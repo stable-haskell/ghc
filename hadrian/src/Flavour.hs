@@ -66,6 +66,7 @@ flavourTransformers = M.fromList
     , "hi_core"          =: enableHiCore
     , "late_ccs"         =: enableLateCCS
     , "boot_nonmoving_gc" =: enableBootNonmovingGc
+    , "ghc_coverage" =: enableGhcCoverage
     ]
   where (=:) = (,)
 
@@ -352,6 +353,28 @@ fullyStatic flavour =
         , builder (Ghc LinkHs) ? pure [ "-optl", "-static" ]
         ]
 
+enableGhcCoverage :: Flavour -> Flavour
+enableGhcCoverage = addArgs $ notStage0 ? mconcat
+    [ package compiler ? enableCoverage
+    , package ghc ? enableCoverage
+    , package ghci ? enableCoverage
+    ]
+  where
+    -- In principle this should work but in practice it does not: -fhpc does
+    -- not appear anywhere in the BuildInfo produced by Cabal.
+    --enableCoverage = builder (Cabal Setup) ? arg "--enable-coverage"
+
+    enableCoverage = do
+        path <- expr buildRoot
+        stage <- getStage
+        let hpcdir = path -/- stageString stage -/- "hpc"
+            flags = [ "-fhpc", "-hpcdir", hpcdir ]
+        mconcat
+            [ builder (Ghc LinkHs) ? pure flags
+            , builder (Ghc CompileHs) ? pure flags
+            ]
+
+-- * CLI and <root>/had
 -- | Build stage2 dependencies with options to enable collection of compiler
 -- stats.
 collectTimings :: Flavour -> Flavour

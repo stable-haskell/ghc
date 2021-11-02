@@ -316,6 +316,10 @@ The supported transformers are listed below:
         <td><code>late_ccs</code></td>
         <td>Enable <code>-fprof-late</code> in profiled libraries.</td>
     </tr>
+    <tr>
+        <td><code>ghc_coverage</code></td>
+        <td>Build the stage2 compiler with HPC coverage support.</td>
+    </tr>
 </table>
 
 ### Static
