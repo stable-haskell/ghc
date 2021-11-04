@@ -238,6 +238,9 @@ class TestConfig:
         # The path specifies the file in which to write the dependencies
         self.only_report_hadrian_deps = None # type: Optional[Path]
 
+        # Where to place tix files from compilation runs?
+        self.tix_dir = None # type: Optional[Path]
+
     def validate(self) -> None:
         """ Check the TestConfig for self-consistency """
         def assert_implies(a: bool, b: bool):

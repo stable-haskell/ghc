@@ -1855,7 +1855,11 @@ async def simple_build(name: Union[TestName, str],
     if filter_with != '':
         cmd = cmd + ' | ' + filter_with
 
-    exit_code = await runCmd(cmd, None, stdout, stderr, opts.compile_timeout_multiplier)
+    env = {}
+    if config.tix_dir is not None:
+        env['HPCTIXFILE'] = str(config.tix_dir / ('%s.%s.tix' % (name, way)))
+
+    exit_code = await runCmd(cmd, None, stdout, stderr, opts.compile_timeout_multiplier, env_overrides=env)
 
     actual_stderr_path = in_testdir(name, 'comp.stderr')
 
@@ -2673,7 +2677,8 @@ async def runCmd(cmd: str,
            stdout: Union[None, Path]=None,
            stderr: Union[None, int, Path]=None,
            timeout_multiplier=1.0,
-           print_output=False) -> int:
+           print_output=False,
+           env_overrides: Dict[str, str]={}) -> int:
     timeout_prog = strip_quotes(config.timeout_prog)
     timeout = str(int(ceil(config.timeout * timeout_multiplier)))
 
@@ -2695,7 +2700,16 @@ async def runCmd(cmd: str,
         # Hence it must ultimately be run by a Bourne shell. It's timeout's job
         # to invoke the Bourne shell
 
-        proc = await asyncio.create_subprocess_exec(timeout_prog, timeout, cmd, stdin=stdin_file, stdout=asyncio.subprocess.PIPE, stderr=hStdErr, env=ghc_env)
+        env = copy.copy(ghc_env)
+        env.update(env_overrides)
+        proc = await asyncio.create_subprocess_exec(
+            timeout_prog,
+            timeout,
+            cmd,
+            stdin=stdin_file,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=hStdErr,
+            env=env)
 
         stdout_buffer, stderr_buffer = await proc.communicate()
     finally:
