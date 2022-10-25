@@ -47,6 +47,8 @@ module GHC.Hs.Pat (
 
         collectEvVarsPat, collectEvVarsPats,
 
+        patHasTyAppsL,
+
         pprParendLPat, pprConArgs,
         pprLPat
     ) where
@@ -118,6 +120,10 @@ type instance XListPat GhcTc = Type
 type instance XTuplePat GhcPs = EpAnn [AddEpAnn]
 type instance XTuplePat GhcRn = NoExtField
 type instance XTuplePat GhcTc = [Type]
+
+type instance XOrPat GhcPs = EpAnn [AddEpAnn]
+type instance XOrPat GhcRn = NoExtField
+type instance XOrPat GhcTc = Type
 
 type instance XSumPat GhcPs = EpAnn EpAnnSumPat
 type instance XSumPat GhcRn = NoExtField
@@ -333,7 +339,7 @@ pprPat (BangPat _ pat)          = char '!' <> pprParendLPat appPrec pat
 pprPat (AsPat _ name _ pat)     = hcat [pprPrefixOcc (unLoc name), char '@',
                                         pprParendLPat appPrec pat]
 pprPat (ViewPat _ expr pat)     = hcat [pprLExpr expr, text " -> ", ppr pat]
-pprPat (ParPat _ _ pat _)      = parens (ppr pat)
+pprPat (ParPat _ _ pat _)       = parens (ppr pat)
 pprPat (LitPat _ s)             = ppr s
 pprPat (NPat _ l Nothing  _)    = ppr l
 pprPat (NPat _ l (Just _) _)    = char '-' <> ppr l
@@ -350,6 +356,7 @@ pprPat (SplicePat ext splice)   =
       GhcTc -> dataConCantHappen ext
 pprPat (SigPat _ pat ty)        = ppr pat <+> dcolon <+> ppr ty
 pprPat (ListPat _ pats)         = brackets (interpp'SP pats)
+pprPat (OrPat _ pats)           = parens (pprWithBars ppr pats)
 pprPat (TuplePat _ pats bx)
     -- Special-case unary boxed tuples so that they are pretty-printed as
     -- `MkSolo x`, not `(x)`
@@ -565,6 +572,7 @@ isIrrefutableHsPat is_strict = goL
     go (SumPat {})         = False
                     -- See Note [Unboxed sum patterns aren't irrefutable]
     go (ListPat {})        = False
+    go (OrPat _ pats)      = any (isIrrefutableHsPat is_strict) pats
 
     go (ConPat
         { pat_con  = con
@@ -650,6 +658,7 @@ isBoringHsPat = goL
               -- A pattern match on a GADT constructor can introduce
               -- type-level information (for example, T18572).
               -> False
+      OrPat _ pats  -> all goL pats
       LitPat {}     -> True
       NPat {}       -> True
       NPlusKPat {}  -> True
@@ -746,6 +755,7 @@ patNeedsParens p = go @p
     -- at a different GhcPass (see the case for GhcTc XPat below).
     go :: forall q. IsPass q => Pat (GhcPass q) -> Bool
     go (NPlusKPat {})    = p > opPrec
+    go (OrPat {})        = False
     go (SplicePat {})    = False
     go (ConPat { pat_args = ds })
                          = conPatNeedsParens p ds
@@ -821,6 +831,7 @@ collectEvVarsPat pat =
     BangPat _ p      -> collectEvVarsLPat p
     ListPat _ ps     -> unionManyBags $ map collectEvVarsLPat ps
     TuplePat _ ps _  -> unionManyBags $ map collectEvVarsLPat ps
+    OrPat _ ps       -> unionManyBags $ map collectEvVarsLPat ps
     SumPat _ p _ _   -> collectEvVarsLPat p
     ConPat
       { pat_args  = args
@@ -838,6 +849,29 @@ collectEvVarsPat pat =
       ExpansionPat _ p -> collectEvVarsPat p
     _other_pat       -> emptyBag
 
+{-
+% True if the pattern contains a type application, ignoring nested or-patterns.
+-}
+patHasTyApps :: Pat GhcPs -> Bool
+patHasTyApps pat =
+  case pat of
+    LazyPat _ p      -> patHasTyAppsL p
+    AsPat _ _ _ p    -> patHasTyAppsL p
+    ParPat  _ _ p _  -> patHasTyAppsL p
+    BangPat _ p      -> patHasTyAppsL p
+    ListPat _ ps     -> any patHasTyAppsL ps
+    TuplePat _ ps _  -> any patHasTyAppsL ps
+    OrPat _ _        -> False -- this prohibits redundant error messages
+    SumPat _ p _ _   -> patHasTyAppsL p
+    ConPat { pat_args  = args } -> case args of
+      PrefixCon ts ps -> not (null ts) || any patHasTyAppsL ps
+      RecCon fs       -> any (patHasTyAppsL . hfbRHS . unXRec @GhcPs) (rec_flds fs)
+      InfixCon p1 p2  -> any patHasTyAppsL [p1,p2]
+    SigPat  _ p _    -> patHasTyAppsL p
+    _other_pat       -> False
+
+patHasTyAppsL :: GenLocated l (Pat GhcPs) -> Bool
+patHasTyAppsL = patHasTyApps . unLoc
 {-
 ************************************************************************
 *                                                                      *

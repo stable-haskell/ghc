@@ -137,6 +137,10 @@ data Pat p
     --            'GHC.Parser.Annotation.AnnOpen' @'('@ or @'(#'@,
     --            'GHC.Parser.Annotation.AnnClose' @')'@ or  @'#)'@
 
+  | OrPat       (XOrPat p)
+                [LPat p]
+    -- ^ Or Pattern
+
   | SumPat      (XSumPat p)        -- after typechecker, types of the alternative
                 (LPat p)           -- Sum sub-pattern
                 ConTag             -- Alternative (one-based)

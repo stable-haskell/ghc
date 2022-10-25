@@ -506,6 +506,10 @@ instance Diagnostic PsMessage where
                 , text "'" <> text [looks_like_char] <> text "' (" <> text looks_like_char_name <> text ")" <> comma
                 , text "but it is not" ]
 
+    PsErrIllegalOrPat pat
+      -> mkSimpleDecorated $ vcat [text "Illegal or-pattern:" <+> ppr (unLoc pat)]
+
+
   diagnosticReason = \case
     PsUnknownMessage m                            -> diagnosticReason m
     PsHeaderMessage  m                            -> psHeaderMessageReason m
@@ -620,6 +624,7 @@ instance Diagnostic PsMessage where
     PsErrInvalidCApiImport {}                     -> ErrorWithoutFlag
     PsErrMultipleConForNewtype {}                 -> ErrorWithoutFlag
     PsErrUnicodeCharLooksLike{}                   -> ErrorWithoutFlag
+    PsErrIllegalOrPat{}                           -> ErrorWithoutFlag
 
   diagnosticHints = \case
     PsUnknownMessage m                            -> diagnosticHints m
@@ -787,6 +792,7 @@ instance Diagnostic PsMessage where
     PsErrInvalidCApiImport {}                     -> noHints
     PsErrMultipleConForNewtype {}                 -> noHints
     PsErrUnicodeCharLooksLike{}                   -> noHints
+    PsErrIllegalOrPat{}                           -> [suggestExtension LangExt.OrPatterns]
 
   diagnosticCode = constructorCode
 

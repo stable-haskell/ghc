@@ -2697,6 +2697,7 @@ xFlagsDeps = [
   depFlagSpec' "NullaryTypeClasses"           LangExt.NullaryTypeClasses
     (deprecatedForExtension "MultiParamTypeClasses"),
   flagSpec "NumDecimals"                      LangExt.NumDecimals,
+  flagSpec "OrPatterns"                       LangExt.OrPatterns,
   depFlagSpecOp "OverlappingInstances"        LangExt.OverlappingInstances
     setOverlappingInsts
     "instead use per-instance pragmas OVERLAPPING/OVERLAPPABLE/OVERLAPS",

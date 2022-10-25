@@ -205,8 +205,10 @@ match (v:vs) ty eqns    -- Eqns can be empty, but each equation is nonempty
                 -- Tidy the first pattern, generating
                 -- auxiliary bindings if necessary
         ; (aux_binds, tidy_eqns) <- mapAndUnzipM (tidyEqnInfo v) eqns
+                -- Explode equations starting with OrPatterns
+        ; tidy_exploded <- mapM (explodeOrPats (v:|vs) ty) tidy_eqns
                 -- Group the equations and match each group in turn
-        ; let grouped = groupEquations platform tidy_eqns
+        ; let grouped = groupEquations platform tidy_exploded
 
          -- print the view patterns that are commoned up to help debug
         ; whenDOptM Opt_D_dump_view_pattern_commoning (debug grouped)
@@ -238,6 +240,7 @@ match (v:vs) ty eqns    -- Eqns can be empty, but each equation is nonempty
             PgBang    -> matchBangs      vars ty (dropGroup eqns)
             PgCo {}   -> matchCoercion   vars ty (dropGroup eqns)
             PgView {} -> matchView       vars ty (dropGroup eqns)
+            PgNoPat   -> combineEqnRhss          (dropGroup eqns)
       where eqns' = NEL.toList eqns
             ne l = case NEL.nonEmpty l of
               Just nel -> nel
@@ -408,6 +411,30 @@ tidyEqnInfo v eqn@(EqnMatch { eqn_pat = (L loc pat) }) = do
   (wrap, pat') <- tidy1 v (not . isGoodSrcSpan . locA $ loc) pat
   return (wrap, eqn{eqn_pat = L loc pat' })
 
+
+-- Deconstructs all equations starting with an OrPattern into several equations
+-- starting with the respective patterns of the OrPattern and having a single
+-- shared match-call as a MatchResult. These equations do not have any further
+-- patterns because of the match-call sharing.
+explodeOrPats :: NonEmpty MatchId -> Type -> EquationInfo -> DsM EquationInfo
+
+explodeOrPats (var :| vars) ty eqn@(EqnMatch { eqn_pat = (L _ (OrPat _ sub_pats)) }) = do
+  -- what to do *after* the OrPat matches
+  match_result <- match vars ty (shiftEqns [eqn])
+  -- share match_result across the different cases of the OrPat match
+  total <- shareSuccessHandler match_result ty (\expr -> do {
+      let or_eqns = map (singleEqn expr) sub_pats
+    ; match [var] ty or_eqns
+    })
+  return $ EqnDone total
+  where
+    singleEqn expr pat = EqnMatch { eqn_pat = pat, eqn_rest = EqnDone (pure expr) }
+
+explodeOrPats _ _ eqn = return eqn
+
+-- TODO: consider multiple nested orPats?
+
+
 tidy1 :: Id                  -- The Id being scrutinised
       -> Bool                -- `True` if the pattern was generated, `False` if it was user-written
       -> Pat GhcTc           -- The pattern against which it is to be matched
@@ -424,6 +451,12 @@ tidy1 v g (ParPat _ _ pat _)  = tidy1 v g (unLoc pat)
 tidy1 v g (SigPat _ pat _)    = tidy1 v g (unLoc pat)
 tidy1 _ _ (WildPat ty)        = return (idDsWrapper, WildPat ty)
 tidy1 v g (BangPat _ (L l p)) = tidy_bang_pat v g l p
+
+tidy1 v o (OrPat x lpats) = do
+  (wraps, pats) <- mapAndUnzipM (tidy1 v o . unLoc) lpats
+  let locs = map getLoc lpats
+  let wrap = foldr (.) id wraps in
+    return (wrap, OrPat x (zipWith L locs pats))
 
         -- case v of { x -> mr[] }
         -- = case v of { _ -> let x=v in mr[] }
@@ -991,12 +1024,14 @@ data PatGroup
   | PgView (LHsExpr GhcTc) -- view pattern (e -> p):
                         -- the LHsExpr is the expression e
            Type         -- the Type is the type of p (equivalently, the result type of e)
+  | PgNoPat             -- Equations which do not contains a pattern. Because of OrPatterns, they can occur alongside equations which do have further patterns.
 
 instance Show PatGroup where
   show PgAny = "PgAny"
   show (PgCon _) = "PgCon"
   show (PgLit _) = "PgLit"
   show (PgView _ _) = "PgView"
+  show PgNoPat = "PgNoPat"
   show _ = "PgOther"
 
 {- Note [Don't use Literal for PgN]
@@ -1019,13 +1054,13 @@ the PgN constructor as a FractionalLit if numeric, and add a PgOverStr construct
 for overloaded strings.
 -}
 
-groupEquations :: Platform -> [EquationInfoNE] -> [NonEmpty (PatGroup, EquationInfoNE)]
+groupEquations :: Platform -> [EquationInfo] -> [NonEmpty (PatGroup, EquationInfo)]
 -- If the result is of form [g1, g2, g3],
 -- (a) all the (pg,eq) pairs in g1 have the same pg
 -- (b) none of the gi are empty
 -- The ordering of equations is unchanged
 groupEquations platform eqns
-  = NEL.groupBy same_gp $ [(patGroup platform (firstPat eqn), eqn) | eqn <- eqns]
+  = NEL.groupBy same_gp $ [(patGroup platform (firstPatMaybe eqn), eqn) | eqn <- eqns]
   -- comprehension on NonEmpty
   where
     same_gp :: (PatGroup,EquationInfo) -> (PatGroup,EquationInfo) -> Bool
@@ -1115,6 +1150,7 @@ sameGroup (PgCo t1)     (PgCo t2)     = t1 `eqType` t2
 sameGroup (PgView e1 t1) (PgView e2 t2) = viewLExprEq (e1,t1) (e2,t2)
        -- ViewPats are in the same group iff the expressions
        -- are "equal"---conservatively, we use syntactic equality
+sameGroup PgNoPat       PgNoPat       = True
 sameGroup _          _          = False
 
 -- An approximation of syntactic equality used for determining when view
@@ -1241,15 +1277,19 @@ viewLExprEq (e1,_) (e2,_) = lexp e1 e2
     eq_list _  (_:_)  []     = False
     eq_list eq (x:xs) (y:ys) = eq x y && eq_list eq xs ys
 
-patGroup :: Platform -> Pat GhcTc -> PatGroup
-patGroup _ (ConPat { pat_con = L _ con
+patGroup :: Platform -> Maybe (Pat GhcTc) -> PatGroup
+patGroup _ Nothing = PgNoPat
+patGroup p (Just pat) = patGroup' p pat
+
+patGroup' :: Platform -> Pat GhcTc -> PatGroup
+patGroup' _ (ConPat { pat_con = L _ con
                    , pat_con_ext = ConPatTc { cpt_arg_tys = tys }
                    })
  | RealDataCon dcon <- con              = PgCon dcon
  | PatSynCon psyn <- con                = PgSyn psyn tys
-patGroup _ (WildPat {})                 = PgAny
-patGroup _ (BangPat {})                 = PgBang
-patGroup _ (NPat _ (L _ (OverLit {ol_val=oval})) mb_neg _) =
+patGroup' _ (WildPat {})                 = PgAny
+patGroup' _ (BangPat {})                 = PgBang
+patGroup' _ (NPat _ (L _ (OverLit {ol_val=oval})) mb_neg _) =
   case (oval, isJust mb_neg) of
     (HsIntegral   i, is_neg) -> PgN (integralFractionalLit is_neg (if is_neg
                                                                     then negate (il_value i)
@@ -1259,17 +1299,17 @@ patGroup _ (NPat _ (L _ (OverLit {ol_val=oval})) mb_neg _) =
       | otherwise -> PgN f
     (HsIsString _ s, _) -> assert (isNothing mb_neg) $
                             PgOverS s
-patGroup _ (NPlusKPat _ _ (L _ (OverLit {ol_val=oval})) _ _ _) =
+patGroup' _ (NPlusKPat _ _ (L _ (OverLit {ol_val=oval})) _ _ _) =
   case oval of
    HsIntegral i -> PgNpK (il_value i)
    _ -> pprPanic "patGroup NPlusKPat" (ppr oval)
-patGroup _ (ViewPat _ expr p)           = PgView expr (hsPatType (unLoc p))
-patGroup platform (LitPat _ lit)        = PgLit (hsLitKey platform lit)
-patGroup _ EmbTyPat{} = PgAny
-patGroup platform (XPat ext) = case ext of
+patGroup' _ (ViewPat _ expr p)           = PgView expr (hsPatType (unLoc p))
+patGroup' platform (LitPat _ lit)        = PgLit (hsLitKey platform lit)
+patGroup' _ EmbTyPat{} = PgAny
+patGroup' platform (XPat ext) = case ext of
   CoPat _ p _      -> PgCo (hsPatType p) -- Type of innelexp pattern
-  ExpansionPat _ p -> patGroup platform p
-patGroup _ pat                          = pprPanic "patGroup" (ppr pat)
+  ExpansionPat _ p -> patGroup' platform p
+patGroup' _ pat                          = pprPanic "patGroup" (ppr pat)
 
 {-
 Note [Grouping overloaded literal patterns]

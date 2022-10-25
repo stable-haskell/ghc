@@ -1,0 +1,13 @@
+
+Or3.hs:6:3: error: [GHC-81303]
+    An or-pattern may not bind (type) variables nor type class or equality constraints: (Left a
+                                                                                         | Right a)
+
+Or3.hs:9:8: error: [GHC-81303]
+    An or-pattern may not bind (type) variables nor type class or equality constraints: (x
+                                                                                         | _)
+
+Or3.hs:12:3: error: [GHC-28418]
+    An or-pattern may not contain visible type applications: (Just @Int
+                                                                   3
+                                                              | Nothing)

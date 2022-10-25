@@ -1,0 +1,3 @@
+Or5: no backtracking
+CallStack (from HasCallStack):
+  error, called at Or5.hs:42:8 in main:Main

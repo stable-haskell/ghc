@@ -4602,6 +4602,7 @@ instance ExactPrint (Pat GhcPs) where
   getAnnotationEntry (NPat an _ _ _)          = fromAnn an
   getAnnotationEntry (NPlusKPat an _ _ _ _ _) = fromAnn an
   getAnnotationEntry (SigPat an _ _)          = fromAnn an
+  getAnnotationEntry (OrPat an _)             = fromAnn an
   getAnnotationEntry (EmbTyPat _ _ _)         = NoEntryVal
 
   setAnnotationAnchor a@(WildPat _)              _ _s = a
@@ -4620,6 +4621,7 @@ instance ExactPrint (Pat GhcPs) where
   setAnnotationAnchor (NPat an a b c)          anc cs = (NPat (setAnchorEpa an anc cs) a b c)
   setAnnotationAnchor (NPlusKPat an a b c d e) anc cs = (NPlusKPat (setAnchorEpa an anc cs) a b c d e)
   setAnnotationAnchor (SigPat an a b)          anc cs = (SigPat (setAnchorEpa an anc cs) a b)
+  setAnnotationAnchor (OrPat an a)             anc cs = (OrPat (setAnchorEpa an anc cs) a)
   setAnnotationAnchor a@(EmbTyPat _ _ _)          _ _s = a
 
   exact (WildPat w) = do
@@ -4709,6 +4711,12 @@ instance ExactPrint (Pat GhcPs) where
     an0 <- markEpAnnL an lidl AnnDcolon
     sig' <- markAnnotated sig
     return (SigPat an0 pat' sig')
+
+  exact (OrPat an pats) = do
+    an' <- markEpAnnL an lidl AnnOpenP
+    pats' <- markAnnotated pats
+    an'' <- markEpAnnL an' lidl AnnCloseP
+    return (OrPat an'' pats')
 
   exact (EmbTyPat x toktype tp) = do
     toktype' <- markToken toktype

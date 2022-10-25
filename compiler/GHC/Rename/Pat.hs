@@ -621,6 +621,12 @@ rnPatAndThen mk (TuplePat _ pats boxed)
   = do { pats' <- rnLPatsAndThen mk pats
        ; return (TuplePat noExtField pats' boxed) }
 
+rnPatAndThen mk p@(OrPat _ pats)
+  = do { liftCps $ checkErr (null $ collectPatsBinders CollNoDictBinders pats) (TcRnOrPatBindsVariables p)
+       ; liftCps $ checkErr (not $ any patHasTyAppsL pats) (TcRnOrPatHasVisibleTyApps p)
+       ; pats' <- rnLPatsAndThen mk pats
+       ; return (OrPat noExtField pats') }
+
 rnPatAndThen mk (SumPat _ pat alt arity)
   = do { pat <- rnLPatAndThen mk pat
        ; return (SumPat noExtField pat alt arity)

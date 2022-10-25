@@ -5,6 +5,8 @@
 {-# LANGUAGE TypeFamilies #-}
 
 {-# OPTIONS_GHC -Wno-incomplete-uni-patterns #-}
+{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+{-# HLINT ignore "Use camelCase" #-}
 
 {-
 (c) The University of Glasgow 2006
@@ -420,6 +422,12 @@ tc_pat pat_ty penv ps_pat thing_inside = case ps_pat of
   BangPat x pat -> do
         { (pat', res) <- tc_lpat pat_ty penv pat thing_inside
         ; return (BangPat x pat', res) }
+
+  OrPat _ pats -> do -- or-patterns with variables are rejected later, after zonking
+    { (pats', (res, pat_ct)) <- tc_lpats (map (const pat_ty) pats) penv pats (captureConstraints thing_inside)
+    ; emitConstraints pat_ct
+    ; pat_ty <- expTypeToType (scaledThing pat_ty)
+    ; return (OrPat pat_ty pats', res) }
 
   LazyPat x pat -> do
         { mult_wrap <- checkManyPattern pat_ty

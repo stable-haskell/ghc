@@ -2286,6 +2286,7 @@ isStrictPattern (L loc pat) =
     ParPat _ _ p _  -> isStrictPattern p
     ViewPat _ _ p   -> isStrictPattern p
     SigPat _ p _    -> isStrictPattern p
+    OrPat _ p       -> isStrictPattern (head p)
     BangPat{}       -> True
     ListPat{}       -> True
     TuplePat{}      -> True
