@@ -33,7 +33,7 @@ import GHC.Core.Reduction
 import GHC.Core.Coercion.Opt    ( optCoercion )
 import GHC.Core.FamInstEnv      ( FamInstEnv, topNormaliseType_maybe )
 import GHC.Core.DataCon
-   ( DataCon, dataConWorkId, dataConRepStrictness
+   ( DataCon, dataConWorkId, dataConRepStrictness, dataConRepStrictness_maybe
    , dataConRepArgTys, isUnboxedTupleDataCon
    , StrictnessMark (..) )
 import GHC.Core.Opt.Stats ( Tick(..) )
@@ -2124,14 +2124,14 @@ zap the SubstEnv.  This is VITAL.  Consider
 We'll clone the inner \x, adding x->x' in the id_subst Then when we
 inline y, we must *not* replace x by x' in the inlined copy!!
 
-Note [Fast path for data constructors]
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Note [Fast path for lazy data constructors]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 For applications of a data constructor worker, the full glory of
 rebuildCall is a waste of effort;
 * They never inline, obviously
 * They have no rewrite rules
-* They are not strict (see Note [Data-con worker strictness]
-  in GHC.Core.DataCon)
+* Though they might be strict (see Note [Strict fields in Core] in GHC.Core),
+  we will exploit that strictness through their demand signature
 So it's fine to zoom straight to `rebuild` which just rebuilds the
 call in a very straightforward way.
 
@@ -2155,7 +2155,8 @@ simplVar env var
 
 simplIdF :: SimplEnv -> InId -> SimplCont -> SimplM (SimplFloats, OutExpr)
 simplIdF env var cont
-  | isDataConWorkId var         -- See Note [Fast path for data constructors]
+  | Just dc <- isDataConWorkId_maybe var      -- See Note [Fast path for lazy data constructors]
+  , Nothing <- dataConRepStrictness_maybe dc
   = rebuild env (Var var) cont
   | otherwise
   = case substId env var of
@@ -3342,7 +3343,7 @@ a case pattern.  This is *important*.  Consider
 
 We really must record that b is already evaluated so that we don't
 go and re-evaluate it when constructing the result.
-See Note [Data-con worker strictness] in GHC.Core.DataCon
+See Note [Strict fields in Core] in GHC.Core.
 
 NB: simplLamBndrs preserves this eval info
 

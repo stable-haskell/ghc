@@ -418,7 +418,10 @@ test('T21391', normal, compile, ['-O -dcore-lint'])
 test('T22112', [ grep_errmsg('never matches') ], compile, ['-O -dsuppress-uniques -dno-typeable-binds -fexpose-all-unfoldings -ddump-simpl'])
 test('T21391a', normal, compile, ['-O -dcore-lint'])
 # We don't want to see a thunk allocation for the insertBy expression after CorePrep.
-test('T21392', [ grep_errmsg(r'sat.* :: \[\(.*Unique, .*Int\)\]'), expect_broken(21392) ], compile, ['-O -ddump-prep -dno-typeable-binds -dsuppress-uniques'])
+# Unfortunately, this test is no longer broken after we made workers strict in strict fields,
+# so it is no longer a reproducer for T21392. Still, it doesn't hurt if we test that we don't
+# regress again.
+test('T21392', [ grep_errmsg(r'sat.* :: \[\(.*Unique, .*Int\)\]') ], compile, ['-O -ddump-prep -dno-typeable-binds -dsuppress-uniques'])
 test('T21689', [extra_files(['T21689a.hs'])], multimod_compile, ['T21689', '-v0 -O'])
 test('T21801', normal, compile, ['-O -dcore-lint'])
 test('T21848', [grep_errmsg(r'SPEC wombat') ], compile, ['-O -ddump-spec'])

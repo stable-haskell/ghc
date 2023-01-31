@@ -65,8 +65,8 @@ With nofib being ~0.3% faster as well.
 
 See Note [Tag inference passes] for how we proceed to generate and use this information.
 
-Note [Strict Field Invariant]
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Note [STG Strict Field Invariant]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 As part of tag inference we introduce the Strict Field Invariant.
 Which consists of us saying that:
 
@@ -82,7 +82,7 @@ and will be tagged with `001` or `010` respectively.
 It will never point to a thunk, nor will it be tagged `000` (meaning "might be a thunk").
 NB: Note that the proper tag for some objects is indeed `000`. Currently this is the case for PAPs.
 
-This works analogous to how `WorkerLikeId`s work. See also Note [CBV Function Ids].
+This works analogous to how CBV functions work. See also Note [CBV Function Ids].
 
 Why do we care? Because if we have code like:
 
@@ -104,7 +104,7 @@ where we:
 * If not we convert `StrictJust x` into `case x of x' -> StrictJust x'`
 
 This is usually very beneficial but can cause regressions in rare edge cases where
-we fail to proof that x is properly tagged, or where it simply isn't.
+we fail to prove that x is properly tagged, or where it simply isn't.
 See Note [How untagged pointers can end up in strict fields] for how the second case
 can arise.
 
@@ -125,15 +125,33 @@ Note that there are similar constraints around Note [CBV Function Ids].
 
 Note [How untagged pointers can end up in strict fields]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Since the resolution of #20749 where Core passes assume that DataCon workers
+evaluate their strict fields, it is pretty simple to see how the Simplifier
+might exploit that knowledge to drop evals. Example:
+
+  data MkT a = MkT !a
+  f :: [Int] -> T [Int]
+  f xs = xs `seq` MkT xs
+
+in Core we will have
+
+  f = \xs -> MkT @[Int] xs
+
+No eval left there.
+
 Consider
   data Set a = Tip | Bin !a (Set a) (Set a)
 
 We make a wrapper for Bin that evaluates its arguments
   $WBin x a b = case x of xv -> Bin xv a b
 Here `xv` will always be evaluated and properly tagged, just as the
-Strict Field Invariant requires.
+Note [STG Strict Field Invariant] requires.
 
-But alas the Simplifier can destroy the invariant: see #15696.
+But alas, the Simplifier can destroy the invariant: see #15696.
+Indeed, as Note [Strict fields in Core] explains, Core passes
+assume that Data constructor workers evaluate their strict fields,
+so the Simplifier will drop seqs freely.
+
 We start with
   thk = f ()
   g x = ...(case thk of xv -> Bin xv Tip Tip)...
@@ -154,7 +172,7 @@ Now you can see that the argument of Bin, namely thk, points to the
 thunk, not to the value as it did before.
 
 In short, although it may be rare, the output of optimisation passes
-cannot guarantee to obey the Strict Field Invariant. For this reason
+cannot guarantee to obey the Note [STG Strict Field Invariant]. For this reason
 we run tag inference. See Note [Tag inference passes].
 
 Note [Tag inference passes]
@@ -164,7 +182,7 @@ Tag inference proceeds in two passes:
   The result is then attached to /binders/.
   This is implemented by `inferTagsAnal` in GHC.Stg.InferTags
 * The second pass walks over the AST checking if the Strict Field Invariant is upheld.
-  See Note [Strict Field Invariant].
+  See Note [STG Strict Field Invariant].
   If required this pass modifies the program to uphold this invariant.
   Tag information is also moved from /binders/ to /occurrences/ during this pass.
   This is done by `GHC.Stg.InferTags.Rewrite (rewriteTopBinds)`.

@@ -260,7 +260,7 @@ The invariants around the arguments of call by value function like Ids are then:
   * Any `WorkerLikeId`
   * Some `JoinId` bindings.
 
-This works analogous to the Strict Field Invariant. See also Note [Strict Field Invariant].
+This works analogous to the Strict Field Invariant. See also Note [STG Strict Field Invariant].
 
 To make this work what we do is:
 * During W/W and SpecConstr any worker/specialized binding we introduce

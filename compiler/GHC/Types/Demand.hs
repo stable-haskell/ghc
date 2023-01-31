@@ -1385,33 +1385,8 @@ arguments.  That is the job of dmdTransformDataConSig.  More precisely,
  * it returns the demands on the arguments;
    in the above example that is [SL, A]
 
-Nasty wrinkle. Consider this code (#22475 has more realistic examples but
-assume this is what the demand analyser sees)
-
-   data T = MkT !Int Bool
-   get :: T -> Bool
-   get (MkT _ b) = b
-
-   foo = let v::Int = I# 7
-             t::T   = MkT v True
-         in get t
-
-Now `v` is unused by `get`, /but/ we can't give `v` an Absent demand,
-else we'll drop the binding and replace it with an error thunk.
-Then the code generator (more specifically GHC.Stg.InferTags.Rewrite)
-will add an extra eval of MkT's argument to give
-   foo = let v::Int = error "absent"
-             t::T   = case v of v' -> MkT v' True
-         in get t
-
-Boo!  Because of this extra eval (added in STG-land), the truth is that `MkT`
-may (or may not) evaluate its arguments (as established in #21497). Hence the
-use of `bump` in dmdTransformDataConSig, which adds in a `C_01` eval. The
-`C_01` says "may or may not evaluate" which is absolutely faithful to what
-InferTags.Rewrite does.
-
-In particular it is very important /not/ to make that a `C_11` eval,
-see Note [Data-con worker strictness].
+When the data constructor worker has strict fields, they act as additional
+seqs; hence we add an additional `C_11` eval.
 -}
 
 {- *********************************************************************
@@ -1610,6 +1585,29 @@ a bad fit because
    The "hack" is probably not having to defer when we can prove that the
    expression may not throw a precise exception (increasing precision of the
    analysis), but that's just a favourable guess.
+
+Note [Side-effects and strictness]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Due to historic reasons and the continued effort not to cause performance
+regressions downstream, Strictness Analysis is currently prone to discarding
+observable side-effects (other than precise exceptions, see
+Note [Precise exceptions and strictness analysis]) in some cases. For example,
+  f :: MVar () -> Int -> IO Int
+  f mv x = putMVar mv () >> (x `seq` return x)
+The call to `putMVar` is an observable side-effect. Yet, Strictness Analysis
+currently concludes that `f` is strict in `x` and uses call-by-value.
+That means `f mv (error "boom")` will error out with the imprecise exception
+rather performing the side-effect.
+
+This is a conscious violation of the semantics described in the paper
+"a semantics for imprecise exceptions"; so it would be great if we could
+identify the offending primops and extend the idea in
+Note [Which scrutinees may throw precise exceptions] to general side-effects.
+
+Unfortunately, the existing has-side-effects classification for primops is
+too conservative, listing `writeMutVar#` and even `readMutVar#` as
+side-effecting. That is due to #3207. A possible way forward is described in
+#17900, but no effort has been so far towards a resolution.
 
 Note [Exceptions and strictness]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -2327,7 +2325,7 @@ dmdTransformDataConSig str_marks sd = case viewProd arity body_sd of
     mk_body_ty n dmds = DmdType nopDmdEnv (zipWith (bump n) str_marks dmds)
     bump n str dmd | isMarkedStrict str = multDmd n (plusDmd str_field_dmd dmd)
                    | otherwise          = multDmd n dmd
-    str_field_dmd = C_01 :* seqSubDmd -- Why not C_11? See Note [Data-con worker strictness]
+    str_field_dmd = C_11 :* seqSubDmd -- See Note [Strict fields in Core]
 
 -- | A special 'DmdTransformer' for dictionary selectors that feeds the demand
 -- on the result into the indicated dictionary component (if saturated).

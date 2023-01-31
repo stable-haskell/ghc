@@ -65,7 +65,7 @@ The work of this pass is simple:
 * For any strict field we check if the argument is known to be properly tagged.
 * If it's not known to be properly tagged, we wrap the whole thing in a case,
   which will force the argument before allocation.
-This is described in detail in Note [Strict Field Invariant].
+This is described in detail in Note [STG Strict Field Invariant].
 
 The only slight complication is that we have to make sure not to invalidate free
 variable analysis in the process.
@@ -218,7 +218,7 @@ When compiling bytecode we call myCoreToStg to get STG code first.
 myCoreToStg in turn calls out to stg2stg which runs the STG to STG
 passes followed by free variables analysis and the tag inference pass including
 its rewriting phase at the end.
-Running tag inference is important as it upholds Note [Strict Field Invariant].
+Running tag inference is important as it upholds Note [STG Strict Field Invariant].
 While code executed by GHCi doesn't take advantage of the SFI it can call into
 compiled code which does. So it must still make sure that the SFI is upheld.
 See also #21083 and #22042.

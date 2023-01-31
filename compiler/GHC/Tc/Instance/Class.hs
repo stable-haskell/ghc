@@ -799,7 +799,7 @@ mostly relating to under what circumstances it evaluates its argument.
 Today, that story is simple: A dataToTag primop always evaluates its
 argument, unless tag inference determines the argument was already
 evaluated and correctly tagged.  Getting here was a long journey, with
-many similarities to the story behind Note [Strict Field Invariant] in
+many similarities to the story behind Note [STG Strict Field Invariant] in
 GHC.Stg.InferTags.  See also #15696.
 
 -}
