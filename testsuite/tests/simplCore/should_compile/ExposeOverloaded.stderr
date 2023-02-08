@@ -1,0 +1,356 @@
+
+==================== Tidy Core ====================
+Result size of Tidy Core
+  = {terms: 212, types: 389, coercions: 10, joins: 0/0}
+
+-- RHS size: {terms: 6, types: 8, coercions: 3, joins: 0/0}
+unF :: forall (t :: * -> *) a. F t a -> Functor t => t a
+[GblId[[RecSel]],
+ Arity=2,
+ Str=<1C(1,L)><L>,
+ Unf=Unf{Src=<vanilla>, TopLvl=True,
+         Value=True, ConLike=True, WorkFree=True, Expandable=True,
+         Guidance=ALWAYS_IF(arity=2,unsat_ok=True,boring_ok=True)}]
+unF
+  = \ (@(t_aOm :: * -> *))
+      (@a_aOn)
+      (ds_dVr :: F t_aOm a_aOn)
+      ($dFunctor_aOp :: Functor t_aOm) ->
+      (ds_dVr
+       `cast` (ExposeOverloaded.N:F[0] <t_aOm>_N <a_aOn>_N
+               :: F t_aOm a_aOn ~R# (Functor t_aOm => t_aOm a_aOn)))
+        $dFunctor_aOp
+
+-- RHS size: {terms: 44, types: 123, coercions: 0, joins: 0/0}
+foo
+  :: forall (f :: * -> *) a b.
+     Functor f =>
+     Maybe (Maybe (Maybe (Maybe (Maybe (Maybe (f a))))))
+     -> (a -> b) -> Maybe (Maybe (Maybe (Maybe (f b))))
+[GblId,
+ Arity=3,
+ Str=<MP(1C(1,C(1,L)),A)><1L><L>,
+ Unf=Unf{Src=<vanilla>, TopLvl=True,
+         Value=True, ConLike=True, WorkFree=True, Expandable=True,
+         Guidance=NEVER}]
+foo
+  = \ (@(f_aRL :: * -> *))
+      (@a_aRM)
+      (@b_aRN)
+      ($dFunctor_aRO :: Functor f_aRL)
+      (ds_dV6
+         :: Maybe (Maybe (Maybe (Maybe (Maybe (Maybe (f_aRL a_aRM)))))))
+      (f1_aNt :: a_aRM -> b_aRN) ->
+      case ds_dV6 of {
+        Nothing ->
+          GHC.Maybe.Nothing @(Maybe (Maybe (Maybe (f_aRL b_aRN))));
+        Just ds1_dVi ->
+          case ds1_dVi of {
+            Nothing ->
+              GHC.Maybe.Nothing @(Maybe (Maybe (Maybe (f_aRL b_aRN))));
+            Just ds2_dVj ->
+              case ds2_dVj of {
+                Nothing ->
+                  GHC.Maybe.Nothing @(Maybe (Maybe (Maybe (f_aRL b_aRN))));
+                Just ds3_dVk ->
+                  case ds3_dVk of {
+                    Nothing ->
+                      GHC.Maybe.Nothing @(Maybe (Maybe (Maybe (f_aRL b_aRN))));
+                    Just ds4_dVl ->
+                      case ds4_dVl of {
+                        Nothing ->
+                          GHC.Maybe.Nothing @(Maybe (Maybe (Maybe (f_aRL b_aRN))));
+                        Just ds5_dVm ->
+                          case ds5_dVm of {
+                            Nothing ->
+                              GHC.Maybe.Nothing @(Maybe (Maybe (Maybe (f_aRL b_aRN))));
+                            Just x_aNs ->
+                              GHC.Maybe.Just
+                                @(Maybe (Maybe (Maybe (f_aRL b_aRN))))
+                                (GHC.Maybe.Just
+                                   @(Maybe (Maybe (f_aRL b_aRN)))
+                                   (GHC.Maybe.Just
+                                      @(Maybe (f_aRL b_aRN))
+                                      (GHC.Maybe.Just
+                                         @(f_aRL b_aRN)
+                                         (fmap @f_aRL $dFunctor_aRO @a_aRM @b_aRN f1_aNt x_aNs))))
+                          }
+                      }
+                  }
+              }
+          }
+      }
+
+-- RHS size: {terms: 31, types: 20, coercions: 0, joins: 0/0}
+bar :: forall a. (C a, Enum a) => a -> a -> Bool
+[GblId,
+ Arity=4,
+ Str=<A><SP(MC(1,L),LC(S,L),A,SC(S,L),A,A,A,A)><L><L>,
+ Unf=Unf{Src=<vanilla>, TopLvl=True,
+         Value=True, ConLike=True, WorkFree=True, Expandable=True,
+         Guidance=NEVER}]
+bar
+  = \ (@a_aQT)
+      _ [Occ=Dead]
+      ($dEnum_aQV :: Enum a_aQT)
+      (a1_aNB :: a_aQT)
+      (b_aNC :: a_aQT) ->
+      case fromEnum @a_aQT $dEnum_aQV (succ @a_aQT $dEnum_aQV a1_aNB) of
+      { GHC.Types.I# x_aWc ->
+      case fromEnum
+             @a_aQT
+             $dEnum_aQV
+             (pred
+                @a_aQT
+                $dEnum_aQV
+                (pred
+                   @a_aQT
+                   $dEnum_aQV
+                   (pred
+                      @a_aQT
+                      $dEnum_aQV
+                      (pred @a_aQT $dEnum_aQV (pred @a_aQT $dEnum_aQV b_aNC)))))
+      of
+      { GHC.Types.I# y_aWf ->
+      GHC.Prim.tagToEnum# @Bool (GHC.Prim.># x_aWc y_aWf)
+      }
+      }
+
+-- RHS size: {terms: 45, types: 146, coercions: 7, joins: 0/0}
+baz
+  :: forall (t :: * -> *) a b.
+     Maybe (Maybe (Maybe (Maybe (Maybe (Maybe (F t a))))))
+     -> (a -> b) -> Maybe (Maybe (Maybe (Maybe (F t b))))
+[GblId, Arity=2, Str=<1L><L>, Unf=OtherCon []]
+baz
+  = \ (@(t_aPO :: * -> *))
+      (@a_aPP)
+      (@b_aPQ)
+      (ds_dUH
+         :: Maybe (Maybe (Maybe (Maybe (Maybe (Maybe (F t_aPO a_aPP)))))))
+      (f_aNL :: a_aPP -> b_aPQ) ->
+      case ds_dUH of {
+        Nothing ->
+          GHC.Maybe.Nothing @(Maybe (Maybe (Maybe (F t_aPO b_aPQ))));
+        Just ds1_dUU ->
+          case ds1_dUU of {
+            Nothing ->
+              GHC.Maybe.Nothing @(Maybe (Maybe (Maybe (F t_aPO b_aPQ))));
+            Just ds2_dUV ->
+              case ds2_dUV of {
+                Nothing ->
+                  GHC.Maybe.Nothing @(Maybe (Maybe (Maybe (F t_aPO b_aPQ))));
+                Just ds3_dUW ->
+                  case ds3_dUW of {
+                    Nothing ->
+                      GHC.Maybe.Nothing @(Maybe (Maybe (Maybe (F t_aPO b_aPQ))));
+                    Just ds4_dUX ->
+                      case ds4_dUX of {
+                        Nothing ->
+                          GHC.Maybe.Nothing @(Maybe (Maybe (Maybe (F t_aPO b_aPQ))));
+                        Just ds5_dUY ->
+                          case ds5_dUY of {
+                            Nothing ->
+                              GHC.Maybe.Nothing @(Maybe (Maybe (Maybe (F t_aPO b_aPQ))));
+                            Just x_aNK ->
+                              GHC.Maybe.Just
+                                @(Maybe (Maybe (Maybe (F t_aPO b_aPQ))))
+                                (GHC.Maybe.Just
+                                   @(Maybe (Maybe (F t_aPO b_aPQ)))
+                                   (GHC.Maybe.Just
+                                      @(Maybe (F t_aPO b_aPQ))
+                                      (GHC.Maybe.Just
+                                         @(F t_aPO b_aPQ)
+                                         ((\ ($dFunctor_aQz :: Functor t_aPO) ->
+                                             fmap
+                                               @t_aPO
+                                               $dFunctor_aQz
+                                               @a_aPP
+                                               @b_aPQ
+                                               f_aNL
+                                               ((x_aNK
+                                                 `cast` (ExposeOverloaded.N:F[0] <t_aPO>_N <a_aPP>_N
+                                                         :: F t_aPO a_aPP
+                                                            ~R# (Functor t_aPO => t_aPO a_aPP)))
+                                                  $dFunctor_aQz))
+                                          `cast` (Sym (ExposeOverloaded.N:F[0] <t_aPO>_N <b_aPQ>_N)
+                                                  :: (Functor t_aPO => t_aPO b_aPQ)
+                                                     ~R# F t_aPO b_aPQ)))))
+                          }
+                      }
+                  }
+              }
+          }
+      }
+
+-- RHS size: {terms: 1, types: 0, coercions: 0, joins: 0/0}
+ExposeOverloaded.$trModule4 :: GHC.Prim.Addr#
+[GblId,
+ Unf=Unf{Src=<vanilla>, TopLvl=True,
+         Value=True, ConLike=True, WorkFree=True, Expandable=True,
+         Guidance=IF_ARGS [] 20 0}]
+ExposeOverloaded.$trModule4 = "main"#
+
+-- RHS size: {terms: 2, types: 0, coercions: 0, joins: 0/0}
+ExposeOverloaded.$trModule3 :: GHC.Types.TrName
+[GblId,
+ Unf=Unf{Src=<vanilla>, TopLvl=True,
+         Value=True, ConLike=True, WorkFree=True, Expandable=True,
+         Guidance=IF_ARGS [] 10 10}]
+ExposeOverloaded.$trModule3
+  = GHC.Types.TrNameS ExposeOverloaded.$trModule4
+
+-- RHS size: {terms: 1, types: 0, coercions: 0, joins: 0/0}
+ExposeOverloaded.$trModule2 :: GHC.Prim.Addr#
+[GblId,
+ Unf=Unf{Src=<vanilla>, TopLvl=True,
+         Value=True, ConLike=True, WorkFree=True, Expandable=True,
+         Guidance=IF_ARGS [] 50 0}]
+ExposeOverloaded.$trModule2 = "ExposeOverloaded"#
+
+-- RHS size: {terms: 2, types: 0, coercions: 0, joins: 0/0}
+ExposeOverloaded.$trModule1 :: GHC.Types.TrName
+[GblId,
+ Unf=Unf{Src=<vanilla>, TopLvl=True,
+         Value=True, ConLike=True, WorkFree=True, Expandable=True,
+         Guidance=IF_ARGS [] 10 10}]
+ExposeOverloaded.$trModule1
+  = GHC.Types.TrNameS ExposeOverloaded.$trModule2
+
+-- RHS size: {terms: 3, types: 0, coercions: 0, joins: 0/0}
+ExposeOverloaded.$trModule :: GHC.Types.Module
+[GblId,
+ Unf=Unf{Src=<vanilla>, TopLvl=True,
+         Value=True, ConLike=True, WorkFree=True, Expandable=True,
+         Guidance=IF_ARGS [] 10 10}]
+ExposeOverloaded.$trModule
+  = GHC.Types.Module
+      ExposeOverloaded.$trModule3 ExposeOverloaded.$trModule1
+
+-- RHS size: {terms: 3, types: 0, coercions: 0, joins: 0/0}
+ExposeOverloaded.$tcF1 [InlPrag=[~]] :: GHC.Types.KindRep
+[GblId, Unf=OtherCon []]
+ExposeOverloaded.$tcF1
+  = GHC.Types.KindRepFun GHC.Types.krep$*Arr* GHC.Types.krep$*Arr*
+
+-- RHS size: {terms: 2, types: 0, coercions: 0, joins: 0/0}
+$krep_rWr :: GHC.Types.KindRep
+[GblId, Unf=OtherCon []]
+$krep_rWr = GHC.Types.KindRepVar 1#
+
+-- RHS size: {terms: 2, types: 0, coercions: 0, joins: 0/0}
+$krep1_rWs :: GHC.Types.KindRep
+[GblId, Unf=OtherCon []]
+$krep1_rWs = GHC.Types.KindRepVar 0#
+
+-- RHS size: {terms: 3, types: 2, coercions: 0, joins: 0/0}
+$krep2_rWt :: [GHC.Types.KindRep]
+[GblId, Unf=OtherCon []]
+$krep2_rWt
+  = GHC.Types.:
+      @GHC.Types.KindRep $krep1_rWs (GHC.Types.[] @GHC.Types.KindRep)
+
+-- RHS size: {terms: 3, types: 0, coercions: 0, joins: 0/0}
+$krep3_rWu :: GHC.Types.KindRep
+[GblId, Unf=OtherCon []]
+$krep3_rWu
+  = GHC.Types.KindRepTyConApp GHC.Base.$tcFunctor $krep2_rWt
+
+-- RHS size: {terms: 3, types: 0, coercions: 0, joins: 0/0}
+$krep4_rWv :: GHC.Types.KindRep
+[GblId, Unf=OtherCon []]
+$krep4_rWv = GHC.Types.KindRepApp $krep1_rWs $krep_rWr
+
+-- RHS size: {terms: 3, types: 0, coercions: 0, joins: 0/0}
+$krep5_rWw :: GHC.Types.KindRep
+[GblId, Unf=OtherCon []]
+$krep5_rWw = GHC.Types.KindRepFun $krep3_rWu $krep4_rWv
+
+-- RHS size: {terms: 1, types: 0, coercions: 0, joins: 0/0}
+ExposeOverloaded.$tcF3 :: GHC.Prim.Addr#
+[GblId,
+ Unf=Unf{Src=<vanilla>, TopLvl=True,
+         Value=True, ConLike=True, WorkFree=True, Expandable=True,
+         Guidance=IF_ARGS [] 20 0}]
+ExposeOverloaded.$tcF3 = "F"#
+
+-- RHS size: {terms: 2, types: 0, coercions: 0, joins: 0/0}
+ExposeOverloaded.$tcF2 :: GHC.Types.TrName
+[GblId,
+ Unf=Unf{Src=<vanilla>, TopLvl=True,
+         Value=True, ConLike=True, WorkFree=True, Expandable=True,
+         Guidance=IF_ARGS [] 10 10}]
+ExposeOverloaded.$tcF2 = GHC.Types.TrNameS ExposeOverloaded.$tcF3
+
+-- RHS size: {terms: 7, types: 0, coercions: 0, joins: 0/0}
+ExposeOverloaded.$tcF :: GHC.Types.TyCon
+[GblId,
+ Unf=Unf{Src=<vanilla>, TopLvl=True,
+         Value=True, ConLike=True, WorkFree=True, Expandable=True,
+         Guidance=IF_ARGS [] 10 10}]
+ExposeOverloaded.$tcF
+  = GHC.Types.TyCon
+      12501119209406789822#Word64
+      801305613953237324#Word64
+      ExposeOverloaded.$trModule
+      ExposeOverloaded.$tcF2
+      0#
+      ExposeOverloaded.$tcF1
+
+-- RHS size: {terms: 3, types: 2, coercions: 0, joins: 0/0}
+$krep6_rWx :: [GHC.Types.KindRep]
+[GblId, Unf=OtherCon []]
+$krep6_rWx
+  = GHC.Types.:
+      @GHC.Types.KindRep $krep_rWr (GHC.Types.[] @GHC.Types.KindRep)
+
+-- RHS size: {terms: 3, types: 1, coercions: 0, joins: 0/0}
+$krep7_rWy :: [GHC.Types.KindRep]
+[GblId, Unf=OtherCon []]
+$krep7_rWy = GHC.Types.: @GHC.Types.KindRep $krep1_rWs $krep6_rWx
+
+-- RHS size: {terms: 3, types: 0, coercions: 0, joins: 0/0}
+$krep8_rWz :: GHC.Types.KindRep
+[GblId, Unf=OtherCon []]
+$krep8_rWz
+  = GHC.Types.KindRepTyConApp ExposeOverloaded.$tcF $krep7_rWy
+
+-- RHS size: {terms: 3, types: 0, coercions: 0, joins: 0/0}
+ExposeOverloaded.$tc'F1 [InlPrag=[~]] :: GHC.Types.KindRep
+[GblId, Unf=OtherCon []]
+ExposeOverloaded.$tc'F1
+  = GHC.Types.KindRepFun $krep5_rWw $krep8_rWz
+
+-- RHS size: {terms: 1, types: 0, coercions: 0, joins: 0/0}
+ExposeOverloaded.$tc'F3 :: GHC.Prim.Addr#
+[GblId,
+ Unf=Unf{Src=<vanilla>, TopLvl=True,
+         Value=True, ConLike=True, WorkFree=True, Expandable=True,
+         Guidance=IF_ARGS [] 20 0}]
+ExposeOverloaded.$tc'F3 = "'F"#
+
+-- RHS size: {terms: 2, types: 0, coercions: 0, joins: 0/0}
+ExposeOverloaded.$tc'F2 :: GHC.Types.TrName
+[GblId,
+ Unf=Unf{Src=<vanilla>, TopLvl=True,
+         Value=True, ConLike=True, WorkFree=True, Expandable=True,
+         Guidance=IF_ARGS [] 10 10}]
+ExposeOverloaded.$tc'F2 = GHC.Types.TrNameS ExposeOverloaded.$tc'F3
+
+-- RHS size: {terms: 7, types: 0, coercions: 0, joins: 0/0}
+ExposeOverloaded.$tc'F :: GHC.Types.TyCon
+[GblId,
+ Unf=Unf{Src=<vanilla>, TopLvl=True,
+         Value=True, ConLike=True, WorkFree=True, Expandable=True,
+         Guidance=IF_ARGS [] 10 10}]
+ExposeOverloaded.$tc'F
+  = GHC.Types.TyCon
+      4352013886347538781#Word64
+      11126594965226303942#Word64
+      ExposeOverloaded.$trModule
+      ExposeOverloaded.$tc'F2
+      2#
+      ExposeOverloaded.$tc'F1
+
+
+
