@@ -18,6 +18,7 @@ import GHC.Platform
 import GHC.Driver.Flags
 
 import GHC.Core
+import GHC.Core.Class( Class, classArity )
 import GHC.Core.Opt.Simplify.Monad
 import GHC.Core.Opt.ConstantFold
 import GHC.Core.Type hiding ( substTy, substTyVar, extendTvSubst, extendCvSubst )
@@ -66,6 +67,7 @@ import GHC.Builtin.Names( runRWKey )
 
 import GHC.Data.Maybe   ( isNothing, orElse, mapMaybe )
 import GHC.Data.FastString
+import GHC.Data.List.SetOps( getNth )
 import GHC.Unit.Module ( moduleName )
 import GHC.Utils.Outputable
 import GHC.Utils.Panic
@@ -2144,25 +2146,65 @@ simplIdF env var cont
         where
           env' = setSubstEnv env tvs cvs ids
 
-      DoneId var1 ->
-        do { rule_base <- getSimplRules
-           ; let cont' = trimJoinCont var1 (idJoinPointHood var1) cont
-                 info  = mkArgInfo env rule_base var1 cont'
-           ; rebuildCall env info cont' }
+      DoneId var1 -> simplCall env var1 cont'
+        where
+          cont' = trimJoinCont var1 (idJoinPointHood var1) cont
 
       DoneEx e mb_join -> simplExprF env' e cont'
         where
           cont' = trimJoinCont var mb_join cont
           env'  = zapSubstEnv env  -- See Note [zapSubstEnv]
 
+simplCall :: SimplEnv -> OutId -> SimplCont -> SimplM (SimplFloats, OutExpr)
+simplCall env var cont
+  | ClassOpId clas idx _     <- idDetails var
+  , Just (env', arg', cont') <- classOpDictApp_maybe env clas idx cont
+  = simplExprF env' arg' cont'
+
+  | otherwise
+  = do { rule_base <- getSimplRules
+       ; let info  = mkArgInfo env rule_base var cont
+       ; rebuildCall env info cont }
+
+classOpDictApp_maybe :: SimplEnv -> Class -> Int -> SimplCont
+                     -> Maybe (SimplEnv, InExpr, SimplCont)
+classOpDictApp_maybe env cls idx cont
+  = go cont
+  where
+    go (ApplyToTy { sc_cont = cont })
+      = go cont  -- Discard leading type args
+    go (ApplyToVal { sc_arg = dict_arg, sc_env = dict_se, sc_cont = cont })
+      | Just (dfun, dfun_args) <- splitInApp dict_se dict_arg [] -- dfun_args :: [InExpr]
+      , DFunUnfolding { df_bndrs = bndrs, df_args = dict_args } <- idUnfolding dfun
+      , bndrs `equalLength` dfun_args        -- See Note [DFun arity check]
+      , let arg_env = extendSubstForDFun (zapSubstEnv env) bndrs dfun_args
+            the_arg = getNth (drop (classArity cls) dict_args) idx   -- An OutExpr
+      = Just (arg_env, the_arg, cont)
+    go _ = Nothing
+
+    splitInApp :: StaticEnv -> InExpr -> [(InExpr,StaticEnv)]
+               -> Maybe (OutVar, [(InExpr,StaticEnv)])
+    splitInApp env (App fun arg) args
+      = splitInApp env fun ((arg,env):args)
+    splitInApp env (Var v) args
+      = case substId env v of
+          DoneId v'            -> Just (v', args)
+          ContEx tvs cvs ids e -> splitInApp (setSubstEnv env tvs cvs ids) e args
+          DoneEx e _           -> splitInApp (zapSubstEnv env)             e args
+    splitInApp _ _ _
+       = Nothing
+
 ---------------------------------------------------------
 --      Dealing with a call site
 
-rebuildCall :: SimplEnv -> ArgInfo -> SimplCont
+rebuildCall, rebuildCall' :: SimplEnv -> ArgInfo -> SimplCont
             -> SimplM (SimplFloats, OutExpr)
 
 ---------- Bottoming applications --------------
-rebuildCall env (ArgInfo { ai_fun = fun, ai_args = rev_args, ai_dmds = [] }) cont
+rebuildCall env ai cont
+  = rebuildCall' env ai cont
+
+rebuildCall' env (ArgInfo { ai_fun = fun, ai_args = rev_args, ai_dmds = [] }) cont
   -- When we run out of strictness args, it means
   -- that the call is definitely bottom; see GHC.Core.Opt.Simplify.Utils.mkArgInfo
   -- Then we want to discard the entire strict continuation.  E.g.
@@ -2189,7 +2231,7 @@ rebuildCall env (ArgInfo { ai_fun = fun, ai_args = rev_args, ai_dmds = [] }) con
 -- If there are rewrite rules we'll skip this case until we have
 -- simplified enough args to satisfy nr_wanted==0 in the TryRules case below
 -- Then we'll try the rules, and if that fails, we'll do TryInlining
-rebuildCall env info@(ArgInfo { ai_fun = fun, ai_args = rev_args
+rebuildCall' env info@(ArgInfo { ai_fun = fun, ai_args = rev_args
                               , ai_rewrite = TryInlining }) cont
   = do { logger <- getLogger
        ; let full_cont = pushSimplifiedRevArgs env rev_args cont
@@ -2204,7 +2246,7 @@ rebuildCall env info@(ArgInfo { ai_fun = fun, ai_args = rev_args
 ---------- Try rewrite RULES, if ai_rewrite = TryRules --------------
 -- See Note [Rewrite rules and inlining]
 -- See also Note [Trying rewrite rules]
-rebuildCall env info@(ArgInfo { ai_fun = fun, ai_args = rev_args
+rebuildCall' env info@(ArgInfo { ai_fun = fun, ai_args = rev_args
                               , ai_rewrite = TryRules nr_wanted rules }) cont
   | nr_wanted == 0 || no_more_args
   = -- We've accumulated a simplified call in <fun,rev_args>
@@ -2224,10 +2266,10 @@ rebuildCall env info@(ArgInfo { ai_fun = fun, ai_args = rev_args
                       _             -> True
 
 ---------- Simplify type applications and casts --------------
-rebuildCall env info (CastIt co cont)
+rebuildCall' env info (CastIt co cont)
   = rebuildCall env (addCastTo info co) cont
 
-rebuildCall env info (ApplyToTy { sc_arg_ty = arg_ty, sc_hole_ty = hole_ty, sc_cont = cont })
+rebuildCall' env info (ApplyToTy { sc_arg_ty = arg_ty, sc_hole_ty = hole_ty, sc_cont = cont })
   = rebuildCall env (addTyArgTo info arg_ty hole_ty) cont
 
 ---------- The runRW# rule. Do this after absorbing all arguments ------
@@ -2235,7 +2277,7 @@ rebuildCall env info (ApplyToTy { sc_arg_ty = arg_ty, sc_hole_ty = hole_ty, sc_c
 --
 -- runRW# :: forall (r :: RuntimeRep) (o :: TYPE r). (State# RealWorld -> o) -> o
 -- K[ runRW# rr ty body ]   -->   runRW rr' ty' (\s. K[ body s ])
-rebuildCall env (ArgInfo { ai_fun = fun_id, ai_args = rev_args })
+rebuildCall' env (ArgInfo { ai_fun = fun_id, ai_args = rev_args })
             (ApplyToVal { sc_arg = arg, sc_env = arg_se
                         , sc_cont = cont, sc_hole_ty = fun_ty })
   | fun_id `hasKey` runRWKey
@@ -2269,7 +2311,7 @@ rebuildCall env (ArgInfo { ai_fun = fun_id, ai_args = rev_args })
        ; return (emptyFloats env, call') }
 
 ---------- Simplify value arguments --------------------
-rebuildCall env fun_info
+rebuildCall' env fun_info
             (ApplyToVal { sc_arg = arg, sc_env = arg_se
                         , sc_dup = dup_flag, sc_hole_ty = fun_ty
                         , sc_cont = cont })
@@ -2297,7 +2339,7 @@ rebuildCall env fun_info
         ; rebuildCall env (addValArgTo fun_info  arg' fun_ty) cont }
 
 ---------- No further useful info, revert to generic rebuild ------------
-rebuildCall env (ArgInfo { ai_fun = fun, ai_args = rev_args }) cont
+rebuildCall' env (ArgInfo { ai_fun = fun, ai_args = rev_args }) cont
   = rebuild env (argInfoExpr fun rev_args) cont
 
 -----------------------------------
@@ -2385,7 +2427,7 @@ The simplifier arranges to do this, as follows. In effect, the ai_rewrite
 field of the ArgInfo record is the state of a little state-machine:
 
 * mkArgInfo sets the ai_rewrite field to TryRules if there are any rewrite
-  rules avaialable for that function.
+  rules available for that function.
 
 * rebuildCall simplifies arguments until enough are simplified to match the
   rule with greatest arity.  See Note [RULES apply to simplified arguments]

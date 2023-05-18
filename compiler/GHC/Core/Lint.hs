@@ -2498,8 +2498,11 @@ lintCoercion the_co@(SelCo cs co)
                   ; return (SelCo cs co') }
 
             | otherwise
-            -> failWithL (hang (text "Bad SelCo:")
-                             2 (ppr the_co $$ ppr s $$ ppr t)) }
+            -> failWithL $ hang (text "Bad SelCo:") 2 $
+               vcat [ text "the_co:" <+> ppr the_co
+                    , text "lhs type:" <+> ppr s
+                    , text "rhs type:" <+> ppr t
+                    , text "role:" <+> ppr co_role ] }
 
 lintCoercion the_co@(LRCo lr co)
   = do { co' <- lintCoercion co

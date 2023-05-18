@@ -1652,7 +1652,7 @@ app_ok fun_ok primop_ok fun args
                    -- See #20749 and Note [How untagged pointers can
                    -- end up in strict fields] in GHC.Stg.InferTags
 
-      ClassOpId _ is_terminating_result
+      ClassOpId _ _ is_terminating_result
         | is_terminating_result -- See Note [exprOkForSpeculation and type classes]
         -> assertPpr (n_val_args == 1) (ppr fun $$ ppr args) $
            True
@@ -1927,7 +1927,22 @@ exprIsHNF = exprIsHNFlike isDataConWorkId isEvaldUnfolding
 -- data constructors. Conlike arguments are considered interesting by the
 -- inliner.
 exprIsConLike :: CoreExpr -> Bool       -- True => lambda, conlike, PAP
-exprIsConLike = exprIsHNFlike isConLikeId isConLikeUnfolding
+-- exprIsConLike = exprIsHNFlike isConLikeId isConLikeUnfolding
+-- Trying: just a constructor application
+exprIsConLike (Var v)       = isConLikeId v
+exprIsConLike (Lit l)       = not (isLitRubbish l)
+exprIsConLike (App f a)     = exprIsTrivial a && exprIsConLike f
+exprIsConLike (Lam b e)
+  | isRuntimeVar b          = False
+  | otherwise               = exprIsConLike e
+exprIsConLike (Tick t e)
+  | tickishCounts t         = False
+  | otherwise               = exprIsConLike e
+exprIsConLike (Cast e _)    = exprIsConLike e
+exprIsConLike (Let {})      = False
+exprIsConLike (Case {})     = False
+exprIsConLike (Type {})     = False
+exprIsConLike (Coercion {}) = False
 
 -- | Returns true for values or value-like expressions. These are lambdas,
 -- constructors / CONLIKE functions (as determined by the function argument)

@@ -968,7 +968,7 @@ instance Outputable Coercion where
   ppr = pprCo
 
 instance Outputable CoSel where
-  ppr (SelTyCon n _r) = text "Tc" <> parens (int n)
+  ppr (SelTyCon n r) = text "Tc" <> parens (int n <> comma <> ppr r)
   ppr SelForAll       = text "All"
   ppr (SelFun fs)     = text "Fun" <> parens (ppr fs)
 
@@ -1075,26 +1075,28 @@ The Coercion form SelCo allows us to decompose a structural coercion, one
 between ForallTys, or TyConApps, or FunTys.
 
 There are three forms, split by the CoSel field inside the SelCo:
-SelTyCon, SelForAll, and SelFun.
+SelTyCon, SelForAll, and SelFun.  The typing rules below are directly
+checked by the SelCo case of GHC.Core.Lint.lintCoercion.
 
 * SelTyCon:
 
-      co : (T s1..sn) ~r0 (T t1..tn)
-      T is a data type, not a newtype, nor an arrow type
-      r = tyConRole tc r0 i
+      co : (T s1..sn) ~r (T t1..tn)
+      T is not a saturated FunTyCon (use SelFun for that)
+      T is injective at role r
+      ri = tyConRole tc r i
       i < n    (i is zero-indexed)
       ----------------------------------
-      SelCo (SelTyCon i r) : si ~r ti
+      SelCo (SelTyCon i ri) co : si ~ri ti
 
-  "Not a newtype": see Note [SelCo and newtypes]
-  "Not an arrow type": see SelFun below
+  "Injective at role r": see Note [SelCo and newtypes]
+  "Not saturated FunTyCon": see SelFun below
 
    See Note [SelCo Cached Roles]
 
 * SelForAll:
       co : forall (a:k1).t1 ~r0 forall (a:k2).t2
       ----------------------------------
-      SelCo SelForAll : k1 ~N k2
+      SelCo SelForAll co : k1 ~N k2
 
   NB: SelForAll always gives a Nominal coercion.
 
@@ -1104,17 +1106,17 @@ SelTyCon, SelForAll, and SelFun.
       co : (s1 %{m1}-> t1) ~r0 (s2 %{m2}-> t2)
       r = funRole r0 SelMult
       ----------------------------------
-      SelCo (SelFun SelMult) : m1 ~r m2
+      SelCo (SelFun SelMult) co : m1 ~r m2
 
       co : (s1 %{m1}-> t1) ~r0 (s2 %{m2}-> t2)
       r = funRole r0 SelArg
       ----------------------------------
-      SelCo (SelFun SelArg) : s1 ~r s2
+      SelCo (SelFun SelArg) co : s1 ~r s2
 
       co : (s1 %{m1}-> t1) ~r0 (s2 %{m2}-> t2)
       r = funRole r0 SelRes
       ----------------------------------
-      SelCo (SelFun SelRes) : t1 ~r t2
+      SelCo (SelFun SelRes) co : t1 ~r t2
 
 Note [FunCo]
 ~~~~~~~~~~~~
@@ -1452,6 +1454,10 @@ SelCo, we'll get out a representational coercion. That is:
 
 Yikes! Clearly, this is terrible. The solution is simple: forbid
 SelCo to be used on newtypes if the internal coercion is representational.
+More specifically, we use isInjectiveTyCon to determine whether
+T is injective at role r:
+* Newtypes and datatypes are both injective at Nominal role, but
+* Newtypes are not injective at Representational role
 See the SelCo equation for GHC.Core.Lint.lintCoercion.
 
 This is not just some corner case discovered by a segfault somewhere;

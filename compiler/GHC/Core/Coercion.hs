@@ -45,7 +45,7 @@ module GHC.Core.Coercion (
         mkPhantomCo,
         mkHoleCo, mkUnivCo, mkSubCo,
         mkAxiomInstCo, mkProofIrrelCo,
-        downgradeRole, mkAxiomRuleCo,
+        downgradeRole, upgradeRole, mkAxiomRuleCo,
         mkGReflRightCo, mkGReflLeftCo, mkCoherenceLeftCo, mkCoherenceRightCo,
         mkKindCo,
         castCoercionKind, castCoercionKind1, castCoercionKind2,
@@ -75,7 +75,7 @@ module GHC.Core.Coercion (
 
         coToMCo, mkTransMCo, mkTransMCoL, mkTransMCoR, mkCastTyMCo, mkSymMCo,
         mkFunResMCo, mkPiMCos,
-        isReflMCo, checkReflexiveMCo,
+        isReflMCo, checkReflexiveMCo, isSubCo_maybe,
 
         -- ** Coercion variables
         mkCoVar, isCoVar, coVarName, setCoVarName, setCoVarUnique,
@@ -1172,12 +1172,7 @@ mkSelCo_maybe cs co
 
     go _ _ = Nothing
 
-    -- Assertion checking
-    bad_call_msg = vcat [ text "Coercion =" <+> ppr co
-                        , text "LHS ty =" <+> ppr ty1
-                        , text "RHS ty =" <+> ppr ty2
-                        , text "cs =" <+> ppr cs
-                        , text "coercion role =" <+> ppr (coercionRole co) ]
+    ------ Assertion checking only below here ---------
 
     -- good_call checks the typing rules given in Note [SelCo]
     good_call SelForAll
@@ -1200,6 +1195,12 @@ mkSelCo_maybe cs co
        && r == tyConRole (coercionRole co) tc1 n
 
     good_call _ = False
+
+    bad_call_msg = vcat [ text "Coercion =" <+> ppr co
+                        , text "LHS ty =" <+> ppr ty1
+                        , text "RHS ty =" <+> ppr ty2
+                        , text "cs =" <+> ppr cs
+                        , text "coercion role =" <+> ppr (coercionRole co) ]
 
 -- | Extract the nth field of a FunCo
 getNthFun :: FunSel
@@ -1294,6 +1295,10 @@ mkSubCo co@(FunCo { fco_role = Nominal, fco_arg = arg, fco_res = res })
 mkSubCo co = assertPpr (coercionRole co == Nominal) (ppr co <+> ppr (coercionRole co)) $
              SubCo co
 
+isSubCo_maybe :: Coercion -> Maybe Coercion
+isSubCo_maybe (SubCo co) = Just co
+isSubCo_maybe _          = Nothing
+
 -- | Changes a role, but only a downgrade. See Note [Role twiddling functions]
 downgradeRole_maybe :: Role   -- ^ desired role
                     -> Role   -- ^ current role
@@ -1320,6 +1325,10 @@ downgradeRole r1 r2 co
   = case downgradeRole_maybe r1 r2 co of
       Just co' -> co'
       Nothing  -> pprPanic "downgradeRole" (ppr co)
+
+upgradeRole :: Coercion -> Coercion
+upgradeRole (SubCo co) = co
+upgradeRole co         = co
 
 mkAxiomRuleCo :: CoAxiomRule -> [Coercion] -> Coercion
 mkAxiomRuleCo = AxiomRuleCo
@@ -1939,16 +1948,16 @@ type LiftCoEnv = VarEnv Coercion
      -- Also maps coercion variables to ProofIrrelCos.
 
 -- like liftCoSubstWith, but allows for existentially-bound types as well
-liftCoSubstWithEx :: Role          -- desired role for output coercion
-                  -> [TyVar]       -- universally quantified tyvars
+liftCoSubstWithEx :: [TyVar]       -- universally quantified tyvars
                   -> [Coercion]    -- coercions to substitute for those
                   -> [TyCoVar]     -- existentially quantified tycovars
                   -> [Type]        -- types and coercions to be bound to ex vars
-                  -> (Type -> Coercion, [Type]) -- (lifting function, converted ex args)
-liftCoSubstWithEx role univs omegas exs rhos
+                  -> (Type -> CoercionR, [Type]) -- (lifting function, converted ex args)
+                      -- Returned coercion has Representational role
+liftCoSubstWithEx univs omegas exs rhos
   = let theta = mkLiftingContext (zipEqual "liftCoSubstWithExU" univs omegas)
         psi   = extendLiftingContextEx theta (zipEqual "liftCoSubstWithExX" exs rhos)
-    in (ty_co_subst psi role, substTys (lcSubstRight psi) (mkTyCoVarTys exs))
+    in (ty_co_subst psi Representational, substTys (lcSubstRight psi) (mkTyCoVarTys exs))
 
 liftCoSubstWith :: Role -> [TyCoVar] -> [Coercion] -> Type -> Coercion
 liftCoSubstWith r tvs cos ty

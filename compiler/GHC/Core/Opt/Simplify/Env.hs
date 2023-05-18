@@ -12,13 +12,13 @@ module GHC.Core.Opt.Simplify.Env (
         smPedanticBottoms, smPlatform,
 
         -- * Environments
-        SimplEnv(..), pprSimplEnv,   -- Temp not abstract
+        SimplEnv(..), StaticEnv, pprSimplEnv,   -- Temp not abstract
         seArityOpts, seCaseCase, seCaseFolding, seCaseMerge, seCastSwizzle,
         seDoEtaReduction, seEtaExpand, seFloatEnable, seInline, seNames,
         seOptCoercionOpts, sePedanticBottoms, sePhase, sePlatform, sePreInline,
         seRuleOpts, seRules, seUnfoldingOpts,
         mkSimplEnv, extendIdSubst,
-        extendTvSubst, extendCvSubst,
+        extendTvSubst, extendCvSubst, extendSubstForDFun,
         zapSubstEnv, setSubstEnv, bumpCaseDepth,
         getInScope, setInScopeFromE, setInScopeFromF,
         setInScopeSet, modifyInScope, addNewInScopeIds,
@@ -152,6 +152,8 @@ following table:
     | Computed on initialization | SimplEnv     | SimplTopEnv     |
 
 -}
+
+type StaticEnv = SimplEnv       -- Just the static part is relevant
 
 data SimplEnv
   = SimplEnv {
@@ -379,7 +381,6 @@ data SimplSR
        -- and  ja = Just a <=> x is a join-point of arity a
        -- See Note [Join arity in SimplIdSubst]
 
-
   | DoneId OutId
        -- If  x :-> DoneId v   is in the SimplIdSubst
        -- then replace occurrences of x by v
@@ -546,6 +547,20 @@ extendCvSubst :: SimplEnv -> CoVar -> Coercion -> SimplEnv
 extendCvSubst env@(SimplEnv {seCvSubst = csubst}) var co
   = assert (isCoVar var) $
     env {seCvSubst = extendVarEnv csubst var co}
+
+extendSubstForDFun :: SimplEnv -> [OutVar] -> [(InExpr,StaticEnv)] -> SimplEnv
+extendSubstForDFun env bndrs args
+  = foldl2 extend env bndrs args
+  where
+    extend env@(SimplEnv {seIdSubst = ids, seCvSubst = cvs, seTvSubst = tvs})
+           bndr (arg,arg_se)
+      | isTyVar bndr, Type ty <- arg
+      = env { seTvSubst = extendVarEnv tvs bndr (substTy arg_se ty) }
+      | isCoVar bndr, Coercion co <- arg
+      = env { seCvSubst = extendVarEnv cvs bndr (substCo arg_se co) }
+      | otherwise
+      = assertPpr (isId bndr) (ppr bndr) $
+        env { seIdSubst = extendVarEnv ids bndr (mkContEx arg_se arg) }
 
 ---------------------
 getInScope :: SimplEnv -> InScopeSet
