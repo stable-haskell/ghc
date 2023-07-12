@@ -1285,6 +1285,11 @@ exprIsCheapX ok_app e
     go _ (Type {})                    = True
     go _ (Coercion {})                = True
     go n (Cast e _)                   = go n e
+-- Experiment: try restricting single-branch cases
+-- Another idea: use Simplify.Iteration.alts_would_dup
+--    go n (Case scrut _ _ alts)
+--      | [Alt _ _ rhs] <- alts           = ok scrut && ok rhs
+--      | otherwise                       = False
     go n (Case scrut _ _ alts)        = ok scrut &&
                                         and [ go n rhs | Alt _ _ rhs <- alts ]
     go n (Tick t e) | tickishCounts t = False

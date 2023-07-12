@@ -88,14 +88,18 @@ StrictAnal.addStrictnessInfoToTopId
 
 callSiteInline :: Logger
                -> UnfoldingOpts
-               -> Int                   -- Case depth
+               -> Int -> Int            -- Case depth and inline depth
                -> Id                    -- The Id
                -> Bool                  -- True <=> unfolding is active
                -> Bool                  -- True if there are no arguments at all (incl type args)
                -> [ArgSummary]          -- One for each value arg; True if it is interesting
                -> CallCtxt              -- True <=> continuation is interesting
                -> Maybe CoreExpr        -- Unfolding, if any
-callSiteInline logger opts !case_depth id active_unfolding lone_variable arg_infos cont_info
+callSiteInline logger opts
+               !case_depth     -- See Note [Avoid inlining into deeply nested cases]
+               !inline_depth   -- Currently not used to control inlining
+                               -- but we pass it for debug-logging purposes
+               id active_unfolding lone_variable arg_infos cont_info
   = case idUnfolding id of
       -- idUnfolding checks for loop-breakers, returning NoUnfolding
       -- Things with an INLINE pragma may have an unfolding *and*
@@ -103,7 +107,7 @@ callSiteInline logger opts !case_depth id active_unfolding lone_variable arg_inf
         CoreUnfolding { uf_tmpl = unf_template
                       , uf_cache = unf_cache
                       , uf_guidance = guidance }
-          | active_unfolding -> tryUnfolding logger opts case_depth id lone_variable
+          | active_unfolding -> tryUnfolding logger opts case_depth inline_depth id lone_variable
                                     arg_infos cont_info unf_template
                                     unf_cache guidance
           | otherwise -> traceInline logger opts id "Inactive unfolding:" (ppr id) Nothing
@@ -132,8 +136,9 @@ traceInline logger opts inline_id str doc result
 
 {- Note [Avoid inlining into deeply nested cases]
    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Also called "exponential inlining".
 
-Consider a function f like this:
+Consider a function f like this: (#18730)
 
   f arg1 arg2 =
     case ...
@@ -144,46 +149,44 @@ This function is small. So should be safe to inline.
 However sometimes this doesn't quite work out like that.
 Consider this code:
 
-f1 arg1 arg2 ... = ...
-    case _foo of
-      alt1 -> ... f2 arg1 ...
-      alt2 -> ... f2 arg2 ...
+    f1 arg1 arg2 ... = ...
+        case _foo of
+          alt1 -> ... f2 arg1 ...
+          alt2 -> ... f2 arg2 ...
 
-f2 arg1 arg2 ... = ...
-    case _foo of
-      alt1 -> ... f3 arg1 ...
-      alt2 -> ... f3 arg2 ...
+    f2 arg1 arg2 ... = ...
+        case _foo of
+          alt1 -> ... f3 arg1 ...
+          alt2 -> ... f3 arg2 ...
 
-f3 arg1 arg2 ... = ...
+    f3 arg1 arg2 ... = ...
 
-... repeats up to n times. And then f1 is
-applied to some arguments:
+    ... repeats up to n times. And then f1 is
+    applied to some arguments:
 
-foo = ... f1 <interestingArgs> ...
+    foo = ... f1 <interestingArgs> ...
 
-Initially f2..fn are not interesting to inline so we don't.
-However we see that f1 is applied to interesting args.
-So it's an obvious choice to inline those:
+Initially f2..fn are not interesting to inline so we don't.  However we see
+that f1 is applied to interesting args.  So it's an obvious choice to inline
+those:
 
-foo =
-    ...
-      case _foo of
-        alt1 -> ... f2 <interestingArg> ...
-        alt2 -> ... f2 <interestingArg> ...
+    foo = ...
+          case _foo of
+            alt1 -> ... f2 <interestingArg> ...
+            alt2 -> ... f2 <interestingArg> ...
 
-As a result we go and inline f2 both mentions of f2 in turn are now applied to interesting
-arguments and f2 is small:
+As a result we go and inline f2 both mentions of f2 in turn are now applied to
+interesting arguments and f2 is small:
 
-foo =
-    ...
-      case _foo of
-        alt1 -> ... case _foo of
-            alt1 -> ... f3 <interestingArg> ...
-            alt2 -> ... f3 <interestingArg> ...
+    foo = ...
+          case _foo of
+            alt1 -> ... case _foo of
+                alt1 -> ... f3 <interestingArg> ...
+                alt2 -> ... f3 <interestingArg> ...
 
-        alt2 -> ... case _foo of
-            alt1 -> ... f3 <interestingArg> ...
-            alt2 -> ... f3 <interestingArg> ...
+            alt2 -> ... case _foo of
+                alt1 -> ... f3 <interestingArg> ...
+                alt2 -> ... f3 <interestingArg> ...
 
 The same thing happens for each binding up to f_n, duplicating the amount of inlining
 done in each step. Until at some point we are either done or run out of simplifier
@@ -200,19 +203,73 @@ The heuristic can be tuned in two ways:
 
 * We can ignore the first n levels of case nestings for inlining decisions using
   -funfolding-case-threshold.
-* The penalty grows linear with the depth. It's computed as size*(depth-threshold)/scaling.
+
+* The penalty grows linear with the depth. It's computed as
+     size*(depth-threshold)/scaling.
   Scaling can be set with -funfolding-case-scaling.
+
+Reflections and wrinkles
+
+* See also Note [Do not add unfoldings to join points at birth] in
+  GHC.Core.Opt.Simplify.Iteration
+
+* The total case depth is really the wrong thing; it will inhibit inlining of a
+  local function, just because there is some giant case nest further out.  What we
+  want is the /difference/ in case-depth between the binding site and the call site.
+  That could be done quite easily by adding the case-depth to the Unfolding of the
+  function.
+
+* What matters more than /depth/ is total /width/; that is how many alternatives
+  are in the tree.  We could perhaps multiply depth by width at each case expression.
+
+* There might be a case nest with many alternatives, but the function is called in
+  only a handful of them.  So maybe we should ignore case-depth, and instead penalise
+  funtions that are called many times -- after all, inlining them bloats code.
+
+  But in the scenario above, we are simplifying an inlined fuction, without doing a
+  global occurrence analysis each time.  So if we based the penalty on multiple
+  occurences, we should /also/ add a penalty when simplifying an already-simplified
+  expression.  We do track this (seInlineDepth) but currently we barely use it.
+
+  An advantage of using occurrences+inline depth is that it'll work when no
+  case expressions are involved.  See #15488.
+
+* Test T18730 did not involve join points.  But join points are very prone to
+  the same kind of thing.  For exampe in #13253, and several related tickets,
+  we got an exponential blowup in code size from a program that looks like
+  this.
+
+  let j1a x = case f y     of { True -> p;   False -> q }
+      j1b x = case f y     of { True -> q;   False -> p }
+      j2a x = case f (y+1) of { True -> j1a x; False -> j1b x}
+      j2b x = case f (y+1) of { True -> j1b x; False -> j1a x}
+      ...
+  in case f (y+10) of { True -> j10a 7; False -> j10b 8 }
+
+  The first danger is this: in Simplifier iteration 1 postInlineUnconditionally
+  inlines the last functions, j10a and j10b (they are both small).  Now we have
+  two calls to j9a and two to j9b.  In the next Simplifer iteration,
+  postInlineUnconditionally inlines all four of these calls, leaving four calls
+  to j8a and j8b. Etc.
+
+  Happily, this probably /won't/ happen because the Simplifier works top down, so it'll
+  inline j1a/j1b into j2a/j2b, which will make the latter bigger; so the process
+  will stop.  But we still need to stop the inline cascade described at the head
+  of this Note.
 
 Some guidance on setting these defaults:
 
 * A low threshold (<= 2) is needed to prevent exponential cases from spiraling out of
   control. We picked 2 for no particular reason.
+
 * Scaling the penalty by any more than 30 means the reproducer from
   T18730 won't compile even with reasonably small values of n. Instead
   it will run out of runs/ticks. This means to positively affect the reproducer
   a scaling <= 30 is required.
+
 * A scaling of >= 15 still causes a few very large regressions on some nofib benchmarks.
   (+80% for gc/fulsom, +90% for real/ben-raytrace, +20% for spectral/fibheaps)
+
 * A scaling of >= 25 showed no regressions on nofib. However it showed a number of
   (small) regression for compiler perf benchmarks.
 
@@ -221,15 +278,15 @@ This gives us minimal compiler perf regressions. No nofib runtime regressions an
 will still avoid this pattern sometimes. This is a "safe" default, where we err on
 the side of compiler blowup instead of risking runtime regressions.
 
-For cases where the default falls short the flag can be changed to allow more/less inlining as
-needed on a per-module basis.
+For cases where the default falls short the flag can be changed to allow
+more/less inlining as needed on a per-module basis.
 
 -}
 
-tryUnfolding :: Logger -> UnfoldingOpts -> Int -> Id -> Bool -> [ArgSummary] -> CallCtxt
+tryUnfolding :: Logger -> UnfoldingOpts -> Int -> Int -> Id -> Bool -> [ArgSummary] -> CallCtxt
              -> CoreExpr -> UnfoldingCache -> UnfoldingGuidance
              -> Maybe CoreExpr
-tryUnfolding logger opts !case_depth id lone_variable arg_infos
+tryUnfolding logger opts !case_depth !inline_depth id lone_variable arg_infos
              cont_info unf_template unf_cache guidance
  = case guidance of
      UnfNever -> traceInline logger opts id str (text "UnfNever") Nothing
@@ -245,13 +302,19 @@ tryUnfolding logger opts !case_depth id lone_variable arg_infos
           enough_args  = (n_val_args >= uf_arity) || (unsat_ok && n_val_args > 0)
 
      UnfIfGoodArgs { ug_args = arg_discounts, ug_res = res_discount, ug_size = size }
-        | unfoldingVeryAggressive opts
-        -> traceInline logger opts id str (mk_doc some_benefit extra_doc True) (Just unf_template)
-        | is_wf && some_benefit && small_enough
-        -> traceInline logger opts id str (mk_doc some_benefit extra_doc True) (Just unf_template)
-        | otherwise
-        -> traceInline logger opts id str (mk_doc some_benefit extra_doc False) Nothing
+        | isJoinId id
+        -> -- Inline a join point only if it scrutinisees a ValueArg
+           -- See Note [Duplicating join points] in GHC.Core.Opt.Simplify.Iteration
+           if or (zipWith scrut_arg arg_discounts arg_infos) && small_enough
+           then yes
+           else no
+        | unfoldingVeryAggressive opts          -> yes
+        | is_wf && some_benefit && small_enough -> yes
+        | otherwise                             -> no
         where
+          yes = traceInline logger opts id str (mk_doc some_benefit extra_doc True)  (Just unf_template)
+          no  = traceInline logger opts id str (mk_doc some_benefit extra_doc False) Nothing
+
           some_benefit = calc_some_benefit (length arg_discounts)
           -- See Note [Avoid inlining into deeply nested cases]
           depth_treshold = unfoldingCaseThreshold opts
@@ -262,9 +325,13 @@ tryUnfolding logger opts !case_depth id lone_variable arg_infos
           small_enough = adjusted_size <= unfoldingUseThreshold opts
           discount = computeDiscount arg_discounts res_discount arg_infos cont_info
 
-          extra_doc = vcat [ text "case depth =" <+> int case_depth
-                           , text "depth based penalty =" <+> int depth_penalty
+          extra_doc = vcat [ text "depth based penalty =" <+> int depth_penalty
                            , text "discounted size =" <+> int adjusted_size ]
+
+          -- True if the function body has a discount and the arg is a value
+          scrut_arg disc ValueArg = disc > 0
+          scrut_arg _    _        = False
+
   where
     -- Unpack the UnfoldingCache lazily because it may not be needed, and all
     -- its fields are strict; so evaluating unf_cache at all forces all the
@@ -280,6 +347,8 @@ tryUnfolding logger opts !case_depth id lone_variable arg_infos
              , text "is exp:" <+> ppr is_exp
              , text "is work-free:" <+> ppr is_wf
              , text "guidance" <+> ppr guidance
+             , text "case depth =" <+> int case_depth
+             , text "inline depth =" <+> int inline_depth
              , extra_doc
              , text "ANSWER =" <+> if yes_or_no then text "YES" else text "NO"]
 

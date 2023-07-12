@@ -162,9 +162,12 @@ data SimplCont
 
 
   | CastIt              -- (CastIt co K)[e] = K[ e `cast` co ]
-        OutCoercion             -- The coercion simplified
+      { sc_co   :: OutCoercion  -- The coercion simplified
                                 -- Invariant: never an identity coercion
-        SimplCont
+      , sc_opt  :: Bool         -- True <=> sc_co has had optCoercion applied to it
+                                --      See Note [Avoid re-simplifying coercions]
+                                --      in GHC.Core.Opt.Simplify.Iteration
+      , sc_cont :: SimplCont }
 
   | ApplyToVal         -- (ApplyToVal arg K)[e] = K[ e arg ]
       { sc_dup     :: DupFlag   -- See Note [DupFlag invariants]
@@ -273,8 +276,10 @@ instance Outputable SimplCont where
     = text "Stop" <> brackets (sep $ punctuate comma pps) <+> ppr ty
     where
       pps = [ppr interesting] ++ [ppr eval_sd | eval_sd /= topSubDmd]
-  ppr (CastIt co cont  )    = (text "CastIt" <+> pprOptCo co) $$ ppr cont
-  ppr (TickIt t cont)       = (text "TickIt" <+> ppr t) $$ ppr cont
+  ppr (CastIt { sc_co = co, sc_cont = cont })
+    = (text "CastIt" <+> pprOptCo co) $$ ppr cont
+  ppr (TickIt t cont)
+    = (text "TickIt" <+> ppr t) $$ ppr cont
   ppr (ApplyToTy  { sc_arg_ty = ty, sc_cont = cont })
     = (text "ApplyToTy" <+> pprParendType ty) $$ ppr cont
   ppr (ApplyToVal { sc_arg = arg, sc_dup = dup, sc_cont = cont, sc_hole_ty = hole_ty })
@@ -285,9 +290,9 @@ instance Outputable SimplCont where
     = (text "StrictBind" <+> ppr b) $$ ppr cont
   ppr (StrictArg { sc_fun = ai, sc_cont = cont })
     = (text "StrictArg" <+> ppr (ai_fun ai)) $$ ppr cont
-  ppr (Select { sc_dup = dup, sc_bndr = bndr, sc_alts = alts, sc_env = se, sc_cont = cont })
+  ppr (Select { sc_dup = dup, sc_bndr = bndr, sc_alts = alts, sc_cont = cont })
     = (text "Select" <+> ppr dup <+> ppr bndr) $$
-       whenPprDebug (nest 2 $ vcat [ppr (seTvSubst se), ppr alts]) $$ ppr cont
+      whenPprDebug (nest 2 $ ppr alts) $$ ppr cont
 
 
 {- Note [The hole type in ApplyToTy]
@@ -351,6 +356,7 @@ data ArgSpec
           , as_hole_ty :: OutType }   -- Type of the function (presumably forall a. blah)
 
   | CastBy OutCoercion                -- Cast by this; c.f. CastIt
+                                      -- Coercion is optimised
 
 instance Outputable ArgInfo where
   ppr (ArgInfo { ai_fun = fun, ai_args = args, ai_dmds = dmds })
@@ -413,7 +419,8 @@ pushSimplifiedArg env (ValArg { as_arg = arg, as_hole_ty = hole_ty }) cont
   = ApplyToVal { sc_arg = arg, sc_env = env, sc_dup = Simplified
                  -- The SubstEnv will be ignored since sc_dup=Simplified
                , sc_hole_ty = hole_ty, sc_cont = cont }
-pushSimplifiedArg _ (CastBy c) cont = CastIt c cont
+pushSimplifiedArg _ (CastBy c) cont
+  = CastIt { sc_co = c, sc_cont = cont, sc_opt = True }
 
 argInfoExpr :: OutId -> [ArgSpec] -> OutExpr
 -- NB: the [ArgSpec] is reversed so that the first arg
@@ -470,7 +477,7 @@ mkLazyArgStop ty fun_info = Stop ty (lazyArgContext fun_info) arg_sd
 -------------------
 contIsRhs :: SimplCont -> Maybe RecFlag
 contIsRhs (Stop _ (RhsCtxt is_rec) _) = Just is_rec
-contIsRhs (CastIt _ k)                = contIsRhs k   -- For f = e |> co, treat e as Rhs context
+contIsRhs (CastIt { sc_cont = k })    = contIsRhs k   -- For f = e |> co, treat e as Rhs context
 contIsRhs _                           = Nothing
 
 -------------------
@@ -484,7 +491,7 @@ contIsDupable (ApplyToTy  { sc_cont = k })      = contIsDupable k
 contIsDupable (ApplyToVal { sc_dup = OkToDup }) = True -- See Note [DupFlag invariants]
 contIsDupable (Select { sc_dup = OkToDup })     = True -- ...ditto...
 contIsDupable (StrictArg { sc_dup = OkToDup })  = True -- ...ditto...
-contIsDupable (CastIt _ k)                      = contIsDupable k
+contIsDupable (CastIt { sc_cont = k })          = contIsDupable k
 contIsDupable _                                 = False
 
 -------------------
@@ -493,13 +500,13 @@ contIsTrivial (Stop {})                                         = True
 contIsTrivial (ApplyToTy { sc_cont = k })                       = contIsTrivial k
 -- This one doesn't look right.  A value application is not trivial
 -- contIsTrivial (ApplyToVal { sc_arg = Coercion _, sc_cont = k }) = contIsTrivial k
-contIsTrivial (CastIt _ k)                                      = contIsTrivial k
+contIsTrivial (CastIt { sc_cont = k })                          = contIsTrivial k
 contIsTrivial _                                                 = False
 
 -------------------
 contResultType :: SimplCont -> OutType
 contResultType (Stop ty _ _)                = ty
-contResultType (CastIt _ k)                 = contResultType k
+contResultType (CastIt { sc_cont = k })     = contResultType k
 contResultType (StrictBind { sc_cont = k }) = contResultType k
 contResultType (StrictArg { sc_cont = k })  = contResultType k
 contResultType (Select { sc_cont = k })     = contResultType k
@@ -510,7 +517,7 @@ contResultType (TickIt _ k)                 = contResultType k
 contHoleType :: SimplCont -> OutType
 contHoleType (Stop ty _ _)                    = ty
 contHoleType (TickIt _ k)                     = contHoleType k
-contHoleType (CastIt co _)                    = coercionLKind co
+contHoleType (CastIt { sc_co = co })          = coercionLKind co
 contHoleType (StrictBind { sc_bndr = b, sc_dup = dup, sc_env = se })
   = perhapsSubstTy dup se (idType b)
 contHoleType (StrictArg  { sc_fun_ty = ty })  = funArgTy ty
@@ -530,7 +537,8 @@ contHoleType (Select { sc_dup = d, sc_bndr =  b, sc_env = se })
 -- case-of-case transformation.
 contHoleScaling :: SimplCont -> Mult
 contHoleScaling (Stop _ _ _) = OneTy
-contHoleScaling (CastIt _ k) = contHoleScaling k
+contHoleScaling (CastIt { sc_cont = k })
+  = contHoleScaling k
 contHoleScaling (StrictBind { sc_bndr = id, sc_cont = k })
   = idMult id `mkMultMul` contHoleScaling k
 contHoleScaling (Select { sc_bndr = id, sc_cont = k })
@@ -549,14 +557,14 @@ countArgs :: SimplCont -> Int
 -- and other values; skipping over casts.
 countArgs (ApplyToTy  { sc_cont = cont }) = 1 + countArgs cont
 countArgs (ApplyToVal { sc_cont = cont }) = 1 + countArgs cont
-countArgs (CastIt _ cont)                 = countArgs cont
+countArgs (CastIt     { sc_cont = cont }) = countArgs cont
 countArgs _                               = 0
 
 countValArgs :: SimplCont -> Int
 -- Count value arguments only
 countValArgs (ApplyToTy  { sc_cont = cont }) = countValArgs cont
 countValArgs (ApplyToVal { sc_cont = cont }) = 1 + countValArgs cont
-countValArgs (CastIt _ cont)                 = countValArgs cont
+countValArgs (CastIt     { sc_cont = cont }) = countValArgs cont
 countValArgs _                               = 0
 
 -------------------
@@ -576,7 +584,7 @@ contArgs cont
     go args (ApplyToVal { sc_arg = arg, sc_env = se, sc_cont = k })
                                         = go (is_interesting arg se : args) k
     go args (ApplyToTy { sc_cont = k }) = go args k
-    go args (CastIt _ k)                = go args k
+    go args (CastIt { sc_cont = k })    = go args k
     go args k                           = (False, reverse args, k)
 
     is_interesting arg se = interestingArg se arg
@@ -595,10 +603,10 @@ contArgs cont
 -- about what to do then and no call sites so far seem to care.
 contEvalContext :: SimplCont -> SubDemand
 contEvalContext k = case k of
-  (Stop _ _ sd)              -> sd
-  (TickIt _ k)               -> contEvalContext k
-  (CastIt _ k)               -> contEvalContext k
-  ApplyToTy{sc_cont=k}       -> contEvalContext k
+  Stop _ _ sd              -> sd
+  TickIt _ k               -> contEvalContext k
+  CastIt   { sc_cont = k } -> contEvalContext k
+  ApplyToTy{ sc_cont = k } -> contEvalContext k
     --  ApplyToVal{sc_cont=k}      -> mkCalledOnceDmd $ contEvalContext k
     -- Not 100% sure that's correct, . Here's an example:
     --   f (e x) and f :: <SC(S,C(1,L))>
@@ -882,7 +890,7 @@ interestingCallContext env cont
     interesting (Stop _ cci _)               = cci
     interesting (TickIt _ k)                 = interesting k
     interesting (ApplyToTy { sc_cont = k })  = interesting k
-    interesting (CastIt _ k)                 = interesting k
+    interesting (CastIt { sc_cont = k })     = interesting k
         -- If this call is the arg of a strict function, the context
         -- is a bit interesting.  If we inline here, we may get useful
         -- evaluation information to avoid repeated evals: e.g.
@@ -922,7 +930,7 @@ contHasRules cont
   where
     go (ApplyToVal { sc_cont = cont }) = go cont
     go (ApplyToTy  { sc_cont = cont }) = go cont
-    go (CastIt _ cont)                 = go cont
+    go (CastIt { sc_cont = cont })     = go cont
     go (StrictArg { sc_fun = fun })    = ai_encl fun
     go (Stop _ RuleArgCtxt _)          = True
     go (TickIt _ c)                    = go c
@@ -1527,15 +1535,14 @@ rules] for details.
 
 postInlineUnconditionally
     :: SimplEnv -> BindContext
-    -> OutId            -- The binder (*not* a CoVar), including its unfolding
-    -> OccInfo          -- From the InId
+    -> InId -> OutId    -- The binder (*not* a CoVar), including its unfolding
     -> OutExpr
     -> Bool
 -- Precondition: rhs satisfies the let-can-float invariant
 -- See Note [Core let-can-float invariant] in GHC.Core
 -- Reason: we don't want to inline single uses, or discard dead bindings,
 --         for unlifted, side-effect-ful bindings
-postInlineUnconditionally env bind_cxt bndr occ_info rhs
+postInlineUnconditionally env bind_cxt old_bndr bndr rhs
   | not active                  = False
   | isWeakLoopBreaker occ_info  = False -- If it's a loop-breaker of any kind, don't inline
                                         -- because it might be referred to "earlier"
@@ -1550,20 +1557,14 @@ postInlineUnconditionally env bind_cxt bndr occ_info rhs
       OneOcc { occ_in_lam = in_lam, occ_int_cxt = int_cxt, occ_n_br = n_br }
         -- See Note [Inline small things to avoid creating a thunk]
 
-        -> n_br < 100  -- See Note [Suppress exponential blowup]
+        | let not_inside_lam = in_lam == NotInsideLam
+        -> n_br < 100  -- See #23627
 
-           && smallEnoughToInline uf_opts unfolding     -- Small enough to dup
-                        -- ToDo: consider discount on smallEnoughToInline if int_cxt is true
-                        --
-                        -- NB: Do NOT inline arbitrarily big things, even if occ_n_br=1
-                        -- Reason: doing so risks exponential behaviour.  We simplify a big
-                        --         expression, inline it, and simplify it again.  But if the
-                        --         very same thing happens in the big expression, we get
-                        --         exponential cost!
-                        -- PRINCIPLE: when we've already simplified an expression once,
-                        -- make sure that we only inline it if it's reasonably small.
+           && (  (n_br == 1 && not_inside_lam)  -- See Note [Post-inline for single-use things]
+              || smallEnoughToInline uf_opts unfolding)  -- Small enough to dup
+                 -- ToDo: consider discount on smallEnoughToInline if int_cxt is true
 
-           && (in_lam == NotInsideLam ||
+           && (not_inside_lam ||
                         -- Outside a lambda, we want to be reasonably aggressive
                         -- about inlining into multiple branches of case
                         -- e.g. let x = <non-value>
@@ -1584,19 +1585,8 @@ postInlineUnconditionally env bind_cxt bndr occ_info rhs
 
       _ -> False
 
--- Here's an example that we don't handle well:
---      let f = if b then Left (\x.BIG) else Right (\y.BIG)
---      in \y. ....case f of {...} ....
--- Here f is used just once, and duplicating the case work is fine (exprIsCheap).
--- But
---  - We can't preInlineUnconditionally because that would invalidate
---    the occ info for b.
---  - We can't postInlineUnconditionally because the RHS is big, and
---    that risks exponential behaviour
---  - We can't call-site inline, because the rhs is big
--- Alas!
-
   where
+    occ_info  = idOccInfo old_bndr
     unfolding = idUnfolding bndr
     uf_opts   = seUnfoldingOpts env
     phase     = sePhase env
@@ -1621,37 +1611,51 @@ in allocation if you miss this out.  And bits of GHC itself start
 to allocate more.  An egregious example is test perf/compiler/T14697,
 where GHC.Driver.CmdLine.$wprocessArgs allocated hugely more.
 
-Note [Suppress exponential blowup]
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-In #13253, and several related tickets, we got an exponential blowup
-in code size from postInlineUnconditionally.  The trouble comes when
-we have
-  let j1a = case f y     of { True -> p;   False -> q }
-      j1b = case f y     of { True -> q;   False -> p }
-      j2a = case f (y+1) of { True -> j1a; False -> j1b }
-      j2b = case f (y+1) of { True -> j1b; False -> j1a }
-      ...
-  in case f (y+10) of { True -> j10a; False -> j10b }
+Note [Post-inline for single-use things]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+If we have
 
-when there are many branches. In pass 1, postInlineUnconditionally
-inlines j10a and j10b (they are both small).  Now we have two calls
-to j9a and two to j9b.  In pass 2, postInlineUnconditionally inlines
-all four of these calls, leaving four calls to j8a and j8b. Etc.
-Yikes!  This is exponential!
+   let x = rhs in ...x...
 
-A possible plan: stop doing postInlineUnconditionally
-for some fixed, smallish number of branches, say 4. But that turned
-out to be bad: see Note [Inline small things to avoid creating a thunk].
-And, as it happened, the problem with #13253 was solved in a
-different way (Note [Duplicating StrictArg] in Simplify).
+and `x` is used exactly once, and not inside a lambda, then we will usually
+preInlineUnconditinally. But we can still get this situation in
+postInlineUnconditionally:
 
-So I just set an arbitrary, high limit of 100, to stop any
-totally exponential behaviour.
+  case K rhs of K x -> ...x....
 
-This still leaves the nasty possibility that /ordinary/ inlining (not
-postInlineUnconditionally) might inline these join points, each of
-which is individually quiet small.  I'm still not sure what to do
-about this (e.g. see #15488).
+Here we'll use `simplAuxBind` to bind `x` to (the already-simplified) `rhs`;
+and `x` is used exactly once.  It's beneficial to inline right away; otherwise
+we risk creating
+
+   let x = rhs in ...x...
+
+which will take another iteration of the Simplifier to eliminate.  We do this in
+two places
+
+1. In the full `postInlineUnconditionally` look for the special case
+   of "one occurrence, not under a lambda", and inline unconditionally then.
+
+   This is a bit risky: see Note [Avoiding simplifying repeatedly] in
+   Simplify.Iteration.  But in practice it seems to be a small win.
+
+2. `simplAuxBind` does a kind of poor-man's `postInlineUnconditionally`.  It
+   does not need to account for many of the cases (e.g. top level) that the
+   full `postInlineUnconditionally` does.  Moreover, we don't have an
+   OutId, which `postInlineUnconditionally` needs.  I got a slight improvement
+   in compiler performance when I added this test.
+
+Here's an example that we don't currently handle well:
+     let f = if b then Left (\x.BIG) else Right (\y.BIG)
+     in \y. ....case f of {...} ....
+Here f is used just once, and duplicating the case work is fine (exprIsCheap).
+But
+ - We can't preInlineUnconditionally because that would invalidate
+   the occ info for b.
+ - We can't postInlineUnconditionally because the RHS is big, and
+   that risks exponential behaviour
+ - We can't call-site inline, because the rhs is big
+Alas!
+
 
 Note [Top level and postInlineUnconditionally]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -2196,7 +2200,7 @@ abstractFloats uf_opts top_lvl main_tvs floats body
       = (poly_id `setIdUnfolding` unf, poly_rhs)
       where
         poly_rhs = mkLams tvs_here rhs
-        unf = mkUnfolding uf_opts VanillaSrc is_top_lvl False poly_rhs Nothing
+        unf = mkUnfolding uf_opts VanillaSrc is_top_lvl False False poly_rhs Nothing
 
         -- We want the unfolding.  Consider
         --      let
@@ -2397,6 +2401,14 @@ Wrinkles
     case-on-variable is easy to do, and seems useful in common cases so
     `tryMergeCase` does it.
 
+(MC2) The auxiliary bindings b'=b are annoying, because they force another
+      simplifier pass, but there seems no easy way to avoid them.  See
+      Note [Which transformations are innocuous] in GHC.Core.Opt.Stats.
+
+See also
+* Note [Example of case-merging and caseRules]
+* Note [Cascading case merge]
+
 Note [Eliminate Identity Case]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         case e of               ===> e
@@ -2488,7 +2500,6 @@ Wrinkle 4:
   see Note [caseRules for dataToTag] in GHC.Core.Opt.ConstantFold
 
 
-
 Note [Example of case-merging and caseRules]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 The case-transformation rules are quite powerful. Here's a
@@ -2574,6 +2585,9 @@ mkCase, mkCase1, mkCase2, mkCase3
 
 --------------------------------------------------
 --      1. Merge Nested Cases
+--         See Note [Merge Nested Cases]
+--             Note [Example of case-merging and caseRules]
+--             Note [Cascading case merge]
 --------------------------------------------------
 
 mkCase mode scrut outer_bndr alts_ty alts
@@ -2642,6 +2656,7 @@ tryMergeCase _ _ = Nothing
 
 --------------------------------------------------
 --      2. Eliminate Identity Case
+--         See Note [Eliminate Identity Case]
 --------------------------------------------------
 
 mkCase1 _mode scrut case_bndr _ alts@(Alt _ _ rhs1 : alts')      -- Identity case
@@ -2687,6 +2702,7 @@ mkCase1 mode scrut bndr alts_ty alts = mkCase2 mode scrut bndr alts_ty alts
 
 --------------------------------------------------
 --      2. Scrutinee Constant Folding
+--         See Note [Scrutinee Constant Folding]
 --------------------------------------------------
 
 mkCase2 mode scrut bndr alts_ty alts
