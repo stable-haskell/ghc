@@ -232,6 +232,7 @@ test('OrigThunkInfo', normal, compile_and_run, ['-forig-thunk-info'])
 # Note [MO_S_MulMayOflo significant width]) and may require fixing/adjustment.
 test('MulMayOflo_full',
      [ extra_files(['MulMayOflo.hs']),
+       req_cmm,
        when(unregisterised(), skip),
        unless(
          arch('aarch64') or arch('x86_64') or arch('i386'),
