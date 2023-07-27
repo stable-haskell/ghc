@@ -823,7 +823,6 @@ primOpRules nm = \case
 
    AddrAddOp  -> mkPrimOpRule nm 2 [ rightIdentityPlatform zeroi ]
 
-   SeqOp      -> mkPrimOpRule nm 4 [ seqRule ]
    SparkOp    -> mkPrimOpRule nm 4 [ sparkRule ]
 
    _          -> Nothing
@@ -2073,36 +2072,86 @@ mechanism for 'evaluate'
    evaluate a = IO $ \s -> seq# a s
 
 The semantics of seq# is
+  * wait for all earlier actions in the State#-token-thread to complete
   * evaluate its first argument
   * and return it
 
 Things to note
 
-* Why do we need a primop at all?  That is, instead of
-      case seq# x s of (# x, s #) -> blah
-  why not instead say this?
-      case x of { DEFAULT -> blah)
+S1. Why do we need a primop at all?  That is, instead of
+        case seq# x s of (# x, s #) -> blah
+    why not instead say this?
+        case x of { DEFAULT -> blah)
 
-  Reason (see #5129): if we saw
-    catch# (\s -> case x of { DEFAULT -> raiseIO# exn s }) handler
+    Reason (see #5129): if we saw
+      catch# (\s -> case x of { DEFAULT -> raiseIO# exn s }) handler
 
-  then we'd drop the 'case x' because the body of the case is bottom
-  anyway. But we don't want to do that; the whole /point/ of
-  seq#/evaluate is to evaluate 'x' first in the IO monad.
+    then we'd drop the 'case x' because the body of the case is bottom
+    anyway. But we don't want to do that; the whole /point/ of
+    seq#/evaluate is to evaluate 'x' first in the IO monad.
 
-  In short, we /always/ evaluate the first argument and never
-  just discard it.
+    In short, we /always/ evaluate the first argument and never
+    just discard it.
 
-* Why return the value?  So that we can control sharing of seq'd
-  values: in
-     let x = e in x `seq` ... x ...
-  We don't want to inline x, so better to represent it as
-       let x = e in case seq# x RW of (# _, x' #) -> ... x' ...
-  also it matches the type of rseq in the Eval monad.
+S2. Why return the value?  So that we can control sharing of seq'd
+    values: in
+       let x = e in x `seq` ... x ...
+    We don't want to inline x, so better to represent it as
+         let x = e in case seq# x RW of (# _, x' #) -> ... x' ...
+    also it matches the type of rseq in the Eval monad.
+
+S3. seq# is also used to implement pseq#:
+
+      pseq !x y = case seq# x realWorld# of
+        (# s, _ #) -> case seq# y s of
+          (# _, y' #) -> y'
+
+    The state token threading between `seq# x realWorld#` and `seq# y s`
+    should ensure that `y` is not evaluated before `x`.  Historically we
+    used instead ``pseq x y = x `seq` lazy y``, but this was not robust;
+    see #23233 and #23699.
+
+S4. We do not consider `seq# x s` to raise a precise exception even
+    when `x` certainly raises an exception; doing so would cause
+    `evaluate` and `pseq` to interfere with unrelated strictness properties.
+
+S5. Because seq# waits for all earlier actions in its
+    State#-token-thread to complete before evaluating its first
+    argument, it is (perhaps surprisingly) NOT unconditionally strict
+    in that first argument.  Making it strict in its first argument
+    would semantically permit us to re-order the eval with respect to
+    earlier actions in the State#-token-thread, undermining the
+    utility of `evaluate` for sequencing evaluation with respect to
+    side-effects.
+
+    A user who wants strictness can ask for it as easily as writing
+    `evaluate $! x` instead of `evaluate x`:
+
+    * `evaluate x` means "evaluate `x` at exactly this moment"
+    * `evaluate $! x` means "evaluate `x` at this moment /or earlier/"
+
+S6. We used to rewrite `seq# x<whnf> s` to `(# s, x #)` with the
+    reasoning that x has already been evaluated, so seq# has nothing
+    to do.  But doing so defeats the ordering that seq# provides.
+    Consider this example:
+
+       (start)
+       evaluate $! x
+
+       (inline $! and evaluate)
+       case x of !x' -> IO $ \s -> seq# x' s
+
+       (x' is whnf)
+       case x of !x' -> IO (\s -> (# s, x' #))
+
+    Note that this last expression is equivalent to `pure $! x`.  Its
+    evaluation of `x` is completely untethered to the state thread of
+    any enclosing sequence of IO actions; as such the simplifier may
+    drop the eval entirely if `x` is used strictly later in the
+    sequence of IO actions.
+
 
 Implementing seq#.  The compiler has magic for SeqOp in
-
-- GHC.Core.Opt.ConstantFold.seqRule: eliminate (seq# <whnf> s)
 
 - GHC.StgToCmm.Expr.cgExpr, and cgCase: special case for seq#
 
@@ -2111,15 +2160,14 @@ Implementing seq#.  The compiler has magic for SeqOp in
   in GHC.Core.Opt.Simplify.Iteration
 -}
 
-seqRule :: RuleM CoreExpr
-seqRule = do
-  [Type _ty_a, Type _ty_s, a, s] <- getArgs
-  guard $ exprIsHNF a
-  return $ mkCoreUnboxedTuple [s, a]
 
 -- spark# :: forall a s . a -> State# s -> (# State# s, a #)
 sparkRule :: RuleM CoreExpr
-sparkRule = seqRule -- reduce on HNF, just the same
+sparkRule = do
+  [Type _ty_a, Type _ty_s, a, s] <- getArgs
+  guard $ exprIsHNF a
+  return $ mkCoreUnboxedTuple [s, a]
+  -- reduce on HNF
   -- XXX perhaps we shouldn't do this, because a spark eliminated by
   -- this rule won't be counted as a dud at runtime?
 

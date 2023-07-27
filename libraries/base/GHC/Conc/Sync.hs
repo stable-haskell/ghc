@@ -519,19 +519,21 @@ labelThreadByteArray# (ThreadId t) str =
 --                 but 'seq' is now defined in GHC.Prim
 --
 -- "pseq" is defined a bit weirdly (see below)
---
--- The reason for the strange "lazy" call is that
--- it fools the compiler into thinking that pseq  and par are non-strict in
--- their second argument (even if it inlines pseq at the call site).
--- If it thinks pseq is strict in "y", then it often evaluates
--- "y" before "x", which is totally wrong.
-
+-- The state token threading is meant to ensure that
+-- we cannot move the eval of y before the eval of x
 {-# INLINE pseq  #-}
 pseq :: a -> b -> b
-pseq  x y = x `seq` lazy y
+pseq !x y = case seq# x realWorld# of
+  (# s, _ #) -> case seq# y s of
+    (# _, y' #) -> y'
 
 {-# INLINE par  #-}
 par :: a -> b -> b
+-- The reason for the strange "lazy" call is that
+-- it fools the compiler into thinking that  par are non-strict in
+-- their second argument (even if it inlines par at the call site).
+-- If it thinks par is strict in "y", then it often evaluates
+-- "y" before "x", which is totally wrong.
 par  x y = case (par# x) of { _ -> lazy y }
 
 -- | Internal function used by the RTS to run sparks.
