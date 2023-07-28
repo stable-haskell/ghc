@@ -1550,33 +1550,30 @@ postInlineUnconditionally env bind_cxt old_bndr bndr rhs
   | isTopLevel (bindContextLevel bind_cxt)
                                 = False -- Note [Top level and postInlineUnconditionally]
   | exprIsTrivial rhs           = True
-  | BC_Join {} <- bind_cxt              -- See point (1) of Note [Duplicating join points]
-  , not (phase == FinalPhase)   = False -- in Simplify.hs
+  | BC_Join {} <- bind_cxt      = False -- See point (1) of Note [Duplicating join points]
+                                        --     in GHC.Core.Opt.Simplify.Iteration
   | otherwise
   = case occ_info of
       OneOcc { occ_in_lam = in_lam, occ_int_cxt = int_cxt, occ_n_br = n_br }
         -- See Note [Inline small things to avoid creating a thunk]
 
-        | let not_inside_lam = in_lam == NotInsideLam
-        -> n_br < 100  -- See #23627
+        | n_br >= 100 -> False  -- See #23627
 
-           && (  (n_br == 1 && not_inside_lam)  -- See Note [Post-inline for single-use things]
-              || smallEnoughToInline uf_opts unfolding)  -- Small enough to dup
-                 -- ToDo: consider discount on smallEnoughToInline if int_cxt is true
+        | n_br == 1, NotInsideLam <- in_lam  -- One syntactic occurrence
+        -> True                              -- See Note [Post-inline for single-use things]
 
-           && (not_inside_lam ||
-                        -- Outside a lambda, we want to be reasonably aggressive
-                        -- about inlining into multiple branches of case
-                        -- e.g. let x = <non-value>
-                        --      in case y of { C1 -> ..x..; C2 -> ..x..; C3 -> ... }
-                        -- Inlining can be a big win if C3 is the hot-spot, even if
-                        -- the uses in C1, C2 are not 'interesting'
-                        -- An example that gets worse if you add int_cxt here is 'clausify'
+        | is_unlifted                        -- Unlifted binding, hence ok-for-spec
+        -> True                              -- hence cheap to inline probably just a primop
+                                             -- Not a big deal either way
 
-                (isCheapUnfolding unfolding && int_cxt == IsInteresting))
-                        -- isCheap => acceptable work duplication; in_lam may be true
-                        -- int_cxt to prevent us inlining inside a lambda without some
-                        -- good reason.  See the notes on int_cxt in preInlineUnconditionally
+        | is_demanded
+        -> False                            -- No allocation (it'll be a case expression in the end)
+                                            -- so inlining duplciates code but nothing more
+
+        | otherwise
+        -> work_ok in_lam int_cxt && smallEnoughToInline uf_opts unfolding
+              -- Multiple syntactic occurences; but lazy, and small enough to dup
+              -- ToDo: consider discount on smallEnoughToInline if int_cxt is true
 
       IAmDead -> True   -- This happens; for example, the case_bndr during case of
                         -- known constructor:  case (a,b) of x { (p,q) -> ... }
@@ -1586,11 +1583,28 @@ postInlineUnconditionally env bind_cxt old_bndr bndr rhs
       _ -> False
 
   where
-    occ_info  = idOccInfo old_bndr
-    unfolding = idUnfolding bndr
-    uf_opts   = seUnfoldingOpts env
-    phase     = sePhase env
-    active    = isActive phase (idInlineActivation bndr)
+    work_ok NotInsideLam _              = True
+    work_ok IsInsideLam  IsInteresting  = isCheapUnfolding unfolding
+    work_ok IsInsideLam  NotInteresting = False
+      -- NotInsideLam: outside a lambda, we want to be reasonably aggressive
+      -- about inlining into multiple branches of case
+      -- e.g. let x = <non-value>
+      --      in case y of { C1 -> ..x..; C2 -> ..x..; C3 -> ... }
+      -- Inlining can be a big win if C3 is the hot-spot, even if
+      -- the uses in C1, C2 are not 'interesting'
+      -- An example that gets worse if you add int_cxt here is 'clausify'
+
+      -- InsideLam: check for acceptable work duplication, using isCheapUnfoldign
+      -- int_cxt to prevent us inlining inside a lambda without some
+      -- good reason.  See the notes on int_cxt in preInlineUnconditionally
+
+    is_unlifted = isUnliftedType (idType bndr)
+    is_demanded = isStrUsedDmd (idDemandInfo bndr)
+    occ_info    = idOccInfo old_bndr
+    unfolding   = idUnfolding bndr
+    uf_opts     = seUnfoldingOpts env
+    phase       = sePhase env
+    active      = isActive phase (idInlineActivation bndr)
         -- See Note [pre/postInlineUnconditionally in gentle mode]
 
 {- Note [Inline small things to avoid creating a thunk]
