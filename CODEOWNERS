@@ -53,6 +53,9 @@
 /compiler/GHC/ThToHs.hs            @rae
 /compiler/GHC/Wasm/                @nrnrnr
 
+[Haddock]
+/utils/haddock                     @haddock
+
 [Core libraries]
 /libraries/base/                  @hvr
 /libraries/ghci/                  @simonmar
