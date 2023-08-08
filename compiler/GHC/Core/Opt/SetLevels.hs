@@ -1302,11 +1302,18 @@ lvlFloatRhs abs_vars dest_lvl env rec is_bot mb_join_arity rhs
                       = collectAnnBndrs rhs
     (env1, bndrs1)    = substBndrsSL NonRecursive env bndrs
     all_bndrs         = abs_vars ++ bndrs1
+
     (body_env, bndrs') | JoinPoint {} <- mb_join_arity
-                      = lvlJoinBndrs env1 dest_lvl rec all_bndrs
-                      | otherwise
-                      = case lvlLamBndrs env1 dest_lvl all_bndrs of
-                          (env2, bndrs') -> (placeJoinCeiling env2, bndrs')
+                       = if isTopLvl dest_lvl  -- No longer a join point
+                         then lvl_lam_bndrs (map zap_one_shot all_bndrs)
+                         else lvlJoinBndrs env1 dest_lvl rec all_bndrs
+                       | otherwise
+                       = lvl_lam_bndrs all_bndrs
+
+    zap_one_shot v | isId v    = clearOneShotLambda v
+                   | otherwise = v
+    lvl_lam_bndrs bndrs = case lvlLamBndrs env1 dest_lvl bndrs of
+                            (env2, bndrs') -> (placeJoinCeiling env2, bndrs')
         -- The important thing here is that we call lvlLamBndrs on
         -- all these binders at once (abs_vars and bndrs), so they
         -- all get the same major level.  Otherwise we create stupid
