@@ -845,7 +845,6 @@ data Token
   | ITjavascriptcallconv
   | ITmdo (Maybe FastString)
   | ITfamily
-  | ITone
   | ITrole
   | ITgroup
   | ITby
@@ -1097,7 +1096,6 @@ reservedWordsFM = listToUFM $
          ( "mdo",            ITmdo Nothing,   xbit RecursiveDoBit),
              -- See Note [Lexing type pseudo-keywords]
          ( "family",         ITfamily,        0 ),
-         ( "one",            ITone,           0),
          ( "role",           ITrole,          0 ),
          ( "pattern",        ITpattern,       xbit PatternSynonymsBit),
          ( "static",         ITstatic,        xbit StaticPointersBit ),

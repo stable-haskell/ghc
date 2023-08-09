@@ -76,7 +76,6 @@ keywordToString kw =
       AnnModule       -> "module"
       AnnNewtype      -> "newtype"
       AnnOf           -> "of"
-      AnnOne          -> "one"
       AnnOpenB        -> "(|"
       AnnOpenBU       ->  "⦇"
       AnnOpenC        -> "{"

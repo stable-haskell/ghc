@@ -356,7 +356,7 @@ pprPat (SplicePat ext splice)   =
       GhcTc -> dataConCantHappen ext
 pprPat (SigPat _ pat ty)        = ppr pat <+> dcolon <+> ppr ty
 pprPat (ListPat _ pats)         = brackets (interpp'SP pats)
-pprPat (OrPat _ pats)           = parens (pprWithBars ppr pats)
+pprPat (OrPat _ pats)           = parens (pprWithSemis ppr pats)
 pprPat (TuplePat _ pats bx)
     -- Special-case unary boxed tuples so that they are pretty-printed as
     -- `MkSolo x`, not `(x)`

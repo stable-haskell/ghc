@@ -8,11 +8,11 @@ data G a where
   G3 :: Num a => G a
 
 bar :: G a -> a
-bar (G2 | G1) = 3
+bar (G2; G1) = 3
 
 data GADT a where
     IsInt1 :: GADT Int
     IsInt2 :: GADT Int
 
 foo :: a -> GADT a -> a
-foo x (IsInt1 {} | IsInt2 {}) = x + 1
+foo x (IsInt1 {}; IsInt2 {}) = x + 1

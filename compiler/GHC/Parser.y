@@ -605,7 +605,6 @@ are the most common patterns, rewritten as regular expressions for clarity:
  'interruptible' { L _ ITinterruptible }
  'unsafe'       { L _ ITunsafe }
  'family'       { L _ ITfamily }
- 'one'          { L _ ITone }
  'role'         { L _ ITrole }
  'stdcall'      { L _ ITstdcallconv }
  'ccall'        { L _ ITccallconv }
@@ -1656,24 +1655,27 @@ role : VARID             { sL1 $1 $ Just $ getVARID $1 }
 
 -- Glasgow extension: pattern synonyms
 pattern_synonym_decl :: { LHsDecl GhcPs }
-        : 'pattern' pattern_synonym_lhs '=' pat
+        : 'pattern' pattern_synonym_lhs '=' infixpat
          {%      let (name, args, as ) = $2 in
                  acsA (\cs -> sLL $1 $> . ValD noExtField $ mkPatSynBind name args $4
                                                     ImplicitBidirectional
                       (EpAnn (glR $1) (as ++ [mj AnnPattern $1, mj AnnEqual $3]) cs)) }
 
-        | 'pattern' pattern_synonym_lhs '<-' pat
+        | 'pattern' pattern_synonym_lhs '<-' infixpat
          {%    let (name, args, as) = $2 in
                acsA (\cs -> sLL $1 $> . ValD noExtField $ mkPatSynBind name args $4 Unidirectional
                        (EpAnn (glR $1) (as ++ [mj AnnPattern $1,mu AnnLarrow $3]) cs)) }
 
-        | 'pattern' pattern_synonym_lhs '<-' pat where_decls
+        | 'pattern' pattern_synonym_lhs '<-' infixpat where_decls
             {% do { let (name, args, as) = $2
                   ; mg <- mkPatSynMatchGroup name $5
                   ; acsA (\cs -> sLL $1 $> . ValD noExtField $
                            mkPatSynBind name args $4 (ExplicitBidirectional mg)
                             (EpAnn (glR $1) (as ++ [mj AnnPattern $1,mu AnnLarrow $3]) cs))
                    }}
+
+infixpat :: { LPat GhcPs }
+infixpat : infixexp     {% (checkPattern <=< runPV) (unECP $1) }
 
 pattern_synonym_lhs :: { (LocatedN RdrName, HsPatSynDetails GhcPs, [AddEpAnn]) }
         : con vars0 { ($1, PrefixCon noTypeArgs $2, []) }
@@ -2978,15 +2980,13 @@ aexp2   :: { ECP }
                                            mkSumOrTuplePV (noAnnSrcSpan $ comb2 $1 $>) Boxed $2
                                                 [mop $1,mcp $3]}
 
-        | '(' texp '|' orpats ')'        {%
-                                          do { pat <- (checkPattern <=< runPV) (unECP $2)
-                                             ; pat1 <- addTrailingVbarA pat (getLoc $3)
-                                             ; let srcSpan = comb2 $1 $5
+        | '(' orpats ')'        {%
+                                          do { let srcSpan = comb2 $1 $3
                                              ; cs <- getCommentsFor srcSpan
-                                             ; let pat2 = OrPat (EpAnn (spanAsAnchor srcSpan) [mop $1, mcp $5] cs) (pat1:$4)
-                                             ; let pat3 = sL (noAnnSrcSpan srcSpan) pat2
-                                             ; _ <- hintOrPats pat3
-                                             ; return $ ecpFromPat pat3 }}
+                                             ; let pat = OrPat (EpAnn (spanAsAnchor srcSpan) [mop $1, mcp $3] cs) $2
+                                             ; let pat' = sL (noAnnSrcSpan srcSpan) pat
+                                             ; _ <- hintOrPats pat'
+                                             ; return $ ecpFromPat pat' }}
 
         -- This case is only possible when 'OverloadedRecordDotBit' is enabled.
         | '(' projection ')'            { ECP $
@@ -3117,10 +3117,12 @@ texp :: { ECP }
                              mkHsViewPatPV (comb2 $1 $>) $1 $3 [mu AnnRarrow $2] }
 
 orpats :: { [LPat GhcPs] }
-        : texp                  {% do
+--        : texp                  {% do
+        : exp %shift         {% do
                                  { pat1 <- (checkPattern <=< runPV) (unECP $1)
                                  ; return [pat1] }}
-        | texp '|' orpats      {% do
+--        | texp '|' orpats      {% do
+        | exp ';' orpats     {% do
                                  { pat1 <- (checkPattern <=< runPV) (unECP $1)
                                  ; pat2 <- addTrailingVbarA pat1 (getLoc $2)
                                  ; return (pat2:$3) }}
@@ -3387,9 +3389,12 @@ gdpat   :: { forall b. DisambECP b => PV (LGRHS GhcPs (LocatedA b)) }
 -- we parse them right when bang-patterns are off
 pat     :: { LPat GhcPs }
 pat     :  exp          {% (checkPattern <=< runPV) (unECP $1) }
-
-tpat     :: { LPat GhcPs }
-tpat     :  texp          {% (checkPattern <=< runPV) (unECP $1) }
+        |  pat ';' orpats   {%
+                     do { let srcSpan = comb2 (getLocA $1) (getLocA $ last $3)
+                        ; cs <- getCommentsFor srcSpan
+                        ; let orpat = sL (noAnnSrcSpan srcSpan) $ OrPat (EpAnn (spanAsAnchor srcSpan) [] cs) ($1:$3)
+                        ; _ <- hintOrPats orpat
+                        ; return $ orpat }}
 
 -- 'pats1' does the same thing as 'pat', but returns it as a singleton
 -- list so that it can be used with a parameterized production rule
@@ -3898,7 +3903,6 @@ special_id
         | 'ccall'               { sL1 $1 (fsLit "ccall") }
         | 'capi'                { sL1 $1 (fsLit "capi") }
         | 'prim'                { sL1 $1 (fsLit "prim") }
-        | 'one'                 { sL1 $1 (fsLit "one") }
         | 'javascript'          { sL1 $1 (fsLit "javascript") }
         -- See Note [%shift: special_id -> 'group']
         | 'group' %shift        { sL1 $1 (fsLit "group") }
