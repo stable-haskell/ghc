@@ -216,7 +216,7 @@ getCoreToDo dflags hpt_rule_base extra_vars
         if full_laziness then
            CoreDoFloatOutwards FloatOutSwitches {
                                  floatOutLambdas   = Just 0,
-                                 floatOutConstants = True,
+                                 floatOutConstants = False,
                                  floatOutOverSatApps = False,
                                  floatToTopLevelOnly = False }
                 -- Was: gentleFloatOutSwitches
