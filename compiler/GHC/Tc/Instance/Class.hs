@@ -62,7 +62,6 @@ import GHC.Unit.Module.Warnings
 import GHC.Hs.Extension
 
 import Language.Haskell.Syntax.Basic (FieldLabelString(..))
-import GHC.Types.Id.Info
 import GHC.Tc.Errors.Types
 import Control.Monad
 
@@ -423,7 +422,7 @@ makeLitDict clas lit_ty lit_expr
              ev_tm   = EvExpr (Let (NonRec dfun_id dfun_rhs) (Var dfun_id))
        ; return $ OneInst { cir_new_theta   = []
                           , cir_mk_ev       = \_ -> ev_tm
-                          , cir_coherence   = True
+                          , cir_canonical   = True
                           , cir_what        = BuiltinInstance } }
 
     | otherwise
