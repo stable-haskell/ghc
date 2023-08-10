@@ -737,7 +737,8 @@ lvlMFE env strict_ctxt ann_expr
 
     -- See Note [Floating to the top]
     saves_alloc =  isTopLvl dest_lvl
-                && floatConsts env
+                && (floatConsts env || is_function)   -- Always float constant lambdas
+                                                      -- T5237 is a good example
                 && (   not strict_ctxt                     -- (a)
                     || exprIsHNF expr                      -- (b)
                     || (is_bot_lam && escapes_value_lam))  -- (c)
@@ -1173,7 +1174,8 @@ lvlBind env (AnnNonRec bndr rhs)
     is_join       = isJoinPoint mb_join_arity
 
 lvlBind env (AnnRec pairs)
-  |  floatTopLvlOnly env && not (isTopLvl dest_lvl)
+  |  pprTrace "lvlBind" (ppr (map fst pairs) $$ ppr dest_lvl $$ ppr (profitableFloat env dest_lvl)) $
+     floatTopLvlOnly env && not (isTopLvl dest_lvl)
          -- Only floating to the top level is allowed.
   || not (profitableFloat env dest_lvl)
   || (isTopLvl dest_lvl && any (mightBeUnliftedType . idType) bndrs)
@@ -1267,7 +1269,9 @@ lvlBind env (AnnRec pairs)
 profitableFloat :: LevelEnv -> Level -> Bool
 profitableFloat env dest_lvl
   =  (dest_lvl `ltMajLvl` le_ctxt_lvl env)  -- Escapes a value lambda
-  || (isTopLvl dest_lvl && floatConsts env) -- Going all the way to top level
+  || (isTopLvl dest_lvl)                    -- Going all the way to top level
+          -- Float to top even if floatConsts=False; this is a
+          -- let-binding anyway, so it doesn't create a new binding
 
 
 ----------------------------------------------------
