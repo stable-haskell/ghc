@@ -1175,8 +1175,7 @@ lvlBind env (AnnNonRec bndr rhs)
     is_join       = isJoinPoint mb_join_arity
 
 lvlBind env (AnnRec pairs)
-  |  pprTrace "lvlBind" (ppr (map fst pairs) $$ ppr dest_lvl $$ ppr (profitableFloat env dest_lvl)) $
-     floatTopLvlOnly env && not (isTopLvl dest_lvl)
+  |  floatTopLvlOnly env && not (isTopLvl dest_lvl)
          -- Only floating to the top level is allowed.
   || not (profitableFloat env dest_lvl)
   || (isTopLvl dest_lvl && any (mightBeUnliftedType . idType) bndrs)
