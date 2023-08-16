@@ -445,7 +445,8 @@ a `finally` sequel =
 --
 -- > evaluate (error "foo") >> error "bar"
 --
--- is guaranteed to throw @"foo"@.
+-- is guaranteed to throw @"foo"@. (TODO: I think we have /never/
+-- actually guaranteed this.  Do users expect it?)
 --
 -- The rule of thumb is to use 'evaluate' to force or handle exceptions in
 -- lazy values. If, on the other hand, you are forcing a lazy value for

@@ -1,7 +1,6 @@
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE MagicHash #-}
 {-# LANGUAGE NoImplicitPrelude #-}
-{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE UnboxedTuples #-}
 {-# LANGUAGE UnliftedFFITypes #-}
@@ -516,26 +515,38 @@ labelThreadByteArray# :: ThreadId -> ByteArray# -> IO ()
 labelThreadByteArray# (ThreadId t) str =
     IO $ \s -> case labelThread# t str s of s1 -> (# s1, () #)
 
+-- | @'pseq' x y@ evaluates @x@ and then evaluates @y@, in that order.
+-- If @x@ does not throw an exception, it returns @y@.
+--
+-- Note that if @y@ is used strictly by some other component of a
+-- larger expression, it may happen that @y@ gets evaluated by that
+-- other component before @pseq x y@ gets the chance to evaluate
+-- either @x@ or @y@.  For example, @pseq x y + y@ may evaluate @y@ as
+-- the second argument of @(+)@ before it evaluates @x@.
+{-# INLINE pseq  #-}
+pseq :: a -> b -> b
 --      Nota Bene: 'pseq' used to be 'seq'
 --                 but 'seq' is now defined in GHC.Prim
 --
 -- "pseq" is defined a bit weirdly (see below)
--- The state token threading is meant to ensure that
--- we cannot move the eval of y before the eval of x
-{-# INLINE pseq  #-}
-pseq :: a -> b -> b
-pseq !x y = case seq# x realWorld# of
+-- The state token threading is ensures that we
+-- cannot move the eval of y before the eval of x.
+-- See also Note [seq# magic] wrinkle S2.
+--
+-- Because `seq#` is considered lazy we also explicitly
+-- make pseq strict in its first argument with (no-hash) seq.
+-- But it must be lazy in its second arg! See wrinkle S3.
+pseq x y = x `seq` case seq# x realWorld# of
   (# s, _ #) -> case seq# y s of
-    (# _, y' #) -> y'
+    (# _, y' #) -> y' -- We must use y' rather than y here, to stay lazy.
 
 {-# INLINE par  #-}
 par :: a -> b -> b
--- The reason for the strange "lazy" call is that
--- it fools the compiler into thinking that  par are non-strict in
--- their second argument (even if it inlines par at the call site).
--- If it thinks par is strict in "y", then it often evaluates
--- "y" before "x", which is totally wrong.
-par  x y = case (par# x) of { _ -> lazy y }
+-- FIXME: par, par#, spark# all have no Haddocks
+-- TODO: Does this even make sense?
+par x y = case (spark# x realWorld#) of
+  (# s, _ #) -> case seq# y s of
+    (# _, y' #) -> y' -- We must use y' rather than y here, to stay lazy.
 
 -- | Internal function used by the RTS to run sparks.
 runSparks :: IO ()
