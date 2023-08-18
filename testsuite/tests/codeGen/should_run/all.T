@@ -248,4 +248,4 @@ test('MulMayOflo_full',
 test('CCallConv',
      [],
      multi_compile_and_run,
-     ['CCallConv', [('CCallConv_cmm.cmm', ''), ('CCallConv_c.c', '')], ''])
+     ['CCallConv', [('CCallConv_c.c', '')], ''])
