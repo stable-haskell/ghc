@@ -43,7 +43,6 @@ import GHC.Types.Literal
 import GHC.Builtin.PrimOps
 import GHC.Builtin.PrimOps.Ids (primOpId)
 import GHC.Core.Type
-import GHC.Core.TyCo.Compare (eqType)
 import GHC.Types.RepType
 import GHC.Core.DataCon
 import GHC.Core.TyCon
@@ -58,7 +57,7 @@ import GHC.Data.FastString
 import GHC.Utils.Panic
 import GHC.Utils.Panic.Plain
 import GHC.Utils.Exception (evaluate)
-import GHC.StgToCmm.Closure ( NonVoid(..), fromNonVoid, nonVoidIds, argPrimRep )
+import GHC.StgToCmm.Closure ( NonVoid(..), fromNonVoid, nonVoidIds, argPrimRep, idPrimRep)
 import GHC.StgToCmm.Layout
 import GHC.Runtime.Heap.Layout hiding (WordOff, ByteOff, wordsToBytes)
 import GHC.Data.Bitmap
@@ -93,6 +92,8 @@ import Data.Either ( partitionEithers )
 import GHC.Stg.Syntax
 import qualified Data.IntSet as IntSet
 import GHC.CoreToIface
+import GHC.Types.Var.Env (IdEnv, mkVarEnv, lookupVarEnv)
+import GHC.StgToCmm.Types (LambdaFormInfo(LFCon))
 
 -- -----------------------------------------------------------------------------
 -- Generating byte code for a complete module
@@ -118,9 +119,10 @@ byteCodeGen hsc_env this_mod binds tycs mb_modBreaks
             flattenBind (StgRec bs)     = bs
         stringPtrs <- allocateTopStrings interp strings
 
+        let flattened_binds = concatMap flattenBind (reverse lifted_binds)
+
         (BcM_State{..}, proto_bcos) <-
-           runBc hsc_env this_mod mb_modBreaks $ do
-             let flattened_binds = concatMap flattenBind (reverse lifted_binds)
+           runBc hsc_env this_mod mb_modBreaks (mkVarEnv (getDcs flattened_binds)) $ do
              mapM schemeTopBind flattened_binds
 
         when (notNull ffis)
@@ -149,6 +151,11 @@ byteCodeGen hsc_env this_mod binds tycs mb_modBreaks
         logger  = hsc_logger hsc_env
         interp  = hscInterp hsc_env
         profile = targetProfile dflags
+
+getDcs :: [(Id, CgStgRhs)] -> [(Id, DataCon)]
+getDcs ((id, StgRhsCon _ dc _ _ _ _) : xs) = (id, dc) : getDcs xs
+getDcs (_ : xs) = getDcs xs
+getDcs [] = []
 
 -- | see Note [Generating code for top-level string literal bindings]
 allocateTopStrings
@@ -1861,9 +1868,18 @@ pushAtom d p (StgVarArg var)
 
           Nothing
             -- see Note [Generating code for top-level string literal bindings]
-            | isUnliftedType (idType var) -> do
-              massert (idType var `eqType` addrPrimTy)
+            | idPrimRep var == AddrRep -> do
               return (unitOL (PUSH_ADDR (getName var)), szb)
+
+            | idPrimRep var == BoxedRep (Just Unlifted) -> do
+              mayDc <- lookupDc var
+              case mayDc of
+                Nothing ->
+                  case idLFInfo_maybe var of
+                    Nothing -> pprPanic "pushAtom: unlifted external id without LFInfo" (ppr var)
+                    Just (LFCon dc) -> return (unitOL (PUSH_TAGGED (getName var) dc), szb)
+                    Just{} -> pprPanic "pushAtom: expected LFCon" (ppr var)
+                Just dc -> return (unitOL (PUSH_TAGGED (getName var) dc), szb)
 
             | otherwise -> do
               return (unitOL (PUSH_G (getName var)), szb)
@@ -2230,6 +2246,7 @@ data BcM_State
                                          -- Should be free()d when it is GCd
         , modBreaks   :: Maybe ModBreaks -- info about breakpoints
         , breakInfo   :: IntMap CgBreakInfo
+        , bcm_dcs     :: IdEnv DataCon
         }
 
 newtype BcM r = BcM (BcM_State -> IO (BcM_State, r)) deriving (Functor)
@@ -2239,11 +2256,11 @@ ioToBc io = BcM $ \st -> do
   x <- io
   return (st, x)
 
-runBc :: HscEnv -> Module -> Maybe ModBreaks
+runBc :: HscEnv -> Module -> Maybe ModBreaks -> IdEnv DataCon
       -> BcM r
       -> IO (BcM_State, r)
-runBc hsc_env this_mod modBreaks (BcM m)
-   = m (BcM_State hsc_env this_mod 0 [] modBreaks IntMap.empty)
+runBc hsc_env this_mod modBreaks dcs (BcM m)
+   = m (BcM_State hsc_env this_mod 0 [] modBreaks IntMap.empty dcs)
 
 thenBc :: BcM a -> (a -> BcM b) -> BcM b
 thenBc (BcM expr) cont = BcM $ \st0 -> do
@@ -2317,3 +2334,6 @@ getCurrentModBreaks = BcM $ \st -> return (st, modBreaks st)
 
 tickFS :: FastString
 tickFS = fsLit "ticked"
+
+lookupDc :: Id -> BcM (Maybe DataCon)
+lookupDc id = BcM $ \st -> pure (st, lookupVarEnv (bcm_dcs st) id)
