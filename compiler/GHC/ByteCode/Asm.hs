@@ -73,7 +73,7 @@ bcoFreeNames :: UnlinkedBCO -> UniqDSet Name
 bcoFreeNames bco
   = bco_refs bco `uniqDSetMinusUniqSet` mkNameSet [unlinkedBCOName bco]
   where
-    bco_refs (UnlinkedBCO _ _ _ _ nonptrs ptrs)
+    bco_refs (UnlinkedBCO _ _ _ _ nonptrs ptrs _)
         = unionManyUniqDSets (
              mkUniqDSet [ n | BCOPtrName n <- ssElts ptrs ] :
              mkUniqDSet [ n | BCONPtrItbl n <- ssElts nonptrs ] :
@@ -182,7 +182,8 @@ assembleBCO platform (ProtoBCO { protoBCOName       = nm
                              , protoBCOInstrs     = instrs
                              , protoBCOBitmap     = bitmap
                              , protoBCOBitmapSize = bsize
-                             , protoBCOArity      = arity }) = do
+                             , protoBCOArity      = arity
+                             , protoBCOIsStatic   = static }) = do
   -- pass 1: collect up the offsets of the local labels.
   let asm = mapM_ (assembleI platform) instrs
 
@@ -219,7 +220,7 @@ assembleBCO platform (ProtoBCO { protoBCOName       = nm
   let asm_insns = ssElts final_insns
       insns_arr = Array.listArray (0, fromIntegral n_insns - 1) asm_insns
       bitmap_arr = mkBitmapArray bsize bitmap
-      ul_bco = UnlinkedBCO nm arity insns_arr bitmap_arr final_lits final_ptrs
+      ul_bco = UnlinkedBCO nm arity insns_arr bitmap_arr final_lits final_ptrs static
 
   -- 8 Aug 01: Finalisers aren't safe when attached to non-primitive
   -- objects, since they might get run too early.  Disable this until

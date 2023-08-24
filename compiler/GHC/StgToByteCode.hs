@@ -252,9 +252,10 @@ mkProtoBCO
    -> WordOff   -- ^ bitmap size
    -> [StgWord] -- ^ bitmap
    -> Bool      -- ^ True <=> is a return point, rather than a function
+   -> Bool      -- ^ Should this BCO be statically evaluated?
    -> [FFIInfo]
    -> ProtoBCO name
-mkProtoBCO platform nm instrs_ordlist origin arity bitmap_size bitmap is_ret ffis
+mkProtoBCO platform nm instrs_ordlist origin arity bitmap_size bitmap is_ret static ffis
    = ProtoBCO {
         protoBCOName = nm,
         protoBCOInstrs = maybe_with_stack_check,
@@ -262,6 +263,7 @@ mkProtoBCO platform nm instrs_ordlist origin arity bitmap_size bitmap is_ret ffi
         protoBCOBitmapSize = fromIntegral bitmap_size,
         protoBCOArity = arity,
         protoBCOExpr = origin,
+        protoBCOIsStatic = static,
         protoBCOFFIs = ffis
       }
      where
@@ -329,10 +331,12 @@ schemeTopBind (id, rhs)
         -- for the worker itself, we must allocate it directly.
     -- ioToBc (putStrLn $ "top level BCO")
     emitBc (mkProtoBCO platform (getName id) (toOL [PACK data_con 0, RETURN P])
-                       (Right rhs) 0 0 [{-no bitmap-}] False{-not alts-})
+                       (Right rhs) 0 0 [{-no bitmap-}] False{-no alts-} True{-static-})
 
   | otherwise
-  = schemeR [{- No free variables -}] (getName id, rhs)
+  = case rhs of
+      StgRhsCon{} -> schemeR_wrk [{- No free variables -}] id rhs (collect rhs) True{-static-}
+      _ -> schemeR [{- No free variables -}] (id, rhs)
 
 
 -- -----------------------------------------------------------------------------
@@ -349,10 +353,10 @@ schemeTopBind (id, rhs)
 schemeR :: [Id]                 -- Free vars of the RHS, ordered as they
                                 -- will appear in the thunk.  Empty for
                                 -- top-level things, which have no free vars.
-        -> (Name, CgStgRhs)
+        -> (Id, CgStgRhs)
         -> BcM (ProtoBCO Name)
-schemeR fvs (nm, rhs)
-   = schemeR_wrk fvs nm rhs (collect rhs)
+schemeR fvs (id, rhs)
+   = schemeR_wrk fvs id rhs (collect rhs) False
 
 -- If an expression is a lambda, return the
 -- list of arguments to the lambda (in R-to-L order) and the
@@ -364,11 +368,12 @@ collect (StgRhsCon _cc dc cnum _ticks args _typ) = ([], StgConApp dc cnum args [
 
 schemeR_wrk
     :: [Id]
-    -> Name
+    -> Id
     -> CgStgRhs            -- expression e, for debugging only
     -> ([Var], CgStgExpr)  -- result of collect on e
+    -> Bool                -- static?
     -> BcM (ProtoBCO Name)
-schemeR_wrk fvs nm original_body (args, body)
+schemeR_wrk fvs id original_body (args, body) static
    = do
      profile <- getProfile
      let
@@ -391,8 +396,8 @@ schemeR_wrk fvs nm original_body (args, body)
          bitmap = mkBitmap platform bits
      body_code <- schemeER_wrk sum_szsb_args p_init body
 
-     emitBc (mkProtoBCO platform nm body_code (Right original_body)
-                 arity bitmap_size bitmap False{-not alts-})
+     emitBc (mkProtoBCO platform (getName id) body_code (Right original_body)
+                 arity bitmap_size bitmap False{-not alts-} static)
 
 -- | Introduce break instructions for ticked expressions.
 -- If no breakpoint information is available, the instruction is omitted.
@@ -644,7 +649,7 @@ schemeE d s p (StgLet _ext binds body) = do
                      _other -> False
 
          compile_bind d' fvs x (rhs::CgStgRhs) size arity off = do
-                bco <- schemeR fvs (getName x,rhs)
+                bco <- schemeR fvs (x,rhs)
                 build_thunk d' fvs size bco off arity
 
          compile_binds =
@@ -1084,7 +1089,7 @@ doCase d s p scrut bndr alts
      let
          alt_bco_name = getName bndr
          alt_bco = mkProtoBCO platform alt_bco_name alt_final (Left alts)
-                       0{-no arity-} bitmap_size bitmap True{-is alts-}
+                       0{-no arity-} bitmap_size bitmap True{-is alts-} False
      scrut_code <- schemeE (d + ret_frame_size_b + save_ccs_size_b)
                            (d + ret_frame_size_b + save_ccs_size_b)
                            p scrut
@@ -1294,7 +1299,7 @@ Note [unboxed tuple bytecodes and tuple_BCO]
 tupleBCO :: Platform -> NativeCallInfo -> [(PrimRep, ByteOff)] -> [FFIInfo] -> ProtoBCO Name
 tupleBCO platform args_info args =
   mkProtoBCO platform invented_name body_code (Left [])
-             0{-no arity-} bitmap_size bitmap False{-is alts-}
+             0{-no arity-} bitmap_size bitmap False{-is alts-} False
   where
     {-
       The tuple BCO is never referred to by name, so we can get away
@@ -1315,7 +1320,7 @@ tupleBCO platform args_info args =
 primCallBCO ::  Platform -> NativeCallInfo -> [(PrimRep, ByteOff)] -> [FFIInfo] -> ProtoBCO Name
 primCallBCO platform args_info args =
   mkProtoBCO platform invented_name body_code (Left [])
-             0{-no arity-} bitmap_size bitmap False{-is alts-}
+             0{-no arity-} bitmap_size bitmap False{-is alts-} False
   where
     {-
       The primcall BCO is never referred to by name, so we can get away

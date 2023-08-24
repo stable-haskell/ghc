@@ -155,7 +155,8 @@ data UnlinkedBCO
         unlinkedBCOInstrs :: !(UArray Int Word16),      -- insns
         unlinkedBCOBitmap :: !(UArray Int Word64),      -- bitmap
         unlinkedBCOLits   :: !(SizedSeq BCONPtr),       -- non-ptrs
-        unlinkedBCOPtrs   :: !(SizedSeq BCOPtr)         -- ptrs
+        unlinkedBCOPtrs   :: !(SizedSeq BCOPtr),        -- ptrs
+        unlinkedBCOIsStatic :: !Bool
    }
 
 instance NFData UnlinkedBCO where
@@ -208,10 +209,11 @@ seqCgBreakInfo CgBreakInfo{..} =
     rnf cgb_resty
 
 instance Outputable UnlinkedBCO where
-   ppr (UnlinkedBCO nm _arity _insns _bitmap lits ptrs)
-      = sep [text "BCO", ppr nm, text "with",
-             ppr (sizeSS lits), text "lits",
-             ppr (sizeSS ptrs), text "ptrs" ]
+   ppr (UnlinkedBCO nm _arity _insns _bitmap lits ptrs static)
+      = sep $ [text "BCO", ppr nm, text "with",
+               ppr (sizeSS lits), text "lits",
+               ppr (sizeSS ptrs), text "ptrs"]
+               ++ [text "static" | static]
 
 instance Outputable CgBreakInfo where
    ppr info = text "CgBreakInfo" <+>

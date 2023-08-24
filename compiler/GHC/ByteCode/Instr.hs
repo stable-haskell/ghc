@@ -46,6 +46,7 @@ data ProtoBCO a
         protoBCOArity      :: Int,
         -- what the BCO came from, for debugging only
         protoBCOExpr       :: Either [CgStgAlt] CgStgRhs,
+        protoBCOIsStatic   :: Bool,
         -- malloc'd pointers
         protoBCOFFIs       :: [FFIInfo]
    }
@@ -222,9 +223,9 @@ instance Outputable a => Outputable (ProtoBCO a) where
                  , protoBCOBitmapSize = bsize
                  , protoBCOArity      = arity
                  , protoBCOExpr       = origin
-                 , protoBCOFFIs       = ffis })
-      = (text "ProtoBCO" <+> ppr name <> char '#' <> int arity
-                <+> text (show ffis) <> colon)
+                 , protoBCOFFIs       = ffis
+                 , protoBCOIsStatic   = static })
+      = hsep ([text "ProtoBCO", ppr name <> char '#' <> int arity, text (show ffis)] ++ [text "static" | static]) <> colon
         $$ nest 3 (case origin of
                       Left alts ->
                         vcat (zipWith (<+>) (char '{' : repeat (char ';'))
