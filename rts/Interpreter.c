@@ -1299,9 +1299,6 @@ run_BCO:
 
         case bci_PUSH_G: {
             W_ o1 = BCO_GET_LARGE_ARG;
-            IF_DEBUG(interpreter,
-                     debugBelch("PUSH_G %ld\n", o1);
-                );
             SpW(-1) = BCO_PTR(o1);
             Sp_subW(1);
             goto nextInsn;
@@ -1310,9 +1307,6 @@ run_BCO:
         case bci_PUSH_TAGGED: {
             W_ o1 = BCO_GET_LARGE_ARG;
             W_ o_itbl = BCO_GET_LARGE_ARG;
-            IF_DEBUG(interpreter,
-                     debugBelch("PUSH_TAGGED %ld %ld\n", o1, o_itbl);
-                );
             StgInfoTable* itbl = INFO_PTR_TO_STRUCT((StgInfoTable *)BCO_LIT(o_itbl));
             SpW(-1) = (W_)tagPtr((StgClosure *)BCO_PTR(o1), itbl);
             Sp_subW(1);
@@ -1695,9 +1689,6 @@ run_BCO:
             W_ i;
             W_ o_itbl         = BCO_GET_LARGE_ARG;
             W_ n_words        = BCO_GET_LARGE_ARG;
-            IF_DEBUG(interpreter,
-                     debugBelch("PACK %ld %ld\n", o_itbl, n_words);
-                );
             StgInfoTable* itbl = INFO_PTR_TO_STRUCT((StgInfoTable *)BCO_LIT(o_itbl));
             int request        = CONSTR_sizeW( itbl->layout.payload.ptrs,
                                                itbl->layout.payload.nptrs );
