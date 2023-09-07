@@ -217,4 +217,3 @@ test('T21843e', normal, compile_fail, [''])
 test('T21843f', normal, compile_fail, [''])
 
 test('Or1', normal, compile_fail, [''])
-test('Or2', normal, compile_fail, [''])

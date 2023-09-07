@@ -3124,7 +3124,7 @@ orpats :: { [LPat GhcPs] }
 --        | texp '|' orpats      {% do
         | exp ';' orpats     {% do
                                  { pat1 <- (checkPattern <=< runPV) (unECP $1)
-                                 ; pat2 <- addTrailingVbarA pat1 (getLoc $2)
+                                 ; pat2 <- addTrailingSemiA pat1 (getLoc $2)
                                  ; return (pat2:$3) }}
 
 -- Always at least one comma or bar.
@@ -3392,7 +3392,8 @@ pat     :  exp          {% (checkPattern <=< runPV) (unECP $1) }
         |  pat ';' orpats   {%
                      do { let srcSpan = comb2 (getLocA $1) (getLocA $ last $3)
                         ; cs <- getCommentsFor srcSpan
-                        ; let orpat = sL (noAnnSrcSpan srcSpan) $ OrPat (EpAnn (spanAsAnchor srcSpan) [] cs) ($1:$3)
+                        ; pat1 <- addTrailingSemiA $1 (getLoc $2)
+                        ; let orpat = sL (noAnnSrcSpan srcSpan) $ OrPat (EpAnn (spanAsAnchor srcSpan) [] cs) (pat1:$3)
                         ; _ <- hintOrPats orpat
                         ; return $ orpat }}
 

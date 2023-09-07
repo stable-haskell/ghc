@@ -19,24 +19,24 @@ main = do
 f1 x = case x of
   3 -> 1
   4 -> 2
-  (3|4|5) -> 3
+  3;4;5 -> 3
 
 f2 y = case y of
-  (_:2:_ | 1:_) | length y /= 2 -> 1
-  ([1,2] | 1:3:_)-> 2
-  (_ | _) -> 3
+  (_:2:_ ; 1:_) | length y /= 2 -> 1
+  ([1,2] ; 1:3:_)-> 2
+  _ ; _ -> 3
 
 f3 :: (Eq a, Show a) => a -> a -> Bool
-f3 a ((== a) -> True | show -> "8") = True
+f3 a (((== a) -> True) ; (show -> "8")) = True
 f3 _ _ = False
 
-a3 = (\(1 | 2) -> 3) 1
-a4 = (\(Left 0 | Right 1) -> True) (Right 1)
-a5 = (\(([1] | [2, _]) | ([3, _, _] | [4, _, _, _])) -> True) [4, undefined, undefined, undefined]
-a6 = (\(1 | 2 | 3) -> False) 3
+a3 = (\(1 ; 2) -> 3) 1
+a4 = (\(Left 0 ; Right 1) -> True) (Right 1)
+a5 = (\(([1] ; [2, _]) ; ([3, _, _] ; [4, _, _, _])) -> True) [4, undefined, undefined, undefined]
+a6 = (\(1 ; 2 ; 3) -> False) 3
 
 backtrack :: String
 backtrack = case (True, error "backtracking") of
-  ((True, _) | (_, True))
+  ((True, _) ; (_, True))
     | False -> error "inaccessible"
   _ -> error "no backtracking"
