@@ -2,7 +2,7 @@ Linear types
 ============
 
 .. extension:: LinearTypes
-    :shortdesc: Enable linear types.
+    :shortdesc: Allow linear arrow types.
 
     :since: 9.0.1
     :status: Experimental

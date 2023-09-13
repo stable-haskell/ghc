@@ -3,11 +3,10 @@
 Rebindable syntax and the implicit Prelude import
 -------------------------------------------------
 
-.. extension:: NoImplicitPrelude
-    :shortdesc: Don't implicitly ``import Prelude``.
-        Implied by :extension:`RebindableSyntax`.
+.. extension:: ImplicitPrelude
+    :shortdesc: Implicitly import ``Prelude``.
 
-    :implied by: :extension:`RebindableSyntax`
+    :implied by: :extension:`RebindableSyntax` implies :extension:`NoImplicitPrelude`.
     :since: 6.8.1
 
     Don't import ``Prelude`` by default.
@@ -17,8 +16,7 @@ you. If you'd rather it didn't, then give it a ``-XNoImplicitPrelude``
 option. The idea is that you can then import a Prelude of your own.
 
 .. extension:: RebindableSyntax
-    :shortdesc: Employ rebindable syntax.
-        Implies :extension:`NoImplicitPrelude`.
+    :shortdesc: Allow rebinding of builtin syntax.
 
     :implies: :extension:`NoImplicitPrelude`
     :since: 7.0.1
@@ -163,7 +161,7 @@ Postfix operators
 -----------------
 
 .. extension:: PostfixOperators
-    :shortdesc: Enable postfix operators.
+    :shortdesc: Allow the use of postfix operators.
 
     :since: 7.10.1
     :status: Included in :extension:`GHC2021`
