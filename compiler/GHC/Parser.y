@@ -1655,27 +1655,24 @@ role : VARID             { sL1 $1 $ Just $ getVARID $1 }
 
 -- Glasgow extension: pattern synonyms
 pattern_synonym_decl :: { LHsDecl GhcPs }
-        : 'pattern' pattern_synonym_lhs '=' infixpat
+        : 'pattern' pattern_synonym_lhs '=' pat_syn_pat
          {%      let (name, args, as ) = $2 in
                  acsA (\cs -> sLL $1 $> . ValD noExtField $ mkPatSynBind name args $4
                                                     ImplicitBidirectional
                       (EpAnn (glR $1) (as ++ [mj AnnPattern $1, mj AnnEqual $3]) cs)) }
 
-        | 'pattern' pattern_synonym_lhs '<-' infixpat
+        | 'pattern' pattern_synonym_lhs '<-' pat_syn_pat
          {%    let (name, args, as) = $2 in
                acsA (\cs -> sLL $1 $> . ValD noExtField $ mkPatSynBind name args $4 Unidirectional
                        (EpAnn (glR $1) (as ++ [mj AnnPattern $1,mu AnnLarrow $3]) cs)) }
 
-        | 'pattern' pattern_synonym_lhs '<-' infixpat where_decls
+        | 'pattern' pattern_synonym_lhs '<-' pat_syn_pat where_decls
             {% do { let (name, args, as) = $2
                   ; mg <- mkPatSynMatchGroup name $5
                   ; acsA (\cs -> sLL $1 $> . ValD noExtField $
                            mkPatSynBind name args $4 (ExplicitBidirectional mg)
                             (EpAnn (glR $1) (as ++ [mj AnnPattern $1,mu AnnLarrow $3]) cs))
                    }}
-
-infixpat :: { LPat GhcPs }
-infixpat : infixexp     {% (checkPattern <=< runPV) (unECP $1) }
 
 pattern_synonym_lhs :: { (LocatedN RdrName, HsPatSynDetails GhcPs, [AddEpAnn]) }
         : con vars0 { ($1, PrefixCon noTypeArgs $2, []) }
@@ -3387,8 +3384,12 @@ gdpat   :: { forall b. DisambECP b => PV (LGRHS GhcPs (LocatedA b)) }
 --      e.g.  "!x" or "!(x,y)" or "C a b" etc
 -- Bangs inside are parsed as infix operator applications, so that
 -- we parse them right when bang-patterns are off
+
+pat_syn_pat :: { LPat GhcPs }
+pat_syn_pat :  exp          {% (checkPattern <=< runPV) (unECP $1) }
+
 pat     :: { LPat GhcPs }
-pat     :  exp          {% (checkPattern <=< runPV) (unECP $1) }
+pat     :  pat_syn_pat      { $1 }
         |  pat ';' orpats   {%
                      do { let srcSpan = comb2 (getLocA $1) (getLocA $ last $3)
                         ; cs <- getCommentsFor srcSpan
