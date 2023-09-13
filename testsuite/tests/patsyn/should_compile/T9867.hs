@@ -2,4 +2,4 @@
 
 module T9867 where
 
-pattern Nil = ([] :: [a])
+pattern Nil = [] :: [a]

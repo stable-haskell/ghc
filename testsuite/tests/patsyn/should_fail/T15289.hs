@@ -2,4 +2,4 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 module Oops where
 
-pattern What = (True :: Maybe)
+pattern What = True :: Maybe

@@ -132,16 +132,16 @@ pattern QNaN    = Half 0x7fff
 pattern SNaN    = Half 0x7dff
 
 -- | Smallest positive half
-pattern HALF_MIN = (5.96046448e-08 :: Half)
+pattern HALF_MIN = 5.96046448e-08 :: Half 
 
 -- | Smallest positive normalized half
-pattern HALF_NRM_MIN = (6.10351562e-05 :: Half)
+pattern HALF_NRM_MIN = 6.10351562e-05 :: Half
 
 -- | Largest positive half
-pattern HALF_MAX = (65504.0 :: Half)
+pattern HALF_MAX = 65504.0 :: Half
 
 -- | Smallest positive e for which half (1.0 + e) != half (1.0)
-pattern HALF_EPSILON = (0.00097656 :: Half)
+pattern HALF_EPSILON = 0.00097656 :: Half
 
 -- | Number of base 10 digits that can be represented without change
 pattern HALF_DIG = 2 

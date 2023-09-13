@@ -3,4 +3,4 @@
 
 module T22326_fail_patsyn where
 
-pattern MyPat = (type Int)
+pattern MyPat = type Int
