@@ -642,7 +642,7 @@ lvlMFE env strict_ctxt e@(_, AnnCase {})
   | strict_ctxt       -- Don't share cases in a strict context
   = lvlExpr env e     -- See Note [Case MFEs]
 
-lvlMFE env strict_ctxt ann_expr
+lvlMFE env _strict_ctxt ann_expr
   |  floatTopLvlOnly env && not (isTopLvl dest_lvl)
          -- Only floating to the top level is allowed.
   || hasFreeJoin env fvs   -- If there is a free join, don't float
@@ -741,7 +741,7 @@ lvlMFE env strict_ctxt ann_expr
 
     -- See Note [Floating to the top]
     saves_alloc =  isTopLvl dest_lvl
-                && (  (is_bot_lam && not strict_ctxt)
+                && (  (is_bot_lam && escapes_value_lam)
                    || (exprIsExpandable expr && not (is_con_app expr)) )
 {-
                 && (floatConsts env || is_function || is_bot_lam)
@@ -1616,8 +1616,10 @@ addLvls dest_lvl env vs = foldl' (addLvl dest_lvl) env vs
 floatLams :: LevelEnv -> Maybe Int
 floatLams le = floatOutLambdas (le_switches le)
 
+{-
 floatConsts :: LevelEnv -> Bool
 floatConsts le = floatOutConstants (le_switches le)
+-}
 
 floatOverSat :: LevelEnv -> Bool
 floatOverSat le = floatOutOverSatApps (le_switches le)
