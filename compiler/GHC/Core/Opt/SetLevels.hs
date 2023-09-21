@@ -735,14 +735,22 @@ lvlMFE env strict_ctxt ann_expr
     escapes_value_lam = dest_lvl `ltMajLvl` (le_ctxt_lvl env)
                   -- See Note [Escaping a value lambda]
 
+    is_con_app (Cast e _) = is_con_app e
+    is_con_app (Var v)    = isDataConWorkId v
+    is_con_app e          = False
+
     -- See Note [Floating to the top]
     saves_alloc =  isTopLvl dest_lvl
+                && (  (is_bot_lam && not strict_ctxt)
+                   || (exprIsExpandable expr && not (is_con_app expr)) )
+{-
                 && (floatConsts env || is_function || is_bot_lam)
                             -- Always float constant lambdas
                             -- T5237 is a good example
                 && (   not strict_ctxt                     -- (a)
                     || exprIsExpandable expr               -- (b)
                     || (is_bot_lam && escapes_value_lam))  -- (c)
+-}
 
 hasFreeJoin :: LevelEnv -> DVarSet -> Bool
 -- Has a free join point which is not being floated to top level.
