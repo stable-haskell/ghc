@@ -736,6 +736,7 @@ lvlMFE env _strict_ctxt ann_expr
                   -- See Note [Escaping a value lambda]
 
     is_con_app (Cast e _) = is_con_app e
+    is_con_app (App f _)  = is_con_app f
     is_con_app (Var v)    = isDataConWorkId v
     is_con_app _          = False
 
