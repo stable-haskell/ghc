@@ -594,6 +594,7 @@ Library
         GHC.Parser.Header
         GHC.Parser.Lexer
         GHC.Parser.HaddockLex
+        GHC.Parser.PreProcess
         GHC.Parser.PostProcess
         GHC.Parser.PostProcess.Haddock
         GHC.Parser.Types

@@ -985,6 +985,7 @@ dynamic_flags_deps = [
     make_dep_flag defFlag "n" (NoArg $ return ())
         "The -n flag is deprecated and no longer has any effect"
   , make_ord_flag defFlag "cpp"      (NoArg (setExtensionFlag LangExt.Cpp))
+  , make_ord_flag defFlag "ghc-cpp"  (NoArg (setExtensionFlag LangExt.GhcCpp))
   , make_ord_flag defFlag "F"        (NoArg (setGeneralFlag Opt_Pp))
   , (Deprecated, defFlag "#include"
       (HasArg (\_s ->
@@ -2613,6 +2614,7 @@ xFlagsDeps = [
   flagSpec "BinaryLiterals"                   LangExt.BinaryLiterals,
   flagSpec "CApiFFI"                          LangExt.CApiFFI,
   flagSpec "CPP"                              LangExt.Cpp,
+  flagSpec "GhcCPP"                           LangExt.GhcCpp,
   flagSpec "CUSKs"                            LangExt.CUSKs,
   flagSpec "ConstrainedClassMethods"          LangExt.ConstrainedClassMethods,
   flagSpec "ConstraintKinds"                  LangExt.ConstraintKinds,

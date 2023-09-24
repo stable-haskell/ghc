@@ -58,6 +58,7 @@ module GHC.Parser.Lexer (
    Token(..), lexer, lexerDbg,
    ParserOpts(..), mkParserOpts,
    PState (..), initParserState, initPragState,
+   PpState(..), initPpState, PpContext(..),
    P(..), ParseResult(POk, PFailed),
    allocateComments, allocatePriorComments, allocateFinalComments,
    MonadP(..),
@@ -78,7 +79,9 @@ module GHC.Parser.Lexer (
    HdkComment(..),
    warnopt,
    adjustChar,
-   addPsMessage
+   addPsMessage,
+   -- * for integration with the preprocessor
+   lexToken
   ) where
 
 import GHC.Prelude
@@ -106,6 +109,8 @@ import Data.ByteString (ByteString)
 -- containers
 import Data.Map (Map)
 import qualified Data.Map as Map
+import Data.Set (Set)
+import qualified Data.Set as Set
 
 -- compiler
 import GHC.Utils.Error
@@ -292,6 +297,31 @@ $unigraphic / { isSmartQuote } { smart_quote_error }
 -- with {-#, then we'll assume it's a pragma we know about and go for do_bol.
 <bol> {
   \n                                    ;
+  -- Ghc CPP symbols
+  ^"#define"        / { ifExtension GhcCppBit } { cppToken cpp_prag (ITcppDefine) }
+  ^"#include"       / { ifExtension GhcCppBit } { cppToken cpp_prag (ITcppInclude) }
+  ^"#undef"         / { ifExtension GhcCppBit } { cppToken cpp_prag (ITcppUndef) }
+  ^"#error"         / { ifExtension GhcCppBit } { cppToken cpp_prag (ITcppError) }
+  ^"#if"            / { ifExtension GhcCppBit } { cppToken cpp_prag (ITcppIf) }
+  ^"#ifdef"         / { ifExtension GhcCppBit } { cppToken cpp_prag (ITcppIfdef) }
+  ^"#ifndef"        / { ifExtension GhcCppBit } { cppToken cpp_prag (ITcppIfndef) }
+  ^"#elif"          / { ifExtension GhcCppBit } { cppToken cpp_prag (ITcppElif) }
+  ^"#else"          / { ifExtension GhcCppBit } { cppToken cpp_prag (ITcppElse) }
+  ^"#endif"         / { ifExtension GhcCppBit } { cppToken cpp_prag (ITcppEndif) }
+  -- "defined"        { token (ITcppDefined) }
+
+  -- ^\# "define"        / { ifExtension GhcCppBit } { cppToken cpp_prag (ITcppDefine) }
+  -- ^\# "include"       / { ifExtension GhcCppBit } { cppToken cpp_prag (ITcppInclude) }
+  -- ^\# "undef"         / { ifExtension GhcCppBit } { cppToken cpp_prag (ITcppUndef) }
+  -- ^\# "error"         / { ifExtension GhcCppBit } { cppToken cpp_prag (ITcppError) }
+  -- ^\# "if"            / { ifExtension GhcCppBit } { cppToken cpp_prag (ITcppIf) }
+  -- ^\# "ifdef"         / { ifExtension GhcCppBit } { cppToken cpp_prag (ITcppIfdef) }
+  -- ^\# "ifndef"        / { ifExtension GhcCppBit } { cppToken cpp_prag (ITcppIfndef) }
+  -- ^\# "elif"          / { ifExtension GhcCppBit } { cppToken cpp_prag (ITcppElif) }
+  -- ^\# "else"          / { ifExtension GhcCppBit } { cppToken cpp_prag (ITcppElse) }
+  -- ^\# "endif"         / { ifExtension GhcCppBit } { cppToken cpp_prag (ITcppEndif) }
+  -- -- "defined"        { token (ITcppDefined) }
+
   ^\# line                              { begin line_prag1 }
   ^\# / { followedByDigit }             { begin line_prag1 }
   ^\# pragma .* \n                      ; -- GCC 3.3 CPP generated, apparently
@@ -329,6 +359,11 @@ $unigraphic / { isSmartQuote } { smart_quote_error }
 
 "{-#" $whitechar* $pragmachar+ / { known_pragma linePrags }
                                 { dispatch_pragmas linePrags }
+
+-- CPP pragmas
+<cpp_prag> {
+  () { pop }
+}
 
 -- single-line line pragmas, of the form
 --    # <line> "<file>" <extra-stuff> \n
@@ -432,6 +467,7 @@ $unigraphic / { isSmartQuote } { smart_quote_error }
         ifExtension ThQuotesBit }
     { token (ITcloseQuote UnicodeSyntax) }
 }
+
 
 <0> {
   "(|"
@@ -1007,6 +1043,21 @@ data Token
   | ITlineComment  String      PsSpan -- ^ comment starting by "--"
   | ITblockComment String      PsSpan -- ^ comment in {- -}
 
+  -- GHC CPP extension
+  | ITcppDefine       -- ^ #define
+  | ITcppInclude      -- ^ #include
+  | ITcppUndef        -- ^ #undef
+  | ITcppError        -- ^ #error
+  | ITcppIf           -- ^ #if
+  | ITcppIfdef        -- ^ #ifdef
+  | ITcppIfndef       -- ^ #ifndef
+  | ITcppElif         -- ^ #elif
+  | ITcppElse         -- ^ #else
+  | ITcppEndif        -- ^ #endif
+  | ITcppDefined      -- ^ defined (in conditional)
+  | ITcppIgnored [Located Token] -- TODO: push into comments instead
+
+
   deriving Show
 
 instance Outputable Token where
@@ -1237,7 +1288,15 @@ begin code _span _str _len _buf2 = do pushLexState code; lexToken
 pop :: Action
 pop _span _buf _len _buf2 =
   do _ <- popLexState
-     lexToken
+     -- lexToken
+     trace "pop" $ do lexToken
+
+cppToken :: Int ->  Token -> Action
+cppToken code t span _buf _len _buf2 =
+  do pushLexState code
+     -- return (L span t)
+     trace ("cppToken:" ++ show (code, t)) $ do return (L span t)
+
 -- See Note [Nested comment line pragmas]
 failLinePrag1 :: Action
 failLinePrag1 span _buf _len _buf2 = do
@@ -2668,7 +2727,10 @@ data PState = PState {
         -- (BufPos). We use OrdList to get O(1) snoc.
         --
         -- See Note [Adding Haddock comments to the syntax tree] in GHC.Parser.PostProcess.Haddock
-        hdk_comments :: OrdList (PsLocated HdkComment)
+        hdk_comments :: OrdList (PsLocated HdkComment),
+
+        -- See Note [CPP in GHC] in GHC.Parser.PreProcess
+        pp :: !PpState
      }
         -- last_loc and last_len are used when generating error messages,
         -- and in pushCurrentContext only.  Sigh, if only Happy passed the
@@ -2681,6 +2743,26 @@ data PState = PState {
         -- calling the action in the token.  So from the perspective
         -- of the action, it is the *current* token.  Do I understand
         -- correctly?
+
+-- | Use for emulating (limited) CPP preprocessing in GHC.
+data PpState = PpState {
+        pp_defines :: !(Set String),
+        pp_pushed_back :: !(Maybe (Located Token)),
+        pp_context :: ![PpContext],
+        pp_accepting :: !Bool
+     }
+    deriving (Show)
+
+data PpContext = PpContextIf [Located Token]
+    deriving (Show)
+
+initPpState :: PpState
+initPpState = PpState
+   { pp_defines = Set.empty
+   , pp_pushed_back = Nothing
+   , pp_context = []
+   , pp_accepting = True
+   }
 
 data ALRContext = ALRNoLayout Bool{- does it contain commas? -}
                               Bool{- is it a 'let' block? -}
@@ -2897,10 +2979,12 @@ nextIsEOF = do
   return $ atEnd s
 
 pushLexState :: Int -> P ()
-pushLexState ls = P $ \s@PState{ lex_state=l } -> POk s{lex_state=ls:l} ()
+-- pushLexState ls = P $ \s@PState{ lex_state=l } -> POk s{lex_state=ls:l} ()
+pushLexState ls = P $ \s@PState{ lex_state= l } -> POk s{lex_state= trace ("pushLexState:" ++ show ls) ls:l} ()
 
 popLexState :: P Int
-popLexState = P $ \s@PState{ lex_state=ls:l } -> POk s{ lex_state=l } ls
+-- popLexState = P $ \s@PState{ lex_state=ls:l } -> POk s{ lex_state=l } ls
+popLexState = P $ \s@PState{ lex_state=ls:l } -> POk s{ lex_state= trace ("popLexState:" ++ show (ls,l)) l } ls
 
 getLexState :: P Int
 getLexState = P $ \s@PState{ lex_state=ls:_ } -> POk s ls
@@ -3039,6 +3123,7 @@ data ExtBits
   | OverloadedRecordDotBit
   | OverloadedRecordUpdateBit
   | ExtendedLiteralsBit
+  | GhcCppBit -- Enable preprocessor tokens and rules
 
   -- Flags that are updated once parsing starts
   | InRulePragBit
@@ -3119,6 +3204,7 @@ mkParserOpts extensionFlags diag_opts supported
       .|. OverloadedRecordDotBit      `xoptBit` LangExt.OverloadedRecordDot
       .|. OverloadedRecordUpdateBit   `xoptBit` LangExt.OverloadedRecordUpdate  -- Enable testing via 'getBit OverloadedRecordUpdateBit' in the parser (RecordDotSyntax parsing uses that information).
       .|. ExtendedLiteralsBit         `xoptBit` LangExt.ExtendedLiterals
+      .|. GhcCppBit                   `xoptBit` LangExt.GhcCpp
     optBits =
           HaddockBit        `setBitIf` isHaddock
       .|. RawTokenStreamBit `setBitIf` rawTokStream
@@ -3141,7 +3227,8 @@ disableHaddock opts = upd_bitmap (xunset HaddockBit)
 
 -- | Set parser options for parsing OPTIONS pragmas
 initPragState :: ParserOpts -> StringBuffer -> RealSrcLoc -> PState
-initPragState options buf loc = (initParserState options buf loc)
+-- initPragState options buf loc = (initParserState options buf loc)
+initPragState options buf loc = (initParserState options buf (trace ("initPragState:" ++ show bol) loc))
    { lex_state = [bol, option_prags, 0]
    }
 
@@ -3172,7 +3259,8 @@ initParserState options buf loc =
       eof_pos = Strict.Nothing,
       header_comments = Strict.Nothing,
       comment_q = [],
-      hdk_comments = nilOL
+      hdk_comments = nilOL,
+      pp = initPpState
     }
   where init_loc = PsLoc loc (BufPos 0)
 
@@ -3627,7 +3715,8 @@ lexToken = do
   inp@(AI loc1 buf) <- getInput
   sc <- getLexState
   exts <- getExts
-  case alexScanUser exts inp sc of
+  -- case alexScanUser exts inp sc of
+  case alexScanUser exts inp (trace ("lexToken:state=" ++ show sc) sc) of
     AlexEOF -> do
         let span = mkPsSpan loc1 loc1
         lc <- getLastLocIncludingComments
