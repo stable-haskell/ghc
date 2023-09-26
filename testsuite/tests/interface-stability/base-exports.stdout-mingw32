@@ -12457,7 +12457,7 @@ instance GHC.Show.Show GHC.IO.Windows.Handle.CONSOLE_READCONSOLE_CONTROL -- Defi
 instance GHC.Show.Show (GHC.IO.Windows.Handle.Io GHC.IO.Windows.Handle.NativeHandle) -- Defined in ‘GHC.IO.Windows.Handle’
 instance GHC.Show.Show (GHC.IO.Windows.Handle.Io GHC.IO.Windows.Handle.ConsoleHandle) -- Defined in ‘GHC.IO.Windows.Handle’
 instance GHC.Show.Show GHC.IOPort.IOPortException -- Defined in ‘GHC.IOPort’
-instance GHC.Show.Show GHC.InfoProv.InfoProv -- Defined in ‘GHC.InfoProv’
+instance GHC.Show.Show base-4.19.0.0:GHC.InfoProv.Types.InfoProv -- Defined in ‘base-4.19.0.0:GHC.InfoProv.Types’
 instance GHC.Show.Show GHC.Stack.CloneStack.StackEntry -- Defined in ‘GHC.Stack.CloneStack’
 instance GHC.Show.Show GHC.StaticPtr.StaticPtrInfo -- Defined in ‘GHC.StaticPtr’
 instance GHC.Show.Show GHC.Stats.GCDetails -- Defined in ‘GHC.Stats’
@@ -12625,7 +12625,7 @@ instance GHC.Classes.Eq GHC.RTS.Flags.IoSubSystem -- Defined in ‘GHC.RTS.Flags
 instance GHC.Classes.Eq GHC.IO.Windows.Handle.TempFileOptions -- Defined in ‘GHC.IO.Windows.Handle’
 instance forall i e. GHC.Classes.Eq (GHC.IOArray.IOArray i e) -- Defined in ‘GHC.IOArray’
 instance forall a. GHC.Classes.Eq (GHC.IOPort.IOPort a) -- Defined in ‘GHC.IOPort’
-instance GHC.Classes.Eq GHC.InfoProv.InfoProv -- Defined in ‘GHC.InfoProv’
+instance GHC.Classes.Eq base-4.19.0.0:GHC.InfoProv.Types.InfoProv -- Defined in ‘base-4.19.0.0:GHC.InfoProv.Types’
 instance GHC.Classes.Eq GHC.Num.Integer.Integer -- Defined in ‘GHC.Num.Integer’
 instance GHC.Classes.Eq GHC.Num.BigNat.BigNat -- Defined in ‘GHC.Num.BigNat’
 instance GHC.Classes.Eq GHC.Num.Natural.Natural -- Defined in ‘GHC.Num.Natural’

@@ -205,6 +205,7 @@ Library
         GHC.GHCi.Helpers
         GHC.Generics
         GHC.InfoProv
+        GHC.InfoProv.Types
         GHC.IO
         GHC.IO.Buffer
         GHC.IO.BufferedIO

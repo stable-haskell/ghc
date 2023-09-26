@@ -28,7 +28,7 @@ import Foreign
 import GHC.Base
 import GHC.Conc.Sync
 import GHC.Exts () -- (Int (I#), RealWorld, StackSnapshot#, ThreadId#, Array#, sizeofArray#, indexArray#, State#, StablePtr#)
-import GHC.InfoProv (InfoProv (..), InfoProvEnt, ipLoc, ipeProv, peekInfoProv)
+import GHC.InfoProv.Types (InfoProv (..), InfoProvEnt, ipLoc, ipeProv, peekInfoProv)
 import GHC.Num
 import GHC.Stable
 import Text.Read
