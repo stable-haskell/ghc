@@ -8052,7 +8052,7 @@ module GHC.IORef where
 module GHC.InfoProv where
   -- Safety: Trustworthy
   type InfoProv :: *
-  data InfoProv = InfoProv {ipName :: GHC.Base.String, ipDesc :: GHC.Base.String, ipTyDesc :: GHC.Base.String, ipLabel :: GHC.Base.String, ipMod :: GHC.Base.String, ipSrcFile :: GHC.Base.String, ipSrcSpan :: GHC.Base.String}
+  data InfoProv = InfoProv {ipName :: GHC.Base.String, ipDesc :: GHC.Base.String, ipTyDesc :: GHC.Base.String, ipLabel :: GHC.Base.String, ipUnitId :: GHC.Base.String, ipMod :: GHC.Base.String, ipSrcFile :: GHC.Base.String, ipSrcSpan :: GHC.Base.String}
   type InfoProvEnt :: *
   data InfoProvEnt
   ipLoc :: InfoProv -> GHC.Base.String
