@@ -235,7 +235,8 @@ ghcCommentText (L _ (GHC.EpaComment (EpaDocComment s) _))      = exactPrintHsDoc
 ghcCommentText (L _ (GHC.EpaComment (EpaDocOptions s) _))      = s
 ghcCommentText (L _ (GHC.EpaComment (EpaLineComment s) _))     = s
 ghcCommentText (L _ (GHC.EpaComment (EpaBlockComment s) _))    = s
-ghcCommentText (L _ (GHC.EpaComment (EpaEofComment) _))        = ""
+ghcCommentText (L _ (GHC.EpaComment (EpaCppIgnored [L _ s]) _))= s
+ghcCommentText (L _ (GHC.EpaComment (EpaCppIgnored _) _))      = ""
 
 tokComment :: LEpaComment -> Comment
 tokComment t@(L lt c) = mkComment (normaliseCommentText $ ghcCommentText t) lt (ac_prior_tok c)
@@ -250,7 +251,7 @@ comment2LEpaComment :: Comment -> LEpaComment
 comment2LEpaComment (Comment s anc r _mk) = mkLEpaComment s anc r
 
 mkLEpaComment :: String -> Anchor -> RealSrcSpan -> LEpaComment
-mkLEpaComment "" anc r = (L anc (GHC.EpaComment (EpaEofComment) r))
+mkLEpaComment "" anc r = (L anc (GHC.EpaComment (EpaCppIgnored []) r))
 mkLEpaComment s anc r = (L anc (GHC.EpaComment (EpaLineComment s) r))
 
 mkComment :: String -> Anchor -> RealSrcSpan -> Comment

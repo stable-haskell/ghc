@@ -676,9 +676,10 @@ commentOrigDelta (L (GHC.Anchor la _) (GHC.EpaComment t pp))
                -- then MovedAnchor (ss2delta (r,c+0) la)
                -- else MovedAnchor (ss2delta (r,c)   la)
                else MovedAnchor (tweakDelta $ ss2delta (r,c)   la)
-        op = if t == EpaEofComment && op' == MovedAnchor (SameLine 0)
-               then MovedAnchor (DifferentLine 1 0)
-               else op'
+        -- op = if t == EpaEofComment && op' == MovedAnchor (SameLine 0)
+        --        then MovedAnchor (DifferentLine 1 0)
+        --        else op'
+        op = op'
 
 -- ---------------------------------------------------------------------
 
