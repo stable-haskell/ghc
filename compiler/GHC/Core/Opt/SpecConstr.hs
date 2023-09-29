@@ -642,7 +642,7 @@ for why we do this.
 
 Note [Specialising on dictionaries]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-In #21386, SpecConstr saw this call:
+In #21386 (see nofib/real/eff/VSM), SpecConstr saw this call:
 
    $wgo 100# @.. ($fMonadStateT @.. @.. $fMonadIdentity)
 
