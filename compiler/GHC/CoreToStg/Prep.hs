@@ -679,9 +679,11 @@ cpePair top_lvl is_rec dmd is_unlifted env bndr rhs
                else warnPprTrace True "CorePrep: silly extra arguments:" (ppr bndr) $
                                -- Note [Silly extra arguments]
                     (do { v <- newVar (idType bndr)
-                        ; let float = mkNonRecFloat env topDmd False v rhs2
+                        ; let float@(Float (NonRec v' _) _ _) =
+                                mkNonRecFloat env topDmd False v rhs2
+                        -- v' has demand info and possibly evaldUnfolding
                         ; return ( snocFloat floats2 float
-                                 , cpeEtaExpand arity (Var v)) })
+                                 , cpeEtaExpand arity (Var v')) })
 
         -- Wrap floating ticks
        ; let (floats4, rhs4) = wrapTicks floats3 rhs3
@@ -1484,8 +1486,10 @@ cpeArg env dmd arg
          else do { v <- newVar arg_ty
                  -- See Note [Eta expansion of arguments in CorePrep]
                  ; let arg3 = cpeEtaExpandArg env arg2
-                       arg_float = mkNonRecFloat env dmd is_unlifted v arg3
-                 ; return (snocFloat floats2 arg_float, varToCoreExpr v) }
+                       arg_float@(Float (NonRec v' _) _ _) =
+                         mkNonRecFloat env dmd is_unlifted v arg3
+                       -- v' has demand info and possibly evaldUnfolding
+                 ; return (snocFloat floats2 arg_float, varToCoreExpr v') }
        }
 
 cpeEtaExpandArg :: CorePrepEnv -> CoreArg -> CoreArg
@@ -1703,6 +1707,62 @@ cpeEtaExpand arity expr
 Note [Pin demand info on floats]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 We pin demand info on floated lets, so that we can see the one-shot thunks.
+
+Note [Pin evaluatedness on floats]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Consider a call to a CBV function, such as a DataCon worker with strict fields:
+
+  data T a = T !a
+  ... f (T e) ...
+
+During ANFisation, we will `mkNonRecFloat` for `e`, binding it to a
+fresh binder `sat`.
+Now there are two interesting cases:
+
+ 1. When `e=Just y` is a value, we will float `sat=Just y` as far as possible,
+    to top-level, even. It is important that we mark `sat` as evaluated (via
+    setting its unfolding to `evaldUnfolding`), otherwise we get a superfluous
+    thunk to carry out the field seq on T's field, because
+    `exprIsHNF sat == False`:
+
+      let sat = Just y in
+      let sat2 = case sat of x { __DEFAULT } -> T x in
+        -- NONONO, want just `sat2 = T x`
+      f sat2
+
+    This happened in $walexGetByte, where the thunk caused additional
+    allocation.
+
+ 2. Similarly, when `e` is not a value, we still know that it is strictly
+    evaluated. Hence it is going to be case-bound, and we anticipate that `sat`
+    will be a case binder which is *always* evaluated.
+    Hence in this case, we also mark `sat` as evaluated via its unfolding.
+    This happened in GHC.Linker.Deps.$wgetLinkDeps, where without
+    `evaldUnfolding` we ended up with this:
+
+      Word64Map = ... | Bin ... ... !Word64Map !Word64Map
+      case ... of { Word64Map.Bin a b l r ->
+      case insert ... of sat { __DEFAULT ->
+      case Word64Map.Bin a b l sat of sat2 { __DEFAULT ->
+      f sat2
+      }}}
+
+    Note that *the DataCon app `Bin a b l sat` was case-bound*, because it was
+    not detected to be a value according to `exprIsHNF`.
+    That is because the strict field `sat` lacked the `evaldUnfolding`,
+    although it ended up being case-bound.
+
+    There is one small wrinkle: It could be that `sat=insert ...` floats to
+    top-level, where it is not eagerly evaluated. In this case, we may not
+    give `sat` an `evaldUnfolding`. We detect this case by looking at the
+    `FloatInfo` of `sat=insert ...`: If it says `TopLvlFloatable`, we are
+    conservative and will not give `sat` an `evaldUnfolding`.
+
+TLDR; when creating a new float `sat=e` in `mkNonRecFloat`, propagate `sat` with
+an `evaldUnfolding` if either
+
+ 1. `e` is a value, or
+ 2. `sat=e` is case-bound, but won't float to top-level.
 
 Note [Speculative evaluation]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1986,7 +2046,6 @@ mkNonRecFloat :: CorePrepEnv -> Demand -> Bool -> Id -> CpeRhs -> FloatingBind
 mkNonRecFloat env dmd is_unlifted bndr rhs = -- pprTraceWith "mkNonRecFloat" ppr $
   Float (NonRec bndr' rhs) bound info
   where
-    bndr' = setIdDemandInfo bndr dmd -- See Note [Pin demand info on floats]
     (bound,info)
       | is_lifted, is_hnf        = (LetBound, TopLvlFloatable)
           -- is_lifted: We currently don't allow unlifted values at the
@@ -2016,6 +2075,17 @@ mkNonRecFloat env dmd is_unlifted bndr rhs = -- pprTraceWith "mkNonRecFloat" ppr
     ok_for_spec = exprOkForSpecEval (not . is_rec_call) rhs
     is_rec_call = (`elemUnVarSet` cpe_rec_ids env)
     is_data_con = isJust . isDataConId_maybe
+
+    evald = is_hnf || (bound == CaseBound && info /= TopLvlFloatable)
+    bndr' = pinIdInfo evald dmd bndr
+              -- See Note [Pin demand info on floats]
+              -- See Note [Pin evaluatedness on floats]
+
+pinIdInfo :: Bool -> Demand -> Id -> Id
+-- See Note [Pin evaluatedness on floats]
+-- See Note [Pin demand info on floats]
+pinIdInfo evald dmd =
+  applyWhen evald (`setIdUnfolding` evaldUnfolding) . (`setIdDemandInfo` dmd)
 
 -- | Wrap floats around an expression
 wrapBinds :: Floats -> CpeBody -> CpeBody
