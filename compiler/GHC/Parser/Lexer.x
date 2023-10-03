@@ -81,7 +81,8 @@ module GHC.Parser.Lexer (
    adjustChar,
    addPsMessage,
    -- * for integration with the preprocessor
-   queueIgnoredToken
+   queueIgnoredToken,
+   getInput, setInput
   ) where
 
 import GHC.Prelude
