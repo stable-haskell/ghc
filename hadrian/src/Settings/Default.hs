@@ -161,8 +161,10 @@ stage1Packages = do
         , if winTarget then win32 else unix
         ]
       , when (not cross)
-        [ haddock
-        , hpcBin
+        [
+        --   haddock
+        -- ,
+          hpcBin
         , iserv
         , runGhc
         , ghcToolchainBin
