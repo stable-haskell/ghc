@@ -60,7 +60,6 @@ type BigFieldList =
   '[ "f1" := Int
    , "f2" := Int
    , "f3" := Int
-{-
    , "f4" := Int
    , "f5" := Int
    , "f6" := Int
@@ -73,7 +72,6 @@ type BigFieldList =
    , "f13" := Int
    , "f14" := Int
    , "f15" := Int
--}
    ]
 
 bigRec :: Record BigFieldList
@@ -81,7 +79,6 @@ bigRec =
     #f1   := 1
   & #f2   := 2
   & #f3   := 3
-{-
   & #f4   := 4
   & #f5   := 5
   & #f6   := 6
@@ -94,7 +91,6 @@ bigRec =
   & #f13  := 13
   & #f14  := 14
   & #f15  := 15
--}
   & rnil
 
 main :: IO ()
