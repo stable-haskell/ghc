@@ -3114,11 +3114,9 @@ texp :: { ECP }
                              mkHsViewPatPV (comb2 $1 $>) $1 $3 [mu AnnRarrow $2] }
 
 orpats :: { [LPat GhcPs] }
---        : texp                  {% do
         : exp %shift         {% do
                                  { pat1 <- (checkPattern <=< runPV) (unECP $1)
                                  ; return [pat1] }}
---        | texp '|' orpats      {% do
         | exp ';' orpats     {% do
                                  { pat1 <- (checkPattern <=< runPV) (unECP $1)
                                  ; pat2 <- addTrailingSemiA pat1 (getLoc $2)
@@ -3389,14 +3387,14 @@ pat_syn_pat :: { LPat GhcPs }
 pat_syn_pat :  exp          {% (checkPattern <=< runPV) (unECP $1) }
 
 pat     :: { LPat GhcPs }
-pat     :  pat_syn_pat      { $1 }
-        |  pat ';' orpats   {%
-                     do { let srcSpan = comb2 (getLocA $1) (getLocA $ last $3)
-                        ; cs <- getCommentsFor srcSpan
-                        ; pat1 <- addTrailingSemiA $1 (getLoc $2)
-                        ; let orpat = sL (noAnnSrcSpan srcSpan) $ OrPat (EpAnn (spanAsAnchor srcSpan) [] cs) (pat1:$3)
-                        ; _ <- hintOrPats orpat
-                        ; return $ orpat }}
+pat     :  orpats      {% case $1 of
+                            [pat] -> return pat
+                            _ -> do { let srcSpan = comb2 (head $1) (last $1)
+                                    ; cs <- getCommentsFor srcSpan
+                                    ; let orpat = sL (noAnnSrcSpan srcSpan) $ OrPat (EpAnn (spanAsAnchor srcSpan) [] cs) $1
+                                    ; _ <- hintOrPats orpat
+                                    ; return orpat }}
+
 
 -- 'pats1' does the same thing as 'pat', but returns it as a singleton
 -- list so that it can be used with a parameterized production rule
