@@ -279,7 +279,7 @@ getCoreToDo dflags hpt_rule_base extra_vars
         runWhen full_laziness $
            CoreDoFloatOutwards FloatOutSwitches {
                                  floatOutLambdas     = floatLamArgs dflags,
-                                 floatOutConstants   = True,
+                                 floatOutConstants   = True,  -- For SpecConstr and CSE
                                  floatOutOverSatApps = True,
                                  floatToTopLevelOnly = False },
                 -- nofib/spectral/hartel/wang doubles in speed if you

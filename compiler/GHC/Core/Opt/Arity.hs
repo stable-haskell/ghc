@@ -54,7 +54,7 @@ import GHC.Core.Utils
 import GHC.Core.DataCon
 import GHC.Core.TyCon     ( tyConArity )
 import GHC.Core.TyCon.RecWalk     ( initRecTc, checkRecTc )
-import GHC.Core.Predicate ( isDictTy, isEvVar, isCallStackPredTy )
+import GHC.Core.Predicate ( isDictTy, isEvVar, isCallStackPredTy, isCallStackTy )
 import GHC.Core.Multiplicity
 
 -- We have two sorts of substitution:
@@ -1461,7 +1461,7 @@ myExprIsCheap (AE { am_opts = opts, am_sigs = sigs }) e mb_ty
     cheap_dict = case mb_ty of
                      Nothing -> False
                      Just ty -> (ao_dicts_cheap opts && isDictTy ty)
-                                || isCallStackPredTy ty
+                                || isCallStackPredTy ty || isCallStackTy ty
         -- See Note [Eta expanding through dictionaries]
         -- See Note [Eta expanding through CallStacks]
 
