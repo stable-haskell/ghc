@@ -24,7 +24,7 @@ import GHC.Unit.Types
 import GHC.Data.FastString
 import GHC.Core
 import GHC.Core.Opt.Monad
-import GHC.Core.Utils (mkTick)
+import GHC.Core.Utils (mkTick, exprIsWorkFree)
 import GHC.Types.Id
 import GHC.Driver.DynFlags
 
@@ -120,6 +120,7 @@ doBndr env bndr rhs
 -- We want to put the cost centre below the lambda as we only care about executions of the RHS.
 doBndr' :: Env -> Id -> CoreExpr -> State LateCCState CoreExpr
 doBndr' env bndr (Lam b rhs) = Lam b <$> doBndr' env bndr rhs
+doBndr' _env _bndr rhs | exprIsWorkFree rhs = pure rhs
 doBndr' env bndr rhs = do
     let name = idName bndr
         name_loc = nameSrcSpan name
