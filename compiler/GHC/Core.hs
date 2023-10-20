@@ -1432,7 +1432,7 @@ data CaseTree
                        -- nothing relies on non-empty-ness
   | ScrutOf Id Int     -- If this Id is bound to a value, apply this discount
 
-data AltTree  = AT AltCon [Var] ExprTree
+data AltTree  = AltTree AltCon [Var] ExprTree
 
 {- Note [UnfoldingCache]
 ~~~~~~~~~~~~~~~~~~~~~~~~

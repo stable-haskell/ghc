@@ -638,7 +638,7 @@ instance Outputable CaseTree where
                         <+> brackets (sep (map ppr alts))
 
 instance Outputable AltTree where
-  ppr (AT con bs rhs) = ppr con <+> ppr bs <+> text "->" <+> ppr rhs
+  ppr (AltTree con bs rhs) = ppr con <+> ppr bs <+> text "->" <+> ppr rhs
 
 instance Outputable Unfolding where
   ppr NoUnfolding                = text "No unfolding"

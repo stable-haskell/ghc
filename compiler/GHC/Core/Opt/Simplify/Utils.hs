@@ -48,7 +48,7 @@ import qualified GHC.Prelude as Partial (head)
 import GHC.Core
 import GHC.Types.Literal ( isLitRubbish )
 import GHC.Core.Opt.Simplify.Env
-import GHC.Core.Opt.Simplify.Inline
+-- import GHC.Core.Opt.Simplify.Inline
 import GHC.Core.Opt.Stats ( Tick(..) )
 import qualified GHC.Core.Subst
 import GHC.Core.Ppr
@@ -579,9 +579,9 @@ contArgs cont
     go args (CastIt _ k)                = go args k
     go args k                           = (False, reverse args, k)
 
-    is_interesting arg se = interestingArg se arg
-                   -- Do *not* use short-cutting substitution here
-                   -- because we want to get as much IdInfo as possible
+    is_interesting arg se = exprSummary se arg
+       -- Do *not* use short-cutting substitution here
+       -- because we want to get as much IdInfo as possible
 
 -- | Describes how the 'SimplCont' will evaluate the hole as a 'SubDemand'.
 -- This can be more insightful than the limited syntactic context that
@@ -1004,23 +1004,23 @@ interestingArg env e = go env 0 e
          conlike_unfolding = isConLikeUnfolding (idUnfolding v)
 
 ------------------------------
-idScrutInfo :: Id -> ScrutInfo
-idScrutInfo bndr
+idSummary :: SimplEnv -> Id -> ArgSummary
+idSummary env bndr
   = case idUnfolding bndr of
       OtherCon cs -> ScrutIsNot cs
       DFunUnfolding { df_bndrs = bndrs, df_con = con, df_args = args }
         | null bndrs
-        -> ScrutIsCon (DataAlt con) (map exprScrutInfo args)
+        -> ScrutIsCon (DataAlt con) (map exprSummary args)
         | otherwise
         -> ScrutNoInfo
       CoreUnfolding { uf_tmpl = e }
-        -> exprScrutInfo e
+        -> exprSummary e
       NoUnfolding   -> ScrutNoInfo
       BootUnfolding -> ScrutNoInfo
 
-exprScrutInfo :: CoreExpr -> ScrutInfo
+exprSummary :: SimplEnv -> CoreExpr -> ArgSummary
 -- Very simple version of exprIsConApp_maybe
-exprScrutInfo e = go e []
+exprSummary env e = go e []
   where
     go (Cast e _) as = go e as
     go (Tick _ e) as = go e as
@@ -1037,7 +1037,7 @@ exprScrutInfo e = go e []
 
     go_var v as
       | Just con <- isDataConWorkId_maybe v
-      = ScrutIsCon (DataAlt con) (map exprScrutInfo as)
+      = ScrutIsCon (DataAlt con) (map (exprSummary env) as)
       | Just rhs <- expandUnfolding_maybe (idUnfolding v)
       = go rhs as
       | otherwise

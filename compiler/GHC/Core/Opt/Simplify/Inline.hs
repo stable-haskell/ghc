@@ -20,6 +20,8 @@ import GHC.Prelude
 
 import GHC.Driver.Flags
 
+import GHC.Core.Opt.Simplify.Env
+import GHC.Core.Opt.Simplify.Utils
 import GHC.Core
 import GHC.Core.Unfold
 import GHC.Types.Id
@@ -104,7 +106,7 @@ callSiteInline logger opts !case_depth id active_unfolding lone_variable arg_inf
         CoreUnfolding { uf_tmpl = unf_template
                       , uf_cache = unf_cache
                       , uf_guidance = guidance }
-          | active_unfolding -> tryUnfolding logger opts case_depth id lone_variable
+          | active_unf -> tryUnfolding logger opts case_depth id lone_variable
                                     arg_infos cont_info unf_template
                                     unf_cache guidance
           | otherwise -> traceInline logger opts id "Inactive unfolding:" (ppr id) Nothing
@@ -112,6 +114,9 @@ callSiteInline logger opts !case_depth id active_unfolding lone_variable arg_inf
         BootUnfolding    -> Nothing
         OtherCon {}      -> Nothing
         DFunUnfolding {} -> Nothing     -- Never unfold a DFun
+  where
+    active_unf = activeUnfolding (seMode env) var
+
 
 -- | Report the inlining of an identifier's RHS to the user, if requested.
 traceInline :: Logger -> UnfoldingOpts -> Id -> String -> SDoc -> a -> a
@@ -227,7 +232,8 @@ needed on a per-module basis.
 
 -}
 
-tryUnfolding :: Logger -> UnfoldingOpts -> Int -> Id -> Bool -> [ArgSummary] -> CallCtxt
+tryUnfolding :: Logger -> UnfoldingOpts -> Int
+             -> Id -> Bool -> [ArgSummary] -> CallCtxt
              -> CoreExpr -> UnfoldingCache -> UnfoldingGuidance
              -> Maybe CoreExpr
 tryUnfolding logger opts !case_depth id lone_variable arg_infos
@@ -245,7 +251,7 @@ tryUnfolding logger opts !case_depth id lone_variable arg_infos
           some_benefit = calc_some_benefit uf_arity
           enough_args  = (n_val_args >= uf_arity) || (unsat_ok && n_val_args > 0)
 
-     UnfIfGoodArgs { ug_args = arg_discounts, ug_res = res_discount, ug_size = size }
+     UnfIfGoodArgs { ug_args = arg_bndrs, ug_tree = expr_tree }
         | unfoldingVeryAggressive opts
         -> traceInline logger opts id str (mk_doc some_benefit extra_doc True) (Just unf_template)
         | is_wf && some_benefit && small_enough
@@ -259,9 +265,19 @@ tryUnfolding logger opts !case_depth id lone_variable arg_infos
           depth_scaling = unfoldingCaseScaling opts
           depth_penalty | case_depth <= depth_treshold = 0
                         | otherwise       = (size * (case_depth - depth_treshold)) `div` depth_scaling
-          adjusted_size = size + depth_penalty - discount
-          small_enough = adjusted_size <= unfoldingUseThreshold opts
-          discount = computeDiscount arg_discounts res_discount arg_infos cont_info
+
+          want_result
+             | LT <- arg_bndrs `compareLength` arg_infos
+                         = True  -- Over-saturated
+             | otherwise = case cont_info of
+                              BoringCtxt -> False
+                              _          -> True
+
+          context = IC { ic_bound = mkVarEnv (arg_bnds `zip` arg_infos)
+                       , ic_free  = xx
+                       , ic_want_res = want_result }
+          size = depth_penalty `addSizeN` exprTreeSize context expr_tree
+          small_enough = adjusted_size `leqSize` unfoldingUseThreshold opts
 
           extra_doc = vcat [ text "case depth =" <+> int case_depth
                            , text "depth based penalty =" <+> int depth_penalty

@@ -21,9 +21,8 @@ module GHC.Core.Unfold (
         Unfolding, UnfoldingGuidance,   -- Abstract types
 
         ExprTree, exprTree, exprTreeSize,
-
-        ArgSummary(..), nonTriv,
-        CallCtxt(..),
+        ArgSummary(..), CallCtxt(..),
+        Size, leqSize, addSizeN,
 
         UnfoldingOpts (..), defaultUnfoldingOpts,
         updateCreationThreshold, updateUseThreshold,
@@ -55,7 +54,6 @@ import GHC.Builtin.Names
 import GHC.Builtin.PrimOps
 
 import GHC.Utils.Misc
-import GHC.Utils.Panic
 import GHC.Utils.Outputable
 
 import GHC.Data.Bag
@@ -165,23 +163,15 @@ updateReportPrefix n opts = opts { unfoldingReportPrefix = n }
 ********************************************************************* -}
 
 data ArgSummary = ArgNoInfo
-                | ArgIsCon AltCon [ArgInfo]
+                | ArgIsCon AltCon [ArgSummary]
                 | ArgIsNot [AltCon]
                 | ArgIsLam
 
-data ArgSummary = TrivArg       -- Nothing interesting
-                | NonTrivArg    -- Arg has structure
-                | ValueArg      -- Arg is a con-app or PAP
-                                -- ..or con-like. Note [Conlike is interesting]
-
 instance Outputable ArgSummary where
-  ppr TrivArg    = text "TrivArg"
-  ppr NonTrivArg = text "NonTrivArg"
-  ppr ValueArg   = text "ValueArg"
-
-nonTriv ::  ArgSummary -> Bool
-nonTriv TrivArg = False
-nonTriv _       = True
+  ppr ArgNoInfo       = text "ArgNoInfo"
+  ppr ArgIsLam        = text "ArgIsLam"
+  ppr (ArgIsCon c as) = ppr c <> ppr as
+  ppr (ArgIsNot cs)   = text "ArgIsNot" <> ppr cs
 
 data CallCtxt
   = BoringCtxt
@@ -542,7 +532,7 @@ exprTree opts !bOMB_OUT_SIZE svars expr
         where
           alt_alt_tree :: Alt Var -> AltTree
           alt_alt_tree (Alt con bs rhs)
-            = AT con bs (exprTree opts bOMB_OUT_SIZE svars' rhs)
+            = AltTree con bs (exprTree opts bOMB_OUT_SIZE svars' rhs)
             where
               svars' = svars `extendVarSetList` bs
 
@@ -936,74 +926,82 @@ addSize :: Size -> Size -> Size
 addSize (SSize n1) (SSize n2) = SSize (n1+n2)
 addSize _          _          = STooBig
 
+addSizeN :: Int -> Size -> Size
+addSizeN n1 (SSize n2) = SSize (n1+n2)
+addSizeN _  STooBig    = STooBig
+
 leqSize :: Size -> Int -> Bool
 leqSize STooBig   _ = False
 leqSize (SSize n) m = n <= m
 
 -------------------------
-type UnfoldingInfo = IdEnv ArgInfo
-   -- Domain is the bound vars of the function RHS
+data InlineContext
+   = IC { ic_free  :: Id -> ArgSummary  -- Current unfoldings for free variables
+        , ic_bound :: IdEnv ArgSummary  -- Summaries for local variables
+        , ic_want_res :: Bool           -- True <=> result is scrutinised/demanded
+                                        --          so apply result discount
+     }
 
 -------------------------
-exprTreeSize :: UnfoldingInfo       -- Unfolding
-             -> Bool                -- Apply result discount please
-             -> ExprTree -> Size
-exprTreeSize _ _ TooBig = STooBig
-exprTreeSize unf want_res (SizeIs { et_size  = size
-                                  , et_cases = cases
-                                  , et_ret   = ret_discount })
-  = foldr (addSize . caseTreeSize unf False)
+exprTreeSize :: InlineContext -> ExprTree -> Size
+exprTreeSize _    TooBig = STooBig
+exprTreeSize !ic (SizeIs { et_size  = size
+                         , et_cases = cases
+                         , et_ret   = ret_discount })
+  = foldr (addSize . caseTreeSize (ic { ic_want_res = False }))
           (sizeN discounted_size) cases
   where
-    discounted_size | want_res  = size - ret_discount
-                    | otherwise = size
+    discounted_size | ic_want_res ic = size - ret_discount
+                    | otherwise      = size
 
-caseTreeSize :: UnfoldingInfo -> Bool -> CaseTree -> Size
-caseTreeSize unf _ (ScrutOf bndr disc)
-  = case lookupBndr unf bndr of
+caseTreeSize :: InlineContext -> CaseTree -> Size
+caseTreeSize ic (ScrutOf bndr disc)
+  = case lookupBndr ic bndr of
       ArgNoInfo   -> sizeN 0
       ArgIsNot {} -> sizeN 0
       ArgIsLam    -> sizeN (-disc)  -- Apply discount
       ArgIsCon {} -> sizeN (-disc)  -- Apply discount
 
-caseTreeSize unf want_res (CaseOf bndr alts)
-  = case lookupBndr unf bndr of
-      ArgNoInfo     -> keptCaseSize unf want_res alts
-      ArgIsLam      -> keptCaseSize unf want_res alts
-      ArgIsNot cons -> keptCaseSize unf want_res (trim_alts cons alts)
+caseTreeSize ic (CaseOf var alts)
+  = case lookupBndr ic var of
+      ArgNoInfo     -> keptCaseSize ic alts
+      ArgIsLam      -> keptCaseSize ic alts
+      ArgIsNot cons -> keptCaseSize ic (trim_alts cons alts)
       ArgIsCon con args
-         | Just (AT _ bs rhs) <- find_alt con alts
-         , let unf' = extendVarEnvList unf (bs `zip` args)   -- In DEFAULT case, bs is empty
-         -> exprTreeSize unf' want_res rhs
+         | Just (AltTree _ bs rhs) <- find_alt con alts
+         , let ic' = ic { ic_bound = ic_bound ic `extendVarEnvList`
+                                     (bs `zip` args) }
+                     -- In DEFAULT case, bs is empty, so extend is a no-op
+         -> exprTreeSize ic' rhs
          | otherwise  -- Happens for empty alternatives
-         -> keptCaseSize unf want_res alts
+         -> keptCaseSize ic alts
 
 find_alt :: AltCon -> [AltTree] -> Maybe AltTree
 find_alt _   []                     = Nothing
 find_alt con (alt:alts)
-   | AT DEFAULT _ _ <- alt = go alts       (Just alt)
-   | otherwise             = go (alt:alts) Nothing
+   | AltTree DEFAULT _ _ <- alt = go alts       (Just alt)
+   | otherwise                  = go (alt:alts) Nothing
    where
      go []         deflt              = deflt
      go (alt:alts) deflt
-       | AT con' _ _ <- alt, con==con' = Just alt
-       | otherwise                     = go alts deflt
+       | AltTree con' _ _ <- alt, con==con' = Just alt
+       | otherwise                          = go alts deflt
 
 trim_alts :: [AltCon] -> [AltTree] -> [AltTree]
 trim_alts _   []                      = []
 trim_alts acs (alt:alts)
-  | AT con _ _ <- alt, con `elem` acs = trim_alts acs alts
-  | otherwise                         = alt : trim_alts acs alts
+  | AltTree con _ _ <- alt, con `elem` acs = trim_alts acs alts
+  | otherwise                              = alt : trim_alts acs alts
 
-keptCaseSize :: UnfoldingInfo -> Bool -> [AltTree] -> Size
+keptCaseSize :: InlineContext -> [AltTree] -> Size
 -- Size of a (retained) case expression
-keptCaseSize unf want_res alts
+keptCaseSize ic alts
   = foldr (addSize . size_alt) (sizeN 0) alts
     -- We make the case itself free, but charge for each alternative
     -- If there are no alternatives (case e of {}), we get just the size of the scrutinee
   where
     size_alt :: AltTree -> Size
-    size_alt (AT _ _ rhs) = sizeN 10 `addSize` exprTreeSize unf want_res rhs
+    size_alt (AltTree _ _ rhs) = sizeN 10 `addSize` exprTreeSize ic rhs
         -- Add 10 for each alternative
         -- Don't charge for args, so that wrappers look cheap
         -- (See comments about wrappers with Case)
@@ -1012,8 +1010,8 @@ keptCaseSize unf want_res alts
         -- find that giant case nests are treated as practically free
         -- A good example is Foreign.C.Error.errnoToIOError
 
-lookupBndr :: UnfoldingInfo -> Id -> ArgInfo
-lookupBndr unf bndr
-  | Just info <- lookupVarEnv unf bndr = info
-  | otherwise                          = idArgInfo bndr
+lookupBndr :: InlineContext -> Id -> ArgSummary
+lookupBndr (IC { ic_bound = bound_env, ic_free = lookup_free }) var
+  | Just info <- lookupVarEnv bound_env var = info
+  | otherwise                               = lookup_free var
 

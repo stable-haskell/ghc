@@ -135,5 +135,5 @@ seqCT (ScrutOf x i) = x `seq` i `seq` ()
 seqCT (CaseOf x alts) = x `seq` seqList seqAT alts
 
 seqAT :: AltTree -> ()
-seqAT (AT con bs e) = con `seq` seqBndrs bs `seq` seqET e
+seqAT (AltTree con bs e) = con `seq` seqBndrs bs `seq` seqET e
 
