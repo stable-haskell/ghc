@@ -17,7 +17,6 @@ import GHC.Core.TyCo.Rep
 import GHC.Core.Map.Type
 import GHC.Types.Var
 import GHC.Types.Literal
-import GHC.Types.Tickish
 
 import Data.Equality.Graph as EG
 import Data.Equality.Analysis.Monadic

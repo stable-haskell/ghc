@@ -1,6 +1,13 @@
 {-# LANGUAGE LambdaCase          #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE ViewPatterns        #-}
+{-# LANGUAGE TupleSections         #-}
+{-# LANGUAGE FlexibleInstances     #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE MultiWayIf            #-}
+{-# LANGUAGE TypeApplications      #-}
+{-# LANGUAGE ScopedTypeVariables   #-}
+{-# LANGUAGE ViewPatterns          #-}
+{-# LANGUAGE RankNTypes, GADTs     #-}
+{-# OPTIONS_GHC -Wno-orphans #-} -- Analysis........
 
 {-
 Authors: George Karachalias <george.karachalias@cs.kuleuven.be>
@@ -48,7 +55,6 @@ import GHC.Data.Bag
 import GHC.Types.CompleteMatch
 import GHC.Types.Unique.Set
 import GHC.Types.Unique.DSet
-import GHC.Types.Unique.SDFM
 import GHC.Types.Id
 import GHC.Types.Name
 import GHC.Types.Var      (EvVar)
@@ -63,7 +69,8 @@ import GHC.Core.Map.Expr
 import GHC.Core.Predicate (typeDeterminesValue)
 import GHC.Core.SimpleOpt (simpleOptExpr, exprIsConApp_maybe)
 import GHC.Core.Utils     (exprType)
-import GHC.Core.Make      (mkListExpr, mkCharExpr, mkImpossibleExpr)
+import GHC.Core.Make      (mkListExpr, mkCharExpr, mkImpossibleExpr, mkCoreApp)
+import GHC.Types.Id.Make (unboxedUnitExpr)
 
 import GHC.Data.FastString
 import GHC.Types.SrcLoc
@@ -96,6 +103,14 @@ import Data.Monoid   (Any(..))
 import Data.List     (sortBy, find)
 import qualified Data.List.NonEmpty as NE
 import Data.Ord      (comparing)
+
+import Data.Equality.Analysis.Monadic
+import Data.Equality.Graph (ClassId)
+import Data.Equality.Graph.Lens
+import qualified Data.Equality.Graph as EG
+import qualified Data.Equality.Graph.Monad as EGM
+import Data.Function ((&))
+import qualified Data.IntSet as IS
 
 --
 -- * Main exports
@@ -951,14 +966,13 @@ modifyT f = StateT $ fmap ((,) ()) . f
 -- Which is the @x@ of a @let x = e'@ constraint (with @e@ semantically
 -- equivalent to @e'@) we encountered earlier, or a fresh identifier if
 -- there weren't any such constraints.
-representCoreExpr :: Nabla -> CoreExpr -> DsM (Id, Nabla)
-representCoreExpr nabla@MkNabla{ nabla_tm_st = ts@TmSt{ ts_reps = reps } } e
-  | Just rep <- lookupCoreMap reps key = pure (rep, nabla)
-  | otherwise = do
-      rep <- mkPmId (exprType e)
-      let reps'  = extendCoreMap reps key rep
-      let nabla' = nabla{ nabla_tm_st = ts{ ts_reps = reps' } }
-      pure (rep, nabla')
+representCoreExpr :: Nabla -> CoreExpr -> MaybeT DsM (ClassId, Nabla)
+representCoreExpr (MkNabla tyst ts@TmSt{ ts_facts = egraph }) e = do
+  ((xid, egr''), tysty') <- (`runStateT` tyst) $ do
+      (xid, egr') <- representCoreExprEgr key egraph
+      egr'' <- EG.rebuildM egr'
+      return (xid, egr'')
+  return (xid, MkNabla tysty' ts{ts_facts = egr''})
   where
     key = makeDictsCoherent e
       -- Use a key in which dictionaries for the same type become equal.
@@ -969,6 +983,8 @@ representCoreExpr nabla@MkNabla{ nabla_tm_st = ts@TmSt{ ts_reps = reps } } e
 -- are considered equal when building a 'CoreMap'.
 --
 -- See Note [Unique dictionaries in the TmOracle CoreMap]
+-- ROMES:TODO: I suppose this should be taken into account by the Eq instance of DeBruijnF CoreExprF
+-- if we do that there then we're sure that EG.represent takes that into account.
 makeDictsCoherent :: CoreExpr -> CoreExpr
 makeDictsCoherent var@(Var v)
   | let ty = idType v
@@ -1271,11 +1287,11 @@ tyStateRefined a b = ty_st_n a /= ty_st_n b
 
 markDirty :: Id -> Nabla -> Nabla
 markDirty x nabla@MkNabla{nabla_tm_st = ts@TmSt{ts_dirty = dirty} } =
-  nabla{ nabla_tm_st = ts{ ts_dirty = extendDVarSet dirty x } }
+  nabla{ nabla_tm_st = ts{ ts_dirty = IS.insert x dirty } }
 
 traverseDirty :: Monad m => (VarInfo -> m VarInfo) -> TmState -> m TmState
 traverseDirty f ts@TmSt{ts_facts = env, ts_dirty = dirty} =
-  go (uniqDSetToList dirty) env
+  go (IS.elems dirty) env
   where
     go []     env  = pure ts{ts_facts=env}
     go (x:xs) !env = do
@@ -1308,7 +1324,7 @@ inhabitationTest fuel  old_ty_st nabla@MkNabla{ nabla_tm_st = ts } = {-# SCC "in
             else traverseDirty test_one ts
   pure nabla{ nabla_tm_st = ts'{ts_dirty=emptyDVarSet}}
   where
-    nabla_not_dirty = nabla{ nabla_tm_st = ts{ts_dirty=emptyDVarSet} }
+    nabla_not_dirty = nabla{ nabla_tm_st = ts{ts_dirty=IS.empty} }
     test_one :: VarInfo -> MaybeT DsM VarInfo
     test_one vi =
       lift (varNeedsTesting old_ty_st nabla vi) >>= \case
@@ -2080,3 +2096,52 @@ Note that for -XEmptyCase, we don't want to emit a minimal cover. We arrange
 that by passing 'CaseSplitTopLevel' to 'generateInhabitingPatterns'. We detect
 the -XEmptyCase case in 'reportWarnings' by looking for 'ReportEmptyCase'.
 -}
+
+------------------------------------------------
+-- * E-graphs for pattern match checking
+
+representId :: Id -> Nabla -> MaybeT DsM (ClassId, Nabla)
+representId x (MkNabla tyst tmst@TmSt{ts_facts=eg0})
+  = do
+    ((xid, tmst'),tyst') <- (`runStateT` tyst) $ do
+        (xid, eg1) <- EG.addM (EG.Node (FreeVarF x)) eg0
+        eg2 <- EG.rebuildM eg1 -- why do this here? I guess a good place as any, and should be cheap anyway (workload is not something like eqsat)
+        return (xid, tmst{ts_facts=eg2})
+    return (xid, MkNabla tyst' tmst')
+
+representIds :: [Id] -> Nabla -> MaybeT DsM ([ClassId], Nabla)
+representIds xs = runStateT (mapM (StateT . representId) xs)
+
+-- There are too many cycles for this to be in Solver.Types...
+-- We need the TyState to check insoluble constraints while merging VarInfos
+instance Analysis (StateT TyState (MaybeT DsM)) (Maybe VarInfo) ExprF where
+  {-# INLINE makeA #-}
+
+  -- When an e-class is created for a variable, we create an VarInfo from it.
+  -- It doesn't matter if this variable is bound or free, since it's the first
+  -- variable in this e-class (and all others would have to be equivalent to
+  -- it)
+  --
+  -- Also, the Eq instance for DeBruijn Vars will ensure that two free
+  -- variables with the same Id are equal and so they will be represented in
+  -- the same e-class
+  makeA (FreeVarF x) = pure $ emptyVarInfo x
+  makeA _ = pure $ Nothing
+
+  joinA Nothing Nothing  = Nothing
+  joinA Nothing (Just b) = Just b
+  joinA (Just a) Nothing = Just a
+
+  -- Add the constraints we had for x to y
+  joinA (Just vi_x) (Just vi_y) = do
+
+    -- Gradually merge every positive fact we have on x into y
+    -- The args are merged by congruence, since we represent the
+    -- constructor in the e-graph in addConCt.
+    let add_pos y (PACA cl tvs args) = mergeConCt y cl tvs args
+    vi_res <- foldlM add_pos vi_y (vi_pos vi_x)
+
+    -- Do the same for negative info
+    let add_neg vi nalt = lift $ snd <$> mergeNotConCt nalt vi
+    foldlM add_neg vi_res (pmAltConSetElems (vi_neg vi_x))
+
