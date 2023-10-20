@@ -40,11 +40,8 @@ import GHC.Core
 import GHC.Core.FVs
 import GHC.Core.Seq
 import GHC.Core.Utils
-
-        -- We are defining local versions
-import GHC.Core.Type hiding ( substTy )
-import GHC.Core.Coercion
-    ( tyCoFVsOfCo, mkCoVarCo, substCoVarBndr )
+import GHC.Core.Type    -- Subst comes from here
+import GHC.Core.Coercion( tyCoFVsOfCo, mkCoVarCo, substCoVarBndr )
 
 import GHC.Types.Var.Set
 import GHC.Types.Var.Env as InScopeSet

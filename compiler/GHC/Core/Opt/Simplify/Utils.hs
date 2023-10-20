@@ -1003,6 +1003,46 @@ interestingArg env e = go env 0 e
        where
          conlike_unfolding = isConLikeUnfolding (idUnfolding v)
 
+------------------------------
+idScrutInfo :: Id -> ScrutInfo
+idScrutInfo bndr
+  = case idUnfolding bndr of
+      OtherCon cs -> ScrutIsNot cs
+      DFunUnfolding { df_bndrs = bndrs, df_con = con, df_args = args }
+        | null bndrs
+        -> ScrutIsCon (DataAlt con) (map exprScrutInfo args)
+        | otherwise
+        -> ScrutNoInfo
+      CoreUnfolding { uf_tmpl = e }
+        -> exprScrutInfo e
+      NoUnfolding   -> ScrutNoInfo
+      BootUnfolding -> ScrutNoInfo
+
+exprScrutInfo :: CoreExpr -> ScrutInfo
+-- Very simple version of exprIsConApp_maybe
+exprScrutInfo e = go e []
+  where
+    go (Cast e _) as = go e as
+    go (Tick _ e) as = go e as
+    go (Let _ e)  as = go e as
+    go (App f a)  as = go f (a:as)
+    go (Lit l)    as = assertPpr (null as) (ppr as) $
+                       ScrutIsCon (LitAlt l) []
+    go (Var v)    as = go_var v as
+    go (Lam b e)  as
+      | null as = if isRuntimeVar b
+                  then ScrutIsLam
+                  else go e []
+    go _ _ = ScrutNoInfo
+
+    go_var v as
+      | Just con <- isDataConWorkId_maybe v
+      = ScrutIsCon (DataAlt con) (map exprScrutInfo as)
+      | Just rhs <- expandUnfolding_maybe (idUnfolding v)
+      = go rhs as
+      | otherwise
+      = ScrutNoInfo
+
 {-
 ************************************************************************
 *                                                                      *

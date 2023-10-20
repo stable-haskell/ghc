@@ -56,7 +56,8 @@ couldBeSmallEnoughToInline opts threshold rhs
 smallEnoughToInline :: UnfoldingOpts -> Unfolding -> Bool
 smallEnoughToInline opts (CoreUnfolding {uf_guidance = guidance})
   = case guidance of
-       UnfIfGoodArgs {ug_size = size} -> size <= unfoldingUseThreshold opts
+       UnfIfGoodArgs {ug_tree = et}
+         -> exprTreeSize emptyVarEnv False et `ltSize` unfoldingUseThreshold opts
        UnfWhen {} -> True
        UnfNever   -> False
 smallEnoughToInline _ _
