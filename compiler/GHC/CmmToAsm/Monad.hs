@@ -74,13 +74,47 @@ import GHC.Utils.Misc
 import GHC.CmmToAsm.CFG
 import GHC.CmmToAsm.CFG.Weight
 
+-- | A Native Code Generator implementation is parametrised over
+-- * The type of static data (typically related to 'CmmStatics')
+-- * The type of instructions
+-- * The type of jump destinations
 data NcgImpl statics instr jumpDest = NcgImpl {
     ncgConfig                 :: !NCGConfig,
     cmmTopCodeGen             :: RawCmmDecl -> NatM [NatCmmDecl statics instr],
     generateJumpTableForInstr :: instr -> Maybe (NatCmmDecl statics instr),
+    -- | Given a jump destination, if it refers to a block, return the block id of the destination.
     getJumpDestBlockId        :: jumpDest -> Maybe BlockId,
+    -- | Determine whether the given instruction is a jump to some destination.
+    -- The function is named as such because we use this predicate only in
+    -- order to shortcut redundant jumps, such as a jump to @b@ in the following program:
+    --
+    -- @
+    -- a:
+    --  goto b
+    -- b:
+    --  goto c
+    -- c:
+    --  ...
+    -- @
     canShortcut               :: instr -> Maybe jumpDest,
     shortcutStatics           :: (BlockId -> Maybe jumpDest) -> statics -> statics,
+    -- | Rewrite the jump destination of a jump instruction to another
+    -- destination, if the given function returns a new jump destination for
+    -- the 'BlockId' of the original destination.
+    --
+    -- For instance, if @goto b@, from the following program
+    --
+    -- @
+    -- a:
+    --  goto b
+    -- b:
+    --  goto c
+    -- c:
+    --  ...
+    -- @
+    --
+    -- is the given instruction, and the function maps @b@ to @c@,
+    -- 'shortcutJump' returns @goto c@
     shortcutJump              :: (BlockId -> Maybe jumpDest) -> instr -> instr,
     -- | 'Module' is only for printing internal labels. See Note [Internal proc
     -- labels] in CLabel.

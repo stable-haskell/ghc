@@ -1014,6 +1014,7 @@ instance Outputable JumpDest where
   ppr (DestBlockId bid) = text "jd<blk>:" <> ppr bid
   ppr (DestImm _imm)    = text "jd<imm>:noShow"
 
+-- Instances the methods of the same name in 'NgcImpl'
 
 getJumpDestBlockId :: JumpDest -> Maybe BlockId
 getJumpDestBlockId (DestBlockId bid) = Just bid
@@ -1023,7 +1024,6 @@ canShortcut :: Instr -> Maybe JumpDest
 canShortcut (JXX ALWAYS id)      = Just (DestBlockId id)
 canShortcut (JMP (OpImm imm) _)  = Just (DestImm imm)
 canShortcut _                    = Nothing
-
 
 -- This helper shortcuts a sequence of branches.
 -- The blockset helps avoid following cycles.
