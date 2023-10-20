@@ -14,7 +14,7 @@ module GHC.HsToCore.Pmc.Solver.Types (
 
         -- * Normalised refinement types
         BotInfo(..), PmAltConApp(..), VarInfo(..), TmState(..), TyState(..),
-        Nabla(..), Nablas(..), initNablas,
+        Nabla(..), Nablas(..), initNablas, emptyVarInfo,
         lookupRefuts, lookupSolution,
 
         -- ** Looking up 'VarInfo'
@@ -48,7 +48,6 @@ import GHC.Prelude
 import GHC.Data.Bag
 import GHC.Data.FastString
 import GHC.Types.Id
-import GHC.Types.Var.Set
 import GHC.Types.Unique.DSet
 import GHC.Types.Name
 import GHC.Core.DataCon
@@ -63,7 +62,6 @@ import GHC.Core.TyCon
 import GHC.Types.Literal
 import GHC.Core
 import GHC.Core.TyCo.Compare( eqType )
-import GHC.Core.Map.Expr
 import GHC.Core.Utils (exprType)
 import GHC.Builtin.Names
 import GHC.Builtin.Types
@@ -90,7 +88,6 @@ import qualified Data.Equality.Graph.Internal as EGI
 import Data.IntSet (IntSet)
 import qualified Data.IntSet as IS (empty)
 import Data.Bifunctor (second)
-import qualified Data.IntMap as IM
 
 -- import GHC.Driver.Ppr
 
@@ -244,10 +241,10 @@ instance Outputable BotInfo where
 -- | Not user-facing.
 instance Outputable TmState where
   -- TODO: Proper outputable instance for e-graphs?
-  ppr (TmSt state dirty) = text (show state) $$ ppr dirty
+  ppr (TmSt state dirty) = text (show state) -- $$ ppr dirty
 -- ROMES:TODO: Don't leave this here, it's just for debug
-instance Outputable IntSet where
-  ppr = text . show
+-- instance Outputable IntSet where
+--   ppr = text . show
 
 -- | Not user-facing.
 instance Outputable VarInfo where
@@ -346,17 +343,21 @@ lookupVarInfoNT ts x = case lookupVarInfo ts x of
       | isNewDataCon dc = Just y
     go _                = Nothing
 
-trvVarInfo :: forall f a. Functor f => (VarInfo -> f (a, VarInfo)) -> Nabla -> Id -> f (a, Nabla)
-trvVarInfo f nabla@MkNabla{ nabla_tm_st = ts@TmSt{ts_facts = env} } x@(lookupId ts -> Just xid)
-  = second (\g -> nabla{nabla_tm_st = ts{ts_facts=g}}) <$> updateAccum (_class xid._data.defaultEmpty) f env
+trvVarInfo :: forall f a. Functor f => (VarInfo -> f (a, VarInfo)) -> Nabla
+           -> (ClassId,Id)
+           -- ^ The ClassId of the VarInfo to traverse, and the Id represented
+           -- to get it, to determine the empty var info in case it isn't available.
+           -- ... Feels a bit weird, but let's see if it works at all
+           -> f (a, Nabla)
+trvVarInfo f nabla@MkNabla{ nabla_tm_st = ts@TmSt{ts_facts = env} } (xid,x)
+  = second (\g -> nabla{nabla_tm_st = ts{ts_facts=g}}) <$>
+    updateAccum (_class xid._data.defaultEmpty) f env
   where
     updateAccum :: forall f a s c. Functor f => Lens' s a -> (a -> f (c,a)) -> s -> f (c,s)
     updateAccum lens g = getCompose . lens @(Compose f ((,) c)) (Compose . g)
 
     defaultEmpty :: Lens' (Maybe VarInfo) VarInfo
     defaultEmpty f s = Just <$> (f (fromMaybe (emptyVarInfo x) s))
-
-trvVarInfo _ _ _ = error "Id not in Nabla"
 
 ------------------------------------------
 -- * Utility for looking up Ids in 'Nabla'
