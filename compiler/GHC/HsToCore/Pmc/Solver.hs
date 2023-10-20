@@ -1321,21 +1321,30 @@ tyStateRefined a b = ty_st_n a /= ty_st_n b
 
 markDirty :: Id -> Nabla -> Nabla
 markDirty x nabla@MkNabla{nabla_tm_st = ts@TmSt{ts_dirty = dirty} } =
-  nabla{ nabla_tm_st = ts{ ts_dirty = IS.insert x dirty } }
+  case lookupId ts x of
+    Nothing -> error "Marking as dirty an Id that is not represented in the Nabla"
+    Just xid ->
+      nabla{ nabla_tm_st = ts{ ts_dirty = IS.insert xid dirty } }
 
 traverseDirty :: Monad m => (VarInfo -> m VarInfo) -> TmState -> m TmState
 traverseDirty f ts@TmSt{ts_facts = env, ts_dirty = dirty} =
   go (IS.elems dirty) env
   where
     go []     env  = pure ts{ts_facts=env}
-    go (x:xs) !env = do
-      vi' <- f (lookupVarInfo ts x)
-      go xs (addToUSDFM env x vi')
+    go (xid:xs) !env = do
+      vi' <- f' (env ^._class xid._data)
+      go xs (env & _class xid._data .~ vi')
+
+    f' Nothing  = pure Nothing
+    f' (Just x) = Just <$> f x
 
 traverseAll :: Monad m => (VarInfo -> m VarInfo) -> TmState -> m TmState
 traverseAll f ts@TmSt{ts_facts = env} = do
-  env' <- traverseUSDFM f env
+  env' <- (_classes._data) f' env
   pure ts{ts_facts = env'}
+  where
+    f' Nothing  = pure Nothing
+    f' (Just x) = Just <$> f x
 
 -- | Makes sure the given 'Nabla' is still inhabited, by trying to instantiate
 -- all dirty variables (or all variables when the 'TyState' changed) to concrete
@@ -1356,7 +1365,7 @@ inhabitationTest fuel  old_ty_st nabla@MkNabla{ nabla_tm_st = ts } = {-# SCC "in
   ts' <- if tyStateRefined old_ty_st (nabla_ty_st nabla)
             then traverseAll   test_one ts
             else traverseDirty test_one ts
-  pure nabla{ nabla_tm_st = ts'{ts_dirty=emptyDVarSet}}
+  pure nabla{ nabla_tm_st = ts'{ts_dirty=IS.empty}}
   where
     nabla_not_dirty = nabla{ nabla_tm_st = ts{ts_dirty=IS.empty} }
     test_one :: VarInfo -> MaybeT DsM VarInfo

@@ -241,7 +241,7 @@ instance Outputable BotInfo where
 -- | Not user-facing.
 instance Outputable TmState where
   -- TODO: Proper outputable instance for e-graphs?
-  ppr (TmSt state dirty) = text (show state) -- $$ ppr dirty
+  ppr (TmSt state _dirty) = text (show state) -- $$ ppr dirty
 -- ROMES:TODO: Don't leave this here, it's just for debug
 -- instance Outputable IntSet where
 --   ppr = text . show
