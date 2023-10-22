@@ -312,6 +312,29 @@ Note [Honour INLINE on 0-ary bindings].
 
 I'm a bit worried that it's possible for the same kind of problem
 to arise for non-0-ary functions too, but let's wait and see.
+
+Note [Calculate unfolding guidance on the non-occ-anal'd expression]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Notice that we give the non-occur-analysed expression to
+calcUnfoldingGuidance.  In some ways it'd be better to occur-analyse
+first; for example, sometimes during simplification, there's a large
+let-bound thing which has been substituted, and so is now dead; so
+'expr' contains two copies of the thing while the occurrence-analysed
+expression doesn't.
+
+Nevertheless, we *don't* and *must not* occ-analyse before computing
+the size because
+
+a) The size computation bales out after a while, whereas occurrence
+   analysis does not.
+
+b) Residency increases sharply if you occ-anal first.  I'm not
+   100% sure why, but it's a large effect.  Compiling Cabal went
+   from residency of 534M to over 800M with this one change.
+
+This can occasionally mean that the guidance is very pessimistic;
+it gets fixed up next round.  And it should be rare, because large
+let-bound things that are dead are usually caught by preInlineUnconditionally
 -}
 
 mkUnfolding :: UnfoldingOpts

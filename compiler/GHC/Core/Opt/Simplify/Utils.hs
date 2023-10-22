@@ -29,6 +29,9 @@ module GHC.Core.Opt.Simplify.Utils (
         mkBoringStop, mkRhsStop, mkLazyArgStop,
         interestingCallContext,
 
+        -- The CallCtxt type
+        CallCtxt(..),
+        
         -- ArgInfo
         ArgInfo(..), ArgSpec(..), RewriteCall(..), mkArgInfo,
         addValArgTo, addCastTo, addTyArgTo,
@@ -518,6 +521,38 @@ contHoleType (Select { sc_dup = d, sc_bndr =  b, sc_env = se })
   = perhapsSubstTy d se (idType b)
 
 
+contHasRules :: SimplCont -> Bool
+-- If the argument has form (f x y), where x,y are boring,
+-- and f is marked INLINE, then we don't want to inline f.
+-- But if the context of the argument is
+--      g (f x y)
+-- where g has rules, then we *do* want to inline f, in case it
+-- exposes a rule that might fire.  Similarly, if the context is
+--      h (g (f x x))
+-- where h has rules, then we do want to inline f.  So contHasRules
+-- tries to see if the context of the f-call is a call to a function
+-- with rules.
+--
+-- The ai_encl flag makes this happen; if it's
+-- set, the inliner gets just enough keener to inline f
+-- regardless of how boring f's arguments are, if it's marked INLINE
+--
+-- The alternative would be to *always* inline an INLINE function,
+-- regardless of how boring its context is; but that seems overkill
+-- For example, it'd mean that wrapper functions were always inlined
+contHasRules cont
+  = go cont
+  where
+    go (ApplyToVal { sc_cont = cont }) = go cont
+    go (ApplyToTy  { sc_cont = cont }) = go cont
+    go (CastIt _ cont)                 = go cont
+    go (StrictArg { sc_fun = fun })    = ai_encl fun
+    go (Stop _ RuleArgCtxt _)          = True
+    go (TickIt _ c)                    = go c
+    go (Select {})                     = False
+    go (StrictBind {})                 = False      -- ??
+    go (Stop _ _ _)                    = False
+
 -- Computes the multiplicity scaling factor at the hole. That is, in (case [] of
 -- x ::(p) _ { … }) (respectively for arguments of functions), the scaling
 -- factor is p. And in E[G[]], the scaling factor is the product of the scaling
@@ -711,15 +746,36 @@ make use of the strictness info for the function.
 -}
 
 
-{-
-************************************************************************
+{- *********************************************************************
 *                                                                      *
-        Interesting arguments
+             CallCtxt: the context of a call
 *                                                                      *
-************************************************************************
+********************************************************************* -}
 
-Note [Interesting call context]
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+data CallCtxt
+  = BoringCtxt
+  | RhsCtxt RecFlag     -- Rhs of a let-binding; see Note [RHS of lets]
+  | DiscArgCtxt         -- Argument of a function with non-zero arg discount
+  | RuleArgCtxt         -- We are somewhere in the argument of a function with rules
+
+  | ValAppCtxt          -- We're applied to at least one value arg
+                        -- This arises when we have ((f x |> co) y)
+                        -- Then the (f x) has argument 'x' but in a ValAppCtxt
+
+  | CaseCtxt            -- We're the scrutinee of a case
+                        -- that decomposes its scrutinee
+
+instance Outputable CallCtxt where
+  ppr CaseCtxt    = text "CaseCtxt"
+  ppr ValAppCtxt  = text "ValAppCtxt"
+  ppr BoringCtxt  = text "BoringCtxt"
+  ppr (RhsCtxt ir)= text "RhsCtxt" <> parens (ppr ir)
+  ppr DiscArgCtxt = text "DiscArgCtxt"
+  ppr RuleArgCtxt = text "RuleArgCtxt"
+
+
+{- Note [Interesting call context]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 We want to avoid inlining an expression where there can't possibly be
 any gain, such as in an argument position.  Hence, if the continuation
 is interesting (eg. a case scrutinee that isn't just a seq, application etc.)
@@ -874,38 +930,6 @@ interestingCallContext env cont
         -- Here, the context of (f x) is strict, and if f's unfolding is
         -- a build it's *great* to inline it here.  So we must ensure that
         -- the context for (f x) is not totally uninteresting.
-
-contHasRules :: SimplCont -> Bool
--- If the argument has form (f x y), where x,y are boring,
--- and f is marked INLINE, then we don't want to inline f.
--- But if the context of the argument is
---      g (f x y)
--- where g has rules, then we *do* want to inline f, in case it
--- exposes a rule that might fire.  Similarly, if the context is
---      h (g (f x x))
--- where h has rules, then we do want to inline f.  So contHasRules
--- tries to see if the context of the f-call is a call to a function
--- with rules.
---
--- The ai_encl flag makes this happen; if it's
--- set, the inliner gets just enough keener to inline f
--- regardless of how boring f's arguments are, if it's marked INLINE
---
--- The alternative would be to *always* inline an INLINE function,
--- regardless of how boring its context is; but that seems overkill
--- For example, it'd mean that wrapper functions were always inlined
-contHasRules cont
-  = go cont
-  where
-    go (ApplyToVal { sc_cont = cont }) = go cont
-    go (ApplyToTy  { sc_cont = cont }) = go cont
-    go (CastIt _ cont)                 = go cont
-    go (StrictArg { sc_fun = fun })    = ai_encl fun
-    go (Stop _ RuleArgCtxt _)          = True
-    go (TickIt _ c)                    = go c
-    go (Select {})                     = False
-    go (StrictBind {})                 = False      -- ??
-    go (Stop _ _ _)                    = False
 
 
 {-

@@ -2,7 +2,6 @@
 (c) The University of Glasgow 2006
 (c) The AQUA Project, Glasgow University, 1994-1998
 
-
 Core-syntax unfoldings
 
 Unfoldings (which can travel across module boundaries) are in Core
@@ -22,7 +21,7 @@ module GHC.Core.Unfold (
 
         ExprTree, exprTree, exprTreeSize,
         exprTreeWillInline, couldBeSmallEnoughToInline,
-        ArgSummary(..), CallCtxt(..), hasArgInfo,
+        ArgSummary(..), hasArgInfo,
         Size, leqSize, addSizeN, adjustSize,
         InlineContext(..),
 
@@ -48,7 +47,7 @@ import GHC.Types.Var.Env
 import GHC.Types.Literal
 import GHC.Types.Id.Info
 import GHC.Types.RepType ( isZeroBitTy )
-import GHC.Types.Basic  ( Arity, RecFlag )
+import GHC.Types.Basic  ( Arity )
 import GHC.Types.ForeignCall
 import GHC.Types.Tickish
 
@@ -63,6 +62,67 @@ import GHC.Data.Bag
 
 import qualified Data.ByteString as BS
 
+
+{- Note [Overview of inlining heuristics]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Key examples
+------------
+Example 1:
+
+   let f x = case x of
+               A -> True
+               B -> <big>
+   in ...(f A)....(f B)...
+
+Even though f's entire RHS is big, it collapses to something small when applied
+to A.  We'd like to spot this.
+
+Example 1:
+
+   let f x = case x of
+               (p,q) -> case p of
+                           A -> True
+                           B -> <big>
+   in ...(f (A,3))....
+
+This is similar to Example 1, but nested.
+
+Example 3:
+
+   let j x = case y of
+               A -> True
+               B -> <big>
+   in case y of
+         A -> ..(j 3)...(j 4)....
+         B -> ...
+
+Here we want to spot that although the free far `y` is unknown at j's definition
+site, we know that y=A at the two calls in the A-alternative of the body. If `y`
+had been an argument we'd have spotted this; we'd like to get the same goodness
+when `y` is a free variable.
+
+This kind of thing can occur a lot with join points.
+
+Design overview
+---------------
+The question is whethe or not to inline f = rhs.
+The key idea is to abstract `rhs` to an ExprTree, which gives a measure of
+size, but records structure for case-expressions.
+
+
+The moving parts
+-----------------
+* An unfolding is accompanied (in its UnfoldingGuidance) with its GHC.Core.ExprTree,
+  computed by GHC.Core.Unfold.exprTree.
+
+* At a call site, GHC.Core.Opt.Simplify.Inline.contArgs constructs an ArgSummary
+  for each value argument. This reflects any nested data construtors.
+
+* Then GHC.Core.Unfold.exprTreeSize takes information about the context of the
+  call (particularly the ArgSummary for each argument) and computes a final size
+  for the inlined body, taking account of case-of-known-consructor.
+
+-}
 
 {- *********************************************************************
 *                                                                      *
@@ -159,73 +219,7 @@ updateReportPrefix :: Maybe String -> UnfoldingOpts -> UnfoldingOpts
 updateReportPrefix n opts = opts { unfoldingReportPrefix = n }
 
 
-{- *********************************************************************
-*                                                                      *
-                    Argument summary
-*                                                                      *
-********************************************************************* -}
-
-data ArgSummary = ArgNoInfo
-                | ArgIsCon AltCon [ArgSummary]  -- Includes type args
-                | ArgIsNot [AltCon]
-                | ArgIsLam
-
-hasArgInfo :: ArgSummary -> Bool
-hasArgInfo ArgNoInfo = False
-hasArgInfo _         = True
-
-instance Outputable ArgSummary where
-  ppr ArgNoInfo       = text "ArgNoInfo"
-  ppr ArgIsLam        = text "ArgIsLam"
-  ppr (ArgIsCon c as) = ppr c <> ppr as
-  ppr (ArgIsNot cs)   = text "ArgIsNot" <> ppr cs
-
-data CallCtxt
-  = BoringCtxt
-  | RhsCtxt RecFlag     -- Rhs of a let-binding; see Note [RHS of lets]
-  | DiscArgCtxt         -- Argument of a function with non-zero arg discount
-  | RuleArgCtxt         -- We are somewhere in the argument of a function with rules
-
-  | ValAppCtxt          -- We're applied to at least one value arg
-                        -- This arises when we have ((f x |> co) y)
-                        -- Then the (f x) has argument 'x' but in a ValAppCtxt
-
-  | CaseCtxt            -- We're the scrutinee of a case
-                        -- that decomposes its scrutinee
-
-instance Outputable CallCtxt where
-  ppr CaseCtxt    = text "CaseCtxt"
-  ppr ValAppCtxt  = text "ValAppCtxt"
-  ppr BoringCtxt  = text "BoringCtxt"
-  ppr (RhsCtxt ir)= text "RhsCtxt" <> parens (ppr ir)
-  ppr DiscArgCtxt = text "DiscArgCtxt"
-  ppr RuleArgCtxt = text "RuleArgCtxt"
-
 {-
-Note [Calculate unfolding guidance on the non-occ-anal'd expression]
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Notice that we give the non-occur-analysed expression to
-calcUnfoldingGuidance.  In some ways it'd be better to occur-analyse
-first; for example, sometimes during simplification, there's a large
-let-bound thing which has been substituted, and so is now dead; so
-'expr' contains two copies of the thing while the occurrence-analysed
-expression doesn't.
-
-Nevertheless, we *don't* and *must not* occ-analyse before computing
-the size because
-
-a) The size computation bales out after a while, whereas occurrence
-   analysis does not.
-
-b) Residency increases sharply if you occ-anal first.  I'm not
-   100% sure why, but it's a large effect.  Compiling Cabal went
-   from residency of 534M to over 800M with this one change.
-
-This can occasionally mean that the guidance is very pessimistic;
-it gets fixed up next round.  And it should be rare, because large
-let-bound things that are dead are usually caught by preInlineUnconditionally
-
-
 ************************************************************************
 *                                                                      *
 \subsection{The UnfoldingGuidance type}
@@ -294,20 +288,17 @@ calcUnfoldingGuidance opts is_top_bottoming expr
     is_case (CaseOf {})  = True
     is_case (ScrutOf {}) = False
 
-{- We use 'couldBeSmallEnoughToInline' to avoid exporting inlinings that
-   we ``couldn't possibly use'' on the other side.  Can be overridden w/
-   flaggery.  Just the same as smallEnoughToInline, except that it has no
-   actual arguments.
--}
 
 couldBeSmallEnoughToInline :: UnfoldingOpts -> Int -> CoreExpr -> Bool
+-- We use 'couldBeSmallEnoughToInline' to avoid exporting inlinings that
+-- we ``couldn't possibly use'' on the other side.  Can be overridden
+-- w/flaggery.  Just the same as smallEnoughToInline, except that it has no
+-- actual arguments.
 couldBeSmallEnoughToInline opts threshold rhs
   = exprTreeWillInline threshold $
     exprTree opts [] body
   where
     (_, body) = collectBinders rhs
-
-----------------
 
 
 {- Note [Inline unsafeCoerce]
@@ -1034,6 +1025,22 @@ data InlineContext
                                         --          so apply result discount
      }
 
+data ArgSummary = ArgNoInfo
+                | ArgIsCon AltCon [ArgSummary]  -- Includes type args
+                | ArgIsNot [AltCon]
+                | ArgIsLam
+
+hasArgInfo :: ArgSummary -> Bool
+hasArgInfo ArgNoInfo = False
+hasArgInfo _         = True
+
+instance Outputable ArgSummary where
+  ppr ArgNoInfo       = text "ArgNoInfo"
+  ppr ArgIsLam        = text "ArgIsLam"
+  ppr (ArgIsCon c as) = ppr c <> ppr as
+  ppr (ArgIsNot cs)   = text "ArgIsNot" <> ppr cs
+
+
 -------------------------
 exprTreeWillInline :: Int -> ExprTree -> Bool
 -- (cheapExprTreeSize limit et) takes an upper bound `n` on the
@@ -1056,6 +1063,8 @@ exprTreeWillInline limit et
     go_alt :: AltTree -> (Int -> Bool) -> Int -> Bool
     go_alt (AltTree _ _ et) k n = go et k (n+10)
 
+
+-------------------------
 exprTreeSize :: InlineContext -> ExprTree -> Size
 exprTreeSize _    TooBig = STooBig
 exprTreeSize !ic (SizeIs { et_size  = size

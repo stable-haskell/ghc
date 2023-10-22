@@ -9,7 +9,7 @@ This module contains inlining logic used by the simplifier.
 
 module GHC.Core.Opt.Simplify.Inline (
         -- * The smart inlining decisions are made by callSiteInline
-        callSiteInline, CallCtxt(..),
+        callSiteInline,
 
         exprSummary
     ) where
@@ -39,7 +39,7 @@ import Data.List (isPrefixOf)
 {-
 ************************************************************************
 *                                                                      *
-\subsection{callSiteInline}
+                  callSiteInline
 *                                                                      *
 ************************************************************************
 
@@ -509,55 +509,14 @@ This kind of thing can occur if you have
         foo = let x = e in (x,x)
 
 which Roman did.
-
-
 -}
 
-{-
-computeDiscount :: [Int] -> Int -> [ArgSummary] -> CallCtxt
-                -> Int
-computeDiscount arg_discounts res_discount arg_infos cont_info
 
-  = 10          -- Discount of 10 because the result replaces the call
-                -- so we count 10 for the function itself
-
-    + 10 * length actual_arg_discounts
-               -- Discount of 10 for each arg supplied,
-               -- because the result replaces the call
-
-    + total_arg_discount + res_discount'
-  where
-    actual_arg_discounts = zipWith mk_arg_discount arg_discounts arg_infos
-    total_arg_discount   = sum actual_arg_discounts
-
-    mk_arg_discount _        TrivArg    = 0
-    mk_arg_discount _        NonTrivArg = 10
-    mk_arg_discount discount ValueArg   = discount
-
-    res_discount'
-      | LT <- arg_discounts `compareLength` arg_infos
-      = res_discount   -- Over-saturated
-      | otherwise
-      = case cont_info of
-           BoringCtxt  -> 0
-           CaseCtxt    -> res_discount  -- Presumably a constructor
-           ValAppCtxt  -> res_discount  -- Presumably a function
-           _           -> 40 `min` res_discount
-                -- ToDo: this 40 `min` res_discount doesn't seem right
-                --   for DiscArgCtxt it shouldn't matter because the function will
-                --       get the arg discount for any non-triv arg
-                --   for RuleArgCtxt we do want to be keener to inline; but not only
-                --       constructor results
-                --   for RhsCtxt I suppose that exposing a data con is good in general
-                --   And 40 seems very arbitrary
-                --
-                -- res_discount can be very large when a function returns
-                -- constructors; but we only want to invoke that large discount
-                -- when there's a case continuation.
-                -- Otherwise we, rather arbitrarily, threshold it.  Yuk.
-                -- But we want to avoid inlining large functions that return
-                -- constructors into contexts that are simply "interesting"
--}
+{- *********************************************************************
+*                                                                      *
+                  Computing ArgSummary
+*                                                                      *
+********************************************************************* -}
 
 {- Note [Interesting arguments]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
