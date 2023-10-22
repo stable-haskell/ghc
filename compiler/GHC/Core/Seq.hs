@@ -132,7 +132,7 @@ seqET (SizeIs { et_size = size, et_cases = cases, et_ret = ret })
 
 seqCT :: CaseTree -> ()
 seqCT (ScrutOf x i) = x `seq` i `seq` ()
-seqCT (CaseOf x alts) = x `seq` seqList seqAT alts
+seqCT (CaseOf x y alts) = x `seq` y `seq` seqList seqAT alts
 
 seqAT :: AltTree -> ()
 seqAT (AltTree con bs e) = con `seq` seqBndrs bs `seq` seqET e

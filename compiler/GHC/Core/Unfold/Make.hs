@@ -376,8 +376,8 @@ certainlyWillInline opts fn_info rhs'
              UnfNever   -> Nothing
              UnfWhen {} -> Just (fn_unf { uf_src = src', uf_tmpl = tmpl' })
                              -- INLINE functions have UnfWhen
-             UnfIfGoodArgs { ug_size = size, ug_args = args }
-                        -> do_cunf size args src' tmpl'
+             UnfIfGoodArgs { ug_args = args, ug_tree = tree }
+                        -> do_cunf args tree src' tmpl'
         where
           src' | isCompulsorySource src = src  -- Do not change InlineCompulsory!
                | otherwise              = StableSystemSrc
@@ -396,19 +396,20 @@ certainlyWillInline opts fn_info rhs'
     noinline = isNoInlinePragma (inlinePragInfo fn_info)
     fn_unf   = unfoldingInfo fn_info -- NB: loop-breakers never inline
 
-        -- The UnfIfGoodArgs case seems important.  If we w/w small functions
-        -- binary sizes go up by 10%!  (This is with SplitObjs.)
-        -- I'm not totally sure why.
-        -- INLINABLE functions come via this path
-        --    See Note [certainlyWillInline: INLINABLE]
-    do_cunf size args src' tmpl'
+    -- The UnfIfGoodArgs case seems important.  If we w/w small functions
+    -- binary sizes go up by 10%!  (This is with SplitObjs.)
+    -- I'm not totally sure why.
+    -- INLINABLE functions come via this path
+    --    See Note [certainlyWillInline: INLINABLE]
+    do_cunf args tree src' tmpl'
       | arityInfo fn_info > 0  -- See Note [certainlyWillInline: be careful of thunks]
       , not (isDeadEndSig (dmdSigInfo fn_info))
               -- Do not unconditionally inline a bottoming functions even if
               -- it seems smallish. We've carefully lifted it out to top level,
               -- so we don't want to re-inline it.
       , let unf_arity = length args
-      , size - (10 * (unf_arity + 1)) <= unfoldingUseThreshold opts
+            limit = unfoldingUseThreshold opts + (10 * (unf_arity + 1))
+      , exprTreeWillInline limit tree
       = Just (fn_unf { uf_src      = src'
                      , uf_tmpl     = tmpl'
                      , uf_guidance = UnfWhen { ug_arity     = unf_arity

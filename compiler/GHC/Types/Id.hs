@@ -752,7 +752,7 @@ idTagSig_maybe = tagSig . idInfo
 -- loop breaker. See 'unfoldingInfo'.
 --
 -- If you really want the unfolding of a strong loopbreaker, call 'realIdUnfolding'.
-idUnfolding :: IdUnfoldingFun
+idUnfolding :: HasDebugCallStack => IdUnfoldingFun
 idUnfolding id = unfoldingInfo (idInfo id)
 
 noUnfoldingFun :: IdUnfoldingFun

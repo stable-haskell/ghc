@@ -1414,6 +1414,8 @@ data UnfoldingGuidance
   | UnfIfGoodArgs {     -- Arose from a normal Id
       ug_args :: [Var],      -- Arguments
       ug_tree :: ExprTree    -- Abstraction of the body
+      -- Invariant: free vars of ug_tree are the ug_args, plus variables
+      --            in scope at the binding site of the function definition
     }
 
   | UnfNever        -- The RHS is big, so don't inline it
@@ -1421,13 +1423,14 @@ data UnfoldingGuidance
 data ExprTree
   = TooBig
   | SizeIs { et_size  :: {-# UNPACK #-} !Int
-           , et_cases :: Bag CaseTree
            , et_ret   :: {-# UNPACK #-} !Int
                 -- ^ Discount when result is scrutinised
+           , et_cases :: Bag CaseTree
     }
 
 data CaseTree
   = CaseOf Id          -- Abstracts a case expression on this Id
+           Id          -- Case binder
            [AltTree]   -- Always non-empty, but not worth making NonEmpty;
                        -- nothing relies on non-empty-ness
   | ScrutOf Id Int     -- If this Id is bound to a value, apply this discount

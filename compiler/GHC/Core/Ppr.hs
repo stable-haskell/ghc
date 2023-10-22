@@ -634,11 +634,11 @@ instance Outputable ExprTree where
 
 instance Outputable CaseTree where
   ppr (ScrutOf x n)   = ppr x <> colon <> int n
-  ppr (CaseOf x alts) = text "case" <+> ppr x
-                        <+> brackets (sep (map ppr alts))
+  ppr (CaseOf x b alts) = sep [ text "case" <+> ppr x <+> ppr b
+                              , nest 2 $ braces $ sep $ map ppr alts ]
 
 instance Outputable AltTree where
-  ppr (AltTree con bs rhs) = ppr con <+> ppr bs <+> text "->" <+> ppr rhs
+  ppr (AltTree con bs rhs) = sep [ppr con <+> ppr bs <+> text "->", nest 2 (ppr rhs)]
 
 instance Outputable Unfolding where
   ppr NoUnfolding                = text "No unfolding"

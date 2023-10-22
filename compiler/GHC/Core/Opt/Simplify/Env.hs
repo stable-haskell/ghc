@@ -75,6 +75,8 @@ import GHC.Types.Id as Id
 import GHC.Types.Basic
 import GHC.Types.Unique.FM      ( pprUniqFM )
 
+import GHC.Unit.Types( Module )
+
 import GHC.Data.OrdList
 import GHC.Data.Graph.UnVar
 
@@ -242,7 +244,8 @@ seUnfoldingOpts env = sm_uf_opts (seMode env)
 
 -- See Note [The environments of the Simplify pass]
 data SimplMode = SimplMode -- See comments in GHC.Core.Opt.Simplify.Monad
-  { sm_phase        :: !CompilerPhase
+  { sm_module       ::  !Module
+  , sm_phase        :: !CompilerPhase
   , sm_names        :: ![String]      -- ^ Name(s) of the phase
   , sm_rules        :: !Bool          -- ^ Whether RULES are enabled
   , sm_inline       :: !Bool          -- ^ Whether inlining is enabled
@@ -910,12 +913,12 @@ So we want to look up the inner X.g_34 in the substitution, where we'll
 find that it has been substituted by b.  (Or conceivably cloned.)
 -}
 
-substId :: SimplEnv -> InId -> SimplSR
+substId :: HasDebugCallStack => SimplEnv -> InId -> SimplSR
 -- Returns DoneEx only on a non-Var expression
-substId (SimplEnv { seInScope = in_scope, seIdSubst = ids }) v
+substId (SimplEnv { seMode = mode, seInScope = in_scope, seIdSubst = ids }) v
   = case lookupVarEnv ids v of  -- Note [Global Ids in the substitution]
-        Nothing               -> DoneId (refineFromInScope in_scope v)
-        Just (DoneId v)       -> DoneId (refineFromInScope in_scope v)
+        Nothing               -> DoneId (refineFromInScope mode in_scope v)
+        Just (DoneId v)       -> DoneId (refineFromInScope mode in_scope v)
         Just res              -> res    -- DoneEx non-var, or ContEx
 
         -- Get the most up-to-date thing from the in-scope set
@@ -924,22 +927,24 @@ substId (SimplEnv { seInScope = in_scope, seIdSubst = ids }) v
         --
         -- See also Note [In-scope set as a substitution] in GHC.Core.Opt.Simplify.
 
-refineFromInScope :: InScopeSet -> Var -> Var
-refineFromInScope in_scope v
+refineFromInScope :: HasDebugCallStack => SimplMode -> InScopeSet -> Var -> Var
+refineFromInScope mode in_scope v
   | isLocalId v = case lookupInScope in_scope v of
                   Just v' -> v'
-                  Nothing -> pprPanic "refineFromInScope" (ppr in_scope $$ ppr v)
+                  Nothing -> -- pprPanic "refineFromInScope" (ppr in_scope $$ ppr v)
+                             pprTrace "refineFromInScope"
+                                 (ppr (sm_module mode) <+> ppr v) v
                              -- c.f #19074 for a subtle place where this went wrong
   | otherwise = v
 
 lookupRecBndr :: SimplEnv -> InId -> OutId
 -- Look up an Id which has been put into the envt by simplRecBndrs,
 -- but where we have not yet done its RHS
-lookupRecBndr (SimplEnv { seInScope = in_scope, seIdSubst = ids }) v
+lookupRecBndr (SimplEnv { seMode = mode, seInScope = in_scope, seIdSubst = ids }) v
   = case lookupVarEnv ids v of
         Just (DoneId v) -> v
         Just _ -> pprPanic "lookupRecBndr" (ppr v)
-        Nothing -> refineFromInScope in_scope v
+        Nothing -> refineFromInScope mode in_scope v
 
 {-
 ************************************************************************

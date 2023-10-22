@@ -21,8 +21,10 @@ module GHC.Core.Unfold (
         Unfolding, UnfoldingGuidance,   -- Abstract types
 
         ExprTree, exprTree, exprTreeSize,
-        ArgSummary(..), CallCtxt(..),
-        Size, leqSize, addSizeN,
+        exprTreeWillInline, couldBeSmallEnoughToInline,
+        ArgSummary(..), CallCtxt(..), hasArgInfo,
+        Size, leqSize, addSizeN, adjustSize,
+        InlineContext(..),
 
         UnfoldingOpts (..), defaultUnfoldingOpts,
         updateCreationThreshold, updateUseThreshold,
@@ -55,6 +57,7 @@ import GHC.Builtin.PrimOps
 
 import GHC.Utils.Misc
 import GHC.Utils.Outputable
+import GHC.Utils.Panic
 
 import GHC.Data.Bag
 
@@ -163,9 +166,13 @@ updateReportPrefix n opts = opts { unfoldingReportPrefix = n }
 ********************************************************************* -}
 
 data ArgSummary = ArgNoInfo
-                | ArgIsCon AltCon [ArgSummary]
+                | ArgIsCon AltCon [ArgSummary]  -- Includes type args
                 | ArgIsNot [AltCon]
                 | ArgIsLam
+
+hasArgInfo :: ArgSummary -> Bool
+hasArgInfo ArgNoInfo = False
+hasArgInfo _         = True
 
 instance Outputable ArgSummary where
   ppr ArgNoInfo       = text "ArgNoInfo"
@@ -264,10 +271,11 @@ calcUnfoldingGuidance opts is_top_bottoming (Tick t expr)
   | not (tickishIsCode t)  -- non-code ticks don't matter for unfolding
   = calcUnfoldingGuidance opts is_top_bottoming expr
 calcUnfoldingGuidance opts is_top_bottoming expr
-  = case exprTree opts bOMB_OUT_SIZE (mkVarSet val_bndrs) body of
+  = case exprTree opts val_bndrs body of
       TooBig -> UnfNever
-      et@(SizeIs { et_size = size })
-        | uncondInline expr n_val_bndrs size
+      et@(SizeIs { et_size = size, et_cases = cases })
+        | not (any is_case cases)
+        , uncondInline expr n_val_bndrs size
         -> UnfWhen { ug_unsat_ok  = unSaturatedOk
                    , ug_boring_ok =  boringCxtOk
                    , ug_arity     = n_val_bndrs }   -- Note [INLINE for small functions]
@@ -280,10 +288,27 @@ calcUnfoldingGuidance opts is_top_bottoming expr
 
   where
     (bndrs, body) = collectBinders expr
-    bOMB_OUT_SIZE = unfoldingCreationThreshold opts
-           -- Bomb out if size gets bigger than this
     val_bndrs   = filter isId bndrs
     n_val_bndrs = length val_bndrs
+
+    is_case (CaseOf {})  = True
+    is_case (ScrutOf {}) = False
+
+{- We use 'couldBeSmallEnoughToInline' to avoid exporting inlinings that
+   we ``couldn't possibly use'' on the other side.  Can be overridden w/
+   flaggery.  Just the same as smallEnoughToInline, except that it has no
+   actual arguments.
+-}
+
+couldBeSmallEnoughToInline :: UnfoldingOpts -> Int -> CoreExpr -> Bool
+couldBeSmallEnoughToInline opts threshold rhs
+  = exprTreeWillInline threshold $
+    exprTree opts [] body
+  where
+    (_, body) = collectBinders rhs
+
+----------------
+
 
 {- Note [Inline unsafeCoerce]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -438,56 +463,99 @@ uncondInline rhs arity size
 *                                                                      *
 ********************************************************************* -}
 
-exprTree :: UnfoldingOpts
-         -> Int             -- Bomb out if it gets bigger than this
-         -> VarSet          -- Record scrutiny of these variables
-         -> CoreExpr
-         -> ExprTree
+{- Note [Constructing an ExprTree]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+We maintain:
+* avs: argument variables, or variables bound by a case on an
+       argument variable.
 
+  We record a CaseOf or ScrutOf for the `avs`
+
+* lvs: variables bound by lambda and lets in the body; and by
+       case expressions that scrutinise one of the `lvs`, or
+       a non-variable.
+
+  We never record a CaseOf or ScrutOf for one of the `lvs`.
+
+* We record a CaseOf, but not ScrutOf, for other variables; that is,
+  variables free in the entire function definition.  For example:
+        let  f x = case y of
+                     A -> True
+                     B -> <big>
+        in
+        case y of
+          A -> ....f 3....f 4....
+          B -> blah
+  At the calls site of `f` we know that the free var `y` is equal to A, so
+  f should definitely inline.
+
+  But consider instead this example
+        let f x = y x 3 <big>
+        in  ...(f 3)...
+  There nothing we will learn about the free `y` that will make the inining of
+  `f` more attractive.  Hence we don't record ScrutOf for y.
+
+  This is IMPORTANT, because even a call like (reverse xs) would otherwise record
+  a ScrutOf for `reverse` which is very silly.
+-}
+
+type ETVars = (VarSet,VarSet)  -- (avs, lvs)
+              -- See Note [Constructing an ExprTree]
+
+exprTree :: UnfoldingOpts -> [Var] -> CoreExpr -> ExprTree
 -- Note [Computing the size of an expression]
 
--- Forcing bOMB_OUT_SIZE early prevents repeated
--- unboxing of the Int argument.
-exprTree opts !bOMB_OUT_SIZE svars expr
-  = size_up expr
+exprTree opts args expr
+  = go (mkVarSet args, emptyVarSet) expr
   where
+    !bOMB_OUT_SIZE = unfoldingCreationThreshold opts
+       -- Bomb out if size gets bigger than this
+       -- Forcing bOMB_OUT_SIZE early prevents repeated
+       -- unboxing of the Int argument.
+
     et_add     = etAdd bOMB_OUT_SIZE
     et_add_alt = etAddAlt bOMB_OUT_SIZE
 
-    size_up :: CoreExpr -> ExprTree
-    size_up (Cast e _)   = size_up e
-    size_up (Tick _ e)   = size_up e
-    size_up (Type _)     = exprTreeN 0
-    size_up (Coercion _) = exprTreeN 0
-    size_up (Lit lit)    = exprTreeN (litSize lit)
+    go :: ETVars -> CoreExpr -> ExprTree
+          -- (avs,lvs): see Note [Constructing an ExprTree]
+    go vs (Cast e _)   = go vs e
+    go vs (Tick _ e)   = go vs e
+    go _  (Type _)     = exprTreeN 0
+    go _  (Coercion _) = exprTreeN 0
+    go _  (Lit lit)    = exprTreeN (litSize lit)
 
-    size_up (Lam b e)
-      | isId b, not (id_is_free b) = size_up e `et_add` lamSize opts
-      | otherwise                  = size_up e
+    go vs (Lam b e)
+      | isId b, not (id_is_free b) = go vs' e `et_add` lamSize opts
+      | otherwise                  = go vs' e
+      where
+        vs' = vs `add_lv` b
 
-    size_up (Let (NonRec binder rhs) body)
-      = size_up_bind (binder, rhs)  `et_add` size_up body
+    go vs (Let (NonRec binder rhs) body)
+      = go_bind vs (binder, rhs)  `et_add`
+        go (vs `add_lv` binder) body
 
-    size_up (Let (Rec pairs) body)
-      = foldr (et_add . size_up_bind) (size_up body) pairs
+    go vs (Let (Rec pairs) body)
+      = foldr (et_add . go_bind vs') (go vs' body) pairs
+      where
+        vs' = vs `add_lvs` map fst pairs
 
-    size_up e@(App {}) = size_up_app e []
+    go vs e@(App {}) = go_app vs e []
 
-    size_up (Var f) | id_is_free f = exprTreeN 0
+    go vs (Var f) | id_is_free f = exprTreeN 0
                     -- Use calLSize to ensure we get constructor
                     -- discounts even on nullary constructors
-                    | otherwise    = callTree opts svars f []
+                    | otherwise  = callTree opts vs f []
 
-    size_up (Case e _ _ alts) = size_up_case e alts
+    go vs (Case e b _ alts) = go_case vs e b alts
 
     -----------------------------
-    size_up_bind (bndr, rhs)
+    go_bind vs (bndr, rhs)
       | JoinPoint join_arity <- idJoinPointHood bndr
-      , (_bndrs, body) <- collectNBinders join_arity rhs
+      , (bndrs, body) <- collectNBinders join_arity rhs
                           -- Skip arguments to join point
-      = size_up body
+      = go (vs `add_lvs` bndrs) body
       | otherwise
-      = size_up_alloc bndr `etAddN` size_up rhs
+      = size_up_alloc bndr `etAddN` go vs rhs
 
     -- Cost to allocate binding with given binder
     size_up_alloc bndr
@@ -500,94 +568,109 @@ exprTree opts !bOMB_OUT_SIZE svars expr
 
     -----------------------------
     -- size_up_app is used when there's ONE OR MORE value args
-    size_up_app :: CoreExpr -> [CoreExpr] -> ExprTree
+    go_app :: ETVars -> CoreExpr -> [CoreExpr] -> ExprTree
                    -- args are the non-void value args
-    size_up_app (App fun arg) args
-                 | arg_is_free arg = size_up_app fun args
-                 | otherwise       = size_up arg  `et_add`
-                                     size_up_app fun (arg:args)
-    size_up_app (Var fun)     args = callTree opts svars fun args
-    size_up_app (Tick _ expr) args = size_up_app expr args
-    size_up_app (Cast expr _) args = size_up_app expr args
-    size_up_app other         args = vanillaCallSize (length args) `etAddN`
-                                     size_up other
+    go_app vs (App fun arg) args
+               | arg_is_free arg = go_app vs fun args
+               | otherwise       = go vs arg `et_add`
+                                   go_app vs fun (arg:args)
+    go_app vs (Var fun)     args = callTree opts vs fun args
+    go_app vs (Tick _ expr) args = go_app vs expr args
+    go_app vs (Cast expr _) args = go_app vs expr args
+    go_app vs other         args = vanillaCallSize (length args) `etAddN`
+                                   go vs other
        -- if the lhs is not an App or a Var, or an invisible thing like a
        -- Tick or Cast, then we should charge for a complete call plus the
        -- size of the lhs itself.
 
     -----------------------------
-    size_up_case scrut [] = size_up scrut
+    -- Empty case
+    go_case vs scrut _ [] = go vs scrut
          -- case e of {} never returns, so take size of scrutinee
 
-    size_up_case scrut alts                    -- Now alts is non-empty
-        | Just v <- interesting_id svars scrut -- We are scrutinising an argument variable
-        = size_up scrut `et_add`
-          etZero { et_cases = unitBag (CaseOf v (map alt_alt_tree alts)) }
+    -- Record a CaseOf
+    go_case vs@(avs,lvs) scrut b alts                 -- Now alts is non-empty
+      | Just v <- recordCaseOf vs scrut
+      = -- pprTrace "recordCaseOf" (ppr v $$ ppr lvs $$ ppr scrut $$ ppr alts) $
+        go vs scrut `et_add`
+        etZero { et_cases = unitBag (CaseOf v b (map (alt_alt_tree v) alts)) }
+      where
+        alt_alt_tree :: Id -> Alt Var -> AltTree
+        alt_alt_tree v (Alt con bs rhs)
+          = AltTree con bs (10 `etAddN` go (add_alt_bndrs v bs) rhs)
 
-        | otherwise
-        = case_size     `etAddN`   -- A bit odd that this is only in one branch
-          size_up scrut `et_add`
-          foldr1 et_add_alt (map alt_expr_tree alts)
+        add_alt_bndrs v bs
+          | v `elemVarSet` avs = (avs `extendVarSetList` (b:bs), lvs)
+                                 -- Don't forget to add the case binder, b
+          | otherwise = vs
 
-        where
-          alt_alt_tree :: Alt Var -> AltTree
-          alt_alt_tree (Alt con bs rhs)
-            = AltTree con bs (exprTree opts bOMB_OUT_SIZE svars' rhs)
-            where
-              svars' = svars `extendVarSetList` bs
+    -- Don't record a CaseOf
+    go_case vs scrut b alts    -- alts is non-empty
+      = caseSize scrut alts `etAddN`   -- A bit odd that this is only in one branch
+        go vs scrut         `et_add`
+        foldr1 et_add_alt (map alt_expr_tree alts)
+      where
+        alt_expr_tree :: Alt Var -> ExprTree
+        alt_expr_tree (Alt _con bs rhs)
+          = 10 `etAddN` go (vs `add_lvs` (b:bs)) rhs
+            -- Don't charge for bndrs, so that wrappers look cheap
+            -- (See comments about wrappers with Case)
+            -- Don't forget to add the case binder, b, to lvs.
+            --
+            -- IMPORTANT: *do* charge 10 for the alternative, else we
+            -- find that giant case nests are treated as practically free
+            -- A good example is Foreign.C.Error.errnoToIOError
 
-          alt_expr_tree :: Alt Var -> ExprTree
-          alt_expr_tree (Alt _con _bndrs rhs) = 10 `etAddN` size_up rhs
-              -- Don't charge for bndrs, so that wrappers look cheap
-              -- (See comments about wrappers with Case)
+caseSize :: CoreExpr -> [CoreAlt] -> Int
+caseSize scrut alts
+  | is_inline_scrut scrut, lengthAtMost alts 1 = -10
+  | otherwise                                  = 0
+              -- Normally we don't charge for the case itself, but
+              -- we charge one per alternative (see size_up_alt,
+              -- below) to account for the cost of the info table
+              -- and comparisons.
               --
-              -- IMPORTANT: *do* charge 10 for the alternative, else we
-              -- find that giant case nests are treated as practically free
-              -- A good example is Foreign.C.Error.errnoToIOError
+              -- However, in certain cases (see is_inline_scrut
+              -- below), no code is generated for the case unless
+              -- there are multiple alts.  In these cases we
+              -- subtract one, making the first alt free.
+              -- e.g. case x# +# y# of _ -> ...   should cost 1
+              --      case touch# x# of _ -> ...  should cost 0
+              -- (see #4978)
+              --
+              -- I would like to not have the "lengthAtMost alts 1"
+              -- condition above, but without that some programs got worse
+              -- (spectral/hartel/event and spectral/para).  I don't fully
+              -- understand why. (SDM 24/5/11)
 
-          case_size
-           | is_inline_scrut scrut, lengthAtMost alts 1 = -10
-           | otherwise                                  = 0
-                -- Normally we don't charge for the case itself, but
-                -- we charge one per alternative (see size_up_alt,
-                -- below) to account for the cost of the info table
-                -- and comparisons.
-                --
-                -- However, in certain cases (see is_inline_scrut
-                -- below), no code is generated for the case unless
-                -- there are multiple alts.  In these cases we
-                -- subtract one, making the first alt free.
-                -- e.g. case x# +# y# of _ -> ...   should cost 1
-                --      case touch# x# of _ -> ...  should cost 0
-                -- (see #4978)
-                --
-                -- I would like to not have the "lengthAtMost alts 1"
-                -- condition above, but without that some programs got worse
-                -- (spectral/hartel/event and spectral/para).  I don't fully
-                -- understand why. (SDM 24/5/11)
+              -- Unboxed variables, inline primops and unsafe foreign calls
+              -- are all "inline" things:
+  where
+    is_inline_scrut (Var v) =
+      isUnliftedType (idType v)
+        -- isUnliftedType is OK here: scrutinees have a fixed RuntimeRep (search for FRRCase)
+    is_inline_scrut scrut
+        | (Var f, _) <- collectArgs scrut
+          = case idDetails f of
+              FCallId fc    -> not (isSafeForeignCall fc)
+              PrimOpId op _ -> not (primOpOutOfLine op)
+              _other        -> False
+        | otherwise
+          = False
 
-                -- Unboxed variables, inline primops and unsafe foreign calls
-                -- are all "inline" things:
+add_lv :: ETVars -> Var -> ETVars
+add_lv (avs,lvs) b = (avs, lvs `extendVarSet` b)
 
-          is_inline_scrut (Var v) =
-            isUnliftedType (idType v)
-              -- isUnliftedType is OK here: scrutinees have a fixed RuntimeRep (search for FRRCase)
-          is_inline_scrut scrut
-              | (Var f, _) <- collectArgs scrut
-                = case idDetails f of
-                    FCallId fc    -> not (isSafeForeignCall fc)
-                    PrimOpId op _ -> not (primOpOutOfLine op)
-                    _other        -> False
-              | otherwise
-                = False
-    ------------
+add_lvs :: ETVars -> [Var] -> ETVars
+add_lvs (avs,lvs) bs = (avs, lvs `extendVarSetList` bs)
 
-interesting_id :: VarSet -> CoreExpr -> Maybe Id
-interesting_id svars (Var v)
-  | v `elemVarSet` svars  = Just v
-interesting_id svars (Tick _ e) = interesting_id svars e
-interesting_id svars (Cast e _) = interesting_id svars e
-interesting_id _     _          = Nothing
+recordCaseOf :: ETVars -> CoreExpr -> Maybe Id
+recordCaseOf (_,lvs) (Var v)
+     | v `elemVarSet` lvs  = Nothing
+     | otherwise           = Just v
+recordCaseOf vs (Tick _ e) = recordCaseOf vs e
+recordCaseOf vs (Cast e _) = recordCaseOf vs e
+recordCaseOf _     _       = Nothing
 
 arg_is_free :: CoreExpr -> Bool
 -- "free" means we don't charge for this
@@ -619,15 +702,15 @@ litSize _other = 0    -- Must match size of nullary constructors
                       --            (eg via case binding)
 
 ----------------------------
-callTree :: UnfoldingOpts -> VarSet -> Id -> [CoreExpr] -> ExprTree
-callTree opts svars fun val_args
+callTree :: UnfoldingOpts -> ETVars -> Id -> [CoreExpr] -> ExprTree
+callTree opts vs fun val_args
   = case idDetails fun of
       FCallId _        -> exprTreeN (vanillaCallSize n_val_args)
       JoinId {}        -> exprTreeN (jumpSize        n_val_args)
       PrimOpId op _    -> exprTreeN (primOpSize op   n_val_args)
       DataConWorkId dc -> conSize dc n_val_args
-      ClassOpId {}     -> classOpSize opts svars val_args
-      _                -> funSize opts svars fun n_val_args
+      ClassOpId {}     -> classOpSize opts vs fun val_args
+      _                -> funSize opts vs fun n_val_args
   where
     n_val_args = length val_args
 
@@ -645,14 +728,15 @@ jumpSize n_val_args = 2 * (1 + n_val_args)
   -- spectral/puzzle. TODO Perhaps adjusting the default threshold would be a
   -- better solution?
 
-classOpSize :: UnfoldingOpts -> VarSet -> [CoreExpr] -> ExprTree
+classOpSize :: UnfoldingOpts -> ETVars -> Id -> [CoreExpr] -> ExprTree
 -- See Note [Conlike is interesting]
-classOpSize _ _ []
+classOpSize _ _ _ []
   = etZero
-classOpSize opts svars val_args
+classOpSize opts vs fn val_args
   | arg1 : _ <- val_args
-  , Just dict <- interesting_id svars arg1
-  = vanillaCallSize (length val_args) `etAddN`
+  , Just dict <- recordCaseOf vs arg1
+  = warnPprTrace (not (isId dict)) "classOpSize" (ppr fn <+> ppr val_args) $
+    vanillaCallSize (length val_args) `etAddN`
     etZero { et_cases = unitBag (ScrutOf dict (unfoldingDictDiscount opts)) }
            -- If the class op is scrutinising a lambda bound dictionary then
            -- give it a discount, to encourage the inlining of this function
@@ -660,10 +744,10 @@ classOpSize opts svars val_args
   | otherwise
   = exprTreeN (vanillaCallSize (length val_args))
 
-funSize :: UnfoldingOpts -> VarSet -> Id -> Int -> ExprTree
+funSize :: UnfoldingOpts -> ETVars -> Id -> Int -> ExprTree
 -- Size for function calls that are not constructors or primops
 -- Note [Function applications]
-funSize opts svars fun n_val_args
+funSize opts (avs,_) fun n_val_args
   | fun `hasKey` buildIdKey   = etZero  -- Wwant to inline applications of build/augment
   | fun `hasKey` augmentIdKey = etZero  -- so we give size zero to the whole call
   | otherwise = SizeIs { et_size  = size
@@ -676,7 +760,7 @@ funSize opts svars fun n_val_args
     -- Discount if this is an interesting variable, and is applied
     -- Discount is enough to make the application free (but not negative!)
     --  See Note [Function and non-function discounts]
-    cases | n_val_args > 0, fun `elemVarSet` svars
+    cases | n_val_args > 0, fun `elemVarSet` avs
           = unitBag (ScrutOf fun size)
           | otherwise
           = emptyBag
@@ -919,6 +1003,10 @@ etZero = SizeIs { et_size = 0, et_cases = emptyBag, et_ret = 0 }
 
 data Size = STooBig | SSize {-# UNPACK #-} !Int
 
+instance Outputable Size where
+  ppr STooBig = text "STooBig"
+  ppr (SSize n) = int n
+
 sizeN :: Int -> Size
 sizeN n = SSize n
 
@@ -929,6 +1017,10 @@ addSize _          _          = STooBig
 addSizeN :: Int -> Size -> Size
 addSizeN n1 (SSize n2) = SSize (n1+n2)
 addSizeN _  STooBig    = STooBig
+
+adjustSize :: (Int -> Int) -> Size -> Size
+adjustSize f (SSize n) = SSize (f n)
+adjustSize _ STooBig   = STooBig
 
 leqSize :: Size -> Int -> Bool
 leqSize STooBig   _ = False
@@ -943,6 +1035,27 @@ data InlineContext
      }
 
 -------------------------
+exprTreeWillInline :: Int -> ExprTree -> Bool
+-- (cheapExprTreeSize limit et) takes an upper bound `n` on the
+-- size of et; i.e. without discounts etc.
+-- Return True if (s <- limit), False otherwise
+-- Bales out early in the False case
+exprTreeWillInline limit et
+  = go et (\n -> n <= limit) 0
+  where
+    go :: ExprTree -> (Int -> Bool) -> Int -> Bool
+    go _      _ n | n > limit = False
+    go TooBig _ _             = False
+    go (SizeIs { et_size = size, et_cases = cases }) k n
+      = foldr go_ct k cases (n+size)
+
+    go_ct :: CaseTree -> (Int -> Bool) -> Int -> Bool
+    go_ct (ScrutOf {})      k n = k n
+    go_ct (CaseOf _ _ alts) k n = foldr go_alt k alts n
+
+    go_alt :: AltTree -> (Int -> Bool) -> Int -> Bool
+    go_alt (AltTree _ _ et) k n = go et k (n+10)
+
 exprTreeSize :: InlineContext -> ExprTree -> Size
 exprTreeSize _    TooBig = STooBig
 exprTreeSize !ic (SizeIs { et_size  = size
@@ -962,16 +1075,18 @@ caseTreeSize ic (ScrutOf bndr disc)
       ArgIsLam    -> sizeN (-disc)  -- Apply discount
       ArgIsCon {} -> sizeN (-disc)  -- Apply discount
 
-caseTreeSize ic (CaseOf var alts)
-  = case lookupBndr ic var of
+caseTreeSize ic (CaseOf scrut_var case_bndr alts)
+  = case lookupBndr ic scrut_var of
       ArgNoInfo     -> keptCaseSize ic alts
       ArgIsLam      -> keptCaseSize ic alts
       ArgIsNot cons -> keptCaseSize ic (trim_alts cons alts)
-      ArgIsCon con args
+      arg_summ@(ArgIsCon con args)
          | Just (AltTree _ bs rhs) <- find_alt con alts
-         , let ic' = ic { ic_bound = ic_bound ic `extendVarEnvList`
-                                     (bs `zip` args) }
-                     -- In DEFAULT case, bs is empty, so extend is a no-op
+         , let new_summaries :: [(Var,ArgSummary)]
+               new_summaries = (case_bndr,arg_summ) : bs `zip` args
+                  -- Don't forget to add a summary for the case binder!
+               ic' = ic { ic_bound = ic_bound ic `extendVarEnvList` new_summaries }
+                     -- In DEFAULT case, bs is empty, so extending is a no-op
          -> exprTreeSize ic' rhs
          | otherwise  -- Happens for empty alternatives
          -> keptCaseSize ic alts
@@ -1001,17 +1116,11 @@ keptCaseSize ic alts
     -- If there are no alternatives (case e of {}), we get just the size of the scrutinee
   where
     size_alt :: AltTree -> Size
-    size_alt (AltTree _ _ rhs) = sizeN 10 `addSize` exprTreeSize ic rhs
-        -- Add 10 for each alternative
-        -- Don't charge for args, so that wrappers look cheap
-        -- (See comments about wrappers with Case)
-        --
-        -- IMPORTANT: *do* charge 1 for the alternative, else we
-        -- find that giant case nests are treated as practically free
-        -- A good example is Foreign.C.Error.errnoToIOError
+    size_alt (AltTree _ _ rhs) = exprTreeSize ic rhs
+        -- Cost for the alternative is already in `rhs`
 
-lookupBndr :: InlineContext -> Id -> ArgSummary
+lookupBndr :: HasDebugCallStack => InlineContext -> Id -> ArgSummary
 lookupBndr (IC { ic_bound = bound_env, ic_free = lookup_free }) var
-  | Just info <- lookupVarEnv bound_env var = info
+  | Just info <- assertPpr (isId var) (ppr var) $
+                 lookupVarEnv bound_env var = info
   | otherwise                               = lookup_free var
-

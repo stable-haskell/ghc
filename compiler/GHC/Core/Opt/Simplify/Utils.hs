@@ -24,7 +24,7 @@ module GHC.Core.Opt.Simplify.Utils (
         SimplCont(..), DupFlag(..), FromWhat(..), StaticEnv,
         isSimplified, contIsStop,
         contIsDupable, contResultType, contHoleType, contHoleScaling,
-        contIsTrivial, contArgs, contIsRhs,
+        contIsTrivial, contIsRhs,
         countArgs,
         mkBoringStop, mkRhsStop, mkLazyArgStop,
         interestingCallContext,
@@ -46,9 +46,7 @@ import GHC.Prelude hiding (head, init, last, tail)
 import qualified GHC.Prelude as Partial (head)
 
 import GHC.Core
-import GHC.Types.Literal ( isLitRubbish )
 import GHC.Core.Opt.Simplify.Env
--- import GHC.Core.Opt.Simplify.Inline
 import GHC.Core.Opt.Stats ( Tick(..) )
 import qualified GHC.Core.Subst
 import GHC.Core.Ppr
@@ -560,29 +558,6 @@ countValArgs (CastIt _ cont)                 = countValArgs cont
 countValArgs _                               = 0
 
 -------------------
-contArgs :: SimplCont -> (Bool, [ArgSummary], SimplCont)
--- Summarises value args, discards type args and coercions
--- The returned continuation of the call is only used to
--- answer questions like "are you interesting?"
-contArgs cont
-  | lone cont = (True, [], cont)
-  | otherwise = go [] cont
-  where
-    lone (ApplyToTy  {}) = False  -- See Note [Lone variables] in GHC.Core.Unfold
-    lone (ApplyToVal {}) = False  -- NB: even a type application or cast
-    lone (CastIt {})     = False  --     stops it being "lone"
-    lone _               = True
-
-    go args (ApplyToVal { sc_arg = arg, sc_env = se, sc_cont = k })
-                                        = go (is_interesting arg se : args) k
-    go args (ApplyToTy { sc_cont = k }) = go args k
-    go args (CastIt _ k)                = go args k
-    go args k                           = (False, reverse args, k)
-
-    is_interesting arg se = exprSummary se arg
-       -- Do *not* use short-cutting substitution here
-       -- because we want to get as much IdInfo as possible
-
 -- | Describes how the 'SimplCont' will evaluate the hole as a 'SubDemand'.
 -- This can be more insightful than the limited syntactic context that
 -- 'SimplCont' provides, because the 'Stop' constructor might carry a useful
@@ -595,10 +570,10 @@ contArgs cont
 -- about what to do then and no call sites so far seem to care.
 contEvalContext :: SimplCont -> SubDemand
 contEvalContext k = case k of
-  (Stop _ _ sd)              -> sd
-  (TickIt _ k)               -> contEvalContext k
-  (CastIt _ k)               -> contEvalContext k
-  ApplyToTy{sc_cont=k}       -> contEvalContext k
+  Stop _ _ sd          -> sd
+  TickIt _ k           -> contEvalContext k
+  CastIt _ k           -> contEvalContext k
+  ApplyToTy{sc_cont=k} -> contEvalContext k
     --  ApplyToVal{sc_cont=k}      -> mkCalledOnceDmd $ contEvalContext k
     -- Not 100% sure that's correct, . Here's an example:
     --   f (e x) and f :: <SC(S,C(1,L))>
@@ -640,9 +615,11 @@ mkArgInfo env rule_base fun cont
     vanilla_discounts, arg_discounts :: [Int]
     vanilla_discounts = repeat 0
     arg_discounts = case idUnfolding fun of
-                        CoreUnfolding {uf_guidance = UnfIfGoodArgs {ug_args = discounts}}
-                              -> discounts ++ vanilla_discounts
+                        CoreUnfolding {uf_guidance = UnfIfGoodArgs {ug_args = _discounts}}
+                              -> {- discounts ++ -} vanilla_discounts
                         _     -> vanilla_discounts
+         -- ToDo: with the New Plan it's harder to know which arguments
+         -- attract a discount.  For now, let's just drop this and see.
 
     vanilla_dmds, arg_dmds :: [Demand]
     vanilla_dmds  = repeat topDmd
@@ -930,118 +907,6 @@ contHasRules cont
     go (StrictBind {})                 = False      -- ??
     go (Stop _ _ _)                    = False
 
-{- Note [Interesting arguments]
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-An argument is interesting if it deserves a discount for unfoldings
-with a discount in that argument position.  The idea is to avoid
-unfolding a function that is applied only to variables that have no
-unfolding (i.e. they are probably lambda bound): f x y z There is
-little point in inlining f here.
-
-Generally, *values* (like (C a b) and (\x.e)) deserve discounts.  But
-we must look through lets, eg (let x = e in C a b), because the let will
-float, exposing the value, if we inline.  That makes it different to
-exprIsHNF.
-
-Before 2009 we said it was interesting if the argument had *any* structure
-at all; i.e. (hasSomeUnfolding v).  But does too much inlining; see #3016.
-
-But we don't regard (f x y) as interesting, unless f is unsaturated.
-If it's saturated and f hasn't inlined, then it's probably not going
-to now!
-
-Note [Conlike is interesting]
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Consider
-        f d = ...((*) d x y)...
-        ... f (df d')...
-where df is con-like. Then we'd really like to inline 'f' so that the
-rule for (*) (df d) can fire.  To do this
-  a) we give a discount for being an argument of a class-op (eg (*) d)
-  b) we say that a con-like argument (eg (df d)) is interesting
--}
-
-interestingArg :: SimplEnv -> CoreExpr -> ArgSummary
--- See Note [Interesting arguments]
-interestingArg env e = go env 0 e
-  where
-    -- n is # value args to which the expression is applied
-    go env n (Var v)
-       = case substId env v of
-           DoneId v'            -> go_var n v'
-           DoneEx e _           -> go (zapSubstEnv env)             n e
-           ContEx tvs cvs ids e -> go (setSubstEnv env tvs cvs ids) n e
-
-    go _   _ (Lit l)
-       | isLitRubbish l        = TrivArg -- Leads to unproductive inlining in WWRec, #20035
-       | otherwise             = ValueArg
-    go _   _ (Type _)          = TrivArg
-    go _   _ (Coercion _)      = TrivArg
-    go env n (App fn (Type _)) = go env n fn
-    go env n (App fn _)        = go env (n+1) fn
-    go env n (Tick _ a)        = go env n a
-    go env n (Cast e _)        = go env n e
-    go env n (Lam v e)
-       | isTyVar v             = go env n e
-       | n>0                   = NonTrivArg     -- (\x.b) e   is NonTriv
-       | otherwise             = ValueArg
-    go _ _ (Case {})           = NonTrivArg
-    go env n (Let b e)         = case go env' n e of
-                                   ValueArg -> ValueArg
-                                   _        -> NonTrivArg
-                               where
-                                 env' = env `addNewInScopeIds` bindersOf b
-
-    go_var n v
-       | isConLikeId v     = ValueArg   -- Experimenting with 'conlike' rather that
-                                        --    data constructors here
-       | idArity v > n     = ValueArg   -- Catches (eg) primops with arity but no unfolding
-       | n > 0             = NonTrivArg -- Saturated or unknown call
-       | conlike_unfolding = ValueArg   -- n==0; look for an interesting unfolding
-                                        -- See Note [Conlike is interesting]
-       | otherwise         = TrivArg    -- n==0, no useful unfolding
-       where
-         conlike_unfolding = isConLikeUnfolding (idUnfolding v)
-
-------------------------------
-idSummary :: SimplEnv -> Id -> ArgSummary
-idSummary env bndr
-  = case idUnfolding bndr of
-      OtherCon cs -> ScrutIsNot cs
-      DFunUnfolding { df_bndrs = bndrs, df_con = con, df_args = args }
-        | null bndrs
-        -> ScrutIsCon (DataAlt con) (map exprSummary args)
-        | otherwise
-        -> ScrutNoInfo
-      CoreUnfolding { uf_tmpl = e }
-        -> exprSummary e
-      NoUnfolding   -> ScrutNoInfo
-      BootUnfolding -> ScrutNoInfo
-
-exprSummary :: SimplEnv -> CoreExpr -> ArgSummary
--- Very simple version of exprIsConApp_maybe
-exprSummary env e = go e []
-  where
-    go (Cast e _) as = go e as
-    go (Tick _ e) as = go e as
-    go (Let _ e)  as = go e as
-    go (App f a)  as = go f (a:as)
-    go (Lit l)    as = assertPpr (null as) (ppr as) $
-                       ScrutIsCon (LitAlt l) []
-    go (Var v)    as = go_var v as
-    go (Lam b e)  as
-      | null as = if isRuntimeVar b
-                  then ScrutIsLam
-                  else go e []
-    go _ _ = ScrutNoInfo
-
-    go_var v as
-      | Just con <- isDataConWorkId_maybe v
-      = ScrutIsCon (DataAlt con) (map (exprSummary env) as)
-      | Just rhs <- expandUnfolding_maybe (idUnfolding v)
-      = go rhs as
-      | otherwise
-      = ScrutNoInfo
 
 {-
 ************************************************************************
@@ -1592,7 +1457,7 @@ postInlineUnconditionally env bind_cxt bndr occ_info rhs
 
         -> n_br < 100  -- See Note [Suppress exponential blowup]
 
-           && smallEnoughToInline uf_opts unfolding     -- Small enough to dup
+           && smallEnoughToInline env unfolding     -- Small enough to dup
                         -- ToDo: consider discount on smallEnoughToInline if int_cxt is true
                         --
                         -- NB: Do NOT inline arbitrarily big things, even if occ_n_br=1
@@ -1638,10 +1503,22 @@ postInlineUnconditionally env bind_cxt bndr occ_info rhs
 
   where
     unfolding = idUnfolding bndr
-    uf_opts   = seUnfoldingOpts env
     phase     = sePhase env
     active    = isActive phase (idInlineActivation bndr)
         -- See Note [pre/postInlineUnconditionally in gentle mode]
+
+smallEnoughToInline :: SimplEnv -> Unfolding -> Bool
+smallEnoughToInline env unfolding
+  | CoreUnfolding {uf_guidance = guidance} <- unfolding
+  = case guidance of
+       UnfIfGoodArgs {ug_tree = et} -> exprTreeWillInline limit et
+       UnfWhen {}                   -> True
+       UnfNever                     -> False
+  | otherwise
+  = False
+  where
+    uf_opts = seUnfoldingOpts env
+    limit   = unfoldingUseThreshold uf_opts
 
 {- Note [Inline small things to avoid creating a thunk]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
