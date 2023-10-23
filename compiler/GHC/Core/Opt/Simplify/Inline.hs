@@ -616,11 +616,19 @@ exprSummary env e = go env e []
       | Just con <- isDataConWorkId_maybe f
       = ArgIsCon (DataAlt con) (map (exprSummary env) args)
 
-      | Just rhs <- expandUnfolding_maybe (idUnfolding f)
-      = go (zapSubstEnv env) rhs args
+      | OtherCon cs <- unfolding
+      = ArgIsNot cs
 
-      | idArity f > valArgCount args
+      | Just rhs <- expandUnfolding_maybe unfolding
+      = pprTrace "exprSummary:expanded" (ppr f <+> text "==>" <+> ppr rhs) $
+        go (zapSubstEnv env) rhs args
+
+      | pprTrace "exprSummary:no-expand" (ppr f <+> text "unf" <+> ppr (idUnfolding f)) $
+        idArity f > valArgCount args
       = ArgIsLam
 
       | otherwise
       = ArgNoInfo
+      where
+        unfolding = idUnfolding f
+

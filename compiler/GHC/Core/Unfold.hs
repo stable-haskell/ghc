@@ -19,10 +19,11 @@ find, unsurprisingly, a Core expression.
 module GHC.Core.Unfold (
         Unfolding, UnfoldingGuidance,   -- Abstract types
 
-        ExprTree, exprTree, exprTreeSize,
+        ExprTree, exprTree, exprTreeSize, keptCaseSize,
         exprTreeWillInline, couldBeSmallEnoughToInline,
         ArgSummary(..), hasArgInfo,
-        Size, leqSize, addSizeN, adjustSize,
+
+        Size(..), leqSize, addSizeN, addSize, adjustSize, sizeZero,
         InlineContext(..),
 
         UnfoldingOpts (..), defaultUnfoldingOpts,
@@ -1000,6 +1001,9 @@ instance Outputable Size where
   ppr STooBig = text "STooBig"
   ppr (SSize n) = int n
 
+sizeZero :: Size
+sizeZero = SSize 0
+
 sizeN :: Int -> Size
 sizeN n = SSize n
 
@@ -1141,3 +1145,5 @@ lookupBndr (IC { ic_bound = bound_env, ic_free = lookup_free }) var
   | Just info <- assertPpr (isId var) (ppr var) $
                  lookupVarEnv bound_env var = info
   | otherwise                               = lookup_free var
+
+

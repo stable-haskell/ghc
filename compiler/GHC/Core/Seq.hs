@@ -7,7 +7,7 @@
 module GHC.Core.Seq (
         -- * Utilities for forcing Core structures
         seqExpr, seqExprs, seqUnfolding, seqRules,
-        megaSeqIdInfo, seqRuleInfo, seqBinds,
+        megaSeqIdInfo, seqRuleInfo, seqBinds, seqGuidance
     ) where
 
 import GHC.Prelude

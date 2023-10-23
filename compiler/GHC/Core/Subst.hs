@@ -37,6 +37,7 @@ module GHC.Core.Subst (
 import GHC.Prelude
 
 import GHC.Core
+import GHC.Core.Unfold
 import GHC.Core.FVs
 import GHC.Core.Seq
 import GHC.Core.Utils
@@ -54,6 +55,7 @@ import GHC.Types.Unique.Supply
 
 import GHC.Builtin.Names
 import GHC.Data.Maybe
+import GHC.Data.Bag
 
 import GHC.Utils.Misc
 import GHC.Utils.Outputable
@@ -513,17 +515,69 @@ substUnfolding subst df@(DFunUnfolding { df_bndrs = bndrs, df_args = args })
     (subst',bndrs') = substBndrs subst bndrs
     args'           = map (substExpr subst') args
 
-substUnfolding subst unf@(CoreUnfolding { uf_tmpl = tmpl, uf_src = src })
+substUnfolding subst unf@(CoreUnfolding { uf_tmpl = tmpl, uf_src = src
+                                        , uf_guidance = guidance })
   -- Retain stable unfoldings
   | not (isStableSource src)  -- Zap an unstable unfolding, to save substitution work
   = NoUnfolding
   | otherwise                 -- But keep a stable one!
-  = seqExpr new_tmpl `seq`
-    unf { uf_tmpl = new_tmpl }
+  = seqExpr new_tmpl `seq` seqGuidance new_guidance `seq`
+    unf { uf_tmpl = new_tmpl, uf_guidance = new_guidance  }
   where
-    new_tmpl = substExpr subst tmpl
+    new_tmpl     = substExpr subst tmpl
+    new_guidance = substGuidance subst guidance
 
 substUnfolding _ unf = unf      -- NoUnfolding, OtherCon
+
+substGuidance :: Subst -> UnfoldingGuidance -> UnfoldingGuidance
+substGuidance subst guidance
+  = case guidance of
+      UnfNever   -> guidance
+      UnfWhen {} -> guidance
+      UnfIfGoodArgs { ug_args = args, ug_tree = et }
+        -> UnfIfGoodArgs { ug_args = args', ug_tree = substExprTree subst' et }
+        where
+           (subst', args') = substBndrs subst args
+
+-------------------------
+substExprTree :: Subst -> ExprTree -> ExprTree
+-- ExprTrees have free variables, and so must be substituted
+substExprTree _     TooBig = TooBig
+substExprTree subst (SizeIs { et_size  = size
+                            , et_cases = cases
+                            , et_ret   = ret_discount })
+   = case extra_size of
+       STooBig     -> TooBig
+       SSize extra -> SizeIs { et_size = size + extra
+                             , et_cases = cases'
+                             , et_ret = ret_discount }
+   where
+     (extra_size, cases') = foldr subst_ct (sizeZero, emptyBag) cases
+
+     subst_ct :: CaseTree -> (Size, Bag CaseTree) -> (Size, Bag CaseTree)
+     subst_ct (ScrutOf v d) (n, cts)
+        = case lookupIdSubst subst v of
+             Var v' -> (n, ScrutOf v' d `consBag` cts)
+             _ -> (n, cts)
+
+     subst_ct (CaseOf v case_bndr alts) (n, cts)
+        = case lookupIdSubst subst v of
+             Var v' -> (n, CaseOf v' case_bndr' alts' `consBag` cts)
+             _ -> (n `addSize` extra, cts)
+        where
+          (subst', case_bndr') = substBndr subst case_bndr
+          alts' = map (subst_alt subst') alts
+          extra = keptCaseSize boringInlineContext case_bndr alts
+
+     subst_alt subst (AltTree con bs rhs)
+        = AltTree con bs' (substExprTree subst' rhs)
+        where
+          (subst', bs') = substBndrs subst bs
+
+boringInlineContext :: InlineContext
+boringInlineContext = IC { ic_free = \_ -> ArgNoInfo
+                         , ic_bound = emptyVarEnv
+                         , ic_want_res = False }
 
 ------------------
 substIdOcc :: Subst -> Id -> Id
