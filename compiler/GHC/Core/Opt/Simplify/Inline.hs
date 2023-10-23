@@ -229,17 +229,21 @@ tryUnfolding logger env fn cont unf_template unf_cache guidance
                               BoringCtxt -> False
                               _          -> True
 
-          zapped_env = zapSubstEnv env
-          context = IC { ic_bound    = mkVarEnv (arg_bndrs `zip` arg_infos)
-                       , ic_free     = getFreeSummary zapped_env
+          bound_env = mkVarEnv (arg_bndrs `zip` (arg_infos ++ repeat ArgNoInfo))
+                      -- Crucial to include /all/ arg_bndrs, lest we treat
+                      -- them as free and use ic_free instead
+          context = IC { ic_bound    = bound_env
+                       , ic_free     = getFreeSummary
                        , ic_want_res = want_result }
           size :: Size
           size = exprTreeSize context expr_tree
 
-          getFreeSummary :: SimplEnv -> Id -> ArgSummary
+          in_scope = seInScope env
+
+          getFreeSummary :: Id -> ArgSummary
           -- Get the ArgSummary of a free variable
-          getFreeSummary env x
-            = case lookupInScope (seInScope env) x of
+          getFreeSummary x
+            = case lookupInScope in_scope x of
                 Just x' | warnPprTrace (not (isId x')) "GFS" (vcat
                             [ ppr fn <+> equals <+> ppr unf_template
                             , text "expr_tree:" <+> ppr expr_tree
