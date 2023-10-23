@@ -666,6 +666,7 @@ recordCaseOf vs (Tick _ e) = recordCaseOf vs e
 recordCaseOf vs (Cast e _) = recordCaseOf vs e
 recordCaseOf _     _       = Nothing
 
+{-
 arg_is_free :: CoreExpr -> Bool
 -- "free" means we don't charge for this
 -- occurrence in a function application
@@ -675,6 +676,7 @@ arg_is_free (Cast e _)    = arg_is_free e
 arg_is_free (Type {})     = True
 arg_is_free (Coercion {}) = True
 arg_is_free _             = False
+-}
 
 id_is_free :: Id -> Bool
 id_is_free id = not (isJoinId id) && isZeroBitTy (idType id)
