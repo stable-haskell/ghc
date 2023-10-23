@@ -614,7 +614,8 @@ exprSummary env e = go env e []
       where
         env' = modifyInScope env b  -- Tricky corner here
 
-    go _ _ _ = ArgNoInfo
+    go _ _ _ = ArgIsNot []    -- Some structure; not all boring
+                              -- Example of improvement: base/tests/T9848
 
     go_var :: SimplEnv -> Id
            -> [CoreExpr]   -- Value args only
@@ -623,11 +624,15 @@ exprSummary env e = go env e []
       | Just con <- isDataConWorkId_maybe f
       = ArgIsCon (DataAlt con) (map (exprSummary env) val_args)
 
-      | OtherCon cs <- unfolding
-      = ArgIsNot cs
+      | DFunUnfolding {} <- unfolding
+      = ArgIsNot []  -- Says "this is a data con" without saying which
+                     -- Will also return this for ($df d1 .. dn)
 
       | Just rhs <- expandUnfolding_maybe unfolding
       = go (zapSubstEnv env) rhs val_args
+
+      | OtherCon cs <- unfolding
+      = ArgIsNot cs
 
       | idArity f > length val_args
       = ArgIsLam

@@ -561,9 +561,9 @@ exprTree opts args expr
     -----------------------------
     -- size_up_app is used when there's ONE OR MORE value args
     go_app :: ETVars -> CoreExpr -> [CoreExpr] -> ExprTree
-                   -- args are the non-void value args
+                   -- args are the value args
     go_app vs (App fun arg) args
-               | arg_is_free arg = go_app vs fun args
+               | isTypeArg arg   = go_app vs fun args
                | otherwise       = go vs arg `et_add`
                                    go_app vs fun (arg:args)
     go_app vs (Var fun)     args = callTree opts vs fun args
@@ -1088,7 +1088,8 @@ caseTreeSize :: InlineContext -> CaseTree -> Size
 caseTreeSize ic (ScrutOf bndr disc)
   = case lookupBndr ic bndr of
       ArgNoInfo   -> sizeN 0
-      ArgIsNot {} -> sizeN 0
+      ArgIsNot {} -> sizeN (-disc)  -- E.g. bndr is a DFun application
+                                    --      T8732 need to inline mapM_
       ArgIsLam    -> sizeN (-disc)  -- Apply discount
       ArgIsCon {} -> sizeN (-disc)  -- Apply discount
 
