@@ -1412,9 +1412,9 @@ data UnfoldingGuidance
     }
 
   | UnfIfGoodArgs {     -- Arose from a normal Id
-      ug_args :: [Var],      -- Arguments
+      ug_args :: [Id],       -- Value arguments only
       ug_tree :: ExprTree    -- Abstraction of the body
-      -- Invariant: free vars of ug_tree are the ug_args, plus variables
+      -- Invariant: free Ids of ug_tree are the ug_args, plus Ids
       --            in scope at the binding site of the function definition
     }
 
@@ -1435,7 +1435,9 @@ data CaseTree
                        -- nothing relies on non-empty-ness
   | ScrutOf Id Int     -- If this Id is bound to a value, apply this discount
 
-data AltTree  = AltTree AltCon [Var] ExprTree
+data AltTree  = AltTree AltCon
+                        [Id]      -- Term variables only
+                        ExprTree
 
 {- Note [UnfoldingCache]
 ~~~~~~~~~~~~~~~~~~~~~~~~

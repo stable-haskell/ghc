@@ -266,10 +266,11 @@ tryUnfolding logger env fn cont unf_template unf_cache guidance
                            , text "case depth =" <+> int case_depth
                            , text "final_size =" <+> ppr final_size ]
   where
-    (lone_variable, arg_infos, call_cont) = contArgs cont
-    cont_info  = interestingCallContext env call_cont
-    case_depth = seCaseDepth env
-    opts       = seUnfoldingOpts env
+    (arg_infos, call_cont) = contArgs cont
+    lone_variable = loneVariable cont
+    cont_info     = interestingCallContext env call_cont
+    case_depth    = seCaseDepth env
+    opts          = seUnfoldingOpts env
 
     -- Unpack the UnfoldingCache lazily because it may not be needed, and all
     -- its fields are strict; so evaluating unf_cache at all forces all the
@@ -550,24 +551,24 @@ rule for (*) (df d) can fire.  To do this
 -}
 
 -------------------
-contArgs :: SimplCont -> (Bool, [ArgSummary], SimplCont)
--- Summarises value args, discards type args and coercions
+contArgs :: SimplCont -> ( [ArgSummary]   -- One for each value argument
+                         , SimplCont )    -- The rest
+-- Summarises value args, discards type args and casts.
 -- The returned continuation of the call is only used to
 -- answer questions like "are you interesting?"
-contArgs cont
-  | lone cont = (True, [], cont)
-  | otherwise = go [] cont
+contArgs cont = go [] cont
   where
-    lone (ApplyToTy  {}) = False  -- See Note [Lone variables] in GHC.Core.Unfold
-    lone (ApplyToVal {}) = False  -- NB: even a type application or cast
-    lone (CastIt {})     = False  --     stops it being "lone"
-    lone _               = True
-
     go args (ApplyToVal { sc_arg = arg, sc_env = se, sc_cont = k })
                                         = go (exprSummary se arg : args) k
     go args (ApplyToTy { sc_cont = k }) = go args k
     go args (CastIt _ k)                = go args k
-    go args k                           = (False, reverse args, k)
+    go args k                           = (reverse args, k)
+
+loneVariable :: SimplCont -> Bool
+loneVariable (ApplyToTy  {}) = False  -- See Note [Lone variables] in GHC.Core.Unfold
+loneVariable (ApplyToVal {}) = False  -- NB: even a type application or cast
+loneVariable (CastIt {})     = False  --     stops it being "lone"
+loneVariable _               = True
 
 ------------------------------
 exprSummary :: SimplEnv -> CoreExpr -> ArgSummary
@@ -582,10 +583,13 @@ exprSummary :: SimplEnv -> CoreExpr -> ArgSummary
 --     We want to see that x is (a,b) at the call site of f
 exprSummary env e = go env e []
   where
-    go :: SimplEnv -> CoreExpr -> [CoreExpr] -> ArgSummary
+    go :: SimplEnv -> CoreExpr
+       -> [CoreExpr]   -- Value arg only
+       -> ArgSummary
     go env (Cast e _) as = go env e as
     go env (Tick _ e) as = go env e as
-    go env (App f a)  as = go env f (a:as)
+    go env (App f a)  as | isValArg a = go env f (a:as)
+                         | otherwise  = go env f as
     go env (Let b e)  as = go env' e as
       where
         env' = env `addNewInScopeIds` bindersOf b
@@ -612,17 +616,20 @@ exprSummary env e = go env e []
 
     go _ _ _ = ArgNoInfo
 
-    go_var env f args
+    go_var :: SimplEnv -> Id
+           -> [CoreExpr]   -- Value args only
+           -> ArgSummary
+    go_var env f val_args
       | Just con <- isDataConWorkId_maybe f
-      = ArgIsCon (DataAlt con) (map (exprSummary env) args)
+      = ArgIsCon (DataAlt con) (map (exprSummary env) val_args)
 
       | OtherCon cs <- unfolding
       = ArgIsNot cs
 
       | Just rhs <- expandUnfolding_maybe unfolding
-      = go (zapSubstEnv env) rhs args
+      = go (zapSubstEnv env) rhs val_args
 
-      | idArity f > valArgCount args
+      | idArity f > length val_args
       = ArgIsLam
 
       | otherwise

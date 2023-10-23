@@ -1032,7 +1032,7 @@ data InlineContext
      }
 
 data ArgSummary = ArgNoInfo
-                | ArgIsCon AltCon [ArgSummary]  -- Includes type args
+                | ArgIsCon AltCon [ArgSummary]  -- Value args only
                 | ArgIsNot [AltCon]
                 | ArgIsLam
 
@@ -1095,14 +1095,17 @@ caseTreeSize ic (CaseOf scrut_var case_bndr alts)
       ArgNoInfo     -> keptCaseSize ic case_bndr alts
       ArgIsLam      -> keptCaseSize ic case_bndr alts
       ArgIsNot cons -> keptCaseSize ic case_bndr (trim_alts cons alts)
+
       arg_summ@(ArgIsCon con args)
-         | Just (AltTree _ bndrs rhs) <- find_alt con alts
-         , let new_summaries :: [(Var,ArgSummary)]
+         | Just at@(AltTree alt_con bndrs rhs) <- find_alt con alts
+         , let new_summaries :: [(Id,ArgSummary)]
                new_summaries = (case_bndr,arg_summ) : bndrs `zip` args
                   -- Don't forget to add a summary for the case binder!
                ic' = ic { ic_bound = ic_bound ic `extendVarEnvList` new_summaries }
                      -- In DEFAULT case, bs is empty, so extending is a no-op
-         -> exprTreeSize ic' rhs
+         -> assertPpr ((alt_con == DEFAULT) || (bndrs `equalLength` args)) (ppr arg_summ $$ ppr at) $
+            exprTreeSize ic' rhs
+
          | otherwise  -- Happens for empty alternatives
          -> keptCaseSize ic case_bndr alts
 
@@ -1131,7 +1134,8 @@ keptCaseSize ic case_bndr alts
     -- If there are no alternatives (case e of {}), we get just the size of the scrutinee
   where
     size_alt :: AltTree -> Size
-    size_alt (AltTree _ bndrs rhs) = exprTreeSize ic' rhs
+    size_alt (AltTree _ bndrs rhs)
+       = exprTreeSize ic' rhs
         -- Cost for the alternative is already in `rhs`
       where
         -- Must extend ic_bound, lest a captured variable is

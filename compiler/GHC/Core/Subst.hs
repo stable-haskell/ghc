@@ -41,8 +41,9 @@ import GHC.Core.Unfold
 import GHC.Core.FVs
 import GHC.Core.Seq
 import GHC.Core.Utils
-import GHC.Core.Type    -- Subst comes from here
-import GHC.Core.Coercion( tyCoFVsOfCo, mkCoVarCo, substCoVarBndr )
+import GHC.Core.TyCo.Subst    -- Subst comes from here
+import GHC.Core.Type( mkTyVarTy, noFreeVarsOfType, tyCoFVsOfType, tyCoVarsOfType )
+import GHC.Core.Coercion( tyCoFVsOfCo, mkCoVarCo )
 
 import GHC.Types.Var.Set
 import GHC.Types.Var.Env as InScopeSet
@@ -341,14 +342,14 @@ preserve occ info in rules.
 -- | Substitutes a 'Var' for another one according to the 'Subst' given, returning
 -- the result and an updated 'Subst' that should be used by subsequent substitutions.
 -- 'IdInfo' is preserved by this process, although it is substituted into appropriately.
-substBndr :: Subst -> Var -> (Subst, Var)
+substBndr :: HasDebugCallStack => Subst -> Var -> (Subst, Var)
 substBndr subst bndr
   | isTyVar bndr  = substTyVarBndr subst bndr
   | isCoVar bndr  = substCoVarBndr subst bndr
   | otherwise     = substIdBndr (text "var-bndr") subst subst bndr
 
 -- | Applies 'substBndr' to a number of 'Var's, accumulating a new 'Subst' left-to-right
-substBndrs :: Traversable f => Subst -> f Var -> (Subst, f Var)
+substBndrs :: (HasDebugCallStack, Traversable f) => Subst -> f Var -> (Subst, f Var)
 substBndrs = mapAccumL substBndr
 {-# INLINE substBndrs #-}
 
@@ -535,17 +536,18 @@ substGuidance subst guidance
       UnfNever   -> guidance
       UnfWhen {} -> guidance
       UnfIfGoodArgs { ug_args = args, ug_tree = et }
-        -> UnfIfGoodArgs { ug_args = args', ug_tree = substExprTree subst' et }
+        -> UnfIfGoodArgs { ug_args = args, ug_tree = substExprTree id_env et }
         where
-           (subst', args') = substBndrs subst args
+           id_env = getIdSubstEnv subst `delVarEnvList` args
 
 -------------------------
-substExprTree :: Subst -> ExprTree -> ExprTree
--- ExprTrees have free variables, and so must be substituted
+substExprTree :: IdSubstEnv -> ExprTree -> ExprTree
+-- ExprTrees have free Ids, and so must be substituted
+-- But Ids /only/ not tyvars, so substitution is very simple
 substExprTree _     TooBig = TooBig
-substExprTree subst (SizeIs { et_size  = size
-                            , et_cases = cases
-                            , et_ret   = ret_discount })
+substExprTree id_env (SizeIs { et_size  = size
+                             , et_cases = cases
+                             , et_ret   = ret_discount })
    = case extra_size of
        STooBig     -> TooBig
        SSize extra -> SizeIs { et_size = size + extra
@@ -556,23 +558,23 @@ substExprTree subst (SizeIs { et_size  = size
 
      subst_ct :: CaseTree -> (Size, Bag CaseTree) -> (Size, Bag CaseTree)
      subst_ct (ScrutOf v d) (n, cts)
-        = case lookupIdSubst subst v of
-             Var v' -> (n, ScrutOf v' d `consBag` cts)
+        = case lookupVarEnv id_env v of
+             Just (Var v') -> (n, ScrutOf v' d `consBag` cts)
              _ -> (n, cts)
 
      subst_ct (CaseOf v case_bndr alts) (n, cts)
-        = case lookupIdSubst subst v of
-             Var v' -> (n, CaseOf v' case_bndr' alts' `consBag` cts)
+        = case lookupVarEnv id_env v of
+             Just (Var v') -> (n, CaseOf v' case_bndr alts' `consBag` cts)
              _ -> (n `addSize` extra, cts)
         where
-          (subst', case_bndr') = substBndr subst case_bndr
-          alts' = map (subst_alt subst') alts
+          id_env' = id_env `delVarEnv` case_bndr
+          alts' = map (subst_alt id_env') alts
           extra = keptCaseSize boringInlineContext case_bndr alts
 
-     subst_alt subst (AltTree con bs rhs)
-        = AltTree con bs' (substExprTree subst' rhs)
+     subst_alt id_env (AltTree con bs rhs)
+        = AltTree con bs (substExprTree id_env' rhs)
         where
-          (subst', bs') = substBndrs subst bs
+          id_env' = id_env `delVarEnvList` bs
 
 boringInlineContext :: InlineContext
 boringInlineContext = IC { ic_free = \_ -> ArgNoInfo
