@@ -584,7 +584,7 @@ exprTree opts args expr
       | Just v <- recordCaseOf vs scrut
       = -- pprTrace "recordCaseOf" (ppr v $$ ppr lvs $$ ppr scrut $$ ppr alts) $
         go vs scrut `et_add`
-        etZero { et_cases = unitBag (CaseOf v b (map (alt_alt_tree v) alts)) }
+        etOneCase (CaseOf v b (map (alt_alt_tree v) alts))
       where
         alt_alt_tree :: Id -> Alt Var -> AltTree
         alt_alt_tree v (Alt con bs rhs)
@@ -728,7 +728,7 @@ classOpSize opts vs fn val_args
   , Just dict <- recordCaseOf vs arg1
   = warnPprTrace (not (isId dict)) "classOpSize" (ppr fn <+> ppr val_args) $
     vanillaCallSize (length val_args) `etAddN`
-    etZero { et_cases = unitBag (ScrutOf dict (unfoldingDictDiscount opts)) }
+    etOneCase (ScrutOf dict (unfoldingDictDiscount opts))
            -- If the class op is scrutinising a lambda bound dictionary then
            -- give it a discount, to encourage the inlining of this function
            -- The actual discount is rather arbitrarily chosen
@@ -984,6 +984,8 @@ etAddAlt bOMB_OUT_SIZE (SizeIs { et_size = n1, et_cases = c1, et_ret = ret1 })
 etZero :: ExprTree
 etZero = SizeIs { et_size = 0, et_cases = emptyBag, et_ret = 0 }
 
+etOneCase :: CaseTree -> ExprTree
+etOneCase ct = SizeIs { et_size = 0, et_cases = unitBag ct, et_ret = 0 }
 
 {- *********************************************************************
 *                                                                      *

@@ -31,7 +31,7 @@ module GHC.Core.Opt.Simplify.Utils (
 
         -- The CallCtxt type
         CallCtxt(..),
-        
+
         -- ArgInfo
         ArgInfo(..), ArgSpec(..), RewriteCall(..), mkArgInfo,
         addValArgTo, addCastTo, addTyArgTo,
