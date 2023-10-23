@@ -589,7 +589,9 @@ exprTree opts args expr
       where
         alt_alt_tree :: Id -> Alt Var -> AltTree
         alt_alt_tree v (Alt con bs rhs)
-          = AltTree con bs (10 `etAddN` go (add_alt_bndrs v bs) rhs)
+          = AltTree con val_bs (10 `etAddN` go (add_alt_bndrs v val_bs) rhs)
+          where
+            val_bs = filter isId bs
 
         add_alt_bndrs v bs
           | v `elemVarSet` avs = (avs `extendVarSetList` (b:bs), lvs)
@@ -1140,7 +1142,7 @@ keptCaseSize ic case_bndr alts
       where
         -- Must extend ic_bound, lest a captured variable is
         -- looked up in ic_free by lookupBndr
-        new_summaries :: [(Var,ArgSummary)]
+        new_summaries :: [(Id,ArgSummary)]
         new_summaries = [(b,ArgNoInfo) | b <- case_bndr:bndrs]
         ic' = ic { ic_bound = ic_bound ic `extendVarEnvList` new_summaries }
 
