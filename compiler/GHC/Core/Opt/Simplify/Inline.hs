@@ -620,11 +620,9 @@ exprSummary env e = go env e []
       = ArgIsNot cs
 
       | Just rhs <- expandUnfolding_maybe unfolding
-      = pprTrace "exprSummary:expanded" (ppr f <+> text "==>" <+> ppr rhs) $
-        go (zapSubstEnv env) rhs args
+      = go (zapSubstEnv env) rhs args
 
-      | pprTrace "exprSummary:no-expand" (ppr f <+> text "unf" <+> ppr (idUnfolding f)) $
-        idArity f > valArgCount args
+      | idArity f > valArgCount args
       = ArgIsLam
 
       | otherwise
