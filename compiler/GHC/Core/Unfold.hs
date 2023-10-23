@@ -1088,19 +1088,19 @@ caseTreeSize ic (ScrutOf bndr disc)
 
 caseTreeSize ic (CaseOf scrut_var case_bndr alts)
   = case lookupBndr ic scrut_var of
-      ArgNoInfo     -> keptCaseSize ic alts
-      ArgIsLam      -> keptCaseSize ic alts
-      ArgIsNot cons -> keptCaseSize ic (trim_alts cons alts)
+      ArgNoInfo     -> keptCaseSize ic case_bndr alts
+      ArgIsLam      -> keptCaseSize ic case_bndr alts
+      ArgIsNot cons -> keptCaseSize ic case_bndr (trim_alts cons alts)
       arg_summ@(ArgIsCon con args)
-         | Just (AltTree _ bs rhs) <- find_alt con alts
+         | Just (AltTree _ bndrs rhs) <- find_alt con alts
          , let new_summaries :: [(Var,ArgSummary)]
-               new_summaries = (case_bndr,arg_summ) : bs `zip` args
+               new_summaries = (case_bndr,arg_summ) : bndrs `zip` args
                   -- Don't forget to add a summary for the case binder!
                ic' = ic { ic_bound = ic_bound ic `extendVarEnvList` new_summaries }
                      -- In DEFAULT case, bs is empty, so extending is a no-op
          -> exprTreeSize ic' rhs
          | otherwise  -- Happens for empty alternatives
-         -> keptCaseSize ic alts
+         -> keptCaseSize ic case_bndr alts
 
 find_alt :: AltCon -> [AltTree] -> Maybe AltTree
 find_alt _   []                     = Nothing
@@ -1119,16 +1119,22 @@ trim_alts acs (alt:alts)
   | AltTree con _ _ <- alt, con `elem` acs = trim_alts acs alts
   | otherwise                              = alt : trim_alts acs alts
 
-keptCaseSize :: InlineContext -> [AltTree] -> Size
+keptCaseSize :: InlineContext -> Id -> [AltTree] -> Size
 -- Size of a (retained) case expression
-keptCaseSize ic alts
+keptCaseSize ic case_bndr alts
   = foldr (addSize . size_alt) (sizeN 0) alts
     -- We make the case itself free, but charge for each alternative
     -- If there are no alternatives (case e of {}), we get just the size of the scrutinee
   where
     size_alt :: AltTree -> Size
-    size_alt (AltTree _ _ rhs) = exprTreeSize ic rhs
+    size_alt (AltTree _ bndrs rhs) = exprTreeSize ic' rhs
         -- Cost for the alternative is already in `rhs`
+      where
+        -- Must extend ic_bound, lest a captured variable is
+        -- looked up in ic_free by lookupBndr
+        new_summaries :: [(Var,ArgSummary)]
+        new_summaries = [(b,ArgNoInfo) | b <- case_bndr:bndrs]
+        ic' = ic { ic_bound = ic_bound ic `extendVarEnvList` new_summaries }
 
 lookupBndr :: HasDebugCallStack => InlineContext -> Id -> ArgSummary
 lookupBndr (IC { ic_bound = bound_env, ic_free = lookup_free }) var
