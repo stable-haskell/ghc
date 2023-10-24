@@ -154,6 +154,12 @@ data UnfoldingOpts = UnfoldingOpts
    , unfoldingCaseScaling :: !Int
       -- ^ Penalize depth with 1/x
 
+   , exprTreeCaseWidth :: !Int
+      -- ^ Don't make ExprTrees with a case width greater than this
+
+   , exprTreeCaseDepth :: !Int
+      -- ^ Don't make ExprTrees with a case depth greater than this
+
    , unfoldingReportPrefix :: !(Maybe String)
       -- ^ Only report inlining decisions for names with this prefix
    }
@@ -190,6 +196,9 @@ defaultUnfoldingOpts = UnfoldingOpts
 
       -- Don't filter inlining decision reports
    , unfoldingReportPrefix = Nothing
+
+   , exprTreeCaseWidth = 4
+   , exprTreeCaseDepth = 4
    }
 
 -- Helpers for "GHC.Driver.Session"
@@ -489,6 +498,12 @@ We maintain:
 
   This is IMPORTANT, because even a call like (reverse xs) would otherwise record
   a ScrutOf for `reverse` which is very silly.
+
+Wrinkles:
+
+* We must be careful about recording enormous functions, with very wide or very
+  deep case trees. (This can happen with Generics; e.g. test T5642.)  We limit
+  both with UnfoldingOpts, and 
 -}
 
 type ETVars = (VarSet,VarSet)  -- (avs, lvs)
@@ -498,54 +513,83 @@ exprTree :: UnfoldingOpts -> [Var] -> CoreExpr -> ExprTree
 -- Note [Computing the size of an expression]
 
 exprTree opts args expr
-  = go (mkVarSet args, emptyVarSet) expr
+  = go (exprTreeCaseDepth opts) (mkVarSet args, emptyVarSet) expr
   where
+    !max_width     = exprTreeCaseWidth opts
     !bOMB_OUT_SIZE = unfoldingCreationThreshold opts
        -- Bomb out if size gets bigger than this
        -- Forcing bOMB_OUT_SIZE early prevents repeated
        -- unboxing of the Int argument.
 
+    ok_case :: Int -> Int -> Bool
+    ok_case case_depth n_alts  -- Case is not too deep, nor too wide
+      = case_depth > 0 && n_alts <= max_width
+
     et_add     = etAdd bOMB_OUT_SIZE
     et_add_alt = etAddAlt bOMB_OUT_SIZE
 
-    go :: ETVars -> CoreExpr -> ExprTree
+    go :: Int -> ETVars -> CoreExpr -> ExprTree
+          -- cd is the unused case depth; decreases toward zero
           -- (avs,lvs): see Note [Constructing an ExprTree]
-    go vs (Cast e _)   = go vs e
-    go vs (Tick _ e)   = go vs e
-    go _  (Type _)     = exprTreeN 0
-    go _  (Coercion _) = exprTreeN 0
-    go _  (Lit lit)    = exprTreeN (litSize lit)
-
-    go vs (Lam b e)
-      | isId b, not (isZeroBitId b) = go vs' e `et_add` lamSize opts
-      | otherwise                   = go vs' e
+    go cd vs (Cast e _)      = go cd vs e
+    go cd vs (Tick _ e)      = go cd vs e
+    go _  _  (Type _)        = exprTreeN 0
+    go _  _  (Coercion _)    = exprTreeN 0
+    go _  _  (Lit lit)       = exprTreeN (litSize lit)
+    go cd vs (Case e b _ as) = go_case cd vs e b as
+    go cd vs (Let bind body) = go_let cd vs bind body
+    go cd vs (Lam b e)       = go_lam cd vs b e
+    go cd vs e@(App {})      = go_app cd vs e
+    go _  vs (Var f)         = callTree opts vs f [] 0
+                               -- Use callTree to ensure we get constructor
+                               -- discounts even on nullary constructors
+    -------------------
+    go_lam cd vs bndr body
+      | isId bndr, not (isZeroBitId bndr) = go cd vs' body `et_add` lamSize opts
+      | otherwise                         = go cd vs' body
       where
-        vs' = vs `add_lv` b
+        vs' = vs `add_lv` bndr
 
-    go vs (Let (NonRec binder rhs) body)
-      = go_bind vs (binder, rhs)  `et_add`
-        go (vs `add_lv` binder) body
+    -------------------
+    go_let cd vs (NonRec binder rhs) body
+      = go_bind cd vs (binder, rhs)  `et_add`
+        go cd (vs `add_lv` binder) body
 
-    go vs (Let (Rec pairs) body)
-      = foldr (et_add . go_bind vs') (go vs' body) pairs
+    go_let cd vs (Rec pairs) body
+      = foldr (et_add . go_bind cd vs') (go cd vs' body) pairs
       where
         vs' = vs `add_lvs` map fst pairs
 
-    go vs e@(App {}) = go_app vs e [] 0
-    go vs (Var f)    = callTree opts vs f [] 0
-                    -- Use callTree to ensure we get constructor
-                    -- discounts even on nullary constructors
-
-    go vs (Case e b _ alts) = go_case vs e b alts
+    -------------------
+    go_app cd vs e = lgo e [] 0
+      where
+         lgo :: CoreExpr -> [CoreExpr] -> Int -> ExprTree
+             -- args:  all the value args
+             -- voids: counts the zero-bit arguments; don't charge for these
+             --        This makes a difference in ST-heavy code which does a lot
+             --        of state passing, and which can be in an inner loop.
+         lgo (App fun arg) args voids
+                    | isTypeArg arg    = lgo fun args voids
+                    | isZeroBitArg arg = lgo fun (arg:args) (voids+1)
+                    | otherwise        = go cd vs arg `et_add`
+                                         lgo fun (arg:args) voids
+         lgo (Var fun)     args voids  = callTree opts vs fun args voids
+         lgo (Tick _ expr) args voids  = lgo expr args voids
+         lgo (Cast expr _) args voids  = lgo expr args voids
+         lgo other         args voids  = vanillaCallSize (length args) voids
+                                         `etAddN` go cd vs other
+         -- if the lhs is not an App or a Var, or an invisible thing like a
+         -- Tick or Cast, then we should charge for a complete call plus the
+         -- size of the lhs itself.
 
     -----------------------------
-    go_bind vs (bndr, rhs)
+    go_bind cd vs (bndr, rhs)
       | JoinPoint join_arity <- idJoinPointHood bndr
       , (bndrs, body) <- collectNBinders join_arity rhs
                           -- Skip arguments to join point
-      = go (vs `add_lvs` bndrs) body
+      = go cd (vs `add_lvs` bndrs) body
       | otherwise
-      = size_up_alloc bndr `etAddN` go vs rhs
+      = size_up_alloc bndr `etAddN` go cd vs rhs
 
     -- Cost to allocate binding with given binder
     size_up_alloc bndr
@@ -557,42 +601,25 @@ exprTree opts args expr
       = 10
 
     -----------------------------
-    -- size_up_app is used when there's ONE OR MORE value args
-    go_app :: ETVars -> CoreExpr -> [CoreExpr] -> Int -> ExprTree
-        -- args:  all the value args
-        -- voids: counts the zero-bit arguments; don't charge for these
-        --        This makes a difference in ST-heavy code which does
-        --        does a lot of state passing, and which can be in an
-        --        inner loop.
-    go_app vs (App fun arg) args voids
-                  | isTypeArg arg      = go_app vs fun args voids
-                  | isZeroBitArg arg   = go_app vs fun (arg:args) (voids+1)
-                  | otherwise          = go vs arg `et_add`
-                                         go_app vs fun (arg:args) voids
-    go_app vs (Var fun)     args voids = callTree opts vs fun args voids
-    go_app vs (Tick _ expr) args voids = go_app vs expr args voids
-    go_app vs (Cast expr _) args voids = go_app vs expr args voids
-    go_app vs other         args voids = vanillaCallSize (length args) voids `etAddN`
-                                         go vs other
-       -- if the lhs is not an App or a Var, or an invisible thing like a
-       -- Tick or Cast, then we should charge for a complete call plus the
-       -- size of the lhs itself.
-
-    -----------------------------
+    go_case :: Int -> ETVars -> CoreExpr -> Id -> [CoreAlt] -> ExprTree
     -- Empty case
-    go_case vs scrut _ [] = go vs scrut
+    go_case cd vs scrut _ [] = go cd vs scrut
          -- case e of {} never returns, so take size of scrutinee
 
     -- Record a CaseOf
-    go_case vs@(avs,lvs) scrut b alts                 -- Now alts is non-empty
+    go_case cd vs@(avs,lvs) scrut b alts
       | Just v <- recordCaseOf vs scrut
-      = -- pprTrace "recordCaseOf" (ppr v $$ ppr lvs $$ ppr scrut $$ ppr alts) $
-        go vs scrut `et_add`
-        etOneCase (CaseOf v b (map (alt_alt_tree v) alts))
+      = go cd vs scrut `et_add`
+        (if   ok_case cd n_alts
+         then etOneCase (CaseOf v b (map (alt_alt_tree v) alts))
+         else etOneCase (ScrutOf v (10 * n_alts)) `et_add`
+              go_alts cd vs b alts)
       where
+        cd1 = cd - 1
+        n_alts = length alts
         alt_alt_tree :: Id -> Alt Var -> AltTree
         alt_alt_tree v (Alt con bs rhs)
-          = AltTree con val_bs (10 `etAddN` go (add_alt_bndrs v val_bs) rhs)
+          = AltTree con val_bs (10 `etAddN` go cd1 (add_alt_bndrs v val_bs) rhs)
           where
             val_bs = filter isId bs
 
@@ -602,14 +629,18 @@ exprTree opts args expr
           | otherwise = vs
 
     -- Don't record a CaseOf
-    go_case vs scrut b alts    -- alts is non-empty
+    go_case cd vs scrut b alts    -- alts is non-empty
       = caseSize scrut alts `etAddN`   -- A bit odd that this is only in one branch
-        go vs scrut         `et_add`
-        foldr1 et_add_alt (map alt_expr_tree alts)
+        go cd vs scrut      `et_add`
+        go_alts cd vs b alts
+
+    go_alts :: Int -> ETVars -> Id -> [CoreAlt] -> ExprTree
+    go_alts cd vs b alts = foldr1 et_add_alt (map alt_expr_tree alts)
       where
+        cd1 = cd - 1
         alt_expr_tree :: Alt Var -> ExprTree
         alt_expr_tree (Alt _con bs rhs)
-          = 10 `etAddN` go (vs `add_lvs` (b:bs)) rhs
+          = 10 `etAddN` go cd1 (vs `add_lvs` (b:bs)) rhs
             -- Don't charge for bndrs, so that wrappers look cheap
             -- (See comments about wrappers with Case)
             -- Don't forget to add the case binder, b, to lvs.
@@ -772,13 +803,13 @@ lamSize opts = SizeIs { et_size = 10, et_cases = emptyBag
 conSize :: DataCon -> Int -> ExprTree
 -- Does not need to include the size of the arguments themselves
 conSize dc n_val_args
-  = SizeIs { et_size = n, et_cases = emptyBag, et_ret = n }
+  | isUnboxedTupleDataCon dc
+  = etZero     -- See Note [Unboxed tuple size and result discount]
+  | otherwise  -- See Note [Constructor size and result discount]
+  = SizeIs { et_size = size, et_cases = emptyBag, et_ret = 10 }
   where
-    n | n_val_args == 0 = 0   -- Like variables
-      | unboxed_tuple   = 0   -- See Note [Unboxed tuple size and result discount]
-      | otherwise       = 10  -- See Note [Constructor size and result discount]
-
-    unboxed_tuple = isUnboxedTupleDataCon dc
+    size | n_val_args == 0 = 0  -- Like variables
+         | otherwise       = 10
 
 primOpSize :: PrimOp -> Int -> Int
 primOpSize op n_val_args

@@ -645,6 +645,11 @@ exprSummary env e = go env e []
       | idArity f > length val_args
       = ArgIsLam
 
+      | not (null val_args)
+      = ArgIsNot []   -- Use ArgIsNot [] for args with some structure e.g. (f xs)
+                      -- This makes the call not totally-boring, and hence makes
+                      -- INLINE things inline (which they won't if all args are boring)
+
       | otherwise
       = ArgNoInfo
       where
