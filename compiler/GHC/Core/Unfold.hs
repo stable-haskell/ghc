@@ -517,8 +517,8 @@ exprTree opts args expr
     go _  (Lit lit)    = exprTreeN (litSize lit)
 
     go vs (Lam b e)
-      | isId b, not (id_is_free b) = go vs' e `et_add` lamSize opts
-      | otherwise                  = go vs' e
+      | isId b, not (isZeroBitId b) = go vs' e `et_add` lamSize opts
+      | otherwise                   = go vs' e
       where
         vs' = vs `add_lv` b
 
@@ -531,12 +531,10 @@ exprTree opts args expr
       where
         vs' = vs `add_lvs` map fst pairs
 
-    go vs e@(App {}) = go_app vs e []
-
-    go vs (Var f) | id_is_free f = exprTreeN 0
-                    -- Use calLSize to ensure we get constructor
+    go vs e@(App {}) = go_app vs e [] 0
+    go vs (Var f)    = callTree opts vs f [] 0
+                    -- Use callTree to ensure we get constructor
                     -- discounts even on nullary constructors
-                    | otherwise  = callTree opts vs f []
 
     go vs (Case e b _ alts) = go_case vs e b alts
 
@@ -560,17 +558,18 @@ exprTree opts args expr
 
     -----------------------------
     -- size_up_app is used when there's ONE OR MORE value args
-    go_app :: ETVars -> CoreExpr -> [CoreExpr] -> ExprTree
+    go_app :: ETVars -> CoreExpr -> [CoreExpr] -> Int -> ExprTree
                    -- args are the value args
-    go_app vs (App fun arg) args
-               | isTypeArg arg   = go_app vs fun args
-               | otherwise       = go vs arg `et_add`
-                                   go_app vs fun (arg:args)
-    go_app vs (Var fun)     args = callTree opts vs fun args
-    go_app vs (Tick _ expr) args = go_app vs expr args
-    go_app vs (Cast expr _) args = go_app vs expr args
-    go_app vs other         args = vanillaCallSize (length args) `etAddN`
-                                   go vs other
+    go_app vs (App fun arg) args voids
+                  | isTypeArg arg      = go_app vs fun args voids
+                  | isZeroBitArg arg   = go_app vs fun (arg:args) (voids+1)
+                  | otherwise          = go vs arg `et_add`
+                                         go_app vs fun (arg:args) voids
+    go_app vs (Var fun)     args voids = callTree opts vs fun args voids
+    go_app vs (Tick _ expr) args voids = go_app vs expr args voids
+    go_app vs (Cast expr _) args voids = go_app vs expr args voids
+    go_app vs other         args voids = vanillaCallSize (length args) voids `etAddN`
+                                         go vs other
        -- if the lhs is not an App or a Var, or an invisible thing like a
        -- Tick or Cast, then we should charge for a complete call plus the
        -- size of the lhs itself.
@@ -666,23 +665,18 @@ recordCaseOf vs (Tick _ e) = recordCaseOf vs e
 recordCaseOf vs (Cast e _) = recordCaseOf vs e
 recordCaseOf _     _       = Nothing
 
-{-
-arg_is_free :: CoreExpr -> Bool
--- "free" means we don't charge for this
--- occurrence in a function application
-arg_is_free (Var id)      = id_is_free id
-arg_is_free (Tick _ e)    = arg_is_free e
-arg_is_free (Cast e _)    = arg_is_free e
-arg_is_free (Type {})     = True
-arg_is_free (Coercion {}) = True
-arg_is_free _             = False
--}
+isZeroBitArg :: CoreExpr -> Bool
+-- We could take ticks and casts into account, but it makes little
+-- difference, and avoiding a recursive function here is good.
+isZeroBitArg (Var id) = isZeroBitId id
+isZeroBitArg _        = False
 
-id_is_free :: Id -> Bool
-id_is_free id = not (isJoinId id) && isZeroBitTy (idType id)
-   -- Don't count expressions such as State# RealWorld
-   -- exclude join points, because they can be rep-polymorphic
-   -- and typePrimRep will crash
+isZeroBitId :: Id -> Bool
+-- Don't count expressions such as State# RealWorld
+isZeroBitId id = assertPpr (not (isJoinId id)) (ppr id) $
+                   -- Exclude join points, because they can be rep-polymorphic
+                   -- and typePrimRep will crash
+                 isZeroBitTy (idType id)
 
 
 -- | Finds a nominal size of a string literal.
@@ -698,52 +692,52 @@ litSize _other = 0    -- Must match size of nullary constructors
                       --            (eg via case binding)
 
 ----------------------------
-callTree :: UnfoldingOpts -> ETVars -> Id -> [CoreExpr] -> ExprTree
-callTree opts vs fun val_args
+callTree :: UnfoldingOpts -> ETVars -> Id -> [CoreExpr] -> Int -> ExprTree
+callTree opts vs fun val_args voids
   = case idDetails fun of
-      FCallId _        -> exprTreeN (vanillaCallSize n_val_args)
-      JoinId {}        -> exprTreeN (jumpSize        n_val_args)
+      FCallId _        -> exprTreeN (vanillaCallSize n_val_args voids)
+      JoinId {}        -> exprTreeN (jumpSize        n_val_args voids)
       PrimOpId op _    -> exprTreeN (primOpSize op   n_val_args)
       DataConWorkId dc -> conSize dc n_val_args
-      ClassOpId {}     -> classOpSize opts vs fun val_args
-      _                -> funSize opts vs fun n_val_args
+      ClassOpId {}     -> classOpSize opts vs fun val_args voids
+      _                -> funSize opts vs fun n_val_args voids
   where
     n_val_args = length val_args
 
 -- | The size of a function call
-vanillaCallSize :: Int -> Int
-vanillaCallSize n_val_args = 10 * (1 + n_val_args)
+vanillaCallSize :: Int -> Int -> Int
+vanillaCallSize n_val_args voids = 10 * (1 + n_val_args - voids)
         -- The 1+ is for the function itself
         -- Add 1 for each non-trivial value arg
 
 -- | The size of a jump to a join point
-jumpSize :: Int -> Int
-jumpSize n_val_args = 2 * (1 + n_val_args)
+jumpSize :: Int -> Int -> Int
+jumpSize n_val_args voids = 2 * (1 + n_val_args - voids)
   -- A jump is 20% the size of a function call. Making jumps free reopens
   -- bug #6048, but making them any more expensive loses a 21% improvement in
   -- spectral/puzzle. TODO Perhaps adjusting the default threshold would be a
   -- better solution?
 
-classOpSize :: UnfoldingOpts -> ETVars -> Id -> [CoreExpr] -> ExprTree
+classOpSize :: UnfoldingOpts -> ETVars -> Id -> [CoreExpr] -> Int -> ExprTree
 -- See Note [Conlike is interesting]
-classOpSize _ _ _ []
+classOpSize _ _ _ [] _
   = etZero
-classOpSize opts vs fn val_args
+classOpSize opts vs fn val_args voids
   | arg1 : _ <- val_args
   , Just dict <- recordCaseOf vs arg1
   = warnPprTrace (not (isId dict)) "classOpSize" (ppr fn <+> ppr val_args) $
-    vanillaCallSize (length val_args) `etAddN`
+    vanillaCallSize (length val_args) voids `etAddN`
     etOneCase (ScrutOf dict (unfoldingDictDiscount opts))
            -- If the class op is scrutinising a lambda bound dictionary then
            -- give it a discount, to encourage the inlining of this function
            -- The actual discount is rather arbitrarily chosen
   | otherwise
-  = exprTreeN (vanillaCallSize (length val_args))
+  = exprTreeN (vanillaCallSize (length val_args) voids)
 
-funSize :: UnfoldingOpts -> ETVars -> Id -> Int -> ExprTree
+funSize :: UnfoldingOpts -> ETVars -> Id -> Int -> Int -> ExprTree
 -- Size for function calls that are not constructors or primops
 -- Note [Function applications]
-funSize opts (avs,_) fun n_val_args
+funSize opts (avs,_) fun n_val_args voids
   | fun `hasKey` buildIdKey   = etZero  -- Wwant to inline applications of build/augment
   | fun `hasKey` augmentIdKey = etZero  -- so we give size zero to the whole call
   | otherwise = SizeIs { et_size  = size
@@ -751,13 +745,14 @@ funSize opts (avs,_) fun n_val_args
                        , et_ret   = res_discount }
   where
     size | n_val_args == 0 = 0
-         | otherwise       = vanillaCallSize n_val_args
+         | otherwise       = vanillaCallSize n_val_args voids
 
     -- Discount if this is an interesting variable, and is applied
-    -- Discount is enough to make the application free (but not negative!)
+    -- If the function is an argument and is applied to some values,
+    -- give it a discount -- maybe we can apply that lambda.
     --  See Note [Function and non-function discounts]
     cases | n_val_args > 0, fun `elemVarSet` avs
-          = unitBag (ScrutOf fun size)
+          = unitBag (ScrutOf fun (unfoldingFunAppDiscount opts))
           | otherwise
           = emptyBag
 

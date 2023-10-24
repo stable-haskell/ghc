@@ -30,7 +30,6 @@ import GHC.Types.Name
 import GHC.Types.Var.Env
 
 import GHC.Utils.Logger
-import GHC.Utils.Misc
 import GHC.Utils.Outputable
 import GHC.Utils.Panic
 
@@ -220,14 +219,18 @@ tryUnfolding logger env fn cont unf_template unf_cache guidance
         | otherwise
         -> traceInline logger env fn str (mk_doc some_benefit extra_doc False) Nothing
         where
-          some_benefit = calc_some_benefit (length arg_bndrs)
+          n_bndrs = length arg_bndrs
+          some_benefit  = calc_some_benefit n_bndrs
+          small_enough  = adjusted_size `leqSize` unfoldingUseThreshold opts
+          adjusted_size = adjustSize adjust_size rhs_size
 
+          --------  Compute the size of the ExprTree in this context -----------
+          rhs_size = exprTreeSize context expr_tree
           want_result
-             | LT <- arg_bndrs `compareLength` arg_infos
-                         = True  -- Over-saturated
-             | otherwise = case cont_info of
-                              BoringCtxt -> False
-                              _          -> True
+             | n_bndrs < n_val_args = True  -- Over-saturated
+             | otherwise            = case cont_info of
+                                        BoringCtxt -> False
+                                        _          -> True
 
           bound_env = mkVarEnv (arg_bndrs `zip` (arg_infos ++ repeat ArgNoInfo))
                       -- Crucial to include /all/ arg_bndrs, lest we treat
@@ -235,11 +238,8 @@ tryUnfolding logger env fn cont unf_template unf_cache guidance
           context = IC { ic_bound    = bound_env
                        , ic_free     = getFreeSummary
                        , ic_want_res = want_result }
-          size :: Size
-          size = exprTreeSize context expr_tree
 
           in_scope = seInScope env
-
           getFreeSummary :: Id -> ArgSummary
           -- Get the ArgSummary of a free variable
           getFreeSummary x
@@ -253,28 +253,37 @@ tryUnfolding logger env fn cont unf_template unf_cache guidance
                         -> exprSummary env expr
                 _ -> ArgNoInfo
 
+          -------- adjust_size ----------------
+          adjust_size size = size - call_size + depth_penalty size
+
+          -- Subtract size of the call, because the result replaces the call
+          -- We count 10 for the function itself, 10 for each arg supplied,
+          call_size = 10 + 10*n_val_args
 
           -- Adjust by the depth scaling
           -- See Note [Avoid inlining into deeply nested cases]
           depth_threshold = unfoldingCaseThreshold opts
           depth_scaling   = unfoldingCaseScaling opts
 
-          add_depth_penalty size = size + (size * (case_depth - depth_threshold))
-                                                  `div` depth_scaling
-          final_size | case_depth <= depth_threshold = size
-                     | otherwise = adjustSize add_depth_penalty size
+          depth_penalty size
+            | case_depth <= depth_threshold = 0
+            | otherwise = (size * (case_depth - depth_threshold)) `div` depth_scaling
 
-          small_enough = final_size `leqSize` unfoldingUseThreshold opts
-
-          extra_doc = vcat [ text "size =" <+> ppr size
+          extra_doc = vcat [ text "size =" <+> ppr rhs_size
                            , text "case depth =" <+> int case_depth
-                           , text "final_size =" <+> ppr final_size ]
+                           , text "adjusted_size =" <+> ppr adjusted_size ]
+
   where
     (arg_infos, call_cont) = contArgs cont
-    lone_variable = loneVariable cont
-    cont_info     = interestingCallContext env call_cont
-    case_depth    = seCaseDepth env
-    opts          = seUnfoldingOpts env
+    n_val_args       = length arg_infos
+    lone_variable    = loneVariable cont
+    cont_info        = interestingCallContext env call_cont
+    case_depth       = seCaseDepth env
+    opts             = seUnfoldingOpts env
+    interesting_args = any hasArgInfo arg_infos
+                -- NB: (any hasArgInfo arg_infos) looks at the
+                -- over-saturated args too which is "wrong";
+                -- but if over-saturated we inline anyway.
 
     -- Unpack the UnfoldingCache lazily because it may not be needed, and all
     -- its fields are strict; so evaluating unf_cache at all forces all the
@@ -282,20 +291,6 @@ tryUnfolding logger env fn cont unf_template unf_cache guidance
     -- Ids that are never going to inline anyway.
     -- See Note [UnfoldingCache] in GHC.Core
     UnfoldingCache{ uf_is_work_free = is_wf, uf_expandable = is_exp } = unf_cache
-
-    mk_doc some_benefit extra_doc yes_or_no
-      = vcat [ text "arg infos" <+> ppr arg_infos
-             , text "interesting continuation" <+> ppr cont_info
-             , text "some_benefit" <+> ppr some_benefit
-             , text "is exp:" <+> ppr is_exp
-             , text "is work-free:" <+> ppr is_wf
-             , text "guidance" <+> ppr guidance
-             , extra_doc
-             , text "ANSWER =" <+> if yes_or_no then text "YES" else text "NO"]
-
-    ctx = log_default_dump_context (logFlags logger)
-    str = "Considering inlining: " ++ showSDocOneLine ctx (ppr fn)
-    n_val_args = length arg_infos
 
            -- some_benefit is used when the RHS is small enough
            -- and the call has enough (or too many) value
@@ -312,10 +307,6 @@ tryUnfolding logger env fn cont unf_template unf_cache guidance
       where
         saturated      = n_val_args >= uf_arity
         over_saturated = n_val_args > uf_arity
-        interesting_args = any hasArgInfo arg_infos
-                -- NB: (any nonTriv arg_infos) looks at the
-                -- over-saturated args too which is "wrong";
-                -- but if over-saturated we inline anyway.
 
         interesting_call
           | over_saturated
@@ -329,6 +320,19 @@ tryUnfolding logger env fn cont unf_template unf_cache guidance
               RhsCtxt NonRecursive
                           -> uf_arity > 0  -- See Note [RHS of lets]
               _other      -> False         -- See Note [Nested functions]
+
+    mk_doc some_benefit extra_doc yes_or_no
+      = vcat [ text "arg infos" <+> ppr arg_infos
+             , text "interesting continuation" <+> ppr cont_info
+             , text "some_benefit" <+> ppr some_benefit
+             , text "is exp:" <+> ppr is_exp
+             , text "is work-free:" <+> ppr is_wf
+             , text "guidance" <+> ppr guidance
+             , extra_doc
+             , text "ANSWER =" <+> if yes_or_no then text "YES" else text "NO"]
+
+    ctx = log_default_dump_context (logFlags logger)
+    str = "Considering inlining: " ++ showSDocOneLine ctx (ppr fn)
 
 {- Note [RHS of lets]
 ~~~~~~~~~~~~~~~~~~~~~
