@@ -559,7 +559,11 @@ exprTree opts args expr
     -----------------------------
     -- size_up_app is used when there's ONE OR MORE value args
     go_app :: ETVars -> CoreExpr -> [CoreExpr] -> Int -> ExprTree
-                   -- args are the value args
+        -- args:  all the value args
+        -- voids: counts the zero-bit arguments; don't charge for these
+        --        This makes a difference in ST-heavy code which does
+        --        does a lot of state passing, and which can be in an
+        --        inner loop.
     go_app vs (App fun arg) args voids
                   | isTypeArg arg      = go_app vs fun args voids
                   | isZeroBitArg arg   = go_app vs fun (arg:args) (voids+1)
@@ -744,7 +748,7 @@ funSize opts (avs,_) fun n_val_args voids
                        , et_cases = cases
                        , et_ret   = res_discount }
   where
-    size | n_val_args == 0 = 0
+    size | n_val_args == 0 = 0    -- Naked variable counts zero
          | otherwise       = vanillaCallSize n_val_args voids
 
     -- Discount if this is an interesting variable, and is applied
