@@ -276,7 +276,7 @@ calcUnfoldingGuidance opts is_top_bottoming (Tick t expr)
 calcUnfoldingGuidance opts is_top_bottoming expr
   = case exprTree opts val_bndrs body of
       Nothing -> UnfNever
-      Just et@(ExprTree { et_size = tot })
+      Just et@(ExprTree { et_tot = tot })
         | uncondInline expr n_val_bndrs tot
         -> UnfWhen { ug_unsat_ok  = unSaturatedOk
                    , ug_boring_ok =  boringCxtOk
@@ -633,6 +633,7 @@ exprTree opts args expr
         go_alts cd vs b alts
 
     go_alts :: Int -> ETVars -> Id -> [CoreAlt] -> Maybe ExprTree
+    -- Add up the sizes of all RHSs, plus 10 for each alternative
     go_alts cd vs b alts = foldr1 et_add_alt (map alt_expr_tree alts)
       where
         cd1 = cd - 1
@@ -1001,7 +1002,7 @@ metAdd bOMB_OUT_SIZE (Just et1) (Just et2)
   , let t12 = t1 + t2
   = if   t12 >= bOMB_OUT_SIZE
     then Nothing
-    else Just (ExprTree { et_tot = t12
+    else Just (ExprTree { et_tot   = t12
                         , et_size  = n1 + n2
                         , et_cases = c1 `unionBags` c2
                         , et_ret   = ret2 })
@@ -1016,7 +1017,7 @@ metAddAlt bOMB_OUT_SIZE (Just et1) (Just et2)
   , let t12 = t1 + t2
   = if   t12 >= bOMB_OUT_SIZE
     then Nothing
-    else Just (ExprTree { et_tot = t12
+    else Just (ExprTree { et_tot   = t12
                         , et_size  = n1 + n2
                         , et_cases = c1 `unionBags` c2
                         , et_ret   = ret1 + ret2 })
