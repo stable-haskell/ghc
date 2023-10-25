@@ -221,11 +221,11 @@ tryUnfolding logger env fn cont unf_template unf_cache guidance
         where
           n_bndrs = length arg_bndrs
           some_benefit  = calc_some_benefit n_bndrs
-          small_enough  = adjusted_size `leqSize` unfoldingUseThreshold opts
-          adjusted_size = adjustSize adjust_size rhs_size
+          small_enough  = adjusted_size <= unfoldingUseThreshold opts
+          rhs_size      = exprTreeSize context expr_tree
+          adjusted_size = rhs_size - call_size + depth_penalty
 
           --------  Compute the size of the ExprTree in this context -----------
-          rhs_size = exprTreeSize context expr_tree
           want_result
              | n_bndrs < n_val_args = True  -- Over-saturated
              | otherwise            = case cont_info of
@@ -253,9 +253,7 @@ tryUnfolding logger env fn cont unf_template unf_cache guidance
                         -> exprSummary env expr
                 _ -> ArgNoInfo
 
-          -------- adjust_size ----------------
-          adjust_size size = size - call_size + depth_penalty size
-
+          -------- Size adjustements ----------------
           -- Subtract size of the call, because the result replaces the call
           -- We count 10 for the function itself, 10 for each arg supplied,
           call_size = 10 + 10*n_val_args
@@ -265,9 +263,9 @@ tryUnfolding logger env fn cont unf_template unf_cache guidance
           depth_threshold = unfoldingCaseThreshold opts
           depth_scaling   = unfoldingCaseScaling opts
 
-          depth_penalty size
+          depth_penalty
             | case_depth <= depth_threshold = 0
-            | otherwise = (size * (case_depth - depth_threshold)) `div` depth_scaling
+            | otherwise = (rhs_size * (case_depth - depth_threshold)) `div` depth_scaling
 
           extra_doc = vcat [ text "size =" <+> ppr rhs_size
                            , text "case depth =" <+> int case_depth

@@ -126,9 +126,8 @@ seqGuidance (UnfIfGoodArgs bs et) = seqBndrs bs `seq` seqET et
 seqGuidance _                     = ()
 
 seqET :: ExprTree -> ()
-seqET TooBig = ()
-seqET (SizeIs { et_size = size, et_cases = cases, et_ret = ret })
-  = size `seq` ret `seq` seqBag seqCT cases
+seqET (ExprTree { et_tot = tot, et_size = size, et_cases = cases, et_ret = ret })
+  = tot `seq` size `seq` ret `seq` seqBag seqCT cases
 
 seqCT :: CaseTree -> ()
 seqCT (ScrutOf x i) = x `seq` i `seq` ()

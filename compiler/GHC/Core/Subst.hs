@@ -544,17 +544,22 @@ substGuidance subst guidance
 substExprTree :: IdSubstEnv -> ExprTree -> ExprTree
 -- ExprTrees have free Ids, and so must be substituted
 -- But Ids /only/ not tyvars, so substitution is very simple
-substExprTree _     TooBig = TooBig
-substExprTree id_env (SizeIs { et_size  = size
-                             , et_cases = cases
-                             , et_ret   = ret_discount })
-   = case extra_size of
-       STooBig     -> TooBig
-       SSize extra -> SizeIs { et_size = size + extra
-                             , et_cases = cases'
-                             , et_ret = ret_discount }
+--
+-- We might be substituting a big tree in place of a variable
+-- but we don't account for that in the size: I think it doesn't
+-- matter, and the ExprTree will be refreshed soon enough.
+substExprTree id_env (ExprTree { et_tot = tot
+                               , et_size  = size
+                               , et_cases = cases
+                               , et_ret   = ret_discount })
+   = ExprTree { et_tot   = tot
+              , et_size  = size + extra_size
+              , et_cases = cases'
+              , et_ret   = ret_discount }
    where
-     (extra_size, cases') = foldr subst_ct (sizeZero, emptyBag) cases
+     (extra_size, cases') = foldr subst_ct (0, emptyBag) cases
+     -- The extra_size is just in case we substitute a non-variable for
+     -- for a variable, in which case a CaseOf won't work. Unlikely.
 
      subst_ct :: CaseTree -> (Size, Bag CaseTree) -> (Size, Bag CaseTree)
      subst_ct (ScrutOf v d) (n, cts)
@@ -565,21 +570,16 @@ substExprTree id_env (SizeIs { et_size  = size
      subst_ct (CaseOf v case_bndr alts) (n, cts)
         = case lookupVarEnv id_env v of
              Just (Var v') -> (n, CaseOf v' case_bndr alts' `consBag` cts)
-             _ -> (n `addSize` extra, cts)
+             _ -> (n + extra, cts)
         where
           id_env' = id_env `delVarEnv` case_bndr
           alts' = map (subst_alt id_env') alts
-          extra = keptCaseSize boringInlineContext case_bndr alts
+          extra = keptCaseSize alts
 
      subst_alt id_env (AltTree con bs rhs)
         = AltTree con bs (substExprTree id_env' rhs)
         where
           id_env' = id_env `delVarEnvList` bs
-
-boringInlineContext :: InlineContext
-boringInlineContext = IC { ic_free = \_ -> ArgNoInfo
-                         , ic_bound = emptyVarEnv
-                         , ic_want_res = False }
 
 ------------------
 substIdOcc :: Subst -> Id -> Id

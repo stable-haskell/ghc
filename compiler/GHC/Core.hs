@@ -1421,11 +1421,10 @@ data UnfoldingGuidance
   | UnfNever        -- The RHS is big, so don't inline it
 
 data ExprTree
-  = TooBig
-  | SizeIs { et_size  :: {-# UNPACK #-} !Int
-           , et_ret   :: {-# UNPACK #-} !Int
-                -- ^ Discount when result is scrutinised
-           , et_cases :: Bag CaseTree
+  = ExprTree { et_tot   :: {-# UNPACK #-} !Int   -- ^ Size of whole tree
+             , et_size  :: {-# UNPACK #-} !Int   -- ^ Size of the bit apart from et_cases
+             , et_ret   :: {-# UNPACK #-} !Int   -- ^ Discount when result is scrutinised
+             , et_cases :: Bag CaseTree
     }
 
 data CaseTree

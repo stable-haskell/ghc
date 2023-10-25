@@ -628,9 +628,9 @@ instance Outputable UnfoldingGuidance where
                ppr et ]
 
 instance Outputable ExprTree where
-  ppr TooBig         = text "TooBig"
-  ppr (SizeIs { et_size = size, et_ret = ret, et_cases = cases })
-    = int size <> char '/' <> int ret <> brackets (sep (map ppr (bagToList cases)))
+  ppr (ExprTree { et_tot = tot, et_size = size, et_ret = ret, et_cases = cases })
+    = int tot <> char '/' <> int size <> char '/' <> int ret
+       <> brackets (sep (map ppr (bagToList cases)))
 
 instance Outputable CaseTree where
   ppr (ScrutOf x n)   = ppr x <> colon <> int n
