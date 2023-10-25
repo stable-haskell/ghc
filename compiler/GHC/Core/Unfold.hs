@@ -503,7 +503,7 @@ Wrinkles:
 
 * We must be careful about recording enormous functions, with very wide or very
   deep case trees. (This can happen with Generics; e.g. test T5642.)  We limit
-  both with UnfoldingOpts, and 
+  both with UnfoldingOpts.
 -}
 
 type ETVars = (VarSet,VarSet)  -- (avs, lvs)
@@ -1184,5 +1184,3 @@ lookupBndr (IC { ic_bound = bound_env, ic_free = lookup_free }) var
   | Just info <- assertPpr (isId var) (ppr var) $
                  lookupVarEnv bound_env var = info
   | otherwise                               = lookup_free var
-
-
