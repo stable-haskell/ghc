@@ -12,6 +12,7 @@ module GHC.Core (
         CoreProgram, CoreExpr, CoreAlt, CoreBind, CoreArg, CoreBndr,
         TaggedExpr, TaggedAlt, TaggedBind, TaggedArg, TaggedBndr(..), deTagExpr,
         ExprTree(..), CaseTree(..), AltTree(..),
+        Size, Discount,
 
         -- * In/Out type synonyms
         InId, InBind, InExpr, InAlt, InArg, InType, InKind,
@@ -1420,19 +1421,23 @@ data UnfoldingGuidance
 
   | UnfNever        -- The RHS is big, so don't inline it
 
+type Size     = Int
+type Discount = Int
+
 data ExprTree
-  = ExprTree { et_tot   :: {-# UNPACK #-} !Int   -- ^ Size of whole tree
-             , et_size  :: {-# UNPACK #-} !Int   -- ^ Size of the bit apart from et_cases
-             , et_ret   :: {-# UNPACK #-} !Int   -- ^ Discount when result is scrutinised
+  = ExprTree { et_tot   :: {-# UNPACK #-} !Size      -- ^ Size of whole tree
+             , et_size  :: {-# UNPACK #-} !Size      -- ^ Size of the bit apart from et_cases
+             , et_ret   :: {-# UNPACK #-} !Discount  -- ^ Discount when result is scrutinised
              , et_cases :: Bag CaseTree
     }
 
 data CaseTree
-  = CaseOf Id          -- Abstracts a case expression on this Id
-           Id          -- Case binder
-           [AltTree]   -- Always non-empty, but not worth making NonEmpty;
-                       -- nothing relies on non-empty-ness
-  | ScrutOf Id Int     -- If this Id is bound to a value, apply this discount
+  = CaseOf Id            -- Abstracts a case expression on this Id
+           Id            -- Case binder
+           [AltTree]     -- Always non-empty, but not worth making NonEmpty;
+                         -- nothing relies on non-empty-ness
+
+  | ScrutOf Id Discount  -- If this Id is bound to a value, apply this discount
 
 data AltTree  = AltTree AltCon
                         [Id]      -- Term variables only
