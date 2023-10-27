@@ -707,9 +707,9 @@ addBotCt nabla0@MkNabla{nabla_tm_st = ts0} x = do
   bot1 <- mergeBots (idType y) IsBot bot0
   let vi' = vi{ vi_bot = bot1 }
 
-  (yid, nabla1@MkNabla{nabla_tm_st = ts1@TmSt{ts_facts=env1}}) <- representId y nabla0
+  (yid, nabla1) <- representId y nabla0
 
-  pure nabla1{ nabla_tm_st = ts1{ts_facts = env1 & _class yid._data .~ Just vi' } }
+  pure (nabla1 & nabla_egr._class yid._data .~ Just vi')
 
 -- | Adds the constraint @x ~/ ⊥@ to 'Nabla'. Quite similar to 'addNotConCt',
 -- but only cares for the ⊥ "constructor".
@@ -728,7 +728,7 @@ addNotBotCt nabla0@MkNabla{ nabla_tm_st = ts0 } x = do
         _        -> id
   return $
     marked
-    nabla1{ nabla_tm_st = ts1{ts_facts = env1 & _class yid._data .~ Just vi' } }
+    (nabla1 & nabla_egr._class yid._data .~ Just vi')
 
 mergeBots :: Type
           -- ^ The type of the pattern whose 'BotInfo's are being merged
@@ -770,7 +770,7 @@ addNotConCt _     _ (PmAltConLike (RealDataCon dc))
   | isNewDataCon dc = mzero -- (3) in Note [Coverage checking Newtype matches]
 addNotConCt nabla0 x nalt = do
   (xid, nabla1) <- representId x nabla0
-  (mb_mark_dirty, nabla2) <- trvVarInfo (mergeNotConCt nalt) nabla1 (xid, x)
+  (mb_mark_dirty, nabla2) <- trvVarInfo (`mergeNotConCt` nalt) nabla1 (xid, x)
   pure $ case mb_mark_dirty of
     Just x  -> markDirty x nabla2
     Nothing -> nabla2
@@ -778,7 +778,7 @@ addNotConCt nabla0 x nalt = do
 -- Update `x`'s 'VarInfo' entry. Fail ('MaybeT') if contradiction,
 -- otherwise return updated entry and `Just x'` if `x` should be marked dirty,
 -- where `x'` is the representative of `x`.
-mergeNotConCt :: PmAltCon -> VarInfo -> MaybeT DsM (Maybe Id, VarInfo)
+mergeNotConCt :: VarInfo -> PmAltCon -> MaybeT DsM (Maybe Id, VarInfo)
 mergeNotConCt nalt vi@(VI x' pos neg _ rcm) = do
   -- 1. Bail out quickly when nalt contradicts a solution
   let contradicts nalt sol = eqPmAltCon (paca_con sol) nalt == Equal
@@ -811,6 +811,10 @@ hasRequiredTheta (PmAltConLike cl) = notNull req_theta
     (_,_,_,_,req_theta,_,_) = conLikeFullSig cl
 hasRequiredTheta _                 = False
 
+-- | Worth making a lens from Nabla to EGraph, to make changing data operations much easier
+nabla_egr :: Functor f => (TmEGraph -> f TmEGraph) -> (Nabla -> f Nabla)
+nabla_egr f (MkNabla tyst ts@TmSt{ts_facts=egr}) = (\egr' -> MkNabla tyst ts{ts_facts=egr'}) <$> f egr
+
 -- | Add a @x ~ K tvs args ts@ constraint.
 -- @addConCt x K tvs args ts@ extends the substitution with a solution
 -- @x :-> (K, tvs, args)@ if compatible with the negative and positive info we
@@ -819,14 +823,34 @@ hasRequiredTheta _                 = False
 -- See Note [TmState invariants].
 addConCt :: Nabla -> Id -> PmAltCon -> [TyVar] -> [Id] -> MaybeT DsM Nabla
 addConCt nabla0 x alt tvs args = do
-  -- represent x, represent the pattern, merge
-  (xid, nabla1@MkNabla{ nabla_tm_st = ts@TmSt{ ts_facts=env } })
-    <- representId x nabla0
+  (xid, nabla1) <- representId x nabla0
+  (kid, nabla2) <- representPattern alt tvs args -- VarInfo contains K data in pos info
+  let k_vi = (emptyVarInfo x){vi_pos=[PACA alt tvs args]}
 
-  let vi@(VI _ pos neg bot _) = lookupVarInfo ts x
+  nabla3 <- case (alt, args) of
+    (PmAltConLike (RealDataCon dc), [y]) | isNewDataCon dc ->
+      (yid, nabla3) <- representId y nabla2
 
-  
+      -- A newtype con and the underlying var are in the same e-class
+      nabla4 <- mergeVarIds xid yid nabla3
 
+      -- Return the nabla3 and set the k_vi unchanged
+      pure (nabla4 & nabla_egr._class kid._data .~ Just k_vi)
+
+      -- If the merging y and N y thing works, we won't need this.
+      -- case bot of
+        -- MaybeBot -> pure (nabla_with MaybeBot)
+        -- IsBot    -> addBotCt (nabla_with IsBot) y
+        -- IsNotBot -> addNotBotCt (nabla_with IsNotBot) y
+
+    _ -> assert (isPmAltConMatchStrict alt)
+         -- Return the nabla2 and set the k_vi with additional IsNotBot info
+         pure (nabla2 & nabla_egr._class kid._data .~ Just k_vi{vi_bot=IsNotBot}) -- strict match ==> not ⊥
+
+  mergeVarIds xid kid
+
+mergeConCt :: VarInfo -> PmAltConApp -> StateT TyState (MaybeT DsM) VarInfo
+mergeConCt vi@(VI _ pos neg bot _) (PACA alt tvs args) = StateT $ \tyst -> do
   -- First try to refute with a negative fact
   guard (not (elemPmAltConSet alt neg))
   -- Then see if any of the other solutions (remember: each of them is an
@@ -838,23 +862,17 @@ addConCt nabla0 x alt tvs args = do
   case find ((== Equal) . eqPmAltCon alt . paca_con) pos of
     Just (PACA _con other_tvs other_args) -> do
       -- We must unify existentially bound ty vars and arguments!
+      --
+      -- The arguments are handled automatically by representing K in
+      -- the e-class...! all equivalent things will be merged.
+      --
+      -- So we treat the ty vars:
       let ty_cts = equateTys (map mkTyVarTy tvs) (map mkTyVarTy other_tvs)
-      nabla2 <- MaybeT $ addPhiCts nabla1 (listToBag ty_cts)
-      let add_var_ct nabla' (a, b) = addVarCt nabla' a b
-      foldlM add_var_ct nabla2 $ zipEqual "addConCt" args other_args
+      tyst' <- MaybeT (tyOracle tyst (listToBag $ map (\(PhiTyCt pred) -> pred) ty_cts))
+      return (vi, tyst') -- All good, and we get no new information.
     Nothing -> do
-      let pos' = PACA alt tvs args : pos
-      let nabla_with bot' =
-            nabla1{ nabla_tm_st = ts{ts_facts = env & _class xid._data .~ Just (vi{vi_pos = pos', vi_bot = bot'})} }
-      -- Do (2) in Note [Coverage checking Newtype matches]
-      case (alt, args) of
-        (PmAltConLike (RealDataCon dc), [y]) | isNewDataCon dc ->
-          case bot of
-            MaybeBot -> pure (nabla_with MaybeBot)
-            IsBot    -> addBotCt (nabla_with MaybeBot) y
-            IsNotBot -> addNotBotCt (nabla_with MaybeBot) y
-        _ -> assert (isPmAltConMatchStrict alt )
-             pure (nabla_with IsNotBot) -- strict match ==> not ⊥
+      -- No new information to merge, all done.
+      return (vi, tyst)
 
 equateTys :: [Type] -> [Type] -> [PhiCt]
 equateTys ts us =
@@ -876,17 +894,17 @@ equateTys ts us =
 addVarCt :: Nabla -> Id -> Id -> MaybeT DsM Nabla
 addVarCt nabla0 x y = do
 
+  -- We'd really rather ([xid, yid], nabla1) <- representIds [x,y] nabla0, but that's not exhaustive...
   ((xid, yid), nabla1)
     <- runStateT ((,) <$> StateT (representId x) <*> StateT (representId y)) nabla0
 
-  mergeVarIds nabla1 xid yid
+  mergeVarIds xid yid nabla1
 
-mergeVarIds :: Nabla -> ClassId -> ClassId -> MaybeT DsM Nabla
-mergeVarIds (MkNabla tyst0 (TmSt egr0 is)) xid yid = do
+mergeVarIds :: ClassId -> ClassId -> Nabla -> MaybeT DsM Nabla
+mergeVarIds xid yid (MkNabla tyst0 (TmSt egr0 is)) = do
 
   -- @merge env x y@ makes @x@ and @y@ point to the same entry,
   -- thereby merging @x@'s class with @y@'s.
-
   (egr1, tyst1) <- runStateT (EG.mergeM xid yid egr0 >>= EG.rebuildM . snd) tyst0
 
   return (MkNabla tyst1 (TmSt egr1 is))
@@ -961,7 +979,7 @@ addCoreCt nabla x e = do
       -- Note that @rep == x@ if we encountered @e@ for the first time.
       modifyT (\nabla0 -> do
         (xid, nabla1) <- representId x nabla0
-        mergeVarIds nabla1 xid rep)
+        mergeVarIds xid rep nabla1)
 
     bind_expr :: CoreExpr -> StateT Nabla (MaybeT DsM) Id
     bind_expr e = do
@@ -2213,11 +2231,10 @@ instance Analysis (StateT TyState (MaybeT DsM)) (Maybe VarInfo) ExprF where
     -- Gradually merge every positive fact we have on x into y
     -- The args are merged by congruence, since we represent the
     -- constructor in the e-graph in addConCt.
-    let add_pos py (PACA cl tvs args) = mergeConCt py cl tvs args
-    vi_res1 <- foldlM add_pos pos_y pos_x
+    vi_res1 <- foldlM mergeConCt pos_y pos_x
 
     -- Do the same for negative info
-    let add_neg vi nalt = lift $ snd <$> mergeNotConCt nalt vi
+    let add_neg vi nalt = lift $ snd <$> mergeNotConCt vi nalt
     vi_res2 <- foldlM add_neg vi_res1 (pmAltConSetElems neg_x)
 
     -- We previously were not merging the bottom information, but now we do.
