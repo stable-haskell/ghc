@@ -716,14 +716,16 @@ addBotCt nabla0@MkNabla{nabla_tm_st = ts0} x = do
 addNotBotCt :: Nabla -> Id -> MaybeT DsM Nabla
 addNotBotCt nabla0@MkNabla{ nabla_tm_st = ts0 } x = do
   let (y, vi@VI { vi_bot = bot0 }) = lookupVarInfoNT ts0 x
-  (bot1, isDirty) <- mergeBots (idType y) IsNotBot bot0
+  bot1 <- mergeBots (idType y) IsNotBot bot0
   let vi' = vi{ vi_bot = bot1 }
 
   (yid, nabla1@MkNabla{nabla_tm_st = ts1@TmSt{ts_facts=env1}}) <- representId y nabla0
-  marked <- case bot0 of
-    -- Mark dirty for a delayed inhabitation test (see comment in 'mergeBots' as well)
-    MaybeBot -> markDirty y
-    _        -> id
+  let
+    marked
+      = case bot0 of
+        -- Mark dirty for a delayed inhabitation test (see comment in 'mergeBots' as well)
+        MaybeBot -> markDirty y
+        _        -> id
   return $
     marked
     nabla1{ nabla_tm_st = ts1{ts_facts = env1 & _class yid._data .~ Just vi' } }
@@ -734,7 +736,7 @@ mergeBots :: Type
           -> BotInfo
           -> MaybeT DsM BotInfo
 -- There already is x ~ ⊥. Nothing left to do
-mergeBots _ IsBot IsBot    = IsBot
+mergeBots _ IsBot IsBot    = pure IsBot
 -- There was x ≁ ⊥. Contradiction!
 mergeBots _ IsBot IsNotBot = mzero
 -- We add x ~ ⊥
@@ -744,20 +746,20 @@ mergeBots t IsBot MaybeBot
   -- (unlifted vars can never be ⊥)
   = mzero 
   | otherwise
-  = IsBot
+  = pure IsBot
 -- There was x ~ ⊥. Contradiction!
 mergeBots _ IsNotBot IsBot    = mzero
 -- There already is x ≁ ⊥. Nothing left to do
-mergeBots _ IsNotBot IsNotBot = IsNotBot
+mergeBots _ IsNotBot IsNotBot = pure IsNotBot
 -- We add x ≁ ⊥ and will need to test if x is still inhabited (see addNotBotCt)
 -- romes:todo: We don't have the dirty set in the e-graph, so
 -- congruence-fueled merging won't mark anything as dirty... hmm...
-mergeBots _ IsNotBot MaybeBot = IsNotBot
+mergeBots _ IsNotBot MaybeBot = pure IsNotBot
 -- Commutativity of 'mergeBots',
 -- and trivially merging MaybeBots
-mergeBots _ MaybeBot IsBot    = mergeBots IsBot    MaybeBot
-mergeBots _ MaybeBot IsNotBot = mergeBots IsNotBot MaybeBot
-mergeBots _ MaybeBot MaybeBot = MaybeBot
+mergeBots x MaybeBot IsBot    = mergeBots x IsBot    MaybeBot
+mergeBots x MaybeBot IsNotBot = mergeBots x IsNotBot MaybeBot
+mergeBots _ MaybeBot MaybeBot = pure MaybeBot
 
 -- | Record a @x ~/ K@ constraint, e.g. that a particular 'Id' @x@ can't
 -- take the shape of a 'PmAltCon' @K@ in the 'Nabla' and return @Nothing@ if
@@ -768,40 +770,40 @@ addNotConCt _     _ (PmAltConLike (RealDataCon dc))
   | isNewDataCon dc = mzero -- (3) in Note [Coverage checking Newtype matches]
 addNotConCt nabla0 x nalt = do
   (xid, nabla1) <- representId x nabla0
-  (mb_mark_dirty, nabla2) <- trvVarInfo go nabla1 (xid, x)
+  (mb_mark_dirty, nabla2) <- trvVarInfo (mergeNotConCt nalt) nabla1 (xid, x)
   pure $ case mb_mark_dirty of
     Just x  -> markDirty x nabla2
     Nothing -> nabla2
-  where
-    -- Update `x`'s 'VarInfo' entry. Fail ('MaybeT') if contradiction,
-    -- otherwise return updated entry and `Just x'` if `x` should be marked dirty,
-    -- where `x'` is the representative of `x`.
-    go :: VarInfo -> MaybeT DsM (Maybe Id, VarInfo)
-    go vi@(VI x' pos neg _ rcm) = do
-      -- 1. Bail out quickly when nalt contradicts a solution
-      let contradicts nalt sol = eqPmAltCon (paca_con sol) nalt == Equal
-      guard (not (any (contradicts nalt) pos))
-      -- 2. Only record the new fact when it's not already implied by one of the
-      -- solutions
-      let implies nalt sol = eqPmAltCon (paca_con sol) nalt == Disjoint
-      let neg'
-            | any (implies nalt) pos = neg
-            -- See Note [Completeness checking with required Thetas]
-            | hasRequiredTheta nalt  = neg
-            | otherwise              = extendPmAltConSet neg nalt
-      massert (isPmAltConMatchStrict nalt)
-      let vi' = vi{ vi_neg = neg', vi_bot = IsNotBot }
-      -- 3. Make sure there's at least one other possible constructor
-      mb_rcm' <- lift (markMatched nalt rcm)
-      pure $ case mb_rcm' of
-        -- If nalt could be removed from a COMPLETE set, we'll get back Just and
-        -- have to mark x dirty, by returning Just x'.
-        Just rcm' -> (Just x',  vi'{ vi_rcm = rcm' })
-        -- Otherwise, nalt didn't occur in any residual COMPLETE set and we
-        -- don't have to mark it dirty. So we return Nothing, which in the case
-        -- above would have compromised precision.
-        -- See Note [Shortcutting the inhabitation test], grep for T17836.
-        Nothing   -> (Nothing, vi')
+
+-- Update `x`'s 'VarInfo' entry. Fail ('MaybeT') if contradiction,
+-- otherwise return updated entry and `Just x'` if `x` should be marked dirty,
+-- where `x'` is the representative of `x`.
+mergeNotConCt :: PmAltCon -> VarInfo -> MaybeT DsM (Maybe Id, VarInfo)
+mergeNotConCt nalt vi@(VI x' pos neg _ rcm) = do
+  -- 1. Bail out quickly when nalt contradicts a solution
+  let contradicts nalt sol = eqPmAltCon (paca_con sol) nalt == Equal
+  guard (not (any (contradicts nalt) pos))
+  -- 2. Only record the new fact when it's not already implied by one of the
+  -- solutions
+  let implies nalt sol = eqPmAltCon (paca_con sol) nalt == Disjoint
+  let neg'
+        | any (implies nalt) pos = neg
+        -- See Note [Completeness checking with required Thetas]
+        | hasRequiredTheta nalt  = neg
+        | otherwise              = extendPmAltConSet neg nalt
+  massert (isPmAltConMatchStrict nalt)
+  let vi' = vi{ vi_neg = neg', vi_bot = IsNotBot }
+  -- 3. Make sure there's at least one other possible constructor
+  mb_rcm' <- lift (markMatched nalt rcm)
+  pure $ case mb_rcm' of
+    -- If nalt could be removed from a COMPLETE set, we'll get back Just and
+    -- have to mark x dirty, by returning Just x'.
+    Just rcm' -> (Just x',  vi'{ vi_rcm = rcm' })
+    -- Otherwise, nalt didn't occur in any residual COMPLETE set and we
+    -- don't have to mark it dirty. So we return Nothing, which in the case
+    -- above would have compromised precision.
+    -- See Note [Shortcutting the inhabitation test], grep for T17836.
+    Nothing   -> (Nothing, vi')
 
 hasRequiredTheta :: PmAltCon -> Bool
 hasRequiredTheta (PmAltConLike cl) = notNull req_theta
@@ -816,8 +818,15 @@ hasRequiredTheta _                 = False
 --
 -- See Note [TmState invariants].
 addConCt :: Nabla -> Id -> PmAltCon -> [TyVar] -> [Id] -> MaybeT DsM Nabla
-addConCt nabla@MkNabla{ nabla_tm_st = ts@TmSt{ ts_facts=env } } x alt tvs args = do
+addConCt nabla0 x alt tvs args = do
+  -- represent x, represent the pattern, merge
+  (xid, nabla1@MkNabla{ nabla_tm_st = ts@TmSt{ ts_facts=env } })
+    <- representId x nabla0
+
   let vi@(VI _ pos neg bot _) = lookupVarInfo ts x
+
+  
+
   -- First try to refute with a negative fact
   guard (not (elemPmAltConSet alt neg))
   -- Then see if any of the other solutions (remember: each of them is an
@@ -830,13 +839,13 @@ addConCt nabla@MkNabla{ nabla_tm_st = ts@TmSt{ ts_facts=env } } x alt tvs args =
     Just (PACA _con other_tvs other_args) -> do
       -- We must unify existentially bound ty vars and arguments!
       let ty_cts = equateTys (map mkTyVarTy tvs) (map mkTyVarTy other_tvs)
-      nabla' <- MaybeT $ addPhiCts nabla (listToBag ty_cts)
-      let add_var_ct nabla (a, b) = addVarCt nabla a b
-      foldlM add_var_ct nabla' $ zipEqual "addConCt" args other_args
+      nabla2 <- MaybeT $ addPhiCts nabla1 (listToBag ty_cts)
+      let add_var_ct nabla' (a, b) = addVarCt nabla' a b
+      foldlM add_var_ct nabla2 $ zipEqual "addConCt" args other_args
     Nothing -> do
       let pos' = PACA alt tvs args : pos
       let nabla_with bot' =
-            nabla{ nabla_tm_st = ts{ts_facts = addToUSDFM env x (vi{vi_pos = pos', vi_bot = bot'})} }
+            nabla1{ nabla_tm_st = ts{ts_facts = env & _class xid._data .~ Just (vi{vi_pos = pos', vi_bot = bot'})} }
       -- Do (2) in Note [Coverage checking Newtype matches]
       case (alt, args) of
         (PmAltConLike (RealDataCon dc), [y]) | isNewDataCon dc ->
@@ -867,13 +876,18 @@ equateTys ts us =
 addVarCt :: Nabla -> Id -> Id -> MaybeT DsM Nabla
 addVarCt nabla0 x y = do
 
-  ((xid, yid), MkNabla tyst0 (TmSt egr0 is))
-    <- runStateT ((,) <$> representId x <*> representId y) nabla0
+  ((xid, yid), nabla1)
+    <- runStateT ((,) <$> StateT (representId x) <*> StateT (representId y)) nabla0
+
+  mergeVarIds nabla1 xid yid
+
+mergeVarIds :: Nabla -> ClassId -> ClassId -> MaybeT DsM Nabla
+mergeVarIds (MkNabla tyst0 (TmSt egr0 is)) xid yid = do
 
   -- @merge env x y@ makes @x@ and @y@ point to the same entry,
   -- thereby merging @x@'s class with @y@'s.
 
-  (egr1, tyst1) <- runStateT (EG.mergeM xid yid egr0 >>= EG.rebuildM . fst) tyst0
+  (egr1, tyst1) <- runStateT (EG.mergeM xid yid egr0 >>= EG.rebuildM . snd) tyst0
 
   return (MkNabla tyst1 (TmSt egr1 is))
 
@@ -943,9 +957,11 @@ addCoreCt nabla x e = do
     -- @x ~ y@.
     equate_with_similar_expr :: Id -> CoreExpr -> StateT Nabla (MaybeT DsM) ()
     equate_with_similar_expr x e = do
-      rep <- StateT $ \nabla -> lift (representCoreExpr nabla e)
+      rep <- StateT $ \nabla -> representCoreExpr nabla e
       -- Note that @rep == x@ if we encountered @e@ for the first time.
-      modifyT (\nabla -> addVarCt nabla x rep)
+      modifyT (\nabla0 -> do
+        (xid, nabla1) <- representId x nabla0
+        mergeVarIds nabla1 xid rep)
 
     bind_expr :: CoreExpr -> StateT Nabla (MaybeT DsM) Id
     bind_expr e = do
@@ -1382,21 +1398,21 @@ inhabitationTest fuel  old_ty_st nabla@MkNabla{ nabla_tm_st = ts } = {-# SCC "in
 -- Returns `False` when we can skip the inhabitation test, presuming it would
 -- say "yes" anyway. See Note [Shortcutting the inhabitation test].
 varNeedsTesting :: TyState -> Nabla -> VarInfo -> DsM Bool
-varNeedsTesting _         MkNabla{nabla_tm_st=tm_st}     vi
-  | elemDVarSet (vi_id vi) (ts_dirty tm_st) = pure True
-varNeedsTesting _         _                              vi
-  | notNull (vi_pos vi)                     = pure False
-varNeedsTesting old_ty_st MkNabla{nabla_ty_st=new_ty_st} _
-  -- Same type state => still inhabited
-  | not (tyStateRefined old_ty_st new_ty_st) = pure False
-varNeedsTesting old_ty_st MkNabla{nabla_ty_st=new_ty_st} vi = do
-  -- These normalisations are relatively expensive, but still better than having
-  -- to perform a full inhabitation test
-  (_, _, old_norm_ty) <- tntrGuts <$> pmTopNormaliseType old_ty_st (idType $ vi_id vi)
-  (_, _, new_norm_ty) <- tntrGuts <$> pmTopNormaliseType new_ty_st (idType $ vi_id vi)
-  if old_norm_ty `eqType` new_norm_ty
-    then pure False
-    else pure True
+varNeedsTesting old_ty_st n@MkNabla{nabla_ty_st=new_ty_st,nabla_tm_st=tm_st} vi
+  = do
+    Just (xid, _) <- runMaybeT $ representId (vi_id vi) n
+    if | IS.member xid (ts_dirty tm_st) -> pure True
+       | notNull (vi_pos vi)            -> pure False
+       -- Same type state => still inhabited
+       | not (tyStateRefined old_ty_st new_ty_st) -> pure False
+       -- These normalisations are relatively expensive, but still better than having
+       -- to perform a full inhabitation test
+       | otherwise -> do
+          (_, _, old_norm_ty) <- tntrGuts <$> pmTopNormaliseType old_ty_st (idType $ vi_id vi)
+          (_, _, new_norm_ty) <- tntrGuts <$> pmTopNormaliseType new_ty_st (idType $ vi_id vi)
+          if old_norm_ty `eqType` new_norm_ty
+            then pure False
+            else pure True
 
 -- | Returns (Just vi) if at least one member of each ConLike in the COMPLETE
 -- set satisfies the oracle
@@ -2177,18 +2193,32 @@ instance Analysis (StateT TyState (MaybeT DsM)) (Maybe VarInfo) ExprF where
   joinA Nothing (Just b) = pure $ Just b
   joinA (Just a) Nothing = pure $ Just a
 
-  -- Add the constraints we had for x to y
-  joinA (Just vi_x) (Just vi_y) = do
+  -- Merge the 'VarInfo's from @x@ and @y@
+  joinA (Just vi_x@VI{ vi_id=id_x
+                     , vi_pos=pos_x
+                     , vi_neg=neg_x
+                     , vi_bot=bot_x
+                     , vi_rcm=rcm_x
+                     })
+        (Just vi_y@VI{ vi_id=id_y
+                     , vi_pos=pos_y
+                     , vi_neg=neg_y
+                     , vi_bot=bot_y
+                     , vi_rcm=rcm_y
+                     }) = do
+    -- If we can merge x ~ N y with y too, then we no longer need to worry
+    -- about propagating the bottomness information, since it will always be
+    -- right... though I'm not sure if that would be correct
 
     -- Gradually merge every positive fact we have on x into y
     -- The args are merged by congruence, since we represent the
     -- constructor in the e-graph in addConCt.
-    let add_pos y (PACA cl tvs args) = mergeConCt y cl tvs args
-    vi_res1 <- foldlM add_pos vi_y (vi_pos vi_x)
+    let add_pos py (PACA cl tvs args) = mergeConCt py cl tvs args
+    vi_res1 <- foldlM add_pos pos_y pos_x
 
     -- Do the same for negative info
     let add_neg vi nalt = lift $ snd <$> mergeNotConCt nalt vi
-    vi_res2 <- foldlM add_neg vi_res1 (pmAltConSetElems (vi_neg vi_x))
+    vi_res2 <- foldlM add_neg vi_res1 (pmAltConSetElems neg_x)
 
     -- We previously were not merging the bottom information, but now we do.
     -- TODO: We don't need to do it yet if we are only trying to be as good as before, but not better
@@ -2196,7 +2226,7 @@ instance Analysis (StateT TyState (MaybeT DsM)) (Maybe VarInfo) ExprF where
     -- (No, I think that situation can occur)
     bot_res <- lift $
                mergeBots (idType (vi_id vi_res2))
-                         (vi_bot vi_x) (vi_bot vi_y)
+                         bot_x bot_y
     let vi_res3 = vi_res2{vi_bot = bot_res}
 
     return (Just vi_res3)
