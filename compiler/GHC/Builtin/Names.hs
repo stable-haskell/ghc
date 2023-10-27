@@ -2340,7 +2340,7 @@ rootMainKey, runMainKey :: Unique
 rootMainKey                   = mkPreludeMiscIdUnique 101
 runMainKey                    = mkPreludeMiscIdUnique 102
 
-thenIOIdKey, lazyIdKey, assertErrorIdKey, oneShotKey, runRWKey :: Unique
+thenIOIdKey, lazyIdKey, assertErrorIdKey, oneShotKey, runRWKey, seqHashIdKey :: Unique
 thenIOIdKey                   = mkPreludeMiscIdUnique 103
 lazyIdKey                     = mkPreludeMiscIdUnique 104
 assertErrorIdKey              = mkPreludeMiscIdUnique 105
@@ -2374,6 +2374,8 @@ naturalToDoubleIdKey   = mkPreludeMiscIdUnique 131
 rationalToFloatIdKey, rationalToDoubleIdKey :: Unique
 rationalToFloatIdKey   = mkPreludeMiscIdUnique 132
 rationalToDoubleIdKey  = mkPreludeMiscIdUnique 133
+
+seqHashIdKey                  = mkPreludeMiscIdUnique 134
 
 coerceKey :: Unique
 coerceKey                     = mkPreludeMiscIdUnique 157

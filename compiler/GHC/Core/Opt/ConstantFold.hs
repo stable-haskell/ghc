@@ -35,7 +35,7 @@ import GHC.Prelude
 
 import GHC.Platform
 
-import GHC.Types.Id.Make ( unboxedUnitExpr )
+import GHC.Types.Id.Make ( unboxedUnitExpr, seqHashIdName )
 import GHC.Types.Id
 import GHC.Types.Literal
 import GHC.Types.Name.Occurrence ( occNameFS )
@@ -822,7 +822,6 @@ primOpRules nm = \case
 
    AddrAddOp  -> mkPrimOpRule nm 2 [ rightIdentityPlatform zeroi ]
 
-   SeqOp      -> mkPrimOpRule nm 4 [ seqRule ]
    SparkOp    -> mkPrimOpRule nm 4 [ sparkRule ]
 
    _          -> Nothing
@@ -2041,56 +2040,136 @@ unsafeEqualityProofRule
 
 {- Note [seq# magic]
 ~~~~~~~~~~~~~~~~~~~~
-The primop
-   seq# :: forall a s . a -> State# s -> (# State# s, a #)
+The purpose of the magic Id (See Note [magicIds])
 
-is /not/ the same as the Prelude function seq :: a -> b -> b
-as you can see from its type.  In fact, seq# is the implementation
-mechanism for 'evaluate'
+  seq# :: forall a s . a -> State# s -> (# State# s, a #)
+
+is to elevate evaluation of its argument `a` into an observable
+side effect.
+It is /not/ the same as the Prelude function seq :: a -> b -> b:
+First off, the type is different, but also GHC makes no guarantees that
+evaluation ordering using `seq` is maintained throughout optimisations, only
+termination behavior.
+(NB: It would be reasonable to define `pseq :: a -> b -> b` in terms of `seq#`
+and `runST`.)
+
+The main use of seq# is to implement `evaluate`
 
    evaluate :: a -> IO a
    evaluate a = IO $ \s -> seq# a s
 
-The semantics of seq# is
+Its (NOINLINE) definition in GHC.Magic is simply
+   seq# a s = a `seq` (# s, a #),
+but the precise semantics of seq# exported to the user is
+  * wait for all earlier actions in the State#-token-thread to complete
   * evaluate its first argument
   * and return it
 
 Things to note
 
-* Why do we need a primop at all?  That is, instead of
+(SEQ1)
+  Clearly, the definition given above satisfies the precise semantics,
+  because any side effect in the chain to `s` must have been evaluated before
+  the call. But why is it NOINLINE?  That is, instead of
       case seq# x s of (# x, s #) -> blah
   why not instead say this?
       case x of { DEFAULT -> blah }
 
-  Reason (see #5129): if we saw
+  One reason (see #5129): if we saw
     catch# (\s -> case x of { DEFAULT -> raiseIO# exn s }) handler
 
-  then we'd drop the 'case x' because the body of the case is bottom
-  anyway. But we don't want to do that; the whole /point/ of
-  seq#/evaluate is to evaluate 'x' first in the IO monad.
+  then we'd drop the `case x` because the body of the case is bottom
+  anyway (we revisit this decision in #24251).
+  But we don't want to do that; the whole /point/ of
+  seq#/evaluate is to evaluate `x` first in the IO monad.
 
-  In short, we /always/ evaluate the first argument and never
-  just discard it.
+  However, we *do* inline saturated applications of `seq#` in CorePrep, where
+  evaluation order is fixed; see the implementation notes below.
+  This is one reason why we need `seq#` to be known-key.
 
-* Why return the value?  So that we can control sharing of seq'd
+(SEQ2)
+  We set the strictness signature of `seq#` to <ML><L> in GHC.Types.Id.Make,
+  despite its definition having the stricter signature <1L><L>.
+
+  That is because `seq#` is intended to mean "evaluate this argument now -- not
+  earlier". Therefore, we must not only NOINLINE `seq#`, we must also take care
+  that we do /not/ expose Demand Analysis to the stricter signature because
+  then it would feel free to rearrange evaluation order to enable unboxing such
+  as in
+
+    foo :: Bool -> Bool -> (Int, Int) -> Int
+    foo True _     (a,b) = a + b
+    foo _    False (a,b) = 1 + a + b
+
+  'foo' is strict in the pair and its components and we *absolutely* want to
+  unbox it. However, doing so is impossible without affecting evaluation order:
+  Without optimisation, `bar False (error "OK") (error "Not OK")` errors "OK".
+  If we decide to unbox (a,b) and insert an eval on the first (strict) arg in
+  the wrapper as well, we get "Not OK".
+
+  More generally, preserving evaluation order is fundamentally at odds
+  with exploiting the results of Strictness Analysis, and the latter offers
+  huge leverage throughout the compiler.
+  By using `seq#`/`evaluate`, the user explicitly gives up on optimisations to
+  observe evaluations in order.
+
+  More concretely, consider
+    do { evaluate x; evaluate y }
+  Operationally, this should evaluate `x` and then `y`.
+  If `seq#` was visibly strict, they might be evaluated in the opposite order.
+
+(SEQ3)
+  Mainly for reasons of backwards compatibility, we recognise `seq#` during
+  Demand Analysis as not throwing a precise exception by the mechanism
+  implementing Note [Precise exceptions and strictness analysis].
+  More concretely (T24124b),
+    f :: Int -> Int -> IO Int
+    f x y = evaluate x >> pure $! y+1
+  historically is strict in `y` and thus unboxed, and changing that would break
+  the performance of client code. We retain the old behavior by treating
+  `seq#` just like any PrimOp except `raiseIO#`.
+
+(SEQ4)
+  Why return the value?  So that we can control sharing of seq'd
   values: in
      let x = e in x `seq` ... x ...
   We don't want to inline x, so better to represent it as
        let x = e in case seq# x RW of (# _, x' #) -> ... x' ...
   also it matches the type of rseq in the Eval monad.
 
-Implementing seq#.  The compiler has magic for SeqOp in
+Implementing seq#.  The compiler has magic for `seq#` in
+
+- GHC.Types.Id.Make: Wire in `seq#`, set IdInfo (demand signature, cf. (SEQ2))
 
 - GHC.Core.Opt.ConstantFold.seqRule: eliminate (seq# <whnf> s)
 
-- GHC.StgToCmm.Expr.cgExpr, and cgCase: special case for seq#
-
-- Simplify.addEvals records evaluated-ness for the result; see
+- Simplify.addEvals records evaluated-ness for the result (cf. (SEQ4)); see
   Note [Adding evaluatedness info to pattern-bound variables]
   in GHC.Core.Opt.Simplify.Iteration
 
-- Likewise, GHC.Stg.InferTags.inferTagExpr knows that seq# returns a
-  properly-tagged pointer inside of its unboxed-tuple result.
+- GHC.Core.Opt.DmdAnal.exprMayThrowPreciseException:
+  return False for seq#. (cf. (SEQ3))
+
+- GHC.CoreToStg.Prep: Inline saturated applications to a Case, e.g.,
+
+    seq# (f 13) s
+    ==>
+    case f 13 of sat of __DEFAULT -> (# s, sat #)
+
+  This is implemented in `cpeApp`, not unlike Note [runRW magic].
+  We are only inlining `seq#`, leaving opportunities for case-of-known-con
+  behind that are easily picked up by Unarise:
+
+    case seq# f 13 s of (# s', r #) -> rhs
+    ==> {Prep}
+    case f 13 of sat of __DEFAULT -> case (# s, sat #) of (# s', r #) -> rhs
+    ==> {Unarise}
+    case f 13 of sat of __DEFAULT -> rhs[s/s',sat/r]
+
+  Note that CorePrep really allocates a CaseBound FloatingBind for `f 13`.
+  That's OK, because the telescope of Floats always stays in the same order
+  and won't be floated out of binders, so all guarantees of evaluation order
+  provided by seq# are upheld.
 -}
 
 seqRule :: RuleM CoreExpr
@@ -2180,7 +2259,9 @@ builtinRules
           platform <- getPlatform
           return $ Var (primOpId IntAndOp)
             `App` arg `App` mkIntVal platform (d - 1)
-        ]
+        ],
+
+     mkBasicRule seqHashIdName 4 seqRule
      ]
  ++ builtinBignumRules
 {-# NOINLINE builtinRules #-}

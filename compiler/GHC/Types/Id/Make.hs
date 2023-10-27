@@ -31,6 +31,7 @@ module GHC.Types.Id.Make (
         realWorldPrimId,
         voidPrimId, voidArgId,
         nullAddrId, seqId, lazyId, lazyIdKey,
+        seqHashId, seqHashIdName, seqHashIdKey,
         coercionTokenId, coerceId,
         proxyHashId,
         nospecId, nospecIdName,
@@ -172,7 +173,14 @@ wiredInIds
   ++ errorIds           -- Defined in GHC.Core.Make
 
 magicIds :: [Id]    -- See Note [magicIds]
-magicIds = [lazyId, oneShotId, noinlineId, noinlineConstraintId, nospecId]
+magicIds
+  = [ lazyId
+    , oneShotId
+    , noinlineId
+    , noinlineConstraintId
+    , nospecId
+    , seqHashId
+    ]
 
 ghcPrimIds :: [Id]  -- See Note [ghcPrimIds (aka pseudoops)]
 ghcPrimIds
@@ -1843,10 +1851,11 @@ leftSectionName   = mkWiredInIdName gHC_PRIM  (fsLit "leftSection")    leftSecti
 rightSectionName  = mkWiredInIdName gHC_PRIM  (fsLit "rightSection")   rightSectionKey    rightSectionId
 
 -- Names listed in magicIds; see Note [magicIds]
-lazyIdName, oneShotName, nospecIdName :: Name
+lazyIdName, oneShotName, nospecIdName, seqHashIdName :: Name
 lazyIdName        = mkWiredInIdName gHC_MAGIC (fsLit "lazy")           lazyIdKey          lazyId
 oneShotName       = mkWiredInIdName gHC_MAGIC (fsLit "oneShot")        oneShotKey         oneShotId
 nospecIdName      = mkWiredInIdName gHC_MAGIC (fsLit "nospec")         nospecIdKey        nospecId
+seqHashIdName     = mkWiredInIdName gHC_MAGIC (fsLit "seq#")           seqHashIdKey       seqHashId
 
 ------------------------------------------------
 proxyHashId :: Id
@@ -1960,6 +1969,23 @@ oneShotId = pcRepPolyId oneShotName ty concs info
 
     concs = mkRepPolyIdConcreteTyVars
         [((openAlphaTy, Argument 2 Top), runtimeRep1TyVar)]
+
+------------------------------------------------
+seqHashId :: Id
+-- See Note [seq# magic] in GHC.Core.Opt.ConstantFold
+seqHashId = pcMiscPrelId seqHashIdName ty info
+  where
+    info = noCafIdInfo `setArityInfo`  2
+                       `setDmdSigInfo` dmd_sig
+    -- forall a b. a -> State# b -> (# State# b, a #)
+    ty  = mkSpecForAllTys [alphaTyVar,deltaTyVar]
+        $ mkVisFunTyMany alphaTy
+        $ mkVisFunTyMany state_ty
+        $ mkTupleTy Unboxed [state_ty, alphaTy]
+    state_ty = mkStatePrimTy deltaTy
+    dmd_sig = mkClosedDmdSig [C_01 :* topSubDmd, topDmd] topDiv
+      -- Why is the demand on the first arg lazy? See Note [seq# magic], (SEQ2)
+      -- NB: topSubDmd because we don't know how its value is used
 
 ----------------------------------------------------------------------
 {- Note [Wired-in Ids for rebindable syntax]

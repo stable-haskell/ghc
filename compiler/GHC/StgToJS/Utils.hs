@@ -61,7 +61,7 @@ import GHC.Stg.Syntax
 import GHC.Tc.Utils.TcType
 
 import GHC.Builtin.Names
-import GHC.Builtin.PrimOps (PrimOp(SeqOp), primOpIsReallyInline)
+import GHC.Builtin.PrimOps (primOpIsReallyInline)
 
 import GHC.Types.RepType
 import GHC.Types.Var
@@ -427,8 +427,6 @@ isInlineExpr v = \case
     -> (emptyUniqSet, True)
   StgOpApp (StgFCallOp f _) _ _
     -> (emptyUniqSet, isInlineForeignCall f)
-  StgOpApp (StgPrimOp SeqOp) [StgVarArg e] t
-    -> (emptyUniqSet, e `elementOfUniqSet` v || isStrictType t)
   StgOpApp (StgPrimOp op) _ _
     -> (emptyUniqSet, primOpIsReallyInline op)
   StgOpApp (StgPrimCallOp _c) _ _
