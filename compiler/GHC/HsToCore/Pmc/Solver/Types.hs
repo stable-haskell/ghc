@@ -13,7 +13,7 @@
 module GHC.HsToCore.Pmc.Solver.Types (
 
         -- * Normalised refinement types
-        BotInfo(..), PmAltConApp(..), VarInfo(..), TmState(..), TyState(..),
+        BotInfo(..), PmAltConApp(..), VarInfo(..), TmState(..), TyState(..), TmEGraph,
         Nabla(..), Nablas(..), initNablas, emptyVarInfo,
         lookupRefuts, lookupSolution,
 

@@ -59,14 +59,13 @@ import GHC.Types.Id
 import GHC.Types.Name
 import GHC.Types.Var      (EvVar)
 import GHC.Types.Var.Env
-import GHC.Types.Var.Set
 import GHC.Types.Unique.Supply
 
 import GHC.Core
 import GHC.Core.Equality
 import GHC.Core.FVs         (exprFreeVars)
 import GHC.Core.TyCo.Compare( eqType )
-import GHC.Core.Map.Expr
+import GHC.Core.Map.Type (deBruijnize)
 import GHC.Core.Predicate (typeDeterminesValue)
 import GHC.Core.SimpleOpt (simpleOptExpr, exprIsConApp_maybe)
 import GHC.Core.Utils     (exprType)
@@ -719,7 +718,7 @@ addNotBotCt nabla0@MkNabla{ nabla_tm_st = ts0 } x = do
   bot1 <- mergeBots (idType y) IsNotBot bot0
   let vi' = vi{ vi_bot = bot1 }
 
-  (yid, nabla1@MkNabla{nabla_tm_st = ts1@TmSt{ts_facts=env1}}) <- representId y nabla0
+  (yid, nabla1) <- representId y nabla0
   let
     marked
       = case bot0 of
@@ -779,7 +778,7 @@ addNotConCt nabla0 x nalt = do
 -- otherwise return updated entry and `Just x'` if `x` should be marked dirty,
 -- where `x'` is the representative of `x`.
 mergeNotConCt :: VarInfo -> PmAltCon -> MaybeT DsM (Maybe Id, VarInfo)
-mergeNotConCt nalt vi@(VI x' pos neg _ rcm) = do
+mergeNotConCt vi@(VI x' pos neg _ rcm) nalt = do
   -- 1. Bail out quickly when nalt contradicts a solution
   let contradicts nalt sol = eqPmAltCon (paca_con sol) nalt == Equal
   guard (not (any (contradicts nalt) pos))
@@ -824,18 +823,18 @@ nabla_egr f (MkNabla tyst ts@TmSt{ts_facts=egr}) = (\egr' -> MkNabla tyst ts{ts_
 addConCt :: Nabla -> Id -> PmAltCon -> [TyVar] -> [Id] -> MaybeT DsM Nabla
 addConCt nabla0 x alt tvs args = do
   (xid, nabla1) <- representId x nabla0
-  (kid, nabla2) <- representPattern alt tvs args -- VarInfo contains K data in pos info
+  (kid, nabla2) <- fromMaybe (xid, nabla1) <$> representPattern alt tvs args nabla1 -- VarInfo contains K data in pos info
   let k_vi = (emptyVarInfo x){vi_pos=[PACA alt tvs args]}
 
   nabla3 <- case (alt, args) of
-    (PmAltConLike (RealDataCon dc), [y]) | isNewDataCon dc ->
+    (PmAltConLike (RealDataCon dc), [y]) | isNewDataCon dc -> do
       (yid, nabla3) <- representId y nabla2
 
       -- A newtype con and the underlying var are in the same e-class
-      nabla4 <- mergeVarIds xid yid nabla3
+      -- nabla4 <- mergeVarIds xid yid nabla3
 
       -- Return the nabla3 and set the k_vi unchanged
-      pure (nabla4 & nabla_egr._class kid._data .~ Just k_vi)
+      pure (nabla3 & nabla_egr._class kid._data .~ Just k_vi)
 
       -- If the merging y and N y thing works, we won't need this.
       -- case bot of
@@ -847,10 +846,10 @@ addConCt nabla0 x alt tvs args = do
          -- Return the nabla2 and set the k_vi with additional IsNotBot info
          pure (nabla2 & nabla_egr._class kid._data .~ Just k_vi{vi_bot=IsNotBot}) -- strict match ==> not ⊥
 
-  mergeVarIds xid kid
+  mergeVarIds xid kid nabla3
 
 mergeConCt :: VarInfo -> PmAltConApp -> StateT TyState (MaybeT DsM) VarInfo
-mergeConCt vi@(VI _ pos neg bot _) (PACA alt tvs args) = StateT $ \tyst -> do
+mergeConCt vi@(VI _ pos neg _bot _) (PACA alt tvs _args) = StateT $ \tyst -> do
   -- First try to refute with a negative fact
   guard (not (elemPmAltConSet alt neg))
   -- Then see if any of the other solutions (remember: each of them is an
@@ -860,7 +859,7 @@ mergeConCt vi@(VI _ pos neg bot _) (PACA alt tvs args) = StateT $ \tyst -> do
   -- Now we should be good! Add (alt, tvs, args) as a possible solution, or
   -- refine an existing one
   case find ((== Equal) . eqPmAltCon alt . paca_con) pos of
-    Just (PACA _con other_tvs other_args) -> do
+    Just (PACA _con other_tvs _other_args) -> do
       -- We must unify existentially bound ty vars and arguments!
       --
       -- The arguments are handled automatically by representing K in
@@ -868,7 +867,7 @@ mergeConCt vi@(VI _ pos neg bot _) (PACA alt tvs args) = StateT $ \tyst -> do
       --
       -- So we treat the ty vars:
       let ty_cts = equateTys (map mkTyVarTy tvs) (map mkTyVarTy other_tvs)
-      tyst' <- MaybeT (tyOracle tyst (listToBag $ map (\(PhiTyCt pred) -> pred) ty_cts))
+      tyst' <- MaybeT (tyOracle tyst (listToBag $ map (\case (PhiTyCt pred) -> pred; _ -> error "impossible") ty_cts))
       return (vi, tyst') -- All good, and we get no new information.
     Nothing -> do
       -- No new information to merge, all done.
@@ -2179,6 +2178,50 @@ the -XEmptyCase case in 'reportWarnings' by looking for 'ReportEmptyCase'.
 ------------------------------------------------
 -- * E-graphs for pattern match checking
 
+representPattern :: PmAltCon -> [TyVar] -> [Id] -> Nabla -> MaybeT DsM (Maybe (ClassId, Nabla))
+-- We don't need to do anything in the case of PmAltLit.
+-- The Constructor information is recorded in the positive info e-class
+-- it is represented in, so when we merge we take care of handling this
+-- equality right.
+-- If we did this even more ideally, we'd just represent PmAltLit in the e-graph and it would fail on merge without having to edit the e-class.
+-- Wait, is it even safe to edit the e-class? Won't that *NOT* trigger the merging??
+-- Here I suppose we're creating the e-class. So we can add information at will. When we eventually merge this class with another one, we can do things.
+-- But we could definitely check whether the information we're adding isn't colliding with the existing one.
+representPattern (PmAltLit _) _ _ _ = return Nothing
+                 -- We might need represent patterns alongside expressions -- then we can use the "real" equality instances for the patterns (e.g. eqPmLit)
+representPattern (PmAltConLike conLike) tvs args nab00 = do
+  (args', MkNabla tyst0 ts@TmSt{ts_facts=egr0}) <- representIds args nab00
+  ((cid, egr1), tyst1) <- (`runStateT` tyst0) $ EGM.runEGraphMT egr0 $ do
+    -- We must represent the constructor application in the e-graph to make
+    -- sure the children are recursively merged against other children of
+    -- other constructors represneted in the same e-class.
+    -- We need to represent the constructor correctly to ensure existing
+    -- constructors match or not the new one
+    -- dsHsConLike basically implements the logic we want.
+    -- ROMES:TODO: Nevermind, the dsHsConLike won't work because we want to
+    -- talk about pattern synonyms in their "matching" form, and converting
+    -- them with dsHsConLike assumes they are used as a constructor,
+    -- meaning we will fail for unidirectional patterns
+    desugaredCon <- lift . lift . lift $ ds_hs_con_like_pat conLike -- DsM action to desugar the conlike into the expression we'll represent for this constructor
+    conLikeId <- StateT $ representCoreExprEgr desugaredCon
+    tvs' <- mapM (EGM.addM . EG.Node . TypeF . DBT . deBruijnize . TyVarTy) tvs -- ugh...
+    foldlM (\acc i -> EGM.addM (EG.Node $ AppF acc i)) conLikeId (tvs' ++ args')
+  return (Just (cid, MkNabla tyst1 ts{ts_facts=egr1}))
+  where
+    -- TODO: do something cleaner than the following inlined thing...
+
+    -- We inlined dsHsConLike but use patSynMatcher instead of patSynBuilder
+    ds_hs_con_like_pat :: ConLike -> DsM CoreExpr
+    ds_hs_con_like_pat (RealDataCon dc)
+      = return (varToCoreExpr (dataConWrapId dc))
+    ds_hs_con_like_pat (PatSynCon ps)
+      | (builder_name, _, add_void) <- patSynMatcher ps
+      = do { builder_id <- dsLookupGlobalId builder_name
+           ; return (if add_void
+                     then mkCoreApp (text "dsConLike" <+> ppr ps)
+                                    (Var builder_id) unboxedUnitExpr
+                     else Var builder_id) }
+
 representId :: Id -> Nabla -> MaybeT DsM (ClassId, Nabla)
 representId x (MkNabla tyst tmst@TmSt{ts_facts=eg0})
   = do
@@ -2212,18 +2255,13 @@ instance Analysis (StateT TyState (MaybeT DsM)) (Maybe VarInfo) ExprF where
   joinA (Just a) Nothing = pure $ Just a
 
   -- Merge the 'VarInfo's from @x@ and @y@
-  joinA (Just vi_x@VI{ vi_id=id_x
-                     , vi_pos=pos_x
-                     , vi_neg=neg_x
-                     , vi_bot=bot_x
-                     , vi_rcm=rcm_x
-                     })
-        (Just vi_y@VI{ vi_id=id_y
-                     , vi_pos=pos_y
-                     , vi_neg=neg_y
-                     , vi_bot=bot_y
-                     , vi_rcm=rcm_y
-                     }) = do
+  joinA (Just VI{ vi_id=_id_x
+                , vi_pos=pos_x
+                , vi_neg=neg_x
+                , vi_bot=bot_x
+                , vi_rcm=_rcm_x
+                })
+        (Just vi_y) = do
     -- If we can merge x ~ N y with y too, then we no longer need to worry
     -- about propagating the bottomness information, since it will always be
     -- right... though I'm not sure if that would be correct
@@ -2231,7 +2269,7 @@ instance Analysis (StateT TyState (MaybeT DsM)) (Maybe VarInfo) ExprF where
     -- Gradually merge every positive fact we have on x into y
     -- The args are merged by congruence, since we represent the
     -- constructor in the e-graph in addConCt.
-    vi_res1 <- foldlM mergeConCt pos_y pos_x
+    vi_res1 <- foldlM mergeConCt vi_y pos_x
 
     -- Do the same for negative info
     let add_neg vi nalt = lift $ snd <$> mergeNotConCt vi nalt
@@ -2243,7 +2281,7 @@ instance Analysis (StateT TyState (MaybeT DsM)) (Maybe VarInfo) ExprF where
     -- (No, I think that situation can occur)
     bot_res <- lift $
                mergeBots (idType (vi_id vi_res2))
-                         bot_x bot_y
+                         bot_x (vi_bot vi_y)
     let vi_res3 = vi_res2{vi_bot = bot_res}
 
     return (Just vi_res3)
