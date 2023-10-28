@@ -828,7 +828,7 @@ addConCt nabla0 x alt tvs args = do
 
   nabla3 <- case (alt, args) of
     (PmAltConLike (RealDataCon dc), [y]) | isNewDataCon dc -> do
-      (yid, nabla3) <- representId y nabla2
+      (_yid, nabla3) <- representId y nabla2
 
       -- A newtype con and the underlying var are in the same e-class
       -- nabla4 <- mergeVarIds xid yid nabla3
