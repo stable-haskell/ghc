@@ -731,7 +731,7 @@ addNotBotCt nabla0@MkNabla{ nabla_tm_st = ts0 } x = do
 
 mergeBots :: Type
           -- ^ The type of the pattern whose 'BotInfo's are being merged
-          -> BotInfo 
+          -> BotInfo
           -> BotInfo
           -> MaybeT DsM BotInfo
 -- There already is x ~ ⊥. Nothing left to do
@@ -743,7 +743,7 @@ mergeBots t IsBot MaybeBot
   | definitelyUnliftedType t
   -- Case (3) in Note [Strict fields and variables of unlifted type]
   -- (unlifted vars can never be ⊥)
-  = mzero 
+  = mzero
   | otherwise
   = pure IsBot
 -- There was x ~ ⊥. Contradiction!
@@ -837,6 +837,12 @@ addConCt nabla0 x alt tvs args = do
       pure (nabla3 & nabla_egr._class kid._data .~ Just k_vi)
 
       -- If the merging y and N y thing works, we won't need this.
+      -- (UPDT: It didn't work (looped, i Think. Try uncommenting that line above).
+      -- That means we're not currently moving the strictness information from the NT pattern to the underlying variable.
+      -- We need to.)
+      -- Also, if we do that manually here, that means we won't add strictness
+      -- annotations to underlying NT representatives if merging is done by
+      -- congruence instead of by manually calling 'addConCt'
       -- case bot of
         -- MaybeBot -> pure (nabla_with MaybeBot)
         -- IsBot    -> addBotCt (nabla_with IsBot) y
