@@ -849,7 +849,7 @@ addConCt nabla0 x alt tvs args = do
   mergeVarIds xid kid nabla3
 
 mergeConCt :: VarInfo -> PmAltConApp -> StateT TyState (MaybeT DsM) VarInfo
-mergeConCt vi@(VI _ pos neg _bot _) (PACA alt tvs _args) = StateT $ \tyst -> do
+mergeConCt vi@(VI _ pos neg _bot _) paca@(PACA alt tvs _args) = StateT $ \tyst -> do
   -- First try to refute with a negative fact
   guard (not (elemPmAltConSet alt neg))
   -- Then see if any of the other solutions (remember: each of them is an
@@ -870,8 +870,8 @@ mergeConCt vi@(VI _ pos neg _bot _) (PACA alt tvs _args) = StateT $ \tyst -> do
       tyst' <- MaybeT (tyOracle tyst (listToBag $ map (\case (PhiTyCt pred) -> pred; _ -> error "impossible") ty_cts))
       return (vi, tyst') -- All good, and we get no new information.
     Nothing -> do
-      -- No new information to merge, all done.
-      return (vi, tyst)
+      -- Add new con info
+      return (vi{vi_pos = paca:pos}, tyst)
 
 equateTys :: [Type] -> [Type] -> [PhiCt]
 equateTys ts us =
