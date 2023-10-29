@@ -1,4 +1,5 @@
 {-# LANGUAGE ApplicativeDo       #-}
+{-# LANGUAGE FlexibleInstances   #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE ViewPatterns        #-}
 {-# LANGUAGE MultiWayIf          #-}
@@ -79,6 +80,7 @@ import GHC.Real (Ratio(..))
 import qualified Data.Semigroup as Semi
 
 import GHC.Core.Equality
+import Data.Functor.Const
 import Data.Functor.Compose
 import Data.Equality.Graph (EGraph, ClassId)
 import Data.Equality.Graph.Lens
@@ -240,11 +242,15 @@ instance Outputable BotInfo where
 
 -- | Not user-facing.
 instance Outputable TmState where
-  -- TODO: Proper outputable instance for e-graphs?
-  ppr (TmSt state _dirty) = text (show state) -- $$ ppr dirty
--- ROMES:TODO: Don't leave this here, it's just for debug
--- instance Outputable IntSet where
---   ppr = text . show
+  ppr (TmSt state _dirty) =
+    -- $$ text (show dirty)
+    vcat $ getConst $ _iclasses (\(i,cl) -> Const [ppr i <> text ":" <+> ppr cl]) state
+
+instance Outputable (EG.EClass (Maybe VarInfo) CoreExprF) where
+  ppr cl = ppr (cl^._nodes) $$ ppr (cl^._data)
+
+instance Outputable (EG.ENode CoreExprF) where
+  ppr (EG.Node n) = text (show n)
 
 -- | Not user-facing.
 instance Outputable VarInfo where
