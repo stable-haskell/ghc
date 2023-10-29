@@ -769,7 +769,7 @@ addNotConCt _     _ (PmAltConLike (RealDataCon dc))
   | isNewDataCon dc = mzero -- (3) in Note [Coverage checking Newtype matches]
 addNotConCt nabla0 x nalt = do
   (xid, nabla1) <- representId x nabla0
-  (mb_mark_dirty, nabla2) <- trvVarInfo (`mergeNotConCt` nalt) nabla1 (xid, x)
+  (mb_mark_dirty, nabla2) <- trvVarInfo (\v -> mergeNotConCt True v nalt) nabla1 (xid, x)
   pure $ case mb_mark_dirty of
     Just x  -> markDirty x nabla2
     Nothing -> nabla2
@@ -777,8 +777,12 @@ addNotConCt nabla0 x nalt = do
 -- Update `x`'s 'VarInfo' entry. Fail ('MaybeT') if contradiction,
 -- otherwise return updated entry and `Just x'` if `x` should be marked dirty,
 -- where `x'` is the representative of `x`.
-mergeNotConCt :: VarInfo -> PmAltCon -> MaybeT DsM (Maybe Id, VarInfo)
-mergeNotConCt vi@(VI x' pos neg _ rcm) nalt = do
+mergeNotConCt :: Bool
+              -- ^ Whether we can omit negative alts that are implied by current info
+              -- This will be true when called from 'addNotConCt', but false
+              -- when called from the analysis join
+              -> VarInfo -> PmAltCon -> MaybeT DsM (Maybe Id, VarInfo)
+mergeNotConCt omitImpliedNalts vi@(VI x' pos neg _ rcm) nalt = do
   lift $ tracePm "mergeNotConCt vi nalt" (ppr vi <+> ppr nalt)
   -- 1. Bail out quickly when nalt contradicts a solution
   let contradicts nalt sol = eqPmAltCon (paca_con sol) nalt == Equal
@@ -786,18 +790,20 @@ mergeNotConCt vi@(VI x' pos neg _ rcm) nalt = do
   -- 2. Only record the new fact when it's not already implied by one of the
   -- solutions
   --
-  -- ROMES:TODO
-  -- Unfortunately, I think the egraph backend makes this implication works in
-  -- places where it previously didn't (I think), so not adding the neg info to the neg info makes checking fail.
-  -- We need to look much closer to figure out why, but the traces help out.
-  -- let implies nalt sol = eqPmAltCon (paca_con sol) nalt == Disjoint
-  -- let neg'
-  --       | any (implies nalt) pos = neg
-  --       -- See Note [Completeness checking with required Thetas]
-  --       | hasRequiredTheta nalt  = neg
-  --       | otherwise              = extendPmAltConSet neg nalt
-  --
-  let neg' = extendPmAltConSet neg nalt
+  -- 'mergeNotConCt' used to be called only by 'addNotConCt', at which point it
+  -- was fine to omit negative alts that were implied by the 'VarInfo'.
+  -- However, we now reuse this function to merge var infos in the e-graph
+  -- analysis join operation, which requires all negative info to be merged
+  -- regardless of the implication?
+  -- (Or is it because we don't check, when checking uncovered alternatives,
+  -- whether the negative info is implied by the rest?)
+  let implies nalt sol = eqPmAltCon (paca_con sol) nalt == Disjoint
+  let neg'
+        | omitImpliedNalts
+        , any (implies nalt) pos = neg
+        -- See Note [Completeness checking with required Thetas]
+        | hasRequiredTheta nalt  = neg
+        | otherwise              = extendPmAltConSet neg nalt
   massert (isPmAltConMatchStrict nalt)
   let vi' = vi{ vi_neg = neg', vi_bot = IsNotBot }
   -- 3. Make sure there's at least one other possible constructor
@@ -2290,7 +2296,7 @@ instance Analysis (StateT TyState (MaybeT DsM)) (Maybe VarInfo) ExprF where
     vi_res1 <- foldlM mergeConCt vi_y pos_x
 
     -- Do the same for negative info
-    let add_neg vi nalt = lift $ snd <$> mergeNotConCt vi nalt
+    let add_neg vi nalt = lift $ snd <$> mergeNotConCt False vi nalt
     vi_res2 <- foldlM add_neg vi_res1 (pmAltConSetElems neg_x)
 
     -- We previously were not merging the bottom information, but now we do.
