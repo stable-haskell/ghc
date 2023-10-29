@@ -249,9 +249,6 @@ instance Outputable TmState where
 instance Outputable (EG.EClass (Maybe VarInfo) CoreExprF) where
   ppr cl = ppr (cl^._nodes) $$ ppr (cl^._data)
 
-instance Outputable (EG.ENode CoreExprF) where
-  ppr (EG.Node n) = text (show n)
-
 -- | Not user-facing.
 instance Outputable VarInfo where
   ppr (VI x pos neg bot cache)

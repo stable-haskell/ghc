@@ -779,21 +779,30 @@ addNotConCt nabla0 x nalt = do
 -- where `x'` is the representative of `x`.
 mergeNotConCt :: VarInfo -> PmAltCon -> MaybeT DsM (Maybe Id, VarInfo)
 mergeNotConCt vi@(VI x' pos neg _ rcm) nalt = do
+  lift $ tracePm "mergeNotConCt vi nalt" (ppr vi <+> ppr nalt)
   -- 1. Bail out quickly when nalt contradicts a solution
   let contradicts nalt sol = eqPmAltCon (paca_con sol) nalt == Equal
   guard (not (any (contradicts nalt) pos))
   -- 2. Only record the new fact when it's not already implied by one of the
   -- solutions
-  let implies nalt sol = eqPmAltCon (paca_con sol) nalt == Disjoint
-  let neg'
-        | any (implies nalt) pos = neg
-        -- See Note [Completeness checking with required Thetas]
-        | hasRequiredTheta nalt  = neg
-        | otherwise              = extendPmAltConSet neg nalt
+  --
+  -- ROMES:TODO
+  -- Unfortunately, I think the egraph backend makes this implication works in
+  -- places where it previously didn't (I think), so not adding the neg info to the neg info makes checking fail.
+  -- We need to look much closer to figure out why, but the traces help out.
+  -- let implies nalt sol = eqPmAltCon (paca_con sol) nalt == Disjoint
+  -- let neg'
+  --       | any (implies nalt) pos = neg
+  --       -- See Note [Completeness checking with required Thetas]
+  --       | hasRequiredTheta nalt  = neg
+  --       | otherwise              = extendPmAltConSet neg nalt
+  --
+  let neg' = extendPmAltConSet neg nalt
   massert (isPmAltConMatchStrict nalt)
   let vi' = vi{ vi_neg = neg', vi_bot = IsNotBot }
   -- 3. Make sure there's at least one other possible constructor
   mb_rcm' <- lift (markMatched nalt rcm)
+  lift $ tracePm "mergeNotConCt vi' (no upd. rcm)" (ppr vi')
   pure $ case mb_rcm' of
     -- If nalt could be removed from a COMPLETE set, we'll get back Just and
     -- have to mark x dirty, by returning Just x'.
@@ -874,7 +883,7 @@ mergeConCt vi@(VI _ pos neg _bot _) paca@(PACA alt tvs _args) = StateT $ \tyst -
       -- So we treat the ty vars:
       let ty_cts = equateTys (map mkTyVarTy tvs) (map mkTyVarTy other_tvs)
       tyst' <- MaybeT (tyOracle tyst (listToBag $ map (\case (PhiTyCt pred) -> pred; _ -> error "impossible") ty_cts))
-      return (vi, tyst') -- All good, and we get no new information.
+      return (vi, tyst') -- All good, and we get no new term information.
     Nothing -> do
       -- Add new con info
       return (vi{vi_pos = paca:pos}, tyst)
@@ -2253,6 +2262,8 @@ instance Analysis (StateT TyState (MaybeT DsM)) (Maybe VarInfo) ExprF where
   -- Also, the Eq instance for DeBruijn Vars will ensure that two free
   -- variables with the same Id are equal and so they will be represented in
   -- the same e-class
+  --
+  -- It would be good if we didn't do this always... It might be a bit expensive
   makeA (FreeVarF x) = pure $ Just $ emptyVarInfo x
   makeA _ = pure $ Nothing
 
@@ -2261,13 +2272,14 @@ instance Analysis (StateT TyState (MaybeT DsM)) (Maybe VarInfo) ExprF where
   joinA (Just a) Nothing = pure $ Just a
 
   -- Merge the 'VarInfo's from @x@ and @y@
-  joinA (Just VI{ vi_id=_id_x
-                , vi_pos=pos_x
-                , vi_neg=neg_x
-                , vi_bot=bot_x
-                , vi_rcm=_rcm_x
-                })
+  joinA (Just vi_x@VI{ vi_id=_id_x
+                     , vi_pos=pos_x
+                     , vi_neg=neg_x
+                     , vi_bot=bot_x
+                     , vi_rcm=_rcm_x
+                     })
         (Just vi_y) = do
+    lift . lift $ tracePm "merging vi_x and vi_y" (ppr vi_x <+> ppr vi_y)
     -- If we can merge x ~ N y with y too, then we no longer need to worry
     -- about propagating the bottomness information, since it will always be
     -- right... though I'm not sure if that would be correct
@@ -2290,6 +2302,7 @@ instance Analysis (StateT TyState (MaybeT DsM)) (Maybe VarInfo) ExprF where
                          bot_x (vi_bot vi_y)
     let vi_res3 = vi_res2{vi_bot = bot_res}
 
+    lift . lift $ tracePm "result of merging vi_x and vi_y" (ppr vi_res3)
     return (Just vi_res3)
 
 

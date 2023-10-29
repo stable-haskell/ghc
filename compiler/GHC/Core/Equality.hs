@@ -141,6 +141,9 @@ type CoreExprF = ExprF
 type CoreAltF = AltF
 type CoreBindF = BindF
 
+instance Outputable (EG.ENode CoreExprF) where
+  ppr (EG.Node n) = text (show n)
+
 -- cmpDeBruijnTickish :: DeBruijn CoreTickish -> DeBruijn CoreTickish -> Ordering
 -- cmpDeBruijnTickish (D env1 t1) (D env2 t2) = go t1 t2 where
 --     go (Breakpoint lext lid lids _) (Breakpoint rext rid rids _)
