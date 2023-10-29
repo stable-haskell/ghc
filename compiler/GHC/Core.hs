@@ -1425,10 +1425,10 @@ type Size     = Int
 type Discount = Int
 
 data ExprTree
-  = ExprTree { et_tot   :: {-# UNPACK #-} !Size      -- ^ Size of whole tree
-             , et_size  :: {-# UNPACK #-} !Size      -- ^ Size of the bit apart from et_cases
-             , et_ret   :: {-# UNPACK #-} !Discount  -- ^ Discount when result is scrutinised
-             , et_cases :: Bag CaseTree
+  = ExprTree { et_wc_tot :: {-# UNPACK #-} !Size      -- ^ Worst-case size of whole tree
+             , et_size   :: {-# UNPACK #-} !Size      -- ^ Size of the bit apart from et_cases
+             , et_ret    :: {-# UNPACK #-} !Discount  -- ^ Discount when result is scrutinised
+             , et_cases  :: Bag CaseTree
     }
 
 data CaseTree

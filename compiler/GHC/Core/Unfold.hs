@@ -277,7 +277,7 @@ calcUnfoldingGuidance opts is_top_bottoming (Tick t expr)
 calcUnfoldingGuidance opts is_top_bottoming expr
   = case exprTree opts val_bndrs body of
       Nothing -> UnfNever
-      Just et@(ExprTree { et_tot = tot })
+      Just et@(ExprTree { et_wc_tot = tot })
         | uncondInline expr n_val_bndrs tot
         -> UnfWhen { ug_unsat_ok  = unSaturatedOk
                    , ug_boring_ok =  boringCxtOk
@@ -522,39 +522,30 @@ exprTree opts args expr
     et_add_alt = metAddAlt bOMB_OUT_SIZE
 
     go :: Int -> ETVars -> CoreExpr -> Maybe ExprTree
-          -- cd is the /unused/ case depth; decreases toward zero
+          -- rcd is the /unused/ case depth; decreases toward zero
           -- (avs,lvs): see Note [Constructing an ExprTree]
-    go cd vs (Cast e _)      = go cd vs e
-    go cd vs (Tick _ e)      = go cd vs e
-    go _  _  (Type _)        = Just (exprTreeN 0)
-    go _  _  (Coercion _)    = Just (exprTreeN 0)
-    go _  _  (Lit lit)       = Just (exprTreeN (litSize lit))
-    go cd vs (Case e b _ as) = go_case cd vs e b as
-    go cd vs (Let bind body) = go_let cd vs bind body
-    go cd vs (Lam b e)       = go_lam cd vs b e
-    go cd vs e@(App {})      = go_app cd vs e
-    go _  vs (Var f)         = Just (callTree opts vs f [] 0)
-                               -- Use callTree to ensure we get constructor
-                               -- discounts even on nullary constructors
-    -------------------
-    go_lam cd vs bndr body
-      | isId bndr, not (isZeroBitId bndr) = go cd vs' body `et_add` Just (lamSize opts)
-      | otherwise                         = go cd vs' body
+    go rcd vs (Cast e _)      = go rcd vs e
+    go rcd vs (Tick _ e)      = go rcd vs e
+    go _   _  (Type _)        = Just (exprTreeN 0)
+    go _   _  (Coercion _)    = Just (exprTreeN 0)
+    go _   _  (Lit lit)       = Just (exprTreeN (litSize lit))
+    go rcd vs (Case e b _ as) = go_case rcd vs e b as
+    go rcd vs (Let bind body) = go_let rcd vs bind body
+    go rcd vs (Lam b e)       = go_lam rcd vs b e
+    go rcd vs e@(App {})      = go_app rcd vs e
+    go _   vs (Var f)         = Just (callTree opts vs f [] 0)
+                                -- Use callTree to ensure we get constructor
+                                -- discounts even on nullary constructors
+
+    ----------- Lambdas ------------------
+    go_lam rcd vs bndr body
+      | isId bndr, not (isZeroBitId bndr) = go rcd vs' body `et_add` Just (lamSize opts)
+      | otherwise                         = go rcd vs' body
       where
         vs' = vs `add_lv` bndr
 
-    -------------------
-    go_let cd vs (NonRec binder rhs) body
-      = go_bind cd vs (binder, rhs)  `et_add`
-        go cd (vs `add_lv` binder) body
-
-    go_let cd vs (Rec pairs) body
-      = foldr (et_add . go_bind cd vs') (go cd vs' body) pairs
-      where
-        vs' = vs `add_lvs` map fst pairs
-
-    -------------------
-    go_app cd vs e = lgo e [] 0
+    ----------- Applications ------------------
+    go_app rcd vs e = lgo e [] 0
       where
          lgo :: CoreExpr -> [CoreExpr] -> Int -> Maybe ExprTree
              -- args:  all the value args
@@ -564,25 +555,34 @@ exprTree opts args expr
          lgo (App fun arg) args voids
                     | isTypeArg arg    = lgo fun args voids
                     | isZeroBitArg arg = lgo fun (arg:args) (voids+1)
-                    | otherwise        = go cd vs arg `et_add`
+                    | otherwise        = go rcd vs arg `et_add`
                                          lgo fun (arg:args) voids
          lgo (Var fun)     args voids  = Just (callTree opts vs fun args voids)
          lgo (Tick _ expr) args voids  = lgo expr args voids
          lgo (Cast expr _) args voids  = lgo expr args voids
          lgo other         args voids  = vanillaCallSize (length args) voids
-                                         `metAddN` go cd vs other
+                                         `metAddN` go rcd vs other
          -- if the lhs is not an App or a Var, or an invisible thing like a
          -- Tick or Cast, then we should charge for a complete call plus the
          -- size of the lhs itself.
 
-    -----------------------------
-    go_bind cd vs (bndr, rhs)
+    ----------- Let-expressions ------------------
+    go_let rcd vs (NonRec binder rhs) body
+      = go_bind rcd vs (binder, rhs)  `et_add`
+        go rcd (vs `add_lv` binder) body
+
+    go_let rcd vs (Rec pairs) body
+      = foldr (et_add . go_bind rcd vs') (go rcd vs' body) pairs
+      where
+        vs' = vs `add_lvs` map fst pairs
+
+    go_bind rcd vs (bndr, rhs)
       | JoinPoint join_arity <- idJoinPointHood bndr
       , (bndrs, body) <- collectNBinders join_arity rhs
                           -- Skip arguments to join point
-      = go cd (vs `add_lvs` bndrs) body
+      = go rcd (vs `add_lvs` bndrs) body
       | otherwise
-      = size_up_alloc bndr `metAddN` go cd vs rhs
+      = size_up_alloc bndr `metAddN` go rcd vs rhs
 
     -- Cost to allocate binding with given binder
     size_up_alloc bndr
@@ -593,28 +593,34 @@ exprTree opts args expr
       | otherwise
       = 10
 
-    -----------------------------
+    -----------Case expressions ------------------
     go_case :: Int -> ETVars -> CoreExpr -> Id -> [CoreAlt] -> Maybe ExprTree
     -- Empty case
-    go_case cd vs scrut _ [] = go cd vs scrut
+    go_case rcd vs scrut _ [] = go rcd vs scrut
          -- case e of {} never returns, so take size of scrutinee
 
     -- Record a CaseOf
-    go_case cd vs@(avs,lvs) scrut b alts
+    go_case remaining_case_depth vs@(avs,lvs) scrut b alts
       | Just v <- interestingVarScrut vs scrut
-      = go cd vs scrut `et_add`
-        (if   record_case cd n_alts
+      = go remaining_case_depth vs scrut `et_add`
+        (if   record_case
          then do { alts' <- mapM (alt_alt_tree v) alts
                  ; etCaseOf bOMB_OUT_SIZE v b alts' }
          else Just (etScrutOf v caseElimDiscount) `et_add`
               -- When this scrutinee has structure, we expect to eliminate the case
-              go_alts cd vs b alts)
+              go_alts rcd1 vs b alts)
       where
-        cd1 = cd - 1
-        n_alts = length alts
+        rcd1 = remaining_case_depth - 1
+
+        record_case :: Bool
+        -- True  <=> record CaseOf: case is not too deep, nor too wide
+        -- False <=> record ScrutOf
+        record_case = (remaining_case_depth > 0) &&
+                      (alts `lengthAtMost` max_width)
+
         alt_alt_tree :: Id -> Alt Var -> Maybe AltTree
         alt_alt_tree v (Alt con bs rhs)
-          = do { rhs <- go cd1 (add_alt_bndrs v val_bs) rhs
+          = do { rhs <- go rcd1 (add_alt_bndrs v val_bs) rhs
                ; return (AltTree con val_bs rhs) }
           where
             val_bs = filter isId bs
@@ -625,30 +631,23 @@ exprTree opts args expr
           | otherwise = vs
 
     -- Don't record a CaseOf
-    go_case cd vs scrut b alts    -- alts is non-empty
+    go_case rcd vs scrut b alts    -- alts is non-empty
       = caseSize scrut alts     `metAddN`   -- A bit odd that this is only in one branch
         (altSize * length alts) `metAddN`
             -- IMPORTANT: charge `altSize` for each alternative, else we
             -- find that giant case nests are treated as practically free
             -- A good example is Foreign.C.Error.errnoToIOError
-        go cd vs scrut `et_add` go_alts cd vs b alts
-
-    record_case :: Int -> Int -> Bool
-    -- True <=> record CaseOf; False <=> record ScrutOf
-    record_case case_depth n_alts  -- Case is not too deep, nor too wide
-      = case_depth > 0 && n_alts <= max_width
+        go rcd vs scrut `et_add` go_alts (rcd-1) vs b alts
 
     go_alts :: Int -> ETVars -> Id -> [CoreAlt] -> Maybe ExprTree
     -- Add up the sizes of all RHSs
-    go_alts cd vs b alts = foldr1 et_add_alt (map alt_expr_tree alts)
+    go_alts rcd vs b alts = foldr1 et_add_alt (map alt_expr_tree alts)
       where
-        cd1 = cd - 1
         alt_expr_tree :: Alt Var -> Maybe ExprTree
-        alt_expr_tree (Alt _con bs rhs) = go cd1 (vs `add_lvs` (b:bs)) rhs
+        alt_expr_tree (Alt _con bs rhs) = go rcd (vs `add_lvs` (b:bs)) rhs
             -- Don't charge for bndrs, so that wrappers look cheap
             -- (See comments about wrappers with Case)
             -- Don't forget to add the case binder, b, to lvs.
-            --
 
 caseSize :: CoreExpr -> [CoreAlt] -> Size
 caseSize scrut alts
@@ -777,7 +776,7 @@ funSize :: UnfoldingOpts -> ETVars -> Id -> Int -> Int -> ExprTree
 funSize opts (avs,_) fun n_val_args voids
   | fun `hasKey` buildIdKey   = etZero  -- Wwant to inline applications of build/augment
   | fun `hasKey` augmentIdKey = etZero  -- so we give size zero to the whole call
-  | otherwise = ExprTree { et_tot = size, et_size  = size
+  | otherwise = ExprTree { et_wc_tot = size, et_size  = size
                          , et_cases = cases
                          , et_ret   = res_discount }
   where
@@ -799,7 +798,7 @@ funSize opts (avs,_) fun n_val_args voids
 
 lamSize :: UnfoldingOpts -> ExprTree
 -- Does not include the size of the body, just the lambda itself
-lamSize opts = ExprTree { et_size = 10, et_tot = 10
+lamSize opts = ExprTree { et_size = 10, et_wc_tot = 10
                         , et_cases = emptyBag
                         , et_ret = unfoldingFunAppDiscount opts }
 
@@ -809,7 +808,7 @@ conSize dc n_val_args
   | isUnboxedTupleDataCon dc
   = etZero     -- See Note [Unboxed tuple size and result discount]
   | otherwise  -- See Note [Constructor size and result discount]
-  = ExprTree { et_size = size, et_tot = size
+  = ExprTree { et_size = size, et_wc_tot = size
              , et_cases = emptyBag, et_ret = 10 }
   where
     size | n_val_args == 0 = 0  -- Like variables
@@ -998,70 +997,70 @@ metAddN _ Nothing = Nothing
 metAddN n (Just et) = Just (n `etAddN` et)
 
 etAddN :: Size -> ExprTree -> ExprTree
--- Does not account for et_tot geting too big, but that doesn't
+-- Does not account for et_wc_tot geting too big, but that doesn't
 -- matter; the extra increment is always small, and we never get
 -- a long cascade of etAddNs
-etAddN n1 (ExprTree { et_tot = t2, et_size = n2, et_cases = c2, et_ret = ret2 })
-  = ExprTree { et_tot = n1+t2, et_size = n1+n2, et_cases = c2, et_ret = ret2 }
+etAddN n1 (ExprTree { et_wc_tot = t2, et_size = n2, et_cases = c2, et_ret = ret2 })
+  = ExprTree { et_wc_tot = n1+t2, et_size = n1+n2, et_cases = c2, et_ret = ret2 }
 
 metAdd :: Size -> Maybe ExprTree -> Maybe ExprTree -> Maybe ExprTree
 -- Takes return value from the right hand argument
 metAdd _ Nothing _ = Nothing
 metAdd _ _ Nothing = Nothing
 metAdd bOMB_OUT_SIZE (Just et1) (Just et2)
-  | ExprTree { et_tot = t1, et_size = n1, et_cases = c1, et_ret = _ret1 } <- et1
-  , ExprTree { et_tot = t2, et_size = n2, et_cases = c2, et_ret =  ret2 } <- et2
+  | ExprTree { et_wc_tot = t1, et_size = n1, et_cases = c1, et_ret = _ret1 } <- et1
+  , ExprTree { et_wc_tot = t2, et_size = n2, et_cases = c2, et_ret =  ret2 } <- et2
   , let t12 = t1 + t2
   = if   t12 >= bOMB_OUT_SIZE
     then Nothing
-    else Just (ExprTree { et_tot   = t12
-                        , et_size  = n1 + n2
-                        , et_cases = c1 `unionBags` c2
-                        , et_ret   = ret2 })
+    else Just (ExprTree { et_wc_tot = t12
+                        , et_size   = n1 + n2
+                        , et_cases  = c1 `unionBags` c2
+                        , et_ret    = ret2 })
 
 metAddAlt :: Size -> Maybe ExprTree -> Maybe ExprTree -> Maybe ExprTree
 -- Adds return discounts from both args
 metAddAlt _ Nothing _ = Nothing
 metAddAlt _ _ Nothing = Nothing
 metAddAlt bOMB_OUT_SIZE (Just et1) (Just et2)
-  | ExprTree { et_tot = t1, et_size = n1, et_cases = c1, et_ret = ret1 } <- et1
-  , ExprTree { et_tot = t2, et_size = n2, et_cases = c2, et_ret = ret2 } <- et2
+  | ExprTree { et_wc_tot = t1, et_size = n1, et_cases = c1, et_ret = ret1 } <- et1
+  , ExprTree { et_wc_tot = t2, et_size = n2, et_cases = c2, et_ret = ret2 } <- et2
   , let t12 = t1 + t2
   = if   t12 >= bOMB_OUT_SIZE
     then Nothing
-    else Just (ExprTree { et_tot   = t12
-                        , et_size  = n1 + n2
-                        , et_cases = c1 `unionBags` c2
-                        , et_ret   = ret1 + ret2 })
+    else Just (ExprTree { et_wc_tot = t12
+                        , et_size   = n1 + n2
+                        , et_cases  = c1 `unionBags` c2
+                        , et_ret    = ret1 + ret2 })
 
 
 -- | The "expression tree"; an abstraction of the RHS of the function
 exprTreeN :: Size -> ExprTree
-exprTreeN n = ExprTree { et_size = n, et_tot = n, et_cases = emptyBag, et_ret = 0 }
+exprTreeN n = ExprTree { et_size = n, et_wc_tot = n, et_cases = emptyBag, et_ret = 0 }
 
 etZero :: ExprTree
-etZero = ExprTree { et_tot = 0, et_size = 0, et_cases = emptyBag, et_ret = 0 }
+etZero = ExprTree { et_wc_tot = 0, et_size = 0, et_cases = emptyBag, et_ret = 0 }
 
 etCaseOf :: Size -> Id -> Id -> [AltTree] -> Maybe ExprTree
--- We make the case itself free, but charge for each alternative
--- If there are no alternatives (case e of {}), we get just the size of the scrutinee
+-- We make the case itself free (remember that in this case the scrutinee
+-- is a variable) but charge for each alternative (included in `altTreesSize`)
 etCaseOf bOMB_OUT_SIZE scrut case_bndr alts
   | tot >= bOMB_OUT_SIZE = Nothing
-  | otherwise            = Just (ExprTree { et_tot = tot, et_size = 0, et_ret = 0
+  | otherwise            = Just (ExprTree { et_wc_tot = tot, et_size = 0, et_ret = 0
                                           , et_cases = unitBag case_tree })
   where
     case_tree = CaseOf scrut case_bndr alts
     tot       = altTreesSize alts
 
 altTreesSize :: [AltTree] -> Size
--- Total aize of a [AltTree]
+-- Total worst-case size of a [AltTree], including the per-alternative cost of altSize
 altTreesSize alts = foldl' add_alt 0 alts
   where
-    add_alt n (AltTree _ _ (ExprTree { et_tot = tot })) = n+tot
+    add_alt n (AltTree _ _ (ExprTree { et_wc_tot = alt_tot }))
+       = n + alt_tot + altSize
 
 etScrutOf :: Id -> Discount -> ExprTree
-etScrutOf v d = ExprTree { et_tot = 0, et_size = 0, et_ret = 0
-                         , et_cases = unitBag (ScrutOf v d) }
+etScrutOf v d = etZero { et_cases = unitBag (ScrutOf v d) }
 
 {- *********************************************************************
 *                                                                      *
@@ -1098,7 +1097,7 @@ exprTreeWillInline :: Size -> ExprTree -> Bool
 -- (cheapExprTreeSize limit et) takes an upper bound `n` on the
 -- size of et; i.e. without discounts etc.
 -- Return True if (s <= limit), False otherwise
-exprTreeWillInline limit (ExprTree { et_tot = tot }) = tot <= limit
+exprTreeWillInline limit (ExprTree { et_wc_tot = tot }) = tot <= limit
 
 -------------------------
 exprTreeSize :: InlineContext -> ExprTree -> Size
@@ -1122,9 +1121,18 @@ caseTreeSize ic (ScrutOf bndr disc)
 
 caseTreeSize ic (CaseOf scrut_var case_bndr alts)
   = case lookupBndr ic scrut_var of
-      ArgNoInfo     -> keptCaseSize ic case_bndr alts
-      ArgIsLam      -> keptCaseSize ic case_bndr alts
-      ArgIsNot cons -> keptCaseSize ic case_bndr (trim_alts cons alts)
+      ArgNoInfo     -> altsSize ic case_bndr alts + case_size
+
+      ArgIsNot cons -> altsSize ic case_bndr (trim_alts cons alts)
+         -- The case-expression may not disappear, but it scrutinises
+         -- a variable bound to something with structure; may lead to
+         -- avoiding a thunk, or other benefits.  So we give a discount
+         -- compared to ArgNoInfo.  How much?  Rather a guess, but simply
+         -- not adding case_size is convenient.
+         --
+         -- The function 'radiance' in nofib/real/smallpt benefits a lot from this
+
+      ArgIsLam -> altsSize ic case_bndr alts  -- Case will disappear altogether
 
       arg_summ@(ArgIsCon con args)
          | Just at@(AltTree alt_con bndrs rhs) <- find_alt con alts
@@ -1133,12 +1141,19 @@ caseTreeSize ic (CaseOf scrut_var case_bndr alts)
                   -- Don't forget to add a summary for the case binder!
                ic' = ic { ic_bound = ic_bound ic `extendVarEnvList` new_summaries }
                      -- In DEFAULT case, bs is empty, so extending is a no-op
-         -> assertPpr ((alt_con == DEFAULT) || (bndrs `equalLength` args)) (ppr arg_summ $$ ppr at) $
+         -> assertPpr ((alt_con == DEFAULT) || (bndrs `equalLength` args))
+                      (ppr arg_summ $$ ppr at) $
             exprTreeSize ic' rhs - caseElimDiscount
-              -- Take off a discount for eliminating the case expression itself
+              -- Take off an extra discount for eliminating the case expression itself
 
          | otherwise  -- Happens for empty alternatives
-         -> keptCaseSize ic case_bndr alts
+         -> altsSize ic case_bndr alts
+  where
+    case_size = altSize * length alts
+      -- We make the case itself free, but charge for each alternatives
+      -- (the latter is already included in the AltTrees)
+      -- If there are no alternatives (case e of {}), we get zero
+
 
 find_alt :: AltCon -> [AltTree] -> Maybe AltTree
 find_alt _   []                     = Nothing
@@ -1157,9 +1172,9 @@ trim_alts acs (alt:alts)
   | AltTree con _ _ <- alt, con `elem` acs = trim_alts acs alts
   | otherwise                              = alt : trim_alts acs alts
 
-keptCaseSize :: InlineContext -> Id -> [AltTree] -> Size
+altsSize :: InlineContext -> Id -> [AltTree] -> Size
 -- Size of a (retained) case expression
-keptCaseSize ic case_bndr alts = foldr ((+) . size_alt) case_size alts
+altsSize ic case_bndr alts = foldr ((+) . size_alt) 0 alts
   -- Just add up the  sizes of the alternatives
   -- We recurse in case we have
   --    args = [a,b], expr_tree = [CaseOf a [ X -> CaseOf b [...]
@@ -1167,11 +1182,6 @@ keptCaseSize ic case_bndr alts = foldr ((+) . size_alt) case_size alts
   -- Then for a call with ArgInfo for `b`, but not `a`, we want to get
   -- the trimmed trees in the X and Y branches
   where
-    case_size = altSize * length alts
-      -- We make the case itself free, but charge for each alternatives
-      -- (the latter is already included in the AltTrees)
-      -- If there are no alternatives (case e of {}), we get zero
-
     size_alt :: AltTree -> Size
     size_alt (AltTree _ bndrs rhs) = exprTreeSize ic' rhs
         -- Cost for the alternative is already in `rhs`

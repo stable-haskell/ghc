@@ -548,14 +548,8 @@ substExprTree :: IdSubstEnv -> ExprTree -> ExprTree
 -- We might be substituting a big tree in place of a variable
 -- but we don't account for that in the size: I think it doesn't
 -- matter, and the ExprTree will be refreshed soon enough.
-substExprTree id_env (ExprTree { et_tot = tot
-                               , et_size  = size
-                               , et_cases = cases
-                               , et_ret   = ret_discount })
-   = ExprTree { et_tot   = tot
-              , et_size  = size + extra_size
-              , et_cases = cases'
-              , et_ret   = ret_discount }
+substExprTree id_env et@(ExprTree { et_size = size, et_cases = cases })
+   = et { et_size = size + extra_size , et_cases = cases' }
    where
      (extra_size, cases') = foldr subst_ct (0, emptyBag) cases
      -- The extra_size is just in case we substitute a non-variable for

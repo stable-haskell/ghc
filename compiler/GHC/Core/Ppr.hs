@@ -628,7 +628,7 @@ instance Outputable UnfoldingGuidance where
                ppr et ]
 
 instance Outputable ExprTree where
-  ppr (ExprTree { et_tot = tot, et_size = size, et_ret = ret, et_cases = cases })
+  ppr (ExprTree { et_wc_tot = tot, et_size = size, et_ret = ret, et_cases = cases })
     = int tot <> char '/' <> int size <> char '/' <> int ret
        <> brackets (sep (map ppr (bagToList cases)))
 
