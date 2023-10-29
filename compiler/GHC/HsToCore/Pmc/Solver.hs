@@ -617,8 +617,10 @@ addPhiCts :: Nabla -> PhiCts -> DsM (Maybe Nabla)
 -- See Note [TmState invariants].
 addPhiCts nabla cts = runMaybeT $ do
   let (ty_cts, tm_cts) = partitionPhiCts cts
-  nabla' <- addTyCts nabla (listToBag ty_cts)
+  nabla'  <- addTyCts nabla (listToBag ty_cts)
   nabla'' <- foldlM addPhiTmCt nabla' (listToBag tm_cts)
+  lift $ tracePm "addPhiCts, doing inhabitationTest" (ppr nabla'')
+  -- ROMES:TODO: Should the ty_st be nabla' or nabla'' !?
   inhabitationTest initFuel (nabla_ty_st nabla) nabla''
 
 partitionPhiCts :: PhiCts -> ([PredType], [PhiCt])
@@ -769,7 +771,7 @@ addNotConCt _     _ (PmAltConLike (RealDataCon dc))
   | isNewDataCon dc = mzero -- (3) in Note [Coverage checking Newtype matches]
 addNotConCt nabla0 x nalt = do
   (xid, nabla1) <- representId x nabla0
-  (mb_mark_dirty, nabla2) <- trvVarInfo (\v -> mergeNotConCt True v nalt) nabla1 (xid, x)
+  (mb_mark_dirty, nabla2) <- trvVarInfo (`mergeNotConCt` nalt) nabla1 (xid, x)
   pure $ case mb_mark_dirty of
     Just x  -> markDirty x nabla2
     Nothing -> nabla2
@@ -777,30 +779,17 @@ addNotConCt nabla0 x nalt = do
 -- Update `x`'s 'VarInfo' entry. Fail ('MaybeT') if contradiction,
 -- otherwise return updated entry and `Just x'` if `x` should be marked dirty,
 -- where `x'` is the representative of `x`.
-mergeNotConCt :: Bool
-              -- ^ Whether we can omit negative alts that are implied by current info
-              -- This will be true when called from 'addNotConCt', but false
-              -- when called from the analysis join
-              -> VarInfo -> PmAltCon -> MaybeT DsM (Maybe Id, VarInfo)
-mergeNotConCt omitImpliedNalts vi@(VI x' pos neg _ rcm) nalt = do
+mergeNotConCt :: VarInfo -> PmAltCon -> MaybeT DsM (Maybe Id, VarInfo)
+mergeNotConCt vi@(VI x' pos neg _ rcm) nalt = do
   lift $ tracePm "mergeNotConCt vi nalt" (ppr vi <+> ppr nalt)
   -- 1. Bail out quickly when nalt contradicts a solution
   let contradicts nalt sol = eqPmAltCon (paca_con sol) nalt == Equal
   guard (not (any (contradicts nalt) pos))
   -- 2. Only record the new fact when it's not already implied by one of the
   -- solutions
-  --
-  -- 'mergeNotConCt' used to be called only by 'addNotConCt', at which point it
-  -- was fine to omit negative alts that were implied by the 'VarInfo'.
-  -- However, we now reuse this function to merge var infos in the e-graph
-  -- analysis join operation, which requires all negative info to be merged
-  -- regardless of the implication?
-  -- (Or is it because we don't check, when checking uncovered alternatives,
-  -- whether the negative info is implied by the rest?)
   let implies nalt sol = eqPmAltCon (paca_con sol) nalt == Disjoint
   let neg'
-        | omitImpliedNalts
-        , any (implies nalt) pos = neg
+        | any (implies nalt) pos = neg
         -- See Note [Completeness checking with required Thetas]
         | hasRequiredTheta nalt  = neg
         | otherwise              = extendPmAltConSet neg nalt
@@ -838,7 +827,8 @@ nabla_egr f (MkNabla tyst ts@TmSt{ts_facts=egr}) = (\egr' -> MkNabla tyst ts{ts_
 addConCt :: Nabla -> Id -> PmAltCon -> [TyVar] -> [Id] -> MaybeT DsM Nabla
 addConCt nabla0 x alt tvs args = do
   (xid, nabla1) <- representId x nabla0
-  (kid, nabla2) <- fromMaybe (xid, nabla1) <$> representPattern alt tvs args nabla1 -- VarInfo contains K data in pos info
+  let vi_x = lookupVarInfo (nabla_tm_st nabla1) x
+  (kid, nabla2) <- fromMaybe (xid, nabla1) <$> representPattern vi_x alt tvs args nabla1 -- VarInfo contains K data in pos info
   let k_vi = (emptyVarInfo x){vi_pos=[PACA alt tvs args]}
 
   nabla3 <- case (alt, args) of
@@ -1409,12 +1399,12 @@ traverseAll f ts@TmSt{ts_facts = env} = do
 inhabitationTest :: Int -> TyState -> Nabla -> MaybeT DsM Nabla
 inhabitationTest 0     _         nabla             = pure nabla
 inhabitationTest fuel  old_ty_st nabla@MkNabla{ nabla_tm_st = ts } = {-# SCC "inhabitationTest" #-} do
-  -- lift $ tracePm "inhabitation test" $ vcat
-  --   [ ppr fuel
-  --   , ppr old_ty_st
-  --   , ppr nabla
-  --   , text "tyStateRefined:" <+> ppr (tyStateRefined old_ty_st (nabla_ty_st nabla))
-  --   ]
+  lift $ tracePm "inhabitation test" $ vcat
+    [ ppr fuel
+    , ppr old_ty_st
+    , ppr nabla
+    , text "tyStateRefined:" <+> ppr (tyStateRefined old_ty_st (nabla_ty_st nabla))
+    ]
   -- When type state didn't change, we only need to traverse dirty VarInfos
   ts' <- if tyStateRefined old_ty_st (nabla_ty_st nabla)
             then traverseAll   test_one ts
@@ -1423,14 +1413,16 @@ inhabitationTest fuel  old_ty_st nabla@MkNabla{ nabla_tm_st = ts } = {-# SCC "in
   where
     nabla_not_dirty = nabla{ nabla_tm_st = ts{ts_dirty=IS.empty} }
     test_one :: VarInfo -> MaybeT DsM VarInfo
-    test_one vi =
+    test_one vi = do
       lift (varNeedsTesting old_ty_st nabla vi) >>= \case
         True -> do
-          -- lift $ tracePm "test_one" (ppr vi)
+          lift $ tracePm "test_one" (ppr vi)
           -- No solution yet and needs testing
           -- We have to test with a Nabla where all dirty bits are cleared
           instantiate (fuel-1) nabla_not_dirty vi
-        _ -> pure vi
+        _ -> do
+          lift $ tracePm "test_one needs no testing" (ppr vi)
+          pure vi
 
 -- | Checks whether the given 'VarInfo' needs to be tested for inhabitants.
 -- Returns `False` when we can skip the inhabitation test, presuming it would
@@ -1439,7 +1431,7 @@ varNeedsTesting :: TyState -> Nabla -> VarInfo -> DsM Bool
 varNeedsTesting old_ty_st n@MkNabla{nabla_ty_st=new_ty_st,nabla_tm_st=tm_st} vi
   = do
     Just (xid, _) <- runMaybeT $ representId (vi_id vi) n
-    if | IS.member xid (ts_dirty tm_st) -> pure True
+    if | IS.member xid (IS.map (`EG.find` ts_facts tm_st) $ ts_dirty tm_st) -> pure True
        | notNull (vi_pos vi)            -> pure False
        -- Same type state => still inhabited
        | not (tyStateRefined old_ty_st new_ty_st) -> pure False
@@ -2199,7 +2191,12 @@ the -XEmptyCase case in 'reportWarnings' by looking for 'ReportEmptyCase'.
 ------------------------------------------------
 -- * E-graphs for pattern match checking
 
-representPattern :: PmAltCon -> [TyVar] -> [Id] -> Nabla -> MaybeT DsM (Maybe (ClassId, Nabla))
+representPattern :: VarInfo
+                 -- ^ Var info of e-class in which this pattern is going to be represented...
+                 -- The things we are doing with this should rather be done as
+                 -- an e-graph analysis modify to "downwards" merge in the e-graph the sub-nodes
+                 -- A bit weird that the e-graph doesn't do this, but it seems like it doesn't... (see egraphs zulip discussion)
+                 -> PmAltCon -> [TyVar] -> [Id] -> Nabla -> MaybeT DsM (Maybe (ClassId, Nabla))
 -- We don't need to do anything in the case of PmAltLit.
 -- The Constructor information is recorded in the positive info e-class
 -- it is represented in, so when we merge we take care of handling this
@@ -2208,10 +2205,20 @@ representPattern :: PmAltCon -> [TyVar] -> [Id] -> Nabla -> MaybeT DsM (Maybe (C
 -- Wait, is it even safe to edit the e-class? Won't that *NOT* trigger the merging??
 -- Here I suppose we're creating the e-class. So we can add information at will. When we eventually merge this class with another one, we can do things.
 -- But we could definitely check whether the information we're adding isn't colliding with the existing one.
-representPattern (PmAltLit _) _ _ _ = return Nothing
+representPattern _ (PmAltLit _) _ _ _ = return Nothing
                  -- We might need represent patterns alongside expressions -- then we can use the "real" equality instances for the patterns (e.g. eqPmLit)
-representPattern (PmAltConLike conLike) tvs args nab00 = do
-  (args', MkNabla tyst0 ts@TmSt{ts_facts=egr0}) <- representIds args nab00
+representPattern (VI _ pos _ _ _) alt@(PmAltConLike conLike) tvs args nab00 = do
+  (args', nab01) <- representIds args nab00
+
+  -- rOMES: It is very akward that this is being done here... perhaps it would be best as a modify method in the analysis
+  -- it certainly won't work for things we learn by congruence...
+  MkNabla tyst0 ts@TmSt{ts_facts=egr0} <-
+    case find ((== Equal) . eqPmAltCon alt . paca_con) pos of
+      Just (PACA _con _other_tvs other_args) -> do
+        let add_var_ct nabla (a, b) = addVarCt nabla a b
+        foldlM add_var_ct nab01 $ zipEqual "addConCt" args other_args
+      Nothing -> pure nab01
+
   ((cid, egr1), tyst1) <- (`runStateT` tyst0) $ EGM.runEGraphMT egr0 $ do
     -- We must represent the constructor application in the e-graph to make
     -- sure the children are recursively merged against other children of
@@ -2296,7 +2303,7 @@ instance Analysis (StateT TyState (MaybeT DsM)) (Maybe VarInfo) ExprF where
     vi_res1 <- foldlM mergeConCt vi_y pos_x
 
     -- Do the same for negative info
-    let add_neg vi nalt = lift $ snd <$> mergeNotConCt False vi nalt
+    let add_neg vi nalt = lift $ snd <$> mergeNotConCt vi nalt
     vi_res2 <- foldlM add_neg vi_res1 (pmAltConSetElems neg_x)
 
     -- We previously were not merging the bottom information, but now we do.

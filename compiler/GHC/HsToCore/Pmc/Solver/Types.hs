@@ -88,7 +88,7 @@ import qualified Data.Equality.Graph.Nodes as EGN
 import qualified Data.Equality.Graph as EG
 import qualified Data.Equality.Graph.Internal as EGI
 import Data.IntSet (IntSet)
-import qualified Data.IntSet as IS (empty)
+import qualified Data.IntSet as IS (empty, toList)
 import Data.Bifunctor (second)
 
 -- import GHC.Driver.Ppr
@@ -242,9 +242,10 @@ instance Outputable BotInfo where
 
 -- | Not user-facing.
 instance Outputable TmState where
-  ppr (TmSt state _dirty) =
-    -- $$ text (show dirty)
-    vcat $ getConst $ _iclasses (\(i,cl) -> Const [ppr i <> text ":" <+> ppr cl]) state
+  ppr (TmSt state dirty) =
+    (vcat $ getConst $ _iclasses (\(i,cl) -> Const [ppr i <> text ":" <+> ppr cl]) state)
+      $$ ppr (IS.toList dirty)
+
 
 instance Outputable (EG.EClass (Maybe VarInfo) CoreExprF) where
   ppr cl = ppr (cl^._nodes) $$ ppr (cl^._data)
