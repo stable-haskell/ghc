@@ -769,7 +769,7 @@ classOpSize opts vs fn val_args voids
            -- If the class op is scrutinising a lambda bound dictionary then
            -- give it a discount, to encourage the inlining of this function
            -- The actual discount is rather arbitrarily chosen
-n  | otherwise
+  | otherwise
   = exprTreeN (vanillaCallSize (length val_args) voids)
 
 funSize :: UnfoldingOpts -> ETVars -> Id -> Int -> Int -> ExprTree
