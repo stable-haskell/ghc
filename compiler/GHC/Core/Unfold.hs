@@ -155,7 +155,7 @@ data UnfoldingOpts = UnfoldingOpts
       -- ^ Penalize depth with 1/x
 
    , exprTreeCaseWidth :: !Int
-      -- ^ Don't make ExprTrees with a case width greater than this
+      -- ^ Bale out entirely with a case width greater than this
 
    , exprTreeCaseDepth :: !Int
       -- ^ Don't make ExprTrees with a case depth greater than this
@@ -197,7 +197,11 @@ defaultUnfoldingOpts = UnfoldingOpts
       -- Don't filter inlining decision reports
    , unfoldingReportPrefix = Nothing
 
-   , exprTreeCaseWidth = 4
+     -- Bale out at exprTreeCaseWidth
+     -- See Note [Bale out on very wide case expressions]
+   , exprTreeCaseWidth = 20
+
+     -- Don't record CaseOf beyond exprTreeCaseDepth
    , exprTreeCaseDepth = 4
    }
 
@@ -601,22 +605,19 @@ exprTree opts args expr
 
     -- Record a CaseOf
     go_case remaining_case_depth vs@(avs,lvs) scrut b alts
+      | alts `lengthExceeds` max_width
+      = Nothing   -- See Note [Bale out on very wide case expressions]
+
       | Just v <- interestingVarScrut vs scrut
       = go remaining_case_depth vs scrut `et_add`
-        (if   record_case
+        (if   remaining_case_depth > 0
          then do { alts' <- mapM (alt_alt_tree v) alts
                  ; etCaseOf bOMB_OUT_SIZE v b alts' }
          else Just (etScrutOf v caseElimDiscount) `et_add`
               -- When this scrutinee has structure, we expect to eliminate the case
-              go_alts rcd1 vs b alts)
+              go_alts remaining_case_depth vs b alts)
       where
         rcd1 = remaining_case_depth - 1
-
-        record_case :: Bool
-        -- True  <=> record CaseOf: case is not too deep, nor too wide
-        -- False <=> record ScrutOf
-        record_case = (remaining_case_depth > 0) &&
-                      (alts `lengthAtMost` max_width)
 
         alt_alt_tree :: Id -> Alt Var -> Maybe AltTree
         alt_alt_tree v (Alt con bs rhs)
@@ -634,17 +635,18 @@ exprTree opts args expr
     go_case rcd vs scrut b alts    -- alts is non-empty
       = caseSize scrut alts     `metAddN`   -- A bit odd that this is only in one branch
         (altSize * length alts) `metAddN`
-            -- IMPORTANT: charge `altSize` for each alternative, else we
-            -- find that giant case nests are treated as practically free
-            -- A good example is Foreign.C.Error.errnoToIOError
         go rcd vs scrut `et_add` go_alts (rcd-1) vs b alts
 
     go_alts :: Int -> ETVars -> Id -> [CoreAlt] -> Maybe ExprTree
-    -- Add up the sizes of all RHSs
+    -- Add up the sizes of all RHSs.
+    -- IMPORTANT: charge `altSize` for each alternative, else we
+    -- find that giant case nests are treated as practically free
+    -- A good example is Foreign.C.Error.errnoToIOError
     go_alts rcd vs b alts = foldr1 et_add_alt (map alt_expr_tree alts)
       where
         alt_expr_tree :: Alt Var -> Maybe ExprTree
-        alt_expr_tree (Alt _con bs rhs) = go rcd (vs `add_lvs` (b:bs)) rhs
+        alt_expr_tree (Alt _con bs rhs) = altSize `metAddN`
+                                          go rcd (vs `add_lvs` (b:bs)) rhs
             -- Don't charge for bndrs, so that wrappers look cheap
             -- (See comments about wrappers with Case)
             -- Don't forget to add the case binder, b, to lvs.
@@ -767,7 +769,7 @@ classOpSize opts vs fn val_args voids
            -- If the class op is scrutinising a lambda bound dictionary then
            -- give it a discount, to encourage the inlining of this function
            -- The actual discount is rather arbitrarily chosen
-  | otherwise
+n  | otherwise
   = exprTreeN (vanillaCallSize (length val_args) voids)
 
 funSize :: UnfoldingOpts -> ETVars -> Id -> Int -> Int -> ExprTree
@@ -829,8 +831,28 @@ caseElimDiscount :: Discount
 -- Bonus for eliminating a case
 caseElimDiscount = 10
 
-{- Note [Constructor size and result discount]
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+{- Note [Bale out on very wide case expressions]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+With very wide case trees (say N) we get a size N*altSize, which usually
+prevents inlining (e.g. 20*altSize = 200 currently, which is way above the
+inlining thresold of 90-ish).  Plus, we risk getting big CaseOf trees in the
+ExprTree.
+
+If we aren't going to inline it anyway, then retaining the unfolding in an
+interface file is plain silly; T5642 (involving Generics) is a good example.
+We had a very wide case whose branches mentioned dozens of data structures,
+each of which had very large types.
+
+Of course, if we apply such a function to a data constructor, we could in
+principle get a huge discount (because all but one branches fall away).
+So perhaps we could use a different setting
+* when generating an unfolding /within a module/
+* when generating an unfoldign /for an interface file/
+
+Currently we aren't doing this, but we could consider it.
+
+Note [Constructor size and result discount]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Treat a constructors application as size 10, regardless of how many
 arguments it has; we are keen to expose them (and we charge separately
 for their args).  We can't treat them as size zero, else we find that
