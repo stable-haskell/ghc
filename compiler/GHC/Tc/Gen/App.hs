@@ -835,10 +835,11 @@ expr_to_type earg =
       --           or   vfun (Int -> type Int)
       -- The T2T transformation can simply discard the herald and use the embedded type.
       unwrap_wc t
-    go (L l (HsVar _ lname)) =
+    go (L l (HsVar is_punned lname)) =
       -- as per #281: variables and constructors (regardless of their namespace)
       -- are mapped directly, without modification.
-      return (L l (HsTyVar noAnn NotPromoted lname))
+      do { detect_puns is_punned (unLoc lname)
+         ; return (L l (HsTyVar noAnn NotPromoted lname)) }
     go (L l (HsApp _ lhs rhs)) =
       do { lhs' <- go lhs
          ; rhs' <- go rhs
@@ -917,6 +918,14 @@ expr_to_type earg =
       -- equivalent of fromListN, so we must use the original.
       go (L l orig)
     go e = failWith $ TcRnIllformedTypeArgument e
+
+    detect_puns :: IsPunnedVarOcc -> Name -> TcM ()
+    detect_puns (PunnedVarOcc n1 n2) name
+      -- as per #281: there should be no variable of the same name but from a different namespace,
+      -- or else raise an ambiguity error (does not apply to constructors)
+      | isVarNameSpace (rdrNameSpace (nameRdrName name))
+      = addErr $ TcRnIllegalPunnedVarOccInTypeArgument n1 n2
+    detect_puns _ _ = return ()
 
     unwrap_wc :: HsWildCardBndrs GhcRn t -> TcM t
     unwrap_wc (HsWC wcs t)

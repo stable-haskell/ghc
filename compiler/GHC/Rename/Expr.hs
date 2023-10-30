@@ -237,14 +237,14 @@ rnLExpr = wrapLocFstMA rnExpr
 
 rnExpr :: HsExpr GhcPs -> RnM (HsExpr GhcRn, FreeVars)
 
-finishHsVar :: LocatedA Name -> RnM (HsExpr GhcRn, FreeVars)
+finishHsVar :: IsPunnedVarOcc -> LocatedA Name -> RnM (HsExpr GhcRn, FreeVars)
 -- Separated from rnExpr because it's also used
 -- when renaming infix expressions
-finishHsVar (L l name)
+finishHsVar is_punned (L l name)
  = do { this_mod <- getModule
       ; when (nameIsLocalOrFrom this_mod name) $
         checkThLocalName name
-      ; return (HsVar noExtField (L (la2na l) name), unitFV name) }
+      ; return (HsVar is_punned (L (la2na l) name), unitFV name) }
 
 rnUnboundVar :: RdrName -> RnM (HsExpr GhcRn, FreeVars)
 rnUnboundVar v = do
@@ -258,7 +258,7 @@ rnExpr (HsVar _ (L l v))
        ; mb_gre <- lookupExprOccRn v
        ; case mb_gre of {
            Nothing -> rnUnboundVar v ;
-           Just gre ->
+           Just (is_punned, gre) ->
     do { let nm   = greName gre
              info = greInfo gre
        ; if | IAmRecField fld_info <- info
@@ -280,7 +280,7 @@ rnExpr (HsVar _ (L l v))
             -> rnExpr (ExplicitList noAnn [])
 
             | otherwise
-            -> finishHsVar (L (na2la l) nm)
+            -> finishHsVar is_punned (L (na2la l) nm)
         }}}
 
 rnExpr (HsIPVar x v)
@@ -1357,12 +1357,12 @@ lookupStmtNamePoly ctxt name
   = do { rebindable_on <- xoptM LangExt.RebindableSyntax
        ; if rebindable_on
          then do { fm <- lookupOccRn (nameRdrName name)
-                 ; return (HsVar noExtField (noLocA fm), unitFV fm) }
+                 ; return (HsVar DistinctVarOcc (noLocA fm), unitFV fm) }
          else not_rebindable }
   | otherwise
   = not_rebindable
   where
-    not_rebindable = return (HsVar noExtField (noLocA name), emptyFVs)
+    not_rebindable = return (HsVar DistinctVarOcc (noLocA name), emptyFVs)
 
 -- | Is this a context where we respect RebindableSyntax?
 -- but ListComp are never rebindable

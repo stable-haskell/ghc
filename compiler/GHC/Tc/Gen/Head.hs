@@ -1107,7 +1107,7 @@ tcCheckId name res_ty
        ; addFunResCtxt rn_fun [] actual_res_ty res_ty $
          tcWrapResultO (OccurrenceOf name) rn_fun expr actual_res_ty res_ty }
   where
-    rn_fun = HsVar noExtField (noLocA name)
+    rn_fun = HsVar DistinctVarOcc (noLocA name)
 
 ------------------------
 tcInferId :: Name -> TcM (HsExpr GhcTc, TcSigmaType)

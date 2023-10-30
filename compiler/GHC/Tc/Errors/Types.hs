@@ -743,6 +743,20 @@ data TcRnMessage where
     :: RdrName
     -> TcRnMessage
 
+  {- TcRnIllegalPunnedVarOccInTypeArgument is an error raised
+     when a punned variable occurs in a required type argument.
+
+     Example:
+       vfun :: forall (a :: k) -> ()
+       f (Just @a a) = vfun a
+       --                  ^^^
+       --  which `a` is referenced?
+  -}
+  TcRnIllegalPunnedVarOccInTypeArgument
+    :: Name
+    -> Name
+    -> TcRnMessage
+
   {-| TcRnDuplicateFieldName is an error that occurs whenever
       there are duplicate field names in a single record.
 

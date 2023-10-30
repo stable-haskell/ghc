@@ -500,13 +500,18 @@ mkConLikeTc con = XExpr (ConLikeTc con [] [])
 ************************************************************************
 -}
 
-nlHsVar :: IsSrcSpanAnn p a
-        => IdP (GhcPass p) -> LHsExpr (GhcPass p)
-nlHsVar n = noLocA (HsVar noExtField (noLocA n))
+class    DefaultXVar p           where defaultXVar :: XVar (GhcPass p)
+instance DefaultXVar Parsed      where defaultXVar = noExtField
+instance DefaultXVar Renamed     where defaultXVar = DistinctVarOcc
+instance DefaultXVar Typechecked where defaultXVar = noExtField
 
-nl_HsVar :: IsSrcSpanAnn p a
-        => IdP (GhcPass p) -> HsExpr (GhcPass p)
-nl_HsVar n = HsVar noExtField (noLocA n)
+nlHsVar :: forall p a. (DefaultXVar p, IsSrcSpanAnn p a)
+        => IdP (GhcPass p) -> LHsExpr (GhcPass p)
+nlHsVar n = noLocA (HsVar (defaultXVar @p) (noLocA n))
+
+nl_HsVar :: forall p a. (DefaultXVar p, IsSrcSpanAnn p a)
+         => IdP (GhcPass p) -> HsExpr (GhcPass p)
+nl_HsVar n = HsVar (defaultXVar @p) (noLocA n)
 
 -- | NB: Only for 'LHsExpr' 'Id'.
 nlHsDataCon :: DataCon -> LHsExpr GhcTc
@@ -532,14 +537,14 @@ nlHsSyntaxApps :: SyntaxExprTc -> [LHsExpr GhcTc]
                -> LHsExpr GhcTc
 nlHsSyntaxApps = mkHsSyntaxApps noSrcSpanA
 
-nlHsApps :: IsSrcSpanAnn p a
+nlHsApps :: (DefaultXVar p, IsSrcSpanAnn p a)
          => IdP (GhcPass p) -> [LHsExpr (GhcPass p)] -> LHsExpr (GhcPass p)
 nlHsApps f xs = foldl' nlHsApp (nlHsVar f) xs
 
-nlHsVarApps :: IsSrcSpanAnn p a
+nlHsVarApps :: forall p a. (DefaultXVar p, IsSrcSpanAnn p a)
             => IdP (GhcPass p) -> [IdP (GhcPass p)] -> LHsExpr (GhcPass p)
-nlHsVarApps f xs = noLocA (foldl' mk (HsVar noExtField (noLocA f))
-                                         (map ((HsVar noExtField) . noLocA) xs))
+nlHsVarApps f xs = noLocA (foldl' mk (HsVar (defaultXVar @p) (noLocA f))
+                                         (map ((HsVar (defaultXVar @p)) . noLocA) xs))
                  where
                    mk f a = HsApp noComments (noLocA f) (noLocA a)
 
@@ -668,8 +673,8 @@ mkLHsTupleExpr [e] _ = e
 mkLHsTupleExpr es ext
   = noLocA $ ExplicitTuple ext (map (Present noAnn) es) Boxed
 
-mkLHsVarTuple :: IsSrcSpanAnn p a
-               => [IdP (GhcPass p)]  -> XExplicitTuple (GhcPass p)
+mkLHsVarTuple :: (DefaultXVar p, IsSrcSpanAnn p a)
+              => [IdP (GhcPass p)]  -> XExplicitTuple (GhcPass p)
               -> LHsExpr (GhcPass p)
 mkLHsVarTuple ids ext = mkLHsTupleExpr (map nlHsVar ids) ext
 
@@ -685,7 +690,7 @@ mkLHsPatTup [lpat] = lpat
 mkLHsPatTup lpats@(lpat:_) = L (getLoc lpat) $ TuplePat noExtField lpats Boxed
 
 -- | The Big equivalents for the source tuple expressions
-mkBigLHsVarTup :: IsSrcSpanAnn p a
+mkBigLHsVarTup :: (DefaultXVar p, IsSrcSpanAnn p a)
                => [IdP (GhcPass p)] -> XExplicitTuple (GhcPass p)
                -> LHsExpr (GhcPass p)
 mkBigLHsVarTup ids anns = mkBigLHsTup (map nlHsVar ids) anns

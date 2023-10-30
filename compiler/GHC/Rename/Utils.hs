@@ -737,7 +737,7 @@ genLHsVar :: Name -> LHsExpr GhcRn
 genLHsVar nm = wrapGenSpan $ genHsVar nm
 
 genHsVar :: Name -> HsExpr GhcRn
-genHsVar nm = HsVar noExtField $ wrapGenSpan nm
+genHsVar nm = HsVar DistinctVarOcc $ wrapGenSpan nm
 
 genAppType :: HsExpr GhcRn -> HsType (NoGhcTc GhcRn) -> HsExpr GhcRn
 genAppType expr ty = HsAppType noExtField (wrapGenSpan expr) noHsTok (mkEmptyWildCardBndrs (wrapGenSpan ty))

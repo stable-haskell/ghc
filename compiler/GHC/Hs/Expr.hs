@@ -147,7 +147,7 @@ mkSyntaxExpr = SyntaxExprRn
 -- | Make a 'SyntaxExpr' from a 'Name' (the "rn" is because this is used in the
 -- renamer).
 mkRnSyntaxExpr :: Name -> SyntaxExprRn
-mkRnSyntaxExpr name = SyntaxExprRn $ HsVar noExtField $ noLocA name
+mkRnSyntaxExpr name = SyntaxExprRn $ HsVar DistinctVarOcc $ noLocA name
 
 instance Outputable SyntaxExprRn where
   ppr (SyntaxExprRn expr) = ppr expr
@@ -222,7 +222,22 @@ type instance XOverLabel     GhcTc = DataConCantHappen
 
 -- ---------------------------------------------------------------------
 
-type instance XVar           (GhcPass _) = NoExtField
+-- | Is this variable occurrence punned, i.e. is there a variable with the same
+-- 'occNameFS' but a different 'occNameSpace' in the context?
+--
+-- This is used to reject punned variable occurrences when converting required
+-- type arguments from HsExpr to HsType.
+-- See Note [RequiredTypeArguments and the T2T mapping] in GHC.Tc.Gen.App.
+data IsPunnedVarOcc =
+    DistinctVarOcc
+  | PunnedVarOcc
+      Name  -- how the variable was actually resolved
+      Name  -- how it could have been resolved if we were to look in a different namespace
+  deriving (Eq, Data)
+
+type instance XVar GhcPs = NoExtField
+type instance XVar GhcRn = IsPunnedVarOcc
+type instance XVar GhcTc = NoExtField
 
 type instance XUnboundVar    GhcPs = EpAnn EpAnnUnboundVar
 type instance XUnboundVar    GhcRn = NoExtField

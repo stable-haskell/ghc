@@ -63,7 +63,7 @@
                       (L
                        (SrcSpanAnn (EpAnnNotUsed) { DumpRenamedAst.hs:35:8-15 })
                        (HsVar
-                        (NoExtField)
+                        (DistinctVarOcc)
                         (L
                          (SrcSpanAnn (EpAnnNotUsed) { DumpRenamedAst.hs:35:8-15 })
                          {Name: System.IO.putStrLn})))

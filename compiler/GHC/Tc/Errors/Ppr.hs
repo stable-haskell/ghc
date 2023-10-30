@@ -285,6 +285,13 @@ instance Diagnostic TcRnMessage where
       -> mkSimpleDecorated $
             hang (text "Illegal implicitly quantified type variable in a required type argument:")
                 2 (quotes (ppr rdr))
+    TcRnIllegalPunnedVarOccInTypeArgument n1 n2
+      -> mkSimpleDecorated $ hang msg 2 info
+         where
+           msg  = vcat [ text "Illegal punned variable occurrence in a required type argument."
+                       , text "The name" <+> quotes (ppr n1) <+> text "could refer to:" ]
+           info = vcat [ quotes (ppr n1) <+> text "bound at" <+> ppr (getSrcLoc n1)
+                       , quotes (ppr n2) <+> text "bound at" <+> ppr (getSrcLoc n2) ]
     TcRnDuplicateFieldName fld_part dups
       -> mkSimpleDecorated $
            hsep [ text "Duplicate field name"
@@ -1966,6 +1973,8 @@ instance Diagnostic TcRnMessage where
       -> ErrorWithoutFlag
     TcRnIllegalImplicitTyVarInTypeArgument{}
       -> ErrorWithoutFlag
+    TcRnIllegalPunnedVarOccInTypeArgument{}
+      -> ErrorWithoutFlag
     TcRnDuplicateFieldName{}
       -> ErrorWithoutFlag
     TcRnIllegalViewPattern{}
@@ -2590,6 +2599,8 @@ instance Diagnostic TcRnMessage where
       -> [SuggestAnonymousWildcard]
     TcRnIllegalImplicitTyVarInTypeArgument tv
       -> [SuggestExplicitQuantification tv]
+    TcRnIllegalPunnedVarOccInTypeArgument{}
+      -> []
     TcRnDuplicateFieldName{}
       -> noHints
     TcRnIllegalViewPattern{}

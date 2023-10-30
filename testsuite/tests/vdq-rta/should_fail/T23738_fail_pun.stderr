@@ -1,0 +1,14 @@
+
+T23738_fail_pun.hs:11:17: error: [GHC-09591]
+    • Illegal punned variable occurrence in a required type argument.
+      The name ‘a’ could refer to:
+        ‘a’ bound at T23738_fail_pun.hs:11:12
+        ‘a’ bound at T23738_fail_pun.hs:11:10
+    • In the expression: vfun a
+      In an equation for ‘f’: f (Just @a a) = vfun a
+
+T23738_fail_pun.hs:11:22: error: [GHC-10969]
+    • Local identifier ‘a’ used as a type
+    • In the type ‘a’
+      In the expression: vfun a
+      In an equation for ‘f’: f (Just @a a) = vfun a
