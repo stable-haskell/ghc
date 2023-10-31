@@ -633,13 +633,13 @@ exprTree opts args expr
 
     -- Don't record a CaseOf
     go_case rcd vs scrut b alts    -- alts is non-empty
-      = caseSize scrut alts     `metAddN`   -- A bit odd that this is only in one branch
-        (altSize * length alts) `metAddN`
-        go rcd vs scrut `et_add` go_alts (rcd-1) vs b alts
+      = caseSize scrut alts  `metAddN`   -- A bit odd that this is only in one branch
+        go rcd vs scrut      `et_add`
+        go_alts (rcd-1) vs b alts
 
     go_alts :: Int -> ETVars -> Id -> [CoreAlt] -> Maybe ExprTree
     -- Add up the sizes of all RHSs.
-    -- IMPORTANT: charge `altSize` for each alternative, else we
+    -- IMPORTANT: include a charge `altSize` for each alternative, else we
     -- find that giant case nests are treated as practically free
     -- A good example is Foreign.C.Error.errnoToIOError
     go_alts rcd vs b alts = foldr1 et_add_alt (map alt_expr_tree alts)
