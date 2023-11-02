@@ -931,9 +931,9 @@ refineFromInScope :: HasDebugCallStack => SimplMode -> InScopeSet -> Var -> Var
 refineFromInScope mode in_scope v
   | isLocalId v = case lookupInScope in_scope v of
                   Just v' -> v'
-                  Nothing -> -- pprPanic "refineFromInScope" (ppr in_scope $$ ppr v)
-                             pprTrace "refineFromInScope"
-                                 (ppr (sm_module mode) <+> ppr v) v
+                  Nothing -> pprPanic "refineFromInScope" (ppr (sm_module mode) $$ ppr v $$ ppr in_scope)
+                             -- pprTrace "refineFromInScope"
+                             --    (ppr (sm_module mode) <+> ppr v) v
                              -- c.f #19074 for a subtle place where this went wrong
   | otherwise = v
 

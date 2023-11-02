@@ -617,7 +617,13 @@ exprTree opts args expr
               -- When this scrutinee has structure, we expect to eliminate the case
               go_alts remaining_case_depth vs b alts)
       where
-        rcd1 = remaining_case_depth - 1
+        -- Decremement remaining case depth when going inside
+        -- a case with more than one alternative.
+        -- Don't do so for single-alt cases, becuase they don't give rise
+        -- to exponential blow-up, and it's very common to have deep nests
+        -- of case x of (a,b) -> case a of I# a' -> ...
+        rcd1 | isSingleton alts = remaining_case_depth
+             | otherwise        = remaining_case_depth - 1
 
         alt_alt_tree :: Id -> Alt Var -> Maybe AltTree
         alt_alt_tree v (Alt con bs rhs)
@@ -1053,7 +1059,8 @@ metAddAlt bOMB_OUT_SIZE (Just et1) (Just et2)
     else Just (ExprTree { et_wc_tot = t12
                         , et_size   = n1 + n2
                         , et_cases  = c1 `unionBags` c2
-                        , et_ret    = ret1 + ret2 })
+                        , et_ret    = ret1 + ret2 -- See Note [Result discount for case alternatives]
+          })
 
 
 -- | The "expression tree"; an abstraction of the RHS of the function
@@ -1068,11 +1075,13 @@ etCaseOf :: Size -> Id -> Id -> [AltTree] -> Maybe ExprTree
 -- is a variable) but charge for each alternative (included in `altTreesSize`)
 etCaseOf bOMB_OUT_SIZE scrut case_bndr alts
   | tot >= bOMB_OUT_SIZE = Nothing
-  | otherwise            = Just (ExprTree { et_wc_tot = tot, et_size = 0, et_ret = 0
+  | otherwise            = Just (ExprTree { et_wc_tot = tot, et_ret = ret
+                                          , et_size = 0
                                           , et_cases = unitBag case_tree })
   where
     case_tree = CaseOf scrut case_bndr alts
     tot       = altTreesSize alts
+    ret       = altTreesDiscount alts
 
 altTreesSize :: [AltTree] -> Size
 -- Total worst-case size of a [AltTree], including the per-alternative cost of altSize
@@ -1081,8 +1090,24 @@ altTreesSize alts = foldl' add_alt 0 alts
     add_alt n (AltTree _ _ (ExprTree { et_wc_tot = alt_tot }))
        = n + alt_tot + altSize
 
+altTreesDiscount :: [AltTree] -> Discount
+-- See Note [Result discount for case alternatives]
+altTreesDiscount alts = foldl' add_alt 0 alts
+  where
+    add_alt n (AltTree _ _ (ExprTree { et_ret = ret })) = n + ret
+
 etScrutOf :: Id -> Discount -> ExprTree
 etScrutOf v d = etZero { et_cases = unitBag (ScrutOf v d) }
+
+{- Note [Result discount for case alternatives]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+When adding the size of alternatives, we *add* the result discounts
+too, rather than take the *maximum*.  For a multi-branch case, this
+gives a discount for each branch that returns a constructor, making us
+keener to inline.  I did try using 'max' instead, but it makes nofib
+'rewrite' and 'puzzle' allocate significantly more, and didn't make
+binary sizes shrink significantly either.
+-}
 
 {- *********************************************************************
 *                                                                      *
@@ -1127,6 +1152,7 @@ exprTreeSize !ic (ExprTree { et_size  = size
                            , et_cases = cases
                            , et_ret   = ret_discount })
   = foldr ((+) . caseTreeSize (ic { ic_want_res = False }))
+          -- False: all result discount is at the top; ignore inner ones
           discounted_size cases
   where
     discounted_size | ic_want_res ic = size - ret_discount

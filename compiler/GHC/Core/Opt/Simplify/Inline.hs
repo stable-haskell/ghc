@@ -596,11 +596,21 @@ exprSummary env e = go env e []
     go env (Tick _ e) as = go env e as
     go env (App f a)  as | isValArg a = go env f (a:as)
                          | otherwise  = go env f as
-    go env (Let b e)  as = go env' e as
-      where
-        env' = env `addNewInScopeIds` bindersOf b
 
-    go env (Var v)    as
+    -- Look through let-expressions
+    go env (Let b e)  as
+      | let env' = env `addNewInScopeIds` bindersOf b
+      = go env' e as
+
+{-
+    -- Look through single-branch case-expressions; like lets
+    go env (Case _ b _ alts) as
+      | [Alt _ bs e] <- alts
+      , let env' = env `addNewInScopeIds` (b:bs)
+      = go env' e as
+-}
+
+    go env (Var v) as
        = -- Simplify.Env.substId Looks up in substitution
          -- /and/ refines from the InScopeset
          case substId env v of
