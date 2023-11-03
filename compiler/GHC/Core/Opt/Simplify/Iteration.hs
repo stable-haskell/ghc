@@ -409,7 +409,7 @@ simplAuxBind env bndr new_rhs
   -- The cases would be inlined unconditionally by completeBind:
   -- but it seems not uncommon, and avoids faff to do it here
   -- This is safe because it's only used for auxiliary bindings, which
-  -- have no NOLINE pragmas, nor RULEs
+  -- have no NOINLINE pragmas, nor RULEs
   | exprIsTrivial new_rhs  -- Short-cut for let x = y in ...
   = return ( emptyFloats env
            , case new_rhs of
@@ -3382,6 +3382,22 @@ simplAlt env scrut' _ case_bndr' cont' (Alt (DataAlt con) vs rhs)
         ; rhs' <- simplExprC env'' rhs cont'
         ; return (Alt (DataAlt con) vs' rhs') }
 
+
+{- -------- Debugging only -------------
+
+ppr_in_scope :: SimplEnv -> SDoc
+-- Show only in-scope thing with unfoldings
+ppr_in_scope env
+  = text "InScope(unf)" <+> braces (nonDetStrictFoldVarSet do_one empty (getInScopeVars (seInScope env)))
+  where
+    do_one v d | isId v
+               , Just e <- maybeUnfoldingTemplate (idUnfolding v)
+               = (ppr v <+> equals <+> my_ppr e) $$ d
+               | otherwise = d
+    my_ppr (Lam {}) = text "<lambda>"
+    my_ppr e        = ppr e
+---------------------------------------- -}
+
 {- Note [Adding evaluatedness info to pattern-bound variables]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 addEvals records the evaluated-ness of the bound variables of
@@ -3608,7 +3624,7 @@ knownCon env scrut dc_floats dc dc_ty_args dc_args bndr bs rhs cont
              -- Nevertheless we must keep it if the case-binder is alive,
              -- because it may be used in the con_app.  See Note [knownCon occ info]
            ; (floats1, env2) <- simplAuxBind env' b' arg  -- arg satisfies let-can-float invariant
-           ; (floats2, env3)  <- bind_args env2 bs' args
+           ; (floats2, env3) <- bind_args env2 bs' args
            ; return (floats1 `addFloats` floats2, env3) }
 
     bind_args _ _ _ =
