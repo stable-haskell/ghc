@@ -66,6 +66,11 @@ import qualified Data.ByteString as BS
 
 {- Note [Overview of inlining heuristics]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+These inlining heurstics all concern callSiteInline; that is, the
+decision about whether or not to inline a let-binding.  It does not
+concern inlining used-once things, or things with a trivial RHS, which
+kills the let-binding altogether.
+
 Key examples
 ------------
 Example 1:
@@ -78,7 +83,7 @@ Example 1:
 Even though f's entire RHS is big, it collapses to something small when applied
 to A.  We'd like to spot this.
 
-Example 1:
+Example 2:
 
    let f x = case x of
                (p,q) -> case p of
@@ -104,9 +109,35 @@ when `y` is a free variable.
 
 This kind of thing can occur a lot with join points.
 
+Example 4: result discounts:
+
+   let f x = case x of
+               A -> (e1,e2)
+               B -> (e3,e4)
+               C -> e5
+    in \y -> ...case f y of { (a,b) -> blah }
+
+Here there is nothing interesting about f's /argument/, but:
+  * Many of f's cases return a data constructur (True or False)
+  * The call of `f` scrutinises its result
+
+If we inline `f`, the 'case' will cancel with pair constrution, we should be keener
+to inline `f` than if it was called in a boring context. We say that `f`  has a
+/result discount/ meaning that we should apply a discount if `f` is called in
+a case context.
+
+Example 5: totally boring
+
+   let f x = not (g x x)
+   in ....(\y. f y)...
+
+Here,there is /nothing/ interesting about either the arguments or the result
+coninuation of the call (f y).  There is no point in inlining, even if f's RHS
+is small, as it is here.
+
 Design overview
 ---------------
-The question is whethe or not to inline f = rhs.
+The question is whether or not to inline f = rhs.
 The key idea is to abstract `rhs` to an ExprTree, which gives a measure of
 size, but records structure for case-expressions.
 
@@ -148,7 +179,7 @@ data UnfoldingOpts = UnfoldingOpts
    , unfoldingVeryAggressive :: !Bool
       -- ^ Force inlining in many more cases
 
-   , unfoldingCaseThreshold :: !Size
+   , unfoldingCaseThreshold :: !Int
       -- ^ Don't consider depth up to x
 
    , unfoldingCaseScaling :: !Int
@@ -466,6 +497,11 @@ uncondInline rhs arity size
 
 {- Note [Constructing an ExprTree]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+We construct an ExprTree as an abstaction or "digest" of the body
+of a function    f = \x1...xn. body
+
+The arguments are x1..xn; we apply `exprTree` to the `body`.
+
 We maintain:
 * avs: argument variables, or variables bound by a case on an
        argument variable.
@@ -526,7 +562,7 @@ exprTree opts args expr
     et_add_alt = metAddAlt bOMB_OUT_SIZE
 
     go :: Int -> ETVars -> CoreExpr -> Maybe ExprTree
-          -- rcd is the /unused/ case depth; decreases toward zero
+          -- rcd is the /remaining/ case depth; decreases toward zero
           -- (avs,lvs): see Note [Constructing an ExprTree]
     go rcd vs (Cast e _)      = go rcd vs e
     go rcd vs (Tick _ e)      = go rcd vs e
@@ -639,7 +675,8 @@ exprTree opts args expr
 
     -- Don't record a CaseOf
     go_case rcd vs scrut b alts    -- alts is non-empty
-      = caseSize scrut alts  `metAddN`   -- A bit odd that this is only in one branch
+      = caseSize scrut alts  `metAddN`   -- A bit odd that this `caseSize` business is only
+                                         -- applied in this equation, not in the previous ones
         go rcd vs scrut      `et_add`
         go_alts (rcd-1) vs b alts
 
@@ -782,7 +819,7 @@ funSize :: UnfoldingOpts -> ETVars -> Id -> Int -> Int -> ExprTree
 -- Size for function calls that are not constructors or primops
 -- Note [Function applications]
 funSize opts (avs,_) fun n_val_args voids
-  | fun `hasKey` buildIdKey   = etZero  -- Wwant to inline applications of build/augment
+  | fun `hasKey` buildIdKey   = etZero  -- We want to inline applications of build/augment
   | fun `hasKey` augmentIdKey = etZero  -- so we give size zero to the whole call
   | otherwise = ExprTree { et_wc_tot = size, et_size  = size
                          , et_cases = cases
@@ -1123,10 +1160,14 @@ data InlineContext
                                         --          so apply result discount
      }
 
-data ArgSummary = ArgNoInfo
-                | ArgIsCon AltCon [ArgSummary]  -- Value args only
-                | ArgIsNot [AltCon]
-                | ArgIsLam
+data ArgSummary
+  = ArgNoInfo
+  | ArgIsCon AltCon [ArgSummary]  -- Arg is a data-con application;
+                                  --   the [ArgSummary] is for value args only
+  | ArgIsNot [AltCon]             -- Arg is a value, not headed by these construtors
+  | ArgIsLam                      -- Arg is a lambda
+  | ArgNonTriv                    -- The arg has some struture, but is not a value
+                                  --   e.g. it might be a call (f x)
 
 hasArgInfo :: ArgSummary -> Bool
 hasArgInfo ArgNoInfo = False
@@ -1135,6 +1176,7 @@ hasArgInfo _         = True
 instance Outputable ArgSummary where
   ppr ArgNoInfo       = text "ArgNoInfo"
   ppr ArgIsLam        = text "ArgIsLam"
+  ppr ArgNonTriv      = text "ArgNonTriv"
   ppr (ArgIsCon c as) = ppr c <> ppr as
   ppr (ArgIsNot cs)   = text "ArgIsNot" <> ppr cs
 
@@ -1162,14 +1204,18 @@ caseTreeSize :: InlineContext -> CaseTree -> Size
 caseTreeSize ic (ScrutOf bndr disc)
   = case lookupBndr ic bndr of
       ArgNoInfo   -> 0
-      ArgIsNot {} -> -disc  -- E.g. bndr is a DFun application
+      ArgNonTriv  -> -10    -- E.g. bndr is a DFun application
                             --      T8732 need to inline mapM_
+
+      -- Apply full discount for values
       ArgIsLam    -> -disc  -- Apply discount
+      ArgIsNot {} -> -disc
       ArgIsCon {} -> -disc  -- Apply discount
 
 caseTreeSize ic (CaseOf scrut_var case_bndr alts)
   = case lookupBndr ic scrut_var of
-      ArgNoInfo     -> altsSize ic case_bndr alts + case_size
+      ArgNoInfo  -> altsSize ic case_bndr alts + case_size
+      ArgNonTriv -> altsSize ic case_bndr alts + case_size
 
       ArgIsNot cons -> altsSize ic case_bndr (trim_alts cons alts)
          -- The case-expression may not disappear, but it scrutinises

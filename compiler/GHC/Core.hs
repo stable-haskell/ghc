@@ -1440,6 +1440,8 @@ data CaseTree
                          -- nothing relies on non-empty-ness
 
   | ScrutOf Id Discount  -- If this Id is bound to a value, apply this discount
+                         -- All size info is accounted for elsewhere;
+                         -- ScrutOf just records a discount
 
 data AltTree  = AltTree AltCon
                         [Id]      -- Term variables only
