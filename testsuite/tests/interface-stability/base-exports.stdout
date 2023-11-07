@@ -5707,6 +5707,7 @@ module GHC.Exts where
   ctz64# :: Word64# -> Word#
   ctz8# :: Word# -> Word#
   currentCallStack :: GHC.Types.IO [GHC.Base.String]
+  currentCallStackIds :: GHC.Types.IO [GHC.Word.Word32]
   deRefStablePtr# :: forall {l :: Levity} (a :: TYPE (BoxedRep l)). StablePtr# a -> State# RealWorld -> (# State# RealWorld, a #)
   deRefWeak# :: forall {l :: Levity} (a :: TYPE (BoxedRep l)). Weak# a -> State# RealWorld -> (# State# RealWorld, Int#, a #)
   decodeDouble_2Int# :: Double# -> (# Int#, Word#, Word#, Int# #)
@@ -9197,14 +9198,17 @@ module GHC.Stack where
   type SrcLoc :: *
   data SrcLoc = SrcLoc {srcLocPackage :: [GHC.Types.Char], srcLocModule :: [GHC.Types.Char], srcLocFile :: [GHC.Types.Char], srcLocStartLine :: GHC.Types.Int, srcLocStartCol :: GHC.Types.Int, srcLocEndLine :: GHC.Types.Int, srcLocEndCol :: GHC.Types.Int}
   callStack :: HasCallStack => CallStack
+  ccId :: GHC.Ptr.Ptr CostCentre -> GHC.Types.IO GHC.Word.Word32
   ccLabel :: GHC.Ptr.Ptr CostCentre -> GHC.Types.IO base-4.19.0.0:GHC.Foreign.Internal.CString
   ccModule :: GHC.Ptr.Ptr CostCentre -> GHC.Types.IO base-4.19.0.0:GHC.Foreign.Internal.CString
   ccSrcSpan :: GHC.Ptr.Ptr CostCentre -> GHC.Types.IO base-4.19.0.0:GHC.Foreign.Internal.CString
   ccsCC :: GHC.Ptr.Ptr CostCentreStack -> GHC.Types.IO (GHC.Ptr.Ptr CostCentre)
   ccsParent :: GHC.Ptr.Ptr CostCentreStack -> GHC.Types.IO (GHC.Ptr.Ptr CostCentreStack)
+  ccsToIds :: GHC.Ptr.Ptr CostCentreStack -> GHC.Types.IO [GHC.Word.Word32]
   ccsToStrings :: GHC.Ptr.Ptr CostCentreStack -> GHC.Types.IO [GHC.Base.String]
   clearCCS :: forall a. GHC.Types.IO a -> GHC.Types.IO a
   currentCallStack :: GHC.Types.IO [GHC.Base.String]
+  currentCallStackIds :: GHC.Types.IO [GHC.Word.Word32]
   emptyCallStack :: CallStack
   errorWithStackTrace :: forall a. GHC.Base.String -> a
   freezeCallStack :: CallStack -> CallStack
@@ -9226,14 +9230,17 @@ module GHC.Stack.CCS where
   data CostCentre
   type CostCentreStack :: *
   data CostCentreStack
+  ccId :: GHC.Ptr.Ptr CostCentre -> GHC.Types.IO GHC.Word.Word32
   ccLabel :: GHC.Ptr.Ptr CostCentre -> GHC.Types.IO base-4.19.0.0:GHC.Foreign.Internal.CString
   ccModule :: GHC.Ptr.Ptr CostCentre -> GHC.Types.IO base-4.19.0.0:GHC.Foreign.Internal.CString
   ccSrcSpan :: GHC.Ptr.Ptr CostCentre -> GHC.Types.IO base-4.19.0.0:GHC.Foreign.Internal.CString
   ccsCC :: GHC.Ptr.Ptr CostCentreStack -> GHC.Types.IO (GHC.Ptr.Ptr CostCentre)
   ccsParent :: GHC.Ptr.Ptr CostCentreStack -> GHC.Types.IO (GHC.Ptr.Ptr CostCentreStack)
+  ccsToIds :: GHC.Ptr.Ptr CostCentreStack -> GHC.Types.IO [GHC.Word.Word32]
   ccsToStrings :: GHC.Ptr.Ptr CostCentreStack -> GHC.Types.IO [GHC.Base.String]
   clearCCS :: forall a. GHC.Types.IO a -> GHC.Types.IO a
   currentCallStack :: GHC.Types.IO [GHC.Base.String]
+  currentCallStackIds :: GHC.Types.IO [GHC.Word.Word32]
   getCCSOf :: forall a. a -> GHC.Types.IO (GHC.Ptr.Ptr CostCentreStack)
   getCurrentCCS :: forall dummy. dummy -> GHC.Types.IO (GHC.Ptr.Ptr CostCentreStack)
   renderStack :: [GHC.Base.String] -> GHC.Base.String
