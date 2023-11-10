@@ -187,6 +187,7 @@ data UnfoldingOpts = UnfoldingOpts
 
    , exprTreeCaseWidth :: !Int
       -- ^ Bale out entirely with a case width greater than this
+      -- See Note [Bale out on very wide case expressions]
 
    , exprTreeCaseDepth :: !Int
       -- ^ Don't make ExprTrees with a case depth greater than this
@@ -468,9 +469,17 @@ in the typical case we will record an UnfoldingGuidance of
                     , ug_tree = exprTree body }
 
 The ug_tree :: ExprTree is an abstaction or "digest" of the body
-of the function.  An ExprTree records:
-  * et_wc_tot
-We maintain:
+of the function.  An ExprTree has
+
+  * A CaseOf for each case-expression that scrutinises an argument or
+    free variable, with a branch for each alternative.
+
+  * A ScrutOf for each other interesting use a variable, giving a discount
+    to apply if that argument has structure. e.g. a function that is applied.
+
+How exprTree works
+------------------
+We maintain in ETVars:
 * avs: argument variables, or variables bound by a case on an
        argument variable.
 
@@ -505,9 +514,15 @@ We maintain:
 
 Wrinkles:
 
-* We must be careful about recording enormous functions, with very wide or very
+(ET1) We must be careful about recording enormous functions, with very wide or very
   deep case trees. (This can happen with Generics; e.g. test T5642.)  We limit
-  both with UnfoldingOpts.
+  both with UnfoldingOpts: see the use of `exprTreeCaseWidth` and `exprTreeCaseDepth`
+  in `exprTree`.
+  * When we exceed the maximum case-depth we just record ScrutOf info (instead of
+    CaseOf) for the scrutinee.
+
+  * When we exceed the maximum case width we just bale out entirely and say that
+    the function is too big. See Note [Bale out on very wide case expressions].
 
 Note [Computing the size of an expression]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -546,10 +561,13 @@ are very cheap, because exposing them to a caller is so valuable.
 
 type ETVars = (VarSet,VarSet)  -- (avs, lvs)
               -- See Note [Constructing an ExprTree]
+              -- These sets include type variables, which do no harm,
+              -- and are a bit tiresome to filter out.
 
 exprTree :: UnfoldingOpts -> [Var] -> CoreExpr -> Maybe ExprTree
 -- Nothing => too big
--- Note [Computing the size of an expression]
+-- See Note [Overview of inlining heuristics]
+-- See Note [Computing the size of an expression]
 
 exprTree opts args expr
   = go (exprTreeCaseDepth opts) (mkVarSet args, emptyVarSet) expr
@@ -560,17 +578,17 @@ exprTree opts args expr
        -- Forcing bOMB_OUT_SIZE early prevents repeated
        -- unboxing of the Int argument.
 
-    et_add     = metAdd bOMB_OUT_SIZE
-    et_add_alt = metAddAlt bOMB_OUT_SIZE
+    met_add     = metAdd bOMB_OUT_SIZE
+    met_add_alt = metAddAlt bOMB_OUT_SIZE
 
     go :: Int -> ETVars -> CoreExpr -> Maybe ExprTree
           -- rcd is the /remaining/ case depth; decreases toward zero
           -- (avs,lvs): see Note [Constructing an ExprTree]
     go rcd vs (Cast e _)      = go rcd vs e
     go rcd vs (Tick _ e)      = go rcd vs e
-    go _   _  (Type _)        = Just (exprTreeN 0)
-    go _   _  (Coercion _)    = Just (exprTreeN 0)
-    go _   _  (Lit lit)       = Just (exprTreeN (litSize lit))
+    go _   _  (Type _)        = Just (exprTreeS 0)
+    go _   _  (Coercion _)    = Just (exprTreeS 0)
+    go _   _  (Lit lit)       = Just (exprTreeS (litSize lit))
     go rcd vs (Case e b _ as) = go_case rcd vs e b as
     go rcd vs (Let bind body) = go_let rcd vs bind body
     go rcd vs (Lam b e)       = go_lam rcd vs b e
@@ -581,7 +599,7 @@ exprTree opts args expr
 
     ----------- Lambdas ------------------
     go_lam rcd vs bndr body
-      | isId bndr, not (isZeroBitId bndr) = go rcd vs' body `et_add` Just (lamSize opts)
+      | isId bndr, not (isZeroBitId bndr) = go rcd vs' body `met_add` Just (lamSize opts)
       | otherwise                         = go rcd vs' body
       where
         vs' = vs `add_lv` bndr
@@ -597,24 +615,24 @@ exprTree opts args expr
          lgo (App fun arg) args voids
                     | isTypeArg arg    = lgo fun args voids
                     | isZeroBitArg arg = lgo fun (arg:args) (voids+1)
-                    | otherwise        = go rcd vs arg `et_add`
+                    | otherwise        = go rcd vs arg `met_add`
                                          lgo fun (arg:args) voids
          lgo (Var fun)     args voids  = Just (callTree opts vs fun args voids)
          lgo (Tick _ expr) args voids  = lgo expr args voids
          lgo (Cast expr _) args voids  = lgo expr args voids
          lgo other         args voids  = vanillaCallSize (length args) voids
-                                         `metAddN` go rcd vs other
+                                         `metAddS` go rcd vs other
          -- if the lhs is not an App or a Var, or an invisible thing like a
          -- Tick or Cast, then we should charge for a complete call plus the
          -- size of the lhs itself.
 
     ----------- Let-expressions ------------------
     go_let rcd vs (NonRec binder rhs) body
-      = go_bind rcd vs (binder, rhs)  `et_add`
+      = go_bind rcd vs (binder, rhs)  `met_add`
         go rcd (vs `add_lv` binder) body
 
     go_let rcd vs (Rec pairs) body
-      = foldr (et_add . go_bind rcd vs') (go rcd vs' body) pairs
+      = foldr (met_add . go_bind rcd vs') (go rcd vs' body) pairs
       where
         vs' = vs `add_lvs` map fst pairs
 
@@ -624,7 +642,7 @@ exprTree opts args expr
                           -- Skip arguments to join point
       = go rcd (vs `add_lvs` bndrs) body
       | otherwise
-      = size_up_alloc bndr `metAddN` go rcd vs rhs
+      = size_up_alloc bndr `metAddS` go rcd vs rhs
 
     -- Cost to allocate binding with given binder
     size_up_alloc bndr
@@ -642,16 +660,16 @@ exprTree opts args expr
          -- case e of {} never returns, so take size of scrutinee
 
     -- Record a CaseOf
-    go_case remaining_case_depth vs@(avs,lvs) scrut b alts
+    go_case remaining_case_depth vs scrut b alts
       | alts `lengthExceeds` max_width
       = Nothing   -- See Note [Bale out on very wide case expressions]
 
-      | Just v <- interestingVarScrut vs scrut
-      = go remaining_case_depth vs scrut `et_add`
+      | Just scrut_id <- interestingVarScrut vs scrut
+      = go remaining_case_depth vs scrut `met_add`
         (if   remaining_case_depth > 0
-         then do { alts' <- mapM (alt_alt_tree v) alts
-                 ; etCaseOf bOMB_OUT_SIZE v b alts' }
-         else Just (etScrutOf v caseElimDiscount) `et_add`
+         then do { alts' <- mapM (alt_alt_tree scrut_id) alts
+                 ; etCaseOf bOMB_OUT_SIZE scrut_id b alts' }
+         else Just (etScrutOf scrut_id caseElimDiscount) `met_add`
               -- When this scrutinee has structure, we expect to eliminate the case
               go_alts remaining_case_depth vs b alts)
       where
@@ -664,33 +682,28 @@ exprTree opts args expr
              | otherwise        = remaining_case_depth - 1
 
         alt_alt_tree :: Id -> Alt Var -> Maybe AltTree
-        alt_alt_tree v (Alt con bs rhs)
-          = do { rhs <- go rcd1 (add_alt_bndrs v val_bs) rhs
+        alt_alt_tree scrut_id (Alt con bs rhs)
+          = do { let val_bs = filter isId bs  -- The AltTree only has value binders
+               ; rhs <- go rcd1 (add_alt_lvs vs scrut_id (b:val_bs)) rhs
+                        -- (b:bs) don't forget to include the case binder
                ; return (AltTree con val_bs rhs) }
-          where
-            val_bs = filter isId bs
-
-        add_alt_bndrs v bs
-          | v `elemVarSet` avs = (avs `extendVarSetList` (b:bs), lvs)
-                                 -- Don't forget to add the case binder, b
-          | otherwise = vs
 
     -- Don't record a CaseOf
     go_case rcd vs scrut b alts    -- alts is non-empty
-      = caseSize scrut alts  `metAddN`   -- A bit odd that this `caseSize` business is only
+      = caseSize scrut alts  `metAddS`   -- It is a bit odd that this `caseSize` business is only
                                          -- applied in this equation, not in the previous ones
-        go rcd vs scrut      `et_add`
+        go rcd vs scrut      `met_add`
         go_alts (rcd-1) vs b alts
 
     go_alts :: Int -> ETVars -> Id -> [CoreAlt] -> Maybe ExprTree
-    -- Add up the sizes of all RHSs.
+    -- Add up the sizes of all RHSs.  Only used for ScrutOf.
     -- IMPORTANT: include a charge `altSize` for each alternative, else we
     -- find that giant case nests are treated as practically free
     -- A good example is Foreign.C.Error.errnoToIOError
-    go_alts rcd vs b alts = foldr1 et_add_alt (map alt_expr_tree alts)
+    go_alts rcd vs b alts = foldr1 met_add_alt (map alt_expr_tree alts)
       where
         alt_expr_tree :: Alt Var -> Maybe ExprTree
-        alt_expr_tree (Alt _con bs rhs) = altSize `metAddN`
+        alt_expr_tree (Alt _con bs rhs) = altSize `metAddS`
                                           go rcd (vs `add_lvs` (b:bs)) rhs
             -- Don't charge for bndrs, so that wrappers look cheap
             -- (See comments about wrappers with Case)
@@ -739,6 +752,14 @@ add_lv (avs,lvs) b = (avs, lvs `extendVarSet` b)
 add_lvs :: ETVars -> [Var] -> ETVars
 add_lvs (avs,lvs) bs = (avs, lvs `extendVarSetList` bs)
 
+add_alt_lvs :: ETVars
+            -> Var       -- Scrutinised variable
+            -> [Var]     -- Binders of the alterantive (including the case binder)
+            -> ETVars
+add_alt_lvs vs@(avs, lvs) scrut_id alt_bndrs
+  | scrut_id `elemVarSet` avs = (avs `extendVarSetList` alt_bndrs, lvs)
+  | otherwise                 = vs
+
 interestingVarScrut :: ETVars -> CoreExpr -> Maybe Id
 -- The scrutinee of a case is worth recording
 interestingVarScrut (_,lvs) (Var v)
@@ -778,9 +799,9 @@ litSize _other = 0    -- Must match size of nullary constructors
 callTree :: UnfoldingOpts -> ETVars -> Id -> [CoreExpr] -> Int -> ExprTree
 callTree opts vs fun val_args voids
   = case idDetails fun of
-      FCallId _        -> exprTreeN (vanillaCallSize n_val_args voids)
-      JoinId {}        -> exprTreeN (jumpSize        n_val_args voids)
-      PrimOpId op _    -> exprTreeN (primOpSize op   n_val_args)
+      FCallId _        -> exprTreeS (vanillaCallSize n_val_args voids)
+      JoinId {}        -> exprTreeS (jumpSize        n_val_args voids)
+      PrimOpId op _    -> exprTreeS (primOpSize op   n_val_args)
       DataConWorkId dc -> conSize dc n_val_args
       ClassOpId {}     -> classOpSize opts vs fun val_args voids
       _                -> funSize opts vs fun n_val_args voids
@@ -809,13 +830,13 @@ classOpSize opts vs fn val_args voids
   | arg1 : _ <- val_args
   , Just dict <- interestingVarScrut vs arg1
   = warnPprTrace (not (isId dict)) "classOpSize" (ppr fn <+> ppr val_args) $
-    vanillaCallSize (length val_args) voids `etAddN`
+    vanillaCallSize (length val_args) voids `etAddS`
     etScrutOf dict (unfoldingDictDiscount opts)
            -- If the class op is scrutinising a lambda bound dictionary then
            -- give it a discount, to encourage the inlining of this function
            -- The actual discount is rather arbitrarily chosen
   | otherwise
-  = exprTreeN (vanillaCallSize (length val_args) voids)
+  = exprTreeS (vanillaCallSize (length val_args) voids)
 
 funSize :: UnfoldingOpts -> ETVars -> Id -> Int -> Int -> ExprTree
 -- Size for function calls that are not constructors or primops
@@ -888,13 +909,17 @@ interface file is plain silly; T5642 (involving Generics) is a good example.
 We had a very wide case whose branches mentioned dozens of data structures,
 each of which had very large types.
 
-Of course, if we apply such a function to a data constructor, we could in
+Sebastian wonders about the effect of tihs choice on #11068.
+
+For example, if we apply such a function to a data constructor, we could in
 principle get a huge discount (because all but one branches fall away).
 So perhaps we could use a different setting
 * when generating an unfolding /within a module/
-* when generating an unfoldign /for an interface file/
+* when generating an unfolding /for an interface file/
 
-Currently we aren't doing this, but we could consider it.
+Currently we aren't doing this, but we could consider it
+
+See (ET1) in Note [Constructing an ExprTree].
 
 Note [Constructor size and result discount]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1057,21 +1082,29 @@ Code for manipulating sizes
 
 ---------------------------------------
 -- Right associative; predence level unimportant
-infixr 5 `metAddN`, `etAddN`, `metAdd`, `metAddAlt`
+infixr 5 `metAddS`, `etAddS`, `metAdd`, `metAddAlt`
 
-metAddN :: Size -> Maybe ExprTree -> Maybe ExprTree
-metAddN _ Nothing = Nothing
-metAddN n (Just et) = Just (n `etAddN` et)
+-- Nomenclature:
+-- * The "met" is for "Maybe ExprTree"
+-- * The "S" is for Size
 
-etAddN :: Size -> ExprTree -> ExprTree
+metAddS :: Size -> Maybe ExprTree -> Maybe ExprTree
+metAddS _ Nothing = Nothing
+metAddS n (Just et) = Just (n `etAddS` et)
+
+etAddS :: Size -> ExprTree -> ExprTree
 -- Does not account for et_wc_tot geting too big, but that doesn't
 -- matter; the extra increment is always small, and we never get
--- a long cascade of etAddNs
-etAddN n1 (ExprTree { et_wc_tot = t2, et_size = n2, et_cases = c2, et_ret = ret2 })
+-- a long cascade of etAddSs
+etAddS n1 (ExprTree { et_wc_tot = t2, et_size = n2, et_cases = c2, et_ret = ret2 })
   = ExprTree { et_wc_tot = n1+t2, et_size = n1+n2, et_cases = c2, et_ret = ret2 }
 
+---------------------------------------------------
+-- metAdd vs metAddAlt are identical except
+-- * metAdd    takesthe return discount from the second argument
+-- * metAddAlt adds the return discounts
+
 metAdd :: Size -> Maybe ExprTree -> Maybe ExprTree -> Maybe ExprTree
--- Takes return value from the right hand argument
 metAdd _ Nothing _ = Nothing
 metAdd _ _ Nothing = Nothing
 metAdd bOMB_OUT_SIZE (Just et1) (Just et2)
@@ -1102,12 +1135,14 @@ metAddAlt bOMB_OUT_SIZE (Just et1) (Just et2)
           })
 
 
+---------------------------------------------------
 -- | The "expression tree"; an abstraction of the RHS of the function
-exprTreeN :: Size -> ExprTree
-exprTreeN n = ExprTree { et_size = n, et_wc_tot = n, et_cases = emptyBag, et_ret = 0 }
+--   The "S" signals the Size argument
+exprTreeS :: Size -> ExprTree
+exprTreeS n = ExprTree { et_size = n, et_wc_tot = n, et_cases = emptyBag, et_ret = 0 }
 
 etZero :: ExprTree
-etZero = ExprTree { et_wc_tot = 0, et_size = 0, et_cases = emptyBag, et_ret = 0 }
+etZero = exprTreeS 0
 
 etCaseOf :: Size -> Id -> Id -> [AltTree] -> Maybe ExprTree
 -- We make the case itself free (remember that in this case the scrutinee
@@ -1191,6 +1226,7 @@ exprTreeWillInline limit (ExprTree { et_wc_tot = tot }) = tot <= limit
 
 -------------------------
 exprTreeSize :: InlineContext -> ExprTree -> Size
+-- See Note [Overview of inlining heuristics]
 exprTreeSize !ic (ExprTree { et_size  = size
                            , et_cases = cases
                            , et_ret   = ret_discount })

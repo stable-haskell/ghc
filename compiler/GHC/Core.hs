@@ -1427,7 +1427,7 @@ type Discount = Int
 data ExprTree
   = ExprTree { et_wc_tot :: {-# UNPACK #-} !Size      -- ^ Total worst-case size of whole tree
              , et_ret    :: {-# UNPACK #-} !Discount  -- ^ Total discount when result is scrutinised
-                  -- Both et_wc_tot and et_rec /include/ et_cases
+                  -- Both et_wc_tot and et_ret /include/ et_cases
 
              , et_size   :: {-# UNPACK #-} !Size      -- ^ Size of the tree /apart from/ et_cases
              , et_cases  :: Bag CaseTree              -- ^ Case expressions and discounts
@@ -1482,7 +1482,6 @@ of simplicity. The .hi sizes are usually insignificant (excluding the
 +1M for base libraries), and compile time barely increases (~+1% for
 nofib). The nicer upshot is that the UnfoldingSource no longer mentions
 an Id, so, eg, substitutions need not traverse them.
-
 
 Note [DFun unfoldings]
 ~~~~~~~~~~~~~~~~~~~~~~
