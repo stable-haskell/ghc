@@ -21,7 +21,7 @@ module GHC.Core.Unfold (
 
         ExprTree, exprTree, exprTreeSize, altTreesSize,
         exprTreeWillInline, couldBeSmallEnoughToInline,
-        ArgSummary(..), hasArgInfo,
+        ArgDigest(..), hasArgInfo,
 
         Size, InlineContext(..),
 
@@ -147,11 +147,11 @@ The moving parts
 * An unfolding is accompanied (in its UnfoldingGuidance) with its GHC.Core.ExprTree,
   computed by GHC.Core.Unfold.exprTree.
 
-* At a call site, GHC.Core.Opt.Simplify.Inline.contArgs constructs an ArgSummary
+* At a call site, GHC.Core.Opt.Simplify.Inline.contArgs constructs an ArgDigest
   for each value argument. This reflects any nested data construtors.
 
 * Then GHC.Core.Unfold.exprTreeSize takes information about the context of the
-  call (particularly the ArgSummary for each argument) and computes a final size
+  call (particularly the ArgDigest for each argument) and computes a final size
   for the inlined body, taking account of case-of-known-consructor.
 
 -}
@@ -342,6 +342,15 @@ couldBeSmallEnoughToInline opts threshold rhs
             -- creating specialised copies of the function
     (_, body) = collectBinders rhs
 
+uncondInline :: CoreExpr -> Arity -> Size -> Bool
+-- Inline unconditionally if there no size increase
+-- Size of call is arity (+1 for the function)
+-- See Note [INLINE for small functions]
+uncondInline rhs arity size
+  | arity > 0 = size <= 10 * (arity + 1) -- See Note [INLINE for small functions] (1)
+  | otherwise = exprIsTrivial rhs        -- See Note [INLINE for small functions] (4)
+
+
 {- Note [Inline unsafeCoerce]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 We really want to inline unsafeCoerce, even when applied to boring
@@ -358,42 +367,6 @@ Conclusion: we really want inlineBoringOk to be True of the RHS of
 unsafeCoerce. And it really is, because we regard
   case unsafeEqualityProof @a @b of UnsafeRefl -> rhs
 as trivial iff rhs is. This is (U4) in Note [Implementing unsafeCoerce].
-
-Note [Computing the size of an expression]
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-The basic idea of exprSizeTree is obvious enough: count nodes.  But getting the
-heuristics right has taken a long time.  Here's the basic strategy:
-
-    * Variables, literals: 0
-      (Exception for string literals, see litSize.)
-
-    * Function applications (f e1 .. en): 1 + #value args
-
-    * Constructor applications: 1, regardless of #args
-
-    * Let(rec): 1 + size of components
-
-    * Note, cast: 0
-
-Examples
-
-  Size  Term
-  --------------
-    0     42#
-    0     x
-    0     True
-    2     f x
-    1     Just x
-    4     f (g x)
-
-Notice that 'x' counts 0, while (f x) counts 2.  That's deliberate: there's
-a function call to account for.  Notice also that constructor applications
-are very cheap, because exposing them to a caller is so valuable.
-
-[25/5/11] All sizes are now multiplied by 10, except for primops
-(which have sizes like 1 or 4.  This makes primops look fantastically
-cheap, and seems to be almost universally beneficial.  Done partly as a
-result of #4978.
 
 Note [Do not inline top-level bottoming functions]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -478,15 +451,6 @@ sharing the wrapper closure.
 The solution: don’t ignore coercion arguments after all.
 -}
 
-uncondInline :: CoreExpr -> Arity -> Size -> Bool
--- Inline unconditionally if there no size increase
--- Size of call is arity (+1 for the function)
--- See Note [INLINE for small functions]
-uncondInline rhs arity size
-  | arity > 0 = size <= 10 * (arity + 1) -- See Note [INLINE for small functions] (1)
-  | otherwise = exprIsTrivial rhs        -- See Note [INLINE for small functions] (4)
-
-
 
 {- *********************************************************************
 *                                                                      *
@@ -497,11 +461,15 @@ uncondInline rhs arity size
 
 {- Note [Constructing an ExprTree]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-We construct an ExprTree as an abstaction or "digest" of the body
-of a function    f = \x1...xn. body
+Given a function      f = \x1...xn. body
+in the typical case we will record an UnfoldingGuidance of
 
-The arguments are x1..xn; we apply `exprTree` to the `body`.
+   UnfoldIfGoodArgs { ug_args = filter isValArg [x1,..,xn]
+                    , ug_tree = exprTree body }
 
+The ug_tree :: ExprTree is an abstaction or "digest" of the body
+of the function.  An ExprTree records:
+  * et_wc_tot
 We maintain:
 * avs: argument variables, or variables bound by a case on an
        argument variable.
@@ -540,6 +508,40 @@ Wrinkles:
 * We must be careful about recording enormous functions, with very wide or very
   deep case trees. (This can happen with Generics; e.g. test T5642.)  We limit
   both with UnfoldingOpts.
+
+Note [Computing the size of an expression]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+The basic idea of exprSizeTree is obvious enough: count nodes.  But getting the
+heuristics right has taken a long time.  Here's the basic strategy:
+
+    * Variables, literals: 0
+      (Exception for string literals, see litSize.)
+
+    * Function applications (f e1 .. en): 10 + #value args
+
+    * Constructor applications: 10, regardless of #args
+
+    * Let(rec): 10 + size of components
+
+    * Primops: size 1.  They look fantastically cheap. Done partly
+      as a result of #4978.
+
+    * Note, Cast: 0
+
+Examples
+
+  Size  Term
+  --------------
+     0     42#
+     0     x
+     0     True
+    20     f x
+    10     Just x
+    40     f (g x)
+
+Notice that 'x' counts 0, while (f x) counts 20.  That's deliberate: there's
+a function call to account for.  Notice also that constructor applications
+are very cheap, because exposing them to a caller is so valuable.
 -}
 
 type ETVars = (VarSet,VarSet)  -- (avs, lvs)
@@ -1154,32 +1156,31 @@ binary sizes shrink significantly either.
 ********************************************************************* -}
 
 data InlineContext
-   = IC { ic_free  :: Id -> ArgSummary  -- Current unfoldings for free variables
-        , ic_bound :: IdEnv ArgSummary  -- Summaries for local variables
-        , ic_want_res :: Bool           -- True <=> result is scrutinised/demanded
-                                        --          so apply result discount
+   = IC { ic_free  :: Id -> ArgDigest  -- Current unfoldings for free variables
+        , ic_bound :: IdEnv ArgDigest  -- Digests for local variables
+        , ic_want_res :: Bool          -- True <=> result is scrutinised/demanded
+                                       --          so apply result discount
      }
 
-data ArgSummary
+data ArgDigest
   = ArgNoInfo
-  | ArgIsCon AltCon [ArgSummary]  -- Arg is a data-con application;
-                                  --   the [ArgSummary] is for value args only
+  | ArgIsCon AltCon [ArgDigest]   -- Arg is a data-con application;
+                                  --   the [ArgDigest] is for value args only
   | ArgIsNot [AltCon]             -- Arg is a value, not headed by these construtors
   | ArgIsLam                      -- Arg is a lambda
   | ArgNonTriv                    -- The arg has some struture, but is not a value
                                   --   e.g. it might be a call (f x)
 
-hasArgInfo :: ArgSummary -> Bool
+hasArgInfo :: ArgDigest -> Bool
 hasArgInfo ArgNoInfo = False
 hasArgInfo _         = True
 
-instance Outputable ArgSummary where
+instance Outputable ArgDigest where
   ppr ArgNoInfo       = text "ArgNoInfo"
   ppr ArgIsLam        = text "ArgIsLam"
   ppr ArgNonTriv      = text "ArgNonTriv"
   ppr (ArgIsCon c as) = ppr c <> ppr as
   ppr (ArgIsNot cs)   = text "ArgIsNot" <> ppr cs
-
 
 -------------------------
 exprTreeWillInline :: Size -> ExprTree -> Bool
@@ -1228,15 +1229,15 @@ caseTreeSize ic (CaseOf scrut_var case_bndr alts)
 
       ArgIsLam -> altsSize ic case_bndr alts  -- Case will disappear altogether
 
-      arg_summ@(ArgIsCon con args)
+      arg_digest@(ArgIsCon con args)
          | Just at@(AltTree alt_con bndrs rhs) <- find_alt con alts
-         , let new_summaries :: [(Id,ArgSummary)]
-               new_summaries = (case_bndr,arg_summ) : bndrs `zip` args
-                  -- Don't forget to add a summary for the case binder!
-               ic' = ic { ic_bound = ic_bound ic `extendVarEnvList` new_summaries }
+         , let new_digests :: [(Id,ArgDigest)]
+               new_digests = (case_bndr,arg_digest) : bndrs `zip` args
+                  -- Don't forget to add a digest for the case binder!
+               ic' = ic { ic_bound = ic_bound ic `extendVarEnvList` new_digests }
                      -- In DEFAULT case, bs is empty, so extending is a no-op
          -> assertPpr ((alt_con == DEFAULT) || (bndrs `equalLength` args))
-                      (ppr arg_summ $$ ppr at) $
+                      (ppr arg_digest $$ ppr at) $
             exprTreeSize ic' rhs - caseElimDiscount
               -- Take off an extra discount for eliminating the case expression itself
 
@@ -1282,11 +1283,11 @@ altsSize ic case_bndr alts = foldr ((+) . size_alt) 0 alts
       where
         -- Must extend ic_bound, lest a captured variable
         -- is looked up in ic_free by lookupBndr
-        new_summaries :: [(Id,ArgSummary)]
-        new_summaries = [(b,ArgNoInfo) | b <- case_bndr:bndrs]
-        ic' = ic { ic_bound = ic_bound ic `extendVarEnvList` new_summaries }
+        new_digests :: [(Id,ArgDigest)]
+        new_digests = [(b,ArgNoInfo) | b <- case_bndr:bndrs]
+        ic' = ic { ic_bound = ic_bound ic `extendVarEnvList` new_digests }
 
-lookupBndr :: HasDebugCallStack => InlineContext -> Id -> ArgSummary
+lookupBndr :: HasDebugCallStack => InlineContext -> Id -> ArgDigest
 lookupBndr (IC { ic_bound = bound_env, ic_free = lookup_free }) var
   | Just info <- assertPpr (isId var) (ppr var) $
                  lookupVarEnv bound_env var = info

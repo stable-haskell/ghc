@@ -1430,7 +1430,7 @@ data ExprTree
                   -- Both et_wc_tot and et_rec /include/ et_cases
 
              , et_size   :: {-# UNPACK #-} !Size      -- ^ Size of the tree /apart from/ et_cases
-             , et_cases  :: Bag CaseTree              -- ^ Case exprsions and discounts
+             , et_cases  :: Bag CaseTree              -- ^ Case expressions and discounts
     }
 
 data CaseTree
