@@ -605,8 +605,14 @@ exprDigest env e = go env e []
       | let env' = env `addNewInScopeIds` bindersOf b
       = go env' e as
 
-{-
-    -- Look through single-branch case-expressions; like lets
+{-  -- Look through single-branch case-expressions; like lets
+    -- This is a bit aggressive, because we might have
+    --     f (case x of (a,b) -> (b,a))
+    -- where   f p = Just (case p of (a,b) -> a)
+    -- So f is lazy, and we won't get cancellation of the case in the body.
+    --
+    -- If f is strict and we don't inline, we'll float the case out, so we don't
+    -- need to be clever here.
     go env (Case _ b _ alts) as
       | [Alt _ bs e] <- alts
       , let env' = env `addNewInScopeIds` (b:bs)
@@ -644,8 +650,13 @@ exprDigest env e = go env e []
       = ArgIsCon (DataAlt con) (map (exprDigest env) val_args)
 
       | DFunUnfolding {} <- unfolding
-      = ArgNonTriv   -- Says "this is a data con" without saying which
-                     -- Will also return this for ($df d1 .. dn)
+      = ArgIsNot []  -- We (slightly hackily) use ArgIsNot [] for dfun applications
+                     -- ($df d1 .. dn).  This is very important to encourage inlining
+                     -- of overloaded functions.  Example. GHC.Base.liftM2. It has
+                     -- three uses of its dict arg, each of which attracts a ScrutOf
+                     -- discount.  But the ArgDigest had better be good enough to
+                     -- attract that ScrutOf discount!  We want liftM2 to be inlined
+                     -- in its use in the liftA2 method of instance Applicative (ST s)
 
       | Just rhs <- expandUnfolding_maybe unfolding
       = go (zapSubstEnv env) rhs val_args
