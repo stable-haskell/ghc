@@ -649,7 +649,8 @@ exprDigest env e = go env e []
       | Just con <- isDataConWorkId_maybe f
       = ArgIsCon (DataAlt con) (map (exprDigest env) val_args)
 
-      | DFunUnfolding {} <- unfolding
+--      | DFunUnfolding {} <- unfolding
+      | hasSomeUnfolding unfolding
       = ArgIsNot []  -- We (slightly hackily) use ArgIsNot [] for dfun applications
                      -- ($df d1 .. dn).  This is very important to encourage inlining
                      -- of overloaded functions.  Example. GHC.Base.liftM2. It has
@@ -657,6 +658,12 @@ exprDigest env e = go env e []
                      -- discount.  But the ArgDigest had better be good enough to
                      -- attract that ScrutOf discount!  We want liftM2 to be inlined
                      -- in its use in the liftA2 method of instance Applicative (ST s)
+                     --
+                     -- Actually in specrtal/puzzle I found that we got a big (40%!)
+                     -- benefit from    let newDest = ... in case (notSeen newDest) of ...
+                     -- We want to inline notSeen.  The argument has structure (its RHS)
+                     -- and in fat if we inline notSeen, newDest turns into a thunk
+                     -- (SPJ GHC log 13 Nov).
 
       | Just rhs <- expandUnfolding_maybe unfolding
       = go (zapSubstEnv env) rhs val_args
