@@ -48,7 +48,7 @@ import GHC.Types.Literal
 import GHC.Types.Id.Info
 import GHC.Types.RepType ( isZeroBitTy )
 import GHC.Types.Basic  ( Arity )
-import GHC.Types.ForeignCall
+-- import GHC.Types.ForeignCall
 import GHC.Types.Tickish
 
 import GHC.Builtin.Names
@@ -669,13 +669,12 @@ exprTree opts args expr
       = Nothing   -- See Note [Bale out on very wide case expressions]
 
       | Just scrut_id <- interestingVarScrut vs scrut
-      = go remaining_case_depth vs scrut `met_add`
-        (if   remaining_case_depth > 0
-         then do { alts' <- mapM (alt_alt_tree scrut_id) alts
-                 ; etCaseOf bOMB_OUT_SIZE scrut_id b alts' }
-         else Just (etScrutOf scrut_id caseElimDiscount) `met_add`
+      = if   remaining_case_depth > 0
+        then do { alts' <- mapM (alt_alt_tree scrut_id) alts
+                ; etCaseOf bOMB_OUT_SIZE scrut_id b alts' }
+        else Just (etScrutOf scrut_id caseElimDiscount) `met_add`
               -- When this scrutinee has structure, we expect to eliminate the case
-              go_alts remaining_case_depth vs b alts)
+             go_alts remaining_case_depth vs b alts
       where
         -- Decremement remaining case depth when going inside
         -- a case with more than one alternative.
@@ -694,27 +693,29 @@ exprTree opts args expr
 
     -- Don't record a CaseOf
     go_case rcd vs scrut b alts    -- alts is non-empty
-      = caseSize scrut alts  `metAddS`   -- It is a bit odd that this `caseSize` business is only
-                                         -- applied in this equation, not in the previous ones
+      = -- caseDiscount scrut alts  `metAddS`   -- It is a bit odd that this `caseDiscount` business is only
+        --                                  -- applied in this equation, not in the previous ones
         go rcd vs scrut      `met_add`
         go_alts (rcd-1) vs b alts
 
     go_alts :: Int -> ETVars -> Id -> [CoreAlt] -> Maybe ExprTree
     -- Add up the sizes of all RHSs.  Only used for ScrutOf.
-    -- IMPORTANT: include a charge `altSize` for each alternative, else we
+    -- IMPORTANT: include a charge for the case itself, else we
     -- find that giant case nests are treated as practically free
     -- A good example is Foreign.C.Error.errnoToIOError
-    go_alts rcd vs b alts = foldr1 met_add_alt (map alt_expr_tree alts)
+    go_alts rcd vs case_bndr alts
+      = caseSize case_bndr alts `metAddS`
+        foldr1 met_add_alt (map alt_expr_tree alts)
       where
         alt_expr_tree :: Alt Var -> Maybe ExprTree
-        alt_expr_tree (Alt _con bs rhs) = altSize `metAddS`
-                                          go rcd (vs `add_lvs` (b:bs)) rhs
+        alt_expr_tree (Alt _con bs rhs) = go rcd (vs `add_lvs` (case_bndr : bs)) rhs
             -- Don't charge for bndrs, so that wrappers look cheap
             -- (See comments about wrappers with Case)
             -- Don't forget to add the case binder, b, to lvs.
 
-caseSize :: CoreExpr -> [CoreAlt] -> Size
-caseSize scrut alts
+{-
+caseDiscount :: CoreExpr -> [CoreAlt] -> Size
+caseDiscount scrut alts
   | is_inline_scrut scrut, lengthAtMost alts 1 = -10
   | otherwise                                  = 0
               -- Normally we don't charge for the case itself, but
@@ -749,6 +750,7 @@ caseSize scrut alts
               _other        -> False
         | otherwise
           = False
+-}
 
 add_lv :: ETVars -> Var -> ETVars
 add_lv (avs,lvs) b = (avs, lvs `extendVarSet` b)
@@ -893,9 +895,21 @@ primOpSize op n_val_args
  where
    op_size = primOpCodeSize op
 
-altSize :: Size
--- We charge `altSize` for each alternative in a case
-altSize = 10
+caseSize :: Id -> [alt] -> Size
+-- For a case expression we charge for charge for each alternative.
+-- (This does /not/ include the cost of the alternatives themselves)
+-- If there are no alternatives (case e of {}), we get zero
+--
+-- Unlifted cases are much, much cheaper becuase they don't need to
+-- save live variables, push a return address create an info table
+-- An unlifted case is just a conditional; and if there is only one
+-- alternative, it's not even a conditional, hence size zero
+caseSize scrut_id alts
+  | isUnliftedType (idType scrut_id)
+  = if isSingleton alts then 0
+                        else 5 * length alts
+  | otherwise
+  = 10 * length alts
 
 caseElimDiscount :: Discount
 -- Bonus for eliminating a case
@@ -1158,15 +1172,16 @@ etCaseOf bOMB_OUT_SIZE scrut case_bndr alts
                                           , et_cases = unitBag case_tree })
   where
     case_tree = CaseOf scrut case_bndr alts
-    tot       = altTreesSize alts
+    tot       = altTreesSize scrut alts
     ret       = altTreesDiscount alts
 
-altTreesSize :: [AltTree] -> Size
+altTreesSize :: Id -> [AltTree] -> Size
 -- Total worst-case size of a [AltTree], including the per-alternative cost of altSize
-altTreesSize alts = foldl' add_alt 0 alts
+altTreesSize scrut_id alts
+  = foldl' add_alt (caseSize scrut_id alts) alts
   where
-    add_alt n (AltTree _ _ (ExprTree { et_wc_tot = alt_tot }))
-       = n + alt_tot + altSize
+    add_alt :: Size -> AltTree -> Size
+    add_alt sz (AltTree _ _ (ExprTree { et_wc_tot = alt_tot })) = sz + alt_tot
 
 altTreesDiscount :: [AltTree] -> Discount
 -- See Note [Result discount for case alternatives]
@@ -1255,10 +1270,10 @@ caseTreeSize ic (ScrutOf bndr disc)
 
 caseTreeSize ic (CaseOf scrut_var case_bndr alts)
   = case lookupBndr ic scrut_var of
-      ArgNoInfo  -> altsSize ic case_bndr alts + case_size
-      ArgNonTriv -> altsSize ic case_bndr alts + case_size
+      ArgNoInfo  -> caseAltsSize ic case_bndr alts + case_size
+      ArgNonTriv -> caseAltsSize ic case_bndr alts + case_size
 
-      ArgIsNot cons -> altsSize ic case_bndr (trim_alts cons alts)
+      ArgIsNot cons -> caseAltsSize ic case_bndr (trim_alts cons alts)
          -- The case-expression may not disappear, but it scrutinises
          -- a variable bound to something with structure; may lead to
          -- avoiding a thunk, or other benefits.  So we give a discount
@@ -1267,7 +1282,7 @@ caseTreeSize ic (CaseOf scrut_var case_bndr alts)
          --
          -- The function 'radiance' in nofib/real/smallpt benefits a lot from this
 
-      ArgIsLam -> altsSize ic case_bndr alts  -- Case will disappear altogether
+      ArgIsLam -> caseAltsSize ic case_bndr alts  -- Case will disappear altogether
 
       arg_digest@(ArgIsCon con args)
          | Just at@(AltTree alt_con bndrs rhs) <- find_alt con alts
@@ -1282,13 +1297,9 @@ caseTreeSize ic (CaseOf scrut_var case_bndr alts)
               -- Take off an extra discount for eliminating the case expression itself
 
          | otherwise  -- Happens for empty alternatives
-         -> altsSize ic case_bndr alts
+         -> caseAltsSize ic case_bndr alts
   where
-    case_size = altSize * length alts
-      -- We make the case itself free, but charge for each alternatives
-      -- (the latter is already included in the AltTrees)
-      -- If there are no alternatives (case e of {}), we get zero
-
+    case_size = caseSize scrut_var alts
 
 find_alt :: AltCon -> [AltTree] -> Maybe AltTree
 find_alt _   []                     = Nothing
@@ -1307,9 +1318,10 @@ trim_alts acs (alt:alts)
   | AltTree con _ _ <- alt, con `elem` acs = trim_alts acs alts
   | otherwise                              = alt : trim_alts acs alts
 
-altsSize :: InlineContext -> Id -> [AltTree] -> Size
+caseAltsSize :: InlineContext -> Id -> [AltTree] -> Size
 -- Size of a (retained) case expression
-altsSize ic case_bndr alts = foldr ((+) . size_alt) 0 alts
+-- Do /not/ include the per-alternative cost, just the alternatives themselves
+caseAltsSize ic case_bndr alts = foldr ((+) . size_alt) 0 alts
   -- Just add up the  sizes of the alternatives
   -- We recurse in case we have
   --    args = [a,b], expr_tree = [CaseOf a [ X -> CaseOf b [...]
