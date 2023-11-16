@@ -17,6 +17,7 @@ module GHC.InfoProv.Types
     ) where
 
 import GHC.Base
+import GHC.Prim (whereFrom##)
 import GHC.Show (Show)
 import GHC.Ptr (Ptr(..), plusPtr)
 import GHC.Foreign (CString, peekCString)

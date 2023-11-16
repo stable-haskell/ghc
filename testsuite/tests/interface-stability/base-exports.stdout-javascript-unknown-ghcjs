@@ -4712,7 +4712,6 @@ module GHC.Base where
   waitRead# :: forall d. Int# -> State# d -> State# d
   waitWrite# :: forall d. Int# -> State# d -> State# d
   when :: forall (f :: * -> *). Applicative f => Bool -> f () -> f ()
-  whereFrom# :: forall a d. a -> Addr# -> State# d -> (# State# d, Int# #)
   word16ToInt16# :: Word16# -> Int16#
   word16ToWord# :: Word16# -> Word#
   word2Double# :: Word# -> Double#
@@ -6777,7 +6776,6 @@ module GHC.Exts where
   void# :: (# #)
   waitRead# :: forall d. Int# -> State# d -> State# d
   waitWrite# :: forall d. Int# -> State# d -> State# d
-  whereFrom# :: forall a d. a -> Addr# -> State# d -> (# State# d, Int# #)
   word16ToInt16# :: Word16# -> Int16#
   word16ToWord# :: Word16# -> Word#
   word2Double# :: Word# -> Double#
