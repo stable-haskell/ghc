@@ -927,10 +927,18 @@ interface file is plain silly; T5642 (involving Generics) is a good example.
 We had a very wide case whose branches mentioned dozens of data structures,
 each of which had very large types.
 
-Sebastian wonders about the effect of tihs choice on #11068.
+Sebastian wonders about the effect of this choice on #11068.
 
 For example, if we apply such a function to a data constructor, we could in
 principle get a huge discount (because all but one branches fall away).
+Something a bit like this happens in nofib/real/cacheprof, in module Main:
+    instance PP Reg where
+       pp ppm ST_0 = "%st"
+       ... other special cases ...
+       pp ppm r    = "%" ++ map toLower (show r)
+If we inline that call (show r), itself a 32-wide case,  we get a lot of CAFs
+which can be floated out.  Results in a 4% allocation change.
+
 So perhaps we could use a different setting
 * when generating an unfolding /within a module/
 * when generating an unfolding /for an interface file/
@@ -1313,10 +1321,13 @@ find_alt con (alt:alts)
        | otherwise                          = go alts deflt
 
 trim_alts :: [AltCon] -> [AltTree] -> [AltTree]
-trim_alts _   []                      = []
-trim_alts acs (alt:alts)
-  | AltTree con _ _ <- alt, con `elem` acs = trim_alts acs alts
-  | otherwise                              = alt : trim_alts acs alts
+trim_alts cons alts
+  | null cons = alts
+  | otherwise = go alts
+  where
+    go [] = []
+    go (alt:alts) | AltTree con _ _ <- alt, con `elem` cons = go alts
+                  | otherwise                               = alt : go alts
 
 caseAltsSize :: InlineContext -> Id -> [AltTree] -> Size
 -- Size of a (retained) case expression

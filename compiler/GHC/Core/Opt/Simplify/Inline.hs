@@ -228,8 +228,8 @@ tryUnfolding logger env fn cont unf_template unf_cache guidance
           want_result
              | n_bndrs < n_val_args = True  -- Over-saturated
              | otherwise            = case cont_info of
-                                        BoringCtxt -> False
-                                        _          -> True
+                                        CaseCtxt -> True
+                                        _        -> False
 
           bound_env = mkVarEnv (val_arg_bndrs `zip` (arg_infos ++ repeat ArgNoInfo))
                       -- Crucial to include /all/ val_arg_bndrs, lest we treat
