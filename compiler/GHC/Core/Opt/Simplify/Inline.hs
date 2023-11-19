@@ -659,10 +659,10 @@ exprDigest env e = go env e []
                      -- attract that ScrutOf discount!  We want liftM2 to be inlined
                      -- in its use in the liftA2 method of instance Applicative (ST s)
                      --
-                     -- Actually in specrtal/puzzle I found that we got a big (40%!)
+                     -- Actually in spectral/puzzle I found that we got a big (40%!)
                      -- benefit from    let newDest = ... in case (notSeen newDest) of ...
                      -- We want to inline notSeen.  The argument has structure (its RHS)
-                     -- and in fat if we inline notSeen, newDest turns into a thunk
+                     -- and in fact if we inline notSeen, newDest turns into a thunk
                      -- (SPJ GHC log 13 Nov).
 
       | Just rhs <- expandUnfolding_maybe unfolding

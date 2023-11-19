@@ -205,7 +205,7 @@ defaultUnfoldingOpts = UnfoldingOpts
       -- inline into Csg.calc (The unfolding for sqr never makes it
       -- into the interface file.)
 
-   , unfoldingUseThreshold   = 80
+   , unfoldingUseThreshold   = 70
       -- Adjusted 90 -> 80 when adding discounts for free variables which
       -- generally make things more likely to inline.  Reducing the threshold
       -- eliminates some undesirable compile-time regressions (e.g. T10412a)
@@ -213,7 +213,7 @@ defaultUnfoldingOpts = UnfoldingOpts
       -- Previously: adjusted upwards in #18282, when I reduced
       -- the result discount for constructors.
 
-   , unfoldingFunAppDiscount = 60
+   , unfoldingFunAppDiscount = 30
       -- Be fairly keen to inline a function if that means
       -- we'll be able to pick the right method from a dictionary
 
@@ -881,12 +881,11 @@ conSize :: DataCon -> Int -> ExprTree
 conSize dc n_val_args
   | isUnboxedTupleDataCon dc
   = etZero     -- See Note [Unboxed tuple size and result discount]
+  | n_val_args == 0    -- Like variables
+  = etZero
   | otherwise  -- See Note [Constructor size and result discount]
-  = ExprTree { et_size = size, et_wc_tot = size
+  = ExprTree { et_size = 10, et_wc_tot = 10
              , et_cases = emptyBag, et_ret = 10 }
-  where
-    size | n_val_args == 0 = 0  -- Like variables
-         | otherwise       = 10
 
 primOpSize :: PrimOp -> Int -> Size
 primOpSize op n_val_args
