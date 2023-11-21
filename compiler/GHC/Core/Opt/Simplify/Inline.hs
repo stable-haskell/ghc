@@ -210,7 +210,8 @@ tryUnfolding logger env fn cont unf_template unf_cache guidance
           some_benefit = calc_some_benefit uf_arity
           enough_args  = (n_val_args >= uf_arity) || (unsat_ok && n_val_args > 0)
 
-     UnfIfGoodArgs { ug_args = val_arg_bndrs, ug_tree = expr_tree }
+     UnfIfGoodArgs { ug_args = val_arg_bndrs
+                   , ug_tree = expr_tree@(ExprTree { et_ret = ret_discount}) }
         | unfoldingVeryAggressive opts
         -> traceInline logger env fn str (mk_doc some_benefit extra_doc True) (Just unf_template)
         | is_wf && some_benefit && small_enough
@@ -222,21 +223,15 @@ tryUnfolding logger env fn cont unf_template unf_cache guidance
           some_benefit  = calc_some_benefit n_bndrs
           small_enough  = adjusted_size <= unfoldingUseThreshold opts
           rhs_size      = exprTreeSize context expr_tree
-          adjusted_size = rhs_size - call_size_discount + depth_penalty
+          adjusted_size = rhs_size - call_size_discount - actual_ret_discount + depth_penalty
 
           --------  Compute the size of the ExprTree in this context -----------
-          want_result
-             | n_bndrs < n_val_args = True  -- Over-saturated
-             | otherwise            = case cont_info of
-                                        CaseCtxt -> True
-                                        _        -> False
+          context = IC { ic_bound = bound_env
+                       , ic_free  = getFreeDigest }
 
           bound_env = mkVarEnv (val_arg_bndrs `zip` (arg_infos ++ repeat ArgNoInfo))
                       -- Crucial to include /all/ val_arg_bndrs, lest we treat
                       -- them as free and use ic_free instead
-          context = IC { ic_bound    = bound_env
-                       , ic_free     = getFreeDigest
-                       , ic_want_res = want_result }
 
           in_scope = seInScope env
           getFreeDigest :: Id -> ArgDigest -- The ArgDigest of a free variable
@@ -260,6 +255,23 @@ tryUnfolding logger env fn cont unf_template unf_cache guidance
           args_discount = foldr ((+) . arg_discount) 0 (take n_bndrs arg_infos)
           arg_discount arg_info | hasArgInfo arg_info = 20
                                 | otherwise           = 10
+
+          actual_ret_discount | n_bndrs < n_val_args
+                              = ret_discount
+                              | otherwise
+                              = case cont_info of
+                                  BoringCtxt  -> 0
+                                  DiscArgCtxt -> 0
+                                  RuleArgCtxt -> 0
+                                  CaseCtxt    -> ret_discount
+                                  ValAppCtxt  -> ret_discount
+                                  RhsCtxt {}  -> 40 `min` ret_discount
+                -- For RhsCtxt I suppose that exposing a data con is good in general
+                -- although 40 seems very arbitrary
+                --
+                -- `min` thresholding: res_discount can be very large when a
+                -- function returns constructors; but we only want to invoke
+                -- that large discount when there's a case continuation.
 
           -- Adjust by the depth scaling
           -- See Note [Avoid inlining into deeply nested cases]
@@ -649,6 +661,9 @@ exprDigest env e = go env e []
       | Just con <- isDataConWorkId_maybe f
       = ArgIsCon (DataAlt con) (map (exprDigest env) val_args)
 
+      | Just rhs <- expandUnfolding_maybe unfolding
+      = go (zapSubstEnv env) rhs val_args
+
 --      | DFunUnfolding {} <- unfolding
       | hasSomeUnfolding unfolding
       = ArgIsNot []  -- We (slightly hackily) use ArgIsNot [] for dfun applications
@@ -662,11 +677,8 @@ exprDigest env e = go env e []
                      -- Actually in spectral/puzzle I found that we got a big (40%!)
                      -- benefit from    let newDest = ... in case (notSeen newDest) of ...
                      -- We want to inline notSeen.  The argument has structure (its RHS)
-                     -- and in fact if we inline notSeen, newDest turns into a thunk
+                     -- and in fact if we inline notSeen, newDest stops being a thunk
                      -- (SPJ GHC log 13 Nov).
-
-      | Just rhs <- expandUnfolding_maybe unfolding
-      = go (zapSubstEnv env) rhs val_args
 
       | OtherCon cs <- unfolding
       = ArgIsNot cs

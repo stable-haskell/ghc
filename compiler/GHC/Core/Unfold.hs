@@ -205,7 +205,7 @@ defaultUnfoldingOpts = UnfoldingOpts
       -- inline into Csg.calc (The unfolding for sqr never makes it
       -- into the interface file.)
 
-   , unfoldingUseThreshold   = 70
+   , unfoldingUseThreshold   = 75
       -- Adjusted 90 -> 80 when adding discounts for free variables which
       -- generally make things more likely to inline.  Reducing the threshold
       -- eliminates some undesirable compile-time regressions (e.g. T10412a)
@@ -213,7 +213,7 @@ defaultUnfoldingOpts = UnfoldingOpts
       -- Previously: adjusted upwards in #18282, when I reduced
       -- the result discount for constructors.
 
-   , unfoldingFunAppDiscount = 30
+   , unfoldingFunAppDiscount = 45
       -- Be fairly keen to inline a function if that means
       -- we'll be able to pick the right method from a dictionary
 
@@ -912,7 +912,7 @@ caseSize scrut_id alts
 
 caseElimDiscount :: Discount
 -- Bonus for eliminating a case
-caseElimDiscount = 10
+caseElimDiscount = 15
 
 {- Note [Bale out on very wide case expressions]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1219,8 +1219,6 @@ binary sizes shrink significantly either.
 data InlineContext
    = IC { ic_free  :: Id -> ArgDigest  -- Current unfoldings for free variables
         , ic_bound :: IdEnv ArgDigest  -- Digests for local variables
-        , ic_want_res :: Bool          -- True <=> result is scrutinised/demanded
-                                       --          so apply result discount
      }
 
 data ArgDigest
@@ -1253,15 +1251,8 @@ exprTreeWillInline limit (ExprTree { et_wc_tot = tot }) = tot <= limit
 -------------------------
 exprTreeSize :: InlineContext -> ExprTree -> Size
 -- See Note [Overview of inlining heuristics]
-exprTreeSize !ic (ExprTree { et_size  = size
-                           , et_cases = cases
-                           , et_ret   = ret_discount })
-  = foldr ((+) . caseTreeSize (ic { ic_want_res = False }))
-          -- False: all result discount is at the top; ignore inner ones
-          discounted_size cases
-  where
-    discounted_size | ic_want_res ic = size - ret_discount
-                    | otherwise      = size
+exprTreeSize !ic (ExprTree { et_size  = size, et_cases = cases })
+  = foldr ((+) . caseTreeSize ic) size cases
 
 caseTreeSize :: InlineContext -> CaseTree -> Size
 caseTreeSize ic (ScrutOf bndr disc)
