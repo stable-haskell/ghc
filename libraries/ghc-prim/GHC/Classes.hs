@@ -146,8 +146,10 @@ class  Eq a  where
 
     {-# INLINE (/=) #-}
     {-# INLINE (==) #-}
-    x /= y               = not (x == y)
-    x == y               = not (x /= y)
+    -- Write these with no arg, so that they inline even as the argument of
+    -- the DFun.  Then the RULES for eqList can fire.
+    (/=) = \x y -> not (x == y)
+    (==) = \x y -> not (x /= y)
     {-# MINIMAL (==) | (/=) #-}
 
 deriving instance Eq ()
@@ -189,9 +191,22 @@ instance (Eq a) => Eq [a] where
     {-# SPECIALISE instance Eq [[Char]] #-}
     {-# SPECIALISE instance Eq [Char] #-}
     {-# SPECIALISE instance Eq [Int] #-}
-    []     == []     = True
-    (x:xs) == (y:ys) = x == y && xs == ys
-    _xs    == _ys    = False
+    (==) = eqList
+
+-- These rules avoid the recursive function when
+-- one of the arguments is the empty list.  We want
+-- good code for    xs == []  or    xs /= []
+{-# RULES
+"eqList1" forall xs. eqList xs [] = case xs of { [] -> True; _ -> False }
+"eqList2" forall ys. eqList [] ys = case ys of { [] -> True; _ -> False }
+  #-}
+
+eqList :: Eq a => [a] -> [a] -> Bool
+{-# NOINLINE [1] eqList #-}  -- Give the RULES eqList1/eqList2 a chance to fire
+-- eqList should auto-specialise for the same types as specialise instance Eq above
+eqList []     []     = True
+eqList (x:xs) (y:ys) = x == y && eqList xs ys
+eqList _xs   _ys    = False
 
 deriving instance Eq Module
 
