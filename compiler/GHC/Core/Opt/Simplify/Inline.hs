@@ -262,11 +262,11 @@ tryUnfolding logger env fn cont unf_template unf_cache guidance
                               = case cont_info of
                                   BoringCtxt  -> 0
                                   DiscArgCtxt -> 0
-                                  RuleArgCtxt -> 0
+                                  RuleArgCtxt -> ret_discount
                                   CaseCtxt    -> ret_discount
                                   ValAppCtxt  -> ret_discount
                                   RhsCtxt {}  -> 40 `min` ret_discount
-                -- For RhsCtxt I suppose that exposing a data con is good in general
+                -- For RhsCtxt I suppose that exposing a data con is good in general;
                 -- although 40 seems very arbitrary
                 --
                 -- `min` thresholding: res_discount can be very large when a

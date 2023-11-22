@@ -205,7 +205,7 @@ defaultUnfoldingOpts = UnfoldingOpts
       -- inline into Csg.calc (The unfolding for sqr never makes it
       -- into the interface file.)
 
-   , unfoldingUseThreshold   = 75
+   , unfoldingUseThreshold   = 80
       -- Adjusted 90 -> 80 when adding discounts for free variables which
       -- generally make things more likely to inline.  Reducing the threshold
       -- eliminates some undesirable compile-time regressions (e.g. T10412a)
@@ -213,7 +213,7 @@ defaultUnfoldingOpts = UnfoldingOpts
       -- Previously: adjusted upwards in #18282, when I reduced
       -- the result discount for constructors.
 
-   , unfoldingFunAppDiscount = 45
+   , unfoldingFunAppDiscount = 30
       -- Be fairly keen to inline a function if that means
       -- we'll be able to pick the right method from a dictionary
 
