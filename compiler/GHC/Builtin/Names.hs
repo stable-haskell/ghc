@@ -270,6 +270,9 @@ basicKnownKeyNames
         -- WithDict
         withDictClassName,
 
+        -- TagToEnum
+        tagToEnumClassName,
+
         -- DataToTag
         dataToTagClassName,
 
@@ -551,7 +554,7 @@ pRELUDE :: Module
 pRELUDE         = mkBaseModule_ pRELUDE_NAME
 
 gHC_PRIM, gHC_PRIM_PANIC,
-    gHC_TYPES, gHC_GENERICS, gHC_MAGIC, gHC_MAGIC_DICT,
+    gHC_TYPES, gHC_GENERICS, gHC_MAGIC, gHC_MAGIC_DICT, gHC_MAGIC_TAGTOENUM,
     gHC_CLASSES, gHC_PRIMOPWRAPPERS, gHC_BASE, gHC_ENUM,
     gHC_GHCI, gHC_GHCI_HELPERS, gHC_CSTRING,
     gHC_SHOW, gHC_READ, gHC_NUM, gHC_MAYBE,
@@ -573,6 +576,7 @@ gHC_PRIM_PANIC  = mkPrimModule (fsLit "GHC.Prim.Panic")
 gHC_TYPES       = mkPrimModule (fsLit "GHC.Types")
 gHC_MAGIC       = mkPrimModule (fsLit "GHC.Magic")
 gHC_MAGIC_DICT  = mkPrimModule (fsLit "GHC.Magic.Dict")
+gHC_MAGIC_TAGTOENUM = mkPrimModule (fsLit "GHC.Magic.TagToEnum")
 gHC_CSTRING     = mkPrimModule (fsLit "GHC.CString")
 gHC_CLASSES     = mkPrimModule (fsLit "GHC.Classes")
 gHC_PRIMOPWRAPPERS = mkPrimModule (fsLit "GHC.PrimopWrappers")
@@ -752,11 +756,13 @@ plus_RDR                = varQual_RDR gHC_NUM (fsLit "+")
 compose_RDR :: RdrName
 compose_RDR             = varQual_RDR gHC_BASE (fsLit ".")
 
-not_RDR, dataToTag_RDR, succ_RDR, pred_RDR, minBound_RDR, maxBound_RDR,
+not_RDR, tagToEnum_RDR, dataToTag_RDR,
+    succ_RDR, pred_RDR, minBound_RDR, maxBound_RDR,
     and_RDR, range_RDR, inRange_RDR, index_RDR,
     unsafeIndex_RDR, unsafeRangeSize_RDR :: RdrName
 and_RDR                 = varQual_RDR gHC_CLASSES (fsLit "&&")
 not_RDR                 = varQual_RDR gHC_CLASSES (fsLit "not")
+tagToEnum_RDR           = varQual_RDR gHC_MAGIC_TAGTOENUM (fsLit "tagToEnum#")
 dataToTag_RDR           = varQual_RDR gHC_MAGIC (fsLit "dataToTag#")
 succ_RDR                = varQual_RDR gHC_ENUM (fsLit "succ")
 pred_RDR                = varQual_RDR gHC_ENUM (fsLit "pred")
@@ -1394,12 +1400,16 @@ constraintKindRepName  = varQual gHC_TYPES         (fsLit "krep$Constraint") con
 withDictClassName :: Name
 withDictClassName = clsQual gHC_MAGIC_DICT (fsLit "WithDict") withDictClassKey
 
-nonEmptyTyConName :: Name
-nonEmptyTyConName = tcQual gHC_BASE (fsLit "NonEmpty") nonEmptyTyConKey
+-- TagToEnum
+tagToEnumClassName :: Name
+tagToEnumClassName = clsQual gHC_MAGIC_TAGTOENUM (fsLit "TagToEnum") tagToEnumClassKey
 
 -- DataToTag
 dataToTagClassName :: Name
-dataToTagClassName    = clsQual gHC_MAGIC      (fsLit "DataToTag") dataToTagClassKey
+dataToTagClassName    = clsQual gHC_MAGIC (fsLit "DataToTag") dataToTagClassKey
+
+nonEmptyTyConName :: Name
+nonEmptyTyConName = tcQual gHC_BASE (fsLit "NonEmpty") nonEmptyTyConKey
 
 -- Custom type errors
 errorMessageTypeErrorFamName
@@ -1715,6 +1725,9 @@ typeableClassKey        = mkPreludeClassUnique 20
 
 withDictClassKey :: Unique
 withDictClassKey        = mkPreludeClassUnique 21
+
+tagToEnumClassKey :: Unique
+tagToEnumClassKey       = mkPreludeClassUnique 22
 
 dataToTagClassKey :: Unique
 dataToTagClassKey       = mkPreludeClassUnique 23

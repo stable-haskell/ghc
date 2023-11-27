@@ -80,6 +80,7 @@ import GHC.Types.Basic
 import GHC.Types.Demand      ( splitDmdSig, isDeadEndDiv )
 
 import GHC.Builtin.Names
+import GHC.Builtin.PrimOps ( PrimOp(..) )
 import GHC.Builtin.Types.Prim
 import GHC.Builtin.Types ( multiplicityTy )
 
@@ -865,7 +866,7 @@ lintCoreExpr (Var var)
       var_pair@(var_ty, _) <- lintIdOcc var 0
       -- See Note [Linting representation-polymorphic builtins]
       checkRepPolyBuiltin (Var var) [] var_ty
-      --checkDataToTagPrimOpTyCon (Var var) []
+      checkSpecialPrimOpTypeArgs (Var var) []
       return var_pair
 
 lintCoreExpr (Lit lit)
@@ -962,7 +963,7 @@ lintCoreExpr e@(App _ _)
 
        -- See Note [Linting representation-polymorphic builtins]
        ; checkRepPolyBuiltin fun args app_ty
-       ; --checkDataToTagPrimOpTyCon fun args
+       ; checkSpecialPrimOpTypeArgs fun args
 
        ; return app_pair}
   where
@@ -1129,6 +1130,37 @@ checkTypeDataConOcc :: String -> DataCon -> LintM ()
 checkTypeDataConOcc what dc
   = checkL (not (isTypeDataTyCon (dataConTyCon dc))) $
     (text "type data constructor found in a" <+> text what <> colon <+> ppr dc)
+
+
+-- | A few special primops cannot be used at just any type, i.e. they
+-- are less polymorphic than their type suggests.
+--
+-- This function checks that a use of such a primop is at an appropriate type.
+-- Ignores applications not headed by such special primops.
+checkSpecialPrimOpTypeArgs
+  :: CoreExpr   -- ^ the function (head of the application) we are checking
+  -> [CoreArg]  -- ^ The arguments to the application
+  -> LintM ()
+checkSpecialPrimOpTypeArgs (Var fun_id) args
+  | Just TagToEnumOp <- isPrimOpId_maybe fun_id
+  -- Check invariant TTE from Note [TagToEnum overview]
+  -- in GHC.Tc.Instance.Class
+  = case args of
+      Type _levity : Type dty : _rest
+        | Just (tc, _) <- splitTyConApp_maybe dty
+        , tces <- tyConEnumSort tc
+        , tces == ExoticEnum || tces == NormalEnum
+
+        -> pure ()
+        | otherwise -> failWithL $ text "tagToEnumPrim# used at non-enum type:"
+                                   <+> ppr dty
+      _ -> failWithL $ text "tagToEnumPrim# needs two type arguments but has args:"
+                       <+> ppr (take 2 args)
+
+checkSpecialPrimOpTypeArgs _ _ = pure ()
+
+-- I'll move the commented out code here up into checkSpecialPrimOpTypeArgs
+-- when I can do so without creating merge conflicts.
 
 {-
 -- | Check that a use of a dataToTag# primop satisfies conditions DTT2

@@ -1,9 +1,9 @@
 
 ==================== Tidy Core ====================
 Result size of Tidy Core
-  = {terms: 96, types: 41, coercions: 0, joins: 0/0}
+  = {terms: 96, types: 42, coercions: 0, joins: 0/0}
 
--- RHS size: {terms: 14, types: 9, coercions: 0, joins: 0/0}
+-- RHS size: {terms: 14, types: 10, coercions: 0, joins: 0/0}
 T22375.$fEqX_$c== :: X -> X -> Bool
 [GblId,
  Arity=2,
@@ -17,7 +17,8 @@ T22375.$fEqX_$c==
       { __DEFAULT ->
       case GHC.Prim.dataToTagLarge# @GHC.Types.Lifted @X b of b#
       { __DEFAULT ->
-      GHC.Prim.tagToEnum# @Bool (GHC.Prim.==# a# b#)
+      GHC.Prim.tagToEnumPrim#
+        @GHC.Types.Lifted @Bool (GHC.Prim.==# a# b#)
       }
       }
 

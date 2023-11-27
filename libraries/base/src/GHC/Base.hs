@@ -103,6 +103,7 @@ module GHC.Base
         module GHC.CString,
         module GHC.Magic,
         module GHC.Magic.Dict,
+        module GHC.Magic.TagToEnum,
         module GHC.Types,
         module GHC.Prim,        -- Re-export GHC.Prim, GHC.Prim.Ext,
         module GHC.Prim.Ext,    -- GHC.Prim.PtrEq and [boot] GHC.Err
@@ -117,6 +118,7 @@ import GHC.Classes
 import GHC.CString
 import GHC.Magic
 import GHC.Magic.Dict
+import GHC.Magic.TagToEnum
 import GHC.Prim hiding (dataToTagSmall#, dataToTagLarge#)
   -- Hide dataToTag# ops because they are expected to break for
   -- GHC-internal reasons in the near future, and shouldn't

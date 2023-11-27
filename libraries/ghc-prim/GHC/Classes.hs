@@ -65,6 +65,7 @@ module GHC.Classes(
 
 -- GHC.Magic is used in some derived instances
 import GHC.Magic ()
+import GHC.Magic.TagToEnum () -- also used in derived instances
 import GHC.Prim
 import GHC.Tuple
 import GHC.CString (unpackCString#)

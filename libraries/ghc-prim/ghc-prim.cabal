@@ -53,6 +53,7 @@ Library
         GHC.Debug
         GHC.Magic
         GHC.Magic.Dict
+        GHC.Magic.TagToEnum
         GHC.Prim.Ext
         GHC.Prim.Panic
         GHC.Prim.Exception

@@ -1710,7 +1710,7 @@ maybe_getCCallReturnRep fn_ty
          _             -> blargh
 
 maybe_is_tagToEnum_call :: CgStgExpr -> Maybe (Id, [Name])
--- Detect and extract relevant info for the tagToEnum kludge.
+-- Detect and extract relevant info for the tagToEnumPrim# kludge.
 maybe_is_tagToEnum_call (StgOpApp (StgPrimOp TagToEnumOp) [StgVarArg v] t)
   = Just (v, extract_constr_Names t)
   where
@@ -1718,8 +1718,8 @@ maybe_is_tagToEnum_call (StgOpApp (StgPrimOp TagToEnumOp) [StgVarArg v] t)
            | rep_ty <- unwrapType ty
            , Just tyc <- tyConAppTyCon_maybe rep_ty
            , isDataTyCon tyc
-           = map (getName . dataConWorkId) (tyConDataCons tyc)
-           -- NOTE: use the worker name, not the source name of
+           = map (getName . dataConWrapId) (tyConDataCons tyc)
+           -- NOTE: use the wrapper name, not the source name of
            -- the DataCon.  See "GHC.Core.DataCon" for details.
            | otherwise
            = pprPanic "maybe_is_tagToEnum_call.extract_constr_Ids" (ppr ty)

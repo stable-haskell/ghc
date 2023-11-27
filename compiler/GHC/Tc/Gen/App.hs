@@ -29,7 +29,6 @@ import GHC.Tc.Errors.Types
 import GHC.Tc.Utils.Monad
 import GHC.Tc.Utils.Unify
 import GHC.Tc.Utils.Instantiate
-import GHC.Tc.Instance.Family ( tcGetFamInstEnvs, tcLookupDataFamInst_maybe )
 import GHC.Tc.Gen.HsType
 import GHC.Tc.Utils.Concrete  ( unifyConcrete, idConcreteTvs )
 import GHC.Tc.Utils.TcMType
@@ -47,7 +46,6 @@ import GHC.Core.TyCo.FVs
 import GHC.Core.Type
 import GHC.Core.Coercion
 import GHC.Types.Var.Set
-import GHC.Builtin.PrimOps( tagToEnumKey )
 import GHC.Builtin.Names
 import GHC.Driver.DynFlags
 import GHC.Types.Name
@@ -259,8 +257,6 @@ tcApp works like this:
 
 6. Use tcValArgs to typecheck the value arguments
 
-7. After a gruesome special case for tagToEnum, rebuild the result.
-
 
 Some cases that /won't/ work:
 
@@ -375,11 +371,8 @@ tcApp rn_expr exp_res_ty
        -- Typecheck the value arguments
        ; tc_args <- tcValArgs do_ql inst_args
 
-       -- Reconstruct, with a special case for tagToEnum#.
-       ; tc_expr <-
-          if isTagToEnum rn_fun
-          then tcTagToEnum tc_fun fun_ctxt tc_args app_res_rho
-          else do rebuildHsApps tc_fun fun_ctxt tc_args app_res_rho
+       -- Reconstruct
+       ; tc_expr <- rebuildHsApps tc_fun fun_ctxt tc_args app_res_rho
 
        ; whenDOptM Opt_D_dump_tc_trace $
          do { inst_args <- liftZonkM $ mapM zonkArg inst_args  -- Only when tracing
@@ -1700,86 +1693,6 @@ findNoQuantVars fun_ty args
       | otherwise
       = False  -- E.g. head id 'x'
 
-
-{- *********************************************************************
-*                                                                      *
-                 tagToEnum#
-*                                                                      *
-********************************************************************* -}
-
-{- Note [tagToEnum#]
-~~~~~~~~~~~~~~~~~~~~
-Nasty check to ensure that tagToEnum# is applied to a type that is an
-enumeration TyCon.  It's crude, because it relies on our
-knowing *now* that the type is ok, which in turn relies on the
-eager-unification part of the type checker pushing enough information
-here.  In theory the Right Thing to do is to have a new form of
-constraint but I definitely cannot face that!  And it works ok as-is.
-
-Here's are two cases that should fail
-        f :: forall a. a
-        f = tagToEnum# 0        -- Can't do tagToEnum# at a type variable
-
-        g :: Int
-        g = tagToEnum# 0        -- Int is not an enumeration
-
-When data type families are involved it's a bit more complicated.
-     data family F a
-     data instance F [Int] = A | B | C
-Then we want to generate something like
-     tagToEnum# R:FListInt 3# |> co :: R:FListInt ~ F [Int]
-Usually that coercion is hidden inside the wrappers for
-constructors of F [Int] but here we have to do it explicitly.
-
-It's all grotesquely complicated.
--}
-
-isTagToEnum :: HsExpr GhcRn -> Bool
-isTagToEnum (HsVar _ (L _ fun_id)) = fun_id `hasKey` tagToEnumKey
-isTagToEnum _ = False
-
-tcTagToEnum :: HsExpr GhcTc -> AppCtxt -> [HsExprArg 'TcpTc]
-            -> TcRhoType
-            -> TcM (HsExpr GhcTc)
--- tagToEnum# :: forall a. Int# -> a
--- See Note [tagToEnum#]   Urgh!
-tcTagToEnum tc_fun fun_ctxt tc_args res_ty
-  | [val_arg] <- dropWhile (not . isHsValArg) tc_args
-  = do { res_ty <- liftZonkM $ zonkTcType res_ty
-
-       -- Check that the type is algebraic
-       ; case tcSplitTyConApp_maybe res_ty of {
-           Nothing -> do { addErrTc (TcRnTagToEnumUnspecifiedResTy res_ty)
-                         ; vanilla_result } ;
-           Just (tc, tc_args) ->
-
-    do { -- Look through any type family
-       ; fam_envs <- tcGetFamInstEnvs
-       ; case tcLookupDataFamInst_maybe fam_envs tc tc_args of {
-           Nothing -> do { check_enumeration res_ty tc
-                         ; vanilla_result } ;
-           Just (rep_tc, rep_args, coi) ->
-
-    do { -- coi :: tc tc_args ~R rep_tc rep_args
-         check_enumeration res_ty rep_tc
-       ; let rep_ty  = mkTyConApp rep_tc rep_args
-             tc_fun' = mkHsWrap (WpTyApp rep_ty) tc_fun
-             df_wrap = mkWpCastR (mkSymCo coi)
-       ; tc_expr <- rebuildHsApps tc_fun' fun_ctxt [val_arg] res_ty
-       ; return (mkHsWrap df_wrap tc_expr) }}}}}
-
-  | otherwise
-  = failWithTc TcRnTagToEnumMissingValArg
-
-  where
-    vanilla_result = rebuildHsApps tc_fun fun_ctxt tc_args res_ty
-
-    check_enumeration ty' tc
-      | -- isTypeDataTyCon: see wrinkle (W1) in
-        -- Note [Type data declarations] in GHC.Rename.Module
-        isTypeDataTyCon tc    = addErrTc (TcRnTagToEnumResTyTypeData ty')
-      | isEnumerationTyCon tc = return ()
-      | otherwise             = addErrTc (TcRnTagToEnumResTyNotAnEnum ty')
 
 
 {- *********************************************************************
