@@ -208,6 +208,11 @@ Runtime system
 - Add support for heap profiling with the non-moving GC.
   See :ghc-ticket:`22221`.
 
+- Memory return logic now uses live bytes rather than live blocks to measure the size of the heap.
+  This primarily affects the non-moving GC, which should now be more willing to return memory to the OS.
+  Users who have fine-tuned the :rts-flag:`-F ⟨factor⟩`, :rts-flag:`-Fd ⟨factor⟩`, or :rts-flag:`-O ⟨size⟩` flags,
+  and use the non-moving GC, should see if adjustments are needed in light of this change.
+
 - Add a :rts-flag:`--no-automatic-time-samples` flag which stops time profiling samples being automatically started on
   startup. Time profiling can be controlled manually using functions in ``GHC.Profiling``.
 
