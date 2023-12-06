@@ -8,24 +8,24 @@ type GHC.TypeLits.ConsSymbol :: Char
 type family GHC.TypeLits.ConsSymbol a b
 type GHC.TypeLits.KnownChar :: Char -> Constraint
 class GHC.TypeLits.KnownChar n where
-  GHC.TypeLits.charSing :: GHC.TypeLits.SChar n
+  GHC.TypeLits.charSing :: ghc-internal-0.1.0.0:GHC.TypeLits.Internal.SChar
+                             n
   {-# MINIMAL charSing #-}
 type GHC.TypeLits.KnownSymbol :: GHC.Types.Symbol -> Constraint
 class GHC.TypeLits.KnownSymbol n where
-  GHC.TypeLits.symbolSing :: GHC.TypeLits.SSymbol n
+  GHC.TypeLits.symbolSing :: ghc-internal-0.1.0.0:GHC.TypeLits.Internal.SSymbol
+                               n
   {-# MINIMAL symbolSing #-}
 type GHC.TypeLits.NatToChar :: GHC.Num.Natural.Natural -> Char
 type family GHC.TypeLits.NatToChar a
 pattern GHC.TypeLits.SChar
-  :: () => GHC.TypeLits.KnownChar c => GHC.TypeLits.SChar c
-type role GHC.TypeLits.SChar nominal
-type GHC.TypeLits.SChar :: Char -> *
-newtype GHC.TypeLits.SChar s = GHC.TypeLits.UnsafeSChar Char
+  :: () =>
+     GHC.TypeLits.KnownChar c =>
+     ghc-internal-0.1.0.0:GHC.TypeLits.Internal.SChar c
 pattern GHC.TypeLits.SSymbol
-  :: () => GHC.TypeLits.KnownSymbol s => GHC.TypeLits.SSymbol s
-type role GHC.TypeLits.SSymbol nominal
-type GHC.TypeLits.SSymbol :: GHC.Types.Symbol -> *
-newtype GHC.TypeLits.SSymbol s = GHC.TypeLits.UnsafeSSymbol String
+  :: () =>
+     GHC.TypeLits.KnownSymbol s =>
+     ghc-internal-0.1.0.0:GHC.TypeLits.Internal.SSymbol s
 type GHC.TypeLits.SomeChar :: *
 data GHC.TypeLits.SomeChar
   = forall (n :: Char).
@@ -62,9 +62,12 @@ GHC.TypeLits.decideSymbol ::
   -> Either
        ((a Data.Type.Equality.:~: b) -> GHC.Base.Void)
        (a Data.Type.Equality.:~: b)
-GHC.TypeLits.fromSChar :: GHC.TypeLits.SChar c -> Char
-GHC.TypeLits.fromSNat :: GHC.TypeNats.SNat n -> Integer
-GHC.TypeLits.fromSSymbol :: GHC.TypeLits.SSymbol s -> String
+GHC.TypeLits.fromSChar ::
+  ghc-internal-0.1.0.0:GHC.TypeLits.Internal.SChar c -> Char
+GHC.TypeLits.fromSNat ::
+  ghc-internal-0.1.0.0:GHC.TypeNats.Internal.SNat n -> Integer
+GHC.TypeLits.fromSSymbol ::
+  ghc-internal-0.1.0.0:GHC.TypeLits.Internal.SSymbol s -> String
 GHC.TypeLits.natVal ::
   GHC.TypeNats.KnownNat n => proxy n -> Integer
 GHC.TypeLits.natVal' ::
@@ -83,19 +86,25 @@ GHC.TypeLits.symbolVal ::
 GHC.TypeLits.symbolVal' ::
   GHC.TypeLits.KnownSymbol n => GHC.Prim.Proxy# n -> String
 GHC.TypeLits.withKnownChar ::
-  GHC.TypeLits.SChar c -> (GHC.TypeLits.KnownChar c => r) -> r
+  ghc-internal-0.1.0.0:GHC.TypeLits.Internal.SChar c
+  -> (GHC.TypeLits.KnownChar c => r) -> r
 GHC.TypeLits.withKnownSymbol ::
-  GHC.TypeLits.SSymbol s -> (GHC.TypeLits.KnownSymbol s => r) -> r
+  ghc-internal-0.1.0.0:GHC.TypeLits.Internal.SSymbol s
+  -> (GHC.TypeLits.KnownSymbol s => r) -> r
 GHC.TypeLits.withSomeSChar ::
-  Char -> (forall (c :: Char). GHC.TypeLits.SChar c -> r) -> r
+  Char
+  -> (forall (c :: Char).
+      ghc-internal-0.1.0.0:GHC.TypeLits.Internal.SChar c -> r)
+  -> r
 GHC.TypeLits.withSomeSNat ::
   Integer
-  -> (forall (n :: GHC.TypeNats.Nat).
-      Maybe (GHC.TypeNats.SNat n) -> r)
+  -> (forall (n :: GHC.Num.Natural.Natural).
+      Maybe (ghc-internal-0.1.0.0:GHC.TypeNats.Internal.SNat n) -> r)
   -> r
 GHC.TypeLits.withSomeSSymbol ::
   String
-  -> (forall (s :: GHC.Types.Symbol). GHC.TypeLits.SSymbol s -> r)
+  -> (forall (s :: GHC.Types.Symbol).
+      ghc-internal-0.1.0.0:GHC.TypeLits.Internal.SSymbol s -> r)
   -> r
 type (GHC.TypeNats.*) :: GHC.Num.Natural.Natural
                          -> GHC.Num.Natural.Natural -> GHC.Num.Natural.Natural
@@ -115,14 +124,15 @@ type (Data.Type.Ord.<=?) :: forall k. k -> k -> Bool
 type (Data.Type.Ord.<=?) m n =
   Data.Type.Ord.OrdCond (Data.Type.Ord.Compare m n) True True False
   :: Bool
-type GHC.TypeLits.Internal.CmpChar :: Char -> Char -> Ordering
-type family GHC.TypeLits.Internal.CmpChar a b
-type GHC.TypeNats.Internal.CmpNat :: GHC.Num.Natural.Natural
-                                     -> GHC.Num.Natural.Natural -> Ordering
-type family GHC.TypeNats.Internal.CmpNat a b
-type GHC.TypeLits.Internal.CmpSymbol :: GHC.Types.Symbol
-                                        -> GHC.Types.Symbol -> Ordering
-type family GHC.TypeLits.Internal.CmpSymbol a b
+type base-4.19.0.0:GHC.TypeLits.Internal.CmpChar :: Char
+                                                    -> Char -> Ordering
+type family base-4.19.0.0:GHC.TypeLits.Internal.CmpChar a b
+type base-4.19.0.0:GHC.TypeNats.Internal.CmpNat :: GHC.Num.Natural.Natural
+                                                   -> GHC.Num.Natural.Natural -> Ordering
+type family base-4.19.0.0:GHC.TypeNats.Internal.CmpNat a b
+type base-4.19.0.0:GHC.TypeLits.Internal.CmpSymbol :: GHC.Types.Symbol
+                                                      -> GHC.Types.Symbol -> Ordering
+type family base-4.19.0.0:GHC.TypeLits.Internal.CmpSymbol a b
 type GHC.TypeNats.Div :: GHC.Num.Natural.Natural
                          -> GHC.Num.Natural.Natural -> GHC.Num.Natural.Natural
 type family GHC.TypeNats.Div a b
@@ -138,7 +148,8 @@ data GHC.TypeError.ErrorMessage
     GHC.TypeError.ErrorMessage
 type GHC.TypeNats.KnownNat :: GHC.TypeNats.Nat -> Constraint
 class GHC.TypeNats.KnownNat n where
-  GHC.TypeNats.natSing :: GHC.TypeNats.SNat n
+  GHC.TypeNats.natSing :: ghc-internal-0.1.0.0:GHC.TypeNats.Internal.SNat
+                            n
   {-# MINIMAL natSing #-}
 type GHC.TypeNats.Log2 :: GHC.Num.Natural.Natural
                           -> GHC.Num.Natural.Natural
@@ -164,12 +175,24 @@ data Data.Type.Ord.OrderingI a b where
   Data.Type.Ord.GTI :: forall {k} (a :: k) (b :: k).
                        (Data.Type.Ord.Compare a b ~ GT) =>
                        Data.Type.Ord.OrderingI a b
+type role ghc-internal-0.1.0.0:GHC.TypeLits.Internal.SChar nominal
+type ghc-internal-0.1.0.0:GHC.TypeLits.Internal.SChar :: Char -> *
+newtype ghc-internal-0.1.0.0:GHC.TypeLits.Internal.SChar s
+  = ghc-internal-0.1.0.0:GHC.TypeLits.Internal.UnsafeSChar Char
 pattern GHC.TypeNats.SNat
-  :: () => GHC.TypeNats.KnownNat n => GHC.TypeNats.SNat n
-type role GHC.TypeNats.SNat nominal
-type GHC.TypeNats.SNat :: GHC.TypeNats.Nat -> *
-newtype GHC.TypeNats.SNat n
-  = GHC.TypeNats.UnsafeSNat GHC.Num.Natural.Natural
+  :: () =>
+     GHC.TypeNats.KnownNat n =>
+     ghc-internal-0.1.0.0:GHC.TypeNats.Internal.SNat n
+type role ghc-internal-0.1.0.0:GHC.TypeNats.Internal.SNat nominal
+type ghc-internal-0.1.0.0:GHC.TypeNats.Internal.SNat :: GHC.Num.Natural.Natural
+                                                        -> *
+newtype ghc-internal-0.1.0.0:GHC.TypeNats.Internal.SNat n
+  = ghc-internal-0.1.0.0:GHC.TypeNats.Internal.UnsafeSNat GHC.Num.Natural.Natural
+type role ghc-internal-0.1.0.0:GHC.TypeLits.Internal.SSymbol nominal
+type ghc-internal-0.1.0.0:GHC.TypeLits.Internal.SSymbol :: GHC.Types.Symbol
+                                                           -> *
+newtype ghc-internal-0.1.0.0:GHC.TypeLits.Internal.SSymbol s
+  = ghc-internal-0.1.0.0:GHC.TypeLits.Internal.UnsafeSSymbol [Char]
 type GHC.TypeNats.SomeNat :: *
 data GHC.TypeNats.SomeNat
   = forall (n :: GHC.TypeNats.Nat).
@@ -197,4 +220,5 @@ GHC.TypeNats.sameNat ::
   (GHC.TypeNats.KnownNat a, GHC.TypeNats.KnownNat b) =>
   proxy1 a -> proxy2 b -> Maybe (a Data.Type.Equality.:~: b)
 GHC.TypeNats.withKnownNat ::
-  GHC.TypeNats.SNat n -> (GHC.TypeNats.KnownNat n => r) -> r
+  ghc-internal-0.1.0.0:GHC.TypeNats.Internal.SNat n
+  -> (GHC.TypeNats.KnownNat n => r) -> r
