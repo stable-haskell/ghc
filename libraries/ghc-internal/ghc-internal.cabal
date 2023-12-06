@@ -23,9 +23,10 @@ common warnings
 
 library
     import:           warnings
+
     exposed-modules:
-    other-modules:    Dummy
-    other-extensions:
+        GHC.Internal.TypeLits
+        GHC.Internal.TypeNats
     build-depends:    rts == 1.0.*,
                       ghc-prim >= 0.5.1.0 && < 0.11,
                       ghc-bignum >= 1.0 && < 2.0

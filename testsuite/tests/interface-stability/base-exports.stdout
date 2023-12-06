@@ -9462,7 +9462,7 @@ module GHC.TypeLits where
   newtype SChar s = ...
   pattern SNat :: forall (n :: Nat). () => KnownNat n => SNat n
   type role SNat nominal
-  type SNat :: Nat -> *
+  type SNat :: Natural -> *
   newtype SNat n = ...
   pattern SSymbol :: forall (s :: Symbol). () => KnownSymbol s => SSymbol s
   type role SSymbol nominal
@@ -9491,7 +9491,7 @@ module GHC.TypeLits where
   decideNat :: forall (a :: Nat) (b :: Nat) (proxy1 :: Nat -> *) (proxy2 :: Nat -> *). (KnownNat a, KnownNat b) => proxy1 a -> proxy2 b -> Data.Either.Either ((a Data.Type.Equality.:~: b) -> GHC.Base.Void) (a Data.Type.Equality.:~: b)
   decideSymbol :: forall (a :: Symbol) (b :: Symbol) (proxy1 :: Symbol -> *) (proxy2 :: Symbol -> *). (KnownSymbol a, KnownSymbol b) => proxy1 a -> proxy2 b -> Data.Either.Either ((a Data.Type.Equality.:~: b) -> GHC.Base.Void) (a Data.Type.Equality.:~: b)
   fromSChar :: forall (c :: GHC.Types.Char). SChar c -> GHC.Types.Char
-  fromSNat :: forall (n :: Nat). SNat n -> GHC.Num.Integer.Integer
+  fromSNat :: forall (n :: Natural). SNat n -> GHC.Num.Integer.Integer
   fromSSymbol :: forall (s :: Symbol). SSymbol s -> GHC.Base.String
   natVal :: forall (n :: Nat) (proxy :: Nat -> *). KnownNat n => proxy n -> GHC.Num.Integer.Integer
   natVal' :: forall (n :: Nat). KnownNat n => GHC.Prim.Proxy# n -> GHC.Num.Integer.Integer
@@ -9504,10 +9504,10 @@ module GHC.TypeLits where
   symbolVal :: forall (n :: Symbol) (proxy :: Symbol -> *). KnownSymbol n => proxy n -> GHC.Base.String
   symbolVal' :: forall (n :: Symbol). KnownSymbol n => GHC.Prim.Proxy# n -> GHC.Base.String
   withKnownChar :: forall (c :: GHC.Types.Char) (rep :: GHC.Types.RuntimeRep) (r :: TYPE rep). SChar c -> (KnownChar c => r) -> r
-  withKnownNat :: forall (n :: Nat) (rep :: GHC.Types.RuntimeRep) (r :: TYPE rep). SNat n -> (KnownNat n => r) -> r
+  withKnownNat :: forall (n :: Natural) (rep :: GHC.Types.RuntimeRep) (r :: TYPE rep). SNat n -> (KnownNat n => r) -> r
   withKnownSymbol :: forall (s :: Symbol) (rep :: GHC.Types.RuntimeRep) (r :: TYPE rep). SSymbol s -> (KnownSymbol s => r) -> r
   withSomeSChar :: forall (rep :: GHC.Types.RuntimeRep) (r :: TYPE rep). GHC.Types.Char -> (forall (c :: GHC.Types.Char). SChar c -> r) -> r
-  withSomeSNat :: forall (rep :: GHC.Types.RuntimeRep) (r :: TYPE rep). GHC.Num.Integer.Integer -> (forall (n :: Nat). GHC.Maybe.Maybe (SNat n) -> r) -> r
+  withSomeSNat :: forall (rep :: GHC.Types.RuntimeRep) (r :: TYPE rep). GHC.Num.Integer.Integer -> (forall (n :: Natural). GHC.Maybe.Maybe (SNat n) -> r) -> r
   withSomeSSymbol :: forall (rep :: GHC.Types.RuntimeRep) (r :: TYPE rep). GHC.Base.String -> (forall (s :: Symbol). SSymbol s -> r) -> r
 
 module GHC.TypeLits.Internal where
@@ -9549,7 +9549,7 @@ module GHC.TypeNats where
   data Natural = ...
   pattern SNat :: forall (n :: Nat). () => KnownNat n => SNat n
   type role SNat nominal
-  type SNat :: Nat -> *
+  type SNat :: Natural -> *
   newtype SNat n = ...
   type SomeNat :: *
   data SomeNat = forall (n :: Nat). KnownNat n => SomeNat (Data.Proxy.Proxy n)
@@ -9557,13 +9557,13 @@ module GHC.TypeNats where
   type family (^) a b
   cmpNat :: forall (a :: Nat) (b :: Nat) (proxy1 :: Nat -> *) (proxy2 :: Nat -> *). (KnownNat a, KnownNat b) => proxy1 a -> proxy2 b -> Data.Type.Ord.OrderingI a b
   decideNat :: forall (a :: Nat) (b :: Nat) (proxy1 :: Nat -> *) (proxy2 :: Nat -> *). (KnownNat a, KnownNat b) => proxy1 a -> proxy2 b -> Data.Either.Either ((a Data.Type.Equality.:~: b) -> GHC.Base.Void) (a Data.Type.Equality.:~: b)
-  fromSNat :: forall (n :: Nat). SNat n -> Natural
+  fromSNat :: forall (n :: Natural). SNat n -> Natural
   natVal :: forall (n :: Nat) (proxy :: Nat -> *). KnownNat n => proxy n -> Natural
   natVal' :: forall (n :: Nat). KnownNat n => GHC.Prim.Proxy# n -> Natural
   sameNat :: forall (a :: Nat) (b :: Nat) (proxy1 :: Nat -> *) (proxy2 :: Nat -> *). (KnownNat a, KnownNat b) => proxy1 a -> proxy2 b -> GHC.Maybe.Maybe (a Data.Type.Equality.:~: b)
   someNatVal :: Natural -> SomeNat
-  withKnownNat :: forall (n :: Nat) (rep :: GHC.Types.RuntimeRep) (r :: TYPE rep). SNat n -> (KnownNat n => r) -> r
-  withSomeSNat :: forall (rep :: GHC.Types.RuntimeRep) (r :: TYPE rep). Natural -> (forall (n :: Nat). SNat n -> r) -> r
+  withKnownNat :: forall (n :: Natural) (rep :: GHC.Types.RuntimeRep) (r :: TYPE rep). SNat n -> (KnownNat n => r) -> r
+  withSomeSNat :: forall (rep :: GHC.Types.RuntimeRep) (r :: TYPE rep). Natural -> (forall (n :: Natural). SNat n -> r) -> r
 
 module GHC.TypeNats.Internal where
   -- Safety: Trustworthy
@@ -11014,15 +11014,15 @@ instance Data.Traversable.Traversable Data.Semigroup.First -- Defined in ‘Data
 instance Data.Traversable.Traversable Data.Semigroup.Last -- Defined in ‘Data.Semigroup’
 instance Data.Traversable.Traversable Data.Semigroup.Max -- Defined in ‘Data.Semigroup’
 instance Data.Traversable.Traversable Data.Semigroup.Min -- Defined in ‘Data.Semigroup’
-instance Data.Type.Coercion.TestCoercion GHC.TypeLits.SChar -- Defined in ‘GHC.TypeLits’
-instance Data.Type.Coercion.TestCoercion GHC.TypeLits.SSymbol -- Defined in ‘GHC.TypeLits’
-instance Data.Type.Coercion.TestCoercion GHC.TypeNats.SNat -- Defined in ‘GHC.TypeNats’
+instance Data.Type.Coercion.TestCoercion GHC.Internal.TypeLits.SChar -- Defined in ‘GHC.TypeLits’
+instance Data.Type.Coercion.TestCoercion GHC.Internal.TypeLits.SSymbol -- Defined in ‘GHC.TypeLits’
+instance Data.Type.Coercion.TestCoercion GHC.Internal.TypeNats.SNat -- Defined in ‘GHC.TypeNats’
 instance forall k (a :: k). Data.Type.Coercion.TestCoercion ((Data.Type.Equality.:~:) a) -- Defined in ‘Data.Type.Coercion’
 instance forall k1 k (a :: k1). Data.Type.Coercion.TestCoercion ((Data.Type.Equality.:~~:) a) -- Defined in ‘Data.Type.Coercion’
 instance forall k (a :: k). Data.Type.Coercion.TestCoercion (Data.Type.Coercion.Coercion a) -- Defined in ‘Data.Type.Coercion’
-instance Data.Type.Equality.TestEquality GHC.TypeLits.SChar -- Defined in ‘GHC.TypeLits’
-instance Data.Type.Equality.TestEquality GHC.TypeLits.SSymbol -- Defined in ‘GHC.TypeLits’
-instance Data.Type.Equality.TestEquality GHC.TypeNats.SNat -- Defined in ‘GHC.TypeNats’
+instance Data.Type.Equality.TestEquality GHC.Internal.TypeLits.SChar -- Defined in ‘GHC.TypeLits’
+instance Data.Type.Equality.TestEquality GHC.Internal.TypeLits.SSymbol -- Defined in ‘GHC.TypeLits’
+instance Data.Type.Equality.TestEquality GHC.Internal.TypeNats.SNat -- Defined in ‘GHC.TypeNats’
 instance forall k (a :: k). Data.Type.Equality.TestEquality ((Data.Type.Equality.:~:) a) -- Defined in ‘Data.Type.Equality’
 instance forall k1 k (a :: k1). Data.Type.Equality.TestEquality ((Data.Type.Equality.:~~:) a) -- Defined in ‘Data.Type.Equality’
 instance forall k. Data.Type.Equality.TestEquality base-4.19.0.0:Data.Typeable.Internal.TypeRep -- Defined in ‘base-4.19.0.0:Data.Typeable.Internal’
@@ -12076,11 +12076,11 @@ instance GHC.Show.Show GHC.Stack.CloneStack.StackEntry -- Defined in ‘GHC.Stac
 instance GHC.Show.Show GHC.StaticPtr.StaticPtrInfo -- Defined in ‘GHC.StaticPtr’
 instance GHC.Show.Show GHC.Stats.GCDetails -- Defined in ‘GHC.Stats’
 instance GHC.Show.Show GHC.Stats.RTSStats -- Defined in ‘GHC.Stats’
-instance forall (c :: GHC.Types.Char). GHC.Show.Show (GHC.TypeLits.SChar c) -- Defined in ‘GHC.TypeLits’
-instance forall (s :: GHC.Types.Symbol). GHC.Show.Show (GHC.TypeLits.SSymbol s) -- Defined in ‘GHC.TypeLits’
+instance forall (c :: GHC.Types.Char). GHC.Show.Show (GHC.Internal.TypeLits.SChar c) -- Defined in ‘GHC.TypeLits’
+instance forall (s :: GHC.Types.Symbol). GHC.Show.Show (GHC.Internal.TypeLits.SSymbol s) -- Defined in ‘GHC.TypeLits’
 instance GHC.Show.Show GHC.TypeLits.SomeChar -- Defined in ‘GHC.TypeLits’
 instance GHC.Show.Show GHC.TypeLits.SomeSymbol -- Defined in ‘GHC.TypeLits’
-instance forall (n :: GHC.TypeNats.Nat). GHC.Show.Show (GHC.TypeNats.SNat n) -- Defined in ‘GHC.TypeNats’
+instance forall (n :: GHC.Num.Natural.Natural). GHC.Show.Show (GHC.Internal.TypeNats.SNat n) -- Defined in ‘GHC.TypeNats’
 instance GHC.Show.Show GHC.TypeNats.SomeNat -- Defined in ‘GHC.TypeNats’
 instance [safe] GHC.Show.Show System.Timeout.Timeout -- Defined in ‘System.Timeout’
 instance GHC.Show.Show Text.Read.Lex.Lexeme -- Defined in ‘Text.Read.Lex’
@@ -12267,12 +12267,12 @@ instance GHC.Classes.Eq GHC.Num.BigNat.BigNat -- Defined in ‘GHC.Num.BigNat’
 instance GHC.Classes.Eq GHC.Num.Natural.Natural -- Defined in ‘GHC.Num.Natural’
 instance forall a. GHC.Classes.Eq (GHC.StableName.StableName a) -- Defined in ‘GHC.StableName’
 instance GHC.Classes.Eq GHC.Stack.CloneStack.StackEntry -- Defined in ‘GHC.Stack.CloneStack’
-instance forall (c :: GHC.Types.Char). GHC.Classes.Eq (GHC.TypeLits.SChar c) -- Defined in ‘GHC.TypeLits’
-instance forall (s :: GHC.Types.Symbol). GHC.Classes.Eq (GHC.TypeLits.SSymbol s) -- Defined in ‘GHC.TypeLits’
 instance GHC.Classes.Eq GHC.TypeLits.SomeChar -- Defined in ‘GHC.TypeLits’
 instance GHC.Classes.Eq GHC.TypeLits.SomeSymbol -- Defined in ‘GHC.TypeLits’
-instance forall (n :: GHC.TypeNats.Nat). GHC.Classes.Eq (GHC.TypeNats.SNat n) -- Defined in ‘GHC.TypeNats’
 instance GHC.Classes.Eq GHC.TypeNats.SomeNat -- Defined in ‘GHC.TypeNats’
+instance forall (c :: GHC.Types.Char). GHC.Classes.Eq (GHC.Internal.TypeLits.SChar c) -- Defined in ‘GHC.Internal.TypeLits’
+instance forall (s :: GHC.Types.Symbol). GHC.Classes.Eq (GHC.Internal.TypeLits.SSymbol s) -- Defined in ‘GHC.Internal.TypeLits’
+instance forall (n :: GHC.Num.Natural.Natural). GHC.Classes.Eq (GHC.Internal.TypeNats.SNat n) -- Defined in ‘GHC.Internal.TypeNats’
 instance [safe] GHC.Classes.Eq System.Timeout.Timeout -- Defined in ‘System.Timeout’
 instance GHC.Classes.Eq Text.Read.Lex.Lexeme -- Defined in ‘Text.Read.Lex’
 instance GHC.Classes.Eq Text.Read.Lex.Number -- Defined in ‘Text.Read.Lex’
@@ -12394,9 +12394,9 @@ instance GHC.Classes.Ord GHC.IO.IOMode.IOMode -- Defined in ‘GHC.IO.IOMode’
 instance GHC.Classes.Ord GHC.Num.Integer.Integer -- Defined in ‘GHC.Num.Integer’
 instance GHC.Classes.Ord GHC.Num.BigNat.BigNat -- Defined in ‘GHC.Num.BigNat’
 instance GHC.Classes.Ord GHC.Num.Natural.Natural -- Defined in ‘GHC.Num.Natural’
-instance forall (c :: GHC.Types.Char). GHC.Classes.Ord (GHC.TypeLits.SChar c) -- Defined in ‘GHC.TypeLits’
-instance forall (s :: GHC.Types.Symbol). GHC.Classes.Ord (GHC.TypeLits.SSymbol s) -- Defined in ‘GHC.TypeLits’
 instance GHC.Classes.Ord GHC.TypeLits.SomeChar -- Defined in ‘GHC.TypeLits’
 instance GHC.Classes.Ord GHC.TypeLits.SomeSymbol -- Defined in ‘GHC.TypeLits’
-instance forall (n :: GHC.TypeNats.Nat). GHC.Classes.Ord (GHC.TypeNats.SNat n) -- Defined in ‘GHC.TypeNats’
 instance GHC.Classes.Ord GHC.TypeNats.SomeNat -- Defined in ‘GHC.TypeNats’
+instance forall (c :: GHC.Types.Char). GHC.Classes.Ord (GHC.Internal.TypeLits.SChar c) -- Defined in ‘GHC.Internal.TypeLits’
+instance forall (s :: GHC.Types.Symbol). GHC.Classes.Ord (GHC.Internal.TypeLits.SSymbol s) -- Defined in ‘GHC.Internal.TypeLits’
+instance forall (n :: GHC.Num.Natural.Natural). GHC.Classes.Ord (GHC.Internal.TypeNats.SNat n) -- Defined in ‘GHC.Internal.TypeNats’

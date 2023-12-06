@@ -18,6 +18,9 @@
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE RoleAnnotations #-}
 
+-- orphan instances for SNat
+{-# OPTIONS_GHC -Wno-orphans #-}
+
 {-| This module is an internal GHC module.  It declares the constants used
 in the implementation of type-level natural numbers.  The programmer interface
 for working with type-level naturals should be defined in a separate library.
@@ -66,6 +69,8 @@ import Data.Type.Ord(OrderingI(..), type (<=), type (<=?))
 import Unsafe.Coerce(unsafeCoerce)
 
 import GHC.TypeNats.Internal(CmpNat)
+
+import GHC.Internal.TypeNats
 
 -- | A type synonym for 'Natural'.
 --
@@ -329,23 +334,7 @@ cmpNat x y = case compare (natVal x) (natVal y) of
 --------------------------------------------------------------------------------
 -- Singleton values
 
--- | A value-level witness for a type-level natural number. This is commonly
--- referred to as a /singleton/ type, as for each @n@, there is a single value
--- that inhabits the type @'SNat' n@ (aside from bottom).
---
--- The definition of 'SNat' is intentionally left abstract. To obtain an 'SNat'
--- value, use one of the following:
---
--- 1. The 'natSing' method of 'KnownNat'.
---
--- 2. The @SNat@ pattern synonym.
---
--- 3. The 'withSomeSNat' function, which creates an 'SNat' from a 'Natural'
---    number.
---
--- @since 4.18.0.0
-newtype SNat (n :: Nat) = UnsafeSNat Natural
-type role SNat nominal
+
 
 -- | A explicitly bidirectional pattern synonym relating an 'SNat' to a
 -- 'KnownNat' constraint.
@@ -380,14 +369,6 @@ data KnownNatInstance (n :: Nat) where
 -- synonym.
 knownNatInstance :: SNat n -> KnownNatInstance n
 knownNatInstance sn = withKnownNat sn KnownNatInstance
-
--- | @since 4.19.0.0
-instance Eq (SNat n) where
-  _ == _ = True
-
--- | @since 4.19.0.0
-instance Ord (SNat n) where
-  compare _ _ = EQ
 
 -- | @since 4.18.0.0
 instance Show (SNat n) where

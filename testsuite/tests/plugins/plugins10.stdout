@@ -4,6 +4,8 @@ interfacePlugin: Language.Haskell.TH
 interfacePlugin: Language.Haskell.TH.Quote
 interfacePlugin: GHC.Base
 interfacePlugin: GHC.Float
+interfacePlugin: GHC.TypeLits
+interfacePlugin: GHC.TypeNats
 interfacePlugin: GHC.Prim.Ext
 interfacePlugin: Language.Haskell.TH.Syntax
 typeCheckPlugin (rn)

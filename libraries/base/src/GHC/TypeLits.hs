@@ -17,6 +17,9 @@
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE RoleAnnotations #-}
 
+-- orphan instances for SChar and SSymbol
+{-# OPTIONS_GHC -Wno-orphans #-}
+
 {-|
 GHC's @DataKinds@ language extension lifts data constructors, natural
 numbers, and strings to the type level. This module provides the
@@ -69,7 +72,7 @@ module GHC.TypeLits
 
   ) where
 
-import GHC.Base ( Bool(..), Eq(..), Functor(..), Ord(..), Ordering(..), String
+import GHC.Base ( Eq(..), Functor(..), Ord(..), Ordering(..), String
                 , (.), otherwise, withDict, Void, (++)
                 , errorWithoutStackTrace)
 import GHC.Types(Symbol, Char, TYPE)
@@ -89,6 +92,8 @@ import Unsafe.Coerce(unsafeCoerce)
 
 import GHC.TypeLits.Internal(CmpSymbol, CmpChar)
 import qualified GHC.TypeNats as N
+
+import GHC.Internal.TypeLits
 
 --------------------------------------------------------------------------------
 
@@ -325,24 +330,6 @@ withSomeSNat n k
   | n >= 0    = N.withSomeSNat (fromInteger n) (\sn -> k (Just sn))
   | otherwise = k Nothing
 
--- | A value-level witness for a type-level symbol. This is commonly referred
--- to as a /singleton/ type, as for each @s@, there is a single value that
--- inhabits the type @'SSymbol' s@ (aside from bottom).
---
--- The definition of 'SSymbol' is intentionally left abstract. To obtain an
--- 'SSymbol' value, use one of the following:
---
--- 1. The 'symbolSing' method of 'KnownSymbol'.
---
--- 2. The @SSymbol@ pattern synonym.
---
--- 3. The 'withSomeSSymbol' function, which creates an 'SSymbol' from a
---    'String'.
---
--- @since 4.18.0.0
-newtype SSymbol (s :: Symbol) = UnsafeSSymbol String
-type role SSymbol nominal
-
 -- | A explicitly bidirectional pattern synonym relating an 'SSymbol' to a
 -- 'KnownSymbol' constraint.
 --
@@ -376,14 +363,6 @@ data KnownSymbolInstance (s :: Symbol) where
 -- synonym.
 knownSymbolInstance :: SSymbol s -> KnownSymbolInstance s
 knownSymbolInstance ss = withKnownSymbol ss KnownSymbolInstance
-
--- | @since 4.19.0.0
-instance Eq (SSymbol s) where
-  _ == _ = True
-
--- | @since 4.19.0.0
-instance Ord (SSymbol s) where
-  compare _ _ = EQ
 
 -- | @since 4.18.0.0
 instance Show (SSymbol s) where
@@ -429,22 +408,7 @@ withSomeSSymbol s k = k (UnsafeSSymbol s)
 -- For details see Note [NOINLINE withSomeSNat] in "GHC.TypeNats"
 -- The issue described there applies to `withSomeSSymbol` as well.
 
--- | A value-level witness for a type-level character. This is commonly referred
--- to as a /singleton/ type, as for each @c@, there is a single value that
--- inhabits the type @'SChar' c@ (aside from bottom).
---
--- The definition of 'SChar' is intentionally left abstract. To obtain an
--- 'SChar' value, use one of the following:
---
--- 1. The 'charSing' method of 'KnownChar'.
---
--- 2. The @SChar@ pattern synonym.
---
--- 3. The 'withSomeSChar' function, which creates an 'SChar' from a 'Char'.
---
--- @since 4.18.0.0
-newtype SChar (s :: Char) = UnsafeSChar Char
-type role SChar nominal
+
 
 -- | A explicitly bidirectional pattern synonym relating an 'SChar' to a
 -- 'KnownChar' constraint.
@@ -479,14 +443,6 @@ data KnownCharInstance (n :: Char) where
 -- synonym.
 knownCharInstance :: SChar c -> KnownCharInstance c
 knownCharInstance sc = withKnownChar sc KnownCharInstance
-
--- | @since 4.19.0.0
-instance Eq (SChar c) where
-  _ == _ = True
-
--- | @since 4.19.0.0
-instance Ord (SChar c) where
-  compare _ _ = EQ
 
 -- | @since 4.18.0.0
 instance Show (SChar c) where
