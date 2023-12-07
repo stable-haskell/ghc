@@ -206,7 +206,7 @@ defaultUnfoldingOpts = UnfoldingOpts
       -- into the interface file.)
 
    , unfoldingUseThreshold   = 75
-      -- Adjusted 90 -> 80 when adding discounts for free variables which
+      -- Adjusted 90 -> 75 when adding discounts for free variables which
       -- generally make things more likely to inline.  Reducing the threshold
       -- eliminates some undesirable compile-time regressions (e.g. T10412a)
       --
@@ -822,7 +822,9 @@ vanillaCallSize n_val_args voids = 10 * (1 + n_val_args - voids)
 
 -- | The size of a jump to a join point
 jumpSize :: Int -> Int -> Size
-jumpSize n_val_args voids = 2 * (1 + n_val_args - voids)
+jumpSize n_val_args voids = 10 * (n_val_args - voids)
+  -- Not so much smaller than an ordinary call;
+  --   Trying the effect of not charging for the function head itself
   -- A jump is 20% the size of a function call. Making jumps free reopens
   -- bug #6048, but making them any more expensive loses a 21% improvement in
   -- spectral/puzzle. TODO Perhaps adjusting the default threshold would be a
@@ -912,7 +914,7 @@ caseSize scrut_id alts
 
 caseElimDiscount :: Discount
 -- Bonus for eliminating a case
-caseElimDiscount = 15
+caseElimDiscount = 10
 
 {- Note [Bale out on very wide case expressions]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
