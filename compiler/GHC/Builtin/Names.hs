@@ -1024,7 +1024,7 @@ unpackCStringName, unpackCStringFoldrName,
     unpackCStringAppendName, unpackCStringAppendUtf8Name,
     eqStringName, cstringLengthName :: Name
 cstringLengthName       = varQual gHC_CSTRING (fsLit "cstringLength#") cstringLengthIdKey
-eqStringName            = varQual gHC_BASE (fsLit "eqString")  eqStringIdKey
+eqStringName            = varQual gHC_CLASSES (fsLit "eqString")  eqStringIdKey
 
 unpackCStringName       = varQual gHC_CSTRING (fsLit "unpackCString#") unpackCStringIdKey
 unpackCStringAppendName = varQual gHC_CSTRING (fsLit "unpackAppendCString#") unpackCStringAppendIdKey

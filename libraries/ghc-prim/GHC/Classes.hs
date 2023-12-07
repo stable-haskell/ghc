@@ -47,7 +47,8 @@ module GHC.Classes(
     eqInt, neInt,
     eqWord, neWord,
     eqChar, neChar,
-    eqFloat, eqDouble,
+    eqFloat, eqDouble, eqString,
+
     -- ** Monomorphic comparison operators
     gtInt, geInt, leInt, ltInt, compareInt, compareInt#,
     gtWord, geWord, leWord, ltWord, compareWord, compareWord#,
@@ -146,10 +147,8 @@ class  Eq a  where
 
     {-# INLINE (/=) #-}
     {-# INLINE (==) #-}
-    -- Write these with no arg, so that they inline even as the argument of
-    -- the DFun.  Then the RULES for eqList can fire.
-    (/=) = \x y -> not (x == y)
-    (==) = \x y -> not (x /= y)
+    (/=) x y = not (x == y)
+    (==) x y = not (x /= y)
     {-# MINIMAL (==) | (/=) #-}
 
 deriving instance Eq ()
@@ -187,6 +186,7 @@ deriving instance (Eq a, Eq b, Eq c, Eq d, Eq e, Eq f, Eq g,
                    Eq h, Eq i, Eq j, Eq k, Eq l, Eq m, Eq n, Eq o)
                => Eq (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o)
 
+----------------------------------------------
 instance (Eq a) => Eq [a] where
     {-# SPECIALISE instance Eq [[Char]] #-}
     {-# SPECIALISE instance Eq [Char] #-}
@@ -196,18 +196,47 @@ instance (Eq a) => Eq [a] where
 -- These rules avoid the recursive function when
 -- one of the arguments is the empty list.  We want
 -- good code for    xs == []  or    xs /= []
+-- The sequence is this:
+--   (/=) @ty ($dEqList d) xs []
+--   -->{ClassOp rule} $dm/= @ty d xs []
+--   -->{inline $dm/=} not (eqList d xs [])
+-- and now the eqList1 rule can fire
 {-# RULES
-"eqList1" forall xs. eqList xs [] = case xs of { [] -> True; _ -> False }
-"eqList2" forall ys. eqList [] ys = case ys of { [] -> True; _ -> False }
+"eqList1" forall xs. eqList xs [] = null xs
+"eqList2" forall xs. eqList [] xs = null xs
   #-}
 
 eqList :: Eq a => [a] -> [a] -> Bool
-{-# NOINLINE [1] eqList #-}  -- Give the RULES eqList1/eqList2 a chance to fire
 -- eqList should auto-specialise for the same types as specialise instance Eq above
 eqList []     []     = True
 eqList (x:xs) (y:ys) = x == y && eqList xs ys
-eqList _xs   _ys    = False
+eqList _xs    _ys    = False
 
+-- We give a manual specialisation for eqList @Char = eqString, so that we can give
+-- eqString a BuiltInRule in GHC.Core.Opt.ConstantFold:
+--      eqString (unpackCString# (Lit s1)) (unpackCString# (Lit s2)) = s1==s2
+-- Tiresomely, we have to duplicate rules eqList1 and eqList2
+-- (The manual specialistion RULE "eqString" should mean that we don't
+--  auto-specialise eqList @String.)
+{-# RULES
+"eqString" eqList = eqString
+"eqString1" forall xs. eqString xs [] = null xs
+"eqString2" forall xs. eqString [] xs = null xs
+ #-}
+
+null :: [a] -> Bool
+-- Defined in base:Data.List but we need it here
+null []    = True
+null (_:_) = False
+
+-- | This 'String' equality predicate is used when desugaring
+-- pattern-matches against strings.
+eqString :: [Char] -> [Char] -> Bool
+eqString []       []       = True
+eqString (c1:cs1) (c2:cs2) = c1 == c2 && cs1 `eqString` cs2
+eqString _        _        = False
+
+----------------------------------------------
 deriving instance Eq Module
 
 instance Eq TrName where
