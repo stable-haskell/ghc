@@ -822,9 +822,9 @@ vanillaCallSize n_val_args voids = 10 * (1 + n_val_args - voids)
 
 -- | The size of a jump to a join point
 jumpSize :: Int -> Int -> Size
-jumpSize n_val_args voids = 10 * (n_val_args - voids)
-  -- Not so much smaller than an ordinary call;
-  --   Trying the effect of not charging for the function head itself
+jumpSize n_val_args voids = 2 * (1 + n_val_args - voids)
+  -- A jump isn't so much smaller than a function call, but it's definitely
+  --   a known, exactly saturated call, so we make it very cheap
   -- A jump is 20% the size of a function call. Making jumps free reopens
   -- bug #6048, but making them any more expensive loses a 21% improvement in
   -- spectral/puzzle. TODO Perhaps adjusting the default threshold would be a
@@ -874,9 +874,12 @@ funSize opts (avs,_) fun n_val_args voids
 
 lamSize :: UnfoldingOpts -> ExprTree
 -- Does not include the size of the body, just the lambda itself
+lamSize _ = etZero  -- Lambdas themselves cost nothing
+{-
 lamSize opts = ExprTree { et_size = 10, et_wc_tot = 10
                         , et_cases = emptyBag
                         , et_ret = unfoldingFunAppDiscount opts }
+-}
 
 conSize :: DataCon -> Int -> ExprTree
 -- Does not need to include the size of the arguments themselves
