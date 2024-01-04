@@ -172,7 +172,6 @@ import GHC.Iface.Ext.Debug  ( diffFile, validateScopes )
 import GHC.Core
 import GHC.Core.Lint.Interactive ( interactiveInScope )
 import GHC.Core.Tidy           ( tidyExpr )
-import GHC.Core.Type           ( Type, Kind )
 import GHC.Core.Utils          ( exprType )
 import GHC.Core.ConLike
 import GHC.Core.Opt.Pipeline
@@ -181,8 +180,11 @@ import GHC.Core.TyCon
 import GHC.Core.InstEnv
 import GHC.Core.FamInstEnv
 import GHC.Core.Rules
+import GHC.Core.Seq
 import GHC.Core.Stats
-import GHC.Core.LateCC (addLateCostCentresPgm)
+import GHC.Core.LateCC
+import GHC.Core.LateCC.TopLevelBinds
+import GHC.Core.LateCC.OverloadedCalls
 
 
 import GHC.CoreToStg.Prep
@@ -194,6 +196,7 @@ import GHC.Parser.Lexer as Lexer
 
 import GHC.Tc.Module
 import GHC.Tc.Utils.Monad
+import GHC.Tc.Utils.TcType
 import GHC.Tc.Zonk.Env ( ZonkFlexi (DefaultFlexi) )
 
 import GHC.Stg.Syntax
@@ -264,6 +267,7 @@ import GHC.Data.StringBuffer
 import qualified GHC.Data.Stream as Stream
 import GHC.Data.Stream (Stream)
 import GHC.Data.Maybe
+import qualified GHC.Data.Strict as Strict
 
 import GHC.SysTools (initSysTools)
 import GHC.SysTools.BaseDir (findTopDir)
@@ -294,7 +298,6 @@ import GHC.StgToCmm.Utils (IPEStats)
 import GHC.Types.Unique.FM
 import GHC.Types.Unique.DFM
 import GHC.Cmm.Config (CmmConfig)
-import GHC.Types.CostCentre.State (newCostCentreState)
 
 
 {- **********************************************************************
@@ -1788,22 +1791,73 @@ hscGenHardCode hsc_env cgguts location output_filename = do
 
 
         -------------------
-        -- Insert late cost centres if enabled.
+        -- Insert late cost centres on top level bindings if enabled.
         -- If `-fprof-late-inline` is enabled we can skip this, as it will have added
         -- a superset of cost centres we would add here already.
 
-        (late_cc_binds, late_local_ccs, cc_state) <-
-              if gopt Opt_ProfLateCcs dflags && not (gopt Opt_ProfLateInlineCcs dflags)
-                  then
-                    withTiming
-                      logger
-                      (text "LateCCs"<+>brackets (ppr this_mod))
-                      (const ())
-                      $ {-# SCC lateCC #-} do
-                        (binds, late_ccs, cc_state) <- addLateCostCentresPgm dflags logger this_mod core_binds
-                        return ( binds, (S.toList late_ccs `mappend` local_ccs ), cc_state)
-                  else
-                    return (core_binds, local_ccs, newCostCentreState)
+        -- If `-fprof-late-overloaded` is enabled, only add CCs to bindings for
+        -- overloaded functions.
+        let
+          topLevelCCPred :: CoreExpr -> Bool
+          topLevelCCPred =
+            if gopt Opt_ProfLateOverloadedCcs dflags then
+              isOverloadedTy . exprType
+            else
+              const True
+
+          doLateTopLevelCcs :: Bool
+          doLateTopLevelCcs =
+               (    gopt Opt_ProfLateCcs dflags
+                 || gopt Opt_ProfLateOverloadedCcs dflags
+               )
+            && not (gopt Opt_ProfLateInlineCcs dflags)
+
+          lateCCEnv :: LateCCEnv
+          lateCCEnv =
+            LateCCEnv
+              { lateCCEnv_module = this_mod
+              , lateCCEnv_file = fsLit <$> ml_hs_file location
+              , lateCCEnv_countEntries= gopt Opt_ProfCountEntries dflags
+              , lateCCEnv_collectCCs = True
+              }
+
+        (top_level_cc_binds, top_level_late_cc_state) <-
+          if doLateTopLevelCcs then do
+              withTiming
+                logger
+                (text "LateTopLevelCCs"<+>brackets (ppr this_mod))
+                (\(binds, late_cc_state) -> seqBinds binds `seq` late_cc_state `seq` ())
+                $ {-# SCC lateTopLevelCCs #-} do
+                  pure $
+                    addLateCostCentres
+                      lateCCEnv
+                      (initLateCCState ())
+                      (topLevelBindsCC topLevelCCPred)
+                      core_binds
+          else
+            return (core_binds, initLateCCState ())
+
+        (late_cc_binds, late_cc_state) <-
+          if gopt Opt_ProfLateoverloadedCallsCCs dflags then
+            withTiming
+                logger
+                (text "LateOverloadedCallsCCs"<+>brackets (ppr this_mod))
+                (\(binds, late_cc_state) -> seqBinds binds `seq` late_cc_state `seq` ())
+                $ {-# SCC lateoverloadedCallsCCs #-} do
+                  pure $
+                    addLateCostCentres
+                      lateCCEnv
+                      (top_level_late_cc_state { lateCCState_extra = Strict.Nothing })
+                      overloadedCallsCC
+                      top_level_cc_binds
+          else
+            return
+              ( top_level_cc_binds
+              , top_level_late_cc_state { lateCCState_extra = Strict.Nothing }
+              )
+
+        when (dopt Opt_D_dump_late_cc dflags || dopt Opt_D_verbose_core2core dflags) $
+          putDumpFileMaybe logger Opt_D_dump_late_cc "LateCC" FormatCore (vcat (map ppr late_cc_binds))
 
         -------------------
         -- Run late plugins
@@ -1817,7 +1871,7 @@ hscGenHardCode hsc_env cgguts location output_filename = do
               cg_hpc_info      = hpc_info,
               cg_spt_entries   = spt_entries,
               cg_binds         = late_binds,
-              cg_ccs           = late_local_ccs'
+              cg_ccs           = late_local_ccs
             }
           , _
           ) <-
@@ -1830,9 +1884,9 @@ hscGenHardCode hsc_env cgguts location output_filename = do
               (($ hsc_env) . latePlugin)
                 ( cgguts
                     { cg_binds = late_cc_binds
-                    , cg_ccs = late_local_ccs
+                    , cg_ccs = S.toList (lateCCState_ccs late_cc_state) ++ local_ccs
                     }
-                , cc_state
+                , lateCCState_ccState late_cc_state
                 )
 
         let
@@ -1873,7 +1927,7 @@ hscGenHardCode hsc_env cgguts location output_filename = do
         let (stg_binds,_stg_deps) = unzip stg_binds_with_deps
 
         let cost_centre_info =
-              (late_local_ccs' ++ caf_ccs, caf_cc_stacks)
+              (late_local_ccs ++ caf_ccs, caf_cc_stacks)
             platform = targetPlatform dflags
             prof_init
               | sccProfilingEnabled dflags = profilingInitCode platform this_mod cost_centre_info
