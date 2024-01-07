@@ -1640,37 +1640,94 @@ and possibly to bear similarities to a 1982 paper by Richard O'Keefe:
 
 Benchmarks show it to be often 2x the speed of the previous implementation.
 Fixes ticket https://gitlab.haskell.org/ghc/ghc/issues/2143
+
+Further improved using a four-way merge, with an additional performance increase of ~20%
+https://gitlab.haskell.org/ghc/ghc/issues/24280
 -}
 
 sort = sortBy compare
-sortBy cmp = mergeAll . sequences
+sortBy cmp ns
+  | []        <- ns = []
+  | [a]       <- ns = [a]
+  | [a,b]     <- ns = merge2 [a] [b]
+  | [a,b,c]   <- ns = merge3 [a] [b] [c]
+  | [a,b,c,d] <- ns = merge4 [a] [b] [c] [d]
+  | otherwise       = merge_all (sequences ns)
   where
+    x `gt` y = x `cmp` y == GT
+
     sequences (a:b:xs)
-      | a `cmp` b == GT = descending b [a]  xs
-      | otherwise       = ascending  b (a:) xs
+      | a `gt` b  = descending b [a]  xs
+      | otherwise = ascending  b (a:) xs
     sequences xs = [xs]
 
     descending a as (b:bs)
-      | a `cmp` b == GT = descending b (a:as) bs
-    descending a as bs  = (a:as): sequences bs
+      | a `gt` b       = descending b (a:as) bs
+    descending a as bs = (a:as): sequences bs
 
     ascending a as (b:bs)
-      | a `cmp` b /= GT = ascending b (\ys -> as (a:ys)) bs
-    ascending a as bs   = let !x = as [a]
-                          in x : sequences bs
+      | not (a `gt` b) = ascending b (\ys -> as (a:ys)) bs
+    ascending a as bs  = let !x = as [a]
+                         in x : sequences bs
 
-    mergeAll [x] = x
-    mergeAll xs  = mergeAll (mergePairs xs)
+    merge_all [x] = x
+    merge_all xs  = merge_all (reduce_sequences xs)
 
-    mergePairs (a:b:xs) = let !x = merge a b
-                          in x : mergePairs xs
-    mergePairs xs       = xs
+    reduce_sequences []            = []
+    reduce_sequences [a]           = [a]
+    reduce_sequences [a,b]         = [merge2 a b]
+    reduce_sequences [a,b,c]       = [merge3 a b c]
+    reduce_sequences [a,b,c,d,e]   = [merge2 a b, merge3 c d e]
+    reduce_sequences [a,b,c,d,e,f] = [merge3 a b c, merge3 d e f]
+    reduce_sequences (a:b:c:d:xs)  = let !x = merge4 a b c d
+                                     in x : reduce_sequences xs
 
-    merge as@(a:as') bs@(b:bs')
-      | a `cmp` b == GT = b:merge as  bs'
-      | otherwise       = a:merge as' bs
-    merge [] bs         = bs
-    merge as []         = as
+    merge2 as@(a:as') bs@(b:bs')
+      | a `gt` b  = b : merge2 as  bs'
+      | otherwise = a : merge2 as' bs
+    merge2 [] bs   = bs
+    merge2 as []   = as
+
+    -- `merge3` is a manually fused version of `merge2 (merge2 as bs) cs`
+    merge3 as@(a:as') bs@(b:bs') cs
+      | a `gt` b  = merge3X b as  bs' cs
+      | otherwise = merge3X a as' bs  cs
+    merge3 [] bs cs = merge2 bs cs
+    merge3 as [] cs = merge2 as cs
+
+    merge3X x as bs cs@(c:cs')
+      | x `gt` c  = c : merge3X x as bs cs'
+      | otherwise = x : merge3    as bs cs
+    merge3X x as bs [] = x : merge2 as bs
+
+    merge3Y as@(a:as') y bs cs
+      | a `gt` y  = y : merge3  as    bs cs
+      | otherwise = a : merge3Y as' y bs cs
+    merge3Y [] x bs cs = x : merge2 bs cs
+
+    -- `merge4 as bs cs ds` is (essentially) a manually fused version of
+    -- `merge2 (merge2 as bs) (merge2 cs ds)`
+    merge4 as@(a:as') bs@(b:bs') cs ds
+      | a `gt` b  = merge4X b as  bs' cs ds
+      | otherwise = merge4X a as' bs  cs ds
+    merge4 [] bs cs ds = merge3 bs cs ds
+    merge4 as [] cs ds = merge3 as cs ds
+
+    merge4X x as bs cs@(c:cs') ds@(d:ds')
+      | c `gt` d  = merge4XY x as bs d cs  ds'
+      | otherwise = merge4XY x as bs c cs' ds
+    merge4X x as bs [] ds = merge3X x as bs ds
+    merge4X x as bs cs [] = merge3X x as bs cs
+
+    merge4Y as@(a:as') bs@(b:bs') y cs ds
+      | a `gt` b  = merge4XY b as  bs' y cs ds
+      | otherwise = merge4XY a as' bs  y cs ds
+    merge4Y as [] y cs ds = merge3Y as y cs ds
+    merge4Y [] bs y cs ds = merge3Y bs y cs ds
+
+    merge4XY x as bs y cs ds
+      | x `gt` y  = y : merge4X x as bs   cs ds
+      | otherwise = x : merge4Y   as bs y cs ds
 
 {-
 sortBy cmp l = mergesort cmp l
