@@ -287,7 +287,7 @@ tryUnfolding logger env fn cont unf_template unf_cache guidance
                            , text "adjusted_size =" <+> ppr adjusted_size ]
 
   where
-    (arg_infos, call_cont) = contArgs cont
+    (arg_infos, call_cont) = contArgDigests cont
     n_val_args       = length arg_infos
     lone_variable    = loneVariable cont
     cont_info        = interestingCallContext env call_cont
@@ -540,44 +540,13 @@ which Roman did.
 *                                                                      *
 ********************************************************************* -}
 
-{- Note [Interesting arguments]
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-An argument is interesting if it deserves a discount for unfoldings
-with a discount in that argument position.  The idea is to avoid
-unfolding a function that is applied only to variables that have no
-unfolding (i.e. they are probably lambda bound): f x y z There is
-little point in inlining f here.
-
-Generally, *values* (like (C a b) and (\x.e)) deserve discounts.  But
-we must look through lets, eg (let x = e in C a b), because the let will
-float, exposing the value, if we inline.  That makes it different to
-exprIsHNF.
-
-Before 2009 we said it was interesting if the argument had *any* structure
-at all; i.e. (hasSomeUnfolding v).  But does too much inlining; see #3016.
-
-But we don't regard (f x y) as interesting, unless f is unsaturated.
-If it's saturated and f hasn't inlined, then it's probably not going
-to now!
-
-Note [Conlike is interesting]
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Consider
-        f d = ...((*) d x y)...
-        ... f (df d')...
-where df is con-like. Then we'd really like to inline 'f' so that the
-rule for (*) (df d) can fire.  To do this
-  a) we give a discount for being an argument of a class-op (eg (*) d)
-  b) we say that a con-like argument (eg (df d)) is interesting
--}
-
 -------------------
-contArgs :: SimplCont -> ( [ArgDigest]   -- One for each value argument
-                         , SimplCont )    -- The rest
+contArgDigests :: SimplCont -> ( [ArgDigest]   -- One for each value argument
+                               , SimplCont )    -- The rest
 -- Summarises value args, discards type args and casts.
 -- The returned continuation of the call is only used to
 -- answer questions like "are you interesting?"
-contArgs cont = go [] cont
+contArgDigests cont = go [] cont
   where
     go args (ApplyToVal { sc_arg = arg, sc_env = se, sc_cont = k })
                                         = go (exprDigest se arg : args) k
@@ -617,14 +586,14 @@ exprDigest env e = go env e []
       | let env' = env `addNewInScopeIds` bindersOf b
       = go env' e as
 
-{-  -- Look through single-branch case-expressions; like lets
-    -- This is a bit aggressive, because we might have
+{-  -- I considered looking through single-branch case-expressions; like lets
+    -- But this is a bit too aggressive, because we might have
     --     f (case x of (a,b) -> (b,a))
     -- where   f p = Just (case p of (a,b) -> a)
     -- So f is lazy, and we won't get cancellation of the case in the body.
     --
-    -- If f is strict and we don't inline, we'll float the case out, so we don't
-    -- need to be clever here.
+    -- If f is strict and we don't inline, we'll float the case out, so in fact
+    -- we don't need to be clever here.
     go env (Case _ b _ alts) as
       | [Alt _ bs e] <- alts
       , let env' = env `addNewInScopeIds` (b:bs)
@@ -673,12 +642,18 @@ exprDigest env e = go env e []
                      -- discount.  But the ArgDigest had better be good enough to
                      -- attract that ScrutOf discount!  We want liftM2 to be inlined
                      -- in its use in the liftA2 method of instance Applicative (ST s)
+                     -- See Note [DFun applications are interesting]
                      --
                      -- Actually in spectral/puzzle I found that we got a big (40%!)
                      -- benefit from    let newDest = ... in case (notSeen newDest) of ...
                      -- We want to inline notSeen.  The argument has structure (its RHS)
                      -- and in fact if we inline notSeen, newDest stops being a thunk
                      -- (SPJ GHC log 13 Nov).
+
+      -- ToDo:
+      --   * Maybe we should use ArgIsNot   for (isConLikeUnfolding unfolding)
+      --                     and ArgNonTriv for (hasSomeUnfolding unfolding)
+      --   * Perhaps we should use ArgIsNot [] for (isConLikeId f)
 
       | OtherCon cs <- unfolding
       = ArgIsNot cs
@@ -695,4 +670,16 @@ exprDigest env e = go env e []
       = ArgNoInfo
       where
         unfolding = idUnfolding f
+
+
+{- Note [DFun applications are interesting]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Consider
+        f d = ...((*) d x y)...
+        ... f (df d')...
+where df is con-like. Then we'd really like to inline 'f' so that the
+rule for (*) (df d) can fire.  To do this
+  a) we give a discount for being an argument of a class-op (eg (*) d)
+  b) we say that a con-like argument (eg (df d)) has digest (ArgIsNot [])
+-}
 

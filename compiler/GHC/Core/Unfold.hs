@@ -19,7 +19,7 @@ find, unsurprisingly, a Core expression.
 module GHC.Core.Unfold (
         Unfolding, UnfoldingGuidance,   -- Abstract types
 
-        ExprTree, exprTree, exprTreeSize, altTreesSize,
+        ExprTree, mkExprTree, exprTreeSize, altTreesSize,
         exprTreeWillInline, couldBeSmallEnoughToInline,
         ArgDigest(..), hasArgInfo,
 
@@ -141,13 +141,12 @@ The question is whether or not to inline f = rhs.
 The key idea is to abstract `rhs` to an ExprTree, which gives a measure of
 size, but records structure for case-expressions.
 
-
 The moving parts
 -----------------
 * An unfolding is accompanied (in its UnfoldingGuidance) with its GHC.Core.ExprTree,
-  computed by GHC.Core.Unfold.exprTree.
+  computed by GHC.Core.Unfold.mkExprTree.
 
-* At a call site, GHC.Core.Opt.Simplify.Inline.contArgs constructs an ArgDigest
+* At a call site, GHC.Core.Opt.Simplify.Inline.contArgDigests constructs an ArgDigest
   for each value argument. This reflects any nested data construtors.
 
 * Then GHC.Core.Unfold.exprTreeSize takes information about the context of the
@@ -315,7 +314,7 @@ calcUnfoldingGuidance opts is_top_bottoming (Tick t expr)
   | not (tickishIsCode t)  -- non-code ticks don't matter for unfolding
   = calcUnfoldingGuidance opts is_top_bottoming expr
 calcUnfoldingGuidance opts is_top_bottoming expr
-  = case exprTree opts val_bndrs body of
+  = case mkExprTree opts val_bndrs body of
       Nothing -> UnfNever
       Just et@(ExprTree { et_wc_tot = tot })
         | uncondInline expr n_val_bndrs tot
@@ -340,7 +339,7 @@ couldBeSmallEnoughToInline :: UnfoldingOpts -> Size -> CoreExpr -> Bool
 -- w/flaggery.  Just the same as smallEnoughToInline, except that it has no
 -- actual arguments.
 couldBeSmallEnoughToInline opts threshold rhs
-  = isJust (exprTree opts' [] body)
+  = isJust (mkExprTree opts' [] body)
   where
     opts' = opts { unfoldingCreationThreshold = threshold }
             -- We use a different (and larger) theshold here for
@@ -470,7 +469,7 @@ Given a function      f = \x1...xn. body
 in the typical case we will record an UnfoldingGuidance of
 
    UnfoldIfGoodArgs { ug_args = filter isValArg [x1,..,xn]
-                    , ug_tree = exprTree body }
+                    , ug_tree = mkExprTree body }
 
 The ug_tree :: ExprTree is an abstaction or "digest" of the body
 of the function.  An ExprTree has
@@ -481,9 +480,11 @@ of the function.  An ExprTree has
   * A ScrutOf for each other interesting use a variable, giving a discount
     to apply if that argument has structure. e.g. a function that is applied.
 
-How exprTree works
+How mkExprTree works
 ------------------
-We maintain in ETVars:
+ETVars maintains a partition of in-scope variables into avs, lvs and fvs,
+defined as follows:
+
 * avs: argument variables, or variables bound by a case on an
        argument variable.
 
@@ -521,7 +522,7 @@ Wrinkles:
 (ET1) We must be careful about recording enormous functions, with very wide or very
   deep case trees. (This can happen with Generics; e.g. test T5642.)  We limit
   both with UnfoldingOpts: see the use of `exprTreeCaseWidth` and `exprTreeCaseDepth`
-  in `exprTree`.
+  in `mkExprTree`.
   * When we exceed the maximum case-depth we just record ScrutOf info (instead of
     CaseOf) for the scrutinee.
 
@@ -568,12 +569,12 @@ type ETVars = (VarSet,VarSet)  -- (avs, lvs)
               -- These sets include type variables, which do no harm,
               -- and are a bit tiresome to filter out.
 
-exprTree :: UnfoldingOpts -> [Var] -> CoreExpr -> Maybe ExprTree
+mkExprTree :: UnfoldingOpts -> [Var] -> CoreExpr -> Maybe ExprTree
 -- Nothing => too big
 -- See Note [Overview of inlining heuristics]
 -- See Note [Computing the size of an expression]
 
-exprTree opts args expr
+mkExprTree opts args expr
   = go (exprTreeCaseDepth opts) (mkVarSet args, emptyVarSet) expr
   where
     !max_width     = exprTreeCaseWidth opts
@@ -596,8 +597,9 @@ exprTree opts args expr
     go rcd vs (Case e b _ as) = go_case rcd vs e b as
     go rcd vs (Let bind body) = go_let rcd vs bind body
     go rcd vs (Lam b e)       = go_lam rcd vs b e
-    go rcd vs e@(App {})      = go_app rcd vs e
+    go rcd vs e@(App {})      = go_app rcd vs e [] 0
     go _   vs (Var f)         = Just (callTree opts vs f [] 0)
+                                -- Same as (go_app rcd vs (Var f) [] 0)
                                 -- Use callTree to ensure we get constructor
                                 -- discounts even on nullary constructors
 
@@ -609,26 +611,24 @@ exprTree opts args expr
         vs' = vs `add_lv` bndr
 
     ----------- Applications ------------------
-    go_app rcd vs e = lgo e [] 0
-      where
-         lgo :: CoreExpr -> [CoreExpr] -> Int -> Maybe ExprTree
-             -- args:  all the value args
-             -- voids: counts the zero-bit arguments; don't charge for these
-             --        This makes a difference in ST-heavy code which does a lot
-             --        of state passing, and which can be in an inner loop.
-         lgo (App fun arg) args voids
-                    | isTypeArg arg    = lgo fun args voids
-                    | isZeroBitArg arg = lgo fun (arg:args) (voids+1)
-                    | otherwise        = go rcd vs arg `met_add`
-                                         lgo fun (arg:args) voids
-         lgo (Var fun)     args voids  = Just (callTree opts vs fun args voids)
-         lgo (Tick _ expr) args voids  = lgo expr args voids
-         lgo (Cast expr _) args voids  = lgo expr args voids
-         lgo other         args voids  = vanillaCallSize (length args) voids
-                                         `metAddS` go rcd vs other
-         -- if the lhs is not an App or a Var, or an invisible thing like a
-         -- Tick or Cast, then we should charge for a complete call plus the
-         -- size of the lhs itself.
+    go_app :: Int -> ETVars -> CoreExpr -> [CoreExpr] -> Int -> Maybe ExprTree
+      -- args:  all the value args
+      -- voids: counts the zero-bit arguments; don't charge for these
+      --        This makes a difference in ST-heavy code which does a lot
+      --        of state passing, and which can be in an inner loop.
+    go_app rcd vs (App fun arg) args voids
+      | isTypeArg arg    = go_app rcd vs fun args voids
+      | isZeroBitArg arg = go_app rcd vs fun (arg:args) (voids+1)
+      | otherwise        = go rcd vs arg `met_add`
+                           go_app rcd vs fun (arg:args) voids
+    go_app rcd vs (Var fun)     args voids  = Just (callTree opts vs fun args voids)
+    go_app rcd vs (Tick _ expr) args voids  = go_app rcd vs expr args voids
+    go_app rcd vs (Cast expr _) args voids  = go_app rcd vs expr args voids
+    go_app rcd vs other         args voids  = vanillaCallSize (length args) voids
+                                              `metAddS` go rcd vs other
+    -- if the lhs is not an App or a Var, or an invisible thing like a
+    -- Tick or Cast, then we should charge for a complete call plus the
+    -- size of the lhs itself.
 
     ----------- Let-expressions ------------------
     go_let rcd vs (NonRec binder rhs) body
@@ -791,7 +791,7 @@ isZeroBitId id = assertPpr (not (isJoinId id)) (ppr id) $
 
 -- | Finds a nominal size of a string literal.
 litSize :: Literal -> Size
--- Used by GHC.Core.Unfold.exprTree
+-- Used by GHC.Core.Unfold.mkExprTree
 litSize (LitNumber LitNumBigNat _)  = 100
 litSize (LitString str) = 10 + 10 * ((BS.length str + 3) `div` 4)
         -- If size could be 0 then @f "x"@ might be too small
@@ -808,9 +808,9 @@ callTree opts vs fun val_args voids
       FCallId _        -> exprTreeS (vanillaCallSize n_val_args voids)
       JoinId {}        -> exprTreeS (jumpSize        n_val_args voids)
       PrimOpId op _    -> exprTreeS (primOpSize op   n_val_args)
-      DataConWorkId dc -> conSize dc n_val_args
-      ClassOpId {}     -> classOpSize opts vs fun val_args voids
-      _                -> funSize opts vs fun n_val_args voids
+      DataConWorkId dc -> conAppET dc n_val_args
+      ClassOpId {}     -> classOpAppET opts vs fun val_args voids
+      _                -> genAppET opts vs fun n_val_args voids
   where
     n_val_args = length val_args
 
@@ -830,14 +830,14 @@ jumpSize n_val_args voids = 2 * (1 + n_val_args - voids)
   -- spectral/puzzle. TODO Perhaps adjusting the default threshold would be a
   -- better solution?
 
-classOpSize :: UnfoldingOpts -> ETVars -> Id -> [CoreExpr] -> Int -> ExprTree
+classOpAppET :: UnfoldingOpts -> ETVars -> Id -> [CoreExpr] -> Int -> ExprTree
 -- See Note [Conlike is interesting]
-classOpSize _ _ _ [] _
+classOpAppET _ _ _ [] _
   = etZero
-classOpSize opts vs fn val_args voids
+classOpAppET opts vs fn val_args voids
   | arg1 : _ <- val_args
   , Just dict <- interestingVarScrut vs arg1
-  = warnPprTrace (not (isId dict)) "classOpSize" (ppr fn <+> ppr val_args) $
+  = warnPprTrace (not (isId dict)) "classOpAppET" (ppr fn <+> ppr val_args) $
     vanillaCallSize (length val_args) voids `etAddS`
     etScrutOf dict (unfoldingDictDiscount opts)
            -- If the class op is scrutinising a lambda bound dictionary then
@@ -846,10 +846,10 @@ classOpSize opts vs fn val_args voids
   | otherwise
   = exprTreeS (vanillaCallSize (length val_args) voids)
 
-funSize :: UnfoldingOpts -> ETVars -> Id -> Int -> Int -> ExprTree
+genAppET :: UnfoldingOpts -> ETVars -> Id -> Int -> Int -> ExprTree
 -- Size for function calls that are not constructors or primops
 -- Note [Function applications]
-funSize opts (avs,_) fun n_val_args voids
+genAppET opts (avs,_) fun n_val_args voids
   | fun `hasKey` buildIdKey   = etZero  -- We want to inline applications of build/augment
   | fun `hasKey` augmentIdKey = etZero  -- so we give size zero to the whole call
   | otherwise = ExprTree { et_wc_tot = size, et_size  = size
@@ -881,9 +881,9 @@ lamSize opts = ExprTree { et_size = 10, et_wc_tot = 10
                         , et_ret = unfoldingFunAppDiscount opts }
 -}
 
-conSize :: DataCon -> Int -> ExprTree
+conAppET :: DataCon -> Int -> ExprTree
 -- Does not need to include the size of the arguments themselves
-conSize dc n_val_args
+conAppET dc n_val_args
   | isUnboxedTupleDataCon dc
   = etZero     -- See Note [Unboxed tuple size and result discount]
   | n_val_args == 0    -- Like variables
@@ -975,10 +975,10 @@ much (#18282).  In particular, consider a huge case tree like
                       Nothing -> B1 c b a
                       Just v2 -> ...
 
-If conSize gives a cost of 10 (regardless of n_val_args) and a
+If conAppET gives a cost of 10 (regardless of n_val_args) and a
 discount of 10, that'll make each alternative RHS cost zero.  We
 charge 10 for each case alternative (see size_up_alt).  If we give a
-bigger discount (say 20) in conSize, we'll make the case expression
+bigger discount (say 20) in conAppET, we'll make the case expression
 cost *nothing*, and that can make a huge case tree cost nothing. This
 leads to massive, sometimes exponential inlinings (#18282).  In short,
 don't give a discount that give a negative size to a sub-expression!
@@ -1119,8 +1119,7 @@ infixr 5 `metAddS`, `etAddS`, `metAdd`, `metAddAlt`
 -- * The "S" is for Size
 
 metAddS :: Size -> Maybe ExprTree -> Maybe ExprTree
-metAddS _ Nothing = Nothing
-metAddS n (Just et) = Just (n `etAddS` et)
+metAddS n met = fmap (etAddS n) met
 
 etAddS :: Size -> ExprTree -> ExprTree
 -- Does not account for et_wc_tot geting too big, but that doesn't
