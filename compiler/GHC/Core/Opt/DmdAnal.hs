@@ -814,7 +814,7 @@ It is sound to return False in those cases, because
      from pure code.
   2. raiseIO# is the only primop that may throw a precise exception.
   3. `seq# = \(!a) s -> (# a, s #)`, so it does not throw a precise exception.
-     See point (SEQ3) of Note [seq# magic] in GHC.Core.Opt.ConstantFold.
+     See point (SEQ3) of Note [seq# magic] in GHC.Types.Id.Make.
   4. Unsafe FFI calls may not interact with the RTS (to throw, for example).
      See haddock on GHC.Types.ForeignCall.PlayRisky.
 

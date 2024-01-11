@@ -125,7 +125,7 @@ runRW# m = m realWorld#
 -- breaking changes. For example, this magic Id used to live in "GHC.Prim".
 -- Prefer to use 'GHC.IO.evaluate' whenever possible!
 seq# :: forall a s. a -> State# s -> (# State# s, a #)
--- See Note [seq# magic] in GHC.Core.Opt.ConstantFold
+-- See Note [seq# magic] in GHC.Types.Id.Make
 {-# NOINLINE seq# #-}  -- seq# is inlined manually in CorePrep
 seq# !a s = (# s, a' #)
 
