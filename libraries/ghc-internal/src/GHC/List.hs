@@ -1600,6 +1600,9 @@ lookup  key ((x,y):xys)
   lookup x (build g) = g (\(k, v) r -> if x == k then Just v else r) Nothing
 #-}
 
+{-# SPECIALISE lookup :: Char -> [(Char,b)] -> Maybe b #-}
+{-# SPECIALISE lookup :: Int  -> [(Int,b)]  -> Maybe b #-}
+
 -- | Map a function returning a list over a list and concatenate the results.
 -- 'concatMap' can be seen as the composition of 'concat' and 'map'.
 --
