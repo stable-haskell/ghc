@@ -1021,7 +1021,6 @@ until the final simplifier phase; see Note [Activation for data
 constructor wrappers].
 
 For further reading, see:
-  * Note [Conlike is interesting] in GHC.Core.Op.Simplify.Utils
   * Note [Lone variables] in GHC.Core.Unfold
   * Note [exprIsConApp_maybe on data constructors with wrappers]
     in GHC.Core.SimpleOpt

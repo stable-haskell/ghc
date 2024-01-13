@@ -793,7 +793,6 @@ jumpSize val_args = vanillaCallSize val_args
   -- better solution?
 
 classOpAppET :: UnfoldingOpts -> ETVars -> Id -> [CoreExpr] -> ExprTree
--- See Note [Conlike is interesting]
 classOpAppET _ _ _ []
   = etZero
 classOpAppET opts vs fn val_args
