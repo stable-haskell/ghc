@@ -208,6 +208,7 @@ instance (Eq a) => Eq [a] where
 
 eqList :: Eq a => [a] -> [a] -> Bool
 -- eqList should auto-specialise for the same types as specialise instance Eq above
+{-# NOINLINE [1] eqList #-}
 eqList []     []     = True
 eqList (x:xs) (y:ys) = x == y && eqList xs ys
 eqList _xs    _ys    = False
