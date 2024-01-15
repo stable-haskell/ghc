@@ -760,16 +760,20 @@ litSize _other = 0    -- Must match size of nullary constructors
 
 ----------------------------
 callTree :: UnfoldingOpts -> ETVars -> Id -> [CoreExpr] -> ExprTree
+-- Caller accounts for the size of the arguments,
+-- but not for the cost of building a closure
 callTree opts vs fun val_args
   = case idDetails fun of
       FCallId _        -> exprTreeS (vanillaCallSize val_args)
       JoinId {}        -> exprTreeS (jumpSize        val_args)
       PrimOpId op _    -> exprTreeS (primOpSize op   val_args)
-      DataConWorkId dc -> conAppET dc val_args
+      DataConWorkId dc -> exprTreeS (conAppSize dc val_args)
       ClassOpId {}     -> classOpAppET opts vs fun val_args
       _                -> genAppET opts vs fun val_args
 
 -- | The size of a function call
+-- Caller accounts for the size of the arguments,
+-- but not for the cost of building a closure
 vanillaCallSize :: [CoreExpr] -> Size
 vanillaCallSize val_args = foldl' arg_sz 2 val_args
   where
@@ -780,6 +784,33 @@ vanillaCallSize val_args = foldl' arg_sz 2 val_args
 -- 10 * (1 + n_val_args - voids)
         -- The 1+ is for the function itself
         -- Add 1 for each non-trivial value arg
+
+conAppSize :: DataCon -> [CoreExpr] -> Size
+-- Smaller than vanillaCallSize; don't charge for the call
+-- itself, just for the closures it builds
+conAppSize _dc val_args = foldl' arg_sz 0 val_args
+  where
+    arg_sz n arg
+      | exprIsTrivial arg = n
+      | otherwise         = n+closureSize
+{-
+  | isUnboxedTupleDataCon dc
+  = etZero     -- See Note [Unboxed tuple size and result discount]
+  | n_val_args == 0    -- Like variables
+  = etZero
+  | otherwise  -- See Note [Constructor size and result discount]
+  = ExprTree { et_size = 10, et_wc_tot = 10
+             , et_cases = emptyBag, et_ret = 10 }
+-}
+
+primOpSize :: PrimOp -> [CoreExpr] -> Size
+-- Args are almost always strict, so we don't charge for arg
+-- closures, unlike vanillaCallSize, conAppSize
+primOpSize op val_args
+  | primOpOutOfLine op = op_size + length val_args
+  | otherwise          = op_size
+ where
+   op_size = primOpCodeSize op
 
 -- | The size of a jump to a join point
 jumpSize :: [CoreExpr] -> Size
@@ -810,6 +841,8 @@ classOpAppET opts vs fn val_args
 genAppET :: UnfoldingOpts -> ETVars -> Id -> [CoreExpr] -> ExprTree
 -- Size for function calls that are not constructors or primops
 -- Note [Function applications]
+-- Caller accounts for the size of the arguments,
+-- but not for the cost of building a closure
 genAppET opts (avs,_) fun val_args
   | fun `hasKey` buildIdKey   = etZero  -- We want to inline applications of build/augment
   | fun `hasKey` augmentIdKey = etZero  -- so we give size zero to the whole call
@@ -837,25 +870,6 @@ lamSize :: UnfoldingOpts -> ExprTree
 -- Does not include the size of the body, just the lambda itself
 lamSize _ = etZero  -- Lambdas themselves cost nothing
 
-conAppET :: DataCon -> [CoreExpr] -> ExprTree
--- Does not need to include the size of the arguments themselves
-conAppET _dc _n_val_args = etZero
-{-
-  | isUnboxedTupleDataCon dc
-  = etZero     -- See Note [Unboxed tuple size and result discount]
-  | n_val_args == 0    -- Like variables
-  = etZero
-  | otherwise  -- See Note [Constructor size and result discount]
-  = ExprTree { et_size = 10, et_wc_tot = 10
-             , et_cases = emptyBag, et_ret = 10 }
--}
-
-primOpSize :: PrimOp -> [CoreExpr] -> Size
-primOpSize op val_args
-  | primOpOutOfLine op = op_size + length val_args
-  | otherwise          = op_size
- where
-   op_size = primOpCodeSize op
 
 closureSize :: Size  -- Size for a heap-allocated closure
 closureSize = 15

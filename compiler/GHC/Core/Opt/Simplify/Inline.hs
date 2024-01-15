@@ -246,15 +246,15 @@ tryUnfolding logger env fn cont unf_template unf_cache guidance
                         -> exprDigest env expr
                 _ -> ArgNoInfo
 
-          -------- Size adjustements ----------------
+          -------- Size adjustments ----------------
           -- Subtract size of the call, because the result replaces the call
-          -- We count 10 for the function itself, 10 for each arg supplied,
-          -- plus an extra discount of 10 for each argument which has
-          -- interesting info, regardless of the function body.
-          call_size_discount = 10 + args_discount
-          args_discount = foldr ((+) . arg_discount) 0 (take n_bndrs arg_infos)
-          arg_discount arg_info | hasArgInfo arg_info = 20
-                                | otherwise           = 10
+          -- We count 2 for the function itself, 2 for each arg supplied,
+          -- plus a rather-arbitrary extra discount of 10 for each argument which
+          -- has interesting info, regardless of the function body.
+          -- Should line up with GHC.Core.Unfold.vanillaCallSize
+          call_size_discount = foldr ((+) . arg_discount) 2 (take n_bndrs arg_infos)
+          arg_discount arg_info | hasArgInfo arg_info = 10
+                                | otherwise           = 2
 
           actual_ret_discount | n_bndrs < n_val_args
                               = ret_discount
