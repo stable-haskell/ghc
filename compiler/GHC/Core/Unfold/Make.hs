@@ -432,7 +432,7 @@ certainlyWillInline opts fn_info rhs'
               -- so we don't want to re-inline it.
       , let unf_arity = length args
             limit = unfoldingUseThreshold opts + (10 * (unf_arity + 1))
-      , exprTreeWillInline limit tree
+      , exprDigestWillInline limit tree
       = Just (fn_unf { uf_src      = src'
                      , uf_tmpl     = tmpl'
                      , uf_guidance = UnfWhen { ug_arity     = unf_arity

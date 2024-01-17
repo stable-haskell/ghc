@@ -125,14 +125,14 @@ seqGuidance :: UnfoldingGuidance -> ()
 seqGuidance (UnfIfGoodArgs bs et) = seqBndrs bs `seq` seqET et
 seqGuidance _                     = ()
 
-seqET :: ExprTree -> ()
-seqET (ExprTree { et_wc_tot = tot, et_size = size, et_cases = cases, et_ret = ret })
+seqET :: ExprDigest -> ()
+seqET (ExprDigest { ed_wc_tot = tot, ed_size = size, ed_cases = cases, ed_ret = ret })
   = tot `seq` size `seq` ret `seq` seqBag seqCT cases
 
-seqCT :: CaseTree -> ()
-seqCT (ScrutOf x i) = x `seq` i `seq` ()
+seqCT :: CaseDigest -> ()
+seqCT (DiscVal x i) = x `seq` i `seq` ()
 seqCT (CaseOf x y alts) = x `seq` y `seq` seqList seqAT alts
 
-seqAT :: AltTree -> ()
-seqAT (AltTree con bs e) = con `seq` seqBndrs bs `seq` seqET e
+seqAT :: AltDigest -> ()
+seqAT (AltDigest con bs e) = con `seq` seqBndrs bs `seq` seqET e
 

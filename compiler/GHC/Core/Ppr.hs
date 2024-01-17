@@ -627,18 +627,18 @@ instance Outputable UnfoldingGuidance where
                brackets (hsep (map ppr cs)),
                ppr et ]
 
-instance Outputable ExprTree where
-  ppr (ExprTree { et_wc_tot = tot, et_size = size, et_ret = ret, et_cases = cases })
+instance Outputable ExprDigest where
+  ppr (ExprDigest { ed_wc_tot = tot, ed_size = size, ed_ret = ret, ed_cases = cases })
     = int tot <> char '/' <> int size <> char '/' <> int ret
        <> brackets (sep (map ppr (bagToList cases)))
 
-instance Outputable CaseTree where
-  ppr (ScrutOf x n)   = ppr x <> colon <> int n
+instance Outputable CaseDigest where
+  ppr (DiscVal x n)     = ppr x <> colon <> int n
   ppr (CaseOf x b alts) = sep [ text "case" <+> ppr x <+> ppr b
                               , nest 2 $ braces $ sep $ map ppr alts ]
 
-instance Outputable AltTree where
-  ppr (AltTree con bs rhs) = sep [ppr con <+> ppr bs <+> text "->", nest 2 (ppr rhs)]
+instance Outputable AltDigest where
+  ppr (AltDigest con bs rhs) = sep [ppr con <+> ppr bs <+> text "->", nest 2 (ppr rhs)]
 
 instance Outputable Unfolding where
   ppr NoUnfolding                = text "No unfolding"

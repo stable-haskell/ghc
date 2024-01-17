@@ -536,29 +536,29 @@ substGuidance subst guidance
       UnfNever   -> guidance
       UnfWhen {} -> guidance
       UnfIfGoodArgs { ug_args = args, ug_tree = et }
-        -> UnfIfGoodArgs { ug_args = args, ug_tree = substExprTree id_env et }
+        -> UnfIfGoodArgs { ug_args = args, ug_tree = substExprDigest id_env et }
         where
            id_env = getIdSubstEnv subst `delVarEnvList` args
 
 -------------------------
-substExprTree :: IdSubstEnv -> ExprTree -> ExprTree
--- ExprTrees have free Ids, and so must be substituted
+substExprDigest :: IdSubstEnv -> ExprDigest -> ExprDigest
+-- ExprDigests have free Ids, and so must be substituted
 -- But Ids /only/ not tyvars, so substitution is very simple
 --
 -- We might be substituting a big tree in place of a variable
 -- but we don't account for that in the size: I think it doesn't
--- matter, and the ExprTree will be refreshed soon enough.
-substExprTree id_env et@(ExprTree { et_size = size, et_cases = cases })
-   = et { et_size = size + extra_size , et_cases = cases' }
+-- matter, and the ExprDigest will be refreshed soon enough.
+substExprDigest id_env et@(ExprDigest { ed_size = size, ed_cases = cases })
+   = et { ed_size = size + extra_size , ed_cases = cases' }
    where
      (extra_size, cases') = foldr subst_ct (0, emptyBag) cases
      -- The extra_size is just in case we substitute a non-variable for
      -- for a variable, in which case a CaseOf won't work. Unlikely.
 
-     subst_ct :: CaseTree -> (Size, Bag CaseTree) -> (Size, Bag CaseTree)
-     subst_ct (ScrutOf v d) (n, cts)
+     subst_ct :: CaseDigest -> (Size, Bag CaseDigest) -> (Size, Bag CaseDigest)
+     subst_ct (DiscVal v d) (n, cts)
         = case lookupVarEnv id_env v of
-             Just (Var v') -> (n, ScrutOf v' d `consBag` cts)
+             Just (Var v') -> (n, DiscVal v' d `consBag` cts)
              _ -> (n, cts)
 
      subst_ct (CaseOf v case_bndr alts) (n, cts)
@@ -568,10 +568,10 @@ substExprTree id_env et@(ExprTree { et_size = size, et_cases = cases })
         where
           id_env' = id_env `delVarEnv` case_bndr
           alts' = map (subst_alt id_env') alts
-          extra = altTreesSize v alts
+          extra = altDigestsSize v alts
 
-     subst_alt id_env (AltTree con bs rhs)
-        = AltTree con bs (substExprTree id_env' rhs)
+     subst_alt id_env (AltDigest con bs rhs)
+        = AltDigest con bs (substExprDigest id_env' rhs)
         where
           id_env' = id_env `delVarEnvList` bs
 

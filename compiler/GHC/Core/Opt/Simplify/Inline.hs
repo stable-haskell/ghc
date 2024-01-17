@@ -10,10 +10,13 @@ This module contains inlining logic used by the simplifier.
 module GHC.Core.Opt.Simplify.Inline (
         -- * The smart inlining decisions are made by callSiteInline
         callSiteInline,
-        exprDigest
+        exprDigest,
+        lazyArgContext, strictArgContext, interestingCallContext,
+        mkBoringStop, mkRhsStop, mkLazyArgStop
     ) where
 
 import GHC.Prelude
+import qualified GHC.Prelude as Partial (head)
 
 import GHC.Driver.Flags
 
@@ -26,6 +29,7 @@ import GHC.Types.Id
 import GHC.Types.Literal ( isLitRubbish )
 import GHC.Types.Basic  ( Arity, RecFlag(..) )
 import GHC.Types.Name
+import GHC.Types.Demand
 import GHC.Types.Var.Env
 
 import GHC.Utils.Logger
@@ -210,8 +214,7 @@ tryUnfolding logger env fn cont unf_template unf_cache guidance
           some_benefit = calc_some_benefit uf_arity
           enough_args  = (n_val_args >= uf_arity) || (unsat_ok && n_val_args > 0)
 
-     UnfIfGoodArgs { ug_args = val_arg_bndrs
-                   , ug_tree = expr_tree@(ExprTree { et_ret = ret_discount}) }
+     UnfIfGoodArgs { ug_args = val_arg_bndrs, ug_tree = expr_tree }
         | unfoldingVeryAggressive opts
         -> traceInline logger env fn str (mk_doc some_benefit extra_doc True) (Just unf_template)
         | is_wf && some_benefit && small_enough
@@ -222,11 +225,12 @@ tryUnfolding logger env fn cont unf_template unf_cache guidance
           n_bndrs       = length val_arg_bndrs
           some_benefit  = calc_some_benefit n_bndrs
           small_enough  = adjusted_size <= unfoldingUseThreshold opts
-          rhs_size      = exprTreeSize context expr_tree
-          adjusted_size = rhs_size - call_size_discount - actual_ret_discount + depth_penalty
+          rhs_size      = exprDigestSize context expr_tree
+          adjusted_size = rhs_size - call_size_discount + depth_penalty
 
-          --------  Compute the size of the ExprTree in this context -----------
+          --------  Compute the size of the ExprDigest in this context -----------
           context = IC { ic_bound = bound_env
+                       , ic_cont  = cont_info'
                        , ic_free  = getFreeDigest }
 
           bound_env = mkVarEnv (val_arg_bndrs `zip` (arg_infos ++ repeat ArgNoInfo))
@@ -256,22 +260,8 @@ tryUnfolding logger env fn cont unf_template unf_cache guidance
           arg_discount arg_info | hasArgInfo arg_info = 10
                                 | otherwise           = 2
 
-          actual_ret_discount | n_bndrs < n_val_args
-                              = ret_discount
-                              | otherwise
-                              = case cont_info of
-                                  BoringCtxt  -> 0
-                                  DiscArgCtxt -> 0
-                                  RuleArgCtxt -> ret_discount
-                                  CaseCtxt    -> ret_discount
-                                  ValAppCtxt  -> ret_discount
-                                  RhsCtxt {}  -> 40 `min` ret_discount
-                -- For RhsCtxt I suppose that exposing a data con is good in general;
-                -- although 40 seems very arbitrary
-                --
-                -- `min` thresholding: res_discount can be very large when a
-                -- function returns constructors; but we only want to invoke
-                -- that large discount when there's a case continuation.
+          cont_info' | n_bndrs < n_val_args = ValAppCtxt
+                     | otherwise            = cont_info
 
           -- Adjust by the depth scaling
           -- See Note [Avoid inlining into deeply nested cases]
@@ -633,30 +623,26 @@ exprDigest env e = go env e []
       | Just rhs <- expandUnfolding_maybe unfolding
       = go (zapSubstEnv env) rhs val_args
 
---      | DFunUnfolding {} <- unfolding
-      | hasSomeUnfolding unfolding
-      = ArgIsNot []  -- We (slightly hackily) use ArgIsNot [] for dfun applications
-                     -- ($df d1 .. dn).  This is very important to encourage inlining
-                     -- of overloaded functions.  Example. GHC.Base.liftM2. It has
-                     -- three uses of its dict arg, each of which attracts a ScrutOf
-                     -- discount.  But the ArgDigest had better be good enough to
-                     -- attract that ScrutOf discount!  We want liftM2 to be inlined
-                     -- in its use in the liftA2 method of instance Applicative (ST s)
+      | DFunUnfolding {} <- unfolding
+      = ArgIsDFun    -- DFun applications ($df d1 .. dn).
                      -- See Note [DFun applications are interesting]
-                     --
-                     -- Actually in spectral/puzzle I found that we got a big (40%!)
-                     -- benefit from    let newDest = ... in case (notSeen newDest) of ...
-                     -- We want to inline notSeen.  The argument has structure (its RHS)
-                     -- and in fact if we inline notSeen, newDest stops being a thunk
-                     -- (SPJ GHC log 13 Nov).
-
       -- ToDo:
-      --   * Maybe we should use ArgIsNot   for (isConLikeUnfolding unfolding)
-      --                     and ArgNonTriv for (hasSomeUnfolding unfolding)
-      --   * Perhaps we should use ArgIsNot [] for (isConLikeId f)
+      --   * Maybe we should use ArgIsDFun
+      --     for (isConLikeUnfolding unfolding) or for (isConLikeId f)
 
       | OtherCon cs <- unfolding
       = ArgIsNot cs
+
+      | hasSomeUnfolding unfolding
+      = ArgNonTriv
+        -- In spectral/puzzle I found that we got a big (40%!)
+        -- benefit from    let newDest = ... in case (notSeen newDest) of ...
+        -- We want to inline notSeen.  The argument has structure (its RHS)
+        -- and in fact if we inline notSeen, newDest stops being a thunk
+        -- (SPJ GHC log 13 Nov).
+        --
+        -- Note that the unfolding does not need to be isEvaldUnfolding,
+        -- and indeed isn't in the 'puzzle' case.
 
       | idArity f > length val_args
       = ArgIsLam
@@ -680,6 +666,188 @@ Consider
 where df is con-like. Then we'd really like to inline 'f' so that the
 rule for (*) (df d) can fire.  To do this
   a) we give a discount for being an argument of a class-op (eg (*) d)
-  b) we say that a con-like argument (eg (df d)) has digest (ArgIsNot [])
+  b) we say that a con-like argument (eg (df d)) has digest ArgIsDFun
+
+Example: GHC.Base.liftM2. It has three uses of its dict arg, each of which
+attracts a DiscVal discount.  But the ArgDigest had better be good enough to
+attract that DiscVal discount!  We want liftM2 to be inlined in its use in the
+liftA2 method of instance Applicative (ST s)
 -}
+
+
+{- *********************************************************************
+*                                                                      *
+             Computing ContDigest: the context of a call
+*                                                                      *
+********************************************************************* -}
+
+{- Note [Interesting call context]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+We want to avoid inlining an expression where there can't possibly be
+any gain, such as in an argument position.  Hence, if the continuation
+is interesting (eg. a case scrutinee that isn't just a seq, application etc.)
+then we inline, otherwise we don't.
+
+Previously some_benefit used to return True only if the variable was
+applied to some value arguments.  This didn't work:
+
+        let x = _coerce_ (T Int) Int (I# 3) in
+        case _coerce_ Int (T Int) x of
+                I# y -> ....
+
+we want to inline x, but can't see that it's a constructor in a case
+scrutinee position, and some_benefit is False.
+
+Another example:
+
+dMonadST = _/\_ t -> :Monad (g1 _@_ t, g2 _@_ t, g3 _@_ t)
+
+....  case dMonadST _@_ x0 of (a,b,c) -> ....
+
+we'd really like to inline dMonadST here, but we *don't* want to
+inline if the case expression is just
+
+        case x of y { DEFAULT -> ... }
+
+since we can just eliminate this case instead (x is in WHNF).  Similar
+applies when x is bound to a lambda expression.  Hence
+contIsInteresting looks for case expressions with just a single
+default case.
+
+Note [No case of case is boring]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+If we see
+   case f x of <alts>
+
+we'd usually treat the context as interesting, to encourage 'f' to
+inline.  But if case-of-case is off, it's really not so interesting
+after all, because we are unlikely to be able to push the case
+expression into the branches of any case in f's unfolding.  So, to
+reduce unnecessary code expansion, we just make the context look boring.
+This made a small compile-time perf improvement in perf/compiler/T6048,
+and it looks plausible to me.
+
+Note [Seq is boring]
+~~~~~~~~~~~~~~~~~~~~
+Suppose
+  f x = case v of
+          True  -> Just x
+          False -> Just (x-1)
+
+Now consider these cases:
+
+1. case f x of b{-dead-} { DEFAULT -> blah[no b] }
+     Inlining (f x) will allow us to avoid ever allocating (Just x),
+     since the case binder `b` is dead.  We will end up with a
+     join point for blah, thus
+         join j = blah in
+         case v of { True -> j; False -> j }
+     which will turn into (case v of DEFAULT -> blah
+     All good
+
+2. case f x of b { DEFAULT -> blah[b] }
+     Inlining (f x) will still mean we allocate (Just x). We'd get:
+         join j b = blah[b]
+         case v of { True -> j (Just x); False -> j (Just (x-1)) }
+     No new optimisations are revealed. Nothing is gained.
+     (This is the situation in T22317.)
+
+2a. case g x of b { (x{-dead-}, x{-dead-}) -> blah[b, no x, no y] }
+      Instead of DEFAULT we have a single constructor alternative
+      with all dead binders.  This is just a variant of (2); no
+      gain from inlining (f x)
+
+3. case f x of b { Just y -> blah[y,b] }
+     Inlining (f x) will mean we still allocate (Just x),
+     but we also get to bind `y` without fetching it out of the Just, thus
+         join j y b = blah[y,b]
+         case v of { True -> j x (Just x)
+                   ; False -> let y = x-1 in j y (Just y) }
+   Inlining (f x) has a small benefit, perhaps.
+   (To T14955 it makes a surprisingly large difference of ~30% to inline here.)
+
+
+Conclusion: if the case expression
+  * Has a non-dead case-binder
+  * Has one alternative
+  * All the binders in the alternative are dead
+then the `case` is just a strict let-binding, and the scrutinee is
+BoringCtxt (don't inline).  Otherwise CaseCtxt.
+-}
+
+mkBoringStop :: OutType -> SimplCont
+mkBoringStop ty = Stop ty BoringCtxt topSubDmd
+
+mkRhsStop :: OutType -> RecFlag -> Demand -> SimplCont
+-- See Note [RHS of lets] in GHC.Core.Unfold
+mkRhsStop ty is_rec bndr_dmd = Stop ty (RhsCtxt is_rec) (subDemandIfEvaluated bndr_dmd)
+
+mkLazyArgStop :: OutType -> ArgInfo -> SimplCont
+mkLazyArgStop ty fun_info = Stop ty (lazyArgContext fun_info) arg_sd
+  where
+    arg_sd = subDemandIfEvaluated (Partial.head (ai_dmds fun_info))
+
+-------------------
+lazyArgContext :: ArgInfo -> ContDigest
+-- Use this for lazy arguments
+lazyArgContext (ArgInfo { ai_encl = encl_rules, ai_discs = discs })
+  | encl_rules                = RuleArgCtxt
+  | disc:_ <- discs, disc > 0 = DiscArgCtxt  -- Be keener here
+  | otherwise                 = BoringCtxt   -- Nothing interesting
+
+strictArgContext :: ArgInfo -> ContDigest
+strictArgContext (ArgInfo { ai_encl = encl_rules, ai_discs = discs })
+-- Use this for strict arguments
+  | encl_rules                = RuleArgCtxt
+  | disc:_ <- discs, disc > 0 = DiscArgCtxt  -- Be keener here
+  | otherwise                 = RhsCtxt NonRecursive
+      -- Why RhsCtxt?  if we see f (g x), and f is strict, we
+      -- want to be a bit more eager to inline g, because it may
+      -- expose an eval (on x perhaps) that can be eliminated or
+      -- shared. I saw this in nofib 'boyer2', RewriteFuns.onewayunify1
+      -- It's worth an 18% improvement in allocation for this
+      -- particular benchmark; 5% on 'mate' and 1.3% on 'multiplier'
+      --
+      -- Why NonRecursive?  Becuase it's a bit like
+      --   let a = g x in f a
+
+interestingCallContext :: SimplEnv -> SimplCont -> ContDigest
+-- See Note [Interesting call context]
+interestingCallContext env cont
+  = interesting cont
+  where
+    interesting (Select {sc_alts=alts, sc_bndr=case_bndr})
+      | not (seCaseCase env)         = BoringCtxt -- See Note [No case of case is boring]
+      | [Alt _ bs _] <- alts
+      , all isDeadBinder bs
+      , not (isDeadBinder case_bndr) = BoringCtxt -- See Note [Seq is boring]
+      | otherwise                    = CaseCtxt
+
+
+    interesting (ApplyToVal {}) = ValAppCtxt
+        -- Can happen if we have (f Int |> co) y
+        -- If f has an INLINE prag we need to give it some
+        -- motivation to inline. See Note [Cast then apply]
+        -- in GHC.Core.Unfold
+
+    interesting (StrictArg { sc_fun = fun }) = strictArgContext fun
+    interesting (StrictBind {})              = BoringCtxt
+    interesting (Stop _ cci _)               = cci
+    interesting (TickIt _ k)                 = interesting k
+    interesting (ApplyToTy { sc_cont = k })  = interesting k
+    interesting (CastIt _ k)                 = interesting k
+        -- If this call is the arg of a strict function, the context
+        -- is a bit interesting.  If we inline here, we may get useful
+        -- evaluation information to avoid repeated evals: e.g.
+        --      x + (y * z)
+        -- Here the contIsInteresting makes the '*' keener to inline,
+        -- which in turn exposes a constructor which makes the '+' inline.
+        -- Assuming that +,* aren't small enough to inline regardless.
+        --
+        -- It's also very important to inline in a strict context for things
+        -- like
+        --              foldr k z (f x)
+        -- Here, the context of (f x) is strict, and if f's unfolding is
+        -- a build it's *great* to inline it here.  So we must ensure that
+        -- the context for (f x) is not totally uninteresting.
 

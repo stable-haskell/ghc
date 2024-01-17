@@ -11,7 +11,7 @@ module GHC.Core (
         Expr(..), Alt(..), Bind(..), AltCon(..), Arg,
         CoreProgram, CoreExpr, CoreAlt, CoreBind, CoreArg, CoreBndr,
         TaggedExpr, TaggedAlt, TaggedBind, TaggedArg, TaggedBndr(..), deTagExpr,
-        ExprTree(..), CaseTree(..), AltTree(..),
+        ExprDigest(..), CaseDigest(..), AltDigest(..),
         Size, Discount,
 
         -- * In/Out type synonyms
@@ -1414,7 +1414,7 @@ data UnfoldingGuidance
 
   | UnfIfGoodArgs {     -- Arose from a normal Id
       ug_args :: [Id],       -- Value arguments only
-      ug_tree :: ExprTree    -- Abstraction of the body
+      ug_tree :: ExprDigest    -- Abstraction of the body
       -- Invariant: free Ids of ug_tree are the ug_args, plus Ids
       --            in scope at the binding site of the function definition
     }
@@ -1424,28 +1424,28 @@ data UnfoldingGuidance
 type Size     = Int
 type Discount = Int
 
-data ExprTree
-  = ExprTree { et_wc_tot :: {-# UNPACK #-} !Size      -- ^ Total worst-case size of whole tree
-             , et_ret    :: {-# UNPACK #-} !Discount  -- ^ Total discount when result is scrutinised
-                  -- Both et_wc_tot and et_ret /include/ et_cases
+data ExprDigest
+  = ExprDigest { ed_wc_tot :: {-# UNPACK #-} !Size      -- ^ Total worst-case size of whole tree
+               , ed_ret    :: {-# UNPACK #-} !Discount  -- ^ Total discount when result is scrutinised
+                    -- Both ed_wc_tot and ed_ret /include/ ed_cases
 
-             , et_size   :: {-# UNPACK #-} !Size      -- ^ Size of the tree /apart from/ et_cases
-             , et_cases  :: Bag CaseTree              -- ^ Case expressions and discounts
+               , ed_size   :: {-# UNPACK #-} !Size      -- ^ Size of the tree /apart from/ ed_cases
+               , ed_cases  :: Bag CaseDigest              -- ^ Case expressions and discounts
     }
 
-data CaseTree
+data CaseDigest
   = CaseOf Id            -- Abstracts a case expression on this Id
            Id            -- Case binder
-           [AltTree]     -- Always non-empty, but not worth making NonEmpty;
+           [AltDigest]     -- Always non-empty, but not worth making NonEmpty;
                          -- nothing relies on non-empty-ness
 
-  | ScrutOf Id Discount  -- If this Id is bound to a value, apply this discount
+  | DiscVal Id Discount  -- If this Id is bound to a value, apply this discount
                          -- All size info is accounted for elsewhere;
-                         -- ScrutOf just records a discount
+                         -- DiscVal just records a discount
 
-data AltTree  = AltTree AltCon
+data AltDigest  = AltDigest AltCon
                         [Id]      -- Term variables only
-                        ExprTree
+                        ExprDigest
 
 {- Note [UnfoldingCache]
 ~~~~~~~~~~~~~~~~~~~~~~~~
