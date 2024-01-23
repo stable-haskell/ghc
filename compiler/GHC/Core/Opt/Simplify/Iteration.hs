@@ -3868,21 +3868,12 @@ mkDupableContWithDmds env _
   where
     thumbsUpPlanA (StrictBind {})              = True
     thumbsUpPlanA (Stop {})                    = True
-    thumbsUpPlanA (Select {})                  = dup_fun fun
---                                                 False -- Using Plan B benefits carryPropagate
---                                                       -- in nofib digits-of-e2
+    thumbsUpPlanA (Select {})                  = True
     thumbsUpPlanA (StrictArg {})               = False
     thumbsUpPlanA (CastIt { sc_cont = k })     = thumbsUpPlanA k
     thumbsUpPlanA (TickIt _ k)                 = thumbsUpPlanA k
     thumbsUpPlanA (ApplyToVal { sc_cont = k }) = thumbsUpPlanA k
     thumbsUpPlanA (ApplyToTy  { sc_cont = k }) = thumbsUpPlanA k
-
-    dup_fun fun | Just op <- isPrimOpId_maybe (ai_fun fun)
-                = case op of
-                     TagToEnumOp -> True
-                     _           -> False
-                | otherwise
-                = False
 
 mkDupableContWithDmds env dmds
     (ApplyToTy { sc_cont = cont, sc_arg_ty = arg_ty, sc_hole_ty = hole_ty })
@@ -4318,25 +4309,27 @@ There are two ways to make it duplicable.
   So, looking at Note [Duplicating join points], we also want Plan B
   when `f` is a data constructor.
 
-Plan A is often good. Here's an example from #3116
+Plan A is often good:
+
+* The calls to `f` may well be able to inline, since they are now applied
+  to more informative arguments, `r1`, `r2`. For example:
+        && E (case x of { T -> F; F -> T })
+  Pushing the call inward (being careful not to duplicate E) we get
+        let a = E
+        in case x of { T -> && a F; F -> && a T }
+  and now the (&& a F) etc can optimise.
+
+* Moreover there might be a RULE for the function that can fire when it "sees"
+  the particular case alternative.
+
+* More specialisation can happen.  Here's an example from #3116
      go (n+1) (case l of
                  1  -> bs'
                  _  -> Chunk p fpc (o+1) (l-1) bs')
 
-If we pushed the entire call for 'go' inside the case, we get
-call-pattern specialisation for 'go', which is *crucial* for
-this particular program.
-
-Here is another example.
-        && E (case x of { T -> F; F -> T })
-
-Pushing the call inward (being careful not to duplicate E)
-        let a = E
-        in case x of { T -> && a F; F -> && a T }
-
-and now the (&& a F) etc can optimise.  Moreover there might
-be a RULE for the function that can fire when it "sees" the
-particular case alternative.
+  If we pushed the entire call for 'go' inside the case, we get
+  call-pattern specialisation for 'go', which is *crucial* for
+  this particular program.
 
 But Plan A can have terrible, terrible behaviour. Here is a classic
 case:

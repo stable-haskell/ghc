@@ -440,11 +440,17 @@ uncondInlineJoin bndrs body
   | exprIsTrivial body
   = True   -- Nullary constructors, literals
 
+{-
   | (Var v, args) <- collectArgs body
   , all exprIsTrivial args
   = if   isDataConId v
     then isEmptyVarSet (exprsSomeFreeVars is_free_id args)
     else True
+-}
+  | (Var v, args) <- collectArgs body
+  , all exprIsTrivial args
+  , isJoinId v   -- Indirection to another join point; always inline
+  = True
 
   | otherwise
   = False

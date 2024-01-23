@@ -303,7 +303,7 @@ tryUnfolding logger opts !case_depth !inline_depth id lone_variable arg_infos
 
      UnfIfGoodArgs { ug_args = arg_discounts, ug_res = res_discount, ug_size = size }
         | isJoinId id
-        -> -- Inline a join point only if it scrutinisees a ValueArg
+        -> -- Inline a join point only if it scrutinises a ValueArg
            -- See Note [Duplicating join points] in GHC.Core.Opt.Simplify.Iteration
            if or (zipWith scrut_arg arg_discounts arg_infos) && small_enough
            then yes
