@@ -41,10 +41,9 @@ import GHC.Core
 import GHC.Core.Utils
 import GHC.Core.DataCon
 import GHC.Core.Type
-import GHC.Core.FVs( exprsSomeFreeVars )
 
 import GHC.Types.Id
-import GHC.Types.Var.Set( mkVarSet, isEmptyVarSet, elemVarSet )
+import GHC.Types.Var.Set( mkVarSet, elemVarSet )
 import GHC.Types.Literal
 import GHC.Types.Id.Info
 import GHC.Types.RepType ( isZeroBitTy )
@@ -446,6 +445,9 @@ uncondInlineJoin bndrs body
   = if   isDataConId v
     then isEmptyVarSet (exprsSomeFreeVars is_free_id args)
     else True
+  where
+    bndr_set = mkVarSet bndrs
+    is_free_id v = not (v `elemVarSet` bndr_set)
 -}
   | (Var v, args) <- collectArgs body
   , all exprIsTrivial args
@@ -455,9 +457,6 @@ uncondInlineJoin bndrs body
   | otherwise
   = False
 
-  where
-    bndr_set = mkVarSet bndrs
-    is_free_id v = not (v `elemVarSet` bndr_set)
 
 sizeExpr :: UnfoldingOpts
          -> Int             -- Bomb out if it gets bigger than this
