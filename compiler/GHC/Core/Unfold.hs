@@ -43,7 +43,6 @@ import GHC.Core.DataCon
 import GHC.Core.Type
 
 import GHC.Types.Id
-import GHC.Types.Var.Set( mkVarSet, elemVarSet )
 import GHC.Types.Literal
 import GHC.Types.Id.Info
 import GHC.Types.RepType ( isZeroBitTy )
@@ -435,7 +434,7 @@ uncondInline is_join rhs bndrs arity body size
 
 uncondInlineJoin :: [Var] -> CoreExpr -> Bool
 -- See Note [Duplicating join points] point (DJ3)
-uncondInlineJoin bndrs body
+uncondInlineJoin _bndrs body
   | exprIsTrivial body
   = True   -- Nullary constructors, literals
 
