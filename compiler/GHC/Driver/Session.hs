@@ -2705,6 +2705,7 @@ xFlagsDeps = [
   flagSpec "MonomorphismRestriction"          LangExt.MonomorphismRestriction,
   flagSpec "MultiParamTypeClasses"            LangExt.MultiParamTypeClasses,
   flagSpec "MultiWayIf"                       LangExt.MultiWayIf,
+  flagSpec "MultilineStrings"                 LangExt.MultilineStrings,
   flagSpec "NumericUnderscores"               LangExt.NumericUnderscores,
   flagSpec "NPlusKPatterns"                   LangExt.NPlusKPatterns,
   flagSpec "NamedFieldPuns"                   LangExt.NamedFieldPuns,
