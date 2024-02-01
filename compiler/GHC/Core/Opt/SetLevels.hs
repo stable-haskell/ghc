@@ -1279,6 +1279,9 @@ dontFloatNonRec env dest_lvl bndr bndr_ty deann_rhs
           -- If a continuation consumes (let $j x = Just x in case y of {...})
           -- we may get much less duplication of the continuation if we don't
           -- float $j to the top, because the contination goes into $j's RHS
+          --
+          -- Moreover see #21392 for another bad consequence of floating
+          -- a join to the top.
 
   | otherwise
   = False
