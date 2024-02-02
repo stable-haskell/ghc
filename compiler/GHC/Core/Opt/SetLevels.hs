@@ -795,8 +795,10 @@ I think this is obsolete; the flag seems always on.]
 
 Note [Floating join point bindings]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Mostly we only float a join point if it can /stay/ a join point.  But
-there is one exception: if it can go to the top level (#13286).
+Mostly we don't float join points at all -- we want them to /stay/ join points.
+This decision is made in `wantToFloat`.
+
+But there is one exception: if it can go to the top level (#13286).
 Consider
   f x = joinrec j y n = <...j y' n'...>
         in jump j x 0
@@ -811,6 +813,47 @@ It shouldn't make a lot of difference, but these tests
   simplCore/should_compile/spec-inline
 and one nofib program, all improve if you do float to top, because
 of the resulting inlining of f.  So ok, let's do it.
+
+However there are also bad consequences of floating join point to the top:
+
+* If a continuation consumes (let $j x = Just x in case y of {...})
+  we may get much less duplication of the continuation if we don't
+  float $j to the top, because the contination goes into $j's RHS
+
+* See #21392 for an example of how demand analysis can get worse if you
+  float a join point to the top level.
+
+Compromise: we control float-joins-to-the-top with the FloatOutSwitch
+floatJoinsToTop.  We don't do it in the first invocation of FloatOut, but
+we /do/ do it in the second iteration near the end of the pipeline.
+
+Missed opportunity
+------------------
+There is another benfit of floating local join points.  Stream fusion
+has been known to produce nested loops like this:
+
+  joinrec j1 x1 =
+    joinrec j2 x2 =
+      joinrec j3 x3 = ... jump j1 (x3 + 1) ... jump j2 (x3 + 1) ...
+      in jump j3 x2
+    in jump j2 x1
+  in jump j1 x
+
+(Assume x1 and x2 do *not* occur free in j3.)
+
+Here j1 and j2 are wholly superfluous---each of them merely forwards its
+argument to j3. Since j3 only refers to x3, we can float j2 and j3 to make
+everything one big mutual recursion:
+
+  joinrec j1 x1 = jump j2 x1
+          j2 x2 = jump j3 x2
+          j3 x3 = ... jump j1 (x3 + 1) ... jump j2 (x3 + 1) ...
+  in jump j1 x
+
+Now the simplifier will happily inline the trivial j1 and j2, leaving only j3.
+Without floating, we're stuck with three loops instead of one.
+
+Currently we don't do this -- a missed opportunity.
 
 Note [Free join points]
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -1242,15 +1285,8 @@ wantToFloat env dest_lvl is_join is_top_bindable
              -- bit brutal, but unlifted bindings aren't expensive either
 
   | is_join  -- Join points either stay put, or float to top
-             -- See Note [Floating join points]
+             -- See Note [Floating join point bindings]
   = isTopLvl dest_lvl && floatJoinsToTop (le_switches env)
-          -- Try not floating join points at all
-          -- If a continuation consumes (let $j x = Just x in case y of {...})
-          -- we may get much less duplication of the continuation if we don't
-          -- float $j to the top, because the contination goes into $j's RHS
-          --
-          -- Moreover see #21392 for another bad consequence of floating
-          -- a join to the top.
 
   | otherwise
   = True     -- Yes!  Float me
