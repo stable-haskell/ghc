@@ -53,7 +53,7 @@ test('T3717', only_ways(['optasm']),
 
 test('spec-inline', only_ways(['optasm']),
               	    compile,
-              	    ['-O2 -ddump-simpl -dsuppress-uniques -dsuppress-ticks'])
+              	    ['-O2 -ddump-simpl -dsuppress-uniques -dsuppress-ticks -dno-typeable-binds'])
 test('T4908', only_ways(['optasm']),
               compile,
               ['-O2 -ddump-simpl -dsuppress-uniques -dsuppress-ticks'])
