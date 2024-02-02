@@ -395,14 +395,14 @@ floatExpr (Coercion co) = (zeroStats, emptyFloats, Coercion co)
 floatExpr (Lit lit) = (zeroStats, emptyFloats, Lit lit)
 
 floatExpr (App e a)
-  = case (atJoinCeiling $ floatExpr  e) of { (fse, floats_e, e') ->
-    case (atJoinCeiling $ floatExpr  a) of { (fsa, floats_a, a') ->
+  = case (floatExpr  e) of { (fse, floats_e, e') ->
+    case (floatExpr  a) of { (fsa, floats_a, a') ->
     (fse `add_stats` fsa, floats_e `plusFloats` floats_a, App e' a') }}
 
 floatExpr lam@(Lam (TB _ lam_spec) _)
   = let (bndrs_w_lvls, body) = collectBinders lam
         bndrs                = [b | TB b _ <- bndrs_w_lvls]
-        bndr_lvl             = asJoinCeilLvl (floatSpecLevel lam_spec)
+        bndr_lvl             = floatSpecLevel lam_spec
         -- All the binders have the same level
         -- See GHC.Core.Opt.SetLevels.lvlLamBndrs
         -- Use asJoinCeilLvl to make this the join ceiling
@@ -412,11 +412,11 @@ floatExpr lam@(Lam (TB _ lam_spec) _)
 
 floatExpr (Tick tickish expr)
   | tickish `tickishScopesLike` SoftScope -- not scoped, can just float
-  = case (atJoinCeiling $ floatExpr expr)    of { (fs, floating_defns, expr') ->
+  = case (floatExpr expr)    of { (fs, floating_defns, expr') ->
     (fs, floating_defns, Tick tickish expr') }
 
   | not (tickishCounts tickish) || tickishCanSplit tickish
-  = case (atJoinCeiling $ floatExpr expr)    of { (fs, floating_defns, expr') ->
+  = case (floatExpr expr)    of { (fs, floating_defns, expr') ->
     let -- Annotate bindings floated outwards past an scc expression
         -- with the cc.  We mark that cc as "duplicated", though.
         annotated_defns = wrapTick (mkNoCount tickish) floating_defns
@@ -432,7 +432,7 @@ floatExpr (Tick tickish expr)
   = pprPanic "floatExpr tick" (ppr tickish)
 
 floatExpr (Cast expr co)
-  = case (atJoinCeiling $ floatExpr expr) of { (fs, floating_defns, expr') ->
+  = case (floatExpr expr) of { (fs, floating_defns, expr') ->
     (fs, floating_defns, Cast expr' co) }
 
 floatExpr (Let bind body)
@@ -463,8 +463,8 @@ floatExpr (Case scrut (TB case_bndr case_spec) ty alts)
   = case case_spec of
       FloatMe dest_lvl  -- Case expression moves
         | [Alt con@(DataAlt {}) bndrs rhs] <- alts
-        -> case atJoinCeiling $ floatExpr scrut of { (fse, fde, scrut') ->
-           case                 floatExpr rhs   of { (fsb, fdb, rhs') ->
+        -> case floatExpr scrut of { (fse, fde, scrut') ->
+           case floatExpr rhs   of { (fsb, fdb, rhs') ->
            let
              float = unitCaseFloat dest_lvl scrut'
                           case_bndr con [b | TB b _ <- bndrs]
@@ -474,7 +474,7 @@ floatExpr (Case scrut (TB case_bndr case_spec) ty alts)
         -> pprPanic "Floating multi-case" (ppr alts)
 
       StayPut bind_lvl  -- Case expression stays put
-        -> case atJoinCeiling $ floatExpr scrut of { (fse, fde, scrut') ->
+        -> case floatExpr scrut of { (fse, fde, scrut') ->
            case floatList (float_alt bind_lvl) alts of { (fsa, fda, alts')  ->
            (add_stats fse fsa, fda `plusFloats` fde, Case scrut' case_bndr ty alts')
            }}
@@ -496,7 +496,7 @@ floatRhs bndr rhs
         case floatBody lvl body of { (fs, floats, body') ->
         (fs, floats, mkLams [b | TB b _ <- bndrs] body') }
   | otherwise
-  = atJoinCeiling $ floatExpr rhs
+  = floatExpr rhs
   where
     try_collect 0 expr      acc = Just (reverse acc, expr)
     try_collect n (Lam b e) acc = try_collect (n-1) e (b:acc)
@@ -571,9 +571,9 @@ add_stats (FlS a1 b1 c1) (FlS a2 b2 c2)
   = FlS (a1 + a2) (b1 + b2) (c1 + c2)
 
 add_to_stats :: FloatStats -> FloatBinds -> FloatStats
-add_to_stats (FlS a b c) (FB tops ceils others)
+add_to_stats (FlS a b c) (FB tops others)
   = FlS (a + lengthBag tops)
-        (b + lengthBag ceils + lengthBag (flattenMajor others))
+        (b + lengthBag (flattenMajor others))
         (c + 1)
 
 {-
@@ -608,21 +608,18 @@ type MajorEnv = M.IntMap MinorEnv         -- Keyed by major level
 type MinorEnv = M.IntMap (Bag FloatBind)  -- Keyed by minor level
 
 data FloatBinds  = FB !(Bag FloatLet)           -- Destined for top level
-                      !(Bag FloatBind)          -- Destined for join ceiling
                       !MajorEnv                 -- Other levels
      -- See Note [Representation of FloatBinds]
 
 instance Outputable FloatBinds where
-  ppr (FB fbs ceils defs)
+  ppr (FB fbs defs)
       = text "FB" <+> (braces $ vcat
            [ text "tops ="     <+> ppr fbs
-           , text "ceils ="    <+> ppr ceils
            , text "non-tops =" <+> ppr defs ])
 
 flattenTopFloats :: FloatBinds -> Bag CoreBind
-flattenTopFloats (FB tops ceils defs)
+flattenTopFloats (FB tops defs)
   = assertPpr (isEmptyBag (flattenMajor defs)) (ppr defs) $
-    assertPpr (isEmptyBag ceils) (ppr ceils)
     tops
 
 addTopFloatPairs :: Bag CoreBind -> [(Id,CoreExpr)] -> [(Id,CoreExpr)]
@@ -639,29 +636,24 @@ flattenMinor :: MinorEnv -> Bag FloatBind
 flattenMinor = M.foldr unionBags emptyBag
 
 emptyFloats :: FloatBinds
-emptyFloats = FB emptyBag emptyBag M.empty
+emptyFloats = FB emptyBag M.empty
 
 unitCaseFloat :: Level -> CoreExpr -> Id -> AltCon -> [Var] -> FloatBinds
-unitCaseFloat (Level major minor t) e b con bs
-  | t == JoinCeilLvl
-  = FB emptyBag floats M.empty
-  | otherwise
-  = FB emptyBag emptyBag (M.singleton major (M.singleton minor floats))
+unitCaseFloat (Level major minor) e b con bs
+  = FB emptyBag (M.singleton major (M.singleton minor floats))
   where
     floats = unitBag (FloatCase e b con bs)
 
 unitLetFloat :: Level -> FloatLet -> FloatBinds
-unitLetFloat lvl@(Level major minor t) b
-  | isTopLvl lvl     = FB (unitBag b) emptyBag M.empty
-  | t == JoinCeilLvl = FB emptyBag floats M.empty
-  | otherwise        = FB emptyBag emptyBag (M.singleton major
-                                              (M.singleton minor floats))
+unitLetFloat lvl@(Level major minor) b
+  | isTopLvl lvl = FB (unitBag b) M.empty
+  | otherwise    = FB emptyBag (M.singleton major (M.singleton minor floats))
   where
     floats = unitBag (FloatLet b)
 
 plusFloats :: FloatBinds -> FloatBinds -> FloatBinds
-plusFloats (FB t1 c1 l1) (FB t2 c2 l2)
-  = FB (t1 `unionBags` t2) (c1 `unionBags` c2) (l1 `plusMajor` l2)
+plusFloats (FB t1 l1) (FB t2 l2)
+  = FB (t1 `unionBags` t2) (l1 `plusMajor` l2)
 
 plusMajor :: MajorEnv -> MajorEnv -> MajorEnv
 plusMajor = M.unionWith plusMinor
@@ -701,10 +693,9 @@ partitionByMajorLevel (Level major _) (FB tops defns)
                Just h  -> flattenMinor h
 -}
 
-partitionByLevel (Level major minor typ) (FB tops ceils defns)
-  = (FB tops ceils' (outer_maj `plusMajor` M.singleton major outer_min),
-     here_min `unionBags` here_ceil
-              `unionBags` flattenMinor inner_min
+partitionByLevel (Level major minor) (FB tops defns)
+  = (FB tops (outer_maj `plusMajor` M.singleton major outer_min),
+     here_min `unionBags` flattenMinor inner_min
               `unionBags` flattenMajor inner_maj)
 
   where
@@ -713,27 +704,10 @@ partitionByLevel (Level major minor typ) (FB tops ceils defns)
                                             Nothing -> (M.empty, Nothing, M.empty)
                                             Just min_defns -> M.splitLookup minor min_defns
     here_min = mb_here_min `orElse` emptyBag
-    (here_ceil, ceils') | typ == JoinCeilLvl = (ceils, emptyBag)
-                        | otherwise          = (emptyBag, ceils)
-
--- Like partitionByLevel, but instead split out the bindings that are marked
--- to float to the nearest join ceiling (see Note [Join points])
-partitionAtJoinCeiling :: FloatBinds -> (FloatBinds, Bag FloatBind)
-partitionAtJoinCeiling (FB tops ceils defs)
-  = (FB tops emptyBag defs, ceils)
-
--- Perform some action at a join ceiling, i.e., don't let join points float out
--- (see Note [Join points])
-atJoinCeiling :: (FloatStats, FloatBinds, CoreExpr)
-              -> (FloatStats, FloatBinds, CoreExpr)
-atJoinCeiling (fs, floats, expr')
-  = (fs, floats', install ceils expr')
-  where
-    (floats', ceils) = partitionAtJoinCeiling floats
 
 wrapTick :: CoreTickish -> FloatBinds -> FloatBinds
-wrapTick t (FB tops ceils defns)
-  = FB (mapBag wrap_bind tops) (wrap_defns ceils)
+wrapTick t (FB tops defns)
+  = FB (mapBag wrap_bind tops)
        (M.map (M.map wrap_defns) defns)
   where
     wrap_defns = mapBag wrap_one
