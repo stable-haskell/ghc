@@ -482,8 +482,9 @@ getSomeCharacters handle_@Handle__{..} buf@Buffer{..} =
 -- | The 'hGetContents'' operation reads all input on the given handle
 -- before returning it as a 'String' and closing the handle.
 --
+-- This is a strict version of 'hGetContents'
+--
 -- @since 4.15.0.0
-
 hGetContents' :: Handle -> IO String
 hGetContents' handle = do
     es <- wantReadableHandle "hGetContents'" handle (strictRead handle)
@@ -563,7 +564,7 @@ lazyBuffersToString CRLF = loop '\0' where
 --
 -- This operation may fail with:
 --
---  * 'isFullError' if the device is full; or
+--  * 'isFullError' if the device is full.
 --
 --  * 'isPermissionError' if another system resource limit would be exceeded.
 
@@ -623,7 +624,7 @@ hPutcBuffered handle_@Handle__{..} c = do
 --
 -- This operation may fail with:
 --
---  * 'isFullError' if the device is full; or
+--  * 'isFullError' if the device is full.
 --
 --  * 'isPermissionError' if another system resource limit would be exceeded.
 
@@ -631,6 +632,8 @@ hPutStr :: Handle -> String -> IO ()
 hPutStr handle str = hPutStr' handle str False
 
 -- | The same as 'hPutStr', but adds a newline character.
+--
+-- This operation may fail with the same errors as 'hPutStr'
 hPutStrLn :: Handle -> String -> IO ()
 hPutStrLn handle str = hPutStr' handle str True
 
