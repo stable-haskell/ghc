@@ -19,6 +19,7 @@ module GHC.Core.TyCo.FVs
         tyCoVarsOfCoDSet,
         tyCoFVsOfCo, tyCoFVsOfCos,
         tyCoVarsOfCoList,
+        shallowCoVarsOfCosDSet,
 
         almostDevoidCoVarOfCo,
 
@@ -446,6 +447,39 @@ deepCoVarFolder = TyCoFolder { tcf_view = noView
                        -- See Note [CoercionHoles and coercion free variables]
                        -- in GHC.Core.TyCo.Rep
 
+------- Same again, but for DCoVarSet ----------
+--    But this time the free vars are shallow
+
+shallowCoVarsOfCosDSet :: [Coercion] -> DCoVarSet
+shallowCoVarsOfCosDSet _cos = undefined  -- !!!   runTCA (shallow_dcv_cos cos) emptyVarSet emptyDVarSet
+{- TODO: !!! lots of other code and refactorings, partially bit-rotten, would need to be taken from !3792
+
+shallow_dcv_cos  :: [Coercion] -> TyCoAcc DCoVarSet
+(_, _, _, shallow_dcv_cos) = foldTyCo shallowCoVarDSetFolder
+
+
+shallowCoVarDSetFolder :: TyCoFolder TyCoVarSet{-!!!-} (TyCoAcc DCoVarSet)
+shallowCoVarDSetFolder = TyCoFolder { tcf_view = noView
+                                    , tcf_tyvar = do_tyvar, tcf_covar = do_covar
+                                    , tcf_hole  = do_hole, tcf_tycobinder = do_bndr }
+  where
+    do_tyvar _  = mempty
+    do_covar cv = shallowAddCoVarDSet cv
+
+    do_bndr tcv _vis fvs = extendInScope tcv fvs
+    do_hole hole = do_covar (coHoleCoVar hole)
+
+shallowAddCoVarDSet :: CoVar -> TyCoAcc DCoVarSet
+-- Add a variable to the free vars unless it is in the in-scope
+-- or is already in the in-scope set-
+shallowAddCoVarDSet cv = TCA add_it
+  where
+    add_it is acc | cv `elemVarSet`  is  = acc
+                  | cv `elemDVarSet` acc = acc
+                  | otherwise            = acc `extendDVarSet` cv
+-}
+
+
 {- *********************************************************************
 *                                                                      *
           Closing over kinds
@@ -660,7 +694,7 @@ tyCoFVsOfCoVar v fv_cand in_scope acc
 tyCoFVsOfProv :: UnivCoProvenance -> FV
 tyCoFVsOfProv (PhantomProv co)    fv_cand in_scope acc = tyCoFVsOfCo co fv_cand in_scope acc
 tyCoFVsOfProv (ProofIrrelProv co) fv_cand in_scope acc = tyCoFVsOfCo co fv_cand in_scope acc
-tyCoFVsOfProv (PluginProv _)      fv_cand in_scope acc = emptyFV fv_cand in_scope acc
+tyCoFVsOfProv (PluginProv _ cvs)  fv_cand in_scope acc = mkFVs (dVarSetElems cvs) fv_cand in_scope acc
 
 tyCoFVsOfCos :: [Coercion] -> FV
 tyCoFVsOfCos []       fv_cand in_scope acc = emptyFV fv_cand in_scope acc
@@ -730,7 +764,7 @@ almost_devoid_co_var_of_prov (PhantomProv co) cv
   = almost_devoid_co_var_of_co co cv
 almost_devoid_co_var_of_prov (ProofIrrelProv co) cv
   = almost_devoid_co_var_of_co co cv
-almost_devoid_co_var_of_prov (PluginProv _) _ = True
+almost_devoid_co_var_of_prov (PluginProv _ cvs) cv = not (cv `elemDVarSet` cvs)
 
 almost_devoid_co_var_of_type :: Type -> CoVar -> Bool
 almost_devoid_co_var_of_type (TyVarTy _) _ = True
@@ -1129,7 +1163,7 @@ tyConsOfType ty
 
      go_prov (PhantomProv co)    = go_co co
      go_prov (ProofIrrelProv co) = go_co co
-     go_prov (PluginProv _)      = emptyUniqSet
+     go_prov (PluginProv _ _)    = emptyUniqSet
 
      go_cos cos   = foldr (unionUniqSets . go_co)  emptyUniqSet cos
 
@@ -1340,4 +1374,4 @@ occCheckExpand vs_to_avoid ty
     ------------------
     go_prov cxt (PhantomProv co)    = PhantomProv <$> go_co cxt co
     go_prov cxt (ProofIrrelProv co) = ProofIrrelProv <$> go_co cxt co
-    go_prov _   p@(PluginProv _)    = return p
+    go_prov _   p@(PluginProv _ _)  = return p  -- !!! Richard says somewhere in the old MR: "If the zapped co contains tyvars, we might need to expand here, too."

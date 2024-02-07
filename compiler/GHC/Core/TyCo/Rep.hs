@@ -1,4 +1,3 @@
-
 {-# LANGUAGE DeriveDataTypeable #-}
 
 {-# OPTIONS_HADDOCK not-home #-}
@@ -78,7 +77,7 @@ import {-# SOURCE #-} GHC.Core.Type( chooseFunTyFlag, typeKind, typeTypeOrConstr
 
 -- friends:
 import GHC.Types.Var
-import GHC.Types.Var.Set( elemVarSet )
+import GHC.Types.Var.Set( DCoVarSet, dVarSetElems, elemVarSet )
 import GHC.Core.TyCon
 import GHC.Core.Coercion.Axiom
 
@@ -885,7 +884,7 @@ data Coercion
 
   | FunCo  -- FunCo :: "e" -> N/P -> e -> e -> e
            -- See Note [FunCo] for fco_afl, fco_afr
-       { fco_role         :: Role
+        { fco_role         :: Role
         , fco_afl          :: FunTyFlag   -- Arrow for coercionLKind
         , fco_afr          :: FunTyFlag   -- Arrow for coercionRKind
         , fco_mult         :: CoercionN
@@ -1526,15 +1525,18 @@ data UnivCoProvenance
                                  --   considered equivalent. See Note [ProofIrrelProv].
                                  -- Can be used in Nominal or Representational coercions
 
-  | PluginProv String  -- ^ From a plugin, which asserts that this coercion
-                       --   is sound. The string is for the use of the plugin.
+  | PluginProv String DCoVarSet  -- !!! shall we make the field(s) strict?
+      -- ^ From a plugin, which asserts that this coercion is sound.
+      --   The string and the variable set are for the use of the plugin.
+      --   E.g., the set may contain the in-scope coercion variables
+      --   that the the proof represented by the coercion makes use of.
 
   deriving Data.Data
 
 instance Outputable UnivCoProvenance where
-  ppr (PhantomProv _)    = text "(phantom)"
-  ppr (ProofIrrelProv _) = text "(proof irrel.)"
-  ppr (PluginProv str)   = parens (text "plugin" <+> brackets (text str))
+  ppr (PhantomProv _)      = text "(phantom)"
+  ppr (ProofIrrelProv _)   = text "(proof irrel.)"
+  ppr (PluginProv str cvs) = parens (text "plugin" <+> brackets (text str) <+> ppr cvs)
 
 -- | A coercion to be filled in by the type-checker. See Note [Coercion holes]
 data CoercionHole
@@ -1689,6 +1691,45 @@ Here,
   where
     co5 :: (a1 ~ Bool) ~ (a2 ~ Bool)
     co5 = TyConAppCo Nominal (~#) [<*>, <*>, co4, <Bool>]
+
+
+The importance of tracking free coercion variables
+--------------------------------------------------
+
+-- !!! Rewrite the below, explaining how plugins need the vars:
+
+It is vital that zapped coercions track their free coercion variables.
+To see why, consider this program:
+
+    data T a where
+      T1 :: Bool -> T Bool
+      T2 :: T Int
+
+    f :: T a -> a -> Bool
+    f = /\a (x:T a) (y:a).
+        case x of
+              T1 (c : a~Bool) (z : Bool) -> not (y |> c)
+              T2 -> True
+
+Now imagine that we zap the coercion `c`, replacing it with a generic UnivCo
+between `a` and Bool. If we didn't record the fact that this coercion was
+previously free in `c`, we may incorrectly float the expression `not (y |> c)`
+out of the case alternative which brings proof of `c` into scope. If this
+happened then `f T2 (I# 5)` would try to interpret `y` as a Bool, at
+which point we aren't far from a segmentation fault or much worse.
+
+Note that we don't need to track
+* the coercion's free *type* variables
+* coercion variables free in kinds (we only need the "shallow" free covars)
+
+This means that we may float past type variables which the original
+proof had as free variables. While surprising, this doesn't jeopardise
+the validity of the coercion, which only depends upon the scoping
+relative to the free coercion variables.
+
+(The free coercion variables are kept as a DCoVarSet in UnivCo,
+since these sets are included in interface files.)
+
 -}
 
 
@@ -1855,7 +1896,10 @@ foldTyCo (TyCoFolder { tcf_view       = view
 
     go_prov env (PhantomProv co)    = go_co env co
     go_prov env (ProofIrrelProv co) = go_co env co
-    go_prov _   (PluginProv _)      = mempty
+    go_prov _   (PluginProv _ cvs)  = go_cvs env (dVarSetElems cvs)  -- !!!
+
+    go_cvs _   []       = mempty
+    go_cvs env (cv:cvs) = covar env cv `mappend` go_cvs env cvs
 
 -- | A view function that looks through nothing.
 noView :: Type -> Maybe Type
@@ -1921,7 +1965,7 @@ coercionSize (AxiomRuleCo _ cs)  = 1 + sum (map coercionSize cs)
 provSize :: UnivCoProvenance -> Int
 provSize (PhantomProv co)    = 1 + coercionSize co
 provSize (ProofIrrelProv co) = 1 + coercionSize co
-provSize (PluginProv _)      = 1
+provSize (PluginProv _ _)    = 1
 
 {-
 ************************************************************************

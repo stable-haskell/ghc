@@ -2532,7 +2532,7 @@ lintCoercion co@(UnivCo prov r ty1 ty2)
             ; check_kinds kco k1 k2
             ; return (ProofIrrelProv kco') }
 
-     lint_prov _ _ prov@(PluginProv _) = return prov
+     lint_prov _ _ prov@(PluginProv _ _) = return prov  -- !!! do we want to add checkTyCoVarInScope, as in !3792. and refactor all other variable checks to use it?
 
      check_kinds kco k1 k2
        = do { let Pair k1' k2' = coercionKind kco
