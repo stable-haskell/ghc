@@ -1138,7 +1138,7 @@ lvlBind env (AnnNonRec bndr rhs)
   |  isTyVar bndr  -- Don't float TyVar binders (simplifier gets rid of them pronto)
   || isCoVar bndr  -- Don't float CoVars: difficult to fix up CoVar occurrences
                    --                     (see extendPolyLvlEnv)
-  || not (wantToFloat env dest_lvl is_join is_top_bindable)
+  || not (wantToFloat env NonRecursive dest_lvl is_join is_top_bindable)
   = -- No float
     do { rhs' <- lvlRhs env NonRecursive is_bot_lam mb_join_arity rhs
        ; let  bind_lvl        = incMinorLvl (le_ctxt_lvl env)
@@ -1182,7 +1182,7 @@ lvlBind env (AnnNonRec bndr rhs)
     is_join       = isJoinPoint mb_join_arity
 
 lvlBind env (AnnRec pairs)
-  |  not (wantToFloat env dest_lvl is_join is_top_bindable)
+  |  not (wantToFloat env Recursive dest_lvl is_join is_top_bindable)
   = -- No float
     do { let bind_lvl       = incMinorLvl (le_ctxt_lvl env)
              (env', bndrs') = substAndLvlBndrs Recursive env bind_lvl bndrs
@@ -1267,12 +1267,13 @@ lvlBind env (AnnRec pairs)
        -- an unlifted value -- but we can if it's a /join binding/ (#16978)
 
 wantToFloat :: LevelEnv
+            -> RecFlag
             -> Level    -- This is how far it could float
             -> Bool     -- Join point
             -> Bool     -- True <=> top-level-bindadable
             -> Bool     -- True <=> Yes! Float me
 
-wantToFloat env dest_lvl is_join is_top_bindable
+wantToFloat env is_rec dest_lvl is_join is_top_bindable
   | not (profitableFloat env dest_lvl)
   = False
 
@@ -1286,7 +1287,7 @@ wantToFloat env dest_lvl is_join is_top_bindable
 
   | is_join  -- Join points either stay put, or float to top
              -- See Note [Floating join point bindings]
-  = isTopLvl dest_lvl && floatJoinsToTop (le_switches env)
+  = isTopLvl dest_lvl && (isRec is_rec || floatJoinsToTop (le_switches env))
 
   | otherwise
   = True     -- Yes!  Float me
