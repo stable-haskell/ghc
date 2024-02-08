@@ -452,7 +452,12 @@ deepCoVarFolder = TyCoFolder { tcf_view = noView
 
 shallowCoVarsOfCosDSet :: [Coercion] -> DCoVarSet
 shallowCoVarsOfCosDSet _cos = undefined  -- !!!   runTCA (shallow_dcv_cos cos) emptyVarSet emptyDVarSet
-{- TODO: !!! lots of other code and refactorings, partially bit-rotten, would need to be taken from !3792
+{- TODO: !!! lots of other code and refactorings, partially bit-rotten, would need to be taken from !3792 --- in particular
+
+* should I port the removal of the `env` parameter from `TyCoFolder`, see https://gitlab.haskell.org/ghc/ghc/-/merge_requests/3792/diffs#578c7c3857d66d963736ff6742f3433a0e8d01b7_1883_2076? That's 200 lines in the old GHC.Core.TyCo.Rep alone and who know how many lines in the new versions of these files. If not, what `env` to use in `shallowCoVarDSetFolder`, a couple of lines below in the place marked as {-!!!-}? Is this relatively shallow (e.g., if the env type-checks, it's likely to be correct?)?
+
+* should I introduce TyCoAcc, see https://gitlab.haskell.org/ghc/ghc/-/merge_requests/3792/diffs#039e8f5676356ef05c90af828aae48aac7296e47_266_268 and then also use it for many other operations (e.g., instead of Endo)?
+
 
 shallow_dcv_cos  :: [Coercion] -> TyCoAcc DCoVarSet
 (_, _, _, shallow_dcv_cos) = foldTyCo shallowCoVarDSetFolder
