@@ -80,6 +80,6 @@ solveCt ( PluginDefs {..} ) ct@( classifyPredType . ctPred -> EqPred NomEq lhs r
   , let
       evTerm :: EvTerm
       evTerm = EvExpr . Coercion
-             $ mkUnivCo ( PluginProv "TyFamPlugin" emptyUniqDSet) Nominal lhs rhs  -- !!! how do I take the free variables at this point? should we provide a smart constructor that computes the free variables? how about another that sets the empty set? would some plugins work fine with that?
+             $ mkUnivCo ( PluginProv "TyFamPlugin" emptyUniqDSet) Nominal lhs rhs  -- Empty is fine. This plugin does not use "givens".
   = pure $ Just ( evTerm, ct )
 solveCt _ ct = pure Nothing

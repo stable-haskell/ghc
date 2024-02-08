@@ -87,5 +87,5 @@ mkTyFamReduction :: TyCon -> [ Type ] -> Type -> Reduction
 mkTyFamReduction tyCon args res = Reduction co res
   where
     co :: Coercion
-    co = mkUnivCo ( PluginProv "RewritePlugin" emptyUniqDSet) Nominal
+    co = mkUnivCo ( PluginProv "RewritePlugin" emptyUniqDSet) Nominal  -- Empty is fine. This plugin does not use "givens".   -- !!! is it true for this plugin as well?
            ( mkTyConApp tyCon args ) res

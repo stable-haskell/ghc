@@ -1522,7 +1522,7 @@ promoteCoercion co = case co of
 
     UnivCo (PhantomProv kco)    _ _ _ -> kco
     UnivCo (ProofIrrelProv kco) _ _ _ -> kco
-    UnivCo (PluginProv _ _)     _ _ _ -> mkKindCo co  -- !!!
+    UnivCo (PluginProv _ _)     _ _ _ -> mkKindCo co
 
     SymCo g
       -> mkSymCo (promoteCoercion g)

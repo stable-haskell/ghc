@@ -125,18 +125,11 @@ partitionUniqDSet p = coerce . partitionUDFM p . getUniqDSet
 
 -- See Note [UniqSet invariant] in GHC.Types.Unique.Set
 mapUniqDSet :: Uniquable b => (a -> b) -> UniqDSet a -> UniqDSet b
-mapUniqDSet f = mkUniqDSet . map f . uniqDSetToList
-{- !!! why was this changed in !3792 at all? should we change it too?
-mapUniqDSet f s = foldl' (\s e -> addOneToUniqDSet s (f e)) emptyUniqDSet $
-
-        Richard Eisenberg
-        @rae · 3 years ago
-        Developer
-
-Goodness gracious this is inefficient. It uses uniqDSetToList, which uses eltsUDFM, which uses sortBy! !! !!!!! No no no. Just use the Functor instance for IntMap, lifting through TaggedVal. No need to sort and then rebalance the map structure. No no no.
-
-                  uniqDSetToList s
--}
+mapUniqDSet f (UniqDSet m) = UniqDSet $ unsafeCastUDFMKey $ mapUDFM f m
+-- Simply apply `f` to each element, retaining all the structure unchanged.
+-- The identification of keys and elements prevents a derived Functor
+-- instance, but `unsafeCastUDFMKey` makes it possible to apply the strict
+-- mapping from DFM.
 
 strictFoldUniqDSet :: (a -> r -> r) -> r -> UniqDSet a -> r
 strictFoldUniqDSet k r s = foldl' (\r e -> k e r) r $

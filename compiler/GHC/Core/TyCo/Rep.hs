@@ -1896,10 +1896,9 @@ foldTyCo (TyCoFolder { tcf_view       = view
 
     go_prov env (PhantomProv co)    = go_co env co
     go_prov env (ProofIrrelProv co) = go_co env co
-    go_prov _   (PluginProv _ cvs)  = go_cvs env (dVarSetElems cvs)  -- !!!
+    go_prov _   (PluginProv _ cvs)  = go_cvs env cvs
 
-    go_cvs _   []       = mempty
-    go_cvs env (cv:cvs) = covar env cv `mappend` go_cvs env cvs
+    go_cvs env cvs = foldl' (\acc cv -> acc `mappend` covar env cv) mempty (dVarSetElems cvs)
 
 -- | A view function that looks through nothing.
 noView :: Type -> Maybe Type
