@@ -726,6 +726,10 @@ opt_trans_rule is in_co1@(UnivCo p1 r1 tyl1 _tyr1)
       = Just $ ProofIrrelProv $ opt_trans is kco1 kco2
     opt_trans_prov (PluginProv str1 cvs1) (PluginProv str2 cvs2)
       | str1 == str2 && cvs1 == cvs2 = Just p1
+-- !!! but Adam says "You'll want [...] the union of both sets of coercion variables.", so should we instead do
+--  opt_trans_prov (PluginProv str1 cvs1) (PluginProv str2 cvs2)
+--    | str1 == str2 = Just (PluginProv str1 (cvs1 `union` cvs2)
+-- ??? maybe also concatenate the strings instead of comparing them?
     opt_trans_prov _ _ = Nothing
 
 -- Push transitivity down through matching top-level constructors.
