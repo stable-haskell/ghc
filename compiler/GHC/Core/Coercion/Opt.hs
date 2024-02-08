@@ -641,9 +641,9 @@ opt_univ env sym prov role oty1 oty2
   where
     prov' = case prov of
       ProofIrrelProv kco -> ProofIrrelProv $ opt_co4_wrap env sym False Nominal kco
-      PluginProv s cvs   -> PluginProv s $! substDCoVarSet (lcTCvSubst env) cvs
+      PluginProv s cvs   -> PluginProv s $! substDCoVarSet (undefined{-lcTCvSubst-} env) cvs
 
-lcTCvSubst = undefined  -- !!! neither lcTCvSubst nor lcSubst exist any more; what shall I use here? lcSubstLeft? lcSubstRight? leave the cvs alone?
+-- !!! neither lcTCvSubst nor lcSubst exist any more; what shall I use here? lcSubstLeft? lcSubstRight? leave the cvs alone?
 
 -------------
 opt_transList :: HasDebugCallStack => InScopeSet -> [NormalCo] -> [NormalCo] -> [NormalCo]
