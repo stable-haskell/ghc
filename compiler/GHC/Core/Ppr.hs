@@ -628,9 +628,12 @@ instance Outputable UnfoldingGuidance where
                ppr et ]
 
 instance Outputable ExprDigest where
-  ppr (ExprDigest { ed_wc_tot = tot, ed_size = size, ed_ret = ret, ed_cases = cases })
-    = int tot <> char '/' <> int size <> char '/' <> int ret
-       <> brackets (sep (map ppr (bagToList cases)))
+  ppr (ExprDigest { ed_wc_tot = tot, ed_size = size
+                  , ed_ret = ret, ed_cases = cases
+                  , ed_fvs = fvs })
+    = hang (int tot <> char '/' <> int size <> char '/' <> int ret
+            <> ppr fvs)
+         2 (brackets (sep (map ppr (bagToList cases))))
 
 instance Outputable CaseDigest where
   ppr (DiscVal x n)     = ppr x <> colon <> int n

@@ -21,7 +21,7 @@ module GHC.Core.Unfold (
 
         ExprDigest, mkExprDigest, exprDigestSize, altDigestsSize,
         exprDigestMaxSize, exprDigestWillInline, exprIsTooLarge,
-        ArgDigest(..), hasArgInfo,
+        ArgDigest(..), digestHasInfo, digestIsEvald,
         ContDigest(..),
 
         Size, InlineContext(..),
@@ -498,7 +498,7 @@ EDVars maintains a partition of in-scope variables into avs, lvs and fvs,
 defined as follows:
 
 * avs: argument variables, or variables bound by a case on an
-       argument variable or free variable.
+       argument variable
 
   We record a CaseOf or DiscVal for the `avs`
 
@@ -508,17 +508,9 @@ defined as follows:
 
   We never record a CaseOf or DiscVal for one of the `lvs`.
 
-* fvs: we record a CaseOf /but not DiscVal/ for other variables that are
-  neither `lvs` nor `avs`; that is, variables free in the entire definition.
+* fvs: we record a CaseOf /but not DiscVal (see (ED2)/ for other variables that
+  are neither `lvs` nor `avs`; that is, variables free in the entire definition.
   See Example 3 of Note [Overview of inlining heuristics].
-
-  It is IMPORTANT that we do not record DiscVal for free variables:
-        let f x = y x 3 <big>
-        in  ...(f 3)...
-  There nothing we will learn about the free `y` that will make the inining of
-  `f` more attractive.  Hence we don't record DiscVal for `y`.  This is imporant,
-  because even a call like (reverse xs) would otherwise record a DiscVal for
-  `reverse` which is very silly.
 
 Wrinkles:
 
@@ -531,6 +523,14 @@ Wrinkles:
 
   * When we exceed the maximum case width we just bale out entirely and say that
     the function is too big. See Note [Bale out on very wide case expressions].
+
+(ED2) It is IMPORTANT that we do not record DiscVal for free variables:
+        let f x = y x 3 <big>
+        in  ...(f 3)...
+  There nothing we will learn about the free `y` that will make the inlining of
+  `f` more attractive.  Hence we don't record DiscVal for `y`.  This is imporant,
+  because even a call like (reverse xs) would otherwise record a DiscVal for
+  `reverse` which is very silly.
 
 Note [Computing the size of an expression]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -572,7 +572,7 @@ a function call to account for.  Notice also that constructor applications
 are very cheap, because exposing them to a caller is so valuable.
 -}
 
-type EDVars = (VarSet,VarSet)  -- (avs, lvs)
+data EDVars = ED { ed_avs, ed_lvs :: VarSet }
               -- See Note [Constructing an ExprDigest]
               -- These sets include type variables, which do no harm,
               -- and are a bit tiresome to filter out.
@@ -583,7 +583,7 @@ mkExprDigest :: UnfoldingOpts -> [Var] -> CoreExpr -> Maybe ExprDigest
 -- See Note [Computing the size of an expression]
 
 mkExprDigest opts args expr
-  = go (exprDigestCaseDepth opts) (mkVarSet args, emptyVarSet) expr
+  = go (exprDigestCaseDepth opts) (ED { ed_avs = mkVarSet args, ed_lvs = emptyVarSet }) expr
   where
     !max_width     = exprDigestCaseWidth opts
     !bOMB_OUT_SIZE = unfoldingCreationThreshold opts
@@ -718,24 +718,24 @@ mkExprDigest opts args expr
             -- Don't forget to add the case binder, b, to lvs.
 
 add_lv :: EDVars -> Var -> EDVars
-add_lv (avs,lvs) b = (avs, lvs `extendVarSet` b)
+add_lv edvs@(ED { ed_lvs = lvs }) b = edvs { ed_lvs = lvs `extendVarSet` b }
 
 add_lvs :: EDVars -> [Var] -> EDVars
-add_lvs (avs,lvs) bs = (avs, lvs `extendVarSetList` bs)
+add_lvs edvs@(ED { ed_lvs = lvs }) bs = edvs { ed_lvs = lvs `extendVarSetList` bs }
 
 add_alt_lvs :: EDVars
             -> Var       -- Scrutinised variable
-            -> [Var]     -- Binders of the alterantive (including the case binder)
+            -> [Var]     -- Binders of the alternative (including the case binder)
             -> EDVars
-add_alt_lvs vs@(avs, lvs) scrut_id alt_bndrs
-  | scrut_id `elemVarSet` avs = (avs `extendVarSetList` alt_bndrs, lvs)
-  | otherwise                 = vs
+add_alt_lvs edvs@(ED { ed_avs = avs }) scrut_id alt_bndrs
+  | scrut_id `elemVarSet` avs = edvs { ed_avs = avs `extendVarSetList` alt_bndrs }
+  | otherwise                 = edvs
 
 interestingVarScrut :: EDVars -> CoreExpr -> Maybe Id
 -- The scrutinee of a case is worth recording
 -- That is: an argument variable or free variable, but /not/
 --          one of the `lvs`, which are bound by local lets etc
-interestingVarScrut (_,lvs) (Var v)
+interestingVarScrut (ED { ed_lvs = lvs }) (Var v)
      | v `elemVarSet` lvs  = Nothing
      | otherwise           = Just v
 interestingVarScrut vs (Tick _ e) = interestingVarScrut vs e
@@ -853,24 +853,36 @@ genAppET :: UnfoldingOpts -> EDVars -> Id -> [CoreExpr] -> ExprDigest
 -- Note [Function applications]
 -- Caller accounts for the size of the arguments,
 -- but not for the cost of building a closure
-genAppET opts (avs,_) fun val_args
+genAppET opts (ED { ed_avs = avs, ed_lvs = lvs }) fun val_args
   | fun `hasKey` buildIdKey   = edZero  -- We want to inline applications of build/augment
   | fun `hasKey` augmentIdKey = edZero  -- so we give size zero to the whole call
   | otherwise = ExprDigest { ed_wc_tot = size, ed_size  = size
-                         , ed_cases = cases
-                         , ed_ret   = res_discount }
+                           , ed_cases = cases, ed_fvs = fvs
+                           , ed_ret   = res_discount }
   where
     size | null val_args = 0    -- Naked variable counts zero
          | otherwise     = vanillaCallSize val_args
+
+    in_avs = fun `elemVarSet` avs
+    in_lvs = fun `elemVarSet` lvs
 
     -- Discount if this is an interesting variable, and is applied
     -- If the function is an argument and is applied to some values,
     -- give it a discount -- maybe we can apply that lambda.
     --  See Note [Function and non-function discounts]
-    cases | (_:_) <- val_args, fun `elemVarSet` avs
+    cases | (_:_) <- val_args
+          , fun `elemVarSet` avs  -- Arguments only: see Note (ED2)
           = unitBag (DiscVal fun (unfoldingFunAppDiscount opts))
           | otherwise
           = emptyBag
+
+    unf = idUnfolding fun
+    fvs | isLocalId fun
+        , not (in_avs || in_lvs)
+        , hasCoreUnfolding unf
+        , not (isEvaldUnfolding unf)
+        = unitVarSet fun
+        | otherwise = emptyVarSet
 
     res_discount | val_args `lengthLessThan` idArity fun = unfoldingFunAppDiscount opts
                  | otherwise                             = 0
@@ -1110,8 +1122,8 @@ edAddS :: Size -> ExprDigest -> ExprDigest
 -- Does not account for ed_wc_tot geting too big, but that doesn't
 -- matter; the extra increment is always small, and we never get
 -- a long cascade of edAddSs
-edAddS n1 (ExprDigest { ed_wc_tot = t2, ed_size = n2, ed_cases = c2, ed_ret = ret2 })
-  = ExprDigest { ed_wc_tot = n1+t2, ed_size = n1+n2, ed_cases = c2, ed_ret = ret2 }
+edAddS n1 ed@(ExprDigest { ed_wc_tot = t2, ed_size = n2 })
+  = ed { ed_wc_tot = n1+t2, ed_size = n1+n2 }
 
 ---------------------------------------------------
 -- medAdd vs medAddAlt are identical except
@@ -1122,13 +1134,14 @@ medAdd :: Size -> Maybe ExprDigest -> Maybe ExprDigest -> Maybe ExprDigest
 medAdd _ Nothing _ = Nothing
 medAdd _ _ Nothing = Nothing
 medAdd bOMB_OUT_SIZE (Just ed1) (Just ed2)
-  | ExprDigest { ed_wc_tot = t1, ed_size = n1, ed_cases = c1, ed_ret = _ret1 } <- ed1
-  , ExprDigest { ed_wc_tot = t2, ed_size = n2, ed_cases = c2, ed_ret =  ret2 } <- ed2
+  | ExprDigest { ed_wc_tot = t1, ed_size = n1, ed_cases = c1, ed_ret = _ret1, ed_fvs = fvs1 } <- ed1
+  , ExprDigest { ed_wc_tot = t2, ed_size = n2, ed_cases = c2, ed_ret =  ret2, ed_fvs = fvs2 } <- ed2
   , let t12 = t1 + t2
   = if   t12 >= bOMB_OUT_SIZE
     then Nothing
     else Just (ExprDigest { ed_wc_tot = t12
                           , ed_size   = n1 + n2
+                          , ed_fvs    = fvs1 `unionVarSet` fvs2
                           , ed_cases  = c1 `unionBags` c2
                           , ed_ret    = ret2 })
 
@@ -1137,13 +1150,14 @@ medAddAlt :: Size -> Maybe ExprDigest -> Maybe ExprDigest -> Maybe ExprDigest
 medAddAlt _ Nothing _ = Nothing
 medAddAlt _ _ Nothing = Nothing
 medAddAlt bOMB_OUT_SIZE (Just ed1) (Just ed2)
-  | ExprDigest { ed_wc_tot = t1, ed_size = n1, ed_cases = c1, ed_ret = ret1 } <- ed1
-  , ExprDigest { ed_wc_tot = t2, ed_size = n2, ed_cases = c2, ed_ret = ret2 } <- ed2
+  | ExprDigest { ed_wc_tot = t1, ed_size = n1, ed_cases = c1, ed_ret = ret1, ed_fvs = fvs1 } <- ed1
+  , ExprDigest { ed_wc_tot = t2, ed_size = n2, ed_cases = c2, ed_ret = ret2, ed_fvs = fvs2 } <- ed2
   , let t12 = t1 + t2
   = if   t12 >= bOMB_OUT_SIZE
     then Nothing
     else Just (ExprDigest { ed_wc_tot = t12
                           , ed_size   = n1 + n2
+                          , ed_fvs    = fvs1 `unionVarSet` fvs2
                           , ed_cases  = c1 `unionBags` c2
                           , ed_ret    = ret1 + ret2 -- See Note [Result discount for case alternatives]
           })
@@ -1153,7 +1167,8 @@ medAddAlt bOMB_OUT_SIZE (Just ed1) (Just ed2)
 -- | The "expression tree"; an abstraction of the RHS of the function
 --   The "S" signals the Size argument
 edSized :: Size -> ExprDigest
-edSized n = ExprDigest { ed_size = n, ed_wc_tot = n, ed_cases = emptyBag, ed_ret = 0 }
+edSized n = ExprDigest { ed_size = n, ed_wc_tot = n, ed_fvs = emptyVarSet
+                       , ed_cases = emptyBag, ed_ret = 0 }
 
 edZero :: ExprDigest
 edZero = edSized 0
@@ -1164,7 +1179,7 @@ edCaseOf :: Size -> Id -> Id -> [AltDigest] -> Maybe ExprDigest
 edCaseOf bOMB_OUT_SIZE scrut case_bndr alts
   | tot >= bOMB_OUT_SIZE = Nothing
   | otherwise            = Just (ExprDigest { ed_wc_tot = tot, ed_ret = ret
-                                            , ed_size = 0
+                                            , ed_size = 0, ed_fvs = emptyVarSet
                                             , ed_cases = unitBag case_tree })
   where
     case_tree = CaseOf scrut case_bndr alts
@@ -1243,9 +1258,17 @@ instance Outputable ContDigest where
   ppr RuleArgCtxt = text "RuleArgCtxt"
 
 
-hasArgInfo :: ArgDigest -> Bool
-hasArgInfo ArgNoInfo = False
-hasArgInfo _         = True
+digestHasInfo :: ArgDigest -> Bool
+digestHasInfo ArgNoInfo = False
+digestHasInfo _         = True
+
+digestIsEvald :: ArgDigest -> Bool
+digestIsEvald ArgNoInfo     = False
+digestIsEvald ArgNonTriv    = False
+digestIsEvald (ArgIsCon {}) = True
+digestIsEvald (ArgIsNot {}) = True
+digestIsEvald ArgIsDFun     = True
+digestIsEvald ArgIsLam      = True
 
 instance Outputable ArgDigest where
   ppr ArgNoInfo       = text "ArgNoInfo"

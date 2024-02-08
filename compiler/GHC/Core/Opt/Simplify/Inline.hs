@@ -257,8 +257,8 @@ tryUnfolding logger env fn cont unf_template unf_cache guidance
           -- has interesting info, regardless of the function body.
           -- Should line up with GHC.Core.Unfold.vanillaCallSize
           call_size_discount = foldr ((+) . arg_discount) 2 (take n_bndrs arg_infos)
-          arg_discount arg_info | hasArgInfo arg_info = 10
-                                | otherwise           = 2
+          arg_discount arg_info | digestHasInfo arg_info = 10
+                                | otherwise                 = 2
 
           cont_info' | n_bndrs < n_val_args = ValAppCtxt
                      | otherwise            = cont_info
@@ -304,8 +304,8 @@ tryUnfolding logger env fn cont unf_template unf_cache guidance
        | otherwise = interesting_args   -- Saturated or over-saturated
                   || interesting_call
       where
-        interesting_args = any hasArgInfo arg_infos
-          -- NB: (any hasArgInfo arg_infos) looks at the
+        interesting_args = any digestHasInfo arg_infos
+          -- NB: (any digestHasInfo arg_infos) looks at the
           -- over-saturated args too which is "wrong";
           -- but if over-saturated we return True anyway
         saturated      = n_val_args >= uf_arity

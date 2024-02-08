@@ -101,8 +101,9 @@ import GHC.Core.Coercion
 import GHC.Core.Rules.Config ( RuleOpts )
 import GHC.Core.DataCon
 
-import GHC.Types.Var.Env( InScopeSet )
 import GHC.Types.Var
+import GHC.Types.Var.Env( InScopeSet )
+import GHC.Types.Var.Set( IdSet )
 import GHC.Types.Name
 import GHC.Types.Name.Set
 import GHC.Types.Literal
@@ -1425,12 +1426,15 @@ type Size     = Int
 type Discount = Int
 
 data ExprDigest
-  = ExprDigest { ed_wc_tot :: {-# UNPACK #-} !Size      -- ^ Total worst-case size of whole tree
+  = ExprDigest { ed_wc_tot :: {-# UNPACK #-} !Size  -- ^ Total worst-case size of whole tree
+               , ed_fvs    :: !IdSet                -- ^ LocalId free vars with a non-value unfolding
+                                                    --   that are merely used somewhere
+
                , ed_ret    :: {-# UNPACK #-} !Discount  -- ^ Total discount when result is scrutinised
                     -- Both ed_wc_tot and ed_ret /include/ ed_cases
 
                , ed_size   :: {-# UNPACK #-} !Size      -- ^ Size of the tree /apart from/ ed_cases
-               , ed_cases  :: Bag CaseDigest              -- ^ Case expressions and discounts
+               , ed_cases  :: Bag CaseDigest            -- ^ Case expressions and discounts
     }
 
 data CaseDigest

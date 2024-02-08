@@ -126,8 +126,11 @@ seqGuidance (UnfIfGoodArgs bs et) = seqBndrs bs `seq` seqET et
 seqGuidance _                     = ()
 
 seqET :: ExprDigest -> ()
-seqET (ExprDigest { ed_wc_tot = tot, ed_size = size, ed_cases = cases, ed_ret = ret })
-  = tot `seq` size `seq` ret `seq` seqBag seqCT cases
+seqET (ExprDigest { ed_wc_tot = tot, ed_size = size, ed_cases = cases
+                  , ed_fvs = fvs, ed_ret = ret })
+  = tot `seq` size `seq` ret `seq`
+    fvs `seq`  -- Not really right; should seq the elements I suppose
+    seqBag seqCT cases
 
 seqCT :: CaseDigest -> ()
 seqCT (DiscVal x i) = x `seq` i `seq` ()
