@@ -1277,8 +1277,9 @@ postInlineUnconditionally env bind_cxt bndr occ_info rhs
 
         -> n_br < 100  -- See Note [Suppress exponential blowup]
 
-           && smallEnoughToInline env unfolding     -- Small enough to dup
-                        -- ToDo: consider discount on smallEnoughToInline if int_cxt is true
+           && unfoldingWillAlwaysInline env unfolding     -- Small enough to dup
+                        -- ToDo: consider discount on unfoldingWillAlwaysInline
+                        --       if int_cxt is true
                         --
                         -- NB: Do NOT inline arbitrarily big things, even if occ_n_br=1
                         -- Reason: doing so risks exponential behaviour.  We simplify a big
@@ -1327,8 +1328,11 @@ postInlineUnconditionally env bind_cxt bndr occ_info rhs
     active    = isActive phase (idInlineActivation bndr)
         -- See Note [pre/postInlineUnconditionally in gentle mode]
 
-smallEnoughToInline :: SimplEnv -> Unfolding -> Bool
-smallEnoughToInline env unfolding
+unfoldingWillAlwaysInline :: SimplEnv -> Unfolding -> Bool
+-- True if the unfolding will always inline /based on size/;
+-- it may still not /actually/ inline if there is nothing interesting
+-- about the calling context
+unfoldingWillAlwaysInline env unfolding
   | CoreUnfolding {uf_guidance = guidance} <- unfolding
   = case guidance of
        UnfIfGoodArgs {ug_tree = et} -> exprDigestWillInline limit et

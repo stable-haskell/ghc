@@ -20,7 +20,7 @@ module GHC.Core.Unfold (
         Unfolding, UnfoldingGuidance,   -- Abstract types
 
         ExprDigest, mkExprDigest, exprDigestSize, altDigestsSize,
-        exprDigestWillInline, couldBeSmallEnoughToInline,
+        exprDigestMaxSize, exprDigestWillInline, exprIsTooLarge,
         ArgDigest(..), hasArgInfo,
         ContDigest(..),
 
@@ -347,13 +347,11 @@ calcUnfoldingGuidance opts is_top_bottoming expr
     val_bndrs   = filter isId bndrs
     n_val_bndrs = length val_bndrs
 
-couldBeSmallEnoughToInline :: UnfoldingOpts -> Size -> CoreExpr -> Bool
--- We use 'couldBeSmallEnoughToInline' to avoid exporting inlinings that
--- we ``couldn't possibly use'' on the other side.  Can be overridden
--- w/flaggery.  Just the same as smallEnoughToInline, except that it has no
--- actual arguments.
-couldBeSmallEnoughToInline opts threshold rhs
-  = isJust (mkExprDigest opts' [] body)
+exprIsTooLarge :: UnfoldingOpts -> Size -> CoreExpr -> Bool
+-- 'exprIsTooLarge' says when an expression is bigger than some threshold;
+-- used to avoid creating too-large specialisations of teh function
+exprIsTooLarge opts threshold rhs
+  = isNothing (mkExprDigest opts' [] body)
   where
     opts' = opts { unfoldingCreationThreshold = threshold }
             -- We use a different (and larger) theshold here for
@@ -545,6 +543,7 @@ heuristics right has taken a long time.  Here's the basic strategy:
     * Function applications (f e1 .. en): 10 + #value args
 
     * Constructor applications: 10, regardless of #args
+      See #22317
 
     * Let(rec): 10 + size of components
 
@@ -552,6 +551,10 @@ heuristics right has taken a long time.  Here's the basic strategy:
       as a result of #4978.
 
     * Tick, Cast: 0
+
+    * Lam: we don't charge anything for the binders, just the body
+
+    * Case: see `caseSize`
 
 Examples
 
@@ -596,9 +599,9 @@ mkExprDigest opts args expr
           -- (avs,lvs): see Note [Constructing an ExprDigest]
     go rcd vs (Cast e _)      = go rcd vs e
     go rcd vs (Tick _ e)      = go rcd vs e
-    go _   _  (Type _)        = Just (exprDigestS 0)
-    go _   _  (Coercion _)    = Just (exprDigestS 0)
-    go _   _  (Lit lit)       = Just (exprDigestS (litSize lit))
+    go _   _  (Type _)        = Just (edSized 0)
+    go _   _  (Coercion _)    = Just (edSized 0)
+    go _   _  (Lit lit)       = Just (edSized (litSize lit))
     go rcd vs (Case e b _ as) = go_case rcd vs e b as
     go rcd vs (Let bind body) = go_let rcd vs bind body
     go rcd vs (Lam b e)       = go_lam rcd vs b e
@@ -610,7 +613,7 @@ mkExprDigest opts args expr
 
     ----------- Lambdas ------------------
     go_lam rcd vs bndr body
-      | isId bndr, not (isZeroBitId bndr) = go rcd vs' body `med_add` Just (lamSize opts)
+      | isId bndr, not (isZeroBitId bndr) = lamSize opts `medAddS` go rcd vs' body
       | otherwise                         = go rcd vs' body
       where
         vs' = vs `add_lv` bndr
@@ -645,7 +648,7 @@ mkExprDigest opts args expr
 
     go_bind rcd vs (bndr, rhs)
       | isTyVar bndr
-      = Just (exprDigestS 0)
+      = Just (edSized 0)
 
       | JoinPoint join_arity <- idJoinPointHood bndr
       , (bndrs, body) <- collectNBinders join_arity rhs
@@ -771,10 +774,10 @@ callDigest :: UnfoldingOpts -> EDVars -> Id -> [CoreExpr] -> ExprDigest
 -- but not for the cost of building a closure
 callDigest opts vs fun val_args
   = case idDetails fun of
-      FCallId _        -> exprDigestS (vanillaCallSize val_args)
-      JoinId {}        -> exprDigestS (jumpSize        val_args)
-      PrimOpId op _    -> exprDigestS (primOpSize op   val_args)
-      DataConWorkId dc -> exprDigestS (conAppSize dc val_args)
+      FCallId _        -> edSized (vanillaCallSize val_args)
+      JoinId {}        -> edSized (jumpSize        val_args)
+      PrimOpId op _    -> edSized (primOpSize op   val_args)
+      DataConWorkId dc -> edSized (conAppSize dc val_args)
       ClassOpId {}     -> classOpAppET opts vs fun val_args
       _                -> genAppET opts vs fun val_args
 
@@ -843,7 +846,7 @@ classOpAppET opts vs fn val_args
            -- give it a discount, to encourage the inlining of this function
            -- The actual discount is rather arbitrarily chosen
   | otherwise
-  = exprDigestS (vanillaCallSize val_args)
+  = edSized (vanillaCallSize val_args)
 
 genAppET :: UnfoldingOpts -> EDVars -> Id -> [CoreExpr] -> ExprDigest
 -- Size for function calls that are not constructors or primops
@@ -873,9 +876,9 @@ genAppET opts (avs,_) fun val_args
                  | otherwise                             = 0
         -- If the function is partially applied, show a result discount
 
-lamSize :: UnfoldingOpts -> ExprDigest
+lamSize :: UnfoldingOpts -> Size
 -- Does not include the size of the body, just the lambda itself
-lamSize _ = edZero  -- Lambdas themselves cost nothing
+lamSize _ = 0  -- Lambdas themselves cost nothing
 
 
 closureSize :: Size  -- Size for a heap-allocated closure
@@ -1149,11 +1152,11 @@ medAddAlt bOMB_OUT_SIZE (Just ed1) (Just ed2)
 ---------------------------------------------------
 -- | The "expression tree"; an abstraction of the RHS of the function
 --   The "S" signals the Size argument
-exprDigestS :: Size -> ExprDigest
-exprDigestS n = ExprDigest { ed_size = n, ed_wc_tot = n, ed_cases = emptyBag, ed_ret = 0 }
+edSized :: Size -> ExprDigest
+edSized n = ExprDigest { ed_size = n, ed_wc_tot = n, ed_cases = emptyBag, ed_ret = 0 }
 
 edZero :: ExprDigest
-edZero = exprDigestS 0
+edZero = edSized 0
 
 edCaseOf :: Size -> Id -> Id -> [AltDigest] -> Maybe ExprDigest
 -- We make the case itself free (remember that in this case the scrutinee
@@ -1254,12 +1257,15 @@ instance Outputable ArgDigest where
 
 -------------------------
 exprDigestWillInline :: Size -> ExprDigest -> Bool
--- (cheapExprDigestSize limit ed) takes an upper bound `n` on the
+-- (exprDigestWillInline limit ed) takes an upper bound `limit` on the
 -- size of ed; i.e. without discounts etc.
 -- Return True if (s <= limit), False otherwise
 exprDigestWillInline limit (ExprDigest { ed_wc_tot = tot }) = tot <= limit
 
 -------------------------
+exprDigestMaxSize :: ExprDigest -> Size
+exprDigestMaxSize = ed_wc_tot
+
 exprDigestSize :: InlineContext -> ExprDigest -> Size
 -- See Note [Overview of inlining heuristics]
 exprDigestSize !ic (ExprDigest { ed_size = size, ed_cases = cases

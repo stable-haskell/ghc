@@ -163,7 +163,7 @@ libCaseBind env (Rec pairs)
     -- See Note [Small enough]
     small_enough = case lc_threshold env of
                       Nothing   -> True   -- Infinity
-                      Just size -> couldBeSmallEnoughToInline (lc_uf_opts env) size $
+                      Just size -> not $ exprIsTooLarge (lc_uf_opts env) size $
                                    Let (Rec dup_pairs) (Var unitDataConId)
 
     ok_pair (id,_)

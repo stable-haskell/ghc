@@ -37,6 +37,7 @@ import GHC.Core.Utils   ( exprIsTrivial, isDefaultAlt, isExpandableApp,
                           mkCastMCo, mkTicks )
 import GHC.Core.Opt.Arity   ( joinRhsArity, isOneShotBndr )
 import GHC.Core.Coercion
+import GHC.Core.Unfold      ( exprDigestMaxSize )
 import GHC.Core.Predicate   ( isDictId )
 import GHC.Core.Type
 import GHC.Core.TyCo.FVs    ( tyCoVarsOfMCo )
@@ -1927,8 +1928,16 @@ nodeScore !env new_bndr lb_deps
                    _ -> bind_rhs
         -- 'bind_rhs' is irrelevant for inlining things with a stable unfolding
 
-    rhs_size = cheapExprSize rhs
-        -- ToDo: could exploit pre-computed unfolding size?
+    rhs_size = case old_unf of
+                 CoreUnfolding { uf_guidance = guidance }
+                    -> case guidance of
+                          UnfIfGoodArgs { ug_tree = ed } -> exprDigestMaxSize ed
+                          UnfWhen {} -> 0
+                          UnfNever   -> bigSize
+                 _ -> bigSize  -- DFunUnfolding already dealt with
+
+    bigSize = 1000  -- Bigger than what exprDigestMaxSize will return
+                    -- But it really doesn't matter much what this is!
 
         -- Checking for a constructor application
         -- Cheap and cheerful; the simplifier moves casts out of the way
@@ -1946,34 +1955,6 @@ nodeScore !env new_bndr lb_deps
     is_con_app (Let _ e)  = is_con_app e  -- let x = let y = blah in (a,b)
     is_con_app _          = False         -- We will float the y out, so treat
                                           -- the x-binding as a con-app (#20941)
-
-maxExprSize :: Int
-maxExprSize = 20  -- Rather arbitrary
-
-cheapExprSize :: CoreExpr -> Int
--- Maxes out at maxExprSize
-cheapExprSize e
-  = go 0 e
-  where
-    go n e | n >= maxExprSize = n
-           | otherwise        = go1 n e
-
-    go1 n (Var {})        = n+1
-    go1 n (Lit {})        = n+1
-    go1 n (Type {})       = n
-    go1 n (Coercion {})   = n
-    go1 n (Tick _ e)      = go1 n e
-    go1 n (Cast e _)      = go1 n e
-    go1 n (App f a)       = go (go1 n f) a
-    go1 n (Lam b e)
-      | isTyVar b         = go1 n e
-      | otherwise         = go (n+1) e
-    go1 n (Let b e)       = gos (go1 n e) (rhssOfBind b)
-    go1 n (Case e _ _ as) = gos (go1 n e) (rhssOfAlts as)
-
-    gos n [] = n
-    gos n (e:es) | n >= maxExprSize = n
-                 | otherwise        = gos (go1 n e) es
 
 betterLB :: NodeScore -> NodeScore -> Bool
 -- If  n1 `betterLB` n2  then choose n1 as the loop breaker

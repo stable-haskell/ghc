@@ -824,8 +824,9 @@ special behaviour.  For example, this is /not/ fine:
 
 Note [Coercions in terms]
 ~~~~~~~~~~~~~~~~~~~~~~~~~
-The expression (Type ty) can occur only as the argument of an application,
-or the RHS of a non-recursive Let.  But what about (Coercion co)?
+The expressions (Type ty) and (Coercion co) can certainly occur as the argument of an
+application, or the RHS of a non-recursive Let.  (Type ty) cannot occur anywhere else.
+But what about (Coercion co)?
 
 Currently it appears in ghc-prim:GHC.Types.coercible_sel, a WiredInId whose
 definition is:

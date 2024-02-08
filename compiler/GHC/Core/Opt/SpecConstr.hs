@@ -1431,7 +1431,7 @@ scBind top_lvl env (Rec prs) do_body
   | isTopLevel top_lvl
   , Just threshold <- sc_size (sc_opts env)
   , not force_spec -- See Note [Forcing specialisation], point (FS1)
-  , not (all (couldBeSmallEnoughToInline (sc_uf_opts (sc_opts env)) threshold) rhss)
+  , any (exprIsTooLarge (sc_uf_opts (sc_opts env)) threshold) rhss
   = -- Do no specialisation if the RHSs are too big
     -- ToDo: I'm honestly not sure of the rationale of this size-testing, nor
     --       why it only applies at top level. But that's the way it has been
@@ -1443,7 +1443,7 @@ scBind top_lvl env (Rec prs) do_body
               bind'   = Rec (bndrs' `zip` rhss')
         ; return (all_usg, [bind'], body') }
 
-  | otherwise
+  | otherwise -- Specialise!
   = do  { rhs_infos <- mapM (scRecRhs rhs_env2) (bndrs' `zip` rhss)
         ; (body_usg, body') <- do_body rhs_env2
 
