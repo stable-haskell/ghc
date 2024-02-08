@@ -10,7 +10,7 @@ This module contains inlining logic used by the simplifier.
 module GHC.Core.Opt.Simplify.Inline (
         -- * Cheap and cheerful inlining checks.
         couldBeSmallEnoughToInline,
-        smallEnoughToInline,
+        smallEnoughToInline, activeUnfolding,
 
         -- * The smart inlining decisions are made by callSiteInline
         callSiteInline, CallCtxt(..),
@@ -20,10 +20,16 @@ import GHC.Prelude
 
 import GHC.Driver.Flags
 
+import GHC.Core.Opt.Simplify.Env
+
 import GHC.Core
 import GHC.Core.Unfold
+import GHC.Core.FVs( exprFreeIds )
+
 import GHC.Types.Id
-import GHC.Types.Basic  ( Arity, RecFlag(..) )
+import GHC.Types.Var.Env( InScopeSet, lookupInScope )
+import GHC.Types.Var.Set
+import GHC.Types.Basic  ( Arity, RecFlag(..), isActive )
 import GHC.Utils.Logger
 import GHC.Utils.Misc
 import GHC.Utils.Outputable
@@ -86,20 +92,14 @@ them inlining is to give them a NOINLINE pragma, which we do in
 StrictAnal.addStrictnessInfoToTopId
 -}
 
-callSiteInline :: Logger
-               -> UnfoldingOpts
-               -> Int -> Int            -- Case depth and inline depth
+callSiteInline :: SimplEnv
+               -> Logger
                -> Id                    -- The Id
-               -> Bool                  -- True <=> unfolding is active
                -> Bool                  -- True if there are no arguments at all (incl type args)
                -> [ArgSummary]          -- One for each value arg; True if it is interesting
                -> CallCtxt              -- True <=> continuation is interesting
                -> Maybe CoreExpr        -- Unfolding, if any
-callSiteInline logger opts
-               !case_depth     -- See Note [Avoid inlining into deeply nested cases]
-               !inline_depth   -- Currently not used to control inlining
-                               -- but we pass it for debug-logging purposes
-               id active_unfolding lone_variable arg_infos cont_info
+callSiteInline env logger id lone_variable arg_infos cont_info
   = case idUnfolding id of
       -- idUnfolding checks for loop-breakers, returning NoUnfolding
       -- Things with an INLINE pragma may have an unfolding *and*
@@ -107,14 +107,30 @@ callSiteInline logger opts
         CoreUnfolding { uf_tmpl = unf_template
                       , uf_cache = unf_cache
                       , uf_guidance = guidance }
-          | active_unfolding -> tryUnfolding logger opts case_depth inline_depth id lone_variable
+          | active_unf -> tryUnfolding env logger id lone_variable
                                     arg_infos cont_info unf_template
                                     unf_cache guidance
-          | otherwise -> traceInline logger opts id "Inactive unfolding:" (ppr id) Nothing
+          | otherwise -> traceInline logger uf_opts id "Inactive unfolding:" (ppr id) Nothing
         NoUnfolding      -> Nothing
         BootUnfolding    -> Nothing
         OtherCon {}      -> Nothing
         DFunUnfolding {} -> Nothing     -- Never unfold a DFun
+  where
+    uf_opts    = seUnfoldingOpts env
+    active_unf = activeUnfolding (seMode env) id
+
+activeUnfolding :: SimplMode -> Id -> Bool
+activeUnfolding mode id
+  | isCompulsoryUnfolding (realIdUnfolding id)
+  = True   -- Even sm_inline can't override compulsory unfoldings
+  | otherwise
+  = isActive (sm_phase mode) (idInlineActivation id)
+  && sm_inline mode
+      -- `or` isStableUnfolding (realIdUnfolding id)
+      -- Inline things when
+      --  (a) they are active
+      --  (b) sm_inline says so, except that for stable unfoldings
+      --                         (ie pragmas) we inline anyway
 
 -- | Report the inlining of an identifier's RHS to the user, if requested.
 traceInline :: Logger -> UnfoldingOpts -> Id -> String -> SDoc -> a -> a
@@ -283,10 +299,10 @@ more/less inlining as needed on a per-module basis.
 
 -}
 
-tryUnfolding :: Logger -> UnfoldingOpts -> Int -> Int -> Id -> Bool -> [ArgSummary] -> CallCtxt
+tryUnfolding :: SimplEnv -> Logger -> Id -> Bool -> [ArgSummary] -> CallCtxt
              -> CoreExpr -> UnfoldingCache -> UnfoldingGuidance
              -> Maybe CoreExpr
-tryUnfolding logger opts !case_depth !inline_depth id lone_variable arg_infos
+tryUnfolding env logger id lone_variable arg_infos
              cont_info unf_template unf_cache guidance
  = case guidance of
      UnfNever -> traceInline logger opts id str (text "UnfNever") Nothing
@@ -302,25 +318,22 @@ tryUnfolding logger opts !case_depth !inline_depth id lone_variable arg_infos
           enough_args  = (n_val_args >= uf_arity) || (unsat_ok && n_val_args > 0)
 
      UnfIfGoodArgs { ug_args = arg_discounts, ug_res = res_discount, ug_size = size }
-        | isJoinId id
-        -> -- Inline a join point only if it scrutinises a ValueArg
-           -- See Note [Duplicating join points] in GHC.Core.Opt.Simplify.Iteration
-           if or (zipWith scrut_arg arg_discounts arg_infos) && small_enough
-           then yes
-           else no
-        | unfoldingVeryAggressive opts          -> yes
-        | is_wf && some_benefit && small_enough -> yes
-        | otherwise                             -> no
+        | isJoinId id, small_enough         -> inline_join_point
+        | unfoldingVeryAggressive opts      -> yes
+        | is_wf, some_benefit, small_enough -> yes
+        | otherwise                         -> no
         where
           yes = traceInline logger opts id str (mk_doc some_benefit extra_doc True)  (Just unf_template)
           no  = traceInline logger opts id str (mk_doc some_benefit extra_doc False) Nothing
 
           some_benefit = calc_some_benefit (length arg_discounts)
-          -- See Note [Avoid inlining into deeply nested cases]
-          depth_treshold = unfoldingCaseThreshold opts
-          depth_scaling = unfoldingCaseScaling opts
-          depth_penalty | case_depth <= depth_treshold = 0
-                        | otherwise       = (size * (case_depth - depth_treshold)) `div` depth_scaling
+
+          -- depth_penalty: see Note [Avoid inlining into deeply nested cases]
+          depth_threshold = unfoldingCaseThreshold opts
+          depth_scaling   = unfoldingCaseScaling opts
+          depth_penalty | case_depth <= depth_threshold = 0
+                        | otherwise = (size * (case_depth - depth_threshold)) `div` depth_scaling
+
           adjusted_size = size + depth_penalty - discount
           small_enough = adjusted_size <= unfoldingUseThreshold opts
           discount = computeDiscount arg_discounts res_discount arg_infos cont_info
@@ -332,7 +345,22 @@ tryUnfolding logger opts !case_depth !inline_depth id lone_variable arg_infos
           scrut_arg disc ValueArg = disc > 0
           scrut_arg _    _        = False
 
+          inline_join_point
+            | anyVarSet (is_evald in_scope) (exprFreeIds unf_template)
+            = yes
+
+            -- Inline a join point only if it scrutinises a ValueArg
+            -- See Note [Duplicating join points] in GHC.Core.Opt.Simplify.Iteration
+            | or (zipWith scrut_arg arg_discounts arg_infos)
+            = yes
+
+            | otherwise = no
   where
+    opts         = seUnfoldingOpts env
+    case_depth   = seCaseDepth env
+    inline_depth = seInlineDepth env
+    in_scope     = seInScope env
+
     -- Unpack the UnfoldingCache lazily because it may not be needed, and all
     -- its fields are strict; so evaluating unf_cache at all forces all the
     -- isWorkFree etc computations to take place.  That risks wasting effort for
@@ -389,6 +417,17 @@ tryUnfolding logger opts !case_depth !inline_depth id lone_variable arg_infos
                           -> uf_arity > 0  -- See Note [RHS of lets]
               _other      -> False         -- See Note [Nested functions]
 
+
+is_evald :: InScopeSet -> Id -> Bool
+is_evald in_scope v
+  | let unf = idUnfolding v
+  , hasCoreUnfolding unf
+  , not (isEvaldUnfolding unf)
+  , Just v' <- lookupInScope in_scope v
+  , isEvaldUnfolding (idUnfolding v')
+  = True
+  | otherwise
+  = False
 
 {- Note [RHS of lets]
 ~~~~~~~~~~~~~~~~~~~~~

@@ -13,7 +13,7 @@ module GHC.Core.Opt.Simplify.Utils (
 
         -- Inlining,
         preInlineUnconditionally, postInlineUnconditionally,
-        activeUnfolding, activeRule,
+        activeRule,
         getUnfoldingInRuleMatch,
         updModeForStableUnfoldings, updModeForRules,
 
@@ -48,7 +48,7 @@ import qualified GHC.Prelude as Partial (head)
 import GHC.Core
 import GHC.Types.Literal ( isLitRubbish )
 import GHC.Core.Opt.Simplify.Env
-import GHC.Core.Opt.Simplify.Inline
+import GHC.Core.Opt.Simplify.Inline( smallEnoughToInline )
 import GHC.Core.Opt.Stats ( Tick(..) )
 import qualified GHC.Core.Subst
 import GHC.Core.Ppr
@@ -1231,19 +1231,6 @@ if the wrapper is sure to be called, the strictness analyser will
 mark it 'demanded', so when the RHS is simplified, it'll get an ArgOf
 continuation.
 -}
-
-activeUnfolding :: SimplMode -> Id -> Bool
-activeUnfolding mode id
-  | isCompulsoryUnfolding (realIdUnfolding id)
-  = True   -- Even sm_inline can't override compulsory unfoldings
-  | otherwise
-  = isActive (sm_phase mode) (idInlineActivation id)
-  && sm_inline mode
-      -- `or` isStableUnfolding (realIdUnfolding id)
-      -- Inline things when
-      --  (a) they are active
-      --  (b) sm_inline says so, except that for stable unfoldings
-      --                         (ie pragmas) we inline anyway
 
 getUnfoldingInRuleMatch :: SimplEnv -> InScopeEnv
 -- When matching in RULE, we want to "look through" an unfolding

@@ -2407,8 +2407,7 @@ rebuildCall env (ArgInfo { ai_fun = fun, ai_args = rev_args }) cont
 -----------------------------------
 tryInlining :: SimplEnv -> Logger -> OutId -> SimplCont -> SimplM (Maybe OutExpr)
 tryInlining env logger var cont
-  | Just expr <- callSiteInline logger uf_opts case_depth inline_depth var active_unf
-                                lone_variable arg_infos interesting_cont
+  | Just expr <- callSiteInline env logger var lone_variable arg_infos interesting_cont
   = do { dump_inline expr cont
        ; return (Just expr) }
 
@@ -2416,12 +2415,8 @@ tryInlining env logger var cont
   = return Nothing
 
   where
-    uf_opts    = seUnfoldingOpts env
-    case_depth = seCaseDepth env
-    inline_depth = seInlineDepth env
     (lone_variable, arg_infos, call_cont) = contArgs cont
     interesting_cont = interestingCallContext env call_cont
-    active_unf       = activeUnfolding (seMode env) var
 
     log_inlining doc
       = liftIO $ logDumpFile logger (mkDumpStyle alwaysQualify)
@@ -3430,17 +3425,15 @@ simplAlt :: SimplEnv
          -> InAlt
          -> SimplM OutAlt
 
-simplAlt env _ imposs_deflt_cons case_bndr' cont' (Alt DEFAULT bndrs rhs)
+simplAlt env scrut' imposs_deflt_cons case_bndr' cont' (Alt DEFAULT bndrs rhs)
   = assert (null bndrs) $
-    do  { let env' = addBinderUnfolding env case_bndr'
-                                        (mkOtherCon imposs_deflt_cons)
-                -- Record the constructors that the case-binder *can't* be.
+    do  { let env' = addDefaultUnfoldings env scrut' case_bndr' imposs_deflt_cons
         ; rhs' <- simplExprC env' rhs cont'
         ; return (Alt DEFAULT [] rhs') }
 
 simplAlt env scrut' _ case_bndr' cont' (Alt (LitAlt lit) bndrs rhs)
   = assert (null bndrs) $
-    do  { env' <- addAltUnfoldings env scrut' case_bndr' (Lit lit)
+    do  { let env' = addAltUnfoldings env scrut' case_bndr' (Lit lit)
         ; rhs' <- simplExprC env' rhs cont'
         ; return (Alt (LitAlt lit) [] rhs') }
 
@@ -3452,9 +3445,9 @@ simplAlt env scrut' _ case_bndr' cont' (Alt (DataAlt con) vs rhs)
                 -- Bind the case-binder to (con args)
         ; let inst_tys' = tyConAppArgs (idType case_bndr')
               con_app :: OutExpr
-              con_app   = mkConApp2 con inst_tys' vs'
+              con_app = mkConApp2 con inst_tys' vs'
+              env''   = addAltUnfoldings env' scrut' case_bndr' con_app
 
-        ; env'' <- addAltUnfoldings env' scrut' case_bndr' con_app
         ; rhs' <- simplExprC env'' rhs cont'
         ; return (Alt (DataAlt con) vs' rhs') }
 
@@ -3528,24 +3521,36 @@ zapIdOccInfoAndSetEvald str v =
   zapIdOccInfo v         -- And kill occ info;
                          -- see Note [Case alternative occ info]
 
-addAltUnfoldings :: SimplEnv -> Maybe OutExpr -> OutId -> OutExpr -> SimplM SimplEnv
-addAltUnfoldings env mb_scrut case_bndr con_app
-  = do { let con_app_unf = mk_simple_unf con_app
-             env1 = addBinderUnfolding env case_bndr con_app_unf
-
-             -- See Note [Add unfolding for scrutinee]
-             env2 | Just scrut <- mb_scrut
-                  , Just (v,mco) <- scrutBinderSwap_maybe scrut
-                  = addBinderUnfolding env1 v $
-                       if isReflMCo mco  -- isReflMCo: avoid calling mk_simple_unf
-                       then con_app_unf  --            twice in the common case
-                       else mk_simple_unf (mkCastMCo con_app mco)
-
-                  | otherwise = env1
-
-       ; traceSmpl "addAltUnf" (vcat [ppr case_bndr <+> ppr mb_scrut, ppr con_app])
-       ; return env2 }
+addDefaultUnfoldings :: SimplEnv -> Maybe OutExpr -> OutId -> [AltCon] -> SimplEnv
+addDefaultUnfoldings env mb_scrut case_bndr imposs_deflt_cons
+  = env2
   where
+    unf = mkOtherCon imposs_deflt_cons
+          -- Record the constructors that the case-binder *can't* be.
+    env1 = addBinderUnfolding env case_bndr unf
+    env2 | Just scrut <- mb_scrut
+         , Just (v,_mco) <- scrutBinderSwap_maybe scrut
+         = addBinderUnfolding env1 v unf
+         | otherwise = env1
+
+
+addAltUnfoldings :: SimplEnv -> Maybe OutExpr -> OutId -> OutExpr -> SimplEnv
+addAltUnfoldings env mb_scrut case_bndr con_app
+  = env2
+  where
+    con_app_unf = mk_simple_unf con_app
+    env1 = addBinderUnfolding env case_bndr con_app_unf
+
+    -- See Note [Add unfolding for scrutinee]
+    env2 | Just scrut <- mb_scrut
+         , Just (v,mco) <- scrutBinderSwap_maybe scrut
+         = addBinderUnfolding env1 v $
+              if isReflMCo mco  -- isReflMCo: avoid calling mk_simple_unf
+              then con_app_unf  --            twice in the common case
+              else mk_simple_unf (mkCastMCo con_app mco)
+
+         | otherwise = env1
+
     -- Force the opts, so that the whole SimplEnv isn't retained
     !opts = seUnfoldingOpts env
     mk_simple_unf = mkSimpleUnfolding opts
