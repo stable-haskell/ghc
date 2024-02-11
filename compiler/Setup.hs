@@ -55,12 +55,12 @@ primopIncls =
     ]
 
 ghcAutogen :: Verbosity -> LocalBuildInfo -> IO ()
-ghcAutogen verbosity lbi@LocalBuildInfo{..} = do
+ghcAutogen verbosity lbi@LocalBuildInfo{} = do
   -- Get compiler/ root directory from the cabal file
-  let Just compilerRoot = takeDirectory <$> pkgDescrFile
+  let Just compilerRoot = takeDirectory <$> pkgDescrFile lbi
 
   -- Require the necessary programs
-  (gcc   ,withPrograms) <- requireProgram normal gccProgram withPrograms
+  (gcc   ,withPrograms) <- requireProgram normal gccProgram (withPrograms lbi)
   (ghc   ,withPrograms) <- requireProgram normal ghcProgram withPrograms
 
   settings <- read <$> getProgramOutput normal ghc ["--info"]
@@ -77,7 +77,9 @@ ghcAutogen verbosity lbi@LocalBuildInfo{..} = do
   -- Call genprimopcode to generate *.hs-incl
   forM_ primopIncls $ \(file,command) -> do
     contents <- readProcess "genprimopcode" [command] primopsStr
-    rewriteFileEx verbosity (buildDir </> file) contents
+    rewriteFileEx verbosity (buildDir lbi </> file) contents
+                     -- This ^^^^^^^^ "buildDir" use didn't work with RecordWildCards
+                     -- Probably a bug!  But we can stupidly work around it for now.
 
   -- Write GHC.Platform.Constants
   let platformConstantsPath = autogenPackageModulesDir lbi </> "GHC/Platform/Constants.hs"
@@ -90,7 +92,7 @@ ghcAutogen verbosity lbi@LocalBuildInfo{..} = do
     callProcess "deriveConstants" ["--gen-haskell-type","-o",tmp,"--target-os",targetOS]
     renameFile tmp platformConstantsPath
 
-  let cProjectUnitId = case Map.lookup (CLibName LMainLibName) componentNameMap of
+  let cProjectUnitId = case Map.lookup (CLibName LMainLibName) (componentNameMap lbi) of
                          Just [LibComponentLocalBuildInfo{componentUnitId}] -> unUnitId componentUnitId
                          _ -> error "Couldn't find unique cabal library when building ghc"
 
