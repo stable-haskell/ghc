@@ -2,6 +2,8 @@
 
 - Shipped with GHC 9.10.1
 
+- `IOPort#` and its related operations have been removed ([CLC #213](https://github.com/haskell/core-libraries-committee/issues/213))
+
 - Add unaligned addr access primops. These primops will be emulated on platforms that don't support unaligned access.
 
          readWord8OffAddrAsChar# :: Addr# -> Int# -> State# s -> (# State# s, Char# #)
@@ -183,7 +185,7 @@
     - `Array#`, `SmallArray#`, `Weak#`, `StablePtr#`, `StableName#`,
 
     - `MutableArray#`, `SmallMutableArray#`, `MutVar#`,
-      `TVar#`, `MVar#`, `IOPort#`.
+      `TVar#`, `MVar#`
 
   For example, `Array#` used to have kind:
 
@@ -239,8 +241,6 @@
         `tryPutMVar#`, `readMVar#`, `tryReadMVar#`,
 
     - `STM` operations `atomically#`, `retry#`, `catchRetry#` and `catchSTM#`.
-
-    - `newIOPort#`, `readIOPort#`, `writeIOPort#`,
 
     - `mkWeak#`, `mkWeakNoFinalizer#`, `addCFinalizerToWeak#`, `deRefWeak#`, `finalizeWeak#`,
 
@@ -340,7 +340,6 @@
   - `sameMutableArray#`, `sameSmallMutableArray#`, `sameMutableByteArray#`
      and `sameMutableArrayArray#`,
   - `sameMutVar#`, `sameTVar#` and`sameMVar#`,
-  - `sameIOPort#`,
   - `eqStableName#`.
 
 - The following functions have been added to `GHC.Exts`:

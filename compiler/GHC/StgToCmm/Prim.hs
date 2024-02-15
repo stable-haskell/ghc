@@ -1695,9 +1695,6 @@ emitPrimOp cfg primop =
   ReadMVarOp -> alwaysExternal
   TryReadMVarOp -> alwaysExternal
   IsEmptyMVarOp -> alwaysExternal
-  NewIOPortOp -> alwaysExternal
-  ReadIOPortOp -> alwaysExternal
-  WriteIOPortOp -> alwaysExternal
   DelayOp -> alwaysExternal
   WaitReadOp -> alwaysExternal
   WaitWriteOp -> alwaysExternal
