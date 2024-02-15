@@ -1007,9 +1007,12 @@ interestingArg env e = go env 0 e
        | n > 0             = NonTrivArg -- Saturated or unknown call
        | conlike_unfolding = ValueArg   -- n==0; look for an interesting unfolding
                                         -- See Note [Conlike is interesting]
+       | evald_unfolding   = NonTrivArg
        | otherwise         = TrivArg    -- n==0, no useful unfolding
        where
-         conlike_unfolding = isConLikeUnfolding (idUnfolding v)
+         unf = idUnfolding v
+         conlike_unfolding = isConLikeUnfolding unf
+         evald_unfolding   = isEvaldUnfolding unf
 
 {-
 ************************************************************************
