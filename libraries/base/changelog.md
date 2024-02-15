@@ -16,6 +16,7 @@
   * Deprecate `Data.List.NonEmpty.unzip` ([CLC proposal #86](https://github.com/haskell/core-libraries-committee/issues/86))
   * Fix exponent overflow/underflow bugs in the `Read` instances for `Float` and `Double` ([CLC proposal #192](https://github.com/haskell/core-libraries-committee/issues/192))
   * Implement `many` and `some` methods of `instance Alternative (Compose f g)` explicitly. ([CLC proposal #181](https://github.com/haskell/core-libraries-committee/issues/181))
+  * `GHC.Desugar` has been deprecated. ([CLC proposal #216](https://github.com/haskell/core-libraries-committee/issues/216))
 
   * The functions `GHC.Exts.dataToTag#` and `GHC.Base.getTag` have had
     their types changed to the following:

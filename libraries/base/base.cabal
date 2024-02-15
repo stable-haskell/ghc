@@ -46,6 +46,7 @@ Library
         , Data.Ratio
         , Data.STRef.Lazy
         , Data.Semigroup
+        , GHC.Desugar
         , Prelude
         , Text.Printf
         , System.CPUTime
@@ -144,7 +145,6 @@ Library
         , GHC.Conc.Sync
         , GHC.ConsoleHandler
         , GHC.Constants
-        , GHC.Desugar
         , GHC.Encoding.UTF8
         , GHC.Enum
         , GHC.Environment
