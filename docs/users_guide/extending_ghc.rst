@@ -770,6 +770,8 @@ usually implied by old ones. It is not uncommon that the evidence of a new
 Given constraint contains a removed constraint: the new one has replaced the
 removed one.
 
+-- !!! Given that "Evidence" and "Given" is mentioned here, is this the right place to "explain when plugin authors need to record coercion variables in their PluginProv"? I think, ideally, we'd explaion this in a subsection about a relevant example plugin, but I can't spot any.
+
 .. _type-family-rewriting-with-plugins:
 
 Type family rewriting with plugins

@@ -910,7 +910,7 @@ subst_co subst co
 
     go_prov (PhantomProv kco)    = PhantomProv (go kco)
     go_prov (ProofIrrelProv kco) = ProofIrrelProv (go kco)
-    go_prov (PluginProv s cvs)   = PluginProv s $! substDCoVarSet subst cvs
+    go_prov (PluginProv s cvs)   = PluginProv s $ substDCoVarSet subst cvs
 
     -- See Note [Substituting in a coercion hole]
     go_hole h@(CoercionHole { ch_co_var = cv })
@@ -919,7 +919,7 @@ subst_co subst co
 -- | Perform a substitution within a 'DVarSet' of free variables.
 -- returning the shallow free coercion variables
 substDCoVarSet :: Subst -> DCoVarSet -> DCoVarSet
-substDCoVarSet subst cvs = shallowCoVarsOfCosDSet $ map (substCoVar subst) $
+substDCoVarSet subst cvs = coVarsOfCosDSet $ map (substCoVar subst) $
                            dVarSetElems cvs
 
 substForAllCoBndr :: Subst -> TyCoVar -> KindCoercion

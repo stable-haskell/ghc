@@ -1525,7 +1525,7 @@ data UnivCoProvenance
                                  --   considered equivalent. See Note [ProofIrrelProv].
                                  -- Can be used in Nominal or Representational coercions
 
-  | PluginProv String DCoVarSet  -- !!! shall we make the field(s) strict?
+  | PluginProv String !DCoVarSet
       -- ^ From a plugin, which asserts that this coercion is sound.
       --   The string and the variable set are for the use of the plugin.
       --   E.g., the set may contain the in-scope coercion variables

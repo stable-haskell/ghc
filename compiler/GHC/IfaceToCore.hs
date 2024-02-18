@@ -1494,7 +1494,7 @@ tcIfaceUnivCoProv (IfaceProofIrrelProv kco) = ProofIrrelProv <$> tcIfaceCo kco
 tcIfaceUnivCoProv (IfacePluginProv str cvs fcvs) =
   assertPpr (null fcvs) (ppr fcvs) $ do
     cvs' <- mapM tcIfaceLclId cvs
-    return $ PluginProv str $! mkDVarSet cvs'
+    return $ PluginProv str $ mkDVarSet cvs'
 
 {-
 ************************************************************************

@@ -19,7 +19,7 @@ module GHC.Core.TyCo.FVs
         tyCoVarsOfCoDSet,
         tyCoFVsOfCo, tyCoFVsOfCos,
         tyCoVarsOfCoList,
-        shallowCoVarsOfCosDSet,
+        coVarsOfCosDSet,
 
         almostDevoidCoVarOfCo,
 
@@ -450,39 +450,8 @@ deepCoVarFolder = TyCoFolder { tcf_view = noView
 ------- Same again, but for DCoVarSet ----------
 --    But this time the free vars are shallow
 
-shallowCoVarsOfCosDSet :: [Coercion] -> DCoVarSet
-shallowCoVarsOfCosDSet _cos = undefined  -- !!!   runTCA (shallow_dcv_cos cos) emptyVarSet emptyDVarSet
-{- TODO: !!! lots of other code and refactorings, partially bit-rotten, would need to be taken from !3792 --- in particular
-
-* should I port the removal of the `env` parameter from `TyCoFolder`, see https://gitlab.haskell.org/ghc/ghc/-/merge_requests/3792/diffs#578c7c3857d66d963736ff6742f3433a0e8d01b7_1883_2076? That's 200 lines in the old GHC.Core.TyCo.Rep alone and who know how many lines in the new versions of these files. If not, what `env` to use in `shallowCoVarDSetFolder`, a couple of lines below in the place marked as {-!!!-}? Is this relatively shallow (e.g., if the env type-checks, it's likely to be correct?)?
-
-* should I introduce TyCoAcc, see https://gitlab.haskell.org/ghc/ghc/-/merge_requests/3792/diffs#039e8f5676356ef05c90af828aae48aac7296e47_266_268 and then also use it for many other operations (e.g., instead of Endo)?
-
-
-shallow_dcv_cos  :: [Coercion] -> TyCoAcc DCoVarSet
-(_, _, _, shallow_dcv_cos) = foldTyCo shallowCoVarDSetFolder
-
-
-shallowCoVarDSetFolder :: TyCoFolder TyCoVarSet{-!!!-} (TyCoAcc DCoVarSet)
-shallowCoVarDSetFolder = TyCoFolder { tcf_view = noView
-                                    , tcf_tyvar = do_tyvar, tcf_covar = do_covar
-                                    , tcf_hole  = do_hole, tcf_tycobinder = do_bndr }
-  where
-    do_tyvar _  = mempty
-    do_covar cv = shallowAddCoVarDSet cv
-
-    do_bndr tcv _vis fvs = extendInScope tcv fvs
-    do_hole hole = do_covar (coHoleCoVar hole)
-
-shallowAddCoVarDSet :: CoVar -> TyCoAcc DCoVarSet
--- Add a variable to the free vars unless it is in the in-scope
--- or is already in the in-scope set-
-shallowAddCoVarDSet cv = TCA add_it
-  where
-    add_it is acc | cv `elemVarSet`  is  = acc
-                  | cv `elemDVarSet` acc = acc
-                  | otherwise            = acc `extendDVarSet` cv
--}
+coVarsOfCosDSet :: [Coercion] -> DCoVarSet
+coVarsOfCosDSet cos = fvDVarSetSome isCoVar (tyCoFVsOfCos cos)
 
 
 {- *********************************************************************

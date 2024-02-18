@@ -97,7 +97,7 @@ module GHC.Core.Coercion (
         emptyLiftingContext, extendLiftingContext, extendLiftingContextAndInScope,
         liftCoSubstVarBndrUsing, isMappedByLC, extendLiftingContextCvSubst,
 
-        mkSubstLiftingContext, zapLiftingContext,
+        mkSubstLiftingContext, liftingContextSubst, zapLiftingContext,
         substForAllCoBndrUsingLC, lcLookupCoVar, lcInScopeSet,
 
         LiftCoEnv, LiftingContext(..), liftEnvSubstLeft, liftEnvSubstRight,
@@ -1978,6 +1978,9 @@ mkLiftingContext pairs
 
 mkSubstLiftingContext :: Subst -> LiftingContext
 mkSubstLiftingContext subst = LC subst emptyVarEnv
+
+liftingContextSubst :: LiftingContext -> Subst
+liftingContextSubst (LC subst _) = subst
 
 -- | Extend a lifting context with a new mapping.
 extendLiftingContext :: LiftingContext  -- ^ original LC

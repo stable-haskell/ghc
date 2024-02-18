@@ -253,7 +253,7 @@ tidyCo env@(_, subst) co
 
     go_prov (PhantomProv co)    = PhantomProv $! go co
     go_prov (ProofIrrelProv co) = ProofIrrelProv $! go co
-    go_prov (PluginProv s cvs)  = PluginProv s $! mapDVarSet go_cv cvs
+    go_prov (PluginProv s cvs)  = PluginProv s $ mapDVarSet go_cv cvs
 
 tidyCos :: TidyEnv -> [Coercion] -> [Coercion]
 tidyCos env = strictMap (tidyCo env)
