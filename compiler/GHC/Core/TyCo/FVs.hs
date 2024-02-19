@@ -1348,4 +1348,4 @@ occCheckExpand vs_to_avoid ty
     ------------------
     go_prov cxt (PhantomProv co)    = PhantomProv <$> go_co cxt co
     go_prov cxt (ProofIrrelProv co) = ProofIrrelProv <$> go_co cxt co
-    go_prov _   p@(PluginProv _ _)  = return p  -- !!! Richard says somewhere in the old MR: "If the zapped co contains tyvars, we might need to expand here, too."
+    go_prov _   p@(PluginProv _ _)  = return p
