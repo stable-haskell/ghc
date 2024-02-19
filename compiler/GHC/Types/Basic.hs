@@ -28,7 +28,7 @@ module GHC.Types.Basic (
 
         ConTag, ConTagZ, fIRST_TAG,
 
-        Arity, RepArity, JoinArity, FullArgCount,
+        Arity, VisArity, RepArity, JoinArity, FullArgCount,
         JoinPointHood(..), isJoinPoint,
 
         Alignment, mkAlignment, alignmentOf, alignmentBytes,
@@ -182,6 +182,13 @@ instance Binary LeftOrRight where
 --  \x -> fib x has arity 1
 -- See also Note [Definition of arity] in "GHC.Core.Opt.Arity"
 type Arity = Int
+
+-- | Syntactic (visibility) arity
+--
+-- The number of visible arguments. Visible arguments are the ones that occur
+-- visibly in the source code and are supplied without the @-prefix. This
+-- includes value arguments and required type arguments.
+type VisArity = Int
 
 -- | Representation Arity
 --

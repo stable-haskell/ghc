@@ -751,7 +751,7 @@ Example:
 matchExpectedFunTys :: forall a.
                        ExpectedFunTyOrigin  -- See Note [Herald for matchExpectedFunTys]
                     -> UserTypeCtxt
-                    -> Arity
+                    -> VisArity
                     -> ExpSigmaType
                     -> ([ExpPatType] -> ExpRhoType -> TcM a)
                     -> TcM (HsWrapper, a)
@@ -777,7 +777,7 @@ matchExpectedFunTys herald _ arity (Infer inf_res) thing_inside
 matchExpectedFunTys herald ctx arity (Check top_ty) thing_inside
   = check 0 [] top_ty
   where
-    check :: Arity -> [ExpPatType] -> TcSigmaType -> TcM (HsWrapper, a)
+    check :: VisArity -> [ExpPatType] -> TcSigmaType -> TcM (HsWrapper, a)
     -- `check` is called only in the Check{} case
     -- It collects rev_pat_tys in reversed order
     -- n_so_far is the number of /visible/ arguments seen so far:
@@ -875,7 +875,7 @@ matchExpectedFunTys herald ctx arity (Check top_ty) thing_inside
         defer n_so_far rev_pat_tys res_ty
 
     ------------
-    defer :: Arity -> [ExpPatType] -> TcRhoType -> TcM (HsWrapper, a)
+    defer :: VisArity -> [ExpPatType] -> TcRhoType -> TcM (HsWrapper, a)
     defer n_so_far rev_pat_tys fun_ty
       = do { more_arg_tys <- mapM (new_check_arg_ty herald) [n_so_far + 1 .. arity]
            ; let all_pats = reverse rev_pat_tys ++ map mkCheckExpFunPatTy more_arg_tys
@@ -898,19 +898,15 @@ new_check_arg_ty herald arg_pos -- Position for error messages only
        ; return (mkScaled mult arg_ty) }
 
 mkFunTysMsg :: ExpectedFunTyOrigin
-            -> (Arity, TcType)
+            -> (VisArity, TcType)
             -> TidyEnv -> ZonkM (TidyEnv, SDoc)
 -- See Note [Reporting application arity errors]
-mkFunTysMsg herald (n_val_args_in_call, fun_ty) env
+mkFunTysMsg herald (n_vis_args_in_call, fun_ty) env
   = do { (env', fun_ty) <- zonkTidyTcType env fun_ty
 
        ; let (pi_ty_bndrs, _) = splitPiTys fun_ty
-
-             -- `all_arg_tys` contains visible quantifiers only, so their number matches
-             -- the number of arguments that the user needs to pass to the function.
              n_fun_args = count isVisiblePiTyBinder pi_ty_bndrs
-
-             msg | n_val_args_in_call <= n_fun_args  -- Enough args, in the end
+             msg | n_vis_args_in_call <= n_fun_args  -- Enough args, in the end
                  = text "In the result of a function call"
                  | otherwise
                  = hang (full_herald <> comma)
@@ -921,7 +917,7 @@ mkFunTysMsg herald (n_val_args_in_call, fun_ty) env
        ; return (env', msg) }
  where
   full_herald = pprExpectedFunTyHerald herald
-            <+> speakNOf n_val_args_in_call (text "value argument")
+            <+> speakNOf n_vis_args_in_call (text "visible argument")
 
 
 {- Note [Reporting application arity errors]
