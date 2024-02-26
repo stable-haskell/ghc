@@ -15,11 +15,11 @@ let
   ghcBindists = let version = ghc.version; in {
     aarch64-darwin = pkgs.fetchurl {
       url = "https://downloads.haskell.org/ghc/${version}/ghc-${version}-aarch64-apple-darwin.tar.xz";
-      sha256 = "sha256-tQUHsingxBizLktswGAoi6lJf92RKWLjsHB9CisANlg=";
+      sha256 = "sha256-Ja/8nOtvIDJwbsG0t7pdFL003ztSI9gGDyEK7OJf7qk=";
     };
     x86_64-darwin = pkgs.fetchurl {
       url = "https://downloads.haskell.org/ghc/${version}/ghc-${version}-x86_64-apple-darwin.tar.xz";
-      sha256 = "sha256-OjXjVe+ZODDCc/hqtihqqz6CX25TKI0ZgORzkR5O3pQ=";
+      sha256 = "sha256-uJfL0VZpD05sxEAPa5Rl1hDqIo2FJ/i9UBIQ0bk6Tqs=";
     };
   };
 
