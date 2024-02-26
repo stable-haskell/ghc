@@ -30,6 +30,7 @@ let
     configureFlags = [
       "CC=/usr/bin/clang"
       "CLANG=/usr/bin/clang"
+      "AR=/usr/bin/ar"
       "LLC=${llvm}/bin/llc"
       "OPT=${llvm}/bin/opt"
       "CONF_CC_OPTS_STAGE2=--target=${targetTriple}"
