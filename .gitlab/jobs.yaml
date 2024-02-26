@@ -29,12 +29,7 @@
     },
     "dependencies": [],
     "image": null,
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB != \"yes\") && ($NIGHTLY == null)",
@@ -94,12 +89,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/aarch64-linux-deb10:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB != \"yes\") && ($NIGHTLY == null)",
@@ -155,12 +145,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/aarch64-linux-deb12:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(($CI_MERGE_REQUEST_LABELS =~ /.*LLVM backend.*/)) && ($RELEASE_JOB != \"yes\") && ($NIGHTLY == null)",
@@ -216,12 +201,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/i386-linux-deb10:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "((($CI_MERGE_REQUEST_LABELS =~ /.*full-ci.*/) || ($CI_MERGE_REQUEST_LABELS =~ /.*marge_bot_batch_merge_job.*/) || ($CI_COMMIT_BRANCH == \"master\") || ($CI_COMMIT_BRANCH =~ /ghc-[0-9]+\\.[0-9]+/))) && ($RELEASE_JOB != \"yes\") && ($NIGHTLY == null)",
@@ -277,12 +257,7 @@
     },
     "dependencies": [],
     "image": null,
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB != \"yes\") && ($NIGHTLY)",
@@ -343,12 +318,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/aarch64-linux-alpine3_18:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB != \"yes\") && ($NIGHTLY)",
@@ -407,12 +377,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/aarch64-linux-deb10:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB != \"yes\") && ($NIGHTLY)",
@@ -469,12 +434,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/aarch64-linux-deb11:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB != \"yes\") && ($NIGHTLY)",
@@ -531,12 +491,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/aarch64-linux-deb12:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB != \"yes\") && ($NIGHTLY)",
@@ -593,12 +548,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/i386-linux-deb10:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB != \"yes\") && ($NIGHTLY)",
@@ -655,12 +605,7 @@
     },
     "dependencies": [],
     "image": null,
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB != \"yes\") && ($NIGHTLY)",
@@ -724,12 +669,7 @@
     },
     "dependencies": [],
     "image": null,
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB != \"yes\") && ($NIGHTLY)",
@@ -788,12 +728,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-alpine3_12:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB != \"yes\") && ($NIGHTLY)",
@@ -852,12 +787,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-alpine3_12:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB != \"yes\") && ($NIGHTLY)",
@@ -916,12 +846,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-alpine3_12:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB != \"yes\") && ($NIGHTLY)",
@@ -980,12 +905,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-alpine3_18:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB != \"yes\") && ($NIGHTLY)",
@@ -1044,12 +964,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-alpine3_18-wasm:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB != \"yes\") && ($NIGHTLY)",
@@ -1108,12 +1023,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-alpine3_18-wasm:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB != \"yes\") && ($NIGHTLY)",
@@ -1172,12 +1082,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-alpine3_18-wasm:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB != \"yes\") && ($NIGHTLY)",
@@ -1236,12 +1141,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-centos7:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB != \"yes\") && ($NIGHTLY)",
@@ -1300,12 +1200,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-deb10:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB != \"yes\") && ($NIGHTLY)",
@@ -1362,12 +1257,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-deb10:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB != \"yes\") && ($NIGHTLY)",
@@ -1424,12 +1314,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-deb10:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB != \"yes\") && ($NIGHTLY)",
@@ -1487,12 +1372,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-deb10:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB != \"yes\") && ($NIGHTLY)",
@@ -1549,12 +1429,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-deb10:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB != \"yes\") && ($NIGHTLY)",
@@ -1611,12 +1486,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-deb10:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB != \"yes\") && ($NIGHTLY)",
@@ -1673,12 +1543,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-deb10:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB != \"yes\") && ($NIGHTLY)",
@@ -1737,12 +1602,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-deb10:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB != \"yes\") && ($NIGHTLY)",
@@ -1799,12 +1659,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-deb11:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB != \"yes\") && ($NIGHTLY)",
@@ -1863,12 +1718,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-deb11:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB != \"yes\") && ($NIGHTLY)",
@@ -1928,12 +1778,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-deb11:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB != \"yes\") && ($NIGHTLY)",
@@ -1990,12 +1835,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-deb11:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB != \"yes\") && ($NIGHTLY)",
@@ -2052,12 +1892,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-deb12:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB != \"yes\") && ($NIGHTLY)",
@@ -2114,12 +1949,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-deb12:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB != \"yes\") && ($NIGHTLY)",
@@ -2176,12 +2006,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-deb9:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB != \"yes\") && ($NIGHTLY)",
@@ -2238,12 +2063,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-fedora33:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB != \"yes\") && ($NIGHTLY)",
@@ -2302,12 +2122,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-fedora33:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB != \"yes\") && ($NIGHTLY)",
@@ -2367,12 +2182,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-fedora33:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB != \"yes\") && ($NIGHTLY)",
@@ -2431,12 +2241,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-fedora38:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB != \"yes\") && ($NIGHTLY)",
@@ -2493,12 +2298,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-rocky8:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB != \"yes\") && ($NIGHTLY)",
@@ -2555,12 +2355,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-ubuntu18_04:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB != \"yes\") && ($NIGHTLY)",
@@ -2617,12 +2412,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-ubuntu20_04:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB != \"yes\") && ($NIGHTLY)",
@@ -2675,12 +2465,7 @@
     },
     "dependencies": [],
     "image": null,
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB != \"yes\") && ($NIGHTLY)",
@@ -2737,12 +2522,7 @@
     },
     "dependencies": [],
     "image": null,
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB != \"yes\") && ($NIGHTLY)",
@@ -2803,12 +2583,7 @@
     },
     "dependencies": [],
     "image": null,
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB == \"yes\") && ($NIGHTLY == null)",
@@ -2870,12 +2645,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/aarch64-linux-alpine3_18:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB == \"yes\") && ($NIGHTLY == null)",
@@ -2936,12 +2706,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/aarch64-linux-deb10:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB == \"yes\") && ($NIGHTLY == null)",
@@ -3000,12 +2765,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/aarch64-linux-deb11:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB == \"yes\") && ($NIGHTLY == null)",
@@ -3064,12 +2824,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/i386-linux-deb10:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB == \"yes\") && ($NIGHTLY == null)",
@@ -3128,12 +2883,7 @@
     },
     "dependencies": [],
     "image": null,
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB == \"yes\") && ($NIGHTLY == null)",
@@ -3198,12 +2948,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-alpine3_12:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB == \"yes\") && ($NIGHTLY == null)",
@@ -3264,12 +3009,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-alpine3_12:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB == \"yes\") && ($NIGHTLY == null)",
@@ -3330,12 +3070,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-alpine3_12:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB == \"yes\") && ($NIGHTLY == null)",
@@ -3396,12 +3131,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-alpine3_18:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB == \"yes\") && ($NIGHTLY == null)",
@@ -3462,12 +3192,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-centos7:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB == \"yes\") && ($NIGHTLY == null)",
@@ -3527,12 +3252,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-deb10:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB == \"yes\") && ($NIGHTLY == null)",
@@ -3591,12 +3311,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-deb10:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB == \"yes\") && ($NIGHTLY == null)",
@@ -3655,12 +3370,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-deb11:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB == \"yes\") && ($NIGHTLY == null)",
@@ -3719,12 +3429,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-deb12:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB == \"yes\") && ($NIGHTLY == null)",
@@ -3783,12 +3488,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-deb9:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB == \"yes\") && ($NIGHTLY == null)",
@@ -3847,12 +3547,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-fedora33:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB == \"yes\") && ($NIGHTLY == null)",
@@ -3913,12 +3608,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-fedora33:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB == \"yes\") && ($NIGHTLY == null)",
@@ -3979,12 +3669,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-fedora33:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB == \"yes\") && ($NIGHTLY == null)",
@@ -4045,12 +3730,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-fedora38:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB == \"yes\") && ($NIGHTLY == null)",
@@ -4109,12 +3789,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-rocky8:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB == \"yes\") && ($NIGHTLY == null)",
@@ -4173,12 +3848,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-ubuntu18_04:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB == \"yes\") && ($NIGHTLY == null)",
@@ -4237,12 +3907,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-ubuntu20_04:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB == \"yes\") && ($NIGHTLY == null)",
@@ -4297,12 +3962,7 @@
     },
     "dependencies": [],
     "image": null,
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB == \"yes\") && ($NIGHTLY == null)",
@@ -4360,12 +4020,7 @@
     },
     "dependencies": [],
     "image": null,
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB == \"yes\") && ($NIGHTLY == null)",
@@ -4427,12 +4082,7 @@
     },
     "dependencies": [],
     "image": null,
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "((($CI_MERGE_REQUEST_LABELS =~ /.*full-ci.*/) || ($CI_MERGE_REQUEST_LABELS =~ /.*marge_bot_batch_merge_job.*/) || ($CI_COMMIT_BRANCH == \"master\") || ($CI_COMMIT_BRANCH =~ /ghc-[0-9]+\\.[0-9]+/)) || ($CI_MERGE_REQUEST_LABELS =~ /.*test-primops.*/)) && ($RELEASE_JOB != \"yes\") && ($NIGHTLY == null)",
@@ -4495,12 +4145,7 @@
     },
     "dependencies": [],
     "image": null,
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(($CI_MERGE_REQUEST_LABELS =~ /.*FreeBSD.*/)) && ($RELEASE_JOB != \"yes\") && ($NIGHTLY == null)",
@@ -4558,12 +4203,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-alpine3_12:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "((($CI_MERGE_REQUEST_LABELS =~ /.*full-ci.*/) || ($CI_MERGE_REQUEST_LABELS =~ /.*marge_bot_batch_merge_job.*/) || ($CI_COMMIT_BRANCH == \"master\") || ($CI_COMMIT_BRANCH =~ /ghc-[0-9]+\\.[0-9]+/))) && ($RELEASE_JOB != \"yes\") && ($NIGHTLY == null)",
@@ -4621,12 +4261,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-alpine3_18-wasm:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "((($CI_MERGE_REQUEST_LABELS =~ /.*full-ci.*/) || ($CI_MERGE_REQUEST_LABELS =~ /.*marge_bot_batch_merge_job.*/) || ($CI_COMMIT_BRANCH == \"master\") || ($CI_COMMIT_BRANCH =~ /ghc-[0-9]+\\.[0-9]+/))) && ($RELEASE_JOB != \"yes\") && ($NIGHTLY == null)",
@@ -4684,12 +4319,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-alpine3_18-wasm:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "allow_failure": true,
@@ -4748,12 +4378,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-alpine3_18-wasm:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "allow_failure": true,
@@ -4812,12 +4437,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-deb10:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "((($CI_MERGE_REQUEST_LABELS =~ /.*full-ci.*/) || ($CI_MERGE_REQUEST_LABELS =~ /.*marge_bot_batch_merge_job.*/) || ($CI_COMMIT_BRANCH == \"master\") || ($CI_COMMIT_BRANCH =~ /ghc-[0-9]+\\.[0-9]+/))) && ($RELEASE_JOB != \"yes\") && ($NIGHTLY == null)",
@@ -4873,12 +4493,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-deb10:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "allow_failure": true,
@@ -4935,12 +4550,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-deb10:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB != \"yes\") && ($NIGHTLY == null)",
@@ -4997,12 +4607,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-deb10:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "((($CI_MERGE_REQUEST_LABELS =~ /.*full-ci.*/) || ($CI_MERGE_REQUEST_LABELS =~ /.*marge_bot_batch_merge_job.*/) || ($CI_COMMIT_BRANCH == \"master\") || ($CI_COMMIT_BRANCH =~ /ghc-[0-9]+\\.[0-9]+/))) && ($RELEASE_JOB != \"yes\") && ($NIGHTLY == null)",
@@ -5058,12 +4663,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-deb10:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "((($CI_MERGE_REQUEST_LABELS =~ /.*full-ci.*/) || ($CI_MERGE_REQUEST_LABELS =~ /.*marge_bot_batch_merge_job.*/) || ($CI_COMMIT_BRANCH == \"master\") || ($CI_COMMIT_BRANCH =~ /ghc-[0-9]+\\.[0-9]+/)) || ($CI_MERGE_REQUEST_LABELS =~ /.*test-primops.*/)) && ($RELEASE_JOB != \"yes\") && ($NIGHTLY == null)",
@@ -5119,12 +4719,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-deb10:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "allow_failure": true,
@@ -5183,12 +4778,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-deb10:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(($CI_MERGE_REQUEST_LABELS =~ /.*IPE.*/)) && ($RELEASE_JOB != \"yes\") && ($NIGHTLY == null)",
@@ -5244,12 +4834,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-deb11:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "((($CI_MERGE_REQUEST_LABELS =~ /.*full-ci.*/) || ($CI_MERGE_REQUEST_LABELS =~ /.*marge_bot_batch_merge_job.*/) || ($CI_COMMIT_BRANCH == \"master\") || ($CI_COMMIT_BRANCH =~ /ghc-[0-9]+\\.[0-9]+/))) && ($RELEASE_JOB != \"yes\") && ($NIGHTLY == null)",
@@ -5307,12 +4892,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-deb11:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "((($CI_MERGE_REQUEST_LABELS =~ /.*full-ci.*/) || ($CI_MERGE_REQUEST_LABELS =~ /.*marge_bot_batch_merge_job.*/) || ($CI_COMMIT_BRANCH == \"master\") || ($CI_COMMIT_BRANCH =~ /ghc-[0-9]+\\.[0-9]+/)) || ($CI_MERGE_REQUEST_LABELS =~ /.*javascript.*/)) && ($RELEASE_JOB != \"yes\") && ($NIGHTLY == null)",
@@ -5371,12 +4951,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-deb11:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(($CI_MERGE_REQUEST_LABELS =~ /.*non-moving GC.*/)) && ($RELEASE_JOB != \"yes\") && ($NIGHTLY == null)",
@@ -5432,12 +5007,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-deb12:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(($CI_MERGE_REQUEST_LABELS =~ /.*LLVM backend.*/)) && ($RELEASE_JOB != \"yes\") && ($NIGHTLY == null)",
@@ -5493,12 +5063,7 @@
     },
     "dependencies": [],
     "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-fedora33:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB != \"yes\") && ($NIGHTLY == null)",
@@ -5552,12 +5117,7 @@
     },
     "dependencies": [],
     "image": null,
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
+    "needs": [],
     "rules": [
       {
         "if": "(\"true\" == \"true\") && ($RELEASE_JOB != \"yes\") && ($NIGHTLY == null)",
