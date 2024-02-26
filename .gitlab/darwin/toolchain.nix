@@ -92,7 +92,7 @@ let
     };
   fonts = with pkgs; makeFontsConf { fontDirectories = [ dejavu_fonts ]; };
 
-  llvm = pkgs.llvm_11;
+  llvm = pkgs.llvm_15;
 in
 pkgs.writeTextFile {
   name = "toolchain";
