@@ -24,7 +24,7 @@ let
   };
 
   ghc = pkgs.stdenv.mkDerivation rec {
-    version = "9.4.4";
+    version = "9.6.4";
     name = "ghc";
     src = ghcBindists.${pkgs.stdenv.hostPlatform.system};
     configureFlags = [
