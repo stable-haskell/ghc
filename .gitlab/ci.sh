@@ -192,7 +192,7 @@ function set_toolchain_paths() {
       CABAL="$toolchain/bin/cabal$exe"
       HAPPY="$toolchain/bin/happy$exe"
       ALEX="$toolchain/bin/alex$exe"
-      SPHINXBUILD="$toolchain/bin/sphinx-build$exe"
+      SPHINXBUILD="$toolchain/.venv-sphinx/bin/sphinx-build$exe"
       if [ "$(uname)" = "FreeBSD" ]; then
         GHC=/usr/local/bin/ghc
       fi
@@ -357,9 +357,9 @@ function fetch_sphinx() {
           $PYTHON -m venv $toolchain/.venv-sphinx
           cat $toolchain/.venv-sphinx/bin/activate
           source $toolchain/.venv-sphinx/bin/activate
-          pip install -U "sphinx==$SPHINXBUILD_VERSION"
-          deactivate
+          pip install --force-reinstall "sphinx==$SPHINXBUILD_VERSION"
           ls $toolchain/.venv-sphinx
+          ls $toolchain/.venv-sphinx/lib
           ls $toolchain/.venv-sphinx/bin
           ;;
       esac
