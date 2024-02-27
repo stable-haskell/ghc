@@ -356,19 +356,19 @@ function fetch_sphinx() {
         MSYS_*|MINGW*)
           pip uninstall -y sphinx
           which pip
-          pip install -vvv --upgrade "sphinx==$SPHINXBUILD_VERSION"
-          pip show -v sphinx
-          $PYTHON -m venv $toolchain/.venv-sphinx
-          $toolchain/.venv-sphinx/bin/pip uninstall -y sphinx
-          cat $toolchain/.venv-sphinx/bin/pip
-          cat $toolchain/.venv-sphinx/bin/python
-          info "Building sphinx2 $SPHINXBUILD_VERSION..."
-          $toolchain/.venv-sphinx/bin/pip install -vvv --upgrade "sphinx==$SPHINXBUILD_VERSION"
-          $toolchain/.venv-sphinx/bin/pip show -v sphinx
-          info "Building sphinx3 $SPHINXBUILD_VERSION..."
-          ls $toolchain/.venv-sphinx
-          ls $toolchain/.venv-sphinx/lib
-          ls $toolchain/.venv-sphinx/bin
+          pip install -v --target=$toolchain/sphinx --upgrade "sphinx==$SPHINXBUILD_VERSION"
+          ls $toolchain/sphinx
+#          $PYTHON -m venv $toolchain/.venv-sphinx
+#          $toolchain/.venv-sphinx/bin/pip uninstall -y sphinx
+#          cat $toolchain/.venv-sphinx/bin/pip
+#          cat $toolchain/.venv-sphinx/bin/python
+#          info "Building sphinx2 $SPHINXBUILD_VERSION..."
+#          $toolchain/.venv-sphinx/bin/pip install -vvv --upgrade "sphinx==$SPHINXBUILD_VERSION"
+#          $toolchain/.venv-sphinx/bin/pip show -v sphinx
+#          info "Building sphinx3 $SPHINXBUILD_VERSION..."
+#          ls $toolchain/.venv-sphinx
+#          ls $toolchain/.venv-sphinx/lib
+#          ls $toolchain/.venv-sphinx/bin
           ;;
       esac
       end_section "fetch sphinx"
