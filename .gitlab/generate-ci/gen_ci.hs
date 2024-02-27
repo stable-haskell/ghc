@@ -429,6 +429,7 @@ opsysVariables _ (Windows {}) =
           , "LANG" =: "en_US.UTF-8"
           , "CABAL_INSTALL_VERSION" =: "3.10.2.0"
           , "SPHINXBUILD_VERSION" =: "7.2.6"
+          , "HADRIAN_ARGS" =: "--docs=no-sphinx-pdfs"
           , "GHC_VERSION" =: "9.6.4" ]
 opsysVariables _ _ = mempty
 
