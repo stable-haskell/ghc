@@ -192,6 +192,7 @@ function set_toolchain_paths() {
       CABAL="$toolchain/bin/cabal$exe"
       HAPPY="$toolchain/bin/happy$exe"
       ALEX="$toolchain/bin/alex$exe"
+      SPHINXBUILD="$toolchain/bin/sphinx-build$exe"
       if [ "$(uname)" = "FreeBSD" ]; then
         GHC=/usr/local/bin/ghc
       fi
@@ -223,6 +224,7 @@ function set_toolchain_paths() {
   export CABAL
   export HAPPY
   export ALEX
+  export SPHINXBUILD
 
   if [[ "${CROSS_TARGET:-}" == *"wasm"* ]]; then
     source "/home/ghc/.ghc-wasm/env"
@@ -264,6 +266,7 @@ function setup() {
   show_tool CABAL
   show_tool HAPPY
   show_tool ALEX
+  show_tool SPHINXBUILD
 
   info "====================================================="
   info "ghc --info"
@@ -339,20 +342,21 @@ function fetch_cabal() {
 }
 
 function fetch_sphinx() {
-  if [ ! -e "$CABAL" ]; then
-      local v="$CABAL_INSTALL_VERSION"
+  if [ ! -e "$SPHINXBUILD" ]; then
+      local v="$SPHINXBUILD_VERSION"
       if [[ -z "$v" ]]; then
-          fail "neither CABAL nor CABAL_INSTALL_VERSION are not set"
+          fail "neither SPHINXBUILD nor SPHINXBUILD__VERSION are not set"
       fi
 
       start_section "fetch sphinx"
       case "$(uname)" in
-        # N.B. Windows uses zip whereas all others use .tar.xz
+        # N.B.
         MSYS_*|MINGW*)
           $PYTHON -m venv $toolchain/.venv-sphinx
           source $toolchain/.venv-sphinx/activate
-          $PIP install -U sphinx
+          $PIP install -U "sphinx==$SPHINXBUILD_VERSION"
           deactivate
+          ls $toolchain/.venv-sphinx
           ;;
       esac
       end_section "fetch sphinx"

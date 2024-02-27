@@ -2489,10 +2489,10 @@
       "CABAL_INSTALL_VERSION": "3.10.2.0",
       "CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
       "GHC_VERSION": "9.6.4",
-      "HADRIAN_ARGS": "--docs=no-sphinx",
       "LANG": "en_US.UTF-8",
       "MSYSTEM": "CLANG64",
       "RUNTEST_ARGS": "",
+      "SPHINXBUILD_VERSION": "7.2.6",
       "TEST_ENV": "x86_64-windows-int_native-validate",
       "XZ_OPT": "-9"
     }
@@ -2546,10 +2546,10 @@
       "CABAL_INSTALL_VERSION": "3.10.2.0",
       "CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
       "GHC_VERSION": "9.6.4",
-      "HADRIAN_ARGS": "--docs=no-sphinx",
       "LANG": "en_US.UTF-8",
       "MSYSTEM": "CLANG64",
       "RUNTEST_ARGS": "",
+      "SPHINXBUILD_VERSION": "7.2.6",
       "TEST_ENV": "x86_64-windows-validate",
       "XZ_OPT": "-9"
     }
@@ -3986,11 +3986,12 @@
       "CABAL_INSTALL_VERSION": "3.10.2.0",
       "CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
       "GHC_VERSION": "9.6.4",
-      "HADRIAN_ARGS": "--hash-unit-ids --docs=no-sphinx",
+      "HADRIAN_ARGS": "--hash-unit-ids",
       "IGNORE_PERF_FAILURES": "all",
       "LANG": "en_US.UTF-8",
       "MSYSTEM": "CLANG64",
       "RUNTEST_ARGS": "",
+      "SPHINXBUILD_VERSION": "7.2.6",
       "TEST_ENV": "x86_64-windows-int_native-release",
       "XZ_OPT": "-9"
     }
@@ -4044,11 +4045,12 @@
       "CABAL_INSTALL_VERSION": "3.10.2.0",
       "CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
       "GHC_VERSION": "9.6.4",
-      "HADRIAN_ARGS": "--hash-unit-ids --docs=no-sphinx",
+      "HADRIAN_ARGS": "--hash-unit-ids",
       "IGNORE_PERF_FAILURES": "all",
       "LANG": "en_US.UTF-8",
       "MSYSTEM": "CLANG64",
       "RUNTEST_ARGS": "",
+      "SPHINXBUILD_VERSION": "7.2.6",
       "TEST_ENV": "x86_64-windows-release",
       "XZ_OPT": "-9"
     }
@@ -5141,10 +5143,10 @@
       "CABAL_INSTALL_VERSION": "3.10.2.0",
       "CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
       "GHC_VERSION": "9.6.4",
-      "HADRIAN_ARGS": "--docs=no-sphinx",
       "LANG": "en_US.UTF-8",
       "MSYSTEM": "CLANG64",
       "RUNTEST_ARGS": "",
+      "SPHINXBUILD_VERSION": "7.2.6",
       "TEST_ENV": "x86_64-windows-validate"
     }
   }
