@@ -4,6 +4,7 @@ let
   sources = import ./nix/sources.nix;
   nixpkgsSrc = sources.nixpkgs;
   pkgs = import nixpkgsSrc { inherit system; };
+  hostPkgs = import nixpkgsSrc { };
 in
 
 let
@@ -13,19 +14,20 @@ let
   targetTriple = pkgs.stdenv.targetPlatform.config;
 
   ghcBindists = let version = ghc.version; in {
-    aarch64-darwin = pkgs.fetchurl {
+    aarch64-darwin = hostPkgs.fetchurl {
       url = "https://downloads.haskell.org/ghc/${version}/ghc-${version}-aarch64-apple-darwin.tar.xz";
-      sha256 = "sha256-4c30WJJrLq9S0qgofZmpZQQP+QURcfXDt0ZwSc8OshM=";
+      sha256 = "sha256-c1GTMJf3/yiW/t4QL532EswD5JVlgA4getkfsxj4TaA=";
     };
-    x86_64-darwin = pkgs.fetchurl {
+    x86_64-darwin = hostPkgs.fetchurl {
       url = "https://downloads.haskell.org/ghc/${version}/ghc-${version}-x86_64-apple-darwin.tar.xz";
-      sha256 = "sha256-3eRhGKuDiPsQZjEsCXEj6Tsdz2rjZuM3D4jqRWOCyds=";
+      sha256 = "sha256-LrYniMG0phsvyW6dhQC+3ompvzcxnwAe6GezEqqzoTQ=";
     };
+
   };
 
   ghc = pkgs.stdenv.mkDerivation rec {
     # Using 9.6.3 because of #24050
-    version = "9.6.3";
+    version = "9.6.2";
     name = "ghc";
     src = ghcBindists.${pkgs.stdenv.hostPlatform.system};
     configureFlags = [
