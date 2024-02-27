@@ -193,7 +193,7 @@ function set_toolchain_paths() {
       HAPPY="$toolchain/bin/happy$exe"
       ALEX="$toolchain/bin/alex$exe"
       SPHINXBUILD="$toolchain/sphinx/bin/sphinx-build"
-      PYTHONPATH="$toolchain/sphinx:$PYTHONPATH"
+      PYTHONPATH="$toolchain/sphinx"
       export PYTHONPATH
       if [ "$(uname)" = "FreeBSD" ]; then
         GHC=/usr/local/bin/ghc
