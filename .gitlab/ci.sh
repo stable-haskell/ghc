@@ -150,7 +150,9 @@ function mingw_init() {
   PATH="$MINGW_MOUNT_POINT/bin:$PATH"
 
   # We always use mingw64 Python to avoid path length issues like #17483.
+  ls /mingw64/bin/
   export PYTHON="/mingw64/bin/python3"
+  export PIP="/mingw64/bin/pip"
 }
 
 # This will contain GHC's local native toolchain
@@ -305,7 +307,7 @@ function fetch_cabal() {
           fail "neither CABAL nor CABAL_INSTALL_VERSION are not set"
       fi
 
-      start_section "fetch GHC"
+      start_section "fetch cabal"
       case "$(uname)" in
         # N.B. Windows uses zip whereas all others use .tar.xz
         MSYS_*|MINGW*)
@@ -332,7 +334,28 @@ function fetch_cabal() {
           mv cabal "$toolchain/bin"
           ;;
       esac
-      end_section "fetch GHC"
+      end_section "fetch cabal"
+  fi
+}
+
+function fetch_sphinx() {
+  if [ ! -e "$CABAL" ]; then
+      local v="$CABAL_INSTALL_VERSION"
+      if [[ -z "$v" ]]; then
+          fail "neither CABAL nor CABAL_INSTALL_VERSION are not set"
+      fi
+
+      start_section "fetch sphinx"
+      case "$(uname)" in
+        # N.B. Windows uses zip whereas all others use .tar.xz
+        MSYS_*|MINGW*)
+          $PYTHON -m venv $toolchain/.venv-sphinx
+          source $toolchain/.venv-sphinx/activate
+          $PIP install -U sphinx
+          deactivate
+          ;;
+      esac
+      end_section "fetch sphinx"
   fi
 }
 
@@ -342,6 +365,7 @@ function fetch_cabal() {
 function setup_toolchain() {
   fetch_ghc
   fetch_cabal
+  fetch_sphinx
   cabal_update
 
   local cabal_install="$CABAL v2-install \
