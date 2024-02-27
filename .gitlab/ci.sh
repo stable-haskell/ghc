@@ -349,14 +349,16 @@ function fetch_sphinx() {
       fi
 
       start_section "fetch sphinx"
+      info "Building sphinx $SPHINXBUILD_VERSION..."
       case "$(uname)" in
         # N.B.
         MSYS_*|MINGW*)
           $PYTHON -m venv $toolchain/.venv-sphinx
           source $toolchain/.venv-sphinx/activate
-          $PIP install -U "sphinx==$SPHINXBUILD_VERSION"
+          pip install -U "sphinx==$SPHINXBUILD_VERSION"
           deactivate
           ls $toolchain/.venv-sphinx
+          ls $toolchain/.venv-sphinx/bin
           ;;
       esac
       end_section "fetch sphinx"
