@@ -354,7 +354,7 @@ function fetch_sphinx() {
       case "$(uname)" in
         # N.B.
         MSYS_*|MINGW*)
-          pip uninstall sphinx
+          pip uninstall -y sphinx
           $PYTHON -m venv $toolchain/.venv-sphinx
           source $toolchain/.venv-sphinx/bin/activate
           info "Building sphinx2 $SPHINXBUILD_VERSION..."
