@@ -192,7 +192,7 @@ function set_toolchain_paths() {
       CABAL="$toolchain/bin/cabal$exe"
       HAPPY="$toolchain/bin/happy$exe"
       ALEX="$toolchain/bin/alex$exe"
-      SPHINXBUILD="$toolchain/.venv-sphinx/bin/sphinx-build$exe"
+      SPHINXBUILD="$toolchain/sphinx/bin/sphinx-build"
       if [ "$(uname)" = "FreeBSD" ]; then
         GHC=/usr/local/bin/ghc
       fi
