@@ -1368,13 +1368,19 @@ checkPatBind _loc annsIn lhs (L _ grhss) mult = do
 
 
 checkValSigLhs :: LHsExpr GhcPs -> P (LocatedN RdrName)
-checkValSigLhs (L _ (HsVar _ lrdr@(L _ v)))
-  | isUnqual v
-  , not (isDataOcc (rdrNameOcc v))
-  = return lrdr
+checkValSigLhs lhs@(L l lhs_expr)
+  | HsVar _ lrdr@(L _ v) <- lhs_expr = check_var v lrdr
+  | HsApp _ _ _          <- lhs_expr = make_err InvalidTypeSig_Application
+  | otherwise                        = make_err InvalidTypeSig_Other
+  where
+    check_var v lrdr
+      | not (isUnqual v) = make_err InvalidTypeSig_Qualified
+      | isDataOcc occ_n  = make_err $ InvalidTypeSig_DataCon (isDataSymOcc occ_n)
+      | otherwise        = pure lrdr
+      where occ_n = rdrNameOcc v
+    make_err reason = addFatalError $
+      mkPlainErrorMsgEnvelope (locA l) (PsErrInvalidTypeSignature reason lhs)
 
-checkValSigLhs lhs@(L l _)
-  = addFatalError $ mkPlainErrorMsgEnvelope (locA l) $ PsErrInvalidTypeSignature lhs
 
 checkDoAndIfThenElse
   :: (Outputable a, Outputable b, Outputable c)

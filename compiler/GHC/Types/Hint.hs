@@ -10,6 +10,7 @@ module GHC.Types.Hint (
   , SimilarName(..)
   , StarIsType(..)
   , UntickedPromotedThing(..)
+  , InvalidTypeSignatureReason(..)
   , pprUntickedConstructor, isBareSymbol
   , suggestExtension
   , suggestExtensionWithInfo
@@ -53,6 +54,12 @@ data AvailableBindings
   = NamedBindings  (NE.NonEmpty Name)
   | UnnamedBinding
   -- ^ An unknown binding (i.e. too complicated to turn into a 'Name')
+
+data InvalidTypeSignatureReason
+  = InvalidTypeSig_DataCon !Bool -- ^ Is it an operator
+  | InvalidTypeSig_Qualified
+  | InvalidTypeSig_Application
+  | InvalidTypeSig_Other
 
 data LanguageExtensionHint
   = -- | Suggest to enable the input extension. This is the hint that
@@ -303,7 +310,7 @@ data GhcHint
         Triggered by: 'GHC.Parser.Errors.Types.PsErrInvalidTypeSignature'
         Test case(s): parser/should_fail/T3811
     -}
-  | SuggestTypeSignatureForm
+  | SuggestTypeSignatureForm InvalidTypeSignatureReason
 
     {-| Suggests to move an orphan instance (for a typeclass or a type or data
         family), or to newtype-wrap it.

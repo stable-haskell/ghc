@@ -127,8 +127,14 @@ instance Outputable GhcHint where
       -> text "To use (or export) this operator in"
             <+> text "modules with StarIsType,"
          $$ text "    including the definition module, you must qualify it."
-    SuggestTypeSignatureForm
-      -> text "A type signature should be of form <variables> :: <type>"
+    SuggestTypeSignatureForm reason
+      -> case reason of
+           InvalidTypeSig_Qualified     -> text "Perhaps you meant to omit the qualifier"
+           InvalidTypeSig_DataCon is_op -> if is_op then text "Use an operator name that does not start with"
+                                                         <+> quotes colon
+                                                    else text "Use a lowercase name"
+           InvalidTypeSig_Application   -> text "Remove the application on the left hand side"
+           InvalidTypeSig_Other         -> text "A type signature should be of form <variables> :: <type>"
     SuggestAddToHSigExportList _name mb_mod
       -> let header = text "Try adding it to the export list of"
          in case mb_mod of

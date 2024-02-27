@@ -389,7 +389,7 @@ data PsMessage
    | PsErrIllegalRoleName !FastString [Role]
 
    -- | Invalid type signature
-   | PsErrInvalidTypeSignature !(LHsExpr GhcPs)
+   | PsErrInvalidTypeSignature !InvalidTypeSignatureReason !(LHsExpr GhcPs)
 
    -- | Unexpected type in declaration
    | PsErrUnexpectedTypeInDecl !(LHsType GhcPs)
@@ -523,6 +523,7 @@ data NumUnderscoreReason
    = NumUnderscore_Integral
    | NumUnderscore_Float
    deriving (Show,Eq,Ord)
+
 
 data LexErrKind
    = LexErrKind_EOF        -- ^ End of input

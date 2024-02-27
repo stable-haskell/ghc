@@ -455,11 +455,16 @@ instance Diagnostic PsMessage where
     PsErrIllegalRoleName role _nearby
       -> mkSimpleDecorated $
            text "Illegal role name" <+> quotes (ppr role)
-    PsErrInvalidTypeSignature lhs
-      -> mkSimpleDecorated $
-           text "Invalid type signature:"
-           <+> ppr lhs
-           <+> text ":: ..."
+    PsErrInvalidTypeSignature reason _
+      -> mkSimpleDecorated $ case reason of
+           InvalidTypeSig_DataCon is_op
+             -> if is_op then text "Invalid data constructor operator in type signature" $$
+                              text "an operator must not start with" <+> quotes colon <> dot
+                         else text "Invalid data constructor in type signature" $$
+                              text "a variable or function must not start with an uppercase letter"
+           InvalidTypeSig_Qualified   -> text "Invalid qualified name in type signature"
+           InvalidTypeSig_Application -> text "Invalid application in type signature"
+           InvalidTypeSig_Other       -> text "Invalid type signature"
     PsErrUnexpectedTypeInDecl t what tc tparms equals_or_where
        -> mkSimpleDecorated $
             vcat [ text "Unexpected type" <+> quotes (ppr t)
@@ -760,7 +765,7 @@ instance Diagnostic PsMessage where
         sug_missingdo _                                     = Nothing
     PsErrParseRightOpSectionInPat{}               -> noHints
     PsErrIllegalRoleName _ nearby                 -> [SuggestRoles nearby]
-    PsErrInvalidTypeSignature lhs                 ->
+    PsErrInvalidTypeSignature reason lhs          ->
         if | foreign_RDR `looks_like` lhs
            -> [suggestExtension LangExt.ForeignFunctionInterface]
            | default_RDR `looks_like` lhs
@@ -768,7 +773,7 @@ instance Diagnostic PsMessage where
            | pattern_RDR `looks_like` lhs
            -> [suggestExtension LangExt.PatternSynonyms]
            | otherwise
-           -> [SuggestTypeSignatureForm]
+           -> [SuggestTypeSignatureForm reason]
       where
         -- A common error is to forget the ForeignFunctionInterface flag
         -- so check for that, and suggest.  cf #3805
