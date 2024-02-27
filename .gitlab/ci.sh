@@ -216,6 +216,7 @@ function set_toolchain_paths() {
       : ${CABAL:=$(which cabal)}
       : ${HAPPY:=$(which happy)}
       : ${ALEX:=$(which alex)}
+      : ${SPHINXBUILD:=$(which sphinx-build)}
       ;;
     *) fail "bad toolchain_source"
   esac
