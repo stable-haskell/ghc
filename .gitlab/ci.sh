@@ -357,6 +357,7 @@ function fetch_sphinx() {
           pip uninstall -y sphinx
           $PYTHON -m venv $toolchain/.venv-sphinx
           source $toolchain/.venv-sphinx/bin/activate
+          pip uninstall -y sphinx
           info "Building sphinx2 $SPHINXBUILD_VERSION..."
           pip install -vvv --upgrade "sphinx==$SPHINXBUILD_VERSION"
           pip show -v sphinx
