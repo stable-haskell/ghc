@@ -393,6 +393,51 @@ split_block_low (bdescr *bd, W_ n)
     return bd;
 }
 
+static bdescr *
+split_group_low (bdescr *bd, W_ n)
+{
+    ASSERT(bd->blocks > n);
+
+    bdescr* bd_ = bd + n;
+    bd_->blocks = bd->blocks - n;
+    bd_->start = bd_->free = bd->start + n*BLOCK_SIZE_W;
+
+    bd->blocks = n;
+
+    setup_tail(bd);
+    setup_tail(bd_);
+
+    return bd_;
+}
+
+// Allocate a MBlock worth of `n` block sized chunks aligned at `n`-block boundry.
+// This returns a linked list of `bdescr` of length `BLOCKS_PER_MBLOCK / n`.
+// We assume relevant locks are held.
+bdescr *
+allocMBlockAlignedGroupOnNode(uint32_t node, W_ n)
+{
+    bdescr *bd = allocGroupOnNode(node, BLOCKS_PER_MBLOCK);
+
+    // Free unaligned blocks, as we can't use these.
+    bdescr *unaligned_blocks = bd;
+    ASSERT(bd->blocks == BLOCKS_PER_MBLOCK);
+    bd = split_group_low(unaligned_blocks, bd->blocks % n);
+    freeGroup(unaligned_blocks);
+    ASSERT(bd->blocks % n == 0);
+
+    bdescr *start = bd;
+    // Chain the aligned groups together onto a linked-list
+    while (bd->blocks > n) {
+      bdescr *chunk = bd;
+      bd = split_group_low(chunk, n);
+      chunk->link = bd;
+    }
+    bd->link = NULL;
+    ASSERT(bd->link == NULL);
+
+    return start;
+}
+
 
 /* Find a fitting block for the allocation request in the given free list.
    Returns:

@@ -128,6 +128,7 @@ struct NonmovingHeap {
     // NONMOVING_MAX_FREE segments to avoid thrashing the block allocator.
     // Note that segments in this list are still counted towards
     // oldest_gen->n_blocks.
+    // TODO: Update?
     struct NonmovingSegment *free;
     // how many segments in free segment list? accessed atomically.
     unsigned int n_free;
@@ -172,6 +173,7 @@ void nonmovingCollect(StgWeak **dead_weaks,
                       bool concurrent);
 
 void nonmovingPushFreeSegment(struct NonmovingSegment *seg);
+void nonmovingPruneFreeSegmentList(void);
 
 INLINE_HEADER unsigned long log2_ceil(unsigned long x)
 {

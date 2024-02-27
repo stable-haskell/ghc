@@ -579,17 +579,17 @@ static void nonmovingExitConcurrentWorker(void);
 void nonmovingPushFreeSegment(struct NonmovingSegment *seg)
 {
     // See Note [Live data accounting in nonmoving collector].
-    if (RELAXED_LOAD(&nonmovingHeap.n_free) > NONMOVING_MAX_FREE) {
-        bdescr *bd = Bdescr((StgPtr) seg);
-        ACQUIRE_SM_LOCK;
-        ASSERT(oldest_gen->n_blocks >= bd->blocks);
-        ASSERT(oldest_gen->n_words >= BLOCK_SIZE_W * bd->blocks);
-        oldest_gen->n_blocks -= bd->blocks;
-        oldest_gen->n_words  -= BLOCK_SIZE_W * bd->blocks;
-        freeGroup(bd);
-        RELEASE_SM_LOCK;
-        return;
-    }
+    /* if (RELAXED_LOAD(&nonmovingHeap.n_free) > NONMOVING_MAX_FREE) { */
+    /*     bdescr *bd = Bdescr((StgPtr) seg); */
+    /*     ACQUIRE_SM_LOCK; */
+    /*     ASSERT(oldest_gen->n_blocks >= bd->blocks); */
+    /*     ASSERT(oldest_gen->n_words >= BLOCK_SIZE_W * bd->blocks); */
+    /*     oldest_gen->n_blocks -= bd->blocks; */
+    /*     oldest_gen->n_words  -= BLOCK_SIZE_W * bd->blocks; */
+    /*     freeGroup(bd); */
+    /*     RELEASE_SM_LOCK; */
+    /*     return; */
+    /* } */
 
     SET_SEGMENT_STATE(seg, FREE);
     while (true) {
@@ -599,6 +599,94 @@ void nonmovingPushFreeSegment(struct NonmovingSegment *seg)
             break;
     }
     __sync_add_and_fetch(&nonmovingHeap.n_free, 1);
+}
+
+static int
+cmp_segment_ptr (const void *x, const void *y)
+{
+    const struct NonMovingSegment *p1 = *(const struct NonMovingSegment**)x;
+    const struct NonMovingSegment *p2 = *(const struct NonMovingSegment**)y;
+    if (p1 > p2) return +1;
+    else if (p1 < p2) return -1;
+    else return 0;
+}
+
+void nonmovingPruneFreeSegmentList(void)
+{
+  // grab the entire free list
+  struct NonmovingSegment *free;
+  size_t length;
+  while (true) {
+    free = ACQUIRE_LOAD(&nonmovingHeap.free);
+    length = ACQUIRE_LOAD(&nonmovingHeap.n_free);
+    if (cas((StgVolatilePtr) &nonmovingHeap.free,
+            (StgWord) free,
+            (StgWord) NULL) == (StgWord) free) {
+        __sync_sub_and_fetch(&nonmovingHeap.n_free, length);
+        break;
+    }
+  }
+  // sort the free list by address
+  struct NonmovingSegment **sorted = stgMallocBytes(sizeof(struct NonmovingSegment*) * length, "sorted free segment list");
+  for(size_t i = 0; i<length; i++) {
+    sorted[i] = free;
+    free = free->link;
+  }
+  // we should have reached the end of the free list
+  ASSERT(free == NULL);
+
+  qsort(sorted, length, sizeof(struct NonmovingSegment*), cmp_segment_ptr);
+
+  // Walk the sorted list and either:
+  // - free segments if the entire megablock is free
+  // - put it back on the free list
+  size_t new_length = 0;
+  size_t free_in_megablock = 0;
+  for(size_t i = 0; i<length; i+=free_in_megablock) {
+    free_in_megablock = 1;
+    for(;i + free_in_megablock < length; free_in_megablock++) {
+      if (((W_)sorted[i] & ~MBLOCK_MASK) != ((W_)sorted[i + free_in_megablock] & ~MBLOCK_MASK))
+        break;
+    }
+    if (free_in_megablock < BLOCKS_PER_MBLOCK / NONMOVING_SEGMENT_BLOCKS) {
+      // the entire block isn't free so put it back on the list
+      for(size_t j = 0; j < free_in_megablock;j++){
+        struct NonmovingSegment *last = free;
+        free = sorted[i+j];
+        free->link = last;
+        new_length++;
+      }
+    } else {
+      ACQUIRE_SM_LOCK;
+      for(size_t j = 0; j < free_in_megablock;j++){
+        bdescr *bd = Bdescr((StgPtr)sorted[i+j]);
+        freeGroup(bd);
+        // See Note [Live data accounting in nonmoving collector].
+        oldest_gen->n_blocks -= bd->blocks;
+        oldest_gen->n_words  -= BLOCK_SIZE_W * bd->blocks;
+      }
+      RELEASE_SM_LOCK;
+    }
+  }
+  stgFree(sorted);
+  // If we couldn't free any segments, then put them back on the list.
+  //printf("%d %d\n", length, new_length);
+  if(free) {
+    struct NonmovingSegment* tail = free;
+    while(tail->link) {
+      tail = tail->link;
+    }
+    while (true) {
+      struct NonmovingSegment* rest = ACQUIRE_LOAD(&nonmovingHeap.free);
+      tail->link = rest;
+      if (cas((StgVolatilePtr) &nonmovingHeap.free,
+              (StgWord) rest,
+              (StgWord) free) == (StgWord) rest) {
+          __sync_add_and_fetch(&nonmovingHeap.n_free, new_length);
+          break;
+      }
+    }
+  }
 }
 
 void nonmovingInitAllocator(struct NonmovingAllocator* alloc, uint16_t block_size)
@@ -1216,6 +1304,7 @@ concurrent_marking:
     nonmovingSweepStableNameTable();
 
     nonmovingSweep();
+    nonmovingPruneFreeSegmentList();
     ASSERT(nonmovingHeap.sweep_list == NULL);
     debugTrace(DEBUG_nonmoving_gc, "Finished sweeping.");
     traceConcSweepEnd();

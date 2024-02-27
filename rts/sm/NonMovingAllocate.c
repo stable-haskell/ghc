@@ -65,19 +65,36 @@ static struct NonmovingSegment *nonmovingAllocSegment(enum AllocLockMode mode, u
     struct NonmovingSegment *ret;
     ret = nonmovingPopFreeSegment();
 
-    // Nothing in the free list, allocate a new segment...
+    // Nothing in the free list, allocate a new segment.
+    // We allocate a full megablock, and add spare segments to our free list.
+    // TODO: link note
     if (ret == NULL) {
+        // TODO: should we try again in case another thread
+        // allocated some while we were blocked?
         acquire_alloc_lock(mode);
-        bdescr *bd = allocAlignedGroupOnNode(node, NONMOVING_SEGMENT_BLOCKS);
-        // See Note [Live data accounting in nonmoving collector].
-        oldest_gen->n_blocks += bd->blocks;
-        oldest_gen->n_words  += BLOCK_SIZE_W * bd->blocks;
+        bdescr *bd = allocMBlockAlignedGroupOnNode(node, NONMOVING_SEGMENT_BLOCKS);
         release_alloc_lock(mode);
 
-        for (StgWord32 i = 0; i < bd->blocks; ++i) {
+        W_ alloc_blocks = NONMOVING_SEGMENT_BLOCKS * (BLOCKS_PER_MBLOCK / NONMOVING_SEGMENT_BLOCKS);
+
+        // See Note [Live data accounting in nonmoving collector].
+        oldest_gen->n_blocks += alloc_blocks;
+        oldest_gen->n_words  += BLOCK_SIZE_W * alloc_blocks;
+
+        for (StgWord32 i = 0; i < alloc_blocks; ++i) {
             initBdescr(&bd[i], oldest_gen, oldest_gen);
             bd[i].flags = BF_NONMOVING;
         }
+
+        // Push all but the last segment to the free segment list.
+        while(bd->link) {
+          bdescr *next_bd = bd->link;
+          bd->link = NULL;
+          nonmovingPushFreeSegment((struct NonmovingSegment *)bd->start);
+          bd = next_bd;
+        }
+
+        // Use the last segment to service the allocation.
         ret = (struct NonmovingSegment *)bd->start;
     }
 
