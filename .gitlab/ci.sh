@@ -358,7 +358,7 @@ function fetch_sphinx() {
           $PYTHON -m venv $toolchain/.venv-sphinx
           source $toolchain/.venv-sphinx/bin/activate
           info "Building sphinx2 $SPHINXBUILD_VERSION..."
-          $toolchain/.venv-sphinx/bin/pip.exe install -v --upgrade --force-reinstall "sphinx==$SPHINXBUILD_VERSION"
+          $toolchain/.venv-sphinx/bin/pip.exe install -v --upgrade "sphinx==$SPHINXBUILD_VERSION"
           $toolchain/.venv-sphinx/bin/pip.exe show -v sphinx
           info "Building sphinx3 $SPHINXBUILD_VERSION..."
           deactivate
