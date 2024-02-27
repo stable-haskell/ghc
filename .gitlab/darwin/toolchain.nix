@@ -15,16 +15,17 @@ let
   ghcBindists = let version = ghc.version; in {
     aarch64-darwin = pkgs.fetchurl {
       url = "https://downloads.haskell.org/ghc/${version}/ghc-${version}-aarch64-apple-darwin.tar.xz";
-      sha256 = "sha256-Ja/8nOtvIDJwbsG0t7pdFL003ztSI9gGDyEK7OJf7qk=";
+      sha256 = "sha256-4c30WJJrLq9S0qgofZmpZQQP+QURcfXDt0ZwSc8OshM=";
     };
     x86_64-darwin = pkgs.fetchurl {
       url = "https://downloads.haskell.org/ghc/${version}/ghc-${version}-x86_64-apple-darwin.tar.xz";
-      sha256 = "sha256-uJfL0VZpD05sxEAPa5Rl1hDqIo2FJ/i9UBIQ0bk6Tqs=";
+      sha256 = "sha256-3eRhGKuDiPsQZjEsCXEj6Tsdz2rjZuM3D4jqRWOCyds=";
     };
   };
 
   ghc = pkgs.stdenv.mkDerivation rec {
-    version = "9.6.4";
+    # Using 9.6.3 because of #24050
+    version = "9.6.3";
     name = "ghc";
     src = ghcBindists.${pkgs.stdenv.hostPlatform.system};
     configureFlags = [
