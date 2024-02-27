@@ -356,13 +356,11 @@ function fetch_sphinx() {
         MSYS_*|MINGW*)
           pip uninstall -y sphinx
           $PYTHON -m venv $toolchain/.venv-sphinx
-          source $toolchain/.venv-sphinx/bin/activate
-          pip uninstall -y sphinx
+          $toolchain/.venv-sphinx/bin/pip.exe uninstall -y sphinx
           info "Building sphinx2 $SPHINXBUILD_VERSION..."
-          pip install -vvv --upgrade "sphinx==$SPHINXBUILD_VERSION"
-          pip show -v sphinx
+          $toolchain/.venv-sphinx/bin/pip.exe install -vvv --upgrade "sphinx==$SPHINXBUILD_VERSION"
+          $toolchain/.venv-sphinx/bin/pip.exe show -v sphinx
           info "Building sphinx3 $SPHINXBUILD_VERSION..."
-          deactivate
           ls $toolchain/.venv-sphinx
           ls $toolchain/.venv-sphinx/lib
           ls $toolchain/.venv-sphinx/bin
