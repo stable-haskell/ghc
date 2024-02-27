@@ -355,9 +355,9 @@ function fetch_sphinx() {
         # N.B.
         MSYS_*|MINGW*)
           $PYTHON -m venv $toolchain/.venv-sphinx
-          cat $toolchain/.venv-sphinx/bin/activate
           source $toolchain/.venv-sphinx/bin/activate
           pip install --force-reinstall "sphinx==$SPHINXBUILD_VERSION"
+          deactivate
           ls $toolchain/.venv-sphinx
           ls $toolchain/.venv-sphinx/lib
           ls $toolchain/.venv-sphinx/bin
