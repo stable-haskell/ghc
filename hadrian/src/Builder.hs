@@ -376,7 +376,10 @@ instance H.Builder Builder where
 
                 Tar _ -> cmd' buildOptions [path] buildArgs
 
-                Sphinx {} ->
+                Sphinx {} -> do
+                  let unpack = fromMaybe . error $ "Cannot find path to builder "
+                                ++ quote "sphinx-build"  ++ " Did you skip configure?"
+                  path <- unpack <$> lookupValue configFile "sphinx-build"
                   cmd' ["perl", path] buildArgs buildOptions
 
                 -- RunTest produces a very large amount of (colorised) output;
