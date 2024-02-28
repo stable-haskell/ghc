@@ -140,6 +140,7 @@ function mingw_init() {
       fail "win32-init: Unknown MSYSTEM $MSYSTEM"
       ;;
   esac
+
   # Bring mingw toolchain into PATH.
   # This is extracted from /etc/profile since this script inexplicably fails to
   # run under gitlab-runner.
@@ -190,7 +191,6 @@ function set_toolchain_paths() {
       HAPPY="$toolchain/bin/happy$exe"
       ALEX="$toolchain/bin/alex$exe"
       SPHINXBUILD="/mingw64/bin/sphinx-build.exe"
-      export PYTHONPATH
       if [ "$(uname)" = "FreeBSD" ]; then
         GHC=/usr/local/bin/ghc
       fi

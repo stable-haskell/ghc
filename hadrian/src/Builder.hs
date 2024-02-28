@@ -46,7 +46,6 @@ import GHC.ResponseFile
 import GHC.Toolchain (Target(..))
 import qualified GHC.Toolchain as Toolchain
 import GHC.Toolchain.Program
-import System.Environment
 
 -- | C compiler can be used in two different modes:
 -- * Compile or preprocess a source file.
@@ -377,17 +376,6 @@ instance H.Builder Builder where
 
                 Tar _ -> cmd' buildOptions [path] buildArgs
 
-{-                Sphinx {} -> do
-                  let unpack = fromMaybe . error $ "Cannot find path to builder "
-                                ++ quote "sphinx-build"  ++ " Did you skip configure?"
-                  path <- unpack <$> lookupValue configFile "sphinx-build"
-                  liftIO (lookupEnv "PYTHONPATH" >>= print)
-                  mpp <- liftIO (lookupEnv "PYTHONPATH")
-                  liftIO (print (convertWindowsPath <$> mpp))
-
-                  cmd' ["perl", path] [AddEnv "PYTHONPATH" (convertWindowsPath pp) |  Just pp <- [mpp]] (map convertWindowsPath buildArgs) buildOptions
-                  -}
-
                 -- RunTest produces a very large amount of (colorised) output;
                 -- Don't attempt to capture it.
                 Testsuite RunTest -> do
@@ -396,13 +384,6 @@ instance H.Builder Builder where
                     fail "tests failed"
 
                 _  -> cmd' [path] buildArgs buildOptions
-
-convertWindowsPath :: FilePath -> FilePath
-convertWindowsPath (';':fp) = ':' : convertWindowsPath fp
-convertWindowsPath ('\\':fp) = '/' : convertWindowsPath fp
-convertWindowsPath (c : ':' : '/':fp) = '/' : c : '/' : convertWindowsPath fp
-convertWindowsPath (c:fp) = c : convertWindowsPath fp
-convertWindowsPath [] = []
 
 -- | Invoke @haddock@ given a path to it and a list of arguments. The arguments
 -- are passed in a response file.

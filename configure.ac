@@ -783,8 +783,6 @@ changequote(, )dnl
 fi;
 changequote([, ])dnl
 ])
-"$SPHINXBUILD" --version
-
 FP_COMPARE_VERSIONS([$fp_cv_sphinx_version],-lt,1.0.0,
     [AC_MSG_WARN([Sphinx version 1.0.0 or later is required to build documentation]); SPHINXBUILD=;])
 if test -n "$SPHINXBUILD"; then
