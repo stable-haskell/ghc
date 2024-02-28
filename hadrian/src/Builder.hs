@@ -385,7 +385,7 @@ instance H.Builder Builder where
                   mpp <- liftIO (lookupEnv "PYTHONPATH")
                   liftIO (print (convertWindowsPath <$> mpp))
 
-                  cmd' ["perl", path] [AddEnv "PYTHONPATH" (convertWindowsPath pp) |  Just pp <- [mpp]] buildArgs buildOptions
+                  cmd' ["perl", path] [AddEnv "PYTHONPATH" (convertWindowsPath pp) |  Just pp <- [mpp]] (map convertWindowsPath buildArgs) buildOptions
 
                 -- RunTest produces a very large amount of (colorised) output;
                 -- Don't attempt to capture it.
@@ -394,7 +394,7 @@ instance H.Builder Builder where
                   when (code /= ExitSuccess) $ do
                     fail "tests failed"
 
-                _  -> cmd' [path] (map convertWindowsPath buildArgs) (map convertWindowsPath buildOptions)
+                _  -> cmd' [path] buildArgs buildOptions
 
 convertWindowsPath :: FilePath -> FilePath
 convertWindowsPath (';':fp) = ':' : convertWindowsPath fp
