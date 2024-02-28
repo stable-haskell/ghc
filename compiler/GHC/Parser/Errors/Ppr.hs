@@ -455,13 +455,11 @@ instance Diagnostic PsMessage where
     PsErrIllegalRoleName role _nearby
       -> mkSimpleDecorated $
            text "Illegal role name" <+> quotes (ppr role)
-    PsErrInvalidTypeSignature reason _
+    PsErrInvalidTypeSignature reason lhs
       -> mkSimpleDecorated $ case reason of
-           InvalidTypeSig_DataCon is_op
-             -> if is_op then text "Invalid data constructor operator in type signature" $$
-                              text "an operator must not start with" <+> quotes colon <> dot
-                         else text "Invalid data constructor in type signature" $$
-                              text "a variable or function must not start with an uppercase letter"
+           InvalidTypeSig_DataCon _   -> text "Invalid data constructor" <+> quotes (ppr lhs) <+>
+                                         text "in type signature" <> colon $$
+                                         text "you can only define data constructors in data type declarations."
            InvalidTypeSig_Qualified   -> text "Invalid qualified name in type signature"
            InvalidTypeSig_Application -> text "Invalid application in type signature"
            InvalidTypeSig_Other       -> text "Invalid type signature"
