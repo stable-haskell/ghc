@@ -265,7 +265,6 @@ function setup() {
   show_tool CABAL
   show_tool HAPPY
   show_tool ALEX
-  show_tool SPHINXBUILD
 
   info "====================================================="
   info "ghc --info"
