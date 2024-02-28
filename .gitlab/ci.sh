@@ -140,9 +140,6 @@ function mingw_init() {
       fail "win32-init: Unknown MSYSTEM $MSYSTEM"
       ;;
   esac
-  which python
-  which pip
-
   # Bring mingw toolchain into PATH.
   # This is extracted from /etc/profile since this script inexplicably fails to
   # run under gitlab-runner.
@@ -380,6 +377,8 @@ function fetch_sphinx() {
           ;;
       esac
       end_section "fetch sphinx"
+  else
+    info "SPHINXBUILD: $SPHINXBUILD"
   fi
 }
 
