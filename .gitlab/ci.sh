@@ -190,7 +190,7 @@ function set_toolchain_paths() {
       CABAL="$toolchain/bin/cabal$exe"
       HAPPY="$toolchain/bin/happy$exe"
       ALEX="$toolchain/bin/alex$exe"
-      SPHINXBUILD="/mingw64/bin/sphinx-build.exe"
+      #SPHINXBUILD="/mingw64/bin/sphinx-build.exe"
       if [ "$(uname)" = "FreeBSD" ]; then
         GHC=/usr/local/bin/ghc
       fi
@@ -214,7 +214,7 @@ function set_toolchain_paths() {
       : ${CABAL:=$(which cabal)}
       : ${HAPPY:=$(which happy)}
       : ${ALEX:=$(which alex)}
-      : ${SPHINXBUILD:=$(which sphinx-build)}
+   #   : ${SPHINXBUILD:=$(which sphinx-build)}
       ;;
     *) fail "bad toolchain_source"
   esac
@@ -223,7 +223,7 @@ function set_toolchain_paths() {
   export CABAL
   export HAPPY
   export ALEX
-  export SPHINXBUILD
+  #export SPHINXBUILD
 
   if [[ "${CROSS_TARGET:-}" == *"wasm"* ]]; then
     source "/home/ghc/.ghc-wasm/env"
