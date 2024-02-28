@@ -382,7 +382,10 @@ instance H.Builder Builder where
                                 ++ quote "sphinx-build"  ++ " Did you skip configure?"
                   path <- unpack <$> lookupValue configFile "sphinx-build"
                   liftIO (lookupEnv "PYTHONPATH" >>= print)
-                  cmd' ["perl", path] buildArgs buildOptions
+                  mpp <- liftIO (lookupEnv "PYTHONPATH")
+                  liftIO (print (convertWindowsPath <$> mpp))
+
+                  cmd' ["perl", path] [AddEnv "PYTHONPATH" (convertWindowsPath pp) |  Just pp <- [mpp]] buildArgs buildOptions
 
                 -- RunTest produces a very large amount of (colorised) output;
                 -- Don't attempt to capture it.
@@ -392,6 +395,13 @@ instance H.Builder Builder where
                     fail "tests failed"
 
                 _  -> cmd' [path] buildArgs buildOptions
+
+convertWindowsPath :: FilePath -> FilePath
+convertWindowsPath (';':fp) = ':' : convertWindowsPath fp
+convertWindowsPath ('\\':fp) = '/' : convertWindowsPath fp
+convertWindowsPath (c : ':' : '/':fp) = '/' : c : '/' : convertWindowsPath fp
+convertWindowsPath (c:fp) = c : convertWindowsPath fp
+convertWindowsPath [] = []
 
 -- | Invoke @haddock@ given a path to it and a list of arguments. The arguments
 -- are passed in a response file.
