@@ -151,6 +151,8 @@ function mingw_init() {
 
   # We always use mingw64 Python to avoid path length issues like #17483.
   export PYTHON="/mingw64/bin/python3"
+  # On the other hand, we need to use the system sphinx-build.exe as that's a "proper executable".
+  export SPHINXBUILD="/usr/bin/sphinx-build.exe"
 }
 
 # This will contain GHC's local native toolchain
