@@ -394,7 +394,7 @@ instance H.Builder Builder where
                   when (code /= ExitSuccess) $ do
                     fail "tests failed"
 
-                _  -> cmd' [path] buildArgs buildOptions
+                _  -> cmd' [path] (map convertWindowsPath buildArgs) (map convertWindowsPath buildOptions)
 
 convertWindowsPath :: FilePath -> FilePath
 convertWindowsPath (';':fp) = ':' : convertWindowsPath fp
