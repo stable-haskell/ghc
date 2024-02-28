@@ -358,7 +358,7 @@ function fetch_sphinx() {
         MSYS_*|MINGW*)
           pip uninstall -y sphinx
           pip install -v --target=$toolchain/sphinx --upgrade "sphinx==$SPHINXBUILD_VERSION"
-          cp $toolchain/sphinx/bin/sphinx-build $toolchain/sphinx/bin/sphinx-build.exe
+          cp -p $toolchain/sphinx/bin/sphinx-build $toolchain/sphinx/bin/sphinx-build.exe
 #          $PYTHON -m venv $toolchain/.venv-sphinx
 #          $toolchain/.venv-sphinx/bin/pip uninstall -y sphinx
 #          cat $toolchain/.venv-sphinx/bin/pip
@@ -536,6 +536,7 @@ function build_hadrian() {
   else
     case "$(uname)" in
         MSYS_*|MINGW*)
+          run_hadrian _build/manpage/ghc.1 -V
           run_hadrian test:all_deps reloc-binary-dist -V
           mv _build/reloc-bindist/ghc*.tar.xz "$BIN_DIST_NAME.tar.xz"
           ;;
