@@ -361,6 +361,8 @@ function fetch_sphinx() {
           cp -p $toolchain/sphinx/bin/sphinx-build $toolchain/sphinx/bin/sphinx-build.exe
           chmod +x $toolchain/sphinx/bin/sphinx-build.exe
           ls -alh $toolchain/sphinx/bin
+          ls -alh $toolchain/sphinx/
+          cat $toolchain/sphinx/bin/sphinx-build.exe
 #          $PYTHON -m venv $toolchain/.venv-sphinx
 #          $toolchain/.venv-sphinx/bin/pip uninstall -y sphinx
 #          cat $toolchain/.venv-sphinx/bin/pip
