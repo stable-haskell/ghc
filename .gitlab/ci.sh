@@ -195,7 +195,7 @@ function set_toolchain_paths() {
       CABAL="$toolchain/bin/cabal$exe"
       HAPPY="$toolchain/bin/happy$exe"
       ALEX="$toolchain/bin/alex$exe"
-      SPHINXBUILD="$toolchain/sphinx/bin/sphinx-build$exe"
+      SPHINXBUILD="/mingw64/bin/sphinx-build.exe"
       PYTHONPATH="$toolchain/sphinx"
       export PYTHONPATH
       if [ "$(uname)" = "FreeBSD" ]; then
@@ -359,8 +359,8 @@ function fetch_sphinx() {
       case "$(uname)" in
         # N.B.
         MSYS_*|MINGW*)
-          pip uninstall -y sphinx
-          pip install -v --target=$toolchain/sphinx --upgrade "sphinx==$SPHINXBUILD_VERSION"
+          /usr/bin/pip uninstall -y sphinx
+          /usr/bin/pip install -v --target=$toolchain/sphinx --upgrade "sphinx==$SPHINXBUILD_VERSION"
           cp -p $toolchain/sphinx/bin/sphinx-build $toolchain/sphinx/bin/sphinx-build.exe
           chmod +x $toolchain/sphinx/bin/sphinx-build.exe
           ls -alh $toolchain/sphinx/bin
