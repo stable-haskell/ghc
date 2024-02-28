@@ -369,6 +369,9 @@ data RealSrcSpan
         }
   deriving Eq
 
+instance NFData RealSrcSpan where
+  rnf = rwhnf -- already strict
+
 -- | StringBuffer Source Span
 data BufSpan =
   BufSpan { bufSpanStart, bufSpanEnd :: {-# UNPACK #-} !BufPos }

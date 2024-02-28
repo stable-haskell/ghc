@@ -36,6 +36,7 @@ import GHCi.UI.Monad hiding ( args, runStmt )
 import GHCi.UI.Info
 import GHCi.UI.Exception
 import GHC.Runtime.Debugger
+import GHC.Runtime.Eval (mkTopLevEnv)
 
 -- The GHC interface
 import GHC.Runtime.Interpreter
@@ -75,7 +76,7 @@ import GHC.Types.Var ( varType )
 import GHC.Iface.Syntax ( showToHeader )
 import GHC.Builtin.Names
 import GHC.Builtin.Types( stringTyCon_RDR )
-import GHC.Types.Name.Reader as RdrName ( getGRE_NameQualifier_maybes, getRdrName )
+import GHC.Types.Name.Reader as RdrName ( getGRE_NameQualifier_maybes, getRdrName, greName, globalRdrEnvElts)
 import GHC.Types.SrcLoc as SrcLoc
 import qualified GHC.Parser.Lexer as Lexer
 import GHC.Parser.Header ( toArgs )
@@ -206,7 +207,7 @@ ghciCommands = map mkCmd [
   ("browse",    keepGoing' (browseCmd False),   completeModule),
   ("browse!",   keepGoing' (browseCmd True),    completeModule),
   ("cd",        keepGoingMulti' changeDirectory,     completeFilename),
-  ("check",     keepGoing' checkModule,         completeHomeModule),
+  -- ("check",     keepGoing' checkModule,         completeHomeModule),
   ("continue",  keepGoing continueCmd,          noCompletion),
   ("cmd",       keepGoing cmdCmd,               completeExpression),
   ("def",       keepGoing (defineMacro False),  completeExpression),
@@ -1893,28 +1894,6 @@ getGhciStepIO = do
   return $ noLocA $ ExprWithTySig noAnn body tySig
 
 -----------------------------------------------------------------------------
--- :check
-
-checkModule :: GhciMonad m => String -> m ()
-checkModule m = do
-  let modl = GHC.mkModuleName m
-  ok <- handleSourceError (\e -> printErrAndMaybeExit e >> return False) $ do
-          r <- GHC.typecheckModule =<< GHC.parseModule =<< GHC.getModSummary modl
-          dflags <- getDynFlags
-          liftIO $ putStrLn $ showSDoc dflags $
-           case GHC.moduleInfo r of
-             cm | Just scope <- GHC.modInfoTopLevelScope cm ->
-                let
-                    (loc, glob) = assert (all isExternalName scope) $
-                                  partition ((== modl) . GHC.moduleName . GHC.nameModule) scope
-                in
-                        (text "global names: " <+> ppr glob) $$
-                        (text "local  names: " <+> ppr loc)
-             _ -> empty
-          return True
-  afterLoad (successIf ok) False
-
------------------------------------------------------------------------------
 -- :doc
 
 docCmd :: GHC.GhcMonad m => String -> m ()
@@ -2355,9 +2334,7 @@ typeAtCmd str = runExceptGhciMonad $ do
     (span',sample) <- exceptT $ parseSpanArg str
     infos      <- lift $ mod_infos <$> getGHCiState
     (info, ty) <- findType infos span' sample
-    let mb_rdr_env = case modinfoRdrEnv info of
-          Strict.Just rdrs -> Just rdrs
-          Strict.Nothing   -> Nothing
+    let mb_rdr_env = Just (modinfoRdrEnv info)
     lift $ printForUserGlobalRdrEnv
               mb_rdr_env
               (sep [text sample,nest 2 (dcolon <+> ppr ty)])
@@ -2643,10 +2620,16 @@ browseModule bang modl exports_only = do
     Nothing -> throwGhcException (CmdLineError ("unknown module: " ++
                                 GHC.moduleNameString (GHC.moduleName modl)))
     Just mod_info -> do
-        let names
-               | exports_only = GHC.modInfoExports mod_info
-               | otherwise    = GHC.modInfoTopLevelScope mod_info
-                                `orElse` []
+        names <-
+          if exports_only
+          then pure $ GHC.modInfoExports mod_info
+          else do
+            hsc_env <- GHC.getSession
+            mmod_env <- liftIO $ mkTopLevEnv hsc_env (moduleName modl)
+            case mmod_env of
+              Left err -> throwGhcException (CmdLineError (GHC.moduleNameString (GHC.moduleName modl) ++ " " ++ err))
+              Right mod_env -> pure $ map greName . globalRdrEnvElts $ mod_env
+        let
 
                 -- sort alphabetically name, but putting locally-defined
                 -- identifiers first. We would like to improve this; see #1799.
