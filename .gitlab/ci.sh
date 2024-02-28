@@ -140,6 +140,8 @@ function mingw_init() {
       fail "win32-init: Unknown MSYSTEM $MSYSTEM"
       ;;
   esac
+  which python
+  which pip
 
   # Bring mingw toolchain into PATH.
   # This is extracted from /etc/profile since this script inexplicably fails to
@@ -151,6 +153,7 @@ function mingw_init() {
 
   # We always use mingw64 Python to avoid path length issues like #17483.
   ls /mingw64/bin/
+  /mingw64/bin/sphinx-build.exe --version
   export PYTHON="/mingw64/bin/python3"
   export PIP="/mingw64/bin/pip"
 }
