@@ -78,10 +78,6 @@ enabledBacktraceMechanismsRef =
     unsafePerformIO $ newIORef defaultEnabledBacktraceMechanisms
 {-# NOINLINE enabledBacktraceMechanismsRef #-}
 
--- | Set how 'Control.Exception.throwIO', et al. collect backtraces.
-setEnabledBacktraceMechanisms :: EnabledBacktraceMechanisms -> IO ()
-setEnabledBacktraceMechanisms = writeIORef enabledBacktraceMechanismsRef
-
 -- | Returns the currently enabled 'BacktraceMechanism's.
 getEnabledBacktraceMechanisms :: IO EnabledBacktraceMechanisms
 getEnabledBacktraceMechanisms = readIORef enabledBacktraceMechanismsRef
