@@ -14,6 +14,8 @@ import Unsafe.Coerce (unsafeCoerce)
 nats :: [Integer]
 nats = [0 .. ]
 
+-- foreign import ccall "performBlockingMajorGC" performBlockingMajorGC :: IO ()
+
 -- The key of a 'StaticPtr' to some CAF.
 nats_key :: StaticKey
 nats_key = staticKey (static nats :: StaticPtr [Integer])
@@ -21,13 +23,15 @@ nats_key = staticKey (static nats :: StaticPtr [Integer])
 main = do
   let z = nats !! 400
   print z
-  performGC
+  performBlockingMajorGC
+  --print "done gc"
   addFinalizer z (putStrLn "finalizer z")
   print z
-  performGC
+  performBlockingMajorGC
+  --print "done gc"
   threadDelay 1000000
   Just p <- unsafeLookupStaticPtr nats_key
   print (deRefStaticPtr (unsafeCoerce p) !! 800 :: Integer)
   -- Uncommenting the next line keeps 'nats' alive and would prevent a segfault
   -- if 'nats' were garbage collected.
-  -- print (nats !! 900)
+  print (nats !! 900)
