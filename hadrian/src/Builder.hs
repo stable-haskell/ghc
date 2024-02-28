@@ -376,6 +376,9 @@ instance H.Builder Builder where
 
                 Tar _ -> cmd' buildOptions [path] buildArgs
 
+                Sphinx {} ->
+                  cmd' ["perl", path] buildArgs buildOptions
+
                 -- RunTest produces a very large amount of (colorised) output;
                 -- Don't attempt to capture it.
                 Testsuite RunTest -> do
