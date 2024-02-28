@@ -377,7 +377,7 @@ instance H.Builder Builder where
 
                 Tar _ -> cmd' buildOptions [path] buildArgs
 
-                Sphinx {} -> do
+{-                Sphinx {} -> do
                   let unpack = fromMaybe . error $ "Cannot find path to builder "
                                 ++ quote "sphinx-build"  ++ " Did you skip configure?"
                   path <- unpack <$> lookupValue configFile "sphinx-build"
@@ -386,6 +386,7 @@ instance H.Builder Builder where
                   liftIO (print (convertWindowsPath <$> mpp))
 
                   cmd' ["perl", path] [AddEnv "PYTHONPATH" (convertWindowsPath pp) |  Just pp <- [mpp]] (map convertWindowsPath buildArgs) buildOptions
+                  -}
 
                 -- RunTest produces a very large amount of (colorised) output;
                 -- Don't attempt to capture it.
