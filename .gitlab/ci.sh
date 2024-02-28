@@ -149,9 +149,7 @@ function mingw_init() {
   PATH="$MINGW_MOUNT_POINT/bin:$PATH"
 
   # We always use mingw64 Python to avoid path length issues like #17483.
-  ls /mingw64/bin/
   export PYTHON="/mingw64/bin/python3"
-  export PIP="/mingw64/bin/pip"
 }
 
 # This will contain GHC's local native toolchain
@@ -160,7 +158,7 @@ mkdir -p "$toolchain/bin"
 PATH="$toolchain/bin:$PATH"
 
 export METRICS_FILE="$TOP/performance-metrics.tsv"
-c
+
 cores="$(mk/detect-cpu-count.sh)"
 
 # Use a local temporary directory to ensure that concurrent builds don't
@@ -501,7 +499,6 @@ function build_hadrian() {
   else
     case "$(uname)" in
         MSYS_*|MINGW*)
-          run_hadrian _build/manpage/ghc.1 -V
           run_hadrian test:all_deps reloc-binary-dist -V
           mv _build/reloc-bindist/ghc*.tar.xz "$BIN_DIST_NAME.tar.xz"
           ;;
