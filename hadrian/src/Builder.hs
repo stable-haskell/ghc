@@ -46,6 +46,7 @@ import GHC.ResponseFile
 import GHC.Toolchain (Target(..))
 import qualified GHC.Toolchain as Toolchain
 import GHC.Toolchain.Program
+import System.Environment
 
 -- | C compiler can be used in two different modes:
 -- * Compile or preprocess a source file.
@@ -380,6 +381,7 @@ instance H.Builder Builder where
                   let unpack = fromMaybe . error $ "Cannot find path to builder "
                                 ++ quote "sphinx-build"  ++ " Did you skip configure?"
                   path <- unpack <$> lookupValue configFile "sphinx-build"
+                  liftIO (lookupEnv "PYTHONPATH" >>= print)
                   cmd' ["perl", path] buildArgs buildOptions
 
                 -- RunTest produces a very large amount of (colorised) output;
