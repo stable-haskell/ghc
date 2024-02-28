@@ -150,7 +150,6 @@ function mingw_init() {
 
   # We always use mingw64 Python to avoid path length issues like #17483.
   ls /mingw64/bin/
-  /mingw64/bin/sphinx-build.exe --version
   export PYTHON="/mingw64/bin/python3"
   export PIP="/mingw64/bin/pip"
 }
@@ -161,7 +160,7 @@ mkdir -p "$toolchain/bin"
 PATH="$toolchain/bin:$PATH"
 
 export METRICS_FILE="$TOP/performance-metrics.tsv"
-
+c
 cores="$(mk/detect-cpu-count.sh)"
 
 # Use a local temporary directory to ensure that concurrent builds don't
@@ -193,7 +192,6 @@ function set_toolchain_paths() {
       HAPPY="$toolchain/bin/happy$exe"
       ALEX="$toolchain/bin/alex$exe"
       SPHINXBUILD="/mingw64/bin/sphinx-build.exe"
-      PYTHONPATH="$toolchain/sphinx"
       export PYTHONPATH
       if [ "$(uname)" = "FreeBSD" ]; then
         GHC=/usr/local/bin/ghc
@@ -344,51 +342,12 @@ function fetch_cabal() {
   fi
 }
 
-function fetch_sphinx() {
-  if [ ! -e "$SPHINXBUILD" ]; then
-      local v="$SPHINXBUILD_VERSION"
-      if [[ -z "$v" ]]; then
-          fail "neither SPHINXBUILD nor SPHINXBUILD__VERSION are not set"
-      fi
-
-      start_section "fetch sphinx"
-      info "Building sphinx $SPHINXBUILD_VERSION..."
-      case "$(uname)" in
-        # N.B.
-        MSYS_*|MINGW*)
-          /usr/bin/pip uninstall -y sphinx
-          /usr/bin/pip install -v --target=$toolchain/sphinx --upgrade "sphinx==$SPHINXBUILD_VERSION"
-          cp -p $toolchain/sphinx/bin/sphinx-build $toolchain/sphinx/bin/sphinx-build.exe
-          chmod +x $toolchain/sphinx/bin/sphinx-build.exe
-          ls -alh $toolchain/sphinx/bin
-          ls -alh $toolchain/sphinx/
-          cat $toolchain/sphinx/bin/sphinx-build.exe
-#          $PYTHON -m venv $toolchain/.venv-sphinx
-#          $toolchain/.venv-sphinx/bin/pip uninstall -y sphinx
-#          cat $toolchain/.venv-sphinx/bin/pip
-#          cat $toolchain/.venv-sphinx/bin/python
-#          info "Building sphinx2 $SPHINXBUILD_VERSION..."
-#          $toolchain/.venv-sphinx/bin/pip install -vvv --upgrade "sphinx==$SPHINXBUILD_VERSION"
-#          $toolchain/.venv-sphinx/bin/pip show -v sphinx
-#          info "Building sphinx3 $SPHINXBUILD_VERSION..."
-#          ls $toolchain/.venv-sphinx
-#          ls $toolchain/.venv-sphinx/lib
-#          ls $toolchain/.venv-sphinx/bin
-          ;;
-      esac
-      end_section "fetch sphinx"
-  else
-    info "SPHINXBUILD: $SPHINXBUILD"
-  fi
-}
-
 # For non-Docker platforms we prepare the bootstrap toolchain
 # here. For Docker platforms this is done in the Docker image
 # build.
 function setup_toolchain() {
   fetch_ghc
   fetch_cabal
-  fetch_sphinx
   cabal_update
 
   local cabal_install="$CABAL v2-install \
