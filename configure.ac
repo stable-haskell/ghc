@@ -778,6 +778,7 @@ dnl ** check for Sphinx toolchain
 AC_PATH_PROG(SPHINXBUILD,sphinx-build)
 echo "SPHINXBUILD: $SPHINXBUILD"
 "$SPHINXBUILD" --version
+sphinx-build.exe --version
 AC_CACHE_CHECK([for version of sphinx-build], fp_cv_sphinx_version,
 changequote(, )dnl
 [if test -n "$SPHINXBUILD"; then
