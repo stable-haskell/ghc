@@ -462,10 +462,12 @@ static OpenedDLL* opened_dlls = NULL;
 /* Adds a DLL instance to the list of DLLs in which to search for symbols. */
 static void addDLLHandle(pathchar* dll_name, HINSTANCE instance) {
 
+    IF_DEBUG(linker, debugBelch("addDLLHandle(%" PATH_FMT ")...\n", dll_name));
     /* At this point, we actually know what was loaded.
        So bail out if it's already been loaded.  */
     if (checkIfDllLoaded(instance))
     {
+        IF_DEBUG(linker, debugBelch("already loaded: addDLLHandle(%" PATH_FMT ")\n", dll_name));
         return;
     }
 
@@ -500,7 +502,7 @@ static void addDLLHandle(pathchar* dll_name, HINSTANCE instance) {
     do {
         pathchar* module = mkPath((char*)(BYTE *)instance + imports->Name);
         HINSTANCE module_instance = GetModuleHandleW(module);
-        if (0 != wcsncmp(module, ms_dll, len)
+        if ((true || 0 != wcsncmp(module, ms_dll, len))
             && module_instance
             && !checkIfDllLoaded(module_instance))
         {
@@ -511,6 +513,7 @@ static void addDLLHandle(pathchar* dll_name, HINSTANCE instance) {
         stgFree(module);
         imports++;
     } while (imports->Name);
+    IF_DEBUG(linker, debugBelch("done: addDLLHandle(%" PATH_FMT ")\n", dll_name));
 }
 
 static OpenedDLL* findLoadedDll(HINSTANCE instance)
