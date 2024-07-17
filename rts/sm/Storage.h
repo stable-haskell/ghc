@@ -8,6 +8,9 @@
 
 #pragma once
 
+#define ACQUIRE_ALLOC_BLOCK_SPIN_LOCK() ACQUIRE_SPIN_LOCK(&gc_alloc_block_sync)
+#define RELEASE_ALLOC_BLOCK_SPIN_LOCK() RELEASE_SPIN_LOCK(&gc_alloc_block_sync)
+
 #include "Capability.h"
 
 #include "BeginPrivate.h"
@@ -47,10 +50,6 @@ extern Mutex sm_mutex;
 // needed for HEAP_ALLOCED below
 extern SpinLock gc_alloc_block_sync;
 #endif
-
-#define ACQUIRE_ALLOC_BLOCK_SPIN_LOCK() ACQUIRE_SPIN_LOCK(&gc_alloc_block_sync)
-#define RELEASE_ALLOC_BLOCK_SPIN_LOCK() RELEASE_SPIN_LOCK(&gc_alloc_block_sync)
-
 
 /* -----------------------------------------------------------------------------
    The write barrier for MVARs and TVARs
