@@ -319,11 +319,19 @@ relocateObjectCodeAarch64(ObjectCode * oc) {
         for(unsigned i=0; i < relaTab->n_relocations; i++) {
 
             Elf_Rela *rel = &relaTab->relocations[i];
+#if defined(arm_HOST_OS)
+            if(ELF64_R_TYPE(rel->r_info) == COMPAT_R_AARCH64_NONE)
+                continue;
+#endif
 
             ElfSymbol *symbol =
                     findSymbol(oc,
                                relaTab->sectionHeader->sh_link,
+#if defined(arm_HOST_OS)
+                               ELF64_R_SYM(rel->r_info));
+#else
                                ELF64_R_SYM((Elf64_Xword)rel->r_info));
+#endif
 
             CHECK(0x0 != symbol);
             CHECK(0x0 != symbol->addr);
