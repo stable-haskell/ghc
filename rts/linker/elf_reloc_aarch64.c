@@ -334,7 +334,12 @@ relocateObjectCodeAarch64(ObjectCode * oc) {
 #endif
 
             CHECK(0x0 != symbol);
+#if defined(arm_HOST_OS)
+            if(0x0 == symbol->addr)
+                barf("0x0 address for %s + %d of type %d in %s for relocation %d in section %d of kind: %d\n", symbol->name, rel->r_addend, ELF64_R_TYPE((Elf64_Xword)rel->r_info), OC_INFORMATIVE_FILENAME(oc), i, relaTab->targetSectionIndex, oc->sections[relaTab->targetSectionIndex].kind);
+#else
             CHECK(0x0 != symbol->addr);
+#endif
 
             /* take explicit addend */
             int64_t addend = rel->r_addend;
