@@ -424,6 +424,16 @@ Mutex dl_mutex; // mutex to protect dlopen/dlerror critical section
 #endif
 #endif
 
+#if defined(arm_HOST_ARCH)
+    RtsSymbolVal* __attribute__((weak)) iserv_syms() {
+        return (RtsSymbolVal[]){
+            { .lbl = NULL
+            , .addr = NULL
+            , .strength = STRENGTH_NORMAL
+            , .type = SYM_TYPE_CODE } /* sentinel */
+        };
+    }
+#endif
 void initLinker (void)
 {
     // default to retaining CAFs for backwards compatibility.  Most
@@ -471,6 +481,24 @@ initLinker_ (int retain_cafs)
         }
         IF_DEBUG(linker, debugBelch("initLinker: inserting rts symbol %s, %p\n", sym->lbl, sym->addr));
     }
+    /* Add symbols e.g. iserv or some other process wants to insert
+     * as well. Mostly libc or similar. iserv_syms() is a weakly defined
+     * symbol in the rts, that can be overrided by linking in an object with
+     * a corresponding definition later.
+     */
+#if defined(arm_HOST_ARCH)
+    IF_DEBUG(linker, debugBelch("checking iserv_syms\n"));
+    if(iserv_syms && iserv_syms() != NULL) for(RtsSymbolVal *sym = iserv_syms(); sym->lbl != NULL; sym++) {
+        IF_DEBUG(linker, debugBelch("adding iserv symbol\n"));
+        if (! ghciInsertSymbolTable(WSTR("(GHCi built-in symbols)"),
+                                    symhash, sym->lbl, sym->addr,
+                                    sym->strength, sym->type, NULL)) {
+            barf("ghciInsertSymbolTable failed");
+        }
+        IF_DEBUG(linker, debugBelch("initLinker: inserting rts symbol %s, %p\n", sym->lbl, sym->addr));
+    }
+    IF_DEBUG(linker, debugBelch("done with iserv_syms\n"));
+#endif
 
     // Redirect newCAF to newRetainedCAF if retain_cafs is true.
     if (! ghciInsertSymbolTable(WSTR("(GHCi built-in symbols)"), symhash,
