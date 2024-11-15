@@ -48,4 +48,4 @@ jobs:
 
     - name: Build the bindist
       run: |
-        ./hadrian/build --flavour=release binary-dist-dir
+        ./hadrian/build --flavour=release -j binary-dist-dir
