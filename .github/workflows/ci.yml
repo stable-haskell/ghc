@@ -32,6 +32,11 @@ jobs:
         cabal-version: "latest"
         cabal-update: true
 
+    - name: Install Alex and Happy
+      run: |
+        cabal install alex
+        cabal install happy
+
     - name: Configure the build
       run: |
         ./boot
