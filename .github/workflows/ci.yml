@@ -42,6 +42,10 @@ jobs:
         ./boot
         ./configure
 
-    - name: Build
+    - name: Build Hadrian
+      run: |
+        ./hadrian/build --version
+
+    - name: Build the bindist
       run: |
         ./hadrian/build --flavour=release binary-dist-dir
