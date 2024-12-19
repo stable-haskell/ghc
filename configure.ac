@@ -445,10 +445,12 @@ AC_SUBST([CmmCPPCmd])
 AC_SUBST([CmmCPPArgs])
 AC_SUBST([CmmCPPSupportsG0])
 
-FP_SET_CFLAGS_C99([CC],[CFLAGS],[CPPFLAGS])
-FP_SET_CFLAGS_C99([CC_STAGE0],[CONF_CC_OPTS_STAGE0],[CONF_CPP_OPTS_STAGE0])
-FP_SET_CFLAGS_C99([CC],[CONF_CC_OPTS_STAGE1],[CONF_CPP_OPTS_STAGE1])
-FP_SET_CFLAGS_C99([CC],[CONF_CC_OPTS_STAGE2],[CONF_CPP_OPTS_STAGE2])
+AC_PROG_CC
+
+dnl Autoconf will configure the latest standard. We require at least c99.
+AS_CASE([$ac_prog_cc_stdc],
+  [c89], [AC_MSG_ERROR([C99-compatible compiler needed])]
+)
 
 dnl ** Do we have a compatible emsdk version?
 dnl --------------------------------------------------------------
