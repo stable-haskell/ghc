@@ -88,21 +88,10 @@
 #endif
 
 #if defined(solaris2_HOST_OS)
-/* USE_TIMER_CREATE is usually disabled for Solaris. In fact it is
-   supported well on this OS, but requires additional privilege. When
-   user does not have it, then the testing configure program fails
-   which results in USE_TIMER_CREATE not defined.
-   On the other hand when we cross-compile, then we optimistically
-   assume usage of timer_create function. The problem is that if we
-   cross compile for example from i386-solaris2 to x86_64-solaris2,
-   then the build fails with error like this:
-
-ghc-stage2: timer_create: Not owner
-
-   which happens on first ghc-stage2 invocation. So to support
-   cross-compilation to Solaris we manually undefine USE_TIMER_CREATE
+/* While timer_create is supported well on Solaris, it requires
+   additional privilege. So we manually undefine HAVE_TIMER_CREATE
    here */
-#undef USE_TIMER_CREATE
+#undef HAVE_TIMER_CREATE
 #endif /* solaris2_HOST_OS */
 
 // Select the variant to use
@@ -110,7 +99,7 @@ ghc-stage2: timer_create: Not owner
 #include "ticker/TimerFd.c"
 #elif defined(USE_PTHREAD_FOR_ITIMER)
 #include "ticker/Pthread.c"
-#elif defined(USE_TIMER_CREATE)
+#elif defined(HAVE_TIMER_CREATE)
 #include "ticker/TimerCreate.c"
 #else
 #include "ticker/Setitimer.c"
