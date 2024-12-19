@@ -945,10 +945,6 @@ AC_SUBST(BUILD_MAN)
 AC_SUBST(BUILD_SPHINX_HTML)
 AC_SUBST(BUILD_SPHINX_PDF)
 
-if grep '	' compiler/ghc.cabal.in 2>&1 >/dev/null; then
-   AC_MSG_ERROR([compiler/ghc.cabal.in contains tab characters; please remove them])
-fi
-
 # We got caught by
 #     http://savannah.gnu.org/bugs/index.php?1516
 #     $(eval ...) inside conditionals causes errors
