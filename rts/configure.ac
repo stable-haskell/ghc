@@ -239,7 +239,8 @@ FP_MUSTTAIL
 
 dnl ** check for librt
 AC_CHECK_FUNCS(clock_gettime timer_settime)
-FP_CHECK_TIMER_CREATE
+
+AC_CHECK_FUNC([timer_create],[HAVE_timer_create=yes],[HAVE_timer_create=no])
 
 dnl ** check for Apple's "interesting" long double compatibility scheme
 AC_MSG_CHECKING(for printf\$LDBLStub)
