@@ -466,13 +466,7 @@ findInstalledHomeModule fc fopts home_unit mod_name = do
           | finder_lookupHomeInterfaces fopts = (hi_dir_path, hi_exts)
           | otherwise                         = (home_path, source_exts)
    in
-
-   -- special case for GHC.Prim; we won't find it in the filesystem.
-   -- This is important only when compiling the base package (where GHC.Prim
-   -- is a home module).
-   if mod `installedModuleEq` gHC_PRIM
-         then return (InstalledFound (error "GHC.Prim ModLocation"))
-         else searchPathExts search_dirs mod exts
+   searchPathExts search_dirs mod exts
 
 -- | Prepend the working directory to the search path.
 augmentImports :: OsPath -> [OsPath] -> [OsPath]

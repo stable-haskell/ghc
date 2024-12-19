@@ -80,6 +80,9 @@ module GHC.Driver.Session (
         safeDirectImpsReq, safeImplicitImpsReq,
         unsafeFlags, unsafeFlagsForInfer,
 
+        -- ** base
+        baseUnitId,
+
         -- ** System tool settings and locations
         Settings(..),
         sProgramName,
@@ -390,6 +393,7 @@ settings :: DynFlags -> Settings
 settings dflags = Settings
   { sGhcNameVersion = ghcNameVersion dflags
   , sFileSettings = fileSettings dflags
+  , sUnitSettings = unitSettings dflags
   , sTargetPlatform = targetPlatform dflags
   , sToolSettings = toolSettings dflags
   , sPlatformMisc = platformMisc dflags
@@ -487,6 +491,10 @@ opt_las               :: DynFlags -> [String]
 opt_las dflags = toolSettings_opt_las $ toolSettings dflags
 opt_i                 :: DynFlags -> [String]
 opt_i dflags= toolSettings_opt_i $ toolSettings dflags
+
+
+setBaseUnitId :: String -> DynP ()
+setBaseUnitId s = upd $ \d -> d { unitSettings = UnitSettings (stringToUnitId s) }
 
 -----------------------------------------------------------------------------
 
@@ -2053,6 +2061,7 @@ package_flags_deps = [
       (NoArg (setGeneralFlag Opt_DistrustAllPackages))
   , make_ord_flag defFlag "trust"                 (HasArg trustPackage)
   , make_ord_flag defFlag "distrust"              (HasArg distrustPackage)
+  , make_ord_flag defFlag "base-unit-id"          (HasArg setBaseUnitId)
   ]
   where
     setPackageEnv env = upd $ \s -> s { packageEnv = Just env }
@@ -2348,7 +2357,6 @@ wWarningFlagsDeps = [minBound..maxBound] >>= \x -> case x of
   Opt_WarnIncompleteExportWarnings -> warnSpec x
   Opt_WarnIncompleteRecordSelectors -> warnSpec x
   Opt_WarnDataKindsTC -> warnSpec x
-  Opt_WarnDeprecatedTypeAbstractions -> warnSpec x
   Opt_WarnDefaultedExceptionContext -> warnSpec x
   Opt_WarnViewPatternSignatures -> warnSpec x
 
@@ -2925,12 +2933,17 @@ unSetExtensionFlag f = upd (unSetExtensionFlag' f)
 setExtensionFlag', unSetExtensionFlag' :: LangExt.Extension -> DynFlags -> DynFlags
 setExtensionFlag' f dflags = foldr ($) (xopt_set dflags f) deps
   where
-    deps = [ if turn_on then setExtensionFlag'   d
-                        else unSetExtensionFlag' d
-           | (f', turn_on, d) <- impliedXFlags, f' == f ]
+    deps :: [DynFlags -> DynFlags]
+    deps = [ setExtension d
+           | (f', d) <- impliedXFlags, f' == f ]
         -- When you set f, set the ones it implies
         -- NB: use setExtensionFlag recursively, in case the implied flags
         --     implies further flags
+
+    setExtension :: OnOff LangExt.Extension -> DynFlags -> DynFlags
+    setExtension = \ case
+      On extension -> setExtensionFlag' extension
+      Off extension -> unSetExtensionFlag' extension
 
 unSetExtensionFlag' f dflags = xopt_unset dflags f
    -- When you un-set f, however, we don't un-set the things it implies
@@ -3153,7 +3166,7 @@ setMainIs arg = parse parse_main_f arg
 
     -- dummy parser state.
     p_state str = initParserState
-              (mkParserOpts mempty emptyDiagOpts [] False False False True)
+              (mkParserOpts mempty emptyDiagOpts False False False True)
               (stringToStringBuffer str)
               (mkRealSrcLoc (mkFastString []) 1 1)
 

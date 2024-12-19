@@ -1,22 +1,25 @@
+{-# LANGUAGE Safe #-}
 {-# LANGUAGE NoImplicitPrelude #-}
 
 -----------------------------------------------------------------------------
 -- |
--- Module      :  GHC.Internal.Data.Enum
+-- Module      :  Data.Bounded
 -- Copyright   :  (c) The University of Glasgow, 1992-2002
 -- License     :  see libraries/base/LICENSE
 --
--- Maintainer  :  ghc-devs@haskell.org
+-- Maintainer  :  cvs-ghc@haskell.org
 -- Stability   :  stable
 -- Portability :  non-portable (GHC extensions)
 --
--- The 'Enum' and 'Bounded' classes.
+-- The 'Bounded' class.
+--
+-- @since 4.22.0.0
 --
 -----------------------------------------------------------------------------
 
-module GHC.Internal.Data.Enum
+module Data.Bounded
     ( Bounded(..)
-    , Enum(..)
     ) where
 
-import GHC.Internal.Enum
+import GHC.Enum
+

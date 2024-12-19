@@ -20,6 +20,11 @@ Language
   as serious as a warning about missing patterns from a function definition, perhaps even
   more so, since it is invisible in the source program.
 
+* The combination of :extension:`ScopedTypeVariables` and :extension:`TypeApplications`
+  no longer enables type applications in patterns, which now always requires
+  :extension:`TypeAbstractions`. The warning flag``deprecated-type-abstractions``
+  has also been removed from the compiler.
+
 Compiler
 ~~~~~~~~
 
@@ -57,6 +62,16 @@ Cmm
 
 ``ghc-experimental`` library
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+- ``ghc-experimental`` now exposes ``GHC.RTS.Flags`` and ``GHC.Stats`` as
+  ``GHC.RTS.Flags.Experimental`` and ``GHC.Stats.Experimental``. These are
+  *also* exposed in ``base``, however the ``base`` versions will be deprecated as
+  part of the split base project. See `CLC proposal 289
+  <https://github.com/haskell/core-libraries-committee/issues/289>`__.
+  Downstream consumers of these flags are encouraged to migrate to the
+  ``ghc-experimental`` versions.
+
+
 
 ``template-haskell`` library
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~

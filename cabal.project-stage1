@@ -1,0 +1,24 @@
+-- for some reason it doesn't work...
+--with-compiler: ./_build/stage0/bin/ghc
+--with-hc-pkg: ./_build/stage0/bin/ghc-pkg
+package-dbs: clear, global
+
+packages:
+  ./_build/stage1/src/libraries/rts
+  ./_build/stage1/src/libraries/ghc-prim
+
+benchmarks: False
+tests: False
+allow-boot-library-installs: True
+active-repositories: :none
+
+program-options
+  ghc-options: -fhide-source-paths -j
+
+package *
+  library-vanilla: True
+  shared: False
+  executable-profiling: False
+  executable-dynamic: False
+  executable-static: False
+  ghc-options: -fhide-source-paths -j
