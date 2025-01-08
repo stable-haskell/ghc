@@ -3369,8 +3369,6 @@ topNoLayoutContainsCommas (ALRNoLayout b _ : _) = b
 -- If the generated alexScan/alexScanUser functions are called multiple times
 -- in this file, alexScanUser gets broken out into a separate function and
 -- increases memory usage. Make sure GHC inlines this function and optimizes it.
--- https://github.com/haskell/alex/pull/262
-{-# INLINE alexScanUser #-}
 
 lexToken :: P (PsLocated Token)
 lexToken = do
