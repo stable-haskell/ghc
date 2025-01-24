@@ -24,13 +24,12 @@ jobs:
       with:
         submodules: "recursive"
 
-    - uses: haskell-actions/setup@v2
-      id: setup
-      name: Setup Haskell tools
+    - uses: haskell/ghcup-setup@v1
       with:
-        ghc-version: ${{ matrix.ghc }}
-        cabal-version: "latest"
-        cabal-update: true
+        ghc: ${{ matrix.ghc }}
+        cabal: latest
+
+    - run: cabal update
 
     - name: Build patched cabal
       run: make cabal
