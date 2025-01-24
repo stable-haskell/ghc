@@ -31,17 +31,24 @@ import System.Directory
 import System.Environment
 import System.FilePath
 
+applyFindProgramVersion :: Program -> Program
+applyFindProgramVersion p =
+    p{programFindVersion = findProgramVersion "--numeric-version" id}
+
 ghc0Program :: Program
-ghc0Program =
-    (simpleProgram "ghc")
-        { programFindVersion = findProgramVersion "--numeric-version" id
-        }
+ghc0Program = simpleProgram "ghc"
+
+ghcPkg0Program :: Program
+ghcPkg0Program = simpleProgram "ghc-pkg"
+
+ghc1Program :: Program
+ghc1Program = simpleProgram "stage1-ghc"
+
+ghcPkg1Program :: Program
+ghcPkg1Program = simpleProgram "stage1-ghc-pkg"
 
 cabalProgram :: Program
-cabalProgram =
-    (simpleProgram "cabal")
-        { programFindVersion = findProgramVersion "--numeric-version" id
-        }
+cabalProgram = simpleProgram "cabal"
 
 gitProgram :: Program
 gitProgram = simpleProgram "git"
@@ -50,7 +57,18 @@ pythonProgram :: Program
 pythonProgram = simpleProgram "python"
 
 defaultProgramDb :: ProgramDb
-defaultProgramDb = addKnownPrograms [ghc0Program, cabalProgram] emptyProgramDb
+defaultProgramDb =
+    addKnownPrograms
+        ( map
+            applyFindProgramVersion
+            [ cabalProgram
+            , ghc0Program
+            , ghcPkg0Program
+            , ghc1Program
+            , ghcPkg1Program
+            ]
+        )
+        emptyProgramDb
 
 requireProgram' :: Verbosity -> MVar ProgramDb -> Program -> IO ConfiguredProgram
 requireProgram' verbosity progdb program =
@@ -64,34 +82,31 @@ main :: IO ()
 main = do
     let verbosity = verboseNoWrap Verbosity.verbose
 
-    progdb <- newMVar defaultProgramDb
+    progdb <-
+        newMVar $
+            setProgramSearchPath (ProgramSearchPathDir "_build/stage0/bin" : defaultProgramSearchPath) $
+                defaultProgramDb
+
     lookupEnv "GHC" >>= userMaybeSpecifyPath' progdb "ghc"
     lookupEnv "CABAL" >>= userMaybeSpecifyPath' progdb "cabal"
 
-    modifyMVar_ progdb (configureAllKnownPrograms verbosity)
-    ghc0 <- requireProgram' verbosity progdb ghc0Program
-    cabal <- requireProgram' verbosity progdb cabalProgram
+    buildGhcStage1 verbosity progdb defaultGhcBuildOptions "_build/stage0/"
 
-    notice verbosity $ "Bootstrapping GHC path: " ++ show (programPath ghc0)
-    notice verbosity $ "Bootstrapping GHC version: " ++ show (programVersion ghc0)
-
-    notice verbosity "Building stage1 GHC program and utility programs"
-    buildGhcStage1 verbosity progdb defaultGhcBuildOptions cabal ghc0 "_build/stage0/"
-
-    ghc1 <- requireProgram' verbosity progdb (simpleProgram "_build/stage0/bin/ghc")
-    ghcPkg1 <- requireProgram' verbosity progdb (simpleProgram "_build/stage0/bin/ghc-pkg")
-    deriveConstants <- requireProgram' verbosity progdb (simpleProgram "_build/stage0/bin/deriveConstants")
-    genapply <- requireProgram' verbosity progdb (simpleProgram "_build/stage0/bin/genapply")
-    genprimop <- requireProgram' verbosity progdb (simpleProgram "_build/stage0/bin/genprimopcode")
-
-    notice verbosity "Building boot libraries with stage1 compiler..."
-    buildBootLibraries verbosity progdb ghc1 ghcPkg1 deriveConstants genapply genprimop defaultGhcBuildOptions "_build/stage1/"
+    buildBootLibraries verbosity progdb defaultGhcBuildOptions "_build/stage1/"
 
     notice verbosity "Done"
 
 -- | Build stage1 GHC program
-buildGhcStage1 :: Verbosity -> MVar ProgramDb -> GhcBuildOptions -> ConfiguredProgram -> ConfiguredProgram -> FilePath -> IO ()
-buildGhcStage1 verbosity progdb opts cabal ghc0 dst = do
+buildGhcStage1 :: Verbosity -> MVar ProgramDb -> GhcBuildOptions -> FilePath -> IO ()
+buildGhcStage1 verbosity progdb opts dst = do
+    notice verbosity "Building stage1 GHC program and utility programs"
+
+    cabal <- requireProgram' verbosity progdb cabalProgram
+    ghc0 <- requireProgram' verbosity progdb ghc0Program
+
+    notice verbosity $ "Bootstrapping GHC path: " ++ show (programPath ghc0)
+    notice verbosity $ "Bootstrapping GHC version: " ++ show (programVersion ghc0)
+
     let src = dst </> "src"
     prepareGhcSources verbosity progdb opts src
 
@@ -169,26 +184,31 @@ buildGhcStage1 verbosity progdb opts cabal ghc0 dst = do
           "allow-newer: ghc-boot-th"
         ]
 
-    runProgram verbosity (cabal{programOverrideEnv = [("HADRIAN_SETTINGS", Just stage1_ghc_boot_settings)]}) 
-            [ "install"
-            , "--project-file=" ++ cabal_project_path
-            , "--builddir=" ++ builddir
-            , "-j"
-            , "--with-compiler=" ++ programPath ghc0
-            , "--installdir=" ++ (dst </> "bin") 
-            , -- the targets
-              "ghc-bin:ghc"
-            , "ghc-pkg:ghc-pkg"
-            , "genprimopcode:genprimopcode"
-            , "deriveConstants:deriveConstants"
-            , "genapply:genapply"
-            ]
+    dst_absolute <- makeAbsolute dst
+    runProgram
+        verbosity
+        (cabal{programOverrideEnv = [("HADRIAN_SETTINGS", Just stage1_ghc_boot_settings)]})
+        [ "install"
+        , "--project-file=" ++ cabal_project_path
+        , "--builddir=" ++ builddir
+        , "-j"
+        , "--with-compiler=" ++ programPath ghc0
+        , "--installdir=" ++ (dst_absolute </> "bin")
+        , "--overwrite-policy=always"
+        , "--program-prefix=stage1-"
+        , -- the targets
+          "ghc-bin:ghc"
+        , "ghc-pkg:ghc-pkg"
+        , "genprimopcode:genprimopcode"
+        , "deriveConstants:deriveConstants"
+        , "genapply:genapply"
+        ]
 
     -- initialize empty global package database
     pkgdb <- makeAbsolute (dst </> "pkgs")
 
-    ghcpkg <- requireProgram' verbosity progdb $ simpleProgram (dst </> "bin/ghc-pkg")
-    initEmptyDB verbosity ghcpkg pkgdb
+    ghcPkg1 <- requireProgram' verbosity progdb ghcPkg1Program
+    initEmptyDB verbosity ghcPkg1 pkgdb
 
     -- generate settings based on stage1 compiler settings
     createDirectoryIfMissing True (dst </> "lib")
@@ -197,7 +217,7 @@ buildGhcStage1 verbosity progdb opts cabal ghc0 dst = do
 
     -- try to run the stage1 compiler (no package db yet, so just display the
     -- version)
-    ghc1 <- requireProgram' verbosity progdb $ simpleProgram (dst </> "bin/ghc")
+    ghc1 <- requireProgram' verbosity progdb ghcPkg1Program
     print ghc1
 
 -- TODO:
@@ -382,20 +402,18 @@ makeStage1Settings in_settings = out_settings
 buildBootLibraries ::
     Verbosity ->
     MVar ProgramDb ->
-    -- | ghc
-    ConfiguredProgram ->
-    -- | ghc-pkg
-    ConfiguredProgram ->
-    -- | derive_constants
-    ConfiguredProgram ->
-    -- | genapply
-    ConfiguredProgram ->
-    -- | genprimop
-    ConfiguredProgram ->
     GhcBuildOptions ->
     FilePath ->
     IO ()
-buildBootLibraries verbosity progdb ghc ghcpkg derive_constants genapply genprimop opts dst = do
+buildBootLibraries verbosity progdb opts dst = do
+    notice verbosity "Building boot libraries with stage1 compiler..."
+
+    ghc <- requireProgram' verbosity progdb ghc1Program
+    ghcPkg <- requireProgram' verbosity progdb ghcPkg1Program
+    deriveConstants <- requireProgram' verbosity progdb (simpleProgram "stage1-deriveConstants")
+    genapply <- requireProgram' verbosity progdb (simpleProgram "stage1-genapply")
+    genprimop <- requireProgram' verbosity progdb (simpleProgram "stage1-genprimopcode")
+
     src <- makeAbsolute (dst </> "src")
     prepareGhcSources verbosity progdb opts src
 
@@ -467,11 +485,11 @@ buildBootLibraries verbosity progdb ghc ghcpkg derive_constants genapply genprim
         cabal
         [ "build"
         , "--project-file=" ++ cabal_project_rts_path
-        , "rts"
         , "--with-compiler=" ++ programPath ghc
-        , "--with-hc-pkg=" ++ programPath ghcpkg
+        , "--with-hc-pkg=" ++ programPath ghcPkg
         , "--ghc-options=\"-ghcversion-file=" ++ ghcversionh ++ "\""
         , "--builddir=" ++ build_dir
+        , "rts"
         ]
 
     ghcplatform_dir <- takeDirectory <$> getSimpleProgramOutput verbosity "find" ["build_dir", "-name", "ghcplatform.h"]
@@ -480,7 +498,7 @@ buildBootLibraries verbosity progdb ghc ghcpkg derive_constants genapply genprim
     withSystemTempDirectory "derive-constants" $ \tmp_dir -> do
         runProgram
             verbosity
-            derive_constants
+            deriveConstants
             [ "--gen-header"
             , "-o"
             , derived_constants
@@ -634,7 +652,7 @@ buildBootLibraries verbosity progdb ghc ghcpkg derive_constants genapply genprim
         , -- [ "build"
           "--project-file=" ++ cabal_project_bootlibs_path
         , "--with-compiler=" ++ programPath ghc
-        , "--with-hc-pkg=" ++ programPath ghcpkg
+        , "--with-hc-pkg=" ++ programPath ghcPkg
         , "--ghc-options=\"-ghcversion-file=" ++ ghcversionh ++ "\""
         , "--builddir=" ++ build_dir
         , "-j"
@@ -724,7 +742,7 @@ initEmptyDB :: Verbosity -> ConfiguredProgram -> FilePath -> IO ()
 initEmptyDB verbosity ghcPkg pkgdb = do
     exists <- doesDirectoryExist pkgdb
     -- don't try to recreate the DB if it already exist as it would fail
-    unless exists $  runProgram verbosity ghcPkg ["init", pkgdb]
+    unless exists $ runProgram verbosity ghcPkg ["init", pkgdb]
 
 runSimpleProgram :: Verbosity -> FilePath -> [String] -> IO ()
 runSimpleProgram verbosity path args =
@@ -740,4 +758,3 @@ runSimpleProgramCWD :: Verbosity -> FilePath -> FilePath -> [String] -> IO ()
 runSimpleProgramCWD verbosity workdir path args =
     runProgramInvocation verbosity $
         (simpleProgramInvocation path args){progInvokeCwd = Just workdir}
-
