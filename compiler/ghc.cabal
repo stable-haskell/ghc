@@ -97,10 +97,7 @@ Library
     Exposed: False
 
     -- HACK: Not ideal but better 
-    Include-Dirs:
-      ../rts/include
-      ../rts/include
-      ../rts/include
+    Include-Dirs: ../rts/include
 
     Includes: Unique.h
               -- CodeGen.Platform.h -- invalid as C, skip
