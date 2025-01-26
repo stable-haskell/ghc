@@ -25,29 +25,33 @@ Description:
 Category: Development
 Build-Type: Custom
 
-extra-source-files:
-    GHC/Builtin/primops.txt.pp
-    Unique.h
-    CodeGen.Platform.h
-    -- Shared with rts via hard-link at configure time. This is safer
-    -- for Windows, where symlinks don't work out of the box, so we
-    -- can't just commit some in git.
-    Bytecodes.h
-    ClosureTypes.h
-    FunTypes.h
-    MachRegs.h
-    MachRegs/arm32.h
-    MachRegs/arm64.h
-    MachRegs/loongarch64.h
-    MachRegs/ppc.h
-    MachRegs/riscv64.h
-    MachRegs/s390x.h
-    MachRegs/wasm32.h
-    MachRegs/x86.h
-
+-- extra-source-files:
+--     GHC/Builtin/primops.txt.pp
+--     Unique.h
+--     CodeGen.Platform.h
+--     -- Shared with rts via hard-link at configure time. This is safer
+--     -- for Windows, where symlinks don't work out of the box, so we
+--     -- can't just commit some in git.
+--     Bytecodes.h
+--     ClosureTypes.h
+--     FunTypes.h
+--     MachRegs.h
+--     MachRegs/arm32.h
+--     MachRegs/arm64.h
+--     MachRegs/loongarch64.h
+--     MachRegs/ppc.h
+--     MachRegs/riscv64.h
+--     MachRegs/s390x.h
+--     MachRegs/wasm32.h
+--     MachRegs/x86.h
 
 custom-setup
-    setup-depends: base >= 3 && < 5, Cabal >= 1.6 && <3.16, directory, process, filepath, containers
+    setup-depends: base >= 3 && < 5
+                 , Cabal >= 1.6 && <3.16
+                 , directory
+                 , process
+                 , filepath
+                 , containers
 
 Flag internal-interpreter
     Description: Build with internal interpreter support.
@@ -80,23 +84,30 @@ Flag hadrian-stage0
     Manual: True
 
 Flag bootstrap
-        Description:
-          Enabled when building the stage1 compiler in order to vendor the in-tree
-          `ghc-boot-th` library, and through that the in-tree TH AST defintions from
-          `ghc-internal`.
-          See Note [Bootstrapping Template Haskell]
-        Default: False
-        Manual: True
+    Description:
+      Enabled when building the stage1 compiler in order to vendor the in-tree
+      `ghc-boot-th` library, and through that the in-tree TH AST defintions from
+      `ghc-internal`.
+      See Note [Bootstrapping Template Haskell]
+    Default: False
+    Manual: True
 
 Library
     Default-Language: GHC2021
     Exposed: False
+
+    -- HACK: Not ideal but better 
+    Include-Dirs:
+      ../rts/include
+      ../rts/include
+      ../rts/include
+
     Includes: Unique.h
               -- CodeGen.Platform.h -- invalid as C, skip
               -- shared with rts via symlink
-              Bytecodes.h
-              ClosureTypes.h
-              FunTypes.h
+              rts/Bytecodes.h
+              rts/storage/ClosureTypes.h
+              rts/storage/FunTypes.h
 
     if flag(build-tool-depends)
       build-tool-depends: alex:alex >= 3.2.6, happy:happy >= 1.20.0, genprimopcode:genprimopcode, deriveConstants:deriveConstants
