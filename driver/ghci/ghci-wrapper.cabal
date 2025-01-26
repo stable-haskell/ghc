@@ -1,8 +1,6 @@
--- WARNING: ghci-wrapper.cabal is automatically generated from ghci-wrapper.cabal.in by
--- ./configure.  Make sure you are editing ghci-wrapper.cabal.in, not ghci-wrapper.cabal.
-
+cabal-version: >=1.10
 Name: ghci-wrapper
-Version: @ProjectVersion@
+Version: 9.13.123.123
 Copyright: XXX
 License: BSD3
 -- XXX License-File: LICENSE
@@ -14,7 +12,6 @@ Description:
     to ensure that console setup is performed correctly.
 Category: Development
 build-type: Simple
-cabal-version: >=1.10
 
 Executable ghci
     Default-Language: Haskell2010
@@ -29,4 +26,4 @@ Executable ghci
     -- We need to call the versioned ghc executable because the unversioned
     -- GHC executable is a wrapper that doesn't call FreeConsole and so
     -- breaks an interactive process like GHCi. See #21889, #14150 and #13411
-    cc-options: -DEXE_PATH="ghc-@ProjectVersion@"
+    cc-options: -DEXE_PATH="ghc-9.13.123.123"

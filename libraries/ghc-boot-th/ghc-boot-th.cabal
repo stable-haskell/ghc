@@ -1,9 +1,6 @@
--- WARNING: ghc-boot-th@Suffix@.cabal is automatically generated from
--- ghc-boot-th@Suffix@.cabal.in by ../../configure.  Make sure you are editing
--- ghc-boot-th@Suffix@.cabal.in, not ghc-boot-th@Suffix@.cabal.
-
-name:           ghc-boot-th@Suffix@
-version:        @ProjectVersionMunged@
+cabal-version:  >=1.10
+name:           ghc-boot-th
+version:        9.13.123.123
 license:        BSD3
 license-file:   LICENSE
 category:       GHC
@@ -17,7 +14,6 @@ description:    This library contains various bits shared between the @ghc@ and
                 This package exists to ensure that @template-haskell@ has a
                 minimal set of transitive dependencies, since it is intended to
                 be depended upon by user code.
-cabal-version:  >=1.10
 build-type:     Simple
 extra-source-files: changelog.md
 
@@ -55,7 +51,7 @@ Library
 
     if flag(bootstrap)
         cpp-options: -DBOOTSTRAP_TH
-        hs-source-dirs: @SourceRoot@ ../ghc-internal/src
+        hs-source-dirs: . ../ghc-internal/src
         exposed-modules:
             GHC.Internal.TH.Lib
             GHC.Internal.TH.Syntax
@@ -64,7 +60,7 @@ Library
             GHC.Internal.LanguageExtensions
             GHC.Internal.Lexeme
     else
-        hs-source-dirs: @SourceRoot@
+        hs-source-dirs: .
         build-depends:
             ghc-internal
         reexported-modules:

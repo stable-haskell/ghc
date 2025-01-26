@@ -3,7 +3,7 @@
 -- iserv.cabal.
 
 Name: iserv
-Version: @ProjectVersion@
+Version: 9.13.123.123
 Copyright: XXX
 License: BSD3
 -- XXX License-File: LICENSE
@@ -36,7 +36,7 @@ Executable iserv
                    bytestring >= 0.10 && < 0.13,
                    containers >= 0.5 && < 0.8,
                    deepseq    >= 1.4 && < 1.6,
-                   ghci       == @ProjectVersionMunged@
+                   ghci       == 9.13.123.123
 
     if os(windows)
         Cpp-Options: -DWINDOWS

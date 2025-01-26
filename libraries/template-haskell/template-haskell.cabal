@@ -53,7 +53,7 @@ Library
 
     build-depends:
         base        >= 4.11 && < 4.22,
-        ghc-boot-th == @ProjectVersionMunged@
+        ghc-boot-th == 9.13.123.123
 
     other-modules:
       System.FilePath
