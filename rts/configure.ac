@@ -26,6 +26,12 @@ AC_CONFIG_FILES([ghcplatform.h.top])
 
 AC_CONFIG_HEADERS([ghcautoconf.h.autoconf])
 
+AC_ARG_WITH([compiler],
+   [AS_HELP_STRING([--with-compier],
+                   [give the path to a particular compiler (ignored)])],
+   [],
+   [])
+
 AC_ARG_ENABLE(asserts-all-ways,
 [AS_HELP_STRING([--enable-asserts-all-ways],
                 [Usually ASSERTs are only compiled in the DEBUG way,
