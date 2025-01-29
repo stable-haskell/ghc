@@ -7,7 +7,9 @@ on:
       - opened
       - synchronize
   push:
-    branches: [master]
+    branches:
+      - master
+      - andrea/make-build
 
 jobs:
   cabal:
@@ -65,17 +67,16 @@ jobs:
         restore-keys: ${{ matrix.os }}-${{ matrix.ghc }}-
         path: |
           ${{ steps.cabal-paths.outputs.store }}
-          libraries/Cabal/dist-newstyle
-          _build
-
-    - name: Configure the build
-      run: ./boot
+          dist-newstyle
 
     - name: Build patched cabal
-      run: make cabal
+      run: |
+        cabal build --project-dir libraries/Cabal cabal-install:exe:cabal
+        CABAL=$(cabal list-bin -v0 --project-dir libraries/Cabal cabal-install:exe:cabal)
+        echo "CABAL=${CABAL}" >> $GITHUB_ENV
 
-    - name: Build the bindist
-      run: make
+    - name: Build stage1
+      run: ${CABAL} build --project-file cabal.project.stage0 ghc-bin:exe:ghc
 
     - name: Save GHCup cache
       uses: actions/cache/save@v4
@@ -98,5 +99,4 @@ jobs:
         key: ${{ matrix.os }}-${{ matrix.ghc }}-${{ github.run_id }}
         path: |
           ${{ steps.cabal-paths.outputs.store }}
-          libraries/Cabal/dist-newstyle
-          _build
+          dist-newstyle
