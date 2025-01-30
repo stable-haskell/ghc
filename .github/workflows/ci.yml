@@ -70,13 +70,10 @@ jobs:
           dist-newstyle
 
     - name: Build patched cabal
-      run: |
-        cabal build --project-dir libraries/Cabal cabal-install:exe:cabal
-        CABAL=$(cabal list-bin -v0 --project-dir libraries/Cabal cabal-install:exe:cabal)
-        echo "CABAL=${CABAL}" >> $GITHUB_ENV
+      run: make cabal
 
     - name: Build stage1
-      run: ${CABAL} build --project-file cabal.project.stage0 ghc-bin:exe:ghc
+      run: make stage1-ghc
 
     - name: Save GHCup cache
       uses: actions/cache/save@v4

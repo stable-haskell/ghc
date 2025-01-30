@@ -5,28 +5,47 @@ SHELL := bash
 MAKEFLAGS += --warn-undefined-variables
 MAKEFLAGS += --no-builtin-rules
 
-export CABAL := $(shell cabal list-bin -v0 --project-dir libraries/Cabal cabal-install:exe:cabal)
-export CABAL_ARGS_STAGE1 =--project-file cabal.project.stage1
-export GHC_STAGE1 := $(shell cabal list-bin -v0 $(CABAL_ARGS_STAGE1) ghc-bin:exe:ghc)
+GHC ?= ghc
+GHC_VERSION=$(shell $(GHC) --numeric-version)
 
-all: $(GHC_STAGE1)
+STAGE ?= stage1
+
+BUILD_DIR = _build/$(STAGE)/build
+STORE_DIR = _build/$(STAGE)/store
+
+GHC = _build/$(STAGE)/bin/ghc
+CABAL := _build/cabal/bin/cabal
+
+.PHONY: all
+all: _build/stage1/bin/ghc
+
+CONFIG_SCRIPTS := $(patsubst %.ac,%,$(wildcard libraries/*/configure.ac))
+
+$(CONFIG_SCRIPTS) : % : %.ac
+	autoreconf -i $(@D)
+
+all-config-scripts: $(CONFIG_SCRIPTS)
 
 cabal: $(CABAL)
-	
+
+CABAL_BUILD    = $(CABAL) --store-dir $(STORE_DIR) build --builddir $(abspath $(BUILD_DIR)) $(CABAL_ARGS)
+CABAL_LIST_BIN = $(CABAL) --store-dir $(STORE_DIR) list-bin --builddir $(abspath $(BUILD_DIR)) $(CABAL_ARGS)
+
+$(CABAL): STAGE=cabal
+$(CABAL): CABAL_ARGS=--project-dir libraries/Cabal
 $(CABAL):
-	cabal build --project-dir libraries/Cabal cabal-install:exe:cabal
+	echo "Building cabal for $(STAGE)"
+	mkdir -p $(@D)
+	$(CABAL_BUILD) cabal-install:exe:cabal
+	ln -svf $$($(CABAL_LIST_BIN) cabal-install:exe:cabal) $@
 
-CONFIG_SCRIPTS := $(wildcard libraries/*/configure.ac)
-
-$(CONFIG_SCRIPTS:%.ac=%) : % : %.ac
-	autoreconf -i -f $(@D)
-
-$(GHC_STAGE1): $(CABAL) $(CONFIG_SCRIPTS)
-	$(CABAL) build $(CABAL_ARGS_STAGE1) ghc-bin:exe:ghc
+_build/stage1/bin/ghc: STAGE=stage1
+_build/stage1/bin/ghc: CABAL_ARGS=--project-file cabal.project.stage1
+_build/stage1/bin/ghc: $(CABAL) $(CONFIG_SCRIPTS)
+	mkdir -p $(@D)
+	$(CABAL_BUILD) ghc-bin:exe:ghc
+	ln -svf $$($(CABAL_LIST_BIN) ghc-bin:exe:ghc) $@
 
 clean:
 	rm -rf _build
-
-clean-submodules:
 	git submodule foreach git clean -dxf
-
