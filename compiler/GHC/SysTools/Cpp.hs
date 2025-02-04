@@ -7,6 +7,7 @@ module GHC.SysTools.Cpp
   ( doCpp
   , CppOpts(..)
   , getGhcVersionPathName
+  , getGhcVersionIncludeFlags
   , applyCDefs
   , offsetIncludePaths
   )
@@ -175,8 +176,7 @@ doCpp logger tmpfs dflags unit_env opts input_fn output_fn = do
     let asserts_def = [ "-D__GLASGOW_HASKELL_ASSERTS_IGNORED__" | gopt Opt_IgnoreAsserts dflags]
 
     -- Default CPP defines in Haskell source
-    ghcVersionH <- getGhcVersionPathName dflags unit_env
-    let hsSourceCppOpts = [ "-include", ghcVersionH ]
+    hsSourceCppOpts <- getGhcVersionIncludeFlags dflags unit_env
 
     -- MIN_VERSION macros
     let uids = explicitUnits unit_state
@@ -262,28 +262,40 @@ generateMacros prefix name version =
       _         -> error "take3"
     (major1,major2,minor) = take3 $ map show (versionBranch version) ++ repeat "0"
 
+getGhcVersionIncludeFlags :: DynFlags -> UnitEnv -> IO [String]
+getGhcVersionIncludeFlags dflags unit_env = do
+  mghcversionh <- getGhcVersionPathName dflags unit_env
+  pure $ case mghcversionh of
+    Nothing -> []
+    Just p  -> ["-include", p]
 
 -- | Find out path to @ghcversion.h@ file
-getGhcVersionPathName :: DynFlags -> UnitEnv -> IO FilePath
+getGhcVersionPathName :: DynFlags -> UnitEnv -> IO (Maybe FilePath)
 getGhcVersionPathName dflags unit_env = do
-  let candidates = case ghcVersionFile dflags of
-        -- the user has provided an explicit `ghcversion.h` file to use.
-        Just path -> [path]
-        -- otherwise, try to find it in the rts' include-dirs.
-        -- Note: only in the RTS include-dirs! not all preload units less we may
-        -- use a wrong file. See #25106 where a globally installed
-        -- /usr/include/ghcversion.h file was used instead of the one provided
-        -- by the rts.
-        Nothing -> case lookupUnitId (ue_homeUnitState unit_env) rtsUnitId of
-          Nothing   -> []
-          Just info -> (</> "ghcversion.h") <$> collectIncludeDirs [info]
-
-  found <- filterM doesFileExist candidates
-  case found of
-      []    -> throwGhcExceptionIO (InstallationError
-                                    ("ghcversion.h missing; tried: "
-                                      ++ intercalate ", " candidates))
-      (x:_) -> return x
+  case ghcVersionFile dflags of
+    -- the user has provided an explicit `ghcversion.h` file to use.
+    Just path -> doesFileExist path >>= \case
+      True  -> pure (Just path)
+      False ->  throwGhcExceptionIO (InstallationError
+                  ("ghcversion.h missing; tried user-supplied path: " ++ path))
+    -- otherwise, try to find it in the rts' include-dirs.
+    -- Note: only in the RTS include-dirs! not all preload units less we may
+    -- use a wrong file. See #25106 where a globally installed
+    -- /usr/include/ghcversion.h file was used instead of the one provided
+    -- by the rts.
+    Nothing -> case lookupUnitId (ue_homeUnitState unit_env) rtsUnitId of
+      Nothing   -> do
+        -- print warning and return nothing
+        putStrLn "Couldn't find ghcversion.h file: no rts unit available and -ghcversion-file flag not passed"
+        pure Nothing
+      Just info -> do
+        let candidates = (</> "ghcversion.h") <$> collectIncludeDirs [info]
+        found <- filterM doesFileExist candidates
+        case found of
+            []    -> throwGhcExceptionIO (InstallationError
+                                          ("ghcversion.h missing; tried: "
+                                            ++ intercalate ", " candidates))
+            (x:_) -> return (Just x)
 
 applyCDefs :: DefunctionalizedCDefs -> Logger -> DynFlags -> IO [String]
 applyCDefs NoCDefs _ _ = return []
