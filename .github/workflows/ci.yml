@@ -32,11 +32,11 @@ jobs:
         cabal-version: "latest"
         cabal-update: true
 
-    - name: Configure the build
-      run: ./boot
-
     - name: Build patched cabal
       run: make cabal
+
+    - # This runs autoconf also in the subdirectories
+      run: autoreconf -v
 
     - name: Build the bindist
       env:
