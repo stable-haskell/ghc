@@ -25,11 +25,48 @@ jobs:
         submodules: "recursive"
 
     - uses: haskell/ghcup-setup@v1
-      with:
-        ghc: ${{ matrix.ghc }}
-        cabal: latest
 
+    - id: ghcup
+      run: |
+        ghcup config set cache true
+        echo "basedir=$(ghcup whereis basedir)" >> $GITHUB_OUTPUT
+
+    - id: ghcup-cache
+      name: Cache GHCup basedir
+      uses: actions/cache@v4
+      with:
+        key: ghcup-basedir-${{ github.run_id }}
+        restore-keys: ghcup-basedir-
+        path: ${{ steps.ghcup.outputs.basedir }}
+
+    - run: |
+        ghcup install ghc --set ${{ matrix.ghc }}
+        ghcup install cabal --set
+
+    - id: cabal-paths
+      run: |
+        cabal user-config init
+        echo "store=$(cabal path --store-dir)" >> $GITHUB_OUTPUT
+        echo "remote-repo-cache=$(cabal path --remote-repo-cache)" >> $GITHUB_OUTPUT
+
+    - name: Restore Hackage index
+      uses: actions/cache/restore@v4
+      with:
+        key: hackage-${{ github.run_id }}
+        restore-keys: hackage-
+        path: ${{ steps.cabal-paths.outputs.remote-repo-cache }}
+        
     - run: cabal update
+
+    - name: Restore build artifacts
+      uses: actions/cache/restore@v4
+      with:
+        key: ${{ matrix.os }}-${{ matrix.ghc }}-${{ github.run_id }}
+        restore-keys: ${{ matrix.os }}-${{ matrix.ghc }}-
+        path: |
+          ${{ steps.cabal-paths.outputs.store }}
+          libraries/Cabal/dist-newstyle
+          _build
 
     - name: Build patched cabal
       run: make cabal
@@ -61,3 +98,27 @@ jobs:
           _build/test-perf.csv
           _build/test-summary.txt
           _build/test-junit.xml
+
+    - name: Save GHCup cache
+      uses: actions/cache/save@v4
+      if: always()
+      with:
+        key: ghcup-${{ github.run_id }}
+        path: ${{ steps.ghcup.outputs.cachedir }}
+
+    - name: Save Hackage index
+      uses: actions/cache/save@v4
+      if: always()
+      with:
+        key: hackage-${{ github.run_id }}
+        path: ${{ steps.cabal-paths.outputs.remote-repo-cache }}
+
+    - name: Save build artifacts
+      if: always()
+      uses: actions/cache/save@v4
+      with:
+        key: ${{ matrix.os }}-${{ matrix.ghc }}-${{ github.run_id }}
+        path: |
+          ${{ steps.cabal-paths.outputs.store }}
+          libraries/Cabal/dist-newstyle
+          _build
