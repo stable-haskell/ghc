@@ -21,3 +21,7 @@
 #define @HostVendor_CPP@_HOST_VENDOR  1
 #define BUILD_VENDOR  "@BuildVendor_CPP@"
 #define HOST_VENDOR  "@HostVendor_CPP@"
+
+#define UnregisterisedCompiler  @CABAL_FLAG_unregisterised@
+
+#endif /* __GHCPLATFORM_H__ */

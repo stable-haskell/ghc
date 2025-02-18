@@ -22,8 +22,6 @@ dnl     #define SIZEOF_CHAR 0
 dnl   recently.
 AC_PREREQ([2.69])
 
-AC_CONFIG_FILES([ghcplatform.h.top])
-
 AC_CONFIG_FILES([include/ghcplatform.h])
 AC_CONFIG_HEADERS([include/ghcautoconf.h])
 
@@ -376,6 +374,9 @@ AS_IF(
   [test "$CABAL_FLAG_libnuma" = 1],
   [AC_CHECK_HEADERS([numa.h numaif.h])])
 
+dnl ** Do an unregisterised build?
+dnl --------------------------------------------------------------
+AC_SUBST(CABAL_FLAG_unregisterised)
 
 dnl ** I/O managers
 dnl --------------------------------------------------------------
@@ -467,29 +468,6 @@ dnl ** Write config files
 dnl --------------------------------------------------------------
 
 AC_OUTPUT
-
-dnl ######################################################################
-dnl Generate ghcplatform.h
-dnl ######################################################################
-
-[
-mkdir -p include
-
-touch include/ghcplatform.h
-> include/ghcplatform.h
-
-cat ghcplatform.h.top                          >> include/ghcplatform.h
-]
-
-dnl ** Do an unregisterised build?
-dnl --------------------------------------------------------------
-AS_IF(
-  [test "$CABAL_FLAG_unregisterised" = 1],
-  [echo "#define UnregisterisedCompiler 1"     >> include/ghcplatform.h])
-
-[
-cat $srcdir/ghcplatform.h.bottom               >> include/ghcplatform.h
-]
 
 dnl ######################################################################
 dnl Generate external symbol flags (-Wl,-u...)

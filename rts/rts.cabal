@@ -15,8 +15,6 @@ extra-source-files:
     configure
     config.guess
     config.sub
-    ghcplatform.h.top.in
-    ghcplatform.h.bottom
     configure.ac
     external-symbols.list.in
     rts.buildinfo.in
@@ -61,6 +59,7 @@ extra-source-files:
     hooks/Hooks.h
     include/Cmm.h
     include/ghcautoconf.h.in
+    include/ghcplatform.h.in
     include/ghcconfig.h
     include/HsFFI.h
     include/MachDeps.h
@@ -338,8 +337,11 @@ library
 
     autogen-includes:
       ghcautoconf.h
+      ghcplatform.h
+
     install-includes:
       ghcautoconf.h
+      ghcplatform.h
 
     if arch(javascript)
 
@@ -478,7 +480,6 @@ library
       -- TODO: move internal headers into include/private?
       include-dirs: .
       includes: Rts.h
-      autogen-includes: ghcplatform.h
       install-includes: Cmm.h HsFFI.h MachDeps.h Jumps.h Rts.h RtsAPI.h RtsSymbols.h Stg.h
                         ghcconfig.h ghcplatform.h
                         -- ^ from include
