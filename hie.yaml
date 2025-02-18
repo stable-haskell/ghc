@@ -7,11 +7,11 @@
 # The format is documented here - https://github.com/mpickering/hie-bios
 cradle:
   multi:
-    - path: Build.hs
+    - path: ./Build.hs
       config:
         cradle:
           direct:
             arguments: []
-    - path: "*"
+    - path: .
       config:
         cradle: {bios: {program: "./hadrian/hie-bios"}}
