@@ -411,10 +411,6 @@ prepareGhcSources opts dst = do
         , (,) "@ProjectPatchLevel2@"   (gboVersionPatchLevel2 opts)
         , (,) "@ProjectVersionInt@"    (gboVersionInt opts)
         ]
-      llvm_substs =
-        [ (,) "@LlvmMinVersion@" (gboLlvmMinVersion opts)
-        , (,) "@LlvmMaxVersion@" (gboLlvmMaxVersion opts)
-        ]
       boot_th_substs =
         [ (,) "@Suffix@"     ""
         , (,) "@SourceRoot@" "."
@@ -427,9 +423,6 @@ prepareGhcSources opts dst = do
   subst_in (dst </> "libraries/ghc-heap/ghc-heap.cabal") common_substs
   subst_in (dst </> "libraries/template-haskell/template-haskell.cabal") common_substs
   subst_in (dst </> "libraries/ghci/ghci.cabal") common_substs
-
-  -- This is only used for a warning message. Nuke the check!
-  subst_in (dst </> "libraries/ghc/GHC/CmmToLlvm/Version/Bounds.hs") llvm_substs
 
   subst_in (dst </> "utils/ghc-pkg/ghc-pkg.cabal") common_substs
   subst_in (dst </> "utils/iserv/iserv.cabal") common_substs
