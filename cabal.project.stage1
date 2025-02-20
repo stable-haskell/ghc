@@ -30,16 +30,18 @@ packages:
   ./utils/ghc-toolchain
   ./utils/ghc-toolchain/exe
 
-benchmark: False
+benchmarks: False
 tests: False
+profiling: False
+
 allow-boot-library-installs: True
 
 package *
   library-vanilla: True
-  shared: False
-  executable-profiling: False
-  executable-dynamic: False
-  executable-static: True
+  shared: True
+  -- executable-profiling: False
+  -- executable-dynamic: False
+  -- executable-static: True
 
 package ghc-boot-th
   flags: +bootstrap
