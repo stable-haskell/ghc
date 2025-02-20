@@ -1,9 +1,7 @@
 Cabal-Version: 2.2
--- WARNING: ghc.cabal is automatically generated from ghc.cabal.in by
--- ./configure.  Make sure you are editing ghc.cabal.in, not ghc.cabal.
-
 Name: ghc
-Version: @ProjectVersionMunged@
+-- ProjectVersionMunged
+Version: 9.13
 License: BSD-3-Clause
 License-File: LICENSE
 Author: The GHC Team
@@ -132,16 +130,19 @@ Library
                    semaphore-compat,
                    stm,
                    rts,
-                   ghc-boot   == @ProjectVersionMunged@,
-                   ghc-heap   == @ProjectVersionMunged@,
-                   ghci == @ProjectVersionMunged@
+                   -- ProjectVersionMunged
+                   ghc-boot   == 9.13,
+                   ghc-heap   == 9.13,
+                   ghci       == 9.13
 
     if flag(bootstrap)
       Build-Depends:
-        ghc-boot-th-next     == @ProjectVersionMunged@
+        -- ProjectVersionMunged
+        ghc-boot-th-next     == 9.13
     else
       Build-Depends:
-        ghc-boot-th          == @ProjectVersionMunged@
+        -- ProjectVersionMunged
+        ghc-boot-th          == 9.13
 
     if os(windows)
         Build-Depends: Win32  >= 2.3 && < 2.15

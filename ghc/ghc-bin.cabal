@@ -1,12 +1,7 @@
--- WARNING: ghc-bin.cabal is automatically generated from ghc-bin.cabal.in by
--- ./configure.  Make sure you are editing ghc-bin.cabal.in, not ghc-bin.cabal.
-
+Cabal-Version: 3.0
 Name: ghc-bin
-Version: @ProjectVersion@
-Copyright: XXX
--- License: XXX
--- License-File: XXX
-Author: XXX
+-- ProjectVersion
+Version: 9.13
 Maintainer: glasgow-haskell-users@haskell.org
 Homepage: http://www.haskell.org/ghc/
 Synopsis: The Glorious Glasgow Haskell Compiler.
@@ -15,7 +10,6 @@ Description:
     to the Glasgow Haskell Compiler.
 Category: Development
 Build-Type: Simple
-Cabal-Version: >=1.10
 
 Flag internal-interpreter
     Description: Build with internal interpreter support.
@@ -39,8 +33,9 @@ Executable ghc
                    filepath   >= 1.5 && < 1.6,
                    containers >= 0.5 && < 0.8,
                    transformers >= 0.5 && < 0.7,
-                   ghc-boot      == @ProjectVersionMunged@,
-                   ghc           == @ProjectVersionMunged@
+                   -- ProjectVersionMunged
+                   ghc-boot      == 9.13,
+                   ghc           == 9.13,
 
     if os(windows)
         Build-Depends: Win32  >= 2.3 && < 2.15
@@ -58,7 +53,8 @@ Executable ghc
         Build-depends:
             deepseq        >= 1.4 && < 1.6,
             ghc-prim       >= 0.5.0 && < 0.14,
-            ghci           == @ProjectVersionMunged@,
+            -- ProjectVersionMunged
+            ghci           == 9.13,
             haskeline      == 0.8.*,
             exceptions     == 0.10.*,
             time           >= 1.8 && < 1.15

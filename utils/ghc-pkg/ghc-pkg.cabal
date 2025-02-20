@@ -1,10 +1,8 @@
+cabal-version: 3.0
 Name: ghc-pkg
--- XXX Version number
-Version: @ProjectVersion@
-Copyright: XXX
-License: BSD3
--- XXX License-File: LICENSE
-Author: XXX
+-- ProjectVersion
+Version: 9.13
+License: BSD-3-Clause
 Maintainer: cvs-fptools@haskell.org
 Synopsis: A utility for querying and managing the GHC package database.
 Description:
@@ -13,7 +11,6 @@ Description:
     usage information.
 Category: Development
 build-type: Simple
-cabal-version: >=1.10
 
 Executable ghc-pkg
     Default-Language: GHC2021

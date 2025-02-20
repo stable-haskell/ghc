@@ -1,9 +1,7 @@
--- WARNING: ghci.cabal is automatically generated from ghci.cabal.in by
--- ../../configure.  Make sure you are editing ghci.cabal.in, not ghci.cabal.
-
+cabal-version:  3.0
 name:           ghci
-version:        @ProjectVersionMunged@
-license:        BSD3
+version:        9.13
+license:        BSD-3-Clause
 license-file:   LICENSE
 category:       GHC
 maintainer:     ghc-devs@haskell.org
@@ -13,7 +11,6 @@ description:
             This library offers interfaces which mediate interactions between the
             @ghci@ interactive shell and @iserv@, GHC's out-of-process interpreter
             backend.
-cabal-version:  >=1.10
 build-type:     Simple
 extra-source-files: changelog.md
 
@@ -96,19 +93,23 @@ library
         containers       >= 0.5 && < 0.8,
         deepseq          >= 1.4 && < 1.6,
         filepath         >= 1.4 && < 1.6,
-        ghc-boot         == @ProjectVersionMunged@,
-        ghc-heap         == @ProjectVersionMunged@,
+        -- ProjectVersionMunged
+        ghc-boot         == 9.13,
+        ghc-heap         == 9.13,
         transformers     >= 0.5 && < 0.7
 
     if flag(bootstrap)
       build-depends:
-            ghc-boot-th-next  == @ProjectVersionMunged@
+            -- ProjectVersionMunged
+            ghc-boot-th-next  == 9.13
     else
       build-depends:
-            ghc-boot-th       == @ProjectVersionMunged@
+            -- ProjectVersionMunged
+            ghc-boot-th       == 9.13
 
     if !os(windows)
         Build-Depends: unix >= 2.7 && < 2.9
 
     if arch(wasm32)
-        build-depends: ghc-experimental == @ProjectVersionForLib@.0
+        -- ProjectVersionForLib
+        build-depends: ghc-experimental == 9.1300.0

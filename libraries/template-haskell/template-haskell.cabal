@@ -1,18 +1,14 @@
--- WARNING: template-haskell.cabal is automatically generated from template-haskell.cabal.in by
--- ../../configure.  Make sure you are editing template-haskell.cabal.in, not
--- template-haskell.cabal.
-
+cabal-Version:  3.0
 name:           template-haskell
 version:        2.23.0.0
 -- NOTE: Don't forget to update ./changelog.md
-license:        BSD3
+license:        BSD-3-Clause
 license-file:   LICENSE
 category:       Template Haskell
 maintainer:     libraries@haskell.org
 bug-reports:    https://gitlab.haskell.org/ghc/ghc/issues/new
 synopsis:       Support library for Template Haskell
 build-type:     Simple
-Cabal-Version:  >= 1.10
 description:
     This package provides modules containing facilities for manipulating
     Haskell source code using Template Haskell.
@@ -53,7 +49,8 @@ Library
 
     build-depends:
         base        >= 4.11 && < 4.22,
-        ghc-boot-th == @ProjectVersionMunged@
+        -- ProjectVersionMunged
+        ghc-boot-th == 9.13
 
     other-modules:
       System.FilePath

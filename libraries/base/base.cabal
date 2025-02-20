@@ -1,8 +1,4 @@
 cabal-version:  3.0
-
--- WARNING: ghc-experimental.cabal is automatically generated from ghc-experimental.cabal.in
--- Make sure you are editing ghc-experimental.cabal.in, not ghc-experimental.cabal
-
 name:           base
 version:        4.21.0.0
 -- NOTE: Don't forget to update ./changelog.md
@@ -30,7 +26,8 @@ Library
     default-language: Haskell2010
     default-extensions: NoImplicitPrelude
     build-depends:
-        ghc-internal == @ProjectVersionForLib@.*,
+        -- ProjectVersionForLib
+        ghc-internal == 9.1300,
         ghc-prim,
 
     exposed-modules:
