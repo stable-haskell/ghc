@@ -1,0 +1,53 @@
+-- aka cabal.project-ghc
+-- NOTE: this should be in sync with stage1_project in Build.hs until we merge them
+-- (except some packages paths)
+
+packages:
+  ./compiler
+  ./ghc
+  ./libraries/directory
+  ./libraries/file-io
+  ./libraries/filepath
+  ./libraries/ghc-platform
+  ./libraries/ghc-boot
+  ./libraries/ghc-boot-th
+  ./libraries/ghc-heap
+  ./libraries/ghci
+  ./libraries/os-string
+  ./libraries/process
+  ./libraries/semaphore-compat
+  ./libraries/time
+  ./libraries/unix
+  ./libraries/Win32
+  ./utils/ghc-pkg
+  ./utils/hsc2hs
+  ./utils/unlit
+  ./utils/genprimopcode
+  ./utils/genapply
+  ./utils/deriveConstants
+  ./utils/ghc-toolchain
+  ./utils/ghc-toolchain/exe
+
+benchmark: False
+tests: False
+allow-boot-library-installs: True
+
+package *
+  library-vanilla: True
+  shared: False
+  executable-profiling: False
+  executable-dynamic: False
+  executable-static: True
+
+package ghc-boot-th
+  flags: +bootstrap
+
+package hsc2hs
+  flags: +in-ghc-tree
+
+-- allow template-haskell with newer ghc-boot-th
+allow-newer: ghc-boot-th
+
+constraints:
+-- FIXME: template-haskell 2.23 is too recent when booting with 9.8.4
+  template-haskell <= 2.22
