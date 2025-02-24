@@ -382,22 +382,6 @@ prepareGhcSources opts dst = do
   cp "utils/fs/fs.*" (dst </> "libraries/rts/")
   cp "utils/fs/fs.*" (dst </> "utils/unlit/")
 
-  python <- findExecutable "python" >>= \case
-    Nothing -> error "Couldn't find 'python'"
-    Just r -> pure r
-
-  void $ readCreateProcess (proc python
-    [ "rts/gen_event_types.py"
-    , "--event-types-defines"
-    , dst </> "libraries/rts/include/rts/EventLogConstants.h"
-    ]) ""
-
-  void $ readCreateProcess (proc python
-    [ "rts/gen_event_types.py"
-    , "--event-types-array"
-    , dst </> "libraries/rts/include/rts/EventTypes.h"
-    ]) ""
-
   -- substitute variables in files
   let subst fin fout rs = do
         t <- Text.readFile fin
