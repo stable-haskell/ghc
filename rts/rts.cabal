@@ -9,7 +9,7 @@ description:
     that cannot be written in Haskell itself.
 license: BSD-3-Clause
 maintainer: glasgow-haskell-users@haskell.org
-build-type: Configure
+build-type: Custom
 
 extra-source-files:
     configure
@@ -324,6 +324,10 @@ flag thread-sanitizer
     in @rts/include/rts/TSANUtils.h@.
   default: False
   manual: True
+
+custom-setup
+  setup-depends:
+    base, Cabal, Cabal-syntax, mtl, transformers
 
 library
     -- rts is a wired in package and
