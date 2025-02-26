@@ -381,7 +381,6 @@ buildBootLibraries cabal ghc ghcpkg derive_constants genapply genprimop opts dst
   -- Build the RTS
   src_rts <- makeAbsolute (src </> "libraries/rts")
   build_dir <- makeAbsolute (dst </> "cabal")
-  ghcversionh <- makeAbsolute (src_rts </> "include/ghcversion.h")
 
   -- FIXME: could we build a cross compiler, simply by not reading this from the boot compiler, but passing it in?
   target_triple <- ghcTargetTriple ghc
@@ -462,7 +461,6 @@ buildBootLibraries cabal ghc ghcpkg derive_constants genapply genprimop opts dst
         , "rts"
         , "--with-compiler=" ++ ghcPath ghc
         , "--with-hc-pkg=" ++ ghcPkgPath ghcpkg
-        , "--ghc-options=\"-ghcversion-file=" ++ ghcversionh ++ "\""
         , "--builddir=" ++ build_dir
         ]
 
@@ -629,7 +627,6 @@ buildBootLibraries cabal ghc ghcpkg derive_constants genapply genprimop opts dst
         , "--project-file=" ++ cabal_project_bootlibs_path
         , "--with-compiler=" ++ ghcPath ghc
         , "--with-hc-pkg=" ++ ghcPkgPath ghcpkg
-        , "--ghc-options=\"-ghcversion-file=" ++ ghcversionh ++ "\""
         , "--builddir=" ++ build_dir
         , "-j"
 

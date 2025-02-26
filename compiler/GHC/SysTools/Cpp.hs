@@ -6,7 +6,6 @@
 module GHC.SysTools.Cpp
   ( doCpp
   , CppOpts(..)
-  , getGhcVersionPathName
   , getGhcVersionIncludeFlags
   , applyCDefs
   , offsetIncludePaths
@@ -39,6 +38,7 @@ import Control.Monad
 
 import System.Directory
 import System.FilePath
+import GHC.Settings.Config (cProjectVersionInt, cProjectPatchLevel1, cProjectVersion, cProjectPatchLevel2)
 
 data CppOpts = CppOpts
   { sourceCodePreprocessor  :: !SourceCodePreprocessor
@@ -125,10 +125,10 @@ doCpp logger tmpfs dflags unit_env opts input_fn output_fn = do
          [homeUnitEnv_dflags . ue_findHomeUnitEnv uid $ unit_env | uid <- ue_transitiveHomeDeps (ue_currentUnit unit_env) unit_env]
         dep_pkg_extra_inputs = [offsetIncludePaths fs (includePaths fs) | fs <- home_pkg_deps]
 
-    let include_paths_global = foldr (\ x xs -> ("-I" ++ x) : xs) []
+    let include_paths_global = map ("-I" ++)
           (includePathsGlobal cmdline_include_paths ++ pkg_include_dirs
                                                     ++ concatMap includePathsGlobal dep_pkg_extra_inputs)
-    let include_paths_quote = foldr (\ x xs -> ("-iquote" ++ x) : xs) []
+    let include_paths_quote = map ("-iquote" ++)
           (includePathsQuote cmdline_include_paths ++
            includePathsQuoteImplicit cmdline_include_paths)
     let include_paths = include_paths_quote ++ include_paths_global
@@ -176,7 +176,7 @@ doCpp logger tmpfs dflags unit_env opts input_fn output_fn = do
     let asserts_def = [ "-D__GLASGOW_HASKELL_ASSERTS_IGNORED__" | gopt Opt_IgnoreAsserts dflags]
 
     -- Default CPP defines in Haskell source
-    hsSourceCppOpts <- getGhcVersionIncludeFlags dflags unit_env
+    hsSourceCppOpts <- getGhcVersionIncludeFlags dflags logger tmpfs
 
     -- MIN_VERSION macros
     let uids = explicitUnits unit_state
@@ -262,40 +262,41 @@ generateMacros prefix name version =
       _         -> error "take3"
     (major1,major2,minor) = take3 $ map show (versionBranch version) ++ repeat "0"
 
-getGhcVersionIncludeFlags :: DynFlags -> UnitEnv -> IO [String]
-getGhcVersionIncludeFlags dflags unit_env = do
-  mghcversionh <- getGhcVersionPathName dflags unit_env
-  pure $ case mghcversionh of
-    Nothing -> []
-    Just p  -> ["-include", p]
-
--- | Find out path to @ghcversion.h@ file
-getGhcVersionPathName :: DynFlags -> UnitEnv -> IO (Maybe FilePath)
-getGhcVersionPathName dflags unit_env = do
+getGhcVersionIncludeFlags :: DynFlags -> Logger -> TmpFs -> IO [String]
+getGhcVersionIncludeFlags dflags logger tmpfs = do
   case ghcVersionFile dflags of
-    -- the user has provided an explicit `ghcversion.h` file to use.
-    Just path -> doesFileExist path >>= \case
-      True  -> pure (Just path)
-      False ->  throwGhcExceptionIO (InstallationError
-                  ("ghcversion.h missing; tried user-supplied path: " ++ path))
-    -- otherwise, try to find it in the rts' include-dirs.
-    -- Note: only in the RTS include-dirs! not all preload units less we may
-    -- use a wrong file. See #25106 where a globally installed
-    -- /usr/include/ghcversion.h file was used instead of the one provided
-    -- by the rts.
-    Nothing -> case lookupUnitId (ue_homeUnitState unit_env) rtsUnitId of
-      Nothing   -> do
-        -- print warning and return nothing
-        putStrLn "Couldn't find ghcversion.h file: no rts unit available and -ghcversion-file flag not passed"
-        pure Nothing
-      Just info -> do
-        let candidates = (</> "ghcversion.h") <$> collectIncludeDirs [info]
-        found <- filterM doesFileExist candidates
-        case found of
-            []    -> throwGhcExceptionIO (InstallationError
-                                          ("ghcversion.h missing; tried: "
-                                            ++ intercalate ", " candidates))
-            (x:_) -> return (Just x)
+        -- the user has provided an explicit `ghcversion.h` file to use.
+        Just path -> do
+          found <- doesFileExist path
+          unless found $ 
+            throwGhcExceptionIO (InstallationError ("ghcversion.h missing; tried: " ++ path))
+          return ["-include", path]
+        Nothing -> do
+          macro_stub <- newTempName logger tmpfs (tmpDir dflags) TFL_CurrentModule "h"
+          writeFile macro_stub ghcVersionH
+          return ["-include", macro_stub]
+
+-- ---------------------------------------------------------------------------
+-- ghcversion.h
+
+ghcVersionH :: String
+ghcVersionH =
+  concat
+  ["#define __GLASGOW_HASKELL__ ", show cProjectVersionInt, "\n"
+  ,"#define __GLASGOW_HASKELL_FULL_VERSION__ ", show cProjectVersion, "\n"
+  ,"\n"
+  ,"#define __GLASGOW_HASKELL_PATCHLEVEL1__ ", show cProjectPatchLevel1, "\n"
+  ,"#define __GLASGOW_HASKELL_PATCHLEVEL2__ ", show cProjectPatchLevel2, "\n"
+  ,"\n"
+  ,"#define MIN_VERSION_GLASGOW_HASKELL(ma,mi,pl1,pl2) (     \\\n"
+  ,"   ((ma)*100+(mi)) <  __GLASGOW_HASKELL__ ||             \\\n"
+  ,"   ((ma)*100+(mi)) == __GLASGOW_HASKELL__                \\\n"
+  ,"          && (pl1) <  __GLASGOW_HASKELL_PATCHLEVEL1__ || \\\n"
+  ,"   ((ma)*100+(mi)) == __GLASGOW_HASKELL__                \\\n"
+  ,"          && (pl1) == __GLASGOW_HASKELL_PATCHLEVEL1__    \\\n"
+  ,"          && (pl2) <= __GLASGOW_HASKELL_PATCHLEVEL2__ )\n"
+  ,"\n\n"
+  ]
 
 applyCDefs :: DefunctionalizedCDefs -> Logger -> DynFlags -> IO [String]
 applyCDefs NoCDefs _ _ = return []

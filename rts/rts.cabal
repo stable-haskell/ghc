@@ -370,7 +370,7 @@ library
         js/time.js
 
       install-includes: HsFFI.h MachDeps.h Rts.h RtsAPI.h Stg.h
-                        ghcautoconf.h ghcconfig.h ghcplatform.h ghcversion.h
+                        ghcautoconf.h ghcconfig.h ghcplatform.h
                         DerivedConstants.h
                         stg/MachRegsForHost.h
                         stg/Types.h
@@ -475,7 +475,7 @@ library
       includes: Rts.h
       autogen-includes: ghcautoconf.h ghcplatform.h
       install-includes: Cmm.h HsFFI.h MachDeps.h Jumps.h Rts.h RtsAPI.h RtsSymbols.h Stg.h
-                        ghcautoconf.h ghcconfig.h ghcplatform.h ghcversion.h
+                        ghcautoconf.h ghcconfig.h ghcplatform.h
                         -- ^ from include
                         DerivedConstants.h
                         rts/EventLogConstants.h

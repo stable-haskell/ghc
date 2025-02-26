@@ -24,7 +24,8 @@ AC_PREREQ([2.69])
 
 AC_CONFIG_FILES([ghcplatform.h.top])
 
-AC_CONFIG_HEADERS([ghcautoconf.h.autoconf])
+AC_CONFIG_FILES([include/ghcplatform.h])
+AC_CONFIG_HEADERS([include/ghcautoconf.h])
 
 AC_ARG_WITH([compiler],
    [AS_HELP_STRING([--with-compiler=PATH],
