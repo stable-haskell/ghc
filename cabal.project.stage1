@@ -5,6 +5,7 @@
 packages:
   ./compiler
   ./ghc
+  ./rts-headers
   ./libraries/directory
   ./libraries/file-io
   ./libraries/filepath
