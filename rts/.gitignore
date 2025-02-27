@@ -3,6 +3,7 @@
 /dist-*/
 
 /include/ghcversion.h
+/include/ghcautoconf.h
 
 /package.conf.inplace
 /package.conf.inplace.raw
@@ -16,6 +17,3 @@
 /configure
 
 /external-symbols.list
-/ghcautoconf.h.autoconf.in
-/ghcautoconf.h.autoconf
-/include/ghcautoconf.h

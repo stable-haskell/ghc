@@ -492,26 +492,6 @@ cat $srcdir/ghcplatform.h.bottom               >> include/ghcplatform.h
 ]
 
 dnl ######################################################################
-dnl Generate ghcautoconf.h
-dnl ######################################################################
-
-[
-touch include/ghcautoconf.h
-> include/ghcautoconf.h
-
-echo "#if !defined(__GHCAUTOCONF_H__)" >> include/ghcautoconf.h
-echo "#define __GHCAUTOCONF_H__" >> include/ghcautoconf.h
-# Copy the contents of ghcautoconf.h.autoconf, turning '#define PACKAGE_FOO
-# "blah"' into '/* #undef PACKAGE_FOO */' to avoid clashes.
-cat ghcautoconf.h.autoconf | sed \
-   -e 's,^\([	 ]*\)#[	 ]*define[	 ][	 ]*\(PACKAGE_[A-Z]*\)[	 ][ 	]*".*".*$,\1/* #undef \2 */,' \
-   -e '/__GLASGOW_HASKELL/d' \
-   -e '/REMOVE ME/d' \
-   >> include/ghcautoconf.h
-echo "#endif /* __GHCAUTOCONF_H__ */" >> include/ghcautoconf.h
-]
-
-dnl ######################################################################
 dnl Generate external symbol flags (-Wl,-u...)
 dnl ######################################################################
 
