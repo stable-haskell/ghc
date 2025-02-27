@@ -26,6 +26,35 @@ AC_CONFIG_FILES([ghcplatform.h.top])
 
 AC_CONFIG_HEADERS([ghcautoconf.h.autoconf])
 
+AC_ARG_WITH([compiler],
+   [AS_HELP_STRING([--with-compiler=PATH],
+                   [Use a particular compiler available at PATH (default: ghc)])],
+   [
+    GHC="$withval"
+    dnl If a name was provided (not an absolute path), resolve it in PATH
+    case "$withval" in
+      /*) AC_PATH_PROG([GHC], [`basename -- "$withval"`], [], [`dirname -- "$withval"`])
+         ;;  # It's already an absolute path, do nothing
+      *) AC_PATH_PROG([GHC], [$GHC], [], [$PATH]) ;;  # Resolve it in PATH
+    esac
+   ],
+   [AC_PATH_PROG([GHC], [ghc])]
+)
+
+dnl Verify that the resolved GHC is valid
+if test -z "$GHC"; then
+  AC_MSG_ERROR([No valid GHC compiler found. Please install GHC or specify one with --with-compiler=.])
+elif test ! -x "$GHC"; then
+  AC_MSG_ERROR([The specified compiler ($GHC) is not executable.])
+fi
+
+dnl Check if it's actually GHC
+GHC_VERSION=`$GHC --numeric-version 2>/dev/null`
+if test -z "$GHC_VERSION"; then
+  AC_MSG_ERROR([The specified compiler ($GHC) does not appear to be a valid GHC.])
+fi
+ 
+
 AC_ARG_ENABLE(asserts-all-ways,
 [AS_HELP_STRING([--enable-asserts-all-ways],
                 [Usually ASSERTs are only compiled in the DEBUG way,
