@@ -1,1 +1,2 @@
 ld-options: @LDFLAGS@
+cc-options: @CPPFLAGS@ @CFLAGS@

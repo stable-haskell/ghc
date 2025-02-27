@@ -56,6 +56,16 @@ if test -z "$GHC_VERSION"; then
   AC_MSG_ERROR([The specified compiler ($GHC) does not appear to be a valid GHC.])
 fi
  
+dnl NOTE: This is relative to what is being used to compile the rts,
+dnl even if this is a new rts to be included in a new compiler version.
+dnl tl;dr: this is going to be wrong in stage1 but will be correct in stage2.
+AC_DEFINE_UNQUOTED([ProjectVersion], ["$GHC_VERSION"], [Version of GHC used to build this RTS])
+
+dnl ** Rts way
+dnl --------------------------------------------------------------
+
+dnl FIXME Only used for display?
+AC_DEFINE_UNQUOTED([RtsWay], ["FIXME"], [RtsWay])
 
 AC_ARG_ENABLE(asserts-all-ways,
 [AS_HELP_STRING([--enable-asserts-all-ways],
@@ -76,9 +86,7 @@ AC_CANONICAL_HOST
 dnl ** Do a build with tables next to code?
 dnl --------------------------------------------------------------
 
-AS_IF(
-  [test "$CABAL_FLAG_tables_next_to_code" = 1],
-  [AC_DEFINE([TABLES_NEXT_TO_CODE], [1], [Define to 1 if info tables are laid out next to code])])
+AC_DEFINE_UNQUOTED([TABLES_NEXT_TO_CODE], [$CABAL_FLAG_tables_next_to_code], [Define to 1 if info tables are laid out next to code])
 
 dnl detect compiler (prefer gcc over clang) and set $CC (unless CC already set),
 dnl later CC is copied to CC_STAGE{1,2,3}
@@ -105,9 +113,19 @@ GHC_CONVERT_PLATFORM_PARTS([build], [Build])
 FPTOOLS_SET_PLATFORM_VARS([build],[Build])
 FPTOOLS_SET_HASKELL_PLATFORM_VARS([Build])
 
+AC_DEFINE_UNQUOTED([BuildPlatform],["$BuildPlatform_CPP"],[BuildPlatform])
+AC_DEFINE_UNQUOTED([BuildArch],["$BuildArch_CPP"],[BuildArch])
+AC_DEFINE_UNQUOTED([BuildOS],["$BuildOS_CPP"],[BuildOS])
+AC_DEFINE_UNQUOTED([BuildVendor],["$BuildVendor_CPP"],[BuildVendor])
+
 GHC_CONVERT_PLATFORM_PARTS([host], [Host])
 FPTOOLS_SET_PLATFORM_VARS([host], [Host])
 FPTOOLS_SET_HASKELL_PLATFORM_VARS([Host])
+
+AC_DEFINE_UNQUOTED([HostPlatform],["$HostPlatform"],[HostPlatform])
+AC_DEFINE_UNQUOTED([HostArch],["$HostArch_CPP"],[HostArch])
+AC_DEFINE_UNQUOTED([HostOS],["$HostOS_CPP"],[HostOS])
+AC_DEFINE_UNQUOTED([HostVendor],["$HostVendor_CPP"],[HostVendor])
 
 GHC_SUBSECTIONS_VIA_SYMBOLS
 AS_IF([test x"${TargetHasSubsectionsViaSymbols}" = x"YES"],
@@ -169,7 +187,6 @@ FP_CHECK_SIZEOF_AND_ALIGNMENT(int32_t)
 FP_CHECK_SIZEOF_AND_ALIGNMENT(uint32_t)
 FP_CHECK_SIZEOF_AND_ALIGNMENT(int64_t)
 FP_CHECK_SIZEOF_AND_ALIGNMENT(uint64_t)
-
 
 FP_CHECK_FUNC([WinExec],
   [@%:@include <windows.h>], [WinExec("",0)])
@@ -377,9 +394,11 @@ AS_IF(
   [test "$CABAL_FLAG_libnuma" = 1],
   [AC_CHECK_HEADERS([numa.h numaif.h])])
 
-dnl ** Do an unregisterised build?
+dnl ** Is this an unregisterised build?
 dnl --------------------------------------------------------------
-AC_SUBST(CABAL_FLAG_unregisterised)
+
+dnl Only used for printing information
+AC_DEFINE_UNQUOTED([GhcUnregisterised], [$CABAL_FLAG_unregisterised], [Is this an unregistered build?])
 
 dnl ** I/O managers
 dnl --------------------------------------------------------------

@@ -66,6 +66,18 @@
 /* The alignment of a `void *'. */
 #undef ALIGNMENT_VOID_P
 
+/* BuildArch */
+#undef BuildArch
+
+/* BuildOS */
+#undef BuildOS
+
+/* BuildPlatform */
+#undef BuildPlatform
+
+/* BuildVendor */
+#undef BuildVendor
+
 /* Define (to 1) if C compiler has an LLVM back end */
 #undef CC_LLVM_BACKEND
 
@@ -78,6 +90,9 @@
 /* Define to 1 if your processor stores words of floats with the most
    significant byte first */
 #undef FLOAT_WORDS_BIGENDIAN
+
+/* Is this an unregistered build? */
+#undef GhcUnregisterised
 
 /* Has musttail */
 #undef HAS_MUSTTAIL
@@ -380,6 +395,18 @@
 /* Define to 1 if 'vfork' works. */
 #undef HAVE_WORKING_VFORK
 
+/* HostArch */
+#undef HostArch
+
+/* HostOS */
+#undef HostOS
+
+/* HostPlatform */
+#undef HostPlatform
+
+/* HostVendor */
+#undef HostVendor
+
 /* Define to 1 if the mio I/O manager should be built */
 #undef IOMGR_BUILD_MIO
 
@@ -435,8 +462,14 @@
 /* Define to the version of this package. */
 #undef PACKAGE_VERSION
 
+/* Version of GHC used to build this RTS */
+#undef ProjectVersion
+
 /* Use mmap in the runtime linker */
 #undef RTS_LINKER_USE_MMAP
+
+/* RtsWay */
+#undef RtsWay
 
 /* The size of 'char', as computed by sizeof. */
 #undef SIZEOF_CHAR

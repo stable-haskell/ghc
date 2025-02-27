@@ -378,8 +378,8 @@ void printRtsInfo(const RtsConfig rts_config) {
     // say the target is <ABI adj>, unless we are talking about the host
     // platform of the compiler / ABI used by a compiler plugin. This is *not*
     // that, so I think a rename is in order to avoid confusion.
-    mkRtsInfoPair("Compiler unregisterised", GhcUnregisterised);
-    mkRtsInfoPair("Tables next to code",     TablesNextToCode);
+    mkRtsInfoPair("Compiler unregisterised", GhcUnregisterised ? "yes" : "no");
+    mkRtsInfoPair("Tables next to code",     TABLES_NEXT_TO_CODE ? "yes" : "no");
     mkRtsInfoPair("Flag -with-rtsopts",      /* See #15261 */
         rts_config.rts_opts != NULL ? rts_config.rts_opts : "");
     selectIOManager(); /* resolve the io-manager, accounting for flags  */
