@@ -1,0 +1,48 @@
+name: CI (with nix)
+
+# Trigger the workflow on push or pull request, but only for the master branch
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+  push:
+    branches: [master]
+
+defaults:
+  run:
+    shell: devx {0}
+
+jobs:
+  cabal:
+    name: ${{ matrix.os }} / ghc ${{ matrix.ghc }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+        ghc:
+          - ghc98 # bootstrapping compiler
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: "recursive"
+
+    - name: Build
+      uses: input-output-hk/actions/devx@latest
+      with:
+        platform: ${{ matrix.os == 'ubuntu-latest' && 'x86_64-linux' || 'aarch64-darwin' }}
+        compiler-nix-name: ${{ matrix.ghc }}
+        minimal: true
+        ghc: true
+
+    - run: cabal update
+
+    - name: Build stage1
+      run: make stage1
+
+    - name: Build stage1-rts
+      run: make stage1-rts
