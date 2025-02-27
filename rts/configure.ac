@@ -10,8 +10,8 @@ AC_INIT([GHC run-time system], [1.0.2], [libraries@haskell.org], [rts])
 
 AC_CONFIG_MACRO_DIRS([../m4])
 
-# Safety check: Ensure that we are in the correct source directory.
-AC_CONFIG_SRCDIR([include/rts/Constants.h])
+# Ensure that we are in the correct source directory.
+AC_CONFIG_SRCDIR([rts.cabal])
 
 dnl * We require autoconf version 2.69 due to
 dnl   https://bugs.ruby-lang.org/issues/8179. Also see #14910.
