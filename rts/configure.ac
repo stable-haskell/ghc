@@ -23,7 +23,10 @@ dnl   recently.
 AC_PREREQ([2.69])
 
 AC_CONFIG_FILES([include/ghcplatform.h])
+AC_CONFIG_FILES([rts.buildinfo])
 AC_CONFIG_HEADERS([include/ghcautoconf.h])
+
+AC_PROG_AWK
 
 AC_ARG_WITH([compiler],
    [AS_HELP_STRING([--with-compiler=PATH],
@@ -463,49 +466,34 @@ GHC_IOMANAGER_DEFAULT_AC_DEFINE([IOManagerThreadedDefault], [threaded],
 GHC_IOMANAGER_DEFAULT_AC_DEFINE([IOManagerThreadedDefault], [threaded],
                                 [winio], [IOMGR_DEFAULT_THREADED_WINIO])
 
-
-dnl ** Write config files
-dnl --------------------------------------------------------------
-
-AC_OUTPUT
-
 dnl ######################################################################
 dnl Generate external symbol flags (-Wl,-u...)
 dnl ######################################################################
 
 dnl See Note [Undefined symbols in the RTS]
 
-[
-symbolExtraDefs=''
-if [ "$CABAL_FLAG_find_ptr" = 1 ]; then
-    symbolExtraDefs+=' -DFIND_PTR'
+TEMP_FILE=`mktemp conftest.XXXXXX` || exit 1
+
+cp $srcdir/external-symbols.list "$TEMP_FILE"
+
+if test "$CABAL_FLAG_find_ptr" = 1; then
+	echo findPtr >> "$TEMP_FILE"
 fi
 
-cat $srcdir/external-symbols.list.in \
-    | "$CC" $symbolExtraDefs -E -P -traditional -Iinclude - -o - \
-    | sed -e '/^ *$/d' \
-    > external-symbols.list \
-    || exit 1
+if test "$HostOS_CPP" = "mingw32"; then
+	echo ghczminternal_GHCziInternalziEventziWindows_processRemoteCompletion_closure >> "$TEMP_FILE"
+fi
 
-if [ "$CABAL_FLAG_leading_underscore" = 1 ]; then
-    sedExpr='s/^(.*)$/  "-Wl,-u,_\1"/'
+if test "$CABAL_FLAGS_leading_underscore" = 1; then
+	LDFLAGS="$LDFLAGS `echo; $AWK '{ print "   -Wl,-u,_" $0 }' "$TEMP_FILE"`"
 else
-    sedExpr='s/^(.*)$/  "-Wl,-u,\1"/'
+	LDFLAGS="$LDFLAGS `echo; $AWK '{ print "   -Wl,-u," $0 }' "$TEMP_FILE"`"
 fi
-sed -E -e "${sedExpr}" external-symbols.list > external-symbols.flags
-unset sedExpr
-rm -f external-symbols.list
-]
 
-dnl ######################################################################
-dnl Generate build-info
-dnl ######################################################################
+rm -rf "$TEMP_FILE"
 
-[
-cat $srcdir/rts.buildinfo.in \
-    | "$CC" -E -P -traditional - -o - \
-    | sed -e '/^ *$/d' \
-    > rts.buildinfo \
-    || exit 1
-rm -f external-symbols.flags
-]
+dnl --------------------------------------------------------------
+dnl ** Write config files
+dnl --------------------------------------------------------------
+
+AC_OUTPUT

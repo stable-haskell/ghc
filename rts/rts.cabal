@@ -16,7 +16,7 @@ extra-source-files:
     config.guess
     config.sub
     configure.ac
-    external-symbols.list.in
+    external-symbols.list
     rts.buildinfo.in
     linker/ELFRelocs/AArch64.def
     linker/ELFRelocs/ARM.def
