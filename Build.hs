@@ -173,6 +173,7 @@ buildGhcStage booting opts cabal ghc0 dst = do
         , "  " ++ src </> "libraries/ghci"
         , "  " ++ src </> "libraries/os-string/"
         , "  " ++ src </> "libraries/process/"
+        , "  " ++ src </> "libraries/rts-fs/"
         , "  " ++ src </> "libraries/rts-headers/"
         , "  " ++ src </> "libraries/semaphore-compat"
         , "  " ++ src </> "libraries/time"
@@ -364,18 +365,13 @@ prepareGhcSources dst = do
   cp "./libraries"    dst
   cp "./compiler/*"   (dst </> "libraries/ghc/")
   cp "./rts"          (dst </> "libraries/")
+  cp "./rts-fs"       (dst </> "libraries/")
   cp "./rts-headers" (dst </> "libraries/")
   cp "./ghc"          (dst </> "ghc-bin")
   cp "./utils"        dst
 
   cp "./config.sub"   (dst </> "libraries/rts/")
   cp "./config.guess" (dst </> "libraries/rts/")
-
-  -- shared among ghc-internal rts and unlit
-  cp "utils/fs/fs.h" (dst </> "libraries/ghc-internal/include")
-  cp "utils/fs/fs.c" (dst </> "libraries/ghc-internal/cbits")
-  cp "utils/fs/fs.*" (dst </> "libraries/rts/")
-  cp "utils/fs/fs.*" (dst </> "utils/unlit/")
 
 buildBootLibraries :: Cabal -> Ghc -> GhcPkg -> DeriveConstants -> GenApply -> GenPrimop -> GhcBuildOptions -> FilePath -> IO ()
 buildBootLibraries cabal ghc ghcpkg derive_constants genapply genprimop opts dst = do
@@ -443,6 +439,7 @@ buildBootLibraries cabal ghc ghcpkg derive_constants genapply genprimop opts dst
         , ""
         , "packages:"
         , "  " ++ src </> "libraries/rts"
+        , "  " ++ src </> "libraries/rts-fs"
         , "  " ++ src </> "libraries/rts-headers"
         , ""
         , "benchmarks: False"
