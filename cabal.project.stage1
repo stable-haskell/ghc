@@ -1,7 +1,3 @@
--- aka cabal.project-ghc
--- NOTE: this should be in sync with stage1_project in Build.hs until we merge them
--- (except some packages paths)
-
 packages:
   ./compiler
   ./ghc

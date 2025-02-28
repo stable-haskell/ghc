@@ -1,0 +1,89 @@
+allow-boot-library-installs: True
+active-repositories: :none
+
+benchmarks: False
+tests: False
+
+packages:
+  ./compiler
+  ./ghc
+  ./rts
+  ./rts-headers
+  ./rts-fs
+  ./libraries/array
+  ./libraries/base
+  ./libraries/binary
+  ./libraries/bytestring
+  ./libraries/Cabal/Cabal
+  ./libraries/Cabal/Cabal-syntax
+  ./libraries/containers/containers
+  ./libraries/deepseq
+  ./libraries/directory
+  ./libraries/exceptions
+  ./libraries/file-io
+  ./libraries/filepath
+  ./libraries/ghc-bignum
+  ./libraries/ghc-boot
+  ./libraries/ghc-boot-th
+  ./libraries/ghc-compact
+  ./libraries/ghc-experimental
+  ./libraries/ghc-heap
+  ./libraries/ghci
+  -- ./libraries/ghc-internal
+  _stage1-boot/src/ghc-internal
+  ./libraries/ghc-platform
+  ./libraries/ghc-prim
+  ./libraries/haskeline
+  ./libraries/hpc
+  ./libraries/integer-gmp
+  ./libraries/mtl
+  ./libraries/os-string
+  ./libraries/parsec
+  ./libraries/pretty
+  ./libraries/process
+  ./libraries/semaphore-compat
+  ./libraries/stm
+  ./libraries/system-cxx-std-lib
+  ./libraries/template-haskell
+  ./libraries/terminfo
+  ./libraries/text
+  ./libraries/time
+  ./libraries/transformers
+  ./libraries/unix
+  ./libraries/Win32
+  ./libraries/xhtml
+  ./utils/deriveConstants
+  ./utils/genprimopcode
+  ./utils/ghc-pkg
+  ./utils/ghc-toolchain
+  ./utils/hsc2hs
+  ./utils/unlit
+  https://hackage.haskell.org/package/alex-3.5.2.0/alex-3.5.2.0.tar.gz
+  https://hackage.haskell.org/package/happy-2.1.5/happy-2.1.5.tar.gz
+  https://hackage.haskell.org/package/happy-lib-2.1.5/happy-lib-2.1.5.tar.gz
+  -- https://hackage.haskell.org/package/os-string-2.0.7/os-string-2.0.7.tar.gz
+  -- https://hackage.haskell.org/package/process-1.6.25.0/process-1.6.25.0.tar.gz
+  -- https://hackage.haskell.org/package/time-1.14/time-1.14.tar.gz
+  -- https://hackage.haskell.org/package/unix-2.8.6.0/unix-2.8.6.0.tar.gz
+
+package hsc2hs
+  flags: +in-ghc-tree
+
+package ghc
+  -- build-tool-depends: require genprimopcode, etc. used by Setup.hs
+  -- internal-interpreter: otherwise our compiler has the internal
+  -- interpreter but not the boot library we install
+  -- FIXME: we should really install the lib we used to build stage2
+  flags: +build-tool-depends +internal-interpreter
+
+package ghci
+  flags: +internal-interpreter
+
+package ghc-internal
+  -- FIXME: make our life easier for now by using the native bignum backend
+  flags: +bignum-native
+
+package text
+  -- FIXME: avoid having to deal with system-cxx-std-lib fake package for now
+  flags: -simdutf
+
