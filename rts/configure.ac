@@ -55,7 +55,7 @@ GHC_VERSION=`$GHC --numeric-version 2>/dev/null`
 if test -z "$GHC_VERSION"; then
   AC_MSG_ERROR([The specified compiler ($GHC) does not appear to be a valid GHC.])
 fi
- 
+
 dnl NOTE: This is relative to what is being used to compile the rts,
 dnl even if this is a new rts to be included in a new compiler version.
 dnl tl;dr: this is going to be wrong in stage1 but will be correct in stage2.
@@ -510,6 +510,68 @@ else
 fi
 
 rm -rf "$TEMP_FILE"
+
+dnl --------------------------------------------------------------
+dnl Generate derived constants
+dnl --------------------------------------------------------------
+
+AC_ARG_VAR([NM], [Path to the nm program])
+AC_PATH_PROG([NM], nm)
+if test -z "$NM"; then
+	AC_MSG_ERROR([Cannot find nm])
+fi
+
+AC_ARG_VAR([OBJDUMP], [Path to the objdump program])
+AC_PATH_PROG([OBJDUMP], objdump)
+if test -z "$OBJDUMP"; then
+	AC_MSG_ERROR([Cannot find objdump])
+fi
+
+AC_ARG_VAR([DERIVE_CONSTANTS], [Path to the deriveConstants program])
+AC_PATH_PROG([DERIVE_CONSTANTS], deriveConstants)
+if test -z "$DERIVE_CONSTANTS"; then
+	AC_MSG_ERROR([Cannot find deriveConstants])
+fi
+
+AC_CONFIG_COMMANDS([DerivedConstants.h],[
+	dnl NOTE:  dnl pass `-fcommon` to force symbols into the common section. If they end
+	dnl up in the ro data section `nm` won't list their size, and thus derivedConstants
+	dnl will fail. Recent clang (e.g. 16) will by default use `-fno-common`.
+	dnl
+	dnl FIXME: using a relative path here is TERRIBLE
+	dnl
+	$DERIVE_CONSTANTS \
+		--gen-header \
+		-o include/DerivedConstants.h \
+		--target-os "$BuildOS_CPP" \
+		--gcc-program "$CC" \
+		--nm-program "$NM" \
+		--objdump-program "$OBJDUMP" \
+		--tmpdir "$PWD" \
+		--gcc-flag "-Iinclude" \
+		--gcc-flag "-I$srcdir" \
+		--gcc-flag "-I$srcdir/include" \
+		--gcc-flag "-I$srcdir/../rts-headers/include"
+],[
+	BuildOS_CPP=$BuildOS_CPP
+	CC=$CC
+	DERIVE_CONSTANTS=$DERIVE_CONSTANTS
+	NM=$NM
+	OBJDUMP=$OBJDUMP
+])
+
+AC_ARG_VAR([GENAPPLY], [Path to the genapply program])
+AC_PATH_PROG([GENAPPLY], genapply)
+if test -z "$GENAPPLY"; then
+	AC_MSG_ERROR([Cannot find genapply])
+fi
+
+AC_CONFIG_COMMANDS([AutoApply.h],[
+	$GENAPPLY include/DerivedConstants.h > AutoApply.cmm
+	$GENAPPLY include/DerivedConstants.h -V16 > AutoApply_V16.cmm
+	$GENAPPLY include/DerivedConstants.h -V32 > AutoApply_V32.cmm
+	$GENAPPLY include/DerivedConstants.h -V64 > AutoApply_V64.cmm
+],[GENAPPLY=$GENAPPLY])
 
 dnl --------------------------------------------------------------
 dnl ** Write config files
