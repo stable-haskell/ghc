@@ -348,6 +348,7 @@ library
       ghcautoconf.h
       ghcplatform.h
       DerivedConstants.h
+      stg/MachRegsForHost.h
 
     if arch(javascript)
 
@@ -384,7 +385,6 @@ library
 
       install-includes: HsFFI.h MachDeps.h Rts.h RtsAPI.h Stg.h
                         ghcconfig.h ghcplatform.h
-                        stg/MachRegsForHost.h
                         stg/Types.h
 
     else

@@ -12,6 +12,19 @@ cradle:
         cradle:
           direct:
             arguments: []
+    - path: ./rts/Setup.hs
+      config:
+        cradle:
+          direct:
+            arguments:
+              - -clear-package-db
+              - -global-package-db
+              - -package-db _stage0/store/ghc-9.8.4-6626/package.db
+              # - -package base
+              # - -package Cabal
+              # - -package Cabal-syntax
+              # - -package mtl
+              # - -package transformers
     - path: .
       config:
         cradle: {bios: {program: "./hadrian/hie-bios"}}

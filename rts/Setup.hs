@@ -10,7 +10,10 @@ import Distribution.Types.BuildInfo as BI
 import Distribution.Types.InstalledPackageInfo as IPI
 import Distribution.Types.Library
 import Distribution.Types.PackageDescription
+import Distribution.Utils.Path (interpretSymbolicPathCWD, (</>), makeRelativePathEx)
 import Distribution.Verbosity (normal)
+import System.Directory (getCurrentDirectory)
+import System.Info (os)
 
 nmProgram :: Program
 nmProgram = simpleProgram "nm"
@@ -27,9 +30,10 @@ main =
         autoconfUserHooks
             { postConf = \args flags pd lbi -> do
                 postConf autoconfUserHooks args flags pd lbi
-                
+
                 let verbosity = fromFlagOrDefault normal (configVerbosity flags)
-                let progdb = withPrograms lbi
+                    progdb = withPrograms lbi
+
                 (nm, _progdb) <- requireProgram verbosity nmProgram progdb
                 (objdump, _progdb) <- requireProgram verbosity objdumpProgram progdb
                 (gcc, _progdb) <- requireProgram verbosity gccProgram progdb
@@ -48,13 +52,13 @@ main =
                         , incdir <- IPI.includeDirs ipi
                         ]
 
-
+                getCurrentDirectory >>= putStrLn
                 runProgram verbosity deriveConstants $
                     [ "--gen-header"
                     , "-o"
-                    , "include/DerivedConstants.h"
+                    , interpretSymbolicPathCWD (buildDir lbi </> makeRelativePathEx "include/DerivedConstants.h")
                     , "--target-os"
-                    , "linux"
+                    , os
                     , "--gcc-program"
                     , programPath gcc
                     , "--nm-program"
@@ -62,8 +66,10 @@ main =
                     , "--objdump-program"
                     , programPath objdump
                     , "--tmpdir"
-                    , buildDir lbi
+                    , interpretSymbolicPathCWD (buildDir lbi)
+                    , "--gcc-flag"
+                    , "-I" ++ interpretSymbolicPathCWD (buildDir lbi </> makeRelativePathEx "include")
                     ]
-                        ++ foldMap (\i -> ["--gcc-flag", "-I" ++ i]) thisIncDirs
+                        ++ foldMap ((\i -> ["--gcc-flag", "-I" ++ i]) . interpretSymbolicPathCWD) thisIncDirs
                         ++ foldMap (\incdir -> ["--gcc-flag", "-I" ++ incdir]) depsIncDirs
             }

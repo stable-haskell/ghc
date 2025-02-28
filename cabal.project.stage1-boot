@@ -7,9 +7,6 @@ tests: False
 packages:
   ./compiler
   ./ghc
-  ./rts
-  ./rts-headers
-  ./rts-fs
   ./libraries/array
   ./libraries/base
   ./libraries/binary

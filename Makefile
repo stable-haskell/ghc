@@ -5,9 +5,11 @@ SHELL := bash
 MAKEFLAGS += --warn-undefined-variables
 MAKEFLAGS += --no-builtin-rules
 
+all: stage1-boot
+
 CABAL0 ?= cabal
 CABAL  ?= _stage0/bin/cabal
-GHC    ?= ghc
+GHC0   ?= ghc
 
 define LIB =
 BOLD_RED='\033[1;31m'
@@ -76,55 +78,64 @@ _stage1/lib/settings: _stage1/bin/ghc-toolchain-bin
 
 stage1: _stage1/bin/ghc _stage1/lib/settings
 
-#
-# TODO: We cannot build the rts with cabal-install because we are passing
-# to deriveConstants the headers in rts-headers via a relative path.
-# cabal-install's install command makes a source distribution before building
-# and this breaks the relative path. The solution is to move the call to
-# derivedConstants into Setup.hs where we have access to the installed
-# packagedb. I had a version of this then it looked too complex and I moved back
-# to configure.ac.
-# 
-# stage1-rts: CABAL = _stage0/bin/cabal
-# stage1-rts: GHC = $(abspath _stage1/bin/ghc)
-# stage1-rts: OUT ?= $(abspath _stage1-rts)
-# stage1-rts: _stage0/bin/cabal _stage1/bin/ghc _stage1/bin/deriveConstants _stage1/bin/genapply rts/configure
-# 	@$(LIB)
-# 	# for rts/configure
-# 	export DERIVE_CONSTANTS=$(abspath _stage1/bin/deriveConstants)
-# 	export GENAPPLY=$(abspath _stage1/bin/genapply)
-# 	log $(CABAL_INSTALL) --lib --package-env $(OUT) --project-file cabal.project.stage1-rts all
-
-stage1-rts: CABAL = _stage0/bin/cabal
-stage1-rts: CABAL_CONFIG_FLAGS += --with-compiler $(abspath _stage1/bin/ghc)
-stage1-rts: CABAL_CONFIG_FLAGS += --prefix $(OUT)
-stage1-rts: CABAL_CONFIG_FLAGS += --package-db $(OUT)/lib/package.conf.d
-stage1-rts: OUT ?= $(abspath _stage1-rts)
-stage1-rts: _stage0/bin/cabal-main-simple _stage0/bin/cabal-main-configure _stage1/bin/ghc _stage1/bin/deriveConstants _stage1/bin/genapply rts/configure
+_stage1-rts/lib/package.conf.d/rts-fs-1.0.0.0.conf: _stage0/bin/cabal-main-simple 
 	@$(LIB)
-	mkdir -p $(OUT)/lib/package.conf.d
-
-	# for rts/configure
-	export DERIVE_CONSTANTS=$(abspath _stage1/bin/deriveConstants)
-	export GENAPPLY=$(abspath _stage1/bin/genapply)
+	mkdir -p "$(@D)/lib/package.conf.d"
 
 	pushd rts-fs || exit
-	log ../_stage0/bin/cabal-main-simple configure --builddir "$(OUT)/dist/rts-fs" $(CABAL_CONFIG_FLAGS)
+	log ../_stage0/bin/cabal-main-simple configure --builddir "$(OUT)/dist/rts-fs" $(CABAL_CONFIG_FLAGS) --ipid=$(notdir $(@:%.conf=%))
 	log ../_stage0/bin/cabal-main-simple build --builddir "$(OUT)/dist/rts-fs"
 	log ../_stage0/bin/cabal-main-simple install --builddir "$(OUT)/dist/rts-fs"
 	popd
 
+_stage1-rts/lib/package.conf.d/rts-headers-1.0.0.0.conf: _stage0/bin/cabal-main-simple
+	@$(LIB)
+	mkdir -p "$(@D)"
+
 	pushd rts-headers || exit
-	log ../_stage0/bin/cabal-main-simple configure --builddir "$(OUT)/dist/rts-headers" $(CABAL_CONFIG_FLAGS)
+	log ../_stage0/bin/cabal-main-simple configure --builddir "$(OUT)/dist/rts-headers" $(CABAL_CONFIG_FLAGS) --ipid=$(notdir $(@:%.conf=%))
 	log ../_stage0/bin/cabal-main-simple build --builddir "$(OUT)/dist/rts-headers"
 	log ../_stage0/bin/cabal-main-simple install --builddir "$(OUT)/dist/rts-headers"
 	popd
 
+# NOTE: The bootstrap is particularly annoying in this step.
+#
+# rts has a custom config so we need a Cabal to compile Setup.hs, but we cannot
+# use the new compiler (not even stage1) for this because we do not have the rts
+# yet (as we are just preparing to build it).
+#
+# We cut the know by using the version of Cabal we had built with the stage0 compiler.
+# NOTE: the requirement _stage0/bin/cabal is representative of the fact that we had built the library
+#
+
+# _stage0/bin/cabal as evidence that we have build cabal
+_stage1-rts/dist/rts/Setup: .EXTRA_PREREQS=_stage0/bin/cabal
+_stage1-rts/dist/rts/Setup: rts/Setup.hs
+	@$(LIB)
+	# FIXME I am using the store as a package db, its path is not quite fixed as it
+	# relies on the bootstrap compiler id
+	mkdir -p $(@D)
+	log $(GHC0) -clear-package-db -global-package-db -package-db _stage0/store/*/package.db -o $@ $<
+
+_stage1-rts/lib/package.conf.d/rts-1.0.0.0.conf: _stage1/bin/ghc rts/configure _stage1-rts/lib/package.conf.d/rts-fs-1.0.0.0.conf _stage1-rts/lib/package.conf.d/rts-headers-1.0.0.0.conf _stage1-rts/dist/rts/Setup _stage1/bin/deriveConstants _stage1/bin/genapply 
+	@$(LIB)
+	mkdir -p "$(@D)/lib/package.conf.d"
+
+	# for rts setup to find derivedConstants and genApply
+	export PATH=$(abspath _stage1/bin):$$PATH
+
 	pushd rts || exit
-	log ../_stage0/bin/cabal-main-configure configure --builddir "$(OUT)/dist/rts" $(CABAL_CONFIG_FLAGS)
-	log ../_stage0/bin/cabal-main-configure build --builddir "$(OUT)/dist/rts"
-	log ../_stage0/bin/cabal-main-configure install --builddir "$(OUT)/dist/rts"
+	log ../_stage1-rts/dist/rts/Setup configure --builddir "$(OUT)/dist/rts" $(CABAL_CONFIG_FLAGS) --ipid=$(notdir $(@:%.conf=%))
+	log ../_stage1-rts/dist/rts/Setup build --builddir "$(OUT)/dist/rts"
+	log ../_stage1-rts/dist/rts/Setup install --builddir "$(OUT)/dist/rts"
 	popd
+
+stage1-rts: GHC = _stage1/bin/ghc
+stage1-rts: CABAL_CONFIG_FLAGS += -v --with-compiler $(abspath _stage1/bin/ghc)
+stage1-rts: CABAL_CONFIG_FLAGS += --prefix $(OUT)
+stage1-rts: CABAL_CONFIG_FLAGS += --package-db $(OUT)/lib/package.conf.d
+stage1-rts: OUT ?= $(abspath _stage1-rts)
+stage1-rts: $(addprefix _stage1-rts/lib/package.conf.d/,rts-1.0.0.0.conf rts-fs-1.0.0.0.conf rts-headers-1.0.0.0.conf)
 
 _stage1-boot/src/compiler/GHC/Builtin/primops.txt: compiler/GHC/Builtin/primops.txt.pp
 	@$(LIB)
@@ -147,12 +158,13 @@ _stage1-boot/src/ghc-internal/src/GHC/Internal/PrimopWrappers.hs: _stage1-boot/s
 	mkdir -p $(@D)
 	log _stage1/bin/genprimopcode --make-haskell-wrappers < $< > $@
 	
-_stage1-boot/src/ghc-internal/.stamp: _stage1-boot/src/ghc-internal/ghc-internal.cabal
-_stage1-boot/src/ghc-internal/.stamp: _stage1-boot/src/ghc-internal/src/GHC/Internal/Prim.hs
-_stage1-boot/src/ghc-internal/.stamp: _stage1-boot/src/ghc-internal/src/GHC/Internal/PrimopWrappers.hs
+_stage1-boot/src/ghc-internal/.ready: _stage1-boot/src/ghc-internal/ghc-internal.cabal
+_stage1-boot/src/ghc-internal/.ready: _stage1-boot/src/ghc-internal/src/GHC/Internal/Prim.hs
+_stage1-boot/src/ghc-internal/.ready: _stage1-boot/src/ghc-internal/src/GHC/Internal/PrimopWrappers.hs
+_stage1-boot/src/ghc-internal/.ready: _stage1-boot/src/ghc-internal/configure
 
 # targets
-STAGE1_BOOT_TARGETS = rts ghc-internal ghc-experimental ghc-compact base stm system-cxx-std-lib
+STAGE1_BOOT_TARGETS = ghc-internal ghc-experimental ghc-compact base stm system-cxx-std-lib
 # shallow compat packages over ghc-internal
 STAGE1_BOOT_TARGETS += ghc-prim ghc-bignum integer-gmp template-haskell
 # target dependencies
@@ -167,10 +179,9 @@ STAGE1_BOOT_TARGETS += ghc-boot ghc-heap ghc-platform ghc-toolchain ghci ghc
 stage1-boot: CABAL = _stage0/bin/cabal
 stage1-boot: GHC = $(abspath _stage1/bin/ghc)
 stage1-boot: OUT ?= $(abspath _stage1-boot)
-stage1-boot: _stage0/bin/cabal _stage1/bin/ghc _stage1-boot/src/ghc-internal/.stamp _stage1-boot/src/ghc-internal/configure
+stage1-boot: _stage0/bin/cabal _stage1/bin/ghc _stage1-boot/src/ghc-internal/.ready stage1-rts
 	@$(LIB)
 	# for rts/configure
 	export DERIVE_CONSTANTS=$(abspath _stage1/bin/deriveConstants)
 	export GENAPPLY=$(abspath _stage1/bin/genapply)
-	log $(CABAL_INSTALL) --lib --package-env $(OUT) --project-file cabal.project.stage1-boot $(STAGE1_BOOT_TARGETS)
-
+	log $(CABAL_INSTALL) --lib --package-db=$(abspath _stage1-rts/lib/package.conf.d) --package-env $(OUT) --project-file cabal.project.stage1-boot Cabal

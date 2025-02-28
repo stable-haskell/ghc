@@ -76,16 +76,13 @@ jobs:
       with:
         key: build-${{ matrix.os }}-${{ matrix.ghc }}-${{ github.run_id }}
         restore-keys: build-${{ matrix.os }}-${{ matrix.ghc }}-
-        path: _build _stage0 _stage1
+        path: _build _stage0 _stage1 _stage1-rts _stage1-boot
           
     - name: Update Hackage index
       run: cabal update
 
-    - name: Build stage1
-      run: make stage1
-
-    - name: Build stage1-rts
-      run: make stage1-rts
+    - name: Build
+      run: make
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
@@ -98,7 +95,7 @@ jobs:
       if: always()
       with:
         key: build-${{ matrix.os }}-${{ matrix.ghc }}-${{ github.run_id }}
-        path: _build _stage0 _stage1
+        path: _build _stage0 _stage1 _stage1-rts _stage1-boot
 
     - name: Save cabal store
       uses: actions/cache/save@v4
