@@ -53,74 +53,21 @@ $(STAGE1_BIN) &: $(CABAL)
 	log mkdir -p $(@D)
 	log $(CABAL_INSTALL) --project-file cabal.project.stage1 $(addprefix exe:,$(STAGE1_EXE))
 
-_stage1/lib/settings:
+TARGET := $(shell cc -dumpmachine)
+
+# FIXME: why do they all claim ("target has subsections via symbols","NO") for
+# macOS? 9.8 seems to claim this as well. This seems wrong and will severely
+# impact dead-stripability if ghc does not emit subsection via symbols. wtf.
+# I remain that `ghc-toolchain` is a bad tool and should just be a configure
+# script for ghc-bin producing a `settings` file according to a passed
+# `--target`. I also think most of the settins file values should have sensible
+# defaults: install_name_tool = install_name_tool, ... that do not need to be
+# explicitly listed in the settings file unless you want to override them.
+
+_stage1/lib/settings: _stage1/bin/ghc-toolchain-bin
 	@$(LIB)
-
-	# Write here only the settings **actually read** by GHC.
-	# ghc --info will complete the output with other details
-	# known internally (like the project version)
-
 	mkdir -p $(@D)
-	cat > $@ <<-'EOF'
-	[ ("C compiler command","cc")
-	, ("C compiler flags","")
-	, ("C++ compiler command","c++")
-	, ("C++ compiler flags","")
-	, ("C compiler link flags","")
-	, ("C compiler supports -no-pie","YES")
-	, ("CPP command","cpp")
-	, ("CPP flags","-E")
-	, ("Haskell CPP command","cpp")
-	, ("Haskell CPP flags","-undef -traditional")
-	, ("JavaScript CPP command","cpp")
-	, ("JavaScript CPP flags","-CC -Wno-unicode -nostdinc")
-	, ("C-- CPP command","cpp")
-	, ("C-- CPP flags","")
-	, ("C-- CPP supports -g0","YES")
-	, ("ld supports compact unwind","NO")
-	, ("ld supports filelist","NO")
-	, ("ld supports single module","NO")
-	, ("ld is GNU ld","YES")
-	, ("Merge objects command","ld.gold")
-	, ("Merge objects flags","-r")
-	, ("Merge objects supports response files","YES")
-	, ("ar command","ar")
-	, ("ar flags","q")
-	, ("ar supports at file","YES")
-	, ("ar supports -L","NO")
-	, ("ranlib command","ranlib")
-	, ("otool command","")
-	, ("install_name_tool command","")
-	, ("windres command","/bin/false")
-	, ("unlit command","$$topdir/../bin/unlit")
-	, ("cross compiling","NO")
-	, ("target platform string","x86_64-unknown-linux")
-	, ("target os","OSLinux")
-	, ("target arch","ArchX86_64")
-	, ("target word size","8")
-	, ("target word big endian","NO")
-	, ("target has GNU nonexec stack","YES")
-	, ("target has .ident directive","YES")
-	, ("target has subsections via symbols","NO")
-	, ("target has libm","NO")
-	, ("Unregisterised","NO")
-	, ("LLVM target","x86_64-unknown-linux-gnu")
-	, ("LLVM llc command","llc")
-	, ("LLVM opt command","opt")
-	, ("LLVM llvm-as command","llvm-as")
-	, ("Use inplace MinGW toolchain","NO")
-	, ("target RTS linker only supports shared libraries","NO")
-	, ("Use interpreter","YES")
-	, ("Support SMP","YES")
-	, ("RTS ways","")
-	, ("Tables next to code","YES")
-	, ("Leading underscore","NO")
-	, ("Use LibFFI","NO")
-	, ("RTS expects libdw","NO")
-	, ("Relative Global Package DB","")
-	, ("base unit-id","")
-	]
-	EOF
+	log _stage1/bin/ghc-toolchain-bin --cc=cc --cxx=c++ --output-settings -t $(TARGET) -o $@
 
 stage1: _stage1/bin/ghc _stage1/lib/settings
 
