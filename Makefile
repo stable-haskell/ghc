@@ -36,13 +36,15 @@ CABAL_INSTALL = $(CABAL) $(CABAL_FLAGS) install $(CABAL_INSTALL_FLAGS)
 
 cabal: _stage0/bin/cabal
 
-_stage0/bin/cabal: OUT ?= $(abspath _stage0)
-_stage0/bin/cabal: CABAL=$(CABAL0)
-_stage0/bin/cabal:
+CABAL_EXE = cabal cabal-main-simple cabal-main-configure
+CABAL_BIN := $(addprefix _stage0/bin/,$(CABAL_EXE))
+
+$(CABAL_BIN) &: OUT ?= $(abspath _stage0)
+$(CABAL_BIN) &: CABAL=$(CABAL0)
+$(CABAL_BIN) &:
 	@$(LIB)
 	log mkdir -p $(@D)
-	log $(CABAL_INSTALL) --project-dir libraries/Cabal --project-file cabal.release.project cabal-install:exe:cabal
-
+	log $(CABAL_INSTALL) --project-dir libraries/Cabal --project-file cabal.release.project $(addprefix exe:,$(CABAL_EXE))
 
 STAGE1_EXE = ghc ghc-toolchain-bin deriveConstants genprimopcode genapply
 STAGE1_BIN := $(addprefix _stage1/bin/,$(STAGE1_EXE))
@@ -73,7 +75,7 @@ stage1: _stage1/bin/ghc _stage1/lib/settings
 
 stage1-rts: CABAL = _stage0/bin/cabal
 stage1-rts: OUT ?= $(abspath _stage1-rts)
-stage1-rts: _stage0/bin/cabal stage1 rts/configure libraries/ghc-internal/configure
+stage1-rts: _stage0/bin/cabal-main-simple _stage0/bin/cabal-main-configure _stage1/bin/ghc _stage1/bin/deriveConstants _stage1/bin/genapply rts/configure
 	@$(LIB)
 
 	flags=(                                     \
@@ -84,22 +86,22 @@ stage1-rts: _stage0/bin/cabal stage1 rts/configure libraries/ghc-internal/config
 	mkdir -p $(OUT)/lib/package.conf.d
 
 	pushd rts-fs || exit
-	log ../$(CABAL) act-as-setup --build-type=Simple -- configure --builddir "$(OUT)/dist/rts-fs" "$${flags[@]}"
-	log ../$(CABAL) act-as-setup --build-type=Simple -- build --builddir "$(OUT)/dist/rts-fs"
-	log ../$(CABAL) act-as-setup --build-type=Simple -- install --builddir "$(OUT)/dist/rts-fs"
+	log ../_stage0/bin/cabal-main-simple configure --builddir "$(OUT)/dist/rts-fs" "$${flags[@]}"
+	log ../_stage0/bin/cabal-main-simple build --builddir "$(OUT)/dist/rts-fs"
+	log ../_stage0/bin/cabal-main-simple install --builddir "$(OUT)/dist/rts-fs"
 	popd
 
 	pushd rts-headers || exit
-	log ../$(CABAL) act-as-setup --build-type=Simple -- configure --builddir "$(OUT)/dist/rts-headers" "$${flags[@]}"
-	log ../$(CABAL) act-as-setup --build-type=Simple -- build --builddir "$(OUT)/dist/rts-headers"
-	log ../$(CABAL) act-as-setup --build-type=Simple -- install --builddir "$(OUT)/dist/rts-headers"
+	log ../_stage0/bin/cabal-main-simple configure --builddir "$(OUT)/dist/rts-headers" "$${flags[@]}"
+	log ../_stage0/bin/cabal-main-simple build --builddir "$(OUT)/dist/rts-headers"
+	log ../_stage0/bin/cabal-main-simple install --builddir "$(OUT)/dist/rts-headers"
 	popd
 
 	export DERIVE_CONSTANTS=$(abspath _stage1/bin/deriveConstants)
 	export GENAPPLY=$(abspath _stage1/bin/genapply)
 	pushd rts || exit
-	log ../$(CABAL) act-as-setup --build-type=Configure -- configure --builddir "$(OUT)/dist/rts" -v "$${flags[@]}"
-	log ../$(CABAL) act-as-setup --build-type=Configure -- build --builddir "$(OUT)/dist/rts" -v
-	log ../$(CABAL) act-as-setup --build-type=Configure -- install --builddir "$(OUT)/dist/rts" -v
+	log ../_stage0/bin/cabal-main-configure configure --builddir "$(OUT)/dist/rts" -v "$${flags[@]}"
+	log ../_stage0/bin/cabal-main-configure build --builddir "$(OUT)/dist/rts" -v
+	log ../_stage0/bin/cabal-main-configure install --builddir "$(OUT)/dist/rts" -v
 	popd
 
