@@ -45,6 +45,7 @@ CABAL_EXE = cabal cabal-main-simple cabal-main-configure
 CABAL_BIN = $(addprefix _stage0/bin/,$(CABAL_EXE))
 
 $(CABAL_BIN) &: OUT ?= $(abspath _stage0)
+$(CABAL_BIN) &: override GHC=$(GHC0)
 $(CABAL_BIN) &: CABAL=$(CABAL0)
 $(CABAL_BIN) &:
 	@$(LIB)
@@ -55,6 +56,7 @@ STAGE1_EXE = ghc ghc-toolchain-bin deriveConstants genprimopcode genapply
 STAGE1_BIN = $(addprefix _stage1/bin/,$(STAGE1_EXE))
 
 $(STAGE1_BIN) &: OUT ?= $(abspath _stage1)
+$(STAGE1_BIN) &: override GHC=$(GHC0)
 $(STAGE1_BIN) &: $(CABAL)
 	@$(LIB)
 	log mkdir -p $(@D)
@@ -130,8 +132,8 @@ _stage1-rts/lib/package.conf.d/rts-1.0.0.0.conf: _stage1/bin/ghc rts/configure _
 	log ../_stage1-rts/dist/rts/Setup install --builddir "$(OUT)/dist/rts"
 	popd
 
-stage1-rts: GHC = _stage1/bin/ghc
-stage1-rts: CABAL_CONFIG_FLAGS += -v --with-compiler $(abspath _stage1/bin/ghc)
+stage1-rts: GHC = $(abspath _stage1/bin/ghc)
+stage1-rts: CABAL_CONFIG_FLAGS += -v --with-compiler $(GHC)
 stage1-rts: CABAL_CONFIG_FLAGS += --prefix $(OUT)
 stage1-rts: CABAL_CONFIG_FLAGS += --package-db $(OUT)/lib/package.conf.d
 stage1-rts: OUT ?= $(abspath _stage1-rts)
