@@ -268,7 +268,7 @@ getGhcVersionIncludeFlags dflags logger tmpfs = do
         -- the user has provided an explicit `ghcversion.h` file to use.
         Just path -> do
           found <- doesFileExist path
-          unless found $ 
+          unless found $
             throwGhcExceptionIO (InstallationError ("ghcversion.h missing; tried: " ++ path))
           return ["-include", path]
         Nothing -> do
@@ -282,11 +282,11 @@ getGhcVersionIncludeFlags dflags logger tmpfs = do
 ghcVersionH :: String
 ghcVersionH =
   concat
-  ["#define __GLASGOW_HASKELL__ ", show cProjectVersionInt, "\n"
-  ,"#define __GLASGOW_HASKELL_FULL_VERSION__ ", show cProjectVersion, "\n"
+  ["#define __GLASGOW_HASKELL__ ", cProjectVersionInt, "\n"
+  ,"#define __GLASGOW_HASKELL_FULL_VERSION__ \"", cProjectVersion, "\"\n"
   ,"\n"
-  ,"#define __GLASGOW_HASKELL_PATCHLEVEL1__ ", show cProjectPatchLevel1, "\n"
-  ,"#define __GLASGOW_HASKELL_PATCHLEVEL2__ ", show cProjectPatchLevel2, "\n"
+  ,"#define __GLASGOW_HASKELL_PATCHLEVEL1__ ", cProjectPatchLevel1, "\n"
+  ,"#define __GLASGOW_HASKELL_PATCHLEVEL2__ ", cProjectPatchLevel2, "\n"
   ,"\n"
   ,"#define MIN_VERSION_GLASGOW_HASKELL(ma,mi,pl1,pl2) (     \\\n"
   ,"   ((ma)*100+(mi)) <  __GLASGOW_HASKELL__ ||             \\\n"
