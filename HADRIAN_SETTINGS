@@ -1,4 +1,6 @@
-[ ("cProjectGitCommitId", "0000000000000000000000000000000000000000")
+[ ("hostPlatformArch",    "ArchAArch64")
+, ("hostPlatformOS",      "OSDarwin")
+, ("cProjectGitCommitId", "0000000000000000000000000000000000000000")
 , ("cProjectVersion",     "9.13")
 , ("cProjectVersionInt",  "913")
 , ("cProjectPatchLevel",  "0")

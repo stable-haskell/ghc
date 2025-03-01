@@ -60,7 +60,7 @@ $(STAGE1_BIN) &: override GHC=$(GHC0)
 $(STAGE1_BIN) &: $(CABAL)
 	@$(LIB)
 	log mkdir -p $(@D)
-	export HADRIAN_SETTINGS=$(abspath HADRIAN_SETTINGS)
+	log export HADRIAN_SETTINGS="$$(cat ./HADRIAN_SETTINGS)"
 	log $(CABAL_INSTALL) --project-file cabal.project.stage1 $(addprefix exe:,$(STAGE1_EXE))
 
 TARGET := $(shell cc -dumpmachine)
