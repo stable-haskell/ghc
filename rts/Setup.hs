@@ -69,6 +69,11 @@ main =
                     , interpretSymbolicPathCWD (buildDir lbi)
                     , "--gcc-flag"
                     , "-I" ++ interpretSymbolicPathCWD (buildDir lbi </> makeRelativePathEx "include")
+                    -- pass `-fcommon` to force symbols into the common section. If they
+                    -- end up in the ro data section `nm` won't list their size, and thus
+                    -- derivedConstants will fail. Recent clang (e.g. 16) will by default
+                    -- use `-fno-common`.
+                    , "--gcc-flag", "-fcommon"
                     ]
                         ++ foldMap ((\i -> ["--gcc-flag", "-I" ++ i]) . interpretSymbolicPathCWD) thisIncDirs
                         ++ foldMap (\incdir -> ["--gcc-flag", "-I" ++ incdir]) depsIncDirs
