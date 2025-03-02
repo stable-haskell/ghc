@@ -558,7 +558,7 @@ library
         if !arch(x86_64) && !arch(aarch64)
            ld-options: -read_only_relocs warning
 
-      cmm-sources: 
+      cmm-sources:
         Apply.cmm
         Compact.cmm
         ContinuationOps.cmm
