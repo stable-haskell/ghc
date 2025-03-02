@@ -8,3 +8,6 @@ packages:
     rts
     rts-fs
     rts-headers
+
+program-options
+  ghc-options: -fhide-source-paths -j

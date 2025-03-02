@@ -51,3 +51,6 @@ allow-newer: ghc-boot-th
 constraints:
 -- FIXME: template-haskell 2.23 is too recent when booting with 9.8.4
   template-haskell <= 2.22
+
+program-options
+  ghc-options: -fhide-source-paths -j

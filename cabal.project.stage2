@@ -30,3 +30,6 @@ package ghc-bin
 
 package hsc2hs
   flags: +in-ghc-tree
+
+program-options
+  ghc-options: -fhide-source-paths -j

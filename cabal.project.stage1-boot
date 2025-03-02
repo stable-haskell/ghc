@@ -84,3 +84,5 @@ package text
   -- FIXME: avoid having to deal with system-cxx-std-lib fake package for now
   flags: -simdutf
 
+program-options
+  ghc-options: -fhide-source-paths -j
