@@ -1,0 +1,120 @@
+name: CI mostly cabal-install
+
+# Trigger the workflow on push or pull request, but only for the master branch
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+  push:
+    branches:
+      - master
+
+jobs:
+  cabal:
+    name: ${{ matrix.os }} / ghc ${{ matrix.ghc }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+        ghc:
+          - '9.8.4' # bootstrapping compiler
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: "recursive"
+
+    - id: ghc-path
+      name: Set GHC install directory
+      run: |
+        DIR=${{ github.workspace }}/ghc-${{ matrix.ghc }}
+        echo "path=$DIR" >> $GITHUB_OUTPUT
+        echo "$DIR/bin" >> $GITHUB_PATH
+
+    - id: cache-ghc
+      name: Restore bootstrap compiler
+      uses: actions/cache/restore@v4
+      with:
+        key: ${{ matrix.os }}-ghc-${{ matrix.ghc }}
+        path: ${{ steps.ghc-path.outputs.path }}
+
+    - if: steps.cache-ghc.outputs.cache-hit != 'true'
+      name: Install ghcup
+      uses: haskell/ghcup-setup@v1
+
+    - if: steps.cache-ghc.outputs.cache-hit != 'true'
+      name: Install bootstrap compiler
+      run: |
+        ghcup install ghc ${{ matrix.ghc }} --isolate ${{ steps.ghc-path.output.path }}
+        ghcup install cabal latest --isolate ${{ steps.ghc-path.outputs.path }}/bin
+        
+    - id: cabal-paths
+      run: |
+        cabal user-config init
+        echo "store=$(cabal path --store-dir)" >> $GITHUB_OUTPUT
+        echo "remote-repo-cache=$(cabal path --remote-repo-cache)" >> $GITHUB_OUTPUT
+
+    - name: Restore Hackage index and source packages
+      uses: actions/cache/restore@v4
+      with:
+        key: hackage-${{ github.run_id }}
+        restore-keys: hackage-
+        path: ${{ steps.cabal-paths.outputs.remote-repo-cache }}
+        
+    - name: Restore cabal store
+      uses: actions/cache/restore@v4
+      with:
+        key: store-${{ matrix.os }}-${{ matrix.ghc }}-${{ github.run_id }}
+        restore-keys: store-${{ matrix.os }}-${{ matrix.ghc }}-
+        path: ${{ steps.cabal-paths.outputs.store }}
+
+    - name: Restore build artifacts
+      uses: actions/cache/restore@v4
+      with:
+        key: build-${{ matrix.os }}-${{ matrix.ghc }}-${{ github.run_id }}
+        restore-keys: build-${{ matrix.os }}-${{ matrix.ghc }}-
+        path: _build _stage0 _stage1 _stage1-rts _stage1-boot
+          
+    - name: Update Hackage index
+      run: cabal update
+
+    - name: Build
+      run: make
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: stage1
+        path: _stage1
+
+    - name: Save build artifacts
+      uses: actions/cache/save@v4
+      if: always()
+      with:
+        key: build-${{ matrix.os }}-${{ matrix.ghc }}-${{ github.run_id }}
+        path: _build _stage0 _stage1 _stage1-rts _stage1-boot
+
+    - name: Save cabal store
+      uses: actions/cache/save@v4
+      if: always()
+      with:
+        key: store-${{ matrix.os }}-${{ matrix.ghc }}-${{ github.run_id }}
+        path: ${{ steps.cabal-paths.outputs.store }}
+
+    - name: Save Hackage index and source packages
+      uses: actions/cache/save@v4
+      if: always()
+      with:
+        key: hackage-${{ github.run_id }}
+        path: ${{ steps.cabal-paths.outputs.remote-repo-cache }}
+
+    - name: Save bootstrap compiler
+      uses: actions/cache/save@v4
+      if: steps.cache-ghc.outputs.cache-hit != 'true'
+      with:
+        key: ${{ matrix.os }}-ghc-${{ matrix.ghc }}
+        path: ${{ steps.ghc-path.outputs.path }}
+        

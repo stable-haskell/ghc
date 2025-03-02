@@ -129,7 +129,7 @@ buildGhcStage2 = buildGhcStage False
 buildGhcStage :: Bool -> GhcBuildOptions -> Cabal -> Ghc -> FilePath -> IO ()
 buildGhcStage booting opts cabal ghc0 dst = do
   let src = dst </> "src"
-  prepareGhcSources opts src
+  prepareGhcSources src
 
   msg "  - Building GHC and utility programs..."
 
@@ -173,6 +173,8 @@ buildGhcStage booting opts cabal ghc0 dst = do
         , "  " ++ src </> "libraries/ghci"
         , "  " ++ src </> "libraries/os-string/"
         , "  " ++ src </> "libraries/process/"
+        , "  " ++ src </> "libraries/rts-fs/"
+        , "  " ++ src </> "libraries/rts-headers/"
         , "  " ++ src </> "libraries/semaphore-compat"
         , "  " ++ src </> "libraries/time"
         , "  " ++ src </> "libraries/unix/"
@@ -354,8 +356,8 @@ buildGhcStage booting opts cabal ghc0 dst = do
 
 
 -- | Prepare GHC sources in the given directory
-prepareGhcSources :: GhcBuildOptions -> FilePath -> IO ()
-prepareGhcSources opts dst = do
+prepareGhcSources :: FilePath -> IO ()
+prepareGhcSources dst = do
   msg $ "  - Preparing sources in " ++ dst ++ "..."
   createDirectoryIfMissing True dst
   createDirectoryIfMissing True (dst </> "libraries/ghc/MachRegs")
@@ -363,93 +365,22 @@ prepareGhcSources opts dst = do
   cp "./libraries"    dst
   cp "./compiler/*"   (dst </> "libraries/ghc/")
   cp "./rts"          (dst </> "libraries/")
+  cp "./rts-fs"       (dst </> "libraries/")
+  cp "./rts-headers" (dst </> "libraries/")
   cp "./ghc"          (dst </> "ghc-bin")
   cp "./utils"        dst
 
   cp "./config.sub"   (dst </> "libraries/rts/")
   cp "./config.guess" (dst </> "libraries/rts/")
 
-  -- These needs to shared
-  cp "rts/include/rts/Bytecodes.h"            (dst </> "libraries/ghc/")
-  cp "rts/include/rts/storage/ClosureTypes.h" (dst </> "libraries/ghc/")
-  cp "rts/include/rts/storage/FunTypes.h"     (dst </> "libraries/ghc/")
-  cp "rts/include/stg/MachRegs.h"             (dst </> "libraries/ghc/")
-  cp "rts/include/stg/MachRegs/*.h"           (dst </> "libraries/ghc/MachRegs/")
-
-  -- shared among ghc-internal rts and unlit
-  cp "utils/fs/fs.h" (dst </> "libraries/ghc-internal/include")
-  cp "utils/fs/fs.c" (dst </> "libraries/ghc-internal/cbits")
-  cp "utils/fs/fs.*" (dst </> "libraries/rts/")
-  cp "utils/fs/fs.*" (dst </> "utils/unlit/")
-
-  python <- findExecutable "python" >>= \case
-    Nothing -> error "Couldn't find 'python'"
-    Just r -> pure r
-
-  void $ readCreateProcess (proc python
-    [ "rts/gen_event_types.py"
-    , "--event-types-defines"
-    , dst </> "libraries/rts/include/rts/EventLogConstants.h"
-    ]) ""
-
-  void $ readCreateProcess (proc python
-    [ "rts/gen_event_types.py"
-    , "--event-types-array"
-    , dst </> "libraries/rts/include/rts/EventTypes.h"
-    ]) ""
-
-  -- substitute variables in files
-  let subst fin fout rs = do
-        t <- Text.readFile fin
-        Text.writeFile fout (List.foldl' (\v (needle,rep) -> Text.replace needle rep v) t rs)
-  let subst_in f = subst (f <.> "in") f
-  let common_substs =
-        [ (,) "@ProjectVersion@"       (gboVersion opts)
-        , (,) "@ProjectVersionMunged@" (gboVersionMunged opts)
-        , (,) "@ProjectVersionForLib@" (gboVersionForLib opts)
-        , (,) "@ProjectPatchLevel1@"   (gboVersionPatchLevel1 opts)
-        , (,) "@ProjectPatchLevel2@"   (gboVersionPatchLevel2 opts)
-        , (,) "@ProjectVersionInt@"    (gboVersionInt opts)
-        ]
-      llvm_substs =
-        [ (,) "@LlvmMinVersion@" (gboLlvmMinVersion opts)
-        , (,) "@LlvmMaxVersion@" (gboLlvmMaxVersion opts)
-        ]
-      boot_th_substs =
-        [ (,) "@Suffix@"     ""
-        , (,) "@SourceRoot@" "."
-        ]
-
-  subst_in (dst </> "ghc-bin/ghc-bin.cabal") common_substs
-  subst_in (dst </> "libraries/ghc/ghc.cabal") common_substs
-  subst_in (dst </> "libraries/ghc-boot/ghc-boot.cabal") common_substs
-  subst_in (dst </> "libraries/ghc-boot-th/ghc-boot-th.cabal") (common_substs ++ boot_th_substs)
-  subst_in (dst </> "libraries/ghc-heap/ghc-heap.cabal") common_substs
-  subst_in (dst </> "libraries/template-haskell/template-haskell.cabal") common_substs
-  subst_in (dst </> "libraries/ghci/ghci.cabal") common_substs
-
-  -- This is only used for a warning message. Nuke the check!
-  subst_in (dst </> "libraries/ghc/GHC/CmmToLlvm/Version/Bounds.hs") llvm_substs
-
-  subst_in (dst </> "utils/ghc-pkg/ghc-pkg.cabal") common_substs
-  subst_in (dst </> "utils/iserv/iserv.cabal") common_substs
-  subst_in (dst </> "utils/runghc/runghc.cabal") common_substs
-
-  subst_in (dst </> "libraries/ghc-internal/ghc-internal.cabal") common_substs
-  subst_in (dst </> "libraries/ghc-experimental/ghc-experimental.cabal") common_substs
-  subst_in (dst </> "libraries/base/base.cabal") common_substs
-  subst_in (dst </> "libraries/rts/include/ghcversion.h") common_substs
-
-
 buildBootLibraries :: Cabal -> Ghc -> GhcPkg -> DeriveConstants -> GenApply -> GenPrimop -> GhcBuildOptions -> FilePath -> IO ()
 buildBootLibraries cabal ghc ghcpkg derive_constants genapply genprimop opts dst = do
   src <- makeAbsolute (dst </> "src")
-  prepareGhcSources opts src
+  prepareGhcSources src
 
   -- Build the RTS
   src_rts <- makeAbsolute (src </> "libraries/rts")
   build_dir <- makeAbsolute (dst </> "cabal")
-  ghcversionh <- makeAbsolute (src_rts </> "include/ghcversion.h")
 
   -- FIXME: could we build a cross compiler, simply by not reading this from the boot compiler, but passing it in?
   target_triple <- ghcTargetTriple ghc
@@ -507,6 +438,8 @@ buildBootLibraries cabal ghc ghcpkg derive_constants genapply genprimop opts dst
         , ""
         , "packages:"
         , "  " ++ src </> "libraries/rts"
+        , "  " ++ src </> "libraries/rts-fs"
+        , "  " ++ src </> "libraries/rts-headers"
         , ""
         , "benchmarks: False"
         , "tests: False"
@@ -528,7 +461,6 @@ buildBootLibraries cabal ghc ghcpkg derive_constants genapply genprimop opts dst
         , "rts"
         , "--with-compiler=" ++ ghcPath ghc
         , "--with-hc-pkg=" ++ ghcPkgPath ghcpkg
-        , "--ghc-options=\"-ghcversion-file=" ++ ghcversionh ++ "\""
         , "--builddir=" ++ build_dir
         ]
 
@@ -695,7 +627,6 @@ buildBootLibraries cabal ghc ghcpkg derive_constants genapply genprimop opts dst
         , "--project-file=" ++ cabal_project_bootlibs_path
         , "--with-compiler=" ++ ghcPath ghc
         , "--with-hc-pkg=" ++ ghcPkgPath ghcpkg
-        , "--ghc-options=\"-ghcversion-file=" ++ ghcversionh ++ "\""
         , "--builddir=" ++ build_dir
         , "-j"
 
