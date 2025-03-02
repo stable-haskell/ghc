@@ -52,7 +52,7 @@ $(CABAL_BIN) &:
 	log mkdir -p $(@D)
 	log $(CABAL_INSTALL) --project-dir libraries/Cabal --project-file cabal.release.project $(addprefix exe:,$(CABAL_EXE))
 
-STAGE1_EXE = ghc ghc-toolchain-bin deriveConstants genprimopcode genapply
+STAGE1_EXE = ghc ghc-pkg ghc-toolchain-bin deriveConstants genprimopcode genapply
 STAGE1_BIN = $(addprefix _stage1/bin/,$(STAGE1_EXE))
 
 $(STAGE1_BIN) &: OUT ?= $(abspath _stage1)
@@ -135,6 +135,8 @@ _stage1-rts/lib/package.conf.d/rts-1.0.0.0.conf: _stage1/lib/settings _stage1/bi
 
 stage1-rts: GHC = $(abspath _stage1/bin/ghc)
 stage1-rts: CABAL_CONFIG_FLAGS += -v --with-compiler $(GHC)
+stage1-rts: GHCPKG = $(abspath _stage1/bin/ghc-pkg)
+stage1-rts: CABAL_CONFIG_FLAGS += --with-hc-pkg $(GHCPKG)
 stage1-rts: CABAL_CONFIG_FLAGS += --prefix $(OUT)
 stage1-rts: CABAL_CONFIG_FLAGS += --package-db $(OUT)/lib/package.conf.d
 stage1-rts: OUT ?= $(abspath _stage1-rts)
