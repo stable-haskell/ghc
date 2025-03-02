@@ -120,7 +120,7 @@ _stage1-rts/dist/rts/Setup: rts/Setup.hs
 	mkdir -p $(@D)
 	log $(GHC0) -clear-package-db -global-package-db -package-db _stage0/store/*/package.db -o $@ $<
 
-_stage1-rts/lib/package.conf.d/rts-1.0.0.0.conf: _stage1/bin/ghc rts/configure _stage1-rts/lib/package.conf.d/rts-fs-1.0.0.0.conf _stage1-rts/lib/package.conf.d/rts-headers-1.0.0.0.conf _stage1-rts/dist/rts/Setup _stage1/bin/deriveConstants _stage1/bin/genapply 
+_stage1-rts/lib/package.conf.d/rts-1.0.0.0.conf: _stage1/lib/settings _stage1/bin/ghc rts/configure _stage1-rts/lib/package.conf.d/rts-fs-1.0.0.0.conf _stage1-rts/lib/package.conf.d/rts-headers-1.0.0.0.conf _stage1-rts/dist/rts/Setup _stage1/bin/deriveConstants _stage1/bin/genapply
 	@$(LIB)
 	mkdir -p "$(@D)/lib/package.conf.d"
 
