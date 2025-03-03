@@ -1,3 +1,2 @@
--- External symbols referenced by the RTS
-ld-options:
-#include "external-symbols.flags"
+ld-options: @LDFLAGS@
+cc-options: @CPPFLAGS@ @CFLAGS@

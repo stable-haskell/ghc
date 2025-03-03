@@ -478,7 +478,7 @@ runCcPhase cc_phase pipe_env hsc_env location input_fn = do
           -- very weakly typed, being derived from C--.
           ["-fno-strict-aliasing"]
 
-  include_ghcVersionH <- getGhcVersionIncludeFlags dflags unit_env
+  include_ghcVersionH <- getGhcVersionIncludeFlags dflags logger tmpfs
 
   withAtomicRename output_fn $ \temp_outputFilename ->
     GHC.SysTools.runCc (phaseForeignLanguage cc_phase) logger tmpfs dflags (

@@ -103,15 +103,20 @@
 [submodule "gmp-tarballs"]
 	path = libraries/ghc-internal/gmp/gmp-tarballs
 	url = https://gitlab.haskell.org/ghc/gmp-tarballs.git
+	ignore = untracked
 [submodule "libraries/exceptions"]
 	path = libraries/exceptions
 	url = https://gitlab.haskell.org/ghc/packages/exceptions.git
+	ignore = untracked
 [submodule "utils/hpc"]
 	path = utils/hpc
 	url = https://gitlab.haskell.org/hpc/hpc-bin.git
+	ignore = untracked
 [submodule "libraries/os-string"]
 	path = libraries/os-string
-	url = https://gitlab.haskell.org/ghc/packages/os-string
+	url = https://gitlab.haskell.org/ghc/packages/os-string.git
+	ignore = untracked
 [submodule "libraries/file-io"]
 	path = libraries/file-io
 	url = https://gitlab.haskell.org/ghc/packages/file-io.git
+	ignore = untracked

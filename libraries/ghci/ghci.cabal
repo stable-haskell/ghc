@@ -1,0 +1,115 @@
+cabal-version:  3.0
+name:           ghci
+version:        9.13
+license:        BSD-3-Clause
+license-file:   LICENSE
+category:       GHC
+maintainer:     ghc-devs@haskell.org
+bug-reports:    https://gitlab.haskell.org/ghc/ghc/issues/new
+synopsis:       The library supporting GHC's interactive interpreter
+description:
+            This library offers interfaces which mediate interactions between the
+            @ghci@ interactive shell and @iserv@, GHC's out-of-process interpreter
+            backend.
+build-type:     Simple
+extra-source-files: changelog.md
+
+Flag internal-interpreter
+    Description: Build with internal interpreter support.
+    Default: False
+    Manual: True
+
+Flag bootstrap
+        Description:
+          Enabled when building the stage1 compiler in order to vendor the in-tree
+          `ghc-boot-th` library, and through that the in-tree TH AST defintions from
+          `ghc-internal`.
+          See Note [Bootstrapping Template Haskell]
+        Default: False
+        Manual: True
+
+source-repository head
+    type:     git
+    location: https://gitlab.haskell.org/ghc/ghc.git
+    subdir:   libraries/ghci
+
+library
+    default-language: Haskell2010
+    default-extensions: NoImplicitPrelude
+    other-extensions:
+        BangPatterns
+        CPP
+        DeriveGeneric
+        ExistentialQuantification
+        FlexibleInstances
+        GADTs
+        GeneralizedNewtypeDeriving
+        InstanceSigs
+        MagicHash
+        MultiParamTypeClasses
+        RecordWildCards
+        ScopedTypeVariables
+        StandaloneDeriving
+        TupleSections
+        UnboxedTuples
+
+    if flag(internal-interpreter)
+        CPP-Options: -DHAVE_INTERNAL_INTERPRETER
+        exposed-modules:
+            GHCi.Run
+            GHCi.CreateBCO
+            GHCi.ObjLink
+            GHCi.Signals
+            GHCi.StaticPtrTable
+            GHCi.TH
+            GHCi.Server
+
+        if !arch(javascript)
+          exposed-modules:
+            GHCi.InfoTable
+
+    exposed-modules:
+        GHCi.BreakArray
+        GHCi.BinaryArray
+        GHCi.Message
+        GHCi.ResolvedBCO
+        GHCi.RemoteTypes
+        GHCi.FFI
+        GHCi.TH.Binary
+        GHCi.Utils
+
+    Build-Depends:
+        rts,
+        array            == 0.5.*,
+        base             >= 4.8 && < 4.22,
+        -- ghc-internal     == @ProjectVersionForLib@.*
+        -- TODO: Use GHC.Internal.Desugar and GHC.Internal.Base from
+        -- ghc-internal instead of ignoring the deprecation warning in GHCi.TH
+        -- and GHCi.CreateBCO when we require ghc-internal of the bootstrap
+        -- compiler
+        ghc-prim         >= 0.5.0 && < 0.14,
+        binary           == 0.8.*,
+        bytestring       >= 0.10 && < 0.13,
+        containers       >= 0.5 && < 0.8,
+        deepseq          >= 1.4 && < 1.6,
+        filepath         >= 1.4 && < 1.6,
+        -- ProjectVersionMunged
+        ghc-boot         == 9.13,
+        ghc-heap         == 9.13,
+        transformers     >= 0.5 && < 0.7
+
+    if flag(bootstrap)
+      build-depends:
+            -- ProjectVersionMunged
+            ghc-boot-th-next  == 9.13
+    else
+      build-depends:
+            -- ProjectVersionMunged
+            ghc-boot-th       == 9.13
+
+    if !os(windows)
+        Build-Depends: unix >= 2.7 && < 2.9
+
+    if arch(wasm32)
+        -- ProjectVersionForLib
+        build-depends: ghc-experimental == 9.1300.0

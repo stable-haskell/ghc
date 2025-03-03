@@ -1,4 +1,4 @@
-cabal-version: 3.4
+cabal-version: 3.8
 name: rts
 version: 1.0.3
 synopsis: The GHC runtime system
@@ -9,17 +9,14 @@ description:
     that cannot be written in Haskell itself.
 license: BSD-3-Clause
 maintainer: glasgow-haskell-users@haskell.org
-build-type: Configure
+build-type: Custom
 
 extra-source-files:
     configure
     config.guess
     config.sub
-    ghcplatform.h.top.in
-    ghcplatform.h.bottom
-    ghcautoconf.h.autoconf.in
     configure.ac
-    external-symbols.list.in
+    external-symbols.list
     rts.buildinfo.in
     linker/ELFRelocs/AArch64.def
     linker/ELFRelocs/ARM.def
@@ -55,20 +52,20 @@ extra-source-files:
     FileLock.h
     ForeignExports.h
     fs_rts.h
-    fs.h
     GetEnv.h
     GetTime.h
     Globals.h
     Hash.h
     hooks/Hooks.h
     include/Cmm.h
+    include/ghcautoconf.h.in
+    include/ghcplatform.h.in
     include/ghcconfig.h
     include/HsFFI.h
     include/MachDeps.h
     include/rts/Adjustor.h
     include/RtsAPI.h
     include/rts/BlockSignals.h
-    include/rts/Bytecodes.h
     include/rts/Config.h
     include/rts/Constants.h
     include/rts/EventLogFormat.h
@@ -105,9 +102,6 @@ extra-source-files:
     include/rts/StaticPtrTable.h
     include/rts/storage/Block.h
     include/rts/storage/ClosureMacros.h
-    include/rts/storage/Closures.h
-    include/rts/storage/ClosureTypes.h
-    include/rts/storage/FunTypes.h
     include/rts/storage/GC.h
     include/rts/storage/HeapAlloc.h
     include/rts/storage/Heap.h
@@ -124,16 +118,7 @@ extra-source-files:
     include/rts/Utils.h
     include/stg/DLL.h
     include/Stg.h
-    include/stg/MachRegs/arm32.h
-    include/stg/MachRegs/arm64.h
     include/stg/MachRegsForHost.h
-    include/stg/MachRegs.h
-    include/stg/MachRegs/loongarch64.h
-    include/stg/MachRegs/ppc.h
-    include/stg/MachRegs/riscv64.h
-    include/stg/MachRegs/s390x.h
-    include/stg/MachRegs/wasm32.h
-    include/stg/MachRegs/x86.h
     include/stg/MiscClosures.h
     include/stg/Prim.h
     include/stg/Regs.h
@@ -340,6 +325,10 @@ flag thread-sanitizer
   default: False
   manual: True
 
+custom-setup
+  setup-depends:
+    base, Cabal, Cabal-syntax, mtl, transformers
+
 library
     -- rts is a wired in package and
     -- expects the unit-id to be
@@ -349,6 +338,17 @@ library
 
     exposed: True
     exposed-modules:
+
+    autogen-includes:
+      ghcautoconf.h
+      ghcplatform.h
+      DerivedConstants.h
+
+    install-includes:
+      ghcautoconf.h
+      ghcplatform.h
+      DerivedConstants.h
+      stg/MachRegsForHost.h
 
     if arch(javascript)
 
@@ -384,18 +384,7 @@ library
         js/time.js
 
       install-includes: HsFFI.h MachDeps.h Rts.h RtsAPI.h Stg.h
-                        ghcautoconf.h ghcconfig.h ghcplatform.h ghcversion.h
-                        DerivedConstants.h
-                        stg/MachRegs.h
-                        stg/MachRegs/arm32.h
-                        stg/MachRegs/arm64.h
-                        stg/MachRegs/loongarch64.h
-                        stg/MachRegs/ppc.h
-                        stg/MachRegs/riscv64.h
-                        stg/MachRegs/s390x.h
-                        stg/MachRegs/wasm32.h
-                        stg/MachRegs/x86.h
-                        stg/MachRegsForHost.h
+                        ghcconfig.h ghcplatform.h
                         stg/Types.h
 
     else
@@ -496,11 +485,9 @@ library
       -- TODO: move internal headers into include/private?
       include-dirs: .
       includes: Rts.h
-      autogen-includes: ghcautoconf.h ghcplatform.h
       install-includes: Cmm.h HsFFI.h MachDeps.h Jumps.h Rts.h RtsAPI.h RtsSymbols.h Stg.h
-                        ghcautoconf.h ghcconfig.h ghcplatform.h ghcversion.h
+                        ghcconfig.h ghcplatform.h
                         -- ^ from include
-                        DerivedConstants.h
                         rts/EventLogConstants.h
                         rts/EventTypes.h
                         -- ^ generated
@@ -508,7 +495,6 @@ library
                         rts/Adjustor.h
                         rts/ExecPage.h
                         rts/BlockSignals.h
-                        rts/Bytecodes.h
                         rts/Config.h
                         rts/Constants.h
                         rts/EventLogFormat.h
@@ -550,9 +536,7 @@ library
                         rts/prof/LDV.h
                         rts/storage/Block.h
                         rts/storage/ClosureMacros.h
-                        rts/storage/ClosureTypes.h
                         rts/storage/Closures.h
-                        rts/storage/FunTypes.h
                         rts/storage/Heap.h
                         rts/storage/HeapAlloc.h
                         rts/storage/GC.h
@@ -560,16 +544,6 @@ library
                         rts/storage/MBlock.h
                         rts/storage/TSO.h
                         stg/DLL.h
-                        stg/MachRegs.h
-                        stg/MachRegs/arm32.h
-                        stg/MachRegs/arm64.h
-                        stg/MachRegs/loongarch64.h
-                        stg/MachRegs/ppc.h
-                        stg/MachRegs/riscv64.h
-                        stg/MachRegs/s390x.h
-                        stg/MachRegs/wasm32.h
-                        stg/MachRegs/x86.h
-                        stg/MachRegsForHost.h
                         stg/MiscClosures.h
                         stg/Prim.h
                         stg/Regs.h
@@ -584,34 +558,38 @@ library
         if !arch(x86_64) && !arch(aarch64)
            ld-options: -read_only_relocs warning
 
-      cmm-sources: Apply.cmm
-                   Compact.cmm
-                   ContinuationOps.cmm
-                   Exception.cmm
-                   HeapStackCheck.cmm
-                   Jumps_D.cmm
-                   Jumps_V16.cmm
-                   PrimOps.cmm
-                   StgMiscClosures.cmm
-                   StgStartup.cmm
-                   StgStdThunks.cmm
-                   Updates.cmm
-                   -- AutoApply is generated
-                   AutoApply.cmm
-                   AutoApply_V16.cmm
+      cmm-sources:
+        Apply.cmm
+        Compact.cmm
+        ContinuationOps.cmm
+        Exception.cmm
+        HeapStackCheck.cmm
+        Jumps_D.cmm
+        Jumps_V16.cmm
+        PrimOps.cmm
+        StgMiscClosures.cmm
+        StgStartup.cmm
+        StgStdThunks.cmm
+        Updates.cmm
+
+      autogen-cmm-sources:
+        AutoApply.cmm
+        AutoApply_V16.cmm
 
       if arch(x86_64)
         cmm-sources:
-          AutoApply_V32.cmm (-mavx2)
-          AutoApply_V64.cmm (-mavx512f)
           Jumps_V32.cmm (-mavx2)
           Jumps_V64.cmm (-mavx512f)
+        autogen-cmm-sources:
+          AutoApply_V32.cmm (-mavx2)
+          AutoApply_V64.cmm (-mavx512f)
       else
         cmm-sources:
-          AutoApply_V32.cmm
-          AutoApply_V64.cmm
           Jumps_V32.cmm
           Jumps_V64.cmm
+        autogen-cmm-sources:
+          AutoApply_V32.cmm
+          AutoApply_V64.cmm
 
       -- we always link against libffi, even without libffi-adjustors enabled.
       -- libffi is used by the Interpreter and some of its symbols are declared
@@ -768,7 +746,6 @@ library
                  sm/Scav_thr.c
                  sm/Storage.c
                  sm/Sweep.c
-                 fs.c
                  -- I wish we had wildcards..., this would be:
                  -- *.c hooks/**/*.c sm/**/*.c eventlog/**/*.c linker/**/*.c
 
@@ -811,6 +788,10 @@ library
                     -- ticker/*.c
                     -- We don't want to compile posix/ticker/*.c, these will be #included
                     -- from Ticker.c
+
+    build-depends:
+      rts-headers,
+      rts-fs
 
 -- Note [Undefined symbols in the RTS]
 -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

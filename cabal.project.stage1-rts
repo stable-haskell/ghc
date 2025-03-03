@@ -1,0 +1,13 @@
+allow-boot-library-installs: True
+-- active-repositories: :none
+
+benchmarks: False
+tests: False
+
+packages:
+    rts
+    rts-fs
+    rts-headers
+
+program-options
+  ghc-options: -fhide-source-paths -j
