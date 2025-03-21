@@ -275,7 +275,8 @@ getGhcVersionIncludeFlags dflags logger tmpfs = do
           return $ ["-include", "ghcversion.h"]
             ++ map (\(k, v) -> "-D" ++ k ++ "=" ++ v)
             [ ("__GLASGOW_HASKELL__", cProjectVersionInt)
-            , ("__GLASGOW_HASKELL_FULL_VERSION__", cProjectVersion)
+            -- The cProjectVersion needs to be quoted!
+            , ("__GLASGOW_HASKELL_FULL_VERSION__", "\"" ++ cProjectVersion ++ "\"")
             , ("__GLASGOW_HASKELL_PATCHLEVEL1__", cProjectPatchLevel1)
             , ("__GLASGOW_HASKELL_PATCHLEVEL2__", cProjectPatchLevel2)
             ]
