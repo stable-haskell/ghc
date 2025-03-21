@@ -1,0 +1,11 @@
+allow-boot-library-installs: True
+
+benchmarks: False
+tests: False
+
+packages:
+  libraries/Cabal/Cabal
+  libraries/Cabal/Cabal-syntax
+
+program-options
+  ghc-options: -fhide-source-paths -j
