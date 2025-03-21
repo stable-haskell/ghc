@@ -590,7 +590,7 @@ targetToSettings tgt@Target{..} =
   , ("Leading underscore",  (yesNo tgtSymbolsHaveLeadingUnderscore))
   , ("Use LibFFI", yesNo tgtUseLibffiForAdjustors)
   , ("RTS expects libdw", yesNo False) -- FIXME
-  , ("Relative Global Package DB", "")
+  , ("Relative Global Package DB", "package.conf.d")
   , ("base unit-id", "")
   ]
   where
