@@ -287,13 +287,13 @@ flag static-libzstd
   default: False
   manual: True
 flag leading-underscore
-  default: False
+  default: True
   manual: True
 flag unregisterised
   default: False
   manual: True
 flag tables-next-to-code
-  default: False
+  default: True
   manual: True
 flag smp
   default: True
@@ -348,7 +348,6 @@ library
     install-includes:
       ghcautoconf.h
       ghcplatform.h
-      ghcversion.h
       DerivedConstants.h
       stg/MachRegsForHost.h
 
