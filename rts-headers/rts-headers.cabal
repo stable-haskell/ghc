@@ -15,8 +15,9 @@ build-type: Simple
 library
   include-dirs:
     include
-  
+
   install-includes:
+    ghcversion.h
     rts/Bytecodes.h
     rts/storage/ClosureTypes.h
     rts/storage/FunTypes.h
