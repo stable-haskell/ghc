@@ -272,7 +272,7 @@ getGhcVersionIncludeFlags dflags logger tmpfs = do
             throwGhcExceptionIO (InstallationError ("ghcversion.h missing; tried: " ++ path))
           return ["-include", path]
         Nothing -> do
-          return $ ["-include", "<ghcversion.h>"]
+          return $ ["-include", "ghcversion.h"]
             ++ map (\(k, v) -> "-D" ++ k ++ "=" ++ v)
             [ ("__GLASGOW_HASKELL__", cProjectVersionInt)
             , ("__GLASGOW_HASKELL_FULL_VERSION__", cProjectVersion)
