@@ -61,7 +61,6 @@ extra-source-files:
     include/ghcautoconf.h.in
     include/ghcplatform.h.in
     include/ghcconfig.h
-    include/ghcversion.h
     include/HsFFI.h
     include/MachDeps.h
     include/rts/Adjustor.h
