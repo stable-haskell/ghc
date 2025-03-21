@@ -272,31 +272,13 @@ getGhcVersionIncludeFlags dflags logger tmpfs = do
             throwGhcExceptionIO (InstallationError ("ghcversion.h missing; tried: " ++ path))
           return ["-include", path]
         Nothing -> do
-          macro_stub <- newTempName logger tmpfs (tmpDir dflags) TFL_CurrentModule "h"
-          writeFile macro_stub ghcVersionH
-          return ["-include", macro_stub]
-
--- ---------------------------------------------------------------------------
--- ghcversion.h
-
-ghcVersionH :: String
-ghcVersionH =
-  concat
-  ["#define __GLASGOW_HASKELL__ ", cProjectVersionInt, "\n"
-  ,"#define __GLASGOW_HASKELL_FULL_VERSION__ \"", cProjectVersion, "\"\n"
-  ,"\n"
-  ,"#define __GLASGOW_HASKELL_PATCHLEVEL1__ ", cProjectPatchLevel1, "\n"
-  ,"#define __GLASGOW_HASKELL_PATCHLEVEL2__ ", cProjectPatchLevel2, "\n"
-  ,"\n"
-  ,"#define MIN_VERSION_GLASGOW_HASKELL(ma,mi,pl1,pl2) (     \\\n"
-  ,"   ((ma)*100+(mi)) <  __GLASGOW_HASKELL__ ||             \\\n"
-  ,"   ((ma)*100+(mi)) == __GLASGOW_HASKELL__                \\\n"
-  ,"          && (pl1) <  __GLASGOW_HASKELL_PATCHLEVEL1__ || \\\n"
-  ,"   ((ma)*100+(mi)) == __GLASGOW_HASKELL__                \\\n"
-  ,"          && (pl1) == __GLASGOW_HASKELL_PATCHLEVEL1__    \\\n"
-  ,"          && (pl2) <= __GLASGOW_HASKELL_PATCHLEVEL2__ )\n"
-  ,"\n\n"
-  ]
+          return $ ["-include", "<ghcversion.h>"]
+            ++ map (\(k, v) -> "-D" ++ k ++ "=" ++ v)
+            [ ("__GLASGOW_HASKELL__", cProjectVersionInt)
+            , ("__GLASGOW_HASKELL_FULL_VERSION__", cProjectVersion)
+            , ("__GLASGOW_HASKELL_PATCHLEVEL1__", cProjectPatchLevel1)
+            , ("__GLASGOW_HASKELL_PATCHLEVEL2__", cProjectPatchLevel2)
+            ]
 
 applyCDefs :: DefunctionalizedCDefs -> Logger -> DynFlags -> IO [String]
 applyCDefs NoCDefs _ _ = return []
