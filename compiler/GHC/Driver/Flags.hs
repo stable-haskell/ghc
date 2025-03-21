@@ -716,6 +716,7 @@ data GeneralFlag
    | Opt_EagerBlackHoling
    | Opt_OrigThunkInfo
    | Opt_NoHsMain
+   | Opt_NoGhcVersionH
    | Opt_SplitSections
    | Opt_StgStats
    | Opt_HideAllPackages

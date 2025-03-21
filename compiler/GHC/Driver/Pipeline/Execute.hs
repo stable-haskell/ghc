@@ -523,7 +523,9 @@ runCcPhase cc_phase pipe_env hsc_env location input_fn = do
                        else [])
                  ++ verbFlags
                  ++ cc_opt
-                 ++ include_ghcVersionH
+                 ++ (if gopt Opt_NoGhcVersionH dflags
+                       then []
+                       else include_ghcVersionH)
                  ++ framework_paths
                  ++ include_paths
                  ++ pkg_extra_cc_opts
