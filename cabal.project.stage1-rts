@@ -13,6 +13,6 @@ package rts
   ghc-options: -v
 
 program-options
-  ghc-options: -fhide-source-paths -j
+  ghc-options: -fhide-source-paths -j -no-ghcversion-header
 
 -- constraints: any.base installed
