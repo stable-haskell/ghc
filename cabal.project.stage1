@@ -25,6 +25,10 @@ packages:
   ./utils/deriveConstants
   ./utils/ghc-toolchain
   ./utils/ghc-toolchain/exe
+  -- we need these here, as we'll need them for the setup.hs for the RTS, and
+  -- other packages. Once Cabal upstream is recent enough, we can drop them.
+  ./libraries/Cabal/Cabal
+  ./libraries/Cabal/Cabal-syntax
 
 benchmarks: False
 tests: False
