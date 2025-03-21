@@ -25,10 +25,11 @@
 #
 # Stage 1
 # We now have the boostrap libraries and a compiler (ghc1) built with (ghc0) the
-# ghc0-libraries + extra libraries built with ghc0.  This includes the new run-
-# time system (rts). Thus we have a ghc1 but no libraries yet.  We now build all
-# the libraries required to build the compiler (from ø) using ghc1.  And then
-# build ghc2 using ghc1 with the newly build libraries.
+# ghc0-libraries + extra libraries built with ghc0. Thus we have a ghc1 but no
+# libraries yet.  We now build all the libraries required to build the compiler
+# (from ø) using ghc1. First we need to build the rts with ghc1. Then build all
+# the libraries necessary to build ghc2. And then build ghc2 using ghc1 with the
+# newly build libraries.
 #
 # Stage 2
 # This gives us our stage2 compiler (ghc2, all it's deps built with ghc1).  This
