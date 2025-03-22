@@ -63,6 +63,7 @@ endef
 
 CABAL_FLAGS += --store-dir $(OUT)/store --logs-dir $(OUT)/logs
 
+
 CABAL_BUILD_FLAGS += --builddir $(OUT)/build
 CABAL_BUILD_FLAGS += --with-compiler $(GHC) --with-hc-pkg $(GHC)-pkg --with-build-compiler $(GHC0) --with-build-hc-pkg $(GHC0)-pkg
 
@@ -72,6 +73,8 @@ CABAL_INSTALL_FLAGS += --installdir $(OUT)/bin
 CABAL_INSTALL_FLAGS += --overwrite-policy=always
 # If we copy the executables then ghc will recognise _stage1 as topdir (rather than a path in the store)
 CABAL_INSTALL_FLAGS += --install-method=copy
+# stop cabal from being a fucking turd.
+CABAL_INSTALL_FLAGS += --write-ghc-environment-files=never
 
 CABAL_INSTALL = $(CABAL) $(CABAL_FLAGS) install $(CABAL_BUILD_FLAGS) $(CABAL_INSTALL_FLAGS)
 
@@ -180,7 +183,7 @@ STAGE2_BIN = $(addprefix _stage2/bin/,$(STAGE2_EXE))
 $(STAGE2_BIN) &: OUT ?= $(abspath _stage2)
 $(STAGE2_BIN) &: GHC = $(abspath _stage1/bin/ghc)
 $(STAGE2_BIN) &: GHC0 = $(abspath _stage1/bin/ghc)
-$(STAGE2_BIN) &: _stage1/bin/ghc _stage1/src/ghc-internal/.ready _stage2/rts.ready
+$(STAGE2_BIN) &: _stage1/bin/ghc _stage1/src/ghc-internal/.ready _stage2/rts.ready _stage2/lib/settings
 	@$(LIB)
 	log mkdir -p $(@D)
 	log export HADRIAN_SETTINGS="$$(cat ./HADRIAN_SETTINGS)"

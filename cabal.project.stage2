@@ -40,7 +40,7 @@ packages:
   ./libraries/process
   ./libraries/semaphore-compat
   ./libraries/stm
-  ./libraries/system-cxx-std-lib
+  -- ./libraries/system-cxx-std-lib
   ./libraries/template-haskell
   ./libraries/terminfo
   ./libraries/text

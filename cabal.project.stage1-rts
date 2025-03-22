@@ -15,4 +15,5 @@ package rts
 program-options
   ghc-options: -fhide-source-paths -j -no-ghcversion-header
 
--- constraints: any.base installed
+-- constraints: any.base installed, any.ghc-internal installed
+-- allow-newer: Cabal-hooks:Cabal-syntax, Cabal-hooks:Cabal

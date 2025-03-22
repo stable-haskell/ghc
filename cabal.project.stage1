@@ -29,6 +29,7 @@ packages:
   -- other packages. Once Cabal upstream is recent enough, we can drop them.
   ./libraries/Cabal/Cabal
   ./libraries/Cabal/Cabal-syntax
+  ./libraries/Cabal/Cabal-hooks
 
 benchmarks: False
 tests: False
