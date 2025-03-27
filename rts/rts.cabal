@@ -336,6 +336,8 @@ library
     ghc-options: -this-unit-id rts
     cmm-options: -this-unit-id rts
 
+    build-tool-depends: genapply:genapply, deriveConstants:deriveConstants
+
     exposed: True
     exposed-modules:
 

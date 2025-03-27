@@ -4,6 +4,14 @@ active-repositories: :none
 benchmarks: False
 tests: False
 
+build-packages:
+  https://hackage.haskell.org/package/alex-3.5.2.0/alex-3.5.2.0.tar.gz
+  https://hackage.haskell.org/package/happy-2.1.5/happy-2.1.5.tar.gz
+  https://hackage.haskell.org/package/happy-lib-2.1.5/happy-lib-2.1.5.tar.gz
+  ./utils/deriveConstants
+  ./utils/genprimopcode
+  ./utils/genapply
+
 packages:
   ./compiler
   ./ghc
@@ -49,29 +57,44 @@ packages:
   ./libraries/unix
   ./libraries/Win32
   ./libraries/xhtml
-  ./utils/deriveConstants
-  ./utils/genprimopcode
   ./utils/ghc-pkg
   ./utils/ghc-toolchain
   ./utils/hsc2hs
   ./utils/unlit
-  https://hackage.haskell.org/package/alex-3.5.2.0/alex-3.5.2.0.tar.gz
-  https://hackage.haskell.org/package/happy-2.1.5/happy-2.1.5.tar.gz
-  https://hackage.haskell.org/package/happy-lib-2.1.5/happy-lib-2.1.5.tar.gz
+  -- https://hackage.haskell.org/package/alex-3.5.2.0/alex-3.5.2.0.tar.gz
+  -- https://hackage.haskell.org/package/happy-2.1.5/happy-2.1.5.tar.gz
+  -- https://hackage.haskell.org/package/happy-lib-2.1.5/happy-lib-2.1.5.tar.gz
   -- https://hackage.haskell.org/package/os-string-2.0.7/os-string-2.0.7.tar.gz
   -- https://hackage.haskell.org/package/process-1.6.25.0/process-1.6.25.0.tar.gz
   -- https://hackage.haskell.org/package/time-1.14/time-1.14.tar.gz
   -- https://hackage.haskell.org/package/unix-2.8.6.0/unix-2.8.6.0.tar.gz
+  rts
+  rts-fs
+  rts-headers
+
+-- When building the rts{-headers,-fs} we do not have the ghcversion.h yet.
+-- We basically have a bare ghc with no packages yet. To avoid the forced
+-- need of ghcversion.h, we pass -no-ghcversion-header to ghc, to prevent it
+-- from trying to pass `-include ghcversion.h`.
+
+package rts-headers
+  ghc-options: -v -no-ghcversion-header
+
+package rts-fs
+  ghc-options: -v -no-ghcversion-header
+
+package rts
+  flags: +table-next-to-code +leading-underscore
+  ghc-options: -v -no-ghcversion-header
 
 package hsc2hs
   flags: +in-ghc-tree
 
 package ghc
-  -- build-tool-depends: require genprimopcode, etc. used by Setup.hs
   -- internal-interpreter: otherwise our compiler has the internal
   -- interpreter but not the boot library we install
   -- FIXME: we should really install the lib we used to build stage2
-  flags: +build-tool-depends +internal-interpreter
+  flags: +internal-interpreter
   ghc-options: -v3
 
 package ghci

@@ -150,30 +150,10 @@ _stage1/src/ghc-internal/.ready: _stage1/src/ghc-internal/configure
 # the packages it built on the way to ghc stage2.
 _stage1/lib/package.conf.d:
 	@$(LIB)
+	mkdir -p _stage1/lib _stage2/lib
 	log _stage1/bin/ghc-pkg init $(PWD)/_stage2/store/$$(_stage1/bin/ghc --info | grep "Project Unit Id" | cut -d'"' -f4)/package.db
 	log ln -sf $(PWD)/_stage2/store/$$(_stage1/bin/ghc --info | grep "Project Unit Id" | cut -d'"' -f4)/package.db _stage1/lib/package.conf.d
 	log ln -sf $(PWD)/_stage2/store/$$(_stage1/bin/ghc --info | grep "Project Unit Id" | cut -d'"' -f4)/package.db _stage2/lib/package.conf.d
-
-# This is basically the glue piece. We have a compiler `ghc`, that just doesn't have an RTS yet, and thus can't really link any executable.
-# Ideally we'd just ask cabal to start building, by providing the boostrap compiler as GHC0 and the stage1 compiler as GHC. However, cabal
-# will fall over itself trying to solve the packages even for the build-compiler. E.g. it sees it needs Cabal/Cabal-syntax, which are listed
-# as packages in the cabal.project file, then tries to figure out how to build base, ... which just can't work. Ideally the build compiler
-# would make a cut wrt to which packages it considers to rebuild. A small closure maybe. Maybe we should re-use non-reinstallable packages
-# for this? Although I'd argue, I really don't want those in cabal anymore at some point. Another option would be to have build-packages
-# in the cabal-project file, or just outright deny the build-compiler to consider building any of those packages and requesting in that
-# special case that people just install --lib the necessary packages as needed? The idea of extending `build-packages` to the cabal.project
-# file is growing on me. E.g. consider these packages under `build-packages` eligable to build from source when using the build-compiler
-# e.g. for setup, and build-depends.
-_stage2/rts.ready : OUT ?= $(abspath _stage2)
-_stage2/rts.ready : GHC = $(abspath _stage1/bin/ghc)
-_stage2/rts.ready : GHC0 = $(shell which ghc)
-_stage2/rts.ready : _stage1/bin/ghc _stage1/lib/settings rts/configure _stage1/lib/package.conf.d
-	@$(LIB)
-	log mkdir -p $(@D)
-	log export PATH="$(abspath _stage1/bin):$(PATH)"
-	log $(CABAL_INSTALL) --lib --build-package-db=$(abspath _stage1/store)/$$($(GHC0) --info | grep "Project Unit Id" | cut -d'"' -f4)/package.db --project-file cabal.project.stage1-rts all
-	log touch $@
-
 
 # Now that we've jammed the rts's into the stage1 compiler package.db, we can go on and just build the rest of the stage2 compiler.
 # This will automatically also mean, we end up with the relevant packages to ship alognside the stage2 compiler in the _stage1/lib/package.conf.d.
@@ -182,8 +162,8 @@ STAGE2_BIN = $(addprefix _stage2/bin/,$(STAGE2_EXE))
 
 $(STAGE2_BIN) &: OUT ?= $(abspath _stage2)
 $(STAGE2_BIN) &: GHC = $(abspath _stage1/bin/ghc)
-$(STAGE2_BIN) &: GHC0 = $(abspath _stage1/bin/ghc)
-$(STAGE2_BIN) &: _stage1/bin/ghc _stage1/src/ghc-internal/.ready _stage2/rts.ready _stage2/lib/settings
+$(STAGE2_BIN) &: GHC0 = $(shell which ghc)
+$(STAGE2_BIN) &: _stage1/bin/ghc _stage1/lib/settings rts/configure _stage1/lib/package.conf.d _stage1/src/ghc-internal/.ready
 	@$(LIB)
 	log mkdir -p $(@D)
 	log export HADRIAN_SETTINGS="$$(cat ./HADRIAN_SETTINGS)"
