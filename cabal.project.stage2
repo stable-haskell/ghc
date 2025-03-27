@@ -34,8 +34,7 @@ packages:
   ./libraries/ghc-experimental
   ./libraries/ghc-heap
   ./libraries/ghci
-  -- ./libraries/ghc-internal
-  _stage1/src/ghc-internal
+  ./libraries/ghc-internal
   ./libraries/ghc-platform
   ./libraries/ghc-prim
   ./libraries/haskeline

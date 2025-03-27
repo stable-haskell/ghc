@@ -113,35 +113,6 @@ _stage2/lib/settings: _stage1/bin/ghc-toolchain-bin
 
 stage1: _stage1/bin/ghc _stage1/lib/settings
 
-
-# this should be in the setup of compiler.cabal?
-_stage1/src/compiler/GHC/Builtin/primops.txt: compiler/GHC/Builtin/primops.txt.pp
-	@$(LIB)
-	mkdir -p $(@D)
-	log cc -E -undef -traditional -P -x c $< >$@
-
-# This should be in the setup of ghc-internal.cabal?
-_stage1/src/ghc-internal/ghc-internal.cabal:
-	@$(LIB)
-	rm -rf $(@D)
-	mkdir -p $(@D)
-	cp -r libraries/ghc-internal/* $(@D)
-
-_stage1/src/ghc-internal/src/GHC/Internal/Prim.hs: _stage1/src/compiler/GHC/Builtin/primops.txt | _stage1/src/ghc-internal/ghc-internal.cabal
-	@$(LIB)
-	mkdir -p $(@D)
-	log _stage1/bin/genprimopcode --make-haskell-source < $< > $@
-
-_stage1/src/ghc-internal/src/GHC/Internal/PrimopWrappers.hs: _stage1/src/compiler/GHC/Builtin/primops.txt | _stage1/src/ghc-internal/ghc-internal.cabal
-	@$(LIB)
-	mkdir -p $(@D)
-	log _stage1/bin/genprimopcode --make-haskell-wrappers < $< > $@
-
-_stage1/src/ghc-internal/.ready: _stage1/src/ghc-internal/ghc-internal.cabal
-_stage1/src/ghc-internal/.ready: _stage1/src/ghc-internal/src/GHC/Internal/Prim.hs
-_stage1/src/ghc-internal/.ready: _stage1/src/ghc-internal/src/GHC/Internal/PrimopWrappers.hs
-_stage1/src/ghc-internal/.ready: _stage1/src/ghc-internal/configure
-
 # We need this folder to exist prior to running anything with _stage1/bin/ghc and cabal,
 # because that will result in ghc-pkg being invoked. That one looking into the ../lib/settings file.
 # Finding that package.conf.d is the global package db, and then falling over itself because that
@@ -163,7 +134,7 @@ STAGE2_BIN = $(addprefix _stage2/bin/,$(STAGE2_EXE))
 $(STAGE2_BIN) &: OUT ?= $(abspath _stage2)
 $(STAGE2_BIN) &: GHC = $(abspath _stage1/bin/ghc)
 $(STAGE2_BIN) &: GHC0 = $(shell which ghc)
-$(STAGE2_BIN) &: _stage1/bin/ghc _stage1/lib/settings rts/configure _stage1/lib/package.conf.d _stage1/src/ghc-internal/.ready
+$(STAGE2_BIN) &: _stage1/bin/ghc _stage1/lib/settings rts/configure libraries/ghc-internal/configure _stage1/lib/package.conf.d
 	@$(LIB)
 	log mkdir -p $(@D)
 	log export HADRIAN_SETTINGS="$$(cat ./HADRIAN_SETTINGS)"
