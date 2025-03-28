@@ -716,6 +716,7 @@ data GeneralFlag
    | Opt_EagerBlackHoling
    | Opt_OrigThunkInfo
    | Opt_NoHsMain
+   | Opt_NoGhcVersionH
    | Opt_SplitSections
    | Opt_StgStats
    | Opt_HideAllPackages
@@ -1018,7 +1019,6 @@ data WarningFlag =
    | Opt_WarnMissedSpecs
    | Opt_WarnAllMissedSpecs
    | Opt_WarnUnsupportedCallingConventions
-   | Opt_WarnUnsupportedLlvmVersion
    | Opt_WarnMissedExtraSharedLib
    | Opt_WarnInlineRuleShadowing
    | Opt_WarnTypedHoles
@@ -1144,7 +1144,6 @@ warnFlagNames wflag = case wflag of
   Opt_WarnMisplacedPragmas                        -> "misplaced-pragmas" :| []
   Opt_WarnUnsafe                                  -> "unsafe" :| []
   Opt_WarnUnsupportedCallingConventions           -> "unsupported-calling-conventions" :| []
-  Opt_WarnUnsupportedLlvmVersion                  -> "unsupported-llvm-version" :| []
   Opt_WarnMissedExtraSharedLib                    -> "missed-extra-shared-lib" :| []
   Opt_WarnUntickedPromotedConstructors            -> "unticked-promoted-constructors" :| []
   Opt_WarnUnusedDoBind                            -> "unused-do-bind" :| []
@@ -1314,7 +1313,6 @@ standardWarnings -- see Note [Documenting warning flags]
         Opt_WarnDodgyForeignImports,
         Opt_WarnInlineRuleShadowing,
         Opt_WarnAlternativeLayoutRuleTransitional,
-        Opt_WarnUnsupportedLlvmVersion,
         Opt_WarnMissedExtraSharedLib,
         Opt_WarnTabs,
         Opt_WarnUnrecognisedWarningFlags,

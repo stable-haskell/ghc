@@ -38,6 +38,8 @@ import GHC.Platform
 import GHC.Platform.Ways
 import GHC.Platform.Host
 
+import GHC.Builtin.PrimOps (primOpPrimModule, primOpWrappersModule)
+
 #if defined(HAVE_INTERNAL_INTERPRETER)
 import GHCi.UI              ( interactiveUI, ghciWelcomeMsg, defaultGhciSettings )
 #endif
@@ -147,6 +149,8 @@ main = do
                    ShowVersion               -> showVersion
                    ShowNumVersion            -> putStrLn cProjectVersion
                    ShowOptions isInteractive -> showOptions isInteractive
+                   PrintPrimModule           -> liftIO $ putStrLn primOpPrimModule
+                   PrintPrimWrappersModule   -> liftIO $ putStrLn primOpWrappersModule
         Right postStartupMode ->
             -- start our GHC session
             GHC.runGhc mbMinusB $ do
@@ -451,12 +455,16 @@ data PreStartupMode
   | ShowNumVersion                       -- ghc --numeric-version
   | ShowSupportedExtensions              -- ghc --supported-extensions
   | ShowOptions Bool {- isInteractive -} -- ghc --show-options
+  | PrintPrimModule                      -- ghc --print-prim-module
+  | PrintPrimWrappersModule              -- ghc --print-prim-wrappers-module
 
-showVersionMode, showNumVersionMode, showSupportedExtensionsMode, showOptionsMode :: Mode
+showVersionMode, showNumVersionMode, showSupportedExtensionsMode, showOptionsMode, printPrimModule, printPrimWrappersModule :: Mode
 showVersionMode             = mkPreStartupMode ShowVersion
 showNumVersionMode          = mkPreStartupMode ShowNumVersion
 showSupportedExtensionsMode = mkPreStartupMode ShowSupportedExtensions
 showOptionsMode             = mkPreStartupMode (ShowOptions False)
+printPrimModule             = mkPreStartupMode PrintPrimModule
+printPrimWrappersModule     = mkPreStartupMode PrintPrimWrappersModule
 
 mkPreStartupMode :: PreStartupMode -> Mode
 mkPreStartupMode = Left
@@ -622,6 +630,8 @@ mode_flags =
   , defFlag "-numeric-version"      (PassFlag (setMode showNumVersionMode))
   , defFlag "-info"                 (PassFlag (setMode showInfoMode))
   , defFlag "-show-options"         (PassFlag (setMode showOptionsMode))
+  , defFlag "-print-prim-module"    (PassFlag (setMode printPrimModule))
+  , defFlag "-print-prim-wrappers-module"  (PassFlag (setMode printPrimWrappersModule))
   , defFlag "-supported-languages"  (PassFlag (setMode showSupportedExtensionsMode))
   , defFlag "-supported-extensions" (PassFlag (setMode showSupportedExtensionsMode))
   , defFlag "-show-packages"        (PassFlag (setMode showUnitsMode))

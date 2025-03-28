@@ -1,0 +1,33 @@
+cabal-version: 3.0
+Name: runghc
+-- ProjectVersion
+Version: 9.13
+License: BSD-3-Clause
+Synopsis: A wrapper around GHC allowing convenient execution of scripts
+Description:
+    @runghc@ is a small wrapper program around GHC which allows the compiler
+    to be used as a UNIX-style script interpreter. For instance,
+    .
+    @
+    $ cat <<EOF > Hi.hs
+    > \#!/usr/bin/env runghc
+    > main = putStrLn "hello!"
+    > EOF
+    $ chmod u+x Hi.hs
+    $ ./Hi.hs
+    hello!
+    @
+Category: Development
+build-type: Simple
+
+Executable runghc
+    Default-Language: Haskell2010
+    Main-Is: Main.hs
+
+    Build-Depends: base       >= 3   && < 5,
+                   directory  >= 1   && < 1.4,
+                   process    >= 1   && < 1.7,
+                   filepath
+
+    if !os(windows)
+      build-depends: unix

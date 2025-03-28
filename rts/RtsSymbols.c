@@ -279,7 +279,7 @@ extern char **environ;
      SymE_NeedsDataProto(ffi_type_uint8)                    \
      SymE_NeedsDataProto(ffi_type_pointer)
 
-#if defined(TABLES_NEXT_TO_CODE)
+#if TABLES_NEXT_TO_CODE
 #define RTS_RET_SYMBOLS /* nothing */
 #else
 #define RTS_RET_SYMBOLS                                 \

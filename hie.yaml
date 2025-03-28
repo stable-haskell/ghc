@@ -7,11 +7,24 @@
 # The format is documented here - https://github.com/mpickering/hie-bios
 cradle:
   multi:
-    - path: Build.hs
+    - path: ./Build.hs
       config:
         cradle:
           direct:
             arguments: []
-    - path: "*"
+    - path: ./rts/Setup.hs
+      config:
+        cradle:
+          direct:
+            arguments:
+              - -clear-package-db
+              - -global-package-db
+              - -package-db _stage0/store/ghc-9.8.4-6626/package.db
+              # - -package base
+              # - -package Cabal
+              # - -package Cabal-syntax
+              # - -package mtl
+              # - -package transformers
+    - path: .
       config:
         cradle: {bios: {program: "./hadrian/hie-bios"}}

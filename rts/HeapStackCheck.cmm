@@ -458,7 +458,7 @@ __stg_gc_fun /* explicit stack */
         size = BITMAP_SIZE(StgFunInfoExtra_bitmap(info));
     } else {
         if (type == ARG_GEN_BIG) {
-#if defined(TABLES_NEXT_TO_CODE)
+#if TABLES_NEXT_TO_CODE
             // bitmap field holds an offset
             size = StgLargeBitmap_size(
                       TO_W_(StgFunInfoExtraRev_bitmap_offset(info))

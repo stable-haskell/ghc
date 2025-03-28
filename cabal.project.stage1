@@ -1,0 +1,62 @@
+packages:
+  ./compiler
+  ./ghc
+  ./rts-headers
+  ./rts-fs
+  https://hackage.haskell.org/package/directory-1.3.9.0/directory-1.3.9.0.tar.gz
+  ./libraries/file-io
+  ./libraries/filepath
+  ./libraries/ghc-platform
+  ./libraries/ghc-boot
+  ./libraries/ghc-boot-th
+  ./libraries/ghc-heap
+  ./libraries/ghci
+  https://hackage.haskell.org/package/os-string-2.0.7/os-string-2.0.7.tar.gz
+  https://hackage.haskell.org/package/process-1.6.25.0/process-1.6.25.0.tar.gz
+  ./libraries/semaphore-compat
+  https://hackage.haskell.org/package/time-1.14/time-1.14.tar.gz
+  https://hackage.haskell.org/package/unix-2.8.6.0/unix-2.8.6.0.tar.gz
+  ./libraries/Win32
+  ./utils/ghc-pkg
+  ./utils/hsc2hs
+  ./utils/unlit
+  ./utils/genprimopcode
+  ./utils/genapply
+  ./utils/deriveConstants
+  ./utils/ghc-toolchain
+  ./utils/ghc-toolchain/exe
+  -- we need these here, as we'll need them for the setup.hs for the RTS, and
+  -- other packages. Once Cabal upstream is recent enough, we can drop them.
+  ./libraries/Cabal/Cabal
+  ./libraries/Cabal/Cabal-syntax
+  ./libraries/Cabal/Cabal-hooks
+
+benchmarks: False
+tests: False
+profiling: False
+
+allow-boot-library-installs: True
+
+package *
+  library-vanilla: True
+  shared: True
+  -- executable-profiling: False
+  -- executable-dynamic: False
+  -- executable-static: True
+
+package ghc-boot-th
+  flags: +bootstrap
+
+package hsc2hs
+  -- FIXME: What's this for?
+  flags: +in-ghc-tree
+
+-- allow template-haskell with newer ghc-boot-th
+allow-newer: ghc-boot-th
+
+constraints:
+-- FIXME: template-haskell 2.23 is too recent when booting with 9.8.4
+  template-haskell <= 2.22
+
+package *
+  ghc-options: -fhide-source-paths -j
