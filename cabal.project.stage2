@@ -77,14 +77,14 @@ packages:
 -- from trying to pass `-include ghcversion.h`.
 
 package rts-headers
-  ghc-options: -v -no-ghcversion-header
+  ghc-options: -no-ghcversion-header
 
 package rts-fs
-  ghc-options: -v -no-ghcversion-header
+  ghc-options: -no-ghcversion-header
 
 package rts
   flags: +table-next-to-code +leading-underscore
-  ghc-options: -v -no-ghcversion-header
+  ghc-options: -no-ghcversion-header
 
 package hsc2hs
   flags: +in-ghc-tree
@@ -94,7 +94,6 @@ package ghc
   -- interpreter but not the boot library we install
   -- FIXME: we should really install the lib we used to build stage2
   flags: +internal-interpreter
-  ghc-options: -v3
 
 package ghci
   flags: +internal-interpreter

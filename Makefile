@@ -1,48 +1,11 @@
-# The Makefile to build GHC with cabal
-#
-# Pre-requisites:
-# There are a few tools we expect to exist prior to building this.  These are
-# documented here.  If you end up creating more dependencies, be explicit about
-# them here at the start.
-#
-#  - make
-#  - ghc (a recent enough GHC to function at the boostrap compiler)
-#  - cabal (a recent enough cabal-install executable to build the cabal pkgs
-#    and the necessary changes for dual stage, ...)
-#
-# Build Plan:
-# In general GHC is built in two stages to ensure the compiler is linked against
-# libraries built by the same compiler.  This allows the compiler to have the
-# same abi as the code it produces.  This does not work for cross compilers, as
-# we can't build a compiler for the host platform using a host->target compiler.
-#
-# Stage 0 (boostrap stage)
-# In this stage we build just enough of the compiler dependencies to build the
-# Stage 1 compiler (ghc executable).  We want to build the ghc executable, but
-# may need to build extra libraries that are newer than the ones that come with
-# the bootstrap compiler.  This crucially also means, these libraries are stable
-# (as long as their source doesn't change) to be cached.
-#
-# Stage 1
-# We now have the boostrap libraries and a compiler (ghc1) built with (ghc0) the
-# ghc0-libraries + extra libraries built with ghc0. Thus we have a ghc1 but no
-# libraries yet.  We now build all the libraries required to build the compiler
-# (from ø) using ghc1. First we need to build the rts with ghc1. Then build all
-# the libraries necessary to build ghc2. And then build ghc2 using ghc1 with the
-# newly build libraries.
-#
-# Stage 2
-# This gives us our stage2 compiler (ghc2, all it's deps built with ghc1).  This
-# is the pair we package up.
-
 SHELL := bash
 .ONESHELL:
 .SHELLFLAGS := -eu -o pipefail -c
 .DELETE_ON_ERROR:
-MAKEFLAGS += --warn-undefined-variables
-MAKEFLAGS += --no-builtin-rules
+MAKEFLAGS += --warn-undefined-variables --no-builtin-rules
 
-all: stage1-boot
+# Default target
+all: stage2
 
 CABAL  ?= cabal
 GHC0   ?= ghc
@@ -62,25 +25,21 @@ endef
 	log autoreconf $(@D)
 
 CABAL_FLAGS += --store-dir $(OUT)/store --logs-dir $(OUT)/logs
-
-
-CABAL_BUILD_FLAGS += --builddir $(OUT)/build
-CABAL_BUILD_FLAGS += --with-compiler $(GHC) --with-hc-pkg $(GHC)-pkg --with-build-compiler $(GHC0) --with-build-hc-pkg $(GHC0)-pkg
+CABAL_BUILD_FLAGS += --builddir $(OUT)/build --with-compiler $(GHC) --with-hc-pkg $(GHC)-pkg --with-build-compiler $(GHC0) --with-build-hc-pkg $(GHC0)-pkg
+CABAL_INSTALL_FLAGS += --installdir $(OUT)/bin --overwrite-policy=always --install-method=copy --write-ghc-environment-files=never
 
 CABAL_BUILD = $(CABAL) $(CABAL_FLAGS) build $(CABAL_BUILD_FLAGS)
-
-CABAL_INSTALL_FLAGS += --installdir $(OUT)/bin
-CABAL_INSTALL_FLAGS += --overwrite-policy=always
-# If we copy the executables then ghc will recognise _stage1 as topdir (rather than a path in the store)
-CABAL_INSTALL_FLAGS += --install-method=copy
-# stop cabal from being a fucking turd.
-CABAL_INSTALL_FLAGS += --write-ghc-environment-files=never
-
 CABAL_INSTALL = $(CABAL) $(CABAL_FLAGS) install $(CABAL_BUILD_FLAGS) $(CABAL_INSTALL_FLAGS)
 
-STAGE1_EXE = ghc ghc-pkg ghc-toolchain-bin deriveConstants genprimopcode genapply unlit
+STAGE1_EXE = ghc ghc-pkg ghc-toolchain-bin
 STAGE1_BIN = $(addprefix _stage1/bin/,$(STAGE1_EXE))
 
+STAGE2_EXE = ghc ghc-pkg
+STAGE2_BIN = $(addprefix _stage2/bin/,$(STAGE2_EXE))
+
+TARGET := $(shell cc -dumpmachine)
+
+# Stage 1
 $(STAGE1_BIN) &: OUT ?= $(abspath _stage1)
 $(STAGE1_BIN) &: override GHC=$(GHC0)
 $(STAGE1_BIN) &:
@@ -89,36 +48,11 @@ $(STAGE1_BIN) &:
 	log export HADRIAN_SETTINGS="$$(cat ./HADRIAN_SETTINGS)"
 	log $(CABAL_INSTALL) --project-file cabal.project.stage1 $(addprefix exe:,$(STAGE1_EXE))
 
-TARGET := $(shell cc -dumpmachine)
-
-# FIXME: why do they all claim ("target has subsections via symbols","NO") for
-# macOS? 9.8 seems to claim this as well. This seems wrong and will severely
-# impact dead-stripability if ghc does not emit subsection via symbols. wtf.
-# I remain that `ghc-toolchain` is a bad tool and should just be a configure
-# script for ghc-bin producing a `settings` file according to a passed
-# `--target`. I also think most of the settins file values should have sensible
-# defaults: install_name_tool = install_name_tool, ... that do not need to be
-# explicitly listed in the settings file unless you want to override them.
-
-_stage1/lib/settings: _stage1/bin/ghc-toolchain-bin
+%/settings: _stage1/bin/ghc-toolchain-bin
 	@$(LIB)
 	mkdir -p $(@D)
 	log _stage1/bin/ghc-toolchain-bin --cc=cc --cxx=c++ --install-name-tool=install_name_tool --otool=otool --output-settings -t $(TARGET) -o $@
 
-_stage2/lib/settings: _stage1/bin/ghc-toolchain-bin
-	@$(LIB)
-	mkdir -p $(@D)
-	log _stage1/bin/ghc-toolchain-bin --cc=cc --cxx=c++ --install-name-tool=install_name_tool --otool=otool --output-settings -t $(TARGET) -o $@
-
-
-stage1: _stage1/bin/ghc _stage1/lib/settings
-
-# We need this folder to exist prior to running anything with _stage1/bin/ghc and cabal,
-# because that will result in ghc-pkg being invoked. That one looking into the ../lib/settings file.
-# Finding that package.conf.d is the global package db, and then falling over itself because that
-# folder doesn't exist after building the ghc executable. So here we link the cabal _store_ package-db
-# into the _stage1/lib/package.conf.d folder, thus the new ghc compiler will always have access to all
-# the packages it built on the way to ghc stage2.
 _stage1/lib/package.conf.d:
 	@$(LIB)
 	mkdir -p _stage1/lib _stage2/lib
@@ -126,11 +60,9 @@ _stage1/lib/package.conf.d:
 	log ln -sf $(PWD)/_stage2/store/$$(_stage1/bin/ghc --info | grep "Project Unit Id" | cut -d'"' -f4)/package.db _stage1/lib/package.conf.d
 	log ln -sf $(PWD)/_stage2/store/$$(_stage1/bin/ghc --info | grep "Project Unit Id" | cut -d'"' -f4)/package.db _stage2/lib/package.conf.d
 
-# Now that we've jammed the rts's into the stage1 compiler package.db, we can go on and just build the rest of the stage2 compiler.
-# This will automatically also mean, we end up with the relevant packages to ship alognside the stage2 compiler in the _stage1/lib/package.conf.d.
-STAGE2_EXE = ghc ghc-pkg
-STAGE2_BIN = $(addprefix _stage2/bin/,$(STAGE2_EXE))
+stage1: $(STAGE1_BIN) _stage1/lib/settings _stage1/lib/package.conf.d
 
+# Stage 2
 $(STAGE2_BIN) &: OUT ?= $(abspath _stage2)
 $(STAGE2_BIN) &: GHC = $(abspath _stage1/bin/ghc)
 $(STAGE2_BIN) &: GHC0 = $(shell which ghc)
@@ -140,7 +72,13 @@ $(STAGE2_BIN) &: _stage1/bin/ghc _stage1/lib/settings rts/configure libraries/gh
 	log export HADRIAN_SETTINGS="$$(cat ./HADRIAN_SETTINGS)"
 	log $(CABAL_INSTALL) --package-db=$(abspath _stage1/lib/package.conf.d) --project-file cabal.project.stage2 $(addprefix exe:,$(STAGE2_EXE))
 
-# 1. git clean -xfd
-# 2. make _stage1/bin/ghc
-# 3. make _stage2/bin/ghc
-# 4. make _stage2/lib/settings
+stage2: stage1 _stage2/lib/settings $(STAGE2_BIN)
+
+# Clean up
+clean:
+	rm -rf _stage1 _stage2
+
+# Usage instructions
+# 1. make clean
+# 2. make stage1
+# 3. make stage2
