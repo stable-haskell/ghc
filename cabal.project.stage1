@@ -48,6 +48,7 @@ package ghc-boot-th
   flags: +bootstrap
 
 package hsc2hs
+  -- FIXME: What's this for?
   flags: +in-ghc-tree
 
 -- allow template-haskell with newer ghc-boot-th
@@ -57,5 +58,5 @@ constraints:
 -- FIXME: template-haskell 2.23 is too recent when booting with 9.8.4
   template-haskell <= 2.22
 
-program-options
+package *
   ghc-options: -fhide-source-paths -j

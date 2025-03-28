@@ -104,11 +104,11 @@ package ghc-internal
 
 package ghc-bin
   -- FIXME: we don't have the threaded RTS yet.
-  flags: -threaded
+  flags: -threaded +internal-interpreter
 
 package text
   -- FIXME: avoid having to deal with system-cxx-std-lib fake package for now
   flags: -simdutf
 
-program-options
+package *
   ghc-options: -fhide-source-paths -j
