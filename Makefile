@@ -24,8 +24,8 @@ endef
 	@$(LIB)
 	log autoreconf $(@D)
 
-CABAL_FLAGS += --store-dir $(OUT)/store --logs-dir $(OUT)/logs
-CABAL_BUILD_FLAGS += --builddir $(OUT)/build --with-compiler $(GHC) --with-hc-pkg $(GHC)-pkg --with-build-compiler $(GHC0) --with-build-hc-pkg $(GHC0)-pkg
+CABAL_FLAGS += --store-dir $(abspath _build/store) --logs-dir $(abspath _build/logs) -j --ghc-option=-fhide-source-paths --ghc-option=-j
+CABAL_BUILD_FLAGS += --builddir $(abspath _build/build) --with-compiler $(GHC) --with-hc-pkg $(GHC)-pkg --with-build-compiler $(GHC0) --with-build-hc-pkg $(GHC0)-pkg
 CABAL_INSTALL_FLAGS += --installdir $(OUT)/bin --overwrite-policy=always --install-method=copy --write-ghc-environment-files=never
 
 CABAL_BUILD = $(CABAL) $(CABAL_FLAGS) build $(CABAL_BUILD_FLAGS)
@@ -56,9 +56,9 @@ $(STAGE1_BIN) &:
 _stage1/lib/package.conf.d:
 	@$(LIB)
 	mkdir -p _stage1/lib _stage2/lib
-	log _stage1/bin/ghc-pkg init $(PWD)/_stage2/store/$$(_stage1/bin/ghc --info | grep "Project Unit Id" | cut -d'"' -f4)/package.db
-	log ln -sf $(PWD)/_stage2/store/$$(_stage1/bin/ghc --info | grep "Project Unit Id" | cut -d'"' -f4)/package.db _stage1/lib/package.conf.d
-	log ln -sf $(PWD)/_stage2/store/$$(_stage1/bin/ghc --info | grep "Project Unit Id" | cut -d'"' -f4)/package.db _stage2/lib/package.conf.d
+	log _stage1/bin/ghc-pkg init $(abspath _build/store)/$$(_stage1/bin/ghc --info | grep "Project Unit Id" | cut -d'"' -f4)/package.db
+	log ln -sf $(abspath _build/store)/$$(_stage1/bin/ghc --info | grep "Project Unit Id" | cut -d'"' -f4)/package.db _stage1/lib/package.conf.d
+	log ln -sf $(abspath _build/store)/$$(_stage1/bin/ghc --info | grep "Project Unit Id" | cut -d'"' -f4)/package.db _stage2/lib/package.conf.d
 
 stage1: $(STAGE1_BIN) _stage1/lib/settings _stage1/lib/package.conf.d
 
