@@ -82,10 +82,14 @@ package rts-headers
 package rts-fs
   ghc-options: -no-ghcversion-header
 
+-- FIXME: TNTC should be configurable.
+-- FIXME: leading-underscore is platform dependent (only mach-o!)
 package rts
   flags: +table-next-to-code +leading-underscore
   ghc-options: -no-ghcversion-header
 
+-- FIXME: Still not sure what in-ghc-tree is. Maybe we should specify/explain
+-- this HERE!
 package hsc2hs
   flags: +in-ghc-tree
 
@@ -111,4 +115,33 @@ package text
   flags: -simdutf
 
 package *
+  -- try to make everything build faster 😓
   ghc-options: -fhide-source-paths -j
+
+constraints:
+  -- these build.* constraints will ensure that we do not rebuild any library
+  -- during stage2 that we had built during stage1 anyway. build.* constraints
+  -- only apply to Setup.hs / build-tool dependencies, and are built with our
+  -- bootstrap compiler anyway.
+  --
+  -- Stage1: GHC0=GHC1=bootstrap-ghc
+  --          .-<--'
+  -- Stage2: GHC0=bootstrap-ghc, GHC1=stage1-ghc
+  --          .---------<---------'
+  -- Stage3: GHC0=stage1-ghc, GHC1=stage2-ghc
+  --
+  build.rts installed,
+  build.template-haskell installed,
+  build.process installed,
+  build.file-io installed,
+  build.containers installed,
+  build.directory installed,
+  build.Cabal-syntax installed,
+  build.Cabal installed
+
+  -- FIXME: we don't seem to be able to request build-tools to be "installed".
+  -- build.genprimopcode installed,
+  -- build.genapply installed,
+  -- build.deriveConstants installed,
+  -- build.alex installed,
+  -- build.happy installed

@@ -39,7 +39,7 @@ STAGE2_BIN = $(addprefix _stage2/bin/,$(STAGE2_EXE))
 
 TARGET := $(shell cc -dumpmachine)
 
-# Stage 1
+# Stage 1 -- should we pass prefix=stage1- here? And get stage1-ghc, stage1-ghc-pkg, ...?
 $(STAGE1_BIN) &: OUT ?= $(abspath _stage1)
 $(STAGE1_BIN) &: override GHC=$(GHC0)
 $(STAGE1_BIN) &:
@@ -56,9 +56,15 @@ $(STAGE1_BIN) &:
 _stage1/lib/package.conf.d:
 	@$(LIB)
 	mkdir -p _stage1/lib _stage2/lib
-	log _stage1/bin/ghc-pkg init $(abspath _build/store)/$$(_stage1/bin/ghc --info | grep "Project Unit Id" | cut -d'"' -f4)/package.db
-	log ln -sf $(abspath _build/store)/$$(_stage1/bin/ghc --info | grep "Project Unit Id" | cut -d'"' -f4)/package.db _stage1/lib/package.conf.d
-	log ln -sf $(abspath _build/store)/$$(_stage1/bin/ghc --info | grep "Project Unit Id" | cut -d'"' -f4)/package.db _stage2/lib/package.conf.d
+	log _stage1/bin/ghc-pkg init $(abspath _build/store)/$$(_stage1/bin/ghc --info | grep "Project Unit Id" | sed -E 's/.*_(ghc-[0-9.]+-[0-9a-z]+).*/\1/')/package.db
+	log ln -sf $(abspath _build/store)/$$(_stage1/bin/ghc --info | grep "Project Unit Id" | sed -E 's/.*_(ghc-[0-9.]+-[0-9a-z]+).*/\1/')/package.db _stage1/lib/package.conf.d
+	log ln -sf $(abspath _build/store)/$$(_stage1/bin/ghc --info | grep "Project Unit Id" | sed -E 's/.*_(ghc-[0-9.]+-[0-9a-z]+).*/\1/')/package.db _stage2/lib/package.conf.d
+
+# stage0 is boot
+_stage0/lib/package.conf.d:
+	@$(LIB)
+	mkdir -p _stage0/lib
+	log ln -sf $(abspath _build/store)/$$(ghc --info | grep "Project Unit Id" | sed -E 's/.*[_]*(ghc-[0-9.]+-[0-9a-z]+).*/\1/')/package.db _stage0/lib/package.conf.d
 
 stage1: $(STAGE1_BIN) _stage1/lib/settings _stage1/lib/package.conf.d
 
@@ -66,17 +72,17 @@ stage1: $(STAGE1_BIN) _stage1/lib/settings _stage1/lib/package.conf.d
 $(STAGE2_BIN) &: OUT ?= $(abspath _stage2)
 $(STAGE2_BIN) &: GHC = $(abspath _stage1/bin/ghc)
 $(STAGE2_BIN) &: GHC0 = $(shell which ghc)
-$(STAGE2_BIN) &: _stage1/bin/ghc _stage1/lib/settings rts/configure libraries/ghc-internal/configure _stage1/lib/package.conf.d
+$(STAGE2_BIN) &: _stage1/bin/ghc _stage1/lib/settings rts/configure libraries/ghc-internal/configure _stage0/lib/package.conf.d _stage1/lib/package.conf.d
 	@$(LIB)
 	log mkdir -p $(@D)
 	log export HADRIAN_SETTINGS="$$(cat ./HADRIAN_SETTINGS)"
-	log $(CABAL_INSTALL) --package-db=$(abspath _stage1/lib/package.conf.d) --project-file cabal.project.stage2 $(addprefix exe:,$(STAGE2_EXE))
+	log $(CABAL_INSTALL) --package-db=$(abspath _stage1/lib/package.conf.d) --build-package-db=$(abspath _stage0/lib/package.conf.d) --project-file cabal.project.stage2 $(addprefix exe:,$(STAGE2_EXE))
 
 stage2: stage1 _stage2/lib/settings $(STAGE2_BIN)
 
 # Clean up
 clean:
-	rm -rf _stage1 _stage2
+	rm -rf _stage0 _stage1 _stage2 _build
 
 # Usage instructions
 # 1. make clean
