@@ -549,7 +549,7 @@ buildBootLibraries cabal ghc ghcpkg derive_constants genapply genprimop opts dst
     ghcplatform_h <- readCreateProcess (shell ("find " ++ build_dir ++ " -name ghcplatform.h")) ""
     case ghcplatform_h of
       "" -> do
-        putStrLn "Couldn't find ghcplatform.h"
+        putStrLn $ "Couldn't find ghcplatform.h. Look into " ++ dst ++ "rts-conf.{stdout,stderr}"
         exitFailure
       d  -> pure (takeDirectory d)
 
