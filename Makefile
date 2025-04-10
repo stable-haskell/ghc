@@ -5,7 +5,7 @@ SHELL := bash
 MAKEFLAGS += --warn-undefined-variables --no-builtin-rules
 
 # Default target
-all: stage2 rts-debug rts-threaded rts-debug-threaded
+all: stage2 rts-debug rts-no-threaded rts-debug-no-threaded
 
 CABAL  ?= cabal
 GHC0   ?= ghc
@@ -87,20 +87,20 @@ rts-debug: _stage2/bin/ghc
 	# cabal still writes the environment files even if we pass --write-ghc-environment-files=never
 	log rm ~/.ghc/*/*/default
 
-rts-threaded: OUT = $(abspath _stage2)
-rts-threaded: GHC = $(abspath _stage2/bin/ghc)
-rts-threaded: _stage2/bin/ghc
+rts-no-threaded: OUT = $(abspath _stage2)
+rts-no-threaded: GHC = $(abspath _stage2/bin/ghc)
+rts-no-threaded: _stage2/bin/ghc
 	@$(LIB)
-	log $(CABAL_INSTALL) --write-ghc-environment-files=never --package-db=$(abspath _stage1/lib/package.conf.d) --build-package-db=$(abspath _stage0/lib/package.conf.d) --project-file cabal.project.stage2 --lib rts:rts --constraint="rts+threaded"
+	log $(CABAL_INSTALL) --write-ghc-environment-files=never --package-db=$(abspath _stage1/lib/package.conf.d) --build-package-db=$(abspath _stage0/lib/package.conf.d) --project-file cabal.project.stage2 --lib rts:rts --constraint="rts-threaded"
 	# cabal still writes the environment files even if we pass --write-ghc-environment-files=never
 	log rm ~/.ghc/*/*/default
 
 
-rts-debug-threaded: OUT = $(abspath _stage2)
-rts-debug-threaded: GHC = $(abspath _stage2/bin/ghc)
-rts-debug-threaded: _stage2/bin/ghc
+rts-debug-no-threaded: OUT = $(abspath _stage2)
+rts-debug-no-threaded: GHC = $(abspath _stage2/bin/ghc)
+rts-debug-no-threaded: _stage2/bin/ghc
 	@$(LIB)
-	log $(CABAL_INSTALL) --write-ghc-environment-files=never --package-db=$(abspath _stage1/lib/package.conf.d) --build-package-db=$(abspath _stage0/lib/package.conf.d) --project-file cabal.project.stage2 --lib rts:rts --constraint="rts+debug" --constraint="rts+threaded"
+	log $(CABAL_INSTALL) --write-ghc-environment-files=never --package-db=$(abspath _stage1/lib/package.conf.d) --build-package-db=$(abspath _stage0/lib/package.conf.d) --project-file cabal.project.stage2 --lib rts:rts --constraint="rts+debug" --constraint="rts-threaded"
 	# cabal still writes the environment files even if we pass --write-ghc-environment-files=never
 	log rm ~/.ghc/*/*/default
 

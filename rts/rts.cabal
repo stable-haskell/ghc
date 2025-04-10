@@ -315,7 +315,7 @@ flag dynamic
   default: False
   manual: True
 flag threaded
-  default: False
+  default: True
   manual: True
 flag thread-sanitizer
   description:
