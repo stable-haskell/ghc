@@ -121,13 +121,13 @@
         name : bits8[] str;                     \
   }                                             \
 
-#if defined(TABLES_NEXT_TO_CODE)
+#if TABLES_NEXT_TO_CODE
 #define RET_LBL(f) f##_info
 #else
 #define RET_LBL(f) f##_ret
 #endif
 
-#if defined(TABLES_NEXT_TO_CODE)
+#if TABLES_NEXT_TO_CODE
 #define ENTRY_LBL(f) f##_info
 #else
 #define ENTRY_LBL(f) f##_entry
@@ -637,7 +637,7 @@
  * depending on TABLES_NEXT_TO_CODE.  So we define field access
  * macros which use the appropriate version here:
  */
-#if defined(TABLES_NEXT_TO_CODE)
+#if TABLES_NEXT_TO_CODE
 /*
  * when TABLES_NEXT_TO_CODE, slow_apply is stored as an offset
  * instead of the normal pointer.

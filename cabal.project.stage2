@@ -1,0 +1,145 @@
+allow-boot-library-installs: True
+active-repositories: :none
+
+benchmarks: False
+tests: False
+
+build-packages:
+  https://hackage.haskell.org/package/alex-3.5.2.0/alex-3.5.2.0.tar.gz
+  https://hackage.haskell.org/package/happy-2.1.5/happy-2.1.5.tar.gz
+  https://hackage.haskell.org/package/happy-lib-2.1.5/happy-lib-2.1.5.tar.gz
+  ./utils/deriveConstants
+  ./utils/genprimopcode
+  ./utils/genapply
+
+packages:
+  ./compiler
+  ./ghc
+  ./libraries/array
+  ./libraries/base
+  ./libraries/binary
+  ./libraries/bytestring
+  ./libraries/Cabal/Cabal
+  ./libraries/Cabal/Cabal-syntax
+  ./libraries/containers/containers
+  ./libraries/deepseq
+  ./libraries/directory
+  ./libraries/exceptions
+  ./libraries/file-io
+  ./libraries/filepath
+  ./libraries/ghc-bignum
+  ./libraries/ghc-boot
+  ./libraries/ghc-boot-th
+  ./libraries/ghc-compact
+  ./libraries/ghc-experimental
+  ./libraries/ghc-heap
+  ./libraries/ghci
+  ./libraries/ghc-internal
+  ./libraries/ghc-platform
+  ./libraries/ghc-prim
+  ./libraries/haskeline
+  ./libraries/hpc
+  ./libraries/integer-gmp
+  ./libraries/mtl
+  ./libraries/os-string
+  ./libraries/parsec
+  ./libraries/pretty
+  ./libraries/process
+  ./libraries/semaphore-compat
+  ./libraries/stm
+  -- ./libraries/system-cxx-std-lib
+  ./libraries/template-haskell
+  ./libraries/terminfo
+  ./libraries/text
+  ./libraries/time
+  ./libraries/transformers
+  ./libraries/unix
+  ./libraries/Win32
+  ./libraries/xhtml
+  ./utils/ghc-pkg
+  ./utils/ghc-toolchain
+  ./utils/hsc2hs
+  ./utils/unlit
+  -- https://hackage.haskell.org/package/alex-3.5.2.0/alex-3.5.2.0.tar.gz
+  -- https://hackage.haskell.org/package/happy-2.1.5/happy-2.1.5.tar.gz
+  -- https://hackage.haskell.org/package/happy-lib-2.1.5/happy-lib-2.1.5.tar.gz
+  -- https://hackage.haskell.org/package/os-string-2.0.7/os-string-2.0.7.tar.gz
+  -- https://hackage.haskell.org/package/process-1.6.25.0/process-1.6.25.0.tar.gz
+  -- https://hackage.haskell.org/package/time-1.14/time-1.14.tar.gz
+  -- https://hackage.haskell.org/package/unix-2.8.6.0/unix-2.8.6.0.tar.gz
+  rts
+  rts-fs
+  rts-headers
+
+-- When building the rts{-headers,-fs} we do not have the ghcversion.h yet.
+-- We basically have a bare ghc with no packages yet. To avoid the forced
+-- need of ghcversion.h, we pass -no-ghcversion-header to ghc, to prevent it
+-- from trying to pass `-include ghcversion.h`.
+
+package rts-headers
+  ghc-options: -no-ghcversion-header
+
+package rts-fs
+  ghc-options: -no-ghcversion-header
+
+-- FIXME: TNTC should be configurable.
+package rts
+  flags: +table-next-to-code
+  ghc-options: -no-ghcversion-header
+
+-- FIXME: Still not sure what in-ghc-tree is. Maybe we should specify/explain
+-- this HERE!
+package hsc2hs
+  flags: +in-ghc-tree
+
+package ghc
+  -- internal-interpreter: otherwise our compiler has the internal
+  -- interpreter but not the boot library we install
+  -- FIXME: we should really install the lib we used to build stage2
+  flags: +internal-interpreter
+
+package ghci
+  flags: +internal-interpreter
+
+package ghc-internal
+  -- FIXME: make our life easier for now by using the native bignum backend
+  flags: +bignum-native
+
+package ghc-bin
+  flags: +internal-interpreter
+
+package text
+  -- FIXME: avoid having to deal with system-cxx-std-lib fake package for now
+  flags: -simdutf
+
+package *
+  -- try to make everything build faster 😓
+  ghc-options: -fhide-source-paths -j
+
+constraints:
+  -- these build.* constraints will ensure that we do not rebuild any library
+  -- during stage2 that we had built during stage1 anyway. build.* constraints
+  -- only apply to Setup.hs / build-tool dependencies, and are built with our
+  -- bootstrap compiler anyway.
+  --
+  -- Stage1: GHC0=GHC1=bootstrap-ghc
+  --          .-<--'
+  -- Stage2: GHC0=bootstrap-ghc, GHC1=stage1-ghc
+  --          .---------<---------'
+  -- Stage3: GHC0=stage1-ghc, GHC1=stage2-ghc
+  --
+  build.rts installed,
+  build.template-haskell installed,
+  build.process installed,
+  build.file-io installed,
+  build.containers installed,
+  build.directory installed,
+  build.Cabal-syntax installed,
+  build.Cabal installed
+
+  -- FIXME: we don't seem to be able to request build-tools to be "installed".
+  -- build.genprimopcode installed,
+  -- build.genapply installed,
+  -- build.deriveConstants installed,
+  -- build.alex installed,
+  -- build.happy installed

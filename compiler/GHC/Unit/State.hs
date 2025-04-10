@@ -644,7 +644,7 @@ initUnits logger dflags cached_dbs home_units = do
 
   (unit_state,dbs) <- withTiming logger (text "initializing unit database")
                    forceUnitInfoMap
-                 $ mkUnitState logger (initUnitConfig dflags cached_dbs home_units)
+                 $ mkUnitState logger dflags (initUnitConfig dflags cached_dbs home_units)
 
   putDumpFileMaybe logger Opt_D_dump_mod_map "Module Map"
     FormatText (updSDocContext (\ctx -> ctx {sdocLineLength = 200})
@@ -1093,6 +1093,7 @@ type WiringMap = UniqMap UnitId UnitId
 
 findWiredInUnits
    :: Logger
+   -> DynFlags
    -> UnitPrecedenceMap
    -> [UnitInfo]           -- database
    -> VisibilityMap             -- info on what units are visible
@@ -1100,7 +1101,7 @@ findWiredInUnits
    -> IO ([UnitInfo],  -- unit database updated for wired in
           WiringMap)   -- map from unit id to wired identity
 
-findWiredInUnits logger prec_map pkgs vis_map = do
+findWiredInUnits logger dflags prec_map pkgs vis_map = do
   -- Now we must find our wired-in units, and rename them to
   -- their canonical names (eg. base-1.0 ==> base), as described
   -- in Note [Wired-in units] in GHC.Unit.Types
@@ -1126,10 +1127,35 @@ findWiredInUnits logger prec_map pkgs vis_map = do
         -- available.
         --
         findWiredInUnit :: [UnitInfo] -> UnitId -> IO (Maybe (UnitId, UnitInfo))
-        findWiredInUnit pkgs wired_pkg = firstJustsM [try all_exposed_ps, try all_ps, notfound]
+        findWiredInUnit pkgs wired_pkg
+          | wired_pkg == rtsUnitId = firstJustsM [try all_exposed_rts_ps, try all_rts_ps, notfound]
+          | otherwise = firstJustsM [try all_exposed_ps, try all_ps, notfound]
           where
                 all_ps = [ p | p <- pkgs, p `matches` wired_pkg ]
                 all_exposed_ps = [ p | p <- all_ps, (mkUnit p) `elemUniqMap` vis_map ]
+
+                -- this technically permits to have multiple rts's that match the required ways.
+                all_rts_ps = [ p | p <- pkgs, p `matches` wired_pkg
+                                 -- this is a bit stupid, we need to get
+                                 -- -threaded and -debug or
+                                 -- +threaded and -debug or
+                                 -- +threaded and +debug or
+                                 -- -threaded and +debug.
+                                 -- And then check if we have an rts instance
+                                 -- that matches these flags exactly.
+                                 , and [(wayToFlag way) `elem` (map ST.unpack (unitFlags p)) | way <- [WayThreaded, WayDebug]]]
+                all_exposed_rts_ps = [ p | p <- all_rts_ps, (mkUnit p) `elemUniqMap` vis_map ]
+
+                prefixWay :: Way -> Char
+                prefixWay way = if (ways dflags) `hasWay` way then '+' else '-'
+
+                wayToFlag :: Way -> String
+                wayToFlag way = prefixWay way:case way of
+                  WayThreaded -> "threaded"
+                  WayDebug -> "debug"
+                  -- this can't really happen, as we only call this function
+                  -- with Threaded and Debug
+                  _ -> error "findWiredInUnits: unexpected way"
 
                 try ps = case sortByPreference prec_map ps of
                     p:_ -> Just <$> pick p
@@ -1464,9 +1490,10 @@ validateDatabase cfg pkg_map1 =
 
 mkUnitState
     :: Logger
+    -> DynFlags
     -> UnitConfig
     -> IO (UnitState,[UnitDatabase UnitId])
-mkUnitState logger cfg = do
+mkUnitState logger dflags cfg = do
 {-
    Plan.
 
@@ -1621,7 +1648,7 @@ mkUnitState logger cfg = do
   -- it modifies the unit ids of wired in packages, but when we process
   -- package arguments we need to key against the old versions.
   --
-  (pkgs2, wired_map) <- findWiredInUnits logger prec_map pkgs1 vis_map2
+  (pkgs2, wired_map) <- findWiredInUnits logger dflags prec_map pkgs1 vis_map2
   let pkg_db = mkUnitInfoMap pkgs2
 
   -- Update the visibility map, so we treat wired packages as visible.

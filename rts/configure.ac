@@ -10,8 +10,8 @@ AC_INIT([GHC run-time system], [1.0.2], [libraries@haskell.org], [rts])
 
 AC_CONFIG_MACRO_DIRS([../m4])
 
-# Safety check: Ensure that we are in the correct source directory.
-AC_CONFIG_SRCDIR([include/rts/Constants.h])
+# Ensure that we are in the correct source directory.
+AC_CONFIG_SRCDIR([rts.cabal])
 
 dnl * We require autoconf version 2.69 due to
 dnl   https://bugs.ruby-lang.org/issues/8179. Also see #14910.
@@ -22,9 +22,50 @@ dnl     #define SIZEOF_CHAR 0
 dnl   recently.
 AC_PREREQ([2.69])
 
-AC_CONFIG_FILES([ghcplatform.h.top])
+AC_CONFIG_FILES([include/ghcplatform.h])
+AC_CONFIG_FILES([rts.buildinfo])
+AC_CONFIG_HEADERS([include/ghcautoconf.h])
 
-AC_CONFIG_HEADERS([ghcautoconf.h.autoconf])
+AC_PROG_AWK
+
+AC_ARG_WITH([compiler],
+   [AS_HELP_STRING([--with-compiler=PATH],
+                   [Use a particular compiler available at PATH (default: ghc)])],
+   [
+    GHC="$withval"
+    dnl If a name was provided (not an absolute path), resolve it in PATH
+    case "$withval" in
+      /*) AC_PATH_PROG([GHC], [`basename -- "$withval"`], [], [`dirname -- "$withval"`])
+         ;;  # It's already an absolute path, do nothing
+      *) AC_PATH_PROG([GHC], [$GHC], [], [$PATH]) ;;  # Resolve it in PATH
+    esac
+   ],
+   [AC_PATH_PROG([GHC], [ghc])]
+)
+
+dnl Verify that the resolved GHC is valid
+if test -z "$GHC"; then
+  AC_MSG_ERROR([No valid GHC compiler found. Please install GHC or specify one with --with-compiler=.])
+elif test ! -x "$GHC"; then
+  AC_MSG_ERROR([The specified compiler ($GHC) is not executable.])
+fi
+
+dnl Check if it's actually GHC
+GHC_VERSION=`$GHC --numeric-version 2>/dev/null`
+if test -z "$GHC_VERSION"; then
+  AC_MSG_ERROR([The specified compiler ($GHC) does not appear to be a valid GHC.])
+fi
+
+dnl NOTE: This is relative to what is being used to compile the rts,
+dnl even if this is a new rts to be included in a new compiler version.
+dnl tl;dr: this is going to be wrong in stage1 but will be correct in stage2.
+AC_DEFINE_UNQUOTED([ProjectVersion], ["$GHC_VERSION"], [Version of GHC used to build this RTS])
+
+dnl ** Rts way
+dnl --------------------------------------------------------------
+
+dnl FIXME Only used for display?
+AC_DEFINE_UNQUOTED([RtsWay], ["FIXME"], [RtsWay])
 
 AC_ARG_ENABLE(asserts-all-ways,
 [AS_HELP_STRING([--enable-asserts-all-ways],
@@ -45,9 +86,7 @@ AC_CANONICAL_HOST
 dnl ** Do a build with tables next to code?
 dnl --------------------------------------------------------------
 
-AS_IF(
-  [test "$CABAL_FLAG_tables_next_to_code" = 1],
-  [AC_DEFINE([TABLES_NEXT_TO_CODE], [1], [Define to 1 if info tables are laid out next to code])])
+AC_DEFINE_UNQUOTED([TABLES_NEXT_TO_CODE], [$CABAL_FLAG_tables_next_to_code], [Define to 1 if info tables are laid out next to code])
 
 dnl detect compiler (prefer gcc over clang) and set $CC (unless CC already set),
 dnl later CC is copied to CC_STAGE{1,2,3}
@@ -74,9 +113,19 @@ GHC_CONVERT_PLATFORM_PARTS([build], [Build])
 FPTOOLS_SET_PLATFORM_VARS([build],[Build])
 FPTOOLS_SET_HASKELL_PLATFORM_VARS([Build])
 
+AC_DEFINE_UNQUOTED([BuildPlatform],["$BuildPlatform_CPP"],[BuildPlatform])
+AC_DEFINE_UNQUOTED([BuildArch],["$BuildArch_CPP"],[BuildArch])
+AC_DEFINE_UNQUOTED([BuildOS],["$BuildOS_CPP"],[BuildOS])
+AC_DEFINE_UNQUOTED([BuildVendor],["$BuildVendor_CPP"],[BuildVendor])
+
 GHC_CONVERT_PLATFORM_PARTS([host], [Host])
 FPTOOLS_SET_PLATFORM_VARS([host], [Host])
 FPTOOLS_SET_HASKELL_PLATFORM_VARS([Host])
+
+AC_DEFINE_UNQUOTED([HostPlatform],["$HostPlatform"],[HostPlatform])
+AC_DEFINE_UNQUOTED([HostArch],["$HostArch_CPP"],[HostArch])
+AC_DEFINE_UNQUOTED([HostOS],["$HostOS_CPP"],[HostOS])
+AC_DEFINE_UNQUOTED([HostVendor],["$HostVendor_CPP"],[HostVendor])
 
 GHC_SUBSECTIONS_VIA_SYMBOLS
 AS_IF([test x"${TargetHasSubsectionsViaSymbols}" = x"YES"],
@@ -138,7 +187,6 @@ FP_CHECK_SIZEOF_AND_ALIGNMENT(int32_t)
 FP_CHECK_SIZEOF_AND_ALIGNMENT(uint32_t)
 FP_CHECK_SIZEOF_AND_ALIGNMENT(int64_t)
 FP_CHECK_SIZEOF_AND_ALIGNMENT(uint64_t)
-
 
 FP_CHECK_FUNC([WinExec],
   [@%:@include <windows.h>], [WinExec("",0)])
@@ -210,7 +258,8 @@ FP_MUSTTAIL
 
 dnl ** check for librt
 AC_CHECK_FUNCS(clock_gettime timer_settime)
-FP_CHECK_TIMER_CREATE
+
+AC_CHECK_FUNC([timer_create],[HAVE_timer_create=yes],[HAVE_timer_create=no])
 
 dnl ** check for Apple's "interesting" long double compatibility scheme
 AC_MSG_CHECKING(for printf\$LDBLStub)
@@ -345,6 +394,11 @@ AS_IF(
   [test "$CABAL_FLAG_libnuma" = 1],
   [AC_CHECK_HEADERS([numa.h numaif.h])])
 
+dnl ** Is this an unregisterised build?
+dnl --------------------------------------------------------------
+
+dnl Only used for printing information
+AC_DEFINE_UNQUOTED([GhcUnregisterised], [$CABAL_FLAG_unregisterised], [Is this an unregistered build?])
 
 dnl ** I/O managers
 dnl --------------------------------------------------------------
@@ -431,92 +485,34 @@ GHC_IOMANAGER_DEFAULT_AC_DEFINE([IOManagerThreadedDefault], [threaded],
 GHC_IOMANAGER_DEFAULT_AC_DEFINE([IOManagerThreadedDefault], [threaded],
                                 [winio], [IOMGR_DEFAULT_THREADED_WINIO])
 
-
-dnl ** Write config files
-dnl --------------------------------------------------------------
-
-AC_OUTPUT
-
-dnl ######################################################################
-dnl Generate ghcplatform.h
-dnl ######################################################################
-
-[
-mkdir -p include
-
-touch include/ghcplatform.h
-> include/ghcplatform.h
-
-cat ghcplatform.h.top                          >> include/ghcplatform.h
-]
-
-dnl ** Do an unregisterised build?
-dnl --------------------------------------------------------------
-AS_IF(
-  [test "$CABAL_FLAG_unregisterised" = 1],
-  [echo "#define UnregisterisedCompiler 1"     >> include/ghcplatform.h])
-
-[
-cat $srcdir/ghcplatform.h.bottom               >> include/ghcplatform.h
-]
-
-dnl ######################################################################
-dnl Generate ghcautoconf.h
-dnl ######################################################################
-
-[
-touch include/ghcautoconf.h
-> include/ghcautoconf.h
-
-echo "#if !defined(__GHCAUTOCONF_H__)" >> include/ghcautoconf.h
-echo "#define __GHCAUTOCONF_H__" >> include/ghcautoconf.h
-# Copy the contents of ghcautoconf.h.autoconf, turning '#define PACKAGE_FOO
-# "blah"' into '/* #undef PACKAGE_FOO */' to avoid clashes.
-cat ghcautoconf.h.autoconf | sed \
-   -e 's,^\([	 ]*\)#[	 ]*define[	 ][	 ]*\(PACKAGE_[A-Z]*\)[	 ][ 	]*".*".*$,\1/* #undef \2 */,' \
-   -e '/__GLASGOW_HASKELL/d' \
-   -e '/REMOVE ME/d' \
-   >> include/ghcautoconf.h
-echo "#endif /* __GHCAUTOCONF_H__ */" >> include/ghcautoconf.h
-]
-
 dnl ######################################################################
 dnl Generate external symbol flags (-Wl,-u...)
 dnl ######################################################################
 
 dnl See Note [Undefined symbols in the RTS]
 
-[
-symbolExtraDefs=''
-if [ "$CABAL_FLAG_find_ptr" = 1 ]; then
-    symbolExtraDefs+=' -DFIND_PTR'
+TEMP_FILE=`mktemp conftest.XXXXXX` || exit 1
+
+cp $srcdir/external-symbols.list "$TEMP_FILE"
+
+if test "$CABAL_FLAG_find_ptr" = 1; then
+	echo findPtr >> "$TEMP_FILE"
 fi
 
-cat $srcdir/external-symbols.list.in \
-    | "$CC" $symbolExtraDefs -E -P -traditional -Iinclude - -o - \
-    | sed -e '/^ *$/d' \
-    > external-symbols.list \
-    || exit 1
+if test "$HostOS_CPP" = "mingw32"; then
+	echo ghczminternal_GHCziInternalziEventziWindows_processRemoteCompletion_closure >> "$TEMP_FILE"
+fi
 
-if [ "$CABAL_FLAG_leading_underscore" = 1 ]; then
-    sedExpr='s/^(.*)$/  "-Wl,-u,_\1"/'
+if test "$CABAL_FLAGS_leading_underscore" = 1; then
+	LDFLAGS="$LDFLAGS `echo; $AWK '{ print "   -Wl,-u,_" $0 }' "$TEMP_FILE"`"
 else
-    sedExpr='s/^(.*)$/  "-Wl,-u,\1"/'
+	LDFLAGS="$LDFLAGS `echo; $AWK '{ print "   -Wl,-u," $0 }' "$TEMP_FILE"`"
 fi
-sed -E -e "${sedExpr}" external-symbols.list > external-symbols.flags
-unset sedExpr
-rm -f external-symbols.list
-]
 
-dnl ######################################################################
-dnl Generate build-info
-dnl ######################################################################
+rm -rf "$TEMP_FILE"
 
-[
-cat $srcdir/rts.buildinfo.in \
-    | "$CC" -E -P -traditional - -o - \
-    | sed -e '/^ *$/d' \
-    > rts.buildinfo \
-    || exit 1
-rm -f external-symbols.flags
-]
+dnl --------------------------------------------------------------
+dnl ** Write config files
+dnl --------------------------------------------------------------
+
+AC_OUTPUT

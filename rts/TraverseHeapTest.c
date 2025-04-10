@@ -26,7 +26,7 @@ struct node {
 };
 
 // See INFO_PTR_TO_STRUCT in ClosureMacros.h
-#if defined(TABLES_NEXT_TO_CODE)
+#if TABLES_NEXT_TO_CODE
 #define INFO(ptr) ((StgInfoTable *)ptr + 1)
 #else
 #define INFO(ptr) ((StgInfoTable *)ptr)

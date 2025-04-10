@@ -35,7 +35,7 @@
 #  define RTS_FUN_DECL(f)   extern DLL_IMPORT_RTS StgFunPtr f(void)
 #endif
 
-#if defined(TABLES_NEXT_TO_CODE)
+#if TABLES_NEXT_TO_CODE
 #  define RTS_RET(f)      RTS_INFO(f##_info)
 #  define RTS_ENTRY(f)    RTS_INFO(f##_info)
 #  define RTS_FUN(f)      RTS_FUN_INFO(f##_info)
