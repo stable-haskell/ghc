@@ -390,39 +390,34 @@ library
                         stg/Types.h
 
     else
-      -- Here we declare several flavours to be available when passing the
-      -- suitable (combination of) flag(s) when configuring the RTS from hadrian,
-      -- using Cabal.
-      if flag(threaded)
-        extra-library-flavours: _thr
-        if flag(dynamic)
-          extra-dynamic-library-flavours: _thr
+      cc-options: -DFS_NAMESPACE=rts -DCOMPILING_RTS
+      cc-options: -Wall -Wextra -Wstrict-prototypes -Wmissing-prototypes
+      cc-options: -Wmissing-declarations -Winline -Wpointer-arith
+      cc-options: -Wmissing-noreturn -Wnested-externs -Wredundant-decls
+      cc-options: -Wundef -fno-strict-aliasing
 
-      if flag(profiling)
-        extra-library-flavours: _p
-        if flag(threaded)
-          extra-library-flavours: _thr_p
-        if flag(debug)
-          extra-library-flavours: _debug_p
-          if flag(threaded)
-            extra-library-flavours: _thr_debug_p
-        if flag(dynamic)
-          extra-dynamic-library-flavours: _p
-          if flag(threaded)
-            extra-dynamic-library-flavours: _thr_p
-          if flag(debug)
-            extra-dynamic-library-flavours: _debug_p
-            if flag(threaded)
-              extra-dynamic-library-flavours: _thr_debug_p
-
+      -- RTS *must* be compiled with optimisations. The INLINE_HEADER macro
+      -- requires that functions are inlined to work as expected. Inlining
+      -- only happens for optimised builds. Otherwise we can assume that
+      -- there is a non-inlined variant to use instead. But RTS does not
+      -- provide non-inlined alternatives and hence needs the function to
+      -- be inlined. See https://github.com/snowleopard/hadrian/issues/90.
       if flag(debug)
-        extra-library-flavours: _debug
-        if flag(dynamic)
-          extra-dynamic-library-flavours: _debug
-        if flag(threaded)
-          extra-library-flavours: _thr_debug
-          if flag(dynamic)
-            extra-dynamic-library-flavours: _thr_debug
+        cc-options: -DDEBUG -fno-omit-frame-pointer -g3 -O0
+        if !flag(threaded)
+          -- TICKY_TICKY is only supported in non-threaded rts
+          ghc-options: -DTICKY_TICKY -optc-DTICKY_TICKY
+      else
+        cc-options: -O2 -fomit-frame-pointer
+
+      -- FIXME: PROFILING should is a different ABI, a PROFILING GHC should
+      -- emit -DPROFILING.
+      if flag(profiling)
+        ghc-options: -DPROFILING
+
+      if flag(threaded)
+        cc-options: -DTHREADED_RTS
+        cpp-options: -DTHREADED_RTS
 
       if flag(thread-sanitizer)
         cc-options: -fsanitize=thread
