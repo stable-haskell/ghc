@@ -83,9 +83,8 @@ package rts-fs
   ghc-options: -no-ghcversion-header
 
 -- FIXME: TNTC should be configurable.
--- FIXME: leading-underscore is platform dependent (only mach-o!)
 package rts
-  flags: +table-next-to-code +leading-underscore
+  flags: +table-next-to-code
   ghc-options: -no-ghcversion-header
 
 -- FIXME: Still not sure what in-ghc-tree is. Maybe we should specify/explain
