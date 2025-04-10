@@ -41,7 +41,7 @@ main = do
     ghc_path <- fromMaybe "ghc" <$> lookupEnv "GHC"
     findExecutable ghc_path >>= \case
       Nothing -> error ("Couldn't find GHC: " ++ show ghc_path)
-      Just x  -> pure (Ghc x)
+      Just x  -> pure (Ghc x [])
 
   cabal <- do
     cabal_path <- fromMaybe "cabal" <$> lookupEnv "CABAL"
@@ -67,16 +67,15 @@ main = do
   cp "_build/stage0/lib/template-hsc.h" "_build/stage1/lib/template-hsc.h"
   cp "_build/stage0/pkgs/*" "_build/stage1/pkgs/"
 
-  ghc1    <- Ghc    <$> makeAbsolute "_build/stage1/bin/ghc"
+  ghc1    <- Ghc    <$> makeAbsolute "_build/stage1/bin/ghc" <*> pure []
   ghcPkg1 <- GhcPkg <$> makeAbsolute "_build/stage1/bin/ghc-pkg"
   deriveConstants <- DeriveConstants <$> makeAbsolute "_build/stage1/bin/deriveConstants"
   genapply <- GenApply <$> makeAbsolute "_build/stage1/bin/genapply"
   genprimop <- GenPrimop <$> makeAbsolute "_build/stage1/bin/genprimopcode"
   ghcToolchain <- GhcToolchain <$> makeAbsolute "_build/stage1/bin/ghc-toolchain"
 
-  -- generate settings based on stage1 compiler settings: stage1 should never be
-  -- a cross-compiler! Hence we reuse the same target platform as the bootstrap
-  -- compiler.
+  -- generate settings for the stage1 compiler: we want a non cross-compiler so
+  -- we reuse the target from stage0 (bootstrap compiler).
   stage0_target_triple <- ghcTargetTriple ghc0
   let stage1_settings = emptySettings
                           { settingsTriple = Just stage0_target_triple
@@ -88,19 +87,36 @@ main = do
 
   msg "Building stage2 GHC program"
   createDirectoryIfMissing True "_build/stage2"
-  ghc1' <- Ghc <$> makeAbsolute "_build/stage1/bin/ghc"
+  ghc1' <- Ghc <$> makeAbsolute "_build/stage1/bin/ghc" <*> pure []
   buildGhcStage2 defaultGhcBuildOptions cabal ghc1' "_build/stage2/"
 
-  -- Reuse stage1 settings for stage2 and copy stage1's built boot package for
-  -- stage2 to use.
+  -- We keep the packages and the settings used to build the stage2 compiler.
+  -- They can be used to build plugins to use with fplugin-library and they can
+  -- also be used with the internal interpreter
   createDirectoryIfMissing True "_build/stage2/lib/"
   cp "_build/stage1/pkgs/*" "_build/stage2/pkgs"
   cp "_build/stage1/lib/settings" "_build/stage2/lib/settings"
 
-  -- TODO: in the future we want to generate different settings for cross
-  -- targets and build boot libraries with stage2 using these settings. In any
-  -- case, we need non-cross boot packages to build plugins for use with
-  -- -fplugin-library.
+  -- Now we build extra targets. Ideally those should be built on demand...
+  createDirectoryIfMissing True "_build/stage2/targets/"
+  let targets =
+        [-- (,) "aarch64-linux" emptySettings
+         --     { settingsTriple = Just "aarch64-linux"
+         --     , settingsCc = ProgOpt (Just "zig-cc") (Just ["-target", "aarch64-linux-gnu"])
+         --     , settingsCxx = ProgOpt (Just "zig-c++") (Just ["-target", "aarch64-linux-gnu"]) 
+         --     }
+--        , (,) "javascript" emptySettings
+--              { settingsTriple = Just "javascript-unknown-ghcjs"
+--              , settingsCc = ProgOpt (Just "emcc") Nothing
+--              }
+        ]
+  forM_ targets $ \(target,settings) -> do
+    msg $ "Bootstrapping target: " <> target
+    target_dir <- makeAbsolute ("_build/stage2/targets" </> target)
+    createDirectoryIfMissing True target_dir
+    generateSettings ghcToolchain settings target_dir
+    ghc2 <- Ghc <$> makeAbsolute "_build/stage2/bin/ghc" <*> pure ["-B"++ target_dir </> "lib"]
+    buildBootLibraries cabal ghc2 ghcPkg1 deriveConstants genapply genprimop defaultGhcBuildOptions target_dir
 
 
   -- Finally create bindist directory
@@ -108,9 +124,11 @@ main = do
   createDirectoryIfMissing True "_build/bindist/lib/"
   createDirectoryIfMissing True "_build/bindist/bin/"
   createDirectoryIfMissing True "_build/bindist/pkgs/"
+  createDirectoryIfMissing True "_build/bindist/targets/"
   cp "_build/stage2/bin/*" "_build/bindist/bin/"
   cp "_build/stage2/lib/*" "_build/bindist/lib/"
   cp "_build/stage2/pkgs/*" "_build/bindist/pkgs/"
+  cp "_build/stage2/targets/*" "_build/bindist/targets/"
   cp "driver/ghc-usage.txt" "_build/bindist/lib/"
   cp "driver/ghci-usage.txt" "_build/bindist/lib/"
 
@@ -448,8 +466,12 @@ buildBootLibraries cabal ghc ghcpkg derive_constants genapply genprimop opts dst
 
   -- Build the RTS
   src_rts <- makeAbsolute (src </> "libraries/rts")
-  build_dir <- makeAbsolute (dst </> "cabal")
+  build_dir <- makeAbsolute (dst </> "cabal" </> "build")
+  store_dir <- makeAbsolute (dst </> "cabal" </> "store")
   ghcversionh <- makeAbsolute (src_rts </> "include/ghcversion.h")
+
+  createDirectoryIfMissing True build_dir
+  createDirectoryIfMissing True store_dir
 
   -- FIXME: could we build a cross compiler, simply by not reading this from the boot compiler, but passing it in?
   target_triple <- ghcTargetTriple ghc
@@ -503,7 +525,7 @@ buildBootLibraries cabal ghc ghcpkg derive_constants genapply genprimop opts dst
         ]
 
   makeCabalProject cabal_project_rts_path $
-        [ "package-dbs: clear, global"
+        [ "package-dbs: clear, store"
         , ""
         , "packages:"
         , "  " ++ src </> "libraries/rts"
@@ -523,7 +545,8 @@ buildBootLibraries cabal ghc ghcpkg derive_constants genapply genprimop opts dst
         ] ++ rts_options
 
   let build_rts_cmd = runCabal cabal
-        [ "build"
+        [ "--store-dir=" ++ store_dir
+        , "build"
         , "--project-file=" ++ cabal_project_rts_path
         , "rts"
         , "--with-compiler=" ++ ghcPath ghc
@@ -597,9 +620,8 @@ buildBootLibraries cabal ghc ghcpkg derive_constants genapply genprimop opts dst
   -- build boot libraries: ghc-internal, base...
   let cabal_project_bootlibs_path = dst </> "cabal-project-boot-libs"
   makeCabalProject cabal_project_bootlibs_path $
-        [ "package-dbs: clear, global"
-        , ""
-        , "packages:"
+        [-- "package-dbs: clear, store" -- this makes cabal fail because it can't find a dubious database in a temp directory
+          "packages:"
         , "  " ++ src </> "libraries/rts"
         , "  " ++ src </> "libraries/ghc-prim"
         , "  " ++ src </> "libraries/ghc-internal"
@@ -688,7 +710,8 @@ buildBootLibraries cabal ghc ghcpkg derive_constants genapply genprimop opts dst
 
   let boot_libs_env = dst </> "boot-libs.env"
   let build_boot_cmd = runCabal cabal
-        [ "install"
+        [ "--store-dir=" ++ store_dir
+        , "install"
         , "--lib"
         , "--package-env=" ++ boot_libs_env
         , "--force-reinstalls"
@@ -761,18 +784,26 @@ buildBootLibraries cabal ghc ghcpkg derive_constants genapply genprimop opts dst
 
   -- The libraries have been installed globally.
   boot_libs_env_lines <- lines <$> readFile boot_libs_env
-  -- FIXME: Sometimes the package environment contains the path to the global db,
-  -- sometimes not... I don't know why yet.
-  (global_db,pkg_ids) <- case drop 2 boot_libs_env_lines of
+  (global_db,pkg_ids) <- case drop 2 boot_libs_env_lines of -- drop "clear-package-db\nglobal-package-db"
     [] -> error "Unexpected empty package environment"
     (x:xs)
+      -- FIXME: Sometimes the package environment contains the path to the global db,
+      -- sometimes not... I don't know why yet.
       | not ("package-db" `List.isPrefixOf` x)
       -> do
         putStrLn "For some reason cabal-install didn't generate a valid package environment (package-db is missing)."
         putStrLn "It happens sometimes for unknown reasons... Rerun 'make' to workaround this..."
         exitFailure
-      | otherwise -> pure (drop 11 x, map (drop 11) xs)
-  putStrLn $ "We've built boot libraries in " ++ global_db ++ ":"
+      | otherwise -> do
+        let !package_id_len = length ("package-id ":: String)
+        let !package_db_len = length ("package-db ":: String)
+        let pkgs_ids = map (drop package_id_len) xs
+        -- cabal always adds the `base` global package to the environment files
+        -- as first entry, so we remove it because it's wrong in our case.
+        -- See cabal-install/src/Distribution/Client/CmdInstall.hs:{globalPackages,installLibraries}
+        let pkgs_ids_without_wired_base = drop 1 pkgs_ids
+        pure (drop package_db_len x, pkgs_ids_without_wired_base)
+  -- putStrLn $ "We've built boot libraries in " ++ global_db ++ ":"
   mapM_ (putStrLn . ("  - " ++)) pkg_ids
 
   -- copy the libs in another db
@@ -842,7 +873,7 @@ msg x = do
   putStrLn (stp ++ replicate (6 - length stp) ' ' ++ x)
 
 -- Avoid FilePath blindness by using type aliases for programs.
-newtype Ghc = Ghc FilePath
+data Ghc = Ghc FilePath [String]
 newtype GhcPkg = GhcPkg FilePath
 newtype GhcToolchain = GhcToolchain FilePath
 newtype Cabal = Cabal FilePath
@@ -851,10 +882,10 @@ newtype GenApply = GenApply FilePath
 newtype GenPrimop = GenPrimop FilePath
 
 runGhc :: Ghc -> [String] -> CreateProcess
-runGhc (Ghc f) = proc f
+runGhc (Ghc f args) xs = proc f (args ++ xs)
 
 ghcPath :: Ghc -> FilePath
-ghcPath (Ghc x) = x
+ghcPath (Ghc x _) = x
 
 runGhcPkg :: GhcPkg -> [String] -> CreateProcess
 runGhcPkg (GhcPkg f) = proc f
@@ -1006,20 +1037,18 @@ generateSettings ghc_toolchain Settings{..} dst = do
 
   let gen_settings_path = dst </> "lib/settings.generated"
 
-  mbCC <- lookupEnv "CC" >>= \case
-    Just cc -> pure ["--cc", cc]
-    Nothing -> pure []
-  mbCXX <- lookupEnv "CXX" >>= \case
-    Just cxx -> pure ["--cxx", cxx]
-    Nothing -> pure []
   let common_args =
        [ "--output-settings"
        , "-o", gen_settings_path
-       ] ++ mbCC ++ mbCXX
+       ]
 
   let opt m f = fmap f m
   let args = mconcat (catMaybes
        [ opt settingsTriple $ \x -> ["--triple", x]
+       , opt (poPath settingsCc) $ \x -> ["--cc", x]
+       , opt (poFlags settingsCc) $ \xs -> concat [["--cc-opt", x] | x <- xs]
+       , opt (poPath settingsCxx) $ \x -> ["--cxx", x]
+       , opt (poFlags settingsCxx) $ \xs -> concat [["--cxx-opt", x] | x <- xs]
        -- FIXME: add other options for ghc-toolchain from Settings
        ]) ++ common_args
 
