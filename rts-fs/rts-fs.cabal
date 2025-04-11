@@ -13,3 +13,7 @@ library
     include-dirs:     .
     install-includes: fs.h
     default-language: Haskell2010
+    cc-options: -DFS_NAMESPACE=rts -DCOMPILING_RTS
+    ghc-options: -DFS_NAMESPACE=rts -DCOMPILING_RTS
+    cpp-options: -DFS_NAMESPACE=rts -DCOMPILING_RTS
+

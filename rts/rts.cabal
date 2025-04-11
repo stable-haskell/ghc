@@ -286,7 +286,7 @@ flag static-libzstd
   default: False
   manual: True
 flag leading-underscore
-  default: True
+  default: False
   manual: False
 flag unregisterised
   default: False
@@ -352,8 +352,8 @@ library
       DerivedConstants.h
       stg/MachRegsForHost.h
 
-    if flag(leading-underscore)
-      if arch(darwin)
+    if !flag(leading-underscore)
+      if os(darwin)
         buildable: False
 
     if arch(javascript)
@@ -395,6 +395,8 @@ library
 
     else
       cc-options: -DFS_NAMESPACE=rts -DCOMPILING_RTS
+      ghc-options: -DFS_NAMESPACE=rts -DCOMPILING_RTS
+      cpp-options: -DFS_NAMESPACE=rts -DCOMPILING_RTS
       cc-options: -Wall -Wextra -Wstrict-prototypes -Wmissing-prototypes
       cc-options: -Wmissing-declarations -Winline -Wpointer-arith
       cc-options: -Wmissing-noreturn -Wnested-externs -Wredundant-decls

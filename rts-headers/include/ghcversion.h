@@ -7,3 +7,4 @@
     ((ma)*100+(mi)) == __GLASGOW_HASKELL__               \
         && (pl1) == __GLASGOW_HASKELL_PATCHLEVEL1__      \
         && (pl2) <= __GLASGOW_HASKELL_PATCHLEVEL2__ )
+
