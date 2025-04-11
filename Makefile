@@ -37,7 +37,32 @@ STAGE1_BIN = $(addprefix _stage1/bin/,$(STAGE1_EXE))
 STAGE2_EXE = ghc ghc-pkg
 STAGE2_BIN = $(addprefix _stage2/bin/,$(STAGE2_EXE))
 
-TARGET := $(shell cc -dumpmachine)
+define GHC_INFO
+$(shell $(GHC0) --info | $(GHC0) -e 'getContents >>= foldMap putStrLn . lookup "$1" . read')
+endef
+
+TARGET_PLATFORM := $(call GHC_INFO,target platform string)
+TARGET_ARCH     := $(call GHC_INFO,target arch)
+TARGET_OS       := $(call GHC_INFO,target os)
+GIT_COMMIT_ID   := $(shell git rev-parse HEAD)
+
+define HADRIAN_SETTINGS
+[ ("hostPlatformArch",    "$(TARGET_ARCH)")
+, ("hostPlatformOS",      "$(TARGET_OS)")
+, ("cProjectGitCommitId", "$(GIT_COMMIT_ID)")
+, ("cProjectVersion",     "9.13")
+, ("cProjectVersionInt",  "913")
+, ("cProjectPatchLevel",  "0")
+, ("cProjectPatchLevel1", "0")
+, ("cProjectPatchLevel2", "0")
+]
+endef
+
+_stage1/cabal:
+	$(CABAL0) install --project-dir libraries/Cabal --project-file cabal.release.project --installdir _stage1 cabal-install:exe:cabal
+
+stage1: STAGE=stage1
+stage1: $(STAGE1_BIN)
 
 # Stage 1 -- should we pass prefix=stage1- here? And get stage1-ghc, stage1-ghc-pkg, ...?
 $(STAGE1_BIN) &: OUT ?= $(abspath _stage1)
@@ -45,13 +70,13 @@ $(STAGE1_BIN) &: override GHC=$(GHC0)
 $(STAGE1_BIN) &: libraries/directory/configure libraries/unix/configure libraries/time/configure libraries/process/configure libraries/terminfo/configure
 	@$(LIB)
 	log mkdir -p $(@D)
-	log export HADRIAN_SETTINGS="$$(cat ./HADRIAN_SETTINGS)"
+	log export HADRIAN_SETTINGS='$(HADRIAN_SETTINGS)'
 	log $(CABAL_INSTALL) --project-file cabal.project.stage1 $(addprefix exe:,$(STAGE1_EXE))
 
 %/settings: _stage1/bin/ghc-toolchain-bin
 	@$(LIB)
 	mkdir -p $(@D)
-	log _stage1/bin/ghc-toolchain-bin --cc=cc --cxx=c++ --install-name-tool=install_name_tool --otool=otool --output-settings -t $(TARGET) -o $@
+	log _stage1/bin/ghc-toolchain-bin --cc=cc --cxx=c++ --install-name-tool=install_name_tool --otool=otool --output-settings -t $(TARGET_PLATFORM) -o $@
 
 _stage1/lib/package.conf.d:
 	@$(LIB)
