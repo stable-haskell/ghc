@@ -42,7 +42,7 @@ TARGET := $(shell cc -dumpmachine)
 # Stage 1 -- should we pass prefix=stage1- here? And get stage1-ghc, stage1-ghc-pkg, ...?
 $(STAGE1_BIN) &: OUT ?= $(abspath _stage1)
 $(STAGE1_BIN) &: override GHC=$(GHC0)
-$(STAGE1_BIN) &:
+$(STAGE1_BIN) &: libraries/directory/configure libraries/unix/configure libraries/time/configure libraries/process/configure libraries/terminfo/configure
 	@$(LIB)
 	log mkdir -p $(@D)
 	log export HADRIAN_SETTINGS="$$(cat ./HADRIAN_SETTINGS)"
