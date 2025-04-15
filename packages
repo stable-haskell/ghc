@@ -37,6 +37,7 @@
 # localpath                  tag         remotepath                      upstreamurl
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ghc-tarballs                 windows     ghc-tarballs.git                -
+libffi-tarballs              -           -                               -
 utils/hsc2hs                 -           -                               ssh://git@github.com/haskell/hsc2hs.git
 libraries/array              -           -                               -
 libraries/binary             -           -                               https://github.com/kolmodin/binary.git
