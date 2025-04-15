@@ -106,7 +106,8 @@ package ghc-internal
   flags: +bignum-native
 
 package ghc-bin
-  flags: +internal-interpreter
+  -- FIXME: we don't have the threaded RTS yet.
+  flags: -threaded +internal-interpreter
 
 package text
   -- FIXME: avoid having to deal with system-cxx-std-lib fake package for now

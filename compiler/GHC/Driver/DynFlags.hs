@@ -636,8 +636,7 @@ defaultDynFlags mySettings =
         ignorePackageFlags      = [],
         trustFlags              = [],
         packageEnv              = Nothing,
-        -- we default to threaded!
-        targetWays_             = Set.singleton WayThreaded,
+        targetWays_             = Set.empty,
         splitInfo               = Nothing,
 
         ghcNameVersion = sGhcNameVersion mySettings,
