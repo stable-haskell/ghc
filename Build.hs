@@ -100,11 +100,13 @@ main = do
   -- Now we build extra targets. Ideally those should be built on demand...
   createDirectoryIfMissing True "_build/stage2/targets/"
   let targets =
-        [-- (,) "aarch64-linux" emptySettings
-         --     { settingsTriple = Just "aarch64-linux"
-         --     , settingsCc = ProgOpt (Just "zig-cc") (Just ["-target", "aarch64-linux-gnu"])
-         --     , settingsCxx = ProgOpt (Just "zig-c++") (Just ["-target", "aarch64-linux-gnu"]) 
-         --     }
+        [ (,) "aarch64-linux" emptySettings
+              { settingsTriple = Just "aarch64-linux"
+              , settingsCc = ProgOpt (Just "aarch64-linux-zig-cc") Nothing
+              , settingsCxx = ProgOpt (Just "aarch64-linux-zig-c++") Nothing
+              , settingsLd = ProgOpt (Just "aarch64-linux-zig-cc") Nothing
+              , settingsMergeObjs = ProgOpt (Just "aarch64-linux-zig-cc") Nothing
+              }
 --        , (,) "javascript" emptySettings
 --              { settingsTriple = Just "javascript-unknown-ghcjs"
 --              , settingsCc = ProgOpt (Just "emcc") Nothing
@@ -801,7 +803,9 @@ buildBootLibraries cabal ghc ghcpkg derive_constants genapply genprimop opts dst
         -- cabal always adds the `base` global package to the environment files
         -- as first entry, so we remove it because it's wrong in our case.
         -- See cabal-install/src/Distribution/Client/CmdInstall.hs:{globalPackages,installLibraries}
-        let pkgs_ids_without_wired_base = drop 1 pkgs_ids
+        --
+        -- But apparently in Moritz' version of cabal, it's fixed.
+        let pkgs_ids_without_wired_base = drop 0 pkgs_ids
         pure (drop package_db_len x, pkgs_ids_without_wired_base)
   -- putStrLn $ "We've built boot libraries in " ++ global_db ++ ":"
   mapM_ (putStrLn . ("  - " ++)) pkg_ids
@@ -1049,6 +1053,8 @@ generateSettings ghc_toolchain Settings{..} dst = do
        , opt (poFlags settingsCc) $ \xs -> concat [["--cc-opt", x] | x <- xs]
        , opt (poPath settingsCxx) $ \x -> ["--cxx", x]
        , opt (poFlags settingsCxx) $ \xs -> concat [["--cxx-opt", x] | x <- xs]
+       , opt (poPath settingsLd) $ \x -> ["--ld", x]
+       , opt (poPath settingsMergeObjs) $ \x -> ["--merge-objs", x]
        -- FIXME: add other options for ghc-toolchain from Settings
        ]) ++ common_args
 
