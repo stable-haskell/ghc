@@ -60,3 +60,7 @@ constraints:
 
 package *
   ghc-options: -fhide-source-paths -j
+
+if(os(darwin))
+  package rts
+    flags: +leading-underscore

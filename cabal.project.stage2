@@ -117,6 +117,10 @@ package *
   -- try to make everything build faster 😓
   ghc-options: -fhide-source-paths -j
 
+if(os(darwin))
+  package rts
+    flags: +leading-underscore
+
 constraints:
   -- these build.* constraints will ensure that we do not rebuild any library
   -- during stage2 that we had built during stage1 anyway. build.* constraints
