@@ -1,4 +1,0 @@
-import: cabal.project.stage2
-
-package rts
-  flags: +leading-underscore
