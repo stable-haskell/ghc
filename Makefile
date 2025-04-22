@@ -26,7 +26,7 @@ endef
 
 CABAL_FLAGS += --store-dir $(abspath _build/store) --logs-dir $(abspath _build/logs) -j --ghc-option=-fhide-source-paths --ghc-option=-j
 CABAL_BUILD_FLAGS += --builddir $(abspath _build/build) --with-compiler $(GHC) --with-hc-pkg $(GHC)-pkg --with-build-compiler $(GHC0) --with-build-hc-pkg $(GHC0)-pkg
-CABAL_INSTALL_FLAGS += --installdir $(OUT)/bin --overwrite-policy=always --install-method=copy --write-ghc-environment-files=never
+CABAL_INSTALL_FLAGS += --installdir $(OUT)/bin --overwrite-policy=always --install-method=copy
 
 CABAL_BUILD = $(CABAL) $(CABAL_FLAGS) build $(CABAL_BUILD_FLAGS)
 CABAL_INSTALL = $(CABAL) $(CABAL_FLAGS) install $(CABAL_BUILD_FLAGS) $(CABAL_INSTALL_FLAGS)
@@ -109,29 +109,20 @@ rts-debug: OUT = $(abspath _stage2)
 rts-debug: GHC = $(abspath _stage1/bin/ghc)
 rts-debug: _stage2/bin/ghc
 	@$(LIB)
-	log rm -f ~/.ghc/*/*/default
-	log $(CABAL_INSTALL) --write-ghc-environment-files=never --package-db=$(abspath _stage1/lib/package.conf.d) --build-package-db=$(abspath _stage0/lib/package.conf.d) --project-file cabal.project.stage2 --lib rts:rts --constraint="rts+debug"
-	# cabal still writes the environment files even if we pass --write-ghc-environment-files=never
-	log rm -f ~/.ghc/*/*/default
+	log $(CABAL_INSTALL) --lib --package-env ./_stage2/environments/rts-debug --package-db=$(abspath _stage1/lib/package.conf.d) --build-package-db=$(abspath _stage0/lib/package.conf.d) --project-file cabal.project.stage2 --constraint="rts+debug" rts:rts
 
 rts-threaded: OUT = $(abspath _stage2)
 rts-threaded: GHC = $(abspath _stage2/bin/ghc)
 rts-threaded: _stage2/bin/ghc
 	@$(LIB)
-	log rm -f ~/.ghc/*/*/default
-	log $(CABAL_INSTALL) --write-ghc-environment-files=never --package-db=$(abspath _stage1/lib/package.conf.d) --build-package-db=$(abspath _stage0/lib/package.conf.d) --project-file cabal.project.stage2 --lib rts:rts --constraint="rts+threaded"
-	# cabal still writes the environment files even if we pass --write-ghc-environment-files=never
-	log rm -f ~/.ghc/*/*/default
+	log $(CABAL_INSTALL) --lib --package-env ./_stage2/environments/rts-threaded --package-db=$(abspath _stage1/lib/package.conf.d) --build-package-db=$(abspath _stage0/lib/package.conf.d) --project-file cabal.project.stage2 --constraint="rts+threaded" rts:rts
 
 
 rts-debug-threaded: OUT = $(abspath _stage2)
 rts-debug-threaded: GHC = $(abspath _stage2/bin/ghc)
 rts-debug-threaded: _stage2/bin/ghc
 	@$(LIB)
-	log rm -f ~/.ghc/*/*/default
-	log $(CABAL_INSTALL) --write-ghc-environment-files=never --package-db=$(abspath _stage1/lib/package.conf.d) --build-package-db=$(abspath _stage0/lib/package.conf.d) --project-file cabal.project.stage2 --lib rts:rts --constraint="rts+debug" --constraint="rts+threaded"
-	# cabal still writes the environment files even if we pass --write-ghc-environment-files=never
-	log rm -f ~/.ghc/*/*/default
+	log $(CABAL_INSTALL) --lib --package-env ./_stage2/environments/rts-debug-threaded --package-db=$(abspath _stage1/lib/package.conf.d) --build-package-db=$(abspath _stage0/lib/package.conf.d) --project-file cabal.project.stage2 --constraint="rts+debug" --constraint="rts+threaded" rts:rts
 
 stage2: stage1 _stage2/lib/settings $(STAGE2_BIN)
 
