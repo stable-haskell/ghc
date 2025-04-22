@@ -41,6 +41,9 @@ define GHC_INFO
 $(shell $(GHC0) --info | $(GHC0) -e 'getContents >>= foldMap putStrLn . lookup "$1" . read')
 endef
 
+BUILD_HOST := $(shell uname -m | tr A-Z a-z)-$(shell uname -s | tr A-Z a-z)
+TARGET_HOST ?= $(BUILD_HOST)
+
 TARGET_PLATFORM := $(call GHC_INFO,target platform string)
 TARGET_ARCH     := $(call GHC_INFO,target arch)
 TARGET_OS       := $(call GHC_INFO,target os)
@@ -71,7 +74,7 @@ $(STAGE1_BIN) &: libraries/directory/configure libraries/unix/configure librarie
 	@$(LIB)
 	log mkdir -p $(@D)
 	log export HADRIAN_SETTINGS='$(HADRIAN_SETTINGS)'
-	log $(CABAL_INSTALL) --project-file cabal.project.stage1 $(addprefix exe:,$(STAGE1_EXE))
+	log $(CABAL_INSTALL) --project-file cabal.project.stage1.$(BUILD_HOST) $(addprefix exe:,$(STAGE1_EXE))
 
 %/settings: _stage1/bin/ghc-toolchain-bin
 	@$(LIB)
@@ -101,7 +104,7 @@ $(STAGE2_BIN) &: _stage1/bin/ghc _stage1/lib/settings rts/configure libraries/gh
 	@$(LIB)
 	log mkdir -p $(@D)
 	log export HADRIAN_SETTINGS="$$(cat ./HADRIAN_SETTINGS)"
-	log $(CABAL_INSTALL) --package-db=$(abspath _stage1/lib/package.conf.d) --build-package-db=$(abspath _stage0/lib/package.conf.d) --project-file cabal.project.stage2 $(addprefix exe:,$(STAGE2_EXE))
+	log $(CABAL_INSTALL) --package-db=$(abspath _stage1/lib/package.conf.d) --build-package-db=$(abspath _stage0/lib/package.conf.d) --project-file cabal.project.stage2.$(TARGET_HOST) $(addprefix exe:,$(STAGE2_EXE))
 
 # Build a few extra RTS variants (debug, threaded, debug-threaded)
 # We build these with the stage1 compiler, as we build all other libraries
@@ -110,7 +113,7 @@ rts-debug: GHC = $(abspath _stage1/bin/ghc)
 rts-debug: _stage2/bin/ghc
 	@$(LIB)
 	log rm -f ~/.ghc/*/*/default
-	log $(CABAL_INSTALL) --write-ghc-environment-files=never --package-db=$(abspath _stage1/lib/package.conf.d) --build-package-db=$(abspath _stage0/lib/package.conf.d) --project-file cabal.project.stage2 --lib rts:rts --constraint="rts+debug"
+	log $(CABAL_INSTALL) --write-ghc-environment-files=never --package-db=$(abspath _stage1/lib/package.conf.d) --build-package-db=$(abspath _stage0/lib/package.conf.d) --project-file cabal.project.stage2.$(TARGET_HOST) --lib rts:rts --constraint="rts+debug"
 	# cabal still writes the environment files even if we pass --write-ghc-environment-files=never
 	log rm -f ~/.ghc/*/*/default
 
@@ -119,7 +122,7 @@ rts-threaded: GHC = $(abspath _stage2/bin/ghc)
 rts-threaded: _stage2/bin/ghc
 	@$(LIB)
 	log rm -f ~/.ghc/*/*/default
-	log $(CABAL_INSTALL) --write-ghc-environment-files=never --package-db=$(abspath _stage1/lib/package.conf.d) --build-package-db=$(abspath _stage0/lib/package.conf.d) --project-file cabal.project.stage2 --lib rts:rts --constraint="rts+threaded"
+	log $(CABAL_INSTALL) --write-ghc-environment-files=never --package-db=$(abspath _stage1/lib/package.conf.d) --build-package-db=$(abspath _stage0/lib/package.conf.d) --project-file cabal.project.stage2.$(TARGET_HOST) --lib rts:rts --constraint="rts+threaded"
 	# cabal still writes the environment files even if we pass --write-ghc-environment-files=never
 	log rm -f ~/.ghc/*/*/default
 
@@ -129,7 +132,7 @@ rts-debug-threaded: GHC = $(abspath _stage2/bin/ghc)
 rts-debug-threaded: _stage2/bin/ghc
 	@$(LIB)
 	log rm -f ~/.ghc/*/*/default
-	log $(CABAL_INSTALL) --write-ghc-environment-files=never --package-db=$(abspath _stage1/lib/package.conf.d) --build-package-db=$(abspath _stage0/lib/package.conf.d) --project-file cabal.project.stage2 --lib rts:rts --constraint="rts+debug" --constraint="rts+threaded"
+	log $(CABAL_INSTALL) --write-ghc-environment-files=never --package-db=$(abspath _stage1/lib/package.conf.d) --build-package-db=$(abspath _stage0/lib/package.conf.d) --project-file cabal.project.stage2.$(TARGET_HOST) --lib rts:rts --constraint="rts+debug" --constraint="rts+threaded"
 	# cabal still writes the environment files even if we pass --write-ghc-environment-files=never
 	log rm -f ~/.ghc/*/*/default
 
