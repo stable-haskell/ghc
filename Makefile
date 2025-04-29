@@ -6,6 +6,7 @@ CPUS=$(shell mk/detect-cpu-count.sh)
 THREADS=${THREADS:-$((CPUS + 1))}
 
 all: $(CABAL) ./booted
+	PATH=`pwd`:${PATH} \
 	GHC=ghc-9.8.4 ./Build.hs
 
 cabal: $(CABAL)

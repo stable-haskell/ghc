@@ -481,6 +481,9 @@ buildBootLibraries cabal ghc ghcpkg derive_constants genapply genprimop opts dst
         [arch,vendor,os] -> (arch,vendor,os)
         t -> error $ "Triple expected but got: " ++ show t
   let (arch,vendor,os) = to_triple $ words $ map (\c -> if c == '-' then ' ' else c) target_triple
+  let fixed_triple = case vendor of
+        "unknown" -> arch ++ "-" ++ os
+        _         -> target_triple
 
   let cabal_project_rts_path = dst </> "cabal.project-rts"
       -- cabal's code handling escaping is bonkers. We need to wrap the whole
@@ -507,11 +510,8 @@ buildBootLibraries cabal ghc ghcpkg derive_constants genapply genprimop opts dst
           -- This is stupid, I can't seem to figure out how to set this in cabal
           -- this needs to be fixed in cabal.
         , if os == "darwin"
-          then "  flags: +tables-next-to-code +leading-underscore"
-          else "  flags: +tables-next-to-code"
-          -- FIXME: we should
-          -- FIXME: deal with libffi (add package?)
-          --
+          then "  flags: +tables-next-to-code +leading-underscore +use-system-libffi"
+          else "  flags: +tables-next-to-code +use-system-libffi"
           -- FIXME: we should make tables-next-to-code  optional here and in the
           -- compiler settings. Ideally, GHC should even look into the rts's
           -- ghcautoconf.h to check whether TABLES_NEXT_TO_CODE is defined or
@@ -578,6 +578,8 @@ buildBootLibraries cabal ghc ghcpkg derive_constants genapply genprimop opts dst
         exitFailure
       d  -> pure (takeDirectory d)
 
+  cc <- ghcSetting ghc "C compiler command"
+
   -- deriving constants
   let derived_constants = src_rts </> "include/DerivedConstants.h"
   withSystemTempDirectory "derive-constants" $ \tmp_dir -> do
@@ -587,7 +589,7 @@ buildBootLibraries cabal ghc ghcpkg derive_constants genapply genprimop opts dst
       , "-o",  derived_constants
       , "--target-os", target
       , "--tmpdir", tmp_dir
-      , "--gcc-program", "cc" -- FIXME
+      , "--gcc-program", cc
       , "--nm-program", "nm"   -- FIXME
       , "--objdump-program", "objdump" -- FIXME
       -- pass `-fcommon` to force symbols into the common section. If they
@@ -623,15 +625,18 @@ buildBootLibraries cabal ghc ghcpkg derive_constants genapply genprimop opts dst
   msg "  - Building libffi..."
   src_libffi <- makeAbsolute (src </> "libffi")
   dst_libffi <- makeAbsolute (dst </> "libffi")
-  let libffi_version = "3.4.6"
-  createDirectoryIfMissing True src_libffi
   createDirectoryIfMissing True dst_libffi
-  void $ readCreateProcess (shell ("tar -xvf libffi-tarballs/libffi-" ++ libffi_version ++ ".tar.gz -C " ++ src_libffi)) ""
+
+  doesDirectoryExist src_libffi >>= \case
+    True -> pure ()
+    False -> do
+      createDirectoryIfMissing True src_libffi
+      -- fetch libffi fork with zig build system
+      void $ readCreateProcess (shell ("git clone git@github.com:vezel-dev/libffi.git " ++ src_libffi)) ""
+
   let build_libffi = mconcat
-        [ "cd " ++ src_libffi </> "libffi-" ++ libffi_version ++ "; "
-        -- FIXME: pass the appropriate toolchain (CC, LD...)
-        , "./configure --disable-docs --with-pic=yes --disable-multi-os-directory --prefix=" ++ dst_libffi
-        , " && make install -j"
+        [ "cd " ++ src_libffi ++ "; "
+        , "zig build install --prefix " ++ dst_libffi ++ " -Dtarget=" ++ fixed_triple
         ]
   (libffi_exit_code, libffi_stdout, libffi_stderr) <- readCreateProcessWithExitCode (shell build_libffi) ""
   case libffi_exit_code of
@@ -828,9 +833,12 @@ buildBootLibraries cabal ghc ghcpkg derive_constants genapply genprimop opts dst
         -- cabal always adds the `base` global package to the environment files
         -- as first entry, so we remove it because it's wrong in our case.
         -- See cabal-install/src/Distribution/Client/CmdInstall.hs:{globalPackages,installLibraries}
-        --
-        -- But apparently in Moritz' version of cabal, it's fixed.
-        let pkgs_ids_without_wired_base = drop 0 pkgs_ids
+        let pkgs_ids_without_wired_base
+              | (fid:fids) <- pkgs_ids
+              , "base-" `List.isPrefixOf` fid = fids
+              -- apparently in Moritz' version of cabal, it's fixed.
+              | otherwise = pkgs_ids
+
         pure (drop package_db_len x, pkgs_ids_without_wired_base)
   -- putStrLn $ "We've built boot libraries in " ++ global_db ++ ":"
   mapM_ (putStrLn . ("  - " ++)) pkg_ids
@@ -845,8 +853,19 @@ buildBootLibraries cabal ghc ghcpkg derive_constants genapply genprimop opts dst
     -- NOTE: GHC assumes that pkgroot is just one directory above the directory
     -- containing the package db. In our case where everything is at the same
     -- level in "pkgs" we need to re-add "/pkgs"
+    let fix_pkgroot = Text.replace (Text.pack pkg_root) "${pkgroot}/pkgs" 
+    -- Add libCffi library to the rts. We can't use RTS cabal flag -use-system-ffi
+    -- because the library needs to be installed during setup.
+    let fix_cffi_line l
+          | "hs-libraries:" `Text.isPrefixOf` l = l <> " Cffi"
+          | otherwise = l
+    let fix_cffi c
+          | not ("rts-" `List.isPrefixOf` pid) = c
+          | otherwise = Text.unlines (map fix_cffi_line (Text.lines c))
+
+
     Text.writeFile (dst </> "pkgs" </> pid <.> "conf")
-                   (Text.replace (Text.pack pkg_root) "${pkgroot}/pkgs" conf)
+                   (fix_cffi (fix_pkgroot conf))
     cp (pkg_root </> pid) (dst </> "pkgs")
 
   void $ readCreateProcess (runGhcPkg ghcpkg ["recache", "--package-db=" ++ (dst </> "pkgs")]) ""
@@ -987,12 +1006,17 @@ getTarget ghc = ghcTargetArchOS ghc >>= \case
   (_,"OSLinux") -> pure "linux"
   _ -> error "Unsupported target"
 
+ghcSettings :: Ghc -> IO [(String,String)]
+ghcSettings ghc = read <$> readCreateProcess (runGhc ghc ["--info"]) ""
+
+ghcSetting :: Ghc -> String -> IO String
+ghcSetting ghc s = do
+  is <- ghcSettings ghc
+  pure $ fromMaybe (error $ "Couldn't read '" ++ s ++ "' setting of " ++ ghcPath ghc) (lookup s is)
+
 -- | Retrieve GHC's target triple
 ghcTargetTriple :: Ghc -> IO String
-ghcTargetTriple ghc = do
-  is <- read <$> readCreateProcess (runGhc ghc ["--info"]) "" :: IO [(String,String)]
-  pure $ fromMaybe (error "Couldn't read 'Target platform setting") (lookup "Target platform" is)
-
+ghcTargetTriple ghc = ghcSetting ghc "Target platform"
 
 data Settings = Settings
   { settingsTriple            :: Maybe String
