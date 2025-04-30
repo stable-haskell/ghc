@@ -113,12 +113,21 @@ main = do
 --              , settingsCc = ProgOpt (Just "emcc") Nothing
 --              }
         ]
+
+  ghc_stage2_abs <- makeAbsolute "_build/stage2/bin/ghc"
   forM_ targets $ \(target,settings) -> do
     msg $ "Bootstrapping target: " <> target
     target_dir <- makeAbsolute ("_build/stage2/targets" </> target)
     createDirectoryIfMissing True target_dir
     generateSettings ghcToolchain settings target_dir
-    ghc2 <- Ghc <$> makeAbsolute "_build/stage2/bin/ghc" <*> pure ["-B"++ target_dir </> "lib"]
+    -- compiler flags aren't passed consistently to configure, etc.
+    -- So we need to create a wrapper. Yes this is garbage. Why are we
+    -- infliciting this (autotools, etc.) to ourselves?
+    let ghc_wrapper = target_dir </> "ghc"
+    writeFile ghc_wrapper ("#!/bin/sh\n" <> ghc_stage2_abs <> " -B" <> (target_dir </> "lib") <> " $@")
+    _ <- readCreateProcess (shell $ "chmod +x " ++ ghc_wrapper) ""
+    let ghc2 = Ghc ghc_wrapper []
+    -- ghc2 <- Ghc <$> makeAbsolute "_build/stage2/bin/ghc" <*> pure ["-B"++ target_dir </> "lib"]
     buildBootLibraries cabal ghc2 ghcPkg1 deriveConstants genapply genprimop defaultGhcBuildOptions target_dir
 
 
@@ -467,16 +476,7 @@ buildBootLibraries cabal ghc ghcpkg derive_constants genapply genprimop opts dst
   src <- makeAbsolute (dst </> "src")
   prepareGhcSources opts src
 
-  -- Build the RTS
-  src_rts <- makeAbsolute (src </> "libraries/rts")
-  build_dir <- makeAbsolute (dst </> "cabal" </> "build")
-  store_dir <- makeAbsolute (dst </> "cabal" </> "store")
-  ghcversionh <- makeAbsolute (src_rts </> "include/ghcversion.h")
-
-  createDirectoryIfMissing True build_dir
-  createDirectoryIfMissing True store_dir
-
-  -- FIXME: could we build a cross compiler, simply by not reading this from the boot compiler, but passing it in?
+  -- detect target (inferred from the ghc we use)
   target_triple <- ghcTargetTriple ghc
   let to_triple = \case
         [arch,vendor,os] -> (arch,vendor,os)
@@ -485,6 +485,15 @@ buildBootLibraries cabal ghc ghcpkg derive_constants genapply genprimop opts dst
   let fixed_triple = case vendor of
         "unknown" -> arch ++ "-" ++ os
         _         -> target_triple
+
+  -- Build the RTS
+  src_rts <- makeAbsolute (src </> "libraries/rts")
+  build_dir <- makeAbsolute (dst </> "cabal" </> "build")
+  store_dir <- makeAbsolute (dst </> "cabal" </> "store")
+  ghcversionh <- makeAbsolute (src_rts </> "include/ghcversion.h")
+
+  createDirectoryIfMissing True build_dir
+  createDirectoryIfMissing True store_dir
 
   let cabal_project_rts_path = dst </> "cabal.project-rts"
       -- cabal's code handling escaping is bonkers. We need to wrap the whole
@@ -573,11 +582,16 @@ buildBootLibraries cabal ghc ghcpkg derive_constants genapply genprimop opts dst
   writeFile (dst </> "rts-conf.stderr") rts_conf_stderr
   ghcplatform_dir <- do
     ghcplatform_h <- readCreateProcess (shell ("find " ++ build_dir ++ " -name ghcplatform.h")) ""
-    case ghcplatform_h of
-      "" -> do
+    case lines ghcplatform_h of
+      [] -> do
         putStrLn $ "Couldn't find ghcplatform.h. Look into " ++ dst ++ "rts-conf.{stdout,stderr}"
         exitFailure
-      d  -> pure (takeDirectory d)
+      [d] -> pure (takeDirectory d)
+      ds -> do
+        putStrLn $ "ghcplatform.h found in several paths:"
+        forM_ ds $ \d -> putStrLn (" - " ++ d)
+        putStrLn $ "Check the log in " ++ (dst </> "rts-conf.{stdout,stderr}")
+        exitFailure
 
   cc <- ghcSetting ghc "C compiler command"
 

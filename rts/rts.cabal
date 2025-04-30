@@ -465,9 +465,11 @@ library
          extra-libraries: rt
       if flag(libdl)
          extra-libraries: dl
-      if flag(use-system-libffi)
-         extra-libraries: ffi
-         extra-libraries-static: ffi
+      -- we patch the package ourselves later to avoid cabal warning about
+      -- libffi not being available
+      -- if flag(use-system-libffi)
+      --    extra-libraries: ffi
+      --    extra-libraries-static: ffi
       if os(windows)
          extra-libraries:
             -- for the linker
