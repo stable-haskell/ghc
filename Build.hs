@@ -106,6 +106,7 @@ main = do
               , settingsCxx = ProgOpt (Just "aarch64-linux-zig-c++") Nothing
               , settingsLd = ProgOpt (Just "aarch64-linux-zig-cc") Nothing
               , settingsMergeObjs = ProgOpt (Just "aarch64-linux-zig-cc") Nothing
+              , settingsCrossCompiling = True
               }
 --        , (,) "javascript" emptySettings
 --              { settingsTriple = Just "javascript-unknown-ghcjs"
@@ -637,6 +638,7 @@ buildBootLibraries cabal ghc ghcpkg derive_constants genapply genprimop opts dst
   let build_libffi = mconcat
         [ "cd " ++ src_libffi ++ "; "
         , "zig build install --prefix " ++ dst_libffi ++ " -Dtarget=" ++ fixed_triple
+        , " -Doptimize=ReleaseFast -Dlinkage=static"
         ]
   (libffi_exit_code, libffi_stdout, libffi_stderr) <- readCreateProcessWithExitCode (shell build_libffi) ""
   case libffi_exit_code of
@@ -858,6 +860,7 @@ buildBootLibraries cabal ghc ghcpkg derive_constants genapply genprimop opts dst
     -- because the library needs to be installed during setup.
     let fix_cffi_line l
           | "hs-libraries:" `Text.isPrefixOf` l = l <> " Cffi"
+          | "extra-libraries:" `Text.isPrefixOf` l = Text.replace "ffi" "" l
           | otherwise = l
     let fix_cffi c
           | not ("rts-" `List.isPrefixOf` pid) = c
@@ -867,6 +870,10 @@ buildBootLibraries cabal ghc ghcpkg derive_constants genapply genprimop opts dst
     Text.writeFile (dst </> "pkgs" </> pid <.> "conf")
                    (fix_cffi (fix_pkgroot conf))
     cp (pkg_root </> pid) (dst </> "pkgs")
+
+    -- install libffi...
+    when ("rts-" `List.isPrefixOf` pid) $ do
+      cp (dst_libffi </> "lib" </> "libffi.a") (dst </> "pkgs" </> pid </> "lib" </> "libCffi.a")
 
   void $ readCreateProcess (runGhcPkg ghcpkg ["recache", "--package-db=" ++ (dst </> "pkgs")]) ""
 
@@ -1043,6 +1050,7 @@ data Settings = Settings
   , settingsTablesNextToCode  :: Maybe Bool
   , settingsUseLibFFIForAdjustors :: Maybe Bool
   , settingsLdOverride        :: Maybe Bool
+  , settingsCrossCompiling    :: Bool
   }
 
 -- | Program specifier from the command-line.
@@ -1080,6 +1088,7 @@ emptySettings = Settings
     , settingsTablesNextToCode = Nothing
     , settingsUseLibFFIForAdjustors = Nothing
     , settingsLdOverride = Nothing
+    , settingsCrossCompiling = False
     }
   where
     po0 = emptyProgOpt
@@ -1126,5 +1135,6 @@ generateSettings ghc_toolchain Settings{..} dst = do
              $ Map.insert "RTS ways" "v"     -- FIXME: this depends on the different ways used to build the RTS!
              $ Map.insert "otool command" "otool" -- FIXME: this should just arguably be a default in the settings in GHC, and not require the settings file?
              $ Map.insert "install_name_tool command" "install_name_tool"
+             $ Map.insert "cross compiling" (if settingsCrossCompiling then "YES" else "NO")
              $ kvs
   writeFile (dst </> "lib/settings") (show $ Map.toList kvs')
