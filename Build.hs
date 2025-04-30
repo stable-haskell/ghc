@@ -107,6 +107,7 @@ main = do
               , settingsLd = ProgOpt (Just "aarch64-linux-zig-cc") Nothing
               , settingsMergeObjs = ProgOpt (Just "aarch64-linux-zig-cc") Nothing
               , settingsCrossCompiling = True
+              , settingsUnlit = "$topdir/../../../bin/unlit"
               }
 --        , (,) "javascript" emptySettings
 --              { settingsTriple = Just "javascript-unknown-ghcjs"
@@ -1063,6 +1064,7 @@ data Settings = Settings
   , settingsReadelf           :: ProgOpt
   , settingsMergeObjs         :: ProgOpt
   , settingsWindres           :: ProgOpt
+  , settingsUnlit             :: String
   -- Note we don't actually configure LD into anything but
   -- see #23857 and #22550 for the very unfortunate story.
   , settingsLd                :: ProgOpt
@@ -1103,6 +1105,7 @@ emptySettings = Settings
     , settingsReadelf   = po0
     , settingsMergeObjs = po0
     , settingsWindres   = po0
+    , settingsUnlit     = "$topdir/../bin/unlit"
     , settingsLd        = po0
     , settingsUnregisterised = Nothing
     , settingsTablesNextToCode = Nothing
@@ -1157,5 +1160,6 @@ generateSettings ghc_toolchain Settings{..} dst = do
              $ Map.insert "otool command" "otool" -- FIXME: this should just arguably be a default in the settings in GHC, and not require the settings file?
              $ Map.insert "install_name_tool command" "install_name_tool"
              $ Map.insert "cross compiling" (if settingsCrossCompiling then "YES" else "NO")
+             $ Map.insert "unlit command" settingsUnlit
              $ kvs
   writeFile (dst </> "lib/settings") (show $ Map.toList kvs')
