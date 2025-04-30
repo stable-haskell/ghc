@@ -475,6 +475,7 @@ buildBootLibraries :: Cabal -> Ghc -> GhcPkg -> DeriveConstants -> GenApply -> G
 buildBootLibraries cabal ghc ghcpkg derive_constants genapply genprimop opts dst = do
   src <- makeAbsolute (dst </> "src")
   prepareGhcSources opts src
+  src_rts <- makeAbsolute (src </> "libraries/rts")
 
   -- detect target (inferred from the ghc we use)
   target_triple <- ghcTargetTriple ghc
@@ -486,8 +487,36 @@ buildBootLibraries cabal ghc ghcpkg derive_constants genapply genprimop opts dst
         "unknown" -> arch ++ "-" ++ os
         _         -> target_triple
 
+  -- build libffi
+  msg "  - Building libffi..."
+  src_libffi <- makeAbsolute (src </> "libffi")
+  dst_libffi <- makeAbsolute (dst </> "libffi")
+  createDirectoryIfMissing True dst_libffi
+
+  doesDirectoryExist src_libffi >>= \case
+    True -> pure ()
+    False -> do
+      createDirectoryIfMissing True src_libffi
+      -- fetch libffi fork with zig build system
+      void $ readCreateProcess (shell ("git clone git@github.com:vezel-dev/libffi.git " ++ src_libffi)) ""
+
+  let build_libffi = mconcat
+        [ "cd " ++ src_libffi ++ "; "
+        , "zig build install --prefix " ++ dst_libffi ++ " -Dtarget=" ++ fixed_triple
+        , " -Doptimize=ReleaseFast -Dlinkage=static"
+        ]
+  (libffi_exit_code, libffi_stdout, libffi_stderr) <- readCreateProcessWithExitCode (shell build_libffi) ""
+  case libffi_exit_code of
+    ExitSuccess -> pure ()
+    ExitFailure r -> do
+      putStrLn $ "Failed to build libffi with error code " ++ show r
+      putStrLn libffi_stdout
+      putStrLn libffi_stderr
+      exitFailure
+  cp (dst_libffi </> "include" </> "*") (src_rts </> "include")
+  -- cp (dst_libffi </> "lib" </> "libffi.a") (takeDirectory ghcplatform_dir </> "libCffi.a")
+
   -- Build the RTS
-  src_rts <- makeAbsolute (src </> "libraries/rts")
   build_dir <- makeAbsolute (dst </> "cabal" </> "build")
   store_dir <- makeAbsolute (dst </> "cabal" </> "store")
   ghcversionh <- makeAbsolute (src_rts </> "include/ghcversion.h")
@@ -553,6 +582,8 @@ buildBootLibraries cabal ghc ghcpkg derive_constants genapply genprimop opts dst
         , "  executable-profiling: False"
         , "  executable-dynamic: False"
         , "  executable-static: False"
+        , "  extra-lib-dirs: " ++ dst_libffi </> "lib"
+        , "  extra-include-dirs: " ++ dst_libffi </> "include"
         , ""
         ] ++ rts_options
 
@@ -584,7 +615,7 @@ buildBootLibraries cabal ghc ghcpkg derive_constants genapply genprimop opts dst
     ghcplatform_h <- readCreateProcess (shell ("find " ++ build_dir ++ " -name ghcplatform.h")) ""
     case lines ghcplatform_h of
       [] -> do
-        putStrLn $ "Couldn't find ghcplatform.h. Look into " ++ dst ++ "rts-conf.{stdout,stderr}"
+        putStrLn $ "Couldn't find ghcplatform.h. Look into " ++ (dst </> "rts-conf.{stdout,stderr}")
         exitFailure
       [d] -> pure (takeDirectory d)
       ds -> do
@@ -635,35 +666,6 @@ buildBootLibraries cabal ghc ghcpkg derive_constants genapply genprimop opts dst
   writeFile primops_txt primops
   writeFile (src </> "libraries/ghc-internal/src/GHC/Internal/Prim.hs") =<< readCreateProcess (runGenPrimop genprimop ["--make-haskell-source"]) primops
   writeFile (src </> "libraries/ghc-internal/src/GHC/Internal/PrimopWrappers.hs") =<< readCreateProcess (runGenPrimop genprimop ["--make-haskell-wrappers"]) primops
-
-  -- build libffi
-  msg "  - Building libffi..."
-  src_libffi <- makeAbsolute (src </> "libffi")
-  dst_libffi <- makeAbsolute (dst </> "libffi")
-  createDirectoryIfMissing True dst_libffi
-
-  doesDirectoryExist src_libffi >>= \case
-    True -> pure ()
-    False -> do
-      createDirectoryIfMissing True src_libffi
-      -- fetch libffi fork with zig build system
-      void $ readCreateProcess (shell ("git clone git@github.com:vezel-dev/libffi.git " ++ src_libffi)) ""
-
-  let build_libffi = mconcat
-        [ "cd " ++ src_libffi ++ "; "
-        , "zig build install --prefix " ++ dst_libffi ++ " -Dtarget=" ++ fixed_triple
-        , " -Doptimize=ReleaseFast -Dlinkage=static"
-        ]
-  (libffi_exit_code, libffi_stdout, libffi_stderr) <- readCreateProcessWithExitCode (shell build_libffi) ""
-  case libffi_exit_code of
-    ExitSuccess -> pure ()
-    ExitFailure r -> do
-      putStrLn $ "Failed to build libffi with error code " ++ show r
-      putStrLn libffi_stdout
-      putStrLn libffi_stderr
-      exitFailure
-  cp (dst_libffi </> "include" </> "*") (src_rts </> "include")
-  cp (dst_libffi </> "lib" </> "libffi.a") (takeDirectory ghcplatform_dir </> "libCffi.a")
 
   -- build boot libraries: ghc-internal, base...
   let cabal_project_bootlibs_path = dst </> "cabal-project-boot-libs"
@@ -734,6 +736,8 @@ buildBootLibraries cabal ghc ghcpkg derive_constants genapply genprimop opts dst
         , "  executable-profiling: False"
         , "  executable-dynamic: False"
         , "  executable-static: True"
+        , "  extra-lib-dirs: " ++ dst_libffi </> "lib"
+        , "  extra-include-dirs: " ++ dst_libffi </> "include"
         , ""
         , "package ghc"
              -- build-tool-depends: require genprimopcode, etc. used by Setup.hs
@@ -827,7 +831,7 @@ buildBootLibraries cabal ghc ghcpkg derive_constants genapply genprimop opts dst
       putStrLn $ "Failed to build boot libraries with error code " ++ show r
       putStrLn boot_stdout
       putStrLn boot_stderr
-      putStrLn $ "Logs can be found in " ++ dst ++ "boot-libs.{stdout,stderr}"
+      putStrLn $ "Logs can be found in " ++ (dst </> "boot-libs.{stdout,stderr}")
       exitFailure
 
   -- The libraries have been installed globally.
@@ -888,6 +892,8 @@ buildBootLibraries cabal ghc ghcpkg derive_constants genapply genprimop opts dst
     -- install libffi...
     when ("rts-" `List.isPrefixOf` pid) $ do
       cp (dst_libffi </> "lib" </> "libffi.a") (dst </> "pkgs" </> pid </> "lib" </> "libCffi.a")
+      cp (dst_libffi </> "include" </> "ffi.h") (dst </> "pkgs" </> pid </> "lib" </> "include" </> "ffi.h")
+      cp (dst_libffi </> "include" </> "ffitarget.h") (dst </> "pkgs" </> pid </> "lib" </> "include" </> "ffitarget.h")
 
   void $ readCreateProcess (runGhcPkg ghcpkg ["recache", "--package-db=" ++ (dst </> "pkgs")]) ""
 
@@ -1110,6 +1116,7 @@ emptySettings = Settings
 generateSettings :: GhcToolchain -> Settings -> FilePath -> IO ()
 generateSettings ghc_toolchain Settings{..} dst = do
   createDirectoryIfMissing True (dst </> "lib")
+  createDirectoryIfMissing True (dst </> "pkgs")
 
   let gen_settings_path = dst </> "lib/settings.generated"
 
