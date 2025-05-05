@@ -86,6 +86,8 @@ import GHC.Iface.Errors.Ppr
 
 -- Standard Haskell libraries
 import System.IO
+import System.FilePath
+import System.Directory
 import System.Environment
 import System.Exit
 import System.FilePath
@@ -123,11 +125,27 @@ main = do
     -- 1. extract the -B flag from the args
     argv0 <- getArgs
 
-    let (minusB_args, argv1) = partition ("-B" `isPrefixOf`) argv0
+    let (target_args, argv1) = partition ("--target=" `isPrefixOf`) argv0
+        mbTarget | null target_args = Nothing
+                 | otherwise = Just (drop 9 (last target_args))
+
+
+    let (minusB_args, argv1') = partition ("-B" `isPrefixOf`) argv1
         mbMinusB | null minusB_args = Nothing
                  | otherwise = Just (drop 2 (last minusB_args))
 
-    let argv2 = map (mkGeneralLocated "on the commandline") argv1
+    -- find top directory for the given target. Or default to usual topdir.
+    targettopdir <- Just <$> do
+      topdir <- findTopDir mbMinusB
+      case mbTarget of
+        Nothing -> pure topdir
+        Just target -> do
+          let r = topdir </> "targets" </> target </> "lib"
+          doesDirectoryExist r >>= \case
+            True -> pure r
+            False -> throwGhcException (UsageError $ "Couldn't find specific target `" ++ target ++ "' in `" ++ r ++ "'")
+
+    let argv2 = map (mkGeneralLocated "on the commandline") argv1'
 
     -- 2. Parse the "mode" flags (--make, --interactive etc.)
     (mode, units, argv3, flagWarnings) <- parseModeFlags argv2
@@ -143,13 +161,13 @@ main = do
     case mode of
         Left preStartupMode ->
             do case preStartupMode of
-                   ShowSupportedExtensions   -> showSupportedExtensions mbMinusB
+                   ShowSupportedExtensions   -> showSupportedExtensions targettopdir
                    ShowVersion               -> showVersion
                    ShowNumVersion            -> putStrLn cProjectVersion
                    ShowOptions isInteractive -> showOptions isInteractive
         Right postStartupMode ->
             -- start our GHC session
-            GHC.runGhc mbMinusB $ do
+            GHC.runGhc targettopdir $ do
 
             dflags <- GHC.getSessionDynFlags
 
