@@ -356,6 +356,20 @@ def req_ghc_smp( name, opts ):
     if not config.ghc_has_smp:
         opts.skip = True
 
+def req_target_debug_rts( name, opts ):
+    """
+    Mark a test as requiring the debug rts (e.g. compile with -debug or -ticky)
+    """
+    if not config.debug_rts:
+        opts.skip = True
+
+def req_target_threaded_rts( name, opts ):
+    # FIXME: this is probably wrong: we should have a different flag for the
+    # compiler's rts and the target rts...
+    if not config.ghc_with_threaded_rts:
+        opts.skip = True
+
+
 def req_target_smp( name, opts ):
     """
     Mark a test as requiring smp when run on the target. If the target does
@@ -2876,6 +2890,11 @@ def normalise_callstacks(s: str) -> str:
     def repl(matches):
         location = matches.group(1)
         location = normalise_slashes_(location)
+        # backtrace paths contain the package path when building with Hadrian
+        location = re.sub(r'libraries/\w+(-\w+)*/', '', location)
+        location = re.sub(r'utils/\w+(-\w+)*/', '', location)
+        location = re.sub(r'compiler/', '', location)
+        location = re.sub(r'\./', '', location)
         return ', called at {0}:<line>:<column> in <package-id>:'.format(location)
     # Ignore line number differences in call stacks (#10834).
     s = re.sub(callSite_re, repl, s)
