@@ -83,7 +83,7 @@ main = do
   generateSettings ghcToolchain stage1_settings "_build/stage1/"
 
   msg "Building boot libraries with stage1 compiler..."
-  buildBootLibraries cabal ghc1 ghcPkg1 deriveConstants genapply genprimop defaultGhcBuildOptions "_build/stage1/"
+  buildBootLibraries cabal ghc1 ghc1 ghcPkg1 deriveConstants genapply genprimop defaultGhcBuildOptions "_build/stage1/"
 
   msg "Building stage2 GHC program"
   createDirectoryIfMissing True "_build/stage2"
@@ -127,9 +127,10 @@ main = do
     let ghc_wrapper = target_dir </> "ghc"
     writeFile ghc_wrapper ("#!/bin/sh\n" <> ghc_stage2_abs <> " -B" <> (target_dir </> "lib") <> " $@")
     _ <- readCreateProcess (shell $ "chmod +x " ++ ghc_wrapper) ""
+    let ghc2_host = Ghc ghc_stage2_abs []
     let ghc2 = Ghc ghc_wrapper []
     -- ghc2 <- Ghc <$> makeAbsolute "_build/stage2/bin/ghc" <*> pure ["-B"++ target_dir </> "lib"]
-    buildBootLibraries cabal ghc2 ghcPkg1 deriveConstants genapply genprimop defaultGhcBuildOptions target_dir
+    buildBootLibraries cabal ghc2_host ghc2 ghcPkg1 deriveConstants genapply genprimop defaultGhcBuildOptions target_dir
 
 
   -- Finally create bindist directory
@@ -472,8 +473,8 @@ prepareGhcSources opts dst = do
   subst_in (dst </> "libraries/rts/include/ghcversion.h") common_substs
 
 
-buildBootLibraries :: Cabal -> Ghc -> GhcPkg -> DeriveConstants -> GenApply -> GenPrimop -> GhcBuildOptions -> FilePath -> IO ()
-buildBootLibraries cabal ghc ghcpkg derive_constants genapply genprimop opts dst = do
+buildBootLibraries :: Cabal -> Ghc -> Ghc -> GhcPkg -> DeriveConstants -> GenApply -> GenPrimop -> GhcBuildOptions -> FilePath -> IO ()
+buildBootLibraries cabal ghc_host ghc ghcpkg derive_constants genapply genprimop opts dst = do
   src <- makeAbsolute (dst </> "src")
   prepareGhcSources opts src
   src_rts <- makeAbsolute (src </> "libraries/rts")
@@ -592,8 +593,9 @@ buildBootLibraries cabal ghc ghcpkg derive_constants genapply genprimop opts dst
         [ "--store-dir=" ++ store_dir
         , "build"
         , "--project-file=" ++ cabal_project_rts_path
-        , "rts"
-        , "--with-compiler=" ++ ghcPath ghc
+        , "rts:rts"
+        , "-w", ghcPath ghc
+        , "-W", ghcPath ghc_host
         , "--with-hc-pkg=" ++ ghcPkgPath ghcpkg
         , "--ghc-options=\"-ghcversion-file=" ++ ghcversionh ++ "\""
         , "--builddir=" ++ build_dir
@@ -769,57 +771,58 @@ buildBootLibraries cabal ghc ghcpkg derive_constants genapply genprimop opts dst
         , "--package-env=" ++ boot_libs_env
         , "--force-reinstalls"
         , "--project-file=" ++ cabal_project_bootlibs_path
-        , "--with-compiler=" ++ ghcPath ghc
+        , "-w", ghcPath ghc
+        , "-W", ghcPath ghc_host
         , "--with-hc-pkg=" ++ ghcPkgPath ghcpkg
         , "--ghc-options=\"-ghcversion-file=" ++ ghcversionh ++ "\""
         , "--builddir=" ++ build_dir
         , "-j"
 
           -- targets
-        , "rts"
-        , "ghc-internal"
-        , "ghc-experimental"
-        , "ghc-compact"
-        , "base"
-        , "stm"
-        , "system-cxx-std-lib"
+        , "rts:rts"
+        , "ghc-internal:ghc-internal"
+        , "ghc-experimental:ghc-experimental"
+        , "ghc-compact:ghc-compact"
+        , "base:base"
+        , "stm:stm"
+        , "system-cxx-std-lib:system-cxx-std-lib"
           -- shallow compat packages over ghc-internal
-        , "ghc-prim"
-        , "ghc-bignum"
-        , "integer-gmp"
-        , "template-haskell"
+        , "ghc-prim:ghc-prim"
+        , "ghc-bignum:ghc-bignum"
+        , "integer-gmp:integer-gmp"
+        , "template-haskell:template-haskell"
           -- target dependencies
-        , "ghc-boot-th" -- dependency of template-haskell
-        , "pretty"      -- dependency of ghc-boot-th
+        , "ghc-boot-th:ghc-boot-th" -- dependency of template-haskell
+        , "pretty:pretty"      -- dependency of ghc-boot-th
           -- other boot libraries used by tests
-        , "array"
-        , "binary"
-        , "bytestring"
-        , "Cabal"
-        , "Cabal-syntax"
-        , "containers"
-        , "deepseq"
-        , "directory"
-        , "exceptions"
-        , "file-io"
-        , "filepath"
-        , "hpc"
-        , "mtl"
-        , "os-string"
-        , "parsec"
-        , "process"
-        , "semaphore-compat"
-        , "text"
-        , "time"
-        , "transformers"
-        , "unix" -- FIXME: we'd have to install Win32 for Windows target. Maybe --libs could install dependencies too..
+        , "array:array"
+        , "binary:binary"
+        , "bytestring:bytestring"
+        , "Cabal:Cabal"
+        , "Cabal-syntax:Cabal-syntax"
+        , "containers:containers"
+        , "deepseq:deepseq"
+        , "directory:directory"
+        , "exceptions:exceptions"
+        , "file-io:file-io"
+        , "filepath:filepath"
+        , "hpc:hpc"
+        , "mtl:mtl"
+        , "os-string:os-string"
+        , "parsec:parsec"
+        , "process:process"
+        , "semaphore-compat:semaphore-compat"
+        , "text:text"
+        , "time:time"
+        , "transformers:transformers"
+        , "unix:unix" -- FIXME: we'd have to install Win32 for Windows target. Maybe --libs could install dependencies too..
           -- ghc related
-        , "ghc-boot"
-        , "ghc-heap"
-        , "ghc-platform"
-        , "ghc-toolchain" -- some test requires this
-        , "ghci"
-        , "ghc"
+        , "ghc-boot:ghc-boot"
+        , "ghc-heap:ghc-heap"
+        , "ghc-platform:ghc-platform"
+        , "ghc-toolchain:ghc-toolchain" -- some test requires this
+        , "ghci:ghci"
+        , "ghc:ghc"
         ]
 
   msg "  - Building boot libraries..."
