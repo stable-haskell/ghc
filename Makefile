@@ -1,4 +1,4 @@
-export CABAL := $(shell cabal update 2>&1 >/dev/null && cabal list-bin -v0 --project-dir libraries/Cabal cabal-install:exe:cabal)
+export CABAL := $(shell cabal update 2>&1 >/dev/null && cabal build cabal-install -v0 --disable-tests --project-dir libraries/Cabal && cabal list-bin -v0 --project-dir libraries/Cabal cabal-install:exe:cabal)
 
 CPUS=$(shell mk/detect-cpu-count.sh)
 
