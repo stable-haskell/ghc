@@ -98,17 +98,18 @@ main = do
   cp "_build/stage1/lib/settings" "_build/stage2/lib/settings"
 
   -- Now we build extra targets. Ideally those should be built on demand...
-  createDirectoryIfMissing True "_build/stage2/targets/"
-  let targets =
-        [ (,) "aarch64-linux" emptySettings
-              { settingsTriple = Just "aarch64-linux"
-              , settingsCc = ProgOpt (Just "aarch64-linux-zig-cc") Nothing
-              , settingsCxx = ProgOpt (Just "aarch64-linux-zig-c++") Nothing
-              , settingsLd = ProgOpt (Just "aarch64-linux-zig-cc") Nothing
-              , settingsMergeObjs = ProgOpt (Just "aarch64-linux-zig-cc") Nothing
-              , settingsCrossCompiling = True
-              , settingsUnlit = "$topdir/../../../bin/unlit"
-              }
+  targets_dir <- makeAbsolute "_build/stage2/lib/targets/"
+  createDirectoryIfMissing True targets_dir
+  let targets = [
+--      [ (,) "aarch64-linux" emptySettings
+--            { settingsTriple = Just "aarch64-linux"
+--            , settingsCc = ProgOpt (Just "aarch64-linux-zig-cc") Nothing
+--            , settingsCxx = ProgOpt (Just "aarch64-linux-zig-c++") Nothing
+--            , settingsLd = ProgOpt (Just "aarch64-linux-zig-cc") Nothing
+--            , settingsMergeObjs = ProgOpt (Just "aarch64-linux-zig-cc") Nothing
+--            , settingsCrossCompiling = True
+--            , settingsUnlit = "$topdir/../../../bin/unlit"
+--            }
 --        , (,) "javascript" emptySettings
 --              { settingsTriple = Just "javascript-unknown-ghcjs"
 --              , settingsCc = ProgOpt (Just "emcc") Nothing
@@ -118,7 +119,7 @@ main = do
   ghc_stage2_abs <- makeAbsolute "_build/stage2/bin/ghc"
   forM_ targets $ \(target,settings) -> do
     msg $ "Bootstrapping target: " <> target
-    target_dir <- makeAbsolute ("_build/stage2/targets" </> target)
+    target_dir <- makeAbsolute (targets_dir </> target)
     createDirectoryIfMissing True target_dir
     generateSettings ghcToolchain settings target_dir
     -- compiler flags aren't passed consistently to configure, etc.
