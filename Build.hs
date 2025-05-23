@@ -100,8 +100,17 @@ main = do
   -- Now we build extra targets. Ideally those should be built on demand...
   targets_dir <- makeAbsolute "_build/stage2/lib/targets/"
   createDirectoryIfMissing True targets_dir
-  let targets = [
---      [ (,) "aarch64-linux" emptySettings
+  let targets =
+        [ (,) "aarch64-linux" emptySettings
+              { settingsTriple = Just "aarch64-linux"
+              , settingsCc = ProgOpt (Just "aarch64-linux-gnu-gcc") Nothing
+              , settingsCxx = ProgOpt (Just "aarch64-linux-gnu-g++") Nothing
+              , settingsLd = ProgOpt (Just "aarch64-linux-gnu-gcc") Nothing
+              , settingsMergeObjs = ProgOpt (Just "aarch64-linux-gnu-gcc") Nothing
+              , settingsCrossCompiling = True
+              , settingsUnlit = "$topdir/../../../bin/unlit"
+              }
+--      , (,) "aarch64-linux" emptySettings
 --            { settingsTriple = Just "aarch64-linux"
 --            , settingsCc = ProgOpt (Just "aarch64-linux-zig-cc") Nothing
 --            , settingsCxx = ProgOpt (Just "aarch64-linux-zig-c++") Nothing
