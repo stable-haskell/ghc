@@ -3371,7 +3371,9 @@ picCCOpts dflags =
             else [])
       -- gcc may be configured to have PIC on by default, let's be
       -- explicit here, see #15847
-       | otherwise -> ["-fno-PIC"]
+      -- FIXME: actually no, because -fPIC may be required for ASLR too!
+      -- Zig cc doesn't support `-fno-pic` in this case
+       | otherwise -> [] -- ["-fno-PIC"]
 
 pieCCLDOpts :: DynFlags -> [String]
 pieCCLDOpts dflags
