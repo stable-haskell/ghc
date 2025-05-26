@@ -105,11 +105,11 @@ main = do
   createDirectoryIfMissing True targets_dir
   let targets =
         [ (,) "aarch64-linux" emptySettings
-              { settingsTriple = Just "aarch64-linux"
-              , settingsCc = ProgOpt (Just "aarch64-linux-gnu-gcc") Nothing
-              , settingsCxx = ProgOpt (Just "aarch64-linux-gnu-g++") Nothing
-              , settingsLd = ProgOpt (Just "aarch64-linux-gnu-gcc") Nothing
-              , settingsMergeObjs = ProgOpt (Just "aarch64-linux-gnu-gcc") Nothing
+              { settingsTriple = Just "aarch64-unknown-linux"
+              , settingsCc = ProgOpt (Just "aarch64-unknown-linux-gnu-gcc") Nothing
+              , settingsCxx = ProgOpt (Just "aarch64-unknown-linux-gnu-g++") Nothing
+              , settingsLd = ProgOpt (Just "aarch64-unknown-linux-gnu-gcc") Nothing
+              , settingsMergeObjs = ProgOpt (Just "aarch64-unknown-linux-gnu-gcc") Nothing
               , settingsCrossCompiling = True
               , settingsUnlit = "$topdir/../../../bin/unlit"
               }
