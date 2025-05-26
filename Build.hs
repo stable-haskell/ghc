@@ -852,6 +852,8 @@ buildBootLibraries cabal ghc_host ghc ghcpkg derive_constants genapply genprimop
   case boot_exit_code of
     ExitSuccess -> pure ()
     ExitFailure r -> do
+      let CreateProcess { cmdspec = RawCommand cmd args } = build_boot_cmd in
+        putStrLn $ "Failed to run cabal-install: " ++ cmd ++ " " ++ unwords args
       putStrLn $ "Failed to build boot libraries with error code " ++ show r
       putStrLn boot_stdout
       putStrLn boot_stderr
