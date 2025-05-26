@@ -512,7 +512,7 @@ buildBootLibraries cabal ghc_host ghc ghcpkg derive_constants genapply genprimop
     False -> do
       createDirectoryIfMissing True src_libffi
       -- fetch libffi fork with zig build system
-      void $ readCreateProcess (shell ("git clone git@github.com:vezel-dev/libffi.git " ++ src_libffi)) ""
+      void $ readCreateProcess (shell ("git clone https://github.com/vezel-dev/libffi.git " ++ src_libffi)) ""
 
   let build_libffi = mconcat
         [ "cd " ++ src_libffi ++ "; "
