@@ -7,7 +7,10 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE NumericUnderscores #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE CPP #-}
 {-# OPTIONS_GHC -Wall #-}
+
+#define ZIG_LIBFFI 1
 
 -- | GHC builder
 --
@@ -502,6 +505,7 @@ buildBootLibraries cabal ghc_host ghc ghcpkg derive_constants genapply genprimop
         _         -> target_triple
 
   -- build libffi
+#if defined(ZIG_LIBFFI)
   msg "  - Building libffi..."
   src_libffi <- makeAbsolute (src </> "libffi")
   dst_libffi <- makeAbsolute (dst </> "libffi")
@@ -529,7 +533,7 @@ buildBootLibraries cabal ghc_host ghc ghcpkg derive_constants genapply genprimop
       exitFailure
   cp (dst_libffi </> "include" </> "*") (src_rts </> "include")
   -- cp (dst_libffi </> "lib" </> "libffi.a") (takeDirectory ghcplatform_dir </> "libCffi.a")
-
+#endif
   -- Build the RTS
   build_dir <- makeAbsolute (dst </> "cabal" </> "build")
   store_dir <- makeAbsolute (dst </> "cabal" </> "store")
@@ -596,8 +600,10 @@ buildBootLibraries cabal ghc_host ghc ghcpkg derive_constants genapply genprimop
         , "  executable-profiling: False"
         , "  executable-dynamic: False"
         , "  executable-static: False"
+#if defined(ZIG_LIBFFI)
         , "  extra-lib-dirs: " ++ dst_libffi </> "lib"
         , "  extra-include-dirs: " ++ dst_libffi </> "include"
+#endif
         , ""
         ] ++ rts_options
 
@@ -751,8 +757,10 @@ buildBootLibraries cabal ghc_host ghc ghcpkg derive_constants genapply genprimop
         , "  executable-profiling: False"
         , "  executable-dynamic: False"
         , "  executable-static: False"
+#if defined(ZIG_LIBFFI)
         , "  extra-lib-dirs: " ++ dst_libffi </> "lib"
         , "  extra-include-dirs: " ++ dst_libffi </> "include"
+#endif
         , ""
         , "package ghc"
              -- build-tool-depends: require genprimopcode, etc. used by Setup.hs
@@ -889,7 +897,8 @@ buildBootLibraries cabal ghc_host ghc ghcpkg derive_constants genapply genprimop
     -- NOTE: GHC assumes that pkgroot is just one directory above the directory
     -- containing the package db. In our case where everything is at the same
     -- level in "pkgs" we need to re-add "/pkgs"
-    let fix_pkgroot = Text.replace (Text.pack pkg_root) "${pkgroot}/pkgs" 
+    let fix_pkgroot = Text.replace (Text.pack pkg_root) "${pkgroot}/pkgs"
+#if defined(ZIG_LIBFFI)
     -- Add libCffi library to the rts. We can't use RTS cabal flag -use-system-ffi
     -- because the library needs to be installed during setup.
     let fix_cffi_line l
@@ -899,17 +908,22 @@ buildBootLibraries cabal ghc_host ghc ghcpkg derive_constants genapply genprimop
     let fix_cffi c
           | not ("rts-" `List.isPrefixOf` pid) = c
           | otherwise = Text.unlines (map fix_cffi_line (Text.lines c))
+#endif
 
-
-    Text.writeFile (dst </> "pkgs" </> pid <.> "conf")
-                   (fix_cffi (fix_pkgroot conf))
+    Text.writeFile (dst </> "pkgs" </> pid <.> "conf") (
+#if defined(ZIG_LIBFFI)
+                    fix_cffi
+#endif
+                    (fix_pkgroot conf))
     cp (pkg_root </> pid) (dst </> "pkgs")
 
+#if defined(ZIG_LIBFFI)
     -- install libffi...
     when ("rts-" `List.isPrefixOf` pid) $ do
       cp (dst_libffi </> "lib" </> "libffi.a") (dst </> "pkgs" </> pid </> "lib" </> "libCffi.a")
       cp (dst_libffi </> "include" </> "ffi.h") (dst </> "pkgs" </> pid </> "lib" </> "include" </> "ffi.h")
       cp (dst_libffi </> "include" </> "ffitarget.h") (dst </> "pkgs" </> pid </> "lib" </> "include" </> "ffitarget.h")
+#endif
 
   void $ readCreateProcess (runGhcPkg ghcpkg ["recache", "--package-db=" ++ (dst </> "pkgs")]) ""
 
