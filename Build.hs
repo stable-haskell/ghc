@@ -341,6 +341,8 @@ buildGhcStage booting opts cabal ghc0 dst = do
   case exit_code of
     ExitSuccess -> pure ()
     ExitFailure n -> do
+      let CreateProcess { cmdspec = RawCommand cmd args } = build_cmd in
+        putStrLn $ "Failed to run cabal-install: " ++ cmd ++ " " ++ unwords args
       putStrLn $ "cabal-install failed with error code: " ++ show n
       putStrLn cabal_stdout
       putStrLn cabal_stderr
