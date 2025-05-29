@@ -1,12 +1,15 @@
 #include "Rts.h"
 #include "Prelude.h"
+#include "RaiseAsync.h"
 #include "Schedule.h"
+#include "Threads.h"
 #include "sm/Sanity.h"
 
 #if defined(__wasm_reference_types__)
 
 extern HsBool rts_JSFFI_flag;
 extern HsStablePtr rts_threadDelay_impl;
+extern StgClosure ghczminternal_GHCziInternalziWasmziPrimziImports_raiseJSException_closure;
 extern StgClosure ghczminternal_GHCziInternalziWasmziPrimziConcziInternal_threadDelay_closure;
 
 int __main_void(void);
@@ -20,6 +23,7 @@ int __main_argc_argv(int argc, char *argv[]) {
   hs_init_ghc(&argc, &argv, __conf);
   // See Note [threadDelay on wasm] for details.
   rts_JSFFI_flag = HS_BOOL_TRUE;
+  getStablePtr((StgPtr)&ghczminternal_GHCziInternalziWasmziPrimziImports_raiseJSException_closure);
   rts_threadDelay_impl = getStablePtr((StgPtr)&ghczminternal_GHCziInternalziWasmziPrimziConcziInternal_threadDelay_closure);
   return 0;
 }
@@ -70,7 +74,7 @@ __attribute__((constructor(102))) static void __ghc_wasm_jsffi_init(void) {
 }
 
 typedef __externref_t HsJSVal;
-typedef StgWord JSValKey;
+typedef StgInt JSValKey;
 
 extern const StgInfoTable stg_JSVAL_info;
 extern const StgInfoTable ghczminternal_GHCziInternalziWasmziPrimziTypes_JSVal_con_info;
@@ -91,9 +95,10 @@ HaskellObj rts_mkJSVal(Capability*, HsJSVal);
 HaskellObj rts_mkJSVal(Capability *cap, HsJSVal v) {
   JSValKey k = __imported_newJSVal(v);
 
-  HaskellObj p = (HaskellObj)allocate(cap, CONSTR_sizeW(0, 1));
+  HaskellObj p = (HaskellObj)allocate(cap, CONSTR_sizeW(1, 2));
   SET_HDR(p, &stg_JSVAL_info, CCS_SYSTEM);
-  p->payload[0] = (HaskellObj)k;
+  p->payload[1] = (HaskellObj)k;
+  p->payload[2] = NULL;
 
   StgCFinalizerList *cfin =
       (StgCFinalizerList *)allocate(cap, sizeofW(StgCFinalizerList));
@@ -115,11 +120,12 @@ HaskellObj rts_mkJSVal(Capability *cap, HsJSVal v) {
     cap->weak_ptr_list_tl = w;
   }
 
-  HaskellObj box = (HaskellObj)allocate(cap, CONSTR_sizeW(3, 0));
+  p->payload[0] = (HaskellObj)w;
+
+  HaskellObj box = (HaskellObj)allocate(cap, CONSTR_sizeW(1, 0));
   SET_HDR(box, &ghczminternal_GHCziInternalziWasmziPrimziTypes_JSVal_con_info, CCS_SYSTEM);
   box->payload[0] = p;
-  box->payload[1] = (HaskellObj)w;
-  box->payload[2] = NULL;
+
   return TAG_CLOSURE(1, box);
 }
 
@@ -128,7 +134,7 @@ HsJSVal __imported_getJSVal(JSValKey);
 
 STATIC_INLINE HsJSVal rts_getJSValzh(HaskellObj p) {
   ASSERT(p->header.info == &stg_JSVAL_info);
-  return __imported_getJSVal((JSValKey)p->payload[0]);
+  return __imported_getJSVal((JSValKey)p->payload[1]);
 }
 
 HsJSVal rts_getJSVal(HaskellObj);
@@ -142,9 +148,7 @@ INLINE_HEADER void pushClosure   (StgTSO *tso, StgWord c) {
   tso->stackobj->sp[0] = (W_) c;
 }
 
-extern const StgInfoTable stg_jsffi_block_info;
 extern const StgInfoTable stg_scheduler_loop_info;
-extern StgClosure ghczminternal_GHCziInternalziWasmziPrimziImports_raiseJSException_closure;
 
 // schedule a future round of RTS scheduler loop via setImmediate(),
 // to avoid jamming the JavaScript main thread
@@ -171,19 +175,7 @@ void rts_schedulerLoop(void) {
 #define mk_rtsPromiseCallback(obj)                         \
   {                                                        \
   Capability *cap = &MainCapability;                       \
-  StgTSO *tso = (StgTSO*)deRefStablePtr(sp);               \
-  IF_DEBUG(sanity, checkTSO(tso));                         \
-  hs_free_stable_ptr(sp);                                  \
-                                                           \
-  StgStack *stack = tso->stackobj;                         \
-  IF_DEBUG(sanity, checkSTACK(stack));                     \
-                                                           \
-  if (stack->sp[0] == (StgWord)&stg_jsffi_block_info) {    \
-    dirty_TSO(cap, tso);                                   \
-    dirty_STACK(cap, stack);                               \
-    stack->sp[1] = (StgWord)(obj);                         \
-  }                                                        \
-  scheduleThreadNow(cap, tso);                             \
+  hs_try_putmvar_with_value(cap->no, sp, obj);             \
   rts_schedulerLoop();                                     \
   }
 
@@ -221,6 +213,27 @@ __attribute__((export_name("rts_promiseReject")))
 void rts_promiseReject(HsStablePtr, HsJSVal);
 void rts_promiseReject(HsStablePtr sp, HsJSVal js_err)
   mk_rtsPromiseCallback(rts_apply(cap, &ghczminternal_GHCziInternalziWasmziPrimziImports_raiseJSException_closure, rts_mkJSVal(cap, js_err)))
+
+__attribute__((export_name("rts_promiseThrowTo")))
+void rts_promiseThrowTo(HsStablePtr, HsJSVal);
+void rts_promiseThrowTo(HsStablePtr sp, HsJSVal js_err) {
+  Capability *cap = &MainCapability;
+  StgWeak *w = (StgWeak *)deRefStablePtr(sp);
+  if (w->header.info == &stg_DEAD_WEAK_info) {
+    return;
+  }
+  ASSERT(w->header.info == &stg_WEAK_info);
+  StgTSO *tso = (StgTSO *)w->key;
+  ASSERT(tso->header.info == &stg_TSO_info);
+  throwToSelf(
+      cap, tso,
+      rts_apply(
+          cap,
+          &ghczminternal_GHCziInternalziWasmziPrimziImports_raiseJSException_closure,
+          rts_mkJSVal(cap, js_err)));
+  tryWakeupThread(cap, tso);
+  rts_schedulerLoop();
+}
 
 __attribute__((export_name("rts_freeStablePtr")))
 void rts_freeStablePtr(HsStablePtr);

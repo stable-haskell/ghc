@@ -8,7 +8,7 @@ module GHC.Core.SimpleOpt (
         SimpleOpts (..), defaultSimpleOpts,
 
         -- ** Simple expression optimiser
-        simpleOptPgm, simpleOptExpr, simpleOptExprWith,
+        simpleOptPgm, simpleOptExpr, simpleOptExprNoInline, simpleOptExprWith,
 
         -- ** Join points
         joinPointBinding_maybe, joinPointBindings_maybe,
@@ -89,6 +89,24 @@ functions called precisely once, without repeatedly optimising the same
 expression.  In fact, the simple optimiser is a good example of this
 little dance in action; the full Simplifier is a lot more complicated.
 
+Note [The InScopeSet for simpleOptExpr]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Care must be taken to remove unfoldings from `Var`s collected by exprFreeVars
+before using them to construct an in-scope set hence `zapIdUnfolding` in `init_subst`.
+Consider calling `simpleOptExpr` on an expression like
+
+```
+ case x of (a,b) -> (x,a)
+```
+
+* One of those two occurrences of x has an unfolding (the one in (x,a), with
+unfolding x = (a,b)) and the other does not. (Inside a case GHC adds
+unfolding-info to the scrutinee's Id.)
+* But exprFreeVars just builds a set, so it's a bit random which occurrence is collected.
+* Then simpleOptExpr replaces each occurrence of x with the one in the in-scope set.
+* Bad bad bad: then the x in  case x of ... may be replaced with a version that has an unfolding.
+
+See ticket #25790
 -}
 
 -- | Simple optimiser options
@@ -96,6 +114,8 @@ data SimpleOpts = SimpleOpts
    { so_uf_opts :: !UnfoldingOpts   -- ^ Unfolding options
    , so_co_opts :: !OptCoercionOpts -- ^ Coercion optimiser options
    , so_eta_red :: !Bool            -- ^ Eta reduction on?
+   , so_inline :: !Bool             -- ^ False <=> do no inlining whatsoever,
+                                    --    even for trivial or used-once things
    }
 
 -- | Default options for the Simple optimiser.
@@ -104,6 +124,7 @@ defaultSimpleOpts = SimpleOpts
    { so_uf_opts = defaultUnfoldingOpts
    , so_co_opts = OptCoercionOpts { optCoercionEnabled = False }
    , so_eta_red = False
+   , so_inline  = True
    }
 
 simpleOptExpr :: HasDebugCallStack => SimpleOpts -> CoreExpr -> CoreExpr
@@ -135,16 +156,22 @@ simpleOptExpr opts expr
   = -- pprTrace "simpleOptExpr" (ppr init_subst $$ ppr expr)
     simpleOptExprWith opts init_subst expr
   where
-    init_subst = mkEmptySubst (mkInScopeSet (exprFreeVars expr))
-        -- It's potentially important to make a proper in-scope set
-        -- Consider  let x = ..y.. in \y. ...x...
-        -- Then we should remember to clone y before substituting
-        -- for x.  It's very unlikely to occur, because we probably
-        -- won't *be* substituting for x if it occurs inside a
-        -- lambda.
-        --
+    init_subst = mkEmptySubst (mkInScopeSet (mapVarSet zapIdUnfolding (exprFreeVars expr)))
+        -- zapIdUnfolding: see Note [The InScopeSet for simpleOptExpr]
+
         -- It's a bit painful to call exprFreeVars, because it makes
         -- three passes instead of two (occ-anal, and go)
+
+simpleOptExprNoInline :: HasDebugCallStack => SimpleOpts -> CoreExpr -> CoreExpr
+-- A variant of simpleOptExpr, but without
+-- occurrence analysis or inlining of any kind.
+-- Result: we don't inline evidence bindings, which is useful for the specialiser
+simpleOptExprNoInline opts expr
+  = simple_opt_expr init_env expr
+  where
+    init_opts  = opts { so_inline = False }
+    init_env   = (emptyEnv init_opts) { soe_subst = init_subst }
+    init_subst = mkEmptySubst (mkInScopeSet (exprFreeVars expr))
 
 simpleOptExprWith :: HasDebugCallStack => SimpleOpts -> Subst -> InExpr -> OutExpr
 -- See Note [The simple optimiser]
@@ -277,7 +304,7 @@ simple_opt_expr env expr
           _       -> foldr wrapLet (simple_opt_expr env' rhs) mb_prs
             where
               (env', mb_prs) = mapAccumL (simple_out_bind NotTopLevel) env $
-                               zipEqual "simpleOptExpr" bs es
+                               zipEqual bs es
 
          -- See Note [Getting the map/coerce RULE to work]
       | isDeadBinder b
@@ -455,7 +482,7 @@ simple_bind_pair :: SimpleOptEnv
     -- (simple_bind_pair subst in_var out_rhs)
     --   either extends subst with (in_var -> out_rhs)
     --   or     returns Nothing
-simple_bind_pair env@(SOE { soe_inl = inl_env, soe_subst = subst })
+simple_bind_pair env@(SOE { soe_inl = inl_env, soe_subst = subst, soe_opts = opts })
                  in_bndr mb_out_bndr clo@(rhs_env, in_rhs)
                  top_level
   | Type ty <- in_rhs        -- let a::* = TYPE ty in <body>
@@ -497,6 +524,7 @@ simple_bind_pair env@(SOE { soe_inl = inl_env, soe_subst = subst })
 
     pre_inline_unconditionally :: Bool
     pre_inline_unconditionally
+       | not (so_inline opts)     = False    -- Not if so_inline is False
        | isExportedId in_bndr     = False
        | stable_unf               = False
        | not active               = False    -- Note [Inline prag in simplOpt]
@@ -548,13 +576,14 @@ simple_out_bind_pair :: SimpleOptEnv
                      -> InId -> Maybe OutId -> OutExpr
                      -> OccInfo -> Bool -> Bool -> TopLevelFlag
                      -> (SimpleOptEnv, Maybe (OutVar, OutExpr))
-simple_out_bind_pair env in_bndr mb_out_bndr out_rhs
+simple_out_bind_pair env@(SOE { soe_subst = subst, soe_opts = opts })
+                     in_bndr mb_out_bndr out_rhs
                      occ_info active stable_unf top_level
   | assertPpr (isNonCoVarId in_bndr) (ppr in_bndr)
     -- Type and coercion bindings are caught earlier
     -- See Note [Core type and coercion invariant]
     post_inline_unconditionally
-  = ( env' { soe_subst = extendIdSubst (soe_subst env) in_bndr out_rhs }
+  = ( env' { soe_subst = extendIdSubst subst in_bndr out_rhs }
     , Nothing)
 
   | otherwise
@@ -567,6 +596,7 @@ simple_out_bind_pair env in_bndr mb_out_bndr out_rhs
 
     post_inline_unconditionally :: Bool
     post_inline_unconditionally
+       | not (so_inline opts)  = False -- Not if so_inline is False
        | isExportedId in_bndr  = False -- Note [Exported Ids and trivial RHSs]
        | stable_unf            = False -- Note [Stable unfoldings and postInlineUnconditionally]
        | not active            = False --     in GHC.Core.Opt.Simplify.Utils
@@ -839,7 +869,7 @@ too.  Achieving all this is surprisingly tricky:
 (MC1) We must compulsorily unfold MkAge to a cast.
       See Note [Compulsory newtype unfolding] in GHC.Types.Id.Make
 
-(MC2) We must compulsorily unfolding coerce on the rule LHS, yielding
+(MC2) We must compulsorily unfold coerce on the rule LHS, yielding
         forall a b (dict :: Coercible * a b).
           map @a @b (\(x :: a) -> case dict of
             MkCoercible (co :: a ~R# b) -> x |> co) = ...
@@ -856,7 +886,6 @@ too.  Achieving all this is surprisingly tricky:
   Unfortunately, this still abstracts over a Coercible dictionary. We really
   want it to abstract over the ~R# evidence. So, we have Desugar.unfold_coerce,
   which transforms the above to
-  Desugar)
 
     forall a b (co :: a ~R# b).
       let dict = MkCoercible @* @a @b co in
@@ -881,7 +910,7 @@ too.  Achieving all this is surprisingly tricky:
 
 (MC4) The map/coerce rule is the only compelling reason for having a RULE that
   quantifies over a coercion variable, something that is otherwise Very Deeply
-  Suspicous.  See Note [Casts in the template] in GHC.Core.Rules. Ugh!
+  Suspicious.  See Note [Casts in the template] in GHC.Core.Rules. Ugh!
 
 This is all a fair amount of special-purpose hackery, but it's for
 a good cause. And it won't hurt other RULES and such that it comes across.
@@ -1438,7 +1467,7 @@ exprIsConApp_maybe ise@(ISE in_scope id_unf) expr
       = (in_scope', floats', ty_args ++ val_args')
       where
         (ty_args, val_args) = splitAtList (dataConUnivAndExTyCoVars dc) args
-        (in_scope', floats', val_args') = foldr do_one (in_scope, [], []) $ zipEqual "mkFieldSeqFloats" str_marks val_args
+        (in_scope', floats', val_args') = foldr do_one (in_scope, [], []) $ zipEqual str_marks val_args
         str_marks = dataConRepStrictness dc
         do_one (str, arg) (in_scope,floats,args)
           | NotMarkedStrict <- str   = no_seq

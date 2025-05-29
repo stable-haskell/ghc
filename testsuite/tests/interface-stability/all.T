@@ -7,6 +7,9 @@ def check_package(pkg_name):
          makefile_test,
          [f'exports_{pkg_name}'])
 
+# About these tests: see README.mkd in this directory
 check_package('base')
 check_package('ghc-experimental')
 check_package('template-haskell')
+check_package('ghc-prim')
+check_package('ghc-bignum')

@@ -124,7 +124,7 @@ import GHC.Serialized
 import GHC.Unit.Finder
 import GHC.Unit.Module
 import GHC.Unit.Module.ModIface
-import GHC.Unit.Module.Deps
+import GHC.Iface.Syntax
 
 import GHC.Utils.Misc
 import GHC.Utils.Panic as Panic
@@ -142,12 +142,13 @@ import qualified GHC.Data.EnumSet as EnumSet
 import qualified GHC.LanguageExtensions as LangExt
 
 -- THSyntax gives access to internal functions and data types
-import qualified GHC.Internal.TH.Syntax as TH
-import qualified GHC.Internal.TH.Ppr    as TH
+import qualified GHC.Boot.TH.Syntax as TH
+import qualified GHC.Boot.TH.Ppr    as TH
 
 #if defined(HAVE_INTERNAL_INTERPRETER)
 import Unsafe.Coerce    ( unsafeCoerce )
 import GHC.Desugar ( AnnotationWrapper(..) )
+import Control.DeepSeq
 #endif
 
 import Control.Monad
@@ -172,27 +173,27 @@ import GHC.Rename.Doc (rnHsDoc)
 {-
 Note [Template Haskell state diagram]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Here are the ThStages, s, their corresponding level numbers
-(the result of (thLevel s)), and their state transitions.
+Here are the ThLevels, their corresponding level numbers
+(the result of (thLevelIndex s)), and their state transitions.
 The top level of the program is stage Comp:
 
      Start here
          |
          V
-      -----------     $      ------------   $
-      |  Comp   | ---------> |  Splice  | -----|
-      |   1     |            |    0     | <----|
-      -----------            ------------
+      -----------     $      ------------   $    -----------------
+      |  Comp   | ---------> |  Splice  | -----> | Splice Splice |
+      |   0     |            |    -1    | <----  |     -2        |
+      -----------            ------------  [||]  -----------------
         ^     |                ^      |
       $ |     | [||]         $ |      | [||]
         |     v                |      v
    --------------          ----------------
    | Brack Comp |          | Brack Splice |
-   |     2      |          |      1       |
+   |     1      |          |      0       |
    --------------          ----------------
 
 * Normal top-level declarations start in state Comp
-       (which has level 1).
+       (which has level 0).
   Annotations start in state Splice, since they are
        treated very like a splice (only without a '$')
 
@@ -200,31 +201,28 @@ The top level of the program is stage Comp:
   will be *run at compile time*, with the result replacing
   the splice
 
-* The original paper used level -1 instead of 0, etc.
-
 * The original paper did not allow a splice within a
   splice, but there is no reason not to. This is the
   $ transition in the top right.
 
 Note [Template Haskell levels]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-* Imported things are impLevel (= 0)
+* Imported things are level 0
 
-* However things at level 0 are not *necessarily* imported.
-      eg  $( \b -> ... )   here b is bound at level 0
+* Top-level things are level 0
 
 * In GHCi, variables bound by a previous command are treated
-  as impLevel, because we have bytecode for them.
+  as imported, because we have bytecode for them.
 
 * Variables are bound at the "current level"
 
-* The current level starts off at outerLevel (= 1)
+* The current level starts off at 0
 
 * The level is decremented by splicing $(..)
                incremented by brackets [| |]
                incremented by name-quoting 'f
 
-* When a variable is used, checkWellStaged compares
+* When a variable is used, checkThLocalName compares
         bind:  binding level, and
         use:   current level at usage site
 
@@ -235,15 +233,17 @@ Note [Template Haskell levels]
         bind = use      Always OK (bound same stage as used)
                         [| \x -> $(f [| x |]) |]
 
-        bind < use      Inside brackets, it depends
-                        Inside splice, OK
-                        Inside neither, OK
+        bind < use      Inside brackets, it depends on what cross stage
+                        persistence rules are used.
 
   For (bind < use) inside brackets, there are three cases:
-    - Imported things   OK      f = [| map |]
-    - Top-level things  OK      g = [| f |]
+    - Imported things (if ImplicitStagePersistence is enabled)   OK      f = [| map |]
+    - Top-level things (if ImplicitStagePersistence is enabled)  OK      g = [| f |]
     - Non-top-level     Only if there is a liftable instance
                                 h = \(x:Int) -> [| x |]
+
+  If ExplicitLevelImports is used, then imports can bring identifiers into scope
+  at non-zero levels.
 
   To track top-level-ness we use the ThBindEnv in TcLclEnv
 
@@ -447,7 +447,7 @@ without having to walk over the untyped bracket code.  Our example
 
 RENAMER (rnUntypedBracket):
 
-* Set the ThStage to (Brack s (RnPendingUntyped ps_var))
+* Set the ThLevel to (Brack s (RnPendingUntyped ps_var))
 
 * Rename the body
 
@@ -557,7 +557,7 @@ RENAMER (rnTypedSplice): the renamer adds a SplicePointName, spn:
 
 TYPECHECKER (tcTypedBracket):
 
-* Set the ThStage to (Brack s (TcPending ps_var lie_var))
+* Set the ThLevel to (Brack s (TcPending ps_var lie_var))
 
 * Typecheck the body, and keep the elaborated result (despite never using it!)
 
@@ -669,7 +669,7 @@ runAnnotation        :: CoreAnnTarget -> LHsExpr GhcRn -> TcM Annotation
 -- See Note [How brackets and nested splices are handled]
 tcTypedBracket rn_expr expr res_ty
   = addErrCtxt (TypedTHBracketCtxt expr) $
-    do { cur_stage <- getStage
+    do { cur_lvl <- getThLevel
        ; ps_ref <- newMutVar []
        ; lie_var <- getConstraintVar   -- Any constraints arising from nested splices
                                        -- should get thrown into the constraint set
@@ -686,7 +686,7 @@ tcTypedBracket rn_expr expr res_ty
        -- The typechecked expression won't be used, so we just discard it
        --   (See Note [The life cycle of a TH quotation] in GHC.Hs.Expr)
        -- We'll typecheck it again when we splice it in somewhere
-       ; (tc_expr, expr_ty) <- setStage (Brack cur_stage (TcPending ps_ref lie_var wrapper)) $
+       ; (tc_expr, expr_ty) <- setThLevel (Brack cur_lvl (TcPending ps_ref lie_var wrapper)) $
                                 tcScalingUsage ManyTy $
                                 -- Scale by Many, TH lifting is currently nonlinear (#18465)
                                 tcInferRhoNC expr
@@ -835,8 +835,8 @@ getUntypedSpliceBody (HsUntypedSpliceNested {})
 tcTypedSplice splice_name expr res_ty
   = addErrCtxt (TypedSpliceCtxt (Just splice_name) expr) $
     setSrcSpan (getLocA expr)    $ do
-    { stage <- getStage
-    ; case stage of
+    { lvl <- getThLevel
+    ; case lvl of
           Splice {}            -> tcTopSplice expr res_ty
           Brack pop_stage pend -> tcNestedSplice pop_stage pend splice_name expr res_ty
           RunSplice _          ->
@@ -888,7 +888,8 @@ tcTopSpliceExpr :: SpliceType -> TcM (LHsExpr GhcTc) -> TcM (LHsExpr GhcTc)
 tcTopSpliceExpr isTypedSplice tc_action
   = checkNoErrs $  -- checkNoErrs: must not try to run the thing
                    -- if the type checker fails!
-    setStage (Splice isTypedSplice) $
+
+    setThLevel (Splice isTypedSplice Comp) $
     do {    -- Typecheck the expression
          (mb_expr', wanted) <- tryCaptureConstraints tc_action
              -- If tc_action fails (perhaps because of insoluble constraints)
@@ -903,7 +904,7 @@ tcTopSpliceExpr isTypedSplice tc_action
             Just expr' -> return $ mkHsDictLet (EvBinds const_binds) expr' }
 
 ------------------
-tcNestedSplice :: ThStage -> PendingStuff -> Name
+tcNestedSplice :: ThLevel -> PendingStuff -> Name
                 -> LHsExpr GhcRn -> ExpRhoType -> TcM (HsExpr GhcTc)
     -- See Note [How brackets and nested splices are handled]
     -- A splice inside brackets
@@ -911,7 +912,7 @@ tcNestedSplice pop_stage (TcPending ps_var lie_var q@(QuoteWrapper _ m_var)) spl
   = do { res_ty <- expTypeToType res_ty
        ; let rep = getRuntimeRep res_ty
        ; meta_exp_ty <- tcTExpTy m_var res_ty
-       ; expr' <- setStage pop_stage $
+       ; expr' <- setThLevel pop_stage $
                   setConstraintVar lie_var $
                   tcCheckMonoExpr expr meta_exp_ty
        ; untype_code <- tcLookupId unTypeCodeName
@@ -939,7 +940,7 @@ runTopSplice (DelayedSplice lcl_env orig_expr res_ty q_expr)
         -- See Note [Collecting modFinalizers in typed splices].
        ; modfinalizers_ref <- newTcRef []
          -- Run the expression
-       ; expr2 <- setStage (RunSplice modfinalizers_ref) $
+       ; expr2 <- setThLevel (RunSplice modfinalizers_ref) $
                     runMetaE zonked_q_expr
        ; mod_finalizers <- readTcRef modfinalizers_ref
        ; addModFinalizersWithLclEnv $ ThModFinalizers mod_finalizers
@@ -1007,7 +1008,7 @@ runAnnotation target expr = do
               ; let loc' = noAnnSrcSpan loc
               ; let specialised_to_annotation_wrapper_expr
                       = L loc' (mkHsWrap wrapper
-                                 (HsVar noExtField (L (noAnnSrcSpan loc) to_annotation_wrapper_id)))
+                                 (mkHsVar (L (noAnnSrcSpan loc) to_annotation_wrapper_id)))
               ; return (L loc' (HsApp noExtField
                                 specialised_to_annotation_wrapper_expr expr'))
                                 })
@@ -1039,11 +1040,7 @@ convertAnnotationWrapper fhv = do
                -- annotation are exposed at this point.  This is also why we are
                -- doing all this stuff inside the context of runMeta: it has the
                -- facilities to deal with user error in a meta-level expression
-               seqSerialized serialized `seq` serialized
-
--- | Force the contents of the Serialized value so weknow it doesn't contain any bottoms
-seqSerialized :: Serialized -> ()
-seqSerialized (Serialized the_type bytes) = the_type `seq` bytes `seqList` ()
+               rnf serialized `seq` serialized
 
 #endif
 
@@ -1196,8 +1193,6 @@ runMeta' :: Bool                 -- Whether code should be printed in the except
          -> TcM hs_syn           -- Of type t
 runMeta' show_code ppr_hs run_and_convert expr
   = do  { traceTc "About to run" (ppr expr)
-        ; recordThSpliceUse -- seems to be the best place to do this,
-                            -- we catch all kinds of splices and annotations.
 
         -- Check that we've had no errors of any sort so far.
         -- For example, if we found an error in an earlier defn f, but
@@ -1656,15 +1651,15 @@ lookupThInstName th_type = do
 -- | Adds a mod finalizer reference to the local environment.
 addModFinalizerRef :: ForeignRef (TH.Q ()) -> TcM ()
 addModFinalizerRef finRef = do
-    th_stage <- getStage
-    case th_stage of
+    th_lvl <- getThLevel
+    case th_lvl of
       RunSplice th_modfinalizers_var -> updTcRef th_modfinalizers_var (finRef :)
       -- This case happens only if a splice is executed and the caller does
-      -- not set the 'ThStage' to 'RunSplice' to collect finalizers.
+      -- not set the 'ThLevel' to 'RunSplice' to collect finalizers.
       -- See Note [Delaying modFinalizers in untyped splices] in GHC.Rename.Splice.
       _ ->
         pprPanic "addModFinalizer was called when no finalizers were collected"
-                 (ppr th_stage)
+                 (ppr th_lvl)
 
 -- | Releases the external interpreter state.
 finishTH :: TcM ()
@@ -1934,7 +1929,7 @@ reifyInstances' th_nm th_tys
                      ; return $ Right (tc, map fim_instance matches) }
             _  -> bale_out $ TcRnTHError $ THReifyError $ CannotReifyInstance ty }
   where
-    doc = ClassInstanceCtx
+    doc = ReifyInstancesCtx
     bale_out msg = failWithTc msg
 
     cvt :: EnumSet LangExt.Extension -> Origin -> SrcSpan -> TH.Type -> TcM (LHsType GhcPs)
@@ -2829,7 +2824,7 @@ reifyStrictness SrcLazy     = TH.SourceLazy
 
 reifySourceBang :: DataCon.HsSrcBang
                 -> (TH.SourceUnpackedness, TH.SourceStrictness)
-reifySourceBang (HsSrcBang _ (HsBang u s)) = (reifyUnpackedness u, reifyStrictness s)
+reifySourceBang (HsSrcBang _ u s) = (reifyUnpackedness u, reifyStrictness s)
 
 reifyDecidedStrictness :: DataCon.HsImplBang -> TH.DecidedStrictness
 reifyDecidedStrictness HsLazy       = TH.DecidedLazy
@@ -2887,16 +2882,12 @@ reifyModule (TH.Module (TH.PkgName pkgString) (TH.ModName mString)) = do
 
       reifyFromIface reifMod = do
         iface <- loadInterfaceForModule (text "reifying module from TH for" <+> ppr reifMod) reifMod
-        let usages = [modToTHMod m | usage <- mi_usages iface,
-                                     Just m <- [usageToModule (moduleUnit reifMod) usage] ]
+        let IfaceTopEnv _ imports = mi_top_env iface
+            -- Convert IfaceImport to module names
+            usages = [modToTHMod (ifImpModule imp) | imp <- imports]
         return $ TH.ModuleInfo usages
 
-      usageToModule :: Unit -> Usage -> Maybe Module
-      usageToModule _ (UsageFile {}) = Nothing
-      usageToModule this_pkg (UsageHomeModule { usg_mod_name = mn }) = Just $ mkModule this_pkg mn
-      usageToModule _ (UsagePackageModule { usg_mod = m }) = Just m
-      usageToModule _ (UsageMergedRequirement { usg_mod = m }) = Just m
-      usageToModule this_pkg (UsageHomeModuleInterface { usg_mod_name = mn }) = Just $ mkModule this_pkg mn
+
 
 ------------------------------
 mkThAppTs :: TH.Type -> [TH.Type] -> TH.Type

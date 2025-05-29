@@ -20,7 +20,7 @@ ToDo:
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE ViewPatterns #-}
 
-{-# OPTIONS_GHC -optc-DNON_POSIX_SOURCE -Wno-incomplete-uni-patterns #-}
+{-# OPTIONS_GHC -optc-DNON_POSIX_SOURCE #-}
 
 -- | Constant Folder
 module GHC.Core.Opt.ConstantFold
@@ -55,7 +55,7 @@ import GHC.Core.Rules.Config
 import GHC.Core.Type
 import GHC.Core.TyCo.Compare( eqType )
 import GHC.Core.TyCon
-   ( TyCon, tyConDataCons_maybe, tyConDataCons, tyConFamilySize
+   ( TyCon, tyConDataCons_maybe, tyConDataCons, tyConSingleDataCon, tyConFamilySize
    , isEnumerationTyCon, isValidDTT2TyCon, isNewTyCon )
 import GHC.Core.Map.Expr ( eqCoreExpr )
 
@@ -69,7 +69,6 @@ import GHC.Cmm.MachOp ( FMASign(..) )
 import GHC.Cmm.Type ( Width(..) )
 
 import GHC.Data.FastString
-import GHC.Data.Maybe      ( orElse )
 
 import GHC.Utils.Outputable
 import GHC.Utils.Misc
@@ -1997,6 +1996,14 @@ because we don't expect the user to call tagToEnum# at all; we merely
 generate calls in derived instances of Enum.  So we compromise: a
 rewrite rule rewrites a bad instance of tagToEnum# to an error call,
 and emits a warning.
+
+We also do something similar if we can see that the argument of tagToEnum is out
+of bounds, e.g. `tagToEnum# 99# :: Bool`.
+Replacing this with an error expression is better for two reasons:
+* It allow us to eliminate more dead code in cases like `case tagToEnum# 99# :: Bool of ...`
+* Should we actually end up executing the relevant code at runtime the user will
+  see a meaningful error message, instead of a segfault or incorrect result.
+See #25976.
 -}
 
 tagToEnumRule :: RuleM CoreExpr
@@ -2008,9 +2015,13 @@ tagToEnumRule = do
     Just (tycon, tc_args) | isEnumerationTyCon tycon -> do
       let tag = fromInteger i
           correct_tag dc = (dataConTagZ dc) == tag
-      (dc:rest) <- return $ filter correct_tag (tyConDataCons_maybe tycon `orElse` [])
-      massert (null rest)
-      return $ mkTyApps (Var (dataConWorkId dc)) tc_args
+      Just dataCons <- pure $ tyConDataCons_maybe tycon
+      case filter correct_tag dataCons of
+        (dc:rest) -> do
+          massert (null rest)
+          pure $ mkTyApps (Var (dataConWorkId dc)) tc_args
+        -- Literal is out of range, e.g. tagToEnum @Bool #4
+        [] -> pure $ mkImpossibleExpr ty "tagToEnum: Argument out of range"
 
     -- See Note [tagToEnum#]
     _ -> warnPprTrace True "tagToEnum# on non-enumeration type" (ppr ty) $
@@ -2059,7 +2070,7 @@ unsafeEqualityProofRule
        ; fn <- getFunction
        ; let (_, ue) = splitForAllTyCoVars (idType fn)
              tc      = tyConAppTyCon ue  -- tycon:    UnsafeEquality
-             (dc:_)  = tyConDataCons tc  -- data con: UnsafeRefl
+             dc      = tyConSingleDataCon tc  -- data con: UnsafeRefl
              -- UnsafeRefl :: forall (r :: RuntimeRep) (a :: TYPE r).
              --               UnsafeEquality r a a
        ; return (mkTyApps (Var (dataConWrapId dc)) [rep, t1]) }
@@ -2635,6 +2646,13 @@ match_inline _ = Nothing
 --------------------------------------------------------
 -- Note [Constant folding through nested expressions]
 -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+-- GHC has some support for constant folding through nested expressions (i.e.
+-- when constants are not only arguments of the considered App node but to one
+-- of its own argument (an App node too), see examples below).
+--
+-- For performance reason, this optimization is only enabled with -O1 and above.
+-- As with all optimizations, it can also be independently enabled with its own
+-- command-line flag too: -fnum-constant-folding (grep Opt_NumConstantFolding).
 --
 -- We use rewrites rules to perform constant folding. It means that we don't
 -- have a global view of the expression we are trying to optimise. As a

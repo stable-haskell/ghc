@@ -5,6 +5,7 @@
 
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE LambdaCase #-}
@@ -37,9 +38,14 @@ module GHC.Types.Name.Reader (
         nameRdrName, getRdrName,
 
         -- ** Destruction
-        rdrNameOcc, rdrNameSpace, demoteRdrName, demoteRdrNameTv, promoteRdrName,
+        rdrNameOcc, rdrNameSpace,
+        demoteRdrName, demoteRdrNameTcCls, demoteRdrNameTv,
+        promoteRdrName,
         isRdrDataCon, isRdrTyVar, isRdrTc, isQual, isQual_maybe, isUnqual,
         isOrig, isOrig_maybe, isExact, isExact_maybe, isSrcRdrName,
+
+        -- ** Preserving user-written qualification
+        WithUserRdr(..), noUserRdr, unLocWithUserRdr,
 
         -- * Local mapping of 'RdrName' to 'Name.Name'
         LocalRdrEnv, emptyLocalRdrEnv, extendLocalRdrEnv, extendLocalRdrEnvList,
@@ -59,7 +65,6 @@ module GHC.Types.Name.Reader (
         LookupGRE(..), lookupGRE,
         WhichGREs(.., AllRelevantGREs, RelevantGREsFOS),
         greIsRelevant,
-        LookupChild(..),
 
         lookupGRE_Name,
         lookupGRE_FieldLabel,
@@ -85,7 +90,7 @@ module GHC.Types.Name.Reader (
         pprNameProvenance,
         mkGRE, mkExactGRE, mkLocalGRE, mkLocalVanillaGRE, mkLocalTyConGRE,
         mkLocalConLikeGRE, mkLocalFieldGREs,
-        gresToNameSet,
+        gresToNameSet, greLevels,
 
         -- ** Shadowing
         greClashesWith, shadowNames,
@@ -98,13 +103,15 @@ module GHC.Types.Name.Reader (
         fieldGRE_maybe, fieldGRELabel,
 
         -- ** Parent information
-        Parent(..), greParent_maybe,
+        Parent(..), ParentGRE(..), greParent_maybe,
         mkParent, availParent,
         ImportSpec(..), ImpDeclSpec(..), ImpItemSpec(..),
-        importSpecLoc, importSpecModule, isExplicitItem, bestImport,
+        importSpecLoc, importSpecModule, importSpecLevel, isExplicitItem, bestImport,
+        ImportLevel(..),
 
         -- * Utils
-        opIsAt
+        opIsAt,
+
   ) where
 
 import GHC.Prelude
@@ -119,7 +126,6 @@ import GHC.Types.GREInfo
 import GHC.Types.FieldLabel
 import GHC.Types.Name
 import GHC.Types.Name.Env
-    ( NameEnv, nonDetNameEnvElts, emptyNameEnv, extendNameEnv_Acc )
 import GHC.Types.Name.Set
 import GHC.Types.PkgQual
 import GHC.Types.SrcLoc as SrcLoc
@@ -127,12 +133,15 @@ import GHC.Types.Unique
 import GHC.Types.Unique.FM
 import GHC.Types.Unique.Set
 import GHC.Builtin.Uniques ( isFldNSUnique )
+import GHC.Types.ThLevelIndex
+import qualified Data.Set as Set
 
 import GHC.Unit.Module
 
 import GHC.Utils.Misc as Utils
 import GHC.Utils.Outputable
 import GHC.Utils.Panic
+import GHC.Utils.Binary
 
 import Control.DeepSeq
 import Control.Monad ( guard )
@@ -222,13 +231,21 @@ rdrNameOcc (Exact name) = nameOccName name
 rdrNameSpace :: RdrName -> NameSpace
 rdrNameSpace = occNameSpace . rdrNameOcc
 
--- demoteRdrName lowers the NameSpace of RdrName.
+-- | 'demoteRdrName' attempts to lowers the 'NameSpace' of a 'RdrName'
+-- to the term-level.
+--
 -- See Note [Demotion] in GHC.Rename.Env
 demoteRdrName :: RdrName -> Maybe RdrName
 demoteRdrName (Unqual occ) = fmap Unqual (demoteOccName occ)
 demoteRdrName (Qual m occ) = fmap (Qual m) (demoteOccName occ)
 demoteRdrName (Orig _ _) = Nothing
 demoteRdrName (Exact _) = Nothing
+
+demoteRdrNameTcCls :: RdrName -> Maybe RdrName
+demoteRdrNameTcCls (Unqual occ) = fmap Unqual (demoteOccTcClsName occ)
+demoteRdrNameTcCls (Qual m occ) = fmap (Qual m) (demoteOccTcClsName occ)
+demoteRdrNameTcCls (Orig _ _) = Nothing
+demoteRdrNameTcCls (Exact _) = Nothing
 
 demoteRdrNameTv :: RdrName -> Maybe RdrName
 demoteRdrNameTv (Unqual occ) = fmap Unqual (demoteOccTvName occ)
@@ -335,7 +352,7 @@ instance Outputable RdrName where
     ppr (Exact name)   = ppr name
     ppr (Unqual occ)   = ppr occ
     ppr (Qual mod occ) = ppr mod <> dot <> ppr occ
-    ppr (Orig mod occ) = getPprStyle (\sty -> pprModulePrefix sty mod occ <> ppr occ)
+    ppr (Orig mod occ) = getPprStyle (\sty -> pprModulePrefix sty mod Nothing occ <> ppr occ)
 
 instance OutputableBndr RdrName where
     pprBndr _ n
@@ -456,6 +473,14 @@ lookupLocalRdrEnv (LRE { lre_env = env, lre_in_scope = ns }) rdr
   = Just name
 
   | otherwise
+  -- As per the Haskell report (www.haskell.org/onlinereport/haskell2010/haskellch5.html#x11-980005),
+  -- qualified names can only refer to:
+  --
+  --  - imported names, or
+  --  - top-level declarations in the current module.
+  --
+  -- Thus, looking up in the LocalRdrEnv using a Qual or Orig RdrName will
+  -- always fail.
   = Nothing
 
 lookupLocalRdrOcc :: LocalRdrEnv -> OccName -> Maybe Name
@@ -615,6 +640,11 @@ greParent = gre_par
 
 greInfo :: GlobalRdrElt -> GREInfo
 greInfo = gre_info
+
+greLevels :: GlobalRdrElt -> Set.Set ImportLevel
+greLevels g =
+  if gre_lcl g then Set.singleton NormalLevel
+               else Set.fromList (bagToList (fmap (is_level . is_decl) (gre_imp g)))
 
 -- | See Note [Parents]
 data Parent = NoParent
@@ -1095,6 +1125,23 @@ allowGRE WantNormal gre
 allowGRE WantField gre
   = isRecFldGRE gre
 
+-- | A parent of a child, in contexts like import/export lists, class and
+-- instance declarations, etc.
+--
+-- Not simply a 'GlobalRdrElt', because we don't always have a full
+-- 'GlobalRdrElt' to hand (e.g. in 'GHC.Rename.Env.lookupInstDeclBndr').
+data ParentGRE
+  = ParentGRE
+  { parentGRE_name :: Name
+  , parentGRE_info :: GREInfo
+  }
+
+instance Outputable ParentGRE where
+  ppr (ParentGRE name info) = ppr name <+> parens (ppr info)
+
+instance Eq ParentGRE where
+  ParentGRE name1 _ == ParentGRE name2 _ = name1 == name2
+
 -- | What should we look up in a 'GlobalRdrEnv'? Should we only look up
 -- names with the exact same 'OccName', or do we allow different 'NameSpace's?
 --
@@ -1135,11 +1182,9 @@ data LookupGRE info where
 
   -- | Look up children 'GlobalRdrElt's with a given 'Parent'.
   LookupChildren
-    :: OccName  -- ^ the 'OccName' to look up
-    -> LookupChild
-         -- ^ information to decide which 'GlobalRdrElt's
-         -- are valid children after looking up
-    -> LookupGRE info
+    :: ParentGRE        -- ^ the parent
+    -> OccName          -- ^ the child 'OccName' to look up
+    -> LookupGRE GREInfo
 
 -- | How should we look up in a 'GlobalRdrEnv'?
 -- Which 'NameSpace's are considered relevant for a given lookup?
@@ -1194,33 +1239,6 @@ pattern RelevantGREsFOS fos <- RelevantGREs { includeFieldSelectors = fos }
                    , lookupVariablesForFields = fos == WantBoth
                    , lookupTyConsAsWell = False }
 
-data LookupChild
-  = LookupChild
-  { wantedParent :: Name
-     -- ^ the parent we are looking up children of
-  , lookupDataConFirst :: Bool
-     -- ^ for type constructors, should we look in the data constructor
-     -- namespace first?
-  , prioritiseParent :: Bool
-    -- ^ should we prioritise getting the right 'Parent'?
-    --
-    --  - @True@: prioritise getting the right 'Parent'
-    --  - @False@: prioritise getting the right 'NameSpace'
-    --
-    -- See Note [childGREPriority].
-  }
-
-instance Outputable LookupChild where
-  ppr (LookupChild { wantedParent = par
-                   , lookupDataConFirst = dc
-                   , prioritiseParent = prio_parent })
-    = braces $ hsep
-        [ text "LookupChild"
-        , braces (text "parent:" <+> ppr par)
-        , if dc then text "[dc_first]" else empty
-        , if prio_parent then text "[prio_parent]" else empty
-        ]
-
 -- | After looking up something with the given 'NameSpace', is the resulting
 -- 'GlobalRdrElt' we have obtained relevant, according to the 'RelevantGREs'
 -- specification of which 'NameSpace's are relevant?
@@ -1269,69 +1287,64 @@ which have a given Parent. These are the two calls to lookupSubBndrOcc_helper:
        class C a where { type (+++) :: a -> a ->; infixl 6 +++ }
        (+++) :: Int -> Int -> Int; (+++) = (+)
 
-In these two situations, there are two competing metrics for finding the "best"
+In these two situations, there are two metrics for finding the "best"
 'GlobalRdrElt' that a particular 'OccName' resolves to:
 
   - does the resolved 'GlobalRdrElt' have the correct parent?
   - does the resolved 'GlobalRdrElt' have the same 'NameSpace' as the 'OccName'?
 
-(A) and (B) have competing requirements.
+To resolve a children export item, we proceed by first prioritising GREs which
+have the correct parent, and then break ties by looking at 'NameSpace's.
 
-For the example of (A) above, we know that the child 'D' of 'T' must live
-in the data namespace, so we look up the OccName 'OccName DataName "D"' and
-prioritise the lookup results based on the 'NameSpace'.
-This means we get an error message of the form:
-
-  The type constructor 'T' is not the parent of the data constructor 'D'.
-
-as opposed to the rather unhelpful and confusing:
-
-  The type constructor 'T' is not the parent of the type constructor 'D'.
-
-See test case T11970.
-
-For the example of (B) above, the fixity declaration for +++ lies inside the
-class, so we should prioritise looking up 'GlobalRdrElt's whose parent is 'C'.
-Not doing so led to #23664.
+Test cases:
+  - T11970: pattern synonyms, classes etc
+  - T10816, T23664, T24037: fixity declarations for associated types
+  - T20427: promoted data constructors and TypeData
 -}
 
 -- | Scoring priority function for looking up children 'GlobalRdrElt'.
 --
--- We score by 'Parent' and 'NameSpace', with higher priorities having lower
--- numbers. Which lexicographic order we use ('Parent' or 'NameSpace' first)
--- is determined by the first argument; see Note [childGREPriority].
-childGREPriority :: LookupChild -- ^ what kind of child do we want,
-                                -- e.g. what should its parent be?
-                 -> NameSpace   -- ^ what 'NameSpace' are we originally looking in?
-                 -> GlobalRdrEltX info
-                                -- ^ the result of looking up; it might be in a different
-                                -- 'NameSpace', which is used to determine the score
-                                -- (in the first component)
+-- The returned score orders by 'Parent' first and then by 'NameSpace',
+-- with higher priorities having lower numbers.
+--
+-- See Note [childGREPriority].
+childGREPriority :: ParentGRE      -- ^ wanted parent
+                 -> NameSpace      -- ^ what 'NameSpace' are we originally looking in?
+                 -> GlobalRdrElt
+                      -- ^ the result of looking up; it might be in a different
+                      -- 'NameSpace', which is used to determine the score
+                      -- (in the second component)
                  -> Maybe (Int, Int)
-childGREPriority (LookupChild { wantedParent = wanted_parent
-                              , lookupDataConFirst = try_dc_first
-                              , prioritiseParent = par_first })
-  ns gre =
-    case child_ns_prio $ greNameSpace gre of
-      Nothing -> Nothing
-      Just ns_prio ->
-        let par_prio = parent_prio $ greParent gre
-        in Just $ if par_first
-                  then (par_prio, ns_prio)
-                  else (ns_prio, par_prio)
-          -- See Note [childGREPriority].
+childGREPriority (ParentGRE wanted_parent parent_info) wanted_ns child_gre =
+  (parent_prio, ) <$> child_ns_prio
 
   where
+      child_ns = greNameSpace child_gre
+
+      -- Is the parent a class? Only class TyCons can have children that
+      -- are in the TcCls NameSpace (associated types).
+      is_class_parent =
+        case parent_info of
+          IAmTyCon ClassFlavour -> True
+          _ -> False
+
       -- Pick out the possible 'NameSpace's in order of priority.
-      child_ns_prio :: (NameSpace -> Maybe Int)
-      child_ns_prio other_ns
-        | other_ns == ns
+      child_ns_prio :: Maybe Int
+      child_ns_prio
+        | child_ns == wanted_ns
+
+        -- Is it OK to have a child in this NameSpace?
+        --
+        -- If it's in the TcCls NameSpace, then the parent must be a class,
+        -- unless the child is a promoted data constructor (which can happen
+        -- when exporting a TypeData declaration, see T20427).
+        , not (isTcClsNameSpace child_ns) || is_class_parent || child_is_data
         = Just 0
-        | isTermVarOrFieldNameSpace ns
-        , isTermVarOrFieldNameSpace other_ns
+        | isTermVarOrFieldNameSpace wanted_ns
+        , isTermVarOrFieldNameSpace child_ns
         = Just 0
-        | isValNameSpace varName
-        , other_ns == tcName
+        | isValNameSpace wanted_ns
+        , is_class_parent && isTcClsNameSpace child_ns
         -- When looking up children, we sometimes want a value name
         -- to resolve to a type constructor.
         -- For example, for an infix declaration "infixr 3 +!" or "infix 2 `Fun`"
@@ -1341,18 +1354,48 @@ childGREPriority (LookupChild { wantedParent = wanted_parent
         -- NameSpace, and "Fun" would be in the term-level data constructor
         -- NameSpace.  See tests T10816, T23664, T24037.
         = Just 1
-        | ns == tcName
-        , other_ns == dataName
-        , try_dc_first -- try data namespace before type/class namespace?
-        = Just (-1)
+        | wanted_ns == tcName
+        , child_is_data
+        = Just $
+            -- For classes we de-prioritise data constructors;
+            -- otherwise we prioritise them.
+            if is_class_parent
+            then  1
+            else -1
         | otherwise
         = Nothing
 
-      parent_prio :: Parent -> Int
-      parent_prio (ParentIs other_parent)
-        | other_parent == wanted_parent = 0
-        | otherwise                     = 1
-      parent_prio NoParent              = 0
+      parent_prio :: Int
+      parent_prio =
+        case greParent child_gre of
+          ParentIs other_parent
+            | other_parent == wanted_parent
+            -> 0
+            | otherwise
+            -- The parent is wrong, so give this a low priority.
+            -- Don't return 'Nothing': if there are no other options, this
+            -- allows us to report an incorrect parent to the user, as opposed
+            -- to an out-of-scope error.
+            -> 1
+          NoParent ->
+            -- Higher priority than having the wrong parent entirely,
+            -- but same priority as having the right parent. Why? See T25892:
+            --
+            --   module M1 where
+            --     data D = K
+            --   module M2 (D(M2.K)) where
+            --     import qualified M1
+            --     pattern K = M1.K
+            --
+            -- Here, we do not want the data constructor M1.K to take priority
+            -- over the pattern synonym M2.K that we are trying to bundle.
+            0
+
+      child_is_data =
+        case greInfo child_gre of
+          IAmConLike{} -> True
+          IAmTyCon PromotedDataConFlavour -> True
+          _ -> child_ns == dataName
 
 -- | Look something up in the Global Reader Environment.
 --
@@ -1377,10 +1420,10 @@ lookupGRE env = \case
       occ = nameOccName nm
       lkup | all_ns    = concat $ lookupOccEnv_AllNameSpaces env occ
            | otherwise = fromMaybe [] $ lookupOccEnv env occ
-  LookupChildren occ which_child ->
-    let ns = occNameSpace occ
-        all_gres = concat $ lookupOccEnv_AllNameSpaces env occ
-    in highestPriorityGREs (childGREPriority which_child ns) all_gres
+  LookupChildren parent child_occ ->
+    let ns = occNameSpace child_occ
+        all_gres = concat $ lookupOccEnv_AllNameSpaces env child_occ
+    in highestPriorityGREs (childGREPriority parent ns) all_gres
 
 -- | Collect the 'GlobalRdrElt's with the highest priority according
 -- to the given function (lower value <=> higher priority).
@@ -1778,6 +1821,7 @@ shadowNames drop_only_qualified env new_gres = minusOccEnv_C_Ns do_shadowing env
                                    , is_as = old_mod_name
                                    , is_pkg_qual = NoPkgQual
                                    , is_qual = True
+                                   , is_level = NormalLevel -- MP: Not 100% sure this is correct
                                    , is_isboot = NotBoot
                                    , is_dloc = greDefinitionSrcSpan old_gre }
 
@@ -1940,11 +1984,33 @@ data ImpDeclSpec
         is_pkg_qual :: !PkgQual,    -- ^ Was this a package import?
         is_qual     :: !Bool,       -- ^ Was this import qualified?
         is_dloc     :: !SrcSpan,    -- ^ The location of the entire import declaration
-        is_isboot   :: !IsBootInterface -- ^ Was this a SOURCE import?
+        is_isboot   :: !IsBootInterface, -- ^ Was this a SOURCE import?
+        is_level    :: !ImportLevel -- ^ Was this import level modified? splice/quote +-1
     } deriving (Eq, Data)
+
+
 
 instance NFData ImpDeclSpec where
   rnf = rwhnf -- Already strict in all fields
+
+
+instance Binary ImpDeclSpec where
+  put_ bh (ImpDeclSpec mod as pkg_qual qual _dloc isboot isstage) = do
+    put_ bh mod
+    put_ bh as
+    put_ bh pkg_qual
+    put_ bh qual
+    put_ bh isboot
+    put_ bh (fromEnum isstage)
+
+  get bh = do
+    mod <- get bh
+    as <- get bh
+    pkg_qual <- get bh
+    qual <- get bh
+    isboot <- get bh
+    isstage <- toEnum <$> get bh
+    return (ImpDeclSpec mod as pkg_qual qual noSrcSpan isboot isstage)
 
 -- | Import Item Specification
 --
@@ -2058,6 +2124,9 @@ importSpecLoc (ImpSpec _    item)   = is_iloc item
 importSpecModule :: ImportSpec -> ModuleName
 importSpecModule = moduleName . is_mod . is_decl
 
+importSpecLevel :: ImportSpec -> ImportLevel
+importSpecLevel = is_level . is_decl
+
 isExplicitItem :: ImpItemSpec -> Bool
 isExplicitItem ImpAll                        = False
 isExplicitItem (ImpSome {is_explicit = exp}) = exp
@@ -2095,10 +2164,17 @@ instance Outputable ImportSpec where
    ppr imp_spec
      = text "imported" <+> qual
         <+> text "from" <+> quotes (ppr (importSpecModule imp_spec))
+        <+> level_ppr
         <+> pprLoc (importSpecLoc imp_spec)
      where
        qual | is_qual (is_decl imp_spec) = text "qualified"
             | otherwise                  = empty
+
+       level = thLevelIndexFromImportLevel (is_level (is_decl imp_spec))
+       level_ppr
+        | level == topLevelIndex = empty
+        | otherwise = text "at" <+> ppr level
+
 
 pprLoc :: SrcSpan -> SDoc
 pprLoc (RealSrcSpan s _)  = text "at" <+> ppr s
@@ -2107,3 +2183,39 @@ pprLoc (UnhelpfulSpan {}) = empty
 -- | Indicate if the given name is the "@" operator
 opIsAt :: RdrName -> Bool
 opIsAt e = e == mkUnqual varName (fsLit "@")
+
+
+--------------------------------------------------------------------------------
+-- Preserving user-written qualification
+
+-- | 'WithUserRdr' allows us to keep track of the original user-written
+-- 'RdrName', and in particular, any user-written module qualification.
+--
+-- See Note [IdOcc] in Language.Haskell.Syntax.Extension.
+data WithUserRdr a = WithUserRdr RdrName a
+  deriving stock (Functor, Foldable, Traversable)
+
+instance NamedThing a => NamedThing (WithUserRdr a) where
+  getName (WithUserRdr _rdr a) = getName a
+instance Outputable (WithUserRdr Name) where
+    ppr (WithUserRdr rdr name) =
+      pprName_userQual (rdrQual_maybe rdr) name
+instance OutputableBndr (WithUserRdr Name) where
+    pprBndr _ (WithUserRdr rdr name) =
+      pprName_userQual (rdrQual_maybe rdr) name
+    pprInfixOcc :: WithUserRdr Name -> SDoc
+    pprInfixOcc  = pprInfixName
+    pprPrefixOcc = pprPrefixName
+
+unLocWithUserRdr :: GenLocated l (WithUserRdr a) -> a
+unLocWithUserRdr (L _ (WithUserRdr _ a)) = a
+
+noUserRdr :: Name -> WithUserRdr Name
+noUserRdr n = WithUserRdr (nameRdrName n) n
+
+rdrQual_maybe :: RdrName -> Maybe ModuleName
+rdrQual_maybe = \case
+  Qual q _ -> Just q
+  _        -> Nothing
+
+--------------------------------------------------------------------------------

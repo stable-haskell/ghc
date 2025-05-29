@@ -19,6 +19,7 @@ import GHCi.CreateBCO
 import GHCi.InfoTable
 #endif
 
+import qualified GHC.InfoProv as InfoProv
 import GHCi.FFI
 import GHCi.Message
 import GHCi.ObjLink
@@ -32,6 +33,7 @@ import Control.DeepSeq
 import Control.Exception
 import Control.Monad
 import Data.ByteString (ByteString)
+import qualified Data.ByteString.Short as BS
 import qualified Data.ByteString.Unsafe as B
 import GHC.Exts
 import qualified GHC.Exts.Heap as Heap
@@ -72,7 +74,7 @@ run m = case m of
   UnloadObj str -> unloadObj str
   AddLibrarySearchPath str -> toRemotePtr <$> addLibrarySearchPath str
   RemoveLibrarySearchPath ptr -> removeLibrarySearchPath (fromRemotePtr ptr)
-  MkConInfoTable tc ptrs nptrs tag ptrtag desc ->
+  MkConInfoTable (ConInfoTable tc ptrs nptrs tag ptrtag desc) ->
     toRemotePtr <$> mkConInfoTable tc ptrs nptrs tag ptrtag desc
   ResolveObjs -> resolveObjs
   FindSystemLibrary str -> findSystemLibrary str
@@ -94,7 +96,6 @@ run m = case m of
   MkCostCentres mod ccs -> mkCostCentres mod ccs
   CostCentreStackInfo ptr -> ccsToStrings (fromRemotePtr ptr)
   NewBreakArray sz -> mkRemoteRef =<< newBreakArray sz
-  NewBreakModule name -> newModuleName name
   SetupBreakpoint ref ix cnt -> do
     arr <- localRef ref;
     _ <- setupBreakpoint arr ix cnt
@@ -115,6 +116,8 @@ run m = case m of
   GetClosure ref -> do
     clos <- Heap.getClosureData =<< localRef ref
     mapM (\(Heap.Box x) -> mkRemoteRef (HValue x)) clos
+  WhereFrom ref ->
+    InfoProv.whereFrom =<< localRef ref
   Seq ref -> doSeq ref
   ResumeSeq ref -> resumeSeq ref
 
@@ -226,7 +229,10 @@ sandboxIO opts io = do
     let runIt = measureAlloc $ tryEval $ rethrow opts $ clearCCS io
     if useSandboxThread opts
        then do
-         tid <- forkIO $ do unsafeUnmask runIt >>= putMVar statusMVar
+         tid <- forkIO $ do
+           tid <- myThreadId
+           labelThread tid "GHCi sandbox"
+           unsafeUnmask runIt >>= putMVar statusMVar
                                 -- empty: can't block
          redirectInterrupts tid $ unsafeUnmask $ takeMVar statusMVar
        else
@@ -329,7 +335,7 @@ withBreakAction opts breakMVar statusMVar act
         -- as soon as it is hit, or in resetBreakAction below.
 
    onBreak :: BreakpointCallback
-   onBreak tick_mod# tickx# info_mod# infox# is_exception apStack = do
+   onBreak tick_mod# tick_mod_uid# tickx# info_mod# info_mod_uid# infox# is_exception apStack = do
      tid <- myThreadId
      let resume = ResumeContext
            { resumeBreakMVar = breakMVar
@@ -343,8 +349,10 @@ withBreakAction opts breakMVar statusMVar act
        then pure Nothing
        else do
          tick_mod <- peekCString (Ptr tick_mod#)
+         tick_mod_uid <- BS.packCString (Ptr tick_mod_uid#)
          info_mod <- peekCString (Ptr info_mod#)
-         pure (Just (EvalBreakpoint tick_mod (I# tickx#) info_mod (I# infox#)))
+         info_mod_uid <- BS.packCString (Ptr info_mod_uid#)
+         pure (Just (EvalBreakpoint tick_mod tick_mod_uid (I# tickx#) info_mod info_mod_uid (I# infox#)))
      putMVar statusMVar $ EvalBreak apStack_r breakpoint resume_r ccs
      takeMVar breakMVar
 
@@ -394,8 +402,10 @@ resetStepFlag = poke stepFlag 0
 
 type BreakpointCallback
      = Addr#   -- pointer to the breakpoint tick module name
+    -> Addr#   -- pointer to the breakpoint tick module unit id
     -> Int#    -- breakpoint tick index
     -> Addr#   -- pointer to the breakpoint info module name
+    -> Addr#   -- pointer to the breakpoint info module unit id
     -> Int#    -- breakpoint info index
     -> Bool    -- exception?
     -> HValue  -- the AP_STACK, or exception
@@ -408,8 +418,8 @@ noBreakStablePtr :: StablePtr BreakpointCallback
 noBreakStablePtr = unsafePerformIO $ newStablePtr noBreakAction
 
 noBreakAction :: BreakpointCallback
-noBreakAction _ _ _ _ False _ = putStrLn "*** Ignoring breakpoint"
-noBreakAction _ _ _ _ True  _ = return () -- exception: just continue
+noBreakAction _ _ _ _ _ _ False _ = putStrLn "*** Ignoring breakpoint"
+noBreakAction _ _ _ _ _ _ True  _ = return () -- exception: just continue
 
 -- Malloc and copy the bytes.  We don't have any way to monitor the
 -- lifetime of this memory, so it just leaks.
@@ -442,10 +452,6 @@ foreign import ccall unsafe "mkCostCentre"
 #else
 mkCostCentres _ _ = return []
 #endif
-
-newModuleName :: String -> IO (RemotePtr BreakModule)
-newModuleName name =
-  castRemotePtr . toRemotePtr <$> newCString name
 
 getIdValFromApStack :: HValue -> Int -> IO (Maybe HValue)
 getIdValFromApStack apStack (I# stackDepth) = do

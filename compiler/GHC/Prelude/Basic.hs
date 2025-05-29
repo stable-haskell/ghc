@@ -24,7 +24,9 @@ module GHC.Prelude.Basic
   , bit
   , shiftL, shiftR
   , setBit, clearBit
-  , head, tail
+  , head, tail, unzip
+
+  , strictGenericLength
   ) where
 
 
@@ -57,9 +59,12 @@ NoImplicitPrelude. There are two motivations for this:
 -}
 
 import qualified Prelude
-import Prelude as X hiding ((<>), Applicative(..), Foldable(..), head, tail)
+import Prelude as X hiding ((<>), Applicative(..), Foldable(..), head, tail, unzip)
 import Control.Applicative (Applicative(..))
-import Data.Foldable as X (Foldable(elem, foldMap, foldr, foldl, foldl', foldr1, foldl1, maximum, minimum, product, sum, null, length))
+import Data.Foldable as X (Foldable (elem, foldMap, foldl, foldl', foldr, length, null, product, sum))
+import Data.Foldable1 as X hiding (head, last)
+import qualified Data.List as List
+import qualified GHC.Data.List.NonEmpty as NE
 import GHC.Stack.Types (HasCallStack)
 
 import GHC.Bits as Bits hiding (bit, shiftL, shiftR, setBit, clearBit)
@@ -130,3 +135,22 @@ head = Prelude.head
 tail :: HasCallStack => [a] -> [a]
 tail = Prelude.tail
 {-# INLINE tail #-}
+
+{- |
+The 'genericLength' function defined in base can't be specialised due to the
+NOINLINE pragma.
+
+It is also not strict in the accumulator, and strictGenericLength is not exported.
+
+See #25706 for why it is important to use a strict, specialised version.
+
+-}
+strictGenericLength :: Num a => [x] -> a
+strictGenericLength = fromIntegral . length
+
+-- This is `Data.Functor.unzip`. Unfortunately, that function lacks the RULES for specialization.
+unzip :: Functor f => f (a, b) -> (f a, f b)
+unzip = \ xs -> (fmap fst xs, fmap snd xs)
+{-# NOINLINE [1] unzip #-}
+{-# RULES "unzip/List" unzip = List.unzip #-}
+{-# RULES "unzip/NonEmpty" unzip = NE.unzip #-}

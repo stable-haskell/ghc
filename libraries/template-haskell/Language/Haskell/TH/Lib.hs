@@ -122,7 +122,9 @@ module Language.Haskell.TH.Lib (
     -- **** Pragmas
     ruleVar, typedRuleVar,
     valueAnnotation, typeAnnotation, moduleAnnotation,
-    pragInlD, pragSpecD, pragSpecInlD, pragSpecInstD, pragRuleD, pragAnnD,
+    pragInlD, pragSpecD, pragSpecInlD,
+    pragSpecED, pragSpecInlED,
+    pragSpecInstD, pragRuleD, pragAnnD,
     pragLineD, pragCompleteD,
 
     -- **** Pattern Synonyms
@@ -141,7 +143,7 @@ module Language.Haskell.TH.Lib (
 
    ) where
 
-import GHC.Internal.TH.Lib hiding
+import GHC.Boot.TH.Lib hiding
   ( tySynD
   , dataD
   , newtypeD
@@ -181,7 +183,7 @@ import GHC.Internal.TH.Lib hiding
   , Role
   , InjectivityAnn
   )
-import qualified GHC.Internal.TH.Lib as Internal
+import qualified GHC.Boot.TH.Lib as Internal
 import Language.Haskell.TH.Syntax
 
 import Control.Applicative (Applicative(..))

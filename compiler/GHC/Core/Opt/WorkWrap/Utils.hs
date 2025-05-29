@@ -217,7 +217,7 @@ mkWwBodies opts fun_id ww_arity arg_vars res_ty demands res_cpr
         ; let args_free_tcvs = tyCoVarsOfTypes (res_ty : map varType arg_vars)
               empty_subst = mkEmptySubst (mkInScopeSet args_free_tcvs)
               zapped_arg_vars = map zap_var arg_vars
-        ; (subst, cloned_arg_vars) <- cloneBndrs empty_subst zapped_arg_vars
+        ; (subst, cloned_arg_vars) <- cloneBndrsM empty_subst zapped_arg_vars
         ; let res_ty' = substTyUnchecked subst res_ty
               init_str_marks = map (const NotMarkedStrict) cloned_arg_vars
 
@@ -983,7 +983,7 @@ unbox_one_arg opts arg_var
              -- don't end up in lambda binders of the worker.
              -- See Note [Never put `OtherCon` unfoldings on lambda binders]
              arg_ids' = map zapIdUnfolding $
-                        zipWithEqual "unbox_one_arg" setIdDemandInfo arg_ids ds
+                        zipWithEqual setIdDemandInfo arg_ids ds
 
              unbox_fn = mkUnpackCase (Var arg_var) co (idMult arg_var)
                                      dc (ex_tvs' ++ arg_ids')

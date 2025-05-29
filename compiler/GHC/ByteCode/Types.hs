@@ -19,9 +19,9 @@ module GHC.ByteCode.Types
   , ItblEnv, ItblPtr(..)
   , AddrEnv, AddrPtr(..)
   , CgBreakInfo(..)
-  , ModBreaks (..), BreakIndex, emptyModBreaks
+  , ModBreaks (..), BreakIndex
   , CCostCentre
-  , FlatBag, sizeFlatBag, fromSizedSeq, elemsFlatBag
+  , FlatBag, sizeFlatBag, fromSmallArray, elemsFlatBag
   ) where
 
 import GHC.Prelude
@@ -35,6 +35,7 @@ import GHC.Builtin.PrimOps
 import GHC.Types.SptEntry
 import GHC.Types.SrcLoc
 import GHCi.BreakArray
+import GHCi.Message
 import GHCi.RemoteTypes
 import GHCi.FFI
 import Control.DeepSeq
@@ -44,12 +45,12 @@ import Foreign
 import Data.Array
 import Data.ByteString (ByteString)
 import Data.IntMap (IntMap)
-import qualified Data.IntMap as IntMap
 import qualified GHC.Exts.Heap as Heap
 import GHC.Stack.CCS
 import GHC.Cmm.Expr ( GlobalRegSet, emptyRegSet, regSetToList )
 import GHC.Iface.Syntax
 import Language.Haskell.Syntax.Module.Name (ModuleName)
+import GHC.Unit.Types (UnitId(..))
 
 -- -----------------------------------------------------------------------------
 -- Compiled Byte Code
@@ -58,13 +59,10 @@ data CompiledByteCode = CompiledByteCode
   { bc_bcos   :: FlatBag UnlinkedBCO
     -- ^ Bunch of interpretable bindings
 
-  , bc_itbls  :: ItblEnv
+  , bc_itbls  :: [(Name, ConInfoTable)]
     -- ^ Mapping from DataCons to their info tables
 
-  , bc_ffis   :: [FFIInfo]
-    -- ^ ffi blocks we allocated
-
-  , bc_strs   :: AddrEnv
+  , bc_strs   :: [(Name, ByteString)]
     -- ^ top-level strings (heap allocated)
 
   , bc_breaks :: Maybe ModBreaks
@@ -75,9 +73,10 @@ data CompiledByteCode = CompiledByteCode
     -- BCOs. See Note [Grand plan for static forms] in
     -- "GHC.Iface.Tidy.StaticPtrTable".
   }
-                -- ToDo: we're not tracking strings that we malloc'd
-newtype FFIInfo = FFIInfo (RemotePtr C_ffi_cif)
-  deriving (Show, NFData)
+
+-- | A libffi ffi_cif function prototype.
+data FFIInfo = FFIInfo { ffiInfoArgs :: ![FFIType], ffiInfoRet :: !FFIType }
+  deriving (Show)
 
 instance Outputable CompiledByteCode where
   ppr CompiledByteCode{..} = ppr $ elemsFlatBag bc_bcos
@@ -87,9 +86,8 @@ instance Outputable CompiledByteCode where
 seqCompiledByteCode :: CompiledByteCode -> ()
 seqCompiledByteCode CompiledByteCode{..} =
   rnf bc_bcos `seq`
-  seqEltsNameEnv rnf bc_itbls `seq`
-  rnf bc_ffis `seq`
-  seqEltsNameEnv rnf bc_strs `seq`
+  rnf bc_itbls `seq`
+  rnf bc_strs `seq`
   rnf (fmap seqModBreaks bc_breaks)
 
 newtype ByteOff = ByteOff Int
@@ -199,10 +197,13 @@ data BCONPtr
   -- | A reference to a top-level string literal; see
   -- Note [Generating code for top-level string literal bindings] in GHC.StgToByteCode.
   | BCONPtrAddr  !Name
-  -- | Only used internally in the assembler in an intermediate representation;
-  -- should never appear in a fully-assembled UnlinkedBCO.
+  -- | A top-level string literal.
   -- Also see Note [Allocating string literals] in GHC.ByteCode.Asm.
   | BCONPtrStr   !ByteString
+  -- | Same as 'BCONPtrStr' but with benefits of 'FastString' interning logic.
+  | BCONPtrFS    !FastString
+  -- | A libffi ffi_cif function prototype.
+  | BCONPtrFFIInfo !FFIInfo
 
 instance NFData BCONPtr where
   rnf x = x `seq` ()
@@ -248,7 +249,7 @@ data CCostCentre
 -- | All the information about the breakpoints for a module
 data ModBreaks
    = ModBreaks
-   { modBreaks_flags :: ForeignRef BreakArray
+   { modBreaks_flags :: !(ForeignRef BreakArray)
         -- ^ The array of flags, one per breakpoint,
         -- indicating which breakpoints are enabled.
    , modBreaks_locs :: !(Array BreakIndex SrcSpan)
@@ -262,7 +263,10 @@ data ModBreaks
         -- ^ Array pointing to cost centre for each breakpoint
    , modBreaks_breakInfo :: IntMap CgBreakInfo
         -- ^ info about each breakpoint from the bytecode generator
-   , modBreaks_module :: RemotePtr ModuleName
+   , modBreaks_module :: !ModuleName
+        -- ^ info about the module in which we are setting the breakpoint
+   , modBreaks_module_unitid :: !UnitId
+        -- ^ The 'UnitId' of the 'ModuleName'
    }
 
 seqModBreaks :: ModBreaks -> ()
@@ -273,20 +277,8 @@ seqModBreaks ModBreaks{..} =
   rnf modBreaks_decls `seq`
   rnf modBreaks_ccs `seq`
   rnf (fmap seqCgBreakInfo modBreaks_breakInfo) `seq`
-  rnf modBreaks_module
-
--- | Construct an empty ModBreaks
-emptyModBreaks :: ModBreaks
-emptyModBreaks = ModBreaks
-   { modBreaks_flags = error "ModBreaks.modBreaks_array not initialised"
-         -- ToDo: can we avoid this?
-   , modBreaks_locs  = array (0,-1) []
-   , modBreaks_vars  = array (0,-1) []
-   , modBreaks_decls = array (0,-1) []
-   , modBreaks_ccs = array (0,-1) []
-   , modBreaks_breakInfo = IntMap.empty
-   , modBreaks_module = toRemotePtr nullPtr
-   }
+  rnf modBreaks_module `seq`
+  rnf modBreaks_module_unitid
 
 {-
 Note [Field modBreaks_decls]

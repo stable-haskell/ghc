@@ -37,7 +37,7 @@ module GHC.Core.TyCo.Rep (
         -- * Coercions
         Coercion(..), CoSel(..), FunSel(..),
         UnivCoProvenance(..),
-        CoercionHole(..), coHoleCoVar, setCoHoleCoVar, isHeteroKindCoHole,
+        CoercionHole(..), coHoleCoVar, setCoHoleCoVar,
         CoercionN, CoercionR, CoercionP, KindCoercion,
         MCoercion(..), MCoercionR, MCoercionN,
 
@@ -994,6 +994,11 @@ instance Outputable FunSel where
   ppr SelArg  = text "arg"
   ppr SelRes  = text "res"
 
+instance NFData FunSel where
+  rnf SelMult = ()
+  rnf SelArg  = ()
+  rnf SelRes  = ()
+
 instance Binary CoSel where
    put_ bh (SelTyCon n r)   = do { putByte bh 0; put_ bh n; put_ bh r }
    put_ bh SelForAll        = putByte bh 1
@@ -1010,9 +1015,9 @@ instance Binary CoSel where
                    _ -> return (SelFun SelRes) }
 
 instance NFData CoSel where
-  rnf (SelTyCon n r) = n `seq` r `seq` ()
+  rnf (SelTyCon n r) = rnf n `seq` rnf r `seq` ()
   rnf SelForAll      = ()
-  rnf (SelFun fs)    = fs `seq` ()
+  rnf (SelFun fs)    = rnf fs `seq` ()
 
 -- | A semantically more meaningful type to represent what may or may not be a
 -- useful 'Coercion'.
@@ -1680,18 +1685,10 @@ data CoercionHole
                        -- See Note [CoercionHoles and coercion free variables]
 
                  , ch_ref :: IORef (Maybe Coercion)
-
-                 , ch_hetero_kind :: Bool
-                       -- True <=> arises from a kind-level equality
-                       -- See Note [Equalities with incompatible kinds]
-                       --     in GHC.Tc.Solver.Equality, wrinkle (EIK2)
                  }
 
 coHoleCoVar :: CoercionHole -> CoVar
 coHoleCoVar = ch_co_var
-
-isHeteroKindCoHole :: CoercionHole -> Bool
-isHeteroKindCoHole = ch_hetero_kind
 
 setCoHoleCoVar :: CoercionHole -> CoVar -> CoercionHole
 setCoHoleCoVar h cv = h { ch_co_var = cv }
@@ -1703,8 +1700,7 @@ instance Data.Data CoercionHole where
   dataTypeOf _ = mkNoRepType "CoercionHole"
 
 instance Outputable CoercionHole where
-  ppr (CoercionHole { ch_co_var = cv, ch_hetero_kind = hk })
-    = braces (ppr cv <> ppWhen hk (text "[hk]"))
+  ppr (CoercionHole { ch_co_var = cv }) = braces (ppr cv)
 
 instance Uniquable CoercionHole where
   getUnique (CoercionHole { ch_co_var = cv }) = getUnique cv

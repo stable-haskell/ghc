@@ -24,7 +24,7 @@ module GHC.Tc.Gen.Head
 
        , tcInferAppHead, tcInferAppHead_maybe
        , tcInferId, tcCheckId, tcInferConLike, obviousSig
-       , tyConOf, tyConOfET, fieldNotInType
+       , tyConOf, tyConOfET
        , nonBidirectionalErr
 
        , pprArgInst
@@ -66,9 +66,8 @@ import GHC.Core.TyCo.Rep
 import GHC.Core.Type
 
 import GHC.Types.Id
-import GHC.Types.Id.Info
 import GHC.Types.Name
-import GHC.Types.Name.Reader
+import GHC.Types.Name.Reader ( WithUserRdr(..) )
 import GHC.Types.SrcLoc
 import GHC.Types.Basic
 import GHC.Types.Error
@@ -84,7 +83,8 @@ import GHC.Utils.Panic
 
 import GHC.Data.Maybe
 import Control.Monad
-import GHC.Rename.Unbound (WhatLooking(WL_Anything))
+import qualified Data.Set as Set
+import qualified GHC.LanguageExtensions as LangExt
 
 
 
@@ -652,12 +652,6 @@ tyConOf fam_inst_envs ty0
 tyConOfET :: FamInstEnvs -> ExpRhoType -> Maybe TyCon
 tyConOfET fam_inst_envs ty0 = tyConOf fam_inst_envs =<< checkingExpType_maybe ty0
 
-fieldNotInType :: RecSelParent -> RdrName -> TcRnMessage
-fieldNotInType p rdr
-  = mkTcRnNotInScope rdr $
-    UnknownSubordinate (text "field of type" <+> quotes (ppr p))
-
-
 {- *********************************************************************
 *                                                                      *
                 Expressions with a type signature
@@ -781,7 +775,7 @@ tcInferOverLit lit@(OverLit { ol_val = val
        ; let lit_expr = L (l2l loc) $ mkHsWrapCo co $
                         HsLit noExtField hs_lit
              from_expr = mkHsWrap (wrap2 <.> wrap1) $
-                         HsVar noExtField (L loc from_id)
+                         mkHsVar (L loc from_id)
              witness = HsApp noExtField (L (l2l loc) from_expr) lit_expr
              lit' = OverLit { ol_val = val
                             , ol_ext = OverLitTc { ol_rebindable = rebindable
@@ -797,31 +791,31 @@ tcInferOverLit lit@(OverLit { ol_val = val
 
 tcCheckId :: Name -> ExpRhoType -> TcM (HsExpr GhcTc)
 tcCheckId name res_ty
-  = do { (expr, actual_res_ty) <- tcInferId (noLocA name)
+  = do { (expr, actual_res_ty) <- tcInferId (noLocA $ noUserRdr name)
        ; traceTc "tcCheckId" (vcat [ppr name, ppr actual_res_ty, ppr res_ty])
        ; addFunResCtxt expr [] actual_res_ty res_ty $
          tcWrapResultO (OccurrenceOf name) rn_fun expr actual_res_ty res_ty }
   where
-    rn_fun = HsVar noExtField (noLocA name)
+    rn_fun = mkHsVar (noLocA name)
 
 ------------------------
-tcInferId :: LocatedN Name -> TcM (HsExpr GhcTc, TcSigmaType)
+tcInferId :: LocatedN (WithUserRdr Name) -> TcM (HsExpr GhcTc, TcSigmaType)
 -- Look up an occurrence of an Id
 -- Do not instantiate its type
-tcInferId lname@(L loc id_name)
+tcInferId lname@(L loc (WithUserRdr rdr id_name))
 
   | id_name `hasKey` assertIdKey
   = -- See Note [Overview of assertions]
     do { dflags <- getDynFlags
        ; if gopt Opt_IgnoreAsserts dflags
          then tc_infer_id lname
-         else tc_infer_id (L loc assertErrorName) }
+         else tc_infer_id (L loc $ WithUserRdr rdr assertErrorName) }
 
   | otherwise
   = tc_infer_id lname
 
-tc_infer_id :: LocatedN Name -> TcM (HsExpr GhcTc, TcSigmaType)
-tc_infer_id (L loc id_name)
+tc_infer_id :: LocatedN (WithUserRdr Name) -> TcM (HsExpr GhcTc, TcSigmaType)
+tc_infer_id (L loc (WithUserRdr rdr id_name))
  = do { thing <- tcLookup id_name
       ; (expr,ty) <- case thing of
              ATcId { tct_id = id }
@@ -835,15 +829,15 @@ tc_infer_id (L loc id_name)
 
              AGlobal (AConLike cl) -> tcInferConLike cl
 
-             (tcTyThingTyCon_maybe -> Just tc) -> failIllegalTyCon WL_Anything (tyConName tc)
-             ATyVar name _ -> failIllegalTyVal name
+             (tcTyThingTyCon_maybe -> Just tc) -> failIllegalTyCon WL_Term (WithUserRdr rdr (tyConName tc))
+             ATyVar name _ -> failIllegalTyVar (WithUserRdr rdr name)
 
              _ -> failWithTc $ TcRnExpectedValueId thing
 
        ; traceTc "tcInferId" (ppr id_name <+> dcolon <+> ppr ty)
        ; return (expr, ty) }
   where
-    return_id id = return (HsVar noExtField (L loc id), idType id)
+    return_id id = return (mkHsVar (L loc id), idType id)
 
 {- Note [Overview of assertions]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1077,32 +1071,34 @@ Wrinkles
 ************************************************************************
 -}
 
+-- TODO: We should do all level checks, once, and for all in the renamer in
+-- checkThLocalName.
 checkThLocalId :: Id -> TcM ()
--- The renamer has already done checkWellStaged,
---   in RnSplice.checkThLocalName, so don't repeat that here.
--- Here we just add constraints for cross-stage lifting
 checkThLocalId id
-  = do  { mb_local_use <- getStageAndBindLevel (idName id)
+  = do  { mb_local_use <- getCurrentAndBindLevel (idName id)
         ; case mb_local_use of
-             Just (top_lvl, bind_lvl, use_stage)
-                | thLevel use_stage > bind_lvl
-                -> checkCrossStageLifting top_lvl id use_stage
+             Just (top_lvl, bind_lvl, use_lvl)
+                | thLevelIndex use_lvl `Set.notMember` bind_lvl
+                -> do
+                    dflags <- getDynFlags
+                    checkCrossLevelLifting dflags top_lvl id use_lvl
              _  -> return ()   -- Not a locally-bound thing, or
                                -- no cross-stage link
     }
 
 --------------------------------------
-checkCrossStageLifting :: TopLevelFlag -> Id -> ThStage -> TcM ()
+checkCrossLevelLifting :: DynFlags -> TopLevelFlag -> Id -> ThLevel -> TcM ()
 -- If we are inside typed brackets, and (use_lvl > bind_lvl)
 -- we must check whether there's a cross-stage lift to do
 -- Examples   \x -> [|| x ||]
 --            [|| map ||]
 --
--- This is similar to checkCrossStageLifting in GHC.Rename.Splice, but
+-- This is similar to checkCrossLevelLifting in GHC.Rename.Splice, but
 -- this code is applied to *typed* brackets.
 
-checkCrossStageLifting top_lvl id (Brack _ (TcPending ps_var lie_var q))
+checkCrossLevelLifting dflags top_lvl id (Brack _ (TcPending ps_var lie_var q))
   | isTopLevel top_lvl
+  , xopt LangExt.ImplicitStagePersistence dflags
   = when (isExternalName id_name) (keepAlive id_name)
     -- See Note [Keeping things alive for Template Haskell] in GHC.Rename.Splice
 
@@ -1128,7 +1124,7 @@ checkCrossStageLifting top_lvl id (Brack _ (TcPending ps_var lie_var q))
         ; lift <- if isStringTy id_ty then
                      do { sid <- tcLookupId GHC.Builtin.Names.TH.liftStringName
                                      -- See Note [Lifting strings]
-                        ; return (HsVar noExtField (noLocA sid)) }
+                        ; return (mkHsVar (noLocA sid)) }
                   else
                      setConstraintVar lie_var   $
                           -- Put the 'lift' constraint into the right LIE
@@ -1150,7 +1146,7 @@ checkCrossStageLifting top_lvl id (Brack _ (TcPending ps_var lie_var q))
   where
     id_name = idName id
 
-checkCrossStageLifting _ _ _ = return ()
+checkCrossLevelLifting _ _ _ _ = return ()
 
 {-
 Note [Lifting strings]
@@ -1170,6 +1166,35 @@ Note [Local record selectors]
 Record selectors for TyCons in this module are ordinary local bindings,
 which show up as ATcIds rather than AGlobals.  So we need to check for
 naughtiness in both branches.  c.f. GHC.Tc.TyCl.Utils.mkRecSelBinds.
+
+Note [Explicit Level Imports]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+This is the overview note which explains the whole implementation of ExplicitLevelImports
+
+GHC Proposal: https://github.com/ghc-proposals/ghc-proposals/blob/master/proposals/0682-explicit-level-imports.rst
+Paper: https://mpickering.github.io/papers/explicit-level-imports.pdf
+
+The feature is turned on by the `ExplicitLevelImports` extension.
+At the source level, the user marks imports with `quote` or `splice` to introduce
+them at level 1 or -1.
+
+The function GHC.Tc.Utils.Monad.getCurrentAndBindLevel. computes the levels
+at which a Name is available:
+  - for top-level Names, this information is stored in its GRE; it is either local
+    (level 0) or imported, in which case the levels it is imported at are stored in the
+    'ImpDeclSpec's for the GRE. The function 'greLevels' retrieves this information.
+  - for locally-bound Names, this information is stored in the ThBindEnv.
+GHC.Rename.Splice.checkCrossLevelLifting checks that levels in user-written programs
+are correct.
+
+Instances are checked by `checkWellLevelledDFun`, which computes the level of an
+instance by calling `checkWellLevelledInstanceWhat`, which sees what is available at by looking at the module graph.
+
+That's it for the main implementation of the feature; the rest is modifications
+to the driver parts of the code to use this information. For example, in downsweep,
+we only enable code generation for modules needed at the runtime stage.
+See Note [-fno-code mode].
+
 -}
 
 
@@ -1271,10 +1296,9 @@ addStmtCtxt stmt =
 addExprCtxt :: HsExpr GhcRn -> TcRn a -> TcRn a
 addExprCtxt e thing_inside
   = case e of
-      HsUnboundVar {} -> thing_inside
+      HsHole _ -> thing_inside
       _ -> addErrCtxt (ExprCtxt e) thing_inside
-   -- The HsUnboundVar special case addresses situations like
+   -- The HsHole special case addresses situations like
    --    f x = _
    -- when we don't want to say "In the expression: _",
    -- because it is mentioned in the error message itself
-

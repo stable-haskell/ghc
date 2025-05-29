@@ -1,5 +1,3 @@
-{-# OPTIONS_GHC -Wno-incomplete-uni-patterns #-}
-
 {-
 (c) The GRASP/AQUA Project, Glasgow University, 1993-1998
 
@@ -66,7 +64,7 @@ import GHC.Unit.Module.ModGuts
 import GHC.Core.Unfold
 
 import Data.List( partition )
-import Data.List.NonEmpty ( NonEmpty (..) )
+-- import Data.List.NonEmpty ( NonEmpty (..) )
 import GHC.Core.Subst (substTickish)
 
 {-
@@ -1245,14 +1243,15 @@ specExpr env (Let bind body)
 --     Note [Fire rules in the specialiser]
 fireRewriteRules :: SpecEnv -> InExpr -> [OutExpr] -> (InExpr, [OutExpr])
 fireRewriteRules env (Var f) args
-  | Just (rule, expr) <- specLookupRule env f args InitialPhase (getRules (se_rules env) f)
+  | let rules = getRules (se_rules env) f
+  , Just (rule, expr) <- specLookupRule env f args activeInInitialPhase rules
   , let rest_args    = drop (ruleArity rule) args -- See Note [Extra args in the target]
         zapped_subst = Core.zapSubst (se_subst env)
         expr'        = simpleOptExprWith defaultSimpleOpts zapped_subst expr
                        -- simplOptExpr needed because lookupRule returns
                        --   (\x y. rhs) arg1 arg2
-  , (fun, args) <- collectArgs expr'
-  = fireRewriteRules env fun (args++rest_args)
+  , (fun', args') <- collectArgs expr'
+  = fireRewriteRules env fun' (args'++rest_args)
 fireRewriteRules _ fun args = (fun, args)
 
 --------------
@@ -1278,67 +1277,8 @@ specCase :: SpecEnv
                   , OutId
                   , [OutAlt]
                   , UsageDetails)
-specCase env scrut' case_bndr [Alt con args rhs]
-  | -- See Note [Floating dictionaries out of cases]
-    interestingDict scrut' (idType case_bndr)
-  , not (isDeadBinder case_bndr && null sc_args')
-  = do { case_bndr_flt :| sc_args_flt <- mapM clone_me (case_bndr' :| sc_args')
-
-       ; let case_bndr_flt' = case_bndr_flt `addDictUnfolding` scrut'
-             scrut_bind     = mkDB (NonRec case_bndr_flt scrut')
-
-             sc_args_flt' = zipWith addDictUnfolding sc_args_flt sc_rhss
-             sc_rhss      = [ Case (Var case_bndr_flt') case_bndr' (idType sc_arg')
-                                   [Alt con args' (Var sc_arg')]
-                            | sc_arg' <- sc_args' ]
-             cb_set       = unitVarSet case_bndr_flt'
-             sc_binds     = [ DB { db_bind = NonRec sc_arg_flt sc_rhs, db_fvs  = cb_set }
-                            | (sc_arg_flt, sc_rhs) <- sc_args_flt' `zip` sc_rhss ]
-
-             flt_binds    = scrut_bind : sc_binds
-
-             -- Extend the substitution for RHS to map the *original* binders
-             -- to their floated versions.
-             mb_sc_flts :: [Maybe DictId]
-             mb_sc_flts = map (lookupVarEnv clone_env) args'
-             clone_env  = zipVarEnv sc_args' sc_args_flt'
-
-             subst_prs  = (case_bndr, Var case_bndr_flt)
-                        : [ (arg, Var sc_flt)
-                          | (arg, Just sc_flt) <- args `zip` mb_sc_flts ]
-             subst'   = se_subst env_rhs
-                        `Core.extendSubstInScopeList` (case_bndr_flt' : sc_args_flt')
-                        `Core.extendIdSubstList`      subst_prs
-             env_rhs' = env_rhs { se_subst = subst' }
-
-       ; (rhs', rhs_uds)   <- specExpr env_rhs' rhs
-       ; let (free_uds, dumped_dbs) = dumpUDs (case_bndr':args') rhs_uds
-             all_uds = flt_binds `consDictBinds` free_uds
-             alt'    = Alt con args' (wrapDictBindsE dumped_dbs rhs')
---       ; pprTrace "specCase" (ppr case_bndr $$ ppr scrut_bind) $
-       ; return (Var case_bndr_flt, case_bndr', [alt'], all_uds) }
-  where
-    (env_rhs, (case_bndr':args')) = substBndrs env (case_bndr:args)
-    sc_args' = filter is_flt_sc_arg args'
-
-    clone_me bndr = do { uniq <- getUniqueM
-                       ; return (mkUserLocalOrCoVar occ uniq wght ty loc) }
-       where
-         name = idName bndr
-         wght = idMult bndr
-         ty   = idType bndr
-         occ  = nameOccName name
-         loc  = getSrcSpan name
-
-    arg_set = mkVarSet args'
-    is_flt_sc_arg var =  isId var
-                      && not (isDeadBinder var)
-                      && isDictTy var_ty
-                      && tyCoVarsOfType var_ty `disjointVarSet` arg_set
-       where
-         var_ty = idType var
-
-
+-- We used to float out super class selections here,
+-- but no longer do so. See Historical Note [Floating dictionaries out of cases]
 specCase env scrut case_bndr alts
   = do { (alts', uds_alts) <- mapAndCombineSM spec_alt alts
        ; return (scrut, case_bndr', alts', uds_alts) }
@@ -1379,9 +1319,9 @@ Note that `f` has the CPR property, and so will worker/wrapper.
 The call to `g` in `h` will make us specialise `g @Int`. And the specialised
 version of `g` will contain the call `f @Int`; but in the subsequent run of
 the Simplifier, there will be a competition between:
-* The user-supplied SPECIALISE rule for `f`
-* The inlining of the wrapper for `f`
-In fact, the latter wins -- see Note [Rewrite rules and inlining] in
+  * The user-supplied SPECIALISE rule for `f`
+  * The inlining of the wrapper for `f`
+In fact, the latter wins -- see Note [tryRules: plan (BEFORE)]
 GHC.Core.Opt.Simplify.Iteration.  However, it a bit fragile.
 
 Moreover consider (test T21851_2):
@@ -1410,42 +1350,41 @@ making sure that we have a reasonably up to date EPS rule base. Currently
 we load it up just once, in `initRuleEnv`, called at the beginning of
 `specProgram`.
 
-NB: you might wonder if running rules in the specialiser (this Note)
-renders Note [Rewrite rules and inlining] in the Simplifier redundant.
-That is, if we run rules in the specialiser, does it matter if we make
-rules "win" over inlining in the Simplifier?  Yes, it does!  See the
-discussion in #21851.
+NB: you might wonder if running rules in the specialiser (this Note) renders
+Note [tryRules: plan (BEFORE)] in the Simplifier (partly) redundant.  That is,
+if we run rules in the specialiser, does it matter if we make rules "win" over
+inlining in the Simplifier?  Yes, it does!  See the discussion in #21851.
 
-Note [Floating dictionaries out of cases]
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Consider
+Historical Note [Floating dictionaries out of cases]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Function `specCase` used to give special treatment to a case-expression
+that scrutinised a dictionary, like this:
    g = \d. case d of { MkD sc ... -> ...(f sc)... }
-Naively we can't float d2's binding out of the case expression,
-because 'sc' is bound by the case, and that in turn means we can't
-specialise f, which seems a pity.
+But actually
 
-So we invert the case, by floating out a binding
-for 'sc_flt' thus:
-    sc_flt = case d of { MkD sc ... -> sc }
-Now we can float the call instance for 'f'.  Indeed this is just
-what'll happen if 'sc' was originally bound with a let binding,
-but case is more efficient, and necessary with equalities. So it's
-good to work with both.
+* We never explicitly case-analyse a dictionary; rather the class-op
+  rules select superclasses from it.  (NB: worker/wrapper can unbox
+  tuple dictionaries -- see (DNB1) in Note [Do not unbox class dictionaries];
+  but that's only after worker/wrapper, and specialisation happens before
+  that.)
 
-You might think that this won't make any difference, because the
-call instance will only get nuked by the \d.  BUT if 'g' itself is
-specialised, then transitively we should be able to specialise f.
+* Calling `interestingDict` on every scrutinee is hardly sensible;
+  generally `interestingDict` is called only on Constraint-kinded things.
 
-In general, given
-   case e of cb { MkD sc ... -> ...(f sc)... }
-we transform to
-   let cb_flt = e
-       sc_flt = case cb_flt of { MkD sc ... -> sc }
-   in
-   case cb_flt of bg { MkD sc ... -> ....(f sc_flt)... }
+* It was giving a Lint scope error in !14272
 
-The "_flt" things are the floated binds; we use the current substitution
-to substitute sc -> sc_flt in the RHS
+So now there is no special case. This Note just records the change
+in case we ever want to reinstate it.   The original note was
+added in
+
+   commit c107a00ccf1e641a2d008939cf477c71caa028d5
+   Author: Simon Peyton Jones <simonpj@microsoft.com>
+   Date:   Thu Aug 12 13:11:33 2010 +0000
+
+       Improve the Specialiser, fixing Trac #4203
+
+End of Historical Note
+
 
 ************************************************************************
 *                                                                      *
@@ -1623,7 +1562,7 @@ specCalls :: Bool              -- True  =>  specialising imported fn
 
 -- This function checks existing rules, and does not create
 -- duplicate ones. So the caller does not need to do this filtering.
--- See 'already_covered'
+-- See `alreadyCovered`
 
 type SpecInfo = ( [CoreRule]       -- Specialisation rules
                 , [(Id,CoreExpr)]  -- Specialised definition
@@ -1647,15 +1586,13 @@ specCalls spec_imp env existing_rules calls_for_me fn rhs
 
   = -- pprTrace "specCalls: some" (vcat
     --   [ text "function" <+> ppr fn
-    --   , text "calls:" <+> ppr calls_for_me
-    --   , text "subst" <+> ppr (se_subst env) ]) $
+    --    , text "calls:" <+> ppr calls_for_me
+    --    , text "subst" <+> ppr (se_subst env) ]) $
     foldlM spec_call ([], [], emptyUDs) calls_for_me
 
   | otherwise   -- No calls or RHS doesn't fit our preconceptions
-  = warnPprTrace (not (exprIsTrivial rhs) && notNull calls_for_me && not (isClassOpId fn))
+  = warnPprTrace (not (exprIsTrivial rhs) && notNull calls_for_me)
           "Missed specialisation opportunity for" (ppr fn $$ trace_doc) $
-          -- isClassOpId: class-op Ids never inline; we specialise them
-          -- through fireRewriteRules. So don't complain about missed opportunities
           -- Note [Specialisation shape]
     -- pprTrace "specCalls: none" (ppr fn <+> ppr calls_for_me) $
     return ([], [], emptyUDs)
@@ -1667,6 +1604,10 @@ specCalls spec_imp env existing_rules calls_for_me fn rhs
     fn_unf    = realIdUnfolding fn  -- Ignore loop-breaker-ness here
     inl_prag  = idInlinePragma fn
     inl_act   = inlinePragmaActivation inl_prag
+    is_active = isActive (beginPhase inl_act) :: Activation -> Bool
+         -- is_active: inl_act is the activation we are going to put in the new
+         --   SPEC rule; so we want to see if it is covered by another rule with
+         --   that same activation.
     is_local  = isLocalId fn
     is_dfun   = isDFunId fn
     dflags    = se_dflags env
@@ -1676,16 +1617,6 @@ specCalls spec_imp env existing_rules calls_for_me fn rhs
 
     (rhs_bndrs, rhs_body) = collectBindersPushingCo rhs
                             -- See Note [Account for casts in binding]
-
-    already_covered :: SpecEnv -> [CoreRule] -> [CoreExpr] -> Bool
-    already_covered env new_rules args      -- Note [Specialisations already covered]
-       = isJust (specLookupRule env fn args (beginPhase inl_act)
-                                (new_rules ++ existing_rules))
-         -- Rules: we look both in the new_rules (generated by this invocation
-         --   of specCalls), and in existing_rules (passed in to specCalls)
-         -- inl_act: is the activation we are going to put in the new SPEC
-         --   rule; so we want to see if it is covered by another rule with
-         --   that same activation.
 
     ----------------------------------------------------------
         -- Specialise to one particular call pattern
@@ -1720,8 +1651,12 @@ specCalls spec_imp env existing_rules calls_for_me fn rhs
 --                , ppr dx_binds ]) $
 --             return ()
 
+           ; let all_rules = rules_acc ++ existing_rules
+                 -- all_rules: we look both in the rules_acc (generated by this invocation
+                 --   of specCalls), and in existing_rules (passed in to specCalls)
            ; if not useful  -- No useful specialisation
-                || already_covered rhs_env2 rules_acc rule_lhs_args
+                || alreadyCovered rhs_env2 rule_bndrs fn rule_lhs_args is_active all_rules
+                   -- See (SC1) in Note [Specialisations already covered]
              then return spec_acc
              else
         do { -- Run the specialiser on the specialised RHS
@@ -1783,7 +1718,7 @@ specCalls spec_imp env existing_rules calls_for_me fn rhs
                  spec_fn_details
                    = case idDetails fn of
                        JoinId join_arity _ -> JoinId (join_arity - join_arity_decr) Nothing
-                       DFunId is_nt        -> DFunId is_nt
+                       DFunId unary        -> DFunId unary
                        _                   -> VanillaId
 
            ; spec_fn <- newSpecIdSM (idName fn) spec_fn_ty spec_fn_details spec_fn_info
@@ -1807,6 +1742,8 @@ specCalls spec_imp env existing_rules calls_for_me fn rhs
                                        , ppr spec_fn  <+> dcolon <+> ppr spec_fn_ty
                                        , ppr rhs_bndrs, ppr call_args
                                        , ppr spec_rule
+                                       , text "acc" <+> ppr rules_acc
+                                       , text "existing" <+> ppr existing_rules
                                        ]
 
            ; -- pprTrace "spec_call: rule" _rule_trace_doc
@@ -1815,19 +1752,35 @@ specCalls spec_imp env existing_rules calls_for_me fn rhs
                     , spec_uds           `thenUDs` uds_acc
                     ) } }
 
+alreadyCovered :: SpecEnv
+               -> [Var] -> Id -> [CoreExpr]   -- LHS of possible new rule
+               -> (Activation -> Bool)        -- Which rules are active
+               -> [CoreRule] -> Bool
+-- Note [Specialisations already covered] esp (SC2)
+alreadyCovered env bndrs fn args is_active rules
+  = case specLookupRule env fn args is_active rules of
+      Nothing             -> False
+      Just (rule, _)
+        | isAutoRule rule -> -- Discard identical rules
+                             -- We know that (fn args) is an instance of RULE
+                             -- Check if RULE is an instance of (fn args)
+                             ruleLhsIsMoreSpecific in_scope bndrs args rule
+        | otherwise       -> True  -- User rules dominate
+  where
+    in_scope = substInScopeSet (se_subst env)
+
 -- Convenience function for invoking lookupRule from Specialise
 -- The SpecEnv's InScopeSet should include all the Vars in the [CoreExpr]
 specLookupRule :: SpecEnv -> Id -> [CoreExpr]
-               -> CompilerPhase  -- Look up rules as if we were in this phase
+               -> (Activation -> Bool)  -- Which rules are active
                -> [CoreRule] -> Maybe (CoreRule, CoreExpr)
-specLookupRule env fn args phase rules
+specLookupRule env fn args is_active rules
   = lookupRule ropts in_scope_env is_active fn args rules
   where
     dflags       = se_dflags env
     in_scope     = substInScopeSet (se_subst env)
     in_scope_env = ISE in_scope (whenActiveUnfoldingFun is_active)
     ropts        = initRuleOpts dflags
-    is_active    = isActive phase
 
 {- Note [Specialising DFuns]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -2326,21 +2279,24 @@ This plan is implemented in the Rec case of specBindItself.
 Note [Specialisations already covered]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 We obviously don't want to generate two specialisations for the same
-argument pattern.  There are two wrinkles
+argument pattern.  Wrinkles
 
-1. We do the already-covered test in specDefn, not when we generate
-the CallInfo in mkCallUDs.  We used to test in the latter place, but
-we now iterate the specialiser somewhat, and the Id at the call site
-might therefore not have all the RULES that we can see in specDefn
+(SC1) We do the already-covered test in specDefn, not when we generate
+    the CallInfo in mkCallUDs.  We used to test in the latter place, but
+    we now iterate the specialiser somewhat, and the Id at the call site
+    might therefore not have all the RULES that we can see in specDefn
 
-2. What about two specialisations where the second is an *instance*
-of the first?  If the more specific one shows up first, we'll generate
-specialisations for both.  If the *less* specific one shows up first,
-we *don't* currently generate a specialisation for the more specific
-one.  (See the call to lookupRule in already_covered.)  Reasons:
-  (a) lookupRule doesn't say which matches are exact (bad reason)
-  (b) if the earlier specialisation is user-provided, it's
-      far from clear that we should auto-specialise further
+(SC2) What about two specialisations where the second is an *instance*
+   of the first?  It's a bit arbitrary, but here's what we do:
+   * If the existing one is user-specified, via a SPECIALISE pragma, we
+     suppress the further specialisation.
+   * If the existing one is auto-generated, we generate a second RULE
+     for the more specialised version.
+   The latter is important because we don't want the accidental order
+   of calls to determine what specialisations we generate.
+
+(SC3) Annoyingly, we /also/ eliminate duplicates in `filterCalls`.
+   See (MP3) in Note [Specialising polymorphic dictionaries]
 
 Note [Auto-specialisation and RULES]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -2803,11 +2759,9 @@ non-dictionary bindings too.
 
 Note [Specialising polymorphic dictionaries]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
 Note June 2023: This has proved to be quite a tricky optimisation to get right
 see (#23469, #23109, #21229, #23445) so it is now guarded by a flag
 `-fpolymorphic-specialisation`.
-
 
 Consider
     class M a where { foo :: a -> Int }
@@ -2848,11 +2802,26 @@ Here are the moving parts:
       function.
 
 (MP3) If we have f :: forall m. Monoid m => blah, and two calls
-        (f @(Endo b)      (d :: Monoid (Endo b))
-        (f @(Endo (c->c)) (d :: Monoid (Endo (c->c)))
+        (f @(Endo b)      (d1 :: Monoid (Endo b))
+        (f @(Endo (c->c)) (d2 :: Monoid (Endo (c->c)))
       we want to generate a specialisation only for the first.  The second
       is just a substitution instance of the first, with no greater specialisation.
-      Hence the call to `remove_dups` in `filterCalls`.
+      Hence the use of `removeDupCalls` in `filterCalls`.
+
+      You might wonder if `d2` might be more specialised than `d1`; but no.
+      This `removeDupCalls` thing is at the definition site of `f`, and both `d1`
+      and `d2` are in scope. So `d1` is simply more polymorphic than `d2`, but
+      is just as specialised.
+
+      This distinction is sadly lost once we build a RULE, so `alreadyCovered`
+      can't be so clever.  E.g if we have an existing RULE
+            forall @a (d1:Ord Int) (d2: Eq a). f @a @Int d1 d2 = ...
+      and a putative new rule
+            forall (d1:Ord Int) (d2: Eq Int). f @Int @Int d1 d2 = ...
+      we /don't/ want the existing rule to subsume the new one.
+
+      So we sadly put up with having two rather different places where we
+      eliminate duplicates: `alreadyCovered` and `removeDupCalls`.
 
 All this arose in #13873, in the unexpected form that a SPECIALISE
 pragma made the program slower!  The reason was that the specialised
@@ -2950,15 +2919,28 @@ data CallInfoSet = CIS Id (Bag CallInfo)
   -- The list of types and dictionaries is guaranteed to
   -- match the type of f
   -- The Bag may contain duplicate calls (i.e. f @T and another f @T)
-  -- These dups are eliminated by already_covered in specCalls
+  -- These dups are eliminated by alreadyCovered in specCalls
 
 data CallInfo
-  = CI { ci_key  :: [SpecArg]   -- All arguments
+  = CI { ci_key  :: [SpecArg]   -- Arguments of the call
+                                -- See Note [The (CI-KEY) invariant]
+
        , ci_fvs  :: IdSet       -- Free Ids of the ci_key call
                                 -- /not/ including the main id itself, of course
                                 -- NB: excluding tyvars:
                                 --     See Note [Specialising polymorphic dictionaries]
     }
+
+{- Note [The (CI-KEY) invariant]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Invariant (CI-KEY):
+   In the `ci_key :: [SpecArg]` field of `CallInfo`,
+     * The list is non-empty
+     * The least element is always a `SpecDict`
+
+In this way the RULE has as few args as possible, which broadens its
+applicability, since rules only fire when saturated.
+-}
 
 type DictExpr = CoreExpr
 
@@ -3048,10 +3030,7 @@ mkCallUDs' env f args
     ci_key :: [SpecArg]
     ci_key = dropWhileEndLE (not . isSpecDict) $
              zipWith mk_spec_arg args pis
-             -- Drop trailing args until we get to a SpecDict
-             -- In this way the RULE has as few args as possible,
-             -- which broadens its applicability, since rules only
-             -- fire when saturated
+             -- Establish (CI-KEY): drop trailing args until we get to a SpecDict
 
     mk_spec_arg :: OutExpr -> PiTyBinder -> SpecArg
     mk_spec_arg arg (Named bndr)
@@ -3089,34 +3068,76 @@ site, so we only look through ticks that RULE matching looks through
 -}
 
 wantCallsFor :: SpecEnv -> Id -> Bool
-wantCallsFor _env _f = True
- -- We could reduce the size of the UsageDetails by being less eager
- -- about collecting calls for LocalIds: there is no point for
- -- ones that are lambda-bound.  We can't decide this by looking at
- -- the (absence of an) unfolding, because unfoldings for local
- -- functions are discarded by cloneBindSM, so no local binder will
- -- have an unfolding at this stage.  We'd have to keep a candidate
- -- set of let-binders.
- --
- -- Not many lambda-bound variables have dictionary arguments, so
- -- this would make little difference anyway.
- --
- -- For imported Ids we could check for an unfolding, but we have to
- -- do so anyway in canSpecImport, and it seems better to have it
- -- all in one place.  So we simply collect usage info for imported
- -- overloaded functions.
+-- See Note [wantCallsFor]
+wantCallsFor _env f
+  = case idDetails f of
+      RecSelId {}      -> False
+      DataConWorkId {} -> False
+      DataConWrapId {} -> False
+      ClassOpId {}     -> False
+      PrimOpId {}      -> False
+      FCallId {}       -> False
+      TickBoxOpId {}   -> False
+      CoVarId {}       -> False
 
-{- Note [Interesting dictionary arguments]
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Consider this
-         \a.\d:Eq a.  let f = ... in ...(f d)...
-There really is not much point in specialising f wrt the dictionary d,
-because the code for the specialised f is not improved at all, because
-d is lambda-bound.  We simply get junk specialisations.
+      DFunId {}        -> True
+      VanillaId {}     -> True
+      JoinId {}        -> True
+      WorkerLikeId {}  -> True
+      RepPolyId {}     -> True
 
-What is "interesting"?  Just that it has *some* structure.  But what about
-variables?  We look in the variable's /unfolding/.  And that means
-that we must be careful to ensure that dictionaries have unfoldings,
+{- Note [wantCallsFor]
+~~~~~~~~~~~~~~~~~~~~~~
+`wantCallsFor env f` says whether the Specialiser should collect calls for
+function `f`; other thing being equal, the fewer calls we collect the better. It
+is False for things we can't specialise:
+
+* ClassOpId: never inline and we don't have a defn to specialise; we specialise
+  them through fireRewriteRules.
+* PrimOpId: are never overloaded
+* Data constructors: we never specialise them
+
+We could reduce the size of the UsageDetails by being less eager about
+collecting calls for some LocalIds: there is no point for ones that are
+lambda-bound.  We can't decide this by looking at the (absence of an) unfolding,
+because unfoldings for local functions are discarded by cloneBindSM, so no local
+binder will have an unfolding at this stage.  We'd have to keep a candidate set
+of let-binders.
+
+Not many lambda-bound variables have dictionary arguments, so this would make
+little difference anyway.
+
+For imported Ids we could check for an unfolding, but we have to do so anyway in
+canSpecImport, and it seems better to have it all in one place.  So we simply
+collect usage info for imported overloaded functions.
+
+Note [Interesting dictionary arguments]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+In `mkCallUDs` we only use `SpecDict` for dictionaries of which
+`interestingDict` holds.  Otherwise we use `UnspecArg`.  Two reasons:
+
+* Consider this
+       \a.\d:Eq a.  let f = ... in ...(f d)...
+  There really is not much point in specialising f wrt the dictionary d,
+  because the code for the specialised f is not improved at all, because
+  d is lambda-bound.  We simply get junk specialisations.
+
+* Consider this (#25703):
+     f :: (Eq a, Show b) => a -> b -> INt
+     goo :: forall x. (Eq x) => x -> blah
+     goo @x (d:Eq x) (arg:x) = ...(f @x @Int d $fShowInt)...
+  If we built a `ci_key` with a (SpecDict d) for `d`, we would end up
+  discarding the call at the `\d`.  But if we use `UnspecArg` for that
+  uninteresting `d`, we'll get a `ci_key` of
+      f @x @Int UnspecArg (SpecDict $fShowInt)
+  and /that/ can float out to f's definition and specialise nicely.
+  Hooray.  (NB: the call can float only if `-fpolymorphic-specialisation`
+  is on; otherwise it'll be trapped by the `\@x -> ...`.)(
+
+What is "interesting"?  (See `interestingDict`.)  Just that it has *some*
+structure.  But what about variables?  We look in the variable's /unfolding/.
+And that means that we must be careful to ensure that dictionaries /have/
+unfoldings,
 
 * cloneBndrSM discards non-Stable unfoldings
 * specBind updates the unfolding after specialisation
@@ -3162,7 +3183,7 @@ Now `f` turns into:
           meth @a dc ....
 
 When we specialise `f`, at a=Int say, that superclass selection can
-nfire (via rewiteClassOps), but that info (that 'dc' is now a
+fire (via rewiteClassOps), but that info (that 'dc' is now a
 particular dictionary `C`, of type `C Int`) must be available to
 the call `meth @a dc`, so that we can fire the `meth` class-op, and
 thence specialise `wombat`.
@@ -3289,7 +3310,11 @@ dumpUDs :: [CoreBndr] -> UsageDetails -> (UsageDetails, OrdList DictBind)
 -- Used at a lambda or case binder; just dump anything mentioning the binder
 dumpUDs bndrs uds@(MkUD { ud_binds = orig_dbs, ud_calls = orig_calls })
   | null bndrs = (uds, nilOL)  -- Common in case alternatives
-  | otherwise  = -- pprTrace "dumpUDs" (ppr bndrs $$ ppr free_uds $$ ppr dump_dbs) $
+  | otherwise  = -- pprTrace "dumpUDs" (vcat
+                 --    [ text "bndrs" <+> ppr bndrs
+                 --    , text "uds" <+> ppr uds
+                 --    , text "free_uds" <+> ppr free_uds
+                 --    , text "dump-dbs" <+> ppr dump_dbs ]) $
                  (free_uds, dump_dbs)
   where
     free_uds = uds { ud_binds = free_dbs, ud_calls = free_calls }
@@ -3328,20 +3353,17 @@ callsForMe fn uds@MkUD { ud_binds = orig_dbs, ud_calls = orig_calls }
     calls_for_me = case lookupDVarEnv orig_calls fn of
                         Nothing -> []
                         Just cis -> filterCalls cis orig_dbs
-         -- filterCalls: drop calls that (directly or indirectly)
-         -- refer to fn.  See Note [Avoiding loops (DFuns)]
 
 ----------------------
 filterCalls :: CallInfoSet -> FloatedDictBinds -> [CallInfo]
--- Remove dominated calls (Note [Specialising polymorphic dictionaries])
--- and loopy DFuns (Note [Avoiding loops (DFuns)])
+-- Remove
+--   (a) dominated calls: (MP3) in Note [Specialising polymorphic dictionaries]
+--   (b) loopy DFuns: Note [Avoiding loops (DFuns)]
 filterCalls (CIS fn call_bag) (FDB { fdb_binds = dbs })
-  | isDFunId fn  -- Note [Avoiding loops (DFuns)] applies only to DFuns
-  = filter ok_call de_dupd_calls
-  | otherwise         -- Do not apply it to non-DFuns
-  = de_dupd_calls  -- See Note [Avoiding loops (non-DFuns)]
+  | isDFunId fn  = filter ok_call de_dupd_calls  -- Deals with (b)
+  | otherwise    = de_dupd_calls
   where
-    de_dupd_calls = remove_dups call_bag
+    de_dupd_calls = removeDupCalls call_bag -- Deals with (a)
 
     dump_set = foldl' go (unitVarSet fn) dbs
       -- This dump-set could also be computed by splitDictBinds
@@ -3355,10 +3377,10 @@ filterCalls (CIS fn call_bag) (FDB { fdb_binds = dbs })
 
     ok_call (CI { ci_fvs = fvs }) = fvs `disjointVarSet` dump_set
 
-remove_dups :: Bag CallInfo -> [CallInfo]
+removeDupCalls :: Bag CallInfo -> [CallInfo]
 -- Calls involving more generic instances beat more specific ones.
 -- See (MP3) in Note [Specialising polymorphic dictionaries]
-remove_dups calls = foldr add [] calls
+removeDupCalls calls = foldr add [] calls
   where
     add :: CallInfo -> [CallInfo] -> [CallInfo]
     add ci [] = [ci]
@@ -3367,12 +3389,20 @@ remove_dups calls = foldr add [] calls
                       | otherwise               = ci2 : add ci1 cis
 
 beats_or_same :: CallInfo -> CallInfo -> Bool
+-- (beats_or_same ci1 ci2) is True if specialising on ci1 subsumes ci2
+-- That is: ci1's types are less specialised than ci2
+--          ci1   specialises on the same dict args as ci2
 beats_or_same (CI { ci_key = args1 }) (CI { ci_key = args2 })
   = go args1 args2
   where
-    go [] _ = True
+    go []           []           = True
     go (arg1:args1) (arg2:args2) = go_arg arg1 arg2 && go args1 args2
-    go (_:_)        []           = False
+
+    -- If one or the other runs dry, the other must still have a SpecDict
+    -- because of the (CI-KEY) invariant.  So neither subsumes the other;
+    -- one is more specialised (faster code) but the other is more generally
+    -- applicable.
+    go  _ _ = False
 
     go_arg (SpecType ty1) (SpecType ty2) = isJust (tcMatchTy ty1 ty2)
     go_arg UnspecType     UnspecType     = True
@@ -3466,7 +3496,7 @@ substBndr :: SpecEnv -> CoreBndr -> (SpecEnv, CoreBndr)
 substBndr env bs = case Core.substBndr (se_subst env) bs of
                       (subst', bs') -> (env { se_subst = subst' }, bs')
 
-substBndrs :: SpecEnv -> [CoreBndr] -> (SpecEnv, [CoreBndr])
+substBndrs :: Traversable f => SpecEnv -> f CoreBndr -> (SpecEnv, f CoreBndr)
 substBndrs env bs = case Core.substBndrs (se_subst env) bs of
                       (subst', bs') -> (env { se_subst = subst' }, bs')
 
@@ -3481,7 +3511,7 @@ cloneBndrSM env@(SE { se_subst = subst }) bndr
 
 cloneRecBndrsSM :: SpecEnv -> [Id] -> SpecM (SpecEnv, [Id])
 cloneRecBndrsSM env@(SE { se_subst = subst }) bndrs
-  = do { (subst', bndrs') <- Core.cloneRecIdBndrs subst bndrs
+  = do { (subst', bndrs') <- Core.cloneRecIdBndrsM subst bndrs
        ; let env' = env { se_subst = subst' }
        ; return (env', bndrs') }
 
