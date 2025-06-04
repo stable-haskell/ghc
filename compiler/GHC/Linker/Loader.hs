@@ -48,7 +48,6 @@ import GHC.Driver.Session
 import GHC.Driver.Ppr
 import GHC.Driver.Config.Diagnostic
 import GHC.Driver.Config.Finder
-import GHC.Driver.DynFlags (rtsWayUnitId)
 
 import GHC.Tc.Utils.Monad
 
@@ -169,8 +168,8 @@ getLoaderState :: Interp -> IO (Maybe LoaderState)
 getLoaderState interp = readMVar (loader_state (interpLoader interp))
 
 
-emptyLoaderState :: DynFlags -> LoaderState
-emptyLoaderState dflags = LoaderState
+emptyLoaderState :: LoaderState
+emptyLoaderState = LoaderState
    { linker_env = LinkerEnv
      { closure_env = emptyNameEnv
      , itbl_env    = emptyNameEnv
@@ -186,11 +185,7 @@ emptyLoaderState dflags = LoaderState
   --
   -- The linker's symbol table is populated with RTS symbols using an
   -- explicit list.  See rts/Linker.c for details.
-  where init_pkgs = let addToUDFM' (k, v) m = addToUDFM m k v
-                    in foldr addToUDFM' emptyUDFM [
-                      (rtsUnitId, (LoadedPkgInfo rtsUnitId [] [] [] emptyUniqDSet))
-                    , (rtsWayUnitId dflags, (LoadedPkgInfo (rtsWayUnitId dflags) [] [] [] emptyUniqDSet))
-                    ]
+  where init_pkgs = unitUDFM rtsUnitId (LoadedPkgInfo rtsUnitId [] [] [] emptyUniqDSet)
 
 extendLoadedEnv :: Interp -> [(Name,ForeignHValue)] -> IO ()
 extendLoadedEnv interp new_bindings =
@@ -330,7 +325,7 @@ initLoaderState interp hsc_env = do
 reallyInitLoaderState :: Interp -> HscEnv -> IO LoaderState
 reallyInitLoaderState interp hsc_env = do
   -- Initialise the linker state
-  let pls0 = emptyLoaderState (hsc_dflags hsc_env)
+  let pls0 = emptyLoaderState
 
   case platformArch (targetPlatform (hsc_dflags hsc_env)) of
     -- FIXME: we don't initialize anything with the JS interpreter.
