@@ -10,6 +10,8 @@ SHELL := bash
 
 ROOT_DIR := $(patsubst %/,%,$(dir $(realpath $(lastword $(MAKEFILE_LIST)))))
 
+LIST_BIN := $(ROOT_DIR)/list-bin.sh
+
 GHC0 ?= ghc-9.8.4
 PYTHON ?= python3
 CABAL ?= cabal
@@ -34,9 +36,6 @@ STAGE ?= stage1
 GHC ?= $(GHC0)
 
 CABAL_BUILD = $(CABAL) $(CABAL_ARGS) build $(CABAL_BUILD_ARGS)
-
-CABAL_LIST_BIN_ARGS += $(CABAL_BUILD_ARGS) -v0
-CABAL_LIST_BIN = $(CABAL) $(CABAL_ARGS) list-bin $(CABAL_LIST_BIN_ARGS)
 
 GHC1 = _build/stage1/bin/ghc
 GHC2 = _build/stage2/bin/ghc
@@ -91,32 +90,61 @@ CONFIGURED_FILES := \
 # --- Main Targets ---
 all: _build/bindist # booted will depend on prepare-sources
 
-STAGE_TARGETS := rts-headers:rts-headers ghc-bin:ghc ghc-pkg:ghc-pkg genprimopcode:genprimopcode deriveConstants:deriveConstants genapply:genapply unlit:unlit hsc2hs:hsc2hs
+STAGE_TARGETS := \
+	deriveConstants:deriveConstants \
+	genapply:genapply \
+	genprimopcode:genprimopcode \
+	ghc-bin:ghc \
+	ghc-pkg:ghc-pkg \
+	hsc2hs:hsc2hs \
+	rts-headers:rts-headers \
+	unlit:unlit
+
 STAGE1_TARGETS := $(STAGE_TARGETS) ghc-toolchain-bin:ghc-toolchain-bin
 
 # TODO: dedup
-STAGE1_EXECUTABLES := ghc ghc-pkg unlit hsc2hs deriveConstants genprimopcode genapply ghc-toolchain-bin
+STAGE1_EXECUTABLES := \
+	deriveConstants \
+	genapply \
+	genprimopcode \
+	ghc \
+	ghc-pkg \
+	ghc-toolchain-bin \
+	hsc2hs \
+	unlit
 
-STAGE2_TARGETS := $(STAGE_TARGETS) hp2ps:hp2ps hpc-bin:hpc iserv:iserv runghc:runghc
-# All these libraries are somehow needed by some tests :rolleyes: this seems to be needed occationally.
-STAGE2_TARGETS += ghc-bignum:ghc-bignum ghc-compact:ghc-compact ghc-experimental:ghc-experimental integer-gmp:integer-gmp xhtml:xhtml terminfo:terminfo ghc-toolchain:ghc-toolchain system-cxx-std-lib:system-cxx-std-lib
+STAGE2_TARGETS := \
+	$(STAGE_TARGETS) \
+	ghc-bignum:ghc-bignum \
+	ghc-compact:ghc-compact \
+	ghc-experimental:ghc-experimental \
+	ghc-toolchain:ghc-toolchain \
+	hp2ps:hp2ps \
+	hpc-bin:hpc \
+	integer-gmp:integer-gmp \
+	iserv:iserv \
+	runghc:runghc \
+	system-cxx-std-lib:system-cxx-std-lib \
+	terminfo:terminfo \
+	xhtml:xhtml
+
 # This package is just utterly retarded
 # I don't understand why this following line somehow breaks the build...
 # STAGE2_TARGETS += system-cxx-std-lib:system-cxx-std-lib
 
 # TODO: dedup
 STAGE2_EXECUTABLES := \
-	ghc  \
-	pkg \
-	unlit \
-	hsc2hs \
 	deriveConstants \
-	genprimopcode \
 	genapply \
+	genprimopcode \
+	ghc  \
+	ghc-iserv \
+	ghc-pkg \
 	hp2ps \
 	hpc \
+	hsc2hs \
 	runghc \
-	ghc-iserv
+	unlit
 
 # export CABAL := $(shell cabal update 2>&1 >/dev/null && cabal build cabal-install -v0 --disable-tests --project-dir libraries/Cabal && cabal list-bin -v0 --project-dir libraries/Cabal cabal-install:exe:cabal)
 $(abspath _build/stage0/bin/cabal): _build/stage0/bin/cabal
@@ -136,14 +164,13 @@ _build/stage1/%: private GHC=$(GHC0)
 
 .PHONY: $(addprefix _build/stage1/bin/,$(STAGE1_EXECUTABLES))
 $(addprefix _build/stage1/bin/,$(STAGE1_EXECUTABLES)) &: $(CABAL) | _build/booted
-	# Force re-planning
-	rm -rf _build/stage1/cache
+	rm -rf _build/stage1/{build,cache,packagedb,src,store,tmp}
 	HADRIAN_SETTINGS='$(HADRIAN_SETTINGS)' \
 		$(CABAL_BUILD) $(STAGE1_TARGETS) \
 		|& tee _build/logs/stage1.log
 	
 	@mkdir -p _build/stage1/bin
-	for t in $(STAGE1_EXECUTABLES); do cp -v $$($(CABAL_LIST_BIN) exe:$$t) _build/stage1/bin/; done
+	for n in $$(./list-bin.sh _build/stage1/cache/plan.json); do [ -e $n ] && cp -v $n  _build/stage1/bin; done
 
 _build/stage1.done: $(addprefix _build/stage1/bin/,$(STAGE1_EXECUTABLES)) _build/stage1/bin/ghc-toolchain-bin
 	@mkdir -p _build/stage1/{bin,lib}
@@ -162,15 +189,13 @@ _build/stage2/%: private GHC=$(realpath _build/stage1/bin/ghc)
 
 .PHONY: $(addprefix _build/stage2/bin/,$(STAGE2_EXECUTABLES))
 $(addprefix _build/stage2/bin/,$(STAGE2_EXECUTABLES)) &: $(CABAL) _build/stage1.done
-	# Force re-planning
-	rm -rf _build/stage2/cache
+	rm -rf _build/stage2/{build,cache,packagedb,src,store,tmp}
 	HADRIAN_SETTINGS='$(HADRIAN_SETTINGS)' \
 		PATH=$(PWD)/_build/stage1/bin:$(PATH) \
 		$(CABAL_BUILD) --ghc-options="-ghcversion-file=$(abspath ./rts/include/ghcversion.h)" -W $(GHC0) $(STAGE2_TARGETS) \
 		|& tee _build/logs/stage2.log
-
 	@mkdir -p _build/stage2/bin
-	for t in $(STAGE2_EXECUTABLES); do cp -v $$($(CABAL_LIST_BIN) exe:$$t) _build/stage2/bin/; done
+	for n in $$(./list-bin.sh _build/stage1/cache/plan.json); do [ -e $n ] && cp -v $n  _build/stage1/bin; done
 
 
 # # We use PATH=... here to ensure all the build-tool-depends (deriveConstants, genapply, genprimopcode, ...) are
@@ -208,6 +233,8 @@ _build/stage2.done: $(GHC2)
 	cp -rfp _build/stage2/packagedb/host _build/stage2/lib/package.conf.d
 	_build/stage2/bin/ghc-pkg recache
 	touch $@
+
+stage2: _build/stage2.done
 
 # Target for creating the final binary distribution directory
 _build/bindist: _build/stage2.done driver/ghc-usage.txt driver/ghci-usage.txt
