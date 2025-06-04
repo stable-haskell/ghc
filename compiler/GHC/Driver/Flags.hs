@@ -859,7 +859,6 @@ data GeneralFlag
 
    -- temporary flags
    | Opt_AutoLinkPackages
-   | Opt_NoRts
    | Opt_ImplicitImportQualified
 
    -- keeping stuff
