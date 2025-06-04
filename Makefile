@@ -8,19 +8,26 @@
 SHELL := bash
 .SHELLFLAGS := -eu -o pipefail -O globstar -c
 
-ROOT_DIR := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
+ROOT_DIR := $(patsubst %/,%,$(dir $(realpath $(lastword $(MAKEFILE_LIST)))))
 
 GHC0 ?= ghc-9.8.4
 PYTHON ?= python3
 CABAL ?= cabal
 
-CABAL_ARGS += --remote-repo-cache _build/packages
-CABAL_ARGS += --store-dir=_build/$(STAGE)/store
-CABAL_ARGS += --logs-dir=_build/$(STAGE)/logs
+# :exploding-head: It turns out override doesn't override the command-line
+# value but it overrides Make's normal behavior of ignoring assignments to
+# command-line variables. This allows the += operations to append to whatever
+# was passed from the command line.
 
-CABAL_BUILD_ARGS += -j1 -v -w $(GHC)
-CABAL_BUILD_ARGS += --project-file=cabal.project.$(STAGE)
-CABAL_BUILD_ARGS += --builddir=_build/$(STAGE)
+override CABAL_ARGS += \
+	--remote-repo-cache _build/packages \
+	--store-dir=_build/$(STAGE)/store \
+	--logs-dir=_build/$(STAGE)/logs
+
+override CABAL_BUILD_ARGS += \
+	-j1 -v -w $(GHC) \
+	--project-file=cabal.project.$(STAGE) \
+	--builddir=_build/$(STAGE)
 
 # just some defaults
 STAGE ?= stage1
@@ -126,11 +133,11 @@ _build/stage0/bin/cabal:
 
 _build/stage1/%: private STAGE=stage1
 _build/stage1/%: private GHC=$(GHC0)
-_build/stage1/%: $(CABAL) | _build/booted
 
 .PHONY: $(addprefix _build/stage1/bin/,$(STAGE1_EXECUTABLES))
-$(addprefix _build/stage1/bin/,$(STAGE1_EXECUTABLES)) &: $(CABAL)
-	./configure
+$(addprefix _build/stage1/bin/,$(STAGE1_EXECUTABLES)) &: $(CABAL) | _build/booted
+	# Force re-planning
+	rm -rf _build/stage1/cache
 	HADRIAN_SETTINGS='$(HADRIAN_SETTINGS)' \
 		$(CABAL_BUILD) $(STAGE1_TARGETS) \
 		|& tee _build/logs/stage1.log
@@ -151,10 +158,12 @@ stage1: _build/stage1.done
 # --- Stage 2 build ---
 
 _build/stage2/%: private STAGE=stage2
-_build/stage2/%: private GHC=_build/stage1/bin/ghc
+_build/stage2/%: private GHC=$(realpath _build/stage1/bin/ghc)
 
 .PHONY: $(addprefix _build/stage2/bin/,$(STAGE2_EXECUTABLES))
 $(addprefix _build/stage2/bin/,$(STAGE2_EXECUTABLES)) &: $(CABAL) _build/stage1.done
+	# Force re-planning
+	rm -rf _build/stage2/cache
 	HADRIAN_SETTINGS='$(HADRIAN_SETTINGS)' \
 		PATH=$(PWD)/_build/stage1/bin:$(PATH) \
 		$(CABAL_BUILD) --ghc-options="-ghcversion-file=$(abspath ./rts/include/ghcversion.h)" -W $(GHC0) $(STAGE2_TARGETS) \
@@ -229,6 +238,8 @@ _build/booted:
 	@echo ">>> Running ./boot script..."
 	@mkdir -p _build/logs
 	./boot |& tee _build/logs/boot.log
+	@echo ">>> Running ./configure script..."
+	./configure |& tee _build/logs/configure.log
 	touch $@
 
 # --- Clean Targets ---
