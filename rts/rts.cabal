@@ -394,39 +394,6 @@ library
                         stg/Types.h
 
     else
-      -- Here we declare several flavours to be available when passing the
-      -- suitable (combination of) flag(s) when configuring the RTS from hadrian,
-      -- using Cabal.
-      if flag(threaded)
-        extra-library-flavours: _thr
-        if flag(dynamic)
-          extra-dynamic-library-flavours: _thr
-
-      if flag(profiling)
-        extra-library-flavours: _p
-        if flag(threaded)
-          extra-library-flavours: _thr_p
-        if flag(debug)
-          extra-library-flavours: _debug_p
-          if flag(threaded)
-            extra-library-flavours: _thr_debug_p
-        if flag(dynamic)
-          extra-dynamic-library-flavours: _p
-          if flag(threaded)
-            extra-dynamic-library-flavours: _thr_p
-          if flag(debug)
-            extra-dynamic-library-flavours: _debug_p
-            if flag(threaded)
-              extra-dynamic-library-flavours: _thr_debug_p
-
-      if flag(debug)
-        extra-library-flavours: _debug
-        if flag(dynamic)
-          extra-dynamic-library-flavours: _debug
-        if flag(threaded)
-          extra-library-flavours: _thr_debug
-          if flag(dynamic)
-            extra-dynamic-library-flavours: _thr_debug
 
       if flag(thread-sanitizer)
         cc-options: -fsanitize=thread
