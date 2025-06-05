@@ -179,8 +179,9 @@ _build/stage1/lib/settings: _build/stage1/bin/ghc-toolchain-bin
 	_build/stage1/bin/ghc-toolchain-bin --triple $(TARGET_TRIPLE) --output-settings -o $@ --cc $(CC) --cxx $(CXX) |& tee _build/logs/ghc-toolchain.log
 
 _build/stage1/lib/package.conf.d/package.cache: _build/stage1/bin/ghc-pkg _build/stage1/lib/settings
-	rm -rf _build/stage1/lib/package.conf.d
-	cp -rfp _build/stage1/packagedb/host _build/stage1/lib/package.conf.d
+	@mkdir -p _build/stage1/lib/package.conf.d
+	@rm -rf _build/stage1/lib/package.conf.d/*
+	cp -rfp _build/stage1/packagedb/host/*/* _build/stage1/lib/package.conf.d
 	_build/stage1/bin/ghc-pkg recache
 
 _build/stage1/lib/template-hsc.h: utils/hsc2hs/data/template-hsc.h
@@ -241,8 +242,9 @@ _build/stage2/lib/settings: _build/stage1/lib/settings
 	cp -rfp _build/stage1/lib/settings _build/stage2/lib/settings
 
 _build/stage2/lib/package.conf.d/package.cache: _build/stage2/bin/ghc-pkg _build/stage2/lib/settings
-	rm -rf _build/stage2/lib/package.conf.d
-	cp -rfp _build/stage2/packagedb/host _build/stage2/lib/package.conf.d
+	@mkdir -p _build/stage2/lib/package.conf.d
+	@rm -rf _build/stage2/lib/package.conf.d/*
+	cp -rfp _build/stage2/packagedb/host/*/* _build/stage2/lib/package.conf.d
 	_build/stage2/bin/ghc-pkg recache
 
 _build/stage2/lib/template-hsc.h: utils/hsc2hs/data/template-hsc.h
