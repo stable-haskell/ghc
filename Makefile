@@ -253,7 +253,7 @@ _build/stage2/lib/template-hsc.h: utils/hsc2hs/data/template-hsc.h
 stage2: $(addprefix _build/stage2/bin/,$(STAGE2_EXECUTABLES)) _build/stage2/lib/settings _build/stage2/lib/package.conf.d/package.cache _build/stage2/lib/template-hsc.h
 
 # Target for creating the final binary distribution directory
-_build/bindist: _build/stage2.done driver/ghc-usage.txt driver/ghci-usage.txt
+_build/bindist: stage2 driver/ghc-usage.txt driver/ghci-usage.txt
 	@echo "Creating binary distribution in _build/bindist"
 	@mkdir -p _build/bindist/bin
 	@mkdir -p _build/bindist/lib
