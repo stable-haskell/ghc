@@ -41,7 +41,7 @@ GHC1 = _build/stage1/bin/ghc
 GHC2 = _build/stage2/bin/ghc
 
 define GHC_INFO
-$(shell $(GHC0) --info | $(GHC0) -e 'getContents >>= foldMap putStrLn . lookup "$1" . read')
+$(shell sh -c "$(GHC0) --info | $(GHC0) -e 'getContents >>= foldMap putStrLn . lookup \"$1\" . read'")
 endef
 
 TARGET_PLATFORM := $(call GHC_INFO,target platform string)
