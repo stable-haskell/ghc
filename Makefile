@@ -276,21 +276,6 @@ _build/packages/hackage.haskell.org/01-index.tar.gz: | $(CABAL)
 	@mkdir -p $(@D)
 	$(CABAL) $(CABAL_ARGS) update --index-state 2025-04-22T01:25:40Z
 
-clean:
-	@echo ">>> Cleaning build artifacts..."
-	rm -rf _build
-	@echo ">>> Build artifacts cleaned."
-
-clean-stage1:
-	@echo ">>> Cleaning stage1 build artifacts..."
-	rm -rf _build/stage1
-	@echo ">>> Stage1 build artifacts cleaned."
-
-clean-stage2:
-	@echo ">>> Cleaning stage2 build artifacts..."
-	rm -rf _build/stage2
-	@echo ">>> Stage2 build artifacts cleaned."
-
 # booted depends on successful source preparation
 _build/booted:
 	@echo ">>> Running ./boot script..."
@@ -305,6 +290,16 @@ clean:
 	@echo ">>> Cleaning build artifacts..."
 	rm -rf _build
 	@echo ">>> Build artifacts cleaned."
+
+clean-stage1:
+	@echo ">>> Cleaning stage1 build artifacts..."
+	rm -rf _build/stage1
+	@echo ">>> Stage1 build artifacts cleaned."
+
+clean-stage2:
+	@echo ">>> Cleaning stage2 build artifacts..."
+	rm -rf _build/stage2
+	@echo ">>> Stage2 build artifacts cleaned."
 
 distclean: clean
 	@echo ">>> Cleaning all generated files (distclean)..."
