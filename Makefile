@@ -180,7 +180,7 @@ _build/stage1/lib/settings: _build/stage1/bin/ghc-toolchain-bin
 
 _build/stage1/lib/package.conf.d/package.cache: _build/stage1/bin/ghc-pkg _build/stage1/lib/settings
 	rm -rf _build/stage1/lib/package.conf.d
-	cp -rfp _build/stage1/package.conf.d/host _build/stage1/lib/package.conf.d
+	cp -rfp _build/stage1/packagedb/host _build/stage1/lib/package.conf.d
 	_build/stage1/bin/ghc-pkg recache
 
 _build/stage1/lib/template-hsc.h: utils/hsc2hs/data/template-hsc.h
@@ -196,7 +196,7 @@ _build/stage2/%: private STAGE=stage2
 _build/stage2/%: private GHC=$(realpath _build/stage1/bin/ghc)
 
 .PHONY: $(addprefix _build/stage2/bin/,$(STAGE2_EXECUTABLES))
-$(addprefix _build/stage2/bin/,$(STAGE2_EXECUTABLES)) &: $(CABAL) _build/stage1.done
+$(addprefix _build/stage2/bin/,$(STAGE2_EXECUTABLES)) &: $(CABAL) stage1
 	# Force cabal to replan
 	rm -rf _build/stage2/cache
 	HADRIAN_SETTINGS='$(HADRIAN_SETTINGS)' \
@@ -242,7 +242,7 @@ _build/stage2/lib/settings: _build/stage1/lib/settings
 
 _build/stage2/lib/package.conf.d/package.cache: _build/stage2/bin/ghc-pkg _build/stage2/lib/settings
 	rm -rf _build/stage2/lib/package.conf.d
-	cp -rfp _build/stage2/package.conf.d/host _build/stage2/lib/package.conf.d
+	cp -rfp _build/stage2/packagedb/host _build/stage2/lib/package.conf.d
 	_build/stage2/bin/ghc-pkg recache
 
 _build/stage2/lib/template-hsc.h: utils/hsc2hs/data/template-hsc.h
