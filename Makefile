@@ -164,7 +164,8 @@ _build/stage1/%: private GHC=$(GHC0)
 
 .PHONY: $(addprefix _build/stage1/bin/,$(STAGE1_EXECUTABLES))
 $(addprefix _build/stage1/bin/,$(STAGE1_EXECUTABLES)) &: $(CABAL) | _build/booted
-	rm -rf _build/stage1/{build,cache,packagedb,src,store,tmp}
+	# Force cabal to replan
+	rm -rf _build/stage2/cache
 	HADRIAN_SETTINGS='$(HADRIAN_SETTINGS)' \
 		$(CABAL_BUILD) $(STAGE1_TARGETS) \
 		|& tee _build/logs/stage1.log
@@ -173,15 +174,21 @@ $(addprefix _build/stage1/bin/,$(STAGE1_EXECUTABLES)) &: $(CABAL) | _build/boote
 	# I had enough of this crap
 	cp -v $(addprefix _build/stage1/build/host/x86_64-linux/*/*/build/*/,$(STAGE1_EXECUTABLES)) _build/stage1/bin
 
-_build/stage1.done: $(addprefix _build/stage1/bin/,$(STAGE1_EXECUTABLES)) _build/stage1/bin/ghc-toolchain-bin
-	@mkdir -p _build/stage1/{bin,lib}
-	cp -rfp utils/hsc2hs/data/template-hsc.h _build/stage1/lib/template-hsc.h
-	_build/stage1/bin/ghc-toolchain-bin --triple $(TARGET_TRIPLE) --output-settings -o _build/stage1/lib/settings --cc $(CC) --cxx $(CXX) |& tee _build/logs/ghc-toolchain.log
-	cp -rfp _build/stage1/packagedb/host _build/stage1/lib/package.conf.d
-	_build/stage1/bin/ghc-pkg recache
-	touch $@
+_build/stage1/lib/settings: _build/stage1/bin/ghc-toolchain-bin
+	@mkdir -p $(@D)
+	_build/stage1/bin/ghc-toolchain-bin --triple $(TARGET_TRIPLE) --output-settings -o $@ --cc $(CC) --cxx $(CXX) |& tee _build/logs/ghc-toolchain.log
 
-stage1: _build/stage1.done
+_build/stage1/lib/package.conf.d/package.cache: _build/stage1/bin/ghc-pkg _build/stage1/lib/settings
+	rm -rf _build/stage1/lib/package.conf.d
+	cp -rfp _build/stage1/package.conf.d/host _build/stage1/lib/package.conf.d
+	_build/stage1/bin/ghc-pkg recache
+
+_build/stage1/lib/template-hsc.h: utils/hsc2hs/data/template-hsc.h
+	@mkdir -p $(@D)
+	cp -rfp $< $@
+
+.PHONY: stage1
+stage1: $(addprefix _build/stage1/bin/,$(STAGE1_EXECUTABLES)) _build/stage1/lib/settings _build/stage1/lib/package.conf.d/package.cache _build/stage1/lib/template-hsc.h
 
 # --- Stage 2 build ---
 
@@ -190,7 +197,8 @@ _build/stage2/%: private GHC=$(realpath _build/stage1/bin/ghc)
 
 .PHONY: $(addprefix _build/stage2/bin/,$(STAGE2_EXECUTABLES))
 $(addprefix _build/stage2/bin/,$(STAGE2_EXECUTABLES)) &: $(CABAL) _build/stage1.done
-	rm -rf _build/stage2/{build,cache,packagedb,src,store,tmp}
+	# Force cabal to replan
+	rm -rf _build/stage2/cache
 	HADRIAN_SETTINGS='$(HADRIAN_SETTINGS)' \
 		PATH=$(PWD)/_build/stage1/bin:$(PATH) \
 		$(CABAL_BUILD) --ghc-options="-ghcversion-file=$(abspath ./rts/include/ghcversion.h)" -W $(GHC0) $(STAGE2_TARGETS) \
@@ -228,15 +236,21 @@ $(addprefix _build/stage2/bin/,$(STAGE2_EXECUTABLES)) &: $(CABAL) _build/stage1.
 # 		$(STAGE2_TARGETS) \
 # 		|& tee _build/logs/stage2.log
 
-_build/stage2.done: $(GHC2)
-	@mkdir -p _build/stage2/{bin,lib}
+_build/stage2/lib/settings: _build/stage1/lib/settings
+	@mkdir -p $(@D)
 	cp -rfp _build/stage1/lib/settings _build/stage2/lib/settings
-	cp -rfp utils/hsc2hs/data/template-hsc.h _build/stage2/lib/template-hsc.h
-	cp -rfp _build/stage2/packagedb/host _build/stage2/lib/package.conf.d
-	_build/stage2/bin/ghc-pkg recache
-	touch $@
 
-stage2: _build/stage2.done
+_build/stage2/lib/package.conf.d/package.cache: _build/stage2/bin/ghc-pkg _build/stage2/lib/settings
+	rm -rf _build/stage2/lib/package.conf.d
+	cp -rfp _build/stage2/package.conf.d/host _build/stage2/lib/package.conf.d
+	_build/stage2/bin/ghc-pkg recache
+
+_build/stage2/lib/template-hsc.h: utils/hsc2hs/data/template-hsc.h
+	@mkdir -p $(@D)
+	cp -rfp $< $@
+
+.PHONY: stage2
+stage2: $(addprefix _build/stage2/bin/,$(STAGE2_EXECUTABLES)) _build/stage2/lib/settings _build/stage2/lib/package.conf.d/package.cache _build/stage2/lib/template-hsc.h
 
 # Target for creating the final binary distribution directory
 _build/bindist: _build/stage2.done driver/ghc-usage.txt driver/ghci-usage.txt
@@ -250,7 +264,7 @@ _build/bindist: _build/stage2.done driver/ghc-usage.txt driver/ghci-usage.txt
 	# Copy driver usage files
 	@cp -rfp driver/ghc-usage.txt _build/bindist/lib/
 	@cp -rfp driver/ghci-usage.txt _build/bindist/lib/
-	@echo "FIXME: swpaaing Support SMP from YES to NO in settings file"
+	@echo "FIXME: Changing 'Support SMP' from YES to NO in settings file"
 	@sed 's/("Support SMP","YES")/("Support SMP","NO")/' -i.bck _build/bindist/lib/settings
 	@echo "Binary distribution created."
 
@@ -261,6 +275,21 @@ hackage: _build/packages/hackage.haskell.org/01-index.tar.gz
 _build/packages/hackage.haskell.org/01-index.tar.gz: | $(CABAL)
 	@mkdir -p $(@D)
 	$(CABAL) $(CABAL_ARGS) update --index-state 2025-04-22T01:25:40Z
+
+clean:
+	@echo ">>> Cleaning build artifacts..."
+	rm -rf _build
+	@echo ">>> Build artifacts cleaned."
+
+clean-stage1:
+	@echo ">>> Cleaning stage1 build artifacts..."
+	rm -rf _build/stage1
+	@echo ">>> Stage1 build artifacts cleaned."
+
+clean-stage2:
+	@echo ">>> Cleaning stage2 build artifacts..."
+	rm -rf _build/stage2
+	@echo ">>> Stage2 build artifacts cleaned."
 
 # booted depends on successful source preparation
 _build/booted:
