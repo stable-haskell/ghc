@@ -10,8 +10,6 @@ SHELL := bash
 
 ROOT_DIR := $(patsubst %/,%,$(dir $(realpath $(lastword $(MAKEFILE_LIST)))))
 
-LIST_BIN := $(ROOT_DIR)/list-bin.sh
-
 GHC0 ?= ghc-9.8.4
 PYTHON ?= python3
 CABAL ?= cabal
@@ -169,10 +167,6 @@ $(addprefix _build/stage1/bin/,$(STAGE1_EXECUTABLES)) &: $(CABAL) | _build/boote
 	HADRIAN_SETTINGS='$(HADRIAN_SETTINGS)' \
 		$(CABAL_BUILD) $(STAGE1_TARGETS) \
 		|& tee _build/logs/stage1.log
-	
-	@mkdir -p _build/stage1/bin
-	# I had enough of this crap
-	cp -v $(addprefix _build/stage1/build/host/x86_64-linux/*/*/build/*/,$(STAGE1_EXECUTABLES)) _build/stage1/bin
 
 _build/stage1/lib/settings: _build/stage1/bin/ghc-toolchain-bin
 	@mkdir -p $(@D)
@@ -204,10 +198,6 @@ $(addprefix _build/stage2/bin/,$(STAGE2_EXECUTABLES)) &: $(CABAL) stage1
 		PATH=$(PWD)/_build/stage1/bin:$(PATH) \
 		$(CABAL_BUILD) --ghc-options="-ghcversion-file=$(abspath ./rts/include/ghcversion.h)" -W $(GHC0) $(STAGE2_TARGETS) \
 		|& tee _build/logs/stage2.log
-
-	@mkdir -p _build/stage2/bin
-	# I had enough of this crap
-	cp -v $(addprefix _build/stage2/build/host/x86_64-linux/*/*/build/*/,$(STAGE2_EXECUTABLES)) _build/stage2/bin
 
 # # We use PATH=... here to ensure all the build-tool-depends (deriveConstants, genapply, genprimopcode, ...) are
 # # available in PATH while cabal evaluates configure files. Cabal sadly does not support build-tool-depends or
