@@ -27,7 +27,7 @@ override CABAL_ARGS += \
 	--logs-dir=_build/$(STAGE)/logs
 
 override CABAL_BUILD_ARGS += \
-	-j1 -v -w $(GHC) \
+	-j -v -w $(GHC) \
 	--project-file=cabal.project.$(STAGE) \
 	--builddir=_build/$(STAGE)
 
@@ -138,7 +138,7 @@ STAGE2_EXECUTABLES := \
 	genapply \
 	genprimopcode \
 	ghc  \
-	ghc-iserv \
+	iserv \
 	ghc-pkg \
 	hp2ps \
 	hpc \
@@ -170,7 +170,8 @@ $(addprefix _build/stage1/bin/,$(STAGE1_EXECUTABLES)) &: $(CABAL) | _build/boote
 		|& tee _build/logs/stage1.log
 	
 	@mkdir -p _build/stage1/bin
-	for n in $$(./list-bin.sh _build/stage1/cache/plan.json); do [ -e $n ] && cp -v $n  _build/stage1/bin; done
+	# I had enough of this crap
+	cp -v $(addprefix _build/stage1/build/host/x86_64-linux/*/*/build/*/,$(STAGE1_EXECUTABLES)) _build/stage1/bin
 
 _build/stage1.done: $(addprefix _build/stage1/bin/,$(STAGE1_EXECUTABLES)) _build/stage1/bin/ghc-toolchain-bin
 	@mkdir -p _build/stage1/{bin,lib}
@@ -194,9 +195,10 @@ $(addprefix _build/stage2/bin/,$(STAGE2_EXECUTABLES)) &: $(CABAL) _build/stage1.
 		PATH=$(PWD)/_build/stage1/bin:$(PATH) \
 		$(CABAL_BUILD) --ghc-options="-ghcversion-file=$(abspath ./rts/include/ghcversion.h)" -W $(GHC0) $(STAGE2_TARGETS) \
 		|& tee _build/logs/stage2.log
-	@mkdir -p _build/stage2/bin
-	for n in $$(./list-bin.sh _build/stage1/cache/plan.json); do [ -e $n ] && cp -v $n  _build/stage1/bin; done
 
+	@mkdir -p _build/stage2/bin
+	# I had enough of this crap
+	cp -v $(addprefix _build/stage2/build/host/x86_64-linux/*/*/build/*/,$(STAGE2_EXECUTABLES)) _build/stage2/bin
 
 # # We use PATH=... here to ensure all the build-tool-depends (deriveConstants, genapply, genprimopcode, ...) are
 # # available in PATH while cabal evaluates configure files. Cabal sadly does not support build-tool-depends or
