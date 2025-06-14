@@ -1,3 +1,4 @@
+{-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE MultiWayIf #-}
 
 -- | Solving Class constraints CDictCan
@@ -23,7 +24,7 @@ import GHC.Tc.Solver.InertSet
 import GHC.Tc.Solver.Monad
 import GHC.Tc.Solver.Types
 import GHC.Tc.Utils.TcType
-import GHC.Tc.Utils.Unify( uType )
+import GHC.Tc.Utils.Unify( uType, mightEqualLater )
 
 import GHC.Hs.Type( HsIPName(..) )
 
@@ -61,7 +62,6 @@ import Data.Void( Void )
 import Control.Monad.Trans.Maybe( MaybeT, runMaybeT )
 import Control.Monad.Trans.Class( lift )
 import Control.Monad
-
 
 {- *********************************************************************
 *                                                                      *
@@ -101,26 +101,6 @@ solveDict dict_ct@(DictCt { di_ev = ev, di_cls = cls, di_tys = tys })
        ; simpleStage (updInertDicts dict_ct)
        ; stopWithStage (dictCtEvidence dict_ct) "Kept inert DictCt" }
 
-updInertDicts :: DictCt -> TcS ()
-updInertDicts dict_ct@(DictCt { di_cls = cls, di_ev = ev, di_tys = tys })
-  = do { traceTcS "Adding inert dict" (ppr dict_ct $$ ppr cls  <+> ppr tys)
-
-       ; if |  isGiven ev, Just (str_ty, _) <- isIPPred_maybe cls tys
-            -> -- See (SIP1) and (SIP2) in Note [Shadowing of implicit parameters]
-               -- Update /both/ inert_cans /and/ inert_solved_dicts.
-               updInertSet $ \ inerts@(IS { inert_cans = ics, inert_solved_dicts = solved }) ->
-               inerts { inert_cans         = updDicts (filterDicts (not_ip_for str_ty)) ics
-                      , inert_solved_dicts = filterDicts (not_ip_for str_ty) solved }
-            |  otherwise
-            -> return ()
-
-       -- Add the new constraint to the inert set
-       ; updInertCans (updDicts (addDict dict_ct)) }
-  where
-    not_ip_for :: Type -> DictCt -> Bool
-    not_ip_for str_ty (DictCt { di_cls = cls, di_tys = tys })
-      = not (mentionsIP str_ty cls tys)
-
 canDictCt :: CtEvidence -> Class -> [Type] -> SolverStage DictCt
 -- Once-only processing of Dict constraints:
 --   * expand superclasses
@@ -138,9 +118,9 @@ canDictCt ev cls tys
          -- doNotExpand: We have already expanded superclasses for /this/ dict
          -- so set the fuel to doNotExpand to avoid repeating expansion
 
-  | CtWanted { ctev_rewriters = rewriters } <- ev
+  | CtWanted (WantedCt { ctev_rewriters = rws }) <- ev
   , Just ip_name <- isCallStackPred cls tys
-  , isPushCallStackOrigin orig
+  , Just fun_fs  <- isPushCallStackOrigin_maybe orig
   -- If we're given a CallStack constraint that arose from a function
   -- call, we need to push the current call-site onto the stack instead
   -- of solving it directly from a given.
@@ -155,12 +135,11 @@ canDictCt ev cls tys
                             -- See Note [Overview of implicit CallStacks]
                             -- in GHC.Tc.Types.Evidence
 
-       ; new_ev <- newWantedEvVarNC new_loc rewriters pred
+       ; new_ev <- CtWanted <$> newWantedEvVarNC new_loc rws pred
 
          -- Then we solve the wanted by pushing the call-site
          -- onto the newly emitted CallStack
-       ; let ev_cs = EvCsPushCall (callStackOriginFS orig)
-                                  (ctLocSpan loc) (ctEvExpr new_ev)
+       ; let ev_cs = EvCsPushCall fun_fs (ctLocSpan loc) (ctEvExpr new_ev)
        ; solveCallStack ev ev_cs
 
        ; continueWith (DictCt { di_ev = new_ev, di_cls = cls
@@ -190,9 +169,9 @@ solveCallStack ev ev_cs
   = do { cs_tm <- evCallStack ev_cs
        ; let ev_tm = mkEvCast cs_tm (wrapIP (ctEvPred ev))
        ; setEvBindIfWanted ev EvCanonical ev_tm }
-         -- EvCanonical: see Note [CallStack and ExecptionContext hack]
+         -- EvCanonical: see Note [CallStack and ExceptionContext hack]
 
-{- Note [CallStack and ExecptionContext hack]
+{- Note [CallStack and ExceptionContext hack]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 It isn't really right that we treat CallStack and ExceptionContext dictionaries
 as canonical, in the sense of Note [Coherence and specialisation: overview].
@@ -200,7 +179,7 @@ They definitely are not!
 
 But if we use EvNonCanonical here we get lots of
     nospec (error @Int) dict  string
-(since `error` takes a HasCallStack dict), and that isn't bottomng  (at least not
+(since `error` takes a HasCallStack dict), and that isn't bottoming  (at least not
 without extra work)  So, hackily, we just say that HasCallStack and ExceptionContext
 are canonical, even though they aren't really.
 
@@ -213,7 +192,7 @@ in two places:
 * In `GHC.Tc.Solver.InertSet.solveOneFromTheOther`, be careful when we have
    (?x :: ty) in the inert set and an identical (?x :: ty) as the work item.
 
-* In `updInertDicts` in this module, when adding [G] (?x :: ty), remove  any
+* In `updInertDicts`, in this module, when adding [G] (?x :: ty), remove any
   existing [G] (?x :: ty'), regardless of ty'.
 
 * Wrinkle (SIP1): we must be careful of superclasses.  Consider
@@ -233,7 +212,7 @@ in two places:
   An important special case is constraint tuples like [G] (% ?x::ty, Eq a %).
   But it could happen for `class xx => D xx where ...` and the constraint D
   (?x :: int).  This corner (constraint-kinded variables instantiated with
-  implicit parameter constraints) is not well explorered.
+  implicit parameter constraints) is not well explored.
 
   Example in #14218, and #23761
 
@@ -415,7 +394,7 @@ There is a bit of special treatment: search for isCTupleClass.
 solveEqualityDict :: CtEvidence -> Class -> [Type] -> SolverStage Void
 -- Precondition: (isEqualityClass cls) True, so cls is (~), (~~), or Coercible
 solveEqualityDict ev cls tys
-  | CtWanted { ctev_dest = dest } <- ev
+  | CtWanted (WantedCt { ctev_dest = dest }) <- ev
   = Stage $
     do { let (data_con, role, t1, t2) = matchEqualityInst cls tys
          -- Unify t1~t2, putting anything that can't be solved
@@ -427,13 +406,14 @@ solveEqualityDict ev cls tys
          evDataConApp data_con tys [Coercion co]
        ; stopWith ev "Solved wanted lifted equality" }
 
-  | CtGiven { ctev_evar = ev_id, ctev_loc = loc } <- ev
+  | CtGiven (GivenCt { ctev_evar = ev_id }) <- ev
   , [sel_id] <- classSCSelIds cls  -- Equality classes have just one superclass
   = Stage $
-    do { let sc_pred = classMethodInstTy sel_id tys
+    do { let loc = ctEvLoc ev
+             sc_pred = classMethodInstTy sel_id tys
              ev_expr = EvExpr $ Var sel_id `mkTyApps` tys `App` evId ev_id
        ; given_ev <- newGivenEvVar loc (sc_pred, ev_expr)
-       ; startAgainWith (mkNonCanonical given_ev) }
+       ; startAgainWith (mkNonCanonical $ CtGiven given_ev) }
   | otherwise
   = pprPanic "solveEqualityDict" (ppr cls)
 
@@ -761,8 +741,8 @@ shortCutSolver :: DynFlags
                -> CtEvidence -- Inert we want to try to replace
                -> TcS Bool   -- True <=> success
 shortCutSolver dflags ev_w ev_i
-  | isWanted ev_w
-  , isGiven ev_i
+  | CtWanted wanted <- ev_w
+  , CtGiven  {}     <- ev_i
     -- We are about to solve a [W] constraint from a [G] constraint. We take
     -- a moment to see if we can get a better solution using an instance.
     -- Note that we only do this for the sake of performance. Exactly the same
@@ -786,7 +766,7 @@ shortCutSolver dflags ev_w ev_i
        ; solved_dicts <- getSolvedDicts
 
        ; mb_stuff <- runMaybeT $
-                     try_solve_from_instance (ev_binds, solved_dicts) ev_w
+                     try_solve_from_instance (ev_binds, solved_dicts) wanted
 
        ; case mb_stuff of
            Nothing -> return False
@@ -804,11 +784,10 @@ shortCutSolver dflags ev_w ev_i
     loc_w = ctEvLoc ev_w
 
     try_solve_from_instance   -- See Note [Shortcut try_solve_from_instance]
-      :: (EvBindMap, DictMap DictCt) -> CtEvidence
+      :: (EvBindMap, DictMap DictCt) -> WantedCtEvidence
       -> MaybeT TcS (EvBindMap, DictMap DictCt)
-    try_solve_from_instance (ev_binds, solved_dicts) ev
-      | let pred = ctEvPred ev
-      , ClassPred cls tys <- classifyPredType pred
+    try_solve_from_instance (ev_binds, solved_dicts) wtd@(WantedCt { ctev_loc = loc, ctev_pred = pred })
+      | ClassPred cls tys <- classifyPredType pred
       = do { inst_res <- lift $ matchGlobalInst dflags True cls tys loc_w
            ; lift $ warn_custom_warn_instance inst_res loc_w
                  -- See Note [Implementation of deprecated instances]
@@ -819,7 +798,7 @@ shortCutSolver dflags ev_w ev_i
                        , cir_what        = what }
                  | safeOverlap what
                  , all isTyFamFree preds  -- Note [Shortcut solving: type families]
-                 -> do { let dict_ct = DictCt { di_ev = ev, di_cls = cls
+                 -> do { let dict_ct = DictCt { di_ev = CtWanted wtd, di_cls = cls
                                               , di_tys = tys, di_pend_sc = doNotExpand }
                              solved_dicts' = addSolvedDict dict_ct solved_dicts
                              -- solved_dicts': it is important that we add our goal
@@ -827,17 +806,17 @@ shortCutSolver dflags ev_w ev_i
                              -- up in a loop while solving recursive dictionaries.
 
                        ; lift $ traceTcS "shortCutSolver: found instance" (ppr preds)
-                       ; loc' <- lift $ checkInstanceOK (ctEvLoc ev) what pred
+                       ; loc' <- lift $ checkInstanceOK loc what pred
                        ; lift $ checkReductionDepth loc' pred
 
 
-                       ; evc_vs <- mapM (new_wanted_cached ev loc' solved_dicts') preds
+                       ; evc_vs <- mapM (new_wanted_cached wtd loc' solved_dicts') preds
                                   -- Emit work for subgoals but use our local cache
                                   -- so we can solve recursive dictionaries.
 
                        ; let ev_tm     = mk_ev (map getEvExpr evc_vs)
                              ev_binds' = extendEvBinds ev_binds $
-                                         mkWantedEvBind (ctEvEvId ev) canonical ev_tm
+                                         mkWantedEvBind (wantedCtEvEvId wtd) canonical ev_tm
 
                        ; foldlM try_solve_from_instance (ev_binds', solved_dicts') $
                          freshGoals evc_vs }
@@ -851,13 +830,13 @@ shortCutSolver dflags ev_w ev_i
     -- Use a local cache of solved dicts while emitting EvVars for new work
     -- We bail out of the entire computation if we need to emit an EvVar for
     -- a subgoal that isn't a ClassPred.
-    new_wanted_cached :: CtEvidence -> CtLoc
+    new_wanted_cached :: WantedCtEvidence -> CtLoc
                       -> DictMap DictCt -> TcPredType -> MaybeT TcS MaybeNew
-    new_wanted_cached ev_w loc cache pty
+    new_wanted_cached (WantedCt { ctev_rewriters = rws }) loc cache pty
       | ClassPred cls tys <- classifyPredType pty
       = lift $ case findDict cache loc_w cls tys of
           Just dict_ct -> return $ Cached (ctEvExpr (dictCtEvidence dict_ct))
-          Nothing      -> Fresh <$> newWantedNC loc (ctEvRewriters ev_w) pty
+          Nothing      -> Fresh <$> newWantedNC loc rws pty
       | otherwise = mzero
 
 {- *******************************************************************
@@ -910,7 +889,7 @@ chooseInstance work_item
                     (ppr work_item)
        ; evc_vars <- mapM (newWanted deeper_loc (ctEvRewriters work_item)) theta
        ; setEvBindIfWanted work_item canonical (mk_ev (map getEvExpr evc_vars))
-       ; emitWorkNC (freshGoals evc_vars)
+       ; emitWorkNC (map CtWanted $ freshGoals evc_vars)
        ; stopWith work_item "Dict/Top (solved wanted)" }
   where
      pred = ctEvPred work_item
@@ -925,7 +904,7 @@ checkInstanceOK :: CtLoc -> InstanceWhat -> TcPredType -> TcS CtLoc
 -- Returns the CtLoc to used for sub-goals
 -- Probably also want to call checkReductionDepth
 checkInstanceOK loc what pred
-  = do { checkWellStagedDFun loc what pred
+  = do { checkWellLevelledDFun loc what pred
        ; return deeper_loc }
   where
      deeper_loc = zap_origin (bumpCtLocDepth loc)
@@ -947,7 +926,8 @@ matchClassInst dflags inerts clas tys loc
 -- First check whether there is an in-scope Given that could
 -- match this constraint.  In that case, do not use any instance
 -- whether top level, or local quantified constraints.
--- See Note [Instance and Given overlap]
+-- See Note [Instance and Given overlap] and see
+-- (IL0) in Note [Rules for instance lookup] in GHC.Core.InstEnv
   | not (xopt LangExt.IncoherentInstances dflags)
   , not (isCTupleClass clas)
         -- It is always safe to unpack constraint tuples
@@ -979,6 +959,25 @@ matchClassInst dflags inerts clas tys loc
                     ; return global_res } }
   where
     pred = mkClassPred clas tys
+
+-- | Returns True iff there are no Given constraints that might,
+-- potentially, match the given class constraint. This is used when checking to see if a
+-- Given might overlap with an instance. See Note [Instance and Given overlap]
+-- in GHC.Tc.Solver.Dict
+noMatchableGivenDicts :: InertSet -> CtLoc -> Class -> [TcType] -> Bool
+noMatchableGivenDicts inerts@(IS { inert_cans = inert_cans }) loc_w clas tys
+  = not $ anyBag matchable_given $
+    findDictsByClass (inert_dicts inert_cans) clas
+  where
+    pred_w = mkClassPred clas tys
+
+    matchable_given :: DictCt -> Bool
+    matchable_given (DictCt { di_ev = ev })
+      | CtGiven (GivenCt { ctev_loc = loc_g, ctev_pred = pred_g }) <- ev
+      = isJust $ mightEqualLater inerts pred_g loc_g pred_w loc_w
+
+      | otherwise
+      = False
 
 {- Note [Implementation of deprecated instances]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1071,7 +1070,7 @@ Other notes:
      - natural numbers
      - Typeable
 
-* See also Note [What might equal later?] in GHC.Tc.Solver.InertSet.
+* See also Note [What might equal later?] in GHC.Tc.Utils.Unify
 
 * The given-overlap problem is arguably not easy to appear in practice
   due to our aggressive prioritization of equality solving over other
@@ -1140,10 +1139,10 @@ nullary case of what's happening here.
 matchLocalInst :: TcPredType -> CtLoc -> TcS ClsInstResult
 -- Look up the predicate in Given quantified constraints,
 -- which are effectively just local instance declarations.
-matchLocalInst pred loc
+matchLocalInst body_pred loc
   = do { inerts@(IS { inert_cans = ics }) <- getInertSet
        ; case match_local_inst inerts (inert_insts ics) of
-          { ([], []) -> do { traceTcS "No local instance for" (ppr pred)
+          { ([], []) -> do { traceTcS "No local instance for" (ppr body_pred)
                            ; return NoInstance }
           ; (matches, unifs) ->
     do { matches <- mapM mk_instDFun matches
@@ -1158,7 +1157,7 @@ matchLocalInst pred loc
                                       , cir_canonical   = EvCanonical
                                       , cir_what        = LocalInstance }
                ; traceTcS "Best local instance found:" $
-                  vcat [ text "pred:" <+> ppr pred
+                  vcat [ text "body_pred:" <+> ppr body_pred
                        , text "result:" <+> ppr result
                        , text "matches:" <+> ppr matches
                        , text "unifs:" <+> ppr unifs ]
@@ -1166,13 +1165,13 @@ matchLocalInst pred loc
 
           ; mb_best ->
             do { traceTcS "Multiple local instances; not committing to any"
-                  $ vcat [ text "pred:" <+> ppr pred
+                  $ vcat [ text "body_pred:" <+> ppr body_pred
                          , text "matches:" <+> ppr matches
                          , text "unifs:" <+> ppr unifs
                          , text "best_match:" <+> ppr mb_best ]
                ; return NotSure }}}}}
   where
-    pred_tv_set = tyCoVarsOfType pred
+    body_pred_tv_set = tyCoVarsOfType body_pred
 
     mk_instDFun :: (CtEvidence, [DFunInstType]) -> TcS InstDFun
     mk_instDFun (ev, tys) =
@@ -1188,18 +1187,18 @@ matchLocalInst pred loc
     match_local_inst _inerts []
       = ([], [])
     match_local_inst inerts (qci@(QCI { qci_tvs  = qtvs
-                                      , qci_pred = qpred
+                                      , qci_body = qbody
                                       , qci_ev   = qev })
                             :qcis)
-      | let in_scope = mkInScopeSet (qtv_set `unionVarSet` pred_tv_set)
+      | let in_scope = mkInScopeSet (qtv_set `unionVarSet` body_pred_tv_set)
       , Just tv_subst <- ruleMatchTyKiX qtv_set (mkRnEnv2 in_scope)
-                                        emptyTvSubstEnv qpred pred
+                                        emptyTvSubstEnv qbody body_pred
       , let match = (qev, map (lookupVarEnv tv_subst) qtvs)
       = (match:matches, unifs)
 
       | otherwise
-      = assertPpr (disjointVarSet qtv_set (tyCoVarsOfType pred))
-                  (ppr qci $$ ppr pred)
+      = assertPpr (disjointVarSet qtv_set (tyCoVarsOfType body_pred))
+                  (ppr qci $$ ppr body_pred)
             -- ASSERT: unification relies on the
             -- quantified variables being fresh
         (matches, this_unif `combine` unifs)
@@ -1208,7 +1207,7 @@ matchLocalInst pred loc
         qtv_set = mkVarSet qtvs
         (matches, unifs) = match_local_inst inerts qcis
         this_unif
-          | Just subst <- mightEqualLater inerts qpred qloc pred loc
+          | Just subst <- mightEqualLater inerts qbody qloc body_pred loc
           = Just (qev, map  (lookupTyVar subst) qtvs)
           | otherwise
           = Nothing
@@ -1986,10 +1985,9 @@ makeSuperClasses cts = concatMapM go cts
     go (CDictCan (DictCt { di_ev = ev, di_cls = cls, di_tys = tys, di_pend_sc = fuel }))
       = assertFuelPreconditionStrict fuel $ -- fuel needs to be more than 0 always
         mkStrictSuperClasses fuel ev [] [] cls tys
-    go (CQuantCan (QCI { qci_pred = pred, qci_ev = ev, qci_pend_sc = fuel }))
-      = assertPpr (isClassPred pred) (ppr pred) $  -- The cts should all have
-                                                   -- class pred heads
-        assertFuelPreconditionStrict fuel $ -- fuel needs to be more than 0 always
+    go (CQuantCan (QCI { qci_body = body_pred, qci_ev = ev, qci_pend_sc = fuel }))
+      = assertPpr (isClassPred body_pred) (ppr body_pred) $ -- The cts should all have class pred heads
+        assertFuelPreconditionStrict fuel $                 -- fuel needs to be more than 0, always
         mkStrictSuperClasses fuel ev tvs theta cls tys
       where
         (tvs, theta, cls, tys) = tcSplitDFunTy (ctEvPred ev)
@@ -2020,13 +2018,12 @@ mk_strict_superclasses _ _ _ _ _ cls _
   | isEqualityClass cls
   = return []
 
-mk_strict_superclasses fuel rec_clss
-                       ev@(CtGiven { ctev_evar = evar, ctev_loc = loc })
-                       tvs theta cls tys
+mk_strict_superclasses fuel rec_clss ev@(CtGiven (GivenCt { ctev_evar = evar })) tvs theta cls tys
   = -- Given case
     do { traceTcS "mk_strict" (ppr ev $$ ppr (ctLocOrigin loc))
        ; concatMapM do_one_given (classSCSelIds cls) }
   where
+    loc  = ctEvLoc ev
     dict_ids  = mkTemplateLocals theta
     this_size = pSizeClassPred cls tys
 
@@ -2041,7 +2038,7 @@ mk_strict_superclasses fuel rec_clss
       = do { given_ev <- newGivenEvVar sc_loc $
                          mk_given_desc sel_id sc_pred
            ; assertFuelPrecondition fuel $
-             mk_superclasses fuel rec_clss given_ev tvs theta sc_pred }
+             mk_superclasses fuel rec_clss (CtGiven given_ev) tvs theta sc_pred }
       where
         sc_pred = classMethodInstTy sel_id tys
 
@@ -2097,7 +2094,9 @@ mk_strict_superclasses fuel rec_clss
     newly_blocked _                      = False
 
 -- Wanted case
-mk_strict_superclasses fuel rec_clss ev tvs theta cls tys
+mk_strict_superclasses fuel rec_clss
+  (CtWanted (WantedCt { ctev_pred = pty, ctev_loc = loc0, ctev_rewriters = rws }))
+  tvs theta cls tys
   | all noFreeVarsOfType tys
   = return [] -- Wanteds with no variables yield no superclass constraints.
               -- See Note [Improvement from Ground Wanteds]
@@ -2107,12 +2106,12 @@ mk_strict_superclasses fuel rec_clss ev tvs theta cls tys
   = assertPpr (null tvs && null theta) (ppr tvs $$ ppr theta) $
     concatMapM do_one (immSuperClasses cls tys)
   where
-    loc = ctEvLoc ev `updateCtLocOrigin` WantedSuperclassOrigin (ctEvPred ev)
+    loc = loc0 `updateCtLocOrigin` WantedSuperclassOrigin pty
 
     do_one sc_pred
       = do { traceTcS "mk_strict_superclasses Wanted" (ppr (mkClassPred cls tys) $$ ppr sc_pred)
-           ; sc_ev <- newWantedNC loc (ctEvRewriters ev) sc_pred
-           ; mk_superclasses fuel rec_clss sc_ev [] [] sc_pred }
+           ; sc_ev <- newWantedNC loc rws sc_pred
+           ; mk_superclasses fuel rec_clss (CtWanted sc_ev) [] [] sc_pred }
 
 {- Note [Improvement from Ground Wanteds]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -2173,7 +2172,7 @@ mk_superclasses_of fuel rec_clss ev tvs theta cls tys
                     -- NB: If there is a loop, we cut off, so we have not
                     --     added the superclasses, hence cc_pend_sc = fuel
                     | otherwise
-                    = CQuantCan (QCI { qci_tvs = tvs, qci_pred = mkClassPred cls tys
+                    = CQuantCan (QCI { qci_tvs = tvs, qci_body = mkClassPred cls tys
                                      , qci_ev = ev, qci_pend_sc = fuel })
 
 

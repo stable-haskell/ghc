@@ -83,7 +83,7 @@ packageArgs = do
             -- (#14335) and completely untested in CI for cross
             -- backends at the moment, so we might as well disable it
             -- for cross GHC.
-            [ andM [expr ghcWithInterpreter, notStage0, notCross] `cabalFlag` "internal-interpreter"
+            [ andM [expr (ghcWithInterpreter stage), notCross] `cabalFlag` "internal-interpreter"
             , notM cross `cabalFlag` "terminfo"
             , arg "-build-tool-depends"
             , flag UseLibzstd `cabalFlag` "with-libzstd"
@@ -105,16 +105,7 @@ packageArgs = do
              , compilerStageOption ghcDebugAssertions ? arg "-DDEBUG" ]
 
           , builder (Cabal Flags) ? mconcat
-            [
-              -- When cross compiling, enable for stage0 to get ghci
-              -- support. But when not cross compiling, disable for
-              -- stage0, otherwise we introduce extra dependencies
-              -- like haskeline etc, and mixing stageBoot/stage0 libs
-              -- can cause extra trouble (e.g. #25406)
-              expr ghcWithInterpreter ?
-                ifM (expr cross)
-                  (arg "internal-interpreter")
-                  (notStage0 `cabalFlag` "internal-interpreter")
+            [ (expr (ghcWithInterpreter stage)) `cabalFlag` "internal-interpreter"
             , ifM stage0
                   -- We build a threaded stage 1 if the bootstrapping compiler
                   -- supports it.
@@ -295,10 +286,6 @@ ghcInternalArgs = package ghcInternal ? do
 rtsPackageArgs :: Args
 rtsPackageArgs = package rts ? do
     projectVersion <- getSetting ProjectVersion
-    hostPlatform   <- queryHost targetPlatformTriple
-    hostArch       <- queryHost queryArch
-    hostOs         <- queryHost queryOS
-    hostVendor     <- queryHost queryVendor
     buildPlatform  <- queryBuild targetPlatformTriple
     buildArch      <- queryBuild queryArch
     buildOs        <- queryBuild queryOS
@@ -380,18 +367,16 @@ rtsPackageArgs = package rts ? do
 
           , input "**/RtsUtils.c" ? pure
             [ "-DProjectVersion="            ++ show projectVersion
-            , "-DHostPlatform="              ++ show hostPlatform
-            , "-DHostArch="                  ++ show hostArch
-            , "-DHostOS="                    ++ show hostOs
-            , "-DHostVendor="                ++ show hostVendor
+              -- the RTS' host is the compiler's target (the target should be
+              -- per stage ideally...)
+            , "-DHostPlatform="              ++ show targetPlatform
+            , "-DHostArch="                  ++ show targetArch
+            , "-DHostOS="                    ++ show targetOs
+            , "-DHostVendor="                ++ show targetVendor
             , "-DBuildPlatform="             ++ show buildPlatform
             , "-DBuildArch="                 ++ show buildArch
             , "-DBuildOS="                   ++ show buildOs
             , "-DBuildVendor="               ++ show buildVendor
-            , "-DTargetPlatform="            ++ show targetPlatform
-            , "-DTargetArch="                ++ show targetArch
-            , "-DTargetOS="                  ++ show targetOs
-            , "-DTargetVendor="              ++ show targetVendor
             , "-DGhcUnregisterised="         ++ show (yesNo ghcUnreg)
             , "-DTablesNextToCode="          ++ show (yesNo ghcEnableTNC)
             , "-DRtsWay=\"rts_" ++ show way ++ "\""

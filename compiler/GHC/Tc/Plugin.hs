@@ -1,4 +1,3 @@
-
 -- | This module provides an interface for typechecker plugins to
 -- access select functions of the 'TcM', principally those to do with
 -- reading parts of the state.
@@ -67,7 +66,7 @@ import GHC.Core.FamInstEnv     ( FamInstEnv )
 import GHC.Tc.Utils.Monad      ( TcGblEnv, TcLclEnv, TcPluginM
                                , unsafeTcPluginTcM
                                , liftIO, traceTc )
-import GHC.Tc.Types.Constraint ( Ct, CtEvidence(..) )
+import GHC.Tc.Types.Constraint ( Ct, CtEvidence(..), GivenCtEvidence(..) )
 import GHC.Tc.Types.CtLoc      ( CtLoc )
 
 import GHC.Tc.Utils.TcMType    ( TcTyVar, TcType )
@@ -92,7 +91,7 @@ import GHC.Core.InstEnv     ( InstEnvs )
 import GHC.Types.Unique     ( Unique )
 import GHC.Types.PkgQual    ( PkgQual )
 
-import qualified GHC.Internal.TH.Syntax as TH
+import qualified GHC.Boot.TH.Syntax as TH
 
 -- | Perform some IO, typically to interact with an external tool.
 tcPluginIO :: IO a -> TcPluginM a
@@ -101,7 +100,6 @@ tcPluginIO a = unsafeTcPluginTcM (liftIO a)
 -- | Output useful for debugging the compiler.
 tcPluginTrace :: String -> SDoc -> TcPluginM ()
 tcPluginTrace a b = unsafeTcPluginTcM (traceTc a b)
-
 
 findImportedModule :: ModuleName -> PkgQual -> TcPluginM Finder.FindResult
 findImportedModule mod_name mb_pkg = do
@@ -186,7 +184,8 @@ newGiven :: EvBindsVar -> CtLoc -> PredType -> EvExpr -> TcPluginM CtEvidence
 newGiven tc_evbinds loc pty evtm = do
    new_ev <- newEvVar pty
    setEvBind tc_evbinds $ mkGivenEvBind new_ev (EvExpr evtm)
-   return CtGiven { ctev_pred = pty, ctev_evar = new_ev, ctev_loc = loc }
+   return $ CtGiven $
+     GivenCt { ctev_pred = pty, ctev_evar = new_ev, ctev_loc = loc }
 
 -- | Create a fresh evidence variable.
 --
@@ -197,7 +196,7 @@ newEvVar = unsafeTcPluginTcM . TcM.newEvVar
 -- | Create a fresh coercion hole.
 -- This should only be invoked within 'tcPluginSolve'.
 newCoercionHole :: PredType -> TcPluginM CoercionHole
-newCoercionHole = unsafeTcPluginTcM . TcM.newVanillaCoercionHole
+newCoercionHole = unsafeTcPluginTcM . TcM.newCoercionHole
 
 -- | Bind an evidence variable.
 --

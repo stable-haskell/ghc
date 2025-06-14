@@ -37,7 +37,11 @@ test('ShrinkSmallMutableArrayB', normal, compile_and_run, [''])
 test('T14664', normal, compile_and_run, [''])
 test('CStringLength', normal, compile_and_run, ['-O2'])
 test('NonNativeSwitch', normal, compile_and_run, ['-O2'])
-test('Sized', normal, compile_and_run, [''])
+test('Sized', [
+      # optasm is broken with js backend: #25922
+      extra_ways(['optasm','ghci','ghci-opt']) if not js_arch()
+        else extra_ways(['ghci','ghci-opt'])
+    ], compile_and_run, [''])
 
 test('LevPolyPtrEquality1', normal, compile_and_run, [''])
 test('LevPolyPtrEquality2', normal, compile_and_run, [''])
@@ -75,7 +79,10 @@ test('FMA_ConstantFold'
     , compile_and_run, ['-O'])
 
 test('T21624', normal, compile_and_run, [''])
-test('T23071', ignore_stdout, compile_and_run, [''])
+test('T23071',
+     [when(opsys('freebsd'), fragile(25751)), ignore_stdout],
+     compile_and_run,
+     [''])
 test('T22710', normal, compile_and_run, [''])
 test('T24496'
     , [ when(have_cpu_feature('fma'), extra_hc_opts('-mfma'))

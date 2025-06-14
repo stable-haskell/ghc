@@ -25,10 +25,6 @@
 #include "MachDeps.h"
 #include "SMPClosureOps.h"
 
-#if defined(__PIC__)
-import pthread_mutex_lock;
-import pthread_mutex_unlock;
-#endif
 import CLOSURE ghczminternal_GHCziInternalziControlziExceptionziBase_nestedAtomically_closure;
 import CLOSURE ghczminternal_GHCziInternalziIOziException_heapOverflow_closure;
 import CLOSURE ghczminternal_GHCziInternalziIOziException_blockedIndefinitelyOnMVar_closure;
@@ -2444,6 +2440,7 @@ stg_newBCOzh ( P_ instrs,
                W_ arity,
                P_ bitmap_arr )
 {
+    // N.B. bitmap_arr contains a full StgLargeBitmap object.
     W_ bco, bytes, words;
 
     words = BYTES_TO_WDS(SIZEOF_StgBCO) + BYTE_ARR_WDS(bitmap_arr);

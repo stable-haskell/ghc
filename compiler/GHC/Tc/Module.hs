@@ -16,7 +16,8 @@
 --
 -- https://gitlab.haskell.org/ghc/ghc/wikis/commentary/compiler/type-checker
 module GHC.Tc.Module (
-        tcRnStmt, tcRnExpr, TcRnExprMode(..), tcRnType,
+        tcRnStmt, tcRnExpr, TcRnExprMode(..),
+        tcRnType, tcRnTypeSkolemising,
         tcRnImportDecls,
         tcRnLookupRdrName,
         getModuleInterface,
@@ -71,7 +72,7 @@ import GHC.Tc.Gen.Annotation
 import GHC.Tc.Gen.Bind
 import GHC.Tc.Gen.Default
 import GHC.Tc.Utils.Env
-import GHC.Tc.Gen.Rule
+import GHC.Tc.Gen.Sig( tcRules )
 import GHC.Tc.Gen.Foreign
 import GHC.Tc.TyCl.Instance
 import GHC.Tc.Utils.TcMType
@@ -115,6 +116,7 @@ import GHC.Core.Class
 import GHC.Core.Coercion.Axiom
 import GHC.Core.Reduction ( Reduction(..) )
 import GHC.Core.TyCo.Ppr( debugPprType )
+import GHC.Core.TyCo.Tidy( tidyTopType )
 import GHC.Core.FamInstEnv
    ( FamInst, pprFamInst, famInstsRepTyCons, orphNamesOfFamInst
    , famInstEnvElts, extendFamInstEnvList, normaliseType )
@@ -133,8 +135,7 @@ import GHC.Utils.Logger
 
 import GHC.Types.Error
 import GHC.Types.Name.Reader
-import GHC.Types.DefaultEnv ( DefaultEnv, ClassDefaults (ClassDefaults, cd_class, cd_types),
-                              emptyDefaultEnv, isEmptyDefaultEnv, unitDefaultEnv, lookupDefaultEnv )
+import GHC.Types.DefaultEnv
 import GHC.Types.Fixity.Env
 import GHC.Types.Id as Id
 import GHC.Types.Id.Info( IdDetails(..) )
@@ -163,6 +164,7 @@ import GHC.Unit.Module.ModSummary
 import GHC.Unit.Module.ModIface
 import GHC.Unit.Module.ModDetails
 import GHC.Unit.Module.Deps
+import GHC.Driver.Downsweep
 
 import GHC.Data.FastString
 import GHC.Data.Maybe
@@ -175,6 +177,7 @@ import Control.DeepSeq
 import Control.Monad
 import Control.Monad.Trans.Writer.CPS
 import Data.Data ( Data )
+import Data.Function (on)
 import Data.Functor.Classes ( liftEq )
 import Data.List ( sort, sortBy )
 import Data.List.NonEmpty ( NonEmpty (..) )
@@ -184,6 +187,7 @@ import qualified Data.Set as S
 import qualified Data.Map as M
 import Data.Foldable ( for_ )
 import Data.Traversable ( for )
+import Data.IORef( newIORef )
 
 
 
@@ -380,6 +384,7 @@ the actual contents of the module are wired in to GHC.
 -}
 
 {- Note [Disambiguation of multiple default declarations]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 See Note [Named default declarations] in GHC.Tc.Gen.Default
 
@@ -421,7 +426,7 @@ reportClashingDefaultImports :: [NonEmpty ClassDefaults] -> DefaultEnv -> TcM ()
 reportClashingDefaultImports importsByClass local = mapM_ check importsByClass
   where
     check cds@(ClassDefaults{cd_class = cls} :| _) = do
-      let cdLocal  = lookupDefaultEnv local (tyConName cls)
+      let cdLocal  = lookupDefaultEnv local (className cls)
       case cdLocal of
         Just ClassDefaults{cd_types = localTypes}
           | all ((`isTypeSubsequenceOf` localTypes) . cd_types) cds -> pure ()
@@ -459,8 +464,11 @@ isTypeSubsequenceOf (t1:t1s) (t2:t2s)
 
 tcRnImports :: HscEnv -> [(LImportDecl GhcPs, SDoc)] -> TcM ([NonEmpty ClassDefaults], TcGblEnv)
 tcRnImports hsc_env import_decls
-  = do  { (rn_imports, imp_user_spec, rdr_env, imports, defaults, hpc_info) <- rnImports import_decls ;
-
+  = do  { (rn_imports, imp_user_spec, rdr_env, imports) <- rnImports import_decls
+        -- Get the default declarations for the classes imported by this module
+        -- and group them by class.
+        ; tc_defaults <-(NE.groupBy ((==) `on` cd_class) . (concatMap defaultList))
+                        <$> tcGetClsDefaults (M.keys $ imp_mods imports)
         ; this_mod <- getModule
         ; gbl_env <- getGblEnv
         ; let unitId = homeUnitId $ hsc_home_unit hsc_env
@@ -482,8 +490,6 @@ tcRnImports hsc_env import_decls
                   updateEps_ $ \eps  -> eps { eps_is_boot = imp_boot_mods imports }
                }
 
-                -- Type check the imported default declarations
-        ; tc_defaults <- initIfaceTcRn (tcIfaceDefaults this_mod defaults)
                 -- Update the gbl env
         ; updGblEnv ( \ gbl ->
             gbl {
@@ -494,8 +500,7 @@ tcRnImports hsc_env import_decls
               tcg_default      = foldMap subsume tc_defaults,
               tcg_inst_env     = tcg_inst_env gbl `unionInstEnv` home_insts,
               tcg_fam_inst_env = extendFamInstEnvList (tcg_fam_inst_env gbl)
-                                                      home_fam_insts,
-              tcg_hpc          = hpc_info
+                                                      home_fam_insts
             }) $ do {
 
         ; traceRn "rn1" (ppr (imp_direct_dep_mods imports))
@@ -1808,9 +1813,8 @@ tcTyClsInstDecls tycl_decls deriv_decls default_decls binds
           --
           -- But only after we've typechecked 'default' declarations.
           -- See Note [Typechecking default declarations]
-          defaults <- tcDefaults default_decls ;
-          updGblEnv (\gbl -> gbl { tcg_default = defaults }) $ do {
-
+          defaults <- tcDefaultDecls default_decls
+          ; extendDefaultEnvWithLocalDefaults defaults $ do {
 
           -- Careful to quit now in case there were instance errors, so that
           -- the deriving errors don't pile up as well.
@@ -1929,7 +1933,7 @@ generateMainBinding tcg_env main_name = do
     { traceTc "checkMain found" (ppr main_name)
     ; (io_ty, res_ty) <- getIOType
     ; let loc = getSrcSpan main_name
-          main_expr_rn = L (noAnnSrcSpan loc) (HsVar noExtField (L (noAnnSrcSpan loc) main_name))
+          main_expr_rn = L (noAnnSrcSpan loc) (mkHsVar (L (noAnnSrcSpan loc) main_name))
     ; (ev_binds, main_expr) <- setMainCtxt main_name io_ty $
                                tcCheckMonoExpr main_expr_rn io_ty
 
@@ -2066,6 +2070,25 @@ exist. For this logic see GHC.IfaceToCore.mk_top_id.
 There is also some similar (probably dead) logic in GHC.Rename.Env which says it
 was added for External Core which faced a similar issue.
 
+Note [runTcInteractive module graph]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The `withInteractiveModuleNode` function sets up the module graph which contains
+the interactive module used by `runTcInteractive`.
+
+The module graph is essentially the ambient module graph which is set up when
+ghci loads a module using `load`, with the addition of the interactive module (Ghci<N>),
+which imports the parts specified by the `InteractiveImports`.
+
+Therefore `downsweepInteractiveImports` presumes that any import which is
+determined to be from the home module is already present in the module graph.
+This saves resummarising and performing the whole downsweep again if it's already been
+done.
+
+On the other hand, when GHCi starts up, and no modules have been loaded yet, the
+module graph will be empty. Therefore `downsweepInteractiveImports` will perform
+for the unit portion of the graph, if it's not already been performed.
+
 
 *********************************************************
 *                                                       *
@@ -2074,12 +2097,20 @@ was added for External Core which faced a similar issue.
 *********************************************************
 -}
 
+-- See Note [runTcInteractive module graph]
+withInteractiveModuleNode :: HscEnv -> TcM a -> TcM a
+withInteractiveModuleNode hsc_env thing_inside = do
+  mg <- liftIO $ downsweepInteractiveImports hsc_env (hsc_IC hsc_env)
+  updTopEnv (\env -> env { hsc_mod_graph = mg }) thing_inside
+
+
 runTcInteractive :: HscEnv -> TcRn a -> IO (Messages TcRnMessage, Maybe a)
 -- Initialise the tcg_inst_env with instances from all home modules.
 -- This mimics the more selective call to hptInstances in tcRnImports
 runTcInteractive hsc_env thing_inside
   = initTcInteractive hsc_env $ withTcPlugins hsc_env $
     withDefaultingPlugins hsc_env $ withHoleFitPlugins hsc_env $
+    withInteractiveModuleNode hsc_env $
     do { traceTc "setInteractiveContext" $
             vcat [ text "ic_tythings:" <+> vcat (map ppr (ic_tythings icxt))
                  , text "ic_insts:" <+> vcat (map (pprBndr LetBind . instanceDFunId) (instEnvElts ic_insts))
@@ -2681,6 +2712,16 @@ tcRnImportDecls hsc_env import_decls
   where
     zap_rdr_env gbl_env = gbl_env { tcg_rdr_env = emptyGlobalRdrEnv }
 
+
+tcRnTypeSkolemising :: HscEnv
+                    -> LHsType GhcPs
+                    -> IO (Messages TcRnMessage, Maybe (Type, Kind))
+-- tcRnTypeSkolemising skolemisese any free unification variables,
+-- and normalises the type
+tcRnTypeSkolemising env ty
+  = do { skol_tv_ref <- liftIO (newIORef [])
+       ; tcRnType env (SkolemiseFlexi skol_tv_ref) True ty }
+
 -- tcRnType just finds the kind of a type
 tcRnType :: HscEnv
          -> ZonkFlexi
@@ -2869,7 +2910,7 @@ tcRnLookupRdrName hsc_env (L loc rdr_name)
          let rdr_names = dataTcOccs rdr_name
        ; names_s <- mapM lookupInfoOccRn rdr_names
        ; let names = concat names_s
-       ; when (null names) (addErrTc $ mkTcRnNotInScope rdr_name NotInScope)
+       ; when (null names) (addErrTc $ TcRnNotInScope NotInScope rdr_name)
        ; return names }
 
 tcRnLookupName :: HscEnv -> Name -> IO (Messages TcRnMessage, Maybe TyThing)

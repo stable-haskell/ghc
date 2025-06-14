@@ -5,6 +5,7 @@
 {-# LANGUAGE UnliftedFFITypes #-}
 
 module GHC.Internal.Wasm.Prim.Imports (
+  raiseJSException,
   stg_blockPromise,
   stg_messagePromiseUnit,
   stg_messagePromiseJSVal,
@@ -67,23 +68,19 @@ function. At this point, the Promise fulfill logic that resumes the
 thread in the future has been set up, we can drop the Promise eagerly,
 then arrange the current thread to block.
 
-Blocking is done by calling stg_jsffi_block: it pushes a
-stg_jsffi_block frame and suspends the thread. The payload of
-stg_jsffi_block frame is a single pointer field that holds the return
-value. When the Promise is resolved with the result, the RTS fetches
-the TSO indexed by the stable pointer passed earlier, checks for the
-top stack frame to see if it's still a stg_jsffi_block frame (could be
-stripped by an async exception), fills in the boxed result and
-restarts execution. In case of a Promise rejection, the closure being
-filled is generated via raiseJSException.
+Blocking is done by readMVar. stg_blockPromise allocates an empty MVar
+and pins it under a stable pointer, then finally blocks by readMVar.
+The stable pointer is captured in the promise.then callback. When the
+Promise is settled in the future, the promise.then callback writes the
+result (or exception) to the MVar and then resumes Haskell execution.
 
 -}
 
-stg_blockPromise :: JSVal -> (JSVal -> StablePtr Any -> IO ()) -> r
-stg_blockPromise p msg_p = unsafeDupablePerformIO $ IO $ \s0 ->
-  case stg_jsffi_check (unsafeCoerce# $ toException WouldBlockException) s0 of
-    (# s1 #) -> case myThreadId# s1 of
-      (# s2, tso #) -> case makeStablePtr# tso s2 of
+stg_blockPromise :: String -> JSVal -> (JSVal -> StablePtr Any -> IO ()) -> r
+stg_blockPromise err_msg p msg_p = unsafeDupablePerformIO $ IO $ \s0 ->
+  case stg_jsffi_check (unsafeCoerce# $ toException $ WouldBlockException err_msg) s0 of
+    (# s1 #) -> case newMVar# s1 of
+      (# s2, mv# #) -> case makeStablePtr# mv# s2 of
         (# s3, sp #) ->
           case unIO (msg_p p $ StablePtr $ unsafeCoerce# sp) s3 of
             -- Since we eagerly free the Promise here, we must return
@@ -98,20 +95,10 @@ stg_blockPromise p msg_p = unsafeDupablePerformIO $ IO $ \s0 ->
             --    and prevents dmdanal from being naughty
             (# s4, _ #) -> case unIO (freeJSVal p) s4 of
               (# s5, _ #) ->
-                -- raiseJSException_closure is used by the RTS in case
-                -- the Promise is rejected, and it is likely a CAF. So
-                -- we need to keep it alive when we block waiting for
-                -- the Promise to resolve or reject, and also mark it
-                -- as OPAQUE just to be sure.
-                keepAlive# raiseJSException s5 $
-                  stg_jsffi_block $
-                    throw PromisePendingException
+                readMVar# mv# s5
 
 foreign import prim "stg_jsffi_check"
   stg_jsffi_check :: Any -> State# RealWorld -> (# State# RealWorld #)
-
-foreign import prim "stg_jsffi_block"
-  stg_jsffi_block :: Any -> State# RealWorld -> (# State# RealWorld, r #)
 
 foreign import javascript unsafe "$1.then(() => __exports.rts_promiseResolveUnit($2), err => __exports.rts_promiseReject($2, err))"
   stg_messagePromiseUnit :: JSVal -> StablePtr Any -> IO ()

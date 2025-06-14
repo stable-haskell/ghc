@@ -5,12 +5,14 @@ module GHC.Types.Hint (
   , AvailableBindings(..)
   , InstantiationSuggestion(..)
   , LanguageExtensionHint(..)
+  , ImportItemSuggestion(..)
   , ImportSuggestion(..)
   , HowInScope(..)
   , SimilarName(..)
   , StarIsType(..)
   , UntickedPromotedThing(..)
   , AssumedDerivingStrategy(..)
+  , SigLike(..)
   , pprUntickedConstructor, isBareSymbol
   , suggestExtension
   , suggestExtensionWithInfo
@@ -23,7 +25,7 @@ module GHC.Types.Hint (
   ) where
 
 import Language.Haskell.Syntax.Expr (LHsExpr)
-import Language.Haskell.Syntax (LPat, LIdP, LHsSigType, LHsSigWcType)
+import Language.Haskell.Syntax (LPat, LIdP, LHsSigType, LHsSigWcType, Sig)
 
 import GHC.Prelude
 
@@ -32,7 +34,8 @@ import qualified Data.List.NonEmpty as NE
 import qualified GHC.LanguageExtensions as LangExt
 import GHC.Unit.Module (ModuleName, Module)
 import GHC.Unit.Module.Imported (ImportedModsVal)
-import GHC.Hs.Extension (GhcTc, GhcRn)
+import GHC.Hs.Extension (GhcTc, GhcRn, GhcPs)
+import GHC.Core.Class (Class)
 import GHC.Core.Coercion
 import GHC.Core.FamInstEnv (FamFlavor)
 import GHC.Core.TyCon (TyCon)
@@ -381,8 +384,7 @@ data GhcHint
       Test cases: T495, T8485, T2713, T5533.
    -}
   | SuggestMoveToDeclarationSite
-      -- TODO: remove the SDoc argument.
-      SDoc -- ^ fixity declaration, role annotation, type signature, ...
+      SigLike -- ^ fixity declaration, role annotation, type signature, ...
       RdrName -- ^ the 'RdrName' for the declaration site
 
   {-| Suggest a similar name that the user might have meant,
@@ -479,7 +481,7 @@ data GhcHint
   | SuggestBindTyVarExplicitly Name
 
   {-| Suggest a default declaration; e.g @default Cls (Ty1, Ty2)@ -}
-  | SuggestDefaultDeclaration TyCon [Type]
+  | SuggestDefaultDeclaration Class [Type]
 
   {-| Suggest using explicit deriving strategies for a deriving clause.
 
@@ -503,6 +505,14 @@ data GhcHint
 
   {-| Suggest add parens to pattern `e -> p :: t` -}
   | SuggestParenthesizePatternRHS
+
+  {-| Suggest splitting up a SPECIALISE pragmas with multiple type ascriptions
+      into several individual SPECIALISE pragmas.
+  -}
+  | SuggestSplittingIntoSeveralSpecialisePragmas
+
+  {-| Suggest using the `data` keyword -}
+  | SuggestDataKeyword
 
 -- | The deriving strategy that was assumed when not explicitly listed in the
 --   source. This is used solely by the missing-deriving-strategies warning.
@@ -531,24 +541,32 @@ instance Outputable AssumedDerivingStrategy where
 --      replacing <MyStr> as necessary.)
 data InstantiationSuggestion = InstantiationSuggestion !ModuleName !Module
 
+data ImportItemSuggestion =
+    ImportItemRemoveType
+  | ImportItemRemoveData
+  | ImportItemRemovePattern
+  | ImportItemRemoveSubordinateType (NE.NonEmpty OccName)
+  | ImportItemRemoveSubordinateData (NE.NonEmpty OccName)
+  | ImportItemAddType
+    -- Why no 'ImportItemAddData'?  Because the suggestion to add 'data' is
+    -- represented by the 'ImportDataCon' constructor of 'ImportSuggestion'.
+
 -- | Suggest how to fix an import.
 data ImportSuggestion
   -- | Some module exports what we want, but we aren't explicitly importing it.
   = CouldImportFrom (NE.NonEmpty (Module, ImportedModsVal))
   -- | Some module exports what we want, but we are explicitly hiding it.
   | CouldUnhideFrom (NE.NonEmpty (Module, ImportedModsVal))
-  -- | The module exports what we want, but it isn't a type.
-  | CouldRemoveTypeKeyword ModuleName
-  -- | The module exports what we want, but it's a type and we have @ExplicitNamespaces@ on.
-  | CouldAddTypeKeyword ModuleName
+  -- | The module exports what we want, but the import item requires modification.
+  | CouldChangeImportItem ModuleName ImportItemSuggestion
   -- | Suggest importing a data constructor to bring it into scope
   | ImportDataCon
       -- | Where to suggest importing the 'DataCon' from.
-      --
-      -- The 'Bool' tracks whether to suggest using an import of the form
-      -- @import (pattern Foo)@, depending on whether @-XPatternSynonyms@
-      -- was enabled.
-      { ies_suggest_import_from :: Maybe (ModuleName, Bool)
+      { ies_suggest_import_from :: Maybe ModuleName
+        -- | Whether to suggest the use of the 'pattern' keyword.
+      , ies_suggest_pattern_keyword :: Bool
+        -- | Whether to suggest the use of the 'data' keyword.
+      , ies_suggest_data_keyword :: Bool
         -- | The 'OccName' of the parent of the data constructor.
       , ies_parent :: OccName }
 
@@ -562,6 +580,15 @@ data HowInScope
 data SimilarName
   = SimilarName Name
   | SimilarRdrName RdrName (Maybe HowInScope)
+
+-- | Some kind of signature, such as a fixity signature, standalone
+-- kind signature, COMPLETE pragma, role annotation, etc.
+data SigLike
+  = SigLikeSig (Sig GhcPs)
+  | SigLikeStandaloneKindSig
+  | SigLikeFixitySig
+  | SigLikeDeprecation
+  | SigLikeRoleAnnotation
 
 -- | Something is promoted to the type-level without a promotion tick.
 data UntickedPromotedThing

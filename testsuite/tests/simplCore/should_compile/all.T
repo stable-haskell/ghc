@@ -209,9 +209,9 @@ test('T11232', normal, compile, ['-O2'])
 test('T11562', normal, compile, ['-O2'])
 test('T11742', normal, compile, ['-O2'])
 test('T11644', normal, compile, ['-O2'])
-test('T3990',
-     normal,
-     makefile_test, ['T3990'])
+test('T3990', normal, makefile_test, ['T3990'])
+test('T3990b', normal, makefile_test, ['T3990b'])
+test('T3990c', normal, makefile_test, ['T3990c'])
 
 test('T12076', [], multimod_compile, ['T12076', '-v0'])
 test('T12076lit', normal, compile, ['-O'])
@@ -502,6 +502,7 @@ test('T23491d', [extra_files(['T23491.hs']), grep_errmsg(r'Static argument')], m
 test('T23074', normal, compile, ['-O -ddump-rules'])
 test('T23272', [only_ways(['ghci']), extra_hc_opts('-fno-unoptimized-core-for-interpreter -O')], ghci_script, ['T23272.script'])
 test('T23567', [extra_files(['T23567A.hs'])], multimod_compile, ['T23567', '-O -v0'])
+test('DsSpecPragmas', normal, compile, ['-O -ddump-rules'])
 
 # The -ddump-simpl of T22404 should have no let-bindings
 test('T22404', [only_ways(['optasm']), check_errmsg(r'let') ], compile, ['-ddump-simpl -dsuppress-uniques'])
@@ -532,3 +533,18 @@ test('T24725a', [ grep_errmsg(r'testedRule')], compile, ['-O -ddump-rule-firings
 test('T25033', normal, compile, ['-O'])
 test('T25160', normal, compile, ['-O -ddump-rules'])
 test('T25197', [req_th, extra_files(["T25197_TH.hs"]), only_ways(['optasm'])], multimod_compile, ['T25197', '-O2 -v0'])
+test('T25389', normal, compile, ['-O -ddump-simpl -dsuppress-uniques -dno-typeable-binds'])
+test('T24359a', normal, compile, ['-O -ddump-rules'])
+test('T25713', [grep_errmsg('W:::')], compile, ['-O -ddump-simpl'])
+
+test('T25883', normal, compile_grep_core, [''])
+test('T25883b', normal, compile_grep_core, [''])
+test('T25883c', normal, compile_grep_core, [''])
+test('T25883d', [extra_files(['T25883d_import.hs'])], multimod_compile_filter, ['T25883d', '-O -ddump-simpl -dno-typeable-binds -dsuppress-all -dsuppress-uniques', r'grep -e "y ="'])
+
+test('T25976', [grep_errmsg('Dead Code')], compile, ['-O -ddump-simpl -dsuppress-uniques -dno-typeable-binds'])
+
+test('T25965', normal, compile, ['-O'])
+test('T25703',  [grep_errmsg(r'SPEC')], compile, ['-O -fpolymorphic-specialisation -ddump-rule-firings'])
+test('T25703a', [grep_errmsg(r'SPEC')], compile, ['-O -fpolymorphic-specialisation -ddump-rule-firings'])
+

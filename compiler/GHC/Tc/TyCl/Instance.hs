@@ -352,10 +352,9 @@ does the same thing; it shows up in module Fraction.hs.
 
 Conclusion: when typechecking the methods in a C [a] instance, we want to
 treat the 'a' as an *existential* type variable, in the sense described
-by Note [Binding when looking up instances].  That is why isOverlappableTyVar
-responds True to an InstSkol, which is the kind of skolem we use in
-tcInstDecl2.
-
+by Note [Super skolems: binding when looking up instances] in GHC.Core.InstEnv
+That is why isOverlappableTyVar responds True to an InstSkol, which is the kind
+of skolem we use in tcInstDecl2.
 
 Note [Tricky type variable scoping]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -419,8 +418,8 @@ tcInstDeclsDeriv
   -> [LDerivDecl GhcRn]
   -> TcM (TcGblEnv, [InstInfo GhcRn], HsValBinds GhcRn)
 tcInstDeclsDeriv deriv_infos derivds
-  = do th_stage <- getStage -- See Note [Deriving inside TH brackets]
-       if isBrackStage th_stage
+  = do th_lvl <- getThLevel -- See Note [Deriving inside TH brackets]
+       if isBrackLevel th_lvl
        then do { gbl_env <- getGblEnv
                ; return (gbl_env, bagToList emptyBag, emptyValBindsOut) }
        else do { (tcg_env, info_bag, valbinds) <- tcDeriving deriv_infos derivds
@@ -951,7 +950,7 @@ tcDataFamInstHeader mb_clsinfo skol_info fam_tc hs_outer_bndrs fixity
                   -- Check that the result kind of the TyCon applied to its args
                   -- is compatible with the explicit signature (or Type, if there
                   -- is none)
-                  ; let hs_lhs = nlHsTyConApp NotPromoted fixity (getName fam_tc) hs_pats
+                  ; let hs_lhs = nlHsTyConApp NotPromoted fixity (noUserRdr $ getName fam_tc) hs_pats
                   -- Add constraints from the result signature
                   ; res_kind <- tc_kind_sig m_ksig
                   ; _ <- unifyKind (Just . HsTypeRnThing $ unLoc hs_lhs) lhs_applied_kind res_kind
@@ -1441,7 +1440,7 @@ addDFunPrags dfun_id sc_meth_ids
    is_newtype  = isNewTyCon clas_tc
 
 wrapId :: HsWrapper -> Id -> HsExpr GhcTc
-wrapId wrapper id = mkHsWrap wrapper (HsVar noExtField (noLocA id))
+wrapId wrapper id = mkHsWrap wrapper (mkHsVar (noLocA id))
 
 {- Note [Typechecking plan for instance declarations]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -2043,7 +2042,17 @@ tcMethodBody skol_info clas tyvars dfun_ev_vars inst_tys
                 tcMethodBodyHelp sig_fn sel_id local_meth_id (L bind_loc lm_bind)
 
        ; global_meth_id <- addInlinePrags global_meth_id prags
-       ; spec_prags     <- tcSpecPrags global_meth_id prags
+       ; spec_prags     <- tcExtendIdEnv1 (idName sel_id) global_meth_id $
+                           -- tcExtendIdEnv1: tricky point: a SPECIALISE pragma in prags
+                           -- mentions sel_name but the pragma is really for global_meth_id.
+                           -- So we bind sel_name to global_meth_id, just in the pragmas.
+                           -- Example:
+                           --    instance C [a] where
+                           --       op :: forall b. Ord b => b -> a -> a
+                           --       {-# SPECIALISE op @Int #-}
+                           -- The specialisation is for the `op` for this instance decl, not
+                           -- for the global selector-id, of course.
+                           tcSpecPrags global_meth_id prags
 
         ; let specs  = mk_meth_spec_prags global_meth_id spec_inst_prags spec_prags
               export = ABE { abe_poly  = global_meth_id
@@ -2215,7 +2224,7 @@ mk_meth_spec_prags :: Id -> [LTcSpecPrag] -> [LTcSpecPrag] -> TcSpecPrags
         --   * spec_prags_from_inst: derived from {-# SPECIALISE instance :: <blah> #-}
         --     These ones have the dfun inside, but [perhaps surprisingly]
         --     the correct wrapper.
-        -- See Note [Handling SPECIALISE pragmas] in GHC.Tc.Gen.Bind
+        -- See Note [Handling old-form SPECIALISE pragmas] in GHC.Tc.Gen.Bind
 mk_meth_spec_prags meth_id spec_inst_prags spec_prags_for_me
   = SpecPrags (spec_prags_for_me ++ spec_prags_from_inst)
   where

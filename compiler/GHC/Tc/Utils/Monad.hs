@@ -20,7 +20,8 @@ module GHC.Tc.Utils.Monad(
   updTopFlags,
   getEnvs, setEnvs, updEnvs, restoreEnvs,
   xoptM, doptM, goptM, woptM,
-  setXOptM, unsetXOptM, unsetGOptM, unsetWOptM,
+  setXOptM, setWOptM,
+  unsetXOptM, unsetGOptM, unsetWOptM,
   whenDOptM, whenGOptM, whenWOptM,
   whenXOptM, unlessXOptM,
   getGhcMode,
@@ -75,7 +76,9 @@ module GHC.Tc.Utils.Monad(
   -- * Shared error message stuff: renamer and typechecker
   recoverM, mapAndRecoverM, mapAndReportM, foldAndRecoverM,
   attemptM, tryTc,
-  askNoErrs, discardErrs, tryTcDiscardingErrs,
+  askNoErrs, discardErrs,
+  tryTcDiscardingErrs,
+  tryTcDiscardingErrs',
   checkNoErrs, whenNoErrs,
   ifErrsM, failIfErrsM,
 
@@ -88,6 +91,7 @@ module GHC.Tc.Utils.Monad(
   addErrTcM,
   failWithTc, failWithTcM,
   checkTc, checkTcM,
+  checkJustTc, checkJustTcM,
   failIfTc, failIfTcM,
   mkErrCtxt,
   addTcRnDiagnostic, addDetailedDiagnostic,
@@ -97,7 +101,7 @@ module GHC.Tc.Utils.Monad(
 
   -- * Type constraints
   newTcEvBinds, newNoTcEvBinds, cloneEvBindsVar,
-  addTcEvBind, addTopEvBinds,
+  addTcEvBind, addTcEvBinds, addTopEvBinds,
   getTcEvTyCoVars, getTcEvBindsMap, setTcEvBindsMap,
   chooseUniqueOccTc,
   getConstraintVar, setConstraintVar,
@@ -113,8 +117,8 @@ module GHC.Tc.Utils.Monad(
   emitNamedTypeHole, IsExtraConstraint(..), emitAnonTypeHole,
 
   -- * Template Haskell context
-  recordThUse, recordThSpliceUse, recordThNeededRuntimeDeps,
-  keepAlive, getStage, getStageAndBindLevel, setStage,
+  recordThUse, recordThNeededRuntimeDeps,
+  keepAlive, getThLevel, getCurrentAndBindLevel, setThLevel,
   addModFinalizersWithLclEnv,
 
   -- * Safe Haskell context
@@ -166,6 +170,7 @@ import GHC.Tc.Types.Evidence
 import GHC.Tc.Types.LclEnv
 import GHC.Tc.Types.Origin
 import GHC.Tc.Types.TcRef
+import GHC.Tc.Types.TH
 import GHC.Tc.Utils.TcType
 import GHC.Tc.Zonk.TcType
 
@@ -206,6 +211,7 @@ import GHC.Utils.Panic
 import GHC.Utils.Constants (debugIsOn)
 import GHC.Utils.Logger
 import qualified GHC.Data.Strict as Strict
+import qualified Data.Set as Set
 
 import GHC.Types.Error
 import GHC.Types.DefaultEnv ( DefaultEnv, emptyDefaultEnv )
@@ -225,7 +231,7 @@ import GHC.Types.Unique.FM ( emptyUFM )
 import GHC.Types.Unique.DFM
 import GHC.Types.Unique.Supply
 import GHC.Types.Annotations
-import GHC.Types.Basic( TopLevelFlag, TypeOrKind(..) )
+import GHC.Types.Basic( TopLevelFlag(..), TypeOrKind(..) )
 import GHC.Types.CostCentre.State
 import GHC.Types.SourceFile
 
@@ -261,7 +267,6 @@ initTc hsc_env hsc_src keep_rn_syntax mod loc do_this
  = do { keep_var     <- newIORef emptyNameSet ;
         used_gre_var <- newIORef [] ;
         th_var       <- newIORef False ;
-        th_splice_var<- newIORef False ;
         infer_var    <- newIORef True ;
         infer_reasons_var <- newIORef emptyMessages ;
         dfun_n_var   <- newIORef emptyOccSet ;
@@ -324,7 +329,6 @@ initTc hsc_env hsc_src keep_rn_syntax mod loc do_this
                 tcg_fam_inst_env   = emptyFamInstEnv,
                 tcg_ann_env        = emptyAnnEnv,
                 tcg_th_used        = th_var,
-                tcg_th_splice_used = th_splice_var,
                 tcg_th_needed_deps = th_needed_deps_var,
                 tcg_exports        = [],
                 tcg_imports        = emptyImportAvails,
@@ -359,7 +363,6 @@ initTc hsc_env hsc_src keep_rn_syntax mod loc do_this
                 tcg_zany_n         = zany_n_var,
                 tcg_keep           = keep_var,
                 tcg_hdr_info        = (Nothing,Nothing),
-                tcg_hpc            = False,
                 tcg_main           = Nothing,
                 tcg_self_boot      = NoSelfBoot,
                 tcg_safe_infer     = infer_var,
@@ -398,7 +401,7 @@ initTcWithGbl hsc_env gbl_env loc do_this
                 tcl_in_gen_code = False,
                 tcl_ctxt       = [],
                 tcl_rdr        = emptyLocalRdrEnv,
-                tcl_th_ctxt    = topStage,
+                tcl_th_ctxt    = topLevel,
                 tcl_th_bndrs   = emptyNameEnv,
                 tcl_arrow_ctxt = NoArrowCtxt,
                 tcl_env        = emptyNameEnv,
@@ -578,6 +581,9 @@ woptM flag = wopt flag <$> getDynFlags
 
 setXOptM :: LangExt.Extension -> TcRnIf gbl lcl a -> TcRnIf gbl lcl a
 setXOptM flag = updTopFlags (\dflags -> xopt_set dflags flag)
+
+setWOptM :: WarningFlag -> TcRnIf gbl lcl a -> TcRnIf gbl lcl a
+setWOptM flag = updTopFlags (\dflags -> wopt_set dflags flag)
 
 unsetXOptM :: LangExt.Extension -> TcRnIf gbl lcl a -> TcRnIf gbl lcl a
 unsetXOptM flag = updTopFlags (\dflags -> xopt_unset dflags flag)
@@ -1379,11 +1385,13 @@ tryCaptureConstraints thing_inside
                           tcTryM thing_inside
 
        -- See Note [Constraints and errors]
-       ; let lie_to_keep = case mb_res of
-                             Nothing -> dropMisleading lie
-                             Just {} -> lie
-
-       ; return (mb_res, lie_to_keep) }
+       ; case mb_res of
+            Just {} -> return (mb_res, lie)
+            Nothing -> do { let pruned_lie = dropMisleading lie
+                          ; traceTc "tryCaptureConstraints" $
+                            vcat [ text "lie:" <+> ppr lie
+                                 , text "dropMisleading lie:" <+> ppr pruned_lie ]
+                          ; return (Nothing, pruned_lie) } }
 
 captureConstraints :: TcM a -> TcM (a, WantedConstraints)
 -- (captureConstraints m) runs m, and returns the type constraints it generates
@@ -1519,21 +1527,37 @@ tryTcDiscardingErrs :: TcM r -> TcM r -> TcM r
 --      if 'main' succeeds with no error messages, it's the answer
 --      otherwise discard everything from 'main', including errors,
 --          and try 'recover' instead.
-tryTcDiscardingErrs recover thing_inside
+tryTcDiscardingErrs recover =
+  tryTcDiscardingErrs'
+    (\_ _ _ -> True)     -- No validation
+    recover recover      -- Discard all errors and warnings
+                         -- and unsolved constraints entirely
+
+tryTcDiscardingErrs' :: (WantedConstraints -> Messages TcRnMessage -> r -> Bool)  -- Validation
+                     -> TcM r  -- Recover from validation error
+                     -> TcM r  -- Recover from failure
+                     -> TcM r  -- Action to try
+                     -> TcM r
+-- (tryTcDiscardingErrs' validate recover_invalid recover_error thing_inside) tries 'thing_inside';
+--      if 'thing_inside' succeeds and validation produces no errors, it's the answer
+--      otherwise discard everything from 'thing_inside', including errors,
+--          and try 'recover' instead.
+tryTcDiscardingErrs' validate recover_invalid recover_error thing_inside
   = do { ((mb_res, lie), msgs) <- capture_messages    $
                                   capture_constraints $
                                   tcTryM thing_inside
         ; case mb_res of
             Just res | not (errorsFound msgs)
                      , not (insolubleWC lie)
-              -> -- 'main' succeeded with no errors
-                 do { addMessages msgs  -- msgs might still have warnings
-                    ; emitConstraints lie
-                    ; return res }
+                    -- 'thing_inside' succeeded with no errors
+              -> if validate lie msgs res
+                 then do { addMessages msgs  -- msgs might still have warnings
+                         ; emitConstraints lie
+                         ; return res }
+                 else recover_invalid
 
-            _ -> -- 'main' failed, or produced an error message
-                 recover     -- Discard all errors and warnings
-                             -- and unsolved constraints entirely
+            _ -> -- 'thing_inside' failed, or produced an error message
+                 recover_error
         }
 
 {-
@@ -1586,6 +1610,12 @@ checkTc False err = failWithTc err
 checkTcM :: Bool -> (TidyEnv, TcRnMessage) -> TcM ()
 checkTcM True  _   = return ()
 checkTcM False err = failWithTcM err
+
+checkJustTc :: TcRnMessage -> Maybe a -> TcM a
+checkJustTc err = maybe (failWithTc err) pure
+
+checkJustTcM :: (TidyEnv, TcRnMessage) -> Maybe a -> TcM a
+checkJustTcM err = maybe (failWithTcM err) pure
 
 failIfTc :: Bool -> TcRnMessage -> TcM ()         -- Check that the boolean is false
 failIfTc False _   = return ()
@@ -1789,6 +1819,19 @@ addTcEvBind (EvBindsVar { ebv_binds = ev_ref, ebv_uniq = u }) ev_bind
        ; writeTcRef ev_ref (extendEvBinds bnds ev_bind) }
 addTcEvBind (CoEvBindsVar { ebv_uniq = u }) ev_bind
   = pprPanic "addTcEvBind CoEvBindsVar" (ppr ev_bind $$ ppr u)
+
+addTcEvBinds :: EvBindsVar -> EvBindMap -> TcM ()
+-- ^ Add a collection of binding to the TcEvBinds by side effect
+addTcEvBinds _ new_ev_binds
+  | isEmptyEvBindMap new_ev_binds
+  = return ()
+addTcEvBinds (EvBindsVar { ebv_binds = ev_ref, ebv_uniq = u }) new_ev_binds
+  = do { traceTc "addTcEvBinds" $ ppr u $$
+                                  ppr new_ev_binds
+       ; old_bnds <- readTcRef ev_ref
+       ; writeTcRef ev_ref (old_bnds `unionEvBindMap` new_ev_binds) }
+addTcEvBinds (CoEvBindsVar { ebv_uniq = u }) new_ev_binds
+  = pprPanic "addTcEvBinds CoEvBindsVar" (ppr new_ev_binds $$ ppr u)
 
 chooseUniqueOccTc :: (OccSet -> OccName) -> TcM OccName
 chooseUniqueOccTc fn =
@@ -2025,28 +2068,51 @@ It's distressingly delicate though:
   emitted some constraints with skolem-escape problems.
 
 * If we discard too /few/ constraints, we may get the misleading
-  class constraints mentioned above.  But we may /also/ end up taking
-  constraints built at some inner level, and emitting them at some
-  outer level, and then breaking the TcLevel invariants
-  See Note [TcLevel invariants] in GHC.Tc.Utils.TcType
+  class constraints mentioned above.
 
-So dropMisleading has a horridly ad-hoc structure.  It keeps only
-/insoluble/ flat constraints (which are unlikely to very visibly trip
-up on the TcLevel invariant, but all /implication/ constraints (except
-the class constraints inside them).  The implication constraints are
-OK because they set the ambient level before attempting to solve any
-inner constraints.  Ugh! I hate this. But it seems to work.
+  We may /also/ end up taking constraints built at some inner level, and
+  emitting them (via the exception catching in `tryCaptureConstraints` at some
+  outer level, and then breaking the TcLevel invariants See Note [TcLevel
+  invariants] in GHC.Tc.Utils.TcType
 
-However note that freshly-generated constraints like (Int ~ Bool), or
-((a -> b) ~ Int) are all CNonCanonical, and hence won't be flagged as
-insoluble.  The constraint solver does that.  So they'll be discarded.
-That's probably ok; but see th/5358 as a not-so-good example:
-   t1 :: Int
-   t1 x = x   -- Manifestly wrong
+So `dropMisleading` has a horridly ad-hoc structure:
 
-   foo = $(...raises exception...)
-We report the exception, but not the bug in t1.  Oh well.  Possible
-solution: make GHC.Tc.Utils.Unify.uType spot manifestly-insoluble constraints.
+* It keeps only /insoluble/ flat constraints (which are unlikely to very visibly
+  trip up on the TcLevel invariant
+
+* But it keeps all /implication/ constraints (except the class constraints
+  inside them).  The implication constraints are OK because they set the ambient
+  level before attempting to solve any inner constraints.
+
+Ugh! I hate this. But it seems to work.
+
+Other wrinkles
+
+(CERR1) Note that freshly-generated constraints like (Int ~ Bool), or
+    ((a -> b) ~ Int) are all CNonCanonical, and hence won't be flagged as
+    insoluble.  The constraint solver does that.  So they'll be discarded.
+    That's probably ok; but see th/5358 as a not-so-good example:
+       t1 :: Int
+       t1 x = x   -- Manifestly wrong
+
+       foo = $(...raises exception...)
+    We report the exception, but not the bug in t1.  Oh well.  Possible
+    solution: make GHC.Tc.Utils.Unify.uType spot manifestly-insoluble constraints.
+
+(CERR2) In #26015 I found that from the constraints
+           [W] alpha ~ Int      -- A class constraint
+           [W] F alpha ~# Bool  -- An equality constraint
+  we were dropping the first (becuase it's a class constraint) but not the
+  second, and then getting a misleading error message from the second.  As
+  #25607 shows, we can get not just one but a zillion bogus messages, which
+  conceal the one genuine error.  Boo.
+
+  For now I have added an even more ad-hoc "drop class constraints except
+  equality classes (~) and (~~)"; see `dropMisleading`.  That just kicks the can
+  down the road; but this problem seems somewhat rare anyway.  The code in
+  `dropMisleading` hasn't changed for years.
+
+It would be great to have a more systematic solution to this entire mess.
 
 
 ************************************************************************
@@ -2058,9 +2124,6 @@ solution: make GHC.Tc.Utils.Unify.uType spot manifestly-insoluble constraints.
 
 recordThUse :: TcM ()
 recordThUse = do { env <- getGblEnv; writeTcRef (tcg_th_used env) True }
-
-recordThSpliceUse :: TcM ()
-recordThSpliceUse = do { env <- getGblEnv; writeTcRef (tcg_th_splice_used env) True }
 
 recordThNeededRuntimeDeps :: [Linkable] -> PkgsLoaded -> TcM ()
 recordThNeededRuntimeDeps new_links new_pkgs
@@ -2077,18 +2140,38 @@ keepAlive name
        ; traceRn "keep alive" (ppr name)
        ; updTcRef (tcg_keep env) (`extendNameSet` name) }
 
-getStage :: TcM ThStage
-getStage = do { env <- getLclEnv; return (getLclEnvThStage env) }
+getThLevel :: TcM ThLevel
+getThLevel = do { env <- getLclEnv; return (getLclEnvThLevel env) }
 
-getStageAndBindLevel :: Name -> TcRn (Maybe (TopLevelFlag, ThLevel, ThStage))
-getStageAndBindLevel name
+getCurrentAndBindLevel :: Name -> TcRn (Maybe (TopLevelFlag, Set.Set ThLevelIndex, ThLevel))
+getCurrentAndBindLevel name
   = do { env <- getLclEnv;
        ; case lookupNameEnv (getLclEnvThBndrs env) name of
-           Nothing                  -> return Nothing
-           Just (top_lvl, bind_lvl) -> return (Just (top_lvl, bind_lvl, getLclEnvThStage env)) }
+           Nothing                  -> do
+              lvls <- getExternalBindLvl name
+              if Set.empty == lvls
+                -- This case happens when code is generated for identifiers which are not
+                -- in scope.
+                --
+                -- TODO: What happens if someone generates [|| GHC.Magic.dataToTag# ||]
+                then do
+                  return Nothing
+                else return (Just (TopLevel, lvls, getLclEnvThLevel env))
+           Just (top_lvl, bind_lvl) -> return (Just (top_lvl, Set.singleton bind_lvl, getLclEnvThLevel env)) }
 
-setStage :: ThStage -> TcM a -> TcRn a
-setStage s = updLclEnv (setLclEnvThStage s)
+getExternalBindLvl :: Name -> TcRn (Set.Set ThLevelIndex)
+getExternalBindLvl name = do
+  env <- getGlobalRdrEnv
+  mod <- getModule
+  case lookupGRE_Name env name of
+    Just gre -> return $ (Set.map thLevelIndexFromImportLevel (greLevels gre))
+    Nothing ->
+      if nameIsLocalOrFrom mod name
+        then return $ Set.singleton topLevelIndex
+        else return Set.empty
+
+setThLevel :: ThLevel -> TcM a -> TcRn a
+setThLevel l = updLclEnv (setLclEnvThLevel l)
 
 -- | Adds the given modFinalizers to the global environment and set them to use
 -- the current local environment.

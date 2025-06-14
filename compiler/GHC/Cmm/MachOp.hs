@@ -1,7 +1,5 @@
 {-# LANGUAGE LambdaCase #-}
 
-{-# OPTIONS_GHC -Wno-incomplete-uni-patterns #-}
-
 module GHC.Cmm.MachOp
     ( MachOp(..)
     , pprMachOp, isCommutableMachOp, isAssociativeMachOp
@@ -24,6 +22,7 @@ module GHC.Cmm.MachOp
     , CallishMachOp(..), callishMachOpHints
     , pprCallishMachOp
     , machOpMemcpyishAlign
+    , callishMachOpArgTys
 
     -- Atomic read-modify-write
     , MemoryOrdering(..)
@@ -39,6 +38,9 @@ import GHC.Prelude
 import GHC.Platform
 import GHC.Cmm.Type
 import GHC.Utils.Outputable
+import GHC.Utils.Misc (expectNonEmpty)
+
+import Data.List.NonEmpty (NonEmpty (..))
 
 -----------------------------------------------------------------------------
 --              MachOp
@@ -168,15 +170,7 @@ data MachOp
   | MO_V_Add Length Width
   | MO_V_Sub Length Width
   | MO_V_Mul Length Width
-
-  -- Signed vector multiply/divide
-  | MO_VS_Quot Length Width
-  | MO_VS_Rem  Length Width
   | MO_VS_Neg  Length Width
-
-  -- Unsigned vector multiply/divide
-  | MO_VU_Quot Length Width
-  | MO_VU_Rem  Length Width
 
   -- Vector shuffles
   | MO_V_Shuffle  Length Width [Int]
@@ -513,14 +507,10 @@ machOpResultType platform mop tys =
     MO_V_Sub l w        -> cmmVec l (cmmBits w)
     MO_V_Mul l w        -> cmmVec l (cmmBits w)
 
-    MO_VS_Quot l w      -> cmmVec l (cmmBits w)
-    MO_VS_Rem  l w      -> cmmVec l (cmmBits w)
     MO_VS_Neg  l w      -> cmmVec l (cmmBits w)
     MO_VS_Min  l w      -> cmmVec l (cmmBits w)
     MO_VS_Max  l w      -> cmmVec l (cmmBits w)
 
-    MO_VU_Quot l w      -> cmmVec l (cmmBits w)
-    MO_VU_Rem  l w      -> cmmVec l (cmmBits w)
     MO_VU_Min  l w      -> cmmVec l (cmmBits w)
     MO_VU_Max  l w      -> cmmVec l (cmmBits w)
 
@@ -542,7 +532,7 @@ machOpResultType platform mop tys =
     MO_RelaxedRead w    -> cmmBits w
     MO_AlignmentCheck _ _ -> ty1
   where
-    (ty1:_) = tys
+    ty1:|_ = expectNonEmpty tys
 
 comparisonResultRep :: Platform -> CmmType
 comparisonResultRep = bWord  -- is it?
@@ -630,14 +620,10 @@ machOpArgReps platform op =
     MO_V_Sub l w        -> [vecwidth l w, vecwidth l w]
     MO_V_Mul l w        -> [vecwidth l w, vecwidth l w]
 
-    MO_VS_Quot l w      -> [vecwidth l w, vecwidth l w]
-    MO_VS_Rem  l w      -> [vecwidth l w, vecwidth l w]
     MO_VS_Neg  l w      -> [vecwidth l w]
     MO_VS_Min  l w      -> [vecwidth l w, vecwidth l w]
     MO_VS_Max  l w      -> [vecwidth l w, vecwidth l w]
 
-    MO_VU_Quot l w      -> [vecwidth l w, vecwidth l w]
-    MO_VU_Rem  l w      -> [vecwidth l w, vecwidth l w]
     MO_VU_Min  l w      -> [vecwidth l w, vecwidth l w]
     MO_VU_Max  l w      -> [vecwidth l w, vecwidth l w]
 
@@ -751,6 +737,20 @@ data CallishMachOp
   | MO_SubIntC   Width
   | MO_U_Mul2    Width
 
+  -- Signed vector divide
+  | MO_VS_Quot Length Width
+  | MO_VS_Rem  Length Width
+
+  -- Unsigned vector divide
+  | MO_VU_Quot Length Width
+  | MO_VU_Rem  Length Width
+
+  -- Int64X2/Word64X2 min/max
+  | MO_I64X2_Min
+  | MO_I64X2_Max
+  | MO_W64X2_Min
+  | MO_W64X2_Max
+
   | MO_Touch         -- Keep variables live (when using interior pointers)
 
   -- Prefetch
@@ -845,3 +845,144 @@ machOpMemcpyishAlign op = case op of
   MO_Memmove align -> Just align
   MO_Memcmp  align -> Just align
   _                -> Nothing
+
+-- | Like 'machOpArgReps', but for 'CallishMachOp'.
+--
+-- Used only in Cmm lint.
+callishMachOpArgTys :: Platform -> CallishMachOp -> [CmmType]
+callishMachOpArgTys platform = \case
+  MO_F64_Pwr -> [f64, f64]
+  MO_F64_Sin -> [f64]
+  MO_F64_Cos -> [f64]
+  MO_F64_Tan -> [f64]
+  MO_F64_Sinh -> [f64]
+  MO_F64_Cosh -> [f64]
+  MO_F64_Tanh -> [f64]
+  MO_F64_Asin -> [f64]
+  MO_F64_Acos -> [f64]
+  MO_F64_Atan -> [f64]
+  MO_F64_Asinh -> [f64]
+  MO_F64_Acosh -> [f64]
+  MO_F64_Atanh -> [f64]
+  MO_F64_Log -> [f64]
+  MO_F64_Log1P -> [f64]
+  MO_F64_Exp -> [f64]
+  MO_F64_ExpM1 -> [f64]
+  MO_F64_Fabs -> [f64]
+  MO_F64_Sqrt -> [f64]
+  MO_F32_Pwr -> [f32, f32]
+  MO_F32_Sin -> [f32]
+  MO_F32_Cos -> [f32]
+  MO_F32_Tan -> [f32]
+  MO_F32_Sinh -> [f32]
+  MO_F32_Cosh -> [f32]
+  MO_F32_Tanh -> [f32]
+  MO_F32_Asin -> [f32]
+  MO_F32_Acos -> [f32]
+  MO_F32_Atan -> [f32]
+  MO_F32_Asinh -> [f32]
+  MO_F32_Acosh -> [f32]
+  MO_F32_Atanh -> [f32]
+  MO_F32_Log -> [f32]
+  MO_F32_Log1P -> [f32]
+  MO_F32_Exp -> [f32]
+  MO_F32_ExpM1 -> [f32]
+  MO_F32_Fabs -> [f32]
+  MO_F32_Sqrt -> [f32]
+  MO_I64_ToI -> [b64]
+  MO_I64_FromI -> [bWord platform]
+  MO_W64_ToW -> [b64]
+  MO_W64_FromW -> [bWord platform]
+  MO_x64_Neg -> [b64]
+  MO_x64_Add -> [b64]
+  MO_x64_Sub -> [b64]
+  MO_x64_Mul -> [b64]
+  MO_I64_Quot -> [b64,b64]
+  MO_I64_Rem -> [b64,b64]
+  MO_W64_Quot -> [b64,b64]
+  MO_W64_Rem -> [b64,b64]
+  MO_x64_And -> [b64,b64]
+  MO_x64_Or -> [b64,b64]
+  MO_x64_Xor -> [b64,b64]
+  MO_x64_Not -> [b64]
+  MO_x64_Shl -> [b64,b64]
+  MO_I64_Shr -> [b64,b64]
+  MO_W64_Shr -> [b64,b64]
+  MO_x64_Eq -> [b64,b64]
+  MO_x64_Ne -> [b64,b64]
+  MO_I64_Ge -> [b64,b64]
+  MO_I64_Gt -> [b64,b64]
+  MO_I64_Le -> [b64,b64]
+  MO_I64_Lt -> [b64,b64]
+  MO_W64_Ge -> [b64,b64]
+  MO_W64_Gt -> [b64,b64]
+  MO_W64_Le -> [b64,b64]
+  MO_W64_Lt -> [b64,b64]
+  MO_UF_Conv _w -> [bWord platform] -- Word to Float/Double
+  MO_S_Mul2    w -> [cmmBits w, cmmBits w]
+  MO_S_QuotRem w -> [cmmBits w, cmmBits w]
+  MO_U_QuotRem w -> [cmmBits w, cmmBits w]
+  MO_U_QuotRem2 w -> [cmmBits w, cmmBits w]
+  MO_Add2      w -> [cmmBits w, cmmBits w]
+  MO_AddWordC  w -> [cmmBits w, cmmBits w]
+  MO_SubWordC  w -> [cmmBits w, cmmBits w]
+  MO_AddIntC   w -> [cmmBits w, cmmBits w]
+  MO_SubIntC   w -> [cmmBits w, cmmBits w]
+  MO_U_Mul2    w -> [cmmBits w, cmmBits w]
+  MO_VS_Quot l w -> [cmmVec l (cmmBits w), cmmVec l (cmmBits w)]
+  MO_VS_Rem  l w -> [cmmVec l (cmmBits w), cmmVec l (cmmBits w)]
+  MO_VU_Quot l w -> [cmmVec l (cmmBits w), cmmVec l (cmmBits w)]
+  MO_VU_Rem  l w -> [cmmVec l (cmmBits w), cmmVec l (cmmBits w)]
+  MO_I64X2_Min -> [cmmVec 2 (cmmBits W64), cmmVec 2 (cmmBits W64)]
+  MO_I64X2_Max -> [cmmVec 2 (cmmBits W64), cmmVec 2 (cmmBits W64)]
+  MO_W64X2_Min -> [cmmVec 2 (cmmBits W64), cmmVec 2 (cmmBits W64)]
+  MO_W64X2_Max -> [cmmVec 2 (cmmBits W64), cmmVec 2 (cmmBits W64)]
+  MO_Touch -> [gcWord platform]
+  MO_Prefetch_Data _n -> [addr]
+  MO_Memcpy _align -> [addr, addr, bWord platform]
+  MO_Memset _align ->
+    [ addr
+    , bWord platform -- byte to set: supplied as an int, converted to a byte
+    , bWord platform]
+  MO_Memmove _align -> [addr, addr, bWord platform]
+  MO_Memcmp _align -> [addr, addr, bWord platform]
+  MO_PopCnt w ->
+    case w of
+      W64 -> [cmmBits W64]
+      _   -> [bWord platform]
+  MO_Pdep w ->
+    case w of
+      W64 -> [cmmBits W64, cmmBits W64]
+      _   -> [bWord platform, bWord platform]
+  MO_Pext w ->
+    case w of
+      W64 -> [cmmBits W64, cmmBits W64]
+      _   -> [bWord platform, bWord platform]
+  MO_Clz w ->
+    case w of
+      W64 -> [cmmBits W64]
+      _   -> [bWord platform]
+  MO_Ctz w ->
+    case w of
+      W64 -> [cmmBits W64]
+      _   -> [bWord platform]
+  MO_BSwap w ->
+    case w of
+      W64 -> [cmmBits W64]
+      _   -> [bWord platform]
+  MO_BRev w ->
+    case w of
+      W64 -> [cmmBits W64]
+      _   -> [bWord platform]
+  MO_AcquireFence -> []
+  MO_ReleaseFence -> []
+  MO_SeqCstFence -> []
+  MO_AtomicRMW w _op -> [addr, cmmBits w]
+  MO_AtomicRead _w _mem_ordering -> [addr]
+  MO_AtomicWrite w _mem_ordering -> [addr, cmmBits w]
+  MO_Cmpxchg w -> [addr, cmmBits w, cmmBits w]
+  MO_Xchg w -> [addr, cmmBits w]
+  MO_SuspendThread -> []
+  MO_ResumeThread -> []
+  where
+    addr = bWord platform

@@ -33,6 +33,7 @@ import GHC.Hs.Type
 import GHC.Hs.Pat
 import GHC.Hs.ImpExp
 import GHC.Parser.Annotation
+import GHC.Types.Name.Reader (WithUserRdr(..))
 import GHC.Data.BooleanFormula (BooleanFormula(..))
 import Language.Haskell.Syntax.Extension (Anno)
 
@@ -110,9 +111,6 @@ deriving instance Data (HsPatSynDir GhcPs)
 deriving instance Data (HsPatSynDir GhcRn)
 deriving instance Data (HsPatSynDir GhcTc)
 
-deriving instance Data (HsMultAnn GhcPs)
-deriving instance Data (HsMultAnn GhcRn)
-deriving instance Data (HsMultAnn GhcTc)
 -- ---------------------------------------------------------------------
 -- Data derivations from GHC.Hs.Decls ----------------------------------
 
@@ -260,6 +258,13 @@ deriving instance Data (RuleDecl GhcTc)
 deriving instance Data (RuleBndr GhcPs)
 deriving instance Data (RuleBndr GhcRn)
 deriving instance Data (RuleBndr GhcTc)
+
+deriving instance Data (RuleBndrs GhcPs)
+deriving instance Data (RuleBndrs GhcRn)
+deriving instance Data (RuleBndrs GhcTc)
+
+deriving instance Data TcSpecPrags
+deriving instance Data TcSpecPrag
 
 -- deriving instance (DataId p)     => Data (WarnDecls p)
 deriving instance Data (WarnDecls GhcPs)
@@ -456,10 +461,6 @@ deriving instance Data (Pat GhcTc)
 
 deriving instance Data ConPatTc
 
-deriving instance Data (HsConPatTyArg GhcPs)
-deriving instance Data (HsConPatTyArg GhcRn)
-deriving instance Data (HsConPatTyArg GhcTc)
-
 deriving instance (Data a, Data b) => Data (HsFieldBind a b)
 
 deriving instance (Data body) => Data (HsRecFields GhcPs body)
@@ -529,33 +530,35 @@ deriving instance Data (HsType GhcPs)
 deriving instance Data (HsType GhcRn)
 deriving instance Data (HsType GhcTc)
 
+deriving instance Data HsTypeGhcPsExt
+
 -- deriving instance (DataIdLR p p) => Data (HsTyLit p)
 deriving instance Data (HsTyLit GhcPs)
 deriving instance Data (HsTyLit GhcRn)
 deriving instance Data (HsTyLit GhcTc)
 
--- deriving instance (Data mult, DataIdLR p p) => Data (HsArrowOf mult p)
-deriving instance Data (HsArrowOf (LocatedA (HsType GhcPs)) GhcPs)
-deriving instance Data (HsArrowOf (LocatedA (HsType GhcRn)) GhcRn)
-deriving instance Data (HsArrowOf (LocatedA (HsType GhcTc)) GhcTc)
-deriving instance Data (HsArrowOf (LocatedA (HsExpr GhcPs)) GhcPs)
-deriving instance Data (HsArrowOf (LocatedA (HsExpr GhcRn)) GhcRn)
-deriving instance Data (HsArrowOf (LocatedA (HsExpr GhcTc)) GhcTc)
-
--- deriving instance (DataIdLR p p) => Data (HsScaled p a)
-deriving instance Data thing => Data (HsScaled GhcPs thing)
-deriving instance Data thing => Data (HsScaled GhcRn thing)
-deriving instance Data thing => Data (HsScaled GhcTc thing)
+-- deriving instance (Data mult, DataIdLR p p) => Data (HsMultAnnOf mult p)
+deriving instance Data (HsMultAnnOf (LocatedA (HsType GhcPs)) GhcPs)
+deriving instance Data (HsMultAnnOf (LocatedA (HsType GhcRn)) GhcRn)
+deriving instance Data (HsMultAnnOf (LocatedA (HsType GhcRn)) GhcTc)
+deriving instance Data (HsMultAnnOf (LocatedA (HsExpr GhcPs)) GhcPs)
+deriving instance Data (HsMultAnnOf (LocatedA (HsExpr GhcRn)) GhcRn)
+deriving instance Data (HsMultAnnOf (LocatedA (HsExpr GhcTc)) GhcTc)
 
 -- deriving instance (Data a, Data b) => Data (HsArg p a b)
 deriving instance (Data a, Data b) => Data (HsArg GhcPs a b)
 deriving instance (Data a, Data b) => Data (HsArg GhcRn a b)
 deriving instance (Data a, Data b) => Data (HsArg GhcTc a b)
 
--- deriving instance (DataIdLR p p) => Data (ConDeclField p)
-deriving instance Data (ConDeclField GhcPs)
-deriving instance Data (ConDeclField GhcRn)
-deriving instance Data (ConDeclField GhcTc)
+-- deriving instance (DataIdLR p p) => Data (HsConDeclRecField p)
+deriving instance Data (HsConDeclRecField GhcPs)
+deriving instance Data (HsConDeclRecField GhcRn)
+deriving instance Data (HsConDeclRecField GhcTc)
+
+-- deriving instance (DataIdLR p p, Typeable on) => Data (HsConDeclField on p)
+deriving instance Data (HsConDeclField GhcPs)
+deriving instance Data (HsConDeclField GhcRn)
+deriving instance Data (HsConDeclField GhcTc)
 
 -- deriving instance (DataId p)     => Data (FieldOcc p)
 deriving instance Data (FieldOcc GhcPs)
@@ -581,6 +584,7 @@ deriving instance Eq (IE GhcTc)
 
 deriving instance Data HsThingRn
 deriving instance Data XXExprGhcRn
+deriving instance Data a => Data (WithUserRdr a)
 
 -- ---------------------------------------------------------------------
 

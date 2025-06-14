@@ -1,9 +1,6 @@
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE LambdaCase #-}
 
-{-# OPTIONS_GHC -Wno-incomplete-record-updates #-}
-{-# OPTIONS_GHC -Wno-incomplete-uni-patterns   #-}
-
 {-
 (c) The University of Glasgow 2006
 (c) The GRASP/AQUA Project, Glasgow University, 1992-1998
@@ -52,6 +49,7 @@ import GHC.Core.Predicate
 import GHC.Core.TyCo.FVs
 import GHC.Core.TyCo.Rep
 import GHC.Core.TyCo.Ppr
+import GHC.Core.TyCo.Tidy
 import GHC.Core.FamInstEnv ( isDominatedBy, injectiveBranches
                            , InjectivityCheckResult(..) )
 
@@ -374,7 +372,6 @@ checkValidType ctxt ty
                = case ctxt of
                  DefaultDeclCtxt-> MustBeMonoType
                  PatSigCtxt     -> rank0
-                 RuleSigCtxt {} -> rank1
                  TySynCtxt _    -> rank0
 
                  ExprSigCtxt {} -> rank1
@@ -398,10 +395,11 @@ checkValidType ctxt ty
                  SpecInstCtxt   -> rank1
                  GhciCtxt {}    -> ArbitraryRank
 
-                 TyVarBndrKindCtxt _ -> rank0
-                 DataKindCtxt _      -> rank1
-                 TySynKindCtxt _     -> rank1
-                 TyFamResKindCtxt _  -> rank1
+                 TyVarBndrKindCtxt {} -> rank0
+                 RuleBndrTypeCtxt{}   -> rank1
+                 DataKindCtxt _       -> rank1
+                 TySynKindCtxt _      -> rank1
+                 TyFamResKindCtxt _   -> rank1
 
                  _              -> panic "checkValidType"
                                           -- Can't happen; not used for *user* sigs
@@ -535,7 +533,7 @@ typeOrKindCtxt (ExprSigCtxt {})     = OnlyTypeCtxt
 typeOrKindCtxt (TypeAppCtxt {})     = OnlyTypeCtxt
 typeOrKindCtxt (PatSynCtxt {})      = OnlyTypeCtxt
 typeOrKindCtxt (PatSigCtxt {})      = OnlyTypeCtxt
-typeOrKindCtxt (RuleSigCtxt {})     = OnlyTypeCtxt
+typeOrKindCtxt (RuleBndrTypeCtxt {})= OnlyTypeCtxt
 typeOrKindCtxt (ForSigCtxt {})      = OnlyTypeCtxt
 typeOrKindCtxt (DefaultDeclCtxt {}) = OnlyTypeCtxt
 typeOrKindCtxt (InstDeclCtxt {})    = OnlyTypeCtxt
@@ -1457,7 +1455,7 @@ okIPCtxt (StandaloneKindSigCtxt {}) = False
 okIPCtxt (ClassSCCtxt {})       = False
 okIPCtxt (InstDeclCtxt {})      = False
 okIPCtxt (SpecInstCtxt {})      = False
-okIPCtxt (RuleSigCtxt {})       = False
+okIPCtxt (RuleBndrTypeCtxt {})  = False
 okIPCtxt DefaultDeclCtxt        = False
 okIPCtxt DerivClauseCtxt        = False
 okIPCtxt (TyVarBndrKindCtxt {}) = False
@@ -1566,7 +1564,7 @@ check_special_inst_head dflags hs_src ctxt clas cls_args
   | isAbstractClass clas
   , hs_src == HsSrcFile
   = fail_with_inst_err $ IllegalInstanceHead
-                       $ InstHeadAbstractClass clas
+                       $ InstHeadAbstractClass (noUserRdr $ className clas)
 
   -- Complain about hand-written instances of built-in classes
   -- Typeable, KnownNat, KnownSymbol, Coercible, HasField.
@@ -2113,9 +2111,10 @@ checkValidInstance ctxt hs_type ty = case tau of
         ; traceTc "End checkValidInstance }" empty }
     | otherwise
     -> failWithTc $ mk_err $ IllegalInstanceHead
-                           $ InstHeadNonClass (Just tc)
+                           $ InstHeadNonClassHead
+                           $ InstNonClassTyCon (noUserRdr $ tyConName tc) (fmap tyConName $ tyConFlavour tc)
   _ -> failWithTc $ mk_err $ IllegalInstanceHead
-                           $ InstHeadNonClass Nothing
+                           $ InstHeadNonClassHead InstNonTyCon
   where
     (theta, tau) = splitInstTyForValidity ty
 
@@ -2614,7 +2613,7 @@ checkConsistentFamInst (InClsInst { ai_class = clas
     -- The /scoped/ type variables from the class-instance header
     -- should not be alpha-renamed.  Inferred ones can be.
     no_bind_set = mkVarSet inst_tvs
-    bind_me tv _ty | tv `elemVarSet` no_bind_set = Apart
+    bind_me tv _ty | tv `elemVarSet` no_bind_set = DontBindMe
                    | otherwise                   = BindMe
 
 

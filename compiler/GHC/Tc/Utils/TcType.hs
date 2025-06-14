@@ -88,7 +88,7 @@ module GHC.Tc.Utils.TcType (
   isSigmaTy, isRhoTy, isRhoExpTy, isOverloadedTy,
   isFloatingPrimTy, isDoubleTy, isFloatTy, isIntTy, isWordTy, isStringTy,
   isIntegerTy, isNaturalTy,
-  isBoolTy, isUnitTy, isCharTy,
+  isBoolTy, isUnitTy, isAnyTy, isZonkAnyTy, isCharTy,
   isTauTy, isTauTyCon, tcIsTyVarTy,
   isPredTy, isTyVarClassPred,
   checkValidClsArgs, hasTyVarHead,
@@ -606,7 +606,8 @@ data TcTyVarDetails
                   --     how this level number is used
        Bool       -- True <=> this skolem type variable can be overlapped
                   --          when looking up instances
-                  -- See Note [Binding when looking up instances] in GHC.Core.InstEnv
+                  -- See Note [Super skolems: binding when looking up instances]
+                  --     in GHC.Core.InstEnv
 
   | RuntimeUnk    -- Stands for an as-yet-unknown type in the GHCi
                   -- interactive context
@@ -648,7 +649,7 @@ data MetaInfo
    | RuntimeUnkTv  -- ^ A unification variable used in the GHCi debugger.
                    -- It /is/ allowed to unify with a polytype, unlike TauTv
 
-   | CycleBreakerTv  -- Used to fix occurs-check problems in Givens
+   | CycleBreakerTv  -- ^ Used to fix occurs-check problems in Givens
                      -- See Note [Type equality cycles] in
                      -- GHC.Tc.Solver.Equality
 
@@ -1653,7 +1654,7 @@ tcSplitFunTysN n ty
  = Left n
 
 tcSplitFunTy :: Type -> (Scaled Type, Type)
-tcSplitFunTy  ty = expectJust "tcSplitFunTy" (tcSplitFunTy_maybe ty)
+tcSplitFunTy  ty = expectJust (tcSplitFunTy_maybe ty)
 
 tcFunArgTy :: Type -> Scaled Type
 tcFunArgTy ty = fst (tcSplitFunTy ty)
@@ -2005,7 +2006,7 @@ isFloatTy, isDoubleTy,
     isFloatPrimTy, isDoublePrimTy,
     isIntegerTy, isNaturalTy,
     isIntTy, isWordTy, isBoolTy,
-    isUnitTy, isCharTy :: Type -> Bool
+    isUnitTy, isAnyTy, isZonkAnyTy, isCharTy :: Type -> Bool
 isFloatTy      = is_tc floatTyConKey
 isDoubleTy     = is_tc doubleTyConKey
 isFloatPrimTy  = is_tc floatPrimTyConKey
@@ -2016,6 +2017,8 @@ isIntTy        = is_tc intTyConKey
 isWordTy       = is_tc wordTyConKey
 isBoolTy       = is_tc boolTyConKey
 isUnitTy       = is_tc unitTyConKey
+isAnyTy        = is_tc anyTyConKey
+isZonkAnyTy    = is_tc zonkAnyTyConKey
 isCharTy       = is_tc charTyConKey
 
 -- | Check whether the type is of the form @Any :: k@,

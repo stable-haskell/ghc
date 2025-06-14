@@ -17,8 +17,6 @@
 --
 -------------------------------------------------------------------------------
 
-{-# OPTIONS_GHC -Wno-incomplete-uni-patterns #-}
-
 module GHC.Driver.Session (
         -- * Dynamic flags and associated configuration types
         DumpFlag(..),
@@ -207,6 +205,9 @@ module GHC.Driver.Session (
         setUnsafeGlobalDynFlags,
 
         -- * SSE and AVX
+        isSse3Enabled,
+        isSsse3Enabled,
+        isSse4_1Enabled,
         isSse4_2Enabled,
         isBmiEnabled,
         isBmi2Enabled,
@@ -235,6 +236,7 @@ import GHC.Prelude
 import GHC.Platform
 import GHC.Platform.Ways
 import GHC.Platform.Profile
+import GHC.Platform.ArchOS
 
 import GHC.Unit.Types
 import GHC.Unit.Parser
@@ -249,6 +251,7 @@ import GHC.Driver.Plugins.External
 import GHC.Settings.Config
 import GHC.Core.Unfold
 import GHC.Driver.CmdLine
+import GHC.Utils.Logger
 import GHC.Utils.Panic
 import GHC.Utils.Misc
 import GHC.Utils.Constants (debugIsOn)
@@ -267,7 +270,7 @@ import GHC.Data.FastString
 import GHC.Utils.TmpFs
 import GHC.Utils.Fingerprint
 import GHC.Utils.Outputable
-import GHC.Utils.Error (emptyDiagOpts)
+import GHC.Utils.Error (emptyDiagOpts, logInfo)
 import GHC.Settings
 import GHC.CmmToAsm.CFG.Weight
 import GHC.Core.Opt.CallerCC
@@ -285,6 +288,7 @@ import Data.Functor.Identity
 import Data.Ord
 import Data.Char
 import Data.List (intercalate, sortBy, partition)
+import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map as Map
 import qualified Data.Set as Set
@@ -707,15 +711,15 @@ setDumpPrefixForce f d = d { dumpPrefixForce = f}
 -- XXX HACK: Prelude> words "'does not' work" ===> ["'does","not'","work"]
 -- Config.hs should really use Option.
 setPgmP   f = alterToolSettings (\s -> s { toolSettings_pgm_P   = (pgm, map Option args)})
-  where (pgm:args) = words f
+  where pgm:|args = expectNonEmpty $ words f
 -- XXX HACK: Prelude> words "'does not' work" ===> ["'does","not'","work"]
 -- Config.hs should really use Option.
 setPgmJSP   f = alterToolSettings (\s -> s { toolSettings_pgm_JSP   = (pgm, map Option args)})
-  where (pgm:args) = words f
+  where pgm:|args = expectNonEmpty $ words f
 -- XXX HACK: Prelude> words "'does not' work" ===> ["'does","not'","work"]
 -- Config.hs should really use Option.
 setPgmCmmP f = alterToolSettings (\s -> s { toolSettings_pgm_CmmP = (pgm, map Option args)})
-  where (pgm:args) = words f
+  where pgm:|args = expectNonEmpty $ words f
 addOptl   f = alterToolSettings (\s -> s { toolSettings_opt_l   = f : toolSettings_opt_l s})
 addOptc   f = alterToolSettings (\s -> s { toolSettings_opt_c   = f : toolSettings_opt_c s})
 addOptcxx f = alterToolSettings (\s -> s { toolSettings_opt_cxx = f : toolSettings_opt_cxx s})
@@ -807,7 +811,7 @@ updOptLevel n = fst . updOptLevelChanged n
 -- the parsed 'DynFlags', the left-over arguments, and a list of warnings.
 -- Throws a 'UsageError' if errors occurred during parsing (such as unknown
 -- flags or missing arguments).
-parseDynamicFlagsCmdLine :: MonadIO m => DynFlags -> [Located String]
+parseDynamicFlagsCmdLine :: MonadIO m => Logger -> DynFlags -> [Located String]
                          -> m (DynFlags, [Located String], Messages DriverMessage)
                             -- ^ Updated 'DynFlags', left-over arguments, and
                             -- list of warnings.
@@ -817,7 +821,7 @@ parseDynamicFlagsCmdLine = parseDynamicFlagsFull flagsAll True
 -- | Like 'parseDynamicFlagsCmdLine' but does not allow the package flags
 -- (-package, -hide-package, -ignore-package, -hide-all-packages, -package-db).
 -- Used to parse flags set in a modules pragma.
-parseDynamicFilePragma :: MonadIO m => DynFlags -> [Located String]
+parseDynamicFilePragma :: MonadIO m => Logger -> DynFlags -> [Located String]
                        -> m (DynFlags, [Located String], Messages DriverMessage)
                           -- ^ Updated 'DynFlags', left-over arguments, and
                           -- list of warnings.
@@ -866,10 +870,11 @@ parseDynamicFlagsFull
     :: forall m. MonadIO m
     => [Flag (CmdLineP DynFlags)]    -- ^ valid flags to match against
     -> Bool                          -- ^ are the arguments from the command line?
+    -> Logger                        -- ^ logger
     -> DynFlags                      -- ^ current dynamic flags
     -> [Located String]              -- ^ arguments to parse
     -> m (DynFlags, [Located String], Messages DriverMessage)
-parseDynamicFlagsFull activeFlags cmdline dflags0 args = do
+parseDynamicFlagsFull activeFlags cmdline logger dflags0 args = do
   ((leftover, errs, cli_warns), dflags1) <- processCmdLineP activeFlags dflags0 args
 
   -- See Note [Handling errors when parsing command-line flags]
@@ -885,7 +890,7 @@ parseDynamicFlagsFull activeFlags cmdline dflags0 args = do
       throwGhcExceptionIO (CmdLineError ("combination not supported: " ++
                                intercalate "/" (map wayDesc (Set.toAscList theWays))))
 
-  let (dflags3, consistency_warnings) = makeDynFlagsConsistent dflags2
+  let (dflags3, consistency_warnings, infoverb) = makeDynFlagsConsistent dflags2
 
   -- Set timer stats & heap size
   when (enableTimeStats dflags3) $ liftIO enableTimingStats
@@ -898,6 +903,9 @@ parseDynamicFlagsFull activeFlags cmdline dflags0 args = do
   -- create message envelopes using final DynFlags: #23402
   let diag_opts = initDiagOpts dflags3
       warns = warnsToMessages diag_opts $ mconcat [consistency_warnings, sh_warns, cli_warns]
+
+  when (logVerbAtLeast logger 3) $
+    mapM_ (\(L _loc m) -> liftIO $ logInfo logger m) infoverb
 
   return (dflags3, leftover, warns)
 
@@ -1303,6 +1311,8 @@ dynamic_flags_deps = [
         (NoArg (unSetGeneralFlag Opt_AutoLinkPackages))
   , make_ord_flag defGhcFlag "no-hs-main"
         (NoArg (setGeneralFlag Opt_NoHsMain))
+  , make_ord_flag defGhcFlag "no-rts"
+        (NoArg (setGeneralFlag Opt_NoRts))
   , make_ord_flag defGhcFlag "fno-state-hack"
         (NoArg (setGeneralFlag Opt_G_NoStateHack))
   , make_ord_flag defGhcFlag "fno-opt-coercion"
@@ -1668,6 +1678,8 @@ dynamic_flags_deps = [
                                                   d { sseVersion = Just SSE2 }))
   , make_ord_flag defGhcFlag "msse3"        (noArg (\d ->
                                                   d { sseVersion = Just SSE3 }))
+  , make_ord_flag defGhcFlag "mssse3"       (noArg (\d ->
+                                                  d { sseVersion = Just SSSE3 }))
   , make_ord_flag defGhcFlag "msse4"        (noArg (\d ->
                                                   d { sseVersion = Just SSE4 }))
   , make_ord_flag defGhcFlag "msse4.2"      (noArg (\d ->
@@ -1835,6 +1847,19 @@ dynamic_flags_deps = [
       (intSuffix (\n d -> d {maxForcedSpecArgs = n}))
   , make_ord_flag defGhciFlag "fghci-hist-size"
       (intSuffix (\n d -> d {ghciHistSize = n}))
+
+  -- wasm ghci browser mode
+  , make_ord_flag defGhciFlag "fghci-browser-host"
+      $ hasArg $ \f d -> d { ghciBrowserHost = f }
+  , make_ord_flag defGhciFlag "fghci-browser-port"
+      $ intSuffix $ \n d -> d { ghciBrowserPort = n }
+  , make_ord_flag defGhciFlag "fghci-browser-puppeteer-launch-opts"
+      $ hasArg $ \f d -> d { ghciBrowserPuppeteerLaunchOpts = Just f }
+  , make_ord_flag defGhciFlag "fghci-browser-playwright-browser-type"
+      $ hasArg $ \f d -> d { ghciBrowserPlaywrightBrowserType = Just f }
+  , make_ord_flag defGhciFlag "fghci-browser-playwright-launch-opts"
+      $ hasArg $ \f d -> d { ghciBrowserPlaywrightLaunchOpts = Just f }
+
   , make_ord_flag defGhcFlag "fmax-inline-alloc-size"
       (intSuffix (\n d -> d { maxInlineAllocSize = n }))
   , make_ord_flag defGhcFlag "fmax-inline-memcpy-insns"
@@ -2242,7 +2267,9 @@ wWarningFlagsDeps = [minBound..maxBound] >>= \x -> case x of
   Opt_WarnAmbiguousFields -> warnSpec x
   Opt_WarnAutoOrphans -> depWarnSpec x "it has no effect"
   Opt_WarnCPPUndef -> warnSpec x
-  Opt_WarnBadlyStagedTypes -> warnSpec x
+  Opt_WarnBadlyLevelledTypes ->
+    warnSpec x ++
+    subWarnSpec "badly-staged-types" x "it is renamed to -Wbadly-levelled-types"
   Opt_WarnUnbangedStrictPatterns -> warnSpec x
   Opt_WarnDeferredTypeErrors -> warnSpec x
   Opt_WarnDeferredOutOfScopeVariables -> warnSpec x
@@ -2310,7 +2337,6 @@ wWarningFlagsDeps = [minBound..maxBound] >>= \x -> case x of
   Opt_WarnMisplacedPragmas -> warnSpec x
   Opt_WarnUnsafe -> warnSpec' x setWarnUnsafe
   Opt_WarnUnsupportedCallingConventions -> warnSpec x
-  Opt_WarnUnsupportedLlvmVersion -> warnSpec x
   Opt_WarnMissedExtraSharedLib -> warnSpec x
   Opt_WarnUntickedPromotedConstructors -> warnSpec x
   Opt_WarnUnusedDoBind -> warnSpec x
@@ -2359,6 +2385,11 @@ wWarningFlagsDeps = [minBound..maxBound] >>= \x -> case x of
   Opt_WarnDataKindsTC -> warnSpec x
   Opt_WarnDefaultedExceptionContext -> warnSpec x
   Opt_WarnViewPatternSignatures -> warnSpec x
+  Opt_WarnUselessSpecialisations -> warnSpec x
+  Opt_WarnDeprecatedPragmas -> warnSpec x
+  Opt_WarnRuleLhsEqualities -> warnSpec x
+  Opt_WarnUnusableUnpackPragmas -> warnSpec x
+  Opt_WarnPatternNamespaceSpecifier -> warnSpec x
 
 warningGroupsDeps :: [(Deprecation, FlagSpec WarningGroup)]
 warningGroupsDeps = map mk warningGroups
@@ -2463,10 +2494,16 @@ fFlagsDeps = [
   flagSpec "gen-manifest"                     Opt_GenManifest,
   flagSpec "ghci-history"                     Opt_GhciHistory,
   flagSpec "ghci-leak-check"                  Opt_GhciLeakCheck,
+  flagSpec "inter-module-far-jumps"               Opt_InterModuleFarJumps,
   flagSpec "validate-ide-info"                Opt_ValidateHie,
   flagGhciSpec "local-ghci-history"           Opt_LocalGhciHistory,
   flagGhciSpec "no-it"                        Opt_NoIt,
   flagSpec "ghci-sandbox"                     Opt_GhciSandbox,
+
+  -- wasm ghci browser mode
+  flagGhciSpec "ghci-browser"                 Opt_GhciBrowser,
+  flagGhciSpec "ghci-browser-redirect-wasi-console" Opt_GhciBrowserRedirectWasiConsole,
+
   flagSpec "helpful-errors"                   Opt_HelpfulErrors,
   flagSpec "hpc"                              Opt_Hpc,
   flagSpec "ignore-asserts"                   Opt_IgnoreAsserts,
@@ -2529,6 +2566,8 @@ fFlagsDeps = [
   flagSpec "use-rpaths"                       Opt_RPath,
   flagSpec "write-interface"                  Opt_WriteInterface,
   flagSpec "write-if-simplified-core"         Opt_WriteIfSimplifiedCore,
+  flagSpec "write-if-self-recomp"             Opt_WriteSelfRecompInfo,
+  flagSpec "write-if-self-recomp-flags"       Opt_WriteSelfRecompFlags,
   flagSpec "write-ide-info"                   Opt_WriteHie,
   flagSpec "unbox-small-strict-fields"        Opt_UnboxSmallStrictFields,
   flagSpec "unbox-strict-fields"              Opt_UnboxStrictFields,
@@ -3371,7 +3410,9 @@ picCCOpts dflags =
             else [])
       -- gcc may be configured to have PIC on by default, let's be
       -- explicit here, see #15847
-       | otherwise -> ["-fno-PIC"]
+      -- FIXME: actually no, because -fPIC may be required for ASLR too!
+      -- Zig cc doesn't support `-fno-pic` in this case
+       | otherwise -> [] -- ["-fno-PIC"]
 
 pieCCLDOpts :: DynFlags -> [String]
 pieCCLDOpts dflags
@@ -3422,6 +3463,9 @@ compilerInfo dflags
        ("Build platform",              cBuildPlatformString),
        ("Host platform",               cHostPlatformString),
        ("Target platform",             platformMisc_targetPlatformString $ platformMisc dflags),
+       ("target os string",            stringEncodeOS (platformOS (targetPlatform dflags))),
+       ("target arch string",          stringEncodeArch (platformArch (targetPlatform dflags))),
+       ("target word size in bits",    show (platformWordSizeInBits (targetPlatform dflags))),
        ("Have interpreter",            showBool $ platformMisc_ghcWithInterpreter $ platformMisc dflags),
        ("Object splitting supported",  showBool False),
        ("Have native code generator",  showBool $ platformNcgSupported platform),
@@ -3491,12 +3535,35 @@ combination when parsing flags, we also need to check when we update
 the flags; this is because API clients may parse flags but update the
 DynFlags afterwords, before finally running code inside a session (see
 T10052 and #10052).
+
+Host ways vs Build ways mismatch
+--------------------------------
+Many consistency checks aim to fix the situation where the wanted build ways
+are not compatible with the ways the compiler is built in. This happens when
+using the interpreter, TH, and the runtime linker, where the compiler cannot
+load objects compiled for ways not matching its own.
+
+For instance, a profiled-dynamic object can only be loaded by a
+profiled-dynamic compiler (and not any other kind of compiler).
+
+This incompatibility is traditionally solved in either of two ways:
+
+(1) Force the "wanted" build ways to match the compiler ways exactly,
+    guaranteeing they match.
+
+(2) Force the use of the external interpreter. When interpreting is offloaded
+    to the external interpreter it no longer matters what are the host compiler ways.
+
+In the checks and fixes performed by `makeDynFlagsConsistent`, the choice
+between the two does not seem uniform. TODO: Make this choice more evident and uniform.
 -}
 
 -- | Resolve any internal inconsistencies in a set of 'DynFlags'.
 -- Returns the consistent 'DynFlags' as well as a list of warnings
--- to report to the user.
-makeDynFlagsConsistent :: DynFlags -> (DynFlags, [Warn])
+-- to report to the user, and a list of verbose info msgs.
+--
+-- See Note [DynFlags consistency]
+makeDynFlagsConsistent :: DynFlags -> (DynFlags, [Warn], [Located SDoc])
 -- Whenever makeDynFlagsConsistent does anything, it starts over, to
 -- ensure that a later change doesn't invalidate an earlier check.
 -- Be careful not to introduce potential loops!
@@ -3587,13 +3654,49 @@ makeDynFlagsConsistent dflags
 
  | LinkMergedObj <- ghcLink dflags
  , Nothing <- outputFile dflags
- = pgmError "--output must be specified when using --merge-objs"
+    = pgmError "--output must be specified when using --merge-objs"
 
- | otherwise = (dflags, mempty)
+ | platformTablesNextToCode platform
+   && os == OSMinGW32
+   && arch == ArchAArch64
+    = case backendCodeOutput (backend dflags) of
+        LlvmCodeOutput -> pgmError "-fllvm is incompatible with enabled TablesNextToCode at Windows Aarch64"
+        NcgCodeOutput -> pgmError "-fasm is incompatible with enabled TablesNextToCode at Windows Aarch64"
+        _ -> (dflags, mempty, mempty)
+
+  -- When we do ghci, force using dyn ways if the target RTS linker
+  -- only supports dynamic code
+ | LinkInMemory <- ghcLink dflags
+ , sTargetRTSLinkerOnlySupportsSharedLibs $ settings dflags
+ , not (ways dflags `hasWay` WayDyn && gopt Opt_ExternalInterpreter dflags)
+    = flip loopNoWarn "Forcing dynamic way because target RTS linker only supports dynamic code" $
+        -- See checkOptions, -fexternal-interpreter is
+        -- required when using --interactive with a non-standard
+        -- way (-prof, -static, or -dynamic).
+        setGeneralFlag' Opt_ExternalInterpreter $
+        addWay' WayDyn dflags
+
+ | LinkInMemory <- ghcLink dflags
+ , not (gopt Opt_ExternalInterpreter dflags)
+ , targetWays_ dflags /= hostFullWays
+    = flip loopNoWarn "Forcing build ways to match the compiler ways because we're using the internal interpreter" $
+        let dflags_a = dflags { targetWays_ = hostFullWays }
+            dflags_b = foldl gopt_set dflags_a
+                     $ concatMap (wayGeneralFlags platform)
+                                 hostFullWays
+            dflags_c = foldl gopt_unset dflags_b
+                     $ concatMap (wayUnsetGeneralFlags platform)
+                                 hostFullWays
+        in dflags_c
+
+ | otherwise = (dflags, mempty, mempty)
     where loc = mkGeneralSrcSpan (fsLit "when making flags consistent")
           loop updated_dflags warning
               = case makeDynFlagsConsistent updated_dflags of
-                (dflags', ws) -> (dflags', L loc (DriverInconsistentDynFlags warning) : ws)
+                (dflags', ws, is) -> (dflags', L loc (DriverInconsistentDynFlags warning) : ws, is)
+          loopNoWarn updated_dflags doc
+              = case makeDynFlagsConsistent updated_dflags of
+                (dflags', ws, is) -> (dflags', ws, L loc (text doc):is)
           platform = targetPlatform dflags
           arch = platformArch platform
           os   = platformOS   platform

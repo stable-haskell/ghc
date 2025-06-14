@@ -25,7 +25,6 @@ module GHC.Iface.Load (
         -- IfM functions
         loadInterface,
         loadSysInterface, loadUserInterface, loadPluginInterface,
-        loadExternalGraphBelow,
         findAndReadIface, readIface, writeIface,
         flagsToIfCompression,
         moduleFreeHolesPrecise,
@@ -47,9 +46,8 @@ import GHC.Platform.Profile
 
 import {-# SOURCE #-} GHC.IfaceToCore
    ( tcIfaceDecls, tcIfaceRules, tcIfaceInst, tcIfaceFamInst
-   , tcIfaceAnnotations, tcIfaceCompleteMatches )
+   , tcIfaceAnnotations, tcIfaceCompleteMatches, tcIfaceDefaults)
 
-import GHC.Driver.Config.Finder
 import GHC.Driver.Env
 import GHC.Driver.Errors.Types
 import GHC.Driver.DynFlags
@@ -73,7 +71,6 @@ import GHC.Utils.Outputable as Outputable
 import GHC.Utils.Panic
 import GHC.Utils.Constants (debugIsOn)
 import GHC.Utils.Logger
-import GHC.Utils.Fingerprint( Fingerprint )
 
 import GHC.Settings.Constants
 
@@ -111,7 +108,6 @@ import GHC.Unit.Home
 import GHC.Unit.Home.PackageTable
 import GHC.Unit.Finder
 import GHC.Unit.Env
-import GHC.Unit.Module.External.Graph
 
 import GHC.Data.Maybe
 
@@ -123,7 +119,6 @@ import GHC.Driver.Env.KnotVars
 import {-# source #-} GHC.Driver.Main (loadIfaceByteCode)
 import GHC.Iface.Errors.Types
 import Data.Function ((&))
-import qualified Data.Set as Set
 import GHC.Unit.Module.Graph
 import qualified GHC.Unit.Home.Graph as HUG
 
@@ -414,112 +409,6 @@ loadInterfaceWithException doc mod_name where_from
     let ctx = initSDocContext dflags defaultUserStyle
     withIfaceErr ctx (loadInterface doc mod_name where_from)
 
--- | Load the part of the external module graph which is transitively reachable
--- from the given modules.
---
--- This operation is used just before TH splices are run (in 'getLinkDeps').
---
--- A field in the EPS tracks which home modules are already fully loaded, which we use
--- here to avoid trying to load them a second time.
---
--- The function takes a set of keys which are currently in the process of being loaded.
--- This is used to avoid duplicating work by loading keys twice if they appear along multiple
--- paths in the transitive closure. Once the interface and all its dependencies are
--- loaded, the key is added to the "fully loaded" set, so we know that it and it's
--- transitive closure are present in the graph.
---
--- Note that being "in progress" is different from being "fully loaded", consider if there
--- is an exception during `loadExternalGraphBelow`, then an "in progress" item may fail
--- to become fully loaded.
-loadExternalGraphBelow :: (Module -> SDoc) -> Maybe HomeUnit {-^ The current home unit -}
-                               -> Set.Set ExternalKey -> [Module] -> IfM lcl (Set.Set ExternalKey)
-loadExternalGraphBelow _ Nothing _ _ = panic "loadExternalGraphBelow: No home unit"
-loadExternalGraphBelow msg (Just home_unit) in_progress mods =
-  foldM (loadExternalGraphModule msg home_unit) in_progress mods
-
--- | Load the interface for a module, and all its transitive dependencies but
--- only if we haven't fully loaded the module already or are in the process of fully loading it.
-loadExternalGraphModule :: (Module -> SDoc) -> HomeUnit
-                         -> Set.Set ExternalKey
-                         -> Module
-                         -> IfM lcl (Set.Set ExternalKey)
-loadExternalGraphModule msg home_unit in_progress mod
-  | homeUnitId home_unit /= moduleUnitId mod = do
-      loadExternalPackageBelow in_progress (moduleUnitId mod)
-  | otherwise =  do
-
-      let key = ExternalModuleKey $ ModNodeKeyWithUid (GWIB (moduleName mod) NotBoot) (moduleUnitId mod)
-      graph <- eps_module_graph <$> getEps
-
-      if (not (isFullyLoadedModule key graph || Set.member key in_progress))
-        then actuallyLoadExternalGraphModule msg home_unit in_progress key mod
-        else return in_progress
-
--- | Load the interface for a module, and all its transitive dependenices.
-actuallyLoadExternalGraphModule
-  :: (Module -> SDoc)
-  -> HomeUnit
-  -> Set.Set ExternalKey
-  -> ExternalKey
-  -> Module
-  -> IOEnv (Env IfGblEnv lcl) (Set.Set ExternalKey)
-actuallyLoadExternalGraphModule msg home_unit in_progress key mod = do
-  dflags <- getDynFlags
-  let ctx = initSDocContext dflags defaultUserStyle
-  iface <- withIfaceErr ctx $
-    loadInterface (msg mod) mod (ImportByUser NotBoot)
-
-  let deps = mi_deps iface
-      mod_deps = dep_direct_mods deps
-      pkg_deps = dep_direct_pkgs deps
-
-  -- Do not attempt to load the same key again when traversing
-  let in_progress' = Set.insert key in_progress
-
-  -- Load all direct dependencies that are in the home package
-  cache_mods <- loadExternalGraphBelow msg (Just home_unit) in_progress'
-    $ map (\(uid, GWIB mn _) -> mkModule (RealUnit (Definite uid)) mn)
-    $ Set.toList mod_deps
-
-  -- Load all the package nodes, and packages beneath them.
-  cache_pkgs <- foldM loadExternalPackageBelow cache_mods (Set.toList pkg_deps)
-
-  registerFullyLoaded key
-  return cache_pkgs
-
-registerFullyLoaded :: ExternalKey -> IfM lcl ()
-registerFullyLoaded key = do
-    -- Update the external graph with this module being fully loaded.
-    logger <- getLogger
-    liftIO $ trace_if logger (text "Fully loaded:" <+> ppr key)
-    updateEps_ $ \eps ->
-      eps{eps_module_graph = setFullyLoadedModule key (eps_module_graph eps)}
-
-loadExternalPackageBelow :: Set.Set ExternalKey -> UnitId ->  IfM lcl (Set.Set ExternalKey)
-loadExternalPackageBelow in_progress uid = do
-    graph <- eps_module_graph <$> getEps
-    us    <- hsc_units <$> getTopEnv
-    let key = ExternalPackageKey uid
-    if not (isFullyLoadedModule key graph || Set.member key in_progress)
-      then do
-        let in_progress' = Set.insert key in_progress
-        case unitDepends <$> lookupUnitId us uid of
-          Just dep_uids -> do
-            loadPackageIntoEPSGraph uid dep_uids
-            final_cache <- foldM loadExternalPackageBelow in_progress' dep_uids
-            registerFullyLoaded key
-            return final_cache
-          Nothing -> pprPanic "loadExternalPackagesBelow: missing" (ppr uid)
-      else
-        return in_progress
-
-loadPackageIntoEPSGraph :: UnitId -> [UnitId] -> IfM lcl ()
-loadPackageIntoEPSGraph uid dep_uids =
-  updateEps_ $ \eps ->
-    eps { eps_module_graph =
-      extendExternalModuleGraph (NodeExternalPackage uid
-        (Set.fromList dep_uids)) (eps_module_graph eps) }
-
 ------------------
 loadInterface :: SDoc -> Module -> WhereFrom
               -> IfM lcl (MaybeErr MissingInterfaceError ModIface)
@@ -622,28 +511,21 @@ loadInterface doc_str mod from
         ; ignore_prags      <- goptM Opt_IgnoreInterfacePragmas
         ; new_eps_decls     <- tcIfaceDecls ignore_prags (mi_decls iface)
         ; new_eps_insts     <- mapM tcIfaceInst (mi_insts iface)
+        ; new_eps_defaults  <- tcIfaceDefaults mod (mi_defaults iface)
         ; new_eps_fam_insts <- mapM tcIfaceFamInst (mi_fam_insts iface)
         ; new_eps_rules     <- tcIfaceRules ignore_prags (mi_rules iface)
         ; new_eps_anns      <- tcIfaceAnnotations (mi_anns iface)
         ; new_eps_complete_matches <- tcIfaceCompleteMatches (mi_complete_matches iface)
         ; purged_hsc_env <- getTopEnv
 
-        ; let direct_deps = map (uncurry (flip ModNodeKeyWithUid)) $ (Set.toList (dep_direct_mods $ mi_deps iface))
-        ; let direct_pkg_deps = Set.toList $ dep_direct_pkgs $ mi_deps iface
-        ; let !module_graph_key =
-                if moduleUnitId mod `elem` hsc_all_home_unit_ids hsc_env
-                                    --- ^ home unit mods in eps can only happen in oneshot mode
-                  then Just $ NodeHomePackage (miKey iface) (map ExternalModuleKey direct_deps
-                                                            ++ map ExternalPackageKey direct_pkg_deps)
-                  else Nothing
-
         ; let final_iface = iface
                                & set_mi_decls     (panic "No mi_decls in PIT")
                                & set_mi_insts     (panic "No mi_insts in PIT")
+                               & set_mi_defaults  (panic "No mi_defaults in PIT")
                                & set_mi_fam_insts (panic "No mi_fam_insts in PIT")
                                & set_mi_rules     (panic "No mi_rules in PIT")
                                & set_mi_anns      (panic "No mi_anns in PIT")
-                               & set_mi_extra_decls (panic "No mi_extra_decls in PIT")
+                               & set_mi_simplified_core (panic "No mi_simplified_core in PIT")
 
               bad_boot = mi_boot iface == IsBoot
                           && isJust (lookupKnotVars (if_rec_types gbl_env) mod)
@@ -677,11 +559,6 @@ loadInterface doc_str mod from
                   eps_iface_bytecode = add_bytecode (eps_iface_bytecode eps),
                   eps_rule_base    = extendRuleBaseList (eps_rule_base eps)
                                                         new_eps_rules,
-                  eps_module_graph =
-                    let eps_graph'  = case module_graph_key of
-                                       Just k -> extendExternalModuleGraph k (eps_module_graph eps)
-                                       Nothing -> eps_module_graph eps
-                     in eps_graph',
                   eps_complete_matches
                                    = eps_complete_matches eps ++ new_eps_complete_matches,
                   eps_inst_env     = extendInstEnvList (eps_inst_env eps)
@@ -702,7 +579,9 @@ loadInterface doc_str mod from
                   eps_stats        = addEpsInStats (eps_stats eps)
                                                    (length new_eps_decls)
                                                    (length new_eps_insts)
-                                                   (length new_eps_rules) }
+                                                   (length new_eps_rules),
+                  eps_defaults    =  extendModuleEnv (eps_defaults eps) mod new_eps_defaults
+                                                   }
 
         ; -- invoke plugins with *full* interface, not final_iface, to ensure
           -- that plugins have access to declarations, etc.
@@ -789,6 +668,9 @@ dontLeakTheHUG thing_inside = do
         -- tweak.
         old_unit_env = hsc_unit_env hsc_env
         keepFor20509
+         -- oneshot mode does not support backpack
+         -- and we want to avoid prodding the hsc_mod_graph thunk
+         | isOneShot (ghcMode (hsc_dflags hsc_env)) = False
          | mgHasHoles (hsc_mod_graph hsc_env) = True
          | otherwise = False
         pruneHomeUnitEnv hme = do
@@ -1009,12 +891,10 @@ findAndReadIface hsc_env doc_str mod wanted_mod hi_boot_file = do
 
   let profile = targetProfile dflags
       unit_state = hsc_units hsc_env
-      fc         = hsc_FC hsc_env
       name_cache = hsc_NC hsc_env
       mhome_unit  = hsc_home_unit_maybe hsc_env
       dflags     = hsc_dflags hsc_env
       logger     = hsc_logger hsc_env
-      other_fopts = initFinderOpts . homeUnitEnv_dflags <$> (hsc_HUG hsc_env)
 
 
   trace_if logger (sep [hsep [text "Reading",
@@ -1033,9 +913,8 @@ findAndReadIface hsc_env doc_str mod wanted_mod hi_boot_file = do
           let iface = getGhcPrimIface hsc_env
           return (Succeeded (iface, panic "GHC.Prim ModLocation (findAndReadIface)"))
       else do
-          let fopts = initFinderOpts dflags
           -- Look for the file
-          mb_found <- liftIO (findExactModule fc fopts other_fopts unit_state mhome_unit mod hi_boot_file)
+          mb_found <- liftIO (findExactModule hsc_env mod hi_boot_file)
           case mb_found of
               InstalledFound loc -> do
                   -- See Note [Home module load error]
@@ -1082,7 +961,7 @@ load_dynamic_too :: Logger -> NameCache -> UnitState -> DynFlags
 load_dynamic_too logger name_cache unit_state dflags wanted_mod iface loc = do
   read_file logger name_cache unit_state dflags wanted_mod (ml_dyn_hi_file loc) >>= \case
     Succeeded (dynIface, _)
-     | mi_mod_hash (mi_final_exts iface) == mi_mod_hash (mi_final_exts dynIface)
+     | mi_mod_hash iface == mi_mod_hash dynIface
      -> return (Succeeded ())
      | otherwise ->
         do return $ (Failed $ DynamicHashMismatchError wanted_mod loc)
@@ -1098,7 +977,6 @@ read_file :: Logger -> NameCache -> UnitState -> DynFlags
           -> Module -> FilePath
           -> IO (MaybeErr ReadInterfaceError (ModIface, FilePath))
 read_file logger name_cache unit_state dflags wanted_mod file_path = do
-  trace_if logger (text "readIFace" <+> text file_path)
 
   -- Figure out what is recorded in mi_module.  If this is
   -- a fully definite interface, it'll match exactly, but
@@ -1109,7 +987,7 @@ read_file logger name_cache unit_state dflags wanted_mod file_path = do
             (_, Just indef_mod) ->
               instModuleToModule unit_state
                 (uninstantiateInstantiatedModule indef_mod)
-  read_result <- readIface dflags name_cache wanted_mod' file_path
+  read_result <- readIface logger dflags name_cache wanted_mod' file_path
   case read_result of
     Failed err      -> return (Failed err)
     Succeeded iface -> return (Succeeded (iface, file_path))
@@ -1136,12 +1014,14 @@ flagsToIfCompression dflags
 -- Failed err    <=> file not found, or unreadable, or illegible
 -- Succeeded iface <=> successfully found and parsed
 readIface
-  :: DynFlags
+  :: Logger
+  -> DynFlags
   -> NameCache
   -> Module
   -> FilePath
   -> IO (MaybeErr ReadInterfaceError ModIface)
-readIface dflags name_cache wanted_mod file_path = do
+readIface logger dflags name_cache wanted_mod file_path = do
+  trace_if logger (text "readIFace" <+> text file_path)
   let profile = targetProfile dflags
   res <- tryMost $ readBinIface profile name_cache CheckHiWay QuietBinIFace file_path
   case res of
@@ -1173,11 +1053,10 @@ ghcPrimIface
       & set_mi_exports  ghcPrimExports
       & set_mi_decls    []
       & set_mi_fixities ghcPrimFixities
-      & set_mi_final_exts ((mi_final_exts empty_iface)
-          { mi_fix_fn = mkIfaceFixCache ghcPrimFixities
-          , mi_decl_warn_fn = mkIfaceDeclWarnCache ghcPrimWarns
-          , mi_export_warn_fn = mkIfaceExportWarnCache ghcPrimWarns
-          })
+      & set_mi_fix_fn (mkIfaceFixCache ghcPrimFixities)
+      & set_mi_decl_warn_fn (mkIfaceDeclWarnCache ghcPrimWarns)
+      & set_mi_export_warn_fn (mkIfaceExportWarnCache ghcPrimWarns)
+      & set_mi_fix_fn (mkIfaceFixCache ghcPrimFixities)
       & set_mi_docs (Just ghcPrimDeclDocs) -- See Note [GHC.Prim Docs] in GHC.Builtin.Utils
       & set_mi_warns (toIfaceWarnings ghcPrimWarns) -- See Note [GHC.Prim Deprecations] in GHC.Builtin.Utils
 
@@ -1235,7 +1114,7 @@ showIface logger dflags unit_state name_cache filename = do
    iface <- readBinIface profile name_cache IgnoreHiWay (TraceBinIFace printer) filename
 
    let -- See Note [Name qualification with --show-iface]
-       qualifyImportedNames mod _
+       qualifyImportedNames mod _user_qual _
            | mod == mi_module iface = NameUnqual
            | otherwise              = NameNotInScope1
        name_ppr_ctx = QueryQualify qualifyImportedNames
@@ -1259,37 +1138,36 @@ pprModIfaceSimple unit_state iface =
 -- The UnitState is used to pretty-print units
 pprModIface :: UnitState -> ModIface -> SDoc
 pprModIface unit_state iface
- = vcat [ text "interface"
+ = vcat $ [ text "interface"
                 <+> ppr (mi_module iface) <+> pp_hsc_src (mi_hsc_src iface)
-                <+> (if mi_orphan exts then text "[orphan module]" else Outputable.empty)
-                <+> (if mi_finsts exts then text "[family instance module]" else Outputable.empty)
-                <+> (if mi_hpc iface then text "[hpc]" else Outputable.empty)
+                <+> (withSelfRecomp iface empty $ \_ -> text "[self-recomp]")
+                <+> (if mi_orphan iface then text "[orphan module]" else Outputable.empty)
+                <+> (if mi_finsts iface then text "[family instance module]" else Outputable.empty)
                 <+> integer hiVersion
-        , nest 2 (text "interface hash:" <+> ppr (mi_iface_hash exts))
-        , nest 2 (text "ABI hash:" <+> ppr (mi_mod_hash exts))
-        , nest 2 (text "export-list hash:" <+> ppr (mi_exp_hash exts))
-        , nest 2 (text "orphan hash:" <+> ppr (mi_orphan_hash exts))
-        , nest 2 (text "flag hash:" <+> ppr (mi_flag_hash exts))
-        , nest 2 (text "opt_hash:" <+> ppr (mi_opt_hash exts))
-        , nest 2 (text "hpc_hash:" <+> ppr (mi_hpc_hash exts))
-        , nest 2 (text "plugin_hash:" <+> ppr (mi_plugin_hash exts))
-        , nest 2 (text "src_hash:" <+> ppr (mi_src_hash iface))
+        , nest 2 (text "ABI hash:" <+> ppr (mi_mod_hash iface))
+        , nest 2 (text "interface hash:" <+> ppr (mi_iface_hash iface))
+        , nest 2 (text "export avails hash:" <+> ppr (mi_export_avails_hash iface))
+        , nest 2 (text "orphan-like hash:" <+> ppr (mi_orphan_like_hash iface))
+        , withSelfRecomp iface empty ppr
+        , nest 2 (text "orphan hash:" <+> ppr (mi_orphan_hash iface))
         , nest 2 (text "sig of:" <+> ppr (mi_sig_of iface))
-        , nest 2 (text "used TH splices:" <+> ppr (mi_used_th iface))
         , nest 2 (text "where")
         , text "exports:"
         , nest 2 (vcat (map pprExport (mi_exports iface)))
         , text "defaults:"
         , nest 2 (vcat (map ppr (mi_defaults iface)))
         , pprDeps unit_state (mi_deps iface)
-        , vcat (map pprUsage (mi_usages iface))
         , vcat (map pprIfaceAnnotation (mi_anns iface))
         , pprFixities (mi_fixities iface)
         , vcat [ppr ver $$ nest 2 (ppr decl) | (ver,decl) <- mi_decls iface]
-        , case mi_extra_decls iface of
+        , case mi_simplified_core iface of
             Nothing -> empty
-            Just eds -> text "extra decls:"
-                          $$ nest 2 (vcat ([ppr bs | bs <- eds]))
+            Just (IfaceSimplifiedCore eds fs) ->
+              vcat [ text "extra decls:"
+                           $$ nest 2 (vcat ([ppr bs | bs <- eds]))
+                   , text "foreign stubs:"
+                           $$ nest 2 (ppr fs)
+                   ]
         , vcat (map ppr (mi_insts iface))
         , vcat (map ppr (mi_fam_insts iface))
         , vcat (map ppr (mi_rules iface))
@@ -1301,10 +1179,11 @@ pprModIface unit_state iface
         , text "extensible fields:" $$ nest 2 (pprExtensibleFields (mi_ext_fields iface))
         ]
   where
-    exts = mi_final_exts iface
+
     pp_hsc_src HsBootFile = text "[boot]"
     pp_hsc_src HsigFile   = text "[hsig]"
     pp_hsc_src HsSrcFile  = Outputable.empty
+
 
 {-
 When printing export lists, we print like this:
@@ -1325,35 +1204,6 @@ pprExport avail@(AvailTC n _) =
     pp_export []    = Outputable.empty
     pp_export names = braces (hsep (map ppr names))
 
-pprUsage :: Usage -> SDoc
-pprUsage UsagePackageModule{ usg_mod = mod, usg_mod_hash = hash, usg_safe = safe }
-  = pprUsageImport mod hash safe
-pprUsage UsageHomeModule{ usg_unit_id = unit_id, usg_mod_name = mod_name
-                              , usg_mod_hash = hash, usg_safe = safe
-                              , usg_exports = exports, usg_entities = entities }
-  = pprUsageImport (mkModule unit_id mod_name) hash safe $$
-    nest 2 (
-        maybe Outputable.empty (\v -> text "exports: " <> ppr v) exports $$
-        vcat [ ppr n <+> ppr v | (n,v) <- entities ]
-        )
-pprUsage usage@UsageFile{}
-  = hsep [text "addDependentFile",
-          doubleQuotes (ftext (usg_file_path usage)),
-          ppr (usg_file_hash usage)]
-pprUsage usage@UsageMergedRequirement{}
-  = hsep [text "merged", ppr (usg_mod usage), ppr (usg_mod_hash usage)]
-pprUsage usage@UsageHomeModuleInterface{}
-  = hsep [text "implementation", ppr (usg_mod_name usage)
-                               , ppr (usg_unit_id usage)
-                               , ppr (usg_iface_hash usage)]
-
-pprUsageImport :: Outputable mod => mod -> Fingerprint -> IsSafeImport -> SDoc
-pprUsageImport mod hash safe
-  = hsep [ text "import", pp_safe, ppr mod
-         , ppr hash ]
-    where
-        pp_safe | safe      = text "safe"
-                | otherwise = text " -/ "
 
 pprFixities :: [(OccName, Fixity)] -> SDoc
 pprFixities []    = Outputable.empty

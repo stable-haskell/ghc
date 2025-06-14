@@ -7,8 +7,6 @@
 {-# LANGUAGE ViewPatterns        #-}
 {-# LANGUAGE RecursiveDo        #-}
 
-{-# OPTIONS_GHC -Wno-incomplete-uni-patterns #-}
-
 {-
 (c) The University of Glasgow 2006
 (c) The GRASP/AQUA Project, Glasgow University, 1992-1998
@@ -25,7 +23,7 @@ module GHC.Tc.Gen.HsType (
         funsSigCtxt, addSigCtxt, pprSigCtxt,
 
         tcHsClsInstType,
-        tcHsDefault, tcHsDeriv, tcDerivStrategy,
+        tcDefaultDeclClass, tcHsDeriv, tcDerivStrategy,
         tcHsTypeApp,
         UserTypeCtxt(..),
         bindImplicitTKBndrs_Tv, bindImplicitTKBndrs_Skol,
@@ -70,7 +68,7 @@ module GHC.Tc.Gen.HsType (
         tcMult,
 
         -- Pattern type signatures
-        tcHsPatSigType, tcHsTyPat,
+        tcHsPatSigType, tcHsTyPat, tcRuleBndrSig,
         HoleMode(..),
 
         -- Utils
@@ -108,7 +106,7 @@ import GHC.Core.TyCo.Ppr
 import GHC.Builtin.Types.Prim
 import GHC.Types.Error
 import GHC.Types.Name.Env
-import GHC.Types.Name.Reader( lookupLocalRdrOcc )
+import GHC.Types.Name.Reader( WithUserRdr(..), lookupLocalRdrOcc )
 import GHC.Types.Var
 import GHC.Types.Var.Set
 import GHC.Core.TyCon
@@ -396,7 +394,7 @@ kcClassSigType :: [LocatedN Name] -> LHsSigType GhcRn -> TcM ()
 --     meth :: forall a (x :: f a). Proxy x -> ()
 -- When instantiating Proxy with kappa, we must unify kappa := f a. But we're
 -- still working out the kind of f, and thus f a will have a coercion in it.
--- Coercions may block unification (Note [Equalities with incompatible kinds] in
+-- Coercions may block unification (Note [Equalities with heterogeneous kinds] in
 -- GHC.Tc.Solver.Equality, wrinkle (EIK2)) and so we fail to unify. If we try to
 -- kind-generalize, we'll end up promoting kappa to the top level (because
 -- kind-generalization is normally done right before adding a binding to the context),
@@ -634,52 +632,78 @@ tc_top_lhs_type tyki ctxt (L loc sig_ty@(HsSig { sig_bndrs = hs_outer_bndrs
   where
     skol_info_anon = SigTypeSkol ctxt
 
-tcClassConstraint :: Type -> TcM (Either (Maybe TyCon) ([TyVar], Class, [Type], [Kind]))
--- Like tcHsSigType, but for a simple class constraint of form ( C ty1 ty2 )
--- Returns the C, [ty1, ty2], and the kinds of C's remaining arguments
--- E.g.    class C (a::*) (b::k->k)
---         tcClassConstraint ( C Int ) returns Right ([k], C, [k, Int], [k->k])
--- Return values are fully zonked
-tcClassConstraint ty
-  = do { let (tvs, pred)    = splitForAllTyCoVars ty
-             (kind_args, _) = splitFunTys (typeKind pred)
-      -- Checking that `pred` a is type class application
-       ; case splitTyConApp_maybe pred of
-          Just (tyCon, tyConArgs) ->
-            case tyConClass_maybe tyCon of
-              Just clas ->
-                return (Right (tvs, clas, tyConArgs, map scaledThing kind_args))
-              Nothing -> return (Left (Just tyCon))
-          Nothing -> return (Left Nothing) }
+-- | Typecheck the class in a default declaration, checking that:
+--
+--  - it is indeed a class (not e.g. a type family),
+--  - that the class expects some invisible arguments followed
+--    by a single visible argument.
+tcDefaultDeclClass :: LIdP GhcRn -> TcM (Maybe Class)
+tcDefaultDeclClass l_nm
+  = setSrcSpan (locA l_nm) $
+  do { let nm = unLoc l_nm
+     ; thing <- tcLookupGlobal nm
+     ; case thing of
+        ATyCon tc
+          | Just cls <- tyConClass_maybe tc
+          -> if is_unary (tyConBinders tc)
+             then return $ Just cls
+             else
+               do { addErrTc $ TcRnNonUnaryTypeclassConstraint DefaultDeclCtxt (NameThing nm)
+                  ; return Nothing }
 
-tcHsDefault :: LHsSigType GhcRn -> TcM ([TyVar], Class, [Type], [Kind])
--- Like tcHsSigType, but for the default ( C ty1 ty2 ) (ty1', ty2', ...) declaration
--- See Note [Named default declarations] in GHC.Tc.Gen.Default
-tcHsDefault hs_ty
-  = tcTopLHsType DefaultDeclCtxt hs_ty
-    >>= tcClassConstraint
-    >>= either (const $ failWithTc $ TcRnIllegalDefaultClass hs_ty) return
+        _ -> do { addErrTc $ TcRnIllegalDefaultClass nm
+                ; return Nothing }
+     }
+  where
+    is_unary :: [TyConBinder] -> Bool
+    is_unary = ( `lengthIs` 1 ) . dropWhile isInvisibleTyConBinder
 
 -----------------
-tcHsDeriv :: LHsSigType GhcRn -> TcM ([TyVar], Class, [Type], [Kind])
--- Like tcHsSigType, but for the ...deriving( C ty1 ty2 ) clause
--- Returns the C, [ty1, ty2], and the kinds of C's remaining arguments
--- E.g.    class C (a::*) (b::k->k)
---         data T a b = ... deriving( C Int )
---    returns ([k], C, [k, Int], [k->k])
+tcHsDeriv :: LHsSigType GhcRn -> TcM (Maybe (Class, [TyCoVar], [Type], Kind))
+-- ^ Like tcHsSigType, but for the @...deriving( C ty1 ty2 )@ clause
+--
+-- Returns a class constraint with the last argument missing, and the
+-- expected kind of the remaining argument.
+--
+-- E.g.:
+--
+--  @class C (a::*) (b::k->k)@
+--  @data T a b = ... deriving( C Int )@
+--
+-- This function returns @(C, [k], [k, Int], k->k)@.
+--
 -- Return values are fully zonked
 tcHsDeriv hs_ty
   = do { ty <- tcTopLHsType DerivClauseCtxt hs_ty
-       ; constrained <- tcClassConstraint ty
-       ; case constrained of
-           Left Nothing -> failWithTc (TcRnIllegalDerivingItem hs_ty)
-           Left (Just tyCon) ->
-             failWithTc $ TcRnIllegalInstance
-                        $ IllegalClassInstance (TypeThing ty)
-                        $ IllegalInstanceHead
-                        $ InstHeadNonClass
-                        $ Just tyCon
-           Right result -> return result }
+
+       ; let (tvs, pred)    = splitForAllTyCoVars ty
+             (kind_args, _) = splitFunTys (typeKind pred)
+      -- Checking that `pred` a is type class application
+
+       ; case splitTyConApp_maybe pred of
+            Just (tc, tc_args) ->
+              case tyConClass_maybe tc of
+                Just cls ->
+                  case kind_args of
+                    [Scaled _ last_kind] ->
+                      return $ Just $
+                        (cls, tvs, tc_args, last_kind)
+                    _ ->
+                      do { addErrTc $ TcRnNonUnaryTypeclassConstraint DerivClauseCtxt (TypeThing pred)
+                         ; return Nothing
+                         }
+                Nothing ->
+                  do { addErrTc $ TcRnIllegalInstance
+                                $ IllegalClassInstance (TypeThing ty)
+                                $ IllegalInstanceHead
+                                $ InstHeadNonClassHead
+                                $ InstNonClassTyCon
+                                    (noUserRdr $ tyConName tc)
+                                    (fmap tyConName $ tyConFlavour tc)
+                     ; return Nothing }
+            Nothing ->
+              do { addErrTc $ TcRnIllegalDerivingItem hs_ty; return Nothing }
+       }
 
 -- | Typecheck a deriving strategy. For most deriving strategies, this is a
 -- no-op, but for the @via@ strategy, this requires typechecking the @via@ type.
@@ -805,7 +829,7 @@ tcFamTyPats fam_tc hs_pats
   where
     fam_name  = tyConName fam_tc
     fam_arity = tyConArity fam_tc
-    lhs_fun   = noLocA (HsTyVar noAnn NotPromoted (noLocA fam_name))
+    lhs_fun   = noLocA (HsTyVar noAnn NotPromoted (noLocA $ noUserRdr fam_name))
 
 {- Note [tcFamTyPats: zonking the result kind]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -947,8 +971,8 @@ concern things that the renamer can't handle.
 
 -}
 
-tcMult :: HsArrow GhcRn -> TcM Mult
-tcMult hc = tc_mult typeLevelMode hc
+tcMult :: LHsType GhcRn -> TcM Mult
+tcMult ty = tc_check_lhs_type typeLevelMode ty multiplicityTy
 
 -- | Info about the context in which we're checking a type. Currently,
 -- differentiates only between types and kinds, but this will likely
@@ -1102,15 +1126,6 @@ tcHsType :: TcTyMode -> HsType GhcRn -> ExpKind -> TcM TcType
 
 tcHsType mode (HsParTy _ ty)   exp_kind = tcLHsType mode ty exp_kind
 tcHsType mode (HsDocTy _ ty _) exp_kind = tcLHsType mode ty exp_kind
-tcHsType _ ty@(HsBangTy _ bang _) _
-    -- While top-level bangs at this point are eliminated (eg !(Maybe Int)),
-    -- other kinds of bangs are not (eg ((!Maybe) Int)). These kinds of
-    -- bangs are invalid, so fail. (#7210, #14761)
-    = failWith $ TcRnUnexpectedAnnotation ty bang
-tcHsType _ ty@(HsRecTy {})      _
-      -- Record types (which only show up temporarily in constructor
-      -- signatures) should have been removed by now
-    = failWithTc $ TcRnIllegalRecordSyntax (Right ty)
 
 -- HsSpliced is an annotation produced by 'GHC.Rename.Splice.rnSpliceType'.
 -- Here we get rid of it and add the finalizers to the global environment
@@ -1128,9 +1143,9 @@ tcHsType _ (HsSpliceTy (HsUntypedSpliceNested n) s) _ = pprPanic "tcHsType: inva
 tcHsType mode (HsFunTy _ mult ty1 ty2) exp_kind
   = tc_fun_type mode mult ty1 ty2 exp_kind
 
-tcHsType mode (HsOpTy _ _ ty1 (L _ op) ty2) exp_kind
+tcHsType mode (HsOpTy _ _ ty1 (L _ (WithUserRdr _ op)) ty2) exp_kind
   | op `hasKey` unrestrictedFunTyConKey
-  = tc_fun_type mode (HsUnrestrictedArrow noExtField) ty1 ty2 exp_kind
+  = tc_fun_type mode (HsUnannotated noExtField) ty1 ty2 exp_kind
 
 --------- Foralls
 tcHsType mode t@(HsForAllTy { hst_tele = tele, hst_body = ty }) exp_kind
@@ -1373,10 +1388,7 @@ Note [VarBndrs, ForAllTyBinders, TyConBinders, and visibility] in "GHC.Core.TyCo
 -}
 
 ------------------------------------------
-tc_mult :: TcTyMode -> HsArrow GhcRn -> TcM Mult
-tc_mult mode ty = tc_check_lhs_type mode (arrowToHsType ty) multiplicityTy
-------------------------------------------
-tc_fun_type :: TcTyMode -> HsArrow GhcRn -> LHsType GhcRn -> LHsType GhcRn -> ExpKind
+tc_fun_type :: TcTyMode -> HsMultAnn GhcRn -> LHsType GhcRn -> LHsType GhcRn -> ExpKind
             -> TcM TcType
 tc_fun_type mode mult ty1 ty2 exp_kind = case mode_tyki mode of
   TypeLevel ->
@@ -1396,6 +1408,10 @@ tc_fun_type mode mult ty1 ty2 exp_kind = case mode_tyki mode of
        ; checkExpKind (HsFunTy noExtField mult ty1 ty2)
                       (tcMkVisFunTy mult' ty1' ty2')
                       liftedTypeKind exp_kind }
+  where
+    tc_mult mode mult = case multAnnToHsType mult of
+      Just mult' -> tc_check_lhs_type mode mult' multiplicityTy
+      Nothing    -> return manyDataConTy
 
 {- Note [Skolem escape and forall-types]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1500,7 +1516,8 @@ splitHsAppTys_maybe hs_ty
     is_app :: HsType GhcRn -> Bool
     is_app (HsAppKindTy {})        = True
     is_app (HsAppTy {})            = True
-    is_app (HsOpTy _ _ _ (L _ op) _) = not (op `hasKey` unrestrictedFunTyConKey)
+    is_app (HsOpTy _ _ _ (L _ (WithUserRdr _ op)) _)
+      = not (op `hasKey` unrestrictedFunTyConKey)
       -- I'm not sure why this funTyConKey test is necessary
       -- Can it even happen?  Perhaps for   t1 `(->)` t2
       -- but then maybe it's ok to treat that like a normal
@@ -1531,7 +1548,7 @@ tcInferTyAppHead :: TcTyMode -> LHsType GhcRn -> TcM (TcType, TcKind)
 -- application. In particular, for a HsTyVar (which includes type
 -- constructors, it does not zoom off into tcInferTyApps and family
 -- saturation
-tcInferTyAppHead _ (L _ (HsTyVar _ _ (L _ tv)))
+tcInferTyAppHead _ (L _ (HsTyVar _ _ (L _ (WithUserRdr _ tv))))
   = tcTyVar tv
 tcInferTyAppHead mode ty
   = tc_infer_lhs_type mode ty
@@ -3941,7 +3958,9 @@ splitTyConKind skol_info in_scope avoid_occs kind
                         name   = mkInternalName uniq occ loc
                         tv     = mkTcTyVar name arg' details
                         subst' = extendSubstInScope subst tv
-                        uniq:uniqs' = uniqs
+                        (uniq,uniqs') = case uniqs of
+                            uniq:uniqs' -> (uniq,uniqs')
+                            _           -> panic "impossible"
                         Inf occ occs' = occs
 
                     Just (Named (Bndr tv vis), kind')
@@ -4399,8 +4418,26 @@ tcHsPatSigType ctxt hole_mode
   (HsPS { hsps_ext  = HsPSRn { hsps_nwcs = sig_wcs, hsps_imp_tvs = sig_ns }
         , hsps_body = hs_ty })
   ctxt_kind
-  = tc_type_in_pat ctxt hole_mode hs_ty sig_wcs sig_ns ctxt_kind
+  = tc_type_in_pat ctxt Nothing hole_mode hs_ty sig_wcs sig_ns ctxt_kind
 
+tcRuleBndrSig :: Name
+              -> SkolemInfo
+              -> HsPatSigType GhcRn          -- The type signature
+              -> TcM ( [(Name, TcTyVar)]     -- Wildcards
+                     , [(Name, TcTyVar)]     -- The new bit of type environment, binding
+                                             -- the scoped type variables
+                     , TcType)       -- The type
+-- Used for type-checking type signatures in
+--     RULE forall bndrs  e.g. forall (x::Int). f x = x
+-- See Note [Pattern signature binders and scoping] in GHC.Hs.Type
+--
+-- This may emit constraints
+-- See Note [Recipe for checking a signature]
+tcRuleBndrSig name skol_info
+    (HsPS { hsps_ext  = HsPSRn { hsps_nwcs = sig_wcs, hsps_imp_tvs = sig_ns }
+          , hsps_body = hs_ty })
+  = tc_type_in_pat (RuleBndrTypeCtxt name) (Just skol_info)
+                   HM_Sig hs_ty sig_wcs sig_ns OpenKind
 
 -- Typecheck type patterns, in data constructor patterns, e.g
 --    f (MkT @a @(Maybe b) ...) = ...
@@ -4423,7 +4460,7 @@ tcHsTyPat hs_pat@(HsTP{hstp_ext = hstp_rn, hstp_body = hs_ty}) expected_kind
   where
     all_ns = imp_ns ++ exp_ns
     HsTPRn{hstp_nwcs = wcs, hstp_imp_tvs = imp_ns, hstp_exp_tvs = exp_ns} = hstp_rn
-    tc_unif_in_pat = tc_type_in_pat TypeAppCtxt HM_TyAppPat
+    tc_unif_in_pat = tc_type_in_pat TypeAppCtxt Nothing HM_TyAppPat
 
 -- `tc_bndr_in_pat` is used in type patterns to handle the binders case.
 -- See Note [Type patterns: binders and unifiers]
@@ -4476,6 +4513,7 @@ tc_bndr_in_pat bndr wcs imp_ns expected_kind = do
 --
 -- * In patterns `tc_type_in_pat` is used to check pattern signatures.
 tc_type_in_pat :: UserTypeCtxt
+               -> Maybe SkolemInfo    -- Just sk for RULE and SPECIALISE pragmas only
                -> HoleMode -- HM_Sig when in a SigPat, HM_TyAppPat when in a ConPat checking type applications.
                -> LHsType GhcRn          -- The type in pattern
                -> [Name]                 -- All named wildcards in type
@@ -4485,9 +4523,10 @@ tc_type_in_pat :: UserTypeCtxt
                       , [(Name, TcTyVar)]     -- The new bit of type environment, binding
                                               -- the scoped type variables
                       , TcType)       -- The type
-tc_type_in_pat ctxt hole_mode hs_ty wcs ns ctxt_kind
+tc_type_in_pat ctxt mb_skol hole_mode hs_ty wcs ns ctxt_kind
   = addSigCtxt ctxt (UserLHsType hs_ty) $
-    do { tkv_prs <- mapM new_implicit_tv ns
+    do { tkvs <- mapM new_implicit_tv ns
+       ; let tkv_prs = ns `zip` tkvs
        ; mode <- mkHoleMode TypeLevel hole_mode
        ; (wcs, ty)
             <- addTypeCtxt hs_ty                $
@@ -4517,14 +4556,11 @@ tc_type_in_pat ctxt hole_mode hs_ty wcs ns ctxt_kind
   where
     new_implicit_tv name
       = do { kind <- newMetaKindVar
-           ; tv   <- case ctxt of
-                       RuleSigCtxt rname _  -> do
-                        skol_info <- mkSkolemInfo (RuleSkol rname)
-                        newSkolemTyVar skol_info name kind
-                       _              -> newPatTyVar name kind
-                       -- See Note [Typechecking pattern signature binders]
-             -- NB: tv's Name may be fresh (in the case of newPatTyVar)
-           ; return (name, tv) }
+           ; case mb_skol of
+                Just skol_info -> newSkolemTyVar skol_info name kind
+                Nothing        -> newPatTyVar name kind }
+                -- See Note [Typechecking pattern signature binders]
+                -- NB: tv's Name may be fresh (in the case of newPatTyVar)
 
 -- See Note [Type patterns: binders and unifiers]
 tyPatToBndr :: HsTyPat GhcRn -> Maybe (HsTyVarBndr () GhcRn)
@@ -4541,9 +4577,9 @@ tyPatToBndr HsTP{hstp_body = (L _ hs_ty)} = go hs_ty where
     Just (HsTvb noAnn () bvar bkind)
 
   go_bvar :: HsType GhcRn -> Maybe (HsBndrVar GhcRn)
-  go_bvar (HsTyVar _ _ name)
-    | isTyVarName (unLoc name)
-    = Just (HsBndrVar noExtField name)
+  go_bvar (HsTyVar _ _ tv)
+    | isTyVarName (getName tv)
+    = Just (HsBndrVar noExtField (fmap getName tv))
   go_bvar (HsWildCardTy _)
     = Just (HsBndrWildCard noExtField)
   go_bvar _ = Nothing
