@@ -20,52 +20,56 @@ import GHC.Hs
 import GHC.Driver.Session
 
 import GHC.Tc.Errors.Types
-import GHC.Tc.Utils.Monad
 import GHC.Tc.Instance.Family
 import GHC.Tc.Types.Origin
 import GHC.Tc.Deriv.Infer
 import GHC.Tc.Deriv.Utils
-import GHC.Tc.TyCl.Class( instDeclCtxt3, tcATDefault )
-import GHC.Tc.Utils.Env
 import GHC.Tc.Deriv.Generate
+import GHC.Tc.TyCl.Class( instDeclCtxt3, tcATDefault )
 import GHC.Tc.Validity( checkValidInstHead )
-import GHC.Core.InstEnv
-import GHC.Tc.Utils.Instantiate
-import GHC.Core.FamInstEnv
 import GHC.Tc.Gen.HsType
-import GHC.Core.TyCo.Rep
-import GHC.Core.TyCo.Ppr ( pprTyVars )
-import GHC.Unit.Module.Warnings
+import GHC.Tc.Utils.Monad
+import GHC.Tc.Utils.Instantiate
+import GHC.Tc.Utils.TcType
+import GHC.Tc.Utils.Env
 
 import GHC.Rename.Bind
 import GHC.Rename.Env
 import GHC.Rename.Module ( addTcgDUs )
 import GHC.Rename.Utils
 
+import GHC.Core.TyCo.Ppr ( pprTyVars )
+import GHC.Core.FamInstEnv
+import GHC.Core.InstEnv
 import GHC.Core.Unify( tcUnifyTy )
 import GHC.Core.Class
 import GHC.Core.Type
-import GHC.Utils.Error
 import GHC.Core.DataCon
-import GHC.Data.Maybe
+import GHC.Core.TyCon
+import GHC.Core.Predicate( tyCoVarsOfTypesWellScoped )
+
 import GHC.Types.Hint (AssumedDerivingStrategy(..))
 import GHC.Types.Name.Reader
 import GHC.Types.Name
 import GHC.Types.Name.Set as NameSet
-import GHC.Core.TyCon
-import GHC.Tc.Utils.TcType
 import GHC.Types.Var as Var
 import GHC.Types.Var.Env
 import GHC.Types.Var.Set
-import GHC.Builtin.Names
 import GHC.Types.SrcLoc
+
+import GHC.Unit.Module.Warnings
+import GHC.Builtin.Names
+
+import GHC.Utils.Error
 import GHC.Utils.Misc
 import GHC.Utils.Outputable as Outputable
 import GHC.Utils.Panic
 import GHC.Utils.Logger
-import GHC.Data.Bag
 import GHC.Utils.FV as FV (fvVarList, unionFV, mkFVs)
 import qualified GHC.LanguageExtensions as LangExt
+
+import GHC.Data.Bag
+import GHC.Data.Maybe
 import GHC.Data.BooleanFormula ( isUnsatisfied )
 
 import Control.Monad
@@ -575,21 +579,20 @@ derivePred tc tys mb_lderiv_strat via_tvs deriv_pred =
       , text "deriv_pred"      <+> ppr deriv_pred
       , text "mb_lderiv_strat" <+> ppr mb_lderiv_strat
       , text "via_tvs"         <+> ppr via_tvs ]
-    (cls_tvs, cls, cls_tys, cls_arg_kinds) <- tcHsDeriv deriv_pred
-    when (cls_arg_kinds `lengthIsNot` 1) $
-      failWithTc (TcRnNonUnaryTypeclassConstraint DerivClauseCtxt deriv_pred)
-    let [cls_arg_kind] = cls_arg_kinds
-        mb_deriv_strat = fmap unLoc mb_lderiv_strat
-    if (className cls == typeableClassName)
-    then do warnUselessTypeable
-            return Nothing
-    else let deriv_tvs = via_tvs ++ cls_tvs in
-         Just <$> deriveTyData tc tys mb_deriv_strat
-                               deriv_tvs cls cls_tys cls_arg_kind
+    mb_cls_minus1 <- tcHsDeriv deriv_pred
+    case mb_cls_minus1 of
+      Nothing -> return Nothing
+      Just (cls, cls_tvs, arg_tys, arg_kind) ->
+        do let mb_deriv_strat = fmap unLoc mb_lderiv_strat
+           if className cls == typeableClassName
+           then do warnUselessTypeable
+                   return Nothing
+           else let deriv_tvs = via_tvs ++ cls_tvs in
+                Just <$> deriveTyData tc tys mb_deriv_strat
+                                      deriv_tvs cls arg_tys arg_kind
 
-{-
-Note [Don't typecheck too much in DerivingVia]
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+{- Note [Don't typecheck too much in DerivingVia]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Consider the following example:
 
   data D = ...
@@ -723,12 +726,12 @@ deriveStandalone (L loc (DerivDecl (warn, _) deriv_ty mb_lderiv_strat overlap_mo
                    inst_ty_kind = typeKind inst_ty
                    mb_match     = tcUnifyTy inst_ty_kind via_kind
 
-               checkTc (isJust mb_match)
-                       (TcRnCannotDeriveInstance cls mempty Nothing NoGeneralizedNewtypeDeriving $
-                          DerivErrDerivingViaWrongKind inst_ty_kind via_ty via_kind)
+               kind_subst <- checkJustTc
+                 ( TcRnCannotDeriveInstance cls mempty Nothing NoGeneralizedNewtypeDeriving $
+                   DerivErrDerivingViaWrongKind inst_ty_kind via_ty via_kind )
+                   mb_match
 
-               let Just kind_subst = mb_match
-                   ki_subst_range  = getSubstRangeTyCoFVs kind_subst
+               let ki_subst_range  = getSubstRangeTyCoFVs kind_subst
                    -- See Note [Unification of two kind variables in deriving]
                    unmapped_tkvs = filter (\v -> v `notElemSubst` kind_subst
                                         && not (v `elemVarSet` ki_subst_range))
@@ -853,9 +856,10 @@ deriveTyData tc tc_args mb_deriv_strat deriv_tvs cls cls_tys cls_arg_kind
                , text "tycon:" <+> ppr tc <+> dcolon <+> ppr (tyConKind tc)
                , text "cls_arg:" <+> ppr (mkTyConApp tc tc_args_to_keep) <+> dcolon <+> ppr inst_ty_kind
                , text "cls_arg_kind:" <+> ppr cls_arg_kind ]
-        ; checkTc (enough_args && isJust mb_match)
-                  (TcRnCannotDeriveInstance cls cls_tys Nothing NoGeneralizedNewtypeDeriving $
-                     DerivErrNotWellKinded tc cls_arg_kind n_args_to_keep)
+        ; kind_subst <- checkJustTc
+            ( TcRnCannotDeriveInstance cls cls_tys Nothing NoGeneralizedNewtypeDeriving $
+              DerivErrNotWellKinded tc cls_arg_kind n_args_to_keep )
+            ( guard enough_args *> mb_match )
 
         ; let -- Returns a singleton-element list if using ViaStrategy and an
               -- empty list otherwise. Useful for free-variable calculations.
@@ -883,7 +887,6 @@ deriveTyData tc tc_args mb_deriv_strat deriv_tvs cls cls_tys cls_arg_kind
         ; let tkvs = scopedSort $ fvVarList $
                      unionFV (tyCoFVsOfTypes tc_args_to_keep)
                              (FV.mkFVs deriv_tvs)
-              Just kind_subst = mb_match
               (tkvs', cls_tys', tc_args', mb_deriv_strat')
                 = propagate_subst kind_subst tkvs cls_tys
                                   tc_args_to_keep mb_deriv_strat
@@ -899,11 +902,11 @@ deriveTyData tc tc_args mb_deriv_strat deriv_tvs cls cls_tys cls_arg_kind
                               = typeKind (mkTyConApp tc tc_args')
                     via_match = tcUnifyTy inst_ty_kind via_kind
 
-                checkTc (isJust via_match)
-                        (TcRnCannotDeriveInstance cls mempty Nothing NoGeneralizedNewtypeDeriving $
-                           DerivErrDerivingViaWrongKind inst_ty_kind via_ty via_kind)
+                via_subst <- checkJustTc
+                  ( TcRnCannotDeriveInstance cls mempty Nothing NoGeneralizedNewtypeDeriving $
+                    DerivErrDerivingViaWrongKind inst_ty_kind via_ty via_kind )
+                    via_match
 
-                let Just via_subst = via_match
                 pure $ propagate_subst via_subst tkvs' cls_tys'
                                        tc_args' mb_deriv_strat'
 

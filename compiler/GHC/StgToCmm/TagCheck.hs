@@ -12,7 +12,7 @@ module GHC.StgToCmm.TagCheck
   ( emitTagAssertion, emitArgTagCheck, checkArg, whenCheckTags,
     checkArgStatic, checkFunctionArgTags,checkConArgsStatic,checkConArgsDyn) where
 
-#include "ClosureTypes.h"
+#include "rts/storage/ClosureTypes.h"
 
 import GHC.Prelude
 
@@ -174,5 +174,4 @@ checkArgStatic msg MarkedStrict arg = whenCheckTags $
       if taggedCgInfo info
           then return ()
           else pprPanic "Arg not tagged as expected" (ppr msg <+> ppr arg)
-
 

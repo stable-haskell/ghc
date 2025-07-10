@@ -37,11 +37,13 @@ import GHC.Tc.Types.Origin
 import GHC.Tc.TyCl.Build
 
 import GHC.Core.Multiplicity
-import GHC.Core.Type ( typeKind, tidyForAllTyBinders, tidyTypes, tidyType, isManyTy, mkTYPEapp )
+import GHC.Core.Type ( typeKind, isManyTy, mkTYPEapp )
 import GHC.Core.TyCo.Subst( extendTvSubstWithClone )
+import GHC.Core.TyCo.Tidy( tidyForAllTyBinders, tidyTypes, tidyType )
 import GHC.Core.Predicate
 
 import GHC.Types.Name
+import GHC.Types.Name.Reader
 import GHC.Types.Name.Set
 import GHC.Types.SrcLoc
 import GHC.Core.PatSyn
@@ -182,7 +184,7 @@ tcInferPatSynDecl (PSB { psb_id = lname@(L _ name), psb_args = details
        ; doNotQuantifyTyVars dvs err_ctx
 
        ; traceTc "tcInferPatSynDecl }" $ (ppr name $$ ppr ex_tvs)
-       ; rec_fields <- lookupConstructorFields name
+       ; rec_fields <- lookupConstructorFields $ noUserRdr name
        ; tc_patsyn_finish lname dir is_infix lpat' prag_fn
                           (mkTyVarBinders InferredSpec univ_tvs
                             , req_theta,  ev_binds, req_dicts)
@@ -452,7 +454,7 @@ tcCheckPatSynDecl psb@PSB{ psb_id = lname@(L _ name), psb_args = details
 
        ; traceTc "tcCheckPatSynDecl }" $ ppr name
 
-       ; rec_fields <- lookupConstructorFields name
+       ; rec_fields <- lookupConstructorFields $ noUserRdr name
        ; tc_patsyn_finish lname dir is_infix lpat' prag_fn
                           (skol_univ_bndrs, skol_req_theta, ev_binds, req_dicts)
                           (skol_ex_bndrs, mkTyVarTys ex_tvs', skol_prov_theta, prov_dicts)
@@ -640,7 +642,7 @@ collectPatSynArgInfo :: HsPatSynDetails GhcRn
                      -> ([Name], Bool)
 collectPatSynArgInfo details =
   case details of
-    PrefixCon _ names    -> (map unLoc names, False)
+    PrefixCon names      -> (map unLoc names, False)
     InfixCon name1 name2 -> (map unLoc [name1, name2], True)
     RecCon names         -> (map (unLoc . recordPatSynPatVar) names, False)
 
@@ -952,7 +954,7 @@ tcPatSynBuilderBind prag_fn (PSB { psb_id = ps_lname@(L loc ps_name)
                                     (EmptyLocalBinds noExtField)
 
     args = case details of
-              PrefixCon _ args   -> args
+              PrefixCon args     -> args
               InfixCon arg1 arg2 -> [arg1, arg2]
               RecCon args        -> map recordPatSynPatVar args
 
@@ -998,7 +1000,8 @@ tcPatToExpr args pat = go pat
     lhsVars = mkNameSet (map unLoc args)
 
     -- Make a prefix con for prefix and infix patterns for simplicity
-    mkPrefixConExpr :: LocatedN Name -> [LPat GhcRn]
+    mkPrefixConExpr :: LocatedN (WithUserRdr Name)
+                    -> [LPat GhcRn]
                     -> Either PatSynInvalidRhsReason (HsExpr GhcRn)
     mkPrefixConExpr lcon@(L loc _) pats
       = do { exprs <- mapM go pats
@@ -1006,7 +1009,8 @@ tcPatToExpr args pat = go pat
            ; return (unLoc $ mkHsApps con exprs)
            }
 
-    mkRecordConExpr :: LocatedN Name -> HsRecFields GhcRn (LPat GhcRn)
+    mkRecordConExpr :: LocatedN (WithUserRdr Name)
+                    -> HsRecFields GhcRn (LPat GhcRn)
                     -> Either PatSynInvalidRhsReason (HsExpr GhcRn)
     mkRecordConExpr con (HsRecFields x fields dd)
       = do { exprFields <- mapM go' fields
@@ -1021,7 +1025,7 @@ tcPatToExpr args pat = go pat
     go1 :: Pat GhcRn -> Either PatSynInvalidRhsReason (HsExpr GhcRn)
     go1 (ConPat NoExtField con info)
       = case info of
-          PrefixCon _ ps -> mkPrefixConExpr con ps
+          PrefixCon ps   -> mkPrefixConExpr con ps
           InfixCon l r   -> mkPrefixConExpr con [l,r]
           RecCon fields  -> mkRecordConExpr con fields
 
@@ -1030,7 +1034,7 @@ tcPatToExpr args pat = go pat
 
     go1 (VarPat _ (L l var))
         | var `elemNameSet` lhsVars
-        = return $ HsVar noExtField (L l var)
+        = return $ mkHsVar (L l var)
         | otherwise
         = Left (PatSynUnboundVar var)
     go1 (ParPat _ pat) = fmap (HsPar noExtField) (go pat)
@@ -1246,7 +1250,7 @@ tcCollectEx pat = go pat
     go1 _                   = empty
 
     goConDetails :: HsConPatDetails GhcTc -> ([TyVar], [EvVar])
-    goConDetails (PrefixCon _ ps) = mergeMany . map go $ ps
+    goConDetails (PrefixCon ps)   = mergeMany . map go $ ps
     goConDetails (InfixCon p1 p2) = go p1 `merge` go p2
     goConDetails (RecCon HsRecFields{ rec_flds = flds })
       = mergeMany . map goRecFd $ flds

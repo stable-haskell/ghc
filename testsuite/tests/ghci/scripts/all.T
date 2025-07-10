@@ -163,8 +163,7 @@ test('T6106', [extra_files(['../shell.hs']),
 test('T6105', normal, ghci_script, ['T6105.script'])
 test('T7117', normal, ghci_script, ['T7117.script'])
 test('ghci058', [extra_files(['../shell.hs']),
-                 cmd_prefix('ghciWayFlags=' + config.ghci_way_flags),
-                 when(opsys('linux') and not ghc_dynamic(), expect_broken(20706))],
+                 cmd_prefix('ghciWayFlags=' + config.ghci_way_flags)],
      ghci_script, ['ghci058.script'])
 test('T7587', normal, ghci_script, ['T7587.script'])
 test('T7688', normal, ghci_script, ['T7688.script'])
@@ -386,3 +385,9 @@ test('T13869', extra_files(['T13869a.hs', 'T13869b.hs']), ghci_script, ['T13869.
 test('ListTuplePunsPpr', normal, ghci_script, ['ListTuplePunsPpr.script'])
 test('ListTuplePunsPprNoAbbrevTuple', [expect_broken(23135), limit_stdout_lines(13)], ghci_script, ['ListTuplePunsPprNoAbbrevTuple.script'])
 test('T24459', normal, ghci_script, ['T24459.script'])
+
+# Test package renaming in GHCi session
+test('GhciPackageRename',
+     [extra_hc_opts("-hide-all-packages -package 'containers (Data.Map as Prelude)'")],
+     ghci_script,
+     ['GhciPackageRename.script'])

@@ -4,7 +4,6 @@ module GHC.Tc.Solver(
        InferMode(..), simplifyInfer, findInferredDiff,
        growThetaTyVars,
        simplifyAmbiguityCheck,
-       simplifyDefault,
        simplifyTop, simplifyTopImplic,
        simplifyInteractive,
        solveEqualities,
@@ -16,7 +15,7 @@ module GHC.Tc.Solver(
        tcNormalise,
        approximateWC,    -- Exported for plugins to use
 
-       captureTopConstraints,
+       captureTopConstraints, emitResidualConstraints,
 
        simplifyTopWanteds,
 
@@ -31,7 +30,8 @@ import GHC.Tc.Errors.Types
 import GHC.Tc.Types.Evidence
 import GHC.Tc.Solver.Solve   ( solveSimpleGivens, solveSimpleWanteds
                              , solveWanteds, simplifyWantedsTcM )
-import GHC.Tc.Solver.Default ( tryDefaulting, tryUnsatisfiableGivens, isInteractiveClass )
+import GHC.Tc.Solver.Default ( tryDefaulting, tryDefaultingForAmbiguityCheck
+                             , isInteractiveClass )
 import GHC.Tc.Solver.Dict    ( makeSuperClasses )
 import GHC.Tc.Solver.Rewrite ( rewriteType )
 import GHC.Tc.Utils.Unify
@@ -231,7 +231,7 @@ simplifyAndEmitFlatConstraints wanted
                                         -- it's OK to use unkSkol    |  we must increase the TcLevel,
                                         -- because we don't bind     |  as explained in
                                         -- any skolem variables here |  Note [Wrapping failing kind equalities]
-                         ; emitImplication implic
+                         ; TcM.emitImplication implic
                          ; failM }
            Just (simples, errs)
               -> do { _ <- promoteTyVarSet (tyCoVarsOfCts simples)
@@ -590,17 +590,6 @@ How is this implemented? It's complicated! So we'll step through it all:
  7) `GHC.Driver.Main.tcRnModule'` -- Reads `tcg_safe_infer` after type-checking, calling
     `GHC.Driver.Main.markUnsafeInfer` (passing the reason along) when safe-inference
     failed.
-
-Note [No defaulting in the ambiguity check]
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-When simplifying constraints for the ambiguity check, we use
-solveWanteds, not simplifyTopWanteds, so that we do no defaulting.
-#11947 was an example:
-   f :: Num a => Int -> Int
-This is ambiguous of course, but we don't want to default the
-(Num alpha) constraint to (Num Int)!  Doing so gives a defaulting
-warning, but no error.
-
 -}
 
 ------------------
@@ -610,11 +599,7 @@ simplifyAmbiguityCheck ty wc
          text "type = " <+> ppr ty $$ text "wanted = " <+> ppr wc
 
        ; (final_wc, _) <- runTcS $ do { wc1 <- solveWanteds wc
-                                      ; tryUnsatisfiableGivens wc1 }
-             -- NB: no defaulting!  See Note [No defaulting in the ambiguity check]
-             -- Note: we do still use Unsatisfiable Givens to solve Wanteds,
-             -- see Wrinkle [Ambiguity] under point (C) of
-             -- Note [Implementation of Unsatisfiable constraints] in GHC.Tc.Errors.
+                                      ; tryDefaultingForAmbiguityCheck wc1 }
 
        ; discardResult (reportUnsolved final_wc)
 
@@ -625,15 +610,6 @@ simplifyInteractive :: WantedConstraints -> TcM (Bag EvBind)
 simplifyInteractive wanteds
   = traceTc "simplifyInteractive" empty >>
     simplifyTop wanteds
-
-------------------
-simplifyDefault :: ThetaType    -- Wanted; has no type variables in it
-                -> TcM Bool     -- Return if the constraint is soluble
-simplifyDefault theta
-  = do { traceTc "simplifyDefault" empty
-       ; wanteds  <- newWanteds DefaultOrigin theta
-       ; (unsolved, _) <- runTcS (solveWanteds (mkSimpleWC wanteds))
-       ; return (isEmptyWC unsolved) }
 
 ------------------
 {- Note [Pattern match warnings with insoluble Givens]
@@ -925,21 +901,22 @@ simplifyInfer top_lvl rhs_tclvl infer_mode sigs name_taus wanteds
        ; let psig_theta = concatMap sig_inst_theta partial_sigs
 
        -- First do full-blown solving
-       -- NB: we must gather up all the bindings from doing
-       -- this solving; hence (runTcSWithEvBinds ev_binds_var).
-       -- And note that since there are nested implications,
-       -- calling solveWanteds will side-effect their evidence
-       -- bindings, so we can't just revert to the input
-       -- constraint.
-
+       -- NB: we must gather up all the bindings from doing this solving; hence
+       -- (runTcSWithEvBinds ev_binds_var).  And note that since there are
+       -- nested implications, calling solveWanteds will side-effect their
+       -- evidence bindings, so we can't just revert to the input constraint.
+       --
+       -- See also Note [Inferring principal types]
        ; ev_binds_var <- TcM.newTcEvBinds
        ; psig_evs     <- newWanteds AnnOrigin psig_theta
        ; wanted_transformed
-            <- setTcLevel rhs_tclvl $
-               runTcSWithEvBinds ev_binds_var $
+            <- runTcSWithEvBinds ev_binds_var $
+               setTcLevelTcS rhs_tclvl        $
                solveWanteds (mkSimpleWC psig_evs `andWC` wanteds)
+               -- setLevelTcS: we do setLevel /inside/ the runTcS, so that
+               --              we initialise the InertSet inert_given_eq_lvl as far
+               --              out as possible, maximising oppportunities to unify
                -- psig_evs : see Note [Add signature contexts as wanteds]
-               -- See Note [Inferring principal types]
 
        -- Find quant_pred_candidates, the predicates that
        -- we'll consider quantifying over
@@ -968,14 +945,17 @@ simplifyInfer top_lvl rhs_tclvl infer_mode sigs name_taus wanteds
              ; bound_theta_vars <- mapM TcM.newEvVar bound_theta
 
              ; let full_theta = map idType bound_theta_vars
-             ; skol_info <- mkSkolemInfo (InferSkol [ (name, mkPhiTy full_theta ty)
-                                                    | (name, ty) <- name_taus ])
+                   skol_info  = InferSkol [ (name, mkPhiTy full_theta ty)
+                                          | (name, ty) <- name_taus ]
+                 -- mkPhiTy: we don't add the quantified variables here, because
+                 -- they are also bound in ic_skols and we want them to be tidied
+                 -- uniformly.
        }
 
 
        -- Now emit the residual constraint
-       ; emitResidualConstraints rhs_tclvl ev_binds_var
-                                 name_taus co_vars qtvs bound_theta_vars
+       ; emitResidualConstraints rhs_tclvl skol_info ev_binds_var
+                                 co_vars qtvs bound_theta_vars
                                  wanted_transformed
 
          -- All done!
@@ -992,13 +972,12 @@ simplifyInfer top_lvl rhs_tclvl infer_mode sigs name_taus wanteds
     partial_sigs = filter isPartialSig sigs
 
 --------------------
-emitResidualConstraints :: TcLevel -> EvBindsVar
-                        -> [(Name, TcTauType)]
+emitResidualConstraints :: TcLevel -> SkolemInfoAnon -> EvBindsVar
                         -> CoVarSet -> [TcTyVar] -> [EvVar]
                         -> WantedConstraints -> TcM ()
 -- Emit the remaining constraints from the RHS.
-emitResidualConstraints rhs_tclvl ev_binds_var
-                        name_taus co_vars qtvs full_theta_vars wanteds
+emitResidualConstraints rhs_tclvl skol_info ev_binds_var
+                        co_vars qtvs full_theta_vars wanteds
   | isEmptyWC wanteds
   = return ()
 
@@ -1031,13 +1010,6 @@ emitResidualConstraints rhs_tclvl ev_binds_var
 
         ; emitConstraints (emptyWC { wc_simple = outer_simple
                                    , wc_impl   = implics }) }
-  where
-    full_theta = map idType full_theta_vars
-    skol_info = InferSkol [ (name, mkPhiTy full_theta ty)
-                          | (name, ty) <- name_taus ]
-    -- We don't add the quantified variables here, because they are
-    -- also bound in ic_skols and we want them to be tidied
-    -- uniformly.
 
 --------------------
 findInferredDiff :: TcThetaType -> TcThetaType -> TcM TcThetaType
@@ -1286,7 +1258,7 @@ decideQuantification
   :: TopLevelFlag
   -> TcLevel
   -> InferMode
-  -> SkolemInfo
+  -> SkolemInfoAnon
   -> [(Name, TcTauType)]   -- Variables to be generalised
   -> [TcIdSigInst]         -- Partial type signatures (if any)
   -> WantedConstraints     -- Candidate theta; already zonked
@@ -1445,13 +1417,15 @@ decideAndPromoteTyVars top_lvl rhs_tclvl infer_mode name_taus psigs wanted
 
              -- Step 1 of Note [decideAndPromoteTyVars]
              -- Get candidate constraints, decide which we can potentially quantify
-             (can_quant_cts, no_quant_cts) = approximateWCX wanted
+             -- The `no_quant_tvs` are free in constraints we can't quantify.
+             (can_quant_cts, no_quant_tvs) = approximateWCX False wanted
              can_quant = ctsPreds can_quant_cts
-             no_quant  = ctsPreds no_quant_cts
+             can_quant_tvs = tyCoVarsOfTypes can_quant
 
              -- Step 2 of Note [decideAndPromoteTyVars]
              -- Apply the monomorphism restriction
              (post_mr_quant, mr_no_quant) = applyMR dflags infer_mode can_quant
+             mr_no_quant_tvs              = tyCoVarsOfTypes mr_no_quant
 
              -- The co_var_tvs are tvs mentioned in the types of covars or
              -- coercion holes. We can't quantify over these covars, so we
@@ -1463,30 +1437,33 @@ decideAndPromoteTyVars top_lvl rhs_tclvl infer_mode name_taus psigs wanted
                                          ++ tau_tys ++ post_mr_quant)
              co_var_tvs = closeOverKinds co_vars
 
-             -- outer_tvs are mentioned in `wanted, and belong to some outer level.
+             -- outer_tvs are mentioned in `wanted`, and belong to some outer level.
              -- We definitely can't quantify over them
              outer_tvs = outerLevelTyVars rhs_tclvl $
-                         tyCoVarsOfTypes can_quant `unionVarSet` tyCoVarsOfTypes no_quant
+                         can_quant_tvs `unionVarSet` no_quant_tvs
 
-             -- Step 3 of Note [decideAndPromoteTyVars]
+             -- Step 3 of Note [decideAndPromoteTyVars], (a-c)
              -- Identify mono_tvs: the type variables that we must not quantify over
+             -- At top level we are much less keen to create mono tyvars, to avoid
+             -- spooky action at a distance.
              mono_tvs_without_mr
-               | is_top_level = outer_tvs
-               | otherwise    = outer_tvs                                 -- (a)
-                                `unionVarSet` tyCoVarsOfTypes no_quant    -- (b)
-                                `unionVarSet` co_var_tvs                  -- (c)
+               | is_top_level = outer_tvs    -- See (DP2)
+               | otherwise    = outer_tvs                    -- (a)
+                                `unionVarSet` no_quant_tvs   -- (b)
+                                `unionVarSet` co_var_tvs     -- (c)
 
+             -- Step 3 of Note [decideAndPromoteTyVars], (d)
              mono_tvs_with_mr
                = -- Even at top level, we don't quantify over type variables
                  -- mentioned in constraints that the MR tells us not to quantify
                  -- See Note [decideAndPromoteTyVars] (DP2)
-                 mono_tvs_without_mr `unionVarSet` tyCoVarsOfTypes mr_no_quant
+                 mono_tvs_without_mr `unionVarSet` mr_no_quant_tvs
 
              --------------------------------------------------------------------
              -- Step 4 of Note [decideAndPromoteTyVars]
              -- Use closeWrtFunDeps to find any other variables that are determined by mono_tvs
-             add_determined tvs = closeWrtFunDeps post_mr_quant tvs
-                                  `delVarSetList` psig_qtvs
+             add_determined tvs preds = closeWrtFunDeps preds tvs
+                                        `delVarSetList` psig_qtvs
                  -- Why delVarSetList psig_qtvs?
                  -- If the user has explicitly asked for quantification, then that
                  -- request "wins" over the MR.
@@ -1495,8 +1472,8 @@ decideAndPromoteTyVars top_lvl rhs_tclvl infer_mode name_taus psigs wanted
                  -- (i.e. says "no" to isQuantifiableTv)? That's OK: explanation
                  -- in Step 2 of Note [Deciding quantification].
 
-             mono_tvs_with_mr_det    = add_determined mono_tvs_with_mr
-             mono_tvs_without_mr_det = add_determined mono_tvs_without_mr
+             mono_tvs_with_mr_det    = add_determined mono_tvs_with_mr    post_mr_quant
+             mono_tvs_without_mr_det = add_determined mono_tvs_without_mr can_quant
 
              --------------------------------------------------------------------
              -- Step 5 of Note [decideAndPromoteTyVars]
@@ -1533,7 +1510,7 @@ decideAndPromoteTyVars top_lvl rhs_tclvl infer_mode name_taus psigs wanted
            , text "newly_mono_tvs =" <+> ppr newly_mono_tvs
            , text "can_quant =" <+> ppr can_quant
            , text "post_mr_quant =" <+> ppr post_mr_quant
-           , text "no_quant =" <+> ppr no_quant
+           , text "no_quant_tvs =" <+> ppr no_quant_tvs
            , text "mr_no_quant =" <+> ppr mr_no_quant
            , text "final_quant =" <+> ppr final_quant
            , text "co_vars =" <+> ppr co_vars ]
@@ -1620,8 +1597,8 @@ The plan
   The body of z tries to unify the type of x (call it alpha[1]) with
   (beta[2] -> gamma[2]). This unification fails because alpha is untouchable, leaving
        [W] alpha[1] ~ (beta[2] -> gamma[2])
-  We need to know not to quantify over beta or gamma, because they are in the
-  equality constraint with alpha. Actual test case:   typecheck/should_compile/tc213
+  We don't want to quantify over beta or gamma because they are fixed by alpha,
+  which is monomorphic. Actual test case:   typecheck/should_compile/tc213
 
   Another example. Suppose we have
       class C a b | a -> b
@@ -1658,9 +1635,22 @@ Wrinkles
   promote type variables.  But for bindings affected by the MR we have no choice
   but to promote.
 
+  An example is in #26004.
+      f w e = case e of
+        T1 -> let y = not w in False
+        T2 -> True
+  When generalising `f` we have a constraint
+      forall. (a ~ Bool) => alpha ~ Bool
+  where our provisional type for `f` is `f :: T alpha -> blah`.
+  In a /nested/ setting, we might simply not-generalise `f`, hoping to learn
+  about `alpha` from f's call sites (test T5266b is an example).  But at top
+  level, to avoid spooky action at a distance.
+
 Note [The top-level Any principle]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Key principle: we never want to show the programmer a type with `Any` in it.
+Key principles:
+  * we never want to show the programmer a type with `Any` in it.
+  * avoid "spooky action at a distance" and silent defaulting
 
 Most /top level/ bindings have a type signature, so none of this arises.  But
 where a top-level binding lacks a signature, we don't want to infer a type like
@@ -1669,11 +1659,18 @@ and then subsequently default alpha[0]:=Any.  Exposing `Any` to the user is bad
 bad bad.  Better to report an error, which is what may well happen if we
 quantify over alpha instead.
 
+Moreover,
+ * If (elsewhere in this module) we add a call to `f`, say (f True), then
+   `f` will get the type `Bool -> Int`
+ * If we add /another/ call, say (f 'x'), we will then get a type error.
+ * If we have no calls, the final exported type of `f` may get set by
+   defaulting, and might not be principal (#26004).
+
 For /nested/ bindings, a monomorphic type like `f :: alpha[0] -> Int` is fine,
 because we can see all the call sites of `f`, and they will probably fix
 `alpha`.  In contrast, we can't see all of (or perhaps any of) the calls of
 top-level (exported) functions, reducing the worries about "spooky action at a
-distance".
+distance".  This also moves in the direction of `MonoLocalBinds`, which we like.
 
 Note [Do not quantify over constraints that determine a variable]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1818,13 +1815,13 @@ defaultTyVarsAndSimplify rhs_tclvl candidates
 
 ------------------
 decideQuantifiedTyVars
-   :: SkolemInfo
+   :: SkolemInfoAnon
    -> [(Name,TcType)]   -- Annotated theta and (name,tau) pairs
    -> [TcIdSigInst]     -- Partial signatures
    -> [PredType]        -- Candidates, zonked
    -> TcM [TyVar]
 -- Fix what tyvars we are going to quantify over, and quantify them
-decideQuantifiedTyVars skol_info name_taus psigs candidates
+decideQuantifiedTyVars skol_info_anon name_taus psigs candidates
   = do {     -- Why psig_tys? We try to quantify over everything free in here
              -- See Note [Quantification and partial signatures]
              --     Wrinkles 2 and 3
@@ -1843,20 +1840,19 @@ decideQuantifiedTyVars skol_info name_taus psigs candidates
        -- The psig_tys are first in seed_tys, then candidates, then tau_tvs.
        -- This makes candidateQTyVarsOfTypes produces them in that order, so that the
         -- final qtvs quantifies in the same- order as the partial signatures do (#13524)
-       ; dv@DV {dv_kvs = cand_kvs, dv_tvs = cand_tvs}
-             <- candidateQTyVarsOfTypes $
-                psig_tys ++ candidates ++ tau_tys
-       ; let pick     = (`dVarSetIntersectVarSet` grown_tcvs)
-             dvs_plus = dv { dv_kvs = pick cand_kvs, dv_tvs = pick cand_tvs }
+       ; dvs <- candidateQTyVarsOfTypes (psig_tys ++ candidates ++ tau_tys)
+       ; let dvs_plus = weedOutCandidates (`dVarSetIntersectVarSet` grown_tcvs) dvs
 
        ; traceTc "decideQuantifiedTyVars" (vcat
-           [ text "candidates =" <+> ppr candidates
-           , text "cand_kvs =" <+> ppr cand_kvs
-           , text "cand_tvs =" <+> ppr cand_tvs
-           , text "seed_tys =" <+> ppr seed_tvs
+           [ text "tau_tys =" <+> ppr tau_tys
+           , text "candidates =" <+> ppr candidates
+           , text "dvs =" <+> ppr dvs
+           , text "tau_tys =" <+> ppr tau_tys
+           , text "seed_tvs =" <+> ppr seed_tvs
            , text "grown_tcvs =" <+> ppr grown_tcvs
            , text "dvs =" <+> ppr dvs_plus])
 
+       ; skol_info <- mkSkolemInfo skol_info_anon
        ; quantifyTyVars skol_info DefaultNonStandardTyVars dvs_plus }
 
 ------------------

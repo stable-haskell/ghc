@@ -1109,7 +1109,10 @@ machOps = listToUFM $
         ( "f2i32",    flip MO_FS_Truncate W32 ),
         ( "f2i64",    flip MO_FS_Truncate W64 ),
         ( "i2f32",    flip MO_SF_Round W32 ),
-        ( "i2f64",    flip MO_SF_Round W64 )
+        ( "i2f64",    flip MO_SF_Round W64 ),
+
+        ( "w2f_bitcast", MO_WF_Bitcast ),
+        ( "f2w_bitcast", MO_FW_Bitcast )
         ]
 
 callishMachOps :: Platform -> UniqFM FastString ([CmmExpr] -> (CallishMachOp, [CmmExpr]))
@@ -1194,6 +1197,8 @@ callishMachOps platform = listToUFM $
     , allWidths "fetch_nand" (\w -> MO_AtomicRMW w AMO_Nand)
     , allWidths "fetch_or" (\w -> MO_AtomicRMW w AMO_Or)
     , allWidths "fetch_xor" (\w -> MO_AtomicRMW w AMO_Xor)
+    , allWidths "mul2_" (\w -> MO_S_Mul2 w)
+    , allWidths "mul2u_" (\w -> MO_U_Mul2 w)
     ]
   where
     allWidths

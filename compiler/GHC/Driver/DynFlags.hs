@@ -64,6 +64,7 @@ module GHC.Driver.DynFlags (
 
         --
         baseUnitId,
+        rtsWayUnitId,
 
 
         -- * Include specifications
@@ -75,6 +76,8 @@ module GHC.Driver.DynFlags (
         initPromotionTickContext,
 
         -- * Platform features
+        isSse3Enabled,
+        isSsse3Enabled,
         isSse4_1Enabled,
         isSse4_2Enabled,
         isAvxEnabled,
@@ -102,6 +105,7 @@ import GHC.Data.Maybe
 import GHC.Builtin.Names ( mAIN_NAME )
 import GHC.Driver.Backend
 import GHC.Driver.Flags
+import GHC.Driver.IncludeSpecs
 import GHC.Driver.Phases ( Phase(..), phaseInputExt )
 import GHC.Driver.Plugins.External
 import GHC.Settings
@@ -405,6 +409,13 @@ data DynFlags = DynFlags {
 
   ghciHistSize          :: Int,
 
+  -- wasm ghci browser mode
+  ghciBrowserHost                  :: !String,
+  ghciBrowserPort                  :: !Int,
+  ghciBrowserPuppeteerLaunchOpts   :: !(Maybe String),
+  ghciBrowserPlaywrightBrowserType :: !(Maybe String),
+  ghciBrowserPlaywrightLaunchOpts  :: !(Maybe String),
+
   flushOut              :: FlushOut,
 
   ghcVersionFile        :: Maybe FilePath,
@@ -690,6 +701,12 @@ defaultDynFlags mySettings =
 
         ghciHistSize = 50, -- keep a log of length 50 by default
 
+        ghciBrowserHost = "127.0.0.1",
+        ghciBrowserPort = 0,
+        ghciBrowserPuppeteerLaunchOpts = Nothing,
+        ghciBrowserPlaywrightBrowserType = Nothing,
+        ghciBrowserPlaywrightLaunchOpts = Nothing,
+
         flushOut = defaultFlushOut,
         pprUserLength = 5,
         pprCols = 100,
@@ -859,7 +876,8 @@ packageFlagsChanged idflags1 idflags0 =
    packageGFlags dflags = map (`gopt` dflags)
      [ Opt_HideAllPackages
      , Opt_HideAllPluginPackages
-     , Opt_AutoLinkPackages ]
+     , Opt_AutoLinkPackages
+     , Opt_NoRts ]
 
 instance Outputable PackageFlag where
     ppr (ExposePackage n arg rn) = text n <> braces (ppr arg <+> ppr rn)
@@ -922,44 +940,6 @@ data PkgDbRef
   | PkgDbPath FilePath
   deriving Eq
 
--- | Used to differentiate the scope an include needs to apply to.
--- We have to split the include paths to avoid accidentally forcing recursive
--- includes since -I overrides the system search paths. See #14312.
-data IncludeSpecs
-  = IncludeSpecs { includePathsQuote  :: [String]
-                 , includePathsGlobal :: [String]
-                 -- | See Note [Implicit include paths]
-                 , includePathsQuoteImplicit :: [String]
-                 }
-  deriving Show
-
--- | Append to the list of includes a path that shall be included using `-I`
--- when the C compiler is called. These paths override system search paths.
-addGlobalInclude :: IncludeSpecs -> [String] -> IncludeSpecs
-addGlobalInclude spec paths  = let f = includePathsGlobal spec
-                               in spec { includePathsGlobal = f ++ paths }
-
--- | Append to the list of includes a path that shall be included using
--- `-iquote` when the C compiler is called. These paths only apply when quoted
--- includes are used. e.g. #include "foo.h"
-addQuoteInclude :: IncludeSpecs -> [String] -> IncludeSpecs
-addQuoteInclude spec paths  = let f = includePathsQuote spec
-                              in spec { includePathsQuote = f ++ paths }
-
--- | These includes are not considered while fingerprinting the flags for iface
--- | See Note [Implicit include paths]
-addImplicitQuoteInclude :: IncludeSpecs -> [String] -> IncludeSpecs
-addImplicitQuoteInclude spec paths  = let f = includePathsQuoteImplicit spec
-                              in spec { includePathsQuoteImplicit = f ++ paths }
-
-
--- | Concatenate and flatten the list of global and quoted includes returning
--- just a flat list of paths.
-flattenIncludes :: IncludeSpecs -> [String]
-flattenIncludes specs =
-    includePathsQuote specs ++
-    includePathsQuoteImplicit specs ++
-    includePathsGlobal specs
 
 
 -- An argument to --reexported-module which can optionally specify a module renaming.
@@ -1178,7 +1158,8 @@ defaultFlags settings
       Opt_ShowErrorContext,
       Opt_SuppressStgReps,
       Opt_UnoptimizedCoreForInterpreter,
-      Opt_SpecialiseIncoherents
+      Opt_SpecialiseIncoherents,
+      Opt_WriteSelfRecompInfo
     ]
 
     ++ [f | (ns,f) <- optLevelFlags, 0 `elem` ns]
@@ -1190,7 +1171,6 @@ defaultFlags settings
     ++ default_PIC platform
 
     ++ validHoleFitDefaults
-
 
     where platform = sTargetPlatform settings
 
@@ -1317,6 +1297,7 @@ default_PIC platform =
                                          -- always generate PIC. See
                                          -- #10597 for more
                                          -- information.
+    (OSLinux,   ArchLoongArch64) -> [Opt_PIC, Opt_ExternalDynamicRefs]
     _                      -> []
 
 -- | The language extensions implied by the various language variants.
@@ -1345,7 +1326,8 @@ languageExtensions (Just Haskell98)
            -- default unless you specify another language.
        LangExt.DeepSubsumption,
        -- Non-standard but enabled for backwards compatability (see GHC proposal #511)
-       LangExt.ListTuplePuns
+       LangExt.ListTuplePuns,
+       LangExt.ImplicitStagePersistence
       ]
 
 languageExtensions (Just Haskell2010)
@@ -1363,7 +1345,9 @@ languageExtensions (Just Haskell2010)
        LangExt.FieldSelectors,
        LangExt.RelaxedPolyRec,
        LangExt.DeepSubsumption,
-       LangExt.ListTuplePuns ]
+       LangExt.ListTuplePuns,
+       LangExt.ImplicitStagePersistence
+       ]
 
 languageExtensions (Just GHC2021)
     = [LangExt.ImplicitPrelude,
@@ -1414,7 +1398,9 @@ languageExtensions (Just GHC2021)
        LangExt.TupleSections,
        LangExt.TypeApplications,
        LangExt.TypeOperators,
-       LangExt.TypeSynonymInstances]
+       LangExt.TypeSynonymInstances,
+       LangExt.ImplicitStagePersistence
+       ]
 
 languageExtensions (Just GHC2024)
     = languageExtensions (Just GHC2021) ++
@@ -1488,6 +1474,17 @@ versionedFilePath platform = uniqueSubdir platform
 baseUnitId :: DynFlags -> UnitId
 baseUnitId dflags = unitSettings_baseUnitId (unitSettings dflags)
 
+rtsWayUnitId :: DynFlags -> UnitId
+rtsWayUnitId dflags | ways dflags `hasWay` WayThreaded
+                    , ways dflags `hasWay` WayDebug
+                    = stringToUnitId "rts:threaded-debug"
+                    | ways dflags `hasWay` WayThreaded
+                    = stringToUnitId "rts:threaded-nodebug"
+                    | ways dflags `hasWay` WayDebug
+                    = stringToUnitId "rts:nonthreaded-debug"
+                    | otherwise
+                    = stringToUnitId "rts:nonthreaded-nodebug"
+
 -- SDoc
 -------------------------------------------
 -- | Initialize the pretty-printing options
@@ -1546,6 +1543,12 @@ initPromotionTickContext dflags =
 
 -- -----------------------------------------------------------------------------
 -- SSE, AVX, FMA
+
+isSse3Enabled :: DynFlags -> Bool
+isSse3Enabled dflags = sseVersion dflags >= Just SSE3
+
+isSsse3Enabled :: DynFlags -> Bool
+isSsse3Enabled dflags = sseVersion dflags >= Just SSSE3
 
 isSse4_1Enabled :: DynFlags -> Bool
 isSse4_1Enabled dflags = sseVersion dflags >= Just SSE4

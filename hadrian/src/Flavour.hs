@@ -8,6 +8,7 @@ module Flavour
   , splitSections
   , enableThreadSanitizer
   , enableLateCCS
+  , enableHashUnitIds
   , enableDebugInfo, enableTickyGhc
   , viaLlvmBackend
   , enableProfiledGhc
@@ -16,6 +17,7 @@ module Flavour
   , disableProfiledLibs
   , enableLinting
   , enableHaddock
+  , disableSelfRecompInfo
   , enableHiCore
   , useNativeBignum
   , enableTextWithSIMDUTF
@@ -67,10 +69,12 @@ flavourTransformers = M.fromList
     , "debug_stage1_ghc" =: debugGhc Stage1
     , "lint"             =: enableLinting
     , "haddock"          =: enableHaddock
+    , "no_self_recomp"   =: disableSelfRecompInfo
     , "hi_core"          =: enableHiCore
     , "late_ccs"         =: enableLateCCS
     , "boot_nonmoving_gc" =: enableBootNonmovingGc
     , "dump_stg"         =: enableDumpStg
+    , "hash_unit_ids"    =: enableHashUnitIds
     ]
   where (=:) = (,)
 
@@ -133,6 +137,7 @@ werror =
         ? notStage0
         ? mconcat
           [ arg "-Werror"
+          , arg "-Wno-error=pattern-namespace-specifier"   -- not until the boot compiler is >=9.14
             -- unix has many unused imports
           , package unix
               ? mconcat [arg "-Wwarn=unused-imports", arg "-Wwarn=unused-top-binds"]
@@ -206,6 +211,17 @@ enableHaddock =
   where
     haddock = mconcat
       [ arg "-haddock"
+      ]
+
+-- | Disable self recompilation information in interface files
+disableSelfRecompInfo :: Flavour -> Flavour
+disableSelfRecompInfo =
+    addArgs $ stage1 ? mconcat
+      [ builder (Ghc CompileHs) ? selfRecomp
+      ]
+  where
+    selfRecomp = mconcat
+      [ arg "-fno-write-if-self-recomp"
       ]
 
 -- | Build stage2 dependencies with options to emit Core into
@@ -304,6 +320,9 @@ enableTextWithSIMDUTF :: Flavour -> Flavour
 enableTextWithSIMDUTF flavour = flavour {
   textWithSIMDUTF = True
 }
+
+enableHashUnitIds :: Flavour -> Flavour
+enableHashUnitIds flavour = flavour { hashUnitIds = True }
 
 -- | Build stage2 compiler with -fomit-interface-pragmas to reduce
 -- recompilation.

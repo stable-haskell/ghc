@@ -42,7 +42,7 @@ module GHC.Rename.Utils (
 where
 
 
-import GHC.Prelude hiding (unzip)
+import GHC.Prelude
 
 import GHC.Core.Type
 import GHC.Hs
@@ -74,9 +74,8 @@ import GHC.Unit.Module.Warnings  ( WarningTxt(..) )
 import GHC.Iface.Load
 import qualified GHC.LanguageExtensions as LangExt
 
-import qualified Data.List as List
 import qualified Data.List.NonEmpty as NE
-import Data.Foldable
+import Data.Foldable (for_)
 import Data.Maybe
 
 
@@ -107,7 +106,7 @@ newLocalBndrsRn = mapM newLocalBndrRn
 bindLocalNames :: [Name] -> RnM a -> RnM a
 bindLocalNames names
   = updLclCtxt $ \ lcl_env ->
-    let th_level  = thLevel (tcl_th_ctxt lcl_env)
+    let th_level  = thLevelIndex (tcl_th_ctxt lcl_env)
         th_bndrs' = extendNameEnvList (tcl_th_bndrs lcl_env)
                     [ (n, (NotTopLevel, th_level)) | n <- names ]
         rdr_env'  = extendLocalRdrEnvList (tcl_rdr lcl_env) names
@@ -346,11 +345,6 @@ mapFvRn f xs = do
         (ys, fvs_s) -> return (ys, foldl' (flip plusFV) emptyFVs fvs_s)
 {-# SPECIALIZE mapFvRn :: (a -> RnM (b, FreeVars)) -> [a] -> RnM ([b], FreeVars) #-}
 
-unzip :: Functor f => f (a, b) -> (f a, f b)
-unzip = \ xs -> (fmap fst xs, fmap snd xs)
-{-# NOINLINE [1] unzip #-}
-{-# RULES "unzip/List" unzip = List.unzip #-}
-
 mapMaybeFvRn :: (a -> RnM (b, FreeVars)) -> Maybe a -> RnM (Maybe b, FreeVars)
 mapMaybeFvRn _ Nothing = return (Nothing, emptyFVs)
 mapMaybeFvRn f (Just x) = do { (y, fvs) <- f x; return (Just y, fvs) }
@@ -545,9 +539,9 @@ warnIfDeclDeprecated gre@(GRE { gre_imp = iss })
 lookupImpDeclDeprec :: ModIface -> GlobalRdrElt -> Maybe (WarningTxt GhcRn)
 lookupImpDeclDeprec iface gre
   -- Bleat if the thing, or its parent, is warn'd
-  = mi_decl_warn_fn (mi_final_exts iface) (greOccName gre) `mplus`
+  = mi_decl_warn_fn iface (greOccName gre) `mplus`
     case greParent gre of
-       ParentIs p -> mi_decl_warn_fn (mi_final_exts iface) (nameOccName p)
+       ParentIs p -> mi_decl_warn_fn iface (nameOccName p)
        NoParent   -> Nothing
 
 warnIfExportDeprecated :: GlobalRdrElt -> RnM ()
@@ -568,7 +562,7 @@ warnIfExportDeprecated gre@(GRE { gre_imp = iss })
     process_import_spec is = do
       let mod = is_mod $ is_decl is
       iface <- loadInterfaceForModule doc mod
-      let mb_warn_txt = mi_export_warn_fn (mi_final_exts iface) name
+      let mb_warn_txt = mi_export_warn_fn iface name
       return $ (moduleName mod, ) <$> mb_warn_txt
 
 -------------------------
@@ -678,7 +672,7 @@ badQualBndrErr :: RdrName -> TcRnMessage
 badQualBndrErr rdr_name = TcRnQualifiedBinder rdr_name
 
 typeAppErr :: TypeOrKind -> LHsType GhcPs -> TcRnMessage
-typeAppErr what (L _ k) = TcRnTypeApplicationsDisabled (TypeApplication k what)
+typeAppErr what (L _ k) = TcRnTypeApplicationsDisabled k what
 
 badFieldConErr :: Name -> FieldLabelString -> TcRnMessage
 badFieldConErr con field = TcRnInvalidRecordField con field
@@ -718,7 +712,7 @@ mkRnSyntaxExpr :: Name -> SyntaxExprRn
 mkRnSyntaxExpr = SyntaxExprRn . genHsVar
 
 genHsVar :: Name -> HsExpr GhcRn
-genHsVar n = HsVar noExtField (wrapGenSpan n)
+genHsVar n = mkHsVar (wrapGenSpan n)
 
 genHsApps :: Name -> [LHsExpr GhcRn] -> HsExpr GhcRn
 genHsApps fun args = foldl genHsApp (genHsVar fun) args
@@ -756,8 +750,8 @@ genSimpleConPat :: Name -> [LPat GhcRn] -> LPat GhcRn
 -- The pattern (C p1 .. pn)
 genSimpleConPat con pats
   = wrapGenSpan $ ConPat { pat_con_ext = noExtField
-                         , pat_con     = wrapGenSpan con
-                         , pat_args    = PrefixCon [] pats }
+                         , pat_con     = wrapGenSpan $ noUserRdr con
+                         , pat_args    = PrefixCon pats }
 
 genVarPat :: Name -> LPat GhcRn
 genVarPat n = wrapGenSpan $ VarPat noExtField (wrapGenSpan n)

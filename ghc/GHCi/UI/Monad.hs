@@ -56,10 +56,10 @@ import GHC.Hs (ImportDecl, GhcPs, GhciLStmt, LHsDecl)
 import GHC.Hs.Utils
 import GHC.Utils.Misc
 import GHC.Utils.Logger
+import GHC.Runtime.Debugger.Breakpoints
 
 import GHC.Utils.Exception hiding (uninterruptibleMask, mask, catch)
 import Numeric
-import Data.Array
 import Data.IORef
 import Data.Time
 import System.Environment
@@ -163,8 +163,6 @@ data GHCiState = GHCiState
             -- ^ @hSetBuffering NoBuffering@ for stdin/stdout/stderr
         ifaceCache :: ModIfaceCache
      }
-
-type TickArray = Array Int [(GHC.BreakIndex,RealSrcSpan)]
 
 -- | A GHCi command
 data Command
@@ -401,14 +399,14 @@ runDecls' decls = do
                   return Nothing)
         (Just <$> GHC.runParsedDecls decls)
 
-resume :: GhciMonad m => (SrcSpan -> Bool) -> GHC.SingleStep -> Maybe Int -> m GHC.ExecResult
-resume canLogSpan step mbIgnoreCnt = do
+resume :: GhciMonad m => GHC.SingleStep -> Maybe Int -> m GHC.ExecResult
+resume step mbIgnoreCnt = do
   st <- getGHCiState
   reifyGHCi $ \x ->
     withProgName (progname st) $
     withArgs (args st) $
       reflectGHCi x $ do
-        GHC.resumeExec canLogSpan step mbIgnoreCnt
+        GHC.resumeExec step mbIgnoreCnt
 
 -- --------------------------------------------------------------------------
 -- timing & statistics

@@ -56,7 +56,6 @@ import GHC.Types.Name.Reader
 import GHC.Types.Unique.DFM
 
 import GHC.Unit.Finder         ( findPluginModule, FindResult(..) )
-import GHC.Driver.Config.Finder ( initFinderOpts )
 import GHC.Driver.Config.Diagnostic ( initIfaceMessageOpts )
 import GHC.Unit.Module   ( Module, ModuleName, thisGhcUnit, GenModule(moduleUnit), IsBootInterface(NotBoot) )
 import GHC.Unit.Module.ModIface
@@ -220,7 +219,7 @@ loadPlugin' occ_name plugin_name hsc_env mod_name
                           [ text "The value", ppr name
                           , text "with type", ppr actual_type
                           , text "did not have the type"
-                          , text "GHC.Plugins.Plugin"
+                          , ppr (mkTyConTy plugin_tycon)
                           , text "as required"])
             Right (plugin, links, pkgs) -> return (plugin, mod_iface, links, pkgs) } } } } }
 
@@ -343,13 +342,8 @@ lookupRdrNameInModuleForPlugins :: HasDebugCallStack
                                 -> IO (Maybe (Name, ModIface))
 lookupRdrNameInModuleForPlugins hsc_env mod_name rdr_name = do
     let dflags     = hsc_dflags hsc_env
-    let fopts      = initFinderOpts dflags
-    let fc         = hsc_FC hsc_env
-    let unit_env   = hsc_unit_env hsc_env
-    let unit_state = ue_homeUnitState unit_env
-    let mhome_unit = hsc_home_unit_maybe hsc_env
     -- First find the unit the module resides in by searching exposed units and home modules
-    found_module <- findPluginModule fc fopts unit_state mhome_unit mod_name
+    found_module <- findPluginModule hsc_env mod_name
     case found_module of
         Found _ mod -> do
             -- Find the exports of the module
@@ -360,7 +354,7 @@ lookupRdrNameInModuleForPlugins hsc_env mod_name rdr_name = do
                 Just iface -> do
                     -- Try and find the required name in the exports
                     let decl_spec = ImpDeclSpec { is_mod = mod, is_as = mod_name, is_pkg_qual = NoPkgQual
-                                                , is_qual = False, is_dloc = noSrcSpan, is_isboot = NotBoot }
+                                                , is_qual = False, is_dloc = noSrcSpan, is_isboot = NotBoot, is_level = SpliceLevel }
                         imp_spec = ImpSpec decl_spec ImpAll
                         env = mkGlobalRdrEnv
                             $ gresFromAvails hsc_env (Just imp_spec) (mi_exports iface)

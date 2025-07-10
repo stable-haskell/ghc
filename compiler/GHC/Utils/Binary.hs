@@ -2,6 +2,8 @@
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE UnboxedTuples #-}
+{-# LANGUAGE DerivingVia #-}
+{-# LANGUAGE StandaloneDeriving #-}
 
 {-# OPTIONS_GHC -O2 -funbox-strict-fields #-}
 -- We always optimise this, otherwise performance of a non-optimised
@@ -75,6 +77,9 @@ module GHC.Utils.Binary
    lazyGetMaybe,
    lazyPutMaybe,
 
+   -- * EnumBinary
+   EnumBinary(..),
+
    -- * User data
    ReaderUserData, getReaderUserData, setReaderUserData, noReaderUserData,
    WriterUserData, getWriterUserData, setWriterUserData, noWriterUserData,
@@ -107,11 +112,15 @@ module GHC.Utils.Binary
    simpleBindingNameReader,
    FullBinData(..), freezeBinHandle, thawBinHandle, putFullBinData,
    BinArray,
+
+   -- * FingerprintWithValue
+   FingerprintWithValue(..)
   ) where
 
 import GHC.Prelude
 
 import Language.Haskell.Syntax.Module.Name (ModuleName(..))
+import Language.Haskell.Syntax.ImpExp.IsBoot (IsBootInterface(..))
 
 import {-# SOURCE #-} GHC.Types.Name (Name)
 import GHC.Data.FastString
@@ -135,6 +144,7 @@ import Data.ByteString (ByteString, copy)
 import Data.Coerce
 import qualified Data.ByteString.Internal as BS
 import qualified Data.ByteString.Unsafe   as BS
+import qualified Data.ByteString.Short.Internal as SBS
 import Data.IORef
 import Data.Char                ( ord, chr )
 import Data.List.NonEmpty       ( NonEmpty(..))
@@ -940,8 +950,8 @@ instance Binary a => Binary [a] where
 -- | This instance doesn't rely on the determinism of the keys' 'Ord' instance,
 -- so it works e.g. for 'Name's too.
 instance (Binary a, Ord a) => Binary (Set a) where
-  put_ bh s = put_ bh (Set.toList s)
-  get bh = Set.fromList <$> get bh
+  put_ bh s = put_ bh (Set.toAscList s)
+  get bh = Set.fromAscList <$> get bh
 
 instance Binary a => Binary (NonEmpty a) where
     put_ bh = put_ bh . NonEmpty.toList
@@ -1059,6 +1069,22 @@ instance Binary JoinPointHood where
         case h of
             0 -> return NotJoinPoint
             _ -> do { ar <- get bh; return (JoinPoint ar) }
+
+newtype EnumBinary a = EnumBinary { unEnumBinary :: a }
+instance Enum a => Binary (EnumBinary a) where
+  put_ bh (EnumBinary x) = put_ bh (fromEnum x)
+  get bh = do x <- get bh
+              return $ EnumBinary (toEnum x)
+
+
+instance Binary IsBootInterface where
+  put_ bh ib = put_ bh (case ib of
+                          IsBoot -> True
+                          NotBoot -> False)
+  get bh = do x <- get bh
+              return $ case x of
+                        True -> IsBoot
+                        False -> NotBoot
 
 {-
 Finally - a reasonable portable Integer instance.
@@ -1771,7 +1797,7 @@ type SymbolTable a = Array Int a
 ---------------------------------------------------------
 
 putFS :: WriteBinHandle -> FastString -> IO ()
-putFS bh fs = putBS bh $ bytesFS fs
+putFS bh fs = putSBS bh $ fastStringToShortByteString fs
 
 getFS :: ReadBinHandle -> IO FastString
 getFS bh = do
@@ -1791,6 +1817,18 @@ getByteString bh l =
   BS.create l $ \dest -> do
     getPrim bh l (\src -> copyBytes dest src l)
 
+putSBS :: WriteBinHandle -> SBS.ShortByteString -> IO ()
+putSBS bh sbs = do
+  let l = SBS.length sbs
+  put_ bh l
+  putPrim bh l (\p -> SBS.copyToPtr sbs 0 p l)
+
+
+getSBS :: ReadBinHandle -> IO SBS.ShortByteString
+getSBS bh = do
+  l <- get bh :: IO Int
+  getPrim bh l (\src -> SBS.createFromPtr src l)
+
 putBS :: WriteBinHandle -> ByteString -> IO ()
 putBS bh bs =
   BS.unsafeUseAsCStringLen bs $ \(ptr, l) -> do
@@ -1802,6 +1840,10 @@ getBS bh = do
   l <- get bh :: IO Int
   BS.create l $ \dest -> do
     getPrim bh l (\src -> copyBytes dest src l)
+
+instance Binary SBS.ShortByteString where
+  put_ bh f = putSBS bh f
+  get bh = getSBS bh
 
 instance Binary ByteString where
   put_ bh f = putBS bh f
@@ -2086,5 +2128,38 @@ source location as part of a larger structure.
 --------------------------------------------------------------------------------
 
 instance (Binary v) => Binary (IntMap v) where
-  put_ bh m = put_ bh (IntMap.toList m)
-  get bh = IntMap.fromList <$> get bh
+  put_ bh m = put_ bh (IntMap.toAscList m)
+  get bh = IntMap.fromAscList <$> get bh
+
+
+{- Note [FingerprintWithValue]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+FingerprintWithValue is a wrapper which allows us to store a fingerprint and
+optionally the value which was used to create the fingerprint.
+
+This is useful for storing information in interface files, where we want to
+store the fingerprint of the interface file, but also the value which was used
+to create the fingerprint (e.g. the DynFlags).
+
+The wrapper is useful to ensure that the fingerprint can be read quickly without
+having to deserialise the value itself.
+-}
+
+-- | A wrapper which allows us to store a fingerprint and optionally the value which
+-- was used to create the fingerprint.
+data FingerprintWithValue a = FingerprintWithValue !Fingerprint (Maybe a)
+  deriving Functor
+
+instance Binary a => Binary (FingerprintWithValue a) where
+  put_ bh (FingerprintWithValue fp val) = do
+    put_ bh fp
+    lazyPutMaybe bh val
+
+  get bh = do
+    fp <- get bh
+    val <- lazyGetMaybe bh
+    return $ FingerprintWithValue fp val
+
+instance NFData a => NFData (FingerprintWithValue a) where
+  rnf (FingerprintWithValue fp mflags)
+    = rnf fp `seq` rnf mflags `seq` ()

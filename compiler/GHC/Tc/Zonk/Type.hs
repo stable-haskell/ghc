@@ -28,12 +28,6 @@ module GHC.Tc.Zonk.Type (
         -- ** 'ZonkEnv', and the 'ZonkT' and 'ZonkBndrT' monad transformers
         module GHC.Tc.Zonk.Env,
 
-        -- * Coercion holes
-        isFilledCoercionHole, unpackCoercionHole, unpackCoercionHole_maybe,
-
-        -- * Rewriter sets
-        zonkRewriterSet, zonkCtRewriterSet, zonkCtEvRewriterSet,
-
         -- * Tidying
         tcInitTidyEnv, tcInitOpenTidyEnv,
 
@@ -55,7 +49,6 @@ import GHC.Tc.TyCl.Build ( TcMethInfo, MethInfo )
 import GHC.Tc.Utils.Env ( tcLookupGlobalOnly )
 import GHC.Tc.Utils.TcType
 import GHC.Tc.Utils.Monad ( newZonkAnyType, setSrcSpanA, liftZonkM, traceTc, addErr )
-import GHC.Tc.Types.Constraint
 import GHC.Tc.Types.Evidence
 import GHC.Tc.Errors.Types
 import GHC.Tc.Zonk.Env
@@ -88,7 +81,6 @@ import GHC.Types.Id
 import GHC.Types.TypeEnv
 import GHC.Types.Basic
 import GHC.Types.SrcLoc
-import GHC.Types.Unique.Set
 import GHC.Types.Unique.FM
 import GHC.Types.TyThing
 
@@ -99,8 +91,8 @@ import GHC.Data.Bag
 
 import Control.Monad
 import Control.Monad.Trans.Class ( lift )
-import Data.Semigroup
 import Data.List.NonEmpty ( NonEmpty )
+import Data.Foldable ( toList )
 
 {- Note [What is zonking?]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -380,7 +372,7 @@ zonkTyVarBinderX (Bndr tv vis)
 
 zonkTyVarOcc :: HasDebugCallStack => TcTyVar -> ZonkTcM Type
 zonkTyVarOcc tv
-  = do { ZonkEnv { ze_tv_env = tv_env } <- getZonkEnv
+  = do { ZonkEnv { ze_tv_env = tv_env, ze_flexi = zonk_flexi } <- getZonkEnv
 
        ; let lookup_in_tv_env    -- Look up in the env just as we do for Ids
                = case lookupVarEnv tv_env tv of
@@ -394,7 +386,7 @@ zonkTyVarOcc tv
 
              zonk_meta ref Flexi
                = do { kind <- zonkTcTypeToTypeX (tyVarKind tv)
-                    ; ty <- commitFlexi tv kind
+                    ; ty <- lift $ commitFlexi zonk_flexi tv kind
 
                     ; lift $ liftZonkM $ writeMetaTyVarRef tv ref ty  -- Belt and braces
                     ; finish_meta ty }
@@ -442,50 +434,47 @@ lookupTyVarX tv
                       Nothing -> pprPanic "lookupTyVarOcc" (ppr tv $$ ppr tv_env)
        ; return res }
 
-commitFlexi :: TcTyVar -> Kind -> ZonkTcM Type
-commitFlexi tv zonked_kind
-  = do { flexi <- ze_flexi <$> getZonkEnv
-       ; lift $ case flexi of
-         SkolemiseFlexi  -> return (mkTyVarTy (mkTyVar name zonked_kind))
+commitFlexi :: ZonkFlexi -> TcTyVar -> Kind -> TcM Type
+commitFlexi NoFlexi tv zonked_kind
+  = pprPanic "NoFlexi" (ppr tv <+> dcolon <+> ppr zonked_kind)
 
-         DefaultFlexi
-             -- Normally, RuntimeRep variables are defaulted in GHC.Tc.Utils.TcMType.defaultTyVar
-             -- But that sees only type variables that appear in, say, an inferred type.
-             -- Defaulting here, in the zonker, is needed to catch e.g.
-             --    y :: Bool
-             --    y = (\x -> True) undefined
-             -- We need *some* known RuntimeRep for the x and undefined, but no one
-             -- will choose it until we get here, in the zonker.
-           | isRuntimeRepTy zonked_kind
-           -> do { traceTc "Defaulting flexi tyvar to LiftedRep:" (pprTyVar tv)
-                 ; return liftedRepTy }
-           | isLevityTy zonked_kind
-           -> do { traceTc "Defaulting flexi tyvar to Lifted:" (pprTyVar tv)
-                 ; return liftedDataConTy }
-           | isMultiplicityTy zonked_kind
-           -> do { traceTc "Defaulting flexi tyvar to Many:" (pprTyVar tv)
-                 ; return manyDataConTy }
-           | Just (ConcreteFRR origin) <- isConcreteTyVar_maybe tv
-           -> do { addErr $ TcRnZonkerMessage (ZonkerCannotDefaultConcrete origin)
-                 ; return (anyTypeOfKind zonked_kind) }
-           | otherwise
-           -> do { traceTc "Defaulting flexi tyvar to ZonkAny:" (pprTyVar tv)
-                   -- See Note [Any types] in GHC.Builtin.Types, esp wrinkle (Any4)
-                 ; newZonkAnyType zonked_kind }
+commitFlexi (SkolemiseFlexi tvs_ref) tv zonked_kind
+  = do { let skol_tv = mkTyVar (tyVarName tv) zonked_kind
+       ; updTcRef tvs_ref (skol_tv :)
+       ; return (mkTyVarTy skol_tv) }
 
-         RuntimeUnkFlexi
-           -> do { traceTc "Defaulting flexi tyvar to RuntimeUnk:" (pprTyVar tv)
-                 ; return (mkTyVarTy (mkTcTyVar name zonked_kind RuntimeUnk)) }
-                           -- This is where RuntimeUnks are born:
-                           -- otherwise-unconstrained unification variables are
-                           -- turned into RuntimeUnks as they leave the
-                           -- typechecker's monad
+commitFlexi RuntimeUnkFlexi tv zonked_kind
+  = do { traceTc "Defaulting flexi tyvar to RuntimeUnk:" (pprTyVar tv)
+       ; return (mkTyVarTy (mkTcTyVar (tyVarName tv) zonked_kind RuntimeUnk)) }
+            -- This is where RuntimeUnks are born:
+            -- otherwise-unconstrained unification variables are
+            -- turned into RuntimeUnks as they leave the
+            -- typechecker's monad
 
-         NoFlexi -> pprPanic "NoFlexi" (ppr tv <+> dcolon <+> ppr zonked_kind) }
-
-  where
-     name = tyVarName tv
-
+commitFlexi DefaultFlexi tv zonked_kind
+  -- Normally, RuntimeRep variables are defaulted in GHC.Tc.Utils.TcMType.defaultTyVar
+  -- But that sees only type variables that appear in, say, an inferred type.
+  -- Defaulting here, in the zonker, is needed to catch e.g.
+  --    y :: Bool
+  --    y = (\x -> True) undefined
+  -- We need *some* known RuntimeRep for the x and undefined, but no one
+  -- will choose it until we get here, in the zonker.
+  | isRuntimeRepTy zonked_kind
+  = do { traceTc "Defaulting flexi tyvar to LiftedRep:" (pprTyVar tv)
+       ; return liftedRepTy }
+  | isLevityTy zonked_kind
+  = do { traceTc "Defaulting flexi tyvar to Lifted:" (pprTyVar tv)
+       ; return liftedDataConTy }
+  | isMultiplicityTy zonked_kind
+  = do { traceTc "Defaulting flexi tyvar to Many:" (pprTyVar tv)
+       ; return manyDataConTy }
+  | Just (ConcreteFRR origin) <- isConcreteTyVar_maybe tv
+  = do { addErr $ TcRnZonkerMessage (ZonkerCannotDefaultConcrete origin)
+       ; return (anyTypeOfKind zonked_kind) }
+  | otherwise
+  = do { traceTc "Defaulting flexi tyvar to ZonkAny:" (pprTyVar tv)
+          -- See Note [Any types] in GHC.Builtin.Types, esp wrinkle (Any4)
+       ; newZonkAnyType zonked_kind }
 
 zonkCoVarOcc :: CoVar -> ZonkTcM Coercion
 zonkCoVarOcc cv
@@ -815,20 +804,20 @@ zonk_bind (PatSynBind x bind@(PSB { psb_id   = L loc id
                        , psb_dir  = dir' } } }
 
 zonkMultAnn :: HsMultAnn GhcTc -> ZonkTcM (HsMultAnn GhcTc)
-zonkMultAnn (HsNoMultAnn mult)
+zonkMultAnn (HsUnannotated mult)
   = do { mult' <- zonkTcTypeToTypeX mult
-       ; return (HsNoMultAnn mult') }
-zonkMultAnn (HsPct1Ann mult)
+       ; return (HsUnannotated mult') }
+zonkMultAnn (HsLinearAnn mult)
   = do { mult' <- zonkTcTypeToTypeX mult
-       ; return (HsPct1Ann mult') }
-zonkMultAnn (HsMultAnn mult hs_ty)
+       ; return (HsLinearAnn mult') }
+zonkMultAnn (HsExplicitMult mult hs_ty)
   = do { mult' <- zonkTcTypeToTypeX mult
-       ; return (HsMultAnn mult' hs_ty) }
+       ; return (HsExplicitMult mult' hs_ty) }
 
 zonkPatSynDetails :: HsPatSynDetails GhcTc
                   -> ZonkTcM (HsPatSynDetails GhcTc)
-zonkPatSynDetails (PrefixCon _ as)
-  = PrefixCon noTypeArgs <$> traverse zonkLIdOcc as
+zonkPatSynDetails (PrefixCon as)
+  = PrefixCon <$> traverse zonkLIdOcc as
 zonkPatSynDetails (InfixCon a1 a2)
   = InfixCon <$> zonkLIdOcc a1 <*> zonkLIdOcc a2
 zonkPatSynDetails (RecCon flds)
@@ -854,9 +843,25 @@ zonkLTcSpecPrags ps
   = mapM zonk_prag ps
   where
     zonk_prag (L loc (SpecPrag id co_fn inl))
-        = do { co_fn' <- don'tBind $ zonkCoFn co_fn
-             ; id' <- zonkIdOcc id
-             ; return (L loc (SpecPrag id' co_fn' inl)) }
+      = do { co_fn' <- don'tBind $ zonkCoFn co_fn
+           ; id' <- zonkIdOcc id
+           ; return (L loc (SpecPrag id' co_fn' inl)) }
+    zonk_prag (L loc prag@(SpecPragE { spe_fn_id = poly_id
+                                     , spe_bndrs = bndrs
+                                     , spe_call  = spec_e }))
+      = do { poly_id' <- zonkIdOcc poly_id
+
+           ; skol_tvs_ref <- lift $ newTcRef []
+           ; setZonkType (SkolemiseFlexi skol_tvs_ref) $
+               -- SkolemiseFlexi: see Note [Free tyvars on rule LHS]
+             runZonkBndrT (zonkCoreBndrsX bndrs)       $ \ bndrs' ->
+             do { spec_e' <- zonkLExpr spec_e
+                ; skol_tvs <- lift $ readTcRef skol_tvs_ref
+                ; return (L loc (prag { spe_fn_id = poly_id'
+                                      , spe_bndrs = skol_tvs ++ bndrs'
+                                      , spe_call  = spec_e'
+                                      }))
+                }}
 
 {-
 ************************************************************************
@@ -925,16 +930,15 @@ zonkExpr (HsVar x (L l id))
   do { id' <- zonkIdOcc id
      ; return (HsVar x (L l id')) }
 
-zonkExpr (HsUnboundVar her occ)
+zonkExpr (HsHole (h, her))
   = do her' <- zonk_her her
-       return (HsUnboundVar her' occ)
+       return (HsHole (h, her'))
   where
     zonk_her :: HoleExprRef -> ZonkTcM HoleExprRef
     zonk_her (HER ref ty u)
       = do updTcRefM ref zonkEvTerm
            ty'  <- zonkTcTypeToTypeX ty
            return (HER ref ty' u)
-
 
 zonkExpr (HsIPVar x _) = dataConCantHappen x
 
@@ -1301,7 +1305,7 @@ zonkStmt _ (ParStmt bind_ty stmts_w_bndrs mzip_op bind_op)
        ; new_stmts_w_bndrs <- noBinders $ mapM zonk_branch stmts_w_bndrs
 
        -- Add in the binders after we're done with all the branches.
-       ; let new_binders = [ b | ParStmtBlock _ _ bs _ <- new_stmts_w_bndrs
+       ; let new_binders = [ b | ParStmtBlock _ _ bs _ <- toList new_stmts_w_bndrs
                            , b <- bs ]
        ; extendIdZonkEnvRec new_binders
        ; new_mzip <- noBinders $ zonkExpr mzip_op
@@ -1439,7 +1443,7 @@ zonkStmt _zBody (XStmtLR (ApplicativeStmt body_ty args mb_join))
     zonk_args args
       = do { new_args_rev <- zonk_args_rev (reverse args)
            ; new_pats     <- zonkPats (map get_pat args)
-           ; return $ zipWithEqual "zonkStmt" replace_pat
+           ; return $ zipWithEqual replace_pat
                         new_pats (reverse new_args_rev) }
 
      -- these need to go backward, because if any operators are higher-rank,
@@ -1621,9 +1625,9 @@ zonk_pat pat = pprPanic "zonk_pat" (ppr pat)
 ---------------------------
 zonkConStuff :: HsConPatDetails GhcTc
              -> ZonkBndrTcM (HsConPatDetails GhcTc)
-zonkConStuff (PrefixCon tyargs pats)
+zonkConStuff (PrefixCon pats)
   = do  { pats' <- zonkPats pats
-        ; return (PrefixCon tyargs pats') }
+        ; return (PrefixCon pats') }
 
 zonkConStuff (InfixCon p1 p2)
   = do  { p1' <- zonkPat p1
@@ -1670,30 +1674,73 @@ zonkRules :: [LRuleDecl GhcTc] -> ZonkTcM [LRuleDecl GhcTc]
 zonkRules rs = mapM (wrapLocZonkMA zonkRule) rs
 
 zonkRule :: RuleDecl GhcTc -> ZonkTcM (RuleDecl GhcTc)
-zonkRule rule@(HsRule { rd_tmvs = tm_bndrs{-::[RuleBndr TcId]-}
+zonkRule rule@(HsRule { rd_bndrs = bndrs
                       , rd_lhs = lhs
                       , rd_rhs = rhs })
-  = runZonkBndrT (traverse zonk_tm_bndr tm_bndrs) $ \ new_tm_bndrs ->
-    do { -- See Note [Zonking the LHS of a RULE]
-       ; new_lhs <- setZonkType SkolemiseFlexi $ zonkLExpr lhs
-       ; new_rhs <-                              zonkLExpr rhs
-       ; return $ rule { rd_tmvs = new_tm_bndrs
-                       , rd_lhs  = new_lhs
-                       , rd_rhs  = new_rhs } }
-  where
-   zonk_tm_bndr :: LRuleBndr GhcTc -> ZonkBndrTcM (LRuleBndr GhcTc)
-   zonk_tm_bndr (L l (RuleBndr x (L loc v)))
-      = do { v' <- zonk_it v
-           ; return (L l (RuleBndr x (L loc v'))) }
-   zonk_tm_bndr (L _ (RuleBndrSig {})) = panic "zonk_tm_bndr RuleBndrSig"
+  = do { skol_tvs_ref <- lift $ newTcRef []
+       ; setZonkType (SkolemiseFlexi skol_tvs_ref) $
+           -- setZonkType: see Note [Free tyvars on rule LHS]
+         zonkRuleBndrs bndrs $ \ new_bndrs ->
+         do { new_lhs  <- zonkLExpr lhs
+            ; skol_tvs <- lift $ readTcRef skol_tvs_ref
+            ; new_rhs  <- setZonkType DefaultFlexi $ zonkLExpr rhs
+            ; return $ rule { rd_bndrs = add_tvs skol_tvs new_bndrs
+                            , rd_lhs   = new_lhs
+                            , rd_rhs   = new_rhs } } }
+   where
+     add_tvs :: [TyVar] -> RuleBndrs GhcTc -> RuleBndrs GhcTc
+     add_tvs tvs rbs@(RuleBndrs { rb_ext = bndrs }) = rbs { rb_ext = tvs ++ bndrs }
 
-   zonk_it v
-     | isId v     = zonkIdBndrX v
-     | otherwise  = assert (isImmutableTyVar v)
-                    zonkTyBndrX v
-                    -- DV: used to be "return v", but that is plain
-                    -- wrong because we may need to go inside the kind
-                    -- of v and zonk there!
+
+zonkRuleBndrs :: RuleBndrs GhcTc -> (RuleBndrs GhcTc -> ZonkTcM a) -> ZonkTcM a
+zonkRuleBndrs rb@(RuleBndrs { rb_ext = bndrs }) thing_inside
+  = runZonkBndrT (traverse zonk_it bndrs) $ \ new_bndrs ->
+    thing_inside (rb { rb_ext = new_bndrs })
+  where
+    zonk_it v
+      | isId v     = zonkIdBndrX v
+      | otherwise  = assert (isImmutableTyVar v) $
+                     zonkTyBndrX v
+                     -- We may need to go inside the kind of v and zonk there!
+
+{- Note [Free tyvars on rule LHS]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Consider
+  data T a = C
+
+  foo :: T a -> Int
+  foo C = 1
+
+  {-# RULES "myrule"  foo C = 1 #-}
+
+After type checking the LHS becomes (foo alpha (C alpha)), where alpha
+is an unbound meta-tyvar.  The zonker in GHC.Tc.Zonk.Type is careful not to
+turn the free alpha into Any (as it usually does).  Instead we want to quantify
+over it.   Here is how:
+
+* We set the ze_flexi field of ZonkEnv to (SkolemiseFlexi ref), to tell the
+  zonker to zonk a Flexi meta-tyvar to a TyVar, not to Any.  See the
+  SkolemiseFlexi case of `commitFlexi`.
+
+* Here (ref :: TcRef [TyVar]) collects the type variables thus skolemised;
+  again see `commitFlexi`.
+
+* When zonking a RULE, in `zonkRule` we
+   - make a fresh ref-cell to collect the skolemised type variables,
+   - zonk the binders and LHS with ze_flexi = SkolemiseFlexi ref
+   - read the ref-cell to get all the skolemised TyVars
+   - add them to the binders
+
+All this applies for SPECIALISE pragmas too.
+
+Wrinkles:
+
+(FTV1) We just add the new tyvars to the front of the binder-list, but
+  that may make the list not be in dependency order.  Example (T12925):
+  the existing list is  [k:Type, b:k], and we add (a:k) to the front.
+  Also we just collect the new skolemised type variables in any old order,
+  so they may not be ordered with respect to each other.
+-}
 
 {-
 ************************************************************************
@@ -1900,89 +1947,3 @@ finding the free type vars of an expression is necessarily monadic
 operation. (consider /\a -> f @ b, where b is side-effected to a)
 -}
 
-{-
-************************************************************************
-*                                                                      *
-             Checking for coercion holes
-*                                                                      *
-************************************************************************
--}
-
--- | Is a coercion hole filled in?
-isFilledCoercionHole :: CoercionHole -> TcM Bool
-isFilledCoercionHole (CoercionHole { ch_ref = ref })
-  = isJust <$> readTcRef ref
-
--- | Retrieve the contents of a coercion hole. Panics if the hole
--- is unfilled
-unpackCoercionHole :: CoercionHole -> TcM Coercion
-unpackCoercionHole hole
-  = do { contents <- unpackCoercionHole_maybe hole
-       ; case contents of
-           Just co -> return co
-           Nothing -> pprPanic "Unfilled coercion hole" (ppr hole) }
-
--- | Retrieve the contents of a coercion hole, if it is filled
-unpackCoercionHole_maybe :: CoercionHole -> TcM (Maybe Coercion)
-unpackCoercionHole_maybe (CoercionHole { ch_ref = ref }) = readTcRef ref
-
-zonkCtRewriterSet :: Ct -> TcM Ct
-zonkCtRewriterSet ct
-  | isGivenCt ct
-  = return ct
-  | otherwise
-  = case ct of
-      CEqCan eq@(EqCt { eq_ev = ev })       -> do { ev' <- zonkCtEvRewriterSet ev
-                                                  ; return (CEqCan (eq { eq_ev = ev' })) }
-      CIrredCan ir@(IrredCt { ir_ev = ev }) -> do { ev' <- zonkCtEvRewriterSet ev
-                                                  ; return (CIrredCan (ir { ir_ev = ev' })) }
-      CDictCan di@(DictCt { di_ev = ev })   -> do { ev' <- zonkCtEvRewriterSet ev
-                                                  ; return (CDictCan (di { di_ev = ev' })) }
-      CQuantCan {}     -> return ct
-      CNonCanonical ev -> do { ev' <- zonkCtEvRewriterSet ev
-                             ; return (CNonCanonical ev') }
-
-zonkCtEvRewriterSet :: CtEvidence -> TcM CtEvidence
-zonkCtEvRewriterSet ev@(CtGiven {})
-  = return ev
-zonkCtEvRewriterSet ev@(CtWanted { ctev_rewriters = rewriters })
-  = do { rewriters' <- zonkRewriterSet rewriters
-       ; return (ev { ctev_rewriters = rewriters' }) }
-
--- | Check whether any coercion hole in a RewriterSet is still unsolved.
--- Does this by recursively looking through filled coercion holes until
--- one is found that is not yet filled in, at which point this aborts.
-zonkRewriterSet :: RewriterSet -> TcM RewriterSet
-zonkRewriterSet (RewriterSet set)
-  = nonDetStrictFoldUniqSet go (return emptyRewriterSet) set
-     -- this does not introduce non-determinism, because the only
-     -- monadic action is to read, and the combining function is
-     -- commutative
-  where
-    go :: CoercionHole -> TcM RewriterSet -> TcM RewriterSet
-    go hole m_acc = unionRewriterSet <$> check_hole hole <*> m_acc
-
-    check_hole :: CoercionHole -> TcM RewriterSet
-    check_hole hole = do { m_co <- unpackCoercionHole_maybe hole
-                         ; case m_co of
-                             Nothing -> return (unitRewriterSet hole)
-                             Just co -> unUCHM (check_co co) }
-
-    check_ty :: Type -> UnfilledCoercionHoleMonoid
-    check_co :: Coercion -> UnfilledCoercionHoleMonoid
-    (check_ty, _, check_co, _) = foldTyCo folder ()
-
-    folder :: TyCoFolder () UnfilledCoercionHoleMonoid
-    folder = TyCoFolder { tcf_view  = noView
-                        , tcf_tyvar = \ _ tv -> check_ty (tyVarKind tv)
-                        , tcf_covar = \ _ cv -> check_ty (varType cv)
-                        , tcf_hole  = \ _ -> UCHM . check_hole
-                        , tcf_tycobinder = \ _ _ _ -> () }
-
-newtype UnfilledCoercionHoleMonoid = UCHM { unUCHM :: TcM RewriterSet }
-
-instance Semigroup UnfilledCoercionHoleMonoid where
-  UCHM l <> UCHM r = UCHM (unionRewriterSet <$> l <*> r)
-
-instance Monoid UnfilledCoercionHoleMonoid where
-  mempty = UCHM (return emptyRewriterSet)

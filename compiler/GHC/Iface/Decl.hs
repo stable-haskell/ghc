@@ -31,6 +31,7 @@ import GHC.Core.ConLike
 import GHC.Core.DataCon
 import GHC.Core.Type
 import GHC.Core.Multiplicity
+import GHC.Core.TyCo.Tidy
 
 import GHC.Types.Id
 import GHC.Types.Var.Env
@@ -115,7 +116,7 @@ coAxBranchToIfaceBranch tc lhs_s
                   , ifaxbRHS     = toIfaceType rhs
                   , ifaxbIncomps = iface_incomps }
   where
-    iface_incomps = map (expectJust "iface_incomps"
+    iface_incomps = map (expectJust
                         . flip findIndex lhs_s
                         . eqTypes
                         . coAxBranchLHS) incomps
@@ -245,7 +246,7 @@ tyConToIfaceDecl env tycon
           --     we know that the type variables will line up
           -- The latter (b) is important because we pretty-print type constructors
           -- by converting to Iface syntax and pretty-printing that
-          con_env1 = (fst tc_env1, mkVarEnv (zipEqual "ifaceConDecl" univ_tvs tc_tyvars))
+          con_env1 = (fst tc_env1, mkVarEnv (zipEqual univ_tvs tc_tyvars))
                      -- A bit grimy, perhaps, but it's simple!
 
           (con_env2, ex_tvs') = tidyVarBndrs con_env1 ex_tvs

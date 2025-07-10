@@ -159,7 +159,7 @@ bindistRules = do
 
         let lib_exe_targets = (lib_targets ++ (map (\(_, p) -> p) (bin_targets ++ iserv_targets)))
 
-        let doc_target = if cross then [] else ["docs"]
+        let doc_target = ["docs"]
 
         let other_targets = map (bindistFilesDir -/-) (["configure", "Makefile"] ++ bindistInstallFiles)
         let all_targets = lib_exe_targets ++ doc_target ++ other_targets
@@ -301,7 +301,8 @@ bindistRules = do
 
     let buildBinDist compressor = do
           win_target <- isWinTarget
-          when win_target (error "normal binary-dist does not work for Windows targets, use `reloc-binary-dist-*` target instead.")
+          win_host <- isWinHost
+          when (win_target && win_host) (error "normal binary-dist does not work at Windows, use `reloc-binary-dist-*` target instead.")
           buildBinDistX "binary-dist-dir" "bindist" compressor
         buildBinDistReloc = buildBinDistX "reloc-binary-dist-dir" "reloc-bindist"
 

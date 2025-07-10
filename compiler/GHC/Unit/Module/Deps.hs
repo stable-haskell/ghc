@@ -1,21 +1,29 @@
+{-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE ExplicitNamespaces #-}
+{-# LANGUAGE DerivingVia #-}
 -- | Dependencies and Usage of a module
 module GHC.Unit.Module.Deps
-   ( Dependencies
-   , mkDependencies
-   , noDependencies
-   , dep_direct_mods
-   , dep_direct_pkgs
-   , dep_sig_mods
-   , dep_trusted_pkgs
-   , dep_orphs
-   , dep_plugin_pkgs
-   , dep_finsts
-   , dep_boot_mods
+   ( Dependencies(dep_direct_mods
+                  , dep_direct_pkgs
+                  , dep_sig_mods
+                  , dep_trusted_pkgs
+                  , dep_orphs
+                  , dep_plugin_pkgs
+                  , dep_finsts
+                  , dep_boot_mods
+                  , Dependencies)
    , dep_orphs_update
    , dep_finsts_update
+   , mkDependencies
+   , noDependencies
    , pprDeps
    , Usage (..)
+   , HomeModImport (..)
+   , HomeModImportedAvails (..)
    , ImportAvails (..)
+   , IfaceImportLevel(..)
+   , tcImportLevel
    )
 where
 
@@ -23,8 +31,10 @@ import GHC.Prelude
 
 import GHC.Data.FastString
 
+import GHC.Types.Avail
 import GHC.Types.SafeHaskell
 import GHC.Types.Name
+import GHC.Types.Basic
 
 import GHC.Unit.Module.Imported
 import GHC.Unit.Module
@@ -39,6 +49,10 @@ import Data.List (sortBy, sort, partition)
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Bifunctor
+import Control.DeepSeq
+import GHC.Types.Name.Set
+
+
 
 -- | Dependency information about ALL modules and packages below this one
 -- in the import hierarchy. This is the serialisable version of `ImportAvails`.
@@ -51,38 +65,38 @@ import Data.Bifunctor
 --
 -- See Note [Transitive Information in Dependencies]
 data Dependencies = Deps
-   { dep_direct_mods :: Set (UnitId, ModuleNameWithIsBoot)
+   { dep_direct_mods_ :: Set (IfaceImportLevel, UnitId, ModuleNameWithIsBoot)
       -- ^ All home-package modules which are directly imported by this one.
       -- This may include modules from other units when using multiple home units
 
-   , dep_direct_pkgs :: Set UnitId
+   , dep_direct_pkgs_ :: Set (IfaceImportLevel, UnitId)
       -- ^ All packages directly imported by this module
       -- I.e. packages to which this module's direct imports belong.
       -- Does not include other home units when using multiple home units.
       -- Modules from these units will go in `dep_direct_mods`
 
-   , dep_plugin_pkgs :: Set UnitId
+   , dep_plugin_pkgs_ :: Set UnitId
       -- ^ All units needed for plugins
 
     ------------------------------------
     -- Transitive information below here
 
-   , dep_sig_mods :: ![ModuleName]
+   , dep_sig_mods_ :: ![ModuleName]
     -- ^ Transitive closure of hsig files in the home package
 
 
-   , dep_trusted_pkgs :: Set UnitId
+   , dep_trusted_pkgs_ :: Set UnitId
       -- Packages which we are required to trust
       -- when the module is imported as a safe import
       -- (Safe Haskell). See Note [Tracking Trust Transitively] in GHC.Rename.Names
 
-   , dep_boot_mods :: Set (UnitId, ModuleNameWithIsBoot)
+   , dep_boot_mods_ :: Set (UnitId, ModuleNameWithIsBoot)
       -- ^ All modules which have boot files below this one, and whether we
       -- should use the boot file or not.
       -- This information is only used to populate the eps_is_boot field.
       -- See Note [Structure of dep_boot_mods]
 
-   , dep_orphs  :: [Module]
+   , dep_orphs_ :: [Module]
       -- ^ Transitive closure of orphan modules (whether
       -- home or external pkg).
       --
@@ -92,7 +106,7 @@ data Dependencies = Deps
       -- which relies on dep_orphs having the complete list!)
       -- This does NOT include us, unlike 'imp_orphs'.
 
-   , dep_finsts :: [Module]
+   , dep_finsts_ :: [Module]
       -- ^ Transitive closure of depended upon modules which
       -- contain family instances (whether home or external).
       -- This is used by 'checkFamInstConsistency'.  This
@@ -104,6 +118,54 @@ data Dependencies = Deps
         -- Equality used only for old/new comparison in GHC.Iface.Recomp.addFingerprints
         -- See 'GHC.Tc.Utils.ImportAvails' for details on dependencies.
 
+pattern Dependencies :: Set (IfaceImportLevel, UnitId, ModuleNameWithIsBoot)
+             -> Set (IfaceImportLevel, UnitId)
+             -> Set UnitId
+             -> [ModuleName]
+             -> Set UnitId
+             -> Set (UnitId, ModuleNameWithIsBoot)
+             -> [Module]
+             -> [Module]
+             -> Dependencies
+pattern Dependencies {dep_direct_mods, dep_direct_pkgs, dep_plugin_pkgs, dep_sig_mods, dep_trusted_pkgs, dep_boot_mods, dep_orphs, dep_finsts}
+          <- Deps {dep_direct_mods_ = dep_direct_mods
+                 , dep_direct_pkgs_ = dep_direct_pkgs
+                 , dep_plugin_pkgs_ = dep_plugin_pkgs
+                 , dep_sig_mods_ = dep_sig_mods
+                 , dep_trusted_pkgs_ = dep_trusted_pkgs
+                 , dep_boot_mods_ = dep_boot_mods
+                 , dep_orphs_ = dep_orphs
+                 , dep_finsts_ = dep_finsts}
+{-# COMPLETE Dependencies #-}
+
+instance NFData Dependencies where
+  rnf (Deps dmods dpkgs ppkgs hsigms tps bmods orphs finsts)
+    = rnf dmods
+        `seq` rnf dpkgs
+        `seq` rnf ppkgs
+        `seq` rnf hsigms
+        `seq` rnf tps
+        `seq` rnf bmods
+        `seq` rnf orphs
+        `seq` rnf finsts
+        `seq` ()
+
+newtype IfaceImportLevel = IfaceImportLevel ImportLevel
+  deriving (Eq, Ord)
+  deriving Binary via EnumBinary ImportLevel
+
+tcImportLevel :: IfaceImportLevel -> ImportLevel
+tcImportLevel (IfaceImportLevel lvl) = lvl
+
+instance NFData IfaceImportLevel where
+  rnf (IfaceImportLevel lvl) = case lvl of
+                                NormalLevel -> ()
+                                QuoteLevel  -> ()
+                                SpliceLevel -> ()
+
+instance Outputable IfaceImportLevel where
+  ppr (IfaceImportLevel lvl) = ppr lvl
+
 
 -- | Extract information from the rename and typecheck phases to produce
 -- a dependencies information for the module being compiled.
@@ -113,15 +175,19 @@ mkDependencies :: HomeUnit -> Module -> ImportAvails -> [Module] -> Dependencies
 mkDependencies home_unit mod imports plugin_mods =
   let (home_plugins, external_plugins) = partition (isHomeUnit home_unit . moduleUnit) plugin_mods
       plugin_units = Set.fromList (map (toUnitId . moduleUnit) external_plugins)
-      all_direct_mods = foldr (\mn m -> extendInstalledModuleEnv m mn (GWIB (moduleName mn) NotBoot))
+      all_direct_mods = foldr (\(s, mn) m -> extendInstalledModuleEnv m mn (s, (GWIB (moduleName mn) NotBoot)))
                               (imp_direct_dep_mods imports)
-                              (map (fmap toUnitId) home_plugins)
+                              (map (fmap (fmap toUnitId) . (Set.singleton SpliceLevel,)) home_plugins)
 
-      modDepsElts = Set.fromList . installedModuleEnvElts
+      modDepsElts_source :: Ord a => InstalledModuleEnv a -> Set.Set (InstalledModule, a)
+      modDepsElts_source = Set.fromList . installedModuleEnvElts
         -- It's OK to use nonDetEltsUFM here because sorting by module names
         -- restores determinism
 
-      direct_mods = first moduleUnit `Set.map` modDepsElts (delInstalledModuleEnv all_direct_mods (toUnitId <$> mod))
+      modDepsElts :: Ord a => InstalledModuleEnv (Set.Set ImportLevel, a) -> Set.Set (IfaceImportLevel, UnitId,  a)
+      modDepsElts e = Set.fromList [ (IfaceImportLevel s, moduleUnit im, a) | (im, (ss,a)) <- installedModuleEnvElts e, s <- Set.toList ss]
+
+      direct_mods = modDepsElts (delInstalledModuleEnv all_direct_mods (toUnitId <$> mod))
             -- M.hi-boot can be in the imp_dep_mods, but we must remove
             -- it before recording the modules on which this one depends!
             -- (We want to retain M.hi-boot in imp_dep_mods so that
@@ -133,7 +199,7 @@ mkDependencies home_unit mod imports plugin_mods =
             -- We must also remove self-references from imp_orphs. See
             -- Note [Module self-dependency]
 
-      direct_pkgs = imp_dep_direct_pkgs imports
+      direct_pkgs = Set.map (\(lvl, uid) -> (IfaceImportLevel lvl, uid)) (imp_dep_direct_pkgs imports)
 
       -- Set the packages required to be Safe according to Safe Haskell.
       -- See Note [Tracking Trust Transitively] in GHC.Rename.Names
@@ -141,18 +207,18 @@ mkDependencies home_unit mod imports plugin_mods =
 
       -- If there's a non-boot import, then it shadows the boot import
       -- coming from the dependencies
-      source_mods = first moduleUnit `Set.map` modDepsElts (imp_boot_mods imports)
+      source_mods = first moduleUnit `Set.map` modDepsElts_source (imp_boot_mods imports)
 
       sig_mods = filter (/= (moduleName mod)) $ imp_sig_mods imports
 
-  in Deps { dep_direct_mods  = direct_mods
-          , dep_direct_pkgs  = direct_pkgs
-          , dep_plugin_pkgs  = plugin_units
-          , dep_sig_mods     = sort sig_mods
-          , dep_trusted_pkgs = trust_pkgs
-          , dep_boot_mods    = source_mods
-          , dep_orphs        = sortBy stableModuleCmp dep_orphs
-          , dep_finsts       = sortBy stableModuleCmp (imp_finsts imports)
+  in Deps { dep_direct_mods_   = direct_mods
+          , dep_direct_pkgs_  = direct_pkgs
+          , dep_plugin_pkgs_  = plugin_units
+          , dep_sig_mods_     = sort sig_mods
+          , dep_trusted_pkgs_ = trust_pkgs
+          , dep_boot_mods_    = source_mods
+          , dep_orphs_        = sortBy stableModuleCmp dep_orphs
+          , dep_finsts_       = sortBy stableModuleCmp (imp_finsts imports)
             -- sort to get into canonical order
             -- NB. remember to use lexicographic ordering
           }
@@ -161,14 +227,13 @@ mkDependencies home_unit mod imports plugin_mods =
 dep_orphs_update :: Monad m => Dependencies -> ([Module] -> m [Module]) -> m Dependencies
 dep_orphs_update deps f = do
   r <- f (dep_orphs deps)
-  pure (deps { dep_orphs = sortBy stableModuleCmp r })
+  pure (deps { dep_orphs_ = sortBy stableModuleCmp r })
 
 -- | Update module dependencies containing family instances (used by Backpack)
 dep_finsts_update :: Monad m => Dependencies -> ([Module] -> m [Module]) -> m Dependencies
 dep_finsts_update deps f = do
   r <- f (dep_finsts deps)
-  pure (deps { dep_finsts = sortBy stableModuleCmp r })
-
+  pure (deps { dep_finsts_ = sortBy stableModuleCmp r })
 
 instance Binary Dependencies where
     put_ bh deps = do put_ bh (dep_direct_mods deps)
@@ -188,36 +253,36 @@ instance Binary Dependencies where
                 sms <- get bh
                 os <- get bh
                 fis <- get bh
-                return (Deps { dep_direct_mods = dms
-                             , dep_direct_pkgs = dps
-                             , dep_plugin_pkgs = plugin_pkgs
-                             , dep_sig_mods = hsigms
-                             , dep_boot_mods = sms
-                             , dep_trusted_pkgs = tps
-                             , dep_orphs = os,
-                               dep_finsts = fis })
+                return (Deps { dep_direct_mods_ = dms
+                             , dep_direct_pkgs_ = dps
+                             , dep_plugin_pkgs_ = plugin_pkgs
+                             , dep_sig_mods_ = hsigms
+                             , dep_boot_mods_ = sms
+                             , dep_trusted_pkgs_ = tps
+                             , dep_orphs_ = os,
+                               dep_finsts_ = fis })
 
 noDependencies :: Dependencies
 noDependencies = Deps
-  { dep_direct_mods  = Set.empty
-  , dep_direct_pkgs  = Set.empty
-  , dep_plugin_pkgs  = Set.empty
-  , dep_sig_mods     = []
-  , dep_boot_mods    = Set.empty
-  , dep_trusted_pkgs = Set.empty
-  , dep_orphs        = []
-  , dep_finsts       = []
+  { dep_direct_mods_  = Set.empty
+  , dep_direct_pkgs_  = Set.empty
+  , dep_plugin_pkgs_  = Set.empty
+  , dep_sig_mods_     = []
+  , dep_boot_mods_    = Set.empty
+  , dep_trusted_pkgs_ = Set.empty
+  , dep_orphs_        = []
+  , dep_finsts_       = []
   }
 
 -- | Pretty-print unit dependencies
 pprDeps :: UnitState -> Dependencies -> SDoc
-pprDeps unit_state (Deps { dep_direct_mods = dmods
-                         , dep_boot_mods = bmods
-                         , dep_plugin_pkgs = plgns
-                         , dep_orphs = orphs
-                         , dep_direct_pkgs = pkgs
-                         , dep_trusted_pkgs = tps
-                         , dep_finsts = finsts
+pprDeps unit_state (Deps { dep_direct_mods_ = dmods
+                         , dep_boot_mods_ = bmods
+                         , dep_plugin_pkgs_ = plgns
+                         , dep_orphs_ = orphs
+                         , dep_direct_pkgs_ = pkgs
+                         , dep_trusted_pkgs_ = tps
+                         , dep_finsts_ = finsts
                          })
   = pprWithUnitState unit_state $
     vcat [text "direct module dependencies:"  <+> ppr_set ppr_mod dmods,
@@ -231,8 +296,8 @@ pprDeps unit_state (Deps { dep_direct_mods = dmods
           text "family instance modules:" <+> fsep (map ppr finsts)
         ]
   where
-    ppr_mod (uid, (GWIB mod IsBoot))  = ppr uid <> colon <> ppr mod <+> text "[boot]"
-    ppr_mod (uid, (GWIB mod NotBoot)) = ppr uid <> colon <> ppr mod
+    ppr_mod (_, uid, (GWIB mod IsBoot))  = ppr uid <> colon <> ppr mod <+> text "[boot]"
+    ppr_mod (lvl, uid, (GWIB mod NotBoot)) = ppr lvl <+> ppr uid <> colon <> ppr mod
 
     ppr_set :: Outputable a => (a -> SDoc) -> Set a -> SDoc
     ppr_set w = fsep . fmap w . Set.toAscList
@@ -268,9 +333,9 @@ data Usage
             -- ^ Entities we depend on, sorted by occurrence name and fingerprinted.
             -- NB: usages are for parent names only, e.g. type constructors
             -- but not the associated data constructors.
-        usg_exports  :: Maybe Fingerprint,
-            -- ^ Fingerprint for the export list of this module,
-            -- if we directly imported it (and hence we depend on its export list)
+        usg_exports :: Maybe HomeModImport,
+            -- ^ What we depend on from the exports of the module;
+            -- see 'HomeModImport'.
         usg_safe :: IsSafeImport
             -- ^ Was this module imported as a safe import
     }
@@ -325,6 +390,13 @@ data Usage
         --                      import M()
         -- And of course, for modules that aren't imported directly we don't
         -- depend on their export lists
+
+instance NFData Usage where
+  rnf (UsagePackageModule mod hash safe) = rnf mod `seq` rnf hash `seq` rnf safe `seq` ()
+  rnf (UsageHomeModule mod uid hash entities exports safe) = rnf mod `seq` rnf uid `seq` rnf hash `seq` rnf entities `seq` rnf exports `seq` rnf safe `seq` ()
+  rnf (UsageFile file hash label) = rnf file `seq` rnf hash `seq` rnf label `seq` ()
+  rnf (UsageMergedRequirement mod hash) = rnf mod `seq` rnf hash `seq` ()
+  rnf (UsageHomeModuleInterface mod uid hash) = rnf mod `seq` rnf uid `seq` rnf hash `seq` ()
 
 instance Binary Usage where
     put_ bh usg@UsagePackageModule{} = do
@@ -392,11 +464,79 @@ instance Binary Usage where
             return UsageHomeModuleInterface { usg_mod_name = mod, usg_unit_id = uid, usg_iface_hash = hash }
           i -> error ("Binary.get(Usage): " ++ show i)
 
+-- | Records the imports that we depend on from a home module,
+-- for recompilation checking.
+--
+-- See Note [When to recompile when export lists change?] in GHC.Iface.Recomp.
+data HomeModImport
+  = HomeModImport
+    -- | Hash of orphans, dependencies, orphans of dependencies etc...
+    --
+    -- See Note [Orphan-like hash].
+    --
+    -- If this changes, we definitely need to recompile.
+  { hmiu_orphanLikeHash :: Fingerprint
+    -- | The avails we are importing; see 'HomeModImportedAvails'.
+  , hmiu_importedAvails :: HomeModImportedAvails
+  }
+  deriving stock Eq
 
-{-
-Note [Transitive Information in Dependencies]
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+-- | Records all the 'Avail's we are importing from a home module.
+data HomeModImportedAvails
+  -- | All import lists are explicit import lists, but some identifiers
+  -- may still be implicitly imported, e.g. @import M(a, b, T(..))@.
+  --
+  -- In this case, recompilation is keyed by the names we are importing,
+  -- with their 'Avail' structure.
+  = HMIA_Explicit
+    { hmia_imported_avails :: DetOrdAvails
+        -- ^ The avails we are importing
+    , hmia_parents_with_implicits :: NameSet
+        -- ^ The 'Name's of all 'AvailTC' imports which
+        -- implicitly import children
+    }
+  -- | One import is a whole module import, or a @import module M hiding(..)@
+  -- import.
+  --
+  -- In this case, recompilation is keyed on the hash of the exported avails
+  -- of the module we are importing.
+  | HMIA_Implicit
+     { hmia_exportedAvailsHash :: Fingerprint
+       -- ^ The export avails hash of the module we are importing
+     }
+  deriving stock Eq
 
+instance Outputable HomeModImport where
+  ppr (HomeModImport orphan_like imp_avails) =
+    braces (text "orphan_like:" <+> ppr orphan_like <+> text ", imported avails:" <+> ppr imp_avails)
+instance Outputable HomeModImportedAvails where
+  ppr (HMIA_Explicit avails implicit_parents) =
+    braces (text "explicit:" <+> ppr avails <+> text ", implicit_parents:" <+> ppr implicit_parents)
+  ppr (HMIA_Implicit hash) = braces (text "implicit:" <+> ppr hash)
+instance NFData HomeModImport where
+  rnf (HomeModImport a b) = rnf a `seq` rnf b `seq` ()
+instance NFData HomeModImportedAvails where
+  rnf (HMIA_Explicit avails implicit_parents) = rnf avails `seq` rnf implicit_parents
+  rnf (HMIA_Implicit hash) = rnf hash
+instance Binary HomeModImport where
+  put_ bh (HomeModImport a b) = put_ bh a >> put_ bh b
+  get bh = do
+    a <- get bh
+    b <- get bh
+    return $ HomeModImport a b
+instance Binary HomeModImportedAvails where
+  put_ bh (HMIA_Explicit avails implicit_parents) =
+    putByte bh 0 >> put_ bh avails >> put_ bh (nameSetElemsStable implicit_parents)
+  put_ bh (HMIA_Implicit hash  ) = putByte bh 1 >> put_ bh hash
+  get bh = do
+    tag <- getByte bh
+    case tag of
+      0 -> HMIA_Explicit <$> get bh <*> (mkNameSet <$> get bh)
+      1 -> HMIA_Implicit <$> get bh
+      _ -> error ("Binary.get(HomeModImportedAvails): " ++ show tag)
+
+{- Note [Transitive Information in Dependencies]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 It is important to be careful what information we put in 'Dependencies' because
 ultimately it ends up serialised in an interface file. Interface files must always
 be kept up-to-date with the state of the world, so if `Dependencies` needs to be updated
@@ -490,10 +630,10 @@ data ImportAvails
           -- different packages. (currently not the case, but might be in the
           -- future).
 
-        imp_direct_dep_mods :: InstalledModuleEnv ModuleNameWithIsBoot,
+        imp_direct_dep_mods :: InstalledModuleEnv (Set.Set ImportLevel, ModuleNameWithIsBoot),
           -- ^ Home-package modules directly imported by the module being compiled.
 
-        imp_dep_direct_pkgs :: Set UnitId,
+        imp_dep_direct_pkgs :: Set (ImportLevel, UnitId),
           -- ^ Packages directly needed by the module being compiled
 
         imp_trust_own_pkg :: Bool,

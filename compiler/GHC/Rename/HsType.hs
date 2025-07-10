@@ -14,14 +14,14 @@ module GHC.Rename.HsType (
         -- Type related stuff
         rnHsType, rnLHsType, rnLHsTypes, rnContext, rnMaybeContext,
         rnLHsKind, rnLHsTypeArgs,
-        rnHsSigType, rnHsWcType, rnHsTyLit, rnHsArrowWith,
+        rnHsSigType, rnHsWcType, rnHsTyLit, rnHsMultAnnWith,
         HsPatSigTypeScoping(..), rnHsSigWcType, rnHsPatSigType, rnHsPatSigKind,
         newTyVarNameRn,
-        rnConDeclFields,
+        rnHsConDeclRecFields,
         lookupField, mkHsOpTyRn,
         rnLTyVar,
 
-        rnScaledLHsType,
+        rnHsConDeclField,
 
         -- Precence related stuff
         NegationHandling(..),
@@ -450,12 +450,17 @@ rnLHsType ctxt ty = rnLHsTyKi (mkTyKiEnv ctxt TypeLevel RnTypeBody) ty
 rnLHsTypes :: HsDocContext -> [LHsType GhcPs] -> RnM ([LHsType GhcRn], FreeVars)
 rnLHsTypes doc tys = mapFvRn (rnLHsType doc) tys
 
-rnScaledLHsType :: HsDocContext -> HsScaled GhcPs (LHsType GhcPs)
-                                  -> RnM (HsScaled GhcRn (LHsType GhcRn), FreeVars)
-rnScaledLHsType doc (HsScaled w ty) = do
-  (w' , fvs_w) <- rnHsArrow (mkTyKiEnv doc TypeLevel RnTypeBody) w
-  (ty', fvs) <- rnLHsType doc ty
-  return (HsScaled w' ty', fvs `plusFV` fvs_w)
+rnHsConDeclField :: HsDocContext -> HsConDeclField GhcPs
+                 -> RnM (HsConDeclField GhcRn, FreeVars)
+rnHsConDeclField doc = rnHsConDeclFieldTyKi (mkTyKiEnv doc TypeLevel RnTypeBody)
+
+rnHsConDeclFieldTyKi :: RnTyKiEnv -> HsConDeclField GhcPs
+                     -> RnM (HsConDeclField GhcRn, FreeVars)
+rnHsConDeclFieldTyKi env cdf@(CDF { cdf_multiplicity, cdf_type, cdf_doc }) = do
+  (w , fvs_w) <- rnHsMultAnnWith (rnLHsTyKi env) cdf_multiplicity
+  (ty, fvs) <- rnLHsTyKi env cdf_type
+  doc <- traverse rnLHsDoc cdf_doc
+  return (cdf { cdf_multiplicity = w, cdf_type = ty, cdf_doc = doc }, fvs `plusFV` fvs_w)
 
 
 rnHsType  :: HsDocContext -> HsType GhcPs -> RnM (HsType GhcRn, FreeVars)
@@ -549,16 +554,17 @@ rnHsTyKi env tv@(HsTyVar _ ip (L loc rdr_name))
        ; when (isDataConName name && not (isPromoted ip)) $
          -- NB: a prefix symbolic operator such as (:) is represented as HsTyVar.
             addDiagnostic (TcRnUntickedPromotedThing $ UntickedConstructor Prefix name)
-       ; return (HsTyVar noAnn ip (L loc name), unitFV name) }
+       ; return (HsTyVar noAnn ip (L loc $ WithUserRdr rdr_name name), unitFV name) }
 
 rnHsTyKi env ty@(HsOpTy _ prom ty1 l_op ty2)
   = setSrcSpan (getLocA l_op) $
-    do  { (l_op', fvs1) <- rnHsTyOp env (ppr ty) l_op
+    do  { let op_rdr = unLoc l_op
+        ; (l_op', fvs1) <- rnHsTyOp env (ppr ty) l_op
         ; let op_name = unLoc l_op'
         ; fix   <- lookupTyFixityRn l_op'
         ; (ty1', fvs2) <- rnLHsTyKi env ty1
         ; (ty2', fvs3) <- rnLHsTyKi env ty2
-        ; res_ty <- mkHsOpTyRn prom l_op' fix ty1' ty2'
+        ; res_ty <- mkHsOpTyRn prom (fmap (WithUserRdr op_rdr) l_op') fix ty1' ty2'
         ; when (isDataConName op_name && not (isPromoted prom)) $
             addDiagnostic (TcRnUntickedPromotedThing $ UntickedConstructor Infix op_name)
         ; return (res_ty, plusFVs [fvs1, fvs2, fvs3]) }
@@ -567,35 +573,10 @@ rnHsTyKi env (HsParTy _ ty)
   = do { (ty', fvs) <- rnLHsTyKi env ty
        ; return (HsParTy noAnn ty', fvs) }
 
-rnHsTyKi env (HsBangTy x b ty)
-  = do { (ty', fvs) <- rnLHsTyKi env ty
-       ; return (HsBangTy x b ty', fvs) }
-
-rnHsTyKi env ty@(HsRecTy _ flds)
-  = do { let ctxt = rtke_ctxt env
-       ; fls          <- get_fields ctxt
-       ; (flds', fvs) <- rnConDeclFields ctxt fls flds
-       ; return (HsRecTy noExtField flds', fvs) }
-  where
-    get_fields ctxt@(ConDeclCtx names)
-      = do res <- concatMapM (lookupConstructorFields . unLoc) names
-           if equalLength res names
-           -- Lookup can fail when the record syntax is incorrect, e.g.
-           -- data D = D Int { fld :: Bool }. See T7943.
-           then return res
-           else err ctxt
-    get_fields ctxt = err ctxt
-
-    err ctxt =
-      do { addErr $
-            TcRnWithHsDocContext ctxt $
-            TcRnIllegalRecordSyntax (Left ty)
-         ; return [] }
-
 rnHsTyKi env (HsFunTy u mult ty1 ty2)
   = do { (ty1', fvs1) <- rnLHsTyKi env ty1
        ; (ty2', fvs2) <- rnLHsTyKi env ty2
-       ; (mult', w_fvs) <- rnHsArrow env mult
+       ; (mult', w_fvs) <- rnHsMultAnnWith (rnLHsTyKi env) mult
        ; return (HsFunTy u mult' ty1' ty2'
                 , plusFVs [fvs1, fvs2, w_fvs]) }
 
@@ -662,7 +643,7 @@ rnHsTyKi env (HsDocTy x ty haddock_doc)
        ; return (HsDocTy x ty' haddock_doc', fvs) }
 
 -- See Note [Renaming HsCoreTys]
-rnHsTyKi env (XHsType ty)
+rnHsTyKi env (XHsType (HsCoreTy ty))
   = do mapM_ (check_in_scope . nameRdrName) fvs_list
        return (XHsType ty, fvs)
   where
@@ -675,7 +656,24 @@ rnHsTyKi env (XHsType ty)
       when (isNothing mb_name) $
         addErr $
           TcRnWithHsDocContext (rtke_ctxt env) $
-            TcRnNotInScope (notInScopeErr WL_LocalOnly rdr_name) rdr_name [] noHints
+            TcRnNotInScope (notInScopeErr WL_LocalOnly rdr_name) rdr_name
+
+rnHsTyKi env ty@(XHsType (HsBangTy _ bang (L _ inner))) = do
+  -- While top-level bangs at this point are eliminated (eg !(Maybe Int)),
+  -- other kinds of bangs are not (eg ((!Maybe) Int)). These kinds of
+  -- bangs are invalid, so fail. (#7210, #14761)
+  addErr $
+    TcRnWithHsDocContext (rtke_ctxt env) $
+      TcRnUnexpectedAnnotation ty bang
+  rnHsTyKi env inner
+
+rnHsTyKi env ty@(XHsType (HsRecTy {})) = do
+  -- Record types (which only show up temporarily in constructor
+  -- signatures) should have been removed by now
+  addErr $
+    TcRnWithHsDocContext (rtke_ctxt env) $
+      TcRnIllegalRecordSyntax ty
+  return (HsWildCardTy noExtField, emptyFVs) -- trick to avoid `failWithTc`
 
 rnHsTyKi env ty@(HsExplicitListTy _ ip tys)
   = do { checkDataKinds env ty
@@ -703,15 +701,12 @@ rnHsTyLit tyLit@(HsNumTy x i) = do
 rnHsTyLit (HsCharTy x c) = pure (HsCharTy x c)
 
 
-rnHsArrow :: RnTyKiEnv -> HsArrow GhcPs -> RnM (HsArrow GhcRn, FreeVars)
-rnHsArrow env = rnHsArrowWith (rnLHsTyKi env)
-
-rnHsArrowWith :: (LocatedA (mult GhcPs) -> RnM (LocatedA (mult GhcRn), FreeVars))
-              -> HsArrowOf (LocatedA (mult GhcPs)) GhcPs
-              -> RnM (HsArrowOf (LocatedA (mult GhcRn)) GhcRn, FreeVars)
-rnHsArrowWith _rn (HsUnrestrictedArrow _) = pure (HsUnrestrictedArrow noExtField, emptyFVs)
-rnHsArrowWith _rn (HsLinearArrow _) = pure (HsLinearArrow noExtField, emptyFVs)
-rnHsArrowWith rn (HsExplicitMult _ p)
+rnHsMultAnnWith :: (LocatedA (mult GhcPs) -> RnM (LocatedA (mult GhcRn), FreeVars))
+                  -> HsMultAnnOf (LocatedA (mult GhcPs)) GhcPs
+                  -> RnM (HsMultAnnOf (LocatedA (mult GhcRn)) GhcRn, FreeVars)
+rnHsMultAnnWith _rn (HsUnannotated _) = pure (HsUnannotated noExtField, emptyFVs)
+rnHsMultAnnWith _rn (HsLinearAnn _) = pure (HsLinearAnn noExtField, emptyFVs)
+rnHsMultAnnWith rn (HsExplicitMult _ p)
   =  (\(mult, fvs) -> (HsExplicitMult noExtField mult, fvs)) <$> rn p
 
 {-
@@ -825,6 +820,7 @@ wildCardsAllowed env
        ExprWithTySigCtx {} -> True
        PatCtx {}           -> True
        RuleCtx {}          -> True
+       SpecECtx {}         -> True
        FamPatCtx {}        -> True   -- Not named wildcards though
        GHCiCtx {}          -> True
        HsTypeCtx {}        -> True
@@ -1310,34 +1306,33 @@ before we check for term variable capture.
 {-
 *********************************************************
 *                                                       *
-        ConDeclField
+        HsConDeclRecField
 *                                                       *
 *********************************************************
 
-When renaming a ConDeclField, we have to find the FieldLabel
+When renaming a HsConDeclRecField, we have to find the FieldLabel
 associated with each field.  But we already have all the FieldLabels
 available (since they were brought into scope by
 GHC.Rename.Names.getLocalNonValBinders), so we just take the list as an
 argument, build a map and look them up.
 -}
 
-rnConDeclFields :: HsDocContext -> [FieldLabel] -> [LConDeclField GhcPs]
-                -> RnM ([LConDeclField GhcRn], FreeVars)
+rnHsConDeclRecFields :: HsDocContext -> [FieldLabel] -> [LHsConDeclRecField GhcPs]
+                -> RnM ([LHsConDeclRecField GhcRn], FreeVars)
 -- Also called from GHC.Rename.Module
 -- No wildcards can appear in record fields
-rnConDeclFields ctxt fls fields
+rnHsConDeclRecFields ctxt fls fields
    = mapFvRn (rnField fl_env env) fields
   where
     env    = mkTyKiEnv ctxt TypeLevel RnTypeBody
     fl_env = mkFsEnv [ (field_label $ flLabel fl, fl) | fl <- fls ]
 
-rnField :: FastStringEnv FieldLabel -> RnTyKiEnv -> LConDeclField GhcPs
-        -> RnM (LConDeclField GhcRn, FreeVars)
-rnField fl_env env (L l (ConDeclField _ names ty haddock_doc))
+rnField :: FastStringEnv FieldLabel -> RnTyKiEnv -> LHsConDeclRecField GhcPs
+        -> RnM (LHsConDeclRecField GhcRn, FreeVars)
+rnField fl_env env (L l (HsConDeclRecField _ names ty))
   = do { let new_names = map (fmap (lookupField fl_env)) names
-       ; (new_ty, fvs) <- rnLHsTyKi env ty
-       ; haddock_doc' <- traverse rnLHsDoc haddock_doc
-       ; return (L l (ConDeclField noAnn new_names new_ty haddock_doc')
+       ; (new_ty, fvs) <- rnHsConDeclFieldTyKi env ty
+       ; return (L l (HsConDeclRecField noExtField new_names new_ty)
                 , fvs) }
 
 lookupField :: FastStringEnv FieldLabel -> FieldOcc GhcPs -> FieldOcc GhcRn
@@ -1346,7 +1341,7 @@ lookupField fl_env (FieldOcc _ (L lr rdr)) =
   where
     lbl = occNameFS $ rdrNameOcc rdr
     sel = flSelector
-        $ expectJust "lookupField"
+        $ expectJust
         $ lookupFsEnv fl_env lbl
 
 {-
@@ -1381,19 +1376,19 @@ precedence and does not require rearrangement.
 ---------------
 -- Building (ty1 `op1` (ty2a `op2` ty2b))
 mkHsOpTyRn :: PromotionFlag
-           -> LocatedN Name -> Fixity -> LHsType GhcRn -> LHsType GhcRn
+           -> LocatedN (WithUserRdr Name) -> Fixity -> LHsType GhcRn -> LHsType GhcRn
            -> RnM (HsType GhcRn)
 
 mkHsOpTyRn prom1 op1 fix1 ty1 (L loc2 (HsOpTy _ prom2 ty2a op2 ty2b))
-  = do  { fix2 <- lookupTyFixityRn op2
+  = do  { fix2 <- lookupTyFixityRn (fmap getName op2)
         ; mk_hs_op_ty prom1 op1 fix1 ty1 prom2 op2 fix2 ty2a ty2b loc2 }
 
 mkHsOpTyRn prom1 op1 _ ty1 ty2              -- Default case, no rearrangement
   = return (HsOpTy noExtField prom1 ty1 op1 ty2)
 
 ---------------
-mk_hs_op_ty :: PromotionFlag -> LocatedN Name -> Fixity -> LHsType GhcRn
-            -> PromotionFlag -> LocatedN Name -> Fixity -> LHsType GhcRn
+mk_hs_op_ty :: PromotionFlag -> LocatedN (WithUserRdr Name) -> Fixity -> LHsType GhcRn
+            -> PromotionFlag -> LocatedN (WithUserRdr Name) -> Fixity -> LHsType GhcRn
             -> LHsType GhcRn -> SrcSpanAnnA
             -> RnM (HsType GhcRn)
 mk_hs_op_ty prom1 op1 fix1 ty1 prom2 op2 fix2 ty2a ty2b loc2
@@ -1466,10 +1461,10 @@ data NegationHandling = ReassociateNegation | KeepNegationIntact
 ----------------------------
 
 get_op :: LHsExpr GhcRn -> OpName
--- An unbound name could be either HsVar or HsUnboundVar
+-- An unbound name could be either HsVar or (HsHole (HoleVar _, _))
 -- See GHC.Rename.Expr.rnUnboundVar
 get_op (L _ (HsVar _ n))                 = NormalOp (unLoc n)
-get_op (L _ (HsUnboundVar _ uv))         = UnboundOp uv
+get_op (L _ (HsHole (HoleVar (L _ uv)))) = UnboundOp uv
 get_op (L _ (XExpr (HsRecSelRn fld)))    = RecFldOp fld
 get_op other                             = pprPanic "get_op" (ppr other)
 
@@ -1496,11 +1491,12 @@ not_op_app (OpApp {}) = False
 not_op_app _          = True
 
 --------------------------------------
-mkConOpPatRn :: LocatedN Name -> Fixity -> LPat GhcRn -> LPat GhcRn
+mkConOpPatRn :: LocatedN (WithUserRdr Name)
+             -> Fixity -> LPat GhcRn -> LPat GhcRn
              -> RnM (Pat GhcRn)
 
 mkConOpPatRn op2 fix2 p1@(L loc (ConPat NoExtField op1 (InfixCon p1a p1b))) p2
-  = do  { fix1 <- lookupFixityRn (unLoc op1)
+  = do  { fix1 <- lookupFixityRn (getName op1)
         ; let (nofix_error, associate_right) = compareFixity fix1 fix2
 
         ; if nofix_error then do
@@ -1508,7 +1504,7 @@ mkConOpPatRn op2 fix2 p1@(L loc (ConPat NoExtField op1 (InfixCon p1a p1b))) p2
                                (NormalOp (unLoc op2),fix2)
                 ; return $ ConPat
                     { pat_con_ext = noExtField
-                    , pat_con = op2
+                    , pat_con  = op2
                     , pat_args = InfixCon p1 p2
                     }
                 }
@@ -1569,14 +1565,14 @@ checkPrecMatch op (MG { mg_alts = (L _ ms) })
 checkPrec :: Name -> Pat GhcRn -> Bool -> IOEnv (Env TcGblEnv TcLclEnv) ()
 checkPrec op (ConPat NoExtField op1 (InfixCon _ _)) right = do
     op_fix@(Fixity op_prec  op_dir) <- lookupFixityRn op
-    op1_fix@(Fixity op1_prec op1_dir) <- lookupFixityRn (unLoc op1)
+    op1_fix@(Fixity op1_prec op1_dir) <- lookupFixityRn (getName op1)
     let
         inf_ok = op1_prec > op_prec ||
                  (op1_prec == op_prec &&
                   (op1_dir == InfixR && op_dir == InfixR && right ||
                    op1_dir == InfixL && op_dir == InfixL && not right))
 
-        info  = (NormalOp op,          op_fix)
+        info  = (NormalOp (noUserRdr op), op_fix)
         info1 = (NormalOp (unLoc op1), op1_fix)
         (infol, infor) = if right then (info, info1) else (info1, info)
     unless inf_ok (precParseErr infol infor)
@@ -1606,7 +1602,7 @@ checkSectionPrec direction section op arg
 
 -- | Look up the fixity for an operator name.
 lookupFixityOp :: OpName -> RnM Fixity
-lookupFixityOp (NormalOp n)  = lookupFixityRn n
+lookupFixityOp (NormalOp n)  = lookupFixityRn (getName n)
 lookupFixityOp NegateOp      = lookupFixityRn negateName
 lookupFixityOp (UnboundOp u) = lookupFixityRn (mkUnboundName (occName u))
 lookupFixityOp (RecFldOp f)  = lookupFieldFixityRn f
@@ -1628,7 +1624,7 @@ sectionPrecErr op@(n1,_) arg_op@(n2,_) section
   = addErr $ TcRnSectionPrecedenceError op arg_op section
 
 is_unbound :: OpName -> Bool
-is_unbound (NormalOp n) = isUnboundName n
+is_unbound (NormalOp n) = isUnboundName (getName n)
 is_unbound UnboundOp{}  = True
 is_unbound _            = False
 
@@ -2031,7 +2027,7 @@ extractConDeclGADTDetailsTyVars ::
   HsConDeclGADTDetails GhcPs -> FreeKiTyVars -> FreeKiTyVars
 extractConDeclGADTDetailsTyVars con_args = case con_args of
   PrefixConGADT _ args    -> extract_scaled_ltys args
-  RecConGADT _ (L _ flds) -> extract_ltys $ map (cd_fld_type . unLoc) $ flds
+  RecConGADT _ (L _ flds) -> extract_scaled_ltys $ map (cdrf_spec . unLoc) $ flds
 
 -- | Get type/kind variables mentioned in the kind signature, preserving
 -- left-to-right order:
@@ -2047,13 +2043,14 @@ extractDataDefnKindVars (HsDataDefn { dd_kindSig = ksig })
 extract_lctxt :: LHsContext GhcPs -> FreeKiTyVars -> FreeKiTyVars
 extract_lctxt ctxt = extract_ltys (unLoc ctxt)
 
-extract_scaled_ltys :: [HsScaled GhcPs (LHsType GhcPs)]
+extract_scaled_ltys :: [HsConDeclField GhcPs]
                     -> FreeKiTyVars -> FreeKiTyVars
 extract_scaled_ltys args acc = foldr extract_scaled_lty acc args
 
-extract_scaled_lty :: HsScaled GhcPs (LHsType GhcPs)
+extract_scaled_lty :: HsConDeclField GhcPs
                    -> FreeKiTyVars -> FreeKiTyVars
-extract_scaled_lty (HsScaled m ty) acc = extract_lty ty $ extract_hs_arrow m acc
+extract_scaled_lty (CDF { cdf_multiplicity, cdf_type }) acc
+  = extract_lty cdf_type $ extract_hs_mult_ann cdf_multiplicity acc
 
 extract_ltys :: [LHsType GhcPs] -> FreeKiTyVars -> FreeKiTyVars
 extract_ltys tys acc = foldr extract_lty acc tys
@@ -2062,10 +2059,6 @@ extract_lty :: LHsType GhcPs -> FreeKiTyVars -> FreeKiTyVars
 extract_lty (L _ ty) acc
   = case ty of
       HsTyVar _ _  ltv            -> extract_tv ltv acc
-      HsBangTy _ _ ty             -> extract_lty ty acc
-      HsRecTy _ flds              -> foldr (extract_lty
-                                            . cd_fld_type . unLoc) acc
-                                           flds
       HsAppTy _ ty1 ty2           -> extract_lty ty1 $
                                      extract_lty ty2 acc
       HsAppKindTy _ ty k          -> extract_lty ty $
@@ -2074,7 +2067,7 @@ extract_lty (L _ ty) acc
       HsTupleTy _ _ tys           -> extract_ltys tys acc
       HsSumTy _ tys               -> extract_ltys tys acc
       HsFunTy _ m ty1 ty2         -> extract_lty ty1 $
-                                     extract_hs_arrow m $ -- See Note [Ordering of implicit variables]
+                                     extract_hs_mult_ann m $ -- See Note [Ordering of implicit variables]
                                      extract_lty ty2 acc
       HsIParamTy _ _ ty           -> extract_lty ty acc
       HsOpTy _ _ ty1 tv ty2       -> extract_lty ty1 $
@@ -2115,10 +2108,9 @@ extract_lhs_sig_ty :: LHsSigType GhcPs -> FreeKiTyVars
 extract_lhs_sig_ty (L _ (HsSig{sig_bndrs = outer_bndrs, sig_body = body})) =
   extractHsOuterTvBndrs outer_bndrs $ extract_lty body []
 
-extract_hs_arrow :: HsArrow GhcPs -> FreeKiTyVars ->
-                   FreeKiTyVars
-extract_hs_arrow (HsExplicitMult _ p) acc = extract_lty p acc
-extract_hs_arrow _ acc = acc
+extract_hs_mult_ann :: HsMultAnn GhcPs -> FreeKiTyVars -> FreeKiTyVars
+extract_hs_mult_ann (HsExplicitMult _ p) acc = extract_lty p acc
+extract_hs_mult_ann _ acc = acc
 
 extract_hs_for_all_telescope :: HsForAllTelescope GhcPs
                              -> FreeKiTyVars -- Accumulator

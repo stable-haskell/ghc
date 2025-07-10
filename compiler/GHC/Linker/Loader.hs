@@ -48,13 +48,14 @@ import GHC.Driver.Session
 import GHC.Driver.Ppr
 import GHC.Driver.Config.Diagnostic
 import GHC.Driver.Config.Finder
+import GHC.Driver.DynFlags (rtsWayUnitId)
 
 import GHC.Tc.Utils.Monad
 
 import GHC.Runtime.Interpreter
 import GHCi.RemoteTypes
 import GHC.Iface.Load
-import GHCi.Message (LoadedDLL)
+import GHCi.Message (ConInfoTable(..), LoadedDLL)
 
 import GHC.ByteCode.Linker
 import GHC.ByteCode.Asm
@@ -76,12 +77,10 @@ import GHC.Utils.Logger
 import GHC.Utils.TmpFs
 
 import GHC.Unit.Env
-import GHC.Unit.Home
 import GHC.Unit.Home.ModInfo
 import GHC.Unit.External (ExternalPackageState (..))
 import GHC.Unit.Module
 import GHC.Unit.Module.ModNodeKey
-import GHC.Unit.Module.External.Graph
 import GHC.Unit.Module.Graph
 import GHC.Unit.Module.ModIface
 import GHC.Unit.State as Packages
@@ -97,6 +96,7 @@ import GHC.Linker.Types
 -- Standard libraries
 import Control.Monad
 
+import Data.ByteString (ByteString)
 import qualified Data.Set as Set
 import Data.Char (isSpace)
 import qualified Data.Foldable as Foldable
@@ -119,6 +119,9 @@ import System.Win32.Info (getSystemDirectory)
 
 import GHC.Utils.Exception
 import GHC.Unit.Home.Graph (lookupHug, unitEnv_foldWithKey)
+import GHC.Driver.Downsweep
+
+
 
 -- Note [Linkers and loaders]
 -- ~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -166,8 +169,8 @@ getLoaderState :: Interp -> IO (Maybe LoaderState)
 getLoaderState interp = readMVar (loader_state (interpLoader interp))
 
 
-emptyLoaderState :: LoaderState
-emptyLoaderState = LoaderState
+emptyLoaderState :: DynFlags -> LoaderState
+emptyLoaderState dflags = LoaderState
    { linker_env = LinkerEnv
      { closure_env = emptyNameEnv
      , itbl_env    = emptyNameEnv
@@ -183,7 +186,14 @@ emptyLoaderState = LoaderState
   --
   -- The linker's symbol table is populated with RTS symbols using an
   -- explicit list.  See rts/Linker.c for details.
-  where init_pkgs = unitUDFM rtsUnitId (LoadedPkgInfo rtsUnitId [] [] [] emptyUniqDSet)
+  where init_pkgs = let addToUDFM' (k, v) m = addToUDFM m k v
+                    in foldr addToUDFM' emptyUDFM [
+                      (rtsUnitId, (LoadedPkgInfo rtsUnitId [] [] [] emptyUniqDSet))
+                    -- FIXME? Should this be the rtsWayUnitId of the current ghc, or the one
+                    --        for the target build? I think target-build seems right, but I'm
+                    --        not fully convinced.
+                    , (rtsWayUnitId dflags, (LoadedPkgInfo (rtsWayUnitId dflags) [] [] [] emptyUniqDSet))
+                    ]
 
 extendLoadedEnv :: Interp -> [(Name,ForeignHValue)] -> IO ()
 extendLoadedEnv interp new_bindings =
@@ -217,12 +227,12 @@ loadName interp hsc_env name = do
     case lookupNameEnv (closure_env (linker_env pls)) name of
       Just (_,aa) -> return (pls,(aa, links, pkgs))
       Nothing     -> assertPpr (isExternalName name) (ppr name) $
-                     do let sym_to_find = nameToCLabel name "closure"
-                        m <- lookupClosure interp (unpackFS sym_to_find)
+                     do let sym_to_find = IClosureSymbol name
+                        m <- lookupClosure interp sym_to_find
                         r <- case m of
                           Just hvref -> mkFinalizedHValue interp hvref
                           Nothing -> linkFail "GHC.Linker.Loader.loadName"
-                                       (unpackFS sym_to_find)
+                                       (ppr sym_to_find)
                         return (pls,(r, links, pkgs))
 
 loadDependencies
@@ -323,7 +333,7 @@ initLoaderState interp hsc_env = do
 reallyInitLoaderState :: Interp -> HscEnv -> IO LoaderState
 reallyInitLoaderState interp hsc_env = do
   -- Initialise the linker state
-  let pls0 = emptyLoaderState
+  let pls0 = emptyLoaderState (hsc_dflags hsc_env)
 
   case platformArch (targetPlatform (hsc_dflags hsc_env)) of
     -- FIXME: we don't initialize anything with the JS interpreter.
@@ -615,89 +625,53 @@ initLinkDepsOpts hsc_env = opts
     dflags = hsc_dflags hsc_env
 
     ldLoadByteCode mod = do
+      _ <- initIfaceLoad hsc_env $
+             loadInterface (text "get_reachable_nodes" <+> parens (ppr mod))
+                 mod ImportBySystem
       EPS {eps_iface_bytecode} <- hscEPS hsc_env
       sequence (lookupModuleEnv eps_iface_bytecode mod)
 
 
--- See Note [Reachability in One-shot mode vs Make mode]
 get_reachable_nodes :: HscEnv -> [Module] -> IO ([Module], UniqDSet UnitId)
 get_reachable_nodes hsc_env mods
 
-  -- Reachability on 'ExternalModuleGraph' (for one shot mode)
-  | isOneShot (ghcMode dflags)
+  -- Fallback case if the ModuleGraph has not been initialised by the user.
+  -- This can happen if is the user is loading plugins or doing something else very
+  -- early in the compiler pipeline.
+  | isEmptyMG (hsc_mod_graph hsc_env)
   = do
-    initIfaceCheck (text "loader") hsc_env
-      $ void $ loadExternalGraphBelow msg (hsc_home_unit_maybe hsc_env) Set.empty mods
-    -- Read the EPS only after `loadExternalGraphBelow`
-    eps <- hscEPS hsc_env
-    let
-      emg = eps_module_graph eps
-      get_mod_info_eps (ModNodeKeyWithUid gwib uid)
-        | uid == homeUnitId (ue_unsafeHomeUnit unit_env)
-        = case lookupModuleEnv (eps_PIT eps) (Module (RealUnit $ Definite uid) (gwib_mod gwib)) of
-            Just iface -> return $ Just iface
-            Nothing -> moduleNotLoaded "(in EPS)" gwib uid
-        | otherwise
-        = return Nothing
+      mg <- downsweepInstalledModules hsc_env mods
+      go mg
 
-      get_mod_key m
-        | moduleUnitId m == homeUnitId (ue_unsafeHomeUnit unit_env)
-        = ExternalModuleKey (mkModuleNk m)
-        | otherwise = ExternalPackageKey (moduleUnitId m)
-
-    go get_mod_key emgNodeKey (emgReachableLoopMany emg) (map emgProject) get_mod_info_eps
-
-  -- Reachability on 'ModuleGraph' (for --make mode)
   | otherwise
-  = go hmgModKey mkNodeKey (mgReachableLoop hmGraph) (catMaybes . map hmgProject) get_mod_info_hug
+  = go (hsc_mod_graph hsc_env)
 
   where
-    dflags = hsc_dflags hsc_env
     unit_env = hsc_unit_env hsc_env
     mkModuleNk m = ModNodeKeyWithUid (GWIB (moduleName m) NotBoot) (moduleUnitId m)
-    msg mod =
-      text "need to link module" <+> ppr mod <+>
-        text "and the modules below it, due to use of Template Haskell"
 
-    hmGraph = hsc_mod_graph hsc_env
-
-    hmgModKey m
+    hmgModKey mg m
       | let k = NodeKey_Module (mkModuleNk m)
-      , mgMember hmGraph k = k
+      , mgMember mg k = k
       | otherwise = NodeKey_ExternalUnit (moduleUnitId m)
-
-    hmgProject = \case
-      NodeKey_Module with_uid  -> Just $ Left  with_uid
-      NodeKey_ExternalUnit uid -> Just $ Right uid
-      _                        -> Nothing
-
-    emgProject = \case
-      ExternalModuleKey with_uid -> Left  with_uid
-      ExternalPackageKey uid     -> Right uid
 
     -- The main driver for getting dependencies, which calls the given
     -- functions to compute the reachable nodes.
-    go :: (Module -> key)
-       -> (node -> key)
-       -> ([key] -> [node])
-       -> ([key] -> [Either ModNodeKeyWithUid UnitId])
-       -> (ModNodeKeyWithUid -> IO (Maybe ModIface))
-       -> IO ([Module], UniqDSet UnitId)
-    go modKey nodeKey manyReachable project get_mod_info
-      | let mod_keys = map modKey mods
-      = do
-        let (all_home_mods, pkgs_s) = partitionEithers $ project $ mod_keys ++ map nodeKey (manyReachable mod_keys)
-        ifaces <- mapMaybeM get_mod_info all_home_mods
-        let mods_s = map mi_module ifaces
+    go :: ModuleGraph -> IO ([Module], UniqDSet UnitId)
+    go mg = do
+        let mod_keys = map (hmgModKey mg) mods
+            all_reachable = mod_keys ++ map mkNodeKey (mgReachableLoop mg mod_keys)
+        (mods_s, pkgs_s) <- partitionEithers <$> mapMaybeM get_mod_info all_reachable
         return (mods_s, mkUniqDSet pkgs_s)
 
-    get_mod_info_hug (ModNodeKeyWithUid gwib uid) =
+    get_mod_info :: NodeKey -> IO (Maybe (Either Module UnitId))
+    get_mod_info (NodeKey_Module m@(ModNodeKeyWithUid gwib uid)) =
       lookupHug (ue_home_unit_graph unit_env) uid (gwib_mod gwib) >>= \case
-        Just hmi -> return $ Just (hm_iface hmi)
-        Nothing -> moduleNotLoaded "(in HUG)" gwib uid
+        Just hmi -> return $ Just (Left  (mi_module (hm_iface hmi)))
+        Nothing -> return (Just (Left (mnkToModule m)))
+    get_mod_info (NodeKey_ExternalUnit uid) = return (Just (Right uid))
+    get_mod_info _ = return Nothing
 
-    moduleNotLoaded m gwib uid = throwGhcExceptionIO $ ProgramError $ showSDoc dflags $
-      text "getLinkDeps: Home module not loaded" <+> text m <+> ppr (gwib_mod gwib) <+> ppr uid
 
 {- **********************************************************************
 
@@ -723,8 +697,10 @@ loadDecls interp hsc_env span linkable = do
         else do
           -- Link the expression itself
           let le  = linker_env pls
-              le2 = le { itbl_env = foldl' (\acc cbc -> plusNameEnv acc (bc_itbls cbc)) (itbl_env le) cbcs
-                       , addr_env = foldl' (\acc cbc -> plusNameEnv acc (bc_strs cbc)) (addr_env le) cbcs }
+          le2_itbl_env <- linkITbls interp (itbl_env le) (concat $ map bc_itbls cbcs)
+          le2_addr_env <- foldlM (\env cbc -> allocateTopStrings interp (bc_strs cbc) env) (addr_env le) cbcs
+          let le2 = le { itbl_env = le2_itbl_env
+                       , addr_env = le2_addr_env }
 
           -- Link the necessary packages and linkables
           new_bindings <- linkSomeBCOs interp (pkgs_loaded pls) le2 cbcs
@@ -909,7 +885,7 @@ dynLoadObjs interp hsc_env pls@LoaderState{..} objs = do
     m <- loadDLL interp soFile
     case m of
       Right _ -> return $! pls { temp_sos = (libPath, libName) : temp_sos }
-      Left err -> linkFail msg err
+      Left err -> linkFail msg (text err)
   where
     msg = "GHC.Linker.Loader.dynLoadObjs: Loading temp shared object failed"
 
@@ -946,9 +922,9 @@ dynLinkBCOs interp pls bcos = do
 
 
             le1 = linker_env pls
-            ie2 = foldr plusNameEnv (itbl_env le1) (map bc_itbls cbcs)
-            ae2 = foldr plusNameEnv (addr_env le1) (map bc_strs cbcs)
-            le2 = le1 { itbl_env = ie2, addr_env = ae2 }
+        ie2 <- linkITbls interp (itbl_env le1) (concatMap bc_itbls cbcs)
+        ae2 <- foldlM (\env cbc -> allocateTopStrings interp (bc_strs cbc) env) (addr_env le1) cbcs
+        let le2 = le1 { itbl_env = ie2, addr_env = ae2 }
 
         names_and_refs <- linkSomeBCOs interp (pkgs_loaded pls) le2 cbcs
 
@@ -992,6 +968,11 @@ makeForeignNamedHValueRefs
   :: Interp -> [(Name,HValueRef)] -> IO [(Name,ForeignHValue)]
 makeForeignNamedHValueRefs interp bindings =
   mapM (\(n, hvref) -> (n,) <$> mkFinalizedHValue interp hvref) bindings
+
+linkITbls :: Interp -> ItblEnv -> [(Name, ConInfoTable)] -> IO ItblEnv
+linkITbls interp = foldlM $ \env (nm, itbl) -> do
+  r <- interpCmd interp $ MkConInfoTable itbl
+  evaluate $ extendNameEnv env nm (nm, ItblPtr r)
 
 {- **********************************************************************
 
@@ -1649,3 +1630,13 @@ maybePutStr logger s = maybePutSDoc logger (text s)
 
 maybePutStrLn :: Logger -> String -> IO ()
 maybePutStrLn logger s = maybePutSDoc logger (text s <> text "\n")
+
+-- | see Note [Generating code for top-level string literal bindings]
+allocateTopStrings ::
+  Interp -> [(Name, ByteString)] -> AddrEnv -> IO AddrEnv
+allocateTopStrings interp topStrings prev_env = do
+  let (bndrs, strings) = unzip topStrings
+  ptrs <- interpCmd interp $ MallocStrings strings
+  evaluate $ extendNameEnvList prev_env (zipWith mk_entry bndrs ptrs)
+  where
+    mk_entry nm ptr = (nm, (nm, AddrPtr ptr))

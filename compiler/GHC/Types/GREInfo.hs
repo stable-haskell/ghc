@@ -111,7 +111,7 @@ Search for references to this note in the code for illustration.
 --
 -- See Note [GREInfo]
 data GREInfo
-      -- | No particular information... e.g. a function
+      -- | A variable (an 'Id' or a 'TyVar')
     = Vanilla
       -- | An unbound GRE... could be anything
     | UnboundGRE
@@ -126,12 +126,6 @@ data GREInfo
 
     deriving Data
 
-instance NFData GREInfo where
-  rnf Vanilla = ()
-  rnf UnboundGRE = ()
-  rnf (IAmTyCon tc) = rnf tc
-  rnf (IAmConLike info) = rnf info
-  rnf (IAmRecField info) = rnf info
 
 plusGREInfo :: GREInfo -> GREInfo -> GREInfo
 plusGREInfo Vanilla Vanilla = Vanilla
@@ -263,7 +257,7 @@ instance NFData ConFieldInfo where
   rnf ConHasPositionalArgs = ()
   rnf (ConHasRecordFields flds) = rnf flds
 
-mkConInfo :: ConLikeInfo -> Arity -> [FieldLabel] -> ConInfo
+mkConInfo :: ConLikeInfo -> VisArity -> [FieldLabel] -> ConInfo
 mkConInfo con_ty n flds =
   ConInfo { conLikeInfo  = con_ty
           , conFieldInfo = mkConFieldInfo n flds }
@@ -305,6 +299,9 @@ data ConLikeName
   = DataConName { conLikeName_Name :: !Name }
   | PatSynName  { conLikeName_Name :: !Name }
   deriving (Eq, Data)
+
+instance NamedThing ConLikeName where
+  getName = conLikeName_Name
 
 instance Outputable ConLikeName where
   ppr = ppr . conLikeName_Name

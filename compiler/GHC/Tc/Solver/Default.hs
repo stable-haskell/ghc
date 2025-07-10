@@ -1,5 +1,8 @@
+{-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE MultiWayIf #-}
+
 module GHC.Tc.Solver.Default(
-   tryDefaulting, tryUnsatisfiableGivens,
+   tryDefaulting, tryDefaultingForAmbiguityCheck,
    isInteractiveClass, isNumClass
    ) where
 
@@ -26,11 +29,11 @@ import GHC.Core.Reduction( Reduction, reductionCoercion )
 import GHC.Core
 import GHC.Core.DataCon
 import GHC.Core.Make
-import GHC.Core.Coercion( mkNomReflCo, isReflCo )
+import GHC.Core.Coercion( isReflCo, mkReflCo, mkSubCo, hasCoercionHole )
 import GHC.Core.Unify    ( tcMatchTyKis )
 import GHC.Core.Predicate
 import GHC.Core.Type
-import GHC.Core.TyCon    ( TyCon )
+import GHC.Core.TyCo.Tidy
 
 import GHC.Types.DefaultEnv ( ClassDefaults (..), defaultList )
 import GHC.Types.Unique.Set
@@ -61,7 +64,6 @@ import Control.Monad
 import Control.Monad.Trans.Class        ( lift )
 import Control.Monad.Trans.State.Strict ( StateT(runStateT), put )
 import Data.Foldable      ( toList, traverse_ )
-import Data.List          ( intersect )
 import Data.List.NonEmpty ( NonEmpty(..), nonEmpty )
 import qualified Data.List.NonEmpty as NE
 import GHC.Data.Maybe     ( isJust, mapMaybe, catMaybes )
@@ -108,6 +110,32 @@ defaulting. Again this is done at the top-level and the plan is:
      - Apply defaulting to their kinds
 
 More details in Note [DefaultTyVar].
+
+Note [Limited defaulting in the ambiguity check]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+When simplifying constraints for the ambiguity check, we don't want full
+defaulting.  E.g. #11947 was an example:
+   f :: Num a => Int -> Int
+This is ambiguous of course, but we don't want to default the (Num
+alpha) constraint to (Num Int)!  Doing so gives a defaulting warning,
+but no error.
+
+But we still do
+
+* tryConstraintDefaulting.  Example in T10009 where we have this type signature
+    f :: (UnF (F b) ~ b) => F b -> ()
+  We finish up with an equality that is a member of it's
+    [W] hole{co_aF0} {rewriters: {co_aF0}}:: b_aES[tau:1] ~# b_aEP[sk:1]
+  It is not unified because of (REWRITERS) in Note [Unification preconditions]
+  in GHC.Tc.Utils.Unify
+
+  (`tryConstraintDefaulting` defaults call-stack and exception constraint
+  as well as equalities; but in the case of the ambiguity check we will
+  only see equality constraints.  Does not seem worth making a version
+  of `tryConstraintDefaulting` that looks only for equalities.)
+
+* tryUnsatisfiableGivens: see Wrinkle [Ambiguity] under point (C) of
+  Note [Implementation of Unsatisfiable constraints] in GHC.Tc.Errors.
 -}
 
 
@@ -115,13 +143,22 @@ tryDefaulting :: WantedConstraints -> TcS WantedConstraints
 -- This is the function that pulls all the defaulting strategies together
 tryDefaulting wc
  = do { dflags <- getDynFlags
-      ; traceTcS "tryDefaulting:before" (ppr wc)
+      ; traceTcS "tryDefaulting {" (ppr wc)
       ; wc1 <- tryTyVarDefaulting dflags wc
       ; wc2 <- tryConstraintDefaulting wc1
       ; wc3 <- tryTypeClassDefaulting wc2
       ; wc4 <- tryUnsatisfiableGivens wc3
-      ; traceTcS "tryDefaulting:after" (ppr wc4)
+      ; traceTcS "tryDefaulting }" (ppr wc4)
       ; return wc4 }
+
+tryDefaultingForAmbiguityCheck  :: WantedConstraints -> TcS WantedConstraints
+-- See Note [Limited defaulting in the ambiguity check]
+tryDefaultingForAmbiguityCheck wc
+ = do { traceTcS "tryDefaulting for ambiguity {" (ppr wc)
+      ; wc1 <- tryConstraintDefaulting wc
+      ; wc2 <- tryUnsatisfiableGivens wc1
+      ; traceTcS "tryDefaulting }" (ppr wc2)
+      ; return wc2 }
 
 solveAgainIf :: Bool -> WantedConstraints -> TcS WantedConstraints
 -- If the Bool is true, solve the wanted constraints again
@@ -255,9 +292,9 @@ solveImplicationUsingUnsatGiven
            ; return $ wc { wc_simple = emptyBag, wc_impl = impls } }
     go_simple :: Ct -> TcS ()
     go_simple ct = case ctEvidence ct of
-      CtWanted { ctev_pred = pty, ctev_dest = dst }
+      CtWanted (WantedCt { ctev_pred = pty, ctev_dest = dest })
         -> do { ev_expr <- unsatisfiableEvExpr unsat_given pty
-              ; setWantedEvTerm dst EvNonCanonical $ EvExpr ev_expr }
+              ; setWantedEvTerm dest EvNonCanonical $ EvExpr ev_expr }
       _ -> return ()
 
 -- | Create an evidence expression for an arbitrary constraint using
@@ -362,9 +399,9 @@ tryConstraintDefaulting wc
   where
     go_wc :: WantedConstraints -> TcS WantedConstraints
     go_wc wc@(WC { wc_simple = simples, wc_impl = implics })
-      = do { mb_simples <- mapMaybeBagM go_simple simples
+      = do { simples'   <- mapMaybeBagM go_simple simples
            ; mb_implics <- mapMaybeBagM go_implic implics
-           ; return (wc { wc_simple = mb_simples, wc_impl   = mb_implics }) }
+           ; return (wc { wc_simple = simples', wc_impl = mb_implics }) }
 
     go_simple :: Ct -> TcS (Maybe Ct)
     go_simple ct = do { solved <- tryCtDefaultingStrategy ct
@@ -388,9 +425,10 @@ tryCtDefaultingStrategy :: CtDefaultingStrategy
 -- The composition of all the CtDefaultingStrategies we want
 tryCtDefaultingStrategy
   = foldr1 combineStrategies
-    [ defaultCallStack
-    , defaultExceptionContext
-    , defaultEquality ]
+    ( defaultCallStack :|
+      defaultExceptionContext :
+      defaultEquality :
+      [] )
 
 -- | Default @ExceptionContext@ constraints to @emptyExceptionContext@.
 defaultExceptionContext :: CtDefaultingStrategy
@@ -402,7 +440,7 @@ defaultExceptionContext ct
        ; let ev = ctEvidence ct
              ev_tm = mkEvCast (Var empty_ec_id) (wrapIP (ctEvPred ev))
        ; setEvBindIfWanted ev EvCanonical ev_tm
-         -- EvCanonical: see Note [CallStack and ExecptionContext hack]
+         -- EvCanonical: see Note [CallStack and ExceptionContext hack]
          --              in GHC.Tc.Solver.Dict
        ; return True }
   | otherwise
@@ -422,19 +460,54 @@ defaultCallStack ct
 defaultEquality :: CtDefaultingStrategy
 -- See Note [Defaulting equalities]
 defaultEquality ct
-  | EqPred NomEq ty1 ty2 <- classifyPredType (ctPred ct)
+  | EqPred eq_rel ty1 ty2 <- classifyPredType (ctPred ct)
   = do { -- Remember: `ct` may not be zonked;
          -- see (DE3) in Note [Defaulting equalities]
          z_ty1 <- TcS.zonkTcType ty1
        ; z_ty2 <- TcS.zonkTcType ty2
-
+       ; case eq_rel of
+          { NomEq ->
        -- Now see if either LHS or RHS is a bare type variable
        -- You might think the type variable will only be on the LHS
        -- but with a type function we might get   F t1 ~ alpha
-       ; case (getTyVar_maybe z_ty1, getTyVar_maybe z_ty2) of
+         case (getTyVar_maybe z_ty1, getTyVar_maybe z_ty2) of
            (Just z_tv1, _) -> try_default_tv z_tv1 z_ty2
            (_, Just z_tv2) -> try_default_tv z_tv2 z_ty1
-           _               -> return False }
+           _               -> return False ;
+
+          ; ReprEq
+              -- See Note [Defaulting representational equalities]
+              | CIrredCan (IrredCt { ir_reason }) <- ct
+              , isInsolubleReason ir_reason
+              -- Don't do this for definitely insoluble representational
+              -- equalities such as Int ~R# Bool.
+              -> return False
+              | otherwise
+              ->
+       do { traceTcS "defaultEquality ReprEq {" $ vcat
+              [ text "ct:" <+> ppr ct
+              , text "z_ty1:" <+> ppr z_ty1
+              , text "z_ty2:" <+> ppr z_ty2
+              ]
+            -- Promote this representational equality to a nominal equality.
+            --
+            -- This handles cases such as @IO alpha[tau] ~R# IO Int@
+            -- by defaulting @alpha := Int@, which is useful in practice
+            -- (see Note [Defaulting representational equalities]).
+          ; (co, new_eqs, _unifs) <-
+              wrapUnifierX (ctEvidence ct) Nominal $
+              -- NB: nominal equality!
+                \ uenv -> uType uenv z_ty1 z_ty2
+            -- Only accept this solution if no new equalities are produced
+            -- by the unifier.
+            --
+            -- See Note [Defaulting representational equalities].
+          ; if null new_eqs
+            then do { setEvBindIfWanted (ctEvidence ct) EvCanonical $
+                       (evCoercion $ mkSubCo co)
+                    ; return True }
+            else return False
+          } } }
   | otherwise
   = return False
 
@@ -443,19 +516,16 @@ defaultEquality ct
       | MetaTv { mtv_info = info } <- tcTyVarDetails lhs_tv
       , tyVarKind lhs_tv `tcEqType` typeKind rhs_ty
       , checkTopShape info rhs_ty
+      , not (hasCoercionHole rhs_ty) -- See (DE6) in Note [Defaulting equalities]
       -- Do not test for touchability of lhs_tv; that is the whole point!
       -- See (DE2) in Note [Defaulting equalities]
       = do { traceTcS "defaultEquality 1" (ppr lhs_tv $$ ppr rhs_ty)
 
            -- checkTyEqRhs: check that we can in fact unify lhs_tv := rhs_ty
            -- See Note [Defaulting equalities]
-           ; let task :: TEFTask
-                 task = unifyingLHSMetaTyVar_TEFTask lhs_tv (LC_Promote True)
-                    -- LC_Promote: promote deeper unification variables (DE4)
-                    -- LC_Promote True: ...including under type families (DE5)
-                 flags :: TyEqFlags ()
-                 flags = TEF { tef_task    = task
-                             , tef_fam_app = TEFA_Recurse }
+           ; let flags :: TyEqFlags TcM ()
+                 flags = defaulting_TEFTask lhs_tv
+
            ; res :: PuResult () Reduction <- wrapTcS (checkTyEqRhs flags rhs_ty)
 
            ; case res of
@@ -480,8 +550,10 @@ defaultEquality ct
                ; unifyTyVar lhs_tv rhs_ty  -- NB: unifyTyVar adds to the
                                            -- TcS unification counter
                ; setEvBindIfWanted (ctEvidence ct) EvCanonical $
-                 evCoercion (mkNomReflCo rhs_ty)
-               ; return True }
+                 evCoercion (mkReflCo Nominal rhs_ty)
+               ; return True
+               }
+
 
 combineStrategies :: CtDefaultingStrategy -> CtDefaultingStrategy -> CtDefaultingStrategy
 combineStrategies default1 default2 ct
@@ -521,29 +593,42 @@ too drastic.
 
 Note [Defaulting equalities]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+In top-level defaulting (as per Note [Top-level Defaulting Plan]), it makes
+sense to try to default equality constraints, in addition to e.g. typeclass
+defaulting: this doesn't threaten principal types (see DE1 below), but
+allows GHC to accept strictly more programs.
+
+This Note explains defaulting nominal equalities; see also
+Note [Defaulting representational equalities] which describes
+the defaulting of representational equalities.
+
 Consider
+
   f :: forall a. (forall t. (F t ~ Int) => a -> Int) -> Int
 
   g :: Int
   g = f id
 
 We'll typecheck
+
   id :: forall t. (F t ~ Int) => alpha[1] -> Int
+
 where the `alpha[1]` comes from instantiating `f`. So we'll end up
 with the implication constraint
+
    forall[2] t. (F t ~ Int) => alpha[1] ~ Int
-And that can't be solved because `alpha` is untouchable under the
+
+and that can't be solved because `alpha` is untouchable under the
 equality (F t ~ Int).
 
 This is tiresome, and gave rise to user complaints: #25125 and #25029.
 Moreover, in this case there is no good reason not to unify alpha:=Int.
 Doing so solves the constraint, and since `alpha` is not otherwise
-constrained, it does no harm.  So the new plan is this:
+constrained, it does no harm.
 
-  * For the Wanted constraint
-        [W] alpha ~ ty
-    if the only reason for not unifying is untouchability, then during
-    top-level defaulting, go ahead and unify
+In conclusion, for a Wanted equality constraint [W] lhs ~ rhs, if the only
+reason for not unifying is that either lhs or rhs is an untouchable metavariable
+then, in top-level defaulting, go ahead and unify.
 
 In top-level defaulting, we already do several other somewhat-ad-hoc,
 but terribly convenient, unifications. This is just one more.
@@ -558,12 +643,11 @@ Wrinkles:
      f x = case x of T1 -> True
 
   Should we infer f :: T a -> Bool, or f :: T a -> a.  Both are valid, but
-  neither is more general than the other
+  neither is more general than the other.
 
 (DE2) We still can't unify if there is a skolem-escape check, or an occurs check,
   or it it'd mean unifying a TyVarTv with a non-tyvar.  It's only the
-  "untouchability test" that we lift.  We can lift it by saying that the innermost
-  given equality is at top level.
+  "untouchability test" that we lift.
 
 (DE3) The contraint we are looking at may not be fully zonked; for example,
   an earlier defaulting might have affected it. So we zonk-on-the fly in
@@ -571,7 +655,7 @@ Wrinkles:
 
 (DE4) Promotion. Suppose we see  alpha[2] := Maybe beta[4].  We want to promote
   beta[4] to level 2 and unify alpha[2] := Maybe beta'[2].  This is done by
-  checkTyEqRhs.
+  checkTyEqRhs called in defaultEquality.
 
 (DE5) Promotion. Suppose we see  alpha[2] := F beta[4], where F is a type
   family. Then we still want to promote beta to beta'[2], and unify. This is
@@ -580,6 +664,22 @@ Wrinkles:
 
   Hence the Bool flag on LC_Promote, and its use in `tef_unifying` in
   `defaultEquality`.
+
+(DE6) /Don't/ unify if the RHS has a free coercion hole in it.  That means
+  that there is an as-yet-unsolved equality constraint (whose evidence
+  will fill that hole); unifying can lead to very confusing type errors.
+  e.g.    [W] co1 :: IntRep ~ LiftedRep
+          [W] co2 {rewritten by co1} :: alpha ~ t2 |> (TYPE co1)
+  Unifying alpha := (t1 |> TYPE co1) is a Bad Idea.
+
+  Note that we /do/ unify even if the constraint has a non-empty rewriter
+  set, which has prevented unification up to now; see
+  Note [Unify only if the rewriter set is empty] in GHC.Tc.Solver.Equality.
+  In obscure situations a constraint can end up in its own rewriter set, but
+  without a coercion hole being in the RHS.
+
+  See #10009, and Note [Limited defaulting in the ambiguity check].
+
 
 Note [Must simplify after defaulting]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -590,6 +690,64 @@ Then when we default 'a' we can solve the constraint.  And we want to do
 that before starting in on type classes.  We MUST do it before reporting
 errors, because it isn't an error!  #7967 was due to this.
 
+Note [Defaulting representational equalities]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Suppose we end up with [W] alpha ~#R Int, with no other constraints on alpha.
+Then it makes sense to simply unify alpha := Int -- the alternative is to
+reject the program due to an ambiguous metavariable alpha, so it makes sense
+to unify and accept instead.
+
+This is particularly convenient for users of `coerce`, as it lessens the
+amount of type annotations required (see #21003). Consider for example:
+
+  -- 'foldMap' defined using 'traverse'
+  foldMapUsingTraverse :: forall t m a. (Traversable t, Monoid m) => (a -> m) -> t a -> m
+  foldMapUsingTraverse = coerce $ traverse @t @(Const m)
+
+  -- 'traverse_' defined using 'foldMap'
+  traverse_UsingFoldMap :: forall f t a. (Foldable t, Applicative f) => (a -> f ()) -> t a -> f ()
+  traverse_UsingFoldMap = coerce $ foldMap @t @(Ap f ())
+
+Typechecking these functions results in unsolved Wanted constraints of the form
+[W] alpha[tau] ~R# some_ty; accepting such programs by unifying
+alpha := some_ty avoids the need for users to specify tiresome additional
+type annotations, such as:
+
+    foldMapUsingTraverse = coerce $ traverse @t @(Const m) @a
+    traverse_UsingFoldMap = coerce $ foldMap @t @(Ap f ()) @a
+
+Consider also the following example:
+
+  -- 'sequence_', but for two nested 'Foldable' structures
+  sequenceNested_ :: forall f1 f2. (Foldable f1, Foldable f2) => f1 (f2 (IO ())) -> IO ()
+  sequenceNested_ = coerce $ sequence_ @( Compose f1 f2 )
+
+Here, we end up with [W] mu[tau] beta[tau] ~#R IO (), and it similarly makes
+sense to default mu := IO, beta := (). This avoids requiring the
+user to provide additional type applications:
+
+    sequenceNested_ = coerce $ sequence_ @( Compose f1 f2 ) @IO @()
+
+The plan for defaulting a representational equality, say [W] ty1 ~R# ty2,
+is thus as follows:
+
+  1. attempt to unify ty1 ~# ty2 (at nominal role)
+  2. a. if this succeeds without deferring any constraints, accept this solution
+     b. otherwise, keep the original constraint.
+
+(2b) ensures that we don't degrade all error messages by always turning unsolved
+representational equalities into nominal ones; we only want to default a
+representational equality when we can fully solve it.
+
+Note that this does not threaten principle types. Recall that the original worry
+(as per Note [Do not unify representational equalities]) was that we might have
+
+    [W] alpha ~R# Int
+    [W] alpha ~ Age
+
+in which case unifying alpha := Int would be wrong, as the correct solution is
+alpha := Age. This worry doesn't concern us in top-level defaulting, because
+defaulting takes place after generalisation; it is fully monomorphic.
 
 *********************************************************************************
 *                                                                               *
@@ -603,32 +761,74 @@ Type-class defaulting deals with the situation where we have unsolved
 constraints like (Num alpha), where `alpha` is a unification variable.  We want
 to pick a default for `alpha`, such as `alpha := Int` to resolve the ambiguity.
 
-Type-class defaulting is guided by the `DefaultEnv`: see Note [Named default declarations]
-in GHC.Tc.Gen.Default
+The function 'tryTypeClassDefaulting' implements type-class defaulting. The
+algorithm for defaulting depends on whether certain extensions are enabled,
+such as -XOverloadedStrings or -XExtendedDefaultRules. To explain this, let us
+define the following:
 
-The entry point for defaulting the unsolved constraints is `applyDefaultingRules`,
-which depends on `disambigGroup`, which in turn depends on workhorse
-`disambigProposalSequences`. The latter is also used by defaulting plugins through
-`disambigMultiGroup` (see Note [Defaulting plugins] below).
+  Unary typeclass:
+    a typeclass with a single visible type argument.
 
-The algorithm works as follows. Let S be the complete set of unsolved
-constraints, and initialize Sx to an empty set of constraints. For every type
-variable `v` that is free in S:
+    Examples:
 
-1. Define Cv = { Ci v | Ci v ∈ S }, the subset of S consisting of all constraints in S of
-   form (Ci v), where Ci is a single-parameter type class.  (We do no defaulting for
-   multi-parameter type classes.)
+      Num :: Type -> Constraint
+      Eq :: Type -> Constraint
+      Foldable :: (Type -> Type) -> Constraint
+      Typeable :: forall k. k -> Constraint   -- NB: also has an /invisible/ argument
 
-2. Define Dv, by extending Cv with the superclasses of every Ci in Cv
+    Non-examples:
 
-3. Define Ev, by filtering Dv to contain only classes with a default declaration.
+      Nullary :: Constraint
+      Binary :: Type -> Type -> Constraint
+      Binary2 :: forall k -> k -> Constraint  -- Two visible arguments
 
-4. For each Ci in Ev, if Ci has a non-empty default list in the `DefaultEnv`, find the first
-   type T in the default list for Ci for which, for every (Ci v) in Cv, the constraint (Ci T)
-  is soluble.
+  Defaultable class
+    a typeclass which has at least one in-scope default declaration
 
-5. If there is precisely one type T in the resulting type set, resolve the ambiguity by adding
-   a constraint (v~ Ti) constraint to a set Sx; otherwise report a static error.
+    This includes the two different categories of default declarations:
+
+      - Haskell 98 default declarations such as 'default (Integer, Float)'.
+
+        - `Num` is always defaultable; either the user says 'default( Integer, Float )'
+          or (absent such a declaration) the system fills in a fallback default declaration.
+          See Section 4.3.4 in https://www.haskell.org/onlinereport/haskell2010/haskellch4.html
+
+        - With `OverloadedStrings`, the class `IsString` is defaultable
+        - With `ExtendedDefaultRules`, the classes `Show`, `Eq`, `Ord`, `Foldable` and `Traversable`
+          are defaultable
+
+      - Named default declarations, which apply to the named class, e.g.
+        'default Cls(X, Y)' applies precisely to 'Cls'.
+        Note that these may be locally defined, or they may be imported.
+
+  Standard class:
+    a class defined in the Prelude or the standard library, as defined
+    by the Haskell 98 report (section 4.3.4)
+
+    These are defined in GHC.Builtin.Names.standardClassKeys.
+
+The rules for defaulting a collection 'S' of unsolved constraints are as follows:
+
+  1. For each metavariable 'v' appearing in 'S', define
+
+       U_v = { C v | C v ∈ U, C is a unary typeclass }
+
+     We then process each 'U_v' in turn, in order to find a defaulting
+     assignment 'v := ty' that solves all of 'U_v'.
+
+  2. Unless -XExtendedDefaultRules is in effect, give up if 'v' appears:
+
+      - in any constraint that isn't a unary class constraint
+      - in a class constraint which is non-standard and does not have
+        a default declaration in scope.
+
+  3. Compute candidate assignments: for each unary typeclass 'C' in 'U_v' which
+     has a default declaration in scope, find the first type 'ty' in the list
+     of in-scope default types for 'C' for which all of 'U_v' is soluble.
+
+  4. If there is precisely one type candidate type assignment 'ty' that allows
+     all of 'U_v' to be solved, we default 'v := ty'. Otherwise, do nothing
+     ('v' remains ambiguous).
 
 Note [Defaulting plugins]
 ~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -815,7 +1015,7 @@ findDefaultableGroups (default_tys, extended_defaults) wanteds
     | group'@((_,_,tv) :| _) <- unary_groups
     , let group = toList group'
     , defaultable_tyvar tv
-    , defaultable_classes (map (classTyCon . sndOf3) group) ]
+    , defaultable_classes (map sndOf3 group) ]
   where
     simples  = approximateWC True wanteds
       -- True: for the purpose of defaulting we don't care
@@ -831,8 +1031,8 @@ findDefaultableGroups (default_tys, extended_defaults) wanteds
 
     -- Finds unary type-class constraints
     -- But take account of polykinded classes like Typeable,
-    -- which may look like (Typeable * (a:*))   (#8931)
-    -- step (1) in Note [How type-class constraints are defaulted]
+    -- which may look like (Typeable Type (a:Type))   (#8931)
+    -- See step (1) in Note [How type-class constraints are defaulted]
     find_unary :: Ct -> Either (Ct, Class, TyVar) Ct
     find_unary cc
         | Just (cls,tys)   <- getClassPredTys_maybe (ctPred cc)
@@ -844,21 +1044,42 @@ findDefaultableGroups (default_tys, extended_defaults) wanteds
         = Left (cc, cls, tv)
     find_unary cc = Right cc  -- Non unary or non dictionary
 
-    bad_tvs :: TcTyCoVarSet  -- TyVars mentioned by non-unaries
-    bad_tvs = mapUnionVarSet tyCoVarsOfCt non_unaries
+    nonunary_tvs :: TcTyCoVarSet  -- TyVars mentioned by non-unaries
+    nonunary_tvs = mapUnionVarSet tyCoVarsOfCt non_unaries
 
     cmp_tv (_,_,tv1) (_,_,tv2) = tv1 `compare` tv2
 
     defaultable_tyvar :: TcTyVar -> Bool
     defaultable_tyvar tv
         = let b1 = isTyConableTyVar tv  -- Note [Avoiding spurious errors]
-              b2 = not (tv `elemVarSet` bad_tvs)
+              b2 = not (tv `elemVarSet` nonunary_tvs)
           in b1 && (b2 || extended_defaults) -- Note [Multi-parameter defaults]
 
-    -- Determines if any of the given type class constructors is in default_tys
-    -- step (3) in Note [How type-class constraints are defaulted]
-    defaultable_classes :: [TyCon] -> Bool
-    defaultable_classes clss = not . null . intersect clss $ map cd_class default_tys
+    -- Determines whether the collection of class constraints permits defaulting.
+    -- See step (2) in Note [How type-class constraints are defaulted]
+    defaultable_classes :: [Class] -> Bool
+    defaultable_classes clss =
+      -- One of the classes has a default declaration in scope
+      -- (this includes 'Num', and e.g. 'IsString' with -XOverloadedStrings)
+      any (`elementOfUniqSet` classes_with_defaults) clss
+        &&
+      -- AND, either:
+      --  - ExtendedDefaultRules is in effect, or
+      --  - all the classes are standard or have a default declaration in scope
+      (extended_defaults || all is_std_or_has_default clss)
+    is_std_or_has_default :: Class -> Bool
+    is_std_or_has_default cls =
+      (getUnique cls `elem` standardClassKeys)
+        ||
+      (cls `elementOfUniqSet` classes_with_defaults)
+
+    -- All classes with a default declaration in scope; either:
+    --
+    --  - a named default declaration such as 'default C(Double, Bool)', or
+    --  - a Haskell 98 default declaration such as 'default(Int, Float)',
+    --    which adds defaults for Num, for IsString with OverloadedStrings,
+    --    and for Foldable/Traversable/... with ExtendedDefaultRules
+    classes_with_defaults = mkUniqSet $ map cd_class default_tys
 
 ------------------------------
 
@@ -885,8 +1106,8 @@ disambigGroup orig_wanteds default_ctys (tv, wanteds)
     allConsistent ((_, sub) :| subs) = all (eqSubAt tv sub . snd) subs
     defaultses =
       [ defaults | defaults@ClassDefaults{cd_class = cls} <- default_ctys
-                 , any (isDictForClass cls) wanteds ]
-    isDictForClass clcon ct = any ((clcon ==) . classTyCon . fst) (getClassPredTys_maybe $ ctPred ct)
+                 , any (isDictForClass (className cls)) wanteds ]
+    isDictForClass clcon ct = any ((clcon ==) . className . fst) (getClassPredTys_maybe $ ctPred ct)
     eqSubAt :: TcTyVar -> Subst -> Subst -> Bool
     eqSubAt tvar s1 s2 = or $ liftA2 tcEqType (lookupTyVar s1 tvar) (lookupTyVar s2 tvar)
 
@@ -908,14 +1129,14 @@ disambigProposalSequences orig_wanteds wanteds proposalSequences allConsistent
   = do { traverse_ (traverse_ reportInvalidDefaultedTyVars . getProposalSequence) proposalSequences
        ; fake_ev_binds_var <- TcS.newTcEvBinds
        ; tclvl             <- TcS.getTcLevel
-       -- Step (4) in Note [How type-class constraints are defaulted]
+       -- Step (3) in Note [How type-class constraints are defaulted]
        ; successes <- fmap catMaybes $
                       nestImplicTcS fake_ev_binds_var (pushTcLevel tclvl) $
                       mapM firstSuccess proposalSequences
-       ; traceTcS "disambigProposalSequences" (vcat [ ppr wanteds
-                                                    , ppr proposalSequences
-                                                    , ppr successes ])
-       -- Step (5) in Note [How type-class constraints are defaulted]
+       ; traceTcS "disambigProposalSequences {" (vcat [ ppr wanteds
+                                                      , ppr proposalSequences
+                                                      , ppr successes ])
+       -- Step (4) in Note [How type-class constraints are defaulted]
        ; case successes of
            success@(tvs, subst) : rest
              | allConsistent (success :| rest)
@@ -956,14 +1177,16 @@ tryDefaultGroup wanteds (Proposal assignments)
           = do { lcl_env <- TcS.getLclEnv
                ; tc_lvl <- TcS.getTcLevel
                ; let loc = mkGivenLoc tc_lvl (getSkolemInfo unkSkol) (mkCtLocEnv lcl_env)
-               -- Equality constraints are possible due to type defaulting plugins
-               ; wanted_evs <- sequence [ newWantedNC loc rewriters pred'
-                                        | wanted <- wanteds
-                                        , CtWanted { ctev_pred = pred
-                                                   , ctev_rewriters = rewriters }
-                                            <- return (ctEvidence wanted)
-                                        , let pred' = substTy subst pred ]
-               ; residual_wc <- solveSimpleWanteds $ listToBag $ map mkNonCanonical wanted_evs
+                     new_wtd_ct :: WantedCtEvidence -> TcS Ct
+                     new_wtd_ct (WantedCt { ctev_pred = wtd_pred, ctev_rewriters = rws }) =
+                       mkNonCanonical . CtWanted <$>
+                         -- NB: equality constraints are possible,
+                         -- due to type defaulting plugins
+                         newWantedNC loc rws (substTy subst wtd_pred)
+               ; new_wanteds <- sequence [ new_wtd_ct wtd
+                                         | CtWanted wtd <- map ctEvidence wanteds
+                                         ]
+               ; residual_wc <- solveSimpleWanteds (listToBag new_wanteds)
                ; return $ if isEmptyWC residual_wc then Just (tvs, subst) else Nothing }
 
           | otherwise
