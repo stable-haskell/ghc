@@ -43,6 +43,7 @@ import GHC.Types.Literal
 import GHC.Builtin.PrimOps
 import GHC.Builtin.PrimOps.Ids (primOpId)
 import GHC.Core.Type
+import GHC.Core.Predicate( tyCoVarsOfTypesWellScoped )
 import GHC.Core.TyCo.Compare (eqType)
 import GHC.Types.RepType
 import GHC.Core.DataCon
@@ -57,6 +58,7 @@ import GHC.Builtin.Uniques
 import GHC.Data.FastString
 import GHC.Utils.Panic
 import GHC.Utils.Exception (evaluate)
+import GHC.CmmToAsm.Config (platformWordWidth)
 import GHC.StgToCmm.Closure ( NonVoid(..), fromNonVoid, idPrimRepU,
                               addIdReps, addArgReps,
                               assertNonVoidIds, assertNonVoidStgArgs )
@@ -66,11 +68,10 @@ import GHC.Data.Bitmap
 import GHC.Data.FlatBag as FlatBag
 import GHC.Data.OrdList
 import GHC.Data.Maybe
-import GHC.Types.Name.Env (mkNameEnv)
 import GHC.Types.Tickish
 import GHC.Types.SptEntry
 
-import Data.List ( genericReplicate, genericLength, intersperse
+import Data.List ( genericReplicate, intersperse
                  , partition, scanl', sortBy, zip4, zip6 )
 import Foreign hiding (shiftL, shiftR)
 import Control.Monad
@@ -81,7 +82,6 @@ import GHC.Unit.Home.PackageTable (lookupHpt)
 
 import Data.Array
 import Data.Coerce (coerce)
-import Data.ByteString (ByteString)
 #if MIN_VERSION_rts(1,0,3)
 import qualified Data.ByteString.Char8 as BS
 #endif
@@ -117,18 +117,14 @@ byteCodeGen hsc_env this_mod binds tycs mb_modBreaks spt_entries
                 bnd <- binds
                 case bnd of
                   StgTopLifted bnd      -> [Right bnd]
-                  StgTopStringLit b str -> [Left (b, str)]
+                  StgTopStringLit b str -> [Left (getName b, str)]
             flattenBind (StgNonRec b e) = [(b,e)]
             flattenBind (StgRec bs)     = bs
-        stringPtrs <- allocateTopStrings interp strings
 
         (BcM_State{..}, proto_bcos) <-
            runBc hsc_env this_mod mb_modBreaks $ do
              let flattened_binds = concatMap flattenBind (reverse lifted_binds)
              FlatBag.fromList (fromIntegral $ length flattened_binds) <$> mapM schemeTopBind flattened_binds
-
-        when (notNull ffis)
-             (panic "GHC.StgToByteCode.byteCodeGen: missing final emitBc?")
 
         putDumpFileMaybe logger Opt_D_dump_BCOs
            "Proto-BCOs" FormatByteCode
@@ -137,7 +133,7 @@ byteCodeGen hsc_env this_mod binds tycs mb_modBreaks spt_entries
         let mod_breaks = case modBreaks of
              Nothing -> Nothing
              Just mb -> Just mb{ modBreaks_breakInfo = breakInfo }
-        cbc <- assembleBCOs interp profile proto_bcos tycs stringPtrs mod_breaks spt_entries
+        cbc <- assembleBCOs profile proto_bcos tycs strings mod_breaks spt_entries
 
         -- Squash space leaks in the CompiledByteCode.  This is really
         -- important, because when loading a set of modules into GHCi
@@ -151,21 +147,7 @@ byteCodeGen hsc_env this_mod binds tycs mb_modBreaks spt_entries
 
   where dflags  = hsc_dflags hsc_env
         logger  = hsc_logger hsc_env
-        interp  = hscInterp hsc_env
         profile = targetProfile dflags
-
--- | see Note [Generating code for top-level string literal bindings]
-allocateTopStrings
-  :: Interp
-  -> [(Id, ByteString)]
-  -> IO AddrEnv
-allocateTopStrings interp topStrings = do
-  let !(bndrs, strings) = unzip topStrings
-  ptrs <- interpCmd interp $ MallocStrings strings
-  return $ mkNameEnv (zipWith mk_entry bndrs ptrs)
-  where
-    mk_entry bndr ptr = let nm = getName bndr
-                        in (nm, (nm, AddrPtr ptr))
 
 {- Note [Generating code for top-level string literal bindings]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -177,9 +159,9 @@ the bytecode compiler: (1) compiling the bindings themselves, and
 we deal with them:
 
   1. Top-level string literal bindings are separated from the rest of
-     the module. Memory for them is allocated immediately, via
-     interpCmd, in allocateTopStrings, and the resulting AddrEnv is
-     recorded in the bc_strs field of the CompiledByteCode result.
+     the module. Memory is not allocated until bytecode link-time, the
+     bc_strs field of the CompiledByteCode result records [(Name, ByteString)]
+     directly.
 
   2. When we encounter a reference to a top-level string literal, we
      generate a PUSH_ADDR pseudo-instruction, which is assembled to
@@ -240,11 +222,12 @@ ppBCEnv p
 -- Create a BCO and do a spot of peephole optimisation on the insns
 -- at the same time.
 mkProtoBCO
-   :: (Outputable name)
-   => Platform
-   -> Bool      -- ^ True <=> label with @BCO_NAME@ instruction
-                -- see Note [BCO_NAME]
-   -> name
+   ::
+    Platform
+   -> Maybe Module
+        -- ^ Just cur_mod <=> label with @BCO_NAME@ instruction
+        -- see Note [BCO_NAME]
+   -> Name
    -> BCInstrList
    -> Either  [CgStgAlt] (CgStgRhs)
                 -- ^ original expression; for debugging only
@@ -252,24 +235,22 @@ mkProtoBCO
    -> WordOff   -- ^ bitmap size
    -> [StgWord] -- ^ bitmap
    -> Bool      -- ^ True <=> is a return point, rather than a function
-   -> [FFIInfo]
-   -> ProtoBCO name
-mkProtoBCO platform _add_bco_name nm instrs_ordlist origin arity bitmap_size bitmap is_ret ffis
+   -> ProtoBCO Name
+mkProtoBCO platform _add_bco_name nm instrs_ordlist origin arity bitmap_size bitmap is_ret
    = ProtoBCO {
         protoBCOName = nm,
         protoBCOInstrs = maybe_add_bco_name $ maybe_add_stack_check peep_d,
         protoBCOBitmap = bitmap,
         protoBCOBitmapSize = fromIntegral bitmap_size,
         protoBCOArity = arity,
-        protoBCOExpr = origin,
-        protoBCOFFIs = ffis
+        protoBCOExpr = origin
       }
      where
 #if MIN_VERSION_rts(1,0,3)
         maybe_add_bco_name instrs
-          | _add_bco_name = BCO_NAME str : instrs
-          where
-            str = BS.pack $ showSDocOneLine defaultSDocContext (ppr nm)
+          | Just cur_mod <- _add_bco_name =
+              let str = BS.pack $ showSDocOneLine defaultSDocContext (pprFullNameWithUnique cur_mod nm)
+              in BCO_NAME str : instrs
 #endif
         maybe_add_bco_name instrs = instrs
 
@@ -332,7 +313,7 @@ schemeTopBind (id, rhs)
         -- by just re-using the single top-level definition.  So
         -- for the worker itself, we must allocate it directly.
     -- ioToBc (putStrLn $ "top level BCO")
-    emitBc (mkProtoBCO platform add_bco_name
+    pure (mkProtoBCO platform add_bco_name
                        (getName id) (toOL [PACK data_con 0, RETURN P])
                        (Right rhs) 0 0 [{-no bitmap-}] False{-not alts-})
 
@@ -393,11 +374,11 @@ schemeR_wrk fvs nm original_body (args, body)
 
          -- make the arg bitmap
          bits = argBits platform (reverse (map (idArgRep platform) all_args))
-         bitmap_size = genericLength bits
+         bitmap_size = strictGenericLength bits
          bitmap = mkBitmap platform bits
      body_code <- schemeER_wrk sum_szsb_args p_init body
 
-     emitBc (mkProtoBCO platform add_bco_name nm body_code (Right original_body)
+     pure (mkProtoBCO platform add_bco_name nm body_code (Right original_body)
                  arity bitmap_size bitmap False{-not alts-})
 
 -- | Introduce break instructions for ticked expressions.
@@ -414,7 +395,7 @@ schemeER_wrk d p (StgTick (Breakpoint tick_ty tick_no fvs tick_mod) rhs) = do
     Nothing -> pure code
     Just current_mod_breaks -> break_info hsc_env tick_mod current_mod mb_current_mod_breaks >>= \case
       Nothing -> pure code
-      Just ModBreaks {modBreaks_flags = breaks, modBreaks_module = tick_mod_ptr, modBreaks_ccs = cc_arr} -> do
+      Just ModBreaks {modBreaks_flags = breaks, modBreaks_module = tick_mod_ptr, modBreaks_module_unitid = tick_mod_id_ptr, modBreaks_ccs = cc_arr} -> do
         platform <- profilePlatform <$> getProfile
         let idOffSets = getVarOffSets platform d p fvs
             ty_vars   = tyCoVarsOfTypesWellScoped (tick_ty:map idType fvs)
@@ -423,6 +404,7 @@ schemeER_wrk d p (StgTick (Breakpoint tick_ty tick_no fvs tick_mod) rhs) = do
             breakInfo  = dehydrateCgBreakInfo ty_vars (map toWord idOffSets) tick_ty
 
         let info_mod_ptr = modBreaks_module current_mod_breaks
+            info_mod_id_ptr = modBreaks_module_unitid current_mod_breaks
         infox <- newBreakInfo breakInfo
 
         let cc | Just interp <- hsc_interp hsc_env
@@ -435,7 +417,7 @@ schemeER_wrk d p (StgTick (Breakpoint tick_ty tick_no fvs tick_mod) rhs) = do
                       in if fromIntegral r == x
                         then r
                         else pprPanic "schemeER_wrk: breakpoint tick/info index too large!" (ppr x)
-            breakInstr = BRK_FUN breaks tick_mod_ptr (toW16 tick_no) info_mod_ptr (toW16 infox) cc
+            breakInstr = BRK_FUN breaks tick_mod_ptr tick_mod_id_ptr (toW16 tick_no) info_mod_ptr info_mod_id_ptr (toW16 infox) cc
         return $ breakInstr `consOL` code
 schemeER_wrk d p rhs = schemeE d 0 p rhs
 
@@ -457,8 +439,8 @@ schemeER_wrk d p rhs = schemeE d 0 p rhs
 --
 -- If the breakpoint is inlined from another module, look it up in the home
 -- package table.
--- If the module doesn't exist there, or its module pointer is null (which means
--- that the 'ModBreaks' value is uninitialized), skip the instruction.
+-- If the module doesn't exist there, or if the 'ModBreaks' value is
+-- uninitialized, skip the instruction (i.e. return Nothing).
 break_info ::
   HscEnv ->
   Module ->
@@ -467,18 +449,11 @@ break_info ::
   BcM (Maybe ModBreaks)
 break_info hsc_env mod current_mod current_mod_breaks
   | mod == current_mod
-  = pure $ check_mod_ptr =<< current_mod_breaks
+  = pure current_mod_breaks
   | otherwise
   = ioToBc (lookupHpt (hsc_HPT hsc_env) (moduleName mod)) >>= \case
-      Just hp -> pure $ check_mod_ptr (getModBreaks hp)
+      Just hp -> pure $ getModBreaks hp
       Nothing -> pure Nothing
-  where
-    check_mod_ptr mb
-      | mod_ptr <- modBreaks_module mb
-      , fromRemotePtr mod_ptr /= nullPtr
-      = Just mb
-      | otherwise
-      = Nothing
 
 getVarOffSets :: Platform -> StackDepth -> BCEnv -> [Id] -> [Maybe (Id, WordOff)]
 getVarOffSets platform depth env = map getOffSet
@@ -543,12 +518,12 @@ returnUnliftedReps d s szb reps = do
              -- otherwise use RETURN_TUPLE with a tuple descriptor
              nv_reps -> do
                let (call_info, args_offsets) = layoutNativeCall profile NativeTupleReturn 0 id nv_reps
-               tuple_bco <- emitBc (tupleBCO platform call_info args_offsets)
+                   tuple_bco = tupleBCO platform call_info args_offsets
                return $ PUSH_UBX (mkNativeCallInfoLit platform call_info) 1 `consOL`
                         PUSH_BCO tuple_bco `consOL`
                         unitOL RETURN_TUPLE
     return ( mkSlideB platform szb (d - s) -- clear to sequel
-             `consOL` ret)                 -- go
+             `appOL` ret)                 -- go
 
 -- construct and return an unboxed tuple
 returnUnboxedTuple
@@ -579,8 +554,7 @@ returnUnboxedTuple d s p es = do
 
 -- Compile code to apply the given expression to the remaining args
 -- on the stack, returning a HNF.
-schemeE
-    :: StackDepth -> Sequel -> BCEnv -> CgStgExpr -> BcM BCInstrList
+schemeE :: StackDepth -> Sequel -> BCEnv -> CgStgExpr -> BcM BCInstrList
 schemeE d s p (StgLit lit) = returnUnliftedAtom d s p (StgLitArg lit)
 schemeE d s p (StgApp x [])
    | isUnliftedType (idType x) = returnUnliftedAtom d s p (StgVarArg x)
@@ -607,7 +581,7 @@ schemeE d s p (StgLet _ext binds body) = do
      platform <- targetPlatform <$> getDynFlags
      let (xs,rhss) = case binds of StgNonRec x rhs  -> ([x],[rhs])
                                    StgRec xs_n_rhss -> unzip xs_n_rhss
-         n_binds = genericLength xs
+         n_binds = strictGenericLength xs
 
          fvss  = map (fvsToEnv p') rhss
 
@@ -616,16 +590,15 @@ schemeE d s p (StgLet _ext binds body) = do
          sizes = map (\rhs_fvs -> sum (map size_w rhs_fvs)) fvss
 
          -- the arity of each rhs
-         arities = map (genericLength . fst . collect) rhss
+         arities = map (strictGenericLength . fst . collect) rhss
 
          -- This p', d' defn is safe because all the items being pushed
          -- are ptrs, so all have size 1 word.  d' and p' reflect the stack
          -- after the closures have been allocated in the heap (but not
          -- filled in), and pointers to them parked on the stack.
          offsets = mkStackOffsets d (genericReplicate n_binds (wordSize platform))
-         p' = Map.insertList (zipE xs offsets) p
+         p' = Map.insertList (zipEqual xs offsets) p
          d' = d + wordsToBytes platform n_binds
-         zipE = zipEqual "schemeE"
 
          -- ToDo: don't build thunks for things with no free variables
          build_thunk
@@ -732,8 +705,14 @@ schemeT d s p (StgOpApp (StgFCallOp (CCall ccall_spec) _ty) args result_ty)
       then generateCCall d s p ccall_spec result_ty args
       else unsupportedCConvException
 
-schemeT d s p (StgOpApp (StgPrimOp op) args _ty)
-   = doTailCall d s p (primOpId op) (reverse args)
+schemeT d s p (StgOpApp (StgPrimOp op) args _ty) = do
+  profile <- getProfile
+  let platform = profilePlatform profile
+  case doPrimOp platform op d s p args of
+    -- Can we do this right in the interpreter?
+    Just prim_code -> prim_code
+    -- Otherwise we have to do a call to the primop wrapper instead :(
+    _         -> doTailCall d s p (primOpId op) (reverse args)
 
 schemeT d s p (StgOpApp (StgPrimCallOp (PrimCall label unit)) args result_ty)
    = generatePrimCall d s p label (Just unit) result_ty args
@@ -812,7 +791,7 @@ doTailCall init_d s p fn args = do
         platform <- profilePlatform <$> getProfile
         assert (sz == wordSize platform) return ()
         let slide = mkSlideB platform (d - init_d + wordSize platform) (init_d - s)
-        return (push_fn `appOL` (slide `consOL` unitOL ENTER))
+        return (push_fn `appOL` (slide `appOL` unitOL ENTER))
   do_pushes !d args reps = do
       let (push_apply, n, rest_of_reps) = findPushSeq reps
           (these_args, rest_of_args) = splitAt n args
@@ -827,6 +806,300 @@ doTailCall init_d s p fn args = do
     (push_code, sz) <- pushAtom d p arg
     (final_d, more_push_code) <- push_seq (d + sz) args
     return (final_d, push_code `appOL` more_push_code)
+
+doPrimOp  :: Platform
+          -> PrimOp
+          -> StackDepth
+          -> Sequel
+          -> BCEnv
+          -> [StgArg]
+          -> Maybe (BcM BCInstrList)
+doPrimOp platform op init_d s p args =
+  case op of
+    IntAddOp -> sizedPrimOp OP_ADD
+    Int64AddOp -> only64bit $ sizedPrimOp OP_ADD
+    Int32AddOp -> sizedPrimOp OP_ADD
+    Int16AddOp -> sizedPrimOp OP_ADD
+    Int8AddOp -> sizedPrimOp OP_ADD
+    WordAddOp -> sizedPrimOp OP_ADD
+    Word64AddOp -> only64bit $ sizedPrimOp OP_ADD
+    Word32AddOp -> sizedPrimOp OP_ADD
+    Word16AddOp -> sizedPrimOp OP_ADD
+    Word8AddOp -> sizedPrimOp OP_ADD
+    AddrAddOp -> sizedPrimOp OP_ADD
+
+    IntMulOp -> sizedPrimOp OP_MUL
+    Int64MulOp -> only64bit $ sizedPrimOp OP_MUL
+    Int32MulOp -> sizedPrimOp OP_MUL
+    Int16MulOp -> sizedPrimOp OP_MUL
+    Int8MulOp -> sizedPrimOp OP_MUL
+    WordMulOp -> sizedPrimOp OP_MUL
+    Word64MulOp -> only64bit $ sizedPrimOp OP_MUL
+    Word32MulOp -> sizedPrimOp OP_MUL
+    Word16MulOp -> sizedPrimOp OP_MUL
+    Word8MulOp -> sizedPrimOp OP_MUL
+
+    IntSubOp -> sizedPrimOp OP_SUB
+    WordSubOp -> sizedPrimOp OP_SUB
+    Int64SubOp -> only64bit $ sizedPrimOp OP_SUB
+    Int32SubOp -> sizedPrimOp OP_SUB
+    Int16SubOp -> sizedPrimOp OP_SUB
+    Int8SubOp -> sizedPrimOp OP_SUB
+    Word64SubOp -> only64bit $ sizedPrimOp OP_SUB
+    Word32SubOp -> sizedPrimOp OP_SUB
+    Word16SubOp -> sizedPrimOp OP_SUB
+    Word8SubOp -> sizedPrimOp OP_SUB
+    AddrSubOp -> sizedPrimOp OP_SUB
+
+    IntAndOp -> sizedPrimOp OP_AND
+    WordAndOp -> sizedPrimOp OP_AND
+    Word64AndOp -> only64bit $ sizedPrimOp OP_AND
+    Word32AndOp -> sizedPrimOp OP_AND
+    Word16AndOp -> sizedPrimOp OP_AND
+    Word8AndOp -> sizedPrimOp OP_AND
+
+    IntNotOp -> sizedPrimOp OP_NOT
+    WordNotOp -> sizedPrimOp OP_NOT
+    Word64NotOp -> only64bit $ sizedPrimOp OP_NOT
+    Word32NotOp -> sizedPrimOp OP_NOT
+    Word16NotOp -> sizedPrimOp OP_NOT
+    Word8NotOp -> sizedPrimOp OP_NOT
+
+    IntXorOp -> sizedPrimOp OP_XOR
+    WordXorOp -> sizedPrimOp OP_XOR
+    Word64XorOp -> only64bit $ sizedPrimOp OP_XOR
+    Word32XorOp -> sizedPrimOp OP_XOR
+    Word16XorOp -> sizedPrimOp OP_XOR
+    Word8XorOp -> sizedPrimOp OP_XOR
+
+    IntOrOp -> sizedPrimOp OP_OR
+    WordOrOp -> sizedPrimOp OP_OR
+    Word64OrOp -> only64bit $ sizedPrimOp OP_OR
+    Word32OrOp -> sizedPrimOp OP_OR
+    Word16OrOp -> sizedPrimOp OP_OR
+    Word8OrOp -> sizedPrimOp OP_OR
+
+    WordSllOp   -> sizedPrimOp OP_SHL
+    Word64SllOp -> only64bit $ sizedPrimOp OP_SHL -- check 32bit platform
+    Word32SllOp -> sizedPrimOp OP_SHL
+    Word16SllOp -> sizedPrimOp OP_SHL
+    Word8SllOp -> sizedPrimOp OP_SHL
+    IntSllOp    -> sizedPrimOp OP_SHL
+    Int64SllOp  -> only64bit $ sizedPrimOp OP_SHL
+    Int32SllOp  -> sizedPrimOp OP_SHL
+    Int16SllOp  -> sizedPrimOp OP_SHL
+    Int8SllOp  -> sizedPrimOp OP_SHL
+
+    WordSrlOp   -> sizedPrimOp OP_LSR
+    Word64SrlOp -> only64bit $ sizedPrimOp OP_LSR
+    Word32SrlOp -> sizedPrimOp OP_LSR
+    Word16SrlOp -> sizedPrimOp OP_LSR
+    Word8SrlOp -> sizedPrimOp OP_LSR
+    IntSrlOp    -> sizedPrimOp OP_LSR
+    Int64SrlOp  -> only64bit $ sizedPrimOp OP_LSR -- check 32bit platform
+    Int32SrlOp  -> sizedPrimOp OP_LSR
+    Int16SrlOp  -> sizedPrimOp OP_LSR
+    Int8SrlOp  -> sizedPrimOp OP_LSR
+
+    IntSraOp -> sizedPrimOp OP_ASR
+    Int64SraOp -> only64bit $ sizedPrimOp OP_ASR -- check 32bit platform
+    Int32SraOp -> sizedPrimOp OP_ASR
+    Int16SraOp -> sizedPrimOp OP_ASR
+    Int8SraOp -> sizedPrimOp OP_ASR
+
+
+    IntNeOp -> sizedPrimOp OP_NEQ
+    Int64NeOp -> only64bit $ sizedPrimOp OP_NEQ
+    Int32NeOp -> sizedPrimOp OP_NEQ
+    Int16NeOp -> sizedPrimOp OP_NEQ
+    Int8NeOp -> sizedPrimOp OP_NEQ
+    WordNeOp -> sizedPrimOp OP_NEQ
+    Word64NeOp -> only64bit $ sizedPrimOp OP_NEQ
+    Word32NeOp -> sizedPrimOp OP_NEQ
+    Word16NeOp -> sizedPrimOp OP_NEQ
+    Word8NeOp -> sizedPrimOp OP_NEQ
+    AddrNeOp -> sizedPrimOp OP_NEQ
+
+    IntEqOp -> sizedPrimOp OP_EQ
+    Int64EqOp -> only64bit $ sizedPrimOp OP_EQ
+    Int32EqOp -> sizedPrimOp OP_EQ
+    Int16EqOp -> sizedPrimOp OP_EQ
+    Int8EqOp -> sizedPrimOp OP_EQ
+    WordEqOp -> sizedPrimOp OP_EQ
+    Word64EqOp -> only64bit $ sizedPrimOp OP_EQ
+    Word32EqOp -> sizedPrimOp OP_EQ
+    Word16EqOp -> sizedPrimOp OP_EQ
+    Word8EqOp -> sizedPrimOp OP_EQ
+    AddrEqOp -> sizedPrimOp OP_EQ
+    CharEqOp -> sizedPrimOp OP_EQ
+
+    IntLtOp -> sizedPrimOp OP_S_LT
+    Int64LtOp -> only64bit $ sizedPrimOp OP_S_LT
+    Int32LtOp -> sizedPrimOp OP_S_LT
+    Int16LtOp -> sizedPrimOp OP_S_LT
+    Int8LtOp -> sizedPrimOp OP_S_LT
+    WordLtOp -> sizedPrimOp OP_U_LT
+    Word64LtOp -> only64bit $ sizedPrimOp OP_U_LT
+    Word32LtOp -> sizedPrimOp OP_U_LT
+    Word16LtOp -> sizedPrimOp OP_U_LT
+    Word8LtOp -> sizedPrimOp OP_U_LT
+    AddrLtOp -> sizedPrimOp OP_U_LT
+    CharLtOp -> sizedPrimOp OP_U_LT
+
+    IntGeOp -> sizedPrimOp OP_S_GE
+    Int64GeOp -> only64bit $ sizedPrimOp OP_S_GE
+    Int32GeOp -> sizedPrimOp OP_S_GE
+    Int16GeOp -> sizedPrimOp OP_S_GE
+    Int8GeOp -> sizedPrimOp OP_S_GE
+    WordGeOp -> sizedPrimOp OP_U_GE
+    Word64GeOp -> only64bit $ sizedPrimOp OP_U_GE
+    Word32GeOp -> sizedPrimOp OP_U_GE
+    Word16GeOp -> sizedPrimOp OP_U_GE
+    Word8GeOp -> sizedPrimOp OP_U_GE
+    AddrGeOp -> sizedPrimOp OP_U_GE
+    CharGeOp -> sizedPrimOp OP_U_GE
+
+    IntGtOp -> sizedPrimOp OP_S_GT
+    Int64GtOp -> only64bit $ sizedPrimOp OP_S_GT
+    Int32GtOp -> sizedPrimOp OP_S_GT
+    Int16GtOp -> sizedPrimOp OP_S_GT
+    Int8GtOp -> sizedPrimOp OP_S_GT
+    WordGtOp -> sizedPrimOp OP_U_GT
+    Word64GtOp -> only64bit $ sizedPrimOp OP_U_GT
+    Word32GtOp -> sizedPrimOp OP_U_GT
+    Word16GtOp -> sizedPrimOp OP_U_GT
+    Word8GtOp -> sizedPrimOp OP_U_GT
+    AddrGtOp -> sizedPrimOp OP_U_GT
+    CharGtOp -> sizedPrimOp OP_U_GT
+
+    IntLeOp -> sizedPrimOp OP_S_LE
+    Int64LeOp -> only64bit $ sizedPrimOp OP_S_LE
+    Int32LeOp -> sizedPrimOp OP_S_LE
+    Int16LeOp -> sizedPrimOp OP_S_LE
+    Int8LeOp -> sizedPrimOp OP_S_LE
+    WordLeOp -> sizedPrimOp OP_U_LE
+    Word64LeOp -> only64bit $ sizedPrimOp OP_U_LE
+    Word32LeOp -> sizedPrimOp OP_U_LE
+    Word16LeOp -> sizedPrimOp OP_U_LE
+    Word8LeOp -> sizedPrimOp OP_U_LE
+    AddrLeOp -> sizedPrimOp OP_U_LE
+    CharLeOp -> sizedPrimOp OP_U_LE
+
+    IntNegOp -> sizedPrimOp OP_NEG
+    Int64NegOp -> only64bit $ sizedPrimOp OP_NEG
+    Int32NegOp -> sizedPrimOp OP_NEG
+    Int16NegOp -> sizedPrimOp OP_NEG
+    Int8NegOp -> sizedPrimOp OP_NEG
+
+    IntToWordOp     -> mk_conv (platformWordWidth platform)
+    WordToIntOp     -> mk_conv (platformWordWidth platform)
+    Int8ToWord8Op   -> mk_conv W8
+    Word8ToInt8Op   -> mk_conv W8
+    Int16ToWord16Op -> mk_conv W16
+    Word16ToInt16Op -> mk_conv W16
+    Int32ToWord32Op -> mk_conv W32
+    Word32ToInt32Op -> mk_conv W32
+    Int64ToWord64Op -> only64bit $ mk_conv W64
+    Word64ToInt64Op -> only64bit $ mk_conv W64
+    IntToAddrOp     -> mk_conv (platformWordWidth platform)
+    AddrToIntOp     -> mk_conv (platformWordWidth platform)
+    ChrOp           -> mk_conv (platformWordWidth platform)   -- Int# and Char# are rep'd the same
+    OrdOp           -> mk_conv (platformWordWidth platform)
+
+    -- Memory primops, expand the ghci-mem-primops test if you add more.
+    IndexOffAddrOp_Word8 ->  primOpWithRep (OP_INDEX_ADDR W8) W8
+    IndexOffAddrOp_Word16 -> primOpWithRep (OP_INDEX_ADDR W16) W16
+    IndexOffAddrOp_Word32 -> primOpWithRep (OP_INDEX_ADDR W32) W32
+    IndexOffAddrOp_Word64 -> only64bit $ primOpWithRep (OP_INDEX_ADDR W64) W64
+
+    _ -> Nothing
+  where
+    only64bit = if platformWordWidth platform == W64 then id else const Nothing
+    primArg1Width :: StgArg -> Width
+    primArg1Width arg
+      | rep <- (stgArgRepU arg)
+      = case rep of
+        AddrRep -> platformWordWidth platform
+        IntRep -> platformWordWidth platform
+        WordRep -> platformWordWidth platform
+
+        Int64Rep -> W64
+        Word64Rep -> W64
+
+        Int32Rep -> W32
+        Word32Rep -> W32
+
+        Int16Rep -> W16
+        Word16Rep -> W16
+
+        Int8Rep -> W8
+        Word8Rep -> W8
+
+        FloatRep -> unexpectedRep
+        DoubleRep -> unexpectedRep
+
+        BoxedRep{} -> unexpectedRep
+        VecRep{} -> unexpectedRep
+      where
+        unexpectedRep = panic "doPrimOp: Unexpected argument rep"
+
+
+    -- TODO: The slides for the result need to be two words on 32bit for 64bit ops.
+    mkNReturn width
+      | W64 <- width = RETURN L -- L works for 64 bit on any platform
+      | otherwise = RETURN N -- <64bit width, fits in word on all platforms
+
+    mkSlideWords width = if platformWordWidth platform < width then 2 else 1
+
+    -- Push args, execute primop, slide, return_N
+    -- Decides width of operation based on first argument.
+    sizedPrimOp op_inst = Just $ do
+      let width = primArg1Width (head args)
+      prim_code <- mkPrimOpCode init_d s p (op_inst width) $ args
+      let slide = mkSlideW (mkSlideWords width) (bytesToWords platform $ init_d - s) `snocOL` mkNReturn width
+      return $ prim_code `appOL` slide
+
+    -- primOpWithRep op w => operation @op@ resulting in result @w@ wide.
+    primOpWithRep :: BCInstr -> Width -> Maybe (BcM (OrdList BCInstr))
+    primOpWithRep op_inst result_width = Just $ do
+      prim_code <- mkPrimOpCode init_d s p op_inst $ args
+      let slide = mkSlideW (mkSlideWords result_width) (bytesToWords platform $ init_d - s) `snocOL` mkNReturn result_width
+      return $ prim_code `appOL` slide
+
+    -- Coerce the argument, requires them to be the same size
+    mk_conv :: Width -> Maybe (BcM (OrdList BCInstr))
+    mk_conv target_width = Just $ do
+      let width = primArg1Width (head args)
+      massert (width == target_width)
+      (push_code, _bytes) <- pushAtom init_d p (head args)
+      let slide = mkSlideW (mkSlideWords target_width) (bytesToWords platform $ init_d - s) `snocOL` mkNReturn target_width
+      return $ push_code `appOL` slide
+
+-- Push the arguments on the stack and emit the given instruction
+-- Pushes at least one word per non void arg.
+mkPrimOpCode
+    :: StackDepth
+    -> Sequel
+    -> BCEnv
+    -> BCInstr                  -- The operator
+    -> [StgArg]                 -- Args, in *reverse* order (must be fully applied)
+    -> BcM BCInstrList
+mkPrimOpCode orig_d _ p op_inst args = app_code
+  where
+    app_code = do
+        profile <- getProfile
+        let _platform = profilePlatform profile
+
+            do_pushery :: StackDepth -> [StgArg] -> BcM BCInstrList
+            do_pushery !d (arg : args) = do
+                (push,arg_bytes) <- pushAtom d p arg
+                more_push_code <- do_pushery (d + arg_bytes) args
+                return (push `appOL` more_push_code)
+            do_pushery !_d [] = do
+                return (unitOL op_inst)
+
+        -- Push on the stack in the reverse order.
+        do_pushery orig_d (reverse args)
 
 -- v. similar to CgStackery.findMatch, ToDo: merge
 findPushSeq :: [ArgRep] -> (BCInstr, Int, [ArgRep])
@@ -1095,16 +1368,15 @@ doCase d s p scrut bndr alts
      scrut_code <- schemeE (d + ret_frame_size_b + save_ccs_size_b)
                            (d + ret_frame_size_b + save_ccs_size_b)
                            p scrut
-     alt_bco' <- emitBc alt_bco
      if ubx_tuple_frame
-       then do tuple_bco <- emitBc (tupleBCO platform call_info args_offsets)
-               return (PUSH_ALTS_TUPLE alt_bco' call_info tuple_bco
+       then do let tuple_bco = tupleBCO platform call_info args_offsets
+               return (PUSH_ALTS_TUPLE alt_bco call_info tuple_bco
                        `consOL` scrut_code)
        else let scrut_rep = case non_void_arg_reps of
                   []    -> V
                   [rep] -> rep
                   _     -> panic "schemeE(StgCase).push_alts"
-            in return (PUSH_ALTS alt_bco' scrut_rep `consOL` scrut_code)
+            in return (PUSH_ALTS alt_bco scrut_rep `consOL` scrut_code)
 
 
 -- -----------------------------------------------------------------------------
@@ -1396,9 +1668,9 @@ Note [unboxed tuple bytecodes and tuple_BCO]
 
  -}
 
-tupleBCO :: Platform -> NativeCallInfo -> [(PrimRep, ByteOff)] -> [FFIInfo] -> ProtoBCO Name
+tupleBCO :: Platform -> NativeCallInfo -> [(PrimRep, ByteOff)] -> ProtoBCO Name
 tupleBCO platform args_info args =
-  mkProtoBCO platform False invented_name body_code (Left [])
+  mkProtoBCO platform Nothing invented_name body_code (Left [])
              0{-no arity-} bitmap_size bitmap False{-is alts-}
   where
     {-
@@ -1417,9 +1689,9 @@ tupleBCO platform args_info args =
     body_code = mkSlideW 0 1          -- pop frame header
                 `snocOL` RETURN_TUPLE -- and add it again
 
-primCallBCO :: Platform -> NativeCallInfo -> [(PrimRep, ByteOff)] -> [FFIInfo] -> ProtoBCO Name
+primCallBCO :: Platform -> NativeCallInfo -> [(PrimRep, ByteOff)] -> ProtoBCO Name
 primCallBCO platform args_info args =
-  mkProtoBCO platform False invented_name body_code (Left [])
+  mkProtoBCO platform Nothing invented_name body_code (Left [])
              0{-no arity-} bitmap_size bitmap False{-is alts-}
   where
     {-
@@ -1526,12 +1798,12 @@ generatePrimCall d s p target _mb_unit _result_ty args
                                           massert (off == dd + szb)
                                           go (dd + szb) (push:pushes) cs
      push_args <- go d [] shifted_args_offsets
-     args_bco <- emitBc (primCallBCO platform args_info prim_args_offsets)
+     let args_bco = primCallBCO platform args_info prim_args_offsets
      return $ mconcat push_args `appOL`
               (push_target `consOL`
                push_info `consOL`
                PUSH_BCO args_bco `consOL`
-               (mkSlideB platform szb (d - s) `consOL` unitOL PRIMCALL))
+               (mkSlideB platform szb (d - s) `appOL` unitOL PRIMCALL))
 
 -- -----------------------------------------------------------------------------
 -- Deal with a CCall.
@@ -1704,13 +1976,10 @@ generateCCall d0 s p (CCallSpec target _ safety) result_ty args
 
      let ffires = primRepToFFIType platform r_rep
          ffiargs = map (primRepToFFIType platform) a_reps
-     interp <- hscInterp <$> getHscEnv
-     token <- ioToBc $ interpCmd interp (PrepFFI ffiargs ffires)
-     recordFFIBc token
 
      let
          -- do the call
-         do_call      = unitOL (CCALL stk_offset token flags)
+         do_call      = unitOL (CCALL stk_offset (FFIInfo ffiargs ffires) flags)
            where flags = case safety of
                            PlaySafe          -> 0x0
                            PlayInterruptible -> 0x1
@@ -1800,10 +2069,14 @@ maybe_getCCallReturnRep fn_ty
          _ -> pprPanic "maybe_getCCallReturn: can't handle:"
                          (pprType fn_ty)
 
-maybe_is_tagToEnum_call :: CgStgExpr -> Maybe (Id, [Name])
+maybe_is_tagToEnum_call :: CgStgExpr -> Maybe (StgArg, [Name])
 -- Detect and extract relevant info for the tagToEnum kludge.
-maybe_is_tagToEnum_call (StgOpApp (StgPrimOp TagToEnumOp) [StgVarArg v] t)
+maybe_is_tagToEnum_call (StgOpApp (StgPrimOp TagToEnumOp) args t)
+  | [v] <- args
   = Just (v, extract_constr_Names t)
+  | otherwise
+  = pprPanic "StgToByteCode: tagToEnum#"
+     $ text "Expected exactly one arg, but actual args are:" <+> ppr args
   where
     extract_constr_Names ty
            | rep_ty <- unwrapType ty
@@ -1850,14 +2123,14 @@ implement_tagToId
     :: StackDepth
     -> Sequel
     -> BCEnv
-    -> Id
+    -> StgArg
     -> [Name]
     -> BcM BCInstrList
 -- See Note [Implementing tagToEnum#]
 implement_tagToId d s p arg names
   = assert (notNull names) $
-    do (push_arg, arg_bytes) <- pushAtom d p (StgVarArg arg)
-       labels <- getLabelsBc (genericLength names)
+    do (push_arg, arg_bytes) <- pushAtom d p arg
+       labels <- getLabelsBc (strictGenericLength names)
        label_fail <- getLabelBc
        label_exit <- getLabelBc
        dflags <- getDynFlags
@@ -1894,9 +2167,7 @@ implement_tagToId d s p arg names
 -- to 5 and not to 4.  Stack locations are numbered from zero, so a
 -- depth 6 stack has valid words 0 .. 5.
 
-pushAtom
-    :: StackDepth -> BCEnv -> StgArg -> BcM (BCInstrList, ByteOff)
-
+pushAtom :: StackDepth -> BCEnv -> StgArg -> BcM (BCInstrList, ByteOff)
 -- See Note [Empty case alternatives] in GHC.Core
 -- and Note [Bottoming expressions] in GHC.Core.Utils:
 -- The scrutinee of an empty case evaluates to bottom
@@ -1951,13 +2222,16 @@ pushAtom d p (StgVarArg var)
 
           Nothing
             -- see Note [Generating code for top-level string literal bindings]
-            | isUnliftedType (idType var) -> do
-              massert (idType var `eqType` addrPrimTy)
+            | idType var `eqType` addrPrimTy ->
               return (unitOL (PUSH_ADDR (getName var)), szb)
 
             | otherwise -> do
+              let varTy = idType var
+              massertPpr (definitelyLiftedType varTy) $
+                vcat [ text "pushAtom: unhandled unlifted type"
+                     , text "var:" <+> ppr var <+> dcolon <+> ppr varTy <> dcolon <+> ppr (typeKind varTy)
+                     ]
               return (unitOL (PUSH_G (getName var)), szb)
-
 
 pushAtom _ _ (StgLitArg lit) = pushLiteral True lit
 
@@ -1967,7 +2241,13 @@ pushLiteral padded lit =
      platform <- targetPlatform <$> getDynFlags
      let code :: PrimRep -> BcM (BCInstrList, ByteOff)
          code rep =
-            return (padding_instr `snocOL` instr, size_bytes + padding_bytes)
+            -- TODO: It's a bit silly to use up to four instructions to put a single literal on the stack.
+            --       Lot's of better ways to do this. Add a instruction to push it as full word.
+            --       Store the literal as full word and push it as full word.
+            --       Maybe more, but for now this will do.
+            case platformByteOrder platform of
+              LittleEndian -> return (padding_instr `snocOL` instr, size_bytes + padding_bytes)
+              BigEndian -> return (instr `consOL` padding_instr, size_bytes + padding_bytes)
           where
             size_bytes = ByteOff $ primRepSizeB platform rep
 
@@ -2263,8 +2543,8 @@ unsupportedCConvException = throwGhcException (ProgramError
   ("Error: bytecode compiler can't handle some foreign calling conventions\n"++
    "  Workaround: use -fobject-code, or compile this module to .o separately."))
 
-mkSlideB :: Platform -> ByteOff -> ByteOff -> BCInstr
-mkSlideB platform nb db = SLIDE n d
+mkSlideB :: Platform -> ByteOff -> ByteOff -> OrdList BCInstr
+mkSlideB platform nb db = mkSlideW n d
   where
     !n = bytesToWords platform nb
     !d = bytesToWords platform db
@@ -2298,8 +2578,6 @@ data BcM_State
         { bcm_hsc_env :: HscEnv
         , thisModule  :: Module          -- current module (for breakpoints)
         , nextlabel   :: Word32          -- for generating local labels
-        , ffis        :: [FFIInfo]       -- ffi info blocks, to free later
-                                         -- Should be free()d when it is GCd
         , modBreaks   :: Maybe ModBreaks -- info about breakpoints
 
         , breakInfo   :: IntMap CgBreakInfo -- ^ Info at breakpoint occurrence.
@@ -2320,7 +2598,7 @@ runBc :: HscEnv -> Module -> Maybe ModBreaks
       -> BcM r
       -> IO (BcM_State, r)
 runBc hsc_env this_mod modBreaks (BcM m)
-   = m (BcM_State hsc_env this_mod 0 [] modBreaks IntMap.empty 0)
+   = m (BcM_State hsc_env this_mod 0 modBreaks IntMap.empty 0)
 
 thenBc :: BcM a -> (a -> BcM b) -> BcM b
 thenBc (BcM expr) cont = BcM $ \st0 -> do
@@ -2356,16 +2634,12 @@ getHscEnv = BcM $ \st -> return (st, bcm_hsc_env st)
 getProfile :: BcM Profile
 getProfile = targetProfile <$> getDynFlags
 
-shouldAddBcoName :: BcM Bool
-shouldAddBcoName = gopt Opt_AddBcoName <$> getDynFlags
-
-emitBc :: ([FFIInfo] -> ProtoBCO Name) -> BcM (ProtoBCO Name)
-emitBc bco
-  = BcM $ \st -> return (st{ffis=[]}, bco (ffis st))
-
-recordFFIBc :: RemotePtr C_ffi_cif -> BcM ()
-recordFFIBc a
-  = BcM $ \st -> return (st{ffis = FFIInfo a : ffis st}, ())
+shouldAddBcoName :: BcM (Maybe Module)
+shouldAddBcoName = do
+  add <- gopt Opt_AddBcoName <$> getDynFlags
+  if add
+    then Just <$> getCurrentModule
+    else return Nothing
 
 getLabelBc :: BcM LocalLabel
 getLabelBc

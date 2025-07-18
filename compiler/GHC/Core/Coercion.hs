@@ -120,8 +120,7 @@ module GHC.Core.Coercion (
 
         multToCo, mkRuntimeRepCo,
 
-        hasCoercionHoleTy, hasCoercionHoleCo, hasThisCoercionHoleTy,
-
+        hasCoercionHole,
         setCoHoleType
        ) where
 
@@ -166,6 +165,7 @@ import Control.Monad (foldM, zipWithM)
 import Data.Function ( on )
 import Data.Char( isDigit )
 import qualified Data.Monoid as Monoid
+import Data.List.NonEmpty ( NonEmpty (..) )
 import Control.DeepSeq
 
 {-
@@ -248,14 +248,14 @@ pprCoAxBranch = ppr_co_ax_branch ppr_rhs
 ppr_co_ax_branch :: (TidyEnv -> Type -> SDoc)
                  -> TyCon -> CoAxBranch -> SDoc
 ppr_co_ax_branch ppr_rhs fam_tc branch
-  = foldr1 (flip hangNotEmpty 2)
-    [ pprUserForAll (mkForAllTyBinders Inferred bndrs')
+  = foldr1 (flip hangNotEmpty 2) $
+    pprUserForAll (mkForAllTyBinders Inferred bndrs') :|
          -- See Note [Printing foralls in type family instances] in GHC.Iface.Type
-    , pp_lhs <+> ppr_rhs tidy_env ee_rhs
-    , vcat [ text "-- Defined" <+> pp_loc
+    (pp_lhs <+> ppr_rhs tidy_env ee_rhs) :
+    ( vcat [ text "-- Defined" <+> pp_loc
            , ppUnless (null incomps) $ whenPprDebug $
-             text "-- Incomps:" <+> vcat (map (pprCoAxBranch fam_tc) incomps) ]
-    ]
+             text "-- Incomps:" <+> vcat (map (pprCoAxBranch fam_tc) incomps) ] ) :
+    []
   where
     incomps = coAxBranchIncomps branch
     loc = coAxBranchSpan branch
@@ -2020,13 +2020,13 @@ liftCoSubstWithEx :: Role          -- desired role for output coercion
                   -> [Type]        -- types and coercions to be bound to ex vars
                   -> (Type -> Coercion, [Type]) -- (lifting function, converted ex args)
 liftCoSubstWithEx role univs omegas exs rhos
-  = let theta = mkLiftingContext (zipEqual "liftCoSubstWithExU" univs omegas)
-        psi   = extendLiftingContextEx theta (zipEqual "liftCoSubstWithExX" exs rhos)
+  = let theta = mkLiftingContext (zipEqual univs omegas)
+        psi   = extendLiftingContextEx theta (zipEqual exs rhos)
     in (ty_co_subst psi role, substTys (lcSubstRight psi) (mkTyCoVarTys exs))
 
 liftCoSubstWith :: Role -> [TyCoVar] -> [Coercion] -> Type -> Coercion
 liftCoSubstWith r tvs cos ty
-  = liftCoSubst r (mkLiftingContext $ zipEqual "liftCoSubstWith" tvs cos) ty
+  = liftCoSubst r (mkLiftingContext $ zipEqual tvs cos) ty
 
 -- | @liftCoSubst role lc ty@ produces a coercion (at role @role@)
 -- that coerces between @lc_left(ty)@ and @lc_right(ty)@, where
@@ -2153,7 +2153,7 @@ ty_co_subst !lc role ty
     go r ty                 | Just ty' <- coreView ty
                             = go r ty'
     go Phantom ty           = lift_phantom ty
-    go r (TyVarTy tv)       = expectJust "ty_co_subst bad roles" $
+    go r (TyVarTy tv)       = expectJust $
                               liftCoSubstTyVar lc r tv
     go r (AppTy ty1 ty2)    = mkAppCo (go r ty1) (go Nominal ty2)
     go r (TyConApp tc tys)  = mkTyConAppCo r tc (zipWith go (tyConRoleListX r tc) tys)
@@ -2780,39 +2780,22 @@ buildCoercion orig_ty1 orig_ty2 = go orig_ty1 orig_ty2
 -}
 
 has_co_hole_ty :: Type -> Monoid.Any
-has_co_hole_co :: Coercion -> Monoid.Any
-(has_co_hole_ty, _, has_co_hole_co, _)
+(has_co_hole_ty, _, _, _)
   = foldTyCo folder ()
   where
     folder = TyCoFolder { tcf_view  = noView
                         , tcf_tyvar = const2 (Monoid.Any False)
                         , tcf_covar = const2 (Monoid.Any False)
-                        , tcf_hole  = \_ hole -> Monoid.Any (isHeteroKindCoHole hole)
+                        , tcf_hole  = \_ _ -> Monoid.Any True
                         , tcf_tycobinder = const2
                         }
 
--- | Is there a hetero-kind coercion hole in this type?
---   (That is, a coercion hole with ch_hetero_kind=True.)
--- See wrinkle (EIK2) of Note [Equalities with incompatible kinds] in GHC.Tc.Solver.Equality
-hasCoercionHoleTy :: Type -> Bool
-hasCoercionHoleTy = Monoid.getAny . has_co_hole_ty
-
--- | Is there a hetero-kind coercion hole in this coercion?
-hasCoercionHoleCo :: Coercion -> Bool
-hasCoercionHoleCo = Monoid.getAny . has_co_hole_co
-
-hasThisCoercionHoleTy :: Type -> CoercionHole -> Bool
-hasThisCoercionHoleTy ty hole = Monoid.getAny (f ty)
-  where
-    (f, _, _, _) = foldTyCo folder ()
-
-    folder = TyCoFolder { tcf_view  = noView
-                        , tcf_tyvar = const2 (Monoid.Any False)
-                        , tcf_covar = const2 (Monoid.Any False)
-                        , tcf_hole  = \ _ h -> Monoid.Any (getUnique h == getUnique hole)
-                        , tcf_tycobinder = const2
-                        }
+-- | Is there a coercion hole in this type?
+-- See wrinkle (DE6) of Note [Defaulting equalities] in GHC.Tc.Solver.Default
+hasCoercionHole :: Type -> Bool
+hasCoercionHole = Monoid.getAny . has_co_hole_ty
 
 -- | Set the type of a 'CoercionHole'
 setCoHoleType :: CoercionHole -> Type -> CoercionHole
 setCoHoleType h t = setCoHoleCoVar h (setVarType (coHoleCoVar h) t)
+

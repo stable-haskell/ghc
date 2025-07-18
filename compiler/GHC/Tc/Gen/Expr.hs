@@ -44,7 +44,7 @@ import GHC.Types.Unique.Map
 import GHC.Types.Unique.Set
 import GHC.Core.Multiplicity
 import GHC.Core.UsageEnv
-import GHC.Tc.Errors.Types
+import GHC.Tc.Errors.Types hiding (HoleError)
 import GHC.Tc.Utils.Concrete ( hasFixedRuntimeRep_syntactic, hasFixedRuntimeRep )
 import GHC.Tc.Utils.Instantiate
 import GHC.Tc.Gen.App
@@ -56,7 +56,7 @@ import GHC.Rename.Env         ( addUsedGRE, getUpdFieldLbls )
 import GHC.Tc.Utils.Env
 import GHC.Tc.Gen.Arrow
 import GHC.Tc.Gen.Match( tcBody, tcLambdaMatches, tcCaseMatches
-                       , tcGRHSList, tcDoStmts )
+                       , tcGRHSNE, tcDoStmts )
 import GHC.Tc.Gen.HsType
 import GHC.Tc.Utils.TcMType
 import GHC.Tc.Zonk.TcType
@@ -298,13 +298,16 @@ tcExpr (XExpr e)                 res_ty = tcXExpr e res_ty
 -- Typecheck an occurrence of an unbound Id
 --
 -- Some of these started life as a true expression hole "_".
--- Others might simply be variables that accidentally have no binding site
-tcExpr (HsUnboundVar _ occ) res_ty
+-- Others might simply be variables that accidentally have no binding site.
+tcExpr (HsHole (HoleVar locc@(L _ occ))) res_ty
   = do { ty <- expTypeToType res_ty    -- Allow Int# etc (#12531)
        ; her <- emitNewExprHole occ ty
        ; tcEmitBindingUsage bottomUE   -- Holes fit any usage environment
                                        -- (#18491)
-       ; return (HsUnboundVar her occ) }
+       ; return (HsHole (HoleVar locc, her))
+       }
+tcExpr (HsHole HoleError) _ =
+  panic "GHC.Tc.Gen.Expr: tcExpr: HoleError: Not implemented"
 
 tcExpr e@(HsLit x lit) res_ty
   = do { let lit_ty = hsLitType lit
@@ -333,7 +336,7 @@ tcExpr e@(HsIPVar _ x) res_ty
        ; ipClass <- tcLookupClass ipClassName
        ; ip_var <- emitWantedEvVar origin (mkClassPred ipClass [ip_name, ip_ty])
        ; tcWrapResult e
-                   (fromDict ipClass ip_name ip_ty (HsVar noExtField (noLocA ip_var)))
+                   (fromDict ipClass ip_name ip_ty (mkHsVar (noLocA ip_var)))
                    ip_ty res_ty }
   where
   -- Coerces a dictionary for `IP "x" t` into `t`.
@@ -493,7 +496,7 @@ tcExpr (HsCase ctxt scrut matches) res_ty
         ; (scrut', scrut_ty) <- tcScalingUsage mult $ tcInferRho scrut
 
         ; hasFixedRuntimeRep_syntactic FRRCase scrut_ty
-        ; matches' <- tcCaseMatches tcBody (Scaled mult scrut_ty) matches res_ty
+        ; matches' <- tcCaseMatches ctxt tcBody (Scaled mult scrut_ty) matches res_ty
         ; return (HsCase ctxt scrut' matches') }
 
 tcExpr (HsIf x pred b1 b2) res_ty
@@ -528,7 +531,7 @@ Not using 'sup' caused #23814.
 -}
 
 tcExpr (HsMultiIf _ alts) res_ty
-  = do { alts' <- tcGRHSList IfAlt tcBody alts res_ty
+  = do { alts' <- tcGRHSNE IfAlt tcBody alts res_ty
                   -- See Note [MultiWayIf linearity checking]
        ; res_ty <- readExpType res_ty
        ; return (HsMultiIf res_ty alts') }
@@ -596,9 +599,9 @@ tcExpr (HsFunArr _ _ _ _) _ = failWith (TcRnIllegalTypeExpr FunctionArrowSyntax)
 ************************************************************************
 -}
 
-tcExpr expr@(RecordCon { rcon_con = L loc con_name
+tcExpr expr@(RecordCon { rcon_con = L loc qcon@(WithUserRdr _ con_name)
                        , rcon_flds = rbinds }) res_ty
-  = do  { con_like <- tcLookupConLike con_name
+  = do  { con_like <- tcLookupConLike qcon
 
         ; (con_expr, con_sigma) <- tcInferConLike con_like
         ; (con_wrap, con_tau)   <- topInstantiate orig con_sigma
@@ -765,6 +768,7 @@ tcXExpr xe@(ExpandedThingRn o e') res_ty
   | OrigStmt ls@(L loc _) <- o
   = setSrcSpanA loc $
        mkExpandedStmtTc ls <$> tcApp (XExpr xe) res_ty
+
 tcXExpr xe res_ty = tcApp (XExpr xe) res_ty
 
 {-
@@ -1579,7 +1583,8 @@ disambiguateRecordBinds record_expr record_rho possible_parents rbnds res_ty
     lookup_parent_flds par@(RnRecUpdParent { rnRecUpdLabels = lbls, rnRecUpdCons = cons })
       = do { let cons' :: NonDetUniqFM ConLike ConLikeName
                  cons' = NonDetUniqFM $ unsafeCastUFMKey $ getUniqSet cons
-           ; cons <- traverse (tcLookupConLike . conLikeName_Name) cons'
+                 lookup_one con = tcLookupConLike (noUserRdr $ getName con)
+           ; cons <- traverse lookup_one cons'
            ; tc   <- tcLookupRecSelParent par
            ; return $
                TcRecUpdParent
@@ -1654,7 +1659,7 @@ tcRecordBinds con_like arg_tys (HsRecFields x rbinds dd)
         ; return (HsRecFields x (catMaybes mb_binds) dd) }
   where
     fields = map flSelector $ conLikeFieldLabels con_like
-    flds_w_tys = zipEqual "tcRecordBinds" fields arg_tys
+    flds_w_tys = zipEqual fields arg_tys
 
     do_bind :: LHsRecField GhcRn (LHsExpr GhcRn)
             -> TcM (Maybe (LHsRecField GhcTc (LHsExpr GhcTc)))

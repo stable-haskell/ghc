@@ -315,6 +315,168 @@
       "TEST_ENV": "aarch64-linux-deb12-validate+llvm"
     }
   },
+  "aarch64-linux-deb12-wine-int_native-cross_aarch64-unknown-mingw32-validate": {
+    "after_script": [
+      ".gitlab/ci.sh save_cache",
+      ".gitlab/ci.sh save_test_output",
+      ".gitlab/ci.sh clean",
+      "cat ci_timings"
+    ],
+    "allow_failure": false,
+    "artifacts": {
+      "expire_in": "2 weeks",
+      "paths": [
+        "ghc-aarch64-linux-deb12-wine-int_native-cross_aarch64-unknown-mingw32-validate.tar.xz",
+        "junit.xml",
+        "unexpected-test-output.tar.gz"
+      ],
+      "reports": {
+        "junit": "junit.xml"
+      },
+      "when": "always"
+    },
+    "cache": {
+      "key": "aarch64-linux-deb12-wine-$CACHE_REV",
+      "paths": [
+        "cabal-cache",
+        "toolchain"
+      ]
+    },
+    "dependencies": [],
+    "image": "registry.gitlab.haskell.org/ghc/ci-images/aarch64-linux-deb12-wine:$DOCKER_REV",
+    "needs": [
+      {
+        "artifacts": false,
+        "job": "hadrian-ghc-in-ghci"
+      }
+    ],
+    "rules": [
+      {
+        "if": "((($ONLY_JOBS) && ($ONLY_JOBS =~ /.*\\baarch64-linux-deb12-wine-int_native-cross_aarch64-unknown-mingw32-validate(\\s|$).*/)) || (($ONLY_JOBS == null) && ((($CI_MERGE_REQUEST_LABELS =~ /.*full-ci.*/) || ($CI_MERGE_REQUEST_LABELS =~ /.*marge_bot_batch_merge_job.*/) || ($CI_COMMIT_BRANCH == \"master\") || ($CI_COMMIT_BRANCH =~ /ghc-[0-9]+\\.[0-9]+/)) || (($CI_MERGE_REQUEST_LABELS =~ /.*aarch64.*/) && ($CI_MERGE_REQUEST_LABELS =~ /.*Windows.*/))))) && ($RELEASE_JOB != \"yes\") && ($NIGHTLY == null)",
+        "when": "on_success"
+      }
+    ],
+    "script": [
+      "sudo chown ghc:ghc -R .",
+      ".gitlab/ci.sh setup",
+      ".gitlab/ci.sh configure",
+      ".gitlab/ci.sh build_hadrian",
+      ".gitlab/ci.sh test_hadrian"
+    ],
+    "stage": "full-build",
+    "tags": [
+      "aarch64-linux"
+    ],
+    "variables": {
+      "AR": "/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-llvm-ar",
+      "BIGNUM_BACKEND": "native",
+      "BIN_DIST_NAME": "ghc-aarch64-linux-deb12-wine-int_native-cross_aarch64-unknown-mingw32-validate",
+      "BUILD_FLAVOUR": "validate",
+      "CC": "/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-clang",
+      "CFLAGS": "-fuse-ld=/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-ld --rtlib=compiler-rt",
+      "CONFIGURE_ARGS": "--with-intree-gmp --enable-strict-ghc-toolchain-check",
+      "CONF_CC_OPTS_STAGE2": "-fuse-ld=/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-ld --rtlib=compiler-rt",
+      "CROSS_EMULATOR": "/opt/wine-arm64ec-msys2-deb12/bin/wine",
+      "CROSS_TARGET": "aarch64-unknown-mingw32",
+      "CXX": "/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-clang++",
+      "HADRIAN_ARGS": "--docs=none",
+      "INSTALL_CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
+      "LD": "/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-ld",
+      "LLVMAS": "/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-clang",
+      "MergeObjsCmd": "",
+      "NM": "/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-nm",
+      "OBJCOPY": "/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-objcopy",
+      "OBJDUMP": "/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-objdump",
+      "RANLIB": "/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-llvm-ranlib",
+      "RUNTEST_ARGS": "",
+      "SIZE": "/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-size",
+      "STRINGS": "/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-strings",
+      "STRIP": "/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-strip",
+      "TEST_ENV": "aarch64-linux-deb12-wine-int_native-cross_aarch64-unknown-mingw32-validate",
+      "WindresCmd": "/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-windres"
+    }
+  },
+  "aarch64-linux-deb12-wine-int_native-cross_aarch64-unknown-mingw32-validate+llvm": {
+    "after_script": [
+      ".gitlab/ci.sh save_cache",
+      ".gitlab/ci.sh save_test_output",
+      ".gitlab/ci.sh clean",
+      "cat ci_timings"
+    ],
+    "allow_failure": false,
+    "artifacts": {
+      "expire_in": "2 weeks",
+      "paths": [
+        "ghc-aarch64-linux-deb12-wine-int_native-cross_aarch64-unknown-mingw32-validate+llvm.tar.xz",
+        "junit.xml",
+        "unexpected-test-output.tar.gz"
+      ],
+      "reports": {
+        "junit": "junit.xml"
+      },
+      "when": "always"
+    },
+    "cache": {
+      "key": "aarch64-linux-deb12-wine-$CACHE_REV",
+      "paths": [
+        "cabal-cache",
+        "toolchain"
+      ]
+    },
+    "dependencies": [],
+    "image": "registry.gitlab.haskell.org/ghc/ci-images/aarch64-linux-deb12-wine:$DOCKER_REV",
+    "needs": [
+      {
+        "artifacts": false,
+        "job": "hadrian-ghc-in-ghci"
+      }
+    ],
+    "rules": [
+      {
+        "if": "((($ONLY_JOBS) && ($ONLY_JOBS =~ /.*\\baarch64-linux-deb12-wine-int_native-cross_aarch64-unknown-mingw32-validate\\+llvm(\\s|$).*/)) || (($ONLY_JOBS == null) && ((($CI_MERGE_REQUEST_LABELS =~ /.*full-ci.*/) || ($CI_MERGE_REQUEST_LABELS =~ /.*marge_bot_batch_merge_job.*/) || ($CI_COMMIT_BRANCH == \"master\") || ($CI_COMMIT_BRANCH =~ /ghc-[0-9]+\\.[0-9]+/)) || (($CI_MERGE_REQUEST_LABELS =~ /.*aarch64.*/) && ($CI_MERGE_REQUEST_LABELS =~ /.*Windows.*/) && ($CI_MERGE_REQUEST_LABELS =~ /.*LLVM backend.*/))))) && ($RELEASE_JOB != \"yes\") && ($NIGHTLY == null)",
+        "when": "on_success"
+      }
+    ],
+    "script": [
+      "sudo chown ghc:ghc -R .",
+      ".gitlab/ci.sh setup",
+      ".gitlab/ci.sh configure",
+      ".gitlab/ci.sh build_hadrian",
+      ".gitlab/ci.sh test_hadrian"
+    ],
+    "stage": "full-build",
+    "tags": [
+      "aarch64-linux"
+    ],
+    "variables": {
+      "AR": "/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-llvm-ar",
+      "BIGNUM_BACKEND": "native",
+      "BIN_DIST_NAME": "ghc-aarch64-linux-deb12-wine-int_native-cross_aarch64-unknown-mingw32-validate+llvm",
+      "BUILD_FLAVOUR": "validate+llvm",
+      "CC": "/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-clang",
+      "CFLAGS": "-fuse-ld=/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-ld --rtlib=compiler-rt",
+      "CONFIGURE_ARGS": "--with-intree-gmp --enable-strict-ghc-toolchain-check",
+      "CONF_CC_OPTS_STAGE2": "-fuse-ld=/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-ld --rtlib=compiler-rt",
+      "CROSS_EMULATOR": "/opt/wine-arm64ec-msys2-deb12/bin/wine",
+      "CROSS_TARGET": "aarch64-unknown-mingw32",
+      "CXX": "/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-clang++",
+      "HADRIAN_ARGS": "--docs=none",
+      "INSTALL_CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
+      "LD": "/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-ld",
+      "LLVMAS": "/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-clang",
+      "MergeObjsCmd": "",
+      "NM": "/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-nm",
+      "OBJCOPY": "/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-objcopy",
+      "OBJDUMP": "/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-objdump",
+      "RANLIB": "/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-llvm-ranlib",
+      "RUNTEST_ARGS": "",
+      "SIZE": "/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-size",
+      "STRINGS": "/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-strings",
+      "STRIP": "/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-strip",
+      "TEST_ENV": "aarch64-linux-deb12-wine-int_native-cross_aarch64-unknown-mingw32-validate+llvm",
+      "WindresCmd": "/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-windres"
+    }
+  },
   "i386-linux-alpine3_20-validate": {
     "after_script": [
       ".gitlab/ci.sh save_cache",
@@ -819,6 +981,170 @@
       "INSTALL_CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
       "RUNTEST_ARGS": "",
       "TEST_ENV": "aarch64-linux-deb12-validate+llvm",
+      "XZ_OPT": "-9"
+    }
+  },
+  "nightly-aarch64-linux-deb12-wine-int_native-cross_aarch64-unknown-mingw32-validate": {
+    "after_script": [
+      ".gitlab/ci.sh save_cache",
+      ".gitlab/ci.sh save_test_output",
+      ".gitlab/ci.sh clean",
+      "cat ci_timings"
+    ],
+    "allow_failure": false,
+    "artifacts": {
+      "expire_in": "8 weeks",
+      "paths": [
+        "ghc-aarch64-linux-deb12-wine-int_native-cross_aarch64-unknown-mingw32-validate.tar.xz",
+        "junit.xml",
+        "unexpected-test-output.tar.gz"
+      ],
+      "reports": {
+        "junit": "junit.xml"
+      },
+      "when": "always"
+    },
+    "cache": {
+      "key": "aarch64-linux-deb12-wine-$CACHE_REV",
+      "paths": [
+        "cabal-cache",
+        "toolchain"
+      ]
+    },
+    "dependencies": [],
+    "image": "registry.gitlab.haskell.org/ghc/ci-images/aarch64-linux-deb12-wine:$DOCKER_REV",
+    "needs": [
+      {
+        "artifacts": false,
+        "job": "hadrian-ghc-in-ghci"
+      }
+    ],
+    "rules": [
+      {
+        "if": "(\"true\" == \"true\") && ($RELEASE_JOB != \"yes\") && ($NIGHTLY)",
+        "when": "on_success"
+      }
+    ],
+    "script": [
+      "sudo chown ghc:ghc -R .",
+      ".gitlab/ci.sh setup",
+      ".gitlab/ci.sh configure",
+      ".gitlab/ci.sh build_hadrian",
+      ".gitlab/ci.sh test_hadrian"
+    ],
+    "stage": "full-build",
+    "tags": [
+      "aarch64-linux"
+    ],
+    "variables": {
+      "AR": "/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-llvm-ar",
+      "BIGNUM_BACKEND": "native",
+      "BIN_DIST_NAME": "ghc-aarch64-linux-deb12-wine-int_native-cross_aarch64-unknown-mingw32-validate",
+      "BUILD_FLAVOUR": "validate",
+      "CC": "/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-clang",
+      "CFLAGS": "-fuse-ld=/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-ld --rtlib=compiler-rt",
+      "CONFIGURE_ARGS": "--with-intree-gmp --enable-strict-ghc-toolchain-check",
+      "CONF_CC_OPTS_STAGE2": "-fuse-ld=/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-ld --rtlib=compiler-rt",
+      "CROSS_EMULATOR": "/opt/wine-arm64ec-msys2-deb12/bin/wine",
+      "CROSS_TARGET": "aarch64-unknown-mingw32",
+      "CXX": "/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-clang++",
+      "HADRIAN_ARGS": "--docs=none",
+      "INSTALL_CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
+      "LD": "/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-ld",
+      "LLVMAS": "/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-clang",
+      "MergeObjsCmd": "",
+      "NM": "/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-nm",
+      "OBJCOPY": "/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-objcopy",
+      "OBJDUMP": "/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-objdump",
+      "RANLIB": "/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-llvm-ranlib",
+      "RUNTEST_ARGS": "",
+      "SIZE": "/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-size",
+      "STRINGS": "/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-strings",
+      "STRIP": "/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-strip",
+      "TEST_ENV": "aarch64-linux-deb12-wine-int_native-cross_aarch64-unknown-mingw32-validate",
+      "WindresCmd": "/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-windres",
+      "XZ_OPT": "-9"
+    }
+  },
+  "nightly-aarch64-linux-deb12-wine-int_native-cross_aarch64-unknown-mingw32-validate+llvm": {
+    "after_script": [
+      ".gitlab/ci.sh save_cache",
+      ".gitlab/ci.sh save_test_output",
+      ".gitlab/ci.sh clean",
+      "cat ci_timings"
+    ],
+    "allow_failure": false,
+    "artifacts": {
+      "expire_in": "8 weeks",
+      "paths": [
+        "ghc-aarch64-linux-deb12-wine-int_native-cross_aarch64-unknown-mingw32-validate+llvm.tar.xz",
+        "junit.xml",
+        "unexpected-test-output.tar.gz"
+      ],
+      "reports": {
+        "junit": "junit.xml"
+      },
+      "when": "always"
+    },
+    "cache": {
+      "key": "aarch64-linux-deb12-wine-$CACHE_REV",
+      "paths": [
+        "cabal-cache",
+        "toolchain"
+      ]
+    },
+    "dependencies": [],
+    "image": "registry.gitlab.haskell.org/ghc/ci-images/aarch64-linux-deb12-wine:$DOCKER_REV",
+    "needs": [
+      {
+        "artifacts": false,
+        "job": "hadrian-ghc-in-ghci"
+      }
+    ],
+    "rules": [
+      {
+        "if": "(\"true\" == \"true\") && ($RELEASE_JOB != \"yes\") && ($NIGHTLY)",
+        "when": "on_success"
+      }
+    ],
+    "script": [
+      "sudo chown ghc:ghc -R .",
+      ".gitlab/ci.sh setup",
+      ".gitlab/ci.sh configure",
+      ".gitlab/ci.sh build_hadrian",
+      ".gitlab/ci.sh test_hadrian"
+    ],
+    "stage": "full-build",
+    "tags": [
+      "aarch64-linux"
+    ],
+    "variables": {
+      "AR": "/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-llvm-ar",
+      "BIGNUM_BACKEND": "native",
+      "BIN_DIST_NAME": "ghc-aarch64-linux-deb12-wine-int_native-cross_aarch64-unknown-mingw32-validate+llvm",
+      "BUILD_FLAVOUR": "validate+llvm",
+      "CC": "/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-clang",
+      "CFLAGS": "-fuse-ld=/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-ld --rtlib=compiler-rt",
+      "CONFIGURE_ARGS": "--with-intree-gmp --enable-strict-ghc-toolchain-check",
+      "CONF_CC_OPTS_STAGE2": "-fuse-ld=/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-ld --rtlib=compiler-rt",
+      "CROSS_EMULATOR": "/opt/wine-arm64ec-msys2-deb12/bin/wine",
+      "CROSS_TARGET": "aarch64-unknown-mingw32",
+      "CXX": "/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-clang++",
+      "HADRIAN_ARGS": "--docs=none",
+      "INSTALL_CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
+      "LD": "/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-ld",
+      "LLVMAS": "/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-clang",
+      "MergeObjsCmd": "",
+      "NM": "/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-nm",
+      "OBJCOPY": "/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-objcopy",
+      "OBJDUMP": "/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-objdump",
+      "RANLIB": "/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-llvm-ranlib",
+      "RUNTEST_ARGS": "",
+      "SIZE": "/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-size",
+      "STRINGS": "/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-strings",
+      "STRIP": "/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-strip",
+      "TEST_ENV": "aarch64-linux-deb12-wine-int_native-cross_aarch64-unknown-mingw32-validate+llvm",
+      "WindresCmd": "/opt/llvm-mingw-linux/bin/aarch64-w64-mingw32-windres",
       "XZ_OPT": "-9"
     }
   },
@@ -1462,7 +1788,8 @@
       "BUILD_FLAVOUR": "release+host_fully_static+text_simdutf",
       "CONFIGURE_ARGS": "--with-intree-gmp --with-system-libffi --enable-strict-ghc-toolchain-check",
       "CROSS_TARGET": "wasm32-wasi",
-      "HADRIAN_ARGS": "--docs=none",
+      "FIREFOX_LAUNCH_OPTS": "{\"browser\":\"firefox\",\"executablePath\":\"/usr/bin/firefox\"}",
+      "HADRIAN_ARGS": "--docs=no-sphinx-pdfs --docs=no-sphinx-man",
       "RUNTEST_ARGS": "",
       "TEST_ENV": "x86_64-linux-alpine3_20-wasm-cross_wasm32-wasi-release+host_fully_static+text_simdutf",
       "XZ_OPT": "-9"
@@ -1526,7 +1853,8 @@
       "BUILD_FLAVOUR": "release+host_fully_static+text_simdutf",
       "CONFIGURE_ARGS": "--with-intree-gmp --with-system-libffi --enable-strict-ghc-toolchain-check",
       "CROSS_TARGET": "wasm32-wasi",
-      "HADRIAN_ARGS": "--docs=none",
+      "FIREFOX_LAUNCH_OPTS": "{\"browser\":\"firefox\",\"executablePath\":\"/usr/bin/firefox\"}",
+      "HADRIAN_ARGS": "--docs=no-sphinx-pdfs --docs=no-sphinx-man",
       "RUNTEST_ARGS": "",
       "TEST_ENV": "x86_64-linux-alpine3_20-wasm-int_native-cross_wasm32-wasi-release+host_fully_static+text_simdutf",
       "XZ_OPT": "-9"
@@ -1590,74 +1918,10 @@
       "BUILD_FLAVOUR": "release+host_fully_static+text_simdutf",
       "CONFIGURE_ARGS": "--enable-unregisterised --with-intree-gmp --with-system-libffi --enable-strict-ghc-toolchain-check",
       "CROSS_TARGET": "wasm32-wasi",
-      "HADRIAN_ARGS": "--docs=none",
+      "FIREFOX_LAUNCH_OPTS": "{\"browser\":\"firefox\",\"executablePath\":\"/usr/bin/firefox\"}",
+      "HADRIAN_ARGS": "--docs=no-sphinx-pdfs --docs=no-sphinx-man",
       "RUNTEST_ARGS": "",
       "TEST_ENV": "x86_64-linux-alpine3_20-wasm-unreg-cross_wasm32-wasi-release+host_fully_static+text_simdutf",
-      "XZ_OPT": "-9"
-    }
-  },
-  "nightly-x86_64-linux-centos7-validate": {
-    "after_script": [
-      ".gitlab/ci.sh save_cache",
-      ".gitlab/ci.sh save_test_output",
-      ".gitlab/ci.sh clean",
-      "cat ci_timings"
-    ],
-    "allow_failure": false,
-    "artifacts": {
-      "expire_in": "8 weeks",
-      "paths": [
-        "ghc-x86_64-linux-centos7-validate.tar.xz",
-        "junit.xml",
-        "unexpected-test-output.tar.gz"
-      ],
-      "reports": {
-        "junit": "junit.xml"
-      },
-      "when": "always"
-    },
-    "cache": {
-      "key": "x86_64-linux-centos7-$CACHE_REV",
-      "paths": [
-        "cabal-cache",
-        "toolchain"
-      ]
-    },
-    "dependencies": [],
-    "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-centos7:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
-    "rules": [
-      {
-        "if": "(\"true\" == \"true\") && ($RELEASE_JOB != \"yes\") && ($NIGHTLY)",
-        "when": "on_success"
-      }
-    ],
-    "script": [
-      "sudo chown ghc:ghc -R .",
-      ".gitlab/ci.sh setup",
-      ".gitlab/ci.sh configure",
-      ".gitlab/ci.sh build_hadrian",
-      ".gitlab/ci.sh test_hadrian"
-    ],
-    "stage": "full-build",
-    "tags": [
-      "x86_64-linux"
-    ],
-    "variables": {
-      "BIGNUM_BACKEND": "gmp",
-      "BIN_DIST_NAME": "ghc-x86_64-linux-centos7-validate",
-      "BROKEN_TESTS": "T22012",
-      "BUILD_FLAVOUR": "validate",
-      "CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
-      "HADRIAN_ARGS": "--docs=no-sphinx",
-      "INSTALL_CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
-      "RUNTEST_ARGS": "",
-      "TEST_ENV": "x86_64-linux-centos7-validate",
       "XZ_OPT": "-9"
     }
   },
@@ -3253,6 +3517,134 @@
       "XZ_OPT": "-9"
     }
   },
+  "nightly-x86_64-linux-ubuntu24_04-loongarch-cross_loongarch64-linux-gnu-validate": {
+    "after_script": [
+      ".gitlab/ci.sh save_cache",
+      ".gitlab/ci.sh save_test_output",
+      ".gitlab/ci.sh clean",
+      "cat ci_timings"
+    ],
+    "allow_failure": false,
+    "artifacts": {
+      "expire_in": "8 weeks",
+      "paths": [
+        "ghc-x86_64-linux-ubuntu24_04-loongarch-cross_loongarch64-linux-gnu-validate.tar.xz",
+        "junit.xml",
+        "unexpected-test-output.tar.gz"
+      ],
+      "reports": {
+        "junit": "junit.xml"
+      },
+      "when": "always"
+    },
+    "cache": {
+      "key": "x86_64-linux-ubuntu24_04-loongarch-$CACHE_REV",
+      "paths": [
+        "cabal-cache",
+        "toolchain"
+      ]
+    },
+    "dependencies": [],
+    "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-ubuntu24_04-loongarch:$DOCKER_REV",
+    "needs": [
+      {
+        "artifacts": false,
+        "job": "hadrian-ghc-in-ghci"
+      }
+    ],
+    "rules": [
+      {
+        "if": "(\"true\" == \"true\") && ($RELEASE_JOB != \"yes\") && ($NIGHTLY)",
+        "when": "on_success"
+      }
+    ],
+    "script": [
+      "sudo chown ghc:ghc -R .",
+      ".gitlab/ci.sh setup",
+      ".gitlab/ci.sh configure",
+      ".gitlab/ci.sh build_hadrian",
+      ".gitlab/ci.sh test_hadrian"
+    ],
+    "stage": "full-build",
+    "tags": [
+      "x86_64-linux"
+    ],
+    "variables": {
+      "BIGNUM_BACKEND": "gmp",
+      "BIN_DIST_NAME": "ghc-x86_64-linux-ubuntu24_04-loongarch-cross_loongarch64-linux-gnu-validate",
+      "BUILD_FLAVOUR": "validate",
+      "CONFIGURE_ARGS": "--with-intree-gmp --enable-strict-ghc-toolchain-check",
+      "CROSS_EMULATOR": "qemu-loongarch64 -L /usr/loongarch64-linux-gnu",
+      "CROSS_TARGET": "loongarch64-linux-gnu",
+      "INSTALL_CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
+      "RUNTEST_ARGS": "",
+      "TEST_ENV": "x86_64-linux-ubuntu24_04-loongarch-cross_loongarch64-linux-gnu-validate",
+      "XZ_OPT": "-9"
+    }
+  },
+  "nightly-x86_64-linux-ubuntu24_04-validate": {
+    "after_script": [
+      ".gitlab/ci.sh save_cache",
+      ".gitlab/ci.sh save_test_output",
+      ".gitlab/ci.sh clean",
+      "cat ci_timings"
+    ],
+    "allow_failure": false,
+    "artifacts": {
+      "expire_in": "8 weeks",
+      "paths": [
+        "ghc-x86_64-linux-ubuntu24_04-validate.tar.xz",
+        "junit.xml",
+        "unexpected-test-output.tar.gz"
+      ],
+      "reports": {
+        "junit": "junit.xml"
+      },
+      "when": "always"
+    },
+    "cache": {
+      "key": "x86_64-linux-ubuntu24_04-$CACHE_REV",
+      "paths": [
+        "cabal-cache",
+        "toolchain"
+      ]
+    },
+    "dependencies": [],
+    "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-ubuntu24_04:$DOCKER_REV",
+    "needs": [
+      {
+        "artifacts": false,
+        "job": "hadrian-ghc-in-ghci"
+      }
+    ],
+    "rules": [
+      {
+        "if": "(\"true\" == \"true\") && ($RELEASE_JOB != \"yes\") && ($NIGHTLY)",
+        "when": "on_success"
+      }
+    ],
+    "script": [
+      "sudo chown ghc:ghc -R .",
+      ".gitlab/ci.sh setup",
+      ".gitlab/ci.sh configure",
+      ".gitlab/ci.sh build_hadrian",
+      ".gitlab/ci.sh test_hadrian"
+    ],
+    "stage": "full-build",
+    "tags": [
+      "x86_64-linux"
+    ],
+    "variables": {
+      "BIGNUM_BACKEND": "gmp",
+      "BIN_DIST_NAME": "ghc-x86_64-linux-ubuntu24_04-validate",
+      "BUILD_FLAVOUR": "validate",
+      "CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
+      "INSTALL_CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
+      "RUNTEST_ARGS": "",
+      "TEST_ENV": "x86_64-linux-ubuntu24_04-validate",
+      "XZ_OPT": "-9"
+    }
+  },
   "nightly-x86_64-windows-int_native-validate": {
     "after_script": [
       "bash .gitlab/ci.sh save_cache",
@@ -3436,7 +3828,7 @@
       "BIN_DIST_NAME": "ghc-aarch64-darwin-release",
       "BUILD_FLAVOUR": "release",
       "CONFIGURE_ARGS": "--with-intree-gmp --with-system-libffi --enable-strict-ghc-toolchain-check",
-      "HADRIAN_ARGS": "--hash-unit-ids --docs=no-sphinx-pdfs",
+      "HADRIAN_ARGS": "--docs=no-sphinx-pdfs",
       "IGNORE_PERF_FAILURES": "all",
       "INSTALL_CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
       "LANG": "en_US.UTF-8",
@@ -3505,7 +3897,6 @@
       "BROKEN_TESTS": "encoding004 T10458",
       "BUILD_FLAVOUR": "release+no_split_sections",
       "CONFIGURE_ARGS": "--disable-ld-override --enable-ignore-build-platform-mismatch --build=aarch64-unknown-linux --host=aarch64-unknown-linux --target=aarch64-unknown-linux --enable-strict-ghc-toolchain-check",
-      "HADRIAN_ARGS": "--hash-unit-ids",
       "IGNORE_PERF_FAILURES": "all",
       "INSTALL_CONFIGURE_ARGS": "--disable-ld-override --enable-strict-ghc-toolchain-check",
       "RUNTEST_ARGS": "",
@@ -3570,7 +3961,6 @@
       "BIN_DIST_NAME": "ghc-aarch64-linux-deb10-release+no_split_sections",
       "BUILD_FLAVOUR": "release+no_split_sections",
       "CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
-      "HADRIAN_ARGS": "--hash-unit-ids",
       "IGNORE_PERF_FAILURES": "all",
       "INSTALL_CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
       "RUNTEST_ARGS": "",
@@ -3635,7 +4025,6 @@
       "BIN_DIST_NAME": "ghc-aarch64-linux-deb12-release+no_split_sections",
       "BUILD_FLAVOUR": "release+no_split_sections",
       "CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
-      "HADRIAN_ARGS": "--hash-unit-ids",
       "IGNORE_PERF_FAILURES": "all",
       "INSTALL_CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
       "RUNTEST_ARGS": "",
@@ -3701,7 +4090,6 @@
       "BROKEN_TESTS": "encoding004 T10458 simd009 T25062_V16 T25169 T22187_run T22033",
       "BUILD_FLAVOUR": "release+no_split_sections",
       "CONFIGURE_ARGS": "--disable-ld-override --enable-strict-ghc-toolchain-check",
-      "HADRIAN_ARGS": "--hash-unit-ids",
       "IGNORE_PERF_FAILURES": "all",
       "INSTALL_CONFIGURE_ARGS": "--disable-ld-override --enable-strict-ghc-toolchain-check",
       "RUNTEST_ARGS": "",
@@ -3766,7 +4154,6 @@
       "BIN_DIST_NAME": "ghc-i386-linux-deb10-release+no_split_sections",
       "BUILD_FLAVOUR": "release+no_split_sections",
       "CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
-      "HADRIAN_ARGS": "--hash-unit-ids",
       "IGNORE_PERF_FAILURES": "all",
       "INSTALL_CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
       "RUNTEST_ARGS": "",
@@ -3831,7 +4218,6 @@
       "BIN_DIST_NAME": "ghc-i386-linux-deb12-release+no_split_sections",
       "BUILD_FLAVOUR": "release+no_split_sections",
       "CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
-      "HADRIAN_ARGS": "--hash-unit-ids",
       "IGNORE_PERF_FAILURES": "all",
       "INSTALL_CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
       "RUNTEST_ARGS": "",
@@ -3896,7 +4282,7 @@
       "BIN_DIST_NAME": "ghc-x86_64-darwin-release",
       "BUILD_FLAVOUR": "release",
       "CONFIGURE_ARGS": "--with-intree-gmp --with-system-libffi --enable-strict-ghc-toolchain-check",
-      "HADRIAN_ARGS": "--hash-unit-ids --docs=no-sphinx-pdfs",
+      "HADRIAN_ARGS": "--docs=no-sphinx-pdfs",
       "IGNORE_PERF_FAILURES": "all",
       "INSTALL_CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
       "LANG": "en_US.UTF-8",
@@ -3970,7 +4356,6 @@
       "CONFIGURE_ARGS": "--with-iconv-includes=/usr/local/include --with-iconv-libraries=/usr/local/lib --with-system-libffi --with-ffi-includes=/usr/local/include --with-ffi-libraries=/usr/local/lib --with-gmp-includes=/usr/local/include --with-gmp-libraries=/usr/local/lib --enable-strict-ghc-toolchain-check",
       "CXX": "c++",
       "GHC_VERSION": "9.6.4",
-      "HADRIAN_ARGS": "--hash-unit-ids",
       "IGNORE_PERF_FAILURES": "all",
       "INSTALL_CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
       "RUNTEST_ARGS": "",
@@ -4036,7 +4421,6 @@
       "BROKEN_TESTS": "ghcilink002 linker_unload_native encoding004 T10458",
       "BUILD_FLAVOUR": "release+fully_static",
       "CONFIGURE_ARGS": "--disable-ld-override --enable-strict-ghc-toolchain-check",
-      "HADRIAN_ARGS": "--hash-unit-ids",
       "IGNORE_PERF_FAILURES": "all",
       "INSTALL_CONFIGURE_ARGS": "--disable-ld-override --enable-strict-ghc-toolchain-check",
       "RUNTEST_ARGS": "",
@@ -4102,7 +4486,6 @@
       "BROKEN_TESTS": "ghcilink002 linker_unload_native encoding004 T10458",
       "BUILD_FLAVOUR": "release+fully_static+no_split_sections",
       "CONFIGURE_ARGS": "--disable-ld-override --enable-strict-ghc-toolchain-check",
-      "HADRIAN_ARGS": "--hash-unit-ids",
       "IGNORE_PERF_FAILURES": "all",
       "INSTALL_CONFIGURE_ARGS": "--disable-ld-override --enable-strict-ghc-toolchain-check",
       "RUNTEST_ARGS": "",
@@ -4168,7 +4551,6 @@
       "BROKEN_TESTS": "encoding004 T10458",
       "BUILD_FLAVOUR": "release+no_split_sections",
       "CONFIGURE_ARGS": "--disable-ld-override --enable-strict-ghc-toolchain-check",
-      "HADRIAN_ARGS": "--hash-unit-ids",
       "IGNORE_PERF_FAILURES": "all",
       "INSTALL_CONFIGURE_ARGS": "--disable-ld-override --enable-strict-ghc-toolchain-check",
       "RUNTEST_ARGS": "",
@@ -4234,77 +4616,10 @@
       "BROKEN_TESTS": "encoding004 T10458",
       "BUILD_FLAVOUR": "release+no_split_sections",
       "CONFIGURE_ARGS": "--disable-ld-override --enable-strict-ghc-toolchain-check",
-      "HADRIAN_ARGS": "--hash-unit-ids",
       "IGNORE_PERF_FAILURES": "all",
       "INSTALL_CONFIGURE_ARGS": "--disable-ld-override --enable-strict-ghc-toolchain-check",
       "RUNTEST_ARGS": "",
       "TEST_ENV": "x86_64-linux-alpine3_20-release+no_split_sections",
-      "XZ_OPT": "-9"
-    }
-  },
-  "release-x86_64-linux-centos7-release+no_split_sections": {
-    "after_script": [
-      ".gitlab/ci.sh save_cache",
-      ".gitlab/ci.sh save_test_output",
-      ".gitlab/ci.sh clean",
-      "cat ci_timings"
-    ],
-    "allow_failure": false,
-    "artifacts": {
-      "expire_in": "1 year",
-      "paths": [
-        "ghc-x86_64-linux-centos7-release+no_split_sections.tar.xz",
-        "junit.xml",
-        "unexpected-test-output.tar.gz"
-      ],
-      "reports": {
-        "junit": "junit.xml"
-      },
-      "when": "always"
-    },
-    "cache": {
-      "key": "x86_64-linux-centos7-$CACHE_REV",
-      "paths": [
-        "cabal-cache",
-        "toolchain"
-      ]
-    },
-    "dependencies": [],
-    "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-centos7:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
-    "rules": [
-      {
-        "if": "(\"true\" == \"true\") && ($RELEASE_JOB == \"yes\") && ($NIGHTLY == null)",
-        "when": "on_success"
-      }
-    ],
-    "script": [
-      "sudo chown ghc:ghc -R .",
-      ".gitlab/ci.sh setup",
-      ".gitlab/ci.sh configure",
-      ".gitlab/ci.sh build_hadrian",
-      ".gitlab/ci.sh test_hadrian"
-    ],
-    "stage": "full-build",
-    "tags": [
-      "x86_64-linux"
-    ],
-    "variables": {
-      "BIGNUM_BACKEND": "gmp",
-      "BIN_DIST_NAME": "ghc-x86_64-linux-centos7-release+no_split_sections",
-      "BROKEN_TESTS": "T22012",
-      "BUILD_FLAVOUR": "release+no_split_sections",
-      "CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
-      "HADRIAN_ARGS": "--hash-unit-ids --docs=no-sphinx",
-      "IGNORE_PERF_FAILURES": "all",
-      "INSTALL_CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
-      "RUNTEST_ARGS": "",
-      "TEST_ENV": "x86_64-linux-centos7-release+no_split_sections",
       "XZ_OPT": "-9"
     }
   },
@@ -4365,7 +4680,6 @@
       "BIN_DIST_NAME": "ghc-x86_64-linux-deb10-release",
       "BUILD_FLAVOUR": "release",
       "CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
-      "HADRIAN_ARGS": "--hash-unit-ids",
       "IGNORE_PERF_FAILURES": "all",
       "INSTALL_CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
       "RUNTEST_ARGS": "",
@@ -4430,7 +4744,6 @@
       "BIN_DIST_NAME": "ghc-x86_64-linux-deb10-release+debug_info",
       "BUILD_FLAVOUR": "release+debug_info",
       "CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
-      "HADRIAN_ARGS": "--hash-unit-ids",
       "IGNORE_PERF_FAILURES": "all",
       "INSTALL_CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
       "RUNTEST_ARGS": "",
@@ -4495,7 +4808,6 @@
       "BIN_DIST_NAME": "ghc-x86_64-linux-deb11-release",
       "BUILD_FLAVOUR": "release",
       "CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
-      "HADRIAN_ARGS": "--hash-unit-ids",
       "IGNORE_PERF_FAILURES": "all",
       "INSTALL_CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
       "RUNTEST_ARGS": "",
@@ -4560,7 +4872,6 @@
       "BIN_DIST_NAME": "ghc-x86_64-linux-deb12-release",
       "BUILD_FLAVOUR": "release",
       "CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
-      "HADRIAN_ARGS": "--hash-unit-ids",
       "IGNORE_PERF_FAILURES": "all",
       "INSTALL_CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
       "RUNTEST_ARGS": "",
@@ -4625,7 +4936,6 @@
       "BIN_DIST_NAME": "ghc-x86_64-linux-deb9-release+no_split_sections",
       "BUILD_FLAVOUR": "release+no_split_sections",
       "CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
-      "HADRIAN_ARGS": "--hash-unit-ids",
       "IGNORE_PERF_FAILURES": "all",
       "INSTALL_CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
       "RUNTEST_ARGS": "",
@@ -4690,7 +5000,6 @@
       "BIN_DIST_NAME": "ghc-x86_64-linux-fedora33-release",
       "BUILD_FLAVOUR": "release",
       "CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
-      "HADRIAN_ARGS": "--hash-unit-ids",
       "IGNORE_PERF_FAILURES": "all",
       "INSTALL_CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
       "LLC": "/bin/false",
@@ -4757,7 +5066,6 @@
       "BIN_DIST_NAME": "ghc-x86_64-linux-fedora33-release+debug_info",
       "BUILD_FLAVOUR": "release+debug_info",
       "CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
-      "HADRIAN_ARGS": "--hash-unit-ids",
       "IGNORE_PERF_FAILURES": "all",
       "INSTALL_CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
       "LLC": "/bin/false",
@@ -4824,7 +5132,7 @@
       "BIN_DIST_NAME": "ghc-x86_64-linux-fedora33-release",
       "BUILD_FLAVOUR": "release",
       "CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
-      "HADRIAN_ARGS": "--haddock-for-hackage --hash-unit-ids",
+      "HADRIAN_ARGS": "--haddock-for-hackage",
       "IGNORE_PERF_FAILURES": "all",
       "INSTALL_CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
       "LLC": "/bin/false",
@@ -4891,7 +5199,6 @@
       "BIN_DIST_NAME": "ghc-x86_64-linux-fedora38-release",
       "BUILD_FLAVOUR": "release",
       "CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
-      "HADRIAN_ARGS": "--hash-unit-ids",
       "IGNORE_PERF_FAILURES": "all",
       "INSTALL_CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
       "RUNTEST_ARGS": "",
@@ -4956,7 +5263,6 @@
       "BIN_DIST_NAME": "ghc-x86_64-linux-rocky8-release",
       "BUILD_FLAVOUR": "release",
       "CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
-      "HADRIAN_ARGS": "--hash-unit-ids",
       "IGNORE_PERF_FAILURES": "all",
       "INSTALL_CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
       "RUNTEST_ARGS": "",
@@ -5021,7 +5327,6 @@
       "BIN_DIST_NAME": "ghc-x86_64-linux-ubuntu18_04-release",
       "BUILD_FLAVOUR": "release",
       "CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
-      "HADRIAN_ARGS": "--hash-unit-ids",
       "IGNORE_PERF_FAILURES": "all",
       "INSTALL_CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
       "RUNTEST_ARGS": "",
@@ -5086,7 +5391,6 @@
       "BIN_DIST_NAME": "ghc-x86_64-linux-ubuntu20_04-release",
       "BUILD_FLAVOUR": "release",
       "CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
-      "HADRIAN_ARGS": "--hash-unit-ids",
       "IGNORE_PERF_FAILURES": "all",
       "INSTALL_CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
       "RUNTEST_ARGS": "",
@@ -5151,11 +5455,74 @@
       "BIN_DIST_NAME": "ghc-x86_64-linux-ubuntu22_04-release",
       "BUILD_FLAVOUR": "release",
       "CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
-      "HADRIAN_ARGS": "--hash-unit-ids",
       "IGNORE_PERF_FAILURES": "all",
       "INSTALL_CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
       "RUNTEST_ARGS": "",
       "TEST_ENV": "x86_64-linux-ubuntu22_04-release",
+      "XZ_OPT": "-9"
+    }
+  },
+  "release-x86_64-linux-ubuntu24_04-release": {
+    "after_script": [
+      ".gitlab/ci.sh save_cache",
+      ".gitlab/ci.sh save_test_output",
+      ".gitlab/ci.sh clean",
+      "cat ci_timings"
+    ],
+    "allow_failure": false,
+    "artifacts": {
+      "expire_in": "1 year",
+      "paths": [
+        "ghc-x86_64-linux-ubuntu24_04-release.tar.xz",
+        "junit.xml",
+        "unexpected-test-output.tar.gz"
+      ],
+      "reports": {
+        "junit": "junit.xml"
+      },
+      "when": "always"
+    },
+    "cache": {
+      "key": "x86_64-linux-ubuntu24_04-$CACHE_REV",
+      "paths": [
+        "cabal-cache",
+        "toolchain"
+      ]
+    },
+    "dependencies": [],
+    "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-ubuntu24_04:$DOCKER_REV",
+    "needs": [
+      {
+        "artifacts": false,
+        "job": "hadrian-ghc-in-ghci"
+      }
+    ],
+    "rules": [
+      {
+        "if": "(\"true\" == \"true\") && ($RELEASE_JOB == \"yes\") && ($NIGHTLY == null)",
+        "when": "on_success"
+      }
+    ],
+    "script": [
+      "sudo chown ghc:ghc -R .",
+      ".gitlab/ci.sh setup",
+      ".gitlab/ci.sh configure",
+      ".gitlab/ci.sh build_hadrian",
+      ".gitlab/ci.sh test_hadrian"
+    ],
+    "stage": "full-build",
+    "tags": [
+      "x86_64-linux"
+    ],
+    "variables": {
+      "BIGNUM_BACKEND": "gmp",
+      "BIN_DIST_NAME": "ghc-x86_64-linux-ubuntu24_04-release",
+      "BUILD_FLAVOUR": "release",
+      "CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
+      "IGNORE_PERF_FAILURES": "all",
+      "INSTALL_CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
+      "RUNTEST_ARGS": "",
+      "TEST_ENV": "x86_64-linux-ubuntu24_04-release",
       "XZ_OPT": "-9"
     }
   },
@@ -5213,7 +5580,7 @@
       "CABAL_INSTALL_VERSION": "3.10.2.0",
       "CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
       "GHC_VERSION": "9.6.4",
-      "HADRIAN_ARGS": "--hash-unit-ids --docs=no-sphinx-pdfs",
+      "HADRIAN_ARGS": "--docs=no-sphinx-pdfs",
       "IGNORE_PERF_FAILURES": "all",
       "INSTALL_CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
       "LANG": "en_US.UTF-8",
@@ -5277,7 +5644,7 @@
       "CABAL_INSTALL_VERSION": "3.10.2.0",
       "CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
       "GHC_VERSION": "9.6.4",
-      "HADRIAN_ARGS": "--hash-unit-ids --docs=no-sphinx-pdfs",
+      "HADRIAN_ARGS": "--docs=no-sphinx-pdfs",
       "IGNORE_PERF_FAILURES": "all",
       "INSTALL_CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
       "LANG": "en_US.UTF-8",
@@ -5731,7 +6098,8 @@
       "BUILD_FLAVOUR": "release+host_fully_static+text_simdutf",
       "CONFIGURE_ARGS": "--with-intree-gmp --with-system-libffi --enable-strict-ghc-toolchain-check",
       "CROSS_TARGET": "wasm32-wasi",
-      "HADRIAN_ARGS": "--docs=none",
+      "FIREFOX_LAUNCH_OPTS": "{\"browser\":\"firefox\",\"executablePath\":\"/usr/bin/firefox\"}",
+      "HADRIAN_ARGS": "--docs=no-sphinx-pdfs --docs=no-sphinx-man",
       "RUNTEST_ARGS": "",
       "TEST_ENV": "x86_64-linux-alpine3_20-wasm-cross_wasm32-wasi-release+host_fully_static+text_simdutf"
     }
@@ -5795,7 +6163,8 @@
       "BUILD_FLAVOUR": "release+host_fully_static+text_simdutf",
       "CONFIGURE_ARGS": "--with-intree-gmp --with-system-libffi --enable-strict-ghc-toolchain-check",
       "CROSS_TARGET": "wasm32-wasi",
-      "HADRIAN_ARGS": "--docs=none",
+      "FIREFOX_LAUNCH_OPTS": "{\"browser\":\"firefox\",\"executablePath\":\"/usr/bin/firefox\"}",
+      "HADRIAN_ARGS": "--docs=no-sphinx-pdfs --docs=no-sphinx-man",
       "RUNTEST_ARGS": "",
       "TEST_ENV": "x86_64-linux-alpine3_20-wasm-int_native-cross_wasm32-wasi-release+host_fully_static+text_simdutf"
     }
@@ -5859,73 +6228,10 @@
       "BUILD_FLAVOUR": "release+host_fully_static+text_simdutf",
       "CONFIGURE_ARGS": "--enable-unregisterised --with-intree-gmp --with-system-libffi --enable-strict-ghc-toolchain-check",
       "CROSS_TARGET": "wasm32-wasi",
-      "HADRIAN_ARGS": "--docs=none",
+      "FIREFOX_LAUNCH_OPTS": "{\"browser\":\"firefox\",\"executablePath\":\"/usr/bin/firefox\"}",
+      "HADRIAN_ARGS": "--docs=no-sphinx-pdfs --docs=no-sphinx-man",
       "RUNTEST_ARGS": "",
       "TEST_ENV": "x86_64-linux-alpine3_20-wasm-unreg-cross_wasm32-wasi-release+host_fully_static+text_simdutf"
-    }
-  },
-  "x86_64-linux-centos7-validate": {
-    "after_script": [
-      ".gitlab/ci.sh save_cache",
-      ".gitlab/ci.sh save_test_output",
-      ".gitlab/ci.sh clean",
-      "cat ci_timings"
-    ],
-    "allow_failure": false,
-    "artifacts": {
-      "expire_in": "2 weeks",
-      "paths": [
-        "ghc-x86_64-linux-centos7-validate.tar.xz",
-        "junit.xml",
-        "unexpected-test-output.tar.gz"
-      ],
-      "reports": {
-        "junit": "junit.xml"
-      },
-      "when": "always"
-    },
-    "cache": {
-      "key": "x86_64-linux-centos7-$CACHE_REV",
-      "paths": [
-        "cabal-cache",
-        "toolchain"
-      ]
-    },
-    "dependencies": [],
-    "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-centos7:$DOCKER_REV",
-    "needs": [
-      {
-        "artifacts": false,
-        "job": "hadrian-ghc-in-ghci"
-      }
-    ],
-    "rules": [
-      {
-        "if": "((($ONLY_JOBS) && ($ONLY_JOBS =~ /.*\\bx86_64-linux-centos7-validate(\\s|$).*/)) || (($ONLY_JOBS == null) && (\"disabled\" != \"disabled\"))) && ($RELEASE_JOB != \"yes\") && ($NIGHTLY == null)",
-        "when": "on_success"
-      }
-    ],
-    "script": [
-      "sudo chown ghc:ghc -R .",
-      ".gitlab/ci.sh setup",
-      ".gitlab/ci.sh configure",
-      ".gitlab/ci.sh build_hadrian",
-      ".gitlab/ci.sh test_hadrian"
-    ],
-    "stage": "full-build",
-    "tags": [
-      "x86_64-linux"
-    ],
-    "variables": {
-      "BIGNUM_BACKEND": "gmp",
-      "BIN_DIST_NAME": "ghc-x86_64-linux-centos7-validate",
-      "BROKEN_TESTS": "T22012",
-      "BUILD_FLAVOUR": "validate",
-      "CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
-      "HADRIAN_ARGS": "--docs=no-sphinx",
-      "INSTALL_CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
-      "RUNTEST_ARGS": "",
-      "TEST_ENV": "x86_64-linux-centos7-validate"
     }
   },
   "x86_64-linux-deb10-validate": {
@@ -7495,6 +7801,132 @@
       "INSTALL_CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
       "RUNTEST_ARGS": "",
       "TEST_ENV": "x86_64-linux-ubuntu22_04-validate"
+    }
+  },
+  "x86_64-linux-ubuntu24_04-loongarch-cross_loongarch64-linux-gnu-validate": {
+    "after_script": [
+      ".gitlab/ci.sh save_cache",
+      ".gitlab/ci.sh save_test_output",
+      ".gitlab/ci.sh clean",
+      "cat ci_timings"
+    ],
+    "allow_failure": false,
+    "artifacts": {
+      "expire_in": "2 weeks",
+      "paths": [
+        "ghc-x86_64-linux-ubuntu24_04-loongarch-cross_loongarch64-linux-gnu-validate.tar.xz",
+        "junit.xml",
+        "unexpected-test-output.tar.gz"
+      ],
+      "reports": {
+        "junit": "junit.xml"
+      },
+      "when": "always"
+    },
+    "cache": {
+      "key": "x86_64-linux-ubuntu24_04-loongarch-$CACHE_REV",
+      "paths": [
+        "cabal-cache",
+        "toolchain"
+      ]
+    },
+    "dependencies": [],
+    "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-ubuntu24_04-loongarch:$DOCKER_REV",
+    "needs": [
+      {
+        "artifacts": false,
+        "job": "hadrian-ghc-in-ghci"
+      }
+    ],
+    "rules": [
+      {
+        "if": "((($ONLY_JOBS) && ($ONLY_JOBS =~ /.*\\bx86_64-linux-ubuntu24_04-loongarch-cross_loongarch64-linux-gnu-validate(\\s|$).*/)) || (($ONLY_JOBS == null) && ((($CI_MERGE_REQUEST_LABELS =~ /.*full-ci.*/) || ($CI_MERGE_REQUEST_LABELS =~ /.*marge_bot_batch_merge_job.*/) || ($CI_COMMIT_BRANCH == \"master\") || ($CI_COMMIT_BRANCH =~ /ghc-[0-9]+\\.[0-9]+/)) || ($CI_MERGE_REQUEST_LABELS =~ /.*loongarch.*/)))) && ($RELEASE_JOB != \"yes\") && ($NIGHTLY == null)",
+        "when": "on_success"
+      }
+    ],
+    "script": [
+      "sudo chown ghc:ghc -R .",
+      ".gitlab/ci.sh setup",
+      ".gitlab/ci.sh configure",
+      ".gitlab/ci.sh build_hadrian",
+      ".gitlab/ci.sh test_hadrian"
+    ],
+    "stage": "full-build",
+    "tags": [
+      "x86_64-linux"
+    ],
+    "variables": {
+      "BIGNUM_BACKEND": "gmp",
+      "BIN_DIST_NAME": "ghc-x86_64-linux-ubuntu24_04-loongarch-cross_loongarch64-linux-gnu-validate",
+      "BUILD_FLAVOUR": "validate",
+      "CONFIGURE_ARGS": "--with-intree-gmp --enable-strict-ghc-toolchain-check",
+      "CROSS_EMULATOR": "qemu-loongarch64 -L /usr/loongarch64-linux-gnu",
+      "CROSS_TARGET": "loongarch64-linux-gnu",
+      "INSTALL_CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
+      "RUNTEST_ARGS": "",
+      "TEST_ENV": "x86_64-linux-ubuntu24_04-loongarch-cross_loongarch64-linux-gnu-validate"
+    }
+  },
+  "x86_64-linux-ubuntu24_04-validate": {
+    "after_script": [
+      ".gitlab/ci.sh save_cache",
+      ".gitlab/ci.sh save_test_output",
+      ".gitlab/ci.sh clean",
+      "cat ci_timings"
+    ],
+    "allow_failure": false,
+    "artifacts": {
+      "expire_in": "2 weeks",
+      "paths": [
+        "ghc-x86_64-linux-ubuntu24_04-validate.tar.xz",
+        "junit.xml",
+        "unexpected-test-output.tar.gz"
+      ],
+      "reports": {
+        "junit": "junit.xml"
+      },
+      "when": "always"
+    },
+    "cache": {
+      "key": "x86_64-linux-ubuntu24_04-$CACHE_REV",
+      "paths": [
+        "cabal-cache",
+        "toolchain"
+      ]
+    },
+    "dependencies": [],
+    "image": "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-ubuntu24_04:$DOCKER_REV",
+    "needs": [
+      {
+        "artifacts": false,
+        "job": "hadrian-ghc-in-ghci"
+      }
+    ],
+    "rules": [
+      {
+        "if": "((($ONLY_JOBS) && ($ONLY_JOBS =~ /.*\\bx86_64-linux-ubuntu24_04-validate(\\s|$).*/)) || (($ONLY_JOBS == null) && (\"disabled\" != \"disabled\"))) && ($RELEASE_JOB != \"yes\") && ($NIGHTLY == null)",
+        "when": "on_success"
+      }
+    ],
+    "script": [
+      "sudo chown ghc:ghc -R .",
+      ".gitlab/ci.sh setup",
+      ".gitlab/ci.sh configure",
+      ".gitlab/ci.sh build_hadrian",
+      ".gitlab/ci.sh test_hadrian"
+    ],
+    "stage": "full-build",
+    "tags": [
+      "x86_64-linux"
+    ],
+    "variables": {
+      "BIGNUM_BACKEND": "gmp",
+      "BIN_DIST_NAME": "ghc-x86_64-linux-ubuntu24_04-validate",
+      "BUILD_FLAVOUR": "validate",
+      "CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
+      "INSTALL_CONFIGURE_ARGS": "--enable-strict-ghc-toolchain-check",
+      "RUNTEST_ARGS": "",
+      "TEST_ENV": "x86_64-linux-ubuntu24_04-validate"
     }
   },
   "x86_64-windows-int_native-validate": {

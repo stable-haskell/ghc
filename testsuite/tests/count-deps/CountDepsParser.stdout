@@ -70,7 +70,9 @@ GHC.Data.Graph.Directed
 GHC.Data.Graph.Directed.Internal
 GHC.Data.Graph.Directed.Reachability
 GHC.Data.Graph.UnVar
+GHC.Data.List
 GHC.Data.List.Infinite
+GHC.Data.List.NonEmpty
 GHC.Data.List.SetOps
 GHC.Data.Maybe
 GHC.Data.OrdList
@@ -93,6 +95,7 @@ GHC.Driver.Backpack.Syntax
 GHC.Driver.DynFlags
 GHC.Driver.Errors.Types
 GHC.Driver.Flags
+GHC.Driver.IncludeSpecs
 GHC.Driver.Phases
 GHC.Driver.Pipeline.Monad
 GHC.Driver.Plugins.External
@@ -115,7 +118,9 @@ GHC.HsToCore.Errors.Types
 GHC.HsToCore.Pmc.Solver.Types
 GHC.Iface.Errors.Types
 GHC.Iface.Ext.Fields
+GHC.Iface.Flags
 GHC.Iface.Recomp.Binary
+GHC.Iface.Recomp.Types
 GHC.Iface.Syntax
 GHC.Iface.Type
 GHC.Linker.Static.Utils
@@ -182,7 +187,6 @@ GHC.Types.ForeignStubs
 GHC.Types.GREInfo
 GHC.Types.Hint
 GHC.Types.Hint.Ppr
-GHC.Types.HpcInfo
 GHC.Types.Id
 GHC.Types.Id.Info
 GHC.Types.Id.Make
@@ -201,6 +205,7 @@ GHC.Types.SourceText
 GHC.Types.SptEntry
 GHC.Types.SrcLoc
 GHC.Types.Target
+GHC.Types.ThLevelIndex
 GHC.Types.Tickish
 GHC.Types.TyThing
 GHC.Types.Unique
@@ -227,6 +232,7 @@ GHC.Unit.Module.Location
 GHC.Unit.Module.ModIface
 GHC.Unit.Module.ModNodeKey
 GHC.Unit.Module.ModSummary
+GHC.Unit.Module.Stage
 GHC.Unit.Module.Warnings
 GHC.Unit.Module.WholeCoreBindings
 GHC.Unit.Parser
@@ -268,6 +274,7 @@ Language.Haskell.Syntax.Decls
 Language.Haskell.Syntax.Expr
 Language.Haskell.Syntax.Extension
 Language.Haskell.Syntax.ImpExp
+Language.Haskell.Syntax.ImpExp.IsBoot
 Language.Haskell.Syntax.Lit
 Language.Haskell.Syntax.Module.Name
 Language.Haskell.Syntax.Pat

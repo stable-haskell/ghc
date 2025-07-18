@@ -1201,8 +1201,8 @@ Note [Floating applications to coercions]
 We don’t float out variables applied only to type arguments, since the
 extra binding would be pointless: type arguments are completely erased.
 But *coercion* arguments aren’t (see Note [Coercion tokens] in
-"GHC.CoreToStg" and Note [Count coercion arguments in boring contexts] in
-"GHC.Core.Unfold"), so we still want to float out variables applied only to
+"GHC.CoreToStg" and Note [inlineBoringOk] in"GHC.Core.Unfold"),
+so we still want to float out variables applied only to
 coercion arguments.
 
 
@@ -1854,7 +1854,7 @@ newLvlVar lvld_rhs join_arity_maybe is_mk_static
 cloneCaseBndrs :: LevelEnv -> Level -> [Var] -> LvlM (LevelEnv, [Var])
 cloneCaseBndrs env@(LE { le_subst = subst, le_lvl_env = lvl_env, le_env = id_env })
                new_lvl vs
-  = do { (subst', vs') <- cloneBndrs subst vs
+  = do { (subst', vs') <- cloneBndrsM subst vs
              -- N.B. We are not moving the body of the case, merely its case
              -- binders.  Consequently we should *not* set le_ctxt_lvl.
              -- See Note [Setting levels when floating single-alternative cases].
@@ -1875,8 +1875,8 @@ cloneLetVars is_rec
           dest_lvl vs
   = do { let vs1  = map zap vs
        ; (subst', vs2) <- case is_rec of
-                            NonRecursive -> cloneBndrs      subst vs1
-                            Recursive    -> cloneRecIdBndrs subst vs1
+                            NonRecursive -> cloneBndrsM      subst vs1
+                            Recursive    -> cloneRecIdBndrsM subst vs1
 
        ; let prs  = vs `zip` vs2
              env' = env { le_lvl_env = addLvls dest_lvl lvl_env vs2

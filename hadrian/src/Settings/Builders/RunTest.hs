@@ -93,23 +93,22 @@ data TestCompilerArgs = TestCompilerArgs{
 inTreeCompilerArgs :: Stage -> Action TestCompilerArgs
 inTreeCompilerArgs stg = do
 
-
     (hasDynamicRts, hasThreadedRts) <- do
       ways <- interpretInContext (vanillaContext stg rts) getRtsWays
       return (dynamic `elem` ways, threaded `elem` ways)
     -- MP: We should be able to vary if stage1/stage2 is dynamic, ie a dynamic stage1
     -- should be able to built a static stage2?
-    hasDynamic          <- (dynamic ==) . Context.Type.way <$> (programContext stg ghc)
+    hasDynamic          <- (wayUnit Dynamic) . Context.Type.way <$> (programContext stg ghc)
     -- LeadingUnderscore is a property of the system so if cross-compiling stage1/stage2 could
     -- have different values? Currently not possible to express.
     leadingUnderscore   <- queryTargetTarget tgtSymbolsHaveLeadingUnderscore
-    withInterpreter     <- ghcWithInterpreter
+    cross               <- flag CrossCompiling
+    withInterpreter     <- ghcWithInterpreter stg
     interpForceDyn      <- targetRTSLinkerOnlySupportsSharedLibs
     unregisterised      <- queryTargetTarget tgtUnregisterised
     tables_next_to_code <- queryTargetTarget tgtTablesNextToCode
     targetWithSMP       <- targetSupportsSMP
 
-    cross <- flag CrossCompiling
 
     let ghcStage
           | cross, Stage1 <- stg = Stage1
@@ -120,7 +119,7 @@ inTreeCompilerArgs stg = do
 
     os          <- queryHostTarget queryOS
     arch        <- queryTargetTarget queryArch
-    let codegen_arches = ["x86_64", "i386", "powerpc", "powerpc64", "powerpc64le", "aarch64", "wasm32", "riscv64"]
+    let codegen_arches = ["x86_64", "i386", "powerpc", "powerpc64", "powerpc64le", "aarch64", "wasm32", "riscv64", "loongarch64"]
     let withNativeCodeGen
           | unregisterised = False
           | arch `elem` codegen_arches = True

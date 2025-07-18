@@ -77,9 +77,6 @@ rtsDependencies = do
 
 compilerDependencies :: Expr [FilePath]
 compilerDependencies = do
-    let fixed = ("compiler" -/-) <$>
-                  [ "GHC/CmmToLlvm/Version/Bounds.hs"
-                  ]
     stage   <- getStage
     ghcPath <- expr $ buildPath (vanillaContext stage compiler)
     let buildSpecific = (ghcPath -/-) <$>
@@ -101,10 +98,12 @@ compilerDependencies = do
                   , "primop-vector-uniques.hs-incl"
                   , "primop-docs.hs-incl"
                   , "primop-deprecations.hs-incl"
+                  , "primop-prim-module.hs-incl"
+                  , "primop-wrappers-module.hs-incl"
                   , "GHC/Platform/Constants.hs"
                   , "GHC/Settings/Config.hs"
                   ]
-    pure $ fixed ++ buildSpecific
+    pure buildSpecific
 
 generatedDependencies :: Expr [FilePath]
 generatedDependencies = do
@@ -388,10 +387,6 @@ templateRules = do
     , interpolateSetting "LlvmMinVersion" LlvmMinVersion
     , interpolateSetting "LlvmMaxVersion" LlvmMaxVersion
     ]
-  templateRule "compiler/GHC/CmmToLlvm/Version/Bounds.hs" $ mconcat
-    [ interpolateVar "LlvmMinVersion" $ replaceEq '.' ',' <$> setting LlvmMinVersion
-    , interpolateVar "LlvmMaxVersion" $ replaceEq '.' ',' <$> setting LlvmMaxVersion
-    ]
   bindistRules
 
 bindistRules :: Rules ()
@@ -528,10 +523,11 @@ generateSettings settingsFile = do
         , ("LLVM llc command", expr $ settingsFileSetting ToolchainSetting_LlcCommand)
         , ("LLVM opt command", expr $ settingsFileSetting ToolchainSetting_OptCommand)
         , ("LLVM llvm-as command", expr $ settingsFileSetting ToolchainSetting_LlvmAsCommand)
+        , ("LLVM llvm-as flags", expr $ settingsFileSetting ToolchainSetting_LlvmAsFlags)
         , ("Use inplace MinGW toolchain", expr $ settingsFileSetting ToolchainSetting_DistroMinGW)
 
         , ("target RTS linker only supports shared libraries", expr $ yesNo <$> targetRTSLinkerOnlySupportsSharedLibs)
-        , ("Use interpreter", expr $ yesNo <$> ghcWithInterpreter)
+        , ("Use interpreter", expr $ yesNo <$> ghcWithInterpreter (predStage stage))
         , ("Support SMP", expr $ yesNo <$> targetSupportsSMP)
         , ("RTS ways", escapeArgs . map show . Set.toList <$> getRtsWays)
         , ("Tables next to code", queryTarget (yesNo . tgtTablesNextToCode))

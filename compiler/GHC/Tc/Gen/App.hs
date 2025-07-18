@@ -221,7 +221,7 @@ A "head" has three special cases (for which we can infer a polytype
 using tcInferAppHead_maybe); otherwise is just any old expression (for
 which we can infer a rho-type (via tcInfer).
 
-There is no special treatment for HsUnboundVar, HsOverLit etc, because
+There is no special treatment for HsHole (HsVar ...), HsOverLit, etc, because
 we can't get a polytype from them.
 
 Left and right sections (e.g. (x +) and (+ x)) are not yet supported.
@@ -615,7 +615,7 @@ tcValArg _ (EValArgQL { eaql_wanted  = wanted
 
 --------------------
 wantQuickLook :: HsExpr GhcRn -> TcM QLFlag
-wantQuickLook (HsVar _ (L _ f))
+wantQuickLook (HsVar _ (L _ (WithUserRdr _ f)))
   | getUnique f `elem` quickLookKeys = return DoQL
 wantQuickLook _                      = do { impred <- xoptM LangExt.ImpredicativeTypes
                                           ; if impred then return DoQL else return NoQL }
@@ -680,7 +680,7 @@ tcInstFun do_ql inst_final (tc_fun, fun_ctxt) fun_sigma rn_args
 
     fun_is_out_of_scope  -- See Note [VTA for out-of-scope functions]
       = case tc_fun of
-          HsUnboundVar {} -> True
+          HsHole _        -> True
           _               -> False
 
     inst_fun :: [HsExprArg 'TcpRn] -> ForAllTyFlag -> Bool
@@ -976,6 +976,7 @@ expr_to_type earg =
       -- only parts of it are, e.g. `vfun (Maybe Int)` or `vfun (Maybe (type Int))`.
       -- Apply a recursive T2T transformation.
       HsWC [] <$> go e
+        <* failIfErrsM   -- Suppress unhelpful errors that arise after a failed T2T
   where
     go :: LHsExpr GhcRn -> TcM (LHsType GhcRn)
     go (L _ (HsEmbTy _ t)) =
@@ -990,9 +991,9 @@ expr_to_type earg =
          ; res' <- go res
          ; return (L l (HsFunTy noExtField mult' arg' res'))}
          where
-          go_arrow :: HsArrowOf (LHsExpr GhcRn) GhcRn -> TcM (HsArrow GhcRn)
-          go_arrow (HsUnrestrictedArrow{}) = pure (HsUnrestrictedArrow noExtField)
-          go_arrow (HsLinearArrow{}) = pure (HsLinearArrow noExtField)
+          go_arrow :: HsMultAnnOf (LHsExpr GhcRn) GhcRn -> TcM (HsMultAnn GhcRn)
+          go_arrow (HsUnannotated _) = pure (HsUnannotated noExtField)
+          go_arrow (HsLinearAnn{}) = pure (HsLinearAnn noExtField)
           go_arrow (HsExplicitMult _ exp) = HsExplicitMult noExtField <$> go exp
     go (L l (HsForAll _ tele expr)) =
       do { ty <- go expr
@@ -1002,9 +1003,11 @@ expr_to_type earg =
          ; ty <- go expr
          ; return (L l (HsQualTy noExtField (L ann ctxt') ty)) }
     go (L l (HsVar _ lname)) =
-      -- as per #281: variables and constructors (regardless of their namespace)
-      -- are mapped directly, without modification.
-      return (L l (HsTyVar noAnn NotPromoted lname))
+      -- GHC Proposal #281, section 7.5 "T2T-Mapping":
+      --   variables and constructors (regardless of their namespace)
+      --   are mapped directly, without modification.
+      do { detect_puns lname
+         ; return (L l (HsTyVar noAnn NotPromoted lname)) }
     go (L l (HsApp _ lhs rhs)) =
       do { lhs' <- go lhs
          ; rhs' <- go rhs
@@ -1056,7 +1059,7 @@ expr_to_type earg =
       = do { t <- go (L l e)
            ; let splice_result' = HsUntypedSpliceTop finalizers t
            ; return (L l (HsSpliceTy splice_result' splice)) }
-    go (L l (HsUnboundVar _ rdr))
+    go (L l (HsHole (HoleVar (L _ rdr))))
       | isUnderscore occ = return (L l (HsWildCardTy noExtField))
       | startsWithUnderscore occ =
           -- See Note [Wildcards in the T2T translation]
@@ -1066,7 +1069,7 @@ expr_to_type earg =
                else not_in_scope }
       | otherwise = not_in_scope
       where occ = occName rdr
-            not_in_scope = failWith $ mkTcRnNotInScope rdr NotInScope
+            not_in_scope = failWith $ TcRnNotInScope NotInScope rdr
     go (L l (XExpr (ExpandedThingRn (OrigExpr orig) _))) =
       -- Use the original, user-written expression (before expansion).
       -- Example. Say we have   vfun :: forall a -> blah
@@ -1077,6 +1080,30 @@ expr_to_type earg =
       -- equivalent of fromListN, so we must use the original.
       go (L l orig)
     go e = failWith $ TcRnIllformedTypeArgument e
+
+    detect_puns :: LocatedN (WithUserRdr Name) -> TcM ()
+      -- GHC Proposal #281, section 7.5 "T2T-Mapping":
+      --   there should be no variable of the same name but from
+      --   a different namespace, or else raise an ambiguity error
+      --   (does not apply to constructors)
+    detect_puns (L l (WithUserRdr rdr _))
+      | isTermVarOrFieldNameSpace (rdrNameSpace rdr)
+      , Just promoted_rdr <- promoteRdrName rdr
+      = do { envs <- getRdrEnvs
+           ; whenIsJust (lookup_rdr envs rdr) $ \unpromoted ->
+             whenIsJust (lookup_rdr envs promoted_rdr) $ \promoted ->
+               addErrAt (locA l) $
+               TcRnIllegalPunnedVarOccInTypeArgument { illegalPunTermName = unpromoted
+                                                     , illegalPunTypeName = promoted } }
+      | otherwise = return ()
+
+    lookup_rdr :: (GlobalRdrEnv, LocalRdrEnv) -> RdrName -> Maybe ResolvedNameInfo
+    lookup_rdr (gbl_env, lcl_env) rdr
+      | Just name <- lookupLocalRdrEnv lcl_env rdr
+      = Just (ResolvedNameInfo [] rdr name)
+      | gres@(gre:_) <- lookupGRE gbl_env (LookupRdrName rdr (RelevantGREsFOS WantNormal))
+      = Just (ResolvedNameInfo gres rdr (gre_name gre))
+      | otherwise = Nothing
 
     unwrap_wc :: HsWildCardBndrs GhcRn t -> TcM t
     unwrap_wc (HsWC wcs t)
@@ -1128,7 +1155,7 @@ This conversion is in the TcM monad because
       vfun [x | x <- xs]     Can't convert list comprehension to a type
       vfun (\x -> x)         Can't convert a lambda to a type
 * It needs to check for LangExt.NamedWildCards to generate an appropriate
-  error message for HsUnboundVar.
+  error message for HsHole (HsVar ...).
      vfun _a    Not in scope: ‘_a’
                    (NamedWildCards disabled)
      vfun _a    Illegal named wildcard in a required type argument: ‘_a’
@@ -1190,13 +1217,13 @@ tc_inst_forall_arg conc_tvs (tvb, inner_ty) hs_ty
        --
        -- See [Wrinkle: VTA] in Note [Representation-polymorphism checking built-ins]
        -- in GHC.Tc.Utils.Concrete.
-       ; th_stage <- getStage
+       ; th_lvl <- getThLevel
        ; ty_arg <- case mb_conc of
            Nothing   -> return ty_arg0
            Just conc
              -- See [Wrinkle: Typed Template Haskell]
              -- in Note [hasFixedRuntimeRep] in GHC.Tc.Utils.Concrete.
-             | Brack _ (TcPending {}) <- th_stage
+             | Brack _ (TcPending {}) <- th_lvl
              -> return ty_arg0
              | otherwise
              ->
@@ -1337,17 +1364,18 @@ Syntax of applications in HsExpr
 Syntax of abstractions in Pat
 -----------------------------
 * Type patterns are represented in Pat roughly like this
-     data Pat = ConPat   ConLike [HsTyPat] [Pat]  -- (Con @tp1 @tp2 p1 p2)  (constructor pattern)
-              | EmbTyPat HsTyPat                  -- (type tp)              (embed a type into a pattern with `type`)
+     data Pat = ConPat   ConLike [Pat]  -- (Con @tp1 @tp2 p1 p2)  (constructor pattern)
+              | EmbTyPat HsTyPat        -- (type tp)              (embed a type into a pattern with `type`)
+              | InvisPat HsTyPat        -- (@tp)                  (invisible type pattern)
               | ...
      data HsTyPat = HsTP LHsType
   (In ConPat, the type and term arguments are actually inside HsConPatDetails.)
 
-  * Similar to HsAppType in HsExpr, the [HsTyPat] in ConPat is used just for @ty arguments
+  * Similar to HsAppType in HsExpr, InvisPat in ConPat is used for @ty arguments
   * Similar to HsEmbTy   in HsExpr, EmbTyPat lets you embed a type in a pattern
 
 * Examples:
-      \ (MkT @a  (x :: a)) -> rhs    -- ConPat (c.o. Pat) and HsConPatTyArg (c.o. HsConPatTyArg)
+      \ (MkT @a  (x :: a)) -> rhs    -- ConPat (c.o. Pat) and InvisPat (c.o. Pat)
       \ (type a) (x :: a)  -> rhs    -- EmbTyPat (c.o. Pat)
       \ a        (x :: a)  -> rhs    -- VarPat (c.o. Pat)
       \ @a       (x :: a)  -> rhs    -- InvisPat (c.o. Pat)
@@ -1478,7 +1506,7 @@ Note [VTA for out-of-scope functions]
 Suppose 'wurble' is not in scope, and we have
    (wurble @Int @Bool True 'x')
 
-Then the renamer will make (HsUnboundVar "wurble") for 'wurble',
+Then the renamer will make (HsHole (HsVar "wurble")) for 'wurble',
 and the typechecker will typecheck it with tcUnboundId, giving it
 a type 'alpha', and emitting a deferred Hole constraint, to
 be reported later.
@@ -1493,7 +1521,7 @@ tcUnboundId.  It later reports 'wurble' as out of scope, and tries to
 give its type.
 
 Fortunately in tcInstFun we still have access to the function, so we
-can check if it is a HsUnboundVar.  We use this info to simply skip
+can check if it is a HsHole.  We use this info to simply skip
 over any visible type arguments.  We'll /already/ have emitted a
 Hole constraint; failing preserves that constraint.
 
@@ -2038,18 +2066,22 @@ qlUnify ty1 ty2
       = go_flexi1 kappa ty2
 
     go_flexi1 kappa ty2  -- ty2 is zonked
-      | -- See Note [QuickLook unification] (UQL1)
-        simpleUnifyCheck UC_QuickLook kappa ty2
-      = do { co <- unifyKind (Just (TypeThing ty2)) ty2_kind kappa_kind
-                   -- unifyKind: see (UQL2) in Note [QuickLook unification]
-                   --            and (MIV2) in Note [Monomorphise instantiation variables]
-           ; let ty2' = mkCastTy ty2 co
-           ; traceTc "qlUnify:update" $
-             ppr kappa <+> text ":=" <+> ppr ty2
-           ; liftZonkM $ writeMetaTyVar kappa ty2' }
-
-      | otherwise
-      = return ()   -- Occurs-check or forall-bound variable
+      = do { cur_lvl <- getTcLevel
+              -- See Note [Unification preconditions], (UNTOUCHABLE) wrinkles
+              -- Here we are in the TcM monad, which does not track enclosing
+              -- Given equalities; so for quick-look unification we conservatively
+              -- treat /any/ level outside this one as untouchable. Hence cur_lvl.
+           ; case simpleUnifyCheck UC_QuickLook cur_lvl kappa ty2 of
+              SUC_CanUnify ->
+                do { co <- unifyKind (Just (TypeThing ty2)) ty2_kind kappa_kind
+                           -- unifyKind: see (UQL2) in Note [QuickLook unification]
+                           --            and (MIV2) in Note [Monomorphise instantiation variables]
+                   ; let ty2' = mkCastTy ty2 co
+                   ; traceTc "qlUnify:update" $
+                     ppr kappa <+> text ":=" <+> ppr ty2
+                   ; liftZonkM $ writeMetaTyVar kappa ty2' }
+              _ -> return () -- e.g. occurs-check or forall-bound variable
+           }
       where
         kappa_kind = tyVarKind kappa
         ty2_kind   = typeKind ty2

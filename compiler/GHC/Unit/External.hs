@@ -28,11 +28,11 @@ import GHC.Core.Rules ( RuleBase, mkRuleBase)
 
 import GHC.Types.Annotations ( AnnEnv, emptyAnnEnv )
 import GHC.Types.CompleteMatch
+import GHC.Types.DefaultEnv (DefaultEnv)
 import GHC.Types.TypeEnv
 import GHC.Types.Unique.DSet
 
 import GHC.Linker.Types (Linkable)
-import GHC.Unit.Module.External.Graph
 
 import Data.IORef
 
@@ -71,7 +71,6 @@ initExternalPackageState = EPS
   , eps_PIT              = emptyPackageIfaceTable
   , eps_free_holes       = emptyInstalledModuleEnv
   , eps_PTE              = emptyTypeEnv
-  , eps_module_graph     = emptyExternalModuleGraph
   , eps_iface_bytecode   = emptyModuleEnv
   , eps_inst_env         = emptyInstEnv
   , eps_fam_inst_env     = emptyFamInstEnv
@@ -89,6 +88,7 @@ initExternalPackageState = EPS
                             , n_rules_in = length builtinRules
                             , n_rules_out = 0
                             }
+  , eps_defaults         = emptyModuleEnv
   }
 
 
@@ -139,8 +139,6 @@ data ExternalPackageState
                 -- for every import, so cache it here.  When the PIT
                 -- gets filled in we can drop these entries.
 
-        eps_module_graph :: ExternalModuleGraph,
-
         eps_PTE :: !PackageTypeEnv,
                 -- ^ Result of typechecking all the external package
                 -- interface files we have sucked in. The domain of
@@ -167,7 +165,8 @@ data ExternalPackageState
         eps_mod_fam_inst_env :: !(ModuleEnv FamInstEnv), -- ^ The family instances accumulated from external
                                                          -- packages, keyed off the module that declared them
 
-        eps_stats :: !EpsStats                 -- ^ Statistics about what was loaded from external packages
+        eps_stats :: !EpsStats,                 -- ^ Statistics about what was loaded from external packages
+        eps_defaults :: !(ModuleEnv DefaultEnv) -- ^ Default declarations exported by external packages
   }
 
 -- | Accumulated statistics about what we are putting into the 'ExternalPackageState'.

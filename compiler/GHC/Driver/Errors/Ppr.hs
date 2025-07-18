@@ -23,7 +23,6 @@ import GHC.Utils.Outputable
 import GHC.Utils.Panic
 import GHC.Unit.Module
 import GHC.Unit.Module.Graph
-import GHC.Unit.Module.ModSummary
 import GHC.Unit.State
 import GHC.Types.Hint
 import GHC.Types.SrcLoc
@@ -35,7 +34,6 @@ import GHC.HsToCore.Errors.Types (DsMessage)
 import GHC.Iface.Errors.Types
 import GHC.Tc.Errors.Ppr () -- instance Diagnostic TcRnMessage
 import GHC.Iface.Errors.Ppr () -- instance Diagnostic IfaceMessage
-import GHC.CmmToLlvm.Version (llvmVersionStr, supportedLlvmVersionLowerBound, supportedLlvmVersionUpperBound)
 
 --
 -- Suggestions
@@ -156,7 +154,7 @@ instance Diagnostic DriverMessage where
            text "module" <+> quotes (ppr mod) <+>
            text "is defined in multiple files:" <+>
            sep (map text files)
-    DriverModuleNotFound mod
+    DriverModuleNotFound _uid mod
       -> mkSimpleDecorated (text "module" <+> quotes (ppr mod) <+> text "cannot be found locally")
     DriverFileModuleNameMismatch actual expected
       -> mkSimpleDecorated $
@@ -263,21 +261,21 @@ instance Diagnostic DriverMessage where
         ppr_node (LinkNode uid _) = pprPanic "LinkNode should not be in a cycle" (ppr uid)
         ppr_node (UnitNode uid _) = pprPanic "UnitNode should not be in a cycle" (ppr uid)
 
-        ppr_ms :: ModSummary -> SDoc
-        ppr_ms ms = quotes (ppr (moduleName (ms_mod ms))) <+>
-                    (parens (text (msHsFilePath ms)))
+        ppr_ms :: ModuleNodeInfo -> SDoc
+        ppr_ms ms = quotes (ppr (moduleNodeInfoModule ms)) <+>
+                    (parens (text (node_path ms)))
+
+        node_path :: ModuleNodeInfo -> FilePath
+        node_path ms = case ml_hs_file (moduleNodeInfoLocation ms) of
+          Just f -> f
+          Nothing -> ml_hi_file (moduleNodeInfoLocation ms)
     DriverInstantiationNodeInDependencyGeneration node ->
       mkSimpleDecorated $
         vcat [ text "Unexpected backpack instantiation in dependency graph while constructing Makefile:"
              , nest 2 $ ppr node ]
     DriverNoConfiguredLLVMToolchain ->
       mkSimpleDecorated $
-        text "GHC was not configured with a supported LLVM toolchain" $$
-          text ("Make sure you have installed LLVM between ["
-            ++ llvmVersionStr supportedLlvmVersionLowerBound
-            ++ " and "
-            ++ llvmVersionStr supportedLlvmVersionUpperBound
-            ++ ") and reinstall GHC to make -fllvm work")
+        text "GHC was not configured with a supported LLVM toolchain"
 
   diagnosticReason = \case
     DriverUnknownMessage m

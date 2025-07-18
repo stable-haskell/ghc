@@ -97,6 +97,144 @@ profiling functionality, then inspect the report files:
 
    $ wasmtime run --mapdir /::$PWD foo.wasm +RTS -hc -l -RTS
 
+.. _wasm-ghci:
+
+Using GHCi with the wasm backend
+--------------------------------
+
+The GHC wasm backend supports the GHCi feature via a nodejs ``dyld``
+script that provides RTS linker functionality and bootstraps the
+external interpreter. This script is installed into the
+``wasm32-wasi-ghc --print-libdir`` location and will be automatically
+launched by GHC when evaluating Template Haskell splices or starting
+GHCi, though you do need a recent ``node`` available in ``PATH``.
+
+You can launch a GHCi session with ``wasm32-wasi-ghci`` or
+``wasm32-wasi-ghc --interactive``. All existing GHCi features work with
+wasm, including the GHCi debugger. You can also use JavaScript FFI
+detailed in the next section; by default, the JavaScript FFI has access
+to the nodejs global namespace since it runs in nodejs after all.
+
+Additionally, the wasm backend’s GHCi supports the browser mode to
+allow live-coding the frontend using GHCi. This requires the `ws
+<https://www.npmjs.com/package/ws>`__ library to be installed and
+passed to the ``dyld`` script via the `NODE_PATH
+<https://nodejs.org/api/modules.html>`__ environment variable. Suppose
+your wasm backend installation is supplied by ``ghc-wasm-meta``, the
+right ``node`` installation and ``NODE_PATH`` with all the optional
+npm dependencies are automatically provided out of the box.
+
+To start GHCi with the browser mode, use the following GHC flag:
+
+.. ghc-flag:: -fghci-browser
+    :shortdesc: Enable wasm ghci browser mode.
+    :type: dynamic
+
+    :default: off
+
+    Enable wasm ghci browser mode, see :ref:`wasm-ghci`.
+
+::
+
+   $ wasm32-wasi-ghc --interactive -fghci-browser
+   GHCi, version 9.13.20250320: https://www.haskell.org/ghc/  :? for help
+   Open http://127.0.0.1:37517/main.html or import http://127.0.0.1:37517/main.js to boot ghci
+
+At this point, the GHCi session is frozen. The ``dyld`` script acts as a
+broker between the host GHC process and the in-browser external
+interpreter; it starts an HTTP server that serves ``main.js``, an ES6
+module that connects back to the HTTP server and finishes the rest of
+external interpreter bootstrap process. The ``dyld`` HTTP server allows
+`CORS <https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CORS>`__
+requests from any origin, meaning it’s possible to use F12 devtools
+console to import ``main.js`` and use GHCi to debug other websites, but
+the simplest way to get started is simply opening ``main.html`` in the
+browser.
+
+After a few seconds, the GHCi session shall be unfrozen and available
+for use. There are a few important points to keep in mind when using the
+GHCi browser mode:
+
+- All the code runs in the browser, and the JavaScript FFI only has
+  access to the browser global namespace, not the nodejs one. There is
+  no escape hatch to invoke any function on the nodejs side.
+- Likewise, the browser side has no access to the host filesystem. You
+  can use ``:load`` etc in the GHCi prompt to load modules just fine,
+  but attempting to do a ``readFile`` will fail, there is no file for
+  you to open in the browser-side virtual filesystem.
+- Template Haskell splices are also evaluated in the browser. If your
+  splices require side-effects like reading files then they will fail to
+  evaluate; to workaround it, compile modules containing such splices to
+  object code first and load object code instead.
+- By default, ``stdout``/``stderr`` doesn’t write back to the GHCi
+  prompt, the messages are written to the F12 devtools console in a
+  line-buffered manner.
+
+See below for other optional GHC flags of wasm ghci browser mode:
+
+.. ghc-flag:: -fghci-browser-host
+    :shortdesc: Wasm ghci browser mode host address.
+    :type: dynamic
+
+    :default: ``127.0.0.1``
+
+    Specify the host address that the ``dyld`` HTTP server should bind
+    to, supports IPv4/IPv6. Defaults to ``127.0.0.1``. Be careful when
+    changing it and exposing the ``dyld`` HTTP server to other
+    networks, some endpoints of the server allow downloading files
+    from the host filesystem!
+
+.. ghc-flag:: -fghci-browser-port
+    :shortdesc: Wasm ghci browser mode host port.
+    :type: dynamic
+
+    :default: ``0``
+
+    Specify the port that the ``dyld`` HTTP server should listen on.
+    Defaults to a random idle port.
+
+.. ghc-flag:: -fghci-browser-redirect-wasi-console
+    :shortdesc: Redirect wasi console stdout/stderr back to host ghci.
+    :type: dynamic
+
+    :default: off
+
+    If this flag is on, the wasi stdout/stderr output messages are
+    redirected back to the host GHCi terminal instead of outputing to
+    the F12 devtools console. The main intended use case is mobile
+    browsers which likely don’t have F12 devtools readily available.
+    Also note that this only redirects wasi console messages, not
+    ``console.log`` invocations in the browser.
+
+For testing purposes, there is also support for using
+`Puppeteer <https://pptr.dev>`__ or
+`Playwright <https://playwright.dev>`__ to automatically launch a
+headless browser and load ``main.html``. Like ``ws``, the relevant npm
+dependencies need to be supplied via ``NODE_PATH``, either
+``puppeteer``/``puppeteer-core`` or ``playwright``/``playwright-core``,
+then the following options can be used:
+
+.. ghc-flag:: -fghci-browser-puppeteer-launch-opts
+    :shortdesc: puppeteer.launch() options.
+    :type: dynamic
+
+    JSON-formatted options to be passed to `puppeteer.launch()
+    <https://pptr.dev/api/puppeteer.puppeteernode.launch>`__.
+
+.. ghc-flag:: -fghci-browser-playwright-browser-type
+    :shortdesc: Playwright browser type.
+    :type: dynamic
+
+    One of ``chromium``/``firefox``/``webkit``, the type of browser to
+    be launched by ``playwright``.
+
+.. ghc-flag:: -fghci-browser-playwright-launch-opts
+    :shortdesc: Playwright browser.launch() options.
+    :type: dynamic
+
+    Optional, JSON-formatted options to be passed to `browser.launch()
+    <https://playwright.dev/docs/api/class-browsertype#browser-type-launch>`__.
+
 .. _wasm-jsffi:
 
 JavaScript FFI in the wasm backend
@@ -189,9 +327,9 @@ use of ``freeJSVal`` when you’re sure about a ``JSVal``\ ’s lifetime,
 especially for the temporary ``JSVal``\ s. This will help reducing the
 memory footprint at runtime.
 
-Note that ``freeJSVal`` is not idempotent and it’s only safe to call it
-exactly once or not at all. Once it’s called, any subsequent usage of
-that ``JSVal`` results in a runtime panic.
+Note that ``freeJSVal`` is idempotent and it’s safe to call it more
+than once. After it’s called, any subsequent usage of that ``JSVal``
+by passing to the JavaScript side results in a runtime panic.
 
 .. _wasm-jsffi-import:
 
@@ -231,15 +369,15 @@ There are two kinds of JSFFI imports: synchronous/asynchronous imports.
 ``unsafe`` indicates synchronous imports, which has the following
 caveats:
 
--  The calling thread as well as the entire runtime blocks on waiting
-   for the import result.
--  If the JavaScript code throws, the runtime crashes with the same
-   error. A JavaScript exception cannot be handled as a Haskell
-   exception here, so you need to use a JavaScript ``catch`` explicitly
-   shall the need arise.
--  Like ``unsafe`` C imports, re-entrance is not supported, the imported
-   foreign code must not call into Haskell again. Doing so would result
-   in a runtime panic.
+- The calling thread as well as the entire runtime blocks on waiting for
+  the import result.
+- If the JavaScript code throws, the runtime crashes with the same
+  error. A JavaScript exception cannot be handled as a Haskell exception
+  here, so you need to use a JavaScript ``catch`` explicitly shall the
+  need arise.
+- Unlike ``unsafe`` C imports, re-entrance is actually supported, the
+  imported JavaScript code can call into Haskell again, provided that
+  Haskell function is exported as a synchronous one.
 
 When a JSFFI import is marked as ``safe`` / ``interruptible`` or lacks
 safety annotation, then it’s treated as an asynchronous import. The
@@ -274,14 +412,12 @@ runtime, and resumed when the ``Promise`` actually resolves or rejects.
 Compared to synchronous JSFFI imports, asynchronous JSFFI imports have
 the following notable pros/cons:
 
--  Waiting for the result only blocks a single Haskell thread, other
-   threads can still make progress and garbage collection may still
-   happen.
--  If the ``Promise`` rejects, Haskell code can catch JavaScript errors
-   as ``JSException``\ s.
--  Re-entrance is supported. The JavaScript code may call into Haskell
-   again and vice versa.
--  Of course, it has higher overhead than synchronous JSFFI imports.
+- Waiting for the result only blocks a single Haskell thread, other
+  threads can still make progress and garbage collection may still
+  happen.
+- If the ``Promise`` rejects, Haskell code can catch JavaScript errors
+  as ``JSException``\ s.
+- It has higher overhead than synchronous JSFFI imports.
 
 Using thunks to encapsulate ``Promise`` result allows cheaper
 concurrency without even needing to fork Haskell threads just for
@@ -345,12 +481,17 @@ wrapper, and as long as the wasm instance is properly initialized, you
 can call ``await instance.exports.my_fib(10)`` to invoke the exported
 Haskell function and get the result.
 
-Unlike JSFFI imports which have synchronous/asynchronous flavors, JSFFI
-exports are always asynchronous. Calling them always return a
-``Promise`` in JavaScript that needs to be ``await``\ ed for the real
-result. If the Haskell function throws, the ``Promise`` is rejected with
-a ``WebAssembly.RuntimeError``, and the ``message`` field contains a
-JavaScript string of the Haskell exception.
+JSFFI exports are asynchronous by default. Calling an async export
+return a ``Promise`` in JavaScript that needs to be ``await``\ ed for
+the real result. If the Haskell function throws, the ``Promise`` is
+rejected with a ``WebAssembly.RuntimeError``, and the ``message`` field
+contains a JavaScript string of the Haskell exception.
+
+Additionally, sync exports are also supported by using ``"my_fib sync"``
+instead of ``"my_fib"``. With ``sync`` added alongside export function
+name, the JavaScript function would return the result synchronously. For
+the time being, sync exports don’t support propagating uncaught Haskell
+exception to a JavaScript exception at the call site yet.
 
 Above is the static flavor of JSFFI exports. It’s also possible to
 export a dynamically created Haskell function closure as a JavaScript
@@ -366,8 +507,9 @@ function and obtain its ``JSVal``:
 This is also much like ``foreign import ccall "wrapper"``, which wraps a
 Haskell function closure as a C function pointer. Note that ``unsafe`` /
 ``safe`` annotation is ignored here, since the ``JSVal`` that represent
-the exported function is always returned synchronously, but it is always
-an asynchronous JavaScript function, just like static JSFFI exports.
+the exported function is always returned synchronously. Likewise, you
+can use ``"wrapper sync"`` instead of ``"wrapper"`` to indicate the
+returned JavaScript function is sync instead of async.
 
 The ``JSVal`` callbacks created by dynamic JSFFI exports can be passed
 to the rest of JavaScript world to be invoked later. But wait, didn’t we
@@ -386,7 +528,7 @@ callback and intends to call it later, so the Haskell function closure
 is still retained by default.
 
 Still, the runtime can gradually drop these retainers by using
-``FinalizerRegistry`` to invoke the finalizers to free the underlying
+``FinalizationRegistry`` to invoke the finalizers to free the underlying
 stable pointers once the JavaScript callbacks are recycled.
 
 One last corner case is cyclic reference between the two heaps: if a
@@ -440,18 +582,11 @@ caveats:
    registered on that ``Promise`` will no longer be invoked. For
    simplicity of implementation, we aren’t using those for the time
    being.
--  Normally, ``throwTo`` would block until the async exception has been
-   delivered. In the case of JSFFI, ``throwTo`` would always return
-   successfully immediately, while the target thread is still left in a
-   suspended state. The target thread will only be waken up when the
-   ``Promise`` actually resolves or rejects, though the ``Promise``
-   result will be discarded at that point.
-
-The current way async exceptions are handled in JSFFI is subject to
-change though. Ideally, once the exception is delivered, the target
-thread can be waken up immediately and continue execution, and the
-pending ``Promise`` will drop reference to that thread and no longer
-invoke any continuations.
+-  When a thread blocks for a ``Promise`` to settle while masking
+   async exceptions, ``throwTo`` would block the caller until the
+   ``Promise`` is settled. If the target thread isn't masking async
+   exceptions, ``throwTo`` would cancel its blocking on the
+   ``Promise`` and resume its execution.
 
 .. _wasm-jsffi-cffi:
 
@@ -580,3 +715,14 @@ JavaScript.
 Finally, in JavaScript, you can use ``await __exports.my_func()`` to
 call your exported ``my_func`` function and get its result, pass
 arguments, do error handling, etc etc.
+
+For each async export, the returned ``Promise`` value contains a
+``promise.throwTo()`` callback. The value passed to
+``promise.throwTo()`` will be wrapped as a ``JSException`` and raised
+as an async exception in that thread. This can be useful for
+interrupting Haskell computation in JavaScript. ``promise.throwTo()``
+doesn't block the JavaScript caller like Haskell ``throwTo``. It
+doesn't necessarily result in ``promise`` being rejected since the
+Haskell thread can handle the async exception, and it can be called
+multiple time. It has no effect when the respective Haskell thread has
+already run to completion.

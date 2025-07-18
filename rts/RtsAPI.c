@@ -577,15 +577,20 @@ void rts_evalLazyIO_ (/* inout */ Capability **cap,
 
 /* Convenience function for decoding the returned status. */
 
+GHC_STATIC_ASSERT(SchedulerStatus_End == 5, "Add new SchedulerStatus switch case below");
+
 void
 rts_checkSchedStatus (char* site, Capability *cap)
 {
     SchedulerStatus rc = cap->running_task->incall->rstat;
     switch (rc) {
+    case NoStatus:
+        errorBelch("%s: no status, not ok", site);
+        stg_exit(EXIT_FAILURE);
     case Success:
         return;
     case Killed:
-        errorBelch("%s: uncaught exception",site);
+        errorBelch("%s: uncaught exception", site);
         stg_exit(EXIT_FAILURE);
     case Interrupted:
         errorBelch("%s: interrupted", site);
@@ -599,8 +604,11 @@ rts_checkSchedStatus (char* site, Capability *cap)
 #else
         stg_exit(EXIT_FAILURE);
 #endif
+    case HeapExhausted:
+        errorBelch("%s: out of memory", site);
+        stg_exit(EXIT_FAILURE);
     default:
-        errorBelch("%s: Return code (%d) not ok",(site),(rc));
+        errorBelch("%s: SchedulerStatus code (%d) unknown", site, rc);
         stg_exit(EXIT_FAILURE);
     }
 }
@@ -942,12 +950,23 @@ void rts_done (void)
    it would be very difficult for the caller to arrange to free the StablePtr
    in all circumstances.
 
+   There's also hs_try_putmvar_with_value(cap, mvar, value) which
+   allows putting a custom value other than () in the MVar, typically
+   a closure created by one of rts_mk*() functions.
+
    For more details, see the section "Waking up Haskell threads from C" in the
    User's Guide.
    -------------------------------------------------------------------------- */
 
 void hs_try_putmvar (/* in */ int capability,
                      /* in */ HsStablePtr mvar)
+{
+    hs_try_putmvar_with_value(capability, mvar, TAG_CLOSURE(1, Unit_closure));
+}
+
+void hs_try_putmvar_with_value (/* in */ int capability,
+                                /* in */ HsStablePtr mvar,
+                                /* in */ StgClosure *value)
 {
     Task *task = getMyTask();
     Capability *cap;
@@ -963,7 +982,7 @@ void hs_try_putmvar (/* in */ int capability,
 
 #if !defined(THREADED_RTS)
 
-    performTryPutMVar(cap, (StgMVar*)deRefStablePtr(mvar), Unit_closure);
+    performTryPutMVar(cap, (StgMVar*)deRefStablePtr(mvar), value);
     freeStablePtr(mvar);
 
 #else
@@ -976,7 +995,7 @@ void hs_try_putmvar (/* in */ int capability,
         task->cap = cap;
         RELEASE_LOCK(&cap->lock);
 
-        performTryPutMVar(cap, (StgMVar*)deRefStablePtr(mvar), Unit_closure);
+        performTryPutMVar(cap, (StgMVar*)deRefStablePtr(mvar), value);
 
         freeStablePtr(mvar);
 

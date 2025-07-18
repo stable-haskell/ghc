@@ -11,8 +11,8 @@ module Oracles.Setting (
     -- ** Target platform things
     anyTargetOs, anyTargetArch, anyHostOs,
     isElfTarget, isOsxTarget, isWinTarget, isJsTarget, isArmTarget,
-    targetArmVersion,
-    ghcWithInterpreter
+    isWinHost,
+    targetArmVersion
     ) where
 
 import System.Directory
@@ -91,6 +91,7 @@ data ToolchainSetting
     | ToolchainSetting_LlcCommand
     | ToolchainSetting_OptCommand
     | ToolchainSetting_LlvmAsCommand
+    | ToolchainSetting_LlvmAsFlags
     | ToolchainSetting_DistroMinGW
 
 -- | Look up the value of a 'Setting' in @cfg/system.config@, tracking the
@@ -144,6 +145,7 @@ settingsFileSetting key = lookupSystemConfig $ case key of
     ToolchainSetting_LlcCommand             -> "settings-llc-command"
     ToolchainSetting_OptCommand             -> "settings-opt-command"
     ToolchainSetting_LlvmAsCommand          -> "settings-llvm-as-command"
+    ToolchainSetting_LlvmAsFlags            -> "settings-llvm-as-flags"
     ToolchainSetting_DistroMinGW            -> "settings-use-distro-mingw" -- ROMES:TODO: This option doesn't seem to be in ghc-toolchain yet. It corresponds to EnableDistroToolchain
 
 -- | An expression that looks up the value of a 'Setting' in @cfg/system.config@,
@@ -154,6 +156,9 @@ getSetting = expr . setting
 -- | The path to a Bourne shell interpreter.
 bashPath :: Action FilePath
 bashPath = setting BourneShell
+
+isWinHost :: Action Bool
+isWinHost = anyHostOs [OSMinGW32]
 
 isWinTarget :: Action Bool
 isWinTarget = anyTargetOs [OSMinGW32]
@@ -194,22 +199,6 @@ isElfTarget = queryTargetTarget (osElfTarget . archOS_OS . tgtArchOs)
 targetSupportsRPaths :: Action Bool
 targetSupportsRPaths = queryTargetTarget (\t -> let os = archOS_OS (tgtArchOs t)
                                              in osElfTarget os || osMachOTarget os)
-
--- | Check whether the target supports GHCi.
-ghcWithInterpreter :: Action Bool
-ghcWithInterpreter = do
-    goodOs <- anyTargetOs [ OSMinGW32, OSLinux, OSSolaris2 -- TODO "cygwin32"?,
-                          , OSFreeBSD, OSDragonFly, OSNetBSD, OSOpenBSD
-                          , OSDarwin, OSKFreeBSD
-                          , OSWasi ]
-    goodArch <- (||) <$>
-                anyTargetArch [ ArchX86, ArchX86_64, ArchPPC
-                              , ArchAArch64, ArchS390X
-                              , ArchPPC_64 ELF_V1, ArchPPC_64 ELF_V2
-                              , ArchRISCV64
-                              , ArchWasm32 ]
-                              <*> isArmTarget
-    return $ goodOs && goodArch
 
 -- | Which variant of the ARM architecture is the target (or 'Nothing' if not
 -- ARM)?

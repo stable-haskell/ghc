@@ -679,6 +679,11 @@ Options affecting code generation
     object files are generated, but if ghc-flag:`-fprefer-byte-code` is enabled,
     byte-code will be generated instead.
 
+    Code generation is only turned on for modules needed for evaluation during compilation.
+    A programmer can be more precise about which exact modules those are by using
+    the :extension:`ExplicitLevelImports` extension.
+
+
 .. ghc-flag:: -fwrite-interface
     :shortdesc: Always write interface files
     :type: dynamic
@@ -701,6 +706,31 @@ Options affecting code generation
     The definition of bindings which are included in this
     depend on the optimisation level. Any definitions which are already included in
     an interface file (via an unfolding for an exported identifier) are reused.
+
+.. ghc-flag:: -fwrite-if-self-recomp
+    :shortdesc: Write information for self-recompilation checking in an interface file
+    :type: dynamic
+
+    :default: on
+
+    Include information in an interface file which can be used in future to determine
+    whether we need to recompile a module or can reuse the existing interface.
+
+    This is intended to be turned off in situations where you know you will never try
+    to recompile a module, such as when compiling a package for distribution.
+    The advantage is that by omitting unecessary information to do with dependencies
+    there is less chance of build paths leaking into the interface file and affecting
+    determinism.
+
+.. ghc-flag:: -fwrite-if-self-recomp-flags
+    :shortdesc: Include detailed flag information for self-recompilation checking
+    :type: dynamic
+
+    Include detailed information about which flags were used during compilation
+    in an interface file. This makes it easier to debug issues with recompilation
+    by providing more context about the compilation environment. This flag is
+    primarily intended for debugging recompilation problems with ``-ddump-hi-diffs``
+
 
 
 .. ghc-flag:: -fobject-code

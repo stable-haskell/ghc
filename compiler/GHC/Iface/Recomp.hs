@@ -15,6 +15,7 @@ module GHC.Iface.Recomp
    , CompileReason(..)
    , recompileRequired
    , addFingerprints
+   , mkSelfRecomp
    )
 where
 
@@ -22,14 +23,15 @@ import GHC.Prelude
 import GHC.Data.FastString
 
 import GHC.Driver.Backend
-import GHC.Driver.Config.Finder
 import GHC.Driver.Env
 import GHC.Driver.DynFlags
 import GHC.Driver.Ppr
 import GHC.Driver.Plugins
 
+
 import GHC.Iface.Syntax
 import GHC.Iface.Recomp.Binary
+import GHC.Iface.Recomp.Types
 import GHC.Iface.Load
 import GHC.Iface.Recomp.Flags
 import GHC.Iface.Env
@@ -52,7 +54,10 @@ import GHC.Utils.Logger
 import GHC.Utils.Constants (debugIsOn)
 
 import GHC.Types.Annotations
+import GHC.Types.Avail
+import GHC.Types.Basic ( ImportLevel(..) )
 import GHC.Types.Name
+import GHC.Types.Name.Env
 import GHC.Types.Name.Set
 import GHC.Types.SrcLoc
 import GHC.Types.Unique.Set
@@ -69,6 +74,7 @@ import GHC.Unit.Module.Warnings
 import GHC.Unit.Module.Deps
 
 import Control.Monad
+import Control.Monad.Trans.State
 import Data.List (sortBy, sort, sortOn)
 import qualified Data.Map as Map
 import qualified Data.Set as Set
@@ -81,8 +87,10 @@ import qualified Data.Semigroup
 import GHC.List (uncons)
 import Data.Ord
 import Data.Containers.ListUtils
-import Data.Bifunctor
 import GHC.Iface.Errors.Ppr
+import Data.Functor
+import Data.Bifunctor (first)
+import GHC.Types.PkgQual
 
 {-
   -----------------------------------------------
@@ -168,9 +176,10 @@ instance Monoid RecompileRequired where
   mempty = UpToDate
 
 data RecompReason
-  = UnitDepRemoved UnitId
+  = UnitDepRemoved (ImportLevel, UnitId)
   | ModulePackageChanged FastString
   | SourceFileChanged
+  | NoSelfRecompInfo
   | ThisUnitIdChanged
   | ImpurePlugin
   | PluginsChanged
@@ -180,13 +189,14 @@ data RecompReason
   | HieOutdated
   | SigsMergeChanged
   | ModuleChanged ModuleName
-  | ModuleRemoved (UnitId, ModuleName)
-  | ModuleAdded (UnitId, ModuleName)
+  | ModuleRemoved (ImportLevel, UnitId, ModuleName)
+  | ModuleAdded (ImportLevel, UnitId, ModuleName)
   | ModuleChangedRaw ModuleName
   | ModuleChangedIface ModuleName
   | FileChanged FilePath
   | CustomReason String
   | FlagsChanged
+  | LinkFlagsChanged
   | OptimFlagsChanged
   | HpcFlagsChanged
   | MissingBytecode
@@ -199,11 +209,13 @@ data RecompReason
   | THWithJS
   deriving (Eq)
 
+
 instance Outputable RecompReason where
   ppr = \case
-    UnitDepRemoved uid       -> ppr uid <+> text "removed"
+    UnitDepRemoved (_lvl, uid) -> ppr uid <+> text "removed"
     ModulePackageChanged s   -> ftext s <+> text "package changed"
     SourceFileChanged        -> text "Source file changed"
+    NoSelfRecompInfo         -> text "Old interface lacks recompilation info"
     ThisUnitIdChanged        -> text "-this-unit-id changed"
     ImpurePlugin             -> text "Impure plugin forced recompilation"
     PluginsChanged           -> text "Plugins changed"
@@ -215,11 +227,12 @@ instance Outputable RecompReason where
     ModuleChanged m          -> ppr m <+> text "changed"
     ModuleChangedRaw m       -> ppr m <+> text "changed (raw)"
     ModuleChangedIface m     -> ppr m <+> text "changed (interface)"
-    ModuleRemoved (_uid, m)   -> ppr m <+> text "removed"
-    ModuleAdded (_uid, m)     -> ppr m <+> text "added"
+    ModuleRemoved (_st, _uid, m)   -> ppr m <+> text "removed"
+    ModuleAdded (_st, _uid, m)     -> ppr m <+> text "added"
     FileChanged fp           -> text fp <+> text "changed"
     CustomReason s           -> text s
     FlagsChanged             -> text "Flags changed"
+    LinkFlagsChanged         -> text "Flags changed"
     OptimFlagsChanged        -> text "Optimisation flags changed"
     HpcFlagsChanged          -> text "HPC flags changed"
     MissingBytecode          -> text "Missing bytecode"
@@ -283,7 +296,7 @@ check_old_iface hsc_env mod_summary maybe_iface
         logger = hsc_logger hsc_env
         getIface =
             case maybe_iface of
-                Just _  -> do
+                Just {}  -> do
                     trace_if logger (text "We already have the old interface for" <+>
                       ppr (ms_mod mod_summary))
                     return maybe_iface
@@ -291,7 +304,7 @@ check_old_iface hsc_env mod_summary maybe_iface
 
         loadIface read_dflags iface_path = do
              let ncu        = hsc_NC hsc_env
-             read_result <- readIface read_dflags ncu (ms_mod mod_summary) iface_path
+             read_result <- readIface logger read_dflags ncu (ms_mod mod_summary) iface_path
              case read_result of
                  Failed err -> do
                      let msg = readInterfaceErrorDiagnostic err
@@ -315,8 +328,8 @@ check_old_iface hsc_env mod_summary maybe_iface
               maybe_dyn_iface <- liftIO $ loadIface (setDynamicNow dflags) (msDynHiFilePath mod_summary)
               case maybe_dyn_iface of
                 Nothing -> return $ outOfDateItemBecause MissingDynHiFile Nothing
-                Just dyn_iface | mi_iface_hash (mi_final_exts dyn_iface)
-                                    /= mi_iface_hash (mi_final_exts normal_iface)
+                Just dyn_iface | mi_iface_hash dyn_iface
+                                    /= mi_iface_hash normal_iface
                   -> return $ outOfDateItemBecause MismatchedDynHiFile Nothing
                 Just {} -> return res
             _ -> return res
@@ -354,7 +367,9 @@ check_old_iface hsc_env mod_summary maybe_iface
                     -- should check versions because some packages
                     -- might have changed or gone away.
                     Just iface ->
-                      check_dyn_hi iface $ checkVersions hsc_env mod_summary iface
+                      case mi_self_recomp_info iface of
+                        Nothing -> return $ outOfDateItemBecause NoSelfRecompInfo Nothing
+                        Just sr_info -> check_dyn_hi iface $ checkVersions hsc_env mod_summary iface sr_info
 
 -- | Check if a module is still the same 'version'.
 --
@@ -370,8 +385,9 @@ check_old_iface hsc_env mod_summary maybe_iface
 checkVersions :: HscEnv
               -> ModSummary
               -> ModIface       -- Old interface
+              -> IfaceSelfRecomp
               -> IfG (MaybeValidated ModIface)
-checkVersions hsc_env mod_summary iface
+checkVersions hsc_env mod_summary iface self_recomp
   = do { liftIO $ trace_hi_diffs logger
                         (text "Considering whether compilation is required for" <+>
                         ppr (mi_module iface) <> colon)
@@ -380,22 +396,21 @@ checkVersions hsc_env mod_summary iface
        -- but we ALSO must make sure the instantiation matches up.  See
        -- test case bkpcabal04!
        ; hsc_env <- getTopEnv
-       ; if mi_src_hash iface /= ms_hs_hash mod_summary
+       ; if mi_sr_src_hash self_recomp /= ms_hs_hash mod_summary
             then return $ outOfDateItemBecause SourceFileChanged Nothing else do {
        ; if not (isHomeModule home_unit (mi_module iface))
             then return $ outOfDateItemBecause ThisUnitIdChanged Nothing else do {
-       ; recomp <- liftIO $ checkFlagHash hsc_env iface
-                             `recompThen` checkOptimHash hsc_env iface
-                             `recompThen` checkHpcHash hsc_env iface
-                             `recompThen` checkMergedSignatures hsc_env mod_summary iface
+       ; recomp <- liftIO $ checkFlagHash hsc_env (mi_module iface) self_recomp
+                             `recompThen` checkOptimHash hsc_env self_recomp
+                             `recompThen` checkHpcHash hsc_env self_recomp
+                             `recompThen` checkMergedSignatures hsc_env mod_summary self_recomp
                              `recompThen` checkHsig logger home_unit mod_summary iface
                              `recompThen` pure (checkHie dflags mod_summary)
        ; case recomp of (NeedsRecompile reason) -> return $ OutOfDateItem reason Nothing ; _ -> do {
        ; recomp <- checkDependencies hsc_env mod_summary iface
        ; case recomp of (NeedsRecompile reason) -> return $ OutOfDateItem reason (Just iface) ; _ -> do {
-       ; recomp <- checkPlugins (hsc_plugins hsc_env) iface
+       ; recomp <- checkPlugins (hsc_plugins hsc_env) self_recomp
        ; case recomp of (NeedsRecompile reason) -> return $ OutOfDateItem reason Nothing ; _ -> do {
-
 
        -- Source code unchanged and no errors yet... carry on
        --
@@ -411,7 +426,7 @@ checkVersions hsc_env mod_summary iface
           ; updateEps_ $ \eps  -> eps { eps_is_boot = mkModDeps $ dep_boot_mods (mi_deps iface) }
        }
        ; recomp <- checkList [checkModUsage (hsc_FC hsc_env) u
-                             | u <- mi_usages iface]
+                             | u <- mi_sr_usages self_recomp]
        ; case recomp of (NeedsRecompile reason) -> return $ OutOfDateItem reason (Just iface) ; _ -> do {
        ; return $ UpToDateItem iface
     }}}}}}}
@@ -423,11 +438,11 @@ checkVersions hsc_env mod_summary iface
 
 
 -- | Check if any plugins are requesting recompilation
-checkPlugins :: Plugins -> ModIface -> IfG RecompileRequired
-checkPlugins plugins iface = liftIO $ do
+checkPlugins :: Plugins -> IfaceSelfRecomp -> IfG RecompileRequired
+checkPlugins plugins self_recomp = liftIO $ do
   recomp <- recompPlugins plugins
   let new_fingerprint = fingerprintPluginRecompile recomp
-  let old_fingerprint = mi_plugin_hash (mi_final_exts iface)
+  let old_fingerprint = mi_sr_plugin_hash self_recomp
   return $ pluginRecompileToRecompileRequired old_fingerprint new_fingerprint recomp
 
 recompPlugins :: Plugins -> IO PluginRecompile
@@ -516,23 +531,56 @@ checkHie dflags mod_summary =
              _ -> UpToDate
 
 -- | Check the flags haven't changed
-checkFlagHash :: HscEnv -> ModIface -> IO RecompileRequired
-checkFlagHash hsc_env iface = do
+checkFlagHash :: HscEnv -> Module -> IfaceSelfRecomp -> IO RecompileRequired
+checkFlagHash hsc_env iface_mod self_recomp = do
     let logger   = hsc_logger hsc_env
-    let old_hash = mi_flag_hash (mi_final_exts iface)
-    new_hash <- fingerprintDynFlags hsc_env (mi_module iface) putNameLiterally
-    case old_hash == new_hash of
-        True  -> up_to_date logger (text "Module flags unchanged")
-        False -> out_of_date_hash logger FlagsChanged
-                     (text "  Module flags have changed")
-                     old_hash new_hash
+    let FingerprintWithValue old_fp old_flags = mi_sr_flag_hash self_recomp
+    let (new_fp, new_flags) = fingerprintDynFlags hsc_env iface_mod putNameLiterally
+    if old_fp == new_fp
+      then up_to_date logger (text "Module flags unchanged")
+      else do
+        -- Do not perform this computation unless -ddump-hi-diffs is on
+        let diffs = case old_flags of
+                      Nothing -> pure [missingExtraFlagInfo]
+                      Just old_flags -> checkIfaceFlags old_flags new_flags
+        out_of_date logger FlagsChanged (fmap vcat diffs)
+
+
+checkIfaceFlags :: IfaceDynFlags -> IfaceDynFlags -> IO [SDoc]
+checkIfaceFlags (IfaceDynFlags a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14)
+                (IfaceDynFlags b1 b2 b3 b4 b5 b6 b7 b8 b9 b10 b11 b12 b13 b14) =
+  flip execStateT [] $ do
+    check_one "main is" (ppr . fmap (fmap (text @SDoc))) a1 b1
+    check_one_simple "safemode" a2 b2
+    check_one_simple "lang"  a3 b3
+    check_one_simple "exts" a4 b4
+    check_one_simple "cpp option" a5 b5
+    check_one_simple "js option" a6 b6
+    check_one_simple "cmm option" a7 b7
+    check_one "paths" (ppr . map (text @SDoc)) a8 b8
+    check_one_simple "prof" a9 b9
+    check_one_simple "ticky" a10 b10
+    check_one_simple "codegen" a11 b11
+    check_one_simple "fat iface" a12 b12
+    check_one_simple "debug level" a13 b13
+    check_one_simple "caller cc filter" a14 b14
+  where
+    diffSimple p a b = vcat [text "before:" <+> p a
+                           , text "after:" <+> p b ]
+
+    check_one_simple s a b = check_one s ppr a b
+
+    check_one s p a b = do
+      let a' = computeFingerprint putNameLiterally a
+      let b' = computeFingerprint putNameLiterally b
+      if a' == b' then pure () else modify (([ text s <+> text "flags changed"] ++ [diffSimple p a b]) ++)
 
 -- | Check the optimisation flags haven't changed
-checkOptimHash :: HscEnv -> ModIface -> IO RecompileRequired
+checkOptimHash :: HscEnv -> IfaceSelfRecomp -> IO RecompileRequired
 checkOptimHash hsc_env iface = do
     let logger   = hsc_logger hsc_env
-    let old_hash = mi_opt_hash (mi_final_exts iface)
-    new_hash <- fingerprintOptFlags (hsc_dflags hsc_env)
+    let old_hash = mi_sr_opt_hash iface
+    let !new_hash = fingerprintOptFlags (hsc_dflags hsc_env)
                                                putNameLiterally
     if | old_hash == new_hash
          -> up_to_date logger (text "Optimisation flags unchanged")
@@ -544,11 +592,11 @@ checkOptimHash hsc_env iface = do
                      old_hash new_hash
 
 -- | Check the HPC flags haven't changed
-checkHpcHash :: HscEnv -> ModIface -> IO RecompileRequired
-checkHpcHash hsc_env iface = do
+checkHpcHash :: HscEnv -> IfaceSelfRecomp -> IO RecompileRequired
+checkHpcHash hsc_env self_recomp = do
     let logger   = hsc_logger hsc_env
-    let old_hash = mi_hpc_hash (mi_final_exts iface)
-    new_hash <- fingerprintHpcFlags (hsc_dflags hsc_env)
+    let old_hash = mi_sr_hpc_hash self_recomp
+    let !new_hash = fingerprintHpcFlags (hsc_dflags hsc_env)
                                                putNameLiterally
     if | old_hash == new_hash
          -> up_to_date logger (text "HPC flags unchanged")
@@ -561,11 +609,11 @@ checkHpcHash hsc_env iface = do
 
 -- Check that the set of signatures we are merging in match.
 -- If the -unit-id flags change, this can change too.
-checkMergedSignatures :: HscEnv -> ModSummary -> ModIface -> IO RecompileRequired
-checkMergedSignatures hsc_env mod_summary iface = do
+checkMergedSignatures :: HscEnv -> ModSummary -> IfaceSelfRecomp -> IO RecompileRequired
+checkMergedSignatures hsc_env mod_summary self_recomp = do
     let logger     = hsc_logger hsc_env
     let unit_state = hsc_units hsc_env
-    let old_merged = sort [ mod | UsageMergedRequirement{ usg_mod = mod } <- mi_usages iface ]
+    let old_merged = sort [ mod | UsageMergedRequirement{ usg_mod = mod } <- mi_sr_usages self_recomp ]
         new_merged = case lookupUniqMap (requirementContext unit_state)
                           (ms_mod_name mod_summary) of
                         Nothing -> []
@@ -587,8 +635,12 @@ checkMergedSignatures hsc_env mod_summary iface = do
 checkDependencies :: HscEnv -> ModSummary -> ModIface -> IfG RecompileRequired
 checkDependencies hsc_env summary iface
  = do
-    res_normal <- classify_import (findImportedModule hsc_env) (ms_textual_imps summary ++ ms_srcimps summary)
-    res_plugin <- classify_import (\mod _ -> findPluginModule fc fopts units mhome_unit mod) (ms_plugin_imps summary)
+    res_normal <- classify_import (findImportedModule hsc_env)
+                                  ([(st, p, m) | (st, p, m) <- (ms_textual_imps summary)]
+                                  ++
+                                  [(NormalLevel, NoPkgQual, m) | m <- ms_srcimps summary ])
+    res_plugin <- classify_import (\mod _ -> findPluginModule hsc_env mod)
+                    [(st, p, m) | (st, p, m) <- (ms_plugin_imps summary) ]
     case sequence (res_normal ++ res_plugin) of
       Left recomp -> return $ NeedsRecompile recomp
       Right es -> do
@@ -601,32 +653,27 @@ checkDependencies hsc_env summary iface
  where
 
    classify_import :: (ModuleName -> t -> IO FindResult)
-                      -> [(t, GenLocated l ModuleName)]
+                      -> [(ImportLevel, t, GenLocated l ModuleName)]
                     -> IfG
                        [Either
-                          CompileReason (Either (UnitId, ModuleName) (FastString, UnitId))]
+                          CompileReason (Either (ImportLevel, UnitId, ModuleName) (FastString, (ImportLevel, UnitId)))]
    classify_import find_import imports =
-    liftIO $ traverse (\(mb_pkg, L _ mod) ->
+    liftIO $ traverse (\(st, mb_pkg, L _ mod) ->
            let reason = ModuleChanged mod
-           in classify reason <$> find_import mod mb_pkg)
+           in classify st reason <$> find_import mod mb_pkg)
            imports
-   dflags        = hsc_dflags hsc_env
-   fopts         = initFinderOpts dflags
    logger        = hsc_logger hsc_env
-   fc            = hsc_FC hsc_env
-   mhome_unit    = hsc_home_unit_maybe hsc_env
    all_home_units = hsc_all_home_unit_ids hsc_env
-   units         = hsc_units hsc_env
-   prev_dep_mods = map (second gwib_mod) $ Set.toAscList $ dep_direct_mods (mi_deps iface)
-   prev_dep_pkgs = Set.toAscList (Set.union (dep_direct_pkgs (mi_deps iface))
-                                            (dep_plugin_pkgs (mi_deps iface)))
+   prev_dep_mods = map (\(IfaceImportLevel s,u, a) -> (s, u, gwib_mod a)) $ Set.toAscList $ dep_direct_mods (mi_deps iface)
+   prev_dep_pkgs = Set.toAscList (Set.union (Set.map (first tcImportLevel) (dep_direct_pkgs (mi_deps iface)))
+                                            (Set.map ((SpliceLevel),) (dep_plugin_pkgs (mi_deps iface))))
 
-   classify _ (Found _ mod)
-    | (toUnitId $ moduleUnit mod) `elem` all_home_units = Right (Left ((toUnitId $ moduleUnit mod), moduleName mod))
-    | otherwise = Right (Right (moduleNameFS (moduleName mod), toUnitId $ moduleUnit mod))
-   classify reason _ = Left (RecompBecause reason)
+   classify st _ (Found _ mod)
+    | (toUnitId $ moduleUnit mod) `elem` all_home_units = Right (Left ((st, toUnitId $ moduleUnit mod, moduleName mod)))
+    | otherwise = Right (Right (moduleNameFS (moduleName mod), (st, toUnitId $ moduleUnit mod)))
+   classify _ reason _ = Left (RecompBecause reason)
 
-   check_mods :: [(UnitId, ModuleName)] -> [(UnitId, ModuleName)] -> IO RecompileRequired
+   check_mods :: [(ImportLevel, UnitId, ModuleName)] -> [(ImportLevel, UnitId, ModuleName)] -> IO RecompileRequired
    check_mods [] [] = return UpToDate
    check_mods [] (old:_) = do
      -- This case can happen when a module is change from HPT to package import
@@ -644,14 +691,14 @@ checkDependencies hsc_env summary iface
            text " not among previous dependencies"
         return $ needsRecompileBecause $ ModuleAdded new
 
-   check_packages :: [(FastString, UnitId)] -> [UnitId] -> IO RecompileRequired
+   check_packages :: [(FastString, (ImportLevel, UnitId))] -> [(ImportLevel, UnitId)] -> IO RecompileRequired
    check_packages [] [] = return UpToDate
    check_packages [] (old:_) = do
      trace_hi_diffs logger $
       text "package " <> quotes (ppr old) <>
         text "no longer in dependencies"
      return $ needsRecompileBecause $ UnitDepRemoved old
-   check_packages ((new_name, new_unit):news) olds
+   check_packages ((new_name, (new_unit)):news) olds
     | Just (old, olds') <- uncons olds
     , new_unit == old = check_packages (dropWhile ((== new_unit) . snd) news) olds'
     | otherwise = do
@@ -703,7 +750,7 @@ checkModUsage _ UsagePackageModule{
   logger <- getLogger
   needInterface mod $ \iface -> do
     let reason = ModuleChanged (moduleName mod)
-    checkModuleFingerprint logger reason old_mod_hash (mi_mod_hash (mi_final_exts iface))
+    checkModuleFingerprint logger reason old_mod_hash (mi_mod_hash iface)
         -- We only track the ABI hash of package modules, rather than
         -- individual entity usages, so if the ABI hash changes we must
         -- recompile.  This is safe but may entail more recompilation when
@@ -713,7 +760,7 @@ checkModUsage _ UsageMergedRequirement{ usg_mod = mod, usg_mod_hash = old_mod_ha
   logger <- getLogger
   needInterface mod $ \iface -> do
     let reason = ModuleChangedRaw (moduleName mod)
-    checkModuleFingerprint logger reason old_mod_hash (mi_mod_hash (mi_final_exts iface))
+    checkModuleFingerprint logger reason old_mod_hash (mi_mod_hash iface)
 checkModUsage _  UsageHomeModuleInterface{ usg_mod_name = mod_name
                                                  , usg_unit_id = uid
                                                  , usg_iface_hash = old_mod_hash } = do
@@ -721,23 +768,21 @@ checkModUsage _  UsageHomeModuleInterface{ usg_mod_name = mod_name
   logger <- getLogger
   needInterface mod $ \iface -> do
     let reason = ModuleChangedIface mod_name
-    checkIfaceFingerprint logger reason old_mod_hash (mi_iface_hash (mi_final_exts iface))
+    checkIfaceFingerprint logger reason old_mod_hash (mi_iface_hash iface)
 
 checkModUsage _ UsageHomeModule{
                                 usg_mod_name = mod_name,
                                 usg_unit_id  = uid,
                                 usg_mod_hash = old_mod_hash,
-                                usg_exports = maybe_old_export_hash,
+                                usg_exports  = maybe_imported_exports,
                                 usg_entities = old_decl_hash }
   = do
     let mod = mkModule (RealUnit (Definite uid)) mod_name
     logger <- getLogger
     needInterface mod $ \iface -> do
      let
-         new_mod_hash    = mi_mod_hash (mi_final_exts iface)
-         new_decl_hash   = mi_hash_fn  (mi_final_exts iface)
-         new_export_hash = mi_exp_hash (mi_final_exts iface)
-
+         new_mod_hash    = mi_mod_hash iface
+         new_decl_hash   = mi_hash_fn  iface
          reason = ModuleChanged (moduleName mod)
 
      liftIO $ do
@@ -746,10 +791,9 @@ checkModUsage _ UsageHomeModule{
        if not (recompileRequired recompile)
          then return UpToDate
          else checkList
-           [ -- CHECK EXPORT LIST
-             checkMaybeHash logger reason maybe_old_export_hash new_export_hash
-               (text "  Export list changed")
-           , -- CHECK ITEMS ONE BY ONE
+           [ -- CHECK EXPORT LIST; see Note [When to recompile when export lists change?]
+             checkHomeModImport logger reason maybe_imported_exports iface
+           , -- CHECK USED ITEMS ONE BY ONE
              checkList [ checkEntityUsage logger reason new_decl_hash u
                        | u <- old_decl_hash]
            , up_to_date logger (text "  Great!  The bits I use are up to date")
@@ -770,6 +814,193 @@ checkModUsage fc UsageFile{ usg_file_path = file,
    handler = if debugIsOn
       then \e -> pprTrace "UsageFile" (text (show e)) $ return recomp
       else \_ -> return recomp -- if we can't find the file, just recompile, don't fail
+
+-- | We are importing a module whose exports have changed.
+-- Does this require recompilation?
+--
+-- See Note [When to recompile when export lists change?]
+checkHomeModImport :: Logger -> RecompReason -> Maybe HomeModImport -> ModIface -> IO RecompileRequired
+checkHomeModImport _ _ Nothing _ = return UpToDate
+checkHomeModImport logger reason
+  (Just (HomeModImport old_orphan_like_hash old_avails))
+  iface
+    -- (1) Orphans (of the module we are importing or of its dependencies)
+    --     have changed: recompilation is required.
+    --
+    -- See Note [Orphan-like hash].
+    | old_orphan_like_hash /= new_orphan_like_hash
+    = out_of_date_hash logger reason (text "  Orphan-likes changed")
+        old_orphan_like_hash new_orphan_like_hash
+    | otherwise
+    -- (2) Is there a change in the set of entities we are importing?
+    = case old_avails of
+        -- (a) Whole module import: recompile if the export hash
+        -- of the module we are importing has changed.
+        HMIA_Implicit old_avails_hash
+          | old_avails_hash /= new_avails_hash
+          -> out_of_date_hash logger reason (text "  Export list changed")
+               old_orphan_like_hash new_orphan_like_hash
+          | otherwise
+          -> return UpToDate
+        -- (b) Explicit imports: recompile if there is a change in the
+        --     set of imported items.
+        HMIA_Explicit
+         { hmia_imported_avails        = DetOrdAvails imps
+         , hmia_parents_with_implicits = parents_of_implicits
+         } ->
+          case checkNewExportedAvails new_exports parents_of_implicits imps of
+            [] -> return UpToDate
+            changes@(_:_) ->
+              do trace_hi_diffs logger $
+                   hang (text "Export list changed")
+                      2 (ppr changes)
+                 return $ needsRecompileBecause reason
+  where
+    new_orphan_like_hash = mi_orphan_like_hash iface
+    new_avails_hash      = mi_export_avails_hash iface
+    new_exports          = mi_exports iface
+
+-- | The exported avails of a module have changed. Should this cause recompilation
+-- of a module that imports it?
+--
+-- This is only about export/import lists; checking for changes in the definitions
+-- of used identifiers is done later (see 'checkEntityUsage').
+--
+-- See Note [When to recompile when export lists change?].
+checkNewExportedAvails :: [AvailInfo] -> NameSet -> [AvailInfo] -> [AvailInfo]
+checkNewExportedAvails new_avails parents_of_implicits imported_avails
+  = concatMap go imported_avails
+  where
+    go a@(Avail n) =
+      case lookupNameEnv env n of
+        Nothing -> [a]
+        Just {} -> []
+    go a@(AvailTC n ns) =
+      case lookupNameEnv env n of
+        Nothing -> [a]
+        Just a' ->
+          case a' of
+            Avail {} -> [a]
+            AvailTC _ ns'
+              | n `elemNameSet` parents_of_implicits
+              ->
+                -- We are dealing with an export item of the form @T(..)@.
+                -- If the set of subordinate names has changed at all, we must
+                -- recompile.
+                if mkNameSet ns == mkNameSet ns'
+                then []
+                else [a]
+              | otherwise
+              ->
+                -- We are dealing with an import item of the form @T(K,x,y)@.
+                -- Just check that all the names we are explicitly importing
+                -- continue to be exported. It's OK if T has more children
+                -- than it used to.
+                if all (`elem` ns') ns
+                then []
+                else [a]
+
+    env = availsToNameEnv new_avails
+
+{- Note [When to recompile when export lists change?]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Suppose module N imports module M, and the exports of M change. Does this
+require recompiling N?
+
+Suppose for example that we have:
+
+  module M (foo) where
+    foo = 3
+
+  module N where
+    import M
+    bar = foo + 1
+    baz = 2 * bar
+
+If we add an identifier to the export list of M, we must recompile N because
+this might introduce name clashes, e.g. changing M to:
+
+  module M (foo, bar) where
+    foo = 3
+    bar = 7
+
+will cause N to no longer compile because of a name clash involving 'bar'.
+
+However, if N had an explicit import list:
+
+  module N where
+    import M(foo)
+    bar = foo + 1
+    baz = 2 * bar
+
+then it *does not matter* that 'M' starts exporting 'bar'; 'N' is unaffected.
+
+This justifies the following approach for deciding whether a change in exports
+should lead to recompilation.
+
+  (1) If the orphan instances exported by M change, or if the orphans of
+      dependencies of M change, we must recompile N.
+      See Note [Orphan-like hash]
+
+  (2) Otherwise, look at all the import declarations that import M.
+
+      (a) If there is a whole module import, or an "import hiding" import,
+          then we must recompile N when the avails exported from M change
+          (such a change is detected by using the 'mi_export_avails_hash').
+
+      (b) Otherwise, all imports are explicit imports, but not every identifier
+          is necessarily explicitly imported, as we might have an import of
+          the form @import M(T(..))@.
+
+          We proceed by comparing what we are importing from M against the
+          new exports of M. We recompile unless the following two conditions
+          are both satisfied:
+
+            C1. Every explicitly imported identifier continues to be exported.
+            C2. For every parent P in an import item of the form @P(..)@,
+                the set of subordinates exported by P has not changed.
+
+Note that this import check is done purely on the basis of the Names involved,
+unlike the subsequent recompilation check done in 'checkEntityUsage' which
+checks that the definitions of used identifiers have not changed.
+
+Note [Orphan-like hash]
+~~~~~~~~~~~~~~~~~~~~~~~
+The orphan-like hash extends the orphan hash to include other entities that
+also cause recompilation downstream upon changing.
+
+The hash includes:
+
+  (1) orphan class and family instances
+  (2) exported named defaults (these are very similar to orphan instances)
+  (3) non-orphan type family instances, including those of dependencies
+  (4) the Safe Haskell safety of the module
+
+Why do we need to do this? For (3), suppose we have:
+
+  module A where
+      type instance F Int = Bool
+
+  module B where
+      import A
+
+  module C where
+      import B
+
+The family instance consistency check for C depends on the dep_finsts of
+B.  If we rename module A to A2, when the dep_finsts of B changes, we need
+to make sure that C gets rebuilt. Effectively, the dep_finsts are part of
+the exports of B, because C always considers them when checking
+consistency.
+
+A full discussion is in #12723.
+
+We do NOT need to hash dep_orphs, because this is implied by
+dep_orphan_hashes, and we do not need to hash ordinary (non-orphan) class
+instances, because there is no eager consistency check as there is with type
+families. For this reason, we don't currently store a hash of non-orphan class
+instances.
+-}
 
 ------------------------
 checkModuleFingerprint
@@ -801,20 +1032,6 @@ checkIfaceFingerprint logger reason old_mod_hash new_mod_hash
                      old_mod_hash new_mod_hash
 
 ------------------------
-checkMaybeHash
-  :: Logger
-  -> RecompReason
-  -> Maybe Fingerprint
-  -> Fingerprint
-  -> SDoc
-  -> IO RecompileRequired
-checkMaybeHash logger reason maybe_old_hash new_hash doc
-  | Just hash <- maybe_old_hash, hash /= new_hash
-  = out_of_date_hash logger reason doc hash new_hash
-  | otherwise
-  = return UpToDate
-
-------------------------
 checkEntityUsage :: Logger
                  -> RecompReason
                  -> (OccName -> Maybe (OccName, Fingerprint))
@@ -823,7 +1040,7 @@ checkEntityUsage :: Logger
 checkEntityUsage logger reason new_hash (name,old_hash) = do
   case new_hash name of
     -- We used it before, but it ain't there now
-    Nothing       -> out_of_date logger reason (sep [text "No longer exported:", ppr name])
+    Nothing       -> out_of_date logger reason (pure $ sep [text "No longer exported:", ppr name])
     -- It's there, but is it up to date?
     Just (_, new_hash)
       | new_hash == old_hash
@@ -835,20 +1052,18 @@ checkEntityUsage logger reason new_hash (name,old_hash) = do
 up_to_date :: Logger -> SDoc -> IO RecompileRequired
 up_to_date logger msg = trace_hi_diffs logger msg >> return UpToDate
 
-out_of_date :: Logger -> RecompReason -> SDoc -> IO RecompileRequired
-out_of_date logger reason msg = trace_hi_diffs logger msg >> return (needsRecompileBecause reason)
+out_of_date :: Logger -> RecompReason -> IO SDoc -> IO RecompileRequired
+out_of_date logger reason msg = trace_hi_diffs_io logger msg >> return (needsRecompileBecause reason)
 
 out_of_date_hash :: Logger -> RecompReason -> SDoc -> Fingerprint -> Fingerprint -> IO RecompileRequired
 out_of_date_hash logger reason msg old_hash new_hash
-  = out_of_date logger reason (hsep [msg, ppr old_hash, text "->", ppr new_hash])
+  = out_of_date logger reason (pure $ hsep [msg, ppr old_hash, text "->", ppr new_hash])
 
 -- ---------------------------------------------------------------------------
 -- Compute fingerprints for the interface
 
-{-
-Note [Fingerprinting IfaceDecls]
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
+{- Note [Fingerprinting IfaceDecls]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 The general idea here is that we first examine the 'IfaceDecl's and determine
 the recursive groups of them. We then walk these groups in dependency order,
 serializing each contained 'IfaceDecl' to a "Binary" buffer which we then
@@ -870,7 +1085,6 @@ thing that we are currently fingerprinting.
 
 Note [Fingerprinting recursive groups]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
 The fingerprinting of a single recursive group is a rather subtle affair, as
 seen in #18733.
 
@@ -939,6 +1153,33 @@ we use is:
 
 -}
 
+-- | Compute the information needed for self-recompilation checking. This
+-- information can be computed before the backend phase.
+mkSelfRecomp :: HscEnv -> Module -> Fingerprint -> [Usage] -> IO IfaceSelfRecomp
+mkSelfRecomp hsc_env this_mod src_hash usages = do
+      let dflags = hsc_dflags hsc_env
+
+      let dyn_flags_info = fingerprintDynFlags hsc_env this_mod putNameLiterally
+
+      let opt_hash = fingerprintOptFlags dflags putNameLiterally
+
+      let hpc_hash = fingerprintHpcFlags dflags putNameLiterally
+
+      plugin_hash <- fingerprintPlugins (hsc_plugins hsc_env)
+
+      let include_detailed_flags (flag_hash, flags) =
+            if gopt Opt_WriteSelfRecompFlags dflags
+              then FingerprintWithValue flag_hash (Just flags)
+              else FingerprintWithValue flag_hash Nothing
+
+      return (IfaceSelfRecomp
+                { mi_sr_flag_hash = include_detailed_flags dyn_flags_info
+                , mi_sr_hpc_hash = hpc_hash
+                , mi_sr_opt_hash = opt_hash
+                , mi_sr_plugin_hash = plugin_hash
+                , mi_sr_src_hash = src_hash
+                , mi_sr_usages = usages })
+
 -- | Add fingerprints for top-level declarations to a 'ModIface'.
 --
 -- See Note [Fingerprinting IfaceDecls]
@@ -946,28 +1187,99 @@ addFingerprints
         :: HscEnv
         -> PartialModIface
         -> IO ModIface
-addFingerprints hsc_env iface0
- = do
-   eps <- hscEPS hsc_env
-   let
-       decls = mi_decls iface0
-       decl_warn_fn = mkIfaceDeclWarnCache (fromIfaceWarnings $ mi_warns iface0)
-       export_warn_fn = mkIfaceExportWarnCache (fromIfaceWarnings $ mi_warns iface0)
-       fix_fn = mkIfaceFixCache (mi_fixities iface0)
+addFingerprints hsc_env iface0 = do
+  (abiHashes, caches, decls_w_hashes) <- addAbiHashes hsc_env (mi_mod_info iface0) (mi_public iface0) (mi_deps iface0)
+
+   -- put the declarations in a canonical order, sorted by OccName
+  let sorted_decls :: [(Fingerprint, IfaceDecl)]
+      sorted_decls = Map.elems $ Map.fromList $
+                          [(getOccName d, e) | e@(_, d) <- decls_w_hashes]
+
+       -- This key is safe because mi_extra_decls contains tidied things.
+      getOcc (IfGblTopBndr b) = getOccName b
+      getOcc (IfLclTopBndr fs _ _ details) =
+        case details of
+          IfRecSelId { ifRecSelFirstCon = first_con }
+            -> mkRecFieldOccFS (getOccFS first_con) (ifLclNameFS fs)
+          _ -> mkVarOccFS (ifLclNameFS fs)
+
+      binding_key (IfaceNonRec b _) = IfaceNonRec (getOcc b) ()
+      binding_key (IfaceRec bs) = IfaceRec (map (\(b, _) -> (getOcc b, ())) bs)
+
+      sorted_extra_decls :: Maybe IfaceSimplifiedCore
+      sorted_extra_decls = mi_simplified_core iface0 <&> \simpl_core ->
+         IfaceSimplifiedCore (sortOn binding_key (mi_sc_extra_decls simpl_core)) (mi_sc_foreign simpl_core)
+
+  -- The interface hash depends on:
+  --   - the ABI hash, plus
+  --   - the things which can affect whether a module is recompiled
+  --   - the module level annotations,
+  --   - deps (home and external packages, dependent files)
+  let !iface_hash = computeFingerprint putNameLiterally
+                        (mi_abi_mod_hash abiHashes,
+                         mi_self_recomp_info iface0,
+                         mi_deps iface0)
+
+  let final_iface = completePartialModIface iface0 iface_hash
+                     sorted_decls sorted_extra_decls abiHashes caches
+   --
+  return final_iface
+
+
+
+-- The ABI hash should depend on everything in IfacePublic
+-- This is however computed in a very convoluted way, so be careful your
+-- addition ends up in the right place. In essence all this function does is
+-- compute a hash of the arguments.
+--
+-- Why the convoluted way? Hashing individual declarations allows us to do fine-grained
+-- recompilation checking for home package modules, which record precisely what they use
+-- from each module.
+addAbiHashes :: HscEnv -> IfaceModInfo -> PartialIfacePublic -> Dependencies -> IO (IfaceAbiHashes, IfaceCache, [(Fingerprint, IfaceDecl)])
+addAbiHashes hsc_env info
+  iface_public
+  deps = do
+  eps <- hscEPS hsc_env
+  let
+      -- If you have arrived here by accident then congratulations,
+      -- you have discovered the ABI hash. Your reward is to update the ABI hash to
+      -- account for your change to the interface file. Omitting your field using a
+      -- wildcard may lead to some unfortunate consequences.
+      IfacePublic
+        exports fixities warns anns decls
+        defaults insts fam_insts rules
+        trust _trust_pkg -- TODO: trust_pkg ignored
+        complete
+        _cache
+        ()
+          = iface_public
+      -- And these fields of deps should be in IfacePublic, but in good time.
+      Dependencies _ _ _ sig_mods trusted_pkgs boot_mods orph_mods fis_mods  = deps
+      decl_warn_fn = mkIfaceDeclWarnCache (fromIfaceWarnings warns)
+      export_warn_fn = mkIfaceExportWarnCache (fromIfaceWarnings $ warns)
+      fix_fn = mkIfaceFixCache fixities
+
+      this_mod = mi_mod_info_module info
+      semantic_mod = mi_mod_info_semantic_module info
+      (non_orph_insts, orph_insts) = mkOrphMap ifInstOrph    insts
+      (non_orph_rules, orph_rules) = mkOrphMap ifRuleOrph    rules
+      (non_orph_fis,   orph_fis)   = mkOrphMap ifFamInstOrph fam_insts
+      complete_matches = mkIfaceCompleteMap complete
+      ann_fn = mkIfaceAnnCache anns
 
         -- The ABI of a declaration represents everything that is made
         -- visible about the declaration that a client can depend on.
         -- see IfaceDeclABI below.
-       declABI :: IfaceDecl -> IfaceDeclABI
+      declABI :: IfaceDecl -> IfaceDeclABI
        -- TODO: I'm not sure if this should be semantic_mod or this_mod.
        -- See also Note [Identity versus semantic module]
-       declABI decl = (this_mod, decl, extras)
+      declABI decl = (this_mod, decl, extras)
         where extras = declExtras fix_fn ann_fn non_orph_rules non_orph_insts
-                                  non_orph_fis top_lvl_name_env decl
+                                  non_orph_fis top_lvl_name_env complete_matches decl
 
        -- This is used for looking up the Name of a default method
        -- from its OccName. See Note [default method Name]
-       top_lvl_name_env =
+      top_lvl_name_env =
          mkOccEnv [ (nameOccName nm, nm)
                   | IfaceId { ifName = nm } <- decls ]
 
@@ -975,15 +1287,15 @@ addFingerprints hsc_env iface0
        -- This is computed by finding the free external names of each
        -- declaration, including IfaceDeclExtras (things that a
        -- declaration implicitly depends on).
-       edges :: [ Node OccName IfaceDeclABI ]
-       edges = [ DigraphNode abi (getOccName decl) out
+      edges :: [ Node OccName IfaceDeclABI ]
+      edges = [ DigraphNode abi (getOccName decl) out
                | decl <- decls
                , let abi = declABI decl
                , let out = localOccs $ freeNamesDeclABI abi
                ]
 
-       name_module n = assertPpr (isExternalName n) (ppr n) (nameModule n)
-       localOccs =
+      name_module n = assertPpr (isExternalName n) (ppr n) (nameModule n)
+      localOccs =
          map (getParent . getOccName)
                         -- NB: names always use semantic module, so
                         -- filtering must be on the semantic module!
@@ -1001,17 +1313,17 @@ addFingerprints hsc_env iface0
         -- maps OccNames to their parents in the current module.
         -- e.g. a reference to a constructor must be turned into a reference
         -- to the TyCon for the purposes of calculating dependencies.
-       parent_map :: OccEnv OccName
-       parent_map = foldl' extend emptyOccEnv decls
+      parent_map :: OccEnv OccName
+      parent_map = foldl' extend emptyOccEnv decls
           where extend env d =
                   extendOccEnvList env [ (b,n) | b <- ifaceDeclImplicitBndrs d ]
                   where n = getOccName d
 
         -- Strongly-connected groups of declarations, in dependency order
-       groups :: [SCC IfaceDeclABI]
-       groups = stronglyConnCompFromEdgedVerticesOrd edges
+      groups :: [SCC IfaceDeclABI]
+      groups = stronglyConnCompFromEdgedVerticesOrd edges
 
-       global_hash_fn = mkHashFun hsc_env eps
+      global_hash_fn = mkHashFun hsc_env eps
 
         -- How to output Names when generating the data to fingerprint.
         -- Here we want to output the fingerprint for each top-level
@@ -1019,9 +1331,9 @@ addFingerprints hsc_env iface0
         -- module.  In this way, the fingerprint for a declaration will
         -- change if the fingerprint for anything it refers to (transitively)
         -- changes.
-       mk_put_name :: OccEnv (OccName,Fingerprint)
+      mk_put_name :: OccEnv (OccName,Fingerprint)
                    -> WriteBinHandle -> Name -> IO  ()
-       mk_put_name local_env bh name
+      mk_put_name local_env bh name
           | isWiredInName name  =  putNameLiterally bh name
            -- wired-in names don't have fingerprints
           | otherwise
@@ -1048,21 +1360,21 @@ addFingerprints hsc_env iface0
         -- take a strongly-connected group of declarations and compute
         -- its fingerprint.
 
-       fingerprint_group :: (OccEnv (OccName,Fingerprint),
+      fingerprint_group :: (OccEnv (OccName,Fingerprint),
                              [(Fingerprint,IfaceDecl)])
                          -> SCC IfaceDeclABI
                          -> IO (OccEnv (OccName,Fingerprint),
                                 [(Fingerprint,IfaceDecl)])
 
-       fingerprint_group (local_env, decls_w_hashes) (AcyclicSCC abi)
-          = do let hash_fn = mk_put_name local_env
-                   decl = abiDecl abi
+      fingerprint_group (local_env, decls_w_hashes) (AcyclicSCC abi)
+         = do let hash_fn = mk_put_name local_env
+                  decl = abiDecl abi
                --pprTrace "fingerprinting" (ppr (ifName decl) ) $ do
-               hash <- computeFingerprint hash_fn abi
-               env' <- extend_hash_env local_env (hash,decl)
-               return (env', (hash,decl) : decls_w_hashes)
+              let !hash = computeFingerprint hash_fn abi
+              env' <- extend_hash_env local_env (hash,decl)
+              return (env', (hash,decl) : decls_w_hashes)
 
-       fingerprint_group (local_env, decls_w_hashes) (CyclicSCC abis)
+      fingerprint_group (local_env, decls_w_hashes) (CyclicSCC abis)
           = do let stable_abis = sortBy cmp_abiNames abis
                    stable_decls = map abiDecl stable_abis
                local_env1 <- foldM extend_hash_env local_env
@@ -1071,221 +1383,157 @@ addFingerprints hsc_env iface0
                let hash_fn = mk_put_name local_env1
                -- pprTrace "fingerprinting" (ppr (map ifName decls) ) $ do
                 -- put the cycle in a canonical order
-               hash <- computeFingerprint hash_fn stable_abis
+               let !hash = computeFingerprint hash_fn stable_abis
                let pairs = zip (map (bumpFingerprint hash) [0..]) stable_decls
                 -- See Note [Fingerprinting recursive groups]
                local_env2 <- foldM extend_hash_env local_env pairs
                return (local_env2, pairs ++ decls_w_hashes)
 
        -- Make a fingerprint from the ordinal position of a binding in its group.
-       mkRecFingerprint :: Word64 -> Fingerprint
-       mkRecFingerprint i = Fingerprint 0 i
+      mkRecFingerprint :: Word64 -> Fingerprint
+      mkRecFingerprint i = Fingerprint 0 i
 
-       bumpFingerprint :: Fingerprint -> Word64 -> Fingerprint
-       bumpFingerprint fp n = fingerprintFingerprints [ fp, mkRecFingerprint n ]
+      bumpFingerprint :: Fingerprint -> Word64 -> Fingerprint
+      bumpFingerprint fp n = fingerprintFingerprints [ fp, mkRecFingerprint n ]
 
        -- we have fingerprinted the whole declaration, but we now need
        -- to assign fingerprints to all the OccNames that it binds, to
        -- use when referencing those OccNames in later declarations.
        --
-       extend_hash_env :: OccEnv (OccName,Fingerprint)
+      extend_hash_env :: OccEnv (OccName,Fingerprint)
                        -> (Fingerprint,IfaceDecl)
                        -> IO (OccEnv (OccName,Fingerprint))
-       extend_hash_env env0 (hash,d) =
+      extend_hash_env env0 (hash,d) =
           return (foldr (\(b,fp) env -> extendOccEnv env b (b,fp)) env0
                  (ifaceDeclFingerprints hash d))
 
    --
-   (local_env, decls_w_hashes) <-
+  (local_env, decls_w_hashes) <-
        foldM fingerprint_group (emptyOccEnv, []) groups
-
-   -- when calculating fingerprints, we always need to use canonical ordering
-   -- for lists of things. The mi_deps has various lists of modules and
-   -- suchlike, which are stored in canonical order:
-   let sorted_deps :: Dependencies
-       sorted_deps = mi_deps iface0
 
    -- The export hash of a module depends on the orphan hashes of the
    -- orphan modules below us in the dependency tree.  This is the way
    -- that changes in orphans get propagated all the way up the
    -- dependency tree.
    --
-   -- Note [A bad dep_orphs optimization]
-   -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-   -- In a previous version of this code, we filtered out orphan modules which
-   -- were not from the home package, justifying it by saying that "we'd
-   -- pick up the ABI hashes of the external module instead".  This is wrong.
-   -- Suppose that we have:
-   --
-   --       module External where
-   --           instance Show (a -> b)
-   --
-   --       module Home1 where
-   --           import External
-   --
-   --       module Home2 where
-   --           import Home1
-   --
-   -- The export hash of Home1 needs to reflect the orphan instances of
-   -- External. It's true that Home1 will get rebuilt if the orphans
-   -- of External, but we also need to make sure Home2 gets rebuilt
-   -- as well.  See #12733 for more details.
-   let orph_mods
-        = filter (/= this_mod) -- Note [Do not update EPS with your own hi-boot]
-        $ dep_orphs sorted_deps
-   dep_orphan_hashes <- getOrphanHashes hsc_env orph_mods
+   -- NB: do not filter out non-home-package modules!
+   -- See Note [Take into account non-home package orphan modules].
+  let orph_mods_no_self
+       = filter (/= this_mod) -- Note [Do not update EPS with your own hi-boot]
+       $ orph_mods
+  dep_orphan_hashes <- getOrphanHashes hsc_env orph_mods_no_self
 
-   -- Note [Do not update EPS with your own hi-boot]
-   -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-   -- (See also #10182).  When your hs-boot file includes an orphan
-   -- instance declaration, you may find that the dep_orphs of a module you
-   -- import contains reference to yourself.  DO NOT actually load this module
-   -- or add it to the orphan hashes: you're going to provide the orphan
-   -- instances yourself, no need to consult hs-boot; if you do load the
-   -- interface into EPS, you will see a duplicate orphan instance.
-
-   orphan_hash <- computeFingerprint (mk_put_name local_env)
+  let !orphan_hash = computeFingerprint (mk_put_name local_env)
                                      (map ifDFun orph_insts, orph_rules, orph_fis)
 
-   -- Hash of the transitive things in dependencies
-   dep_hash <- computeFingerprint putNameLiterally
-                       (dep_sig_mods (mi_deps iface0),
-                        dep_boot_mods (mi_deps iface0),
-                        -- Trusted packages are like orphans
-                        dep_trusted_pkgs (mi_deps iface0),
-                       -- See Note [Export hash depends on non-orphan family instances]
-                        dep_finsts (mi_deps iface0) )
+  -- Hash of the transitive things in dependencies
+  let !dep_hash = computeFingerprint putNameLiterally
+                      ( sig_mods, boot_mods
+                      , trusted_pkgs -- Trusted packages are like orphans
+                      , fis_mods     -- See Note [Orphan-like hash]
+                      )
 
-   -- the export list hash doesn't depend on the fingerprints of
-   -- the Names it mentions, only the Names themselves, hence putNameLiterally.
-   export_hash <- computeFingerprint putNameLiterally
-                      (mi_exports iface0,
-                       orphan_hash,
-                       dep_hash,
-                       dep_orphan_hashes,
-                       mi_trust iface0)
-                        -- Make sure change of Safe Haskell mode causes recomp.
+  -- The export list hash doesn't depend on the fingerprints of
+  -- the Names it mentions, only the Names themselves, hence putNameLiterally.
+  --
+  -- As per Note [When to recompile when export lists change?], there are two
+  -- separate considerations:
+  --
+  --  (1) If there is a change in exported orphan instances, we must recompile.
+  --
+  --      In fact, we must include slightly more items here than only the orphan
+  --      instances defined in the current module; see Note [Orphan-like hash].
+  --
+  --  (2) If there is a change in the exported avails, this may or may not
+  --      require recompilation downstream, depending on what is imported.
+  --      In the case that the downstream module has a whole module import,
+  --      then we recompile when any exports change, by looking at export_hash.
+  let
+    -- (1) Orphan-like information, see Note [Orphan-like hash].
+    !orphan_like_hash =
+        computeFingerprint putNameLiterally
+          ( orphan_hash, dep_hash, dep_orphan_hashes
+          , defaults -- Changes in exported named defaults cause recompilation
+          , trust    -- Change of Safe Haskell mode causes recompilation
+          )
+    -- (2) Exported avails
+    !exported_avails_hash = computeFingerprint putNameLiterally exports
 
-   -- Note [Export hash depends on non-orphan family instances]
-   -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-   --
-   -- Suppose we have:
-   --
-   --   module A where
-   --       type instance F Int = Bool
-   --
-   --   module B where
-   --       import A
-   --
-   --   module C where
-   --       import B
-   --
-   -- The family instance consistency check for C depends on the dep_finsts of
-   -- B.  If we rename module A to A2, when the dep_finsts of B changes, we need
-   -- to make sure that C gets rebuilt. Effectively, the dep_finsts are part of
-   -- the exports of B, because C always considers them when checking
-   -- consistency.
-   --
-   -- A full discussion is in #12723.
-   --
-   -- We do NOT need to hash dep_orphs, because this is implied by
-   -- dep_orphan_hashes, and we do not need to hash ordinary class instances,
-   -- because there is no eager consistency check as there is with type families
-   -- (also we didn't store it anywhere!)
-   --
+  -- the ABI hash depends on:
+  --   - decls
+  --   - export list
+  --   - orphans
+  --   - deprecations
+  --   - flag abi hash
+  let !mod_hash = computeFingerprint putNameLiterally
+                      (sort (map fst decls_w_hashes),
+                       exported_avails_hash,
+                       orphan_like_hash,  -- includes orphan_hash
+                       ann_fn AnnModule,
+                       warns)
 
-   -- put the declarations in a canonical order, sorted by OccName
-   let sorted_decls :: [(Fingerprint, IfaceDecl)]
-       sorted_decls = Map.elems $ Map.fromList $
-                          [(getOccName d, e) | e@(_, d) <- decls_w_hashes]
+                      -- Surely the ABI depends on "module" annotations?
+                      -- Also named defaults
 
-       -- This key is safe because mi_extra_decls contains tidied things.
-       getOcc (IfGblTopBndr b) = getOccName b
-       getOcc (IfLclTopBndr fs _ _ details) =
-        case details of
-          IfRecSelId { ifRecSelFirstCon = first_con }
-            -> mkRecFieldOccFS (getOccFS first_con) (ifLclNameFS fs)
-          _ -> mkVarOccFS (ifLclNameFS fs)
 
-       binding_key (IfaceNonRec b _) = IfaceNonRec (getOcc b) ()
-       binding_key (IfaceRec bs) = IfaceRec (map (\(b, _) -> (getOcc b, ())) bs)
 
-       sorted_extra_decls :: Maybe [IfaceBindingX IfaceMaybeRhs IfaceTopBndrInfo]
-       sorted_extra_decls = sortOn binding_key <$> mi_extra_decls iface0
-
-   -- the flag hash depends on:
-   --   - (some of) dflags
-   -- it returns two hashes, one that shouldn't change
-   -- the abi hash and one that should
-   flag_hash <- fingerprintDynFlags hsc_env this_mod putNameLiterally
-
-   opt_hash <- fingerprintOptFlags dflags putNameLiterally
-
-   hpc_hash <- fingerprintHpcFlags dflags putNameLiterally
-
-   plugin_hash <- fingerprintPlugins (hsc_plugins hsc_env)
-
-   -- the ABI hash depends on:
-   --   - decls
-   --   - export list
-   --   - orphans
-   --   - deprecations
-   --   - flag abi hash
-   --   - foreign stubs and files
-   mod_hash <- computeFingerprint putNameLiterally
-                      (map fst sorted_decls,
-                       export_hash,  -- includes orphan_hash
-                       mi_warns iface0,
-                       mi_foreign iface0)
-
-   -- The interface hash depends on:
-   --   - the ABI hash, plus
-   --   - the source file hash,
-   --   - the module level annotations,
-   --   - usages
-   --   - deps (home and external packages, dependent files)
-   --   - hpc
-   iface_hash <- computeFingerprint putNameLiterally
-                      (mod_hash,
-                       mi_src_hash iface0,
-                       ann_fn (mkVarOccFS (fsLit "module")),  -- See mkIfaceAnnCache
-                       mi_usages iface0,
-                       sorted_deps,
-                       mi_hpc iface0)
-
-   let
-    final_iface_exts = ModIfaceBackend
-      { mi_iface_hash     = iface_hash
-      , mi_mod_hash       = mod_hash
-      , mi_flag_hash      = flag_hash
-      , mi_opt_hash       = opt_hash
-      , mi_hpc_hash       = hpc_hash
-      , mi_plugin_hash    = plugin_hash
-      , mi_orphan         = not (   all ifRuleAuto orph_rules
+  let
+    final_iface_exts = IfaceAbiHashes
+      { mi_abi_mod_hash       = mod_hash
+      , mi_abi_orphan         = not (   all ifRuleAuto orph_rules
                                       -- See Note [Orphans and auto-generated rules]
                                  && null orph_insts
                                  && null orph_fis)
-      , mi_finsts         = not (null (mi_fam_insts iface0))
-      , mi_exp_hash       = export_hash
-      , mi_orphan_hash    = orphan_hash
-      , mi_decl_warn_fn   = decl_warn_fn
-      , mi_export_warn_fn = export_warn_fn
-      , mi_fix_fn         = fix_fn
-      , mi_hash_fn        = lookupOccEnv local_env
+      , mi_abi_finsts         = not (null fam_insts)
+      , mi_abi_export_avails_hash = exported_avails_hash
+      , mi_abi_orphan_like_hash   = orphan_like_hash
+      , mi_abi_orphan_hash        = orphan_hash
       }
-    final_iface = completePartialModIface iface0
-                    sorted_decls sorted_extra_decls final_iface_exts
-   --
-   return final_iface
 
+    caches = IfaceCache
+      { mi_cache_decl_warn_fn = decl_warn_fn
+      , mi_cache_export_warn_fn = export_warn_fn
+      , mi_cache_fix_fn = fix_fn
+      , mi_cache_hash_fn = lookupOccEnv local_env
+      }
+  return (final_iface_exts, caches, decls_w_hashes)
   where
-    this_mod = mi_module iface0
-    semantic_mod = mi_semantic_module iface0
-    dflags = hsc_dflags hsc_env
-    (non_orph_insts, orph_insts) = mkOrphMap ifInstOrph    (mi_insts iface0)
-    (non_orph_rules, orph_rules) = mkOrphMap ifRuleOrph    (mi_rules iface0)
-    (non_orph_fis,   orph_fis)   = mkOrphMap ifFamInstOrph (mi_fam_insts iface0)
-    ann_fn = mkIfaceAnnCache (mi_anns iface0)
+
+{- Note [Take into account non-home package orphan modules]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+We need to take into account all orphan modules, not just those that are from
+the home package.
+
+Historically, we filtered out orphan modules which were not from the home
+package, justifying it by saying that "we'd pick up the ABI hashes of the
+external module instead".  This is wrong.
+
+Suppose that we have:
+
+      module External where
+          instance Show (a -> b)
+
+      module Home1 where
+          import External
+
+      module Home2 where
+          import Home1
+
+The export hash of Home1 needs to reflect the orphan instances of
+External. It's true that Home1 will get rebuilt if the orphans
+of External, but we also need to make sure Home2 gets rebuilt
+as well. See #12733 for more details.
+
+Note [Do not update EPS with your own hi-boot]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+When your hs-boot file includes an orphan instance declaration, you may find
+that the dep_orphs of a module you import contains reference to yourself.
+DO NOT actually load this module or add it to the orphan hashes: you're going
+to provide the orphan instances yourself, no need to consult hs-boot; if you do
+load the interface into EPS, you will see a duplicate orphan instance.
+
+See also #10182.
+-}
 
 -- | Retrieve the orphan hashes 'mi_orphan_hash' for a list of modules
 -- (in particular, the orphan modules which are transitively imported by the
@@ -1325,7 +1573,7 @@ getOrphanHashes hsc_env mods = do
     get_orph_hash mod = do
           iface <- initIfaceLoad hsc_env . withIfaceErr ctx
                             $ loadInterface (text "getOrphanHashes") mod ImportBySystem
-          return (mi_orphan_hash (mi_final_exts iface))
+          return (mi_orphan_hash iface)
 
   mapM get_orph_hash mods
 
@@ -1390,6 +1638,8 @@ data IfaceDeclExtras
 
   | IfaceFamilyExtras   (Maybe Fixity) [IfaceInstABI] [AnnPayload]
 
+  | IfacePatSynExtras (Maybe Fixity) [IfaceCompleteMatchABI] -- ^ COMPLETE pragmas that this PatSyn appears in
+
   | IfaceOtherDeclExtras
 
 data IfaceIdExtras
@@ -1397,12 +1647,16 @@ data IfaceIdExtras
        (Maybe Fixity)           -- Fixity of the Id (if it exists)
        [IfaceRule]              -- Rules for the Id
        [AnnPayload]             -- Annotations for the Id
+       [IfaceCompleteMatchABI]  -- See Note [Fingerprinting complete matches] for why this is in IdExtras
 
 -- When hashing a class or family instance, we hash only the
 -- DFunId or CoAxiom, because that depends on all the
 -- information about the instance.
 --
 type IfaceInstABI = IfExtName   -- Name of DFunId or CoAxiom that is evidence for the instance
+
+-- See Note [Fingerprinting complete matches]
+type IfaceCompleteMatchABI = (Fingerprint, Maybe IfExtName)
 
 abiDecl :: IfaceDeclABI -> IfaceDecl
 abiDecl (_, decl, _) = decl
@@ -1427,22 +1681,34 @@ freeNamesDeclExtras (IfaceSynonymExtras _ _)
   = emptyNameSet
 freeNamesDeclExtras (IfaceFamilyExtras _ insts _)
   = mkNameSet insts
+freeNamesDeclExtras (IfacePatSynExtras _ complete)
+  = unionNameSets (map freeNamesIfaceCompleteABI complete)
 freeNamesDeclExtras IfaceOtherDeclExtras
   = emptyNameSet
 
 freeNamesIdExtras :: IfaceIdExtras -> NameSet
-freeNamesIdExtras (IdExtras _ rules _) = unionNameSets (map freeNamesIfRule rules)
+freeNamesIdExtras (IdExtras _ rules _ complete) =
+  unionNameSets (map freeNamesIfRule rules ++ map freeNamesIfaceCompleteABI complete)
+
+-- | Extract free names from a COMPLETE pragma ABI
+freeNamesIfaceCompleteABI :: IfaceCompleteMatchABI -> NameSet
+freeNamesIfaceCompleteABI (_, mb_ty) = case mb_ty of
+  Nothing -> emptyNameSet
+  Just ty -> unitNameSet ty
+
 
 instance Outputable IfaceDeclExtras where
   ppr IfaceOtherDeclExtras       = Outputable.empty
   ppr (IfaceIdExtras  extras)    = ppr_id_extras extras
   ppr (IfaceSynonymExtras fix anns) = vcat [ppr fix, ppr anns]
   ppr (IfaceFamilyExtras fix finsts anns) = vcat [ppr fix, ppr finsts, ppr anns]
-  ppr (IfaceDataExtras fix insts anns stuff) = vcat [ppr fix, ppr_insts insts, ppr anns,
-                                                ppr_id_extras_s stuff]
+  ppr (IfaceDataExtras fix insts anns stuff)
+                    = vcat [ppr fix, ppr_insts insts, ppr anns,
+                            ppr_id_extras_s stuff]
   ppr (IfaceClassExtras fix insts anns stuff defms) =
     vcat [ppr fix, ppr_insts insts, ppr anns,
           ppr_id_extras_s stuff, ppr defms]
+  ppr (IfacePatSynExtras fix complete) = vcat [ppr fix, ppr complete]
 
 ppr_insts :: [IfaceInstABI] -> SDoc
 ppr_insts _ = text "<insts>"
@@ -1451,7 +1717,7 @@ ppr_id_extras_s :: [IfaceIdExtras] -> SDoc
 ppr_id_extras_s stuff = vcat (map ppr_id_extras stuff)
 
 ppr_id_extras :: IfaceIdExtras -> SDoc
-ppr_id_extras (IdExtras fix rules anns) = ppr fix $$ vcat (map ppr rules) $$ vcat (map ppr anns)
+ppr_id_extras (IdExtras fix rules anns complete) = ppr fix $$ vcat (map ppr rules) $$ vcat (map ppr anns) $$ vcat (map ppr complete)
 
 -- This instance is used only to compute fingerprints
 instance Binary IfaceDeclExtras where
@@ -1471,32 +1737,35 @@ instance Binary IfaceDeclExtras where
    putByte bh 4; put_ bh fix; put_ bh anns
   put_ bh (IfaceFamilyExtras fix finsts anns) = do
    putByte bh 5; put_ bh fix; put_ bh finsts; put_ bh anns
-  put_ bh IfaceOtherDeclExtras = putByte bh 6
+  put_ bh (IfacePatSynExtras fix complete) = do
+   putByte bh 6; put_ bh fix; put_ bh complete
+  put_ bh IfaceOtherDeclExtras = putByte bh 7
 
 instance Binary IfaceIdExtras where
   get _bh = panic "no get for IfaceIdExtras"
-  put_ bh (IdExtras fix rules anns)= do { put_ bh fix; put_ bh rules; put_ bh anns }
+  put_ bh (IdExtras fix rules anns complete) = do { put_ bh fix; put_ bh rules; put_ bh anns; put_ bh complete }
 
 declExtras :: (OccName -> Maybe Fixity)
-           -> (OccName -> [AnnPayload])
+           -> (AnnCacheKey -> [AnnPayload])
            -> OccEnv [IfaceRule]
            -> OccEnv [IfaceClsInst]
            -> OccEnv [IfaceFamInst]
            -> OccEnv IfExtName          -- lookup default method names
+           -> OccEnv [IfaceCompleteMatchABI]          -- lookup complete matches
            -> IfaceDecl
            -> IfaceDeclExtras
 
-declExtras fix_fn ann_fn rule_env inst_env fi_env dm_env decl
+declExtras fix_fn ann_fn rule_env inst_env fi_env dm_env complete_env decl
   = case decl of
       IfaceId{} -> IfaceIdExtras (id_extras n)
       IfaceData{ifCons=cons} ->
                      IfaceDataExtras (fix_fn n)
                         (map ifFamInstAxiom (lookupOccEnvL fi_env n) ++
                          map ifDFun         (lookupOccEnvL inst_env n))
-                        (ann_fn n)
+                        (ann_fn (AnnOccName n))
                         (map (id_extras . occName . ifConName) (visibleIfConDecls cons))
       IfaceClass{ifBody = IfConcreteClass { ifSigs=sigs, ifATs=ats }} ->
-                     IfaceClassExtras (fix_fn n) insts (ann_fn n) meths defms
+                     IfaceClassExtras (fix_fn n) insts (ann_fn (AnnOccName n)) meths defms
           where
             insts = (map ifDFun $ (concatMap at_extras ats)
                                     ++ lookupOccEnvL inst_env n)
@@ -1509,20 +1778,21 @@ declExtras fix_fn ann_fn rule_env inst_env fi_env dm_env decl
                     , let dmOcc = mkDefaultMethodOcc (nameOccName bndr)
                     , Just dmName <- [lookupOccEnv dm_env dmOcc] ]
       IfaceSynonym{} -> IfaceSynonymExtras (fix_fn n)
-                                           (ann_fn n)
+                                           (ann_fn (AnnOccName n))
       IfaceFamily{} -> IfaceFamilyExtras (fix_fn n)
                         (map ifFamInstAxiom (lookupOccEnvL fi_env n))
-                        (ann_fn n)
+                        (ann_fn (AnnOccName n))
+      IfacePatSyn{} -> IfacePatSynExtras (fix_fn n) (lookup_complete_match n)
       _other -> IfaceOtherDeclExtras
   where
         n = getOccName decl
-        id_extras occ = IdExtras (fix_fn occ) (lookupOccEnvL rule_env occ) (ann_fn occ)
+        id_extras occ = IdExtras (fix_fn occ) (lookupOccEnvL rule_env occ) (ann_fn (AnnOccName occ)) (lookup_complete_match occ)
         at_extras (IfaceAT decl _) = lookupOccEnvL inst_env (getOccName decl)
 
+        lookup_complete_match occ = lookupOccEnvL complete_env occ
 
 {- Note [default method Name] (see also #15970)
-   ~~~~~~~~~~~~~~~~~~~~~~~~~~
-
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 The Names for the default methods aren't available in Iface syntax.
 
 * We originally start with a DefMethInfo from the class, contain a
@@ -1632,20 +1902,103 @@ mkHashFun hsc_env eps name
                             -- just one of the many horrible hacks in the backpack
                             -- implementation.
                           $ loadInterface (text "lookupVers2") mod ImportBySystem
-        return $ snd (mi_hash_fn (mi_final_exts iface) occ `orElse`
+        return $ snd (mi_hash_fn iface occ `orElse`
                   pprPanic "lookupVers1" (ppr mod <+> ppr occ))
 
+{- Note [Fingerprinting complete matches]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+The presence or absence of COMPLETE pragmas influences the programs we generate,
+and not just error messages, because pattern fallibility information feeds into
+the desugaring of do notation (e.g. whether to use 'fail' from 'MonadFail').
+
+As far as recompilation checking is concerned, there are two questions we need
+to answer:
+
+  Usage: When is a COMPLETE pragma used?
+  Fingerprinting: What is the Fingerprint of a COMPLETE pragma, i.e. when
+                  do we consider a COMPLETE pragma to have changed?
+
+Usage
+
+  There isn't a straightforward way to compute which COMPLETE pragmas are
+  "used" during pattern-match checking. So we have to come up with a conservative
+  approximation.
+
+  The most conservative option is to consider a COMPLETE pragma to always be
+  used, much like we treat orphan class instances today. This means that any
+  change at all would require recompilation.
+
+  A slightly finer grained option, which is what is currently implemented, is to
+  consider a COMPLETE pragma to be used only when the importing module actually
+  mentions at least one of the constructors in the COMPLETE pragma.
+
+  Tested in: RecompCompletePragma
+
+Fingerprinting
+
+  Most conservatively, the fingerprint of a COMPLETE pragma would be the hash of
+  all the constructors it mentions (together with the hash of the result TyCon,
+  if any).
+
+  However, for the purposes of the pattern-match checker, we only really care
+  about the Names of the constructors in a COMPLETE pragma; it doesn't matter
+  what the definitions of the constructors are. The above criterion would
+  pessimistically lead to recompilation in the following scenario:
+
+    module M where
+      pattern MyJust :: a -> Maybe a
+      pattern MyJust a = Just a
+      pattern MyNothing :: Maybe a
+      pattern MyNothing = Nothing
+      {-# COMPLETE MyJust, MyNothing #-}
+
+    module N where
+      import M
+      f :: Maybe Int -> Int
+      f (MyJust x) = x; f _ = 0
+
+  In this example, if we change the definition of the 'MyNothing' pattern, then
+  we will recompile 'M', because 'N' uses the 'MyJust' constructor, 'MyJust'
+  appears in the imported {-# COMPLETE MyJust, MyNothing #-} pragma, and
+  'MyNothing' has changed.
+
+  However, this is needless: the RHS of the pattern synonym declaration for
+  'MyNothing' is completely irrelevant to 'N'. So, to avoid this extraneous
+  recompilation, we implement the following finer-grained criterion: the
+  Fingerprint of a COMPLETE pragma is the hash of the 'Name's of the mentioned
+  constructors (hashed together with the Fingerprint of the result TyCon, if any).
+
+  Tested in: RecompCompleteIndependence.
+-}
+
+-- | Make a map from OccNames of pattern synonyms or data constructors to a list
+-- of COMPLETE pragmas relevant for that OccName.
+-- See Note [Fingerprinting complete matches]
+mkIfaceCompleteMap :: [IfaceCompleteMatch] -> OccEnv [IfaceCompleteMatchABI]
+mkIfaceCompleteMap complete =
+  mkOccEnv_C (++) $
+    concatMap (\m@(IfaceCompleteMatch syns _) ->
+                  let complete_abi = mkIfaceCompleteMatchABI m
+                  in [(getOccName syn, [complete_abi]) | syn <- syns]
+    ) complete
+  where
+    mkIfaceCompleteMatchABI (IfaceCompleteMatch syns ty) =
+      (computeFingerprint putNameLiterally syns, ty)
+
+data AnnCacheKey = AnnModule | AnnOccName OccName
 
 -- | Creates cached lookup for the 'mi_anns' field of ModIface
--- Hackily, we use "module" as the OccName for any module-level annotations
-mkIfaceAnnCache :: [IfaceAnnotation] -> OccName -> [AnnPayload]
+mkIfaceAnnCache :: [IfaceAnnotation] -> AnnCacheKey -> [AnnPayload]
 mkIfaceAnnCache anns
-  = \n -> lookupOccEnv env n `orElse` []
+  = \n -> case n of
+            AnnModule -> module_anns
+            AnnOccName occn -> lookupOccEnv env occn `orElse` []
   where
-    pair (IfaceAnnotation target value) =
-      (case target of
-          NamedTarget occn -> occn
-          ModuleTarget _   -> mkVarOccFS (fsLit "module")
-      , [value])
+    (module_anns, occ_anns) = partitionEithers $ map classify anns
+    classify (IfaceAnnotation target value) =
+      case target of
+          NamedTarget occn -> Right (occn, [value])
+          ModuleTarget _   -> Left value
+
     -- flipping (++), so the first argument is always short
-    env = mkOccEnv_C (flip (++)) (map pair anns)
+    env = mkOccEnv_C (flip (++)) occ_anns

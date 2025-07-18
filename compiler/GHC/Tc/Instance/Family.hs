@@ -308,7 +308,7 @@ checkFamInstConsistency directlyImpMods
                  ifc <- modIface mod
                  deps <- dep_finsts . mi_deps <$> modIface mod
                  pure $
-                   if mi_finsts (mi_final_exts ifc)
+                   if mi_finsts ifc
                       then mod:deps
                       else deps
 
@@ -406,7 +406,7 @@ getFamInsts hpt_fam_insts mod
   | Just env <- lookupModuleEnv hpt_fam_insts mod = return env
   | otherwise = do { _ <- initIfaceTcRn (loadSysInterface doc mod)
                    ; eps <- getEps
-                   ; return (expectJust "checkFamInstConsistency" $
+                   ; return (expectJust $
                              lookupModuleEnv (eps_mod_fam_inst_env eps) mod) }
   where
     doc = ppr mod <+> text "is a family-instance module"

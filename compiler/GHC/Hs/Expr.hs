@@ -67,7 +67,7 @@ import GHC.Tc.Utils.TcType (TcType, TcTyVar)
 import {-# SOURCE #-} GHC.Tc.Types.LclEnv (TcLclEnv)
 
 import GHCi.RemoteTypes ( ForeignRef )
-import qualified GHC.Internal.TH.Syntax as TH (Q)
+import qualified GHC.Boot.TH.Syntax as TH (Q)
 
 -- libraries:
 import Data.Data hiding (Fixity(..))
@@ -75,7 +75,8 @@ import qualified Data.Data as Data (Fixity(..))
 import qualified Data.Kind
 import Data.Maybe (isJust)
 import Data.Foldable ( toList )
-import Data.List.NonEmpty (NonEmpty)
+import Data.List.NonEmpty (NonEmpty (..))
+import qualified Data.List.NonEmpty as NE
 import Data.Void (Void)
 
 {- *********************************************************************
@@ -220,11 +221,6 @@ data EpAnnLam = EpAnnLam
 instance NoAnn EpAnnLam where
   noAnn = EpAnnLam noAnn noAnn
 
-data EpAnnUnboundVar = EpAnnUnboundVar
-     { hsUnboundBackquotes :: (EpToken "`", EpToken "`")
-     , hsUnboundHole       :: EpToken "_"
-     } deriving Data
-
 -- Record selectors at parse time are HsVar; they convert to HsRecSel
 -- on renaming.
 type instance XRecSel              GhcPs = DataConCantHappen
@@ -240,14 +236,6 @@ type instance XOverLabel     GhcTc = DataConCantHappen
 -- ---------------------------------------------------------------------
 
 type instance XVar           (GhcPass _) = NoExtField
-
-type instance XUnboundVar    GhcPs = Maybe EpAnnUnboundVar
-type instance XUnboundVar    GhcRn = NoExtField
-type instance XUnboundVar    GhcTc = HoleExprRef
-  -- We really don't need the whole HoleExprRef; just the IORef EvTerm
-  -- would be enough. But then deriving a Data instance becomes impossible.
-  -- Much, much easier just to define HoleExprRef with a Data instance and
-  -- store the whole structure.
 
 type instance XIPVar         GhcPs = NoExtField
 type instance XIPVar         GhcRn = NoExtField
@@ -394,6 +382,148 @@ type instance XEmbTy         GhcTc = DataConCantHappen
   -- A free-standing HsEmbTy is an error.
   -- Valid usages are immediately desugared into Type.
 
+
+{-
+Note [Holes in expressions]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+This Note explains how GHC uses the `HsHole` constructor.
+
+`HsHole` is used to represent:
+
+  - anonymous ("_") and named ("_x") holes in expressions,
+  - unbound variables,
+  - and parse errors.
+
+A `HsHole` can be thought of as any thing which is not necessarily a valid or
+fully defined program fragment, but for which a type can be derived.
+
+Note that holes (wildcards) in types, and partial type signatures, are not
+handled using the mechanisms described here. Instead, see
+Note [The wildcard story for types] for the relevant information.
+
+
+* User-facing behavior
+
+  While GHC uses the same internal mechanism to derive the type for any
+  `HsHole`, it gives different feedback to the user depending on the type of
+  hole. For example, an anonymous hole of the form
+
+    foo x = x && _
+
+  gives the diagnostic
+
+    Foo.hs:5:14: error: [GHC-88464]
+      • Found hole: _ :: Bool
+      • In the second argument of ‘(&&)’, namely ‘_’
+        In the expression: x && _
+
+  while an expression containing an unbound variable
+
+    foo x = x && y
+
+  gives
+
+    Foo.hs:5:14: error: [GHC-88464]
+      Variable not in scope: y :: Bool
+
+
+* HsHole during parsing, renaming, and type checking
+
+  The usage of `HsHole` during the three phases is listed below.
+
+  - Anynomous holes, i.e. the user wrote "_":
+
+      Parser        HsHole (HoleVar "_")
+      Renamer       HsHole (HoleVar "_")
+      Typechecker   HsHole (HoleVar "_", ref :: HoleExprRef)
+
+  - Unbound variables and named holes; i.e. the user wrote "x" or "_x", where
+    `x` or `_x` is not in scope. A variable with a leading underscore has no
+    special meaning to the parser.
+
+      Parser        HsVar "_x"
+      Renamer       HsHole (HoleVar "_x")
+      Typechecker   HsHole (HoleVar "_x", ref :: HoleExprRef)
+
+  - Parse errors currently do not survive beyond the parser because an error is
+    thrown after parsing. However, in the future GHC is intended to be tolerant
+    of parse errors until the type checking phase to provide diagnostics similar
+    to holes. This current singular case looks like this:
+
+      Parser        HsHole HoleError
+
+  Note that between anonymous holes, named holes, and unbound variables only the
+  parsing phase is distinct, while during the renaming and type checking phases
+  the cases are handled identically. The distinction that the user can observe
+  is only introduced during final error reporting. There the `RdrName` is
+  examined to see whether it starts with an underscore or not to determine
+  whether the `HsHole` came from a hole or an out of scope variable.
+
+
+* Contents of HoleExprRef
+
+  The HoleExprRef type used in the type checking phase is a data structure
+  containing:
+
+   - The type of the hole.
+   - A ref-cell that is filled in (by the typechecker) with an
+     error thunk.   With -fdefer-type errors we use this as the
+     value of the hole.
+   - A Unique (see Note [Uniques and tags]).
+
+* Typechecking holes
+
+  When the typechecker encounters a `HsHole`, it returns one with the
+  HoleExprRef, but also emits a `DelayedError` into the `WantedConstraints`.
+  This DelayedError later triggers the error reporting, and the filling-in of
+  the error thunk, in GHC.Tc.Errors.
+
+  The user has the option of deferring errors until runtime with
+  `-fdefer-type-errors`. In this case, the hole carries evidence in its
+  `HoleExprRef`. This evidence is an erroring expression that prints an error
+  and crashes at runtime.
+
+* Desugaring holes
+
+  During desugaring, the `(HsHole (HoleVar "x", ref))` is desugared by
+  reading the ref-cell to find the error thunk evidence term, put there by the
+  constraint solver.
+
+* Wrinkles:
+
+  - Prior to fixing #17812, we used to invent an Id to hold the erroring
+    expression, and then bind it during type-checking. But this does not support
+    representation-polymorphic out-of-scope identifiers. See
+    typecheck/should_compile/T17812. We thus use the mutable-CoreExpr approach
+    described above.
+
+  - You might think that the type in the HoleExprRef is the same as the type of
+    the hole. However, because the hole type (hole_ty) is rewritten with respect
+    to givens, this might not be the case. That is, the hole_ty is always (~) to
+    the type of the HoleExprRef, but they might not be `eqType`. We need the
+    type of the generated evidence to match what is expected in the context of
+    the hole, and so we must store these types separately.
+
+  - We really don't need the whole HoleExprRef; just the IORef EvTerm would be
+    enough. But then deriving a Data instance becomes impossible. Much, much
+    easier just to define HoleExprRef with a Data instance and store the whole
+    structure.
+-}
+-- | Expression Hole. See Note [Holes in expressions].
+type instance XHole GhcPs = HoleKind
+type instance XHole GhcRn = HoleKind
+type instance XHole GhcTc = (HoleKind, HoleExprRef)
+
+data HoleKind
+  = HoleVar (LIdP GhcPs)
+  | HoleError
+  deriving Data
+
+-- | The RdrName for an unnamed hole ("_").
+unnamedHoleRdrName :: RdrName
+unnamedHoleRdrName = mkUnqual varName (fsLit "_")
+
+
 type instance XForAll        GhcPs = NoExtField
 type instance XForAll        GhcRn = NoExtField
 type instance XForAll        GhcTc = DataConCantHappen
@@ -413,8 +543,22 @@ type instance XFunRhs  = AnnFunRhs
 type instance Anno [LocatedA ((StmtLR (GhcPass pl) (GhcPass pr) (LocatedA (body (GhcPass pr)))))] = SrcSpanAnnLW
 type instance Anno (StmtLR GhcRn GhcRn (LocatedA (body GhcRn))) = SrcSpanAnnA
 
-arrowToHsExpr :: HsArrowOf (LocatedA (HsExpr GhcRn)) GhcRn -> LocatedA (HsExpr GhcRn)
-arrowToHsExpr = expandHsArrow (HsVar noExtField)
+multAnnToHsExpr :: HsMultAnnOf (LocatedA (HsExpr GhcRn)) GhcRn -> Maybe (LocatedA (HsExpr GhcRn))
+multAnnToHsExpr = expandHsMultAnnOf mkHsVar
+
+mkHsVar :: forall p. IsPass p => LIdP (GhcPass p) -> HsExpr (GhcPass p)
+mkHsVar n = HsVar noExtField $
+  case ghcPass @p of
+    GhcPs -> n
+    GhcRn -> fmap (WithUserRdr $ nameRdrName $ unLoc n) n
+    GhcTc -> n
+
+mkHsVarWithUserRdr :: forall p. IsPass p => RdrName -> LIdP (GhcPass p) -> HsExpr (GhcPass p)
+mkHsVarWithUserRdr rdr n = HsVar noExtField $
+  case ghcPass @p of
+    GhcPs -> n
+    GhcRn -> fmap (WithUserRdr rdr) n
+    GhcTc -> n
 
 data AnnExplicitSum
   = AnnExplicitSum {
@@ -698,7 +842,13 @@ ppr_lexpr e = ppr_expr (unLoc e)
 ppr_expr :: forall p. (OutputableBndrId p)
          => HsExpr (GhcPass p) -> SDoc
 ppr_expr (HsVar _ (L _ v))   = pprPrefixOcc v
-ppr_expr (HsUnboundVar _ uv) = pprPrefixOcc uv
+ppr_expr (HsHole x) = case (ghcPass @p, x) of
+  (GhcPs, HoleVar (L _ v)) -> pprPrefixOcc v
+  (GhcRn, HoleVar (L _ v)) -> pprPrefixOcc v
+  (GhcTc, (HoleVar (L _ v), _)) -> pprPrefixOcc v
+  (GhcPs, HoleError) -> pprPrefixOcc unnamedHoleRdrName
+  (GhcRn, HoleError) -> pprPrefixOcc unnamedHoleRdrName
+  (GhcTc, (HoleError, _)) -> pprPrefixOcc unnamedHoleRdrName
 ppr_expr (HsIPVar _ v)       = ppr v
 ppr_expr (HsOverLabel s l) = case ghcPass @p of
                GhcPs -> helper s
@@ -804,14 +954,9 @@ ppr_expr (HsIf _ e1 e2 e3)
          nest 4 (ppr e3)]
 
 ppr_expr (HsMultiIf _ alts)
-  = hang (text "if") 3  (vcat (map ppr_alt alts))
+  = hang (text "if") 3  (vcat $ toList $ NE.map ppr_alt alts)
   where ppr_alt (L _ (GRHS _ guards expr)) =
-          hang vbar 2 (ppr_one one_alt)
-          where
-            ppr_one [] = panic "ppr_exp HsMultiIf"
-            ppr_one (h:t) = hang h 2 (sep t)
-            one_alt = [ interpp'SP guards
-                      , text "->" <+> pprDeeper (ppr expr) ]
+          hang vbar 2 (hang (interpp'SP guards) 2 (text "->" <+> pprDeeper (ppr expr)))
         ppr_alt (L _ (XGRHS x)) = ppr x
 
 -- special case: let ... in let ...
@@ -954,10 +1099,13 @@ instance Outputable XXExprGhcTc where
             ppr exp, text ")"]
   ppr (HsRecSelTc f)      = pprPrefixOcc f
 
-
 ppr_infix_expr :: forall p. (OutputableBndrId p) => HsExpr (GhcPass p) -> Maybe SDoc
 ppr_infix_expr (HsVar _ (L _ v))    = Just (pprInfixOcc v)
-ppr_infix_expr (HsUnboundVar _ occ) = Just (pprInfixOcc occ)
+ppr_infix_expr (HsHole x) = Just $ pprInfixOcc $ case (ghcPass @p, x) of
+  (GhcPs, HoleVar (L _ v)) -> v
+  (GhcRn, HoleVar (L _ v)) -> v
+  (GhcTc, (HoleVar (L _ v), _)) -> v
+  _ -> unnamedHoleRdrName -- TODO: this is the HoleError case; this should print the source text instead of "_".
 ppr_infix_expr (XExpr x)            = case ghcPass @p of
                                         GhcRn -> ppr_infix_expr_rn x
                                         GhcTc -> ppr_infix_expr_tc x
@@ -975,7 +1123,6 @@ ppr_infix_expr_tc (ConLikeTc {})             = Nothing
 ppr_infix_expr_tc (HsTick {})                = Nothing
 ppr_infix_expr_tc (HsBinTick {})             = Nothing
 ppr_infix_expr_tc (HsRecSelTc f)            = Just (pprInfixOcc f)
-
 
 ppr_infix_hs_expansion :: HsThingRn -> Maybe SDoc
 ppr_infix_hs_expansion (OrigExpr e) = ppr_infix_expr e
@@ -1023,7 +1170,6 @@ hsExprNeedsParens prec = go
   where
     go :: HsExpr (GhcPass p) -> Bool
     go (HsVar{})                      = False
-    go (HsUnboundVar{})               = False
     go (HsIPVar{})                    = False
     go (HsOverLabel{})                = False
     go (HsLit _ l)                    = hsLitNeedsParens prec l
@@ -1065,6 +1211,7 @@ hsExprNeedsParens prec = go
     go (HsProjection{})               = True
     go (HsGetField{})                 = False
     go (HsEmbTy{})                    = prec > topPrec
+    go (HsHole{})                     = False
     go (HsForAll{})                   = prec >= funPrec
     go (HsQual{})                     = prec >= funPrec
     go (HsFunArr{})                   = prec >= funPrec
@@ -1120,7 +1267,7 @@ isAtomicHsExpr (HsLit {})        = True
 isAtomicHsExpr (HsOverLit {})    = True
 isAtomicHsExpr (HsIPVar {})      = True
 isAtomicHsExpr (HsOverLabel {})  = True
-isAtomicHsExpr (HsUnboundVar {}) = True
+isAtomicHsExpr (HsHole{})        = True
 isAtomicHsExpr (XExpr x)
   | GhcTc <- ghcPass @p          = go_x_tc x
   | GhcRn <- ghcPass @p          = go_x_rn x
@@ -1569,18 +1716,15 @@ isEmptyMatchGroup (MG { mg_alts = ms }) = null $ unLoc ms
 isSingletonMatchGroup :: [LMatch (GhcPass p) body] -> Bool
 isSingletonMatchGroup matches
   | [L _ match] <- matches
-  , Match { m_grhss = GRHSs { grhssGRHSs = [_] } } <- match
+  , Match { m_grhss = GRHSs { grhssGRHSs = _ :| [] } } <- match
   = True
   | otherwise
   = False
 
 matchGroupArity :: MatchGroup (GhcPass id) body -> Arity
--- Precondition: MatchGroup is non-empty
 -- This is called before type checking, when mg_arg_tys is not set
-matchGroupArity (MG { mg_alts = alts })
-  | L _ (alt1:_) <- alts = count (isVisArgPat . unLoc) (hsLMatchPats alt1)
-  | otherwise            = panic "matchGroupArity"
-
+matchGroupArity MG { mg_alts = L _ [] } = 1 -- See Note [Empty mg_alts]
+matchGroupArity MG { mg_alts = L _ (alt1 : _) } = count (isVisArgPat . unLoc) (hsLMatchPats alt1)
 
 hsLMatchPats :: LMatch (GhcPass id) body -> [LPat (GhcPass id)]
 hsLMatchPats (L _ (Match { m_pats = L _ pats })) = pats
@@ -1681,7 +1825,7 @@ pprMatch (Match { m_pats = L _ pats, m_ctxt = ctxt, m_grhss = grhss })
 pprGRHSs :: (OutputableBndrId idR, Outputable body)
          => HsMatchContext fn -> GRHSs (GhcPass idR) body -> SDoc
 pprGRHSs ctxt (GRHSs _ grhss binds)
-  = vcat (map (pprGRHS ctxt . unLoc) grhss)
+  = vcat (toList $ NE.map (pprGRHS ctxt . unLoc) grhss)
   -- Print the "where" even if the contents of the binds is empty. Only
   -- EmptyLocalBinds means no "where" keyword
  $$ ppUnless (eqEmptyLocalBinds binds)
@@ -1890,7 +2034,7 @@ pprStmt (LastStmt _ expr m_dollar_stripped _)
 pprStmt (BindStmt _ pat expr)  = pprBindStmt pat expr
 pprStmt (LetStmt _ binds)      = hsep [text "let", pprBinds binds]
 pprStmt (BodyStmt _ expr _ _)  = ppr expr
-pprStmt (ParStmt _ stmtss _ _) = sep (punctuate (text " | ") (map ppr stmtss))
+pprStmt (ParStmt _ stmtss _ _) = sep (punctuate (text " | ") (map ppr $ toList stmtss))
 
 pprStmt (TransStmt { trS_stmts = stmts, trS_by = by
                    , trS_using = using, trS_form = form })
@@ -2459,7 +2603,7 @@ FieldLabelStrings
 
 instance (UnXRec p, Outputable (XRec p FieldLabelString)) => Outputable (FieldLabelStrings p) where
   ppr (FieldLabelStrings flds) =
-    hcat (punctuate dot (map (ppr . unXRec @p) flds))
+    hcat (punctuate dot (toList $ NE.map (ppr . unXRec @p) flds))
 
 instance (UnXRec p, Outputable (XRec p FieldLabelString)) => OutputableBndr (FieldLabelStrings p) where
   pprInfixOcc = pprFieldLabelStrings
@@ -2471,7 +2615,7 @@ instance (UnXRec p,  Outputable (XRec p FieldLabelString)) => OutputableBndr (Lo
 
 pprFieldLabelStrings :: forall p. (UnXRec p, Outputable (XRec p FieldLabelString)) => FieldLabelStrings p -> SDoc
 pprFieldLabelStrings (FieldLabelStrings flds) =
-    hcat (punctuate dot (map (ppr . unXRec @p) flds))
+    hcat (punctuate dot (toList $ NE.map (ppr . unXRec @p) flds))
 
 pprPrefixFastString :: FastString -> SDoc
 pprPrefixFastString fs = pprPrefixOcc (mkVarUnqual fs)

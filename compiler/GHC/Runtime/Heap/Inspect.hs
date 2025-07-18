@@ -44,6 +44,7 @@ import GHCi.Message ( fromSerializableException )
 
 import GHC.Core.DataCon
 import GHC.Core.Type
+import GHC.Core.Predicate( tyCoVarsOfTypeWellScoped )
 import GHC.Types.RepType
 import GHC.Core.Multiplicity
 import qualified GHC.Core.Unify as U
@@ -86,6 +87,7 @@ import qualified Data.Sequence as Seq
 import Data.Sequence (viewl, ViewL(..))
 import Foreign hiding (shiftL, shiftR)
 import System.IO.Unsafe
+import GHC.InfoProv
 
 ---------------------------------------------
 -- * A representation of semi evaluated Terms
@@ -106,6 +108,7 @@ data Term = Term { ty        :: RttiType
                        , ty       :: RttiType
                        , val      :: ForeignHValue
                        , bound_to :: Maybe Name   -- Useful for printing
+                       , infoprov :: Maybe InfoProv -- Provenance is printed when available
                        }
           | NewtypeWrap{       -- At runtime there are no newtypes, and hence no
                                -- newtype constructors. A NewtypeWrap is just a
@@ -164,7 +167,7 @@ type TermProcessor a b = RttiType -> Either String DataCon -> ForeignHValue -> [
 data TermFold a = TermFold { fTerm        :: TermProcessor a a
                            , fPrim        :: RttiType -> [Word] -> a
                            , fSuspension  :: ClosureType -> RttiType -> ForeignHValue
-                                            -> Maybe Name -> a
+                                            -> Maybe Name -> Maybe InfoProv -> a
                            , fNewtypeWrap :: RttiType -> Either String DataCon
                                             -> a -> a
                            , fRefWrap     :: RttiType -> a -> a
@@ -175,7 +178,7 @@ data TermFoldM m a =
                    TermFoldM {fTermM        :: TermProcessor a (m a)
                             , fPrimM        :: RttiType -> [Word] -> m a
                             , fSuspensionM  :: ClosureType -> RttiType -> ForeignHValue
-                                             -> Maybe Name -> m a
+                                             -> Maybe Name -> Maybe InfoProv -> m a
                             , fNewtypeWrapM :: RttiType -> Either String DataCon
                                             -> a -> m a
                             , fRefWrapM     :: RttiType -> a -> m a
@@ -184,7 +187,7 @@ data TermFoldM m a =
 foldTerm :: TermFold a -> Term -> a
 foldTerm tf (Term ty dc v tt) = fTerm tf ty dc v (map (foldTerm tf) tt)
 foldTerm tf (Prim ty    v   ) = fPrim tf ty v
-foldTerm tf (Suspension ct ty v b) = fSuspension tf ct ty v b
+foldTerm tf (Suspension ct ty v b i) = fSuspension tf ct ty v b i
 foldTerm tf (NewtypeWrap ty dc t)  = fNewtypeWrap tf ty dc (foldTerm tf t)
 foldTerm tf (RefWrap ty t)         = fRefWrap tf ty (foldTerm tf t)
 
@@ -192,7 +195,7 @@ foldTerm tf (RefWrap ty t)         = fRefWrap tf ty (foldTerm tf t)
 foldTermM :: Monad m => TermFoldM m a -> Term -> m a
 foldTermM tf (Term ty dc v tt) = mapM (foldTermM tf) tt >>= fTermM tf ty dc v
 foldTermM tf (Prim ty    v   ) = fPrimM tf ty v
-foldTermM tf (Suspension ct ty v b) = fSuspensionM tf ct ty v b
+foldTermM tf (Suspension ct ty v b i) = fSuspensionM tf ct ty v b i
 foldTermM tf (NewtypeWrap ty dc t)  = foldTermM tf t >>=  fNewtypeWrapM tf ty dc
 foldTermM tf (RefWrap ty t)         = foldTermM tf t >>= fRefWrapM tf ty
 
@@ -208,8 +211,8 @@ idTermFold = TermFold {
 mapTermType :: (RttiType -> Type) -> Term -> Term
 mapTermType f = foldTerm idTermFold {
           fTerm       = \ty dc hval tt -> Term (f ty) dc hval tt,
-          fSuspension = \ct ty hval n ->
-                          Suspension ct (f ty) hval n,
+          fSuspension = \ct ty hval n i ->
+                          Suspension ct (f ty) hval n i,
           fNewtypeWrap= \ty dc t -> NewtypeWrap (f ty) dc t,
           fRefWrap    = \ty t -> RefWrap (f ty) t}
 
@@ -217,8 +220,8 @@ mapTermTypeM :: Monad m =>  (RttiType -> m Type) -> Term -> m Term
 mapTermTypeM f = foldTermM TermFoldM {
           fTermM       = \ty dc hval tt -> f ty >>= \ty' -> return $ Term ty'  dc hval tt,
           fPrimM       = (return.) . Prim,
-          fSuspensionM = \ct ty hval n ->
-                          f ty >>= \ty' -> return $ Suspension ct ty' hval n,
+          fSuspensionM = \ct ty hval n i ->
+                          f ty >>= \ty' -> return $ Suspension ct ty' hval n i,
           fNewtypeWrapM= \ty dc t -> f ty >>= \ty' -> return $ NewtypeWrap ty' dc t,
           fRefWrapM    = \ty t -> f ty >>= \ty' -> return $ RefWrap ty' t}
 
@@ -226,7 +229,7 @@ termTyCoVars :: Term -> TyCoVarSet
 termTyCoVars = foldTerm TermFold {
             fTerm       = \ty _ _ tt   ->
                           tyCoVarsOfType ty `unionVarSet` concatVarEnv tt,
-            fSuspension = \_ ty _ _ -> tyCoVarsOfType ty,
+            fSuspension = \_ ty _ _ _ -> tyCoVarsOfType ty,
             fPrim       = \ _ _ -> emptyVarSet,
             fNewtypeWrap= \ty _ t -> tyCoVarsOfType ty `unionVarSet` t,
             fRefWrap    = \ty t -> tyCoVarsOfType ty `unionVarSet` t}
@@ -284,8 +287,24 @@ ppr_termM _ _ t = ppr_termM1 t
 ppr_termM1 :: Monad m => Term -> m SDoc
 ppr_termM1 Prim{valRaw=words, ty=ty} =
     return $ repPrim (tyConAppTyCon ty) words
-ppr_termM1 Suspension{ty=ty, bound_to=Nothing} =
-    return (char '_' <+> whenPprDebug (dcolon <> pprSigmaType ty))
+ppr_termM1 Suspension{ty=ty, bound_to=Nothing, infoprov=mipe} =
+  return $ hcat $
+    [ char '_'
+    , whenPprDebug $
+        space <>
+        dcolon <>
+        pprSigmaType ty
+    ] ++
+    [ whenPprDebug $
+        space <>
+        char '<' <>
+        text (ipSrcFile ipe) <>
+        char ':' <>
+        text (ipSrcSpan ipe) <>
+        char '>'
+    | Just ipe <- [mipe]
+    , not $ null $ ipSrcFile ipe
+    ]
 ppr_termM1 Suspension{ty=ty, bound_to=Just n}
   | otherwise = return$ parens$ ppr n <> dcolon <> pprSigmaType ty
 ppr_termM1 Term{}        = panic "ppr_termM1 - Term"
@@ -773,12 +792,14 @@ cvObtainTerm hsc_env max_depth force old_ty hval = runTR hsc_env $ do
     traceTR (text "Gave up reconstructing a term after" <>
                   int max_depth <> text " steps")
     clos <- trIO $ GHCi.getClosure interp a
-    return (Suspension (tipe (getClosureInfoTbl clos)) my_ty a Nothing)
+    ipe  <- trIO $ GHCi.whereFrom interp a
+    return (Suspension (tipe (getClosureInfoTbl clos)) my_ty a Nothing ipe)
   go !max_depth my_ty old_ty a = do
     let monomorphic = not(isTyVarTy my_ty)
     -- This ^^^ is a convention. The ancestor tests for
     -- monomorphism and passes a type instead of a tv
     clos <- trIO $ GHCi.getClosure interp a
+    ipe  <- trIO $ GHCi.whereFrom interp a
     case clos of
 -- Thunks we may want to force
       t | isThunk t && force -> do
@@ -797,7 +818,8 @@ cvObtainTerm hsc_env max_depth force old_ty hval = runTR hsc_env $ do
       BlackholeClosure{indirectee=ind} -> do
          traceTR (text "Following a BLACKHOLE")
          ind_clos <- trIO (GHCi.getClosure interp ind)
-         let return_bh_value = return (Suspension BLACKHOLE my_ty a Nothing)
+         ind_ipe  <- trIO (GHCi.whereFrom interp ind)
+         let return_bh_value = return (Suspension BLACKHOLE my_ty a Nothing ind_ipe)
          case ind_clos of
            -- TSO and BLOCKING_QUEUE cases
            BlockingQueueClosure{} -> return_bh_value
@@ -855,7 +877,7 @@ cvObtainTerm hsc_env max_depth force old_ty hval = runTR hsc_env $ do
           Just dc -> do
             traceTR (text "Is constructor" <+> (ppr dc $$ ppr my_ty))
             subTtypes <- getDataConArgTys dc my_ty
-            subTerms <- extractSubTerms (\ty -> go (pred max_depth) ty ty) clos subTtypes
+            subTerms <- extractSubTerms (\ty -> go (pred max_depth) ty ty) pArgs dArgs subTtypes
             return (Term my_ty (Right dc) a subTerms)
 
       -- This is to support printing of Integers. It's not a general
@@ -869,7 +891,7 @@ cvObtainTerm hsc_env max_depth force old_ty hval = runTR hsc_env $ do
       _ -> do
          traceTR (text "Unknown closure:" <+>
                   text (show (fmap (const ()) clos)))
-         return (Suspension (tipe (getClosureInfoTbl clos)) my_ty a Nothing)
+         return (Suspension (tipe (getClosureInfoTbl clos)) my_ty a Nothing ipe)
 
   -- insert NewtypeWraps around newtypes
   expandNewtypes = foldTerm idTermFold { fTerm = worker } where
@@ -885,12 +907,15 @@ cvObtainTerm hsc_env max_depth force old_ty hval = runTR hsc_env $ do
 
    -- Avoid returning types where predicates have been expanded to dictionaries.
   fixFunDictionaries = foldTerm idTermFold {fSuspension = worker} where
-      worker ct ty hval n | isFunTy ty = Suspension ct (dictsView ty) hval n
-                          | otherwise  = Suspension ct ty hval n
+      worker ct ty hval n i | isFunTy ty = Suspension ct (dictsView ty) hval n i
+                            | otherwise  = Suspension ct ty hval n i
 
 extractSubTerms :: (Type -> ForeignHValue -> TcM Term)
-                -> GenClosure ForeignHValue -> [Type] -> TcM [Term]
-extractSubTerms recurse clos = liftM thdOf3 . go 0 0
+                -> [ForeignHValue] -- ^ pointer arguments
+                -> [Word]          -- ^ data arguments
+                -> [Type]
+                -> TcM [Term]
+extractSubTerms recurse ptr_args data_args = liftM thdOf3 . go 0 0
   where
     go ptr_i arr_i [] = return (ptr_i, arr_i, [])
     go ptr_i arr_i (ty:tys)
@@ -921,7 +946,7 @@ extractSubTerms recurse clos = liftM thdOf3 . go 0 0
 
     go_rep ptr_i arr_i ty rep
       | isGcPtrRep rep = do
-          t <- recurse ty $ (getClosurePtrArgs clos)!!ptr_i
+          t <- recurse ty $ ptr_args !! ptr_i
           return (ptr_i + 1, arr_i, t)
       | otherwise = do
           -- This is a bit involved since we allow packing multiple fields
@@ -942,7 +967,7 @@ extractSubTerms recurse clos = liftM thdOf3 . go 0 0
                  | otherwise =
                      let (q, r) = size_b `quotRem` word_size
                      in assert (r == 0 )
-                        [ dataArgs clos !! i
+                        [ data_args !! i
                         | o <- [0.. q - 1]
                         , let i = (aligned_idx `quot` word_size) + o
                         ]
@@ -965,7 +990,7 @@ extractSubTerms recurse clos = liftM thdOf3 . go 0 0
       LittleEndian -> (word `shiftR` moveBits) `shiftL` zeroOutBits `shiftR` zeroOutBits
      where
       (q, r) = aligned_idx `quotRem` word_size
-      word = dataArgs clos !! q
+      word = data_args !! q
       moveBits = r * 8
       zeroOutBits = (word_size - size_b) * 8
 
@@ -1107,7 +1132,7 @@ findPtrTyss i tys = foldM step (i, []) tys
 -- The types can contain skolem type variables, which need to be treated as normal vars.
 -- In particular, we want them to unify with things.
 improveRTTIType :: HscEnv -> RttiType -> RttiType -> Maybe Subst
-improveRTTIType _ base_ty new_ty = U.tcUnifyTyKi base_ty new_ty
+improveRTTIType _ base_ty new_ty = U.tcUnifyDebugger base_ty new_ty
 
 getDataConArgTys :: DataCon -> Type -> TR [Type]
 -- Given the result type ty of a constructor application (D a b c :: ty)
@@ -1384,8 +1409,8 @@ zonkTerm :: Term -> TcM Term
 zonkTerm = foldTermM (TermFoldM
              { fTermM = \ty dc v tt -> zonkRttiType ty    >>= \ty' ->
                                        return (Term ty' dc v tt)
-             , fSuspensionM  = \ct ty v b -> zonkRttiType ty >>= \ty ->
-                                             return (Suspension ct ty v b)
+             , fSuspensionM  = \ct ty v b i -> zonkRttiType ty >>= \ty ->
+                                               return (Suspension ct ty v b i)
              , fNewtypeWrapM = \ty dc t -> zonkRttiType ty >>= \ty' ->
                                            return$ NewtypeWrap ty' dc t
              , fRefWrapM     = \ty t -> return RefWrap  `ap`
