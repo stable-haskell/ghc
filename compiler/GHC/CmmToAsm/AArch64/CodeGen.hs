@@ -1,5 +1,6 @@
 {-# language GADTs, LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
+
 module GHC.CmmToAsm.AArch64.CodeGen (
       cmmTopCodeGen
     , generateJumpTableForInstr
@@ -23,7 +24,7 @@ import GHC.Cmm.DebugBlock
 import GHC.CmmToAsm.Monad
    ( NatM, getNewRegNat
    , getPicBaseMaybeNat, getPlatform, getConfig
-   , getDebugBlock, getFileId, getNewLabelNat
+   , getDebugBlock, getFileId, getNewLabelNat, getThisModuleNat
    )
 -- import GHC.CmmToAsm.Instr
 import GHC.CmmToAsm.PIC
@@ -281,7 +282,11 @@ generateJumpTableForInstr config (J_TBL ids (Just lbl) _) =
               )
             where
               blockLabel = blockLbl blockid
-   in Just (CmmData (Section ReadOnlyData lbl) (CmmStaticsRaw lbl jumpTable))
+      sectionType = case platformOS (ncgPlatform config) of
+        -- Aarch64 Windows platform requires LLVM 20 to support .rodata
+        OSMinGW32 -> Text
+        _         -> ReadOnlyData
+   in Just (CmmData (Section sectionType lbl) (CmmStaticsRaw lbl jumpTable))
 generateJumpTableForInstr _ _ = Nothing
 
 -- -----------------------------------------------------------------------------
@@ -827,11 +832,7 @@ getRegister' config plat expr
         MO_V_Add {} -> notUnary
         MO_V_Sub {} -> notUnary
         MO_V_Mul {} -> notUnary
-        MO_VS_Quot {} -> notUnary
-        MO_VS_Rem {} -> notUnary
         MO_VS_Neg {} -> notUnary
-        MO_VU_Quot {} -> notUnary
-        MO_VU_Rem {} -> notUnary
         MO_V_Shuffle {} -> notUnary
         MO_VF_Shuffle  {} -> notUnary
         MO_VF_Insert {} -> notUnary
@@ -1216,11 +1217,7 @@ getRegister' config plat expr
         MO_V_Add {} -> vectorsNeedLlvm
         MO_V_Sub {} -> vectorsNeedLlvm
         MO_V_Mul {} -> vectorsNeedLlvm
-        MO_VS_Quot {} -> vectorsNeedLlvm
-        MO_VS_Rem {} -> vectorsNeedLlvm
         MO_VS_Neg {} -> vectorsNeedLlvm
-        MO_VU_Quot {} -> vectorsNeedLlvm
-        MO_VU_Rem {} -> vectorsNeedLlvm
         MO_VF_Extract {} -> vectorsNeedLlvm
         MO_VF_Add {} -> vectorsNeedLlvm
         MO_VF_Sub {} -> vectorsNeedLlvm
@@ -1502,8 +1499,19 @@ assignReg_FltCode = assignReg_IntCode
 -- Jumps
 
 genJump :: CmmExpr{-the branch target-} -> NatM InstrBlock
-genJump expr@(CmmLit (CmmLabel lbl))
-  = return $ unitOL (annExpr expr (J (TLabel lbl)))
+genJump expr@(CmmLit (CmmLabel lbl)) = do
+  cur_mod <- getThisModuleNat
+  !useFarJumps <- ncgEnableInterModuleFarJumps <$> getConfig
+  let is_local = isLocalCLabel cur_mod lbl
+
+  -- We prefer to generate a near jump using a simble `B` instruction
+  -- with a range (+/-128MB). But if the target is outside the current module
+  -- we might have to account for large code offsets. (#24648)
+  if not useFarJumps || is_local
+    then return $ unitOL (annExpr expr (J (TLabel lbl)))
+    else do
+      (target, _format, code) <- getSomeReg expr
+      return (code `appOL` unitOL (annExpr expr (J (TReg target))))
 
 genJump expr = do
     (target, _format, code) <- getSomeReg expr
@@ -2137,7 +2145,7 @@ genCCall target dest_regs arg_regs = do
         -- Conversion
         MO_UF_Conv w        -> mkCCall (word2FloatLabel w)
 
-        -- Arithmatic
+        -- Arithmetic
         -- These are not supported on X86, so I doubt they are used much.
         MO_S_QuotRem  _w -> unsupported mop
         MO_U_QuotRem  _w -> unsupported mop
@@ -2147,6 +2155,16 @@ genCCall target dest_regs arg_regs = do
         MO_SubWordC   _w -> unsupported mop
         MO_AddIntC    _w -> unsupported mop
         MO_SubIntC    _w -> unsupported mop
+
+        -- Vector
+        MO_VS_Quot {} -> unsupported mop
+        MO_VS_Rem {} -> unsupported mop
+        MO_VU_Quot {} -> unsupported mop
+        MO_VU_Rem {} -> unsupported mop
+        MO_I64X2_Min -> unsupported mop
+        MO_I64X2_Max -> unsupported mop
+        MO_W64X2_Min -> unsupported mop
+        MO_W64X2_Max -> unsupported mop
 
         -- Memory Ordering
         -- Set flags according to their C pendants (stdatomic.h):

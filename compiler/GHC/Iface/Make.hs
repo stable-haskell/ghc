@@ -13,6 +13,7 @@ module GHC.Iface.Make
    ( mkPartialIface
    , mkFullIface
    , mkIfaceTc
+   , mkRecompUsageInfo
    , mkIfaceExports
    )
 where
@@ -47,7 +48,6 @@ import GHC.Core.RoughMap ( RoughMatchTc(..) )
 
 import GHC.Driver.Config.HsToCore.Usage
 import GHC.Driver.Env
-import GHC.Driver.Backend
 import GHC.Driver.DynFlags
 import GHC.Driver.Plugins
 
@@ -66,7 +66,6 @@ import GHC.Types.Unique.DSet
 import GHC.Types.TypeEnv
 import GHC.Types.SourceFile
 import GHC.Types.TyThing
-import GHC.Types.HpcInfo
 import GHC.Types.CompleteMatch
 import GHC.Types.Name.Cache
 
@@ -89,13 +88,13 @@ import GHC.Unit.Module.ModDetails
 import GHC.Unit.Module.ModGuts
 import GHC.Unit.Module.ModSummary
 import GHC.Unit.Module.Deps
-import GHC.Unit.Module.WholeCoreBindings (encodeIfaceForeign)
+import GHC.Unit.Module.WholeCoreBindings (encodeIfaceForeign, emptyIfaceForeign)
 
 import Data.Function
 import Data.List ( sortBy )
 import Data.Ord
 import Data.IORef
-
+import Data.Traversable
 
 {-
 ************************************************************************
@@ -111,23 +110,23 @@ mkPartialIface :: HscEnv
                -> ModSummary
                -> [ImportUserSpec]
                -> ModGuts
-               -> PartialModIface
+               -> IO PartialModIface
 mkPartialIface hsc_env core_prog mod_details mod_summary import_decls
   ModGuts{ mg_module       = this_mod
          , mg_hsc_src      = hsc_src
          , mg_usages       = usages
-         , mg_used_th      = used_th
          , mg_deps         = deps
          , mg_rdr_env      = rdr_env
          , mg_fix_env      = fix_env
          , mg_warns        = warns
-         , mg_hpc_info     = hpc_info
          , mg_safe_haskell = safe_mode
          , mg_trust_pkg    = self_trust
          , mg_docs         = docs
          }
-  = mkIface_ hsc_env this_mod core_prog hsc_src used_th deps rdr_env import_decls fix_env warns hpc_info self_trust
-             safe_mode usages docs mod_summary mod_details
+  = do
+      self_recomp <- traverse (mkSelfRecomp hsc_env this_mod (ms_hs_hash mod_summary)) usages
+      return $ mkIface_ hsc_env this_mod core_prog hsc_src deps rdr_env import_decls fix_env warns self_trust
+                safe_mode self_recomp docs mod_details
 
 -- | Fully instantiate an interface. Adds fingerprints and potentially code
 -- generator produced information.
@@ -144,11 +143,13 @@ mkFullIface hsc_env partial_iface mb_stg_infos mb_cmm_infos stubs foreign_files 
           = updateDecl (mi_decls partial_iface) mb_stg_infos mb_cmm_infos
 
     -- See Note [Foreign stubs and TH bytecode linking]
-    foreign_ <- encodeIfaceForeign (hsc_logger hsc_env) (hsc_dflags hsc_env) stubs foreign_files
+    mi_simplified_core <- for (mi_simplified_core partial_iface) $ \simpl_core -> do
+        fs <- encodeIfaceForeign (hsc_logger hsc_env) (hsc_dflags hsc_env) stubs foreign_files
+        return $ (simpl_core { mi_sc_foreign = fs })
 
     full_iface <-
       {-# SCC "addFingerprints" #-}
-      addFingerprints hsc_env $ set_mi_foreign foreign_ $ set_mi_decls decls partial_iface
+      addFingerprints hsc_env $ set_mi_simplified_core mi_simplified_core $ set_mi_decls decls partial_iface
 
     -- Debug printing
     let unit_state = hsc_units hsc_env
@@ -182,9 +183,8 @@ shareIface nc compressionLevel  mi = do
   rbh <- shrinkBinBuffer bh
   seekBinReader rbh start
   res <- getIfaceWithExtFields nc rbh
-  let resiface = restoreFromOldModIface mi res
-  forceModIface resiface
-  return resiface
+  forceModIface res
+  return res
 
 -- | Initial ram buffer to allocate for writing interface files.
 initBinMemSize :: Int
@@ -237,64 +237,76 @@ mkIfaceTc hsc_env safe_mode mod_details mod_summary mb_program
                       tcg_import_decls = import_decls,
                       tcg_rdr_env = rdr_env,
                       tcg_fix_env = fix_env,
-                      tcg_merged = merged,
-                      tcg_warns = warns,
-                      tcg_hpc = other_hpc_info,
-                      tcg_th_splice_used = tc_splice_used,
-                      tcg_dependent_files = dependent_files
+                      tcg_warns = warns
                     }
   = do
-          let used_names = mkUsedNames tc_result
           let pluginModules = map lpModule (loadedPlugins (hsc_plugins hsc_env))
           let home_unit = hsc_home_unit hsc_env
           let deps = mkDependencies home_unit
                                     (tcg_mod tc_result)
                                     (tcg_imports tc_result)
                                     (map mi_module pluginModules)
-          let hpc_info = emptyHpcInfo other_hpc_info
-          used_th <- readIORef tc_splice_used
-          dep_files <- (readIORef dependent_files)
-          (needed_links, needed_pkgs) <- readIORef (tcg_th_needed_deps tc_result)
-          let uc = initUsageConfig hsc_env
-              plugins = hsc_plugins hsc_env
-              fc = hsc_FC hsc_env
-              unit_env = hsc_unit_env hsc_env
-          -- Do NOT use semantic module here; this_mod in mkUsageInfo
-          -- is used solely to decide if we should record a dependency
-          -- or not.  When we instantiate a signature, the semantic
-          -- module is something we want to record dependencies for,
-          -- but if you pass that in here, we'll decide it's the local
-          -- module and does not need to be recorded as a dependency.
-          -- See Note [Identity versus semantic module]
-          usages <- initIfaceLoad hsc_env $ mkUsageInfo uc plugins fc unit_env this_mod (imp_mods imports) used_names
-                      dep_files merged needed_links needed_pkgs
 
+          usage <- mkRecompUsageInfo hsc_env tc_result
           docs <- extractDocs (ms_hspp_opts mod_summary) tc_result
+          self_recomp <- traverse (mkSelfRecomp hsc_env this_mod (ms_hs_hash mod_summary)) usage
 
           let partial_iface = mkIface_ hsc_env
                    this_mod (fromMaybe [] mb_program) hsc_src
-                   used_th deps rdr_env import_decls
-                   fix_env warns hpc_info
-                   (imp_trust_own_pkg imports) safe_mode usages
-                   docs mod_summary
+                   deps rdr_env import_decls
+                   fix_env warns
+                   (imp_trust_own_pkg imports) safe_mode self_recomp
+                   docs
                    mod_details
 
           mkFullIface hsc_env partial_iface Nothing Nothing NoStubs []
 
+mkRecompUsageInfo :: HscEnv -> TcGblEnv -> IO (Maybe [Usage])
+mkRecompUsageInfo hsc_env tc_result = do
+  let dflags = hsc_dflags hsc_env
+  if not (gopt Opt_WriteSelfRecompInfo dflags)
+    then return Nothing
+    else do
+     let used_names = mkUsedNames tc_result
+     dep_files <- (readIORef (tcg_dependent_files tc_result))
+     (needed_links, needed_pkgs) <- readIORef (tcg_th_needed_deps tc_result)
+     let uc = initUsageConfig hsc_env
+         plugins = hsc_plugins hsc_env
+         fc = hsc_FC hsc_env
+         unit_env = hsc_unit_env hsc_env
+
+     -- Do NOT use semantic module here; this_mod in mkUsageInfo
+     -- is used solely to decide if we should record a dependency
+     -- or not.  When we instantiate a signature, the semantic
+     -- module is something we want to record dependencies for,
+     -- but if you pass that in here, we'll decide it's the local
+     -- module and does not need to be recorded as a dependency.
+     -- See Note [Identity versus semantic module]
+     usages <- initIfaceLoad hsc_env $
+        mkUsageInfo uc plugins fc unit_env
+          (tcg_mod tc_result)
+          (imp_mods (tcg_imports tc_result))
+          (tcg_import_decls tc_result)
+          used_names
+          dep_files
+          (tcg_merged tc_result)
+          needed_links
+          needed_pkgs
+     return (Just usages)
+
 mkIface_ :: HscEnv -> Module -> CoreProgram -> HscSource
-         -> Bool -> Dependencies -> GlobalRdrEnv -> [ImportUserSpec]
-         -> NameEnv FixItem -> Warnings GhcRn -> HpcInfo
+         -> Dependencies -> GlobalRdrEnv -> [ImportUserSpec]
+         -> NameEnv FixItem -> Warnings GhcRn
          -> Bool
          -> SafeHaskellMode
-         -> [Usage]
+         -> Maybe IfaceSelfRecomp
          -> Maybe Docs
-         -> ModSummary
          -> ModDetails
          -> PartialModIface
 mkIface_ hsc_env
-         this_mod core_prog hsc_src used_th deps rdr_env import_decls fix_env src_warns
-         hpc_info pkg_trust_req safe_mode usages
-         docs mod_summary
+         this_mod core_prog hsc_src deps rdr_env import_decls fix_env src_warns
+         pkg_trust_req safe_mode self_recomp
+         docs
          ModDetails{  md_defaults  = defaults,
                       md_insts     = insts,
                       md_fam_insts = fam_insts,
@@ -314,8 +326,8 @@ mkIface_ hsc_env
         entities = typeEnvElts type_env
         show_linear_types = xopt LangExt.LinearTypes (hsc_dflags hsc_env)
 
-        extra_decls = if gopt Opt_WriteIfSimplifiedCore dflags then Just [ toIfaceTopBind b | b <- core_prog ]
-                                                               else Nothing
+        simplified_core = if gopt Opt_WriteIfSimplifiedCore dflags then Just (IfaceSimplifiedCore [ toIfaceTopBind b | b <- core_prog ] emptyIfaceForeign)
+                                                                   else Nothing
         decls  = [ tyThingToIfaceDecl show_linear_types entity
                  | entity <- entities,
                    let name = getName entity,
@@ -342,7 +354,7 @@ mkIface_ hsc_env
         trust_info  = setSafeMode safe_mode
         annotations = map mkIfaceAnnotation anns
         icomplete_matches = map mkIfaceCompleteMatch complete_matches
-        !rdrs = maybeGlobalRdrEnv rdr_env
+        !rdrs = mkIfaceTopEnv rdr_env
 
     emptyPartialModIface this_mod
           -- Need to record this because it depends on the -instantiated-with flag
@@ -351,8 +363,8 @@ mkIface_ hsc_env
                                       then Nothing
                                       else Just semantic_mod)
           & set_mi_hsc_src          hsc_src
+          & set_mi_self_recomp      self_recomp
           & set_mi_deps             deps
-          & set_mi_usages           usages
           & set_mi_exports          (mkIfaceExports exports)
 
           & set_mi_defaults         (defaultsToIfaceDefaults defaults)
@@ -367,17 +379,14 @@ mkIface_ hsc_env
           & set_mi_warns            warns
           & set_mi_anns             annotations
           & set_mi_top_env          rdrs
-          & set_mi_used_th          used_th
           & set_mi_decls            decls
-          & set_mi_extra_decls      extra_decls
-          & set_mi_hpc              (isHpcUsed hpc_info)
+          & set_mi_simplified_core  simplified_core
           & set_mi_trust            trust_info
           & set_mi_trust_pkg        pkg_trust_req
           & set_mi_complete_matches (icomplete_matches)
           & set_mi_docs             docs
-          & set_mi_final_exts       ()
+          & set_mi_abi_hashes       ()
           & set_mi_ext_fields       emptyExtensibleFields
-          & set_mi_src_hash         (ms_hs_hash mod_summary)
           & set_mi_hi_bytes         PartialIfaceBinHandle
 
   where
@@ -395,15 +404,11 @@ mkIface_ hsc_env
      -- Desugar.addExportFlagsAndRules).  The mi_top_env field is used
      -- by GHCi to decide whether the module has its full top-level
      -- scope available. (#5534)
-     maybeGlobalRdrEnv :: GlobalRdrEnv -> Maybe IfaceTopEnv
-     maybeGlobalRdrEnv rdr_env
-        | backendWantsGlobalBindings (backend dflags)
-        = Just $! let !exports = forceGlobalRdrEnv (globalRdrEnvLocal rdr_env)
-                      !imports = mkIfaceImports import_decls
-                  in IfaceTopEnv exports imports
-          -- See Note [Forcing GREInfo] in GHC.Types.GREInfo.
-        | otherwise
-        = Nothing
+     mkIfaceTopEnv :: GlobalRdrEnv -> IfaceTopEnv
+     mkIfaceTopEnv rdr_env
+        = let !exports = sortAvails $ gresToAvailInfo $ globalRdrEnvElts $ globalRdrEnvLocal rdr_env
+              !imports = mkIfaceImports import_decls
+           in IfaceTopEnv exports imports
 
      ifFamInstTcName = ifFamInstFam
 
@@ -411,10 +416,10 @@ mkIface_ hsc_env
 defaultsToIfaceDefaults :: DefaultEnv -> [IfaceDefault]
 defaultsToIfaceDefaults = map toIface . defaultList
   where
-    toIface ClassDefaults { cd_class = clsTyCon
+    toIface ClassDefaults { cd_class = cls
                           , cd_types = tys
                           , cd_warn = warn }
-      = IfaceDefault { ifDefaultCls = toIfaceTyCon clsTyCon
+      = IfaceDefault { ifDefaultCls = className cls
                      , ifDefaultTys = map toIfaceType tys
                      , ifDefaultWarn = fmap toIfaceWarningTxt warn }
 
@@ -492,7 +497,9 @@ coreRuleToIfaceRule (Rule { ru_name = name, ru_fn = fn,
 
 mkIfaceCompleteMatch :: CompleteMatch -> IfaceCompleteMatch
 mkIfaceCompleteMatch (CompleteMatch cls mtc) =
-  IfaceCompleteMatch (uniqDSetToList cls) mtc
+  -- NB: Sorting here means that COMPLETE {P, Q} and COMPLETE {Q, P} are
+  -- considered identical, in particular for recompilation checking.
+  IfaceCompleteMatch (sortBy stableNameCmp $ uniqDSetToList cls) mtc
 
 
 {-
@@ -514,9 +521,12 @@ mkIfaceAnnotation (Annotation { ann_target = target, ann_value = payload })
 mkIfaceImports :: [ImportUserSpec] -> [IfaceImport]
 mkIfaceImports = map go
   where
-    go (ImpUserSpec decl ImpUserAll) = IfaceImport decl ImpIfaceAll
-    go (ImpUserSpec decl (ImpUserExplicit env)) = IfaceImport decl (ImpIfaceExplicit (forceGlobalRdrEnv env))
-    go (ImpUserSpec decl (ImpUserEverythingBut ns)) = IfaceImport decl (ImpIfaceEverythingBut ns)
+    go (ImpUserSpec decl ImpUserAll)
+      = IfaceImport decl ImpIfaceAll
+    go (ImpUserSpec decl (ImpUserExplicit env parents_of_implicits))
+      = IfaceImport decl (ImpIfaceExplicit (sortAvails env) (nameSetElemsStable parents_of_implicits))
+    go (ImpUserSpec decl (ImpUserEverythingBut ns))
+      = IfaceImport decl (ImpIfaceEverythingBut (nameSetElemsStable ns))
 
 mkIfaceExports :: [AvailInfo] -> [IfaceExport] -- Sort to make canonical
 mkIfaceExports as = case sortAvails as of DefinitelyDeterministicAvails sas -> sas

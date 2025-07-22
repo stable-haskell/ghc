@@ -2,7 +2,18 @@ Named ``default`` declarations
 ==============================
 
 .. extension:: NamedDefaults
-    :shortdesc: Enable ``default`` declarations with explicitly named class.
+    :shortdesc:
+      Enable ``default`` declarations with explicitly named class,
+      extending :ref:`class_defaulting`.
+
+    :since: 9.12.1
+
+The ``NamedDefaults`` extension extends the type-class defaulting mechanism
+described in :ref:`class_defaulting`, allowing default types to be specified
+on a per-class basis, and to be imported and exported.
+
+Motivation
+----------
 
 Haskell 2010 `language report
 <https://www.haskell.org/onlinereport/haskell2010/haskellch4.html#x10-790004.3.4>`__
@@ -51,13 +62,27 @@ just ``Num``:
 
 where each type *qtycon*\ `i`:subscript: must be an instance of the specified
 class *qtycls*. The types may belong to any kind, but the class must have a
-single parameter. This declaration for example becomes legal: ::
+single *visible* parameter. This declaration for example becomes legal: ::
 
     default Monoid ([Int])
 
 and in turn allows this program to compile: ::
 
     main = print mempty
+
+Note that the class is allowed to have invisible type parameters, e.g. the
+following is valid: ::
+
+    -- recall Typeable :: forall k. k -> Constraint
+    default Typeable (Int)
+
+    type RepPolyCls :: forall r. TYPE r -> Constraint
+    class RepPolyCls a where { ... }
+    default RepPolyCls (Int#)
+
+Here, ``Typeable`` and ``RepPolyCls`` both take two parameters, an invisible
+kind parameter and a visible type parameter. For the purposes of named
+default declarations, we consider them to be unary.
 
 If no class is specified, the earlier default of ``Num`` is assumed. In other
 words, the Haskell '98 syntax of::
@@ -172,8 +197,10 @@ is, the repeats can be discarded.
 Rules for disambiguation at the use site
 ----------------------------------------
 
-The disambiguation rules are a conservative extension of the existing rules in
-Haskell 2010, which state that ambiguous type variable *v* is defaultable if:
+The disambiguation rules are a conservative extension of the existing rules from
+the (`Haskell Report, Section 4.3.4 <https://www.haskell.org/onlinereport/decls.html#sect4.3.4>`__).
+These are described in :ref:`class_defaulting`, but to recap: an ambiguous type
+variable *v* is defaultable if:
 
     - *v* appears only in constraints of the form *C* *v*, where *C* is a class,
       and
@@ -187,10 +214,9 @@ Haskell 2010, which state that ambiguous type variable *v* is defaultable if:
     that is an instance of all the ambiguous variable’s classes. It is a static
     error if no such type is found.
 
-The new rules instead require only that 
-
-- *v* appears in at least one constraint of the form *C* *v*, where *C* is a
-  single-parameter class.
+The new rules relax the last two criteria to include any classes for which there
+is a named default declaration (local or imported). Note that this includes
+modules in which the :extension:`NamedDefaults` extension is **not** enabled!
 
 Informally speaking, the type selected for defaulting is the first type from the
 ``default`` list for class *C* that satisfies all constraints on type variable
@@ -219,3 +245,7 @@ Let *S* be the complete set of unsolved constraints, and initialize *S*\
 5. If there is precisely one type *T* in the resulting type set, resolve the
    ambiguity by adding a ``v ~ T``\ `i`:subscript: constraint to a set *S*\
    `x`:subscript:; otherwise report a static error.
+
+As explained in :ref:`extended-class-defaulting`, the :extension:`ExtendedDefaultRules`
+extension allows these rules to be relaxed even further, allowing defaulting
+to take place in more circumstances.

@@ -62,26 +62,28 @@ module GHC.Parser.PostProcess (
         checkValDef,          -- (SrcLoc, HsExp, HsRhs, [HsDecl]) -> P HsDecl
         checkValSigLhs,
         LRuleTyTmVar, RuleTyTmVar(..),
-        mkRuleBndrs, mkRuleTyVarBndrs,
+        mkRuleBndrs,
+        ruleBndrsOrDef,
         checkRuleTyVarBndrNames,
+        mkSpecSig,
         checkRecordSyntax,
         checkEmptyGADTs,
         addFatalError, hintBangPat,
         mkBangTy,
         UnpackednessPragma(..),
-        mkMultTy,
         mkMultAnn,
-
-        -- Token location
-        mkTokenLocation,
+        mkMultField,
+        mkConDeclField,
 
         -- Help with processing exports
         ImpExpSubSpec(..),
         ImpExpQcSpec(..),
         mkModuleImpExp,
         mkTypeImpExp,
+        mkDataImpExp,
         mkImpExpSubSpec,
         checkImportSpec,
+        warnPatternNamespaceSpecifier,
 
         -- Token symbols
         starSym,
@@ -92,6 +94,7 @@ module GHC.Parser.PostProcess (
         failOpFewArgs,
         failNotEnabledImportQualifiedPost,
         failImportQualifiedTwice,
+        failSpliceOrQuoteTwice,
 
         SumOrTuple (..),
 
@@ -108,7 +111,6 @@ module GHC.Parser.PostProcess (
         withArrowParsingMode, withArrowParsingMode',
         setTelescopeBndrsNameSpace,
         PatBuilder,
-        hsHoleExpr,
 
         -- Type/datacon ambiguity resolution
         DisambTD(..),
@@ -174,7 +176,7 @@ import Text.ParserCombinators.ReadP as ReadP
 import Data.Char
 import Data.Data       ( dataTypeOf, fromConstr, dataTypeConstrs )
 import Data.Kind       ( Type )
-import Data.List.NonEmpty (NonEmpty)
+import Data.List.NonEmpty ( NonEmpty (..) )
 
 {- **********************************************************************
 
@@ -732,9 +734,9 @@ mkPatSynMatchGroup (L loc patsyn_name) (L ld decls) =
            -- conAnn should only be AnnOpenP, AnnCloseP, so the rest should be empty
            ; let ann_fun = mk_ann_funrhs [] []
            ; match <- case details of
-               PrefixCon _ pats -> return $ Match { m_ext = noExtField
-                                                  , m_ctxt = ctxt, m_pats = L l pats
-                                                  , m_grhss = rhs }
+               PrefixCon pats -> return $ Match { m_ext = noExtField
+                                                , m_ctxt = ctxt, m_pats = L l pats
+                                                , m_grhss = rhs }
                    where
                      l = listLocation pats
                      ctxt = FunRhs { mc_fun = ln
@@ -803,9 +805,9 @@ mkGadtDecl loc names dcol ty = do
 
   (args, res_ty, (ops, cps), csa) <-
     case body_ty of
-     L ll (HsFunTy _ hsArr (L (EpAnn anc _ cs) (HsRecTy an rf)) res_ty) -> do
+     L ll (HsFunTy _ hsArr (L (EpAnn anc _ cs) (XHsType (HsRecTy an rf))) res_ty) -> do
        arr <- case hsArr of
-         HsUnrestrictedArrow arr -> return arr
+         HsUnannotated (EpArrow arr) -> return arr
          _ -> do addError $ mkPlainErrorMsgEnvelope (getLocA body_ty) $
                                  (PsErrIllegalGadtRecordMultiplicity hsArr)
                  return noAnn
@@ -1006,29 +1008,85 @@ type LRuleTyTmVar = LocatedAn NoEpAnns RuleTyTmVar
 data RuleTyTmVar = RuleTyTmVar AnnTyVarBndr (LocatedN RdrName) (Maybe (LHsType GhcPs))
 -- ^ Essentially a wrapper for a @RuleBndr GhcPs@
 
--- turns RuleTyTmVars into RuleBnrs - this is straightforward
-mkRuleBndrs :: [LRuleTyTmVar] -> [LRuleBndr GhcPs]
-mkRuleBndrs = fmap (fmap cvt_one)
-  where cvt_one (RuleTyTmVar ann v Nothing) = RuleBndr ann v
-        cvt_one (RuleTyTmVar ann v (Just sig)) =
-          RuleBndrSig ann v (mkHsPatSigType noAnn sig)
+ruleBndrsOrDef :: Maybe (RuleBndrs GhcPs) -> RuleBndrs GhcPs
+ruleBndrsOrDef (Just bndrs) = bndrs
+ruleBndrsOrDef Nothing      = mkRuleBndrs noAnn Nothing []
 
--- turns RuleTyTmVars into HsTyVarBndrs - this is more interesting
-mkRuleTyVarBndrs :: [LRuleTyTmVar] -> [LHsTyVarBndr () GhcPs]
-mkRuleTyVarBndrs = fmap (setLHsTyVarBndrNameSpace tvName . cvt_one)
-  where cvt_one (L l (RuleTyTmVar ann v msig))
+mkRuleBndrs :: HsRuleBndrsAnn -> Maybe [LRuleTyTmVar] -> [LRuleTyTmVar] -> RuleBndrs GhcPs
+mkRuleBndrs ann tvbs tmbs
+  = RuleBndrs { rb_ext = ann
+              , rb_tyvs = fmap (fmap (setLHsTyVarBndrNameSpace tvName . cvt_tv)) tvbs
+              , rb_tmvs = fmap (fmap cvt_tm) tmbs }
+  where
+    -- cvt_tm turns RuleTyTmVars into RuleBnrs - this is straightforward
+    cvt_tm (RuleTyTmVar ann v Nothing)    = RuleBndr ann v
+    cvt_tm (RuleTyTmVar ann v (Just sig)) = RuleBndrSig ann v (mkHsPatSigType noAnn sig)
+
+    -- cvt_tv turns RuleTyTmVars into HsTyVarBndrs - this is more interesting
+    cvt_tv (L l (RuleTyTmVar ann v msig))
           = L (l2l l) (HsTvb ann () (HsBndrVar noExtField v) (cvt_sig msig))
-        cvt_sig Nothing    = HsBndrNoKind noExtField
-        cvt_sig (Just sig) = HsBndrKind   noExtField sig
+    cvt_sig Nothing    = HsBndrNoKind noExtField
+    cvt_sig (Just sig) = HsBndrKind   noExtField sig
 
+checkRuleTyVarBndrNames :: [LRuleTyTmVar] -> P ()
 -- See Note [Parsing explicit foralls in Rules] in Parser.y
-checkRuleTyVarBndrNames :: [LHsTyVarBndr flag GhcPs] -> P ()
-checkRuleTyVarBndrNames = mapM_ check . mapMaybe (hsTyVarLName . unLoc)
-  where check (L loc (Unqual occ)) =
-          when (occNameFS occ `elem` [fsLit "family",fsLit "role"])
-            (addFatalError $ mkPlainErrorMsgEnvelope (locA loc) $
-               (PsErrParseErrorOnInput occ))
-        check _ = panic "checkRuleTyVarBndrNames"
+checkRuleTyVarBndrNames bndrs
+   = sequence_ [ check lname | L _ (RuleTyTmVar _ lname _) <- bndrs ]
+  where
+    check (L loc (Unqual occ)) =
+          when (occNameFS occ `elem` [fsLit "family",fsLit "role"]) $
+          addFatalError $ mkPlainErrorMsgEnvelope (locA loc) $
+                          PsErrParseErrorOnInput occ
+    check _ = panic "checkRuleTyVarBndrNames"
+
+-- | Deal with both old-form and new-form specialise pragmas, using the new
+-- 'SpecSigE' form unless there are multiple comma-separated type signatures,
+-- in which case we use the old-form.
+--
+-- See Note [Overview of SPECIALISE pragmas] in GHC.Tc.Gen.Sig.
+mkSpecSig :: InlinePragma
+          -> AnnSpecSig
+          -> Maybe (RuleBndrs GhcPs)
+          -> LHsExpr GhcPs
+          -> Maybe (Located (TokDcolon, OrdList (LHsSigType GhcPs)))
+          -> P (Sig GhcPs)
+mkSpecSig inl_prag activation_anns m_rule_binds expr m_sigtypes_ascr
+  = case m_sigtypes_ascr of
+      Nothing
+        -- New form, no trailing type signature, e.g {-# SPECIALISE f @Int #-}
+        -> pure $
+           SpecSigE activation_anns
+                    (ruleBndrsOrDef m_rule_binds) expr inl_prag
+
+      Just (L lt (colon_ann, sigtype_ol))
+
+        -- Singleton, e.g.  {-# SPECIALISE f :: ty #-}
+        -- Use the SpecSigE route
+        | [sigtype] <- sigtype_list
+        -> pure $
+           SpecSigE activation_anns
+                    (ruleBndrsOrDef m_rule_binds)
+                    (L ((combineSrcSpansA (getLoc expr) (noAnnSrcSpan lt)))
+                       (ExprWithTySig colon_ann expr (mkHsWildCardBndrs sigtype)))
+                    inl_prag
+
+        -- So we must have the old form  {# SPECIALISE f :: ty1, ty2, ty3 #-}
+        -- Use the old SpecSig route
+        | Nothing <- m_rule_binds
+        , L _ (HsVar _ var) <- expr
+        -> do addPsMessage sigs_loc PsWarnSpecMultipleTypeAscription
+              pure $
+                SpecSig (activation_anns {ass_dcolon = Just colon_ann })
+                        var sigtype_list inl_prag
+
+        | otherwise ->
+            addFatalError $
+              mkPlainErrorMsgEnvelope sigs_loc PsErrSpecExprMultipleTypeAscription
+
+        where
+          sigtype_list = fromOL sigtype_ol
+          sigs_loc =
+            getHasLoc colon_ann `combineSrcSpans` getHasLoc (last sigtype_list)
 
 checkRecordSyntax :: (MonadP m, Outputable a) => LocatedA a -> m (LocatedA a)
 checkRecordSyntax lr@(L loc r)
@@ -1221,8 +1279,11 @@ checkContextExpr orig_expr@(L (EpAnn l _ cs) _) =
 
 checkImportDecl :: Maybe (EpToken "qualified")
                 -> Maybe (EpToken "qualified")
-                -> P ()
-checkImportDecl mPre mPost = do
+                -> Maybe EpAnnLevel
+                -> Maybe EpAnnLevel
+                -> P ((Maybe (EpToken "qualified"), ImportDeclQualifiedStyle)
+                     , (Maybe EpAnnLevel, ImportDeclLevelStyle))
+checkImportDecl mPre mPost preLevel postLevel = do
   let whenJust mg f = maybe (pure ()) f mg
       tokenSpan tok = RealSrcSpan (epaLocationRealSrcSpan $ getEpTokenLoc tok) Strict.Nothing
 
@@ -1236,14 +1297,46 @@ checkImportDecl mPre mPost = do
 
   -- Error if 'qualified' occurs in both pre and postpositive
   -- positions.
-  whenJust mPost $ \post ->
-    when (isJust mPre) $
-      failImportQualifiedTwice (tokenSpan post)
+  qualSpec <- importDeclQualifiedStyle mPre mPost
+  levelSpec <- importDeclLevelStyle preLevel postLevel
 
   -- Warn if 'qualified' found in prepositive position and
   -- 'Opt_WarnPrepositiveQualifiedModule' is enabled.
   whenJust mPre $ \pre ->
     warnPrepositiveQualifiedModule (tokenSpan pre)
+
+  return (qualSpec, levelSpec)
+
+-- | Given two possible located 'qualified' tokens, compute a style
+-- (in a conforming Haskell program only one of the two can be not
+-- 'Nothing'). This is called from "GHC.Parser".
+importDeclQualifiedStyle :: Maybe (EpToken "qualified")
+                         -> Maybe (EpToken "qualified")
+                         -> P (Maybe (EpToken "qualified"), ImportDeclQualifiedStyle)
+importDeclQualifiedStyle mPre mPost =
+  case (mPre, mPost) of
+    (Just {}, Just post) -> failImportQualifiedTwice (getEpTokenSrcSpan post)
+                            >> return (Just post, QualifiedPost)
+    (Nothing, Just post) -> pure (Just post, QualifiedPost)
+    (Just pre, Nothing) -> pure (Just pre, QualifiedPre)
+    (Nothing, Nothing) -> pure (Nothing, NotQualified)
+
+importDeclLevelStyle :: (Maybe EpAnnLevel)
+                     -> (Maybe EpAnnLevel)
+                     -> P (Maybe EpAnnLevel, ImportDeclLevelStyle)
+importDeclLevelStyle preImportLevel postImportLevel =
+  case (preImportLevel, postImportLevel) of
+    (Just {}, Just tok) -> failSpliceOrQuoteTwice tok
+                            >> return (Just tok, LevelStylePost (tokToLevel tok))
+    (Nothing, Just post) -> pure (Just post, LevelStylePost (tokToLevel post))
+    (Just pre, Nothing) -> pure (Just pre, LevelStylePre (tokToLevel pre))
+    (Nothing, Nothing) -> pure (Nothing, NotLevelled)
+  where
+    tokToLevel tok = case tok of
+      EpAnnLevelSplice {} -> ImportDeclSplice
+      EpAnnLevelQuote {} -> ImportDeclQuote
+
+
 
 -- -------------------------------------------------------------------------
 -- Checking Patterns.
@@ -1257,40 +1350,43 @@ checkPattern = runPV . checkLPat
 checkPattern_details :: ParseContext -> PV (LocatedA (PatBuilder GhcPs)) -> P (LPat GhcPs)
 checkPattern_details extraDetails pp = runPV_details extraDetails (pp >>= checkLPat)
 
-checkLArgPat :: LocatedA (ArgPatBuilder GhcPs) -> PV (LPat GhcPs)
-checkLArgPat (L l (ArgPatBuilderVisPat p)) = checkLPat (L l p)
-checkLArgPat (L l (ArgPatBuilderArgPat p)) = return (L l p)
-
 checkLPat :: LocatedA (PatBuilder GhcPs) -> PV (LPat GhcPs)
 checkLPat (L l@(EpAnn anc an _) p) = do
-  (L l' p', cs) <- checkPat (EpAnn anc an emptyComments) emptyComments (L l p) [] []
+  (L l' p', cs) <- checkPat (EpAnn anc an emptyComments) emptyComments (L l p) []
   return (L (addCommentsToEpAnn l' cs) p')
 
-checkPat :: SrcSpanAnnA -> EpAnnComments -> LocatedA (PatBuilder GhcPs) -> [HsConPatTyArg GhcPs] -> [LPat GhcPs]
+checkPat :: SrcSpanAnnA -> EpAnnComments -> LocatedA (PatBuilder GhcPs) -> [LPat GhcPs]
          -> PV (LPat GhcPs, EpAnnComments)
 -- SG: I think this function checks what Haskell2010 calls the `pat` and `lpat`
 -- productions
-checkPat loc cs (L l e@(PatBuilderVar (L ln c))) tyargs args
+checkPat loc cs (L l e@(PatBuilderVar (L ln c))) args
   | isRdrDataCon c || isRdrTc c
   = return (L loc $ ConPat
       { pat_con_ext = noAnn -- AZ: where should this come from?
       , pat_con = L ln c
-      , pat_args = PrefixCon tyargs args
+      , pat_args = PrefixCon args
       }, comments l Semi.<> cs)
   | (not (null args) && patIsRec c) = do
       ctx <- askParseContext
       patFail (locA l) . PsErrInPat e $ PEIP_RecPattern args YesPatIsRecursive ctx
-checkPat loc cs (L la (PatBuilderAppType f at t)) tyargs args =
-  checkPat loc (cs Semi.<> comments la) f (HsConPatTyArg at t : tyargs) args
-checkPat loc cs (L la (PatBuilderApp f e)) [] args = do
+checkPat loc cs (L la (PatBuilderAppType f at t)) args =
+  checkPat loc (cs Semi.<> comments la) f (mkInvisLPat at t : args)
+checkPat loc cs (L la (PatBuilderApp f e)) args = do
   p <- checkLPat e
-  checkPat loc (cs Semi.<> comments la) f [] (p : args)
-checkPat loc cs (L l e) [] [] = do
+  checkPat loc (cs Semi.<> comments la) f (p : args)
+checkPat loc cs (L l e) [] = do
   p <- checkAPat loc e
   return (L l p, cs)
-checkPat loc _ e _ _ = do
+checkPat loc _ e _ = do
   details <- fromParseContext <$> askParseContext
   patFail (locA loc) (PsErrInPat (unLoc e) details)
+
+mkInvisLPat :: EpToken "@" -> HsTyPat GhcPs -> LPat GhcPs
+mkInvisLPat tok ty_pat = L l invis_pat
+  where
+    HsTP _ (L (EpAnn anc _ _) _) = ty_pat
+    l = EpAnn (widenAnchorT anc tok) noAnn emptyComments
+    invis_pat = InvisPat (tok, SpecifiedSpec) ty_pat
 
 checkAPat :: SrcSpanAnnA -> PatBuilder GhcPs -> PV (Pat GhcPs)
 checkAPat loc e0 = do
@@ -1374,7 +1470,7 @@ checkValDef loc lhs (mult, Just (sigAnn, sig)) grhss
        checkPatBind loc lhs' grhss mult
 
 checkValDef loc lhs (mult_ann, Nothing) grhss
-  | HsNoMultAnn{} <- mult_ann
+  | HsUnannotated{} <- mult_ann
   = do  { mb_fun <- isFunLhs lhs
         ; case mb_fun of
             Just (fun, is_infix, pats, ops, cps) -> do
@@ -1398,11 +1494,11 @@ checkFunBind :: SrcSpan
              -> AnnFunRhs
              -> LocatedN RdrName
              -> LexicalFixity
-             -> LocatedE [LocatedA (ArgPatBuilder GhcPs)]
+             -> LocatedE [LocatedA (PatBuilder GhcPs)]
              -> Located (GRHSs GhcPs (LHsExpr GhcPs))
              -> P (HsBind GhcPs)
 checkFunBind locF ann_fun (L lf fun) is_infix (L lp pats) (L _ grhss)
-  = do  ps <- runPV_details extraDetails (mapM checkLArgPat pats)
+  = do  ps <- runPV_details extraDetails (mapM checkLPat pats)
         let match_span = noAnnSrcSpan $ locF
         return (makeFunBind (L (l2l lf) fun) (L (noAnnSrcSpan $ locA match_span)
                  [L match_span (Match { m_ext = noExtField
@@ -1435,7 +1531,7 @@ checkPatBind :: SrcSpan
              -> HsMultAnn GhcPs
              -> P (HsBind GhcPs)
 checkPatBind loc (L _ (BangPat an (L _ (VarPat _ v))))
-                        (L _match_span grhss) (HsNoMultAnn _)
+                        (L _match_span grhss) (HsUnannotated _)
       = return (makeFunBind v (L (noAnnSrcSpan loc)
                 [L (noAnnSrcSpan loc) (m an v)]))
   where
@@ -1483,20 +1579,18 @@ checkDoAndIfThenElse err guardExpr semiThen thenExpr semiElse elseExpr
 
 isFunLhs :: LocatedA (PatBuilder GhcPs)
       -> P (Maybe (LocatedN RdrName, LexicalFixity,
-                   [LocatedA (ArgPatBuilder GhcPs)],[EpToken "("],[EpToken ")"]))
+                   [LocatedA (PatBuilder GhcPs)],[EpToken "("],[EpToken ")"]))
 -- A variable binding is parsed as a FunBind.
 -- Just (fun, is_infix, arg_pats) if e is a function LHS
 isFunLhs e = go e [] [] []
  where
-   mk = fmap ArgPatBuilderVisPat
-
    go (L l (PatBuilderVar (L loc f))) es ops cps
        | not (isRdrDataCon f)        = do
            let (_l, loc') = transferCommentsOnlyA l loc
            return (Just (L loc' f, Prefix, es, (reverse ops), cps))
    go (L l (PatBuilderApp (L lf f) e))   es       ops cps = do
      let (_l, lf') = transferCommentsOnlyA l lf
-     go (L lf' f) (mk e:es) ops cps
+     go (L lf' f) (e:es) ops cps
    go (L l (PatBuilderPar _ (L le e) _)) es@(_:_) ops cps = go (L le' e) es (o:ops) (c:cps)
       -- NB: es@(_:_) means that there must be an arg after the parens for the
       -- LHS to be a function LHS. This corresponds to the Haskell Report's definition
@@ -1507,36 +1601,28 @@ isFunLhs e = go e [] [] []
    go (L loc (PatBuilderOpApp (L ll l) (L loc' op) r (os,cs))) es ops cps
       | not (isRdrDataCon op)         -- We have found the function!
       = do { let (_l, ll') = transferCommentsOnlyA loc ll
-           ; return (Just (L loc' op, Infix, (mk (L ll' l):mk r:es), (os ++ reverse ops), (cs ++ cps))) }
+           ; return (Just (L loc' op, Infix, ((L ll' l):r:es), (os ++ reverse ops), (cs ++ cps))) }
       | otherwise                     -- Infix data con; keep going
       = do { let (_l, ll') = transferCommentsOnlyA loc ll
            ; mb_l <- go (L ll' l) es ops cps
            ; return (reassociate =<< mb_l) }
         where
-          reassociate (op', Infix, j : L k_loc (ArgPatBuilderVisPat k) : es', ops', cps')
+          reassociate (op', Infix, j : L k_loc k : es', ops', cps')
             = Just (op', Infix, j : op_app : es', ops', cps')
             where
-              op_app = mk $ L loc (PatBuilderOpApp (L k_loc k)
+              op_app = L loc (PatBuilderOpApp (L k_loc k)
                                     (L loc' op) r (reverse ops, cps))
           reassociate _other = Nothing
    go (L l (PatBuilderAppType (L lp pat) tok ty_pat@(HsTP _ (L (EpAnn anc ann cs) _)))) es ops cps
-             = go (L lp' pat) (L (EpAnn anc' ann cs) (ArgPatBuilderArgPat invis_pat) : es) ops cps
+             = go (L lp' pat) (L (EpAnn anc' ann cs) (PatBuilderPat invis_pat) : es) ops cps
              where invis_pat = InvisPat (tok, SpecifiedSpec) ty_pat
                    anc' = widenAnchorT anc tok
                    (_l, lp') = transferCommentsOnlyA l lp
    go _ _ _ _ = return Nothing
 
-data ArgPatBuilder p
-  = ArgPatBuilderVisPat (PatBuilder p)
-  | ArgPatBuilderArgPat (Pat p)
-
-instance Outputable (ArgPatBuilder GhcPs) where
-  ppr (ArgPatBuilderVisPat p) = ppr p
-  ppr (ArgPatBuilderArgPat p) = ppr p
-
 mkBangTy :: EpaLocation -> SrcStrictness -> LHsType GhcPs -> HsType GhcPs
-mkBangTy tok_loc strictness =
-  HsBangTy ((noAnn, noAnn, tok_loc), NoSourceText) (HsBang NoSrcUnpack strictness)
+mkBangTy tok_loc strictness lty =
+  XHsType (HsBangTy (noAnn, noAnn, tok_loc) (HsSrcBang NoSourceText NoSrcUnpack strictness) lty)
 
 -- | Result of parsing @{-\# UNPACK \#-}@ or @{-\# NOUNPACK \#-}@.
 data UnpackednessPragma =
@@ -1553,11 +1639,11 @@ addUnpackednessP (L lprag (UnpackednessPragma anns prag unpk)) ty = do
     -- such as ~T or !T, then add the pragma to the existing HsBangTy.
     --
     -- Otherwise, wrap the type in a new HsBangTy constructor.
-    addUnpackedness (o,c) (L _ (HsBangTy ((_,_,tl), NoSourceText) bang t))
-      | HsBang NoSrcUnpack strictness <- bang
-      = HsBangTy ((o,c,tl), prag) (HsBang unpk strictness) t
+    addUnpackedness (o,c) (L _ (XHsType (HsBangTy (_,_,tl) bang t)))
+      | HsSrcBang NoSourceText NoSrcUnpack strictness <- bang
+      = XHsType (HsBangTy (o,c,tl) (HsSrcBang prag unpk strictness) t)
     addUnpackedness (o,c) t
-      = HsBangTy ((o,c,noAnn), prag) (HsBang unpk NoSrcStrict) t
+      = XHsType (HsBangTy (o,c,noAnn) (HsSrcBang prag unpk NoSrcStrict) t)
 
 ---------------------------------------------------------------------------
 -- | Check for monad comprehensions
@@ -1610,12 +1696,12 @@ type Fbind b = Either (LHsRecField GhcPs (LocatedA b)) (LHsRecProj GhcPs (Locate
 class DisambInfixOp b where
   mkHsVarOpPV :: LocatedN RdrName -> PV (LocatedN b)
   mkHsConOpPV :: LocatedN RdrName -> PV (LocatedN b)
-  mkHsInfixHolePV :: LocatedN (HsExpr GhcPs) -> PV (LocatedN b)
+  mkHsInfixHolePV :: LocatedN RdrName -> PV (LocatedN b)
 
 instance DisambInfixOp (HsExpr GhcPs) where
   mkHsVarOpPV v = return $ L (getLoc v) (HsVar noExtField v)
   mkHsConOpPV v = return $ L (getLoc v) (HsVar noExtField v)
-  mkHsInfixHolePV h = return h
+  mkHsInfixHolePV v = return $ L (getLoc v) (HsHole (HoleVar v))
 
 instance DisambInfixOp RdrName where
   mkHsConOpPV (L l v) = return $ L l v
@@ -1643,7 +1729,7 @@ class (b ~ (Body b) GhcPs, AnnoBody b) => DisambECP b where
   ecpFromExp' :: LHsExpr GhcPs -> PV (LocatedA b)
   -- | Return a pattern without ambiguity, or fail in a non-pattern context.
   ecpFromPat' :: LPat GhcPs -> PV (LocatedA b)
-  mkHsProjUpdatePV :: SrcSpan -> Located [LocatedAn NoEpAnns (DotFieldOcc GhcPs)]
+  mkHsProjUpdatePV :: SrcSpan -> Located (NonEmpty (LocatedAn NoEpAnns (DotFieldOcc GhcPs)))
     -> LocatedA b -> Bool -> Maybe (EpToken "=") -> PV (LHsRecProj GhcPs (LocatedA b))
   -- | Disambiguate "let ... in ..."
   mkHsLetPV
@@ -1728,10 +1814,10 @@ class (b ~ (Body b) GhcPs, AnnoBody b) => DisambECP b where
     :: SrcSpan -> LocatedA (InfixOp b) -> LocatedA b -> PV (LocatedA b)
   -- | Disambiguate "(a -> b)" (view pattern or function type arrow)
   mkHsArrowPV
-    :: SrcSpan -> ArrowParsingMode lhs b -> LocatedA lhs -> HsArrowOf (LocatedA b) GhcPs -> LocatedA b -> PV (LocatedA b)
+    :: SrcSpan -> ArrowParsingMode lhs b -> LocatedA lhs -> HsMultAnnOf (LocatedA b) GhcPs -> LocatedA b -> PV (LocatedA b)
   -- | Disambiguate "%m" to the left of "->" (multiplicity)
   mkHsMultPV
-    :: EpToken "%" -> LocatedA b -> PV (TokRarrow -> HsArrowOf (LocatedA b) GhcPs)
+    :: EpToken "%" -> LocatedA b -> PV (TokRarrow -> HsMultAnnOf (LocatedA b) GhcPs)
   -- | Disambiguate "forall a. b" and "forall a -> b" (forall telescope)
   mkHsForallPV :: SrcSpan -> HsForAllTelescope GhcPs -> LocatedA b -> PV (LocatedA b)
   -- | Disambiguate "(a,b,c)" to the left of "=>" (constraint list)
@@ -1897,11 +1983,11 @@ instance DisambECP (HsExpr GhcPs) where
   type Body (HsExpr GhcPs) = HsExpr
   ecpFromCmd' (L l c) = do
     addError $ mkPlainErrorMsgEnvelope (locA l) $ PsErrArrowCmdInExpr c
-    return (L l (hsHoleExpr noAnn))
+    return (L l parseError)
   ecpFromExp' = return
   ecpFromPat' p@(L l _) = do
     addError $ mkPlainErrorMsgEnvelope (locA l) $ PsErrOrPatInExpr p
-    return (L l (hsHoleExpr noAnn))
+    return (L l parseError)
   mkHsProjUpdatePV l fields arg isPun anns = do
     !cs <- getCommentsFor l
     return $ mkRdrProjUpdate (EpAnn (spanAsAnchor l) noAnn cs) fields arg isPun anns
@@ -1950,7 +2036,7 @@ instance DisambECP (HsExpr GhcPs) where
   mkHsOverLitPV (L (EpAnn l an csIn) a) = do
     !cs <- getCommentsFor (locA l)
     return $ L (EpAnn  l an (cs Semi.<> csIn)) (HsOverLit NoExtField a)
-  mkHsWildCardPV l = return $ L (noAnnSrcSpan l) (hsHoleExpr noAnn)
+  mkHsWildCardPV l = return $ L (noAnnSrcSpan l) (HsHole (HoleVar (L (noAnnSrcSpan l) (mkUnqual varName (fsLit "_")))))
   mkHsTySigPV l@(EpAnn anc an csIn) a sig anns = do
     !cs <- getCommentsFor (locA l)
     return $ L (EpAnn anc an (csIn Semi.<> cs)) (ExprWithTySig anns a (hsTypeToHsSigWcType sig))
@@ -1971,11 +2057,11 @@ instance DisambECP (HsExpr GhcPs) where
     !cs <- getCommentsFor l
     return $ L (EpAnn (spanAsAnchor l) noAnn cs) (SectionR noExtField op e)
   mkHsAsPatPV l v _ e   = addError (mkPlainErrorMsgEnvelope l $ PsErrTypeAppWithoutSpace (unLoc v) e)
-                          >> return (L (noAnnSrcSpan l) (hsHoleExpr noAnn))
+                          >> return (L (noAnnSrcSpan l) parseError)
   mkHsLazyPatPV l e   _ = addError (mkPlainErrorMsgEnvelope l $ PsErrLazyPatWithoutSpace e)
-                          >> return (L (noAnnSrcSpan l) (hsHoleExpr noAnn))
+                          >> return (L (noAnnSrcSpan l) parseError)
   mkHsBangPatPV l e   _ = addError (mkPlainErrorMsgEnvelope l $ PsErrBangPatWithoutSpace e)
-                          >> return (L (noAnnSrcSpan l) (hsHoleExpr noAnn))
+                          >> return (L (noAnnSrcSpan l) parseError)
   mkSumOrTuplePV = mkSumOrTupleExpr
   mkHsEmbTyPV l toktype ty =
     return $ L (noAnnSrcSpan l) $
@@ -2001,9 +2087,6 @@ instance DisambECP (HsExpr GhcPs) where
   rejectPragmaPV (L l (HsPragE _ prag _)) = addError $ mkPlainErrorMsgEnvelope (locA l) $
                                                          (PsErrUnallowedPragma prag)
   rejectPragmaPV _                        = return ()
-
-hsHoleExpr :: Maybe EpAnnUnboundVar -> HsExpr GhcPs
-hsHoleExpr anns = HsUnboundVar anns (mkRdrUnqual (mkVarOccFS (fsLit "_")))
 
 instance DisambECP (PatBuilder GhcPs) where
   type Body (PatBuilder GhcPs) = PatBuilder
@@ -2071,10 +2154,10 @@ instance DisambECP (PatBuilder GhcPs) where
     where
       tok :: TokRarrow
       tok = case arr of
-        HsUnrestrictedArrow x -> x
+        HsUnannotated (EpArrow x) -> x
         _ -> -- unreachable case because in Parser.y the reduction rules for
              -- (a %m -> b) and (a ->. b) use ArrowIsFunType
-             panic "mkHsArrowPV ArrowIsViewPat: expected HsUnrestrictedArrow"
+             panic "mkHsArrowPV ArrowIsViewPat: expected HsUnannotated"
   mkHsArrowPV l ArrowIsFunType a arr b =
     patFail l (PsErrTypeSyntaxInPat (PETS_FunctionArrow a arr b))
   mkHsMultPV tok arg =
@@ -2331,16 +2414,16 @@ dataConBuilderDetails :: LocatedA DataConBuilder -> HsConDeclH98Details GhcPs
 -- Detect when the record syntax is used:
 --   data T = MkT { ... }
 dataConBuilderDetails (L _ (PrefixDataConBuilder flds _))
-  | [L (EpAnn anc _ cs) (HsRecTy an fields)] <- toList flds
+  | [L (EpAnn anc _ cs) (XHsType (HsRecTy an fields))] <- toList flds
   = RecCon (L (EpAnn anc an cs) fields)
 
 -- Normal prefix constructor, e.g.  data T = MkT A B C
 dataConBuilderDetails (L _ (PrefixDataConBuilder flds _))
-  = PrefixCon noTypeArgs (map hsLinear (toList flds))
+  = PrefixCon (map hsPlainTypeField (toList flds))
 
 -- Infix constructor, e.g. data T = Int :! Bool
 dataConBuilderDetails (L (EpAnn _ _ csl) (InfixDataConBuilder (L (EpAnn anc ann csll) lhs) _ rhs))
-  = InfixCon (hsLinear (L (EpAnn anc ann (csl Semi.<> csll)) lhs)) (hsLinear rhs)
+  = InfixCon (hsPlainTypeField (L (EpAnn anc ann (csl Semi.<> csll)) lhs)) (hsPlainTypeField rhs)
 
 
 instance DisambTD DataConBuilder where
@@ -2367,7 +2450,7 @@ instance DisambTD DataConBuilder where
       return $ L (addCommentsToEpAnn l cs) (InfixDataConBuilder lhs data_con rhs)
     where
       l = combineLocsA lhs rhs
-      check_no_ops (HsBangTy _ _ t) = check_no_ops (unLoc t)
+      check_no_ops (XHsType (HsBangTy _ _ t)) = check_no_ops (unLoc t)
       check_no_ops (HsOpTy{}) =
         addError $ mkPlainErrorMsgEnvelope (locA l) $
                      (PsErrInvalidInfixDataCon (unLoc lhs) (unLoc tc) (unLoc rhs))
@@ -2408,7 +2491,7 @@ checkNotPromotedDataCon IsPromoted (L l name) =
 
 mkUnboxedSumCon :: LHsType GhcPs -> ConTag -> Arity -> (LocatedN RdrName, HsConDeclH98Details GhcPs)
 mkUnboxedSumCon t tag arity =
-  (noLocA (getRdrName (sumDataCon tag arity)), PrefixCon noTypeArgs [hsLinear t])
+  (noLocA (getRdrName (sumDataCon tag arity)), PrefixCon [hsPlainTypeField t])
 
 {- Note [Ambiguous syntactic categories]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -2934,7 +3017,7 @@ mkRdrRecordUpd overloaded_on exp@(L loc _) fbinds anns = do
         let f = occNameFS . rdrNameOcc $ rdr
             fl = DotFieldOcc noAnn (L loc (FieldLabelString f))
             lf = locA loc
-        in mkRdrProjUpdate l (L lf [L (l2l loc) fl]) (punnedVar f) pun anns
+        in mkRdrProjUpdate l (L lf (L (l2l loc) fl :| [])) (punnedVar f) pun anns
         where
           -- If punning, compute HsVar "f" otherwise just arg. This
           -- has the effect that sentinel HsVar "pun-rhs" is replaced
@@ -3159,6 +3242,7 @@ data ImpExpSubSpec = ImpExpAbs
 
 data ImpExpQcSpec = ImpExpQcName (LocatedN RdrName)
                   | ImpExpQcType (EpToken "type") (LocatedN RdrName)
+                  | ImpExpQcData (EpToken "data") (LocatedN RdrName)
                   | ImpExpQcWildcard (EpToken "..") (EpToken ",")
 
 mkModuleImpExp :: Maybe (LWarningTxt GhcPs) -> (EpToken "(", EpToken ")") -> LocatedA ImpExpQcSpec
@@ -3204,11 +3288,13 @@ mkModuleImpExp warning (top, tcp) (L l specname) subs = do
 
     ieNameVal (ImpExpQcName ln)   = unLoc ln
     ieNameVal (ImpExpQcType _ ln) = unLoc ln
+    ieNameVal (ImpExpQcData _ ln) = unLoc ln
     ieNameVal ImpExpQcWildcard{}  = panic "ieNameVal got wildcard"
 
     ieNameFromSpec :: ImpExpQcSpec -> IEWrappedName GhcPs
     ieNameFromSpec (ImpExpQcName   (L l n)) = IEName noExtField (L l n)
     ieNameFromSpec (ImpExpQcType r (L l n)) = IEType r (L l n)
+    ieNameFromSpec (ImpExpQcData r (L l n)) = IEData r (L l n)
     ieNameFromSpec ImpExpQcWildcard{}       = panic "ieName got wildcard"
 
     wrapped = map (fmap ieNameFromSpec)
@@ -3218,6 +3304,12 @@ mkTypeImpExp :: LocatedN RdrName   -- TcCls or Var name space
 mkTypeImpExp name =
   do requireExplicitNamespaces (getLocA name)
      return (fmap (`setRdrNameSpace` tcClsName) name)
+
+mkDataImpExp :: LocatedN RdrName
+             -> P (LocatedN RdrName)
+mkDataImpExp name =
+  do requireExplicitNamespaces (getLocA name)
+     return name
 
 checkImportSpec :: LocatedLI [LIE GhcPs] -> P (LocatedLI [LIE GhcPs])
 checkImportSpec ie@(L _ specs) =
@@ -3257,6 +3349,14 @@ failImportQualifiedTwice :: SrcSpan -> P ()
 failImportQualifiedTwice loc =
   addError $ mkPlainErrorMsgEnvelope loc $ PsErrImportQualifiedTwice
 
+failSpliceOrQuoteTwice :: EpAnnLevel -> P ()
+failSpliceOrQuoteTwice lvl =
+  addError $ mkPlainErrorMsgEnvelope loc $ PsErrSpliceOrQuoteTwice
+  where
+    loc = case lvl of
+      EpAnnLevelSplice tok -> getEpTokenSrcSpan tok
+      EpAnnLevelQuote tok -> getEpTokenSrcSpan tok
+
 warnStarIsType :: SrcSpan -> P ()
 warnStarIsType span = addPsMessage span PsWarnStarIsType
 
@@ -3272,6 +3372,11 @@ requireExplicitNamespaces l = do
   allowed <- getBit ExplicitNamespacesBit
   unless allowed $
     addError $ mkPlainErrorMsgEnvelope l PsErrIllegalExplicitNamespace
+
+warnPatternNamespaceSpecifier :: MonadP m => SrcSpan -> m ()
+warnPatternNamespaceSpecifier l = do
+  explicit_namespaces <- getBit ExplicitNamespacesBit
+  addPsMessage l (PsWarnPatternNamespaceSpecifier explicit_namespaces)
 
 -----------------------------------------------------------------------------
 -- Misc utils
@@ -3488,39 +3593,28 @@ mkLHsOpTy prom x op y =
   let loc = locA x `combineSrcSpans` locA op `combineSrcSpans` locA y
   in L (noAnnSrcSpan loc) (mkHsOpTy prom x op y)
 
-mkMultTy :: EpToken "%" -> LHsType GhcPs -> TokRarrow -> HsArrow GhcPs
-mkMultTy pct t@(L _ (HsTyLit _ (HsNumTy (SourceText (unpackFS -> "1")) 1))) arr
-  -- See #18888 for the use of (SourceText "1") above
-  = HsLinearArrow (EpPct1 pct1 arr)
-  where
-    -- The location of "%" combined with the location of "1".
-    pct1 :: EpToken "%1"
-    pct1 = epTokenWidenR pct (locA (getLoc t))
-mkMultTy pct t arr = HsExplicitMult (pct, arr) t
-
-mkMultExpr :: EpToken "%" -> LHsExpr GhcPs -> TokRarrow -> HsArrowOf (LHsExpr GhcPs) GhcPs
+mkMultExpr :: EpToken "%" -> LHsExpr GhcPs -> TokRarrow -> HsMultAnnOf (LHsExpr GhcPs) GhcPs
 mkMultExpr pct t@(L _ (HsOverLit _ (OverLit _ (HsIntegral (IL (SourceText (unpackFS -> "1")) _ 1))))) arr
   -- See #18888 for the use of (SourceText "1") above
-  = HsLinearArrow (EpPct1 pct1 arr)
+  = HsLinearAnn (EpPct1 pct1 (EpArrow arr))
   where
     -- The location of "%" combined with the location of "1".
     pct1 :: EpToken "%1"
     pct1 = epTokenWidenR pct (locA (getLoc t))
-mkMultExpr pct t arr = HsExplicitMult (pct, arr) t
+mkMultExpr pct t arr = HsExplicitMult (pct, EpArrow arr) t
 
-mkMultAnn :: EpToken "%" -> LHsType GhcPs -> HsMultAnn GhcPs
-mkMultAnn pct t@(L _ (HsTyLit _ (HsNumTy (SourceText (unpackFS -> "1")) 1)))
+mkMultAnn :: EpToken "%" -> LHsType GhcPs -> EpArrowOrColon -> HsMultAnn GhcPs
+mkMultAnn pct t@(L _ (HsTyLit _ (HsNumTy (SourceText (unpackFS -> "1")) 1))) ep
   -- See #18888 for the use of (SourceText "1") above
-  = HsPct1Ann pct1
+  = HsLinearAnn (EpPct1 pct1 ep)
   where
     -- The location of "%" combined with the location of "1".
     pct1 :: EpToken "%1"
     pct1 = epTokenWidenR pct (locA (getLoc t))
-mkMultAnn pct t = HsMultAnn pct t
+mkMultAnn pct t ep = HsExplicitMult (pct, ep) t
 
-mkTokenLocation :: SrcSpan -> TokenLocation
-mkTokenLocation (UnhelpfulSpan _) = NoTokenLoc
-mkTokenLocation (RealSrcSpan r mb) = TokenLoc (EpaSpan (RealSrcSpan r mb))
+mkMultField :: EpToken "%" -> LHsType GhcPs -> TokDcolon -> LHsType GhcPs -> HsConDeclField GhcPs
+mkMultField pct mult col t = mkConDeclField (mkMultAnn pct mult (EpColon col)) t
 
 -- Precondition: the EpToken has EpaSpan, never EpaDelta.
 epTokenWidenR :: EpToken tok -> SrcSpan -> EpToken tok'
@@ -3557,10 +3651,9 @@ mkRdrProjection flds anns =
     , proj_flds = fmap unLoc flds
     }
 
-mkRdrProjUpdate :: SrcSpanAnnA -> Located [LocatedAn NoEpAnns (DotFieldOcc GhcPs)]
+mkRdrProjUpdate :: SrcSpanAnnA -> Located (NonEmpty (LocatedAn NoEpAnns (DotFieldOcc GhcPs)))
                 -> LHsExpr GhcPs -> Bool -> Maybe (EpToken "=")
                 -> LHsRecProj GhcPs (LHsExpr GhcPs)
-mkRdrProjUpdate _ (L _ []) _ _ _ = panic "mkRdrProjUpdate: The impossible has happened!"
 mkRdrProjUpdate loc (L l flds) arg isPun anns =
   L loc HsFieldBind {
       hfbAnn = anns
@@ -3678,3 +3771,6 @@ mkListSyntaxTy1 brkOpen t brkClose =
 
     annsKeyword = (NoEpTok, brkOpen, brkClose)
     annParen = AnnParensSquare brkOpen brkClose
+
+parseError :: HsExpr GhcPs
+parseError = HsHole HoleError

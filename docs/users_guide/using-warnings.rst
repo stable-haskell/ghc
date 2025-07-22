@@ -78,11 +78,13 @@ as ``-Wno-...`` for every individual warning in the group.
         * :ghc-flag:`-Wgadt-mono-local-binds`
         * :ghc-flag:`-Wtype-equality-requires-operators`
         * :ghc-flag:`-Wtype-equality-out-of-scope`
-        * :ghc-flag:`-Wbadly-staged-types`
+        * :ghc-flag:`-Wbadly-levelled-types`
         * :ghc-flag:`-Winconsistent-flags`
         * :ghc-flag:`-Wnoncanonical-monoid-instances`
         * :ghc-flag:`-Wnoncanonical-monad-instances`
         * :ghc-flag:`-Wdata-kinds-tc`
+        * :ghc-flag:`-Wimplicit-rhs-quantification`
+        * :ghc-flag:`-Wunusable-unpack-pragmas`
 
 .. ghc-flag:: -W
     :shortdesc: enable normal warnings
@@ -164,12 +166,12 @@ as ``-Wno-...`` for every individual warning in the group.
     eager to make their code future compatible to adapt to new features before
     they even generate warnings.
 
-    This currently enables
+    This currently enables:
 
     .. hlist::
         :columns: 3
 
-        * :ghc-flag:`-Wimplicit-rhs-quantification`
+        * :ghc-flag:`-Wpattern-namespace-specifier`
 
 .. ghc-flag:: -w
     :shortdesc: disable all warnings
@@ -422,6 +424,38 @@ of ``-W(no-)*``.
     such as a `LANGUAGE` or `OPTIONS_GHC` pragma, appears in the body of
     the module instead.
 
+.. ghc-flag:: -Wdeprecated-pragmas
+    :shortdesc: warn about deprecated pragmas
+    :type: dynamic
+    :reverse: -Wno-deprecated-pragmas
+    :category:
+
+    :since: 9.14
+
+    :default: on
+
+    Emits a warning when using a deprecated form of a SPECIALISE pragma which
+    uses multiple comma-separated type signatures (deprecated and scheduled
+    to be removed in GHC 9.18).
+
+.. ghc-flag:: -Wrule-lhs-equalities
+    :shortdesc: warn about rules whose LHS contains equality constraints
+    :type: dynamic
+    :reverse: -Wno-rule-lhs-equalities
+    :category:
+
+    :since: 9.14
+
+    :default: on
+
+    When GHC encounters a RULE whose left-hand side gives rise to equality
+    constraints that previous GHC versions (``<= 9.12``) accepted quantifying
+    over, GHC will instead drop the rule and emit a warning message, with the
+    warning message being controlled by this flag.
+
+    This warning is intended to give visibility to the fact that the RULES that
+    previous GHC versions generated in such circumstances could never fire.
+
 .. ghc-flag:: -Wmissed-specialisations
     :shortdesc: warn when specialisation of an imported, overloaded function
         fails.
@@ -475,6 +509,27 @@ of ``-W(no-)*``.
     :reverse: -Wno-all-missed-specializations
 
     Alias for :ghc-flag:`-Wall-missed-specialisations`
+
+.. ghc-flag:: -Wuseless-specialisations
+    :shortdesc: warn on useless SPECIALISE pragmas
+    :type: dynamic
+    :reverse: -Wno-useless-specialisations
+    :category:
+
+    :since: 9.14
+
+    :default: on
+
+    Emits a warning if GHC detects a useless SPECIALISE pragma, such as a
+    SPECIALISE pragma on a non-overloaded function, for example
+    ``{-# SPECIALISE id :: Int -> Int #-}``.
+
+.. ghc-flag:: -Wuseless-specializations
+    :shortdesc: alias for :ghc-flag:`-Wuseless-specialisations`
+    :type: dynamic
+    :reverse: -Wno-useless-specializations
+
+    Alias for :ghc-flag:`-Wuseless-specialisations`
 
 .. ghc-flag:: -Wextended-warnings
     :shortdesc: warn about uses of functions & types that have WARNING or
@@ -2458,7 +2513,7 @@ of ``-W(no-)*``.
     :category:
 
     :since: 9.8.1
-    :default: off
+    :default: on (since 9.14.1)
 
     In accordance with `GHC Proposal #425
     <https://github.com/ghc-proposals/ghc-proposals/blob/master/proposals/0425-decl-invis-binders.rst>`__,
@@ -2504,22 +2559,32 @@ of ``-W(no-)*``.
      When :ghc-flag:`-Wincomplete-export-warnings` is enabled, GHC warns about exports
      that are not deprecating a name that is deprecated with another export in that module.
 
-.. ghc-flag:: -Wbadly-staged-types
-    :shortdesc: warn when type binding is used at the wrong TH stage.
+.. ghc-flag:: -Wbadly-levelled-types
+    :shortdesc: warn when type binding is used at the wrong Template Haskell level.
     :type: dynamic
-    :reverse: -Wno-badly-staged-types
+    :reverse: -Wno-badly-levelled-types
 
-    :since: 9.10.1
+    :since: 9.14.1
 
     Consider an example: ::
 
         tardy :: forall a. Proxy a -> IO Type
         tardy _ = [t| a |]
 
-    The type binding ``a`` is bound at stage 1 but used on stage 2.
+    The type binding ``a`` is bound at level 0 but used at level 1.
 
-    This is badly staged program, and the ``tardy (Proxy @Int)`` won't produce
+    This is a badly levelled program, and the ``tardy (Proxy @Int)`` won't produce
     a type representation of ``Int``, but rather a local name ``a``.
+
+.. ghc-flag:: -Wbadly-staged-types
+    :shortdesc: A deprecated alias for :ghc-flag:`-Wbadly-levelled-types`
+    :type: dynamic
+    :reverse: -Wno-badly-staged-types
+
+    :since: 9.10.1
+
+    A deprecated alias for :ghc-flag:`-Wbadly-levelled-types`
+
 
 .. ghc-flag:: -Winconsistent-flags
     :shortdesc: warn when command line options are inconsistent in some way.
@@ -2596,6 +2661,58 @@ of ``-W(no-)*``.
 
     To make the code forwards-compatible and silence the warning, users are
     advised to add parentheses manually.
+
+.. ghc-flag:: -Wunusable-unpack-pragmas
+    :shortdesc: warn when an ``{-# UNPACK #-}`` pragma is unusable
+    :type: dynamic
+    :reverse: -Wno-unusable-unpack-pragmas
+
+    :since: 9.14.1
+    :default: on
+
+    Warn on unusable ``{-# UNPACK #-}`` pragmas in data type declarations.
+    Examples::
+
+        data T = MkT {-# UNPACK #-} !(Int -> Bool)
+
+        data G where
+          MkG :: {-# UNPACK #-} !G -> G
+
+        type family F a where {}
+        data R a = MkR { fld :: {-# UNPACK #-} !(F a) }
+
+    A possible reason for this warning is that the ``{-# UNPACK #-}`` pragma was
+    applied to one of the following:
+
+      * a function type ``a -> b``
+      * a recursive use of the data type being defined
+      * a sum type that cannot be unpacked
+      * a type/data family application with no matching instance in the environment
+
+    However, it is deliberately **not** emitted if:
+
+      * the failure occurs in an indefinite package in Backpack
+      * the pragma is usable, but unpacking is disabled by :ghc-flag:`-O0`
+
+.. ghc-flag:: -Wpattern-namespace-specifier
+    :shortdesc: warn on uses of the ``pattern`` namespace specifier
+    :type: dynamic
+    :reverse: -Wno-pattern-namespace-specifier
+
+    :since: 9.14.1
+    :default: off
+
+    Warn when the deprecated ``pattern`` namespace specifier is used in
+    import/export lists, e.g. ::
+
+        import Data.List.NonEmpty (pattern (:|))
+
+    To silence the warning, use the ``data`` keyword instead:
+    ::
+
+        import Data.List.NonEmpty (data (:|))
+
+----
 
 If you're feeling really paranoid, the :ghc-flag:`-dcore-lint` option is a good choice.
 It turns on heavyweight intra-pass sanity-checking within GHC. (It checks GHC's

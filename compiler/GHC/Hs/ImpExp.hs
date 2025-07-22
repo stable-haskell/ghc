@@ -8,6 +8,8 @@
 {-# LANGUAGE TypeFamilies         #-}
 {-# LANGUAGE UndecidableInstances #-} -- Wrinkle in Note [Trees That Grow]
                                       -- in module Language.Haskell.Syntax.Extension
+{-# LANGUAGE MultiWayIf           #-}
+
 {-
 (c) The University of Glasgow 2006
 (c) The GRASP/AQUA Project, Glasgow University, 1992-1998
@@ -57,21 +59,14 @@ One per import declaration in a module.
 
 type instance Anno (ImportDecl (GhcPass p)) = SrcSpanAnnA
 
--- | Given two possible located 'qualified' tokens, compute a style
--- (in a conforming Haskell program only one of the two can be not
--- 'Nothing'). This is called from "GHC.Parser".
-importDeclQualifiedStyle :: Maybe (EpToken "qualified")
-                         -> Maybe (EpToken "qualified")
-                         -> (Maybe (EpToken "qualified"), ImportDeclQualifiedStyle)
-importDeclQualifiedStyle mPre mPost =
-  if isJust mPre then (mPre, QualifiedPre)
-  else if isJust mPost then (mPost,QualifiedPost) else (Nothing, NotQualified)
+
 
 -- | Convenience function to answer the question if an import decl. is
 -- qualified.
 isImportDeclQualified :: ImportDeclQualifiedStyle -> Bool
 isImportDeclQualified NotQualified = False
 isImportDeclQualified _ = True
+
 
 
 type instance ImportDeclPkgQual GhcPs = RawPkgQual
@@ -114,13 +109,24 @@ data EpAnnImportDecl = EpAnnImportDecl
   { importDeclAnnImport    :: EpToken "import" -- ^ The location of the @import@ keyword
   , importDeclAnnPragma    :: Maybe (EpaLocation, EpToken "#-}") -- ^ The locations of @{-# SOURCE@ and @#-}@ respectively
   , importDeclAnnSafe      :: Maybe (EpToken "safe") -- ^ The location of the @safe@ keyword
+  , importDeclAnnLevel     :: Maybe EpAnnLevel -- ^ The location of the @splice@ or @quote@ keyword
   , importDeclAnnQualified :: Maybe (EpToken "qualified") -- ^ The location of the @qualified@ keyword
   , importDeclAnnPackage   :: Maybe EpaLocation -- ^ The location of the package name (when using @-XPackageImports@)
   , importDeclAnnAs        :: Maybe (EpToken "as") -- ^ The location of the @as@ keyword
   } deriving (Data)
 
+
 instance NoAnn EpAnnImportDecl where
-  noAnn = EpAnnImportDecl noAnn  Nothing  Nothing  Nothing  Nothing  Nothing
+  noAnn = EpAnnImportDecl noAnn  Nothing Nothing  noAnn  Nothing  Nothing  Nothing
+
+data EpAnnLevel = EpAnnLevelSplice (EpToken "splice")
+                | EpAnnLevelQuote (EpToken "quote")
+                deriving Data
+
+instance HasLoc EpAnnLevel where
+  getHasLoc (EpAnnLevelSplice tok) = getEpTokenSrcSpan tok
+  getHasLoc (EpAnnLevelQuote tok) = getEpTokenSrcSpan tok
+
 -- ---------------------------------------------------------------------
 
 simpleImportDecl :: ModuleName -> ImportDecl GhcPs
@@ -130,6 +136,7 @@ simpleImportDecl mn = ImportDecl {
       ideclPkgQual    = NoRawPkgQual,
       ideclSource     = NotBoot,
       ideclSafe       = False,
+      ideclLevelSpec  = NotLevelled,
       ideclQualified  = NotQualified,
       ideclAs         = Nothing,
       ideclImportList = Nothing
@@ -197,6 +204,7 @@ type instance XIEName    (GhcPass _) = NoExtField
 type instance XIEDefault (GhcPass _) = EpToken "default"
 type instance XIEPattern (GhcPass _) = EpToken "pattern"
 type instance XIEType    (GhcPass _) = EpToken "type"
+type instance XIEData    (GhcPass _) = EpToken "data"
 type instance XXIEWrappedName (GhcPass _) = DataConCantHappen
 
 type instance Anno (IEWrappedName (GhcPass _)) = SrcSpanAnnA
@@ -247,19 +255,21 @@ type instance XXIE               (GhcPass _) = DataConCantHappen
 
 type instance Anno (LocatedA (IE (GhcPass p))) = SrcSpanAnnA
 
+ieLIEWrappedName :: IE (GhcPass p) -> LIEWrappedName (GhcPass p)
+ieLIEWrappedName (IEVar _ n _)           = n
+ieLIEWrappedName (IEThingAbs  _ n _)     = n
+ieLIEWrappedName (IEThingWith _ n _ _ _) = n
+ieLIEWrappedName (IEThingAll  _ n _)     = n
+ieLIEWrappedName _ = panic "ieLIEWrappedName failed pattern match!"
+
 ieName :: IE (GhcPass p) -> IdP (GhcPass p)
-ieName (IEVar _ (L _ n) _)           = ieWrappedName n
-ieName (IEThingAbs  _ (L _ n) _)     = ieWrappedName n
-ieName (IEThingWith _ (L _ n) _ _ _) = ieWrappedName n
-ieName (IEThingAll  _ (L _ n) _)     = ieWrappedName n
-ieName _ = panic "ieName failed pattern match!"
+ieName = lieWrappedName . ieLIEWrappedName
 
 ieNames :: IE (GhcPass p) -> [IdP (GhcPass p)]
 ieNames (IEVar       _ (L _ n) _)      = [ieWrappedName n]
 ieNames (IEThingAbs  _ (L _ n) _)      = [ieWrappedName n]
 ieNames (IEThingAll  _ (L _ n) _)      = [ieWrappedName n]
 ieNames (IEThingWith _ (L _ n) _ ns _) = ieWrappedName n : map (ieWrappedName . unLoc) ns
--- NB the above case does not include names of field selectors
 ieNames (IEModuleContents {})     = []
 ieNames (IEGroup          {})     = []
 ieNames (IEDoc            {})     = []
@@ -286,6 +296,7 @@ ieWrappedLName (IEDefault _ (L l n)) = L l n
 ieWrappedLName (IEName    _ (L l n)) = L l n
 ieWrappedLName (IEPattern _ (L l n)) = L l n
 ieWrappedLName (IEType    _ (L l n)) = L l n
+ieWrappedLName (IEData    _ (L l n)) = L l n
 
 ieWrappedName :: IEWrappedName (GhcPass p) -> IdP (GhcPass p)
 ieWrappedName = unLoc . ieWrappedLName
@@ -302,6 +313,7 @@ replaceWrappedName (IEDefault r (L l _)) n = IEDefault r (L l n)
 replaceWrappedName (IEName    x (L l _)) n = IEName    x (L l n)
 replaceWrappedName (IEPattern r (L l _)) n = IEPattern r (L l n)
 replaceWrappedName (IEType    r (L l _)) n = IEType    r (L l n)
+replaceWrappedName (IEData    r (L l _)) n = IEData    r (L l n)
 
 replaceLWrappedName :: LIEWrappedName GhcPs -> IdP GhcRn -> LIEWrappedName GhcRn
 replaceLWrappedName (L l n) n' = L l (replaceWrappedName n n')
@@ -358,6 +370,7 @@ instance OutputableBndrId p => Outputable (IEWrappedName (GhcPass p)) where
   ppr (IEName    _ (L _ n)) = pprPrefixOcc n
   ppr (IEPattern _ (L _ n)) = text "pattern" <+> pprPrefixOcc n
   ppr (IEType    _ (L _ n)) = text "type"    <+> pprPrefixOcc n
+  ppr (IEData    _ (L _ n)) = text "data"    <+> pprPrefixOcc n
 
 pprImpExp :: (HasOccName name, OutputableBndr name) => name -> SDoc
 pprImpExp name = type_pref <+> pprPrefixOcc name

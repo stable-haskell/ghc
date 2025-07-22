@@ -1,6 +1,4 @@
 
-{-# OPTIONS_GHC -Wno-incomplete-uni-patterns #-}
-
 -----------------------------------------------------------------------------
 --
 -- The register allocator
@@ -113,6 +111,7 @@ import qualified GHC.CmmToAsm.Reg.Linear.X86     as X86
 import qualified GHC.CmmToAsm.Reg.Linear.X86_64  as X86_64
 import qualified GHC.CmmToAsm.Reg.Linear.AArch64 as AArch64
 import qualified GHC.CmmToAsm.Reg.Linear.RV64    as RV64
+import qualified GHC.CmmToAsm.Reg.Linear.LA64    as LA64
 import GHC.CmmToAsm.Reg.Target
 import GHC.CmmToAsm.Reg.Liveness
 import GHC.CmmToAsm.Reg.Utils
@@ -141,7 +140,7 @@ import GHC.Platform
 
 import Data.Containers.ListUtils
 import Data.Maybe
-import Data.List (partition)
+import Data.List (sortOn)
 import Control.Monad
 
 -- -----------------------------------------------------------------------------
@@ -178,8 +177,7 @@ regAlloc config (CmmProc static lbl live sccs)
 
                 -- make sure the block that was first in the input list
                 --      stays at the front of the output
-                let !(!(!first':_), !rest')
-                                = partition ((== first_id) . blockId) final_blocks
+                let !final_blocks' = sortOn ((/= first_id) . blockId) final_blocks
 
                 let max_spill_slots = maxSpillSlots config
                     extra_stack
@@ -188,7 +186,7 @@ regAlloc config (CmmProc static lbl live sccs)
                       | otherwise
                       = Nothing
 
-                return  ( CmmProc info lbl live (ListGraph (first' : rest'))
+                return  ( CmmProc info lbl live (ListGraph final_blocks')
                         , extra_stack
                         , Just stats)
 
@@ -228,7 +226,7 @@ linearRegAlloc config entry_ids block_live sccs
       ArchMipseb     -> panic "linearRegAlloc ArchMipseb"
       ArchMipsel     -> panic "linearRegAlloc ArchMipsel"
       ArchRISCV64    -> go (frInitFreeRegs platform :: RV64.FreeRegs)
-      ArchLoongArch64-> panic "linearRegAlloc ArchLoongArch64"
+      ArchLoongArch64 -> go $ (frInitFreeRegs platform :: LA64.FreeRegs)
       ArchJavaScript -> panic "linearRegAlloc ArchJavaScript"
       ArchWasm32     -> panic "linearRegAlloc ArchWasm32"
       ArchUnknown    -> panic "linearRegAlloc ArchUnknown"

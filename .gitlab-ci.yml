@@ -2,7 +2,7 @@ variables:
   GIT_SSL_NO_VERIFY: "1"
 
   # Commit of ghc/ci-images repository from which to pull Docker images
-  DOCKER_REV: eb4d3389fd62e4f7321a0c8799014ec1f4da0708
+  DOCKER_REV: 6e9f8f17086e56e83adae4a8a9d63e2fec3cb6c7
 
   # Sequential version number of all cached things.
   # Bump to invalidate GitLab CI cache.
@@ -909,6 +909,10 @@ test-primops-label:
   extends: .test-primops-validate-template
   rules:
     - if: '$CI_MERGE_REQUEST_LABELS =~ /.*test-primops.*/'
+      # We do not use *.full-ci here since that would imply running in nightly
+      # where we do not have the normal validate jobs. We have the -nightly job
+      # below to handle this case.
+    - if: '$CI_MERGE_REQUEST_LABELS =~ /.*full-ci.*/'
 
 test-primops-nightly:
   extends: .test-primops
@@ -1056,6 +1060,48 @@ abi-test:
     - *full-ci
     - if: '$CI_MERGE_REQUEST_LABELS =~ /.*test-abi.*/'
 
+############################################################
+# ghc-wasm-meta integration testing
+############################################################
+
+.ghc-wasm-meta:
+  stage: testing
+  variables:
+    UPSTREAM_GHC_PIPELINE_ID: $CI_PIPELINE_ID
+    UPSTREAM_GHC_PROJECT_ID: $CI_PROJECT_ID
+  rules:
+    - if: '$CI_MERGE_REQUEST_LABELS =~ /.*test-wasm.*/'
+  trigger:
+    project: haskell-wasm/ghc-wasm-meta
+    branch: master
+    strategy: depend
+
+ghc-wasm-meta-gmp:
+  extends: .ghc-wasm-meta
+  needs:
+    - job: x86_64-linux-alpine3_20-wasm-cross_wasm32-wasi-release+host_fully_static+text_simdutf
+      artifacts: false
+  variables:
+    UPSTREAM_GHC_FLAVOUR: gmp
+    UPSTREAM_GHC_JOB_NAME: x86_64-linux-alpine3_20-wasm-cross_wasm32-wasi-release+host_fully_static+text_simdutf
+
+ghc-wasm-meta-native:
+  extends: .ghc-wasm-meta
+  needs:
+    - job: x86_64-linux-alpine3_20-wasm-int_native-cross_wasm32-wasi-release+host_fully_static+text_simdutf
+      artifacts: false
+  variables:
+    UPSTREAM_GHC_FLAVOUR: native
+    UPSTREAM_GHC_JOB_NAME: x86_64-linux-alpine3_20-wasm-int_native-cross_wasm32-wasi-release+host_fully_static+text_simdutf
+
+ghc-wasm-meta-unreg:
+  extends: .ghc-wasm-meta
+  needs:
+    - job: x86_64-linux-alpine3_20-wasm-unreg-cross_wasm32-wasi-release+host_fully_static+text_simdutf
+      artifacts: false
+  variables:
+    UPSTREAM_GHC_FLAVOUR: unreg
+    UPSTREAM_GHC_JOB_NAME: x86_64-linux-alpine3_20-wasm-unreg-cross_wasm32-wasi-release+host_fully_static+text_simdutf
 
 ############################################################
 # Documentation deployment via GitLab Pages
@@ -1155,7 +1201,7 @@ ghcup-metadata-nightly:
   needs:
     - job: nightly-x86_64-linux-fedora33-release
       artifacts: false
-    - job: nightly-x86_64-linux-centos7-validate
+    - job: nightly-x86_64-linux-ubuntu24_04-validate
       artifacts: false
     - job: nightly-x86_64-linux-ubuntu22_04-validate
       artifacts: false

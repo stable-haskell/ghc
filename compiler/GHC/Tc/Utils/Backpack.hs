@@ -1,4 +1,5 @@
 
+{-# LANGUAGE DuplicateRecordFields    #-}
 {-# LANGUAGE NondecreasingIndentation #-}
 {-# LANGUAGE ScopedTypeVariables      #-}
 {-# LANGUAGE TypeFamilies             #-}
@@ -97,7 +98,7 @@ checkHsigDeclM sig_iface sig_thing real_thing = do
     -- implementation cases.
     checkBootDeclM Hsig sig_thing real_thing
     real_fixity <- lookupFixityRn name
-    let sig_fixity = case mi_fix_fn (mi_final_exts sig_iface) (occName name) of
+    let sig_fixity = case mi_fix_fn sig_iface (occName name) of
                         Nothing -> defaultFixity
                         Just f -> f
     when (real_fixity /= sig_fixity) $
@@ -221,7 +222,8 @@ check_inst sig_inst@(ClsInst { is_dfun = dfun_id }) = do
     (tclvl,cts) <- pushTcLevelM $ do
        given_ids <- mapM newEvVar inst_theta
        let given_loc = mkGivenLoc topTcLevel skol_info (mkCtLocEnv lcl_env)
-           givens = [ CtGiven { ctev_pred = idType given_id
+           givens = [ CtGiven $
+                      GivenCt { ctev_pred = idType given_id
                               -- Doesn't matter, make something up
                               , ctev_evar = given_id
                               , ctev_loc  = given_loc  }
@@ -297,14 +299,14 @@ implicitRequirements hsc_env normal_imports
 -- than a transitive closure done here) all the free holes are still reachable.
 implicitRequirementsShallow
   :: HscEnv
-  -> [(PkgQual, Located ModuleName)]
+  -> [(ImportLevel, PkgQual, Located ModuleName)]
   -> IO ([ModuleName], [InstantiatedUnit])
 implicitRequirementsShallow hsc_env normal_imports = go ([], []) normal_imports
  where
   mhome_unit = hsc_home_unit_maybe hsc_env
 
   go acc [] = pure acc
-  go (accL, accR) ((mb_pkg, L _ imp):imports) = do
+  go (accL, accR) ((_stage, mb_pkg, L _ imp):imports) = do
     found <- findImportedModule hsc_env imp mb_pkg
     let acc' = case found of
           Found _ mod | notHomeModuleMaybe mhome_unit mod ->
@@ -632,7 +634,8 @@ mergeSignatures
                                             is_pkg_qual = NoPkgQual,
                                             is_qual     = False,
                                             is_isboot   = NotBoot,
-                                            is_dloc     = locA loc
+                                            is_dloc     = locA loc,
+                                            is_level    = NormalLevel
                                           } ImpAll
                                 rdr_env = mkGlobalRdrEnv $ gresFromAvails hsc_env (Just ispec) as1
                             setGblEnv tcg_env {
@@ -642,7 +645,7 @@ mergeSignatures
                                     emptyImportAvails
                                     (tcg_semantic_mod tcg_env)
                         case mb_r of
-                            Just (_, as2, _) -> return (thinModIface as2 ireq_iface, as2)
+                            Just (_, _, as2, _) -> return (thinModIface as2 ireq_iface, as2)
                             Nothing -> addMessages msgs >> failM
                     -- We can't thin signatures from non-signature packages
                     _ -> return (ireq_iface, as1)
@@ -699,8 +702,9 @@ mergeSignatures
 
     -- Make sure we didn't refer to anything that doesn't actually exist
     -- pprTrace "mergeSignatures: exports_from_avail" (ppr exports) $ return ()
-    (mb_lies, _, _) <- exports_from_avail mb_exports rdr_env
-                        (tcg_imports tcg_env) (tcg_semantic_mod tcg_env)
+    (mb_lies, exp_dflts, _, _) <-
+      exports_from_avail mb_exports rdr_env
+          (tcg_imports tcg_env) (tcg_semantic_mod tcg_env)
 
     {- -- NB: This is commented out, because warns above is disabled.
     -- If you tried to explicitly export an identifier that has a warning
@@ -720,8 +724,7 @@ mergeSignatures
     failIfErrsM
 
     -- Save the exports
-    let drop_defaults (spans, _defaults, avails) = (spans, avails)
-    setGblEnv tcg_env { tcg_rn_exports = map drop_defaults <$> mb_lies } $ do
+    setGblEnv tcg_env { tcg_rn_exports = mb_lies, tcg_default_exports = exp_dflts } $ do
     tcg_env <- getGblEnv
 
     let home_unit = hsc_home_unit hsc_env
@@ -850,7 +853,7 @@ mergeSignatures
                 if outer_mod == mi_module iface
                     -- Don't add ourselves!
                     then tcg_merged tcg_env
-                    else (mi_module iface, mi_mod_hash (mi_final_exts iface)) : tcg_merged tcg_env
+                    else (mi_module iface, mi_mod_hash iface) : tcg_merged tcg_env
             }
 
     -- Note [Signature merging DFuns]

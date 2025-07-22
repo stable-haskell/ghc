@@ -8,6 +8,7 @@
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE ViewPatterns #-}
 {-# OPTIONS_GHC -Wno-incomplete-record-updates #-}
 {-# OPTIONS_GHC -Wno-redundant-constraints #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
@@ -39,7 +40,7 @@ import qualified Data.List as List
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Maybe (fromMaybe, mapMaybe)
 import qualified Data.Set as Set
-import GHC
+import GHC hiding (HsTypeGhcPsExt (..))
 import GHC.Builtin.Types (liftedRepTy)
 import GHC.Core.TyCo.Rep (Type (..))
 import GHC.Core.Type (binderVar, isRuntimeRepVar)
@@ -49,6 +50,7 @@ import GHC.Driver.Session
 import GHC.HsToCore.Docs hiding (sigNameNoLoc)
 import GHC.Types.Name
 import GHC.Types.SrcLoc (advanceSrcLoc)
+import GHC.Types.SourceText (SourceText(..))
 import GHC.Types.Var
   ( Specificity
   , TyVarBinder
@@ -64,7 +66,7 @@ import GHC.Utils.Outputable (Outputable, SDocContext, ppr)
 import qualified GHC.Utils.Outputable as Outputable
 import GHC.Utils.Panic (panic)
 
-import Haddock.Types (DocName, DocNameI, XRecCond)
+import Haddock.Types (DocName, DocNameI, XRecCond, HsTypeDocNameIExt(..))
 
 moduleString :: Module -> String
 moduleString = moduleNameString . moduleName
@@ -189,6 +191,18 @@ mkHsImplicitSigTypeI body =
     , sig_body = body
     }
 
+hsConDeclFieldToFunTy :: HsConDeclField DocNameI -> LHsType DocNameI -> LHsType DocNameI
+hsConDeclFieldToFunTy cfs tgt =
+  noLocA (HsFunTy noAnn (cdf_multiplicity cfs) (hsConDeclFieldToHsTypeNoMult cfs) tgt)
+
+hsConDeclFieldToHsTypeNoMult :: HsConDeclField DocNameI -> LHsType DocNameI
+hsConDeclFieldToHsTypeNoMult (CDF _ unp str _ t doc) = case doc of
+  Just doc' -> noLocA (HsDocTy noAnn (mkBang unp str t) doc')
+  _ -> mkBang unp str t
+  where
+    mkBang NoSrcUnpack NoSrcStrict ty = ty
+    mkBang u s ty = noLocA (XHsType (HsBangTy (HsSrcBang NoSourceText u s) ty))
+
 getGADTConType :: ConDecl DocNameI -> LHsSigType DocNameI
 -- The full type of a GADT data constructor We really only get this in
 -- order to pretty-print it, and currently only in Haddock's code.  So
@@ -218,11 +232,11 @@ getGADTConType
 
       --  tau_ty :: LHsType DocNameI
       tau_ty = case args of
-        RecConGADT _ flds -> mkFunTy (noLocA (HsRecTy noAnn (unLoc flds))) res_ty
-        PrefixConGADT _ pos_args -> foldr mkFunTy res_ty (map hsScaledThing pos_args)
+        RecConGADT _ flds -> mkFunTy (noLocA (XHsType (HsRecTy (unLoc flds)))) res_ty
+        PrefixConGADT _ pos_args -> foldr hsConDeclFieldToFunTy res_ty pos_args
 
       mkFunTy :: LHsType DocNameI -> LHsType DocNameI -> LHsType DocNameI
-      mkFunTy a b = noLocA (HsFunTy noAnn (HsUnrestrictedArrow noExtField) a b)
+      mkFunTy a b = noLocA (HsFunTy noAnn (HsUnannotated noExtField) a b)
 getGADTConType (ConDeclH98{}) = panic "getGADTConType"
 
 -- Should only be called on ConDeclGADT
@@ -293,7 +307,9 @@ addClassContext cls tvs0 (L pos (ClassOpSig _ _ lname ltype)) =
             }
         )
 
-    extra_pred = nlHsTyConApp NotPromoted Prefix cls (lHsQTyVarsToTypes tvs0)
+    extra_pred = nlHsTyConApp NotPromoted Prefix
+                   (noUserRdr cls)
+                   (lHsQTyVarsToTypes tvs0)
 
     add_ctxt (L loc preds) = L loc (extra_pred : preds)
 addClassContext _ _ sig = sig -- E.g. a MinimalSig is fine
@@ -302,7 +318,7 @@ lHsQTyVarsToTypes :: LHsQTyVars GhcRn -> [LHsTypeArg GhcRn]
 lHsQTyVarsToTypes tvs =
   [ HsValArg noExtField $ noLocA (case hsLTyVarName tv of
       Nothing -> HsWildCardTy noExtField
-      Just nm -> HsTyVar noAnn NotPromoted (noLocA nm))
+      Just nm -> HsTyVar noAnn NotPromoted (noLocA $ noUserRdr nm))
   | tv <- hsQTvExplicit tvs
   ]
 
@@ -342,7 +358,7 @@ restrictCons names decls = [L p d | L p (Just d) <- fmap keep <$> decls]
               PrefixCon{} -> Just d
               RecCon fields
                 | all field_avail (unLoc fields) -> Just d
-                | otherwise -> Just (d{con_args = PrefixCon [] (field_types $ unLoc fields)})
+                | otherwise -> Just (d{con_args = PrefixCon (field_types $ unLoc fields)})
               -- if we have *all* the field names available, then
               -- keep the record declaration.  Otherwise degrade to
               -- a constructor declaration.  This isn't quite right, but
@@ -356,11 +372,11 @@ restrictCons names decls = [L p d | L p (Just d) <- fmap keep <$> decls]
       where
         -- see above
 
-        field_avail :: LConDeclField GhcRn -> Bool
-        field_avail (L _ (ConDeclField _ fs _ _)) =
+        field_avail :: LHsConDeclRecField GhcRn -> Bool
+        field_avail (L _ (HsConDeclRecField _ fs _)) =
           all (\f -> (unLoc . foLabel . unLoc $ f) `elem` names) fs
 
-        field_types flds = [hsUnrestricted t | L _ (ConDeclField _ _ t _) <- flds]
+        field_types flds = [t | L _ (HsConDeclRecField _ _ t) <- flds]
     keep _ = Nothing
 
 restrictDecls :: [Name] -> [LSig GhcRn] -> [LSig GhcRn]
@@ -409,11 +425,9 @@ reparenTypePrec = go
   where
     -- Shorter name for 'reparenType'
     go :: Precedence -> HsType a -> HsType a
-    go _ (HsBangTy x b ty) = HsBangTy x b (reparenLType ty)
     go _ (HsTupleTy x con tys) = HsTupleTy x con (map reparenLType tys)
     go _ (HsSumTy x tys) = HsSumTy x (map reparenLType tys)
     go _ (HsListTy x ty) = HsListTy x (reparenLType ty)
-    go _ (HsRecTy x flds) = HsRecTy x (map (mapXRec @a reparenConDeclField) flds)
     go p (HsDocTy x ty d) = HsDocTy x (goL p ty) d
     go _ (HsExplicitListTy x p tys) = HsExplicitListTy x p (map reparenLType tys)
     go _ (HsExplicitTupleTy x p tys) = HsExplicitTupleTy x p (map reparenLType tys)
@@ -509,11 +523,6 @@ reparenBndrKind (HsBndrNoKind x) = HsBndrNoKind x
 reparenBndrKind (HsBndrKind x k) = HsBndrKind x (reparenLType k)
 reparenBndrKind v@XBndrKind{} = v
 
--- | Add parenthesis around the types in a 'ConDeclField' (see 'reparenTypePrec')
-reparenConDeclField :: XRecCond a => ConDeclField a -> ConDeclField a
-reparenConDeclField (ConDeclField x n t d) = ConDeclField x n (reparenLType t) d
-reparenConDeclField c@XConDeclField{} = c
-
 -------------------------------------------------------------------------------
 
 -- * Located
@@ -551,7 +560,7 @@ instance Parent (ConDecl GhcRn) where
   children con =
     case getRecConArgs_maybe con of
       Nothing -> []
-      Just flds -> map (unLoc . foLabel . unLoc) $ concatMap (cd_fld_names . unLoc) (unLoc flds)
+      Just flds -> map (unLoc . foLabel . unLoc) $ concatMap (cdrf_names . unLoc) (unLoc flds)
 
 instance Parent (TyClDecl GhcRn) where
   children d

@@ -2,11 +2,11 @@
 {-# LANGUAGE GeneralisedNewtypeDeriving #-}
 module Language.Haskell.Syntax.Basic where
 
-import Data.Data
+import Data.Data (Data)
 import Data.Eq
 import Data.Ord
 import Data.Bool
-import Data.Int (Int)
+import Prelude
 
 import GHC.Data.FastString (FastString)
 import Control.DeepSeq
@@ -81,24 +81,6 @@ Source Strictness and Unpackedness
 ************************************************************************
 -}
 
--- | Haskell Bang
---
--- Bangs on data constructor arguments written by the user.
---
--- @(HsBang SrcUnpack SrcLazy)@ and
--- @(HsBang SrcUnpack NoSrcStrict)@ (without StrictData) makes no sense, we
--- emit a warning (in checkValidDataCon) and treat it like
--- @(HsBang NoSrcUnpack SrcLazy)@
---
--- 'GHC.Core.DataCon.HsSrcBang' is a wrapper around this, associating it with
--- a 'GHC.Types.SourceText.SourceText' as written by the user.
--- In the AST, the @SourceText@ is hidden inside the extension point
--- 'Language.Haskell.Syntax.Extension.XBangTy'.
-data HsBang =
-  HsBang SrcUnpackedness
-         SrcStrictness
-  deriving Data
-
 -- | Source Strictness
 --
 -- What strictness annotation the user wrote
@@ -134,5 +116,13 @@ data FixityDirection
    | InfixN
    deriving (Eq, Data)
 
+instance NFData FixityDirection where
+  rnf InfixL = ()
+  rnf InfixR = ()
+  rnf InfixN = ()
+
 data Fixity = Fixity Int FixityDirection
   deriving (Eq, Data)
+
+instance NFData Fixity where
+  rnf (Fixity i d) = rnf i `seq` rnf d `seq` ()

@@ -3,29 +3,13 @@
 // of one; the post-linker script will copy all contents into a new
 // ESM module.
 
-// Manage a mapping from unique 32-bit ids to actual JavaScript
-// values.
+// Manage a mapping from 32-bit ids to actual JavaScript values.
 export class JSValManager {
   #lastk = 0;
   #kv = new Map();
 
-  constructor() {}
-
-  // Maybe just bump this.#lastk? For 64-bit ids that's sufficient,
-  // but better safe than sorry in the 32-bit case.
-  #allocKey() {
-    let k = this.#lastk;
-    while (true) {
-      if (!this.#kv.has(k)) {
-        this.#lastk = k;
-        return k;
-      }
-      k = (k + 1) | 0;
-    }
-  }
-
   newJSVal(v) {
-    const k = this.#allocKey();
+    const k = ++this.#lastk;
     this.#kv.set(k, v);
     return k;
   }
@@ -55,7 +39,7 @@ export class JSValManager {
 // To benchmark different setImmediate() implementations in the
 // browser, use https://github.com/jphpsf/setImmediate-shim-demo as a
 // starting point.
-const setImmediate = await (async () => {
+export const setImmediate = await (async () => {
   // node, bun, or other scripts might have set this up in the browser
   if (globalThis.setImmediate) {
     return globalThis.setImmediate;
