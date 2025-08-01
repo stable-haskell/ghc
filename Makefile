@@ -87,6 +87,11 @@ GHC0 ?= ghc-9.8.4
 PYTHON ?= python3
 CABAL ?= cabal
 
+EMCC ?= emcc
+EMCXX ?= em++
+EMAR ?= emar
+EMRANLIB ?= emranlib
+
 # :exploding-head: It turns out override doesn't override the command-line
 # value but it overrides Make's normal behavior of ignoring assignments to
 # command-line variables. This allows the += operations to append to whatever
@@ -94,18 +99,19 @@ CABAL ?= cabal
 
 override CABAL_ARGS += \
 	--remote-repo-cache _build/packages \
-	--store-dir=_build/$(STAGE)/store \
+	--store-dir=_build/$(STAGE)/$(TARGET)/store \
 	--logs-dir=_build/$(STAGE)/logs
 
 override CABAL_BUILD_ARGS += \
-	-j -w $(GHC) --with-gcc=$(CC) \
+	-j -v -w $(GHC) --with-gcc=$(CC) \
 	--project-file=cabal.project.$(STAGE) \
-	--builddir=_build/$(STAGE) \
+	--builddir=_build/$(STAGE)/$(TARGET) \
 	--ghc-options="-fhide-source-paths"
 
 # just some defaults
 STAGE ?= stage1
 GHC ?= $(GHC0)
+TARGET ?=
 
 CABAL_BUILD = $(CABAL) $(CABAL_ARGS) build $(CABAL_BUILD_ARGS)
 
@@ -113,7 +119,7 @@ GHC1 = _build/stage1/bin/ghc
 GHC2 = _build/stage2/bin/ghc
 
 define GHC_INFO
-$(shell $(GHC0) --info | grep -oP '"$1",\s*"\K[^"]+')
+$(shell sh -c "$(GHC0) --info | $(GHC0) -e 'getContents >>= foldMap putStrLn . lookup \"$1\" . read'")
 endef
 
 TARGET_PLATFORM := $(call GHC_INFO,target platform string)
@@ -230,6 +236,33 @@ STAGE2_UTIL_EXECUTABLES := \
 	hpc \
 	runghc \
 	unlit
+
+STAGE2_TARGET_LIBS := \
+	Cabal \
+	Cabal-syntax \
+	array \
+	base \
+	binary \
+	bytestring \
+	containers \
+	deepseq \
+	directory \
+	exceptions \
+	file-io \
+	filepath \
+	hpc \
+	integer-gmp \
+	mtl \
+	os-string \
+	parsec \
+	pretty \
+	process \
+	stm \
+	template-haskell \
+	text \
+	time \
+	transformers \
+	xhtml
 
 # export CABAL := $(shell cabal update 2>&1 >/dev/null && cabal build cabal-install -v0 --disable-tests --project-dir libraries/Cabal && cabal list-bin -v0 --project-dir libraries/Cabal cabal-install:exe:cabal)
 $(abspath _build/stage0/bin/cabal): _build/stage0/bin/cabal
@@ -365,6 +398,50 @@ _build/stage2/lib/template-hsc.h: utils/hsc2hs/data/template-hsc.h
 
 .PHONY: stage2
 stage2: $(addprefix _build/stage2/bin/,$(STAGE2_EXECUTABLES)) _build/stage2/lib/settings _build/stage2/lib/package.conf.d/package.cache _build/stage2/lib/template-hsc.h
+
+.PHONY: stage2-javascript-unknown-ghcjs
+stage2-javascript-unknown-ghcjs: javascript-unknown-ghcjs-libs _build/stage2/lib/targets/javascript-unknown-ghcjs/lib/package.conf.d/package.cache
+
+_build/stage2/lib/targets/javascript-unknown-ghcjs/lib/settings: _build/stage1/bin/ghc-toolchain-bin
+	@mkdir -p $(@D)
+	$(call run_and_log, emconfigure _build/stage1/bin/ghc-toolchain-bin --triple javascript-unknown-ghcjs --output-settings -o $@ --cc $(EMCC) --cxx $(EMCXX) --ar $(EMAR) --ranlib $(EMRANLIB))
+
+_build/stage2/bin/javascript-unknown-ghcjs-ghc-pkg: _build/stage2/bin/ghc-pkg
+	@mkdir -p $(@D)
+	ln -sf ghc-pkg $@
+
+_build/stage2/bin/javascript-unknown-ghcjs-ghc: _build/stage2/bin/ghc
+	@mkdir -p $(@D)
+	ln -sf ghc $@
+
+_build/stage2/lib/targets/javascript-unknown-ghcjs/lib/package.conf.d:
+	@mkdir -p $@
+
+_build/stage2/lib/targets/javascript-unknown-ghcjs/lib/package.conf.d/package.cache: _build/stage2/bin/javascript-unknown-ghcjs-ghc-pkg _build/stage2/lib/targets/javascript-unknown-ghcjs/lib/settings javascript-unknown-ghcjs-libs
+	@mkdir -p $(@D)
+	@rm -rf $(@D)/*
+	cp -rfp _build/stage2/javascript-unknown-ghcjs/packagedb/host/*/* $(@D)
+	_build/stage2/bin/javascript-unknown-ghcjs-ghc-pkg recache
+
+_build/stage2/lib/targets/javascript-unknown-ghcjs/bin/unlit: _build/stage2/bin/unlit
+	@mkdir -p $(@D)
+	cp -rfp $< $@
+
+.PHONY: javascript-unknown-ghcjs-libs
+javascript-unknown-ghcjs-libs: private TARGET=javascript-unknown-ghcjs
+javascript-unknown-ghcjs-libs: private GHC=$(abspath _build/stage2/bin/javascript-unknown-ghcjs-ghc)
+javascript-unknown-ghcjs-libs: private GHC2=$(abspath _build/stage2/bin/ghc)
+javascript-unknown-ghcjs-libs: private STAGE=stage2
+javascript-unknown-ghcjs-libs: private CC=emcc
+javascript-unknown-ghcjs-libs: _build/stage2/bin/javascript-unknown-ghcjs-ghc-pkg _build/stage2/bin/javascript-unknown-ghcjs-ghc _build/stage2/lib/targets/javascript-unknown-ghcjs/lib/settings _build/stage2/lib/targets/javascript-unknown-ghcjs/bin/unlit _build/stage2/lib/targets/javascript-unknown-ghcjs/lib/package.conf.d
+	# Force cabal to replan
+	rm -rf _build/stage2/javascript-unknown-ghcjs/cache
+	$(call run_and_log, HADRIAN_SETTINGS='$(HADRIAN_SETTINGS)' \
+		PATH=$(PWD)/_build/stage2/bin:$(PATH) \
+		$(CABAL_BUILD) -W $(GHC2) --happy-options="--template=$(abspath _build/stage2/src/happy-lib-2.1.5/data/)" rts:nonthreaded-nodebug )
+	$(call run_and_log, HADRIAN_SETTINGS='$(HADRIAN_SETTINGS)' \
+		PATH=$(PWD)/_build/stage2/bin:$(PATH) \
+		$(CABAL_BUILD) -W $(GHC2) --happy-options="--template=$(abspath _build/stage2/src/happy-lib-2.1.5/data/)" $(STAGE2_TARGET_LIBS) )
 
 # Target for creating the final binary distribution directory
 _build/bindist: stage2 driver/ghc-usage.txt driver/ghci-usage.txt
