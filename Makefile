@@ -81,16 +81,34 @@
 SHELL := bash
 .SHELLFLAGS := -eu -o pipefail -O globstar -c
 
+VERBOSE ?= 0
+
 ROOT_DIR := $(patsubst %/,%,$(dir $(realpath $(lastword $(MAKEFILE_LIST)))))
 
 GHC0 ?= ghc-9.8.4
 PYTHON ?= python3
 CABAL ?= cabal
 
+LD ?= ld
+
 EMCC ?= emcc
 EMCXX ?= em++
 EMAR ?= emar
 EMRANLIB ?= emranlib
+
+EXTRA_LIB_DIRS ?=
+EXTRA_INCLUDE_DIRS ?=
+
+MUSL_EXTRA_LIB_DIRS ?=
+MUSL_EXTRA_INCLUDE_DIRS ?=
+
+JS_EXTRA_LIB_DIRS ?=
+JS_EXTRA_INCLUDE_DIRS ?=
+
+WASM_EXTRA_LIB_DIRS ?=
+WASM_EXTRA_INCLUDE_DIRS ?=
+WASM_CC_OPTS = -fno-strict-aliasing -Wno-error=int-conversion -Oz -msimd128 -mnontrapping-fptoint -msign-ext -mbulk-memory -mmutable-globals -mmultivalue -mreference-types
+WASM_CXX_OPTS = -fno-exceptions -fno-strict-aliasing -Wno-error=int-conversion -Oz -msimd128 -mnontrapping-fptoint -msign-ext -mbulk-memory -mmutable-globals -mmultivalue -mreference-types
 
 # :exploding-head: It turns out override doesn't override the command-line
 # value but it overrides Make's normal behavior of ignoring assignments to
@@ -99,19 +117,22 @@ EMRANLIB ?= emranlib
 
 override CABAL_ARGS += \
 	--remote-repo-cache _build/packages \
-	--store-dir=_build/$(STAGE)/$(TARGET)/store \
+	--store-dir=_build/$(STAGE)/$(TARGET_PLATFORM)/store \
 	--logs-dir=_build/$(STAGE)/logs
 
 override CABAL_BUILD_ARGS += \
-	-j -v -w $(GHC) --with-gcc=$(CC) \
+	-j -w $(GHC) --with-gcc=$(CC) --with-ld=$(LD) \
 	--project-file=cabal.project.$(STAGE) \
-	--builddir=_build/$(STAGE)/$(TARGET) \
+	$(foreach lib,$(EXTRA_LIB_DIRS),--extra-lib-dirs=$(lib)) \
+	$(foreach include,$(EXTRA_INCLUDE_DIRS),--extra-include-dirs=$(include)) \
+	--builddir=_build/$(STAGE)/$(TARGET_PLATFORM) \
 	--ghc-options="-fhide-source-paths"
+
+GHC_TOOLCHAIN_ARGS ?= --disable-ld-override
 
 # just some defaults
 STAGE ?= stage1
 GHC ?= $(GHC0)
-TARGET ?=
 
 CABAL_BUILD = $(CABAL) $(CABAL_ARGS) build $(CABAL_BUILD_ARGS)
 
@@ -119,14 +140,14 @@ GHC1 = _build/stage1/bin/ghc
 GHC2 = _build/stage2/bin/ghc
 
 define GHC_INFO
-$(shell sh -c "$(GHC0) --info | $(GHC0) -e 'getContents >>= foldMap putStrLn . lookup \"$1\" . read'")
+$(shell sh -c "$(GHC) --info | $(GHC0) -e 'getContents >>= foldMap putStrLn . lookup \"$1\" . read'")
 endef
 
-TARGET_PLATFORM := $(call GHC_INFO,target platform string)
-TARGET_ARCH     := $(call GHC_INFO,target arch)
-TARGET_OS       := $(call GHC_INFO,target os)
-TARGET_TRIPLE   := $(call GHC_INFO,Target platform)
-GIT_COMMIT_ID   := $(shell git rev-parse HEAD)
+TARGET_PLATFORM = $(call GHC_INFO,target platform string)
+TARGET_ARCH     = $(call GHC_INFO,target arch)
+TARGET_OS       = $(call GHC_INFO,target os)
+TARGET_TRIPLE   = $(call GHC_INFO,Target platform)
+GIT_COMMIT_ID  := $(shell git rev-parse HEAD)
 
 define HADRIAN_SETTINGS
 [ ("hostPlatformArch",    "$(TARGET_ARCH)") \
@@ -237,7 +258,17 @@ STAGE2_UTIL_EXECUTABLES := \
 	runghc \
 	unlit
 
-STAGE2_TARGET_LIBS := \
+BINDIST_EXECTUABLES := \
+	ghc \
+	ghc-iserv \
+	ghc-pkg \
+	hp2ps \
+	hpc \
+	hsc2hs \
+	runghc
+
+STAGE3_LIBS := \
+    rts:nonthreaded-nodebug \
 	Cabal \
 	Cabal-syntax \
 	array \
@@ -250,6 +281,7 @@ STAGE2_TARGET_LIBS := \
 	exceptions \
 	file-io \
 	filepath \
+	ghc-bignum \
 	hpc \
 	integer-gmp \
 	mtl \
@@ -263,6 +295,231 @@ STAGE2_TARGET_LIBS := \
 	time \
 	transformers \
 	xhtml
+
+# --- Source headers ---
+# TODO: this is a hack, because of https://github.com/haskell/cabal/issues/11172
+#
+# $1 = headers
+# $2 = source base dirs
+# $3 = pkgname
+# $4 = ghc-pkg
+define copy_headers
+  set -e; \
+  dest=`$4 field $3 include-dirs | awk '{ print $$2 }'` ;\
+  for h in $1 ; do \
+	  mkdir -p "$$dest/`dirname $$h`" ; \
+	  for sdir in $2 ; do \
+	    if [ -e "$$sdir/$$h" ] ; then \
+	      cp -frp "$$sdir/$$h" "$$dest/$$h" ; \
+		  break ; \
+        fi ; \
+	  done ; \
+	  [ -e "$$dest/$$h" ] || { echo "Copying $$dest/$$h failed... tried source dirs $2" >&2 ;  exit 2 ; } ; \
+  done
+endef
+
+RTS_HEADERS_H := \
+    rts/Bytecodes.h \
+    rts/storage/ClosureTypes.h \
+    rts/storage/FunTypes.h \
+    stg/MachRegs.h \
+    stg/MachRegs/arm32.h \
+    stg/MachRegs/arm64.h \
+    stg/MachRegs/loongarch64.h \
+    stg/MachRegs/ppc.h \
+    stg/MachRegs/riscv64.h \
+    stg/MachRegs/s390x.h \
+    stg/MachRegs/wasm32.h \
+    stg/MachRegs/x86.h
+
+define copy_rts_headers_h
+  $(call copy_headers,$(RTS_HEADERS_H),rts-headers/include/,rts-headers,$1)
+endef
+
+RTS_FS_H := \
+    fs.h
+
+define copy_rts_fs_h
+  $(call copy_headers,$(RTS_FS_H),rts-fs/,rts-fs,$1)
+endef
+
+RTS_H := \
+      Cmm.h \
+	  HsFFI.h \
+	  MachDeps.h \
+	  Jumps.h \
+	  Rts.h \
+	  RtsAPI.h \
+	  RtsSymbols.h \
+	  Stg.h \
+      ghcconfig.h \
+	  ghcversion.h \
+      rts/ghc_ffi.h \
+      rts/Adjustor.h \
+      rts/ExecPage.h \
+      rts/BlockSignals.h \
+      rts/Config.h \
+      rts/Constants.h \
+      rts/EventLogFormat.h \
+      rts/EventLogWriter.h \
+      rts/FileLock.h \
+      rts/Flags.h \
+      rts/ForeignExports.h \
+      rts/GetTime.h \
+      rts/Globals.h \
+      rts/Hpc.h \
+      rts/IOInterface.h \
+      rts/Libdw.h \
+      rts/LibdwPool.h \
+      rts/Linker.h \
+      rts/Main.h \
+      rts/Messages.h \
+      rts/NonMoving.h \
+      rts/OSThreads.h \
+      rts/Parallel.h \
+      rts/PrimFloat.h \
+      rts/Profiling.h \
+      rts/IPE.h \
+      rts/PosixSource.h \
+      rts/Signals.h \
+      rts/SpinLock.h \
+      rts/StableName.h \
+      rts/StablePtr.h \
+      rts/StaticPtrTable.h \
+      rts/TTY.h \
+      rts/Threads.h \
+      rts/Ticky.h \
+      rts/Time.h \
+      rts/Timer.h \
+      rts/TSANUtils.h \
+      rts/Types.h \
+      rts/Utils.h \
+      rts/prof/CCS.h \
+      rts/prof/Heap.h \
+      rts/prof/LDV.h \
+      rts/storage/Block.h \
+      rts/storage/ClosureMacros.h \
+      rts/storage/Closures.h \
+      rts/storage/Heap.h \
+      rts/storage/HeapAlloc.h \
+      rts/storage/GC.h \
+      rts/storage/InfoTables.h \
+      rts/storage/MBlock.h \
+      rts/storage/TSO.h \
+      stg/DLL.h \
+      stg/MiscClosures.h \
+      stg/Prim.h \
+      stg/Regs.h \
+      stg/SMP.h \
+      stg/Ticky.h \
+      stg/Types.h
+
+RTS_H_DIRS := \
+      rts/ \
+      rts/include/
+
+define copy_rts_h
+  $(call copy_headers,$(RTS_H),$(RTS_H_DIRS),rts,$1)
+endef
+
+RTS_JS_H := \
+      HsFFI.h \
+	  MachDeps.h \
+	  Rts.h \
+	  RtsAPI.h \
+	  Stg.h \
+      ghcconfig.h \
+      ghcversion.h \
+      stg/MachRegsForHost.h \
+      stg/Types.h
+
+define copy_rts_js_h
+  $(call copy_headers,$(RTS_JS_H),rts/include/,rts,$1)
+endef
+
+HASKELINE_H := \
+      win_console.h
+
+define copy_haskeline_h
+  $(call copy_headers,$(HASKELINE_H),libraries/haskeline/includes,haskeline,$1)
+endef
+
+WIN32_H := \
+      HsWin32.h \
+      HsGDI.h \
+      WndProc.h \
+      windows_cconv.h \
+      alphablend.h \
+      wincon_compat.h \
+      winternl_compat.h \
+      winuser_compat.h \
+      winreg_compat.h \
+      tlhelp32_compat.h \
+      winnls_compat.h \
+      winnt_compat.h \
+      namedpipeapi_compat.h
+
+define copy_win32_h
+  $(call copy_headers,$(WIN32_H),libraries/Win32/include/,Win32,$1)
+endef
+
+GHC_INTERNAL_H := \
+      HsBase.h \
+      consUtils.h
+
+define copy_ghc_internal_h
+  $(call copy_headers,$(GHC_INTERNAL_H),libraries/ghc-internal/include/,ghc-internal,$1)
+endef
+
+PROCESS_H := \
+      runProcess.h \
+      processFlags.h
+
+define copy_process_h
+  $(call copy_headers,$(PROCESS_H),libraries/process/include/,process,$1)
+endef
+
+BYTESTRING_H := \
+      fpstring.h \
+      bytestring-cpp-macros.h
+
+define copy_bytestring_h
+  $(call copy_headers,$(BYTESTRING_H),libraries/bytestring/include/,bytestring,$1)
+endef
+
+TIME_H := \
+	HsTime.h
+
+define copy_time_h
+  $(call copy_headers,$(TIME_H),libraries/time/lib/include/,time,$1)
+endef
+
+UNIX_H := \
+    HsUnix.h \
+    execvpe.h
+
+define copy_unix_h
+  $(call copy_headers,$(UNIX_H),libraries/unix/include/,unix,$1)
+endef
+
+define copy_all_stage3_h
+  $(call copy_rts_headers_h,$1)
+  $(call copy_rts_fs_h,$1)
+  if [ "$2" = "javascript-unknown-ghcjs" ] ; then $(call copy_rts_js_h,$1) ; else $(call copy_rts_h,$1) ; fi
+  $(call copy_ghc_internal_h,$1)
+  $(call copy_process_h,$1)
+  $(call copy_bytestring_h,$1)
+  $(call copy_time_h,$1)
+  if [ "$(OS)" = "Windows_NT" ] ; then $(call copy_win32_h,$1) ; else $(call copy_unix_h,$1) ; fi
+endef
+
+define copy_all_stage2_h
+  $(call copy_all_stage3_h,$1,none)
+  $(call copy_haskeline_h,$1)
+endef
+
+
+# --- Bootstrapping and stage 0 ---
 
 # export CABAL := $(shell cabal update 2>&1 >/dev/null && cabal build cabal-install -v0 --disable-tests --project-dir libraries/Cabal && cabal list-bin -v0 --project-dir libraries/Cabal cabal-install:exe:cabal)
 $(abspath _build/stage0/bin/cabal): _build/stage0/bin/cabal
@@ -286,6 +543,7 @@ _build/stage1/%: private STAGE=stage1
 _build/stage1/%: private GHC=$(GHC0)
 
 .PHONY: $(addprefix _build/stage1/bin/,$(STAGE1_EXECUTABLES))
+$(addprefix _build/stage1/bin/,$(STAGE1_EXECUTABLES)) &: private TARGET_PLATFORM=
 $(addprefix _build/stage1/bin/,$(STAGE1_EXECUTABLES)) &: $(CABAL) | _build/booted
 	@echo "::group::Building stage1 executables ($(STAGE1_EXECUTABLES))..."
 	# Force cabal to replan
@@ -296,7 +554,7 @@ $(addprefix _build/stage1/bin/,$(STAGE1_EXECUTABLES)) &: $(CABAL) | _build/boote
 _build/stage1/lib/settings: _build/stage1/bin/ghc-toolchain-bin
 	@echo "::group::Creating settings for $(TARGET_TRIPLE)..."
 	@mkdir -p $(@D)
-	_build/stage1/bin/ghc-toolchain-bin --triple $(TARGET_TRIPLE) --output-settings -o $@ --cc $(CC) --cxx $(CXX)
+	_build/stage1/bin/ghc-toolchain-bin $(GHC_TOOLCHAIN_ARGS) --triple $(TARGET_TRIPLE) --output-settings -o $@ --cc $(CC) --cxx $(CXX)
 	@echo "::endgroup::"
 
 # The somewhat strange thing is, we might not even need this at all now anymore. cabal seems to
@@ -329,6 +587,7 @@ _build/stage2/%: private STAGE=stage2
 _build/stage2/%: private GHC=$(realpath _build/stage1/bin/ghc)
 
 .PHONY: $(addprefix _build/stage2/bin/,$(STAGE2_EXECUTABLES))
+$(addprefix _build/stage2/bin/,$(STAGE2_EXECUTABLES)) &: private TARGET_PLATFORM=
 $(addprefix _build/stage2/bin/,$(STAGE2_EXECUTABLES)) &: $(CABAL) stage1
 	@echo "::group::Building stage2 executables ($(STAGE2_EXECUTABLES))..."
 	# Force cabal to replan
@@ -342,6 +601,7 @@ $(addprefix _build/stage2/bin/,$(STAGE2_EXECUTABLES)) &: $(CABAL) stage1
 # Traditionally we build them with the stage1 ghc, but we could just as well
 # build them with the stage2 ghc; seems like a better/cleaner idea to me (moritz).
 .PHONY: $(addprefix _build/stage2/bin/,$(STAGE2_UTIL_EXECUTABLES))
+$(addprefix _build/stage2/bin/,$(STAGE2_UTIL_EXECUTABLES)) &: private TARGET_PLATFORM=
 $(addprefix _build/stage2/bin/,$(STAGE2_UTIL_EXECUTABLES)) &: $(CABAL) stage1
 	@echo "::group::Building stage2 utilities ($(STAGE2_UTIL_EXECUTABLES))..."
 	# Force cabal to replan
@@ -350,35 +610,6 @@ $(addprefix _build/stage2/bin/,$(STAGE2_UTIL_EXECUTABLES)) &: $(CABAL) stage1
 		PATH=$(PWD)/_build/stage1/bin:$(PATH) \
 		$(CABAL_BUILD) --ghc-options="-ghcversion-file=$(abspath ./rts/include/ghcversion.h)" -W $(GHC0) $(STAGE2_UTIL_TARGETS)
 	@echo "::endgroup::"
-
-
-# # We use PATH=... here to ensure all the build-tool-depends (deriveConstants, genapply, genprimopcode, ...) are
-# # available in PATH while cabal evaluates configure files. Cabal sadly does not support build-tool-depends or
-# # handle build-depends properly prior to building the package.  Thus Configure/Setup/... do not have build-tool-depends
-# # available in PATH.  This is a workaround for that.  I consider this a defect in cabal.
-# _build/stage2/bin/ghc: _build/stage1.done
-# 	@$(LIB)
-# 	@echo ">>> Building with GHC: $(GHC1) and Cabal: $(CABAL)"
-# 	@echo ">>> Using $(THREADS) threads"
-
-# 	# this is stupid, having to build the rts first. We need to find a better way to do this.
-# 	# We might be able to just have the `ghc` executable depend on the specific rts we want to
-# 	# set as a default.
-# 	HADRIAN_SETTINGS='$(HADRIAN_SETTINGS)' \
-# 		PATH=$(PWD)/_build/stage1/bin:$(PATH) \
-# 		$(CABAL) $(CABAL_ARGS) build --project-file=cabal.project.stage2 --builddir=_build/stage2/cabal -j -w ghc \
-# 		$(CABAL_BUILD_ARGS) \
-# 		--ghc-options="-ghcversion-file=$(abspath ./rts/include/ghcversion.h)" \
-# 		rts:nonthreaded-nodebug rts:nonthreaded-debug \
-# 		|& tee _build/logs/rts.log
-
-# 	HADRIAN_SETTINGS='$(HADRIAN_SETTINGS)' \
-# 		PATH=$(PWD)/_build/stage1/bin:$(PATH) \
-# 		$(CABAL) $(CABAL_ARGS) build --project-file=cabal.project.stage2 --builddir=_build/stage2/cabal -j -w ghc \
-# 		$(CABAL_BUILD_ARGS) \
-# 		--ghc-options="-ghcversion-file=$(abspath ./rts/include/ghcversion.h)" \
-# 		$(STAGE2_TARGETS) \
-# 		|& tee _build/logs/stage2.log
 
 _build/stage2/lib/settings: _build/stage1/lib/settings
 	@mkdir -p $(@D)
@@ -399,86 +630,267 @@ _build/stage2/lib/template-hsc.h: utils/hsc2hs/data/template-hsc.h
 .PHONY: stage2
 stage2: $(addprefix _build/stage2/bin/,$(STAGE2_EXECUTABLES)) _build/stage2/lib/settings _build/stage2/lib/package.conf.d/package.cache _build/stage2/lib/template-hsc.h
 
-.PHONY: stage2-javascript-unknown-ghcjs
-stage2-javascript-unknown-ghcjs: javascript-unknown-ghcjs-libs _build/stage2/lib/targets/javascript-unknown-ghcjs/lib/package.conf.d/package.cache
+# --- Stage 3 generic ---
 
-_build/stage2/lib/targets/javascript-unknown-ghcjs/lib/settings: _build/stage1/bin/ghc-toolchain-bin
+_build/stage3/lib/targets/%:
+	@mkdir -p $@
+	@mkdir -p _build/stage2/lib/targets/
+	@ln -sf ../../../stage3/lib/targets/$(@F) _build/stage2/lib/targets/$(@F)
+
+_build/stage3/bin/%-ghc-pkg: _build/stage2/bin/ghc-pkg
 	@mkdir -p $(@D)
-	$(call run_and_log, emconfigure _build/stage1/bin/ghc-toolchain-bin --triple javascript-unknown-ghcjs --output-settings -o $@ --cc $(EMCC) --cxx $(EMCXX) --ar $(EMAR) --ranlib $(EMRANLIB))
+	@ln -sf ../../stage2/bin/ghc-pkg $@
 
-_build/stage2/bin/javascript-unknown-ghcjs-ghc-pkg: _build/stage2/bin/ghc-pkg
+_build/stage3/bin/%-ghc: _build/stage2/bin/ghc
 	@mkdir -p $(@D)
-	ln -sf ghc-pkg $@
+	@ln -sf ../../stage2/bin/ghc $@
 
-_build/stage2/bin/javascript-unknown-ghcjs-ghc: _build/stage2/bin/ghc
+_build/stage3/bin/%-hsc2hs: _build/stage2/bin/hsc2hs
 	@mkdir -p $(@D)
-	ln -sf ghc $@
+	@ln -sf ../../stage2/bin/hsc2hs $@
 
-_build/stage2/lib/targets/javascript-unknown-ghcjs/lib/package.conf.d:
+_build/stage3/lib/targets/%/lib/package.conf.d: _build/stage3/lib/targets/%
 	@mkdir -p $@
 
-_build/stage2/lib/targets/javascript-unknown-ghcjs/lib/package.conf.d/package.cache: _build/stage2/bin/javascript-unknown-ghcjs-ghc-pkg _build/stage2/lib/targets/javascript-unknown-ghcjs/lib/settings javascript-unknown-ghcjs-libs
-	@mkdir -p $(@D)
-	@rm -rf $(@D)/*
-	cp -rfp _build/stage2/javascript-unknown-ghcjs/packagedb/host/*/* $(@D)
-	_build/stage2/bin/javascript-unknown-ghcjs-ghc-pkg recache
-
-_build/stage2/lib/targets/javascript-unknown-ghcjs/bin/unlit: _build/stage2/bin/unlit
+# ghc-toolchain borks unlit
+_build/stage3/lib/targets/%/bin/unlit: _build/stage2/bin/unlit
 	@mkdir -p $(@D)
 	cp -rfp $< $@
 
+# $1 = TIPLET
+define build_cross
+	HADRIAN_SETTINGS='$(call HADRIAN_SETTINGS)' \
+		PATH=$(PWD)/_build/stage2/bin:$(PWD)/_build/stage3/bin:$(PATH) \
+		$(CABAL_BUILD) -W $(GHC2) --happy-options="--template=$(abspath _build/stage2/src/happy-lib-2.1.5/data/)" --with-hsc2hs=$1-hsc2hs --hsc2hs-options='-x' --configure-option='--host=$1' \
+		$(foreach lib,$(CROSS_EXTRA_LIB_DIRS),--extra-lib-dirs=$(lib)) \
+		$(foreach include,$(CROSS_EXTRA_INCLUDE_DIRS),--extra-include-dirs=$(include)) \
+		$(STAGE3_LIBS)
+endef
+
+# --- Stage 3 javascript build ---
+
+.PHONY: stage3-javascript-unknown-ghcjs
+stage3-javascript-unknown-ghcjs: _build/stage3/lib/targets/javascript-unknown-ghcjs/lib/settings javascript-unknown-ghcjs-libs _build/stage3/lib/targets/javascript-unknown-ghcjs/lib/package.conf.d/package.cache
+
+_build/stage3/lib/targets/javascript-unknown-ghcjs/lib/settings: _build/stage3/lib/targets/javascript-unknown-ghcjs _build/stage1/bin/ghc-toolchain-bin
+	@mkdir -p $(@D)
+	_build/stage1/bin/ghc-toolchain-bin $(GHC_TOOLCHAIN_ARGS) --triple javascript-unknown-ghcjs --output-settings -o $@ --cc $(EMCC) --cxx $(EMCXX) --ar $(EMAR) --ranlib $(EMRANLIB)
+
+_build/stage3/lib/targets/javascript-unknown-ghcjs/lib/package.conf.d/package.cache: _build/stage3/bin/javascript-unknown-ghcjs-ghc-pkg _build/stage3/lib/targets/javascript-unknown-ghcjs/lib/settings javascript-unknown-ghcjs-libs
+	@mkdir -p $(@D)
+	@rm -rf $(@D)/*
+	cp -rfp _build/stage3/javascript-unknown-ghcjs/packagedb/host/*/* $(@D)
+	_build/stage3/bin/javascript-unknown-ghcjs-ghc-pkg recache
+
 .PHONY: javascript-unknown-ghcjs-libs
-javascript-unknown-ghcjs-libs: private TARGET=javascript-unknown-ghcjs
-javascript-unknown-ghcjs-libs: private GHC=$(abspath _build/stage2/bin/javascript-unknown-ghcjs-ghc)
+javascript-unknown-ghcjs-libs: private GHC=$(abspath _build/stage3/bin/javascript-unknown-ghcjs-ghc)
 javascript-unknown-ghcjs-libs: private GHC2=$(abspath _build/stage2/bin/ghc)
-javascript-unknown-ghcjs-libs: private STAGE=stage2
+javascript-unknown-ghcjs-libs: private STAGE=stage3
 javascript-unknown-ghcjs-libs: private CC=emcc
-javascript-unknown-ghcjs-libs: _build/stage2/bin/javascript-unknown-ghcjs-ghc-pkg _build/stage2/bin/javascript-unknown-ghcjs-ghc _build/stage2/lib/targets/javascript-unknown-ghcjs/lib/settings _build/stage2/lib/targets/javascript-unknown-ghcjs/bin/unlit _build/stage2/lib/targets/javascript-unknown-ghcjs/lib/package.conf.d
-	# Force cabal to replan
-	rm -rf _build/stage2/javascript-unknown-ghcjs/cache
-	$(call run_and_log, HADRIAN_SETTINGS='$(HADRIAN_SETTINGS)' \
-		PATH=$(PWD)/_build/stage2/bin:$(PATH) \
-		$(CABAL_BUILD) -W $(GHC2) --happy-options="--template=$(abspath _build/stage2/src/happy-lib-2.1.5/data/)" rts:nonthreaded-nodebug )
-	$(call run_and_log, HADRIAN_SETTINGS='$(HADRIAN_SETTINGS)' \
-		PATH=$(PWD)/_build/stage2/bin:$(PATH) \
-		$(CABAL_BUILD) -W $(GHC2) --happy-options="--template=$(abspath _build/stage2/src/happy-lib-2.1.5/data/)" $(STAGE2_TARGET_LIBS) )
+javascript-unknown-ghcjs-libs: private CROSS_EXTRA_LIB_DIRS=$(JS_EXTRA_LIB_DIRS)
+javascript-unknown-ghcjs-libs: private CROSS_EXTRA_INCLUDE_DIRS=$(JS_EXTRA_INCLUDE_DIRS)
+javascript-unknown-ghcjs-libs: _build/stage3/bin/javascript-unknown-ghcjs-ghc-pkg _build/stage3/bin/javascript-unknown-ghcjs-ghc _build/stage3/bin/javascript-unknown-ghcjs-hsc2hs _build/stage3/lib/targets/javascript-unknown-ghcjs/lib/settings _build/stage3/lib/targets/javascript-unknown-ghcjs/bin/unlit _build/stage3/lib/targets/javascript-unknown-ghcjs/lib/package.conf.d
+	$(call build_cross,javascript-unknown-ghcjs)
+
+# --- Stage 3 musl build ---
+
+.PHONY: stage3-x86_64-musl-linux
+stage3-x86_64-musl-linux: x86_64-musl-linux-libs _build/stage3/lib/targets/x86_64-musl-linux/lib/package.conf.d/package.cache
+
+_build/stage3/lib/targets/x86_64-musl-linux/lib/settings: _build/stage3/lib/targets/x86_64-musl-linux _build/stage1/bin/ghc-toolchain-bin
+	@mkdir -p $(@D)
+	_build/stage1/bin/ghc-toolchain-bin $(GHC_TOOLCHAIN_ARGS) --triple x86_64-musl-linux --output-settings -o $@ --cc x86_64-unknown-linux-musl-cc --cxx x86_64-unknown-linux-musl-c++ --ar x86_64-unknown-linux-musl-ar --ranlib x86_64-unknown-linux-musl-ranlib --ld x86_64-unknown-linux-musl-ld
+
+_build/stage3/lib/targets/x86_64-musl-linux/lib/package.conf.d/package.cache: _build/stage3/bin/x86_64-musl-linux-ghc-pkg _build/stage3/lib/targets/x86_64-musl-linux/lib/settings x86_64-musl-linux-libs
+	@mkdir -p $(@D)
+	@rm -rf $(@D)/*
+	cp -rfp _build/stage3/x86_64-musl-linux/packagedb/host/*/* $(@D)
+	_build/stage3/bin/x86_64-musl-linux-ghc-pkg recache
+
+.PHONY: x86_64-musl-linux-libs
+x86_64-musl-linux-libs: private GHC=$(abspath _build/stage3/bin/x86_64-musl-linux-ghc)
+x86_64-musl-linux-libs: private GHC2=$(abspath _build/stage2/bin/ghc)
+x86_64-musl-linux-libs: private STAGE=stage3
+x86_64-musl-linux-libs: private CC=x86_64-unknown-linux-musl-cc
+x86_64-musl-linux-libs: private CROSS_EXTRA_LIB_DIRS=$(MUSL_EXTRA_LIB_DIRS)
+x86_64-musl-linux-libs: private CROSS_EXTRA_INCLUDE_DIRS=$(MUSL_EXTRA_INCLUDE_DIRS)
+x86_64-musl-linux-libs: _build/stage3/bin/x86_64-musl-linux-ghc-pkg _build/stage3/bin/x86_64-musl-linux-ghc _build/stage3/bin/x86_64-musl-linux-hsc2hs _build/stage3/lib/targets/x86_64-musl-linux/lib/settings _build/stage3/lib/targets/x86_64-musl-linux/bin/unlit _build/stage3/lib/targets/x86_64-musl-linux/lib/package.conf.d
+	$(call build_cross,x86_64-musl-linux)
+
+# --- Stage 3 wasm build ---
+
+.PHONY: stage3-wasm32-unknown-wasi
+stage3-wasm32-unknown-wasi: wasm32-unknown-wasi-libs _build/stage3/lib/targets/wasm32-unknown-wasi/lib/package.conf.d/package.cache _build/stage3/lib/targets/wasm32-unknown-wasi/lib/dyld.mjs _build/stage3/lib/targets/wasm32-unknown-wasi/lib/post-link.mjs _build/stage3/lib/targets/wasm32-unknown-wasi/lib/prelude.mjs
+
+_build/stage3/lib/targets/wasm32-unknown-wasi/lib/settings: _build/stage3/lib/targets/wasm32-unknown-wasi _build/stage1/bin/ghc-toolchain-bin
+	@mkdir -p $(@D)
+	PATH=/home/hasufell/.ghc-wasm/wasi-sdk/bin:$(PATH) _build/stage1/bin/ghc-toolchain-bin $(GHC_TOOLCHAIN_ARGS) --triple wasm32-unknown-wasi --output-settings -o $@ --cc wasm32-wasi-clang --cxx wasm32-wasi-clang++ --ar ar --ranlib ranlib --ld wasm-ld --merge-objs wasm-ld --merge-objs-opt="-r" --disable-ld-override --disable-tables-next-to-code $(foreach opt,$(WASM_CC_OPTS),--cc-opt=$(opt)) $(foreach opt,$(WASM_CXX_OPTS),--cxx-opt=$(opt))
+
+_build/stage3/lib/targets/wasm32-unknown-wasi/lib/package.conf.d/package.cache: _build/stage3/bin/wasm32-unknown-wasi-ghc-pkg _build/stage3/lib/targets/wasm32-unknown-wasi/lib/settings wasm32-unknown-wasi-libs
+	@mkdir -p $(@D)
+	@rm -rf $(@D)/*
+	cp -rfp _build/stage3/wasm32-unknown-wasi/packagedb/host/*/* $(@D)
+	_build/stage3/bin/wasm32-unknown-wasi-ghc-pkg recache
+
+# ghc-toolchain borks unlit
+_build/stage3/lib/targets/wasm32-unknown-wasi/bin/unlit: _build/stage2/bin/unlit
+	@mkdir -p $(@D)
+	cp -rfp $< $@
+
+.PHONY: wasm32-unknown-wasi-libs
+wasm32-unknown-wasi-libs: private GHC=$(abspath _build/stage3/bin/wasm32-unknown-wasi-ghc)
+wasm32-unknown-wasi-libs: private GHC2=$(abspath _build/stage2/bin/ghc)
+wasm32-unknown-wasi-libs: private STAGE=stage3
+wasm32-unknown-wasi-libs: private CC=wasm32-wasi-clang
+wasm32-unknown-wasi-libs: private CROSS_EXTRA_LIB_DIRS=$(WASM_EXTRA_LIB_DIRS)
+wasm32-unknown-wasi-libs: private CROSS_EXTRA_INCLUDE_DIRS=$(WASM_EXTRA_INCLUDE_DIRS)
+wasm32-unknown-wasi-libs: _build/stage3/bin/wasm32-unknown-wasi-ghc-pkg _build/stage3/bin/wasm32-unknown-wasi-ghc _build/stage3/bin/wasm32-unknown-wasi-hsc2hs _build/stage3/lib/targets/wasm32-unknown-wasi/lib/settings _build/stage3/lib/targets/wasm32-unknown-wasi/bin/unlit _build/stage3/lib/targets/wasm32-unknown-wasi/lib/package.conf.d
+	$(call build_cross,wasm32-unknown-wasi)
+
+_build/stage3/lib/targets/wasm32-unknown-wasi/lib/dyld.mjs:
+	@mkdir -p $(@D)
+	@cp -f utils/jsffi/dyld.mjs $@
+	@chmod +x $@
+
+_build/stage3/lib/targets/wasm32-unknown-wasi/lib/post-link.mjs:
+	@mkdir -p $(@D)
+	@cp -f utils/jsffi/post-link.mjs $@
+	@chmod +x $@
+
+_build/stage3/lib/targets/wasm32-unknown-wasi/lib/prelude.mjs:
+	@mkdir -p $(@D)
+	@cp -f utils/jsffi/prelude.mjs $@
+	@chmod +x $@
+
+_build/stage3/lib/targets/wasm32-unknown-wasi/lib/ghc-interp.js:
+	@mkdir -p $(@D)
+	@cp -f ghc-interp.js $@
+
+# --- Bindist ---
+
+# patchpackageconf
+#
+# Hacky function to patch up the paths in the package .conf files
+#
+# $1 = package name (ex: 'bytestring')
+# $2 = path to .conf file
+# $3 = (relative) path from $${pkgroot} to docs directory
+# $4 = host triple
+# $5 = package name and version (ex: bytestring-0.13)
+#
+define patchpackageconf
+	sed -i \
+		-e "s|haddock-interfaces:.*|haddock-interfaces: \"\$${pkgroot}/$3/html/libraries/$5/$1.haddock\"|" \
+		-e "s|haddock-html:.*|haddock-html: \"\$${pkgroot}/$3/html/libraries/$5\"|" \
+        -e "s|import-dirs:.*|import-dirs: \"\$${pkgroot}/../lib/$4/$5\"|" \
+		-e "s|library-dirs:.*|library-dirs: \"\$${pkgroot}/../lib/$4/$5\"|" \
+		-e "s|library-dirs-static:.*|library-dirs-static: \"\$${pkgroot}/../lib/$4/$5\"|" \
+		-e "s|dynamic-library-dirs:.*|dynamic-library-dirs: \"\$${pkgroot}/../lib/$4\"|" \
+		-e "s|data-dir:.*|data-dir: \"\$${pkgroot}/../lib/$4/$5\"|" \
+		-e "s|include-dirs:.*|include-dirs: \"\$${pkgroot}/../lib/$4/$5/include\"|" \
+		-e "s|^    $(CURDIR).*||" \
+		$2
+endef
+
+# $1 = triplet
+define copycrosslib
+	@cp -rfp _build/stage3/lib/targets/$1 _build/bindist/lib/targets/
+	@cd _build/bindist/lib/targets/$1/lib/package.conf.d ; \
+		for pkg in *.conf ; do \
+		  pkgname=`echo $${pkg} | sed 's/-[0-9.]*\(-[0-9a-zA-Z]*\)\?\.conf//'` ; \
+		  pkgnamever=`echo $${pkg} | sed 's/\.conf//'` ; \
+		  mkdir -p $(CURDIR)/_build/bindist/lib/targets/$1/lib/$1/$${pkg%.conf} && \
+	      cp -rfp $(CURDIR)/_build/stage3/$1/build/host/*/ghc-*/$${pkg%.conf}/build/* $(CURDIR)/_build/bindist/lib/targets/$1/lib/$1/$${pkg%.conf}/ && \
+		  $(call patchpackageconf,$${pkgname},$${pkg},../../..,$1,$${pkgnamever}) ; \
+		done
+endef
 
 # Target for creating the final binary distribution directory
+#_build/bindist: stage2 driver/ghc-usage.txt driver/ghci-usage.txt
 _build/bindist: stage2 driver/ghc-usage.txt driver/ghci-usage.txt
-	@echo "::group::Creating binary distribution in _build/bindist"
-	@mkdir -p _build/bindist/bin
-	@mkdir -p _build/bindist/lib
+	@echo "::group::Creating binary distribution in $@"
+	@mkdir -p $@/bin
+	@mkdir -p $@/lib
 	# Copy executables from stage2 bin
-	@cp -rfp _build/stage2/bin/* _build/bindist/bin/
+	@cp -rfp _build/stage2/bin/* $@/bin/
 	# Copy libraries and settings from stage2 lib
-	@cp -rfp _build/stage2/lib/* _build/bindist/lib/
+	@cp -rfp _build/stage2/lib/{package.conf.d,settings,template-hsc.h} $@/lib/
+	@mkdir -p $@/lib/x86_64-linux
+	@cd $@/lib/package.conf.d ; \
+		for pkg in *.conf ; do \
+		  pkgname=`echo $${pkg} | sed 's/-[0-9.]*\(-[0-9a-zA-Z]*\)\?\.conf//'` ; \
+		  pkgnamever=`echo $${pkg} | sed 's/\.conf//'` ; \
+		  mkdir -p $(CURDIR)/$@/lib/x86_64-linux/$${pkg%.conf} ; \
+		  cp -rfp $(CURDIR)/_build/stage2/build/host/x86_64-linux/ghc-*/$${pkg%.conf}/build/* $(CURDIR)/$@/lib/x86_64-linux/$${pkg%.conf} ; \
+		  $(call patchpackageconf,$${pkgname},$${pkg},../../..,x86_64-linux,$${pkgnamever}) ; \
+		done
 	# Copy driver usage files
-	@cp -rfp driver/ghc-usage.txt _build/bindist/lib/
-	@cp -rfp driver/ghci-usage.txt _build/bindist/lib/
+	@cp -rfp driver/ghc-usage.txt $@/lib/
+	@cp -rfp driver/ghci-usage.txt $@/lib/
 	@echo "FIXME: Changing 'Support SMP' from YES to NO in settings file"
-	@sed 's/("Support SMP","YES")/("Support SMP","NO")/' -i.bck _build/bindist/lib/settings
+	@sed 's/("Support SMP","YES")/("Support SMP","NO")/' -i.bck $@/lib/settings
+	# Recache
+	$@/bin/ghc-pkg recache
+	# Copy headers
+	@$(call copy_all_stage2_h,$@/bin/ghc-pkg)
 	@echo "::endgroup::"
+
+_build/bindist/ghc.tar.gz: _build/bindist
+	@tar czf $@ \
+		--directory=_build/bindist \
+		$(foreach exe,$(BINDIST_EXECTUABLES),bin/$(exe)) \
+		lib/ghc-usage.txt \
+		lib/ghci-usage.txt \
+		lib/package.conf.d \
+		lib/settings \
+		lib/template-hsc.h \
+		lib/x86_64-linux
+
+_build/bindist/lib/targets/%: _build/bindist driver/ghc-usage.txt driver/ghci-usage.txt stage3-%
+	@echo "::group::Creating binary distribution in $@"
+	@mkdir -p _build/bindist/bin
+	@mkdir -p _build/bindist/lib/targets
+	# Symlinks
+	@cd _build/bindist/bin ; for binary in * ; do \
+		test -L $$binary || ln -sf $$binary $(@F)-$$binary \
+		; done
+	# Copy libraries and settings
+	@if [ -e $(CURDIR)/_build/bindist/lib/targets/$(@F)/lib/$(@F) ] ; then find $(CURDIR)/_build/bindist/lib/targets/$(@F)/lib/$(@F)/ -mindepth 1 -type f -name "*.so" -execdir mv '{}' $(CURDIR)/_build/bindist/lib/targets/$(@F)/lib/$(@F)/'{}' \; ; fi
+	$(call copycrosslib,$(@F))
+	# --help
+	@cp -rfp driver/ghc-usage.txt _build/bindist/lib/targets/$(@F)/lib/
+	@cp -rfp driver/ghci-usage.txt _build/bindist/lib/targets/$(@F)/lib/
+	# Recache
+	@_build/bindist/bin/$(@F)-ghc-pkg recache
+	# Copy headers
+	@$(call copy_all_stage3_h,_build/bindist/bin/$(@F)-ghc-pkg,$(@F))
+	@echo "::endgroup::"
+
+_build/bindist/ghc-%.tar.gz: _build/bindist/lib/targets/% _build/bindist/ghc.tar.gz
+	@triple=`basename $<` ; \
+		tar czf $@ \
+		--directory=_build/bindist \
+		$(foreach exe,$(BINDIST_EXECTUABLES),bin/$${triple}-$(exe)) \
+		lib/targets/$${triple}
+
 
 # --- Configuration ---
 
 $(GHC1) $(GHC2): | hackage
 hackage: _build/packages/hackage.haskell.org/01-index.tar.gz
 _build/packages/hackage.haskell.org/01-index.tar.gz: | $(CABAL)
-	@echo "::group::Updating Hackage index..."
 	@mkdir -p $(@D)
 	$(CABAL) $(CABAL_ARGS) update --index-state 2025-04-22T01:25:40Z
-	@echo "::endgroup::"
 
 # booted depends on successful source preparation
 _build/booted:
 	@echo "::group::Running ./boot script..."
 	@mkdir -p _build/logs
-	./boot
-	@echo "::endgroup::"
-	@echo "::group::Running ./configure script..."
+	./boot |& tee _build/logs/boot.log
+	@echo ">>> Running ./configure script..."
 	./configure
-	@echo "::endgroup::"
 	touch $@
+	@echo "::endgroup::"
 
 # --- Clean Targets ---
 clean:
@@ -494,6 +906,12 @@ clean-stage1:
 clean-stage2:
 	@echo "::group::Cleaning stage2 build artifacts..."
 	rm -rf _build/stage2
+	@echo "::endgroup::"
+
+clean-stage3:
+	@echo "::group::Cleaning stage3 build artifacts..."
+	rm -rf _build/stage3
+	rm -rf _build/stage2/lib/targets
 	@echo "::endgroup::"
 
 distclean: clean
@@ -516,7 +934,7 @@ test: _build/bindist
 	SUMMARY_FILE=`pwd`/_build/test-summary.txt \
 	JUNIT_FILE=`pwd`/_build/test-junit.xml \
 	make -C testsuite/tests test THREADS=${THREADS}
-	@echo "::endgroup::" >&2
+	@echo "::endgroup::"
 
 # Inform Make that these are not actual files if they get deleted by other means
-.PHONY: clean distclean test all
+.PHONY: clean clean-stage1 clean-stage2 clean-stage3 distclean test all configure

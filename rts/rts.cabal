@@ -373,6 +373,9 @@ common rts-c-sources-base
     if arch(ppc) || arch(ppc64) || arch(s390x) || arch(riscv64) || arch(loongarch64)
       asm-sources: StgCRunAsm.S
 
+    if arch(wasm32)
+      cc-options: -fvisibility=default -fvisibility-inlines-hidden
+
     c-sources: Adjustor.c
                adjustor/AdjustorPool.c
                ExecPage.c
@@ -750,15 +753,13 @@ common ghcjs
       js/weak.js
       js/globals.js
       js/time.js
+
+    -- Add JS specific install-includes again
     install-includes: HsFFI.h MachDeps.h Rts.h RtsAPI.h Stg.h
                       ghcconfig.h
                       ghcversion.h
                       stg/MachRegsForHost.h
                       stg/Types.h
-    -- Add JS specific install-includes again
-    install-includes: HsFFI.h MachDeps.h Rts.h RtsAPI.h Stg.h
-                      ghcconfig.h ghcversion.h
-                      stg/MachRegsForHost.h stg/Types.h
 
 -- this is basiclly the "vanilla" version
 library nonthreaded-nodebug

@@ -127,7 +127,7 @@ main = do
         mbTarget | not (null target_args) = Just (drop 8 (last target_args))
                  | "-ghc" `isSuffixOf` prog0
                  , parts <- split '-' prog0
-                 , length parts > 3 = Just (take (length prog0 - 4) prog0)
+                 , length parts > 2 = Just (take (length prog0 - 4) prog0)
                  | otherwise = Nothing
 
 
