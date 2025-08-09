@@ -7,6 +7,7 @@
 {-# LANGUAGE UndecidableInstances #-} -- Wrinkle in Note [Trees That Grow]
                                       -- in module Language.Haskell.Syntax.Extension
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE LambdaCase #-}
 
 module GHC.Tc.Utils.Env(
         TyThing(..), TcTyThing(..), TcId,
@@ -28,7 +29,7 @@ module GHC.Tc.Utils.Env(
         tcLookupLocatedClass, tcLookupAxiom,
         lookupGlobal, lookupGlobal_maybe,
         addTypecheckedBinds,
-        failIllegalTyCon, failIllegalTyVal,
+        failIllegalTyCon, failIllegalTyVar,
 
         -- Local environment
         tcExtendKindEnv, tcExtendKindEnvList,
@@ -59,15 +60,15 @@ module GHC.Tc.Utils.Env(
         tcGetDefaultTys,
 
         -- Template Haskell stuff
-        StageCheckReason(..),
-        checkWellStaged, tcMetaTy, thLevel,
-        topIdLvl, isBrackStage,
+        LevelCheckReason(..),
+        tcMetaTy, thLevelIndex,
+        isBrackLevel,
 
         -- New Ids
         newDFunName,
         newFamInstTyConName, newFamInstAxiomName,
         mkStableIdFromString, mkStableIdFromName,
-        mkWrapperName,
+        mkWrapperName, tcGetClsDefaults,
   ) where
 
 import GHC.Prelude
@@ -105,7 +106,10 @@ import GHC.Core.Class
 
 
 import GHC.Unit.Module
+import GHC.Unit.Module.ModDetails
 import GHC.Unit.Home
+import GHC.Unit.Home.Graph
+import GHC.Unit.Home.ModInfo
 import GHC.Unit.External
 
 import GHC.Utils.Outputable
@@ -115,7 +119,7 @@ import GHC.Utils.Misc ( HasDebugCallStack )
 
 import GHC.Data.FastString
 import GHC.Data.List.SetOps
-import GHC.Data.Maybe( MaybeErr(..), orElse, maybeToList )
+import GHC.Data.Maybe( MaybeErr(..), orElse, maybeToList, fromMaybe )
 
 import GHC.Types.SrcLoc
 import GHC.Types.Basic hiding( SuccessFlag(..) )
@@ -124,8 +128,7 @@ import GHC.Types.SourceFile
 import GHC.Types.Name
 import GHC.Types.Name.Set
 import GHC.Types.Name.Env
-import GHC.Types.DefaultEnv ( DefaultEnv, ClassDefaults(..),
-                              defaultEnv, emptyDefaultEnv, lookupDefaultEnv, unitDefaultEnv )
+import GHC.Types.DefaultEnv
 import GHC.Types.Error
 import GHC.Types.Id
 import GHC.Types.Id.Info ( RecSelParent(..) )
@@ -135,7 +138,7 @@ import GHC.Types.Unique.Set ( nonDetEltsUniqSet )
 import qualified GHC.LanguageExtensions as LangExt
 
 import GHC.Iface.Errors.Types
-import GHC.Rename.Unbound ( unknownNameSuggestions, WhatLooking(..) )
+import GHC.Rename.Unbound ( unknownNameSuggestions )
 import GHC.Tc.Errors.Types.PromotionErr
 import {-# SOURCE #-} GHC.Tc.Errors.Hole (getHoleFitDispConfig)
 
@@ -278,12 +281,12 @@ tcLookupPatSyn name = do
         AConLike (PatSynCon ps) -> return ps
         _                       -> wrongThingErr WrongThingPatSyn (AGlobal thing) name
 
-tcLookupConLike :: Name -> TcM ConLike
-tcLookupConLike name = do
+tcLookupConLike :: WithUserRdr Name -> TcM ConLike
+tcLookupConLike qname@(WithUserRdr _ name) = do
     thing <- tcLookupGlobal name
     case thing of
         AConLike cl -> return cl
-        ATyCon  {}  -> failIllegalTyCon WL_Constructor name
+        ATyCon  {}  -> failIllegalTyCon WL_ConLike qname
         _           -> wrongThingErr WrongThingConLike (AGlobal thing) name
 
 tcLookupRecSelParent :: HsRecUpdParent GhcRn -> TcM RecSelParent
@@ -343,6 +346,20 @@ tcLookupInstance cls tys
     uniqueTyVars tys = all isTyVarTy tys
                     && hasNoDups (map getTyVar tys)
 
+-- | Get the default types for classes
+-- explicitly not combined to be use for `reportClashingDefaultImports`
+tcGetClsDefaults :: [Module] -> TcM [DefaultEnv]
+tcGetClsDefaults mods = do
+  hug <- hsc_HUG <$> getTopEnv
+  module_env_defaults <- eps_defaults <$> getEps
+  liftIO $ mapMaybeM (lookupClsDefault hug module_env_defaults) mods
+
+lookupClsDefault :: HomeUnitGraph -> ModuleEnv DefaultEnv -> Module -> IO (Maybe DefaultEnv)
+lookupClsDefault hug module_env_defaults mod =
+  lookupHugByModule mod hug >>= \case
+             Just hm -> pure $ Just $ md_defaults $ hm_details hm
+             Nothing -> pure $ lookupModuleEnv module_env_defaults mod
+
 tcGetInstEnvs :: TcM InstEnvs
 -- Gets both the external-package inst-env
 -- and the home-pkg inst env (includes module being compiled)
@@ -356,43 +373,98 @@ instance MonadThings (IOEnv (Env TcGblEnv TcLclEnv)) where
     lookupThing = tcLookupGlobal
 
 -- Illegal term-level use of type things
-failIllegalTyCon :: WhatLooking -> Name -> TcM a
-failIllegalTyVal :: Name -> TcM a
-(failIllegalTyCon, failIllegalTyVal) = (fail_tycon, fail_tyvar)
+failIllegalTyCon :: WhatLooking -> WithUserRdr Name -> TcM a
+failIllegalTyVar :: WithUserRdr Name -> TcM a
+(failIllegalTyCon, failIllegalTyVar) = (fail_tycon, fail_tyvar)
   where
-    fail_tycon what_looking tc_nm = do
+    fail_tycon what_looking (WithUserRdr rdr tc_nm) = do
       gre <- getGlobalRdrEnv
       let mb_gre = lookupGRE_Name gre tc_nm
           err = case greInfo <$> mb_gre of
             Just (IAmTyCon ClassFlavour) -> ClassTE
             _ -> TyConTE
-      fail_with_msg what_looking dataName tc_nm (TermLevelUseGRE <$> mb_gre) err
+      fail_with_msg what_looking dataName rdr tc_nm (TermLevelUseGRE <$> mb_gre) err
 
-    fail_tyvar nm =
-      fail_with_msg WL_Anything varName nm (Just TermLevelUseTyVar) TyVarTE
+    fail_tyvar (WithUserRdr rdr nm) =
+      fail_with_msg WL_Term varName rdr nm (Just TermLevelUseTyVar) TyVarTE
 
-    fail_with_msg what_looking whatName nm pprov err = do
-      (imp_errs, hints) <- get_suggestions what_looking whatName nm
+    fail_with_msg what_looking whatName rdr nm pprov err = do
+      required_type_arguments <- xoptM LangExt.RequiredTypeArguments
+      (imp_errs, hints) <- get_suggestions required_type_arguments what_looking whatName rdr
       hfdc <- getHoleFitDispConfig
       unit_state <- hsc_units <$> getTopEnv
-      let info = ErrInfo { errInfoContext = maybeToList $ fmap (TermLevelUseCtxt nm) pprov
-                         , errInfoSupplementary =
-                             fmap ((hfdc,) . (:[]) . SupplementaryImportErrors) $
-                               NE.nonEmpty imp_errs
-                         , errInfoHints = hints
-                         }
-      failWithTc $ TcRnMessageWithInfo unit_state (
-              mkDetailedMessage info (TcRnIllegalTermLevelUse nm err))
+      let
+        want_simple = want_simple_msg hints
+        msg = TcRnIllegalTermLevelUse want_simple rdr nm err
+        info = ErrInfo { errInfoContext =
+                           if want_simple
+                           then []
+                           else maybeToList $ fmap (TermLevelUseCtxt nm) pprov
+                       , errInfoSupplementary =
+                           fmap ((hfdc,) . (:[]) . SupplementaryImportErrors) $
+                             NE.nonEmpty imp_errs
+                       , errInfoHints = hints
+                       }
+      failWithTc $ TcRnMessageWithInfo unit_state (mkDetailedMessage info msg)
 
-    get_suggestions what_looking ns nm = do
-      required_type_arguments <- xoptM LangExt.RequiredTypeArguments
-      if required_type_arguments && isVarNameSpace ns
+    get_suggestions required_type_arguments what_looking ns rdr = do
+      show_helpful_errors <- goptM Opt_HelpfulErrors
+      if not show_helpful_errors || (required_type_arguments && isVarNameSpace ns)
       then return ([], [])  -- See Note [Suppress hints with RequiredTypeArguments]
       else do
-        let occ = mkOccNameFS ns (occNameFS (occName nm))
+        let rdr' = fromMaybe rdr (demoteRdrName rdr)
         lcl_env <- getLocalRdrEnv
-        unknownNameSuggestions lcl_env what_looking (mkRdrUnqual occ)
-{-
+        unknownNameSuggestions lcl_env what_looking rdr'
+
+-- | Should we display a simpler "out of scope" message to the user, instead of
+-- a full-blown "illegal term-level use" message?
+--
+-- See Note [Simpler "illegal term-level use" errors]
+want_simple_msg :: [GhcHint] -> Bool
+want_simple_msg hints = any relevant_suggestion hints
+  where
+    relevant_suggestion = \case
+      ImportSuggestion {} -> True
+      SuggestSimilarNames {} -> True
+      _ -> False
+
+{- Note [Simpler "illegal term-level use" errors]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+When we rename the occurrence of A in the definition of 'f' in the following program:
+
+  module M1 where
+    data A = A Int
+  module M2 where
+    import M1 (A)
+    f x = A x
+
+we initially resolve 'A' to the type constructor 'A', in order to support
+-XRequiredTypeArguments. Then we come to find out that a type is illegal in
+this position. It is more user-friendly to report the problem as:
+
+  Data constructor out of scope: A
+
+rather than:
+
+  Illegal term-level use of type constructor A
+
+This was reported in #23982.
+
+To achieve this, in 'failIllegalTyCon' and 'failIllegalTyVar', we include a
+little heuristic to decide whether to emit an "out of scope" message rather than
+an "illegal term-level use" message: when we have a term to suggest to the user,
+then give the simpler "out of scope" error message.
+
+For instance, in the example above, we suggest extending the import list to
+
+  import M1 (A(A))
+
+to bring the data constructor A into scope. We thus emit the following message:
+
+    Data constructor out of scope: A
+    Suggested fix:
+      Add ‘A’ to the import list in the import of M1
+
 ************************************************************************
 *                                                                      *
                 Extending the global environment
@@ -448,9 +520,8 @@ tcExtendTyConEnv tycons thing_inside
 -- See GHC ticket #17820 .
 tcTyThBinders :: [TyThing] -> TcM ThBindEnv
 tcTyThBinders implicit_things = do
-  stage <- getStage
-  let th_lvl  = thLevel stage
-      th_bndrs = mkNameEnv
+  th_lvl <- thLevelIndex <$> getThLevel
+  let th_bndrs = mkNameEnv
                   [ ( n , (TopLevel, th_lvl) ) | n <- names ]
   return th_bndrs
   where
@@ -686,7 +757,7 @@ tc_extend_local_env top_lvl extra_env thing_inside
   = do  { traceTc "tc_extend_local_env" (ppr extra_env)
         ; updLclCtxt upd_lcl_env thing_inside }
   where
-    upd_lcl_env env0@(TcLclCtxt { tcl_th_ctxt  = stage
+    upd_lcl_env env0@(TcLclCtxt { tcl_th_ctxt  = th_lvl
                                , tcl_rdr      = rdr_env
                                , tcl_th_bndrs = th_bndrs
                                , tcl_env      = lcl_type_env })
@@ -703,7 +774,7 @@ tc_extend_local_env top_lvl extra_env thing_inside
               -- Template Haskell staging env simultaneously. Reason for extending
               -- LocalRdrEnv: after running a TH splice we need to do renaming.
       where
-        thlvl = (top_lvl, thLevel stage)
+        thlvl = (top_lvl, thLevelIndex th_lvl)
 
 
 tcExtendLocalTypeEnv :: [(Name, TcTyThing)] -> TcLclCtxt -> TcLclCtxt
@@ -850,34 +921,6 @@ tcExtendRules lcl_rules thing_inside
 ************************************************************************
 -}
 
-checkWellStaged :: StageCheckReason -- What the stage check is for
-                -> ThLevel      -- Binding level (increases inside brackets)
-                -> ThLevel      -- Use stage
-                -> TcM ()       -- Fail if badly staged, adding an error
-checkWellStaged pp_thing bind_lvl use_lvl
-  | use_lvl >= bind_lvl         -- OK! Used later than bound
-  = return ()                   -- E.g.  \x -> [| $(f x) |]
-
-  | bind_lvl == outerLevel      -- GHC restriction on top level splices
-  = failWithTc (TcRnStageRestriction pp_thing)
-
-  | otherwise                   -- Badly staged
-  = failWithTc $                -- E.g.  \x -> $(f x)
-    TcRnBadlyStaged pp_thing bind_lvl use_lvl
-
-topIdLvl :: Id -> ThLevel
--- Globals may either be imported, or may be from an earlier "chunk"
--- (separated by declaration splices) of this module.  The former
---  *can* be used inside a top-level splice, but the latter cannot.
--- Hence we give the former impLevel, but the latter topLevel
--- E.g. this is bad:
---      x = [| foo |]
---      $( f x )
--- By the time we are processing the $(f x), the binding for "x"
--- will be in the global env, not the local one.
-topIdLvl id | isLocalId id = outerLevel
-            | otherwise    = impLevel
-
 tcMetaTy :: Name -> TcM Type
 -- Given the name of a Template Haskell data type,
 -- return the type
@@ -886,9 +929,9 @@ tcMetaTy tc_name = do
     t <- tcLookupTyCon tc_name
     return (mkTyConTy t)
 
-isBrackStage :: ThStage -> Bool
-isBrackStage (Brack {}) = True
-isBrackStage _other     = False
+isBrackLevel :: ThLevel -> Bool
+isBrackLevel (Brack {}) = True
+isBrackLevel _other     = False
 
 {-
 ************************************************************************
@@ -898,21 +941,28 @@ isBrackStage _other     = False
 ************************************************************************
 -}
 
-{- Note [Default class defaults]
+{- Note [Builtin class defaults]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-In absence of user-defined `default` declarations, the set of class defaults in
-effect (i.e. `DefaultEnv`) is determined by the absence or
-presence of the `ExtendedDefaultRules` and `OverloadedStrings` extensions. In their
-absence, the only rule in effect is `default Num (Integer, Double)` as specified by
-Haskell Language Report.
+In the absence of user-defined `default` declarations, the set of class defaults in
+effect (i.e. the `DefaultEnv`) depends on whether the `ExtendedDefaultRules` and
+`OverloadedStrings` extensions are enabled. In their absence, the only rule in effect
+is `default Num (Integer, Double)`, as specified by the Haskell 2010 report.
 
-In GHC's internal packages `DefaultEnv` is empty to minimize cross-module dependencies:
-the `Num` class or `Integer` type may not even be available in low-level modules. If
-you don't do this, attempted defaulting in package ghc-prim causes an actual crash
-(attempting to look up the `Integer` type).
+Remark [No built-in defaults in ghc-internal]
 
-A user-defined `default` declaration overrides the defaults for the specified class,
-and only for that class.
+  When typechecking the ghc-internal package, we **do not** include any built-in
+  defaults. This is because, in ghc-internal, types such as 'Num' or 'Integer' may
+  not even be available (they haven't been typechecked yet).
+
+Remark [default () in ghc-internal]
+
+  Historically, modules inside ghc-internal have used a single default declaration,
+  of the form `default ()`, to work around the problem described in
+  Remark [No built-in defaults in ghc-internal].
+
+  When we typecheck such a default declaration, we must also make sure not to fail
+  if e.g. 'Num' is not in scope. We thus have special treatment for this case,
+  in 'GHC.Tc.Gen.Default.tcDefaultDecls'.
 -}
 
 tcGetDefaultTys :: TcM (DefaultEnv,  -- Default classes and types
@@ -924,7 +974,7 @@ tcGetDefaultTys
                                         -- See also #1974
               builtinDefaults cls tys = ClassDefaults{ cd_class = cls
                                                      , cd_types = tys
-                                                     , cd_module = Nothing
+                                                     , cd_provenance = DP_Builtin
                                                      , cd_warn = Nothing }
 
         -- see Note [Named default declarations] in GHC.Tc.Gen.Default
@@ -932,7 +982,8 @@ tcGetDefaultTys
         ; this_module <- tcg_mod <$> getGblEnv
         ; let this_unit = moduleUnit this_module
         ; if this_unit == ghcInternalUnit
-             -- see Note [Default class defaults]
+          -- see Remark [No built-in defaults in ghc-internal]
+          -- in Note [Builtin class defaults] in GHC.Tc.Utils.Env
           then return (defaults, extended_defaults)
           else do
               -- not one of the built-in units
@@ -940,30 +991,32 @@ tcGetDefaultTys
               { extDef <- if extended_defaults
                           then do { list_ty <- tcMetaTy listTyConName
                                   ; integer_ty <- tcMetaTy integerTyConName
-                                  ; foldableCls <- tcLookupTyCon foldableClassName
-                                  ; showCls <- tcLookupTyCon showClassName
-                                  ; eqCls <- tcLookupTyCon eqClassName
+                                  ; foldableClass <- tcLookupClass foldableClassName
+                                  ; showClass <- tcLookupClass showClassName
+                                  ; eqClass <- tcLookupClass eqClassName
                                   ; pure $ defaultEnv
-                                    [ builtinDefaults foldableCls [list_ty]
-                                    , builtinDefaults showCls [unitTy, integer_ty, doubleTy]
-                                    , builtinDefaults eqCls [unitTy, integer_ty, doubleTy]
+                                    [ builtinDefaults foldableClass [list_ty]
+                                    , builtinDefaults showClass [unitTy, integer_ty, doubleTy]
+                                    , builtinDefaults eqClass [unitTy, integer_ty, doubleTy]
                                     ]
                                   }
                                   -- Note [Extended defaults]
                           else pure emptyDefaultEnv
               ; ovlStr <- if ovl_strings
-                          then do { isStringCls <- tcLookupTyCon isStringClassName
-                                  ; pure $ unitDefaultEnv $ builtinDefaults isStringCls [stringTy]
+                          then do { isStringClass <- tcLookupClass isStringClassName
+                                  ; pure $ unitDefaultEnv $ builtinDefaults isStringClass [stringTy]
                                   }
                           else pure emptyDefaultEnv
               ; checkWiredInTyCon doubleTyCon
               ; numDef <- case lookupDefaultEnv defaults numClassName of
-                   Nothing -> do { numCls <- tcLookupTyCon numClassName
-                                 ; integer_ty <- tcMetaTy integerTyConName
-                                 ; pure $ unitDefaultEnv $ builtinDefaults numCls [integer_ty, doubleTy]
+                   Nothing -> do { integer_ty <- tcMetaTy integerTyConName
+                                 ; numClass <- tcLookupClass numClassName
+                                 ; pure $ unitDefaultEnv $ builtinDefaults numClass [integer_ty, doubleTy]
                                  }
                    -- The Num class is already user-defaulted, no need to construct the builtin default
                    _ -> pure emptyDefaultEnv
+                -- Supply the built-in defaults, but make the user-supplied defaults
+                -- override them.
               ; let deflt_tys = mconcat [ extDef, numDef, ovlStr, defaults ]
               ; return (deflt_tys, extended_defaults) } }
 
@@ -1160,14 +1213,8 @@ pprBinders bndrs  = pprWithCommas ppr bndrs
 notFound :: Name -> TcM TyThing
 notFound name
   = do { lcl_env <- getLclEnv
-       ; let stage = getLclEnvThStage lcl_env
-       ; case stage of   -- See Note [Out of scope might be a staging error]
-           Splice {}
-             | isUnboundName name -> failM  -- If the name really isn't in scope
-                                            -- don't report it again (#11941)
-             | otherwise -> failWithTc (TcRnStageRestriction (StageCheckSplice name))
-
-           _ | isTermVarOrFieldNameSpace (nameNameSpace name) ->
+       ; if isTermVarOrFieldNameSpace (nameNameSpace name)
+           then
                -- This code path is only reachable with RequiredTypeArguments enabled
                -- via the following chain of calls:
                --   `notFound`       called from
@@ -1180,13 +1227,13 @@ notFound name
                -- See Note [Demotion of unqualified variables] (W1) in GHC.Rename.Env
                failWithTc $ TcRnUnpromotableThing name TermVariablePE
 
-             | otherwise -> failWithTc $
-                mkTcRnNotInScope (getRdrName name) (NotInScopeTc (getLclEnvTypeEnv lcl_env))
-                       -- Take care: printing the whole gbl env can
-                       -- cause an infinite loop, in the case where we
-                       -- are in the middle of a recursive TyCon/Class group;
-                       -- so let's just not print it!  Getting a loop here is
-                       -- very unhelpful, because it hides one compiler bug with another
+           else failWithTc $
+                 TcRnNotInScope (NotInScopeTc (getLclEnvTypeEnv lcl_env)) (getRdrName name)
+                  -- Take care: printing the whole gbl env can
+                  -- cause an infinite loop, in the case where we
+                  -- are in the middle of a recursive TyCon/Class group;
+                  -- so let's just not print it!  Getting a loop here is
+                  -- very unhelpful, because it hides one compiler bug with another
        }
 
 wrongThingErr :: WrongThingSort -> TcTyThing -> Name -> TcM a

@@ -71,13 +71,14 @@ ignoredModules =
     ]
   where
     unstableModules =
-        [ "GHC.Prim"
-        , "GHC.Conc.POSIX"
+        [ "GHC.Conc.POSIX"
         , "GHC.Conc.IO"
         ]
     platformDependentModules =
         [ "System.Posix.Types"
         , "Foreign.C.Types"
+        , "GHC.Num.Backend"
+        , "GHC.Num.Backend.Selected"
         ]
 
 ignoredOccNames :: [OccName]

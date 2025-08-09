@@ -2,12 +2,12 @@
 import GHC.Cmm.Expr
 #if !(defined(MACHREGS_i386) || defined(MACHREGS_x86_64) \
     || defined(MACHREGS_powerpc) || defined(MACHREGS_aarch64) \
-    || defined(MACHREGS_riscv64))
+    || defined(MACHREGS_riscv64) || defined(MACHREGS_loongarch64))
 import GHC.Utils.Panic.Plain
 #endif
 import GHC.Platform.Reg
 
-#include "MachRegs.h"
+#include "stg/MachRegs.h"
 
 #if defined(MACHREGS_i386) || defined(MACHREGS_x86_64)
 
@@ -1032,11 +1032,15 @@ freeReg 29 = False
 -- ip0 -- used for spill offset computations
 freeReg 16 = False
 
-#if defined(darwin_HOST_OS) || defined(ios_HOST_OS)
+-- Note [Aarch64 Register x18 at Darwin and Windows]
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 -- x18 is reserved by the platform on Darwin/iOS, and can not be used
 -- More about ARM64 ABI that Apple platforms support:
 -- https://developer.apple.com/documentation/xcode/writing-arm64-code-for-apple-platforms
 -- https://github.com/Siguza/ios-resources/blob/master/bits/arm64.md
+-- It is a reserved at Windows as well. Acts like TEB register in user mode at Windows.
+-- https://learn.microsoft.com/en-us/cpp/build/arm64-windows-abi-conventions
+#if defined(darwin_HOST_OS) || defined(ios_HOST_OS) || defined(mingw32_HOST_OS)
 freeReg 18 = False
 #endif
 
@@ -1138,6 +1142,104 @@ freeReg 8 = False
 -- made-up inter-procedural (ip) register
 -- See Note [The made-up RISCV64 TMP (IP) register]
 freeReg 31 = False
+
+# if defined(REG_Base)
+freeReg REG_Base  = False
+# endif
+# if defined(REG_Sp)
+freeReg REG_Sp    = False
+# endif
+# if defined(REG_SpLim)
+freeReg REG_SpLim = False
+# endif
+# if defined(REG_Hp)
+freeReg REG_Hp    = False
+# endif
+# if defined(REG_HpLim)
+freeReg REG_HpLim = False
+# endif
+
+# if defined(REG_R1)
+freeReg REG_R1    = False
+# endif
+# if defined(REG_R2)
+freeReg REG_R2    = False
+# endif
+# if defined(REG_R3)
+freeReg REG_R3    = False
+# endif
+# if defined(REG_R4)
+freeReg REG_R4    = False
+# endif
+# if defined(REG_R5)
+freeReg REG_R5    = False
+# endif
+# if defined(REG_R6)
+freeReg REG_R6    = False
+# endif
+# if defined(REG_R7)
+freeReg REG_R7    = False
+# endif
+# if defined(REG_R8)
+freeReg REG_R8    = False
+# endif
+
+# if defined(REG_F1)
+freeReg REG_F1    = False
+# endif
+# if defined(REG_F2)
+freeReg REG_F2    = False
+# endif
+# if defined(REG_F3)
+freeReg REG_F3    = False
+# endif
+# if defined(REG_F4)
+freeReg REG_F4    = False
+# endif
+# if defined(REG_F5)
+freeReg REG_F5    = False
+# endif
+# if defined(REG_F6)
+freeReg REG_F6    = False
+# endif
+
+# if defined(REG_D1)
+freeReg REG_D1    = False
+# endif
+# if defined(REG_D2)
+freeReg REG_D2    = False
+# endif
+# if defined(REG_D3)
+freeReg REG_D3    = False
+# endif
+# if defined(REG_D4)
+freeReg REG_D4    = False
+# endif
+# if defined(REG_D5)
+freeReg REG_D5    = False
+# endif
+# if defined(REG_D6)
+freeReg REG_D6    = False
+# endif
+
+freeReg _ = True
+
+#elif defined(MACHREGS_loongarch64)
+
+-- zero register
+freeReg 0 = False
+-- linker regster
+freeReg 1 = False
+-- thread register
+freeReg 2 = False
+-- stack pointer
+freeReg 3 = False
+-- made-up inter-procedural (ip) register for spilling offset computations
+freeReg 20 = False
+-- reserved
+freeReg 21 = False
+-- frame pointer
+freeReg 22 = False
 
 # if defined(REG_Base)
 freeReg REG_Base  = False

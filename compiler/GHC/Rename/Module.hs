@@ -1,12 +1,15 @@
 
 {-# LANGUAGE FlexibleContexts    #-}
 {-# LANGUAGE LambdaCase          #-}
+{-# LANGUAGE MultiWayIf          #-}
 {-# LANGUAGE NamedFieldPuns      #-}
+{-# LANGUAGE RecursiveDo         #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies        #-}
 {-# LANGUAGE LambdaCase          #-}
 
 {-# OPTIONS_GHC -Wno-incomplete-uni-patterns   #-}
+
 
 {-
 (c) The GRASP/AQUA Project, Glasgow University, 1992-1998
@@ -24,25 +27,23 @@ import {-# SOURCE #-} GHC.Rename.Expr( rnLExpr )
 import {-# SOURCE #-} GHC.Rename.Splice ( rnSpliceDecl, rnTopSpliceDecls )
 
 import GHC.Hs
-import GHC.Types.FieldLabel
-import GHC.Types.Name.Reader
+
 import GHC.Rename.HsType
 import GHC.Rename.Bind
 import GHC.Rename.Doc
 import GHC.Rename.Env
 import GHC.Rename.Utils ( mapFvRn, bindLocalNames
                         , checkDupRdrNames, bindLocalNamesFV
-                        , checkShadowedRdrNames, warnUnusedTypePatterns
-                        , newLocalBndrsRn
+                        , warnUnusedTypePatterns
                         , noNestedForallsContextsErr
                         , addNoNestedForallsContextsErr, checkInferredVars )
 import GHC.Rename.Unbound ( mkUnboundName, notInScopeErr, WhereLooking(WL_Global) )
 import GHC.Rename.Names
+
 import GHC.Tc.Errors.Types
 import GHC.Tc.Utils.Monad
 import GHC.Tc.Types.Origin ( TypedThing(..) )
 
-import GHC.Types.ForeignCall ( CCallTarget(..) )
 import GHC.Unit
 import GHC.Unit.Module.Warnings
 import GHC.Builtin.Names( applicativeClassName, pureAName, thenAName
@@ -50,23 +51,30 @@ import GHC.Builtin.Names( applicativeClassName, pureAName, thenAName
                         , semigroupClassName, sappendName
                         , monoidClassName, mappendName
                         )
+
+import GHC.Types.FieldLabel
+import GHC.Types.Name.Reader
+import GHC.Types.ForeignCall ( CCallTarget(..) )
 import GHC.Types.Name
 import GHC.Types.Name.Set
 import GHC.Types.Name.Env
-import GHC.Utils.Outputable
-import GHC.Types.Basic (Arity)
-import GHC.Types.Basic  ( TypeOrKind(..) )
-import GHC.Data.FastString
-import GHC.Types.SrcLoc as SrcLoc
-import GHC.Driver.DynFlags
-import GHC.Utils.Misc   ( lengthExceeds, partitionWith )
-import GHC.Utils.Panic
-import GHC.Driver.Env ( HscEnv(..), hsc_home_unit)
-import GHC.Data.List.SetOps ( findDupsEq, removeDupsOn, equivClasses )
-import GHC.Data.Graph.Directed ( SCC, flattenSCC, flattenSCCs, Node(..)
-                               , stronglyConnCompFromEdgedVerticesUniq )
+import GHC.Types.Basic  ( VisArity, TyConFlavour(..), TypeOrKind(..), RuleName )
 import GHC.Types.GREInfo (ConLikeInfo (..), ConInfo, mkConInfo, conInfoFields)
+import GHC.Types.Hint (SigLike(..))
 import GHC.Types.Unique.Set
+import GHC.Types.SrcLoc as SrcLoc
+
+import GHC.Driver.DynFlags
+import GHC.Driver.Env ( HscEnv(..), hsc_home_unit)
+
+import GHC.Utils.Misc   ( lengthExceeds )
+import GHC.Utils.Panic
+import GHC.Utils.Outputable
+
+import GHC.Data.FastString
+import GHC.Data.List.SetOps ( findDupsEq, removeDupsOn, equivClasses )
+import GHC.Data.Graph.Directed ( SCC, flattenSCC, Node(..)
+                               , stronglyConnCompFromEdgedVerticesUniq )
 import GHC.Data.OrdList
 import qualified GHC.LanguageExtensions as LangExt
 import GHC.Core.DataCon ( isSrcStrict )
@@ -74,7 +82,6 @@ import GHC.Core.DataCon ( isSrcStrict )
 import Control.Monad
 import Control.Arrow ( first )
 import Data.Foldable ( toList, for_ )
-import Data.List ( mapAccumL )
 import Data.List.NonEmpty ( NonEmpty(..), head, nonEmpty )
 import Data.Maybe ( isNothing, fromMaybe, mapMaybe, maybeToList )
 import qualified Data.Set as Set ( difference, fromList, toList, null )
@@ -292,7 +299,7 @@ rnSrcWarnDecls bndr_set decls'
 
    rn_deprec w@(Warning (ns_spec, _) rdr_names txt)
        -- ensures that the names are defined locally
-     = do { names <- concatMapM (lookupLocalTcNames sig_ctxt what ns_spec . unLoc)
+     = do { names <- concatMapM (lookupLocalTcNames sig_ctxt SigLikeDeprecation ns_spec . unLoc)
                                 rdr_names
           ; unlessXOptM LangExt.ExplicitNamespaces $
             when (ns_spec /= NoNamespaceSpecifier) $
@@ -302,8 +309,6 @@ rnSrcWarnDecls bndr_set decls'
   -- Use the OccName from the Name we looked up, rather than from the RdrName,
   -- as we might hit multiple different NameSpaces when looking up
   -- (e.g. deprecating both a variable and a record field).
-
-   what = text "deprecation"
 
    warn_rdr_dups = find_dup_warning_names
                    $ concatMap (\(L _ (Warning (ns_spec, _) ns _)) -> (ns_spec,) <$> ns) decls
@@ -343,7 +348,8 @@ rnAnnDecl :: AnnDecl GhcPs -> RnM (AnnDecl GhcRn, FreeVars)
 rnAnnDecl ann@(HsAnnotation (_, s) provenance expr)
   = addErrCtxt (AnnCtxt ann) $
     do { (provenance', provenance_fvs) <- rnAnnProvenance provenance
-       ; (expr', expr_fvs) <- setStage (Splice Untyped) $
+       ; cur_level <- getThLevel
+       ; (expr', expr_fvs) <- setThLevel (Splice Untyped cur_level) $
                               rnLExpr expr
        ; return (HsAnnotation (noAnn, s) provenance' expr',
                  provenance_fvs `plusFV` expr_fvs) }
@@ -353,9 +359,9 @@ rnAnnProvenance :: AnnProvenance GhcPs
 rnAnnProvenance provenance = do
     provenance' <- case provenance of
       ValueAnnProvenance n -> ValueAnnProvenance
-                          <$> lookupLocatedTopBndrRnN n
+                          <$> lookupLocatedTopBndrRnN WL_Term n
       TypeAnnProvenance n  -> TypeAnnProvenance
-                          <$> lookupLocatedTopConstructorRnN n
+                          <$> lookupLocatedTopBndrRnN WL_Type n
       ModuleAnnProvenance  -> return ModuleAnnProvenance
     return (provenance', maybe emptyFVs unitFV (annProvenanceName_maybe provenance'))
 
@@ -370,7 +376,7 @@ rnAnnProvenance provenance = do
 rnDefaultDecl :: DefaultDecl GhcPs -> RnM (DefaultDecl GhcRn, FreeVars)
 rnDefaultDecl (DefaultDecl _ mb_cls tys)
   = do {
-       ; mb_cls' <- traverse (traverse lookupOccRn) mb_cls
+       ; mb_cls' <- traverse (traverse $ lookupOccRn WL_TyCon) mb_cls
        ; (tys', ty_fvs) <- rnLHsTypes doc_str tys
        ; return (DefaultDecl noExtField mb_cls' tys', ty_fvs) }
   where
@@ -387,7 +393,7 @@ rnDefaultDecl (DefaultDecl _ mb_cls tys)
 rnHsForeignDecl :: ForeignDecl GhcPs -> RnM (ForeignDecl GhcRn, FreeVars)
 rnHsForeignDecl (ForeignImport { fd_name = name, fd_sig_ty = ty, fd_fi = spec })
   = do { topEnv :: HscEnv <- getTopEnv
-       ; name' <- lookupLocatedTopBndrRnN name
+       ; name' <- lookupLocatedTopBndrRnN WL_TermVariable name
        ; (ty', fvs) <- rnHsSigType (ForeignDeclCtx name) TypeLevel ty
 
         -- Mark any PackageTarget style imports as coming from the current package
@@ -399,7 +405,7 @@ rnHsForeignDecl (ForeignImport { fd_name = name, fd_sig_ty = ty, fd_fi = spec })
                                , fd_fi = spec' }, fvs) }
 
 rnHsForeignDecl (ForeignExport { fd_name = name, fd_sig_ty = ty, fd_fe = spec })
-  = do { name' <- lookupLocatedOccRn name
+  = do { name' <- lookupLocatedOccRn WL_TermVariable name
        ; (ty', fvs) <- rnHsSigType (ForeignDeclCtx name) TypeLevel ty
        ; return (ForeignExport { fd_e_ext = noExtField
                                , fd_name = name', fd_sig_ty = ty'
@@ -558,9 +564,10 @@ checkCanonicalInstances cls poly_ty mbinds = do
     isAliasMG :: MatchGroup GhcRn (LHsExpr GhcRn) -> Maybe Name
     isAliasMG MG {mg_alts = (L _ [L _ (Match { m_pats = L _ []
                                              , m_grhss = grhss })])}
-        | GRHSs _ [L _ (GRHS _ [] body)] lbinds <- grhss
+        | GRHSs _ (L _ (GRHS _ [] body) :| []) lbinds <- grhss
         , EmptyLocalBinds _ <- lbinds
-        , HsVar _ lrhsName  <- unLoc body  = Just (unLoc lrhsName)
+        , HsVar _ lrhsName  <- unLoc body
+        = Just (getName lrhsName)
     isAliasMG _ = Nothing
 
     addWarnNonCanonicalMonoid reason =
@@ -578,34 +585,59 @@ rnClsInstDecl (ClsInstDecl { cid_ext = (inst_warn_ps, _, _)
                            , cid_sigs = uprags, cid_tyfam_insts = ats
                            , cid_overlap_mode = oflag
                            , cid_datafam_insts = adts })
-  = do { checkInferredVars ctxt inst_ty
-       ; (inst_ty', inst_fvs) <- rnHsSigType ctxt TypeLevel inst_ty
-       ; let (ktv_names, _, head_ty') = splitLHsInstDeclTy inst_ty'
-             -- Check if there are any nested `forall`s or contexts, which are
-             -- illegal in the type of an instance declaration (see
-             -- Note [No nested foralls or contexts in instance types] in
-             -- GHC.Hs.Type)...
-             mb_nested_msg = noNestedForallsContextsErr
-                               NFC_InstanceHead head_ty'
-             -- ...then check if the instance head is actually headed by a
-             -- class type constructor...
-             eith_cls = case hsTyGetAppHead_maybe head_ty' of
-               Just (L _ cls) -> Right cls
-               Nothing        ->
-                  Left
-                   ( getLocA head_ty'
-                   , TcRnIllegalInstance $
-                       IllegalClassInstance (HsTypeRnThing $ unLoc head_ty') $
-                       IllegalInstanceHead $ InstHeadNonClass Nothing
-                   )
+  = do { rec { let ctxt = ClassInstanceCtx head_ty'
+             ; checkInferredVars ctxt inst_ty
+             ; (inst_ty', inst_fvs) <- rnHsSigType ctxt TypeLevel inst_ty
+             ; let (ktv_names, _, head_ty') = splitLHsInstDeclTy inst_ty'
+             }
+      ; env <- getGlobalRdrEnv
+      ; let
+          -- Check if there are any nested `forall`s or contexts, which are
+          -- illegal in the type of an instance declaration (see
+          -- Note [No nested foralls or contexts in instance types] in
+          -- GHC.Hs.Type)...
+          mb_nested_msg = noNestedForallsContextsErr NFC_InstanceHead head_ty'
+          -- ...then check if the instance head is actually headed by a
+          -- class type constructor...
+          instance_head :: Either IllegalInstanceHeadReason Name
+          instance_head =
+           case hsTyGetAppHead_maybe head_ty' of
+             Just (L _ nm_with_rdr) ->
+               let nm = getName nm_with_rdr in
+               case lookupGRE_Name env nm of
+                 Just (GRE { gre_info = IAmTyCon flav }) ->
+                   if
+                     | flav == ClassFlavour
+                     -> Right nm
+                     | flav == AbstractTypeFlavour
+                     -> Left $ InstHeadAbstractClass nm_with_rdr
+                     | otherwise
+                     -> Left $ InstHeadNonClassHead $ InstNonClassTyCon nm_with_rdr flav
+                 _ ->
+                  -- The head of the instance head is out of scope;
+                  -- we'll deal with that later. Continue for now.
+                  Right nm
+
+             Nothing ->
+               Left $ InstHeadNonClassHead InstNonTyCon
+          eith_cls =
+            case instance_head of
+              Right cls -> Right cls
+              Left illegal_head_reason ->
+                 Left
+                  ( getLocA head_ty'
+                  , TcRnIllegalInstance $
+                      IllegalClassInstance (HsTypeRnThing $ unLoc head_ty') $
+                      IllegalInstanceHead illegal_head_reason
+                  )
          -- ...finally, attempt to retrieve the class type constructor, failing
          -- with an error message if there isn't one. To avoid excessive
          -- amounts of error messages, we will only report one of the errors
          -- from mb_nested_msg or eith_cls at a time.
        ; cls <- case (mb_nested_msg, eith_cls) of
            (Nothing,   Right cls) -> pure cls
-           (Just err1, _)         -> bail_out err1
-           (_,         Left err2) -> bail_out err2
+           (Just err1, _)         -> bail_out ctxt err1
+           (_,         Left err2) -> bail_out ctxt err2
 
           -- Rename the bindings
           -- The typechecker (not the renamer) checks that all
@@ -645,14 +677,12 @@ rnClsInstDecl (ClsInstDecl { cid_ext = (inst_warn_ps, _, _)
              --     strange, but should not matter (and it would be more work
              --     to remove the context).
   where
-    ctxt    = GenericCtx $ text "an instance declaration"
-
     -- The instance is malformed. We'd still like to make *some* progress
     -- (rather than failing outright), so we report an error and continue for
     -- as long as we can. Importantly, this error should be thrown before we
     -- reach the typechecker, lest we encounter different errors that are
     -- hopelessly confusing (such as the one in #16114).
-    bail_out (l, err_msg) = do
+    bail_out ctxt (l, err_msg) = do
       addErrAt l $ TcRnWithHsDocContext ctxt err_msg
       pure $ mkUnboundName (mkTcOccFS (fsLit "<class>"))
 
@@ -716,7 +746,7 @@ rnFamEqn doc atfi
 
              groups :: [NonEmpty (LocatedN RdrName)]
              groups = equivClasses cmpLocated pat_kity_vars
-       ; nms_dups <- mapM (lookupOccRn . unLoc) $
+       ; nms_dups <- mapM (lookupOccRn WL_TyVar . unLoc) $
                         [ tv | (tv :| (_:_)) <- groups ]
              -- Add to the used variables
              --  a) any variables that appear *more than once* on the LHS
@@ -1159,65 +1189,23 @@ rnHsRuleDecls (HsRules { rds_ext = (_, src)
                          , rds_rules = rn_rules }, fvs) }
 
 rnHsRuleDecl :: RuleDecl GhcPs -> RnM (RuleDecl GhcRn, FreeVars)
-rnHsRuleDecl (HsRule { rd_ext  = (_, st)
-                     , rd_name = rule_name
-                     , rd_act  = act
-                     , rd_tyvs = tyvs
-                     , rd_tmvs = tmvs
-                     , rd_lhs  = lhs
-                     , rd_rhs  = rhs })
-  = do { let rdr_names_w_loc = map (get_var . unLoc) tmvs
-       ; checkDupRdrNames rdr_names_w_loc
-       ; checkShadowedRdrNames rdr_names_w_loc
-       ; names <- newLocalBndrsRn rdr_names_w_loc
-       ; let doc = RuleCtx (unLoc rule_name)
-       ; bindRuleTyVars doc tyvs $ \ tyvs' ->
-         bindRuleTmVars doc tyvs' tmvs names $ \ tmvs' ->
+rnHsRuleDecl (HsRule { rd_ext   = (_, st)
+                     , rd_name  = lrule_name@(L _ rule_name)
+                     , rd_act   = act
+                     , rd_bndrs = bndrs
+                     , rd_lhs   = lhs
+                     , rd_rhs   = rhs })
+  = bindRuleBndrs (RuleCtx rule_name) bndrs $ \tm_names bndrs' ->
     do { (lhs', fv_lhs') <- rnLExpr lhs
        ; (rhs', fv_rhs') <- rnLExpr rhs
-       ; checkValidRule (unLoc rule_name) names lhs' fv_lhs'
-       ; return (HsRule { rd_ext  = (HsRuleRn fv_lhs' fv_rhs', st)
-                        , rd_name = rule_name
-                        , rd_act  = act
-                        , rd_tyvs = tyvs'
-                        , rd_tmvs = tmvs'
-                        , rd_lhs  = lhs'
-                        , rd_rhs  = rhs' }, fv_lhs' `plusFV` fv_rhs') } }
-  where
-    get_var :: RuleBndr GhcPs -> LocatedN RdrName
-    get_var (RuleBndrSig _ v _) = v
-    get_var (RuleBndr _ v)      = v
-
-bindRuleTmVars :: HsDocContext -> Maybe ty_bndrs
-               -> [LRuleBndr GhcPs] -> [Name]
-               -> ([LRuleBndr GhcRn] -> RnM (a, FreeVars))
-               -> RnM (a, FreeVars)
-bindRuleTmVars doc tyvs vars names thing_inside
-  = go vars names $ \ vars' ->
-    bindLocalNamesFV names (thing_inside vars')
-  where
-    go ((L l (RuleBndr _ (L loc _))) : vars) (n : ns) thing_inside
-      = go vars ns $ \ vars' ->
-        thing_inside (L l (RuleBndr noAnn (L loc n)) : vars')
-
-    go ((L l (RuleBndrSig _ (L loc _) bsig)) : vars)
-       (n : ns) thing_inside
-      = rnHsPatSigType bind_free_tvs doc bsig $ \ bsig' ->
-        go vars ns $ \ vars' ->
-        thing_inside (L l (RuleBndrSig noAnn (L loc n) bsig') : vars')
-
-    go [] [] thing_inside = thing_inside []
-    go vars names _ = pprPanic "bindRuleVars" (ppr vars $$ ppr names)
-
-    bind_free_tvs = case tyvs of Nothing -> AlwaysBind
-                                 Just _  -> NeverBind
-
-bindRuleTyVars :: HsDocContext -> Maybe [LHsTyVarBndr () GhcPs]
-               -> (Maybe [LHsTyVarBndr () GhcRn]  -> RnM (b, FreeVars))
-               -> RnM (b, FreeVars)
-bindRuleTyVars doc (Just bndrs) thing_inside
-  = bindLHsTyVarBndrs doc WarnUnusedForalls Nothing bndrs (thing_inside . Just)
-bindRuleTyVars _ _ thing_inside = thing_inside Nothing
+       ; checkValidRule rule_name tm_names lhs' fv_lhs'
+       ; return (HsRule { rd_ext   = (HsRuleRn fv_lhs' fv_rhs', st)
+                        , rd_name  = lrule_name
+                        , rd_act   = act
+                        , rd_bndrs = bndrs'
+                        , rd_lhs   = lhs'
+                        , rd_rhs   = rhs' }
+                , fv_lhs' `plusFV` fv_rhs') }
 
 {-
 Note [Rule LHS validity checking]
@@ -1244,7 +1232,7 @@ with the LHS wrapped in parens. But Template Haskell does (#24621)!
 So we should accommodate them.
 -}
 
-checkValidRule :: FastString -> [Name] -> LHsExpr GhcRn -> NameSet -> RnM ()
+checkValidRule :: RuleName -> [Name] -> LHsExpr GhcRn -> NameSet -> RnM ()
 checkValidRule rule_name ids lhs' fv_lhs'
   = do  {       -- Check for the form of the LHS
           case (validRuleLhs ids lhs') of
@@ -1268,7 +1256,7 @@ validRuleLhs foralls lhs
     check (HsApp _ e1 e2)                 = checkl e1 `mplus` checkl_e e2
     check (HsAppType _ e _)               = checkl e
     check (HsVar _ lv)
-      | (unLoc lv) `notElem` foralls      = Nothing
+      | getName lv `notElem` foralls      = Nothing
     -- See Note [Parens on the LHS of a RULE]
     check (HsPar _ e)                     = checkl e
     check other                           = Just other  -- Failure
@@ -1298,7 +1286,7 @@ badRuleLhsErr name lhs bad_e
   = TcRnIllegalRuleLhs errReason name lhs bad_e
   where
     errReason = case bad_e of
-      HsUnboundVar _ uv ->
+      HsHole (HoleVar (L _ uv)) ->
         UnboundVariable uv $ notInScopeErr WL_Global uv
       _ -> IllegalExpression
 
@@ -1321,13 +1309,12 @@ in order to get the set of tyvars used by it, make an assoc list,
 and then go over it again to rename the tyvars!
 However, we can also do some scoping checks at the same time.
 
-Note [Dependency analysis of type, class, and instance decls]
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-A TyClGroup represents a strongly connected components of
-type/class/instance decls, together with the role annotations for the
-type/class declarations.  The renamer uses strongly connected
-component analysis to build these groups.  We do this for a number of
-reasons:
+Note [Dependency analysis of type and class decls]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+A TyClGroup represents a strongly connected component of type/class/instance
+decls, together with the role annotations and standalone kind signatures for the
+type/class declarations. The renamer uses strongly connected component analysis
+to build these groups. We do this for a number of reasons:
 
 * Improve kind error messages. Consider
 
@@ -1339,89 +1326,152 @@ reasons:
   inference together, you might get an error reported in S, which
   is jolly confusing.  See #4875
 
-
 * Increase kind polymorphism.  See GHC.Tc.TyCl
   Note [Grouping of type and class declarations]
 
-Why do the instance declarations participate?  At least two reasons
+What about instances? Based on a number of tickets (#12088, #12239, #14668,
+#15561, #16410, #16448, #16693, #19611, #20875, #21172, #22257, #25238, #25834,
+etc) we concluded that we cannot handle them at this stage.
 
-* Consider (#11348)
+It is not possible, by looking at the free variables of a declaration, to
+determine which instances a declaration depends on; furthermore, it is not
+possible to discover dependencies between instances, for the same reason.
 
-     type family F a
-     type instance F Int = Bool
-
-     data R = MkR (F Int)
-
-     type Foo = 'MkR 'True
-
-  For Foo to kind-check we need to know that (F Int) ~ Bool.  But we won't
-  know that unless we've looked at the type instance declaration for F
-  before kind-checking Foo.
-
-* Another example is this (#3990).
-
-     data family Complex a
-     data instance Complex Double = CD {-# UNPACK #-} !Double
-                                       {-# UNPACK #-} !Double
-
-     data T = T {-# UNPACK #-} !(Complex Double)
-
-  Here, to generate the right kind of unpacked implementation for T,
-  we must have access to the 'data instance' declaration.
-
-* Things become more complicated when we introduce transitive
-  dependencies through imported definitions, like in this scenario:
-
-      A.hs
-        type family Closed (t :: Type) :: Type where
-          Closed t = Open t
-
-        type family Open (t :: Type) :: Type
-
-      B.hs
-        data Q where
-          Q :: Closed Bool -> Q
-
-        type instance Open Int = Bool
-
-        type S = 'Q 'True
-
-  Somehow, we must ensure that the instance Open Int = Bool is checked before
-  the type synonym S. While we know that S depends upon 'Q depends upon Closed,
-  we have no idea that Closed depends upon Open!
-
-  To accommodate for these situations, we ensure that an instance is checked
-  before every @TyClDecl@ on which it does not depend. That's to say, instances
-  are checked as early as possible in @tcTyAndClassDecls@.
+Previously GHC inserted instances at the earliest positions where their FVs are
+bound, but it only helped with a subset of tickets. The current approach is to
+accept that the dependency analysis here is incomplete and recover in the kind
+checker with a retrying mechanism. See Note [Retrying TyClGroups] in GHC.Tc.TyCl
 
 ------------------------------------
-So much for WHY.  What about HOW?  It's pretty easy:
+So much for why we want SCCs.  What about how and when we construct them?
 
-(1) Rename the type/class, instance, and role declarations
-    individually
+First, an overview:
+  (TCDEP1) Flatten TyClGroups from the parser
+  (TCDEP2) Rename the type/class declarations, standalone kind signatures, role
+           declarations, and instances individually
+  (TCDEP3) Preprocess FVs and build a dependency graph
+  (TCDEP4) Find strongly connected components (SCCs) of declarations
+  (TCDEP5) Attach roles and kind signatures to the appropriate SCC
+  (TCDEP6) Create one singleton "SCC" per instance and put them at the end
 
-(2) Do strongly-connected component analysis of the type/class decls,
-    We'll make a TyClGroup for each SCC
+And now the deep dive:
 
-    In this step we treat a reference to a (promoted) data constructor
-    K as a dependency on its parent type.  Thus
-        data T = K1 | K2
-        data S = MkS (Proxy 'K1)
-    Here S depends on 'K1 and hence on its parent T.
+(TCDEP1) We start with a `HsGroup GhcPs`, containing a `[TyClGroup GhcPs]`:
+  a big pile of declarations. It is not important how the parser distributes
+  declarations across those TyClGroups, as the first thing we do in `rnTyClDecls`
+  is flatten them using a few helpers:
 
-    In this step we ignore instances; see
-    Note [No dependencies on data instances]
+    tyClGroupTyClDecls = Data.List.concatMap group_tyclds
+    tyClGroupInstDecls = Data.List.concatMap group_instds
+    tyClGroupRoleDecls = Data.List.concatMap group_roles
+    tyClGroupKindSigs  = Data.List.concatMap group_kisigs
 
-(3) Attach roles to the appropriate SCC
+  In practice, the parser just puts all declarations in a single `TyClGroup`,
+  so the `concatMap` is a no-op.
 
-(4) Attach instances to the appropriate SCC.
-    We add an instance decl to SCC when:
-      all its free types/classes are bound in this SCC or earlier ones
+(TCDEP2) Rename each declaration separately, yielding the following lists
+  in `rnTyClDecls`:
 
-(5) We make an initial TyClGroup, with empty group_tyclds, for any
-    (orphan) instances that affect only imported types/classes
+    tycls_w_fvs  :: [(LTyClDecl GhcRn, FreeVars)]
+    instds_w_fvs :: [(LInstDecl GhcRn, FreeVars)]
+    kisigs_w_fvs :: [(LStandaloneKindSig GhcRn, FreeVars)]
+    role_annots  :: [LRoleAnnotDecl GhcRn]
 
-Steps (3) and (4) are done by the (mapAccumL mk_group) call.
+  The `FreeVars` are the free type/data constructors of the decl. For example:
+
+    type family F (a :: k)        -- FVs: {}
+    data X = MkX Char (Maybe X)   -- FVs: {Char, Maybe, X}
+    data Y = MkY X (Maybe Y)      -- FVs: {Maybe, Y, X}
+    type instance F MkX = X       -- FVs: {F, MkX, X}
+    type instance F MkY = Int     -- FVs: {F, MkY, Int}
+
+(TCDEP3) Build a graph where each node is a `TyClDecl` keyed by its name, and
+  its `FreeVars` give rise to edges. Happens in `depAnalTyClDecls`. Examples:
+
+    data A x = MkA x       -- node `A`, edges: {}
+    data B x = MkB (A x)   -- node `B`, edges: {B -> A}
+    data C = MkC (B C)     -- node `C`, edges: {C -> B, C -> C}
+
+  The `FreeVars` are not used "as is" to create the edges. They first undergo a
+  few transformations.
+
+  (TCDEP3.fvs_kisig) If a standalone kind signature is present, add its free
+    variables to those of the declaration. Consider:
+
+      data A = MkA
+      data B = MkB
+
+      type P :: A -> Type           -- sig  FVs: {A, Type}
+      data P x = MkP (Proxy MkB)    -- decl FVs: {Proxy, MkB}
+
+    By adding the sig and decl FVs together, we get {A, Type, Proxy, MkB}.
+    Then proceed to the next step.
+
+  (TCDEP3.fvs_parent) Replace any mention of a (promoted) data constructor
+    with its parent TyCon. Consider the FVs from the previous step:
+
+      the name set {A, Type, Proxy, MkB}
+      turns into   {A, Type, Proxy, B}
+
+    MkB does not get its own node in the graph, so an edge to it must actually
+    point to B.
+
+  (TCDEP3.fvs_nogbl) Filter out references to type constructors outside this
+    `HsGroup`. They just clutter things up:
+
+      the name set {A, Type, Proxy, B}
+      turns into   {A, B}
+
+  Note [Prepare TyClGroup FVs] describes these transformations in more detail.
+  Back to our `P` example, the final nodes and edges are as follows:
+
+      data A = MkA    -- node `A`, edges: {}
+      data B = MkB    -- node `B`, edges: {}
+
+      type P :: A -> Type
+      data P x = MkP (Proxy MkB)  -- node `P`, edges: {P -> A, P -> B}
+
+(TCDEP4) Find strongly connected components (SCCs) of `TyClDecl`s.
+  This happens immediately after building the dependency graph in
+  `depAnalTyClDecls`. As the result, in `rnTyClDecls` we get
+
+    tycl_sccs :: [SCC (LTyClDecl GhcRn, NameSet)]
+
+  These SCCs are topologically sorted, but only according to lexical
+  dependencies (i.e. dependencies that can be found by looking at the FVs).
+  Non-lexical dependencies (i.e. dependencies on instances) are ignored because
+  they can't be reliably found prior to type checking.
+
+  More on that in Note [Retrying TyClGroups] in GHC.Tc.TyCl.
+
+(TCDEP5) For each SCC, create a `TyClGroup GhcRn`. Standalone kind signatures
+  and role annotations are looked up by name and included in the same
+  `TyClGroup` as the corresponding type/class declarations.
+
+  The extension field `group_ext` of `TyClGroup GhcRn` contains the dependencies
+  of the SCC computed from FVs in step (TCDEP3), but /excluding/ the type
+  constructors bound by the group itself. Example:
+
+     -- TyClGroup: binds {Z}
+     --            depends on {}
+     data Z = MkZ      -- FVs: {}
+
+     -- TyClGroup: binds {X, Y}
+     --            depends on {Z} rather than {X, Y, Z}
+     data X = MkX Y Z  -- FVs: {Y, Z}
+     data Y = MkY X Z  -- FVs: {X, Z}
+
+  Reason: `isReadyTyClGroup` in GHC.Tc.TyCl is a function that checks whether
+  all of a TyClGroup's dependencies are present in the type checking env, and we
+  wouldn't want it to consider a group to be "blocked" on its own declarations.
+
+(TCDEP6) For each instance, create a singleton `TyClGroup GhcRn`, and put them
+  all at the end, where their lexical dependencies are surely satisfied.
+  More on that in Note [Put instances at the end].
+
+  The `group_ext` field in an instance TyClGroup is set to the FVs of the
+  instance, preprocessed much in the same way as declaration FVs in step
+  (TCDEP3). See Note [Prepare TyClGroup FVs] for details.
 
 Note [No dependencies on data instances]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1439,6 +1489,32 @@ with different dependency structure!)
 Ugh.  For now we simply don't allow promotion of data constructors for
 data instances.  See Note [AFamDataCon: not promoting data family
 constructors] in GHC.Tc.Utils.Env
+
+Note [Put instances at the end]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+There is no point including type family instances or class instances in the
+graph for SCC analysis because instances are not referred to by name. We cannot
+discover, by looking at the free variables of a declaration, what instances it
+depends on.
+
+Instead, we create one singleton "SCC" per instance using mkInstGroups and put
+them at the end. This is simple and guarantees that the FVs of all instances are
+bound in the preceding TyClGroups.
+
+The problem is that if there are any declarations that depend on instances,
+they're going to fail kind checking, because instances come after the
+declarations. To account for that, the kind checker goes through a multipass
+ordeal described in Note [Retrying TyClGroups] in GHC.Tc.TyCl.
+
+One might ask, "why not insert instances at the earliest positions where their
+FVs are bound?" Indeed, this sounds like a plausible solution, and GHC used to
+do it at one point. However, there are many tickets (and now test cases)
+demonstrating its inadequacy: #12088, #12239, #14668, #15561, #16410, #16448,
+#16693, #19611, #20875, #21172, #22257, #25238, #25834, etc.
+
+As to why we put each instance in its own group, as opposed to using just one
+group with all the instances, the reason is that an instance may depend on
+another instance, so we better add them to the environment one by one.
 -}
 
 
@@ -1446,7 +1522,8 @@ rnTyClDecls :: [TyClGroup GhcPs]
             -> RnM ([TyClGroup GhcRn], FreeVars)
 -- Rename the declarations and do dependency analysis on them
 rnTyClDecls tycl_ds
-  = do { -- Rename the type/class, instance, and role declarations
+  = do { -- Flatten TyClGroups and rename each declaration individually.
+         -- Steps (TCDEP1) and (TCDEP2) of Note [Dependency analysis of type and class decls]
        ; tycls_w_fvs <- mapM (wrapLocFstMA rnTyClDecl) (tyClGroupTyClDecls tycl_ds)
        ; let tc_names = mkNameSet (map (tcdName . unLoc . fst) tycls_w_fvs)
        ; traceRn "rnTyClDecls" $
@@ -1456,61 +1533,47 @@ rnTyClDecls tycl_ds
        ; instds_w_fvs <- mapM (wrapLocFstMA rnSrcInstDecl) (tyClGroupInstDecls tycl_ds)
        ; role_annots  <- rnRoleAnnots tc_names (tyClGroupRoleDecls tycl_ds)
 
-       -- Do SCC analysis on the type/class decls
+       -- Do SCC analysis on the type/class declarations.
+       -- Steps (TCDEP3) and (TCDEP4) of Note [Dependency analysis of type and class decls]
        ; rdr_env <- getGlobalRdrEnv
        ; traceRn "rnTyClDecls SCC analysis" $
            vcat [ text "rdr_env:" <+> ppr rdr_env ]
-       ; let tycl_sccs = depAnalTyClDecls rdr_env kisig_fv_env tycls_w_fvs
-             role_annot_env = mkRoleAnnotEnv role_annots
+       ; let tycl_sccs = depAnalTyClDecls rdr_env tc_names kisig_fv_env tycls_w_fvs
              (kisig_env, kisig_fv_env) = mkKindSig_fv_env kisigs_w_fvs
+             role_annot_env = mkRoleAnnotEnv role_annots
 
-             inst_ds_map = mkInstDeclFreeVarsMap rdr_env tc_names instds_w_fvs
-             (init_inst_ds, rest_inst_ds) = getInsts [] inst_ds_map
+       -- Construct renamed TyClGroups.
+       -- Steps (TCDEP5) and (TCDEP6) of Note [Dependency analysis of type and class decls]
+       ; let tycl_groups = map (mk_group role_annot_env kisig_env) tycl_sccs
+             inst_groups = mkInstGroups rdr_env tc_names instds_w_fvs
+             all_groups  = tycl_groups ++ inst_groups
 
-             first_group
-               | null init_inst_ds = []
-               | otherwise = [TyClGroup { group_ext    = noExtField
-                                        , group_tyclds = []
-                                        , group_kisigs = []
-                                        , group_roles  = []
-                                        , group_instds = init_inst_ds }]
+       ; traceRn "rnTycl dependency analysis made groups" (ppr all_groups)
 
-             (final_inst_ds, groups)
-                = mapAccumL (mk_group role_annot_env kisig_env) rest_inst_ds tycl_sccs
-
-             all_fvs = foldr (plusFV . snd) emptyFVs tycls_w_fvs  `plusFV`
+       ; let all_fvs = foldr (plusFV . snd) emptyFVs tycls_w_fvs  `plusFV`
                        foldr (plusFV . snd) emptyFVs instds_w_fvs `plusFV`
                        foldr (plusFV . snd) emptyFVs kisigs_w_fvs
 
-             all_groups = first_group ++ groups
-
-       ; massertPpr (null final_inst_ds)
-                    (ppr instds_w_fvs
-                     $$ ppr inst_ds_map
-                     $$ ppr (flattenSCCs tycl_sccs)
-                     $$ ppr final_inst_ds)
-
-       ; traceRn "rnTycl dependency analysis made groups" (ppr all_groups)
        ; return (all_groups, all_fvs) }
   where
+    -- Construct a type/class declaration TyClGroup.
+    -- Step (TCDEP5) of Note [Dependency analysis of type and class decls]
     mk_group :: RoleAnnotEnv
              -> KindSigEnv
-             -> InstDeclFreeVarsMap
-             -> SCC (LTyClDecl GhcRn)
-             -> (InstDeclFreeVarsMap, TyClGroup GhcRn)
-    mk_group role_env kisig_env inst_map scc
-      = (inst_map', group)
+             -> SCC (LTyClDecl GhcRn, NameSet)
+             -> TyClGroup GhcRn
+    mk_group role_env kisig_env scc = group
       where
-        tycl_ds              = flattenSCC scc
-        bndrs                = map (tcdName . unLoc) tycl_ds
-        roles                = getRoleAnnots bndrs role_env
-        kisigs               = getKindSigs   bndrs kisig_env
-        (inst_ds, inst_map') = getInsts      bndrs inst_map
-        group = TyClGroup { group_ext    = noExtField
+        (tycl_ds, nodes_deps) = unzip (flattenSCC scc)
+        node_bndrs = map (tcdName . unLoc) tycl_ds
+        deps = delFVs node_bndrs (plusFVs nodes_deps)
+          -- (delFVs node_bndrs) removes the self-references.
+          -- See Note [Prepare TyClGroup FVs]
+        group = TyClGroup { group_ext    = deps
                           , group_tyclds = tycl_ds
-                          , group_kisigs = kisigs
-                          , group_roles  = roles
-                          , group_instds = inst_ds }
+                          , group_kisigs = getKindSigs node_bndrs kisig_env
+                          , group_roles  = getRoleAnnots node_bndrs role_env
+                          , group_instds = [] }
 
 -- | Free variables of standalone kind signatures.
 newtype KindSig_FV_Env = KindSig_FV_Env (NameEnv FreeVars)
@@ -1551,32 +1614,39 @@ rnStandaloneKindSignature
 rnStandaloneKindSignature tc_names (StandaloneKindSig _ v ki)
   = do  { standalone_ki_sig_ok <- xoptM LangExt.StandaloneKindSignatures
         ; unless standalone_ki_sig_ok $ addErr TcRnUnexpectedStandaloneKindSig
-        ; new_v <- lookupSigCtxtOccRn (TopSigCtxt tc_names) (text "standalone kind signature") v
-        ; let doc = StandaloneKindSigCtx (ppr v)
-        ; (new_ki, fvs) <- rnHsSigType doc KindLevel ki
+        ; new_v <- lookupSigCtxtOccRn (TopSigCtxt tc_names) SigLikeStandaloneKindSig v
+        ; (new_ki, fvs) <- rnHsSigType (StandaloneKindSigCtx v) KindLevel ki
         ; return (StandaloneKindSig noExtField new_v new_ki, fvs)
         }
 
+-- See Note [Dependency analysis of type and class decls]
 depAnalTyClDecls :: GlobalRdrEnv
-                 -> KindSig_FV_Env
+                 -> NameSet                         -- Names in the current HsGroup
+                 -> KindSig_FV_Env                  -- FVs of standalone kind signatures
                  -> [(LTyClDecl GhcRn, FreeVars)]
-                 -> [SCC (LTyClDecl GhcRn)]
--- See Note [Dependency analysis of type, class, and instance decls]
-depAnalTyClDecls rdr_env kisig_fv_env ds_w_fvs
+                 -> [SCC (LTyClDecl GhcRn, NameSet)]
+depAnalTyClDecls rdr_env tc_names kisig_fv_env ds_w_fvs
   = stronglyConnCompFromEdgedVerticesUniq edges
   where
-    edges :: [ Node Name (LTyClDecl GhcRn) ]
-    edges = [ DigraphNode d name (map (getParent rdr_env) (nonDetEltsUniqSet deps))
+    -- Build a graph where each node is a `TyClDecl` keyed by its name, and
+    -- its `FreeVars` give rise to edges.
+    -- Step (TCDEP3) of Note [Dependency analysis of type and class decls]
+    edges :: [ Node Name (LTyClDecl GhcRn, NameSet) ]
+    edges = [ DigraphNode (d, deps) name (nonDetEltsUniqSet deps)
+              -- nonDetEltsUniqSet is OK to use here because the order of the edges
+              -- has no effect on the result of stronglyConnCompFromEdgedVerticesUniq.
+              -- See Note [Deterministic SCC] in GHC.Data.Graph.Directed.
+
             | (d, fvs) <- ds_w_fvs,
               let { name = tcdName (unLoc d)
                   ; kisig_fvs = lookupKindSig_FV_Env kisig_fv_env name
-                  ; deps = fvs `plusFV` kisig_fvs
+                  ; node_fvs = fvs `plusFV` kisig_fvs -- (TCDEP3.fvs_kisig)
+                  ; deps = toParents rdr_env node_fvs `intersectFVs` tc_names
+                      -- (toParents rdr_env) maps datacons to parent tycons (TCDEP3.fvs_parent),
+                      -- (`intersectFVs` tc_names) filters out imported names (TCDEP3.fvs_nogbl).
+                      -- See also Note [Prepare TyClGroup FVs]
                   }
             ]
-            -- It's OK to use nonDetEltsUFM here as
-            -- stronglyConnCompFromEdgedVertices is still deterministic
-            -- even if the edges are in nondeterministic order as explained
-            -- in Note [Deterministic SCC] in GHC.Data.Graph.Directed.
 
 toParents :: GlobalRdrEnv -> NameSet -> NameSet
 toParents rdr_env ns
@@ -1593,6 +1663,81 @@ getParent rdr_env n
                     ParentIs  { par_is = p } -> p
                     _                        -> n
       Nothing -> n
+
+{- Note [Prepare TyClGroup FVs]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+The renamer returns, alongside each renamed type/class declaration or instance,
+the set of its free variables:
+
+  rnTyClDecl    :: TyClDecl GhcPs -> RnM (TyClDecl GhcRn, FreeVars)
+  rnSrcInstDecl :: InstDecl GhcPs -> RnM (InstDecl GhcRn, FreeVars)
+
+For example:
+
+  type family F (a :: k)        -- FVs: {}
+  data X = MkX Char (Maybe X)   -- FVs: {Char, Maybe, X}
+  data Y = MkY X (Maybe Y)      -- FVs: {Maybe, Y, X}
+  type instance F MkX = X       -- FVs: {F, MkX, X}
+  type instance F MkY = Int     -- FVs: {F, MkY, Int}
+
+This is almost what we need for dependency analysis (i.e. to figure out in which
+order to check the declarations), but first we apply a few transformations:
+
+* toParents rdr_env inst_fvs `intersectFVs` tc_names   -- in mkInstGroups
+* toParents rdr_env node_fvs `intersectFVs` tc_names   -- in depAnalTyClDecls
+* delFVs node_bndrs (plusFVs nodes_deps)               -- in rnTyClGroups
+
+The cited lines of code are somewhat far apart; to see the big picture, refer
+to Note [Dependency analysis of type and class decls], and more specifically
+steps TCDEP3, TCDEP5, and TCDEP6.
+
+The cumulative effect of these transformations is as follows:
+
+* Data constructor names are replaced by the parent type constructors:
+    {MkX} ==> {X}
+  Part of the code:
+    toParents rdr_env
+  Reason:
+    MkX does not get its own node in the dependency graph,
+    so we cannot make an edge to it in `depAnalTyClDecls`
+
+* Names defined outside the current HsGroup are filtered out:
+    {Char,Maybe} ==> {}
+  Part of the code:
+    `intersectFVs` tc_names
+  Reason:
+    makes the NameSet smaller, so there are fewer subsequent lookups
+    in `graphFromEdgedVertices` (GHC.Data.Graph.Directed)
+    and in `isReadyTyClGroup`   (GHC.Tc.TyCl)
+
+* Self-references are removed:
+    {A,B,C} ==> {C}, iff in the TyClGroup that defines {A,B}
+  Part of the code:
+    delFVs node_bndrs
+  Reason:
+    avoids the problem that `isReadyTyClGroup` would otherwise consider
+    a recursive TyClGroup to be blocked on itself
+  Note:
+    needs to happen after the SCC analysis because of
+    mutually-recursive data types
+
+These "prepared" FVs are the lexical dependencies of a TyClGroup that are stored
+in the XCTyClGroup extension field:
+
+  type family F (a :: k)        -- XCTyClGroup: {}
+  data X = MkX Char (Maybe X)   -- XCTyClGroup: {}
+  data Y = MkY X (Maybe Y)      -- XCTyClGroup: {X}
+  type instance F MkX = X       -- XCTyClGroup: {F, X}
+  type instance F MkY = Int     -- XCTyClGroup: {F, Y}
+
+Before attempting to kind-check a TyClGroup, all of its lexical dependencies
+need to be satisfied, i.e. there must be a TyThing in the TypeEnv for each of
+these names.
+
+Imported names {Char,Maybe} don't need to be explicitly included in the set of
+lexical dependencies because `isReadyTyClGroup` can safely assume those are
+definitely already in the env.
+-}
 
 
 {- ******************************************************
@@ -1620,7 +1765,7 @@ rnRoleAnnots tc_names role_annots
       = do {  -- the name is an *occurrence*, but look it up only in the
               -- decls defined in this group (see #10263)
              tycon' <- lookupSigCtxtOccRn (RoleAnnotCtxt tc_names)
-                                          (text "role annotation")
+                                          SigLikeRoleAnnotation
                                           tycon
            ; return $ RoleAnnotDecl noExtField tycon' roles }
 
@@ -1658,43 +1803,27 @@ lookupGlobalOccRn led to #8485).
 ****************************************************** -}
 
 ----------------------------------------------------------
--- | 'InstDeclFreeVarsMap is an association of an
---   @InstDecl@ with @FreeVars@. The @FreeVars@ are
---   the tycon names that are both
---     a) free in the instance declaration
---     b) bound by this group of type/class/instance decls
-type InstDeclFreeVarsMap = [(LInstDecl GhcRn, FreeVars)]
-
--- | Construct an @InstDeclFreeVarsMap@ by eliminating any @Name@s from the
---   @FreeVars@ which are *not* the binders of a @TyClDecl@.
-mkInstDeclFreeVarsMap :: GlobalRdrEnv
-                      -> NameSet
-                      -> [(LInstDecl GhcRn, FreeVars)]
-                      -> InstDeclFreeVarsMap
-mkInstDeclFreeVarsMap rdr_env tycl_bndrs inst_ds_fvs
-  = [ (inst_decl, toParents rdr_env fvs `intersectFVs` tycl_bndrs)
-    | (inst_decl, fvs) <- inst_ds_fvs ]
-
--- | Get the @LInstDecl@s which have empty @FreeVars@ sets, and the
---   @InstDeclFreeVarsMap@ with these entries removed.
--- We call (getInsts tcs instd_map) when we've completed the declarations
--- for 'tcs'.  The call returns (inst_decls, instd_map'), where
---   inst_decls are the instance declarations all of
---              whose free vars are now defined
---   instd_map' is the inst-decl map with 'tcs' removed from
---               the free-var set
-getInsts :: [Name] -> InstDeclFreeVarsMap
-         -> ([LInstDecl GhcRn], InstDeclFreeVarsMap)
-getInsts bndrs inst_decl_map
-  = partitionWith pick_me inst_decl_map
+-- | Construct a @TyClGroup@ for each @InstDecl@.
+-- Step (TCDEP6) of Note [Dependency analysis of type and class decls]
+mkInstGroups :: GlobalRdrEnv
+             -> NameSet
+             -> [(LInstDecl GhcRn, FreeVars)]
+             -> [TyClGroup GhcRn]
+mkInstGroups rdr_env tc_names inst_ds_fvs
+  = [ mk_inst_group deps inst_decl
+    | (inst_decl, inst_fvs) <- inst_ds_fvs
+    , let deps = toParents rdr_env inst_fvs `intersectFVs` tc_names ]
+            -- (toParents rdr_env) maps datacons to parent tycons,
+            -- (`intersectFVs` tc_names) filters out imported names.
+            -- See Note [Prepare TyClGroup FVs]
   where
-    pick_me :: (LInstDecl GhcRn, FreeVars)
-            -> Either (LInstDecl GhcRn) (LInstDecl GhcRn, FreeVars)
-    pick_me (decl, fvs)
-      | isEmptyNameSet depleted_fvs = Left decl
-      | otherwise                   = Right (decl, depleted_fvs)
-      where
-        depleted_fvs = delFVs bndrs fvs
+    mk_inst_group :: NameSet -> LInstDecl GhcRn -> TyClGroup GhcRn
+    mk_inst_group deps inst_d =
+      TyClGroup { group_ext = deps
+                , group_tyclds = []
+                , group_kisigs = []
+                , group_roles  = []
+                , group_instds = [inst_d] }
 
 {- ******************************************************
 *                                                       *
@@ -1713,7 +1842,7 @@ rnTyClDecl (FamDecl { tcdFam = fam })
 
 rnTyClDecl (SynDecl { tcdLName = tycon, tcdTyVars = tyvars,
                       tcdFixity = fixity, tcdRhs = rhs })
-  = do { tycon' <- lookupLocatedTopConstructorRnN tycon
+  = do { tycon' <- lookupLocatedTopBndrRnN WL_TyCon tycon
        ; let kvs = extractHsTyRdrTyVarsKindVars rhs
              doc = TySynCtx tycon
        ; traceRn "rntycl-ty" (ppr tycon <+> ppr kvs)
@@ -1733,7 +1862,7 @@ rnTyClDecl (DataDecl
     { tcdLName = tycon, tcdTyVars = tyvars,
       tcdFixity = fixity,
       tcdDataDefn = defn@HsDataDefn{ dd_cons = cons, dd_kindSig = kind_sig} })
-  = do { tycon' <- lookupLocatedTopConstructorRnN tycon
+  = do { tycon' <- lookupLocatedTopBndrRnN WL_TyCon tycon
        ; let kvs = extractDataDefnKindVars defn
              doc = TyDataCtx tycon
              new_or_data = dataDefnConsNewOrData cons
@@ -1755,7 +1884,7 @@ rnTyClDecl (ClassDecl { tcdCtxt = context, tcdLName = lcls,
                         tcdFDs = fds, tcdSigs = sigs,
                         tcdMeths = mbinds, tcdATs = ats, tcdATDefs = at_defs,
                         tcdDocs = docs})
-  = do  { lcls' <- lookupLocatedTopConstructorRnN lcls
+  = do  { lcls' <- lookupLocatedTopBndrRnN WL_TyCon lcls
         ; let cls' = unLoc lcls'
               kvs = []  -- No scoped kind vars except those in
                         -- kind signatures on the tyvars
@@ -1922,19 +2051,17 @@ rnDataDefn doc (HsDataDefn { dd_cType = cType, dd_ctxt = context, dd_cons = cond
            }
 
     has_labelled_fields (ConDeclGADT { con_g_args = RecConGADT _ _ }) = True
-    has_labelled_fields (ConDeclH98 { con_args = RecCon rec })
-      = not (null (unLoc rec))
+    has_labelled_fields (ConDeclH98 { con_args = RecCon flds })
+      = not (null (unLoc flds))
     has_labelled_fields _ = False
 
     has_strictness_flags condecl
-      = any (is_strict . getBangStrictness . hsScaledThing) (con_args condecl)
+      = any isSrcStrict (con_arg_bangs condecl)
 
-    is_strict (HsSrcBang _ (HsBang _ s)) = isSrcStrict s
-
-    con_args (ConDeclGADT { con_g_args = PrefixConGADT _ args }) = args
-    con_args (ConDeclH98 { con_args = PrefixCon _ args }) = args
-    con_args (ConDeclH98 { con_args = InfixCon arg1 arg2 }) = [arg1, arg2]
-    con_args _ = []
+    con_arg_bangs (ConDeclGADT { con_g_args = PrefixConGADT _ args }) = map cdf_bang args
+    con_arg_bangs (ConDeclH98 { con_args = PrefixCon args }) = map cdf_bang args
+    con_arg_bangs (ConDeclH98 { con_args = InfixCon arg1 arg2 }) = [cdf_bang arg1, cdf_bang arg2]
+    con_arg_bangs _ = []
 
 {-
 Note [Type data declarations]
@@ -2212,7 +2339,7 @@ rnFamDecl mb_cls (FamilyDecl { fdLName = tycon, fdTyVars = tyvars
                              , fdFixity = fixity
                              , fdInfo = info, fdResultSig = res_sig
                              , fdInjectivityAnn = injectivity })
-  = do { tycon' <- lookupLocatedTopConstructorRnN tycon
+  = do { tycon' <- lookupLocatedTopBndrRnN WL_TyCon tycon
        ; ((tyvars', res_sig', injectivity'), fv1) <-
             bindHsQTyVars doc mb_cls kvs tyvars $ \ tyvars' _ ->
             do { let rn_sig = rnFamResultSig doc
@@ -2397,7 +2524,7 @@ rnConDecl decl@(ConDeclH98 { con_name = name, con_ex_tvs = ex_tvs
                            , con_mb_cxt = mcxt, con_args = args
                            , con_doc = mb_doc, con_forall = forall_ })
   = do  { _        <- addLocM checkConName name
-        ; new_name <- lookupLocatedTopConstructorRnN name
+        ; new_name <- lookupLocatedTopBndrRnN WL_ConLike name
 
         -- We bind no implicit binders here; this is just like
         -- a nested HsForAllTy.  E.g. consider
@@ -2433,7 +2560,7 @@ rnConDecl (ConDeclGADT { con_names   = names
                        , con_res_ty  = res_ty
                        , con_doc     = mb_doc })
   = do  { mapM_ (addLocM checkConName) names
-        ; new_names <- mapM (lookupLocatedTopConstructorRnN) names
+        ; new_names <- mapM (lookupLocatedTopBndrRnN WL_ConLike) names
 
         ; let -- We must ensure that we extract the free tkvs in left-to-right
               -- order of their appearance in the constructor type.
@@ -2481,15 +2608,15 @@ rnConDeclH98Details ::
    -> HsDocContext
    -> HsConDeclH98Details GhcPs
    -> RnM (HsConDeclH98Details GhcRn, FreeVars)
-rnConDeclH98Details _ doc (PrefixCon _ tys)
-  = do { (new_tys, fvs) <- mapFvRn (rnScaledLHsType doc) tys
-       ; return (PrefixCon noTypeArgs new_tys, fvs) }
+rnConDeclH98Details _ doc (PrefixCon tys)
+  = do { (new_tys, fvs) <- mapFvRn (rnHsConDeclField doc) tys
+       ; return (PrefixCon new_tys, fvs) }
 rnConDeclH98Details _ doc (InfixCon ty1 ty2)
-  = do { (new_ty1, fvs1) <- rnScaledLHsType doc ty1
-       ; (new_ty2, fvs2) <- rnScaledLHsType doc ty2
+  = do { (new_ty1, fvs1) <- rnHsConDeclField doc ty1
+       ; (new_ty2, fvs2) <- rnHsConDeclField doc ty2
        ; return (InfixCon new_ty1 new_ty2, fvs1 `plusFV` fvs2) }
 rnConDeclH98Details con doc (RecCon flds)
-  = do { (new_flds, fvs) <- rnRecConDeclFields con doc flds
+  = do { (new_flds, fvs) <- rnRecHsConDeclRecFields con doc flds
        ; return (RecCon new_flds, fvs) }
 
 rnConDeclGADTDetails ::
@@ -2498,20 +2625,20 @@ rnConDeclGADTDetails ::
    -> HsConDeclGADTDetails GhcPs
    -> RnM (HsConDeclGADTDetails GhcRn, FreeVars)
 rnConDeclGADTDetails _ doc (PrefixConGADT _ tys)
-  = do { (new_tys, fvs) <- mapFvRn (rnScaledLHsType doc) tys
+  = do { (new_tys, fvs) <- mapFvRn (rnHsConDeclField doc) tys
        ; return (PrefixConGADT noExtField new_tys, fvs) }
 rnConDeclGADTDetails con doc (RecConGADT _ flds)
-  = do { (new_flds, fvs) <- rnRecConDeclFields con doc flds
+  = do { (new_flds, fvs) <- rnRecHsConDeclRecFields con doc flds
        ; return (RecConGADT noExtField new_flds, fvs) }
 
-rnRecConDeclFields ::
+rnRecHsConDeclRecFields ::
      Name
   -> HsDocContext
-  -> LocatedL [LConDeclField GhcPs]
-  -> RnM (LocatedL [LConDeclField GhcRn], FreeVars)
-rnRecConDeclFields con doc (L l fields)
-  = do  { fls <- lookupConstructorFields con
-        ; (new_fields, fvs) <- rnConDeclFields doc fls fields
+  -> LocatedL [LHsConDeclRecField GhcPs]
+  -> RnM (LocatedL [LHsConDeclRecField GhcRn], FreeVars)
+rnRecHsConDeclRecFields con doc (L l fields)
+  = do  { fls <- lookupConstructorFields (noUserRdr con)
+        ; (new_fields, fvs) <- rnHsConDeclRecFields doc fls fields
                 -- No need to check for duplicate fields
                 -- since that is done by GHC.Rename.Names.extendGlobalRdrEnvRn
         ; pure (L l new_fields, fvs) }
@@ -2551,20 +2678,20 @@ extendPatSynEnv dup_fields_ok has_sel val_decls local_fix_env thing = do {
           bnd_name <- newTopSrcBinder (L (l2l bind_loc) n)
           let field_occs = map ((\ f -> L (noAnnSrcSpan $ getLocA (foLabel f)) f) . recordPatSynField) as
           flds <- mapM (newRecordFieldLabel dup_fields_ok has_sel [bnd_name]) field_occs
-          let con_info = mkConInfo ConIsPatSyn (conDetailsArity length (RecCon as)) flds
+          let con_info = mkConInfo ConIsPatSyn (conDetailsVisArity (RecCon as)) flds
           return ((PatSynName bnd_name, con_info) : names)
       | L bind_loc (PatSynBind _ (PSB { psb_id = L _ n, psb_args = as })) <- bind
       = do
         bnd_name <- newTopSrcBinder (L (l2l bind_loc) n)
-        let con_info = mkConInfo ConIsPatSyn (conDetailsArity length as) []
+        let con_info = mkConInfo ConIsPatSyn (conDetailsVisArity as) []
         return ((PatSynName bnd_name, con_info) : names)
       | otherwise
       = return names
 
-conDetailsArity :: (rec -> Arity) -> HsConDetails tyarg arg rec -> Arity
-conDetailsArity recToArity = \case
-  PrefixCon _ args -> length args
-  RecCon rec -> recToArity rec
+conDetailsVisArity :: HsPatSynDetails (GhcPass p) -> VisArity
+conDetailsVisArity = \case
+  PrefixCon args -> length args
+  RecCon flds -> length flds
   InfixCon _ _ -> 2
 
 {-
@@ -2590,7 +2717,7 @@ rnHsTyVars tvs  = mapM rnHsTyVar tvs
 
 rnHsTyVar :: LocatedN RdrName -> RnM (LocatedN Name)
 rnHsTyVar (L l tyvar) = do
-  tyvar' <- lookupOccRn tyvar
+  tyvar' <- lookupOccRn WL_TyVar tyvar
   return (L l tyvar')
 
 {-
@@ -2687,8 +2814,8 @@ add gp@(HsGroup {hs_ruleds  = ts}) l (RuleD _ d) ds
 add gp l (DocD _ d) ds
   = addl (gp { hs_docs = (L l d) : (hs_docs gp) })  ds
 
-add_tycld :: LTyClDecl (GhcPass p) -> [TyClGroup (GhcPass p)]
-          -> [TyClGroup (GhcPass p)]
+add_tycld :: LTyClDecl GhcPs -> [TyClGroup GhcPs]
+          -> [TyClGroup GhcPs]
 add_tycld d []       = [TyClGroup { group_ext    = noExtField
                                   , group_tyclds = [d]
                                   , group_kisigs = []
@@ -2699,8 +2826,8 @@ add_tycld d []       = [TyClGroup { group_ext    = noExtField
 add_tycld d (ds@(TyClGroup { group_tyclds = tyclds }):dss)
   = ds { group_tyclds = d : tyclds } : dss
 
-add_instd :: LInstDecl (GhcPass p) -> [TyClGroup (GhcPass p)]
-          -> [TyClGroup (GhcPass p)]
+add_instd :: LInstDecl GhcPs -> [TyClGroup GhcPs]
+          -> [TyClGroup GhcPs]
 add_instd d []       = [TyClGroup { group_ext    = noExtField
                                   , group_tyclds = []
                                   , group_kisigs = []
@@ -2711,8 +2838,8 @@ add_instd d []       = [TyClGroup { group_ext    = noExtField
 add_instd d (ds@(TyClGroup { group_instds = instds }):dss)
   = ds { group_instds = d : instds } : dss
 
-add_role_annot :: LRoleAnnotDecl (GhcPass p) -> [TyClGroup (GhcPass p)]
-               -> [TyClGroup (GhcPass p)]
+add_role_annot :: LRoleAnnotDecl GhcPs -> [TyClGroup GhcPs]
+               -> [TyClGroup GhcPs]
 add_role_annot d [] = [TyClGroup { group_ext    = noExtField
                                  , group_tyclds = []
                                  , group_kisigs = []
@@ -2723,8 +2850,8 @@ add_role_annot d [] = [TyClGroup { group_ext    = noExtField
 add_role_annot d (tycls@(TyClGroup { group_roles = roles }) : rest)
   = tycls { group_roles = d : roles } : rest
 
-add_kisig :: LStandaloneKindSig (GhcPass p)
-         -> [TyClGroup (GhcPass p)] -> [TyClGroup (GhcPass p)]
+add_kisig :: LStandaloneKindSig GhcPs
+         -> [TyClGroup GhcPs] -> [TyClGroup GhcPs]
 add_kisig d [] = [TyClGroup { group_ext    = noExtField
                             , group_tyclds = []
                             , group_kisigs = [d]

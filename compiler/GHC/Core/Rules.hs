@@ -9,7 +9,7 @@
 -- The 'CoreRule' datatype itself is declared elsewhere.
 module GHC.Core.Rules (
         -- ** Looking up rules
-        lookupRule, matchExprs,
+        lookupRule, matchExprs, ruleLhsIsMoreSpecific,
 
         -- ** RuleBase, RuleEnv
         RuleBase, RuleEnv(..), mkRuleEnv, emptyRuleEnv,
@@ -587,8 +587,8 @@ findBest :: InScopeSet -> (Id, [CoreExpr])
 
 findBest _        _      (rule,ans)   [] = (rule,ans)
 findBest in_scope target (rule1,ans1) ((rule2,ans2):prs)
-  | isMoreSpecific in_scope rule1 rule2 = findBest in_scope target (rule1,ans1) prs
-  | isMoreSpecific in_scope rule2 rule1 = findBest in_scope target (rule2,ans2) prs
+  | ruleIsMoreSpecific in_scope rule1 rule2 = findBest in_scope target (rule1,ans1) prs
+  | ruleIsMoreSpecific in_scope rule2 rule1 = findBest in_scope target (rule2,ans2) prs
   | debugIsOn = let pp_rule rule
                       = ifPprDebug (ppr rule)
                                    (doubleQuotes (ftext (ruleName rule)))
@@ -603,15 +603,25 @@ findBest in_scope target (rule1,ans1) ((rule2,ans2):prs)
   where
     (fn,args) = target
 
-isMoreSpecific :: InScopeSet -> CoreRule -> CoreRule -> Bool
--- The call (rule1 `isMoreSpecific` rule2)
+ruleIsMoreSpecific :: InScopeSet -> CoreRule -> CoreRule -> Bool
+-- The call (rule1 `ruleIsMoreSpecific` rule2)
 -- sees if rule2 can be instantiated to look like rule1
--- See Note [isMoreSpecific]
-isMoreSpecific _        (BuiltinRule {}) _                = False
-isMoreSpecific _        (Rule {})        (BuiltinRule {}) = True
-isMoreSpecific in_scope (Rule { ru_bndrs = bndrs1, ru_args = args1 })
-                        (Rule { ru_bndrs = bndrs2, ru_args = args2 })
-  = isJust (matchExprs in_scope_env bndrs2 args2 args1)
+-- See Note [ruleIsMoreSpecific]
+ruleIsMoreSpecific in_scope rule1 rule2
+  = case rule1 of
+       BuiltinRule {} -> False
+       Rule { ru_bndrs = bndrs1, ru_args = args1 }
+                      -> ruleLhsIsMoreSpecific in_scope bndrs1 args1 rule2
+
+ruleLhsIsMoreSpecific :: InScopeSet
+                      -> [Var] -> [CoreExpr]  -- LHS of a possible new rule
+                      -> CoreRule             -- An existing rule
+                      -> Bool                 -- New one is more specific
+ruleLhsIsMoreSpecific in_scope bndrs1 args1 rule2
+  = case rule2 of
+       BuiltinRule {} -> True
+       Rule { ru_bndrs = bndrs2, ru_args = args2 }
+                      -> isJust (matchExprs in_scope_env bndrs2 args2 args1)
   where
    full_in_scope = in_scope `extendInScopeSetList` bndrs1
    in_scope_env  = ISE full_in_scope noUnfoldingFun
@@ -620,9 +630,9 @@ isMoreSpecific in_scope (Rule { ru_bndrs = bndrs1, ru_args = args1 })
 noBlackList :: Activation -> Bool
 noBlackList _ = False           -- Nothing is black listed
 
-{- Note [isMoreSpecific]
+{- Note [ruleIsMoreSpecific]
 ~~~~~~~~~~~~~~~~~~~~~~~~
-The call (rule1 `isMoreSpecific` rule2)
+The call (rule1 `ruleIsMoreSpecific` rule2)
 sees if rule2 can be instantiated to look like rule1.
 
 Wrinkle:
@@ -825,7 +835,7 @@ bound on the LHS:
 
   The rule looks like
     forall (a::*) (d::Eq Char) (x :: Foo a Char).
-         f (Foo a Char) d x = True
+         f @(Foo a Char) d x = True
 
   Matching the rule won't bind 'a', and legitimately so.  We fudge by
   pretending that 'a' is bound to (Any :: *).
@@ -1001,16 +1011,16 @@ In short, it is Very Deeply Suspicious for a rule to quantify over a coercion
 variable.  And SpecConstr no longer does so: see Note [SpecConstr and casts] in
 SpecConstr.
 
-It is, however, OK for a cast to appear in a template.  For example
-    newtype N a = MkN (a,a)    -- Axiom ax:N a :: (a,a) ~R N a
-    f :: N a -> bah
-    RULE forall b x:b y:b. f @b ((x,y) |> (axN @b)) = ...
-
-When matching we can just move these casts to the other side:
-    match (tmpl |> co) tgt  -->   match tmpl (tgt |> sym co)
-See matchTemplateCast.
-
 Wrinkles:
+
+(CT0) It is, however, OK for a cast to appear in a template provided the cast mentions
+  none of the template variables.  For example
+      newtype N a = MkN (a,a)    -- Axiom ax:N a :: (a,a) ~R N a
+      f :: N a -> bah
+      RULE forall b x:b y:b. f @b ((x,y) |> (axN @b)) = ...
+  When matching we can just move these casts to the other side:
+      match (tmpl |> co) tgt  -->   match tmpl (tgt |> sym co)
+  See matchTemplateCast.
 
 (CT1) We need to be careful about scoping, and to match left-to-right, so that we
   know the substitution [a :-> b] before we meet (co :: (a,a) ~R N a), and so we
@@ -1282,7 +1292,7 @@ Two wrinkles:
              f (\(MkT @b (d::Num b) (x::b)) -> h @b d x) = ...
      where the HOP is (h @b d x). In principle this might be possible, but
      it seems fragile; e.g. we would still need to insist that the (invisible)
-     @b was a type variable.  And since `h` gets a polymoprhic type, that
+     @b was a type variable.  And since `h` gets a polymorphic type, that
      type would have to be declared by the programmer.
 
      Maybe one day.  But for now, we insist (in `arg_as_lcl_var`)that a HOP
@@ -1496,11 +1506,12 @@ matchTemplateCast renv subst e1 co1 e2 mco
     filterFV (`elemVarSet` rv_tmpls renv) $    -- Check that the coercion does not
     tyCoFVsOfCo substed_co                     -- mention any of the template variables
   = -- This is the good path
-    -- See Note [Casts in the template]
+    -- See Note [Casts in the template] wrinkle (CT0)
     match renv subst e1 e2 (checkReflexiveMCo (mkTransMCoL mco (mkSymCo substed_co)))
 
   | otherwise
   = -- This is the Deeply Suspicious Path
+    -- See Note [Casts in the template]
     do { let co2 = case mco of
                      MRefl   -> mkRepReflCo (exprType e2)
                      MCo co2 -> co2

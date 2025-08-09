@@ -1,13 +1,52 @@
-#!/usr/bin/env -S node --disable-warning=ExperimentalWarning --experimental-wasm-type-reflection --max-old-space-size=8192 --no-turbo-fast-api-calls --wasm-lazy-validation
+#!/usr/bin/env -S node --disable-warning=ExperimentalWarning --max-old-space-size=65536 --no-turbo-fast-api-calls --wasm-lazy-validation
 
 // Note [The Wasm Dynamic Linker]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //
-// This nodejs script implements the wasm dynamic linker to support
-// Template Haskell & ghci in the GHC wasm backend. It loads wasm
-// shared libraries, resolves symbols and runs code on demand,
-// communicating with the host GHC via the standard iserv protocol.
-// Below are questions/answers to elaborate the introduction:
+// This script mainly has two roles:
+//
+// 1. Message broker: relay iserv messages between host GHC and wasm
+//    iserv (GHCi.Server.defaultServer). This part only runs in
+//    nodejs.
+// 2. Dynamic linker: provide RTS linker interfaces like
+//    loadDLL/lookupSymbol etc which are imported by wasm iserv. This
+//    part can run in browsers as well.
+//
+// When GHC starts external interpreter for the wasm target, it starts
+// this script and passes a pair of pipe fds for iserv messages,
+// libHSghci.so path, and command line arguments for wasm iserv. By
+// default, the wasm iserv runs in the same node process, so the
+// message broker logic is simple: wrap the pipe fds as
+// ReadableStream/WritableStream, pass reader/writer callbacks to wasm
+// iserv and run it to completion. It doesn't need to intercept or
+// parse any message, unlike iserv-proxy.
+//
+// Things are a bit more interesting with ghci browser mode. All the
+// Haskell code and all the runtime runs in the browser, including the
+// dynamic linker parts of this script. The host GHC process doeesn't
+// need to know about "browser mode" at all as long as iserv messages
+// are handled as usual, though obviously we can't pass fds to
+// browsers like before! So this script starts an HTTP 1.1 server with
+// WebSockets support. The browser side can import a startup script
+// served by the server, which will import this script and invoke main
+// with the right arguments, hooray isomorphic JavaScript! The browser
+// side will proceed to bootstrap wasm iserv, and the iserv messages
+// are relayed over the WebSockets. (also ^C signals over a different
+// connection)
+//
+// Under the browser mode, there's more traffic than just the iserv
+// message WebSockets. The browser side can fulfill most of the RTS
+// linker functionality alone, but it still needs to do stuff like
+// searching for a shared library in a bunch of search paths or
+// fetching a shared library blob; these side effects require access
+// to the same host filesystem that runs GHC, so the HTTP server also
+// exposes some rpc endpoints that the browser side can perform
+// requests. The server binds to 127.0.0.1 by default for a good
+// reason, it doesn't (and shouldn't) have extra logic to try to guard
+// against potential malicious requests to scrape your home directory.
+//
+// So much intro to the message broker part, below are Q/As regarding
+// the dynamic linker part:
 //
 // *** What works right now and what doesn't work yet?
 //
@@ -17,16 +56,12 @@
 // by wasi preview1: we map the full host filesystem into wasm cause
 // yolo, but things like processes and sockets don't work.
 //
-// JSFFI is unsupported in bytecode yet. So in ghci you can't type in
-// code that contains JSFFI declarations, though you can invoke
-// compiled code that uses JSFFI.
-//
 // loadArchive/loadObj etc are unsupported and will stay that way. The
 // only form of compiled code that can be loaded is wasm shared
 // library. There's no code unloading logic. The retain_cafs flag is
 // ignored and revertCAFs is a no-op.
 //
-// ghc -j doesn't work yet (#25285).
+// JSFFI works. ghci debugger works.
 //
 // *** What are implications to end users?
 //
@@ -67,65 +102,84 @@
 // add once we need it.
 //
 // No fancy stuff like LD_PRELOAD, LD_LIBRARY_PATH etc.
-//
-// *** How does GHC interact with the wasm dynamic linker?
-//
-// dyld.mjs is tracked as a build dependency and installed in GHC
-// libdir with executable perms. When GHC targets wasm and needs to
-// start iserv, it starts dyld.mjs and manage the process lifecycle
-// through the entire GHC session. nodejs location is not tracked and
-// must be present in PATH.
-//
-// GHC passes the libHSghci*.so location via command line, so dyld.mjs
-// will load it as well as all dependent so files, then start the
-// default iserv implementation in the ghci library and read/write
-// binary messages. nodejs receives pipe file descriptors from GHC,
-// though uvwasi doesn't support preopening them as wasi virtual file
-// descriptors, therefore we hook a few wasi syscalls and designate
-// our own preopen file descriptors for IPC logic.
-//
-// dyld.mjs inherits default stdin/stdout/stderr from GHC and that's
-// how ghci works. Like native external interpreter, you can use the
-// -opti GHC flag to pass process arguments, like RTS flags or -opti-v
-// to dump the iserv messages.
 
-import assert from "node:assert/strict";
-import fs from "node:fs/promises";
-import fsSync from "node:fs";
-import path from "node:path";
-import { WASI } from "node:wasi";
-import { JSValManager } from "./prelude.mjs";
+import { JSValManager, setImmediate } from "./prelude.mjs";
 import { parseRecord, parseSections } from "./post-link.mjs";
+
+// Make a consumer callback from a buffer. See Parser class
+// constructor comments for what a consumer is.
+function makeBufferConsumer(buf) {
+  return (len) => {
+    if (len > buf.length) {
+      throw new Error("not enough bytes");
+    }
+
+    const r = buf.subarray(0, len);
+    buf = buf.subarray(len);
+    return r;
+  };
+}
+
+// Make a consumer callback from a ReadableStreamDefaultReader.
+function makeStreamConsumer(reader) {
+  let buf = new Uint8Array();
+
+  return async (len) => {
+    while (buf.length < len) {
+      const { done, value } = await reader.read();
+      if (done) {
+        throw new Error("not enough bytes");
+      }
+      if (buf.length === 0) {
+        buf = value;
+        continue;
+      }
+      const tmp = new Uint8Array(buf.length + value.length);
+      tmp.set(buf, 0);
+      tmp.set(value, buf.length);
+      buf = tmp;
+    }
+
+    const r = buf.subarray(0, len);
+    buf = buf.subarray(len);
+    return r;
+  };
+}
 
 // A simple binary parser
 class Parser {
-  #buf;
-  #offset = 0;
+  #cb;
+  #consumed = 0;
+  #limit;
 
-  constructor(buf) {
-    this.#buf = buf;
+  // cb is a consumer callback that returns a buffer with exact N
+  // bytes for await cb(N). limit indicates how many bytes the Parser
+  // may consume at most; it's optional and only used by eof().
+  constructor(cb, limit) {
+    this.#cb = cb;
+    this.#limit = limit;
   }
 
   eof() {
-    return this.#offset === this.#buf.length;
+    return this.#consumed >= this.#limit;
   }
 
-  skip(len) {
-    this.#offset += len;
-    assert(this.#offset <= this.#buf.length);
+  async skip(len) {
+    await this.#cb(len);
+    this.#consumed += len;
   }
 
-  readUInt8() {
-    const r = this.#buf[this.#offset];
-    this.#offset += 1;
+  async readUInt8() {
+    const r = (await this.#cb(1))[0];
+    this.#consumed += 1;
     return r;
   }
 
-  readULEB128() {
+  async readULEB128() {
     let acc = 0n,
       shift = 0n;
     while (true) {
-      const byte = this.readUInt8();
+      const byte = await this.readUInt8();
       acc |= BigInt(byte & 0x7f) << shift;
       shift += 7n;
       if (byte >> 7 === 0) {
@@ -135,41 +189,44 @@ class Parser {
     return Number(acc);
   }
 
-  readBuffer() {
-    const len = this.readULEB128();
-    const r = this.#buf.subarray(this.#offset, this.#offset + len);
-    this.#offset += len;
-    assert(this.#offset <= this.#buf.length);
+  async readBuffer() {
+    const len = await this.readULEB128();
+    const r = await this.#cb(len);
+    this.#consumed += len;
     return r;
   }
 
-  readString() {
-    return new TextDecoder("utf-8", { fatal: true }).decode(this.readBuffer());
+  async readString() {
+    return new TextDecoder("utf-8", { fatal: true }).decode(
+      await this.readBuffer()
+    );
   }
 }
 
 // Parse the dylink.0 section of a wasm module
-function parseDyLink0(buf) {
-  const p0 = new Parser(buf);
+async function parseDyLink0(reader) {
+  const p0 = new Parser(makeStreamConsumer(reader));
   // magic, version
-  p0.skip(8);
+  await p0.skip(8);
   // section id
-  assert(p0.readUInt8() === 0);
-  const p1 = new Parser(p0.readBuffer());
+  console.assert((await p0.readUInt8()) === 0);
+  const p1_buf = await p0.readBuffer();
+  const p1 = new Parser(makeBufferConsumer(p1_buf), p1_buf.length);
   // custom section name
-  assert(p1.readString() === "dylink.0");
+  console.assert((await p1.readString()) === "dylink.0");
 
   const r = { neededSos: [], exportInfo: [], importInfo: [] };
   while (!p1.eof()) {
-    const subsection_type = p1.readUInt8();
-    const p2 = new Parser(p1.readBuffer());
+    const subsection_type = await p1.readUInt8();
+    const p2_buf = await p1.readBuffer();
+    const p2 = new Parser(makeBufferConsumer(p2_buf), p2_buf.length);
     switch (subsection_type) {
       case 1: {
         // WASM_DYLINK_MEM_INFO
-        r.memSize = p2.readULEB128();
-        r.memP2Align = p2.readULEB128();
-        r.tableSize = p2.readULEB128();
-        r.tableP2Align = p2.readULEB128();
+        r.memSize = await p2.readULEB128();
+        r.memP2Align = await p2.readULEB128();
+        r.tableSize = await p2.readULEB128();
+        r.tableP2Align = await p2.readULEB128();
         break;
       }
       case 2: {
@@ -177,10 +234,10 @@ function parseDyLink0(buf) {
         //
         // There may be duplicate entries. Not a big deal to not
         // dedupe, but why not.
-        const n = p2.readULEB128();
+        const n = await p2.readULEB128();
         const acc = new Set();
         for (let i = 0; i < n; ++i) {
-          acc.add(p2.readString());
+          acc.add(await p2.readString());
         }
         r.neededSos = [...acc];
         break;
@@ -190,10 +247,10 @@ function parseDyLink0(buf) {
         //
         // Not actually used yet, kept for completeness in case of
         // future usage.
-        const n = p2.readULEB128();
+        const n = await p2.readULEB128();
         for (let i = 0; i < n; ++i) {
-          const name = p2.readString();
-          const flags = p2.readULEB128();
+          const name = await p2.readString();
+          const flags = await p2.readULEB128();
           r.exportInfo.push({ name, flags });
         }
         break;
@@ -202,11 +259,11 @@ function parseDyLink0(buf) {
         // WASM_DYLINK_IMPORT_INFO
         //
         // Same.
-        const n = p2.readULEB128();
+        const n = await p2.readULEB128();
         for (let i = 0; i < n; ++i) {
-          const module = p2.readString();
-          const name = p2.readString();
-          const flags = p2.readULEB128();
+          const module = await p2.readString();
+          const name = await p2.readString();
+          const flags = await p2.readULEB128();
           r.importInfo.push({ module, name, flags });
         }
         break;
@@ -220,6 +277,391 @@ function parseDyLink0(buf) {
   return r;
 }
 
+// Formats a server.address() result to a URL origin with correct
+// handling for IPv6 hostname
+function originFromServerAddress({ address, family, port }) {
+  const hostname = family === "IPv6" ? `[${address}]` : address;
+  return `http://${hostname}:${port}`;
+}
+
+// Browser/node portable code stays above this watermark.
+const isNode = Boolean(globalThis?.process?.versions?.node);
+
+// Too cumbersome to only import at use sites. Too troublesome to
+// factor out browser-only/node-only logic into different modules. For
+// now, just make these global let bindings optionally initialized if
+// isNode and be careful to not use them in browser-only logic.
+let fs, http, path, require, stream, util, wasi, ws, zlib;
+
+if (isNode) {
+  require = (await import("node:module")).createRequire(import.meta.url);
+
+  fs = require("fs");
+  http = require("http");
+  path = require("path");
+  stream = require("stream");
+  util = require("util");
+  wasi = require("wasi");
+  zlib = require("zlib");
+
+  // Optional npm dependencies loaded via NODE_PATH
+  try {
+    ws = require("ws");
+  } catch {}
+} else {
+  wasi = await import(
+    "https://cdn.jsdelivr.net/npm/@bjorn3/browser_wasi_shim@0.4.1/dist/index.js"
+  );
+}
+
+// A subset of dyld logic that can only be run in the host node
+// process and has full access to local filesystem
+class DyLDHost {
+  // Deduped absolute paths of directories where we lookup .so files
+  #rpaths = new Set();
+
+  constructor() {
+    // Inherited pipe file descriptors from GHC
+    const out_fd = Number.parseInt(process.argv[4]),
+      in_fd = Number.parseInt(process.argv[5]);
+
+    this.readStream = stream.Readable.toWeb(
+      fs.createReadStream(undefined, { fd: in_fd })
+    );
+    this.writeStream = stream.Writable.toWeb(
+      fs.createWriteStream(undefined, { fd: out_fd })
+    );
+  }
+
+  close() {}
+
+  installSignalHandlers(cb) {
+    process.on("SIGINT", cb);
+    process.on("SIGQUIT", cb);
+  }
+
+  // removeLibrarySearchPath is a no-op in ghci. If you have a use
+  // case where it's actually needed, I would like to hear..
+  async addLibrarySearchPath(p) {
+    this.#rpaths.add(path.resolve(p));
+    return null;
+  }
+
+  // f can be either just soname or an absolute path, will be
+  // canonicalized and checked for file existence here. Throws if
+  // non-existent.
+  async findSystemLibrary(f) {
+    if (path.isAbsolute(f)) {
+      await fs.promises.access(f, fs.promises.constants.R_OK);
+      return f;
+    }
+    const r = (
+      await Promise.allSettled(
+        [...this.#rpaths].map(async (p) => {
+          const r = path.resolve(p, f);
+          await fs.promises.access(r, fs.promises.constants.R_OK);
+          return r;
+        })
+      )
+    ).find(({ status }) => status === "fulfilled");
+    console.assert(
+      r,
+      `findSystemLibrary(${f}): not found in ${[...this.#rpaths]}`
+    );
+    return r.value;
+  }
+
+  // returns a Response for a .so absolute path
+  async fetchWasm(p) {
+    return new Response(stream.Readable.toWeb(fs.createReadStream(p)), {
+      headers: { "Content-Type": "application/wasm" },
+    });
+  }
+}
+
+// Fulfill the same functionality as DyLDHost by doing fetch() calls
+// to respective RPC endpoints of a host http server. Also manages
+// WebSocket connections back to host.
+export class DyLDRPC {
+  #origin;
+  #wsPipe;
+  #wsSig;
+  #redirectWasiConsole;
+  #wsStdout;
+  #wsStderr;
+
+  constructor({ origin, redirectWasiConsole }) {
+    this.#origin = origin;
+
+    const ws_url = this.#origin.replace("http://", "ws://");
+
+    this.#wsPipe = new WebSocket(ws_url, "pipe");
+    this.#wsPipe.binaryType = "arraybuffer";
+
+    this.readStream = new ReadableStream({
+      start: (controller) => {
+        this.#wsPipe.addEventListener("message", (ev) =>
+          controller.enqueue(new Uint8Array(ev.data))
+        );
+        this.#wsPipe.addEventListener("error", (ev) => controller.error(ev));
+        this.#wsPipe.addEventListener("close", () => controller.close());
+      },
+    });
+
+    this.writeStream = new WritableStream({
+      start: (controller) => {
+        this.#wsPipe.addEventListener("error", (ev) => controller.error(ev));
+      },
+      write: (buf) => this.#wsPipe.send(buf),
+    });
+
+    this.#wsSig = new WebSocket(ws_url, "sig");
+    this.#wsSig.binaryType = "arraybuffer";
+
+    this.#redirectWasiConsole = redirectWasiConsole;
+    if (redirectWasiConsole) {
+      this.#wsStdout = new WebSocket(ws_url, "stdout");
+      this.#wsStderr = new WebSocket(ws_url, "stderr");
+    }
+
+    this.opened = Promise.all(
+      (redirectWasiConsole
+        ? [this.#wsPipe, this.#wsSig, this.#wsStdout, this.#wsStderr]
+        : [this.#wsPipe, this.#wsSig]
+      ).map(
+        (ws) =>
+          new Promise((res, rej) => {
+            ws.addEventListener("open", res);
+            ws.addEventListener("error", rej);
+          })
+      )
+    );
+  }
+
+  close() {
+    this.#wsPipe.close();
+    this.#wsSig.close();
+    if (this.#redirectWasiConsole) {
+      this.#wsStdout.close();
+      this.#wsStderr.close();
+    }
+  }
+
+  async #rpc(endpoint, ...args) {
+    const r = await fetch(`${this.#origin}/rpc/${endpoint}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(args),
+    });
+    if (!r.ok) {
+      throw new Error(await r.text());
+    }
+    return r.json();
+  }
+
+  installSignalHandlers(cb) {
+    this.#wsSig.addEventListener("message", cb);
+  }
+
+  async addLibrarySearchPath(p) {
+    return this.#rpc("addLibrarySearchPath", p);
+  }
+
+  async findSystemLibrary(f) {
+    return this.#rpc("findSystemLibrary", f);
+  }
+
+  async fetchWasm(p) {
+    return fetch(`${this.#origin}/fs${p}`);
+  }
+
+  stdout(msg) {
+    if (this.#redirectWasiConsole) {
+      this.#wsStdout.send(msg);
+    } else {
+      console.info(msg);
+    }
+  }
+
+  stderr(msg) {
+    if (this.#redirectWasiConsole) {
+      this.#wsStderr.send(msg);
+    } else {
+      console.warn(msg);
+    }
+  }
+}
+
+// Actual implementation of endpoints used by DyLDRPC
+class DyLDRPCServer {
+  #dyldHost = new DyLDHost();
+  #server;
+  #wss;
+
+  constructor({
+    host,
+    port,
+    dyldPath,
+    libdir,
+    ghciSoPath,
+    args,
+    redirectWasiConsole,
+  }) {
+    this.#server = http.createServer(async (req, res) => {
+      const origin = originFromServerAddress(await this.listening);
+
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Access-Control-Allow-Headers", "*");
+
+      if (req.method === "OPTIONS") {
+        res.writeHead(204);
+        res.end();
+        return;
+      }
+
+      if (req.url === "/main.html") {
+        res.writeHead(200, {
+          "Content-Type": "text/html",
+        });
+        res.end(
+          `
+<!DOCTYPE html>
+<title>wasm ghci</title>
+<script type="module" src="./main.js"></script>
+`
+        );
+        return;
+      }
+
+      if (req.url === "/main.js") {
+        res.writeHead(200, {
+          "Content-Type": "application/javascript",
+        });
+        res.end(
+          `
+import { DyLDRPC, main } from "./fs${dyldPath}";
+const args = ${JSON.stringify({ libdir, ghciSoPath, args })};
+args.rpc = new DyLDRPC({origin: "${origin}", redirectWasiConsole: ${redirectWasiConsole}});
+args.rpc.opened.then(() => main(args));
+`
+        );
+        return;
+      }
+
+      if (req.url.startsWith("/fs")) {
+        const p = req.url.replace("/fs", "");
+
+        res.setHeader(
+          "Content-Type",
+          {
+            ".mjs": "application/javascript",
+            ".so": "application/wasm",
+          }[path.extname(p)] || "application/octet-stream"
+        );
+
+        const buf = Buffer.from(await fs.promises.readFile(p));
+        const etag = `sha512-${Buffer.from(
+          await crypto.subtle.digest("SHA-512", buf)
+        ).toString("base64")}`;
+
+        res.setHeader("ETag", etag);
+
+        if (req.headers["if-none-match"] === etag) {
+          res.writeHead(304);
+          res.end();
+          return;
+        }
+
+        res.setHeader("Content-Encoding", "br");
+
+        res.writeHead(200);
+        res.end(
+          await util.promisify(zlib.brotliCompress)(buf, {
+            params: {
+              [zlib.constants.BROTLI_PARAM_QUALITY]:
+                zlib.constants.BROTLI_MIN_QUALITY,
+            },
+          })
+        );
+        return;
+      }
+
+      if (req.url.startsWith("/rpc")) {
+        const endpoint = req.url.replace("/rpc/", "");
+
+        let body = "";
+        for await (const chunk of req) {
+          body += chunk;
+        }
+
+        res.writeHead(200, {
+          "Content-Type": "application/json",
+        });
+        res.end(
+          JSON.stringify(await this.#dyldHost[endpoint](...JSON.parse(body)))
+        );
+        return;
+      }
+
+      res.writeHead(404, {
+        "Content-Type": "text/plain",
+      });
+      res.end("not found");
+    });
+
+    this.closed = new Promise((res) => this.#server.on("close", res));
+
+    this.#wss = new ws.WebSocketServer({ server: this.#server });
+    this.#wss.on("connection", (ws) => {
+      ws.addEventListener("error", () => {
+        this.#wss.close();
+        this.#server.close();
+      });
+
+      ws.addEventListener("close", () => {
+        this.#wss.close();
+        this.#server.close();
+      });
+
+      if (ws.protocol === "pipe") {
+        (async () => {
+          for await (const buf of this.#dyldHost.readStream) {
+            ws.send(buf);
+          }
+        })();
+        const writer = this.#dyldHost.writeStream.getWriter();
+        ws.addEventListener("message", (ev) =>
+          writer.write(new Uint8Array(ev.data))
+        );
+        return;
+      }
+
+      if (ws.protocol === "sig") {
+        this.#dyldHost.installSignalHandlers(() => ws.send(new Uint8Array(0)));
+        return;
+      }
+
+      if (ws.protocol === "stdout") {
+        ws.addEventListener("message", (ev) => console.info(ev.data));
+        return;
+      }
+
+      if (ws.protocol === "stderr") {
+        ws.addEventListener("message", (ev) => console.warn(ev.data));
+        return;
+      }
+
+      throw new Error(`unknown protocol ${ws.protocol}`);
+    });
+
+    this.listening = new Promise((res) =>
+      this.#server.listen({ host, port }, () => res(this.#server.address()))
+    );
+  }
+}
+
 // The real stuff
 class DyLD {
   // Wasm page size.
@@ -231,10 +673,7 @@ class DyLD {
   // memory access near this address will trap immediately.
   //
   // In JS API i32 is signed, hence this layer of redirection.
-  static #poison = new WebAssembly.Global(
-    { value: "i32", mutable: false },
-    0xffffffff - DyLD.#pageSize
-  ).value;
+  static #poison = (0xffffffff - DyLD.#pageSize) | 0;
 
   // When processing exports, skip the following ones since they're
   // generated by wasm-ld.
@@ -245,22 +684,13 @@ class DyLD {
     "__wasm_call_ctors",
   ]);
 
-  // Virtual file descriptors designated for IPC logic and passed to
-  // iserv main. uvwasi doesn't support preopening host file
-  // descriptors as wasi file descriptors so we designate them and
-  // hook certain wasi syscalls on them, so that the pipe file
-  // descriptors passed from GHC can be used to communicate with the
-  // wasm side.
-  static read_fd = 0x7ffffffe;
-  static write_fd = 0x7fffffff;
+  // Handles RPC logic back to host in a browser, or just do plain
+  // function calls in node
+  #rpc;
 
   // The WASI instance to provide wasi imports, shared across all wasm
   // instances
   #wasi;
-
-  // The actual wasi_snapshot_preview1 import object, after hooking
-  // the wasi syscalls provided by uvwasi.
-  #wasiImport;
 
   // Wasm memory & table
   #memory = new WebAssembly.Memory({ initial: 1 });
@@ -277,9 +707,6 @@ class DyLD {
 
   // The JSVal manager
   #jsvalManager = new JSValManager();
-
-  // Deduped absolute paths of directories where we lookup .so files
-  #rpaths = new Set();
 
   // sonames of loaded sos.
   //
@@ -312,140 +739,29 @@ class DyLD {
   // Global STG registers
   #regs = {};
 
-  constructor({ args, out_fd, in_fd }) {
-    this.#wasi = new WASI({
-      version: "preview1",
-      args,
-      env: { PATH: "", PWD: process.cwd() },
-      preopens: { "/": "/" },
-    });
+  constructor({ args, rpc }) {
+    this.#rpc = rpc;
 
-    this.#wasiImport = {};
-
-    // https://gitlab.haskell.org/ghc/wasi-libc/-/blob/master/libc-bottom-half/headers/public/wasi/api.h
-    for (const k in this.#wasi.wasiImport) {
-      switch (k) {
-        case "fd_fdstat_get": {
-          this.#wasiImport[k] = (fd, retptr0) => {
-            switch (fd) {
-              case DyLD.read_fd: {
-                const fdstat = new DataView(this.#memory.buffer, retptr0, 24);
-                fdstat.setUint8(0, 6); // __wasi_filetype_t fs_filetype;
-                fdstat.setUint16(2, 0, true); //  __wasi_fdflags_t fs_flags;
-                fdstat.setBigUint64(8, (1n << 1n) | (1n << 21n), true); // __wasi_rights_t fs_rights_base;
-                fdstat.setBigUint64(16, (1n << 1n) | (1n << 21n), true); // __wasi_rights_t fs_rights_inheriting;
-                return 0;
-              }
-              case DyLD.write_fd: {
-                const fdstat = new DataView(this.#memory.buffer, retptr0, 24);
-                fdstat.setUint8(0, 6); // __wasi_filetype_t fs_filetype;
-                fdstat.setUint16(2, 0, true); //  __wasi_fdflags_t fs_flags;
-                fdstat.setBigUint64(8, (1n << 6n) | (1n << 21n), true); // __wasi_rights_t fs_rights_base;
-                fdstat.setBigUint64(16, (1n << 1n) | (1n << 21n), true); // __wasi_rights_t fs_rights_inheriting;
-                return 0;
-              }
-              default: {
-                return this.#wasi.wasiImport[k](fd, retptr0);
-              }
-            }
-          };
-          break;
-        }
-
-        case "fd_filestat_get": {
-          this.#wasiImport[k] = (fd, retptr0) => {
-            switch (fd) {
-              case DyLD.read_fd: {
-                const filestat = new DataView(this.#memory.buffer, retptr0, 64);
-                filestat.setBigUint64(0, 109n, true); // __wasi_device_t dev;
-                filestat.setBigUint64(8, BigInt(DyLD.read_fd), true); // __wasi_inode_t ino;
-                filestat.setUint8(16, 6); // __wasi_filetype_t filetype;
-                filestat.setBigUint64(24, 1n, true); // __wasi_linkcount_t nlink;
-                filestat.setBigUint64(32, 0n, true); // __wasi_filesize_t size;
-                filestat.setBigUint64(40, 0n, true); // __wasi_timestamp_t atim;
-                filestat.setBigUint64(48, 0n, true); // __wasi_timestamp_t mtim;
-                filestat.setBigUint64(56, 0n, true); // __wasi_timestamp_t ctim;
-                return 0;
-              }
-              case DyLD.write_fd: {
-                const filestat = new DataView(this.#memory.buffer, retptr0, 64);
-                filestat.setBigUint64(0, 109n, true); // __wasi_device_t dev;
-                filestat.setBigUint64(8, BigInt(DyLD.read_fd), true); // __wasi_inode_t ino;
-                filestat.setUint8(16, 6); // __wasi_filetype_t filetype;
-                filestat.setBigUint64(24, 1n, true); // __wasi_linkcount_t nlink;
-                filestat.setBigUint64(32, 0n, true); // __wasi_filesize_t size;
-                filestat.setBigUint64(40, 0n, true); // __wasi_timestamp_t atim;
-                filestat.setBigUint64(48, 0n, true); // __wasi_timestamp_t mtim;
-                filestat.setBigUint64(56, 0n, true); // __wasi_timestamp_t ctim;
-                return 0;
-              }
-              default: {
-                return this.#wasi.wasiImport[k](fd, retptr0);
-              }
-            }
-          };
-          break;
-        }
-
-        case "fd_read": {
-          this.#wasiImport[k] = (fd, iovs, iovs_len, retptr0) => {
-            switch (fd) {
-              case DyLD.read_fd: {
-                assert(iovs_len === 1);
-                const iov = new DataView(this.#memory.buffer, iovs, 8);
-                const buf = iov.getUint32(0, true),
-                  buf_len = iov.getUint32(4, true);
-                const bytes_read = fsSync.readSync(
-                  in_fd,
-                  new Uint8Array(this.#memory.buffer, buf, buf_len)
-                );
-                new DataView(this.#memory.buffer, retptr0, 4).setUint32(
-                  0,
-                  bytes_read,
-                  true
-                );
-                return 0;
-              }
-              default: {
-                return this.#wasi.wasiImport[k](fd, iovs, iovs_len, retptr0);
-              }
-            }
-          };
-          break;
-        }
-
-        case "fd_write": {
-          this.#wasiImport[k] = (fd, iovs, iovs_len, retptr0) => {
-            switch (fd) {
-              case DyLD.write_fd: {
-                assert(iovs_len === 1);
-                const iov = new DataView(this.#memory.buffer, iovs, 8);
-                const buf = iov.getUint32(0, true),
-                  buf_len = iov.getUint32(4, true);
-                const bytes_written = fsSync.writeSync(
-                  out_fd,
-                  new Uint8Array(this.#memory.buffer, buf, buf_len)
-                );
-                new DataView(this.#memory.buffer, retptr0, 4).setUint32(
-                  0,
-                  bytes_written,
-                  true
-                );
-                return 0;
-              }
-              default: {
-                return this.#wasi.wasiImport[k](fd, iovs, iovs_len, retptr0);
-              }
-            }
-          };
-          break;
-        }
-
-        default: {
-          this.#wasiImport[k] = (...args) => this.#wasi.wasiImport[k](...args);
-          break;
-        }
-      }
+    if (isNode) {
+      this.#wasi = new wasi.WASI({
+        version: "preview1",
+        args,
+        env: { PATH: "", PWD: process.cwd() },
+        preopens: { "/": "/" },
+      });
+    } else {
+      this.#wasi = new wasi.WASI(
+        args,
+        [],
+        [
+          new wasi.OpenFile(
+            new wasi.File(new Uint8Array(), { readonly: true })
+          ),
+          wasi.ConsoleStdout.lineBuffered((msg) => this.#rpc.stdout(msg)),
+          wasi.ConsoleStdout.lineBuffered((msg) => this.#rpc.stderr(msg)),
+        ],
+        { debug: false }
+      );
     }
 
     // Keep this in sync with rts/wasm/Wasm.S!
@@ -477,31 +793,12 @@ class DyLD {
     }
   }
 
-  // removeLibrarySearchPath is a no-op in ghci. If you have a use
-  // case where it's actually needed, I would like to hear..
-  addLibrarySearchPath(p) {
-    this.#rpaths.add(path.resolve(p));
+  async addLibrarySearchPath(p) {
+    return this.#rpc.addLibrarySearchPath(p);
   }
 
-  // f can be either just soname or an absolute path, will be
-  // canonicalized and checked for file existence here. Throws if
-  // non-existent.
   async findSystemLibrary(f) {
-    if (path.isAbsolute(f)) {
-      await fs.access(f, fs.constants.R_OK);
-      return f;
-    }
-    const r = (
-      await Promise.allSettled(
-        [...this.#rpaths].map(async (p) => {
-          const r = path.resolve(p, f);
-          await fs.access(r, fs.constants.R_OK);
-          return r;
-        })
-      )
-    ).find(({ status }) => status === "fulfilled");
-    assert(r, `findSystemLibrary(${f}): not found in ${[...this.#rpaths]}`);
-    return r.value;
+    return this.#rpc.findSystemLibrary(f);
   }
 
   // When we do loadDLL, we first perform "downsweep" which return a
@@ -517,7 +814,9 @@ class DyLD {
   // WebAssembly.Module in loadDLL logic. This way we can harness some
   // background parallelism.
   async #downsweep(p) {
-    const soname = path.basename(p);
+    const toks = p.split("/");
+
+    const soname = toks[toks.length - 1];
 
     if (this.#loadedSos.has(soname)) {
       return [];
@@ -526,22 +825,23 @@ class DyLD {
     // Do this before loading dependencies to break potential cycles.
     this.#loadedSos.add(soname);
 
-    if (path.isAbsolute(p)) {
+    if (p.startsWith("/")) {
       // GHC may attempt to load libghc_tmp_2.so that needs
       // libghc_tmp_1.so in a temporary directory without adding that
       // directory via addLibrarySearchPath
-      this.addLibrarySearchPath(path.dirname(p));
+      toks.pop();
+      await this.addLibrarySearchPath(toks.join("/"));
     } else {
       p = await this.findSystemLibrary(p);
     }
 
-    const buf = await fs.readFile(p);
-    const modp = WebAssembly.compile(buf);
+    const resp = await this.#rpc.fetchWasm(p);
+    const resp2 = resp.clone();
+    const modp = WebAssembly.compileStreaming(resp);
     // Parse dylink.0 from the raw buffer, not via
-    // WebAssembly.Module.customSections(). At this point we only care
-    // about WASM_DYLINK_NEEDED, but might as well do the rest of the
-    // parsing anyway.
-    const r = parseDyLink0(buf);
+    // WebAssembly.Module.customSections(). This should return asap
+    // without waiting for rest of the wasm module binary data.
+    const r = await parseDyLink0(resp2.body.getReader());
     r.modp = modp;
     r.soname = soname;
     let acc = [];
@@ -563,7 +863,7 @@ class DyLD {
       soname,
     } of await this.#downsweep(p)) {
       const import_obj = {
-        wasi_snapshot_preview1: this.#wasiImport,
+        wasi_snapshot_preview1: this.#wasi.wasiImport,
         env: {
           memory: this.#memory,
           __indirect_function_table: this.#table,
@@ -585,7 +885,7 @@ class DyLD {
       // __memory_base & __table_base, different for each .so
       let memory_base;
       let table_base = this.#table.grow(tableSize);
-      assert(tableP2Align === 0);
+      console.assert(tableP2Align === 0);
 
       // libc.so is always the first one to be ever loaded and has VIP
       // treatment. It will never be unloaded even if we support
@@ -597,7 +897,7 @@ class DyLD {
         // __heap_base/__heap_end so that dlmalloc can initialize
         // global state. wasm-ld aligns __heap_base to page sized so
         // we follow suit.
-        assert(memP2Align <= Math.log2(DyLD.#pageSize));
+        console.assert(memP2Align <= Math.log2(DyLD.#pageSize));
         memory_base = DyLD.#pageSize;
         const data_pages = Math.ceil(memSize / DyLD.#pageSize);
         this.#memory.grow(data_pages + 1);
@@ -629,7 +929,8 @@ class DyLD {
 
       // Fulfill the ghc_wasm_jsffi imports. Use new Function()
       // instead of eval() to prevent bindings in this local scope to
-      // be accessed by JSFFI code snippets.
+      // be accessed by JSFFI code snippets. See Note [Variable passing in JSFFI]
+      // for what's going on here.
       Object.assign(
         import_obj.ghc_wasm_jsffi,
         new Function(
@@ -692,30 +993,15 @@ class DyLD {
             continue;
           }
 
-          // For lazy GOT.func entries we can do better than poison:
-          // insert a stub in the table, so we at least get an error
-          // message that includes the missing function's name, not a
-          // mysterious table trap. The function type is Cmm function
-          // type as a best effort guess, if there's a type mismatch
-          // then call_indirect would trap.
-          //
-          // Also set a __poison field since we can't compare value
-          // against DyLD.#poison.
+          // Can't find this function, so poison it like GOT.mem.
+          // TODO: when wasm type reflection is widely available in
+          // browsers, use the WebAssembly.Function constructor to
+          // dynamically create a stub function that does better error
+          // reporting
           this.#gotFunc[name] = new WebAssembly.Global(
             { value: "i32", mutable: true },
-            this.#table.grow(
-              1,
-              new WebAssembly.Function(
-                { parameters: [], results: ["i32"] },
-                () => {
-                  throw new WebAssembly.RuntimeError(
-                    `non-existent function ${name}`
-                  );
-                }
-              )
-            )
+            DyLD.#poison
           );
-          this.#gotFunc[name].__poison = true;
           continue;
         }
 
@@ -737,7 +1023,7 @@ class DyLD {
         // Invariant: each function symbol can be defined only once.
         // This is incorrect for weak symbols which are allowed to
         // appear multiple times but this is sufficient in practice.
-        assert(
+        console.assert(
           !this.exportFuncs[k],
           `duplicate symbol ${k} when loading ${soname}`
         );
@@ -753,8 +1039,7 @@ class DyLD {
           if (this.#gotFunc[k]) {
             // ghc-prim/ghc-internal may export functions imported by
             // rts
-            assert(this.#gotFunc[k].__poison);
-            delete this.#gotFunc[k].__poison;
+            console.assert(this.#gotFunc[k].value === DyLD.#poison);
             this.#table.set(this.#gotFunc[k].value, v);
           }
           continue;
@@ -764,7 +1049,7 @@ class DyLD {
         if (v instanceof WebAssembly.Global) {
           const addr = v.value + memory_base;
           if (this.#gotMem[k]) {
-            assert(this.#gotMem[k].value === DyLD.#poison);
+            console.assert(this.#gotMem[k].value === DyLD.#poison);
             this.#gotMem[k].value = addr;
           } else {
             this.#gotMem[k] = new WebAssembly.Global(
@@ -796,12 +1081,17 @@ class DyLD {
 
       const init = () => {
         // See
-        // https://github.com/llvm/llvm-project/blob/llvmorg-19.1.1/lld/wasm/Writer.cpp#L1430,
-        // there's also __wasm_init_memory (not relevant yet, we don't
+        // https://gitlab.haskell.org/haskell-wasm/llvm-project/-/blob/release/20.x/lld/wasm/Writer.cpp#L1450,
+        // __wasm_apply_data_relocs is now optional so only call it if
+        // it exists (we know for sure it exists for libc.so though).
+        // There's also __wasm_init_memory (not relevant yet, we don't
         // use passive segments) & __wasm_apply_global_relocs but
         // those are included in the start function and should have
-        // been called upon instantiation.
-        instance.exports.__wasm_apply_data_relocs();
+        // been called upon instantiation, see
+        // Writer::createStartFunction().
+        if (instance.exports.__wasm_apply_data_relocs) {
+          instance.exports.__wasm_apply_data_relocs();
+        }
 
         instance.exports._initialize();
       };
@@ -824,12 +1114,12 @@ class DyLD {
     if (this.#gotMem[sym] && this.#gotMem[sym].value !== DyLD.#poison) {
       return this.#gotMem[sym].value;
     }
-    if (this.#gotFunc[sym] && !this.#gotFunc[sym].__poison) {
+    if (this.#gotFunc[sym] && this.#gotFunc[sym].value !== DyLD.#poison) {
       return this.#gotFunc[sym].value;
     }
     // Not in GOT.func yet, create the entry on demand
     if (this.exportFuncs[sym]) {
-      assert(!this.#gotFunc[sym]);
+      console.assert(!this.#gotFunc[sym]);
       const addr = this.#table.grow(1, this.exportFuncs[sym]);
       this.#gotFunc[sym] = new WebAssembly.Global(
         { value: "i32", mutable: true },
@@ -841,26 +1131,159 @@ class DyLD {
   }
 }
 
-function isMain() {
-  return import.meta.filename === process.argv[1];
+export async function main({ rpc, libdir, ghciSoPath, args }) {
+  try {
+    const dyld = new DyLD({
+      args: ["dyld.so", ...args],
+      rpc,
+    });
+    await dyld.addLibrarySearchPath(libdir);
+    await dyld.loadDLL(ghciSoPath);
+
+    const reader = rpc.readStream.getReader();
+    const writer = rpc.writeStream.getWriter();
+
+    const cb_sig = (cb) => {
+      rpc.installSignalHandlers(cb);
+    };
+
+    const cb_recv = async () => {
+      const { done, value } = await reader.read();
+      if (done) {
+        throw new Error("not enough bytes");
+      }
+      return value;
+    };
+    const cb_send = (buf) => {
+      writer.write(new Uint8Array(buf));
+    };
+
+    await dyld.exportFuncs.defaultServer(cb_sig, cb_recv, cb_send);
+  } finally {
+    rpc.close();
+  }
 }
 
-if (isMain()) {
-  // sysroot libdir that contains libc.so etc
-  const libdir = process.argv[2],
-    ghci_so_path = process.argv[3];
+(async () => {
+  if (!isNode) {
+    return;
+  }
 
-  // Inherited pipe file descriptors from GHC
-  const out_fd = Number.parseInt(process.argv[4]),
-    in_fd = Number.parseInt(process.argv[5]);
+  const libdir = process.argv[2];
+  const ghciSoPath = process.argv[3];
+  const args = process.argv.slice(6);
 
-  const dyld = new DyLD({
-    args: ["dyld.so", DyLD.write_fd, DyLD.read_fd, ...process.argv.slice(6)],
-    out_fd,
-    in_fd,
+  if (!process.env.GHCI_BROWSER) {
+    const rpc = new DyLDHost();
+    await main({
+      rpc,
+      libdir,
+      ghciSoPath,
+      args,
+    });
+    return;
+  }
+
+  if (!ws) {
+    throw new Error(
+      "Please install ws and ensure it's available via NODE_PATH"
+    );
+  }
+
+  const server = new DyLDRPCServer({
+    host: process.env.GHCI_BROWSER_HOST || "127.0.0.1",
+    port: process.env.GHCI_BROWSER_PORT || 0,
+    dyldPath: import.meta.filename,
+    libdir,
+    ghciSoPath,
+    args,
+    redirectWasiConsole:
+      process.env.GHCI_BROWSER_PUPPETEER_LAUNCH_OPTS ||
+      process.env.GHCI_BROWSER_PLAYWRIGHT_BROWSER_TYPE
+        ? false
+        : Boolean(process.env.GHCI_BROWSER_REDIRECT_WASI_CONSOLE),
   });
-  dyld.addLibrarySearchPath(libdir);
-  await dyld.loadDLL(ghci_so_path);
+  const origin = originFromServerAddress(await server.listening);
 
-  await dyld.exportFuncs.defaultServer();
-}
+  // https://pptr.dev/api/puppeteer.consolemessage
+  // https://playwright.dev/docs/api/class-consolemessage
+  const on_console_msg = (msg) => {
+    switch (msg.type()) {
+      case "error":
+      case "warn":
+      case "warning":
+      case "trace":
+      case "assert": {
+        console.error(msg.text());
+        break;
+      }
+      default: {
+        console.log(msg.text());
+        break;
+      }
+    }
+  };
+
+  if (process.env.GHCI_BROWSER_PUPPETEER_LAUNCH_OPTS) {
+    let puppeteer;
+    try {
+      puppeteer = require("puppeteer");
+    } catch {
+      puppeteer = require("puppeteer-core");
+    }
+
+    // https://pptr.dev/api/puppeteer.puppeteernode.launch
+    const browser = await puppeteer.launch(
+      JSON.parse(process.env.GHCI_BROWSER_PUPPETEER_LAUNCH_OPTS)
+    );
+    try {
+      const page = await browser.newPage();
+
+      // https://pptr.dev/api/puppeteer.pageevent
+      page.on("console", on_console_msg);
+      page.on("error", (err) => console.error(err));
+      page.on("pageerror", (err) => console.error(err));
+
+      await page.goto(`${origin}/main.html`);
+      await server.closed;
+      return;
+    } finally {
+      await browser.close();
+    }
+  }
+
+  if (process.env.GHCI_BROWSER_PLAYWRIGHT_BROWSER_TYPE) {
+    let playwright;
+    try {
+      playwright = require("playwright");
+    } catch {
+      playwright = require("playwright-core");
+    }
+
+    // https://playwright.dev/docs/api/class-browsertype#browser-type-launch
+    const browser = await playwright[
+      process.env.GHCI_BROWSER_PLAYWRIGHT_BROWSER_TYPE
+    ].launch(
+      process.env.GHCI_BROWSER_PLAYWRIGHT_LAUNCH_OPTS
+        ? JSON.parse(process.env.GHCI_BROWSER_PLAYWRIGHT_LAUNCH_OPTS)
+        : {}
+    );
+    try {
+      const page = await browser.newPage();
+
+      // https://playwright.dev/docs/api/class-page#events
+      page.on("console", on_console_msg);
+      page.on("pageerror", (err) => console.error(err));
+
+      await page.goto(`${origin}/main.html`);
+      await server.closed;
+      return;
+    } finally {
+      await browser.close();
+    }
+  }
+
+  console.log(
+    `Open ${origin}/main.html or import ${origin}/main.js to boot ghci`
+  );
+})();

@@ -1,3 +1,5 @@
+{-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE RecursiveDo #-}
 
 module GHC.Tc.Solver.Solve (
@@ -5,6 +7,7 @@ module GHC.Tc.Solver.Solve (
      solveWanteds,        -- Solves WantedConstraints
      solveSimpleGivens,   -- Solves [Ct]
      solveSimpleWanteds,  -- Solves Cts
+     solveCompletelyIfRequired,
 
      setImplicationStatus
   ) where
@@ -51,6 +54,8 @@ import GHC.Driver.Session
 import Data.List( deleteFirstsBy )
 
 import Control.Monad
+import Data.Foldable ( traverse_ )
+import Data.Maybe ( mapMaybe )
 import qualified Data.Semigroup as S
 import Data.Void( Void )
 
@@ -851,7 +856,7 @@ everything to be in terms of b, while k does none of that. This is
 ridiculous, but I (Richard E) don't see a good fix.
 
 Shortcoming 2.  Removing a redundant constraint can cause clients to fail to
-compile, by making the function more polymoprhic. Consider (#16154)
+compile, by making the function more polymorphic. Consider (#16154)
 
   f :: (a ~ Bool) => a -> Int
   f x = 3
@@ -924,20 +929,19 @@ solveSimpleWanteds simples
     go n limit wc
       | n `intGtLimit` limit
       = failTcS $ TcRnSimplifierTooManyIterations simples limit wc
-     | isEmptyBag (wc_simple wc)
-     = return (n,wc)
+      | isEmptyBag (wc_simple wc)
+      = return (n,wc)
+      | otherwise
+      = do { -- Solve
+             wc1 <- solve_simple_wanteds wc
 
-     | otherwise
-     = do { -- Solve
-            wc1 <- solve_simple_wanteds wc
+             -- Run plugins
+           ; (rerun_plugin, wc2) <- runTcPluginsWanted wc1
 
-            -- Run plugins
-          ; (rerun_plugin, wc2) <- runTcPluginsWanted wc1
-
-          ; if rerun_plugin
-            then do { traceTcS "solveSimple going round again:" (ppr rerun_plugin)
-                    ; go (n+1) limit wc2 }   -- Loop
-            else return (n, wc2) }           -- Done
+           ; if rerun_plugin
+             then do { traceTcS "solveSimple going round again:" (ppr rerun_plugin)
+                     ; go (n+1) limit wc2 }   -- Loop
+             else return (n, wc2) }           -- Done
 
 
 solve_simple_wanteds :: WantedConstraints -> TcS WantedConstraints
@@ -1053,7 +1057,7 @@ solveCt (CNonCanonical ev)                   = solveNC ev
 solveCt (CIrredCan (IrredCt { ir_ev = ev })) = solveNC ev
 
 solveCt (CEqCan (EqCt { eq_ev = ev, eq_eq_rel = eq_rel
-                           , eq_lhs = lhs, eq_rhs = rhs }))
+                      , eq_lhs = lhs, eq_rhs = rhs }))
   = solveEquality ev eq_rel (canEqLHSType lhs) rhs
 
 solveCt (CQuantCan (QCI { qci_ev = ev, qci_pend_sc = pend_sc }))
@@ -1062,7 +1066,8 @@ solveCt (CQuantCan (QCI { qci_ev = ev, qci_pend_sc = pend_sc }))
          -- rewrite the pieces and build a Reduction that will rewrite
          -- the whole constraint
        ; case classifyPredType (ctEvPred ev) of
-           ForAllPred tvs th p -> Stage $ solveForAll ev tvs th p pend_sc
+           ForAllPred tvs theta body_pred ->
+             Stage $ solveForAll ev tvs theta body_pred pend_sc
            _ -> pprPanic "SolveCt" (ppr ev) }
 
 solveCt (CDictCan (DictCt { di_ev = ev, di_pend_sc = pend_sc }))
@@ -1100,7 +1105,7 @@ solveNC ev
            IrredPred {}          -> solveIrred (IrredCt { ir_ev = ev, ir_reason = IrredShapeReason })
            EqPred eq_rel ty1 ty2 -> solveEquality ev eq_rel ty1 ty2
               -- EqPred only happens if (say) `c` is unified with `a ~# b`,
-              -- but that is rare becuase it requires c :: CONSTRAINT UnliftedRep
+              -- but that is rare because it requires c :: CONSTRAINT UnliftedRep
 
     }}
 
@@ -1182,44 +1187,96 @@ type signature.
 
 -}
 
+-- | Solve a quantified constraint that came from @CNonCanonical@ (which means
+-- that superclasses have not yet been expanded).
+--
+-- Precondition: the constraint has already been rewritten by the inert set.
 solveForAllNC :: CtEvidence -> [TcTyVar] -> TcThetaType -> TcPredType
               -> TcS (StopOrContinue Void)
--- NC: this came from CNonCanonical, so we have not yet expanded superclasses
--- Precondition: already rewritten by inert set
-solveForAllNC ev tvs theta pred
-  | isGiven ev  -- See Note [Eagerly expand given superclasses]
-  , Just (cls, tys) <- cls_pred_tys_maybe
+solveForAllNC ev tvs theta body_pred
+  | Just (cls,tys) <- getClassPredTys_maybe body_pred
+  , classHasSCs cls
   = do { dflags <- getDynFlags
-       ; sc_cts <- mkStrictSuperClasses (givensFuel dflags) ev tvs theta cls tys
-       -- givensFuel dflags: See Note [Expanding Recursive Superclasses and ExpansionFuel]
-       ; emitWork (listToBag sc_cts)
-       ; solveForAll ev tvs theta pred doNotExpand }
-       -- doNotExpand: as we have already (eagerly) expanded superclasses for this class
+       -- Either expand superclasses (Givens) or provide fuel to do so (Wanteds)
+       ; if isGiven ev
+         then
+           -- See Note [Eagerly expand given superclasses]
+           -- givensFuel dflags: See Note [Expanding Recursive Superclasses and ExpansionFuel]
+           do { sc_cts <- mkStrictSuperClasses (givensFuel dflags) ev tvs theta cls tys
+              ; emitWork (listToBag sc_cts)
+              ; solveForAll ev tvs theta body_pred doNotExpand }
+         else
+           -- See invariants (a) and (b) in QCI.qci_pend_sc
+           -- qcsFuel dflags: See Note [Expanding Recursive Superclasses and ExpansionFuel]
+           -- See Note [Quantified constraints]
+           do { solveForAll ev tvs theta body_pred (qcsFuel dflags) }
+       }
 
   | otherwise
-  = do { dflags <- getDynFlags
-       ; let fuel | Just (cls, _) <- cls_pred_tys_maybe
-                  , classHasSCs cls = qcsFuel dflags
-                  -- See invariants (a) and (b) in QCI.qci_pend_sc
-                  -- qcsFuel dflags: See Note [Expanding Recursive Superclasses and ExpansionFuel]
-                  -- See Note [Quantified constraints]
-                  | otherwise = doNotExpand
-       ; solveForAll ev tvs theta pred fuel }
-  where
-    cls_pred_tys_maybe = getClassPredTys_maybe pred
+  = solveForAll ev tvs theta body_pred doNotExpand
 
+-- | Solve a canonical quantified constraint.
+--
+-- Precondition: the constraint has already been rewritten by the inert set.
 solveForAll :: CtEvidence -> [TcTyVar] -> TcThetaType -> PredType -> ExpansionFuel
             -> TcS (StopOrContinue Void)
--- Precondition: already rewritten by inert set
-solveForAll ev@(CtWanted { ctev_dest = dest, ctev_rewriters = rewriters, ctev_loc = loc })
-            tvs theta pred _fuel
-  = -- See Note [Solving a Wanted forall-constraint]
-    TcS.setSrcSpan (getCtLocEnvLoc $ ctLocEnv loc) $
+solveForAll ev tvs theta body_pred fuel =
+  case ev of
+    CtGiven {} ->
+      -- See Note [Solving a Given forall-constraint]
+      do { addInertForAll qci
+         ; stopWith ev "Given forall-constraint" }
+    CtWanted wtd ->
+      -- See Note [Solving a Wanted forall-constraint]
+      runSolverStage $
+      do { tryInertQCs qci
+         ; Stage $ solveWantedForAll_implic wtd tvs theta body_pred
+         }
+  where
+    qci = QCI { qci_ev = ev, qci_tvs = tvs
+              , qci_body = body_pred, qci_pend_sc = fuel }
+
+
+tryInertQCs :: QCInst -> SolverStage ()
+tryInertQCs qc
+  = Stage $
+    do { inerts <- getInertCans
+       ; try_inert_qcs qc (inert_insts inerts) }
+
+try_inert_qcs :: QCInst -> [QCInst] -> TcS (StopOrContinue ())
+try_inert_qcs (QCI { qci_ev = ev_w }) inerts =
+  case mapMaybe matching_inert inerts of
+    [] -> continueWith ()
+    ev_i:_ ->
+      do { traceTcS "tryInertQCs:KeepInert" (ppr ev_i)
+         ; setEvBindIfWanted ev_w EvCanonical (ctEvTerm ev_i)
+         ; stopWith ev_w "Solved Wanted forall-constraint from inert" }
+  where
+    matching_inert (QCI { qci_ev = ev_i })
+      | ctEvPred ev_i `tcEqType` ctEvPred ev_w
+      = Just ev_i
+      | otherwise
+      = Nothing
+
+-- | Solve a (canonical) Wanted quantified constraint by emitting an implication.
+--
+-- See Note [Solving a Wanted forall-constraint]
+solveWantedForAll_implic :: WantedCtEvidence -> [TcTyVar] -> TcThetaType -> PredType -> TcS (StopOrContinue Void)
+solveWantedForAll_implic
+  wtd@(WantedCt { ctev_dest = dest, ctev_loc = loc, ctev_rewriters = rewriters })
+  tvs theta body_pred =
+    -- We are about to do something irreversible (turning a quantified constraint
+    -- into an implication), so wrap the inner call in solveCompletelyIfRequired
+    -- to ensure we can roll back if we can't solve the implication fully.
+    -- See Note [TcSSpecPrag] in GHC.Tc.Solver.Monad.
+    solveCompletelyIfRequired (mkNonCanonical $ CtWanted wtd) $
+
     -- This setSrcSpan is important: the emitImplicationTcS uses that
     -- TcLclEnv for the implication, and that in turn sets the location
     -- for the Givens when solving the constraint (#21006)
+    TcS.setSrcSpan (getCtLocEnvLoc $ ctLocEnv loc) $
     do { let empty_subst = mkEmptySubst $ mkInScopeSet $
-                           tyCoVarsOfTypes (pred:theta) `delVarSetList` tvs
+                           tyCoVarsOfTypes (body_pred:theta) `delVarSetList` tvs
              is_qc = IsQC (ctLocOrigin loc)
 
          -- rec {..}: see Note [Keeping SkolemInfo inside a SkolemTv]
@@ -1227,7 +1284,7 @@ solveForAll ev@(CtWanted { ctev_dest = dest, ctev_rewriters = rewriters, ctev_lo
          -- Very like the code in tcSkolDFunType
        ; rec { skol_info <- mkSkolemInfo skol_info_anon
              ; (subst, skol_tvs) <- tcInstSkolTyVarsX skol_info empty_subst tvs
-             ; let inst_pred  = substTy    subst pred
+             ; let inst_pred  = substTy    subst body_pred
                    inst_theta = substTheta subst theta
                    skol_info_anon = InstSkol is_qc (get_size inst_pred) }
 
@@ -1240,8 +1297,8 @@ solveForAll ev@(CtWanted { ctev_dest = dest, ctev_rewriters = rewriters, ctev_lo
                          -- See (QC-INV) in Note [Solving a Wanted forall-constraint]
                    ; wanted_ev <- newWantedNC loc' rewriters inst_pred
                          -- NB: inst_pred can be an equality
-                   ; return ( ctEvEvId wanted_ev
-                            , unitBag (mkNonCanonical wanted_ev)) }
+                   ; return ( wantedCtEvEvId wanted_ev
+                            , unitBag (mkNonCanonical $ CtWanted wanted_ev)) }
 
       ; traceTcS "solveForAll" (ppr given_ev_vars $$ ppr wanteds $$ ppr w_id)
       ; ev_binds <- emitImplicationTcS lvl skol_info_anon skol_tvs given_ev_vars wanteds
@@ -1250,7 +1307,8 @@ solveForAll ev@(CtWanted { ctev_dest = dest, ctev_rewriters = rewriters, ctev_lo
         EvFun { et_tvs = skol_tvs, et_given = given_ev_vars
               , et_binds = ev_binds, et_body = w_id }
 
-      ; stopWith ev "Wanted forall-constraint" }
+      ; stopWith (CtWanted wtd) "Wanted forall-constraint (implication)"
+      }
   where
     -- Getting the size of the head is a bit horrible
     -- because of the special treament for class predicates
@@ -1258,24 +1316,23 @@ solveForAll ev@(CtWanted { ctev_dest = dest, ctev_rewriters = rewriters, ctev_lo
                       ClassPred cls tys -> pSizeClassPred cls tys
                       _                 -> pSizeType pred
 
- -- See Note [Solving a Given forall-constraint]
-solveForAll ev@(CtGiven {}) tvs _theta pred fuel
-  = do { addInertForAll qci
-       ; stopWith ev "Given forall-constraint" }
-  where
-    qci = QCI { qci_ev = ev, qci_tvs = tvs
-              , qci_pred = pred, qci_pend_sc = fuel }
-
 {- Note [Solving a Wanted forall-constraint]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Solving a wanted forall (quantified) constraint
-  [W] df :: forall ab. (Eq a, Ord b) => C x a b
+  [W] df :: forall a b. (Eq a, Ord b) => C x a b
 is delightfully easy.   Just build an implication constraint
     forall ab. (g1::Eq a, g2::Ord b) => [W] d :: C x a
 and discharge df thus:
     df = /\ab. \g1 g2. let <binds> in d
 where <binds> is filled in by solving the implication constraint.
 All the machinery is to hand; there is little to do.
+
+We can take a more straightforward parth when there is a matching Given, e.g.
+  [W] dg :: forall c d. (Eq c, Ord d) => C x c d
+In this case, it's better to directly solve the Wanted from the Given, instead
+of building an implication. This is more than a simple optimisation; see
+Note [Solving Wanted QCs from Given QCs].
+
 
 The tricky point is about termination: see #19690.  We want to maintain
 the invariant (QC-INV):
@@ -1299,9 +1356,42 @@ Note [Solving a Given forall-constraint]
 For a Given constraint
   [G] df :: forall ab. (Eq a, Ord b) => C x a b
 we just add it to TcS's local InstEnv of known instances,
-via addInertForall.  Then, if we look up (C x Int Bool), say,
+via addInertForAll.  Then, if we look up (C x Int Bool), say,
 we'll find a match in the InstEnv.
 
+Note [Solving Wanted QCs from Given QCs]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+When we are about to solve a Wanted quantified constraint, and there is a
+Given quantified constraint with the same type, we should directly solve the
+Wanted from the Given (instead of building an implication).
+
+Not only is this more direct and efficient, sometimes it is also /necessary/.
+Consider:
+
+  f :: forall a k. (Eq a, forall x. Eq x => Eq k x) => a -> blah
+  {-# SPECIALISE (f :: forall k. (forall x. Eq x => Eq k x) => Int -> blah #-}
+
+Here we specialise the `a` parameter to `f`, leaving the quantified constraint
+untouched.  We want to get a rule like:
+
+  RULE  forall @k (d :: forall x. Eq x => Eq k x).
+            f @Int @k d = $sf @k d
+
+But when we typecheck that expression-with-a-type-signature, if we don't solve
+Wanted forall constraints directly, we will do so indirectly and end up with
+this as the LHS of the RULE:
+
+  (/\k \(df::forall x.Eq x => Eq k x). f @Int @k (/\x \(d:Eq x). df @x d))
+     @kk dd
+
+We run the simple optimiser on that, which eliminates the beta-redex. However,
+it may not eta-reduce that `/\x \(d:Eq x)...`, because we are cautious about
+eta-reduction. So we may be left with an over-complicated and hard-to-match
+RULE LHS. It's all a bit silly, because the implication constraint is /identical/;
+we just need to spot it.
+
+This came up while implementing GHC proposal 493 (allowing expresions in
+SPECIALISE pragmas).
 
 ************************************************************************
 *                                                                      *
@@ -1359,33 +1449,35 @@ finish_rewrite old_ev (Reduction co new_pred) rewriters
   = assert (isEmptyRewriterSet rewriters) $
     continueWith (setCtEvPredType old_ev new_pred)
 
-finish_rewrite ev@(CtGiven { ctev_evar = old_evar, ctev_loc = loc })
-                (Reduction co new_pred) rewriters
+finish_rewrite
+  ev@(CtGiven (GivenCt { ctev_evar = old_evar }))
+  (Reduction co new_pred)
+  rewriters
   = assert (isEmptyRewriterSet rewriters) $ -- this is a Given, not a wanted
-    do { new_ev <- newGivenEvVar loc (new_pred, new_tm)
-       ; continueWith new_ev }
-  where
-    -- mkEvCast optimises ReflCo
-    ev_rw_role = ctEvRewriteRole ev
-    new_tm = assert (coercionRole co == ev_rw_role)
-             mkEvCast (evId old_evar)
-                (downgradeRole Representational ev_rw_role co)
+    do { let loc = ctEvLoc ev
+             -- mkEvCast optimises ReflCo
+             ev_rw_role = ctEvRewriteRole ev
+             new_tm = assert (coercionRole co == ev_rw_role)
+                      mkEvCast (evId old_evar)
+                         (downgradeRole Representational ev_rw_role co)
+       ; new_ev <- newGivenEvVar loc (new_pred, new_tm)
+       ; continueWith $ CtGiven new_ev }
 
-finish_rewrite ev@(CtWanted { ctev_dest = dest
-                             , ctev_loc = loc
-                             , ctev_rewriters = rewriters })
-                (Reduction co new_pred) new_rewriters
-  = do { mb_new_ev <- newWanted loc rewriters' new_pred
-       ; let ev_rw_role = ctEvRewriteRole ev
+finish_rewrite
+  ev@(CtWanted (WantedCt { ctev_rewriters = rewriters, ctev_dest = dest }))
+  (Reduction co new_pred)
+  new_rewriters
+  = do { let loc = ctEvLoc ev
+             rewriters' = rewriters S.<> new_rewriters
+             ev_rw_role = ctEvRewriteRole ev
+       ; mb_new_ev <- newWanted loc rewriters' new_pred
        ; massert (coercionRole co == ev_rw_role)
        ; setWantedEvTerm dest EvCanonical $
             mkEvCast (getEvExpr mb_new_ev)
                      (downgradeRole Representational ev_rw_role (mkSymCo co))
        ; case mb_new_ev of
-            Fresh  new_ev -> continueWith new_ev
+            Fresh  new_ev -> continueWith $ CtWanted new_ev
             Cached _      -> stopWith ev "Cached wanted" }
-  where
-    rewriters' = rewriters S.<> new_rewriters
 
 {- *******************************************************************
 *                                                                    *
@@ -1453,7 +1545,7 @@ runTcPluginsWanted wc@(WC { wc_simple = simples1 })
   where
     setEv :: (EvTerm,Ct) -> TcS ()
     setEv (ev,ct) = case ctEvidence ct of
-      CtWanted { ctev_dest = dest } -> setWantedEvTerm dest EvCanonical ev
+      CtWanted (WantedCt { ctev_dest = dest }) -> setWantedEvTerm dest EvCanonical ev
            -- TODO: plugins should be able to signal non-canonicity
       _ -> panic "runTcPluginsWanted.setEv: attempt to solve non-wanted!"
 
@@ -1539,4 +1631,105 @@ runTcPluginSolvers solvers all_cts
       CtGiven  {} -> (ct:givens, wanteds)
       CtWanted {} -> (givens, (ev,ct):wanteds)
 
+--------------------------------------------------------------------------------
 
+-- | If the mode is 'TcSSpecPrag', attempt to fully solve the Wanted
+-- constraints that arise from solving 'Ct'.
+--
+-- If not in 'TcSSpecPrag' mode, simply run 'thing_inside'.
+--
+-- See Note [TcSSpecPrag] in GHC.Tc.Solver.Monad.
+solveCompletelyIfRequired :: Ct -> TcS (StopOrContinue a) -> TcS (StopOrContinue a)
+solveCompletelyIfRequired ct (TcS thing_inside)
+  = TcS $ \ env@(TcSEnv { tcs_ev_binds = outer_ev_binds_var
+                        , tcs_unified  = outer_unified_var
+                        , tcs_unif_lvl = outer_unif_lvl_var
+                        , tcs_inerts   = outer_inert_var
+                        , tcs_count    = outer_count
+                        , tcs_mode     = mode
+                        }) ->
+  case mode of
+    TcSSpecPrag ->
+      do { traceTc "solveCompletelyIfRequired {" empty
+           -- Create a fresh environment for the inner computation
+         ; outer_inerts <- TcM.readTcRef outer_inert_var
+         ; let outer_givens = inertGivens outer_inerts
+           -- Keep the ambient Given inerts, but drop the Wanteds.
+         ; new_inert_var    <- TcM.newTcRef outer_givens
+         ; new_wl_var       <- TcM.newTcRef emptyWorkList
+         ; new_ev_binds_var <- TcM.newTcEvBinds
+
+         ; let
+            inner_env =
+              TcSEnv
+                -- KEY part: recur with TcSVanilla
+                { tcs_mode     = TcSVanilla
+
+                -- Use new variables for evidence bindings, inerts; and
+                -- the work list. We may want to discard all of these if the
+                -- inner computation doesn't fully solve all the constraints.
+                , tcs_ev_binds = new_ev_binds_var
+                , tcs_inerts   = new_inert_var
+                , tcs_worklist = new_wl_var
+
+                -- Inherit the other variables. In particular, inherit the
+                -- variables to do with unification, as filling metavariables
+                -- is a side-effect that we are not reverting, even when we
+                -- discard the result of the inner computation.
+                , tcs_unif_lvl = outer_unif_lvl_var
+                , tcs_unified  = outer_unified_var
+                , tcs_count    = outer_count
+                }
+
+           -- Solve the constraint
+         ; let wc = emptyWC { wc_simple = unitBag ct }
+         ; traceTc "solveCompletelyIfRequired solveWanteds" $
+            vcat [ text "ct:" <+> ppr ct
+                 ]
+         ; solved_wc <- unTcS (solveWanteds wc) inner_env
+            -- NB: it would probably make more sense to call 'thing_inside',
+            -- collecting all constraints that were added to the work list as
+            -- a result, and calling 'solveWanteds' on that. This would avoid
+            -- restarting from the top of the solver pipeline.
+            -- For the time being, we just call 'solveWanteds' on the original
+            -- constraint, which is simpler
+
+         ; if isSolvedWC solved_wc
+           then
+             do { -- The constraint was fully solved. Continue with
+                  -- the inner solver state.
+                ; traceTc "solveCompletelyIfRequired: fully solved }" $
+                   vcat [ text "ct:" <+> ppr ct
+                        , text "solved_wc:" <+> ppr solved_wc ]
+
+                  -- Add new evidence bindings to the existing ones
+                ; inner_ev_binds <- TcM.getTcEvBindsMap new_ev_binds_var
+                ; addTcEvBinds outer_ev_binds_var inner_ev_binds
+
+                  -- Keep the outer inert set and work list: the inner work
+                  -- list is empty, and there are no leftover unsolved
+                  -- Wanteds.
+                  -- However, we **must not** drop solved implications, due
+                  -- to Note [Free vars of EvFun] in GHC.Tc.Types.Evidence;
+                  -- so we re-emit them here.
+                ; let re_emit_implic impl = unTcS ( TcS.emitImplication impl ) env
+                ; traverse_ re_emit_implic $ wc_impl solved_wc
+                ; return $ Stop (ctEvidence ct) (text "Fully solved:" <+> ppr ct)
+                }
+           else
+             do { traceTc "solveCompletelyIfRequired: unsolved }" $
+                   vcat [ text "ct:" <+> ppr ct
+                        , text "solved_wc:" <+> ppr solved_wc ]
+                  -- Failed to fully solve the constraint:
+                  --
+                  --  - discard the inner solver state,
+                  --  - add the original constraint as an inert.
+                ; unTcS (updInertIrreds (IrredCt (ctEvidence ct) IrredShapeReason)) env
+                    -- NB: currently we only call 'solveCompletelyIfRequired'
+                    -- from 'solveForAll'; so we just stash the unsolved quantified
+                    -- constraint in the irreds.
+
+                 ; return $ Stop (ctEvidence ct) (text "Not fully solved; kept as inert:" <+> ppr ct)
+                 } }
+    _notFullySolveMode ->
+      thing_inside env

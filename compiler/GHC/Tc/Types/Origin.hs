@@ -27,7 +27,7 @@ module GHC.Tc.Types.Origin (
   TypedThing(..), TyVarBndrs(..),
 
   -- * CallStack
-  isPushCallStackOrigin, callStackOriginFS,
+  isPushCallStackOrigin_maybe,
 
   -- * FixedRuntimeRep origin
   FixedRuntimeRepOrigin(..),
@@ -84,6 +84,7 @@ import GHC.Types.Unique.Supply
 import Language.Haskell.Syntax.Basic (FieldLabelString(..))
 
 import qualified Data.Kind as Hs
+import Data.List.NonEmpty (NonEmpty (..))
 
 {- *********************************************************************
 *                                                                      *
@@ -129,8 +130,6 @@ data UserTypeCtxt
   | PatSigCtxt          -- Type sig in pattern
                         --   eg  f (x::t) = ...
                         --   or  (x::t, y) = e
-  | RuleSigCtxt FastString Name    -- LHS of a RULE forall
-                        --    RULE "foo" forall (x :: a -> a). f (Just x) = ...
   | ForSigCtxt Name     -- Foreign import or export signature
   | DefaultDeclCtxt     -- Class or types in a default declaration
   | InstDeclCtxt Bool   -- An instance declaration
@@ -153,6 +152,9 @@ data UserTypeCtxt
                         --      data <S> => T a = MkT a
   | DerivClauseCtxt     -- A 'deriving' clause
   | TyVarBndrKindCtxt Name  -- The kind of a type variable being bound
+  | RuleBndrTypeCtxt Name   -- The type of a term variable being bound in a RULE
+                            -- or SPECIALISE pragma
+                            --    RULE "foo" forall (x :: a -> a). f (Just x) = ...
   | DataKindCtxt Name   -- The kind of a data/newtype (instance)
   | TySynKindCtxt Name  -- The kind of the RHS of a type synonym
   | TyFamResKindCtxt Name   -- The result kind of a type family
@@ -194,11 +196,10 @@ redundantConstraintsSpan _ = noSrcSpan
 
 
 pprUserTypeCtxt :: UserTypeCtxt -> SDoc
-pprUserTypeCtxt (FunSigCtxt n _)  = text "the type signature for" <+> quotes (ppr n)
-pprUserTypeCtxt (InfSigCtxt n)    = text "the inferred type for" <+> quotes (ppr n)
-pprUserTypeCtxt (RuleSigCtxt _ n) = text "the type signature for" <+> quotes (ppr n)
-pprUserTypeCtxt (ExprSigCtxt _)   = text "an expression type signature"
-pprUserTypeCtxt KindSigCtxt       = text "a kind signature"
+pprUserTypeCtxt (FunSigCtxt n _)   = text "the type signature for" <+> quotes (ppr n)
+pprUserTypeCtxt (InfSigCtxt n)     = text "the inferred type for" <+> quotes (ppr n)
+pprUserTypeCtxt (ExprSigCtxt _)    = text "an expression type signature"
+pprUserTypeCtxt KindSigCtxt        = text "a kind signature"
 pprUserTypeCtxt (StandaloneKindSigCtxt n) = text "a standalone kind signature for" <+> quotes (ppr n)
 pprUserTypeCtxt TypeAppCtxt       = text "a type argument"
 pprUserTypeCtxt (ConArgCtxt c)    = text "the type of the constructor" <+> quotes (ppr c)
@@ -217,6 +218,7 @@ pprUserTypeCtxt (DataTyCtxt tc)   = text "the context of the data type declarati
 pprUserTypeCtxt (PatSynCtxt n)    = text "the signature for pattern synonym" <+> quotes (ppr n)
 pprUserTypeCtxt (DerivClauseCtxt) = text "a `deriving' clause"
 pprUserTypeCtxt (TyVarBndrKindCtxt n) = text "the kind annotation on the type variable" <+> quotes (ppr n)
+pprUserTypeCtxt (RuleBndrTypeCtxt n)  = text "the type signature for" <+> quotes (ppr n)
 pprUserTypeCtxt (DataKindCtxt n)  = text "the kind annotation on the declaration for" <+> quotes (ppr n)
 pprUserTypeCtxt (TySynKindCtxt n) = text "the kind annotation on the declaration for" <+> quotes (ppr n)
 pprUserTypeCtxt (TyFamResKindCtxt n) = text "the result kind for" <+> quotes (ppr n)
@@ -298,6 +300,7 @@ data SkolemInfoAnon
   | IPSkol [HsIPName]   -- Binding site of an implicit parameter
 
   | RuleSkol RuleName   -- The LHS of a RULE
+  | SpecESkol Name      -- A SPECIALISE pragma
 
   | InferSkol [(Name,TcType)]
                         -- We have inferred a type for these (mutually recursive)
@@ -369,6 +372,7 @@ pprSkolInfo (InstSkol (IsQC {}) sz) = vcat [ text "a quantified context"
 pprSkolInfo FamInstSkol       = text "a family instance declaration"
 pprSkolInfo BracketSkol       = text "a Template Haskell bracket"
 pprSkolInfo (RuleSkol name)   = text "the RULE" <+> pprRuleName name
+pprSkolInfo (SpecESkol name)  = text "a SPECIALISE pragma for" <+> quotes (ppr name)
 pprSkolInfo (PatSkol cl mc)   = sep [ pprPatSkolInfo cl
                                     , text "in" <+> pprMatchContext mc ]
 pprSkolInfo (InferSkol ids)   = hang (text "the inferred type" <> plural ids <+> text "of")
@@ -509,11 +513,11 @@ data CtOrigin
 
   ----------- Below here, all are Origins for Wanted constraints ------------
 
-  | OccurrenceOf Name              -- Occurrence of an overloaded identifier
-  | OccurrenceOfRecSel RdrName     -- Occurrence of a record selector
-  | AppOrigin                      -- An application of some kind
+  | OccurrenceOf Name          -- ^ Occurrence of an overloaded identifier
+  | OccurrenceOfRecSel RdrName -- ^ Occurrence of a record selector
+  | AppOrigin                  -- ^ An application of some kind
 
-  | SpecPragOrigin UserTypeCtxt    -- Specialisation pragma for
+  | SpecPragOrigin UserTypeCtxt    -- ^ Specialisation pragma for
                                    -- function or instance
 
 
@@ -626,10 +630,10 @@ data CtOrigin
   | OmittedFieldOrigin (Maybe FieldLabel)
   | UsageEnvironmentOf Name
 
+  -- | See Detail (7) of Note [Type equality cycles] in GHC.Tc.Solver.Equality
   | CycleBreakerOrigin
       CtOrigin   -- origin of the original constraint
 
-      -- See Detail (7) of Note [Type equality cycles] in GHC.Tc.Solver.Equality
   | FRROrigin
       FixedRuntimeRepOrigin
 
@@ -715,9 +719,8 @@ lexprCtOrigin :: LHsExpr GhcRn -> CtOrigin
 lexprCtOrigin (L _ e) = exprCtOrigin e
 
 exprCtOrigin :: HsExpr GhcRn -> CtOrigin
-exprCtOrigin (HsVar _ (L _ name)) = OccurrenceOf name
+exprCtOrigin (HsVar _ (L _ (WithUserRdr _ name))) = OccurrenceOf name
 exprCtOrigin (HsGetField _ _ (L _ f)) = GetFieldOrigin (field_label $ unLoc $ dfoLabel f)
-exprCtOrigin (HsUnboundVar {})    = Shouldn'tHappenOrigin "unbound variable"
 exprCtOrigin (HsOverLabel _ l)  = OverLabelOrigin l
 exprCtOrigin (ExplicitList {})    = ListOrigin
 exprCtOrigin (HsIPVar _ ip)       = IPOccOrigin ip
@@ -751,6 +754,7 @@ exprCtOrigin (HsUntypedSplice {})  = Shouldn'tHappenOrigin "TH untyped splice"
 exprCtOrigin (HsProc {})         = Shouldn'tHappenOrigin "proc"
 exprCtOrigin (HsStatic {})       = Shouldn'tHappenOrigin "static expression"
 exprCtOrigin (HsEmbTy {})        = Shouldn'tHappenOrigin "type expression"
+exprCtOrigin (HsHole _)          = Shouldn'tHappenOrigin "hole expression"
 exprCtOrigin (HsForAll {})       = Shouldn'tHappenOrigin "forall telescope"    -- See Note [Types in terms]
 exprCtOrigin (HsQual {})         = Shouldn'tHappenOrigin "constraint context"  -- See Note [Types in terms]
 exprCtOrigin (HsFunArr {})       = Shouldn'tHappenOrigin "function arrow"      -- See Note [Types in terms]
@@ -775,8 +779,8 @@ grhssCtOrigin :: GRHSs GhcRn (LHsExpr GhcRn) -> CtOrigin
 grhssCtOrigin (GRHSs { grhssGRHSs = lgrhss }) = lGRHSCtOrigin lgrhss
 
 -- | Extract a suitable CtOrigin from a list of guarded RHSs
-lGRHSCtOrigin :: [LGRHS GhcRn (LHsExpr GhcRn)] -> CtOrigin
-lGRHSCtOrigin [L _ (GRHS _ _ (L _ e))] = exprCtOrigin e
+lGRHSCtOrigin :: NonEmpty (LGRHS GhcRn (LHsExpr GhcRn)) -> CtOrigin
+lGRHSCtOrigin (L _ (GRHS _ _ (L _ e)) :| []) = exprCtOrigin e
 lGRHSCtOrigin _ = Shouldn'tHappenOrigin "multi-way GRHS"
 
 pprCtOrigin :: CtOrigin -> SDoc
@@ -983,18 +987,22 @@ pprNonLinearPatternReason OtherPatternReason = empty
 *                                                                      *
 ********************************************************************* -}
 
-isPushCallStackOrigin :: CtOrigin -> Bool
--- Do we want to solve this IP constraint directly (return False)
--- or push the call site (return True)
--- See Note [Overview of implicit CallStacks] in GHc.Tc.Types.Evidence
-isPushCallStackOrigin (IPOccOrigin {}) = False
-isPushCallStackOrigin _                = True
-
-
-callStackOriginFS :: CtOrigin -> FastString
--- This is the string that appears in the CallStack
-callStackOriginFS (OccurrenceOf fun) = occNameFS (getOccName fun)
-callStackOriginFS orig               = mkFastString (showSDocUnsafe (pprCtO orig))
+isPushCallStackOrigin_maybe :: CtOrigin -> Maybe FastString
+-- Do we want to solve this IP constraint normally (return Nothing)
+-- or push the call site (returning the name of the function being called)
+-- See Note [Overview of implicit CallStacks] esp (CS1) in GHC.Tc.Types.Evidence
+isPushCallStackOrigin_maybe (GivenOrigin {})   = Nothing
+isPushCallStackOrigin_maybe (GivenSCOrigin {}) = Nothing
+isPushCallStackOrigin_maybe (IPOccOrigin {})   = Nothing
+isPushCallStackOrigin_maybe (OccurrenceOf fun) = Just (occNameFS (getOccName fun))
+isPushCallStackOrigin_maybe orig               = Just orig_fs
+  -- This fall-through case is important to deal with call stacks
+  --      that arise from rebindable syntax (#19919)
+  -- Here the "name of the function being called" is approximated as
+  --      the result of prettty-printing the CtOrigin; a bit messy,
+  --      but we can perhaps improve it in the light of user feedback
+  where
+    orig_fs = mkFastString (showSDocUnsafe (pprCtO orig))
 
 {-
 ************************************************************************
@@ -1525,7 +1533,7 @@ data InstanceWhat  -- How did we solve this constraint?
                          -- See GHC.Tc.Solver.InertSet Note [Solved dictionaries]
 
   | BuiltinTypeableInstance TyCon   -- Built-in solver for Typeable (T t1 .. tn)
-                         -- See Note [Well-staged instance evidence]
+                         -- See Note [Well-levelled instance evidence]
 
   | BuiltinInstance      -- Built-in solver for (C t1 .. tn) where C is
                          --   KnownNat, .. etc (classes with no top-level evidence)

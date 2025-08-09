@@ -9,8 +9,6 @@
 {-# LANGUAGE MagicHash #-}
 {-# LANGUAGE AllowAmbiguousTypes #-}
 
-{-# OPTIONS_GHC -Wno-incomplete-uni-patterns #-}
-
 -- | Core literals
 module GHC.Types.Literal
         (
@@ -86,6 +84,7 @@ import Data.Char
 import Data.Data ( Data )
 import GHC.Exts( isTrue#, dataToTag#, (<#) )
 import Numeric ( fromRat )
+import Control.DeepSeq
 
 {-
 ************************************************************************
@@ -206,6 +205,20 @@ instance Binary LitNumType where
       h <- getByte bh
       return (toEnum (fromIntegral h))
 
+instance NFData LitNumType where
+    rnf (LitNumBigNat) = ()
+    rnf (LitNumInt) = ()
+    rnf (LitNumInt8) = ()
+    rnf (LitNumInt16) = ()
+    rnf (LitNumInt32) = ()
+    rnf (LitNumInt64) = ()
+    rnf (LitNumWord) = ()
+    rnf (LitNumWord8) = ()
+    rnf (LitNumWord16) = ()
+    rnf (LitNumWord32) = ()
+    rnf (LitNumWord64) = ()
+
+
 {-
 Note [BigNum literals]
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -290,6 +303,16 @@ instance Binary Literal where
                     return (LitNumber nt i)
               _ -> pprPanic "Binary:Literal" (int (fromIntegral h))
 
+instance NFData Literal where
+    rnf (LitChar c) = rnf c
+    rnf (LitNumber nt i) = rnf nt `seq` rnf i
+    rnf (LitString s) = rnf s
+    rnf LitNullAddr = ()
+    rnf (LitFloat r) = rnf r
+    rnf (LitDouble r) = rnf r
+    rnf (LitLabel l1 k2) = rnf l1 `seq` rnf k2
+    rnf (LitRubbish {}) = () -- LitRubbish is not contained within interface files.
+                             -- See Note [Rubbish literals].
 
 instance Outputable Literal where
     ppr = pprLiteral id
@@ -328,7 +351,12 @@ Int/Word range.
 -- | Make a literal number using wrapping semantics if the value is out of
 -- bound.
 mkLitNumberWrap :: Platform -> LitNumType -> Integer -> Literal
-mkLitNumberWrap platform nt i = case nt of
+mkLitNumberWrap platform nt i = LitNumber nt $ mkLitNumberWrap' platform nt i
+
+-- | Make a literal number using wrapping semantics if the value is out of
+-- bound.
+mkLitNumberWrap' :: Platform -> LitNumType -> Integer -> Integer
+mkLitNumberWrap' platform nt i = case nt of
   LitNumInt -> case platformWordSize platform of
     PW4 -> wrap @Int32
     PW8 -> wrap @Int64
@@ -345,10 +373,10 @@ mkLitNumberWrap platform nt i = case nt of
   LitNumWord64  -> wrap @Word64
   LitNumBigNat
     | i < 0     -> panic "mkLitNumberWrap: trying to create a negative BigNat"
-    | otherwise -> LitNumber nt i
+    | otherwise -> i
   where
-    wrap :: forall a. (Integral a, Num a) => Literal
-    wrap = LitNumber nt (toInteger (fromIntegral i :: a))
+    wrap :: forall a. (Integral a, Num a) => Integer
+    wrap = toInteger (fromIntegral i :: a)
 
 -- | Wrap a literal number according to its type using wrapping semantics.
 litNumWrap :: Platform -> Literal -> Literal
@@ -364,9 +392,7 @@ litNumCoerce _  _        l                 = pprPanic "litNumWrapCoerce: not a n
 -- converting it back to its original type.
 litNumNarrow :: LitNumType -> Platform -> Literal -> Literal
 litNumNarrow pt platform (LitNumber nt i)
-   = case mkLitNumberWrap platform pt i of
-      LitNumber _ j -> mkLitNumberWrap platform nt j
-      l             -> pprPanic "litNumNarrow: got invalid literal" (ppr l)
+   = mkLitNumberWrap platform nt . mkLitNumberWrap' platform pt $ i
 litNumNarrow _ _ l = pprPanic "litNumNarrow: invalid literal" (ppr l)
 
 
@@ -429,9 +455,9 @@ mkLitIntUnchecked i = LitNumber LitNumInt i
 --   the argument is wrapped and the overflow flag will be set.
 --   See Note [Word/Int underflow/overflow]
 mkLitIntWrapC :: Platform -> Integer -> (Literal, Bool)
-mkLitIntWrapC platform i = (n, i /= i')
+mkLitIntWrapC platform i = (LitNumber LitNumInt i', i /= i')
   where
-    n@(LitNumber _ i') = mkLitIntWrap platform i
+    i' = mkLitNumberWrap' platform LitNumInt i
 
 -- | Creates a 'Literal' of type @Word#@
 mkLitWord :: Platform -> Integer -> Literal
@@ -453,9 +479,9 @@ mkLitWordUnchecked i = LitNumber LitNumWord i
 --   the argument is wrapped and the carry flag will be set.
 --   See Note [Word/Int underflow/overflow]
 mkLitWordWrapC :: Platform -> Integer -> (Literal, Bool)
-mkLitWordWrapC platform i = (n, i /= i')
+mkLitWordWrapC platform i = (LitNumber LitNumWord i', i /= i')
   where
-    n@(LitNumber _ i') = mkLitWordWrap platform i
+    i' = mkLitNumberWrap' platform LitNumWord i
 
 -- | Creates a 'Literal' of type @Int8#@
 mkLitInt8 :: Integer -> Literal

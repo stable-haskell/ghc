@@ -9,8 +9,27 @@
   * `Data.List.NonEmpty.{init,last,tails1}` are now defined using only total functions (rather than partial ones). ([CLC proposal #293](https://github.com/haskell/core-libraries-committee/issues/293))
   * `Data.List.NonEmpty` functions now have the same laziness as their `Data.List` counterparts (i.e. make them more strict than they currently are) ([CLC proposal #107](https://github.com/haskell/core-libraries-committee/issues/107))
   * `instance Functor NonEmpty` is now specified using `map` (rather than duplicating code). ([CLC proposal #300](https://github.com/haskell/core-libraries-committee/issues/300))
+  * The `Data.Enum.enumerate` function was introduced ([CLC #306](https://github.com/haskell/core-libraries-committee/issues/306))
+  * Worker threads used by various `base` facilities are now labelled with descriptive thread labels ([CLC proposal #305](https://github.com/haskell/core-libraries-committee/issues/305), [GHC #25452](https://gitlab.haskell.org/ghc/ghc/-/issues/25452)). Specifically, these include:
+    * `Control.Concurrent.threadWaitRead`
+    * `Control.Concurrent.threadWaitWrite`
+    * `Control.Concurrent.threadWaitReadSTM`
+    * `Control.Concurrent.threadWaitWriteSTM`
+    * `System.Timeout.timeout`
+    * `GHC.Conc.Signal.runHandlers`
+  * The following internal modules have been removed from `base`, as per [CLC #217](https://github.com/haskell/core-libraries-committee/issues/217):
+      * `GHC.TypeLits.Internal`
+      * `GHC.TypeNats.Internal`
+      * `GHC.ExecutionStack.Internal`.
+  * Deprecate `GHC.JS.Prim.Internal.Build`, as per [CLC #329](https://github.com/haskell/core-libraries-committee/issues/329)
+  * Expose constructor and field of `Backtraces` from `Control.Exception.Backtrace`, as per [CLC #199](https://github.com/haskell/core-libraries-committee/issues/199#issuecomment-1954662391)
 
-## 4.21.0.0 *TBA*
+  * Fix incorrect results of `integerPowMod` when the base is 0 and the exponent is negative, and `integerRecipMod` when the modulus is zero ([#26017](https://gitlab.haskell.org/ghc/ghc/-/issues/26017)).
+
+
+## 4.21.0.0 *December 2024*
+  * Shipped with GHC 9.12.1
+  * Change `SrcLoc` to be a strict and unboxed (finishing [CLC proposal #55](https://github.com/haskell/core-libraries-committee/issues/55))
   * Introduce `Data.Bounded` module exporting the `Bounded` typeclass (finishing [CLC proposal #208](https://github.com/haskell/core-libraries-committee/issues/208))
   * Deprecate export of `Bounded` class from `Data.Enum` ([CLC proposal #208](https://github.com/haskell/core-libraries-committee/issues/208))
   * `GHC.Desugar` has been deprecated and should be removed in GHC 9.14. ([CLC proposal #216](https://github.com/haskell/core-libraries-committee/issues/216))
@@ -294,29 +313,29 @@
 
   * Re-export the `IsList` typeclass from the new `GHC.IsList` module.
 
-  * There's a new special function ``withDict`` in ``GHC.Exts``: ::
+  * There's a new special function `withDict` in `GHC.Exts`: ::
 
         withDict :: forall {rr :: RuntimeRep} cls meth (r :: TYPE rr). WithDict cls meth => meth -> (cls => r) -> r
 
-    where ``cls`` must be a class containing exactly one method, whose type
-    must be ``meth``.
+    where `cls` must be a class containing exactly one method, whose type
+    must be `meth`.
 
-    This function converts ``meth`` to a type class dictionary.
-    It removes the need for ``unsafeCoerce`` in implementation of reflection
+    This function converts `meth` to a type class dictionary.
+    It removes the need for `unsafeCoerce` in implementation of reflection
     libraries. It should be used with care, because it can introduce
     incoherent instances.
 
-    For example, the ``withTypeable`` function from the
-    ``Type.Reflection`` module can now be defined as: ::
+    For example, the `withTypeable` function from the
+    `Type.Reflection` module can now be defined as: ::
 
           withTypeable :: forall k (a :: k) rep (r :: TYPE rep). ()
                        => TypeRep a -> (Typeable a => r) -> r
           withTypeable rep k = withDict @(Typeable a) rep k
 
     Note that the explicit type application is required, as the call to
-    ``withDict`` would be ambiguous otherwise.
+    `withDict` would be ambiguous otherwise.
 
-    This replaces the old ``GHC.Exts.magicDict``, which required
+    This replaces the old `GHC.Exts.magicDict`, which required
     an intermediate data type and was less reliable.
 
   * `Data.Word.Word64` and `Data.Int.Int64` are now always represented by
@@ -334,17 +353,17 @@
 
   * Shipped with GHC 9.2.4
 
-  * winio: make consoleReadNonBlocking not wait for any events at all.
+  * winio: make `consoleReadNonBlocking` not wait for any events at all.
 
-  * winio: Add support to console handles to handleToHANDLE
+  * winio: Add support to console handles to `handleToHANDLE`
 
 ## 4.16.2.0 *May 2022*
 
   * Shipped with GHC 9.2.2
 
-  * Export GHC.Event.Internal on Windows (#21245)
+  * Export `GHC.Event.Internal` on Windows (#21245)
 
-  # Documentation Fixes
+  * Documentation Fixes
 
 ## 4.16.1.0 *Feb 2022*
 
@@ -413,9 +432,16 @@
 
     - Newtypes `And`, `Ior`, `Xor` and `Iff` which wrap their argument,
       and whose `Semigroup` instances are defined using `(.&.)`, `(.|.)`, `xor`
-      and ```\x y -> complement (x `xor` y)```, respectively.
+      and `\x y -> complement (x `xor` y)`, respectively.
 
     - `oneBits :: FiniteBits a => a`, `oneBits = complement zeroBits`.
+
+  * Various folding operations in `GHC.List` are now implemented via strict
+    folds:
+    - `sum`
+    - `product`
+    - `maximum`
+    - `minimum`
 
 ## 4.15.0.0 *Feb 2021*
 

@@ -108,7 +108,6 @@ import GHC.Hs.Doc (LHsDoc) -- ROMES:TODO Discuss in #21592 whether this is parse
 import Control.Monad
 import Control.Exception (assert)
 import Data.Data        hiding (TyCon, Fixity, Infix)
-import Data.Void
 import Data.Maybe
 import Data.String
 import Data.Eq
@@ -622,25 +621,26 @@ NOTE THAT
 
 {- Note [TyClGroups and dependency analysis]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-A TyClGroup represents a strongly connected components of type/class/instance
-decls, together with the role annotations for the type/class declarations.
+A TyClGroup represents a strongly connected component of type/class/instance
+decls, together with the role annotations and standalone kind signatures for the
+type/class declarations.
 
 The hs_tyclds :: [TyClGroup] field of a HsGroup is a dependency-order
 sequence of strongly-connected components.
 
 Invariants
- * The type and class declarations, group_tyclds, may depend on each
-   other, or earlier TyClGroups, but not on later ones
+ * The type and class declarations, group_tyclds, may lexically depend
+   on each other, or earlier TyClGroups, but not on later ones
 
  * The role annotations, group_roles, are role-annotations for some or
    all of the types and classes in group_tyclds (only).
 
  * The instance declarations, group_instds, may (and usually will)
-   depend on group_tyclds, or on earlier TyClGroups, but not on later
-   ones.
+   lexically depend on group_tyclds, or on earlier TyClGroups, but
+   not on later ones.
 
-See Note [Dependency analysis of type, class, and instance decls]
-in GHC.Rename.Module for more info.
+See Note [Dependency analysis of type and class decls] in GHC.Rename.Module
+for more info.
 -}
 
 -- | Type or Class Group
@@ -1116,7 +1116,7 @@ or contexts in two parts:
 
 -- | The arguments in a Haskell98-style data constructor.
 type HsConDeclH98Details pass
-   = HsConDetails Void (HsScaled pass (LBangType pass)) (XRec pass [LConDeclField pass])
+   = HsConDetails (HsConDeclField pass) (XRec pass [LHsConDeclRecField pass])
 -- The Void argument to HsConDetails here is a reflection of the fact that
 -- type applications are not allowed in data constructor declarations.
 
@@ -1127,8 +1127,8 @@ type HsConDeclH98Details pass
 -- derived Show instances—see Note [Infix GADT constructors] in
 -- GHC.Tc.TyCl—but that is an orthogonal concern.)
 data HsConDeclGADTDetails pass
-   = PrefixConGADT !(XPrefixConGADT pass) [HsScaled pass (LBangType pass)]
-   | RecConGADT !(XRecConGADT pass) (XRec pass [LConDeclField pass])
+   = PrefixConGADT !(XPrefixConGADT pass) [HsConDeclField pass]
+   | RecConGADT !(XRecConGADT pass) (XRec pass [LHsConDeclRecField pass])
    | XConDeclGADTDetails !(XXConDeclGADTDetails pass)
 
 type family XPrefixConGADT       p
@@ -1478,28 +1478,12 @@ data RuleDecl pass
            -- ^ After renamer, free-vars from the LHS and RHS
        , rd_name :: XRec pass RuleName
            -- ^ Note [Pragma source text] in "GHC.Types.SourceText"
-       , rd_act  :: Activation
-       , rd_tyvs :: Maybe [LHsTyVarBndr () (NoGhcTc pass)]
-           -- ^ Forall'd type vars
-       , rd_tmvs :: [LRuleBndr pass]
-           -- ^ Forall'd term vars, before typechecking; after typechecking
-           --    this includes all forall'd vars
-       , rd_lhs  :: XRec pass (HsExpr pass)
-       , rd_rhs  :: XRec pass (HsExpr pass)
+       , rd_act   :: Activation
+       , rd_bndrs :: RuleBndrs pass
+       , rd_lhs   :: XRec pass (HsExpr pass)
+       , rd_rhs   :: XRec pass (HsExpr pass)
        }
   | XRuleDecl !(XXRuleDecl pass)
-
--- | Located Rule Binder
-type LRuleBndr pass = XRec pass (RuleBndr pass)
-
--- | Rule Binder
-data RuleBndr pass
-  = RuleBndr (XCRuleBndr pass)  (LIdP pass)
-  | RuleBndrSig (XRuleBndrSig pass) (LIdP pass) (HsPatSigType pass)
-  | XRuleBndr !(XXRuleBndr pass)
-
-collectRuleBndrSigTys :: [RuleBndr pass] -> [HsPatSigType pass]
-collectRuleBndrSigTys bndrs = [ty | RuleBndrSig _ _ ty <- bndrs]
 
 {-
 ************************************************************************

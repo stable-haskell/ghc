@@ -42,7 +42,7 @@ import GHC.Utils.Outputable ( Outputable(..) )
 
 import Language.Haskell.Syntax.Basic ( FieldLabelString(..) )
 import Language.Haskell.Syntax
-import GHC.Internal.TH.Syntax qualified as TH
+import GHC.Boot.TH.Syntax qualified as TH
 
 import qualified Data.List.NonEmpty as NE
 
@@ -142,7 +142,7 @@ data ErrCtxtMsg
   -- | In an instance declaration.
   | InstDeclErrCtxt !(Either (LHsType GhcRn) PredType)
   -- | In a default declaration.
-  | DefaultDeclErrCtxt
+  | DefaultDeclErrCtxt { ddec_in_type_list :: !Bool }
   -- | In the body of a static form.
   | StaticFormCtxt !(LHsExpr GhcRn)
   -- | In a pattern binding.

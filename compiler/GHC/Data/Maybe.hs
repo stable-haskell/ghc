@@ -33,7 +33,9 @@ import Control.Monad.Trans.Maybe
 import Control.Exception (SomeException(..))
 import Data.Maybe
 import Data.Foldable ( foldlM, for_ )
-import GHC.Utils.Misc (HasDebugCallStack)
+import GHC.Utils.Misc (HasCallStack)
+import GHC.Utils.Panic
+import GHC.Utils.Outputable
 import Data.List.NonEmpty ( NonEmpty )
 import Control.Applicative( Alternative( (<|>) ) )
 
@@ -66,10 +68,14 @@ firstJustsM = foldlM go Nothing where
   go Nothing         action  = action
   go result@(Just _) _action = return result
 
-expectJust :: HasDebugCallStack => String -> Maybe a -> a
+expectJust :: HasCallStack => Maybe a -> a
+-- always enable the call stack to get the location even on non-debug builds
 {-# INLINE expectJust #-}
-expectJust _   (Just x) = x
-expectJust err Nothing  = error ("expectJust " ++ err)
+expectJust = fromMaybe expectJustError
+
+expectJustError :: HasCallStack => a
+expectJustError = pprPanic "expectJust" empty
+{-# NOINLINE expectJustError #-}
 
 whenIsJust :: Monad m => Maybe a -> (a -> m ()) -> m ()
 whenIsJust = for_

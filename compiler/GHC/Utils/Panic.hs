@@ -188,10 +188,10 @@ handleGhcException = MC.handle
 
 -- | Throw an exception saying "bug in GHC" with a callstack
 pprPanic :: HasCallStack => String -> SDoc -> a
-pprPanic s doc = panicDoc s (doc $$ callStackDoc)
+pprPanic s doc = withFrozenCallStack $ panicDoc s (doc $$ callStackDoc)
 
 -- | Throw an exception saying "bug in GHC"
-panicDoc :: String -> SDoc -> a
+panicDoc :: HasCallStack => String -> SDoc -> a
 panicDoc x doc = throwGhcException (PprPanic x doc)
 
 -- | Throw an exception saying "this isn't finished yet"

@@ -2,6 +2,8 @@
 
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE MagicHash #-}
+{-# LANGUAGE MonadComprehensions #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 -- | Highly random utility functions
 --
@@ -23,7 +25,8 @@ module GHC.Utils.Misc (
 
         dropWhileEndLE, spanEnd, last2, lastMaybe, onJust,
 
-        List.foldl1', foldl2, count, countWhile, all2, any2, all2Prefix, all3Prefix,
+        foldl2, count, countWhile, all2, any2, all2Prefix, all3Prefix,
+        foldr1WithDefault, foldl1WithDefault',
 
         lengthExceeds, lengthIs, lengthIsNot,
         lengthAtLeast, lengthAtMost, lengthLessThan,
@@ -126,8 +129,9 @@ import Data.Data
 import qualified Data.List as List
 import Data.List.NonEmpty  ( NonEmpty(..), last, nonEmpty )
 
-import GHC.Exts
+import GHC.Exts hiding (toList)
 import GHC.Stack (HasCallStack)
+import GHC.Data.List
 
 import Control.Monad    ( guard )
 import Control.Monad.IO.Class ( MonadIO, liftIO )
@@ -138,6 +142,7 @@ import System.FilePath
 import Data.Bifunctor   ( first, second )
 import Data.Char        ( isUpper, isAlphaNum, isSpace, chr, ord, isDigit, toUpper
                         , isHexDigit, digitToInt )
+import Data.Foldable    ( Foldable (toList) )
 import Data.Int
 import Data.Ratio       ( (%) )
 import Data.Ord         ( comparing )
@@ -237,34 +242,34 @@ are of equal length.  Alastair Reid thinks this should only happen if
 DEBUGging on; hey, why not?
 -}
 
-zipEqual        :: HasDebugCallStack => String -> [a] -> [b] -> [(a,b)]
-zipWithEqual    :: HasDebugCallStack => String -> (a->b->c) -> [a]->[b]->[c]
-zipWith3Equal   :: HasDebugCallStack => String -> (a->b->c->d) -> [a]->[b]->[c]->[d]
-zipWith4Equal   :: HasDebugCallStack => String -> (a->b->c->d->e) -> [a]->[b]->[c]->[d]->[e]
+zipEqual        :: HasDebugCallStack => [a] -> [b] -> [(a,b)]
+zipWithEqual    :: HasDebugCallStack => (a->b->c) -> [a]->[b]->[c]
+zipWith3Equal   :: HasDebugCallStack => (a->b->c->d) -> [a]->[b]->[c]->[d]
+zipWith4Equal   :: HasDebugCallStack => (a->b->c->d->e) -> [a]->[b]->[c]->[d]->[e]
 
 #if !defined(DEBUG)
-zipEqual      _ = zip
-zipWithEqual  _ = zipWith
-zipWith3Equal _ = zipWith3
-zipWith4Equal _ = List.zipWith4
+zipEqual      = zip
+zipWithEqual  = zipWith
+zipWith3Equal = zipWith3
+zipWith4Equal = List.zipWith4
 #else
-zipEqual _   []     []     = []
-zipEqual msg (a:as) (b:bs) = (a,b) : zipEqual msg as bs
-zipEqual msg _      _      = panic ("zipEqual: unequal lists: "++msg)
+zipEqual []     []     = []
+zipEqual (a:as) (b:bs) = (a,b) : zipEqual as bs
+zipEqual _      _      = panic "zipEqual: unequal lists"
 
-zipWithEqual msg z (a:as) (b:bs)=  z a b : zipWithEqual msg z as bs
-zipWithEqual _   _ [] []        =  []
-zipWithEqual msg _ _ _          =  panic ("zipWithEqual: unequal lists: "++msg)
+zipWithEqual z (a:as) (b:bs)=  z a b : zipWithEqual z as bs
+zipWithEqual _ [] []        =  []
+zipWithEqual _ _ _          =  panic "zipWithEqual: unequal lists"
 
-zipWith3Equal msg z (a:as) (b:bs) (c:cs)
-                                =  z a b c : zipWith3Equal msg z as bs cs
-zipWith3Equal _   _ [] []  []   =  []
-zipWith3Equal msg _ _  _   _    =  panic ("zipWith3Equal: unequal lists: "++msg)
+zipWith3Equal z (a:as) (b:bs) (c:cs)
+                                =  z a b c : zipWith3Equal z as bs cs
+zipWith3Equal _ [] []  []   =  []
+zipWith3Equal _ _  _   _    =  panic "zipWith3Equal: unequal lists"
 
-zipWith4Equal msg z (a:as) (b:bs) (c:cs) (d:ds)
-                                =  z a b c d : zipWith4Equal msg z as bs cs ds
-zipWith4Equal _   _ [] [] [] [] =  []
-zipWith4Equal msg _ _  _  _  _  =  panic ("zipWith4Equal: unequal lists: "++msg)
+zipWith4Equal z (a:as) (b:bs) (c:cs) (d:ds)
+                                =  z a b c d : zipWith4Equal z as bs cs ds
+zipWith4Equal _ [] [] [] [] =  []
+zipWith4Equal _ _  _  _  _  =  panic "zipWith4Equal: unequal lists"
 #endif
 
 -- | 'filterByList' takes a list of Bools and a list of some elements and
@@ -322,31 +327,6 @@ mapSnd :: Functor f => (b->c) -> f(a,b) -> f(a,c)
 
 mapFst = fmap . first
 mapSnd = fmap . second
-
-mapAndUnzip :: (a -> (b, c)) -> [a] -> ([b], [c])
-
-mapAndUnzip _ [] = ([], [])
-mapAndUnzip f (x:xs)
-  = let (r1,  r2)  = f x
-        (rs1, rs2) = mapAndUnzip f xs
-    in
-    (r1:rs1, r2:rs2)
-
-mapAndUnzip3 :: (a -> (b, c, d)) -> [a] -> ([b], [c], [d])
-mapAndUnzip3 _ [] = ([], [], [])
-mapAndUnzip3 f (x:xs)
-  = let (r1,  r2,  r3)  = f x
-        (rs1, rs2, rs3) = mapAndUnzip3 f xs
-    in
-    (r1:rs1, r2:rs2, r3:rs3)
-
-mapAndUnzip4 :: (a -> (b, c, d, e)) -> [a] -> ([b], [c], [d], [e])
-mapAndUnzip4 _ [] = ([], [], [], [])
-mapAndUnzip4 f (x:xs)
-  = let (r1,  r2,  r3, r4)  = f x
-        (rs1, rs2, rs3, rs4) = mapAndUnzip4 f xs
-    in
-    (r1:rs1, r2:rs2, r3:rs3, r4:rs4)
 
 zipWithAndUnzip :: (a -> b -> (c,d)) -> [a] -> [b] -> ([c],[d])
 zipWithAndUnzip f (a:as) (b:bs)
@@ -488,14 +468,15 @@ only _ = panic "Util: only"
 -- | Extract the single element of a list and panic with the given message if
 -- there are more elements or the list was empty.
 -- Like 'expectJust', but for lists.
-expectOnly :: HasDebugCallStack => String -> [a] -> a
+expectOnly :: HasCallStack => [a] -> a
+-- always enable the call stack to get the location even on non-debug builds
 {-# INLINE expectOnly #-}
 #if defined(DEBUG)
-expectOnly _   [a]   = a
+expectOnly [a]   = a
 #else
-expectOnly _   (a:_) = a
+expectOnly (a:_) = a
 #endif
-expectOnly msg _     = panic ("expectOnly: " ++ msg)
+expectOnly _     = panic "expectOnly"
 
 -- | Compute all the ways of removing a single element from a list.
 --
@@ -511,13 +492,14 @@ changeLast [_]    x  = [x]
 changeLast (x:xs) x' = x : changeLast xs x'
 
 -- | Like @expectJust msg . nonEmpty@; a better alternative to 'NE.fromList'.
-expectNonEmpty :: HasDebugCallStack => String -> [a] -> NonEmpty a
+expectNonEmpty :: HasCallStack => [a] -> NonEmpty a
+-- always enable the call stack to get the location even on non-debug builds
 {-# INLINE expectNonEmpty #-}
-expectNonEmpty _   (x:xs) = x:|xs
-expectNonEmpty msg []     = expectNonEmptyPanic msg
+expectNonEmpty (x:xs) = x:|xs
+expectNonEmpty []     = expectNonEmptyPanic
 
-expectNonEmptyPanic :: String -> a
-expectNonEmptyPanic msg = panic ("expectNonEmpty: " ++ msg)
+expectNonEmptyPanic :: HasCallStack => a
+expectNonEmptyPanic = panic "expectNonEmpty"
 {-# NOINLINE expectNonEmptyPanic #-}
 
 whenNonEmpty :: Applicative m => [a] -> (NonEmpty a -> m ()) -> m ()
@@ -1079,7 +1061,7 @@ readSignificandExponentPair__ r = do
      readFix r = do
         (ds,s)  <- lexDecDigits r
         (ds',t) <- lexDotDigits s
-        return (read (ds++ds'), length ds', t)
+        return (read (toList ds++ds'), length ds', t)
 
      readExp (e:s) | e `elem` "eE" = readExp' s
      readExp s                     = return (0,s)
@@ -1099,8 +1081,8 @@ readSignificandExponentPair__ r = do
      lexDotDigits ('.':s) = return (span' isDigit s)
      lexDotDigits s       = return ("",s)
 
-     nonnull p s = do (cs@(_:_),t) <- return (span' p s)
-                      return (cs,t)
+     nonnull p s = do (c:cs,t) <- return (span' p s)
+                      return (c:|cs,t)
 
      span' _ xs@[]         =  (xs, xs)
      span' p xs@(x:xs')
@@ -1468,3 +1450,15 @@ mapMaybe' f = foldr g []
     g x rest
       | Just y <- f x = y : rest
       | otherwise     = rest
+
+foldr1WithDefault :: Foldable f => a -> (a -> a -> a) -> f a -> a
+foldr1WithDefault defaultA f xs = case nonEmpty (toList xs) of
+    Nothing -> defaultA
+    Just (xs1 :: NonEmpty a) -> foldr1 f xs1
+{-# SPECIALIZE foldr1WithDefault :: a -> (a -> a -> a) -> [a] -> a #-}
+
+foldl1WithDefault' :: Foldable f => a -> (a -> a -> a) -> f a -> a
+foldl1WithDefault' defaultA f xs = case nonEmpty (toList xs) of
+    Nothing -> defaultA
+    Just (xs1 :: NonEmpty a) -> foldl1' f xs1
+{-# SPECIALIZE foldl1WithDefault' :: a -> (a -> a -> a) -> [a] -> a #-}

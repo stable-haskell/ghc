@@ -1,11 +1,11 @@
-
-{-# LANGUAGE FlexibleContexts    #-}
-{-# LANGUAGE LambdaCase          #-}
-{-# LANGUAGE MultiWayIf          #-}
-{-# LANGUAGE NamedFieldPuns      #-}
-{-# LANGUAGE ParallelListComp    #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TupleSections       #-}
+{-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE FlexibleContexts      #-}
+{-# LANGUAGE LambdaCase            #-}
+{-# LANGUAGE MultiWayIf            #-}
+{-# LANGUAGE NamedFieldPuns        #-}
+{-# LANGUAGE ParallelListComp      #-}
+{-# LANGUAGE ScopedTypeVariables   #-}
+{-# LANGUAGE TupleSections         #-}
 
 module GHC.Tc.Errors(
        reportUnsolved, reportAllUnsolved, warnAllUnsolved,
@@ -60,7 +60,7 @@ import GHC.Core.Predicate
 import GHC.Core.Type
 import GHC.Core.Coercion
 import GHC.Core.TyCo.Ppr     ( pprTyVars )
-import GHC.Core.TyCo.Tidy    ( tidyAvoiding )
+import GHC.Core.TyCo.Tidy
 import GHC.Core.InstEnv
 import GHC.Core.TyCon
 import GHC.Core.DataCon
@@ -466,13 +466,12 @@ mkErrorItem ct
   = do { let loc = ctLoc ct
              flav = ctFlavour ct
 
-       ; (suppress, m_evdest) <- case ctEvidence ct of
-         -- For this `suppress` stuff
-         -- see Note [Wanteds rewrite Wanteds] in GHC.Tc.Types.Constraint
-           CtGiven {} -> return (False, Nothing)
-           CtWanted { ctev_rewriters = rewriters, ctev_dest = dest }
-             -> do { rewriters' <- zonkRewriterSet rewriters
-                   ; return (not (isEmptyRewriterSet rewriters'), Just dest) }
+             (suppress, m_evdest) = case ctEvidence ct of
+                   -- For this `suppress` stuff
+                   -- see Note [Wanteds rewrite Wanteds] in GHC.Tc.Types.Constraint
+                     CtGiven {} -> (False, Nothing)
+                     CtWanted (WantedCt { ctev_rewriters = rws, ctev_dest = dest })
+                                -> (not (isEmptyRewriterSet rws), Just dest)
 
        ; let m_reason = case ct of
                 CIrredCan (IrredCt { ir_reason = reason }) -> Just reason
@@ -503,7 +502,7 @@ reportWanteds ctxt tc_lvl wc@(WC { wc_simple = simples, wc_impl = implics
                                          , text "tidy_errs =" <+> ppr tidy_errs ])
 
          -- Catch an awkward (and probably rare) case in which /all/ errors are
-         -- suppressed: see Wrinkle (WRW2) in Note [Prioritise Wanteds with empty
+         -- suppressed: see Wrinkle (PER2) in Note [Prioritise Wanteds with empty
          -- RewriterSet] in GHC.Tc.Types.Constraint.
          --
          -- Unless we are sure that an error will be reported some other way
@@ -622,7 +621,7 @@ reportWanteds ctxt tc_lvl wc@(WC { wc_simple = simples, wc_impl = implics
                   -- where alpha is untouchable; and representational equalities
                   -- Prefer homogeneous equalities over hetero, because the
                   -- former might be holding up the latter.
-                  -- See Note [Equalities with incompatible kinds] in GHC.Tc.Solver.Equality
+                  -- See Note [Equalities with heterogeneous kinds] in GHC.Tc.Solver.Equality
               , ("Homo eqs",      is_homo_equality,  True,  mkGroupReporter mkEqErr)
               , ("Other eqs",     is_equality,       True,  mkGroupReporter mkEqErr)
               ]
@@ -1051,7 +1050,8 @@ reportNotConcreteErrs ctxt errs@(err0:_)
                 { nce_frr_origin = frr_orig } ->
                 FRR_Info
                   { frr_info_origin       = frr_orig
-                  , frr_info_not_concrete = Nothing }
+                  , frr_info_not_concrete = Nothing
+                  , frr_info_other_origin = Nothing }
                 : frr_errs
 
 reportMultiplicityCoercionErrs :: SolverReportErrCtxt -> [(TcCoercion, CtLoc)] -> TcM ()
@@ -1423,10 +1423,10 @@ See also 'reportUnsolved'.
 ----------------
 -- | Constructs a new hole error, unless this is deferred. See Note [Constructing Hole Errors].
 mkHoleError :: NameEnv Type -> [ErrorItem] -> SolverReportErrCtxt -> Hole -> TcM (MsgEnvelope TcRnMessage)
-mkHoleError _ _tidy_simples ctxt hole@(Hole { hole_occ = occ, hole_loc = ct_loc })
+mkHoleError _ _tidy_simples ctxt hole@(Hole { hole_sort = sort, hole_occ = occ, hole_loc = ct_loc })
   | isOutOfScopeHole hole
   = do { (imp_errs, hints)
-           <- unknownNameSuggestions (ctl_rdr lcl_env) WL_Anything occ
+           <- unknownNameSuggestions (ctl_rdr lcl_env) what_look occ
        ; let
              err    = SolverReportWithCtxt ctxt
                     $ ReportHoleError hole OutOfScopeHole
@@ -1441,6 +1441,10 @@ mkHoleError _ _tidy_simples ctxt hole@(Hole { hole_occ = occ, hole_loc = ct_loc 
              -- to include the context here.
        }
   where
+    what_look = case sort of
+      ExprHole {} -> WL_Term
+      TypeHole {} -> WL_Type
+      ConstraintHole {} -> WL_Type
     lcl_env = ctLocEnv ct_loc
 
  -- general case: not an out-of-scope error
@@ -1525,7 +1529,7 @@ maybeAddDeferredBindings hole report = do
       when (deferringAnyBindings ctxt) $ do
         err_tm <- mkErrorTerm (hole_loc hole) ref_ty report
           -- NB: ref_ty, not hole_ty. hole_ty might be rewritten.
-          -- See Note [Holes] in GHC.Tc.Types.Constraint
+          -- See Note [Holes in expressions] in GHC.Hs.Expr
         writeMutVar ref err_tm
     _ -> pure ()
   where
@@ -1550,10 +1554,11 @@ validHoleFits ctxt@(CEC { cec_encl = implics
     mk_wanted :: ErrorItem -> Maybe CtEvidence
     mk_wanted (EI { ei_pred = pred, ei_evdest = m_dest, ei_loc = loc })
       | Just dest <- m_dest
-      = Just (CtWanted { ctev_pred      = pred
-                       , ctev_dest      = dest
-                       , ctev_loc       = loc
-                       , ctev_rewriters = emptyRewriterSet })
+      = Just $ CtWanted $
+          WantedCt { ctev_pred      = pred
+                   , ctev_dest      = dest
+                   , ctev_loc       = loc
+                   , ctev_rewriters = emptyRewriterSet }
       | otherwise
       = Nothing   -- The ErrorItem was a Given
 
@@ -1591,7 +1596,7 @@ mkFRRErr ctxt items
             -- Zonk/tidy to show useful variable names.
           nubOrdBy (nonDetCmpType `on` (frr_type . frr_info_origin)) $
             -- Remove duplicates: only one representation-polymorphism error per type.
-          map (expectJust "mkFRRErr" . fixedRuntimeRepOrigin_maybe) $
+          map (expectJust . fixedRuntimeRepOrigin_maybe) $
           toList items
        ; return $ important ctxt $ FixedRuntimeRepError frr_infos }
 
@@ -1599,21 +1604,25 @@ mkFRRErr ctxt items
 fixedRuntimeRepOrigin_maybe :: HasDebugCallStack => ErrorItem -> Maybe FixedRuntimeRepErrorInfo
 fixedRuntimeRepOrigin_maybe item
   -- An error that arose directly from a representation-polymorphism check.
-  | FRROrigin frr_orig <- errorItemOrigin item
+  | FRROrigin frr_orig <- orig
   = Just $ FRR_Info { frr_info_origin = frr_orig
-                    , frr_info_not_concrete = Nothing }
+                    , frr_info_not_concrete = Nothing
+                    , frr_info_other_origin = Nothing
+                    }
   -- A nominal equality involving a concrete type variable,
   -- such as @alpha[conc] ~# rr[sk]@ or @beta[conc] ~# RR@ for a
   -- type family application @RR@.
   | EqPred NomEq ty1 ty2 <- classifyPredType (errorItemPred item)
   = if | Just (tv1, ConcreteFRR frr1) <- isConcreteTyVarTy_maybe ty1
-       -> Just $ FRR_Info frr1 (Just (tv1, ty2))
+       -> Just $ FRR_Info frr1 (Just (tv1, ty2)) (Just orig)
        | Just (tv2, ConcreteFRR frr2) <- isConcreteTyVarTy_maybe ty2
-       -> Just $ FRR_Info frr2 (Just (tv2, ty1))
+       -> Just $ FRR_Info frr2 (Just (tv2, ty1)) (Just orig)
        | otherwise
        -> Nothing
   | otherwise
   = Nothing
+  where
+    orig = errorItemOrigin item
 
 {-
 Note [Constraints include ...]
@@ -1737,12 +1746,12 @@ mkEqErr_help :: SolverReportErrCtxt
              -> ErrorItem
              -> TcType -> TcType -> TcM TcSolverReportMsg
 mkEqErr_help ctxt item ty1 ty2
-  | Just casted_tv1 <- getCastedTyVar_maybe ty1
-  = mkTyVarEqErr ctxt item casted_tv1 ty2
+  | Just (tv1, _co) <- getCastedTyVar_maybe ty1
+  = mkTyVarEqErr ctxt item tv1 ty2
 
   -- ToDo: explain..  Cf T2627b   Dual (Dual a) ~ a
-  | Just casted_tv2 <- getCastedTyVar_maybe ty2
-  = mkTyVarEqErr ctxt item casted_tv2 ty1
+  | Just (tv2, _co) <- getCastedTyVar_maybe ty2
+  = mkTyVarEqErr ctxt item tv2 ty1
 
   | otherwise
   = reportEqErr ctxt item ty1 ty2
@@ -1775,15 +1784,15 @@ coercible_msg ty1 ty2
     return $ mkCoercibleExplanation rdr_env fam_envs ty1 ty2
 
 mkTyVarEqErr :: SolverReportErrCtxt -> ErrorItem
-             -> (TcTyVar, TcCoercionN) -> TcType -> TcM TcSolverReportMsg
+             -> TcTyVar -> TcType -> TcM TcSolverReportMsg
 -- tv1 and ty2 are already tidied
-mkTyVarEqErr ctxt item casted_tv1 ty2
-  = do { traceTc "mkTyVarEqErr" (ppr item $$ ppr casted_tv1 $$ ppr ty2)
-       ; mkTyVarEqErr' ctxt item casted_tv1 ty2 }
+mkTyVarEqErr ctxt item tv1 ty2
+  = do { traceTc "mkTyVarEqErr" (ppr item $$ ppr tv1 $$ ppr ty2)
+       ; mkTyVarEqErr' ctxt item tv1 ty2 }
 
 mkTyVarEqErr' :: SolverReportErrCtxt -> ErrorItem
-              -> (TcTyVar, TcCoercionN) -> TcType -> TcM TcSolverReportMsg
-mkTyVarEqErr' ctxt item (tv1, co1) ty2
+              -> TcTyVar -> TcType -> TcM TcSolverReportMsg
+mkTyVarEqErr' ctxt item tv1 ty2
 
   -- Is this a representation-polymorphism error, e.g.
   -- alpha[conc] ~# rr[sk] ? If so, handle that first.
@@ -1812,12 +1821,6 @@ mkTyVarEqErr' ctxt item (tv1, co1) ty2
         -- instead of augmenting it.  This is because the details are not likely
         -- to be helpful since this is just an unimplemented feature.
     return main_msg
-
-  -- Incompatible kinds
-  -- This is wrinkle (EIK2) in Note [Equalities with incompatible kinds]
-  -- in GHC.Tc.Solver.Equality
-  | hasCoercionHoleCo co1 || hasCoercionHoleTy ty2
-  = return $ mkBlockedEqErr item
 
   | isSkolemTyVar tv1  -- ty2 won't be a meta-tyvar; we would have
                        -- swapped in Solver.Equality.canEqTyVarHomo
@@ -1894,8 +1897,10 @@ mkTyVarEqErr' ctxt item (tv1, co1) ty2
   -- See Note [Error messages for untouchables]
   | (implic:_) <- cec_encl ctxt   -- Get the innermost context
   , Implic { ic_tclvl = lvl } <- implic
-  = assertPpr (not (isTouchableMetaTyVar lvl tv1))
+  = assertPpr (not (isTouchableMetaTyVar lvl tv1) || hasCoercionHole ty2)
               (ppr tv1 $$ ppr lvl) $ do -- See Note [Error messages for untouchables]
+         -- We can still get touchable meta-tyvars on the LHS if there is an
+         -- unsolved coercion hole, e.g.   (alpha::Type) ~ Int# |> co_hole
     tv_extra <- extraTyVarEqInfo (tv1, Just implic) ty2
     let tv_extra' = tv_extra { thisTyVarIsUntouchable = Just implic }
         msg = Mismatch
@@ -1931,7 +1936,8 @@ mkTyVarEqErr' ctxt item (tv1, co1) ty2
       = Nothing
     frr_reason (ConcreteFRR frr_orig) conc_tv not_conc
       = FRR_Info { frr_info_origin = frr_orig
-                 , frr_info_not_concrete = Just (conc_tv, not_conc) }
+                 , frr_info_not_concrete = Just (conc_tv, not_conc)
+                 , frr_info_other_origin = Just (errorItemOrigin item) }
 
     ty1 = mkTyVarTy tv1
 
@@ -2001,14 +2007,6 @@ misMatchOrCND ctxt item ty1 ty2
     givens  = [ given | given <- getUserGivens ctxt, ic_given_eqs given /= NoGivenEqs ]
               -- Keep only UserGivens that have some equalities.
               -- See Note [Suppress redundant givens during error reporting]
-
--- These are for the "blocked" equalities, as described in GHC.Tc.Solver.Equality
--- Note [Equalities with incompatible kinds], wrinkle (EIK2). There should
--- always be another unsolved wanted around, which will ordinarily suppress
--- this message. But this can still be printed out with -fdefer-type-errors
--- (sigh), so we must produce a message.
-mkBlockedEqErr :: ErrorItem -> TcSolverReportMsg
-mkBlockedEqErr item = BlockedEquality item
 
 {-
 Note [Suppress redundant givens during error reporting]
@@ -2240,7 +2238,8 @@ mkDictErr ctxt orig_items
 --     and the result of evaluating ...".
 mk_dict_err :: HasCallStack => SolverReportErrCtxt -> (ErrorItem, ClsInstLookupResult)
             -> TcM ( TcSolverReportMsg, ([ImportError], [GhcHint]) )
-mk_dict_err ctxt (item, (matches, pot_unifiers, unsafe_overlapped)) = case (NE.nonEmpty matches, NE.nonEmpty unsafe_overlapped) of
+mk_dict_err ctxt (item, (matches, pot_unifiers, unsafe_overlapped))
+  = case (NE.nonEmpty matches, NE.nonEmpty unsafe_overlapped) of
   (Nothing, _)  -> do -- No matches but perhaps several unifiers
     { (_, rel_binds, item) <- relevantBindings True ctxt item
     ; candidate_insts <- get_candidate_instances

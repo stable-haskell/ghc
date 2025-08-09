@@ -35,7 +35,6 @@ import Language.Haskell.Syntax.Basic ( Fixity )
 import GHC.Types.Basic (InlinePragma)
 import GHC.Types.SourceText (StringLiteral)
 
-import Data.Void
 import Data.Bool
 import Data.Maybe
 
@@ -252,20 +251,6 @@ data PatSynBind idL idR
      }
    | XPatSynBind !(XXPatSynBind idL idR)
 
--- | Multiplicity annotations, on binders, are always resolved (to a unification
--- variable if there is no annotation) during type-checking. The resolved
--- multiplicity is stored in the extension fields.
-data HsMultAnn pass
-  = HsNoMultAnn !(XNoMultAnn pass)
-  | HsPct1Ann   !(XPct1Ann pass)
-  | HsMultAnn   !(XMultAnn pass) (LHsType (NoGhcTc pass))
-  | XMultAnn    !(XXMultAnn pass)
-
-type family XNoMultAnn p
-type family XPct1Ann   p
-type family XMultAnn   p
-type family XXMultAnn  p
-
 {-
 ************************************************************************
 *                                                                      *
@@ -356,15 +341,28 @@ data Sig pass
                 (LIdP pass)        -- Function name
                 InlinePragma       -- Never defaultInlinePragma
 
-        -- | A specialisation pragma
+        -- | An old-form specialisation pragma
         --
         -- > {-# SPECIALISE f :: Int -> Int #-}
+        --
+        -- NB: this constructor is deprecated and will be removed in GHC 9.18 (#25540)
   | SpecSig     (XSpecSig pass)
                 (LIdP pass)        -- Specialise a function or datatype  ...
                 [LHsSigType pass]  -- ... to these types
                 InlinePragma       -- The pragma on SPECIALISE_INLINE form.
                                    -- If it's just defaultInlinePragma, then we said
                                    --    SPECIALISE, not SPECIALISE_INLINE
+
+        -- | A new-form specialisation pragma (see GHC Proposal #493)
+        --   e.g.  {-# SPECIALISE f @Int 1 :: Int -> Int #-}
+        --   See Note [Overview of SPECIALISE pragmas]
+  | SpecSigE    (XSpecSigE pass)
+                (RuleBndrs pass)
+                (LHsExpr pass)     -- Expression to specialise
+                InlinePragma
+                -- The expression should be of form
+                --     f a1 ... an [ :: sig ]
+                -- with an optional type signature
 
         -- | A specialisation pragma for instance declarations only
         --
@@ -420,8 +418,9 @@ isTypeLSig (unXRec @p -> XSig {})       = True
 isTypeLSig _                    = False
 
 isSpecLSig :: forall p. UnXRec p => LSig p -> Bool
-isSpecLSig (unXRec @p -> SpecSig {}) = True
-isSpecLSig _                 = False
+isSpecLSig (unXRec @p -> SpecSig {})  = True
+isSpecLSig (unXRec @p -> SpecSigE {}) = True
+isSpecLSig _                          = False
 
 isSpecInstLSig :: forall p. UnXRec p => LSig p -> Bool
 isSpecInstLSig (unXRec @p -> SpecInstSig {}) = True
@@ -430,6 +429,7 @@ isSpecInstLSig _                      = False
 isPragLSig :: forall p. UnXRec p => LSig p -> Bool
 -- Identifies pragmas
 isPragLSig (unXRec @p -> SpecSig {})   = True
+isPragLSig (unXRec @p -> SpecSigE {})  = True
 isPragLSig (unXRec @p -> InlineSig {}) = True
 isPragLSig (unXRec @p -> SCCFunSig {}) = True
 isPragLSig (unXRec @p -> CompleteMatchSig {}) = True
@@ -452,6 +452,40 @@ isCompleteMatchSig :: forall p. UnXRec p => LSig p -> Bool
 isCompleteMatchSig (unXRec @p -> CompleteMatchSig {} ) = True
 isCompleteMatchSig _                            = False
 
+{- *********************************************************************
+*                                                                      *
+                   Rule binders
+*                                                                      *
+********************************************************************* -}
+
+data RuleBndrs pass = RuleBndrs
+       { rb_ext  :: XCRuleBndrs pass
+           --   After typechecking rb_ext contains /all/ the quantified variables
+           --   both term variables and type varibles
+       , rb_tyvs :: Maybe [LHsTyVarBndr () (NoGhcTc pass)]
+           -- ^ User-written forall'd type vars; preserved for pretty-printing
+       , rb_tmvs :: [LRuleBndr (NoGhcTc pass)]
+           -- ^ User-written forall'd term vars; preserved for pretty-printing
+       }
+  | XRuleBndrs !(XXRuleBndrs pass)
+
+-- | Located Rule Binder
+type LRuleBndr pass = XRec pass (RuleBndr pass)
+
+-- | Rule Binder
+data RuleBndr pass
+  = RuleBndr    (XCRuleBndr pass)   (LIdP pass)
+  | RuleBndrSig (XRuleBndrSig pass) (LIdP pass) (HsPatSigType pass)
+  | XRuleBndr !(XXRuleBndr pass)
+        -- ^
+        --  - 'GHC.Parser.Annotation.AnnKeywordId' : 'GHC.Parser.Annotation.AnnOpen',
+        --     'GHC.Parser.Annotation.AnnDcolon','GHC.Parser.Annotation.AnnClose'
+
+        -- For details on above see Note [exact print annotations] in GHC.Parser.Annotation
+
+collectRuleBndrSigTys :: [RuleBndr pass] -> [HsPatSigType pass]
+collectRuleBndrSigTys bndrs = [ty | RuleBndrSig _ _ ty <- bndrs]
+
 {-
 ************************************************************************
 *                                                                      *
@@ -461,7 +495,7 @@ isCompleteMatchSig _                            = False
 -}
 
 -- | Haskell Pattern Synonym Details
-type HsPatSynDetails pass = HsConDetails Void (LIdP pass) [RecordPatSynField pass]
+type HsPatSynDetails pass = HsConDetails (LIdP pass) [RecordPatSynField pass]
 
 -- See Note [Record PatSyn Fields]
 -- | Record Pattern Synonym Field

@@ -56,6 +56,7 @@ import GHC.Read
 import GHC.ByteOrder (ByteOrder(..))
 import GHC.Platform.Constants
 import GHC.Platform.ArchOS
+import GHC.Stack (HasCallStack)
 import GHC.Types.Basic (Alignment, alignmentOf)
 import GHC.Utils.Panic.Plain
 
@@ -127,7 +128,7 @@ isSse2Enabled platform = case platformArch platform of
 -- -----------------------------------------------------------------------------
 -- Platform Constants
 
-platformConstants :: Platform -> PlatformConstants
+platformConstants :: HasCallStack => Platform -> PlatformConstants
 platformConstants platform = case platform_constants platform of
   Nothing -> panic "Platform constants not available!"
   Just c  -> c
@@ -269,6 +270,7 @@ data SseVersion
    = SSE1
    | SSE2
    | SSE3
+   | SSSE3
    | SSE4
    | SSE42
    deriving (Eq, Ord)
@@ -351,12 +353,15 @@ lookupPlatformConstants :: [FilePath] -> IO (Maybe PlatformConstants)
 lookupPlatformConstants include_dirs = find_constants include_dirs
   where
     try_parse d = do
+        putStrLn $ "Looking for DerivedConstants.h in " ++ d
         let p = d </> "DerivedConstants.h"
         doesFileExist p >>= \case
-          True  -> Just <$> parseConstantsHeader p
+          True  -> do
+            putStrLn $ "Found DerivedConstants.h in " ++ p
+            Just <$> parseConstantsHeader p
           False -> return Nothing
 
-    find_constants []     = return Nothing
+    find_constants []     = putStrLn "No include_dirs left to look for DerivedConstants.h in" >> return Nothing
     find_constants (x:xs) = try_parse x >>= \case
         Nothing -> find_constants xs
         Just c  -> return (Just c)

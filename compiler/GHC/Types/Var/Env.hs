@@ -74,7 +74,8 @@ module GHC.Types.Var.Env (
 
         -- * TidyEnv and its operation
         TidyEnv,
-        emptyTidyEnv, mkEmptyTidyEnv, delTidyEnvList
+        emptyTidyEnv, mkEmptyTidyEnv, delTidyEnvList,
+        mapMaybeDVarEnv
     ) where
 
 import GHC.Prelude
@@ -517,7 +518,7 @@ varEnvDomain      :: VarEnv elt -> UnVarSet
 partitionVarEnv   :: (a -> Bool) -> VarEnv a -> (VarEnv a, VarEnv a)
 -- | Only keep variables contained in the VarSet
 restrictVarEnv    :: VarEnv a -> VarSet -> VarEnv a
-delVarEnvList     :: VarEnv a -> [Var] -> VarEnv a
+delVarEnvList     :: Foldable f => VarEnv a -> f Var -> VarEnv a
 delVarEnv         :: VarEnv a -> Var -> VarEnv a
 minusVarEnv       :: VarEnv a -> VarEnv b -> VarEnv a
 plusVarEnv_C      :: (a -> a -> a) -> VarEnv a -> VarEnv a -> VarEnv a
@@ -550,6 +551,8 @@ plusVarEnv_C     = plusUFM_C
 plusVarEnv_CD    = plusUFM_CD
 plusMaybeVarEnv_C = plusMaybeUFM_C
 delVarEnvList    = delListFromUFM
+-- INLINE due to polymorphism
+{-# INLINE delVarEnvList #-}
 delVarEnv        = delFromUFM
 minusVarEnv      = minusUFM
 plusVarEnv       = plusUFM
@@ -579,7 +582,7 @@ restrictVarEnv env vs = filterUFM_Directly keep env
   where
     keep u _ = u `elemVarSetByKey` vs
 
-zipVarEnv tyvars tys   = mkVarEnv (zipEqual "zipVarEnv" tyvars tys)
+zipVarEnv tyvars tys   = mkVarEnv (zipEqual tyvars tys)
 lookupVarEnv_NF env id = case lookupVarEnv env id of
                          Just xx -> xx
                          Nothing -> panic "lookupVarEnv_NF: Nothing"
@@ -653,6 +656,9 @@ mapDVarEnv = mapUDFM
 
 filterDVarEnv      :: (a -> Bool) -> DVarEnv a -> DVarEnv a
 filterDVarEnv = filterUDFM
+
+mapMaybeDVarEnv :: (a -> Maybe b) -> DVarEnv a -> DVarEnv b
+mapMaybeDVarEnv f = mapMaybeUDFM f
 
 alterDVarEnv :: (Maybe a -> Maybe a) -> DVarEnv a -> Var -> DVarEnv a
 alterDVarEnv = alterUDFM

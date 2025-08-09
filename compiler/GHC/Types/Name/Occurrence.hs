@@ -49,8 +49,7 @@ module GHC.Types.Name.Occurrence (
         mkClsOcc, mkClsOccFS,
         mkDFunOcc,
         setOccNameSpace,
-        demoteOccName,
-        demoteOccTvName,
+        demoteOccName, demoteOccTcClsName, demoteOccTvName,
         promoteOccName,
         varToRecFieldOcc,
         recFieldToVarOcc,
@@ -93,6 +92,7 @@ module GHC.Types.Name.Occurrence (
         plusOccEnv, plusOccEnv_C,
         extendOccEnv_Acc, filterOccEnv, delListFromOccEnv, delFromOccEnv,
         alterOccEnv, minusOccEnv, minusOccEnv_C, minusOccEnv_C_Ns,
+        sizeOccEnv,
         pprOccEnv, forceOccEnv,
         intersectOccEnv_C,
 
@@ -316,15 +316,22 @@ pprNameSpaceBrief TvName       = text "tv"
 pprNameSpaceBrief TcClsName    = text "tc"
 pprNameSpaceBrief (FldName {}) = text "fld"
 
--- demoteNameSpace lowers the NameSpace if possible.  We can not know
--- in advance, since a TvName can appear in an HsTyVar.
+-- | 'demoteNameSpace' lowers the 'NameSpace' to the term-level, if possible.
+--
 -- See Note [Demotion] in GHC.Rename.Env.
 demoteNameSpace :: NameSpace -> Maybe NameSpace
 demoteNameSpace VarName = Nothing
 demoteNameSpace DataName = Nothing
-demoteNameSpace TvName = Nothing
+demoteNameSpace TvName = Just VarName
 demoteNameSpace TcClsName = Just DataName
 demoteNameSpace (FldName {}) = Nothing
+
+demoteTcClsNameSpace :: NameSpace -> Maybe NameSpace
+demoteTcClsNameSpace VarName = Nothing
+demoteTcClsNameSpace DataName = Nothing
+demoteTcClsNameSpace TvName = Nothing
+demoteTcClsNameSpace TcClsName = Just DataName
+demoteTcClsNameSpace (FldName {}) = Nothing
 
 -- demoteTvNameSpace lowers the NameSpace of a type variable.
 -- See Note [Demotion] in GHC.Rename.Env.
@@ -505,6 +512,11 @@ mkClsOccFS = mkOccNameFS clsName
 demoteOccName :: OccName -> Maybe OccName
 demoteOccName (OccName space name) = do
   space' <- demoteNameSpace space
+  return $ OccName space' name
+
+demoteOccTcClsName :: OccName -> Maybe OccName
+demoteOccTcClsName (OccName space name) = do
+  space' <- demoteTcClsNameSpace space
   return $ OccName space' name
 
 demoteOccTvName :: OccName -> Maybe OccName
@@ -791,6 +803,10 @@ minusOccEnv_C_Ns f (MkOccEnv as) (MkOccEnv bs) =
         in if isNullUFM m
            then Nothing
            else Just m
+
+sizeOccEnv :: OccEnv a -> Int
+sizeOccEnv (MkOccEnv as) =
+  nonDetStrictFoldUFM (\ m !acc -> acc + sizeUFM m) 0 as
 
 instance Outputable a => Outputable (OccEnv a) where
     ppr x = pprOccEnv ppr x

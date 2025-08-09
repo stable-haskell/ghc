@@ -47,6 +47,7 @@ module GHC.Driver.Main
     , initModDetails
     , initWholeCoreBindings
     , loadIfaceByteCode
+    , loadIfaceByteCodeLazy
     , hscMaybeWriteIface
     , hscCompileCmmFile
 
@@ -104,6 +105,7 @@ module GHC.Driver.Main
     , hscAddSptEntries
     , writeInterfaceOnlyMode
     , loadByteCode
+    , genModDetails
     ) where
 
 import GHC.Prelude
@@ -116,6 +118,7 @@ import GHC.Driver.Backend
 import GHC.Driver.Env
 import GHC.Driver.Env.KnotVars
 import GHC.Driver.Errors
+import GHC.Driver.Messager
 import GHC.Driver.Errors.Types
 import GHC.Driver.CodeOutput
 import GHC.Driver.Config.Cmm.Parser (initCmmParserConfig)
@@ -218,7 +221,6 @@ import GHC.Cmm.UniqueRenamer
 import GHC.Unit
 import GHC.Unit.Env
 import GHC.Unit.Finder
-import GHC.Unit.External
 import GHC.Unit.Module.ModDetails
 import GHC.Unit.Module.ModGuts
 import GHC.Unit.Module.ModIface
@@ -812,7 +814,6 @@ This is the only thing that isn't caught by the type-system.
 -}
 
 
-type Messager = HscEnv -> (Int,Int) -> RecompileRequired -> ModuleGraphNode -> IO ()
 
 -- | Do the recompilation avoidance checks for both one-shot and --make modes
 -- This function is the *only* place in the compiler where we decide whether to
@@ -829,7 +830,7 @@ hscRecompStatus
   = do
     let
         msg what = case mHscMessage of
-          Just hscMessage -> hscMessage hsc_env mod_index what (ModuleNode [] mod_summary)
+          Just hscMessage -> hscMessage hsc_env mod_index what (ModuleNode [] (ModuleNodeCompile mod_summary))
           Nothing -> return ()
 
     -- First check to see if the interface file agrees with the
@@ -844,7 +845,7 @@ hscRecompStatus
     case recomp_if_result of
       OutOfDateItem reason mb_checked_iface -> do
         msg $ NeedsRecompile reason
-        return $ HscRecompNeeded $ fmap (mi_iface_hash . mi_final_exts) mb_checked_iface
+        return $ HscRecompNeeded $ fmap mi_iface_hash mb_checked_iface
       UpToDateItem checked_iface -> do
         let lcl_dflags = ms_hspp_opts mod_summary
         if | not (backendGeneratesCode (backend lcl_dflags)) -> do
@@ -862,7 +863,7 @@ hscRecompStatus
            , xopt LangExt.TemplateHaskell lcl_dflags
            -> do
               msg $ needsRecompileBecause THWithJS
-              return $ HscRecompNeeded $ Just $ mi_iface_hash $ mi_final_exts $ checked_iface
+              return $ HscRecompNeeded $ Just $ mi_iface_hash $ checked_iface
 
            | otherwise -> do
                -- Do need linkable
@@ -918,7 +919,7 @@ hscRecompStatus
                    return $ HscUpToDate checked_iface $ linkable
                  OutOfDateItem reason _ -> do
                    msg $ NeedsRecompile reason
-                   return $ HscRecompNeeded $ Just $ mi_iface_hash $ mi_final_exts $ checked_iface
+                   return $ HscRecompNeeded $ Just $ mi_iface_hash $ checked_iface
 
 -- | Check that the .o files produced by compilation are already up-to-date
 -- or not.
@@ -968,10 +969,8 @@ loadByteCode iface mod_sum = do
     let
       this_mod   = ms_mod mod_sum
       if_date    = fromJust $ ms_iface_date mod_sum
-    case mi_extra_decls iface of
-      Just extra_decls -> do
-          let fi = WholeCoreBindings extra_decls this_mod (ms_location mod_sum)
-                   (mi_foreign iface)
+    case iface_core_bindings iface (ms_location mod_sum) of
+      Just fi -> do
           return (UpToDateItem (Linkable if_date this_mod (NE.singleton (CoreBindings fi))))
       _ -> return $ outOfDateItemBecause MissingBytecode Nothing
 
@@ -1019,15 +1018,15 @@ compile_for_interpreter hsc_env use =
 -- | Assemble 'WholeCoreBindings' if the interface contains Core bindings.
 iface_core_bindings :: ModIface -> ModLocation -> Maybe WholeCoreBindings
 iface_core_bindings iface wcb_mod_location =
-  mi_extra_decls <&> \ wcb_bindings ->
+  mi_simplified_core <&> \(IfaceSimplifiedCore bindings foreign') ->
     WholeCoreBindings {
-      wcb_bindings,
+      wcb_bindings = bindings,
       wcb_module = mi_module,
       wcb_mod_location,
-      wcb_foreign = mi_foreign
+      wcb_foreign = foreign'
     }
   where
-    ModIface {mi_module, mi_extra_decls, mi_foreign} = iface
+    ModIface {mi_module, mi_simplified_core} = iface
 
 -- | Return an 'IO' that hydrates Core bindings and compiles them to bytecode if
 -- the interface contains any, using the supplied type env for typechecking.
@@ -1059,6 +1058,27 @@ loadIfaceByteCode hsc_env iface location type_env =
       time <- maybe getCurrentTime pure if_time
       return $! Linkable time (mi_module iface) parts
 
+loadIfaceByteCodeLazy ::
+  HscEnv ->
+  ModIface ->
+  ModLocation ->
+  TypeEnv ->
+  IO (Maybe Linkable)
+loadIfaceByteCodeLazy hsc_env iface location type_env =
+  case iface_core_bindings iface location of
+    Nothing -> return Nothing
+    Just wcb -> do
+      Just <$> compile wcb
+  where
+    compile decls = do
+      ~(bcos, fos) <- unsafeInterleaveIO $ compileWholeCoreBindings hsc_env type_env decls
+      linkable $ NE.singleton (LazyBCOs bcos fos)
+
+    linkable parts = do
+      if_time <- modificationTimeIfExists (ml_hi_file location)
+      time <- maybe getCurrentTime pure if_time
+      return $!Linkable time (mi_module iface) parts
+
 -- | If the 'Linkable' contains Core bindings loaded from an interface, replace
 -- them with a lazy IO thunk that compiles them to bytecode and foreign objects,
 -- using the supplied environment for type checking.
@@ -1075,6 +1095,12 @@ loadIfaceByteCode hsc_env iface location type_env =
 --
 -- This is sound because generateByteCode just depends on things already loaded
 -- in the interface file.
+
+-- TODO: We should just use loadIfaceByteCodeLazy instead of the two stage process with
+-- loadByteCode and initWholeCoreBindings. The main reason it is like this is because
+-- initWholeCoreBindings requires a ModDetails, which we don't have during recompilation
+-- checking. We should modify recompilation checking to return a HomeModInfo directly.
+
 initWholeCoreBindings ::
   HscEnv ->
   ModIface ->
@@ -1243,11 +1269,11 @@ hscDesugarAndSimplify summary (FrontendTypecheck tc_result) tc_warnings mb_old_h
           (cg_guts, details) <-
               liftIO $ hscTidy hsc_env simplified_guts
 
-          let !partial_iface =
+          !partial_iface <- liftIO $
                 {-# SCC "GHC.Driver.Main.mkPartialIface" #-}
                 -- This `force` saves 2M residency in test T10370
                 -- See Note [Avoiding space leaks in toIface*] for details.
-                force (mkPartialIface hsc_env (cg_binds cg_guts) details summary (tcg_import_decls tc_result) simplified_guts)
+                fmap force (mkPartialIface hsc_env (cg_binds cg_guts) details summary (tcg_import_decls tc_result) simplified_guts)
 
           return HscRecomp { hscs_guts = cg_guts,
                              hscs_mod_location = ms_location summary,
@@ -1376,7 +1402,7 @@ hscMaybeWriteIface logger dflags is_simple iface old_iface mod_location = do
       --    dynamic interfaces. Hopefully both the dynamic and the non-dynamic
       --    interfaces stay in sync...
       --
-      let change = old_iface /= Just (mi_iface_hash (mi_final_exts iface))
+      let change = old_iface /= Just (mi_iface_hash iface)
 
       let dt = dynamicTooState dflags
 
@@ -1449,46 +1475,6 @@ genModDetails hsc_env old_iface
     dumpIfaceStats hsc_env
     return new_details
 
---------------------------------------------------------------
--- Progress displayers.
---------------------------------------------------------------
-
-oneShotMsg :: Logger -> RecompileRequired -> IO ()
-oneShotMsg logger recomp =
-    case recomp of
-        UpToDate -> compilationProgressMsg logger $ text "compilation IS NOT required"
-        NeedsRecompile _ -> return ()
-
-batchMsg :: Messager
-batchMsg = batchMsgWith (\_ _ _ _ -> empty)
-batchMultiMsg :: Messager
-batchMultiMsg = batchMsgWith (\_ _ _ node -> brackets (ppr (mgNodeUnitId node)))
-
-batchMsgWith :: (HscEnv -> (Int, Int) -> RecompileRequired -> ModuleGraphNode -> SDoc) -> Messager
-batchMsgWith extra hsc_env_start mod_index recomp node =
-      case recomp of
-        UpToDate
-          | logVerbAtLeast logger 2 -> showMsg (text "Skipping") empty
-          | otherwise -> return ()
-        NeedsRecompile reason0 -> showMsg (text herald) $ case reason0 of
-          MustCompile            -> empty
-          (RecompBecause reason) -> text " [" <> pprWithUnitState state (ppr reason) <> text "]"
-    where
-        herald = case node of
-                    LinkNode {} -> "Linking"
-                    InstantiationNode {} -> "Instantiating"
-                    ModuleNode {} -> "Compiling"
-                    UnitNode {} -> "Loading"
-        hsc_env = hscSetActiveUnitId (mgNodeUnitId node) hsc_env_start
-        dflags = hsc_dflags hsc_env
-        logger = hsc_logger hsc_env
-        state  = hsc_units hsc_env
-        showMsg msg reason =
-            compilationProgressMsg logger $
-            (showModuleIndex mod_index <>
-            msg <+> showModMsg dflags (recompileRequired recomp) node)
-                <> extra hsc_env mod_index recomp node
-                <> reason
 
 --------------------------------------------------------------
 -- Safe Haskell
@@ -1776,10 +1762,7 @@ hscCheckSafe' m l = do
     lookup' :: Module -> Hsc (Maybe ModIface)
     lookup' m = do
         hsc_env <- getHscEnv
-        hsc_eps <- liftIO $ hscEPS hsc_env
-        let pkgIfaceT = eps_PIT hsc_eps
-            hug       = hsc_HUG hsc_env
-        iface <- liftIO $ lookupIfaceByModule hug pkgIfaceT m
+        iface <- liftIO $ lookupIfaceByModuleHsc hsc_env m
         -- the 'lookupIfaceByModule' method will always fail when calling from GHCi
         -- as the compiler hasn't filled in the various module tables
         -- so we need to call 'getModuleInterface' to load from disk
@@ -2816,8 +2799,7 @@ hscCompileCoreExpr' hsc_env srcspan ds_expr = do
       (fv_hvs, mods_needed, units_needed) <- loadDecls interp hsc_env srcspan $
         Linkable bco_time this_mod $ NE.singleton $ BCOs bcos
       {- Get the HValue for the root -}
-      return (expectJust "hscCompileCoreExpr'"
-         $ lookup (idName binding_id) fv_hvs, mods_needed, units_needed)
+      return (expectJust $ lookup (idName binding_id) fv_hvs, mods_needed, units_needed)
 
 
 
@@ -2901,7 +2883,7 @@ jsCodeGen hsc_env srcspan i this_mod stg_binds_with_deps binding_id = do
     jsLinkObject logger tmpfs tmp_dir js_config unit_env inst out_obj roots
 
   -- look up "id_sym" closure and create a StablePtr (HValue) from it
-  href <- lookupClosure interp (unpackFS id_sym) >>= \case
+  href <- lookupClosure interp (IFaststringSymbol id_sym) >>= \case
     Nothing -> pprPanic "Couldn't find just linked TH closure" (ppr id_sym)
     Just r  -> pure r
 
@@ -2928,18 +2910,6 @@ dumpIfaceStats hsc_env = do
     logDumpMsg logger "Interface statistics" (ifaceStats eps)
 
 
-{- **********************************************************************
-%*                                                                      *
-        Progress Messages: Module i of n
-%*                                                                      *
-%********************************************************************* -}
-
-showModuleIndex :: (Int, Int) -> SDoc
-showModuleIndex (i,n) = text "[" <> pad <> int i <> text " of " <> int n <> text "] "
-  where
-    -- compute the length of x > 0 in base 10
-    len x = ceiling (logBase 10 (fromIntegral x+1) :: Float)
-    pad = text (replicate (len n - len i) ' ') -- TODO: use GHC.Utils.Ppr.RStr
 
 writeInterfaceOnlyMode :: DynFlags -> Bool
 writeInterfaceOnlyMode dflags =
