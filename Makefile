@@ -5,6 +5,79 @@
 # The whole version replacement therapy is utterly ridiculous. It should be done
 # in the respective packages.
 
+# ┌─────────────────────────────────────────────────────────────────────────┐
+# │                        GHC Bootstrapping Stages                         │
+# ├─────────────────────────────────────────────────────────────────────────┤
+# │                                                                         │
+# │  Stage 0 (Bootstrap)                                                    │
+# │  ┌─────────┐     ┌─────────┐                                            │
+# │  │  ghc0   │     │  pkg0   │  (initial boot packages)                   │
+# │  │ (binary)│     │         │                                            │
+# │  └────┬────┘     └────┬────┘                                            │
+# │       │               │                                                 │
+# │       └───────┬───────┘                                                 │
+# │               ▼                                                         │
+# │         ┌─────────┐                                                     │
+# │         │  pkg0+  │  (augmented boot packages)                          │
+# │         └────┬────┘                                                     │
+# │              │                                                          │
+# │  ············│························································· │
+# │              ▼                                                          │
+# │  Stage 1     │                                                          │
+# │  ┌─────────┐ │                                                          │
+# │  │  ghc1   │◄┘  (built with ghc0, linked with rts0)                     │
+# │  │         │                                                            │
+# │  └────┬────┘                                                            │
+# │       │                                                                 │
+# │       │     ┌─────────┐                                                 │
+# │       └────►│  pkg1   │  (initially empty, then populated)              │
+# │       ┌─────│         │  (built with ghc1)                              │
+# │       │     └─────────┘                                                 │
+# │       │           ▲                                                     │
+# │       │           │ (mutual dependency; ghc1 needs to sees pkg1)        │
+# │       ▼           │                                                     │
+# │  ┌─────────┐      │                                                     │
+# │  │  ghc1   │──────┘                                                     │
+# │  │ (uses)  │                                                            │
+# │  └────┬────┘                                                            │
+# │       │                                                                 │
+# │  ·····│································································ │
+# │       ▼                                                                 │
+# │  Stage 2                                                                │
+# │  ┌─────────┐  ┌──────────┐  ┌─────────┐                                 │
+# │  │  ghc2   │  │ ghc-pkg2 │  │  ...    │                                 │
+# │  │         │  │          │  │         │                                 │
+# │  └─────────┘  └──────────┘  └─────────┘                                 │
+# │  (built with ghc1, linked with rts1)                                    │
+# │                                                                         │
+# │  ┌─────────────────────────────────┐                                    │
+# │  │        SHIPPED RESULT           │                                    │
+# │  │  ┌─────────┐   ┌─────────┐      │                                    │
+# │  │  │  pkg1   │ + │  ghc2   │      │                                    │
+# │  │  └─────────┘   └─────────┘      │                                    │
+# │  └─────────────────────────────────┘                                    │
+# │                                                                         │
+# │  Notes:                                                                 │
+# │  • Binaries: one stage ahead (ghc1 builds pkg1, ghc2 ships with pkg1)   │
+# │  • Libraries: one stage below (pkg1 ships with ghc2)                    │
+# │  • ghc1 and ghc2 are ABI compatible                                     |
+# |  • ghc0 and ghc1 are not guaruateed to be ABI compatible                |
+# │  • ghc1 is linked against rts0, ghc2 against rts1                       │
+# |  • augmented packages are needed because ghc1 may require newer         |
+# |    versions or even new pacakges, not shipped with the boot compiler    |
+# │                                                                         │
+# └─────────────────────────────────────────────────────────────────────────┘
+
+
+# ISSUES:
+# - [ ] Where do we get the version number from? The configure script _does_ contain
+#       one and sets it, but should it come from the last release tag this branch is
+#       contains?
+# - [ ] HADRIAN_SETTINGS needs to be removed.
+# - [ ] The hadrian folder needs to be removed.
+# - [ ] All sublibs should be SRPs in the relevant cabal.project files. No more
+#       submodules.
+
 SHELL := bash
 .SHELLFLAGS := -eu -o pipefail -O globstar -c
 
@@ -193,12 +266,21 @@ _build/stage1/lib/settings: _build/stage1/bin/ghc-toolchain-bin
 	_build/stage1/bin/ghc-toolchain-bin --triple $(TARGET_TRIPLE) --output-settings -o $@ --cc $(CC) --cxx $(CXX)
 	@echo "::endgroup::"
 
+# The somewhat strange thing is, we might not even need this at all now anymore. cabal seems to
+# pass all the necessary flags correctly. Thus even with an _empty_ package-db here (and it will
+# stay empty until we are done with the build), the build succeeds.
+#
+# For now, we are tying the knot here by making sure the stage1 compiler (stage1/bin/ghc) sees
+# the packages it builds (to build stage2/bin/ghc), by symlining cabal's target package-db into
+# the compilers global package-db. Another maybe even better solution might be to set the
+# Global Package DB in the settings file to the absolute path where cabal will place the
+# package db. This would elminate this rule outright.
 _build/stage1/lib/package.conf.d/package.cache: _build/stage1/bin/ghc-pkg _build/stage1/lib/settings
 	@echo "::group::Creating stage1 package cache..."
 	@mkdir -p _build/stage1/lib/package.conf.d
-	@rm -rf _build/stage1/lib/package.conf.d/*
-	cp -rfp _build/stage1/packagedb/host/*/* _build/stage1/lib/package.conf.d
-	_build/stage1/bin/ghc-pkg recache
+# 	@mkdir -p _build/stage2/packagedb/host
+# 	ln -s $(abspath ./_build/stage2/packagedb/host/ghc-9.13) _build/stage1/lib/package.conf.d
+# 	_build/stage1/bin/ghc-pkg init $(abspath ./_build/stage2/packagedb/host/ghc-9.13)
 	@echo "::endgroup::"
 
 _build/stage1/lib/template-hsc.h: utils/hsc2hs/data/template-hsc.h
