@@ -44,6 +44,7 @@ module GHC.Driver.Pipeline (
 
 
 import GHC.Prelude
+import GHC.Builtin.Names
 
 import GHC.Platform
 
@@ -823,10 +824,10 @@ hscGenBackendPipeline pipe_env hsc_env mod_sum result = do
         -- Add the object linkable to the potential bytecode linkable which was generated in HscBackend.
         return (mlinkable { homeMod_object = Just linkable })
 
-  -- when building ghc-internal with cabal-install, we still want the virtual
-  -- interface for gHC_PRIM in the cache
+  -- when building ghc-internal with --make (e.g. with cabal-install), we want
+  -- the virtual interface for gHC_PRIM in the cache, not the empty one.
   let miface_final
-        | ms_mod mod_sum == gHC_PRIM = getGhcPrimIface hsc_env
+        | ms_mod mod_sum == gHC_PRIM = getGhcPrimIface (hsc_hooks hsc_env)
         | otherwise                  = miface
   return (miface_final, final_linkable)
 
