@@ -38,13 +38,9 @@ jobs:
       shell: devx {0}
       run: cabal update
 
-    - name: Configure the build
-      shell: devx {0}
-      run: ./configure
-
     - name: Build the bindist
       shell: devx {0}
-      run: make CABAL=$PWD/_build/stage0/bin/cabal
+      run: make
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
@@ -54,7 +50,7 @@ jobs:
 
     - name: Run the testsuite
       shell: devx {0}
-      run: make test CABAL=$PWD/_build/stage0/bin/cabal
+      run: make test
 
     - name: Upload test results
       uses: actions/upload-artifact@v4
