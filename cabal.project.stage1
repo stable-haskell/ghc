@@ -1,3 +1,8 @@
+benchmarks: False
+tests: False
+
+allow-boot-library-installs: True
+
 packages:
   -- NOTE: we need rts-headers, because the _newly_ built compiler depends
   --       on these potentially _new_ headers, we must not rely on those from
@@ -36,9 +41,13 @@ packages:
   utils/ghc-toolchain
   utils/ghc-toolchain/exe
 
-benchmarks: False
-tests: False
-allow-boot-library-installs: True
+allow-newer: ghc-boot-th
+
+constraints:
+  template-haskell <= 2.22
+
+program-options
+  ghc-options: -fhide-source-paths -j
 
 package *
   library-vanilla: True
@@ -52,11 +61,3 @@ package ghc-boot-th
 
 package hsc2hs
   flags: +in-ghc-tree
-
-allow-newer: ghc-boot-th
-
-constraints:
-  template-haskell <= 2.22
-
-program-options
-  ghc-options: -fhide-source-paths -j

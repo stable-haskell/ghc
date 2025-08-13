@@ -1,4 +1,10 @@
 package-dbs: clear, global
+active-repositories: :none
+
+allow-boot-library-installs: True
+
+benchmarks: False
+tests: False
 
 packages:
   rts-headers
@@ -64,13 +70,6 @@ packages:
   utils/genapply
   utils/runghc
 
-
--- project-rts
-benchmarks: False
-tests: False
-allow-boot-library-installs: True
-active-repositories: :none
-
 constraints:
   -- we do not want to use the rts-headers from stage1
   rts-headers source, rts-fs source
@@ -78,12 +77,15 @@ constraints:
   -- I cannot write build:* but ghc-internal is enough to do the job.
   , build:any.ghc-internal installed
 
+program-options
+  ghc-options: -fhide-source-paths -j
+
 package *
+  executable-dynamic: False
+  executable-profiling: False
+  executable-static: False
   library-vanilla: True
   shared: False
-  executable-profiling: False
-  executable-dynamic: False
-  executable-static: False
 
 -- Maybe we should fix this with some import
 if os(linux)
@@ -120,30 +122,13 @@ if os(darwin)
     ghc-options: "-optc-DFS_NAMESPACE=rts"
     flags: +tables-next-to-code +leading-underscore
 
-
-program-options
-  ghc-options: -fhide-source-paths -j
-
--- project-boot-libs
-benchmarks: False
-tests: False
-allow-boot-library-installs: True
-active-repositories: :none
-
-package *
-  library-vanilla: True
-  shared: False
-  executable-profiling: False
-  executable-dynamic: False
-  executable-static: False
+package rts
+  ghc-options: -no-rts
 
 package rts-headers
   ghc-options: -no-rts
 
 package rts-fs
-  ghc-options: -no-rts
-
-package rts
   ghc-options: -no-rts
 
 package ghc
@@ -158,20 +143,6 @@ package ghc-internal
 package text
   flags: -simdutf
 
-program-options
-  ghc-options: -fhide-source-paths -j
-
--- project-ghc
-benchmarks: False
-tests: False
-
-package *
-  library-vanilla: True
-  shared: False
-  executable-profiling: False
-  executable-dynamic: False
-  executable-static: False
-
 package ghc-bin
   flags: +internal-interpreter -threaded
 
@@ -180,7 +151,3 @@ package hsc2hs
 
 package haskeline
   flags: -terminfo
-
-
-program-options
-  ghc-options: -fhide-source-paths -j
