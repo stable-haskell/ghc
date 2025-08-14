@@ -539,7 +539,7 @@ fi
 
 AC_ARG_VAR([DERIVE_CONSTANTS], [Path to the deriveConstants program])
 AC_PATH_PROG([DERIVE_CONSTANTS], deriveConstants)
-AS_IF([test "x$DERIVE_CONSTANTS" = x], [AC_MSG_ERROR([deriveConstants executable not found. Please install deriveConstantsor set DERIVE_CONSTANTS environment variable.])])
+AS_IF([test "x$DERIVE_CONSTANTS" = x], [AC_MSG_ERROR([deriveConstants executable not found. Please install deriveConstants or set DERIVE_CONSTANTS environment variable.])])
 
 AC_ARG_VAR([GENAPPLY], [Path to the genapply program])
 AC_PATH_PROG([GENAPPLY], genapply)
