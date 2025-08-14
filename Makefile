@@ -262,7 +262,8 @@ $(CONFIGURE_SCRIPTS): %: %.ac
 $(BUILD_DIR)/booted: $(CONFIGURE_SCRIPTS)
 	$(call GROUP,Running ./configure script...)
 	./configure
-	touch $@
+	@mkdir -p $(@D)
+	@touch $@
 	$(END_GROUP)
 
 # --- Bindist Target ---
