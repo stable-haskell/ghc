@@ -14,9 +14,21 @@ MAKEFLAGS += --no-builtin-rules
 
 ROOT_DIR := $(patsubst %/,%,$(dir $(realpath $(lastword $(MAKEFILE_LIST)))))
 
+# NOTE: Variable definitions like these can be overridden from the command line
+# but take precedence over environment variables. E.g.
+# 
+# make GHC=ghc-9.12.2
+#
+# will use ghc 9.12.2, but
+#
+# GHC=9.12.2 make
+#
+# will still use ghc 9.8.4.
+#
+# Explicit is better than implicit so I do not mind this.
+
 GHC0   = ghc-9.8.4
 CABAL0 = cabal
-PYTHON = python3
 
 # Build directories and files
 BUILD_DIR  = _build
