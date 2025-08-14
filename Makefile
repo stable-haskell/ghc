@@ -240,6 +240,7 @@ $(STAGE2_EXE) &: stage1 $(BUILD_DIR)/stage1/bin/wrapped-ghc prepare
 		$(addprefix exe:,$(STAGE2_EXE_TARGETS)) \
 		2>&1 | tee $(STAGE_DIR)/build.log
 	$(call INSTALL_BINS,$(@D),$(@F))
+	$(END_GROUP)
 
 $(BUILD_DIR)/stage2/lib/settings: $(BUILD_DIR)/stage1/lib/settings
 	@mkdir -p $(@D)
