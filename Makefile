@@ -98,8 +98,9 @@ THREADS ?= $(shell echo $$(( $(CPUS) + 1 )))
 
 # Macro to install executables after cabal build. This does not require calling cabal again,
 # which is slower and can cause replanning.
+# Passing -C makes sure install does not re-install files that haven't changed.
 define INSTALL_BINS
-  install -D $$(jq -r '."install-plan"[] | select((."stage" // "host") == "host" and ([."component-name"] | inside($$ARGS.positional))) | ."bin-file"' $(STAGE_DIR)/cache/plan.json --args $(addprefix exe:,$(2))) $(1)
+  install -C -D $$(jq -r '."install-plan"[] | select((."stage" // "host") == "host" and ([."component-name"] | inside($$ARGS.positional))) | ."bin-file"' $(STAGE_DIR)/cache/plan.json --args $(addprefix exe:,$(2))) $(1)
 endef
 
 # --- Main Targets ---
