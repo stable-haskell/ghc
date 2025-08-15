@@ -248,9 +248,11 @@ $(BUILD_DIR)/stage2/lib/settings: $(BUILD_DIR)/stage1/lib/settings
 
 # --- Prepare ---
 
-prepare: $(BUILD_DIR)/booted $(CABAL) $(HACKAGE)
+# The hackage index can be order-only because although the file would change
+# after a cabal update, the index state is fixed and the build would not change.
+prepare: $(BUILD_DIR)/booted $(CABAL) | $(HACKAGE)
 
-$(BUILD_DIR)/packages/hackage.haskell.org/01-index.tar.gz: $(CABAL)
+$(HACKAGE): $(CABAL)
 	$(call GROUP,Updating Hackage index...)
 	@mkdir -p $(@D)
 	$(CABAL) --remote-repo-cache $(BUILD_DIR)/packages update
