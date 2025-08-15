@@ -188,6 +188,7 @@ $(STAGE1_EXE) &: prepare
 		--with-compiler $(GHC0) \
 		$(addprefix exe:,$(STAGE1_EXECUTABLES)) \
 		2>&1 | tee $(STAGE_DIR)/build.log
+	# We do not need to install the executables here, our cabal-install will do that
 	$(END_GROUP)
 
 $(BUILD_DIR)/stage1/lib/settings: $(BUILD_DIR)/stage1/bin/ghc-toolchain-bin
@@ -239,7 +240,7 @@ $(STAGE2_EXE) &: stage1 $(BUILD_DIR)/stage1/bin/wrapped-ghc prepare
 		--ghc-options="-ghcversion-file=$(abspath ./rts/include/ghcversion.h)" \
 		$(addprefix exe:,$(STAGE2_EXE_TARGETS)) \
 		2>&1 | tee $(STAGE_DIR)/build.log
-	$(call INSTALL_BINS,$(@D),$(@F))
+	# We do not need to install the executables here, our cabal-install will do that
 	$(END_GROUP)
 
 $(BUILD_DIR)/stage2/lib/settings: $(BUILD_DIR)/stage1/lib/settings
