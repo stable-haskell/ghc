@@ -232,7 +232,7 @@ $(STAGE2_EXE) &: stage1 $(BUILD_DIR)/stage1/bin/wrapped-ghc prepare
 	$(call GROUP,building $(STAGE) executables $(STAGE2_EXE_TARGETS))
 	@mkdir -p $(@D)
 	HADRIAN_SETTINGS='$(HADRIAN_SETTINGS)' \
-	PATH=$(BUILD_DIR)/stage1/bin:$(PATH) \
+	PATH=$(abspath $(BUILD_DIR)/stage1/bin):$(PATH) \
 	$(CABAL_BUILD) \
 		--with-build-compiler=$(GHC0) \
 		--with-compiler=$(abspath $(BUILD_DIR)/stage1/bin/wrapped-ghc) \
