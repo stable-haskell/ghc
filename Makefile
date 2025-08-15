@@ -122,14 +122,33 @@ $(BUILD_DIR)/%/lib/template-hsc.h: utils/hsc2hs/data/template-hsc.h
 	@mkdir -p $(@D)
 	cp -rfp $< $@
 
+# [Note] Make phony targets and cabal
+# 
+# Getting Make to do the right thing is tricky. Here is what we want:
+# 1. cabal build should always be re-run. We cannot capture its dependencies
+#    correctly and cabal already avoids unnecessary re-builds and would not
+#    update the final binary unless it has to be recompiled.
+# 2. at the same time we want the final binary to be considered dirty only
+#    when it is actually recompiled.
+#
+# Making $(BUILD_DIR)/stage0/bin/cabal a phony target will give you 1. but it
+# would also cause $(BUILD_DIR)/stage0/bin/cabal to always be considered dirty
+# (because that is what phony dependencies are meant for). Thus it would not
+# deliver 2.
+#
+# So we do this. We make a phony FORCE target that causes the recipe to always
+# run, but $(BUILD_DIR)/stage0/bin/cabal is not phony so it will only be considered
+# dirty only when the file changes (i.e. when its mtime changes). We also use
+# install -C so the destination file is only updated if contents actually change.
+
+.PHONY: FORCE
+FORCE:
+
 # --- Stage 0 build ---
+#
+# This builds our cabal-install, which is used to build the rest of the project.
 
-# This just builds cabal-install, which is used to build the rest of the project.
-
-
-.PHONY: $(BUILD_DIR)/stage0/bin/cabal
-
-$(BUILD_DIR)/stage0/bin/cabal:
+$(BUILD_DIR)/stage0/bin/cabal: FORCE
 	$(call GROUP,Building Cabal...)
 	@mkdir -p $(@D)
 	$(CABAL0) build \
@@ -177,8 +196,8 @@ stage1: \
 	$(BUILD_DIR)/stage1/lib/package.conf.d/package.cache \
 	$(BUILD_DIR)/stage1/lib/template-hsc.h
 
-.PHONY: $(STAGE1_EXE)
-$(STAGE1_EXE) &: prepare
+# Re-run cabal every time for stage1, but don't mark outputs dirty unless they change.
+$(STAGE1_EXE) &: FORCE prepare
 	$(call GROUP,Building stage1 executables ($(STAGE1_EXECUTABLES))...)
 	@mkdir -p $(@D)
 	# Force cabal to replan
@@ -229,7 +248,8 @@ stage2: \
 	$(BUILD_DIR)/stage2/lib/package.conf.d/package.cache \
 	$(BUILD_DIR)/stage2/lib/template-hsc.h
 
-$(STAGE2_EXE) &: stage1 $(BUILD_DIR)/stage1/bin/wrapped-ghc prepare
+# Same pattern for stage2 executables: always run cabal, only dirty on change.
+$(STAGE2_EXE) &: FORCE stage1 $(BUILD_DIR)/stage1/bin/wrapped-ghc prepare
 	$(call GROUP,building $(STAGE) executables $(STAGE2_EXE_TARGETS))
 	@mkdir -p $(@D)
 	HADRIAN_SETTINGS='$(HADRIAN_SETTINGS)' \
