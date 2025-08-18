@@ -217,14 +217,6 @@ $(BUILD_DIR)/stage1/lib/settings: $(BUILD_DIR)/stage1/bin/ghc-toolchain-bin
 	$(BUILD_DIR)/stage1/bin/ghc-toolchain-bin --triple $(TARGET_TRIPLE) --cc $(CC) --cxx $(CXX) --output-settings -o $@
 	$(END_GROUP)
 
-# Create a wrapper around the stage1 ghc that logs invocations and delegates to the real ghc
-$(BUILD_DIR)/stage1/bin/wrapped-ghc: mk/wrapped-ghc.in $(BUILD_DIR)/stage1/bin/ghc
-	$(call GROUP,Creating wrapped-ghc (stage1 wrapper)...)
-	@mkdir -p $(@D)
-	@cp -fp mk/wrapped-ghc.in $@
-	@chmod +x $@
-	$(END_GROUP)
-
 # --- Stage 2 build ---
 
 STAGE2_EXE_TARGETS := \
@@ -250,14 +242,14 @@ stage2: \
 	$(BUILD_DIR)/stage2/lib/template-hsc.h
 
 # Same pattern for stage2 executables: always run cabal, only dirty on change.
-$(STAGE2_EXE) &: FORCE stage1 $(BUILD_DIR)/stage1/bin/wrapped-ghc prepare
+$(STAGE2_EXE) &: FORCE stage1 $(STAGE1_EXE) prepare
 	$(call GROUP,building $(STAGE) executables $(STAGE2_EXE_TARGETS))
 	@mkdir -p $(@D)
 	HADRIAN_SETTINGS='$(HADRIAN_SETTINGS)' \
 	PATH=$(abspath $(BUILD_DIR)/stage1/bin):$(PATH) \
 	$(CABAL_BUILD) \
 		--with-build-compiler=$(GHC0) \
-		--with-compiler=$(abspath $(BUILD_DIR)/stage1/bin/wrapped-ghc) \
+		--with-compiler=$(abspath $(GHC1)) \
 		--ghc-options="-ghcversion-file=$(abspath ./rts/include/ghcversion.h)" \
 		$(addprefix exe:,$(STAGE2_EXE_TARGETS)) \
 		2>&1 | tee $(STAGE_DIR)/build.log
