@@ -37,7 +37,7 @@ LOGS_DIR   = $(STAGE_DIR)/logs
 STORE_DIR  = $(STAGE_DIR)/store
 
 # The Hackage index state we want to use.
-INDEX_STATE = 2025-07-01T00:00:00Z
+INDEX_STATE = 2025-06-30T23:22:55Z # last before 2025-07-01T00:00:00Z
 
 # These are merely shortcuts
 CABAL   := $(BUILD_DIR)/stage0/bin/cabal
