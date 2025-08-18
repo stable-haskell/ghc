@@ -103,25 +103,13 @@ define INSTALL_BINS
   install -C -D $$(jq -r '."install-plan"[] | select((."stage" // "host") == "host" and ([."component-name"] | inside($$ARGS.positional))) | ."bin-file"' $(STAGE_DIR)/cache/plan.json --args $(addprefix exe:,$(2))) $(1)
 endef
 
-# --- Main Targets ---
-all: $(BUILD_DIR)/bindist # booted will depend on prepare-sources
+# [Note] phony targets
+# Mark as phony any target that does not correspond to a real file. This will
+# cause make to always consider them dirty, which is the right thing to do.
 
-# --- Common variables ---
-
-$(BUILD_DIR)/stage0/% : private STAGE=stage0
-$(BUILD_DIR)/stage1/% : private STAGE=stage1
-$(BUILD_DIR)/stage2/% : private STAGE=stage2
-# --- Common Targets ---
-
-$(BUILD_DIR)/%/lib/package.conf.d/package.cache: $(BUILD_DIR)/%/bin/ghc-pkg $(BUILD_DIR)/%/lib/settings
-	@rm -rf $(@D)
-	@mkdir -p $(@D)
-	cp -rfp $(BUILD_DIR)/$(STAGE)/packagedb/host/*/* $(@D)
-	$(BUILD_DIR)/$(STAGE)/bin/ghc-pkg recache
-
-$(BUILD_DIR)/%/lib/template-hsc.h: utils/hsc2hs/data/template-hsc.h
-	@mkdir -p $(@D)
-	cp -rfp $< $@
+# [Note] order-only prerequisites
+# These are prerequisites that are not used to determine if the target is up-to-date,
+# but are still required for the build to succeed.
 
 # --- Main Targets ---
 
@@ -155,6 +143,15 @@ $(BUILD_DIR)/stage2/% : private STAGE=stage2
 .PHONY: FORCE
 FORCE:
 
+# --- Main Targets ---
+all: $(BUILD_DIR)/bindist # booted will depend on prepare-sources
+
+# --- Common variables ---
+
+$(BUILD_DIR)/stage0/% : private STAGE=stage0
+$(BUILD_DIR)/stage1/% : private STAGE=stage1
+$(BUILD_DIR)/stage2/% : private STAGE=stage2
+
 # --- Stage 0 build ---
 #
 # This builds our cabal-install, which is used to build the rest of the project.
@@ -174,43 +171,36 @@ $(BUILD_DIR)/stage0/bin/cabal: FORCE
 	$(call INSTALL_BINS,$(@D),$(@F))
 	$(END_GROUP)
 
+#
 # --- Stage 1 build ---
+#
 
-# STAGE_UTIL_TARGETS := \
-# 	deriveConstants \
-# 	genapply \
-# 	genprimopcode \
-# 	ghc-pkg \
-# 	hsc2hs \
-# 	rts-headers \
-# 	unlit
+# STAGE1_EXECUTABLES lists the executables needed to execute the stage1 build.
 
-# STAGE1_TARGETS := $(STAGE_UTIL_TARGETS) ghc-bin:ghc ghc-toolchain-bin:ghc-toolchain-bin
+# Of course we need the compiler itself
+STAGE1_EXECUTABLES := ghc ghc-pkg
+# We need ghc-toolchain-bin to generate the settings file
 
-# TODO: dedup
-STAGE1_EXECUTABLES := \
-	deriveConstants \
-	genapply \
-	genprimopcode \
-	ghc \
-	ghc-pkg \
-	ghc-toolchain-bin \
-	hsc2hs \
-	unlit
+STAGE1_EXECUTABLES += ghc-toolchain-bin
 
+# These could be considered build-tool dependencies but they are used in the rts
+# configuration script which cannot have executable dependencies.
+STAGE1_EXECUTABLES += deriveConstants genapply
+
+# This is the path to the executables above
 STAGE1_EXE := $(addprefix $(BUILD_DIR)/stage1/bin/,$(STAGE1_EXECUTABLES))
 
 .PHONY: stage1
 stage1: \
-	$(GHC1) \
+	$(STAGE1_EXE) \
 	$(BUILD_DIR)/stage1/lib/settings \
 	$(BUILD_DIR)/stage1/lib/package.conf.d/package.cache \
 	$(BUILD_DIR)/stage1/lib/template-hsc.h
 
-# Re-run cabal every time for stage1, but don't mark outputs dirty unless they change.
-$(STAGE1_EXE) &: FORCE prepare
+# See the note "Make phony targets and cabal" for the use of FORCE.
+$(STAGE1_EXE) &: FORCE | prepare
 	$(call GROUP,Building stage1 executables ($(STAGE1_EXECUTABLES))...)
-	@mkdir -p $(@D)
+	@mkdir -p $(STAGE_DIR)
 	# Force cabal to replan
 	rm -rf $(BUILD_DIR)/stage1/cache
 	HADRIAN_SETTINGS='$(HADRIAN_SETTINGS)' \
@@ -227,12 +217,13 @@ $(BUILD_DIR)/stage1/lib/settings: $(BUILD_DIR)/stage1/bin/ghc-toolchain-bin
 	$(BUILD_DIR)/stage1/bin/ghc-toolchain-bin --triple $(TARGET_TRIPLE) --cc $(CC) --cxx $(CXX) --output-settings -o $@
 	$(END_GROUP)
 
+#
 # --- Stage 2 build ---
+#
+
+# STAGE2_EXECUTABLES lists the executables that will be part of the final binary distribution
 
 STAGE2_EXE_TARGETS := \
-	deriveConstants \
-	genapply \
-	genprimopcode \
 	ghc \
 	ghc-iserv \
 	ghc-pkg \
@@ -246,15 +237,35 @@ STAGE2_EXE := $(addprefix $(BUILD_DIR)/stage2/bin/,$(STAGE2_EXE_TARGETS))
 
 .PHONY: stage2
 stage2: \
-	$(GHC2) \
+	$(STAGE2_EXE) \
 	$(BUILD_DIR)/stage2/lib/settings \
 	$(BUILD_DIR)/stage2/lib/package.conf.d/package.cache \
 	$(BUILD_DIR)/stage2/lib/template-hsc.h
 
+# The stage1 compiler won't be able to compile any Haskell code until a run time system is available.
+# It is not possible to express this dependency with cabal so we need to build the RTS separately before
+# building anything else.
+# See the note "Make phony targets and cabal" for the use of FORCE.
+.PHONY: stage2-rts
+stage2-rts: STAGE=stage2
+stage2-rts: FORCE stage1 $(STAGE1_EXE) | prepare
+	$(call GROUP,building $(STAGE) rts)
+	@mkdir -p $(STAGE_DIR)
+	HADRIAN_SETTINGS='$(HADRIAN_SETTINGS)' \
+	PATH=$(abspath $(BUILD_DIR)/stage1/bin):$(PATH) \
+	$(CABAL_BUILD) \
+		--with-build-compiler=$(GHC0) \
+		--with-compiler=$(abspath $(BUILD_DIR)/stage1/bin/ghc) \
+		--ghc-options="-ghcversion-file=$(abspath ./rts/include/ghcversion.h)" \
+		rts:nonthreaded-nodebug rts:threaded-nodebug \
+		2>&1 | tee $(STAGE_DIR)/build.log
+	$(END_GROUP)
+
 # Same pattern for stage2 executables: always run cabal, only dirty on change.
-$(STAGE2_EXE) &: FORCE stage1 $(STAGE1_EXE) prepare
+# See the note "Make phony targets and cabal" for the use of FORCE.
+$(STAGE2_EXE) &: FORCE $(STAGE1_EXE) | prepare stage2-rts
 	$(call GROUP,building $(STAGE) executables $(STAGE2_EXE_TARGETS))
-	@mkdir -p $(@D)
+	@mkdir -p $(STAGE_DIR)
 	HADRIAN_SETTINGS='$(HADRIAN_SETTINGS)' \
 	PATH=$(abspath $(BUILD_DIR)/stage1/bin):$(PATH) \
 	$(CABAL_BUILD) \
@@ -266,11 +277,31 @@ $(STAGE2_EXE) &: FORCE stage1 $(STAGE1_EXE) prepare
 	# We do not need to install the executables here, our cabal-install will do that
 	$(END_GROUP)
 
+# The stage2 settings file is the same as the stage1 one
 $(BUILD_DIR)/stage2/lib/settings: $(BUILD_DIR)/stage1/lib/settings
 	@mkdir -p $(@D)
-	cp -rfp $(BUILD_DIR)/stage1/lib/settings $(BUILD_DIR)/stage2/lib/settings
+	cp -rfp $< $@
 
+#
+# --- Common Targets ---
+#
+
+# These two targets are used to create the package database cache files and the template
+# Haskell header file. They are the same for both stages.
+
+$(BUILD_DIR)/%/lib/package.conf.d/package.cache: $(BUILD_DIR)/%/bin/ghc-pkg $(BUILD_DIR)/%/lib/settings
+	@rm -rf $(@D)
+	@mkdir -p $(@D)
+	cp -rfp $(BUILD_DIR)/$(STAGE)/packagedb/host/*/* $(@D)
+	$(BUILD_DIR)/$(STAGE)/bin/ghc-pkg recache
+
+$(BUILD_DIR)/%/lib/template-hsc.h: utils/hsc2hs/data/template-hsc.h
+	@mkdir -p $(@D)
+	cp -rfp $< $@
+
+#
 # --- Prepare ---
+#
 
 # The hackage index can be order-only because although the file would change
 # after a cabal update, the index state is fixed and the build would not change.
@@ -331,7 +362,9 @@ $(BUILD_DIR)/booted: $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES)
 	@touch $@
 	$(END_GROUP)
 
+#
 # --- Bindist Target ---
+#
 
 # Target for creating the final binary distribution directory
 .PHONY: bindist
@@ -350,8 +383,9 @@ bindist: stage2 driver/ghc-usage.txt driver/ghci-usage.txt
 	@sed 's/("Support SMP","YES")/("Support SMP","NO")/' -i.bck $(BUILD_DIR)/bindist/lib/settings
 	$(END_GROUP)
 
-
+#
 # --- Clean Targets ---
+#
 
 clean-everything:
 	$(call GROUP,Cleaning all build artifacts...)
@@ -382,8 +416,10 @@ distclean: clean
 	rm -f $(CONFIGURED_FILES)
 	$(END_GROUP)
 
-
+#
 # --- Test Target ---
+#
+
 test: $(BUILD_DIR)/bindist
 	$(call GROUP,Running tests with THREADS=${THREADS})
 	TEST_HC=`pwd`/$(BUILD_DIR)/bindist/bin/ghc \
