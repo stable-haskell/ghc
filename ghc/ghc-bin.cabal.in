@@ -45,15 +45,6 @@ Executable ghc
                    ghc-boot      == @ProjectVersionMunged@,
                    ghc           == @ProjectVersionMunged@
 
-    if impl(ghc > 9.12)
-        -- we need to depend on the specific rts we want to link our
-        -- final GHC against.
-        -- TODO: add debug flag and extend those extra cases.
-        if flag(threaded)
-            Build-Depends: rts:threaded-nodebug
-        else
-            Build-Depends: rts:nonthreaded-nodebug
-
     if os(windows)
         Build-Depends: Win32  >= 2.3 && < 2.15
     else
