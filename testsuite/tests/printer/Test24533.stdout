@@ -604,7 +604,6 @@
                     (Unqual
                      {OccName: Foo}))
                    (PrefixCon
-                    []
                     [])))
                 ,(L
                   (EpAnn
@@ -627,12 +626,12 @@
                     (Unqual
                      {OccName: Foo}))
                    (PrefixCon
-                    []
                     [])))])
                (GRHSs
                 (EpaComments
                  [])
-                [(L
+                (:|
+                 (L
                   (EpAnn
                    (EpaSpan { Test24533.hs:16:14-19 })
                    (NoEpAnns)
@@ -666,7 +665,8 @@
                        (EpaComments
                         []))
                       (Unqual
-                       {OccName: True}))))))]
+                       {OccName: True}))))))
+                 [])
                 (EmptyLocalBinds
                  (NoExtField)))))]))))]
        []
@@ -1208,7 +1208,6 @@
                     (Unqual
                      {OccName: Foo}))
                    (PrefixCon
-                    []
                     [])))
                 ,(L
                   (EpAnn
@@ -1231,12 +1230,12 @@
                     (Unqual
                      {OccName: Foo}))
                    (PrefixCon
-                    []
                     [])))])
                (GRHSs
                 (EpaComments
                  [])
-                [(L
+                (:|
+                 (L
                   (EpAnn
                    (EpaSpan { Test24533.ppr.hs:6:14-19 })
                    (NoEpAnns)
@@ -1270,7 +1269,8 @@
                        (EpaComments
                         []))
                       (Unqual
-                       {OccName: True}))))))]
+                       {OccName: True}))))))
+                 [])
                 (EmptyLocalBinds
                  (NoExtField)))))]))))]
        []

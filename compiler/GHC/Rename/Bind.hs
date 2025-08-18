@@ -1,8 +1,6 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE TypeFamilies #-}
 
-{-# OPTIONS_GHC -Wno-incomplete-uni-patterns   #-}
-
 {-
 (c) The GRASP/AQUA Project, Glasgow University, 1992-1998
 
@@ -22,7 +20,7 @@ module GHC.Rename.Bind (
    rnLocalBindsAndThen, rnLocalValBindsLHS, rnLocalValBindsRHS,
 
    -- Other bindings
-   rnMethodBinds, renameSigs,
+   rnMethodBinds, renameSigs, bindRuleBndrs,
    rnMatchGroup, rnGRHSs, rnGRHS, rnSrcFixityDecl,
    makeMiniFixityEnv, MiniFixityEnv, emptyMiniFixityEnv,
    HsSigCtxt(..),
@@ -46,32 +44,37 @@ import GHC.Rename.Pat
 import GHC.Rename.Names
 import GHC.Rename.Env
 import GHC.Rename.Fixity
-import GHC.Rename.Utils ( mapFvRn
-                        , checkDupRdrNames
-                        , warnUnusedLocalBinds
-                        , checkUnusedRecordWildcard
-                        , checkDupAndShadowedNames, bindLocalNamesFV
-                        , addNoNestedForallsContextsErr, checkInferredVars )
+import GHC.Rename.Utils
 import GHC.Driver.DynFlags
-import GHC.Unit.Module
+
+import GHC.Data.BooleanFormula ( bfTraverse )
+import GHC.Data.Graph.Directed ( SCC(..) )
+import GHC.Data.Maybe          ( orElse, mapMaybe )
+import GHC.Data.OrdList
+import GHC.Data.List.SetOps    ( findDupsEq )
+
+
 import GHC.Types.Error
 import GHC.Types.FieldLabel
 import GHC.Types.Name
 import GHC.Types.Name.Env
 import GHC.Types.Name.Set
-import GHC.Types.Name.Reader ( RdrName, rdrNameOcc )
+import GHC.Types.Name.Reader
 import GHC.Types.SourceFile
 import GHC.Types.SrcLoc as SrcLoc
-import GHC.Data.List.SetOps    ( findDupsEq )
 import GHC.Types.Basic         ( RecFlag(..), TypeOrKind(..) )
-import GHC.Data.Graph.Directed ( SCC(..) )
+
+import GHC.Types.CompleteMatch
+import GHC.Types.Hint ( SigLike(..) )
+import GHC.Types.Unique.DSet ( mkUniqDSet )
+import GHC.Types.Unique.Set
+
+import GHC.Unit.Module
+
 import GHC.Utils.Misc
 import GHC.Utils.Outputable
 import GHC.Utils.Panic
-import GHC.Types.CompleteMatch
-import GHC.Types.Unique.Set
-import GHC.Data.Maybe          ( orElse, mapMaybe )
-import GHC.Data.OrdList
+
 import qualified GHC.LanguageExtensions as LangExt
 
 import Language.Haskell.Syntax.Basic (FieldLabelString(..))
@@ -79,8 +82,6 @@ import Language.Haskell.Syntax.Basic (FieldLabelString(..))
 import Control.Monad
 import Data.List          ( partition )
 import Data.List.NonEmpty ( NonEmpty(..) )
-import GHC.Types.Unique.DSet (mkUniqDSet)
-import GHC.Data.BooleanFormula (bfTraverse)
 
 {-
 -- ToDo: Put the annotations into the monad, so that they arrive in the proper
@@ -455,7 +456,7 @@ rnBindLHS name_maker _ bind@(PatBind { pat_lhs = pat, pat_mult = pat_mult })
   = do
       -- we don't actually use the FV processing of rnPatsAndThen here
       (pat',pat'_fvs) <- rnBindPat name_maker pat
-      (pat_mult', mult'_fvs) <- rnHsMultAnn pat_mult
+      (pat_mult', mult'_fvs) <- rnHsMultAnnWith (rnLHsType PatCtx) pat_mult
       return (bind { pat_lhs = pat', pat_ext = pat'_fvs `plusFV` mult'_fvs, pat_mult = pat_mult' })
                 -- We temporarily store the pat's FVs in bind_fvs;
                 -- gets updated to the FVs of the whole bind
@@ -470,7 +471,7 @@ rnBindLHS name_maker _ (PatSynBind x psb@PSB{ psb_id = rdrname })
   | isTopRecNameMaker name_maker
   = do { addLocM checkConName rdrname
        ; name <-
-           lookupLocatedTopConstructorRnN rdrname -- Should be in scope already
+           lookupLocatedTopBndrRnN WL_ConLike rdrname -- Should be in scope already
        ; return (PatSynBind x psb{ psb_ext = noAnn, psb_id = name }) }
 
   | otherwise  -- Pattern synonym, not at top level
@@ -742,16 +743,6 @@ makeMiniFixityEnv decls = foldlM add_one_sig emptyMiniFixityEnv decls
 
       DataNamespaceSpecifier{} -> env { mfe_data_level_names = (extendFsEnv mfe_data_level_names fs fix_item)}
 
-
--- | Multiplicity annotations are a simple wrapper around types. As such,
--- renaming them is a straightforward wrapper around 'rnLHsType'.
-rnHsMultAnn :: HsMultAnn GhcPs -> RnM (HsMultAnn GhcRn, FreeVars)
-rnHsMultAnn (HsNoMultAnn _) = return (HsNoMultAnn noExtField, emptyFVs)
-rnHsMultAnn (HsPct1Ann _) = return (HsPct1Ann noExtField, emptyFVs)
-rnHsMultAnn (HsMultAnn _ p) = do
-  (p', freeVars') <- rnLHsType PatCtx p
-  return $ (HsMultAnn noExtField p', freeVars')
-
 {- *********************************************************************
 *                                                                      *
                 Pattern synonym bindings
@@ -776,10 +767,10 @@ rnPatSynBind sig_fn bind@(PSB { psb_id = L l name
          -- so that the binding locations are reported
          -- from the left-hand side
             case details of
-               PrefixCon _ vars ->
+               PrefixCon vars ->
                    do { checkDupRdrNames vars
                       ; names <- mapM lookupPatSynBndr vars
-                      ; return ( (pat', PrefixCon noTypeArgs names)
+                      ; return ( (pat', PrefixCon names)
                                , mkFVs (map unLoc names)) }
                InfixCon var1 var2 ->
                    do { checkDupRdrNames [var1, var2]
@@ -790,7 +781,7 @@ rnPatSynBind sig_fn bind@(PSB { psb_id = L l name
                                , mkFVs (map unLoc [name1, name2])) }
                RecCon vars ->
                    do { checkDupRdrNames (map (foLabel . recordPatSynField) vars)
-                      ; fls <- lookupConstructorFields name
+                      ; fls <- lookupConstructorFields $ noUserRdr name
                       ; let fld_env = mkFsEnv [ (field_label $ flLabel fl, fl) | fl <- fls ]
                       ; let rnRecordPatSynField
                               (RecordPatSynField { recordPatSynField  = visible
@@ -1024,7 +1015,7 @@ rnMethodBindLHS :: Bool -> Name
                 -> RnM (LHsBindsLR GhcRn GhcPs)
 rnMethodBindLHS _ cls (L loc bind@(FunBind { fun_id = name })) rest
   = setSrcSpanA loc $ do
-    do { sel_name <- wrapLocMA (lookupInstDeclBndr cls (text "method")) name
+    do { sel_name <- wrapLocMA (lookupInstDeclBndr cls MethodOfClass) name
                      -- We use the selector name as the binder
        ; let bind' = bind { fun_id = sel_name, fun_ext = noExtField }
        ; return (L loc bind' : rest ) }
@@ -1075,7 +1066,7 @@ renameSigs ctxt sigs
 renameSig :: HsSigCtxt -> Sig GhcPs -> RnM (Sig GhcRn, FreeVars)
 renameSig ctxt sig@(TypeSig _ vs ty)
   = do  { new_vs <- mapM (lookupSigOccRn ctxt sig) vs
-        ; let doc = TypeSigCtx (ppr_sig_bndrs vs)
+        ; let doc = TypeSigCtx vs
         ; (new_ty, fvs) <- rnHsSigWcType doc ty
         ; return (TypeSig noAnn new_vs new_ty, fvs) }
 
@@ -1087,9 +1078,8 @@ renameSig ctxt sig@(ClassOpSig _ is_deflt vs ty)
         ; (new_ty, fvs) <- rnHsSigType ty_ctxt TypeLevel ty
         ; return (ClassOpSig noAnn is_deflt new_v new_ty, fvs) }
   where
-    (v1:_) = vs
-    ty_ctxt = GenericCtx (text "a class method signature for"
-                          <+> quotes (ppr v1))
+    v1:|_ = expectNonEmpty vs
+    ty_ctxt = ClassMethodSigCtx v1
 
 renameSig _ (SpecInstSig (_, src) ty)
   = do  { checkInferredVars doc ty
@@ -1110,16 +1100,21 @@ renameSig _ (SpecInstSig (_, src) ty)
 -- then the SPECIALISE pragma is ambiguous, unlike all other signatures
 renameSig ctxt sig@(SpecSig _ v tys inl)
   = do  { new_v <- case ctxt of
-                     TopSigCtxt {} -> lookupLocatedOccRn v
+                     TopSigCtxt {} -> lookupLocatedOccRn WL_TermVariable v
                      _             -> lookupSigOccRn ctxt sig v
         ; (new_ty, fvs) <- foldM do_one ([],emptyFVs) tys
         ; return (SpecSig noAnn new_v new_ty inl, fvs) }
   where
-    ty_ctxt = GenericCtx (text "a SPECIALISE signature for"
-                          <+> quotes (ppr v))
     do_one (tys,fvs) ty
-      = do { (new_ty, fvs_ty) <- rnHsSigType ty_ctxt TypeLevel ty
+      = do { (new_ty, fvs_ty) <- rnHsSigType (SpecialiseSigCtx v) TypeLevel ty
            ; return ( new_ty:tys, fvs_ty `plusFV` fvs) }
+
+renameSig _ctxt (SpecSigE _ bndrs spec_e inl)
+  = do { fn_rdr <- checkSpecESigShape spec_e
+       ; fn_name <- lookupOccRn WL_TermVariable fn_rdr  -- Checks that the head isn't forall-bound
+       ; bindRuleBndrs (SpecECtx fn_rdr) bndrs $ \_ bndrs' ->
+         do { (spec_e', fvs) <- rnLExpr spec_e
+            ; return (SpecSigE fn_name bndrs' spec_e' inl, fvs) } }
 
 renameSig ctxt sig@(InlineSig _ v s)
   = do  { new_v <- lookupSigOccRn ctxt sig v
@@ -1138,8 +1133,7 @@ renameSig ctxt sig@(PatSynSig _ vs ty)
         ; (ty', fvs) <- rnHsSigType ty_ctxt TypeLevel ty
         ; return (PatSynSig noAnn new_vs ty', fvs) }
   where
-    ty_ctxt = GenericCtx (text "a pattern synonym signature for"
-                          <+> ppr_sig_bndrs vs)
+    ty_ctxt = PatSynSigCtx vs
 
 renameSig ctxt sig@(SCCFunSig (_, st) v s)
   = do  { new_v <- lookupSigOccRn ctxt sig v
@@ -1148,8 +1142,8 @@ renameSig ctxt sig@(SCCFunSig (_, st) v s)
 -- COMPLETE Sigs can refer to imported IDs which is why we use
 -- lookupLocatedOccRn rather than lookupSigOccRn
 renameSig _ctxt (CompleteMatchSig (_, s) bf mty)
-  = do new_bf <- traverse lookupLocatedOccRn bf
-       new_mty  <- traverse lookupLocatedOccRn mty
+  = do new_bf <- traverse (lookupLocatedOccRn WL_ConLike) bf
+       new_mty  <- traverse (lookupLocatedOccRn WL_TyCon) mty
 
        this_mod <- fmap tcg_mod getGblEnv
        let rn_sig = CompleteMatchSig (noAnn, s) new_bf new_mty
@@ -1159,6 +1153,21 @@ renameSig _ctxt (CompleteMatchSig (_, s) bf mty)
 
        return (rn_sig, emptyFVs)
 
+
+checkSpecESigShape :: LHsExpr GhcPs -> RnM RdrName
+-- Checks the shape of a SPECIALISE
+-- That it looks like  (f a1 .. an [ :: ty ])
+checkSpecESigShape spec_e = go_l spec_e
+  where
+    go_l (L _ e) = go e
+
+    go :: HsExpr GhcPs -> RnM RdrName
+    go (ExprWithTySig _ fn _) = go_l fn
+    go (HsApp _ fn _)         = go_l fn
+    go (HsAppType _ fn _)     = go_l fn
+    go (HsVar _ (L _ fn))     = return fn
+    go (HsPar _ e)            = go_l e
+    go _ = failWithTc (TcRnSpecSigShape spec_e)
 
 {-
 Note [Orphan COMPLETE pragmas]
@@ -1182,9 +1191,6 @@ For now we simply disallow orphan COMPLETE pragmas, as the added
 complexity of supporting them properly doesn't seem worthwhile.
 -}
 
-ppr_sig_bndrs :: [LocatedN RdrName] -> SDoc
-ppr_sig_bndrs bs = quotes (pprWithCommas ppr bs)
-
 okHsSig :: HsSigCtxt -> LSig (GhcPass a) -> Bool
 okHsSig ctxt (L _ sig)
   = case (sig, ctxt) of
@@ -1205,10 +1211,8 @@ okHsSig ctxt (L _ sig)
      (InlineSig {}, HsBootCtxt {}) -> False
      (InlineSig {}, _)             -> True
 
-     (SpecSig {}, TopSigCtxt {})    -> True
-     (SpecSig {}, LocalBindCtxt {}) -> True
-     (SpecSig {}, InstDeclCtxt {})  -> True
-     (SpecSig {}, _)                -> False
+     (SpecSig {},  ctxt) -> ok_spec_ctxt ctxt
+     (SpecSigE {}, ctxt) -> ok_spec_ctxt ctxt
 
      (SpecInstSig {}, InstDeclCtxt {}) -> True
      (SpecInstSig {}, _)               -> False
@@ -1226,6 +1230,12 @@ okHsSig ctxt (L _ sig)
      (XSig {}, InstDeclCtxt {}) -> True
      (XSig {}, _)               -> False
 
+ok_spec_ctxt ::HsSigCtxt -> Bool
+-- Contexts where SPECIALISE can occur
+ok_spec_ctxt (TopSigCtxt {})    = True
+ok_spec_ctxt (LocalBindCtxt {}) = True
+ok_spec_ctxt (InstDeclCtxt {})  = True
+ok_spec_ctxt _                  = False
 
 -------------------
 findDupSigs :: [LSig GhcPs] -> [NonEmpty (LocatedN RdrName, Sig GhcPs)]
@@ -1277,6 +1287,54 @@ localCompletePragmas sigs = mapMaybe (getCompleteSig . unLoc) $ reverse sigs
   -- backwards wrt. declaration order. So we reverse them here, because it makes
   -- a difference for incomplete match suggestions.
 
+bindRuleBndrs :: HsDocContext -> RuleBndrs GhcPs
+              -> ([Name] -> RuleBndrs GhcRn -> RnM (a,FreeVars))
+              -> RnM (a,FreeVars)
+bindRuleBndrs doc (RuleBndrs { rb_tyvs = tyvs, rb_tmvs = tmvs }) thing_inside
+  = do { let rdr_names_w_loc = map (get_var . unLoc) tmvs
+       ; checkDupRdrNames rdr_names_w_loc
+       ; checkShadowedRdrNames rdr_names_w_loc
+       ; names <- newLocalBndrsRn rdr_names_w_loc
+       ; bindRuleTyVars doc tyvs             $ \ tyvs' ->
+         bindRuleTmVars doc tyvs' tmvs names $ \ tmvs' ->
+         thing_inside names (RuleBndrs { rb_ext = noExtField
+                                       , rb_tyvs = tyvs', rb_tmvs = tmvs' }) }
+  where
+    get_var :: RuleBndr GhcPs -> LocatedN RdrName
+    get_var (RuleBndrSig _ v _) = v
+    get_var (RuleBndr _ v)      = v
+
+
+bindRuleTmVars :: HsDocContext -> Maybe ty_bndrs
+               -> [LRuleBndr GhcPs] -> [Name]
+               -> ([LRuleBndr GhcRn] -> RnM (a, FreeVars))
+               -> RnM (a, FreeVars)
+bindRuleTmVars doc tyvs vars names thing_inside
+  = go vars names $ \ vars' ->
+    bindLocalNamesFV names (thing_inside vars')
+  where
+    go ((L l (RuleBndr _ (L loc _))) : vars) (n : ns) thing_inside
+      = go vars ns $ \ vars' ->
+        thing_inside (L l (RuleBndr noAnn (L loc n)) : vars')
+
+    go ((L l (RuleBndrSig _ (L loc _) bsig)) : vars)
+       (n : ns) thing_inside
+      = rnHsPatSigType bind_free_tvs doc bsig $ \ bsig' ->
+        go vars ns $ \ vars' ->
+        thing_inside (L l (RuleBndrSig noAnn (L loc n) bsig') : vars')
+
+    go [] [] thing_inside = thing_inside []
+    go vars names _ = pprPanic "bindRuleVars" (ppr vars $$ ppr names)
+
+    bind_free_tvs = case tyvs of Nothing -> AlwaysBind
+                                 Just _  -> NeverBind
+
+bindRuleTyVars :: HsDocContext -> Maybe [LHsTyVarBndr () GhcPs]
+               -> (Maybe [LHsTyVarBndr () GhcRn]  -> RnM (b, FreeVars))
+               -> RnM (b, FreeVars)
+bindRuleTyVars doc (Just bndrs) thing_inside
+  = bindLHsTyVarBndrs doc WarnUnusedForalls Nothing bndrs (thing_inside . Just)
+bindRuleTyVars _ _ thing_inside = thing_inside Nothing
 
 {-
 ************************************************************************
@@ -1325,14 +1383,38 @@ rnMatchGroup :: (Outputable (body GhcPs), AnnoBody body) => HsMatchContextRn
              -> RnM (MatchGroup GhcRn (LocatedA (body GhcRn)), FreeVars)
 rnMatchGroup ctxt rnBody (MG { mg_alts = L lm ms, mg_ext = origin })
          -- see Note [Empty MatchGroups]
-  = do { whenM ((null ms &&) <$> mustn't_be_empty) (addErr (TcRnEmptyCase ctxt))
+  = do { when (null ms) $ checkEmptyCase ctxt
        ; (new_ms, ms_fvs) <- mapFvRn (rnMatch ctxt rnBody) ms
        ; return (mkMatchGroup origin (L lm new_ms), ms_fvs) }
+
+-- Check the validity of a MatchGroup with an empty list of alternatives.
+--
+--  1. Normal `case x of {}` passes this check as long as EmptyCase is enabled.
+--     Ditto lambda-case `\case {}`.
+--
+--  2. Multi-case with no alternatives `\cases {}` is never valid.
+--
+--  3. Other MatchGroup contexts (FunRhs, LamAlt LamSingle, etc) are not
+--     considered here because there is no syntax to construct them with
+--     no alternatives.
+--
+-- Test case: rename/should_fail/RnEmptyCaseFail
+--
+-- Validation continues in the type checker, namely in tcMatches.
+-- See Note [Pattern types for EmptyCase] in GHC.Tc.Gen.Match
+checkEmptyCase :: HsMatchContextRn -> RnM ()
+checkEmptyCase ctxt
+  | disallowed_ctxt =
+      addErr (TcRnEmptyCase ctxt EmptyCaseDisallowedCtxt)
+  | otherwise =
+      unlessXOptM LangExt.EmptyCase $
+        addErr (TcRnEmptyCase ctxt EmptyCaseWithoutFlag)
   where
-    mustn't_be_empty = case ctxt of
-      LamAlt LamCases -> return True
-      ArrowMatchCtxt (ArrowLamAlt LamCases) -> return True
-      _ -> not <$> xoptM LangExt.EmptyCase
+    disallowed_ctxt =
+      case ctxt of
+        LamAlt LamCases -> True
+        ArrowMatchCtxt (ArrowLamAlt LamCases) -> True
+        _ -> False
 
 rnMatch :: AnnoBody body
         => HsMatchContextRn
@@ -1434,9 +1516,8 @@ rnSrcFixityDecl sig_ctxt = rn_decl
       = setSrcSpanA name_loc $
                     -- This lookup will fail if the name is not defined in the
                     -- same binding group as this fixity declaration.
-        do names <- lookupLocalTcNames sig_ctxt what ns_spec rdr_name
+        do names <- lookupLocalTcNames sig_ctxt SigLikeFixitySig ns_spec rdr_name
            return [ L name_loc name | (_, name) <- names ]
-    what = text "fixity signature"
 
 {-
 ************************************************************************

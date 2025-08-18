@@ -41,6 +41,7 @@
 -- Alex "Haskell code fragment top"
 
 {
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MultiWayIf #-}
@@ -955,6 +956,9 @@ data Token
     -- represents a qualified quasi-quote of the form
     -- [Qual.quoter| quote |]
 
+  | ITsplice
+  | ITquote
+
   -- Arrow notation extension
   | ITproc
   | ITrec
@@ -1094,7 +1098,9 @@ reservedWordsFM = listToUFM $
 
          ( "rec",            ITrec,           xbit ArrowsBit .|.
                                               xbit RecursiveDoBit),
-         ( "proc",           ITproc,          xbit ArrowsBit)
+         ( "proc",           ITproc,          xbit ArrowsBit),
+         ( "splice",         ITsplice,        xbit LevelImportsBit),
+         ( "quote",          ITquote,         xbit LevelImportsBit)
      ]
 
 {-----------------------------------
@@ -2774,6 +2780,7 @@ data ExtBits
   | ViewPatternsBit
   | RequiredTypeArgumentsBit
   | MultilineStringsBit
+  | LevelImportsBit
 
   -- Flags that are updated once parsing starts
   | InRulePragBit
@@ -2857,6 +2864,7 @@ mkParserOpts extensionFlags diag_opts
       .|. ViewPatternsBit             `xoptBit` LangExt.ViewPatterns
       .|. RequiredTypeArgumentsBit    `xoptBit` LangExt.RequiredTypeArguments
       .|. MultilineStringsBit         `xoptBit` LangExt.MultilineStrings
+      .|. LevelImportsBit             `xoptBit` LangExt.ExplicitLevelImports
     optBits =
           HaddockBit        `setBitIf` isHaddock
       .|. RawTokenStreamBit `setBitIf` rawTokStream
@@ -3366,11 +3374,15 @@ topNoLayoutContainsCommas [] = False
 topNoLayoutContainsCommas (ALRLayout _ _ : ls) = topNoLayoutContainsCommas ls
 topNoLayoutContainsCommas (ALRNoLayout b _ : _) = b
 
+#ifdef MIN_TOOL_VERSION_alex
+#if !MIN_TOOL_VERSION_alex(3,5,2)
 -- If the generated alexScan/alexScanUser functions are called multiple times
 -- in this file, alexScanUser gets broken out into a separate function and
 -- increases memory usage. Make sure GHC inlines this function and optimizes it.
 -- https://github.com/haskell/alex/pull/262
 {-# INLINE alexScanUser #-}
+#endif
+#endif
 
 lexToken :: P (PsLocated Token)
 lexToken = do

@@ -1,7 +1,5 @@
 
 {-# LANGUAGE DeriveFunctor #-}
-
-{-# OPTIONS_GHC -Wno-incomplete-uni-patterns #-}
 {-# LANGUAGE NamedFieldPuns #-}
 
 {-
@@ -60,6 +58,7 @@ import GHC.Core.InstEnv
 import GHC.Core.Type
 import GHC.Core.DataCon
 import GHC.Core.TyCon
+import GHC.Core.TyCo.Tidy
 import GHC.Core.Class
 import GHC.Core.Opt.OccurAnal ( occurAnalyseExpr )
 
@@ -72,7 +71,6 @@ import GHC.Utils.Panic
 import GHC.Utils.Logger as Logger
 import qualified GHC.Utils.Error as Err
 
-import GHC.Types.DefaultEnv ( emptyDefaultEnv )
 import GHC.Types.ForeignStubs
 import GHC.Types.Var.Env
 import GHC.Types.Var.Set
@@ -178,7 +176,8 @@ mkBootModDetailsTc logger
                   tcg_insts            = insts,
                   tcg_fam_insts        = fam_insts,
                   tcg_complete_matches = complete_matches,
-                  tcg_mod              = this_mod
+                  tcg_mod              = this_mod,
+                  tcg_default_exports  = default_exports
                 }
   = -- This timing isn't terribly useful since the result isn't forced, but
     -- the message is useful to locating oneself in the compilation process.
@@ -186,7 +185,7 @@ mkBootModDetailsTc logger
                    (text "CoreTidy"<+>brackets (ppr this_mod))
                    (const ()) $
     return (ModDetails { md_types            = type_env'
-                       , md_defaults         = emptyDefaultEnv
+                       , md_defaults         = default_exports
                        , md_insts            = insts'
                        , md_fam_insts        = fam_insts
                        , md_rules            = []
@@ -478,7 +477,10 @@ tidyProgram opts (ModGuts { mg_module           = mod
                  , cg_ccs           = S.toList local_ccs
                  , cg_foreign       = all_foreign_stubs
                  , cg_foreign_files = foreign_files
-                 , cg_dep_pkgs      = dep_direct_pkgs deps
+                 -- TODO: Check whether we need to account for levels here.
+                 -- It seems that this field just gets used to write a comment
+                 -- in C codegen, so it's value doesn't affect an important result.
+                 , cg_dep_pkgs      = S.map snd (dep_direct_pkgs deps)
                  , cg_modBreaks     = modBreaks
                  , cg_spt_entries   = spt_entries
                  }
@@ -1313,7 +1315,7 @@ tidyTopPair unfold_env boot_exports rhs_tidy_env (bndr, rhs)
     (bndr1, rhs1)
 
   where
-    Just (name',show_unfold) = lookupVarEnv unfold_env bndr
+    (name',show_unfold) = expectJust $ lookupVarEnv unfold_env bndr
     !cbv_bndr = tidyCbvInfoTop boot_exports bndr rhs
     bndr1    = mkGlobalId details name' ty' idinfo'
     details  = idDetails cbv_bndr -- Preserve the IdDetails

@@ -1,6 +1,6 @@
 {-# LANGUAGE GADTs, DeriveGeneric, StandaloneDeriving, ScopedTypeVariables,
     GeneralizedNewtypeDeriving, ExistentialQuantification, RecordWildCards,
-    CPP #-}
+    CPP, NamedFieldPuns #-}
 {-# OPTIONS_GHC -fno-warn-name-shadowing -fno-warn-orphans #-}
 
 -- |
@@ -11,6 +11,7 @@
 --
 module GHCi.Message
   ( Message(..), Msg(..)
+  , ConInfoTable(..)
   , THMessage(..), THMsg(..)
   , QResult(..)
   , EvalStatus_(..), EvalStatus, EvalResult(..), EvalOpts(..), EvalExpr(..)
@@ -21,8 +22,9 @@ module GHCi.Message
   , ResumeContext(..)
   , QState(..)
   , getMessage, putMessage, getTHMessage, putTHMessage
-  , Pipe(..), remoteCall, remoteTHCall, readPipe, writePipe
+  , Pipe, mkPipeFromHandles, mkPipeFromContinuations, remoteCall, remoteTHCall, readPipe, writePipe
   , BreakModule
+  , BreakUnitId
   , LoadedDLL
   ) where
 
@@ -34,11 +36,13 @@ import GHCi.BreakArray
 import GHCi.ResolvedBCO
 
 import GHC.LanguageExtensions
+import GHC.InfoProv
 import qualified GHC.Exts.Heap as Heap
 import GHC.ForeignSrcLang
 import GHC.Fingerprint
 import GHC.Conc (pseq, par)
 import Control.Concurrent
+import Control.DeepSeq
 import Control.Exception
 #if MIN_VERSION_base(4,20,0)
 import Control.Exception.Context
@@ -48,7 +52,9 @@ import Data.Binary.Get
 import Data.Binary.Put
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as B
+import qualified Data.ByteString.Builder as B
 import qualified Data.ByteString.Lazy as LB
+import qualified Data.ByteString.Short as BS
 import Data.Dynamic
 import Data.Typeable (TypeRep)
 import Data.IORef
@@ -56,7 +62,7 @@ import Data.Map (Map)
 import Foreign
 import GHC.Generics
 import GHC.Stack.CCS
-import qualified GHC.Internal.TH.Syntax        as TH
+import qualified GHC.Boot.TH.Syntax        as TH
 import System.Exit
 import System.IO
 import System.IO.Error
@@ -113,12 +119,7 @@ data Message a where
 
   -- | Create an info table for a constructor
   MkConInfoTable
-   :: Bool    -- TABLES_NEXT_TO_CODE
-   -> Int     -- ptr words
-   -> Int     -- non-ptr words
-   -> Int     -- constr tag
-   -> Int     -- pointer tag
-   -> ByteString -- constructor desccription
+   :: !ConInfoTable
    -> Message (RemotePtr Heap.StgInfoTable)
 
   -- | Evaluate a statement
@@ -224,6 +225,12 @@ data Message a where
     :: HValueRef
     -> Message (Heap.GenClosure HValueRef)
 
+  -- | Remote interface to GHC.InfoProv.whereFrom. This is used by
+  -- the GHCi debugger to inspect the provenance of thunks for :print.
+  WhereFrom
+    :: HValueRef
+    -> Message (Maybe InfoProv)
+
   -- | Evaluate something. This is used to support :force in GHCi.
   Seq
     :: HValueRef
@@ -234,14 +241,23 @@ data Message a where
     :: RemoteRef (ResumeContext ())
     -> Message (EvalStatus ())
 
-  -- | Allocate a string for a breakpoint module name.
-  -- This uses an empty dummy type because @ModuleName@ isn't available here.
-  NewBreakModule
-   :: String
-   -> Message (RemotePtr BreakModule)
-
 deriving instance Show (Message a)
 
+-- | Used to dynamically create a data constructor's info table at
+-- run-time.
+data ConInfoTable = ConInfoTable {
+  conItblTablesNextToCode :: !Bool, -- ^ TABLES_NEXT_TO_CODE
+  conItblPtrs :: !Int,              -- ^ ptr words
+  conItblNPtrs :: !Int,             -- ^ non-ptr words
+  conItblConTag :: !Int,            -- ^ constr tag
+  conItblPtrTag :: !Int,            -- ^ pointer tag
+  conItblDescr :: !ByteString       -- ^ constructor desccription
+}
+  deriving (Generic, Show)
+
+instance Binary ConInfoTable
+
+instance NFData ConInfoTable
 
 -- | Template Haskell return values
 data QResult a
@@ -401,10 +417,12 @@ data EvalStatus_ a b
 instance Binary a => Binary (EvalStatus_ a b)
 
 data EvalBreakpoint = EvalBreakpoint
-  { eb_tick_mod   :: String -- ^ Breakpoint tick module
-  , eb_tick_index :: Int    -- ^ Breakpoint tick index
-  , eb_info_mod   :: String -- ^ Breakpoint info module
-  , eb_info_index :: Int    -- ^ Breakpoint info index
+  { eb_tick_mod      :: String -- ^ Breakpoint tick module
+  , eb_tick_mod_unit :: BS.ShortByteString -- ^ Breakpoint tick module unit id
+  , eb_tick_index    :: Int    -- ^ Breakpoint tick index
+  , eb_info_mod      :: String -- ^ Breakpoint info module
+  , eb_info_mod_unit :: BS.ShortByteString -- ^ Breakpoint tick module unit id
+  , eb_info_index    :: Int    -- ^ Breakpoint info index
   }
   deriving (Generic, Show)
 
@@ -420,6 +438,10 @@ instance Binary a => Binary (EvalResult a)
 -- | A dummy type that tags the pointer to a breakpoint's @ModuleName@, because
 -- that type isn't available here.
 data BreakModule
+
+-- | A dummy type that tags the pointer to a breakpoint's @UnitId@, because
+-- that type isn't available here.
+data BreakUnitId
 
 -- | A dummy type that tags pointers returned by 'LoadDLL'.
 data LoadedDLL
@@ -498,6 +520,10 @@ instance Binary (FunPtr a) where
   put = put . castFunPtrToPtr
   get = castPtrToFunPtr <$> get
 
+instance Binary Heap.HalfWord where
+  put x = put (fromIntegral x :: Word32)
+  get = fromIntegral <$> (get :: Get Word32)
+
 -- Binary instances to support the GetClosure message
 instance Binary Heap.StgTSOProfInfo
 instance Binary Heap.CostCentreStack
@@ -511,6 +537,15 @@ instance Binary Heap.StgInfoTable
 instance Binary Heap.ClosureType
 instance Binary Heap.PrimType
 instance Binary a => Binary (Heap.GenClosure a)
+instance Binary InfoProv where
+#if MIN_VERSION_base(4,20,0)
+  get = InfoProv <$> get <*> get <*> get <*> get <*> get <*> get <*> get <*> get
+  put (InfoProv x1 x2 x3 x4 x5 x6 x7 x8)
+    = put x1 >> put x2 >> put x3 >> put x4 >> put x5 >> put x6 >> put x7 >> put x8
+#else
+  get = InfoProv <$> get <*> get <*> get <*> get <*> get <*> get <*> get
+  put (InfoProv x1 x2 x3 x4 x5 x6 x7) = put x1 >> put x2 >> put x3 >> put x4 >> put x5 >> put x6 >> put x7
+#endif
 
 data Msg = forall a . (Binary a, Show a) => Msg (Message a)
 
@@ -537,7 +572,7 @@ getMessage = do
       15 -> Msg <$> MallocStrings <$> get
       16 -> Msg <$> (PrepFFI <$> get <*> get)
       17 -> Msg <$> FreeFFI <$> get
-      18 -> Msg <$> (MkConInfoTable <$> get <*> get <*> get <*> get <*> get <*> get)
+      18 -> Msg <$> MkConInfoTable <$> get
       19 -> Msg <$> (EvalStmt <$> get <*> get)
       20 -> Msg <$> (ResumeStmt <$> get <*> get)
       21 -> Msg <$> (AbandonStmt <$> get)
@@ -558,8 +593,8 @@ getMessage = do
       36 -> Msg <$> (Seq <$> get)
       37 -> Msg <$> return RtsRevertCAFs
       38 -> Msg <$> (ResumeSeq <$> get)
-      39 -> Msg <$> (NewBreakModule <$> get)
-      40 -> Msg <$> (LookupSymbolInDLL <$> get <*> get)
+      39 -> Msg <$> (LookupSymbolInDLL <$> get <*> get)
+      40 -> Msg <$> (WhereFrom <$> get)
       _  -> error $ "Unknown Message code " ++ (show b)
 
 putMessage :: Message a -> Put
@@ -583,7 +618,7 @@ putMessage m = case m of
   MallocStrings bss           -> putWord8 15 >> put bss
   PrepFFI args res            -> putWord8 16 >> put args >> put res
   FreeFFI p                   -> putWord8 17 >> put p
-  MkConInfoTable tc p n t pt d -> putWord8 18 >> put tc >> put p >> put n >> put t >> put pt >> put d
+  MkConInfoTable itbl         -> putWord8 18 >> put itbl
   EvalStmt opts val           -> putWord8 19 >> put opts >> put val
   ResumeStmt opts val         -> putWord8 20 >> put opts >> put val
   AbandonStmt val             -> putWord8 21 >> put val
@@ -604,8 +639,8 @@ putMessage m = case m of
   Seq a                       -> putWord8 36 >> put a
   RtsRevertCAFs               -> putWord8 37
   ResumeSeq a                 -> putWord8 38 >> put a
-  NewBreakModule name         -> putWord8 39 >> put name
-  LookupSymbolInDLL dll str   -> putWord8 40 >> put dll >> put str
+  LookupSymbolInDLL dll str   -> putWord8 39 >> put dll >> put str
+  WhereFrom a                 -> putWord8 40 >> put a
 
 {-
 Note [Parallelize CreateBCOs serialization]
@@ -638,47 +673,58 @@ serializeBCOs rbcos = parMap doChunk (chunkList 100 rbcos)
 -- -----------------------------------------------------------------------------
 -- Reading/writing messages
 
+-- | An opaque pipe for bidirectional binary data transmission.
 data Pipe = Pipe
-  { pipeRead :: Handle
-  , pipeWrite ::  Handle
-  , pipeLeftovers :: IORef (Maybe ByteString)
+  { getSome :: !(IO ByteString)
+  , putAll :: !(B.Builder -> IO ())
+  , pipeLeftovers :: !(IORef (Maybe ByteString))
   }
+
+-- | Make a 'Pipe' from a 'Handle' to read and a 'Handle' to write.
+mkPipeFromHandles :: Handle -> Handle -> IO Pipe
+mkPipeFromHandles pipeRead pipeWrite = do
+  let getSome = B.hGetSome pipeRead (32*1024)
+      putAll b = do
+        B.hPutBuilder pipeWrite b
+        hFlush pipeWrite
+  pipeLeftovers <- newIORef Nothing
+  pure $ Pipe { getSome, putAll, pipeLeftovers }
+
+-- | Make a 'Pipe' from a reader function and a writer function.
+mkPipeFromContinuations :: IO ByteString -> (B.Builder -> IO ()) -> IO Pipe
+mkPipeFromContinuations getSome putAll = do
+  pipeLeftovers <- newIORef Nothing
+  pure $ Pipe { getSome, putAll, pipeLeftovers }
 
 remoteCall :: Binary a => Pipe -> Message a -> IO a
 remoteCall pipe msg = do
   writePipe pipe (putMessage msg)
   readPipe pipe get
 
+writePipe :: Pipe -> Put -> IO ()
+writePipe Pipe{..} put = putAll $ execPut put
+
 remoteTHCall :: Binary a => Pipe -> THMessage a -> IO a
 remoteTHCall pipe msg = do
   writePipe pipe (putTHMessage msg)
   readPipe pipe get
 
-writePipe :: Pipe -> Put -> IO ()
-writePipe Pipe{..} put
-  | LB.null bs = return ()
-  | otherwise  = do
-    LB.hPut pipeWrite bs
-    hFlush pipeWrite
- where
-  bs = runPut put
-
 readPipe :: Pipe -> Get a -> IO a
 readPipe Pipe{..} get = do
   leftovers <- readIORef pipeLeftovers
-  m <- getBin pipeRead get leftovers
+  m <- getBin getSome get leftovers
   case m of
     Nothing -> throw $
-      mkIOError eofErrorType "GHCi.Message.remoteCall" (Just pipeRead) Nothing
+      mkIOError eofErrorType "GHCi.Message.readPipe" Nothing Nothing
     Just (result, new_leftovers) -> do
       writeIORef pipeLeftovers new_leftovers
       return result
 
 getBin
-  :: Handle -> Get a -> Maybe ByteString
+  :: (IO ByteString) -> Get a -> Maybe ByteString
   -> IO (Maybe (a, Maybe ByteString))
 
-getBin h get leftover = go leftover (runGetIncremental get)
+getBin getsome get leftover = go leftover (runGetIncremental get)
  where
    go Nothing (Done leftover _ msg) =
      return (Just (msg, if B.null leftover then Nothing else Just leftover))
@@ -687,7 +733,7 @@ getBin h get leftover = go leftover (runGetIncremental get)
      go Nothing (fun (Just leftover))
    go Nothing (Partial fun) = do
      -- putStrLn "before hGetSome"
-     b <- B.hGetSome h (32*1024)
+     b <- getsome
      -- putStrLn $ "hGetSome: " ++ show (B.length b)
      if B.null b
         then return Nothing

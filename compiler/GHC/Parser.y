@@ -13,6 +13,7 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE MonadComprehensions #-}
 
 -- | This module provides the generated Happy parser for Haskell. It exports
 -- a number of parsers which may be used in any library that uses the GHC API.
@@ -42,7 +43,7 @@ where
 import Control.Monad      ( unless, liftM, when, (<=<) )
 import GHC.Exts
 import Data.Maybe         ( maybeToList )
-import Data.List.NonEmpty ( NonEmpty(..) )
+import Data.List.NonEmpty ( NonEmpty(..), head, init, last, tail )
 import qualified Data.List.NonEmpty as NE
 import qualified Prelude -- for happy-generated code
 
@@ -63,7 +64,7 @@ import GHC.Utils.Outputable
 import GHC.Utils.Error
 import GHC.Utils.Misc          ( looksLikePackageName, fstOf3, sndOf3, thdOf3 )
 import GHC.Utils.Panic
-import GHC.Prelude
+import GHC.Prelude hiding ( head, init, last, tail )
 import qualified GHC.Data.Strict as Strict
 
 import GHC.Types.Name.Reader
@@ -638,6 +639,8 @@ are the most common patterns, rewritten as regular expressions for clarity:
  'stock'        { L _ ITstock }    -- for DerivingStrategies extension
  'anyclass'     { L _ ITanyclass } -- for DerivingStrategies extension
  'via'          { L _ ITvia }      -- for DerivingStrategies extension
+ 'splice'       { L _ ITsplice }   -- For StagedImports extension
+ 'quote'        { L _ ITquote }    -- For StagedImports extension
 
  'unit'         { L _ ITunit }
  'signature'    { L _ ITsignature }
@@ -1039,8 +1042,9 @@ export  :: { LIE GhcPs }
                                                                      ; anchor = (maybe glR (\loc -> spanAsAnchor . comb2 loc) $1) $2 }
                                                           ; locImpExp <- return (sL span (IEModuleContents ($1, (epTok $2)) $3))
                                                           ; return $ reLoc $ locImpExp } }
-        | maybe_warning_pragma 'pattern' qcon            { let span = (maybe comb2 comb3 $1) $2 $>
-                                                           in reLoc $ sL span $ IEVar $1 (sLLa $2 $> (IEPattern (epTok $2) $3)) Nothing }
+        | maybe_warning_pragma 'pattern' qcon            {% do { warnPatternNamespaceSpecifier (getLoc $2)
+                                                               ; let span = (maybe comb2 comb3 $1) $2 $>
+                                                               ; return $ reLoc $ sL span $ IEVar $1 (sLLa $2 $> (IEPattern (epTok $2) $3)) Nothing } }
         | maybe_warning_pragma 'default' qtycon          {% do { let { span = (maybe comb2 comb3 $1) $2 $> }
                                                           ; locImpExp <- return (sL span (IEThingAbs $1 (sLLa $2 $> (IEDefault (epTok $2) $3)) Nothing))
                                                           ; return $ reLoc $ locImpExp } }
@@ -1077,6 +1081,8 @@ qcname_ext :: { LocatedA ImpExpQcSpec }
         :  qcname                   { sL1a $1 (ImpExpQcName $1) }
         |  'type' oqtycon           {% do { n <- mkTypeImpExp $2
                                           ; return $ sLLa $1 $> (ImpExpQcType (epTok $1) n) }}
+        |  'data' qvarcon           {% do { n <- mkDataImpExp $2
+                                          ; return $ sLLa $1 $> (ImpExpQcData (epTok $1) n) }}
 
 qcname  :: { LocatedN RdrName }  -- Variable or type constructor
         :  qvar                 { $1 } -- Things which look like functions
@@ -1117,28 +1123,33 @@ importdecls_semi
         | {- empty -}           { [] }
 
 importdecl :: { LImportDecl GhcPs }
-        : 'import' maybe_src maybe_safe optqualified maybe_pkg modid optqualified maybeas maybeimpspec
+        : 'import' maybe_src maybe_splice maybe_safe optqualified maybe_pkg modid maybe_splice optqualified maybeas maybeimpspec
                 {% do {
-                  ; let { ; mPreQual = unLoc $4
-                          ; mPostQual = unLoc $7 }
-                  ; checkImportDecl mPreQual mPostQual
+                  ; let { ; mPreQual = $5
+                          ; mPostQual = $9
+                          ; mPreLevel = $3
+                          ; mPostLevel = $8 }
+                  ; (qualSpec, levelSpec) <- checkImportDecl mPreQual mPostQual mPreLevel mPostLevel
                   ; let anns
                          = EpAnnImportDecl
                              { importDeclAnnImport    = epTok $1
                              , importDeclAnnPragma    = fst $ fst $2
-                             , importDeclAnnSafe      = fst $3
-                             , importDeclAnnQualified = fst $ importDeclQualifiedStyle mPreQual mPostQual
-                             , importDeclAnnPackage   = fst $5
-                             , importDeclAnnAs        = fst $8
+                             , importDeclAnnLevel     = fst $ levelSpec
+                             , importDeclAnnSafe      = fst $4
+                             , importDeclAnnQualified = fst $ qualSpec
+                             , importDeclAnnPackage   = fst $6
+                             , importDeclAnnAs        = fst $10
                              }
-                  ; let loc = (comb5 $1 $6 $7 (snd $8) $9);
+                  ; let loc = (comb6 $1 $7 $8 $9 (snd $10) $11);
                   ; fmap reLoc $ acs loc (\loc cs -> L loc $
                       ImportDecl { ideclExt = XImportDeclPass (EpAnn (spanAsAnchor loc) anns cs) (snd $ fst $2) False
-                                  , ideclName = $6, ideclPkgQual = snd $5
-                                  , ideclSource = snd $2, ideclSafe = snd $3
-                                  , ideclQualified = snd $ importDeclQualifiedStyle mPreQual mPostQual
-                                  , ideclAs = unLoc (snd $8)
-                                  , ideclImportList = unLoc $9 })
+                                  , ideclName = $7, ideclPkgQual = snd $6
+                                  , ideclSource = snd $2
+                                  , ideclLevelSpec = snd $ levelSpec
+                                  , ideclSafe = snd $4
+                                  , ideclQualified = snd $ qualSpec
+                                  , ideclAs = unLoc (snd $10)
+                                  , ideclImportList = unLoc $11 })
                   }
                 }
 
@@ -1152,6 +1163,11 @@ maybe_safe :: { (Maybe (EpToken "safe"),Bool) }
         : 'safe'                                { (Just (epTok $1),True) }
         | {- empty -}                           { (Nothing,      False) }
 
+maybe_splice :: { (Maybe EpAnnLevel) }
+        : 'splice'                              { (Just (EpAnnLevelSplice (epTok $1))) }
+        | 'quote'                               { (Just (EpAnnLevelQuote (epTok $1))) }
+        | {- empty -}                           { (Nothing) }
+
 maybe_pkg :: { (Maybe EpaLocation, RawPkgQual) }
         : STRING  {% do { let { pkgFS = getSTRING $1 }
                         ; unless (looksLikePackageName (unpackFS pkgFS)) $
@@ -1160,9 +1176,9 @@ maybe_pkg :: { (Maybe EpaLocation, RawPkgQual) }
                         ; return (Just (glR $1), RawPkgQual (StringLiteral (getSTRINGs $1) pkgFS Nothing)) } }
         | {- empty -}                           { (Nothing,NoRawPkgQual) }
 
-optqualified :: { Located (Maybe (EpToken "qualified")) }
-        : 'qualified'                           { sL1 $1 (Just (epTok $1)) }
-        | {- empty -}                           { noLoc Nothing }
+optqualified :: { Maybe (EpToken "qualified") }
+        : 'qualified'                           { Just (epTok $1) }
+        | {- empty -}                           { Nothing }
 
 maybeas :: { (Maybe (EpToken "as"),Located (Maybe (LocatedA ModuleName))) }
         : 'as' modid                           { (Just (epTok $1)
@@ -1209,7 +1225,8 @@ importlist1 :: { OrdList (LIE GhcPs) }
 import  :: { OrdList (LIE GhcPs) }
         : qcname_ext export_subspec {% fmap (unitOL . reLoc . (sLL $1 $>)) $ mkModuleImpExp Nothing (fst $ unLoc $2) $1 (snd $ unLoc $2) }
         | 'module' modid            {% fmap (unitOL . reLoc) $ return (sLL $1 $> (IEModuleContents (Nothing, (epTok $1)) $2)) }
-        | 'pattern' qcon            { unitOL $ reLoc $ sLL $1 $> $ IEVar Nothing (sLLa $1 $> (IEPattern (epTok $1) $2)) Nothing }
+        | 'pattern' qcon            {% do { warnPatternNamespaceSpecifier (getLoc $1)
+                                          ; return $ unitOL $ reLoc $ sLL $1 $> $ IEVar Nothing (sLLa $1 $> (IEPattern (epTok $1) $2)) Nothing } }
 
 -----------------------------------------------------------------------------
 -- Fixity Declarations
@@ -1721,7 +1738,7 @@ pattern_synonym_decl :: { LHsDecl GhcPs }
                    }}
 
 pattern_synonym_lhs :: { (LocatedN RdrName, HsPatSynDetails GhcPs, (Maybe (EpToken "{"), Maybe (EpToken "}"))) }
-        : con vars0 { ($1, PrefixCon noTypeArgs $2, noAnn) }
+        : con vars0 { ($1, PrefixCon $2, noAnn) }
         | varid conop varid { ($2, InfixCon $1 $3, noAnn) }
         | con '{' cvars1 '}' { ($1, RecCon $3, (Just (epTok $2), Just (epTok $4))) }
 
@@ -1926,10 +1943,10 @@ rule    :: { LRuleDecl GhcPs }
          {%runPV (unECP $4) >>= \ $4 ->
            runPV (unECP $6) >>= \ $6 ->
            amsA' (sLL $1 $> $ HsRule
-                                   { rd_ext =(((fstOf3 $3) (epTok $5) (fst $2)), getSTRINGs $1)
+                                   { rd_ext =((fst $2, epTok $5), getSTRINGs $1)
                                    , rd_name = L (noAnnSrcSpan $ gl $1) (getSTRING $1)
-                                   , rd_act = (snd $2) `orElse` AlwaysActive
-                                   , rd_tyvs = sndOf3 $3, rd_tmvs = thdOf3 $3
+                                   , rd_act = snd $2 `orElse` AlwaysActive
+                                   , rd_bndrs = ruleBndrsOrDef $3
                                    , rd_lhs = $4, rd_rhs = $6 }) }
 
 -- Rules can be specified to be NeverActive, unlike inline/specialize pragmas
@@ -1965,19 +1982,22 @@ rule_explicit_activation :: { ( ActivationAnn
                                 { ( ActivationAnn (epTok $1) (epTok $3) $2 Nothing
                                   , NeverActive) }
 
-rule_foralls :: { (EpToken "=" -> ActivationAnn -> HsRuleAnn, Maybe [LHsTyVarBndr () GhcPs], [LRuleBndr GhcPs]) }
-        : 'forall' rule_vars '.' 'forall' rule_vars '.'    {% let tyvs = mkRuleTyVarBndrs $2
-                                                              in hintExplicitForall $1
-                                                              >> checkRuleTyVarBndrNames (mkRuleTyVarBndrs $2)
-                                                              >> return (\an_eq an_act -> HsRuleAnn
-                                                                          (Just (epUniTok $1,epTok $3))
-                                                                          (Just (epUniTok $4,epTok $6))
-                                                                          an_eq an_act,
-                                                                         Just (mkRuleTyVarBndrs $2), mkRuleBndrs $5) }
-        | 'forall' rule_vars '.'                           { (\an_eq an_act -> HsRuleAnn Nothing (Just (epUniTok $1,epTok $3)) an_eq an_act,
-                                                              Nothing, mkRuleBndrs $2) }
+rule_foralls :: { Maybe (RuleBndrs GhcPs) }
+        : 'forall' rule_vars '.' 'forall' rule_vars '.'
+              {% hintExplicitForall $1
+                 >> checkRuleTyVarBndrNames $2
+                 >> let ann = HsRuleBndrsAnn
+                                (Just (epUniTok $1,epTok $3))
+                                (Just (epUniTok $4,epTok $6))
+                     in return (Just (mkRuleBndrs ann  (Just $2) $5)) }
+
+        | 'forall' rule_vars '.'
+           { Just (mkRuleBndrs (HsRuleBndrsAnn Nothing (Just (epUniTok $1,epTok $3)))
+                               Nothing $2) }
+
         -- See Note [%shift: rule_foralls -> {- empty -}]
-        | {- empty -}            %shift                    { (\an_eq an_act -> HsRuleAnn Nothing Nothing an_eq an_act, Nothing, []) }
+        | {- empty -}            %shift
+           { Nothing }
 
 rule_vars :: { [LRuleTyTmVar] }
         : rule_var rule_vars                    { $1 : $2 }
@@ -2190,10 +2210,10 @@ sig_vars :: { Located [LocatedN RdrName] }    -- Returned in reversed order
                                              return (sLL $1 $> ($3 : h' : t)) }
          | var                        { sL1 $1 [$1] }
 
-sigtypes1 :: { OrdList (LHsSigType GhcPs) }
-   : sigtype                 { unitOL $1 }
+sigtypes1 :: { Located (OrdList (LHsSigType GhcPs)) }
+   : sigtype                 { sL1 $1 (unitOL $1) }
    | sigtype ',' sigtypes1   {% do { st <- addTrailingCommaA $1 (epTok $2)
-                                   ; return $ unitOL st `appOL` $3 } }
+                                   ; return $ sLL $1 $> (unitOL st `appOL` unLoc $3) } }
 -----------------------------------------------------------------------------
 -- Types
 
@@ -2263,19 +2283,19 @@ type :: { LHsType GhcPs }
         -- See Note [%shift: type -> btype]
         : btype %shift                 { $1 }
         | btype '->' ctype             {% amsA' (sLL $1 $>
-                                            $ HsFunTy noExtField (HsUnrestrictedArrow (epUniTok $2)) $1 $3) }
+                                            $ HsFunTy noExtField (HsUnannotated (EpArrow (epUniTok $2))) $1 $3) }
 
         | btype mult '->' ctype        {% hintLinear (getLoc $2)
                                        >> let arr = (unLoc $2) (epUniTok $3)
                                           in amsA' (sLL $1 $> $ HsFunTy noExtField arr $1 $4) }
 
         | btype '->.' ctype            {% hintLinear (getLoc $2) >>
-                                          amsA' (sLL $1 $> $ HsFunTy noExtField (HsLinearArrow (EpLolly (epTok $2))) $1 $3) }
+                                          amsA' (sLL $1 $> $ HsFunTy noExtField (HsLinearAnn (EpLolly (epTok $2))) $1 $3) }
 
-mult :: { Located (EpUniToken "->" "\8594" -> HsArrow GhcPs) }
-        : PREFIX_PERCENT atype          { sLL $1 $> (mkMultTy (epTok $1) $2) }
+mult :: { Located (EpUniToken "->" "\8594" -> HsMultAnn GhcPs) }
+        : PREFIX_PERCENT atype          { sLL $1 $> (mkMultAnn (epTok $1) $2 . EpArrow) }
 
-expmult :: { forall b. DisambECP b => PV (Located (EpUniToken "->" "\8594" -> HsArrowOf (LocatedA b) GhcPs)) }
+expmult :: { forall b. DisambECP b => PV (Located (EpUniToken "->" "\8594" -> HsMultAnnOf (LocatedA b) GhcPs)) }
 expmult : PREFIX_PERCENT aexp           { unECP $2 >>= \ $2 ->
                                           fmap (sLL $1 $>) (mkHsMultPV (epTok $1) $2) }
 
@@ -2327,7 +2347,7 @@ atype :: { LHsType GhcPs }
         | PREFIX_TILDE atype             {% amsA' (sLL $1 $> (mkBangTy (glR $1) SrcLazy $2)) }
         | PREFIX_BANG  atype             {% amsA' (sLL $1 $> (mkBangTy (glR $1) SrcStrict $2)) }
 
-        | '{' fielddecls '}'             {% do { decls <- amsA' (sLL $1 $> $ HsRecTy (AnnList (listAsAnchorM $2) (ListBraces (epTok $1) (epTok $3)) [] noAnn []) $2)
+        | '{' fielddecls '}'             {% do { decls <- amsA' (sLL $1 $> $ XHsType $ HsRecTy (AnnList (listAsAnchorM $2) (ListBraces (epTok $1) (epTok $3)) [] noAnn []) $2)
                                                ; checkRecordSyntax decls }}
                                                         -- Constructor sigs only
 
@@ -2584,23 +2604,30 @@ usum_constr :: { (LHsType GhcPs, Int, Int) } -- constructor for the data decls S
          : ktype bars { ($1, 1, (snd $2 + 1)) }
          | bars ktype bars0 { ($2, snd $1 + 1, snd $1 + snd $3 + 1) }
 
-fielddecls :: { [LConDeclField GhcPs] }
+fielddecls :: { [LHsConDeclRecField GhcPs] }
         : {- empty -}     { [] }
         | fielddecls1     { $1 }
 
-fielddecls1 :: { [LConDeclField GhcPs] }
+fielddecls1 :: { [LHsConDeclRecField GhcPs] }
         : fielddecl ',' fielddecls1
             {% do { h <- addTrailingCommaA $1 (epTok $2)
                   ; return (h : $3) }}
         | fielddecl   { [$1] }
 
-fielddecl :: { LConDeclField GhcPs }
+fielddecl :: { LHsConDeclRecField GhcPs }
                                               -- A list because of   f,g :: Int
         : sig_vars '::' ctype
             {% amsA' (L (comb2 $1 $3)
-                      (ConDeclField (epUniTok $2)
+                      (HsConDeclRecField noExtField
                                     (reverse (map (\ln@(L l n)
-                                               -> L (fromTrailingN l) $ FieldOcc noExtField (L (noTrailingN l) n)) (unLoc $1))) $3 Nothing))}
+                                               -> L (fromTrailingN l) $ FieldOcc noExtField (L (noTrailingN l) n)) (unLoc $1)))
+                                    (mkConDeclField (HsUnannotated (EpColon (epUniTok $2))) $3)))}
+        | sig_vars PREFIX_PERCENT atype '::' ctype
+            {% amsA' (L (comb4 $1 $2 $3 $5)
+                      (HsConDeclRecField noExtField
+                                    (reverse (map (\ln@(L l n)
+                                               -> L (fromTrailingN l) $ FieldOcc noExtField (L (noTrailingN l) n)) (unLoc $1)))
+                                    (mkMultField (epTok $2) $3 (epUniTok $4) $5)))}
 
 -- Reversed!
 maybe_derivings :: { Located (HsDeriving GhcPs) }
@@ -2664,17 +2691,17 @@ There's an awkward overlap with a type signature.  Consider
 decl_no_th :: { LHsDecl GhcPs }
         : sigdecl               { $1 }
 
-        | infixexp     opt_sig rhs  {% runPV (unECP $1) >>= \ $1 ->
+        | infixexp opt_sig rhs  {% runPV (unECP $1) >>= \ $1 ->
                                        do { let { l = comb2 $1 $> }
-                                          ; r <- checkValDef l $1 (HsNoMultAnn noExtField, $2) $3;
+                                          ; r <- checkValDef l $1 (HsUnannotated EpPatBind, $2) $3;
                                         -- Depending upon what the pattern looks like we might get either
                                         -- a FunBind or PatBind back from checkValDef. See Note
                                         -- [FunBind vs PatBind]
                                           ; !cs <- getCommentsFor l
                                           ; return $! (sL (commentsA l cs) $ ValD noExtField r) } }
-        | PREFIX_PERCENT atype infixexp     opt_sig rhs  {% runPV (unECP $3) >>= \ $3 ->
+        | PREFIX_PERCENT atype infixexp opt_sig rhs {% runPV (unECP $3) >>= \ $3 ->
                                        do { let { l = comb2 $1 $> }
-                                          ; r <- checkValDef l $3 (mkMultAnn (epTok $1) $2, $4) $5;
+                                          ; r <- checkValDef l $3 (mkMultAnn (epTok $1) $2 EpPatBind, $4) $5;
                                         -- parses bindings of the form %p x or
                                         -- %p x :: sig
                                         --
@@ -2703,11 +2730,11 @@ rhs     :: { Located (GRHSs GhcPs (LHsExpr GhcPs)) }
                                                       bs)) } }
         | gdrhs wherebinds      {% do { let {L l (bs, csw) = adaptWhereBinds $2}
                                       ; acs (comb2 $1 (L l bs)) (\loc cs -> L loc
-                                                (GRHSs (cs Semi.<> csw) (reverse (unLoc $1)) bs)) }}
+                                                (GRHSs (cs Semi.<> csw) (NE.reverse (unLoc $1)) bs)) }}
 
-gdrhs :: { Located [LGRHS GhcPs (LHsExpr GhcPs)] }
-        : gdrhs gdrh            { sLL $1 $> ($2 : unLoc $1) }
-        | gdrh                  { sL1 $1 [$1] }
+gdrhs :: { Located (NonEmpty (LGRHS GhcPs (LHsExpr GhcPs))) }
+        : gdrhs gdrh            { sLL $1 $> ($2 NE.<| unLoc $1) }
+        | gdrh                  { sL1 $1 (NE.singleton $1) }
 
 gdrh :: { LGRHS GhcPs (LHsExpr GhcPs) }
         : '|' guardquals '=' exp  {% runPV (unECP $4) >>= \ $4 ->
@@ -2765,16 +2792,21 @@ sigdecl :: { LHsDecl GhcPs }
                 ; let str_lit = StringLiteral (getSTRINGs $3) scc Nothing
                 ; amsA' (sLL $1 $> (SigD noExtField (SCCFunSig ((glR $1, epTok $4), (getSCC_PRAGs $1)) $2 (Just ( sL1a $3 str_lit))))) }}
 
-        | '{-# SPECIALISE' activation qvar '::' sigtypes1 '#-}'
-             {% amsA' (
-                 let inl_prag = mkInlinePragma (getSPEC_PRAGs $1)
-                                             (NoUserInlinePrag, FunLike) (snd $2)
-                  in sLL $1 $> $ SigD noExtField (SpecSig (AnnSpecSig (glR $1) (epTok $6) (epUniTok $4) (fst $2)) $3 (fromOL $5) inl_prag)) }
+        | '{-# SPECIALISE' activation rule_foralls infixexp sigtypes_maybe '#-}'
+             {% runPV (unECP $4) >>= \ $4 -> do
+                let inl_prag = mkInlinePragma (getSPEC_PRAGs $1)
+                                              (NoUserInlinePrag, FunLike)
+                                              (snd $2)
+                spec <- mkSpecSig inl_prag (AnnSpecSig (glR $1) (epTok $6) Nothing (fst $2)) $3 $4 $5
+                amsA' $ sLL $1 $> $ SigD noExtField spec }
 
-        | '{-# SPECIALISE_INLINE' activation qvar '::' sigtypes1 '#-}'
-             {% amsA' (sLL $1 $> $ SigD noExtField (SpecSig (AnnSpecSig (glR $1) (epTok $6) (epUniTok $4) (fst $2)) $3 (fromOL $5)
-                               (mkInlinePragma (getSPEC_INLINE_PRAGs $1)
-                                               (getSPEC_INLINE $1) (snd $2)))) }
+        | '{-# SPECIALISE_INLINE' activation rule_foralls infixexp sigtypes_maybe '#-}'
+             {% runPV (unECP $4) >>= \ $4 -> do
+                let inl_prag = mkInlinePragma (getSPEC_INLINE_PRAGs $1)
+                                              (getSPEC_INLINE $1)
+                                              (snd $2)
+                spec <- mkSpecSig inl_prag (AnnSpecSig (glR $1) (epTok $6) Nothing (fst $2)) $3 $4 $5
+                amsA' $ sLL $1 $> $ SigD noExtField spec }
 
         | '{-# SPECIALISE' 'instance' inst_type '#-}'
                 {% amsA' (sLL $1 $> $ SigD noExtField (SpecInstSig ((glR $1,epTok $2,epTok $4), (getSPEC_PRAGs $1)) $3)) }
@@ -2782,6 +2814,10 @@ sigdecl :: { LHsDecl GhcPs }
         -- A minimal complete definition
         | '{-# MINIMAL' name_boolformula_opt '#-}'
             {% amsA' (sLL $1 $> $ SigD noExtField (MinimalSig ((glR $1,epTok $3), (getMINIMAL_PRAGs $1)) $2)) }
+
+sigtypes_maybe :: { Maybe (Located (TokDcolon, OrdList (LHsSigType GhcPs))) }
+        : '::' sigtypes1         { Just (sLL $1 $> (epUniTok $1, unLoc $2)) }
+        | {- empty -}            { Nothing }
 
 activation :: { (ActivationAnn,Maybe Activation) }
         -- See Note [%shift: activation -> {- empty -}]
@@ -2858,7 +2894,7 @@ infixexp2 :: { ECP }
                                   withArrowParsingMode' $ \mode ->
                                   unECP $1 >>= \ $1 ->
                                   unECP $3 >>= \ $3 ->
-                                  let arr = HsUnrestrictedArrow (epUniTok $2)
+                                  let arr = HsUnannotated (EpArrow (epUniTok $2))
                                   in mkHsArrowPV (comb2 $1 $>) mode $1 arr $3 }
         | infixexp expmult '->'  infixexp2
                                 { ECP $
@@ -2873,7 +2909,7 @@ infixexp2 :: { ECP }
                                   hintLinear (getLoc $2) >>
                                   unECP $1 >>= \ $1 ->
                                   unECP $3 >>= \ $3 ->
-                                  let arr = HsLinearArrow (EpLolly (epTok $2))
+                                  let arr = HsLinearAnn (EpLolly (epTok $2))
                                   in mkHsArrowPV (comb2 $1 $>) ArrowIsFunType $1 arr $3 }
         | expcontext    '=>'  infixexp2
                                 { ECP $
@@ -3052,7 +3088,7 @@ aexp    :: { ECP }
                                            fmap ecpFromExp $
                                            do { let (L _ ((o,c),_)) = $2
                                               ; amsA' (sLL $1 $> $ HsMultiIf (epTok $1, o, c)
-                                                     (reverse $ snd $ unLoc $2)) }}
+                                                     (NE.reverse $ snd $ unLoc $2)) }}
         | 'case' exp 'of' altslist(pats1) {% runPV (unECP $2) >>= \ ($2 :: LHsExpr GhcPs) ->
                                              return $ ECP $
                                                $4 >>= \ $4 ->
@@ -3279,8 +3315,8 @@ tup_exprs :: { forall b. DisambECP b => PV (SumOrTuple b) }
                                 ; return (Tuple (Right t : snd $2)) } }
            | commas tup_tail
                  { $2 >>= \ $2 ->
-                   do { let {cos = map (\ll -> (Left (EpAnn (spanAsAnchor ll) True emptyComments))) (fst $1) }
-                      ; return (Tuple (cos ++ $2)) } }
+                   do { let {cos = NE.map (\ll -> (Left (EpAnn (spanAsAnchor ll) True emptyComments))) (fst $1) }
+                      ; return (Tuple (toList cos ++ $2)) } }
 
            | texp bars   { unECP $1 >>= \ $1 -> return $
                             (Sum 1  (snd $2 + 1) $1 [] (fst $2)) }
@@ -3360,8 +3396,8 @@ lexps :: { forall b. DisambECP b => PV [LocatedA b] }
 -- List Comprehensions
 
 flattenedpquals :: { Located [LStmt GhcPs (LHsExpr GhcPs)] }
-    : pquals   { case (unLoc $1) of
-                    [qs] -> sL1 $1 qs
+    : pquals   { case unLoc $1 of
+                    qs:|[] -> sL1 $1 qs
                     -- We just had one thing in our "parallel" list so
                     -- we simply return that thing directly
 
@@ -3372,30 +3408,30 @@ flattenedpquals :: { Located [LStmt GhcPs (LHsExpr GhcPs)] }
                     -- we wrap them into as a ParStmt
                 }
 
-pquals :: { Located [[LStmt GhcPs (LHsExpr GhcPs)]] }
+pquals :: { Located (NonEmpty [LStmt GhcPs (LHsExpr GhcPs)]) }
     : squals '|' pquals
                      {% case unLoc $1 of
-                          (h:t) -> do
+                          h:|t -> do
                             h' <- addTrailingVbarA h (epTok $2)
-                            return (sLL $1 $> (reverse (h':t) : unLoc $3)) }
-    | squals         { L (getLoc $1) [reverse (unLoc $1)] }
+                            return (sLL $1 $> (reverse (h':t) NE.<| unLoc $3)) }
+    | squals         { L (getLoc $1) (NE.singleton (reverse (toList (unLoc $1)))) }
 
-squals :: { Located [LStmt GhcPs (LHsExpr GhcPs)] }   -- In reverse order, because the last
+squals :: { Located (NonEmpty (LStmt GhcPs (LHsExpr GhcPs))) }   -- In reverse order, because the last
                                         -- one can "grab" the earlier ones
     : squals ',' transformqual
              {% case unLoc $1 of
-                  (h:t) -> do
+                  h:|t -> do
                     h' <- addTrailingCommaA h (epTok $2)
-                    return (sLL $1 $> [sLLa $1 $> ((unLoc $3) (reverse (h':t)))]) }
+                    return (sLL $1 $> (NE.singleton (sLLa $1 $> ((unLoc $3) (reverse (h':t)))))) }
     | squals ',' qual
              {% runPV $3 >>= \ $3 ->
                 case unLoc $1 of
-                  (h:t) -> do
+                  h:|t -> do
                     h' <- addTrailingCommaA h (epTok $2)
-                    return (sLL $1 $> ($3 : (h':t))) }
-    | transformqual        { sLL $1 $> [L (getLocAnn $1) ((unLoc $1) [])] }
+                    return (sLL $1 $> ($3 :| (h':t))) }
+    | transformqual        { sLL $1 $> (NE.singleton (L (getLocAnn $1) ((unLoc $1) []))) }
     | qual                               {% runPV $1 >>= \ $1 ->
-                                            return $ sL1 $1 [$1] }
+                                            return $ sL1 $1 (NE.singleton $1) }
 --  | transformquals1 ',' '{|' pquals '|}'   { sLL $1 $> ($4 : unLoc $1) }
 --  | '{|' pquals '|}'                       { sL1 $1 [$2] }
 
@@ -3492,22 +3528,22 @@ alt_rhs :: { forall b. DisambECP b => PV (Located (GRHSs GhcPs (LocatedA b))) }
                                       do { let {L l (bs, csw) = adaptWhereBinds $2}
                                          ; acs (comb2 alt (L l bs)) (\loc cs -> L loc (GRHSs (cs Semi.<> csw) (unLoc alt) bs)) }}
 
-ralt :: { forall b. DisambECP b => PV (Located [LGRHS GhcPs (LocatedA b)]) }
+ralt :: { forall b. DisambECP b => PV (Located (NonEmpty (LGRHS GhcPs (LocatedA b)))) }
         : '->' exp            { unECP $2 >>= \ $2 ->
                                 acs (comb2 $1 $>) (\loc cs -> L loc (unguardedRHS (EpAnn (spanAsAnchor $ comb2 $1 $2) (GrhsAnn Nothing (Right $ epUniTok $1)) cs) (comb2 $1 $2) $2)) }
         | gdpats              { $1 >>= \gdpats ->
-                                return $ sL1 gdpats (reverse (unLoc gdpats)) }
+                                return $ sL1 gdpats (NE.reverse (unLoc gdpats)) }
 
-gdpats :: { forall b. DisambECP b => PV (Located [LGRHS GhcPs (LocatedA b)]) }
+gdpats :: { forall b. DisambECP b => PV (Located (NonEmpty (LGRHS GhcPs (LocatedA b)))) }
         : gdpats gdpat { $1 >>= \gdpats ->
                          $2 >>= \gdpat ->
-                         return $ sLL gdpats gdpat (gdpat : unLoc gdpats) }
-        | gdpat        { $1 >>= \gdpat -> return $ sL1 gdpat [gdpat] }
+                         return $ sLL gdpats gdpat (gdpat NE.<| unLoc gdpats) }
+        | gdpat        { $1 >>= \gdpat -> return $ sL1 gdpat (NE.singleton gdpat) }
 
 -- layout for MultiWayIf doesn't begin with an open brace, because it's hard to
 -- generate the open brace in addition to the vertical bar in the lexer, and
 -- we don't need it.
-ifgdpats :: { Located ((EpToken "{", EpToken "}"), [LGRHS GhcPs (LHsExpr GhcPs)]) }
+ifgdpats :: { Located ((EpToken "{", EpToken "}"), NonEmpty (LGRHS GhcPs (LHsExpr GhcPs))) }
          : '{' gdpats '}'                 {% runPV $2 >>= \ $2 ->
                                              return $ sLL $1 $> ((epTok $1,epTok $3),unLoc $2)  }
          |     gdpats close               {% runPV $1 >>= \ $1 ->
@@ -3650,7 +3686,7 @@ fbind   :: { forall b. DisambECP b => PV (Fbind b) }
                             let top = sL1a $1 $ DotFieldOcc noAnn $1
                                 ((L lf (DotFieldOcc _ f)):t) = reverse (unLoc $3)
                                 lf' = comb2 $2 (L lf ())
-                                fields = top : L (noAnnSrcSpan lf') (DotFieldOcc (AnnFieldLabel (Just $ epTok $2))  f) : t
+                                fields = top :| L (noAnnSrcSpan lf') (DotFieldOcc (AnnFieldLabel (Just $ epTok $2))  f) : t
                                 final = last fields
                                 l = comb2 $1 $3
                                 isPun = False
@@ -3666,7 +3702,7 @@ fbind   :: { forall b. DisambECP b => PV (Fbind b) }
                             let top =  sL1a $1 $ DotFieldOcc noAnn $1
                                 ((L lf (DotFieldOcc _ f)):t) = reverse (unLoc $3)
                                 lf' = comb2 $2 (L lf ())
-                                fields = top : L (noAnnSrcSpan lf') (DotFieldOcc (AnnFieldLabel (Just $ epTok $2)) f) : t
+                                fields = top :| L (noAnnSrcSpan lf') (DotFieldOcc (AnnFieldLabel (Just $ epTok $2)) f) : t
                                 final = last fields
                                 l = comb2 $1 $3
                                 isPun = True
@@ -3725,13 +3761,13 @@ name_boolformula :: { LBooleanFormula GhcPs }
 
 name_boolformula_and :: { LBooleanFormula GhcPs }
         : name_boolformula_and_list
-                  { sLLa (head $1) (last $1) (And ($1)) }
+                  { sLLa (head $1) (last $1) (And (toList $1)) }
 
-name_boolformula_and_list :: { [LBooleanFormula GhcPs] }
-        : name_boolformula_atom                               { [$1] }
+name_boolformula_and_list :: { NonEmpty (LBooleanFormula GhcPs) }
+        : name_boolformula_atom                               { NE.singleton $1 }
         | name_boolformula_atom ',' name_boolformula_and_list
             {% do { h <- addTrailingCommaL $1 (epTok $2)
-                  ; return (h : $3) } }
+                  ; return (h NE.<| $3) } }
 
 name_boolformula_atom :: { LBooleanFormula GhcPs }
         : '(' name_boolformula ')'  {% amsr (sLL $1 $> (Parens $2))
@@ -3779,10 +3815,10 @@ qcon_list : qcon                  { [$1] }
 -- See Note [ExplicitTuple] in GHC.Hs.Expr
 sysdcon_nolist :: { LocatedN DataCon }  -- Wired in data constructors
         : '(' commas ')'        {% amsr (sLL $1 $> $ tupleDataCon Boxed (snd $2 + 1))
-                                       (NameAnnCommas (NameParens (epTok $1) (epTok $3)) (map (EpTok . srcSpan2e) (fst $2)) []) }
+                                       (NameAnnCommas (NameParens (epTok $1) (epTok $3)) (map (EpTok . srcSpan2e) (toList $ fst $2)) []) }
         | '(#' '#)'             {% amsr (sLL $1 $> $ unboxedUnitDataCon) (NameAnnOnly (NameParensHash (epTok $1) (epTok $2)) []) }
         | '(#' commas '#)'      {% amsr (sLL $1 $> $ tupleDataCon Unboxed (snd $2 + 1))
-                                       (NameAnnCommas (NameParensHash (epTok $1) (epTok $3)) (map (EpTok . srcSpan2e) (fst $2)) []) }
+                                       (NameAnnCommas (NameParensHash (epTok $1) (epTok $3)) (map (EpTok . srcSpan2e) (toList $ fst $2)) []) }
 
 syscon :: { LocatedN RdrName }
         : sysdcon               {  L (getLoc $1) $ nameRdrName (dataConName (unLoc $1)) }
@@ -3823,12 +3859,12 @@ gtycon :: { LocatedN RdrName }  -- A "general" qualified tycon, including unit t
 ntgtycon :: { LocatedN RdrName }  -- A "general" qualified tycon, excluding unit tuples
         : oqtycon               { $1 }
         | '(' commas ')'        {% do { n <- mkTupleSyntaxTycon Boxed (snd $2 + 1)
-                                      ; amsr (sLL $1 $> n) (NameAnnCommas (NameParens (epTok $1) (epTok $3)) (map (EpTok . srcSpan2e) (fst $2)) []) }}
+                                      ; amsr (sLL $1 $> n) (NameAnnCommas (NameParens (epTok $1) (epTok $3)) (map (EpTok . srcSpan2e) (toList $ fst $2)) []) }}
         | '(#' commas '#)'      {% do { n <- mkTupleSyntaxTycon Unboxed (snd $2 + 1)
-                                      ; amsr (sLL $1 $> n) (NameAnnCommas (NameParensHash (epTok $1) (epTok $3)) (map (EpTok . srcSpan2e) (fst $2)) []) }}
+                                      ; amsr (sLL $1 $> n) (NameAnnCommas (NameParensHash (epTok $1) (epTok $3)) (map (EpTok . srcSpan2e) (toList $ fst $2)) []) }}
         | '(#' bars '#)'        {% do { requireLTPuns PEP_SumSyntaxType $1 $>
                                       ; amsr (sLL $1 $> $ (getRdrName (sumTyCon (snd $2 + 1))))
-                                       (NameAnnBars (epTok $1, epTok $3) (fst $2) []) } }
+                                       (NameAnnBars (epTok $1, epTok $3) (toList $ fst $2) []) } }
         | '(' '->' ')'          {% amsr (sLL $1 $> $ getRdrName unrestrictedFunTyCon)
                                        (NameAnnRArrow  (Just $ epTok $1) (epUniTok $2) (Just $ epTok $3) []) }
 
@@ -3928,8 +3964,9 @@ qopm    :: { forall b. DisambInfixOp b => PV (LocatedN b) }   -- used in section
         | qconop                { mkHsConOpPV $1 }
         | hole_op               { mkHsInfixHolePV $1 }
 
-hole_op :: { LocatedN (HsExpr GhcPs) }   -- used in sections
-hole_op : '`' '_' '`'           { sLLa $1 $> (hsHoleExpr (Just $ EpAnnUnboundVar (epTok $1, epTok $3) (epTok $2))) }
+hole_op :: { LocatedN RdrName }   -- used in sections
+hole_op : '`' '_' '`'           {% amsr (sLL $1 $> (mkUnqual varName (fsLit "_")))
+                                           (NameAnn (NameBackquotes (epTok $1) (epTok $3)) (glR $2) []) }
 
 qvarop :: { LocatedN RdrName }
         : qvarsym               { $1 }
@@ -4047,6 +4084,9 @@ special_id
         | 'unit'                { sL1 $1 (fsLit "unit") }
         | 'dependency'          { sL1 $1 (fsLit "dependency") }
         | 'signature'           { sL1 $1 (fsLit "signature") }
+        | 'quote'               { sL1 $1 (fsLit "quote") }
+        | 'splice'              { sL1 $1 (fsLit "splice") }
+
 
 special_sym :: { Located FastString }
 special_sym : '.'       { sL1 $1 (fsLit ".") }
@@ -4157,9 +4197,9 @@ modid   :: { LocatedA ModuleName }
                                    (concatFS [mod, fsLit ".", c])
                                 }
 
-commas :: { ([SrcSpan],Int) }   -- One or more commas
-        : commas ','             { ((fst $1)++[gl $2],snd $1 + 1) }
-        | ','                    { ([gl $1],1) }
+commas :: { (NonEmpty SrcSpan,Int) }   -- One or more commas
+        : commas ','             { (foldr (NE.<|) (NE.singleton $ gl $2) (fst $1) ,snd $1 + 1) }
+        | ','                    { (NE.singleton $ gl $1, 1) }
 
 bars0 :: { ([EpToken "|"],Int) }     -- Zero or more bars
         : bars                   { $1 }
@@ -4304,6 +4344,14 @@ comb5 !a !b !c !d !e =
     combineSrcSpans (getHasLoc b) $
     combineSrcSpans (getHasLoc c) $
     combineSrcSpans (getHasLoc d) (getHasLoc e)
+
+comb6 :: (HasLoc a, HasLoc b, HasLoc c, HasLoc d, HasLoc e, HasLoc f) => a -> b -> c -> d -> e -> f -> SrcSpan
+comb6 !a !b !c !d !e !f =
+    combineSrcSpans (getHasLoc a) $
+    combineSrcSpans (getHasLoc b) $
+    combineSrcSpans (getHasLoc c) $
+    combineSrcSpans (getHasLoc d) $
+    combineSrcSpans (getHasLoc e) (getHasLoc f)
 
 -- strict constructor version:
 {-# INLINE sL #-}

@@ -1,5 +1,3 @@
-{-# OPTIONS_GHC -Wno-orphans #-} -- instance Binary IsBootInterface
-
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE DeriveTraversable #-}
@@ -116,12 +114,6 @@ data GenModule unit = Module
    , moduleName :: !ModuleName -- ^ Module name (e.g. A.B.C)
    }
    deriving (Eq,Ord,Data,Functor)
-
-instance Data ModuleName where
-  -- don't traverse?
-  toConstr _   = abstractConstr "ModuleName"
-  gunfold _ _  = error "gunfold"
-  dataTypeOf _ = mkNoRepType "ModuleName"
 
 -- | A Module is a pair of a 'Unit' and a 'ModuleName'.
 type Module = GenModule Unit
@@ -517,6 +509,9 @@ newtype UnitId = UnitId
   }
   deriving (Data)
 
+instance NFData UnitId where
+  rnf (UnitId fs) = rnf fs `seq` ()
+
 instance Binary UnitId where
   put_ bh (UnitId fs) = put_ bh fs
   get bh = do fs <- get bh; return (UnitId fs)
@@ -681,17 +676,6 @@ the WiringMap, and that's why 'wiredInUnitIds' no longer includes
 -- modules in opposition to boot interfaces. Instead, one should use
 -- 'DriverPhases.HscSource'. See Note [HscSource types].
 
-instance Binary IsBootInterface where
-  put_ bh ib = put_ bh $
-    case ib of
-      NotBoot -> False
-      IsBoot -> True
-  get bh = do
-    b <- get bh
-    return $ case b of
-      False -> NotBoot
-      True -> IsBoot
-
 -- | This data type just pairs a value 'mod' with an IsBootInterface flag. In
 -- practice, 'mod' is usually a @Module@ or @ModuleName@'.
 data GenWithIsBoot mod = GWIB
@@ -703,6 +687,9 @@ data GenWithIsBoot mod = GWIB
   -- the Ord instance must ensure that we first sort by Module and then by
   -- IsBootInterface: this is assumed to perform filtering of non-boot modules,
   -- e.g. in GHC.Driver.Env.hptModulesBelow
+
+instance NFData mod => NFData (GenWithIsBoot mod) where
+  rnf (GWIB mod isBoot) = rnf mod `seq` rnf isBoot `seq` ()
 
 type ModuleNameWithIsBoot = GenWithIsBoot ModuleName
 

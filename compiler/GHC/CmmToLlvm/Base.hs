@@ -18,7 +18,7 @@ module GHC.CmmToLlvm.Base (
         LlvmM,
         runLlvm, withClearVars, varLookup, varInsert,
         markStackReg, checkStackReg,
-        funLookup, funInsert, getLlvmVer,
+        funLookup, funInsert,
         dumpIfSetLlvm, renderLlvm, markUsedVar, getUsedVars,
         ghcInternalFunctions, getPlatform, getConfig,
 
@@ -237,7 +237,7 @@ padLiveArgs platform live =
                text ") both alive AND mapped to the same real register: " <> ppr real <>
                text ". This isn't currently supported by the LLVM backend."
          go (cu@(GlobalRegUse c _):cs) f
-            | fpr_num c == f = go cs f                     -- already covered by a real register
+            | fpr_num c == f = go cs (f+1)                 -- already covered by a real register
             | otherwise      = ctor f : go (cu:cs) (f + 1) -- add padding register
 
     fpr_ctor :: GlobalRegUse -> Int -> GlobalRegUse
@@ -277,8 +277,7 @@ llvmPtrBits platform = widthInBits $ typeWidth $ gcWord platform
 --
 
 data LlvmEnv = LlvmEnv
-  { envVersion   :: LlvmVersion      -- ^ LLVM version
-  , envConfig    :: !LlvmCgConfig    -- ^ Configuration for LLVM code gen
+  { envConfig    :: !LlvmCgConfig    -- ^ Configuration for LLVM code gen
   , envLogger    :: !Logger          -- ^ Logger
   , envOutput    :: BufHandle        -- ^ Output buffer
   , envTag       :: !Char            -- ^ Tag for creating unique values
@@ -290,7 +289,7 @@ data LlvmEnv = LlvmEnv
 
     -- the following get cleared for every function (see @withClearVars@)
   , envVarMap    :: LlvmEnvMap       -- ^ Local variables so far, with type
-  , envStackRegs :: [GlobalReg]      -- ^ Non-constant registers (alloca'd in the function prelude)
+  , envStackRegs :: [GlobalRegUse]   -- ^ Non-constant registers (alloca'd in the function prelude)
   }
 
 type LlvmEnvMap = UniqFM Unique LlvmType
@@ -331,8 +330,8 @@ liftUDSMT m = LlvmM $ \env -> do x <- m
                                  return (x, env)
 
 -- | Get initial Llvm environment.
-runLlvm :: Logger -> LlvmCgConfig -> LlvmVersion -> BufHandle -> DSM.DUniqSupply -> LlvmM a -> IO (a, DSM.DUniqSupply)
-runLlvm logger cfg ver out us m = do
+runLlvm :: Logger -> LlvmCgConfig -> BufHandle -> DSM.DUniqSupply -> LlvmM a -> IO (a, DSM.DUniqSupply)
+runLlvm logger cfg out us m = do
     ((a, _), us') <- DSM.runUDSMT us $ runLlvmM m env
     return (a, us')
   where env = LlvmEnv { envFunMap    = emptyUFM
@@ -340,7 +339,6 @@ runLlvm logger cfg ver out us m = do
                       , envStackRegs = []
                       , envUsedVars  = []
                       , envAliases   = emptyUniqSet
-                      , envVersion   = ver
                       , envConfig    = cfg
                       , envLogger    = logger
                       , envOutput    = out
@@ -374,21 +372,19 @@ varLookup s = getEnv (flip lookupUFM (getUnique s) . envVarMap)
 funLookup s = getEnv (flip lookupUFM (getUnique s) . envFunMap)
 
 -- | Set a register as allocated on the stack
-markStackReg :: GlobalReg -> LlvmM ()
+markStackReg :: GlobalRegUse -> LlvmM ()
 markStackReg r = modifyEnv $ \env -> env { envStackRegs = r : envStackRegs env }
 
 -- | Check whether a register is allocated on the stack
-checkStackReg :: GlobalReg -> LlvmM Bool
-checkStackReg r = getEnv ((elem r) . envStackRegs)
+checkStackReg :: GlobalReg -> LlvmM (Maybe CmmType)
+checkStackReg r = do
+  stack_regs <- getEnv envStackRegs
+  return $ fmap globalRegUse_type $ lookupRegUse r stack_regs
 
 -- | Allocate a new global unnamed metadata identifier
 getMetaUniqueId :: LlvmM MetaId
 getMetaUniqueId = LlvmM $ \env ->
     return (envFreshMeta env, env { envFreshMeta = succ $ envFreshMeta env })
-
--- | Get the LLVM version we are generating code for
-getLlvmVer :: LlvmM LlvmVersion
-getLlvmVer = getEnv envVersion
 
 -- | Dumps the document if the corresponding flag has been set by the user
 dumpIfSetLlvm :: DumpFlag -> String -> DumpFormat -> Outp.SDoc -> LlvmM ()
@@ -524,10 +520,10 @@ generateExternDecls = do
   modifyEnv $ \env -> env { envAliases = emptyUniqSet }
   return (concat defss, [])
 
--- | Is a variable one of the special @$llvm@ globals?
+-- | Is a variable one of the special @\@llvm@ globals?
 isBuiltinLlvmVar :: LlvmVar -> Bool
 isBuiltinLlvmVar (LMGlobalVar lbl _ _ _ _ _) =
-    "$llvm" `isPrefixOf` unpackFS lbl
+    "llvm." `isPrefixOf` unpackFS lbl
 isBuiltinLlvmVar _ = False
 
 -- | Here we take a global variable definition, rename it with a

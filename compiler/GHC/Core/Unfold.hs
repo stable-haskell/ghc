@@ -57,6 +57,8 @@ import GHC.Utils.Misc
 import GHC.Utils.Outputable
 
 import qualified Data.ByteString as BS
+import Data.List.NonEmpty (nonEmpty)
+import qualified Data.List.NonEmpty as NE
 
 -- | Unfolding options
 data UnfoldingOpts = UnfoldingOpts
@@ -213,34 +215,110 @@ let-bound things that are dead are usually caught by preInlineUnconditionally
 ************************************************************************
 -}
 
+{- Note [inlineBoringOk]
+~~~~~~~~~~~~~~~~~~~~~~~~
+See Note [INLINE for small functions]
+
+The function `inlineBoringOk` returns True (boringCxtOk) if the supplied
+unfolding, which looks like (\x y z. body), is such that the result of
+inlining a saturated call is no bigger than `body`.  Some wrinkles:
+
+(IB1) An important case is
+    - \x. (x `cast` co)
+
+(IB2) If `body` looks like a data constructor worker, we become keener
+  to inline, by ignoring the number of arguments; we just insist they
+  are all trivial.  Reason: in a call like `f (g x y)`, if `g` unfolds
+  to a data construtor, we can allocate a data constructor instead of
+  a thunk (g x y).
+
+  A case in point where a GADT data constructor failed to inline (#25713)
+      $WK = /\a \x. K @a <co> x
+  We really want to inline a boring call to $WK so that we allocate
+  a data constructor not a thunk ($WK @ty x).
+
+  But not for nullary constructors!  We don't want to turn
+     f ($WRefl @ty)
+  into
+     f (Refl @ty <co>)
+   because the latter might allocate, whereas the former shares.
+   (You might wonder if (Refl @ty <co>) should allocate, but I think
+   that currently it does.)  So for nullary constructors, `inlineBoringOk`
+   returns False.
+
+(IB3) Types and coercions do not count towards the expression size.
+      They are ultimately erased.
+
+(IB4) If there are no value arguments, `inlineBoringOk` we have to be
+  careful (#17182).  If we have
+      let y = x @Int in f y y
+  there’s no reason not to inline y at both use sites — no work is
+  actually duplicated.
+
+  But not so for coercion arguments! Unlike type arguments, which have
+  no runtime representation, coercion arguments *do* have a runtime
+  representation (albeit the zero-width VoidRep, see Note [Coercion
+  tokens] in "GHC.CoreToStg").  For example:
+       let y = g @Int <co> in g y y
+  Here `co` is a value argument, and calling it twice might duplicate
+  work.
+
+  Even if `g` is a data constructor, so no work is duplicated,
+  inlining `y` might duplicate allocation of a data constructor object
+  (#17787). See also (IB2).
+
+  TL;DR: if `is_fun` is False, so we have no value arguments, we /do/
+  count coercion arguments, despite (IB3).
+
+(IB5) You might wonder about an unfolding like  (\x y z -> x (y z)),
+  whose body is, in some sense, just as small as (g x y z).
+  But `inlineBoringOk` doesn't attempt anything fancy; it just looks
+  for a function call with trivial arguments, Keep it simple.
+-}
+
 inlineBoringOk :: CoreExpr -> Bool
--- See Note [INLINE for small functions]
 -- True => the result of inlining the expression is
 --         no bigger than the expression itself
 --     eg      (\x y -> f y x)
--- This is a quick and dirty version. It doesn't attempt
--- to deal with  (\x y z -> x (y z))
--- The really important one is (x `cast` c)
+-- See Note [inlineBoringOk]
 inlineBoringOk e
   = go 0 e
   where
+    is_fun = isValFun e
+
     go :: Int -> CoreExpr -> Bool
-    go credit (Lam x e) | isId x           = go (credit+1) e
-                        | otherwise        = go credit e
-        -- See Note [Count coercion arguments in boring contexts]
-    go credit (App f (Type {}))            = go credit f
-    go credit (App f a) | credit > 0
-                        , exprIsTrivial a  = go (credit-1) f
-    go credit (Tick _ e)                   = go credit e -- dubious
-    go credit (Cast e _)                   = go credit e
+    go credit (Lam x e) | isRuntimeVar x  = go (credit+1) e
+                        | otherwise       = go credit e      -- See (IB3)
+
+    go credit (App f (Type {}))           = go credit f      -- See (IB3)
+    go credit (App f (Coercion {}))
+      | is_fun                            = go credit f      -- See (IB3)
+      | otherwise                         = go (credit-1) f  -- See (IB4)
+    go credit (App f a) | exprIsTrivial a = go (credit-1) f
+
     go credit (Case e b _ alts)
       | null alts
       = go credit e   -- EmptyCase is like e
       | Just rhs <- isUnsafeEqualityCase e b alts
       = go credit rhs -- See Note [Inline unsafeCoerce]
-    go _      (Var {})                     = boringCxtOk
-    go _      (Lit l)                      = litIsTrivial l && boringCxtOk
-    go _      _                            = boringCxtNotOk
+
+    go credit (Tick _ e) = go credit e      -- dubious
+    go credit (Cast e _) = go credit e      -- See (IB3)
+
+    go _      (Lit l)    = litIsTrivial l && boringCxtOk
+
+      -- We assume credit >= 0; literals aren't functions
+    go credit (Var v) | isDataConWorkId v, is_fun = boringCxtOk  -- See (IB2)
+                      | credit >= 0               = boringCxtOk
+                      | otherwise                 = boringCxtNotOk
+    go _      _                                   = boringCxtNotOk
+
+isValFun :: CoreExpr -> Bool
+-- True of functions with at least
+-- one top-level value lambda
+isValFun (Lam b e) | isRuntimeVar b = True
+                   | otherwise      = isValFun e
+isValFun _                          = False
 
 calcUnfoldingGuidance
         :: UnfoldingOpts
@@ -398,29 +476,6 @@ Things to note:
     NB: you might think that PostInlineUnconditionally would do this
     but it doesn't fire for top-level things; see GHC.Core.Opt.Simplify.Utils
     Note [Top level and postInlineUnconditionally]
-
-Note [Count coercion arguments in boring contexts]
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-In inlineBoringOK, we ignore type arguments when deciding whether an
-expression is okay to inline into boring contexts. This is good, since
-if we have a definition like
-
-  let y = x @Int in f y y
-
-there’s no reason not to inline y at both use sites — no work is
-actually duplicated. It may seem like the same reasoning applies to
-coercion arguments, and indeed, in #17182 we changed inlineBoringOK to
-treat coercions the same way.
-
-However, this isn’t a good idea: unlike type arguments, which have
-no runtime representation, coercion arguments *do* have a runtime
-representation (albeit the zero-width VoidRep, see Note [Coercion tokens]
-in "GHC.CoreToStg"). This caused trouble in #17787 for DataCon wrappers for
-nullary GADT constructors: the wrappers would be inlined and each use of
-the constructor would lead to a separate allocation instead of just
-sharing the wrapper closure.
-
-The solution: don’t ignore coercion arguments after all.
 -}
 
 uncondInline :: Bool -> CoreExpr -> [Var] -> Arity -> CoreExpr -> Int -> Bool
@@ -434,17 +489,55 @@ uncondInline is_join rhs bndrs arity body size
 
 uncondInlineJoin :: [Var] -> CoreExpr -> Bool
 -- See Note [Duplicating join points] point (DJ3) in GHC.Core.Opt.Simplify.Iteration
-uncondInlineJoin _bndrs body
+uncondInlineJoin bndrs body
+
+  -- (DJ3)(a)
   | exprIsTrivial body
   = True   -- Nullary constructors, literals
 
-  | (Var v, args) <- collectArgs body
-  , all exprIsTrivial args
-  , isJoinId v   -- Indirection to another join point; always inline
+  -- (DJ3)(b) and (DJ3)(c) combined
+  | indirectionOrAppWithoutFVs
   = True
 
   | otherwise
   = False
+
+  where
+    -- (DJ3)(b):
+    -- - $j1 x = $j2 y x |> co  -- YES, inline indirection regardless of free vars
+    -- (DJ3)(c):
+    -- - $j1 x y = K y x |> co  -- YES, inline!
+    -- - $j2 x = K f x          -- No, don't! (because f is free)
+    indirectionOrAppWithoutFVs = go False body
+
+    go !seen_fv (App f a)
+      | Just has_fv <- go_arg a
+                          = go (seen_fv || has_fv) f
+      | otherwise         = False       -- Not trivial
+    go seen_fv (Var v)
+      | isJoinId v        = True        -- Indirection to another join point; always inline
+      | isDataConId v     = not seen_fv -- e.g. $j a b = K a b
+      | v `elem` bndrs    = not seen_fv -- e.g. $j a b = b a
+    go seen_fv (Cast e _) = go seen_fv e
+    go seen_fv (Tick _ e) = go seen_fv e
+    go _ _                = False
+
+    -- go_arg returns:
+    --  - `Nothing` if arg is not trivial
+    --  - `Just True` if arg is trivial but contains free var, literal, or constructor
+    --  - `Just False` if arg is trivial without free vars
+    go_arg (Type {})     = Just False
+    go_arg (Coercion {}) = Just False
+    go_arg (Lit l)
+      | litIsTrivial l   = Just True    -- e.g. $j x = $j2 x 7 YES, but $j x = K x 7 NO
+      | otherwise        = Nothing
+    go_arg (App f a)
+      | isTyCoArg a      = go_arg f     -- e.g. $j f = K (f @a)
+      | otherwise        = Nothing
+    go_arg (Cast e _)    = go_arg e
+    go_arg (Tick _ e)    = go_arg e
+    go_arg (Var f)       = Just $! f `notElem` bndrs
+    go_arg _             = Nothing
 
 
 sizeExpr :: UnfoldingOpts
@@ -490,15 +583,12 @@ sizeExpr opts !bOMB_OUT_SIZE top_args expr
               (size_up body `addSizeN` sum (map (size_up_alloc . fst) pairs))
               pairs
 
-    size_up (Case e _ _ alts)
-        | null alts
-        = size_up e    -- case e of {} never returns, so take size of scrutinee
-
-    size_up (Case e _ _ alts)
-        -- Now alts is non-empty
-        | Just v <- is_top_arg e -- We are scrutinising an argument variable
-        = let
-            alt_sizes = map size_up_alt alts
+    size_up (Case e _ _ alts) = case nonEmpty alts of
+      Nothing -> size_up e    -- case e of {} never returns, so take size of scrutinee
+      Just alts
+        | Just v <- is_top_arg e -> -- We are scrutinising an argument variable
+          let
+            alt_sizes = NE.map size_up_alt alts
 
                   -- alts_size tries to compute a good discount for
                   -- the case when we are scrutinising an argument variable
@@ -525,14 +615,15 @@ sizeExpr opts !bOMB_OUT_SIZE top_args expr
                 -- Good to inline if an arg is scrutinised, because
                 -- that may eliminate allocation in the caller
                 -- And it eliminates the case itself
+
+        | otherwise -> size_up e  `addSizeNSD`
+                                foldr (addAltSize . size_up_alt) case_size alts
+
         where
           is_top_arg (Var v) | v `elem` top_args = Just v
           is_top_arg (Cast e _) = is_top_arg e
           is_top_arg _ = Nothing
 
-
-    size_up (Case e _ _ alts) = size_up e  `addSizeNSD`
-                                foldr (addAltSize . size_up_alt) case_size alts
       where
           case_size
            | is_inline_scrut e, lengthAtMost alts 1 = sizeN (-10)

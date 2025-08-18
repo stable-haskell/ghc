@@ -34,6 +34,7 @@ import GHC.Internal.Base
 import GHC.Internal.Exception.Type
 import GHC.Internal.Exts
 import GHC.Internal.IO
+import GHC.Internal.IORef
 import GHC.Internal.Int
 import GHC.Internal.Stable
 import GHC.Internal.TopHandler (flushStdHandles)
@@ -43,10 +44,14 @@ import GHC.Internal.Word
 mkJSCallback :: (StablePtr a -> IO JSVal) -> a -> IO JSVal
 mkJSCallback adjustor f = do
   sp@(StablePtr sp#) <- newStablePtr f
-  JSVal v w _ <- adjustor sp
-  let r = JSVal v w sp#
-  js_callback_register r sp
-  pure r
+  v@(JSVal p) <- adjustor sp
+  IO $ \s0 -> case stg_setJSVALsp p sp# s0 of
+    (# s1 #) -> (# s1, () #)
+  js_callback_register v sp
+  pure v
+
+foreign import prim "stg_setJSVALsp"
+  stg_setJSVALsp :: JSVal# -> StablePtr# a -> State# RealWorld -> (# State# RealWorld #)
 
 foreign import javascript unsafe "__ghc_wasm_jsffi_finalization_registry.register($1, $2, $1)"
   js_callback_register :: JSVal -> StablePtr a -> IO ()
@@ -61,15 +66,26 @@ runIO res m = do
         let tmp@(JSString tmp_v) = toJSString $ displayException err
         js_promiseReject p tmp
         freeJSVal tmp_v
-  IO $ \s0 -> case fork# (unIO $ catch (res p =<< m) topHandler *> flushStdHandles) s0 of
-    (# s1, _ #) -> case stg_scheduler_loop# s1 of
-      (# s2, _ #) -> (# s2, p #)
+  post_action_ref <- newIORef $ pure ()
+  IO $ \s0 -> case fork# (unIO $ catch (res p =<< m) topHandler *> flushStdHandles *> join (readIORef post_action_ref)) s0 of
+    (# s1, tso# #) -> case mkWeakNoFinalizer# tso# () s1 of
+      (# s2, w# #) -> case makeStablePtr# w# s2 of
+        (# s3, sp# #) -> case unIO (writeIORef post_action_ref $ js_promiseDelThrowTo p *> freeStablePtr (StablePtr $ unsafeCoerce# sp#)) s3 of
+          (# s4, _ #) -> case unIO (js_promiseAddThrowTo p $ StablePtr $ unsafeCoerce# sp#) s4 of
+            (# s5, _ #) -> case stg_scheduler_loop# s5 of
+              (# s6, _ #) -> (# s6, p #)
 
 runNonIO :: (JSVal -> a -> IO ()) -> a -> IO JSVal
 runNonIO res a = runIO res $ pure a
 
 foreign import javascript unsafe "let res, rej; const p = new Promise((resolve, reject) => { res = resolve; rej = reject; }); p.resolve = res; p.reject = rej; return p;"
   js_promiseWithResolvers :: IO JSVal
+
+foreign import javascript unsafe "$1.throwTo = (err) => __exports.rts_promiseThrowTo($2, err);"
+  js_promiseAddThrowTo :: JSVal -> StablePtr Any -> IO ()
+
+foreign import javascript unsafe "$1.throwTo = () => {};"
+  js_promiseDelThrowTo :: JSVal -> IO ()
 
 foreign import prim "stg_scheduler_loopzh"
   stg_scheduler_loop# :: State# RealWorld -> (# State# RealWorld, () #)

@@ -10,8 +10,6 @@
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE LambdaCase #-}
 
-{-# OPTIONS_GHC -Wno-incomplete-uni-patterns #-}
-
 -- | Typecheck type and class declarations
 module GHC.Tc.TyCl (
         tcTyAndClassDecls,
@@ -23,7 +21,10 @@ module GHC.Tc.TyCl (
         tcFamTyPats, tcTyFamInstEqn,
         tcAddOpenTyFamInstCtxt, tcMkDataFamInstCtxt, tcAddDataFamInstCtxt,
         unravelFamInstPats, addConsistencyConstraints,
-        checkFamTelescope
+        checkFamTelescope,
+
+        -- Used by GHC.HsToCore.Quote
+        IsPrefixConGADT(..), unannotatedMultIsLinear
     ) where
 
 import GHC.Prelude
@@ -59,7 +60,7 @@ import GHC.Tc.Types.ErrCtxt ( TyConInstFlavour(..) )
 import GHC.Tc.Types.LclEnv
 import GHC.Tc.Types.Origin
 
-import GHC.Builtin.Types ( oneDataConTy,  unitTy, makeRecoveryTyCon )
+import GHC.Builtin.Types ( oneDataConTy,  unitTy, makeRecoveryTyCon, manyDataConTy )
 
 import GHC.Rename.Env( lookupConstructorFields )
 
@@ -88,11 +89,13 @@ import GHC.Types.SourceFile
 import GHC.Types.TypeEnv
 import GHC.Types.Unique
 import GHC.Types.Basic
+import GHC.Types.Error
 import qualified GHC.LanguageExtensions as LangExt
 
 import GHC.Data.FastString
 import GHC.Data.Maybe
 import GHC.Data.List.SetOps( minusList, equivClasses )
+import GHC.Data.OrdList
 
 import GHC.Unit
 import GHC.Unit.Module.ModDetails
@@ -112,6 +115,7 @@ import Data.List.NonEmpty ( NonEmpty(..) )
 import qualified Data.List.NonEmpty as NE
 import Data.Traversable ( for )
 import Data.Tuple( swap )
+import qualified Data.Semigroup as S
 
 {-
 ************************************************************************
@@ -147,44 +151,379 @@ be ill-formed (see #7175 and Note [rejigConRes]) we must check
 *all* the tycons in a group for validity before checking *any* of the roles.
 Thus, we take two passes over the resulting tycons, first checking for general
 validity and then checking for valid role annotations.
+
+Note [Retrying TyClGroups]
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+After renaming type, class, and instance declarations in a module (or, to be
+more precise, in an HsGroup), GHC.Rename.Module.rnTyClDecls does dependency
+analysis on the renamed declarations and returns a topologically sorted list
+of SCCs, each SCC represented by one TyClGroup.
+
+If the dependency analysis were complete, i.e. if it were able to discover all
+dependencies between all declarations, then tcTyAndClassDecls could simply
+kind-check TyClGroups in order. Unfortunately, this is not the case, because
+dependencies come in two varieties:
+
+* Lexical dependencies arise when X mentions Y by name:
+
+    data X (a :: Y) = MkX   -- depends on Y
+    data Y = MkY
+
+* Non-lexical dependencies arise when an instance must be in the
+  typing environment:
+
+    type family F x
+    data X (a :: F Int) = MkX a   -- depends on (F Int ~ Type)
+    type instance F x = Type
+
+Non-lexical dependencies can't be discovered by looking at the free variables of
+a declaration (attempts to find a good heuristic did not bear fruit, see the
+long discussion at #12088 and the linked Wiki pages). As a consequence, the
+order of SCCs (i.e. TyClGroups) coming out of the renamer is determined solely
+by lexical dependencies.
+
+In other words, the TyClGroups are in /lexical dependency order/, meaning:
+- definitely in dependency order if all dependencies are lexical
+- possibly not in dependency order if there are non-lexical dependencies
+
+Here are some examples how type checking declarations might go wrong due to
+non-lexical dependencies:
+
+* Consider (#11348)
+
+    type family F a
+    type instance F Int = Bool
+
+    data R = MkR (F Int)
+
+    type Foo = 'MkR 'True
+
+  For Foo to kind-check we need to know that (F Int) ~ Bool.  But we won't
+  know that unless we've looked at the type instance declaration for F
+  before kind-checking Foo.
+
+* Things become more complicated when we introduce transitive
+  dependencies through imported definitions, like in this scenario:
+
+      A.hs
+        type family Closed (t :: Type) :: Type where
+          Closed t = Open t
+
+        type family Open (t :: Type) :: Type
+
+      B.hs
+        data Q where
+          Q :: Closed Bool -> Q
+
+        type instance Open Int = Bool
+
+        type S = 'Q 'True
+
+  Somehow, we must ensure that the instance Open Int = Bool is checked before
+  the type synonym S. While we know that S depends upon 'Q depends upon Closed,
+  we have no idea that Closed depends upon Open!
+
+* Another example is this (#3990).
+
+    data family Complex a
+    data instance Complex Double = CD {-# UNPACK #-} !Double
+                                      {-# UNPACK #-} !Double
+
+    data T = T {-# UNPACK #-} !(Complex Double)
+
+  Here, to generate the right kind of unpacked implementation for T,
+  we must have access to the 'data instance' declaration.
+
+To accommodate for these situations, tcTyAndClassDecls discovers the correct
+kind-checking order by trial and error.
+
+The algorithm works as follows:
+
+1. (in rnTyClDecls)
+   Perform the SCC analysis on declarations without instances and considering
+   lexical dependencies only. The result is a topologically sorted list of SCCs.
+   See Note [Dependency analysis of type and class decls] in GHC.Rename.Module
+
+2. (in rnTyClDecls)
+   Create one singleton "SCC" per instance and put them at the end.
+   See Note [Put instances at the end] in GHC.Rename.Module
+
+3. (in tcTyAndClassDecls)
+   Check all SCCs in order, skipping any that are blocked (FVs not in env),
+   flawed (unusable unpack pragmas), or fail (type errors)
+   (3a) if none were skipped, we are done
+   (3b) if all were skipped and none are flawed, we are stuck;
+        report errors and exit (tcFailedTyClGroups)
+   (3c) if all were skipped and some are flawed, redo the pass
+        allowing flawed SCCs (tcTyClGroupsPass.go with strict=False)
+   (3d) if some were skipped and some weren't, we've made progress; iterate
+
+In the common case of lexical dependencies only, the algorithm is linear in the
+number of groups: it completes in one pass if the program is kind-correct, or
+two passes if there are kind errors.
+
+In the less common case of non-lexical dependencies, the algorithm is worst-case
+quadratic in the number of groups: if each pass manages to check only one group,
+we end up doing a pass per group.
+
+Now, regarding the "flawed" groups. These are the ones where the programmer used
+the {-# UNPACK #-} pragma on a field, yet we could not unpack (#3990)
+
+* One possible reason for this is that we lack a data instance in the
+  environment that would allow for the field to be unpacked, so it is beneficial
+  to treat this like a kind error: skip the flawed group and retry it in a later
+  pass, when we might have more data instances in the env.
+
+* However, if the /only/ reason a pass gets stuck is due to flawed groups,
+  then we can make progress by treating unpacking failure is a warning.
+
+This way we maximize unpacking with explicit {-# UNPACK #-} pragmas.
+Unfortunately, it does not help with -funbox-strict-fields.
+See Note [Flaky -funbox-strict-fields with type/data families]
+
+Later we might check TyClGroups for other "flaws", but for now the property is
+just about unusable unpack pragmas.
+
+Finally, a short comment on why it is necessary to check whether a group is
+ready (FVs in the env) or blocked (FVs not in the env) using isReadyTyClGroup.
+One might expect this check to be redundant, as the TyClGroups come in lexical
+dependency order. However, as soon as we skip a group, the rest of the pass can
+no longer rely on this property, hence the check. It is rare to encounter this
+problem in a kind-correct program, but see e.g. the T12088e test case.
+
+Note [Flaky -funbox-strict-fields with type/data families]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Consider this program:
+
+  {-# OPTIONS -funbox-strict-fields #-}
+  data family Complex a
+  data instance Complex Double = CD !Double !Double
+  data T = T !(Complex Double)  -- does (Complex Double) get unpacked?
+
+Could we unpack T's field (Complex Double)? This depends on whether we have the
+data instance in the environment. Prior GHC versions could handle this example,
+but it was not reliable. A slightly more involved arrangement could throw it off
+balance:
+
+  {-# OPTIONS -funbox-strict-fields #-}
+  type family F a
+  data D1 = MkD1 !(F Int)       -- does (F Int) get unpacked?
+  data D2 = MkD2 !Int !Int
+  type instance F Int = D2
+
+Here, MkD1's field (F Int) would not get unpacked unless we used a top-level
+splice to separate the module and force the desired order of kind-checking:
+
+  {-# OPTIONS -funbox-strict-fields #-}
+  type family F a
+  data D2 = MkD2 !Int !Int
+  type instance F Int = D2
+  $(return [])                -- break the module into two sections
+  data D1 = MkD1 !(F Int)     -- now (F Int) surely gets unpacked
+
+The current version of GHC is more predictable. Neither the (Complex Double) nor
+the (F Int) example gets unpacking unless the type/data instance is put into a
+separate HsGroup, either with $(return []) or by placing it in another module
+altogether. This is a direct result of placing instances after the other SCCs,
+as described in Note [Put instances at the end] in GHC.Rename.Module
+
+It is also possible to get the desired unpacking with an explicit {-# UNPACK #-}
+pragma, as an unusable unpack pragma marks a TyClGroup "flawed", which means it
+will be retried after more type/data instances are added to the typing
+environment. See the algorithm in Note [Retrying TyClGroups].
 -}
 
-tcTyAndClassDecls :: [TyClGroup GhcRn]      -- Mutually-recursive groups in
-                                            -- dependency order
-                  -> TcM ( TcGblEnv         -- Input env extended by types and
-                                            -- classes
-                                            -- and their implicit Ids,DataCons
-                         , [InstInfo GhcRn] -- Source-code instance decls info
-                         , [DerivInfo]      -- Deriving info
-                         , ThBindEnv        -- TH binding levels
-                         )
+data TcTyClGroupsAccum =
+  TcTyClGroupsAccum
+    { ttcga_inst_info   :: !(OrdList (InstInfo GhcRn)) -- ^ Source-code instance decls info
+    , ttcga_deriv_info  :: !(OrdList DerivInfo)        -- ^ Deriving info
+    , ttcga_th_bndrs    :: !ThBindEnv                  -- ^ TH binding levels
+    }
+
+instance S.Semigroup TcTyClGroupsAccum where
+  (TcTyClGroupsAccum a1 b1 c1) <> (TcTyClGroupsAccum a2 b2 c2) =
+    TcTyClGroupsAccum (a1 S.<> a2)
+                      (b1 S.<> b2)
+                      (c1 S.<> c2)
+
+instance Monoid TcTyClGroupsAccum where
+  mempty = TcTyClGroupsAccum mempty mempty mempty
+
+tcTyAndClassDecls :: [TyClGroup GhcRn]      -- Mutually-recursive groups in lexical dependency order
+  -> TcM ( TcGblEnv         -- Input env extended by types and classes and their implicit Ids, DataCons
+         , [InstInfo GhcRn] -- Source-code instance decls info
+         , [DerivInfo]      -- Deriving info
+         , ThBindEnv        -- TH binding levels
+         )
 -- Fails if there are any errors
 tcTyAndClassDecls tyclds_s
   -- The code recovers internally, but if anything gave rise to
   -- an error we'd better stop now, to avoid a cascade
   -- Type check each group in dependency order folding the global env
-  = checkNoErrs $ fold_env [] [] emptyNameEnv tyclds_s
+  = checkNoErrs $ go mempty tyclds_s
   where
-    fold_env :: [InstInfo GhcRn]
-             -> [DerivInfo]
-             -> ThBindEnv
-             -> [TyClGroup GhcRn]
-             -> TcM (TcGblEnv, [InstInfo GhcRn], [DerivInfo], ThBindEnv)
-    fold_env inst_info deriv_info th_bndrs []
-      = do { gbl_env <- getGblEnv
-           ; return (gbl_env, inst_info, deriv_info, th_bndrs) }
-    fold_env inst_info deriv_info th_bndrs (tyclds:tyclds_s)
-      = do { (tcg_env, inst_info', deriv_info', th_bndrs')
-               <- tcTyClGroup tyclds
-           ; setGblEnv tcg_env $
-               -- remaining groups are typechecked in the extended global env.
-             fold_env (inst_info' ++ inst_info)
-                      (deriv_info' ++ deriv_info)
-                      (th_bndrs' `plusNameEnv` th_bndrs)
-                      tyclds_s }
+    go :: TcTyClGroupsAccum
+       -> [TyClGroup GhcRn]
+       -> TcM (TcGblEnv, [InstInfo GhcRn], [DerivInfo], ThBindEnv)
+    go acc [] = do  -- Case (3a) of the algorithm in Note [Retrying TyClGroups]
+                    -- All good, we are done.
+      tcg_env <- getGblEnv
+      let inst_info  = fromOL (ttcga_inst_info acc)
+          deriv_info = fromOL (ttcga_deriv_info acc)
+          th_bndrs   = ttcga_th_bndrs acc
+      return (tcg_env, inst_info, deriv_info, th_bndrs)
+    go acc gs =
+      tcTyClGroupsPass gs $ \acc' n gs' ->
+        if n == 0 then
+          -- Case (3b) of the algorithm in Note [Retrying TyClGroups]
+          -- The pass made no progress. We are stuck. Report errors and exit.
+          tcFailedTyClGroups gs'
+        else
+          -- Case (3b) of the algorithm in Note [Retrying TyClGroups]
+          -- The pass made some progress. Iterate.
+          go (acc' S.<> acc) gs'
+
+-- Check the remaining TyClGroups that are known to fail,
+-- extending the environment with fake tycons to report more errors.
+-- See Note [Recover from validity error]
+tcFailedTyClGroups :: [TyClGroup GhcRn] -> TcM a
+tcFailedTyClGroups [] = failM
+tcFailedTyClGroups (g:gs) = do
+  tcg_env <- getGblEnv
+  m_result <-
+    if isReadyTyClGroup tcg_env g
+    then attemptM (tcTyClGroup g)
+    else return Nothing
+  let tcg_env' = maybe tcg_env fst m_result
+  setGblEnv tcg_env' $ tcFailedTyClGroups gs
+
+-- Type check as many TyClGroups as possible, skipping any failures.
+-- thing_inside runs in the extended environment.
+tcTyClGroupsPass :: forall a.
+     [TyClGroup GhcRn]     -- Mutually-recursive groups in lexical dependency order
+  -> (TcTyClGroupsAccum
+      -> Int               -- Number of successfully checked groups
+      -> [TyClGroup GhcRn] -- Remaining groups in lexical dependency order
+      -> TcM a)
+  -> TcM a
+tcTyClGroupsPass all_gs thing_inside = go True ttcgs_zero mempty nilOL all_gs
+  where
+    go :: Bool                -- Strict pass, True <=> fail on unusable {-# UNPACK #-}
+       -> TcTyClGroupsStats
+       -> TcTyClGroupsAccum
+       -> OrdList (TyClGroup GhcRn)  -- Skipped groups (accumulator)
+       -> [TyClGroup GhcRn]          -- Groups to check
+       -> TcM a
+    go strict !stats acc skipped_gs []
+      | strict, ttcgs_n_success stats == 0, ttcgs_n_flawed stats > 0 = do
+          -- Case (3b) of the algorithm in Note [Retrying TyClGroups]
+          -- The strict pass made no progress but found flawed groups;
+          -- now do a lax pass to allow them to succeed.
+          traceTc "tcTyClGroupsPass end of strict pass" (ppr stats)
+          go False ttcgs_zero acc nilOL (fromOL skipped_gs)
+      | otherwise = do
+          traceTc "tcTyClGroupsPass done" (ppr stats)
+          thing_inside acc (ttcgs_n_success stats) (fromOL skipped_gs)
+    go strict !stats acc skipped_gs (g:gs) = do
+      (stats', m_result) <- try_tc_group strict stats (null skipped_gs) g
+      case m_result of
+        Nothing ->
+          go strict stats' acc (skipped_gs `snocOL` g) gs
+        Just (tcg_env, acc') ->
+          setGblEnv tcg_env $
+          go strict stats' (acc' S.<> acc) skipped_gs gs
+
+    try_tc_group :: Bool   -- Strict pass, True <=> fail on unusable {-# UNPACK #-}
+                 -> TcTyClGroupsStats
+                 -> Bool   -- True <=> No groups skipped this pass (yet)
+                 -> TyClGroup GhcRn
+                 -> TcM (TcTyClGroupsStats, Maybe (TcGblEnv, TcTyClGroupsAccum))
+    try_tc_group strict stats no_skipped g = do
+      tcg_env <- getGblEnv
+      let on_flawed    = (ttcgs_inc_flawed  stats, Nothing)
+          on_failed    = (ttcgs_inc_failed  stats, Nothing)
+          on_blocked   = (ttcgs_inc_blocked stats, Nothing)
+          on_success r = (ttcgs_inc_success stats, Just r)
+          ready = no_skipped || isReadyTyClGroup tcg_env g
+              -- (no_skipped ||) is a shortcut: if no groups were skipped this
+              -- pass, the current group's lexical dependencies must have been
+              -- satisfied by the preceding groups; no need for the ready check,
+              -- this avoids some lookups in tcg_env
+
+          -- See Note [Expedient use of diagnostics in tcTyClGroupsPass]
+          set_opts action
+            | strict    = setWOptM Opt_WarnUnusableUnpackPragmas action
+            | otherwise = action
+          validate _ msgs _
+            | strict    = not (unpackErrorsFound msgs)
+            | otherwise = True
+
+      if not ready then return on_blocked else
+        tryTcDiscardingErrs' validate
+                             (return on_flawed)
+                             (return on_failed)
+                             (on_success <$> set_opts (tcTyClGroup g))
+
+data TcTyClGroupsStats =
+  TcTyClGroupsStats
+    { ttcgs_n_success   :: !Int   -- ^ Number of successfully checked groups
+    , ttcgs_n_blocked   :: !Int   -- ^ Number of groups whose FVs are not in the env
+    , ttcgs_n_failed    :: !Int   -- ^ Number of groups that failed with an error
+    , ttcgs_n_flawed    :: !Int   -- ^ Number of groups that did not pass validation
+    }
+
+ttcgs_zero :: TcTyClGroupsStats
+ttcgs_zero = TcTyClGroupsStats 0 0 0 0
+
+ttcgs_inc_success, ttcgs_inc_blocked, ttcgs_inc_failed, ttcgs_inc_flawed :: TcTyClGroupsStats -> TcTyClGroupsStats
+ttcgs_inc_success stats = stats { ttcgs_n_success = 1 + ttcgs_n_success stats }
+ttcgs_inc_blocked stats = stats { ttcgs_n_blocked = 1 + ttcgs_n_blocked stats }
+ttcgs_inc_failed  stats = stats { ttcgs_n_failed  = 1 + ttcgs_n_failed stats }
+ttcgs_inc_flawed  stats = stats { ttcgs_n_flawed  = 1 + ttcgs_n_flawed stats }
+
+instance Outputable TcTyClGroupsStats where
+  ppr stats =
+    vcat [ text "n_success =" <+> ppr (ttcgs_n_success stats)
+         , text "n_blocked =" <+> ppr (ttcgs_n_blocked stats)
+         , text "n_failed  =" <+> ppr (ttcgs_n_failed  stats)
+         , text "n_flawed  =" <+> ppr (ttcgs_n_flawed  stats) ]
+
+-- See Note [Expedient use of diagnostics in tcTyClGroupsPass]
+unpackErrorsFound :: Messages TcRnMessage -> Bool
+unpackErrorsFound = any is_unpack_error
+  where
+    is_unpack_error :: TcRnMessage -> Bool
+    is_unpack_error (TcRnMessageWithInfo _ (TcRnMessageDetailed _ msg)) = is_unpack_error msg
+    is_unpack_error (TcRnWithHsDocContext _ msg) = is_unpack_error msg
+    is_unpack_error (TcRnBadFieldAnnotation _ _ UnusableUnpackPragma) = True
+    is_unpack_error _ = False
+
+{- Note [Expedient use of diagnostics in tcTyClGroupsPass]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+In tcTyClGroupsPass.go with strict=True, we want to skip "flawed" groups, i.e.
+groups with unusable unpack pragmas, as explained in Note [Retrying TyClGroups].
+To detect these unusable {-# UNPACK #-} pragmas, we currently piggy-back on the
+diagnostics infrastructure:
+
+  1. (setWOptM Opt_WarnUnusableUnpackPragmas) to enable the warning.
+     The warning is on by default, but the user may have disabled it with
+     -Wno-unusable-unpack-pragmas, in which case we need to turn it back on.
+
+  2. (unpackErrorsFound msgs) to check if UnusableUnpackPragma is one of the
+     collected diagnostics.  This is somewhat unpleasant because of the need to
+     recurse into TcRnMessageWithInfo and TcRnWithHsDocContext.
+
+Arguably, this is not a principled solution, because diagnostics are meant for
+the user and here we inspect them to determine the order of type-checking. The
+only reason for the current setup is that it was the easy thing to do.
+-}
+
+isReadyTyClGroup :: TcGblEnv -> TyClGroup GhcRn -> Bool
+isReadyTyClGroup tcg_env TyClGroup{group_ext = deps} =
+  nameSetAll (\n -> n `elemNameEnv` tcg_type_env tcg_env) deps
 
 tcTyClGroup :: TyClGroup GhcRn
-            -> TcM (TcGblEnv, [InstInfo GhcRn], [DerivInfo], ThBindEnv)
+            -> TcM (TcGblEnv, TcTyClGroupsAccum)
 -- Typecheck one strongly-connected component of type, class, and instance decls
 -- See Note [TyClGroups and dependency analysis] in GHC.Hs.Decls
 tcTyClGroup (TyClGroup { group_tyclds = tyclds
@@ -247,8 +586,10 @@ tcTyClGroup (TyClGroup { group_tyclds = tyclds
        ; let deriv_info = datafam_deriv_info ++ data_deriv_info
        ; let gbl_env'' = gbl_env'
                 { tcg_ksigs = tcg_ksigs gbl_env' `unionNameSet` kindless }
-       ; return (gbl_env'', inst_info, deriv_info,
-                 th_bndrs' `plusNameEnv` th_bndrs) }
+       ; let acc = TcTyClGroupsAccum{ ttcga_inst_info  = toOL inst_info
+                                    , ttcga_deriv_info = toOL deriv_info
+                                    , ttcga_th_bndrs   = th_bndrs' `plusNameEnv` th_bndrs }
+       ; return (gbl_env'', acc) }
 
 -- Gives the kind for every TyCon that has a standalone kind signature
 type KindSigEnv = NameEnv Kind
@@ -1806,13 +2147,13 @@ kcTyClDecl (FamDecl _ (FamilyDecl { fdInfo   = fd_info })) fam_tc
 -- This includes doing kind unification if the type is a newtype.
 -- See Note [Implementation of UnliftedNewtypes] for why we need
 -- the first two arguments.
-kcConArgTys :: ConArgKind                         -- Expected kind of the argument(s)
-            -> [HsScaled GhcRn (LHsType GhcRn)]   -- User-written argument types
+kcConArgTys :: ConArgKind                      -- Expected kind of the argument(s)
+            -> [HsConDeclField GhcRn]          -- User-written argument types
             -> TcM ()
 kcConArgTys exp_kind arg_tys
-  = forM_ arg_tys $ \(HsScaled mult ty) ->
-    do { _ <- tcCheckLHsTypeInContext (getBangType ty) exp_kind
-       ; tcMult mult }
+  = forM_ arg_tys $ \(CDF { cdf_multiplicity, cdf_type }) ->
+    do { _ <- tcCheckLHsTypeInContext cdf_type exp_kind
+       ; maybe (pure ()) (void . tcMult) (multAnnToHsType cdf_multiplicity) }
     -- See Note [Implementation of UnliftedNewtypes], STEP 2
 
 -- Kind-check the types of arguments to a Haskell98 data constructor.
@@ -1820,10 +2161,10 @@ kcConH98Args :: ConArgKind                       -- Expected kind of the argumen
              -> HsConDeclH98Details GhcRn
              -> TcM ()
 kcConH98Args exp_kind con_args = case con_args of
-  PrefixCon _ tys   -> kcConArgTys exp_kind tys
+  PrefixCon tys     -> kcConArgTys exp_kind tys
   InfixCon ty1 ty2  -> kcConArgTys exp_kind [ty1, ty2]
   RecCon (L _ flds) -> kcConArgTys exp_kind $
-                       map (hsLinear . cd_fld_type . unLoc) flds
+                       map (cdrf_spec . unLoc) flds
 
 -- Kind-check the types of arguments to a GADT data constructor.
 kcConGADTArgs :: ConArgKind                       -- Expected kind of the argument(s)
@@ -1832,7 +2173,7 @@ kcConGADTArgs :: ConArgKind                       -- Expected kind of the argume
 kcConGADTArgs exp_kind con_args = case con_args of
   PrefixConGADT _ tys     -> kcConArgTys exp_kind tys
   RecConGADT _ (L _ flds) -> kcConArgTys exp_kind $
-                             map (hsLinear . cd_fld_type . unLoc) flds
+                             map (cdrf_spec . unLoc) flds
 
 kcConDecls :: TcKind  -- Result kind of tycon
                       -- Used only in H98 case
@@ -3378,7 +3719,7 @@ without treating the explicitly-quantified ones specially. Wrinkles:
     no role.
 
 See also Note [Re-quantify type variables in rules] in
-GHC.Tc.Gen.Rule, which explains a /very/ similar design when
+GHC.Tc.Gen.Sig, which explains a /very/ similar design when
 generalising over the type of a rewrite rule.
 
 -}
@@ -3684,7 +4025,7 @@ tcConDecl new_or_data dd_info rep_tycon tc_bndrs res_kind tag_map
               do { ctxt <- tcHsContext hs_ctxt
                  ; let exp_kind = getArgExpKind new_or_data res_kind
                  ; btys <- tcConH98Args exp_kind hs_args
-                 ; field_lbls <- lookupConstructorFields name
+                 ; field_lbls <- lookupConstructorFields $ noUserRdr name
                  ; let (arg_tys, stricts) = unzip btys
                  ; return (ctxt, arg_tys, field_lbls, stricts)
                  }
@@ -3791,7 +4132,7 @@ tcConDecl new_or_data dd_info rep_tycon tc_bndrs _res_kind tag_map
                  ; btys <- tcConGADTArgs exp_kind hs_args
 
                  ; let (arg_tys, stricts) = unzip btys
-                 ; field_lbls <- lookupConstructorFields name
+                 ; field_lbls <- lookupConstructorFields $ noUserRdr name
                  ; return (ctxt, arg_tys, res_ty, field_lbls, stricts)
                  }
 
@@ -3959,7 +4300,7 @@ tcConIsInfixGADT con details
            RecConGADT{} -> return False
            PrefixConGADT _ arg_tys       -- See Note [Infix GADT constructors]
                | isSymOcc (getOccName con)
-               , [_ty1,_ty2] <- map hsScaledThing arg_tys
+               , [_ty1,_ty2] <- arg_tys
                   -> do { fix_env <- getFixityEnv
                         ; return (con `elemNameEnv` fix_env) }
                | otherwise -> return False
@@ -3969,14 +4310,14 @@ tcConH98Args :: ConArgKind   -- expected kind of arguments
                              -- might have a specific kind
              -> HsConDeclH98Details GhcRn
              -> TcM [(Scaled TcType, HsSrcBang)]
-tcConH98Args exp_kind (PrefixCon _ btys)
-  = mapM (tcConArg exp_kind) btys
+tcConH98Args exp_kind (PrefixCon btys)
+  = mapM (tcConArg exp_kind IsNotPrefixConGADT) btys
 tcConH98Args exp_kind (InfixCon bty1 bty2)
-  = do { bty1' <- tcConArg exp_kind bty1
-       ; bty2' <- tcConArg exp_kind bty2
+  = do { bty1' <- tcConArg exp_kind IsNotPrefixConGADT bty1
+       ; bty2' <- tcConArg exp_kind IsNotPrefixConGADT bty2
        ; return [bty1', bty2'] }
 tcConH98Args exp_kind (RecCon fields)
-  = tcRecConDeclFields exp_kind fields
+  = tcRecHsConDeclRecFields exp_kind fields
 
 tcConGADTArgs :: ConArgKind   -- expected kind of arguments
                               -- always OpenKind for datatypes, but unlifted newtypes
@@ -3984,39 +4325,51 @@ tcConGADTArgs :: ConArgKind   -- expected kind of arguments
               -> HsConDeclGADTDetails GhcRn
               -> TcM [(Scaled TcType, HsSrcBang)]
 tcConGADTArgs exp_kind (PrefixConGADT _ btys)
-  = mapM (tcConArg exp_kind) btys
+  = mapM (tcConArg exp_kind IsPrefixConGADT) btys
 tcConGADTArgs exp_kind (RecConGADT _ fields)
-  = tcRecConDeclFields exp_kind fields
+  = tcRecHsConDeclRecFields exp_kind fields
 
 tcConArg :: ConArgKind   -- expected kind for args; always OpenKind for datatypes,
                          -- but might be an unlifted type with UnliftedNewtypes
-         -> HsScaled GhcRn (LHsType GhcRn) -> TcM (Scaled TcType, HsSrcBang)
-tcConArg exp_kind (HsScaled w bty)
+         -> IsPrefixConGADT
+         -> HsConDeclField GhcRn -> TcM (Scaled TcType, HsSrcBang)
+tcConArg exp_kind isPrefixConGADT (CDF (_, src) unp str w bty _)
   = do  { traceTc "tcConArg 1" (ppr bty)
-        ; arg_ty <- tcCheckLHsTypeInContext (getBangType bty) exp_kind
-        ; w' <- tcDataConMult w
+        ; arg_ty <- tcCheckLHsTypeInContext bty exp_kind
+        ; w' <- tcDataConMult isPrefixConGADT w
         ; traceTc "tcConArg 2" (ppr bty)
-        ; return (Scaled w' arg_ty, getBangStrictness bty) }
+        ; return (Scaled w' arg_ty, HsSrcBang src unp str) }
 
-tcRecConDeclFields :: ConArgKind
-                   -> LocatedL [LConDeclField GhcRn]
+tcRecHsConDeclRecFields :: ConArgKind
+                   -> LocatedL [LHsConDeclRecField GhcRn]
                    -> TcM [(Scaled TcType, HsSrcBang)]
-tcRecConDeclFields exp_kind fields
-  = mapM (tcConArg exp_kind) btys
+tcRecHsConDeclRecFields exp_kind fields
+  = mapM (tcConArg exp_kind IsNotPrefixConGADT) btys
   where
     -- We need a one-to-one mapping from field_names to btys
-    combined = map (\(L _ f) -> (cd_fld_names f,hsLinear (cd_fld_type f)))
+    combined = map (\(L _ f) -> (cdrf_names f, cdrf_spec f))
                    (unLoc fields)
     explode (ns,ty) = zip ns (repeat ty)
     exploded = concatMap explode combined
     (_,btys) = unzip exploded
 
-tcDataConMult :: HsArrow GhcRn -> TcM Mult
-tcDataConMult arr@(HsUnrestrictedArrow _) = do
-  -- See Note [Function arrows in GADT constructors]
-  linearEnabled <- xoptM LangExt.LinearTypes
-  if linearEnabled then tcMult arr else return oneDataConTy
-tcDataConMult arr = tcMult arr
+data IsPrefixConGADT = IsPrefixConGADT | IsNotPrefixConGADT deriving (Eq)
+
+-- See Note [Function arrows in GADT constructors]
+unannotatedMultIsLinear :: IsPrefixConGADT -> TcRnIf gbl lcl Bool
+unannotatedMultIsLinear isPrefixConGADT = do
+  if isPrefixConGADT == IsPrefixConGADT then do
+    linearEnabled <- xoptM LangExt.LinearTypes
+    return $ not linearEnabled
+  else
+    return True
+
+tcDataConMult :: IsPrefixConGADT -> HsMultAnn GhcRn -> TcM Mult
+tcDataConMult isPrefixConGADT arr = case multAnnToHsType arr of
+  Nothing -> do
+    isLinear <- unannotatedMultIsLinear isPrefixConGADT
+    return $ if isLinear then oneDataConTy else manyDataConTy
+  Just ty -> tcMult ty
 
 {-
 Note [Function arrows in GADT constructors]
@@ -4674,7 +5027,7 @@ checkFieldCompat fld con1 con2 res1 res2 fty1 fty2
         ; checkTc (isJust mb_subst2) (TcRnCommonFieldTypeMismatch con1 con2 fld) }
   where
     mb_subst1 = tcMatchTy res1 res2
-    mb_subst2 = tcMatchTyX (expectJust "checkFieldCompat" mb_subst1) fty1 fty2
+    mb_subst2 = tcMatchTyX (expectJust mb_subst1) fty1 fty2
 
 -------------------------------
 checkValidDataCon :: DynFlags -> Bool -> TyCon -> DataCon -> TcM ()
@@ -4762,32 +5115,32 @@ checkValidDataCon dflags existential_ok tc con
         ; hsc_env <- getTopEnv
         ; let check_bang :: Type -> HsSrcBang -> HsImplBang -> Int -> TcM ()
               check_bang orig_arg_ty bang rep_bang n
-               | HsSrcBang _ (HsBang _ SrcLazy) <- bang
+               | HsSrcBang _  _ SrcLazy <- bang
                , not (bang_opt_strict_data bang_opts)
                = addErrTc (bad_bang n LazyFieldsDisabled)
 
                -- Warn about UNPACK without "!"
                -- e.g.   data T = MkT {-# UNPACK #-} Int
-               | HsSrcBang _ (HsBang want_unpack strict_mark) <- bang
+               | HsSrcBang _ want_unpack strict_mark <- bang
                , isSrcUnpacked want_unpack, not (is_strict strict_mark)
                , not (isUnliftedType orig_arg_ty)
                = addDiagnosticTc (bad_bang n UnpackWithoutStrictness)
 
                -- Warn about a redundant ! on an unlifted type
                -- e.g.   data T = MkT !Int#
-               | HsSrcBang _ (HsBang _ SrcStrict) <- bang
+               | HsSrcBang _ _ SrcStrict <- bang
                , isUnliftedType orig_arg_ty
                = addDiagnosticTc $ TcRnBangOnUnliftedType orig_arg_ty
 
                -- Warn about a ~ on an unlifted type (#21951)
                -- e.g.   data T = MkT ~Int#
-               | HsSrcBang _ (HsBang _ SrcLazy) <- bang
+               | HsSrcBang _ _ SrcLazy <- bang
                , isUnliftedType orig_arg_ty
                = addDiagnosticTc $ TcRnLazyBangOnUnliftedType orig_arg_ty
 
                -- Warn about unusable UNPACK pragmas
                -- e.g.   data T a = MkT {-# UNPACK #-} !a      -- Can't unpack
-               | HsSrcBang _ (HsBang want_unpack _) <- bang
+               | HsSrcBang _ want_unpack _ <- bang
 
                -- See Note [Detecting useless UNPACK pragmas] in GHC.Core.DataCon.
                , isSrcUnpacked want_unpack  -- this means the user wrote {-# UNPACK #-}
@@ -4800,7 +5153,7 @@ checkValidDataCon dflags existential_ok tc con
                -- warn in this case (it gives users the wrong idea about whether
                -- or not UNPACK on abstract types is supported; it is!)
                , isHomeUnitDefinite (hsc_home_unit hsc_env)
-               = addDiagnosticTc (bad_bang n BackpackUnpackAbstractType)
+               = addDiagnosticTc (bad_bang n UnusableUnpackPragma)
 
                | otherwise
                = return ()
@@ -4819,6 +5172,8 @@ checkValidDataCon dflags existential_ok tc con
         ; traceTc "Done validity of data con" $
           vcat [ ppr con
                , text "Datacon wrapper type:" <+> ppr (dataConWrapperType con)
+               , text "Datacon src bangs:" <+> ppr (dataConSrcBangs con)
+               , text "Datacon impl bangs:" <+> ppr (dataConImplBangs con)
                , text "Datacon rep type:" <+> ppr (dataConRepType con)
                , text "Datacon display type:" <+> ppr data_con_display_type
                , text "Rep typcon binders:" <+> ppr (tyConBinders (dataConTyCon con))
@@ -4884,9 +5239,9 @@ checkNewDataCon con
     (_univ_tvs, ex_tvs, eq_spec, theta, arg_tys, _res_ty)
       = dataConFullSig con
 
-    ok_bang (HsSrcBang _ (HsBang _ SrcStrict)) = False
-    ok_bang (HsSrcBang _ (HsBang _ SrcLazy))   = False
-    ok_bang _                                  = True
+    ok_bang (HsSrcBang _ _ SrcStrict) = False
+    ok_bang (HsSrcBang _ _ SrcLazy)   = False
+    ok_bang _                         = True
 
     ok_mult OneTy = True
     ok_mult _     = False
@@ -5072,9 +5427,10 @@ checkValidClass cls
           --
           --    foo2         :: a -> Int
           --    default foo2 :: a -> b
-          unless (isJust $ tcMatchTys [dm_phi_ty, vanilla_phi_ty]
-                                      [vanilla_phi_ty, dm_phi_ty]) $ addErrTc $
-               TcRnDefaultSigMismatch sel_id dm_ty
+          unless (isJust (tcMatchTy dm_phi_ty vanilla_phi_ty) &&
+                  isJust (tcMatchTy vanilla_phi_ty dm_phi_ty)) $
+            addErrTc $
+            TcRnDefaultSigMismatch sel_id dm_ty
 
           -- Now do an ambiguity check on the default type signature.
           checkValidType ctxt (mkDefaultMethodType cls sel_id dm_spec)

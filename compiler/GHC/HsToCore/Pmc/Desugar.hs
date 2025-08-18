@@ -48,7 +48,6 @@ import GHC.Types.SourceText (FractionalLit(..))
 import Control.Monad (zipWithM, replicateM)
 import Data.List (elemIndex)
 import Data.List.NonEmpty ( NonEmpty(..) )
-import qualified Data.List.NonEmpty as NE
 
 -- import GHC.Driver.Ppr
 
@@ -220,13 +219,13 @@ desugarPat x pat = case pat of
           Just l -> l
           Nothing -> pprPanic "failed to detect OverLit" (ppr olit)
     let lit' = case mb_neg of
-          Just _  -> expectJust "failed to negate lit" (negatePmLit lit)
+          Just _  -> expectJust (negatePmLit lit)
           Nothing -> lit
     mkPmLitGrds x lit'
 
   LitPat _ lit -> do
     core_expr <- dsLit lit
-    let lit = expectJust "failed to detect Lit" (coreExprAsPmLit core_expr)
+    let lit = expectJust (coreExprAsPmLit core_expr)
     mkPmLitGrds x lit
 
   TuplePat _tys pats boxity -> do
@@ -271,7 +270,7 @@ desugarListPat x pats = do
 desugarConPatOut :: Id -> ConLike -> [Type] -> [TyVar]
                  -> [EvVar] -> HsConPatDetails GhcTc -> DsM GrdDag
 desugarConPatOut x con univ_tys ex_tvs dicts = \case
-    PrefixCon _ ps                          -> go_field_pats (zip [0..] ps)
+    PrefixCon ps                            -> go_field_pats (zip [0..] ps)
     InfixCon  p1 p2                         -> go_field_pats (zip [0..] [p1,p2])
     RecCon    (HsRecFields NoExtField fs _) -> go_field_pats (rec_field_ps fs)
   where
@@ -286,7 +285,7 @@ desugarConPatOut x con univ_tys ex_tvs dicts = \case
         -- Unfortunately the label info is empty when the DataCon wasn't defined
         -- with record field labels, hence we desugar to field index.
         orig_lbls        = map flSelector $ conLikeFieldLabels con
-        lbl_to_index lbl = expectJust "lbl_to_index" $ elemIndex lbl orig_lbls
+        lbl_to_index lbl = expectJust $ elemIndex lbl orig_lbls
 
     go_field_pats tagged_pats = do
       -- The fields that appear might not be in the correct order. So
@@ -344,10 +343,7 @@ desugarMatch vars (L match_loc (Match { m_pats = L _ pats, m_grhss = grhss })) =
 desugarGRHSs :: SrcSpan -> SDoc -> GRHSs GhcTc (LHsExpr GhcTc) -> DsM (PmGRHSs Pre)
 desugarGRHSs match_loc pp_pats grhss = do
   lcls <- desugarLocalBinds (grhssLocalBinds grhss)
-  grhss' <- traverse (desugarLGRHS match_loc pp_pats)
-              . expectJust "desugarGRHSs"
-              . NE.nonEmpty
-              $ grhssGRHSs grhss
+  grhss' <- traverse (desugarLGRHS match_loc pp_pats) (grhssGRHSs grhss)
   return PmGRHSs { pgs_lcls = lcls, pgs_grhss = grhss' }
 
 -- | Desugar a guarded right-hand side to a single 'GrdTree'
@@ -392,7 +388,7 @@ desugarLocalBinds (HsValBinds _ (XValBindsLR (NValBinds binds _))) =
       -- See Note [Long-distance information for HsLocalBinds] for why this
       -- pattern match is so very specific.
       | L _ [L _ Match{m_pats = L _ [], m_grhss = grhss}] <- mg_alts mg
-      , GRHSs{grhssGRHSs = [L _ (GRHS _ _grds rhs)]} <- grhss = do
+      , GRHSs{grhssGRHSs = L _ (GRHS _ _grds rhs) :| []} <- grhss = do
           core_rhs <- dsLExpr rhs
           return (GdOne (PmLet x core_rhs))
     go (L _ (XHsBindsLR (AbsBinds

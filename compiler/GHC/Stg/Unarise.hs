@@ -928,7 +928,7 @@ mkUbxSum dc ty_args args0 us
       layout'  = layoutUbxSum sum_slots field_slots
 
       tag_arg  = StgLitArg (LitNumber LitNumInt (fromIntegral tag))
-      arg_idxs = IM.fromList (zipEqual "mkUbxSum" layout' args0)
+      arg_idxs = IM.fromList (zipEqual layout' args0)
 
       ((_idx,_idx_map,_us,wrapper),slot_args)
         = assert (length arg_idxs <= length sum_slots ) $

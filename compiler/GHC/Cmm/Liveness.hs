@@ -57,7 +57,7 @@ cmmLocalLiveness platform graph =
   where
     entry = g_entry graph
     check facts =
-        noLiveOnEntry entry (expectJust "check" $ mapLookup entry facts) facts
+        noLiveOnEntry entry (expectJust $ mapLookup entry facts) facts
 
 cmmGlobalLiveness :: Platform -> CmmGraph -> BlockEntryLiveness GlobalRegUse
 cmmGlobalLiveness platform graph =
@@ -120,7 +120,7 @@ cmmLocalLivenessL platform graph =
   where
     entry = g_entry graph
     check facts =
-        noLiveOnEntryL entry (expectJust "check" $ mapLookup entry facts) facts
+        noLiveOnEntryL entry (expectJust $ mapLookup entry facts) facts
 
 -- | On entry to the procedure, there had better not be any LocalReg's live-in.
 noLiveOnEntryL :: BlockId -> LRegSet -> a -> a
@@ -154,5 +154,4 @@ xferLiveL platform (BlockCC eNode middle xNode) fBase =
     let joined = gen_killL platform xNode $! joinOutFacts liveLatticeL xNode fBase
         !result = foldNodesBwdOO (gen_killL platform) middle joined
     in mapSingleton (entryLabel eNode) result
-
 

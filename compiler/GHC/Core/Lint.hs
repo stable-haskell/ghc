@@ -101,7 +101,7 @@ import GHC.Data.Unboxed
 
 import Control.Monad
 import Data.Foldable      ( for_, toList )
-import Data.List.NonEmpty ( NonEmpty(..), groupWith )
+import Data.List.NonEmpty ( NonEmpty(..), groupWith, nonEmpty )
 import Data.Maybe
 import Data.IntMap.Strict ( IntMap )
 import qualified Data.IntMap.Strict as IntMap ( lookup, keys, empty, fromList )
@@ -951,7 +951,7 @@ lintCoreExpr e@(Let (Rec pairs) body)
         ; ((body_type, body_ue), ues) <-
             lintRecBindings NotTopLevel pairs $ \ bndrs' ->
             lintLetBody (BodyOfLetRec bndrs') bndrs' body
-        ; return (body_type, body_ue  `addUE` scaleUE ManyTy (foldr1 addUE ues)) }
+        ; return (body_type, body_ue  `addUE` scaleUE ManyTy (foldr1WithDefault zeroUE addUE ues)) }
   where
     bndrs = map fst pairs
 
@@ -1243,9 +1243,9 @@ checkRepPolyBuiltinApp fun_id args = checkL (null not_concs) err_msg
 
     max_pos :: Int
     max_pos =
-      case IntMap.keys conc_binder_positions of
-        [] -> 0
-        positions -> maximum positions
+      case nonEmpty $ IntMap.keys conc_binder_positions of
+        Nothing -> 0
+        Just positions -> maximum positions
 
     not_concs :: [(SDoc, ConcreteTvOrigin)]
     not_concs =
@@ -1745,7 +1745,7 @@ lintCoreAlt case_bndr scrut_ty _scrut_mult alt_ty alt@(Alt (DataAlt con) args rh
       { rhs_ue <- lintAltExpr rhs alt_ty
       ; rhs_ue' <- addLoc (CasePat alt) $
                    lintAltBinders rhs_ue case_bndr scrut_ty con_payload_ty
-                                  (zipEqual "lintCoreAlt" multiplicities  args')
+                                  (zipEqual multiplicities  args')
       ; return $ deleteUE rhs_ue' case_bndr
       }
    }
@@ -2756,7 +2756,7 @@ lintBranch this_co fam_tc branch arg_kinds
        ; _ <- foldlM check_ki (empty_subst, empty_subst)
                               (zip (ktvs ++ cvs) arg_kinds)
 
-       ; case check_no_conflict flattened_target incomps of
+       ; case check_no_conflict target incomps of
             Nothing -> return ()
             Just bad_branch -> failWithL $ bad_ax this_co $
                                text "inconsistent with" <+>
@@ -2782,15 +2782,12 @@ lintBranch this_co fam_tc branch arg_kinds
     subst        = zipTvSubst tvs tys `composeTCvSubst`
                    zipCvSubst cvs co_args
     target   = Type.substTys subst (coAxBranchLHS branch)
-    in_scope = mkInScopeSet $
-               unionVarSets (map (tyCoVarsOfTypes . coAxBranchLHS) incomps)
-    flattened_target = flattenTys in_scope target
 
     check_no_conflict :: [Type] -> [CoAxBranch] -> Maybe CoAxBranch
     check_no_conflict _    [] = Nothing
     check_no_conflict flat (b@CoAxBranch { cab_lhs = lhs_incomp } : rest)
          -- See Note [Apartness] in GHC.Core.FamInstEnv
-      | SurelyApart <- tcUnifyTysFG alwaysBindFun flat lhs_incomp
+      | SurelyApart <- tcUnifyTysFG alwaysBindFam alwaysBindTv flat lhs_incomp
       = check_no_conflict flat rest
       | otherwise
       = Just b

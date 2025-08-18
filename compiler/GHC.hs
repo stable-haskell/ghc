@@ -100,33 +100,37 @@ module GHC (
         findGlobalAnns,
         mkNamePprCtxForModule,
         ModIface,
-        ModIface_(
-          mi_module,
-          mi_sig_of,
-          mi_hsc_src,
-          mi_src_hash,
-          mi_hi_bytes,
-          mi_deps,
-          mi_usages,
-          mi_exports,
-          mi_used_th,
-          mi_fixities,
-          mi_warns,
-          mi_anns,
-          mi_insts,
-          mi_fam_insts,
-          mi_rules,
-          mi_decls,
-          mi_extra_decls,
-          mi_top_env,
-          mi_hpc,
-          mi_trust,
-          mi_trust_pkg,
-          mi_complete_matches,
-          mi_docs,
-          mi_final_exts,
-          mi_ext_fields
-        ),
+        ModIface_( mi_mod_info
+                 , mi_module
+                 , mi_sig_of
+                 , mi_hsc_src
+                 , mi_iface_hash
+                 , mi_deps
+                 , mi_public
+                 , mi_exports
+                 , mi_fixities
+                 , mi_warns
+                 , mi_anns
+                 , mi_decls
+                 , mi_defaults
+                 , mi_simplified_core
+                 , mi_top_env
+                 , mi_insts
+                 , mi_fam_insts
+                 , mi_rules
+                 , mi_trust
+                 , mi_trust_pkg
+                 , mi_complete_matches
+                 , mi_docs
+                 , mi_abi_hashes
+                 , mi_ext_fields
+                 , mi_hi_bytes
+                 , mi_self_recomp_info
+                 , mi_fix_fn
+                 , mi_decl_warn_fn
+                 , mi_export_warn_fn
+                 , mi_hash_fn
+                 ),
         pattern ModIface,
         SafeHaskellMode(..),
 
@@ -420,7 +424,6 @@ import GHC.Types.Name.Ppr
 import GHC.Types.TypeEnv
 import GHC.Types.Breakpoint
 import GHC.Types.PkgQual
-import GHC.Types.Unique.FM
 
 import GHC.Unit
 import GHC.Unit.Env as UnitEnv
@@ -705,9 +708,9 @@ setTopSessionDynFlags :: GhcMonad m => DynFlags -> m ()
 setTopSessionDynFlags dflags = do
   hsc_env <- getSession
   logger  <- getLogger
-  lookup_cache  <- liftIO $ newMVar emptyUFM
+  lookup_cache  <- liftIO $ mkInterpSymbolCache
 
-  -- Interpreter
+  -- see Note [Target code interpreter]
   interp <- if
     -- Wasm dynamic linker
     | ArchWasm32 <- platformArch $ targetPlatform dflags
@@ -718,11 +721,7 @@ setTopSessionDynFlags dflags = do
 #if defined(wasm32_HOST_ARCH)
         let libdir = sorry "cannot spawn child process on wasm"
 #else
-        libdir <- liftIO $ do
-          libdirs <- Loader.getGccSearchDirectory logger dflags "libraries"
-          case libdirs of
-            [_, libdir] -> pure libdir
-            _ -> panic "corrupted wasi-sdk installation"
+        libdir <- liftIO $ last <$> Loader.getGccSearchDirectory logger dflags "libraries"
 #endif
         let profiled = ways dflags `hasWay` WayProf
             way_tag = if profiled then "_p" else ""
@@ -731,6 +730,13 @@ setTopSessionDynFlags dflags = do
                 { wasmInterpDyLD = dyld,
                   wasmInterpLibDir = libdir,
                   wasmInterpOpts = getOpts dflags opt_i,
+                  wasmInterpBrowser = gopt Opt_GhciBrowser dflags,
+                  wasmInterpBrowserHost = ghciBrowserHost dflags,
+                  wasmInterpBrowserPort = ghciBrowserPort dflags,
+                  wasmInterpBrowserRedirectWasiConsole = gopt Opt_GhciBrowserRedirectWasiConsole dflags,
+                  wasmInterpBrowserPuppeteerLaunchOpts = ghciBrowserPuppeteerLaunchOpts dflags,
+                  wasmInterpBrowserPlaywrightBrowserType = ghciBrowserPlaywrightBrowserType dflags,
+                  wasmInterpBrowserPlaywrightLaunchOpts = ghciBrowserPlaywrightLaunchOpts dflags,
                   wasmInterpTargetPlatform = targetPlatform dflags,
                   wasmInterpProfiled = profiled,
                   wasmInterpHsSoSuffix = way_tag ++ dynLibSuffix (ghcNameVersion dflags),
@@ -925,7 +931,7 @@ parseDynamicFlags
     -> [Located String]
     -> m (DynFlags, [Located String], Messages DriverMessage)
 parseDynamicFlags logger dflags cmdline = do
-  (dflags1, leftovers, warns) <- parseDynamicFlagsCmdLine dflags cmdline
+  (dflags1, leftovers, warns) <- parseDynamicFlagsCmdLine logger dflags cmdline
   -- flags that have just been read are used by the logger when loading package
   -- env (this is checked by T16318)
   let logger1 = setLogFlags logger (initLogFlags dflags1)
@@ -1022,11 +1028,13 @@ normalise_hyp fp
 checkNewDynFlags :: MonadIO m => Logger -> DynFlags -> m DynFlags
 checkNewDynFlags logger dflags = do
   -- See Note [DynFlags consistency]
-  let (dflags', warnings) = makeDynFlagsConsistent dflags
+  let (dflags', warnings, infoverb) = makeDynFlagsConsistent dflags
   let diag_opts = initDiagOpts dflags
       print_config = initPrintConfig dflags
   liftIO $ printOrThrowDiagnostics logger print_config diag_opts
     $ fmap GhcDriverMessage $ warnsToMessages diag_opts warnings
+  when (logVerbAtLeast logger 3) $
+    mapM_ (\(L _loc m) -> liftIO $ logInfo logger m) infoverb
   return dflags'
 
 checkNewInteractiveDynFlags :: MonadIO m => Logger -> DynFlags -> m DynFlags
@@ -1299,7 +1307,7 @@ typecheckModule pmod = do
            minf_instances = fixSafeInstances safe $ instEnvElts $ md_insts details,
            minf_iface     = Nothing,
            minf_safe      = safe,
-           minf_modBreaks = emptyModBreaks
+           minf_modBreaks = Nothing
          }}
 
 -- | Desugar a typechecked module.
@@ -1453,7 +1461,7 @@ data ModuleInfo = ModuleInfo {
         minf_instances :: [ClsInst],
         minf_iface     :: Maybe ModIface,
         minf_safe      :: SafeHaskellMode,
-        minf_modBreaks :: ModBreaks
+        minf_modBreaks :: Maybe ModBreaks
   }
         -- We don't want HomeModInfo here, because a ModuleInfo applies
         -- to package modules too.
@@ -1482,7 +1490,7 @@ getPackageModuleInfo hsc_env mdl
                         minf_instances = error "getModuleInfo: instances for package module unimplemented",
                         minf_iface     = Just iface,
                         minf_safe      = getSafeMode $ mi_trust iface,
-                        minf_modBreaks = emptyModBreaks
+                        minf_modBreaks = Nothing
                 }))
 
 availsToGlobalRdrEnv :: HasDebugCallStack => HscEnv -> Module -> [AvailInfo] -> IfGlobalRdrEnv
@@ -1496,7 +1504,8 @@ availsToGlobalRdrEnv hsc_env mod avails
     imp_spec = ImpSpec { is_decl = decl, is_item = ImpAll}
     decl = ImpDeclSpec { is_mod = mod, is_as = moduleName mod,
                          is_qual = False, is_isboot = NotBoot, is_pkg_qual = NoPkgQual,
-                         is_dloc = srcLocSpan interactiveSrcLoc }
+                         is_dloc = srcLocSpan interactiveSrcLoc,
+                         is_level = NormalLevel }
 
 getHomeModuleInfo :: HscEnv -> Module -> IO (Maybe ModuleInfo)
 getHomeModuleInfo hsc_env mdl =
@@ -1558,7 +1567,7 @@ modInfoIface = minf_iface
 modInfoSafe :: ModuleInfo -> SafeHaskellMode
 modInfoSafe = minf_safe
 
-modInfoModBreaks :: ModuleInfo -> ModBreaks
+modInfoModBreaks :: ModuleInfo -> Maybe ModBreaks
 modInfoModBreaks = minf_modBreaks
 
 isDictonaryId :: Id -> Bool
@@ -1774,7 +1783,7 @@ modNotLoadedError :: DynFlags -> Module -> ModLocation -> IO a
 modNotLoadedError dflags m loc = throwGhcExceptionIO $ CmdLineError $ showSDoc dflags $
    text "module is not loaded:" <+>
    quotes (ppr (moduleName m)) <+>
-   parens (text (expectJust "modNotLoadedError" (ml_hs_file loc)))
+   parens (text (expectJust (ml_hs_file loc)))
 
 renamePkgQualM :: GhcMonad m => ModuleName -> Maybe FastString -> m PkgQual
 renamePkgQualM mn p = withSession $ \hsc_env -> pure (renamePkgQual (hsc_unit_env hsc_env) mn p)
@@ -1853,7 +1862,11 @@ obtainTermFromVal :: GhcMonad m => Int ->  Bool -> Type -> a -> m Term
 obtainTermFromVal bound force ty a = withSession $ \hsc_env ->
     liftIO $ GHC.Runtime.Eval.obtainTermFromVal hsc_env bound force ty a
 
-obtainTermFromId :: GhcMonad m => Int -> Bool -> Id -> m Term
+obtainTermFromId :: GhcMonad m
+                 => Int -- ^ How many times to recurse for subterms
+                 -> Bool -- ^ Whether to force the expression
+                 -> Id
+                 -> m Term
 obtainTermFromId bound force id = withSession $ \hsc_env ->
     liftIO $ GHC.Runtime.Eval.obtainTermFromId hsc_env bound force id
 

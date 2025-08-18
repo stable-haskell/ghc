@@ -55,6 +55,7 @@ import GHC.Core.FamInstEnv
 import GHC.Core ( isOrphan ) -- For the Coercion constructor
 import GHC.Core.Type
 import GHC.Core.TyCo.Ppr ( debugPprType )
+import GHC.Core.TyCo.Tidy ( tidyType )
 import GHC.Core.Class( Class )
 import GHC.Core.Coercion.Axiom
 
@@ -81,6 +82,7 @@ import GHC.Types.Var.Env
 import GHC.Types.Id
 import GHC.Types.Name
 import GHC.Types.Name.Env
+import GHC.Types.Name.Reader (WithUserRdr(..))
 import GHC.Types.Var
 import qualified GHC.LanguageExtensions as LangExt
 
@@ -131,7 +133,7 @@ newMethodFromName origin name ty_args
        ; wrap <- assert (not (isForAllTy ty) && isSingleton theta) $
                  instCall origin ty_args theta
 
-       ; return (mkHsWrap wrap (HsVar noExtField (noLocA id))) }
+       ; return (mkHsWrap wrap (mkHsVar (noLocA id))) }
 
 {-
 ************************************************************************
@@ -579,7 +581,7 @@ tcSkolDFunType dfun_ty
              ; (subst, inst_tvs) <- tcInstSuperSkolTyVars skol_info tvs
                      -- We instantiate the dfun_tyd with superSkolems.
                      -- See Note [Subtle interaction of recursion and overlap]
-                     -- and Note [Binding when looking up instances]
+                     -- and Note [Super skolems: binding when looking up instances]
              ; let inst_tys = substTys subst tys
                    skol_info_anon = mkClsInstSkol cls inst_tys }
 
@@ -590,7 +592,7 @@ tcSuperSkolTyVars :: TcLevel -> SkolemInfo -> [TyVar] -> (Subst, [TcTyVar])
 -- Make skolem constants, but do *not* give them new names, as above
 -- As always, allocate them one level in
 -- Moreover, make them "super skolems"; see GHC.Core.InstEnv
---    Note [Binding when looking up instances]
+--    Note [Super skolems: binding when looking up instances]
 -- See Note [Kind substitution when instantiating]
 -- Precondition: tyvars should be ordered by scoping
 tcSuperSkolTyVars tc_lvl skol_info = mapAccumL do_one emptySubst
@@ -863,7 +865,7 @@ tcSyntaxName :: CtOrigin
 -- USED ONLY FOR CmdTop (sigh) ***
 -- See Note [CmdSyntaxTable] in "GHC.Hs.Expr"
 
-tcSyntaxName orig ty (std_nm, HsVar _ (L _ user_nm))
+tcSyntaxName orig ty (std_nm, HsVar _ (L _ (WithUserRdr _ user_nm)))
   | std_nm == user_nm
   = do rhs <- newMethodFromName orig std_nm [ty]
        return (std_nm, rhs)

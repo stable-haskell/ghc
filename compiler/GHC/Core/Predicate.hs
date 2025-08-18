@@ -14,7 +14,7 @@ module GHC.Core.Predicate (
   EqRel(..), eqRelRole,
   isEqPred, isReprEqPred, isEqClassPred, isCoVarType,
   getEqPredTys, getEqPredTys_maybe, getEqPredRole,
-  predTypeEqRel,
+  predTypeEqRel, pprPredType,
   mkNomEqPred, mkReprEqPred, mkEqPred, mkEqPredRole,
 
   -- Class predicates
@@ -26,11 +26,19 @@ module GHC.Core.Predicate (
   -- Implicit parameters
   isIPLikePred, mentionsIP, isIPTyCon, isIPClass,
   isCallStackTy, isCallStackPred, isCallStackPredTy,
-  isExceptionContextPred,
+  isExceptionContextPred, isExceptionContextTy,
   isIPPred_maybe,
 
   -- Evidence variables
-  DictId, isEvVar, isDictId
+  DictId, isEvVar, isDictId,
+
+  -- * Well-scoped free variables
+  scopedSort, tyCoVarsOfTypeWellScoped,
+  tyCoVarsOfTypesWellScoped,
+
+  -- Equality left-hand sides
+  CanEqLHS(..), canEqLHS_maybe, canTyFamEqLHS_maybe,
+  canEqLHSKind, canEqLHSType, eqCanEqLHS
 
   ) where
 
@@ -38,10 +46,13 @@ import GHC.Prelude
 
 import GHC.Core.Type
 import GHC.Core.Class
-import GHC.Core.TyCo.Compare( eqType )
+import GHC.Core.TyCo.Compare( tcEqTyConApps )
+import GHC.Core.TyCo.FVs( tyCoVarsOfTypeList, tyCoVarsOfTypesList )
 import GHC.Core.TyCon
 import GHC.Core.TyCon.RecWalk
+import GHC.Types.Name( getOccName )
 import GHC.Types.Var
+import GHC.Types.Var.Set
 import GHC.Core.Multiplicity ( scaledThing )
 
 import GHC.Builtin.Names
@@ -51,6 +62,13 @@ import GHC.Utils.Outputable
 import GHC.Utils.Misc
 import GHC.Utils.Panic
 import GHC.Data.FastString
+
+
+{- *********************************************************************
+*                                                                      *
+*                   Pred and PredType                                  *
+*                                                                      *
+********************************************************************* -}
 
 -- | A predicate in the solver. The solver tries to prove Wanted predicates
 -- from Given ones.
@@ -229,9 +247,22 @@ predTypeEqRel ty
   | isReprEqPred ty = ReprEq
   | otherwise       = NomEq
 
-{-------------------------------------------
-Predicates on PredType
---------------------------------------------}
+pprPredType :: PredType -> SDoc
+-- Special case for (t1 ~# t2) and (t1 ~R# t2)
+pprPredType pred
+  = case classifyPredType pred of
+      EqPred eq_rel t1 t2 -> sep [ ppr t1, ppr (getOccName eq_tc) <+> ppr t2 ]
+         where
+           eq_tc = case eq_rel of
+                     NomEq  -> eqPrimTyCon
+                     ReprEq -> eqReprPrimTyCon
+      _ -> ppr pred
+
+{- *********************************************************************
+*                                                                      *
+*                   Predicates on PredType                             *
+*                                                                      *
+********************************************************************* -}
 
 {-
 Note [Evidence for quantified constraints]
@@ -247,6 +278,14 @@ of it.  So we are careful not to generate it in the first place:
 see Note [Equality superclasses in quantified constraints]
 in GHC.Tc.Solver.Dict.
 -}
+
+isPredTy :: HasDebugCallStack => Type -> Bool
+-- Precondition: expects a type that classifies values
+-- See Note [Types for coercions, predicates, and evidence] in GHC.Core.TyCo.Rep
+-- Returns True for types of kind (CONSTRAINT _), False for ones of kind (TYPE _)
+isPredTy ty = case typeTypeOrConstraint ty of
+                  TypeLike       -> False
+                  ConstraintLike -> True
 
 -- | Does this type classify a core (unlifted) Coercion?
 -- At either role nominal or representational
@@ -342,7 +381,7 @@ isExceptionContextPred cls tys
   | otherwise
   = Nothing
 
--- | Is a type a 'CallStack'?
+-- | Is a type an 'ExceptionContext'?
 isExceptionContextTy :: Type -> Bool
 isExceptionContextTy ty
   | Just tc <- tyConAppTyCon_maybe ty
@@ -388,31 +427,38 @@ isCallStackTy ty
 isIPLikePred :: Type -> Bool
 -- Is `pred`, or any of its superclasses, an implicit parameter?
 -- See Note [Local implicit parameters]
-isIPLikePred pred = mentions_ip_pred initIPRecTc Nothing pred
+isIPLikePred pred =
+  mentions_ip_pred initIPRecTc (const True) (const True) pred
 
-mentionsIP :: Type -> Class -> [Type] -> Bool
--- Is (cls tys) an implicit parameter with key `str_ty`, or
--- is any of its superclasses such at thing.
+mentionsIP :: (Type -> Bool) -- ^ predicate on the string
+           -> (Type -> Bool) -- ^ predicate on the type
+           -> Class
+           -> [Type] -> Bool
+-- ^ @'mentionsIP' str_cond ty_cond cls tys@ returns @True@ if:
+--
+--    - @cls tys@ is of the form @IP str ty@, where @str_cond str@ and @ty_cond ty@
+--      are both @True@,
+--    - or any superclass of @cls tys@ has this property.
+--
 -- See Note [Local implicit parameters]
-mentionsIP str_ty cls tys = mentions_ip initIPRecTc (Just str_ty) cls tys
+mentionsIP = mentions_ip initIPRecTc
 
-mentions_ip :: RecTcChecker -> Maybe Type -> Class -> [Type] -> Bool
-mentions_ip rec_clss mb_str_ty cls tys
-  | Just (str_ty', _) <- isIPPred_maybe cls tys
-  = case mb_str_ty of
-       Nothing -> True
-       Just str_ty -> str_ty `eqType` str_ty'
+mentions_ip :: RecTcChecker -> (Type -> Bool) -> (Type -> Bool) -> Class -> [Type] -> Bool
+mentions_ip rec_clss str_cond ty_cond cls tys
+  | Just (str_ty, ty) <- isIPPred_maybe cls tys
+  = str_cond str_ty && ty_cond ty
   | otherwise
-  = or [ mentions_ip_pred rec_clss mb_str_ty (classMethodInstTy sc_sel_id tys)
+  = or [ mentions_ip_pred rec_clss str_cond ty_cond (classMethodInstTy sc_sel_id tys)
        | sc_sel_id <- classSCSelIds cls ]
 
-mentions_ip_pred :: RecTcChecker -> Maybe Type -> Type -> Bool
-mentions_ip_pred  rec_clss mb_str_ty ty
+
+mentions_ip_pred :: RecTcChecker -> (Type -> Bool) -> (Type -> Bool) -> Type -> Bool
+mentions_ip_pred rec_clss str_cond ty_cond ty
   | Just (cls, tys) <- getClassPredTys_maybe ty
   , let tc = classTyCon cls
   , Just rec_clss' <- if isTupleTyCon tc then Just rec_clss
                       else checkRecTc rec_clss tc
-  = mentions_ip rec_clss' mb_str_ty cls tys
+  = mentions_ip rec_clss' str_cond ty_cond cls tys
   | otherwise
   = False -- Includes things like (D []) where D is
           -- a Constraint-ranged family; #7785
@@ -479,7 +525,38 @@ Small worries (Sept 20):
 * The superclass hunt stops when it encounters the same class again,
   but in principle we could have the same class, differently instantiated,
   and the second time it could have an implicit parameter
-I'm going to treat these as problems for another day. They are all exotic.  -}
+I'm going to treat these as problems for another day. They are all exotic.
+
+Note [Using typesAreApart when calling mentionsIP]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+We call 'mentionsIP' in two situations:
+
+  (1) to check that a predicate does not contain any implicit parameters
+      IP str ty, for a fixed literal str and any type ty,
+  (2) to check that a predicate does not contain any HasCallStack or
+      HasExceptionContext constraints.
+
+In both of these cases, we want to be sure, so we should be conservative:
+
+  For (1), the predicate might contain an implicit parameter IP Str a, where
+  Str is a type family such as:
+
+    type family MyStr where MyStr = "abc"
+
+  To safeguard against this (niche) situation, instead of doing a simple
+  type equality check, we use 'typesAreApart'. This allows us to recognise
+  that 'IP MyStr a' contains an implicit parameter of the form 'IP "abc" ty'.
+
+  For (2), we similarly might have
+
+    type family MyCallStack where MyCallStack = CallStack
+
+  Again, here we use 'typesAreApart'. This allows us to see that
+
+    (?foo :: MyCallStack)
+
+  is indeed a CallStack constraint, hidden under a type family.
+-}
 
 {- *********************************************************************
 *                                                                      *
@@ -492,3 +569,170 @@ isEvVar var = isEvVarType (varType var)
 
 isDictId :: Id -> Bool
 isDictId id = isDictTy (varType id)
+
+
+{- *********************************************************************
+*                                                                      *
+                 scopedSort
+
+       This function lives here becuase it uses isEvVar
+*                                                                      *
+********************************************************************* -}
+
+{- Note [ScopedSort]
+~~~~~~~~~~~~~~~~~~~~
+Consider
+
+  foo :: Proxy a -> Proxy (b :: k) -> Proxy (a :: k2) -> ()
+
+This function type is implicitly generalised over [a, b, k, k2]. These
+variables will be Specified; that is, they will be available for visible
+type application. This is because they are written in the type signature
+by the user.
+
+However, we must ask: what order will they appear in? In cases without
+dependency, this is easy: we just use the lexical left-to-right ordering
+of first occurrence. With dependency, we cannot get off the hook so
+easily.
+
+We thus state:
+
+ * These variables appear in the order as given by ScopedSort, where
+   the input to ScopedSort is the left-to-right order of first occurrence.
+
+Note that this applies only to *implicit* quantification, without a
+`forall`. If the user writes a `forall`, then we just use the order given.
+
+ScopedSort is defined thusly (as proposed in #15743):
+  * Work left-to-right through the input list, with a cursor.
+  * If variable v at the cursor is depended on by any earlier variable w,
+    move v immediately before the leftmost such w.
+
+INVARIANT: The prefix of variables before the cursor form a valid telescope.
+
+Note that ScopedSort makes sense only after type inference is done and all
+types/kinds are fully settled and zonked.
+
+-}
+
+-- | Do a topological sort on a list of tyvars,
+--   so that binders occur before occurrences
+-- E.g. given  @[ a::k, k::Type, b::k ]@
+-- it'll return a well-scoped list @[ k::Type, a::k, b::k ]@.
+--
+-- This is a deterministic sorting operation
+-- (that is, doesn't depend on Uniques).
+--
+-- It is also meant to be stable: that is, variables should not
+-- be reordered unnecessarily. This is specified in Note [ScopedSort]
+-- See also Note [Ordering of implicit variables] in "GHC.Rename.HsType"
+
+scopedSort :: [Var] -> [Var]
+scopedSort = go [] []
+  where
+    go :: [Var] -- already sorted, in reverse order
+       -> [TyCoVarSet] -- each set contains all the variables which must be placed
+                       -- before the tv corresponding to the set; they are accumulations
+                       -- of the fvs in the sorted Var's types
+
+                       -- This list is in 1-to-1 correspondence with the sorted Vars
+                       -- INVARIANT:
+                       --   all (\tl -> all (`subVarSet` head tl) (tail tl)) (tails fv_list)
+                       -- That is, each set in the list is a superset of all later sets.
+
+       -> [Var] -- yet to be sorted
+       -> [Var]
+    go acc _fv_list [] = reverse acc
+    go acc  fv_list (tv:tvs)
+      = go acc' fv_list' tvs
+      where
+        (acc', fv_list') = insert tv acc fv_list
+
+    insert :: Var           -- var to insert
+           -> [Var]         -- sorted list, in reverse order
+           -> [TyCoVarSet]  -- list of fvs, as above
+           -> ([Var], [TyCoVarSet])   -- augmented lists
+    -- Generally we put the new Var at the front of the accumulating list
+    -- (leading to a stable sort) unless there is are reason to put it later.
+    insert v []     []         = ([v], [tyCoVarsOfType (varType v)])
+    insert v (a:as) (fvs:fvss)
+      | (isTyVar v && isId a) ||          -- TyVars precede Ids
+        (isEvVar v && isId a && not (isEvVar a)) || -- DictIds precede non-DictIds
+        (v `elemVarSet` fvs)
+          -- (a) put Ids after TyVars, and (b) respect dependencies
+      , (as', fvss') <- insert v as fvss
+      = (a:as', fvs `unionVarSet` fv_v : fvss')
+
+      | otherwise  -- Put `v` at the front
+      = (v:a:as, fvs `unionVarSet` fv_v : fvs : fvss)
+      where
+        fv_v = tyCoVarsOfType (varType v)
+
+       -- lists not in correspondence
+    insert _ _ _ = panic "scopedSort"
+
+-- | Get the free vars of a type in scoped order
+tyCoVarsOfTypeWellScoped :: Type -> [TyVar]
+tyCoVarsOfTypeWellScoped = scopedSort . tyCoVarsOfTypeList
+
+-- | Get the free vars of types in scoped order
+tyCoVarsOfTypesWellScoped :: [Type] -> [TyVar]
+tyCoVarsOfTypesWellScoped = scopedSort . tyCoVarsOfTypesList
+
+
+{- *********************************************************************
+*                                                                      *
+*                   Equality left-hand sides
+*                                                                      *
+********************************************************************* -}
+
+-- | A 'CanEqLHS' is a type that can appear on the left of a canonical
+-- equality: a type variable or /exactly-saturated/ type family application.
+data CanEqLHS
+  = TyVarLHS TyVar
+  | TyFamLHS TyCon  -- ^ TyCon of the family
+             [Type]   -- ^ Arguments, /exactly saturating/ the family
+
+instance Outputable CanEqLHS where
+  ppr (TyVarLHS tv)              = ppr tv
+  ppr (TyFamLHS fam_tc fam_args) = ppr (mkTyConApp fam_tc fam_args)
+
+-----------------------------------
+-- | Is a type a canonical LHS? That is, is it a tyvar or an exactly-saturated
+-- type family application?
+-- Does not look through type synonyms.
+canEqLHS_maybe :: Type -> Maybe CanEqLHS
+canEqLHS_maybe xi
+  | Just tv <- getTyVar_maybe xi
+  = Just $ TyVarLHS tv
+
+  | otherwise
+  = canTyFamEqLHS_maybe xi
+
+canTyFamEqLHS_maybe :: Type -> Maybe CanEqLHS
+canTyFamEqLHS_maybe xi
+  | Just (tc, args) <- tcSplitTyConApp_maybe xi
+  , isTypeFamilyTyCon tc
+  , args `lengthIs` tyConArity tc
+  = Just $ TyFamLHS tc args
+
+  | otherwise
+  = Nothing
+
+-- | Convert a 'CanEqLHS' back into a 'Type'
+canEqLHSType :: CanEqLHS -> Type
+canEqLHSType (TyVarLHS tv) = mkTyVarTy tv
+canEqLHSType (TyFamLHS fam_tc fam_args) = mkTyConApp fam_tc fam_args
+
+-- | Retrieve the kind of a 'CanEqLHS'
+canEqLHSKind :: CanEqLHS -> Kind
+canEqLHSKind (TyVarLHS tv) = tyVarKind tv
+canEqLHSKind (TyFamLHS fam_tc fam_args) = piResultTys (tyConKind fam_tc) fam_args
+
+-- | Are two 'CanEqLHS's equal?
+eqCanEqLHS :: CanEqLHS -> CanEqLHS -> Bool
+eqCanEqLHS (TyVarLHS tv1) (TyVarLHS tv2) = tv1 == tv2
+eqCanEqLHS (TyFamLHS fam_tc1 fam_args1) (TyFamLHS fam_tc2 fam_args2)
+  = tcEqTyConApps fam_tc1 fam_args1 fam_tc2 fam_args2
+eqCanEqLHS _ _ = False
+
