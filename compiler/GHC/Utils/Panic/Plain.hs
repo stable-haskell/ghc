@@ -99,7 +99,7 @@ throwPlainGhcException = Exception.throw
 
 -- | Panics and asserts.
 panic, sorry, pgmError :: HasCallStack => String -> a
-panic    x = unsafeDupablePerformIO $ throwPlainGhcException (PlainPanic (unlines [x, prettyCallStack callStack]))
+panic    x = unsafeDupablePerformIO $ throwPlainGhcException (PlainPanic x)
 
 sorry    x = throwPlainGhcException (PlainSorry x)
 pgmError x = throwPlainGhcException (PlainProgramError x)
