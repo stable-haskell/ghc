@@ -5,7 +5,7 @@
 # The whole version replacement therapy is utterly ridiculous. It should be done
 # in the respective packages.
 
-SHELL := bash
+SHELL := /usr/bin/env bash
 .SHELLFLAGS := -eu -o pipefail -c
 
 # Sane defaults
@@ -99,8 +99,15 @@ THREADS ?= $(shell echo $$(( $(CPUS) + 1 )))
 # Macro to install executables after cabal build. This does not require calling cabal again,
 # which is slower and can cause replanning.
 # Passing -C makes sure install does not re-install files that haven't changed.
+# Note: do not use -D since it is not available on darwin.
 define INSTALL_BINS
-  install -C -D $$(jq -r '."install-plan"[] | select((."stage" // "host") == "host" and ([."component-name"] | inside($$ARGS.positional))) | ."bin-file"' $(STAGE_DIR)/cache/plan.json --args $(addprefix exe:,$(2))) $(1)
+	@mkdir -p $(1)
+	@{ \
+		mapfile -d '' -t bins < <(jq --raw-output0 '."install-plan"[] | select((."stage" // "host") == "host" and ([."component-name"] | inside($$ARGS.positional))) | ."bin-file"' "$(STAGE_DIR)/cache/plan.json" --args $(addprefix exe:,$(2))); \
+		if [ "$${#bins[@]}" -gt 0 ]; then \
+			install -C "$${bins[@]}" "$(1)"; \
+		fi; \
+	}
 endef
 
 # [Note] phony targets

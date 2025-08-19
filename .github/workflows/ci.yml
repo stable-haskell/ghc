@@ -41,13 +41,15 @@ jobs:
         cabal: '3.14.2.0'
 
     # Note: our makefile use grouped targets which are not supported by the
-    # version of GNU Make available on the macOS runners. So we install a
-    # newer version.
+    # version of GNU Make available on the macOS runners.
+    # Note: one of the Makefile scripts uses bash's mapfile function, this
+    # is also not available in the macOS version of bash.
     - if: runner.os == 'macOS'
       name: Install dependencies
       run: |
-        brew install autoconf automake libffi libtool pkg-config make
+        brew install autoconf automake libffi bash libtool pkg-config make 
         echo "$(brew --prefix make)/libexec/gnubin" >> "$GITHUB_PATH"
+        echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
         # Ensure aclocal can find pkg.m4 and other macros
         echo "ACLOCAL_PATH=$(brew --prefix)/share/aclocal:$(brew --prefix pkg-config)/share/aclocal" >> "$GITHUB_ENV"
 
@@ -56,6 +58,7 @@ jobs:
         aclocal --version | head -1
         autoconf --version | head -1
         autoreconf --version | head -1
+        bash --version | head -1
         libtool --version | head -1
         make --version | head -1
 
