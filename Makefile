@@ -390,33 +390,37 @@ bindist: stage2 driver/ghc-usage.txt driver/ghci-usage.txt
 # --- Clean Targets ---
 #
 
-clean-everything:
+clean:
 	$(call GROUP,Cleaning all build artifacts...)
-	rm -rf $(BUILD_DIR)
+	@rm -rf $(BUILD_DIR)
 	$(END_GROUP)
 
-clean:
-	$(call GROUP,Cleaning stage1 and stage2 build artifacts...)
-	rm -rf $(BUILD_DIR)/stage1 $(BUILD_DIR)/stage2
+clean-stage0:
+	$(call GROUP,Cleaning stage0 build artifacts...)
+	@rm -rf $(BUILD_DIR)/stage0
 	$(END_GROUP)
 
 clean-stage1:
 	$(call GROUP,Cleaning stage1 build artifacts...)
-	rm -rf $(BUILD_DIR)/stage1
+	@rm -rf $(BUILD_DIR)/stage1
 	$(END_GROUP)
 
 clean-stage2:
 	$(call GROUP,Cleaning stage2 build artifacts...)
-	rm -rf $(BUILD_DIR)/stage2
+	@rm -rf $(BUILD_DIR)/stage2
 	$(END_GROUP)
 
 distclean: clean
+	$(call GROUP,Cleaning submodules (git clean)...)
+	@git submodule foreach git clean -dxf
+	$(END_GROUP)
 	$(call GROUP,Cleaning all generated files (distclean)...)
-	rm -rf autom4te.cache
-	rm -f config.status config.log config.h configure aclocal.m4
-	rm -rf build-aux/config.guess build-aux/config.sub build-aux/install-sh build-aux/missing build-aux/compile depcomp
-	find . -name 'Makefile.in' -delete
-	rm -f $(CONFIGURED_FILES)
+	@rm -fv $(CONFIGURED_FILES)
+	$(END_GROUP)
+	$(call GROUP,Cleaning autoconf files...)
+	@rm -rfv ./{config.status,config.log,autom4te.cache}{,~};
+	@rm -rfv ./rts/{configure,config.status,config.log,autom4te.cache,ghcautoconf.h.autoconf.in}{,~};
+	@rm -rfv ./libraries/ghc-internal/{configure,config.status,config.log,autom4te.cache,include/HsBaseConfig.h.in}{,~};
 	$(END_GROUP)
 
 #
