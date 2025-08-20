@@ -156,6 +156,9 @@ $(BUILD_DIR)/stage2/% : private STAGE=stage2
 #
 # This builds our cabal-install, which is used to build the rest of the project.
 
+.PHONY: stage0
+stage0: $(BUILD_DIR)/stage0/bin/cabal
+
 $(BUILD_DIR)/stage0/bin/cabal: FORCE
 	$(call GROUP,Building Cabal...)
 	@mkdir -p $(@D)

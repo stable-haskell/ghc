@@ -7,49 +7,145 @@ on:
       - opened
       - synchronize
   push:
-    branches: [master]
+    branches: 
+      - master
 
   workflow_dispatch:
 
 jobs:
-  cabal:
-    name: ${{ matrix.plat }} / ghc ${{ matrix.ghc }}
-    runs-on: "${{ fromJSON('{\"x86_64-linux\": \"ubuntu-24.04\", \"aarch64-linux\": \"ubuntu-24.04-arm\", \"x86_64-darwin\": \"macos-latest\", \"aarch64-darwin\": \"macos-latest\"}')[matrix.plat] }}"
+  build:
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.runs-on }}
 
     strategy:
       fail-fast: false
       matrix:
-        plat: [x86_64-linux, aarch64-linux, x86_64-darwin, aarch64-darwin]
-        ghc: ['98'] # bootstrapping compiler
+        include:
+          - platform: x86_64-linux
+            runs-on: ubuntu-24.04
+          - platform: aarch64-linux
+            runs-on: ubuntu-24.04-arm
+          - platform: x86_64-darwin
+            runs-on: macos-latest
+          - platform: aarch64-darwin
+            runs-on: macos-latest
 
     steps:
     - uses: actions/checkout@v4
       with:
         submodules: "recursive"
 
-    - uses: input-output-hk/actions/devx@latest
+    - uses: haskell/ghcup-setup@v1
       with:
-        platform: ${{ matrix.plat }}
-        compiler-nix-name: 'ghc98'
-        minimal: true
-        ghc: true
+        ghc: '9.8.4'
+        cabal: '3.14.2.0'
 
-    - name: Update hackage
-      shell: devx {0}
-      run: cabal update
+    # Note: our makefile use grouped targets which are not supported by the
+    # version of GNU Make available on the macOS runners. So we install a
+    # newer version.
+    - if: runner.os == 'macOS'
+      name: Install dependencies
+      run: |
+        brew install autoconf automake libffi libtool pkg-config make
+        echo "$(brew --prefix make)/libexec/gnubin" >> "$GITHUB_PATH"
+        # Ensure aclocal can find pkg.m4 and other macros
+        echo "ACLOCAL_PATH=$(brew --prefix)/share/aclocal:$(brew --prefix pkg-config)/share/aclocal" >> "$GITHUB_ENV"
 
-    - name: Build the bindist
-      shell: devx {0}
-      run: make
+    - name: Check dependencies versions
+      run: |
+        aclocal --version | head -1
+        autoconf --version | head -1
+        autoreconf --version | head -1
+        libtool --version | head -1
+        make --version | head -1
+
+    - run: cabal update
+
+    # Note: the following targets would be built in order by make bindist
+    # but it is nicer to have them separate in GitHub Actions to track where
+    # things are at.
+
+    #
+    # Boot
+    #
+
+    - run: make _build/booted
+
+    #
+    # Stage 0
+    #
+
+    - name: Build stage0 (cabal)
+      run: make CABAL_BUILD_ARGS="-j1 -v2" stage0
+
+    - name: Upload stage0 log
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.platform }}-stage0-build-log
+        path: _build/stage0/build.log
+
+    - name: Upload stage0 artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.platform }}-stage0-artifacts
+        path: _build/stage0
+
+    #
+    # Stage 1
+    #
+
+    - name: Build stage1
+      run: make CABAL_BUILD_ARGS="-j1 -v2" stage1
+
+    - name: Upload stage1 log
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.platform }}-stage1-build-log
+        path: _build/stage1/build.log
+
+    - name: Upload stage1 artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.platform }}-stage1-artifacts
+        path: _build/stage1
+
+    #
+    # Stage 2
+    #
+
+    - name: Build stage2
+      run: make CABAL_BUILD_ARGS="-j1 -v2" stage2
+
+    - name: Upload stage2 log
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.platform }}-stage2-build-log
+        path: _build/stage2/build.log
+
+    - name: Upload stage2 artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.platform }}-stage2-artifacts
+        path: _build/stage2
+
+    #
+    # Binary distribution
+    #        
+
+    - name: Build binary distribution
+      run: make CABAL_BUILD_ARGS="-j1 -v2" bindist
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: ${{ matrix.plat }}-bindist
+        name: ${{ matrix.platform }}-bindist
         path: _build/bindist
 
+    #
+    # Testsuite
+    #        
+
     - name: Run the testsuite
-      shell: devx {0}
       run: make test
 
     - name: Upload test results
