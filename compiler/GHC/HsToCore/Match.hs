@@ -77,7 +77,7 @@ import GHC.Types.Unique
 import GHC.Types.Unique.DFM
 
 import Control.Monad ( zipWithM, unless )
-import Data.List.NonEmpty (NonEmpty(..))
+import Data.List.NonEmpty (NonEmpty(..), nonEmpty)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map as Map
 
@@ -194,9 +194,7 @@ match :: [MatchId]        -- ^ Variables rep\'ing the exprs we\'re matching with
       -> [EquationInfo]   -- ^ Info about patterns, etc. (type synonym below)
       -> DsM (MatchResult CoreExpr) -- ^ Desugared result!
 
-match [] ty eqns
-  = assertPpr (not (null eqns)) (ppr ty) $
-    combineEqnRhss (NE.fromList eqns)
+match [] ty eqns = maybe (assertPprPanic (ppr ty)) combineEqnRhss $ nonEmpty eqns
 
 match (v:vs) ty eqns    -- Eqns can be empty, but each equation is nonempty
   = assertPpr (all (isInternalName . idName) vars) (ppr vars) $
@@ -529,7 +527,7 @@ tidy1 _ _ (OrPat ty lpats)
     mk_match lpat body = noLocA $ Match noExtField CaseAlt (noLocA [lpat]) (single_grhs body)
 
     hs_var :: Var -> LHsExpr GhcTc
-    hs_var v = (noLocA $ HsVar noExtField (noLocA v))
+    hs_var v = noLocA $ mkHsVar (noLocA v)
     single_grhs :: LHsExpr GhcTc -> GRHSs GhcTc (LHsExpr GhcTc)
     single_grhs e = GRHSs emptyComments [noLocA $ GRHS noAnn [] e] (EmptyLocalBinds noExtField)
 
@@ -599,9 +597,9 @@ push_bang_into_newtype_arg :: SrcSpanAnnA
                            -> HsConPatDetails GhcTc -> HsConPatDetails GhcTc
 -- See Note [Bang patterns and newtypes]
 -- We are transforming   !(N p)   into   (N !p)
-push_bang_into_newtype_arg l _ty (PrefixCon ts (arg:args))
+push_bang_into_newtype_arg l _ty (PrefixCon (arg:args))
   = assert (null args) $
-    PrefixCon ts [L l (BangPat noExtField arg)]
+    PrefixCon [L l (BangPat noExtField arg)]
 push_bang_into_newtype_arg l _ty (RecCon rf)
   | HsRecFields { rec_flds = L lf fld : flds } <- rf
   , HsFieldBind { hfbRHS = arg } <- fld
@@ -610,7 +608,7 @@ push_bang_into_newtype_arg l _ty (RecCon rf)
                                            = L l (BangPat noExtField arg) })] })
 push_bang_into_newtype_arg l ty (RecCon rf) -- If a user writes !(T {})
   | HsRecFields { rec_flds = [] } <- rf
-  = PrefixCon [] [L l (BangPat noExtField (noLocA (WildPat ty)))]
+  = PrefixCon [L l (BangPat noExtField (noLocA (WildPat ty)))]
 push_bang_into_newtype_arg _ _ cd
   = pprPanic "push_bang_into_newtype_arg" (pprConArgs cd)
 
@@ -801,7 +799,7 @@ matchWrapper ctxt scrs (MG { mg_alts = L _ matches
         ; new_vars    <- case matches of
                            []    -> newSysLocalsDs arg_tys
                            (m:_) ->
-                            selectMatchVars (zipWithEqual "matchWrapper"
+                            selectMatchVars (zipWithEqual
                                               (\a b -> (scaledMult a, unLoc b))
                                                 arg_tys
                                                 (hsLMatchPats m))
@@ -859,10 +857,7 @@ matchWrapper ctxt scrs (MG { mg_alts = L _ matches
       = map (\(L _ m) -> (ldi_nablas, initNablasGRHSs ldi_nablas (m_grhss m))) ms
 
     initNablasGRHSs :: Nablas -> GRHSs GhcTc b -> NonEmpty Nablas
-    initNablasGRHSs ldi_nablas m
-      = expectJust "GRHSs non-empty"
-      $ NE.nonEmpty
-      $ replicate (length (grhssGRHSs m)) ldi_nablas
+    initNablasGRHSs ldi_nablas m = ldi_nablas <$ grhssGRHSs m
 
 {- Note [Long-distance information in matchWrapper]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1225,7 +1220,7 @@ viewLExprEq (e1,_) (e2,_) = lexp e1 e2
                           , syn_arg_wraps = arg_wraps2
                           , syn_res_wrap  = res_wrap2 })
       = exp expr1 expr2 &&
-        and (zipWithEqual "viewLExprEq" wrap arg_wraps1 arg_wraps2) &&
+        and (zipWithEqual wrap arg_wraps1 arg_wraps2) &&
         wrap res_wrap1 res_wrap2
     syn_exp NoSyntaxExprTc NoSyntaxExprTc = True
     syn_exp _              _              = False

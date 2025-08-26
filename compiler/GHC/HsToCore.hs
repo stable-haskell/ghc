@@ -22,14 +22,12 @@ import GHC.Driver.DynFlags
 import GHC.Driver.Config
 import GHC.Driver.Config.Core.Lint ( endPassHscEnvIO )
 import GHC.Driver.Config.HsToCore.Ticks
-import GHC.Driver.Config.HsToCore.Usage
 import GHC.Driver.Env
 import GHC.Driver.Backend
 import GHC.Driver.Plugins
 
 import GHC.Hs
 
-import GHC.HsToCore.Usage
 import GHC.HsToCore.Monad
 import GHC.HsToCore.Errors.Types
 import GHC.HsToCore.Expr
@@ -42,7 +40,7 @@ import GHC.HsToCore.Docs
 
 import GHC.Tc.Types
 import GHC.Tc.Types.Origin ( Position(..) )
-import GHC.Tc.Utils.Monad  ( finalSafeMode, fixSafeInstances, initIfaceLoad )
+import GHC.Tc.Utils.Monad  ( finalSafeMode, fixSafeInstances )
 import GHC.Tc.Module ( runTcInteractive )
 
 import GHC.Core.Type
@@ -54,7 +52,7 @@ import GHC.Core.SimpleOpt ( simpleOptPgm, simpleOptExpr )
 import GHC.Core.Utils
 import GHC.Core.Unfold.Make
 import GHC.Core.Coercion
-import GHC.Core.Predicate( mkNomEqPred )
+import GHC.Core.Predicate( scopedSort, mkNomEqPred )
 import GHC.Core.DataCon ( dataConWrapId )
 import GHC.Core.Make
 import GHC.Core.Rules
@@ -71,7 +69,7 @@ import GHC.Data.SizedSeq ( sizeSS )
 
 import GHC.Utils.Error
 import GHC.Utils.Outputable
-import GHC.Utils.Panic.Plain
+import GHC.Utils.Panic
 import GHC.Utils.Misc
 import GHC.Utils.Monad
 import GHC.Utils.Logger
@@ -100,6 +98,7 @@ import GHC.Unit.Module.Deps
 import Data.List (partition)
 import Data.IORef
 import Data.Traversable (for)
+import GHC.Iface.Make (mkRecompUsageInfo)
 
 {-
 ************************************************************************
@@ -122,17 +121,14 @@ deSugar hsc_env
                             tcg_imports      = imports,
                             tcg_exports      = exports,
                             tcg_keep         = keep_var,
-                            tcg_th_splice_used = tc_splice_used,
                             tcg_rdr_env      = rdr_env,
                             tcg_fix_env      = fix_env,
                             tcg_inst_env     = inst_env,
                             tcg_fam_inst_env = fam_inst_env,
-                            tcg_merged       = merged,
                             tcg_warns        = warns,
                             tcg_anns         = anns,
                             tcg_binds        = binds,
                             tcg_imp_specs    = imp_specs,
-                            tcg_dependent_files = dependent_files,
                             tcg_ev_binds     = ev_binds,
                             tcg_th_foreign_files = th_foreign_files_var,
                             tcg_fords        = fords,
@@ -142,7 +138,6 @@ deSugar hsc_env
                             tcg_default_exports = defaults,
                             tcg_insts        = insts,
                             tcg_fam_insts    = fam_insts,
-                            tcg_hpc          = other_hpc_info,
                             tcg_complete_matches = complete_matches,
                             tcg_self_boot    = self_boot
                             })
@@ -183,7 +178,7 @@ deSugar hsc_env
                 then writeMixEntries (hpcDir dflags) mod ticks orig_file2
                 else return 0 -- dummy hash when none are written
               pure $ HpcInfo (fromIntegral $ sizeSS ticks) hashNo
-            _ -> pure $ emptyHpcInfo other_hpc_info
+            _ -> pure $ emptyHpcInfo
 
         ; (msgs, mb_res) <- initDs hsc_env tcg_env $
                        do { dsEvBinds ev_binds $ \ ds_ev_binds -> do
@@ -228,26 +223,17 @@ deSugar hsc_env
 
         ; endPassHscEnvIO hsc_env name_ppr_ctx CoreDesugarOpt ds_binds ds_rules_for_imps
 
-        ; let used_names = mkUsedNames tcg_env
-              pluginModules = map lpModule (loadedPlugins (hsc_plugins hsc_env))
+        ; let pluginModules = map lpModule (loadedPlugins (hsc_plugins hsc_env))
               home_unit = hsc_home_unit hsc_env
         ; let deps = mkDependencies home_unit
                                     (tcg_mod tcg_env)
                                     (tcg_imports tcg_env)
                                     (map mi_module pluginModules)
 
-        ; used_th <- readIORef tc_splice_used
-        ; dep_files <- readIORef dependent_files
         ; safe_mode <- finalSafeMode dflags tcg_env
-        ; (needed_mods, needed_pkgs) <- readIORef (tcg_th_needed_deps tcg_env)
 
-        ; let uc = initUsageConfig hsc_env
-        ; let plugins = hsc_plugins hsc_env
-        ; let fc = hsc_FC hsc_env
-        ; let unit_env = hsc_unit_env hsc_env
-        ; usages <- initIfaceLoad hsc_env $
-                      mkUsageInfo uc plugins fc unit_env mod (imp_mods imports) used_names
-                        dep_files merged needed_mods needed_pkgs
+        ; usages <- mkRecompUsageInfo hsc_env tcg_env
+
         -- id_mod /= mod when we are processing an hsig, but hsigs
         -- never desugared and compiled (there's no code!)
         -- Consequently, this should hold for any ModGuts that make
@@ -265,7 +251,6 @@ deSugar hsc_env
                 mg_exports      = exports,
                 mg_usages       = usages,
                 mg_deps         = deps,
-                mg_used_th      = used_th,
                 mg_rdr_env      = rdr_env,
                 mg_fix_env      = fix_env,
                 mg_warns        = warns,
@@ -291,12 +276,6 @@ deSugar hsc_env
               }
         ; return (msgs, Just mod_guts)
         }}}}
-
-dsImpSpecs :: [LTcSpecPrag] -> DsM (OrdList (Id,CoreExpr), [CoreRule])
-dsImpSpecs imp_specs
- = do { spec_prs <- mapMaybeM (dsSpec Nothing) imp_specs
-      ; let (spec_binds, spec_rules) = unzip spec_prs
-      ; return (concatOL spec_binds, spec_rules) }
 
 combineEvBinds :: [CoreBind] -> [(Id,CoreExpr)] -> [CoreBind]
 -- Top-level bindings can include coercion bindings, but not via superclasses
@@ -336,7 +315,7 @@ deSugarExpr hsc_env tc_expr = do
 
       -- mb_result is Nothing only when a failure happens in the type-checker,
       -- but mb_core_expr is Nothing when a failure happens in the desugarer
-    let (ds_msgs, mb_core_expr) = expectJust "deSugarExpr" mb_result
+    let (ds_msgs, mb_core_expr) = expectJust mb_result
 
     case mb_core_expr of
        Nothing   -> return ()
@@ -442,11 +421,14 @@ Reason
 dsRule :: LRuleDecl GhcTc -> DsM (Maybe CoreRule)
 dsRule (L loc (HsRule { rd_name = name
                       , rd_act  = rule_act
-                      , rd_tmvs = vars
+                      , rd_bndrs = RuleBndrs { rb_ext = bndrs }
                       , rd_lhs  = lhs
                       , rd_rhs  = rhs }))
   = putSrcSpanDs (locA loc) $
-    do  { let bndrs' = [var | L _ (RuleBndr _ (L _ var)) <- vars]
+    do  { let bndrs' = scopedSort bndrs
+                 -- The scopedSort is because the binders may not
+                 -- be in dependency order; see wrinkle (FTV1) in
+                 -- Note [Free tyvars on rule LHS] in GHC.Tc.Zonk.Type
 
         ; lhs' <- unsetGOptM Opt_EnableRewriteRules $
                   unsetWOptM Opt_WarnIdentities     $

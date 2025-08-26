@@ -122,7 +122,7 @@ tyThingToLHsDecl prr t = case t of
                 HsBndrKind _ kind -> HsKindSig noAnn (noLocA (cvt' bvar)) kind
 
             cvt' :: HsBndrVar GhcRn -> HsType GhcRn
-            cvt' (HsBndrVar _ nm)   = HsTyVar noAnn NotPromoted nm
+            cvt' (HsBndrVar _ nm)   = HsTyVar noAnn NotPromoted (fmap noUserRdr nm)
             cvt' (HsBndrWildCard _) = HsWildCardTy noExtField
 
             -- \| Convert a LHsTyVarBndr to an equivalent LHsType.
@@ -493,11 +493,10 @@ synifyDataCon use_gadt_syntax dc =
 
     linear_tys =
       zipWith
-        ( \ty bang ->
-            let tySyn = synifyType WithinType [] (scaledThing ty)
-             in case bang of
-                  (HsSrcBang _ (HsBang NoSrcUnpack NoSrcStrict)) -> tySyn
-                  (HsSrcBang src bang') -> noLocA $ HsBangTy (noAnn, src) bang' tySyn
+        ( \(Scaled mult ty) (HsSrcBang st unp str) ->
+            let tySyn = synifyType WithinType [] ty
+                multSyn = synifyMultRec [] mult
+            in CDF (noAnn, st) unp str multSyn tySyn Nothing
         )
         arg_tys
         (dataConSrcBangs dc)
@@ -505,25 +504,24 @@ synifyDataCon use_gadt_syntax dc =
     field_tys = zipWith con_decl_field (dataConFieldLabels dc) linear_tys
     con_decl_field fl synTy =
       noLocA $
-        ConDeclField
-          noAnn
-          [noLocA $ FieldOcc (mkVarUnqual $ field_label $ flLabel fl) (noLocA  (flSelector fl))]
+        HsConDeclRecField
+          noExtField
+          [noLocA $ FieldOcc (mkVarUnqual $ field_label $ flLabel fl) (noLocA (flSelector fl))]
           synTy
-          Nothing
 
     mk_h98_arg_tys :: Either String (HsConDeclH98Details GhcRn)
     mk_h98_arg_tys = case (use_named_field_syntax, use_infix_syntax) of
       (True, True) -> Left "synifyDataCon: contradiction!"
       (True, False) -> return $ RecCon (noLocA field_tys)
-      (False, False) -> return $ PrefixCon noTypeArgs (map hsUnrestricted linear_tys)
+      (False, False) -> return $ PrefixCon linear_tys
       (False, True) -> case linear_tys of
-        [a, b] -> return $ InfixCon (hsUnrestricted a) (hsUnrestricted b)
+        [a, b] -> return $ InfixCon a b
         _ -> Left "synifyDataCon: infix with non-2 args?"
 
     mk_gadt_arg_tys :: HsConDeclGADTDetails GhcRn
     mk_gadt_arg_tys
       | use_named_field_syntax = RecConGADT noExtField (noLocA field_tys)
-      | otherwise = PrefixConGADT noExtField (map hsUnrestricted linear_tys)
+      | otherwise = PrefixConGADT noExtField linear_tys
    in
     -- finally we get synifyDataCon's result!
     if use_gadt_syntax
@@ -713,7 +711,7 @@ synifyType
   -> Type
   -- ^ the type to convert
   -> LHsType GhcRn
-synifyType _ _ (TyVarTy tv) = noLocA $ HsTyVar noAnn NotPromoted $ noLocA (getName tv)
+synifyType _ _ (TyVarTy tv) = noLocA $ HsTyVar noAnn NotPromoted $ noLocA (noUserRdr $ getName tv)
 synifyType _ vs (TyConApp tc tys) =
   maybe_sig res_ty
   where
@@ -724,7 +722,7 @@ synifyType _ vs (TyConApp tc tys) =
       , [TyConApp rep [TyConApp lev []]] <- tys
       , rep `hasKey` boxedRepDataConKey
       , lev `hasKey` liftedDataConKey =
-          noLocA (HsTyVar noAnn NotPromoted (noLocA liftedTypeKindTyConName))
+          noLocA (HsTyVar noAnn NotPromoted (noLocA $ noUserRdr liftedTypeKindTyConName))
       -- Use non-prefix tuple syntax where possible, because it looks nicer.
       | Just sort <- tyConTuple_maybe tc
       , tyConArity tc == tys_len =
@@ -758,7 +756,7 @@ synifyType _ vs (TyConApp tc tys) =
                   | L _ (HsExplicitListTy _ IsPromoted tTy') <- stripKindSig tTy ->
                       noLocA $ HsExplicitListTy noExtField IsPromoted (hTy : tTy')
                   | otherwise ->
-                      noLocA $ HsOpTy noExtField IsPromoted hTy (noLocA $ getName tc) tTy
+                      noLocA $ HsOpTy noExtField IsPromoted hTy (noLocA $ noUserRdr $ getName tc) tTy
       -- ditto for implicit parameter tycons
       | tc `hasKey` ipClassKey
       , [name, ty] <- tys
@@ -772,7 +770,7 @@ synifyType _ vs (TyConApp tc tys) =
               noExtField
               NotPromoted
               (synifyType WithinType vs ty1)
-              (noLocA eqTyConName)
+              (noLocA $ noUserRdr eqTyConName)
               (synifyType WithinType vs ty2)
       -- and infix type operators
       | isSymOcc (nameOccName (getName tc))
@@ -782,14 +780,14 @@ synifyType _ vs (TyConApp tc tys) =
                 noExtField
                 prom
                 (synifyType WithinType vs ty1)
-                (noLocA $ getName tc)
+                (noLocA $ noUserRdr $ getName tc)
                 (synifyType WithinType vs ty2)
             )
             tys_rest
       -- Most TyCons:
       | otherwise =
           mk_app_tys
-            (HsTyVar noAnn prom $ noLocA (getName tc))
+            (HsTyVar noAnn prom $ noLocA (noUserRdr $ getName tc))
             vis_tys
       where
         !prom = if isPromotedDataCon tc then IsPromoted else NotPromoted
@@ -829,7 +827,7 @@ synifyType s vs funty@(FunTy af w t1 t2)
   where
     s1 = synifyType WithinType vs t1
     s2 = synifyType WithinType vs t2
-    w' = synifyMult vs w
+    w' = synifyMultArrow vs w
 synifyType s vs forallty@(ForAllTy (Bndr _ argf) _ty) =
   case argf of
     Required -> synifyVisForAllType vs forallty
@@ -985,10 +983,15 @@ noKindTyVars ts (FunTy _ w t1 t2) =
 noKindTyVars ts (CastTy t _) = noKindTyVars ts t
 noKindTyVars _ _ = emptyVarSet
 
-synifyMult :: [TyVar] -> Mult -> HsArrow GhcRn
-synifyMult vs t = case t of
-  OneTy -> HsLinearArrow noExtField
-  ManyTy -> HsUnrestrictedArrow noExtField
+synifyMultArrow :: [TyVar] -> Mult -> HsMultAnn GhcRn
+synifyMultArrow vs t = case t of
+  OneTy -> HsLinearAnn noExtField
+  ManyTy -> HsUnannotated noExtField
+  ty -> HsExplicitMult noExtField (synifyType WithinType vs ty)
+
+synifyMultRec :: [TyVar] -> Mult -> HsMultAnn GhcRn
+synifyMultRec vs t = case t of
+  OneTy -> HsUnannotated noExtField
   ty -> HsExplicitMult noExtField (synifyType WithinType vs ty)
 
 synifyPatSynType :: PatSyn -> LHsType GhcRn

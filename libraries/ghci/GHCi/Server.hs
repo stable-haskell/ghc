@@ -7,19 +7,27 @@ where
 
 import Prelude
 import GHCi.Run
+import GHCi.Signals
 import GHCi.TH
 import GHCi.Message
-#if !defined(wasm32_HOST_ARCH)
-import GHCi.Signals
-#endif
+#if defined(wasm32_HOST_ARCH)
+import Data.ByteString (ByteString)
+import qualified Data.ByteString.Builder as B
+import qualified Data.ByteString.Internal as B
+import qualified Data.ByteString.Unsafe as B
+import qualified Data.ByteString.Lazy as LB
+import Foreign
+import Foreign.ForeignPtr.Unsafe
+import GHC.Wasm.Prim
+#else
 import GHCi.Utils
+#endif
 
 import Control.DeepSeq
 import Control.Exception
 import Control.Monad
 import Control.Concurrent (threadDelay)
 import Data.Binary
-import Data.IORef
 
 import Text.Printf
 import System.Environment (getProgName, getArgs)
@@ -98,6 +106,12 @@ serv verbose hook pipe restore = loop
       _ -> return ()
 
 -- | Default server
+#if defined(wasm32_HOST_ARCH)
+defaultServer :: Callback (JSVal -> IO ()) -> Callback (IO JSUint8Array) -> Callback (JSUint8Array -> IO ()) -> IO ()
+defaultServer cb_sig cb_recv cb_send = do
+  args <- getArgs
+  let rest = args
+#else
 defaultServer :: IO ()
 defaultServer = do
   args <- getArgs
@@ -108,6 +122,7 @@ defaultServer = do
             outh <- readGhcHandle arg0
             return (outh, inh, rest)
         _ -> dieWithUsage
+#endif
 
   (verbose, rest') <- case rest of
     "-v":rest' -> return (True, rest')
@@ -120,15 +135,16 @@ defaultServer = do
   unless (null rest'') $
     dieWithUsage
 
+#if defined(wasm32_HOST_ARCH)
+  -- See Note [wasm ghci signal handlers] for details
+  installSignalHandlers $ js_register_signal_handler cb_sig
+  pipe <- mkPipeFromContinuations (recv_buf cb_recv) (send_buf cb_send)
+#else
   when verbose $
     printf "GHC iserv starting (in: %s; out: %s)\n" (show inh) (show outh)
-
-#if !defined(wasm32_HOST_ARCH)
   installSignalHandlers
+  pipe <- mkPipeFromHandles inh outh
 #endif
-
-  lo_ref <- newIORef Nothing
-  let pipe = Pipe{pipeRead = inh, pipeWrite = outh, pipeLeftovers = lo_ref}
 
   when wait $ do
     when verbose $
@@ -154,6 +170,40 @@ dieWithUsage = do
 
 #if defined(wasm32_HOST_ARCH)
 
-foreign export javascript "defaultServer" defaultServer :: IO ()
+newtype Callback a = Callback JSVal
+
+newtype JSUint8Array = JSUint8Array { unJSUint8Array :: JSVal }
+
+recv_buf :: Callback (IO JSUint8Array) -> IO ByteString
+recv_buf cb = do
+  buf <- js_recv_buf cb
+  len <- js_buf_len buf
+  fp <- mallocForeignPtrBytes len
+  js_download_buf buf $ unsafeForeignPtrToPtr fp
+  freeJSVal $ unJSUint8Array buf
+  evaluate $ B.fromForeignPtr0 fp len
+
+send_buf :: Callback (JSUint8Array -> IO ()) -> B.Builder -> IO ()
+send_buf cb b = do
+  buf <- evaluate $ LB.toStrict $ B.toLazyByteString b
+  B.unsafeUseAsCStringLen buf $ \(ptr, len) -> js_send_buf cb ptr len
+
+foreign import javascript unsafe "dynamic"
+  js_register_signal_handler :: Callback (JSVal -> IO ()) -> JSVal -> IO ()
+
+foreign import javascript "dynamic"
+  js_recv_buf :: Callback (IO JSUint8Array) -> IO JSUint8Array
+
+foreign import javascript unsafe "$1.byteLength"
+  js_buf_len :: JSUint8Array -> IO Int
+
+foreign import javascript unsafe "(new Uint8Array(__exports.memory.buffer, $2, $1.byteLength)).set($1)"
+  js_download_buf :: JSUint8Array -> Ptr a -> IO ()
+
+foreign import javascript unsafe "$1(new Uint8Array(__exports.memory.buffer, $2, $3))"
+  js_send_buf :: Callback (JSUint8Array -> IO ()) -> Ptr a -> Int -> IO ()
+
+foreign export javascript "defaultServer"
+  defaultServer :: Callback (JSVal -> IO ()) -> Callback (IO JSUint8Array) -> Callback (JSUint8Array -> IO ()) -> IO ()
 
 #endif

@@ -1,4 +1,4 @@
-
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE TypeFamilies   #-}
 
 {-
@@ -35,6 +35,8 @@ import GHC.Utils.Outputable
 import GHC.Utils.Panic
 import GHC.Tc.Utils.TcType
 import GHC.Data.List.SetOps( getNth )
+
+import Data.Foldable ( toList )
 
 {-
 List comprehensions may be desugared in one of two ways: ``ordinary''
@@ -243,13 +245,13 @@ deListComp (ParStmt _ stmtss_w_bndrs _ _ : quals) list
   = do { exps_and_qual_tys <- mapM dsInnerListComp stmtss_w_bndrs
        ; let (exps, qual_tys) = unzip exps_and_qual_tys
 
-       ; (zip_fn, zip_rhs) <- mkZipBind qual_tys
+       ; (zip_fn, zip_rhs) <- mkZipBind (toList qual_tys)
 
         -- Deal with [e | pat <- zip l1 .. ln] in example above
-       ; deBindComp pat (Let (Rec [(zip_fn, zip_rhs)]) (mkApps (Var zip_fn) exps))
+       ; deBindComp pat (Let (Rec [(zip_fn, zip_rhs)]) (mkApps (Var zip_fn) (toList exps)))
                     quals list }
   where
-        bndrs_s = [bs | ParStmtBlock _ _ bs _ <- stmtss_w_bndrs]
+        bndrs_s = [bs | ParStmtBlock _ _ bs _ <- toList stmtss_w_bndrs]
 
         -- pat is the pattern ((x1,..,xn), (y1,..,ym)) in the example above
         pat  = mkBigLHsPatTupId pats
@@ -563,8 +565,11 @@ dsMcStmt (ParStmt bind_ty blocks mzip_op bind_op) stmts_rest
  = do  { exps_w_tys  <- mapM ds_inner blocks   -- Pairs (exp :: m ty, ty)
        ; mzip_op'    <- dsExpr mzip_op
 
-       ; let -- The pattern variables
-             pats = [ mkBigLHsVarPatTupId bs | ParStmtBlock _ _ bs _ <- blocks]
+       ; let parStmtBlockIds :: ParStmtBlock GhcTc GhcTc -> [Id]
+             parStmtBlockIds = \ case
+                 ParStmtBlock _ _ bs _ -> bs
+             -- The pattern variables
+             pats = fmap (mkBigLHsVarPatTupId . parStmtBlockIds) blocks
              -- Pattern with tuples of variables
              -- [v1,v2,v3]  =>  (v1, (v2, v3))
              pat = foldr1 (\p1 p2 -> mkLHsPatTup [p1, p2]) pats

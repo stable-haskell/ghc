@@ -168,6 +168,42 @@ type family IdP p
 
 type LIdP p = XRec p (IdP p)
 
+-- | Like 'IdP', except it keeps track of the user-written module qualification,
+-- if any.
+--
+-- See Note [IdOcc].
+type family IdOccP p
+type LIdOccP p = XRec p (IdOccP p)
+
+{- Note [IdOcc]
+~~~~~~~~~~~~~~~
+When possible, in error messages we would like to report identifiers with the
+qualification that the user has written (provided this does not cause any
+ambiguity). To do this, we record the user-written qualification in the
+AST in the GhcRn stage. This is achieved with the 'WithUserRdr' data type.
+Thus:
+
+  - instead of using 'IdP', we use 'IdOccP', which wraps an 'IdP' in
+    'WithUserRdr' at GhcRn pass, in:
+      - 'HsVar'
+      - 'HsTyVar' (which is used for 'TyCon's, not just type variables)
+      - 'HsOpTy'
+  - we also use 'ConLikeP' which wraps a 'Name' in 'WithUserRdr' at 'GhcRn'
+    pass, in:
+      - 'RecordCon'
+      - 'ConPat'
+
+This user-written module qualification is then consulted when pretty-printing
+expressions, e.g. we have:
+
+  - ppr_expr (HsVar _ (L _ v)) = pprPrefixOcc v
+
+and 'pprPrefixOcc' uses the 'OutputableBndr' instance for 'WithUserRdr'.
+This happens in 'GHC.Types.Name.Ppr.mkQualName'.
+
+Test case: T25877.
+-}
+
 -- =====================================================================
 -- Type families for the HsBinds extension points
 
@@ -208,6 +244,7 @@ type family XIdSig            x
 type family XFixSig           x
 type family XInlineSig        x
 type family XSpecSig          x
+type family XSpecSigE         x
 type family XSpecInstSig      x
 type family XMinimalSig       x
 type family XSCCFunSig        x
@@ -364,6 +401,11 @@ type family XHsRule          x
 type family XXRuleDecl       x
 
 -- -------------------------------------
+-- RuleBndrs type families
+type family XCRuleBndrs     x
+type family XXRuleBndrs     x
+
+-- -------------------------------------
 -- RuleBndr type families
 type family XCRuleBndr      x
 type family XRuleBndrSig    x
@@ -445,6 +487,7 @@ type family XTick           x
 type family XBinTick        x
 type family XPragE          x
 type family XEmbTy          x
+type family XHole           x
 type family XForAll         x
 type family XQual           x
 type family XFunArr         x
@@ -651,8 +694,6 @@ type family XStarTy          x
 type family XKindSig         x
 type family XSpliceTy        x
 type family XDocTy           x
-type family XBangTy          x
-type family XRecTy           x
 type family XExplicitListTy  x
 type family XExplicitTupleTy x
 type family XTyLit           x
@@ -676,6 +717,11 @@ type family XXHsForAllTelescope x
 -- HsTyVarBndr type families
 type family XTyVarBndr   x
 type family XXTyVarBndr  x
+
+-- ---------------------------------------------------------------------
+-- HsConDeclRecField type families
+type family XConDeclRecField  x
+type family XXConDeclRecField x
 
 -- ---------------------------------------------------------------------
 -- ConDeclField type families
@@ -714,6 +760,7 @@ type family XIEName p
 type family XIEDefault p
 type family XIEPattern p
 type family XIEType p
+type family XIEData p
 type family XXIEWrappedName p
 
 

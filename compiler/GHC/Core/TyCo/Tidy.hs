@@ -1,5 +1,3 @@
-{-# OPTIONS_GHC -Wno-incomplete-uni-patterns   #-}
-
 -- | Tidying types and coercions for printing in error messages.
 module GHC.Core.TyCo.Tidy
   (
@@ -21,6 +19,7 @@ module GHC.Core.TyCo.Tidy
 import GHC.Prelude
 import GHC.Data.FastString
 
+import GHC.Core.Predicate( scopedSort )
 import GHC.Core.TyCo.Rep
 import GHC.Core.TyCo.FVs
 import GHC.Types.Name hiding (varName)
@@ -358,7 +357,7 @@ tidyCo env co
 
     go_cv cv = tidyTyCoVarOcc env cv
 
-    go_hole (CoercionHole cv r h) = (CoercionHole $! go_cv cv) r h
+    go_hole (CoercionHole cv r) = (CoercionHole $! go_cv cv) r
     -- Tidy even the holes; tidied types should have tidied kinds
 
 tidyCos :: TidyEnv -> [Coercion] -> [Coercion]

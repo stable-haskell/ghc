@@ -43,7 +43,6 @@ Library
     exposed-modules:
         Language.Haskell.TH
         Language.Haskell.TH.Lib
-        Language.Haskell.TH.Lib.Internal
         Language.Haskell.TH.Ppr
         Language.Haskell.TH.PprLib
         Language.Haskell.TH.Quote
@@ -53,6 +52,10 @@ Library
 
     build-depends:
         base        >= 4.11 && < 4.22,
+        -- We don't directly depend on any of the modules from `ghc-internal`
+        -- But we need to depend on it to work around a hadrian bug.
+        -- See: https://gitlab.haskell.org/ghc/ghc/-/issues/25705
+        ghc-internal == @ProjectVersionForLib@.*,
         ghc-boot-th == @ProjectVersionMunged@
 
     other-modules:

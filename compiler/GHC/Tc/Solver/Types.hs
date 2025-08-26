@@ -14,6 +14,7 @@ module GHC.Tc.Solver.Types (
 
     TcAppMap, emptyTcAppMap, isEmptyTcAppMap,
     insertTcApp, alterTcApp, filterTcAppMap,
+    mapMaybeTcAppMap,
     tcAppMapToBag, foldTcAppMap, delTcApp,
 
     EqualCtList, filterEqualCtList, addToEqualCtList
@@ -114,6 +115,16 @@ filterTcAppMap f m = mapMaybeDTyConEnv one_tycon m
       where
         filtered_tm = filterTM f tm
 
+mapMaybeTcAppMap :: forall a b. (a -> Maybe b) -> TcAppMap a -> TcAppMap b
+mapMaybeTcAppMap f m = mapMaybeDTyConEnv one_tycon m
+  where
+    one_tycon :: ListMap LooseTypeMap a -> Maybe (ListMap LooseTypeMap b)
+    one_tycon tm
+      | isEmptyTM mapped_tm = Nothing
+      | otherwise           = Just mapped_tm
+      where
+        mapped_tm = mapMaybeTM f tm
+
 tcAppMapToBag :: TcAppMap a -> Bag a
 tcAppMapToBag m = foldTcAppMap consBag m emptyBag
 
@@ -134,7 +145,7 @@ emptyDictMap = emptyTcAppMap
 findDict :: DictMap a -> CtLoc -> Class -> [Type] -> Maybe a
 findDict m loc cls tys
   | Just {} <- isCallStackPred cls tys
-  , isPushCallStackOrigin (ctLocOrigin loc)
+  , Just {} <- isPushCallStackOrigin_maybe (ctLocOrigin loc)
   = Nothing             -- See Note [Solving CallStack constraints]
 
   | otherwise
@@ -156,7 +167,7 @@ foldDicts = foldTcAppMap
 
 {- Note [Solving CallStack constraints]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-See also Note [Overview of implicit CallStacks] in GHc.Tc.Types.Evidence.
+See Note [Overview of implicit CallStacks] in GHc.Tc.Types.Evidence.
 
 Suppose f :: HasCallStack => blah.  Then
 
@@ -167,7 +178,7 @@ Suppose f :: HasCallStack => blah.  Then
     IP "callStack" CallStack
   See Note [Overview of implicit CallStacks] in GHC.Tc.Types.Evidence
 
-* We cannonicalise such constraints, in GHC.Tc.Solver.Dict.canDictNC, by
+* We canonicalise such constraints, in GHC.Tc.Solver.Dict.canDictNC, by
   pushing the call-site info on the stack, and changing the CtOrigin
   to record that has been done.
    Bind:  s1 = pushCallStack <site-info> s2

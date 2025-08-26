@@ -4,6 +4,7 @@
 
 module GHC.Driver.Errors.Types (
     GhcMessage(..)
+  , AnyGhcDiagnostic
   , GhcMessageOpts(..)
   , DriverMessage(..)
   , DriverMessageOpts(..)
@@ -98,6 +99,7 @@ data GhcMessage where
 
   deriving Generic
 
+type AnyGhcDiagnostic = UnknownDiagnosticFor GhcMessage
 
 data GhcMessageOpts = GhcMessageOpts { psMessageOpts :: DiagnosticOpts PsMessage
                                      , tcMessageOpts :: DiagnosticOpts TcRnMessage
@@ -185,7 +187,7 @@ data DriverMessage where
 
      Test cases: None.
   -}
-  DriverModuleNotFound :: !ModuleName -> DriverMessage
+  DriverModuleNotFound :: !UnitId -> !ModuleName -> DriverMessage
 
   {-| DriverFileModuleNameMismatch occurs if a module 'A' is defined in a file with a different name.
       The first field is the name written in the source code; the second argument is the name extracted

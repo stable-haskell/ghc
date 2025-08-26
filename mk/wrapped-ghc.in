@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Echo the invocation, expanding any @response-file arguments inline by cat-ing them
+expand_and_echo() {
+  {
+    printf 'ghc'
+    local arg file
+    for arg in "$@"; do
+      if [[ "$arg" == @* ]]; then
+        file="${arg#@}"
+        if [[ -f "$file" ]]; then
+          printf ' '
+          tr '\n' ' ' < "$file"
+          continue
+        fi
+      fi
+      printf ' %s' "$arg"
+    done
+    printf '\n'
+  } >&2
+}
+
+expand_and_echo "$@"
+
+# Resolve the directory of this script and exec the real ghc next to it
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+exec "$DIR/ghc" "$@"

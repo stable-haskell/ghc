@@ -156,6 +156,7 @@ stage1Packages = do
         , ghcInternal
         , ghcPkg
         , ghcPrim
+        , haddock
         , haskeline
         , hp2ps
         , hsc2hs
@@ -174,8 +175,7 @@ stage1Packages = do
         , if winTarget then win32 else unix
         ]
       , when (not cross)
-        [ haddock
-        , hpcBin
+        [ hpcBin
         , iserv
         , runGhc
         , ghcToolchainBin
@@ -282,7 +282,8 @@ defaultFlavour = Flavour
     , ghcThreaded        = const True
     , ghcDebugAssertions = const False
     , ghcSplitSections   = False
-    , ghcDocs            = cmdDocsArgs }
+    , ghcDocs            = cmdDocsArgs
+    , hashUnitIds        = False }
 
 -- | Default logic for determining whether to build
 --   dynamic GHC programs.

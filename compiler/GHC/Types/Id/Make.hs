@@ -1144,18 +1144,18 @@ dataConSrcToImplBang
    -> HsImplBang
 
 dataConSrcToImplBang bang_opts fam_envs arg_ty
-                     (HsSrcBang ann (HsBang unpk NoSrcStrict))
+                     (HsSrcBang ann unpk NoSrcStrict)
   | bang_opt_strict_data bang_opts -- StrictData => strict field
   = dataConSrcToImplBang bang_opts fam_envs arg_ty
-                  (mkHsSrcBang ann unpk SrcStrict)
+                  (HsSrcBang ann unpk SrcStrict)
   | otherwise -- no StrictData => lazy field
   = HsLazy
 
-dataConSrcToImplBang _ _ _ (HsSrcBang _ (HsBang _ SrcLazy))
+dataConSrcToImplBang _ _ _ (HsSrcBang _ _ SrcLazy)
   = HsLazy
 
 dataConSrcToImplBang bang_opts fam_envs arg_ty
-                     (HsSrcBang _ (HsBang unpk_prag SrcStrict))
+                     (HsSrcBang _ unpk_prag SrcStrict)
   | isUnliftedType (scaledThing arg_ty)
     -- NB: non-newtype data constructors can't have representation-polymorphic fields
     -- so this is OK.
@@ -1470,7 +1470,7 @@ shouldUnpackArgTy bang_opts prag fam_envs arg_ty
              -- We'd get a black hole if we used dataConImplBangs
 
          ok_arg :: NameSet -> (Scaled Type, HsSrcBang) -> Bool
-         ok_arg dcs (Scaled _ ty, HsSrcBang _ (HsBang unpack_prag str_prag))
+         ok_arg dcs (Scaled _ ty, HsSrcBang _ unpack_prag str_prag)
            | strict_field str_prag
            , Just data_cons <- unpackable_type_datacons (topNormaliseType fam_envs ty)
            , should_unpack_conservative unpack_prag data_cons  -- Wrinkle (W3)
@@ -1540,39 +1540,87 @@ shouldUnpackArgTy bang_opts prag fam_envs arg_ty
 
 
 
--- Given a type already assumed to have been normalized by topNormaliseType,
--- unpackable_type_datacons ty = Just datacons
--- iff ty is of the form
---     T ty1 .. tyn
--- and T is an algebraic data type (not newtype), in which no data
--- constructors have existentials, and datacons is the list of data
--- constructors of T.
 unpackable_type_datacons :: Type -> Maybe [DataCon]
+-- Given a type already assumed to have been normalized by topNormaliseType,
+--    unpackable_type_datacons (T ty1 .. tyn) = Just datacons
+-- iff the type can be unpacked (see Note [Unpacking GADTs and existentials])
+-- and `datacons` are the data constructors of T
 unpackable_type_datacons ty
   | Just (tc, _) <- splitTyConApp_maybe ty
-  , not (isNewTyCon tc)  -- Even though `ty` has been normalised, it could still
-                         -- be a /recursive/ newtype, so we must check for that
+  , not (isNewTyCon tc)
+      -- isNewTyCon: even though `ty` has been normalised, whic includes looking
+      -- through newtypes, it could still be a /recursive/ newtype, so we must
+      -- check for that case
   , Just cons <- tyConDataCons_maybe tc
-  , not (null cons)      -- Don't upack nullary sums; no need.
-                         -- They already take zero bits
-  , all (null . dataConExTyCoVars) cons
-  = Just cons -- See Note [Unpacking GADTs and existentials]
+  , unpackable_cons cons
+  = Just cons
   | otherwise
   = Nothing
+  where
+    unpackable_cons :: [DataCon] -> Bool
+    -- True if we can unpack a value of type (T t1 .. tn),
+    -- where T is an algebraic data type with these constructors
+    -- See Note [Unpacking GADTs and existentials]
+    unpackable_cons []   -- Don't unpack nullary sums; no need.
+      = False            -- They already take zero bits; see (UC0)
+
+    unpackable_cons [con]   -- Exactly one data constructor; see (UC1)
+      = null (dataConExTyCoVars con)
+
+    unpackable_cons cons  -- More than one data constructor; see (UC2)
+      = all isVanillaDataCon cons
 
 {-
 Note [Unpacking GADTs and existentials]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-There is nothing stopping us unpacking a data type with equality
-components, like
-  data Equal a b where
-    Equal :: Equal a a
+Can we unpack a value of an algebraic data type T? For example
+   data D a = MkD {-# UNPACK #-} (T a)
+Can we unpack that (T a) field?
 
-And it'd be fine to unpack a product type with existential components
-too, but that would require a bit more plumbing, so currently we don't.
+Three cases to consider in `unpackable_cons`
 
-So for now we require: null (dataConExTyCoVars data_con)
-See #14978
+(UC0) No data constructors; a nullary sum type.  This already takes zero
+      bits so there is no point in unpacking it.
+
+(UC1) Single-constructor types (products).  We can just represent it by
+   its fields. For example, if `T` is defined as:
+      data T a = MkT a a Int
+   then we can unpack it as follows.  The worker for MkD takes three unpacked fields:
+       data D a = MkD a a Int
+       $MkD :: T a -> D a
+       $MkD (MkT a1 a2 i) = MkD a1 a2 i
+
+   We currently /can't/ do this if T has existentially-bound type variables,
+   hence:   null (dataConExTyCoVars con)   in `unpackable_cons`.
+   But see also (UC3) below.
+
+   But we /can/ do it for (some) GADTs, such as:
+      data Equal a b where { Equal :: Equal a a }
+      data Wom a where { Wom1 :: Int -> Wom Bool }
+   We will get a MkD constructor that includes some coercion arguments,
+   but that is fine.   See #14978.  We still can't accommodate existentials,
+   but these particular examples don't use existentials.
+
+(UC2) Multi-constructor types, e.g.
+        data T a = T1 a | T2 Int a
+  Here we unpack the field to an unboxed sum type, thus:
+    data D a = MkD (# a | (# Int, a #) #)
+
+  However, now we can't deal with GADTs at all, because we'd need an
+  unboxed sum whose component was a unboxed tuple, whose component(s)
+  have kind (CONSTRAINT r); and that's not well-kinded.  Hence the
+    all isVanillaDataCon
+  condition in `unpackable_cons`. See #25672.
+
+(UC3)  For single-constructor types, with some more plumbing we could
+   allow existentials. e.g.
+       data T a = forall b. MkT a (b->Int) b
+   could unpack to
+       data D a = forall b. MkD a (b->Int) b
+       $MkD :: T a -> D a
+       $MkD (MkT @b x f y) = MkD @b x f y
+   Eminently possible, but more plumbing needed.
+
 
 Note [Unpack one-wide fields]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
