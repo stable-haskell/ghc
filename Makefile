@@ -79,7 +79,7 @@
 #       submodules.
 
 SHELL := bash
-.SHELLFLAGS := -eu -o pipefail -O globstar -c
+.SHELLFLAGS := -eu -o pipefail -c
 
 VERBOSE ?= 0
 
