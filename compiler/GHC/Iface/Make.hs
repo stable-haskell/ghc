@@ -156,7 +156,7 @@ mkFullIface hsc_env partial_iface mb_stg_infos mb_cmm_infos stubs foreign_files 
     putDumpFileMaybe (hsc_logger hsc_env) Opt_D_dump_hi "FINAL INTERFACE" FormatText
       (pprModIface unit_state full_iface)
     final_iface <- shareIface (hsc_NC hsc_env) (flagsToIfCompression $ hsc_dflags hsc_env) full_iface
-    return final_iface
+    return $ final_iface
 
 -- | Compress an 'ModIface' and share as many values as possible, depending on the 'CompressionIFace' level.
 -- See Note [Sharing of ModIface].
