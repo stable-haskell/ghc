@@ -9,43 +9,59 @@ on:
   push:
     branches: [master]
 
+  workflow_dispatch:
+
 jobs:
   cabal:
-    name: ${{ matrix.os }} / ghc ${{ matrix.ghc }}
-    runs-on: ${{ matrix.os }}
+    name: ${{ matrix.plat }} / ghc ${{ matrix.ghc }}
+    runs-on: "${{ fromJSON('{\"x86_64-linux\": \"ubuntu-24.04\", \"aarch64-linux\": \"ubuntu-24.04-arm\", \"x86_64-darwin\": \"macos-latest\", \"aarch64-darwin\": \"macos-latest\"}')[matrix.plat] }}"
+
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest]
-        ghc: ['9.6.5'] # bootstrapping compiler
+        plat: [x86_64-linux, aarch64-linux, x86_64-darwin, aarch64-darwin]
+        ghc: ['98'] # bootstrapping compiler
 
     steps:
     - uses: actions/checkout@v4
       with:
         submodules: "recursive"
 
-    - uses: haskell-actions/setup@v2
-      id: setup
-      name: Setup Haskell tools
+    - uses: input-output-hk/actions/devx@latest
       with:
-        ghc-version: ${{ matrix.ghc }}
-        cabal-version: "latest"
-        cabal-update: true
+        platform: ${{ matrix.plat }}
+        compiler-nix-name: 'ghc98'
+        minimal: true
+        ghc: true
 
-    - name: Install Alex and Happy
-      run: |
-        cabal install alex
-        cabal install happy
+    - name: Update hackage
+      shell: devx {0}
+      run: cabal update
 
     - name: Configure the build
-      run: |
-        ./boot
-        ./configure
-
-    - name: Build Hadrian
-      run: |
-        ./hadrian/build --version
+      shell: devx {0}
+      run: ./configure
 
     - name: Build the bindist
-      run: |
-        ./hadrian/build --flavour=release -j binary-dist-dir --docs=none
+      shell: devx {0}
+      run: make CABAL=$PWD/_build/stage0/bin/cabal
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.plat }}-bindist
+        path: _build/bindist
+
+    - name: Run the testsuite
+      shell: devx {0}
+      run: make test CABAL=$PWD/_build/stage0/bin/cabal
+
+    - name: Upload test results
+      uses: actions/upload-artifact@v4
+      if: ${{ !cancelled() }} # upload test results even if the testsuite failed to pass
+      with:
+        name: testsuite-results
+        path: |
+          _build/test-perf.csv
+          _build/test-summary.txt
+          _build/test-junit.xml
