@@ -143,6 +143,7 @@ define GHC_INFO
 $(shell sh -c "$(GHC) --info | $(GHC0) -e 'getContents >>= foldMap putStrLn . lookup \"$1\" . read'")
 endef
 
+HOST_PLATFORM   = $(call GHC_INFO,Host platform)
 TARGET_PLATFORM = $(call GHC_INFO,target platform string)
 TARGET_ARCH     = $(call GHC_INFO,target arch)
 TARGET_OS       = $(call GHC_INFO,target os)
@@ -815,14 +816,14 @@ _build/bindist: stage2 driver/ghc-usage.txt driver/ghci-usage.txt
 	@cp -rfp _build/stage2/bin/* $@/bin/
 	# Copy libraries and settings from stage2 lib
 	@cp -rfp _build/stage2/lib/{package.conf.d,settings,template-hsc.h} $@/lib/
-	@mkdir -p $@/lib/x86_64-linux
+	@mkdir -p $@/lib/$(HOST_PLATFORM)
 	@cd $@/lib/package.conf.d ; \
 		for pkg in *.conf ; do \
 		  pkgname=`echo $${pkg} | sed 's/-[0-9.]*\(-[0-9a-zA-Z]*\)\?\.conf//'` ; \
 		  pkgnamever=`echo $${pkg} | sed 's/\.conf//'` ; \
-		  mkdir -p $(CURDIR)/$@/lib/x86_64-linux/$${pkg%.conf} ; \
-		  cp -rfp $(CURDIR)/_build/stage2/build/host/x86_64-linux/ghc-*/$${pkg%.conf}/build/* $(CURDIR)/$@/lib/x86_64-linux/$${pkg%.conf} ; \
-		  $(call patchpackageconf,$${pkgname},$${pkg},../../..,x86_64-linux,$${pkgnamever}) ; \
+		  mkdir -p $(CURDIR)/$@/lib/$(HOST_PLATFORM)/$${pkg%.conf} ; \
+		  cp -rfp $(CURDIR)/_build/stage2/build/host/*/ghc-*/$${pkg%.conf}/build/* $(CURDIR)/$@/lib/$(HOST_PLATFORM)/$${pkg%.conf} ; \
+		  $(call patchpackageconf,$${pkgname},$${pkg},../../..,$(HOST_PLATFORM),$${pkgnamever}) ; \
 		done
 	# Copy driver usage files
 	@cp -rfp driver/ghc-usage.txt $@/lib/
@@ -844,7 +845,7 @@ _build/bindist/ghc.tar.gz: _build/bindist
 		lib/package.conf.d \
 		lib/settings \
 		lib/template-hsc.h \
-		lib/x86_64-linux
+		lib/$(HOST_PLATFORM)
 
 _build/bindist/lib/targets/%: _build/bindist driver/ghc-usage.txt driver/ghci-usage.txt stage3-%
 	@echo "::group::Creating binary distribution in $@"
@@ -880,7 +881,7 @@ $(GHC1) $(GHC2): | hackage
 hackage: _build/packages/hackage.haskell.org/01-index.tar.gz
 _build/packages/hackage.haskell.org/01-index.tar.gz: | $(CABAL)
 	@mkdir -p $(@D)
-	$(CABAL) $(CABAL_ARGS) update --index-state 2025-04-22T01:25:40Z
+	$(CABAL) $(CABAL_ARGS) update --index-state @1745256340
 
 # booted depends on successful source preparation
 _build/booted:
