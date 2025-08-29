@@ -911,7 +911,7 @@ findAndReadIface hsc_env doc_str mod wanted_mod hi_boot_file = do
   -- TODO: make this check a function
   if mod `installedModuleEq` gHC_PRIM
       then do
-          let iface = getGhcPrimIface hsc_env
+          let iface = getGhcPrimIface (hsc_hooks hsc_env)
           return (Succeeded (iface, panic "GHC.Prim ModLocation (findAndReadIface)"))
       else do
           -- Look for the file
