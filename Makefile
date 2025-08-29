@@ -96,6 +96,8 @@ EMCXX ?= em++
 EMAR ?= emar
 EMRANLIB ?= emranlib
 
+GHC_CONFIGURE_ARGS ?=
+
 EXTRA_LIB_DIRS ?=
 EXTRA_INCLUDE_DIRS ?=
 
@@ -889,7 +891,7 @@ _build/booted:
 	@mkdir -p _build/logs
 	./boot |& tee _build/logs/boot.log
 	@echo ">>> Running ./configure script..."
-	./configure
+	./configure $(GHC_CONFIGURE_ARGS)
 	touch $@
 	@echo "::endgroup::"
 
