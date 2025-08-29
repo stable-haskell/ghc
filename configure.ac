@@ -156,6 +156,13 @@ AC_ARG_VAR(AR_STAGE0, [Archive command (bootstrap)])
 dnl RTS ways supplied by the bootstrapping compiler.
 AC_ARG_VAR(RTS_WAYS_STAGE0, [RTS ways])
 
+dnl Find the bootstrap GHC compiler
+AC_ARG_VAR(GHC, [GHC compiler command])
+if test -z "$GHC"; then
+  AC_PATH_PROG(GHC, ghc)
+fi
+WithGhc=$GHC
+
 if test "$WithGhc" != ""; then
   FPTOOLS_GHC_VERSION([GhcVersion], [GhcMajVersion], [GhcMinVersion], [GhcPatchLevel])dnl
 
@@ -995,6 +1002,7 @@ AC_CONFIG_FILES([
     compiler/ghc.cabal:compiler/ghc.cabal.in
     libraries/ghc-boot/ghc-boot.cabal:libraries/ghc-boot/ghc-boot.cabal.in
     libraries/ghc-boot-th/ghc-boot-th.cabal:libraries/ghc-boot-th/ghc-boot-th.cabal.in
+    libraries/ghc-boot-th-next/ghc-boot-th-next.cabal:libraries/ghc-boot-th-next/ghc-boot-th-next.cabal.in
     libraries/ghc-heap/ghc-heap.cabal:libraries/ghc-heap/ghc-heap.cabal.in
     libraries/template-haskell/template-haskell.cabal:libraries/template-haskell/template-haskell.cabal.in
     libraries/ghci/ghci.cabal:libraries/ghci/ghci.cabal.in
