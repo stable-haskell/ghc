@@ -889,7 +889,7 @@ _build/packages/hackage.haskell.org/01-index.tar.gz: | $(CABAL)
 _build/booted:
 	@echo "::group::Running ./boot script..."
 	@mkdir -p _build/logs
-	./boot |& tee _build/logs/boot.log
+	./boot
 	@echo ">>> Running ./configure script..."
 	./configure $(GHC_CONFIGURE_ARGS)
 	touch $@
