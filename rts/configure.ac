@@ -522,7 +522,7 @@ rm -f external-symbols.flags
 ]
 AS_IF(
   [test "$HAVE_LIBDL" = 1],
-  [echo "extra-libraries: dl" >> rts.buildinfo]
+  [echo "extra-libraries: dl" >> rts.buildinfo])
 
 dnl --------------------------------------------------------------
 dnl Generate derived constants
