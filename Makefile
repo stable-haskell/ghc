@@ -637,7 +637,8 @@ stage2: $(addprefix _build/stage2/bin/,$(STAGE2_EXECUTABLES)) _build/stage2/lib/
 
 _build/stage2/lib/targets/%:
 	@mkdir -p $@
-	@mkdir -p _build/stage2/lib/targets/
+	@mkdir -p _build/stage3/lib/targets/$(@F)
+	@rm -f _build/stage2/lib/targets/$(@F)
 	@ln -sf ../../../stage3/lib/targets/$(@F) _build/stage2/lib/targets/$(@F)
 
 _build/stage3/bin/%-ghc-pkg: _build/stage2/bin/ghc-pkg
