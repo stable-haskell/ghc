@@ -635,7 +635,7 @@ stage2: $(addprefix _build/stage2/bin/,$(STAGE2_EXECUTABLES)) _build/stage2/lib/
 
 # --- Stage 3 generic ---
 
-_build/stage3/lib/targets/%:
+_build/stage2/lib/targets/%:
 	@mkdir -p $@
 	@mkdir -p _build/stage2/lib/targets/
 	@ln -sf ../../../stage3/lib/targets/$(@F) _build/stage2/lib/targets/$(@F)
@@ -675,7 +675,7 @@ endef
 .PHONY: stage3-javascript-unknown-ghcjs
 stage3-javascript-unknown-ghcjs: _build/stage3/lib/targets/javascript-unknown-ghcjs/lib/settings javascript-unknown-ghcjs-libs _build/stage3/lib/targets/javascript-unknown-ghcjs/lib/package.conf.d/package.cache
 
-_build/stage3/lib/targets/javascript-unknown-ghcjs/lib/settings: _build/stage3/lib/targets/javascript-unknown-ghcjs _build/stage1/bin/ghc-toolchain-bin
+_build/stage3/lib/targets/javascript-unknown-ghcjs/lib/settings: _build/stage2/lib/targets/javascript-unknown-ghcjs _build/stage1/bin/ghc-toolchain-bin
 	@mkdir -p $(@D)
 	_build/stage1/bin/ghc-toolchain-bin $(GHC_TOOLCHAIN_ARGS) --triple javascript-unknown-ghcjs --output-settings -o $@ --cc $(EMCC) --cxx $(EMCXX) --ar $(EMAR) --ranlib $(EMRANLIB)
 
@@ -700,7 +700,7 @@ javascript-unknown-ghcjs-libs: _build/stage3/bin/javascript-unknown-ghcjs-ghc-pk
 .PHONY: stage3-x86_64-musl-linux
 stage3-x86_64-musl-linux: x86_64-musl-linux-libs _build/stage3/lib/targets/x86_64-musl-linux/lib/package.conf.d/package.cache
 
-_build/stage3/lib/targets/x86_64-musl-linux/lib/settings: _build/stage3/lib/targets/x86_64-musl-linux _build/stage1/bin/ghc-toolchain-bin
+_build/stage3/lib/targets/x86_64-musl-linux/lib/settings: _build/stage2/lib/targets/x86_64-musl-linux _build/stage1/bin/ghc-toolchain-bin
 	@mkdir -p $(@D)
 	_build/stage1/bin/ghc-toolchain-bin $(GHC_TOOLCHAIN_ARGS) --triple x86_64-musl-linux --output-settings -o $@ --cc x86_64-unknown-linux-musl-cc --cxx x86_64-unknown-linux-musl-c++ --ar x86_64-unknown-linux-musl-ar --ranlib x86_64-unknown-linux-musl-ranlib --ld x86_64-unknown-linux-musl-ld
 
@@ -725,7 +725,7 @@ x86_64-musl-linux-libs: _build/stage3/bin/x86_64-musl-linux-ghc-pkg _build/stage
 .PHONY: stage3-wasm32-unknown-wasi
 stage3-wasm32-unknown-wasi: wasm32-unknown-wasi-libs _build/stage3/lib/targets/wasm32-unknown-wasi/lib/package.conf.d/package.cache _build/stage3/lib/targets/wasm32-unknown-wasi/lib/dyld.mjs _build/stage3/lib/targets/wasm32-unknown-wasi/lib/post-link.mjs _build/stage3/lib/targets/wasm32-unknown-wasi/lib/prelude.mjs
 
-_build/stage3/lib/targets/wasm32-unknown-wasi/lib/settings: _build/stage3/lib/targets/wasm32-unknown-wasi _build/stage1/bin/ghc-toolchain-bin
+_build/stage3/lib/targets/wasm32-unknown-wasi/lib/settings: _build/stage2/lib/targets/wasm32-unknown-wasi _build/stage1/bin/ghc-toolchain-bin
 	@mkdir -p $(@D)
 	PATH=/home/hasufell/.ghc-wasm/wasi-sdk/bin:$(PATH) _build/stage1/bin/ghc-toolchain-bin $(GHC_TOOLCHAIN_ARGS) --triple wasm32-unknown-wasi --output-settings -o $@ --cc wasm32-wasi-clang --cxx wasm32-wasi-clang++ --ar ar --ranlib ranlib --ld wasm-ld --merge-objs wasm-ld --merge-objs-opt="-r" --disable-ld-override --disable-tables-next-to-code $(foreach opt,$(WASM_CC_OPTS),--cc-opt=$(opt)) $(foreach opt,$(WASM_CXX_OPTS),--cxx-opt=$(opt))
 
@@ -734,11 +734,6 @@ _build/stage3/lib/targets/wasm32-unknown-wasi/lib/package.conf.d/package.cache: 
 	@rm -rf $(@D)/*
 	cp -rfp _build/stage3/wasm32-unknown-wasi/packagedb/host/*/* $(@D)
 	_build/stage3/bin/wasm32-unknown-wasi-ghc-pkg recache
-
-# ghc-toolchain borks unlit
-_build/stage3/lib/targets/wasm32-unknown-wasi/bin/unlit: _build/stage2/bin/unlit
-	@mkdir -p $(@D)
-	cp -rfp $< $@
 
 .PHONY: wasm32-unknown-wasi-libs
 wasm32-unknown-wasi-libs: private GHC=$(abspath _build/stage3/bin/wasm32-unknown-wasi-ghc)
