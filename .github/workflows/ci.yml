@@ -38,9 +38,13 @@ jobs:
       shell: devx {0}
       run: cabal update
 
-    - name: Configure the build
-      shell: devx {0}
-      run: ./configure
+    # The Makefile will run configure (and boot 😞), we also need to create a
+    # synthetic package before running configure.  Once this nuissance is fixed
+    # we can do proper configure + make again. Until then... we have to live
+    # with the hack of running everything from the make target.
+    # - name: Configure the build
+    #   shell: devx {0}
+    #   run: ./configure
 
     - name: Build the bindist
       shell: devx {0}
