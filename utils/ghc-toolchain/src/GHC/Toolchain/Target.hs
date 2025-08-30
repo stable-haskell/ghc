@@ -72,8 +72,8 @@ data Target = Target
       -- Windows-specific tools
     , tgtWindres :: Maybe Program
 
-      -- Darwin-specific tools
-    , tgtOtool   :: Maybe Program
+      -- Mac specific
+    , tgtOtool:: Maybe Program
     , tgtInstallNameTool :: Maybe Program
     }
     deriving (Read, Eq, Ord)
