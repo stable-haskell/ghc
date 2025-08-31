@@ -16,7 +16,7 @@ main = do
   getGhcFieldOrFail fields "TargetARCH_CPP" "Host architecture"
   getGhcFieldOrFail fields "RTSWay" "RTS way"
 
-  -- support for old GHCs (pre 9.13): infer target platform by querying the rts...
+  -- support for old GHCs (pre 9.14): infer target platform by querying the rts...
   let query_rts = isJust (lookup "Target platform" fields)
   when query_rts $ do
     getGhcFieldOrFail fields "WORDSIZE" "Word size"

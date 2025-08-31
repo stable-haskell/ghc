@@ -137,7 +137,7 @@ To start GHCi with the browser mode, use the following GHC flag:
 ::
 
    $ wasm32-wasi-ghc --interactive -fghci-browser
-   GHCi, version 9.13.20250320: https://www.haskell.org/ghc/  :? for help
+   GHCi, version 9.14.20250320: https://www.haskell.org/ghc/  :? for help
    Open http://127.0.0.1:37517/main.html or import http://127.0.0.1:37517/main.js to boot ghci
 
 At this point, the GHCi session is frozen. The ``dyld`` script acts as a
