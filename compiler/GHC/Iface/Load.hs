@@ -921,7 +921,8 @@ findAndReadIface hsc_env doc_str mod wanted_mod hi_boot_file = do
                 -- See Note [Home module load error]
                 case mhome_unit of
                   Just home_unit
-                    | isHomeInstalledModule home_unit mod
+                    | ( isHomeInstalledModule home_unit mod
+                        || HUG.memberHugUnitId (moduleUnit mod) (hsc_HUG hsc_env) )
                     , not (isOneShot (ghcMode dflags))
                     -> return (Failed (HomeModError mod loc))
                   _ -> do
