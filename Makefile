@@ -508,7 +508,8 @@ endef
 define copy_all_stage3_h
   $(call copy_rts_headers_h,$1)
   $(call copy_rts_fs_h,$1)
-  if [ "$2" = "javascript-unknown-ghcjs" ] ; then $(call copy_rts_js_h,$1) ; else $(call copy_rts_h,$1) ; fi
+  $(call copy_rts_h,$1)
+  if [ "$2" = "javascript-unknown-ghcjs" ] ; then $(call copy_rts_js_h,$1) ; fi
   $(call copy_ghc_internal_h,$1)
   $(call copy_process_h,$1)
   $(call copy_bytestring_h,$1)
@@ -937,3 +938,4 @@ test: _build/bindist
 
 # Inform Make that these are not actual files if they get deleted by other means
 .PHONY: clean clean-stage1 clean-stage2 clean-stage3 distclean test all configure
+
