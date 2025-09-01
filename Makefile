@@ -285,6 +285,7 @@ STAGE3_LIBS := \
 	file-io \
 	filepath \
 	ghc-bignum \
+	ghci \
 	hpc \
 	integer-gmp \
 	mtl \
@@ -675,7 +676,7 @@ endef
 # --- Stage 3 javascript build ---
 
 .PHONY: stage3-javascript-unknown-ghcjs
-stage3-javascript-unknown-ghcjs: _build/stage3/lib/targets/javascript-unknown-ghcjs/lib/settings javascript-unknown-ghcjs-libs _build/stage3/lib/targets/javascript-unknown-ghcjs/lib/package.conf.d/package.cache
+stage3-javascript-unknown-ghcjs: _build/stage3/lib/targets/javascript-unknown-ghcjs/lib/settings javascript-unknown-ghcjs-libs _build/stage3/lib/targets/javascript-unknown-ghcjs/lib/package.conf.d/package.cache _build/stage3/lib/targets/javascript-unknown-ghcjs/lib/dyld.mjs _build/stage3/lib/targets/javascript-unknown-ghcjs/lib/post-link.mjs _build/stage3/lib/targets/javascript-unknown-ghcjs/lib/prelude.mjs _build/stage3/lib/targets/javascript-unknown-ghcjs/lib/ghc-interp.js
 
 _build/stage3/lib/targets/javascript-unknown-ghcjs/lib/settings: _build/stage2/lib/targets/javascript-unknown-ghcjs _build/stage1/bin/ghc-toolchain-bin
 	@mkdir -p $(@D)
@@ -725,7 +726,7 @@ x86_64-musl-linux-libs: _build/stage3/bin/x86_64-musl-linux-ghc-pkg _build/stage
 # --- Stage 3 wasm build ---
 
 .PHONY: stage3-wasm32-unknown-wasi
-stage3-wasm32-unknown-wasi: wasm32-unknown-wasi-libs _build/stage3/lib/targets/wasm32-unknown-wasi/lib/package.conf.d/package.cache _build/stage3/lib/targets/wasm32-unknown-wasi/lib/dyld.mjs _build/stage3/lib/targets/wasm32-unknown-wasi/lib/post-link.mjs _build/stage3/lib/targets/wasm32-unknown-wasi/lib/prelude.mjs
+stage3-wasm32-unknown-wasi: wasm32-unknown-wasi-libs _build/stage3/lib/targets/wasm32-unknown-wasi/lib/package.conf.d/package.cache _build/stage3/lib/targets/wasm32-unknown-wasi/lib/dyld.mjs _build/stage3/lib/targets/wasm32-unknown-wasi/lib/post-link.mjs _build/stage3/lib/targets/wasm32-unknown-wasi/lib/prelude.mjs _build/stage3/lib/targets/wasm32-unknown-wasi/lib/ghc-interp.js
 
 _build/stage3/lib/targets/wasm32-unknown-wasi/lib/settings: _build/stage2/lib/targets/wasm32-unknown-wasi _build/stage1/bin/ghc-toolchain-bin
 	@mkdir -p $(@D)
@@ -762,7 +763,7 @@ _build/stage3/lib/targets/wasm32-unknown-wasi/lib/prelude.mjs:
 	@cp -f utils/jsffi/prelude.mjs $@
 	@chmod +x $@
 
-_build/stage3/lib/targets/wasm32-unknown-wasi/lib/ghc-interp.js:
+_build/stage3/lib/targets/%/lib/ghc-interp.js:
 	@mkdir -p $(@D)
 	@cp -f ghc-interp.js $@
 
