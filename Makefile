@@ -938,5 +938,5 @@ test: _build/bindist
 	@echo "::endgroup::"
 
 # Inform Make that these are not actual files if they get deleted by other means
-.PHONY: clean clean-stage1 clean-stage2 clean-stage3 distclean test all configure
+.PHONY: clean clean-stage1 clean-stage2 clean-stage3 distclean test all
 
