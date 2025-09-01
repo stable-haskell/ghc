@@ -549,7 +549,7 @@ _build/stage1/%: private GHC=$(GHC0)
 
 .PHONY: $(addprefix _build/stage1/bin/,$(STAGE1_EXECUTABLES))
 $(addprefix _build/stage1/bin/,$(STAGE1_EXECUTABLES)) &: private TARGET_PLATFORM=
-$(addprefix _build/stage1/bin/,$(STAGE1_EXECUTABLES)) &: $(CABAL) | _build/booted
+$(addprefix _build/stage1/bin/,$(STAGE1_EXECUTABLES)) &: $(CABAL) configure rts/configure libraries/ghc-internal/configure
 	@echo "::group::Building stage1 executables ($(STAGE1_EXECUTABLES))..."
 	# Force cabal to replan
 	rm -rf _build/stage1/cache
@@ -884,7 +884,7 @@ _build/packages/hackage.haskell.org/01-index.tar.gz: | $(CABAL)
 	$(CABAL) $(CABAL_ARGS) update --index-state @1745256340
 
 # booted depends on successful source preparation
-_build/booted:
+configure rts/configure libraries/ghc-internal/configure: configure.ac rts/configure.ac libraries/ghc-internal/configure.ac
 	@echo "::group::Running ./boot script..."
 	@mkdir -p _build/logs
 	./boot
