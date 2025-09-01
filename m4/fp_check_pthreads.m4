@@ -13,7 +13,6 @@ AC_DEFUN([FP_CHECK_PTHREAD_LIB],
   dnl Note that it is important that this happens before we AC_CHECK_LIB(thread)
   AC_MSG_CHECKING(whether -lpthread is needed for pthreads)
   AC_SEARCH_LIBS(pthread, [pthread_create],[UseLibpthread=YES],[UseLibpthread=NO])
-  AS_IF([test "$UseLibpthread" = "YES"], [], [UseLibpthread=NO])
 ])
 
 # FP_CHECK_PTHREAD_FUNCS

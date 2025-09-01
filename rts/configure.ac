@@ -527,10 +527,10 @@ AS_IF(
   [test "$HAVE_LIBDL" = 1],
   [EXTRA_LIBS="$EXTRA_LIBS dl"])
 AS_IF(
-  [test "$UseLibpthread" = "YES"]
+  [test "$UseLibpthread" = "YES"],
   [EXTRA_LIBS="$EXTRA_LIBS pthread"])
 AS_IF(
-  [test "x$EXTRA_LIBS" != "x"]
+  [test "x$EXTRA_LIBS" != "x"],
   [echo "extra-libraries: $EXTRA_LIBS" >> rts.buildinfo])
 
 dnl --------------------------------------------------------------
