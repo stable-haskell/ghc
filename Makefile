@@ -663,6 +663,25 @@ _build/stage3/lib/targets/%/bin/unlit: _build/stage2/bin/unlit
 	@mkdir -p $(@D)
 	cp -rfp $< $@
 
+_build/stage3/lib/targets/%/lib/dyld.mjs:
+	@mkdir -p $(@D)
+	@cp -f utils/jsffi/dyld.mjs $@
+	@chmod +x $@
+
+_build/stage3/lib/targets/%/lib/post-link.mjs:
+	@mkdir -p $(@D)
+	@cp -f utils/jsffi/post-link.mjs $@
+	@chmod +x $@
+
+_build/stage3/lib/targets/%/lib/prelude.mjs:
+	@mkdir -p $(@D)
+	@cp -f utils/jsffi/prelude.mjs $@
+	@chmod +x $@
+
+_build/stage3/lib/targets/%/lib/ghc-interp.js:
+	@mkdir -p $(@D)
+	@cp -f ghc-interp.js $@
+
 # $1 = TIPLET
 define build_cross
 	HADRIAN_SETTINGS='$(call HADRIAN_SETTINGS)' \
@@ -747,25 +766,6 @@ wasm32-unknown-wasi-libs: private CROSS_EXTRA_LIB_DIRS=$(WASM_EXTRA_LIB_DIRS)
 wasm32-unknown-wasi-libs: private CROSS_EXTRA_INCLUDE_DIRS=$(WASM_EXTRA_INCLUDE_DIRS)
 wasm32-unknown-wasi-libs: _build/stage3/bin/wasm32-unknown-wasi-ghc-pkg _build/stage3/bin/wasm32-unknown-wasi-ghc _build/stage3/bin/wasm32-unknown-wasi-hsc2hs _build/stage3/lib/targets/wasm32-unknown-wasi/lib/settings _build/stage3/lib/targets/wasm32-unknown-wasi/bin/unlit _build/stage3/lib/targets/wasm32-unknown-wasi/lib/package.conf.d
 	$(call build_cross,wasm32-unknown-wasi)
-
-_build/stage3/lib/targets/wasm32-unknown-wasi/lib/dyld.mjs:
-	@mkdir -p $(@D)
-	@cp -f utils/jsffi/dyld.mjs $@
-	@chmod +x $@
-
-_build/stage3/lib/targets/wasm32-unknown-wasi/lib/post-link.mjs:
-	@mkdir -p $(@D)
-	@cp -f utils/jsffi/post-link.mjs $@
-	@chmod +x $@
-
-_build/stage3/lib/targets/wasm32-unknown-wasi/lib/prelude.mjs:
-	@mkdir -p $(@D)
-	@cp -f utils/jsffi/prelude.mjs $@
-	@chmod +x $@
-
-_build/stage3/lib/targets/%/lib/ghc-interp.js:
-	@mkdir -p $(@D)
-	@cp -f ghc-interp.js $@
 
 # --- Bindist ---
 
