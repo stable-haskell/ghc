@@ -178,7 +178,7 @@ dnl Check for libraries
 dnl ################################################################
 
 dnl ** check whether we need -ldl to get dlopen()
-AC_SEARCH_LIBS([dl], [dlopen], [HAVE_LIBDL=1])
+AC_SEARCH_LIBS([dlopen], [dl], [HAVE_LIBDL=1])
 dnl ** check whether we have dlinfo
 AC_CHECK_FUNCS([dlinfo])
 
