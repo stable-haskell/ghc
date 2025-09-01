@@ -501,9 +501,9 @@ cat $srcdir/external-symbols.list.in \
     || exit 1
 
 if [ "$CABAL_FLAG_leading_underscore" = 1 ]; then
-    sedExpr='s/^(.*)$/  "-optl-Wl,-u,_\1"/'
+    sedExpr='s/^(.*)$/  "-Wl,-u,_\1"/'
 else
-    sedExpr='s/^(.*)$/  "-optl-Wl,-u,\1"/'
+    sedExpr='s/^(.*)$/  "-Wl,-u,\1"/'
 fi
 sed -E -e "${sedExpr}" external-symbols.list > external-symbols.flags
 unset sedExpr
