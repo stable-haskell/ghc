@@ -50,9 +50,7 @@ import GHCi.Message         ( Pipe )
 
 import GHC.Data.FastString.Env
 import GHC.Platform
-#if defined(HAVE_INTERNAL_INTERPRETER)
 import GHC.Platform.Ways
-#endif
 import GHC.Utils.TmpFs
 import GHC.Utils.Logger
 import GHC.Unit.Env
@@ -210,6 +208,7 @@ data JSInterpConfig = JSInterpConfig
   , jsInterpUnitEnv     :: !UnitEnv
   , jsInterpFinderOpts  :: !FinderOpts
   , jsInterpFinderCache :: !FinderCache
+  , jsInterpRtsWays     :: !Ways
   }
 
 ------------------------
