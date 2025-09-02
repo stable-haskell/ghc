@@ -2,6 +2,7 @@
 {-# LANGUAGE TupleSections     #-}
 {-# LANGUAGE LambdaCase        #-}
 {-# LANGUAGE BlockArguments    #-}
+{-# LANGUAGE MultiWayIf        #-}
 
 -----------------------------------------------------------------------------
 -- |
@@ -109,6 +110,7 @@ import Data.Word
 import Data.Monoid
 
 import System.IO
+import System.Exit      ( ExitCode(..), exitWith )
 import System.FilePath ((<.>), (</>), dropExtension, takeDirectory)
 import System.Directory ( createDirectoryIfMissing
                         , doesFileExist
@@ -189,7 +191,7 @@ jsLinkBinary finder_cache lc_cfg cfg logger tmpfs dflags unit_env hs_objs dep_un
     let finder_opts = initFinderOpts dflags
     ar_cache <- newArchiveCache
 
-    link_plan <- computeLinkDependencies cfg unit_env link_spec finder_opts finder_cache ar_cache
+    link_plan <- computeLinkDependencies logger cfg unit_env link_spec finder_opts finder_cache ar_cache
 
     void $ jsLink lc_cfg cfg logger tmpfs ar_cache exe link_plan
 
@@ -426,14 +428,15 @@ incrementLinkPlan base new = (diff,total)
 
 
 computeLinkDependencies
-  :: StgToJSConfig
+  :: Logger
+  -> StgToJSConfig
   -> UnitEnv
   -> LinkSpec
   -> FinderOpts
   -> FinderCache
   -> ArchiveCache
   -> IO LinkPlan
-computeLinkDependencies cfg unit_env link_spec finder_opts finder_cache ar_cache = do
+computeLinkDependencies logger cfg unit_env link_spec finder_opts finder_cache ar_cache = do
 
   let units       = lks_unit_ids        link_spec
   let hs_objs     = lks_objs_hs         link_spec
@@ -471,7 +474,7 @@ computeLinkDependencies cfg unit_env link_spec finder_opts finder_cache ar_cache
 
   let all_units = fmap unitId all_units_infos
 
-  dep_archives <- getPackageArchives cfg unit_env all_units
+  dep_archives <- getPackageArchives logger cfg unit_env all_units
   (archives_block_info, archives_required_blocks) <- loadArchiveBlockInfo ar_cache dep_archives
 
   -- compute dependencies
@@ -662,13 +665,21 @@ renderLinkerStats s =
     module_stats = "code size per module (in bytes):\n\n" <> unlines (map (concatMap showMod) pkgMods)
 
 
-getPackageArchives :: StgToJSConfig -> UnitEnv -> [UnitId] -> IO [FilePath]
-getPackageArchives cfg unit_env units =
-  filterM doesFileExist [ ST.unpack p </> "lib" ++ ST.unpack l ++ profSuff <.> "a"
-                        | u <- units
-                        , p <- getInstalledPackageLibDirs ue_state u
-                        , l <- getInstalledPackageHsLibs  ue_state u
-                        ]
+getPackageArchives :: Logger -> StgToJSConfig -> UnitEnv -> [UnitId] -> IO [FilePath]
+getPackageArchives logger cfg unit_env units = do
+  fmap concat $ forM units $ \u -> do
+    let archives = [ ST.unpack p </> "lib" ++ ST.unpack l ++ profSuff <.> "a"
+                   | p <- getInstalledPackageLibDirs ue_state u
+                   , l <- getInstalledPackageHsLibs  ue_state u
+                   ]
+    foundArchives <- filterM doesFileExist archives
+    if | not (null archives)
+       , null foundArchives
+       -> do
+         errorMsg logger (cat [text "Could not find any library archives for unit-id: ", ppr u])
+         exitWith (ExitFailure 1)
+       | otherwise
+       -> pure foundArchives
   where
     ue_state = ue_homeUnitState unit_env
 
