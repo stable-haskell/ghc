@@ -413,6 +413,7 @@ RTS_H := \
       rts/storage/MBlock.h \
       rts/storage/TSO.h \
       stg/DLL.h \
+      stg/MachRegsForHost.h \
       stg/MiscClosures.h \
       stg/Prim.h \
       stg/Regs.h \
