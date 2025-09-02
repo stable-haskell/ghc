@@ -772,26 +772,45 @@ wasm32-unknown-wasi-libs: _build/stage3/bin/wasm32-unknown-wasi-ghc-pkg _build/s
 
 # --- Bindist ---
 
+RTS_SUBLIBS := \
+  nonthreaded-nodebug \
+  nonthreaded-debug \
+  threaded-nodebug \
+  threaded-debug
+
 # patchpackageconf
 #
 # Hacky function to patch up the paths in the package .conf files
 #
 # $1 = package name (ex: 'bytestring')
+# TODO: package name is borked for sublibs
 # $2 = path to .conf file
 # $3 = (relative) path from $${pkgroot} to docs directory
 # $4 = host triple
 # $5 = package name and version (ex: bytestring-0.13)
 #
 define patchpackageconf
+    case $5 in \
+		rts-*-nonthreaded-nodebug) \
+	      sublib="/nonthreaded-nodebug" ;; \
+		rts-*-nonthreaded-debug) \
+	      sublib="/nonthreaded-debug" ;; \
+		rts-*-threaded-nodebug) \
+	      sublib="/threaded-nodebug" ;; \
+		rts-*-threaded-debug) \
+	      sublib="/threaded-debug" ;; \
+		*) \
+		  sublib="" ;; \
+	esac ; \
 	sed -i \
 		-e "s|haddock-interfaces:.*|haddock-interfaces: \"\$${pkgroot}/$3/html/libraries/$5/$1.haddock\"|" \
 		-e "s|haddock-html:.*|haddock-html: \"\$${pkgroot}/$3/html/libraries/$5\"|" \
-        -e "s|import-dirs:.*|import-dirs: \"\$${pkgroot}/../lib/$4/$5\"|" \
-		-e "s|library-dirs:.*|library-dirs: \"\$${pkgroot}/../lib/$4/$5\"|" \
-		-e "s|library-dirs-static:.*|library-dirs-static: \"\$${pkgroot}/../lib/$4/$5\"|" \
+        -e "s|import-dirs:.*|import-dirs: \"\$${pkgroot}/../lib/$4/$5$${sublib}\"|" \
+		-e "s|library-dirs:.*|library-dirs: \"\$${pkgroot}/../lib/$4/$5$${sublib}\"|" \
+		-e "s|library-dirs-static:.*|library-dirs-static: \"\$${pkgroot}/../lib/$4/$5$${sublib}\"|" \
 		-e "s|dynamic-library-dirs:.*|dynamic-library-dirs: \"\$${pkgroot}/../lib/$4\"|" \
-		-e "s|data-dir:.*|data-dir: \"\$${pkgroot}/../lib/$4/$5\"|" \
-		-e "s|include-dirs:.*|include-dirs: \"\$${pkgroot}/../lib/$4/$5/include\"|" \
+		-e "s|data-dir:.*|data-dir: \"\$${pkgroot}/../lib/$4/$5$${sublib}\"|" \
+		-e "s|include-dirs:.*|include-dirs: \"\$${pkgroot}/../lib/$4/$5$${sublib}/include\"|" \
 		-e "s|^    $(CURDIR).*||" \
 		$2
 endef
