@@ -20,12 +20,14 @@ module GHC.Runtime.Interpreter.JS
   )
 where
 
+import GHC.Platform.Ways
 import GHC.Prelude
 import GHC.Runtime.Interpreter.Types
 import GHC.Runtime.Interpreter.Process
 import GHC.Runtime.Utils
 import GHCi.Message
 
+import GHC.Driver.DynFlags
 import GHC.StgToJS.Linker.Types
 import GHC.StgToJS.Linker.Linker
 import GHC.StgToJS.Types
@@ -36,9 +38,9 @@ import GHC.Unit.Types
 import GHC.Unit.State
 
 import GHC.Utils.Logger
+import GHC.Utils.Error
 import GHC.Utils.TmpFs
 import GHC.Utils.Panic
-import GHC.Utils.Error (logInfo)
 import GHC.Utils.Outputable (text)
 import GHC.Data.FastString
 
@@ -156,6 +158,7 @@ spawnJSInterp cfg = do
       unit_env     = jsInterpUnitEnv cfg
       finder_opts  = jsInterpFinderOpts cfg
       finder_cache = jsInterpFinderCache cfg
+      rts_ways     = jsInterpRtsWays cfg
 
   (std_in, proc) <- startTHRunnerProcess (jsInterpScript cfg) (jsInterpNodeConfig cfg)
 
@@ -198,7 +201,7 @@ spawnJSInterp cfg = do
   -- cf https://emscripten.org/docs/compiling/Dynamic-Linking.html
 
   -- link rts and its deps
-  jsLinkRts logger tmpfs tmp_dir codegen_cfg unit_env inst
+  jsLinkRts logger tmpfs tmp_dir codegen_cfg unit_env inst rts_ways
 
   -- link interpreter and its deps
   jsLinkInterp logger tmpfs tmp_dir codegen_cfg unit_env inst
@@ -215,8 +218,8 @@ spawnJSInterp cfg = do
 ---------------------------------------------------------
 
 -- | Link JS RTS
-jsLinkRts :: Logger -> TmpFs -> TempDir -> StgToJSConfig -> UnitEnv -> ExtInterpInstance JSInterpExtra -> IO ()
-jsLinkRts logger tmpfs tmp_dir cfg unit_env inst = do
+jsLinkRts :: Logger -> TmpFs -> TempDir -> StgToJSConfig -> UnitEnv -> ExtInterpInstance JSInterpExtra -> Ways -> IO ()
+jsLinkRts logger tmpfs tmp_dir cfg unit_env inst ways = do
   let link_cfg = JSLinkConfig
         { lcNoStats         = True  -- we don't need the stats
         , lcNoRts           = False -- we need the RTS
@@ -228,9 +231,10 @@ jsLinkRts logger tmpfs tmp_dir cfg unit_env inst = do
         , lcLinkCsources    = False -- we know that there are no C sources to load for the RTS
         }
 
-  -- link the RTS and its dependencies (things it uses from `base`, etc.)
+  -- link the RTS and its dependencies (things it uses from `ghc-internal`, etc.)
+  let rts_sublib_unit_id = rtsWayUnitId' ways
   let link_spec = LinkSpec
-        { lks_unit_ids        = [rtsUnitId, ghcInternalUnitId, primUnitId]
+        { lks_unit_ids        = [rtsUnitId, rts_sublib_unit_id, primUnitId, ghcInternalUnitId]
         , lks_obj_root_filter = const False
         , lks_extra_roots     = mempty
         , lks_objs_hs         = mempty
