@@ -4,7 +4,7 @@ on:
   pull_request:
     types: [opened, synchronize]
   push:
-    branches: [stable-ghc-9.14]
+    branches: [stable-ghc-9.14, stable-master]
   workflow_dispatch:
 
 jobs:
