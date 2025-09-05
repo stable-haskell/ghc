@@ -327,7 +327,7 @@ STAGE3_LIBS := \
 # $4 = ghc-pkg
 define copy_headers
   set -e; \
-  dest=`$4 field $3 include-dirs | awk '{ print $$2 }'` ;\
+  dest=`$4 field $3 include-dirs | awk '{ print $$2 ; exit }'` ;\
   for h in $1 ; do \
 	  mkdir -p "$$dest/`dirname $$h`" ; \
 	  for sdir in $2 ; do \
@@ -834,7 +834,7 @@ define patchpackageconf
 		-e "s|dynamic-library-dirs:.*|dynamic-library-dirs: \"\$${pkgroot}/../lib/$4\"|" \
 		-e "s|data-dir:.*|data-dir: \"\$${pkgroot}/../lib/$4/$5$${sublib}\"|" \
 		-e "s|include-dirs:.*|include-dirs: \"\$${pkgroot}/../lib/$4/$5$${sublib}/include\"|" \
-		-e "s|^    $(CURDIR).*||" \
+		-e "s|^    /.*||" \
 		$2
 endef
 
