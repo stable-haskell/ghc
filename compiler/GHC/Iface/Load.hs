@@ -862,8 +862,12 @@ Note [Home module load error]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 If the sought-for interface is in the current package (as determined
 by -package-name flag) then it jolly well should already be in the HPT
-because we process home-package modules in dependency order.  (Except
-in one-shot mode; see notes with hsc_HPT decl in GHC.Driver.Env).
+because we process home-package modules in dependency order. So we shouldn't even call `findAndReadIface`.
+
+Two exceptions:
+- one-shot mode; see notes with hsc_HPT decl in GHC.Driver.Env)
+- GHC.Internal.Prim module which can be accessed at any time because it's a
+  virtual module at the top of the hierarchy
 
 It is possible (though hard) to get this error through user behaviour.
   * Suppose package P (modules P1, P2) depends on package Q (modules Q1,
@@ -909,24 +913,27 @@ findAndReadIface hsc_env doc_str mod wanted_mod hi_boot_file = do
   -- Look for the file
   mb_found <- liftIO (findExactModule hsc_env mod hi_boot_file)
   case mb_found of
-      InstalledFound loc -> do
-          -- See Note [Home module load error]
-          if HUG.memberHugUnitId (moduleUnit mod) (hsc_HUG hsc_env)
-              && not (isOneShot (ghcMode dflags))
-            then return (Failed (HomeModError mod loc))
-            else do
-                r <- read_file hooks logger name_cache unit_state dflags wanted_mod (ml_hi_file loc)
-                case r of
-                  Failed err
-                    -> return (Failed $ BadIfaceFile err)
-                  Succeeded (iface,_fp)
-                    -> do
-                        r2 <- load_dynamic_too_maybe hooks logger name_cache unit_state
-                                                 (setDynamicNow dflags) wanted_mod
-                                                 iface loc
-                        case r2 of
-                          Failed sdoc -> return (Failed sdoc)
-                          Succeeded {} -> return $ Succeeded (iface, loc)
+      InstalledFound loc
+        -- See Note [Home module load error]
+        | not (isOneShot (ghcMode dflags))
+        , not (mod `installedModuleEq` gHC_PRIM)
+        , HUG.memberHugUnitId (moduleUnit mod) (hsc_HUG hsc_env)
+        -> return (Failed (HomeModError mod loc))
+
+        | otherwise
+        -> do
+          r <- read_file hooks logger name_cache unit_state dflags wanted_mod (ml_hi_file loc)
+          case r of
+            Failed err
+              -> return (Failed $ BadIfaceFile err)
+            Succeeded (iface,_fp)
+              -> do
+                  r2 <- load_dynamic_too_maybe hooks logger name_cache unit_state
+                                           (setDynamicNow dflags) wanted_mod
+                                           iface loc
+                  case r2 of
+                    Failed sdoc -> return (Failed sdoc)
+                    Succeeded {} -> return $ Succeeded (iface, loc)
       err -> do
           trace_if logger (text "...not found")
           return $ Failed $ cannotFindInterface
