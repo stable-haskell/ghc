@@ -286,7 +286,8 @@ BINDIST_EXECTUABLES := \
 	hp2ps \
 	hpc \
 	hsc2hs \
-	runghc
+	runghc \
+	unlit
 
 STAGE3_LIBS := \
     rts:nonthreaded-nodebug \
@@ -939,6 +940,10 @@ _build/bindist/haskell-toolchain.tar.gz: _build/bindist/cabal.tar.gz _build/bind
 		$(foreach exe,$(BINDIST_EXECTUABLES),bin/javascript-unknown-ghcjs-$(exe)) \
 		lib/targets/javascript-unknown-ghcjs \
 		bin/cabal
+
+_build/bindist/tests.tar.gz:
+	@tar czf $@ \
+		testsuite
 
 # --- Configuration ---
 
