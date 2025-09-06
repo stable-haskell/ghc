@@ -27,6 +27,7 @@ $(do
       [ ".global \"mydata\""
       , "mydata:"
       , ".ascii \"Hello world\\0\""
+      , ".section .note.GNU-stack,\"\",@progbits"
       ]
 #endif
    return [])
