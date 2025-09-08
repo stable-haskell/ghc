@@ -31,7 +31,7 @@ module GHC.SysTools.Tasks
 import GHC.Prelude
 import GHC.ForeignSrcLang
 
-import GHC.CmmToLlvm.Version (LlvmVersion, llvmVersionStr, supportedLlvmVersionUpperBound, parseLlvmVersion, supportedLlvmVersionLowerBound)
+import GHC.CmmToLlvm.Version (LlvmVersion, parseLlvmVersion)
 
 import GHC.Settings
 
