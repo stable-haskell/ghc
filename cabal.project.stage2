@@ -96,7 +96,6 @@ package *
 if os(linux)
   package rts
     ghc-options: "-optc-DProjectVersion=\"914\""
-    ghc-options: "-optc-DRtsWay=\"v\""
     ghc-options: "-optc-DHostPlatform=\"x86_64-unknown-linux\""
     ghc-options: "-optc-DHostArch=\"x86_64\""
     ghc-options: "-optc-DHostOS=\"linux\""
@@ -113,7 +112,6 @@ if os(linux)
 if os(darwin)
   package rts
     ghc-options: "-optc-DProjectVersion=\"914\""
-    ghc-options: "-optc-DRtsWay=\"v\""
     ghc-options: "-optc-DHostPlatform=\"aarch64-apple-darwin\""
     ghc-options: "-optc-DHostArch=\"aarch64\""
     ghc-options: "-optc-DHostOS=\"darwin\""
@@ -126,12 +124,10 @@ if os(darwin)
     ghc-options: "-optc-DTablesNextToCode=\"FIXME\""
     ghc-options: "-optc-DFS_NAMESPACE=rts"
     flags: +tables-next-to-code +leading-underscore
-	ld-options: -undefined warning
 
 if os(freebsd)
   package rts
     ghc-options: "-optc-DProjectVersion=\"914\""
-    ghc-options: "-optc-DRtsWay=\"v\""
     ghc-options: "-optc-DHostPlatform=\"x86_64-portbld-freebsd\""
     ghc-options: "-optc-DHostArch=\"x86_64\""
     ghc-options: "-optc-DHostOS=\"freebsd\""
@@ -143,7 +139,7 @@ if os(freebsd)
     ghc-options: "-optc-DGhcUnregisterised=\"FIXME\""
     ghc-options: "-optc-DTablesNextToCode=\"FIXME\""
     ghc-options: "-optc-DFS_NAMESPACE=rts"
-    flags: +tables-next-to-code +leading-underscore
+    flags: +tables-next-to-code
 
 program-options
   ghc-options: -fhide-source-paths -j
