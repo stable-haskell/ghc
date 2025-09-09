@@ -158,8 +158,8 @@ jobs:
             gmake CABAL=$PWD/_build/stage0/bin/cabal _build/bindist/ghc.tar.gz _build/bindist/cabal.tar.gz _build/bindist/tests.tar.gz
           fi
           cd _build/bindist
-          mv ghc.tar.gz ghc-$(_build/stage2/bin/ghc --numeric-version)-${{ matrix.platform.ARTIFACT }}.tar.gz
-          mv cabal.tar.gz cabal-$(_build/stage0/bin/cabal --numeric-version)-${{ matrix.platform.ARTIFACT }}.tar.gz
+          mv ghc.tar.gz ghc-$(bin/ghc --numeric-version)-${{ matrix.platform.ARTIFACT }}.tar.gz
+          mv cabal.tar.gz cabal-$(bin/cabal --numeric-version)-${{ matrix.platform.ARTIFACT }}.tar.gz
           [ -e "haskell-toolchain.tar.gz" ] && mv haskell-toolchain.tar.gz haskell-toolchain-${{ matrix.platform.ARTIFACT }}.tar.gz
 
       - name: check linking
@@ -344,6 +344,10 @@ jobs:
         with:
           cabal: ${{ env.CABAL_VERSION }}
           ghc: ${{ env.GHC_VERSION }}
+        env:
+          LD: ld
+          CC: cc
+          CXX: c++
 
       - name: Install dependencies
         run: |
@@ -374,16 +378,13 @@ jobs:
 
       - name: Run build
         run: |
-          echo $PATH
-          which ld
-          ld --version
-          gmake -n CABAL=$PWD/_build/stage0/bin/cabal _build/bindist/haskell-toolchain.tar.gz _build/bindist/tests.tar.gz
-          exit 1
+          which ghc
+          ghc --info
           cabal update
-          gmake CABAL=$PWD/_build/stage0/bin/cabal _build/bindist/haskell-toolchain.tar.gz _build/bindist/tests.tar.gz
+          gmake CABAL_BUILD_ARGS="-v3" CABAL=$PWD/_build/stage0/bin/cabal _build/bindist/haskell-toolchain.tar.gz _build/bindist/tests.tar.gz
           cd _build/bindist
-          mv ghc.tar.gz ghc-$(_build/stage2/bin/ghc --numeric-version)-${{ matrix.platform.ARTIFACT }}.tar.gz
-          mv cabal.tar.gz cabal-$(_build/stage0/bin/cabal --numeric-version)-${{ matrix.platform.ARTIFACT }}.tar.gz
+          mv ghc.tar.gz ghc-$(bin/ghc --numeric-version)-${{ matrix.platform.ARTIFACT }}.tar.gz
+          mv cabal.tar.gz cabal-$(bin/cabal --numeric-version)-${{ matrix.platform.ARTIFACT }}.tar.gz
           mv haskell-toolchain.tar.gz haskell-toolchain-${{ matrix.platform.ARTIFACT }}.tar.gz
         env:
           EXTRA_LIB_DIRS: /usr/local/lib
@@ -589,7 +590,7 @@ jobs:
 
       - uses: ./.github/actions/download
         with:
-          name: artifacts-${{ matrix.platform.ARTIFACT }}-${{ matrix.branch }}
+          name: artifacts-${{ env.ARTIFACT }}-${{ matrix.branch }}
           path: ./_build/bindist
 
       - name: Run test
@@ -625,7 +626,7 @@ jobs:
 
       - uses: ./.github/actions/download
         with:
-          name: artifacts-${{ matrix.platform.ARTIFACT }}-${{ matrix.branch }}
+          name: artifacts-${{ env.ARTIFACT }}-${{ matrix.branch }}
           path: ./_build/bindist
 
       - name: Run test
@@ -661,7 +662,7 @@ jobs:
 
       - uses: ./.github/actions/download
         with:
-          name: artifacts-${{ matrix.platform.ARTIFACT }}-${{ matrix.branch }}
+          name: artifacts-${{ env.ARTIFACT }}-${{ matrix.branch }}
           path: ./_build/bindist
 
       - name: Install dependencies
