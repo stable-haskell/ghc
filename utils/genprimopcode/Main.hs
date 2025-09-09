@@ -204,6 +204,12 @@ main = getArgs >>= \args ->
                       "--wired-in-deprecations"
                          -> putStr (gen_wired_in_deprecations p_o_specs)
 
+                      "--wrappers-module"
+                         -> putStr (gen_wrappers_module p_o_specs)
+
+                      "--prim-module"
+                         -> putStr (gen_hs_source_module p_o_specs)
+
                       _ -> error "Should not happen, known_args out of sync?"
                    )
 
@@ -229,12 +235,17 @@ known_args
        "--make-haskell-source",
        "--make-latex-doc",
        "--wired-in-docs",
-       "--wired-in-deprecations"
+       "--wired-in-deprecations",
+       "--wrappers-module",
+       "--prim-module"
      ]
 
 ------------------------------------------------------------------
 -- Code generators -----------------------------------------------
 ------------------------------------------------------------------
+
+gen_hs_source_module :: Info -> String
+gen_hs_source_module info = "primOpPrimModule = " ++ show (gen_hs_source info)
 
 gen_hs_source :: Info -> String
 gen_hs_source (Info defaults entries) =
@@ -458,6 +469,9 @@ In PrimopWrappers we set some crucial GHC options
   We prevent strictness analyis and w/w by simply doing -O0.  It's
   a very simple module and there is no optimisation to be done
 -}
+
+gen_wrappers_module :: Info -> String
+gen_wrappers_module info = "primOpWrappersModule = " ++ show (gen_wrappers info)
 
 gen_wrappers :: Info -> String
 gen_wrappers (Info _ entries)
