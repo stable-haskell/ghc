@@ -62,6 +62,11 @@ module GHC.Driver.DynFlags (
         versionedAppDir, versionedFilePath,
         extraGccViaCFlags, globalPackageDatabasePath,
 
+        --
+        baseUnitId,
+        rtsWayUnitId,
+
+
         -- * Include specifications
         IncludeSpecs(..), addGlobalInclude, addQuoteInclude, flattenIncludes,
         addImplicitQuoteInclude,
@@ -1486,6 +1491,22 @@ versionedAppDir appname platform = do
 
 versionedFilePath :: ArchOS -> FilePath
 versionedFilePath platform = uniqueSubdir platform
+
+-- | Access the unit-id of the version of `base` which we will automatically link
+-- against.
+baseUnitId :: DynFlags -> UnitId
+baseUnitId dflags = unitSettings_baseUnitId (unitSettings dflags)
+
+rtsWayUnitId :: DynFlags -> UnitId
+rtsWayUnitId dflags | ways dflags `hasWay` WayThreaded
+                    , ways dflags `hasWay` WayDebug
+                    = stringToUnitId "rts:threaded-debug"
+                    | ways dflags `hasWay` WayThreaded
+                    = stringToUnitId "rts:threaded-nodebug"
+                    | ways dflags `hasWay` WayDebug
+                    = stringToUnitId "rts:nonthreaded-debug"
+                    | otherwise
+                    = stringToUnitId "rts:nonthreaded-nodebug"
 
 -- SDoc
 -------------------------------------------

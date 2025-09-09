@@ -1,4 +1,5 @@
-{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE NamedFieldPuns #-}
+{-# LANGUAGE CPP #-}
 module Main where
 
 import Distribution.Simple
@@ -11,6 +12,10 @@ import Distribution.Verbosity
 import Distribution.Simple.Program
 import Distribution.Simple.Utils
 import Distribution.Simple.Setup
+import Distribution.Simple.PackageIndex
+#if MIN_VERSION_Cabal(3,14,0)
+import Distribution.Simple.LocalBuildInfo (interpretSymbolicPathLBI)
+#endif
 
 import System.IO
 import System.Process
@@ -58,9 +63,17 @@ primopIncls =
     ]
 
 ghcAutogen :: Verbosity -> LocalBuildInfo -> IO ()
-ghcAutogen verbosity lbi@LocalBuildInfo{..} = do
+ghcAutogen verbosity lbi@LocalBuildInfo{pkgDescrFile,withPrograms,componentNameMap,installedPkgs}
+  = do
+
+#if MIN_VERSION_Cabal(3,14,0)
+  let fromSymPath = interpretSymbolicPathLBI lbi
+#else
+  let fromSymPath = id
+#endif
+
   -- Get compiler/ root directory from the cabal file
-  let Just compilerRoot = takeDirectory <$> pkgDescrFile
+  let Just compilerRoot = (takeDirectory . fromSymPath) <$> pkgDescrFile
 
   -- Require the necessary programs
   (gcc   ,withPrograms) <- requireProgram normal gccProgram withPrograms
@@ -80,25 +93,31 @@ ghcAutogen verbosity lbi@LocalBuildInfo{..} = do
   -- Call genprimopcode to generate *.hs-incl
   forM_ primopIncls $ \(file,command) -> do
     contents <- readProcess "genprimopcode" [command] primopsStr
-    rewriteFileEx verbosity (buildDir </> file) contents
+    rewriteFileEx verbosity (fromSymPath (buildDir lbi) </> file) contents
 
   -- Write GHC.Platform.Constants
-  let platformConstantsPath = autogenPackageModulesDir lbi </> "GHC/Platform/Constants.hs"
+  let platformConstantsPath = fromSymPath (autogenPackageModulesDir lbi) </> "GHC/Platform/Constants.hs"
       targetOS = case lookup "target os" settings of
         Nothing -> error "no target os in settings"
         Just os -> os
   createDirectoryIfMissingVerbose verbosity True (takeDirectory platformConstantsPath)
+#if MIN_VERSION_Cabal(3,15,0)
+  -- temp files are now always created in system temp directory
+  -- (cf 8161f5f99dbe5d6c7564d9e163754935ddde205d)
+  withTempFile "Constants_tmp.hs" $ \tmp h -> do
+#else
   withTempFile (takeDirectory platformConstantsPath) "Constants_tmp.hs" $ \tmp h -> do
+#endif
     hClose h
     callProcess "deriveConstants" ["--gen-haskell-type","-o",tmp,"--target-os",targetOS]
-    renameFile tmp platformConstantsPath
+    copyFile tmp platformConstantsPath
 
   let cProjectUnitId = case Map.lookup (CLibName LMainLibName) componentNameMap of
                          Just [LibComponentLocalBuildInfo{componentUnitId}] -> unUnitId componentUnitId
                          _ -> error "Couldn't find unique cabal library when building ghc"
 
   -- Write GHC.Settings.Config
-      configHsPath = autogenPackageModulesDir lbi </> "GHC/Settings/Config.hs"
+      configHsPath = fromSymPath (autogenPackageModulesDir lbi) </> "GHC/Settings/Config.hs"
       configHs = generateConfigHs cProjectUnitId settings
   createDirectoryIfMissingVerbose verbosity True (takeDirectory configHsPath)
   rewriteFileEx verbosity configHsPath configHs
