@@ -528,7 +528,7 @@ jobs:
           cd _build/bindist
           for file in *.tar.gz; do tar xzf "$file"; done
           cd testsuite
-          PATH=$PWD/_build/bindist/bin:$PATH make
+          PATH=$GITHUB_WORKSPACE/_build/bindist/bin:$PATH make
         env:
           THREADS: 4
           TEST_HC_OPTS: "-dcore-lint -dstg-lint -dcmm-lint -no-user-package-db -fno-dump-with-ways -fprint-error-index-links=never -rtsopts -fno-warn-missed-specialisations -fshow-warning-groups -fdiagnostics-color=never -fno-diagnostics-show-caret -Werror=compat -dno-debug-output"
@@ -693,5 +693,5 @@ jobs:
           cd _build/bindist
           for file in *.tar.gz; do tar xzf "$file"; done
           cd testsuite
-          PATH=$PWD/_build/bindist/bin:$PATH gmake
+          PATH=$GITHUB_WORKSPACE/_build/bindist/bin:$PATH gmake
 
