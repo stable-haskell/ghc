@@ -169,13 +169,11 @@ jobs:
           fi
 
       - name: check linking
-        run: 'ldd _build/bindist/bin/ghc | grep gmp && exit 1'
-
-      - name: Setup tmate session
-        if: ${{ failure() }}
-        uses: mxschmitt/action-tmate@v3
-        with:
-          limit-access-to-actor: true
+        run: |
+          if ldd _build/bindist/bin/ghc | grep --quiet gmp ; then
+            echo "gmp is linked!"
+            exit 1
+          fi
 
       - if: always()
         name: Upload artifact
@@ -262,6 +260,7 @@ jobs:
           brew install pkg-config gnu-sed libffi automake autoconf make
           echo "/usr/local/opt/gnu-sed/libexec/gnubin" >> $GITHUB_PATH
           echo "/usr/local/opt/make/libexec/gnubin" >> $GITHUB_PATH
+          rm -f /usr/local/opt/libffi/lib/*.dylib
 
       - name: Install emscripten
         run : *emscripten
@@ -313,6 +312,7 @@ jobs:
           brew install pkg-config gnu-sed libffi automake autoconf make
           echo "/opt/homebrew/opt/gnu-sed/libexec/gnubin" >> $GITHUB_PATH
           echo "/opt/homebrew/opt/make/libexec/gnubin" >> $GITHUB_PATH
+          rm -f /opt/homebrew/opt/libffi/lib/*.dylib
 
       - name: Install emscripten
         run : *emscripten
@@ -684,7 +684,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo sed -i.bak -e 's/quarterly/latest/' /etc/pkg/FreeBSD.conf
-          sudo pkg install -y textproc/gsed curl gcc gmp gmake ncurses perl5 pkgconf libffi libiconv git bash misc/compat10x misc/compat11x misc/compat12x groff autoconf automake
+          sudo pkg install -y textproc/gsed curl gcc gmp gmake ncurses perl5 pkgconf libffi libffi321 libiconv git bash misc/compat10x misc/compat11x misc/compat12x groff autoconf automake
           sudo tzsetup Etc/GMT
           sudo adjkerntz -a
 
@@ -693,5 +693,6 @@ jobs:
           cd _build/bindist
           for file in *.tar.gz; do tar xzf "$file"; done
           cd testsuite
+          export LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH
           PATH=$GITHUB_WORKSPACE/_build/bindist/bin:$PATH gmake
 
