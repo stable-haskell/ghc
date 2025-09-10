@@ -169,7 +169,7 @@ jobs:
           fi
 
       - name: check linking
-        run: 'ldd _build/stage2/bin/ghc | { grep gmp && exit 1 ; }'
+        run: 'ldd _build/stage2/bin/ghc | grep gmp && exit 1'
 
       - if: always()
         name: Upload artifact
@@ -683,5 +683,9 @@ jobs:
           sudo adjkerntz -a
 
       - name: Run test
-        run: *test
+        run: |
+          cd _build/bindist
+          for file in *.tar.gz; do tar xzf "$file"; done
+          cd testsuite
+          PATH=$PWD/_build/bindist/bin:$PATH gmake
 
