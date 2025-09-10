@@ -657,7 +657,7 @@ stage2: $(addprefix _build/stage2/bin/,$(STAGE2_EXECUTABLES)) _build/stage2/lib/
 
 # --- Stage 3 generic ---
 
-_build/stage2/lib/targets/%:
+_build/stage2/lib/targets/% _build/stage3/lib/targets/%:
 	@mkdir -p _build/stage3/lib/targets/$(@F)
 	@rm -f _build/stage2/lib/targets/$(@F)
 	@mkdir -p _build/stage2/lib/targets/
