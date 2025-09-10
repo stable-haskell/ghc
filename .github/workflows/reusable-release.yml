@@ -137,6 +137,8 @@ jobs:
       - if: matrix.platform.image == 'rockylinux:8'
         name: Install emscripten
         run : &emscripten |
+          set -eux
+
           git clone https://github.com/emscripten-core/emsdk.git
           cd emsdk
           git fetch --tags
@@ -146,6 +148,8 @@ jobs:
 
       - name: Run build
         run: &build |
+          set -eux
+
           cabal update
           if [ -e "emsdk" ] ; then
             git config --system --add safe.directory $GITHUB_WORKSPACE
@@ -160,12 +164,12 @@ jobs:
           cd _build/bindist
           mv ghc.tar.gz ghc-$(bin/ghc --numeric-version)-${{ matrix.platform.ARTIFACT }}.tar.gz
           mv cabal.tar.gz cabal-$(bin/cabal --numeric-version)-${{ matrix.platform.ARTIFACT }}.tar.gz
-          [ -e "haskell-toolchain.tar.gz" ] && mv haskell-toolchain.tar.gz haskell-toolchain-${{ matrix.platform.ARTIFACT }}.tar.gz
+          if [ -e "haskell-toolchain.tar.gz" ] ; then
+            mv haskell-toolchain.tar.gz haskell-toolchain-${{ matrix.platform.ARTIFACT }}.tar.gz
+          fi
 
       - name: check linking
-        run: |
-          ldd _build/stage2/bin/ghc
-          ldd _build/stage2/bin/ghc | grep --quiet gmp && exit 1
+        run: 'ldd _build/stage2/bin/ghc | { grep gmp && exit 1 ; }'
 
       - if: always()
         name: Upload artifact
@@ -248,7 +252,7 @@ jobs:
           ghc: ${{ env.GHC_VERSION }}
 
       - name: Install dependencies
-        run : &mac-deps |
+        run : |
           brew install pkg-config gnu-sed libffi automake autoconf make
           echo "/usr/local/opt/gnu-sed/libexec/gnubin" >> $GITHUB_PATH
           echo "/usr/local/opt/make/libexec/gnubin" >> $GITHUB_PATH
@@ -299,7 +303,10 @@ jobs:
           ghc: ${{ env.GHC_VERSION }}
 
       - name: Install dependencies
-        run : *mac-deps
+        run : |
+          brew install pkg-config gnu-sed libffi automake autoconf make
+          echo "/opt/homebrew/opt/gnu-sed/libexec/gnubin" >> $GITHUB_PATH
+          echo "/opt/homebrew/opt/make/libexec/gnubin" >> $GITHUB_PATH
 
       - name: Install emscripten
         run : *emscripten
@@ -353,7 +360,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo sed -i.bak -e 's/quarterly/latest/' /etc/pkg/FreeBSD.conf
-          sudo pkg install -y gcc gmp ncurses perl5 pkgconf libiconv bash misc/compat10x misc/compat11x misc/compat12x \
+          sudo pkg install -y textproc/gsed gcc gmp ncurses perl5 pkgconf libiconv bash misc/compat10x misc/compat11x misc/compat12x \
             terminfo-db \
             libffi321 \
             devel/libffi \
@@ -390,6 +397,7 @@ jobs:
         env:
           EXTRA_LIB_DIRS: /usr/local/lib
           EXTRA_INCLUDE_DIRS: /usr/local/include
+          SED: gsed
 
       - if: always()
         name: Upload artifact
@@ -670,7 +678,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo sed -i.bak -e 's/quarterly/latest/' /etc/pkg/FreeBSD.conf
-          sudo pkg install -y curl gcc gmp gmake ncurses perl5 pkgconf libffi libiconv git bash misc/compat10x misc/compat11x misc/compat12x groff autoconf automake
+          sudo pkg install -y textproc/gsed curl gcc gmp gmake ncurses perl5 pkgconf libffi libiconv git bash misc/compat10x misc/compat11x misc/compat12x groff autoconf automake
           sudo tzsetup Etc/GMT
           sudo adjkerntz -a
 
