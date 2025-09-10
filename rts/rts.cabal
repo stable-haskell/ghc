@@ -253,9 +253,6 @@ source-repository head
     location: https://gitlab.haskell.org/ghc/ghc.git
     subdir:   rts
 
-flag libm
-  default: False
-  manual: True
 flag librt
   default: False
   manual: True
@@ -545,8 +542,6 @@ common rts-link-options
 
     if os(linux)
        extra-libraries: c
-    if flag(libm)
-       extra-libraries: m
     if flag(librt)
        extra-libraries: rt
     if os(windows)
