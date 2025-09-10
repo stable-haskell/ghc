@@ -131,8 +131,8 @@ jobs:
           CFLAGS=-fPIC ./configure --prefix=$HOME/.local/ --disable-shared
           make install
           cd ..
-          echo "extra-lib-dirs: $HOME/.local/lib/" >> cabal.project.stage2.local
-          echo "extra-lib-dirs: $HOME/.local/lib/" >> cabal.project.stage3.local
+          echo "extra-lib-dirs: $HOME/.local/lib/" >> cabal.project.stage2
+          echo "extra-lib-dirs: $HOME/.local/lib/" >> cabal.project.stage3
 
       - if: matrix.platform.image == 'rockylinux:8'
         name: Install emscripten
@@ -164,6 +164,7 @@ jobs:
 
       - name: check linking
         run: |
+          ldd _build/stage2/bin/ghc
           ldd _build/stage2/bin/ghc | grep --quiet gmp && exit 1
 
       - if: always()
@@ -249,8 +250,8 @@ jobs:
       - name: Install dependencies
         run : &mac-deps |
           brew install pkg-config gnu-sed libffi automake autoconf make
-          echo "/opt/homebrew/opt/gnu-sed/libexec/gnubin" >> $GITHUB_PATH
-          echo "/opt/homebrew/opt/make/libexec/gnubin" >> $GITHUB_PATH
+          echo "/usr/local/opt/gnu-sed/libexec/gnubin" >> $GITHUB_PATH
+          echo "/usr/local/opt/make/libexec/gnubin" >> $GITHUB_PATH
 
       - name: Install emscripten
         run : *emscripten
@@ -512,6 +513,7 @@ jobs:
         run: &test |
           cd _build/bindist
           for file in *.tar.gz; do tar xzf "$file"; done
+          cd testsuite
           PATH=$PWD/_build/bindist/bin:$PATH make
         env:
           THREADS: 4
