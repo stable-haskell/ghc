@@ -206,7 +206,7 @@ package ghci
   flags: +internal-interpreter
 
 package ghc-internal
-  flags: +bignum-native
+  flags: +bignum-gmp
 
 package text
   flags: -simdutf
