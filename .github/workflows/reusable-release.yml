@@ -169,7 +169,7 @@ jobs:
           fi
 
       - name: check linking
-        run: 'ldd _build/stage2/bin/ghc | grep gmp && exit 1'
+        run: 'ldd _build/bindist/bin/ghc | grep gmp && exit 1'
 
       - name: Setup tmate session
         if: ${{ failure() }}
