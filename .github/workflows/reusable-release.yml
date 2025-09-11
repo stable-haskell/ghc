@@ -672,8 +672,7 @@ jobs:
         run: *test
         env:
           THREADS: 4
-          LDFLAGS: "-L/usr/local/opt/libffi/lib"
-          CPPFLAGS: "-I/usr/local/opt/libffi/include"
+          EXTRA_HC_OPTS: "-optl-L/usr/local/opt/libffi/lib -optc-I/usr/local/opt/libffi/include"
 
   test-mac-aarch64:
     name: Test binary (Mac aarch64)
@@ -712,8 +711,7 @@ jobs:
         run: *test
         env:
           THREADS: 4
-          LDFLAGS: "-L/opt/homebrew/opt/libffi/lib"
-          CPPFLAGS: "-I/opt/homebrew/opt/libffi/include"
+          EXTRA_HC_OPTS: "-optl-L/opt/homebrew/opt/libffi/lib -optc-I/opt/homebrew/opt/libffi/include"
 
   test-freebsd-x86_64:
     name: Test FreeBSD x86_64
