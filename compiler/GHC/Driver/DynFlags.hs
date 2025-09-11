@@ -64,6 +64,8 @@ module GHC.Driver.DynFlags (
 
         --
         baseUnitId,
+        rtsWayUnitId',
+        rtsWayUnitId,
 
 
         -- * Include specifications
@@ -876,7 +878,8 @@ packageFlagsChanged idflags1 idflags0 =
    packageGFlags dflags = map (`gopt` dflags)
      [ Opt_HideAllPackages
      , Opt_HideAllPluginPackages
-     , Opt_AutoLinkPackages ]
+     , Opt_AutoLinkPackages
+     , Opt_NoRts ]
 
 instance Outputable PackageFlag where
     ppr (ExposePackage n arg rn) = text n <> braces (ppr arg <+> ppr rn)
@@ -1473,6 +1476,20 @@ versionedFilePath platform = uniqueSubdir platform
 -- against.
 baseUnitId :: DynFlags -> UnitId
 baseUnitId dflags = unitSettings_baseUnitId (unitSettings dflags)
+
+rtsWayUnitId' :: Ways -> UnitId
+rtsWayUnitId' ways | ways `hasWay` WayThreaded
+                   , ways `hasWay` WayDebug
+                   = stringToUnitId "rts:threaded-debug"
+                   | ways `hasWay` WayThreaded
+                   = stringToUnitId "rts:threaded-nodebug"
+                   | ways `hasWay` WayDebug
+                   = stringToUnitId "rts:nonthreaded-debug"
+                   | otherwise
+                   = stringToUnitId "rts:nonthreaded-nodebug"
+
+rtsWayUnitId :: DynFlags -> UnitId
+rtsWayUnitId dflags = rtsWayUnitId' (ways dflags)
 
 -- SDoc
 -------------------------------------------
