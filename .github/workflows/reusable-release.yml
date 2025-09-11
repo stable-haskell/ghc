@@ -19,7 +19,7 @@ on:
         default: 6.3.0
       ffi:
         type: string
-        default: 3.4.5
+        default: 3.5.2
       cabal:
         type: string
         default: 3.14.2.0
