@@ -350,7 +350,7 @@ jobs:
       - name: Install libffi
         run: *libffi
         env:
-          CFLAGS: "-fPIC"
+          CFLAGS: "-fPIC -fno-sanitize=all"
 
       - name: Install GMP
         run: *gmp
@@ -766,5 +766,4 @@ jobs:
         env:
           THREADS: 8
           EXTRA_HC_OPTS: "-optl-L/usr/local/lib -optc-I/usr/local/include"
-          TEST_HC_OPTS: "-dcore-lint -dstg-lint -dcmm-lint -no-user-package-db -fno-dump-with-ways -fprint-error-index-links=never -rtsopts -fno-warn-missed-specialisations -fshow-warning-groups -fdiagnostics-color=never -fno-diagnostics-show-caret -Werror=compat -dno-debug-output -optl-L/usr/local/lib -optc-I/usr/local/include"
 
