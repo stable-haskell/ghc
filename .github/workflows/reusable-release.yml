@@ -187,7 +187,7 @@ jobs:
           ARTIFACT: ${{ matrix.platform.ARTIFACT }}
 
       - name: check linking
-        run: |
+        run: &linking |
           for lib in gmp libffi ; do
             if ldd _build/bindist/bin/ghc | grep --quiet ${lib} ; then
               echo "${lib} is linked!"
@@ -304,6 +304,9 @@ jobs:
           EXTRA_LIB_DIRS: /usr/local/opt/libffi/lib
           EXTRA_INCLUDE_DIRS: /usr/local/opt/libffi/include
 
+      - name: check linking
+        run: *linking
+
       - if: always()
         name: Upload artifact
         uses: ./.github/actions/upload
@@ -368,6 +371,9 @@ jobs:
         env:
           EXTRA_LIB_DIRS: /opt/homebrew/opt/libffi/lib
           EXTRA_INCLUDE_DIRS: /opt/homebrew/opt/libffi/include
+
+      - name: check linking
+        run: *linking
 
       - if: always()
         name: Upload artifact
@@ -463,6 +469,9 @@ jobs:
           EXTRA_LIB_DIRS: /usr/local/lib
           EXTRA_INCLUDE_DIRS: /usr/local/include
           SED: gsed
+
+      - name: check linking
+        run: *linking
 
       - if: always()
         name: Upload artifact
