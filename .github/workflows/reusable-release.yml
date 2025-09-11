@@ -126,23 +126,27 @@ jobs:
           echo "/usr/local/bin" >> $GITHUB_PATH
 
       - name: Install libffi
-        run: |
+        run: &libffi |
           curl -O -L https://github.com/libffi/libffi/releases/download/v${{ env.FFI_VERSION }}/libffi-${{ env.FFI_VERSION }}.tar.gz
           tar xf libffi-${{ env.FFI_VERSION }}.tar.gz
           cd libffi-${{ env.FFI_VERSION }}
-          CFLAGS=-fPIC ./configure --prefix=$HOME/.local/ --libdir=$HOME/.local/lib/ --disable-shared --disable-multi-os-directory
+          ./configure --prefix=$HOME/.local/ --libdir=$HOME/.local/lib/ --disable-shared --disable-multi-os-directory
           make install
+        env:
+          CFLAGS: "-fPIC"
 
       - name: Install GMP
-        run: |
+        run: &gmp |
           curl -O -L ${{ env.GMP_URL }}/gmp-${{ env.GMP_VERSION }}.tar.xz
           tar xf gmp-${{ env.GMP_VERSION }}.tar.xz
           cd gmp-${{ env.GMP_VERSION }}
-          CFLAGS=-fPIC ./configure --prefix=$HOME/.local/ --disable-shared
+          ./configure --prefix=$HOME/.local/ --disable-shared
           make install
+        env:
+          CFLAGS: "-fPIC"
 
       - name: Add extra-lib-dirs
-        run: |
+        run: &extra-lib-dirs |
           echo "extra-lib-dirs: $HOME/.local/lib/" >> cabal.project.stage2
           echo "extra-lib-dirs: $HOME/.local/lib/" >> cabal.project.stage3
 
@@ -174,11 +178,13 @@ jobs:
             gmake CABAL=$PWD/_build/stage0/bin/cabal _build/bindist/ghc.tar.gz _build/bindist/cabal.tar.gz _build/bindist/tests.tar.gz
           fi
           cd _build/bindist
-          mv ghc.tar.gz ghc-$(bin/ghc --numeric-version)-${{ matrix.platform.ARTIFACT }}.tar.gz
-          mv cabal.tar.gz cabal-$(bin/cabal --numeric-version)-${{ matrix.platform.ARTIFACT }}.tar.gz
+          mv ghc.tar.gz ghc-$(bin/ghc --numeric-version)-${ARTIFACT}.tar.gz
+          mv cabal.tar.gz cabal-$(bin/cabal --numeric-version)-${ARTIFACT}.tar.gz
           if [ -e "haskell-toolchain.tar.gz" ] ; then
-            mv haskell-toolchain.tar.gz haskell-toolchain-${{ matrix.platform.ARTIFACT }}.tar.gz
+            mv haskell-toolchain.tar.gz haskell-toolchain-${ARTIFACT}.tar.gz
           fi
+        env:
+          ARTIFACT: ${{ matrix.platform.ARTIFACT }}
 
       - name: check linking
         run: |
@@ -276,6 +282,19 @@ jobs:
           echo "/usr/local/opt/make/libexec/gnubin" >> $GITHUB_PATH
           rm -f /usr/local/opt/libffi/lib/*.dylib
 
+      - name: Install libffi
+        run: *libffi
+        env:
+          CFLAGS: "-fPIC"
+
+      - name: Install GMP
+        run: *gmp
+        env:
+          CFLAGS: "-fPIC"
+
+      - name: Add extra-lib-dirs
+        run: *extra-lib-dirs
+
       - name: Install emscripten
         run : *emscripten
 
@@ -327,6 +346,19 @@ jobs:
           echo "/opt/homebrew/opt/gnu-sed/libexec/gnubin" >> $GITHUB_PATH
           echo "/opt/homebrew/opt/make/libexec/gnubin" >> $GITHUB_PATH
           rm -f /opt/homebrew/opt/libffi/lib/*.dylib
+
+      - name: Install libffi
+        run: *libffi
+        env:
+          CFLAGS: "-fPIC"
+
+      - name: Install GMP
+        run: *gmp
+        env:
+          CFLAGS: "-fPIC"
+
+      - name: Add extra-lib-dirs
+        run: *extra-lib-dirs
 
       - name: Install emscripten
         run : *emscripten
@@ -400,6 +432,19 @@ jobs:
           sudo tzsetup Etc/GMT
           sudo adjkerntz -a
 
+      - name: Install libffi
+        run: *libffi
+        env:
+          CFLAGS: "-fPIC"
+
+      - name: Install GMP
+        run: *gmp
+        env:
+          CFLAGS: "-fPIC"
+
+      - name: Add extra-lib-dirs
+        run: *extra-lib-dirs
+
       - name: Install emscripten
         run : |
           sudo pkg install -y emscripten
@@ -411,9 +456,9 @@ jobs:
           cabal update
           gmake CABAL=$PWD/_build/stage0/bin/cabal _build/bindist/haskell-toolchain.tar.gz _build/bindist/tests.tar.gz
           cd _build/bindist
-          mv ghc.tar.gz ghc-$(bin/ghc --numeric-version)-${{ matrix.platform.ARTIFACT }}.tar.gz
-          mv cabal.tar.gz cabal-$(bin/cabal --numeric-version)-${{ matrix.platform.ARTIFACT }}.tar.gz
-          mv haskell-toolchain.tar.gz haskell-toolchain-${{ matrix.platform.ARTIFACT }}.tar.gz
+          mv ghc.tar.gz ghc-$(bin/ghc --numeric-version)-${{ env.ARTIFACT }}.tar.gz
+          mv cabal.tar.gz cabal-$(bin/cabal --numeric-version)-${{ env.ARTIFACT }}.tar.gz
+          mv haskell-toolchain.tar.gz haskell-toolchain-${{ env.ARTIFACT }}.tar.gz
         env:
           EXTRA_LIB_DIRS: /usr/local/lib
           EXTRA_INCLUDE_DIRS: /usr/local/include
@@ -546,7 +591,6 @@ jobs:
           PATH=$GITHUB_WORKSPACE/_build/bindist/bin:$PATH make
         env:
           THREADS: 4
-          TEST_HC_OPTS: "-dcore-lint -dstg-lint -dcmm-lint -no-user-package-db -fno-dump-with-ways -fprint-error-index-links=never -rtsopts -fno-warn-missed-specialisations -fshow-warning-groups -fdiagnostics-color=never -fno-diagnostics-show-caret -Werror=compat -dno-debug-output"
 
 # test-arm:
 #   name: Test ARM binary
@@ -627,6 +671,7 @@ jobs:
       - name: Run test
         run: *test
         env:
+          THREADS: 4
           LDFLAGS: "-L/usr/local/opt/libffi/lib"
           CPPFLAGS: "-I/usr/local/opt/libffi/include"
 
@@ -666,6 +711,7 @@ jobs:
       - name: Run test
         run: *test
         env:
+          THREADS: 4
           LDFLAGS: "-L/opt/homebrew/opt/libffi/lib"
           CPPFLAGS: "-I/opt/homebrew/opt/libffi/include"
 
@@ -716,5 +762,9 @@ jobs:
           for file in *.tar.gz; do tar xzf "$file"; done
           cd testsuite
           export LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH
-          PATH=$GITHUB_WORKSPACE/_build/bindist/bin:$PATH gmake EXTRA_HC_OPTS="-optl-L/usr/local/lib -optc-I/usr/local/include"
+          PATH=$GITHUB_WORKSPACE/_build/bindist/bin:$PATH gmake
+        env:
+          THREADS: 8
+          EXTRA_HC_OPTS: "-optl-L/usr/local/lib -optc-I/usr/local/include"
+          TEST_HC_OPTS: "-dcore-lint -dstg-lint -dcmm-lint -no-user-package-db -fno-dump-with-ways -fprint-error-index-links=never -rtsopts -fno-warn-missed-specialisations -fshow-warning-groups -fdiagnostics-color=never -fno-diagnostics-show-caret -Werror=compat -dno-debug-output -optl-L/usr/local/lib -optc-I/usr/local/include"
 
