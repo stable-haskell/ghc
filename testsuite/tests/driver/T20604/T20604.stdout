@@ -1,5 +1,4 @@
 A1
 A
-addDependentFile "/home/teo/git/ghc/_build/stage1/lib/../lib/x86_64-linux-ghc-9.11.20240508/libHSghc-prim-0.11.0-inplace-ghc9.11.20240508.so" a63ccfcae8455a0abc22cfbd2ee0fee4
-addDependentFile "/home/teo/git/ghc/_build/stage1/lib/../lib/x86_64-linux-ghc-9.11.20240508/libHSghc-bignum-1.3-inplace-ghc9.11.20240508.so" fe8ae214b210d7ae50739f9b74c6d3bc
-addDependentFile "/home/teo/git/ghc/_build/stage1/lib/../lib/x86_64-linux-ghc-9.11.20240508/libHSghc-internal-9.1001.0-inplace-ghc9.11.20240508.so" cce9e35d3fb6c65a080cdb8a570f3caf
+HSrts-fs-
+HSghc-internal-

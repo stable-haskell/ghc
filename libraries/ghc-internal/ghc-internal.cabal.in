@@ -38,7 +38,6 @@ extra-source-files:
     include/HsBaseConfig.h.in
     include/ieee-flpt.h
     include/md5.h
-    include/fs.h
     include/winio_structs.h
     install-sh
 
@@ -91,8 +90,7 @@ Library
 
     build-depends:
         rts == 1.0.*,
-        ghc-prim >= 0.11 && < 0.14,
-        ghc-bignum >= 1.0 && < 2.0
+        rts-fs == 1.0.*
 
     exposed-modules:
         GHC.Internal.ClosureTypes
@@ -301,11 +299,25 @@ Library
         -- TODO: remove
         GHC.Internal.IOPort
 
-    reexported-modules:
-          GHC.Num.Integer
-        , GHC.Num.Natural
-        , GHC.Num.BigNat
-        , GHC.Tuple
+        GHC.Internal.CString
+        GHC.Internal.Classes
+        GHC.Internal.Debug
+        GHC.Internal.Magic
+        GHC.Internal.Magic.Dict
+        GHC.Internal.Prim
+        GHC.Internal.Prim.Ext
+        GHC.Internal.Prim.Panic
+        GHC.Internal.Prim.Exception
+        GHC.Internal.Prim.PtrEq
+        GHC.Internal.PrimopWrappers
+        GHC.Internal.Tuple
+        GHC.Internal.Types
+
+    -- Cabal expects autogen modules to be some specific directories, not in the
+    -- source dirs...
+    -- autogen-modules:
+    --     GHC.Internal.Prim
+    --     GHC.Internal.PrimopWrappers
 
     other-modules:
         GHC.Internal.Data.Typeable.Internal
@@ -343,7 +355,6 @@ Library
           cbits/md5.c
           cbits/primFloat.c
           cbits/sysconf.c
-          cbits/fs.c
           cbits/strerror.c
 
       cmm-sources:

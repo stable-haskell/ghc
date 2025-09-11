@@ -1,9 +1,17 @@
 {-# LANGUAGE ScopedTypeVariables, StandaloneDeriving, DeriveGeneric,
     TupleSections, RecordWildCards, InstanceSigs, CPP #-}
 {-# OPTIONS_GHC -fno-warn-name-shadowing #-}
+<<<<<<< HEAD
 {-# OPTIONS_GHC -Wno-warnings-deprecations #-}
 -- TODO We want to import GHC.Internal.Desugar instead of GHC.Desugar when we
 -- can require of the bootstrap compiler to have ghc-internal.
+=======
+-- Suppress deprecation warnings only when we must import deprecated symbols
+-- (i.e. when ghc-internal isn't available yet).
+#ifndef HAVE_GHC_INTERNAL
+{-# OPTIONS_GHC -Wno-warnings-deprecations #-}
+#endif
+>>>>>>> Conditionalize the ghc-internal dependency on the ghc version.
 
 -- |
 -- Running TH splices
@@ -112,8 +120,19 @@ import Data.IORef
 import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Maybe
+<<<<<<< HEAD
 import GHC.Desugar (AnnotationWrapper(..))
 import qualified GHC.Internal.TH.Syntax as TH
+=======
+-- Prefer the non-deprecated internal path when available.
+#ifdef HAVE_GHC_INTERNAL
+import GHC.Internal.Desugar (AnnotationWrapper(..))
+#else
+import GHC.Desugar (AnnotationWrapper(..))
+#endif
+import qualified GHC.Boot.TH.Syntax as TH
+import qualified GHC.Boot.TH.Monad as TH
+>>>>>>> Conditionalize the ghc-internal dependency on the ghc version.
 import Unsafe.Coerce
 
 -- | Create a new instance of 'QState'

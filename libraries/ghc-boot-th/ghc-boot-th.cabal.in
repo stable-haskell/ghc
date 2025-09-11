@@ -55,7 +55,7 @@ Library
 
     if flag(bootstrap)
         cpp-options: -DBOOTSTRAP_TH
-        hs-source-dirs: @SourceRoot@ ../ghc-internal/src
+        hs-source-dirs: ../ghc-boot-th ../ghc-internal/src
         exposed-modules:
             GHC.Internal.TH.Lib
             GHC.Internal.TH.Syntax

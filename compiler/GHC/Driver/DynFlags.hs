@@ -62,6 +62,12 @@ module GHC.Driver.DynFlags (
         versionedAppDir, versionedFilePath,
         extraGccViaCFlags, globalPackageDatabasePath,
 
+        --
+        baseUnitId,
+        rtsWayUnitId',
+        rtsWayUnitId,
+
+
         -- * Include specifications
         IncludeSpecs(..), addGlobalInclude, addQuoteInclude, flattenIncludes,
         addImplicitQuoteInclude,
@@ -862,7 +868,8 @@ packageFlagsChanged idflags1 idflags0 =
    packageGFlags dflags = map (`gopt` dflags)
      [ Opt_HideAllPackages
      , Opt_HideAllPluginPackages
-     , Opt_AutoLinkPackages ]
+     , Opt_AutoLinkPackages
+     , Opt_NoRts ]
 
 instance Outputable PackageFlag where
     ppr (ExposePackage n arg rn) = text n <> braces (ppr arg <+> ppr rn)
@@ -1485,6 +1492,25 @@ versionedAppDir appname platform = do
 
 versionedFilePath :: ArchOS -> FilePath
 versionedFilePath platform = uniqueSubdir platform
+
+-- | Access the unit-id of the version of `base` which we will automatically link
+-- against.
+baseUnitId :: DynFlags -> UnitId
+baseUnitId dflags = unitSettings_baseUnitId (unitSettings dflags)
+
+rtsWayUnitId' :: Ways -> UnitId
+rtsWayUnitId' ways | ways `hasWay` WayThreaded
+                   , ways `hasWay` WayDebug
+                   = stringToUnitId "rts:threaded-debug"
+                   | ways `hasWay` WayThreaded
+                   = stringToUnitId "rts:threaded-nodebug"
+                   | ways `hasWay` WayDebug
+                   = stringToUnitId "rts:nonthreaded-debug"
+                   | otherwise
+                   = stringToUnitId "rts:nonthreaded-nodebug"
+
+rtsWayUnitId :: DynFlags -> UnitId
+rtsWayUnitId dflags = rtsWayUnitId' (ways dflags)
 
 -- SDoc
 -------------------------------------------

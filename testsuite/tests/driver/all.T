@@ -179,24 +179,23 @@ test('T7060', [], makefile_test, [])
 test('T7130', normal, compile_fail, ['-fflul-laziness'])
 test('T7563', when(unregisterised(), skip), makefile_test, [])
 test('T6037',
-     # The testsuite doesn't know how to set a non-Unicode locale on Windows or MacOS < Sonoma.
-     # Because in previous version of MacOS the test is still broken, we mark it as fragile.
+     # Requires forcing a 7-bit/ASCII-only locale.
+     # - On Windows (mingw32) the testsuite can't reliably set a non-Unicode C locale -> expect_fail.
+     # - On modern Darwin there are no pure ASCII locales available -> skip.
      [when(opsys('mingw32'), expect_fail),
-      when(opsys('darwin'), fragile(24161))
+      when(opsys('darwin'), skip)
      ],
      makefile_test, [])
 test('T2507',
-     # The testsuite doesn't know how to set a non-Unicode locale on Windows or MacOS < Sonoma
-     # Because in previous version of MacOS the test is still broken, we mark it as fragile.
+     # Same locale assumptions as T6037 (ASCII-only needed, unavailable on Darwin; untestable on Windows).
      [when(opsys('mingw32'), expect_fail),
-      when(opsys('darwin'), fragile(24161))
+      when(opsys('darwin'), skip)
      ],
      makefile_test, [])
 test('T8959a',
-     # The testsuite doesn't know how to set a non-Unicode locale on Windows or MacOS < Sonoma
-     # Because in previous version of MacOS the test is still broken, we mark it as fragile.
+     # Same locale assumptions as T6037 (ASCII-only needed, unavailable on Darwin; untestable on Windows).
      [when(opsys('mingw32'), expect_fail),
-      when(opsys('darwin'), fragile(24161))
+      when(opsys('darwin'), skip)
      ],
      makefile_test, [])
 
@@ -330,3 +329,5 @@ test('T23944', [unless(have_dynamic(), skip), extra_files(['T23944A.hs'])], mult
 test('T24286', [cxx_src, unless(have_profiling(), skip), extra_files(['T24286.cpp'])], compile, ['-prof -no-hs-main'])
 test('T24839', [unless(arch('x86_64') or arch('aarch64'), skip), extra_files(["t24839_sub.S"])], compile_and_run, ['t24839_sub.S'])
 test('t25150', [extra_files(["t25150"])], multimod_compile, ['Main.hs', '-v0 -working-dir t25150/dir a.c'])
+test('T25382', expect_broken(28), makefile_test, [])
+test('T26018', req_c, makefile_test, [])
