@@ -17,6 +17,9 @@ on:
       gmp:
         type: string
         default: 6.3.0
+      ffi:
+        type: string
+        default: 3.4.5
       cabal:
         type: string
         default: 3.14.2.0
@@ -30,6 +33,7 @@ env:
   CABAL_VERSION: ${{ inputs.cabal }}
   GMP_VERSION: ${{ inputs.gmp }}
   GMP_URL: "https://ftp.gnu.org/gnu/gmp/"
+  FFI_VERSION: ${{ inputs.ffi }}
   BOOTSTRAP_HASKELL_NONINTERACTIVE: 1
   BOOTSTRAP_HASKELL_GHC_VERSION: ${{ inputs.ghc }}
   BOOTSTRAP_HASKELL_CABAL_VERSION: ${{ inputs.cabal }}
@@ -121,16 +125,24 @@ jobs:
           ln -s make /usr/local/bin/gmake
           echo "/usr/local/bin" >> $GITHUB_PATH
 
+      - name: Install libffi
+        run: |
+          curl -O -L https://github.com/libffi/libffi/releases/download/v${{ env.FFI_VERSION }}/libffi-${{ env.FFI_VERSION }}.tar.gz
+          tar xf libffi-${{ env.FFI_VERSION }}.tar.gz
+          cd libffi-${{ env.FFI_VERSION }}
+          CFLAGS=-fPIC ./configure --prefix=$HOME/.local/ --libdir=$HOME/.local/lib/ --disable-shared --disable-multi-os-directory
+          make install
+
       - name: Install GMP
         run: |
-          set -eux
-
           curl -O -L ${{ env.GMP_URL }}/gmp-${{ env.GMP_VERSION }}.tar.xz
           tar xf gmp-${{ env.GMP_VERSION }}.tar.xz
           cd gmp-${{ env.GMP_VERSION }}
           CFLAGS=-fPIC ./configure --prefix=$HOME/.local/ --disable-shared
           make install
-          cd ..
+
+      - name: Add extra-lib-dirs
+        run: |
           echo "extra-lib-dirs: $HOME/.local/lib/" >> cabal.project.stage2
           echo "extra-lib-dirs: $HOME/.local/lib/" >> cabal.project.stage3
 
@@ -170,10 +182,12 @@ jobs:
 
       - name: check linking
         run: |
-          if ldd _build/bindist/bin/ghc | grep --quiet gmp ; then
-            echo "gmp is linked!"
-            exit 1
-          fi
+          for lib in gmp libffi ; do
+            if ldd _build/bindist/bin/ghc | grep --quiet ${lib} ; then
+              echo "${lib} is linked!"
+              exit 1
+            fi
+          done
 
       - if: always()
         name: Upload artifact
@@ -525,6 +539,7 @@ jobs:
 
       - name: Run test
         run: &test |
+          rm -rf .git
           cd _build/bindist
           for file in *.tar.gz; do tar xzf "$file"; done
           cd testsuite
@@ -611,6 +626,9 @@ jobs:
 
       - name: Run test
         run: *test
+        env:
+          LDFLAGS: "-L/usr/local/opt/libffi/lib"
+          CPPFLAGS: "-I/usr/local/opt/libffi/include"
 
   test-mac-aarch64:
     name: Test binary (Mac aarch64)
@@ -647,6 +665,9 @@ jobs:
 
       - name: Run test
         run: *test
+        env:
+          LDFLAGS: "-L/opt/homebrew/opt/libffi/lib"
+          CPPFLAGS: "-I/opt/homebrew/opt/libffi/include"
 
   test-freebsd-x86_64:
     name: Test FreeBSD x86_64
@@ -690,9 +711,10 @@ jobs:
 
       - name: Run test
         run: |
+          rm -rf .git
           cd _build/bindist
           for file in *.tar.gz; do tar xzf "$file"; done
           cd testsuite
           export LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH
-          PATH=$GITHUB_WORKSPACE/_build/bindist/bin:$PATH gmake
+          PATH=$GITHUB_WORKSPACE/_build/bindist/bin:$PATH gmake EXTRA_HC_OPTS="-optl-L/usr/local/lib -optc-I/usr/local/include"
 
