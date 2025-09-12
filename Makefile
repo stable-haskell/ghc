@@ -1033,13 +1033,11 @@ CANONICAL_TEST_HC_OPTS = \
 	-Werror=compat -dno-debug-output
 
 # Build timeout utility (needed for some tests) if not already built.
-.PHONY: testsuite-timeout
-testsuite-timeout:
+testsuite/timeout/install-inplace/bin/timeout:
 	$(MAKE) -C testsuite/timeout
 
-
 # --- Test Target ---
-test: _build/bindist testsuite-timeout
+test: $(TEST_GHC) $(TEST_GHC_PKG) $(TEST_HP2PS) $(TEST_HPC) $(TEST_RUN_GHC) testsuite/timeout/install-inplace/bin/timeout
 	@echo "::group::Running tests with THREADS=$(THREADS)" >&2
 	# If any required tool is missing, testsuite logic will skip related tests.
 	TEST_HC='$(TEST_GHC)' \
