@@ -259,3 +259,4 @@ ghc.nix/
 # clangd
 .clangd
 dist-newstyle/
+cabal.project.stage2.settings
