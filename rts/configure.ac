@@ -583,36 +583,36 @@ else
   AC_MSG_ERROR([Failed to run $DERIVE_CONSTANTS --gen-header ...])
 fi
 
-AC_MSG_CHECKING([for AutoApply.cmm])
-if $GENAPPLY include/DerivedConstants.h > AutoApply.cmm; then
+AC_MSG_CHECKING([for include/rts/AutoApply.cmm.h])
+if mkdir -p include/rts && $GENAPPLY include/DerivedConstants.h > include/rts/AutoApply.cmm.h; then
   AC_MSG_RESULT([created])
 else
   AC_MSG_RESULT([failed to create])
-  AC_MSG_ERROR([Failed to run $GENAPPLY include/DerivedConstants.h > AutoApply.cmm])
+  AC_MSG_ERROR([Failed to run $GENAPPLY include/DerivedConstants.h > include/rts/AutoApply.cmm.h])
 fi
 
-AC_MSG_CHECKING([for AutoApply_V16.cmm])
-if $GENAPPLY include/DerivedConstants.h -V16 > AutoApply_V16.cmm; then
+AC_MSG_CHECKING([for include/rts/AutoApply_V16.cmm.h])
+if mkdir -p include/rts && $GENAPPLY include/DerivedConstants.h -V16 > include/rts/AutoApply_V16.cmm.h; then
   AC_MSG_RESULT([created])
 else
   AC_MSG_RESULT([failed to create])
-  AC_MSG_ERROR([Failed to run $GENAPPLY include/DerivedConstants.h -V16 > AutoApply_V16.cmm])
+  AC_MSG_ERROR([Failed to run $GENAPPLY include/DerivedConstants.h -V16 > include/rts/AutoApply_V16.cmm.h])
 fi
 
-AC_MSG_CHECKING([for AutoApply_V32.cmm])
-if $GENAPPLY include/DerivedConstants.h -V32 > AutoApply_V32.cmm; then
+AC_MSG_CHECKING([for include/rts/AutoApply_V32.cmm.h])
+if mkdir -p include/rts && $GENAPPLY include/DerivedConstants.h -V32 > include/rts/AutoApply_V32.cmm.h; then
   AC_MSG_RESULT([created])
 else
   AC_MSG_RESULT([failed to create])
-  AC_MSG_ERROR([Failed to run $GENAPPLY include/DerivedConstants.h -V32 > AutoApply_V32.cmm])
+  AC_MSG_ERROR([Failed to run $GENAPPLY include/DerivedConstants.h -V32 > include/rts/AutoApply_V32.cmm.h])
 fi
 
-AC_MSG_CHECKING([for AutoApply_V64.cmm])
-if $GENAPPLY include/DerivedConstants.h -V64 > AutoApply_V64.cmm; then
+AC_MSG_CHECKING([for include/rts/AutoApply_V64.cmm.h])
+if mkdir -p include/rts && $GENAPPLY include/DerivedConstants.h -V64 > include/rts/AutoApply_V64.cmm.h; then
   AC_MSG_RESULT([created])
 else
   AC_MSG_RESULT([failed to create])
-  AC_MSG_ERROR([Failed to run $GENAPPLY include/DerivedConstants.h -V64 > AutoApply_V64.cmm])
+  AC_MSG_ERROR([Failed to run $GENAPPLY include/DerivedConstants.h -V64 > include/rts/AutoApply_V64.cmm.h])
 fi
 
 AC_MSG_CHECKING([for include/rts/EventLogConstants.h])
