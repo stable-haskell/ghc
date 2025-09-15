@@ -35,6 +35,7 @@
 #include "PathUtils.h"
 #include "CheckUnload.h" // createOCSectionIndices
 #include "ReportMemoryMap.h"
+#include "xxhash.h"
 
 #if !defined(mingw32_HOST_OS) && defined(HAVE_SIGNAL_H)
 #include "posix/Signals.h"
@@ -443,6 +444,176 @@ void initLinker (void)
     // be able to unload object files when they contain CAFs.
     initLinker_(1);
 }
+
+// Helper to pre-link big archives into a temporary object file so the
+// internal linker can load a single .o instead of many members.
+#if defined(OBJFORMAT_ELF) || defined(OBJFORMAT_MACHO)
+#include <errno.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <limits.h>
+#include <time.h>
+
+static const char *ghci_basename_posix(const char *p)
+{
+    const char *last = p;
+    if (!p) return p;
+    for (const char *s = p; *s; ++s) {
+        if (*s == '/') last = s + 1;
+    }
+    return last;
+}
+
+static const char *ghci_tmpdir(void)
+{
+    const char *t = getenv("TMPDIR");
+    return t && *t ? t : "/tmp";
+}
+
+static bool ghci_read_file_prefix(const char *path, char *buf, size_t bufsz)
+{
+    FILE *f = fopen(path, "rb");
+    if (!f) return false;
+    size_t n = fread(buf, 1, bufsz - 1, f);
+    buf[n] = '\0';
+    fclose(f);
+    return true;
+}
+
+static bool ghci_compute_cache_key(const char *path, char out_hex[65])
+{
+    FILE *f = fopen(path, "rb");
+    if (!f) return false;
+    XXH64_state_t* st = XXH64_createState();
+    if (!st) { fclose(f); return false; }
+    if (XXH64_reset(st, 0) != XXH_OK) { XXH64_freeState(st); fclose(f); return false; }
+    unsigned char buf[256 * 1024];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), f)) > 0) {
+        if (XXH64_update(st, buf, n) != XXH_OK) {
+            XXH64_freeState(st); fclose(f); return false;
+        }
+    }
+    fclose(f);
+    XXH64_hash_t hv = XXH64_digest(st);
+    XXH64_freeState(st);
+    // render as 16-char hex (zero-padded)
+    // use unsigned long long to satisfy printf on most platforms
+    unsigned long long v = (unsigned long long)hv;
+    // ensure buffer large enough; we reserved 65 earlier
+    snprintf(out_hex, 65, "%016llx", v);
+    return true;
+}
+
+static pathchar *ghci_prelink_archive_to_tmp(pathchar *archivePath, size_t threshold)
+{
+    struct_stat st;
+    if (pathstat(archivePath, &st) != 0) return NULL;
+    if (threshold == 0 || (size_t)st.st_size < threshold) return NULL;
+
+    // Build cache target name using SHA-256 and include basename for readability
+    char hex[65];
+    if (!ghci_compute_cache_key((const char *)archivePath, hex)) {
+        return NULL;
+    }
+
+    const char *tmpdir = ghci_tmpdir();
+    const char *base = ghci_basename_posix((const char *)archivePath);
+    int target_needed = snprintf(NULL, 0, "%s/ghc-prelink-%s-%s.o", tmpdir, base, hex);
+    pathchar *target = stgMallocBytes((target_needed + 1) * pathsize, "ghci_prelink(target)");
+    snprintf((char *)target, target_needed + 1, "%s/ghc-prelink-%s-%s.o", tmpdir, base, hex);
+
+    // If cached object exists, use it
+    struct stat sb;
+    if (stat((const char *)target, &sb) == 0 && sb.st_size > 0) {
+        return target;
+    }
+
+    // Cross-process lock using a directory
+    char lock_path[PATH_MAX];
+    snprintf(lock_path, sizeof(lock_path), "%s/ghc-prelink-%s-%s.building", tmpdir, base, hex);
+    if (mkdir(lock_path, 0700) == 0) {
+        // We are the builder
+        int tmp_needed = snprintf(NULL, 0, "%s/ghc-prelink-%d-%s.tmp.o", tmpdir, (int)getpid(), base);
+        pathchar *tmp_out = stgMallocBytes((tmp_needed + 1) * pathsize, "ghci_prelink(tmp)");
+        snprintf((char *)tmp_out, tmp_needed + 1, "%s/ghc-prelink-%d-%s.tmp.o", tmpdir, (int)getpid(), base);
+
+        // Log for diagnostics
+        char log_path[PATH_MAX];
+        snprintf(log_path, sizeof(log_path), "%s/ghc-prelink-%s.log", tmpdir, hex);
+
+    const char *cc = getenv("CC");
+        if (!cc || !*cc) cc = "cc";
+    const char *ldflags = getenv("LDFLAGS");
+    if (!ldflags) ldflags = "";
+        char cmd[4096];
+#  if defined(OBJFORMAT_ELF)
+        int n = snprintf(cmd, sizeof(cmd),
+             "%s %s -nostdlib -Wl,-r -Wl,--whole-archive '%s' -Wl,--no-whole-archive -o '%s' >'%s' 2>&1",
+             cc, ldflags, (const char *)archivePath, (const char *)tmp_out, log_path);
+#  elif defined(OBJFORMAT_MACHO)
+        int n = snprintf(cmd, sizeof(cmd),
+             "%s %s -nostdlib -Wl,-r -Wl,-all_load '%s' -o '%s' >'%s' 2>&1",
+             cc, ldflags, (const char *)archivePath, (const char *)tmp_out, log_path);
+#  endif
+        if (n < 0 || (size_t)n >= sizeof(cmd)) {
+            errorBelch("prelink: command too long while building cache for %s", base);
+            stgFree(tmp_out);
+            rmdir(lock_path);
+            stgFree(target);
+            return NULL;
+        }
+
+        IF_DEBUG(linker, debugBelch("prelinking large archive: %" PATH_FMT " -> %s (cc=%s)\n", archivePath, (char *)tmp_out, cc));
+        int rc = system(cmd);
+        if (rc != 0) {
+            char buf[1024];
+            buf[0] = '\0';
+            if (ghci_read_file_prefix(log_path, buf, sizeof(buf))) {
+                errorBelch("prelink failed (rc=%d) for %s; command: %s\n%s", rc, base, cmd, buf);
+            } else {
+                errorBelch("prelink failed (rc=%d) for %s; command: %s", rc, base, cmd);
+            }
+            unlink((const char *)tmp_out);
+            unlink(log_path);
+            rmdir(lock_path);
+            stgFree(tmp_out);
+            stgFree(target);
+            return NULL;
+        }
+
+        // Atomically move into place
+        if (rename((const char *)tmp_out, (const char *)target) != 0) {
+            errorBelch("prelink: failed to rename '%s' to '%s' (errno=%d)", (char *)tmp_out, (char *)target, errno);
+            unlink((const char *)tmp_out);
+            unlink(log_path);
+            rmdir(lock_path);
+            stgFree(tmp_out);
+            stgFree(target);
+            return NULL;
+        }
+        unlink(log_path);
+        rmdir(lock_path);
+        stgFree(tmp_out);
+        return target;
+    } else {
+        // Someone else is building; wait for target to appear
+        const int max_ms = 30000; // 30 seconds
+        int waited = 0;
+        while (waited < max_ms) {
+            if (stat((const char *)target, &sb) == 0 && sb.st_size > 0) {
+                return target;
+            }
+            struct timespec ts = {0, 100 * 1000 * 1000}; // 100ms
+            nanosleep(&ts, NULL);
+            waited += 100;
+        }
+        // Give up
+        stgFree(target);
+        return NULL;
+    }
+}
+#endif
 
 void
 initLinker_ (int retain_cafs)
@@ -1468,9 +1639,55 @@ static HsInt loadObj_ (pathchar *path)
        return 1; // success
    }
 
+   // Optionally pre-link large archives into a temporary .o to speed up loading.
+   // Runtime configuration precedence:
+   //   1) +RTS --linker-prelink-archive-threshold=<size>
+   //   2) env GHCI_PRELINK_ARCHIVE_THRESHOLD=<size>
+   //   3) default 100M
+   static size_t ghci_prelink_threshold = (size_t)-1;
+   if (ghci_prelink_threshold == (size_t)-1) {
+       // Env var takes precedence over the RTS field
+       size_t val;
+       const char *env = getenv("GHCI_PRELINK_ARCHIVE_THRESHOLD");
+       if (env && *env) {
+           char *endp = NULL;
+           unsigned long long n = strtoull(env, &endp, 10);
+           if (endp && (*endp == 'K' || *endp == 'k')) {
+               val = (size_t)n * 1024ULL;
+           } else if (endp && (*endp == 'M' || *endp == 'm')) {
+               val = (size_t)n * 1024ULL * 1024ULL;
+           } else if (endp && (*endp == 'G' || *endp == 'g')) {
+               val = (size_t)n * 1024ULL * 1024ULL * 1024ULL;
+           } else {
+               val = (size_t)n;
+           }
+       } else {
+           // use the RTS field (set by +RTS or defaulted)
+           val = (size_t)RtsFlags.MiscFlags.linkerPrelinkArchiveThreshold;
+       }
+       ghci_prelink_threshold = val;
+   }
+
    // Things that look like object files (e.g. end in `.o`) may nevertheless be
    // archives, as noted in Note [Object merging] in GHC.Driver.Pipeline.Execute.
    if (isArchive(path)) {
+       // Try pre-linking if the archive is large enough
+    pathchar *tmp_o = NULL;
+#if defined(OBJFORMAT_ELF) || defined(OBJFORMAT_MACHO)
+    tmp_o = ghci_prelink_archive_to_tmp(path, ghci_prelink_threshold);
+#endif
+       if (tmp_o != NULL) {
+           HsInt ok = loadObj_(tmp_o);
+           if (!ok) {
+               IF_DEBUG(linker, debugBelch("prelinked loading failed for %" PATH_FMT ", falling back to archive loader\n", path));
+               // Fall back to archive loader
+               stgFree(tmp_o);
+           } else {
+               // Keep the temp file on disk to allow later unload/debug. Do not free oc->fileName here.
+               stgFree(tmp_o);
+               return 1;
+           }
+       }
        if (loadArchive_(path)) {
             return 1; // success
        } else {

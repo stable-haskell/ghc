@@ -295,6 +295,8 @@ import qualified Data.Map as Map
 import qualified Data.Set as Set
 import Data.Word
 import System.FilePath
+-- no env tweaks needed here
+import Data.Int (Int64)
 import Text.ParserCombinators.ReadP hiding (char)
 import Text.ParserCombinators.ReadP as R
 
@@ -884,7 +886,7 @@ parseDynamicFlagsFull activeFlags cmdline logger dflags0 args = do
     map ((rdr . ppr . getLoc &&& unLoc) . errMsg) $ errs
 
   -- check for disabled flags in safe haskell
-  let (dflags2, sh_warns) = safeFlagCheck cmdline dflags1
+            let (dflags2, sh_warns) = safeFlagCheck cmdline dflags1
       theWays = ways dflags2
 
   unless (allowed_combination theWays) $ liftIO $
@@ -898,6 +900,10 @@ parseDynamicFlagsFull activeFlags cmdline logger dflags0 args = do
   case (ghcHeapSize dflags3) of
     Just x -> liftIO (setHeapSize x)
     _      -> return ()
+
+  case ghciPrelinkArchiveThreshold dflags3 of
+    Just n  -> liftIO (setGhciPrelinkArchiveThreshold (fromIntegral (n :: Integer)))
+    _       -> return ()
 
   liftIO $ setUnsafeGlobalDynFlags dflags3
 
@@ -1075,6 +1081,8 @@ dynamic_flags_deps = [
     -- RTS options -------------------------------------------------------------
   , make_ord_flag defFlag "H"           (HasArg (\s -> upd (\d ->
           d { ghcHeapSize = Just $ fromIntegral (decodeSize s)})))
+  , make_ord_flag defGhcFlag "ghci-prelink-archive-threshold"
+          (HasArg (\s -> upd (\d -> d { ghciPrelinkArchiveThreshold = Just (decodeSize s) })))
 
   , make_ord_flag defFlag "Rghc-timing" (NoArg (upd (\d ->
                                                d { enableTimeStats = True })))
@@ -3808,6 +3816,7 @@ decodeSize str
 
 foreign import ccall unsafe "setHeapSize"       setHeapSize       :: Int -> IO ()
 foreign import ccall unsafe "enableTimingStats" enableTimingStats :: IO ()
+foreign import ccall unsafe "setGhciPrelinkArchiveThreshold" setGhciPrelinkArchiveThreshold :: Int64 -> IO ()
 
 outputFile :: DynFlags -> Maybe String
 outputFile dflags
