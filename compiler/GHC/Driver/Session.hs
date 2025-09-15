@@ -1314,6 +1314,8 @@ dynamic_flags_deps = [
         (NoArg (setGeneralFlag Opt_NoHsMain))
   , make_ord_flag defGhcFlag "no-rts"
         (NoArg (setGeneralFlag Opt_NoRts))
+  , make_ord_flag defGhcFlag "no-ghc-internal"
+        (NoArg (setGeneralFlag Opt_NoGhcInternal))
   , make_ord_flag defGhcFlag "fno-state-hack"
         (NoArg (setGeneralFlag Opt_G_NoStateHack))
   , make_ord_flag defGhcFlag "fno-opt-coercion"
