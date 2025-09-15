@@ -240,6 +240,24 @@ symbolTypeString (SymType type)
     }
 }
 
+#if defined(INTERNAL_LIBFFI)
+int is_ffi_symbol(char* key) {
+   if (strcmp(key, MAYBE_LEADING_UNDERSCORE_STR("ffi_type_void"))) { return 1; }
+   else if (strcmp(key, MAYBE_LEADING_UNDERSCORE_STR("ffi_type_uint8"))) { return 1; }
+   else if (strcmp(key, MAYBE_LEADING_UNDERSCORE_STR("ffi_type_sint8"))) { return 1; }
+   else if (strcmp(key, MAYBE_LEADING_UNDERSCORE_STR("ffi_type_uint16"))) { return 1; }
+   else if (strcmp(key, MAYBE_LEADING_UNDERSCORE_STR("ffi_type_sint16"))) { return 1; }
+   else if (strcmp(key, MAYBE_LEADING_UNDERSCORE_STR("ffi_type_uint32"))) { return 1; }
+   else if (strcmp(key, MAYBE_LEADING_UNDERSCORE_STR("ffi_type_sint32"))) { return 1; }
+   else if (strcmp(key, MAYBE_LEADING_UNDERSCORE_STR("ffi_type_uint64"))) { return 1; }
+   else if (strcmp(key, MAYBE_LEADING_UNDERSCORE_STR("ffi_type_sint64"))) { return 1; }
+   else if (strcmp(key, MAYBE_LEADING_UNDERSCORE_STR("ffi_type_float"))) { return 1; }
+   else if (strcmp(key, MAYBE_LEADING_UNDERSCORE_STR("ffi_type_double"))) { return 1; }
+   else if (strcmp(key, MAYBE_LEADING_UNDERSCORE_STR("ffi_type_pointer"))) { return 1; }
+   else { return 0 ; }
+}
+#endif
+
 /* -----------------------------------------------------------------------------
  * Insert symbols into hash tables, checking for duplicates.
  *
@@ -281,6 +299,14 @@ int ghciInsertSymbolTable(
       insertStrHashTable(table, key, pinfo);
       return 1;
    }
+#if defined(INTERNAL_LIBFFI)
+   else if (is_ffi_symbol((char*)key))
+   {
+       /* We skip ffi symbols. They're already defined in GHCi,
+        * so we don't load them from 'HSlibffi' object. */
+       return 1;
+   }
+#endif
    else if (pinfo->type ^ type)
    {
        if(pinfo->type & SYM_TYPE_HIDDEN)
