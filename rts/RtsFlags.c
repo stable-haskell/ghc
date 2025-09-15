@@ -272,8 +272,6 @@ void initRtsFlagsDefaults(void)
     RtsFlags.MiscFlags.linkerOptimistic        = false;
     RtsFlags.MiscFlags.linkerMemBase           = 0;
     RtsFlags.MiscFlags.ioManager               = IO_MNGR_FLAG_AUTO;
-    /* Default to 100 MiB; can be overridden by env or +RTS */
-    RtsFlags.MiscFlags.linkerPrelinkArchiveThreshold = (int64_t)(100ULL * 1024ULL * 1024ULL);
 #if defined(THREADED_RTS) && defined(mingw32_HOST_OS)
     RtsFlags.MiscFlags.numIoWorkerThreads      = getNumberOfProcessors();
 #else
@@ -557,9 +555,6 @@ usage_text[] = {
 "  -xm        Base address to mmap memory in the GHCi linker",
 "             (hex; must be <80000000)",
 #endif
-"  --linker-prelink-archive-threshold=<size>",
-"             Pre-link large .a archives to a temporary .o before loading.",
-"             Units: K, M, G. 0 disables. Default: 100M (if not set via env)",
 "  -xq        The allocation limit given to a thread after it receives",
 "             an AllocationLimitExceeded exception. (default: 100k)",
 "",
@@ -1009,24 +1004,6 @@ error = true;
                               &rts_argv[arg][2])) {
                        OPTION_UNSAFE;
                        RtsFlags.MiscFlags.linkerOptimistic = true;
-                  }
-                  else if (!strncmp("linker-prelink-archive-threshold=",
-                               &rts_argv[arg][2], 33)) {
-                      OPTION_UNSAFE;
-                      /* rts_argv[arg] is like "--linker-prelink-archive-threshold=<size>" */
-                      /* The value begins after the '=' which is at index 36 of the string */
-                      /* We can't easily compute the offset robustly from here; instead find '=' */
-                      const char* full = rts_argv[arg];
-                      const char* eq = strchr(full, '=');
-                      if (eq == NULL) {
-                          errorBelch("%s: missing value", rts_argv[arg]);
-                          error = true;
-                      } else {
-                          /* decodeSize expects the full flag and an offset to the value within it */
-                          uint32_t off = (uint32_t)(eq - full + 1);
-                          StgWord64 bytes = decodeSize(full, off, 0, HS_WORD64_MAX);
-                          RtsFlags.MiscFlags.linkerPrelinkArchiveThreshold = (int64_t)bytes;
-                      }
                   }
                   else if (strequal("null-eventlog-writer",
                                &rts_argv[arg][2])) {

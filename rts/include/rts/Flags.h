@@ -272,8 +272,6 @@ typedef struct _MISC_FLAGS {
                                   * for the linker, NULL ==> off */
     IO_MANAGER_FLAG ioManager;   /* The I/O manager to use.  */
     uint32_t numIoWorkerThreads; /* Number of I/O worker threads to use.  */
-    /* Pre-link large archives before loading into the RTS linker. */
-    int64_t linkerPrelinkArchiveThreshold; /* bytes; default set in RtsFlags; 0 = disable */
 } MISC_FLAGS;
 
 /* See Note [Synchronization of flags and base APIs] */

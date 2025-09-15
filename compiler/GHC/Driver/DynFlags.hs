@@ -196,9 +196,6 @@ data DynFlags = DynFlags {
 
   enableTimeStats       :: Bool,        -- ^ Enable RTS timing statistics?
   ghcHeapSize           :: Maybe Int,   -- ^ The heap size to set.
-  -- | Threshold (in bytes) above which GHCi will pre-link archives (ld -r)
-  -- before loading. A value of 0 disables pre-linking.
-  ghciPrelinkArchiveThreshold :: Maybe Integer,
 
   maxRelevantBinds      :: Maybe Int,   -- ^ Maximum number of bindings from the type envt
                                         --   to show in type error messages
@@ -586,7 +583,6 @@ defaultDynFlags mySettings =
 
         enableTimeStats         = False,
         ghcHeapSize             = Nothing,
-        ghciPrelinkArchiveThreshold = Nothing,
 
         importPaths             = ["."],
         mainModuleNameIs        = mAIN_NAME,

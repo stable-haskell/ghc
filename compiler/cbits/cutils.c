@@ -7,11 +7,6 @@ places in the GHC library.
 
 #include <HsFFI.h>
 
-/* Prototype for FFI-callable helper */
-void enableTimingStats( void );
-void setHeapSize( HsInt size );
-void setGhciPrelinkArchiveThreshold( HsInt64 bytes );
-
 void
 enableTimingStats( void )       /* called from the driver */
 {
@@ -26,11 +21,4 @@ setHeapSize( HsInt size )
         RtsFlags.GcFlags.heapSizeSuggestion > RtsFlags.GcFlags.maxHeapSize) {
         RtsFlags.GcFlags.maxHeapSize = RtsFlags.GcFlags.heapSizeSuggestion;
     }
-}
-
-/* Configure GHCi pre-link archive threshold (in bytes). 0 disables. */
-void
-setGhciPrelinkArchiveThreshold( HsInt64 bytes )
-{
-    RtsFlags.MiscFlags.linkerPrelinkArchiveThreshold = (StgInt64) bytes;
 }
