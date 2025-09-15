@@ -331,6 +331,34 @@ common rts-base-config
       rts-fs,
       rts
 
+common rts-cmm-sources-base
+    if !arch(javascript)
+      -- FIXME: by virtue of being part of the rts main library, these do not get
+      -- the flags (debug, threaded, ...) as the sub libraries.  Thus we are
+      -- likely missing -DDEBUG, -DTHREADED_RTS, etc.
+      -- One solution to this would be to turn all of these into `.h` files, and
+      -- then have the `AutoApply.cmm` in `rts-c-sources-base` include them.  This
+      -- would mean they are included in the sublibraries which will in turn apply
+      -- the sublibrary specific (c)flags.
+      autogen-cmm-sources:
+        AutoApply.cmm
+        AutoApply_V16.cmm
+
+      if arch(x86_64)
+        cmm-sources:
+          Jumps_V32.cmm (-mavx2)
+          Jumps_V64.cmm (-mavx512f)
+        autogen-cmm-sources:
+          AutoApply_V32.cmm (-mavx2)
+          AutoApply_V64.cmm (-mavx512f)
+      else
+        cmm-sources:
+          Jumps_V32.cmm
+          Jumps_V64.cmm
+        autogen-cmm-sources:
+          AutoApply_V32.cmm
+          AutoApply_V64.cmm
+
 common rts-c-sources-base
     if !arch(javascript)
       cmm-sources:
@@ -694,33 +722,6 @@ library
       rts-headers,
       rts-fs
 
-    if !arch(javascript)
-      -- FIXME: by virtue of being part of the rts main library, these do not get
-      -- the flags (debug, threaded, ...) as the sub libraries.  Thus we are
-      -- likely missing -DDEBUG, -DTHREADED_RTS, etc.
-      -- One solution to this would be to turn all of these into `.h` files, and
-      -- then have the `AutoApply.cmm` in `rts-c-sources-base` include them.  This
-      -- would mean they are included in the sublibraries which will in turn apply
-      -- the sublibrary specific (c)flags.
-      autogen-cmm-sources:
-        AutoApply.cmm
-        AutoApply_V16.cmm
-
-      if arch(x86_64)
-        cmm-sources:
-          Jumps_V32.cmm (-mavx2)
-          Jumps_V64.cmm (-mavx512f)
-        autogen-cmm-sources:
-          AutoApply_V32.cmm (-mavx2)
-          AutoApply_V64.cmm (-mavx512f)
-      else
-        cmm-sources:
-          Jumps_V32.cmm
-          Jumps_V64.cmm
-        autogen-cmm-sources:
-          AutoApply_V32.cmm
-          AutoApply_V64.cmm
-
 common ghcjs
     import: rts-base-config
 
@@ -767,7 +768,7 @@ library nonthreaded-nodebug
     if arch(javascript)
       import: ghcjs
     else
-      import: rts-base-config, rts-c-sources-base, rts-link-options, rts-global-build-flags
+      import: rts-base-config, rts-cmm-sources-base, rts-c-sources-base, rts-link-options, rts-global-build-flags
 
     visibility: public
 
@@ -775,21 +776,21 @@ library nonthreaded-nodebug
 
 
 library threaded-nodebug
-    import: rts-base-config, rts-c-sources-base, rts-link-options, rts-global-build-flags, rts-threaded-flags
+    import: rts-base-config, rts-cmm-sources-base, rts-c-sources-base, rts-link-options, rts-global-build-flags, rts-threaded-flags
     visibility: public
     build-depends: rts
     if arch(javascript)
       buildable: False
 
 library nonthreaded-debug
-    import: rts-base-config, rts-c-sources-base, rts-link-options, rts-global-build-flags, rts-debug-flags
+    import: rts-base-config, rts-cmm-sources-base, rts-c-sources-base, rts-link-options, rts-global-build-flags, rts-debug-flags
     visibility: public
     build-depends: rts
     if arch(javascript)
       buildable: False
 
 library threaded-debug
-    import: rts-base-config, rts-c-sources-base, rts-link-options, rts-global-build-flags, rts-threaded-flags, rts-debug-flags
+    import: rts-base-config, rts-cmm-sources-base, rts-c-sources-base, rts-link-options, rts-global-build-flags, rts-threaded-flags, rts-debug-flags
     visibility: public
     build-depends: rts
     if arch(javascript)
