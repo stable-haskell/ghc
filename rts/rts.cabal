@@ -615,25 +615,35 @@ common rts-link-options
          ld-options: -read_only_relocs warning
 
 common rts-global-build-flags
-    ghc-options: -DCOMPILING_RTS
+    ghc-options: -DCOMPILING_RTS -optc-DCOMPILING_RTS
     cpp-options: -DCOMPILING_RTS
+    cmm-options: -DCOMPILING_RTS
+    cc-options:  -DCOMPILING_RTS
     if !flag(smp)
-       ghc-options: -DNOSMP
+       ghc-options: -DNOSMP -optc-DNOSMP
        cpp-options: -DNOSMP
+       cmm-options: -DNOSMP
+       cc-options:  -DNOSMP
     if flag(dynamic)
-       ghc-options: -DDYNAMIC
+       ghc-options: -DDYNAMIC -optc-DDYNAMIC
        cpp-options: -DDYNAMIC
+       cmm-options: -DDYNAMIC
+       cc-options:  -DDYNAMIC
     if flag(thread-sanitizer)
       cc-options: -fsanitize=thread
       ld-options: -fsanitize=thread
 
 common rts-debug-flags
-    ghc-options: -optc-DDEBUG
+    ghc-options: -DDEBUG -optc-DDEBUG
     cpp-options: -DDEBUG -fno-omit-frame-pointer -g3 -O0
+    cmm-options: -DDEBUG -fno-omit-frame-pointer -g3 -O0
+    cc-options:  -DDEBUG -fno-omit-frame-pointer -g3 -O0
 
 common rts-threaded-flags
-    ghc-options: -DTHREADED_RTS
+    ghc-options: -DTHREADED_RTS -optc-DTHREADED_RTS
     cpp-options: -DTHREADED_RTS
+    cmm-options: -DTHREADED_RTS
+    cc-options:  -DTHREADED_RTS
 
 -- the _main_ library needs to deal with all the _configure_ time stuff.
 library
