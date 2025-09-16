@@ -54,12 +54,12 @@ jobs:
       rpm_tools_test: ${{ steps.gen_output.outputs.rpm_tools_test }}
       apk_tools_test: ${{ steps.gen_output.outputs.apk_tools_test }}
     env:
-      APT_BUILD: "zlib1g-dev libtinfo-dev libsqlite3-0 libsqlite3-dev libgmp-dev libffi-dev libncurses-dev ca-certificates g++ git make automake autoconf gcc perl python3 texinfo xz-utils lbzip2 bzip2 patch openssh-client sudo time jq wget curl locales libdw1 libdw-dev valgrind systemtap-sdt-dev xutils-dev unzip pkg-config python3-sphinx texlive-xetex texlive-latex-extra texlive-binaries texlive-fonts-recommended lmodern tex-gyre texlive-plain-generic linux-perf linux-perf libnuma-dev"
-      RPM_BUILD: "binutils which git make automake autoconf gcc perl python3 texinfo xz bzip2 patch openssh-clients sudo libffi-devel zlib-devel sqlite ncurses-compat-libs gmp-devel ncurses-devel gcc-c++ findutils diffutils curl wget jq systemtap-sdt-devel python3-sphinx texlive texlive-latex texlive-xetex texlive-collection-latex texlive-collection-latexrecommended texlive-collection-xetex python-sphinx-latex dejavu-sans-fonts dejavu-serif-fonts dejavu-sans-mono-fonts"
-      APK_BUILD: "alpine-sdk autoconf automake bash binutils-gold build-base coreutils cpio curl gcc git gmp gmp-dev grep libffi linux-headers gzip jq libffi-dev lld musl-dev musl-locales ncurses-dev ncurses-libs ncurses-static perl python3 sudo unzip wget xz zlib-dev zstd py3-sphinx texlive texlive-xetex texmf-dist-latexextra ttf-dejavu llvm17 clang17 texmf-dist-lang texmf-dist-fontsrecommended texinfo"
-      APT_TEST: "locales libnuma-dev zlib1g-dev libgmp-dev libgmp10 libssl-dev liblzma-dev libbz2-dev git wget lsb-release software-properties-common gnupg2 apt-transport-https gcc autoconf automake build-essential curl gzip libffi-dev libncurses-dev patchelf"
-      RPM_TEST: "autoconf automake binutils bzip2 coreutils curl elfutils-devel elfutils-libs findutils libffi-devel gcc gcc-c++ git gmp gmp-devel jq lbzip2 make ncurses ncurses-compat-libs ncurses-devel openssh-clients patch perl pxz python3 sqlite sudo wget which xz zlib-devel patchelf"
-      APK_TEST: "musl-locales curl gcc g++ gmp-dev libc-dev libffi-dev make musl-dev ncurses-dev perl tar xz autoconf automake bzip2 coreutils elfutils-dev findutils git jq bzip2-dev patch python3 sqlite sudo wget which zlib-dev patchelf zlib zlib-dev zlib-static"
+      APT_BUILD: "zlib1g-dev libtinfo-dev libsqlite3-0 libsqlite3-dev libgmp-dev libffi-dev libncurses-dev ca-certificates g++ git make automake autoconf gcc perl python3 texinfo xz-utils lbzip2 bzip2 patch openssh-client sudo time jq wget curl locales libdw1 libdw-dev valgrind systemtap-sdt-dev xutils-dev unzip pkg-config python3-sphinx texlive-xetex texlive-latex-extra texlive-binaries texlive-fonts-recommended lmodern tex-gyre texlive-plain-generic linux-perf linux-perf libnuma-dev libtool"
+      RPM_BUILD: "binutils which git make automake autoconf gcc perl python3 texinfo xz bzip2 patch openssh-clients sudo libffi-devel zlib-devel sqlite ncurses-compat-libs gmp-devel ncurses-devel gcc-c++ findutils diffutils curl wget jq systemtap-sdt-devel python3-sphinx texlive texlive-latex texlive-xetex texlive-collection-latex texlive-collection-latexrecommended texlive-collection-xetex python-sphinx-latex dejavu-sans-fonts dejavu-serif-fonts dejavu-sans-mono-fonts libtool"
+      APK_BUILD: "alpine-sdk autoconf automake bash binutils-gold build-base coreutils cpio curl gcc git gmp gmp-dev grep libffi linux-headers gzip jq libffi-dev lld musl-dev musl-locales ncurses-dev ncurses-libs ncurses-static perl python3 sudo unzip wget xz zlib-dev zstd py3-sphinx texlive texlive-xetex texmf-dist-latexextra ttf-dejavu llvm17 clang17 texmf-dist-lang texmf-dist-fontsrecommended texinfo libtool"
+      APT_TEST: "locales libnuma-dev zlib1g-dev libgmp-dev libgmp10 libssl-dev liblzma-dev libbz2-dev git wget lsb-release software-properties-common gnupg2 apt-transport-https gcc autoconf automake build-essential curl gzip libffi-dev libncurses-dev patchelf libtool"
+      RPM_TEST: "autoconf automake binutils bzip2 coreutils curl elfutils-devel elfutils-libs findutils libffi-devel gcc gcc-c++ git gmp gmp-devel jq lbzip2 make ncurses ncurses-compat-libs ncurses-devel openssh-clients patch perl pxz python3 sqlite sudo wget which xz zlib-devel patchelf libtool"
+      APK_TEST: "musl-locales curl gcc g++ gmp-dev libc-dev libffi-dev make musl-dev ncurses-dev perl tar xz autoconf automake bzip2 coreutils elfutils-dev findutils git jq bzip2-dev patch python3 sqlite sudo wget which zlib-dev patchelf zlib zlib-dev zlib-static libtool"
     steps:
       - name: Generate output
         id: gen_output
@@ -277,9 +277,10 @@ jobs:
 
       - name: Install dependencies
         run : |
-          brew install pkg-config gnu-sed libffi automake autoconf make
+          brew install pkg-config gnu-sed libffi automake autoconf make libtool
           echo "/usr/local/opt/gnu-sed/libexec/gnubin" >> $GITHUB_PATH
           echo "/usr/local/opt/make/libexec/gnubin" >> $GITHUB_PATH
+          echo "/usr/local/opt/libtool/libexec/gnubin" >> $GITHUB_PATH
           rm -f /usr/local/opt/libffi/lib/*.dylib
 
       - name: Install libffi
@@ -345,9 +346,10 @@ jobs:
 
       - name: Install dependencies
         run : |
-          brew install pkg-config gnu-sed libffi automake autoconf make
+          brew install pkg-config gnu-sed libffi automake autoconf make libtool
           echo "/opt/homebrew/opt/gnu-sed/libexec/gnubin" >> $GITHUB_PATH
           echo "/opt/homebrew/opt/make/libexec/gnubin" >> $GITHUB_PATH
+          echo "/opt/homebrew/opt/libtool/libexec/gnubin" >> $GITHUB_PATH
           rm -f /opt/homebrew/opt/libffi/lib/*.dylib
 
       - name: Install libffi
