@@ -241,20 +241,22 @@ symbolTypeString (SymType type)
 }
 
 #if defined(INTERNAL_LIBFFI)
-int is_ffi_symbol(char* key) {
-   if (strcmp(key, MAYBE_LEADING_UNDERSCORE_STR("ffi_type_void"))) { return 1; }
-   else if (strcmp(key, MAYBE_LEADING_UNDERSCORE_STR("ffi_type_uint8"))) { return 1; }
-   else if (strcmp(key, MAYBE_LEADING_UNDERSCORE_STR("ffi_type_sint8"))) { return 1; }
-   else if (strcmp(key, MAYBE_LEADING_UNDERSCORE_STR("ffi_type_uint16"))) { return 1; }
-   else if (strcmp(key, MAYBE_LEADING_UNDERSCORE_STR("ffi_type_sint16"))) { return 1; }
-   else if (strcmp(key, MAYBE_LEADING_UNDERSCORE_STR("ffi_type_uint32"))) { return 1; }
-   else if (strcmp(key, MAYBE_LEADING_UNDERSCORE_STR("ffi_type_sint32"))) { return 1; }
-   else if (strcmp(key, MAYBE_LEADING_UNDERSCORE_STR("ffi_type_uint64"))) { return 1; }
-   else if (strcmp(key, MAYBE_LEADING_UNDERSCORE_STR("ffi_type_sint64"))) { return 1; }
-   else if (strcmp(key, MAYBE_LEADING_UNDERSCORE_STR("ffi_type_float"))) { return 1; }
-   else if (strcmp(key, MAYBE_LEADING_UNDERSCORE_STR("ffi_type_double"))) { return 1; }
-   else if (strcmp(key, MAYBE_LEADING_UNDERSCORE_STR("ffi_type_pointer"))) { return 1; }
-   else { return 0 ; }
+bool is_ffi_symbol(char* key) {
+   if (strcmp(key, MAYBE_LEADING_UNDERSCORE_STR("ffi_type_void")) == 0) { return true; }
+   else if (strcmp(key, MAYBE_LEADING_UNDERSCORE_STR("ffi_type_uint8")) == 0) { return true; }
+   else if (strcmp(key, MAYBE_LEADING_UNDERSCORE_STR("ffi_type_sint8")) == 0) { return true; }
+   else if (strcmp(key, MAYBE_LEADING_UNDERSCORE_STR("ffi_type_uint16")) == 0) { return true; }
+   else if (strcmp(key, MAYBE_LEADING_UNDERSCORE_STR("ffi_type_sint16")) == 0) { return true; }
+   else if (strcmp(key, MAYBE_LEADING_UNDERSCORE_STR("ffi_type_uint32")) == 0) { return true; }
+   else if (strcmp(key, MAYBE_LEADING_UNDERSCORE_STR("ffi_type_sint32")) == 0) { return true; }
+   else if (strcmp(key, MAYBE_LEADING_UNDERSCORE_STR("ffi_type_uint64")) == 0) { return true; }
+   else if (strcmp(key, MAYBE_LEADING_UNDERSCORE_STR("ffi_type_sint64")) == 0) { return true; }
+   else if (strcmp(key, MAYBE_LEADING_UNDERSCORE_STR("ffi_type_float")) == 0) { return true; }
+   else if (strcmp(key, MAYBE_LEADING_UNDERSCORE_STR("ffi_type_double")) == 0) { return true; }
+   else if (strcmp(key, MAYBE_LEADING_UNDERSCORE_STR("ffi_type_pointer")) == 0) { return true; }
+   else if (strcmp(key, MAYBE_LEADING_UNDERSCORE_STR("ffi_prep_cif")) == 0) { return true; }
+   else if (strcmp(key, MAYBE_LEADING_UNDERSCORE_STR("ffi_call")) == 0) { return true; }
+   else { return false; }
 }
 #endif
 
