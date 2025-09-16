@@ -879,6 +879,13 @@ _build/bindist: stage2 driver/ghc-usage.txt driver/ghci-usage.txt
 	$@/bin/ghc-pkg recache
 	# Copy headers
 	@$(call copy_all_stage2_h,$@/bin/ghc-pkg)
+	# Add basename symlinks for nested shared libs (.dylib, .so) in lib/$(HOST_PLATFORM)
+	@if [ -d "$@/lib/$(HOST_PLATFORM)" ]; then \
+	  cd "$@/lib/$(HOST_PLATFORM)" ; \
+	  for lib in $$(find . -mindepth 2 \( -name "*.dylib" -o -name "*.so" \) -type f) ; do \
+	    ln -sf "$$lib" "$$(basename "$$lib")" ; \
+	  done ; \
+	fi
 	@echo "::endgroup::"
 
 _build/bindist/ghc.tar.gz: _build/bindist
@@ -903,6 +910,13 @@ _build/bindist/lib/targets/%: _build/bindist driver/ghc-usage.txt driver/ghci-us
 	# Copy libraries and settings
 	@if [ -e $(CURDIR)/_build/bindist/lib/targets/$(@F)/lib/$(@F) ] ; then find $(CURDIR)/_build/bindist/lib/targets/$(@F)/lib/$(@F)/ -mindepth 1 -type f -name "*.so" -execdir mv '{}' $(CURDIR)/_build/bindist/lib/targets/$(@F)/lib/$(@F)/'{}' \; ; fi
 	$(call copycrosslib,$(@F))
+	# Add basename symlinks for nested shared libs (.dylib, .so) in lib/$(@F)
+	@if [ -d $(CURDIR)/_build/bindist/lib/targets/$(@F)/lib/$(@F) ] ; then \
+	  cd $(CURDIR)/_build/bindist/lib/targets/$(@F)/lib/$(@F) ; \
+	  for lib in $$(find . -mindepth 2 \( -name "*.dylib" -o -name "*.so" \) -type f) ; do \
+	    ln -sf "$$lib" "$$(basename "$$lib")" ; \
+	  done ; \
+	fi
 	# --help
 	@cp -rfp driver/ghc-usage.txt _build/bindist/lib/targets/$(@F)/lib/
 	@cp -rfp driver/ghci-usage.txt _build/bindist/lib/targets/$(@F)/lib/
