@@ -547,10 +547,10 @@ jobs:
         run: |
           ${{ matrix.platform.installCmd }} curl bash git ${{ matrix.platform.toolRequirements }}
 
-     - if: matrix.platform.image == 'rockylinux:8'
-       name: "Install contextvars for Python <3.7"
-       run: |
-         pip3 install contextvars
+      - if: matrix.platform.image == 'rockylinux:8'
+        name: "Install contextvars for Python <3.7"
+        run: |
+          pip3 install contextvars
 
       # Test suite uses 'git' to find the test files. That appears
       # to cause problems in CI. A similar hack is employed in the validate
