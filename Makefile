@@ -888,7 +888,7 @@ _build/bindist: stage2 driver/ghc-usage.txt driver/ghci-usage.txt
 	fi
 	# Create -dyn iserv executable. #FIXME: THIS IS IDIOTIC!
 	@cd "$@/bin"
-	@ln -sf ghc-iserv-dyn ghc-iserv
+	@ln -sf ghc-iserv ghc-iserv-dyn
 	@echo "::endgroup::"
 
 _build/bindist/ghc.tar.gz: _build/bindist
