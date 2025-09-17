@@ -710,6 +710,14 @@ library
         AutoApply.cmm
         AutoApply_V16.cmm
 
+      -- we actually only need the ffi.h header, because
+      -- ghc_ffi.h is exposing it
+      if flag(system-libffi)
+         extra-libraries: ffi
+         extra-libraries-static: ffi
+      else
+         build-depends: libffi
+
       if arch(x86_64)
         cmm-sources:
           Jumps_V32.cmm (-mavx2)
