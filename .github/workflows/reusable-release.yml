@@ -525,7 +525,7 @@ jobs:
                     },
                     { image: "rockylinux:8"
                     , installCmd: "yum -y install epel-release && yum install -y --allowerasing"
-                    , toolRequirements: "${{ needs.tool-output.outputs.rpm_tools_test }} python3-pip"
+                    , toolRequirements: "${{ needs.tool-output.outputs.rpm_tools_test }}"
                     , ARTIFACT: "x86_64-linux-glibc"
                     },
                     { image: "rockylinux:9"
@@ -548,9 +548,10 @@ jobs:
           ${{ matrix.platform.installCmd }} curl bash git ${{ matrix.platform.toolRequirements }}
 
       - if: matrix.platform.image == 'rockylinux:8'
-        name: "Install contextvars for Python <3.7"
+        name: "Install newer python"
         run: |
-          pip3 install contextvars
+          yum install -y --allowerasing python3.11
+          alternatives --set python3 /usr/bin/python3.11
 
       # Test suite uses 'git' to find the test files. That appears
       # to cause problems in CI. A similar hack is employed in the validate
