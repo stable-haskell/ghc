@@ -886,6 +886,9 @@ _build/bindist: stage2 driver/ghc-usage.txt driver/ghci-usage.txt
 	    ln -sf "$$lib" "$$(basename "$$lib")" ; \
 	  done ; \
 	fi
+	# Create -dyn iserv executable. #FIXME: THIS IS IDIOTIC!
+	@cd "$@/bin"
+	@ln -sf ghc-iserv-dyn ghc-iserv
 	@echo "::endgroup::"
 
 _build/bindist/ghc.tar.gz: _build/bindist
