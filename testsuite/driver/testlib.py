@@ -792,10 +792,8 @@ def _find_so(lib, directory, in_place):
     if directory is None:
         raise StatsException(f"No directory provided to find shared object for {lib}")
     try:
-        dsos = []
         for f in os.listdir(directory):
             if f.endswith(suffix):
-                dsos.append(f)
                 pattern = re.compile(to_match.format(re.escape(lib)))
                 match   = re.match(pattern, f)
                 if match:
