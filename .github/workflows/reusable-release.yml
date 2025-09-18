@@ -591,6 +591,12 @@ jobs:
         env:
           THREADS: 4
 
+      - if: ${{ failure() }}
+        name: Setup tmate session
+        uses: mxschmitt/action-tmate@v3
+        with:
+          limit-access-to-actor: true
+
 # test-arm:
 #   name: Test ARM binary
 #   runs-on: ubuntu-22.04-arm
