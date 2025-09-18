@@ -485,6 +485,12 @@ jobs:
         run: |
           ${{ matrix.platform.installCmd }} curl bash git ${{ matrix.platform.toolRequirements }}
 
+      # T14999 is broken: https://gitlab.haskell.org/ghc/ghc/-/issues/23685
+      - if: startsWith(matrix.platform.image, 'linuxmintd')
+        name: "Uninstall gdb"
+        run: |
+          apt-get remove -y gdb
+
       - if: matrix.platform.image == 'rockylinux:8'
         name: "Install newer python"
         run: |
