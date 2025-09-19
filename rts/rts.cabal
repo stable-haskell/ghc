@@ -386,7 +386,7 @@ common rts-c-sources-base
                FileLock.c
                ForeignExports.c
                Globals.c
-               Hash.c
+               Hash.c (-O3)
                Heap.c
                Hpc.c
                HsFFI.c
