@@ -878,7 +878,8 @@ packageFlagsChanged idflags1 idflags0 =
      [ Opt_HideAllPackages
      , Opt_HideAllPluginPackages
      , Opt_AutoLinkPackages
-     , Opt_NoRts ]
+     , Opt_NoRts
+     , Opt_NoGhcInternal ]
 
 instance Outputable PackageFlag where
     ppr (ExposePackage n arg rn) = text n <> braces (ppr arg <+> ppr rn)

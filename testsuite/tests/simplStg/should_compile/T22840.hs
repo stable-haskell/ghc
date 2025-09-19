@@ -6,9 +6,11 @@ module C where
 import T22840A
 import T22840B
 import Control.Monad.IO.Class
+import System.IO (hFlush, stdout)
 
 $(liftIO $ do
     putStrLn "start"
     putStrLn (disp theT)
     putStrLn "end"
+    hFlush stdout
     return [])

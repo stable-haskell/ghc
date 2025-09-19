@@ -24,5 +24,6 @@ main = do
     runIO $ print (anns :: [String])
     anns <- reifyAnnotations (AnnLookupName 'TestTypeTH)
     runIO $ print (anns :: [String])
+    runIO $ hFlush stdout
     [| return () |] )
   hFlush stdout

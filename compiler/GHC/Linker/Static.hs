@@ -100,11 +100,22 @@ linkBinary' staticLink logger tmpfs dflags unit_env o_files dep_units = do
     -- explicit packages with the auto packages and all of their
     -- dependencies, and eliminating duplicates.
     pkgs <- mayThrowUnitErr (preloadUnitsInfo' unit_env dep_units)
+
+    -- Collect per-package library dirs (deduplicated, non-empty)
     let pkg_lib_paths     = collectLibraryDirs ways_ pkgs
-    let pkg_lib_path_opts = concatMap get_pkg_lib_path_opts pkg_lib_paths
-        get_pkg_lib_path_opts l
+    -- Until: https://github.com/haskell/cabal/issues/11221 is in cabal,
+    --        we have to deal with cabal passing -dyload deploy, and manually
+    --        inject rpaths for the rts.
+    -- Build linker options per (pkg, libdir)
+    let pkg_lib_path_opts =
+          concat
+          [ get_pkg_lib_path_opts pkg l
+          | pkg <- pkgs
+          , l <- collectLibraryDirs ways_ [pkg]
+          ]
+        get_pkg_lib_path_opts pkg l
          | osElfTarget (platformOS platform) &&
-           dynLibLoader dflags == SystemDependent &&
+           (dynLibLoader dflags == SystemDependent || unitPackageNameString pkg == "rts") &&
            ways_ `hasWay` WayDyn
             = let libpath = if gopt Opt_RelativeDynlibPaths dflags
                             then "$ORIGIN" </>
@@ -125,7 +136,7 @@ linkBinary' staticLink logger tmpfs dflags unit_env o_files dep_units = do
                               else ["-Xlinker", "-rpath-link", "-Xlinker", l]
               in ["-L" ++ l] ++ rpathlink ++ rpath
          | osMachOTarget (platformOS platform) &&
-           dynLibLoader dflags == SystemDependent &&
+           (dynLibLoader dflags == SystemDependent || unitPackageNameString pkg == "rts") &&
            ways_ `hasWay` WayDyn &&
            useXLinkerRPath dflags (platformOS platform)
             = let libpath = if gopt Opt_RelativeDynlibPaths dflags
