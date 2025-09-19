@@ -115,7 +115,7 @@ linkBinary' staticLink logger tmpfs dflags unit_env o_files dep_units = do
           ]
         get_pkg_lib_path_opts pkg l
          | osElfTarget (platformOS platform) &&
-           (dynLibLoader dflags == SystemDependent || unitPackageNameString pkg == rts) &&
+           (dynLibLoader dflags == SystemDependent || unitPackageNameString pkg == "rts") &&
            ways_ `hasWay` WayDyn
             = let libpath = if gopt Opt_RelativeDynlibPaths dflags
                             then "$ORIGIN" </>
@@ -136,7 +136,7 @@ linkBinary' staticLink logger tmpfs dflags unit_env o_files dep_units = do
                               else ["-Xlinker", "-rpath-link", "-Xlinker", l]
               in ["-L" ++ l] ++ rpathlink ++ rpath
          | osMachOTarget (platformOS platform) &&
-           (dynLibLoader dflags == SystemDependent || unitPackageNameString pkg == rts) &&
+           (dynLibLoader dflags == SystemDependent || unitPackageNameString pkg == "rts") &&
            ways_ `hasWay` WayDyn &&
            useXLinkerRPath dflags (platformOS platform)
             = let libpath = if gopt Opt_RelativeDynlibPaths dflags
