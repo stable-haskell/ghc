@@ -240,6 +240,26 @@ symbolTypeString (SymType type)
     }
 }
 
+#if defined(INTERNAL_LIBFFI)
+bool is_ffi_symbol(char* key) {
+   if (strcmp(key, MAYBE_LEADING_UNDERSCORE_STR("ffi_type_void")) == 0) { return true; }
+   else if (strcmp(key, MAYBE_LEADING_UNDERSCORE_STR("ffi_type_uint8")) == 0) { return true; }
+   else if (strcmp(key, MAYBE_LEADING_UNDERSCORE_STR("ffi_type_sint8")) == 0) { return true; }
+   else if (strcmp(key, MAYBE_LEADING_UNDERSCORE_STR("ffi_type_uint16")) == 0) { return true; }
+   else if (strcmp(key, MAYBE_LEADING_UNDERSCORE_STR("ffi_type_sint16")) == 0) { return true; }
+   else if (strcmp(key, MAYBE_LEADING_UNDERSCORE_STR("ffi_type_uint32")) == 0) { return true; }
+   else if (strcmp(key, MAYBE_LEADING_UNDERSCORE_STR("ffi_type_sint32")) == 0) { return true; }
+   else if (strcmp(key, MAYBE_LEADING_UNDERSCORE_STR("ffi_type_uint64")) == 0) { return true; }
+   else if (strcmp(key, MAYBE_LEADING_UNDERSCORE_STR("ffi_type_sint64")) == 0) { return true; }
+   else if (strcmp(key, MAYBE_LEADING_UNDERSCORE_STR("ffi_type_float")) == 0) { return true; }
+   else if (strcmp(key, MAYBE_LEADING_UNDERSCORE_STR("ffi_type_double")) == 0) { return true; }
+   else if (strcmp(key, MAYBE_LEADING_UNDERSCORE_STR("ffi_type_pointer")) == 0) { return true; }
+   else if (strcmp(key, MAYBE_LEADING_UNDERSCORE_STR("ffi_prep_cif")) == 0) { return true; }
+   else if (strcmp(key, MAYBE_LEADING_UNDERSCORE_STR("ffi_call")) == 0) { return true; }
+   else { return false; }
+}
+#endif
+
 /* -----------------------------------------------------------------------------
  * Insert symbols into hash tables, checking for duplicates.
  *
@@ -281,6 +301,14 @@ int ghciInsertSymbolTable(
       insertStrHashTable(table, key, pinfo);
       return 1;
    }
+#if defined(INTERNAL_LIBFFI)
+   else if (is_ffi_symbol((char*)key))
+   {
+       /* We skip ffi symbols. They're already defined in GHCi,
+        * so we don't load them from 'HSlibffi' object. */
+       return 1;
+   }
+#endif
    else if (pinfo->type ^ type)
    {
        if(pinfo->type & SYM_TYPE_HIDDEN)

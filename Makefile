@@ -100,6 +100,7 @@ ROOT_DIR := $(patsubst %/,%,$(dir $(realpath $(lastword $(MAKEFILE_LIST)))))
 GHC0 ?= ghc-9.8.4
 PYTHON ?= python3
 CABAL ?= cabal
+SED ?= sed
 
 LD ?= ld
 
@@ -135,7 +136,7 @@ override CABAL_ARGS += \
 	--logs-dir=_build/$(STAGE)/logs
 
 override CABAL_BUILD_ARGS += \
-	-j -w $(GHC) --with-gcc=$(CC) --with-ld=$(LD) \
+	-w $(GHC) --with-gcc=$(CC) --with-ld=$(LD) \
 	--project-file=cabal.project.$(STAGE) \
 	$(foreach lib,$(EXTRA_LIB_DIRS),--extra-lib-dirs=$(lib)) \
 	$(foreach include,$(EXTRA_INCLUDE_DIRS),--extra-include-dirs=$(include)) \
@@ -286,7 +287,8 @@ BINDIST_EXECTUABLES := \
 	hp2ps \
 	hpc \
 	hsc2hs \
-	runghc
+	runghc \
+	unlit
 
 STAGE3_LIBS := \
     rts:nonthreaded-nodebug \
@@ -327,7 +329,7 @@ STAGE3_LIBS := \
 # $4 = ghc-pkg
 define copy_headers
   set -e; \
-  dest=`$4 field $3 include-dirs | awk '{ print $$2 }'` ;\
+  dest=`$4 field $3 include-dirs | awk '{ print $$2 ; exit }'` ;\
   for h in $1 ; do \
 	  mkdir -p "$$dest/`dirname $$h`" ; \
 	  for sdir in $2 ; do \
@@ -656,7 +658,7 @@ stage2: $(addprefix _build/stage2/bin/,$(STAGE2_EXECUTABLES)) _build/stage2/lib/
 
 # --- Stage 3 generic ---
 
-_build/stage2/lib/targets/%:
+_build/stage2/lib/targets/% _build/stage3/lib/targets/%:
 	@mkdir -p _build/stage3/lib/targets/$(@F)
 	@rm -f _build/stage2/lib/targets/$(@F)
 	@mkdir -p _build/stage2/lib/targets/
@@ -825,7 +827,7 @@ define patchpackageconf
 		*) \
 		  sublib="" ;; \
 	esac ; \
-	sed -i \
+	$(SED) -i \
 		-e "s|haddock-interfaces:.*|haddock-interfaces: \"\$${pkgroot}/$3/html/libraries/$5/$1.haddock\"|" \
 		-e "s|haddock-html:.*|haddock-html: \"\$${pkgroot}/$3/html/libraries/$5\"|" \
         -e "s|import-dirs:.*|import-dirs: \"\$${pkgroot}/../lib/$4/$5$${sublib}\"|" \
@@ -834,7 +836,7 @@ define patchpackageconf
 		-e "s|dynamic-library-dirs:.*|dynamic-library-dirs: \"\$${pkgroot}/../lib/$4\"|" \
 		-e "s|data-dir:.*|data-dir: \"\$${pkgroot}/../lib/$4/$5$${sublib}\"|" \
 		-e "s|include-dirs:.*|include-dirs: \"\$${pkgroot}/../lib/$4/$5$${sublib}/include\"|" \
-		-e "s|^    $(CURDIR).*||" \
+		-e "s|^    /.*||" \
 		$2
 endef
 
@@ -843,11 +845,17 @@ define copycrosslib
 	@cp -rfp _build/stage3/lib/targets/$1 _build/bindist/lib/targets/
 	@cd _build/bindist/lib/targets/$1/lib/package.conf.d ; \
 		for pkg in *.conf ; do \
-		  pkgname=`echo $${pkg} | sed 's/-[0-9.]*\(-[0-9a-zA-Z]*\)\?\.conf//'` ; \
-		  pkgnamever=`echo $${pkg} | sed 's/\.conf//'` ; \
+		  pkgname=`echo $${pkg} | $(SED) 's/-[0-9.]*\(-[0-9a-zA-Z]*\)\?\.conf//'` ; \
+		  pkgnamever=`echo $${pkg} | $(SED) 's/\.conf//'` ; \
 		  mkdir -p $(CURDIR)/_build/bindist/lib/targets/$1/lib/$1/$${pkg%.conf} && \
 	      cp -rfp $(CURDIR)/_build/stage3/$1/build/host/*/ghc-*/$${pkg%.conf}/build/* $(CURDIR)/_build/bindist/lib/targets/$1/lib/$1/$${pkg%.conf}/ && \
-		  $(call patchpackageconf,$${pkgname},$${pkg},../../..,$1,$${pkgnamever}) ; \
+	      if [ $${pkgname} = "libffi" ] ; then \
+		    ffi_incdir=`$(CURDIR)/_build/bindist/bin/$1-ghc-pkg field libffi include-dirs | grep '/libffi/src/' | sed 's|.*$(CURDIR)/||'` ; \
+		    $(call patchpackageconf,$${pkgname},$${pkg},../../..,$1,$${pkgnamever}) ; \
+			$(call copy_headers,ffitarget.h,$(CURDIR)/$${ffi_incdir},libffi,$(CURDIR)/_build/bindist/bin/$1-ghc-pkg) ; \
+	      else \
+		    $(call patchpackageconf,$${pkgname},$${pkg},../../..,$1,$${pkgnamever}) ; \
+	      fi ; \
 		done
 endef
 
@@ -864,17 +872,23 @@ _build/bindist: stage2 driver/ghc-usage.txt driver/ghci-usage.txt
 	@mkdir -p $@/lib/$(HOST_PLATFORM)
 	@cd $@/lib/package.conf.d ; \
 		for pkg in *.conf ; do \
-		  pkgname=`echo $${pkg} | sed 's/-[0-9.]*\(-[0-9a-zA-Z]*\)\?\.conf//'` ; \
-		  pkgnamever=`echo $${pkg} | sed 's/\.conf//'` ; \
+		  pkgname=`echo $${pkg} | $(SED) 's/-[0-9.]*\(-[0-9a-zA-Z]*\)\?\.conf//'` ; \
+		  pkgnamever=`echo $${pkg} | $(SED) 's/\.conf//'` ; \
 		  mkdir -p $(CURDIR)/$@/lib/$(HOST_PLATFORM)/$${pkg%.conf} ; \
 		  cp -rfp $(CURDIR)/_build/stage2/build/host/*/ghc-*/$${pkg%.conf}/build/* $(CURDIR)/$@/lib/$(HOST_PLATFORM)/$${pkg%.conf} ; \
-		  $(call patchpackageconf,$${pkgname},$${pkg},../../..,$(HOST_PLATFORM),$${pkgnamever}) ; \
+	      if [ $${pkgname} = "libffi" ] ; then \
+		    ffi_incdir=`$(CURDIR)/$@/bin/ghc-pkg field libffi include-dirs | grep '/libffi/src/' | sed 's|.*$(CURDIR)/||'` ; \
+		    $(call patchpackageconf,$${pkgname},$${pkg},../../..,$(HOST_PLATFORM),$${pkgnamever}) ; \
+			$(call copy_headers,ffitarget.h,$(CURDIR)/$${ffi_incdir},libffi,$(CURDIR)/$@/bin/ghc-pkg) ; \
+	      else \
+		    $(call patchpackageconf,$${pkgname},$${pkg},../../..,$(HOST_PLATFORM),$${pkgnamever}) ; \
+	      fi ; \
 		done
 	# Copy driver usage files
 	@cp -rfp driver/ghc-usage.txt $@/lib/
 	@cp -rfp driver/ghci-usage.txt $@/lib/
 	@echo "FIXME: Changing 'Support SMP' from YES to NO in settings file"
-	@sed 's/("Support SMP","YES")/("Support SMP","NO")/' -i.bck $@/lib/settings
+	@$(SED) 's/("Support SMP","YES")/("Support SMP","NO")/' -i.bck $@/lib/settings
 	# Recache
 	$@/bin/ghc-pkg recache
 	# Copy headers
@@ -940,6 +954,10 @@ _build/bindist/haskell-toolchain.tar.gz: _build/bindist/cabal.tar.gz _build/bind
 		lib/targets/javascript-unknown-ghcjs \
 		bin/cabal
 
+_build/bindist/tests.tar.gz:
+	@tar czf $@ \
+		testsuite
+
 # --- Configuration ---
 
 $(GHC1) $(GHC2): | hackage
@@ -949,7 +967,7 @@ _build/packages/hackage.haskell.org/01-index.tar.gz: | $(CABAL)
 	$(CABAL) $(CABAL_ARGS) update --index-state @1745256340
 
 # booted depends on successful source preparation
-configure rts/configure libraries/ghc-internal/configure: configure.ac rts/configure.ac libraries/ghc-internal/configure.ac libraries/ghc-boot-th-next/.synth-stamp
+configure rts/configure libraries/ghc-internal/configure driver/ghci/ghci-wrapper.cabal libraries/base/base.cabal libraries/ghc-experimental/ghc-experimental.cabal libraries/ghc-boot-th-next/ghc-boot-th-next.cabal libraries/ghci/ghci.cabal libraries/ghc-boot-th/ghc-boot-th.cabal libraries/ghc-boot/ghc-boot.cabal libraries/template-haskell/template-haskell.cabal libraries/ghc-heap/ghc-heap.cabal libraries/ghc-internal/ghc-internal.cabal compiler/ghc.cabal utils/ghc-pkg/ghc-pkg.cabal utils/runghc/runghc.cabal utils/ghc-iserv/ghc-iserv.cabal utils/remote-iserv/remote-iserv.cabal ghc/ghc-bin.cabal: configure.ac rts/configure.ac libraries/ghc-internal/configure.ac libraries/ghc-boot-th-next/.synth-stamp driver/ghci/ghci-wrapper.cabal.in libraries/base/base.cabal.in libraries/ghc-experimental/ghc-experimental.cabal.in libraries/ghc-boot-th-next/ghc-boot-th-next.cabal.in libraries/ghci/ghci.cabal.in libraries/ghc-boot-th/ghc-boot-th.cabal.in libraries/ghc-boot/ghc-boot.cabal.in libraries/template-haskell/template-haskell.cabal.in libraries/ghc-heap/ghc-heap.cabal.in libraries/ghc-internal/ghc-internal.cabal.in compiler/ghc.cabal.in utils/ghc-pkg/ghc-pkg.cabal.in utils/runghc/runghc.cabal.in utils/ghc-iserv/ghc-iserv.cabal.in utils/remote-iserv/remote-iserv.cabal.in ghc/ghc-bin.cabal.in
 	@echo "::group::Running ./boot script..."
 	@mkdir -p _build/logs
 	./boot
@@ -1004,7 +1022,7 @@ libraries/ghc-boot-th-next/.synth-stamp:
 	 dst=libraries/ghc-boot-th-next/ghc-boot-th-next.cabal.in; \
 	 if [ ! -f $$src ]; then echo "Source $$src not found" >&2; exit 1; fi; \
 	 cp -f $$src $$dst.tmp; \
-	 sed -e 's/^name:[[:space:]]*ghc-boot-th$$/name:           ghc-boot-th-next/' \
+	 $(SED) -e 's/^name:[[:space:]]*ghc-boot-th$$/name:           ghc-boot-th-next/' \
 	     -e 's/ ghc-boot-th/ ghc-boot-th-next/g' \
 	     $$dst.tmp > $$dst; \
 	 rm -f $$dst.tmp; \
