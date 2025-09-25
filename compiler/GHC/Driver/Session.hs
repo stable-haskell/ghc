@@ -1113,6 +1113,8 @@ dynamic_flags_deps = [
       (NoArg (setGeneralFlag Opt_SingleLibFolder))
   , make_ord_flag defGhcFlag "pie"            (NoArg (setGeneralFlag Opt_PICExecutable))
   , make_ord_flag defGhcFlag "no-pie"         (NoArg (unSetGeneralFlag Opt_PICExecutable))
+  , make_ord_flag defGhcFlag "static-external" (noArg (\d -> d { ghcLink=LinkBinary MostlyStatic }))
+  , make_ord_flag defGhcFlag "fully-static"    (noArg (\d -> d { ghcLink=LinkBinary FullyStatic }))
 
         ------- Specific phases  --------------------------------------------
     -- need to appear before -pgmL to be parsed as LLVM flags.
@@ -3182,7 +3184,7 @@ parseReexportedModule str
 -- code are allowed (requests for other target types are ignored).
 setBackend :: Backend -> DynP ()
 setBackend l = upd $ \ dfs ->
-  if ghcLink dfs /= LinkBinary || backendWritesFiles l
+  if not (isBinaryLink (ghcLink dfs)) || backendWritesFiles l
   then dfs{ backend = l }
   else dfs
 
@@ -3715,6 +3717,11 @@ makeDynFlagsConsistent dflags
                      $ concatMap (wayUnsetGeneralFlags platform)
                                  hostFullWays
         in dflags_c
+
+ | LinkBinary FullyStatic <- ghcLink dflags
+ , ways dflags `hasWay` WayDyn
+    = let warn = "-dynamic is ignored when using -fully-static"
+      in loop dflags{targetWays_ = removeWay WayDyn (targetWays_ dflags)} warn
 
  | otherwise = (dflags, mempty, mempty)
     where loc = mkGeneralSrcSpan (fsLit "when making flags consistent")

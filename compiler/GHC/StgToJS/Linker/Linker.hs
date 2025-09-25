@@ -670,6 +670,7 @@ getPackageArchives :: StgToJSConfig -> UnitEnv -> [UnitId] -> IO [FilePath]
 getPackageArchives cfg unit_env units = do
   fmap concat $ forM units $ \u -> do
     let archives = [ ST.unpack p </> "lib" ++ ST.unpack l ++ profSuff <.> "a"
+                   -- TODO: this only looks at 'library-dirs', not 'library-dirs-static'
                    | p <- getInstalledPackageLibDirs ue_state u
                    , l <- getInstalledPackageHsLibs  ue_state u
                    ]

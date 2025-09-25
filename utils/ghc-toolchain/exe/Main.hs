@@ -457,15 +457,15 @@ mkTarget opts = do
     cmmCpp <- findCmmCpp (optCmmCpp opts) cc0
     cc <- addPlatformDepCcFlags archOs cc0
     readelf <- optional $ findReadelf (optReadelf opts)
-    ccLink <- findCcLink tgtLlvmTarget (optLd opts) (optCcLink opts) (ldOverrideWhitelist archOs && fromMaybe True (optLdOverride opts)) archOs cc readelf
-
-    ar <- findAr tgtVendor (optAr opts)
     -- TODO: We could have
     -- ranlib <- if arNeedsRanlib ar
     --              then Just <$> findRanlib (optRanlib opts)
     --              else return Nothing
     -- but in order to match the configure output, for now we do
-    ranlib <- Just <$> findRanlib (optRanlib opts)
+    ranlib <- findRanlib (optRanlib opts)
+    ar <- findAr tgtVendor (optAr opts)
+    ccLink <- findCcLink tgtLlvmTarget (optLd opts) (optCcLink opts) (ldOverrideWhitelist archOs && fromMaybe True (optLdOverride opts)) archOs cc readelf ar ranlib
+
 
     nm <- findNm (optNm opts)
     mergeObjs <- optional $ findMergeObjs (optMergeObjs opts) cc ccLink nm
@@ -535,7 +535,7 @@ mkTarget opts = do
                    , tgtCmmCPreprocessor = cmmCpp
                    , tgtAr = ar
                    , tgtCCompilerLink = ccLink
-                   , tgtRanlib = ranlib
+                   , tgtRanlib = Just ranlib
                    , tgtNm = nm
                    , tgtMergeObjs = mergeObjs
                    , tgtLlc = Just llc
@@ -581,6 +581,7 @@ targetToSettings tgt@Target{..} =
   , ("ld supports filelist",       linkSupportsFilelist)
   , ("ld supports single module",  linkSupportsSingleModule)
   , ("ld is GNU ld",               linkIsGnu)
+  , ("ld supports verbatim namespace", linkSupportsVerbatimNamespace)
   , ("Merge objects command", mergeObjsPath)
   , ("Merge objects flags", mergeObjsFlags)
   , ("Merge objects supports response files", mergeObjsSupportsResponseFiles')
@@ -655,6 +656,7 @@ targetToSettings tgt@Target{..} =
     linkSupportsFilelist        = yesNo $ ccLinkSupportsFilelist tgtCCompilerLink
     linkSupportsCompactUnwind   = yesNo $ ccLinkSupportsCompactUnwind tgtCCompilerLink
     linkIsGnu                   = yesNo $ ccLinkIsGnu tgtCCompilerLink
+    linkSupportsVerbatimNamespace = yesNo $ ccLinkSupportsVerbatimNamespace tgtCCompilerLink
     arPath  = prgPath $ arMkArchive tgtAr
     arFlags = escapeArgs $ prgFlags (arMkArchive tgtAr)
     arSupportsAtFile' = yesNo (arSupportsAtFile tgtAr)
