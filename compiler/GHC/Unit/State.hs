@@ -856,13 +856,17 @@ distrustAllUnits pkgs = map distrust pkgs
 mungeUnitInfo :: OsPath -> OsPath
                    -> UnitInfo -> UnitInfo
 mungeUnitInfo top_dir pkgroot =
-    mungeDynLibFields
+    mungeLibDirFields
+  . mungeDynLibFields
   . mungeUnitInfoPaths (ST.pack (OsPath.unsafeDecodeUtf top_dir)) (ST.pack (OsPath.unsafeDecodeUtf pkgroot))
 
-mungeDynLibFields :: UnitInfo -> UnitInfo
-mungeDynLibFields pkg =
+mungeLibDirFields :: UnitInfo -> UnitInfo
+mungeLibDirFields pkg =
     pkg {
       unitLibraryDynDirs = case unitLibraryDynDirs pkg of
+         [] -> unitLibraryDirs pkg
+         ds -> ds
+      , unitLibraryDirsStatic = case unitLibraryDirsStatic pkg of
          [] -> unitLibraryDirs pkg
          ds -> ds
     }

@@ -1119,6 +1119,8 @@ dynamic_flags_deps = [
       (NoArg (setGeneralFlag Opt_SingleLibFolder))
   , make_ord_flag defGhcFlag "pie"            (NoArg (setGeneralFlag Opt_PICExecutable))
   , make_ord_flag defGhcFlag "no-pie"         (NoArg (unSetGeneralFlag Opt_PICExecutable))
+  , make_ord_flag defGhcFlag "static-external" (noArg (\d -> d { ghcLink=LinkBinary MostlyStatic }))
+  , make_ord_flag defGhcFlag "fully-static"    (noArg (\d -> d { ghcLink=LinkBinary FullyStatic }))
 
         ------- Specific phases  --------------------------------------------
     -- need to appear before -pgmL to be parsed as LLVM flags.
@@ -3714,6 +3716,10 @@ makeDynFlagsConsistent dflags
         setGeneralFlag' Opt_ExternalInterpreter $
         addWay' WayDyn dflags
 
+ | LinkBinary FullyStatic <- ghcLink dflags
+ , ways dflags `hasWay` WayDyn
+    = let warn = "-dynamic is ignored when using -fully-static"
+      in loop dflags{targetWays_ = removeWay WayDyn (targetWays_ dflags)} warn
  | LinkInMemory <- ghcLink dflags
  , not (gopt Opt_ExternalInterpreter dflags)
  , targetWays_ dflags /= hostFullWays
