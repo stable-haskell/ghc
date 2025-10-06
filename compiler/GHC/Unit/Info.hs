@@ -212,16 +212,10 @@ libraryDirsForWay' is_dyn
   | otherwise = map ST.unpack . unitLibraryDirsStatic
 
 unitHsLibs :: GhcNameVersion -> Ways -> UnitInfo -> [String]
-unitHsLibs namever ways0 p = map (mkDynName . ST.unpack) (unitLibraries p)
+unitHsLibs namever ways p = map (mkDynName . ST.unpack) (unitLibraries p)
   where
-        ways1 = removeWay WayDyn ways0
-        -- the name of a shared library is libHSfoo-ghc<version>.so
-        -- we leave out the _dyn, because it is superfluous
-
-        tag     = waysTag (fullWays ways1)
-
         mkDynName x
-         | not (ways0 `hasWay` WayDyn) = x
+         | not (ways `hasWay` WayDyn) = x
          | "HS" `isPrefixOf` x         = x ++ dynLibSuffix namever
            -- For non-Haskell libraries, we use the name "Cfoo". The .a
            -- file is libCfoo.a, and the .so is libfoo.so. That way the
