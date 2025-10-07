@@ -1119,8 +1119,8 @@ dynamic_flags_deps = [
       (NoArg (setGeneralFlag Opt_SingleLibFolder))
   , make_ord_flag defGhcFlag "pie"            (NoArg (setGeneralFlag Opt_PICExecutable))
   , make_ord_flag defGhcFlag "no-pie"         (NoArg (unSetGeneralFlag Opt_PICExecutable))
-  , make_ord_flag defGhcFlag "static-external" (noArg (\d -> d { ghcLink=LinkBinary MostlyStatic }))
-  , make_ord_flag defGhcFlag "fully-static"    (noArg (\d -> d { ghcLink=LinkBinary FullyStatic }))
+  , make_ord_flag defGhcFlag "static-external" (noArg (\d -> d { ghcLink=LinkExecutable MostlyStatic }))
+  , make_ord_flag defGhcFlag "fully-static"    (noArg (\d -> d { ghcLink=LinkExecutable FullyStatic }))
 
         ------- Specific phases  --------------------------------------------
     -- need to appear before -pgmL to be parsed as LLVM flags.
@@ -3193,7 +3193,7 @@ parseReexportedModule str
 -- code are allowed (requests for other target types are ignored).
 setBackend :: Backend -> DynP ()
 setBackend l = upd $ \ dfs ->
-  if ghcLink dfs /= LinkBinary || backendWritesFiles l
+  if not (isExecutableLink (ghcLink dfs)) || backendWritesFiles l
   then dfs{ backend = l }
   else dfs
 
@@ -3716,7 +3716,7 @@ makeDynFlagsConsistent dflags
         setGeneralFlag' Opt_ExternalInterpreter $
         addWay' WayDyn dflags
 
- | LinkBinary FullyStatic <- ghcLink dflags
+ | LinkExecutable FullyStatic <- ghcLink dflags
  , ways dflags `hasWay` WayDyn
     = let warn = "-dynamic is ignored when using -fully-static"
       in loop dflags{targetWays_ = removeWay WayDyn (targetWays_ dflags)} warn
@@ -3732,7 +3732,7 @@ makeDynFlagsConsistent dflags
  -- only adjust the ways in the final linking step, and only
  -- when linking .wasm binary (which is supposed to be fully
  -- static), not when linking .so shared libraries.
- | LinkBinary _ <- ghcLink dflags
+ | LinkExecutable _ <- ghcLink dflags
  , ArchWasm32 <- arch
  , ways dflags `hasWay` WayDyn
     = let warn = "-dynamic is ignored when linking binaries on WASM"
