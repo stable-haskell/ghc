@@ -47,14 +47,32 @@
 # │  ┌─────────┐  ┌──────────┐  ┌─────────┐                                 │
 # │  │  ghc2   │  │ ghc-pkg2 │  │  ...    │                                 │
 # │  │         │  │          │  │         │                                 │
-# │  └─────────┘  └──────────┘  └─────────┘                                 │
-# │  (built with ghc1, linked with rts1)                                    │
+# │  └─────┬───┘  └──────────┘  └─────────┘                                 │
+# │       │   (built with ghc1, linked with rts1)                           │
+# │       │                                                                 │
+# │  ·····│································································ │
+# │       ▼                                                                 │
+# │  Stage 3 (Cross-compilation)                                            │
+# │       │                                                                 │
+# │       │     ┌─────────────────────────────────┐                         │
+# │       └────►│ target-specific libs (pkg3)     │                         │
+# │             │ • javascript-unknown-ghcjs      │                         │
+# │             │ • wasm32-unknown-wasi           │                         │
+# │             │ • x86_64-musl-linux             │                         │
+# │             │ • etc.                          │                         │
+# │             └─────────────────────────────────┘                         │
+# │             (built with ghc2 for different target platforms)            │
 # │                                                                         │
 # │  ┌─────────────────────────────────┐                                    │
 # │  │        SHIPPED RESULT           │                                    │
 # │  │  ┌─────────┐   ┌─────────┐      │                                    │
 # │  │  │  pkg1   │ + │  ghc2   │      │                                    │
 # │  │  └─────────┘   └─────────┘      │                                    │
+# │  │                                  │                                    │
+# │  │  Optional cross-compilation:    │                                    │
+# │  │  ┌─────────────────────────┐    │                                    │
+# │  │  │  target-specific pkg3   │    │                                    │
+# │  │  └─────────────────────────┘    │                                    │
 # │  └─────────────────────────────────┘                                    │
 # │                                                                         │
 # │  Notes:                                                                 │
@@ -65,6 +83,8 @@
 # │  • ghc1 is linked against rts0, ghc2 against rts1                       │
 # |  • augmented packages are needed because ghc1 may require newer         |
 # |    versions or even new pacakges, not shipped with the boot compiler    |
+# │  • Stage 3 is optional: ghc2 builds libraries for cross-compilation     │
+# │    targets (different architectures/platforms)                          │
 # │                                                                         │
 # └─────────────────────────────────────────────────────────────────────────┘
 
