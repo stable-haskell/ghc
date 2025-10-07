@@ -369,7 +369,7 @@ link ghcLink logger tmpfs fc hooks dflags unit_env batch_attempt_linking mHscMes
   case linkHook hooks of
       Nothing -> case ghcLink of
         NoLink        -> return Succeeded
-        LinkBinary _  -> normal_link
+        LinkExecutable _  -> normal_link
         LinkStaticLib -> normal_link
         LinkDynLib    -> normal_link
         LinkMergedObj -> normal_link
@@ -443,7 +443,7 @@ link' logger tmpfs fc dflags unit_env batch_attempt_linking mHscMessager hpt
 
         -- Don't showPass in Batch mode; doLink will do that for us.
         case ghcLink dflags of
-          LinkBinary blm
+          LinkExecutable blm
             | backendUseJSLinker (backend dflags) -> linkJSBinary logger tmpfs fc dflags unit_env obj_files pkg_deps
             | otherwise -> linkBinary logger tmpfs dflags blm unit_env obj_files pkg_deps
           LinkStaticLib -> linkStaticLib logger dflags unit_env obj_files pkg_deps
@@ -583,7 +583,7 @@ doLink hsc_env o_files = do
 
   case ghcLink dflags of
     NoLink        -> return ()
-    LinkBinary blm
+    LinkExecutable blm
       | backendUseJSLinker (backend dflags)
                   -> linkJSBinary logger tmpfs fc dflags unit_env o_files []
       | otherwise -> linkBinary logger tmpfs dflags blm unit_env o_files []
