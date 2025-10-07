@@ -14,9 +14,6 @@ on:
       ghc_targets:
         type: string
         default: "install_bin install_lib update_package_db"
-      ffi:
-        type: string
-        default: 3.5.2
       cabal:
         type: string
         default: 3.14.2.0
@@ -28,7 +25,6 @@ env:
   GHC_VERSION: ${{ inputs.ghc }}
   GHC_TARGETS: ${{ inputs.ghc_targets }}
   CABAL_VERSION: ${{ inputs.cabal }}
-  FFI_VERSION: ${{ inputs.ffi }}
   BOOTSTRAP_HASKELL_NONINTERACTIVE: 1
   BOOTSTRAP_HASKELL_GHC_VERSION: ${{ inputs.ghc }}
   BOOTSTRAP_HASKELL_CABAL_VERSION: ${{ inputs.cabal }}
@@ -49,12 +45,12 @@ jobs:
       rpm_tools_test: ${{ steps.gen_output.outputs.rpm_tools_test }}
       apk_tools_test: ${{ steps.gen_output.outputs.apk_tools_test }}
     env:
-      APT_BUILD: "zlib1g-dev libtinfo-dev libsqlite3-0 libsqlite3-dev libgmp-dev libffi-dev libncurses-dev ca-certificates g++ git make automake autoconf gcc perl python3 texinfo xz-utils lbzip2 bzip2 patch openssh-client sudo time jq wget curl locales libdw1 libdw-dev valgrind systemtap-sdt-dev xutils-dev unzip pkg-config python3-sphinx texlive-xetex texlive-latex-extra texlive-binaries texlive-fonts-recommended lmodern tex-gyre texlive-plain-generic linux-perf linux-perf libnuma-dev libtool"
-      RPM_BUILD: "binutils which git make automake autoconf gcc perl python3 texinfo xz bzip2 patch openssh-clients sudo libffi-devel zlib-devel sqlite ncurses-compat-libs gmp-devel ncurses-devel gcc-c++ findutils diffutils curl wget jq systemtap-sdt-devel python3-sphinx texlive texlive-latex texlive-xetex texlive-collection-latex texlive-collection-latexrecommended texlive-collection-xetex python-sphinx-latex dejavu-sans-fonts dejavu-serif-fonts dejavu-sans-mono-fonts libtool"
-      APK_BUILD: "alpine-sdk autoconf automake bash binutils-gold build-base coreutils cpio curl gcc git gmp gmp-dev grep libffi linux-headers gzip jq libffi-dev lld musl-dev musl-locales ncurses-dev ncurses-libs ncurses-static perl python3 sudo unzip wget xz zlib-dev zstd py3-sphinx texlive texlive-xetex texmf-dist-latexextra ttf-dejavu llvm17 clang17 texmf-dist-lang texmf-dist-fontsrecommended texinfo libtool"
-      APT_TEST: "locales libnuma-dev zlib1g-dev libgmp-dev libgmp10 libssl-dev liblzma-dev libbz2-dev git wget lsb-release software-properties-common gnupg2 apt-transport-https gcc autoconf automake build-essential curl gzip libffi-dev libncurses-dev patchelf libtool"
-      RPM_TEST: "autoconf automake binutils bzip2 coreutils curl elfutils-devel elfutils-libs findutils libffi-devel gcc gcc-c++ git gmp gmp-devel jq lbzip2 make ncurses ncurses-compat-libs ncurses-devel openssh-clients patch perl pxz python3 sqlite sudo wget which xz zlib-devel patchelf libtool"
-      APK_TEST: "musl-locales curl gcc g++ gmp-dev libc-dev libffi-dev make musl-dev ncurses-dev perl tar xz autoconf automake bzip2 coreutils elfutils-dev findutils git jq bzip2-dev patch python3 sqlite sudo wget which zlib-dev patchelf zlib zlib-dev zlib-static libtool"
+      APT_BUILD: "diffutils zlib1g-dev libtinfo-dev libsqlite3-0 libsqlite3-dev libgmp-dev libncurses-dev ca-certificates g++ git make automake autoconf gcc perl python3 texinfo xz-utils lbzip2 bzip2 patch openssh-client sudo time jq wget curl locales libdw1 libdw-dev valgrind systemtap-sdt-dev xutils-dev unzip pkg-config python3-sphinx texlive-xetex texlive-latex-extra texlive-binaries texlive-fonts-recommended lmodern tex-gyre texlive-plain-generic linux-perf linux-perf libnuma-dev libtool"
+      RPM_BUILD: "diffutils binutils which git make automake autoconf gcc perl python3 texinfo xz bzip2 patch openssh-clients sudo zlib-devel sqlite ncurses-compat-libs gmp-devel ncurses-devel gcc-c++ findutils curl wget jq systemtap-sdt-devel python3-sphinx texlive texlive-latex texlive-xetex texlive-collection-latex texlive-collection-latexrecommended texlive-collection-xetex python-sphinx-latex dejavu-sans-fonts dejavu-serif-fonts dejavu-sans-mono-fonts libtool"
+      APK_BUILD: "diffutils alpine-sdk autoconf automake bash binutils-gold build-base coreutils cpio curl gcc git gmp gmp-dev grep linux-headers gzip jq lld musl-dev musl-locales ncurses-dev ncurses-libs ncurses-static perl python3 sudo unzip wget xz zlib-dev zstd py3-sphinx texlive texlive-xetex texmf-dist-latexextra ttf-dejavu llvm17 clang17 texmf-dist-lang texmf-dist-fontsrecommended texinfo libtool"
+      APT_TEST: "diffutils locales libnuma-dev zlib1g-dev libgmp-dev libgmp10 libssl-dev liblzma-dev libbz2-dev git wget lsb-release software-properties-common gnupg2 apt-transport-https gcc autoconf automake build-essential curl gzip libncurses-dev patchelf libtool"
+      RPM_TEST: "diffutils autoconf automake binutils bzip2 coreutils curl elfutils-devel elfutils-libs findutils gcc gcc-c++ git gmp gmp-devel jq lbzip2 make ncurses ncurses-compat-libs ncurses-devel openssh-clients patch perl pxz python3 sqlite sudo wget which xz zlib-devel patchelf libtool"
+      APK_TEST: "diffutils musl-locales curl gcc g++ gmp-dev libc-dev make musl-dev ncurses-dev perl tar xz autoconf automake bzip2 coreutils elfutils-dev findutils git jq bzip2-dev patch python3 sqlite sudo wget which zlib-dev patchelf zlib zlib-dev zlib-static libtool"
     steps:
       - name: Generate output
         id: gen_output
@@ -120,16 +116,6 @@ jobs:
           ln -s make /usr/local/bin/gmake
           echo "/usr/local/bin" >> $GITHUB_PATH
 
-      - name: Install libffi
-        run: &libffi |
-          curl -O -L https://github.com/libffi/libffi/releases/download/v${{ env.FFI_VERSION }}/libffi-${{ env.FFI_VERSION }}.tar.gz
-          tar xf libffi-${{ env.FFI_VERSION }}.tar.gz
-          cd libffi-${{ env.FFI_VERSION }}
-          ./configure --prefix=$HOME/.local/ --libdir=$HOME/.local/lib/ --disable-shared --disable-multi-os-directory
-          make install
-        env:
-          CFLAGS: "-fPIC"
-
       - name: Add extra-lib-dirs
         run: &extra-lib-dirs |
           echo "extra-lib-dirs: $HOME/.local/lib/" >> cabal.project.stage2
@@ -170,15 +156,6 @@ jobs:
           fi
         env:
           ARTIFACT: ${{ matrix.platform.ARTIFACT }}
-
-      - name: check linking
-        run: &linking |
-          for lib in libffi ; do
-            if ldd _build/bindist/bin/ghc | grep --quiet ${lib} ; then
-              echo "${lib} is linked!"
-              exit 1
-            fi
-          done
 
       - if: always()
         name: Upload artifact
@@ -262,16 +239,10 @@ jobs:
 
       - name: Install dependencies
         run : |
-          brew install pkg-config gnu-sed libffi automake autoconf make libtool
+          brew install pkg-config gnu-sed automake autoconf make libtool
           echo "/usr/local/opt/gnu-sed/libexec/gnubin" >> $GITHUB_PATH
           echo "/usr/local/opt/make/libexec/gnubin" >> $GITHUB_PATH
           echo "/usr/local/opt/libtool/libexec/gnubin" >> $GITHUB_PATH
-          rm -f /usr/local/opt/libffi/lib/*.dylib
-
-      - name: Install libffi
-        run: *libffi
-        env:
-          CFLAGS: "-fPIC"
 
       - name: Add extra-lib-dirs
         run: *extra-lib-dirs
@@ -281,12 +252,6 @@ jobs:
 
       - name: Run build
         run: *build
-        env:
-          EXTRA_LIB_DIRS: /usr/local/opt/libffi/lib
-          EXTRA_INCLUDE_DIRS: /usr/local/opt/libffi/include
-
-      - name: check linking
-        run: *linking
 
       - if: always()
         name: Upload artifact
@@ -326,16 +291,10 @@ jobs:
 
       - name: Install dependencies
         run : |
-          brew install pkg-config gnu-sed libffi automake autoconf make libtool
+          brew install pkg-config gnu-sed automake autoconf make libtool
           echo "/opt/homebrew/opt/gnu-sed/libexec/gnubin" >> $GITHUB_PATH
           echo "/opt/homebrew/opt/make/libexec/gnubin" >> $GITHUB_PATH
           echo "/opt/homebrew/opt/libtool/libexec/gnubin" >> $GITHUB_PATH
-          rm -f /opt/homebrew/opt/libffi/lib/*.dylib
-
-      - name: Install libffi
-        run: *libffi
-        env:
-          CFLAGS: "-fPIC -fno-sanitize=all"
 
       - name: Add extra-lib-dirs
         run: *extra-lib-dirs
@@ -345,12 +304,6 @@ jobs:
 
       - name: Run build
         run: *build
-        env:
-          EXTRA_LIB_DIRS: /opt/homebrew/opt/libffi/lib
-          EXTRA_INCLUDE_DIRS: /opt/homebrew/opt/libffi/include
-
-      - name: check linking
-        run: *linking
 
       - if: always()
         name: Upload artifact
@@ -397,8 +350,6 @@ jobs:
           sudo sed -i.bak -e 's/quarterly/latest/' /etc/pkg/FreeBSD.conf
           sudo pkg install -y textproc/gsed gcc gmp ncurses perl5 pkgconf libiconv bash misc/compat10x misc/compat11x misc/compat12x \
             terminfo-db \
-            libffi321 \
-            devel/libffi \
             devel/autoconf \
             devel/automake \
             devel/git \
@@ -411,14 +362,10 @@ jobs:
             lang/ghc \
             devel/hs-alex \
             devel/hs-happy \
-            devel/hs-cabal-install
+            devel/hs-cabal-install \
+            devel/libtool
           sudo tzsetup Etc/GMT
           sudo adjkerntz -a
-
-      - name: Install libffi
-        run: *libffi
-        env:
-          CFLAGS: "-fPIC"
 
       - name: Add extra-lib-dirs
         run: *extra-lib-dirs
@@ -441,9 +388,6 @@ jobs:
           EXTRA_LIB_DIRS: /usr/local/lib
           EXTRA_INCLUDE_DIRS: /usr/local/include
           SED: gsed
-
-      - name: check linking
-        run: *linking
 
       - if: always()
         name: Upload artifact
@@ -653,7 +597,6 @@ jobs:
         run: *test
         env:
           THREADS: 4
-          EXTRA_HC_OPTS: "-optl-L/usr/local/opt/libffi/lib -optc-I/usr/local/opt/libffi/include"
 
   test-mac-aarch64:
     name: Test binary (Mac aarch64)
@@ -692,7 +635,6 @@ jobs:
         run: *test
         env:
           THREADS: 4
-          EXTRA_HC_OPTS: "-optl-L/opt/homebrew/opt/libffi/lib -optc-I/opt/homebrew/opt/libffi/include"
 
   test-freebsd-x86_64:
     name: Test FreeBSD x86_64
@@ -729,7 +671,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo sed -i.bak -e 's/quarterly/latest/' /etc/pkg/FreeBSD.conf
-          sudo pkg install -y textproc/gsed curl gcc gmp gmake ncurses perl5 pkgconf libffi libffi321 libiconv git bash misc/compat10x misc/compat11x misc/compat12x groff autoconf automake
+          sudo pkg install -y textproc/gsed curl gcc gmp gmake ncurses perl5 pkgconf libiconv git bash misc/compat10x misc/compat11x misc/compat12x groff autoconf automake devel/libtool
           sudo tzsetup Etc/GMT
           sudo adjkerntz -a
 

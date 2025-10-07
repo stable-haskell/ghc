@@ -60,6 +60,7 @@ module GHC.Unit.Types
      -- * Wired-in units
    , ghcInternalUnitId
    , rtsUnitId
+   , libffiUnitId
    , mainUnitId
    , thisGhcUnitId
    , interactiveUnitId
@@ -68,6 +69,7 @@ module GHC.Unit.Types
 
    , ghcInternalUnit
    , rtsUnit
+   , libffiUnit
    , mainUnit
    , thisGhcUnit
    , interactiveUnit
@@ -591,10 +593,10 @@ Make sure you change 'GHC.Unit.State.findWiredInUnits' if you add an entry here.
 
 -}
 
-ghcInternalUnitId, rtsUnitId,
+ghcInternalUnitId, rtsUnitId, libffiUnitId,
   mainUnitId, thisGhcUnitId, interactiveUnitId, interactiveGhciUnitId, interactiveSessionUnitId :: UnitId
 
-ghcInternalUnit, rtsUnit,
+ghcInternalUnit, rtsUnit, libffiUnit,
   mainUnit, thisGhcUnit, interactiveUnit, interactiveGhciUnit, interactiveSessionUnit :: Unit
 
 ghcInternalUnitId = UnitId (fsLit "ghc-internal")
@@ -603,9 +605,11 @@ thisGhcUnitId     = UnitId (fsLit cProjectUnitId) -- See Note [GHC's Unit Id]
 interactiveUnitId = UnitId (fsLit "interactive")
 interactiveGhciUnitId = UnitId (fsLit "interactive-ghci")
 interactiveSessionUnitId = UnitId (fsLit "interactive-session")
+libffiUnitId         = UnitId (fsLit "libffi")
 
 ghcInternalUnit   = RealUnit (Definite ghcInternalUnitId)
 rtsUnit           = RealUnit (Definite rtsUnitId)
+libffiUnit           = RealUnit (Definite libffiUnitId)
 thisGhcUnit       = RealUnit (Definite thisGhcUnitId)
 interactiveUnit   = RealUnit (Definite interactiveUnitId)
 interactiveGhciUnit = RealUnit (Definite interactiveGhciUnitId)
@@ -624,6 +628,7 @@ wiredInUnitIds :: [UnitId]
 wiredInUnitIds =
    [ ghcInternalUnitId
    , rtsUnitId
+   , libffiUnitId
    ]
    -- NB: ghc is no longer part of the wired-in units since its unit-id, given
    -- by hadrian or cabal, is no longer overwritten and now matches both the

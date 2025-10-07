@@ -31,6 +31,10 @@ Flag bootstrap
         Default: False
         Manual: True
 
+flag system-libffi
+  default: False
+  manual: True
+
 source-repository head
     type:     git
     location: https://gitlab.haskell.org/ghc/ghc.git
@@ -95,6 +99,13 @@ library
         ghc-boot         == @ProjectVersionMunged@,
         ghc-heap         == @ProjectVersionMunged@,
         transformers     >= 0.5 && < 0.7
+
+    if !arch(javascript)
+      if flag(system-libffi)
+         extra-libraries: ffi
+         extra-libraries-static: ffi
+      else
+         build-depends: libffi
 
     if impl(ghc > 9.10)
         -- ghc-internal is only available (and required) when building

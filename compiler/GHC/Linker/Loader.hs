@@ -203,6 +203,7 @@ emptyLoaderState dflags = LoaderState
                     --        for the target build? I think target-build seems right, but I'm
                     --        not fully convinced.
                     , (rtsWayUnitId dflags, (LoadedPkgInfo (rtsWayUnitId dflags) [] [] [] emptyUniqDSet))
+                    , (libffiUnitId, (LoadedPkgInfo libffiUnitId [] [] [] emptyUniqDSet))
                     ]
 
 extendLoadedEnv :: Interp -> [(Name,ForeignHValue)] -> IO ()
@@ -1179,7 +1180,7 @@ loadPackage interp hsc_env pkg
             -- interpreted references to FFI to the compiled FFI.
             -- We therefore filter it out so that we don't get
             -- duplicate symbol errors.
-            hs_libs'  =  filter ("HSffi" /=) hs_libs
+            hs_libs'  =  filter ("HSlibffi" /=) hs_libs
 
         -- Because of slight differences between the GHC dynamic linker and
         -- the native system linker some packages have to link with a

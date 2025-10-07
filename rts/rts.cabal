@@ -253,6 +253,9 @@ source-repository head
     location: https://gitlab.haskell.org/ghc/ghc.git
     subdir:   rts
 
+flag system-libffi
+  default: False
+  manual: True
 flag librt
   default: False
   manual: True
@@ -537,8 +540,11 @@ common rts-c-sources-base
                   posix/TTY.c
 
 common rts-link-options
-    extra-libraries: ffi
-    extra-libraries-static: ffi
+    if flag(system-libffi)
+       extra-libraries: ffi
+       extra-libraries-static: ffi
+    else
+       build-depends: libffi
 
     if os(linux)
        extra-libraries: c
@@ -590,6 +596,9 @@ common rts-global-build-flags
     if flag(thread-sanitizer)
       cc-options: -fsanitize=thread
       ld-options: -fsanitize=thread
+    if !flag(system-libffi)
+       ghc-options: -optc-DINTERNAL_LIBFFI
+       cpp-options: -DINTERNAL_LIBFFI
 
 common rts-debug-flags
     ghc-options: -optc-DDEBUG
@@ -700,6 +709,14 @@ library
       autogen-cmm-sources:
         AutoApply.cmm
         AutoApply_V16.cmm
+
+      -- we actually only need the ffi.h header, because
+      -- ghc_ffi.h is exposing it
+      if flag(system-libffi)
+         extra-libraries: ffi
+         extra-libraries-static: ffi
+      else
+         build-depends: libffi
 
       if arch(x86_64)
         cmm-sources:

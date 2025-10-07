@@ -136,7 +136,7 @@ override CABAL_ARGS += \
 	--logs-dir=_build/$(STAGE)/logs
 
 override CABAL_BUILD_ARGS += \
-	-j -w $(GHC) --with-gcc=$(CC) --with-ld=$(LD) \
+	-w $(GHC) --with-gcc=$(CC) --with-ld=$(LD) \
 	--project-file=cabal.project.$(STAGE) \
 	$(foreach lib,$(EXTRA_LIB_DIRS),--extra-lib-dirs=$(lib)) \
 	$(foreach include,$(EXTRA_INCLUDE_DIRS),--extra-include-dirs=$(include)) \
@@ -849,7 +849,13 @@ define copycrosslib
 		  pkgnamever=`echo $${pkg} | $(SED) 's/\.conf//'` ; \
 		  mkdir -p $(CURDIR)/_build/bindist/lib/targets/$1/lib/$1/$${pkg%.conf} && \
 	      cp -rfp $(CURDIR)/_build/stage3/$1/build/host/*/ghc-*/$${pkg%.conf}/build/* $(CURDIR)/_build/bindist/lib/targets/$1/lib/$1/$${pkg%.conf}/ && \
-		  $(call patchpackageconf,$${pkgname},$${pkg},../../..,$1,$${pkgnamever}) ; \
+	      if [ $${pkgname} = "libffi" ] ; then \
+		    ffi_incdir=`$(CURDIR)/_build/bindist/bin/$1-ghc-pkg field libffi include-dirs | grep '/libffi/src/' | sed 's|.*$(CURDIR)/||'` ; \
+		    $(call patchpackageconf,$${pkgname},$${pkg},../../..,$1,$${pkgnamever}) ; \
+			$(call copy_headers,ffitarget.h,$(CURDIR)/$${ffi_incdir},libffi,$(CURDIR)/_build/bindist/bin/$1-ghc-pkg) ; \
+	      else \
+		    $(call patchpackageconf,$${pkgname},$${pkg},../../..,$1,$${pkgnamever}) ; \
+	      fi ; \
 		done
 endef
 
@@ -870,7 +876,13 @@ _build/bindist: stage2 driver/ghc-usage.txt driver/ghci-usage.txt
 		  pkgnamever=`echo $${pkg} | $(SED) 's/\.conf//'` ; \
 		  mkdir -p $(CURDIR)/$@/lib/$(HOST_PLATFORM)/$${pkg%.conf} ; \
 		  cp -rfp $(CURDIR)/_build/stage2/build/host/*/ghc-*/$${pkg%.conf}/build/* $(CURDIR)/$@/lib/$(HOST_PLATFORM)/$${pkg%.conf} ; \
-		  $(call patchpackageconf,$${pkgname},$${pkg},../../..,$(HOST_PLATFORM),$${pkgnamever}) ; \
+	      if [ $${pkgname} = "libffi" ] ; then \
+		    ffi_incdir=`$(CURDIR)/$@/bin/ghc-pkg field libffi include-dirs | grep '/libffi/src/' | sed 's|.*$(CURDIR)/||'` ; \
+		    $(call patchpackageconf,$${pkgname},$${pkg},../../..,$(HOST_PLATFORM),$${pkgnamever}) ; \
+			$(call copy_headers,ffitarget.h,$(CURDIR)/$${ffi_incdir},libffi,$(CURDIR)/$@/bin/ghc-pkg) ; \
+	      else \
+		    $(call patchpackageconf,$${pkgname},$${pkg},../../..,$(HOST_PLATFORM),$${pkgnamever}) ; \
+	      fi ; \
 		done
 	# Copy driver usage files
 	@cp -rfp driver/ghc-usage.txt $@/lib/
