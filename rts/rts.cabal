@@ -253,7 +253,7 @@ source-repository head
     location: https://gitlab.haskell.org/ghc/ghc.git
     subdir:   rts
 
-flag libm
+flag system-libffi
   default: False
   manual: True
 flag librt
@@ -540,13 +540,14 @@ common rts-c-sources-base
                   posix/TTY.c
 
 common rts-link-options
-    extra-libraries: ffi
-    extra-libraries-static: ffi
+    if flag(system-libffi)
+       extra-libraries: ffi
+       extra-libraries-static: ffi
+    else
+       build-depends: libffi
 
     if os(linux)
        extra-libraries: c
-    if flag(libm)
-       extra-libraries: m
     if flag(librt)
        extra-libraries: rt
     if os(windows)
@@ -584,24 +585,27 @@ common rts-link-options
          ld-options: -read_only_relocs warning
 
 common rts-global-build-flags
-    ghc-options: -DCOMPILING_RTS
+    ghc-options: -optc-DCOMPILING_RTS
     cpp-options: -DCOMPILING_RTS
     if !flag(smp)
-       ghc-options: -DNOSMP
+       ghc-options: -optc-DNOSMP
        cpp-options: -DNOSMP
     if flag(dynamic)
-       ghc-options: -DDYNAMIC
+       ghc-options: -optc-DDYNAMIC
        cpp-options: -DDYNAMIC
     if flag(thread-sanitizer)
       cc-options: -fsanitize=thread
       ld-options: -fsanitize=thread
+    if !flag(system-libffi)
+       ghc-options: -optc-DINTERNAL_LIBFFI
+       cpp-options: -DINTERNAL_LIBFFI
 
 common rts-debug-flags
     ghc-options: -optc-DDEBUG
     cpp-options: -DDEBUG -fno-omit-frame-pointer -g3 -O0
 
 common rts-threaded-flags
-    ghc-options: -DTHREADED_RTS
+    ghc-options: -optc-DTHREADED_RTS
     cpp-options: -DTHREADED_RTS
 
 -- the _main_ library needs to deal with all the _configure_ time stuff.
@@ -706,6 +710,14 @@ library
         AutoApply.cmm
         AutoApply_V16.cmm
 
+      -- we actually only need the ffi.h header, because
+      -- ghc_ffi.h is exposing it
+      if flag(system-libffi)
+         extra-libraries: ffi
+         extra-libraries-static: ffi
+      else
+         build-depends: libffi
+
       if arch(x86_64)
         cmm-sources:
           Jumps_V32.cmm (-mavx2)
@@ -771,7 +783,7 @@ library nonthreaded-nodebug
 
     visibility: public
 
-    ghc-options: -optc-DRtsWay="v"
+    ghc-options: -optc-DRtsWay="rts_v"
 
 
 library threaded-nodebug
@@ -781,6 +793,8 @@ library threaded-nodebug
     if arch(javascript)
       buildable: False
 
+    ghc-options: -optc-DRtsWay="rts_thr"
+
 library nonthreaded-debug
     import: rts-base-config, rts-c-sources-base, rts-link-options, rts-global-build-flags, rts-debug-flags
     visibility: public
@@ -788,12 +802,16 @@ library nonthreaded-debug
     if arch(javascript)
       buildable: False
 
+    ghc-options: -optc-DRtsWay="rts_v_debug"
+
 library threaded-debug
     import: rts-base-config, rts-c-sources-base, rts-link-options, rts-global-build-flags, rts-threaded-flags, rts-debug-flags
     visibility: public
     build-depends: rts
     if arch(javascript)
       buildable: False
+
+    ghc-options: -optc-DRtsWay="rts_thr_debug"
 
 -- Note [Undefined symbols in the RTS]
 -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

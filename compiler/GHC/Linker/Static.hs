@@ -4,6 +4,7 @@ module GHC.Linker.Static
    )
 where
 
+import GHC.Driver.DynFlags (ExecutableLinkMode(..))
 import GHC.Prelude
 import GHC.Platform
 import GHC.Platform.Ways
@@ -67,11 +68,11 @@ it is supported by both gcc and clang. Anecdotally nvcc supports
 -Xlinker, but not -Wl.
 -}
 
-linkBinary :: Logger -> TmpFs -> DynFlags -> UnitEnv -> [FilePath] -> [UnitId] -> IO ()
+linkBinary :: Logger -> TmpFs -> DynFlags -> ExecutableLinkMode -> UnitEnv -> [FilePath] -> [UnitId] -> IO ()
 linkBinary = linkBinary' False
 
-linkBinary' :: Bool -> Logger -> TmpFs -> DynFlags -> UnitEnv -> [FilePath] -> [UnitId] -> IO ()
-linkBinary' staticLink logger tmpfs dflags unit_env o_files dep_units = do
+linkBinary' :: Bool -> Logger -> TmpFs -> DynFlags -> ExecutableLinkMode -> UnitEnv -> [FilePath] -> [UnitId] -> IO ()
+linkBinary' staticLink logger tmpfs dflags blm unit_env o_files dep_units = do
     let platform   = ue_platform unit_env
         unit_state = ue_homeUnitState unit_env
         toolSettings' = toolSettings dflags
@@ -79,17 +80,8 @@ linkBinary' staticLink logger tmpfs dflags unit_env o_files dep_units = do
         arch_os   = platformArchOS platform
         output_fn = exeFileName arch_os staticLink (outputFile_ dflags)
         namever   = ghcNameVersion dflags
-        -- For the wasm target, when ghc is invoked with -dynamic,
-        -- when linking the final .wasm binary we must still ensure
-        -- the static archives are selected. Otherwise wasm-ld would
-        -- fail to find and link the .so library dependencies. wasm-ld
-        -- can link PIC objects into static .wasm binaries fine, so we
-        -- only adjust the ways in the final linking step, and only
-        -- when linking .wasm binary (which is supposed to be fully
-        -- static), not when linking .so shared libraries.
-        ways_
-          | ArchWasm32 <- platformArch platform = removeWay WayDyn $ targetWays_ dflags
-          | otherwise = ways dflags
+        supportsVerbatim = toolSettings_ldSupportsVerbatimNamespace (toolSettings dflags)
+        ways_ = ways dflags
 
     full_output_fn <- if isAbsolute output_fn
                       then return output_fn
@@ -168,10 +160,14 @@ linkBinary' staticLink logger tmpfs dflags unit_env o_files dep_units = do
         = ([],[])
 
     pkg_link_opts <- do
-        unit_link_opts <- getUnitLinkOpts namever ways_ unit_env dep_units
+        -- If we link fully statically, we just append @-static@ at the end of the linker line.
+        -- If we link declared external libraries statically only, we have to adjust each of them
+        -- carefully (see 'getUnitLinkOpts'). We don't need to do the latter if we link fully static.
+        unit_link_opts <- getUnitLinkOpts namever ways_ (Just (blm, supportsVerbatim)) unit_env dep_units
         return $ otherFlags unit_link_opts ++ dead_strip
                   ++ pre_hs_libs ++ hsLibs unit_link_opts ++ post_hs_libs
                   ++ extraLibs unit_link_opts
+                  ++ (if blm == FullyStatic then ["-static"] else [])
                  -- -Wl,-u,<sym> contained in other_flags
                  -- needs to be put before -l<package>,
                  -- otherwise Solaris linker fails linking

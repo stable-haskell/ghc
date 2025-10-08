@@ -1,0 +1,695 @@
+name: Build and release
+
+on:
+  workflow_call:
+    inputs:
+      branches:
+        required: true
+        type: string
+      ghc:
+        type: string
+        default: 9.8.4
+      # speed up installation by skipping docs
+      # starting with GHC 9.10.x, we also need to pass the 'install_extra' target
+      ghc_targets:
+        type: string
+        default: "install_bin install_lib update_package_db"
+      cabal:
+        type: string
+        default: 3.14.2.0
+      test:
+        type: boolean
+        default: true
+
+env:
+  GHC_VERSION: ${{ inputs.ghc }}
+  GHC_TARGETS: ${{ inputs.ghc_targets }}
+  CABAL_VERSION: ${{ inputs.cabal }}
+  BOOTSTRAP_HASKELL_NONINTERACTIVE: 1
+  BOOTSTRAP_HASKELL_GHC_VERSION: ${{ inputs.ghc }}
+  BOOTSTRAP_HASKELL_CABAL_VERSION: ${{ inputs.cabal }}
+  BOOTSTRAP_HASKELL_INSTALL_NO_STACK: 1
+  DEBIAN_FRONTEND: noninteractive
+  TZ: Asia/Singapore
+  EMSDK_VERSION: 3.1.74
+  MAKE_VERSION: 4.4
+
+jobs:
+  tool-output:
+    runs-on: ubuntu-latest
+    outputs:
+      apt_tools_build: ${{ steps.gen_output.outputs.apt_tools_build }}
+      rpm_tools_build: ${{ steps.gen_output.outputs.rpm_tools_build }}
+      apk_tools_build: ${{ steps.gen_output.outputs.apk_tools_build }}
+      apt_tools_test: ${{ steps.gen_output.outputs.apt_tools_test }}
+      rpm_tools_test: ${{ steps.gen_output.outputs.rpm_tools_test }}
+      apk_tools_test: ${{ steps.gen_output.outputs.apk_tools_test }}
+    env:
+      APT_BUILD: "diffutils zlib1g-dev libtinfo-dev libsqlite3-0 libsqlite3-dev libgmp-dev libncurses-dev ca-certificates g++ git make automake autoconf gcc perl python3 texinfo xz-utils lbzip2 bzip2 patch openssh-client sudo time jq wget curl locales libdw1 libdw-dev valgrind systemtap-sdt-dev xutils-dev unzip pkg-config python3-sphinx texlive-xetex texlive-latex-extra texlive-binaries texlive-fonts-recommended lmodern tex-gyre texlive-plain-generic linux-perf linux-perf libnuma-dev libtool"
+      RPM_BUILD: "diffutils binutils which git make automake autoconf gcc perl python3 texinfo xz bzip2 patch openssh-clients sudo zlib-devel sqlite ncurses-compat-libs gmp-devel ncurses-devel gcc-c++ findutils curl wget jq systemtap-sdt-devel python3-sphinx texlive texlive-latex texlive-xetex texlive-collection-latex texlive-collection-latexrecommended texlive-collection-xetex python-sphinx-latex dejavu-sans-fonts dejavu-serif-fonts dejavu-sans-mono-fonts libtool"
+      APK_BUILD: "diffutils alpine-sdk autoconf automake bash binutils-gold build-base coreutils cpio curl gcc git gmp gmp-dev grep linux-headers gzip jq lld musl-dev musl-locales ncurses-dev ncurses-libs ncurses-static perl python3 sudo unzip wget xz zlib-dev zstd py3-sphinx texlive texlive-xetex texmf-dist-latexextra ttf-dejavu llvm17 clang17 texmf-dist-lang texmf-dist-fontsrecommended texinfo libtool"
+      APT_TEST: "diffutils locales libnuma-dev zlib1g-dev libgmp-dev libgmp10 libssl-dev liblzma-dev libbz2-dev git wget lsb-release software-properties-common gnupg2 apt-transport-https gcc autoconf automake build-essential curl gzip libncurses-dev patchelf libtool"
+      RPM_TEST: "diffutils autoconf automake binutils bzip2 coreutils curl elfutils-devel elfutils-libs findutils gcc gcc-c++ git gmp gmp-devel jq lbzip2 make ncurses ncurses-compat-libs ncurses-devel openssh-clients patch perl pxz python3 sqlite sudo wget which xz zlib-devel patchelf libtool"
+      APK_TEST: "diffutils musl-locales curl gcc g++ gmp-dev libc-dev make musl-dev ncurses-dev perl tar xz autoconf automake bzip2 coreutils elfutils-dev findutils git jq bzip2-dev patch python3 sqlite sudo wget which zlib-dev patchelf zlib zlib-dev zlib-static libtool"
+    steps:
+      - name: Generate output
+        id: gen_output
+        run: |
+          echo apt_tools_build="${{ env.APT_BUILD }}" >> "$GITHUB_OUTPUT"
+          echo rpm_tools_build="${{ env.RPM_BUILD }}" >> "$GITHUB_OUTPUT"
+          echo apk_tools_build="${{ env.APK_BUILD }}" >> "$GITHUB_OUTPUT"
+          echo apt_tools_test="${{ env.APT_TEST }}" >> "$GITHUB_OUTPUT"
+          echo rpm_tools_test="${{ env.RPM_TEST }}" >> "$GITHUB_OUTPUT"
+          echo apk_tools_test="${{ env.APK_TEST }}" >> "$GITHUB_OUTPUT"
+
+  build-linux:
+    name: Build linux binaries
+    runs-on: ubuntu-latest
+    needs: ["tool-output"]
+    env:
+      TARBALL_EXT: tar.xz
+      ARCH: 64
+    strategy:
+      fail-fast: false
+      matrix:
+        branch: ${{ fromJSON(inputs.branches) }}
+        platform: [ { image: "rockylinux:8"
+                    , installCmd: "dnf install -y 'dnf-command(config-manager)' && dnf config-manager --set-enabled powertools && yum install -y --allowerasing"
+                    , toolRequirements: "${{ needs.tool-output.outputs.rpm_tools_build }}"
+                    , ARTIFACT: "x86_64-linux-glibc"
+                    },
+                    { image: "alpine:3.20"
+                    , installCmd: "apk update && apk add"
+                    , toolRequirements: "${{ needs.tool-output.outputs.apk_tools_build }}"
+                    , ARTIFACT: "x86_64-linux-musl"
+                    }
+                  ]
+    container:
+      image: ${{ matrix.platform.image }}
+    steps:
+      - name: Install requirements
+        shell: sh
+        run: |
+          ${{ matrix.platform.installCmd }} curl bash git ${{ matrix.platform.toolRequirements }}
+
+      - name: Install GHCup
+        uses: haskell/ghcup-setup@v1
+        with:
+          cabal: ${{ env.CABAL_VERSION }}
+          ghc: ${{ env.GHC_VERSION }}
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.branch }}
+          submodules: recursive
+
+      - if: matrix.platform.image == 'rockylinux:8'
+        name: Install latest make
+        run: |
+          set -eux
+
+          curl -O -L https://ftp.gnu.org/gnu/make/make-${{ env.MAKE_VERSION }}.tar.gz
+          tar xf make-${{ env.MAKE_VERSION }}.tar.gz
+          cd make-${{ env.MAKE_VERSION }}
+          ./configure
+          make install
+          ln -s make /usr/local/bin/gmake
+          echo "/usr/local/bin" >> $GITHUB_PATH
+
+      - name: Add extra-lib-dirs
+        run: &extra-lib-dirs |
+          echo "extra-lib-dirs: $HOME/.local/lib/" >> cabal.project.stage2
+          echo "extra-lib-dirs: $HOME/.local/lib/" >> cabal.project.stage3
+
+      - if: matrix.platform.image == 'rockylinux:8'
+        name: Install emscripten
+        run : &emscripten |
+          set -eux
+
+          git clone https://github.com/emscripten-core/emsdk.git
+          cd emsdk
+          git fetch --tags
+          git checkout ${{ env.EMSDK_VERSION }}
+          ./emsdk install ${{ env.EMSDK_VERSION }}
+          ./emsdk activate ${{ env.EMSDK_VERSION }}
+
+      - name: Run build
+        run: &build |
+          set -eux
+
+          cabal update
+          if [ -e "emsdk" ] ; then
+            git config --system --add safe.directory $GITHUB_WORKSPACE
+            git config --system --add safe.directory '*'
+            cd emsdk
+            source ./emsdk_env.sh
+            cd ..
+            gmake CABAL=$PWD/_build/stage0/bin/cabal _build/bindist/haskell-toolchain.tar.gz _build/bindist/tests.tar.gz
+          else
+            gmake CABAL=$PWD/_build/stage0/bin/cabal _build/bindist/ghc.tar.gz _build/bindist/cabal.tar.gz _build/bindist/tests.tar.gz
+          fi
+          cd _build/bindist
+          mv ghc.tar.gz ghc-$(bin/ghc --numeric-version)-${ARTIFACT}.tar.gz
+          mv cabal.tar.gz cabal-$(bin/cabal --numeric-version)-${ARTIFACT}.tar.gz
+          if [ -e "haskell-toolchain.tar.gz" ] ; then
+            mv haskell-toolchain.tar.gz haskell-toolchain-${ARTIFACT}.tar.gz
+          fi
+        env:
+          ARTIFACT: ${{ matrix.platform.ARTIFACT }}
+
+      - if: always()
+        name: Upload artifact
+        uses: ./.github/actions/upload
+        with:
+          if-no-files-found: error
+          retention-days: 2
+          name: artifacts-${{ matrix.platform.ARTIFACT }}-${{ matrix.branch }}
+          path: |
+            ./_build/bindist/*.tar.gz
+
+  build-arm:
+    name: Build ARM binary
+    needs: ["tool-output"]
+    runs-on: ubuntu-22.04-arm
+    env:
+      TARBALL_EXT: tar.xz
+      ARCH: ARM64
+    strategy:
+      fail-fast: false
+      matrix:
+        branch: ${{ fromJSON(inputs.branches) }}
+        platform: [ { ARCH: "ARM64"
+                    , ARTIFACT: "aarch64-linux-deb11"
+                    },
+                    { ARCH: "ARM64"
+                    , ARTIFACT: "aarch64-linux-unknown"
+                    }
+                  ]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.branch }}
+          submodules: recursive
+
+      - if: matrix.platform.ARTIFACT == 'aarch64-linux-deb11'
+        uses: docker://arm64v8/debian:11
+        name: Run build (aarch64 linux)
+        with:
+          args: sh -c "apt-get update && apt-get install -y curl bash git ${{ needs.tool-output.outputs.apt_tools_build }} && export PATH=$HOME/.ghcup/bin:$PATH && curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org | sh && make CABAL=$PWD/_build/stage0/bin/cabal _build/bindist/ghc.tar.gz _build/bindist/cabal.tar.gz _build/bindist/tests.tar.gz"
+
+      - if: matrix.platform.ARTIFACT == 'aarch64-linux-unknown'
+        uses: docker://arm64v8/alpine:3.20
+        name: Run build (aarch64 linux alpine)
+        with:
+          args: sh -c "apk update && apk add curl bash git ${{ needs.tool-output.outputs.apk_tools_build }} && export PATH=$HOME/.ghcup/bin:$PATH && curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org | sh && make CABAL=$PWD/_build/stage0/bin/cabal _build/bindist/ghc.tar.gz _build/bindist/cabal.tar.gz _build/bindist/tests.tar.gz"
+
+      - if: always()
+        name: Upload artifact
+        uses: ./.github/actions/upload
+        with:
+          if-no-files-found: error
+          retention-days: 2
+          name: artifacts-${{ matrix.platform.ARTIFACT }}-${{ matrix.branch }}
+          path: |
+            ./_build/bindist/*.tar.gz
+
+  build-mac-x86_64:
+    name: Build binary (Mac x86_64)
+    runs-on: macOS-13
+    env:
+      MACOSX_DEPLOYMENT_TARGET: 10.13
+      ARTIFACT: "x86_64-apple-darwin"
+      ARCH: 64
+      TARBALL_EXT: tar.xz
+    strategy:
+      fail-fast: false
+      matrix:
+        branch: ${{ fromJSON(inputs.branches) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.branch }}
+          submodules: recursive
+
+      - name: Install GHCup
+        uses: haskell/ghcup-setup@v1
+        with:
+          cabal: ${{ env.CABAL_VERSION }}
+          ghc: ${{ env.GHC_VERSION }}
+
+      - name: Install dependencies
+        run : |
+          brew install pkg-config gnu-sed automake autoconf make libtool
+          echo "/usr/local/opt/gnu-sed/libexec/gnubin" >> $GITHUB_PATH
+          echo "/usr/local/opt/make/libexec/gnubin" >> $GITHUB_PATH
+          echo "/usr/local/opt/libtool/libexec/gnubin" >> $GITHUB_PATH
+
+      - name: Add extra-lib-dirs
+        run: *extra-lib-dirs
+
+      - name: Install emscripten
+        run : *emscripten
+
+      - name: Run build
+        run: *build
+
+      - if: always()
+        name: Upload artifact
+        uses: ./.github/actions/upload
+        with:
+          if-no-files-found: error
+          retention-days: 2
+          name: artifacts-${{ env.ARTIFACT }}-${{ matrix.branch }}
+          path: |
+            ./_build/bindist/*.tar.gz
+
+  build-mac-aarch64:
+    name: Build binary (Mac aarch64)
+    runs-on: macos-latest
+    env:
+      MACOSX_DEPLOYMENT_TARGET: 10.13
+      ARTIFACT: "aarch64-apple-darwin"
+      ARCH: ARM64
+      TARBALL_EXT: tar.xz
+      HOMEBREW_CHANGE_ARCH_TO_ARM: 1
+      GHCUP_INSTALL_BASE_PREFIX: ${{ github.workspace }}
+    strategy:
+      fail-fast: false
+      matrix:
+        branch: ${{ fromJSON(inputs.branches) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.branch }}
+          submodules: recursive
+
+      - name: Install GHCup
+        uses: haskell/ghcup-setup@v1
+        with:
+          cabal: ${{ env.CABAL_VERSION }}
+          ghc: ${{ env.GHC_VERSION }}
+
+      - name: Install dependencies
+        run : |
+          brew install pkg-config gnu-sed automake autoconf make libtool
+          echo "/opt/homebrew/opt/gnu-sed/libexec/gnubin" >> $GITHUB_PATH
+          echo "/opt/homebrew/opt/make/libexec/gnubin" >> $GITHUB_PATH
+          echo "/opt/homebrew/opt/libtool/libexec/gnubin" >> $GITHUB_PATH
+
+      - name: Add extra-lib-dirs
+        run: *extra-lib-dirs
+
+      - name: Install emscripten
+        run : *emscripten
+
+      - name: Run build
+        run: *build
+
+      - if: always()
+        name: Upload artifact
+        uses: ./.github/actions/upload
+        with:
+          if-no-files-found: error
+          retention-days: 2
+          name: artifacts-${{ env.ARTIFACT }}-${{ matrix.branch }}
+          path: |
+            ./_build/bindist/*.tar.gz
+
+  build-freebsd-x86_64:
+    name: Build FreeBSD x86_64
+    runs-on: [self-hosted, FreeBSD, X64]
+    env:
+      ARTIFACT: "x86_64-portbld-freebsd"
+      ARCH: 64
+      TARBALL_EXT: tar.xz
+      RUNNER_OS: FreeBSD
+      CABAL_DIR: ${{ github.workspace }}/.cabal
+      GHCUP_INSTALL_BASE_PREFIX: ${{ github.workspace }}
+    strategy:
+      fail-fast: false
+      matrix:
+        branch: ${{ fromJSON(inputs.branches) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.branch }}
+          submodules: recursive
+
+      - name: Install GHCup
+        uses: haskell/ghcup-setup@v1
+        with:
+          cabal: ${{ env.CABAL_VERSION }}
+          ghc: ${{ env.GHC_VERSION }}
+        env:
+          LD: ld
+          CC: cc
+          CXX: c++
+
+      - name: Install dependencies
+        run: |
+          sudo sed -i.bak -e 's/quarterly/latest/' /etc/pkg/FreeBSD.conf
+          sudo pkg install -y textproc/gsed gcc gmp ncurses perl5 pkgconf libiconv bash misc/compat10x misc/compat11x misc/compat12x \
+            terminfo-db \
+            devel/autoconf \
+            devel/automake \
+            devel/git \
+            devel/gmake \
+            gtar \
+            ftp/curl \
+            lang/python3 \
+            py311-sphinx \
+            math/gmp \
+            lang/ghc \
+            devel/hs-alex \
+            devel/hs-happy \
+            devel/hs-cabal-install \
+            devel/libtool
+          sudo tzsetup Etc/GMT
+          sudo adjkerntz -a
+
+      - name: Add extra-lib-dirs
+        run: *extra-lib-dirs
+
+      - name: Install emscripten
+        run : |
+          sudo pkg install -y emscripten
+
+      - name: Run build
+        run: |
+          which ghc
+          ghc --info
+          cabal update
+          gmake CABAL=$PWD/_build/stage0/bin/cabal _build/bindist/haskell-toolchain.tar.gz _build/bindist/tests.tar.gz
+          cd _build/bindist
+          mv ghc.tar.gz ghc-$(bin/ghc --numeric-version)-${{ env.ARTIFACT }}.tar.gz
+          mv cabal.tar.gz cabal-$(bin/cabal --numeric-version)-${{ env.ARTIFACT }}.tar.gz
+          mv haskell-toolchain.tar.gz haskell-toolchain-${{ env.ARTIFACT }}.tar.gz
+        env:
+          EXTRA_LIB_DIRS: /usr/local/lib
+          EXTRA_INCLUDE_DIRS: /usr/local/include
+          SED: gsed
+
+      - if: always()
+        name: Upload artifact
+        uses: ./.github/actions/upload
+        with:
+          if-no-files-found: error
+          retention-days: 2
+          name: artifacts-${{ env.ARTIFACT }}-${{ matrix.branch }}
+          path: |
+            ./_build/bindist/*.tar.gz
+
+  test-linux:
+    name: Test linux binaries
+    runs-on: ubuntu-latest
+    needs: ["tool-output", "build-linux"]
+    if: ${{ inputs.test }}
+    env:
+      TARBALL_EXT: tar.xz
+      ARCH: 64
+    strategy:
+      fail-fast: false
+      matrix:
+        branch: ${{ fromJSON(inputs.branches) }}
+        platform: [ { image: "debian:11"
+                    , installCmd: "apt-get update && apt-get install -y"
+                    , toolRequirements: "${{ needs.tool-output.outputs.apt_tools_test }}"
+                    , ARTIFACT: "x86_64-linux-glibc"
+                    },
+                    { image: "debian:12"
+                    , installCmd: "apt-get update && apt-get install -y"
+                    , toolRequirements: "${{ needs.tool-output.outputs.apt_tools_test }}"
+                    , ARTIFACT: "x86_64-linux-glibc"
+                    },
+                    { image: "ubuntu:20.04"
+                    , installCmd: "apt-get update && apt-get install -y"
+                    , toolRequirements: "${{ needs.tool-output.outputs.apt_tools_test }}"
+                    , ARTIFACT: "x86_64-linux-glibc"
+                    },
+                    { image: "ubuntu:22.04"
+                    , installCmd: "apt-get update && apt-get install -y"
+                    , toolRequirements: "${{ needs.tool-output.outputs.apt_tools_test }}"
+                    , ARTIFACT: "x86_64-linux-glibc"
+                    },
+                    { image: "ubuntu:24.04"
+                    , installCmd: "apt-get update && apt-get install -y"
+                    , toolRequirements: "${{ needs.tool-output.outputs.apt_tools_test }}"
+                    , ARTIFACT: "x86_64-linux-glibc"
+                    },
+                    { image: "linuxmintd/mint20.3-amd64"
+                    , installCmd: "apt-get update && apt-get install -y"
+                    , toolRequirements: "${{ needs.tool-output.outputs.apt_tools_test }}"
+                    , ARTIFACT: "x86_64-linux-glibc"
+                    },
+                    { image: "linuxmintd/mint21.3-amd64"
+                    , installCmd: "apt-get update && apt-get install -y"
+                    , toolRequirements: "${{ needs.tool-output.outputs.apt_tools_test }}"
+                    , ARTIFACT: "x86_64-linux-glibc"
+                    },
+                    { image: "fedora:33"
+                    , installCmd: "dnf install -y"
+                    , toolRequirements: "${{ needs.tool-output.outputs.rpm_tools_test }}"
+                    , ARTIFACT: "x86_64-linux-glibc"
+                    },
+                    { image: "fedora:37"
+                    , installCmd: "dnf install -y"
+                    , toolRequirements: "${{ needs.tool-output.outputs.rpm_tools_test }}"
+                    , ARTIFACT: "x86_64-linux-glibc"
+                    },
+                    { image: "fedora:42"
+                    , installCmd: "dnf install -y"
+                    , toolRequirements: "${{ needs.tool-output.outputs.rpm_tools_test }}"
+                    , ARTIFACT: "x86_64-linux-glibc"
+                    },
+                    { image: "rockylinux:8"
+                    , installCmd: "yum -y install epel-release && yum install -y --allowerasing"
+                    , toolRequirements: "${{ needs.tool-output.outputs.rpm_tools_test }}"
+                    , ARTIFACT: "x86_64-linux-glibc"
+                    },
+                    { image: "rockylinux:9"
+                    , installCmd: "yum -y install epel-release && yum install -y --allowerasing"
+                    , toolRequirements: "${{ needs.tool-output.outputs.rpm_tools_test }}"
+                    , ARTIFACT: "x86_64-linux-glibc"
+                    },
+                    { image: "alpine:3.20"
+                    , installCmd: "apk update && apk add"
+                    , toolRequirements: "${{ needs.tool-output.outputs.apk_tools_test }}"
+                    , ARTIFACT: "x86_64-linux-musl"
+                    }
+                  ]
+    container:
+      image: ${{ matrix.platform.image }}
+    steps:
+      - name: Install requirements
+        shell: sh
+        run: |
+          ${{ matrix.platform.installCmd }} curl bash git ${{ matrix.platform.toolRequirements }}
+
+      # T14999 is broken: https://gitlab.haskell.org/ghc/ghc/-/issues/23685
+      - if: startsWith(matrix.platform.image, 'linuxmintd')
+        name: "Uninstall gdb"
+        run: |
+          apt-get remove -y gdb
+
+      - if: matrix.platform.image == 'rockylinux:8'
+        name: "Install newer python"
+        run: |
+          yum install -y --allowerasing python3.11
+          alternatives --set python3 /usr/bin/python3.11
+
+      # Test suite uses 'git' to find the test files. That appears
+      # to cause problems in CI. A similar hack is employed in the validate
+      # pipeline.
+      - name: git clone fix
+        run: git config --system --add safe.directory $GITHUB_WORKSPACE
+
+      - name: Install GHCup
+        uses: haskell/ghcup-setup@v1
+        with:
+          cabal: ${{ env.CABAL_VERSION }}
+          ghc: ${{ env.GHC_VERSION }}
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.branch }}
+
+      - uses: ./.github/actions/download
+        with:
+          name: artifacts-${{ matrix.platform.ARTIFACT }}-${{ matrix.branch }}
+          path: ./_build/bindist
+
+      - name: Run test
+        run: &test |
+          rm -rf .git
+          cd _build/bindist
+          for file in *.tar.gz; do tar xzf "$file"; done
+          cd testsuite
+          PATH=$GITHUB_WORKSPACE/_build/bindist/bin:$PATH make
+        env:
+          THREADS: 4
+
+  test-arm:
+    name: Test ARM binary
+    runs-on: ubuntu-22.04-arm
+    needs: ["tool-output", "build-arm"]
+    if: ${{ inputs.test }}
+    env:
+      TARBALL_EXT: tar.xz
+      ARCH: ARM64
+    strategy:
+      fail-fast: false
+      matrix:
+        branch: ${{ fromJSON(inputs.branches) }}
+        platform: [ { ARCH: "ARM64"
+                    , ARTIFACT: "aarch64-linux-deb11"
+                    },
+                    { ARCH: "ARM64"
+                    , ARTIFACT: "aarch64-linux-unknown"
+                    }
+                  ]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.branch }}
+
+      - uses: ./.github/actions/download
+        with:
+          name: artifacts-${{ matrix.platform.ARTIFACT }}-${{ matrix.branch }}
+          path: ./_build/bindist
+
+      - if: matrix.platform.ARTIFACT == 'aarch64-linux-deb11'
+        uses: docker://arm64v8/debian:11
+        name: Run build (aarch64 linux)
+        with:
+          args: sh -c "apt-get update && apt-get install -y curl bash git ${{ needs.tool-output.outputs.apt_tools_test }} && git config --system --add safe.directory $GITHUB_WORKSPACE && export PATH=$HOME/.ghcup/bin:$PATH && curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org | sh && rm -rf .git && cd _build/bindist && for file in *.tar.gz; do tar xzf $file; done && cd testsuite && PATH=$GITHUB_WORKSPACE/_build/bindist/bin:$PATH make"
+
+      - if: matrix.platform.ARTIFACT == 'aarch64-linux-unknown'
+        uses: docker://arm64v8/alpine:3.20
+        name: Run build (aarch64 linux alpine)
+        with:
+          args: sh -c "apk update && apk add curl bash git ${{ needs.tool-output.outputs.apk_tools_test }} && git config --system --add safe.directory $GITHUB_WORKSPACE && export PATH=$HOME/.ghcup/bin:$PATH && curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org | sh && rm -rf .git && cd _build/bindist && for file in *.tar.gz; do tar xzf $file; done && cd testsuite && PATH=$GITHUB_WORKSPACE/_build/bindist/bin:$PATH make"
+
+  test-mac-x86_64:
+    name: Test binary (Mac x86_64)
+    runs-on: macOS-13
+    needs: ["build-mac-x86_64"]
+    if: ${{ inputs.test }}
+    env:
+      MACOSX_DEPLOYMENT_TARGET: 10.13
+      ARTIFACT: "x86_64-apple-darwin"
+      ARCH: 64
+      TARBALL_EXT: tar.xz
+    strategy:
+      fail-fast: false
+      matrix:
+        branch: ${{ fromJSON(inputs.branches) }}
+    steps:
+      - name: Install GHCup
+        uses: haskell/ghcup-setup@v1
+        with:
+          cabal: ${{ env.CABAL_VERSION }}
+          ghc: ${{ env.GHC_VERSION }}
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.branch }}
+
+      - uses: ./.github/actions/download
+        with:
+          name: artifacts-${{ env.ARTIFACT }}-${{ matrix.branch }}
+          path: ./_build/bindist
+
+      - name: Run test
+        run: *test
+        env:
+          THREADS: 4
+
+  test-mac-aarch64:
+    name: Test binary (Mac aarch64)
+    runs-on: macos-latest
+    needs: ["build-mac-aarch64"]
+    if: ${{ inputs.test }}
+    env:
+      MACOSX_DEPLOYMENT_TARGET: 10.13
+      ARTIFACT: "aarch64-apple-darwin"
+      ARCH: ARM64
+      TARBALL_EXT: tar.xz
+      HOMEBREW_CHANGE_ARCH_TO_ARM: 1
+      GHCUP_INSTALL_BASE_PREFIX: ${{ github.workspace }}
+    strategy:
+      fail-fast: false
+      matrix:
+        branch: ${{ fromJSON(inputs.branches) }}
+    steps:
+      - name: Install GHCup
+        uses: haskell/ghcup-setup@v1
+        with:
+          cabal: ${{ env.CABAL_VERSION }}
+          ghc: ${{ env.GHC_VERSION }}
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.branch }}
+          submodules: recursive
+
+      - uses: ./.github/actions/download
+        with:
+          name: artifacts-${{ env.ARTIFACT }}-${{ matrix.branch }}
+          path: ./_build/bindist
+
+      - name: Run test
+        run: *test
+        env:
+          THREADS: 4
+
+  test-freebsd-x86_64:
+    name: Test FreeBSD x86_64
+    runs-on: [self-hosted, FreeBSD, X64]
+    needs: ["build-freebsd-x86_64"]
+    if: ${{ inputs.test }}
+    env:
+      ARTIFACT: "x86_64-portbld-freebsd"
+      ARCH: 64
+      TARBALL_EXT: tar.xz
+      RUNNER_OS: FreeBSD
+      CABAL_DIR: ${{ github.workspace }}/.cabal
+      GHCUP_INSTALL_BASE_PREFIX: ${{ github.workspace }}
+    strategy:
+      fail-fast: false
+      matrix:
+        branch: ${{ fromJSON(inputs.branches) }}
+    steps:
+      - name: Install GHCup
+        uses: haskell/ghcup-setup@v1
+        with:
+          cabal: ${{ env.CABAL_VERSION }}
+          ghc: ${{ env.GHC_VERSION }}
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.branch }}
+
+      - uses: ./.github/actions/download
+        with:
+          name: artifacts-${{ env.ARTIFACT }}-${{ matrix.branch }}
+          path: ./_build/bindist
+
+      - name: Install dependencies
+        run: |
+          sudo sed -i.bak -e 's/quarterly/latest/' /etc/pkg/FreeBSD.conf
+          sudo pkg install -y textproc/gsed curl gcc gmp gmake ncurses perl5 pkgconf libiconv git bash misc/compat10x misc/compat11x misc/compat12x groff autoconf automake devel/libtool
+          sudo tzsetup Etc/GMT
+          sudo adjkerntz -a
+
+      - name: Run test
+        run: |
+          rm -rf .git
+          cd _build/bindist
+          for file in *.tar.gz; do tar xzf "$file"; done
+          cd testsuite
+          export LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH
+          PATH=$GITHUB_WORKSPACE/_build/bindist/bin:$PATH gmake
+        env:
+          THREADS: 8
+          EXTRA_HC_OPTS: "-optl-L/usr/local/lib -optc-I/usr/local/include"
+

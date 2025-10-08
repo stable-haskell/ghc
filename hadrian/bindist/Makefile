@@ -104,6 +104,7 @@ lib/settings : config.mk
 	@echo ',("ld supports filelist", "$(LdHasFilelist)")' >> $@
 	@echo ',("ld supports single module", "$(LdHasSingleModule)")' >> $@
 	@echo ',("ld is GNU ld", "$(LdIsGNULd)")' >> $@
+	@echo ',("ld supports verbatim namespace", "$(LdSupportsVerbatimNamespace)")' >> $@
 	@echo ',("Merge objects command", "$(SettingsMergeObjectsCommand)")' >> $@
 	@echo ',("Merge objects flags", "$(SettingsMergeObjectsFlags)")' >> $@
 	@echo ',("Merge objects supports response files", "$(MergeObjsSupportsResponseFiles)")' >> $@

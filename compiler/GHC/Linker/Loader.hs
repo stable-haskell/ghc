@@ -203,6 +203,7 @@ emptyLoaderState dflags = LoaderState
                     --        for the target build? I think target-build seems right, but I'm
                     --        not fully convinced.
                     , (rtsWayUnitId dflags, (LoadedPkgInfo (rtsWayUnitId dflags) [] [] [] emptyUniqDSet))
+                    , (libffiUnitId, (LoadedPkgInfo libffiUnitId [] [] [] emptyUniqDSet))
                     ]
 
 extendLoadedEnv :: Interp -> [(Name,ForeignHValue)] -> IO ()
@@ -1170,16 +1171,9 @@ loadPackage interp hsc_env pkg
         let logger    = hsc_logger hsc_env
             platform  = targetPlatform dflags
             is_dyn    = interpreterDynamic interp
-            dirs | is_dyn    = map ST.unpack $ Packages.unitLibraryDynDirs pkg
-                 | otherwise = map ST.unpack $ Packages.unitLibraryDirs pkg
+            dirs      = libraryDirsForWay' is_dyn pkg
 
         let hs_libs   = map ST.unpack $ Packages.unitLibraries pkg
-            -- The FFI GHCi import lib isn't needed as
-            -- GHC.Linker.Loader + rts/Linker.c link the
-            -- interpreted references to FFI to the compiled FFI.
-            -- We therefore filter it out so that we don't get
-            -- duplicate symbol errors.
-            hs_libs'  =  filter ("HSffi" /=) hs_libs
 
         -- Because of slight differences between the GHC dynamic linker and
         -- the native system linker some packages have to link with a
@@ -1199,7 +1193,7 @@ loadPackage interp hsc_env pkg
         dirs_env <- addEnvPaths "LIBRARY_PATH" dirs
 
         hs_classifieds
-           <- mapM (locateLib interp hsc_env True  dirs_env gcc_paths) hs_libs'
+           <- mapM (locateLib interp hsc_env True  dirs_env gcc_paths) hs_libs
         extra_classifieds
            <- mapM (locateLib interp hsc_env False dirs_env gcc_paths) extra_libs
         let classifieds = hs_classifieds ++ extra_classifieds

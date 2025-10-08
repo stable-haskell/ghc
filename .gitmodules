@@ -10,7 +10,7 @@
 	path = libraries/Cabal
 	url = https://github.com/stable-haskell/Cabal.git
 	ignore = untracked
-	branch = stable-haskell/feature/cross-compile
+	branch = stable-haskell/feature/cross-compile-p1
 [submodule "libraries/containers"]
 	path = libraries/containers
 	url = https://gitlab.haskell.org/ghc/packages/containers.git

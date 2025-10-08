@@ -497,6 +497,7 @@ generateSettings settingsFile = do
         , ("ld supports filelist",       queryTarget linkSupportsFilelist)
         , ("ld supports single module",       queryTarget linkSupportsSingleModule)
         , ("ld is GNU ld",               queryTarget linkIsGnu)
+        , ("ld supports verbatim namespace", queryTarget linkSupportsVerbatimNamespace)
         , ("Merge objects command", queryTarget mergeObjsPath)
         , ("Merge objects flags", queryTarget mergeObjsFlags)
         , ("Merge objects supports response files", queryTarget mergeObjsSupportsResponseFiles')
@@ -567,6 +568,7 @@ generateSettings settingsFile = do
     linkSupportsFilelist        = yesNo . ccLinkSupportsFilelist . tgtCCompilerLink
     linkSupportsCompactUnwind   = yesNo . ccLinkSupportsCompactUnwind . tgtCCompilerLink
     linkIsGnu                   = yesNo . ccLinkIsGnu . tgtCCompilerLink
+    linkSupportsVerbatimNamespace = yesNo . ccLinkSupportsVerbatimNamespace . tgtCCompilerLink
     llcPath = maybe "" prgPath . tgtLlc
     optPath = maybe "" prgPath . tgtOpt
     llvmAsPath = maybe "" prgPath . tgtLlvmAs

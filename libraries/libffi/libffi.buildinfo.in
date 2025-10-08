@@ -1,0 +1,7 @@
+extra-libraries: @EXTRA_LIBS@
+cc-options: @CFLAGS@
+ld-options: @LDFLAGS@
+include-dirs: src/@TARGETDIR@
+install-includes: ffitarget.h
+c-sources: @EXTRA_SOURCES@
+asm-sources: @EXTRA_ASM_SOURCES@
