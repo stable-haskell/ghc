@@ -1,3 +1,7 @@
+allow-boot-library-installs: True
+benchmarks: False
+tests: False
+
 packages:
   -- NOTE: we need rts-headers, because the _newly_ built compiler depends
   --       on these potentially _new_ headers, we must not rely on those from
@@ -8,37 +12,39 @@ packages:
   rts-headers
   rts-fs
 
-  -- other packages.
+  -- Compiler
   ghc
   compiler
-  libraries/directory
-  libraries/file-io
-  libraries/filepath
-  libraries/ghc-platform
+
+  -- Internal libraries
   libraries/ghc-boot
   libraries/ghc-boot-th-next
   libraries/ghc-heap
+  libraries/ghc-platform
   libraries/ghci
-  libraries/os-string
-  libraries/process
-  libraries/semaphore-compat
---  libraries/time
-  libraries/unix
-  libraries/Win32
-  libraries/Cabal/Cabal-syntax
-  libraries/Cabal/Cabal
-  utils/ghc-pkg
-  utils/hsc2hs
-  utils/unlit
-  utils/genprimopcode
-  utils/genapply
+
+  -- Internal tools
   utils/deriveConstants
+  utils/genapply
+  utils/genprimopcode
+  utils/ghc-pkg
   utils/ghc-toolchain
   utils/ghc-toolchain/exe
+  utils/unlit
 
-benchmarks: False
-tests: False
-allow-boot-library-installs: True
+-- Git submodules have been replaced with source-repository-packages
+import: cabal.project.boot-packages.stage1-only
+
+--
+-- Constraints
+--
+
+constraints:
+  template-haskell <= 2.22
+
+--
+-- Package level configuration
+--
 
 package *
   library-vanilla: True
@@ -63,8 +69,9 @@ package ghc-boot-th-next
 package hsc2hs
   flags: +in-ghc-tree
 
-constraints:
-  template-haskell <= 2.22
+--
+-- Program options
+--
 
 program-options
   ghc-options: -fhide-source-paths -j
