@@ -1,0 +1,54 @@
+source-repository-package
+  type: git
+  location: https://github.com/stable-haskell/cabal.git
+  tag: bc52b097aa2f26aa440fcacdb506843987bba346
+  subdir: Cabal-syntax Cabal
+
+source-repository-package
+  type: git
+  location: https://gitlab.haskell.org/ghc/packages/directory.git
+  tag: 6442a3cf04f74d82cdf8c9213324313d52b23d28
+  post-checkout-command: autoreconf -i
+
+source-repository-package
+  type: git
+  location: https://gitlab.haskell.org/ghc/packages/file-io.git
+  tag: 21303160b5dd91d6197bd1d20a8796ba2a819d4e
+
+source-repository-package
+  type: git
+  location: https://gitlab.haskell.org/ghc/packages/filepath.git
+  tag: cbcd0ccf92f47e6c10fb9cc513a7b26facfc19fe
+
+
+source-repository-package
+  type: git
+  location: https://gitlab.haskell.org/ghc/packages/os-string
+  tag: 2e693aad07540173a0169971b27c9acac28eeff1
+
+source-repository-package
+  type: git
+  location: https://gitlab.haskell.org/ghc/packages/process.git
+  tag: ae50731b5fb221a7631f7e9d818fc6716c85c51e
+  post-checkout-command: autoreconf -i
+
+source-repository-package
+  type: git
+  location: https://gitlab.haskell.org/ghc/semaphore-compat.git
+  tag: ba87d1bb0209bd9f29bda1c878ddf345f8a2b199
+
+source-repository-package
+  type: git
+  location: https://gitlab.haskell.org/ghc/packages/unix.git
+  tag: c9b3e95b5c15b118e55522bd92963038c6a88160
+  post-checkout-command: autoreconf -i
+
+source-repository-package
+  type: git
+  location: https://gitlab.haskell.org/ghc/packages/Win32.git
+  tag: 7d0772bb265a6c59eb14c441cf65c778895528df
+
+source-repository-package
+  type: git
+  location: https://gitlab.haskell.org/ghc/hsc2hs.git
+  tag: fe3990b9f35000427b016a79330d9f195587cad8

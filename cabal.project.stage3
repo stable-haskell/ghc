@@ -34,33 +34,10 @@ packages:
   utils/genprimopcode
   utils/deriveConstants
 
-  -- The following are packages available on Hackage but included as submodules
-  libraries/array
-  libraries/binary
-  libraries/bytestring
-  libraries/Cabal/Cabal
-  libraries/Cabal/Cabal-syntax
-  libraries/containers/containers
-  libraries/deepseq
-  libraries/directory
-  libraries/exceptions
-  libraries/file-io
-  libraries/filepath
-  libraries/hpc
-  libraries/mtl
-  libraries/os-string
-  libraries/parsec
-  libraries/pretty
-  libraries/process
-  libraries/semaphore-compat
-  libraries/stm
-  libraries/text
-  libraries/time
-  libraries/transformers
-  libraries/unix
-  libraries/Win32
-  libraries/xhtml
-  
+-- Git submodules have been replaced with source-repository-packages
+import: cabal.project.boot-packages
+
+packages:
   -- These would be on Hackage but we include them as direct URLs
   -- (Hackage is disabled by `active-repositories: :none`)
   https://hackage.haskell.org/package/alex-3.5.2.0/alex-3.5.2.0.tar.gz

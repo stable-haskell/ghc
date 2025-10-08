@@ -32,18 +32,8 @@ packages:
   utils/ghc-toolchain/exe
   utils/unlit
 
-  -- The following are packages available on Hackage but included as submodules
-  libraries/Cabal/Cabal
-  libraries/Cabal/Cabal-syntax
-  libraries/directory
-  libraries/file-io
-  libraries/filepath
-  libraries/os-string
-  libraries/process
-  libraries/semaphore-compat
-  libraries/unix
-  libraries/Win32
-  utils/hsc2hs
+-- Git submodules have been replaced with source-repository-packages
+import: cabal.project.boot-packages.stage1-only
 
 --
 -- Constraints

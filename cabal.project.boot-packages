@@ -1,0 +1,94 @@
+import: cabal.project.boot-packages.stage1-only
+
+source-repository-package
+  type: git
+  location: https://gitlab.haskell.org/ghc/packages/array.git
+  tag: 6d59d5deb4f2a12656ab4c4371c0d12dac4875ef
+
+source-repository-package
+  type: git
+  location: https://gitlab.haskell.org/ghc/packages/binary.git
+  tag: a625eee2eb9dfb4019c051b59d6007c9dded88aa
+
+source-repository-package
+  type: git
+  location: https://gitlab.haskell.org/ghc/packages/bytestring.git
+  tag: d984ad00644c0157bad04900434b9d36f23633c5
+
+source-repository-package
+  type: git
+  location: https://gitlab.haskell.org/ghc/packages/containers.git
+  tag: 801b06e5d4392b028e519d5ca116a2881d559721
+  subdir: containers
+
+source-repository-package
+  type: git
+  location: https://gitlab.haskell.org/ghc/packages/deepseq.git
+  tag: ae2762ac241a61852c9ff4c287af234fb1ad931f
+
+source-repository-package
+  type: git
+  location: https://gitlab.haskell.org/ghc/packages/exceptions.git
+  tag: b6c4290124eb1138358bf04ad9f33e67f6c5c1d8
+
+source-repository-package
+  type: git
+  location: https://gitlab.haskell.org/ghc/packages/haskeline.git
+  tag: 991953cd5d3bb9e8057de4a0d8f2cae3455865d8
+
+source-repository-package
+  type: git
+  location: https://gitlab.haskell.org/ghc/packages/hpc.git
+  tag: 12675279dc5cbea4ade8b5157b080390d598f03f
+
+source-repository-package
+  type: git
+  location: https://gitlab.haskell.org/ghc/packages/mtl.git
+  tag: 37cbd924cb71eba591a2e2b6b131767f632d22c9
+
+source-repository-package
+  type: git
+  location: https://gitlab.haskell.org/ghc/packages/parsec.git
+  tag: 552730e23e1fd2dae46a60d75138b8d173492462
+
+source-repository-package
+  type: git
+  location: https://gitlab.haskell.org/ghc/packages/pretty.git
+  tag: c3a1469306b35fa5d023dc570554f97f1a90435d
+
+source-repository-package
+  type: git
+  location: https://gitlab.haskell.org/ghc/packages/stm.git
+  tag: 23bdcc2319965911af28542e76fc01f37c107d40
+
+source-repository-package
+  type: git
+  location: https://gitlab.haskell.org/ghc/packages/terminfo.git
+  tag: 16db154e3e97e6bff62329574163851a7090f3b6
+  post-checkout-command: autoreconf -i
+
+source-repository-package
+  type: git
+  location: https://gitlab.haskell.org/ghc/packages/text.git
+  tag: 5f343f668f421bfb30cead594e52d0ac6206ff67
+
+source-repository-package
+  type: git
+  location: https://gitlab.haskell.org/ghc/packages/time.git
+  tag: 507f50844802f1469ba6cadfeefd4e3fecee0416
+  post-checkout-command: autoreconf -i
+
+source-repository-package
+  type: git
+  location: https://gitlab.haskell.org/ghc/packages/transformers.git
+  tag: cee47cca7705edafe0a5839439e679edbd61890a
+
+source-repository-package
+  type: git
+  location: https://gitlab.haskell.org/ghc/packages/xhtml.git
+  tag: 68353ccd1a2e776d6c2b11619265d8140bb7dc07
+
+source-repository-package
+  type: git
+  location: https://gitlab.haskell.org/hpc/hpc-bin.git
+  tag: 5923da3fe77993b7afc15b5163cffcaa7da6ecf5
