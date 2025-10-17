@@ -1,9 +1,10 @@
+cabal-version:  3.8
 -- WARNING: ghci.cabal is automatically generated from ghci.cabal.in by
 -- ../../configure.  Make sure you are editing ghci.cabal.in, not ghci.cabal.
 
 name:           ghci
-version:        @ProjectVersionMunged@
-license:        BSD3
+version:        9.14
+license:        BSD-3-Clause
 license-file:   LICENSE
 category:       GHC
 maintainer:     ghc-devs@haskell.org
@@ -13,7 +14,6 @@ description:
             This library offers interfaces which mediate interactions between the
             @ghci@ interactive shell and @iserv@, GHC's out-of-process interpreter
             backend.
-cabal-version:  >=1.10
 build-type:     Simple
 extra-source-files: changelog.md
 
@@ -30,6 +30,10 @@ Flag bootstrap
           See Note [Bootstrapping Template Haskell]
         Default: False
         Manual: True
+
+flag use-system-libffi
+  default: False
+  manual: True
 
 source-repository head
     type:     git
@@ -92,9 +96,16 @@ library
         containers       >= 0.5 && < 0.9,
         deepseq          >= 1.4 && < 1.6,
         filepath         >= 1.4 && < 1.6,
-        ghc-boot         == @ProjectVersionMunged@,
-        ghc-heap         == @ProjectVersionMunged@,
+        ghc-boot         == 9.14,
+        ghc-heap         == 9.14,
         transformers     >= 0.5 && < 0.7
+
+    if !arch(javascript)
+      if flag(use-system-libffi)
+         extra-libraries: ffi
+         extra-libraries-static: ffi
+      else
+         build-depends: libffi-clib
 
     if impl(ghc > 9.10)
         -- ghc-internal is only available (and required) when building
@@ -103,22 +114,22 @@ library
         -- so we must not depend on it in that case.
         --
         -- When available we depend on the in-tree version (matching
-        -- @ProjectVersionForLib@) and define HAVE_GHC_INTERNAL so that
+        -- 9.1400) and define HAVE_GHC_INTERNAL so that
         -- sources can import the non-deprecated modules from
         -- GHC.Internal.* instead of the legacy (deprecated) locations.
         Build-Depends:
-            ghc-internal      >= 9.1001.0 && <=@ProjectVersionForLib@.0
+            ghc-internal      >= 9.1001.0 && <=9.1400.0
         CPP-Options:          -DHAVE_GHC_INTERNAL
 
     if flag(bootstrap)
       build-depends:
-            ghc-boot-th-next  == @ProjectVersionMunged@
+            ghc-boot-th-next  == 9.14
     else
       build-depends:
-            ghc-boot-th       == @ProjectVersionMunged@
+            ghc-boot-th       == 9.14
 
     if !os(windows)
         Build-Depends: unix >= 2.7 && < 2.9
 
     if arch(wasm32)
-        build-depends: ghc-experimental == @ProjectVersionForLib@.0
+        build-depends: ghc-experimental == 9.1400.0

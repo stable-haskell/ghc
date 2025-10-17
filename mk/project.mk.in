@@ -25,11 +25,11 @@
 # random .o-file stuff might change even if the .hi syntax doesn't
 
 ProjectName       = @ProjectName@
-ProjectVersion    = @ProjectVersion@
-ProjectVersionInt = @ProjectVersionInt@
+ProjectVersion    = 9.14
+ProjectVersionInt = 914
 ProjectPatchLevel = @ProjectPatchLevel@
-ProjectPatchLevel1 = @ProjectPatchLevel1@
-ProjectPatchLevel2 = @ProjectPatchLevel2@
+ProjectPatchLevel1 = 0
+ProjectPatchLevel2 = 0
 ProjectGitCommitId = @ProjectGitCommitId@
 
 ################################################################################

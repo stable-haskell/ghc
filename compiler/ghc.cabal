@@ -3,7 +3,7 @@ Cabal-Version: 2.2
 -- ./configure.  Make sure you are editing ghc.cabal.in, not ghc.cabal.
 
 Name: ghc
-Version: @ProjectVersionMunged@
+Version: 9.14
 License: BSD-3-Clause
 License-File: LICENSE
 Author: The GHC Team
@@ -112,17 +112,17 @@ Library
                    stm,
                    rts,
                    rts-headers,
-                   ghc-boot   == @ProjectVersionMunged@,
-                   ghc-heap   == @ProjectVersionMunged@,
-                   ghci == @ProjectVersionMunged@
+                   ghc-boot   == 9.14,
+                   ghc-heap   == 9.14,
+                   ghci == 9.14
 
     if flag(bootstrap)
       Build-Depends:
-        ghc-boot-th-next     == @ProjectVersionMunged@
+        ghc-boot-th-next     == 9.14
     else
       Build-Depends:
-        ghc-boot-th          == @ProjectVersionMunged@,
-        ghc-internal         == @ProjectVersionForLib@.0,
+        ghc-boot-th          == 9.14,
+        ghc-internal         == 9.1400.0,
 
     if os(windows)
         Build-Depends: Win32  >= 2.3 && < 2.15
