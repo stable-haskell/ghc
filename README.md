@@ -1,14 +1,19 @@
-The Glasgow Haskell Compiler
-============================
+The Glasgow Haskell Compiler - Stable Haskell Fork
+==================================================
 
 [![pipeline status](https://gitlab.haskell.org/ghc/ghc/badges/master/pipeline.svg?style=flat)](https://gitlab.haskell.org/ghc/ghc/commits/master)
+
+**This is the Stable Haskell fork of GHC**, not the upstream GHC codebase.
 
 This is the source tree for [GHC][1], a compiler and interactive
 environment for the Haskell functional programming language.
 
-For more information, visit [GHC's web site][1].
+**Important**: All issues and bug reports for this fork should be reported at:
+<https://github.com/stable-haskell/ghc/issues>
 
-Information for developers of GHC can be found on the [GHC issue tracker][2], and you can also view [proposals for new GHC features][13].
+For more information about upstream GHC, visit [GHC's web site][1].
+
+Information for developers of upstream GHC can be found on the [GHC issue tracker][2], and you can also view [proposals for new GHC features][13].
 
 
 Getting the Source
@@ -26,10 +31,7 @@ There are two ways to get a source tree:
 
  2. *Check out the source code from git*
 
-        $ git clone --recurse-submodules git@gitlab.haskell.org:ghc/ghc.git
-
-    Note: cloning GHC from Github requires a special setup. See [Getting a GHC
-    repository from Github][7].
+        $ git clone --recurse-submodules https://github.com/stable-haskell/ghc.git
 
   *See the GHC team's working conventions regarding [how to contribute a patch to GHC](https://gitlab.haskell.org/ghc/ghc/wikis/working-conventions/fixing-bugs).* First time contributors are encouraged to get started by just sending a Merge Request.
 
@@ -41,51 +43,45 @@ For full information on building GHC, see the [GHC Building Guide][3].
 Here follows a summary - if you get into trouble, the Building Guide
 has all the answers.
 
-Before building GHC you may need to install some other tools and
-libraries.  See, [Setting up your system for building GHC][8].
+To build GHC, you need:
+- A working version of [GHC][1] (>= 9.8.4), as the compiler is written in Haskell
+- [cabal-install][9]
 
-*NB.* In particular, you need [GHC][1] installed in order to build GHC,
-because the compiler is itself written in Haskell.  You also need
-[Happy][4], [Alex][5], and [Cabal][9].  For instructions on how
-to port GHC to a new platform, see the [GHC Building Guide][3].
+Both the bootstrap compiler and cabal-install can be easily installed with
+[GHCup](https://www.haskell.org/ghcup/):
+
+    $ ghcup install ghc 9.8.4
+    $ ghcup install cabal
+    $ ghcup set ghc 9.8.4
+
+For additional system dependencies and libraries, see [Setting up your system for building GHC][8].
+For instructions on how to port GHC to a new platform, see the [GHC Building Guide][3].
 
 For building library documentation, you'll need [Haddock][6].  To build
 the compiler documentation, you need [Sphinx](http://www.sphinx-doc.org/)
 and Xelatex (only for PDF output).
 
-**Quick start**: GHC is built using the [Hadrian build system](hadrian/README.md).
-The following gives you a default build:
+**Quick start**: The following gives you a default build:
 
-    $ ./boot
-    $ ./configure
-    $ hadrian/build         # can also say '-jX' for X number of jobs
+    $ make CABAL=$PWD/_build/stage0/bin/cabal
 
-  On Windows, you need an extra repository containing some build tools.
-  These can be downloaded for you by configure. This only needs to be done once by running:
+On Windows, you should run the build command from an appropriate
+environment (e.g., MSYS2).
 
-    $ ./configure --enable-tarballs-autodownload
-
-  Additionally, on Windows, to run Hadrian you should run `hadrian/build.bat`
-  instead of `hadrian/build`.
-
-(NB: **Do you have multiple cores? Be sure to tell that to `hadrian`!** This can
-save you hours of build time depending on your system configuration, and is
-almost always a win regardless of how many cores you have. As a simple rule,
-you should have about N+1 jobs, where `N` is the amount of cores you have.)
-
-The `./boot` step is only necessary if this is a tree checked out
-from git.  For source distributions downloaded from [GHC's web site][1],
-this step has already been performed.
-
-These steps give you the default build, which includes everything
+This gives you the default build, which includes everything
 optimised and built in various ways (eg. profiling libs are built).
-It can take a long time.  To customise the build, see the file `HACKING.md`.
+It can take a long time.
+
+To run the test suite:
+
+    $ make test CABAL=$PWD/_build/stage0/bin/cabal
 
 Filing bugs and feature requests
 ================================
 
-If you've encountered what you believe is a bug in GHC, or you'd like
-to propose a feature request, please let us know! Submit an [issue][10] and we'll be sure to look into it. Remember:
+If you've encountered what you believe is a bug in this fork, or you'd like
+to propose a feature request, please let us know! Submit an issue at
+<https://github.com/stable-haskell/ghc/issues> and we'll be sure to look into it. Remember:
 **Filing a bug is the best way to make sure your issue isn't lost over
 time**, so please feel free.
 
@@ -93,13 +89,103 @@ If you're an active user of GHC, you may also be interested in joining
 the [glasgow-haskell-users][11] mailing list, where developers and
 GHC users discuss various topics and hang out.
 
-Hacking & Developing GHC
-========================
+Contributing to GHC
+===================
 
 Once you've filed a bug, maybe you'd like to fix it yourself? That
-would be great, and we'd surely love your company! If you're looking
-to hack on GHC, check out the guidelines in the `HACKING.md` file in
-this directory - they'll get you up to speed quickly.
+would be great, and we'd surely love your company! This section will
+help you get started with contributing to GHC.
+
+Getting Started with Development
+---------------------------------
+
+Make sure your system has the necessary tools to compile GHC. You can
+find an overview of how to prepare your system here:
+
+<https://gitlab.haskell.org/ghc/ghc/wikis/building/preparation>
+
+After building GHC (see "Building & Installing" above), you can start
+making your commits. When you're done, you can submit a merge request
+to [GitLab](https://gitlab.haskell.org/ghc/ghc/merge_requests) for
+code review.
+
+Changes to the `base` library require a proposal to the
+[core libraries committee](https://github.com/haskell/core-libraries-committee/issues).
+
+The GHC Wiki has a good summary for the
+[overall process](https://gitlab.haskell.org/ghc/ghc/wikis/working-conventions/fixing-bugs).
+One or several reviewers will review your PR, and when they are ok with
+your changes, they will assign the PR to
+[Marge Bot](https://gitlab.haskell.org/marge-bot) which will automatically
+rebase, batch and then merge your PR (assuming the build passes).
+
+Useful Resources
+----------------
+
+The home for GHC hackers is our GitLab instance:
+
+<https://gitlab.haskell.org/ghc/ghc>
+
+From here, you can file bugs (or look them up), use the wiki, view the
+git history, among other things.
+
+An overview of things like using Git, the release process, filing bugs
+and more can be located here:
+
+<https://gitlab.haskell.org/ghc/ghc/wikis/contributing>
+
+You can find our coding conventions for the compiler and RTS here:
+
+<https://gitlab.haskell.org/ghc/ghc/wikis/commentary/coding-style>
+<https://gitlab.haskell.org/ghc/ghc/wikis/commentary/rts/conventions>
+
+If you're going to contribute regularly, **learning how to use the
+build system is important** and will save you lots of time. You should
+read over this page carefully:
+
+<https://gitlab.haskell.org/ghc/ghc/wikis/building/using>
+
+If you want to watch issues and code review activities, the following page
+is a good start:
+
+<https://gitlab.haskell.org/ghc/ghc/activity>
+
+How to Communicate with Us
+--------------------------
+
+GHC is a big project, so you'll surely need help. Luckily, we can
+provide plenty through a variety of means!
+
+### IRC
+
+If you're an IRC user, be sure to drop by the official `#ghc` channel
+on [Libera.Chat](https://libera.chat). Many (but not all) of the
+developers and committers are actively there during a variety of
+hours.
+
+### Mailing lists
+
+In the event IRC does not work or if you'd like a bigger audience, GHC
+has several mailing lists for this purpose. The most important one is
+[ghc-devs](http://www.haskell.org/pipermail/ghc-devs/), which is where
+the developers actively hang out and discuss incoming changes and
+problems.
+
+There is no strict standard about where you post patches - either in
+`ghc-devs` or in the bug tracker. Ideally, please put it in the bug
+tracker with test cases or relevant information in a ticket, and set
+the ticket status to `patch`. By doing this, we'll see the patch
+quickly and be able to review. This will also ensure it doesn't get
+lost. But if the change is small and self contained, feel free to
+attach it to your email, and send it to `ghc-devs`.
+
+Furthermore, if you're a developer (or want to become one!) you're
+undoubtedly also interested in the other mailing lists:
+
+ * [glasgow-haskell-users](http://www.haskell.org/mailman/listinfo/glasgow-haskell-users)
+   is where developers/users meet.
+ * [ghc-commits](http://www.haskell.org/mailman/listinfo/ghc-commits)
+   for commit messages when someone pushes to the repository.
 
 Governance and Acknowledgements
 ===============================
@@ -118,19 +204,11 @@ as described in our [governance documentation](https://gitlab.haskell.org/ghc/gh
         "gitlab.haskell.org/ghc/ghc/issues"
 [3]:  https://gitlab.haskell.org/ghc/ghc/wikis/building
         "https://gitlab.haskell.org/ghc/ghc/wikis/building"
-[4]:  http://www.haskell.org/happy/          "www.haskell.org/happy/"
-[5]:  http://www.haskell.org/alex/           "www.haskell.org/alex/"
 [6]:  http://www.haskell.org/haddock/        "www.haskell.org/haddock/"
-[7]: https://gitlab.haskell.org/ghc/ghc/wikis/building/getting-the-sources#cloning-from-github
-        "https://gitlab.haskell.org/ghc/ghc/wikis/building/getting-the-sources#cloning-from-github"
 [8]:  https://gitlab.haskell.org/ghc/ghc/wikis/building/preparation
         "https://gitlab.haskell.org/ghc/ghc/wikis/building/preparation"
-[9]:  http://www.haskell.org/cabal/          "http://www.haskell.org/cabal/"
-[10]: https://gitlab.haskell.org/ghc/ghc/issues
-        "https://gitlab.haskell.org/ghc/ghc/issues"
+[9]:  https://github.com/haskell/cabal          "https://github.com/haskell/cabal"
 [11]: http://www.haskell.org/pipermail/glasgow-haskell-users/
         "http://www.haskell.org/pipermail/glasgow-haskell-users/"
-[12]: https://gitlab.haskell.org/ghc/ghc/wikis/team-ghc
-        "https://gitlab.haskell.org/ghc/ghc/wikis/team-ghc"
 [13]: https://github.com/ghc-proposals/ghc-proposals
         "https://github.com/ghc-proposals/ghc-proposals"
