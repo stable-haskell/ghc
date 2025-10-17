@@ -1,6 +1,6 @@
 Name: ghc-pkg
 -- XXX Version number
-Version: @ProjectVersion@
+Version: 9.14
 Copyright: XXX
 License: BSD3
 -- XXX License-File: LICENSE

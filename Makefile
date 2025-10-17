@@ -1000,8 +1000,8 @@ distclean: clean
 libraries/ghc-boot-th-next/.synth-stamp:
 	@echo "::group::Synthesizing ghc-boot-th-next (copy & sed from ghc-boot-th)..."
 	@mkdir -p libraries/ghc-boot-th-next
-	@src=libraries/ghc-boot-th/ghc-boot-th.cabal.in; \
-	 dst=libraries/ghc-boot-th-next/ghc-boot-th-next.cabal.in; \
+	@src=libraries/ghc-boot-th/ghc-boot-th.cabal; \
+	 dst=libraries/ghc-boot-th-next/ghc-boot-th-next.cabal; \
 	 if [ ! -f $$src ]; then echo "Source $$src not found" >&2; exit 1; fi; \
 	 cp -f $$src $$dst.tmp; \
 	 sed -e 's/^name:[[:space:]]*ghc-boot-th$$/name:           ghc-boot-th-next/' \

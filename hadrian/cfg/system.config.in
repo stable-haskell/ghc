@@ -63,13 +63,13 @@ ghc-patch-level       = @GhcPatchLevel@
 bootstrap-threaded-rts = @GhcThreadedRts@
 
 project-name           = @ProjectName@
-project-version        = @ProjectVersion@
-project-version-munged = @ProjectVersionMunged@
-project-version-for-lib = @ProjectVersionForLib@
-project-version-int    = @ProjectVersionInt@
+project-version        = 9.14
+project-version-munged = 9.14
+project-version-for-lib = 9.1400
+project-version-int    = 914
 project-patch-level    = @ProjectPatchLevel@
-project-patch-level1   = @ProjectPatchLevel1@
-project-patch-level2   = @ProjectPatchLevel2@
+project-patch-level1   = 0
+project-patch-level2   = 0
 project-git-commit-id  = @ProjectGitCommitId@
 
 # Settings:

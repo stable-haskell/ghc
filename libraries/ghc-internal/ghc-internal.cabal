@@ -4,7 +4,7 @@ cabal-version:  3.0
 name:           ghc-internal
 -- The project is ghc's version plus ghc-internal's version suffix.
 -- For example, for ghc=9.10.1, ghc-internal's version will be 9.1001.0.
-version:        @ProjectVersionForLib@.0
+version:        9.1400.0
 license:        BSD-3-Clause
 license-file:   LICENSE
 maintainer:     The GHC Developers <ghc-devs@haskell.org>

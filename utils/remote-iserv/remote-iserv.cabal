@@ -3,7 +3,7 @@
 -- remote-iserv.cabal.
 
 Name: remote-iserv
-Version: @ProjectVersion@
+Version: 9.14
 Copyright: XXX
 License: BSD3
 -- XXX License-File: LICENSE
@@ -24,4 +24,4 @@ Executable remote-iserv
    Main-Is: Cli.hs
    Hs-Source-Dirs: src
    Build-Depends: base       >= 4   && < 5,
-                  ghci       == @ProjectVersionMunged@
+                  ghci       == 9.14
