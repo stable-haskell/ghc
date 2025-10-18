@@ -27,7 +27,7 @@ lib_versions = {
     'array': '@LIBRARY_array_UNIT_ID@',
 }
 
-version = '@ProjectVersion@'
+version = '9.14'
 
 llvm_version_min = '@LlvmMinVersion@'
 llvm_version_max = '@LlvmMaxVersion@'

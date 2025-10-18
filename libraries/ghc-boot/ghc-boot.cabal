@@ -5,7 +5,7 @@ cabal-version:  3.0
 -- ghc-boot.cabal.
 
 name:           ghc-boot
-version:        @ProjectVersionMunged@
+version:        9.14
 license:        BSD-3-Clause
 license-file:   LICENSE
 category:       GHC
@@ -94,10 +94,10 @@ Library
 
     if flag(bootstrap)
       build-depends:
-              ghc-boot-th-next    == @ProjectVersionMunged@
+              ghc-boot-th-next    == 9.14
     else
       build-depends:
-              ghc-boot-th         == @ProjectVersionMunged@
+              ghc-boot-th         == 9.14
 
     if !os(windows)
         build-depends:

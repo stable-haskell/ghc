@@ -3,7 +3,7 @@ Cabal-Version: 3.0
 -- ./configure.  Make sure you are editing ghc-bin.cabal.in, not ghc-bin.cabal.
 
 Name: ghc-bin
-Version: @ProjectVersion@
+Version: 9.14
 Copyright: XXX
 -- License: XXX
 -- License-File: XXX
@@ -42,8 +42,8 @@ Executable ghc
                    filepath   >= 1.5 && < 1.6,
                    containers >= 0.5 && < 0.9,
                    transformers >= 0.5 && < 0.7,
-                   ghc-boot      == @ProjectVersionMunged@,
-                   ghc           == @ProjectVersionMunged@
+                   ghc-boot      == 9.14,
+                   ghc           == 9.14
 
     if impl(ghc > 9.12)
         -- we need to depend on the specific rts we want to link our
@@ -70,7 +70,7 @@ Executable ghc
         Build-depends:
             deepseq        >= 1.4 && < 1.6,
             ghc-prim       >= 0.5.0 && < 0.14,
-            ghci           == @ProjectVersionMunged@,
+            ghci           == 9.14,
             haskeline      == 0.8.*,
             exceptions     == 0.10.*,
             time           >= 1.8 && < 1.16

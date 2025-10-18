@@ -2,7 +2,7 @@
 -- ../../configure.  Make sure you are editing ghci.cabal.in, not ghci.cabal.
 
 name:           ghci
-version:        @ProjectVersionMunged@
+version:        9.14
 license:        BSD3
 license-file:   LICENSE
 category:       GHC
@@ -92,8 +92,8 @@ library
         containers       >= 0.5 && < 0.9,
         deepseq          >= 1.4 && < 1.6,
         filepath         >= 1.4 && < 1.6,
-        ghc-boot         == @ProjectVersionMunged@,
-        ghc-heap         == @ProjectVersionMunged@,
+        ghc-boot         == 9.14,
+        ghc-heap         == 9.14,
         transformers     >= 0.5 && < 0.7
 
     if impl(ghc > 9.10)
@@ -103,22 +103,22 @@ library
         -- so we must not depend on it in that case.
         --
         -- When available we depend on the in-tree version (matching
-        -- @ProjectVersionForLib@) and define HAVE_GHC_INTERNAL so that
+        -- 9.1400) and define HAVE_GHC_INTERNAL so that
         -- sources can import the non-deprecated modules from
         -- GHC.Internal.* instead of the legacy (deprecated) locations.
         Build-Depends:
-            ghc-internal      >= 9.1001.0 && <=@ProjectVersionForLib@.0
+            ghc-internal      >= 9.1001.0 && <=9.1400.0
         CPP-Options:          -DHAVE_GHC_INTERNAL
 
     if flag(bootstrap)
       build-depends:
-            ghc-boot-th-next  == @ProjectVersionMunged@
+            ghc-boot-th-next  == 9.14
     else
       build-depends:
-            ghc-boot-th       == @ProjectVersionMunged@
+            ghc-boot-th       == 9.14
 
     if !os(windows)
         Build-Depends: unix >= 2.7 && < 2.9
 
     if arch(wasm32)
-        build-depends: ghc-experimental == @ProjectVersionForLib@.0
+        build-depends: ghc-experimental == 9.1400.0

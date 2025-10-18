@@ -1,9 +1,5 @@
--- WARNING: ghc-boot-th@Suffix@.cabal is automatically generated from
--- ghc-boot-th@Suffix@.cabal.in by ../../configure.  Make sure you are editing
--- ghc-boot-th@Suffix@.cabal.in, not ghc-boot-th@Suffix@.cabal.
-
-name:           ghc-boot-th@Suffix@
-version:        @ProjectVersionMunged@
+name:           ghc-boot-th
+version:        9.14
 license:        BSD3
 license-file:   LICENSE
 category:       GHC
@@ -67,7 +63,7 @@ Library
             GHC.Internal.LanguageExtensions
             GHC.Internal.Lexeme
     else
-        hs-source-dirs: @SourceRoot@
+        hs-source-dirs: .
         build-depends:
             ghc-internal
         exposed-modules:

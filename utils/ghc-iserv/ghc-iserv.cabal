@@ -1,14 +1,6 @@
--- WARNING: ghc-iserv.cabal is automatically generated from ghc-iserv.cabal.in
--- by ../../configure.  Make sure you are editing ghc-iserv.cabal.in, not
--- ghc-iserv.cabal.
-
 Name: ghc-iserv
-Version: @ProjectVersion@
-Copyright: XXX
+Version: 9.14
 License: BSD3
--- XXX License-File: LICENSE
-Author: XXX
-Maintainer: XXX
 Synopsis: iserv allows GHC to delegate Template Haskell computations
 Description:
   GHC can be provided with a path to the iserv binary with
@@ -36,7 +28,7 @@ Executable ghc-iserv
                    bytestring >= 0.10 && < 0.13,
                    containers >= 0.5 && < 0.9,
                    deepseq    >= 1.4 && < 1.6,
-                   ghci       == @ProjectVersionMunged@
+                   ghci       == 9.14
 
     if os(windows)
         Cpp-Options: -DWINDOWS
