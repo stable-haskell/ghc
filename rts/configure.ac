@@ -520,7 +520,8 @@ rm -f external-symbols.flags
 AC_SUBST([EXTRA_LIBS],[` printf " %s " "$LIBS" | sed -E 's/ -l([[^ ]]*)/\1 /g' `])
 AS_IF(
   [test "`echo $EXTRA_LIBS | sed 's/ //'`" != ""],
-  [echo "extra-libraries: $EXTRA_LIBS" >> rts.buildinfo])
+  [echo "extra-libraries: $EXTRA_LIBS" >> rts.buildinfo
+echo "extra-libraries-static: $EXTRA_LIBS" >> rts.buildinfo])
 
 dnl --------------------------------------------------------------
 dnl Generate derived constants

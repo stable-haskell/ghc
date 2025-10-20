@@ -542,10 +542,16 @@ common rts-link-options
 
     if os(linux)
        extra-libraries: c
+       extra-libraries-static: c
     if flag(librt)
        extra-libraries: rt
+       extra-libraries-static: rt
     if os(windows)
        extra-libraries:
+          wsock32 gdi32 winmm
+          dbghelp
+          psapi
+       extra-libraries-static:
           wsock32 gdi32 winmm
           dbghelp
           psapi
@@ -553,12 +559,16 @@ common rts-link-options
        cc-options: -D_WIN32_WINNT=0x06010000
     if flag(need-atomic)
        extra-libraries: atomic
+       extra-libraries-static: atomic
     if flag(libbfd)
        extra-libraries: bfd iberty
+       extra-libraries-static: bfd iberty
     if flag(libdw)
        extra-libraries: elf dw
+       extra-libraries-static: elf dw
     if flag(libnuma)
        extra-libraries: numa
+       extra-libraries-static: numa
     if flag(libzstd)
        if flag(static-libzstd)
           if os(darwin)
@@ -567,6 +577,7 @@ common rts-link-options
              extra-libraries: :libzstd.a
        else
           extra-libraries: zstd
+       extra-libraries-static: zstd
 
     if os(osx)
       ld-options: "-Wl,-search_paths_first"
