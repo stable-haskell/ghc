@@ -944,9 +944,14 @@ _build/bindist/haskell-toolchain.tar.gz: _build/bindist/cabal.tar.gz _build/bind
 
 $(GHC1) $(GHC2): | hackage
 hackage: _build/packages/hackage.haskell.org/01-index.tar.gz
+
+# Always run cabal update. This makes sure that the index file won't go stale,
+# whatever index-state we set in the project file. Reproducibility is left to
+# index-state.
+.PHONY: _build/packages/hackage.haskell.org/01-index.tar.gz
 _build/packages/hackage.haskell.org/01-index.tar.gz: | $(CABAL)
 	@mkdir -p $(@D)
-	$(CABAL) $(CABAL_ARGS) update --index-state @1745256340
+	$(CABAL) $(CABAL_ARGS) update
 
 # booted depends on successful source preparation
 configure rts/configure libraries/ghc-internal/configure: configure.ac rts/configure.ac libraries/ghc-internal/configure.ac libraries/ghc-boot-th-next/.synth-stamp
