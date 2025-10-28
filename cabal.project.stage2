@@ -23,60 +23,46 @@ packages:
   libraries/ghc-boot-th
   libraries/ghc-heap
   libraries/ghci
-  libraries/stm
-  libraries/template-haskell
-  libraries/hpc
-  libraries/system-cxx-std-lib
-  libraries/array
-  libraries/binary
-  libraries/bytestring
-  libraries/containers/containers
-  libraries/deepseq
-  libraries/directory
-  libraries/exceptions
-  libraries/file-io
-  libraries/filepath
   libraries/libffi-clib
-  libraries/mtl
-  libraries/os-string
-  libraries/parsec
-  libraries/pretty
-  libraries/process
-  libraries/semaphore-compat
-  libraries/text
-  libraries/time
-  libraries/transformers
-  libraries/unix
-  libraries/xhtml
-  libraries/Win32
+  libraries/template-haskell
+  libraries/system-cxx-std-lib
 
   libraries/Cabal/Cabal-syntax
   libraries/Cabal/Cabal
-  https://hackage.haskell.org/package/alex-3.5.2.0/alex-3.5.2.0.tar.gz
-  https://hackage.haskell.org/package/happy-2.1.5/happy-2.1.5.tar.gz
-  https://hackage.haskell.org/package/happy-lib-2.1.5/happy-lib-2.1.5.tar.gz
 
   utils/genprimopcode
   utils/deriveConstants
   utils/ghc-pkg
-  utils/hsc2hs
   utils/unlit
   utils/ghc-toolchain
 
-  libraries/haskeline
-  libraries/terminfo
-  utils/hp2ps
-  utils/hpc
   utils/ghc-iserv
   utils/genapply
+  utils/hp2ps
   utils/runghc
 
 -- project-rts
 -- project-ghc
+
+extra-packages:
+  hpc,
+  hsc2hs,
+  terminfo,
+  xhtml
+
+-- hpc-bin is not published on Hackage
+source-repository-package
+  type: git
+  location: https://gitlab.haskell.org/hpc/hpc-bin.git
+  -- 14 Jun 2025
+  tag: dd43f7e139d7a4f4908d1e8af35a75939f763ef1
+
 benchmarks: False
 tests: False
 allow-boot-library-installs: True
-active-repositories: :none
+
+-- It is fair to assume packages have a conservative bound on base
+allow-newer: *:base
 
 constraints:
   -- we do not want to use the rts-headers from stage1
@@ -84,6 +70,8 @@ constraints:
   -- All build dependencies should be installed, i.e. from stage1.
   -- I cannot write build:* but ghc-internal is enough to do the job.
   , build:any.ghc-internal installed
+  -- Not sure why the solver is not picking the last version
+  , hpc == 0.7.0.2
 
 package *
   library-vanilla: True
@@ -149,9 +137,6 @@ program-options
 benchmarks: False
 tests: False
 allow-boot-library-installs: True
-active-repositories: :none
-
--- (removed duplicate global package * stanza; first one applies already)
 
 package rts-headers
   ghc-options: -no-rts
