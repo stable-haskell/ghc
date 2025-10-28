@@ -208,12 +208,13 @@ CONFIGURED_FILES := \
 # --- Main Targets ---
 all: _build/bindist # booted will depend on prepare-sources
 
+# Note: for some reason hsc2hs:exe:hsc2hs or hsc2:hsc2hs do not work
 STAGE_UTIL_TARGETS := \
 	deriveConstants:deriveConstants \
 	genapply:genapply \
 	genprimopcode:genprimopcode \
 	ghc-pkg:ghc-pkg \
-	hsc2hs:hsc2hs \
+	hsc2hs \
 	rts-headers:rts-headers \
 	unlit:unlit
 

@@ -13,24 +13,14 @@ packages:
   -- other packages.
   ghc
   compiler
-  libraries/directory
-  libraries/file-io
-  libraries/filepath
   libraries/ghc-platform
   libraries/ghc-boot
   libraries/ghc-boot-th-next
   libraries/ghc-heap
   libraries/ghci
-  libraries/os-string
-  libraries/process
-  libraries/semaphore-compat
---  libraries/time
-  libraries/unix
-  libraries/Win32
   libraries/Cabal/Cabal-syntax
   libraries/Cabal/Cabal
   utils/ghc-pkg
-  utils/hsc2hs
   utils/unlit
   utils/genprimopcode
   utils/genapply
@@ -38,6 +28,7 @@ packages:
   utils/ghc-toolchain
   utils/ghc-toolchain/exe
 
+extra-packages: hsc2hs
 
 benchmarks: False
 tests: False
