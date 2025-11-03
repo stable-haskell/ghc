@@ -607,6 +607,9 @@ common rts-global-build-flags
     if flag(thread-sanitizer)
       cc-options: -fsanitize=thread
       ld-options: -fsanitize=thread
+    if !flag(use-system-libffi)
+       ghc-options: -optc-DINTERNAL_LIBFFI
+       cpp-options: -DINTERNAL_LIBFFI
 
 common rts-debug-flags
     ghc-options: -optc-DDEBUG
@@ -717,6 +720,12 @@ library
       autogen-cmm-sources:
         AutoApply.cmm
         AutoApply_V16.cmm
+
+      if flag(use-system-libffi)
+         extra-libraries: ffi
+         extra-libraries-static: ffi
+      else
+         build-depends: libffi-clib
 
       if arch(x86_64)
         cmm-sources:
