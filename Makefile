@@ -978,13 +978,18 @@ configure rts/configure libraries/ghc-internal/configure driver/ghci/ghci-wrappe
 	@echo "::endgroup::"
 
 # --- Clean Targets ---
-clean:
+clean-cabal: clean-stage0
+
+clean-stage0:
 	@echo "::group::Cleaning build artifacts..."
-	rm -rf _build
+	rm -rf _build/stage0
 	rm -f libraries/ghc-boot-th-next/ghc-boot-th-next.cabal
 	rm -f libraries/ghc-boot-th-next/ghc-boot-th-next.cabal.in
 	rm -f libraries/ghc-boot-th-next/.synth-stamp
 	@echo "::endgroup::"
+
+clean: clean-stage1 clean-stage2 clean-stage3
+	@echo "Not removing stage0 (cabal), use clean-stage0 to remove cabal too." 
 
 clean-stage1:
 	@echo "::group::Cleaning stage1 build artifacts..."
