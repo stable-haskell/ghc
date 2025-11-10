@@ -3,8 +3,6 @@ name: Build and release
 on:
   push:
     tags:
-      - 'v*'
-      - 'cabal-install-*'
   pull_request:
     types: [opened, synchronize, reopened, labeled]
 #    branches:
@@ -15,6 +13,7 @@ on:
 
 permissions:
   pull-requests: read
+  contents: write
 
 jobs:
   release-workflow:
@@ -39,7 +38,7 @@ jobs:
           path: ./out
 
       - name: Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           draft: true
           files: |
