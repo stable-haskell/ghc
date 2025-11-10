@@ -2,9 +2,7 @@
 AC_PREREQ([2.69])
 AC_INIT([ghc-builder], [0.1.0], [your-email@example.com])
 AC_CONFIG_SRCDIR([.]) # A representative .in file
-#AC_CONFIG_AUX_DIR([build-aux]) # Recommended place for config.guess, config.sub
 AC_CONFIG_MACRO_DIR([m4])      # For any custom m4 macros
-# AM_INIT_AUTOMAKE([-Wall -Werror foreign]) # Using some automake conventions
 
 # --- Define GHC Build Options ---
 # Usage: ./configure ProjectVersion=X.Y ...
@@ -79,23 +77,23 @@ AC_SUBST([LlvmMaxVersion])
 # --- Files to generate ---
 # config.status will create these files by substituting @VAR@ placeholders.
 AC_CONFIG_FILES([
-    ghc/ghc-bin.cabal:ghc/ghc-bin.cabal.in
-    compiler/ghc.cabal:compiler/ghc.cabal.in
-    compiler/GHC/CmmToLlvm/Version/Bounds.hs:compiler/GHC/CmmToLlvm/Version/Bounds.hs.in
-    libraries/ghc-boot/ghc-boot.cabal:libraries/ghc-boot/ghc-boot.cabal.in
-    libraries/ghc-boot-th/ghc-boot-th.cabal:libraries/ghc-boot-th/ghc-boot-th.cabal.in
-    libraries/ghc-boot-th-next/ghc-boot-th-next.cabal:libraries/ghc-boot-th-next/ghc-boot-th-next.cabal.in
-    libraries/ghc-heap/ghc-heap.cabal:libraries/ghc-heap/ghc-heap.cabal.in
-    libraries/template-haskell/template-haskell.cabal:libraries/template-haskell/template-haskell.cabal.in
-    libraries/ghci/ghci.cabal:libraries/ghci/ghci.cabal.in
-    utils/ghc-pkg/ghc-pkg.cabal:utils/ghc-pkg/ghc-pkg.cabal.in
-    utils/ghc-iserv/ghc-iserv.cabal:utils/ghc-iserv/ghc-iserv.cabal.in
-    utils/runghc/runghc.cabal:utils/runghc/runghc.cabal.in
-    libraries/ghc-internal/ghc-internal.cabal:libraries/ghc-internal/ghc-internal.cabal.in
-    libraries/ghc-experimental/ghc-experimental.cabal:libraries/ghc-experimental/ghc-experimental.cabal.in
-    libraries/base/base.cabal:libraries/base/base.cabal.in
-    rts/include/ghcversion.h:rts/include/ghcversion.h.in
-    cabal.project.stage2.settings:cabal.project.stage2.settings.in
+    ghc/ghc-bin.cabal
+    compiler/ghc.cabal
+    compiler/GHC/CmmToLlvm/Version/Bounds.hs
+    libraries/ghc-boot/ghc-boot.cabal
+    libraries/ghc-boot-th/ghc-boot-th.cabal
+    libraries/ghc-boot-th-next/ghc-boot-th-next.cabal
+    libraries/ghc-heap/ghc-heap.cabal
+    libraries/template-haskell/template-haskell.cabal
+    libraries/ghci/ghci.cabal
+    utils/ghc-pkg/ghc-pkg.cabal
+    utils/ghc-iserv/ghc-iserv.cabal
+    utils/runghc/runghc.cabal
+    libraries/ghc-internal/ghc-internal.cabal
+    libraries/ghc-experimental/ghc-experimental.cabal
+    libraries/base/base.cabal
+    rts/include/ghcversion.h
+    cabal.project.stage2.settings
 ])
 
 AC_OUTPUT
