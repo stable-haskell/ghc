@@ -153,7 +153,9 @@ jobs:
           mv cabal.tar.gz cabal-$(bin/cabal --numeric-version)-${ARTIFACT}.tar.gz
           if [ -e "haskell-toolchain.tar.gz" ] ; then
             mv haskell-toolchain.tar.gz haskell-toolchain-${ARTIFACT}.tar.gz
+            mv ghc-javascript-unknown-ghcjs.tar.gz ghc-javascript-unknown-ghcjs-$(bin/ghc --numeric-version)-${ARTIFACT}.tar.gz
           fi
+          mv tests.tar.gz tests-${ARTIFACT}.tar.gz
         env:
           ARTIFACT: ${{ matrix.platform.ARTIFACT }}
 
@@ -195,13 +197,13 @@ jobs:
         uses: docker://arm64v8/debian:11
         name: Run build (aarch64 linux)
         with:
-          args: sh -c "apt-get update && apt-get install -y curl bash git ${{ needs.tool-output.outputs.apt_tools_build }} && export PATH=$HOME/.ghcup/bin:$PATH && curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org | sh && make CABAL=$PWD/_build/stage0/bin/cabal _build/bindist/ghc.tar.gz _build/bindist/cabal.tar.gz _build/bindist/tests.tar.gz"
+          args: sh -c "apt-get update && apt-get install -y curl bash git ${{ needs.tool-output.outputs.apt_tools_build }} && export PATH=$HOME/.ghcup/bin:$PATH && curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org | sh && make CABAL=$PWD/_build/stage0/bin/cabal _build/bindist/ghc.tar.gz _build/bindist/cabal.tar.gz _build/bindist/tests.tar.gz && cd _build/bindist && mv ghc.tar.gz ghc-$(bin/ghc --numeric-version)-${{ matrix.platform.ARTIFACT }}.tar.gz && mv cabal.tar.gz cabal-$(bin/cabal --numeric-version)-${{ matrix.platform.ARTIFACT }}.tar.gz && mv tests.tar.gz tests-${{ matrix.platform.ARTIFACT }}.tar.gz"
 
       - if: matrix.platform.ARTIFACT == 'aarch64-linux-unknown'
         uses: docker://arm64v8/alpine:3.20
         name: Run build (aarch64 linux alpine)
         with:
-          args: sh -c "apk update && apk add curl bash git ${{ needs.tool-output.outputs.apk_tools_build }} && export PATH=$HOME/.ghcup/bin:$PATH && curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org | sh && make CABAL=$PWD/_build/stage0/bin/cabal _build/bindist/ghc.tar.gz _build/bindist/cabal.tar.gz _build/bindist/tests.tar.gz"
+          args: sh -c "apk update && apk add curl bash git ${{ needs.tool-output.outputs.apk_tools_build }} && export PATH=$HOME/.ghcup/bin:$PATH && curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org | sh && make CABAL=$PWD/_build/stage0/bin/cabal _build/bindist/ghc.tar.gz _build/bindist/cabal.tar.gz _build/bindist/tests.tar.gz && cd _build/bindist && mv ghc.tar.gz ghc-$(bin/ghc --numeric-version)-${{ matrix.platform.ARTIFACT }}.tar.gz && mv cabal.tar.gz cabal-$(bin/cabal --numeric-version)-${{ matrix.platform.ARTIFACT }}.tar.gz && mv tests.tar.gz tests-${{ matrix.platform.ARTIFACT }}.tar.gz"
 
       - if: always()
         name: Upload artifact
@@ -383,6 +385,8 @@ jobs:
           mv ghc.tar.gz ghc-$(bin/ghc --numeric-version)-${{ env.ARTIFACT }}.tar.gz
           mv cabal.tar.gz cabal-$(bin/cabal --numeric-version)-${{ env.ARTIFACT }}.tar.gz
           mv haskell-toolchain.tar.gz haskell-toolchain-${{ env.ARTIFACT }}.tar.gz
+          mv ghc-javascript-unknown-ghcjs.tar.gz ghc-javascript-unknown-ghcjs-$(bin/ghc --numeric-version)-${{ env.ARTIFACT }}.tar.gz
+          mv tests.tar.gz tests-${{ env.ARTIFACT }}.tar.gz
         env:
           EXTRA_LIB_DIRS: /usr/local/lib
           EXTRA_INCLUDE_DIRS: /usr/local/include
