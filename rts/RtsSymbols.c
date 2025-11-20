@@ -30,7 +30,7 @@
 #include <shfolder.h> /* SHGetFolderPathW */
 #include "IOManager.h"
 #include "win32/AsyncWinIO.h"
-#include "win32/AsyncMIO.h"
+#include "fs.h"
 #endif
 
 #if defined(openbsd_HOST_OS)
@@ -158,6 +158,9 @@ extern char **environ;
  * https://docs.microsoft.com/en-us/cpp/porting/visual-cpp-change-history-2003-2015?view=vs-2017#stdioh-and-conioh
  */
 #define RTS_MINGW_ONLY_SYMBOLS                           \
+      SymI_HasProto(_assert)                             \
+      SymI_HasProto(__rts_swopen)                        \
+      SymI_HasProto(__rts_create_device_name)            \
       SymI_HasProto(stg_asyncReadzh)                     \
       SymI_HasProto(stg_asyncWritezh)                    \
       SymI_HasProto(stg_asyncDoProczh)                   \
@@ -169,7 +172,6 @@ extern char **environ;
       SymI_HasProto(__stdio_common_vswprintf_s)          \
       SymI_HasProto(__stdio_common_vswprintf)            \
       SymI_HasProto(_errno)                              \
-      SymI_HasProto(rts_EINTR)                           \
       /* see Note [Symbols for MinGW's printf] */        \
       SymI_HasProto(_lock_file)                          \
       SymI_HasProto(_unlock_file)                        \
@@ -475,16 +477,7 @@ extern char **environ;
       SymI_HasDataProto(stg_ret_d_info)                                     \
       SymI_HasDataProto(stg_ret_l_info)                                     \
       SymI_HasDataProto(stg_ret_t_info)                                     \
-      SymI_HasDataProto(stg_ctoi_t_info)                                    \
-      SymI_HasDataProto(stg_ctoi_t0_info)                                   \
-      SymI_HasDataProto(stg_ctoi_t1_info)                                   \
-      SymI_HasDataProto(stg_ctoi_t2_info)                                   \
-      SymI_HasDataProto(stg_ctoi_t3_info)                                   \
-      SymI_HasDataProto(stg_ctoi_t4_info)                                   \
-      SymI_HasDataProto(stg_ctoi_t5_info)                                   \
-      SymI_HasDataProto(stg_ctoi_t6_info)                                   \
-      SymI_HasDataProto(stg_ctoi_t7_info)                                   \
-      SymI_HasDataProto(stg_ctoi_t8_info)                                   \
+      SymI_HasDataProto(stg_ctoi_t)                                         \
       SymI_HasDataProto(stg_primcall_info)                                  \
       SymI_HasDataProto(stg_gc_prim_p)                                      \
       SymI_HasDataProto(stg_gc_prim_pp)                                     \
