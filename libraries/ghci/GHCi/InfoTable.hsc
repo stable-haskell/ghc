@@ -19,7 +19,9 @@ import Foreign
 import Foreign.C
 import GHC.Ptr
 import GHC.Exts
+#ifndef BOOTSTRAPPING
 import GHC.Exts.Heap
+#endif
 import Data.ByteString (ByteString)
 import Control.Monad.Fail
 import qualified Data.ByteString as BS
@@ -36,11 +38,16 @@ mkConInfoTable
    -> Int     -- constr tag
    -> Int     -- pointer tag
    -> ByteString  -- con desc
+#ifndef BOOTSTRAPPING
    -> IO (Ptr StgInfoTable)
+#else
+   -> IO (Ptr ())
+#endif
       -- resulting info table is allocated with allocateExecPage(), and
       -- should be freed with freeExecPage().
 
 mkConInfoTable tables_next_to_code ptr_words nonptr_words tag ptrtag con_desc = do
+#ifndef BOOTSTRAPPING
   let entry_addr = interpConstrEntry !! ptrtag
   code' <- if tables_next_to_code
     then Just <$> mkJumpToAddr entry_addr
@@ -57,8 +64,11 @@ mkConInfoTable tables_next_to_code ptr_words nonptr_words tag ptrtag con_desc = 
                  code  = code'
               }
   castFunPtrToPtr <$> newExecConItbl tables_next_to_code itbl con_desc
+#else
+  return nullPtr
+#endif
 
-
+#ifndef BOOTSTRAPPING
 -- -----------------------------------------------------------------------------
 -- Building machine code fragments for a constructor's entry code
 
@@ -382,3 +392,4 @@ wORD_SIZE = (#const SIZEOF_HSINT)
 
 conInfoTableSizeB :: Int
 conInfoTableSizeB = wORD_SIZE + itblSize
+#endif
