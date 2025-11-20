@@ -45,6 +45,9 @@ packages:
   utils/hp2ps
   utils/runghc
   utils/unlit
+  utils/haddock
+  utils/haddock/haddock-api
+  utils/haddock/haddock-library
 
   -- The following are packages available on Hackage but included as submodules
   libraries/array
@@ -99,13 +102,23 @@ constraints:
 -- Package level configuration
 --
 
+package haddock-api
+  flags: +in-ghc-tree
+
+if !os(windows)
+  packages:
+    libraries/terminfo
+
 package *
   library-vanilla: True
-  library-for-ghci: True
   -- shared/executable-dynamic now controlled by Makefile (DYNAMIC variable)
   -- so we do not pin them here; default (static) remains when DYNAMIC=0.
   executable-profiling: False
   executable-static: False
+
+if !os(windows)
+  package *
+    library-for-ghci: True
 
 import: cabal.project.rts
 
@@ -148,7 +161,7 @@ package ghc
   flags: +build-tool-depends +internal-interpreter
 
 package ghc-bin
-  flags: +internal-interpreter -threaded
+  flags: +internal-interpreter
 
 package ghci
   flags: +internal-interpreter
