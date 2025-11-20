@@ -22,17 +22,27 @@ on:
         default: true
 
 env:
+  # toolchain
   GHC_VERSION: ${{ inputs.ghc }}
   GHC_TARGETS: ${{ inputs.ghc_targets }}
   CABAL_VERSION: ${{ inputs.cabal }}
+  # ghcup
   BOOTSTRAP_HASKELL_NONINTERACTIVE: 1
   BOOTSTRAP_HASKELL_GHC_VERSION: ${{ inputs.ghc }}
   BOOTSTRAP_HASKELL_CABAL_VERSION: ${{ inputs.cabal }}
   BOOTSTRAP_HASKELL_INSTALL_NO_STACK: 1
+  # debian/ubuntu
   DEBIAN_FRONTEND: noninteractive
   TZ: Asia/Singapore
+  # cross
   EMSDK_VERSION: 3.1.74
+  # make
   MAKE_VERSION: 4.4
+  MAKE: make
+  # windows
+  GHCUP_MSYS2_ENV: CLANG64
+  MSYSTEM: CLANG64
+  CHERE_INVOKING: 1
 
 jobs:
   tool-output:
@@ -66,9 +76,6 @@ jobs:
     name: Build linux binaries
     runs-on: ubuntu-latest
     needs: ["tool-output"]
-    env:
-      TARBALL_EXT: tar.xz
-      ARCH: 64
     strategy:
       fail-fast: false
       matrix:
@@ -92,7 +99,8 @@ jobs:
         run: |
           ${{ matrix.platform.installCmd }} curl bash git ${{ matrix.platform.toolRequirements }}
 
-      - name: Install GHCup
+      - id: ghcup
+        name: Install GHCup
         uses: haskell/ghcup-setup@v1
         with:
           cabal: ${{ env.CABAL_VERSION }}
@@ -103,18 +111,22 @@ jobs:
           ref: ${{ matrix.branch }}
           submodules: recursive
 
-      - if: matrix.platform.image == 'rockylinux:8'
+      - uses: nick-fields/retry@v3
+        if: matrix.platform.image == 'rockylinux:8'
         name: Install latest make
-        run: |
-          set -eux
-
-          curl -O -L https://ftp.gnu.org/gnu/make/make-${{ env.MAKE_VERSION }}.tar.gz
-          tar xf make-${{ env.MAKE_VERSION }}.tar.gz
-          cd make-${{ env.MAKE_VERSION }}
-          ./configure
-          make install
-          ln -s make /usr/local/bin/gmake
-          echo "/usr/local/bin" >> $GITHUB_PATH
+        with:
+          timeout_minutes: 15
+          max_attempts: 3
+          retry_on: error
+          command: |
+            set -eux
+            curl -O -L https://ftp.gnu.org/gnu/make/make-${{ env.MAKE_VERSION }}.tar.gz
+            tar xf make-${{ env.MAKE_VERSION }}.tar.gz
+            cd make-${{ env.MAKE_VERSION }}
+            ./configure
+            make install
+            ln -s make /usr/local/bin/gmake
+            echo "/usr/local/bin" >> $GITHUB_PATH
 
       - name: Add extra-lib-dirs
         run: &extra-lib-dirs |
@@ -137,6 +149,16 @@ jobs:
         run: &build |
           set -eux
 
+          # On windows, we use msys2 shell, which does not by default inherit the windows PATHs.
+          # So although the ghcup action sets the PATH, it's not visible. We don't want to use
+          # 'pathtype: inherit', because it pollutes the msys2 paths, possibly leading to linking
+          # or other issues. So we just hardcode it here.
+          if [ ${{ runner.os }} = "Windows" ] ; then
+            export PATH="/c/ghcup/bin:$PATH"
+            make --version
+            which make
+          fi
+
           cabal update
           if [ -e "emsdk" ] ; then
             git config --system --add safe.directory $GITHUB_WORKSPACE
@@ -144,9 +166,10 @@ jobs:
             cd emsdk
             source ./emsdk_env.sh
             cd ..
-            gmake CABAL=$PWD/_build/stage0/bin/cabal _build/bindist/haskell-toolchain.tar.gz _build/bindist/tests.tar.gz
+            ${{ env.MAKE }} _build/bindist/haskell-toolchain.tar.gz _build/bindist/tests.tar.gz
           else
-            gmake CABAL=$PWD/_build/stage0/bin/cabal _build/bindist/ghc.tar.gz _build/bindist/cabal.tar.gz _build/bindist/tests.tar.gz
+            echo $PWD
+            ${{ env.MAKE }} --debug _build/bindist/ghc.tar.gz _build/bindist/cabal.tar.gz _build/bindist/tests.tar.gz
           fi
           cd _build/bindist
           mv ghc.tar.gz ghc-$(bin/ghc --numeric-version)-${ARTIFACT}.tar.gz
@@ -173,18 +196,13 @@ jobs:
     name: Build ARM binary
     needs: ["tool-output"]
     runs-on: ubuntu-22.04-arm
-    env:
-      TARBALL_EXT: tar.xz
-      ARCH: ARM64
     strategy:
       fail-fast: false
       matrix:
         branch: ${{ fromJSON(inputs.branches) }}
-        platform: [ { ARCH: "ARM64"
-                    , ARTIFACT: "aarch64-linux-deb11"
+        platform: [ { ARTIFACT: "aarch64-linux-deb11"
                     },
-                    { ARCH: "ARM64"
-                    , ARTIFACT: "aarch64-linux-unknown"
+                    { ARTIFACT: "aarch64-linux-unknown"
                     }
                   ]
     steps:
@@ -219,10 +237,8 @@ jobs:
     name: Build binary (Mac x86_64)
     runs-on: macOS-13
     env:
-      MACOSX_DEPLOYMENT_TARGET: 10.13
       ARTIFACT: "x86_64-apple-darwin"
-      ARCH: 64
-      TARBALL_EXT: tar.xz
+      MACOSX_DEPLOYMENT_TARGET: 10.13
     strategy:
       fail-fast: false
       matrix:
@@ -233,7 +249,8 @@ jobs:
           ref: ${{ matrix.branch }}
           submodules: recursive
 
-      - name: Install GHCup
+      - id: ghcup
+        name: Install GHCup
         uses: haskell/ghcup-setup@v1
         with:
           cabal: ${{ env.CABAL_VERSION }}
@@ -269,10 +286,7 @@ jobs:
     name: Build binary (Mac aarch64)
     runs-on: macos-latest
     env:
-      MACOSX_DEPLOYMENT_TARGET: 10.13
       ARTIFACT: "aarch64-apple-darwin"
-      ARCH: ARM64
-      TARBALL_EXT: tar.xz
       HOMEBREW_CHANGE_ARCH_TO_ARM: 1
       GHCUP_INSTALL_BASE_PREFIX: ${{ github.workspace }}
     strategy:
@@ -285,7 +299,8 @@ jobs:
           ref: ${{ matrix.branch }}
           submodules: recursive
 
-      - name: Install GHCup
+      - id: ghcup
+        name: Install GHCup
         uses: haskell/ghcup-setup@v1
         with:
           cabal: ${{ env.CABAL_VERSION }}
@@ -317,13 +332,59 @@ jobs:
           path: |
             ./_build/bindist/*.tar.gz
 
+  build-windows:
+    name: Build binary (Windows)
+    runs-on: windows-latest
+    env:
+      ARTIFACT: "x86_64-mingw64"
+      CABAL_DIR: "C:\\Users\\runneradmin\\AppData\\Roaming\\cabal"
+      GHCUP_INSTALL_BASE_PREFIX: "C:\\"
+    strategy:
+      fail-fast: false
+      matrix:
+        branch: ${{ fromJSON(inputs.branches) }}
+    defaults:
+      run:
+        shell: 'C:/msys64/usr/bin/bash.exe --login -e {0}'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.branch }}
+          submodules: recursive
+
+      - name: Install msys2 dependencies
+        run: &msys2-install |
+          pacman --noconfirm -S --needed --overwrite '*' git vim winpty git tar bsdtar unzip binutils autoconf make xz curl libtool automake p7zip patch ca-certificates python3 zip mingw-w64-clang-x86_64-toolchain mingw-w64-clang-x86_64-python-sphinx mingw-w64-clang-x86_64-python-requests mingw-w64-clang-x86_64-tools-git mingw-w64-clang-x86_64-ghostscript tar gzip
+
+      - id: ghcup
+        name: Install GHCup
+        uses: haskell/ghcup-setup@v1
+        with:
+          cabal: ${{ env.CABAL_VERSION }}
+          ghc: ${{ env.GHC_VERSION }}
+        env:
+          GHCUP_MSYS2: 'C:/msys64'
+
+      - name: Run build
+        run: *build
+        env:
+          MAKE: make
+
+      - if: always()
+        name: Upload artifact
+        uses: ./.github/actions/upload
+        with:
+          if-no-files-found: error
+          retention-days: 2
+          name: artifacts-${{ env.ARTIFACT }}-${{ matrix.branch }}
+          path: |
+            ./_build/bindist/*.tar.gz
+
   build-freebsd-x86_64:
     name: Build FreeBSD x86_64
     runs-on: [self-hosted, FreeBSD, X64]
     env:
       ARTIFACT: "x86_64-portbld-freebsd"
-      ARCH: 64
-      TARBALL_EXT: tar.xz
       RUNNER_OS: FreeBSD
       CABAL_DIR: ${{ github.workspace }}/.cabal
       GHCUP_INSTALL_BASE_PREFIX: ${{ github.workspace }}
@@ -337,7 +398,8 @@ jobs:
           ref: ${{ matrix.branch }}
           submodules: recursive
 
-      - name: Install GHCup
+      - id: ghcup
+        name: Install GHCup
         uses: haskell/ghcup-setup@v1
         with:
           cabal: ${{ env.CABAL_VERSION }}
@@ -407,9 +469,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: ["tool-output", "build-linux"]
     if: ${{ inputs.test }}
-    env:
-      TARBALL_EXT: tar.xz
-      ARCH: 64
     strategy:
       fail-fast: false
       matrix:
@@ -506,12 +565,6 @@ jobs:
       - name: git clone fix
         run: git config --system --add safe.directory $GITHUB_WORKSPACE
 
-      - name: Install GHCup
-        uses: haskell/ghcup-setup@v1
-        with:
-          cabal: ${{ env.CABAL_VERSION }}
-          ghc: ${{ env.GHC_VERSION }}
-
       - uses: actions/checkout@v4
         with:
           ref: ${{ matrix.branch }}
@@ -521,33 +574,46 @@ jobs:
           name: artifacts-${{ matrix.platform.ARTIFACT }}-${{ matrix.branch }}
           path: ./_build/bindist
 
+      - id: pwd_output
+        run: |
+          echo pwd="$(pwd)" >> "$GITHUB_OUTPUT"
+
       - name: Run test
         run: &test |
+          # On windows, we use msys2 shell, which does not by default inherit the windows PATHs.
+          # So although the ghcup action sets the PATH, it's not visible. We don't want to use
+          # 'pathtype: inherit', because it pollutes the msys2 paths, possibly leading to linking
+          # or other issues. So we just hardcode it here.
+          if [ ${{ runner.os }} = "Windows" ] ; then
+            export PATH="/c/ghcup/bin:$PATH"
+          fi
+
           rm -rf .git
+          (
           cd _build/bindist
           for file in *.tar.gz; do tar xzf "$file"; done
-          cd testsuite
-          PATH=$GITHUB_WORKSPACE/_build/bindist/bin:$PATH make
+          )
+          PATH=$(pwd)/_build/bindist/bin:$PATH ${{ env.MAKE }} -C _build/bindist/testsuite
         env:
           THREADS: 4
+          TEST_HC: ${{ steps.pwd_output.outputs.pwd }}/_build/bindist/bin/ghc
+          GHC_PKG: ${{ steps.pwd_output.outputs.pwd }}/_build/bindist/bin/ghc-pkg
+          HP2PS_ABS: ${{ steps.pwd_output.outputs.pwd }}/_build/bindist/bin/hp2ps
+          HPC: ${{ steps.pwd_output.outputs.pwd }}/_build/bindist/bin/hpc
+          RUNGHC: ${{ steps.pwd_output.outputs.pwd }}/_build/bindist/bin/runghc
 
   test-arm:
     name: Test ARM binary
     runs-on: ubuntu-22.04-arm
     needs: ["tool-output", "build-arm"]
     if: ${{ inputs.test }}
-    env:
-      TARBALL_EXT: tar.xz
-      ARCH: ARM64
     strategy:
       fail-fast: false
       matrix:
         branch: ${{ fromJSON(inputs.branches) }}
-        platform: [ { ARCH: "ARM64"
-                    , ARTIFACT: "aarch64-linux-deb11"
+        platform: [ { ARTIFACT: "aarch64-linux-deb11"
                     },
-                    { ARCH: "ARM64"
-                    , ARTIFACT: "aarch64-linux-unknown"
+                    { ARTIFACT: "aarch64-linux-unknown"
                     }
                   ]
     steps:
@@ -564,13 +630,13 @@ jobs:
         uses: docker://arm64v8/debian:11
         name: Run build (aarch64 linux)
         with:
-          args: sh -c "apt-get update && apt-get install -y curl bash git ${{ needs.tool-output.outputs.apt_tools_test }} && git config --system --add safe.directory $GITHUB_WORKSPACE && export PATH=$HOME/.ghcup/bin:$PATH && curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org | sh && rm -rf .git && cd _build/bindist && for file in *.tar.gz; do tar xzf $file; done && cd testsuite && PATH=$GITHUB_WORKSPACE/_build/bindist/bin:$PATH make"
+          args: sh -c "apt-get update && apt-get install -y curl bash git ${{ needs.tool-output.outputs.apt_tools_test }} && git config --system --add safe.directory $GITHUB_WORKSPACE && rm -rf .git && cd _build/bindist && for file in *.tar.gz; do tar xzf $file; done && cd testsuite && PATH=$GITHUB_WORKSPACE/_build/bindist/bin:$PATH make"
 
       - if: matrix.platform.ARTIFACT == 'aarch64-linux-unknown'
         uses: docker://arm64v8/alpine:3.20
         name: Run build (aarch64 linux alpine)
         with:
-          args: sh -c "apk update && apk add curl bash git ${{ needs.tool-output.outputs.apk_tools_test }} && git config --system --add safe.directory $GITHUB_WORKSPACE && export PATH=$HOME/.ghcup/bin:$PATH && curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org | sh && rm -rf .git && cd _build/bindist && for file in *.tar.gz; do tar xzf $file; done && cd testsuite && PATH=$GITHUB_WORKSPACE/_build/bindist/bin:$PATH make"
+          args: sh -c "apk update && apk add curl bash git ${{ needs.tool-output.outputs.apk_tools_test }} && git config --system --add safe.directory $GITHUB_WORKSPACE && rm -rf .git && cd _build/bindist && for file in *.tar.gz; do tar xzf $file; done && cd testsuite && PATH=$GITHUB_WORKSPACE/_build/bindist/bin:$PATH make"
 
   test-mac-x86_64:
     name: Test binary (Mac x86_64)
@@ -578,21 +644,12 @@ jobs:
     needs: ["build-mac-x86_64"]
     if: ${{ inputs.test }}
     env:
-      MACOSX_DEPLOYMENT_TARGET: 10.13
       ARTIFACT: "x86_64-apple-darwin"
-      ARCH: 64
-      TARBALL_EXT: tar.xz
     strategy:
       fail-fast: false
       matrix:
         branch: ${{ fromJSON(inputs.branches) }}
     steps:
-      - name: Install GHCup
-        uses: haskell/ghcup-setup@v1
-        with:
-          cabal: ${{ env.CABAL_VERSION }}
-          ghc: ${{ env.GHC_VERSION }}
-
       - uses: actions/checkout@v4
         with:
           ref: ${{ matrix.branch }}
@@ -613,23 +670,13 @@ jobs:
     needs: ["build-mac-aarch64"]
     if: ${{ inputs.test }}
     env:
-      MACOSX_DEPLOYMENT_TARGET: 10.13
       ARTIFACT: "aarch64-apple-darwin"
-      ARCH: ARM64
-      TARBALL_EXT: tar.xz
       HOMEBREW_CHANGE_ARCH_TO_ARM: 1
-      GHCUP_INSTALL_BASE_PREFIX: ${{ github.workspace }}
     strategy:
       fail-fast: false
       matrix:
         branch: ${{ fromJSON(inputs.branches) }}
     steps:
-      - name: Install GHCup
-        uses: haskell/ghcup-setup@v1
-        with:
-          cabal: ${{ env.CABAL_VERSION }}
-          ghc: ${{ env.GHC_VERSION }}
-
       - uses: actions/checkout@v4
         with:
           ref: ${{ matrix.branch }}
@@ -645,6 +692,40 @@ jobs:
         env:
           THREADS: 4
 
+  test-windows:
+    name: Test binary (Windows)
+    runs-on: windows-latest
+    needs: ["build-windows"]
+    if: ${{ inputs.test }}
+    env:
+      ARTIFACT: "x86_64-mingw64"
+    strategy:
+      fail-fast: false
+      matrix:
+        branch: ${{ fromJSON(inputs.branches) }}
+    defaults:
+      run:
+        shell: 'C:/msys64/usr/bin/bash.exe --login -e {0}'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.branch }}
+          submodules: recursive
+
+      - name: Install msys2 dependencies
+        run: *msys2-install
+
+      - uses: ./.github/actions/download
+        with:
+          name: artifacts-${{ env.ARTIFACT }}-${{ matrix.branch }}
+          path: ./_build/bindist
+
+      - name: Run test
+        run: *test
+        env:
+          THREADS: 4
+          MAKE: make
+
   test-freebsd-x86_64:
     name: Test FreeBSD x86_64
     runs-on: [self-hosted, FreeBSD, X64]
@@ -652,22 +733,12 @@ jobs:
     if: ${{ inputs.test }}
     env:
       ARTIFACT: "x86_64-portbld-freebsd"
-      ARCH: 64
-      TARBALL_EXT: tar.xz
       RUNNER_OS: FreeBSD
-      CABAL_DIR: ${{ github.workspace }}/.cabal
-      GHCUP_INSTALL_BASE_PREFIX: ${{ github.workspace }}
     strategy:
       fail-fast: false
       matrix:
         branch: ${{ fromJSON(inputs.branches) }}
     steps:
-      - name: Install GHCup
-        uses: haskell/ghcup-setup@v1
-        with:
-          cabal: ${{ env.CABAL_VERSION }}
-          ghc: ${{ env.GHC_VERSION }}
-
       - uses: actions/checkout@v4
         with:
           ref: ${{ matrix.branch }}
@@ -693,6 +764,6 @@ jobs:
           export LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH
           PATH=$GITHUB_WORKSPACE/_build/bindist/bin:$PATH gmake
         env:
+          MAKE: gmake
           THREADS: 8
-          EXTRA_HC_OPTS: "-optl-L/usr/local/lib -optc-I/usr/local/include"
 
