@@ -104,6 +104,14 @@ SED ?= sed
 
 LD ?= ld
 
+ifeq ($(OS),Windows_NT)
+CC := clang.exe
+CXX := clang++.exe
+CYGPATH = cygpath --unix -f -
+else
+CYGPATH = echo
+endif
+
 EMCC ?= emcc
 EMCXX ?= em++
 EMAR ?= emar
@@ -251,7 +259,6 @@ STAGE2_UTIL_TARGETS := \
 	ghc-toolchain:ghc-toolchain \
 	integer-gmp:integer-gmp \
 	system-cxx-std-lib:system-cxx-std-lib \
-	terminfo:terminfo \
 	xhtml:xhtml
 
 # These things should be built on demand.
@@ -560,7 +567,7 @@ _build/stage0/bin/cabal:
 	@echo "::group::Building Cabal..."
 	@mkdir -p _build/stage0/bin _build/logs
 	cabal build $(BUILD_ARGS) cabal-install:exe:cabal
-	cp -rfp $(shell cabal list-bin -v0 $(BUILD_ARGS) cabal-install:exe:cabal) _build/stage0/bin/cabal
+	cp -rfp $(shell cabal list-bin -v0 $(BUILD_ARGS) cabal-install:exe:cabal | $(CYGPATH)) _build/stage0/bin/cabal
 	@echo "::endgroup::"
 
 # --- Stage 1 build ---
@@ -618,8 +625,8 @@ $(addprefix _build/stage2/bin/,$(STAGE2_EXECUTABLES)) &: $(CABAL) stage1
 	@echo "::group::Building stage2 executables ($(STAGE2_EXECUTABLES))..."
 	# Force cabal to replan
 	rm -rf _build/stage2/cache
-	HADRIAN_SETTINGS='$(HADRIAN_SETTINGS)' \
-		PATH=$(PWD)/_build/stage1/bin:$(PATH) \
+	GHC=$(GHC) HADRIAN_SETTINGS='$(HADRIAN_SETTINGS)' \
+		PATH='$(PWD)/_build/stage1/bin:$(PATH)' \
 		$(CABAL_BUILD) --ghc-options="-ghcversion-file=$(abspath ./rts/include/ghcversion.h)" -W $(GHC0) $(STAGE2_TARGETS)
 	@echo "::endgroup::"
 
@@ -632,8 +639,8 @@ $(addprefix _build/stage2/bin/,$(STAGE2_UTIL_EXECUTABLES)) &: $(CABAL) stage1
 	@echo "::group::Building stage2 utilities ($(STAGE2_UTIL_EXECUTABLES))..."
 	# Force cabal to replan
 	rm -rf _build/stage2/cache
-	HADRIAN_SETTINGS='$(HADRIAN_SETTINGS)' \
-		PATH=$(PWD)/_build/stage1/bin:$(PATH) \
+	GHC=$(GHC) HADRIAN_SETTINGS='$(HADRIAN_SETTINGS)' \
+		PATH='$(PWD)/_build/stage1/bin:$(PATH)' \
 		$(CABAL_BUILD) --ghc-options="-ghcversion-file=$(abspath ./rts/include/ghcversion.h)" -W $(GHC0) $(STAGE2_UTIL_TARGETS)
 	@echo "::endgroup::"
 
@@ -705,7 +712,7 @@ _build/stage3/lib/targets/%/lib/ghc-interp.js:
 
 # $1 = TIPLET
 define build_cross
-	HADRIAN_SETTINGS='$(call HADRIAN_SETTINGS)' \
+	GHC=$(GHC) HADRIAN_SETTINGS='$(call HADRIAN_SETTINGS)' \
 		PATH=$(PWD)/_build/stage2/bin:$(PWD)/_build/stage3/bin:$(PATH) \
 		$(CABAL_BUILD) -W $(GHC2) --happy-options="--template=$(abspath _build/stage2/src/happy-lib-2.1.5/data/)" --with-hsc2hs=$1-hsc2hs --hsc2hs-options='-x' --configure-option='--host=$1' \
 		$(foreach lib,$(CROSS_EXTRA_LIB_DIRS),--extra-lib-dirs=$(lib)) \
@@ -837,26 +844,26 @@ define patchpackageconf
 		-e "s|data-dir:.*|data-dir: \"\$${pkgroot}/../lib/$4/$5$${sublib}\"|" \
 		-e "s|include-dirs:.*|include-dirs: \"\$${pkgroot}/../lib/$4/$5$${sublib}/include\"|" \
 		-e "s|^    /.*||" \
+		-e "s|^    [A-Z]:.*||" \
 		$2
 endef
 
 # $1 = triplet
 define copycrosslib
 	@cp -rfp _build/stage3/lib/targets/$1 _build/bindist/lib/targets/
-	@cd _build/bindist/lib/targets/$1/lib/package.conf.d ; \
+	@ffi_incdir=`$(CURDIR)/_build/bindist/bin/$1-ghc-pkg field libffi-clib include-dirs | grep '/libffi-clib/src/' | sed 's|.*$(CURDIR)/||'` ; cd _build/bindist/lib/targets/$1/lib/package.conf.d ; \
 		for pkg in *.conf ; do \
 		  pkgname=`echo $${pkg} | $(SED) 's/-[0-9.]*\(-[0-9a-zA-Z]*\)\?\.conf//'` ; \
 		  pkgnamever=`echo $${pkg} | $(SED) 's/\.conf//'` ; \
 		  mkdir -p $(CURDIR)/_build/bindist/lib/targets/$1/lib/$1/$${pkg%.conf} && \
 	      cp -rfp $(CURDIR)/_build/stage3/$1/build/host/*/ghc-*/$${pkg%.conf}/build/* $(CURDIR)/_build/bindist/lib/targets/$1/lib/$1/$${pkg%.conf}/ && \
 	      if [ $${pkgname} = "libffi-clib" ] ; then \
-		    ffi_incdir=`$(CURDIR)/_build/bindist/bin/$1-ghc-pkg field libffi-clib include-dirs | grep '/libffi-clib/src/' | sed 's|.*$(CURDIR)/||'` ; \
 		    $(call patchpackageconf,$${pkgname},$${pkg},../../..,$1,$${pkgnamever}) ; \
-			$(call copy_headers,ffitarget.h,$(CURDIR)/$${ffi_incdir},libffi-clib,$(CURDIR)/_build/bindist/bin/$1-ghc-pkg) ; \
 	      else \
 		    $(call patchpackageconf,$${pkgname},$${pkg},../../..,$1,$${pkgnamever}) ; \
 	      fi ; \
-		done
+		done ; \
+		$(call copy_headers,ffitarget.h,$(CURDIR)/$${ffi_incdir},libffi-clib,$(CURDIR)/_build/bindist/bin/$1-ghc-pkg)
 endef
 
 # Target for creating the final binary distribution directory
@@ -870,20 +877,20 @@ _build/bindist: stage2 driver/ghc-usage.txt driver/ghci-usage.txt
 	# Copy libraries and settings from stage2 lib
 	@cp -rfp _build/stage2/lib/{package.conf.d,settings,template-hsc.h} $@/lib/
 	@mkdir -p $@/lib/$(HOST_PLATFORM)
-	@cd $@/lib/package.conf.d ; \
-		for pkg in *.conf ; do \
-		  pkgname=`echo $${pkg} | $(SED) 's/-[0-9.]*\(-[0-9a-zA-Z]*\)\?\.conf//'` ; \
-		  pkgnamever=`echo $${pkg} | $(SED) 's/\.conf//'` ; \
-		  mkdir -p $(CURDIR)/$@/lib/$(HOST_PLATFORM)/$${pkg%.conf} ; \
-		  cp -rfp $(CURDIR)/_build/stage2/build/host/*/ghc-*/$${pkg%.conf}/build/* $(CURDIR)/$@/lib/$(HOST_PLATFORM)/$${pkg%.conf} ; \
-	      if [ $${pkgname} = "libffi-clib" ] ; then \
-		    ffi_incdir=`$(CURDIR)/$@/bin/ghc-pkg field libffi-clib include-dirs | grep '/libffi-clib/src/' | sed 's|.*$(CURDIR)/||'` ; \
-		    $(call patchpackageconf,$${pkgname},$${pkg},../../..,$(HOST_PLATFORM),$${pkgnamever}) ; \
-			$(call copy_headers,ffitarget.h,$(CURDIR)/$${ffi_incdir},libffi-clib,$(CURDIR)/$@/bin/ghc-pkg) ; \
-	      else \
-		    $(call patchpackageconf,$${pkgname},$${pkg},../../..,$(HOST_PLATFORM),$${pkgnamever}) ; \
-	      fi ; \
-		done
+	@ffi_incdir=`$(CURDIR)/$@/bin/ghc-pkg field libffi-clib include-dirs | grep 'libffi-clib[/\\]src/' | sed 's/^[ \t]*//' | $(CYGPATH) | sed 's|.*$(CURDIR)/||'` ; \
+		cd $@/lib/package.conf.d ; \
+			for pkg in *.conf ; do \
+		  	pkgname=`echo $${pkg} | $(SED) 's/-[0-9.]*\(-[0-9a-zA-Z]*\)\?\.conf//'` ; \
+		  	pkgnamever=`echo $${pkg} | $(SED) 's/\.conf//'` ; \
+		  	mkdir -p $(CURDIR)/$@/lib/$(HOST_PLATFORM)/$${pkg%.conf} ; \
+		  	cp -rfp $(CURDIR)/_build/stage2/build/host/*/ghc-*/$${pkg%.conf}/build/* $(CURDIR)/$@/lib/$(HOST_PLATFORM)/$${pkg%.conf} ; \
+	      	if [ $${pkgname} = "libffi-clib" ] ; then \
+			    $(call patchpackageconf,$${pkgname},$${pkg},../../..,$(HOST_PLATFORM),$${pkgnamever}) ; \
+	    	  else \
+		    	$(call patchpackageconf,$${pkgname},$${pkg},../../..,$(HOST_PLATFORM),$${pkgnamever}) ; \
+	      	fi ; \
+			done ; \
+			$(call copy_headers,ffitarget.h,$(CURDIR)/$${ffi_incdir},libffi-clib,$(CURDIR)/$@/bin/ghc-pkg)
 	# Copy driver usage files
 	@cp -rfp driver/ghc-usage.txt $@/lib/
 	@cp -rfp driver/ghci-usage.txt $@/lib/
