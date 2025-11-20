@@ -17,7 +17,6 @@ packages:
   libraries/ghc-platform
   libraries/ghc-boot
   libraries/ghc-boot-th-next
-  libraries/ghc-heap
   libraries/ghci
   libraries/libffi-clib
   libraries/os-string
