@@ -317,6 +317,53 @@ jobs:
           path: |
             ./_build/bindist/*.tar.gz
 
+  build-windows:
+    name: Build binary (Windows)
+    runs-on: windows-latest
+    env:
+      ADD_CABAL_ARGS: ""
+      ARTIFACT: "x86_64-mingw64"
+      ARCH: 64
+      CABAL_DIR: "C:\\Users\\runneradmin\\AppData\\Roaming\\cabal"
+    strategy:
+      fail-fast: false
+      matrix:
+        branch: ${{ fromJSON(inputs.branches) }}
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.branch }}
+          submodules: recursive
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: CLANG64
+          update: true
+          install: &msys2-install git vim winpty git tar bsdtar unzip binutils autoconf make xz curl libtool automake p7zip patch ca-certificates python3 zip mingw-w64-clang-x86_64-clang mingw-w64-clang-x86_64-python-sphinx mingw-w64-clang-x86_64-python-requests mingw-w64-clang-x86_64-tools-git tar gzip
+          path-type: inherit
+
+      - name: Install GHCup
+        uses: haskell/ghcup-setup@v1
+        with:
+          cabal: ${{ env.CABAL_VERSION }}
+          ghc: ${{ env.GHC_VERSION }}
+
+      - name: Run build
+        run: *build
+
+      - if: always()
+        name: Upload artifact
+        uses: ./.github/actions/upload
+        with:
+          if-no-files-found: error
+          retention-days: 2
+          name: artifacts-${{ env.ARTIFACT }}-${{ matrix.branch }}
+          path: |
+            ./_build/bindist/*.tar.gz
+
   build-freebsd-x86_64:
     name: Build FreeBSD x86_64
     runs-on: [self-hosted, FreeBSD, X64]
@@ -634,6 +681,49 @@ jobs:
         with:
           ref: ${{ matrix.branch }}
           submodules: recursive
+
+      - uses: ./.github/actions/download
+        with:
+          name: artifacts-${{ env.ARTIFACT }}-${{ matrix.branch }}
+          path: ./_build/bindist
+
+      - name: Run test
+        run: *test
+        env:
+          THREADS: 4
+
+  test-windows:
+    name: Test binary (Windows)
+    runs-on: windows-latest
+    needs: ["build-windows"]
+    if: ${{ inputs.test }}
+    env:
+      ADD_CABAL_ARGS: ""
+      ARTIFACT: "x86_64-mingw64"
+      ARCH: 64
+      CABAL_DIR: "C:\\Users\\runneradmin\\AppData\\Roaming\\cabal"
+      GHCUP_INSTALL_BASE_PREFIX: "/c"
+    strategy:
+      fail-fast: false
+      matrix:
+        branch: ${{ fromJSON(inputs.branches) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.branch }}
+          submodules: recursive
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: CLANG64
+          update: true
+          install: *msys2-install
+
+      - name: Install GHCup
+        uses: haskell/ghcup-setup@v1
+        with:
+          cabal: ${{ env.CABAL_VERSION }}
+          ghc: ${{ env.GHC_VERSION }}
 
       - uses: ./.github/actions/download
         with:

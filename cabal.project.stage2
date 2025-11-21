@@ -64,12 +64,15 @@ packages:
   utils/ghc-toolchain
 
   libraries/haskeline
---  libraries/terminfo
   utils/hp2ps
   utils/hpc
   utils/ghc-iserv
   utils/genapply
   utils/runghc
+
+if !os(windows)
+  packages:
+    libraries/terminfo
 
 -- project-rts
 -- project-ghc

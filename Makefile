@@ -109,7 +109,7 @@ CC := clang.exe
 CXX := clang++.exe
 CYGPATH = cygpath --unix -f -
 else
-CYGPATH = echo
+CYGPATH = cat
 endif
 
 EMCC ?= emcc
@@ -260,6 +260,10 @@ STAGE2_UTIL_TARGETS := \
 	integer-gmp:integer-gmp \
 	system-cxx-std-lib:system-cxx-std-lib \
 	xhtml:xhtml
+
+ifneq ($(OS),Windows_NT)
+STAGE2_UTIL_TARGETS += terminfo:terminfo
+endif
 
 # These things should be built on demand.
 # hp2ps:hp2ps \
