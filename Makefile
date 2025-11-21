@@ -105,8 +105,6 @@ SED ?= sed
 LD ?= ld
 
 ifeq ($(OS),Windows_NT)
-CC := clang.exe
-CXX := clang++.exe
 CYGPATH = cygpath --unix -f -
 else
 CYGPATH = cat
