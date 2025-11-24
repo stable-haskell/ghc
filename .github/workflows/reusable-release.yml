@@ -353,19 +353,16 @@ jobs:
         branch: ${{ fromJSON(inputs.branches) }}
     defaults:
       run:
-        shell: msys2 {0}
+        shell: 'C:/msys64/usr/bin/bash.exe --login -e {0}'
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ matrix.branch }}
           submodules: recursive
 
-      - id: msys2
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: ${{ env.MSYSTEM }}
-          update: true
-          install: &msys2-install git vim winpty git tar bsdtar unzip binutils autoconf make xz curl libtool automake p7zip patch ca-certificates python3 zip mingw-w64-clang-x86_64-toolchain mingw-w64-clang-x86_64-python-sphinx mingw-w64-clang-x86_64-python-requests mingw-w64-clang-x86_64-tools-git tar gzip
+      - name: Install msys2 dependencies
+        run: &msys2-install |
+          pacman --noconfirm -S --needed --overwrite * git vim winpty git tar bsdtar unzip binutils autoconf make xz curl libtool automake p7zip patch ca-certificates python3 zip mingw-w64-clang-x86_64-toolchain mingw-w64-clang-x86_64-python-sphinx mingw-w64-clang-x86_64-python-requests mingw-w64-clang-x86_64-tools-git tar gzip
 
       - id: ghcup
         name: Install GHCup
