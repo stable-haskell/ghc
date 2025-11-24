@@ -102,12 +102,14 @@ PYTHON ?= python3
 CABAL ?= cabal
 SED ?= sed
 
-LD ?= ld
-
 ifeq ($(OS),Windows_NT)
+CC := x86_64-w64-mingw32-clang.exe
+CXX := x86_64-w64-mingw32-clang++.exe
+LD := ld.lld.exe
 CYGPATH = cygpath --unix -f -
 else
 CYGPATH = cat
+LD ?= ld
 endif
 
 EMCC ?= emcc
