@@ -99,16 +99,20 @@ ROOT_DIR := $(patsubst %/,%,$(dir $(realpath $(lastword $(MAKEFILE_LIST)))))
 
 GHC0 ?= ghc-9.8.4
 PYTHON ?= python3
-CABAL ?= cabal
+CABAL ?= _build/stage0/bin/cabal
 SED ?= sed
 
 ifeq ($(OS),Windows_NT)
 CC := x86_64-w64-mingw32-clang.exe
 CXX := x86_64-w64-mingw32-clang++.exe
+CC_LINK_OPT := -Wl,CRT_fp8.o
 LD := ld.lld.exe
 CYGPATH = cygpath --unix -f -
+CYGPATH_MIXED = cygpath --mixed -f -
 else
+CYGPATH_MIXED = cat
 CYGPATH = cat
++CC_LINK_OPT ?=
 LD ?= ld
 endif
 
@@ -175,6 +179,7 @@ TARGET_PLATFORM = $(call GHC_INFO,target platform string)
 TARGET_ARCH     = $(call GHC_INFO,target arch)
 TARGET_OS       = $(call GHC_INFO,target os)
 TARGET_TRIPLE   = $(call GHC_INFO,Target platform)
+GHC_LIBDIR      = $(call GHC_INFO,LibDir)
 GIT_COMMIT_ID  := $(shell git rev-parse HEAD)
 
 define HADRIAN_SETTINGS
@@ -250,6 +255,7 @@ STAGE2_UTIL_TARGETS := \
 	rts:nonthreaded-debug \
 	rts:nonthreaded-nodebug \
 	rts:threaded-nodebug \
+	rts:threaded-debug \
 	hp2ps:hp2ps \
 	hpc-bin:hpc \
 	runghc:runghc \
@@ -579,9 +585,18 @@ _build/stage0/bin/cabal:
 _build/stage1/%: private STAGE=stage1
 _build/stage1/%: private GHC=$(GHC0)
 
+.PHONY: cabal.project.stage1.local
+
+cabal.project.stage1.local: cabal.project.stage1
+ifeq ($(OS),Windows_NT)
+	echo "extra-prog-path: $(shell echo '$(GHC_LIBDIR)' | $(CYGPATH_MIXED))/../mingw/bin" > $@
+else
+	echo "" > $@
+endif
+
 .PHONY: $(addprefix _build/stage1/bin/,$(STAGE1_EXECUTABLES))
 $(addprefix _build/stage1/bin/,$(STAGE1_EXECUTABLES)) &: private TARGET_PLATFORM=
-$(addprefix _build/stage1/bin/,$(STAGE1_EXECUTABLES)) &: $(CABAL) configure rts/configure libraries/ghc-internal/configure
+$(addprefix _build/stage1/bin/,$(STAGE1_EXECUTABLES)) &: $(CABAL) cabal.project.stage1 cabal.project.stage1.local configure rts/configure libraries/ghc-internal/configure
 	@echo "::group::Building stage1 executables ($(STAGE1_EXECUTABLES))..."
 	# Force cabal to replan
 	rm -rf _build/stage1/cache
@@ -591,7 +606,7 @@ $(addprefix _build/stage1/bin/,$(STAGE1_EXECUTABLES)) &: $(CABAL) configure rts/
 _build/stage1/lib/settings: _build/stage1/bin/ghc-toolchain-bin
 	@echo "::group::Creating settings for $(TARGET_TRIPLE)..."
 	@mkdir -p $(@D)
-	_build/stage1/bin/ghc-toolchain-bin $(GHC_TOOLCHAIN_ARGS) --triple $(TARGET_TRIPLE) --output-settings -o $@ --cc $(CC) --cxx $(CXX)
+	_build/stage1/bin/ghc-toolchain-bin $(GHC_TOOLCHAIN_ARGS) --triple $(TARGET_TRIPLE) --output-settings -o $@ --cc $(CC) --cxx $(CXX) --cc-link-opt "$(CC_LINK_OPT)"
 	@echo "::endgroup::"
 
 # The somewhat strange thing is, we might not even need this at all now anymore. cabal seems to
@@ -625,7 +640,7 @@ _build/stage2/%: private GHC=$(realpath _build/stage1/bin/ghc)
 
 .PHONY: $(addprefix _build/stage2/bin/,$(STAGE2_EXECUTABLES))
 $(addprefix _build/stage2/bin/,$(STAGE2_EXECUTABLES)) &: private TARGET_PLATFORM=
-$(addprefix _build/stage2/bin/,$(STAGE2_EXECUTABLES)) &: $(CABAL) stage1
+$(addprefix _build/stage2/bin/,$(STAGE2_EXECUTABLES)) &: $(CABAL) stage1 cabal.project.stage2
 	@echo "::group::Building stage2 executables ($(STAGE2_EXECUTABLES))..."
 	# Force cabal to replan
 	rm -rf _build/stage2/cache
@@ -639,7 +654,7 @@ $(addprefix _build/stage2/bin/,$(STAGE2_EXECUTABLES)) &: $(CABAL) stage1
 # build them with the stage2 ghc; seems like a better/cleaner idea to me (moritz).
 .PHONY: $(addprefix _build/stage2/bin/,$(STAGE2_UTIL_EXECUTABLES))
 $(addprefix _build/stage2/bin/,$(STAGE2_UTIL_EXECUTABLES)) &: private TARGET_PLATFORM=
-$(addprefix _build/stage2/bin/,$(STAGE2_UTIL_EXECUTABLES)) &: $(CABAL) stage1
+$(addprefix _build/stage2/bin/,$(STAGE2_UTIL_EXECUTABLES)) &: $(CABAL) stage1 cabal.project.stage2
 	@echo "::group::Building stage2 utilities ($(STAGE2_UTIL_EXECUTABLES))..."
 	# Force cabal to replan
 	rm -rf _build/stage2/cache
@@ -746,7 +761,7 @@ javascript-unknown-ghcjs-libs: private STAGE=stage3
 javascript-unknown-ghcjs-libs: private CC=emcc
 javascript-unknown-ghcjs-libs: private CROSS_EXTRA_LIB_DIRS=$(JS_EXTRA_LIB_DIRS)
 javascript-unknown-ghcjs-libs: private CROSS_EXTRA_INCLUDE_DIRS=$(JS_EXTRA_INCLUDE_DIRS)
-javascript-unknown-ghcjs-libs: _build/stage3/bin/javascript-unknown-ghcjs-ghc-pkg _build/stage3/bin/javascript-unknown-ghcjs-ghc _build/stage3/bin/javascript-unknown-ghcjs-hsc2hs _build/stage3/lib/targets/javascript-unknown-ghcjs/lib/settings _build/stage3/lib/targets/javascript-unknown-ghcjs/bin/unlit _build/stage3/lib/targets/javascript-unknown-ghcjs/lib/package.conf.d
+javascript-unknown-ghcjs-libs: cabal.project.stage3 _build/stage3/bin/javascript-unknown-ghcjs-ghc-pkg _build/stage3/bin/javascript-unknown-ghcjs-ghc _build/stage3/bin/javascript-unknown-ghcjs-hsc2hs _build/stage3/lib/targets/javascript-unknown-ghcjs/lib/settings _build/stage3/lib/targets/javascript-unknown-ghcjs/bin/unlit _build/stage3/lib/targets/javascript-unknown-ghcjs/lib/package.conf.d
 	$(call build_cross,javascript-unknown-ghcjs)
 
 # --- Stage 3 musl build ---
@@ -771,7 +786,7 @@ x86_64-musl-linux-libs: private STAGE=stage3
 x86_64-musl-linux-libs: private CC=x86_64-unknown-linux-musl-cc
 x86_64-musl-linux-libs: private CROSS_EXTRA_LIB_DIRS=$(MUSL_EXTRA_LIB_DIRS)
 x86_64-musl-linux-libs: private CROSS_EXTRA_INCLUDE_DIRS=$(MUSL_EXTRA_INCLUDE_DIRS)
-x86_64-musl-linux-libs: _build/stage3/bin/x86_64-musl-linux-ghc-pkg _build/stage3/bin/x86_64-musl-linux-ghc _build/stage3/bin/x86_64-musl-linux-hsc2hs _build/stage3/lib/targets/x86_64-musl-linux/lib/settings _build/stage3/lib/targets/x86_64-musl-linux/bin/unlit _build/stage3/lib/targets/x86_64-musl-linux/lib/package.conf.d
+x86_64-musl-linux-libs: cabal.project.stage3 _build/stage3/bin/x86_64-musl-linux-ghc-pkg _build/stage3/bin/x86_64-musl-linux-ghc _build/stage3/bin/x86_64-musl-linux-hsc2hs _build/stage3/lib/targets/x86_64-musl-linux/lib/settings _build/stage3/lib/targets/x86_64-musl-linux/bin/unlit _build/stage3/lib/targets/x86_64-musl-linux/lib/package.conf.d
 	$(call build_cross,x86_64-musl-linux)
 
 # --- Stage 3 wasm build ---
@@ -796,7 +811,7 @@ wasm32-unknown-wasi-libs: private STAGE=stage3
 wasm32-unknown-wasi-libs: private CC=wasm32-wasi-clang
 wasm32-unknown-wasi-libs: private CROSS_EXTRA_LIB_DIRS=$(WASM_EXTRA_LIB_DIRS)
 wasm32-unknown-wasi-libs: private CROSS_EXTRA_INCLUDE_DIRS=$(WASM_EXTRA_INCLUDE_DIRS)
-wasm32-unknown-wasi-libs: _build/stage3/bin/wasm32-unknown-wasi-ghc-pkg _build/stage3/bin/wasm32-unknown-wasi-ghc _build/stage3/bin/wasm32-unknown-wasi-hsc2hs _build/stage3/lib/targets/wasm32-unknown-wasi/lib/settings _build/stage3/lib/targets/wasm32-unknown-wasi/bin/unlit _build/stage3/lib/targets/wasm32-unknown-wasi/lib/package.conf.d
+wasm32-unknown-wasi-libs: cabal.project.stage3 _build/stage3/bin/wasm32-unknown-wasi-ghc-pkg _build/stage3/bin/wasm32-unknown-wasi-ghc _build/stage3/bin/wasm32-unknown-wasi-hsc2hs _build/stage3/lib/targets/wasm32-unknown-wasi/lib/settings _build/stage3/lib/targets/wasm32-unknown-wasi/bin/unlit _build/stage3/lib/targets/wasm32-unknown-wasi/lib/package.conf.d
 	$(call build_cross,wasm32-unknown-wasi)
 
 # --- Bindist ---
