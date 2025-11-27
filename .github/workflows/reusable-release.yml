@@ -147,13 +147,6 @@ jobs:
           # or other issues. So we just hardcode it here.
           if [ ${{ runner.os }} = "Windows" ] ; then
             export PATH="/c/ghcup/bin:$PATH"
-            echo $PATH
-            clang --version
-            which clang
-            ld --version
-            which ld
-            ld.lld --version
-            which ld.lld
           fi
 
           cabal update
@@ -163,9 +156,9 @@ jobs:
             cd emsdk
             source ./emsdk_env.sh
             cd ..
-            ${{ env.MAKE }} CABAL=$PWD/_build/stage0/bin/cabal _build/bindist/haskell-toolchain.tar.gz _build/bindist/tests.tar.gz
+            ${{ env.MAKE }} _build/bindist/haskell-toolchain.tar.gz _build/bindist/tests.tar.gz
           else
-            ${{ env.MAKE }} CABAL=$PWD/_build/stage0/bin/cabal _build/bindist/ghc.tar.gz _build/bindist/cabal.tar.gz _build/bindist/tests.tar.gz
+            ${{ env.MAKE }} _build/bindist/ghc.tar.gz _build/bindist/cabal.tar.gz _build/bindist/tests.tar.gz
           fi
           cd _build/bindist
           mv ghc.tar.gz ghc-$(bin/ghc --numeric-version)-${ARTIFACT}.tar.gz
@@ -375,15 +368,6 @@ jobs:
 
       - name: Run build
         run: *build
-        env:
-          MAKE: "make"
-
-      - name: Setup tmate session
-        if: ${{ failure() }}
-        uses: mxschmitt/action-tmate@v3
-        with:
-          limit-access-to-actor: true
-          msys2-location: ${{ steps.setup-msys2.outputs.msys2-location }}
 
       - if: always()
         name: Upload artifact
