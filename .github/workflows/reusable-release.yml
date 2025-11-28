@@ -147,6 +147,8 @@ jobs:
           # or other issues. So we just hardcode it here.
           if [ ${{ runner.os }} = "Windows" ] ; then
             export PATH="/c/ghcup/bin:$PATH"
+            make --version
+            which make
           fi
 
           cabal update
@@ -368,6 +370,8 @@ jobs:
 
       - name: Run build
         run: *build
+        env:
+          MAKE: make
 
       - if: always()
         name: Upload artifact
