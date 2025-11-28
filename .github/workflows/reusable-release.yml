@@ -160,7 +160,8 @@ jobs:
             cd ..
             ${{ env.MAKE }} _build/bindist/haskell-toolchain.tar.gz _build/bindist/tests.tar.gz
           else
-            ${{ env.MAKE }} _build/bindist/ghc.tar.gz _build/bindist/cabal.tar.gz _build/bindist/tests.tar.gz
+            echo $PWD
+            ${{ env.MAKE }} --debug _build/bindist/ghc.tar.gz _build/bindist/cabal.tar.gz _build/bindist/tests.tar.gz
           fi
           cd _build/bindist
           mv ghc.tar.gz ghc-$(bin/ghc --numeric-version)-${ARTIFACT}.tar.gz
