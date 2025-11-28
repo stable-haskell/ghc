@@ -368,19 +368,12 @@ jobs:
           cabal: ${{ env.CABAL_VERSION }}
           ghc: ${{ env.GHC_VERSION }}
         env:
-          GHCUP_MSYS2: ${{ steps.msys2.outputs.msys2-location }}
+          GHCUP_MSYS2: 'C:/msys64'
 
       - name: Run build
         run: *build
         env:
           MAKE: make
-
-      - name: Setup tmate session
-        if: ${{ failure() }}
-        uses: mxschmitt/action-tmate@v3
-        with:
-          limit-access-to-actor: true
-          msys2-location: ${{ steps.setup-msys2.outputs.msys2-location }}
 
       - if: always()
         name: Upload artifact
