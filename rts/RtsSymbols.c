@@ -159,7 +159,7 @@ extern char **environ;
  */
 #define RTS_MINGW_ONLY_SYMBOLS                           \
       SymI_NeedsProto(__imp___msvcrt_assert)             \
-      SymI_HasProto(__msvcrt_assert)                     \
+      SymI_NeedsProto(__msvcrt_assert)                     \
       SymI_HasProto(__rts_swopen)                        \
       SymI_HasProto(__rts_create_device_name)            \
       SymI_HasProto(stg_asyncReadzh)                     \
