@@ -21,6 +21,7 @@ packages:
   libraries/ghc-boot
   libraries/ghc-boot-th-next
   libraries/ghci
+  libraries/ghc-platform
   libraries/libffi-clib
 
   -- Internal tools
