@@ -740,18 +740,17 @@ jobs:
       fail-fast: false
       matrix:
         branch: ${{ fromJSON(inputs.branches) }}
+    defaults:
+      run:
+        shell: 'C:/msys64/usr/bin/bash.exe --login -e {0}'
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ matrix.branch }}
           submodules: recursive
 
-      - id: msys2
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: ${{ env.MSYSTEM }}
-          update: true
-          install: *msys2-install
+      - name: Install msys2 dependencies
+        run: *msys2-install
 
       - id: ghcup
         name: Install GHCup
@@ -760,7 +759,7 @@ jobs:
           cabal: ${{ env.CABAL_VERSION }}
           ghc: ${{ env.GHC_VERSION }}
         env:
-          GHCUP_MSYS2: ${{ steps.msys2.outputs.msys2-location }}
+          GHCUP_MSYS2: 'C:/msys64'
 
       - uses: ./.github/actions/download
         with:
