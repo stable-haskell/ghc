@@ -870,7 +870,7 @@ endef
 # $1 = triplet
 define copycrosslib
 	@cp -rfp _build/stage3/lib/targets/$1 _build/bindist/lib/targets/
-	@ffi_incdir=`$(CURDIR)/_build/bindist/bin/$1-ghc-pkg field libffi-clib include-dirs | grep '/libffi-clib/src/' | sed 's|.*$(CURDIR)/||'` ; cd _build/bindist/lib/targets/$1/lib/package.conf.d ; \
+	@ffi_incdir=`$(CURDIR)/_build/bindist/bin/$1-ghc-pkg field libffi-clib include-dirs | grep '/libffi-clib/src/' | sed 's|.*$(CURDIR)/||' || echo "none"` ; cd _build/bindist/lib/targets/$1/lib/package.conf.d ; \
 		for pkg in *.conf ; do \
 		  pkgname=`echo $${pkg} | $(SED) 's/-[0-9.]*\(-[0-9a-zA-Z]*\)\?\.conf//'` ; \
 		  pkgnamever=`echo $${pkg} | $(SED) 's/\.conf//'` ; \
@@ -882,7 +882,7 @@ define copycrosslib
 		    $(call patchpackageconf,$${pkgname},$${pkg},../../..,$1,$${pkgnamever}) ; \
 	      fi ; \
 		done ; \
-		$(call copy_headers,ffitarget.h,$(CURDIR)/$${ffi_incdir},libffi-clib,$(CURDIR)/_build/bindist/bin/$1-ghc-pkg)
+		if [ $${ffi_incdir} != "none" ] ; then $(call copy_headers,ffitarget.h,$(CURDIR)/$${ffi_incdir},libffi-clib,$(CURDIR)/_build/bindist/bin/$1-ghc-pkg) ; fi
 endef
 
 # Target for creating the final binary distribution directory
