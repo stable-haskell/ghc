@@ -68,8 +68,7 @@ On Windows, you should run the build command from an appropriate
 environment (e.g., MSYS2).
 
 This gives you the default build, which includes everything
-optimised and built in various ways (eg. profiling libs are built).
-It can take a long time.
+optimised and built. It can take a long time.
 
 To run the test suite:
 
