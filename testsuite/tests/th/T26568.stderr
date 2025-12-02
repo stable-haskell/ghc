@@ -1,8 +1,7 @@
 T26568.hs:5:3: error: [GHC-28914]
     • Level error:
-      instance for ‘GHC.Internal.Base.Monad
-                      GHC.Internal.TH.Syntax.Q’ is used at level -1
-      but it is bound at levels {}
+      instance for ‘GHC.Internal.Base.Monad GHC.Internal.TH.Monad.Q’
+      is bound at levels {} but used at level -1
     • In a stmt of a 'do' block: _ <- _
       In the expression:
         do _ <- _
@@ -12,7 +11,7 @@ T26568.hs:5:3: error: [GHC-28914]
              _)
 
 T26568.hs:5:8: error: [GHC-88464]
-    • Found hole: _ :: GHC.Internal.TH.Syntax.Q a0
+    • Found hole: _ :: GHC.Internal.TH.Monad.Q a0
       Where: ‘a0’ is an ambiguous type variable
     • In a stmt of a 'do' block: _ <- _
       In the expression:
@@ -24,7 +23,7 @@ T26568.hs:5:8: error: [GHC-88464]
 
 T26568.hs:6:3: error: [GHC-88464]
     • Found hole:
-        _ :: GHC.Internal.TH.Syntax.Q GHC.Internal.TH.Syntax.Exp
+        _ :: GHC.Internal.TH.Monad.Q GHC.Internal.TH.Syntax.Exp
     • In a stmt of a 'do' block: _
       In the expression:
         do _ <- _
