@@ -248,14 +248,18 @@ STAGE1_EXECUTABLES := \
 STAGE2_TARGETS := \
 	ghc-bin:ghc
 
+# we need to build these before all else
+STAGE2_UTIL_RTS := \
+	rts:nonthreaded-debug \
+	rts:nonthreaded-nodebug \
+	rts:threaded-nodebug \
+	rts:threaded-debug
+
 # rts:threaded-nodebug need it for compiling Setup.hs
 STAGE2_UTIL_TARGETS := \
 	$(STAGE_UTIL_TARGETS) \
 	ghc-iserv:ghc-iserv \
-	rts:nonthreaded-debug \
-	rts:nonthreaded-nodebug \
-	rts:threaded-nodebug \
-	rts:threaded-debug \
+    $(STAGE2_UTIL_RTS) \
 	hp2ps:hp2ps \
 	hpc-bin:hpc \
 	runghc:runghc \
@@ -640,7 +644,7 @@ _build/stage2/%: private GHC=$(realpath _build/stage1/bin/ghc)
 
 .PHONY: $(addprefix _build/stage2/bin/,$(STAGE2_EXECUTABLES))
 $(addprefix _build/stage2/bin/,$(STAGE2_EXECUTABLES)) &: private TARGET_PLATFORM=
-$(addprefix _build/stage2/bin/,$(STAGE2_EXECUTABLES)) &: $(CABAL) stage1 cabal.project.stage2
+$(addprefix _build/stage2/bin/,$(STAGE2_EXECUTABLES)) &: $(CABAL) stage1 cabal.project.stage2 stage2-rts
 	@echo "::group::Building stage2 executables ($(STAGE2_EXECUTABLES))..."
 	# Force cabal to replan
 	rm -rf _build/stage2/cache
@@ -649,12 +653,26 @@ $(addprefix _build/stage2/bin/,$(STAGE2_EXECUTABLES)) &: $(CABAL) stage1 cabal.p
 		$(CABAL_BUILD) --ghc-options="-ghcversion-file=$(abspath ./rts/include/ghcversion.h)" -W $(GHC0) $(STAGE2_TARGETS)
 	@echo "::endgroup::"
 
+.PHONY: stage2-rts
+stage2-rts: private STAGE=stage2
+stage2-rts: private GHC=$(realpath _build/stage1/bin/ghc)
+stage2-rts: private TARGET_PLATFORM=
+stage2-rts: $(CABAL) stage1 cabal.project.stage2
+	@echo "::group::Building stage2 RTSes..."
+	# Force cabal to replan
+	rm -rf _build/stage2/cache
+	GHC=$(GHC) HADRIAN_SETTINGS='$(HADRIAN_SETTINGS)' \
+		PATH='$(PWD)/_build/stage1/bin:$(PATH)' \
+		$(CABAL_BUILD) --ghc-options="-ghcversion-file=$(abspath ./rts/include/ghcversion.h)" -W $(GHC0) $(STAGE2_UTIL_RTS)
+	@echo "::endgroup::"
+
+
 # Do we want to build these with the stage2 GHC or the stage1 GHC?
 # Traditionally we build them with the stage1 ghc, but we could just as well
 # build them with the stage2 ghc; seems like a better/cleaner idea to me (moritz).
 .PHONY: $(addprefix _build/stage2/bin/,$(STAGE2_UTIL_EXECUTABLES))
 $(addprefix _build/stage2/bin/,$(STAGE2_UTIL_EXECUTABLES)) &: private TARGET_PLATFORM=
-$(addprefix _build/stage2/bin/,$(STAGE2_UTIL_EXECUTABLES)) &: $(CABAL) stage1 cabal.project.stage2
+$(addprefix _build/stage2/bin/,$(STAGE2_UTIL_EXECUTABLES)) &: $(CABAL) stage1 cabal.project.stage2 stage2-rts
 	@echo "::group::Building stage2 utilities ($(STAGE2_UTIL_EXECUTABLES))..."
 	# Force cabal to replan
 	rm -rf _build/stage2/cache
