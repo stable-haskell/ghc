@@ -84,6 +84,11 @@ package ghc-boot-th-next
 package hsc2hs
   flags: +in-ghc-tree
 
+-- libffi-clib produces C warnings that are promoted to errors by default.
+-- Suppress -Werror to prevent build failures from upstream code.
+package libffi-clib
+  ghc-options: -optc-Wno-error
+
 --
 -- Program options
 --
