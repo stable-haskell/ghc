@@ -1640,7 +1640,11 @@ mkUnitState logger dflags cfg = do
   -- it modifies the unit ids of wired in packages, but when we process
   -- package arguments we need to key against the old versions.
   --
-  (pkgs2, wired_map) <- findWiredInUnits logger (rtsWayUnitId dflags:wiredInUnitIds) prec_map pkgs1 vis_map2
+  let wired_ids_all = rtsWayUnitId dflags : wiredInUnitIds
+      wired_ids
+        | gopt Opt_NoGhcInternal dflags = filter (/= ghcInternalUnitId) wired_ids_all
+        | otherwise                     = wired_ids_all
+  (pkgs2, wired_map) <- findWiredInUnits logger wired_ids prec_map pkgs1 vis_map2
 
   --
   -- Sanity check. If the rtsWayUnitId is not in the database, then we have a
@@ -1652,6 +1656,7 @@ mkUnitState logger dflags cfg = do
         , nest 2 $ vcat
             [ text "pkgs1_count =" <+> ppr (length pkgs1)
             , text "Opt_NoRts   =" <+> ppr (gopt Opt_NoRts dflags)
+            , text "Opt_NoGhcInternal =" <+> ppr (gopt Opt_NoGhcInternal dflags)
             , text "ghcLink     =" <+> text (show (ghcLink dflags))
             , text "platform    =" <+> text (show (targetPlatform dflags))
             , text "rtsWayUnitId=" <+> ppr (rtsWayUnitId dflags)
@@ -1668,7 +1673,9 @@ mkUnitState logger dflags cfg = do
       <> text " Please check your installation."
       <> text " If this target doesn't need the RTS (e.g. building a shared library), you can add -no-rts to the relevant package's ghc-options in cabal.project to bypass this check."
 
-  let pkgs3 = if gopt Opt_NoRts dflags && not (anyUniqMap (== ghcInternalUnitId) wired_map)
+  let pkgs3 = if gopt Opt_NoGhcInternal dflags
+         then pkgs2
+         else if gopt Opt_NoRts dflags && not (anyUniqMap (== ghcInternalUnitId) wired_map)
               then pkgs2
               else
               -- At this point we should have `ghcInternalUnitId`, and the `rtsWiredUnitId dflags`.
