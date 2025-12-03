@@ -92,6 +92,42 @@ This is the same issue that ghc-iserv faces, and is documented in
 utils/ghc-iserv/ghc-iserv.cabal.in as Note [ghc-iserv and dynamic symbol export].
 -}
 
+{-
+Note [RTS sublibrary rpath injection]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+GHC selects RTS sublibraries (rts:nonthreaded-nodebug, rts:threaded-nodebug, etc.)
+at link time based on flags like -threaded and -debug. This selection happens
+inside GHC, not through Cabal's dependency resolution.
+
+When Cabal uses -dynload deploy, it tells GHC "don't inject rpaths, I'll handle
+them via -optl-Wl,-rpath,...". However, Cabal cannot inject rpaths for:
+  - RTS sublibraries: Cabal doesn't know which sublibrary GHC will select
+  - RTS dependencies: e.g., libffi-clib is a dependency of the RTS
+
+This is not just a workaround for Cabal issue #11221. Even if Cabal passes
+-rpath to GHC and lets GHC handle all rpaths, GHC would still need special
+handling for RTS-related libraries because Cabal fundamentally cannot see them.
+
+We handle this by always injecting rpaths for:
+  1. Any package named "rts" (all sublibraries share the package name)
+  2. Any direct dependency of an RTS package
+
+This is computed dynamically from the package database rather than hardcoded,
+so it remains correct if the RTS gains additional library dependencies.
+-}
+
+-- | Check if a package is the RTS or a direct dependency of the RTS.
+-- See Note [RTS sublibrary rpath injection]
+isRtsOrRtsDep :: [UnitInfo] -> UnitInfo -> Bool
+isRtsOrRtsDep pkgs pkg = isRts || isRtsDep
+  where
+    isRts = unitPackageNameString pkg == "rts"
+    -- Collect all direct dependencies of RTS packages
+    rtsDeps = [ dep | rtsPkg <- pkgs
+                    , unitPackageNameString rtsPkg == "rts"
+                    , dep <- unitDepends rtsPkg ]
+    isRtsDep = unitId pkg `elem` rtsDeps
+
 linkBinary :: Logger -> TmpFs -> DynFlags -> ExecutableLinkMode -> UnitEnv -> [FilePath] -> [UnitId] -> IO ()
 linkBinary = linkBinary' False
 
@@ -119,9 +155,7 @@ linkBinary' staticLink logger tmpfs dflags blm unit_env o_files dep_units = do
 
     -- Collect per-package library dirs (deduplicated, non-empty)
     let pkg_lib_paths     = collectLibraryDirs ways_ pkgs
-    -- Until: https://github.com/haskell/cabal/issues/11221 is in cabal,
-    --        we have to deal with cabal passing -dyload deploy, and manually
-    --        inject rpaths for the rts.
+    -- See Note [RTS sublibrary rpath injection]
     -- Build linker options per (pkg, libdir)
     let pkg_lib_path_opts =
           concat
@@ -131,7 +165,7 @@ linkBinary' staticLink logger tmpfs dflags blm unit_env o_files dep_units = do
           ]
         get_pkg_lib_path_opts pkg l
          | osElfTarget (platformOS platform) &&
-           (dynLibLoader dflags == SystemDependent || unitPackageNameString pkg `elem` ["rts", "libffi-clib"]) &&
+           (dynLibLoader dflags == SystemDependent || isRtsOrRtsDep pkgs pkg) &&
            ways_ `hasWay` WayDyn
             = let libpath = if gopt Opt_RelativeDynlibPaths dflags
                             then "$ORIGIN" </>
@@ -152,7 +186,7 @@ linkBinary' staticLink logger tmpfs dflags blm unit_env o_files dep_units = do
                               else ["-Xlinker", "-rpath-link", "-Xlinker", l]
               in ["-L" ++ l] ++ rpathlink ++ rpath
          | osMachOTarget (platformOS platform) &&
-           (dynLibLoader dflags == SystemDependent || unitPackageNameString pkg `elem` ["rts", "libffi-clib"]) &&
+           (dynLibLoader dflags == SystemDependent || isRtsOrRtsDep pkgs pkg) &&
            ways_ `hasWay` WayDyn &&
            useXLinkerRPath dflags (platformOS platform)
             = let libpath = if gopt Opt_RelativeDynlibPaths dflags
