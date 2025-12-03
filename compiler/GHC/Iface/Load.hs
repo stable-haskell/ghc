@@ -915,18 +915,14 @@ findAndReadIface hsc_env doc_str mod wanted_mod hi_boot_file = do
               && not (isOneShot (ghcMode dflags))
             then return (Failed (HomeModError mod loc))
             else do
+                -- Note: load_dynamic_too_maybe removed - -dynamic-too is deprecated
+                -- We no longer check for .dyn_hi files
                 r <- read_file hooks logger name_cache unit_state dflags wanted_mod (ml_hi_file loc)
                 case r of
                   Failed err
                     -> return (Failed $ BadIfaceFile err)
                   Succeeded (iface,_fp)
-                    -> do
-                        r2 <- load_dynamic_too_maybe hooks logger name_cache unit_state
-                                                 (setDynamicNow dflags) wanted_mod
-                                                 iface loc
-                        case r2 of
-                          Failed sdoc -> return (Failed sdoc)
-                          Succeeded {} -> return $ Succeeded (iface, loc)
+                    -> return $ Succeeded (iface, loc)
       err -> do
           trace_if logger (text "...not found")
           return $ Failed $ cannotFindInterface
@@ -936,33 +932,8 @@ findAndReadIface hsc_env doc_str mod wanted_mod hi_boot_file = do
                               (moduleName mod)
                               err
 
--- | Check if we need to try the dynamic interface for -dynamic-too
-load_dynamic_too_maybe :: Hooks -> Logger -> NameCache -> UnitState -> DynFlags
-                       -> Module -> ModIface -> ModLocation
-                       -> IO (MaybeErr MissingInterfaceError ())
-load_dynamic_too_maybe hooks logger name_cache unit_state dflags wanted_mod iface loc
-  -- Indefinite interfaces are ALWAYS non-dynamic.
-  | not (moduleIsDefinite (mi_module iface)) = return (Succeeded ())
-  | gopt Opt_BuildDynamicToo dflags = load_dynamic_too hooks logger name_cache unit_state dflags wanted_mod iface loc
-  | otherwise = return (Succeeded ())
-
-load_dynamic_too :: Hooks -> Logger -> NameCache -> UnitState -> DynFlags
-                 -> Module -> ModIface -> ModLocation
-                 -> IO (MaybeErr MissingInterfaceError ())
-load_dynamic_too hooks logger name_cache unit_state dflags wanted_mod iface loc = do
-  read_file hooks logger name_cache unit_state dflags wanted_mod (ml_dyn_hi_file loc) >>= \case
-    Succeeded (dynIface, _)
-     | mi_mod_hash iface == mi_mod_hash dynIface
-     -> return (Succeeded ())
-     | otherwise ->
-        do return $ (Failed $ DynamicHashMismatchError wanted_mod loc)
-    Failed err ->
-        do return $ (Failed $ FailedToLoadDynamicInterface wanted_mod err)
-
-          --((text "Failed to load dynamic interface file for" <+> ppr wanted_mod <> colon) $$ err))
-
-
-
+-- Note: load_dynamic_too_maybe and load_dynamic_too removed
+-- -dynamic-too is deprecated - we no longer check for .dyn_hi files
 
 read_file :: Hooks -> Logger -> NameCache -> UnitState -> DynFlags
           -> Module -> FilePath

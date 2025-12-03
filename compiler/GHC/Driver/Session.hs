@@ -41,7 +41,8 @@ module GHC.Driver.Session (
         xopt_DuplicateRecordFields,
         xopt_FieldSelectors,
         lang_set,
-        DynamicTooState(..), dynamicTooState, setDynamicNow,
+        -- Note: DynamicTooState, dynamicTooState, setDynamicNow removed
+        -- -dynamic-too is deprecated
         sccProfilingEnabled,
         needSourceNotes,
         OnOff(..),
@@ -1325,8 +1326,10 @@ dynamic_flags_deps = [
   , make_ord_flag defGhcFlag "ddump-file-prefix"
         (hasArg (setDumpPrefixForce . Just . flip (++) "."))
 
-  , make_ord_flag defGhcFlag "dynamic-too"
-        (NoArg (setGeneralFlag Opt_BuildDynamicToo))
+  -- -dynamic-too is deprecated and ignored - GHC now only produces dynamic objects
+  , make_dep_flag defGhcFlag "dynamic-too"
+        (NoArg (return ()))
+        "-dynamic-too is deprecated and ignored. Use -dynamic instead."
 
         ------- Keeping temporary files -------------------------------------
      -- These can be singular (think ghc -c) or plural (think ghc --make)
@@ -3664,17 +3667,7 @@ makeDynFlagsConsistent :: DynFlags -> (DynFlags, [Warn], [Located SDoc])
 -- ensure that a later change doesn't invalidate an earlier check.
 -- Be careful not to introduce potential loops!
 makeDynFlagsConsistent dflags
- -- Disable -dynamic-too on Windows (#8228, #7134, #5987)
- | os == OSMinGW32 && gopt Opt_BuildDynamicToo dflags
-    = let dflags' = gopt_unset dflags Opt_BuildDynamicToo
-          warn    = "-dynamic-too is not supported on Windows"
-      in loop dflags' warn
- -- Disable -dynamic-too if we are are compiling with -dynamic already, otherwise
- -- you get two dynamic object files (.o and .dyn_o). (#20436)
- | ways dflags `hasWay` WayDyn && gopt Opt_BuildDynamicToo dflags
-    = let dflags' = gopt_unset dflags Opt_BuildDynamicToo
-          warn = "-dynamic-too is ignored when using -dynamic"
-      in loop dflags' warn
+ -- Note: -dynamic-too validation removed - flag is now deprecated and ignored
 
  | gopt Opt_SplitSections dflags
  , platformHasSubsectionsViaSymbols (targetPlatform dflags)
@@ -3899,15 +3892,13 @@ decodeSize str
 foreign import ccall unsafe "setHeapSize"       setHeapSize       :: Int -> IO ()
 foreign import ccall unsafe "enableTimingStats" enableTimingStats :: IO ()
 
+-- Note: dynamicNow removed - -dynamic-too is deprecated
+-- Always use the non-dynamic output file paths
 outputFile :: DynFlags -> Maybe String
-outputFile dflags
-   | dynamicNow dflags = dynOutputFile_ dflags
-   | otherwise         = outputFile_    dflags
+outputFile dflags = outputFile_ dflags
 
 objectSuf :: DynFlags -> String
-objectSuf dflags
-   | dynamicNow dflags = dynObjectSuf_ dflags
-   | otherwise         = objectSuf_    dflags
+objectSuf dflags = objectSuf_ dflags
 
 -- | Pretty-print the difference between 2 DynFlags.
 --

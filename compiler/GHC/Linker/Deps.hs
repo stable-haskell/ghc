@@ -51,7 +51,7 @@ import System.Directory
 
 data LinkDepsOpts = LinkDepsOpts
   { ldObjSuffix   :: !String                        -- ^ Suffix of .o files
-  , ldForceDyn    :: !Bool                          -- ^ Always use .dyn_o?
+  , ldForceDyn    :: !Bool                          -- ^ Force dynamic loading (legacy, .dyn_o deprecated)
   , ldUnitEnv     :: !UnitEnv
   , ldPprOpts     :: !SDocContext                   -- ^ Rendering options for error messages
   , ldUseByteCode :: !Bool                          -- ^ Use bytecode rather than objects
@@ -239,9 +239,8 @@ throwProgramError opts doc = throwGhcExceptionIO (ProgramError (renderWithContex
 checkNonStdWay :: LinkDepsOpts -> Interp -> SrcSpan -> IO (Maybe FilePath)
 checkNonStdWay _opts interp _srcspan
   -- On some targets (e.g. wasm) the RTS linker only supports loading
-  -- dynamic code, in which case we need to ensure the .dyn_o object
-  -- is picked (instead of .o which is also present because of
-  -- -dynamic-too)
+  -- dynamic code. Note: -dynamic-too is deprecated, so .dyn_o is no
+  -- longer produced. Dynamic objects are now just .o files.
   | ldForceDyn _opts = do
       let target_ways = fullWays $ ldWays _opts
       pure $ if target_ways `hasWay` WayDyn

@@ -940,12 +940,7 @@ enableCodeGenWhen logger tmpfs staticLife dynLife unit_env mod_graph = do
                      }
                -- Recursive call to catch the other cases
                enable_code_gen_ms ms'
-         | dynamic_too_enable enable_spec ms -> do
-               let ms' = ms
-                     { ms_hspp_opts = gopt_set (ms_hspp_opts ms) Opt_BuildDynamicToo
-                     }
-               -- Recursive call to catch the other cases
-               enable_code_gen_ms ms'
+         -- Note: dynamic_too_enable case removed - -dynamic-too is deprecated
          | ext_interp_enable ms -> do
                let ms' = ms
                      { ms_hspp_opts = gopt_set (ms_hspp_opts ms) Opt_ExternalInterpreter
@@ -968,14 +963,10 @@ enableCodeGenWhen logger tmpfs staticLife dynLife unit_env mod_graph = do
       -- can't compile anything anyway! See #16219.
       isHomeUnitDefinite (ue_unitHomeUnit (ms_unitid ms) unit_env)
 
+    -- bytecode_and_enable: prefer bytecode over needing dynamic objects
+    -- Note: dynamic_too_enable logic removed - -dynamic-too is deprecated
     bytecode_and_enable enable_spec ms =
-      -- In the situation where we **would** need to enable dynamic-too
-      -- IF we had decided we needed objects
-      dynamic_too_enable EnableObject ms
-        -- but we prefer to use bytecode rather than objects
-        && prefer_bytecode
-        -- and we haven't already turned it on
-        && not generate_both
+        prefer_bytecode && not generate_both
       where
         lcl_dflags   = ms_hspp_opts ms
         prefer_bytecode = case enable_spec of
@@ -984,29 +975,6 @@ enableCodeGenWhen logger tmpfs staticLife dynLife unit_env mod_graph = do
                             EnableObject -> False
 
         generate_both   = gopt Opt_ByteCodeAndObjectCode lcl_dflags
-
-    -- #8180 - when using TemplateHaskell, switch on -dynamic-too so
-    -- the linker can correctly load the object files.  This isn't necessary
-    -- when using -fexternal-interpreter.
-    -- FIXME: Duplicated from makeDynFlagsConsistent
-    dynamic_too_enable enable_spec ms
-      | sTargetRTSLinkerOnlySupportsSharedLibs $ settings lcl_dflags =
-          not isDynWay && not dyn_too_enabled
-            && enable_object
-      | otherwise =
-          hostIsDynamic && not hostIsProfiled && internalInterpreter &&
-            not isDynWay && not isProfWay &&  not dyn_too_enabled
-              && enable_object
-      where
-       lcl_dflags   = ms_hspp_opts ms
-       internalInterpreter = not (gopt Opt_ExternalInterpreter lcl_dflags)
-       dyn_too_enabled = gopt Opt_BuildDynamicToo lcl_dflags
-       isDynWay    = hasWay (ways lcl_dflags) WayDyn
-       isProfWay   = hasWay (ways lcl_dflags) WayProf
-       enable_object = case enable_spec of
-                            EnableByteCode -> False
-                            EnableByteCodeAndObject -> True
-                            EnableObject -> True
 
     -- #16331 - when no "internal interpreter" is available but we
     -- need to process some TemplateHaskell or QuasiQuotes, we automatically
