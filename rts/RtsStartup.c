@@ -69,6 +69,46 @@
 #include <locale.h>
 #endif
 
+/*
+ * Note [Promoting Boot Libraries to RTLD_GLOBAL]
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ * Boot libraries (ghc-internal, etc.) are loaded by the system linker at
+ * program startup with RTLD_LOCAL (default). When user code is later
+ * dlopen'd, the dynamic linker can't see these existing copies and loads
+ * FRESH copies, causing duplicate global state.
+ *
+ * With ghc-internal, this causes GC crashes ("strange closure type")
+ * because the RTS's ghc_hs_iface pointer references info tables from
+ * the first copy, while user code uses info tables from the second copy.
+ *
+ * Fix: Promote boot libraries to RTLD_GLOBAL scope early in RTS init,
+ * before any user code can trigger dlopen.
+ *
+ * This is a no-op on:
+ * - Windows (different linking model)
+ * - Systems without RTLD_NOLOAD
+ * - Static executables (symbols already global)
+ */
+#if !defined(mingw32_HOST_OS) && defined(RTLD_NOLOAD)
+#include <dlfcn.h>
+
+static void promoteBootLibrariesToGlobal(void)
+{
+    extern void init_ghc_hs_iface(void);
+    Dl_info info;
+    if (dladdr((void*)&init_ghc_hs_iface, &info) && info.dli_fname) {
+        void* handle = dlopen(info.dli_fname, RTLD_NOW | RTLD_NOLOAD | RTLD_GLOBAL);
+        IF_DEBUG(linker,
+            if (handle) {
+                debugBelch("RTS: promoted ghc-internal (%s) to RTLD_GLOBAL\n",
+                           info.dli_fname);
+            }
+        );
+        (void)handle;
+    }
+}
+#endif
+
 // Count of how many outstanding hs_init()s there have been.
 static StgWord hs_init_count = 0;
 static bool rts_shutdown = false;
@@ -249,6 +289,12 @@ hs_init_ghc(int *argc, char **argv[], RtsConfig rts_config)
     setlocale(LC_CTYPE,"");
 
     init_ghc_hs_iface();
+
+#if !defined(mingw32_HOST_OS) && defined(RTLD_NOLOAD)
+    /* Promote boot libraries to RTLD_GLOBAL for dynamic code loading.
+     * See Note [Promoting Boot Libraries to RTLD_GLOBAL] */
+    promoteBootLibrariesToGlobal();
+#endif
 
     /* Initialise the stats department, phase 0 */
     initStats0();
