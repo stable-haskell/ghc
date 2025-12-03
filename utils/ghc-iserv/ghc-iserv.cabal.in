@@ -23,9 +23,41 @@ Category: Development
 build-type: Simple
 cabal-version: >=1.10
 
+-- Note [ghc-iserv and dynamic symbol export]
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+-- ghc-iserv loads Haskell shared libraries dynamically (for TH, GHCi).
+-- These libraries reference RTS symbols like stg_INTLIKE_closure.
+-- The RTS sublibrary is already linked into ghc-iserv at build time,
+-- but without special linker flags, those symbols aren't visible to
+-- dlopen'd libraries.
+--
+-- Platform-specific solutions:
+--   Linux:   -rdynamic passes --export-dynamic to the linker
+--   macOS:   -flat_namespace makes all symbols visible across namespaces
+--   Windows: --export-all-symbols exports all symbols from the executable
+--
+-- Alternative approaches considered:
+-- 1. LD_PRELOAD: GHC sets LD_PRELOAD when spawning iserv to preload RTS
+--    - Con: Loads second RTS copy; platform-specific env var handling
+-- 2. dlopen in iservmain.c: Load RTS before hs_main()
+--    - Con: Requires C code changes; still loads second RTS
+--
+-- Using linker flags is preferred because it exports symbols from the RTS
+-- that's already linked into iserv, avoiding a second copy.
+
 Executable ghc-iserv
     Default-Language: Haskell2010
     ghc-options: -no-hs-main
+
+    -- Export RTS symbols to dynamically loaded libraries
+    -- See Note [ghc-iserv and dynamic symbol export]
+    if os(linux) || os(freebsd)
+      ghc-options: -rdynamic
+    if os(osx) || os(darwin)
+      ghc-options: -optl -Wl,-flat_namespace
+    if os(windows) || os(mingw32)
+      ghc-options: -optl -Wl,--export-all-symbols
+
     Main-Is: Main.hs
     C-Sources: cbits/iservmain.c
     Hs-Source-Dirs: src

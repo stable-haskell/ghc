@@ -4,6 +4,16 @@
 
 #include <HsFFI.h>
 
+/*
+ * Note [Boot library symbol visibility]
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ * Boot library promotion to RTLD_GLOBAL is now handled in RTS initialization.
+ * See Note [Promoting Boot Libraries to RTLD_GLOBAL] in rts/RtsStartup.c.
+ *
+ * This ensures all GHC API programs (not just ghc-iserv) properly export
+ * boot library symbols before any user code is loaded via dlopen.
+ */
+
 int main (int argc, char *argv[])
 {
     RtsConfig conf = defaultRtsConfig;
