@@ -606,7 +606,7 @@ jobs:
           cd _build/bindist
           for file in *.tar.gz; do tar xzf "$file"; done
           cd testsuite
-          PATH=$GITHUB_WORKSPACE/_build/bindist/bin:$PATH make
+          PATH=$(pwd)/_build/bindist/bin:$PATH make
         env:
           THREADS: 4
 
