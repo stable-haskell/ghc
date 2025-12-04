@@ -603,10 +603,11 @@ jobs:
           fi
 
           rm -rf .git
+          (
           cd _build/bindist
           for file in *.tar.gz; do tar xzf "$file"; done
-          cd testsuite
-          PATH=$(pwd)/_build/bindist/bin:$PATH ${{ env.MAKE }}
+          )
+          PATH=$(pwd)/_build/bindist/bin:$PATH ${{ env.MAKE }} -C _build/bindist/testsuite
         env:
           THREADS: 4
 
