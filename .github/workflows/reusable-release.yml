@@ -606,7 +606,7 @@ jobs:
           cd _build/bindist
           for file in *.tar.gz; do tar xzf "$file"; done
           cd testsuite
-          PATH=$(pwd)/_build/bindist/bin:$PATH make
+          PATH=$(pwd)/_build/bindist/bin:$PATH ${{ env.MAKE }}
         env:
           THREADS: 4
 
@@ -771,6 +771,7 @@ jobs:
         run: *test
         env:
           THREADS: 4
+          MAKE: make
 
   test-freebsd-x86_64:
     name: Test FreeBSD x86_64
