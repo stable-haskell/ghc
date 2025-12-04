@@ -207,7 +207,7 @@ linearRegAlloc
         :: forall instr. (Instruction instr)
         => NCGConfig
         -> [BlockId] -- ^ entry points
-        -> BlockMap Regs
+        -> BlockMap (UniqSet RegWithFormat)
               -- ^ live regs on entry to each basic block
         -> [SCC (LiveBasicBlock instr)]
               -- ^ instructions annotated with "deaths"
@@ -246,7 +246,7 @@ linearRegAlloc'
         => NCGConfig
         -> freeRegs
         -> [BlockId]                    -- ^ entry points
-        -> BlockMap Regs              -- ^ live regs on entry to each basic block
+        -> BlockMap (UniqSet RegWithFormat)              -- ^ live regs on entry to each basic block
         -> [SCC (LiveBasicBlock instr)] -- ^ instructions annotated with "deaths"
         -> UniqDSM ([NatBasicBlock instr], RegAllocStats, Int)
 
@@ -260,7 +260,7 @@ linearRegAlloc' config initFreeRegs entry_ids block_live sccs
 
 linearRA_SCCs :: OutputableRegConstraint freeRegs instr
               => [BlockId]
-              -> BlockMap Regs
+              -> BlockMap (UniqSet RegWithFormat)
               -> [NatBasicBlock instr]
               -> [SCC (LiveBasicBlock instr)]
               -> RegM freeRegs [NatBasicBlock instr]
@@ -295,7 +295,7 @@ linearRA_SCCs entry_ids block_live blocksAcc (CyclicSCC blocks : sccs)
 
 process :: forall freeRegs instr. (OutputableRegConstraint freeRegs instr)
         => [BlockId]
-        -> BlockMap Regs
+        -> BlockMap (UniqSet RegWithFormat)
         -> [GenBasicBlock (LiveInstr instr)]
         -> RegM freeRegs [[NatBasicBlock instr]]
 process entry_ids block_live =
@@ -334,7 +334,7 @@ process entry_ids block_live =
 --
 processBlock
         :: OutputableRegConstraint freeRegs instr
-        => BlockMap Regs              -- ^ live regs on entry to each basic block
+        => BlockMap (UniqSet RegWithFormat)              -- ^ live regs on entry to each basic block
         -> LiveBasicBlock instr         -- ^ block to do register allocation on
         -> RegM freeRegs [NatBasicBlock instr]   -- ^ block with registers allocated
 
@@ -351,7 +351,7 @@ processBlock block_live (BasicBlock id instrs)
 -- | Load the freeregs and current reg assignment into the RegM state
 --      for the basic block with this BlockId.
 initBlock :: FR freeRegs
-          => BlockId -> BlockMap Regs -> RegM freeRegs ()
+          => BlockId -> BlockMap (UniqSet RegWithFormat) -> RegM freeRegs ()
 initBlock id block_live
  = do   platform    <- getPlatform
         block_assig <- getBlockAssigR
@@ -368,7 +368,7 @@ initBlock id block_live
                             setFreeRegsR    (frInitFreeRegs platform)
                           Just live ->
                             setFreeRegsR $ foldl' (flip $ frAllocateReg platform) (frInitFreeRegs platform)
-                                                  (nonDetEltsUniqSet $ takeRealRegs $ getRegs live)
+                                                  (nonDetEltsUniqSet $ takeRealRegs live)
                             -- See Note [Unique Determinism and code generation]
                         setAssigR       emptyRegMap
 
@@ -381,7 +381,7 @@ initBlock id block_live
 -- | Do allocation for a sequence of instructions.
 linearRA
         :: forall freeRegs instr. (OutputableRegConstraint freeRegs instr)
-        => BlockMap Regs                      -- ^ map of what vregs are live on entry to each block.
+        => BlockMap (UniqSet RegWithFormat)                      -- ^ map of what vregs are live on entry to each block.
         -> BlockId                              -- ^ id of the current block, for debugging.
         -> [LiveInstr instr]                    -- ^ liveness annotated instructions in this block.
         -> RegM freeRegs
@@ -406,7 +406,7 @@ linearRA block_live block_id = go [] []
 -- | Do allocation for a single instruction.
 raInsn
         :: OutputableRegConstraint freeRegs instr
-        => BlockMap Regs                         -- ^ map of what vregs are live on entry to each block.
+        => BlockMap (UniqSet RegWithFormat)                      -- ^ map of what vregs are love on entry to each block.
         -> [instr]                              -- ^ accumulator for instructions already processed.
         -> BlockId                              -- ^ the id of the current block, for debugging
         -> LiveInstr instr                      -- ^ the instr to have its regs allocated, with liveness info.
@@ -437,7 +437,7 @@ raInsn block_live new_instrs id (LiveInstr (Instr instr) (Just live))
     -- (we can't eliminate it if the source register is on the stack, because
     --  we do not want to use one spill slot for different virtual registers)
     case takeRegRegMoveInstr platform instr of
-        Just (src,dst)  | Just fmt <- lookupReg src (liveDieRead live),
+        Just (src,dst)  | Just (RegWithFormat _ fmt) <- lookupUniqSet_Directly (liveDieRead live) (getUnique src),
                           isVirtualReg dst,
                           not (dst `elemUFM` assig),
                           isRealReg src || isInReg src assig -> do
@@ -461,8 +461,8 @@ raInsn block_live new_instrs id (LiveInstr (Instr instr) (Just live))
            return (new_instrs, [])
 
         _ -> genRaInsn block_live new_instrs id instr
-                        (map regWithFormat_reg $ nonDetEltsUniqSet $ getRegs $ liveDieRead live)
-                        (map regWithFormat_reg $ nonDetEltsUniqSet $ getRegs $ liveDieWrite live)
+                        (map regWithFormat_reg $ nonDetEltsUniqSet $ liveDieRead live)
+                        (map regWithFormat_reg $ nonDetEltsUniqSet $ liveDieWrite live)
                         -- See Note [Unique Determinism and code generation]
 
 raInsn _ _ _ instr
@@ -494,7 +494,7 @@ isInReg src assig
 
 genRaInsn :: forall freeRegs instr.
              (OutputableRegConstraint freeRegs instr)
-          => BlockMap Regs
+          => BlockMap (UniqSet RegWithFormat)
           -> [instr]
           -> BlockId
           -> instr
@@ -673,11 +673,10 @@ releaseRegs regs = do
 saveClobberedTemps
         :: forall instr freeRegs.
            (Instruction instr, FR freeRegs)
-        => [RealReg]             -- ^ real registers clobbered by this instruction
-        -> [Reg]                 -- ^ registers which are no longer live after this instruction,
-                                 -- because read for the last time
-        -> RegM freeRegs [instr] -- return: instructions to spill any temps that will
-                                 -- be clobbered.
+        => [RealReg]            -- real registers clobbered by this instruction
+        -> [Reg]                -- registers which are no longer live after this insn
+        -> RegM freeRegs [instr]         -- return: instructions to spill any temps that will
+                                -- be clobbered.
 
 saveClobberedTemps [] _
         = return []
@@ -734,7 +733,6 @@ saveClobberedTemps clobbered dying
 
               -- (2) no free registers: spill the value
               [] -> do
-
                   (spill, slot)   <- spillR (RegWithFormat (RegReal reg) fmt) temp
 
                   -- record why this reg was spilled for profiling
@@ -834,24 +832,19 @@ allocateRegsAndSpill reading keep spills alloc (r@(VirtualRegWithFormat vr vrFmt
         let doSpill = allocRegsAndSpill_spill reading keep spills alloc r rs assig
         case lookupUFM assig vr of
                 -- case (1a): already in a register
-                Just (Loc (InReg my_reg) in_reg_fmt) -> do
-                  -- (RF1) from Note [Allocated register formats]:
-                  -- writes redefine the format the register is used at.
-                  when (not reading && vrFmt /= in_reg_fmt) $
-                    setAssigR $ toRegMap $
-                      addToUFM assig vr (Loc (InReg my_reg) vrFmt)
-                  allocateRegsAndSpill reading keep spills (my_reg:alloc) rs
+                Just (Loc (InReg my_reg) _) ->
+                        allocateRegsAndSpill reading keep spills (my_reg:alloc) rs
 
                 -- case (1b): already in a register (and memory)
-                Just (Loc (InBoth my_reg _) _) -> do
-                  -- NB1. if we're writing this register, update its assignment to be
-                  -- InReg, because the memory value is no longer valid.
-                  -- NB2. This is why we must process written registers here, even if they
-                  -- are also read by the same instruction.
-                  when (not reading) $
-                    setAssigR $ toRegMap $
-                      addToUFM assig vr (Loc (InReg my_reg) vrFmt)
-                  allocateRegsAndSpill reading keep spills (my_reg:alloc) rs
+                -- NB1. if we're writing this register, update its assignment to be
+                -- InReg, because the memory value is no longer valid.
+                -- NB2. This is why we must process written registers here, even if they
+                -- are also read by the same instruction.
+                Just (Loc (InBoth my_reg _) _)
+                 -> do  when (not reading) $
+                          setAssigR $ toRegMap $
+                            addToUFM assig vr (Loc (InReg my_reg) vrFmt)
+                        allocateRegsAndSpill reading keep spills (my_reg:alloc) rs
 
                 -- Not already in a register, so we need to find a free one...
                 Just (Loc (InMem slot) memFmt)
@@ -1034,39 +1027,6 @@ loadTemp (VirtualRegWithFormat vreg _fmt) (ReadMem slot memFmt) hreg spills
 
 loadTemp _ _ _ spills =
    return spills
-
-{- Note [Allocated register formats]
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-We uphold the following principle for the format at which we keep track of
-alllocated registers:
-
-  RF1. Writes redefine the format.
-
-    When we write to a register 'r' at format 'fmt', we consider the register
-    to hold that format going forwards.
-
-    (In cases where a partial write is desired, the move instruction should
-     specify that the destination format is the full register, even if, say,
-     the instruction only writes to the low 64 bits of the register.
-     See also Wrinkle [Don't allow scalar partial writes] in
-     Note [Register formats in liveness analysis] in GHC.CmmToAsm.Reg.Liveness.)
-
-  RF2. Reads from a register do not redefine its format.
-
-    Generally speaking, as explained in Note [Register formats in liveness analysis]
-    in GHC.CmmToAsm.Reg.Liveness, when computing the used format from a collection
-    of reads, we take a least upper bound.
-
-It is particularly important to get (RF1) correct, as otherwise we can end up in
-the situation of T26411b, where code such as
-
-  movsd .Ln6m(%rip),%v1
-  shufpd $0,%v1,%v1
-
-we start off with %v1 :: F64, but after shufpd (which broadcasts the low part
-to the high part) we must consider that %v1 :: F64x2. If we fail to do that,
-then we will silently discard the top bits in spill/reload operations.
--}
 
 {- Note [Use spilled format when reloading]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
