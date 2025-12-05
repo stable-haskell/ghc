@@ -3468,6 +3468,7 @@ compilerInfo dflags
     : map (fmap $ expandDirectories (topDir dflags) (toolDir dflags))
           (rawSettings dflags)
    ++ [("Project version",             projectVersion dflags),
+       ("Edition",                     "Stable Haskell"),
        ("Project Git commit id",       cProjectGitCommitId),
        ("Project Version Int",         cProjectVersionInt),
        ("Project Patch Level",         cProjectPatchLevel),
