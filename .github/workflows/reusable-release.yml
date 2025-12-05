@@ -111,18 +111,22 @@ jobs:
           ref: ${{ matrix.branch }}
           submodules: recursive
 
-      - if: matrix.platform.image == 'rockylinux:8'
+      - uses: nick-fields/retry@v3
+        if: matrix.platform.image == 'rockylinux:8'
         name: Install latest make
-        run: |
-          set -eux
-
-          curl -O -L https://ftp.gnu.org/gnu/make/make-${{ env.MAKE_VERSION }}.tar.gz
-          tar xf make-${{ env.MAKE_VERSION }}.tar.gz
-          cd make-${{ env.MAKE_VERSION }}
-          ./configure
-          make install
-          ln -s make /usr/local/bin/gmake
-          echo "/usr/local/bin" >> $GITHUB_PATH
+        with:
+          timeout_minutes: 15
+          max_attempts: 3
+          retry_on: error
+          command: |
+            set -eux
+            curl -O -L https://ftp.gnu.org/gnu/make/make-${{ env.MAKE_VERSION }}.tar.gz
+            tar xf make-${{ env.MAKE_VERSION }}.tar.gz
+            cd make-${{ env.MAKE_VERSION }}
+            ./configure
+            make install
+            ln -s make /usr/local/bin/gmake
+            echo "/usr/local/bin" >> $GITHUB_PATH
 
       - name: Add extra-lib-dirs
         run: &extra-lib-dirs |
