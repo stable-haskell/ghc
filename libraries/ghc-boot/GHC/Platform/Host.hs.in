@@ -1,0 +1,12 @@
+module GHC.Platform.Host where
+
+import GHC.Platform.ArchOS
+
+hostPlatformArch :: Arch
+hostPlatformArch = @HaskellTargetArch@
+
+hostPlatformOS   :: OS
+hostPlatformOS   = @HaskellTargetOs@
+
+hostPlatformArchOS :: ArchOS
+hostPlatformArchOS = ArchOS hostPlatformArch hostPlatformOS
