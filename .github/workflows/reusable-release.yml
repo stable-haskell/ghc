@@ -360,7 +360,7 @@ jobs:
 
       - name: Install msys2 dependencies
         run: &msys2-install |
-          pacman --noconfirm -S --needed --overwrite '*' git vim winpty git tar bsdtar unzip binutils autoconf make xz curl libtool automake p7zip patch ca-certificates python3 zip mingw-w64-clang-x86_64-toolchain mingw-w64-clang-x86_64-python-sphinx mingw-w64-clang-x86_64-python-requests mingw-w64-clang-x86_64-tools-git tar gzip
+          pacman --noconfirm -S --needed --overwrite '*' git vim winpty git tar bsdtar unzip binutils autoconf make xz curl libtool automake p7zip patch ca-certificates python3 zip mingw-w64-clang-x86_64-toolchain mingw-w64-clang-x86_64-python-sphinx mingw-w64-clang-x86_64-python-requests mingw-w64-clang-x86_64-tools-git mingw-w64-clang-x86_64-ghostscript tar gzip
 
       - id: ghcup
         name: Install GHCup
@@ -592,6 +592,10 @@ jobs:
           name: artifacts-${{ matrix.platform.ARTIFACT }}-${{ matrix.branch }}
           path: ./_build/bindist
 
+      - id: pwd_output
+        run: |
+          echo pwd="$(pwd)" >> "$GITHUB_OUTPUT"
+
       - name: Run test
         run: &test |
           # On windows, we use msys2 shell, which does not by default inherit the windows PATHs.
@@ -610,6 +614,11 @@ jobs:
           PATH=$(pwd)/_build/bindist/bin:$PATH ${{ env.MAKE }} -C _build/bindist/testsuite
         env:
           THREADS: 4
+          TEST_HC: ${{ steps.pwd_output.outputs.pwd }}/_build/bindist/bin/ghc
+          GHC_PKG: ${{ steps.pwd_output.outputs.pwd }}/_build/bindist/bin/ghc-pkg
+          HP2PS_ABS: ${{ steps.pwd_output.outputs.pwd }}/_build/bindist/bin/hp2ps
+          HPC: ${{ steps.pwd_output.outputs.pwd }}/_build/bindist/bin/hpc
+          RUNGHC: ${{ steps.pwd_output.outputs.pwd }}/_build/bindist/bin/runghc
 
   test-arm:
     name: Test ARM binary
@@ -823,6 +832,7 @@ jobs:
           export LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH
           PATH=$GITHUB_WORKSPACE/_build/bindist/bin:$PATH gmake
         env:
+          MAKE: gmake
           THREADS: 8
           EXTRA_HC_OPTS: "-optl-L/usr/local/lib -optc-I/usr/local/include"
 
