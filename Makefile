@@ -981,11 +981,14 @@ _build/bindist: stage2 driver/ghc-usage.txt driver/ghci-usage.txt
 	LD_LIBRARY_PATH=$(LD_LIBRARY_PATH) $@/bin/ghc-pkg$(EXE_EXT) recache
 	# Copy headers
 	@$(call copy_all_stage2_h,LD_LIBRARY_PATH=$(LD_LIBRARY_PATH) $@/bin/ghc-pkg$(EXE_EXT))
-	# Add basename symlinks for nested shared libs (.dylib, .so) in lib/$(HOST_PLATFORM)
-	# This makes RTS sublibraries discoverable by the dynamic linker
+	# Add basename symlinks for nested shared libs (.dylib, .so) in
+	# lib/$(HOST_PLATFORM). Shared libraries may be installed in subdirectories
+	# (e.g., lib/x86_64-linux/rts-1.0.3/). We create symlinks at the top level
+	# so all shared libraries are in one folder.
 	@if [ -d "$@/lib/$(HOST_PLATFORM)" ]; then \
-	  cd "$@/lib/$(HOST_PLATFORM)" ; \
-	  find . -mindepth 2 \( -name "*.dylib" -o -name "*.so" \) -type f -exec sh -c 'ln -sf "$$1" "$$(basename "$$1")"' _ {} \; ; \
+	  cd "$@/lib/$(HOST_PLATFORM)" && \
+	  find . -mindepth 2 \( -name "*.dylib" -o -name "*.so" \) -type f \
+	    -exec sh -c 'ln -sf "$$1" "$$(basename "$$1")"' _ {} \; ; \
 	fi
 	# Create -dyn iserv executable (symlink so ghc can find ghc-iserv-dyn)
 	@ln -sf ghc-iserv$(EXE_EXT) "$@/bin/ghc-iserv-dyn$(EXE_EXT)"
@@ -1017,12 +1020,12 @@ _build/bindist/lib/targets/%: _build/bindist driver/ghc-usage.txt driver/ghci-us
 	# Copy libraries and settings
 	@if [ -e $(CURDIR)/_build/bindist/lib/targets/$(@F)/lib/$(@F) ] ; then find $(CURDIR)/_build/bindist/lib/targets/$(@F)/lib/$(@F)/ -mindepth 1 -type f -name "*.so" -execdir mv '{}' $(CURDIR)/_build/bindist/lib/targets/$(@F)/lib/$(@F)/'{}' \; ; fi
 	$(call copycrosslib,$(@F))
-	# Add basename symlinks for nested shared libs (.dylib, .so) in lib/$(@F)
+	# Add basename symlinks for nested shared libs (.dylib, .so) in lib/$(@F).
+	# See comment in _build/bindist target for explanation.
 	@if [ -d $(CURDIR)/_build/bindist/lib/targets/$(@F)/lib/$(@F) ] ; then \
-	  cd $(CURDIR)/_build/bindist/lib/targets/$(@F)/lib/$(@F) ; \
-	  for lib in $$(find . -mindepth 2 \( -name "*.dylib" -o -name "*.so" \) -type f) ; do \
-	    ln -sf "$$lib" "$$(basename "$$lib")" ; \
-	  done ; \
+	  cd $(CURDIR)/_build/bindist/lib/targets/$(@F)/lib/$(@F) && \
+	  find . -mindepth 2 \( -name "*.dylib" -o -name "*.so" \) -type f \
+	    -exec sh -c 'ln -sf "$$1" "$$(basename "$$1")"' _ {} \; ; \
 	fi
 	# --help
 	@cp -rfp driver/ghc-usage.txt _build/bindist/lib/targets/$(@F)/lib/
