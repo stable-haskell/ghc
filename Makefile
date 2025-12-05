@@ -269,7 +269,8 @@ STAGE2_UTIL_TARGETS := \
 	ghc-toolchain:ghc-toolchain \
 	integer-gmp:integer-gmp \
 	system-cxx-std-lib:system-cxx-std-lib \
-	xhtml:xhtml
+	xhtml:xhtml \
+	haddock:haddock
 
 ifneq ($(OS),Windows_NT)
 STAGE2_UTIL_TARGETS += terminfo:terminfo
@@ -299,7 +300,8 @@ STAGE2_UTIL_EXECUTABLES := \
 	hp2ps \
 	hpc \
 	runghc \
-	unlit
+	unlit \
+	haddock
 
 BINDIST_EXECTUABLES := \
 	ghc \
@@ -309,7 +311,8 @@ BINDIST_EXECTUABLES := \
 	hpc \
 	hsc2hs \
 	runghc \
-	unlit
+	unlit \
+	haddock
 
 STAGE3_LIBS := \
     rts:nonthreaded-nodebug \

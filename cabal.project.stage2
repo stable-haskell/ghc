@@ -69,6 +69,12 @@ packages:
   utils/ghc-iserv
   utils/genapply
   utils/runghc
+  utils/haddock
+  utils/haddock/haddock-api
+  utils/haddock/haddock-library
+
+package haddock-api
+  flags: +in-ghc-tree
 
 if !os(windows)
   packages:
