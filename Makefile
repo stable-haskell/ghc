@@ -109,11 +109,14 @@ CC_LINK_OPT := -Wl,CRT_fp8.o
 LD := ld.lld.exe
 CYGPATH = cygpath --unix -f -
 CYGPATH_MIXED = cygpath --mixed -f -
+# Windows executables require .exe extension for native programs to find them
+EXE_EXT := .exe
 else
 CYGPATH_MIXED = cat
 CYGPATH = cat
-+CC_LINK_OPT ?=
+CC_LINK_OPT ?=
 LD ?= ld
+EXE_EXT :=
 endif
 
 EMCC ?= emcc
@@ -914,10 +917,18 @@ _build/bindist: stage2 driver/ghc-usage.txt driver/ghci-usage.txt
 	@mkdir -p $@/lib
 	# Copy executables from stage2 bin
 	@cp -rfp _build/stage2/bin/* $@/bin/
+ifeq ($(OS),Windows_NT)
+	# Add .exe extension to Windows executables (required for native Windows programs)
+	@cd $@/bin && for exe in $(BINDIST_EXECTUABLES); do \
+		if [ -f "$$exe" ] && [ ! -f "$$exe.exe" ]; then \
+			mv "$$exe" "$$exe.exe"; \
+		fi; \
+	done
+endif
 	# Copy libraries and settings from stage2 lib
 	@cp -rfp _build/stage2/lib/{package.conf.d,settings,template-hsc.h} $@/lib/
 	@mkdir -p $@/lib/$(HOST_PLATFORM)
-	@ffi_incdir=`$(CURDIR)/$@/bin/ghc-pkg field libffi-clib include-dirs | grep 'libffi-clib[/\\]src/' | sed 's/^[ \t]*//' | $(CYGPATH) | sed 's|.*$(CURDIR)/||'` ; \
+	@ffi_incdir=`$(CURDIR)/$@/bin/ghc-pkg$(EXE_EXT) field libffi-clib include-dirs | grep 'libffi-clib[/\\]src/' | sed 's/^[ \t]*//' | $(CYGPATH) | sed 's|.*$(CURDIR)/||'` ; \
 		cd $@/lib/package.conf.d ; \
 			for pkg in *.conf ; do \
 		  	pkgname=`echo $${pkg} | $(SED) 's/-[0-9.]*\(-[0-9a-zA-Z]*\)\?\.conf//'` ; \
@@ -930,22 +941,22 @@ _build/bindist: stage2 driver/ghc-usage.txt driver/ghci-usage.txt
 		    	$(call patchpackageconf,$${pkgname},$${pkg},../../..,$(HOST_PLATFORM),$${pkgnamever}) ; \
 	      	fi ; \
 			done ; \
-			$(call copy_headers,ffitarget.h,$(CURDIR)/$${ffi_incdir},libffi-clib,$(CURDIR)/$@/bin/ghc-pkg)
+			$(call copy_headers,ffitarget.h,$(CURDIR)/$${ffi_incdir},libffi-clib,$(CURDIR)/$@/bin/ghc-pkg$(EXE_EXT))
 	# Copy driver usage files
 	@cp -rfp driver/ghc-usage.txt $@/lib/
 	@cp -rfp driver/ghci-usage.txt $@/lib/
 	@echo "FIXME: Changing 'Support SMP' from YES to NO in settings file"
 	@$(SED) 's/("Support SMP","YES")/("Support SMP","NO")/' -i.bck $@/lib/settings
 	# Recache
-	$@/bin/ghc-pkg recache
+	$@/bin/ghc-pkg$(EXE_EXT) recache
 	# Copy headers
-	@$(call copy_all_stage2_h,$@/bin/ghc-pkg)
+	@$(call copy_all_stage2_h,$@/bin/ghc-pkg$(EXE_EXT))
 	@echo "::endgroup::"
 
 _build/bindist/ghc.tar.gz: _build/bindist
 	@tar czf $@ \
 		--directory=_build/bindist \
-		$(foreach exe,$(BINDIST_EXECTUABLES),bin/$(exe)) \
+		$(foreach exe,$(BINDIST_EXECTUABLES),bin/$(exe)$(EXE_EXT)) \
 		lib/ghc-usage.txt \
 		lib/ghci-usage.txt \
 		lib/package.conf.d \
@@ -982,15 +993,15 @@ _build/bindist/ghc-%.tar.gz: _build/bindist/lib/targets/% _build/bindist/ghc.tar
 
 _build/bindist/cabal.tar.gz: _build/stage0/bin/cabal
 	@mkdir -p _build/bindist/bin
-	@cp $^ _build/bindist/bin/cabal
+	@cp $^ _build/bindist/bin/cabal$(EXE_EXT)
 	@tar czf $@ \
 		--directory=_build/bindist \
-		bin/cabal
+		bin/cabal$(EXE_EXT)
 
 _build/bindist/haskell-toolchain.tar.gz: _build/bindist/cabal.tar.gz _build/bindist/ghc.tar.gz _build/bindist/ghc-javascript-unknown-ghcjs.tar.gz
 	@tar czf $@ \
 		--directory=_build/bindist \
-		$(foreach exe,$(BINDIST_EXECTUABLES),bin/$(exe)) \
+		$(foreach exe,$(BINDIST_EXECTUABLES),bin/$(exe)$(EXE_EXT)) \
 		lib/ghc-usage.txt \
 		lib/ghci-usage.txt \
 		lib/package.conf.d \
@@ -999,7 +1010,7 @@ _build/bindist/haskell-toolchain.tar.gz: _build/bindist/cabal.tar.gz _build/bind
 		lib/$(HOST_PLATFORM) \
 		$(foreach exe,$(BINDIST_EXECTUABLES),bin/javascript-unknown-ghcjs-$(exe)) \
 		lib/targets/javascript-unknown-ghcjs \
-		bin/cabal
+		bin/cabal$(EXE_EXT)
 
 _build/bindist/tests.tar.gz:
 	@tar czf $@ \
