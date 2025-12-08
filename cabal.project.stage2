@@ -1,13 +1,9 @@
-allow-boot-library-installs: True
-benchmarks: False
-tests: False
+-- Configuration common to all stages
+import: cabal.project.common
+import: cabal.project.stage2.settings
 
 -- Disable Hackage, we explicitly include the packages we need.
 active-repositories: :none
-
--- Import configure/generated feature toggles (dynamic, etc.) if present.
--- A default file is kept in-tree; configure will overwrite with substituted values.
-import: cabal.project.stage2.settings
 
 packages:
   -- RTS
@@ -42,12 +38,12 @@ packages:
   utils/ghc-iserv
   utils/ghc-pkg
   utils/ghc-toolchain
-  utils/hp2ps
-  utils/runghc
-  utils/unlit
   utils/haddock
   utils/haddock/haddock-api
   utils/haddock/haddock-library
+  utils/hp2ps
+  utils/runghc
+  utils/unlit
 
   -- The following are packages available on Hackage but included as submodules
   libraries/array
@@ -71,7 +67,6 @@ packages:
   libraries/process
   libraries/semaphore-compat
   libraries/stm
-  libraries/terminfo
   libraries/text
   libraries/time
   libraries/transformers
@@ -87,6 +82,10 @@ packages:
   https://hackage.haskell.org/package/happy-2.1.5/happy-2.1.5.tar.gz
   https://hackage.haskell.org/package/happy-lib-2.1.5/happy-lib-2.1.5.tar.gz
 
+if !os(windows)
+  packages:
+    libraries/terminfo
+
 --
 -- Constraints
 --
@@ -101,26 +100,6 @@ constraints:
 --
 -- Package level configuration
 --
-
-package haddock-api
-  flags: +in-ghc-tree
-
-if !os(windows)
-  packages:
-    libraries/terminfo
-
-package *
-  library-vanilla: True
-  -- shared/executable-dynamic now controlled by Makefile (DYNAMIC variable)
-  -- so we do not pin them here; default (static) remains when DYNAMIC=0.
-  executable-profiling: False
-  executable-static: False
-
-if !os(windows)
-  package *
-    library-for-ghci: True
-
-import: cabal.project.rts
 
 package libffi-clib
   ghc-options: -no-rts -optc-Wno-error
@@ -170,19 +149,12 @@ package ghc-internal
   flags: +bignum-native
   ghc-options: -no-rts
 
-package text
-  flags: -simdutf
+package rts
+  ghc-options: -no-rts
+  flags: +tables-next-to-code
 
--- TODO: What is this? Why do we need _in-ghc-tree_ here?
-package hsc2hs
-  flags: +in-ghc-tree
+package rts-headers
+  ghc-options: -no-rts
 
-package haskeline
-  flags: -terminfo
-
---
--- Program options
---
-
-program-options
-  ghc-options: -fhide-source-paths -j
+package rts-fs
+  ghc-options: -no-rts

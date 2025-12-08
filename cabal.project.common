@@ -1,5 +1,34 @@
+index-state: 2025-10-26T19:17:08Z
+allow-boot-library-installs: True
+benchmarks: False
+tests: False
+
+
+--
+-- Package level configuration
+--
+
+package *
+  library-vanilla: True
+  executable-profiling: False
+  executable-static: False
+
+if !os(windows)
+  package *
+    library-for-ghci: True
+
+package haddock-api
+  flags: +in-ghc-tree
+
+package haskeline
+  flags: -terminfo
+
+-- TODO: What is this? Why do we need _in-ghc-tree_ here?
+package hsc2hs
+  flags: +in-ghc-tree
+
 -- NOTE: Yes. The strings have to be escaped like this.
- 
+
 package rts
   ghc-options: "-optc-DProjectVersion=\"914\""
   ghc-options: "-optc-DBuildPlatform=\"FIXME\""
@@ -9,8 +38,6 @@ package rts
   ghc-options: "-optc-DGhcUnregisterised=\"FIXME\""
   ghc-options: "-optc-DTablesNextToCode=\"FIXME\""
   ghc-options: "-optc-DFS_NAMESPACE=rts"
-  ghc-options: -no-rts
-  flags: +tables-next-to-code
 
 if os(linux)
   package rts
@@ -26,6 +53,13 @@ if os(darwin)
     ghc-options: "-optc-DHostPlatform=\"aarch64-apple-darwin\""
     ghc-options: "-optc-DHostVendor=\"unknown\""
     flags: +leading-underscore
+
+if os(windows)
+  package rts
+    ghc-options: "-optc-DHostArch=\"x86_64\""
+    ghc-options: "-optc-DHostOS=\"mingw32\""
+    ghc-options: "-optc-DHostPlatform=\"x86_64-unknown-mingw32\""
+    ghc-options: "-optc-DHostVendor=\"unknown\""
 
 if os(freebsd)
   package rts
@@ -44,15 +78,8 @@ if os(wasi)
     ghc-options: -optc-fvisibility=default
     ghc-options: -optc-fvisibility-inlines-hidden
 
-if os(windows)
-  package rts
-    ghc-options: "-optc-DHostArch=\"x86_64\""
-    ghc-options: "-optc-DHostOS=\"mingw32\""
-    ghc-options: "-optc-DHostPlatform=\"x86_64-unknown-mingw32\""
-    ghc-options: "-optc-DHostVendor=\"unknown\""
+package text
+  flags: -simdutf
 
-package rts-headers
-  ghc-options: -no-rts
-
-package rts-fs
-  ghc-options: -no-rts
+program-options
+  ghc-options: -fhide-source-paths -j

@@ -693,10 +693,10 @@ library
       DerivedConstants.h
       rts/EventLogConstants.h
       rts/EventTypes.h
-      AutoApply.cmm.h
-      AutoApply_V16.cmm.h
-      AutoApply_V32.cmm.h
-      AutoApply_V64.cmm.h
+      rts/AutoApply.cmm.h
+      rts/AutoApply_V16.cmm.h
+      rts/AutoApply_V32.cmm.h
+      rts/AutoApply_V64.cmm.h
 
     install-includes:
       ghcautoconf.h
@@ -704,10 +704,10 @@ library
       DerivedConstants.h
       rts/EventLogConstants.h
       rts/EventTypes.h
-      AutoApply.cmm.h
-      AutoApply_V16.cmm.h
-      AutoApply_V32.cmm.h
-      AutoApply_V64.cmm.h
+      rts/AutoApply.cmm.h
+      rts/AutoApply_V16.cmm.h
+      rts/AutoApply_V32.cmm.h
+      rts/AutoApply_V64.cmm.h
 
     install-includes:
       -- Common headers for non-JS builds

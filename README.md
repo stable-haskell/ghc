@@ -74,6 +74,18 @@ To run the test suite:
 
     $ make test CABAL=$PWD/_build/stage0/bin/cabal
 
+
+Building cross-compilers
+================================
+
+To build *javascript-unknown-ghcjs*:
+
+  1. Download the emscripten toolchain using the instructions at
+     https://emscripten.org/docs/getting_started/downloads.html
+  2. Activate the environment using `source ./emsdk_env.sh`
+  3. `make stage3-javascript-unknown-ghcjs`
+
+
 Filing bugs and feature requests
 ================================
 
