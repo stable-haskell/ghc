@@ -1007,10 +1007,13 @@ $(CONFIGURED_FILES) : % : ./config.status %.in
 	./config.status $@
 
 # Create ghc-boot-th-next from ghc-boot-th
+# This is PHONY because the changelog.md and LICENSE are not tracked
+.PHONY: libraries/ghc-boot-th-next/ghc-boot-th-next.cabal
 libraries/ghc-boot-th-next/ghc-boot-th-next.cabal: libraries/ghc-boot-th/ghc-boot-th.cabal
 	@echo "::group::Synthesizing ghc-boot-th-next (copy & sed from ghc-boot-th)..."
-	@mkdir -p libraries/ghc-boot-th-next
+	@mkdir -p $(@D)
 	sed -e 's/^name:[[:space:]]*ghc-boot-th$$/name:           ghc-boot-th-next/' $< > $@
+	@cp -v libraries/ghc-boot-th/{changelog.md,LICENSE} $(@D)
 	@echo "::endgroup::"
 
 # --- Clean Targets ---
