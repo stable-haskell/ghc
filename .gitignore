@@ -220,8 +220,7 @@ missing-win32-tarballs
 VERSION
 GIT_COMMIT_ID
 
-/libraries/ghc-boot-th-next/.synth-stamp
-/libraries/ghc-boot-th-next/ghc-boot-th-next.cabal.in
+/libraries/ghc-boot-th-next/*
 
 # -------------------------------------------------------------------------------------
 # when using a docker image, one can mount the source code directory as the home folder

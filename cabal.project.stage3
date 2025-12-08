@@ -1,6 +1,5 @@
-allow-boot-library-installs: True
-benchmarks: False
-tests: False
+-- Configuration common to all stages
+import: cabal.project.common
 
 -- Disable Hackage, we explicitly include the packages we need.
 active-repositories: :none
@@ -47,7 +46,6 @@ packages:
   libraries/file-io
   libraries/filepath
   libraries/hpc
-  libraries/libffi-clib
   libraries/mtl
   libraries/os-string
   libraries/parsec
@@ -118,11 +116,8 @@ constraints:
 --
 
 package *
-  library-vanilla: True
   shared: False
-  executable-profiling: False
   executable-dynamic: False
-  executable-static: False
   
   -- library-for-ghci will cause a `ld -r` call to create pre-linked objects.
   -- This helps the internal linker when trying to link (.a) archives with massive
@@ -142,34 +137,28 @@ package *
   --             objects of have GHC pre-link excessively large archives on-demand.
   library-for-ghci: False
 
-if os(wasi)
-  package *
-    shared: True
-
-import: cabal.project.rts
-
 package libffi-clib
   ghc-options: -no-rts
 
 package ghc
   flags: +build-tool-depends +internal-interpreter
 
-package ghci
+package ghc-bin
   flags: +internal-interpreter
+
+package ghci
+  flags: +internal-interpreter +use-system-libffi
 
 package ghc-internal
   flags: +bignum-native
+  ghc-options: -no-rts
 
-package text
-  flags: -simdutf
+package rts
+  ghc-options: -no-rts
+  flags: +use-system-libffi -tables-next-to-code
 
--- TODO: What is this? Why do we need _in-ghc-tree_ here?
-package hsc2hs
-  flags: +in-ghc-tree
+package rts-headers
+  ghc-options: -no-rts
 
---
--- Program options
---
-
-program-options
-  ghc-options: -fhide-source-paths -j
+package rts-fs
+  ghc-options: -no-rts

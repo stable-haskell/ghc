@@ -30,11 +30,6 @@ env:
   GHC_VERSION: ${{ inputs.ghc }}
   GHC_TARGETS: ${{ inputs.ghc_targets }}
   CABAL_VERSION: ${{ inputs.cabal }}
-  # ghcup
-  BOOTSTRAP_HASKELL_NONINTERACTIVE: 1
-  BOOTSTRAP_HASKELL_GHC_VERSION: ${{ inputs.ghc }}
-  BOOTSTRAP_HASKELL_CABAL_VERSION: ${{ inputs.cabal }}
-  BOOTSTRAP_HASKELL_INSTALL_NO_STACK: 1
   # debian/ubuntu
   DEBIAN_FRONTEND: noninteractive
   TZ: Asia/Singapore
@@ -63,7 +58,7 @@ jobs:
     env:
       APT_BUILD: "diffutils zlib1g-dev libtinfo-dev libsqlite3-0 libsqlite3-dev libgmp-dev libncurses-dev ca-certificates g++ git make automake autoconf gcc perl python3 texinfo xz-utils lbzip2 bzip2 patch openssh-client sudo time jq wget curl locales libdw1 libdw-dev valgrind systemtap-sdt-dev xutils-dev unzip pkg-config python3-sphinx texlive-xetex texlive-latex-extra texlive-binaries texlive-fonts-recommended lmodern tex-gyre texlive-plain-generic linux-perf linux-perf libnuma-dev patchelf"
       RPM_BUILD: "diffutils binutils which git make automake autoconf gcc perl python3 texinfo xz bzip2 patch openssh-clients sudo zlib-devel sqlite ncurses-compat-libs gmp-devel ncurses-devel gcc-c++ findutils curl wget jq systemtap-sdt-devel python3-sphinx texlive texlive-latex texlive-xetex texlive-collection-latex texlive-collection-latexrecommended texlive-collection-xetex python-sphinx-latex dejavu-sans-fonts dejavu-serif-fonts dejavu-sans-mono-fonts patchelf"
-      APK_BUILD: "diffutils alpine-sdk autoconf automake bash binutils-gold build-base coreutils cpio curl gcc git gmp gmp-dev grep linux-headers gzip jq lld musl-dev musl-locales ncurses-dev ncurses-libs ncurses-static perl python3 sudo unzip wget xz zlib-dev zstd py3-sphinx texlive texlive-xetex texmf-dist-latexextra ttf-dejavu llvm17 clang17 texmf-dist-lang texmf-dist-fontsrecommended texinfo patchelf"
+      APK_BUILD: "diffutils alpine-sdk autoconf automake bash binutils-gold build-base coreutils cpio curl gcc git gmp gmp-dev grep linux-headers gzip jq lld musl-dev musl-locales ncurses-dev ncurses-libs ncurses-static perl python3 sudo unzip wget xz zlib-dev zstd py3-sphinx texlive texlive-xetex texmf-dist-latexextra ttf-dejavu llvm17 clang17 texmf-dist-lang texmf-dist-fontsrecommended texinfo patchelf findutils"
       APT_TEST: "diffutils locales libnuma-dev zlib1g-dev libgmp-dev libgmp10 libssl-dev liblzma-dev libbz2-dev git wget lsb-release software-properties-common gnupg2 apt-transport-https gcc autoconf automake build-essential curl gzip libncurses-dev patchelf"
       RPM_TEST: "diffutils autoconf automake binutils bzip2 coreutils curl elfutils-devel elfutils-libs findutils gcc gcc-c++ git gmp gmp-devel jq lbzip2 make ncurses ncurses-compat-libs ncurses-devel openssh-clients patch perl pxz python3 sqlite sudo wget which xz zlib-devel patchelf"
       APK_TEST: "diffutils musl-locales curl gcc g++ gmp-dev libc-dev make musl-dev ncurses-dev perl tar xz autoconf automake bzip2 coreutils elfutils-dev findutils git jq bzip2-dev patch python3 sqlite sudo wget which zlib-dev patchelf zlib zlib-dev zlib-static"
@@ -116,7 +111,9 @@ jobs:
         uses: haskell/ghcup-setup@v1
         with:
           cabal: ${{ env.CABAL_VERSION }}
-          ghc: ${{ env.GHC_VERSION }}
+
+      - name: Install GHC
+        run: ghcup --no-verbose install ghc --set --install-targets "${{ env.GHC_TARGETS }}" "${{ env.GHC_VERSION }}"
 
       - uses: actions/checkout@v4
         with:
@@ -139,11 +136,6 @@ jobs:
             make install
             ln -s make /usr/local/bin/gmake
             echo "/usr/local/bin" >> $GITHUB_PATH
-
-      - name: Add extra-lib-dirs
-        run: &extra-lib-dirs |
-          echo "extra-lib-dirs: $HOME/.local/lib/" >> cabal.project.stage2
-          echo "extra-lib-dirs: $HOME/.local/lib/" >> cabal.project.stage3
 
       - if: matrix.platform.image == 'rockylinux:8'
         name: Install emscripten
@@ -178,12 +170,11 @@ jobs:
             cd emsdk
             source ./emsdk_env.sh
             cd ..
-            ${{ env.MAKE }} _build/bindist/haskell-toolchain.tar.gz _build/bindist/tests.tar.gz
+            ${{ env.MAKE }} _build/dist/haskell-toolchain.tar.gz _build/dist/ghc.tar.gz _build/dist/cabal.tar.gz _build/dist/tests.tar.gz _build/dist/ghc-javascript-unknown-ghcjs.tar.gz
           else
-            echo $PWD
-            ${{ env.MAKE }} --debug _build/bindist/ghc.tar.gz _build/bindist/cabal.tar.gz _build/bindist/tests.tar.gz
+            ${{ env.MAKE }} --debug _build/dist/ghc.tar.gz _build/dist/cabal.tar.gz _build/dist/tests.tar.gz
           fi
-          cd _build/bindist
+          cd _build/dist
           mv ghc.tar.gz ghc-$(bin/ghc --numeric-version)-${ARTIFACT}.tar.gz
           mv cabal.tar.gz cabal-$(bin/cabal --numeric-version)-${ARTIFACT}.tar.gz
           if [ -e "haskell-toolchain.tar.gz" ] ; then
@@ -202,7 +193,7 @@ jobs:
           retention-days: 2
           name: artifacts-${{ matrix.platform.ARTIFACT }}-${{ matrix.branch }}
           path: |
-            ./_build/bindist/*.tar.gz
+            ./_build/dist/*.tar.gz
 
   build-arm:
     name: Build ARM binary
@@ -223,17 +214,53 @@ jobs:
           ref: ${{ matrix.branch }}
           submodules: recursive
 
+      # debian 11 ships with make 4.3, but we need 4.4
       - if: matrix.platform.ARTIFACT == 'aarch64-linux-deb11'
         uses: docker://arm64v8/debian:11
         name: Run build (aarch64 linux)
         with:
-          args: sh -c "apt-get update && apt-get install -y curl bash git ${{ needs.tool-output.outputs.apt_tools_build }} && export PATH=$HOME/.ghcup/bin:$PATH && curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org | sh && make CABAL=$PWD/_build/stage0/bin/cabal _build/bindist/ghc.tar.gz _build/bindist/cabal.tar.gz _build/bindist/tests.tar.gz && cd _build/bindist && mv ghc.tar.gz ghc-$(bin/ghc --numeric-version)-${{ matrix.platform.ARTIFACT }}.tar.gz && mv cabal.tar.gz cabal-$(bin/cabal --numeric-version)-${{ matrix.platform.ARTIFACT }}.tar.gz && mv tests.tar.gz tests-${{ matrix.platform.ARTIFACT }}.tar.gz"
+          args: |
+            sh -c "
+              apt-get update &&
+              apt-get install -y curl bash git ${{ needs.tool-output.outputs.apt_tools_build }} &&
+              curl -O -L https://ftp.gnu.org/gnu/make/make-${{ env.MAKE_VERSION }}.tar.gz &&
+              tar xf make-${{ env.MAKE_VERSION }}.tar.gz &&
+              cd make-${{ env.MAKE_VERSION }} &&
+              ./configure &&
+              make install &&
+              cd .. &&
+              ln -s make /usr/local/bin/gmake &&
+              export PATH=$HOME/.ghcup/bin:/usr/local/bin:$PATH &&
+              curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org | BOOTSTRAP_HASKELL_NONINTERACTIVE=1 BOOTSTRAP_HASKELL_MINIMAL=1 sh &&
+              ghcup --no-verbose install ghc --set --install-targets '${{ env.GHC_TARGETS }}' ${{ env.GHC_VERSION }} &&
+              ghcup --no-verbose install cabal --set ${{ env.CABAL_VERSION }} &&
+              cabal update &&
+              make _build/dist/ghc.tar.gz _build/dist/cabal.tar.gz _build/dist/tests.tar.gz &&
+              cd _build/dist &&
+              mv ghc.tar.gz ghc-$(bin/ghc --numeric-version)-${{ matrix.platform.ARTIFACT }}.tar.gz &&
+              mv cabal.tar.gz cabal-$(bin/cabal --numeric-version)-${{ matrix.platform.ARTIFACT }}.tar.gz &&
+              mv tests.tar.gz tests-${{ matrix.platform.ARTIFACT }}.tar.gz
+            "
 
       - if: matrix.platform.ARTIFACT == 'aarch64-linux-unknown'
         uses: docker://arm64v8/alpine:3.20
         name: Run build (aarch64 linux alpine)
         with:
-          args: sh -c "apk update && apk add curl bash git ${{ needs.tool-output.outputs.apk_tools_build }} && export PATH=$HOME/.ghcup/bin:$PATH && curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org | sh && make CABAL=$PWD/_build/stage0/bin/cabal _build/bindist/ghc.tar.gz _build/bindist/cabal.tar.gz _build/bindist/tests.tar.gz && cd _build/bindist && mv ghc.tar.gz ghc-$(bin/ghc --numeric-version)-${{ matrix.platform.ARTIFACT }}.tar.gz && mv cabal.tar.gz cabal-$(bin/cabal --numeric-version)-${{ matrix.platform.ARTIFACT }}.tar.gz && mv tests.tar.gz tests-${{ matrix.platform.ARTIFACT }}.tar.gz"
+          args: |
+            sh -c "
+              apk update &&
+              apk add curl bash git ${{ needs.tool-output.outputs.apk_tools_build }} &&
+              export PATH=$HOME/.ghcup/bin:$PATH &&
+              curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org | BOOTSTRAP_HASKELL_NONINTERACTIVE=1 BOOTSTRAP_HASKELL_MINIMAL=1 sh &&
+              ghcup --no-verbose install ghc --set --install-targets '${{ env.GHC_TARGETS }}' ${{ env.GHC_VERSION }} &&
+              ghcup --no-verbose install cabal --set ${{ env.CABAL_VERSION }} &&
+              cabal update &&
+              make _build/dist/ghc.tar.gz _build/dist/cabal.tar.gz _build/dist/tests.tar.gz &&
+              cd _build/dist &&
+              mv ghc.tar.gz ghc-$(bin/ghc --numeric-version)-${{ matrix.platform.ARTIFACT }}.tar.gz &&
+              mv cabal.tar.gz cabal-$(bin/cabal --numeric-version)-${{ matrix.platform.ARTIFACT }}.tar.gz &&
+              mv tests.tar.gz tests-${{ matrix.platform.ARTIFACT }}.tar.gz
+            "
 
       - if: always()
         name: Upload artifact
@@ -243,7 +270,7 @@ jobs:
           retention-days: 2
           name: artifacts-${{ matrix.platform.ARTIFACT }}-${{ matrix.branch }}
           path: |
-            ./_build/bindist/*.tar.gz
+            ./_build/dist/*.tar.gz
 
   build-mac-x86_64:
     name: Build binary (Mac x86_64)
@@ -266,7 +293,9 @@ jobs:
         uses: haskell/ghcup-setup@v1
         with:
           cabal: ${{ env.CABAL_VERSION }}
-          ghc: ${{ env.GHC_VERSION }}
+
+      - name: Install GHC
+        run: ghcup --no-verbose install ghc --set --install-targets "${{ env.GHC_TARGETS }}" "${{ env.GHC_VERSION }}"
 
       - name: Install dependencies
         run : |
@@ -274,9 +303,6 @@ jobs:
           echo "/usr/local/opt/gnu-sed/libexec/gnubin" >> $GITHUB_PATH
           echo "/usr/local/opt/make/libexec/gnubin" >> $GITHUB_PATH
           echo "/usr/local/opt/libtool/libexec/gnubin" >> $GITHUB_PATH
-
-      - name: Add extra-lib-dirs
-        run: *extra-lib-dirs
 
       - name: Install emscripten
         run : *emscripten
@@ -292,7 +318,7 @@ jobs:
           retention-days: 2
           name: artifacts-${{ env.ARTIFACT }}-${{ matrix.branch }}
           path: |
-            ./_build/bindist/*.tar.gz
+            ./_build/dist/*.tar.gz
 
   build-mac-aarch64:
     name: Build binary (Mac aarch64)
@@ -316,7 +342,9 @@ jobs:
         uses: haskell/ghcup-setup@v1
         with:
           cabal: ${{ env.CABAL_VERSION }}
-          ghc: ${{ env.GHC_VERSION }}
+
+      - name: Install GHC
+        run: ghcup --no-verbose install ghc --set --install-targets "${{ env.GHC_TARGETS }}" "${{ env.GHC_VERSION }}"
 
       - name: Install dependencies
         run : |
@@ -324,9 +352,6 @@ jobs:
           echo "/opt/homebrew/opt/gnu-sed/libexec/gnubin" >> $GITHUB_PATH
           echo "/opt/homebrew/opt/make/libexec/gnubin" >> $GITHUB_PATH
           echo "/opt/homebrew/opt/libtool/libexec/gnubin" >> $GITHUB_PATH
-
-      - name: Add extra-lib-dirs
-        run: *extra-lib-dirs
 
       - name: Run build
         run: *build
@@ -339,7 +364,7 @@ jobs:
           retention-days: 2
           name: artifacts-${{ env.ARTIFACT }}-${{ matrix.branch }}
           path: |
-            ./_build/bindist/*.tar.gz
+            ./_build/dist/*.tar.gz
 
   build-windows:
     name: Build binary (Windows)
@@ -348,6 +373,7 @@ jobs:
       ARTIFACT: "x86_64-mingw64"
       CABAL_DIR: "C:\\Users\\runneradmin\\AppData\\Roaming\\cabal"
       GHCUP_INSTALL_BASE_PREFIX: "C:\\"
+      GHCUP_MSYS2: 'C:/msys64'
     strategy:
       fail-fast: false
       matrix:
@@ -370,9 +396,10 @@ jobs:
         uses: haskell/ghcup-setup@v1
         with:
           cabal: ${{ env.CABAL_VERSION }}
-          ghc: ${{ env.GHC_VERSION }}
-        env:
-          GHCUP_MSYS2: 'C:/msys64'
+
+      - name: Install GHC
+        run: ghcup --no-verbose install ghc --set --install-targets "${{ env.GHC_TARGETS }}" "${{ env.GHC_VERSION }}"
+        shell: pwsh
 
       - name: Run build
         run: *build
@@ -388,7 +415,7 @@ jobs:
           retention-days: 2
           name: artifacts-${{ env.ARTIFACT }}-${{ matrix.branch }}
           path: |
-            ./_build/bindist/*.tar.gz
+            ./_build/dist/*.tar.gz
 
   build-freebsd-x86_64:
     name: Build FreeBSD x86_64
@@ -413,9 +440,11 @@ jobs:
         uses: haskell/ghcup-setup@v1
         with:
           cabal: ${{ env.CABAL_VERSION }}
-          ghc: ${{ env.GHC_VERSION }}
+
+      - name: Install GHC
+        run: ghcup --no-verbose install ghc --set --install-targets "${{ env.GHC_TARGETS }}" "${{ env.GHC_VERSION }}"
         env:
-          LD: ld
+          LD: ld.lld
           CC: cc
           CXX: c++
 
@@ -440,9 +469,6 @@ jobs:
           sudo tzsetup Etc/GMT
           sudo adjkerntz -a
 
-      - name: Add extra-lib-dirs
-        run: *extra-lib-dirs
-
       - name: Install emscripten
         run : |
           sudo pkg install -y emscripten
@@ -452,8 +478,9 @@ jobs:
           which ghc
           ghc --info
           cabal update
-          gmake CABAL=$PWD/_build/stage0/bin/cabal _build/bindist/haskell-toolchain.tar.gz _build/bindist/tests.tar.gz
-          cd _build/bindist
+          gmake clean clean-cabal distclean
+          gmake _build/dist/haskell-toolchain.tar.gz _build/dist/ghc.tar.gz _build/dist/cabal.tar.gz _build/dist/tests.tar.gz _build/dist/ghc-javascript-unknown-ghcjs.tar.gz
+          cd _build/dist
           mv ghc.tar.gz ghc-$(bin/ghc --numeric-version)-${{ env.ARTIFACT }}.tar.gz
           mv cabal.tar.gz cabal-$(bin/cabal --numeric-version)-${{ env.ARTIFACT }}.tar.gz
           mv haskell-toolchain.tar.gz haskell-toolchain-${{ env.ARTIFACT }}.tar.gz
@@ -472,7 +499,7 @@ jobs:
           retention-days: 2
           name: artifacts-${{ env.ARTIFACT }}-${{ matrix.branch }}
           path: |
-            ./_build/bindist/*.tar.gz
+            ./_build/dist/*.tar.gz
 
   test-linux:
     name: Test linux binaries
@@ -582,7 +609,7 @@ jobs:
       - uses: ./.github/actions/download
         with:
           name: artifacts-${{ matrix.platform.ARTIFACT }}-${{ matrix.branch }}
-          path: ./_build/bindist
+          path: ./_build/dist
 
       - id: pwd_output
         run: |
@@ -600,17 +627,17 @@ jobs:
 
           rm -rf .git
           (
-          cd _build/bindist
+          cd _build/dist
           for file in *.tar.gz; do tar xzf "$file"; done
           )
-          PATH=$(pwd)/_build/bindist/bin:$PATH ${{ env.MAKE }} -C _build/bindist/testsuite
+          PATH=$(pwd)/_build/dist/bin:$PATH ${{ env.MAKE }} -C _build/dist/testsuite
         env:
           THREADS: 4
-          TEST_HC: ${{ steps.pwd_output.outputs.pwd }}/_build/bindist/bin/ghc
-          GHC_PKG: ${{ steps.pwd_output.outputs.pwd }}/_build/bindist/bin/ghc-pkg
-          HP2PS_ABS: ${{ steps.pwd_output.outputs.pwd }}/_build/bindist/bin/hp2ps
-          HPC: ${{ steps.pwd_output.outputs.pwd }}/_build/bindist/bin/hpc
-          RUNGHC: ${{ steps.pwd_output.outputs.pwd }}/_build/bindist/bin/runghc
+          TEST_HC: ${{ steps.pwd_output.outputs.pwd }}/_build/dist/bin/ghc
+          GHC_PKG: ${{ steps.pwd_output.outputs.pwd }}/_build/dist/bin/ghc-pkg
+          HP2PS_ABS: ${{ steps.pwd_output.outputs.pwd }}/_build/dist/bin/hp2ps
+          HPC: ${{ steps.pwd_output.outputs.pwd }}/_build/dist/bin/hpc
+          RUNGHC: ${{ steps.pwd_output.outputs.pwd }}/_build/dist/bin/runghc
 
   test-arm:
     name: Test ARM binary
@@ -634,19 +661,19 @@ jobs:
       - uses: ./.github/actions/download
         with:
           name: artifacts-${{ matrix.platform.ARTIFACT }}-${{ matrix.branch }}
-          path: ./_build/bindist
+          path: ./_build/dist
 
       - if: matrix.platform.ARTIFACT == 'aarch64-linux-deb11'
         uses: docker://arm64v8/debian:11
         name: Run build (aarch64 linux)
         with:
-          args: sh -c "apt-get update && apt-get install -y curl bash git ${{ needs.tool-output.outputs.apt_tools_test }} && git config --system --add safe.directory $GITHUB_WORKSPACE && rm -rf .git && cd _build/bindist && for file in *.tar.gz; do tar xzf $file; done && cd testsuite && PATH=$GITHUB_WORKSPACE/_build/bindist/bin:$PATH make"
+          args: sh -c "apt-get update && apt-get install -y curl bash git ${{ needs.tool-output.outputs.apt_tools_test }} && git config --system --add safe.directory $GITHUB_WORKSPACE && rm -rf .git && cd _build/dist && for file in *.tar.gz; do tar xzf $file; done && cd testsuite && PATH=$GITHUB_WORKSPACE/_build/dist/bin:$PATH make"
 
       - if: matrix.platform.ARTIFACT == 'aarch64-linux-unknown'
         uses: docker://arm64v8/alpine:3.20
         name: Run build (aarch64 linux alpine)
         with:
-          args: sh -c "apk update && apk add curl bash git ${{ needs.tool-output.outputs.apk_tools_test }} && git config --system --add safe.directory $GITHUB_WORKSPACE && rm -rf .git && cd _build/bindist && for file in *.tar.gz; do tar xzf $file; done && cd testsuite && PATH=$GITHUB_WORKSPACE/_build/bindist/bin:$PATH make"
+          args: sh -c "apk update && apk add curl bash git ${{ needs.tool-output.outputs.apk_tools_test }} && git config --system --add safe.directory $GITHUB_WORKSPACE && rm -rf .git && cd _build/dist && for file in *.tar.gz; do tar xzf $file; done && cd testsuite && PATH=$GITHUB_WORKSPACE/_build/dist/bin:$PATH make"
 
   test-mac-x86_64:
     name: Test binary (Mac x86_64)
@@ -667,7 +694,7 @@ jobs:
       - uses: ./.github/actions/download
         with:
           name: artifacts-${{ env.ARTIFACT }}-${{ matrix.branch }}
-          path: ./_build/bindist
+          path: ./_build/dist
 
       - name: Run test
         run: *test
@@ -695,7 +722,7 @@ jobs:
       - uses: ./.github/actions/download
         with:
           name: artifacts-${{ env.ARTIFACT }}-${{ matrix.branch }}
-          path: ./_build/bindist
+          path: ./_build/dist
 
       - name: Run test
         run: *test
@@ -728,7 +755,7 @@ jobs:
       - uses: ./.github/actions/download
         with:
           name: artifacts-${{ env.ARTIFACT }}-${{ matrix.branch }}
-          path: ./_build/bindist
+          path: ./_build/dist
 
       - name: Run test
         run: *test
@@ -756,7 +783,7 @@ jobs:
       - uses: ./.github/actions/download
         with:
           name: artifacts-${{ env.ARTIFACT }}-${{ matrix.branch }}
-          path: ./_build/bindist
+          path: ./_build/dist
 
       - name: Install dependencies
         run: |
@@ -768,11 +795,11 @@ jobs:
       - name: Run test
         run: |
           rm -rf .git
-          cd _build/bindist
+          cd _build/dist
           for file in *.tar.gz; do tar xzf "$file"; done
           cd testsuite
           export LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH
-          PATH=$GITHUB_WORKSPACE/_build/bindist/bin:$PATH gmake
+          PATH=$GITHUB_WORKSPACE/_build/dist/bin:$PATH gmake
         env:
           MAKE: gmake
           THREADS: 8
