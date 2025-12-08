@@ -235,7 +235,7 @@ jobs:
 
   build-mac-x86_64:
     name: Build binary (Mac x86_64)
-    runs-on: macOS-13
+    runs-on: macOS-15-intel
     env:
       ARTIFACT: "x86_64-apple-darwin"
       MACOSX_DEPLOYMENT_TARGET: 10.13
@@ -640,7 +640,7 @@ jobs:
 
   test-mac-x86_64:
     name: Test binary (Mac x86_64)
-    runs-on: macOS-13
+    runs-on: macOS-15-intel
     needs: ["build-mac-x86_64"]
     if: ${{ inputs.test }}
     env:
