@@ -269,14 +269,17 @@ STAGE1_EXECUTABLES := \
 STAGE2_TARGETS := \
 	ghc-bin:ghc
 
-# we need to build these before all else
+# We need to build these RTS variants before all else because:
+# 1. They are required for compiling Setup.hs (particularly threaded-nodebug)
+# 2. Different packages may need different RTS ways during their build
+# 3. The RTS is a fundamental dependency that must be available early
 STAGE2_UTIL_RTS := \
 	rts:nonthreaded-debug \
 	rts:nonthreaded-nodebug \
 	rts:threaded-nodebug \
 	rts:threaded-debug
 
-# rts:threaded-nodebug need it for compiling Setup.hs
+# rts:threaded-nodebug needed for compiling Setup.hs
 STAGE2_UTIL_TARGETS := \
 	$(STAGE_UTIL_TARGETS) \
 	ghc-iserv:ghc-iserv \
