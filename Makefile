@@ -265,7 +265,7 @@ STAGE1_EXECUTABLES := \
 	hsc2hs$(EXE_EXT) \
 	unlit$(EXE_EXT)
 
-# We really want to work towards `cabal build/instsall ghc-bin:ghc`.
+# We really want to work towards `cabal build/install ghc-bin:ghc`.
 STAGE2_TARGETS := \
 	ghc-bin:ghc
 
