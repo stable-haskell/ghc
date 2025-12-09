@@ -373,6 +373,10 @@ addPlatformDepLinkFlags archOs cc ccLink0 = do
       -- Since https://github.com/emscripten-core/emscripten/blob/main/ChangeLog.md#407---041525
       -- the emcc linker does not export the HEAP8 memory view which is used by the js RTS by default anymore.
       return $ ccLink2 & _prgFlags %++ "-sEXPORTED_RUNTIME_METHODS=HEAP8,HEAPU8"
+    ArchOS ArchX86_64 OSDarwin ->
+      -- linking against libffi causes many such warnings, potentially
+      -- bogus... or so I hope
+      return $ ccLink2 & _prgFlags %++ "-Wl,-unaligned_pointers=suppress"
     _ ->
       return ccLink2
 
