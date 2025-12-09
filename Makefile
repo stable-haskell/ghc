@@ -106,7 +106,8 @@ ifeq ($(OS),Windows_NT)
 CC := x86_64-w64-mingw32-clang.exe
 CXX := x86_64-w64-mingw32-clang++.exe
 # CC_LINK_OPT: Additional linker options for C compiler on Windows
-# CRT_fp8.o provides floating-point initialization for the Windows runtime
+# CRT_fp8.o is a Windows C Runtime (CRT) object file providing floating-point
+# initialization routines required for proper floating-point operations
 CC_LINK_OPT := -Wl,CRT_fp8.o
 LD := ld.lld.exe
 # CYGPATH: Converts Windows paths to Unix-style paths (C:\path -> /c/path)
