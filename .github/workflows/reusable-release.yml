@@ -316,9 +316,6 @@ jobs:
       - name: Add extra-lib-dirs
         run: *extra-lib-dirs
 
-      - name: Install emscripten
-        run : *emscripten
-
       - name: Run build
         run: *build
 
