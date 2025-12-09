@@ -105,9 +105,15 @@ SED ?= sed
 ifeq ($(OS),Windows_NT)
 CC := x86_64-w64-mingw32-clang.exe
 CXX := x86_64-w64-mingw32-clang++.exe
+# CC_LINK_OPT: Additional linker options for C compiler on Windows
+# CRT_fp8.o provides floating-point initialization for the Windows runtime
 CC_LINK_OPT := -Wl,CRT_fp8.o
 LD := ld.lld.exe
+# CYGPATH: Converts Windows paths to Unix-style paths (C:\path -> /c/path)
+# Used when Unix-style paths are needed for Unix-like tools
 CYGPATH = cygpath --unix -f -
+# CYGPATH_MIXED: Converts Windows paths to mixed format (C:\path -> C:/path)
+# Used when paths need to work with both Windows and Unix-like tools
 CYGPATH_MIXED = cygpath --mixed -f -
 # Windows executables require .exe extension for native programs to find them
 EXE_EXT := .exe
