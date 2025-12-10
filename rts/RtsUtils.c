@@ -131,12 +131,10 @@ stgFree(void* p)
   free(p);
 }
 
-// Aligned allocation that zeros memory (calloc semantics).
 // N.B. Allocations resulting from this function must be freed by
-// `stgFreeAligned`, not `stgFree`. This is necessary due to the properties
-// of Windows' `_aligned_malloc`.
+// `stgFreeAligned`, not `stgFree`. This is necessary due to the properties of Windows' `_aligned_malloc`
 void *
-stgCallocAlignedBytes (size_t n, size_t align, char *msg)
+stgMallocAlignedBytes (size_t n, size_t align, char *msg)
 {
     void *space;
 
@@ -166,10 +164,7 @@ stgCallocAlignedBytes (size_t n, size_t align, char *msg)
       rtsConfig.mallocFailHook((W_) n, msg);
       stg_exit(EXIT_INTERNAL_ERROR);
     }
-
-    // Zero the allocated memory (calloc semantics)
-    memset(space, 0, n);
-
+    IF_DEBUG(zero_on_gc, memset(space, 0xbb, n));
     return space;
 }
 
