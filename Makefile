@@ -99,7 +99,7 @@ ROOT_DIR := $(patsubst %/,%,$(dir $(realpath $(lastword $(MAKEFILE_LIST)))))
 
 GHC0 ?= ghc-9.8.4
 PYTHON ?= python3
-CABAL ?= _build/stage0/bin/cabal$(EXE_EXT)
+CABAL ?= cabal
 SED ?= sed
 
 ifeq ($(OS),Windows_NT)
@@ -585,24 +585,6 @@ define copy_all_stage2_h
 endef
 
 
-# --- Bootstrapping and stage 0 ---
-
-# export CABAL := $(shell cabal update 2>&1 >/dev/null && cabal build cabal-install -v0 --disable-tests --project-dir libraries/Cabal && cabal list-bin -v0 --project-dir libraries/Cabal cabal-install:exe:cabal)
-$(abspath _build/stage0/bin/cabal$(EXE_EXT)): _build/stage0/bin/cabal$(EXE_EXT)
-
-# --- Stage 0 build ---
-
-# This just builds cabal-install, which is used to build the rest of the project.
-
-# We need an absolute path here otherwise cabal will consider the path relative to `the project directory
-_build/stage0/bin/cabal$(EXE_EXT): BUILD_ARGS=-j -w $(GHC0) --disable-tests --project-dir libraries/Cabal --builddir=$(abspath _build/stage0) --ghc-options="-fhide-source-paths"
-_build/stage0/bin/cabal$(EXE_EXT):
-	@echo "::group::Building Cabal..."
-	@mkdir -p _build/stage0/bin _build/logs
-	cabal build $(BUILD_ARGS) cabal-install:exe:cabal
-	cp -rfp $(shell cabal list-bin -v0 $(BUILD_ARGS) cabal-install:exe:cabal | $(CYGPATH)) $@
-	@echo "::endgroup::"
-
 # --- Stage 1 build ---
 
 _build/stage1/%: private STAGE=stage1
@@ -619,7 +601,7 @@ endif
 
 .PHONY: $(addprefix _build/stage1/bin/,$(STAGE1_EXECUTABLES))
 $(addprefix _build/stage1/bin/,$(STAGE1_EXECUTABLES)) &: private TARGET_PLATFORM=
-$(addprefix _build/stage1/bin/,$(STAGE1_EXECUTABLES)) &: $(CABAL) $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) libraries/ghc-boot-th-next/ghc-boot-th-next.cabal cabal.project.stage1 cabal.project.stage1.local
+$(addprefix _build/stage1/bin/,$(STAGE1_EXECUTABLES)) &: $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) libraries/ghc-boot-th-next/ghc-boot-th-next.cabal cabal.project.stage1 cabal.project.stage1.local
 	@echo "::group::Building stage1 executables ($(STAGE1_EXECUTABLES))..."
 	# Force cabal to replan
 	rm -rf _build/stage1/cache
@@ -663,7 +645,7 @@ _build/stage2/%: private GHC=$(realpath _build/stage1/bin/ghc$(EXE_EXT))
 
 .PHONY: $(addprefix _build/stage2/bin/,$(STAGE2_EXECUTABLES))
 $(addprefix _build/stage2/bin/,$(STAGE2_EXECUTABLES)) &: private TARGET_PLATFORM=
-$(addprefix _build/stage2/bin/,$(STAGE2_EXECUTABLES)) &: $(CABAL) stage1 cabal.project.stage2 stage2-rts
+$(addprefix _build/stage2/bin/,$(STAGE2_EXECUTABLES)) &: stage1 cabal.project.stage2 stage2-rts
 	@echo "::group::Building stage2 executables ($(STAGE2_EXECUTABLES))..."
 	# Force cabal to replan
 	rm -rf _build/stage2/cache
@@ -676,7 +658,7 @@ $(addprefix _build/stage2/bin/,$(STAGE2_EXECUTABLES)) &: $(CABAL) stage1 cabal.p
 stage2-rts: private STAGE=stage2
 stage2-rts: private GHC=$(realpath _build/stage1/bin/ghc$(EXE_EXT))
 stage2-rts: private TARGET_PLATFORM=
-stage2-rts: $(CABAL) stage1 cabal.project.stage2
+stage2-rts: stage1 cabal.project.stage2
 	@echo "::group::Building stage2 RTSes..."
 	# Force cabal to replan
 	rm -rf _build/stage2/cache
@@ -691,7 +673,7 @@ stage2-rts: $(CABAL) stage1 cabal.project.stage2
 # build them with the stage2 ghc; seems like a better/cleaner idea to me (moritz).
 .PHONY: $(addprefix _build/stage2/bin/,$(STAGE2_UTIL_EXECUTABLES))
 $(addprefix _build/stage2/bin/,$(STAGE2_UTIL_EXECUTABLES)) &: private TARGET_PLATFORM=
-$(addprefix _build/stage2/bin/,$(STAGE2_UTIL_EXECUTABLES)) &: $(CABAL) stage1 cabal.project.stage2.settings stage2-rts
+$(addprefix _build/stage2/bin/,$(STAGE2_UTIL_EXECUTABLES)) &: stage1 cabal.project.stage2.settings stage2-rts
 	@echo "::group::Building stage2 utilities ($(STAGE2_UTIL_EXECUTABLES))..."
 	# Force cabal to replan
 	rm -rf _build/stage2/cache
@@ -996,27 +978,6 @@ _build/bindist/ghc-%.tar.gz: _build/bindist/lib/targets/% _build/bindist/ghc.tar
 		$(foreach exe,$(BINDIST_EXECTUABLES),bin/$${triple}-$(exe)) \
 		lib/targets/$${triple}
 
-_build/bindist/cabal.tar.gz: _build/stage0/bin/cabal$(EXE_EXT)
-	@mkdir -p _build/bindist/bin
-	@cp $^ _build/bindist/bin/cabal$(EXE_EXT)
-	@tar czf $@ \
-		--directory=_build/bindist \
-		bin/cabal$(EXE_EXT)
-
-_build/bindist/haskell-toolchain.tar.gz: _build/bindist/cabal.tar.gz _build/bindist/ghc.tar.gz _build/bindist/ghc-javascript-unknown-ghcjs.tar.gz
-	@tar czf $@ \
-		--directory=_build/bindist \
-		$(foreach exe,$(BINDIST_EXECTUABLES),bin/$(exe)$(EXE_EXT)) \
-		lib/ghc-usage.txt \
-		lib/ghci-usage.txt \
-		lib/package.conf.d \
-		lib/settings \
-		lib/template-hsc.h \
-		lib/$(HOST_PLATFORM) \
-		$(foreach exe,$(BINDIST_EXECTUABLES),bin/javascript-unknown-ghcjs-$(exe)) \
-		lib/targets/javascript-unknown-ghcjs \
-		bin/cabal$(EXE_EXT)
-
 _build/bindist/tests.tar.gz:
 	@tar czf $@ \
 		testsuite
@@ -1030,7 +991,7 @@ hackage: _build/packages/hackage.haskell.org/01-index.tar.gz
 # whatever index-state we set in the project file. Reproducibility is left to
 # index-state.
 .PHONY: _build/packages/hackage.haskell.org/01-index.tar.gz
-_build/packages/hackage.haskell.org/01-index.tar.gz: | $(CABAL)
+_build/packages/hackage.haskell.org/01-index.tar.gz:
 	@mkdir -p $(@D)
 	$(CABAL) $(CABAL_ARGS) update
 
