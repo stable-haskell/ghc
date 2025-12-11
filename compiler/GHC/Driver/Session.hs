@@ -278,7 +278,7 @@ import GHC.Core.Opt.CallerCC
 import GHC.Parser (parseIdentifier)
 import GHC.Parser.Lexer (mkParserOpts, initParserState, P(..), ParseResult(..))
 
-import GHC.SysTools.BaseDir ( expandToolDir, expandTopDir )
+import GHC.SysTools.BaseDir ( expandTopDir )
 
 import Data.IORef
 import Control.Arrow ((&&&))
@@ -3465,7 +3465,7 @@ compilerInfo dflags
       -- Next come the settings, so anything else can be overridden
       -- in the settings file (as "lookup" uses the first match for the
       -- key)
-    : map (fmap $ expandDirectories (topDir dflags) (toolDir dflags))
+    : map (fmap $ expandTopDir (topDir dflags))
           (rawSettings dflags)
    ++ [("Project version",             projectVersion dflags),
        ("Edition",                     "Stable Haskell"),
@@ -3525,9 +3525,6 @@ compilerInfo dflags
     showBool False = "NO"
     platform  = targetPlatform dflags
     isWindows = platformOS platform == OSMinGW32
-    useInplaceMinGW = toolSettings_useInplaceMinGW $ toolSettings dflags
-    expandDirectories :: FilePath -> Maybe FilePath -> String -> String
-    expandDirectories topd mtoold = expandToolDir useInplaceMinGW mtoold . expandTopDir topd
 
 -- Note [Special unit-ids]
 -- ~~~~~~~~~~~~~~~~~~~~~~~

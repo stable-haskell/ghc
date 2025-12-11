@@ -12,8 +12,8 @@
 -}
 
 module GHC.SysTools.BaseDir
-  ( expandTopDir, expandToolDir
-  , findTopDir, findToolDir
+  ( expandTopDir
+  , findTopDir
   , tryFindTopDir
   ) where
 
@@ -26,11 +26,6 @@ import GHC.Utils.Panic
 
 import System.Environment (lookupEnv)
 import System.FilePath
-
--- Windows
-#if defined(mingw32_HOST_OS)
-import System.Directory (doesDirectoryExist)
-#endif
 
 {-
 Note [topdir: How GHC finds its files]
@@ -119,14 +114,6 @@ provide the override which allows GHC to instead of using an inplace compiler to
 play nice with the system compiler instead.
 -}
 
--- | Expand occurrences of the @$tooldir@ interpolation in a string
--- on Windows, leave the string untouched otherwise.
-expandToolDir
-  :: Bool -- ^ whether we use the ambient mingw toolchain
-  -> Maybe FilePath -- ^ tooldir
-  -> String -> String
-expandToolDir _ _ s = s
-
 -- | Returns a Unix-format path pointing to TopDir.
 findTopDir :: Maybe String -- Maybe TopDir path (without the '-B' prefix).
            -> IO String    -- TopDir (in Unix format '/' separated)
@@ -152,15 +139,3 @@ tryFindTopDir Nothing
              Just env_top_dir -> return $ Just env_top_dir
              -- Try directory of executable
              Nothing -> getBaseDir
-
-
--- See Note [tooldir: How GHC finds mingw on Windows]
--- Returns @Nothing@ when not on Windows.
--- When called on Windows, it either throws an error when the
--- tooldir can't be located, or returns @Just tooldirpath@.
--- If the distro toolchain is being used we treat Windows the same as Linux
-findToolDir
-  :: Bool -- ^ whether we use the ambient mingw toolchain
-  -> FilePath -- ^ topdir
-  -> IO (Maybe FilePath)
-findToolDir _ _ = return Nothing

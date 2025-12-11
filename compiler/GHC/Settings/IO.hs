@@ -69,28 +69,23 @@ initSettings top_dir = do
   -- see Note [topdir: How GHC finds its files]
   -- NB: top_dir is assumed to be in standard Unix
   -- format, '/' separated
-  mtool_dir <- liftIO $ findToolDir useInplaceMinGW top_dir
-        -- see Note [tooldir: How GHC finds mingw on Windows]
 
-    -- Escape 'top_dir' and 'mtool_dir', to make sure we don't accidentally
+    -- Escape 'top_dir' to make sure we don't accidentally
     -- introduce unescaped spaces. See #24265 and #25204.
   let escaped_top_dir = escapeArg top_dir
-      escaped_mtool_dir = fmap escapeArg mtool_dir
 
       getSetting_raw key = either pgmError pure $
         getRawSetting settingsFile mySettings key
       getSetting_topDir top key = either pgmError pure $
         getRawFilePathSetting top settingsFile mySettings key
-      getSetting_toolDir top tool key =
-        expandToolDir useInplaceMinGW tool <$> getSetting_topDir top key
 
       getSetting :: String -> ExceptT SettingsError m String
       getSetting key = getSetting_topDir top_dir key
       getToolSetting :: String -> ExceptT SettingsError m String
-      getToolSetting key = getSetting_toolDir top_dir mtool_dir key
+      getToolSetting key = getSetting_topDir top_dir key
       getFlagsSetting :: String -> ExceptT SettingsError m [String]
-      getFlagsSetting key = unescapeArgs <$> getSetting_toolDir escaped_top_dir escaped_mtool_dir key
-        -- Make sure to unescape, as we have escaped top_dir and tool_dir.
+      getFlagsSetting key = unescapeArgs <$> getSetting_topDir escaped_top_dir key
+        -- Make sure to unescape, as we have escaped top_dir.
 
   -- See Note [Settings file] for a little more about this file. We're
   -- just partially applying those functions and throwing 'Left's; they're
@@ -196,7 +191,7 @@ initSettings top_dir = do
     , sFileSettings = FileSettings
       { fileSettings_ghcUsagePath   = ghc_usage_msg_path
       , fileSettings_ghciUsagePath  = ghci_usage_msg_path
-      , fileSettings_toolDir        = mtool_dir
+      , fileSettings_toolDir        = Nothing
       , fileSettings_topDir         = top_dir
       , fileSettings_globalPackageDatabase = globalpkgdb_path
       }
