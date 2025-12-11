@@ -666,7 +666,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ matrix.branch }}
-          submodules: recursive
 
       - uses: ./.github/actions/download
         with:
@@ -696,7 +695,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ matrix.branch }}
-          submodules: recursive
 
       - name: Install msys2 dependencies
         run: *msys2-install
