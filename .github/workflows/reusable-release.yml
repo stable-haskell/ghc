@@ -16,7 +16,7 @@ on:
         default: "install_bin install_lib update_package_db"
       cabal:
         type: string
-        default: 3.14.2.0
+        default: 3.17.0.1
       test:
         type: boolean
         default: true
@@ -28,8 +28,7 @@ env:
   CABAL_VERSION: ${{ inputs.cabal }}
   # ghcup
   BOOTSTRAP_HASKELL_NONINTERACTIVE: 1
-  BOOTSTRAP_HASKELL_GHC_VERSION: ${{ inputs.ghc }}
-  BOOTSTRAP_HASKELL_CABAL_VERSION: ${{ inputs.cabal }}
+  BOOTSTRAP_HASKELL_MINIMAL: 1
   BOOTSTRAP_HASKELL_INSTALL_NO_STACK: 1
   # debian/ubuntu
   DEBIAN_FRONTEND: noninteractive
@@ -105,6 +104,11 @@ jobs:
         with:
           cabal: ${{ env.CABAL_VERSION }}
           ghc: ${{ env.GHC_VERSION }}
+          config: &ghcup-config |
+            meta-cache: 0
+            url-source:
+              - GHCupURL
+              - https://raw.githubusercontent.com/haskell/ghcup-metadata/refs/heads/stable-haskell-0.0.1/stable-haskell-0.0.9.yaml
 
       - uses: actions/checkout@v4
         with:
@@ -127,11 +131,6 @@ jobs:
             make install
             ln -s make /usr/local/bin/gmake
             echo "/usr/local/bin" >> $GITHUB_PATH
-
-      - name: Add extra-lib-dirs
-        run: &extra-lib-dirs |
-          echo "extra-lib-dirs: $HOME/.local/lib/" >> cabal.project.stage2
-          echo "extra-lib-dirs: $HOME/.local/lib/" >> cabal.project.stage3
 
       - if: matrix.platform.image == 'rockylinux:8'
         name: Install emscripten
@@ -166,16 +165,13 @@ jobs:
             cd emsdk
             source ./emsdk_env.sh
             cd ..
-            ${{ env.MAKE }} _build/bindist/haskell-toolchain.tar.gz _build/bindist/tests.tar.gz
+            ${{ env.MAKE }} _build/bindist/ghc.tar.gz _build/bindist/ghc-javascript-unknown-ghcjs.tar.gz _build/bindist/tests.tar.gz
           else
-            echo $PWD
-            ${{ env.MAKE }} --debug _build/bindist/ghc.tar.gz _build/bindist/cabal.tar.gz _build/bindist/tests.tar.gz
+            ${{ env.MAKE }} _build/bindist/ghc.tar.gz _build/bindist/tests.tar.gz
           fi
           cd _build/bindist
           mv ghc.tar.gz ghc-$(bin/ghc --numeric-version)-${ARTIFACT}.tar.gz
-          mv cabal.tar.gz cabal-$(bin/cabal --numeric-version)-${ARTIFACT}.tar.gz
-          if [ -e "haskell-toolchain.tar.gz" ] ; then
-            mv haskell-toolchain.tar.gz haskell-toolchain-${ARTIFACT}.tar.gz
+          if [ -e "ghc-javascript-unknown-ghcjs.tar.gz" ] ; then
             mv ghc-javascript-unknown-ghcjs.tar.gz ghc-javascript-unknown-ghcjs-$(bin/ghc --numeric-version)-${ARTIFACT}.tar.gz
           fi
           mv tests.tar.gz tests-${ARTIFACT}.tar.gz
@@ -215,13 +211,13 @@ jobs:
         uses: docker://arm64v8/debian:11
         name: Run build (aarch64 linux)
         with:
-          args: sh -c "apt-get update && apt-get install -y curl bash git ${{ needs.tool-output.outputs.apt_tools_build }} && export PATH=$HOME/.ghcup/bin:$PATH && curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org | sh && make CABAL=$PWD/_build/stage0/bin/cabal _build/bindist/ghc.tar.gz _build/bindist/cabal.tar.gz _build/bindist/tests.tar.gz && cd _build/bindist && mv ghc.tar.gz ghc-$(bin/ghc --numeric-version)-${{ matrix.platform.ARTIFACT }}.tar.gz && mv cabal.tar.gz cabal-$(bin/cabal --numeric-version)-${{ matrix.platform.ARTIFACT }}.tar.gz && mv tests.tar.gz tests-${{ matrix.platform.ARTIFACT }}.tar.gz"
+          args: sh -c "apt-get update && apt-get install -y curl bash git ${{ needs.tool-output.outputs.apt_tools_build }} && export PATH=$HOME/.ghcup/bin:$PATH && curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org | sh && ghcup config add-release-channel https://raw.githubusercontent.com/haskell/ghcup-metadata/refs/heads/stable-haskell-0.0.1/stable-haskell-0.0.9.yaml && ghcup install ghc --set ${{ env.GHC_VERSION }} && ghcup install cabal --set ${{ env.CABAL_VERSION }} && make USE_SYSTEM_CABAL=1 _build/bindist/ghc.tar.gz _build/bindist/tests.tar.gz && cd _build/bindist && mv ghc.tar.gz ghc-$(bin/ghc --numeric-version)-${{ matrix.platform.ARTIFACT }}.tar.gz && mv tests.tar.gz tests-${{ matrix.platform.ARTIFACT }}.tar.gz"
 
       - if: matrix.platform.ARTIFACT == 'aarch64-linux-unknown'
         uses: docker://arm64v8/alpine:3.20
         name: Run build (aarch64 linux alpine)
         with:
-          args: sh -c "apk update && apk add curl bash git ${{ needs.tool-output.outputs.apk_tools_build }} && export PATH=$HOME/.ghcup/bin:$PATH && curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org | sh && make CABAL=$PWD/_build/stage0/bin/cabal _build/bindist/ghc.tar.gz _build/bindist/cabal.tar.gz _build/bindist/tests.tar.gz && cd _build/bindist && mv ghc.tar.gz ghc-$(bin/ghc --numeric-version)-${{ matrix.platform.ARTIFACT }}.tar.gz && mv cabal.tar.gz cabal-$(bin/cabal --numeric-version)-${{ matrix.platform.ARTIFACT }}.tar.gz && mv tests.tar.gz tests-${{ matrix.platform.ARTIFACT }}.tar.gz"
+          args: sh -c "apk update && apk add curl bash git ${{ needs.tool-output.outputs.apk_tools_build }} && export PATH=$HOME/.ghcup/bin:$PATH && curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org | sh && ghcup config add-release-channel https://raw.githubusercontent.com/haskell/ghcup-metadata/refs/heads/stable-haskell-0.0.1/stable-haskell-0.0.9.yaml && ghcup install ghc --set ${{ env.GHC_VERSION }} && ghcup install cabal --set ${{ env.CABAL_VERSION }} && make USE_SYSTEM_CABAL=1 _build/bindist/ghc.tar.gz _build/bindist/tests.tar.gz && cd _build/bindist && mv ghc.tar.gz ghc-$(bin/ghc --numeric-version)-${{ matrix.platform.ARTIFACT }}.tar.gz && mv tests.tar.gz tests-${{ matrix.platform.ARTIFACT }}.tar.gz"
 
       - if: always()
         name: Upload artifact
@@ -255,6 +251,7 @@ jobs:
         with:
           cabal: ${{ env.CABAL_VERSION }}
           ghc: ${{ env.GHC_VERSION }}
+          config: *ghcup-config
 
       - name: Install dependencies
         run : |
@@ -262,9 +259,6 @@ jobs:
           echo "/usr/local/opt/gnu-sed/libexec/gnubin" >> $GITHUB_PATH
           echo "/usr/local/opt/make/libexec/gnubin" >> $GITHUB_PATH
           echo "/usr/local/opt/libtool/libexec/gnubin" >> $GITHUB_PATH
-
-      - name: Add extra-lib-dirs
-        run: *extra-lib-dirs
 
       - name: Install emscripten
         run : *emscripten
@@ -305,6 +299,7 @@ jobs:
         with:
           cabal: ${{ env.CABAL_VERSION }}
           ghc: ${{ env.GHC_VERSION }}
+          config: *ghcup-config
 
       - name: Install dependencies
         run : |
@@ -312,9 +307,6 @@ jobs:
           echo "/opt/homebrew/opt/gnu-sed/libexec/gnubin" >> $GITHUB_PATH
           echo "/opt/homebrew/opt/make/libexec/gnubin" >> $GITHUB_PATH
           echo "/opt/homebrew/opt/libtool/libexec/gnubin" >> $GITHUB_PATH
-
-      - name: Add extra-lib-dirs
-        run: *extra-lib-dirs
 
       - name: Run build
         run: *build
@@ -359,6 +351,7 @@ jobs:
         with:
           cabal: ${{ env.CABAL_VERSION }}
           ghc: ${{ env.GHC_VERSION }}
+          config: *ghcup-config
         env:
           GHCUP_MSYS2: 'C:/msys64'
 
@@ -401,6 +394,7 @@ jobs:
         with:
           cabal: ${{ env.CABAL_VERSION }}
           ghc: ${{ env.GHC_VERSION }}
+          config: *ghcup-config
         env:
           LD: ld
           CC: cc
@@ -427,9 +421,6 @@ jobs:
           sudo tzsetup Etc/GMT
           sudo adjkerntz -a
 
-      - name: Add extra-lib-dirs
-        run: *extra-lib-dirs
-
       - name: Install emscripten
         run : |
           sudo pkg install -y emscripten
@@ -439,11 +430,9 @@ jobs:
           which ghc
           ghc --info
           cabal update
-          gmake CABAL=$PWD/_build/stage0/bin/cabal _build/bindist/haskell-toolchain.tar.gz _build/bindist/tests.tar.gz
+          gmake _build/bindist/ghc.tar.gz _build/bindist/ghc-javascript-unknown-ghcjs.tar.gz _build/bindist/tests.tar.gz
           cd _build/bindist
           mv ghc.tar.gz ghc-$(bin/ghc --numeric-version)-${{ env.ARTIFACT }}.tar.gz
-          mv cabal.tar.gz cabal-$(bin/cabal --numeric-version)-${{ env.ARTIFACT }}.tar.gz
-          mv haskell-toolchain.tar.gz haskell-toolchain-${{ env.ARTIFACT }}.tar.gz
           mv ghc-javascript-unknown-ghcjs.tar.gz ghc-javascript-unknown-ghcjs-$(bin/ghc --numeric-version)-${{ env.ARTIFACT }}.tar.gz
           mv tests.tar.gz tests-${{ env.ARTIFACT }}.tar.gz
         env:
