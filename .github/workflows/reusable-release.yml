@@ -165,14 +165,20 @@ jobs:
             cd emsdk
             source ./emsdk_env.sh
             cd ..
-            ${{ env.MAKE }} _build/bindist/ghc.tar.gz _build/bindist/ghc-javascript-unknown-ghcjs.tar.gz _build/bindist/tests.tar.gz
+            ${{ env.MAKE }} _build/bindist/stage2/ghc.tar.gz _build/bindist/stage3/ghc-javascript-unknown-ghcjs.tar.gz _build/bindist/tests.tar.gz
           else
-            ${{ env.MAKE }} _build/bindist/ghc.tar.gz _build/bindist/tests.tar.gz
+            ${{ env.MAKE }} _build/bindist/stage2/ghc.tar.gz _build/bindist/tests.tar.gz
           fi
           cd _build/bindist
-          mv ghc.tar.gz ghc-$(bin/ghc --numeric-version)-${ARTIFACT}.tar.gz
+          (
+            cd stage2
+            mv ghc.tar.gz ghc-$(bin/ghc --numeric-version)-${ARTIFACT}.tar.gz
+          )
           if [ -e "ghc-javascript-unknown-ghcjs.tar.gz" ] ; then
-            mv ghc-javascript-unknown-ghcjs.tar.gz ghc-javascript-unknown-ghcjs-$(bin/ghc --numeric-version)-${ARTIFACT}.tar.gz
+            (
+              cd stage3
+              mv ghc-javascript-unknown-ghcjs.tar.gz ghc-javascript-unknown-ghcjs-$(bin/ghc --numeric-version)-${ARTIFACT}.tar.gz
+            )
           fi
           mv tests.tar.gz tests-${ARTIFACT}.tar.gz
         env:
@@ -185,8 +191,10 @@ jobs:
           if-no-files-found: error
           retention-days: 2
           name: artifacts-${{ matrix.platform.ARTIFACT }}-${{ matrix.branch }}
-          path: |
+          path: &upload-paths |
             ./_build/bindist/*.tar.gz
+            ./_build/bindist/stage2/*.tar.gz
+            ./_build/bindist/stage3/*.tar.gz
 
   build-arm:
     name: Build ARM binary
@@ -211,13 +219,13 @@ jobs:
         uses: docker://arm64v8/debian:11
         name: Run build (aarch64 linux)
         with:
-          args: sh -c "apt-get update && apt-get install -y curl bash git ${{ needs.tool-output.outputs.apt_tools_build }} && export PATH=$HOME/.ghcup/bin:$PATH && curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org | sh && ghcup config add-release-channel https://raw.githubusercontent.com/haskell/ghcup-metadata/refs/heads/stable-haskell-0.0.1/stable-haskell-0.0.9.yaml && ghcup install ghc --set ${{ env.GHC_VERSION }} && ghcup install cabal --set ${{ env.CABAL_VERSION }} && make USE_SYSTEM_CABAL=1 _build/bindist/ghc.tar.gz _build/bindist/tests.tar.gz && cd _build/bindist && mv ghc.tar.gz ghc-$(bin/ghc --numeric-version)-${{ matrix.platform.ARTIFACT }}.tar.gz && mv tests.tar.gz tests-${{ matrix.platform.ARTIFACT }}.tar.gz"
+          args: sh -c "apt-get update && apt-get install -y curl bash git ${{ needs.tool-output.outputs.apt_tools_build }} && export PATH=$HOME/.ghcup/bin:$PATH && curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org | sh && ghcup config add-release-channel https://raw.githubusercontent.com/haskell/ghcup-metadata/refs/heads/stable-haskell-0.0.1/stable-haskell-0.0.9.yaml && ghcup install ghc --set ${{ env.GHC_VERSION }} && ghcup install cabal --set ${{ env.CABAL_VERSION }} && make USE_SYSTEM_CABAL=1 _build/bindist/stage2/ghc.tar.gz _build/bindist/tests.tar.gz && cd _build/bindist/stage2 && mv ghc.tar.gz ghc-$(bin/ghc --numeric-version)-${{ matrix.platform.ARTIFACT }}.tar.gz && cd .. && mv tests.tar.gz tests-${{ matrix.platform.ARTIFACT }}.tar.gz"
 
       - if: matrix.platform.ARTIFACT == 'aarch64-linux-unknown'
         uses: docker://arm64v8/alpine:3.20
         name: Run build (aarch64 linux alpine)
         with:
-          args: sh -c "apk update && apk add curl bash git ${{ needs.tool-output.outputs.apk_tools_build }} && export PATH=$HOME/.ghcup/bin:$PATH && curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org | sh && ghcup config add-release-channel https://raw.githubusercontent.com/haskell/ghcup-metadata/refs/heads/stable-haskell-0.0.1/stable-haskell-0.0.9.yaml && ghcup install ghc --set ${{ env.GHC_VERSION }} && ghcup install cabal --set ${{ env.CABAL_VERSION }} && make USE_SYSTEM_CABAL=1 _build/bindist/ghc.tar.gz _build/bindist/tests.tar.gz && cd _build/bindist && mv ghc.tar.gz ghc-$(bin/ghc --numeric-version)-${{ matrix.platform.ARTIFACT }}.tar.gz && mv tests.tar.gz tests-${{ matrix.platform.ARTIFACT }}.tar.gz"
+          args: sh -c "apk update && apk add curl bash git ${{ needs.tool-output.outputs.apk_tools_build }} && export PATH=$HOME/.ghcup/bin:$PATH && curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org | sh && ghcup config add-release-channel https://raw.githubusercontent.com/haskell/ghcup-metadata/refs/heads/stable-haskell-0.0.1/stable-haskell-0.0.9.yaml && ghcup install ghc --set ${{ env.GHC_VERSION }} && ghcup install cabal --set ${{ env.CABAL_VERSION }} && make USE_SYSTEM_CABAL=1 _build/bindist/stage2/ghc.tar.gz _build/bindist/tests.tar.gz && cd _build/bindist/stage2 && mv ghc.tar.gz ghc-$(bin/ghc --numeric-version)-${{ matrix.platform.ARTIFACT }}.tar.gz && cd .. && mv tests.tar.gz tests-${{ matrix.platform.ARTIFACT }}.tar.gz"
 
       - if: always()
         name: Upload artifact
@@ -226,8 +234,7 @@ jobs:
           if-no-files-found: error
           retention-days: 2
           name: artifacts-${{ matrix.platform.ARTIFACT }}-${{ matrix.branch }}
-          path: |
-            ./_build/bindist/*.tar.gz
+          path: *upload-paths
 
   build-mac-x86_64:
     name: Build binary (Mac x86_64)
@@ -273,8 +280,7 @@ jobs:
           if-no-files-found: error
           retention-days: 2
           name: artifacts-${{ env.ARTIFACT }}-${{ matrix.branch }}
-          path: |
-            ./_build/bindist/*.tar.gz
+          path: *upload-paths
 
   build-mac-aarch64:
     name: Build binary (Mac aarch64)
@@ -318,8 +324,7 @@ jobs:
           if-no-files-found: error
           retention-days: 2
           name: artifacts-${{ env.ARTIFACT }}-${{ matrix.branch }}
-          path: |
-            ./_build/bindist/*.tar.gz
+          path: *upload-paths
 
   build-windows:
     name: Build binary (Windows)
@@ -367,8 +372,7 @@ jobs:
           if-no-files-found: error
           retention-days: 2
           name: artifacts-${{ env.ARTIFACT }}-${{ matrix.branch }}
-          path: |
-            ./_build/bindist/*.tar.gz
+          path: *upload-paths
 
   build-freebsd-x86_64:
     name: Build FreeBSD x86_64
@@ -430,10 +434,16 @@ jobs:
           which ghc
           ghc --info
           cabal update
-          gmake _build/bindist/ghc.tar.gz _build/bindist/ghc-javascript-unknown-ghcjs.tar.gz _build/bindist/tests.tar.gz
+          gmake _build/bindist/stage2/ghc.tar.gz _build/bindist/stage3/ghc-javascript-unknown-ghcjs.tar.gz _build/bindist/tests.tar.gz
           cd _build/bindist
-          mv ghc.tar.gz ghc-$(bin/ghc --numeric-version)-${{ env.ARTIFACT }}.tar.gz
-          mv ghc-javascript-unknown-ghcjs.tar.gz ghc-javascript-unknown-ghcjs-$(bin/ghc --numeric-version)-${{ env.ARTIFACT }}.tar.gz
+          (
+            cd stage2
+            mv ghc.tar.gz ghc-$(bin/ghc --numeric-version)-${{ env.ARTIFACT }}.tar.gz
+          )
+          (
+            cd stage3
+            mv ghc-javascript-unknown-ghcjs.tar.gz ghc-javascript-unknown-ghcjs-$(bin/ghc --numeric-version)-${{ env.ARTIFACT }}.tar.gz
+          )
           mv tests.tar.gz tests-${{ env.ARTIFACT }}.tar.gz
         env:
           EXTRA_LIB_DIRS: /usr/local/lib
@@ -447,8 +457,7 @@ jobs:
           if-no-files-found: error
           retention-days: 2
           name: artifacts-${{ env.ARTIFACT }}-${{ matrix.branch }}
-          path: |
-            ./_build/bindist/*.tar.gz
+          path: *upload-paths
 
   test-linux:
     name: Test linux binaries
@@ -577,16 +586,16 @@ jobs:
           rm -rf .git
           (
           cd _build/bindist
-          for file in *.tar.gz; do tar xzf "$file"; done
+          for file in tests*.tar.gz stage2/ghc*.tar.gz stage3/ghc*.tar.gz ; do tar xzf "$file"; done
           )
           PATH=$(pwd)/_build/bindist/bin:$PATH ${{ env.MAKE }} -C _build/bindist/testsuite
         env:
           THREADS: 4
-          TEST_HC: ${{ steps.pwd_output.outputs.pwd }}/_build/bindist/bin/ghc
-          GHC_PKG: ${{ steps.pwd_output.outputs.pwd }}/_build/bindist/bin/ghc-pkg
-          HP2PS_ABS: ${{ steps.pwd_output.outputs.pwd }}/_build/bindist/bin/hp2ps
-          HPC: ${{ steps.pwd_output.outputs.pwd }}/_build/bindist/bin/hpc
-          RUNGHC: ${{ steps.pwd_output.outputs.pwd }}/_build/bindist/bin/runghc
+          TEST_HC: ${{ steps.pwd_output.outputs.pwd }}/_build/bindist/bin/stage2/ghc
+          GHC_PKG: ${{ steps.pwd_output.outputs.pwd }}/_build/bindist/bin/stage2/ghc-pkg
+          HP2PS_ABS: ${{ steps.pwd_output.outputs.pwd }}/_build/bindist/bin/stage2/hp2ps
+          HPC: ${{ steps.pwd_output.outputs.pwd }}/_build/bindist/bin/stage2/hpc
+          RUNGHC: ${{ steps.pwd_output.outputs.pwd }}/_build/bindist/bin/stage2/runghc
 
   test-arm:
     name: Test ARM binary
@@ -616,13 +625,13 @@ jobs:
         uses: docker://arm64v8/debian:11
         name: Run build (aarch64 linux)
         with:
-          args: sh -c "apt-get update && apt-get install -y curl bash git ${{ needs.tool-output.outputs.apt_tools_test }} && git config --system --add safe.directory $GITHUB_WORKSPACE && rm -rf .git && cd _build/bindist && for file in *.tar.gz; do tar xzf $file; done && cd testsuite && PATH=$GITHUB_WORKSPACE/_build/bindist/bin:$PATH make"
+          args: sh -c "apt-get update && apt-get install -y curl bash git ${{ needs.tool-output.outputs.apt_tools_test }} && git config --system --add safe.directory $GITHUB_WORKSPACE && rm -rf .git && cd _build/bindist && for file in tests*.tar.gz stage2/ghc*.tar.gz stage3/ghc*.tar.gz; do tar xzf $file; done && cd testsuite && PATH=$GITHUB_WORKSPACE/_build/bindist/bin/:$PATH make"
 
       - if: matrix.platform.ARTIFACT == 'aarch64-linux-unknown'
         uses: docker://arm64v8/alpine:3.20
         name: Run build (aarch64 linux alpine)
         with:
-          args: sh -c "apk update && apk add curl bash git ${{ needs.tool-output.outputs.apk_tools_test }} && git config --system --add safe.directory $GITHUB_WORKSPACE && rm -rf .git && cd _build/bindist && for file in *.tar.gz; do tar xzf $file; done && cd testsuite && PATH=$GITHUB_WORKSPACE/_build/bindist/bin:$PATH make"
+          args: sh -c "apk update && apk add curl bash git ${{ needs.tool-output.outputs.apk_tools_test }} && git config --system --add safe.directory $GITHUB_WORKSPACE && rm -rf .git && cd _build/bindist && for file in tests*.tar.gz stage2/ghc*.tar.gz stage3/ghc*.tar.gz; do tar xzf $file; done && cd testsuite && PATH=$GITHUB_WORKSPACE/_build/bindist/bin/:$PATH make"
 
   test-mac-x86_64:
     name: Test binary (Mac x86_64)
@@ -743,10 +752,10 @@ jobs:
         run: |
           rm -rf .git
           cd _build/bindist
-          for file in *.tar.gz; do tar xzf "$file"; done
+          for file in tests*.tar.gz stage2/ghc*.tar.gz stage3/ghc*.tar.gz; do tar xzf "$file"; done
           cd testsuite
           export LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH
-          PATH=$GITHUB_WORKSPACE/_build/bindist/bin:$PATH gmake
+          PATH=$GITHUB_WORKSPACE/_build/bindist/bin/:$PATH gmake
         env:
           MAKE: gmake
           THREADS: 8
