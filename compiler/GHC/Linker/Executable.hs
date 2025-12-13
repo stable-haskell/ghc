@@ -3,6 +3,8 @@ module GHC.Linker.Executable
    ( linkExecutable
    , ExecutableLinkOpts (..)
    , initExecutableLinkOpts
+   , mkExtraObjToLinkIntoBinary
+   , mkNoteObjsToLinkIntoBinary
    -- RTS Opts
    , RtsOptsEnabled (..)
    -- * Link info
