@@ -26,7 +26,7 @@ import GHC.Utils.TmpFs
 import GHC.Linker.MacOS
 import GHC.Linker.Unit
 import GHC.Linker.Dynamic
-import GHC.Linker.ExtraObj
+import GHC.Linker.Executable (initExecutableLinkOpts, mkExtraObjToLinkIntoBinary, mkNoteObjsToLinkIntoBinary)
 import GHC.Linker.External
 import GHC.Linker.Windows
 import GHC.Linker.Static.Utils
@@ -215,8 +215,9 @@ linkBinary' staticLink logger tmpfs dflags blm unit_env o_files dep_units = do
     let lib_paths = libraryPaths dflags
     let lib_path_opts = map ("-L"++) lib_paths
 
-    extraLinkObj <- maybeToList <$> mkExtraObjToLinkIntoBinary logger tmpfs dflags unit_state
-    noteLinkObjs <- mkNoteObjsToLinkIntoBinary logger tmpfs dflags unit_env dep_units
+    let execOpts = initExecutableLinkOpts dflags
+    extraLinkObj <- maybeToList <$> mkExtraObjToLinkIntoBinary logger tmpfs execOpts unit_state
+    noteLinkObjs <- mkNoteObjsToLinkIntoBinary logger tmpfs execOpts unit_env dep_units
 
     let
       (pre_hs_libs, post_hs_libs)
