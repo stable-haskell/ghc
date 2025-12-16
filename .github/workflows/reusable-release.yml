@@ -314,6 +314,9 @@ jobs:
           echo "/opt/homebrew/opt/make/libexec/gnubin" >> $GITHUB_PATH
           echo "/opt/homebrew/opt/libtool/libexec/gnubin" >> $GITHUB_PATH
 
+      - name: Install emscripten
+        run : *emscripten
+
       - name: Run build
         run: *build
 
