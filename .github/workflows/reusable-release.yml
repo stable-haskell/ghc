@@ -588,10 +588,12 @@ jobs:
 
           rm -rf .git
           (
+          shopt -s globstar
           cd _build/bindist
-          for file in tests*.tar.gz stage2/ghc*.tar.gz stage3/ghc*.tar.gz ; do tar xzf "$file"; done
+          for file in **/*.tar.gz ; do tar xzf "$file"; done
           )
           PATH=$(pwd)/_build/bindist/bin:$PATH ${{ env.MAKE }} -C _build/bindist/testsuite
+        shell: bash
         env:
           THREADS: 4
           TEST_HC: ${{ steps.pwd_output.outputs.pwd }}/_build/bindist/bin/stage2/ghc
@@ -628,13 +630,13 @@ jobs:
         uses: docker://arm64v8/debian:11
         name: Run build (aarch64 linux)
         with:
-          args: sh -c "apt-get update && apt-get install -y curl bash git ${{ needs.tool-output.outputs.apt_tools_test }} && git config --system --add safe.directory $GITHUB_WORKSPACE && rm -rf .git && cd _build/bindist && for file in tests*.tar.gz stage2/ghc*.tar.gz stage3/ghc*.tar.gz; do tar xzf $file; done && cd testsuite && PATH=$GITHUB_WORKSPACE/_build/bindist/bin/:$PATH make"
+          args: sh -c "apt-get update && apt-get install -y curl bash git ${{ needs.tool-output.outputs.apt_tools_test }} && git config --system --add safe.directory $GITHUB_WORKSPACE && rm -rf .git && cd _build/bindist && for file in tests*.tar.gz stage2/ghc*.tar.gz ; do tar xzf $file; done && cd testsuite && PATH=$GITHUB_WORKSPACE/_build/bindist/bin/:$PATH make"
 
       - if: matrix.platform.ARTIFACT == 'aarch64-linux-unknown'
         uses: docker://arm64v8/alpine:3.20
         name: Run build (aarch64 linux alpine)
         with:
-          args: sh -c "apk update && apk add curl bash git ${{ needs.tool-output.outputs.apk_tools_test }} && git config --system --add safe.directory $GITHUB_WORKSPACE && rm -rf .git && cd _build/bindist && for file in tests*.tar.gz stage2/ghc*.tar.gz stage3/ghc*.tar.gz; do tar xzf $file; done && cd testsuite && PATH=$GITHUB_WORKSPACE/_build/bindist/bin/:$PATH make"
+          args: sh -c "apk update && apk add curl bash git ${{ needs.tool-output.outputs.apk_tools_test }} && git config --system --add safe.directory $GITHUB_WORKSPACE && rm -rf .git && cd _build/bindist && for file in tests*.tar.gz stage2/ghc*.tar.gz ; do tar xzf $file; done && cd testsuite && PATH=$GITHUB_WORKSPACE/_build/bindist/bin/:$PATH make"
 
   test-mac-x86_64:
     name: Test binary (Mac x86_64)
@@ -659,6 +661,7 @@ jobs:
 
       - name: Run test
         run: *test
+        shell: bash
         env:
           THREADS: 4
 
@@ -686,6 +689,7 @@ jobs:
 
       - name: Run test
         run: *test
+        shell: bash
         env:
           THREADS: 4
 
