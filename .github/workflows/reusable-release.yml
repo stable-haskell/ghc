@@ -591,8 +591,11 @@ jobs:
           shopt -s globstar
           cd _build/bindist
           for file in **/*.tar.gz ; do tar xzf "$file"; done
+          find
           )
-          PATH=$(pwd)/_build/bindist/bin:$PATH ${{ env.MAKE }} -C _build/bindist/testsuite
+          export PATH=$(pwd)/_build/bindist/bin/:$PATH
+          which ghc
+          ${{ env.MAKE }} -C _build/bindist/testsuite
         shell: bash
         env:
           THREADS: 4
@@ -760,6 +763,8 @@ jobs:
           rm -rf .git
           cd _build/bindist
           for file in tests*.tar.gz stage2/ghc*.tar.gz stage3/ghc*.tar.gz; do tar xzf "$file"; done
+          which ghc
+          find
           cd testsuite
           export LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH
           PATH=$GITHUB_WORKSPACE/_build/bindist/bin/:$PATH gmake
