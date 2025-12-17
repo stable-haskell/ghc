@@ -593,17 +593,17 @@ jobs:
           for file in **/*.tar.gz ; do tar xzf "$file"; done
           find
           )
-          export PATH=$(pwd)/_build/bindist/bin/:$PATH
+          export PATH=${{ steps.pwd_output.outputs.pwd }}/_build/bindist/bin/:$PATH
           which ghc
           ${{ env.MAKE }} -C _build/bindist/testsuite
         shell: bash
         env:
           THREADS: 4
-          TEST_HC: ${{ steps.pwd_output.outputs.pwd }}/_build/bindist/bin/stage2/ghc
-          GHC_PKG: ${{ steps.pwd_output.outputs.pwd }}/_build/bindist/bin/stage2/ghc-pkg
-          HP2PS_ABS: ${{ steps.pwd_output.outputs.pwd }}/_build/bindist/bin/stage2/hp2ps
-          HPC: ${{ steps.pwd_output.outputs.pwd }}/_build/bindist/bin/stage2/hpc
-          RUNGHC: ${{ steps.pwd_output.outputs.pwd }}/_build/bindist/bin/stage2/runghc
+          TEST_HC: ${{ steps.pwd_output.outputs.pwd }}/_build/bindist/bin/ghc
+          GHC_PKG: ${{ steps.pwd_output.outputs.pwd }}/_build/bindist/bin/ghc-pkg
+          HP2PS_ABS: ${{ steps.pwd_output.outputs.pwd }}/_build/bindist/bin/hp2ps
+          HPC: ${{ steps.pwd_output.outputs.pwd }}/_build/bindist/bin/hpc
+          RUNGHC: ${{ steps.pwd_output.outputs.pwd }}/_build/bindist/bin/runghc
 
   test-arm:
     name: Test ARM binary
