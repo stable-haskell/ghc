@@ -662,9 +662,13 @@ jobs:
           name: artifacts-${{ env.ARTIFACT }}-${{ matrix.branch }}
           path: ./_build/bindist
 
+      - name: Install newer bash
+        run : |
+          brew install bash
+
       - name: Run test
         run: *test
-        shell: bash
+        shell: /usr/local/bin/bash
         env:
           THREADS: 4
 
@@ -690,9 +694,13 @@ jobs:
           name: artifacts-${{ env.ARTIFACT }}-${{ matrix.branch }}
           path: ./_build/bindist
 
+      - name: Install newer bash
+        run : |
+          brew install bash
+
       - name: Run test
         run: *test
-        shell: bash
+        shell: /opt/homebrew/bin/bash
         env:
           THREADS: 4
 
@@ -764,7 +772,7 @@ jobs:
           cd _build/bindist
           for file in tests*.tar.gz stage2/ghc*.tar.gz stage3/ghc*.tar.gz; do tar xzf "$file"; done
           which ghc
-          find
+          find .
           cd testsuite
           export LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH
           PATH=$GITHUB_WORKSPACE/_build/bindist/bin/:$PATH gmake

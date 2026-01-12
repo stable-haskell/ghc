@@ -39,6 +39,16 @@ BINDIST3_EXECTUABLES := \
 	unlit$(EXE_EXT) \
 	haddock$(EXE_EXT)
 
+# we need to build these before all else
+STAGE3_RTS := \
+	rts:nonthreaded-debug \
+	rts:nonthreaded-nodebug \
+	rts:threaded-nodebug \
+	rts:threaded-debug
+
+STAGE3_RTS_JS := \
+	rts:nonthreaded-nodebug
+
 STAGE3_LIBS := \
     rts:nonthreaded-nodebug \
 	Cabal \
@@ -118,9 +128,14 @@ _build/stage3/lib/targets/%/lib/ghc-interp.js:
 	@cp -f ghc-interp.js $@
 
 # $1 = TIPLET
+# $2 = RTS flavors
 define build_cross
 	GHC=$(GHC) HADRIAN_SETTINGS='$(call HADRIAN_SETTINGS)' \
-		PATH=$(PWD)/_build/stage2/bin:$(PWD)/_build/stage3/bin:$(PATH) \
+		$(CABAL_BUILD) -W $(GHC2) --happy-options="--template=$(abspath _build/stage2/src/happy-lib-2.1.5/data/)" --with-hsc2hs=$1-hsc2hs --hsc2hs-options='-x' --configure-option='--host=$1' \
+		$(foreach lib,$(CROSS_EXTRA_LIB_DIRS),--extra-lib-dirs=$(lib)) \
+		$(foreach include,$(CROSS_EXTRA_INCLUDE_DIRS),--extra-include-dirs=$(include)) \
+		$2
+	GHC=$(GHC) HADRIAN_SETTINGS='$(call HADRIAN_SETTINGS)' \
 		$(CABAL_BUILD) -W $(GHC2) --happy-options="--template=$(abspath _build/stage2/src/happy-lib-2.1.5/data/)" --with-hsc2hs=$1-hsc2hs --hsc2hs-options='-x' --configure-option='--host=$1' \
 		$(foreach lib,$(CROSS_EXTRA_LIB_DIRS),--extra-lib-dirs=$(lib)) \
 		$(foreach include,$(CROSS_EXTRA_INCLUDE_DIRS),--extra-include-dirs=$(include)) \
@@ -150,7 +165,7 @@ javascript-unknown-ghcjs-libs: private CC=emcc
 javascript-unknown-ghcjs-libs: private CROSS_EXTRA_LIB_DIRS=$(JS_EXTRA_LIB_DIRS)
 javascript-unknown-ghcjs-libs: private CROSS_EXTRA_INCLUDE_DIRS=$(JS_EXTRA_INCLUDE_DIRS)
 javascript-unknown-ghcjs-libs: cabal.project.stage3 _build/stage3/bin/javascript-unknown-ghcjs-ghc-pkg$(EXE_EXT) _build/stage3/bin/javascript-unknown-ghcjs-ghc$(EXE_EXT) _build/stage3/bin/javascript-unknown-ghcjs-hsc2hs$(EXE_EXT) _build/stage3/lib/targets/javascript-unknown-ghcjs/lib/settings _build/stage3/lib/targets/javascript-unknown-ghcjs/bin/unlit$(EXE_EXT) _build/stage3/lib/targets/javascript-unknown-ghcjs/lib/package.conf.d
-	$(call build_cross,javascript-unknown-ghcjs)
+	PATH=$(PWD)/_build/stage2/bin:$(PWD)/_build/stage3/bin:$(PATH) $(call build_cross,javascript-unknown-ghcjs,$(STAGE3_RTS_JS))
 
 # --- Stage 3 musl build ---
 
@@ -175,7 +190,7 @@ x86_64-musl-linux-libs: private CC=x86_64-unknown-linux-musl-cc
 x86_64-musl-linux-libs: private CROSS_EXTRA_LIB_DIRS=$(MUSL_EXTRA_LIB_DIRS)
 x86_64-musl-linux-libs: private CROSS_EXTRA_INCLUDE_DIRS=$(MUSL_EXTRA_INCLUDE_DIRS)
 x86_64-musl-linux-libs: _build/stage3/bin/x86_64-musl-linux-ghc-pkg$(EXE_EXT) _build/stage3/bin/x86_64-musl-linux-ghc$(EXE_EXT) _build/stage3/bin/x86_64-musl-linux-hsc2hs$(EXE_EXT) _build/stage3/lib/targets/x86_64-musl-linux/lib/settings _build/stage3/lib/targets/x86_64-musl-linux/bin/unlit$(EXE_EXT) _build/stage3/lib/targets/x86_64-musl-linux/lib/package.conf.d
-	$(call build_cross,x86_64-musl-linux)
+	PATH=$(PWD)/_build/stage2/bin:$(PWD)/_build/stage3/bin:$(PATH) $(call build_cross,x86_64-musl-linux,$(STAGE3_RTS))
 
 # --- Stage 3 wasm build ---
 
@@ -200,7 +215,7 @@ wasm32-unknown-wasi-libs: private CC=wasm32-wasi-clang
 wasm32-unknown-wasi-libs: private CROSS_EXTRA_LIB_DIRS=$(WASM_EXTRA_LIB_DIRS)
 wasm32-unknown-wasi-libs: private CROSS_EXTRA_INCLUDE_DIRS=$(WASM_EXTRA_INCLUDE_DIRS)
 wasm32-unknown-wasi-libs: cabal.project.stage3 _build/stage3/bin/wasm32-unknown-wasi-ghc-pkg$(EXE_EXT) _build/stage3/bin/wasm32-unknown-wasi-ghc$(EXE_EXT) _build/stage3/bin/wasm32-unknown-wasi-hsc2hs$(EXE_EXT) _build/stage3/lib/targets/wasm32-unknown-wasi/lib/settings _build/stage3/lib/targets/wasm32-unknown-wasi/bin/unlit$(EXE_EXT) _build/stage3/lib/targets/wasm32-unknown-wasi/lib/package.conf.d
-	$(call build_cross,wasm32-unknown-wasi)
+	PATH=/home/hasufell/.ghc-wasm/wasi-sdk/bin:$(PWD)/_build/stage2/bin:$(PWD)/_build/stage3/bin:$(PATH) $(call build_cross,wasm32-unknown-wasi,$(STAGE3_RTS))
 
 
 _build/bindist/stage3/lib/targets/%: _build/bindist/stage2 driver/ghc-usage.txt driver/ghci-usage.txt stage3-%
