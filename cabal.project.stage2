@@ -42,6 +42,9 @@ packages:
   utils/ghc-iserv
   utils/ghc-pkg
   utils/ghc-toolchain
+  utils/haddock
+  utils/haddock/haddock-api
+  utils/haddock/haddock-library
   utils/hp2ps
   utils/runghc
   utils/unlit
@@ -68,7 +71,6 @@ packages:
   libraries/process
   libraries/semaphore-compat
   libraries/stm
-  libraries/terminfo
   libraries/text
   libraries/time
   libraries/transformers
@@ -83,6 +85,10 @@ packages:
   https://hackage.haskell.org/package/alex-3.5.2.0/alex-3.5.2.0.tar.gz
   https://hackage.haskell.org/package/happy-2.1.5/happy-2.1.5.tar.gz
   https://hackage.haskell.org/package/happy-lib-2.1.5/happy-lib-2.1.5.tar.gz
+
+if !os(windows)
+  packages:
+    libraries/terminfo
 
 --
 -- Constraints
@@ -159,6 +165,9 @@ package ghc-internal
 
 package text
   flags: -simdutf
+
+package haddock-api
+  flags: +in-ghc-tree
 
 -- TODO: What is this? Why do we need _in-ghc-tree_ here?
 package hsc2hs
