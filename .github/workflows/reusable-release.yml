@@ -17,6 +17,9 @@ on:
       cabal:
         type: string
         default: 3.14.2.0
+      dynamic:
+        type: string
+        default: 1
       test:
         type: boolean
         default: true
@@ -43,6 +46,8 @@ env:
   GHCUP_MSYS2_ENV: CLANG64
   MSYSTEM: CLANG64
   CHERE_INVOKING: 1
+  # dynamic
+  DYNAMIC: ${{ inputs.dynamic }}
 
 jobs:
   tool-output:
