@@ -135,8 +135,13 @@ GHC_TOOLCHAIN_ARGS ?= --disable-ld-override
 
 CABAL_BUILD = $(CABAL) $(CABAL_ARGS) build $(CABAL_BUILD_ARGS)
 
+# Cache GHC0 --info output to avoid zombie processes
+# The := forces immediate evaluation, creating the file before GHC0_INFO is used
+_ := $(shell mkdir -p _build && $(GHC0) --info > _build/ghc0-info.txt)
+
+# Use file input redirection instead of pipe to avoid zombie processes
 define GHC0_INFO
-$(shell sh -c "$(GHC0) --info | $(GHC0) -e 'getContents >>= foldMap putStrLn . lookup \"$1\" . read'")
+$(shell $(GHC0) -e 'getContents >>= foldMap putStrLn . lookup "$1" . read' < _build/ghc0-info.txt)
 endef
 
 HOST_PLATFORM   := $(call GHC0_INFO,Host platform)
