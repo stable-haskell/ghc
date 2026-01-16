@@ -1,7 +1,5 @@
-index-state: 2025-10-26T19:17:08Z
-allow-boot-library-installs: True
-benchmarks: False
-tests: False
+-- Configuration common to all stages
+import: cabal.project.common
 
 packages:
   -- NOTE: we need rts-headers, because the _newly_ built compiler depends
@@ -59,11 +57,8 @@ constraints:
 --
 
 package *
-  library-vanilla: True
   shared: False
-  executable-profiling: False
   executable-dynamic: False
-  executable-static: False
 
 package ghc
   flags: +bootstrap
@@ -76,14 +71,3 @@ package ghc-boot
 
 package ghc-boot-th-next
   flags: +bootstrap
-
--- TODO: What is this? Why do we need _in-ghc-tree_ here?
-package hsc2hs
-  flags: +in-ghc-tree
-
---
--- Program options
---
-
-program-options
-  ghc-options: -fhide-source-paths -j

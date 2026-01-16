@@ -1,4 +1,4 @@
-cabal-version:  3.0
+cabal-version:  3.12
 
 -- WARNING: ghc-boot.cabal is automatically generated from ghc-boot.cabal.in by
 -- ../../configure.  Make sure you are editing ghc-boot.cabal.in, not
@@ -72,8 +72,11 @@ Library
 
     -- but done by Hadrian
     autogen-modules:
-            GHC.Version
+            PackageInfo_ghc_boot
             GHC.Platform.Host
+
+    other-modules:
+            PackageInfo_ghc_boot
 
     build-depends: base       >= 4.7 && < 4.23,
                    binary     == 0.8.*,

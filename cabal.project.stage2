@@ -1,13 +1,8 @@
-allow-boot-library-installs: True
-benchmarks: False
-tests: False
+-- Configuration common to all stages
+import: cabal.project.common
 
 -- Disable Hackage, we explicitly include the packages we need.
 active-repositories: :none
-
--- Import configure/generated feature toggles (dynamic, etc.) if present.
--- A default file is kept in-tree; configure will overwrite with substituted values.
-import: cabal.project.stage2.settings
 
 packages:
   -- RTS
@@ -105,16 +100,6 @@ constraints:
 -- Package level configuration
 --
 
-package *
-  library-vanilla: True
-  library-for-ghci: True
-  -- shared/executable-dynamic now controlled by Makefile (DYNAMIC variable)
-  -- so we do not pin them here; default (static) remains when DYNAMIC=0.
-  executable-profiling: False
-  executable-static: False
-
-import: cabal.project.rts
-
 package libffi-clib
   ghc-options: -no-rts
 
@@ -154,7 +139,7 @@ package ghc
   flags: +build-tool-depends +internal-interpreter
 
 package ghc-bin
-  flags: +internal-interpreter -threaded
+  flags: +internal-interpreter
 
 package ghci
   flags: +internal-interpreter
@@ -163,22 +148,11 @@ package ghc-internal
   flags: +bignum-native
   ghc-options: -no-rts
 
-package text
-  flags: -simdutf
+package rts
+  ghc-options: -no-rts
 
-package haddock-api
-  flags: +in-ghc-tree
+package rts-headers
+  ghc-options: -no-rts
 
--- TODO: What is this? Why do we need _in-ghc-tree_ here?
-package hsc2hs
-  flags: +in-ghc-tree
-
-package haskeline
-  flags: -terminfo
-
---
--- Program options
---
-
-program-options
-  ghc-options: -fhide-source-paths -j
+package rts-fs
+  ghc-options: -no-rts

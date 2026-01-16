@@ -1,4 +1,17 @@
 # This is not perfect but it works ok
 cradle:
-  cabal:
-    cabalProject: cabal.project.stage1
+  multi:
+    - path: libraries/ghc-boot/Setup.hs
+      config:
+        cradle:
+          direct:
+            arguments:
+              - -package Cabal
+              - -package filepath
+              - -package directory
+              - -package ghc
+    - path: .
+      config:
+        cradle:
+          cabal:
+            cabalProject: cabal.project.stage1
