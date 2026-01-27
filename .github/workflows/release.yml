@@ -3,10 +3,11 @@ name: Build and release
 on:
   push:
     tags: ['*']
-  pull_request:
-    types: [opened, synchronize, reopened, labeled]
-    branches:
-      - stable-ghc-9.14
+  # Temporarily disabled - using Nix CI only for PRs
+  # pull_request:
+  #   types: [opened, synchronize, reopened, labeled]
+  #   branches:
+  #     - stable-ghc-9.14
   schedule:
     - cron: '0 0 * * *'
   workflow_dispatch:
