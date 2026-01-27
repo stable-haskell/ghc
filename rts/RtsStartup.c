@@ -89,9 +89,11 @@
  * - Systems without RTLD_NOLOAD
  * - Static executables (symbols already global)
  */
-#if !defined(mingw32_HOST_OS) && defined(RTLD_NOLOAD)
+#if !defined(mingw32_HOST_OS)
 #include <dlfcn.h>
+#endif
 
+#if !defined(mingw32_HOST_OS) && defined(RTLD_NOLOAD)
 static void promoteBootLibrariesToGlobal(void)
 {
     extern void init_ghc_hs_iface(void);
