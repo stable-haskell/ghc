@@ -12,6 +12,7 @@ import GHC.Settings
 
 import GHC.SysTools
 import GHC.SysTools.Ar
+import GHC.SysTools.Tasks (configureOtool, configureInstallName, configureRanlib, runRanlib)
 
 import GHC.Unit.Env
 import GHC.Unit.Types
@@ -257,19 +258,18 @@ linkBinary' staticLink logger tmpfs dflags blm unit_env o_files dep_units = do
     let extra_ld_inputs = ldInputs dflags
 
     rc_objs <- case platformOS platform of
-      OSMinGW32 | gopt Opt_GenManifest dflags -> maybeCreateManifest logger tmpfs dflags output_fn
+      OSMinGW32 | gopt Opt_GenManifest dflags -> maybeCreateManifest logger tmpfs (initManifestOpts dflags) output_fn
       _                                       -> return []
 
     let require_cxx = any ((==) (PackageName (fsLit "system-cxx-std-lib")) . unitPackageName) pkgs
-
-    let linker_config = initLinkerConfig dflags require_cxx
-    let link dflags args = do
-          runLink logger tmpfs linker_config args
+    let linker_config = initLinkerConfig dflags
+    let link args = do
+          runLink logger tmpfs linker_config require_cxx args
           -- Make sure to honour -fno-use-rpaths if set on darwin as well; see #20004
           when (platformOS platform == OSDarwin && gopt Opt_RPath dflags) $
-            GHC.Linker.MacOS.runInjectRPaths logger (toolSettings dflags) pkg_lib_paths output_fn
+            GHC.Linker.MacOS.runInjectRPaths logger (configureOtool dflags) (configureInstallName dflags) pkg_lib_paths output_fn
 
-    link dflags (
+    link (
                        map GHC.SysTools.Option verbFlags
                       ++ [ GHC.SysTools.Option "-o"
                          , GHC.SysTools.FileOption "" output_fn
@@ -389,4 +389,4 @@ linkStaticLib logger dflags unit_env o_files dep_units = do
     else writeBSDAr output_fn $ afilter (not . isBSDSymdef) ar
 
   -- run ranlib over the archive. write*Ar does *not* create the symbol index.
-  runRanlib logger dflags [GHC.SysTools.FileOption "" output_fn]
+  runRanlib logger (configureRanlib dflags) [GHC.SysTools.FileOption "" output_fn]
