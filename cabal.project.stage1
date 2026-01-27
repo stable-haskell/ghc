@@ -65,6 +65,9 @@ package *
   executable-dynamic: False
   executable-static: False
 
+package rts
+  flags: +tables-next-to-code
+
 package ghc
   flags: +bootstrap
 

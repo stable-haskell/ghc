@@ -47,7 +47,6 @@ packages:
   libraries/file-io
   libraries/filepath
   libraries/hpc
-  libraries/libffi-clib
   libraries/mtl
   libraries/os-string
   libraries/parsec
@@ -147,6 +146,12 @@ if os(wasi)
     shared: True
 
 import: cabal.project.rts
+
+package rts
+  flags: +use-system-libffi -tables-next-to-code
+
+package ghci
+  flags: +use-system-libffi
 
 package libffi-clib
   ghc-options: -no-rts

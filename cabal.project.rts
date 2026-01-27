@@ -10,7 +10,6 @@ package rts
   ghc-options: "-optc-DTablesNextToCode=\"FIXME\""
   ghc-options: "-optc-DFS_NAMESPACE=rts"
   ghc-options: -no-rts
-  flags: +tables-next-to-code
 
 if os(linux)
   package rts

@@ -157,6 +157,9 @@ package libffi-clib
 --          GHC.Unit.State:mkUnitState
 --
 
+package rts
+  flags: +tables-next-to-code
+
 package ghc
   flags: +build-tool-depends +internal-interpreter
 
