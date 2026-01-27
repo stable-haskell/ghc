@@ -6,6 +6,12 @@
  *
  * ---------------------------------------------------------------------------*/
 
+/* _GNU_SOURCE needed for RTLD_NOLOAD on some Linux/glibc configurations.
+ * Must be defined before any headers are included. */
+#if !defined(mingw32_HOST_OS) && !defined(_GNU_SOURCE)
+#define _GNU_SOURCE
+#endif
+
 #include "Rts.h"
 #include "RtsAPI.h"
 #include "HsFFI.h"
