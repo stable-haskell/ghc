@@ -337,7 +337,6 @@ BINDIST_EXECTUABLES := \
 	haddock$(EXE_EXT)
 
 STAGE3_LIBS := \
-    rts:nonthreaded-nodebug \
 	Cabal \
 	Cabal-syntax \
 	array \
@@ -785,6 +784,12 @@ define build_cross
 		$(CABAL_BUILD) -W $(GHC2) --happy-options="--template=$(abspath _build/stage2/src/happy-lib-2.1.5/data/)" --with-hsc2hs=$1-hsc2hs --hsc2hs-options='-x' --configure-option='--host=$1' \
 		$(foreach lib,$(CROSS_EXTRA_LIB_DIRS),--extra-lib-dirs=$(lib)) \
 		$(foreach include,$(CROSS_EXTRA_INCLUDE_DIRS),--extra-include-dirs=$(include)) \
+		rts:nonthreaded-nodebug
+	LD_LIBRARY_PATH=$(LD_LIBRARY_PATH) GHC=$(GHC) HADRIAN_SETTINGS='$(call HADRIAN_SETTINGS)' \
+		PATH=$(PWD)/_build/stage2/bin:$(PWD)/_build/stage3/bin:$(PATH) \
+		$(CABAL_BUILD) -W $(GHC2) --happy-options="--template=$(abspath _build/stage2/src/happy-lib-2.1.5/data/)" --with-hsc2hs=$1-hsc2hs --hsc2hs-options='-x' --configure-option='--host=$1' \
+		$(foreach lib,$(CROSS_EXTRA_LIB_DIRS),--extra-lib-dirs=$(lib)) \
+		$(foreach include,$(CROSS_EXTRA_INCLUDE_DIRS),--extra-include-dirs=$(include)) \
 		$(STAGE3_LIBS)
 endef
 
@@ -848,13 +853,14 @@ stage3-wasm32-unknown-wasi: wasm32-unknown-wasi-libs _build/stage3/lib/targets/w
 
 _build/stage3/lib/targets/wasm32-unknown-wasi/lib/settings: _build/stage2/lib/targets/wasm32-unknown-wasi _build/stage1/bin/ghc-toolchain-bin$(EXE_EXT)
 	@mkdir -p $(@D)
-	PATH=/home/hasufell/.ghc-wasm/wasi-sdk/bin:$(PATH) _build/stage1/bin/ghc-toolchain-bin$(EXE_EXT) $(GHC_TOOLCHAIN_ARGS) --triple wasm32-unknown-wasi --output-settings -o $@ --cc wasm32-wasi-clang --cxx wasm32-wasi-clang++ --ar ar --ranlib ranlib --ld wasm-ld --merge-objs wasm-ld --merge-objs-opt="-r" --disable-ld-override --disable-tables-next-to-code $(foreach opt,$(WASM_CC_OPTS),--cc-opt=$(opt)) $(foreach opt,$(WASM_CXX_OPTS),--cxx-opt=$(opt))
+	_build/stage1/bin/ghc-toolchain-bin$(EXE_EXT) $(GHC_TOOLCHAIN_ARGS) --triple wasm32-unknown-wasi --output-settings -o $@ --cc wasm32-wasi-clang --cxx wasm32-wasi-clang++ --ar ar --ranlib ranlib --ld wasm-ld --merge-objs wasm-ld --merge-objs-opt="-r" --disable-ld-override --disable-tables-next-to-code $(foreach opt,$(WASM_CC_OPTS),--cc-opt=$(opt)) $(foreach opt,$(WASM_CXX_OPTS),--cxx-opt=$(opt))
 
+_build/stage3/lib/targets/wasm32-unknown-wasi/lib/package.conf.d/package.cache: private LD_LIBRARY_PATH=$(CURDIR)/_build/stage2/lib/$(HOST_PLATFORM)
 _build/stage3/lib/targets/wasm32-unknown-wasi/lib/package.conf.d/package.cache: _build/stage3/bin/wasm32-unknown-wasi-ghc-pkg$(EXE_EXT) _build/stage3/lib/targets/wasm32-unknown-wasi/lib/settings wasm32-unknown-wasi-libs
 	@mkdir -p $(@D)
 	@rm -rf $(@D)/*
 	cp -rfp _build/stage3/wasm32-unknown-wasi/packagedb/host/*/* $(@D)
-	_build/stage3/bin/wasm32-unknown-wasi-ghc-pkg$(EXE_EXT) recache
+	LD_LIBRARY_PATH=$(LD_LIBRARY_PATH) _build/stage3/bin/wasm32-unknown-wasi-ghc-pkg$(EXE_EXT) recache
 
 .PHONY: wasm32-unknown-wasi-libs
 wasm32-unknown-wasi-libs: private LD_LIBRARY_PATH=$(CURDIR)/_build/stage2/lib/$(HOST_PLATFORM)
