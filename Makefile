@@ -949,8 +949,14 @@ endef
 # set rpath relative to the current executable
 # TODO: on darwin, this doesn't overwrite rpath, but just adds to it,
 #       so we'll have the old rpaths from the build host in there as well
+# set_rpath: Add rpath to binary. On Darwin, check if rpath already exists
+# before adding (install_name_tool fails if rpath is duplicate).
 define set_rpath
-	$(if $(filter Darwin,$(UNAME)), $(INSTALL_NAME_TOOL) -add_rpath "@executable_path/$(1)" "$(2)", $(PATCHELF) --force-rpath --set-rpath "\$$ORIGIN/$(1)" "$(2)")
+	$(if $(filter Darwin,$(UNAME)), \
+		if ! otool -l "$(2)" 2>/dev/null | grep -A2 'LC_RPATH' | grep -q "@executable_path/$(1)"; then \
+			$(INSTALL_NAME_TOOL) -add_rpath "@executable_path/$(1)" "$(2)"; \
+		fi, \
+		$(PATCHELF) --force-rpath --set-rpath "\$$ORIGIN/$(1)" "$(2)")
 endef
 
 # Target for creating the final binary distribution directory
