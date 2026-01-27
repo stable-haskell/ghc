@@ -410,7 +410,15 @@ AS_IF([test "$ac_cv_sizeof_struct_MD5Context" -eq 0],[
 ])
 
 AC_ARG_VAR([GHC], [Path to the ghc program])
-AC_PATH_PROG([GHC], ghc)
+
+AC_ARG_WITH([compiler],
+  [AS_HELP_STRING([--with-compiler],
+    [The haskell compiler to use])],
+      [GHC="$withval"
+       AC_MSG_NOTICE([Using GHC $GHC])
+      ],
+      [AC_PATH_PROG([GHC], ghc)])
+
 if test -z "$GHC"; then
 	AC_MSG_ERROR([Cannot find ghc])
 fi
