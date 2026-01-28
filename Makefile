@@ -717,7 +717,7 @@ _build/stage2/lib/package.conf.d/package.cache: _build/stage2/bin/ghc-pkg$(EXE_E
 	@echo "::group::Creating stage2 package cache..."
 	@mkdir -p _build/stage2/lib/package.conf.d
 	@mkdir -p _build/stage2/lib/$(HOST_PLATFORM)
-	@find $(CURDIR)/_build/stage2/build/host/*/ghc-*/ -type f -name '*.so' -exec mv '{}' $(CURDIR)/_build/stage2/lib/$(HOST_PLATFORM)/ \;
+	@find $(CURDIR)/_build/stage2/build/host/*/ghc-*/ -type f -name '*.so' -exec cp '{}' $(CURDIR)/_build/stage2/lib/$(HOST_PLATFORM)/ \;
 	@rm -rf _build/stage2/lib/package.conf.d/*
 	cp -rfp _build/stage2/packagedb/host/*/* _build/stage2/lib/package.conf.d
 	LD_LIBRARY_PATH=$(CURDIR)/_build/stage2/lib/$(HOST_PLATFORM) _build/stage2/bin/ghc-pkg$(EXE_EXT) recache
@@ -1019,7 +1019,7 @@ _build/bindist/lib/targets/%: _build/bindist driver/ghc-usage.txt driver/ghci-us
 		test -L $$binary || ln -sf $$binary $(@F)-$$binary \
 		; done
 	# Copy libraries and settings
-	@if [ -e $(CURDIR)/_build/bindist/lib/targets/$(@F)/lib/$(@F) ] ; then find $(CURDIR)/_build/bindist/lib/targets/$(@F)/lib/$(@F)/ -mindepth 1 -type f -name "*.so" -execdir mv '{}' $(CURDIR)/_build/bindist/lib/targets/$(@F)/lib/$(@F)/'{}' \; ; fi
+	@if [ -e $(CURDIR)/_build/bindist/lib/targets/$(@F)/lib/$(@F) ] ; then find $(CURDIR)/_build/bindist/lib/targets/$(@F)/lib/$(@F)/ -mindepth 1 -type f -name "*.so" -execdir cp '{}' $(CURDIR)/_build/bindist/lib/targets/$(@F)/lib/$(@F)/'{}' \; ; fi
 	$(call copycrosslib,$(@F))
 	# --help
 	@cp -rfp driver/ghc-usage.txt _build/bindist/lib/targets/$(@F)/lib/
