@@ -111,6 +111,16 @@ LD     ?= ld
 PYTHON ?= python3
 SED    ?= sed
 
+# Notes
+#
+# - rts configure script is a bit evil.
+#   λ rg AC_PATH rts/configure.ac
+#   489:AC_PATH_PROG([NM], nm)
+#   495:AC_PATH_PROG([OBJDUMP], objdump)
+#   501:AC_PATH_PROG([DERIVE_CONSTANTS], deriveConstants)
+#   505:AC_PATH_PROG([GENAPPLY], genapply)
+#
+
 #
 # Some compiler toolchain settings
 #
@@ -351,9 +361,9 @@ all: stage2
 $(CABAL): STAGE=cabal
 $(CABAL):
 	$(call LOG,Building $@)
-	$(CABAL0) build -j --with-compiler $(GHC0) --project-dir=libraries/Cabal --builddir=$(STAGE_DIR) cabal-install:exe:cabal
+	$(CABAL0) build -j --with-compiler $(GHC0) --project-file=cabal.project.stage0 --builddir=$(STAGE_DIR) $(CABAL_ARGS) cabal-install:exe:cabal
 	@mkdir -p $(@D)
-	@cp $$($(CABAL0) list-bin -v0 -j --with-compiler $(GHC0) --project-dir=libraries/Cabal --builddir=$(STAGE_DIR) cabal-install:exe:cabal | $(CYGPATH)) $@
+	@cp $$($(CABAL0) list-bin -v0 -j --with-compiler $(GHC0) --project-file=cabal.project.stage0 --builddir=$(STAGE_DIR) cabal-install:exe:cabal | $(CYGPATH)) $@
 
 stage0 : $(CABAL)
 
@@ -392,7 +402,7 @@ STAGE1_CABAL_BUILD = \
 	--with-build-compiler=$(GHC0)
 
 stage1: STAGE=stage1
-stage1: $(CABAL) $(CONFIGURED_FILES) | hackage
+stage1: $(CABAL) $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) | hackage
 	$(call LOG,Starting build of $(STAGE))
 
 	$(call LOG,Building executables $(STAGE1_EXECUTABLES))
@@ -480,8 +490,10 @@ STAGE2_EXTRA_LIB_DIRS     ?=
 
 STAGE2_CABAL_BUILD = \
 	env \
-		DERIVE_CONSTANTS=$(STAGE1_PATH)/bin/deriveConstants \
-		GENAPPLY=$(STAGE1_PATH)/bin/genapply \
+	DERIVE_CONSTANTS=$(STAGE1_PATH)/bin/deriveConstants \
+	GENAPPLY=$(STAGE1_PATH)/bin/genapply \
+	NM=$(NM) \
+	OBJDUMP=$(OBJDUMP) \
 	$(CABAL_BUILD) \
 	--with-compiler=$(GHC1) \
 	--with-build-compiler=$(GHC0) \
@@ -490,7 +502,7 @@ STAGE2_CABAL_BUILD = \
 
 stage2: STAGE=stage2
 stage2: TARGET_PLATFORM:=$(HOST_PLATFORM)
-stage2: $(GHC1) $(CABAL) $(CONFIGURED_FILES) | stage1
+stage2: $(GHC1) $(CABAL) $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) | stage1
 	$(call LOG,Starting build of $(STAGE))
 
 	$(call LOG,Building rts)
@@ -626,6 +638,11 @@ TARGET_DIR = $(DIST_DIR)/lib/targets/$(TARGET_PLATFORM)
 define stage3
 
 STAGE3_$(1)_CABAL_BUILD = \
+	env \
+	DERIVE_CONSTANTS=$$(STAGE1_PATH)/bin/deriveConstants \
+	GENAPPLY=$$(STAGE1_PATH)/bin/genapply \
+	NM=$$(STAGE3_$(1)_NM) \
+	OBJDUMP=$$(STAGE3_$(1)_OBJDUMP) \
 	$$(CABAL_BUILD) \
 	--with-compiler=$$(DIST_DIR)/bin/$(1)-ghc \
 	--with-build-compiler=$$(DIST_DIR)/bin/ghc \
@@ -640,7 +657,7 @@ STAGE3_$(1)_CABAL_BUILD = \
 .PHONY: stage3-$(1)
 stage3-$(1): STAGE=stage3
 stage3-$(1): TARGET_PLATFORM=$(1)
-stage3-$(1): $(GHC2) $$(STAGE1_PATH)/bin/ghc-toolchain-bin
+stage3-$(1): $(GHC2) $$(STAGE1_PATH)/bin/ghc-toolchain-bin $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES)
 	$$(call LOG,Linking executables)
 	$$(foreach exe,$$(STAGE3_EXECUTABLES),ln -sf $$(exe) $(DIST_DIR)/bin/$(1)-$$(exe);)
 
@@ -656,8 +673,7 @@ stage3-$(1): $(GHC2) $$(STAGE1_PATH)/bin/ghc-toolchain-bin
 		--ar $$(STAGE3_$(1)_AR) \
 		--ld $$(STAGE3_$(1)_LD) \
 		--nm $$(STAGE3_$(1)_NM) \
-		--strip $$(STAGE3_$(1)_STRIP) \
-			--ranlib $$(STAGE3_$(1)_RANLIB) \
+		--ranlib $$(STAGE3_$(1)_RANLIB) \
 		--disable-ld-override \
 		--disable-tables-next-to-code \
 		$$(STAGE3_$(1)_GHC_TOOLCHAIN_ARGS)
@@ -668,7 +684,7 @@ stage3-$(1): $(GHC2) $$(STAGE1_PATH)/bin/ghc-toolchain-bin
 	$$(DIST_DIR)/bin/$(1)-ghc-pkg init $$(TARGET_DIR)/lib/package.conf.d
 
 	$$(call LOG,Building libraries rts)
-	env DERIVE_CONSTANTS=$$(STAGE1_PATH)/bin/deriveConstants GENAPPLY=$$(STAGE1_PATH)/bin/genapply $$(STAGE3_$(1)_CABAL_BUILD) rts
+	$$(STAGE3_$(1)_CABAL_BUILD) rts
 
 	$$(call LOG,Building libraries $(STAGE3_LIBRARIES))
 	$$(STAGE3_$(1)_CABAL_BUILD) $(filter-out rts%,$(STAGE3_LIBRARIES))
