@@ -1,8 +1,9 @@
-{-# LANGUAGE LambdaCase, ScopedTypeVariables #-}
+{-# LANGUAGE LambdaCase, ScopedTypeVariables, PatternSynonyms #-}
 
 -- | Platform architecture and OS
 module GHC.Platform.ArchOS
    ( ArchOS(..)
+   , pattern OSWindows
 
      -- * Architectures
    , Arch(..)
@@ -102,6 +103,7 @@ data OS
    | OSGhcjs
    deriving (Read, Show, Eq, Ord)
 
+pattern OSWindows = OSMinGW32
 
 -- Note [Platform Syntax]
 -- ~~~~~~~~~~~~~~~~~~~~~~
