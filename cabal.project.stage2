@@ -1,5 +1,6 @@
 -- Configuration common to all stages
 import: cabal.project.common
+import: cabal.project.stage2.settings
 
 -- Disable Hackage, we explicitly include the packages we need.
 active-repositories: :none

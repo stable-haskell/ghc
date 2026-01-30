@@ -279,7 +279,22 @@ define DIST_COPY_LIB
 	$(call LOG,Copying library $(1) into $(DIST_DIR)/lib)
 	@cp -ar \
 		$(STORE_DIR)/host/$(TARGET_PLATFORM)/lib/$(call LIB_NAME_GLOB,$(1)) \
-		$(DIST_DIR)/lib
+		$(DIST_DIR)/lib/$(TARGET_PLATFORM)
+
+endef
+
+# DIST_COPY_LIB_CROSS
+#
+# Copies a library from the local store into the distribution directory.
+#
+# $(1) name of the library to copy
+#
+# NOTE: the ending empty line is important
+define DIST_COPY_LIB_CROSS
+	$(call LOG,Copying library $(1) into $(DIST_DIR)/lib/targets/$(TARGET_PLATFORM)/lib/$(TARGET_PLATFORM))
+	@cp -ar \
+		$(STORE_DIR)/host/$(TARGET_PLATFORM)/lib/$(call LIB_NAME_GLOB,$(1)) \
+		$(DIST_DIR)/lib/targets/$(TARGET_PLATFORM)/lib/$(TARGET_PLATFORM)
 
 endef
 
@@ -294,19 +309,42 @@ endef
 # NOTE: sed *has* to run in-place becase we do not know the exact filename of
 # the file. With -i we can get away with a glob.
 define DIST_COPY_LIB_CONF
-	$(call LOG,Copying $(1) packagedb entry into $(DIST_DIR)/lib)
+	$(call LOG,Copying $(1) packagedb entry into $(DIST_DIR)/lib/package.conf.d/)
 	@cp -a \
 		$(STORE_DIR)/host/$(TARGET_PLATFORM)/package.conf.d/$(call LIB_NAME_GLOB,$(1)).conf \
 		$(DIST_DIR)/lib/package.conf.d/
 	@$(SED) -i \
-		-e 's|$(STORE_DIR)/host/$(TARGET_PLATFORM)|\$${pkgroot}/..|g' \
+		-e 's|$(STORE_DIR)/host/$(TARGET_PLATFORM)/lib|\$${pkgroot}/../lib/$(TARGET_PLATFORM)|g' \
 		$(DIST_DIR)/lib/package.conf.d/$(call LIB_NAME_GLOB,$(1)).conf
 
 endef
 
-DIST_COPY_EXES      = $(if $(1),$(foreach exe,$(1),$(call DIST_COPY_EXE,$(exe),$(2))))
-DIST_COPY_LIBS      = $(if $(1),$(foreach lib,$(1),$(call DIST_COPY_LIB,$(lib))))
-DIST_COPY_LIBS_CONF = $(if $(1),$(foreach lib,$(1),$(call DIST_COPY_LIB_CONF,$(lib))))
+# DIST_COPY_LIB_CONF_CROSS
+#
+# Copies a library packagedb entry from the local store into the distribution
+# directory.
+#
+# $(1) library to copy
+#
+# NOTE: the ending empty line is important
+# NOTE: sed *has* to run in-place becase we do not know the exact filename of
+# the file. With -i we can get away with a glob.
+define DIST_COPY_LIB_CONF_CROSS
+	$(call LOG,Copying $(1) packagedb entry into $(DIST_DIR)/lib/targets/$(TARGET_PLATFORM)/lib/package.conf.d/)
+	@cp -a \
+		$(STORE_DIR)/host/$(TARGET_PLATFORM)/package.conf.d/$(call LIB_NAME_GLOB,$(1)).conf \
+		$(DIST_DIR)/lib/targets/$(TARGET_PLATFORM)/lib/package.conf.d/
+	@$(SED) -i \
+		-e 's|$(STORE_DIR)/host/$(TARGET_PLATFORM)/lib|\$${pkgroot}/../lib/$(TARGET_PLATFORM)|g' \
+		$(DIST_DIR)/lib/targets/$(TARGET_PLATFORM)/lib/package.conf.d/$(call LIB_NAME_GLOB,$(1)).conf
+
+endef
+
+DIST_COPY_EXES            = $(if $(1),$(foreach exe,$(1),$(call DIST_COPY_EXE,$(exe),$(2))))
+DIST_COPY_LIBS            = $(if $(1),$(foreach lib,$(1),$(call DIST_COPY_LIB,$(lib))))
+DIST_COPY_LIBS_CROSS      = $(if $(1),$(foreach lib,$(1),$(call DIST_COPY_LIB_CROSS,$(lib))))
+DIST_COPY_LIBS_CONF       = $(if $(1),$(foreach lib,$(1),$(call DIST_COPY_LIB_CONF,$(lib))))
+DIST_COPY_LIBS_CONF_CROSS = $(if $(1),$(foreach lib,$(1),$(call DIST_COPY_LIB_CONF_CROSS,$(lib))))
 
 #
 # Files and targets
@@ -339,7 +377,8 @@ CONFIGURED_FILES := \
 	libraries/ghc-internal/ghc-internal.cabal \
 	libraries/ghc-experimental/ghc-experimental.cabal \
 	libraries/base/base.cabal \
-	rts/include/ghcversion.h
+	rts/include/ghcversion.h \
+	cabal.project.stage2.settings
 
 # __  __       _         _                       _
 # |  \/  | __ _(_)_ __   | |_ __ _ _ __ __ _  ___| |_
@@ -402,7 +441,7 @@ STAGE1_CABAL_BUILD = \
 	--with-build-compiler=$(GHC0)
 
 stage1: STAGE=stage1
-stage1: $(CABAL) $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) | hackage
+stage1: $(CABAL) $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) cabal.project.stage1 cabal.project.common libraries/ghc-boot-th-next | hackage
 	$(call LOG,Starting build of $(STAGE))
 
 	$(call LOG,Building executables $(STAGE1_EXECUTABLES))
@@ -440,26 +479,30 @@ STAGE2_EXECUTABLES = \
 	unlit
 
 STAGE2_LIBRARIES = \
-	Cabal \
-	Cabal-syntax \
 	array \
 	base \
 	binary \
 	bytestring \
+	Cabal \
+	Cabal-syntax \
 	containers \
 	deepseq \
 	directory \
 	exceptions \
-	filepath \
 	file-io \
+	filepath \
 	ghc \
 	ghc-bignum \
 	ghc-boot \
 	ghc-boot-th \
 	ghc-compact \
 	ghc-heap \
-	ghc-prim \
 	ghci \
+	ghc-internal \
+	ghc-platform \
+	ghc-prim \
+	haddock-api \
+	haddock-library \
 	haskeline \
 	hpc \
 	integer-gmp \
@@ -474,6 +517,8 @@ STAGE2_LIBRARIES = \
 	rts:nonthreaded-nodebug \
 	rts:threaded-debug \
 	rts:threaded-nodebug \
+	rts-fs \
+	rts-headers \
 	semaphore-compat \
 	stm \
 	system-cxx-std-lib \
@@ -502,7 +547,7 @@ STAGE2_CABAL_BUILD = \
 
 stage2: STAGE=stage2
 stage2: TARGET_PLATFORM:=$(HOST_PLATFORM)
-stage2: $(GHC1) $(CABAL) $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) | stage1
+stage2: $(GHC1) $(CABAL) $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) cabal.project.stage2 cabal.project.stage2.settings cabal.project.common libraries/ghc-boot-th-next | stage1
 	$(call LOG,Starting build of $(STAGE))
 
 	$(call LOG,Building rts)
@@ -520,7 +565,7 @@ stage2: $(GHC1) $(CABAL) $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) | stage1
 	@mkdir -p $(DIST_DIR)/bin
 	$(call DIST_COPY_EXES,$(STAGE2_EXECUTABLES))
 
-	@mkdir -p $(DIST_DIR)/lib
+	@mkdir -p $(DIST_DIR)/lib/$(TARGET_PLATFORM)
 	$(call DIST_COPY_LIBS,$(filter-out system-cxx-std-lib%,$(STAGE2_LIBRARIES)))
 
 	@mkdir -p $(DIST_DIR)/lib/package.conf.d
@@ -534,6 +579,10 @@ stage2: $(GHC1) $(CABAL) $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) | stage1
 
 	$(call LOG,Verifying $(DIST_DIR)/lib/package.conf.d)
 	@$(DIST_DIR)/bin/ghc-pkg check --package-db $(DIST_DIR)/lib/package.conf.d
+
+	$(call LOG,Copying ghc-usage files)
+	@cp -rfp driver/ghc-usage.txt $(DIST_DIR)/lib/
+	@cp -rfp driver/ghci-usage.txt $(DIST_DIR)/lib/
 
 	$(call LOG,Finished building $(STAGE) in $(DIST_DIR))
 
@@ -564,22 +613,29 @@ STAGE3_EXECUTABLES := \
     unlit \
     haddock
 
+# TODO: this won't work for musl stage3
 STAGE3_LIBRARIES = \
-	Cabal \
-	Cabal-syntax \
 	array \
 	base \
 	binary \
 	bytestring \
+	Cabal \
+	Cabal-syntax \
 	containers \
 	deepseq \
 	directory \
 	exceptions \
-	filepath \
 	file-io \
+	filepath \
 	ghc \
 	ghc-bignum \
+	ghc-boot \
+	ghc-boot-th \
+	ghc-heap \
 	ghci \
+	ghc-internal \
+	ghc-platform \
+	ghc-prim \
 	hpc \
 	integer-gmp \
 	mtl \
@@ -587,6 +643,11 @@ STAGE3_LIBRARIES = \
 	parsec \
 	pretty \
 	process \
+	rts \
+	rts:nonthreaded-nodebug \
+	rts-fs \
+	rts-headers \
+	semaphore-compat \
 	stm \
 	template-haskell \
 	text \
@@ -657,7 +718,7 @@ STAGE3_$(1)_CABAL_BUILD = \
 .PHONY: stage3-$(1)
 stage3-$(1): STAGE=stage3
 stage3-$(1): TARGET_PLATFORM=$(1)
-stage3-$(1): $(GHC2) $$(STAGE1_PATH)/bin/ghc-toolchain-bin $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES)
+stage3-$(1): $(GHC2) $$(STAGE1_PATH)/bin/ghc-toolchain-bin $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) libraries/ghc-boot-th-next cabal.project.common cabal.project.stage3 stage3-$(1)-additional-files
 	$$(call LOG,Linking executables)
 	$$(foreach exe,$$(STAGE3_EXECUTABLES),ln -sf $$(exe) $(DIST_DIR)/bin/$(1)-$$(exe);)
 
@@ -690,11 +751,54 @@ stage3-$(1): $(GHC2) $$(STAGE1_PATH)/bin/ghc-toolchain-bin $(CONFIGURE_SCRIPTS) 
 	$$(STAGE3_$(1)_CABAL_BUILD) $(filter-out rts%,$(STAGE3_LIBRARIES))
 
 	$$(call LOG,Copying libraries into distribution for target $(1))
-	@mkdir -p $$(DIST_DIR)/lib/package.conf.d
-	$$(call DIST_COPY_LIBS,$(STAGE3_LIBRARIES))
-	$$(call DIST_COPY_LIBS_CONF,$(STAGE3_LIBRARIES))
+	@mkdir -p $$(TARGET_DIR)/lib/package.conf.d
+	@mkdir -p $$(TARGET_DIR)/lib/$(1)
+	$$(call DIST_COPY_LIBS_CROSS,$(STAGE3_LIBRARIES),$(1))
+	$$(call DIST_COPY_LIBS_CONF_CROSS,$(STAGE3_LIBRARIES),$(1))
+
+	$(call LOG,Refreshing $$(TARGET_DIR)/lib/package.conf.d cache)
+	@$(DIST_DIR)/bin/$(1)-ghc-pkg recache --package-db $$(TARGET_DIR)/lib/package.conf.d
+
+	$(call LOG,Verifying $$(TARGET_DIR)/lib/package.conf.d)
+	@$(DIST_DIR)/bin/$(1)-ghc-pkg check --package-db $$(TARGET_DIR)/lib/package.conf.d
+
+	$$(call LOG,Copying ghc-usage files)
+	@cp -rfp driver/ghc-usage.txt $$(TARGET_DIR)/lib/
+	@cp -rfp driver/ghci-usage.txt $$(TARGET_DIR)/lib/
 
 endef
+
+stage3-javascript-unknown-ghcjs-additional-files: STAGE=stage3
+stage3-javascript-unknown-ghcjs-additional-files: TARGET_PLATFORM=javascript-unknown-ghcjs
+stage3-javascript-unknown-ghcjs-additional-files:
+	@mkdir -p $(TARGET_DIR)/lib/
+	$(call LOG,Copying dyld.mjs)
+	@cp -f utils/jsffi/dyld.mjs $(TARGET_DIR)/lib/dyld.mjs
+	$(call LOG,Copying ghc-interp.js)
+	@cp -f ghc-interp.js $(TARGET_DIR)/lib/ghc-interp.js
+	$(call LOG,Copying post-link.mjs)
+	@cp -f utils/jsffi/post-link.mjs $(TARGET_DIR)/lib/post-link.mjs
+	$(call LOG,Copying prelude.mjs)
+	@cp -f utils/jsffi/prelude.mjs $(TARGET_DIR)/lib/prelude.mjs
+
+stage3-wasm32-unknown-wasi-additional-files: STAGE=stage3
+stage3-wasm32-unknown-wasi-additional-files: TARGET_PLATFORM=wasm32-unknown-wasi
+stage3-wasm32-unknown-wasi-additional-files:
+	@mkdir -p $(TARGET_DIR)/lib/
+	$(call LOG,Copying dyld.mjs)
+	@cp -f utils/jsffi/dyld.mjs $(TARGET_DIR)/lib/dyld.mjs
+	$(call LOG,Copying ghc-interp.js)
+	@cp -f ghc-interp.js $(TARGET_DIR)/lib/ghc-interp.js
+	$(call LOG,Copying post-link.mjs)
+	@cp -f utils/jsffi/post-link.mjs $(TARGET_DIR)/lib/post-link.mjs
+	$(call LOG,Copying prelude.mjs)
+	@cp -f utils/jsffi/prelude.mjs $(TARGET_DIR)/lib/prelude.mjs
+
+stage3-x86_64-musl-linux-additional-files: STAGE=stage3
+stage3-x86_64-musl-linux-additional-files: TARGET_PLATFORM=x86_64-musl-linux
+stage3-x86_64-musl-linux-additional-files:
+	$(call LOG,No additional files to be copied)
+
 
 $(foreach platform,$(STAGE3_PLATFORMS),$(eval $(call stage3,$(platform))))
 
