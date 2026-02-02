@@ -678,17 +678,15 @@ STAGE3_javascript-unknown-ghcjs_LD                 = emcc
 STAGE3_javascript-unknown-ghcjs_NM                 = emnm
 STAGE3_javascript-unknown-ghcjs_RANLIB             = emranlib
 STAGE3_javascript-unknown-ghcjs_STRIP              = emstrip
-STAGE3_javascript-unknown-ghcjs_GHC_TOOLCHAIN_ARGS = $(GHC_TOOLCHAIN_ARGS)
+STAGE3_javascript-unknown-ghcjs_GHC_TOOLCHAIN_ARGS = $(GHC_TOOLCHAIN_ARGS) --disable-tables-next-to-code
 
-STAGE3_wasm32-unknown-wasi_AR                 = wasm32-wasi-ar
 STAGE3_wasm32-unknown-wasi_CC                 = wasm32-wasi-clang
 STAGE3_wasm32-unknown-wasi_CC_OPTS            = -fno-strict-aliasing -Wno-error=int-conversion -Oz -msimd128 -mnontrapping-fptoint -msign-ext -mbulk-memory -mmutable-globals -mmultivalue -mreference-types
 STAGE3_wasm32-unknown-wasi_CXX                = wasm32-wasi-clang++
 STAGE3_wasm32-unknown-wasi_CXX_OPTS           = $(STAGE3_wasm32-unknown-wasi_CC_OPTS)
 STAGE3_wasm32-unknown-wasi_EXTRA_INCLUDE_DIRS =
 STAGE3_wasm32-unknown-wasi_EXTRA_LIB_DIRS     =
-STAGE3_wasm32-unknown-wasi_RANLIB             = wasm32-wasi-ranlib
-STAGE3_wasm32-unknown-wasi_GHC_TOOLCHAIN_ARGS = $(GHC_TOOLCHAIN_ARGS) --merge-objs wasm-ld --merge-objs-opt="-r"
+STAGE3_wasm32-unknown-wasi_GHC_TOOLCHAIN_ARGS = $(GHC_TOOLCHAIN_ARGS) --merge-objs wasm-ld --merge-objs-opt="-r" --disable-tables-next-to-code
 
 
 TARGET_DIR = $(DIST_DIR)/lib/targets/$(TARGET_PLATFORM)
@@ -731,12 +729,11 @@ stage3-$(1): $(GHC2) $$(STAGE1_PATH)/bin/ghc-toolchain-bin $(CONFIGURE_SCRIPTS) 
 		$$(foreach opt,$$(STAGE3_$(1)_CC_OPTS),--cc-opt=$$(opt)) \
 		--cxx $$(STAGE3_$(1)_CXX) \
 		$$(foreach opt,$$(STAGE3_$(1)_CXX_OPTS),--cxx-opt=$$(opt)) \
-		--ar $$(STAGE3_$(1)_AR) \
-		--ld $$(STAGE3_$(1)_LD) \
-		--nm $$(STAGE3_$(1)_NM) \
-		--ranlib $$(STAGE3_$(1)_RANLIB) \
+		$(if $(STAGE3_$(1)_AR),--ar $$(STAGE3_$(1)_AR),) \
+		$(if $(STAGE3_$(1)_LD),--ld $$(STAGE3_$(1)_LD),) \
+		$(if $(STAGE3_$(1)_ND),--nm $$(STAGE3_$(1)_NM),) \
+		$(if $(STAGE3_$(1)_RANLIB),--ranlib $$(STAGE3_$(1)_RANLIB),) \
 		--disable-ld-override \
-		--disable-tables-next-to-code \
 		$$(STAGE3_$(1)_GHC_TOOLCHAIN_ARGS)
 
 	$$(DIST_DIR)/bin/$(1)-ghc --info
@@ -744,8 +741,8 @@ stage3-$(1): $(GHC2) $$(STAGE1_PATH)/bin/ghc-toolchain-bin $(CONFIGURE_SCRIPTS) 
 	@rm -rf $$(TARGET_DIR)/lib/package.conf.d
 	$$(DIST_DIR)/bin/$(1)-ghc-pkg init $$(TARGET_DIR)/lib/package.conf.d
 
-	$$(call LOG,Building libraries rts)
-	$$(STAGE3_$(1)_CABAL_BUILD) rts
+	$$(call LOG,Building library rts:nonthreaded-nodebug)
+	$$(STAGE3_$(1)_CABAL_BUILD) rts:nonthreaded-nodebug
 
 	$$(call LOG,Building libraries $(STAGE3_LIBRARIES))
 	$$(STAGE3_$(1)_CABAL_BUILD) $(filter-out rts%,$(STAGE3_LIBRARIES))

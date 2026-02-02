@@ -151,6 +151,7 @@ package ghc-internal
 
 package rts
   ghc-options: -no-rts
+  flags: +tables-next-to-code
 
 package rts-headers
   ghc-options: -no-rts

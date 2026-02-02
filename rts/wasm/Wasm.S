@@ -8,7 +8,6 @@
 #define W_ i64
 #endif
 
-#if !defined(__PIC__)
 
 	.hidden __R1
 	.globl __R1
@@ -172,4 +171,3 @@ __Hp:
 	.globaltype __HpLim, W_
 __HpLim:
 
-#endif
