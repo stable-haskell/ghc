@@ -94,8 +94,6 @@ VERBOSE ?= 0
 # to run. The default remains static to keep rebuild cost low.
 DYNAMIC ?= 0
 
-ROOT_DIR := $(patsubst %/,%,$(dir $(realpath $(lastword $(MAKEFILE_LIST)))))
-
 #
 # System tools
 #
@@ -142,7 +140,7 @@ GHC_TOOLCHAIN_ARGS  = --disable-ld-override
 # NOTE: it's tricky to know when and where we need an absolute path or we can
 # get away with a relative path. We make BUILD_DIR absolute and all derived
 # paths will be absolute too.
-BUILD_DIR  := $(abspath _build)
+BUILD_DIR  := _build
 STAGE_DIR   = $(BUILD_DIR)/$(STAGE)
 STORE_DIR   = $(STAGE_DIR)/store
 LOGS_DIR    = $(STAGE_DIR)/logs
@@ -226,12 +224,12 @@ LOG = @echo "$(BOLD)[$(STAGE)]$(NORMAL): $(1)"
 define CABAL_BUILD
 	$(CABAL) \
 		--remote-repo-cache $(BUILD_DIR)/packages \
-		--store-dir $(STORE_DIR) \
-		--logs-dir $(LOGS_DIR) \
+		--store-dir $(CURDIR)/$(STORE_DIR) \
+		--logs-dir $(CURDIR)/$(LOGS_DIR) \
 	build \
 		--project-file cabal.project.$(STAGE) \
-		--builddir $(STAGE_DIR) \
-		--ghc-options "-ghcversion-file=$(ROOT_DIR)/rts/include/ghcversion.h" \
+		--builddir $(CURDIR)/$(STAGE_DIR) \
+		--ghc-options "-ghcversion-file=$(CURDIR)/rts/include/ghcversion.h" \
 		$(CABAL_ARGS)
 endef
 
@@ -254,8 +252,8 @@ LIB_NAME_GLOB = $(let pkg lib,$(subst :, ,$(1)),$(pkg)-*$(if $(lib),-$(lib)))
 define DIST_COPY_EXE
 	$(call LOG,Copying executable $(1) into $(DIST_DIR)/bin)
 	@cp -a \
-		$(STORE_DIR)/host/$(HOST_PLATFORM)/bin/$(1)$(EXE_EXT) \
-		$(DIST_DIR)/bin/$(1)$(EXE_EXT)
+		$(CURDIR)/$(STORE_DIR)/host/$(HOST_PLATFORM)/bin/$(1)$(EXE_EXT) \
+		$(CURDIR)/$(DIST_DIR)/bin/$(1)$(EXE_EXT)
 
 endef
 
@@ -263,8 +261,8 @@ endef
 # $(2) platform
 define DIST_TARGET_EXE_LINK
 	@ln -s \
-		$(DIST_DIR)/bin/$(1)$(EXE_EXT) \
-		$(DIST_DIR)/bin/$(2)-$(1)$(EXE_EXT)
+		$(1)$(EXE_EXT) \
+		$(CURDIR)/$(DIST_DIR)/bin/$(2)-$(1)$(EXE_EXT)
 
 endef
 
@@ -278,8 +276,8 @@ endef
 define DIST_COPY_LIB
 	$(call LOG,Copying library $(1) into $(DIST_DIR)/lib)
 	@cp -ar \
-		$(STORE_DIR)/host/$(TARGET_PLATFORM)/lib/$(call LIB_NAME_GLOB,$(1)) \
-		$(DIST_DIR)/lib/$(TARGET_PLATFORM)
+		$(CURDIR)/$(STORE_DIR)/host/$(TARGET_PLATFORM)/lib/$(call LIB_NAME_GLOB,$(1)) \
+		$(CURDIR)/$(DIST_DIR)/lib/$(TARGET_PLATFORM)
 
 endef
 
@@ -293,8 +291,8 @@ endef
 define DIST_COPY_LIB_CROSS
 	$(call LOG,Copying library $(1) into $(DIST_DIR)/lib/targets/$(TARGET_PLATFORM)/lib/$(TARGET_PLATFORM))
 	@cp -ar \
-		$(STORE_DIR)/host/$(TARGET_PLATFORM)/lib/$(call LIB_NAME_GLOB,$(1)) \
-		$(DIST_DIR)/lib/targets/$(TARGET_PLATFORM)/lib/$(TARGET_PLATFORM)
+		$(CURDIR)/$(STORE_DIR)/host/$(TARGET_PLATFORM)/lib/$(call LIB_NAME_GLOB,$(1)) \
+		$(CURDIR)/$(DIST_DIR)/lib/targets/$(TARGET_PLATFORM)/lib/$(TARGET_PLATFORM)
 
 endef
 
@@ -311,11 +309,11 @@ endef
 define DIST_COPY_LIB_CONF
 	$(call LOG,Copying $(1) packagedb entry into $(DIST_DIR)/lib/package.conf.d/)
 	@cp -a \
-		$(STORE_DIR)/host/$(TARGET_PLATFORM)/package.conf.d/$(call LIB_NAME_GLOB,$(1)).conf \
-		$(DIST_DIR)/lib/package.conf.d/
+		$(CURDIR)/$(STORE_DIR)/host/$(TARGET_PLATFORM)/package.conf.d/$(call LIB_NAME_GLOB,$(1)).conf \
+		$(CURDIR)/$(DIST_DIR)/lib/package.conf.d/
 	@$(SED) -i \
-		-e 's|$(STORE_DIR)/host/$(TARGET_PLATFORM)/lib|\$${pkgroot}/../lib/$(TARGET_PLATFORM)|g' \
-		$(DIST_DIR)/lib/package.conf.d/$(call LIB_NAME_GLOB,$(1)).conf
+		-e 's|$(CURDIR)/$(STORE_DIR)/host/$(TARGET_PLATFORM)/lib|\$${pkgroot}/../lib/$(TARGET_PLATFORM)|g' \
+		$(CURDIR)/$(DIST_DIR)/lib/package.conf.d/$(call LIB_NAME_GLOB,$(1)).conf
 
 endef
 
@@ -332,11 +330,11 @@ endef
 define DIST_COPY_LIB_CONF_CROSS
 	$(call LOG,Copying $(1) packagedb entry into $(DIST_DIR)/lib/targets/$(TARGET_PLATFORM)/lib/package.conf.d/)
 	@cp -a \
-		$(STORE_DIR)/host/$(TARGET_PLATFORM)/package.conf.d/$(call LIB_NAME_GLOB,$(1)).conf \
-		$(DIST_DIR)/lib/targets/$(TARGET_PLATFORM)/lib/package.conf.d/
+		$(CURDIR)/$(STORE_DIR)/host/$(TARGET_PLATFORM)/package.conf.d/$(call LIB_NAME_GLOB,$(1)).conf \
+		$(CURDIR)/$(DIST_DIR)/lib/targets/$(TARGET_PLATFORM)/lib/package.conf.d/
 	@$(SED) -i \
-		-e 's|$(STORE_DIR)/host/$(TARGET_PLATFORM)/lib|\$${pkgroot}/../lib/$(TARGET_PLATFORM)|g' \
-		$(DIST_DIR)/lib/targets/$(TARGET_PLATFORM)/lib/package.conf.d/$(call LIB_NAME_GLOB,$(1)).conf
+		-e 's|$(CURDIR)/$(STORE_DIR)/host/$(TARGET_PLATFORM)/lib|\$${pkgroot}/../lib/$(TARGET_PLATFORM)|g' \
+		$(CURDIR)/$(DIST_DIR)/lib/targets/$(TARGET_PLATFORM)/lib/package.conf.d/$(call LIB_NAME_GLOB,$(1)).conf
 
 endef
 
@@ -698,14 +696,14 @@ define stage3
 
 STAGE3_$(1)_CABAL_BUILD = \
 	env \
-	DERIVE_CONSTANTS=$$(STAGE1_PATH)/bin/deriveConstants \
-	GENAPPLY=$$(STAGE1_PATH)/bin/genapply \
+	DERIVE_CONSTANTS=$$(CURDIR)/$$(STAGE1_PATH)/bin/deriveConstants \
+	GENAPPLY=$$(CURDIR)/$$(STAGE1_PATH)/bin/genapply \
 	NM=$$(STAGE3_$(1)_NM) \
 	OBJDUMP=$$(STAGE3_$(1)_OBJDUMP) \
 	$$(CABAL_BUILD) \
-	--with-compiler=$$(DIST_DIR)/bin/$(1)-ghc \
-	--with-build-compiler=$$(DIST_DIR)/bin/ghc \
-	--with-hsc2hs=$$(DIST_DIR)/bin/$(1)-hsc2hs \
+	--with-compiler=$$(CURDIR)/$$(DIST_DIR)/bin/$(1)-ghc \
+	--with-build-compiler=$$(CURDIR)/$$(DIST_DIR)/bin/ghc \
+	--with-hsc2hs=$$(CURDIR)/$$(DIST_DIR)/bin/$(1)-hsc2hs \
 	--hsc2hs-options='-x' \
 	--configure-option='--host=$(1)' \
 	--disable-library-for-ghci \
@@ -763,6 +761,12 @@ stage3-$(1): $(GHC2) $$(STAGE1_PATH)/bin/ghc-toolchain-bin $(CONFIGURE_SCRIPTS) 
 	@cp -rfp driver/ghc-usage.txt $$(TARGET_DIR)/lib/
 	@cp -rfp driver/ghci-usage.txt $$(TARGET_DIR)/lib/
 
+$(DIST_DIR)/ghc-$(1).tar.gz: stage3-$(1)
+	tar czf $@ \
+		--directory=$(DIST_DIR) \
+		$(foreach exe,$(STAGE3_EXECUTABLES),bin/$(1)-$(exe)) \
+		lib/targets/$(1)
+
 endef
 
 stage3-javascript-unknown-ghcjs-additional-files: STAGE=stage3
@@ -801,37 +805,40 @@ $(foreach platform,$(STAGE3_PLATFORMS),$(eval $(call stage3,$(platform))))
 
 stage3: $(foreach platform,$(STAGE3_PLATFORMS),stage3-$(platform))
 
-# $(BUILD_DIR)/bindist/ghc-%.tar.gz: $(BUILD_DIR)/bindist/lib/targets/% $(BUILD_DIR)/bindist/ghc.tar.gz
-# 	@triple=`basename $<` ; \
-# 		tar czf $@ \
-# 		--directory=$(BUILD_DIR)/bindist \
-# 		$(foreach exe,$(BINDIST_EXECTUABLES),bin/$${triple}-$(exe)) \
-# 		lib/targets/$${triple}
+$(DIST_DIR)/ghc.tar.gz: stage2
+	@tar czf $@ \
+		--directory=$(DIST_DIR) \
+		$(foreach exe,$(STAGE2_EXECUTABLES),bin/$(exe)) \
+		lib/ghc-usage.txt \
+		lib/ghci-usage.txt \
+		lib/package.conf.d \
+		lib/settings \
+		lib/$(HOST_PLATFORM)
 
-# $(BUILD_DIR)/bindist/cabal.tar.gz: $(BUILD_DIR)/stage0/bin/cabal
-# 	@mkdir -p $(BUILD_DIR)/bindist/bin
-# 	@cp $^ $(BUILD_DIR)/bindist/bin/cabal
-# 	@tar czf $@ \
-# 		--directory=$(BUILD_DIR)/bindist \
-# 		bin/cabal
+$(DIST_DIR)/cabal.tar.gz: $(CABAL)
+	@mkdir -p $(DIST_DIR)/bin
+	@cp $^ $(DIST_DIR)/bin/cabal
+	@tar czf $@ \
+		--directory=$(DIST_DIR) \
+		bin/cabal
 
-# $(BUILD_DIR)/bindist/haskell-toolchain.tar.gz: $(BUILD_DIR)/bindist/cabal.tar.gz $(BUILD_DIR)/bindist/ghc.tar.gz $(BUILD_DIR)/bindist/ghc-javascript-unknown-ghcjs.tar.gz
-# 	@tar czf $@ \
-# 		--directory=$(BUILD_DIR)/bindist \
-# 		$(foreach exe,$(BINDIST_EXECTUABLES),bin/$(exe)) \
-# 		lib/ghc-usage.txt \
-# 		lib/ghci-usage.txt \
-# 		lib/package.conf.d \
-# 		lib/settings \
-# 		lib/template-hsc.h \
-# 		lib/$(HOST_PLATFORM) \
-# 		$(foreach exe,$(BINDIST_EXECTUABLES),bin/javascript-unknown-ghcjs-$(exe)) \
-# 		lib/targets/javascript-unknown-ghcjs \
-# 		bin/cabal
+$(DIST_DIR)/haskell-toolchain.tar.gz: $(DIST_DIR)/cabal.tar.gz $(DIST_DIR)/ghc.tar.gz $(DIST_DIR)/ghc-javascript-unknown-ghcjs.tar.gz
+	@tar czf $@ \
+		--directory=$(DIST_DIR) \
+		$(foreach exe,$(STAGE2_EXECUTABLES),bin/$(exe)) \
+		lib/ghc-usage.txt \
+		lib/ghci-usage.txt \
+		lib/package.conf.d \
+		lib/settings \
+		lib/template-hsc.h \
+		lib/$(HOST_PLATFORM) \
+		$(foreach exe,$(STAGE3_EXECUTABLES),bin/javascript-unknown-ghcjs-$(exe)) \
+		lib/targets/javascript-unknown-ghcjs \
+		bin/cabal
 
-# $(BUILD_DIR)/bindist/tests.tar.gz:
-# 	@tar czf $@ \
-# 		testsuite
+$(DIST_DIR)/tests.tar.gz:
+	@tar czf $@ \
+		testsuite
 
 #  _   _            _
 # | | | | __ _  ___| | ____ _  __ _  ___
