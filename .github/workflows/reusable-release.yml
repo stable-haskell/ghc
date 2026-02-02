@@ -144,11 +144,11 @@ jobs:
             cd emsdk
             source ./emsdk_env.sh
             cd ..
-            gmake CABAL=$PWD/_build/stage0/bin/cabal _build/bindist/haskell-toolchain.tar.gz _build/bindist/tests.tar.gz
+            gmake _build/dist/haskell-toolchain.tar.gz _build/dist/tests.tar.gz
           else
-            gmake CABAL=$PWD/_build/stage0/bin/cabal _build/bindist/ghc.tar.gz _build/bindist/cabal.tar.gz _build/bindist/tests.tar.gz
+            gmake _build/dist/ghc.tar.gz _build/dist/cabal.tar.gz _build/dist/tests.tar.gz
           fi
-          cd _build/bindist
+          cd _build/dist
           mv ghc.tar.gz ghc-$(bin/ghc --numeric-version)-${ARTIFACT}.tar.gz
           mv cabal.tar.gz cabal-$(bin/cabal --numeric-version)-${ARTIFACT}.tar.gz
           if [ -e "haskell-toolchain.tar.gz" ] ; then
@@ -167,7 +167,7 @@ jobs:
           retention-days: 2
           name: artifacts-${{ matrix.platform.ARTIFACT }}-${{ matrix.branch }}
           path: |
-            ./_build/bindist/*.tar.gz
+            ./_build/dist/*.tar.gz
 
   build-arm:
     name: Build ARM binary
@@ -197,13 +197,13 @@ jobs:
         uses: docker://arm64v8/debian:11
         name: Run build (aarch64 linux)
         with:
-          args: sh -c "apt-get update && apt-get install -y curl bash git ${{ needs.tool-output.outputs.apt_tools_build }} && export PATH=$HOME/.ghcup/bin:$PATH && curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org | sh && make CABAL=$PWD/_build/stage0/bin/cabal _build/bindist/ghc.tar.gz _build/bindist/cabal.tar.gz _build/bindist/tests.tar.gz && cd _build/bindist && mv ghc.tar.gz ghc-$(bin/ghc --numeric-version)-${{ matrix.platform.ARTIFACT }}.tar.gz && mv cabal.tar.gz cabal-$(bin/cabal --numeric-version)-${{ matrix.platform.ARTIFACT }}.tar.gz && mv tests.tar.gz tests-${{ matrix.platform.ARTIFACT }}.tar.gz"
+          args: sh -c "apt-get update && apt-get install -y curl bash git ${{ needs.tool-output.outputs.apt_tools_build }} && export PATH=$HOME/.ghcup/bin:$PATH && curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org | sh && make _build/dist/ghc.tar.gz _build/dist/cabal.tar.gz _build/dist/tests.tar.gz && cd _build/dist && mv ghc.tar.gz ghc-$(bin/ghc --numeric-version)-${{ matrix.platform.ARTIFACT }}.tar.gz && mv cabal.tar.gz cabal-$(bin/cabal --numeric-version)-${{ matrix.platform.ARTIFACT }}.tar.gz && mv tests.tar.gz tests-${{ matrix.platform.ARTIFACT }}.tar.gz"
 
       - if: matrix.platform.ARTIFACT == 'aarch64-linux-unknown'
         uses: docker://arm64v8/alpine:3.20
         name: Run build (aarch64 linux alpine)
         with:
-          args: sh -c "apk update && apk add curl bash git ${{ needs.tool-output.outputs.apk_tools_build }} && export PATH=$HOME/.ghcup/bin:$PATH && curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org | sh && make CABAL=$PWD/_build/stage0/bin/cabal _build/bindist/ghc.tar.gz _build/bindist/cabal.tar.gz _build/bindist/tests.tar.gz && cd _build/bindist && mv ghc.tar.gz ghc-$(bin/ghc --numeric-version)-${{ matrix.platform.ARTIFACT }}.tar.gz && mv cabal.tar.gz cabal-$(bin/cabal --numeric-version)-${{ matrix.platform.ARTIFACT }}.tar.gz && mv tests.tar.gz tests-${{ matrix.platform.ARTIFACT }}.tar.gz"
+          args: sh -c "apk update && apk add curl bash git ${{ needs.tool-output.outputs.apk_tools_build }} && export PATH=$HOME/.ghcup/bin:$PATH && curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org | sh && make _build/dist/ghc.tar.gz _build/dist/cabal.tar.gz _build/dist/tests.tar.gz && cd _build/dist && mv ghc.tar.gz ghc-$(bin/ghc --numeric-version)-${{ matrix.platform.ARTIFACT }}.tar.gz && mv cabal.tar.gz cabal-$(bin/cabal --numeric-version)-${{ matrix.platform.ARTIFACT }}.tar.gz && mv tests.tar.gz tests-${{ matrix.platform.ARTIFACT }}.tar.gz"
 
       - if: always()
         name: Upload artifact
@@ -213,7 +213,7 @@ jobs:
           retention-days: 2
           name: artifacts-${{ matrix.platform.ARTIFACT }}-${{ matrix.branch }}
           path: |
-            ./_build/bindist/*.tar.gz
+            ./_build/dist/*.tar.gz
 
   build-mac-x86_64:
     name: Build binary (Mac x86_64)
@@ -263,7 +263,7 @@ jobs:
           retention-days: 2
           name: artifacts-${{ env.ARTIFACT }}-${{ matrix.branch }}
           path: |
-            ./_build/bindist/*.tar.gz
+            ./_build/dist/*.tar.gz
 
   build-mac-aarch64:
     name: Build binary (Mac aarch64)
@@ -315,7 +315,7 @@ jobs:
           retention-days: 2
           name: artifacts-${{ env.ARTIFACT }}-${{ matrix.branch }}
           path: |
-            ./_build/bindist/*.tar.gz
+            ./_build/dist/*.tar.gz
 
   build-freebsd-x86_64:
     name: Build FreeBSD x86_64
@@ -380,8 +380,8 @@ jobs:
           which ghc
           ghc --info
           cabal update
-          gmake CABAL=$PWD/_build/stage0/bin/cabal _build/bindist/haskell-toolchain.tar.gz _build/bindist/tests.tar.gz
-          cd _build/bindist
+          gmake _build/dist/haskell-toolchain.tar.gz _build/dist/tests.tar.gz
+          cd _build/dist
           mv ghc.tar.gz ghc-$(bin/ghc --numeric-version)-${{ env.ARTIFACT }}.tar.gz
           mv cabal.tar.gz cabal-$(bin/cabal --numeric-version)-${{ env.ARTIFACT }}.tar.gz
           mv haskell-toolchain.tar.gz haskell-toolchain-${{ env.ARTIFACT }}.tar.gz
@@ -400,7 +400,7 @@ jobs:
           retention-days: 2
           name: artifacts-${{ env.ARTIFACT }}-${{ matrix.branch }}
           path: |
-            ./_build/bindist/*.tar.gz
+            ./_build/dist/*.tar.gz
 
   test-linux:
     name: Test linux binaries
@@ -519,15 +519,15 @@ jobs:
       - uses: ./.github/actions/download
         with:
           name: artifacts-${{ matrix.platform.ARTIFACT }}-${{ matrix.branch }}
-          path: ./_build/bindist
+          path: ./_build/dist
 
       - name: Run test
         run: &test |
           rm -rf .git
-          cd _build/bindist
+          cd _build/dist
           for file in *.tar.gz; do tar xzf "$file"; done
           cd testsuite
-          PATH=$GITHUB_WORKSPACE/_build/bindist/bin:$PATH make
+          PATH=$GITHUB_WORKSPACE/_build/dist/bin:$PATH make
         env:
           THREADS: 4
 
@@ -558,19 +558,19 @@ jobs:
       - uses: ./.github/actions/download
         with:
           name: artifacts-${{ matrix.platform.ARTIFACT }}-${{ matrix.branch }}
-          path: ./_build/bindist
+          path: ./_build/dist
 
       - if: matrix.platform.ARTIFACT == 'aarch64-linux-deb11'
         uses: docker://arm64v8/debian:11
         name: Run build (aarch64 linux)
         with:
-          args: sh -c "apt-get update && apt-get install -y curl bash git ${{ needs.tool-output.outputs.apt_tools_test }} && git config --system --add safe.directory $GITHUB_WORKSPACE && export PATH=$HOME/.ghcup/bin:$PATH && curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org | sh && rm -rf .git && cd _build/bindist && for file in *.tar.gz; do tar xzf $file; done && cd testsuite && PATH=$GITHUB_WORKSPACE/_build/bindist/bin:$PATH make"
+          args: sh -c "apt-get update && apt-get install -y curl bash git ${{ needs.tool-output.outputs.apt_tools_test }} && git config --system --add safe.directory $GITHUB_WORKSPACE && export PATH=$HOME/.ghcup/bin:$PATH && curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org | sh && rm -rf .git && cd _build/dist && for file in *.tar.gz; do tar xzf $file; done && cd testsuite && PATH=$GITHUB_WORKSPACE/_build/dist/bin:$PATH make"
 
       - if: matrix.platform.ARTIFACT == 'aarch64-linux-unknown'
         uses: docker://arm64v8/alpine:3.20
         name: Run build (aarch64 linux alpine)
         with:
-          args: sh -c "apk update && apk add curl bash git ${{ needs.tool-output.outputs.apk_tools_test }} && git config --system --add safe.directory $GITHUB_WORKSPACE && export PATH=$HOME/.ghcup/bin:$PATH && curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org | sh && rm -rf .git && cd _build/bindist && for file in *.tar.gz; do tar xzf $file; done && cd testsuite && PATH=$GITHUB_WORKSPACE/_build/bindist/bin:$PATH make"
+          args: sh -c "apk update && apk add curl bash git ${{ needs.tool-output.outputs.apk_tools_test }} && git config --system --add safe.directory $GITHUB_WORKSPACE && export PATH=$HOME/.ghcup/bin:$PATH && curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org | sh && rm -rf .git && cd _build/dist && for file in *.tar.gz; do tar xzf $file; done && cd testsuite && PATH=$GITHUB_WORKSPACE/_build/dist/bin:$PATH make"
 
   test-mac-x86_64:
     name: Test binary (Mac x86_64)
@@ -600,7 +600,7 @@ jobs:
       - uses: ./.github/actions/download
         with:
           name: artifacts-${{ env.ARTIFACT }}-${{ matrix.branch }}
-          path: ./_build/bindist
+          path: ./_build/dist
 
       - name: Run test
         run: *test
@@ -638,7 +638,7 @@ jobs:
       - uses: ./.github/actions/download
         with:
           name: artifacts-${{ env.ARTIFACT }}-${{ matrix.branch }}
-          path: ./_build/bindist
+          path: ./_build/dist
 
       - name: Run test
         run: *test
@@ -675,7 +675,7 @@ jobs:
       - uses: ./.github/actions/download
         with:
           name: artifacts-${{ env.ARTIFACT }}-${{ matrix.branch }}
-          path: ./_build/bindist
+          path: ./_build/dist
 
       - name: Install dependencies
         run: |
@@ -687,11 +687,11 @@ jobs:
       - name: Run test
         run: |
           rm -rf .git
-          cd _build/bindist
+          cd _build/dist
           for file in *.tar.gz; do tar xzf "$file"; done
           cd testsuite
           export LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH
-          PATH=$GITHUB_WORKSPACE/_build/bindist/bin:$PATH gmake
+          PATH=$GITHUB_WORKSPACE/_build/dist/bin:$PATH gmake
         env:
           THREADS: 8
           EXTRA_HC_OPTS: "-optl-L/usr/local/lib -optc-I/usr/local/include"
