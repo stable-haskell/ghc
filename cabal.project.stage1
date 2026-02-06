@@ -81,6 +81,11 @@ package ghc-boot-th-next
 package hsc2hs
   flags: +in-ghc-tree
 
+-- Suppress -Werror for libffi-clib: its upstream C code produces warnings
+-- (e.g. implicit function declarations) that -Werror promotes to build failures.
+package libffi-clib
+  ghc-options: -optc-Wno-error
+
 --
 -- Program options
 --
