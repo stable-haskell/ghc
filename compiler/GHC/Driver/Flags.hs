@@ -866,6 +866,7 @@ data GeneralFlag
    -- temporary flags
    | Opt_AutoLinkPackages
    | Opt_NoRts
+   | Opt_NoGhcInternal
    | Opt_ImplicitImportQualified
 
    -- keeping stuff
