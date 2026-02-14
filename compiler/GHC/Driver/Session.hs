@@ -3550,8 +3550,12 @@ compilerInfo dflags
        ("Have native code generator",  showBool $ platformNcgSupported platform),
        ("target has RTS linker",       showBool $ platformHasRTSLinker platform),
        ("Target default backend",      show     $ platformDefaultBackend platform),
-       -- Whether or not we support @-dynamic-too@
-       ("Support dynamic-too",         showBool $ not isWindows),
+       -- -dynamic-too is deprecated and a no-op; all object files are now
+       -- dynamic-capable. Report NO so Cabal falls back to two-pass compilation.
+       -- TODO: Cabal should stop requiring .dyn_o files entirely; once it
+       -- understands that .o files are dynamic-capable, the two-pass
+       -- compilation and dyn_o suffix machinery can be removed.
+       ("Support dynamic-too",         "NO"),
        -- Whether or not we support the @-j@ flag with @--make@.
        ("Support parallel --make",     "YES"),
        -- Whether or not we support "Foo from foo-0.1-XXX:Foo" syntax in
@@ -3585,7 +3589,6 @@ compilerInfo dflags
     showBool True  = "YES"
     showBool False = "NO"
     platform  = targetPlatform dflags
-    isWindows = platformOS platform == OSMinGW32
     useInplaceMinGW = toolSettings_useInplaceMinGW $ toolSettings dflags
     expandDirectories :: FilePath -> Maybe FilePath -> String -> String
     expandDirectories topd mtoold = expandToolDir useInplaceMinGW mtoold . expandTopDir topd
