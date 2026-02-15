@@ -1116,8 +1116,8 @@ Potential TODOS:
 ~~~~~
 * Remove -fwrite-interface and have interface files always written in -fno-code
   mode
-* Both .o and .dyn_o files are generated for template haskell, but we only need
-  .dyn_o (for dynamically linked compilers) Fix it. (The needed way is 'hostFullWays')
+* All .o files are now dynamic-capable (-dynamic-too is deprecated), so only
+  .o files are generated for template haskell. (The needed way is 'hostFullWays')
 * In make mode, a message like
   Compiling A (A.hs, /tmp/ghc_123.o)
   is shown if downsweep enabled object code generation for A. Perhaps we should
