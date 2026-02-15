@@ -22,5 +22,5 @@ executable q
   -- other-extensions:
   build-depends:       base >=4.14 && <5, p, ghc
   -- hs-source-dirs:
-  ghc-options: -dynamic-too
+  ghc-options: -dynamic
   default-language:    Haskell2010
