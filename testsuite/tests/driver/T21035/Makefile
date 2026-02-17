@@ -34,8 +34,10 @@ hsdep-empty-lib/libHShsdep-0.1-ghc8.10.7.so:
 	'$(TEST_HC)' $(EXTRA_HC_OPTS) -shared -dynamic -o hsdep-empty-lib/libHShsdep-0.1-ghc8.10.7.so empty.c
 	rm empty.c
 
+# Compile without -dynamic: all .o files are now dynamic-capable,
+# and the .hi profile tag must be "" (not "dyn") for non-dynamic consumers.
 hsdep/HsDep.hi hsdep/HsDep.o: hsdep/HsDep.hs
-	'$(TEST_HC)' $(EXTRA_HC_OPTS) -c -dynamic -this-unit-id hsdep-0.1 hsdep/HsDep.hs
+	'$(TEST_HC)' $(EXTRA_HC_OPTS) -c -this-unit-id hsdep-0.1 hsdep/HsDep.hs
 
 T21035: a.out
 
