@@ -514,13 +514,18 @@ findPackageModule_ fc fopts mod pkg_conf = do
              (ppr (moduleUnit mod) <+> ppr (unitId pkg_conf))
   modLocationCache fc mod $
     let
-       tag = waysBuildTag (finder_ways fopts)
+       -- Ignore WayDyn when computing the build tag for package interface
+       -- lookups: since dynamic-too is deprecated, all .hi and .o files are
+       -- unified (no separate .dyn_hi / .dyn_o). Only non-dynamic ways
+       -- (e.g. profiling) contribute to the suffix.
+       tag = waysBuildTag (removeWay WayDyn (finder_ways fopts))
 
              -- hi-suffix for packages depends on the build tag.
        package_hisuf | null tag  = os "hi"
                      | otherwise = os (tag ++ "_hi")
 
-       package_dynhisuf = os $ waysBuildTag (addWay WayDyn (finder_ways fopts)) ++ "_hi"
+       package_dynhisuf | null tag  = os "hi"
+                        | otherwise = os (tag ++ "_hi")
 
        mk_hi_loc = mkHiOnlyModLocation fopts package_hisuf package_dynhisuf
 
