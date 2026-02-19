@@ -50,4 +50,8 @@ profileBuildTag profile
   | otherwise                       =     wayTag
   where
    platform = profilePlatform profile
-   wayTag   = waysBuildTag (profileWays profile)
+   -- Ignore WayDyn: since -dynamic-too is deprecated and .dyn_hi/.dyn_o are
+   -- now symlinks to .hi/.o, the interface file profile tag must be consistent
+   -- regardless of whether -dynamic is active. Only non-dynamic ways (e.g.
+   -- profiling) contribute to the build tag.
+   wayTag   = waysBuildTag (removeWay WayDyn (profileWays profile))
