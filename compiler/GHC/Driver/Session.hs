@@ -1325,8 +1325,9 @@ dynamic_flags_deps = [
   , make_ord_flag defGhcFlag "ddump-file-prefix"
         (hasArg (setDumpPrefixForce . Just . flip (++) "."))
 
-  , make_ord_flag defGhcFlag "dynamic-too"
+  , make_dep_flag defGhcFlag "dynamic-too"
         (NoArg (setGeneralFlag Opt_BuildDynamicToo))
+        "-dynamic-too is deprecated. All object files are now dynamic-capable; .dyn_o/.dyn_hi are created as symlinks."
 
         ------- Keeping temporary files -------------------------------------
      -- These can be singular (think ghc -c) or plural (think ghc --make)
