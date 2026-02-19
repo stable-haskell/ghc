@@ -788,22 +788,32 @@ hscBackendPipeline pipe_env hsc_env mod_sum result =
   if backendGeneratesCode (backend (hsc_dflags hsc_env)) then
     do
       res <- hscGenBackendPipeline pipe_env hsc_env mod_sum result
-      -- Only run dynamic-too if the backend generates object files
-      -- See Note [Writing interface files]
-      -- If we are writing a simple interface (not . backendWritesFiles), then
-      -- hscMaybeWriteIface in the regular pipeline will write both the hi and
-      -- dyn_hi files. This way we can avoid running the pipeline twice and
-      -- generating a duplicate linkable.
-      -- We must not run the backend a second time with `dynamicNow` enable because
-      -- all the work has already been done in the first pipeline.
-      when (gopt Opt_BuildDynamicToo (hsc_dflags hsc_env) && backendWritesFiles (backend (hsc_dflags hsc_env)) ) $ do
-          let dflags' = setDynamicNow (hsc_dflags hsc_env) -- set "dynamicNow"
-          () <$ hscGenBackendPipeline pipe_env (hscSetFlags dflags' hsc_env) mod_sum result
+      -- -dynamic-too is deprecated: instead of running the backend a second
+      -- time to produce .dyn_o files, we create a symlink .dyn_o -> .o
+      -- since all object files are now dynamic-capable.
+      when (gopt Opt_BuildDynamicToo (hsc_dflags hsc_env) && backendWritesFiles (backend (hsc_dflags hsc_env)) ) $ liftIO $ do
+          let location = ms_location mod_sum
+              obj_fn     = ml_obj_file location
+              dyn_obj_fn = ml_dyn_obj_file location
+          createOrUpdateSymlink obj_fn dyn_obj_fn
       return res
   else
     case result of
       HscUpdate iface ->  return (iface, emptyRecompLinkables)
       HscRecomp {} -> (,) <$> liftIO (mkFullIface hsc_env (hscs_partial_iface result) Nothing Nothing NoStubs []) <*> pure emptyRecompLinkables
+
+-- | Create a symlink from @link@ pointing to @source@, removing any
+-- existing file or symlink at @link@ first. Used by the deprecated
+-- -dynamic-too path to create .dyn_o -> .o and .dyn_hi -> .hi symlinks.
+createOrUpdateSymlink :: FilePath -> FilePath -> IO ()
+createOrUpdateSymlink source link = do
+  -- Use the basename of source so the symlink is relative
+  -- (both files live in the same directory).
+  let relSource = takeFileName source
+  -- doesPathExist detects files, directories, and symlinks (including broken ones)
+  exists <- doesPathExist link
+  when exists $ removeFile link
+  createFileLink relSource link
 
 hscGenBackendPipeline :: P m
   => PipeEnv
