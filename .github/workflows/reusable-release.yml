@@ -25,6 +25,7 @@ on:
         default: true
 
 env:
+  GIT_COMMIT_ID: ${{ github.sha }}
   # toolchain
   GHC_VERSION: ${{ inputs.ghc }}
   GHC_TARGETS: ${{ inputs.ghc_targets }}
