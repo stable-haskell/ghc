@@ -30,7 +30,7 @@
             python3
             m4
 
-            # For WASM - llvm and clang with wasm support
+            # For WASM - llvm and clang with wasm support (native tools)
             llvm_18
             clang_18
 
@@ -40,8 +40,9 @@
             which
             curl
 
-            # WASM SDK with libffi-wasm integrated
-            wasi-sdk
+            # NOTE: wasi-sdk is intentionally NOT in buildInputs to prevent nix
+            # from setting CC/LD/AR to the WASM cross-compiler globally.
+            # It's accessed exclusively via $WASI_SDK_DIR set in shellHook.
           ];
 
           shellHook = ''
