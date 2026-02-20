@@ -73,7 +73,6 @@
 # - [ ] Where do we get the version number from? The configure script _does_ contain
 #       one and sets it, but should it come from the last release tag this branch is
 #       contains?
-# - [ ] HADRIAN_SETTINGS needs to be removed.
 # - [ ] The hadrian folder needs to be removed.
 # - [ ] All sublibs should be SRPs in the relevant cabal.project files. No more
 #       submodules.
@@ -190,18 +189,6 @@ TARGET_OS       = $(call GHC_INFO,target os)
 TARGET_TRIPLE   = $(call GHC_INFO,Target platform)
 GHC_LIBDIR      = $(call GHC_INFO,LibDir)
 GIT_COMMIT_ID  := $(shell git rev-parse HEAD)
-
-define HADRIAN_SETTINGS
-[ ("hostPlatformArch",    "$(TARGET_ARCH)") \
-, ("hostPlatformOS",      "$(TARGET_OS)") \
-, ("cProjectGitCommitId", "$(GIT_COMMIT_ID)") \
-, ("cProjectVersion",     "9.14") \
-, ("cProjectVersionInt",  "914") \
-, ("cProjectPatchLevel",  "0") \
-, ("cProjectPatchLevel1", "0") \
-, ("cProjectPatchLevel2", "0") \
-]
-endef
 
 # Handle CPUS and THREADS
 CPUS_DETECT_SCRIPT := ./mk/detect-cpu-count.sh
@@ -631,7 +618,7 @@ $(addprefix _build/stage1/bin/,$(STAGE1_EXECUTABLES)) &: $(CABAL) $(CONFIGURE_SC
 	@echo "::group::Building stage1 executables ($(STAGE1_EXECUTABLES))..."
 	# Force cabal to replan
 	rm -rf _build/stage1/cache
-	HADRIAN_SETTINGS='$(HADRIAN_SETTINGS)' $(CABAL_BUILD) $(STAGE1_TARGETS)
+	$(CABAL_BUILD) $(STAGE1_TARGETS)
 	@echo "::endgroup::"
 
 _build/stage1/lib/settings: _build/stage1/bin/ghc-toolchain-bin$(EXE_EXT)
@@ -678,7 +665,7 @@ $(addprefix _build/stage2/bin/,$(STAGE2_EXECUTABLES)) &: $(CABAL) stage1 cabal.p
 	@echo "::group::Building stage2 executables ($(STAGE2_EXECUTABLES))..."
 	# Force cabal to replan
 	rm -rf _build/stage2/cache
-	GHC=$(GHC) HADRIAN_SETTINGS='$(HADRIAN_SETTINGS)' \
+	GHC=$(GHC) \
 		PATH='$(PWD)/_build/stage1/bin:$(PATH)' \
 		$(CABAL_BUILD) --ghc-options="-ghcversion-file=$(abspath ./rts/include/ghcversion.h)" -W $(GHC0) $(STAGE2_TARGETS)
 	@echo "::endgroup::"
@@ -691,7 +678,7 @@ stage2-rts: $(CABAL) stage1 cabal.project.stage2
 	@echo "::group::Building stage2 RTSes..."
 	# Force cabal to replan
 	rm -rf _build/stage2/cache
-	GHC=$(GHC) HADRIAN_SETTINGS='$(HADRIAN_SETTINGS)' \
+	GHC=$(GHC) \
 		PATH='$(PWD)/_build/stage1/bin:$(PATH)' \
 		$(CABAL_BUILD) --ghc-options="-ghcversion-file=$(abspath ./rts/include/ghcversion.h)" -W $(GHC0) $(STAGE2_UTIL_RTS)
 	@echo "::endgroup::"
@@ -706,7 +693,7 @@ $(addprefix _build/stage2/bin/,$(STAGE2_UTIL_EXECUTABLES)) &: $(CABAL) stage1 ca
 	@echo "::group::Building stage2 utilities ($(STAGE2_UTIL_EXECUTABLES))..."
 	# Force cabal to replan
 	rm -rf _build/stage2/cache
-	GHC=$(GHC) HADRIAN_SETTINGS='$(HADRIAN_SETTINGS)' \
+	GHC=$(GHC) \
 		PATH='$(PWD)/_build/stage1/bin:$(PATH)' \
 		$(CABAL_BUILD) --ghc-options="-ghcversion-file=$(abspath ./rts/include/ghcversion.h)" -W $(GHC0) $(STAGE2_UTIL_TARGETS)
 	@echo "::endgroup::"
@@ -781,7 +768,7 @@ _build/stage3/lib/targets/%/lib/ghc-interp.js:
 
 # $1 = TIPLET
 define build_cross
-	LD_LIBRARY_PATH=$(LD_LIBRARY_PATH) GHC=$(GHC) HADRIAN_SETTINGS='$(call HADRIAN_SETTINGS)' \
+	LD_LIBRARY_PATH=$(LD_LIBRARY_PATH) GHC=$(GHC) \
 		PATH=$(PWD)/_build/stage2/bin:$(PWD)/_build/stage3/bin:$(PATH) \
 		$(CABAL_BUILD) -W $(GHC2) --happy-options="--template=$(abspath _build/stage2/src/happy-lib-2.1.5/data/)" --with-hsc2hs=$1-hsc2hs --hsc2hs-options='-x' --configure-option='--host=$1' \
 		$(foreach lib,$(CROSS_EXTRA_LIB_DIRS),--extra-lib-dirs=$(lib)) \
