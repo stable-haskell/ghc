@@ -58,6 +58,11 @@
             # wasi-sdk from ghc-wasm-meta includes libffi-wasm
             export WASI_SDK_DIR="${wasi-sdk}"
 
+            # Wasi sysroot paths for WASM RTS compilation.
+            # Passed as --extra-lib-dirs / --extra-include-dirs to cabal.
+            export WASM_EXTRA_LIB_DIRS="${wasi-sdk}/share/wasi-sysroot/lib/wasm32-wasi"
+            export WASM_EXTRA_INCLUDE_DIRS="${wasi-sdk}/share/wasi-sysroot/include"
+
             # Create short-name wrappers for WASM toolchain
             # GHC Makefile expects wasm32-wasi-* but wasi-sdk provides full names
             WASM_BIN_DIR="$PWD/.nix-wasm-bin"
@@ -135,8 +140,8 @@ EOF
             echo ""
 
             echo "To build WASM cross-compiler:"
-            echo "  make CABAL=_build/stage0/bin/cabal stage2"
-            echo "  make CABAL=_build/stage0/bin/cabal stage3-wasm32-unknown-wasi"
+            echo "  make stage2"
+            echo "  make stage3-wasm32-unknown-wasi"
             echo ""
           '';
         };
