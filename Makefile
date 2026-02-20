@@ -659,7 +659,7 @@ ifneq ($(UNAME), Darwin)
 endif
 ifeq ($(DYNAMIC),1)
 	$(call LOG,Create -dyn iserv executable symlink so ghc can find ghc-iserv-dyn)
-	@$(LN_SF) ghc-iserv$(EXE_EXT) "$$(DIST_DIR)/bin/ghc-iserv-dyn$(EXE_EXT)"
+	@$(LN_SF) ghc-iserv$(EXE_EXT) "$(DIST_DIR)/bin/ghc-iserv-dyn$(EXE_EXT)"
 endif
 	$(call LOG,Refreshing $(DIST_DIR)/lib/package.conf.d cache)
 	@$(DIST_DIR)/bin/ghc-pkg recache --package-db $(CURDIR)/$(DIST_DIR)/lib/package.conf.d
