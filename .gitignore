@@ -212,6 +212,7 @@ utils/unlit/fs.*
 libraries/ghc-internal/include/fs.h
 libraries/ghc-internal/cbits/fs.c
 missing-win32-tarballs
+cabal.project.stage2.settings
 
 /extra-gcc-opts
 /sdistprep
