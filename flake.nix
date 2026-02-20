@@ -70,6 +70,28 @@ exec "${wasi-sdk}/bin/clang" "$@"
 EOF
             chmod +x "$WASM_BIN_DIR/wasm32-wasi-clang"
 
+            # GHC's WASM LLVM backend uses llc/opt/llvm-as to compile LLVM IR to WASM
+            # assembly. We must use wasi-sdk's LLVM tools (version 21) since they match
+            # the assembler (clang 21). Using nixpkgs' LLVM 18 tools with clang 21's
+            # assembler causes errors: ".size directive ignored for function symbols"
+            cat > "$WASM_BIN_DIR/llc" <<'EOF'
+#!/bin/sh
+exec "${wasi-sdk}/bin/llc" "$@"
+EOF
+            chmod +x "$WASM_BIN_DIR/llc"
+
+            cat > "$WASM_BIN_DIR/opt" <<'EOF'
+#!/bin/sh
+exec "${wasi-sdk}/bin/opt" "$@"
+EOF
+            chmod +x "$WASM_BIN_DIR/opt"
+
+            cat > "$WASM_BIN_DIR/llvm-as" <<'EOF'
+#!/bin/sh
+exec "${wasi-sdk}/bin/llvm-as" "$@"
+EOF
+            chmod +x "$WASM_BIN_DIR/llvm-as"
+
             cat > "$WASM_BIN_DIR/wasm32-wasi-clang++" <<'EOF'
 #!/bin/sh
 exec "${wasi-sdk}/bin/clang++" "$@"
@@ -82,11 +104,10 @@ exec "${wasi-sdk}/bin/wasm-ld" "$@"
 EOF
             chmod +x "$WASM_BIN_DIR/wasm-ld"
 
-            cat > "$WASM_BIN_DIR/ld" <<'EOF'
-#!/bin/sh
-exec "${wasi-sdk}/bin/wasm-ld" "$@"
-EOF
-            chmod +x "$WASM_BIN_DIR/ld"
+            # NOTE: Do NOT create an 'ld' wrapper here.
+            # ghc-toolchain-bin auto-detects the native linker for stage1 settings.
+            # If 'ld' is the WASM linker, it breaks 'ld -r' tests for native compilation.
+            # The WASM settings file explicitly uses '--ld wasm-ld', not 'ld'.
 
             cat > "$WASM_BIN_DIR/wasm32-wasi-ar" <<'EOF'
 #!/bin/sh
@@ -106,8 +127,9 @@ EOF
             echo "WASM toolchain from ghc-wasm-meta wasi-sdk:"
             echo "  - wasm32-wasi-clang (wrapped)"
             echo "  - wasm32-wasi-clang++ (wrapped)"
-            echo "  - wasm-ld, ld (wrapped)"
+            echo "  - wasm-ld (wrapped, native ld is NOT overridden)"
             echo "  - wasm32-wasi-ar, wasm32-wasi-ranlib (wrapped)"
+            echo "  - llc, opt, llvm-as (wrapped from wasi-sdk LLVM 21)"
             echo "  - Sysroot: ${wasi-sdk}/share/wasi-sysroot"
             echo "  - Includes libffi-wasm pre-integrated"
             echo ""
