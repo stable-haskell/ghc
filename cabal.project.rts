@@ -43,6 +43,12 @@ if os(wasi)
     ghc-options: -optl-Wl,--export-dynamic
     ghc-options: -optc-fvisibility=default
     ghc-options: -optc-fvisibility-inlines-hidden
+    -- WASM/WASI does not use tables-next-to-code: info table symbols must be
+    -- pure data. With TNTC enabled, symbols like stg_WHITEHOLE_info become
+    -- WASM FUNCTION type (entry label == info label), causing wasm-ld to
+    -- report "symbol type mismatch" when C code treats the same symbol as
+    -- a data pointer. Override the unconditional +tables-next-to-code above.
+    flags: -tables-next-to-code
 
 if os(windows)
   package rts

@@ -47,7 +47,7 @@ packages:
   libraries/file-io
   libraries/filepath
   libraries/hpc
-  libraries/libffi-clib
+  -- libraries/libffi-clib  # Not needed for WASM (Emscripten-only)
   libraries/mtl
   libraries/os-string
   libraries/parsec
@@ -145,11 +145,15 @@ package *
 if os(wasi)
   package *
     shared: True
+  -- WASI has no libffi (Emscripten-only); use the system libffi stub from wasi-sdk
+  package rts
+    flags: +use-system-libffi
 
 import: cabal.project.rts
 
-package libffi-clib
-  ghc-options: -no-rts
+-- package libffi-clib not built for WASM
+-- package libffi-clib
+--   ghc-options: -no-rts
 
 package ghc
   flags: +build-tool-depends +internal-interpreter
