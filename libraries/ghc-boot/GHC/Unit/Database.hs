@@ -235,6 +235,10 @@ data GenericUnitInfo srcpkgid srcpkgname uid modulename mod = GenericUnitInfo
    , unitHaddockHTMLs   :: [FilePathST]
       -- ^ Paths to Haddock directories containing HTML files
 
+   , unitDataDir        :: Maybe FilePathST
+      -- ^ Data directory for package data files (e.g., templates, resources)
+      -- Exposed to the compiler for packages that need data files during compilation/linking
+
    , unitExposedModules :: [(modulename, Maybe mod)]
       -- ^ Modules exposed by the unit.
       --
@@ -555,6 +559,7 @@ instance Binary DbUnitInfo where
          unitLinkerOptions unitCcOptions
          unitIncludes unitIncludeDirs
          unitHaddockInterfaces unitHaddockHTMLs
+         unitDataDir
          unitExposedModules unitHiddenModules
          unitIsIndefinite unitIsExposed unitIsTrusted) = do
     put unitPackageId
@@ -583,6 +588,7 @@ instance Binary DbUnitInfo where
     put unitIncludeDirs
     put unitHaddockInterfaces
     put unitHaddockHTMLs
+    put unitDataDir
     put unitExposedModules
     put unitHiddenModules
     put unitIsIndefinite
@@ -616,6 +622,7 @@ instance Binary DbUnitInfo where
     unitIncludeDirs    <- get
     unitHaddockInterfaces <- get
     unitHaddockHTMLs   <- get
+    unitDataDir        <- get
     unitExposedModules <- get
     unitHiddenModules  <- get
     unitIsIndefinite   <- get
@@ -639,6 +646,7 @@ instance Binary DbUnitInfo where
               unitLinkerOptions unitCcOptions
               unitIncludes unitIncludeDirs
               unitHaddockInterfaces unitHaddockHTMLs
+              unitDataDir
               unitExposedModules
               unitHiddenModules
               unitIsIndefinite unitIsExposed unitIsTrusted)
@@ -733,6 +741,7 @@ mungeUnitInfoPaths top_dir pkgroot pkg =
       , unitHaddockInterfaces   = munge_paths (unitHaddockInterfaces pkg)
         -- haddock-html is allowed to be either a URL or a file
       , unitHaddockHTMLs        = munge_paths (munge_urls (unitHaddockHTMLs pkg))
+      , unitDataDir             = fmap munge_path (unitDataDir pkg)
       }
    where
       munge_paths = map munge_path
