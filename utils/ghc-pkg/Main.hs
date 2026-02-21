@@ -1482,6 +1482,10 @@ convertPackageInfoToCacheFormat pkg =
        GhcPkg.unitIncludeDirs    = map ST.pack $ includeDirs pkg,
        GhcPkg.unitHaddockInterfaces = map ST.pack $ haddockInterfaces pkg,
        GhcPkg.unitHaddockHTMLs   = map ST.pack $ haddockHTMLs pkg,
+       GhcPkg.unitDataDir        = let dir = dataDir pkg
+                                   in if null dir
+                                      then Nothing
+                                      else Just (ST.pack dir),
        GhcPkg.unitExposedModules = map convertExposed (exposedModules pkg),
        GhcPkg.unitHiddenModules  = hiddenModules pkg,
        GhcPkg.unitIsIndefinite   = indefinite pkg,
