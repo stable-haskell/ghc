@@ -31,6 +31,7 @@ extra-source-files:
     posix/ticker/Setitimer.c
     posix/ticker/TimerCreate.c
     posix/ticker/TimerFd.c
+    wasm/WasmGlobalRegs.S
     -- headers files that are not installed by the rts package but only used to
     -- build the rts C code
     xxhash.h
@@ -246,6 +247,11 @@ extra-tmp-files:
     rts.buildinfo
     config.log
     config.status
+
+-- WASM GlobalRegs source file, needed at executable link time
+-- See Note [WASM GlobalRegs Linking] in rts/wasm/WasmGlobalRegs.S
+data-files:
+    wasm/WasmGlobalRegs.S
 
 source-repository head
     type:     git
@@ -557,6 +563,9 @@ common rts-c-sources-base
                   win32/veh_excn.c
     elif arch(wasm32)
       asm-sources: wasm/Wasm.S
+      -- Note: WasmGlobalRegs.S is NOT included in RTS build
+      -- It's compiled on-demand and injected during executable linking
+      -- See Note [WASM GlobalRegs Linking] in rts/wasm/WasmGlobalRegs.S
       c-sources: wasm/StgRun.c
                  wasm/GetTime.c
                  wasm/OSMem.c
@@ -583,7 +592,7 @@ common rts-link-options
     if flag(use-system-libffi)
        extra-libraries: ffi
        extra-libraries-static: ffi
-    else
+    if !flag(use-system-libffi) && !arch(javascript) && !arch(wasm32)
        build-depends: libffi-clib
 
     if os(linux)
@@ -781,7 +790,7 @@ library
       rts-headers,
       rts-fs
 
-    if !flag(use-system-libffi) && !arch(javascript)
+    if !flag(use-system-libffi) && !arch(javascript) && !arch(wasm32)
       build-depends: libffi-clib
 
 common ghcjs

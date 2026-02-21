@@ -99,7 +99,10 @@ library
         ghc-boot         == @ProjectVersionMunged@,
         transformers     >= 0.5 && < 0.7
 
-    if !arch(javascript)
+    -- libffi is not available on JS (no native RTS) or WASM/WASI (libffi's
+    -- WASM support is Emscripten-only; the WASI sysroot has no libffi).
+    -- See Note [FFI for the JS-Backend and WASM-Backend] in GHCi/FFI.hsc.
+    if !arch(javascript) && !arch(wasm32)
       if flag(use-system-libffi)
          extra-libraries: ffi
          extra-libraries-static: ffi
