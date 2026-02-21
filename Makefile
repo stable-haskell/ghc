@@ -143,8 +143,8 @@ JS_EXTRA_INCLUDE_DIRS ?=
 
 WASM_EXTRA_LIB_DIRS ?=
 WASM_EXTRA_INCLUDE_DIRS ?=
-WASM_CC_OPTS = -fno-strict-aliasing -Wno-error=int-conversion -Oz -msimd128 -mnontrapping-fptoint -msign-ext -mbulk-memory -mmutable-globals -mmultivalue -mreference-types
-WASM_CXX_OPTS = -fno-exceptions -fno-strict-aliasing -Wno-error=int-conversion -Oz -msimd128 -mnontrapping-fptoint -msign-ext -mbulk-memory -mmutable-globals -mmultivalue -mreference-types
+WASM_CC_OPTS = -w -fno-strict-aliasing -Oz -msimd128 -mnontrapping-fptoint -msign-ext -mbulk-memory -mmutable-globals -mmultivalue -mreference-types
+WASM_CXX_OPTS = -w -fno-exceptions -fno-strict-aliasing -Oz -msimd128 -mnontrapping-fptoint -msign-ext -mbulk-memory -mmutable-globals -mmultivalue -mreference-types
 
 # :exploding-head: It turns out override doesn't override the command-line
 # value but it overrides Make's normal behavior of ignoring assignments to
@@ -779,14 +779,27 @@ _build/stage3/lib/targets/%/lib/ghc-interp.js:
 	@mkdir -p $(@D)
 	@cp -f ghc-interp.js $@
 
-# $1 = TIPLET
+# $1 = TRIPLET
 define build_cross
 	LD_LIBRARY_PATH=$(LD_LIBRARY_PATH) GHC=$(GHC) HADRIAN_SETTINGS='$(call HADRIAN_SETTINGS)' \
 		PATH=$(PWD)/_build/stage2/bin:$(PWD)/_build/stage3/bin:$(PATH) \
 		$(CABAL_BUILD) -W $(GHC2) --happy-options="--template=$(abspath _build/stage2/src/happy-lib-2.1.5/data/)" --with-hsc2hs=$1-hsc2hs --hsc2hs-options='-x' --configure-option='--host=$1' \
 		$(foreach lib,$(CROSS_EXTRA_LIB_DIRS),--extra-lib-dirs=$(lib)) \
 		$(foreach include,$(CROSS_EXTRA_INCLUDE_DIRS),--extra-include-dirs=$(include)) \
+		$(RTS_FLAGS) \
 		$(STAGE3_LIBS)
+endef
+
+# $1 = TRIPLET, $2 = explicit package(s) to build (instead of all STAGE3_LIBS)
+# Used for serial pre-build steps where we want only a specific package + its deps.
+define build_cross_pkgs
+	LD_LIBRARY_PATH=$(LD_LIBRARY_PATH) GHC=$(GHC) HADRIAN_SETTINGS='$(call HADRIAN_SETTINGS)' \
+		PATH=$(PWD)/_build/stage2/bin:$(PWD)/_build/stage3/bin:$(PATH) \
+		$(CABAL_BUILD) -W $(GHC2) --happy-options="--template=$(abspath _build/stage2/src/happy-lib-2.1.5/data/)" --with-hsc2hs=$1-hsc2hs --hsc2hs-options='-x' --configure-option='--host=$1' \
+		$(foreach lib,$(CROSS_EXTRA_LIB_DIRS),--extra-lib-dirs=$(lib)) \
+		$(foreach include,$(CROSS_EXTRA_INCLUDE_DIRS),--extra-include-dirs=$(include)) \
+		$(RTS_FLAGS) \
+		$2
 endef
 
 # --- Stage 3 javascript build ---
@@ -849,13 +862,124 @@ stage3-wasm32-unknown-wasi: wasm32-unknown-wasi-libs _build/stage3/lib/targets/w
 
 _build/stage3/lib/targets/wasm32-unknown-wasi/lib/settings: _build/stage2/lib/targets/wasm32-unknown-wasi _build/stage1/bin/ghc-toolchain-bin$(EXE_EXT)
 	@mkdir -p $(@D)
-	PATH=/home/hasufell/.ghc-wasm/wasi-sdk/bin:$(PATH) _build/stage1/bin/ghc-toolchain-bin$(EXE_EXT) $(GHC_TOOLCHAIN_ARGS) --triple wasm32-unknown-wasi --output-settings -o $@ --cc wasm32-wasi-clang --cxx wasm32-wasi-clang++ --ar ar --ranlib ranlib --ld wasm-ld --merge-objs wasm-ld --merge-objs-opt="-r" --disable-ld-override --disable-tables-next-to-code $(foreach opt,$(WASM_CC_OPTS),--cc-opt=$(opt)) $(foreach opt,$(WASM_CXX_OPTS),--cxx-opt=$(opt))
+	_build/stage1/bin/ghc-toolchain-bin$(EXE_EXT) $(GHC_TOOLCHAIN_ARGS) --triple wasm32-unknown-wasi --output-settings -o $@ --cc wasm32-wasi-clang --cxx wasm32-wasi-clang++ --ar wasm32-wasi-ar --ranlib wasm32-wasi-ranlib --ld wasm-ld --merge-objs wasm-ld --merge-objs-opt="--relocatable" --disable-ld-override --disable-tables-next-to-code --disable-libffi-adjustors $(foreach opt,$(WASM_CC_OPTS),--cc-opt=$(opt)) $(foreach opt,$(WASM_CXX_OPTS),--cxx-opt=$(opt))
 
 _build/stage3/lib/targets/wasm32-unknown-wasi/lib/package.conf.d/package.cache: _build/stage3/bin/wasm32-unknown-wasi-ghc-pkg$(EXE_EXT) _build/stage3/lib/targets/wasm32-unknown-wasi/lib/settings wasm32-unknown-wasi-libs
 	@mkdir -p $(@D)
 	@rm -rf $(@D)/*
 	cp -rfp _build/stage3/wasm32-unknown-wasi/packagedb/host/*/* $(@D)
 	_build/stage3/bin/wasm32-unknown-wasi-ghc-pkg$(EXE_EXT) recache
+
+# Pre-build all RTS sublibs for the WASM target before the main parallel build.
+# This ensures the RTS is registered in the package database before ghc-internal
+# starts compiling (which depends on rts:nonthreaded-nodebug being available).
+# Without this, Cabal's parallel build can start ghc-internal before RTS is done.
+# See: https://github.com/stable-haskell/ghc/issues/134
+.PHONY: wasm32-unknown-wasi-rts
+wasm32-unknown-wasi-rts: private LD_LIBRARY_PATH=$(CURDIR)/_build/stage2/lib/$(HOST_PLATFORM)
+wasm32-unknown-wasi-rts: private GHC=$(abspath _build/stage3/bin/wasm32-unknown-wasi-ghc$(EXE_EXT))
+wasm32-unknown-wasi-rts: private GHC2=$(abspath _build/stage2/bin/ghc$(EXE_EXT))
+wasm32-unknown-wasi-rts: private STAGE=stage3
+wasm32-unknown-wasi-rts: private CC=wasm32-wasi-clang
+wasm32-unknown-wasi-rts: private CROSS_EXTRA_LIB_DIRS=$(WASM_EXTRA_LIB_DIRS)
+wasm32-unknown-wasi-rts: private CROSS_EXTRA_INCLUDE_DIRS=$(WASM_EXTRA_INCLUDE_DIRS)
+wasm32-unknown-wasi-rts: private RTS_FLAGS=--constraint="rts -libffi-adjustors" --constraint="any -libffi-clib"
+wasm32-unknown-wasi-rts: cabal.project.stage3 _build/stage3/bin/wasm32-unknown-wasi-ghc-pkg$(EXE_EXT) _build/stage3/bin/wasm32-unknown-wasi-ghc$(EXE_EXT) _build/stage3/bin/wasm32-unknown-wasi-hsc2hs$(EXE_EXT) _build/stage3/lib/targets/wasm32-unknown-wasi/lib/settings _build/stage3/lib/targets/wasm32-unknown-wasi/bin/unlit$(EXE_EXT) _build/stage3/lib/targets/wasm32-unknown-wasi/lib/package.conf.d
+	@echo "::group::Pre-building WASM32 RTS sublibs (ensures proper package ordering)..."
+	# Force cabal to replan to pick up fresh package state
+	rm -rf _build/stage3/wasm32-unknown-wasi/cache
+	LD_LIBRARY_PATH=$(LD_LIBRARY_PATH) GHC=$(GHC) HADRIAN_SETTINGS='$(call HADRIAN_SETTINGS)' \
+		PATH=$(PWD)/_build/stage2/bin:$(PWD)/_build/stage3/bin:$(PATH) \
+		$(CABAL_BUILD) -W $(GHC2) --happy-options="--template=$(abspath _build/stage2/src/happy-lib-2.1.5/data/)" --with-hsc2hs=wasm32-unknown-wasi-hsc2hs --hsc2hs-options='-x' --configure-option='--host=wasm32-unknown-wasi' \
+		$(foreach lib,$(CROSS_EXTRA_LIB_DIRS),--extra-lib-dirs=$(lib)) \
+		$(foreach include,$(CROSS_EXTRA_INCLUDE_DIRS),--extra-include-dirs=$(include)) \
+		$(RTS_FLAGS) \
+		rts:nonthreaded-nodebug rts:nonthreaded-debug rts:threaded-nodebug rts:threaded-debug
+	@echo "::endgroup::"
+
+# Pre-build ALL STAGE3_LIBS for the WASM target serially to avoid ghc-pkg
+# register race conditions.
+#
+# Root cause: Cabal's parallel build (-j) causes multiple packages to call
+# `ghc-pkg register` (which rewrites package.cache) simultaneously, silently
+# losing some .conf entries.  This affects ALL build-type:Simple packages too,
+# not just build-type:Configure.
+#
+# Fix: build each package in its own cabal invocation in topological (dependency)
+# order.  When package X is built, all its deps are already in the packagedb,
+# so cabal only needs to build and register X itself — at most one ghc-pkg
+# register call per invocation, eliminating the race window entirely.
+#
+# Topological order (each invocation sees all prior ones already registered;
+# rts/ghc-prim/ghc-internal are pre-registered by wasm32-unknown-wasi-rts):
+#   base             - deps: rts, ghc-prim, ghc-internal  (pre-built above)
+#   ghc-bignum       - deps: base
+#   integer-gmp      - deps: base, ghc-bignum
+#   deepseq          - deps: base
+#   array            - deps: base
+#   bytestring       - deps: base, deepseq
+#   text             - deps: base, bytestring, deepseq
+#   os-string        - deps: base, bytestring
+#   filepath         - deps: base, os-string
+#   transformers     - deps: base
+#   stm              - deps: base, array
+#   mtl              - deps: base, transformers
+#   containers       - deps: base, array, deepseq
+#   binary           - deps: base, array, bytestring
+#   exceptions       - deps: base, stm, mtl, transformers
+#   pretty           - deps: base, text
+#   parsec           - deps: base, bytestring, mtl, text
+#   hpc              - deps: base, containers
+#   template-haskell - deps: base, ghc-prim
+#   time             - deps: base, deepseq  [build-type: Configure]
+#   unix             - deps: base, bytestring, text, filepath  [implicit dep]
+#   file-io          - deps: base, filepath, os-string
+#   directory        - deps: base, filepath, unix, time  [build-type: Configure]
+#   process          - deps: base, unix, directory  [build-type: Configure]
+#   xhtml            - deps: base, containers, text
+#   ghci             - deps: many  (libffi-clib excluded for wasm32)
+#   Cabal-syntax     - deps: many
+#   Cabal            - deps: Cabal-syntax, many
+.PHONY: wasm32-unknown-wasi-configure-libs
+wasm32-unknown-wasi-configure-libs: private LD_LIBRARY_PATH=$(CURDIR)/_build/stage2/lib/$(HOST_PLATFORM)
+wasm32-unknown-wasi-configure-libs: private GHC=$(abspath _build/stage3/bin/wasm32-unknown-wasi-ghc$(EXE_EXT))
+wasm32-unknown-wasi-configure-libs: private GHC2=$(abspath _build/stage2/bin/ghc$(EXE_EXT))
+wasm32-unknown-wasi-configure-libs: private STAGE=stage3
+wasm32-unknown-wasi-configure-libs: private CC=wasm32-wasi-clang
+wasm32-unknown-wasi-configure-libs: private CROSS_EXTRA_LIB_DIRS=$(WASM_EXTRA_LIB_DIRS)
+wasm32-unknown-wasi-configure-libs: private CROSS_EXTRA_INCLUDE_DIRS=$(WASM_EXTRA_INCLUDE_DIRS)
+wasm32-unknown-wasi-configure-libs: private RTS_FLAGS=--constraint="rts -libffi-adjustors" --constraint="any -libffi-clib"
+wasm32-unknown-wasi-configure-libs: wasm32-unknown-wasi-rts cabal.project.stage3 _build/stage3/bin/wasm32-unknown-wasi-ghc-pkg$(EXE_EXT) _build/stage3/bin/wasm32-unknown-wasi-ghc$(EXE_EXT) _build/stage3/bin/wasm32-unknown-wasi-hsc2hs$(EXE_EXT) _build/stage3/lib/targets/wasm32-unknown-wasi/lib/settings _build/stage3/lib/targets/wasm32-unknown-wasi/bin/unlit$(EXE_EXT) _build/stage3/lib/targets/wasm32-unknown-wasi/lib/package.conf.d
+	@echo "::group::Pre-building ALL WASM32 libs serially (prevents ghc-pkg register races)..."
+	$(call build_cross_pkgs,wasm32-unknown-wasi,base)
+	$(call build_cross_pkgs,wasm32-unknown-wasi,ghc-bignum)
+	$(call build_cross_pkgs,wasm32-unknown-wasi,integer-gmp)
+	$(call build_cross_pkgs,wasm32-unknown-wasi,deepseq)
+	$(call build_cross_pkgs,wasm32-unknown-wasi,array)
+	$(call build_cross_pkgs,wasm32-unknown-wasi,bytestring)
+	$(call build_cross_pkgs,wasm32-unknown-wasi,text)
+	$(call build_cross_pkgs,wasm32-unknown-wasi,os-string)
+	$(call build_cross_pkgs,wasm32-unknown-wasi,filepath)
+	$(call build_cross_pkgs,wasm32-unknown-wasi,transformers)
+	$(call build_cross_pkgs,wasm32-unknown-wasi,stm)
+	$(call build_cross_pkgs,wasm32-unknown-wasi,mtl)
+	$(call build_cross_pkgs,wasm32-unknown-wasi,containers)
+	$(call build_cross_pkgs,wasm32-unknown-wasi,binary)
+	$(call build_cross_pkgs,wasm32-unknown-wasi,exceptions)
+	$(call build_cross_pkgs,wasm32-unknown-wasi,pretty)
+	$(call build_cross_pkgs,wasm32-unknown-wasi,parsec)
+	$(call build_cross_pkgs,wasm32-unknown-wasi,hpc)
+	$(call build_cross_pkgs,wasm32-unknown-wasi,template-haskell)
+	$(call build_cross_pkgs,wasm32-unknown-wasi,time)
+	$(call build_cross_pkgs,wasm32-unknown-wasi,unix)
+	$(call build_cross_pkgs,wasm32-unknown-wasi,file-io)
+	$(call build_cross_pkgs,wasm32-unknown-wasi,directory)
+	$(call build_cross_pkgs,wasm32-unknown-wasi,process)
+	$(call build_cross_pkgs,wasm32-unknown-wasi,xhtml)
+	$(call build_cross_pkgs,wasm32-unknown-wasi,ghci)
+	$(call build_cross_pkgs,wasm32-unknown-wasi,Cabal-syntax)
+	$(call build_cross_pkgs,wasm32-unknown-wasi,Cabal)
+	@echo "::endgroup::"
 
 .PHONY: wasm32-unknown-wasi-libs
 wasm32-unknown-wasi-libs: private LD_LIBRARY_PATH=$(CURDIR)/_build/stage2/lib/$(HOST_PLATFORM)
@@ -865,7 +989,8 @@ wasm32-unknown-wasi-libs: private STAGE=stage3
 wasm32-unknown-wasi-libs: private CC=wasm32-wasi-clang
 wasm32-unknown-wasi-libs: private CROSS_EXTRA_LIB_DIRS=$(WASM_EXTRA_LIB_DIRS)
 wasm32-unknown-wasi-libs: private CROSS_EXTRA_INCLUDE_DIRS=$(WASM_EXTRA_INCLUDE_DIRS)
-wasm32-unknown-wasi-libs: cabal.project.stage3 _build/stage3/bin/wasm32-unknown-wasi-ghc-pkg$(EXE_EXT) _build/stage3/bin/wasm32-unknown-wasi-ghc$(EXE_EXT) _build/stage3/bin/wasm32-unknown-wasi-hsc2hs$(EXE_EXT) _build/stage3/lib/targets/wasm32-unknown-wasi/lib/settings _build/stage3/lib/targets/wasm32-unknown-wasi/bin/unlit$(EXE_EXT) _build/stage3/lib/targets/wasm32-unknown-wasi/lib/package.conf.d
+wasm32-unknown-wasi-libs: private RTS_FLAGS=--constraint="rts -libffi-adjustors" --constraint="any -libffi-clib"
+wasm32-unknown-wasi-libs: wasm32-unknown-wasi-configure-libs cabal.project.stage3 _build/stage3/bin/wasm32-unknown-wasi-ghc-pkg$(EXE_EXT) _build/stage3/bin/wasm32-unknown-wasi-ghc$(EXE_EXT) _build/stage3/bin/wasm32-unknown-wasi-hsc2hs$(EXE_EXT) _build/stage3/lib/targets/wasm32-unknown-wasi/lib/settings _build/stage3/lib/targets/wasm32-unknown-wasi/bin/unlit$(EXE_EXT) _build/stage3/lib/targets/wasm32-unknown-wasi/lib/package.conf.d
 	$(call build_cross,wasm32-unknown-wasi)
 
 # --- Bindist ---
