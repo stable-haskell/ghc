@@ -42,7 +42,7 @@ packages:
   https://hackage.haskell.org/package/semaphore-compat-1.0.0/semaphore-compat-1.0.0.tar.gz
   https://hackage.haskell.org/package/unix-2.8.8.0/unix-2.8.8.0.tar.gz
   https://hackage.haskell.org/package/Win32-2.14.2.1/Win32-2.14.2.1.tar.gz
-  https://hackage.haskell.org/package/hsc2hs-0.68.10/hsc2hs-0.68.10.tar.gz
+  -- hsc2hs: see source-repository-package below
 
 allow-newer: directory:*
            , file-io:*
@@ -83,3 +83,10 @@ package ghc-boot
 
 package ghc-boot-th-next
   flags: +bootstrap
+
+-- hsc2hs with batch cross-compilation support
+-- https://github.com/stable-haskell/hsc2hs/tree/feat/batch-cross-compilation
+source-repository-package
+  type: git
+  location: https://github.com/stable-haskell/hsc2hs.git
+  tag: bf966e825d34c7776a988f473f1c437b89e8a21f
