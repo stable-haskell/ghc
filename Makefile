@@ -79,6 +79,7 @@
 
 SHELL := bash
 .SHELLFLAGS := -eu -o pipefail -c
+.DEFAULT_GOAL := all
 
 VERBOSE ?= 0
 
@@ -95,6 +96,13 @@ UNAME := $(shell uname)
 # -DDYNAMIC) and allow tests requiring dynamic linking (e.g. plugins-external)
 # to run. The default remains static to keep rebuild cost low.
 DYNAMIC ?= 0
+
+# Quiet mode: suppress output unless error (QUIET=1)
+QUIET ?= 0
+
+# Metrics collection: start background CPU/memory sampling (METRICS=1)
+METRICS ?= 0
+METRICS_INTERVAL ?= 0.5
 
 #
 # System tools
@@ -157,6 +165,12 @@ STORE_DIR   = $(STAGE_DIR)/store
 LOGS_DIR    = $(STAGE_DIR)/logs
 
 DIST_DIR   := $(BUILD_DIR)/dist
+
+# Timing directory for phase start/end timestamps
+TIMING_DIR := $(BUILD_DIR)/timing
+
+# Metrics directory for CPU/memory CSV data
+METRICS_DIR := $(BUILD_DIR)/metrics
 
 # HOST_PLATFROM is always from the bootstrap compiler
 HOST_PLATFORM := $(shell $(GHC0) --print-host-platform)
@@ -221,6 +235,28 @@ LOG_GROUP_START = @echo "$(BOLD)>>>>> $1$(NORMAL)"
 LOG_GROUP_END = @echo ""
 
 LOG = @echo "$(BOLD)[$(STAGE)]$(NORMAL): $(1)"
+
+ifeq ($(QUIET),1)
+LOG = @:
+LOG_GROUP_START = @:
+LOG_GROUP_END = @:
+endif
+
+# Phase timing: records start/end timestamps and status
+define PHASE_START
+	@mkdir -p $(TIMING_DIR)
+	@date +%s > $(TIMING_DIR)/$(1).start
+endef
+
+define PHASE_END_OK
+	@date +%s > $(TIMING_DIR)/$(1).end
+	@echo "0" > $(TIMING_DIR)/$(1).status
+endef
+
+define PHASE_END_FAIL
+	@date +%s > $(TIMING_DIR)/$(1).end
+	@echo "1" > $(TIMING_DIR)/$(1).status
+endef
 
 define NORMALIZE_FP
 $(shell echo $(1) | $(CYGPATH_MIXED))
@@ -442,6 +478,24 @@ CONFIGURED_FILES := \
 # |_|  |_|\__,_|_|_| |_|  \__\__,_|_|  \__, |\___|\__|
 #                                      |___/
 
+.PHONY: timing-summary
+timing-summary:
+	@./mk/timing-summary.sh $(TIMING_DIR)
+
+.PHONY: metrics-start metrics-stop metrics-plot
+metrics-start:
+	@./mk/collect-metrics.sh start $(METRICS_DIR) $(METRICS_INTERVAL)
+
+metrics-stop:
+	@./mk/collect-metrics.sh stop $(METRICS_DIR)
+
+metrics-plot:
+	@if [ -f "$(METRICS_DIR)/metrics.csv" ]; then \
+		$(PYTHON) ./mk/plot-metrics.py $(METRICS_DIR) $(TIMING_DIR) $(METRICS_DIR)/metrics; \
+	else \
+		echo "No metrics data found. Run 'make METRICS=1 all' first."; \
+	fi
+
 .PHONY: all
 all: stage2
 
@@ -454,10 +508,12 @@ all: stage2
 .PHONY: $(CABAL)
 $(CABAL): STAGE=stage0
 $(CABAL):
+	$(call PHASE_START,cabal)
 	$(call LOG,Building $@)
 	$(CABAL_BUILD_STAGE0) --with-compiler $(GHC0) cabal-install:exe:cabal
 	@mkdir -p $(@D)
 	@cp $$($(CABAL0) list-bin -v0 -j --with-compiler $(GHC0) --project-file=cabal.project.stage0 --builddir=$(CURDIR)/$(STAGE_DIR) cabal-install:exe:cabal | $(CYGPATH)) $@
+	$(call PHASE_END_OK,cabal)
 
 stage0 : $(CABAL)
 
@@ -498,10 +554,13 @@ STAGE1_CABAL_BUILD = \
 
 stage1: STAGE=stage1
 stage1: $(CABAL) $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) cabal.project.stage1 cabal.project.common libraries/ghc-boot-th-next | hackage
+	$(call PHASE_START,stage1)
 	$(call LOG,Starting build of $(STAGE))
 
+	$(call PHASE_START,stage1.executables)
 	$(call LOG,Building executables $(STAGE1_EXECUTABLES))
 	$(STAGE1_CABAL_BUILD) $(addprefix exe:,$(STAGE1_EXECUTABLES))
+	$(call PHASE_END_OK,stage1.executables)
 
 	$(call LOG,Creating $(STORE_DIR)/host/$(HOST_PLATFORM)/lib/settings)
 	@$(STORE_DIR)/host/$(HOST_PLATFORM)/bin/ghc-toolchain-bin $(GHC_TOOLCHAIN_ARGS) --triple $(HOST_PLATFORM) --cc $(CC) --cxx $(CXX) --cc-link-opt "$(CC_LINK_OPT)" --output-settings -o $(STORE_DIR)/host/$(HOST_PLATFORM)/lib/settings
@@ -514,6 +573,7 @@ endif
 	@$(STORE_DIR)/host/$(HOST_PLATFORM)/bin/ghc-pkg init $(STORE_DIR)/host/$(HOST_PLATFORM)/lib/package.conf.d
 
 	$(call LOG,Finished building $(STAGE))
+	$(call PHASE_END_OK,stage1)
 
 $(addprefix $(STAGE1_PATH)/bin/,$(STAGE1_EXECUTABLES)) : stage1
 
@@ -614,17 +674,25 @@ STAGE2_CABAL_BUILD = \
 stage2: STAGE=stage2
 stage2: TARGET_PLATFORM:=$(HOST_PLATFORM)
 stage2: $(GHC1) $(CABAL) $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) cabal.project.stage2 cabal.project.stage2.settings cabal.project.common libraries/ghc-boot-th-next | stage1
+	$(call PHASE_START,stage2)
 	$(call LOG,Starting build of $(STAGE))
 
+	$(call PHASE_START,stage2.rts)
 	$(call LOG,Building rts)
 	$(STAGE2_CABAL_BUILD) rts
+	$(call PHASE_END_OK,stage2.rts)
 
+	$(call PHASE_START,stage2.executables)
 	$(call LOG,Building executables $(STAGE2_EXECUTABLES))
 	$(STAGE2_CABAL_BUILD) $(addprefix exe:,$(STAGE2_EXECUTABLES))
+	$(call PHASE_END_OK,stage2.executables)
 
+	$(call PHASE_START,stage2.libraries)
 	$(call LOG,Building libraries $(filter-out rts%,$(STAGE2_LIBRARIES)))
 	$(STAGE2_CABAL_BUILD) $(filter-out rts%,$(STAGE2_LIBRARIES))
+	$(call PHASE_END_OK,stage2.libraries)
 
+	$(call PHASE_START,stage2.dist)
 	$(call LOG,Building distribution in $(DIST_DIR))
 	@rm -rf $(DIST_DIR)
 
@@ -666,6 +734,8 @@ endif
 	@cp -rfp driver/ghci-usage.txt $(DIST_DIR)/lib/
 
 	$(call LOG,Finished building $(STAGE) in $(DIST_DIR))
+	$(call PHASE_END_OK,stage2.dist)
+	$(call PHASE_END_OK,stage2)
 
 $(addprefix $(STAGE2_PATH)/bin/,$(STAGE2_EXECUTABLES)) : stage2
 
@@ -799,6 +869,7 @@ STAGE3_$(1)_CABAL_BUILD = \
 stage3-$(1): STAGE=stage3
 stage3-$(1): TARGET_PLATFORM=$(1)
 stage3-$(1): $(GHC2) $$(STAGE1_PATH)/bin/ghc-toolchain-bin $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) libraries/ghc-boot-th-next cabal.project.common cabal.project.stage3 stage3-$(1)-additional-files
+	$$(call PHASE_START,stage3-$(1))
 	$$(call LOG,Linking executables)
 	$$(foreach exe,$$(STAGE3_EXECUTABLES),$(LN_SF) $$(exe) $(DIST_DIR)/bin/$(1)-$$(exe);)
 
@@ -823,12 +894,17 @@ stage3-$(1): $(GHC2) $$(STAGE1_PATH)/bin/ghc-toolchain-bin $(CONFIGURE_SCRIPTS) 
 	@rm -rf $$(TARGET_DIR)/lib/package.conf.d
 	$$(DIST_DIR)/bin/$(1)-ghc-pkg init $$(TARGET_DIR)/lib/package.conf.d
 
+	$$(call PHASE_START,stage3-$(1).rts)
 	$$(call LOG,Building library rts:nonthreaded-nodebug)
 	$$(STAGE3_$(1)_CABAL_BUILD) rts:nonthreaded-nodebug
+	$$(call PHASE_END_OK,stage3-$(1).rts)
 
+	$$(call PHASE_START,stage3-$(1).libraries)
 	$$(call LOG,Building libraries $(STAGE3_LIBRARIES))
 	$$(STAGE3_$(1)_CABAL_BUILD) $(filter-out rts%,$(STAGE3_LIBRARIES))
+	$$(call PHASE_END_OK,stage3-$(1).libraries)
 
+	$$(call PHASE_START,stage3-$(1).dist)
 	$$(call LOG,Copying libraries into distribution for target $(1))
 	@mkdir -p $$(TARGET_DIR)/lib/package.conf.d
 	@mkdir -p $$(TARGET_DIR)/lib/$(1)
@@ -845,6 +921,8 @@ stage3-$(1): $(GHC2) $$(STAGE1_PATH)/bin/ghc-toolchain-bin $(CONFIGURE_SCRIPTS) 
 	$$(call LOG,Copying ghc-usage files)
 	@cp -rfp driver/ghc-usage.txt $$(TARGET_DIR)/lib/
 	@cp -rfp driver/ghci-usage.txt $$(TARGET_DIR)/lib/
+	$$(call PHASE_END_OK,stage3-$(1).dist)
+	$$(call PHASE_END_OK,stage3-$(1))
 
 $(DIST_DIR)/ghc-$(1).tar.gz: stage3-$(1)
 	@echo "::group::Creating ghc-$(1).tar.gz..."
@@ -1068,6 +1146,7 @@ testsuite-timeout:
 # --- Test Target ---
 
 test: stage2 testsuite-timeout
+	$(call PHASE_START,test)
 	@echo "::group::Running tests with THREADS=$(THREADS)" >&2
 	# If any required tool is missing, testsuite logic will skip related tests.
 	TEST_HC='$(TEST_GHC)' \
@@ -1085,6 +1164,7 @@ test: stage2 testsuite-timeout
 	THREADS='$(THREADS)' \
 	$(MAKE) -C testsuite/tests test
 	@echo "::endgroup::"
+	$(call PHASE_END_OK,test)
 
 # Inform Make that these are not actual files if they get deleted by other means
 .PHONY: clean clean-stage1 clean-stage2 clean-stage3 distclean test
