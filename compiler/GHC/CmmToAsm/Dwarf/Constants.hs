@@ -18,8 +18,10 @@ import GHC.CmmToAsm.X86.Regs
 
 import Data.Word
 
--- | Extract register number from a real register
--- This is a local helper to avoid depending on any specific NCG's Regs module
+-- | Extract register number from a real register.
+-- This is a local, generic fallback used when a platform-specific NCG Regs
+-- module is not available (e.g. when that NCG is compiled out). It is not
+-- intended to replace backend-specific definitions elsewhere.
 toRegNo :: Reg -> RegNo
 toRegNo (RegReal (RealRegSingle n)) = n
 toRegNo _                           = panic "toRegNo: unsupported register"

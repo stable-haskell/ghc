@@ -6,12 +6,118 @@
 -- external process or in the current process.
 --
 #if !defined(HAVE_INTERPRETER)
--- Minimal stub module for stage1 builds - just re-exports types
+-- Minimal stub module for stage1 builds - re-exports types and provides
+-- stub functions that panic if called
 module GHC.Runtime.Interpreter
   ( module GHC.Runtime.Interpreter.Types
+  -- * Stub object-code linker functions
+  -- These functions are not available without interpreter support.
+  -- They will panic if called, which should never happen in stage1.
+  , initObjLinker
+  , lookupSymbol
+  , lookupClosure
+  , loadDLL
+  , loadArchive
+  , loadObj
+  , unloadObj
+  , addLibrarySearchPath
+  , removeLibrarySearchPath
+  , resolveObjs
+  , findSystemLibrary
+  , loadFramework
+  -- * Stub HValue management functions
+  , mkFinalizedHValue
+  , freeHValueRefs
+  , purgeLookupSymbolCache
+  -- * Stub utility functions
+  , linkFail
   ) where
 
+import GHC.Prelude
 import GHC.Runtime.Interpreter.Types
+import GHC.Runtime.Interpreter.Stubs
+       ( ForeignHValue, HValueRef, RemotePtr, LoadedDLL )
+import GHC.Runtime.Interpreter.Types.SymbolCache (InterpSymbol)
+import GHC.Types.Basic (SuccessFlag)
+import GHC.Utils.Panic (panic)
+import GHC.Utils.Outputable (SDoc)
+
+-- -----------------------------------------------------------------------------
+-- Stub functions for the object-code linker
+-- These panic because they should never be called in stage1 builds
+
+noInterp :: String -> a
+noInterp fn = panic $ fn ++ ": interpreter not available (stage1 build)"
+
+-- | Initialize the object linker - stub that panics
+initObjLinker :: Interp -> IO ()
+initObjLinker _ = noInterp "initObjLinker"
+
+-- | Look up a symbol in the RTS linker's symbol table - stub that panics
+lookupSymbol :: Interp -> InterpSymbol s -> IO (Maybe (RemotePtr ()))
+lookupSymbol _ _ = noInterp "lookupSymbol"
+
+-- | Look up a closure - stub that panics
+lookupClosure :: Interp -> InterpSymbol s -> IO (Maybe HValueRef)
+lookupClosure _ _ = noInterp "lookupClosure"
+
+-- | Load a DLL - stub that panics
+loadDLL :: Interp -> String -> IO (Either String (RemotePtr LoadedDLL))
+loadDLL _ _ = noInterp "loadDLL"
+
+-- | Load an archive file - stub that panics
+loadArchive :: Interp -> String -> IO ()
+loadArchive _ _ = noInterp "loadArchive"
+
+-- | Load an object file - stub that panics
+loadObj :: Interp -> String -> IO ()
+loadObj _ _ = noInterp "loadObj"
+
+-- | Unload an object file - stub that panics
+unloadObj :: Interp -> String -> IO ()
+unloadObj _ _ = noInterp "unloadObj"
+
+-- | Add a library search path - stub that panics
+addLibrarySearchPath :: Interp -> String -> IO (RemotePtr ())
+addLibrarySearchPath _ _ = noInterp "addLibrarySearchPath"
+
+-- | Remove a library search path - stub that panics
+removeLibrarySearchPath :: Interp -> RemotePtr () -> IO Bool
+removeLibrarySearchPath _ _ = noInterp "removeLibrarySearchPath"
+
+-- | Resolve object files - stub that panics
+resolveObjs :: Interp -> IO SuccessFlag
+resolveObjs _ = noInterp "resolveObjs"
+
+-- | Find a system library - stub that panics
+findSystemLibrary :: Interp -> String -> IO (Maybe String)
+findSystemLibrary _ _ = noInterp "findSystemLibrary"
+
+-- | Load a framework (macOS) - stub that panics
+loadFramework :: Interp -> [String] -> String -> IO (Maybe String)
+loadFramework _ _ _ = noInterp "loadFramework"
+
+-- -----------------------------------------------------------------------------
+-- Stub HValue management functions
+
+-- | Finalize an HValue reference - stub that panics
+mkFinalizedHValue :: Interp -> HValueRef -> IO ForeignHValue
+mkFinalizedHValue _ _ = noInterp "mkFinalizedHValue"
+
+-- | Free HValue references - stub that panics
+freeHValueRefs :: Interp -> [HValueRef] -> IO ()
+freeHValueRefs _ _ = noInterp "freeHValueRefs"
+
+-- | Purge the lookup symbol cache - stub that panics
+purgeLookupSymbolCache :: Interp -> IO ()
+purgeLookupSymbolCache _ = noInterp "purgeLookupSymbolCache"
+
+-- -----------------------------------------------------------------------------
+-- Stub utility functions
+
+-- | Report a link failure - stub that panics
+linkFail :: String -> SDoc -> IO a
+linkFail msg _ = noInterp $ "linkFail: " ++ msg
 
 #else
 -- Full interpreter implementation for stage2+

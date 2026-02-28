@@ -7,6 +7,7 @@ module GHC.Runtime.Interpreter.Init
   )
 where
 
+#if defined(HAVE_INTERPRETER)
 
 import GHC.Prelude
 import GHC.Platform
@@ -162,4 +163,31 @@ initInterpreter tmpfs logger platform finder_cache unit_env opts = do
       return (Just (Interp InternalInterp loader lookup_cache fs_cache))
 #else
       return Nothing
+#endif
+
+#else
+-- Stub version when HAVE_INTERPRETER is not defined
+
+import GHC.Prelude
+import GHC.Platform
+import GHC.Unit.Finder
+import GHC.Unit.Env
+import GHC.Utils.TmpFs
+import GHC.Utils.Logger
+import GHC.Runtime.Interpreter.Types (Interp)
+
+-- | Stub InterpOpts - not used when interpreter is disabled
+data InterpOpts = InterpOpts
+
+-- | Stub initInterpreter - always returns Nothing when interpreter is disabled
+initInterpreter
+  :: TmpFs
+  -> Logger
+  -> Platform
+  -> FinderCache
+  -> UnitEnv
+  -> InterpOpts
+  -> IO (Maybe Interp)
+initInterpreter _ _ _ _ _ _ = return Nothing
+
 #endif

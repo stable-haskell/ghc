@@ -64,6 +64,13 @@ import GHC.ByteCode.Breakpoints
 import GHC.ByteCode.Linker
 import GHC.ByteCode.Asm
 import GHC.ByteCode.Types
+#else
+-- Use centralized stub types when interpreter is not available
+import GHC.Runtime.Interpreter.Stubs
+       ( ForeignHValue, ForeignRef, RemotePtr, HValueRef
+       , ConInfoTable(..), LoadedDLL
+       , BreakArray, InternalModBreaks(..), ModBreaks(..), BreakInfoIndex
+       , CompiledByteCode(..), UnlinkedBCO, bcoFreeNames )
 #endif
 
 import GHC.Stack.CCS
@@ -1018,6 +1025,9 @@ linkSomeBCOs :: Interp
                         -- the incoming unlinked BCOs.  Each gives the
                         -- value of the corresponding unlinked BCO
 
+#if !defined(HAVE_INTERPRETER)
+linkSomeBCOs _ _ _ _ _ = return []
+#else
 linkSomeBCOs interp pkgs_loaded le lb mods = foldr fun do_link mods []
  where
   fun CompiledByteCode{..} inner accum =
@@ -1031,6 +1041,7 @@ linkSomeBCOs interp pkgs_loaded le lb mods = foldr fun do_link mods []
     resolved <- sequence [ linkBCO interp pkgs_loaded le lb bco_ix bco | bco <- flat ]
     hvrefs <- createBCOs interp resolved
     return (zip names hvrefs)
+#endif
 
 -- | Useful to apply to the result of 'linkSomeBCOs'
 makeForeignNamedHValueRefs
@@ -1741,13 +1752,15 @@ allocateTopStrings interp topStrings prev_env = do
 #endif
 
 -- | Given a list of 'InternalModBreaks' collected from a list of
-
 -- 'CompiledByteCode', allocate the 'BreakArray' used to trigger breakpoints.
 allocateBreakArrays ::
   Interp ->
   ModuleEnv (ForeignRef BreakArray) ->
   [InternalModBreaks] ->
   IO (ModuleEnv (ForeignRef BreakArray))
+#if !defined(HAVE_INTERPRETER)
+allocateBreakArrays _ env _ = return env
+#else
 allocateBreakArrays interp =
   foldlM
     ( \be0 InternalModBreaks{imodBreaks_breakInfo, imodBreaks_modBreaks=ModBreaks {..}} -> do
@@ -1759,6 +1772,7 @@ allocateBreakArrays interp =
         else
           return be0
     )
+#endif
 
 -- | Given a list of 'InternalModBreaks' collected from a list
 -- of 'CompiledByteCode', allocate the 'CostCentre' arrays when profiling is
@@ -1771,6 +1785,9 @@ allocateCCS ::
   ModuleEnv (Array BreakInfoIndex (RemotePtr CostCentre)) ->
   [InternalModBreaks] ->
   IO (ModuleEnv (Array BreakInfoIndex (RemotePtr CostCentre)))
+#if !defined(HAVE_INTERPRETER)
+allocateCCS _ ce _ = return ce
+#else
 allocateCCS interp ce mbss
   | interpreterProfiled interp = do
       -- 1. Create a mapping from source BreakpointId to CostCentre ptr
@@ -1811,3 +1828,4 @@ allocateCCS interp ce mbss
         mbss
 
   | otherwise = pure ce
+#endif
