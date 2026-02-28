@@ -98,7 +98,7 @@ import GHC.Unit.Module.Deps
 import Data.List (partition)
 import Data.IORef
 import GHC.Iface.Make (mkRecompUsageInfo)
-import GHC.Runtime.Interpreter (interpreterProfiled)
+import GHC.Runtime.Interpreter.Types (interpreterProfiled)
 
 {-
 ************************************************************************

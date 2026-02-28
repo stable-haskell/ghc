@@ -29,6 +29,11 @@ Flag threaded
 
 Flag debug
     Description: Link the ghc executable against the debug RTS
+    Default: False
+    Manual: True
+
+Flag frontend-plugins
+    Description: Build with frontend plugin loading support
     Default: True
     Manual: True
 
@@ -87,6 +92,9 @@ Executable ghc
       ghc-options: -optl -Wl,-flat_namespace
     -- Note: Windows has a hard limit of 65535 symbol exports (16-bit index).
     -- We cannot use --export-all-symbols here as we exceed that limit.
+
+    if flag(frontend-plugins)
+        cpp-options: -DFRONTEND_PLUGINS
 
     if flag(internal-interpreter)
         -- NB: this is never built by the bootstrapping GHC+libraries

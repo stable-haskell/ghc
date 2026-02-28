@@ -39,8 +39,10 @@ module GHC (
         setUnitDynFlags,
         getProgramDynFlags, setProgramDynFlags,
         setProgramHUG, setProgramHUG_,
+#if !defined(MINIMAL)
         getInteractiveDynFlags, setInteractiveDynFlags,
         normaliseInteractiveDynFlags, initialiseInteractiveDynFlags,
+#endif
         interpretPackageEnv,
 
         -- * Logging
@@ -61,7 +63,10 @@ module GHC (
 
         -- * Loading\/compiling the program
         depanal, depanalE,
-        load, loadWithCache, LoadHowMuch(..), InteractiveImport(..),
+        load, loadWithCache, LoadHowMuch(..),
+#if !defined(MINIMAL)
+        InteractiveImport(..),
+#endif
         SuccessFlag(..), succeeded, failed,
         defaultWarnErrLogger, WarnErrLogger,
         workingDirectoryChanged,
@@ -142,7 +147,7 @@ module GHC (
         NamePprCtx, alwaysQualify,
 
         -- * Interactive evaluation
-
+#if !defined(MINIMAL)
         -- ** Executing statements
         execStmt, execStmt', ExecOptions(..), execOptions, ExecResult(..),
         resumeExec,
@@ -153,7 +158,9 @@ module GHC (
         -- ** Get/set the current context
         parseImportDecl,
         setContext, getContext,
+#if !defined(MINIMAL)
         setGHCiMonad, getGHCiMonad,
+#endif
 
         -- ** Inspecting the current context
         getBindings, getInsts, getNamePprCtx,
@@ -164,7 +171,9 @@ module GHC (
         isModuleTrusted, moduleTrustReqs,
         getNamesInScope,
         getRdrNamesInScope,
+#if !defined(MINIMAL)
         getGRE,
+#endif
         moduleIsInterpreted,
         getInfo,
         showModule,
@@ -191,8 +200,10 @@ module GHC (
         -- ** Other
         runTcInteractive,   -- Desired by some clients (#8878)
         isStmt, hasImport, isImport, isDecl,
+#endif
 
         -- ** The debugger
+#if !defined(MINIMAL)
         SingleStep(..),
         Resume(..),
         History(historyBreakpointId, historyEnclosingDecls),
@@ -206,6 +217,7 @@ module GHC (
         GHC.Runtime.Eval.back,
         GHC.Runtime.Eval.forward,
         GHC.Runtime.Eval.setupBreakpoint,
+#endif
 
         -- * Abstract syntax elements
 
@@ -270,8 +282,10 @@ module GHC (
         Kind,
         PredType,
         ThetaType, pprForAll, pprThetaArrowTy,
+#if !defined(MINIMAL)
         parseInstanceHead,
         getInstancesForType,
+#endif
 
         -- ** Entities
         TyThing(..),
@@ -357,6 +371,8 @@ import GHC.Driver.Hooks
 import GHC.Driver.Monad
 import GHC.Driver.Ppr
 
+#if !defined(MINIMAL)
+import GHC.Driver.Config.StgToJS (initStgToJSConfig)
 import GHC.ByteCode.Types
 import GHC.Runtime.Loader
 import GHC.Runtime.Eval
@@ -365,6 +381,7 @@ import GHC.Runtime.Interpreter.Init
 import GHC.Driver.Config.Interpreter
 import GHC.Runtime.Context
 import GHCi.RemoteTypes
+#endif
 
 import qualified GHC.Parser as Parser
 import GHC.Parser.Lexer
@@ -575,7 +592,9 @@ withCleanupSession ghc = ghc `MC.finally` cleanup
           unless (gopt Opt_KeepTmpFiles dflags) $ do
             cleanTempFiles logger tmpfs
             cleanTempDirs logger tmpfs
+#if !defined(MINIMAL)
           traverse_ stopInterp (hsc_interp hsc_env)
+#endif
           --  exceptions will be blocked while we clean the temporary files,
           -- so there shouldn't be any difficulty if we receive further
           -- signals.
@@ -709,6 +728,8 @@ setTopSessionDynFlags :: GhcMonad m => DynFlags -> m ()
 setTopSessionDynFlags dflags = do
   hsc_env <- getSession
   logger  <- getLogger
+
+#if !defined(MINIMAL)
   let platform = targetPlatform dflags
   let unit_env = hsc_unit_env hsc_env
   let tmpfs = hsc_tmpfs hsc_env
@@ -719,11 +740,19 @@ setTopSessionDynFlags dflags = do
                       }
 
   interp <- liftIO $ initInterpreter tmpfs logger platform finder_cache unit_env interp_opts
+#else
+  -- MINIMAL build: no interpreter support
+  let interp = Nothing
+#endif
 
   modifySession $ \h -> hscSetFlags dflags
+#if !defined(MINIMAL)
                         h{ hsc_IC = (hsc_IC h){ ic_dflags = dflags }
                          , hsc_interp = hsc_interp h <|> interp
                          }
+#else
+                        h{ hsc_interp = hsc_interp h <|> interp }
+#endif
 
   invalidateModSummaryCache
 
@@ -923,6 +952,7 @@ getProgramDynFlags = getSessionDynFlags
 -- Note: this cannot be used for changes to packages.  Use
 -- 'setSessionDynFlags', or 'setProgramDynFlags' and then copy the
 -- 'unitState' into the interactive @DynFlags@.
+#if !defined(MINIMAL)
 setInteractiveDynFlags :: GhcMonad m => DynFlags -> m ()
 setInteractiveDynFlags dflags = do
   logger <- getLogger
@@ -932,6 +962,7 @@ setInteractiveDynFlags dflags = do
 -- | Get the 'DynFlags' used to evaluate interactive expressions.
 getInteractiveDynFlags :: GhcMonad m => m DynFlags
 getInteractiveDynFlags = withSession $ \h -> return (ic_dflags (hsc_IC h))
+#endif
 
 
 parseDynamicFlags
@@ -1035,10 +1066,12 @@ normalise_hyp fp
 -- | Normalise the 'DynFlags' for us in an interactive context.
 --
 -- Makes sure unsupported Flags and other incosistencies are reported and removed.
+#if !defined(MINIMAL)
 normaliseInteractiveDynFlags :: MonadIO m => Logger -> DynFlags -> m DynFlags
 normaliseInteractiveDynFlags logger dflags = do
   dflags' <- checkNewDynFlags logger dflags
   checkNewInteractiveDynFlags logger dflags'
+#endif
 
 -- | Given a set of normalised 'DynFlags' (see 'normaliseInteractiveDynFlags')
 -- for the interactive context, initialize the 'InteractiveContext'.
@@ -1049,6 +1082,7 @@ initialiseInteractiveDynFlags :: GhcMonad m => DynFlags -> HscEnv -> m HscEnv
 initialiseInteractiveDynFlags dflags hsc_env0 = do
   let ic0 = hsc_IC hsc_env0
 
+#if !defined(MINIMAL)
   -- Initialise (load) plugins in the interactive environment with the new
   -- DynFlags
   plugin_env <- liftIO $ initializePlugins $ mkInteractiveHscEnv $
@@ -1061,6 +1095,10 @@ initialiseInteractiveDynFlags dflags hsc_env0 = do
                   , ic_dflags  = hsc_dflags  plugin_env
                   }
               }
+#else
+  -- MINIMAL build: no plugin support, no IC modifications
+  return hsc_env0
+#endif
 
 -- | Checks the set of new DynFlags for possibly erroneous option
 -- combinations when invoking 'setSessionDynFlags' and friends, and if
@@ -1498,8 +1536,10 @@ findGlobalAnns deserialize target = withSession $ \hsc_env -> do
     return (findAnns deserialize ann_env target)
 
 -- | get the GlobalRdrEnv for a session
+#if !defined(MINIMAL)
 getGRE :: GhcMonad m => m GlobalRdrEnv
 getGRE = withSession $ \hsc_env-> return $ icReaderEnv (hsc_IC hsc_env)
+#endif
 
 -- | Retrieve all type and family instances in the environment, indexed
 -- by 'Name'. Each name's lists will contain every instance in which that name
@@ -1794,6 +1834,7 @@ moduleTrustReqs :: GhcMonad m => Module -> m (Bool, Set UnitId)
 moduleTrustReqs m = withSession $ \hsc_env ->
     liftIO $ hscGetSafe hsc_env m noSrcSpan
 
+#if !defined(MINIMAL)
 -- | Set the monad GHCi lifts user statements into.
 --
 -- Checks that a type (in string form) is an instance of the
@@ -1809,7 +1850,9 @@ setGHCiMonad name = withSession $ \hsc_env -> do
 -- | Get the monad GHCi lifts user statements into.
 getGHCiMonad :: GhcMonad m => m Name
 getGHCiMonad = fmap (ic_monad . hsc_IC) getSession
+#endif
 
+#if !defined(MINIMAL)
 getHistorySpan :: GhcMonad m => History -> m SrcSpan
 getHistorySpan h = withSession $ \hsc_env -> liftIO $ GHC.Runtime.Eval.getHistorySpan (hsc_HUG hsc_env) h
 
@@ -1824,6 +1867,7 @@ obtainTermFromId :: GhcMonad m
                  -> m Term
 obtainTermFromId bound force id = withSession $ \hsc_env ->
     liftIO $ GHC.Runtime.Eval.obtainTermFromId hsc_env bound force id
+#endif
 
 
 -- | Returns the 'TyThing' for a 'Name'.  The 'Name' may refer to any

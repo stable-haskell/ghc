@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE TypeFamilies #-}
 
 module GHC.Tc.Gen.Splice where
@@ -39,8 +40,9 @@ runMetaE :: LHsExpr GhcTc -> TcM (LHsExpr GhcPs)
 runMetaP :: LHsExpr GhcTc -> TcM (LPat GhcPs)
 runMetaT :: LHsExpr GhcTc -> TcM (LHsType GhcPs)
 runMetaD :: LHsExpr GhcTc -> TcM [LHsDecl GhcPs]
-
+finishTH :: TcM ()
+runRemoteModFinalizers :: ThModFinalizers -> TcM ()
+#if !defined(MINIMAL)
 lookupThName_maybe :: TH.Name -> TcM (Maybe Name)
 runQuasi :: TH.Q a -> TcM a
-runRemoteModFinalizers :: ThModFinalizers -> TcM ()
-finishTH :: TcM ()
+#endif

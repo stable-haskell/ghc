@@ -3,6 +3,7 @@
 -- NB: this module is SOURCE-imported by DynFlags, and should primarily
 --     refer to *types*, rather than *code*
 
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE RankNTypes, TypeFamilies #-}
 
 module GHC.Driver.Hooks
@@ -65,13 +66,25 @@ import GHC.StgToCmm.Types (ModuleLFInfos)
 import GHC.StgToCmm.Config
 import GHC.Cmm
 
+#if !defined(MINIMAL)
 import GHCi.RemoteTypes
+#else
+import Foreign.ForeignPtr (ForeignPtr)
+import GHC.Exts (Any)
+#endif
 
 import GHC.Data.Bag
 
 import qualified Data.Kind
 import System.Process
 import GHC.Linker.Types
+
+#if defined(MINIMAL)
+-- Stub types for MINIMAL build (no ghci dependency)
+-- ForeignRef is defined in GHC.Hs.Expr which we import
+newtype HValue = HValue Any
+type ForeignHValue = ForeignRef HValue
+#endif
 
 {-
 ************************************************************************

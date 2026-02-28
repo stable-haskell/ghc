@@ -81,11 +81,15 @@ import GHC.Unit.Module.Env
 import GHC.Driver.Env.KnotVars
 import GHC.Driver.Config.Finder
 import GHC.Rename.Names
+#if !defined(MINIMAL)
 import GHC.StgToJS.Linker.Linker (embedJsFile)
+#endif
 
 import Language.Haskell.Syntax.Module.Name
 import GHC.Unit.Home.ModInfo
+#if !defined(MINIMAL)
 import GHC.Runtime.Loader (initializePlugins)
+#endif
 
 newtype HookedUse a = HookedUse { runHookedUse :: (Hooks, PhaseHook) -> IO a }
   deriving (Functor, Applicative, Monad, MonadIO, MonadThrow, MonadCatch) via (ReaderT (Hooks, PhaseHook) IO)
@@ -133,8 +137,10 @@ runPhase (T_CmmCpp pipe_env hsc_env input_fn) = do
   return output_fn
 runPhase (T_Js pipe_env hsc_env location js_src) =
   runJsPhase pipe_env hsc_env location js_src
+#if !defined(MINIMAL)
 runPhase (T_ForeignJs pipe_env hsc_env location js_src) =
   runForeignJsPhase pipe_env hsc_env location js_src
+#endif
 runPhase (T_Cmm pipe_env hsc_env input_fn) = do
   let dflags = hsc_dflags hsc_env
   let next_phase = hscPostBackendPhase HsSrcFile (backend dflags)
@@ -396,6 +402,7 @@ runJsPhase _pipe_env _hsc_env _location input_fn = do
   touchObjectFile input_fn
   return input_fn
 
+#if !defined(MINIMAL)
 -- | Deal with foreign JS files (embed them into .o files)
 runForeignJsPhase :: PipeEnv -> HscEnv -> Maybe ModLocation -> FilePath -> IO FilePath
 runForeignJsPhase pipe_env hsc_env _location input_fn = do
@@ -407,6 +414,7 @@ runForeignJsPhase pipe_env hsc_env _location input_fn = do
   output_fn <- phaseOutputFilenameNew StopLn pipe_env hsc_env Nothing
   embedJsFile logger dflags tmpfs unit_env input_fn output_fn
   return output_fn
+#endif
 
 runCcPhase :: Phase -> PipeEnv -> HscEnv -> Maybe ModLocation -> FilePath -> IO FilePath
 runCcPhase cc_phase pipe_env hsc_env location input_fn = do
@@ -606,12 +614,15 @@ runHscBackendPhase pipe_env hsc_env mod_name src_flavour location result = do
               -- See Note [Writing interface files]
               hscMaybeWriteIface logger dflags False final_iface mb_old_iface_hash mod_location
               mlinkable <-
+#if !defined(MINIMAL)
                 if gopt Opt_ByteCodeAndObjectCode dflags
                   then do
                     bc <- generateFreshByteCode hsc_env mod_name (mkCgInteractiveGuts cgguts) mod_location
                     return $ emptyHomeModInfoLinkable { homeMod_bytecode = Just bc }
 
-                  else return emptyHomeModInfoLinkable
+                  else
+#endif
+                    return emptyHomeModInfoLinkable
 
               -- This is awkward, no linkable is produced here because we still
               -- have some way to do before the object file is produced
@@ -622,11 +633,15 @@ runHscBackendPhase pipe_env hsc_env mod_name src_flavour location result = do
            else
               -- In interpreted mode the regular codeGen backend is not run so we
               -- generate a interface without codeGen info.
+#if !defined(MINIMAL)
             do
               final_iface <- mkFullIface hsc_env partial_iface Nothing Nothing NoStubs []
               hscMaybeWriteIface logger dflags True final_iface mb_old_iface_hash location
               bc <- generateFreshByteCode hsc_env mod_name (mkCgInteractiveGuts cgguts) mod_location
               return ([], final_iface, emptyHomeModInfoLinkable { homeMod_bytecode = Just bc } , panic "interpreter")
+#else
+            panic "GHC.Driver.Pipeline.Execute.runHscPhase: bytecode generation not supported in MINIMAL build"
+#endif
 
 
 runUnlitPhase :: HscEnv -> FilePath -> FilePath -> IO FilePath
@@ -706,7 +721,11 @@ runHscPhase pipe_env hsc_env0 input_fn src_flavour = do
 
   -- Initialise plugins as the flags passed into runHscPhase might have local plugins just
   -- specific to this module.
+#if !defined(MINIMAL)
   hsc_env <- initializePlugins hsc_env1
+#else
+  let hsc_env = hsc_env1
+#endif
 
   -- gather the imports and module name
   (hspp_buf,mod_name,imps,src_imps) <- do

@@ -92,6 +92,7 @@ The algorithm is roughly:
 
 -}
 
+{-# LANGUAGE CPP #-}
 module GHC.CmmToAsm.Reg.Linear (
         regAlloc,
         module  GHC.CmmToAsm.Reg.Linear.Base,
@@ -106,12 +107,16 @@ import GHC.CmmToAsm.Reg.Linear.StackMap
 import GHC.CmmToAsm.Reg.Linear.FreeRegs
 import GHC.CmmToAsm.Reg.Linear.Stats
 import GHC.CmmToAsm.Reg.Linear.JoinToTargets
+#if !defined(NO_UNCOMMON_NCGS)
 import qualified GHC.CmmToAsm.Reg.Linear.PPC     as PPC
+#endif
 import qualified GHC.CmmToAsm.Reg.Linear.X86     as X86
 import qualified GHC.CmmToAsm.Reg.Linear.X86_64  as X86_64
 import qualified GHC.CmmToAsm.Reg.Linear.AArch64 as AArch64
+#if !defined(NO_UNCOMMON_NCGS)
 import qualified GHC.CmmToAsm.Reg.Linear.RV64    as RV64
 import qualified GHC.CmmToAsm.Reg.Linear.LA64    as LA64
+#endif
 import GHC.CmmToAsm.Reg.Target
 import GHC.CmmToAsm.Reg.Liveness
 import GHC.CmmToAsm.Reg.Utils
@@ -218,15 +223,28 @@ linearRegAlloc config entry_ids block_live sccs
       ArchX86        -> go $ (frInitFreeRegs platform :: X86.FreeRegs)
       ArchX86_64     -> go $ (frInitFreeRegs platform :: X86_64.FreeRegs)
       ArchS390X      -> panic "linearRegAlloc ArchS390X"
+#if !defined(NO_UNCOMMON_NCGS)
       ArchPPC        -> go $ (frInitFreeRegs platform :: PPC.FreeRegs)
+#else
+      ArchPPC        -> panic "linearRegAlloc ArchPPC (disabled in MINIMAL build)"
+#endif
       ArchARM _ _ _  -> panic "linearRegAlloc ArchARM"
       ArchAArch64    -> go $ (frInitFreeRegs platform :: AArch64.FreeRegs)
+#if !defined(NO_UNCOMMON_NCGS)
       ArchPPC_64 _   -> go $ (frInitFreeRegs platform :: PPC.FreeRegs)
+#else
+      ArchPPC_64 _   -> panic "linearRegAlloc ArchPPC_64 (disabled in MINIMAL build)"
+#endif
       ArchAlpha      -> panic "linearRegAlloc ArchAlpha"
       ArchMipseb     -> panic "linearRegAlloc ArchMipseb"
       ArchMipsel     -> panic "linearRegAlloc ArchMipsel"
+#if !defined(NO_UNCOMMON_NCGS)
       ArchRISCV64    -> go (frInitFreeRegs platform :: RV64.FreeRegs)
       ArchLoongArch64 -> go $ (frInitFreeRegs platform :: LA64.FreeRegs)
+#else
+      ArchRISCV64    -> panic "linearRegAlloc ArchRISCV64 (disabled in MINIMAL build)"
+      ArchLoongArch64 -> panic "linearRegAlloc ArchLoongArch64 (disabled in MINIMAL build)"
+#endif
       ArchJavaScript -> panic "linearRegAlloc ArchJavaScript"
       ArchWasm32     -> panic "linearRegAlloc ArchWasm32"
       ArchUnknown    -> panic "linearRegAlloc ArchUnknown"

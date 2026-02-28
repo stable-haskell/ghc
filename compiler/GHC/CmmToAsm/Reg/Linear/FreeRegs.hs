@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 module GHC.CmmToAsm.Reg.Linear.FreeRegs (
     FR(..),
     allFreeRegs,
@@ -29,18 +30,26 @@ import GHC.Platform
 --      getFreeRegs cls f = filter ( (==cls) . regClass . RealReg ) f
 --      allocateReg f r = filter (/= r) f
 
+#if !defined(NO_UNCOMMON_NCGS)
 import qualified GHC.CmmToAsm.Reg.Linear.PPC     as PPC
+#endif
 import qualified GHC.CmmToAsm.Reg.Linear.X86     as X86
 import qualified GHC.CmmToAsm.Reg.Linear.X86_64  as X86_64
 import qualified GHC.CmmToAsm.Reg.Linear.AArch64 as AArch64
+#if !defined(NO_UNCOMMON_NCGS)
 import qualified GHC.CmmToAsm.Reg.Linear.RV64    as RV64
 import qualified GHC.CmmToAsm.Reg.Linear.LA64    as LA64
+#endif
 
+#if !defined(NO_UNCOMMON_NCGS)
 import qualified GHC.CmmToAsm.PPC.Instr     as PPC.Instr
+#endif
 import qualified GHC.CmmToAsm.X86.Instr     as X86.Instr
 import qualified GHC.CmmToAsm.AArch64.Instr as AArch64.Instr
+#if !defined(NO_UNCOMMON_NCGS)
 import qualified GHC.CmmToAsm.RV64.Instr    as RV64.Instr
 import qualified GHC.CmmToAsm.LA64.Instr    as LA64.Instr
+#endif
 
 class Show freeRegs => FR freeRegs where
     frAllocateReg :: Platform -> RealReg -> freeRegs -> freeRegs
@@ -60,11 +69,13 @@ instance FR X86_64.FreeRegs where
     frInitFreeRegs = X86_64.initFreeRegs
     frReleaseReg   = \_ -> X86_64.releaseReg
 
+#if !defined(NO_UNCOMMON_NCGS)
 instance FR PPC.FreeRegs where
     frAllocateReg  = \_ -> PPC.allocateReg
     frGetFreeRegs  = \_ -> PPC.getFreeRegs
     frInitFreeRegs = PPC.initFreeRegs
     frReleaseReg   = \_ -> PPC.releaseReg
+#endif
 
 instance FR AArch64.FreeRegs where
     frAllocateReg = \_ -> AArch64.allocateReg
@@ -72,6 +83,7 @@ instance FR AArch64.FreeRegs where
     frInitFreeRegs = AArch64.initFreeRegs
     frReleaseReg = \_ -> AArch64.releaseReg
 
+#if !defined(NO_UNCOMMON_NCGS)
 instance FR RV64.FreeRegs where
     frAllocateReg = const RV64.allocateReg
     frGetFreeRegs = const RV64.getFreeRegs
@@ -83,6 +95,7 @@ instance FR LA64.FreeRegs where
     frGetFreeRegs = \_ -> LA64.getFreeRegs
     frInitFreeRegs = LA64.initFreeRegs
     frReleaseReg = \_ -> LA64.releaseReg
+#endif
 
 allFreeRegs :: FR freeRegs => Platform -> freeRegs -> [RealReg]
 allFreeRegs plat fr = foldMap (\rcls -> frGetFreeRegs plat rcls fr) allRegClasses
@@ -97,16 +110,29 @@ maxSpillSlots :: NCGConfig -> Int
 maxSpillSlots config = case platformArch (ncgPlatform config) of
    ArchX86       -> X86.Instr.maxSpillSlots config
    ArchX86_64    -> X86.Instr.maxSpillSlots config
+#if !defined(NO_UNCOMMON_NCGS)
    ArchPPC       -> PPC.Instr.maxSpillSlots config
+#else
+   ArchPPC       -> panic "maxSpillSlots ArchPPC (disabled in MINIMAL build)"
+#endif
    ArchS390X     -> panic "maxSpillSlots ArchS390X"
    ArchARM _ _ _ -> panic "maxSpillSlots ArchARM"
    ArchAArch64   -> AArch64.Instr.maxSpillSlots config
+#if !defined(NO_UNCOMMON_NCGS)
    ArchPPC_64 _  -> PPC.Instr.maxSpillSlots config
+#else
+   ArchPPC_64 _  -> panic "maxSpillSlots ArchPPC_64 (disabled in MINIMAL build)"
+#endif
    ArchAlpha     -> panic "maxSpillSlots ArchAlpha"
    ArchMipseb    -> panic "maxSpillSlots ArchMipseb"
    ArchMipsel    -> panic "maxSpillSlots ArchMipsel"
+#if !defined(NO_UNCOMMON_NCGS)
    ArchRISCV64   -> RV64.Instr.maxSpillSlots config
    ArchLoongArch64  -> LA64.Instr.maxSpillSlots config
+#else
+   ArchRISCV64   -> panic "maxSpillSlots ArchRISCV64 (disabled in MINIMAL build)"
+   ArchLoongArch64  -> panic "maxSpillSlots ArchLoongArch64 (disabled in MINIMAL build)"
+#endif
    ArchJavaScript-> panic "maxSpillSlots ArchJavaScript"
    ArchWasm32    -> panic "maxSpillSlots ArchWasm32"
    ArchUnknown   -> panic "maxSpillSlots ArchUnknown"

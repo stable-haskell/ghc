@@ -43,8 +43,9 @@ import GHC.Builtin.PrimOps (primOpPrimModule, primOpWrappersModule)
 #if defined(HAVE_INTERNAL_INTERPRETER)
 import GHCi.UI              ( interactiveUI, ghciWelcomeMsg, defaultGhciSettings )
 #endif
-
+#if defined(FRONTEND_PLUGINS)
 import GHC.Runtime.Loader   ( loadFrontendPlugin, initializeSessionPlugins )
+#endif
 
 import GHC.Unit.Module ( ModuleName, mkModuleName )
 import GHC.Unit.Module.ModIface
@@ -288,7 +289,9 @@ main' postLoadMode units dflags0 args flagWarnings = do
 
   -- Initialise plugins here because the plugin author might already expect this
   -- subsequent call to `getLogger` to be affected by a plugin.
+#if defined(FRONTEND_PLUGINS)
   initializeSessionPlugins
+#endif
   hsc_env <- getSession
   logger <- getLogger
 
@@ -500,7 +503,11 @@ dumpUnitsSimple hsc_env = putMsg (hsc_logger hsc_env) (pprUnitsSimple (hsc_units
 doFrontend :: ModuleName -> [(String, Maybe Phase)] -> Ghc ()
 doFrontend modname srcs = do
     hsc_env <- getSession
+#if defined(FRONTEND_PLUGINS)
     (frontend_plugin, _pkgs, _deps) <- liftIO $ loadFrontendPlugin hsc_env modname -- TODO do these need to recorded?
+#else
+    let frontend_plugin = defaultFrontendPlugin
+#endif
     frontend frontend_plugin
       (reverse $ frontendPluginOpts (hsc_dflags hsc_env)) srcs
 
