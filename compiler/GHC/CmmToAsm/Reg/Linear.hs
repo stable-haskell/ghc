@@ -107,14 +107,20 @@ import GHC.CmmToAsm.Reg.Linear.StackMap
 import GHC.CmmToAsm.Reg.Linear.FreeRegs
 import GHC.CmmToAsm.Reg.Linear.Stats
 import GHC.CmmToAsm.Reg.Linear.JoinToTargets
-#if !defined(NO_UNCOMMON_NCGS)
-import qualified GHC.CmmToAsm.Reg.Linear.PPC     as PPC
-#endif
+#if defined(HAVE_X86_NCG)
 import qualified GHC.CmmToAsm.Reg.Linear.X86     as X86
 import qualified GHC.CmmToAsm.Reg.Linear.X86_64  as X86_64
+#endif
+#if defined(HAVE_AARCH64_NCG)
 import qualified GHC.CmmToAsm.Reg.Linear.AArch64 as AArch64
-#if !defined(NO_UNCOMMON_NCGS)
+#endif
+#if defined(HAVE_PPC_NCG)
+import qualified GHC.CmmToAsm.Reg.Linear.PPC     as PPC
+#endif
+#if defined(HAVE_RISCV64_NCG)
 import qualified GHC.CmmToAsm.Reg.Linear.RV64    as RV64
+#endif
+#if defined(HAVE_LOONGARCH64_NCG)
 import qualified GHC.CmmToAsm.Reg.Linear.LA64    as LA64
 #endif
 import GHC.CmmToAsm.Reg.Target
@@ -220,30 +226,39 @@ linearRegAlloc
 
 linearRegAlloc config entry_ids block_live sccs
  = case platformArch platform of
+#if defined(HAVE_X86_NCG)
       ArchX86        -> go $ (frInitFreeRegs platform :: X86.FreeRegs)
       ArchX86_64     -> go $ (frInitFreeRegs platform :: X86_64.FreeRegs)
-      ArchS390X      -> panic "linearRegAlloc ArchS390X"
-#if !defined(NO_UNCOMMON_NCGS)
-      ArchPPC        -> go $ (frInitFreeRegs platform :: PPC.FreeRegs)
 #else
-      ArchPPC        -> panic "linearRegAlloc ArchPPC (disabled in MINIMAL build)"
+      ArchX86        -> panic "linearRegAlloc ArchX86 (disabled)"
+      ArchX86_64     -> panic "linearRegAlloc ArchX86_64 (disabled)"
 #endif
+      ArchS390X      -> panic "linearRegAlloc ArchS390X"
       ArchARM _ _ _  -> panic "linearRegAlloc ArchARM"
+#if defined(HAVE_AARCH64_NCG)
       ArchAArch64    -> go $ (frInitFreeRegs platform :: AArch64.FreeRegs)
-#if !defined(NO_UNCOMMON_NCGS)
+#else
+      ArchAArch64    -> panic "linearRegAlloc ArchAArch64 (disabled)"
+#endif
+#if defined(HAVE_PPC_NCG)
+      ArchPPC        -> go $ (frInitFreeRegs platform :: PPC.FreeRegs)
       ArchPPC_64 _   -> go $ (frInitFreeRegs platform :: PPC.FreeRegs)
 #else
-      ArchPPC_64 _   -> panic "linearRegAlloc ArchPPC_64 (disabled in MINIMAL build)"
+      ArchPPC        -> panic "linearRegAlloc ArchPPC (disabled)"
+      ArchPPC_64 _   -> panic "linearRegAlloc ArchPPC_64 (disabled)"
 #endif
       ArchAlpha      -> panic "linearRegAlloc ArchAlpha"
       ArchMipseb     -> panic "linearRegAlloc ArchMipseb"
       ArchMipsel     -> panic "linearRegAlloc ArchMipsel"
-#if !defined(NO_UNCOMMON_NCGS)
+#if defined(HAVE_RISCV64_NCG)
       ArchRISCV64    -> go (frInitFreeRegs platform :: RV64.FreeRegs)
+#else
+      ArchRISCV64    -> panic "linearRegAlloc ArchRISCV64 (disabled)"
+#endif
+#if defined(HAVE_LOONGARCH64_NCG)
       ArchLoongArch64 -> go $ (frInitFreeRegs platform :: LA64.FreeRegs)
 #else
-      ArchRISCV64    -> panic "linearRegAlloc ArchRISCV64 (disabled in MINIMAL build)"
-      ArchLoongArch64 -> panic "linearRegAlloc ArchLoongArch64 (disabled in MINIMAL build)"
+      ArchLoongArch64 -> panic "linearRegAlloc ArchLoongArch64 (disabled)"
 #endif
       ArchJavaScript -> panic "linearRegAlloc ArchJavaScript"
       ArchWasm32     -> panic "linearRegAlloc ArchWasm32"

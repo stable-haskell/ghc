@@ -26,7 +26,7 @@ import GHC.Driver.Ppr
 import GHC.Driver.Monad
 import GHC.Driver.Env
 
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
 import GHC.Linker.Loader
 #endif
 

@@ -96,7 +96,12 @@ if !os(windows)
     library-for-ghci: True
 
 package ghc
-  flags: +bootstrap +minimal +no-uncommon-ncgs
+  flags: +bootstrap
+         +x86-ncg +aarch64-ncg
+         -ppc-ncg -riscv64-ncg -loongarch64-ncg
+         -js-backend -wasm-backend
+         +llvm-backend
+         -interpreter -dynamic-linker
 
 package ghc-bin
   flags: -frontend-plugins

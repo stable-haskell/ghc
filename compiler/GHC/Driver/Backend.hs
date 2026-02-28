@@ -208,18 +208,24 @@ platformNcgSupported platform = if
       | otherwise                       -> False
    where
       ncgValidArch = case platformArch platform of
+#if defined(HAVE_X86_NCG)
          ArchX86       -> True
          ArchX86_64    -> True
-#if !defined(NO_UNCOMMON_NCGS)
+#endif
+#if defined(HAVE_AARCH64_NCG)
+         ArchAArch64   -> True
+#endif
+#if defined(HAVE_PPC_NCG)
          ArchPPC       -> True
          ArchPPC_64 {} -> True
 #endif
-         ArchAArch64   -> True
-#if !defined(MINIMAL)
+#if defined(HAVE_WASM_BACKEND)
          ArchWasm32    -> True
 #endif
-#if !defined(NO_UNCOMMON_NCGS)
+#if defined(HAVE_RISCV64_NCG)
          ArchRISCV64   -> True
+#endif
+#if defined(HAVE_LOONGARCH64_NCG)
          ArchLoongArch64 -> True
 #endif
          _             -> False

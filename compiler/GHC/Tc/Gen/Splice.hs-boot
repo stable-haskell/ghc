@@ -42,7 +42,7 @@ runMetaT :: LHsExpr GhcTc -> TcM (LHsType GhcPs)
 runMetaD :: LHsExpr GhcTc -> TcM [LHsDecl GhcPs]
 finishTH :: TcM ()
 runRemoteModFinalizers :: ThModFinalizers -> TcM ()
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
 lookupThName_maybe :: TH.Name -> TcM (Maybe Name)
 runQuasi :: TH.Q a -> TcM a
 #endif

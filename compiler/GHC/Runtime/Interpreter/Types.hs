@@ -31,7 +31,7 @@ module GHC.Runtime.Interpreter.Types
    -- * IServ
    , IServ
    , IServConfig(..)
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
    -- * JSInterp
    , JSInterp
    , JSInterpExtra (..)
@@ -48,7 +48,7 @@ where
 import GHC.Prelude
 import GHC.Linker.Types
 
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
 import GHCi.RemoteTypes
 import GHCi.Message         ( Pipe )
 #else
@@ -65,7 +65,7 @@ import GHC.Utils.Logger
 import GHC.Unit.Env
 import GHC.Unit.State
 import GHC.Unit.Types
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
 import GHC.StgToJS.Types
 import GHC.StgToJS.Linker.Types
 #endif
@@ -76,7 +76,7 @@ import System.Process   ( ProcessHandle, CreateProcess )
 import System.IO
 import GHC.Unit.Finder.Types (FinderCache, FinderOpts)
 
-#if defined(MINIMAL)
+#if !defined(HAVE_INTERPRETER)
 -- Stub types for MINIMAL build (no ghci dependency)
 newtype HValue = HValue Any
 newtype ForeignRef a = ForeignRef (ForeignPtr ())
@@ -110,7 +110,7 @@ data InterpInstance
 
 data ExtInterp
   = ExtIServ !IServ
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
   | ExtJS !JSInterp
   | ExtWasm !WasmInterp
 #endif
@@ -128,7 +128,7 @@ data ExtInterpState cfg details = ExtInterpState
 type ExtInterpStatusVar d = MVar (InterpStatus (ExtInterpInstance d))
 
 type IServ    = ExtInterpState IServConfig    ()
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
 type JSInterp = ExtInterpState JSInterpConfig JSInterpExtra
 type WasmInterp = ExtInterpState WasmInterpConfig ()
 #endif
@@ -176,7 +176,7 @@ interpreterProfiled interp = case interpInstance interp of
 #endif
   ExternalInterp ext -> case ext of
     ExtIServ i -> iservConfProfiled (interpConfig i)
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
     ExtJS {}   -> False -- we don't support profiling yet in the JS backend
     ExtWasm i -> wasmInterpProfiled $ interpConfig i
 #endif
@@ -189,12 +189,12 @@ interpreterDynamic interp = case interpInstance interp of
 #endif
   ExternalInterp ext -> case ext of
     ExtIServ i -> iservConfDynamic (interpConfig i)
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
     ExtJS {}   -> False -- dynamic doesn't make sense for JS
     ExtWasm {} -> True  -- wasm dyld can only load dynamic code
 #endif
 
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
 ------------------------
 -- JS Stuff
 ------------------------

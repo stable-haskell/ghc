@@ -16,7 +16,7 @@ import qualified GHC.Platform.S390X      as S390X
 import qualified GHC.Platform.X86        as X86
 import qualified GHC.Platform.X86_64     as X86_64
 import qualified GHC.Platform.RISCV64    as RISCV64
-#if !defined(MINIMAL)
+#if defined(HAVE_WASM_BACKEND)
 import qualified GHC.Platform.Wasm32     as Wasm32
 #endif
 import qualified GHC.Platform.LA64       as LA64
@@ -36,7 +36,7 @@ callerSaves platform
    ArchARM {}  -> ARM.callerSaves
    ArchAArch64 -> AArch64.callerSaves
    ArchRISCV64 -> RISCV64.callerSaves
-#if !defined(MINIMAL)
+#if defined(HAVE_WASM_BACKEND)
    ArchWasm32  -> Wasm32.callerSaves
 #endif
    ArchLoongArch64 -> LA64.callerSaves
@@ -62,7 +62,7 @@ activeStgRegs platform
    ArchARM {}  -> ARM.activeStgRegs
    ArchAArch64 -> AArch64.activeStgRegs
    ArchRISCV64 -> RISCV64.activeStgRegs
-#if !defined(MINIMAL)
+#if defined(HAVE_WASM_BACKEND)
    ArchWasm32  -> Wasm32.activeStgRegs
 #endif
    ArchLoongArch64 -> LA64.activeStgRegs
@@ -83,7 +83,7 @@ haveRegBase platform
    ArchARM {}  -> ARM.haveRegBase
    ArchAArch64 -> AArch64.haveRegBase
    ArchRISCV64 -> RISCV64.haveRegBase
-#if !defined(MINIMAL)
+#if defined(HAVE_WASM_BACKEND)
    ArchWasm32  -> Wasm32.haveRegBase
 #endif
    ArchLoongArch64 -> LA64.haveRegBase
@@ -104,7 +104,7 @@ globalRegMaybe platform
    ArchARM {}  -> ARM.globalRegMaybe
    ArchAArch64 -> AArch64.globalRegMaybe
    ArchRISCV64 -> RISCV64.globalRegMaybe
-#if !defined(MINIMAL)
+#if defined(HAVE_WASM_BACKEND)
    ArchWasm32  -> Wasm32.globalRegMaybe
 #endif
    ArchLoongArch64 -> LA64.globalRegMaybe
@@ -136,7 +136,7 @@ freeReg platform
             in x18Check
         else AArch64.freeReg
    ArchRISCV64 -> RISCV64.freeReg
-#if !defined(MINIMAL)
+#if defined(HAVE_WASM_BACKEND)
    ArchWasm32  -> Wasm32.freeReg
 #endif
    ArchLoongArch64 -> LA64.freeReg

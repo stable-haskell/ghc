@@ -30,24 +30,25 @@ import GHC.Platform
 --      getFreeRegs cls f = filter ( (==cls) . regClass . RealReg ) f
 --      allocateReg f r = filter (/= r) f
 
-#if !defined(NO_UNCOMMON_NCGS)
-import qualified GHC.CmmToAsm.Reg.Linear.PPC     as PPC
-#endif
+#if defined(HAVE_X86_NCG)
 import qualified GHC.CmmToAsm.Reg.Linear.X86     as X86
 import qualified GHC.CmmToAsm.Reg.Linear.X86_64  as X86_64
-import qualified GHC.CmmToAsm.Reg.Linear.AArch64 as AArch64
-#if !defined(NO_UNCOMMON_NCGS)
-import qualified GHC.CmmToAsm.Reg.Linear.RV64    as RV64
-import qualified GHC.CmmToAsm.Reg.Linear.LA64    as LA64
+import qualified GHC.CmmToAsm.X86.Instr     as X86.Instr
 #endif
-
-#if !defined(NO_UNCOMMON_NCGS)
+#if defined(HAVE_AARCH64_NCG)
+import qualified GHC.CmmToAsm.Reg.Linear.AArch64 as AArch64
+import qualified GHC.CmmToAsm.AArch64.Instr as AArch64.Instr
+#endif
+#if defined(HAVE_PPC_NCG)
+import qualified GHC.CmmToAsm.Reg.Linear.PPC     as PPC
 import qualified GHC.CmmToAsm.PPC.Instr     as PPC.Instr
 #endif
-import qualified GHC.CmmToAsm.X86.Instr     as X86.Instr
-import qualified GHC.CmmToAsm.AArch64.Instr as AArch64.Instr
-#if !defined(NO_UNCOMMON_NCGS)
+#if defined(HAVE_RISCV64_NCG)
+import qualified GHC.CmmToAsm.Reg.Linear.RV64    as RV64
 import qualified GHC.CmmToAsm.RV64.Instr    as RV64.Instr
+#endif
+#if defined(HAVE_LOONGARCH64_NCG)
+import qualified GHC.CmmToAsm.Reg.Linear.LA64    as LA64
 import qualified GHC.CmmToAsm.LA64.Instr    as LA64.Instr
 #endif
 
@@ -57,6 +58,7 @@ class Show freeRegs => FR freeRegs where
     frInitFreeRegs :: Platform -> freeRegs
     frReleaseReg :: Platform -> RealReg -> freeRegs -> freeRegs
 
+#if defined(HAVE_X86_NCG)
 instance FR X86.FreeRegs where
     frAllocateReg  = \_ -> X86.allocateReg
     frGetFreeRegs  = X86.getFreeRegs
@@ -68,8 +70,17 @@ instance FR X86_64.FreeRegs where
     frGetFreeRegs  = X86_64.getFreeRegs
     frInitFreeRegs = X86_64.initFreeRegs
     frReleaseReg   = \_ -> X86_64.releaseReg
+#endif
 
-#if !defined(NO_UNCOMMON_NCGS)
+#if defined(HAVE_AARCH64_NCG)
+instance FR AArch64.FreeRegs where
+    frAllocateReg = \_ -> AArch64.allocateReg
+    frGetFreeRegs = \_ -> AArch64.getFreeRegs
+    frInitFreeRegs = AArch64.initFreeRegs
+    frReleaseReg = \_ -> AArch64.releaseReg
+#endif
+
+#if defined(HAVE_PPC_NCG)
 instance FR PPC.FreeRegs where
     frAllocateReg  = \_ -> PPC.allocateReg
     frGetFreeRegs  = \_ -> PPC.getFreeRegs
@@ -77,19 +88,15 @@ instance FR PPC.FreeRegs where
     frReleaseReg   = \_ -> PPC.releaseReg
 #endif
 
-instance FR AArch64.FreeRegs where
-    frAllocateReg = \_ -> AArch64.allocateReg
-    frGetFreeRegs = \_ -> AArch64.getFreeRegs
-    frInitFreeRegs = AArch64.initFreeRegs
-    frReleaseReg = \_ -> AArch64.releaseReg
-
-#if !defined(NO_UNCOMMON_NCGS)
+#if defined(HAVE_RISCV64_NCG)
 instance FR RV64.FreeRegs where
     frAllocateReg = const RV64.allocateReg
     frGetFreeRegs = const RV64.getFreeRegs
     frInitFreeRegs = RV64.initFreeRegs
     frReleaseReg = const RV64.releaseReg
+#endif
 
+#if defined(HAVE_LOONGARCH64_NCG)
 instance FR LA64.FreeRegs where
     frAllocateReg = \_ -> LA64.allocateReg
     frGetFreeRegs = \_ -> LA64.getFreeRegs
@@ -106,33 +113,52 @@ allFreeRegs plat fr = foldMap (\rcls -> frGetFreeRegs plat rcls fr) allRegClasse
         Separate  ->  Separate.allRegClasses
         NoVectors -> NoVectors.allRegClasses
 
+-- | Get the maximum number of spill slots for an architecture.
+-- Uses record-based dispatch to consolidate CPP.
 maxSpillSlots :: NCGConfig -> Int
-maxSpillSlots config = case platformArch (ncgPlatform config) of
-   ArchX86       -> X86.Instr.maxSpillSlots config
-   ArchX86_64    -> X86.Instr.maxSpillSlots config
-#if !defined(NO_UNCOMMON_NCGS)
-   ArchPPC       -> PPC.Instr.maxSpillSlots config
+maxSpillSlots config = selectMaxSpillSlots (ncgPlatform config) config
+
+-- | Select the maxSpillSlots function for a platform.
+-- This consolidates the CPP dispatch to a single location.
+selectMaxSpillSlots :: Platform -> NCGConfig -> Int
+selectMaxSpillSlots platform = case platformArch platform of
+#if defined(HAVE_X86_NCG)
+    ArchX86       -> X86.Instr.maxSpillSlots
+    ArchX86_64    -> X86.Instr.maxSpillSlots
 #else
-   ArchPPC       -> panic "maxSpillSlots ArchPPC (disabled in MINIMAL build)"
+    ArchX86       -> unavailable "X86"
+    ArchX86_64    -> unavailable "X86_64"
 #endif
-   ArchS390X     -> panic "maxSpillSlots ArchS390X"
-   ArchARM _ _ _ -> panic "maxSpillSlots ArchARM"
-   ArchAArch64   -> AArch64.Instr.maxSpillSlots config
-#if !defined(NO_UNCOMMON_NCGS)
-   ArchPPC_64 _  -> PPC.Instr.maxSpillSlots config
+#if defined(HAVE_AARCH64_NCG)
+    ArchAArch64   -> AArch64.Instr.maxSpillSlots
 #else
-   ArchPPC_64 _  -> panic "maxSpillSlots ArchPPC_64 (disabled in MINIMAL build)"
+    ArchAArch64   -> unavailable "AArch64"
 #endif
-   ArchAlpha     -> panic "maxSpillSlots ArchAlpha"
-   ArchMipseb    -> panic "maxSpillSlots ArchMipseb"
-   ArchMipsel    -> panic "maxSpillSlots ArchMipsel"
-#if !defined(NO_UNCOMMON_NCGS)
-   ArchRISCV64   -> RV64.Instr.maxSpillSlots config
-   ArchLoongArch64  -> LA64.Instr.maxSpillSlots config
+#if defined(HAVE_PPC_NCG)
+    ArchPPC       -> PPC.Instr.maxSpillSlots
+    ArchPPC_64 _  -> PPC.Instr.maxSpillSlots
 #else
-   ArchRISCV64   -> panic "maxSpillSlots ArchRISCV64 (disabled in MINIMAL build)"
-   ArchLoongArch64  -> panic "maxSpillSlots ArchLoongArch64 (disabled in MINIMAL build)"
+    ArchPPC       -> unavailable "PPC"
+    ArchPPC_64 _  -> unavailable "PPC_64"
 #endif
-   ArchJavaScript-> panic "maxSpillSlots ArchJavaScript"
-   ArchWasm32    -> panic "maxSpillSlots ArchWasm32"
-   ArchUnknown   -> panic "maxSpillSlots ArchUnknown"
+#if defined(HAVE_RISCV64_NCG)
+    ArchRISCV64   -> RV64.Instr.maxSpillSlots
+#else
+    ArchRISCV64   -> unavailable "RISCV64"
+#endif
+#if defined(HAVE_LOONGARCH64_NCG)
+    ArchLoongArch64 -> LA64.Instr.maxSpillSlots
+#else
+    ArchLoongArch64 -> unavailable "LoongArch64"
+#endif
+    -- Architectures without NCG support
+    ArchS390X       -> unavailable "S390X"
+    ArchARM _ _ _   -> unavailable "ARM"
+    ArchAlpha       -> unavailable "Alpha"
+    ArchMipseb      -> unavailable "Mipseb"
+    ArchMipsel      -> unavailable "Mipsel"
+    ArchJavaScript  -> unavailable "JavaScript"
+    ArchWasm32      -> unavailable "Wasm32"
+    ArchUnknown     -> unavailable "Unknown"
+  where
+    unavailable arch _ = panic $ "maxSpillSlots: " ++ arch ++ " not available"

@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 -- | Constants describing the DWARF format. Most of this simply
 -- mirrors \/usr\/include\/dwarf.h.
 
@@ -11,7 +12,9 @@ import GHC.Utils.Outputable
 import GHC.Utils.Panic
 
 import GHC.Platform.Reg
+#if defined(HAVE_X86_NCG)
 import GHC.CmmToAsm.X86.Regs
+#endif
 
 import Data.Word
 
@@ -202,6 +205,7 @@ dwarfFrameLabel  = text ".Lsection_frame"
 -- | Mapping of registers to DWARF register numbers
 dwarfRegNo :: Platform -> Reg -> Word8
 dwarfRegNo p r = case platformArch p of
+#if defined(HAVE_X86_NCG)
   ArchX86
     | r == eax  -> 0
     | r == ecx  -> 1  -- yes, no typo
@@ -244,6 +248,10 @@ dwarfRegNo p r = case platformArch p of
     | r == xmm13 -> 30
     | r == xmm14 -> 31
     | r == xmm15 -> 32
+#else
+  ArchX86    -> error "dwarfRegNo: X86 NCG disabled"
+  ArchX86_64 -> error "dwarfRegNo: X86_64 NCG disabled"
+#endif
   ArchPPC_64 _ -> fromIntegral $ toRegNo r
   ArchAArch64  -> fromIntegral $ toRegNo r
   ArchRISCV64  -> fromIntegral $ toRegNo r
@@ -257,8 +265,13 @@ dwarfReturnRegNo p
   -- when using this mechanism gdb already knows the IP anyway. Clang
   -- does this too, so it must be safe.
   = case platformArch p of
+#if defined(HAVE_X86_NCG)
     ArchX86    -> 8  -- eip
     ArchX86_64 -> 16 -- rip
+#else
+    ArchX86    -> error "dwarfReturnRegNo: X86 NCG disabled"
+    ArchX86_64 -> error "dwarfReturnRegNo: X86_64 NCG disabled"
+#endif
     ArchPPC_64 ELF_V2 -> 65 -- lr (link register)
     ArchAArch64 -> 30
     ArchRISCV64 -> 1 -- ra (return address)

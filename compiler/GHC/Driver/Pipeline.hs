@@ -23,7 +23,7 @@ module GHC.Driver.Pipeline (
 
    -- * Linking
    link,
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
    linkingNeeded, checkLinkInfo,
 #endif
 
@@ -78,7 +78,7 @@ import GHC.Linker.Static
 import GHC.Linker.Static.Utils
 import GHC.Linker.Types
 
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
 import GHC.Driver.Config.StgToJS
 import GHC.StgToJS.Linker.Linker
 #endif
@@ -98,7 +98,7 @@ import GHC.Data.Maybe          ( expectJust )
 
 import GHC.Iface.Make          ( mkFullIface )
 import GHC.Iface.Load          ( getGhcPrimIface )
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
 import GHC.Runtime.Loader      ( initializePlugins )
 #endif
 
@@ -248,7 +248,7 @@ compileOne' mHscMessage
                  [ml_obj_file $ ms_location summary]
 
    -- Initialise plugins here for any plugins enabled locally for a module.
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
    plugin_hsc_env <- initializePlugins hsc_env
 #else
    let plugin_hsc_env = hsc_env
@@ -452,8 +452,8 @@ link' logger tmpfs fc dflags unit_env batch_attempt_linking mHscMessager hpt
 
         -- Don't showPass in Batch mode; doLink will do that for us.
         case ghcLink dflags of
-          LinkExecutable _
-#if !defined(MINIMAL)
+          LinkExecutable blm
+#if defined(HAVE_INTERPRETER)
             | backendUseJSLinker (backend dflags) -> linkJSBinary logger tmpfs fc dflags unit_env obj_files pkg_deps
 #endif
             | otherwise -> do
@@ -473,7 +473,7 @@ link' logger tmpfs fc dflags unit_env batch_attempt_linking mHscMessager hpt
                                 text "   Main.main not exported; not linking.")
         return Succeeded
 
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
 linkJSBinary :: Logger -> TmpFs -> FinderCache -> DynFlags -> UnitEnv -> [FilePath] -> [UnitId] -> IO ()
 linkJSBinary logger tmpfs fc dflags unit_env obj_files pkg_deps = do
   -- we use the default configuration for now. In the future we may expose
@@ -552,7 +552,7 @@ oneShot orig_hsc_env stop_phase srcs = do
   -- we also initialise in ghc/Main but this might be used as an entry point by API clients who
   -- should initialise their own plugins but may not.
   -- See Note [Timing of plugin initialization]
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
   hsc_env <- initializePlugins orig_hsc_env
 #else
   let hsc_env = orig_hsc_env
@@ -602,8 +602,8 @@ doLink hsc_env o_files = do
 
   case ghcLink dflags of
     NoLink        -> return ()
-    LinkExecutable _
-#if !defined(MINIMAL)
+    LinkExecutable blm
+#if defined(HAVE_INTERPRETER)
       | backendUseJSLinker (backend dflags)
                   -> linkJSBinary logger tmpfs fc dflags unit_env o_files []
 #endif

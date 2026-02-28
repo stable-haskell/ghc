@@ -179,7 +179,7 @@ import GHC.Utils.Logger
 
 import GHC.Builtin.Names ( isUnboundName )
 
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
 import GHCi.Message
 import GHCi.RemoteTypes
 #else
@@ -194,7 +194,7 @@ import Data.Map ( Map )
 import Data.Typeable ( TypeRep )
 import Data.Maybe    ( mapMaybe )
 
-#if defined(MINIMAL)
+#if !defined(HAVE_INTERPRETER)
 -- Stub types for MINIMAL build (no ghci dependency)
 data QState = QState  -- Stub for Template Haskell state
 #endif

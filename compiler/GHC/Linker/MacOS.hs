@@ -4,7 +4,7 @@ module GHC.Linker.MacOS
    ( runInjectRPaths
    , getUnitFrameworkOpts
    , getFrameworkOpts
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
    , loadFramework
 #endif
    )
@@ -23,7 +23,7 @@ import GHC.Unit.Env
 
 import GHC.SysTools.Tasks
 
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
 import GHC.Runtime.Interpreter
 #endif
 
@@ -148,7 +148,7 @@ various possible locations fail.  See also #18446, which this change
 addresses.
 -}
 
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
 -- Darwin / MacOS X only: load a framework
 -- a framework is a dynamic library packaged inside a directory of the same
 -- name. They are searched for in different paths than normal libraries.

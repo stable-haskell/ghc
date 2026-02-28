@@ -39,25 +39,25 @@ module GHC.Linker.Types
    , linkableObjs
    , linkableLibs
    , linkableFiles
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
    , linkableBCOs
 #endif
    , linkableNativeParts
    , linkablePartitionParts
    , linkablePartPath
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
    , linkablePartAllBCOs
 #endif
    , isNativeCode
    , isNativeLib
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
    , linkableFilterByteCode
 #endif
    , linkableFilterNative
 
    , partitionLinkables
    , linkableAllBCOs
-#if defined(MINIMAL)
+#if !defined(HAVE_INTERPRETER)
    , ItblEnv
    , AddrEnv
 #endif
@@ -67,13 +67,13 @@ where
 
 import GHC.Prelude
 import GHC.Unit                ( UnitId, Module )
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
 import GHC.ByteCode.Types
 #else
 import GHC.Types.Tickish       ( BreakTickIndex )
 #endif
 
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
 import GHCi.BreakArray
 import GHCi.RemoteTypes
 import GHCi.Message            ( LoadedDLL )
@@ -101,7 +101,7 @@ import Data.Maybe (mapMaybe)
 import Data.List.NonEmpty (NonEmpty, nonEmpty)
 import qualified Data.List.NonEmpty as NE
 
-#if defined(MINIMAL)
+#if !defined(HAVE_INTERPRETER)
 -- Stub types for MINIMAL build (no ghci dependency)
 newtype HValue = HValue Any
 newtype ForeignRef a = ForeignRef (ForeignPtr ())
@@ -358,7 +358,7 @@ data LinkablePart
       -- used by some other backend See Note [Interface Files with Core
       -- Definitions]
 
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
   | LazyBCOs
       CompiledByteCode
       -- ^ Some BCOs generated on-demand when forced. This is used for
@@ -379,7 +379,7 @@ instance Outputable LinkablePart where
         ForeignObject -> brackets (text "foreign")
   ppr (DotA path)       = text "DotA" <+> text path
   ppr (DotDLL path)     = text "DotDLL" <+> text path
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
   ppr (BCOs bco)        = text "BCOs" <+> ppr bco
   ppr (LazyBCOs{})      = text "LazyBCOs"
 #endif
@@ -390,7 +390,7 @@ instance Outputable LinkablePart where
 linkableIsNativeCodeOnly :: Linkable -> Bool
 linkableIsNativeCodeOnly l = all isNativeCode (NE.toList (linkableParts l))
 
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
 -- | List the BCOs parts of a linkable.
 --
 -- This excludes the LazyBCOs and the CoreBindings parts
@@ -438,7 +438,7 @@ isNativeCode = \case
   DotO {}         -> True
   DotA {}         -> True
   DotDLL {}       -> True
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
   BCOs {}         -> False
   LazyBCOs{}      -> False
 #endif
@@ -450,7 +450,7 @@ isNativeLib = \case
   DotO {}         -> False
   DotA {}         -> True
   DotDLL {}       -> True
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
   BCOs {}         -> False
   LazyBCOs{}      -> False
 #endif
@@ -464,7 +464,7 @@ linkablePartPath = \case
   DotA fn         -> Just fn
   DotDLL fn       -> Just fn
   CoreBindings {} -> Nothing
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
   LazyBCOs {}     -> Nothing
   BCOs {}         -> Nothing
 #endif
@@ -477,7 +477,7 @@ linkablePartNativePaths = \case
   DotA fn         -> [fn]
   DotDLL fn       -> [fn]
   CoreBindings {} -> []
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
   LazyBCOs _ fos  -> fos
   BCOs {}         -> []
 #endif
@@ -489,13 +489,13 @@ linkablePartObjectPaths = \case
   DotA _ -> []
   DotDLL _ -> []
   CoreBindings {} -> []
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
   LazyBCOs _ fos -> fos
   BCOs {} -> []
 #endif
 
 
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
 -- | Retrieve the compiled byte-code from the linkable part.
 --
 -- Contrary to linkableBCOs, this includes byte-code from LazyBCOs.
@@ -517,13 +517,13 @@ linkablePartNative = \case
   u@DotO {}  -> [u]
   u@DotA {} -> [u]
   u@DotDLL {} -> [u]
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
   LazyBCOs _ os -> [DotO f ForeignObject | f <- os]
 #endif
   _ -> []
 
 
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
 linkablePartByteCode :: LinkablePart -> [LinkablePart]
 linkablePartByteCode = \case
   u@BCOs {}  -> [u]
@@ -537,7 +537,7 @@ linkablePartByteCode = \case
 linkableFilterNative :: Linkable -> Maybe Linkable
 linkableFilterNative = linkableFilter linkablePartNative
 
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
 -- | Transform the 'LinkablePart' list in this 'Linkable' to contain only byte
 -- code without 'LazyBCOs'.
 -- If no 'LinkablePart' remains, return 'Nothing'.
@@ -553,7 +553,7 @@ partitionLinkables :: [Linkable] -> ([Linkable], [Linkable])
 partitionLinkables linkables =
   (
     mapMaybe linkableFilterNative linkables,
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
     mapMaybe linkableFilterByteCode linkables
 #else
     []

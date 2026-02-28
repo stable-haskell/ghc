@@ -1,4 +1,3 @@
-{-# LANGUAGE CPP #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE LambdaCase #-}
 
@@ -7,6 +6,9 @@
 -- (c) The University of Glasgow, 2005-2007
 --
 -- Running statements interactively
+--
+-- NOTE: This module is only compiled when flag(interpreter) is enabled
+-- (see ghc.cabal.in). No CPP guards needed.
 --
 -- -----------------------------------------------------------------------------
 
@@ -59,13 +61,11 @@ import GHC.Runtime.Eval.Types
 import GHC.Runtime.Interpreter as GHCi
 import GHC.Runtime.Heap.Inspect
 import GHC.Runtime.Context
-#if !defined(MINIMAL)
 import GHCi.Message
 import GHCi.RemoteTypes
 import GHC.ByteCode.Types
 import GHC.Linker.Loader as Loader
 import GHC.Linker.Types (LinkedBreaks (..))
-#endif
 
 import GHC.Hs
 
@@ -128,9 +128,7 @@ import GHC.Tc.Utils.Instantiate (instDFunType)
 import GHC.Tc.Utils.Monad
 
 import GHC.IfaceToCore
-#if !defined(MINIMAL)
 import GHC.ByteCode.Breakpoints
-#endif
 
 import Control.Monad
 import Data.Dynamic
@@ -139,9 +137,7 @@ import Data.List (find,intercalate)
 import Data.List.NonEmpty (NonEmpty)
 import Unsafe.Coerce ( unsafeCoerce )
 import qualified GHC.Unit.Home.Graph as HUG
-#if !defined(MINIMAL)
 import GHCi.BreakArray (BreakArray)
-#endif
 
 -- -----------------------------------------------------------------------------
 -- running a statement interactively

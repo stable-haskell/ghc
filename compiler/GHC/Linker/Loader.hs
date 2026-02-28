@@ -56,7 +56,7 @@ import GHC.Tc.Utils.Monad
 import GHC.Runtime.Interpreter
 import GHC.Iface.Load
 
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
 import GHCi.BreakArray
 import GHCi.RemoteTypes
 import GHCi.Message (ConInfoTable(..), LoadedDLL)
@@ -734,7 +734,7 @@ loadDecls interp hsc_env span linkable = do
                           , linked_breaks = lb2 }
           return (pls2, (nms_fhvs, links_needed, units_needed))
   where
-#if defined(MINIMAL)
+#if !defined(HAVE_INTERPRETER)
     cbcs = []
 #else
     cbcs = linkableBCOs linkable
@@ -976,7 +976,7 @@ dynLinkBCOs interp pls bcos = do
             parts = concatMap (NE.toList . linkableParts) new_bcos
 
             cbcs :: [CompiledByteCode]
-#if defined(MINIMAL)
+#if !defined(HAVE_INTERPRETER)
             cbcs = []
 #else
             cbcs = concatMap linkablePartAllBCOs parts
@@ -1039,7 +1039,7 @@ makeForeignNamedHValueRefs interp bindings =
   mapM (\(n, hvref) -> (n,) <$> mkFinalizedHValue interp hvref) bindings
 
 linkITbls :: Interp -> ItblEnv -> [(Name, ConInfoTable)] -> IO ItblEnv
-#if defined(MINIMAL)
+#if !defined(HAVE_INTERPRETER)
 linkITbls _ env _ = return env
 #else
 linkITbls interp = foldlM $ \env (nm, itbl) -> do
@@ -1729,7 +1729,7 @@ maybePutStrLn logger s = maybePutSDoc logger (text s <> text "\n")
 -- | see Note [Generating code for top-level string literal bindings]
 allocateTopStrings ::
   Interp -> [(Name, ByteString)] -> AddrEnv -> IO AddrEnv
-#if defined(MINIMAL)
+#if !defined(HAVE_INTERPRETER)
 allocateTopStrings _ _ env = return env
 #else
 allocateTopStrings interp topStrings prev_env = do

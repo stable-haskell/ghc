@@ -1,4 +1,3 @@
-{-# LANGUAGE CPP #-}
 {-# LANGUAGE FlexibleInstances     #-}
 {-# LANGUAGE MagicHash             #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
@@ -9,6 +8,8 @@
 --
 --  (c) The University of Glasgow 2002-2006
 --
+-- NOTE: This module is only compiled when flag(interpreter) is enabled
+-- (see ghc.cabal.in). No CPP guards needed.
 
 -- | Bytecode assembler and linker
 module GHC.ByteCode.Linker
@@ -21,7 +22,6 @@ where
 
 import GHC.Prelude
 
-#if !defined(MINIMAL)
 import GHC.Runtime.Interpreter
 import GHC.ByteCode.Types
 import GHCi.RemoteTypes
@@ -275,35 +275,4 @@ primopToCLabel primop suffix = concat
     , zString (zEncodeFS (occNameFS (primOpOcc primop)))
     , '_':suffix
     ]
-#else
-import GHC.Runtime.Interpreter
-import GHC.ByteCode.Types hiding (ItblEnv, AddrEnv)
-import GHC.Linker.Types
-import GHC.Types.Name.Env
-import GHC.Types.Name
-import GHC.Data.FastString
-import GHCi.ResolvedBCO
-import Foreign.Ptr
-import GHC.Utils.Panic
-import GHC.Utils.Outputable
-
-linkBCO
-  :: Interp
-  -> PkgsLoaded
-  -> LinkerEnv
-  -> LinkedBreaks
-  -> NameEnv Int
-  -> UnlinkedBCO
-  -> IO ResolvedBCO
-linkBCO _ _ _ _ _ _ = panic "linkBCO: not available in MINIMAL build"
-
-lookupStaticPtr :: Interp -> FastString -> IO (Ptr ())
-lookupStaticPtr _ _ = panic "lookupStaticPtr: not available in MINIMAL build"
-
-lookupIE :: Interp -> PkgsLoaded -> ItblEnv -> Name -> IO (Ptr ())
-lookupIE _ _ _ _ = panic "lookupIE: not available in MINIMAL build"
-
-linkFail :: String -> SDoc -> IO a
-linkFail _ _ = panic "linkFail: not available in MINIMAL build"
-#endif
 

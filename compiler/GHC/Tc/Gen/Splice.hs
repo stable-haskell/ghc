@@ -35,7 +35,7 @@ module GHC.Tc.Gen.Splice(
      runMetaE, runMetaP, runMetaT, runMetaD,
      tcTopSpliceExpr, lookupThName_maybe,
      finishTH, runRemoteModFinalizers,
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
      runQuasi,
      defaultRunMeta, runMeta',
 #endif
@@ -53,7 +53,7 @@ import GHC.Driver.Hooks
 import GHC.Driver.Config.Diagnostic
 import GHC.Driver.Config.Finder
 
-#if defined(MINIMAL)
+#if !defined(HAVE_INTERPRETER)
 import GHC.Hs hiding (ForeignRef)
 #else
 import GHC.Hs
@@ -94,7 +94,7 @@ import GHC.HsToCore.Monad
 import GHC.IfaceToCore
 import GHC.Iface.Load
 
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
 import GHCi.Message
 import GHCi.RemoteTypes
 #else
@@ -187,7 +187,7 @@ import GHC.Parser.HaddockLex (lexHsDoc)
 import GHC.Parser (parseIdentifier)
 import GHC.Rename.Doc (rnHsDoc)
 
-#if defined(MINIMAL)
+#if !defined(HAVE_INTERPRETER)
 -- Stub types for MINIMAL build (no ghci dependency)
 newtype HValue = HValue Any
 newtype ForeignRef a = ForeignRef (ForeignPtr ())
@@ -1169,7 +1169,7 @@ convertAnnotationWrapper fhv = do
 ************************************************************************
 -}
 
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
 -- Template Haskell execution functions - not needed for parsing/typechecking
 runQuasi :: TH.Q a -> TcM a
 runQuasi act = TH.runQ act

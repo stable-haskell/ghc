@@ -32,7 +32,7 @@ module GHC.IfaceToCore (
         tcIfaceGlobal,
         tcIfaceOneShot, tcTopIfaceBindings,
         tcIfaceImport
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
         , hydrateCgBreakInfo
 #endif
  ) where
@@ -40,7 +40,7 @@ module GHC.IfaceToCore (
 
 import GHC.Prelude
 
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
 import GHC.ByteCode.Types
 #endif
 
@@ -2282,7 +2282,7 @@ bindIfaceTyConBinderX bind_tv (Bndr tv vis) thing_inside
   = bind_tv tv $ \tv' ->
     thing_inside (Bndr tv' vis)
 
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
 -- CgBreakInfo
 
 hydrateCgBreakInfo :: CgBreakInfo -> IfL ([Maybe (Id, Word)], Type)
