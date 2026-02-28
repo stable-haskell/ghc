@@ -78,9 +78,10 @@ import GHCi.BreakArray
 import GHCi.RemoteTypes
 import GHCi.Message            ( LoadedDLL )
 #else
-import Foreign.Ptr (Ptr)
-import Foreign.ForeignPtr (ForeignPtr)
-import GHC.Exts (Any)
+-- Use centralized stub types when interpreter is not available
+import GHC.Runtime.Interpreter.Stubs
+       ( HValue, ForeignRef, ForeignHValue, BreakArray, RemotePtr
+       , ItblEnv, AddrEnv, LoadedDLL )
 #endif
 
 import GHC.Stack.CCS
@@ -100,19 +101,6 @@ import GHC.Unit.Module.WholeCoreBindings
 import Data.Maybe (mapMaybe)
 import Data.List.NonEmpty (NonEmpty, nonEmpty)
 import qualified Data.List.NonEmpty as NE
-
-#if !defined(HAVE_INTERPRETER)
--- Stub types for MINIMAL build (no ghci dependency)
-newtype HValue = HValue Any
-newtype ForeignRef a = ForeignRef (ForeignPtr ())
-type ForeignHValue = ForeignRef HValue
-data BreakArray = BreakArray  -- Stub for GHCi.BreakArray
-newtype RemotePtr a = RemotePtr (Ptr ())  -- Stub for GHCi.RemoteTypes
-
-type ItblEnv = NameEnv (Name, ())
-type AddrEnv = NameEnv (Name, ())
-type LoadedDLL = ()  -- Stub for GHCi.Message.LoadedDLL
-#endif
 
 {- **********************************************************************
 

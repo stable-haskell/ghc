@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE LambdaCase #-}
 
@@ -8,7 +9,8 @@
 -- Running statements interactively
 --
 -- NOTE: This module is only compiled when flag(interpreter) is enabled
--- (see ghc.cabal.in). No CPP guards needed.
+-- (see ghc.cabal.in). However, CPP is still needed for HAVE_INTERNAL_INTERPRETER
+-- guards within the module.
 --
 -- -----------------------------------------------------------------------------
 

@@ -98,9 +98,10 @@ import GHC.Iface.Load
 import GHCi.Message
 import GHCi.RemoteTypes
 #else
-import Foreign.ForeignPtr (ForeignPtr)
-import GHC.Exts (Any)
-import System.IO (Handle)
+-- Use centralized stub types when interpreter is not available
+import GHC.Runtime.Interpreter.Stubs
+       ( HValue, ForeignRef, ForeignHValue, Pipe
+       , THMessage(..), THResultType(..) )
 #endif
 import GHC.Runtime.Interpreter
 
@@ -187,15 +188,6 @@ import GHC.Parser.HaddockLex (lexHsDoc)
 import GHC.Parser (parseIdentifier)
 import GHC.Rename.Doc (rnHsDoc)
 
-#if !defined(HAVE_INTERPRETER)
--- Stub types for MINIMAL build (no ghci dependency)
-newtype HValue = HValue Any
-newtype ForeignRef a = ForeignRef (ForeignPtr ())
-type ForeignHValue = ForeignRef HValue
-type Pipe = (Handle, Handle)
-data THMessage a = THMsg  -- Stub for GHCi.Message.THMessage
-data THResultType = THAnnWrapper | THExp | THPat | THType | THDec | THAnnProvenance
-#endif
 
 
 {-
@@ -1977,32 +1969,32 @@ getAnnotationsByTypeRep th_name tyrep
        ; let selectedTcgAnns = findAnnsByTypeRep (tcg_ann_env tcg) name tyrep
        ; return (selectedEpsHptAnns ++ selectedTcgAnns) }
 #else
--- MINIMAL build: Template Haskell execution not supported
+-- Template Haskell execution not supported (HAVE_INTERPRETER not defined)
 -- Provide stub implementations that error at runtime for functions called from unguarded code
 
 runMetaE :: LHsExpr GhcTc -> TcM (LHsExpr GhcPs)
-runMetaE _ = fail "Template Haskell execution is not supported in MINIMAL build"
+runMetaE _ = fail "Template Haskell execution is not supported (HAVE_INTERPRETER not defined)"
 
 runMetaP :: LHsExpr GhcTc -> TcM (LPat GhcPs)
-runMetaP _ = fail "Template Haskell execution is not supported in MINIMAL build"
+runMetaP _ = fail "Template Haskell execution is not supported (HAVE_INTERPRETER not defined)"
 
 runMetaT :: LHsExpr GhcTc -> TcM (LHsType GhcPs)
-runMetaT _ = fail "Template Haskell execution is not supported in MINIMAL build"
+runMetaT _ = fail "Template Haskell execution is not supported (HAVE_INTERPRETER not defined)"
 
 runMetaD :: LHsExpr GhcTc -> TcM [LHsDecl GhcPs]
-runMetaD _ = fail "Template Haskell execution is not supported in MINIMAL build"
+runMetaD _ = fail "Template Haskell execution is not supported (HAVE_INTERPRETER not defined)"
 
 runMetaAW :: LHsExpr GhcTc -> TcM Serialized
-runMetaAW _ = fail "Template Haskell execution is not supported in MINIMAL build"
+runMetaAW _ = fail "Template Haskell execution is not supported (HAVE_INTERPRETER not defined)"
 
 runTH :: THResultType -> ForeignHValue -> TcM a
-runTH _ _ = fail "Template Haskell execution is not supported in MINIMAL build"
+runTH _ _ = fail "Template Haskell execution is not supported (HAVE_INTERPRETER not defined)"
 
 finishTH :: TcM ()
-finishTH = return ()  -- Nothing to finish in MINIMAL build
+finishTH = return ()  -- Nothing to finish (HAVE_INTERPRETER not defined)
 
 runRemoteModFinalizers :: ThModFinalizers -> TcM ()
-runRemoteModFinalizers _ = fail "Template Haskell mod finalizers not supported in MINIMAL build"
+runRemoteModFinalizers _ = fail "Template Haskell mod finalizers not supported (HAVE_INTERPRETER not defined)"
 #endif
 
 {-

@@ -145,7 +145,7 @@ import GHC.Driver.Config.Stg.Pipeline (initStgPipelineOpts)
 import GHC.Driver.Config.StgToCmm  (initStgToCmmConfig)
 import GHC.Driver.Config.Cmm       (initCmmConfig)
 import GHC.Driver.LlvmConfigCache  (initLlvmConfigCache)
-#if defined(HAVE_INTERPRETER)
+#if defined(HAVE_JS_BACKEND)
 import GHC.Driver.Config.StgToJS  (initStgToJSConfig)
 #endif
 import GHC.Driver.Config.Diagnostic
@@ -176,6 +176,8 @@ import GHC.HsToCore
 
 #if defined(HAVE_INTERPRETER)
 import GHC.StgToByteCode    ( byteCodeGen )
+#endif
+#if defined(HAVE_JS_BACKEND)
 import GHC.StgToJS          ( stgToJS )
 import GHC.StgToJS.Ids
 import GHC.StgToJS.Types
@@ -326,15 +328,18 @@ import qualified GHC.Unit.Home.Graph as HUG
 import GHC.Unit.Home.PackageTable
 
 #if !defined(HAVE_INTERPRETER)
--- Stub implementations for MINIMAL build
+-- Stub when interpreter not available
 initializePlugins :: HscEnv -> IO HscEnv
 initializePlugins = return
+#endif
 
+#if !defined(HAVE_JS_BACKEND)
+-- Stub when JS backend not available
 initStgToJSConfig :: DynFlags -> StgToJSConfig
 initStgToJSConfig _ = StgToJSConfig  -- StgToJSConfig stub is from GHC.Runtime.Interpreter.Types
 
 stgToJS :: Logger -> StgToJSConfig -> [CgStgTopBinding] -> Module -> [SptEntry] -> ForeignStubs -> ([CostCentre], [CostCentreStack]) -> FilePath -> IO ()
-stgToJS _ _ _ _ _ _ _ _ = panic "stgToJS: not available in MINIMAL build"
+stgToJS _ _ _ _ _ _ _ _ = panic "stgToJS: not available (HAVE_JS_BACKEND not defined)"
 #endif
 
 {- **********************************************************************
@@ -771,11 +776,7 @@ tcRnModule' sum save_rn_syntax mod = do
 
       -- module (could be) safe, throw warning if needed
       else do
-#if !defined(HAVE_INTERPRETER)
-          let tcg_res' = tcg_res
-#else
           tcg_res' <- hscCheckSafeImports tcg_res
-#endif
           safe <- liftIO $ readIORef (tcg_safe_infer tcg_res')
           when safe $
             case wopt Opt_WarnSafe dflags of
@@ -1318,7 +1319,7 @@ hscDesugarAndSimplify summary (FrontendTypecheck tc_result) tc_warnings mb_old_h
       -- Just cause we desugared doesn't mean we are generating code, see above.
       Just desugared_guts | backendGeneratesCode bcknd -> do
 #if !defined(HAVE_INTERPRETER)
-          -- In MINIMAL builds, no TH plugins can be registered
+          -- No TH plugins can be registered (HAVE_INTERPRETER not defined)
           let plugins = []
 #else
           plugins <- liftIO $ readIORef (tcg_th_coreplugins tc_result)
@@ -1346,7 +1347,7 @@ hscDesugarAndSimplify summary (FrontendTypecheck tc_result) tc_warnings mb_old_h
           -- in order to inline data con wrappers but we honour whatever level of simplificication the
           -- user requested. See #22008 for some discussion.
 #if !defined(HAVE_INTERPRETER)
-          -- In MINIMAL builds, no TH plugins can be registered
+          -- No TH plugins can be registered (HAVE_INTERPRETER not defined)
           let plugins = []
 #else
           plugins <- liftIO $ readIORef (tcg_th_coreplugins tc_result)

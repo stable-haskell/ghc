@@ -22,9 +22,10 @@ import GHCi.Message (EvalExpr, ResumeContext)
 import GHC.ByteCode.Types (InternalBreakpointId(..))
 import GHC.Driver.Config (EvalStep(..))
 #else
-import Foreign.ForeignPtr (ForeignPtr)
-import Foreign.Ptr (Ptr)
-import GHC.Exts (Any)
+-- Use centralized stub types when interpreter is not available
+import GHC.Runtime.Interpreter.Stubs
+       ( HValue, ForeignRef, ForeignHValue, RemoteRef, RemotePtr, HValueRef
+       , InternalBreakpointId(..), EvalExpr, ResumeContext, EvalStep(..) )
 #endif
 import GHC.Types.Id
 import GHC.Types.Name
@@ -35,20 +36,6 @@ import GHC.Utils.Exception
 
 import Data.Word
 import GHC.Stack.CCS
-
-#if !defined(HAVE_INTERPRETER)
--- Stub types for MINIMAL build (no ghci dependency)
-newtype HValue = HValue Any
-newtype ForeignRef a = ForeignRef (ForeignPtr ())
-type ForeignHValue = ForeignRef HValue
-newtype RemoteRef a = RemoteRef ()
-newtype RemotePtr a = RemotePtr (Ptr ())
-type HValueRef = RemoteRef HValue
-data InternalBreakpointId = InternalBreakpointId
-type EvalExpr a = a
-type ResumeContext a = a
-data EvalStep = EvalStepSingle | EvalStepOut | EvalStepNone
-#endif
 
 data ExecOptions
  = ExecOptions

@@ -1,17 +1,25 @@
 {-# LANGUAGE CPP #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE TypeFamilies #-}
 -- | Hard wired things related to registers.
 --
 -- This module provides architecture-specific register operations using a
--- record-based dispatch pattern. Each supported architecture provides a
--- 'RegTarget' record with its implementations, and 'selectRegTarget' performs
--- runtime dispatch based on the platform.
+-- GADT-based dispatch pattern. Each supported architecture is represented
+-- as a type-level tag, and 'selectRegTarget' performs runtime dispatch
+-- based on the platform, returning an existentially wrapped target.
 --
--- The CPP is consolidated to:
+-- The GADT approach provides:
+--   1. Type-safe architecture dispatch
+--   2. Cleaner separation of architecture-specific code
+--   3. Better documentation through type-level architecture tags
+--
+-- CPP is used for:
 --   1. Conditional imports of arch-specific modules
---   2. Conditional definitions of arch-specific RegTarget records
---   3. A single dispatch function with conditional entries
---
--- This reduces CPP spread compared to having it in every function.
+--   2. Conditional typeclass instances
+--   3. Conditional branches in selectRegTarget
 module GHC.CmmToAsm.Reg.Target (
         -- * Exported target functions
         targetVirtualRegSqueeze,
@@ -22,8 +30,12 @@ module GHC.CmmToAsm.Reg.Target (
         targetClassOfReg,
         mapRegFormatSet,
         -- * Internal (for testing/extension)
+        ArchKind(..),
         RegTarget(..),
+        SomeRegTarget(..),
+        RegOps(..),
         selectRegTarget,
+        withRegTarget,
 )
 
 where
@@ -58,166 +70,217 @@ import qualified GHC.CmmToAsm.LA64.Regs      as LA64
 #endif
 
 -- -----------------------------------------------------------------------------
--- RegTarget record: bundles all arch-specific register operations
+-- Architecture kind for type-level representation
 
--- | Record containing all architecture-specific register operations.
--- Each supported architecture provides an implementation of this record.
-data RegTarget = RegTarget
-  { rtVirtualRegSqueeze :: !(RegClass -> VirtualReg -> Int)
-    -- ^ Calculate max register colors denied to a node due to this virtual reg
-  , rtRealRegSqueeze    :: !(RegClass -> RealReg -> Int)
-    -- ^ Calculate max register colors denied to a node due to this real reg
-  , rtClassOfRealReg    :: !(Platform -> RealReg -> RegClass)
-    -- ^ Get the register class of a real register
-  , rtMkVirtualReg      :: !(Unique -> Format -> VirtualReg)
-    -- ^ Create a virtual register from a unique and format
-  , rtRegDotColor       :: !(Platform -> RealReg -> SDoc)
-    -- ^ Get the dot-graph color for a register (for debugging)
-  }
+-- | Architecture kind for type-level architecture representation.
+-- Each supported architecture has a corresponding type-level tag.
+data ArchKind
+  = X86K          -- ^ X86 and X86_64 architectures
+  | AArch64K      -- ^ ARM 64-bit architecture
+  | PPCK          -- ^ PowerPC (32 and 64-bit) architectures
+  | RV64K         -- ^ RISC-V 64-bit architecture
+  | LA64K         -- ^ LoongArch 64-bit architecture
+  | UnavailableK  -- ^ Unsupported/unavailable architecture
 
 -- -----------------------------------------------------------------------------
--- Architecture-specific RegTarget definitions
+-- GADT for architecture-specific register targets
+
+-- | GADT representing architecture-specific register targets.
+-- The type parameter ensures type-safe dispatch - each architecture
+-- has its own constructor with a unique type tag.
+data RegTarget (arch :: ArchKind) where
+#if defined(HAVE_X86_NCG)
+  X86RegTarget     :: RegTarget 'X86K
+#endif
+#if defined(HAVE_AARCH64_NCG)
+  AArch64RegTarget :: RegTarget 'AArch64K
+#endif
+#if defined(HAVE_PPC_NCG)
+  PPCRegTarget     :: RegTarget 'PPCK
+#endif
+#if defined(HAVE_RISCV64_NCG)
+  RV64RegTarget    :: RegTarget 'RV64K
+#endif
+#if defined(HAVE_LOONGARCH64_NCG)
+  LA64RegTarget    :: RegTarget 'LA64K
+#endif
+  -- | Target for unavailable architectures (stores arch name for error messages)
+  UnavailableRegTarget :: !String -> RegTarget 'UnavailableK
+
+-- | Existential wrapper for runtime dispatch.
+-- This allows us to return a RegTarget without knowing the architecture at compile time.
+data SomeRegTarget where
+  SomeRegTarget :: RegOps arch => RegTarget arch -> SomeRegTarget
+
+-- -----------------------------------------------------------------------------
+-- Typeclass for architecture-specific register operations
+
+-- | Typeclass for architecture-specific register operations.
+-- Each architecture provides its own instance with the actual implementations.
+class RegOps (arch :: ArchKind) where
+  -- | Calculate max register colors denied to a node due to this virtual reg
+  virtualRegSqueeze :: RegTarget arch -> RegClass -> VirtualReg -> Int
+
+  -- | Calculate max register colors denied to a node due to this real reg
+  realRegSqueeze :: RegTarget arch -> RegClass -> RealReg -> Int
+
+  -- | Get the register class of a real register
+  classOfRealReg :: RegTarget arch -> Platform -> RealReg -> RegClass
+
+  -- | Create a virtual register from a unique and format
+  mkVirtualReg :: RegTarget arch -> Unique -> Format -> VirtualReg
+
+  -- | Get the dot-graph color for a register (for debugging)
+  regDotColor :: RegTarget arch -> Platform -> RealReg -> SDoc
+
+-- -----------------------------------------------------------------------------
+-- Architecture-specific RegOps instances
 
 #if defined(HAVE_X86_NCG)
--- | X86/X86_64 register target
-x86RegTarget :: RegTarget
-x86RegTarget = RegTarget
-  { rtVirtualRegSqueeze = X86.virtualRegSqueeze
-  , rtRealRegSqueeze    = X86.realRegSqueeze
-  , rtClassOfRealReg    = X86.classOfRealReg
-  , rtMkVirtualReg      = X86.mkVirtualReg
-  , rtRegDotColor       = X86.regDotColor
-  }
+instance RegOps 'X86K where
+  virtualRegSqueeze X86RegTarget = X86.virtualRegSqueeze
+  realRegSqueeze    X86RegTarget = X86.realRegSqueeze
+  classOfRealReg    X86RegTarget = X86.classOfRealReg
+  mkVirtualReg      X86RegTarget = X86.mkVirtualReg
+  regDotColor       X86RegTarget = X86.regDotColor
 #endif
 
 #if defined(HAVE_AARCH64_NCG)
--- | AArch64 register target
-aarch64RegTarget :: RegTarget
-aarch64RegTarget = RegTarget
-  { rtVirtualRegSqueeze = AArch64.virtualRegSqueeze
-  , rtRealRegSqueeze    = AArch64.realRegSqueeze
-  , rtClassOfRealReg    = \_ -> AArch64.classOfRealReg  -- AArch64 doesn't use Platform
-  , rtMkVirtualReg      = AArch64.mkVirtualReg
-  , rtRegDotColor       = \_ -> AArch64.regDotColor     -- AArch64 doesn't use Platform
-  }
+instance RegOps 'AArch64K where
+  virtualRegSqueeze AArch64RegTarget = AArch64.virtualRegSqueeze
+  realRegSqueeze    AArch64RegTarget = AArch64.realRegSqueeze
+  classOfRealReg    AArch64RegTarget _ = AArch64.classOfRealReg  -- AArch64 doesn't use Platform
+  mkVirtualReg      AArch64RegTarget = AArch64.mkVirtualReg
+  regDotColor       AArch64RegTarget _ = AArch64.regDotColor     -- AArch64 doesn't use Platform
 #endif
 
 #if defined(HAVE_PPC_NCG)
--- | PowerPC register target
-ppcRegTarget :: RegTarget
-ppcRegTarget = RegTarget
-  { rtVirtualRegSqueeze = PPC.virtualRegSqueeze
-  , rtRealRegSqueeze    = PPC.realRegSqueeze
-  , rtClassOfRealReg    = \_ -> PPC.classOfRealReg
-  , rtMkVirtualReg      = PPC.mkVirtualReg
-  , rtRegDotColor       = \_ -> PPC.regDotColor
-  }
+instance RegOps 'PPCK where
+  virtualRegSqueeze PPCRegTarget = PPC.virtualRegSqueeze
+  realRegSqueeze    PPCRegTarget = PPC.realRegSqueeze
+  classOfRealReg    PPCRegTarget _ = PPC.classOfRealReg
+  mkVirtualReg      PPCRegTarget = PPC.mkVirtualReg
+  regDotColor       PPCRegTarget _ = PPC.regDotColor
 #endif
 
 #if defined(HAVE_RISCV64_NCG)
--- | RISC-V 64-bit register target
-rv64RegTarget :: RegTarget
-rv64RegTarget = RegTarget
-  { rtVirtualRegSqueeze = RV64.virtualRegSqueeze
-  , rtRealRegSqueeze    = RV64.realRegSqueeze
-  , rtClassOfRealReg    = \_ -> RV64.classOfRealReg
-  , rtMkVirtualReg      = RV64.mkVirtualReg
-  , rtRegDotColor       = \_ -> RV64.regDotColor
-  }
+instance RegOps 'RV64K where
+  virtualRegSqueeze RV64RegTarget = RV64.virtualRegSqueeze
+  realRegSqueeze    RV64RegTarget = RV64.realRegSqueeze
+  classOfRealReg    RV64RegTarget _ = RV64.classOfRealReg
+  mkVirtualReg      RV64RegTarget = RV64.mkVirtualReg
+  regDotColor       RV64RegTarget _ = RV64.regDotColor
 #endif
 
 #if defined(HAVE_LOONGARCH64_NCG)
--- | LoongArch64 register target
-la64RegTarget :: RegTarget
-la64RegTarget = RegTarget
-  { rtVirtualRegSqueeze = LA64.virtualRegSqueeze
-  , rtRealRegSqueeze    = LA64.realRegSqueeze
-  , rtClassOfRealReg    = \_ -> LA64.classOfRealReg
-  , rtMkVirtualReg      = LA64.mkVirtualReg
-  , rtRegDotColor       = \_ -> LA64.regDotColor
-  }
+instance RegOps 'LA64K where
+  virtualRegSqueeze LA64RegTarget = LA64.virtualRegSqueeze
+  realRegSqueeze    LA64RegTarget = LA64.realRegSqueeze
+  classOfRealReg    LA64RegTarget _ = LA64.classOfRealReg
+  mkVirtualReg      LA64RegTarget = LA64.mkVirtualReg
+  regDotColor       LA64RegTarget _ = LA64.regDotColor
 #endif
 
--- | RegTarget for unavailable/unsupported architectures
-unavailableRegTarget :: String -> RegTarget
-unavailableRegTarget archName = RegTarget
-  { rtVirtualRegSqueeze = \_ _ -> panic $ "virtualRegSqueeze: " ++ archName ++ " not available"
-  , rtRealRegSqueeze    = \_ _ -> panic $ "realRegSqueeze: " ++ archName ++ " not available"
-  , rtClassOfRealReg    = \_ _ -> panic $ "classOfRealReg: " ++ archName ++ " not available"
-  , rtMkVirtualReg      = \_ _ -> panic $ "mkVirtualReg: " ++ archName ++ " not available"
-  , rtRegDotColor       = \_ _ -> panic $ "regDotColor: " ++ archName ++ " not available"
-  }
+-- | Instance for unavailable architectures - all operations panic
+instance RegOps 'UnavailableK where
+  virtualRegSqueeze (UnavailableRegTarget name) _ _ =
+    panic $ "virtualRegSqueeze: " ++ name ++ " not available"
+  realRegSqueeze (UnavailableRegTarget name) _ _ =
+    panic $ "realRegSqueeze: " ++ name ++ " not available"
+  classOfRealReg (UnavailableRegTarget name) _ _ =
+    panic $ "classOfRealReg: " ++ name ++ " not available"
+  mkVirtualReg (UnavailableRegTarget name) _ _ =
+    panic $ "mkVirtualReg: " ++ name ++ " not available"
+  regDotColor (UnavailableRegTarget name) _ _ =
+    panic $ "regDotColor: " ++ name ++ " not available"
 
 -- -----------------------------------------------------------------------------
 -- Platform dispatch
 
 -- | Select the appropriate RegTarget for a platform.
--- This is the single point of platform-based dispatch.
-selectRegTarget :: Platform -> RegTarget
+-- This is the single point of platform-based dispatch, returning
+-- an existentially wrapped target with its RegOps constraint.
+selectRegTarget :: Platform -> SomeRegTarget
 selectRegTarget platform = case platformArch platform of
 #if defined(HAVE_X86_NCG)
-    ArchX86       -> x86RegTarget
-    ArchX86_64    -> x86RegTarget
+    ArchX86       -> SomeRegTarget X86RegTarget
+    ArchX86_64    -> SomeRegTarget X86RegTarget
 #else
-    ArchX86       -> unavailableRegTarget "X86"
-    ArchX86_64    -> unavailableRegTarget "X86_64"
+    ArchX86       -> SomeRegTarget (UnavailableRegTarget "X86")
+    ArchX86_64    -> SomeRegTarget (UnavailableRegTarget "X86_64")
 #endif
 #if defined(HAVE_AARCH64_NCG)
-    ArchAArch64   -> aarch64RegTarget
+    ArchAArch64   -> SomeRegTarget AArch64RegTarget
 #else
-    ArchAArch64   -> unavailableRegTarget "AArch64"
+    ArchAArch64   -> SomeRegTarget (UnavailableRegTarget "AArch64")
 #endif
 #if defined(HAVE_PPC_NCG)
-    ArchPPC       -> ppcRegTarget
-    ArchPPC_64 _  -> ppcRegTarget
+    ArchPPC       -> SomeRegTarget PPCRegTarget
+    ArchPPC_64 _  -> SomeRegTarget PPCRegTarget
 #else
-    ArchPPC       -> unavailableRegTarget "PPC"
-    ArchPPC_64 _  -> unavailableRegTarget "PPC_64"
+    ArchPPC       -> SomeRegTarget (UnavailableRegTarget "PPC")
+    ArchPPC_64 _  -> SomeRegTarget (UnavailableRegTarget "PPC_64")
 #endif
 #if defined(HAVE_RISCV64_NCG)
-    ArchRISCV64   -> rv64RegTarget
+    ArchRISCV64   -> SomeRegTarget RV64RegTarget
 #else
-    ArchRISCV64   -> unavailableRegTarget "RISCV64"
+    ArchRISCV64   -> SomeRegTarget (UnavailableRegTarget "RISCV64")
 #endif
 #if defined(HAVE_LOONGARCH64_NCG)
-    ArchLoongArch64 -> la64RegTarget
+    ArchLoongArch64 -> SomeRegTarget LA64RegTarget
 #else
-    ArchLoongArch64 -> unavailableRegTarget "LoongArch64"
+    ArchLoongArch64 -> SomeRegTarget (UnavailableRegTarget "LoongArch64")
 #endif
     -- Architectures without NCG support
-    ArchS390X       -> unavailableRegTarget "S390X"
-    ArchARM _ _ _   -> unavailableRegTarget "ARM"
-    ArchAlpha       -> unavailableRegTarget "Alpha"
-    ArchMipseb      -> unavailableRegTarget "Mipseb"
-    ArchMipsel      -> unavailableRegTarget "Mipsel"
-    ArchJavaScript  -> unavailableRegTarget "JavaScript"
-    ArchWasm32      -> unavailableRegTarget "Wasm32"
-    ArchUnknown     -> unavailableRegTarget "Unknown"
+    ArchS390X       -> SomeRegTarget (UnavailableRegTarget "S390X")
+    ArchARM _ _ _   -> SomeRegTarget (UnavailableRegTarget "ARM")
+    ArchAlpha       -> SomeRegTarget (UnavailableRegTarget "Alpha")
+    ArchMipseb      -> SomeRegTarget (UnavailableRegTarget "Mipseb")
+    ArchMipsel      -> SomeRegTarget (UnavailableRegTarget "Mipsel")
+    ArchJavaScript  -> SomeRegTarget (UnavailableRegTarget "JavaScript")
+    ArchWasm32      -> SomeRegTarget (UnavailableRegTarget "Wasm32")
+    ArchUnknown     -> SomeRegTarget (UnavailableRegTarget "Unknown")
+
+-- | Helper to dispatch on SomeRegTarget.
+-- Uses rank-2 types to provide the RegOps constraint to the continuation.
+{-# INLINE withRegTarget #-}
+withRegTarget :: SomeRegTarget -> (forall arch. RegOps arch => RegTarget arch -> r) -> r
+withRegTarget (SomeRegTarget rt) f = f rt
 
 -- -----------------------------------------------------------------------------
--- Exported functions (simple wrappers around RegTarget dispatch)
+-- Exported functions (use withRegTarget for dispatch)
 
 -- | Calculate the maximum number of register colors that could be
 -- denied to a node of this class due to having this virtual reg as a neighbour.
+{-# INLINE targetVirtualRegSqueeze #-}
 targetVirtualRegSqueeze :: Platform -> RegClass -> VirtualReg -> Int
-targetVirtualRegSqueeze platform = rtVirtualRegSqueeze (selectRegTarget platform)
+targetVirtualRegSqueeze platform cls vreg =
+  withRegTarget (selectRegTarget platform) $ \rt -> virtualRegSqueeze rt cls vreg
 
 -- | Calculate the maximum number of register colors that could be
 -- denied to a node of this class due to having this real reg as a neighbour.
+{-# INLINE targetRealRegSqueeze #-}
 targetRealRegSqueeze :: Platform -> RegClass -> RealReg -> Int
-targetRealRegSqueeze platform = rtRealRegSqueeze (selectRegTarget platform)
+targetRealRegSqueeze platform cls rreg =
+  withRegTarget (selectRegTarget platform) $ \rt -> realRegSqueeze rt cls rreg
 
 -- | Get the register class of a real register.
+{-# INLINE targetClassOfRealReg #-}
 targetClassOfRealReg :: Platform -> RealReg -> RegClass
-targetClassOfRealReg platform = rtClassOfRealReg (selectRegTarget platform) platform
+targetClassOfRealReg platform rreg =
+  withRegTarget (selectRegTarget platform) $ \rt -> classOfRealReg rt platform rreg
 
 -- | Create a virtual register from a unique and format.
+{-# INLINE targetMkVirtualReg #-}
 targetMkVirtualReg :: Platform -> Unique -> Format -> VirtualReg
-targetMkVirtualReg platform = rtMkVirtualReg (selectRegTarget platform)
+targetMkVirtualReg platform uniq fmt =
+  withRegTarget (selectRegTarget platform) $ \rt -> mkVirtualReg rt uniq fmt
 
 -- | Get the dot-graph color for a register (for debugging/visualization).
+{-# INLINE targetRegDotColor #-}
 targetRegDotColor :: Platform -> RealReg -> SDoc
-targetRegDotColor platform = rtRegDotColor (selectRegTarget platform) platform
+targetRegDotColor platform rreg =
+  withRegTarget (selectRegTarget platform) $ \rt -> regDotColor rt platform rreg
 
 -- -----------------------------------------------------------------------------
 -- Helper functions (no CPP needed)
@@ -230,4 +293,4 @@ targetClassOfReg platform reg = case reg of
 
 -- | Map a function over registers in a set, preserving formats.
 mapRegFormatSet :: HasDebugCallStack => (Reg -> Reg) -> UniqSet RegWithFormat -> UniqSet RegWithFormat
-mapRegFormatSet f = mapUniqSet (\(RegWithFormat r fmt) -> RegWithFormat (f r) fmt)
+mapRegFormatSet f = mapUniqSet (\ ( RegWithFormat r fmt ) -> RegWithFormat ( f r ) fmt)

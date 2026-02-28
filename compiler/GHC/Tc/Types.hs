@@ -195,7 +195,7 @@ import Data.Typeable ( TypeRep )
 import Data.Maybe    ( mapMaybe )
 
 #if !defined(HAVE_INTERPRETER)
--- Stub types for MINIMAL build (no ghci dependency)
+-- Stub types when interpreter is not available (no ghci dependency)
 data QState = QState  -- Stub for Template Haskell state
 #endif
 

@@ -640,7 +640,7 @@ runHscBackendPhase pipe_env hsc_env mod_name src_flavour location result = do
               bc <- generateFreshByteCode hsc_env mod_name (mkCgInteractiveGuts cgguts) mod_location
               return ([], final_iface, emptyHomeModInfoLinkable { homeMod_bytecode = Just bc } , panic "interpreter")
 #else
-            panic "GHC.Driver.Pipeline.Execute.runHscBackendPhase: bytecode generation not supported in MINIMAL build"
+            panic "GHC.Driver.Pipeline.Execute.runHscBackendPhase: bytecode generation not supported (HAVE_INTERPRETER not defined)"
 #endif
 
 

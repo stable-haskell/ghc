@@ -741,7 +741,7 @@ setTopSessionDynFlags dflags = do
 
   interp <- liftIO $ initInterpreter tmpfs logger platform finder_cache unit_env interp_opts
 #else
-  -- No interpreter support
+  -- No interpreter support (HAVE_INTERPRETER not defined)
   let interp = Nothing
 #endif
 
@@ -1096,7 +1096,7 @@ initialiseInteractiveDynFlags dflags hsc_env0 = do
                   }
               }
 #else
-  -- MINIMAL build: no plugin support, no IC modifications
+  -- No plugin support (HAVE_INTERPRETER not defined)
   return hsc_env0
 #endif
 
