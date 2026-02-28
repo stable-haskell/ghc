@@ -22,7 +22,8 @@
 --
 -- See #9557 and #18254 for why we use -O0.
 {-# OPTIONS_GHC -O0 #-}
-{-# DEPRECATED "This module is empty; import the phase-specific GHC.Hs.Instances.* modules instead." #-}
+-- DEPRECATED: This module is empty; import the phase-specific
+-- GHC.Hs.Instances.* modules instead.
 
 module GHC.Hs.Instances.Transitions where
 

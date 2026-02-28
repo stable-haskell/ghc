@@ -105,6 +105,11 @@ Flag loongarch64-ncg
     Default: True
     Manual: True
 
+Flag host-ncg-only
+    Description: Only include the NCG for the host architecture (for stage1 builds)
+    Default: False
+    Manual: True
+
 -- =============================================================================
 -- Code Generation Backend Flags
 -- =============================================================================
@@ -138,6 +143,11 @@ Flag dynamic-linker
     Default: True
     Manual: True
 
+Flag hpc
+    Description: Include HPC (Haskell Program Coverage) support
+    Default: True
+    Manual: True
+
 Library
     Default-Language: GHC2021
     Exposed: False
@@ -148,19 +158,19 @@ Library
     -- ==========================================================================
 
     -- Native Code Generators
-    if flag(x86-ncg)
+    if flag(x86-ncg) && (!flag(host-ncg-only) || arch(x86_64) || arch(i386))
         cpp-options: -DHAVE_X86_NCG
 
-    if flag(aarch64-ncg)
+    if flag(aarch64-ncg) && (!flag(host-ncg-only) || arch(aarch64))
         cpp-options: -DHAVE_AARCH64_NCG
 
-    if flag(ppc-ncg)
+    if flag(ppc-ncg) && (!flag(host-ncg-only) || arch(ppc) || arch(ppc64))
         cpp-options: -DHAVE_PPC_NCG
 
-    if flag(riscv64-ncg)
+    if flag(riscv64-ncg) && (!flag(host-ncg-only) || arch(riscv64))
         cpp-options: -DHAVE_RISCV64_NCG
 
-    if flag(loongarch64-ncg)
+    if flag(loongarch64-ncg) && (!flag(host-ncg-only) || arch(loongarch64))
         cpp-options: -DHAVE_LOONGARCH64_NCG
 
     -- Code Generation Backends
@@ -179,6 +189,9 @@ Library
 
     if flag(dynamic-linker)
         cpp-options: -DHAVE_DYNAMIC_LINKER
+
+    if flag(hpc)
+        cpp-options: -DHAVE_HPC
 
     if flag(build-tool-depends)
       build-tool-depends: alex:alex >= 3.2.6, happy:happy >= 1.20.0, genprimopcode:genprimopcode, deriveConstants:deriveConstants
@@ -385,6 +398,10 @@ Library
         GHC.CmmToAsm.Types
         GHC.CmmToAsm.Utils
         GHC.CmmToC
+        -- LLVM version info (lightweight, needed by unconditional modules)
+        GHC.CmmToLlvm.Version
+        GHC.CmmToLlvm.Version.Bounds
+        GHC.CmmToLlvm.Version.Type
         GHC.Cmm.Dominators
         GHC.Cmm.Reducibility
         GHC.Cmm.Type
@@ -526,7 +543,6 @@ Library
         GHC.Driver.Config.Cmm
         GHC.Driver.Config.Cmm.Parser
         GHC.Driver.Config.CmmToAsm
-        GHC.Driver.Config.CmmToLlvm
         GHC.Driver.Config.Core.Lint
         GHC.Driver.Config.Core.Lint.Interactive
         GHC.Driver.Config.Core.Opt.Arity
@@ -598,12 +614,17 @@ Library
         GHC.Hs.Pat
         GHC.Hs.Specificity
         GHC.Hs.Stats
+        GHC.Hs.Instances
+        GHC.Hs.Instances.Common
+        GHC.Hs.Instances.Transitions
+        GHC.Hs.Instances.Parsed
+        GHC.Hs.Instances.Renamed
+        GHC.Hs.Instances.Typechecked
         GHC.HsToCore
         GHC.HsToCore.Arrows
         GHC.HsToCore.Binds
         GHC.HsToCore.Breakpoints
         GHC.HsToCore.Breakpoints.Types
-        GHC.HsToCore.Coverage
         GHC.HsToCore.Docs
         GHC.HsToCore.Errors.Ppr
         GHC.HsToCore.Errors.Types
@@ -636,13 +657,6 @@ Library
         GHC.HsToCore.Utils
         GHC.Hs.Type
         GHC.Hs.Utils
-        -- Data instances for AST (split into parallel-compilable modules per #18254)
-        GHC.Hs.Instances
-        GHC.Hs.Instances.Common
-        GHC.Hs.Instances.Transitions
-        GHC.Hs.Instances.Parsed
-        GHC.Hs.Instances.Renamed
-        GHC.Hs.Instances.Typechecked
         GHC.Iface.Binary
         GHC.Iface.Decl
         GHC.Iface.Env
@@ -751,7 +765,6 @@ Library
         GHC.Settings.Config
         GHC.Settings.Constants
         GHC.Settings.IO
-        GHC.Stg.BcPrep
         GHC.Stg.CSE
         GHC.Stg.Debug
         GHC.Stg.EnforceEpt
@@ -1024,7 +1037,7 @@ Library
     -- =========================================================================
 
     -- X86/X86_64 Native Code Generator
-    if flag(x86-ncg)
+    if flag(x86-ncg) && (!flag(host-ncg-only) || arch(x86_64) || arch(i386))
         Exposed-Modules:
             GHC.CmmToAsm.X86
             GHC.CmmToAsm.X86.CodeGen
@@ -1038,7 +1051,7 @@ Library
             GHC.CmmToAsm.Reg.Graph.X86
 
     -- AArch64 Native Code Generator
-    if flag(aarch64-ncg)
+    if flag(aarch64-ncg) && (!flag(host-ncg-only) || arch(aarch64))
         Exposed-Modules:
             GHC.CmmToAsm.AArch64
             GHC.CmmToAsm.AArch64.CodeGen
@@ -1051,7 +1064,7 @@ Library
             GHC.CmmToAsm.Reg.Linear.AArch64
 
     -- PowerPC Native Code Generator
-    if flag(ppc-ncg)
+    if flag(ppc-ncg) && (!flag(host-ncg-only) || arch(ppc) || arch(ppc64))
         Exposed-Modules:
             GHC.CmmToAsm.PPC
             GHC.CmmToAsm.PPC.CodeGen
@@ -1063,7 +1076,7 @@ Library
             GHC.CmmToAsm.Reg.Linear.PPC
 
     -- RISC-V 64-bit Native Code Generator
-    if flag(riscv64-ncg)
+    if flag(riscv64-ncg) && (!flag(host-ncg-only) || arch(riscv64))
         Exposed-Modules:
             GHC.CmmToAsm.RV64
             GHC.CmmToAsm.RV64.CodeGen
@@ -1075,7 +1088,7 @@ Library
             GHC.CmmToAsm.Reg.Linear.RV64
 
     -- LoongArch64 Native Code Generator
-    if flag(loongarch64-ncg)
+    if flag(loongarch64-ncg) && (!flag(host-ncg-only) || arch(loongarch64))
         Exposed-Modules:
             GHC.CmmToAsm.LA64
             GHC.CmmToAsm.LA64.CodeGen
@@ -1141,6 +1154,7 @@ Library
     -- LLVM Backend
     if flag(llvm-backend)
         Exposed-Modules:
+            GHC.Driver.Config.CmmToLlvm
             GHC.CmmToLlvm
             GHC.CmmToLlvm.Base
             GHC.CmmToLlvm.CodeGen
@@ -1149,9 +1163,6 @@ Library
             GHC.CmmToLlvm.Mangler
             GHC.CmmToLlvm.Ppr
             GHC.CmmToLlvm.Regs
-            GHC.CmmToLlvm.Version
-            GHC.CmmToLlvm.Version.Bounds
-            GHC.CmmToLlvm.Version.Type
             GHC.Llvm
             GHC.Llvm.MetaData
             GHC.Llvm.Ppr
@@ -1167,6 +1178,7 @@ Library
             GHC.ByteCode.Instr
             GHC.ByteCode.Linker
             GHC.ByteCode.Types
+            GHC.Stg.BcPrep
             GHC.StgToByteCode
             GHC.Runtime.Loader
             GHC.Runtime.Debugger
@@ -1190,6 +1202,10 @@ Library
             GHC.Linker.Deps
             GHC.Linker.Loader
 
+    -- HPC (Haskell Program Coverage)
+    if flag(hpc)
+        Exposed-Modules:
+            GHC.HsToCore.Coverage
 
     autogen-modules: GHC.Platform.Constants
                      GHC.Settings.Config
