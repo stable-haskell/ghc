@@ -852,10 +852,12 @@ STAGE3_javascript-unknown-ghcjs_GHC_TOOLCHAIN_ARGS = $(GHC_TOOLCHAIN_ARGS) --dis
 STAGE3_wasm32-unknown-wasi_CC                 = wasm32-wasi-clang
 STAGE3_wasm32-unknown-wasi_CC_OPTS            = -fno-strict-aliasing -Wno-error=int-conversion -Oz -msimd128 -mnontrapping-fptoint -msign-ext -mbulk-memory -mmutable-globals -mmultivalue -mreference-types
 STAGE3_wasm32-unknown-wasi_CXX                = wasm32-wasi-clang++
-STAGE3_wasm32-unknown-wasi_CXX_OPTS           = $(STAGE3_wasm32-unknown-wasi_CC_OPTS)
+STAGE3_wasm32-unknown-wasi_CXX_OPTS           = $(STAGE3_wasm32-unknown-wasi_CC_OPTS) -fno-exceptions
+STAGE3_wasm32-unknown-wasi_AR                 = wasm32-wasi-ar
+STAGE3_wasm32-unknown-wasi_RANLIB             = wasm32-wasi-ranlib
 STAGE3_wasm32-unknown-wasi_EXTRA_INCLUDE_DIRS =
 STAGE3_wasm32-unknown-wasi_EXTRA_LIB_DIRS     =
-STAGE3_wasm32-unknown-wasi_GHC_TOOLCHAIN_ARGS = $(GHC_TOOLCHAIN_ARGS) --merge-objs wasm-ld --merge-objs-opt="-r" --disable-tables-next-to-code
+STAGE3_wasm32-unknown-wasi_GHC_TOOLCHAIN_ARGS = $(GHC_TOOLCHAIN_ARGS) --merge-objs wasm-ld --merge-objs-opt="-r" --disable-tables-next-to-code --disable-libffi-adjustors
 
 
 TARGET_DIR = $(DIST_DIR)/lib/targets/$(TARGET_PLATFORM)
