@@ -648,10 +648,10 @@ stage2: $(GHC1) $(CABAL) $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) cabal.project.
 	@for binary in $(DIST_DIR)/bin/* ; do \
 		$(call SET_RPATH,../lib/$(HOST_PLATFORM),$${binary}) ; \
 	done
+ifeq ($(DYNAMIC),1)
 ifneq ($(UNAME), Darwin)
 	$(PATCHELF) --force-rpath --set-rpath "\$$ORIGIN" $(CURDIR)/$(DIST_DIR)/lib/$(TARGET_PLATFORM)/$(DLL)
 endif
-ifeq ($(DYNAMIC),1)
 	$(call LOG,Create -dyn iserv executable symlink so ghc can find ghc-iserv-dyn)
 	@$(LN_SF) ghc-iserv$(EXE_EXT) "$(DIST_DIR)/bin/ghc-iserv-dyn$(EXE_EXT)"
 endif
@@ -1043,8 +1043,10 @@ export SKIP_PERF_TESTS
 
 # --- Test Suite Helper Tool Paths & Flags (Hadrian parity light) ---
 # We approximate Hadrian's test invocation without depending on Hadrian.
-# Bindist places test tools in $(BUILD_DIR)/bindist/bin (created by the bindist target).
-TEST_TOOLS_DIR := $(BUILD_DIR)/bindist/bin
+# $(CURDIR) is needed because the test recipe runs $(MAKE) -C testsuite/tests,
+# so relative paths would resolve from the wrong directory. This matters both
+# for CI and local `make test` invocations.
+TEST_TOOLS_DIR := $(CURDIR)/$(DIST_DIR)/bin
 TEST_GHC       := $(TEST_TOOLS_DIR)/ghc
 TEST_GHC_PKG   := $(TEST_TOOLS_DIR)/ghc-pkg
 TEST_HP2PS     := $(TEST_TOOLS_DIR)/hp2ps
@@ -1065,7 +1067,7 @@ testsuite-timeout:
 
 # --- Test Target ---
 
-test: $(BUILD_DIR)/bindist testsuite-timeout
+test: stage2 testsuite-timeout
 	@echo "::group::Running tests with THREADS=$(THREADS)" >&2
 	# If any required tool is missing, testsuite logic will skip related tests.
 	TEST_HC='$(TEST_GHC)' \
