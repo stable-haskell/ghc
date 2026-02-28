@@ -1268,7 +1268,7 @@ addSptEntries hsc_env mlinkable =
      , spt <- bc_spt_entries bco
      ]
 #else
-addSptEntries _ _ = return ()  -- No bytecode support in MINIMAL build
+addSptEntries _ _ = return ()  -- No bytecode support (HAVE_INTERPRETER not defined)
 #endif
 
 

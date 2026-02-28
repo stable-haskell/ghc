@@ -44,7 +44,7 @@ import GHC.Utils.Outputable
 import qualified GHC.Unit.Home.Graph as HUG
 
 #if !defined(HAVE_INTERPRETER)
--- Stub type for MINIMAL build (replaces GHC.ByteCode.Breakpoints.InternalModBreaks)
+-- Stub type when interpreter is not available (replaces GHC.ByteCode.Breakpoints.InternalModBreaks)
 data InternalModBreaks = InternalModBreaks
 #endif
 
@@ -164,7 +164,7 @@ getHomeModuleInfo hsc_env mdl =
 #if defined(HAVE_INTERPRETER)
                         minf_modBreaks = getModBreaks hmi
 #else
-                        minf_modBreaks = Nothing  -- No bytecode support in MINIMAL build
+                        minf_modBreaks = Nothing  -- No bytecode support (HAVE_INTERPRETER not defined)
 #endif
                         }))
 

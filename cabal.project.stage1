@@ -18,6 +18,7 @@ packages:
   -- Internal libraries
   libraries/ghc-boot
   libraries/ghc-boot-th-next
+  libraries/ghc-platform
   https://hackage.haskell.org/package/libffi-clib-3.5.2/libffi-clib-3.5.2.tar.gz
 
   -- Internal tools

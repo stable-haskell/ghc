@@ -78,7 +78,7 @@ import GHC.Linker.Static
 import GHC.Linker.Static.Utils
 import GHC.Linker.Types
 
-#if defined(HAVE_INTERPRETER)
+#if defined(HAVE_JS_BACKEND)
 import GHC.Driver.Config.StgToJS
 import GHC.StgToJS.Linker.Linker
 #endif
@@ -453,7 +453,7 @@ link' logger tmpfs fc dflags unit_env batch_attempt_linking mHscMessager hpt
         -- Don't showPass in Batch mode; doLink will do that for us.
         case ghcLink dflags of
           LinkExecutable blm
-#if defined(HAVE_INTERPRETER)
+#if defined(HAVE_JS_BACKEND)
             | backendUseJSLinker (backend dflags) -> linkJSBinary logger tmpfs fc dflags unit_env obj_files pkg_deps
 #endif
             | otherwise -> do
@@ -473,7 +473,7 @@ link' logger tmpfs fc dflags unit_env batch_attempt_linking mHscMessager hpt
                                 text "   Main.main not exported; not linking.")
         return Succeeded
 
-#if defined(HAVE_INTERPRETER)
+#if defined(HAVE_JS_BACKEND)
 linkJSBinary :: Logger -> TmpFs -> FinderCache -> DynFlags -> UnitEnv -> [FilePath] -> [UnitId] -> IO ()
 linkJSBinary logger tmpfs fc dflags unit_env obj_files pkg_deps = do
   -- we use the default configuration for now. In the future we may expose
@@ -603,7 +603,7 @@ doLink hsc_env o_files = do
   case ghcLink dflags of
     NoLink        -> return ()
     LinkExecutable blm
-#if defined(HAVE_INTERPRETER)
+#if defined(HAVE_JS_BACKEND)
       | backendUseJSLinker (backend dflags)
                   -> linkJSBinary logger tmpfs fc dflags unit_env o_files []
 #endif

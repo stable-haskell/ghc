@@ -71,7 +71,8 @@ import {-# SOURCE #-} GHC.Tc.Types.LclEnv (TcLclEnv)
 #if defined(HAVE_INTERPRETER)
 import GHCi.RemoteTypes ( ForeignRef )
 #else
-import Foreign.ForeignPtr (ForeignPtr)
+-- Use centralized stub types when interpreter is not available
+import GHC.Runtime.Interpreter.Stubs ( ForeignRef(..) )
 #endif
 import qualified GHC.Boot.TH.Syntax as TH (Q)
 
@@ -85,11 +86,6 @@ import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import Data.Void (Void)
 import qualified Data.Set as S
-
-#if !defined(HAVE_INTERPRETER)
--- Stub type for builds without interpreter (no ghci dependency)
-newtype ForeignRef a = ForeignRef (ForeignPtr ())
-#endif
 
 {- *********************************************************************
 *                                                                      *

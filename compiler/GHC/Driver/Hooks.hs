@@ -69,8 +69,8 @@ import GHC.Cmm
 #if defined(HAVE_INTERPRETER)
 import GHCi.RemoteTypes
 #else
-import Foreign.ForeignPtr (ForeignPtr)
-import GHC.Exts (Any)
+-- Use centralized stub types when interpreter is not available
+import GHC.Runtime.Interpreter.Stubs ( HValue, ForeignHValue )
 #endif
 
 import GHC.Data.Bag
@@ -78,13 +78,6 @@ import GHC.Data.Bag
 import qualified Data.Kind
 import System.Process
 import GHC.Linker.Types
-
-#if !defined(HAVE_INTERPRETER)
--- Stub types for MINIMAL build (no ghci dependency)
--- ForeignRef is defined in GHC.Hs.Expr which we import
-newtype HValue = HValue Any
-type ForeignHValue = ForeignRef HValue
-#endif
 
 {-
 ************************************************************************

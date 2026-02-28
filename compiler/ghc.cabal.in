@@ -1172,6 +1172,11 @@ Library
             GHC.Runtime.Heap.Inspect
             GHC.Runtime.Interpreter.Process
 
+    -- Stub types when interpreter is not available
+    if !flag(interpreter)
+        Exposed-Modules:
+            GHC.Runtime.Interpreter.Stubs
+
     -- Dynamic Linker/Loader
     if flag(dynamic-linker)
         Exposed-Modules:

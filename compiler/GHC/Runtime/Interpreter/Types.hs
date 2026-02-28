@@ -51,10 +51,13 @@ import GHC.Linker.Types
 #if defined(HAVE_INTERPRETER)
 import GHCi.RemoteTypes
 import GHCi.Message         ( Pipe )
+import GHC.StgToJS.Types
+import GHC.StgToJS.Linker.Types
 #else
-import Foreign.ForeignPtr (ForeignPtr)
-import GHC.Exts (Any)
-import System.IO (Handle)
+-- Use centralized stub types when interpreter is not available
+import GHC.Runtime.Interpreter.Stubs
+       ( HValue, ForeignRef, RemoteRef, HValueRef
+       , Pipe, LinkPlan(..), StgToJSConfig(..) )
 #endif
 
 import GHC.Data.FastString.Env
@@ -65,27 +68,12 @@ import GHC.Utils.Logger
 import GHC.Unit.Env
 import GHC.Unit.State
 import GHC.Unit.Types
-#if defined(HAVE_INTERPRETER)
-import GHC.StgToJS.Types
-import GHC.StgToJS.Linker.Types
-#endif
 import GHC.Runtime.Interpreter.Types.SymbolCache
 
 import Control.Concurrent
 import System.Process   ( ProcessHandle, CreateProcess )
 import System.IO
 import GHC.Unit.Finder.Types (FinderCache, FinderOpts)
-
-#if !defined(HAVE_INTERPRETER)
--- Stub types for MINIMAL build (no ghci dependency)
-newtype HValue = HValue Any
-newtype ForeignRef a = ForeignRef (ForeignPtr ())
-newtype RemoteRef a = RemoteRef ()
-type HValueRef = RemoteRef HValue
-type Pipe = (Handle, Handle)  -- Stub for GHCi.Message.Pipe
-data LinkPlan = LinkPlan  -- Stub for GHC.StgToJS.Linker.Types.LinkPlan
-data StgToJSConfig = StgToJSConfig  -- Stub for GHC.StgToJS.Types.StgToJSConfig
-#endif
 
 -- | Interpreter
 data Interp = Interp
