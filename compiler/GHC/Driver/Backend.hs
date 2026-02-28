@@ -1,4 +1,5 @@
 {-# LANGUAGE MultiWayIf, LambdaCase #-}
+{-# LANGUAGE CPP #-}
 
 {-|
 Module      : GHC.Driver.Backend
@@ -209,13 +210,20 @@ platformNcgSupported platform = if
       ncgValidArch = case platformArch platform of
          ArchX86       -> True
          ArchX86_64    -> True
+#if !defined(NO_UNCOMMON_NCGS)
          ArchPPC       -> True
          ArchPPC_64 {} -> True
+#endif
          ArchAArch64   -> True
+#if !defined(MINIMAL)
          ArchWasm32    -> True
+#endif
+#if !defined(NO_UNCOMMON_NCGS)
          ArchRISCV64   -> True
          ArchLoongArch64 -> True
+#endif
          _             -> False
+
 
 -- | Is the platform supported by the JS backend?
 platformJSSupported :: Platform -> Bool

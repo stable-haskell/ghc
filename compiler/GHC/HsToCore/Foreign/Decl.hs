@@ -1,4 +1,5 @@
 
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 
@@ -20,7 +21,9 @@ import GHC.Tc.Utils.Monad        -- temp
 
 import GHC.HsToCore.Foreign.C
 import GHC.HsToCore.Foreign.JavaScript
+#if !defined(MINIMAL)
 import GHC.HsToCore.Foreign.Wasm
+#endif
 import GHC.HsToCore.Foreign.Utils
 import GHC.HsToCore.Monad
 
@@ -136,8 +139,10 @@ dsFImport id co (CImport _ cconv safety mHeader spec) = do
     (ArchJavaScript, _) -> do
       (bs, h, c) <- dsJsImport id co spec cconv' safety' mHeader
       pure (bs, h, c, [])
+#if !defined(MINIMAL)
     (ArchWasm32, JavaScriptCallConv) ->
       dsWasmJSImport id co spec safety'
+#endif
     _ -> do
       (bs, h, c) <- dsCImport id co spec cconv' safety' mHeader
       pure (bs, h, c, [])
@@ -182,8 +187,10 @@ dsFExport fn_id co ext_name cconv is_dyn = do
     (ArchJavaScript, _) -> do
       (h, c, ts) <- dsJsFExport fn_id co ext_name cconv is_dyn
       pure (h, c, ts, [fn_id], [])
+#if !defined(MINIMAL)
     (ArchWasm32, JavaScriptCallConv) ->
       dsWasmJSExport fn_id co ext_name
+#endif
     _ -> do
       (h, c, ts) <- dsCFExport fn_id co ext_name cconv is_dyn
       pure (h, c, ts, [fn_id], [])

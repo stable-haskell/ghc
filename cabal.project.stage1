@@ -18,8 +18,6 @@ packages:
   -- Internal libraries
   libraries/ghc-boot
   libraries/ghc-boot-th-next
-  libraries/ghci
-  libraries/ghc-platform
   https://hackage.haskell.org/package/libffi-clib-3.5.2/libffi-clib-3.5.2.tar.gz
 
   -- Internal tools
@@ -80,10 +78,10 @@ if !os(windows)
     library-for-ghci: True
 
 package ghc
-  flags: +bootstrap
+  flags: +bootstrap +minimal +no-uncommon-ncgs
 
-package ghci
-  flags: +bootstrap
+package ghc-bin
+  flags: -frontend-plugins
 
 package ghc-boot
   flags: +bootstrap

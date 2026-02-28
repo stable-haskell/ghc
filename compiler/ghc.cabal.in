@@ -76,10 +76,23 @@ Flag bootstrap
         Default: False
         Manual: True
 
+Flag minimal
+    Description: Build without bytecode, js, wasm backends
+    Default: False
+    Manual: True
+
+Flag no-uncommon-ncgs
+    Description: Build only the x86 and aarch64 ncgs
+    Default: False
+    Manual: True
+
 Library
     Default-Language: GHC2021
     Exposed: False
     Includes: Unique.h
+
+    if flag(minimal)
+      cpp-options: -DMINIMAL
 
     if flag(build-tool-depends)
       build-tool-depends: alex:alex >= 3.2.6, happy:happy >= 1.20.0, genprimopcode:genprimopcode, deriveConstants:deriveConstants
@@ -92,7 +105,14 @@ Library
           extra-libraries: :libzstd.a
       else
         extra-libraries: zstd
-      CPP-Options: -DHAVE_LIBZSTD
+      cpp-options: -DHAVE_LIBZSTD
+
+    if flag(minimal)
+        cpp-options: -DMINIMAL
+
+    if flag(no-uncommon-ncgs)
+        cpp-options: -DNO_UNCOMMON_NCGS
+
 
     Build-Depends: base       >= 4.11 && < 4.23,
                    deepseq    >= 1.4 && < 1.6,
@@ -112,11 +132,13 @@ Library
                    stm,
                    rts,
                    rts-headers,
-                   ghc-boot   == @ProjectVersionMunged@,
-                   ghci == @ProjectVersionMunged@
+                   ghc-boot   == @ProjectVersionMunged@
+
+    if !flag(minimal)
+      Build-Depends: ghci == @ProjectVersionMunged@
 
     if flag(bootstrap)
-      CPP-Options: -DBOOTSTRAPPING
+      cpp-options: -DBOOTSTRAPPING
       Build-Depends:
         ghc-boot-th-next     == @ProjectVersionMunged@
     else
@@ -136,11 +158,11 @@ Library
                  -Wnoncanonical-monoid-instances
 
     if flag(internal-interpreter)
-        CPP-Options: -DHAVE_INTERNAL_INTERPRETER
+        cpp-options: -DHAVE_INTERNAL_INTERPRETER
 
     -- if no dynamic system linker is available, don't try DLLs.
     if flag(dynamic-system-linker)
-        CPP-Options: -DCAN_LOAD_DLL
+        cpp-options: -DCAN_LOAD_DLL
 
     Other-Extensions:
         CPP
@@ -205,12 +227,7 @@ Library
         GHC.Builtin.Types.Prim
         GHC.Builtin.Uniques
         GHC.Builtin.Utils
-        GHC.ByteCode.Asm
-        GHC.ByteCode.Breakpoints
-        GHC.ByteCode.InfoTable
-        GHC.ByteCode.Instr
-        GHC.ByteCode.Linker
-        GHC.ByteCode.Types
+
         GHC.Cmm
         GHC.Cmm.BlockId
         GHC.Cmm.CallConv
@@ -268,22 +285,10 @@ Library
         GHC.CmmToAsm.Dwarf.Types
         GHC.CmmToAsm.Format
         GHC.CmmToAsm.Instr
-        GHC.CmmToAsm.LA64
-        GHC.CmmToAsm.LA64.CodeGen
-        GHC.CmmToAsm.LA64.Cond
-        GHC.CmmToAsm.LA64.Instr
-        GHC.CmmToAsm.LA64.Ppr
-        GHC.CmmToAsm.LA64.RegInfo
-        GHC.CmmToAsm.LA64.Regs
+
         GHC.CmmToAsm.Monad
         GHC.CmmToAsm.PIC
-        GHC.CmmToAsm.PPC
-        GHC.CmmToAsm.PPC.CodeGen
-        GHC.CmmToAsm.PPC.Cond
-        GHC.CmmToAsm.PPC.Instr
-        GHC.CmmToAsm.PPC.Ppr
-        GHC.CmmToAsm.PPC.RegInfo
-        GHC.CmmToAsm.PPC.Regs
+
         GHC.CmmToAsm.Ppr
         GHC.CmmToAsm.Reg.Graph
         GHC.CmmToAsm.Reg.Graph.Base
@@ -299,9 +304,7 @@ Library
         GHC.CmmToAsm.Reg.Linear.Base
         GHC.CmmToAsm.Reg.Linear.FreeRegs
         GHC.CmmToAsm.Reg.Linear.JoinToTargets
-        GHC.CmmToAsm.Reg.Linear.LA64
-        GHC.CmmToAsm.Reg.Linear.PPC
-        GHC.CmmToAsm.Reg.Linear.RV64
+
         GHC.CmmToAsm.Reg.Linear.StackMap
         GHC.CmmToAsm.Reg.Linear.State
         GHC.CmmToAsm.Reg.Linear.Stats
@@ -311,13 +314,7 @@ Library
         GHC.CmmToAsm.Reg.Regs
         GHC.CmmToAsm.Reg.Target
         GHC.CmmToAsm.Reg.Utils
-        GHC.CmmToAsm.RV64
-        GHC.CmmToAsm.RV64.CodeGen
-        GHC.CmmToAsm.RV64.Cond
-        GHC.CmmToAsm.RV64.Instr
-        GHC.CmmToAsm.RV64.Ppr
-        GHC.CmmToAsm.RV64.RegInfo
-        GHC.CmmToAsm.RV64.Regs
+
         GHC.CmmToAsm.Types
         GHC.CmmToAsm.Utils
         GHC.CmmToAsm.X86
@@ -505,7 +502,6 @@ Library
         GHC.Driver.Config.Stg.Ppr
         GHC.Driver.Config.StgToCmm
         GHC.Driver.Config.Tidy
-        GHC.Driver.Config.StgToJS
         GHC.Driver.DynFlags
         GHC.Driver.IncludeSpecs
         GHC.Driver.Downsweep
@@ -570,7 +566,7 @@ Library
         GHC.HsToCore.Foreign.JavaScript
         GHC.HsToCore.Foreign.Prim
         GHC.HsToCore.Foreign.Utils
-        GHC.HsToCore.Foreign.Wasm
+
         GHC.HsToCore.GuardedRHSs
         GHC.HsToCore.ListComp
         GHC.HsToCore.Match
@@ -629,16 +625,16 @@ Library
         GHC.JS.JStg.Monad
         GHC.JS.Transform
         GHC.Linker.ArchivePrelink
+        GHC.Linker.Types
         GHC.Linker.Config
-        GHC.Linker.Deps
         GHC.Linker.Dynamic
         GHC.Linker.External
         GHC.Linker.Executable
+        GHC.Linker.ExtraObj
         GHC.Linker.Loader
         GHC.Linker.MacOS
         GHC.Linker.Static
         GHC.Linker.Static.Utils
-        GHC.Linker.Types
         GHC.Linker.Unit
         GHC.Linker.Windows
         GHC.Llvm
@@ -678,7 +674,7 @@ Library
         GHC.Platform.Regs
         GHC.Platform.RISCV64
         GHC.Platform.S390X
-        GHC.Platform.Wasm32
+
         GHC.Platform.Ways
         GHC.Platform.X86
         GHC.Platform.X86_64
@@ -698,22 +694,11 @@ Library
         GHC.Rename.Unbound
         GHC.Rename.Utils
         GHC.Runtime.Context
-        GHC.Runtime.Debugger
-        GHC.Runtime.Debugger.Breakpoints
-        GHC.Runtime.Eval
         GHC.Runtime.Eval.Types
-        GHC.Runtime.Eval.Utils
-        GHC.Runtime.Heap.Inspect
         GHC.Runtime.Heap.Layout
-        GHC.Runtime.Interpreter
-        GHC.Runtime.Interpreter.C
-        GHC.Runtime.Interpreter.Init
-        GHC.Runtime.Interpreter.JS
-        GHC.Runtime.Interpreter.Process
         GHC.Runtime.Interpreter.Types
         GHC.Runtime.Interpreter.Types.SymbolCache
-        GHC.Runtime.Interpreter.Wasm
-        GHC.Runtime.Loader
+        GHC.Runtime.Interpreter
         GHC.Runtime.Utils
         GHC.Settings
         GHC.Settings.Config
@@ -739,7 +724,6 @@ Library
         GHC.Stg.Subst
         GHC.Stg.Syntax
         GHC.Stg.Utils
-        GHC.StgToByteCode
         GHC.StgToCmm
         GHC.StgToCmm.ArgRep
         GHC.StgToCmm.Bind
@@ -764,38 +748,7 @@ Library
         GHC.StgToCmm.Ticky
         GHC.StgToCmm.Types
         GHC.StgToCmm.Utils
-        GHC.StgToJS
-        GHC.StgToJS.Apply
-        GHC.StgToJS.Arg
-        GHC.StgToJS.Closure
-        GHC.StgToJS.CodeGen
-        GHC.StgToJS.DataCon
-        GHC.StgToJS.Deps
-        GHC.StgToJS.Expr
-        GHC.StgToJS.ExprCtx
-        GHC.StgToJS.FFI
-        GHC.StgToJS.Heap
-        GHC.StgToJS.Ids
-        GHC.StgToJS.Literal
-        GHC.StgToJS.Monad
-        GHC.StgToJS.Object
-        GHC.StgToJS.Prim
-        GHC.StgToJS.Profiling
-        GHC.StgToJS.Regs
-        GHC.StgToJS.Rts.Types
-        GHC.StgToJS.Rts.Rts
-        GHC.StgToJS.Sinker.Collect
-        GHC.StgToJS.Sinker.StringsUnfloat
-        GHC.StgToJS.Sinker.Sinker
-        GHC.StgToJS.Stack
-        GHC.StgToJS.StaticPtr
-        GHC.StgToJS.Symbols
-        GHC.StgToJS.Types
-        GHC.StgToJS.Utils
-        GHC.StgToJS.Linker.Linker
-        GHC.StgToJS.Linker.Types
-        GHC.StgToJS.Linker.Utils
-        GHC.StgToJS.Linker.Opt
+
         GHC.Stg.Unarise
         GHC.SysTools
         GHC.SysTools.Ar
@@ -1002,13 +955,7 @@ Library
         GHC.Utils.Trace
         GHC.Utils.Unique
         GHC.Utils.Word64
-        GHC.Wasm.ControlFlow
-        GHC.Wasm.ControlFlow.FromCmm
-        GHC.CmmToAsm.Wasm
-        GHC.CmmToAsm.Wasm.Asm
-        GHC.CmmToAsm.Wasm.FromCmm
-        GHC.CmmToAsm.Wasm.Types
-        GHC.CmmToAsm.Wasm.Utils
+
 
         Language.Haskell.Syntax
         Language.Haskell.Syntax.Basic
@@ -1024,6 +971,97 @@ Library
         Language.Haskell.Syntax.Pat
         Language.Haskell.Syntax.Specificity
         Language.Haskell.Syntax.Type
+
+    if !flag(minimal)
+        Exposed-Modules:
+            GHC.ByteCode.Asm
+            GHC.ByteCode.Breakpoints
+            GHC.ByteCode.InfoTable
+            GHC.ByteCode.Instr
+            GHC.ByteCode.Linker
+            GHC.ByteCode.Types
+            GHC.Driver.Config.StgToJS
+            GHC.StgToByteCode
+            GHC.Linker.Deps
+            GHC.Linker.Loader
+            GHC.Runtime.Loader
+            GHC.Runtime.Debugger
+            GHC.Runtime.Debugger.Breakpoints
+            GHC.Runtime.Eval
+            GHC.Runtime.Eval.Utils
+            GHC.Runtime.Heap.Inspect
+            GHC.Runtime.Interpreter.Process
+            GHC.StgToJS
+            GHC.StgToJS.Apply
+            GHC.StgToJS.Arg
+            GHC.StgToJS.Closure
+            GHC.StgToJS.CodeGen
+            GHC.StgToJS.DataCon
+            GHC.StgToJS.Deps
+            GHC.StgToJS.Expr
+            GHC.StgToJS.ExprCtx
+            GHC.StgToJS.FFI
+            GHC.StgToJS.Heap
+            GHC.StgToJS.Ids
+            GHC.StgToJS.Literal
+            GHC.StgToJS.Monad
+            GHC.StgToJS.Object
+            GHC.StgToJS.Prim
+            GHC.StgToJS.Profiling
+            GHC.StgToJS.Regs
+            GHC.StgToJS.Rts.Types
+            GHC.StgToJS.Rts.Rts
+            GHC.StgToJS.Sinker.Collect
+            GHC.StgToJS.Sinker.StringsUnfloat
+            GHC.StgToJS.Sinker.Sinker
+            GHC.StgToJS.Stack
+            GHC.StgToJS.StaticPtr
+            GHC.StgToJS.Symbols
+            GHC.StgToJS.Types
+            GHC.StgToJS.Utils
+            GHC.StgToJS.Linker.Linker
+            GHC.StgToJS.Linker.Types
+            GHC.StgToJS.Linker.Utils
+            GHC.StgToJS.Linker.Opt
+            GHC.Wasm.ControlFlow
+            GHC.Wasm.ControlFlow.FromCmm
+            GHC.CmmToAsm.Wasm
+            GHC.CmmToAsm.Wasm.Asm
+            GHC.CmmToAsm.Wasm.FromCmm
+            GHC.CmmToAsm.Wasm.Types
+            GHC.CmmToAsm.Wasm.Utils
+            GHC.HsToCore.Foreign.Wasm
+            GHC.Platform.Wasm32
+            GHC.Runtime.Interpreter.Wasm
+            GHC.Runtime.Interpreter.JS
+
+    if !flag(no-uncommon-ncgs)
+        Exposed-Modules:
+            GHC.CmmToAsm.PPC
+            GHC.CmmToAsm.PPC.CodeGen
+            GHC.CmmToAsm.PPC.Cond
+            GHC.CmmToAsm.PPC.Instr
+            GHC.CmmToAsm.PPC.Ppr
+            GHC.CmmToAsm.PPC.RegInfo
+            GHC.CmmToAsm.PPC.Regs
+            GHC.CmmToAsm.RV64
+            GHC.CmmToAsm.RV64.CodeGen
+            GHC.CmmToAsm.RV64.Cond
+            GHC.CmmToAsm.RV64.Instr
+            GHC.CmmToAsm.RV64.Ppr
+            GHC.CmmToAsm.RV64.RegInfo
+            GHC.CmmToAsm.RV64.Regs
+            GHC.CmmToAsm.LA64
+            GHC.CmmToAsm.LA64.CodeGen
+            GHC.CmmToAsm.LA64.Cond
+            GHC.CmmToAsm.LA64.Instr
+            GHC.CmmToAsm.LA64.Ppr
+            GHC.CmmToAsm.LA64.RegInfo
+            GHC.CmmToAsm.LA64.Regs
+            GHC.CmmToAsm.Reg.Linear.LA64
+            GHC.CmmToAsm.Reg.Linear.PPC
+            GHC.CmmToAsm.Reg.Linear.RV64
+
 
     autogen-modules: GHC.Platform.Constants
                      GHC.Settings.Config

@@ -54,17 +54,20 @@ import GHC.Driver.DynFlags (rtsWayUnitId)
 import GHC.Tc.Utils.Monad
 
 import GHC.Runtime.Interpreter
+import GHC.Iface.Load
+
+#if !defined(MINIMAL)
 import GHCi.BreakArray
 import GHCi.RemoteTypes
-import GHC.Iface.Load
 import GHCi.Message (ConInfoTable(..), LoadedDLL)
-
 import GHC.ByteCode.Breakpoints
 import GHC.ByteCode.Linker
 import GHC.ByteCode.Asm
 import GHC.ByteCode.Types
+#endif
 
 import GHC.Stack.CCS
+
 import GHC.SysTools
 
 import GHC.Types.Basic
@@ -731,9 +734,14 @@ loadDecls interp hsc_env span linkable = do
                           , linked_breaks = lb2 }
           return (pls2, (nms_fhvs, links_needed, units_needed))
   where
+#if defined(MINIMAL)
+    cbcs = []
+#else
     cbcs = linkableBCOs linkable
+#endif
 
     free_names = uniqDSetToList $
+
       foldl'
         (\acc cbc -> foldl' (\acc' bco -> bcoFreeNames bco `unionUniqDSets` acc') acc (bc_bcos cbc))
         emptyUniqDSet cbcs
@@ -968,10 +976,15 @@ dynLinkBCOs interp pls bcos = do
             parts = concatMap (NE.toList . linkableParts) new_bcos
 
             cbcs :: [CompiledByteCode]
+#if defined(MINIMAL)
+            cbcs = []
+#else
             cbcs = concatMap linkablePartAllBCOs parts
+#endif
 
 
             le1 = linker_env pls
+
             lb1 = linked_breaks pls
         ie2 <- linkITbls interp (itbl_env le1) (concatMap bc_itbls cbcs)
         ae2 <- foldlM (\env cbc -> allocateTopStrings interp (bc_strs cbc) env) (addr_env le1) cbcs
@@ -1026,11 +1039,16 @@ makeForeignNamedHValueRefs interp bindings =
   mapM (\(n, hvref) -> (n,) <$> mkFinalizedHValue interp hvref) bindings
 
 linkITbls :: Interp -> ItblEnv -> [(Name, ConInfoTable)] -> IO ItblEnv
+#if defined(MINIMAL)
+linkITbls _ env _ = return env
+#else
 linkITbls interp = foldlM $ \env (nm, itbl) -> do
   r <- interpCmd interp $ MkConInfoTable itbl
   evaluate $ extendNameEnv env nm (nm, ItblPtr r)
+#endif
 
 {- **********************************************************************
+
 
                 Unload some object modules
 
@@ -1711,14 +1729,19 @@ maybePutStrLn logger s = maybePutSDoc logger (text s <> text "\n")
 -- | see Note [Generating code for top-level string literal bindings]
 allocateTopStrings ::
   Interp -> [(Name, ByteString)] -> AddrEnv -> IO AddrEnv
+#if defined(MINIMAL)
+allocateTopStrings _ _ env = return env
+#else
 allocateTopStrings interp topStrings prev_env = do
   let (bndrs, strings) = unzip topStrings
   ptrs <- interpCmd interp $ MallocStrings strings
   evaluate $ extendNameEnvList prev_env (zipWith mk_entry bndrs ptrs)
   where
     mk_entry nm ptr = (nm, (nm, AddrPtr ptr))
+#endif
 
 -- | Given a list of 'InternalModBreaks' collected from a list of
+
 -- 'CompiledByteCode', allocate the 'BreakArray' used to trigger breakpoints.
 allocateBreakArrays ::
   Interp ->

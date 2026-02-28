@@ -6,6 +6,7 @@
 --
 -- -----------------------------------------------------------------------------
 
+{-# LANGUAGE CPP #-}
 module GHC.Runtime.Eval.Types (
         Resume(..), ResumeBindings, IcGlobalRdrEnv(..),
         History(..), ExecResult(..),
@@ -15,10 +16,16 @@ module GHC.Runtime.Eval.Types (
 
 import GHC.Prelude
 
+#if !defined(MINIMAL)
 import GHCi.RemoteTypes
 import GHCi.Message (EvalExpr, ResumeContext)
 import GHC.ByteCode.Types (InternalBreakpointId(..))
 import GHC.Driver.Config (EvalStep(..))
+#else
+import Foreign.ForeignPtr (ForeignPtr)
+import Foreign.Ptr (Ptr)
+import GHC.Exts (Any)
+#endif
 import GHC.Types.Id
 import GHC.Types.Name
 import GHC.Types.TyThing
@@ -28,6 +35,20 @@ import GHC.Utils.Exception
 
 import Data.Word
 import GHC.Stack.CCS
+
+#if defined(MINIMAL)
+-- Stub types for MINIMAL build (no ghci dependency)
+newtype HValue = HValue Any
+newtype ForeignRef a = ForeignRef (ForeignPtr ())
+type ForeignHValue = ForeignRef HValue
+newtype RemoteRef a = RemoteRef ()
+newtype RemotePtr a = RemotePtr (Ptr ())
+type HValueRef = RemoteRef HValue
+data InternalBreakpointId = InternalBreakpointId
+type EvalExpr a = a
+type ResumeContext a = a
+data EvalStep = EvalStepSingle | EvalStepOut | EvalStepNone
+#endif
 
 data ExecOptions
  = ExecOptions

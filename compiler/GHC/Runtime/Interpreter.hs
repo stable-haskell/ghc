@@ -5,6 +5,16 @@
 -- | Interacting with the iserv interpreter, whether it is running on an
 -- external process or in the current process.
 --
+#if defined(MINIMAL)
+-- Minimal stub module for stage1 builds - just re-exports types
+module GHC.Runtime.Interpreter
+  ( module GHC.Runtime.Interpreter.Types
+  ) where
+
+import GHC.Runtime.Interpreter.Types
+
+#else
+-- Full interpreter implementation for stage2+
 module GHC.Runtime.Interpreter
   ( module GHC.Runtime.Interpreter.Types
 
@@ -70,17 +80,20 @@ module GHC.Runtime.Interpreter
 import GHC.Prelude
 
 import GHC.Runtime.Interpreter.Types
+#if !defined(MINIMAL)
 import GHC.Runtime.Interpreter.JS
 import GHC.Runtime.Interpreter.Wasm
+#endif
 import GHC.Runtime.Interpreter.Process
 import GHC.Runtime.Utils
+#if !defined(MINIMAL)
 import GHCi.Message
 import GHCi.RemoteTypes
 import GHCi.ResolvedBCO
 import GHCi.BreakArray (BreakArray)
 import GHC.ByteCode.Breakpoints
-
 import GHC.ByteCode.Types
+#endif
 import GHC.Linker.Types
 
 import GHC.Data.Maybe
@@ -741,12 +754,17 @@ wormholeRef interp _r = case interpInstance interp of
 -- 'HomeModInfo'.
 getModBreaks :: HomeModInfo -> Maybe InternalModBreaks
 getModBreaks hmi
+#if defined(MINIMAL)
+  = Nothing
+#else
   | Just linkable <- homeModInfoByteCode hmi,
     -- The linkable may have 'DotO's as well; only consider BCOs. See #20570.
     [cbc] <- linkableAllBCOs linkable
   = bc_breaks cbc
   | otherwise
   = Nothing -- probably object code
+#endif
+
 
 -- | Read the 'InternalModBreaks' of the given home 'Module' (via
 -- 'InternalBreakpointId') from the 'HomeUnitGraph'.
@@ -767,4 +785,6 @@ readIModModBreaks hug mod = imodBreaks_modBreaks . expectJust <$> readIModBreaks
 fromEvalResult :: EvalResult a -> IO a
 fromEvalResult (EvalException e) = throwIO (fromSerializableException e)
 fromEvalResult (EvalSuccess a) = return a
+
+#endif
 

@@ -1,6 +1,7 @@
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MultiWayIf #-}
+{-# LANGUAGE CPP #-}
 
 -----------------------------------------------------------------------------
 --
@@ -38,26 +39,49 @@ module GHC.Linker.Types
    , linkableObjs
    , linkableLibs
    , linkableFiles
+#if !defined(MINIMAL)
    , linkableBCOs
+#endif
    , linkableNativeParts
    , linkablePartitionParts
    , linkablePartPath
+#if !defined(MINIMAL)
    , linkablePartAllBCOs
+#endif
    , isNativeCode
    , isNativeLib
+#if !defined(MINIMAL)
    , linkableFilterByteCode
+#endif
    , linkableFilterNative
+
    , partitionLinkables
    , linkableAllBCOs
+#if defined(MINIMAL)
+   , ItblEnv
+   , AddrEnv
+#endif
    )
 where
 
+
 import GHC.Prelude
 import GHC.Unit                ( UnitId, Module )
+#if !defined(MINIMAL)
 import GHC.ByteCode.Types
+#else
+import GHC.Types.Tickish       ( BreakTickIndex )
+#endif
+
+#if !defined(MINIMAL)
 import GHCi.BreakArray
 import GHCi.RemoteTypes
 import GHCi.Message            ( LoadedDLL )
+#else
+import Foreign.Ptr (Ptr)
+import Foreign.ForeignPtr (ForeignPtr)
+import GHC.Exts (Any)
+#endif
 
 import GHC.Stack.CCS
 import GHC.Types.Name.Env      ( NameEnv, emptyNameEnv, extendNameEnvList, filterNameEnv )
@@ -77,6 +101,18 @@ import Data.Maybe (mapMaybe)
 import Data.List.NonEmpty (NonEmpty, nonEmpty)
 import qualified Data.List.NonEmpty as NE
 
+#if defined(MINIMAL)
+-- Stub types for MINIMAL build (no ghci dependency)
+newtype HValue = HValue Any
+newtype ForeignRef a = ForeignRef (ForeignPtr ())
+type ForeignHValue = ForeignRef HValue
+data BreakArray = BreakArray  -- Stub for GHCi.BreakArray
+newtype RemotePtr a = RemotePtr (Ptr ())  -- Stub for GHCi.RemoteTypes
+
+type ItblEnv = NameEnv (Name, ())
+type AddrEnv = NameEnv (Name, ())
+type LoadedDLL = ()  -- Stub for GHCi.Message.LoadedDLL
+#endif
 
 {- **********************************************************************
 
@@ -322,6 +358,7 @@ data LinkablePart
       -- used by some other backend See Note [Interface Files with Core
       -- Definitions]
 
+#if !defined(MINIMAL)
   | LazyBCOs
       CompiledByteCode
       -- ^ Some BCOs generated on-demand when forced. This is used for
@@ -331,6 +368,8 @@ data LinkablePart
 
   | BCOs CompiledByteCode
     -- ^ A byte-code object, lives only in memory.
+#endif
+
 
 instance Outputable LinkablePart where
   ppr (DotO path sort)   = text "DotO" <+> text path <+> pprSort sort
@@ -340,19 +379,25 @@ instance Outputable LinkablePart where
         ForeignObject -> brackets (text "foreign")
   ppr (DotA path)       = text "DotA" <+> text path
   ppr (DotDLL path)     = text "DotDLL" <+> text path
+#if !defined(MINIMAL)
   ppr (BCOs bco)        = text "BCOs" <+> ppr bco
   ppr (LazyBCOs{})      = text "LazyBCOs"
+#endif
   ppr (CoreBindings {}) = text "CoreBindings"
+
 
 -- | Return true if the linkable only consists of native code (no BCO)
 linkableIsNativeCodeOnly :: Linkable -> Bool
 linkableIsNativeCodeOnly l = all isNativeCode (NE.toList (linkableParts l))
 
+#if !defined(MINIMAL)
 -- | List the BCOs parts of a linkable.
 --
 -- This excludes the LazyBCOs and the CoreBindings parts
 linkableBCOs :: Linkable -> [CompiledByteCode]
 linkableBCOs l = [ cbc | BCOs cbc <- NE.toList (linkableParts l) ]
+#endif
+
 
 linkableAllBCOs :: Linkable -> [CompiledByteCode]
 linkableAllBCOs l = mapMaybe bcos $ NE.toList (linkableParts l)
@@ -393,8 +438,10 @@ isNativeCode = \case
   DotO {}         -> True
   DotA {}         -> True
   DotDLL {}       -> True
+#if !defined(MINIMAL)
   BCOs {}         -> False
   LazyBCOs{}      -> False
+#endif
   CoreBindings {} -> False
 
 -- | Is the part a native library? (.so/.dll)
@@ -403,9 +450,12 @@ isNativeLib = \case
   DotO {}         -> False
   DotA {}         -> True
   DotDLL {}       -> True
+#if !defined(MINIMAL)
   BCOs {}         -> False
   LazyBCOs{}      -> False
+#endif
   CoreBindings {} -> False
+
 
 -- | Get the FilePath of linkable part (if applicable)
 linkablePartPath :: LinkablePart -> Maybe FilePath
@@ -414,8 +464,10 @@ linkablePartPath = \case
   DotA fn         -> Just fn
   DotDLL fn       -> Just fn
   CoreBindings {} -> Nothing
+#if !defined(MINIMAL)
   LazyBCOs {}     -> Nothing
   BCOs {}         -> Nothing
+#endif
 
 -- | Return the paths of all object code files (.o, .a, .so) contained in this
 -- 'LinkablePart'.
@@ -425,8 +477,10 @@ linkablePartNativePaths = \case
   DotA fn         -> [fn]
   DotDLL fn       -> [fn]
   CoreBindings {} -> []
+#if !defined(MINIMAL)
   LazyBCOs _ fos  -> fos
   BCOs {}         -> []
+#endif
 
 -- | Return the paths of all object files (.o) contained in this 'LinkablePart'.
 linkablePartObjectPaths :: LinkablePart -> [FilePath]
@@ -435,9 +489,13 @@ linkablePartObjectPaths = \case
   DotA _ -> []
   DotDLL _ -> []
   CoreBindings {} -> []
+#if !defined(MINIMAL)
   LazyBCOs _ fos -> fos
   BCOs {} -> []
+#endif
 
+
+#if !defined(MINIMAL)
 -- | Retrieve the compiled byte-code from the linkable part.
 --
 -- Contrary to linkableBCOs, this includes byte-code from LazyBCOs.
@@ -446,6 +504,8 @@ linkablePartAllBCOs = \case
   BCOs bco    -> [bco]
   LazyBCOs bcos _ -> [bcos]
   _           -> []
+#endif
+
 
 linkableFilter :: (LinkablePart -> [LinkablePart]) -> Linkable -> Maybe Linkable
 linkableFilter f linkable = do
@@ -457,14 +517,19 @@ linkablePartNative = \case
   u@DotO {}  -> [u]
   u@DotA {} -> [u]
   u@DotDLL {} -> [u]
+#if !defined(MINIMAL)
   LazyBCOs _ os -> [DotO f ForeignObject | f <- os]
+#endif
   _ -> []
 
+
+#if !defined(MINIMAL)
 linkablePartByteCode :: LinkablePart -> [LinkablePart]
 linkablePartByteCode = \case
   u@BCOs {}  -> [u]
   LazyBCOs bcos _ -> [BCOs bcos]
   _ -> []
+#endif
 
 -- | Transform the 'LinkablePart' list in this 'Linkable' to contain only
 -- object code files (.o, .a, .so) without 'LazyBCOs'.
@@ -472,11 +537,14 @@ linkablePartByteCode = \case
 linkableFilterNative :: Linkable -> Maybe Linkable
 linkableFilterNative = linkableFilter linkablePartNative
 
+#if !defined(MINIMAL)
 -- | Transform the 'LinkablePart' list in this 'Linkable' to contain only byte
 -- code without 'LazyBCOs'.
 -- If no 'LinkablePart' remains, return 'Nothing'.
 linkableFilterByteCode :: Linkable -> Maybe Linkable
 linkableFilterByteCode = linkableFilter linkablePartByteCode
+#endif
+
 
 -- | Split the 'LinkablePart' lists in each 'Linkable' into only object code
 -- files (.o, .a, .so) and only byte code, without 'LazyBCOs', and return two
@@ -485,8 +553,13 @@ partitionLinkables :: [Linkable] -> ([Linkable], [Linkable])
 partitionLinkables linkables =
   (
     mapMaybe linkableFilterNative linkables,
+#if !defined(MINIMAL)
     mapMaybe linkableFilterByteCode linkables
+#else
+    []
+#endif
   )
+
 
 {- **********************************************************************
 

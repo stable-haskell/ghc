@@ -1,4 +1,4 @@
-
+{-# LANGUAGE CPP #-}
 
 -- | Dynamically lookup up values from modules and loading them.
 module GHC.Runtime.Loader (
@@ -29,7 +29,9 @@ import GHC.Driver.Hooks
 import GHC.Driver.Plugins
 import GHC.Driver.Plugins.External
 
+#if !defined(MINIMAL)
 import GHC.Linker.Loader       ( loadModule, loadName )
+#endif
 import GHC.Runtime.Interpreter ( wormhole )
 import GHC.Runtime.Interpreter.Types
 

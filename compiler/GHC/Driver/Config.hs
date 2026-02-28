@@ -1,9 +1,12 @@
+{-# LANGUAGE CPP #-}
 -- | Subsystem configuration
 module GHC.Driver.Config
    ( initOptCoercionOpts
    , initSimpleOpts
+#if !defined(MINIMAL)
    , initEvalOpts
    , EvalStep(..)
+#endif
    )
 where
 
@@ -12,7 +15,9 @@ import GHC.Prelude
 import GHC.Driver.DynFlags
 import GHC.Core.SimpleOpt
 import GHC.Core.Coercion.Opt
+#if !defined(MINIMAL)
 import GHCi.Message (EvalOpts(..))
+#endif
 
 -- | Initialise coercion optimiser configuration from DynFlags
 initOptCoercionOpts :: DynFlags -> OptCoercionOpts
@@ -29,6 +34,7 @@ initSimpleOpts dflags = SimpleOpts
    , so_inline  = True
    }
 
+#if !defined(MINIMAL)
 -- | Instruct the interpreter evaluation to break...
 data EvalStep
   -- | ... at every breakpoint tick
@@ -54,4 +60,4 @@ initEvalOpts dflags step =
       EvalStepSingle -> (True,  False)
       EvalStepOut    -> (False, True)
       EvalStepNone   -> (False, False)
-
+#endif

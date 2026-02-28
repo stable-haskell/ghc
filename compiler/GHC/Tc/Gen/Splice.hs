@@ -32,10 +32,14 @@ module GHC.Tc.Gen.Splice(
      tcTypedSplice, tcTypedBracket, tcUntypedBracket,
      runAnnotation, getUntypedSpliceBody,
 
-     runMetaE, runMetaP, runMetaT, runMetaD, runQuasi,
+     runMetaE, runMetaP, runMetaT, runMetaD,
      tcTopSpliceExpr, lookupThName_maybe,
-     defaultRunMeta, runMeta', runRemoteModFinalizers,
-     finishTH, runTopSplice
+     finishTH, runRemoteModFinalizers,
+#if !defined(MINIMAL)
+     runQuasi,
+     defaultRunMeta, runMeta',
+#endif
+     runTopSplice
       ) where
 
 import GHC.Prelude
@@ -49,7 +53,11 @@ import GHC.Driver.Hooks
 import GHC.Driver.Config.Diagnostic
 import GHC.Driver.Config.Finder
 
+#if defined(MINIMAL)
+import GHC.Hs hiding (ForeignRef)
+#else
 import GHC.Hs
+#endif
 
 import GHC.Tc.Errors.Types
 import GHC.Tc.Utils.Monad
@@ -86,8 +94,14 @@ import GHC.HsToCore.Monad
 import GHC.IfaceToCore
 import GHC.Iface.Load
 
+#if !defined(MINIMAL)
 import GHCi.Message
 import GHCi.RemoteTypes
+#else
+import Foreign.ForeignPtr (ForeignPtr)
+import GHC.Exts (Any)
+import System.IO (Handle)
+#endif
 import GHC.Runtime.Interpreter
 
 import GHC.Rename.Splice( traceSplice, SpliceInfo(..) )
@@ -173,6 +187,15 @@ import GHC.Parser.HaddockLex (lexHsDoc)
 import GHC.Parser (parseIdentifier)
 import GHC.Rename.Doc (rnHsDoc)
 
+#if defined(MINIMAL)
+-- Stub types for MINIMAL build (no ghci dependency)
+newtype HValue = HValue Any
+newtype ForeignRef a = ForeignRef (ForeignPtr ())
+type ForeignHValue = ForeignRef HValue
+type Pipe = (Handle, Handle)
+data THMessage a = THMsg  -- Stub for GHCi.Message.THMessage
+data THResultType = THAnnWrapper | THExp | THPat | THType | THDec | THAnnProvenance
+#endif
 
 
 {-
@@ -1146,6 +1169,8 @@ convertAnnotationWrapper fhv = do
 ************************************************************************
 -}
 
+#if !defined(MINIMAL)
+-- Template Haskell execution functions - not needed for parsing/typechecking
 runQuasi :: TH.Q a -> TcM a
 runQuasi act = TH.runQ act
 
@@ -1951,6 +1976,34 @@ getAnnotationsByTypeRep th_name tyrep
        ; let selectedEpsHptAnns = findAnnsByTypeRep epsHptAnns name tyrep
        ; let selectedTcgAnns = findAnnsByTypeRep (tcg_ann_env tcg) name tyrep
        ; return (selectedEpsHptAnns ++ selectedTcgAnns) }
+#else
+-- MINIMAL build: Template Haskell execution not supported
+-- Provide stub implementations that error at runtime for functions called from unguarded code
+
+runMetaE :: LHsExpr GhcTc -> TcM (LHsExpr GhcPs)
+runMetaE _ = fail "Template Haskell execution is not supported in MINIMAL build"
+
+runMetaP :: LHsExpr GhcTc -> TcM (LPat GhcPs)
+runMetaP _ = fail "Template Haskell execution is not supported in MINIMAL build"
+
+runMetaT :: LHsExpr GhcTc -> TcM (LHsType GhcPs)
+runMetaT _ = fail "Template Haskell execution is not supported in MINIMAL build"
+
+runMetaD :: LHsExpr GhcTc -> TcM [LHsDecl GhcPs]
+runMetaD _ = fail "Template Haskell execution is not supported in MINIMAL build"
+
+runMetaAW :: LHsExpr GhcTc -> TcM Serialized
+runMetaAW _ = fail "Template Haskell execution is not supported in MINIMAL build"
+
+runTH :: THResultType -> ForeignHValue -> TcM a
+runTH _ _ = fail "Template Haskell execution is not supported in MINIMAL build"
+
+finishTH :: TcM ()
+finishTH = return ()  -- Nothing to finish in MINIMAL build
+
+runRemoteModFinalizers :: ThModFinalizers -> TcM ()
+runRemoteModFinalizers _ = fail "Template Haskell mod finalizers not supported in MINIMAL build"
+#endif
 
 {-
 ************************************************************************

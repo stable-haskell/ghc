@@ -7,6 +7,7 @@ Type checking of type signatures in interface files
 -}
 
 
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE NondecreasingIndentation #-}
 {-# LANGUAGE FlexibleContexts #-}
 
@@ -30,14 +31,18 @@ module GHC.IfaceToCore (
         tcIfaceExpr,    -- Desired by HERMIT (#7683)
         tcIfaceGlobal,
         tcIfaceOneShot, tcTopIfaceBindings,
-        tcIfaceImport,
-        hydrateCgBreakInfo
+        tcIfaceImport
+#if !defined(MINIMAL)
+        , hydrateCgBreakInfo
+#endif
  ) where
 
 
 import GHC.Prelude
 
+#if !defined(MINIMAL)
 import GHC.ByteCode.Types
+#endif
 
 import GHC.Driver.Env
 import GHC.Driver.Session
@@ -2277,6 +2282,7 @@ bindIfaceTyConBinderX bind_tv (Bndr tv vis) thing_inside
   = bind_tv tv $ \tv' ->
     thing_inside (Bndr tv' vis)
 
+#if !defined(MINIMAL)
 -- CgBreakInfo
 
 hydrateCgBreakInfo :: CgBreakInfo -> IfL ([Maybe (Id, Word)], Type)
@@ -2285,6 +2291,7 @@ hydrateCgBreakInfo CgBreakInfo{..} = do
     result_ty <- tcIfaceType cgb_resty
     mbVars <- mapM (traverse (\(if_gbl, offset) -> (,offset) <$> bindIfaceId if_gbl return)) cgb_vars
     return (mbVars, result_ty)
+#endif
 
 -- | This function is only used to construct the environment for GHCi,
 -- so we make up fake locations

@@ -54,8 +54,10 @@ import GHC.Platform
 import GHC.Tc.Utils.Backpack
 import GHC.Tc.Utils.Monad  ( initIfaceCheck, concatMapM )
 
-import GHC.Runtime.Interpreter
+import GHC.Runtime.Interpreter.Types (Interp)
+#if !defined(MINIMAL)
 import qualified GHC.Linker.Loader as Linker
+#endif
 import GHC.Linker.Types
 
 
@@ -72,7 +74,9 @@ import GHC.Driver.MakeSem
 import GHC.Driver.Downsweep
 import GHC.Driver.MakeAction
 
+#if !defined(MINIMAL)
 import GHC.ByteCode.Types
+#endif
 
 import GHC.Iface.Load      ( cannotFindModule, readIface )
 import GHC.IfaceToCore     ( typecheckIface )
@@ -128,7 +132,9 @@ import Control.Monad.Trans.State.Lazy
 import Control.Monad.Trans.Class
 import GHC.Driver.Env.KnotVars
 import Control.Monad.Trans.Maybe
+#if !defined(MINIMAL)
 import GHC.Runtime.Loader
+#endif
 import GHC.Utils.Constants
 import GHC.Iface.Errors.Types
 import Data.Function
@@ -623,7 +629,9 @@ load' mhmi_cache how_much diag_wrapper mHscMessage mod_graph = do
     -- In normal usage plugins are initialised already by ghc/Main.hs this is protective
     -- for any client who might interact with GHC via load'.
     -- See Note [Timing of plugin initialization]
+#if !defined(MINIMAL)
     initializeSessionPlugins
+#endif
     modifySession (setModuleGraph mod_graph)
     guessOutputFile
     hsc_env <- getSession
@@ -821,7 +829,9 @@ pruneCache hpt summ
 unload :: Interp -> HscEnv -> IO ()
 unload interp hsc_env
   = case ghcLink (hsc_dflags hsc_env) of
+#if !defined(MINIMAL)
         LinkInMemory -> Linker.unload interp hsc_env []
+#endif
         _other -> return ()
 
 
@@ -1249,6 +1259,7 @@ upsweep_mod hsc_env mHscMessage old_hmi summary mod_index nmods =  do
 -- | Add the entries from a BCO linkable to the SPT table, see
 -- See Note [Grand plan for static forms] in GHC.Iface.Tidy.StaticPtrTable.
 addSptEntries :: HscEnv -> Maybe Linkable -> IO ()
+#if !defined(MINIMAL)
 addSptEntries hsc_env mlinkable =
   hscAddSptEntries hsc_env
      [ spt
@@ -1256,6 +1267,9 @@ addSptEntries hsc_env mlinkable =
      , bco <- linkableBCOs linkable
      , spt <- bc_spt_entries bco
      ]
+#else
+addSptEntries _ _ = return ()  -- No bytecode support in MINIMAL build
+#endif
 
 
 -- Note [When source is considered modified]

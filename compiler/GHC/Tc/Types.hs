@@ -1,4 +1,5 @@
 
+{-# LANGUAGE CPP                        #-}
 {-# LANGUAGE DerivingStrategies         #-}
 {-# LANGUAGE ExistentialQuantification  #-}
 {-# LANGUAGE FlexibleInstances          #-}
@@ -178,8 +179,12 @@ import GHC.Utils.Logger
 
 import GHC.Builtin.Names ( isUnboundName )
 
+#if !defined(MINIMAL)
 import GHCi.Message
 import GHCi.RemoteTypes
+#else
+import Foreign.ForeignPtr (ForeignPtr)
+#endif
 
 import Data.Set      ( Set )
 import qualified Data.Set as S
@@ -188,6 +193,11 @@ import Data.Dynamic  ( Dynamic )
 import Data.Map ( Map )
 import Data.Typeable ( TypeRep )
 import Data.Maybe    ( mapMaybe )
+
+#if defined(MINIMAL)
+-- Stub types for MINIMAL build (no ghci dependency)
+data QState = QState  -- Stub for Template Haskell state
+#endif
 
 -- | The import specification as written by the user, including
 -- the list of explicitly imported names. Used in 'ModIface' to

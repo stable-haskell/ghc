@@ -8,12 +8,18 @@ import GHC.Prelude
 import GHC.Utils.Asm
 import GHC.Platform
 import GHC.Utils.Outputable
+import GHC.Utils.Panic
 
 import GHC.Platform.Reg
 import GHC.CmmToAsm.X86.Regs
-import GHC.CmmToAsm.PPC.Regs (toRegNo)
 
 import Data.Word
+
+-- | Extract register number from a real register
+-- This is a local helper to avoid depending on any specific NCG's Regs module
+toRegNo :: Reg -> RegNo
+toRegNo (RegReal (RealRegSingle n)) = n
+toRegNo _                           = panic "toRegNo: unsupported register"
 
 -- | Language ID used for Haskell.
 dW_LANG_Haskell :: Word

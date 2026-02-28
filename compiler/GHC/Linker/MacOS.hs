@@ -1,8 +1,12 @@
+{-# LANGUAGE CPP #-}
+
 module GHC.Linker.MacOS
    ( runInjectRPaths
    , getUnitFrameworkOpts
    , getFrameworkOpts
+#if !defined(MINIMAL)
    , loadFramework
+#endif
    )
 where
 
@@ -19,7 +23,9 @@ import GHC.Unit.Env
 
 import GHC.SysTools.Tasks
 
+#if !defined(MINIMAL)
 import GHC.Runtime.Interpreter
+#endif
 
 import GHC.Utils.Exception
 import GHC.Utils.Logger
@@ -142,6 +148,7 @@ various possible locations fail.  See also #18446, which this change
 addresses.
 -}
 
+#if !defined(MINIMAL)
 -- Darwin / MacOS X only: load a framework
 -- a framework is a dynamic library packaged inside a directory of the same
 -- name. They are searched for in different paths than normal libraries.
@@ -174,3 +181,4 @@ loadFramework interp extraPaths rootname
               Right _  -> return Nothing
               Left err -> findLoadDLL ps ((p ++ ": " ++ err):errs)
           }
+#endif
