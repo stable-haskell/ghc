@@ -55,7 +55,7 @@ import GHC.Tc.Utils.Backpack
 import GHC.Tc.Utils.Monad  ( initIfaceCheck, concatMapM )
 
 import GHC.Runtime.Interpreter.Types (Interp)
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
 import qualified GHC.Linker.Loader as Linker
 #endif
 import GHC.Linker.Types
@@ -74,7 +74,7 @@ import GHC.Driver.MakeSem
 import GHC.Driver.Downsweep
 import GHC.Driver.MakeAction
 
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
 import GHC.ByteCode.Types
 #endif
 
@@ -132,7 +132,7 @@ import Control.Monad.Trans.State.Lazy
 import Control.Monad.Trans.Class
 import GHC.Driver.Env.KnotVars
 import Control.Monad.Trans.Maybe
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
 import GHC.Runtime.Loader
 #endif
 import GHC.Utils.Constants
@@ -629,7 +629,7 @@ load' mhmi_cache how_much diag_wrapper mHscMessage mod_graph = do
     -- In normal usage plugins are initialised already by ghc/Main.hs this is protective
     -- for any client who might interact with GHC via load'.
     -- See Note [Timing of plugin initialization]
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
     initializeSessionPlugins
 #endif
     modifySession (setModuleGraph mod_graph)
@@ -829,7 +829,7 @@ pruneCache hpt summ
 unload :: Interp -> HscEnv -> IO ()
 unload interp hsc_env
   = case ghcLink (hsc_dflags hsc_env) of
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
         LinkInMemory -> Linker.unload interp hsc_env []
 #endif
         _other -> return ()
@@ -1259,7 +1259,7 @@ upsweep_mod hsc_env mHscMessage old_hmi summary mod_index nmods =  do
 -- | Add the entries from a BCO linkable to the SPT table, see
 -- See Note [Grand plan for static forms] in GHC.Iface.Tidy.StaticPtrTable.
 addSptEntries :: HscEnv -> Maybe Linkable -> IO ()
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
 addSptEntries hsc_env mlinkable =
   hscAddSptEntries hsc_env
      [ spt

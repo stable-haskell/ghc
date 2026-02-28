@@ -3,7 +3,7 @@
 module GHC.Driver.Config
    ( initOptCoercionOpts
    , initSimpleOpts
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
    , initEvalOpts
    , EvalStep(..)
 #endif
@@ -15,7 +15,7 @@ import GHC.Prelude
 import GHC.Driver.DynFlags
 import GHC.Core.SimpleOpt
 import GHC.Core.Coercion.Opt
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
 import GHCi.Message (EvalOpts(..))
 #endif
 
@@ -34,7 +34,7 @@ initSimpleOpts dflags = SimpleOpts
    , so_inline  = True
    }
 
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
 -- | Instruct the interpreter evaluation to break...
 data EvalStep
   -- | ... at every breakpoint tick

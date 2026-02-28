@@ -8,7 +8,7 @@ import GHC.Prelude
 import GHC.Data.Maybe
 import Control.Monad
 
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
 import GHC.ByteCode.Types
 import GHC.ByteCode.Breakpoints (InternalModBreaks)
 #endif
@@ -20,7 +20,7 @@ import GHC.Driver.Monad
 import GHC.Driver.Session
 import GHC.Rename.Names
 import GHC.Runtime.Context
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
 import GHC.Runtime.Interpreter
 #endif
 import GHC.Types.Avail
@@ -43,7 +43,7 @@ import GHC.Utils.Misc
 import GHC.Utils.Outputable
 import qualified GHC.Unit.Home.Graph as HUG
 
-#if defined(MINIMAL)
+#if !defined(HAVE_INTERPRETER)
 -- Stub type for MINIMAL build (replaces GHC.ByteCode.Breakpoints.InternalModBreaks)
 data InternalModBreaks = InternalModBreaks
 #endif
@@ -161,7 +161,7 @@ getHomeModuleInfo hsc_env mdl =
                         minf_instances = instEnvElts $ md_insts details,
                         minf_iface     = Just iface,
                         minf_safe      = getSafeMode $ mi_trust iface,
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
                         minf_modBreaks = getModBreaks hmi
 #else
                         minf_modBreaks = Nothing  -- No bytecode support in MINIMAL build

@@ -16,7 +16,7 @@ module GHC.Runtime.Eval.Types (
 
 import GHC.Prelude
 
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
 import GHCi.RemoteTypes
 import GHCi.Message (EvalExpr, ResumeContext)
 import GHC.ByteCode.Types (InternalBreakpointId(..))
@@ -36,7 +36,7 @@ import GHC.Utils.Exception
 import Data.Word
 import GHC.Stack.CCS
 
-#if defined(MINIMAL)
+#if !defined(HAVE_INTERPRETER)
 -- Stub types for MINIMAL build (no ghci dependency)
 newtype HValue = HValue Any
 newtype ForeignRef a = ForeignRef (ForeignPtr ())

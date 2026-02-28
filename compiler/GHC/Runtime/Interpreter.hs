@@ -5,7 +5,7 @@
 -- | Interacting with the iserv interpreter, whether it is running on an
 -- external process or in the current process.
 --
-#if defined(MINIMAL)
+#if !defined(HAVE_INTERPRETER)
 -- Minimal stub module for stage1 builds - just re-exports types
 module GHC.Runtime.Interpreter
   ( module GHC.Runtime.Interpreter.Types
@@ -80,13 +80,13 @@ module GHC.Runtime.Interpreter
 import GHC.Prelude
 
 import GHC.Runtime.Interpreter.Types
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
 import GHC.Runtime.Interpreter.JS
 import GHC.Runtime.Interpreter.Wasm
 #endif
 import GHC.Runtime.Interpreter.Process
 import GHC.Runtime.Utils
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
 import GHCi.Message
 import GHCi.RemoteTypes
 import GHCi.ResolvedBCO
@@ -754,7 +754,7 @@ wormholeRef interp _r = case interpInstance interp of
 -- 'HomeModInfo'.
 getModBreaks :: HomeModInfo -> Maybe InternalModBreaks
 getModBreaks hmi
-#if defined(MINIMAL)
+#if !defined(HAVE_INTERPRETER)
   = Nothing
 #else
   | Just linkable <- homeModInfoByteCode hmi,

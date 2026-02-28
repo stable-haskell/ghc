@@ -53,7 +53,7 @@ module GHC.Driver.Main
     , hscCompileCmmFile
 
     , hscGenHardCode
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
     , hscInteractive
     , mkCgInteractiveGuts
     , CgInteractiveGuts
@@ -84,7 +84,7 @@ module GHC.Driver.Main
     , hscGetModuleInterface
     , hscRnImportDecls
     , hscTcRnLookupRdrName
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
     , hscStmt, hscParseStmtWithLocation, hscStmtWithLocation, hscParsedStmt
     , hscParseDeclsWithLocation, hscParsedDecls
 #endif
@@ -92,14 +92,14 @@ module GHC.Driver.Main
     , hscTcExpr, TcRnExprMode(..), hscImport, hscKcType
     , hscParseExpr
     , hscParseType
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
     , hscCompileCoreExpr
 #endif
     , hscTidy
 
 
     -- * Low-level exports for hooks
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
     , hscCompileCoreExpr'
 #endif
       -- We want to make sure that we export enough to be able to redefine
@@ -111,7 +111,7 @@ module GHC.Driver.Main
     , dumpIfaceStats
     , ioMsgMaybe
     , showModuleIndex
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
     , hscAddSptEntries
 #endif
     , writeInterfaceOnlyMode
@@ -145,7 +145,7 @@ import GHC.Driver.Config.Stg.Pipeline (initStgPipelineOpts)
 import GHC.Driver.Config.StgToCmm  (initStgToCmmConfig)
 import GHC.Driver.Config.Cmm       (initCmmConfig)
 import GHC.Driver.LlvmConfigCache  (initLlvmConfigCache)
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
 import GHC.Driver.Config.StgToJS  (initStgToJSConfig)
 #endif
 import GHC.Driver.Config.Diagnostic
@@ -156,7 +156,7 @@ import GHC.Driver.GenerateCgIPEStub (generateCgIPEStub, lookupEstimatedTicks)
 import GHC.Runtime.Interpreter.Types  ( Interp, interpreterDynamic, interpreterProfiled, StgToJSConfig(..) )
 import GHC.Runtime.Context
 
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
 import GHC.Runtime.Interpreter
 import GHC.Runtime.Interpreter.JS
 import GHC.Runtime.Loader      ( initializePlugins )
@@ -174,7 +174,7 @@ import GHC.Hs.Stats         ( ppSourceStats )
 
 import GHC.HsToCore
 
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
 import GHC.StgToByteCode    ( byteCodeGen )
 import GHC.StgToJS          ( stgToJS )
 import GHC.StgToJS.Ids
@@ -325,7 +325,7 @@ import Data.Bifunctor
 import qualified GHC.Unit.Home.Graph as HUG
 import GHC.Unit.Home.PackageTable
 
-#if defined(MINIMAL)
+#if !defined(HAVE_INTERPRETER)
 -- Stub implementations for MINIMAL build
 initializePlugins :: HscEnv -> IO HscEnv
 initializePlugins = return
@@ -763,7 +763,7 @@ tcRnModule' sum save_rn_syntax mod = do
     if not (safeHaskellOn dflags)
          || (safeInferOn dflags && not allSafeOK)
       -- if safe Haskell off or safe infer failed, mark unsafe
-#if defined(MINIMAL)
+#if !defined(HAVE_INTERPRETER)
       then return tcg_res
 #else
       then markUnsafeInfer tcg_res whyUnsafe
@@ -771,7 +771,7 @@ tcRnModule' sum save_rn_syntax mod = do
 
       -- module (could be) safe, throw warning if needed
       else do
-#if defined(MINIMAL)
+#if !defined(HAVE_INTERPRETER)
           let tcg_res' = tcg_res
 #else
           tcg_res' <- hscCheckSafeImports tcg_res
@@ -1086,7 +1086,7 @@ loadIfaceByteCode ::
   ModLocation ->
   TypeEnv ->
   Maybe (IO Linkable)
-#if defined(MINIMAL)
+#if !defined(HAVE_INTERPRETER)
 loadIfaceByteCode _ _ _ _ = Nothing
 #else
 loadIfaceByteCode hsc_env iface location type_env =
@@ -1108,7 +1108,7 @@ loadIfaceByteCodeLazy ::
   ModLocation ->
   TypeEnv ->
   IO (Maybe Linkable)
-#if defined(MINIMAL)
+#if !defined(HAVE_INTERPRETER)
 loadIfaceByteCodeLazy _ _ _ _ = return Nothing
 #else
 loadIfaceByteCodeLazy hsc_env iface location type_env =
@@ -1155,7 +1155,7 @@ initWholeCoreBindings ::
   ModDetails ->
   Linkable ->
   IO Linkable
-#if defined(MINIMAL)
+#if !defined(HAVE_INTERPRETER)
 initWholeCoreBindings _ _ _ l = return l
 #else
 initWholeCoreBindings hsc_env iface details (Linkable utc_time this_mod uls) = do
@@ -1186,7 +1186,7 @@ initWholeCoreBindings hsc_env iface details (Linkable utc_time this_mod uls) = d
 --
 -- 3. Generating bytecode and foreign objects from the results of the previous
 --    steps using the usual pipeline actions.
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
 compileWholeCoreBindings ::
   HscEnv ->
   TypeEnv ->
@@ -1317,7 +1317,7 @@ hscDesugarAndSimplify summary (FrontendTypecheck tc_result) tc_warnings mb_old_h
   case mb_desugar of
       -- Just cause we desugared doesn't mean we are generating code, see above.
       Just desugared_guts | backendGeneratesCode bcknd -> do
-#if defined(MINIMAL)
+#if !defined(HAVE_INTERPRETER)
           -- In MINIMAL builds, no TH plugins can be registered
           let plugins = []
 #else
@@ -1345,7 +1345,7 @@ hscDesugarAndSimplify summary (FrontendTypecheck tc_result) tc_warnings mb_old_h
           -- Running the simplifier once is necessary before doing byte code generation
           -- in order to inline data con wrappers but we honour whatever level of simplificication the
           -- user requested. See #22008 for some discussion.
-#if defined(MINIMAL)
+#if !defined(HAVE_INTERPRETER)
           -- In MINIMAL builds, no TH plugins can be registered
           let plugins = []
 #else
@@ -2167,7 +2167,7 @@ hscGenHardCode hsc_env cgguts mod_loc output_filename = do
                       , Just stg_cg_infos, Just cmm_cg_infos)
 
 
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
 -- The part of CgGuts that we need for HscInteractive
 data CgInteractiveGuts = CgInteractiveGuts { cgi_module :: Module
                                            , cgi_binds  :: CoreProgram
@@ -2465,7 +2465,7 @@ myCoreToStg logger dflags ic_inscope for_bytecode this_mod ml prepd_binds = do
 %*                                                                      *
 %********************************************************************* -}
 
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
 {-
 When the UnlinkedBCOExpr is linked you get an HValue of type *IO [HValue]* When
 you run it you get a list of HValues that should be the same length as the list
@@ -2539,7 +2539,7 @@ hscParseDeclsWithLocation hsc_env source line_num str = do
   HsModule { hsmodDecls = decls } <- hscParseModuleWithLocation hsc_env source line_num str
   return decls
 
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
 hscParsedDecls :: HscEnv -> [LHsDecl GhcPs] -> IO ([TyThing], InteractiveContext)
 hscParsedDecls hsc_env decls = runInteractiveHsc hsc_env $ do
     hsc_env <- getHscEnv
@@ -2773,7 +2773,7 @@ hscTidy hsc_env guts = do
   pure (cgguts, details)
 
 
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
 {- **********************************************************************
 %*                                                                      *
         Desugar, simplify, convert to bytecode, and link an expression

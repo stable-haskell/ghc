@@ -2,7 +2,7 @@
 {-# LANGUAGE LambdaCase #-}
 module GHC.Runtime.Interpreter.Process
   (
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
   -- * Message API
     Message(..)
   , DelayedResponse (..)
@@ -22,7 +22,7 @@ where
 import GHC.Prelude
 
 import GHC.Runtime.Interpreter.Types
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
 import GHCi.Message
 #endif
 
@@ -40,7 +40,7 @@ data DelayedResponse a = DelayedResponse
 -- -----------------------------------------------------------------------------
 -- Top-level Message API
 
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
 -- | Send a message to the interpreter process that doesn't expect a response
 --   (locks the interpreter while sending)
 sendMessageNoResponse :: ExtInterpInstance d -> Message () -> IO ()
@@ -76,7 +76,7 @@ receiveDelayedResponse i DelayedResponse = do
 -- -----------------------------------------------------------------------------
 -- Nested Message API
 
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
 -- | Send any value (requires locked interpreter)
 sendAnyValue :: Binary a => ExtInterpInstance d -> a -> IO ()
 sendAnyValue i m = ensureLocked i >> writeInterpProcess (instProcess i) (put m)
@@ -111,7 +111,7 @@ ensureLocked i =
     _     -> pure ()
 
 
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
 -- | Send a 'Message' and receive the response from the interpreter process
 callInterpProcess :: Binary a => InterpProcess -> Message a -> IO a
 callInterpProcess i msg =

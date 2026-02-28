@@ -39,7 +39,7 @@ module GHC (
         setUnitDynFlags,
         getProgramDynFlags, setProgramDynFlags,
         setProgramHUG, setProgramHUG_,
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
         getInteractiveDynFlags, setInteractiveDynFlags,
         normaliseInteractiveDynFlags, initialiseInteractiveDynFlags,
 #endif
@@ -64,7 +64,7 @@ module GHC (
         -- * Loading\/compiling the program
         depanal, depanalE,
         load, loadWithCache, LoadHowMuch(..),
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
         InteractiveImport(..),
 #endif
         SuccessFlag(..), succeeded, failed,
@@ -147,7 +147,7 @@ module GHC (
         NamePprCtx, alwaysQualify,
 
         -- * Interactive evaluation
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
         -- ** Executing statements
         execStmt, execStmt', ExecOptions(..), execOptions, ExecResult(..),
         resumeExec,
@@ -158,7 +158,7 @@ module GHC (
         -- ** Get/set the current context
         parseImportDecl,
         setContext, getContext,
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
         setGHCiMonad, getGHCiMonad,
 #endif
 
@@ -171,7 +171,7 @@ module GHC (
         isModuleTrusted, moduleTrustReqs,
         getNamesInScope,
         getRdrNamesInScope,
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
         getGRE,
 #endif
         moduleIsInterpreted,
@@ -203,7 +203,7 @@ module GHC (
 #endif
 
         -- ** The debugger
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
         SingleStep(..),
         Resume(..),
         History(historyBreakpointId, historyEnclosingDecls),
@@ -282,7 +282,7 @@ module GHC (
         Kind,
         PredType,
         ThetaType, pprForAll, pprThetaArrowTy,
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
         parseInstanceHead,
         getInstancesForType,
 #endif
@@ -371,7 +371,7 @@ import GHC.Driver.Hooks
 import GHC.Driver.Monad
 import GHC.Driver.Ppr
 
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
 import GHC.Driver.Config.StgToJS (initStgToJSConfig)
 import GHC.ByteCode.Types
 import GHC.Runtime.Loader
@@ -592,7 +592,7 @@ withCleanupSession ghc = ghc `MC.finally` cleanup
           unless (gopt Opt_KeepTmpFiles dflags) $ do
             cleanTempFiles logger tmpfs
             cleanTempDirs logger tmpfs
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
           traverse_ stopInterp (hsc_interp hsc_env)
 #endif
           --  exceptions will be blocked while we clean the temporary files,
@@ -729,7 +729,7 @@ setTopSessionDynFlags dflags = do
   hsc_env <- getSession
   logger  <- getLogger
 
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
   let platform = targetPlatform dflags
   let unit_env = hsc_unit_env hsc_env
   let tmpfs = hsc_tmpfs hsc_env
@@ -741,12 +741,12 @@ setTopSessionDynFlags dflags = do
 
   interp <- liftIO $ initInterpreter tmpfs logger platform finder_cache unit_env interp_opts
 #else
-  -- MINIMAL build: no interpreter support
+  -- No interpreter support
   let interp = Nothing
 #endif
 
   modifySession $ \h -> hscSetFlags dflags
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
                         h{ hsc_IC = (hsc_IC h){ ic_dflags = dflags }
                          , hsc_interp = hsc_interp h <|> interp
                          }
@@ -952,7 +952,7 @@ getProgramDynFlags = getSessionDynFlags
 -- Note: this cannot be used for changes to packages.  Use
 -- 'setSessionDynFlags', or 'setProgramDynFlags' and then copy the
 -- 'unitState' into the interactive @DynFlags@.
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
 setInteractiveDynFlags :: GhcMonad m => DynFlags -> m ()
 setInteractiveDynFlags dflags = do
   logger <- getLogger
@@ -1066,7 +1066,7 @@ normalise_hyp fp
 -- | Normalise the 'DynFlags' for us in an interactive context.
 --
 -- Makes sure unsupported Flags and other incosistencies are reported and removed.
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
 normaliseInteractiveDynFlags :: MonadIO m => Logger -> DynFlags -> m DynFlags
 normaliseInteractiveDynFlags logger dflags = do
   dflags' <- checkNewDynFlags logger dflags
@@ -1082,7 +1082,7 @@ initialiseInteractiveDynFlags :: GhcMonad m => DynFlags -> HscEnv -> m HscEnv
 initialiseInteractiveDynFlags dflags hsc_env0 = do
   let ic0 = hsc_IC hsc_env0
 
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
   -- Initialise (load) plugins in the interactive environment with the new
   -- DynFlags
   plugin_env <- liftIO $ initializePlugins $ mkInteractiveHscEnv $
@@ -1536,7 +1536,7 @@ findGlobalAnns deserialize target = withSession $ \hsc_env -> do
     return (findAnns deserialize ann_env target)
 
 -- | get the GlobalRdrEnv for a session
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
 getGRE :: GhcMonad m => m GlobalRdrEnv
 getGRE = withSession $ \hsc_env-> return $ icReaderEnv (hsc_IC hsc_env)
 #endif
@@ -1834,7 +1834,7 @@ moduleTrustReqs :: GhcMonad m => Module -> m (Bool, Set UnitId)
 moduleTrustReqs m = withSession $ \hsc_env ->
     liftIO $ hscGetSafe hsc_env m noSrcSpan
 
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
 -- | Set the monad GHCi lifts user statements into.
 --
 -- Checks that a type (in string form) is an instance of the
@@ -1852,7 +1852,7 @@ getGHCiMonad :: GhcMonad m => m Name
 getGHCiMonad = fmap (ic_monad . hsc_IC) getSession
 #endif
 
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
 getHistorySpan :: GhcMonad m => History -> m SrcSpan
 getHistorySpan h = withSession $ \hsc_env -> liftIO $ GHC.Runtime.Eval.getHistorySpan (hsc_HUG hsc_env) h
 

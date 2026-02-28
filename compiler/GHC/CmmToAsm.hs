@@ -65,16 +65,22 @@ where
 
 import GHC.Prelude hiding (head)
 
+#if defined(HAVE_X86_NCG)
 import qualified GHC.CmmToAsm.X86   as X86
+#endif
+#if defined(HAVE_AARCH64_NCG)
 import qualified GHC.CmmToAsm.AArch64 as AArch64
-
-#if !defined(NO_UNCOMMON_NCGS)
+#endif
+#if defined(HAVE_PPC_NCG)
 import qualified GHC.CmmToAsm.PPC   as PPC
+#endif
+#if defined(HAVE_RISCV64_NCG)
 import qualified GHC.CmmToAsm.RV64  as RV64
+#endif
+#if defined(HAVE_LOONGARCH64_NCG)
 import qualified GHC.CmmToAsm.LA64 as LA64
 #endif
-
-#if !defined(MINIMAL)
+#if defined(HAVE_WASM_BACKEND)
 import qualified GHC.CmmToAsm.Wasm as Wasm32
 #endif
 
@@ -150,25 +156,31 @@ nativeCodeGen logger ts config modLoc h cmms
             => NcgImpl statics instr jumpDest -> UniqDSMT IO a
        nCG' ncgImpl = nativeCodeGen' logger config modLoc ncgImpl h cmms
    in case platformArch platform of
+#if defined(HAVE_X86_NCG)
       ArchX86       -> nCG' (X86.ncgX86     config)
       ArchX86_64    -> nCG' (X86.ncgX86_64  config)
-#if !defined(NO_UNCOMMON_NCGS)
+#endif
+#if defined(HAVE_PPC_NCG)
       ArchPPC       -> nCG' (PPC.ncgPPC     config)
       ArchPPC_64 _  -> nCG' (PPC.ncgPPC     config)
 #endif
       ArchS390X     -> panic "nativeCodeGen: No NCG for S390X"
       ArchARM {}    -> panic "nativeCodeGen: No NCG for ARM"
+#if defined(HAVE_AARCH64_NCG)
       ArchAArch64   -> nCG' (AArch64.ncgAArch64 config)
+#endif
       ArchAlpha     -> panic "nativeCodeGen: No NCG for Alpha"
       ArchMipseb    -> panic "nativeCodeGen: No NCG for mipseb"
       ArchMipsel    -> panic "nativeCodeGen: No NCG for mipsel"
-#if !defined(NO_UNCOMMON_NCGS)
+#if defined(HAVE_RISCV64_NCG)
       ArchRISCV64   -> nCG' (RV64.ncgRV64 config)
+#endif
+#if defined(HAVE_LOONGARCH64_NCG)
       ArchLoongArch64 -> nCG' (LA64.ncgLA64 config)
 #endif
       ArchUnknown   -> panic "nativeCodeGen: No NCG for unknown arch"
       ArchJavaScript-> panic "nativeCodeGen: No NCG for JavaScript"
-#if !defined(MINIMAL)
+#if defined(HAVE_WASM_BACKEND)
       ArchWasm32    -> Wasm32.ncgWasm config logger platform ts modLoc h cmms
 #endif
       _             -> panic "nativeCodeGen: No NCG for this architecture"

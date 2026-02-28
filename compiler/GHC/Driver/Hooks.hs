@@ -66,7 +66,7 @@ import GHC.StgToCmm.Types (ModuleLFInfos)
 import GHC.StgToCmm.Config
 import GHC.Cmm
 
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
 import GHCi.RemoteTypes
 #else
 import Foreign.ForeignPtr (ForeignPtr)
@@ -79,7 +79,7 @@ import qualified Data.Kind
 import System.Process
 import GHC.Linker.Types
 
-#if defined(MINIMAL)
+#if !defined(HAVE_INTERPRETER)
 -- Stub types for MINIMAL build (no ghci dependency)
 -- ForeignRef is defined in GHC.Hs.Expr which we import
 newtype HValue = HValue Any

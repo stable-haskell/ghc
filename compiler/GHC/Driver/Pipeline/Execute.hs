@@ -81,13 +81,13 @@ import GHC.Unit.Module.Env
 import GHC.Driver.Env.KnotVars
 import GHC.Driver.Config.Finder
 import GHC.Rename.Names
-#if !defined(MINIMAL)
+#if defined(HAVE_JS_BACKEND)
 import GHC.StgToJS.Linker.Linker (embedJsFile)
 #endif
 
 import Language.Haskell.Syntax.Module.Name
 import GHC.Unit.Home.ModInfo
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
 import GHC.Runtime.Loader (initializePlugins)
 #endif
 
@@ -137,7 +137,7 @@ runPhase (T_CmmCpp pipe_env hsc_env input_fn) = do
   return output_fn
 runPhase (T_Js pipe_env hsc_env location js_src) =
   runJsPhase pipe_env hsc_env location js_src
-#if !defined(MINIMAL)
+#if defined(HAVE_JS_BACKEND)
 runPhase (T_ForeignJs pipe_env hsc_env location js_src) =
   runForeignJsPhase pipe_env hsc_env location js_src
 #endif
@@ -402,7 +402,7 @@ runJsPhase _pipe_env _hsc_env _location input_fn = do
   touchObjectFile input_fn
   return input_fn
 
-#if !defined(MINIMAL)
+#if defined(HAVE_JS_BACKEND)
 -- | Deal with foreign JS files (embed them into .o files)
 runForeignJsPhase :: PipeEnv -> HscEnv -> Maybe ModLocation -> FilePath -> IO FilePath
 runForeignJsPhase pipe_env hsc_env _location input_fn = do
@@ -614,7 +614,7 @@ runHscBackendPhase pipe_env hsc_env mod_name src_flavour location result = do
               -- See Note [Writing interface files]
               hscMaybeWriteIface logger dflags False final_iface mb_old_iface_hash mod_location
               mlinkable <-
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
                 if gopt Opt_ByteCodeAndObjectCode dflags
                   then do
                     bc <- generateFreshByteCode hsc_env mod_name (mkCgInteractiveGuts cgguts) mod_location
@@ -633,14 +633,14 @@ runHscBackendPhase pipe_env hsc_env mod_name src_flavour location result = do
            else
               -- In interpreted mode the regular codeGen backend is not run so we
               -- generate a interface without codeGen info.
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
             do
               final_iface <- mkFullIface hsc_env partial_iface Nothing Nothing NoStubs []
               hscMaybeWriteIface logger dflags True final_iface mb_old_iface_hash location
               bc <- generateFreshByteCode hsc_env mod_name (mkCgInteractiveGuts cgguts) mod_location
               return ([], final_iface, emptyHomeModInfoLinkable { homeMod_bytecode = Just bc } , panic "interpreter")
 #else
-            panic "GHC.Driver.Pipeline.Execute.runHscPhase: bytecode generation not supported in MINIMAL build"
+            panic "GHC.Driver.Pipeline.Execute.runHscBackendPhase: bytecode generation not supported in MINIMAL build"
 #endif
 
 
@@ -721,7 +721,7 @@ runHscPhase pipe_env hsc_env0 input_fn src_flavour = do
 
   -- Initialise plugins as the flags passed into runHscPhase might have local plugins just
   -- specific to this module.
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
   hsc_env <- initializePlugins hsc_env1
 #else
   let hsc_env = hsc_env1

@@ -68,7 +68,7 @@ import GHC.Builtin.Types (mkTupleStr)
 import GHC.Tc.Utils.TcType (TcType, TcTyVar)
 import {-# SOURCE #-} GHC.Tc.Types.LclEnv (TcLclEnv)
 
-#if !defined(MINIMAL)
+#if defined(HAVE_INTERPRETER)
 import GHCi.RemoteTypes ( ForeignRef )
 #else
 import Foreign.ForeignPtr (ForeignPtr)
@@ -86,8 +86,8 @@ import qualified Data.List.NonEmpty as NE
 import Data.Void (Void)
 import qualified Data.Set as S
 
-#if defined(MINIMAL)
--- Stub type for MINIMAL build (no ghci dependency)
+#if !defined(HAVE_INTERPRETER)
+-- Stub type for builds without interpreter (no ghci dependency)
 newtype ForeignRef a = ForeignRef (ForeignPtr ())
 #endif
 
