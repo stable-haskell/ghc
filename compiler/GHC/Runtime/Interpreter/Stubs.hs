@@ -36,9 +36,17 @@ module GHC.Runtime.Interpreter.Stubs
     -- * Communication Types
   , Pipe
   , LoadedDLL
+  , ConInfoTable(..)
     -- * Break/Debug Types
   , BreakArray(..)
   , InternalBreakpointId(..)
+    -- * Bytecode Types
+  , CompiledByteCode(..)
+  , UnlinkedBCO(..)
+  , InternalModBreaks(..)
+  , ModBreaks(..)
+  , BreakInfoIndex
+  , bcoFreeNames
     -- * Template Haskell Types
   , THMessage(..)
   , THResultType(..)
@@ -59,6 +67,8 @@ import GHC.Prelude
 import GHC.Exts (Any)
 import GHC.Types.Name.Env (NameEnv)
 import GHC.Types.Name (Name)
+import GHC.Types.Unique.DSet (UniqDSet, emptyUniqDSet)
+import Data.ByteString (ByteString)
 
 import Foreign.ForeignPtr (ForeignPtr)
 import Foreign.Ptr (Ptr)
@@ -96,6 +106,9 @@ type Pipe = (Handle, Handle)
 -- | Stub for GHCi's LoadedDLL - a loaded dynamic library
 type LoadedDLL = ()
 
+-- | Stub for GHCi's ConInfoTable - constructor info table
+data ConInfoTable = ConInfoTable
+
 -- -----------------------------------------------------------------------------
 -- Break/Debug Types
 -- These are stubs for types from ghci:GHCi.BreakArray and
@@ -106,6 +119,35 @@ data BreakArray = BreakArray
 
 -- | Stub for InternalBreakpointId - identifies a breakpoint
 data InternalBreakpointId = InternalBreakpointId
+
+-- -----------------------------------------------------------------------------
+-- Bytecode Types
+-- These are stubs for types from ghc:GHC.ByteCode.Types and GHC.ByteCode.Breakpoints
+
+-- | Stub for CompiledByteCode - compiled bytecode
+-- This stub provides the record fields needed by Loader.hs
+data CompiledByteCode = CompiledByteCode
+  { bc_bcos   :: [UnlinkedBCO]          -- ^ Unlinked bytecode objects
+  , bc_itbls  :: [(Name, ConInfoTable)] -- ^ Info tables
+  , bc_strs   :: [(Name, ByteString)]   -- ^ Top-level strings
+  , bc_breaks :: Maybe InternalModBreaks -- ^ Breakpoint information
+  }
+
+-- | Stub for UnlinkedBCO - an unlinked bytecode object
+data UnlinkedBCO = UnlinkedBCO
+
+-- | Get the free names from an UnlinkedBCO - stub always returns empty set
+bcoFreeNames :: UnlinkedBCO -> UniqDSet Name
+bcoFreeNames _ = emptyUniqDSet
+
+-- | Stub for InternalModBreaks - internal breakpoint info per module
+data InternalModBreaks = InternalModBreaks
+
+-- | Stub for ModBreaks - breakpoint info per module
+data ModBreaks = ModBreaks
+
+-- | Stub for BreakInfoIndex - index into break info array
+type BreakInfoIndex = Int
 
 -- -----------------------------------------------------------------------------
 -- Template Haskell Types

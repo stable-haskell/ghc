@@ -1,7 +1,11 @@
+{-# LANGUAGE CPP #-}
+
 module GHC.Driver.Config.Interpreter
   ( initInterpOpts
   )
 where
+
+#if defined(HAVE_INTERPRETER)
 
 import GHC.Prelude
 import GHC.Runtime.Interpreter.Init
@@ -44,3 +48,15 @@ initInterpOpts dflags = do
     , interpExecutableLinkOpts = initExecutableLinkOpts dflags
     }
 
+#else
+-- Stub version when HAVE_INTERPRETER is not defined
+
+import GHC.Prelude
+import GHC.Runtime.Interpreter.Init (InterpOpts(..))
+import GHC.Driver.Session (DynFlags)
+
+-- | Stub initInterpOpts - returns empty InterpOpts when interpreter is disabled
+initInterpOpts :: DynFlags -> IO InterpOpts
+initInterpOpts _ = pure InterpOpts
+
+#endif

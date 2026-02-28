@@ -328,9 +328,16 @@ import qualified GHC.Unit.Home.Graph as HUG
 import GHC.Unit.Home.PackageTable
 
 #if !defined(HAVE_INTERPRETER)
--- Stub when interpreter not available
+-- Stub when interpreter not available: plugin initialization requires the
+-- interpreter to load compiled plugin code, so we skip it in minimal builds.
+-- If plugins are specified in the flags but the interpreter is unavailable,
+-- they will simply be ignored.
 initializePlugins :: HscEnv -> IO HscEnv
-initializePlugins = return
+initializePlugins hsc_env = do
+  let logger = hsc_logger hsc_env
+  logMsg logger MCInfo noSrcSpan $
+    text "initializePlugins: interpreter not available; skipping plugin initialization"
+  return hsc_env
 #endif
 
 #if !defined(HAVE_JS_BACKEND)

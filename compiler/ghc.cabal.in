@@ -594,7 +594,6 @@ Library
         GHC.Hs.Syn.Type
         GHC.Hs.Extension
         GHC.Hs.ImpExp
-        GHC.Hs.Instances
         GHC.Hs.Lit
         GHC.Hs.Pat
         GHC.Hs.Specificity
@@ -637,6 +636,13 @@ Library
         GHC.HsToCore.Utils
         GHC.Hs.Type
         GHC.Hs.Utils
+        -- Data instances for AST (split into parallel-compilable modules per #18254)
+        GHC.Hs.Instances
+        GHC.Hs.Instances.Common
+        GHC.Hs.Instances.Transitions
+        GHC.Hs.Instances.Parsed
+        GHC.Hs.Instances.Renamed
+        GHC.Hs.Instances.Typechecked
         GHC.Iface.Binary
         GHC.Iface.Decl
         GHC.Iface.Env
@@ -678,8 +684,6 @@ Library
         GHC.Linker.Dynamic
         GHC.Linker.External
         GHC.Linker.Executable
-        GHC.Linker.ExtraObj
-        GHC.Linker.Loader
         GHC.Linker.MacOS
         GHC.Linker.Static
         GHC.Linker.Static.Utils
@@ -1170,6 +1174,8 @@ Library
             GHC.Runtime.Eval
             GHC.Runtime.Eval.Utils
             GHC.Runtime.Heap.Inspect
+            GHC.Runtime.Interpreter.C
+            GHC.Runtime.Interpreter.Init
             GHC.Runtime.Interpreter.Process
 
     -- Stub types when interpreter is not available
