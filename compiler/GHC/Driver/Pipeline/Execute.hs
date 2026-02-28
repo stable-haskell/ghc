@@ -42,12 +42,16 @@ import GHC.Fingerprint
 import GHC.Utils.Logger
 import GHC.Utils.TmpFs
 import GHC.Platform
+#if defined(HAVE_LLVM_BACKEND)
 import Data.List (intercalate, isInfixOf)
 import qualified Data.List.NonEmpty as NE
+#endif
 import GHC.Unit.Env
 import GHC.Utils.Error
 import Data.Maybe
+#if defined(HAVE_LLVM_BACKEND)
 import GHC.CmmToLlvm.Mangler
+#endif
 import GHC.SysTools
 import GHC.SysTools.Cpp
 import System.Directory
@@ -68,9 +72,11 @@ import GHC.Unit.Finder
 import Data.IORef
 import GHC.Types.Name.Env
 import GHC.Platform.Ways
+#if defined(HAVE_LLVM_BACKEND)
 import GHC.Driver.LlvmConfigCache (readLlvmConfigCache)
 import GHC.CmmToLlvm.Config (LlvmTarget (..), LlvmConfig (..))
 import GHC.CmmToLlvm.Version.Type (LlvmVersion (..))
+#endif
 import {-# SOURCE #-} GHC.Driver.Pipeline (compileForeign, compileEmptyStub)
 import GHC.Settings
 import System.IO
@@ -153,6 +159,7 @@ runPhase (T_Cmm pipe_env hsc_env input_fn) = do
 runPhase (T_Cc phase pipe_env hsc_env location input_fn) = runCcPhase phase pipe_env hsc_env location input_fn
 runPhase (T_As cpp pipe_env hsc_env location input_fn) = do
   runAsPhase cpp pipe_env hsc_env location input_fn
+#if defined(HAVE_LLVM_BACKEND)
 runPhase (T_LlvmOpt pipe_env hsc_env input_fn) =
   runLlvmOptPhase pipe_env hsc_env input_fn
 runPhase (T_LlvmLlc pipe_env hsc_env input_fn) =
@@ -161,9 +168,16 @@ runPhase (T_LlvmAs cpp pipe_env hsc_env location input_fn) = do
   runLlvmAsPhase cpp pipe_env hsc_env location input_fn
 runPhase (T_LlvmMangle pipe_env hsc_env input_fn) =
   runLlvmManglePhase pipe_env hsc_env input_fn
+#else
+runPhase T_LlvmOpt{} = panic "runPhase: LLVM backend not available (HAVE_LLVM_BACKEND not defined)"
+runPhase T_LlvmLlc{} = panic "runPhase: LLVM backend not available (HAVE_LLVM_BACKEND not defined)"
+runPhase T_LlvmAs{}  = panic "runPhase: LLVM backend not available (HAVE_LLVM_BACKEND not defined)"
+runPhase T_LlvmMangle{} = panic "runPhase: LLVM backend not available (HAVE_LLVM_BACKEND not defined)"
+#endif
 runPhase (T_MergeForeign pipe_env hsc_env input_fn fos) =
   runMergeForeign pipe_env hsc_env input_fn fos
 
+#if defined(HAVE_LLVM_BACKEND)
 runLlvmManglePhase :: PipeEnv -> HscEnv -> FilePath -> IO [Char]
 runLlvmManglePhase pipe_env hsc_env input_fn = do
       let next_phase = As False
@@ -171,6 +185,7 @@ runLlvmManglePhase pipe_env hsc_env input_fn = do
       let dflags = hsc_dflags hsc_env
       llvmFixupAsm (targetPlatform dflags) input_fn output_fn
       return output_fn
+#endif
 
 runMergeForeign :: PipeEnv -> HscEnv -> FilePath -> [FilePath] -> IO FilePath
 runMergeForeign _pipe_env hsc_env input_fn foreign_os = do
@@ -187,6 +202,7 @@ runMergeForeign _pipe_env hsc_env input_fn foreign_os = do
          joinObjectFiles hsc_env (new_o : foreign_os) input_fn
          return input_fn
 
+#if defined(HAVE_LLVM_BACKEND)
 runLlvmLlcPhase :: PipeEnv -> HscEnv -> FilePath -> IO FilePath
 runLlvmLlcPhase pipe_env hsc_env input_fn = do
     -- Note [Clamping of llc optimizations]
@@ -296,6 +312,7 @@ runLlvmOptPhase pipe_env hsc_env input_fn = do
                 )
 
     return output_fn
+#endif
 
 
 -- Run either 'clang' or 'gcc' phases
@@ -356,10 +373,12 @@ runGenericAsPhase run_as extra_opts with_cpp pipe_env hsc_env location input_fn 
 
         return output_fn
 
+#if defined(HAVE_LLVM_BACKEND)
 -- Invoke `clang` to assemble a .S file produced by LLvm toolchain
 runLlvmAsPhase :: Bool -> PipeEnv -> HscEnv -> Maybe ModLocation -> FilePath -> IO FilePath
 runLlvmAsPhase =
   runGenericAsPhase runLlvmAs [ GHC.SysTools.Option "-Wno-unused-command-line-argument" ]
+#endif
 
 -- Invoke 'gcc' to assemble a .S file
 runAsPhase :: Bool -> PipeEnv -> HscEnv -> Maybe ModLocation -> FilePath -> IO FilePath
@@ -980,6 +999,7 @@ getOutputFilename logger tmpfs stop_phase output basename dflags next_phase mayb
              | otherwise      = persistent
 
 
+#if defined(HAVE_LLVM_BACKEND)
 -- | LLVM Options. These are flags to be passed to opt and llc, to ensure
 -- consistency we list them in pairs, so that they form groups.
 llvmOptions :: LlvmConfig
@@ -1053,6 +1073,7 @@ llvmOptions llvm_config llvm_version dflags =
                 ArchRISCV64 -> "lp64d"
                 ArchLoongArch64 -> "lp64d"
                 _           -> ""
+#endif
 
 -- | What phase to run after one of the backend code generators has run
 hscPostBackendPhase :: HscSource -> Backend -> Phase

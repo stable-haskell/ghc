@@ -4,6 +4,7 @@
 \section{Code output phase}
 -}
 
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 module GHC.Driver.CodeOutput
@@ -20,7 +21,9 @@ import GHC.ForeignSrcLang
 import GHC.Data.FastString
 
 import GHC.CmmToAsm     ( nativeCodeGen )
+#if defined(HAVE_LLVM_BACKEND)
 import GHC.CmmToLlvm    ( llvmCodeGen )
+#endif
 
 import GHC.CmmToC           ( cmmToC )
 import GHC.Cmm.Lint         ( cmmLint )
@@ -32,7 +35,9 @@ import GHC.StgToCmm.CgUtils (CgStream)
 import GHC.Driver.DynFlags
 import GHC.Driver.Config.Finder    ( initFinderOpts   )
 import GHC.Driver.Config.CmmToAsm  ( initNCGConfig    )
+#if defined(HAVE_LLVM_BACKEND)
 import GHC.Driver.Config.CmmToLlvm ( initLlvmCgConfig )
+#endif
 import GHC.Driver.LlvmConfigCache  (LlvmConfigCache)
 import GHC.Driver.Ppr
 import GHC.Driver.Backend
@@ -50,7 +55,7 @@ import GHC.Utils.Outputable
 import GHC.Utils.Logger
 import GHC.Utils.Exception ( bracket )
 import GHC.Utils.Ppr (Mode(..))
-import GHC.Utils.Panic.Plain ( pgmError )
+import GHC.Utils.Panic.Plain ( pgmError, panic )
 
 import GHC.Unit
 import GHC.Unit.Finder      ( mkStubPaths )
@@ -130,8 +135,16 @@ codeOutput logger tmpfs llvm_config dflags unit_state this_mod filenm location g
                  NcgCodeOutput  -> outputAsm logger dflags this_mod location filenm dus1
                                              final_stream
                  ViaCCodeOutput -> outputC logger dflags filenm dus1 final_stream pkg_deps
+#if defined(HAVE_LLVM_BACKEND)
                  LlvmCodeOutput -> outputLlvm logger llvm_config dflags filenm dus1 final_stream
+#else
+                 LlvmCodeOutput -> panic "codeOutput: LLVM backend not available (HAVE_LLVM_BACKEND not defined)"
+#endif
+#if defined(HAVE_JS_BACKEND)
                  JSCodeOutput   -> outputJS logger llvm_config dflags filenm final_stream
+#else
+                 JSCodeOutput   -> panic "codeOutput: JS backend not available (HAVE_JS_BACKEND not defined)"
+#endif
         ; stubs_exist <- outputForeignStubs logger tmpfs dflags unit_state this_mod location stubs
         ; return (filenm, stubs_exist, foreign_fps, a)
         }
@@ -219,6 +232,7 @@ outputAsm logger dflags this_mod location filenm dus cmm_stream = do
       runUDSMT dus $ setTagUDSMT 'n' $
       nativeCodeGen logger (toolSettings dflags) ncg_config location h cmm_stream
 
+#if defined(HAVE_LLVM_BACKEND)
 {-
 ************************************************************************
 *                                                                      *
@@ -236,7 +250,9 @@ outputLlvm logger llvm_config dflags filenm dus cmm_stream = do
   {-# SCC "llvm_output" #-} doOutput filenm $
     \f -> {-# SCC "llvm_CodeGen" #-}
       llvmCodeGen logger lcg_config f dus cmm_stream
+#endif
 
+#if defined(HAVE_JS_BACKEND)
 {-
 ************************************************************************
 *                                                                      *
@@ -248,6 +264,7 @@ outputJS :: Logger -> LlvmConfigCache -> DynFlags -> FilePath -> CgStream RawCmm
 outputJS _ _ _ _ _ = pgmError $ "codeOutput: Hit JavaScript case. We should never reach here!"
                               ++ "\nThe JS backend should shortcircuit to StgToJS after Stg."
                               ++ "\nIf you reached this point then you've somehow made it to Cmm!"
+#endif
 
 {-
 ************************************************************************

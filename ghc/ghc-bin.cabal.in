@@ -29,7 +29,7 @@ Flag threaded
 
 Flag debug
     Description: Link the ghc executable against the debug RTS
-    Default: False
+    Default: True
     Manual: True
 
 Flag frontend-plugins

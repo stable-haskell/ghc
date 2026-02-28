@@ -82,9 +82,11 @@ package ghc
   flags: +bootstrap
          +x86-ncg +aarch64-ncg
          -ppc-ncg -riscv64-ncg -loongarch64-ncg
+         +host-ncg-only
          -js-backend -wasm-backend
-         +llvm-backend
+         -llvm-backend
          -interpreter -dynamic-linker
+         -hpc
 
 package ghc-bin
   flags: -frontend-plugins

@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE MonadComprehensions #-}
 {-# LANGUAGE TypeFamilies #-}
 
@@ -35,7 +36,9 @@ import GHC.HsToCore.Binds
 import GHC.HsToCore.Foreign.Decl
 import GHC.HsToCore.Ticks
 import GHC.HsToCore.Breakpoints
+#if defined(HAVE_HPC)
 import GHC.HsToCore.Coverage
+#endif
 import GHC.HsToCore.Docs
 
 import GHC.Tc.Types
@@ -65,7 +68,9 @@ import GHC.Builtin.Types
 
 import GHC.Data.Maybe    ( expectJust )
 import GHC.Data.OrdList
+#if defined(HAVE_HPC)
 import GHC.Data.SizedSeq ( sizeSS )
+#endif
 
 import GHC.Utils.Error
 import GHC.Utils.Outputable
@@ -169,6 +174,7 @@ deSugar hsc_env
                 | otherwise
                 = Nothing
 
+#if defined(HAVE_HPC)
         ; ds_hpc_info <- case m_tickInfo of
             Just (orig_file2, ticks)
               | gopt Opt_Hpc $ hsc_dflags hsc_env
@@ -178,6 +184,9 @@ deSugar hsc_env
                 else return 0 -- dummy hash when none are written
               pure $ HpcInfo (fromIntegral $ sizeSS ticks) hashNo
             _ -> pure $ emptyHpcInfo
+#else
+        ; let ds_hpc_info = emptyHpcInfo
+#endif
 
         ; (msgs, mb_res) <- initDs hsc_env tcg_env $
                        do { dsEvBinds ev_binds $ \ ds_ev_binds -> do
@@ -187,7 +196,9 @@ deSugar hsc_env
                           ; (ds_fords, foreign_prs) <- dsForeigns fords
                           ; ds_rules <- mapMaybeM dsRule rules
                           ; let hpc_init
+#if defined(HAVE_HPC)
                                   | gopt Opt_Hpc dflags = hpcInitCode (targetPlatform $ hsc_dflags hsc_env) mod ds_hpc_info
+#endif
                                   | otherwise = mempty
                           ; return ( ds_ev_binds
                                    , foreign_prs `appOL` core_prs `appOL` spec_prs
