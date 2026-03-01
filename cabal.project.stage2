@@ -50,7 +50,7 @@ packages:
   libraries/Cabal/Cabal-syntax
 
   utils/hpc
-  https://hackage.haskell.org/package/hsc2hs-0.68.10/hsc2hs-0.68.10.tar.gz
+  -- hsc2hs: see source-repository-package below
 
   https://hackage.haskell.org/package/Win32-2.14.2.1/Win32-2.14.2.1.tar.gz
   https://hackage.haskell.org/package/array-0.5.8.0/array-0.5.8.0.tar.gz
@@ -196,3 +196,10 @@ package rts-headers
 
 package rts-fs
   ghc-options: -no-rts
+
+-- hsc2hs with batch cross-compilation support
+-- https://github.com/stable-haskell/hsc2hs/tree/feat/batch-cross-compilation
+source-repository-package
+  type: git
+  location: https://github.com/stable-haskell/hsc2hs.git
+  tag: d07eea1260894ce5fe456f881fbc62366c9eb1b7
