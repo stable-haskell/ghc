@@ -242,20 +242,36 @@ LOG_GROUP_START = @:
 LOG_GROUP_END = @:
 endif
 
-# Phase timing: records start/end timestamps and status
+# Phase timing: records start/end timestamps and status.
+#
+# Guards prevent overwrites when PHONY targets re-run without doing real work.
+# For example, `test: stage2` triggers the PHONY stage2 recipe again; without
+# guards, the no-op re-check would overwrite the real stage2 build timings with
+# near-zero durations.
+#
+# Policy:
+#   - If a phase already completed successfully (status=0), skip re-timing.
+#   - If a phase failed (status=1) or never ran, (re)start timing.
 define PHASE_START
 	@mkdir -p $(TIMING_DIR)
-	@date +%s > $(TIMING_DIR)/$(1).start
+	@if [ ! -f $(TIMING_DIR)/$(1).end ] || [ "$$(cat $(TIMING_DIR)/$(1).status 2>/dev/null)" != "0" ]; then \
+		date +%s > $(TIMING_DIR)/$(1).start; \
+		rm -f $(TIMING_DIR)/$(1).end $(TIMING_DIR)/$(1).status; \
+	fi
 endef
 
 define PHASE_END_OK
-	@date +%s > $(TIMING_DIR)/$(1).end
-	@echo "0" > $(TIMING_DIR)/$(1).status
+	@if [ ! -f $(TIMING_DIR)/$(1).end ]; then \
+		date +%s > $(TIMING_DIR)/$(1).end; \
+		echo "0" > $(TIMING_DIR)/$(1).status; \
+	fi
 endef
 
 define PHASE_END_FAIL
-	@date +%s > $(TIMING_DIR)/$(1).end
-	@echo "1" > $(TIMING_DIR)/$(1).status
+	@if [ ! -f $(TIMING_DIR)/$(1).end ]; then \
+		date +%s > $(TIMING_DIR)/$(1).end; \
+		echo "1" > $(TIMING_DIR)/$(1).status; \
+	fi
 endef
 
 define NORMALIZE_FP

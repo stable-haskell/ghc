@@ -110,20 +110,24 @@ jobs:
     - name: Generate metrics plots
       if: ${{ !cancelled() }}
       continue-on-error: true
-      shell: devx {0}
+      shell: bash
       run: |
-        # Generate separate build and test SVG plots
-        nix-shell -p 'python3.withPackages (ps: [ps.matplotlib])' --run 'python3 ./mk/plot-metrics.py _build/metrics _build/timing _build/metrics/metrics'
+        # Generate separate build and test SVG plots.
+        # Use bash (not devx) because nix is not available inside the devx shell.
+        PYTHON_MPL=$(nix build --impure --no-link --print-out-paths \
+          --expr 'let pkgs = (builtins.getFlake "nixpkgs").legacyPackages.${builtins.currentSystem}; in pkgs.python3.withPackages (ps: [ps.matplotlib])')
+        "$PYTHON_MPL/bin/python3" ./mk/plot-metrics.py _build/metrics _build/timing _build/metrics/metrics
 
     - name: Upload metrics plots to R2
       if: ${{ !cancelled() }}
+      continue-on-error: true
       env:
         AWS_ACCESS_KEY_ID: ${{ secrets.R2_METRICS_ACCESS_KEY_ID }}
         AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_METRICS_SECRET_ACCESS_KEY }}
         R2_ENDPOINT: ${{ secrets.R2_METRICS_ENDPOINT }}
         R2_PUBLIC_URL: ${{ vars.R2_METRICS_PUBLIC_URL }}
         R2_BUCKET: ${{ vars.R2_METRICS_BUCKET_NAME }}
-      shell: devx {0}
+      shell: bash
       run: |
         RUN_ID="${{ github.run_id }}"
         PLAT="${{ matrix.plat }}"
@@ -132,17 +136,21 @@ jobs:
         export AWS_ENDPOINT_URL="${R2_ENDPOINT}"
         export AWS_DEFAULT_REGION=auto
 
+        # Use bash (not devx) because nix is not available inside the devx shell.
+        AWSCLI=$(nix build --no-link --print-out-paths nixpkgs#awscli2)
+        AWS="$AWSCLI/bin/aws"
+
         # Upload build plot if it exists
         if [[ -f "_build/metrics/metrics-build.svg" ]]; then
           BUILD_PATH="runs/${RUN_ID}/${PLAT}-dynamic${DYN}-build.svg"
-          nix-shell --keep AWS_ACCESS_KEY_ID --keep AWS_SECRET_ACCESS_KEY --keep AWS_ENDPOINT_URL --keep AWS_DEFAULT_REGION -p awscli2 --run "aws s3 cp _build/metrics/metrics-build.svg s3://${R2_BUCKET}/${BUILD_PATH} --content-type 'image/svg+xml'" || echo "Failed to upload build plot (non-fatal)"
+          "$AWS" s3 cp _build/metrics/metrics-build.svg "s3://${R2_BUCKET}/${BUILD_PATH}" --content-type 'image/svg+xml' || echo "Failed to upload build plot (non-fatal)"
           echo "BUILD_PLOT_URL=${R2_PUBLIC_URL}/${BUILD_PATH}" >> $GITHUB_ENV
         fi
 
         # Upload test plot if it exists
         if [[ -f "_build/metrics/metrics-test.svg" ]]; then
           TEST_PATH="runs/${RUN_ID}/${PLAT}-dynamic${DYN}-test.svg"
-          nix-shell --keep AWS_ACCESS_KEY_ID --keep AWS_SECRET_ACCESS_KEY --keep AWS_ENDPOINT_URL --keep AWS_DEFAULT_REGION -p awscli2 --run "aws s3 cp _build/metrics/metrics-test.svg s3://${R2_BUCKET}/${TEST_PATH} --content-type 'image/svg+xml'" || echo "Failed to upload test plot (non-fatal)"
+          "$AWS" s3 cp _build/metrics/metrics-test.svg "s3://${R2_BUCKET}/${TEST_PATH}" --content-type 'image/svg+xml' || echo "Failed to upload test plot (non-fatal)"
           echo "TEST_PLOT_URL=${R2_PUBLIC_URL}/${TEST_PATH}" >> $GITHUB_ENV
         fi
 
