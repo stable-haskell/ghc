@@ -16,7 +16,7 @@ Creates dual-axis plots showing:
     - Phase markers with shaded regions and labels
 
 Two separate plots are generated:
-    - Build plot: cabal, stage1, stage2, stage2-utils, bindist phases
+    - Build plot: cabal, stage1, stage2, stage3-* phases (with sub-phases)
     - Test plot: test phase only
 """
 
@@ -116,21 +116,121 @@ def format_duration(seconds):
         return f"{hours}h {mins}m"
 
 
+def _hex_to_rgb(hex_color):
+    """Convert '#RRGGBB' to (r, g, b) floats in [0,1]."""
+    h = hex_color.lstrip('#')
+    return tuple(int(h[i:i+2], 16) / 255.0 for i in (0, 2, 4))
+
+
+def _rgb_to_hex(r, g, b):
+    """Convert (r, g, b) floats in [0,1] to '#RRGGBB'."""
+    return '#{:02x}{:02x}{:02x}'.format(
+        int(min(max(r, 0), 1) * 255),
+        int(min(max(g, 0), 1) * 255),
+        int(min(max(b, 0), 1) * 255),
+    )
+
+
+def _vary_color(hex_color, index, total):
+    """Generate a color variation for sub-phase `index` of `total`.
+
+    Shifts lightness up/down symmetrically around the base color so that
+    adjacent sub-phases are visually distinct.
+    """
+    if total <= 1:
+        return hex_color
+    r, g, b = _hex_to_rgb(hex_color)
+    # Spread from -0.15 to +0.15 lightness shift
+    t = (index / (total - 1)) - 0.5  # [-0.5, 0.5]
+    shift = t * 0.30
+    return _rgb_to_hex(r + shift, g + shift, b + shift)
+
+
+# Top-level build phase names (and prefixes for stage3-*)
+_BUILD_PARENTS = {'cabal', 'stage1', 'stage2'}
+
+# Base colors for top-level phases
+_PHASE_COLORS = {
+    'cabal':  '#FFD700',  # Gold
+    'stage1': '#FF6B6B',  # Red
+    'stage2': '#4ECDC4',  # Teal
+    'test':   '#DDA0DD',  # Plum
+}
+_STAGE3_PALETTE = ['#FF8C42', '#6A0572', '#1B998B', '#E55934']
+
+
+def _parent_of(name):
+    """Return the parent phase name, or None if top-level.
+
+    'stage2.rts' -> 'stage2'
+    'stage3-x86_64-linux.libraries' -> 'stage3-x86_64-linux'
+    'cabal' -> None
+    """
+    if '.' in name:
+        return name.rsplit('.', 1)[0]
+    return None
+
+
+def _base_color_for(name):
+    """Return the base color for a phase (top-level or sub-phase)."""
+    parent = _parent_of(name)
+    lookup = parent if parent else name
+    if lookup in _PHASE_COLORS:
+        return _PHASE_COLORS[lookup]
+    if lookup.startswith('stage3-'):
+        idx = int(hashlib.sha256(lookup.encode()).hexdigest(), 16) % len(_STAGE3_PALETTE)
+        return _STAGE3_PALETTE[idx]
+    return '#CCCCCC'
+
+
+def select_display_phases(all_phases):
+    """Choose which phases to display in the build plot.
+
+    When sub-phases exist for a parent (e.g. stage2.rts, stage2.libraries),
+    show only the sub-phases — they're more informative.
+    When no sub-phases exist (e.g. cabal), show the parent phase.
+    """
+    # Determine which parents have sub-phases
+    parents_with_subs = set()
+    for name, _, _, _ in all_phases:
+        parent = _parent_of(name)
+        if parent is not None:
+            parents_with_subs.add(parent)
+
+    result = []
+    for phase in all_phases:
+        name = phase[0]
+        parent = _parent_of(name)
+        if parent is not None:
+            # This IS a sub-phase — always include it
+            result.append(phase)
+        elif name not in parents_with_subs:
+            # Top-level phase with no sub-phases — include it
+            result.append(phase)
+        # else: top-level with sub-phases — skip (sub-phases cover it)
+
+    return result
+
+
+def _display_label(name):
+    """Produce a short display label for a phase.
+
+    Sub-phases strip the parent prefix for readability:
+      'stage2.rts'         -> 'rts'
+      'stage2.executables' -> 'executables'
+      'cabal'              -> 'cabal'
+    """
+    if '.' in name:
+        return name.rsplit('.', 1)[1]
+    return name
+
+
 def create_plot(timestamps, cpu, mem_used, mem_total, phases, title, output_file):
     """Create a single metrics plot for the given data and phases."""
-    # Define colors
-    cpu_color = '#2E86AB'      # Blue
-    mem_color = '#28A745'      # Green
-    phase_colors = {
-        'cabal': '#FFD700',        # Gold
-        'stage1': '#FF6B6B',       # Red
-        'stage2': '#4ECDC4',       # Teal
-        'test': '#DDA0DD',         # Plum
-    }
-    # stage3-* platforms get distinct colors
-    stage3_palette = ['#FF8C42', '#6A0572', '#1B998B', '#E55934']
+    cpu_color = '#2E86AB'  # Blue
+    mem_color = '#28A745'  # Green
 
-    # Create figure with dual y-axes - wider aspect ratio (20:6)
+    # Create figure with dual y-axes — wider aspect ratio (20:6)
     fig, ax1 = plt.subplots(figsize=(20, 6))
 
     # Calculate effective concurrency from max CPU usage
@@ -158,12 +258,28 @@ def create_plot(timestamps, cpu, mem_used, mem_total, phases, title, output_file
         max_mem_gb = max(mem_total) / 1024
         ax2.set_ylim(0, max_mem_gb * 1.1)
 
+    # Assign colors to phases — sub-phases get variations of their parent color
+    # Group sub-phases by parent to assign variation indices
+    parent_groups = {}
+    for name, _, _, _ in phases:
+        parent = _parent_of(name)
+        if parent is not None:
+            parent_groups.setdefault(parent, []).append(name)
+
+    def color_for(name):
+        parent = _parent_of(name)
+        if parent is not None and parent in parent_groups:
+            siblings = parent_groups[parent]
+            idx = siblings.index(name)
+            return _vary_color(_base_color_for(name), idx, len(siblings))
+        return _base_color_for(name)
+
     # Add phase markers as shaded regions
     if phases and timestamps:
         plot_start = timestamps[0]
         plot_end = timestamps[-1]
 
-        for phase_name, start, end, status in phases:
+        for phase_idx, (phase_name, start, end, status) in enumerate(phases):
             # Clamp to plot range
             if end < plot_start or start > plot_end:
                 continue
@@ -171,15 +287,7 @@ def create_plot(timestamps, cpu, mem_used, mem_total, phases, title, output_file
             start = max(start, plot_start)
             end = min(end, plot_end)
 
-            # Get color for phase (stage3-* uses rotating palette)
-            if phase_name in phase_colors:
-                color = phase_colors[phase_name]
-            elif phase_name.startswith('stage3-'):
-                # Stable hash so the same platform always gets the same color
-                idx = int(hashlib.sha256(phase_name.encode()).hexdigest(), 16) % len(stage3_palette)
-                color = stage3_palette[idx]
-            else:
-                color = '#CCCCCC'
+            color = color_for(phase_name)
 
             # Add shaded region
             ax1.axvspan(start, end, alpha=0.2, color=color)
@@ -187,18 +295,27 @@ def create_plot(timestamps, cpu, mem_used, mem_total, phases, title, output_file
             # Add vertical line at phase start
             ax1.axvline(x=start, color=color, linestyle='--', linewidth=1, alpha=0.7)
 
-            # Add phase label at top
+            # Label positioning — alternate top/bottom for adjacent sub-phases
+            # to prevent overlap when phases are narrow
             mid_time = start + (end - start) / 2
             duration = int((end - start).total_seconds())
             duration_str = format_duration(duration)
             status_marker = '\u2713' if status == 'OK' else '\u2717'
+            label = _display_label(phase_name)
+
+            if phase_idx % 2 == 0:
+                y_pos = cpu_limit
+                va = 'top'
+            else:
+                y_pos = cpu_limit * 0.88
+                va = 'top'
 
             ax1.annotate(
-                f'{phase_name}\n{duration_str} {status_marker}',
-                xy=(mid_time, cpu_limit),
-                fontsize=10,
+                f'{label}\n{duration_str} {status_marker}',
+                xy=(mid_time, y_pos),
+                fontsize=9,
                 ha='center',
-                va='top',
+                va=va,
                 bbox=dict(boxstyle='round,pad=0.3', facecolor=color, alpha=0.7)
             )
 
@@ -249,6 +366,12 @@ def filter_metrics_for_phases(timestamps, cpu, mem_used, mem_total, phases):
     return zip(*filtered)
 
 
+def _is_build_phase(name):
+    """Return True if `name` is a build-related phase (top-level or sub-phase)."""
+    top = name.split('.')[0]  # 'stage2.rts' -> 'stage2'
+    return top in _BUILD_PARENTS or top.startswith('stage3-')
+
+
 def plot_metrics(metrics_dir, timing_dir, output_prefix):
     """Generate the metrics plots (build and test separately)."""
     metrics_file = Path(metrics_dir) / 'metrics.csv'
@@ -265,16 +388,11 @@ def plot_metrics(metrics_dir, timing_dir, output_prefix):
         print("Error: No metrics data found")
         sys.exit(1)
 
-    # Separate build phases from test phase.
-    # Include top-level phases only (no sub-phases with dots) to avoid clutter.
-    # stage3-* platforms are build phases.
-    def is_build_phase(name):
-        if '.' in name:
-            return False  # Skip sub-phases
-        return name in ('cabal', 'stage1', 'stage2') or name.startswith('stage3-')
+    # Choose which phases to show — prefer sub-phases over parents
+    display_phases = select_display_phases(all_phases)
 
-    build_phases = [p for p in all_phases if is_build_phase(p[0])]
-    test_phases = [p for p in all_phases if p[0] == 'test']
+    build_phases = [p for p in display_phases if _is_build_phase(p[0])]
+    test_phases = [p for p in display_phases if p[0] == 'test']
 
     # Generate build plot
     if build_phases:
@@ -300,16 +418,19 @@ def plot_metrics(metrics_dir, timing_dir, output_prefix):
         create_plot(ts_test, cpu_test, mem_test, mem_total_test,
                    test_phases, test_title, test_output)
 
-    # Print phase summary
+    # Print phase summary (all phases, including sub-phases)
     if all_phases:
         total_duration = int((all_phases[-1][2] - all_phases[0][1]).total_seconds())
         print("\nPhase Summary:")
-        print("-" * 50)
+        print("-" * 55)
         for phase_name, start, end, status in all_phases:
             duration = int((end - start).total_seconds())
-            print(f"  {phase_name:15} {format_duration(duration):>10}  [{status}]")
-        print("-" * 50)
-        print(f"  {'TOTAL':15} {format_duration(total_duration):>10}")
+            # Indent sub-phases for readability
+            indent = "    " if '.' in phase_name else "  "
+            label = _display_label(phase_name) if '.' in phase_name else phase_name
+            print(f"{indent}{label:20} {format_duration(duration):>10}  [{status}]")
+        print("-" * 55)
+        print(f"  {'TOTAL':20} {format_duration(total_duration):>10}")
 
 
 def main():
