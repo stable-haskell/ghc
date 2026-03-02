@@ -36,41 +36,12 @@ CPU_STATE_FILE=""
 get_cpu_usage() {
     case "$OS" in
         Darwin)
-            # macOS: use sysctl for instant CPU ticks, calculate delta
-            # This is much faster than top or iostat
-            local ticks
-            ticks=$(sysctl -n kern.cp_time 2>/dev/null)
-            if [[ -z "$ticks" ]]; then
-                # Fallback: use ps to get total CPU (less accurate but fast)
-                ps -A -o %cpu | awk '{sum += $1} END {printf "%.1f", sum}'
-                return
-            fi
-
-            # Parse: user nice sys idle
-            local user nice sys idle total
-            read user nice sys idle <<< "$ticks"
-            total=$((user + nice + sys + idle))
-
-            # Calculate delta from previous sample
-            if [[ -f "$CPU_STATE_FILE" ]]; then
-                local prev_total prev_idle
-                read prev_total prev_idle < "$CPU_STATE_FILE"
-                local delta_total=$((total - prev_total))
-                local delta_idle=$((idle - prev_idle))
-                if [[ $delta_total -gt 0 ]]; then
-                    echo "$total $idle" > "$CPU_STATE_FILE"
-                    awk "BEGIN {printf \"%.1f\", 100 * (1 - $delta_idle / $delta_total)}"
-                    return
-                fi
-            fi
-
-            # First sample or invalid delta: store state, return cumulative
-            echo "$total $idle" > "$CPU_STATE_FILE"
-            if [[ $total -gt 0 ]]; then
-                awk "BEGIN {printf \"%.1f\", 100 * (1 - $idle / $total)}"
-            else
-                echo "0"
-            fi
+            # macOS: sum per-process CPU usage via ps
+            # Note: kern.cp_time is FreeBSD-only and doesn't exist on macOS.
+            # Use absolute path — nix devx shell may not include /bin in PATH.
+            /bin/ps -A -o %cpu 2>/dev/null \
+                | awk '{sum += $1} END {printf "%.1f", sum}' \
+                || echo "0.0"
             ;;
         Linux)
             # Linux: calculate from /proc/stat with delta
@@ -126,15 +97,19 @@ get_cpu_usage() {
 get_memory_usage() {
     case "$OS" in
         Darwin)
-            # macOS: use vm_stat and sysctl
-            page_size=$(sysctl -n hw.pagesize 2>/dev/null || echo 4096)
-            total_mb=$(( $(sysctl -n hw.memsize 2>/dev/null || echo 0) / 1024 / 1024 ))
+            # macOS: use vm_stat and sysctl with absolute paths
+            # Nix devx shell may not include /usr/bin or /usr/sbin in PATH.
+            page_size=$(/usr/sbin/sysctl -n hw.pagesize 2>/dev/null || echo 4096)
+            total_mb=$(( $(/usr/sbin/sysctl -n hw.memsize 2>/dev/null || echo 0) / 1024 / 1024 ))
 
-            # Parse vm_stat output
-            vm_stat 2>/dev/null | awk -v ps="$page_size" -v total="$total_mb" '
-                /Pages active/ { active = $3 + 0 }
-                /Pages wired/ { wired = $4 + 0 }
-                /Pages compressed/ { compressed = $5 + 0 }
+            # Parse vm_stat output — use $NF (last field) for robustness across
+            # macOS versions (the label column count varies, e.g. "Pages compressed"
+            # vs "Pages stored in compressor").
+            /usr/bin/vm_stat 2>/dev/null | awk -v ps="$page_size" -v total="$total_mb" '
+                /Pages active/                { active     = $NF + 0 }
+                /Pages wired/                 { wired      = $NF + 0 }
+                /Pages stored in compressor/  { compressed = $NF + 0 }
+                /Pages compressed/            { compressed = $NF + 0 }
                 END {
                     used_mb = int((active + wired + compressed) * ps / 1024 / 1024)
                     printf "%d,%d", used_mb, total
