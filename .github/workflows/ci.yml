@@ -66,7 +66,7 @@ jobs:
     #   run: ./configure
 
     - name: Start metrics collection
-      shell: devx {0}
+      shell: bash
       run: ./mk/collect-metrics.sh start _build/metrics 0.5
 
     - name: Build (dynamic=${{ matrix.dynamic }})
@@ -99,7 +99,7 @@ jobs:
 
     - name: Stop metrics collection
       if: ${{ !cancelled() }}
-      shell: devx {0}
+      shell: bash
       run: ./mk/collect-metrics.sh stop _build/metrics
 
     - name: Display test timings
