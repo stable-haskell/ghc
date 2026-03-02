@@ -2384,17 +2384,24 @@ genCCall target dest_regs arg_regs = do
     -- chunks) instead of calling memcpy. The peephole optimizer will
     -- further merge adjacent LDR/STR into LDP/STP pairs.
     --
-    -- Alignment thresholds are intentionally relaxed: AArch64 basic
-    -- load/store instructions (LDR, STR) support unaligned addresses
-    -- without faulting.  Only LDP/STP require natural alignment, hence
-    -- the stricter align >= 8 guard for the 16-byte path.
+    -- AArch64 single-register LDR/STR instructions handle unaligned
+    -- addresses without faulting, so we always use the widest available
+    -- single-register operation regardless of the stated alignment.
+    -- Only LDP/STP require natural alignment (8-byte for the II64 pair),
+    -- so we gate the 16-byte paired path on align >= 8.
     inlineMemcpy :: CmmExpr -> CmmExpr -> Int -> Int -> NatM InstrBlock
     inlineMemcpy dst_expr src_expr n align = do
       (dst_reg, _fmt_d, code_d) <- getSomeReg dst_expr
       (src_reg, _fmt_s, code_s) <- getSomeReg src_expr
       tmp1 <- getNewRegNat II64
       tmp2 <- getNewRegNat II64
-      let -- Generate copy instructions for the remaining bytes at the given offset
+      let -- Generate copy instructions for the remaining bytes at the given offset.
+          -- We greedily pick the widest operation that fits the remaining size:
+          --   16 bytes: LDP/STP (paired, needs align >= 8)
+          --    8 bytes: LDR/STR II64 (unaligned ok)
+          --    4 bytes: LDR/STR II32 (unaligned ok)
+          --    2 bytes: LDR/STR II16 (unaligned ok)
+          --    1 byte:  LDR/STR II8
           go :: Int -> Int -> OrdList Instr
           go off remaining
             | remaining <= 0 = nilOL
@@ -2405,18 +2412,18 @@ genCCall target dest_regs arg_regs = do
                      , STP II64 (OpReg W64 tmp1) (OpReg W64 tmp2)
                                 (OpAddr (AddrRegImm dst_reg (ImmInt off)))
                      ] `appOL` go (off + 16) (remaining - 16)
-            -- 8-byte chunk (unaligned LDR/STR ok on AArch64)
-            | remaining >= 8, align >= 4 =
+            -- 8-byte chunk (AArch64 LDR/STR handles unaligned)
+            | remaining >= 8 =
                 toOL [ LDR II64 (OpReg W64 tmp1) (OpAddr (AddrRegImm src_reg (ImmInt off)))
                      , STR II64 (OpReg W64 tmp1) (OpAddr (AddrRegImm dst_reg (ImmInt off)))
                      ] `appOL` go (off + 8) (remaining - 8)
             -- 4-byte chunk
-            | remaining >= 4, align >= 2 =
+            | remaining >= 4 =
                 toOL [ LDR II32 (OpReg W32 tmp1) (OpAddr (AddrRegImm src_reg (ImmInt off)))
                      , STR II32 (OpReg W32 tmp1) (OpAddr (AddrRegImm dst_reg (ImmInt off)))
                      ] `appOL` go (off + 4) (remaining - 4)
             -- 2-byte chunk
-            | remaining >= 2, align >= 2 =
+            | remaining >= 2 =
                 toOL [ LDR II16 (OpReg W16 tmp1) (OpAddr (AddrRegImm src_reg (ImmInt off)))
                      , STR II16 (OpReg W16 tmp1) (OpAddr (AddrRegImm dst_reg (ImmInt off)))
                      ] `appOL` go (off + 2) (remaining - 2)
@@ -2463,8 +2470,9 @@ genCCall target dest_regs arg_regs = do
                   , ORR (OpReg W64 tmp) (OpReg W64 tmp)
                         (OpRegShift W64 tmp SLSL 32)
                   ])
-          -- Generate stores at offset.  See inlineMemcpy for the
-          -- rationale behind the relaxed alignment thresholds.
+          -- Generate stores at offset.  See inlineMemcpy for alignment
+          -- rationale: AArch64 single-register STR handles unaligned
+          -- addresses, only STP requires natural alignment.
           go :: Int -> Int -> OrdList Instr
           go off remaining
             | remaining <= 0 = nilOL
@@ -2473,18 +2481,18 @@ genCCall target dest_regs arg_regs = do
                 unitOL (STP II64 (OpReg W64 store_reg) (OpReg W64 store_reg)
                                  (OpAddr (AddrRegImm dst_reg (ImmInt off))))
                 `appOL` go (off + 16) (remaining - 16)
-            -- 8-byte chunk
-            | remaining >= 8, align >= 4 =
+            -- 8-byte chunk (AArch64 STR handles unaligned)
+            | remaining >= 8 =
                 unitOL (STR II64 (OpReg W64 store_reg)
                                  (OpAddr (AddrRegImm dst_reg (ImmInt off))))
                 `appOL` go (off + 8) (remaining - 8)
             -- 4-byte chunk
-            | remaining >= 4, align >= 2 =
+            | remaining >= 4 =
                 unitOL (STR II32 (OpReg W32 store_reg)
                                  (OpAddr (AddrRegImm dst_reg (ImmInt off))))
                 `appOL` go (off + 4) (remaining - 4)
             -- 2-byte chunk
-            | remaining >= 2, align >= 2 =
+            | remaining >= 2 =
                 unitOL (STR II16 (OpReg W16 store_reg)
                                  (OpAddr (AddrRegImm dst_reg (ImmInt off))))
                 `appOL` go (off + 2) (remaining - 2)
