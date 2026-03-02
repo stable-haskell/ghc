@@ -46,11 +46,7 @@ packages:
   utils/unlit
 
   -- The following are packages available on Hackage but included as submodules
-  libraries/Cabal/Cabal
-  libraries/Cabal/Cabal-syntax
-
-  utils/hpc
-  -- hsc2hs: see source-repository-package below
+  -- https://hackage.haskell.org/package/hsc2hs-0.68.10/hsc2hs-0.68.10.tar.gz
 
   https://hackage.haskell.org/package/Win32-2.14.2.1/Win32-2.14.2.1.tar.gz
   https://hackage.haskell.org/package/array-0.5.8.0/array-0.5.8.0.tar.gz
@@ -87,6 +83,19 @@ packages:
   https://hackage.haskell.org/package/alex-3.5.2.0/alex-3.5.2.0.tar.gz
   https://hackage.haskell.org/package/happy-2.1.5/happy-2.1.5.tar.gz
   https://hackage.haskell.org/package/happy-lib-2.1.5/happy-lib-2.1.5.tar.gz
+
+-- wip/andrea/local-store
+source-repository-package
+  type: git
+  location: https://github.com/stable-haskell/Cabal.git
+  tag: d7bf2ce3f9a7da4640833ddc5bb7740d2557b6a7
+  subdir: Cabal
+          Cabal-syntax
+
+source-repository-package
+  type: git
+  location: https://github.com/stable-haskell/hpc-bin.git
+  tag: 5923da3fe77993b7afc15b5163cffcaa7da6ecf5
 
 if !os(windows)
   packages:

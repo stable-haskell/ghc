@@ -301,13 +301,15 @@ define CABAL_BUILD
 	$(call CABAL_BUILD_WITH,$(CABAL))
 endef
 
-define CABAL_BUILD_STAGE0
+define CABAL_INSTALL_STAGE0
 	$(CABAL0) \
 		--store-dir $(call NORMALIZE_FP,$(CURDIR)/$(STORE_DIR)) \
 		--logs-dir $(call NORMALIZE_FP,$(CURDIR)/$(LOGS_DIR)) \
-	build \
-		--project-file cabal.project.$(STAGE) \
+	install \
+		--installdir $(dir $@) \
 		--builddir $(call NORMALIZE_FP,$(CURDIR)/$(STAGE_DIR)) \
+		--project-file cabal.project.$(STAGE) \
+		--overwrite-policy=always --install-method=copy \
 		$(CABAL_ARGS)
 endef
 
@@ -526,9 +528,7 @@ $(CABAL): STAGE=stage0
 $(CABAL):
 	$(call PHASE_START,cabal)
 	$(call LOG,Building $@)
-	$(CABAL_BUILD_STAGE0) --with-compiler $(GHC0) cabal-install:exe:cabal
-	@mkdir -p $(@D)
-	@cp $$($(CABAL0) list-bin -v0 -j --with-compiler $(GHC0) --project-file=cabal.project.stage0 --builddir=$(CURDIR)/$(STAGE_DIR) cabal-install:exe:cabal | $(CYGPATH)) $@
+	$(CABAL_INSTALL_STAGE0) --with-compiler $(GHC0) cabal-install:exe:cabal
 	$(call PHASE_END_OK,cabal)
 
 stage0 : $(CABAL)
