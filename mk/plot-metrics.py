@@ -23,8 +23,9 @@ Two separate plots are generated:
 import sys
 import os
 import csv
+import colorsys
 import hashlib
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 # Try to import matplotlib, provide helpful error if not available
@@ -39,6 +40,23 @@ except ImportError:
     print("  nix run nixpkgs#python3Packages.matplotlib -- mk/plot-metrics.py ...")
     print("  # or: pip install matplotlib")
     sys.exit(1)
+
+# ---------------------------------------------------------------------------
+# Data pipeline overview
+#
+# The script processes metrics in five stages:
+#
+#   1. COLLECT  — mk/collect-metrics.sh samples CPU% and memory at a fixed
+#                 interval and writes rows to metrics.csv.
+#   2. READ     — read_metrics() / read_phases() parse the CSV and the
+#                 per-phase .start/.end timestamp files into lists.
+#   3. SELECT   — select_display_phases() decides which phases to render:
+#                 sub-phases replace their parent when available.
+#   4. FILTER   — filter_metrics_for_phases() trims the time-series to the
+#                 window covered by the selected phases (±30 s margin).
+#   5. PLOT     — create_plot() renders a dual-axis (CPU + memory) SVG with
+#                 phase shading and labels.
+# ---------------------------------------------------------------------------
 
 
 def read_metrics(metrics_file):
@@ -116,34 +134,20 @@ def format_duration(seconds):
         return f"{hours}h {mins}m"
 
 
-def _hex_to_rgb(hex_color):
-    """Convert '#RRGGBB' to (r, g, b) floats in [0,1]."""
-    h = hex_color.lstrip('#')
-    return tuple(int(h[i:i+2], 16) / 255.0 for i in (0, 2, 4))
-
-
-def _rgb_to_hex(r, g, b):
-    """Convert (r, g, b) floats in [0,1] to '#RRGGBB'."""
-    return '#{:02x}{:02x}{:02x}'.format(
-        int(min(max(r, 0), 1) * 255),
-        int(min(max(g, 0), 1) * 255),
-        int(min(max(b, 0), 1) * 255),
-    )
-
-
 def _vary_color(hex_color, index, total):
     """Generate a color variation for sub-phase `index` of `total`.
 
-    Shifts lightness up/down symmetrically around the base color so that
-    adjacent sub-phases are visually distinct.
+    Shifts HLS lightness up/down symmetrically around the base color so
+    that adjacent sub-phases are visually distinct.
     """
     if total <= 1:
         return hex_color
-    r, g, b = _hex_to_rgb(hex_color)
+    r, g, b = matplotlib.colors.to_rgb(hex_color)
+    h, l, s = colorsys.rgb_to_hls(r, g, b)
     # Spread from -0.15 to +0.15 lightness shift
     t = (index / (total - 1)) - 0.5  # [-0.5, 0.5]
-    shift = t * 0.30
-    return _rgb_to_hex(r + shift, g + shift, b + shift)
+    l = min(max(l + t * 0.30, 0.0), 1.0)
+    return matplotlib.colors.to_hex(colorsys.hls_to_rgb(h, l, s))
 
 
 # Top-level build phase names (and prefixes for stage3-*)
@@ -226,14 +230,36 @@ def _display_label(name):
 
 
 def create_plot(timestamps, cpu, mem_used, mem_total, phases, title, output_file):
-    """Create a single metrics plot for the given data and phases."""
+    """Create a dual-axis metrics plot and save it as SVG.
+
+    Left y-axis:  CPU usage (%) — on multi-core machines CPU can exceed
+                  100%, so the axis scales to ``effective_cores * 100``.
+    Right y-axis: Memory used (GB).
+
+    Each phase is drawn as a translucent shaded region with a dashed
+    vertical line at its start.  Labels alternate between two y-positions
+    (top / slightly below top) so that narrow adjacent phases don't
+    overlap each other's text.
+
+    Args:
+        timestamps: list[datetime]   — sample times.
+        cpu:        list[float]      — CPU percentage per sample.
+        mem_used:   list[float]      — used memory in MB per sample.
+        mem_total:  list[float]      — total memory in MB per sample.
+        phases:     list of (name, start, end, status) tuples.
+        title:      str              — plot title text.
+        output_file: str             — destination path (SVG).
+    """
     cpu_color = '#2E86AB'  # Blue
     mem_color = '#28A745'  # Green
 
     # Create figure with dual y-axes — wider aspect ratio (20:6)
     fig, ax1 = plt.subplots(figsize=(20, 6))
 
-    # Calculate effective concurrency from max CPU usage
+    # On multi-core machines ps / /proc/stat report aggregate CPU%, so a
+    # 4-core box fully loaded reads ~400%.  We derive the effective core
+    # count from the peak value and scale the y-axis to cores*100 so the
+    # chart fills the available space without clipping.
     max_cpu = max(cpu) if cpu else 100
     effective_cores = int((max_cpu + 99) // 100)  # ceil(max_cpu / 100)
     cpu_limit = effective_cores * 100
@@ -258,8 +284,11 @@ def create_plot(timestamps, cpu, mem_used, mem_total, phases, title, output_file
         max_mem_gb = max(mem_total) / 1024
         ax2.set_ylim(0, max_mem_gb * 1.1)
 
-    # Assign colors to phases — sub-phases get variations of their parent color
-    # Group sub-phases by parent to assign variation indices
+    # Assign colors to phases.  Sub-phases inherit their parent's base
+    # color (_base_color_for) and get a lightness variation via
+    # _vary_color() so that e.g. stage2.rts / stage2.libraries /
+    # stage2.executables are visually distinct yet clearly related.
+    # Top-level phases without sub-phases use the base color directly.
     parent_groups = {}
     for name, _, _, _ in phases:
         parent = _parent_of(name)
@@ -295,8 +324,10 @@ def create_plot(timestamps, cpu, mem_used, mem_total, phases, title, output_file
             # Add vertical line at phase start
             ax1.axvline(x=start, color=color, linestyle='--', linewidth=1, alpha=0.7)
 
-            # Label positioning — alternate top/bottom for adjacent sub-phases
-            # to prevent overlap when phases are narrow
+            # Label positioning — alternate between two y-positions (top of
+            # chart vs slightly below) for even/odd phase indices.  This
+            # prevents text overlap when consecutive phases are narrow and
+            # their labels would otherwise sit on top of each other.
             mid_time = start + (end - start) / 2
             duration = int((end - start).total_seconds())
             duration_str = format_duration(duration)
@@ -308,7 +339,7 @@ def create_plot(timestamps, cpu, mem_used, mem_total, phases, title, output_file
                 va = 'top'
             else:
                 y_pos = cpu_limit * 0.88
-                va = 'top'
+                va = 'bottom'
 
             ax1.annotate(
                 f'{label}\n{duration_str} {status_marker}',
@@ -351,7 +382,6 @@ def filter_metrics_for_phases(timestamps, cpu, mem_used, mem_total, phases):
     phase_end = max(p[2] for p in phases)
 
     # Add some margin (30 seconds before and after)
-    from datetime import timedelta
     margin = timedelta(seconds=30)
     range_start = phase_start - margin
     range_end = phase_end + margin
