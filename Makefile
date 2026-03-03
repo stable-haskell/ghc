@@ -172,6 +172,23 @@ TIMING_DIR := $(BUILD_DIR)/timing
 # Metrics directory for CPU/memory CSV data
 METRICS_DIR := $(BUILD_DIR)/metrics
 
+# Stamp files — Make uses these to know a stage is complete.
+# Phony targets like `stage2` always re-run their recipe, which causes `test`
+# (which depends on `stage2`) to re-execute the entire build even when nothing
+# changed. File-based stamps let Make skip already-completed stages.
+STAGE0_STAMP := $(BUILD_DIR)/.stamp-stage0
+STAGE1_STAMP := $(BUILD_DIR)/.stamp-stage1
+STAGE2_STAMP := $(BUILD_DIR)/.stamp-stage2
+
+# Stamp fallback rules: if a stamp doesn't exist, invoke the corresponding
+# stage via recursive make. The stage recipe touches the stamp on success.
+# Because there are no prerequisites, Make won't re-run these when the stamp
+# file already exists — which is the whole point: `test: $(STAGE2_STAMP)` will
+# skip the build if stage2 already completed.
+$(STAGE0_STAMP): ; @$(MAKE) stage0
+$(STAGE1_STAMP): ; @$(MAKE) stage1
+$(STAGE2_STAMP): ; @$(MAKE) stage2
+
 # HOST_PLATFROM is always from the bootstrap compiler
 HOST_PLATFORM := $(shell $(GHC0) --print-host-platform)
 
@@ -530,6 +547,7 @@ $(CABAL):
 	$(call LOG,Building $@)
 	$(CABAL_INSTALL_STAGE0) --with-compiler $(GHC0) cabal-install:exe:cabal
 	$(call PHASE_END_OK,cabal)
+	@touch $(STAGE0_STAMP)
 
 stage0 : $(CABAL)
 
@@ -590,6 +608,7 @@ endif
 
 	$(call LOG,Finished building $(STAGE))
 	$(call PHASE_END_OK,stage1)
+	@touch $(STAGE1_STAMP)
 
 $(addprefix $(STAGE1_PATH)/bin/,$(STAGE1_EXECUTABLES)) : stage1
 
@@ -752,6 +771,7 @@ endif
 	$(call LOG,Finished building $(STAGE) in $(DIST_DIR))
 	$(call PHASE_END_OK,stage2.dist)
 	$(call PHASE_END_OK,stage2)
+	@touch $(STAGE2_STAMP)
 
 $(addprefix $(STAGE2_PATH)/bin/,$(STAGE2_EXECUTABLES)) : stage2
 
@@ -1105,6 +1125,7 @@ clean-stage0:
 	@echo "::group::Cleaning build artifacts..."
 	rm -rf $(BUILD_DIR)/cabal
 	rm -rf $(BUILD_DIR)/stage0
+	rm -f $(STAGE0_STAMP)
 	@echo "::endgroup::"
 
 clean: clean-stage1 clean-stage2 clean-stage3
@@ -1113,11 +1134,13 @@ clean: clean-stage1 clean-stage2 clean-stage3
 clean-stage1:
 	@echo "::group::Cleaning stage1 build artifacts..."
 	rm -rf $(BUILD_DIR)/stage1
+	rm -f $(STAGE1_STAMP)
 	@echo "::endgroup::"
 
 clean-stage2:
 	@echo "::group::Cleaning stage2 build artifacts..."
 	rm -rf $(BUILD_DIR)/stage2
+	rm -f $(STAGE2_STAMP)
 	@echo "::endgroup::"
 
 clean-stage3:
@@ -1163,7 +1186,7 @@ testsuite-timeout:
 
 # --- Test Target ---
 
-test: stage2 testsuite-timeout
+test: $(STAGE2_STAMP) testsuite-timeout
 	$(call PHASE_START,test)
 	@echo "::group::Running tests with THREADS=$(THREADS)" >&2
 	# If any required tool is missing, testsuite logic will skip related tests.
