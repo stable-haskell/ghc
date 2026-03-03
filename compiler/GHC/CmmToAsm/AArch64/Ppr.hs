@@ -495,6 +495,16 @@ pprInstr platform instr = case instr of
         op_ldr o1 (ldr') $$
         op_add o1 (check_off off)
 
+  -- Fold small offsets (pointer tags 1-7) into the @pageoff relocation,
+  -- saving one instruction per tagged closure reference.
+  -- Safe because closures are 8-byte aligned (max pageoff 4088) and
+  -- tags are at most 7, so 4088+7=4095 fits in 12 bits without
+  -- crossing a page boundary.
+  LDR _f o1 (OpImm (ImmIndex lbl off)) | off > 0, off <= 7 ->
+    let (adrp', add') = op_adrp_reloc_local $ pprAsmLabel platform lbl in
+    op_adrp o1 adrp' $$
+    op_add o1 (add' <> text " + " <> int off)
+
   LDR _f o1 (OpImm (ImmIndex lbl off)) ->
     let (adrp', add') = op_adrp_reloc_local $ pprAsmLabel platform lbl in
     op_adrp o1 (adrp') $$
