@@ -523,7 +523,9 @@ all: stage2
 # | (_| (_| | |_) | (_| | |_____| | | | \__ \ || (_| | | |
 #  \___\__,_|_.__/ \__,_|_|     |_|_| |_|___/\__\__,_|_|_|
 
-.PHONY: $(CABAL)
+# Not .PHONY: Make only rebuilds when the binary is missing.
+# Cache correctness is handled by the CI cache key (hashFiles('cabal.project.stage0')),
+# not by Make prerequisites.
 $(CABAL): STAGE=stage0
 $(CABAL):
 	$(call PHASE_START,cabal)
