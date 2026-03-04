@@ -7,9 +7,6 @@ on:
     branches: [stable-ghc-9.14, stable-master]
   workflow_dispatch:
 
-env:
-  CABAL_CACHE_PATH: _build/cabal/bin
-
 jobs:
   cabal:
     strategy:
@@ -55,12 +52,6 @@ jobs:
         compiler-nix-name: 'ghc98'
         minimal: true
         ghc: true
-
-    - name: Cache stage0 cabal binary
-      uses: actions/cache@v4
-      with:
-        path: ${{ env.CABAL_CACHE_PATH }}
-        key: cabal-v1-${{ matrix.plat }}-${{ hashFiles('cabal.project.stage0') }}
 
     - name: Update hackage
       shell: devx {0}
