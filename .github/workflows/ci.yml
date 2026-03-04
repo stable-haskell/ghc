@@ -7,6 +7,9 @@ on:
     branches: [stable-ghc-9.14, stable-master]
   workflow_dispatch:
 
+env:
+  CABAL_CACHE_PATH: _build/cabal/bin
+
 jobs:
   cabal:
     strategy:
@@ -53,6 +56,13 @@ jobs:
         minimal: true
         ghc: true
 
+    - name: Cache stage0 cabal binary
+      id: cabal-cache
+      uses: actions/cache@v5
+      with:
+        path: ${{ env.CABAL_CACHE_PATH }}
+        key: cabal-${{ vars.CACHE_VERSION || 'v1' }}-${{ matrix.plat }}-${{ hashFiles('cabal.project.stage0') }}
+
     - name: Update hackage
       shell: devx {0}
       run: cabal update
@@ -71,7 +81,7 @@ jobs:
 
     - name: Build (dynamic=${{ matrix.dynamic }})
       shell: devx {0}
-      run: make QUIET=1 DYNAMIC=${{ matrix.dynamic }}
+      run: make QUIET=1 DYNAMIC=${{ matrix.dynamic }} ${{ steps.cabal-cache.outputs.cache-hit == 'true' && 'USE_SYSTEM_CABAL=1' || '' }}
 
     - name: Display build timings
       if: ${{ !cancelled() }}
@@ -95,7 +105,7 @@ jobs:
 
     - name: Run the testsuite (dynamic=${{ matrix.dynamic }})
       shell: devx {0}
-      run: make test QUIET=1 DYNAMIC=${{ matrix.dynamic }}
+      run: make test QUIET=1 DYNAMIC=${{ matrix.dynamic }} ${{ steps.cabal-cache.outputs.cache-hit == 'true' && 'USE_SYSTEM_CABAL=1' || '' }}
 
     - name: Stop metrics collection
       if: ${{ !cancelled() }}
