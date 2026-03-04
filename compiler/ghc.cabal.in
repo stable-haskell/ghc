@@ -632,7 +632,6 @@ Library
         GHC.HsToCore.Foreign.C
         GHC.HsToCore.Foreign.Call
         GHC.HsToCore.Foreign.Decl
-        GHC.HsToCore.Foreign.JavaScript
         GHC.HsToCore.Foreign.Prim
         GHC.HsToCore.Foreign.Utils
 
@@ -683,16 +682,6 @@ Library
         GHC.Iface.Warnings
         GHC.IfaceToCore
         GHC.Iface.Type
-        GHC.JS.Ident
-        GHC.JS.Make
-        GHC.JS.Optimizer
-        GHC.JS.Opt.Expr
-        GHC.JS.Opt.Simple
-        GHC.JS.Ppr
-        GHC.JS.Syntax
-        GHC.JS.JStg.Syntax
-        GHC.JS.JStg.Monad
-        GHC.JS.Transform
         GHC.Linker.Types
         GHC.Linker.Config
         GHC.Linker.Dynamic
@@ -1099,9 +1088,20 @@ Library
             GHC.CmmToAsm.LA64.Regs
             GHC.CmmToAsm.Reg.Linear.LA64
 
-    -- JavaScript Backend (StgToJS)
+    -- JavaScript Backend (JS IR, foreign decl desugaring, StgToJS)
     if flag(js-backend)
         Exposed-Modules:
+            GHC.HsToCore.Foreign.JavaScript
+            GHC.JS.Ident
+            GHC.JS.Make
+            GHC.JS.Optimizer
+            GHC.JS.Opt.Expr
+            GHC.JS.Opt.Simple
+            GHC.JS.Ppr
+            GHC.JS.Syntax
+            GHC.JS.JStg.Syntax
+            GHC.JS.JStg.Monad
+            GHC.JS.Transform
             GHC.Driver.Config.StgToJS
             GHC.StgToJS
             GHC.StgToJS.Apply

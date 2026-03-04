@@ -76,7 +76,7 @@ package *
 
 if !os(windows)
   package *
-    library-for-ghci: True
+    library-for-ghci: False
 
 package ghc
   flags: +bootstrap
