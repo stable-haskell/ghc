@@ -20,7 +20,9 @@ import GHC.Data.FastString
 import GHC.Tc.Utils.Monad        -- temp
 
 import GHC.HsToCore.Foreign.C
+#if defined(HAVE_JS_BACKEND)
 import GHC.HsToCore.Foreign.JavaScript
+#endif
 #if defined(HAVE_INTERPRETER)
 import GHC.HsToCore.Foreign.Wasm
 #endif
@@ -136,9 +138,11 @@ dsFImport id co (CImport _ cconv safety mHeader spec) = do
   let cconv' = unLoc cconv
       safety' = unLoc safety
   case (platformArch platform, cconv') of
+#if defined(HAVE_JS_BACKEND)
     (ArchJavaScript, _) -> do
       (bs, h, c) <- dsJsImport id co spec cconv' safety' mHeader
       pure (bs, h, c, [])
+#endif
 #if defined(HAVE_INTERPRETER)
     (ArchWasm32, JavaScriptCallConv) ->
       dsWasmJSImport id co spec safety'
@@ -184,9 +188,11 @@ dsFExport :: Id                 -- Either the exported Id,
 dsFExport fn_id co ext_name cconv is_dyn = do
   platform <- getPlatform
   case (platformArch platform, cconv) of
+#if defined(HAVE_JS_BACKEND)
     (ArchJavaScript, _) -> do
       (h, c, ts) <- dsJsFExport fn_id co ext_name cconv is_dyn
       pure (h, c, ts, [fn_id], [])
+#endif
 #if defined(HAVE_INTERPRETER)
     (ArchWasm32, JavaScriptCallConv) ->
       dsWasmJSExport fn_id co ext_name
