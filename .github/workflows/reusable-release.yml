@@ -44,6 +44,8 @@ env:
   CHERE_INVOKING: 1
   # dynamic
   DYNAMIC: ${{ inputs.dynamic }}
+  # stage0 cabal cache
+  CABAL_CACHE_PATH: _build/cabal/bin
 
 jobs:
   tool-output:
@@ -149,6 +151,12 @@ jobs:
           ./emsdk install ${{ env.EMSDK_VERSION }}
           ./emsdk activate ${{ env.EMSDK_VERSION }}
 
+      - name: Cache stage0 cabal binary
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CABAL_CACHE_PATH }}
+          key: cabal-v1-${{ matrix.platform.ARTIFACT }}-${{ hashFiles('cabal.project.stage0') }}
+
       - name: Run build
         run: &build |
           set -eux
@@ -213,6 +221,12 @@ jobs:
         with:
           ref: ${{ matrix.branch }}
           submodules: recursive
+
+      - name: Cache stage0 cabal binary
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CABAL_CACHE_PATH }}
+          key: cabal-v1-${{ matrix.platform.ARTIFACT }}-${{ hashFiles('cabal.project.stage0') }}
 
       # debian 11 ships with make 4.3, but we need 4.4
       - if: matrix.platform.ARTIFACT == 'aarch64-linux-deb11'
@@ -304,6 +318,12 @@ jobs:
           echo "/usr/local/opt/make/libexec/gnubin" >> $GITHUB_PATH
           echo "/usr/local/opt/libtool/libexec/gnubin" >> $GITHUB_PATH
 
+      - name: Cache stage0 cabal binary
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CABAL_CACHE_PATH }}
+          key: cabal-v1-${{ env.ARTIFACT }}-${{ hashFiles('cabal.project.stage0') }}
+
       - name: Install emscripten
         run : *emscripten
 
@@ -353,6 +373,12 @@ jobs:
           echo "/opt/homebrew/opt/make/libexec/gnubin" >> $GITHUB_PATH
           echo "/opt/homebrew/opt/libtool/libexec/gnubin" >> $GITHUB_PATH
 
+      - name: Cache stage0 cabal binary
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CABAL_CACHE_PATH }}
+          key: cabal-v1-${{ env.ARTIFACT }}-${{ hashFiles('cabal.project.stage0') }}
+
       - name: Run build
         run: *build
 
@@ -400,6 +426,12 @@ jobs:
       - name: Install GHC
         run: ghcup --no-verbose install ghc --set --install-targets "${{ env.GHC_TARGETS }}" "${{ env.GHC_VERSION }}"
         shell: pwsh
+
+      - name: Cache stage0 cabal binary
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CABAL_CACHE_PATH }}
+          key: cabal-v1-${{ env.ARTIFACT }}-${{ hashFiles('cabal.project.stage0') }}
 
       - name: Run build
         run: *build
@@ -473,12 +505,22 @@ jobs:
         run : |
           sudo pkg install -y emscripten
 
+      # Self-hosted runner: clean stale state but keep _build/cabal/ for caching.
+      # distclean includes clean (stage1/2/3 + config), but not clean-cabal.
+      - name: Clean stale build state
+        run: gmake distclean
+
+      - name: Cache stage0 cabal binary
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CABAL_CACHE_PATH }}
+          key: cabal-v1-${{ env.ARTIFACT }}-${{ hashFiles('cabal.project.stage0') }}
+
       - name: Run build
         run: |
           which ghc
           ghc --info
           cabal update
-          gmake clean clean-cabal distclean
           gmake _build/dist/haskell-toolchain.tar.gz _build/dist/ghc.tar.gz _build/dist/cabal.tar.gz _build/dist/tests.tar.gz _build/dist/ghc-javascript-unknown-ghcjs.tar.gz
           cd _build/dist
           mv ghc.tar.gz ghc-$(bin/ghc --numeric-version)-${{ env.ARTIFACT }}.tar.gz
