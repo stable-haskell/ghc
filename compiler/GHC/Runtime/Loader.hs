@@ -1,3 +1,5 @@
+{-# LANGUAGE CPP #-}
+
 -- | Dynamically lookup up values from modules and loading them.
 --
 -- NOTE: This module is only compiled when flag(interpreter) is enabled
@@ -57,6 +59,7 @@ import GHC.Types.Name.Reader
 import GHC.Types.Unique.DFM
 
 import GHC.Unit.Finder         ( findPluginModule, FindResult(..) )
+import GHC.Unit.State          ( initPluginUnitConfig, mkUnitState )
 import GHC.Driver.Config.Diagnostic ( initIfaceMessageOpts )
 import GHC.Unit.Module   ( Module, ModuleName, thisGhcUnit, GenModule(moduleUnit), IsBootInterface(NotBoot) )
 import GHC.Unit.Module.ModIface
@@ -69,7 +72,6 @@ import GHC.Utils.Error
 import GHC.Utils.Outputable
 import GHC.Utils.Exception
 
-import Control.Monad     ( unless )
 import Data.Maybe        ( mapMaybe )
 import Unsafe.Coerce     ( unsafeCoerce )
 import GHC.Linker.Types
@@ -156,8 +158,12 @@ initializePlugins hsc_env
 
 loadPlugins :: HscEnv -> IO ([LoadedPlugin], [Linkable], PkgsLoaded)
 loadPlugins hsc_env
-  = do { unless (null to_load) $
-           checkExternalInterpreter hsc_env
+  = do { -- When -fexternal-interpreter is active, create a local Interp with
+         -- InternalInterp so plugins are loaded into GHC's own process.
+         -- TH/bytecode execution still goes through the external interpreter.
+       ; hsc_env' <- if null to_load then return hsc_env
+                     else withPluginInterp hsc_env
+       ; let loadPlugin = loadPlugin' (mkVarOccFS (fsLit "plugin")) pluginTyConName hsc_env'
        ; plugins_with_deps <- mapM loadPlugin to_load
        ; let (plugins, ifaces, links, pkgs) = unzip4 plugins_with_deps
        ; return (zipWith attachOptions to_load (zip plugins ifaces), concat links, foldl' plusUDFM emptyUDFM pkgs)
@@ -171,23 +177,72 @@ loadPlugins hsc_env
       where
         options = [ option | (opt_mod_nm, option) <- pluginModNameOpts dflags
                             , opt_mod_nm == mod_nm ]
-    loadPlugin = loadPlugin' (mkVarOccFS (fsLit "plugin")) pluginTyConName hsc_env
 
 
 loadFrontendPlugin :: HscEnv -> ModuleName -> IO (FrontendPlugin, [Linkable], PkgsLoaded)
 loadFrontendPlugin hsc_env mod_name = do
-    checkExternalInterpreter hsc_env
+    hsc_env' <- withPluginInterp hsc_env
     (plugin, _iface, links, pkgs)
       <- loadPlugin' (mkVarOccFS (fsLit "frontendPlugin")) frontendPluginTyConName
-           hsc_env mod_name
+           hsc_env' mod_name
     return (plugin, links, pkgs)
 
--- #14335
-checkExternalInterpreter :: HscEnv -> IO ()
-checkExternalInterpreter hsc_env = case interpInstance <$> hsc_interp hsc_env of
-  Just (ExternalInterp {})
-    -> throwIO (InstallationError "Plugins require -fno-external-interpreter")
-  _ -> pure ()
+-- | When the external interpreter is active, provide an 'HscEnv' with a
+-- local 'Interp' that uses 'InternalInterp' for loading plugins into GHC's
+-- own process. Plugins are compiler extensions that need to run in the
+-- compiler's address space — they cannot run in iserv because plugin values
+-- (records of Haskell functions) must be directly callable from GHC.
+--
+-- This decouples plugin loading from TH\/bytecode execution: plugins use the
+-- in-process RTS linker, while TH and GHCi continue to use the external
+-- interpreter (iserv) as configured.
+--
+-- For cross-compilers without an internal interpreter, this is not possible
+-- and we fall back to an error suggesting @-fplugin-library@ instead.
+-- See #14335.
+withPluginInterp :: HscEnv -> IO HscEnv
+withPluginInterp hsc_env = case interpInstance <$> hsc_interp hsc_env of
+  Just (ExternalInterp {}) ->
+#if defined(HAVE_INTERNAL_INTERPRETER)
+    do pluginInterp <- mkPluginInterp
+       let hsc_env1 = hsc_env { hsc_interp = Just pluginInterp }
+       -- When plugin-specific package DBs are configured (via
+       -- -plugin-package-db), build a separate UnitState from host
+       -- package DBs so that plugins resolve host-side libraries.
+       -- This is essential for cross-compilation where plugin packages
+       -- are built for the host, not the target.
+       case pluginPackageDBFlags (hsc_dflags hsc_env) of
+         [] -> return hsc_env1  -- no plugin DBs: use existing UnitState
+         _  -> do
+           let logger = hsc_logger hsc_env
+               dflags = hsc_dflags hsc_env
+               cfg    = initPluginUnitConfig dflags
+           (pluginUS, _dbs) <- mkUnitState logger dflags cfg
+           return $ hscSetCurrentUnitState pluginUS hsc_env1
+#else
+    throwIO (InstallationError $ unlines
+      [ "Plugins require the internal interpreter, which is not available"
+      , "in this cross-compiler build."
+      , "Use -fplugin-library to load plugins from shared libraries instead."
+      ])
+#endif
+  _ -> return hsc_env
+
+#if defined(HAVE_INTERNAL_INTERPRETER)
+-- | Create a local 'Interp' with 'InternalInterp' for loading plugins
+-- into GHC's own process. The local interpreter has its own 'Loader'
+-- state, independent of the external interpreter's, so plugin packages
+-- are loaded into GHC's address space via the in-process RTS linker.
+mkPluginInterp :: IO Interp
+mkPluginInterp = do
+  loader <- uninitializedLoader
+  symbolCache <- mkInterpSymbolCache
+  return Interp
+    { interpInstance    = InternalInterp
+    , interpLoader     = loader
+    , interpSymbolCache = symbolCache
+    }
+#endif
 
 loadPlugin' :: OccName -> Name -> HscEnv -> ModuleName -> IO (a, ModIface, [Linkable], PkgsLoaded)
 loadPlugin' occ_name plugin_name hsc_env mod_name
