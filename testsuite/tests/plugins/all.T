@@ -150,7 +150,7 @@ test('T14335',
      [extra_files(['simple-plugin/', 'plugins01.hs']),
 
       pre_cmd('$MAKE -s --no-print-directory -C simple-plugin package.plugins01 TOP={top}')],
-     compile_fail,
+     compile,
      ['-package-db simple-plugin/pkg.plugins01/local.package.conf -fplugin Simple.Plugin \
        -fexternal-interpreter -package simple-plugin ' + config.plugin_way_flags])
 
