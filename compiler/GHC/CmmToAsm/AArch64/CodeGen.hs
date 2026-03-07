@@ -996,13 +996,31 @@ getRegister' config plat expr
                 NEG (OpReg w' dst) (OpReg w' reg') `appOL`
                 truncateReg w' w dst
 
-        ss_conv from to reg code =
+        ss_conv from to reg code
+          -- Widening: use the canonical sign-extend instructions
+          -- (SXTB, SXTH, SXTW) rather than raw SBFM, so that the
+          -- assembly output matches what signExtendReg would produce.
+          -- Note: SXTW/SXTH/SXTB require the source operand to use
+          -- the source register width (Wn), not the destination width.
+          | from < to =
+            let w_dst = opRegWidth to
+                w_src = opRegWidth from
+                ext = case from of
+                        W8  -> SXTB
+                        W16 -> SXTH
+                        W32 -> SXTW
+                        _   -> panic "ss_conv: unsupported widening"
+            in return $ Any (intFormat to) $ \dst ->
+                code `snocOL`
+                ext (OpReg w_dst dst) (OpReg w_src reg) `appOL`
+                truncateReg w_dst to dst
+          -- Narrowing or same-width: extract the lower bits via SBFM
+          -- and truncate to the target width.
+          | otherwise =
             let w' = opRegWidth (max from to)
             in return $ Any (intFormat to) $ \dst ->
                 code `snocOL`
                 SBFM (OpReg w' dst) (OpReg w' reg) (OpImm (ImmInt 0)) (toImm (min from to)) `appOL`
-                -- At this point an 8- or 16-bit value would be sign-extended
-                -- to 32-bits. Truncate back down the final width.
                 truncateReg w' to dst
 
     -- Dyadic machops:
@@ -1060,8 +1078,6 @@ getRegister' config plat expr
     CmmMachOp (MO_S_Shr w) [x, y] | w == W8 -> do
       (reg_x, _format_x, code_x) <- getSomeReg x
       (reg_y, _format_y, code_y) <- getSomeReg y
-      -- Use a temporary register to avoid sign-extending reg_x in-place,
-      -- as other operations may use reg_x.
       tmp <- getNewRegNat (intFormat w)
       return $ Any (intFormat w) (\dst -> code_x `appOL` code_y `snocOL` annExpr expr (SXTB (OpReg w tmp) (OpReg w reg_x)) `snocOL`
                                                                          (ASR (OpReg w dst) (OpReg w tmp) (OpReg w reg_y)) `snocOL`
@@ -1074,8 +1090,6 @@ getRegister' config plat expr
     CmmMachOp (MO_S_Shr w) [x, y] | w == W16 -> do
       (reg_x, _format_x, code_x) <- getSomeReg x
       (reg_y, _format_y, code_y) <- getSomeReg y
-      -- Use a temporary register to avoid sign-extending reg_x in-place,
-      -- as other operations may use reg_x.
       tmp <- getNewRegNat (intFormat w)
       return $ Any (intFormat w) (\dst -> code_x `appOL` code_y `snocOL` annExpr expr (SXTH (OpReg w tmp) (OpReg w reg_x)) `snocOL`
                                                                          (ASR (OpReg w dst) (OpReg w tmp) (OpReg w reg_y)) `snocOL`
@@ -1536,8 +1550,10 @@ signExtendReg w w' r =
   where
     noop = return (r, nilOL)
     extend instr = do
-        r' <- getNewRegNat (intFormat w')
-        return (r', unitOL $ instr (OpReg w' r') (OpReg w r))
+        r' <- getNewRegNat II64
+        -- Source operand uses the source register width (Wn) since
+        -- SXTW/SXTH/SXTB expect e.g. "sxtw Xd, Wn" not "sxtw Xd, Xn".
+        return (r', unitOL $ instr (OpReg w' r') (OpReg (opRegWidth w) r))
 
 -- | Instructions to truncate the value in the given register from width @w@
 -- down to width @w'@.
@@ -1961,19 +1977,11 @@ genCCall target dest_regs arg_regs = do
               let lo = getRegisterReg platform (CmmLocal dst_lo)
                   hi = getRegisterReg platform (CmmLocal dst_hi)
                   nd = getRegisterReg platform (CmmLocal dst_needed)
-
-              -- Generate a fresh virtual register for the low word computation.
-              -- This avoids clobbering reg_a or reg_b in the first MUL instruction,
-              -- which could for example happen if 'lo' and 'reg_a' are the same
-              -- virtual register.
-              tmp_lo <- getNewRegNat II64
-
               return $
                   code_x `appOL`
                   code_y `snocOL`
-                  MUL   (OpReg W64 tmp_lo) (OpReg W64 reg_a) (OpReg W64 reg_b) `snocOL`
+                  MUL   (OpReg W64 lo) (OpReg W64 reg_a) (OpReg W64 reg_b) `snocOL`
                   SMULH (OpReg W64 hi) (OpReg W64 reg_a) (OpReg W64 reg_b) `snocOL`
-                  MOV   (OpReg W64 lo) (OpReg W64 tmp_lo) `snocOL`
                   -- Are all high bits equal to the sign bit of the low word?
                   -- nd = (hi == ASR(lo,width-1)) ? 1 : 0
                   CMP   (OpReg W64 hi) (OpRegShift W64 lo SASR (widthInBits w - 1)) `snocOL`
@@ -1994,35 +2002,41 @@ genCCall target dest_regs arg_regs = do
               let lo = getRegisterReg platform (CmmLocal dst_lo)
                   hi = getRegisterReg platform (CmmLocal dst_hi)
                   nd = getRegisterReg platform (CmmLocal dst_needed)
+                  -- Do everything in a full 64 bit registers
                   w' = platformWordWidth platform
 
-              -- Sign-extend inputs to W32 for SMULL (Xd = Wn * Wm).
-              -- signExtendReg always allocates a fresh temp for w < W32,
-              -- and is a noop for W32 (safe: SMULL reads both sources
-              -- atomically before writing the destination).
-              (reg_a, code_a') <- signExtendReg w W32 reg_a'
-              (reg_b, code_b') <- signExtendReg w W32 reg_b'
+              (reg_a, code_a') <- signExtendReg w w' reg_a'
+              (reg_b, code_b') <- signExtendReg w w' reg_b'
 
               return $
                   code_a  `appOL`
                   code_b  `appOL`
                   code_a' `appOL`
                   code_b' `snocOL`
-                  -- SMULL Xd, Wn, Wm: multiply two W32 values producing a
-                  -- 64-bit result. The low w bits of lo contain the truncated
-                  -- product, and hi gets the overflow (sign extension bits).
+                  -- the low 2w' of lo contains the full multiplication;
+                  -- eg: int8 * int8 -> int16 result
+                  -- so lo is in the last w of the register, and hi is in the second w.
                   SMULL (OpReg w' lo) (OpReg W32 reg_a) (OpReg W32 reg_b) `snocOL`
-                  ASR (OpReg w' hi) (OpReg w' lo) (OpImm (ImmInt $ widthInBits w)) `appOL`
+                  -- Make sure we hold onto the sign bits for dst_needed
+                  ASR (OpReg w' hi) (OpReg w' lo)    (OpImm (ImmInt $ widthInBits w)) `appOL`
+                  -- lo can now be truncated so we can get at it's top bit easily.
                   truncateReg w' w lo `snocOL`
-                  -- CMN (compare negative) tests hi + lo' == 0, i.e. hi == -lo'.
-                  -- lo' = LSR(lo, w-1) gives 1 if lo is negative, 0 if positive.
-                  -- No overflow iff hi is the sign extension of lo:
-                  --   lo positive (bit w-1 = 0) => lo' = 0, need hi == 0
-                  --   lo negative (bit w-1 = 1) => lo' = 1, need hi == -1
-                  -- CMN sets Z when hi + lo' == 0 (no overflow), so we use
-                  -- NE to set nd = 1 when overflow occurred.
+                  -- Note the use of CMN (compare negative), not CMP: we want to
+                  -- test if the top half is negative one and the top
+                  -- bit of the bottom half is positive one. eg:
+                  -- hi = 0b1111_1111  (actually 64 bits)
+                  -- lo = 0b1010_1111  (-81, so the result didn't need the top half)
+                  -- lo' = ASR(lo,7)   (second reg of SMN)
+                  --     = 0b0000_0001 (theeshift gives us 1 for negative,
+                  --                    and 0 for positive)
+                  -- hi == -lo'?
+                  -- 0b1111_1111 == 0b1111_1111 (yes, top half is just overflow)
+                  -- Another way to think of this is if hi + lo' == 0, which is what
+                  -- CMN really is under the hood.
                   CMN   (OpReg w' hi) (OpRegShift w' lo SLSR (widthInBits w - 1)) `snocOL`
-                  CSET  (OpReg w' nd) NE `appOL`
+                  -- Set dst_needed to 1 if hi and lo' were (negatively) equal
+                  CSET  (OpReg w' nd) EQ `appOL`
+                  -- Finally truncate hi to drop any extraneous sign bits.
                   truncateReg w' w hi
           -- Can't handle > 64 bit operands
           | otherwise -> unsupported (MO_S_Mul2 w)
