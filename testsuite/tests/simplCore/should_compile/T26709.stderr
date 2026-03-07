@@ -9,19 +9,21 @@ Rec {
 f [Occ=LoopBreaker] :: T -> Bool
 [GblId, Arity=1, Str=<SL>, Unf=OtherCon []]
 f = \ (x :: T) ->
-      join {
+      case x of wild {
+        __DEFAULT ->
+          join {
         j [InlPrag=NOINLINE, Dmd=MC(1,L)] :: Bool -> Bool
         [LclId[JoinId(1)(Just [!])], Arity=1, Str=<1L>, Unf=OtherCon []]
         j (eta [OS=OneShot] :: Bool)
           = case eta of {
               False -> GHC.Internal.Types.False;
               True ->
-                case f x of {
-                  False -> GHC.Internal.Types.True;
-                  True -> GHC.Internal.Types.False
-                }
-            } } in
-      case x of {
+                    case f wild of {
+                      False -> GHC.Internal.Types.True;
+                      True -> GHC.Internal.Types.False
+                    }
+                } } in
+          case wild of {
         A -> GHC.Internal.Types.True;
         B -> jump j GHC.Internal.Types.True;
         C -> jump j GHC.Internal.Types.False
