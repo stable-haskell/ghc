@@ -23,6 +23,7 @@ import GHC.Cmm.BlockId
 import GHC.Cmm.Dataflow.Label
 import GHC.Cmm
 import GHC.Cmm.CLabel
+import GHC.Cmm.DebugBlock (UnwindTable)
 import GHC.Utils.Outputable
 import GHC.Platform
 import GHC.Types.Unique.DSM
@@ -77,6 +78,7 @@ regUsageOfInstr platform instr = case instr of
   PUSH_STACK_FRAME         -> usage ([], [])
   POP_STACK_FRAME          -> usage ([], [])
   DELTA{}                  -> usage ([], [])
+  UNWIND{}                 -> usage ([], [])
 
   -- 1. Arithmetic Instructions ------------------------------------------------
   ADD dst src1 src2        -> usage (regOp src1 ++ regOp src2, regOp dst)
@@ -241,6 +243,7 @@ patchRegsOfInstr instr env = case instr of
     PUSH_STACK_FRAME    -> instr
     POP_STACK_FRAME     -> instr
     DELTA{}             -> instr
+    UNWIND{}            -> instr
     -- 1. Arithmetic Instructions ----------------------------------------------
     ADD o1 o2 o3   -> ADD (patchOp o1) (patchOp o2) (patchOp o3)
     CMP o1 o2      -> CMP (patchOp o1) (patchOp o2)
@@ -491,6 +494,7 @@ isMetaInstr instr
     LOCATION{}  -> True
     NEWBLOCK{}  -> True
     DELTA{}     -> True
+    UNWIND{}    -> True
     PUSH_STACK_FRAME -> True
     POP_STACK_FRAME -> True
     _           -> False
@@ -612,6 +616,10 @@ data Instr
     -- specify current stack offset for
     -- benefit of subsequent passes
     | DELTA   Int
+
+    -- unwinding information
+    -- See Note [Unwinding information in the NCG] in X86/Instr.hs
+    | UNWIND CLabel UnwindTable
 
     -- 0. Pseudo Instructions --------------------------------------------------
     | SXTB Operand Operand
@@ -756,6 +764,7 @@ instrCon i =
       LOCATION{} -> "LOCATION"
       NEWBLOCK{} -> "NEWBLOCK"
       DELTA{} -> "DELTA"
+      UNWIND{} -> "UNWIND"
       SXTB{} -> "SXTB"
       UXTB{} -> "UXTB"
       SXTH{} -> "SXTH"
