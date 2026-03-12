@@ -23,6 +23,7 @@
 #include "sm/GC.h"
 #include "ThreadPaused.h"
 #include "Messages.h"
+#include "Signpost.h"
 
 #include <string.h> // for memset
 
@@ -456,6 +457,11 @@ stat_startGC (Capability *cap, gc_thread *gct)
     }
 
     updateNurseriesStats();
+
+    /* Emit os_signpost GC begin (macOS Instruments integration).
+     * Generation is not yet known here (determined in GC.c after
+     * stat_startGC), so we pass 0 — the real gen is in signpostGcEnd. */
+    signpostGcBegin((uint32_t)cap->no, 0);
 }
 
 /* -----------------------------------------------------------------------------
@@ -650,6 +656,12 @@ stat_endGC (Capability *cap, gc_thread *initiating_gct, W_ live, W_ copied, W_ s
                            CAPSET_HEAP_DEFAULT,
                            n_alloc_blocks * BLOCK_SIZE);
     }
+
+    /* Emit os_signpost GC end with collected statistics */
+    signpostGcEnd((uint32_t)cap->no,
+                  (uint64_t)stats.gc.copied_bytes,
+                  (uint64_t)stats.gc.slop_bytes);
+
     RELEASE_LOCK(&stats_mutex);
 }
 
