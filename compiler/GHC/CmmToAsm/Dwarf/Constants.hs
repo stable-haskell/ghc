@@ -12,13 +12,7 @@ import GHC.Utils.Outputable
 import GHC.Utils.Panic
 
 import GHC.Platform.Reg
-<<<<<<< HEAD
-import GHC.Cmm.CLabel (asmTempLabelPrefix)
 #if defined(HAVE_X86_NCG)
-||||||| parent of d7e5c5d703 (Fix DWARF Constants.hs: inline local label prefix instead of importing)
-import GHC.Cmm.CLabel (asmTempLabelPrefix)
-=======
->>>>>>> d7e5c5d703 (Fix DWARF Constants.hs: inline local label prefix instead of importing)
 import GHC.CmmToAsm.X86.Regs
 #endif
 

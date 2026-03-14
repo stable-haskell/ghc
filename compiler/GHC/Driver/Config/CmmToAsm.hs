@@ -63,11 +63,14 @@ initNCGConfig dflags this_mod = NCGConfig
    , ncgAvx2Enabled = isAvx2Enabled dflags
    , ncgAvx512fEnabled = isAvx512fEnabled dflags
 
-     -- DWARF debug info is supported on ELF and MachO targets.
-   , ncgDwarfEnabled        = osDwarfTarget dflags && debugLevel dflags > 0
-   , ncgDwarfUnwindings     = osDwarfTarget dflags && debugLevel dflags > 0
-   , ncgDwarfStripBlockInfo = osDwarfTarget dflags && debugLevel dflags < 2 -- We strip out block information when running with -g0 or -g1.
-   , ncgDwarfSourceNotes    = osDwarfTarget dflags && debugLevel dflags > 2 -- We produce GHC-specific source-note DIEs only with -g3
+     -- DWARF debug info is supported on ELF targets.
+     -- MachO (macOS/darwin) has partial DWARF section support but the
+     -- assembler cannot handle relocations against local symbols in
+     -- debug sections, so it is not yet fully supported.
+   , ncgDwarfEnabled        = osElfTarget (platformOS (targetPlatform dflags)) && debugLevel dflags > 0
+   , ncgDwarfUnwindings     = osElfTarget (platformOS (targetPlatform dflags)) && debugLevel dflags > 0
+   , ncgDwarfStripBlockInfo = osElfTarget (platformOS (targetPlatform dflags)) && debugLevel dflags < 2 -- We strip out block information when running with -g0 or -g1.
+   , ncgDwarfSourceNotes    = osElfTarget (platformOS (targetPlatform dflags)) && debugLevel dflags > 2 -- We produce GHC-specific source-note DIEs only with -g3
    , ncgExposeInternalSymbols = gopt Opt_ExposeInternalSymbols dflags
    , ncgCmmStaticPred       = gopt Opt_CmmStaticPred dflags
    , ncgEnableShortcutting  = gopt Opt_AsmShortcutting dflags
@@ -79,9 +82,3 @@ initNCGConfig dflags this_mod = NCGConfig
                                      -- Enable if the platform maintains the CFG
    }
 
--- | Check if the target OS supports DWARF debug info emission.
--- Currently ELF (Linux, BSDs, etc.) and MachO (macOS/darwin).
-osDwarfTarget :: DynFlags -> Bool
-osDwarfTarget dflags =
-  let os = platformOS (targetPlatform dflags)
-  in osElfTarget os || osMachOTarget os
