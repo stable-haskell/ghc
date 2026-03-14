@@ -12,7 +12,12 @@ import GHC.Utils.Outputable
 import GHC.Utils.Panic
 
 import GHC.Platform.Reg
+<<<<<<< HEAD
 #if defined(HAVE_X86_NCG)
+||||||| parent of ff7850cffb (Enable DWARF debug info on MachO/darwin targets)
+=======
+import GHC.Cmm.CLabel (asmTempLabelPrefix)
+>>>>>>> ff7850cffb (Enable DWARF debug info on MachO/darwin targets)
 import GHC.CmmToAsm.X86.Regs
 #endif
 
@@ -190,19 +195,21 @@ dwarfSection platform name =
 
 
 -- * Dwarf section labels
-dwarfInfoLabel, dwarfAbbrevLabel, dwarfLineLabel, dwarfFrameLabel :: IsLine doc => doc
-dwarfInfoLabel   = text ".Lsection_info"
-dwarfAbbrevLabel = text ".Lsection_abbrev"
-dwarfLineLabel   = text ".Lsection_line"
-dwarfFrameLabel  = text ".Lsection_frame"
-{-# SPECIALIZE dwarfInfoLabel :: SDoc #-}
-{-# SPECIALIZE dwarfInfoLabel :: HLine #-} -- see Note [SPECIALIZE to HDoc] in GHC.Utils.Outputable
-{-# SPECIALIZE dwarfAbbrevLabel :: SDoc #-}
-{-# SPECIALIZE dwarfAbbrevLabel :: HLine #-} -- see Note [SPECIALIZE to HDoc] in GHC.Utils.Outputable
-{-# SPECIALIZE dwarfLineLabel :: SDoc #-}
-{-# SPECIALIZE dwarfLineLabel :: HLine #-} -- see Note [SPECIALIZE to HDoc] in GHC.Utils.Outputable
-{-# SPECIALIZE dwarfFrameLabel :: SDoc #-}
-{-# SPECIALIZE dwarfFrameLabel :: HLine #-} -- see Note [SPECIALIZE to HDoc] in GHC.Utils.Outputable
+-- These use the platform-specific local label prefix:
+-- "L" on darwin (MachO), ".L" on ELF (Linux etc.)
+dwarfInfoLabel, dwarfAbbrevLabel, dwarfLineLabel, dwarfFrameLabel :: IsLine doc => Platform -> doc
+dwarfInfoLabel   platform = asmTempLabelPrefix platform <> text "section_info"
+dwarfAbbrevLabel platform = asmTempLabelPrefix platform <> text "section_abbrev"
+dwarfLineLabel   platform = asmTempLabelPrefix platform <> text "section_line"
+dwarfFrameLabel  platform = asmTempLabelPrefix platform <> text "section_frame"
+{-# SPECIALIZE dwarfInfoLabel :: Platform -> SDoc #-}
+{-# SPECIALIZE dwarfInfoLabel :: Platform -> HLine #-} -- see Note [SPECIALIZE to HDoc] in GHC.Utils.Outputable
+{-# SPECIALIZE dwarfAbbrevLabel :: Platform -> SDoc #-}
+{-# SPECIALIZE dwarfAbbrevLabel :: Platform -> HLine #-} -- see Note [SPECIALIZE to HDoc] in GHC.Utils.Outputable
+{-# SPECIALIZE dwarfLineLabel :: Platform -> SDoc #-}
+{-# SPECIALIZE dwarfLineLabel :: Platform -> HLine #-} -- see Note [SPECIALIZE to HDoc] in GHC.Utils.Outputable
+{-# SPECIALIZE dwarfFrameLabel :: Platform -> SDoc #-}
+{-# SPECIALIZE dwarfFrameLabel :: Platform -> HLine #-} -- see Note [SPECIALIZE to HDoc] in GHC.Utils.Outputable
 
 -- | Mapping of registers to DWARF register numbers
 dwarfRegNo :: Platform -> Reg -> Word8
