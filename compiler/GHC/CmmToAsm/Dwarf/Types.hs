@@ -110,7 +110,7 @@ pprAbbrevDecls platform haveDebugLine =
            , (dW_AT_frame_base, dW_FORM_block1)
            ]
   in dwarfAbbrevSection platform $$
-     line (dwarfAbbrevLabel <> colon) $$
+     line (dwarfAbbrevLabel platform <> colon) $$
      mkAbbrev DwAbbrCompileUnit dW_TAG_compile_unit dW_CHILDREN_yes
        ([(dW_AT_name,     dW_FORM_string)
        , (dW_AT_producer, dW_FORM_string)
@@ -184,7 +184,7 @@ pprDwarfInfoOpen platform haveSrc (DwarfCompileUnit _ name producer compDir lowL
   $$ pprWord platform (pprAsmLabel platform lowLabel <> text "-1")
   $$ pprWord platform (pprAsmLabel platform highLabel)
   $$ if haveSrc
-     then sectionOffset platform dwarfLineLabel dwarfLineLabel
+     then sectionOffset platform (dwarfLineLabel platform) (dwarfLineLabel platform)
      else empty
 pprDwarfInfoOpen platform _ (DwarfSubprogram _ name label parent) =
   line (pprAsmLabel platform (mkAsmTempDieLabel label) <> colon)
@@ -202,7 +202,7 @@ pprDwarfInfoOpen platform _ (DwarfSubprogram _ name label parent) =
     abbrev = case parent of Nothing -> DwAbbrSubprogram
                             Just _  -> DwAbbrSubprogramWithParent
     parentValue = maybe empty pprParentDie parent
-    pprParentDie sym = sectionOffset platform (pprAsmLabel platform sym) dwarfInfoLabel
+    pprParentDie sym = sectionOffset platform (pprAsmLabel platform sym) (dwarfInfoLabel platform)
 pprDwarfInfoOpen platform _ (DwarfBlock _ label Nothing) =
   line (pprAsmLabel platform (mkAsmTempDieLabel label) <> colon)
   $$ pprAbbrev DwAbbrBlockWithoutCode
@@ -248,7 +248,7 @@ pprDwarfARanges platform arngs unitU =
       initialLength = 8 + paddingSize + (1 + length arngs) * 2 * wordSize
   in pprDwWord (int initialLength)
      $$ pprHalf 2
-     $$ sectionOffset platform (pprAsmLabel platform $ mkAsmTempLabel $ unitU) dwarfInfoLabel
+     $$ sectionOffset platform (pprAsmLabel platform $ mkAsmTempLabel $ unitU) (dwarfInfoLabel platform)
      $$ pprByte (fromIntegral wordSize)
      $$ pprByte 0
      $$ pad paddingSize
@@ -318,9 +318,10 @@ pprDwarfFrame platform DwarfFrame{dwCieLabel=cieLabel,dwCieInit=cieInit,dwCiePro
         -- Preserve C stack pointer: This necessary to override that default
         -- unwinding behavior of setting $sp = CFA.
         preserveSp = case platformArch platform of
-          ArchX86    -> pprByte dW_CFA_same_value $$ pprLEBWord 4
-          ArchX86_64 -> pprByte dW_CFA_same_value $$ pprLEBWord 7
-          _          -> empty
+          ArchX86     -> pprByte dW_CFA_same_value $$ pprLEBWord 4   -- esp
+          ArchX86_64  -> pprByte dW_CFA_same_value $$ pprLEBWord 7   -- rsp
+          ArchAArch64 -> pprByte dW_CFA_same_value $$ pprLEBWord 31  -- sp (x31)
+          _           -> empty
     in vcat [ line (pprAsmLabel platform cieLabel <> colon)
             , pprData4' length -- Length of CIE
             , line (pprAsmLabel platform cieStartLabel <> colon)
@@ -370,7 +371,7 @@ pprFrameProc platform frameLbl initUw (DwarfFrameProc procLbl hasInfo blocks)
     in vcat [ whenPprDebug $ line $ text "# Unwinding for" <+> pprAsmLabel platform procLbl <> colon
             , pprData4' (pprAsmLabel platform fdeEndLabel <> char '-' <> pprAsmLabel platform fdeLabel)
             , line (pprAsmLabel platform fdeLabel <> colon)
-            , pprData4' (pprAsmLabel platform frameLbl <> char '-' <> dwarfFrameLabel)    -- Reference to CIE
+            , pprData4' (pprAsmLabel platform frameLbl <> char '-' <> dwarfFrameLabel platform)    -- Reference to CIE
             , pprWord platform (pprAsmLabel platform procLbl <> ifInfo "-1") -- Code pointer
             , pprWord platform (pprAsmLabel platform procEnd <> char '-' <>
                                  pprAsmLabel platform procLbl <> ifInfo "+1") -- Block byte length
