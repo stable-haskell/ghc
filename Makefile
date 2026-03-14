@@ -152,6 +152,13 @@ endif
 
 GHC_TOOLCHAIN_ARGS  = --disable-ld-override
 
+# Cross-compilation tool paths: default to stage1 build tree; can be
+# overridden for dist-based cross builds (CI) where only the dist
+# artifact is available.
+GHC_TOOLCHAIN_BIN    ?= $(STAGE1_PATH)/bin/ghc-toolchain-bin
+DERIVE_CONSTANTS_BIN ?= $(STAGE1_PATH)/bin/deriveConstants
+GENAPPLY_BIN         ?= $(STAGE1_PATH)/bin/genapply
+
 #
 # Build directories and paths
 #
@@ -180,14 +187,10 @@ STAGE0_STAMP := $(BUILD_DIR)/.stamp-stage0
 STAGE1_STAMP := $(BUILD_DIR)/.stamp-stage1
 STAGE2_STAMP := $(BUILD_DIR)/.stamp-stage2
 
-# Stamp fallback rules: if a stamp doesn't exist, invoke the corresponding
-# stage via recursive make. The stage recipe touches the stamp on success.
-# Because there are no prerequisites, Make won't re-run these when the stamp
-# file already exists — which is the whole point: `test: $(STAGE2_STAMP)` will
-# skip the build if stage2 already completed.
-$(STAGE0_STAMP): ; @$(MAKE) stable-cabal
-$(STAGE1_STAMP): ; @$(MAKE) stage1
-$(STAGE2_STAMP): ; @$(MAKE) stage2
+# Stamp files are touched at the end of each stage's recipe. They let
+# downstream targets (e.g. stage2 depending on stage1) skip already-completed
+# stages via order-only prerequisites: `stage2: ... | $(STAGE1_STAMP)`.
+# No fallback rules here — stages must be built explicitly.
 
 # HOST_PLATFROM is always from the bootstrap compiler
 HOST_PLATFORM := $(shell $(GHC0) --print-host-platform)
@@ -589,6 +592,7 @@ STAGE1_CABAL_BUILD = \
 	--with-build-compiler=$(GHC0) \
 	--ghc-options "-ghcversion-file=$(call NORMALIZE_FP,$(CURDIR)/rts/include/ghcversion.h)"
 
+ifndef DIST_BUILD
 stage1: STAGE=stage1
 stage1: stable-cabal $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) cabal.project.stage1 cabal.project.common libraries/ghc-boot-th-next | hackage
 	$(call PHASE_START,stage1)
@@ -613,7 +617,8 @@ endif
 	$(call PHASE_END_OK,stage1)
 	@touch $(STAGE1_STAMP)
 
-$(addprefix $(STAGE1_PATH)/bin/,$(STAGE1_EXECUTABLES)) : stage1
+$(addprefix $(STAGE1_PATH)/bin/,$(STAGE1_EXECUTABLES)) : $(STAGE1_STAMP)
+endif # DIST_BUILD (stage1)
 
 #  ____  _                     ____
 # / ___|| |_ __ _  __ _  ___  |___ \
@@ -709,9 +714,10 @@ STAGE2_CABAL_BUILD = \
 	$(foreach dir,$(STAGE2_EXTRA_LIB_DIRS),--extra-lib-dirs=$(dir)) \
 	$(foreach dir,$(STAGE2_EXTRA_INCLUDE_DIRS),--extra-include-dirs=$(dir))
 
+ifndef DIST_BUILD
 stage2: STAGE=stage2
 stage2: TARGET_PLATFORM:=$(HOST_PLATFORM)
-stage2: $(GHC1) stable-cabal $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) cabal.project.stage2 cabal.project.stage2.settings cabal.project.common libraries/ghc-boot-th-next | stage1
+stage2: $(GHC1) stable-cabal $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) cabal.project.stage2 cabal.project.stage2.settings cabal.project.common libraries/ghc-boot-th-next | $(STAGE1_STAMP)
 	$(call PHASE_START,stage2)
 	$(call LOG,Starting build of $(STAGE))
 
@@ -756,7 +762,9 @@ stage2: $(GHC1) stable-cabal $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) cabal.proj
 	done
 ifeq ($(DYNAMIC),1)
 ifneq ($(UNAME), Darwin)
-	$(PATCHELF) --force-rpath --set-rpath "\$$ORIGIN" $(CURDIR)/$(DIST_DIR)/lib/$(TARGET_PLATFORM)/$(DLL)
+	@for so in $(CURDIR)/$(DIST_DIR)/lib/$(TARGET_PLATFORM)/$(DLL) ; do \
+		[ -f "$$so" ] && $(PATCHELF) --force-rpath --set-rpath "\$$ORIGIN" "$$so" ; \
+	done ; true
 endif
 	$(call LOG,Create -dyn iserv executable symlink so ghc can find ghc-iserv-dyn)
 	@$(LN_SF) ghc-iserv$(EXE_EXT) "$(DIST_DIR)/bin/ghc-iserv-dyn$(EXE_EXT)"
@@ -771,12 +779,28 @@ endif
 	@cp -rfp driver/ghc-usage.txt $(DIST_DIR)/lib/
 	@cp -rfp driver/ghci-usage.txt $(DIST_DIR)/lib/
 
+	# Copy stage1 tools needed for cross-compilation from dist
+	$(call LOG,Copying cross-compilation tools to $(DIST_DIR)/bin)
+	@cp -fp $(STAGE1_PATH)/bin/ghc-toolchain-bin $(DIST_DIR)/bin/ghc-toolchain-bin
+	@cp -fp $(STAGE1_PATH)/bin/deriveConstants $(DIST_DIR)/bin/deriveConstants
+	@cp -fp $(STAGE1_PATH)/bin/genapply $(DIST_DIR)/bin/genapply
+
+	# Copy stage0 cabal (needed for cross-compilation from dist, has -W flag)
+	$(call LOG,Copying cabal to $(DIST_DIR)/bin)
+	@cp -fp $(CABAL) $(DIST_DIR)/bin/cabal
+
+	# Copy happy-lib templates (needed for cross-compilation from dist)
+	$(call LOG,Copying happy-lib templates to $(DIST_DIR)/share)
+	@mkdir -p $(DIST_DIR)/share/happy-lib/data
+	@cp -rfp _build/stage2/src/happy-lib-2.1.5/data/* $(DIST_DIR)/share/happy-lib/data/
+
 	$(call LOG,Finished building $(STAGE) in $(DIST_DIR))
 	$(call PHASE_END_OK,stage2.dist)
 	$(call PHASE_END_OK,stage2)
 	@touch $(STAGE2_STAMP)
 
-$(addprefix $(STAGE2_PATH)/bin/,$(STAGE2_EXECUTABLES)) : stage2
+$(addprefix $(STAGE2_PATH)/bin/,$(STAGE2_EXECUTABLES)) : $(STAGE2_STAMP)
+endif # DIST_BUILD (stage2)
 
 #  ____  _                     _____
 # / ___|| |_ __ _  __ _  ___  |___ /
@@ -864,6 +888,9 @@ STAGE3_javascript-unknown-ghcjs_CC                 = emcc
 STAGE3_javascript-unknown-ghcjs_CC_OPTS            =
 STAGE3_javascript-unknown-ghcjs_CXX                = em++
 STAGE3_javascript-unknown-ghcjs_CXX_OPTS           =
+STAGE3_javascript-unknown-ghcjs_CPP                = emcc
+STAGE3_javascript-unknown-ghcjs_HS_CPP             = emcc
+STAGE3_javascript-unknown-ghcjs_CMM_CPP            = emcc
 STAGE3_javascript-unknown-ghcjs_EXTRA_INCLUDE_DIRS =
 STAGE3_javascript-unknown-ghcjs_EXTRA_LIB_DIRS     =
 STAGE3_javascript-unknown-ghcjs_LD                 = emcc
@@ -876,14 +903,27 @@ STAGE3_wasm32-unknown-wasi_CC                 = wasm32-wasi-clang
 STAGE3_wasm32-unknown-wasi_CC_OPTS            = -fno-strict-aliasing -Wno-error=int-conversion -Oz -msimd128 -mnontrapping-fptoint -msign-ext -mbulk-memory -mmutable-globals -mmultivalue -mreference-types
 STAGE3_wasm32-unknown-wasi_CXX                = wasm32-wasi-clang++
 STAGE3_wasm32-unknown-wasi_CXX_OPTS           = $(STAGE3_wasm32-unknown-wasi_CC_OPTS) -fno-exceptions
+STAGE3_wasm32-unknown-wasi_CPP                = wasm32-wasi-clang
+STAGE3_wasm32-unknown-wasi_HS_CPP             = wasm32-wasi-clang
+STAGE3_wasm32-unknown-wasi_CMM_CPP            = wasm32-wasi-clang
 STAGE3_wasm32-unknown-wasi_AR                 = wasm32-wasi-ar
 STAGE3_wasm32-unknown-wasi_RANLIB             = wasm32-wasi-ranlib
 STAGE3_wasm32-unknown-wasi_EXTRA_INCLUDE_DIRS =
 STAGE3_wasm32-unknown-wasi_EXTRA_LIB_DIRS     =
-STAGE3_wasm32-unknown-wasi_GHC_TOOLCHAIN_ARGS = $(GHC_TOOLCHAIN_ARGS) --merge-objs wasm-ld --merge-objs-opt="-r" --disable-tables-next-to-code --disable-libffi-adjustors
+STAGE3_wasm32-unknown-wasi_GHC_TOOLCHAIN_ARGS = $(GHC_TOOLCHAIN_ARGS) \
+  --merge-objs wasm-ld --merge-objs-opt="-r" \
+  --disable-tables-next-to-code --disable-libffi-adjustors \
+  --cc-link-opt="-Wl,--keep-section=ghc_wasm_jsffi" \
+  --cc-link-opt="-Wl,--keep-section=target_features" \
+  --cc-link-opt="-Wl,--stack-first" \
+  --cc-link-opt="-Wl,--strip-debug"
 
 
 TARGET_DIR = $(DIST_DIR)/lib/targets/$(TARGET_PLATFORM)
+
+# Happy template directory: defaults to stage2's unpacked happy-lib source; can
+# be overridden for dist-based cross builds where stage2 build tree is unavailable.
+HAPPY_TEMPLATE_DIR ?= _build/stage2/src/happy-lib-2.1.5/data/
 
 # NOTE: disable-library-for-ghci is repeated here but it should be sufficient
 # to put it in cabal.project.stage3
@@ -892,8 +932,8 @@ define stage3
 
 STAGE3_$(1)_CABAL_BUILD = \
 	env \
-	DERIVE_CONSTANTS=$$(call NORMALIZE_FP,$$(CURDIR)/$$(STAGE1_PATH)/bin/deriveConstants) \
-	GENAPPLY=$$(call NORMALIZE_FP,$$(CURDIR)/$$(STAGE1_PATH)/bin/genapply) \
+	DERIVE_CONSTANTS=$$(call NORMALIZE_FP,$$(abspath $$(DERIVE_CONSTANTS_BIN))) \
+	GENAPPLY=$$(call NORMALIZE_FP,$$(abspath $$(GENAPPLY_BIN))) \
 	NM=$$(STAGE3_$(1)_NM) \
 	OBJDUMP=$$(STAGE3_$(1)_OBJDUMP) \
 	$$(CABAL_BUILD) \
@@ -902,20 +942,29 @@ STAGE3_$(1)_CABAL_BUILD = \
 	--ghc-options "-ghcversion-file=$$(call NORMALIZE_FP,$$(CURDIR)/rts/include/ghcversion.h)" \
 	--with-hsc2hs=$$(call NORMALIZE_FP,$$(CURDIR)/$$(DIST_DIR)/bin/$(1)-hsc2hs) \
 	--hsc2hs-options='-x' \
+	--happy-options="--template=$$(abspath $$(HAPPY_TEMPLATE_DIR))" \
 	--with-gcc $$(STAGE3_$(1)_CC) \
 	$$(foreach dir,$$(STAGE3_$(1)_EXTRA_LIB_DIRS),--extra-lib-dirs=$$(dir)) \
 	$$(foreach dir,$$(STAGE3_$(1)_EXTRA_INCLUDE_DIRS),--extra-include-dirs=$$(dir))
 
+# In DIST_BUILD mode, stage2 binaries come from a pre-built dist artifact;
+# skip the $(GHC2) prerequisite (it points into the stage2 store, not dist).
+ifdef DIST_BUILD
+STAGE3_$(1)_PREREQS = $$(GHC_TOOLCHAIN_BIN) $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) libraries/ghc-boot-th-next cabal.project.common cabal.project.stage3 stage3-$(1)-additional-files
+else
+STAGE3_$(1)_PREREQS = $(GHC2) $$(GHC_TOOLCHAIN_BIN) $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) libraries/ghc-boot-th-next cabal.project.common cabal.project.stage3 stage3-$(1)-additional-files
+endif
+
 .PHONY: stage3-$(1)
 stage3-$(1): STAGE=stage3
 stage3-$(1): TARGET_PLATFORM=$(1)
-stage3-$(1): $(GHC2) $$(STAGE1_PATH)/bin/ghc-toolchain-bin $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) libraries/ghc-boot-th-next cabal.project.common cabal.project.stage3 stage3-$(1)-additional-files
+stage3-$(1): $$(STAGE3_$(1)_PREREQS)
 	$$(call PHASE_START,stage3-$(1))
 	$$(call LOG,Linking executables)
 	$$(foreach exe,$$(STAGE3_EXECUTABLES),$(LN_SF) $$(exe) $(DIST_DIR)/bin/$(1)-$$(exe);)
 
 	@mkdir -p $$(TARGET_DIR)/lib
-	$$(STAGE1_PATH)/bin/ghc-toolchain-bin \
+	$$(GHC_TOOLCHAIN_BIN) \
 		--output-settings \
 		--output $$(TARGET_DIR)/lib/settings \
 		--triple $(1) \
@@ -923,6 +972,9 @@ stage3-$(1): $(GHC2) $$(STAGE1_PATH)/bin/ghc-toolchain-bin $(CONFIGURE_SCRIPTS) 
 		$$(foreach opt,$$(STAGE3_$(1)_CC_OPTS),--cc-opt=$$(opt)) \
 		--cxx $$(STAGE3_$(1)_CXX) \
 		$$(foreach opt,$$(STAGE3_$(1)_CXX_OPTS),--cxx-opt=$$(opt)) \
+		$(if $(STAGE3_$(1)_CPP),--cpp $$(STAGE3_$(1)_CPP),) \
+		$(if $(STAGE3_$(1)_HS_CPP),--hs-cpp $$(STAGE3_$(1)_HS_CPP),) \
+		$(if $(STAGE3_$(1)_CMM_CPP),--cmm-cpp $$(STAGE3_$(1)_CMM_CPP),) \
 		$(if $(STAGE3_$(1)_AR),--ar $$(STAGE3_$(1)_AR),) \
 		$(if $(STAGE3_$(1)_LD),--ld $$(STAGE3_$(1)_LD),) \
 		$(if $(STAGE3_$(1)_ND),--nm $$(STAGE3_$(1)_NM),) \
@@ -1072,11 +1124,13 @@ $(DIST_DIR)/tests.tar.gz:
 # |_| |_|\__,_|\___|_|\_\__,_|\__, |\___|
 #                             |___/
 
+ifndef DIST_BUILD
 # .PHONY: hackage
 hackage: $(BUILD_DIR)/packages/hackage.haskell.org/01-index.tar.gz
 
 $(BUILD_DIR)/packages/hackage.haskell.org/01-index.tar.gz:
 	$(CABAL) --remote-repo-cache $(call NORMALIZE_FP,$(CURDIR)/$(BUILD_DIR)/packages) update
+endif # DIST_BUILD (hackage)
 
 #   ____             __ _
 #  / ___|___  _ __  / _(_) __ _ _   _ _ __ ___
@@ -1191,7 +1245,7 @@ testsuite-timeout:
 
 # --- Test Target ---
 
-test: $(STAGE2_STAMP) testsuite-timeout
+test: stage2 testsuite-timeout
 	$(call PHASE_START,test)
 	@echo "::group::Running tests with THREADS=$(THREADS)" >&2
 	# If any required tool is missing, testsuite logic will skip related tests.

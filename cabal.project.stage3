@@ -173,12 +173,17 @@ package libffi-clib
   ghc-options: -no-rts
 
 -- WASM/WASI-specific overrides:
--- - shared: True is required for GHCi/TH via dyld.mjs
--- - +use-system-libffi is already set unconditionally on package rts above,
---   but we keep this block for clarity and future conditional changes.
-if os(wasi)
-  package *
-    shared: True
+-- NOTE: shared: True is needed for GHCi/TH via dyld.mjs at runtime, but
+-- setting it via `if os(wasi) / package *` also applies to BUILD packages
+-- (e.g. happy-lib compiled by the native build compiler). This causes cabal
+-- to use -dynamic-too for BUILD packages, which fails because the build
+-- compiler's library directories don't include .dyn_hi files.
+-- Re-enable shared: True once cabal supports separate BUILD/HOST package
+-- settings, or once the dist artifact includes .dyn_hi files.
+--
+-- if os(wasi)
+--   package *
+--     shared: True
 
 package ghc
   flags: +build-tool-depends +internal-interpreter
