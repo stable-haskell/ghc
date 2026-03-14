@@ -154,7 +154,12 @@ pprBasicBlock platform with_dwarf info_env (BasicBlock blockid instrs)
     maybe_infotable c = case mapLookup blockid info_env of
        Nothing   -> c
        Just (CmmStaticsRaw info_lbl info) ->
-          --  pprAlignForSection platform Text $$
+           -- No explicit alignment needed here: pprSectionAlign already
+           -- emits .balign 8 for the Text section, and info tables are
+           -- naturally word-aligned within the instruction stream.
+           -- An extra .balign would insert padding between the info table
+           -- and its entry code, breaking the info-table-immediately-
+           -- precedes-entry-code invariant that the RTS relies on.
            infoTableLoc $$
            vcat (map (pprData platform) info) $$
            pprLabel platform info_lbl $$
