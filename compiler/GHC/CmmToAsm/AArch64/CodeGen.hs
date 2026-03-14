@@ -17,6 +17,7 @@ import Data.Word
 
 import GHC.Platform.Regs
 import GHC.CmmToAsm.AArch64.Instr
+import GHC.CmmToAsm.AArch64.Ppr (pprInstr)
 import GHC.CmmToAsm.AArch64.Regs
 import GHC.CmmToAsm.AArch64.Cond (Cond(..), invertCond)
 
@@ -129,6 +130,32 @@ cmmTopCodeGen _cmm@(CmmData sec dat) = do
   --         ++ showSDocUnsafe (ppr cmm)
   return [CmmData sec dat] -- no translation, we just use CmmStatic
 
+-- | Validate basic block structure: no non-control-flow instructions should
+-- appear after a block-terminating jump. This catches NCG bugs early.
+-- Mirrors the X86 implementation in GHC.CmmToAsm.X86.CodeGen.
+verifyBasicBlock :: Platform -> [Instr] -> ()
+verifyBasicBlock platform instrs
+  | debugIsOn     = go False instrs
+  | otherwise     = ()
+  where
+    go _     [] = ()
+    go atEnd (i:rest)
+        = case i of
+            -- Start a new basic block
+            NEWBLOCK {} -> go False rest
+            -- BL is a call (returns to caller), not a block terminator
+            BL{} | atEnd -> faultyBlockWith i
+                 | not atEnd -> go atEnd rest
+            -- All instructions ok, check if we reached the end and continue.
+            _ | not atEnd -> go (isJumpishInstr i) rest
+              -- Only jumps allowed at the end of basic blocks.
+              | otherwise -> if isJumpishInstr i || isMetaInstr i
+                                then go True rest
+                                else faultyBlockWith i
+    faultyBlockWith i
+        = pprPanic "Non control flow instructions after end of basic block."
+                   (pprInstr platform i <+> text "in:" $$ vcat (map (pprInstr platform) instrs))
+
 basicBlockCodeGen
         :: Block CmmNode C C
         -> NatM ( [NatBasicBlock Instr]
@@ -159,6 +186,10 @@ basicBlockCodeGen block = do
   mid_instrs <- stmtsToInstrs stmts
   (!tail_instrs) <- stmtToInstrs tail
   let instrs = header_comment_instr `appOL` loc_instrs `appOL` mid_instrs `appOL` tail_instrs
+  -- Verify basic block structure: no non-control-flow instructions after
+  -- a block-terminating jump. See X86 backend for the original implementation.
+  let platform = ncgPlatform config
+  return $! verifyBasicBlock platform (fromOL instrs)
   -- Insert UNWIND pseudo-instructions after DELTA instructions to track
   -- stack pointer changes for DWARF unwinding. See GHC #19913.
   instrs' <- fold <$> traverse addSpUnwindings instrs
