@@ -46,6 +46,11 @@
 #define REG_R6          r27
 #define REG_SpLim       r28
 
+/* The C stack pointer, used only for DWARF unwind info generation.
+ * AArch64 SP is register 31 (DWARF register 31).
+ * Not allocatable: freeReg 31 = False in CodeGen.Platform.h. */
+#define REG_MachSp      r31
+
 #define REG_F1          s8
 #define REG_F2          s9
 #define REG_F3          s10

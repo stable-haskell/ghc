@@ -618,7 +618,7 @@ data Instr
     | DELTA   Int
 
     -- unwinding information
-    -- See Note [Unwinding information in the NCG] in X86/Instr.hs
+    -- See Note [Unwinding information in the NCG] in GHC.CmmToAsm
     | UNWIND CLabel UnwindTable
 
     -- 0. Pseudo Instructions --------------------------------------------------
