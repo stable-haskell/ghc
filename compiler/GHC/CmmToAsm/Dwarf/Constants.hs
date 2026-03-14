@@ -12,8 +12,13 @@ import GHC.Utils.Outputable
 import GHC.Utils.Panic
 
 import GHC.Platform.Reg
+<<<<<<< HEAD
 import GHC.Cmm.CLabel (asmTempLabelPrefix)
 #if defined(HAVE_X86_NCG)
+||||||| parent of d7e5c5d703 (Fix DWARF Constants.hs: inline local label prefix instead of importing)
+import GHC.Cmm.CLabel (asmTempLabelPrefix)
+=======
+>>>>>>> d7e5c5d703 (Fix DWARF Constants.hs: inline local label prefix instead of importing)
 import GHC.CmmToAsm.X86.Regs
 #endif
 
@@ -194,10 +199,17 @@ dwarfSection platform name =
 -- These use the platform-specific local label prefix:
 -- "L" on darwin (MachO), ".L" on ELF (Linux etc.)
 dwarfInfoLabel, dwarfAbbrevLabel, dwarfLineLabel, dwarfFrameLabel :: IsLine doc => Platform -> doc
-dwarfInfoLabel   platform = asmTempLabelPrefix platform <> text "section_info"
-dwarfAbbrevLabel platform = asmTempLabelPrefix platform <> text "section_abbrev"
-dwarfLineLabel   platform = asmTempLabelPrefix platform <> text "section_line"
-dwarfFrameLabel  platform = asmTempLabelPrefix platform <> text "section_frame"
+dwarfInfoLabel   platform = dwarfLocalLabel platform <> text "section_info"
+dwarfAbbrevLabel platform = dwarfLocalLabel platform <> text "section_abbrev"
+dwarfLineLabel   platform = dwarfLocalLabel platform <> text "section_line"
+dwarfFrameLabel  platform = dwarfLocalLabel platform <> text "section_frame"
+
+-- | Local label prefix for DWARF section labels.
+-- Must match the assembler's convention for local (non-exported) labels.
+dwarfLocalLabel :: IsLine doc => Platform -> doc
+dwarfLocalLabel platform = case platformOS platform of
+  OSDarwin -> text "L"
+  _        -> text ".L"
 {-# SPECIALIZE dwarfInfoLabel :: Platform -> SDoc #-}
 {-# SPECIALIZE dwarfInfoLabel :: Platform -> HLine #-} -- see Note [SPECIALIZE to HDoc] in GHC.Utils.Outputable
 {-# SPECIALIZE dwarfAbbrevLabel :: Platform -> SDoc #-}
