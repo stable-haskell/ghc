@@ -47,8 +47,10 @@ pprNatCmmDecl config proc@(CmmProc top_info lbl _ (ListGraph blocks)) =
           then pprLabel platform lbl -- blocks guaranteed not null, so label needed
           else empty) $$
         vcat (map (pprBasicBlock platform with_dwarf top_info) blocks) $$
-        (if ncgDwarfEnabled config
-         then line (pprAsmLabel platform (mkAsmTempEndLabel lbl) <> char ':') else empty) $$
+        (if with_dwarf
+         then line (pprAsmLabel platform (mkAsmTempEndLabel lbl) <> char ':') $$
+              line (pprProcEndLabel platform lbl)
+         else empty) $$
         pprSizeDecl platform lbl
 
     Just (CmmStaticsRaw info_lbl _) ->
@@ -60,6 +62,8 @@ pprNatCmmDecl config proc@(CmmProc top_info lbl _ (ListGraph blocks)) =
       vcat (map (pprBasicBlock platform with_dwarf top_info) blocks) $$
       -- above: Even the first block gets a label, because with branch-chain
       -- elimination, it might be the target of a goto.
+      -- Print the proc end label when debugging is enabled
+      ppWhen with_dwarf (line (pprProcEndLabel platform info_lbl)) $$
       (if platformHasSubsectionsViaSymbols platform
        then -- See Note [Subsections Via Symbols]
                 line
@@ -109,6 +113,17 @@ pprSectionAlign config sec@(Section seg suffix) =
       | otherwise
       = empty
 
+-- | Label marking the end of a procedure, used in DWARF .debug_info and
+-- .debug_frame to establish procedure address ranges.
+pprProcEndLabel :: IsLine doc => Platform -> CLabel -> doc
+pprProcEndLabel platform lbl =
+    pprAsmLabel platform (mkAsmTempProcEndLabel lbl) <> colon
+
+-- | Label marking the end of a basic block, used in DWARF.
+pprBlockEndLabel :: IsLine doc => Platform -> CLabel -> doc
+pprBlockEndLabel platform lbl =
+    pprAsmLabel platform (mkAsmTempEndLabel lbl) <> colon
+
 -- | Output the ELF .size directive.
 pprSizeDecl :: IsDoc doc => Platform -> CLabel -> doc
 pprSizeDecl platform lbl
@@ -122,9 +137,11 @@ pprBasicBlock platform with_dwarf info_env (BasicBlock blockid instrs)
   = maybe_infotable $
     pprLabel platform asmLbl $$
     vcat (map (pprInstr platform) (id {-detectTrivialDeadlock-} optInstrs)) $$
-    (if  with_dwarf
-      then line (pprAsmLabel platform (mkAsmTempEndLabel asmLbl) <> char ':')
-      else empty
+    ppWhen with_dwarf (
+      -- Emit both end labels since this may end up being a standalone
+      -- top-level block
+      line (pprBlockEndLabel platform asmLbl) $$
+      line (pprProcEndLabel platform asmLbl)
     )
   where
     -- Post-register-allocation peephole optimizer.
@@ -142,9 +159,7 @@ pprBasicBlock platform with_dwarf info_env (BasicBlock blockid instrs)
            vcat (map (pprData platform) info) $$
            pprLabel platform info_lbl $$
            c $$
-           (if with_dwarf
-             then line (pprAsmLabel platform (mkAsmTempEndLabel info_lbl) <> char ':')
-             else empty)
+           ppWhen with_dwarf (line (pprBlockEndLabel platform info_lbl))
     -- Make sure the info table has the right .loc for the block
     -- coming right after it. See Note [Info Offset]
     infoTableLoc = case instrs of
