@@ -110,6 +110,7 @@ pprAbbrevDecls platform haveDebugLine =
            , (dW_AT_frame_base, dW_FORM_block1)
            ]
   in dwarfAbbrevSection platform $$
+     dwarfSectionAnchor platform "abbrev" $$
      line (dwarfAbbrevLabel platform <> colon) $$
      mkAbbrev DwAbbrCompileUnit dW_TAG_compile_unit dW_CHILDREN_yes
        ([(dW_AT_name,     dW_FORM_string)
