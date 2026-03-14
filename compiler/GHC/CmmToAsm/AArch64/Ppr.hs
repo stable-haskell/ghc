@@ -48,7 +48,7 @@ pprNatCmmDecl config proc@(CmmProc top_info lbl _ (ListGraph blocks)) =
           else empty) $$
         vcat (map (pprBasicBlock platform with_dwarf top_info) blocks) $$
         (if with_dwarf
-         then line (pprAsmLabel platform (mkAsmTempEndLabel lbl) <> char ':') $$
+         then line (pprBlockEndLabel platform lbl) $$
               line (pprProcEndLabel platform lbl)
          else empty) $$
         pprSizeDecl platform lbl
