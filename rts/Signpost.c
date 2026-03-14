@@ -65,6 +65,22 @@ freeSignposts(void)
     n_caps_signpost = 0;
 }
 
+void
+signpostsAddCapabilities(uint32_t from, uint32_t to)
+{
+    if (gc_signpost_ids == NULL) return;
+
+    gc_signpost_ids = stgReallocBytes(gc_signpost_ids,
+        to * sizeof(os_signpost_id_t),
+        "signpostsAddCapabilities");
+
+    for (uint32_t i = from; i < to; i++) {
+        gc_signpost_ids[i] = OS_SIGNPOST_ID_NULL;
+    }
+
+    n_caps_signpost = to;
+}
+
 /* ---- GC events ---- */
 
 void

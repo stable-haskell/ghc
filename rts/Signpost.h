@@ -25,6 +25,9 @@
 void initSignposts(void);
 void freeSignposts(void);
 
+/* Resize per-capability arrays when setNumCapabilities grows them */
+void signpostsAddCapabilities(uint32_t from, uint32_t to);
+
 /* GC interval signposts (begin/end pairs tracked per capability) */
 void signpostGcBegin(uint32_t cap_no, uint32_t gen);
 void signpostGcEnd(uint32_t cap_no, uint64_t copied, uint64_t slop);
@@ -42,6 +45,7 @@ void signpostUserMarker(uint32_t cap_no, const char *msg);
 
 #define initSignposts()                        /* nothing */
 #define freeSignposts()                        /* nothing */
+#define signpostsAddCapabilities(from, to)     /* nothing */
 #define signpostGcBegin(cap, gen)              /* nothing */
 #define signpostGcEnd(cap, copied, slop)       /* nothing */
 #define signpostThreadCreate(cap, tid)         /* nothing */
