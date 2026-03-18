@@ -597,7 +597,7 @@ ifndef DIST_BUILD
 # prerequisite (e.g. stage2 -> $(GHC1) -> $(STAGE1_STAMP)).  The PHONY
 # alias below lets users run `make stage1` as before.
 $(STAGE1_STAMP): STAGE=stage1
-$(STAGE1_STAMP): stable-cabal $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) cabal.project.stage1 cabal.project.common libraries/ghc-boot-th-next | hackage
+$(STAGE1_STAMP): $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) cabal.project.stage1 cabal.project.common | stable-cabal libraries/ghc-boot-th-next hackage
 	$(call PHASE_START,stage1)
 	$(call LOG,Starting build of $(STAGE))
 
@@ -723,7 +723,7 @@ STAGE2_CABAL_BUILD = \
 ifndef DIST_BUILD
 $(STAGE2_STAMP): STAGE=stage2
 $(STAGE2_STAMP): TARGET_PLATFORM:=$(HOST_PLATFORM)
-$(STAGE2_STAMP): $(GHC1) stable-cabal $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) cabal.project.stage2 cabal.project.stage2.settings cabal.project.common libraries/ghc-boot-th-next | $(STAGE1_STAMP)
+$(STAGE2_STAMP): $(GHC1) $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) cabal.project.stage2 cabal.project.stage2.settings cabal.project.common | stable-cabal libraries/ghc-boot-th-next $(STAGE1_STAMP)
 	$(call PHASE_START,stage2)
 	$(call LOG,Starting build of $(STAGE))
 
@@ -1137,7 +1137,7 @@ ifndef DIST_BUILD
 # .PHONY: hackage
 hackage: $(BUILD_DIR)/packages/hackage.haskell.org/01-index.tar.gz
 
-$(BUILD_DIR)/packages/hackage.haskell.org/01-index.tar.gz:
+$(BUILD_DIR)/packages/hackage.haskell.org/01-index.tar.gz: | stable-cabal
 	$(CABAL) --remote-repo-cache $(call NORMALIZE_FP,$(CURDIR)/$(BUILD_DIR)/packages) update
 endif # DIST_BUILD (hackage)
 
