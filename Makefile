@@ -187,10 +187,10 @@ STAGE0_STAMP := $(BUILD_DIR)/.stamp-stage0
 STAGE1_STAMP := $(BUILD_DIR)/.stamp-stage1
 STAGE2_STAMP := $(BUILD_DIR)/.stamp-stage2
 
-# Stamp files are touched at the end of each stage's recipe. They let
-# downstream targets (e.g. stage2 depending on stage1) skip already-completed
-# stages via order-only prerequisites: `stage2: ... | $(STAGE1_STAMP)`.
-# No fallback rules here — stages must be built explicitly.
+# Each stamp is the real Make target for its stage's recipe; PHONY aliases
+# (stage1, stage2) are provided for convenience.  This lets Make resolve the
+# full dependency graph in a single invocation (e.g. `make _build/dist/ghc.tar.gz`)
+# while still skipping already-completed stages.
 
 # HOST_PLATFROM is always from the bootstrap compiler
 HOST_PLATFORM := $(shell $(GHC0) --print-host-platform)
@@ -593,8 +593,11 @@ STAGE1_CABAL_BUILD = \
 	--ghc-options "-ghcversion-file=$(call NORMALIZE_FP,$(CURDIR)/rts/include/ghcversion.h)"
 
 ifndef DIST_BUILD
-stage1: STAGE=stage1
-stage1: stable-cabal $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) cabal.project.stage1 cabal.project.common libraries/ghc-boot-th-next | hackage
+# The stamp file is the real target so that Make can resolve it as a
+# prerequisite (e.g. stage2 -> $(GHC1) -> $(STAGE1_STAMP)).  The PHONY
+# alias below lets users run `make stage1` as before.
+$(STAGE1_STAMP): STAGE=stage1
+$(STAGE1_STAMP): stable-cabal $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) cabal.project.stage1 cabal.project.common libraries/ghc-boot-th-next | hackage
 	$(call PHASE_START,stage1)
 	$(call LOG,Starting build of $(STAGE))
 
@@ -615,7 +618,10 @@ endif
 
 	$(call LOG,Finished building $(STAGE))
 	$(call PHASE_END_OK,stage1)
-	@touch $(STAGE1_STAMP)
+	@touch $@
+
+.PHONY: stage1
+stage1: $(STAGE1_STAMP)
 
 $(addprefix $(STAGE1_PATH)/bin/,$(STAGE1_EXECUTABLES)) : $(STAGE1_STAMP)
 endif # DIST_BUILD (stage1)
@@ -715,9 +721,9 @@ STAGE2_CABAL_BUILD = \
 	$(foreach dir,$(STAGE2_EXTRA_INCLUDE_DIRS),--extra-include-dirs=$(dir))
 
 ifndef DIST_BUILD
-stage2: STAGE=stage2
-stage2: TARGET_PLATFORM:=$(HOST_PLATFORM)
-stage2: $(GHC1) stable-cabal $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) cabal.project.stage2 cabal.project.stage2.settings cabal.project.common libraries/ghc-boot-th-next | $(STAGE1_STAMP)
+$(STAGE2_STAMP): STAGE=stage2
+$(STAGE2_STAMP): TARGET_PLATFORM:=$(HOST_PLATFORM)
+$(STAGE2_STAMP): $(GHC1) stable-cabal $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) cabal.project.stage2 cabal.project.stage2.settings cabal.project.common libraries/ghc-boot-th-next | $(STAGE1_STAMP)
 	$(call PHASE_START,stage2)
 	$(call LOG,Starting build of $(STAGE))
 
@@ -797,7 +803,10 @@ endif
 	$(call LOG,Finished building $(STAGE) in $(DIST_DIR))
 	$(call PHASE_END_OK,stage2.dist)
 	$(call PHASE_END_OK,stage2)
-	@touch $(STAGE2_STAMP)
+	@touch $@
+
+.PHONY: stage2
+stage2: $(STAGE2_STAMP)
 
 $(addprefix $(STAGE2_PATH)/bin/,$(STAGE2_EXECUTABLES)) : $(STAGE2_STAMP)
 endif # DIST_BUILD (stage2)
