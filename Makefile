@@ -798,7 +798,7 @@ endif
 	# Copy happy-lib templates (needed for cross-compilation from dist)
 	$(call LOG,Copying happy-lib templates to $(DIST_DIR)/share)
 	@mkdir -p $(DIST_DIR)/share/happy-lib/data
-	@cp -rfp _build/stage2/src/happy-lib-2.1.5/data/* $(DIST_DIR)/share/happy-lib/data/
+	@cp -rfp _build/stage2/src/happy-lib-*/data/* $(DIST_DIR)/share/happy-lib/data/
 
 	$(call LOG,Finished building $(STAGE) in $(DIST_DIR))
 	$(call PHASE_END_OK,stage2.dist)
@@ -932,7 +932,7 @@ TARGET_DIR = $(DIST_DIR)/lib/targets/$(TARGET_PLATFORM)
 
 # Happy template directory: defaults to stage2's unpacked happy-lib source; can
 # be overridden for dist-based cross builds where stage2 build tree is unavailable.
-HAPPY_TEMPLATE_DIR ?= _build/stage2/src/happy-lib-2.1.5/data/
+HAPPY_TEMPLATE_DIR ?= $(wildcard _build/stage2/src/happy-lib-*/data)
 
 # NOTE: disable-library-for-ghci is repeated here but it should be sufficient
 # to put it in cabal.project.stage3
@@ -1079,7 +1079,7 @@ stage3: $(foreach platform,$(STAGE3_PLATFORMS),stage3-$(platform))
 # |____/|_|_| |_|\__,_|_|___/\__|___/
 #
 
-$(DIST_DIR)/ghc.tar.gz: stage2
+$(DIST_DIR)/ghc.tar.gz: $(STAGE2_STAMP)
 	@echo "::group::Creating ghc.tar.gz..."
 	@tar czf $@ \
 		--directory=$(DIST_DIR) \
@@ -1093,7 +1093,7 @@ $(DIST_DIR)/ghc.tar.gz: stage2
 		lib/$(HOST_PLATFORM)
 	@echo "::endgroup::"
 
-$(DIST_DIR)/cabal.tar.gz: stable-cabal
+$(DIST_DIR)/cabal.tar.gz: | stable-cabal
 	@echo "::group::Creating cabal.tar.gz..."
 	@mkdir -p $(DIST_DIR)/bin
 	@cp $(CABAL) $(DIST_DIR)/bin/
@@ -1102,7 +1102,7 @@ $(DIST_DIR)/cabal.tar.gz: stable-cabal
 		bin/cabal
 	@echo "::endgroup::"
 
-$(DIST_DIR)/haskell-toolchain.tar.gz: stable-cabal stage2 stage3-javascript-unknown-ghcjs
+$(DIST_DIR)/haskell-toolchain.tar.gz: $(STAGE2_STAMP) | stable-cabal stage3-javascript-unknown-ghcjs
 	@echo "::group::Creating haskell-toolchain.tar.gz..."
 	@mkdir -p $(DIST_DIR)/bin
 	@cp $(CABAL) $(DIST_DIR)/bin/
@@ -1254,7 +1254,7 @@ testsuite-timeout:
 
 # --- Test Target ---
 
-test: stage2 testsuite-timeout
+test: $(STAGE2_STAMP) testsuite-timeout
 	$(call PHASE_START,test)
 	@echo "::group::Running tests with THREADS=$(THREADS)" >&2
 	# If any required tool is missing, testsuite logic will skip related tests.
