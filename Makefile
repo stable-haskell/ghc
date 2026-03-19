@@ -1134,6 +1134,7 @@ endif
 	@echo "::endgroup::"
 
 clean: clean-stage1 clean-stage2 clean-stage3
+	rm -f $(BUILD_DIR)/bin/ghc-throttle$(EXE_EXT) $(BUILD_DIR)/bin/ghc-throttle-status$(EXE_EXT)
 	@echo "Not removing stage0 (cabal), use clean-stage0 to remove cabal too."
 
 clean-stage1:
@@ -1167,6 +1168,42 @@ export SKIP_PERF_TESTS
 
 # --- Test Suite Helper Tool Paths & Flags (Hadrian parity light) ---
 # We approximate Hadrian's test invocation without depending on Hadrian.
+#         _                _   _                _   _   _
+#    __ _| |__   ___      | |_| |__  _ __ ___ | |_| |_| | ___
+#   / _` | '_ \ / __|____ | __| '_ \| '__/ _ \| __| __| |/ _ \
+#  | (_| | | | | (_|_____|| |_| | | | | | (_) | |_| |_| |  __/
+#   \__, |_| |_|\___|      \__|_| |_|_|  \___/ \__|\__|_|\___|
+#   |___/
+
+# GHC_THROTTLE_JOBS — max concurrent GHC processes (default: max(1, min(ncpus/2, 256)))
+GHC_THROTTLE_JOBS ?= $(shell n=$$(( $(CPUS) / 2 )); n=$$(( n > 0 ? n : 1 )); echo $$(( n < 256 ? n : 256 )))
+
+# Platform-conditional source selection for ghc-throttle.
+# Use $(OS) which is set to "Windows_NT" on all Windows flavours
+# (MSYS2, MinGW, native cmd), matching utils/ghc-throttle/Makefile.
+ifeq ($(OS),Windows_NT)
+GHC_THROTTLE_SRC := utils/ghc-throttle/ghc-throttle-win.c
+GHC_THROTTLE_STATUS_SRC   := utils/ghc-throttle/ghc-throttle-status-win.c
+else
+GHC_THROTTLE_SRC := utils/ghc-throttle/ghc-throttle.c
+GHC_THROTTLE_STATUS_SRC   := utils/ghc-throttle/ghc-throttle-status.c
+endif
+
+.PHONY: ghc-throttle
+ghc-throttle: $(GHC_THROTTLE_SRC)  ## Build the GHC concurrency limiter
+	@mkdir -p $(BUILD_DIR)/bin
+	$(CC) -O2 -Wall -Wextra -pedantic $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) -o $(BUILD_DIR)/bin/ghc-throttle$(EXE_EXT) $<
+	@echo "Built $(BUILD_DIR)/bin/ghc-throttle$(EXE_EXT) (default max jobs: $(GHC_THROTTLE_JOBS), override with GHC_THROTTLE_JOBS)"
+	@echo "Usage:"
+	@echo "  export GHC_THROTTLE_GHC=\$$(which ghc-9.8.4)"
+	@echo "  export GHC_THROTTLE_JOBS=$(GHC_THROTTLE_JOBS)"
+	@echo "  make CABAL_ARGS=\"--with-compiler=\$$PWD/$(BUILD_DIR)/bin/ghc-throttle$(EXE_EXT)\" stage1"
+
+.PHONY: ghc-throttle-status
+ghc-throttle-status: $(GHC_THROTTLE_STATUS_SRC)  ## Build the throttle status tool
+	@mkdir -p $(BUILD_DIR)/bin
+	$(CC) -O2 -Wall -Wextra -pedantic $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) -o $(BUILD_DIR)/bin/ghc-throttle-status$(EXE_EXT) $<
+
 # $(CURDIR) is needed because the test recipe runs $(MAKE) -C testsuite/tests,
 # so relative paths would resolve from the wrong directory. This matters both
 # for CI and local `make test` invocations.
