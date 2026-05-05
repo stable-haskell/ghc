@@ -27,12 +27,26 @@ import qualified Data.Map as Map
 import GHC.ResponseFile
 import System.Environment
 
+-- | Extract the 'Verbosity' from the configure flags.
+--
+-- Cabal 3.17 (commit edb808a0b8b) split the old @Verbosity@ type into
+-- 'VerbosityFlags' (the CLI-passable part) and 'VerbosityHandles', so
+-- 'configVerbosity' now yields a 'VerbosityFlags' which must be wrapped
+-- back into a 'Verbosity' before passing it to the Cabal library functions.
+configVerbosity' :: ConfigFlags -> Verbosity
+#if MIN_VERSION_Cabal(3,17,0)
+configVerbosity' cfg =
+  mkVerbosity defaultVerbosityHandles (fromFlagOrDefault silent (configVerbosity cfg))
+#else
+configVerbosity' cfg = fromFlagOrDefault minBound (configVerbosity cfg)
+#endif
+
 main :: IO ()
 main = defaultMainWithHooks ghcHooks
   where
     ghcHooks = simpleUserHooks
       { postConf = \args cfg pd lbi -> do
-          let verbosity = fromFlagOrDefault minBound (configVerbosity cfg)
+          let verbosity = configVerbosity' cfg
           ghcAutogen verbosity lbi
           postConf simpleUserHooks args cfg pd lbi
       }
@@ -76,10 +90,10 @@ ghcAutogen verbosity lbi@LocalBuildInfo{pkgDescrFile,withPrograms,componentNameM
   let Just compilerRoot = (takeDirectory . fromSymPath) <$> pkgDescrFile
 
   -- Require the necessary programs
-  (gcc   ,withPrograms) <- requireProgram normal gccProgram withPrograms
-  (ghc   ,withPrograms) <- requireProgram normal ghcProgram withPrograms
+  (gcc   ,withPrograms) <- requireProgram verbosity gccProgram withPrograms
+  (ghc   ,withPrograms) <- requireProgram verbosity ghcProgram withPrograms
 
-  settings <- read <$> getProgramOutput normal ghc ["--info"]
+  settings <- read <$> getProgramOutput verbosity ghc ["--info"]
   -- We are reinstalling GHC
   -- Write primop-*.hs-incl
   let hsCppOpts = case lookup "Haskell CPP flags" settings of
@@ -89,7 +103,7 @@ ghcAutogen verbosity lbi@LocalBuildInfo{pkgDescrFile,withPrograms,componentNameM
       cppOpts = hsCppOpts ++ ["-P","-x","c"]
       cppIncludes = map ("-I"++) [compilerRoot]
   -- Preprocess primops.txt.pp
-  primopsStr <- getProgramOutput normal gcc (cppOpts ++ cppIncludes ++ [primopsTxtPP])
+  primopsStr <- getProgramOutput verbosity gcc (cppOpts ++ cppIncludes ++ [primopsTxtPP])
   -- Call genprimopcode to generate *.hs-incl
   forM_ primopIncls $ \(file,command) -> do
     contents <- readProcess "genprimopcode" [command] primopsStr
