@@ -487,6 +487,21 @@ auditable while binaries live in releases.
   Pure wasmtime can't run the binary (GHC's wasm RTS uses JSFFI imports);
   full runtime test via post-link.mjs + Node deferred to Phase 6 miso e2e.
   **PHASE 1 GATE MET (compile-only gate; runtime gate in Phase 6).**
+- **2026-05-26** — Two PRs opened: (1) stable-haskell/cabal#359 with the
+  R8/R8.5 patches (https://github.com/stable-haskell/cabal/pull/359); (2)
+  stable-haskell/ghc#181 with our branch + Phase 0-2 work
+  (https://github.com/stable-haskell/ghc/pull/181). Phase 2 CI verification
+  is async on PR #181 — the `cross-wasm` job in nix-ci.yml already does
+  the full smart-smoke-test runtime check.
+- **2026-05-26** — **PHASE 3 GATE PASSED**. Added `mk/wasm-relocate.sh`
+  (10-line script that runs `ghc-pkg recache` for the new install prefix)
+  and switched the wasm bindist tar to `tar czhf` (dereferences symlinks
+  → wasm-prefixed bin entries become real files instead of broken symlinks
+  to the bare native names). Tarball grew 153MB → 264MB but is now
+  **self-contained and relocatable**. Verified end-to-end: extract to
+  `/tmp/wasm-relocate-test2`, run `./relocate.sh`, then
+  `bin/wasm32-unknown-wasi-ghc hello.hs -o hello.wasm` produces valid
+  wasm from the fresh prefix.
 - **2026-05-26** — R8/R9/R10/R11 reclassified as **dissolved artifacts**
   of bootstrapping with broken master HEAD cabal source. Real root cause:
   the chore commit `e148c1c059` on `stable-ghc-9.14` changed the Cabal
