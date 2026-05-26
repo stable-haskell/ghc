@@ -36,7 +36,7 @@ Or manually:
 ```bash
 nix-shell
 make CABAL=_build/stage0/bin/cabal stage2
-make CABAL=_build/stage0/bin/cabal stage3-wasm32-unknown-wasi
+make CABAL=_build/stage0/bin/cabal stage3-wasm32-wasi
 ```
 
 ## Build Process
@@ -53,7 +53,7 @@ Builds GHC itself using the GHC 9.8.4 bootstrap compiler from Nix.
 
 ### Stage 3: WASM Cross-Compiler
 ```bash
-make CABAL=_build/stage0/bin/cabal stage3-wasm32-unknown-wasi
+make CABAL=_build/stage0/bin/cabal stage3-wasm32-wasi
 ```
 Builds the WASM cross-compiler using stage2.
 
@@ -63,7 +63,7 @@ Builds the WASM cross-compiler using stage2.
 
 The WASM cross-compiler will be at:
 ```
-_build/stage3/bin/wasm32-unknown-wasi-ghc
+_build/stage3/bin/wasm32-wasi-ghc
 ```
 
 ## Testing
@@ -73,7 +73,7 @@ _build/stage3/bin/wasm32-unknown-wasi-ghc
 echo 'main = putStrLn "Hello from WASM!"' > hello.hs
 
 # Compile to WASM (in nix-shell)
-nix-shell --run '_build/stage3/bin/wasm32-unknown-wasi-ghc hello.hs -o hello.wasm'
+nix-shell --run '_build/stage3/bin/wasm32-wasi-ghc hello.hs -o hello.wasm'
 
 # Run with wasmtime
 wasmtime hello.wasm
@@ -112,7 +112,7 @@ alternative to the patch in https://github.com/stable-haskell/ghc/issues/134.
 ### WASM Toolchain: wasi-sdk 24.0
 
 The shell.nix automatically downloads and sets up wasi-sdk 24.0 which provides:
-- `clang` 18.1.8 targeting wasm32-unknown-wasi
+- `clang` 18.1.8 targeting wasm32-wasi
 - Integrated `wasi-libc` (WASI C library with sysroot)
 - LLVM binutils (`llvm-ar`, `llvm-ranlib`, `wasm-ld`)
 
@@ -144,7 +144,7 @@ Install Nix:
 curl -L https://nixos.org/nix/install | sh
 ```
 
-### "make: *** No rule to make target 'stage3-wasm32-unknown-wasi'"
+### "make: *** No rule to make target 'stage3-wasm32-wasi'"
 
 Make sure you're on the `stable-ghc-9.14` branch with the latest Makefile.
 
@@ -171,7 +171,7 @@ llvm-config --version
 
 # Build stages manually
 make CABAL=_build/stage0/bin/cabal stage2
-make CABAL=_build/stage0/bin/cabal stage3-wasm32-unknown-wasi
+make CABAL=_build/stage0/bin/cabal stage3-wasm32-wasi
 ```
 
 ## References

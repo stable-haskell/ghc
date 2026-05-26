@@ -55,7 +55,7 @@ ssh "${REMOTE_USER}@${REMOTE_HOST}" "cd ${REMOTE_DIR} && git init -q && git add 
 success "Sync complete"
 
 info "Starting WASM cross-compiler build on linux-0..."
-info "Using Makefile-based build (stage2 → stage3-wasm32-unknown-wasi)"
+info "Using Makefile-based build (stage2 → stage3-wasm32-wasi)"
 warn "This will take 1-2 hours depending on the machine"
 echo ""
 
@@ -64,4 +64,4 @@ ssh -t "${REMOTE_USER}@${REMOTE_HOST}" "cd ${REMOTE_DIR} && ./build-wasm-make.sh
 
 success "Build completed!"
 info "The WASM cross-compiler is available at:"
-echo "  ${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_DIR}/_build/stage3/bin/wasm32-unknown-wasi-ghc"
+echo "  ${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_DIR}/_build/stage3/bin/wasm32-wasi-ghc"

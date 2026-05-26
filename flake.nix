@@ -141,7 +141,7 @@ EOF
 
             echo "To build WASM cross-compiler:"
             echo "  make stage2"
-            echo "  make stage3-wasm32-unknown-wasi"
+            echo "  make stage3-wasm32-wasi"
             echo ""
           '';
         };

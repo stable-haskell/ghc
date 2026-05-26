@@ -848,7 +848,7 @@ jobs:
              DERIVE_CONSTANTS_BIN=$PWD/_build/dist/bin/deriveConstants \
              GENAPPLY_BIN=$PWD/_build/dist/bin/genapply \
              HAPPY_TEMPLATE_DIR=$PWD/_build/dist/share/happy-lib/data \
-             stage3-wasm32-unknown-wasi
+             stage3-wasm32-wasi
 
     - name: Smoke test
       if: success()
@@ -857,7 +857,7 @@ jobs:
         set -eo pipefail
         export PATH="$HOME/.nix-profile/bin:$PATH:$HOME/.ghc-wasm/wasi-sdk/bin"
         echo 'main = putStrLn "Hello from WASM backend"' > /tmp/hello.hs
-        _build/dist/bin/wasm32-unknown-wasi-ghc /tmp/hello.hs -o /tmp/hello.wasm
+        _build/dist/bin/wasm32-wasi-ghc /tmp/hello.hs -o /tmp/hello.wasm
 
         # Verify the .wasm binary was produced
         ls -lh /tmp/hello.wasm
@@ -883,7 +883,7 @@ jobs:
           #   1. Compile:     wasm32-wasi-ghc hello.hs -o hello.wasm
           #   2. Post-link:   $(ghc --print-libdir)/post-link.mjs -i hello.wasm -o hello.mjs
           #   3. Run:         node runner.mjs
-          WASM_LIBDIR=_build/dist/lib/targets/wasm32-unknown-wasi/lib
+          WASM_LIBDIR=_build/dist/lib/targets/wasm32-wasi/lib
 
           # Generate JavaScript FFI glue from WASM custom sections
           node "$WASM_LIBDIR/post-link.mjs" -i /tmp/hello.wasm -o /tmp/hello.mjs
@@ -922,4 +922,4 @@ jobs:
       with:
         name: aarch64-darwin-cross-wasm
         retention-days: 1
-        path: _build/dist/lib/targets/wasm32-unknown-wasi
+        path: _build/dist/lib/targets/wasm32-wasi
