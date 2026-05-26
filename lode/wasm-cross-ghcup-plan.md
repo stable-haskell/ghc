@@ -225,7 +225,125 @@ location (the cache is binary and not portable).
 - GHC user's guide §15 — WASM backend (reactor module shape, post-link).
 - Tweag blog 2024-11-21 — TH/ghci over wasm via Node iserv.
 
-## 8. Status log
+## 8. Phase 4 design proposal (draft sketches)
+
+These are reference templates for when the `stable-haskell/ghc-wasm-meta` repo
+is created. Refine against the real bindist once Phase 3 produces one.
+
+### 8.1 `ghcup-stable-wasm-0.0.1.yaml` skeleton
+
+```yaml
+ghcupDownloads:
+  GHC:
+    wasm32-wasi-9.14.0.stable.YYYYMMDD:
+      viTags: [base-4.21.0.0]
+      viPreInstall: |
+        Stable Haskell wasm32-wasi cross-compiler.
+
+        Prerequisites — install the host-side wasm toolchain via upstream
+        ghc-wasm-meta (we don't ship wasi-sdk / node / wasmtime / binaryen
+        ourselves):
+
+          curl -sL https://raw.githubusercontent.com/stable-haskell/ghc-wasm-meta/master/bootstrap.sh | sh
+          source ~/.ghc-wasm/env
+
+        Then re-run this install.
+      viPostInstall: |
+        # ghcup runs viPostInstall from the install prefix.
+        # ${pkgroot}-relative *.conf files are portable, but the binary
+        # ghc-pkg cache is not — regenerate it for the new location.
+        ./bin/wasm32-wasi-ghc-pkg recache \
+          --package-db ./lib/targets/wasm32-wasi/lib/package.conf.d
+        echo "Stable Haskell wasm32-wasi-ghc ready at: $(pwd)/bin/wasm32-wasi-ghc"
+      viArch:
+        A_64:
+          Linux_UnknownLinux:
+            unknown_versioning:
+              dlHash: <SHA256-from-Phase-3>
+              dlSubdir: wasm32-wasi-ghc-9.14.0
+              dlUri: https://github.com/stable-haskell/ghc-wasm-bindists/releases/download/v9.14.0.stable.YYYYMMDD/wasm32-wasi-ghc-9.14.0-x86_64-linux.tar.xz
+              dlOutput: wasm32-wasi-ghc-9.14.0-x86_64-linux.tar.xz
+        A_ARM64:
+          Darwin:
+            unknown_versioning:
+              dlHash: <SHA256-from-Phase-3>
+              dlSubdir: wasm32-wasi-ghc-9.14.0
+              dlUri: https://github.com/stable-haskell/ghc-wasm-bindists/releases/download/v9.14.0.stable.YYYYMMDD/wasm32-wasi-ghc-9.14.0-aarch64-darwin.tar.xz
+              dlOutput: wasm32-wasi-ghc-9.14.0-aarch64-darwin.tar.xz
+  Cabal:
+    stable-3.17.0.1:
+      viTags: [Latest]
+      viPreInstall: |
+        Stable Haskell cabal-install with real dual-compiler support
+        (with-build-compiler / with-compiler) for cross-compilation.
+      viArch:
+        A_64:
+          Linux_UnknownLinux: { ... }
+        A_ARM64:
+          Darwin: { ... }
+```
+
+**Open questions to resolve before publishing:**
+- Does ghcup invoke `viPostInstall` with `PWD = install prefix`, or some other dir? Confirm via ghcup source or empirically.
+- Does ghcup support `Cabal:` entries in custom channels, or only `GHC:`? Test by registering a channel with just `Cabal:` and trying `ghcup list cabal`.
+- Should the version suffix be `.stableYYYYMMDD` or `-stable-YYYYMMDD`? Match ghcup's preferred patterns.
+
+### 8.2 `stable-haskell/ghc-wasm-meta/bootstrap.sh` sketch
+
+```sh
+#!/bin/sh
+# Stable Haskell wasm bootstrap — installs everything needed to build wasm
+# Haskell apps with stable-haskell/ghc + stable-haskell/cabal.
+set -e
+
+echo "==> Step 1/3: installing host-side wasm toolchain (wasi-sdk, node, wasmtime, binaryen)"
+echo "    delegating to upstream haskell-wasm/ghc-wasm-meta with SKIP_GHC=1"
+curl -sL https://gitlab.haskell.org/haskell-wasm/ghc-wasm-meta/-/raw/master/bootstrap.sh \
+  | SKIP_GHC=1 SKIP_CABAL=1 sh
+
+if [ -f "$HOME/.ghc-wasm/env" ]; then
+  echo "==> Step 2/3: source ~/.ghc-wasm/env to get wasi-sdk / node / wasmtime on PATH"
+  echo "    add this to your shell rc file:"
+  echo "      source $HOME/.ghc-wasm/env"
+fi
+
+echo "==> Step 3/3: register stable-haskell ghcup channel"
+ghcup config add-release-channel \
+  https://raw.githubusercontent.com/stable-haskell/ghc-wasm-meta/master/ghcup-stable-wasm-0.0.1.yaml
+
+echo
+echo "==> Done. Next steps:"
+echo "    source ~/.ghc-wasm/env"
+echo "    ghcup install ghc wasm32-wasi-9.14.0.stable.YYYYMMDD"
+echo "    ghcup install cabal stable-3.17.0.1"
+echo "    git clone https://github.com/stable-haskell/miso-wasm-template"
+echo "    cd miso-wasm-template && make && make serve"
+```
+
+### 8.3 Repo layout for `stable-haskell/ghc-wasm-meta`
+
+```
+stable-haskell/ghc-wasm-meta/
+├── README.md                            (Phase 7 doc)
+├── bootstrap.sh                          (8.2 above)
+├── ghcup-stable-wasm-0.0.1.yaml          (8.1 above)
+└── .github/workflows/
+    └── validate.yml                      (lint YAML, hash-check release assets)
+```
+
+Bindists themselves live in a SECOND repo:
+
+```
+stable-haskell/ghc-wasm-bindists/
+└── (releases tagged v9.14.0.stable.YYYYMMDD,
+     each with .tar.xz assets per host platform)
+```
+
+This separation mirrors upstream (`haskell-wasm/ghc-wasm-meta` +
+`haskell-wasm/ghc-wasm-bindists`) and keeps the small text-config repo
+auditable while binaries live in releases.
+
+## 9. Status log
 
 - **2026-05-26** — Initiative kicked off. Five research agents fanned out; findings
   aggregated above. Branch `feat/wasm-cross-ghcup` created. This plan committed.
