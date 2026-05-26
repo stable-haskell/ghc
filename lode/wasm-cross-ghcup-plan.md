@@ -160,10 +160,22 @@ Each phase has **one** clear pass/fail gate. Don't advance until the prior gate 
 - **Gate:** PR's wasm-cross jobs green on both runners; total runtime <90 min per host.
 
 ### Phase 3 — Ghcup-compatible wasm bindist
-- Add Makefile target producing `wasm32-wasi-ghc-9.14.0-<host>.tar.xz` with:
-  - Top-level `bin/`, `lib/`, `relocate.sh` (rewrites absolute paths in `lib/settings` from build-time to install-time prefix).
-  - JS shims in `lib/` (dyld, post-link, prelude, ghc-interp.js).
-- Smoke-test: untar to a random `$prefix`, run `relocate.sh $prefix`, then `$prefix/bin/wasm32-wasi-ghc --info` + compile hello-world.
+**Scope shrunk (2026-05-26)**: investigation of `Makefile:409-450` shows
+`DIST_COPY_LIB_CONF_CROSS` already rewrites absolute paths in `*.conf` files
+to `${pkgroot}/../lib/wasm32-wasi/…` and `ghc-pkg recache` is run for the
+cross-target package db at build time (line 1018). The settings file uses
+**bare** tool names (`wasm32-wasi-clang`/`wasm-ld`/etc.) so no path baking
+there either. Therefore bindists are *already* relocatable; `relocate.sh`
+shrinks to a one-liner that re-runs `ghc-pkg recache` for the new install
+location (the cache is binary and not portable).
+
+- Repackage `_build/dist/ghc-wasm32-wasi.tar.gz` (Makefile:1029) into
+  `wasm32-wasi-ghc-9.14.0-<host>.tar.xz`:
+  - Keep existing layout: `bin/wasm32-wasi-ghc{,-pkg,-iserv,…}`, `lib/targets/wasm32-wasi/…`.
+  - Append: `relocate.sh` (10 lines) at top-level.
+  - Verify JS shims (`dyld.mjs`, `post-link.mjs`, `prelude.mjs`, `ghc-interp.js`) are present in `lib/targets/wasm32-wasi/lib/`.
+  - Switch compression to `.tar.xz` (smaller than `.tar.gz`; ghcup accepts both).
+- Smoke-test: untar to a random `$prefix`, run `$prefix/relocate.sh`, then `$prefix/bin/wasm32-wasi-ghc --info` + compile hello-world.
 - **Gate:** tarball untars + relocates + compiles hello-world on a fresh machine without errors.
 
 ### Phase 4 — Ghcup channel published
