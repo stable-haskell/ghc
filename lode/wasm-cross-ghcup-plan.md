@@ -109,6 +109,21 @@ wasi-sdk/node/wasmtime pieces.
 - **R6: Custom channel + upstream `cross` channel collision.** If a user has
   both channels enabled, the last-added wins for any colliding version key.
   D7 mitigates this.
+- **R8: stable-haskell/cabal HEAD doesn't bootstrap with stock GHC 9.8.4.**
+  Discovered 2026-05-26 during Phase 1 stage2 build attempt. `make stable-cabal`
+  fails: `cabal-install/src/Distribution/Client/ProjectPlanning.hs:224` imports
+  `Distribution.Simple.GHCJS` which is hidden in `Cabal-3.10.3.0` (the bundled
+  Cabal library in bootstrap GHC 9.8.4). Either: (a) the GHCJS removal in the
+  compile-less branch is incomplete (still references the removed module), or
+  (b) the cabal-install build-depends accidentally allows linking against
+  the bundled Cabal instead of the source-repository-package version.
+  **Blocks Phase 5** (cabal binary shipping). Workaround for Phase 1: set
+  `USE_SYSTEM_CABAL=1` to skip the stable-cabal target — uses the existing
+  `_build/stage0/bin/cabal` (cabal-install 3.17.0.0, one snapshot older from
+  pre-rebase tag). This is acceptable for Phase 1/2 (we're building GHC, not
+  shipping cabal); for Phase 5 we must either fix the import or pin Cabal
+  source-repo properly. File the fix upstream against
+  `stable-haskell/cabal#stable-haskell/master`.
 - **R7: TH/GHCi on wasm needs `shared: True` for target libs, but stock
   cabal `package *` clauses pollute BUILD packages too.** Discovered 2026-05-26
   inspecting `cabal.project.stage3` lines 175-186 — the `if os(wasi) / package *
@@ -367,4 +382,10 @@ auditable while binaries live in releases.
   `wasm32-unknown-wasi` → `wasm32-wasi` across Makefile, flake.nix, nix-ci.yml,
   USAGE.md, build-wasm-{make,on-linux0}.sh (8 files, ~30 occurrences).
   Mechanical sed; no word-boundary risk (no `wasm32-unknown-wasi-foo` strings
-  that should be preserved).
+  that should be preserved). D2 applied in commit `03bd8b8c0d6`.
+  Initial bad commit with embedded git repos caught and fixed via `git reset
+  --mixed HEAD~1`; recommitted with explicit file paths.
+- **2026-05-26** — Phase 1 stage2 build FAILED after ~3 min: `make stable-cabal`
+  (rebuild cabal-install-3.17.0.1 from stable-haskell/master) fails — see R8.
+  Retrying with `USE_SYSTEM_CABAL=1` to skip the rebuild and use the existing
+  pre-rebase `_build/stage0/bin/cabal` (3.17.0.0).
