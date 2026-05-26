@@ -109,6 +109,21 @@ wasi-sdk/node/wasmtime pieces.
 - **R6: Custom channel + upstream `cross` channel collision.** If a user has
   both channels enabled, the last-added wins for any colliding version key.
   D7 mitigates this.
+- **R7: TH/GHCi on wasm needs `shared: True` for target libs, but stock
+  cabal `package *` clauses pollute BUILD packages too.** Discovered 2026-05-26
+  inspecting `cabal.project.stage3` lines 175-186 — the `if os(wasi) / package *
+  / shared: True` block is **commented out** because it caused `-dynamic-too`
+  on `happy-lib`/etc. compiled by the native build compiler, which fails when
+  the dist artifact lacks `.dyn_hi` files. Consequences:
+  (a) Phase 1 TH smoke-test gate currently CANNOT pass — the stage3 base
+  libraries are built `shared: False`, so dyld.mjs at runtime has nothing to load.
+  (b) Phase 6 miso e2e similarly blocked (miso uses TH heavily).
+  Resolutions in priority order: **(i)** spell out per-package `shared: True`
+  for the wasm target libraries individually (avoiding `package *`); **(ii)** wait
+  for stable-haskell/cabal to gain Host-only `package *` clauses (extension of
+  the Stage/Toolchain work — not in `stable-haskell/master` HEAD as of
+  2026-05-26); **(iii)** ship without TH for v0.0.1, document, fix in v0.0.2.
+  Decision pending Phase 1 attempt; (i) is the safest path forward.
 
 ## 6. Phases & gates
 
@@ -126,15 +141,17 @@ Each phase has **one** clear pass/fail gate. Don't advance until the prior gate 
 - Cherry-pick 6 commits from `build/wasm-nix-environment` (flake.nix + wasi-sdk).
 - Cherry-pick 6 commits from `feat/nix-ci-split` (Makefile cross refactor + CI split + RTS R_*_NONE fix + build-infra fixes).
 - Resolve conflicts. Skip `feat/wasm-fixes` (already merged by patch-id).
-- **Gate:** `nix develop .#wasm-cross` drops you into a shell with `wasm32-wasi-clang`, `wasm-ld`, `wasm-opt` on `PATH`; `make` is callable.
+- Note: flake exposes single `devShells.default` (no `wasm-cross` attr). The shell creates wrappers in `.nix-wasm-bin/` for `wasm32-wasi-{clang,clang++,ar,ranlib}`, `wasm-ld`, `llc`/`opt`/`llvm-as` (LLVM 21). `wasm-opt` (binaryen) is NOT provided — not strictly needed for compiler bring-up.
+- **Gate:** `nix develop --command bash -c 'which wasm32-wasi-clang wasm-ld llc && llc --version | head -2'` succeeds and prints LLVM 21.
 
 ### Phase 1 — Local wasm cross build green
 - Apply D2 (rename triple `wasm32-unknown-wasi` → `wasm32-wasi`); regenerate Makefile var refs.
-- In wasm-cross devShell: `make CABAL=$PWD/_build/stage0/bin/cabal stage3-wasm32-wasi`.
+- In devShell: `make CABAL=$PWD/_build/stage0/bin/cabal stage3-wasm32-wasi`.
 - Smoke-test `_build/dist/bin/wasm32-wasi-ghc`:
   - Compile a one-file `hello :: IO ()`; run produced `.wasm` via `wasmtime` AND node + `browser_wasi_shim`.
-  - Compile a tiny TH-using package (`$(lift "hello")`) — exercises iserv-over-node.
-- **Gate:** both runtimes print "hello"; TH-using package builds without "external interpreter not supported".
+- Attempt R7 resolution (i): add per-package `shared: True` for the wasm target libs (base, ghc-internal, ghc-bignum, integer-gmp, etc. — *not* `package *`). Rebuild stage3 — verify happy-lib/alex still build cleanly.
+- If (i) works: compile a tiny TH-using package, run via Node iserv.
+- **Gate:** non-TH hello-world runs in both `wasmtime` AND node+browser_wasi_shim. **TH gate moved to "stretch"**: if R7(i) succeeds → TH-using package runs; else log R7 as known limitation for v0.0.1 and defer to Phase 5/6.
 
 ### Phase 2 — CI wasm cross build green (both host platforms)
 - Add `wasm-cross-{x86_64-linux, aarch64-darwin}` jobs to `.github/workflows/nix-ci.yml`.
@@ -200,4 +217,24 @@ Each phase has **one** clear pass/fail gate. Don't advance until the prior gate 
 
 - **2026-05-26** — Initiative kicked off. Five research agents fanned out; findings
   aggregated above. Branch `feat/wasm-cross-ghcup` created. This plan committed.
-  Phase 0a in progress.
+- **2026-05-26** — Phase 0a complete. Phase 0 cherry-picks landed cleanly:
+  6 commits from `build/wasm-nix-environment` (flake.nix uses ghc-wasm-meta for
+  wasi-sdk; wrappers in `.nix-wasm-bin/`) + 6 commits from `feat/nix-ci-split`
+  (Makefile cross-refactor + CI nix-ci.yml split + RTS R_*_NONE fix + 3 build
+  infra fixes). Single cabal.project.stage3 auto-merge, no manual conflicts.
+  Branch now 13 commits ahead of `stable-ghc-9.14`. Verifying Phase 0 gate next.
+- **2026-05-26** — Phase 0 gate PASSES. `nix develop` reports: bootstrap GHC
+  9.8.4, cabal-install 3.16.0.0, LLVM 21.1.8-wasi-sdk, clang 21.1.8-wasi-sdk.
+  All wasm wrappers on PATH (`.nix-wasm-bin/wasm32-wasi-{clang,clang++,ar,
+  ranlib}`, `wasm-ld`, `llc`, `opt`, `llvm-as`). `WASI_SDK_DIR` +
+  `WASM_EXTRA_{LIB,INCLUDE}_DIRS` exported. Incidental finding: devshell ships
+  cabal 3.16 — this is R1 materializing (upstream ghc-wasm-meta README warns
+  3.16 has a wasm regression). Doesn't affect Phase 0/1 (we're building GHC,
+  not user apps with TH), but flag for Phase 5 cabal-binary work and Phase 6
+  miso e2e. Cherry-picked artifact: cabal-install was Nix-built from source
+  (~15 min first run); subsequent shells will be cached.
+- **2026-05-26** — Phase 1 starting: apply D2 rename
+  `wasm32-unknown-wasi` → `wasm32-wasi` across Makefile, flake.nix, nix-ci.yml,
+  USAGE.md, build-wasm-{make,on-linux0}.sh (8 files, ~30 occurrences).
+  Mechanical sed; no word-boundary risk (no `wasm32-unknown-wasi-foo` strings
+  that should be preserved).
