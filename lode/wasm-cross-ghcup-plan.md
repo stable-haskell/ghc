@@ -1,0 +1,203 @@
+# Stable-Haskell WASM Cross-Compiler via ghcup — Plan
+
+> **Status:** Active. Branch: `feat/wasm-cross-ghcup` off `stable-ghc-9.14`.
+> **Owner:** angerman.
+> **Last updated:** 2026-05-26.
+
+This is the living source-of-truth for the initiative. Update the **Status Log** at
+the bottom as phases progress. Keep this doc tight — point at code/PRs rather than
+duplicating their content.
+
+---
+
+## 1. Purpose
+
+End-state: a Haskell developer can run
+
+```bash
+ghcup config add-release-channel <stable-haskell channel URL>
+ghcup install ghc wasm32-wasi-9.14.0.stable -- $CONFIGURE_ARGS
+ghcup install cabal stable-3.17.0.1
+git clone https://github.com/stable-haskell/miso-wasm-template && cd $_
+make && make serve   # opens a working miso app in the browser
+```
+
+…using **our** stack: stable-haskell GHC (245+ patches over upstream 9.14),
+stable-haskell/cabal with dual-compiler ("compile-less") support, and a thin
+ghcup channel that reuses upstream `ghc-wasm-meta` for the host-side
+wasi-sdk/node/wasmtime pieces.
+
+## 2. Why us, not upstream `ghc-wasm-meta`
+
+| Capability | Upstream `ghc-wasm-meta` | This initiative |
+|---|---|---|
+| GHC bindist | upstream (master / RCs) | **stable-haskell/ghc** (245-patch fork, stable-9.14 line) |
+| Cabal | stock 3.14.x with `wasm32-wasi-cabal` wrapper + injected config | **stable-haskell/cabal** 3.17.0.1 with real dual-compiler (`with-compiler` / `with-build-compiler`) + compile-less store + file-monitor recompilation avoidance |
+| wasi-sdk / node / wasmtime / binaryen | bundled via `bootstrap.sh` | **reuse upstream's `bootstrap.sh`** with `SKIP_GHC=1` (no fork) |
+| ghcup channel | `haskell-wasm/ghc-wasm-meta` channel | new `stable-haskell/ghc-wasm-meta` channel, distinct version suffix |
+| Custom-Setup packages with cross | not handled (single cabal, single compiler) | works (Setup.hs compiled by build-compiler, target code by host-compiler) |
+
+## 3. Current State Assessment (verified 2026-05-26)
+
+### What's already on `stable-ghc-9.14`
+
+- 245+ WASM patches: RTS WASI guards, JSFFI init ctors, NCG `.functype`/`.size`,
+  on-demand `GlobalRegs`, libffi-clib exclusion for WASI, dyld handling, browser_wasi_shim
+  bump, etc.
+- `cabal.project.stage3` with `if os(wasi) / package * / shared: True` (the
+  build-package pollution bug is **fixed**: the override is correctly nested under `os(wasi)`).
+- Makefile `STAGE3_PLATFORMS := … wasm32-unknown-wasi` with full toolchain wiring
+  (CC/CXX/AR/RANLIB + GHC_TOOLCHAIN_ARGS for `--merge-objs wasm-ld`,
+  `--disable-tables-next-to-code`, `--disable-libffi-adjustors`).
+- Stage3 target → `_build/dist/ghc-wasm32-unknown-wasi.tar.gz` plus
+  JS runtime shims (`dyld.mjs`, `ghc-interp.js`, `post-link.mjs`, `prelude.mjs`).
+- `feat/wasm-fixes` adds **zero** genuinely new content (its commits are already
+  in `stable-ghc-9.14` by patch-id). Ignore that branch.
+
+### What's NOT on `stable-ghc-9.14` (Phase 0 absorbs these)
+
+- **`build/wasm-nix-environment`** (6 commits): `flake.nix` pulling `wasi-sdk`
+  from upstream `ghc-wasm-meta` flake, env vars `WASM_EXTRA_{LIB,INCLUDE}_DIRS`,
+  USAGE docs.
+- **`feat/nix-ci-split`** (6 commits): `Makefile` cross-build refactor (dist-based
+  configuration), `.github/workflows/nix-ci.yml` split into build/test/cross jobs,
+  RTS fix for undefined symbols referenced only by `R_*_NONE` relocations, plus
+  build-infra fixes (stamp-based deps, PHONY ordering, race condition).
+
+### What doesn't exist anywhere yet
+
+- ghcup-installable bindist shape (current tarball has no `./configure && make install`).
+- Published `stable-haskell/ghc-wasm-meta` ghcup channel.
+- stable-haskell/cabal binary releases for ghcup.
+- Miso template proving the dual-compiler workflow.
+- Browser launcher template (neither miso-sampler nor upstream `ghc-wasm-meta`
+  commits one — biggest documentation gap in the ecosystem).
+
+## 4. Decisions made
+
+| # | Decision | Rationale |
+|---|---|---|
+| D1 | Working branch: `feat/wasm-cross-ghcup` off `stable-ghc-9.14`. | Don't pollute `stable-ghc-9.14` until Phase 2 is CI-green. |
+| D2 | Rename triple `wasm32-unknown-wasi` → `wasm32-wasi`. | Match ecosystem convention (`wasm32-wasi-ghc-…`, ghcup-cross YAML, miso-sampler). Mechanical Makefile change; `ghc-toolchain` accepts both. |
+| D3 | Phase-3 bindist shape: **relocatable tarball + `relocate.sh`**, ghcup `viPostInstall` invokes it. | Ships fast; can migrate to full configure-bindist (`./configure --prefix && make install`) later if user feedback demands. |
+| D4 | Reuse upstream `ghc-wasm-meta` `bootstrap.sh` with `SKIP_GHC=1` for wasi-sdk/node/wasmtime/binaryen. | These pieces aren't our value-add. Tracking upstream wasi-sdk updates is a tax we don't want. |
+| D5 | Do not ship a native stable-haskell GHC bindist for build-compiler use. | Any user-installed GHC (ghcup 9.10.x / 9.12.x) suffices. Revisit if "full stable stack" becomes a goal. |
+| D6 | Channel hosting: GitHub raw — `raw.githubusercontent.com/stable-haskell/ghc-wasm-meta/master/ghcup-stable-wasm.yaml`. Bindists as release assets in `stable-haskell/ghc-wasm-bindists`. | Simple, no GH Pages needed, standard pattern. |
+| D7 | Version suffix on ghcup entries: `9.14.0.stable.YYYYMMDD`. | Avoid collision with upstream `wasm32-wasi-9.14`; allow multiple stable releases. |
+
+## 5. Open decisions / risks
+
+- **R1: stable-haskell/cabal 3.17 vs the wasm-known cabal 3.16 regression.**
+  Upstream `ghc-wasm-meta` README pins cabal 3.14.x. Our 3.17 tracks unreleased
+  master + Andrea's patches. Must be verified by running the miso e2e (Phase 6)
+  before claiming it works.
+- **R2: aarch64-darwin CI 41GB APFS budget.** Stage3 adds ~3-5GB; may need
+  `make clean-stage{0,1,2}` between stage2 and stage3 to free space. Determine
+  empirically in Phase 2.
+- **R3: ghc-toolchain triple acceptance.** D2 assumes `wasm32-wasi` works; verify
+  in Phase 1 by running `ghc-toolchain --triple wasm32-wasi …` and inspecting
+  the generated `settings` file.
+- **R4: `build-type: Custom` package compatibility.** Andrea's dual-compiler
+  patches are explicitly tested only against GHC's own stage1/stage2. Real-world
+  miso transitive deps with `Custom`/`Configure` build-types may surface bugs.
+  Phase 5 gate covers one Custom-build-type package as a smoke test; expect
+  follow-up bug reports.
+- **R5: Path-baking in `settings`.** wasi-sdk path is hardcoded into the GHC
+  `settings` file after install. If a user moves/upgrades `~/.ghc-wasm/wasi-sdk`,
+  installed GHC breaks. `relocate.sh` (D3) must rewrite these paths; `viPostInstall`
+  must invoke it.
+- **R6: Custom channel + upstream `cross` channel collision.** If a user has
+  both channels enabled, the last-added wins for any colliding version key.
+  D7 mitigates this.
+
+## 6. Phases & gates
+
+Each phase has **one** clear pass/fail gate. Don't advance until the prior gate is met.
+
+### Phase 0a — Branch + planning docs (IN PROGRESS)
+- Create `feat/wasm-cross-ghcup` off `stable-ghc-9.14`.
+- Write `lode/wasm-cross-ghcup-plan.md` (this file).
+- Update project `CLAUDE.md` with a "Current Initiative" section linking here.
+- Commit.
+- **Gate:** branch checked out; one commit on top of `stable-ghc-9.14`; planning
+  docs reviewable by anyone fresh.
+
+### Phase 0 — Consolidate WASM feature branches
+- Cherry-pick 6 commits from `build/wasm-nix-environment` (flake.nix + wasi-sdk).
+- Cherry-pick 6 commits from `feat/nix-ci-split` (Makefile cross refactor + CI split + RTS R_*_NONE fix + build-infra fixes).
+- Resolve conflicts. Skip `feat/wasm-fixes` (already merged by patch-id).
+- **Gate:** `nix develop .#wasm-cross` drops you into a shell with `wasm32-wasi-clang`, `wasm-ld`, `wasm-opt` on `PATH`; `make` is callable.
+
+### Phase 1 — Local wasm cross build green
+- Apply D2 (rename triple `wasm32-unknown-wasi` → `wasm32-wasi`); regenerate Makefile var refs.
+- In wasm-cross devShell: `make CABAL=$PWD/_build/stage0/bin/cabal stage3-wasm32-wasi`.
+- Smoke-test `_build/dist/bin/wasm32-wasi-ghc`:
+  - Compile a one-file `hello :: IO ()`; run produced `.wasm` via `wasmtime` AND node + `browser_wasi_shim`.
+  - Compile a tiny TH-using package (`$(lift "hello")`) — exercises iserv-over-node.
+- **Gate:** both runtimes print "hello"; TH-using package builds without "external interpreter not supported".
+
+### Phase 2 — CI wasm cross build green (both host platforms)
+- Add `wasm-cross-{x86_64-linux, aarch64-darwin}` jobs to `.github/workflows/nix-ci.yml`.
+- Cache wasi-sdk via nix-store. Mind aarch64-darwin 41GB APFS (R2).
+- Each job: nix-develop wasm-cross → stage0/1/2 → stage3-wasm32-wasi → Phase-1 smoke test.
+- **Gate:** PR's wasm-cross jobs green on both runners; total runtime <90 min per host.
+
+### Phase 3 — Ghcup-compatible wasm bindist
+- Add Makefile target producing `wasm32-wasi-ghc-9.14.0-<host>.tar.xz` with:
+  - Top-level `bin/`, `lib/`, `relocate.sh` (rewrites absolute paths in `lib/settings` from build-time to install-time prefix).
+  - JS shims in `lib/` (dyld, post-link, prelude, ghc-interp.js).
+- Smoke-test: untar to a random `$prefix`, run `relocate.sh $prefix`, then `$prefix/bin/wasm32-wasi-ghc --info` + compile hello-world.
+- **Gate:** tarball untars + relocates + compiles hello-world on a fresh machine without errors.
+
+### Phase 4 — Ghcup channel published
+- Create `stable-haskell/ghc-wasm-meta` repo (or repurpose).
+- Add `bootstrap.sh` delegating to upstream `ghc-wasm-meta` `bootstrap.sh` with `SKIP_GHC=1`; writes `~/.ghc-wasm/env` exporting `$CONFIGURE_ARGS`.
+- Author `ghcup-stable-wasm-0.0.1.yaml`: one `GHC: wasm32-wasi-9.14.0.stable.YYYYMMDD` entry per `(arch, OS)` (start with `A_64/Linux_UnknownLinux` and `A_ARM64/Darwin`).
+- Bindists hosted as release assets at `stable-haskell/ghc-wasm-bindists`.
+- `viPostInstall` invokes `relocate.sh`.
+- **Gate:** on a clean machine: `ghcup config add-release-channel <url> && ghcup install ghc wasm32-wasi-9.14.0.stable -- $CONFIGURE_ARGS` succeeds; `wasm32-wasi-ghc --version` works.
+
+### Phase 5 — Ship stable-haskell/cabal binary
+- CI job builds static cabal-install 3.17.0.1 from `stable-haskell/cabal#stable-haskell/master` for x86_64-linux and aarch64-darwin.
+- Add Cabal entry to ghcup YAML (or sibling channel).
+- Verify dual-compiler `cabal.project` form: one `cabal build` uses native ghc for Setup.hs + wasm32-wasi-ghc for target.
+- **Gate:** a package with `build-type: Custom` builds successfully via dual-compiler (exercises Andrea's patches, not just `Simple`).
+
+### Phase 6 — Miso end-to-end demo
+- Create `stable-haskell/miso-wasm-template` repo:
+  - `app/Main.hs` minimal miso app.
+  - `myapp.cabal` with `if arch(wasm32) / ghc-options: -no-hs-main -optl-mexec-model=reactor "-optl-Wl,--export=hs_start"`.
+  - `cabal.project` with dual-compiler + `if arch(wasm32) shared: True`.
+  - `Makefile`: `cabal build` → `post-link.mjs` → `cp` to `public/` → `npx http-server public`.
+  - `public/index.html` + `public/index.js` browser launcher using `browser_wasi_shim` — **commit it**; close the ecosystem-wide documentation gap.
+- Validate on a fresh machine using only our ghcup channel.
+- **Gate:** developer goes `git clone` → `make && make serve` → working browser demo in <5 min (post-install).
+
+### Phase 7 — Documentation & migration
+- README on `stable-haskell/ghc-wasm-meta` repo: what we offer vs upstream
+  `ghc-wasm-meta`, exact install/use commands, dual-compiler `cabal.project`
+  template, known limitations (no `cabal install miso` Hackage path, no
+  subprocess-using libs in browser, etc.).
+- Migration notes for upstream `ghc-wasm-meta` users.
+- Link from main `stable-haskell/ghc` README.
+- **Gate:** dev unfamiliar with this work reaches working browser demo from
+  README alone, no questions asked.
+
+## 7. References
+
+- Project root `CLAUDE.md` — multi-stage build system overview.
+- `cabal.project.stage3`, `Makefile` (STAGE3_* vars) — current cross wiring.
+- `stable-haskell/cabal#stable-haskell/master` (commit `44817477ff6d`) — dual-compiler Cabal.
+- `haskell-wasm/ghc-wasm-meta` — upstream wasi-sdk/node/wasmtime installer (to reuse).
+- `haskell-wasm/ghc-wasm-bindists` — upstream's bindist hosting pattern.
+- `haskell/ghcup-metadata`, `ghcup-cross-0.1.0.yaml` — channel schema reference.
+- `tweag/ghc-wasm-miso-examples` — working miso wasm example (config to mirror).
+- `haskell-miso/miso-sampler` — official miso starter (Nix flow).
+- GHC user's guide §15 — WASM backend (reactor module shape, post-link).
+- Tweag blog 2024-11-21 — TH/ghci over wasm via Node iserv.
+
+## 8. Status log
+
+- **2026-05-26** — Initiative kicked off. Five research agents fanned out; findings
+  aggregated above. Branch `feat/wasm-cross-ghcup` created. This plan committed.
+  Phase 0a in progress.
