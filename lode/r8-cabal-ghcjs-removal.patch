@@ -1,0 +1,46 @@
+From d6fac5f900c2242d4e788910d474803fc722647b Mon Sep 17 00:00:00 2001
+From: "Moritz Angermann (local patch)" <moritz.angermann@iohk.io>
+Date: Tue, 26 May 2026 11:21:53 +0900
+Subject: [PATCH] Remove dead GHCJS references in ProjectPlanning.hs
+
+CompilerFlavor no longer has a GHCJS constructor and
+Distribution.Simple.GHCJS module no longer exists in
+stable-haskell/cabal. These imports + pattern were left
+behind from incomplete GHCJS removal. Removing them lets
+cabal-install bootstrap with GHC 9.8.4.
+
+Local fix for stable-haskell/ghc#wasm-cross-ghcup. Should
+be upstreamed to stable-haskell/cabal#stable-haskell/master.
+---
+ cabal-install/src/Distribution/Client/ProjectPlanning.hs | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/cabal-install/src/Distribution/Client/ProjectPlanning.hs b/cabal-install/src/Distribution/Client/ProjectPlanning.hs
+index bb7f867..b95ea6f 100644
+--- a/cabal-install/src/Distribution/Client/ProjectPlanning.hs
++++ b/cabal-install/src/Distribution/Client/ProjectPlanning.hs
+@@ -221,7 +221,10 @@ import qualified Distribution.PackageDescription as PD
+ import qualified Distribution.PackageDescription.Configuration as PD
+ import qualified Distribution.Simple.Configure as Cabal
+ import qualified Distribution.Simple.GHC as GHC
+-import qualified Distribution.Simple.GHCJS as GHCJS
++-- GHCJS support was removed from stable-haskell/cabal (CompilerFlavor no longer
++-- has a GHCJS constructor, Distribution.Simple.GHCJS module no longer exists).
++-- This dead import was left behind. -- patched locally for wasm-cross-ghcup.
++-- import qualified Distribution.Simple.GHCJS as GHCJS
+ import qualified Distribution.Simple.InstallDirs as InstallDirs
+ import qualified Distribution.Simple.LocalBuildInfo as Cabal
+ import qualified Distribution.Simple.Setup as Cabal
+@@ -2432,7 +2435,8 @@ elaborateInstallPlan
+           compilerShouldUseSharedLibByDefault =
+             case compilerFlavor compiler of
+               GHC -> GHC.compilerBuildWay compiler == DynWay && canBuildSharedLibs
+-              GHCJS -> GHCJS.isDynamic compiler
++              -- GHCJS support removed -- patched locally for wasm-cross-ghcup.
++              -- GHCJS -> GHCJS.isDynamic compiler
+               _ -> False
+ 
+           canBuildWayLibs predicate = case predicate compiler of
+-- 
+2.47.2
+
