@@ -48,6 +48,27 @@ When ready to ship Phase 6: move these to a new repo
    `lib/targets/wasm32-wasi/lib/` (if shipped) or the version GHC's
    `post-link.mjs` documents.
 
+### Empirical finding (2026-05-26): miso requires stage3 rebuilt with shared:True
+
+Direct attempt to build `miso 1.11.0` against the dual-compiler stable-haskell stack
+hit `character-ps-0.1` → `Failed to load dynamic interface file for Data.Word:
+base-4.22.0.0/Data/Word.dyn_hi: does not exist`. Root cause: our stage3 wasm
+target libraries (base, ghc-internal, etc.) were built with `shared: False` per
+`cabal.project.stage3` (lines 184-186 — the old `if os(wasi) package * shared:
+True` block is commented out due to the build-package pollution bug). miso (and
+most TH-using packages) require `shared: True`, which transitively requires
+base.dyn_hi.
+
+**R7 resolution path (i)** — replace the commented-out form with
+`if arch(wasm32) shared: True` (no `package *`). With stable-haskell/cabal's
+Stage/Toolchain split, this applies ONLY to host-arch packages, not BUILD-arch
+packages → no `happy-lib`/`alex` pollution. To validate, rebuild stage3 and
+re-package the bindist. Order of hours; not done in this session.
+
+**Phase 6 deliverable for v0.0.1** (this session): a trivial reactor template
+(no miso) proving the full toolchain works end-to-end. Miso integration is
+queued as Phase 6.5, contingent on the stage3 shared rebuild.
+
 ### Conceptual insight worth promoting
 
 The agent's `cabal.project` uses:
@@ -76,15 +97,16 @@ the bootstrap (which is what we use), we may be able to re-enable
 
 ### Items to verify against real stage3 output
 
-Per the agent's verification checklist (good list, reproducing the key ones):
+Per the agent's verification checklist (with empirical results from 2026-05-26):
 
-1. `post-link.mjs --input/--output` accepted (vs `-i/-o`)
-2. `hs_start` actually appears in `wasm-objdump -x myapp.wasm` exports
-3. `wasi.initialize(instance)` not `wasi.start(instance)` (reactor vs WASI command)
-4. Knot-tying `Object.assign(instance_exports, instance.exports)` works
-5. `JSaddle.Wasm.run` (or correct name) exists in `jsaddle-wasm` package
-6. `aeson` `-ordered-keymap` flag still exists / still helpful in current aeson
-7. `with-build-compiler` is honored from `cabal.project` (not just CLI)
+1. ✅ `post-link.mjs --input/--output` accepted — confirmed locally; produces a 4915-byte ESM JSFFI glue file.
+2. ✅ `hs_start` is exported — `wasm-objdump -x myapp.wasm` shows it alongside `_initialize`, `__ghc_wasm_jsffi_init`, `memory`, and the `rts_*` runtime helpers.
+3. ✅ `wasi.initialize(instance)` for reactors — confirmed. But ALSO must call `instance.exports.__ghc_wasm_jsffi_init()` BEFORE `hs_start()`. Without that step, `hs_start()` throws `"newBoundTask: RTS is not initialised; call hs_init() first"`. The drafted `index.js` has been updated to include this step.
+4. ✅ Knot-tying via `Object.assign(__exports, instance.exports)` after `WebAssembly.instantiate` and before `wasi.initialize` works.
+5. ⏳ `JSaddle.Wasm.run` correctness — to verify when adding miso; trivial reactor (no miso) is the current empirical test point.
+6. ⏳ `aeson` `-ordered-keymap` flag — to verify with miso layered in.
+7. ✅ `with-build-compiler` is honored from `cabal.project` — confirmed with stable-haskell/cabal at SHA `44817477`. Build profile reports `-w ghc-9.14 -W ghc-9.8.4`. Cabal source: `cabal-install/src/Distribution/Client/ProjectConfig/FieldGrammar.hs:123`.
+8. ✅ Reactor exports include `__ghc_wasm_jsffi_init` — confirmed via `wasm-objdump`; this is the RTS-init function that the launcher MUST call after `wasi.initialize()`.
 
 ### File inventory
 

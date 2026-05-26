@@ -1,0 +1,16 @@
+packages: .
+
+-- Dual-compiler form, supported by stable-haskell/cabal (Stage/Toolchain
+-- architecture, SHA 44817477). One cabal invocation drives both GHCs:
+--   BUILD side (host machine arch): compiles Setup.hs, build-tools, TH host
+--   HOST side (target arch wasm32):  compiles the package's library/exe code
+--
+-- When shipped on ghcup, replace these absolute paths with bare names:
+--   with-build-compiler: ghc          (any ghcup-installed native GHC)
+--   with-build-hc-pkg:   ghc-pkg
+--   with-compiler:       wasm32-unknown-wasi-ghc
+--   with-hc-pkg:         wasm32-unknown-wasi-ghc-pkg
+with-build-compiler: /nix/store/8s4nvbqdqmd1jbmrj8di07hp0nn1lwi5-ghc-9.8.4/bin/ghc-9.8.4
+with-build-hc-pkg:   /nix/store/8s4nvbqdqmd1jbmrj8di07hp0nn1lwi5-ghc-9.8.4/bin/ghc-pkg-9.8.4
+with-compiler:       /Users/angerman/Projects/stable-haskell/ghc/_build/dist/bin/wasm32-unknown-wasi-ghc
+with-hc-pkg:         /Users/angerman/Projects/stable-haskell/ghc/_build/dist/bin/wasm32-unknown-wasi-ghc-pkg

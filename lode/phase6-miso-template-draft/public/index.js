@@ -39,8 +39,12 @@ const { instance } = await WebAssembly.instantiateStreaming(
 // Tie the knot: now jsffi callbacks can reach back into the wasm module.
 Object.assign(instance_exports, instance.exports);
 
-// Reactor modules use `initialize` (which runs ctors + hs_init) - NOT
-// `start`, which would expect a `_start` export. Then we call the
-// user-level entry point we asked the linker to export.
+// Reactor module bring-up sequence — order matters:
+//  1. wasi.initialize() runs WASI static constructors (_initialize export).
+//  2. __ghc_wasm_jsffi_init() initializes GHC's JSFFI runtime + the RTS.
+//     Without this, hs_start() throws "RTS is not initialised; call hs_init()".
+//     Empirically verified 2026-05-26.
+//  3. hs_start() runs the Haskell entry point (whatever you `foreign export`ed).
 wasi.initialize(instance);
+instance.exports.__ghc_wasm_jsffi_init();
 await instance.exports.hs_start();
