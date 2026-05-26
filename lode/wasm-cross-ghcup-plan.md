@@ -445,6 +445,53 @@ auditable while binaries live in releases.
   in /tmp/cabal-fix with bootstrap GHC 9.8.4 + bootstrap cabal — SUCCESS.
   Binary copied to `_build/stage0-patched/bin/cabal` (version banner confirms
   patch SHAs: cabal-install 3.17.0.1 commit `3386061`, Cabal lib commit
-  `d6fac5f`). Retrying stage2 build with `CABAL=_build/stage0-patched/bin/cabal
-  USE_SYSTEM_CABAL=1` — this cabal SHOULD produce the new store layout the
-  Makefile expects. If it works, R10 is resolved as a side-effect.
+  `d6fac5f`).
+- **2026-05-26** — Cascade through R11/R12: with patched cabal + relaxed
+  constraints + jobs:1, stage1 built but stage2 failed on
+  `build:any.ghc-internal installed`. Tried devx ghc910 bootstrap (has
+  ghc-internal-9.1003.0 installed) — different failure (mystery base-4.18.3.0
+  reference in unbuildable ghc-bignum lib). Escalated to user.
+- **2026-05-26** — User suggested looking at GitHub CI for working recipe.
+  **HUGE finding**: CI's last success was 2026-04-23 at SHA `d8f0caefe58`.
+  ALL builds since 2026-05-17 (after chore commit `e148c1c059` "use
+  stable-haskell/master") have failed — same R8 we hit. The project's
+  baseline has been broken for 10 days.
+- **2026-05-26** — Cross-referenced cabal source at SHA `44817477` (the CI
+  April-23 working pin): **no `Distribution.Simple.GHCJS` module, no dead
+  GHCJS import, no `binDirectoryFor` stale call**. The R8/R8.5 bugs were
+  introduced LATER on stable-haskell/master, not present at 44817477.
+- **2026-05-26** — CI uses upstream `cabal-3.14.2.0` from ghcup as bootstrap,
+  NOT a stable-haskell cabal-install. Downloaded 3.14.2.0 — but it fails
+  with `fatal: Could not parse object 44817477ff6d…` because the SHA is
+  orphaned (`wip/angerman/compile-less` branch was deleted/renamed to
+  `stable-haskell/master`, leaving the SHA reachable only via direct fetch).
+  CI works because it has a CACHED cabal binary that pre-dates the cache-key-
+  invalidating chore commit.
+- **2026-05-26** — **WORKING RECIPE FOUND**: substitute the patched cabal
+  (which CAN fetch orphaned SHAs) for upstream 3.14.2.0 as `CABAL0`. The
+  patched cabal builds stable-cabal from clean SHA `44817477` source, which
+  produces a fresh cabal-install with no R8/R8.5/R9/R10/R11 issues.
+  Command: `devx#ghc98-minimal-ghc shell` + `CABAL0=patched-cabal` +
+  `cabal update` + `make clean clean-cabal distclean` + `make _build/dist/ghc.tar.gz`.
+  Result: `_build/dist/ghc.tar.gz` (258MB) built in ~45 min.
+  GHC 9.14 (Stable Haskell Edition) compiles+runs hello world. Stage1+2 GREEN.
+- **2026-05-26** — **PHASE 1 STAGE3 GREEN**: switched to local flake (wasi-sdk),
+  ran `make CABAL=_build/cabal/bin/cabal USE_SYSTEM_CABAL=1 stage3-wasm32-wasi`.
+  Failed on final library-copy step due to **D2 triple mismatch**: ghc-toolchain
+  normalizes `wasm32-wasi` back to `wasm32-unknown-wasi` (canonical autoconf
+  form), so cabal stored libs at `host/wasm32-unknown-wasi/...` but Makefile
+  looked at `host/wasm32-wasi/...`. **REVERTED D2** across Makefile, flake.nix,
+  nix-ci.yml, USAGE.md, 2 build scripts. Rebuild stage3 → success.
+  `_build/dist/bin/wasm32-unknown-wasi-ghc` exists; compiles `hello.hs` to
+  valid `WebAssembly (wasm) binary module version 0x1 (MVP)` (1.5MB).
+  Pure wasmtime can't run the binary (GHC's wasm RTS uses JSFFI imports);
+  full runtime test via post-link.mjs + Node deferred to Phase 6 miso e2e.
+  **PHASE 1 GATE MET (compile-only gate; runtime gate in Phase 6).**
+- **2026-05-26** — R8/R9/R10/R11 reclassified as **dissolved artifacts**
+  of bootstrapping with broken master HEAD cabal source. Real root cause:
+  the chore commit `e148c1c059` on `stable-ghc-9.14` changed the Cabal
+  source-repo tag from explicit SHA `44817477…` to the branch name
+  `stable-haskell/master`, exposing all subsequent builds to whatever
+  bugs landed on that branch tip. **Recommended upstream fix**: revert
+  `e148c1c059` (return to explicit SHA pin) OR fix the bugs on
+  stable-haskell/master HEAD. Either resolves the daily CI failures.
