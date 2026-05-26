@@ -109,6 +109,28 @@ wasi-sdk/node/wasmtime pieces.
 - **R6: Custom channel + upstream `cross` channel collision.** If a user has
   both channels enabled, the last-added wins for any colliding version key.
   D7 mitigates this.
+- **R10: stable-haskell/cabal store layout doesn't match Makefile expectations.**
+  Discovered 2026-05-26 after R9 workaround unblocked the build past unix-2.8.8.0.
+  Cabal compile-less branch builds executables to `_build/stage1/bin/<name>` and
+  libraries to `_build/stage1/store/ghc-9.8.4-inplace/<pkg>-<hash>/`. The Makefile
+  (lines 610, 617, and many others) expects `$(STORE_DIR)/host/$(HOST_PLATFORM)/bin/`
+  = `_build/stage1/store/host/aarch64-apple-darwin/bin/` — a path that simply
+  doesn't exist with this cabal. Stage1 build fails at the `ghc-toolchain-bin`
+  invocation step with `bash: ...: No such file or directory`. **Both at HEAD
+  AND at SHA `44817477…`** (we tested the pin separately) — meaning the layout
+  divergence is somewhere in the compile-less branch's foundational store
+  rework, not a recent regression.
+  **This blocks Phase 1 entirely.** Possible resolutions: (a) update Makefile
+  to look in `_build/stage1/bin/` and `store/ghc-9.8.4-inplace/` (probably
+  20-40 line changes — significant, needs cross-platform care for the GHC
+  toolchain triple); (b) find an even older stable-haskell/Cabal SHA that
+  produced the `store/host/HOST/` layout the Makefile expects; (c) ask the
+  user if there's a known-working combination they've used recently
+  (the previous successful build of `_build/stage1` we saw earlier must
+  have used a compatible cabal — what SHA was that?).
+  **ESCALATING TO USER** — this is bigger than the wasm-cross-ghcup
+  initiative scope. Resolution choice affects the whole project's
+  buildability, not just our branch.
 - **R9: stable-haskell/cabal HEAD races on store install locks across
   stages.** Discovered 2026-05-26 during Phase 1 stage2 retry: the
   compile-less Stage/Toolchain split means cabal builds the same package
