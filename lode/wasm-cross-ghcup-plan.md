@@ -428,3 +428,23 @@ auditable while binaries live in releases.
   (rebuild cabal-install-3.17.0.1 from stable-haskell/master) fails — see R8.
   Retrying with `USE_SYSTEM_CABAL=1` to skip the rebuild and use the existing
   pre-rebase `_build/stage0/bin/cabal` (3.17.0.0).
+- **2026-05-26** — Cascade of issues discovered: USE_SYSTEM_CABAL=1 hit R9
+  (parallel install race on unix-2.8.8.0). Pinning Cabal source-repo tag to
+  `44817477…` did NOT resolve R9 (it's in the cabal binary, not the library).
+  `jobs: 1` in cabal.project.common DID resolve R9 and progressed past
+  unix-2.8.8.0 through Cabal-3.17.0.0, ghc-toolchain-bin, ghc-boot, ghci,
+  ghc-pkg, ghc, ghc-bin. THEN hit R10: cabal-install 3.17.0.0 (pre-Stage/
+  Toolchain) puts binaries in `_build/stage1/bin/` and libraries in
+  `_build/stage1/store/ghc-9.8.4-inplace/<pkg>` (old upstream layout), but
+  the Makefile expects `_build/stage1/store/host/<HOST>/bin/…` (new layout
+  from compile-less). Path-layout mismatch.
+- **2026-05-26** — Path 2 (user-chosen): patched `stable-haskell/cabal` HEAD
+  locally to remove dead GHCJS code (R8 fix) + a stale `binDirectoryFor`
+  call site (uncovered after R8). Patches saved in
+  `lode/r8-cabal-ghcjs-removal.patch` (2 commits). Built patched cabal-install
+  in /tmp/cabal-fix with bootstrap GHC 9.8.4 + bootstrap cabal — SUCCESS.
+  Binary copied to `_build/stage0-patched/bin/cabal` (version banner confirms
+  patch SHAs: cabal-install 3.17.0.1 commit `3386061`, Cabal lib commit
+  `d6fac5f`). Retrying stage2 build with `CABAL=_build/stage0-patched/bin/cabal
+  USE_SYSTEM_CABAL=1` — this cabal SHOULD produce the new store layout the
+  Makefile expects. If it works, R10 is resolved as a side-effect.
