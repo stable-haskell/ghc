@@ -830,16 +830,16 @@ jobs:
         export CABAL_DIR="$GITHUB_WORKSPACE/_build/cabal-dir"
         export TMPDIR="$GITHUB_WORKSPACE/_build/tmp"
         mkdir -p "$TMPDIR"
-        # Create wasm32-wasi-* symlinks for LLVM tools in wasi-sdk so they
+        # Create wasm32-unknown-wasi-* symlinks for LLVM tools in wasi-sdk so they
         # don't clash with devx's llvm-ar/llvm-nm/llvm-ranlib (which have
-        # different capabilities). The wasm32-wasi-clang symlink already
+        # different capabilities). The wasm32-unknown-wasi-clang symlink already
         # exists from ghc-wasm-meta bootstrap.
         WASI_BIN="$HOME/.ghc-wasm/wasi-sdk/bin"
         for tool in ar nm ranlib strip; do
-          ln -sf "$WASI_BIN/llvm-$tool" "$WASI_BIN/wasm32-wasi-$tool"
+          ln -sf "$WASI_BIN/llvm-$tool" "$WASI_BIN/wasm32-unknown-wasi-$tool"
         done
         # wasi-sdk at END of PATH so native tools (cc, clang) resolve to the
-        # host compiler. WASM tools (wasm32-wasi-clang, etc.) have unique
+        # host compiler. WASM tools (wasm32-unknown-wasi-clang, etc.) have unique
         # prefixed names that don't clash.
         export PATH=$PATH:$WASI_BIN
         make DIST_BUILD=1 \
@@ -848,7 +848,7 @@ jobs:
              DERIVE_CONSTANTS_BIN=$PWD/_build/dist/bin/deriveConstants \
              GENAPPLY_BIN=$PWD/_build/dist/bin/genapply \
              HAPPY_TEMPLATE_DIR=$PWD/_build/dist/share/happy-lib/data \
-             stage3-wasm32-wasi
+             stage3-wasm32-unknown-wasi
 
     - name: Smoke test
       if: success()
@@ -857,7 +857,7 @@ jobs:
         set -eo pipefail
         export PATH="$HOME/.nix-profile/bin:$PATH:$HOME/.ghc-wasm/wasi-sdk/bin"
         echo 'main = putStrLn "Hello from WASM backend"' > /tmp/hello.hs
-        _build/dist/bin/wasm32-wasi-ghc /tmp/hello.hs -o /tmp/hello.wasm
+        _build/dist/bin/wasm32-unknown-wasi-ghc /tmp/hello.hs -o /tmp/hello.wasm
 
         # Verify the .wasm binary was produced
         ls -lh /tmp/hello.wasm
@@ -880,10 +880,10 @@ jobs:
           # the ghc_wasm_jsffi imports.
           #
           # Workflow (from docs/users_guide/wasm.rst §"JSFFI"):
-          #   1. Compile:     wasm32-wasi-ghc hello.hs -o hello.wasm
+          #   1. Compile:     wasm32-unknown-wasi-ghc hello.hs -o hello.wasm
           #   2. Post-link:   $(ghc --print-libdir)/post-link.mjs -i hello.wasm -o hello.mjs
           #   3. Run:         node runner.mjs
-          WASM_LIBDIR=_build/dist/lib/targets/wasm32-wasi/lib
+          WASM_LIBDIR=_build/dist/lib/targets/wasm32-unknown-wasi/lib
 
           # Generate JavaScript FFI glue from WASM custom sections
           node "$WASM_LIBDIR/post-link.mjs" -i /tmp/hello.wasm -o /tmp/hello.mjs
@@ -911,7 +911,7 @@ jobs:
           echo "No JSFFI imports → running with wasmtime (pure WASI module)"
 
           # Per docs/users_guide/wasm.rst: "the same toolchain still generates
-          # self-contained wasm32-wasi modules by default" — these can be run
+          # self-contained wasm32-unknown-wasi modules by default" — these can be run
           # directly with any WASI-compatible runtime.
           wasmtime run /tmp/hello.wasm
         fi
@@ -922,4 +922,4 @@ jobs:
       with:
         name: aarch64-darwin-cross-wasm
         retention-days: 1
-        path: _build/dist/lib/targets/wasm32-wasi
+        path: _build/dist/lib/targets/wasm32-unknown-wasi

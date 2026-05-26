@@ -823,7 +823,7 @@ endif # DIST_BUILD (stage2)
 STAGE3_PLATFORMS := \
 	x86_64-musl-linux \
 	javascript-unknown-ghcjs \
-	wasm32-wasi
+	wasm32-unknown-wasi
 
 STAGE3_EXECUTABLES := \
     ghc \
@@ -908,18 +908,18 @@ STAGE3_javascript-unknown-ghcjs_RANLIB             = emranlib
 STAGE3_javascript-unknown-ghcjs_STRIP              = emstrip
 STAGE3_javascript-unknown-ghcjs_GHC_TOOLCHAIN_ARGS = $(GHC_TOOLCHAIN_ARGS) --disable-tables-next-to-code
 
-STAGE3_wasm32-wasi_CC                 = wasm32-wasi-clang
-STAGE3_wasm32-wasi_CC_OPTS            = -fno-strict-aliasing -Wno-error=int-conversion -Oz -msimd128 -mnontrapping-fptoint -msign-ext -mbulk-memory -mmutable-globals -mmultivalue -mreference-types
-STAGE3_wasm32-wasi_CXX                = wasm32-wasi-clang++
-STAGE3_wasm32-wasi_CXX_OPTS           = $(STAGE3_wasm32-wasi_CC_OPTS) -fno-exceptions
-STAGE3_wasm32-wasi_CPP                = wasm32-wasi-clang
-STAGE3_wasm32-wasi_HS_CPP             = wasm32-wasi-clang
-STAGE3_wasm32-wasi_CMM_CPP            = wasm32-wasi-clang
-STAGE3_wasm32-wasi_AR                 = wasm32-wasi-ar
-STAGE3_wasm32-wasi_RANLIB             = wasm32-wasi-ranlib
-STAGE3_wasm32-wasi_EXTRA_INCLUDE_DIRS =
-STAGE3_wasm32-wasi_EXTRA_LIB_DIRS     =
-STAGE3_wasm32-wasi_GHC_TOOLCHAIN_ARGS = $(GHC_TOOLCHAIN_ARGS) \
+STAGE3_wasm32-unknown-wasi_CC                 = wasm32-unknown-wasi-clang
+STAGE3_wasm32-unknown-wasi_CC_OPTS            = -fno-strict-aliasing -Wno-error=int-conversion -Oz -msimd128 -mnontrapping-fptoint -msign-ext -mbulk-memory -mmutable-globals -mmultivalue -mreference-types
+STAGE3_wasm32-unknown-wasi_CXX                = wasm32-unknown-wasi-clang++
+STAGE3_wasm32-unknown-wasi_CXX_OPTS           = $(STAGE3_wasm32-unknown-wasi_CC_OPTS) -fno-exceptions
+STAGE3_wasm32-unknown-wasi_CPP                = wasm32-unknown-wasi-clang
+STAGE3_wasm32-unknown-wasi_HS_CPP             = wasm32-unknown-wasi-clang
+STAGE3_wasm32-unknown-wasi_CMM_CPP            = wasm32-unknown-wasi-clang
+STAGE3_wasm32-unknown-wasi_AR                 = wasm32-unknown-wasi-ar
+STAGE3_wasm32-unknown-wasi_RANLIB             = wasm32-unknown-wasi-ranlib
+STAGE3_wasm32-unknown-wasi_EXTRA_INCLUDE_DIRS =
+STAGE3_wasm32-unknown-wasi_EXTRA_LIB_DIRS     =
+STAGE3_wasm32-unknown-wasi_GHC_TOOLCHAIN_ARGS = $(GHC_TOOLCHAIN_ARGS) \
   --merge-objs wasm-ld --merge-objs-opt="-r" \
   --disable-tables-next-to-code --disable-libffi-adjustors \
   --cc-link-opt="-Wl,--keep-section=ghc_wasm_jsffi" \
@@ -1049,9 +1049,9 @@ stage3-javascript-unknown-ghcjs-additional-files:
 	$(call LOG,Copying prelude.mjs)
 	@cp -f utils/jsffi/prelude.mjs $(TARGET_DIR)/lib/prelude.mjs
 
-stage3-wasm32-wasi-additional-files: STAGE=stage3
-stage3-wasm32-wasi-additional-files: TARGET_PLATFORM=wasm32-wasi
-stage3-wasm32-wasi-additional-files:
+stage3-wasm32-unknown-wasi-additional-files: STAGE=stage3
+stage3-wasm32-unknown-wasi-additional-files: TARGET_PLATFORM=wasm32-unknown-wasi
+stage3-wasm32-unknown-wasi-additional-files:
 	@mkdir -p $(TARGET_DIR)/lib/
 	$(call LOG,Copying dyld.mjs)
 	@cp -f utils/jsffi/dyld.mjs $(TARGET_DIR)/lib/dyld.mjs

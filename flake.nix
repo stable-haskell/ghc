@@ -60,20 +60,20 @@
 
             # Wasi sysroot paths for WASM RTS compilation.
             # Passed as --extra-lib-dirs / --extra-include-dirs to cabal.
-            export WASM_EXTRA_LIB_DIRS="${wasi-sdk}/share/wasi-sysroot/lib/wasm32-wasi"
+            export WASM_EXTRA_LIB_DIRS="${wasi-sdk}/share/wasi-sysroot/lib/wasm32-unknown-wasi"
             export WASM_EXTRA_INCLUDE_DIRS="${wasi-sdk}/share/wasi-sysroot/include"
 
             # Create short-name wrappers for WASM toolchain
-            # GHC Makefile expects wasm32-wasi-* but wasi-sdk provides full names
+            # GHC Makefile expects wasm32-unknown-wasi-* but wasi-sdk provides full names
             WASM_BIN_DIR="$PWD/.nix-wasm-bin"
             mkdir -p "$WASM_BIN_DIR"
 
             # Create wrapper scripts for WASM toolchain
-            cat > "$WASM_BIN_DIR/wasm32-wasi-clang" <<'EOF'
+            cat > "$WASM_BIN_DIR/wasm32-unknown-wasi-clang" <<'EOF'
 #!/bin/sh
 exec "${wasi-sdk}/bin/clang" "$@"
 EOF
-            chmod +x "$WASM_BIN_DIR/wasm32-wasi-clang"
+            chmod +x "$WASM_BIN_DIR/wasm32-unknown-wasi-clang"
 
             # GHC's WASM LLVM backend uses llc/opt/llvm-as to compile LLVM IR to WASM
             # assembly. We must use wasi-sdk's LLVM tools (version 21) since they match
@@ -97,11 +97,11 @@ exec "${wasi-sdk}/bin/llvm-as" "$@"
 EOF
             chmod +x "$WASM_BIN_DIR/llvm-as"
 
-            cat > "$WASM_BIN_DIR/wasm32-wasi-clang++" <<'EOF'
+            cat > "$WASM_BIN_DIR/wasm32-unknown-wasi-clang++" <<'EOF'
 #!/bin/sh
 exec "${wasi-sdk}/bin/clang++" "$@"
 EOF
-            chmod +x "$WASM_BIN_DIR/wasm32-wasi-clang++"
+            chmod +x "$WASM_BIN_DIR/wasm32-unknown-wasi-clang++"
 
             cat > "$WASM_BIN_DIR/wasm-ld" <<'EOF'
 #!/bin/sh
@@ -114,26 +114,26 @@ EOF
             # If 'ld' is the WASM linker, it breaks 'ld -r' tests for native compilation.
             # The WASM settings file explicitly uses '--ld wasm-ld', not 'ld'.
 
-            cat > "$WASM_BIN_DIR/wasm32-wasi-ar" <<'EOF'
+            cat > "$WASM_BIN_DIR/wasm32-unknown-wasi-ar" <<'EOF'
 #!/bin/sh
 exec "${wasi-sdk}/bin/llvm-ar" "$@"
 EOF
-            chmod +x "$WASM_BIN_DIR/wasm32-wasi-ar"
+            chmod +x "$WASM_BIN_DIR/wasm32-unknown-wasi-ar"
 
-            cat > "$WASM_BIN_DIR/wasm32-wasi-ranlib" <<'EOF'
+            cat > "$WASM_BIN_DIR/wasm32-unknown-wasi-ranlib" <<'EOF'
 #!/bin/sh
 exec "${wasi-sdk}/bin/llvm-ranlib" "$@"
 EOF
-            chmod +x "$WASM_BIN_DIR/wasm32-wasi-ranlib"
+            chmod +x "$WASM_BIN_DIR/wasm32-unknown-wasi-ranlib"
 
             # Add WASM wrappers to PATH
             export PATH="$WASM_BIN_DIR:$PATH"
 
             echo "WASM toolchain from ghc-wasm-meta wasi-sdk:"
-            echo "  - wasm32-wasi-clang (wrapped)"
-            echo "  - wasm32-wasi-clang++ (wrapped)"
+            echo "  - wasm32-unknown-wasi-clang (wrapped)"
+            echo "  - wasm32-unknown-wasi-clang++ (wrapped)"
             echo "  - wasm-ld (wrapped, native ld is NOT overridden)"
-            echo "  - wasm32-wasi-ar, wasm32-wasi-ranlib (wrapped)"
+            echo "  - wasm32-unknown-wasi-ar, wasm32-unknown-wasi-ranlib (wrapped)"
             echo "  - llc, opt, llvm-as (wrapped from wasi-sdk LLVM 21)"
             echo "  - Sysroot: ${wasi-sdk}/share/wasi-sysroot"
             echo "  - Includes libffi-wasm pre-integrated"
@@ -141,7 +141,7 @@ EOF
 
             echo "To build WASM cross-compiler:"
             echo "  make stage2"
-            echo "  make stage3-wasm32-wasi"
+            echo "  make stage3-wasm32-unknown-wasi"
             echo ""
           '';
         };

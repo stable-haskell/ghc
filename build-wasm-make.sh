@@ -6,7 +6,7 @@
 # 1. Nix provides GHC bootstrap compiler and tools
 # 2. Nix provides LLVM/Clang with WASM support (pinned via ghc-wasm-meta)
 # 3. Builds stage2 (bootstrap native compiler)
-# 4. Builds stage3-wasm32-wasi (cross-compiler + WASM libraries)
+# 4. Builds stage3-wasm32-unknown-wasi (cross-compiler + WASM libraries)
 #
 # The Makefile default CABAL=_build/stage0/bin/cabal is used (no override needed):
 # stage0 cabal is built automatically from the repo's pinned Cabal source.
@@ -54,20 +54,20 @@ echo ""
 success "Stage2 build complete!"
 echo ""
 
-# Build stage3-wasm32-wasi: cross-compiler + WASM libraries
-info "Step 2/2: Building stage3-wasm32-wasi (WASM cross-compiler)"
+# Build stage3-wasm32-unknown-wasi: cross-compiler + WASM libraries
+info "Step 2/2: Building stage3-wasm32-unknown-wasi (WASM cross-compiler)"
 info "This builds the WASM cross-compiler using stage2..."
 info "Expected time: 30-45 minutes"
 info ""
 
-nix develop . -c make stage3-wasm32-wasi
+nix develop . -c make stage3-wasm32-unknown-wasi
 
 echo ""
 success "WASM cross-compiler build complete!"
 echo ""
 echo "Cross-compiler location:"
-echo "  _build/stage3/bin/wasm32-wasi-ghc"
+echo "  _build/stage3/bin/wasm32-unknown-wasi-ghc"
 echo ""
 echo "To test:"
 echo "  printf 'main = putStrLn \"Hello WASM\"\n' > hello.hs"
-echo "  nix develop . -c _build/stage3/bin/wasm32-wasi-ghc hello.hs -o hello.wasm"
+echo "  nix develop . -c _build/stage3/bin/wasm32-unknown-wasi-ghc hello.hs -o hello.wasm"
