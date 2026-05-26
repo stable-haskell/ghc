@@ -93,7 +93,3 @@ constraints:
   , any.file-io +os-string
   , any.process +os-string
   , any.Win32 +os-string
-
--- R9 workaround (lode/wasm-cross-ghcup-plan.md): serialize cabal installs to
--- sidestep store-lock race on packages shared across Build/Host stages.
-jobs: 1
