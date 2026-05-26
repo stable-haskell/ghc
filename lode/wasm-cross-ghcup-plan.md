@@ -487,6 +487,31 @@ auditable while binaries live in releases.
   Pure wasmtime can't run the binary (GHC's wasm RTS uses JSFFI imports);
   full runtime test via post-link.mjs + Node deferred to Phase 6 miso e2e.
   **PHASE 1 GATE MET (compile-only gate; runtime gate in Phase 6).**
+- **2026-05-26** — **PHASE 6 v0.0.1 DELIVERED** (trivial reactor PoC).
+  Empirically verified end-to-end: dual-compiler `cabal.project` form
+  (`with-build-compiler` + `with-compiler`) builds a trivial wasm reactor;
+  `post-link.mjs` produces JSFFI ESM glue; Node's `node:wasi` + the JSFFI
+  imports run the wasm and print "Hello from the WASM reactor!". Critical
+  finding: the bring-up sequence MUST be **wasi.initialize() →
+  __ghc_wasm_jsffi_init() → hs_start()**. The original agent drafts (and
+  CI smoke test) missed `__ghc_wasm_jsffi_init` — without it, hs_start()
+  throws "RTS is not initialised; call hs_init() first". Files in
+  `lode/phase6-trivial-reactor-poc/`.
+- **2026-05-26** — **PHASE 6 v0.0.2 (miso e2e) BLOCKED on wasm-backend
+  shared-library support.** Adding miso 1.11.0 + jsaddle-wasm pulls in
+  `character-ps` which needs `Data.Word.dyn_hi` from base — but our wasm
+  base library is built `shared: False`. Two attempts to fix in
+  `cabal.project.stage3`:
+    (1) project-level `if arch(wasm32) shared: True` — applied but failed
+        at ghc-internal link with "[GHC-74335] -dynamic is ignored when
+        linking binaries on WASM" + "mismatched interface file profile tag
+        (wanted '', got 'dyn')".
+    (2) package-level `package * / if arch(wasm32) shared: True` — built
+        successfully but applied silently; no .dyn_hi anywhere.
+  Conclusion: cabal config alone can't deliver wasm shared libs.
+  Need upstream GHC work on the wasm backend (RTS / linker / interface-
+  file profile tag handling). **Out of session scope.** Phase 6.5 (miso
+  e2e) is queued as a separate workstream contingent on this fix.
 - **2026-05-26** — Two PRs opened: (1) stable-haskell/cabal#359 with the
   R8/R8.5 patches (https://github.com/stable-haskell/cabal/pull/359); (2)
   stable-haskell/ghc#181 with our branch + Phase 0-2 work
