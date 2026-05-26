@@ -148,13 +148,13 @@ constraints:
 package *
   shared: False
   executable-dynamic: False
-  
+
   -- library-for-ghci will cause a `ld -r` call to create pre-linked objects.
   -- This helps the internal linker when trying to link (.a) archives with massive
   -- displacements. In that case the displacement can be in excess of what
   -- is possible to relocate, and the linker fails. Pre-linking the objects helps with
   -- this (and linking performance, as we need to process fewer relocations).
-  -- 
+  --
   -- For some cross targets like JavaScript, this will fail as the $LD -r invocation
   -- might not be properly supported.
   --
@@ -174,12 +174,18 @@ package libffi-clib
 
 -- WASM/WASI-specific overrides:
 -- NOTE: shared: True is needed for GHCi/TH via dyld.mjs at runtime, but
--- setting it via `if os(wasi) / package *` also applies to BUILD packages
--- (e.g. happy-lib compiled by the native build compiler). This causes cabal
--- to use -dynamic-too for BUILD packages, which fails because the build
--- compiler's library directories don't include .dyn_hi files.
--- Re-enable shared: True once cabal supports separate BUILD/HOST package
--- settings, or once the dist artifact includes .dyn_hi files.
+-- attempting to enable it via `if arch(wasm32) / shared: True` (with
+-- stable-haskell/cabal's Stage/Toolchain split) was tried 2026-05-26 and
+-- still fails at the ghc-internal link step:
+--   "[GHC-74335] -dynamic is ignored when linking binaries on WASM"
+--   "mismatched interface file profile tag (wanted "", got "dyn")"
+-- The wasm backend doesn't fully support GHC's -dynamic linking convention
+-- — needs deeper RTS/linker work in the wasm backend itself, not a
+-- cabal.project tweak. The historical form below pollutes BUILD packages too.
+--
+-- Until the wasm backend gains proper shared-library support, end-user
+-- TH-heavy apps (miso, jsaddle, aeson, ...) can't compile against this
+-- bindist. Trivial reactor apps (lode/phase6-trivial-reactor-poc/) work.
 --
 -- if os(wasi)
 --   package *
