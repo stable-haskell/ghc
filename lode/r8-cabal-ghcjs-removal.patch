@@ -1,7 +1,7 @@
 From d6fac5f900c2242d4e788910d474803fc722647b Mon Sep 17 00:00:00 2001
 From: "Moritz Angermann (local patch)" <moritz.angermann@iohk.io>
 Date: Tue, 26 May 2026 11:21:53 +0900
-Subject: [PATCH] Remove dead GHCJS references in ProjectPlanning.hs
+Subject: [PATCH 1/2] Remove dead GHCJS references in ProjectPlanning.hs
 
 CompilerFlavor no longer has a GHCJS constructor and
 Distribution.Simple.GHCJS module no longer exists in
@@ -41,6 +41,44 @@ index bb7f867..b95ea6f 100644
                _ -> False
  
            canBuildWayLibs predicate = case predicate compiler of
+-- 
+2.47.2
+
+
+From 3386061c78d85651d6098445af85711466566a0b Mon Sep 17 00:00:00 2001
+From: "Moritz Angermann (local patch)" <moritz.angermann@iohk.io>
+Date: Tue, 26 May 2026 11:31:49 +0900
+Subject: [PATCH 2/2] Fix stale binDirectoryFor call in ProjectOrchestration
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+binDirectoryFor was renamed/refactored to binDirectories (in
+ProjectPlanning.hs) with a different signature. The call site
+at ProjectOrchestration.hs:544 wasn't updated. Use elabBinDir
+directly — same value that binDirectories ultimately returns
+(see ProjectPlanning/Types.hs:496-497, 503).
+---
+ .../src/Distribution/Client/ProjectOrchestration.hs         | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/cabal-install/src/Distribution/Client/ProjectOrchestration.hs b/cabal-install/src/Distribution/Client/ProjectOrchestration.hs
+index 69f8542..7af36ea 100644
+--- a/cabal-install/src/Distribution/Client/ProjectOrchestration.hs
++++ b/cabal-install/src/Distribution/Client/ProjectOrchestration.hs
+@@ -541,7 +541,11 @@ installExecutables
+         , (ComponentTarget (CExeName cname) _subtarget, _targetSelectors) <- targets
+         , let platform = toolchainPlatform (getStage toolchains (elabStage elab))
+         , let exeName = unUnqualComponentName cname
+-        , let dir = binDirectoryFor distDirLayout elaboratedShared elab exeName
++        -- binDirectoryFor was renamed/refactored to binDirectories with a
++        -- different signature; the call site here wasn't updated. Use
++        -- elabBinDir directly (same as what binDirectories yields) so this
++        -- file compiles. -- patched locally for wasm-cross-ghcup.
++        , let dir = elabBinDir elab
+         , let exe = exeName <.>  exeExtension platform
+         ]
+       toolchains =  pkgConfigToolchains elaboratedShared
 -- 
 2.47.2
 
