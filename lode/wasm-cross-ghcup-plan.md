@@ -109,6 +109,23 @@ wasi-sdk/node/wasmtime pieces.
 - **R6: Custom channel + upstream `cross` channel collision.** If a user has
   both channels enabled, the last-added wins for any colliding version key.
   D7 mitigates this.
+- **R9: stable-haskell/cabal HEAD races on store install locks across
+  stages.** Discovered 2026-05-26 during Phase 1 stage2 retry: the
+  compile-less Stage/Toolchain split means cabal builds the same package
+  (`unix`, `happy-lib`, `os-string`, `filepath`, …) for both Build and Host
+  stages. When the install steps race, one process holds the per-package
+  lock in `store/.../incoming/*.lock` while another tries to acquire it
+  → `openFile: resource busy`. happy-lib was observed with 12 attempts.
+  Andrea's earlier "TOCTOU race fix for BuildInplaceOnly tarball extraction"
+  doesn't cover this. **Workarounds in priority order:** (i) retry the
+  build (sometimes transient if the artifact lands on the first attempt);
+  (ii) limit cabal parallelism via `--jobs=1` or `cabal-install` config;
+  (iii) pin `tag:` in `cabal.project.stage{0,1,2,3}` back to
+  `44817477ff6d…` (pre-rebase, last known-working). **Fix upstream** in
+  `stable-haskell/cabal#stable-haskell/master` — the store install needs
+  to recognize that two stages building the same package for the same arch
+  produce identical artifacts and short-circuit. **Same fix-priority class
+  as R8** (both block Phase 5).
 - **R8: stable-haskell/cabal HEAD doesn't bootstrap with stock GHC 9.8.4.**
   Discovered 2026-05-26 during Phase 1 stage2 build attempt. `make stable-cabal`
   fails: `cabal-install/src/Distribution/Client/ProjectPlanning.hs:224` imports
