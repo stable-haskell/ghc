@@ -1028,10 +1028,17 @@ stage3-$(1): $$(STAGE3_$(1)_PREREQS)
 
 $(DIST_DIR)/ghc-$(1).tar.gz: stage3-$(1)
 	@echo "::group::Creating ghc-$(1).tar.gz..."
-	tar czf $$@ \
+	# -h: dereference symlinks. The stage3 cross bin/$(1)-* entries are
+	# symlinks to the native stage2 binaries (bin/ghc, bin/ghc-pkg, etc.).
+	# Without -h, the tarball would extract to broken symlinks since the
+	# bare-name targets aren't included. With -h, each cross-prefixed name
+	# becomes a real file (a copy of the native binary, which detects its
+	# invocation name to configure for the target).
+	tar czhf $$@ \
 		--directory=$$(DIST_DIR) \
 		$(foreach exe,$(STAGE3_EXECUTABLES),bin/$(1)-$(exe)$(EXE_EXT)) \
-		lib/targets/$(1)
+		lib/targets/$(1) \
+		$(if $(filter wasm32-unknown-wasi,$(1)),relocate.sh)
 	@echo "::endgroup::"
 
 endef
@@ -1061,6 +1068,13 @@ stage3-wasm32-unknown-wasi-additional-files:
 	@cp -f utils/jsffi/post-link.mjs $(TARGET_DIR)/lib/post-link.mjs
 	$(call LOG,Copying prelude.mjs)
 	@cp -f utils/jsffi/prelude.mjs $(TARGET_DIR)/lib/prelude.mjs
+	# Phase 3: relocate.sh at the top of the bindist — re-runs ghc-pkg recache
+	# for the new install prefix (binary cache is not portable; *.conf files
+	# already use ${pkgroot}-relative paths from DIST_COPY_LIB_CONF_CROSS).
+	# ghcup invokes via viPostInstall.
+	$(call LOG,Copying relocate.sh to bindist root)
+	@cp -f mk/wasm-relocate.sh $(DIST_DIR)/relocate.sh
+	@chmod +x $(DIST_DIR)/relocate.sh
 
 stage3-x86_64-musl-linux-additional-files: STAGE=stage3
 stage3-x86_64-musl-linux-additional-files: TARGET_PLATFORM=x86_64-musl-linux
