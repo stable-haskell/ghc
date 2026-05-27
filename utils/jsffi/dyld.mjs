@@ -1104,39 +1104,6 @@ export async function main({ rpc, libdir, ghciSoPath, args }) {
     });
     await dyld.addLibrarySearchPath(libdir);
 
-    // Workaround for missing rts dep in ghc-internal.so's dylink.0:
-    // ghc-internal IMPORTs env.registerForeignExports (defined only in the
-    // main wasm rts .so), but its needed_dynlibs lists rts-fs only, not the
-    // main rts. The toposort would otherwise load ghc-internal *before* the
-    // main rts (loaded later via ghci.so's deps), and ghc-internal's
-    // _initialize would call env.registerForeignExports which isn't in
-    // exportFuncs yet → "non-existent function" RuntimeError.
-    //
-    // Preload any libHSrts-*-nonthreaded-nodebug-ghc*.so sitting in the
-    // ghci.so directory so its exports are registered before ghc-internal's
-    // _initialize fires. The proper fix is at the link level (ghc-internal's
-    // wasm-ld invocation should produce a needed_dynlibs entry for the main
-    // rts — currently it doesn't).
-    if (isNode) {
-      try {
-        const ghciDir = ghciSoPath.substring(0, ghciSoPath.lastIndexOf("/"));
-        const entries = await fs.promises.readdir(ghciDir);
-        const rtsCandidates = entries.filter(
-          (f) =>
-            f.startsWith("libHSrts-") &&
-            f.endsWith(".so") &&
-            f.includes("nonthreaded-nodebug")
-        );
-        for (const rts of rtsCandidates) {
-          await dyld.loadDLL(`${ghciDir}/${rts}`);
-        }
-      } catch (e) {
-        // Best-effort: if the preload fails (no rts found, browser mode,
-        // etc.) fall through and let the normal toposort try — error will
-        // be more informative anyway.
-      }
-    }
-
     await dyld.loadDLL(ghciSoPath);
 
     const reader = rpc.readStream.getReader();
