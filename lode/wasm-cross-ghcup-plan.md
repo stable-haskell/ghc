@@ -515,14 +515,25 @@ auditable while binaries live in releases.
   Result: stage3-wasm32-unknown-wasi DYNAMIC=1 produces 2121 .dyn_hi
   + 40 .so files. End-user `cabal build` with `shared: True` compiles
   miso through 67/70 modules.
-- **2026-05-27** — **PHASE 6.5 NEW BLOCKER: iserv-proxy / dyld.mjs hang.**
-  Miso's TH evaluation invokes the wasm external interpreter via
-  `node dyld.mjs libHSghci-9.14-ghc9.14.so 14 15 +RTS -H64m -RTS`.
-  The node process loads ghci.so but then hangs at 0% CPU, waiting on
-  IPC pipe fds 14/15. Parent ghc process also blocked. Neither side
-  errors or progresses. Suspect IPC handshake / wasm-load deadlock.
-  Investigation queued — needs dyld.mjs instrumentation +
-  minimal-TH-program repro.
+- **2026-05-27** — **iserv hang RESOLVED.** Instrumented dyld.mjs main()
+  + minimal TH-test program → found the root cause: ghc-internal.so's
+  dylink.0 needed_dynlibs lists `libHSrts-fs-1.0.0.0`, `libdl.so`,
+  `libc.so` but NOT the main wasm RTS (e.g.
+  `libHSrts-1.0.3-nonthreaded-nodebug-ghc9.14.so`). ghc-internal
+  IMPORTs `env.registerForeignExports` (defined only in main rts).
+  Toposort loads ghc-internal *before* main rts → ghc-internal's
+  `_initialize` calls env.registerForeignExports → "non-existent
+  function" RuntimeError → node crashes. Parent ghc never noticed
+  the node death and hung on the IPC pipe.
+  Workaround in `utils/jsffi/dyld.mjs`: preload any
+  `libHSrts-*-nonthreaded-nodebug-ghc*.so` sitting next to ghciSoPath
+  before loadDLL(ghciSoPath). Commit `1cf5c768394` on PR #181.
+  Verified end-to-end with a minimal TH program: builds + installs
+  the wasm executable cleanly.
+  **Proper fix is at link level** — ghc-internal's wasm-ld invocation
+  should emit a needed_dynlibs entry for the main rts. Tracking as
+  follow-up; the dyld.mjs workaround unblocks TH for end-user wasm
+  builds in the meantime.
 - **2026-05-26** — **PHASE 6 v0.0.2 (miso e2e) BLOCKED on wasm-backend
   shared-library support.** [HISTORICAL — superseded by 2026-05-27] Adding miso 1.11.0 + jsaddle-wasm pulls in
   `character-ps` which needs `Data.Word.dyn_hi` from base — but our wasm
