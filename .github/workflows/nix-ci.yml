@@ -832,11 +832,17 @@ jobs:
         mkdir -p "$TMPDIR"
         # Create wasm32-unknown-wasi-* symlinks for LLVM tools in wasi-sdk so they
         # don't clash with devx's llvm-ar/llvm-nm/llvm-ranlib (which have
-        # different capabilities). The wasm32-unknown-wasi-clang symlink already
-        # exists from ghc-wasm-meta bootstrap.
+        # different capabilities). Also symlink clang/clang++ from the
+        # wasm32-wasi- name bootstrap actually creates to the canonical autoconf
+        # triple wasm32-unknown-wasi- that ghc-toolchain-bin searches for —
+        # without these our build fails at "wasm32-unknown-wasi-clang not found
+        # in search path".
         WASI_BIN="$HOME/.ghc-wasm/wasi-sdk/bin"
         for tool in ar nm ranlib strip; do
           ln -sf "$WASI_BIN/llvm-$tool" "$WASI_BIN/wasm32-unknown-wasi-$tool"
+        done
+        for tool in clang clang++; do
+          ln -sf "$WASI_BIN/wasm32-wasi-$tool" "$WASI_BIN/wasm32-unknown-wasi-$tool"
         done
         # wasi-sdk at END of PATH so native tools (cc, clang) resolve to the
         # host compiler. WASM tools (wasm32-unknown-wasi-clang, etc.) have unique
