@@ -816,39 +816,41 @@ jobs:
         mkdir -p "$TMPDIR"
         # ghc-wasm-meta's bootstrap.sh needs jq + unzip; the smoke test below
         # also needs node + wasmtime + wasm-objdump. The devx shell scrubs the
-        # system PATH so we have to install or expose them explicitly.
+        # system PATH so we install or expose them per host kind.
         #
-        # Pick the installer based on what the runner provides:
-        #   - apt-get (github-hosted ubuntu-* runners) — most tools are
-        #     preinstalled; we just expose /usr/bin and install wasmtime + wabt
-        #   - nix-env  (self-hosted darwin Tart VMs) — install via nixpkgs
-        #     channel which the Tart base image preconfigures
-        export PATH="$HOME/.nix-profile/bin:/nix/var/nix/profiles/default/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
-        if command -v apt-get >/dev/null 2>&1; then
-          # Ubuntu runner — most wasm-side helpers are in apt
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends \
-            jq unzip zstd nodejs wabt
-          if ! command -v wasmtime >/dev/null 2>&1; then
-            curl -sSL https://wasmtime.dev/install.sh | bash
-            export PATH="$HOME/.wasmtime/bin:$PATH"
-            echo "$HOME/.wasmtime/bin" >> "$GITHUB_PATH"
-          fi
-        else
-          # Tart VM — go through nix-env on the preconfigured nixpkgs channel
-          for tool in jq unzip zstd node wasmtime; do
-            if ! command -v "$tool" >/dev/null 2>&1; then
-              pkg="$tool"
-              [ "$tool" = "node" ] && pkg="nodejs"
-              echo "Installing $pkg via nix-env..."
-              /nix/var/nix/profiles/default/bin/nix-env -iA "nixpkgs.$pkg"
+        # Pick the installer based on uname -s — devx scrubs /usr/bin on both
+        # macOS and Linux, so `command -v apt-get` would falsely return no on
+        # both. Also CRUCIAL: on darwin we must NOT add /usr/bin to PATH, or
+        # BSD `find` (no `-mindepth`) takes precedence over GNU find used in
+        # Makefile:476 / 485 and the dist-copy step breaks.
+        case "$(uname -s)" in
+          Linux)
+            export PATH="$HOME/.nix-profile/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends \
+              jq unzip zstd nodejs wabt
+            if ! command -v wasmtime >/dev/null 2>&1; then
+              curl -sSL https://wasmtime.dev/install.sh | bash
+              export PATH="$HOME/.wasmtime/bin:$PATH"
+              echo "$HOME/.wasmtime/bin" >> "$GITHUB_PATH"
             fi
-          done
-          if ! command -v wasm-objdump >/dev/null 2>&1; then
-            echo "Installing wabt (wasm-objdump) via nix-env..."
-            /nix/var/nix/profiles/default/bin/nix-env -iA nixpkgs.wabt
-          fi
-        fi
+            ;;
+          Darwin)
+            export PATH="$HOME/.nix-profile/bin:/nix/var/nix/profiles/default/bin:$PATH"
+            for tool in jq unzip zstd node wasmtime; do
+              if ! command -v "$tool" >/dev/null 2>&1; then
+                pkg="$tool"
+                [ "$tool" = "node" ] && pkg="nodejs"
+                echo "Installing $pkg via nix-env..."
+                /nix/var/nix/profiles/default/bin/nix-env -iA "nixpkgs.$pkg"
+              fi
+            done
+            if ! command -v wasm-objdump >/dev/null 2>&1; then
+              echo "Installing wabt (wasm-objdump) via nix-env..."
+              /nix/var/nix/profiles/default/bin/nix-env -iA nixpkgs.wabt
+            fi
+            ;;
+        esac
         curl -fsSL https://gitlab.haskell.org/ghc/ghc-wasm-meta/-/raw/master/bootstrap.sh | \
           FLAVOUR=9.12 PREFIX=$HOME/.ghc-wasm sh
 
@@ -890,9 +892,12 @@ jobs:
       shell: devx {0}
       run: |
         set -eo pipefail
-        # Add nix paths + system paths so node, wasm-objdump, wasmtime are
-        # all reachable regardless of which path the install step took.
-        export PATH="$HOME/.nix-profile/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.wasmtime/bin:$PATH:$HOME/.ghc-wasm/wasi-sdk/bin"
+        # Match the per-host PATH from "Install wasi-sdk" — same rationale
+        # (don't promote /usr/bin's BSD tools on darwin).
+        case "$(uname -s)" in
+          Linux)  export PATH="$HOME/.nix-profile/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.wasmtime/bin:$PATH:$HOME/.ghc-wasm/wasi-sdk/bin" ;;
+          Darwin) export PATH="$HOME/.nix-profile/bin:$PATH:$HOME/.ghc-wasm/wasi-sdk/bin" ;;
+        esac
         echo 'main = putStrLn "Hello from WASM backend"' > /tmp/hello.hs
         _build/dist/bin/wasm32-unknown-wasi-ghc /tmp/hello.hs -o /tmp/hello.wasm
 
