@@ -980,9 +980,15 @@ jobs:
           Darwin) export PATH="$HOME/.nix-profile/bin:$PATH:$HOME/.ghc-wasm/wasi-sdk/bin" ;;
         esac
         rm -f _build/dist/ghc-wasm32-unknown-wasi.tar.gz
+        # The same five DIST_BUILD vars the previous "Build WASM cross
+        # libraries" step uses — stage3 phony deps invoke configure which
+        # otherwise can't find deriveConstants/genapply/happy templates.
         make DIST_BUILD=1 \
              CABAL=$PWD/_build/dist/bin/cabal \
              GHC_TOOLCHAIN_BIN=$PWD/_build/dist/bin/ghc-toolchain-bin \
+             DERIVE_CONSTANTS_BIN=$PWD/_build/dist/bin/deriveConstants \
+             GENAPPLY_BIN=$PWD/_build/dist/bin/genapply \
+             HAPPY_TEMPLATE_DIR=$PWD/_build/dist/share/happy-lib/data \
              _build/dist/ghc-wasm32-unknown-wasi.tar.gz
         # rename with the host triple so we ship one tarball per host
         cp _build/dist/ghc-wasm32-unknown-wasi.tar.gz \
