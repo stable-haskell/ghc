@@ -892,15 +892,18 @@ jobs:
       shell: devx {0}
       run: |
         set -eo pipefail
-        # devx scrubs /usr/bin, so apt-installed tools (node, wasm-objdump)
-        # need /usr/bin appended explicitly. Order matters: devx's $PATH
-        # first (so devx wins for anything it ships), then wasmtime/wasi-sdk
-        # (locally installed), then /usr/bin (apt fallback). On Darwin we
-        # never apt-install anything, so /usr/bin would shadow nix tools
-        # with BSD versions — keep it off.
+        # devx scrubs the user-installed tool locations. Add them back after
+        # devx's $PATH so devx wins where there's overlap, but the per-OS
+        # installer outputs are still findable:
+        #   Linux:  apt installs node / wasm-objdump to /usr/bin;
+        #           curl wasmtime installer drops into ~/.wasmtime/bin
+        #   Darwin: nix-env -iA puts everything (wasmtime, wabt, node, …)
+        #           into ~/.nix-profile/bin
+        # /usr/bin is not added on Darwin because it would shadow nix
+        # coreutils with BSD versions (no -mindepth on find, etc.).
         case "$(uname -s)" in
           Linux)  export PATH="$PATH:$HOME/.wasmtime/bin:$HOME/.ghc-wasm/wasi-sdk/bin:/usr/bin" ;;
-          Darwin) export PATH="$PATH:$HOME/.ghc-wasm/wasi-sdk/bin" ;;
+          Darwin) export PATH="$PATH:$HOME/.nix-profile/bin:$HOME/.ghc-wasm/wasi-sdk/bin" ;;
         esac
         echo 'main = putStrLn "Hello from WASM backend"' > /tmp/hello.hs
         _build/dist/bin/wasm32-unknown-wasi-ghc /tmp/hello.hs -o /tmp/hello.wasm
