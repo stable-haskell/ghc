@@ -568,6 +568,20 @@ auditable while binaries live in releases.
   time, so the build proceeds; but cabal's view of installed packages
   is wrong, which is a latent footgun (ABI hashes etc.). Tracking as
   a stable-haskell/cabal followup.
+- **2026-05-27** — **PHASE 6.5 GATE PASSED. FULL MISO APP BUILDS END-TO-END.**
+  Re-ran the miso build at `/tmp/wasm-reactor-test/` with the dyld.mjs
+  preload workaround in place. All 50+ dependencies — including the
+  heavy TH packages (aeson, lens, jsaddle, jsaddle-wasm) — built
+  cleanly via wasm-iserv. Final `myapp.wasm` is 2.8MB, valid
+  WebAssembly MVP binary. The dyld.mjs preload workaround scales.
+  Two end-user gotchas surfaced and are documented:
+   * miso 1.11 apps need `build-depends: ghc-experimental` to import
+     `GHC.Wasm.Prim` (otherwise GHC-87110 "module hidden in
+     ghc-experimental").
+   * For miso, the wasm entry is `startApp defaultEvents app` *not*
+     `JSW.run (startApp …)` — miso's `startApp` already returns
+     `IO ()`; wrapping it in `JSW.run` triggers `JSM ()` / `IO ()`
+     mismatch.
 - **2026-05-26** — **PHASE 6 v0.0.2 (miso e2e) BLOCKED on wasm-backend
   shared-library support.** [HISTORICAL — superseded by 2026-05-27] Adding miso 1.11.0 + jsaddle-wasm pulls in
   `character-ps` which needs `Data.Word.dyn_hi` from base — but our wasm
