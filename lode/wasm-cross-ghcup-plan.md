@@ -687,6 +687,48 @@ auditable while binaries live in releases.
      builds both non-TH and TH hello-worlds.
   Phase 4 gate is met for the aarch64-darwin host. Linux hosts join
   once PR #181 CI verifies their build.
+- **2026-05-27** — **PHASE 5 GATE PASSED. Dual-compiler `cabal build`
+  works end-to-end via ghcup.** Created `cabal-3.17.0.0.stable.0`
+  release (pre-release) on stable-haskell/ghc with the bundled
+  cabal-install binary (cabal-install 3.17.0.1 from stable-haskell/cabal
+  HEAD + R8 patches). Bundled `lib/libgmp.10.dylib` next to the
+  binary with `@loader_path/lib`-relative rpath so it runs without
+  nix/Homebrew on stock aarch64-darwin. Uses ghcup metadata's
+  `dlInstallSpec.exeRules` + `dataRules: lib/**` to install both files.
+  Add to the same channel YAML.
+  **One critical cabal source patch was needed** to make the dual-
+  compiler `cabal build` flow work on the ghcup-installed bindist:
+   * cabal's `guessGhcPkgFromGhcPath` (`Cabal/src/Distribution/Simple/
+     GHC.hs::guessToolFromGhcPath`) looks for `ghc-pkg` next to the
+     ghc binary, then falls back to PATH. For a cross-compiler bindist
+     where `bin/` only contains the target-prefixed names (e.g.
+     `wasm32-unknown-wasi-ghc-pkg`, no bare `ghc-pkg`), the fallback
+     grabs the BUILD compiler's `ghc-pkg` from PATH, triggering
+     "Version mismatch between ghc and ghc-pkg" at configure time.
+   * Patch: detect the target prefix on the ghc binary
+     (`takeBaseName p` strips dir/ext, `isSuffixOf` the
+     `"ghc"++versionSuffix` tail, take everything before that) and
+     prepend it to the toolname when guessing. So
+     `/path/wasm32-unknown-wasi-ghc` guesses
+     `/path/wasm32-unknown-wasi-ghc-pkg` first, which exists in the
+     bindist. Falls back to existing logic if no prefix is detected.
+   * Patch saved at `lode/r12-cabal-target-prefix-aware-tool-guess.patch`
+     (71 lines) for upstreaming to stable-haskell/cabal#359.
+   * The patched cabal binary in the released tarball already has
+     this fix baked in.
+  Final cabal bindist SHA256:
+    `7f755b0810f5167b7f776470b5219834cdcbdad562998fd3c074b091be77e4d6`
+  Verified end-to-end:
+   * Fresh sandbox: `ghcup config add-release-channel` + install ghc
+     + install cabal both succeed.
+   * `cabal build test-app` on a dual-compiler `cabal.project`
+     (with-build-compiler = ghc-9.8.4, with-compiler = wasm GHC,
+     shared:True) builds a 1.7MB valid WebAssembly MVP binary via
+     `cabal-3.17.0.0.stable.0`.
+  Original Task #13 (cabal symlink resolution) is RESOLVED by the
+  same patch — the target-prefix issue was the ghcup end-user
+  manifestation of the same underlying gap in
+  `guessGhcPkgFromGhcPath`.
 - **2026-05-26** — **PHASE 6 v0.0.2 (miso e2e) BLOCKED on wasm-backend
   shared-library support.** [HISTORICAL — superseded by 2026-05-27] Adding miso 1.11.0 + jsaddle-wasm pulls in
   `character-ps` which needs `Data.Word.dyn_hi` from base — but our wasm
