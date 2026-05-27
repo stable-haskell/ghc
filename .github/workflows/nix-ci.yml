@@ -892,11 +892,14 @@ jobs:
       shell: devx {0}
       run: |
         set -eo pipefail
-        # Keep devx's $PATH first (same reasoning as the Package step). Linux
-        # additionally needs $HOME/.wasmtime/bin since wasmtime was installed
-        # there by the "Install wasi-sdk" step.
+        # devx scrubs /usr/bin, so apt-installed tools (node, wasm-objdump)
+        # need /usr/bin appended explicitly. Order matters: devx's $PATH
+        # first (so devx wins for anything it ships), then wasmtime/wasi-sdk
+        # (locally installed), then /usr/bin (apt fallback). On Darwin we
+        # never apt-install anything, so /usr/bin would shadow nix tools
+        # with BSD versions — keep it off.
         case "$(uname -s)" in
-          Linux)  export PATH="$PATH:$HOME/.wasmtime/bin:$HOME/.ghc-wasm/wasi-sdk/bin" ;;
+          Linux)  export PATH="$PATH:$HOME/.wasmtime/bin:$HOME/.ghc-wasm/wasi-sdk/bin:/usr/bin" ;;
           Darwin) export PATH="$PATH:$HOME/.ghc-wasm/wasi-sdk/bin" ;;
         esac
         echo 'main = putStrLn "Hello from WASM backend"' > /tmp/hello.hs
