@@ -828,7 +828,16 @@ jobs:
             export PATH="$HOME/.nix-profile/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
             sudo apt-get update -qq
             sudo apt-get install -y --no-install-recommends \
-              jq unzip zstd nodejs wabt
+              jq unzip zstd wabt
+            # Ubuntu noble's apt nodejs is 18.19.1, but post-link.mjs uses
+            # import.meta.filename (Node 20.11+) — without it, isMain() returns
+            # false silently and the script exits writing nothing. Install
+            # Node 22 from NodeSource instead.
+            if ! command -v node >/dev/null 2>&1 || \
+               [ "$(node -p 'parseInt(process.versions.node)' 2>/dev/null || echo 0)" -lt 20 ]; then
+              curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+              sudo apt-get install -y --no-install-recommends nodejs
+            fi
             if ! command -v wasmtime >/dev/null 2>&1; then
               curl -sSL https://wasmtime.dev/install.sh | bash
               export PATH="$HOME/.wasmtime/bin:$PATH"
