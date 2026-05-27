@@ -7,8 +7,15 @@ on:
       - synchronize
   push:
     branches: [stable-ghc-9.14, stable-master]
+    # Tag pushes matching wasm32-wasi-* trigger the Cross: WASM jobs to
+    # additionally upload their bindist tarballs to the matching GitHub
+    # Release, populating the stable-haskell ghcup channel.
+    tags: [wasm32-wasi-*]
 
   workflow_dispatch:
+
+permissions:
+  contents: write   # for upload of bindist tarballs to releases on tag push
 
 env:
   CABAL_CACHE_PATH: _build/cabal/bin
@@ -694,16 +701,26 @@ jobs:
         path: _build/dist/lib/targets/javascript-unknown-ghcjs
 
   # ---------------------------------------------------------------------------
-  # Cross: WASM backend (aarch64-darwin, uses static dist)
+  # Cross: WASM backend — matrixed across all build hosts so each one
+  # produces a host-specific bindist tarball that can be shipped through
+  # the stable-haskell ghcup channel.
   # ---------------------------------------------------------------------------
   cross-wasm:
-    name: "Cross: WASM / aarch64-darwin"
+    name: "Cross: WASM / ${{ matrix.plat }}"
     # Cross-builds only need the dist artifact from build. They run in parallel
-    # with tests — each VM is independent (separate nix daemon, separate disk).
+    # with tests — each VM/runner is independent (separate nix daemon, etc.).
     needs: [build]
     if: ${{ !cancelled() && contains(fromJSON('["success", "failure"]'), needs.build.result) }}
-    runs-on: [self-hosted, nix]
+    runs-on: ${{ fromJSON(matrix.runner) }}
     continue-on-error: true
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { plat: aarch64-darwin, devx-plat: aarch64-darwin, runner: '["self-hosted", "nix"]' }
+          - { plat: x86_64-linux,   devx-plat: x86_64-linux,   runner: '"ubuntu-latest"' }
+          - { plat: aarch64-linux,  devx-plat: aarch64-linux,  runner: '"ubuntu-24.04-arm"' }
 
     steps:
     - name: Clean workspace
@@ -752,7 +769,7 @@ jobs:
 
     - uses: input-output-hk/actions/devx@latest
       with:
-        platform: aarch64-darwin
+        platform: ${{ matrix.devx-plat }}
         compiler-nix-name: 'ghc98'
         minimal: true
         ghc: true
@@ -760,7 +777,7 @@ jobs:
     - name: Download dist
       uses: actions/download-artifact@v4
       with:
-        name: aarch64-darwin-dynamic0-dist
+        name: ${{ matrix.plat }}-dynamic0-dist
         path: _build/dist
 
     - name: Set up stage2 from dist
@@ -922,10 +939,47 @@ jobs:
           wasmtime run /tmp/hello.wasm
         fi
 
+    # Package the full ghcup-shippable bindist tarball — same recipe the
+    # Makefile uses locally (tar czhf -h dereferences the wasm-prefixed
+    # symlinks into real files, includes bin/ + lib/ + configure + Makefile
+    # + relocate.sh). Renamed with the host triple to disambiguate.
+    - name: Package bindist tarball
+      shell: devx {0}
+      if: ${{ !cancelled() }}
+      run: |
+        set -eux
+        export CABAL_DIR="$GITHUB_WORKSPACE/_build/cabal-dir"
+        export TMPDIR="$GITHUB_WORKSPACE/_build/tmp"
+        # post-link.mjs etc. — the Makefile target depends on stage3-wasm32-unknown-wasi-additional-files
+        # so run that first.
+        rm -f _build/dist/ghc-wasm32-unknown-wasi.tar.gz
+        make DIST_BUILD=1 \
+             CABAL=$PWD/_build/dist/bin/cabal \
+             GHC_TOOLCHAIN_BIN=$PWD/_build/dist/bin/ghc-toolchain-bin \
+             _build/dist/ghc-wasm32-unknown-wasi.tar.gz
+        # rename with the host triple so we ship one tarball per host
+        cp _build/dist/ghc-wasm32-unknown-wasi.tar.gz \
+           _build/dist/ghc-wasm32-unknown-wasi-${{ matrix.plat }}.tar.gz
+        ls -lh _build/dist/ghc-wasm32-unknown-wasi-${{ matrix.plat }}.tar.gz
+        echo "SHA256:"
+        shasum -a 256 _build/dist/ghc-wasm32-unknown-wasi-${{ matrix.plat }}.tar.gz
+
     - name: Upload WASM cross artifacts
       uses: actions/upload-artifact@v4
       if: ${{ !cancelled() }}
       with:
-        name: aarch64-darwin-cross-wasm
-        retention-days: 1
-        path: _build/dist/lib/targets/wasm32-unknown-wasi
+        name: ${{ matrix.plat }}-cross-wasm
+        retention-days: 30
+        path: _build/dist/ghc-wasm32-unknown-wasi-${{ matrix.plat }}.tar.gz
+
+    # On a tag push matching wasm32-wasi-*, also upload the bindist
+    # tarball directly to that GitHub Release so the ghcup channel can
+    # point at it. Other triggers (PR pushes, branch pushes) only produce
+    # workflow artifacts which is fine for review purposes.
+    - name: Upload bindist to release (on tag push)
+      if: ${{ startsWith(github.ref, 'refs/tags/wasm32-wasi-') }}
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ github.ref_name }}
+        files: _build/dist/ghc-wasm32-unknown-wasi-${{ matrix.plat }}.tar.gz
+        fail_on_unmatched_files: true
