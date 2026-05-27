@@ -648,6 +648,45 @@ auditable while binaries live in releases.
     `8241c107930fadd77fe28773f47581e7288cbc405143a7acf5c0bec4df181d2e`
   (size 226747741 bytes). This is the artifact ready for Phase 4
   hosting.
+- **2026-05-27** — **PHASE 4 GATE PASSED. ghcup channel published.**
+  Decisions (user-approved):
+   * Host: GitHub release attachment on stable-haskell/ghc
+   * Version label: `wasm32-wasi-9.14.0.stable.0`
+   * Channel: custom (GitHub Pages on stable-haskell/ghc gh-pages branch)
+  Implementation:
+   * Created GitHub release `wasm32-wasi-9.14.0.stable.0` (pre-release
+     flag set) with the wasm bindist attached. URL:
+     https://github.com/stable-haskell/ghc/releases/tag/wasm32-wasi-9.14.0.stable.0
+   * Added autoconf-shaped install stubs to the bindist
+     (mk/wasm-configure.sh + mk/wasm-bindist-Makefile, wired through
+     the main Makefile, commit `7c26a1def7e`) so `ghcup install ghc
+     <ver>`'s standard `./configure --prefix && make install
+     DESTDIR=staging` flow works. The install target honors `$(DESTDIR)`,
+     copies bin/+lib/+relocate.sh, and prints a node-missing NOTE.
+   * Tarball SHA changed to
+     `93e5d8c70fb670148015ca6cbcb76fbe1d9fe9d7b7945de0b983799e32efb60e`
+     after adding the autoconf stubs.
+   * Created orphan `gh-pages` branch with `ghcup-wasm.yaml` +
+     `index.html`. Enabled GitHub Pages on that branch.
+     YAML URL: https://stable-haskell.github.io/ghc/ghcup-wasm.yaml
+     Landing page: https://stable-haskell.github.io/ghc/
+   * Crucial schema finding: ghcup's custom-channel parser expects the
+     0.0.9 flat schema (versions directly under tool name) — the
+     0.1.0 schema (`toolDetails:`/`toolVersions:` indirection) only
+     works for the upstream-cached default channel, NOT for
+     `ghcup config add-release-channel <url>`.
+  End-to-end verified:
+   * `ghcup config add-release-channel https://stable-haskell.github.io/ghc/ghcup-wasm.yaml`
+     → succeeds, channel cached.
+   * `ghcup list -t ghc` shows `wasm32-wasi-9.14.0.stable.0
+     latest-prerelease`.
+   * `ghcup install ghc wasm32-wasi-9.14.0.stable.0` → downloads
+     bindist (~216MB), verifies SHA256, runs configure + make install,
+     prints the viPostInstall message including the node hint.
+   * Installed compiler at `~/.ghcup/ghc/wasm32-wasi-9.14.0.stable.0/`
+     builds both non-TH and TH hello-worlds.
+  Phase 4 gate is met for the aarch64-darwin host. Linux hosts join
+  once PR #181 CI verifies their build.
 - **2026-05-26** — **PHASE 6 v0.0.2 (miso e2e) BLOCKED on wasm-backend
   shared-library support.** [HISTORICAL — superseded by 2026-05-27] Adding miso 1.11.0 + jsaddle-wasm pulls in
   `character-ps` which needs `Data.Word.dyn_hi` from base — but our wasm
