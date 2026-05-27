@@ -814,28 +814,40 @@ jobs:
         set -eux
         export TMPDIR="$GITHUB_WORKSPACE/_build/tmp"
         mkdir -p "$TMPDIR"
-        # ghc-wasm-meta's bootstrap.sh needs jq + unzip, which aren't in the
-        # devx shell. Add nix-profile (installed by Setup runner) to PATH.
-        # Also add nix itself so we can install missing tools on the fly.
-        export PATH="$HOME/.nix-profile/bin:/nix/var/nix/profiles/default/bin:$PATH"
-        # Verify required tools or install them (use nix-env, not nix profile,
-        # because experimental features may not be enabled in the VM)
-        # nodejs is needed for the WASM smoke test (post-link.mjs + WASI runtime)
-        # wasmtime is needed for running pure WASI modules (no JSFFI)
-        # wabt provides wasm-objdump for inspecting WASM imports
-        for tool in jq unzip zstd node wasmtime; do
-          if ! command -v "$tool" &>/dev/null; then
-            pkg="$tool"
-            [ "$tool" = "node" ] && pkg="nodejs"
-            echo "Installing $pkg via nix-env..."
-            /nix/var/nix/profiles/default/bin/nix-env -iA "nixpkgs.$pkg"
+        # ghc-wasm-meta's bootstrap.sh needs jq + unzip; the smoke test below
+        # also needs node + wasmtime + wasm-objdump. The devx shell scrubs the
+        # system PATH so we have to install or expose them explicitly.
+        #
+        # Pick the installer based on what the runner provides:
+        #   - apt-get (github-hosted ubuntu-* runners) — most tools are
+        #     preinstalled; we just expose /usr/bin and install wasmtime + wabt
+        #   - nix-env  (self-hosted darwin Tart VMs) — install via nixpkgs
+        #     channel which the Tart base image preconfigures
+        export PATH="$HOME/.nix-profile/bin:/nix/var/nix/profiles/default/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+        if command -v apt-get >/dev/null 2>&1; then
+          # Ubuntu runner — most wasm-side helpers are in apt
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            jq unzip zstd nodejs wabt
+          if ! command -v wasmtime >/dev/null 2>&1; then
+            curl -sSL https://wasmtime.dev/install.sh | bash
+            export PATH="$HOME/.wasmtime/bin:$PATH"
+            echo "$HOME/.wasmtime/bin" >> "$GITHUB_PATH"
           fi
-        done
-        # wabt (wasm-objdump) is a separate install since the tool name
-        # differs from the package name
-        if ! command -v wasm-objdump &>/dev/null; then
-          echo "Installing wabt (wasm-objdump) via nix-env..."
-          /nix/var/nix/profiles/default/bin/nix-env -iA nixpkgs.wabt
+        else
+          # Tart VM — go through nix-env on the preconfigured nixpkgs channel
+          for tool in jq unzip zstd node wasmtime; do
+            if ! command -v "$tool" >/dev/null 2>&1; then
+              pkg="$tool"
+              [ "$tool" = "node" ] && pkg="nodejs"
+              echo "Installing $pkg via nix-env..."
+              /nix/var/nix/profiles/default/bin/nix-env -iA "nixpkgs.$pkg"
+            fi
+          done
+          if ! command -v wasm-objdump >/dev/null 2>&1; then
+            echo "Installing wabt (wasm-objdump) via nix-env..."
+            /nix/var/nix/profiles/default/bin/nix-env -iA nixpkgs.wabt
+          fi
         fi
         curl -fsSL https://gitlab.haskell.org/ghc/ghc-wasm-meta/-/raw/master/bootstrap.sh | \
           FLAVOUR=9.12 PREFIX=$HOME/.ghc-wasm sh
@@ -878,7 +890,9 @@ jobs:
       shell: devx {0}
       run: |
         set -eo pipefail
-        export PATH="$HOME/.nix-profile/bin:$PATH:$HOME/.ghc-wasm/wasi-sdk/bin"
+        # Add nix paths + system paths so node, wasm-objdump, wasmtime are
+        # all reachable regardless of which path the install step took.
+        export PATH="$HOME/.nix-profile/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.wasmtime/bin:$PATH:$HOME/.ghc-wasm/wasi-sdk/bin"
         echo 'main = putStrLn "Hello from WASM backend"' > /tmp/hello.hs
         _build/dist/bin/wasm32-unknown-wasi-ghc /tmp/hello.hs -o /tmp/hello.wasm
 
