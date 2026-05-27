@@ -638,6 +638,16 @@ auditable while binaries live in releases.
   Repackaged bindist after this commit. New SHA256:
     `d10b2ee8c807f47de94870604a68b6ff73835fe75981a456b962b80d77be6789`
   (size 226745567 bytes).
+- **2026-05-27** — **`relocate.sh` also warns at install time if Node.js
+  missing** (commit `d2dda02f14b`). Layers the same UX hint as the
+  compile-time check, but at install/relocate time so end users learn
+  the requirement before their first TH compile. Non-TH builds remain
+  unaffected — the script still completes successfully when node is
+  missing, it just prints a NOTE to stderr.
+  Final repackaged bindist SHA256:
+    `8241c107930fadd77fe28773f47581e7288cbc405143a7acf5c0bec4df181d2e`
+  (size 226747741 bytes). This is the artifact ready for Phase 4
+  hosting.
 - **2026-05-26** — **PHASE 6 v0.0.2 (miso e2e) BLOCKED on wasm-backend
   shared-library support.** [HISTORICAL — superseded by 2026-05-27] Adding miso 1.11.0 + jsaddle-wasm pulls in
   `character-ps` which needs `Data.Word.dyn_hi` from base — but our wasm
