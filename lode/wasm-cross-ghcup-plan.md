@@ -602,6 +602,28 @@ auditable while binaries live in releases.
   Bindist tarball repackaged with the clean state: 226MB,
   ghc-internal.so has rts in deps, dyld.mjs no longer has the
   workaround.
+- **2026-05-27** — **End-user bindist verification (Phase 3 → Phase 4
+  handoff).** Extracted the 226MB tarball into a fresh prefix
+  (`/tmp/wasm-bindist-test/`), ran `./relocate.sh`, then compiled two
+  hello-world programs as an end user would:
+   * Non-TH `hello2.hs` → `hello2.wasm` (1.7MB, valid wasm MVP) — works
+     standalone (no node needed at compile time).
+   * TH-using `hello.hs` (`$(lift "...")`) → `hello.wasm` (1.7MB) —
+     works **with `node` on PATH** (the iserv shim shells out to node
+     to run the wasm interpreter at compile time).
+  Bindist SHA256:
+    `005ebbb7e9c5dfa5bf183a263ab398022409004030b817fd7a12781f1db7ef80`
+  Phase 4 prerequisites:
+   * Bindist file: `_build/dist/ghc-wasm32-unknown-wasi.tar.gz`
+     (226742697 bytes).
+   * Documented user prerequisite: **`node` must be on PATH** if the
+     user wants TH evaluation (cabal pkgs with `template-haskell`).
+     Without node: `External interpreter terminated (127)` with no
+     hint about node being the missing piece — Phase 7 doc TODO.
+   * Symlink-resolution cabal bug (Task #13) downgraded: only affects
+     in-tree `_build/dist/` developer use (symlinks present). End
+     users via ghcup get the `tar czhf`-dereferenced real files in
+     `bin/`, so they don't trip it. Not gating on Phase 4.
 - **2026-05-26** — **PHASE 6 v0.0.2 (miso e2e) BLOCKED on wasm-backend
   shared-library support.** [HISTORICAL — superseded by 2026-05-27] Adding miso 1.11.0 + jsaddle-wasm pulls in
   `character-ps` which needs `Data.Word.dyn_hi` from base — but our wasm
