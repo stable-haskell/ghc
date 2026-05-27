@@ -1048,7 +1048,7 @@ $(DIST_DIR)/ghc-$(1).tar.gz: stage3-$(1)
 		--directory=$$(DIST_DIR) \
 		$(foreach exe,$(STAGE3_EXECUTABLES),bin/$(1)-$(exe)$(EXE_EXT)) \
 		lib/targets/$(1) \
-		$(if $(filter wasm32-unknown-wasi,$(1)),relocate.sh)
+		$(if $(filter wasm32-unknown-wasi,$(1)),relocate.sh configure Makefile)
 	@echo "::endgroup::"
 
 endef
@@ -1081,10 +1081,19 @@ stage3-wasm32-unknown-wasi-additional-files:
 	# Phase 3: relocate.sh at the top of the bindist — re-runs ghc-pkg recache
 	# for the new install prefix (binary cache is not portable; *.conf files
 	# already use ${pkgroot}-relative paths from DIST_COPY_LIB_CONF_CROSS).
-	# ghcup invokes via viPostInstall.
+	# Note: ghc-pkg auto-recaches by mtime on first read, so this is just an
+	# eager refresh.
 	$(call LOG,Copying relocate.sh to bindist root)
 	@cp -f mk/wasm-relocate.sh $(DIST_DIR)/relocate.sh
 	@chmod +x $(DIST_DIR)/relocate.sh
+	# Phase 4: autoconf-shaped stubs so `ghcup install ghc <ver>` can do its
+	# standard "./configure --prefix=DIR && make install" flow. The configure
+	# script just records the prefix; the Makefile install target copies
+	# bin/ + lib/ + relocate.sh and refreshes the package-db cache.
+	$(call LOG,Copying configure + Makefile to bindist root)
+	@cp -f mk/wasm-configure.sh $(DIST_DIR)/configure
+	@chmod +x $(DIST_DIR)/configure
+	@cp -f mk/wasm-bindist-Makefile $(DIST_DIR)/Makefile
 
 stage3-x86_64-musl-linux-additional-files: STAGE=stage3
 stage3-x86_64-musl-linux-additional-files: TARGET_PLATFORM=x86_64-musl-linux
