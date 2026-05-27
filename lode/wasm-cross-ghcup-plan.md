@@ -611,19 +611,33 @@ auditable while binaries live in releases.
    * TH-using `hello.hs` (`$(lift "...")`) → `hello.wasm` (1.7MB) —
      works **with `node` on PATH** (the iserv shim shells out to node
      to run the wasm interpreter at compile time).
-  Bindist SHA256:
+  Original bindist SHA256:
     `005ebbb7e9c5dfa5bf183a263ab398022409004030b817fd7a12781f1db7ef80`
   Phase 4 prerequisites:
    * Bindist file: `_build/dist/ghc-wasm32-unknown-wasi.tar.gz`
      (226742697 bytes).
    * Documented user prerequisite: **`node` must be on PATH** if the
      user wants TH evaluation (cabal pkgs with `template-haskell`).
-     Without node: `External interpreter terminated (127)` with no
-     hint about node being the missing piece — Phase 7 doc TODO.
    * Symlink-resolution cabal bug (Task #13) downgraded: only affects
      in-tree `_build/dist/` developer use (symlinks present). End
      users via ghcup get the `tar czhf`-dereferenced real files in
      `bin/`, so they don't trip it. Not gating on Phase 4.
+- **2026-05-27** — **UX fix: clear error when `node` missing for TH**
+  (commit `6171b4256b1`). The bindist's TH iserv path goes through
+  `dyld.mjs` which starts with `#!/usr/bin/env -S node`. Without node
+  the iserv child exits with 127 and GHC reports the generic
+  `External interpreter terminated (127)` from `Process.hs:129` —
+  cryptic for someone tracking down a CI failure.
+  Added a pre-flight `findExecutable "node"` in
+  `compiler/GHC/Runtime/Interpreter/Wasm.hs::spawnWasmInterp` that
+  throws `InstallationError` with a clear, actionable message naming
+  the dyld.mjs script and instructing the user to install Node.js.
+  Verified: clearing PATH of node and recompiling a TH-using hello-
+  world now produces the new message; happy path (node on PATH)
+  unchanged.
+  Repackaged bindist after this commit. New SHA256:
+    `d10b2ee8c807f47de94870604a68b6ff73835fe75981a456b962b80d77be6789`
+  (size 226745567 bytes).
 - **2026-05-26** — **PHASE 6 v0.0.2 (miso e2e) BLOCKED on wasm-backend
   shared-library support.** [HISTORICAL — superseded by 2026-05-27] Adding miso 1.11.0 + jsaddle-wasm pulls in
   `character-ps` which needs `Data.Word.dyn_hi` from base — but our wasm
