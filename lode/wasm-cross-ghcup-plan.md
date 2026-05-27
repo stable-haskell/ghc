@@ -729,6 +729,34 @@ auditable while binaries live in releases.
   same patch — the target-prefix issue was the ghcup end-user
   manifestation of the same underlying gap in
   `guessGhcPkgFromGhcPath`.
+- **2026-05-27** — **PHASE 7 GATE PASSED.** Tutorial-grade landing
+  page + downloadable hello template shipped on the `gh-pages` branch:
+   * `index.html` — install instructions, 90-second hello walkthrough,
+     anatomy section (cabal.project, myapp.cabal, Main.hs, run.mjs
+     reactor sequence), troubleshooting table, project links.
+     Light/dark mode CSS.
+   * `examples/hello/` — minimal but production-shaped reactor
+     template:
+       - `app/Main.hs` (CPP-guarded `foreign export javascript`)
+       - `cabal.project` (dual-compiler bare names + wasm32 `shared:True`)
+       - `myapp.cabal` (reactor `ghc-options` + `cpp-options: -DWASM`)
+       - `Makefile` (self-documenting, autodetects
+         `$GHCUP_INSTALL_BASE_PREFIX`, honors macOS `/tmp` symlink
+         canonicalization for `post-link.mjs`)
+       - `run.mjs` (Node:wasi launcher with full reactor bring-up
+         comments)
+       - `public/{index.html,index.js}` (browser launcher via
+         `browser_wasi_shim` ESM)
+   * `examples/stable-haskell-wasm-hello.tar.gz` — 5 KB tarball,
+     SHA256
+     `1f422c5ee6056ec0f0c4d1055cbfda6513c98d4bcc305991dd04f067d3a68843`,
+     extracts to `stable-haskell-wasm-hello/`.
+  Verified end-to-end from a clean dir:
+   * `curl -L https://stable-haskell.github.io/ghc/examples/stable-
+     haskell-wasm-hello.tar.gz | tar xz`
+   * `cd stable-haskell-wasm-hello && make run-node`
+   * stdout: `Hello from the WASM reactor!`
+  Phase 7 gate ("unfamiliar dev reaches demo from README alone") met.
 - **2026-05-26** — **PHASE 6 v0.0.2 (miso e2e) BLOCKED on wasm-backend
   shared-library support.** [HISTORICAL — superseded by 2026-05-27] Adding miso 1.11.0 + jsaddle-wasm pulls in
   `character-ps` which needs `Data.Word.dyn_hi` from base — but our wasm
