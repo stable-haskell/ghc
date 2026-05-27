@@ -582,6 +582,26 @@ auditable while binaries live in releases.
      `JSW.run (startApp …)` — miso's `startApp` already returns
      `IO ()`; wrapping it in `JSW.run` triggers `JSM ()` / `IO ()`
      mismatch.
+- **2026-05-27** — **PROPER LINK-LEVEL FIX LANDED. dyld.mjs workaround
+  REVERTED.** Implemented the right fix in
+  `compiler/GHC/Linker/Dynamic.hs` (commit `f92963f43ef`): on wasm32,
+  `linkDynLib` now forces the current way's `rtsWayUnitId` into the
+  pkg list when it isn't already present (looked up via `lookupUnitId`
+  on `ue_units unit_env`). The fix is wasm32-only, purely additive
+  (no-op for .so files that already include rts), and lets `wasm-ld`
+  populate `dylink.0/needed_dynlibs` with rts even when the package
+  was built with `-no-rts`.
+  Verified at two levels:
+   * Artifact: `libHSghc-internal-9.1400.0-ghc9.14.so` needed_dynlibs
+     went from `[rts-fs, libdl, libc]` (3 entries) → `[rts, rts-fs,
+     libffi, libdl, libc]` (5 entries, with the main rts now present).
+   * Runtime: after reverting the dyld.mjs main-rts preload workaround
+     (`d32bc88ff6a`), the full miso build *still* succeeds — aeson
+     (TH-heavy) re-built cleanly via iserv, `myapp.wasm` produced.
+     The link fix is sufficient on its own.
+  Bindist tarball repackaged with the clean state: 226MB,
+  ghc-internal.so has rts in deps, dyld.mjs no longer has the
+  workaround.
 - **2026-05-26** — **PHASE 6 v0.0.2 (miso e2e) BLOCKED on wasm-backend
   shared-library support.** [HISTORICAL — superseded by 2026-05-27] Adding miso 1.11.0 + jsaddle-wasm pulls in
   `character-ps` which needs `Data.Word.dyn_hi` from base — but our wasm
