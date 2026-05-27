@@ -29,6 +29,21 @@ fi
 echo "Relocating wasm32-unknown-wasi-ghc package db to: $PKG_DB"
 "$GHC_PKG" recache --package-db "$PKG_DB"
 
+# Template Haskell support requires `node` (Node.js) on PATH: the wasm
+# dynamic linker shim (lib/dyld.mjs) is a Node script. Warn now if missing
+# so users learn this at install time, not at the first TH compile.
+if ! command -v node >/dev/null 2>&1; then
+  cat >&2 <<EOF
+
+NOTE: Node.js was not found on PATH. Template Haskell evaluation will
+      fail with a clear "requires \`node\` on PATH" error if you try to
+      build a package that uses TH (e.g. aeson, lens, miso). Install
+      Node.js and ensure \`node\` is on PATH before compiling such
+      packages. Non-TH builds work fine without Node.js.
+
+EOF
+fi
+
 cat <<EOF
 
 Stable Haskell wasm32-unknown-wasi-ghc ready.
