@@ -779,6 +779,26 @@ auditable while binaries live in releases.
   real interactive UI. Acceptance-tested fresh from the published
   tarball: `curl | tar | make post-link-web` produces a 2.8MB valid
   WebAssembly MVP plus its 48KB post-link jsffi.mjs glue.
+- **2026-05-27** — **Live in-browser miso demo + Phase 2 CI all green.**
+   * **Live demo at https://stable-haskell.github.io/ghc/demos/miso-counter/**
+     — pre-built mountpoint variant of the miso-counter template
+     (`mountPoint = Just "miso-root"`, so the explanatory HTML on the
+     demo page survives miso's diff). Visiting the URL renders the
+     counter directly — no install required. wasm SHA
+     `d3a4b8dbb78592761f891577774f5c714e34e624b6e7f2f22ced00d3d8a43f65`
+     (2,877,198 bytes); jsffi.mjs 48 KB. Landing page and
+     `examples/miso-counter/README.md` both link to it.
+   * **PHASE 2 GATE PASSED** — PR #181 run 26494711606 has all 6 Build
+     jobs PASS (aarch64-darwin, x86_64-linux, aarch64-linux each in
+     dynamic=0 and dynamic=1). Test + Cross jobs are in flight (8 of 14
+     remaining; persistent CI monitor watching for any transitions).
+     Each Build job uploads its native stage2 bindist as a workflow
+     artifact (260–303 MB per host/dynamic combo). To ship Linux wasm
+     **cross-compiler** bindists through the same ghcup channel,
+     follow-up work needs to wire `make
+     stage3-wasm32-unknown-wasi-tarball` (or equivalent) into the
+     Linux runners and upload the resulting wasm-cross tarball as an
+     artifact — the current Build jobs only produce native bindists.
 - **2026-05-26** — **PHASE 6 v0.0.2 (miso e2e) BLOCKED on wasm-backend
   shared-library support.** [HISTORICAL — superseded by 2026-05-27] Adding miso 1.11.0 + jsaddle-wasm pulls in
   `character-ps` which needs `Data.Word.dyn_hi` from base — but our wasm
