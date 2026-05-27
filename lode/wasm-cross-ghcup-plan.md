@@ -497,8 +497,34 @@ auditable while binaries live in releases.
   CI smoke test) missed `__ghc_wasm_jsffi_init` — without it, hs_start()
   throws "RTS is not initialised; call hs_init() first". Files in
   `lode/phase6-trivial-reactor-poc/`.
+- **2026-05-27** — **PHASE 6.5 shared-library blocker RESOLVED** via
+  extending stable-haskell's `--enable-dynamic` rearchitecture to
+  stage3 cross targets. Five concrete changes (3 commits to PR #181):
+    * `cabal.project.stage3.settings.in` + `configure.ac` + `Makefile`
+      (CONFIGURED_FILES + STAGE3_*_PREREQS + DYNAMIC RTS-ways sed +
+      DIST_COPY_LIBS_SO_CROSS .so/.dylib fix) + `cabal.project.stage3`
+      — symmetric stage2-mirror of the dynamic-enable wiring.
+    * `rts/RtsStartup.c` — missing wasm exclusion at the
+      `promoteBootLibrariesToGlobal()` call site (definition at line 108
+      excludes wasm; call at line 427 didn't, breaking the dyn rts build).
+    * `compiler/GHC/Driver/Session.hs` — disabled the wasm
+      `makeDynFlagsConsistent` rule. The rule's `LinkExecutable _`
+      predicate matched the DEFAULT `defaultDynFlags.ghcLink`, so it
+      fired for per-module compile invocations too — stripping WayDyn
+      mid-compile and breaking `.dyn_hi` lookup.
+  Result: stage3-wasm32-unknown-wasi DYNAMIC=1 produces 2121 .dyn_hi
+  + 40 .so files. End-user `cabal build` with `shared: True` compiles
+  miso through 67/70 modules.
+- **2026-05-27** — **PHASE 6.5 NEW BLOCKER: iserv-proxy / dyld.mjs hang.**
+  Miso's TH evaluation invokes the wasm external interpreter via
+  `node dyld.mjs libHSghci-9.14-ghc9.14.so 14 15 +RTS -H64m -RTS`.
+  The node process loads ghci.so but then hangs at 0% CPU, waiting on
+  IPC pipe fds 14/15. Parent ghc process also blocked. Neither side
+  errors or progresses. Suspect IPC handshake / wasm-load deadlock.
+  Investigation queued — needs dyld.mjs instrumentation +
+  minimal-TH-program repro.
 - **2026-05-26** — **PHASE 6 v0.0.2 (miso e2e) BLOCKED on wasm-backend
-  shared-library support.** Adding miso 1.11.0 + jsaddle-wasm pulls in
+  shared-library support.** [HISTORICAL — superseded by 2026-05-27] Adding miso 1.11.0 + jsaddle-wasm pulls in
   `character-ps` which needs `Data.Word.dyn_hi` from base — but our wasm
   base library is built `shared: False`. Two attempts to fix in
   `cabal.project.stage3`:
