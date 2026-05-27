@@ -892,11 +892,12 @@ jobs:
       shell: devx {0}
       run: |
         set -eo pipefail
-        # Match the per-host PATH from "Install wasi-sdk" — same rationale
-        # (don't promote /usr/bin's BSD tools on darwin).
+        # Keep devx's $PATH first (same reasoning as the Package step). Linux
+        # additionally needs $HOME/.wasmtime/bin since wasmtime was installed
+        # there by the "Install wasi-sdk" step.
         case "$(uname -s)" in
-          Linux)  export PATH="$HOME/.nix-profile/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.wasmtime/bin:$PATH:$HOME/.ghc-wasm/wasi-sdk/bin" ;;
-          Darwin) export PATH="$HOME/.nix-profile/bin:$PATH:$HOME/.ghc-wasm/wasi-sdk/bin" ;;
+          Linux)  export PATH="$PATH:$HOME/.wasmtime/bin:$HOME/.ghc-wasm/wasi-sdk/bin" ;;
+          Darwin) export PATH="$PATH:$HOME/.ghc-wasm/wasi-sdk/bin" ;;
         esac
         echo 'main = putStrLn "Hello from WASM backend"' > /tmp/hello.hs
         _build/dist/bin/wasm32-unknown-wasi-ghc /tmp/hello.hs -o /tmp/hello.wasm
@@ -975,10 +976,10 @@ jobs:
         set -eux
         export CABAL_DIR="$GITHUB_WORKSPACE/_build/cabal-dir"
         export TMPDIR="$GITHUB_WORKSPACE/_build/tmp"
-        case "$(uname -s)" in
-          Linux)  export PATH="$HOME/.nix-profile/bin:/usr/local/bin:/usr/bin:/bin:$PATH:$HOME/.ghc-wasm/wasi-sdk/bin" ;;
-          Darwin) export PATH="$HOME/.nix-profile/bin:$PATH:$HOME/.ghc-wasm/wasi-sdk/bin" ;;
-        esac
+        # Keep devx's $PATH first so `make` resolves to devx's GNU Make (4.4+)
+        # not Ubuntu's /usr/bin/make (4.3 — no $(let), silently returns empty
+        # which corrupts LIB_NAME_GLOB and breaks the package.conf copy phase).
+        export PATH="$PATH:$HOME/.ghc-wasm/wasi-sdk/bin"
         rm -f _build/dist/ghc-wasm32-unknown-wasi.tar.gz
         # The same five DIST_BUILD vars the previous "Build WASM cross
         # libraries" step uses — stage3 phony deps invoke configure which
