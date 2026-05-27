@@ -757,6 +757,28 @@ auditable while binaries live in releases.
    * `cd stable-haskell-wasm-hello && make run-node`
    * stdout: `Hello from the WASM reactor!`
   Phase 7 gate ("unfamiliar dev reaches demo from README alone") met.
+- **2026-05-27** — **miso-counter template shipped alongside hello.**
+  Phase 6.5 had verified the miso 1.11 build end-to-end on a private
+  test dir at `/tmp/wasm-reactor-test/`; that working setup is now
+  packaged as a shippable template on the channel:
+   * `examples/miso-counter/` (browsable) and
+     `examples/stable-haskell-wasm-miso-counter.tar.gz`
+     (SHA `7b243af055ef012864e9e1567739411e1c854dad8a17b5442b1e58937fc0b77b`,
+     5192 bytes).
+   * Same Makefile shape as `hello/` but only `run-web` (miso is
+     DOM-driven). `make build` first-run is ~5-10 min for the
+     TH-heavy dep tree; subsequent code edits are seconds.
+   * cabal.project pins miso 1.11 via `source-repository-package` and
+     ships the `allow-newer: jsaddle-wasm:ghc-experimental` override
+     needed for GHC 9.14.
+   * Main.hs follows the miso 1.11 `component` smart-constructor +
+     `startApp defaultEvents app` pattern (the API drift from older
+     miso versions is called out in the README troubleshooting table).
+  Landing page now features both examples side-by-side in a grid:
+  hello as the 90-second on-ramp, miso-counter as the step-up to a
+  real interactive UI. Acceptance-tested fresh from the published
+  tarball: `curl | tar | make post-link-web` produces a 2.8MB valid
+  WebAssembly MVP plus its 48KB post-link jsffi.mjs glue.
 - **2026-05-26** — **PHASE 6 v0.0.2 (miso e2e) BLOCKED on wasm-backend
   shared-library support.** [HISTORICAL — superseded by 2026-05-27] Adding miso 1.11.0 + jsaddle-wasm pulls in
   `character-ps` which needs `Data.Word.dyn_hi` from base — but our wasm
