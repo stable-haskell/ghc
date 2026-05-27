@@ -477,7 +477,12 @@ define DIST_COPY_LIBS_SO
 endef
 
 define DIST_COPY_LIBS_SO_CROSS
-	@find $(CURDIR)/$(STORE_DIR)/host/$(TARGET_PLATFORM)/lib/ -mindepth 1 -type f -name "$(DLL)" -execdir cp '{}' $(CURDIR)/$(DIST_DIR)/lib/targets/$(TARGET_PLATFORM)/lib/$(TARGET_PLATFORM)/'{}' \;
+	@# $(DLL) is set based on BUILD host (.dylib on Darwin, .so on Linux), but
+	@# cross targets have their own shared-library extension. wasm32-* and
+	@# Linux-style targets produce .so; Mac/Darwin targets would produce .dylib.
+	@# Search for both extensions so cross-stage SO/DYLIB files land in dist
+	@# regardless of build-host vs target-platform mismatch.
+	@find $(CURDIR)/$(STORE_DIR)/host/$(TARGET_PLATFORM)/lib/ -mindepth 1 -type f \( -name "*.so" -o -name "*.dylib" \) -execdir cp '{}' $(CURDIR)/$(DIST_DIR)/lib/targets/$(TARGET_PLATFORM)/lib/$(TARGET_PLATFORM)/'{}' \;
 endef
 
 
@@ -507,7 +512,8 @@ CONFIGURED_FILES := \
 	libraries/ghc-experimental/ghc-experimental.cabal \
 	libraries/base/base.cabal \
 	rts/include/ghcversion.h \
-	cabal.project.stage2.settings
+	cabal.project.stage2.settings \
+	cabal.project.stage3.settings
 
 # __  __       _         _                       _
 # |  \/  | __ _(_)_ __   | |_ __ _ _ __ __ _  ___| |_
@@ -959,9 +965,9 @@ STAGE3_$(1)_CABAL_BUILD = \
 # In DIST_BUILD mode, stage2 binaries come from a pre-built dist artifact;
 # skip the $(GHC2) prerequisite (it points into the stage2 store, not dist).
 ifdef DIST_BUILD
-STAGE3_$(1)_PREREQS = $$(GHC_TOOLCHAIN_BIN) $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) libraries/ghc-boot-th-next cabal.project.common cabal.project.stage3 stage3-$(1)-additional-files
+STAGE3_$(1)_PREREQS = $$(GHC_TOOLCHAIN_BIN) $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) libraries/ghc-boot-th-next cabal.project.common cabal.project.stage3 cabal.project.stage3.settings stage3-$(1)-additional-files
 else
-STAGE3_$(1)_PREREQS = $(GHC2) $$(GHC_TOOLCHAIN_BIN) $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) libraries/ghc-boot-th-next cabal.project.common cabal.project.stage3 stage3-$(1)-additional-files
+STAGE3_$(1)_PREREQS = $(GHC2) $$(GHC_TOOLCHAIN_BIN) $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) libraries/ghc-boot-th-next cabal.project.common cabal.project.stage3 cabal.project.stage3.settings stage3-$(1)-additional-files
 endif
 
 .PHONY: stage3-$(1)
@@ -990,6 +996,10 @@ stage3-$(1): $$(STAGE3_$(1)_PREREQS)
 		$(if $(STAGE3_$(1)_RANLIB),--ranlib $$(STAGE3_$(1)_RANLIB),) \
 		--disable-ld-override \
 		$$(STAGE3_$(1)_GHC_TOOLCHAIN_ARGS)
+
+ifeq ($(DYNAMIC),1)
+	$(SED) -i -e 's/"RTS ways","/"RTS ways","dyn /' $$(TARGET_DIR)/lib/settings
+endif
 
 	$$(DIST_DIR)/bin/$(1)-ghc --info
 

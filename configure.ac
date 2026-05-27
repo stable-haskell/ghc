@@ -48,6 +48,15 @@ AS_IF([test "x$enable_dynamic" = "xyes"], [
         APPEND_CONSTRAINT([rts +dynamic])
 ])
 
+# Stage3 currently has no extra-over-stage2 settings. cabal-install at
+# SHA 44817477 doesn't fully populate library-dirs/dynamic-library-dirs
+# when library-vanilla:False is set, so we keep vanilla on. The wasm
+# makeDynFlagsConsistent rule (compiler/GHC/Driver/Session.hs) was
+# disabled instead so the -dynamic-too compile + link pipeline stays
+# consistent on wasm.
+STAGE3_EXTRA_PKG=""
+AC_SUBST([STAGE3_EXTRA_PKG])
+
 # Indent with two spaces for substitution blocks (uniform handling)
 ALL_PACKAGES=`printf '%b' "$ALL_PACKAGES"`
 CONSTRAINTS=`printf '%b' "$CONSTRAINTS"`
@@ -94,6 +103,7 @@ AC_CONFIG_FILES([
     libraries/base/base.cabal
     rts/include/ghcversion.h
     cabal.project.stage2.settings
+    cabal.project.stage3.settings
 ])
 
 AC_OUTPUT
