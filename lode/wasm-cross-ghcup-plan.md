@@ -534,6 +534,40 @@ auditable while binaries live in releases.
   should emit a needed_dynlibs entry for the main rts. Tracking as
   follow-up; the dyld.mjs workaround unblocks TH for end-user wasm
   builds in the meantime.
+- **2026-05-27** — **Deeper root cause for the ghc-internal/main-rts
+  link bug**: `cabal.project.stage3` declares
+    `package ghc-internal / ghc-options: -no-rts`
+  Setting `-no-rts` (`Opt_NoRts` in GHC) is documented as the right
+  thing for static `.a` libs that would otherwise fail the
+  `mkUnitState` sanity check at `compiler/GHC/Unit/State.hs:1652`
+  ("RTS is missing from the package database"). However, when shared
+  is enabled, the *same flag* also prevents `-lHSrts-...` from being
+  added to the wasm-ld command for the resulting `.so`. The `.so`
+  ends up without rts in its `dylink.0/needed_dynlibs`.
+  GHC already has injection logic at `Unit/State.hs:1700-1713` that
+  makes `rtsWayUnitId` a synthetic dep of `ghcInternalUnitId`, but
+  that's at unit-state level — by the time `linkDynLib`
+  (`compiler/GHC/Linker/Dynamic.hs:55`) calls `preloadUnitsInfo'`
+  with cabal's explicit `--depends` list, the injection has no effect
+  because cabal didn't list rts in ghc-internal's depends.
+  **Cleanest fix** (deferred): on wasm32, when building a `.so` for
+  ghc-internal (or any pkg flagged `-no-rts`), explicitly append the
+  current `rtsWayUnitId` to `pkgs_with_rts` in `linkDynLib`. The
+  Wasm32 branch at `Dynamic.hs:92` already short-circuits to
+  `pkgs_with_rts` instead of `pkgs_without_rts`, but it needs to also
+  guarantee rts is *in* `pkgs_with_rts` regardless of caller intent.
+- **2026-05-27** — **Second bug surfaced during miso retry**:
+  stable-haskell/cabal resolves the `wasm32-unknown-wasi-ghc-pkg`
+  symlink to its target `ghc-pkg` before storing the path in
+  `setup-config`. GHC's ghc-pkg uses `argv[0]` to choose the target
+  package db, so after resolution the *native* db ends up in cabal's
+  db stack. Verified via `cabal -v3` output:
+    `db stack: [..., _build/dist/lib/package.conf.d, ...]`
+  (native), not `lib/targets/wasm32-unknown-wasi/lib/package.conf.d`.
+  The wasm GHC itself still consults its own default db at compile
+  time, so the build proceeds; but cabal's view of installed packages
+  is wrong, which is a latent footgun (ABI hashes etc.). Tracking as
+  a stable-haskell/cabal followup.
 - **2026-05-26** — **PHASE 6 v0.0.2 (miso e2e) BLOCKED on wasm-backend
   shared-library support.** [HISTORICAL — superseded by 2026-05-27] Adding miso 1.11.0 + jsaddle-wasm pulls in
   `character-ps` which needs `Data.Word.dyn_hi` from base — but our wasm
