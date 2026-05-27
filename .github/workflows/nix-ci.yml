@@ -962,6 +962,12 @@ jobs:
     # Makefile uses locally (tar czhf -h dereferences the wasm-prefixed
     # symlinks into real files, includes bin/ + lib/ + configure + Makefile
     # + relocate.sh). Renamed with the host triple to disambiguate.
+    #
+    # NOTE: the tarball Makefile target depends on `stage3-$(plat)` which is
+    # .PHONY, so it re-runs ghc-toolchain-bin. That tool needs
+    # wasm32-unknown-wasi-clang on PATH — the symlinks were created by the
+    # previous step but PATH doesn't persist across CI steps, so we re-add
+    # the wasi-sdk bin dir here.
     - name: Package bindist tarball
       shell: devx {0}
       if: ${{ !cancelled() }}
@@ -969,8 +975,10 @@ jobs:
         set -eux
         export CABAL_DIR="$GITHUB_WORKSPACE/_build/cabal-dir"
         export TMPDIR="$GITHUB_WORKSPACE/_build/tmp"
-        # post-link.mjs etc. — the Makefile target depends on stage3-wasm32-unknown-wasi-additional-files
-        # so run that first.
+        case "$(uname -s)" in
+          Linux)  export PATH="$HOME/.nix-profile/bin:/usr/local/bin:/usr/bin:/bin:$PATH:$HOME/.ghc-wasm/wasi-sdk/bin" ;;
+          Darwin) export PATH="$HOME/.nix-profile/bin:$PATH:$HOME/.ghc-wasm/wasi-sdk/bin" ;;
+        esac
         rm -f _build/dist/ghc-wasm32-unknown-wasi.tar.gz
         make DIST_BUILD=1 \
              CABAL=$PWD/_build/dist/bin/cabal \
