@@ -142,7 +142,22 @@ jobs:
           echo "$HOME/.ghcup/ghc/$WASM_VER/bin" >> "$GITHUB_PATH"
 
       # ---------------------------------------------------------------------
-      # 3b. Install cabal. Currently the channel only ships cabal for
+      # Debug: confirm the wasm GHC binary is actually invocable.
+      # ---------------------------------------------------------------------
+      - name: Verify wasm GHC works
+        run: |
+          set -euo pipefail
+          which wasm32-unknown-wasi-ghc
+          ls -la "$HOME/.ghcup/ghc/$WASM_VER/bin/" | head -20
+          echo "─── direct invocation ───"
+          "$HOME/.ghcup/ghc/$WASM_VER/bin/wasm32-unknown-wasi-ghc" --numeric-version || echo "::warning::--numeric-version failed (exit $?)"
+          "$HOME/.ghcup/ghc/$WASM_VER/bin/wasm32-unknown-wasi-ghc" --version       || echo "::warning::--version failed (exit $?)"
+          echo "─── file metadata ───"
+          file "$HOME/.ghcup/ghc/$WASM_VER/bin/wasm32-unknown-wasi-ghc"
+          head -3 "$HOME/.ghcup/ghc/$WASM_VER/bin/wasm32-unknown-wasi-ghc" 2>/dev/null || true
+
+      # ---------------------------------------------------------------------
+      # 3c. Install cabal. Currently the channel only ships cabal for
       #     aarch64-darwin — Linux bindists are pending (see task #19).
       #     We tolerate that failure here with a clear warning so the rest
       #     of the test (template builds) skip cleanly until cabal Linux
