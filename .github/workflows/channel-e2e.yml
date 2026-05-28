@@ -148,6 +148,41 @@ jobs:
           echo "$HOME/.ghcup/ghc/$WASM_VER/bin" >> "$GITHUB_PATH"
 
       # ---------------------------------------------------------------------
+      # 3c. Install wasi-sdk. The wasm GHC's `settings` file declares
+      #     `C compiler command = wasm32-unknown-wasi-clang`. That binary
+      #     ships in wasi-sdk, NOT in our channel (intentionally — wasi-sdk
+      #     pinning is ghc-wasm-meta's domain). End users need it too.
+      #
+      #     ghc-wasm-meta's bootstrap.sh extracts wasi-sdk under
+      #     $HOME/.ghc-wasm/wasi-sdk/. We also create wasm32-unknown-wasi-*
+      #     symlinks because the wasi-sdk bindist ships the binaries with
+      #     `wasm32-wasi-` prefix while autoconf's canonical triple (which
+      #     ghc-toolchain-bin baked into the wasm GHC settings) is
+      #     `wasm32-unknown-wasi-`.
+      # ---------------------------------------------------------------------
+      - name: Install wasi-sdk via ghc-wasm-meta bootstrap
+        run: |
+          set -euo pipefail
+          export TMPDIR="$GITHUB_WORKSPACE/_tmp"
+          mkdir -p "$TMPDIR"
+          curl -fsSL https://gitlab.haskell.org/ghc/ghc-wasm-meta/-/raw/master/bootstrap.sh | \
+            FLAVOUR=9.12 PREFIX=$HOME/.ghc-wasm sh
+          WASI_BIN="$HOME/.ghc-wasm/wasi-sdk/bin"
+          test -d "$WASI_BIN" || { echo "::error::$WASI_BIN missing — bootstrap.sh layout changed?"; exit 1; }
+          # Bridge the prefix mismatch — wasi-sdk ships wasm32-wasi-clang,
+          # the wasm GHC settings expects wasm32-unknown-wasi-clang.
+          for tool in clang clang++; do
+            ln -sf "$WASI_BIN/wasm32-wasi-$tool" "$WASI_BIN/wasm32-unknown-wasi-$tool"
+          done
+          # llvm-{ar,nm,ranlib,strip} are wrapped under the canonical triple
+          # too, in case the wasm GHC settings file references any of them.
+          for tool in ar nm ranlib strip; do
+            ln -sf "$WASI_BIN/llvm-$tool" "$WASI_BIN/wasm32-unknown-wasi-$tool" 2>/dev/null || true
+          done
+          echo "$WASI_BIN" >> "$GITHUB_PATH"
+          ls "$WASI_BIN" | grep -E "wasm32-unknown-wasi-(clang|ar|nm|ranlib|strip)" | head -10
+
+      # ---------------------------------------------------------------------
       # 3c. Install cabal from the channel. Should succeed on every platform
       #     we test (channel was extended with Linux variants in stable.1).
       # ---------------------------------------------------------------------
