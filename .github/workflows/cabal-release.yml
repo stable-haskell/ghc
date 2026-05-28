@@ -24,6 +24,10 @@ name: Build cabal Linux bindists
 on:
   push:
     tags: ['cabal-3.17.0.0.stable.*']
+  pull_request:
+    # validate workflow changes themselves before merging — same pattern as
+    # channel-e2e.yml. PRs that touch the workflow file get an actual build.
+    paths: ['.github/workflows/cabal-release.yml']
   workflow_dispatch:
     inputs:
       cabal_sha:
