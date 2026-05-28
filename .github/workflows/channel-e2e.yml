@@ -68,6 +68,11 @@ jobs:
       #
       #    MINIMAL=1 skips the auto-install of latest GHC/cabal; the channel
       #    YAML installs the stable-haskell variants we actually want.
+      #
+      #    GHCUP_INSTALL_BASE_PREFIX=$HOME forces install into ~/.ghcup, not
+      #    /usr/local/.ghcup. Without it, the installer detects the pre-baked
+      #    /usr/local/.ghcup on github-hosted ubuntu images and tries to
+      #    chmod +x in there, failing with "Operation not permitted".
       # ---------------------------------------------------------------------
       - name: Install ghcup fresh
         run: |
@@ -75,6 +80,7 @@ jobs:
           curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org \
             | BOOTSTRAP_HASKELL_NONINTERACTIVE=1 \
               BOOTSTRAP_HASKELL_MINIMAL=1 \
+              GHCUP_INSTALL_BASE_PREFIX="$HOME" \
               sh
           echo "$HOME/.ghcup/bin" >> "$GITHUB_PATH"
 
