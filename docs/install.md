@@ -26,6 +26,35 @@
 * **python3** — for the `make run-web` static server in the templates (any
   static server works; this just uses `python3 -m http.server`).
 
+* **wasi-sdk** — the wasm GHC's C compiler (`wasm32-unknown-wasi-clang`)
+  lives here. We deliberately don't bundle wasi-sdk in the ghcup channel —
+  its version pinning is [ghc-wasm-meta](https://gitlab.haskell.org/ghc/ghc-wasm-meta)'s
+  domain, and we'd rather defer to a single source of truth. Install via
+  the upstream bootstrap script:
+
+    ```sh
+    curl -fsSL https://gitlab.haskell.org/ghc/ghc-wasm-meta/-/raw/master/bootstrap.sh \
+      | FLAVOUR=9.12 PREFIX=$HOME/.ghc-wasm sh
+    export PATH="$HOME/.ghc-wasm/wasi-sdk/bin:$PATH"
+    ```
+
+    !!! note "wasi-sdk prefix bridge"
+        wasi-sdk's binaries are named `wasm32-wasi-clang` etc., but the
+        wasm GHC was configured with the canonical autoconf triple
+        `wasm32-unknown-wasi`. After installing wasi-sdk, create the
+        missing prefix-bridge symlinks:
+
+        ```sh
+        WASI_BIN="$HOME/.ghc-wasm/wasi-sdk/bin"
+        for tool in clang clang++; do
+          ln -sf "$WASI_BIN/wasm32-wasi-$tool" "$WASI_BIN/wasm32-unknown-wasi-$tool"
+        done
+        ```
+
+        Once we ship a `ghc98-minimal-ghc-web` devx flavor (see
+        [stable-haskell/devx#250](https://github.com/input-output-hk/devx/pull/250)),
+        this dance disappears.
+
 ## Install the toolchain
 
 {% include-markdown "_snippets/install-channel.md" %}
