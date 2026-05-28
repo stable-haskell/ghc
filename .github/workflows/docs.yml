@@ -1,0 +1,108 @@
+# Build the mkdocs site and deploy to `gh-pages`, preserving static
+# carry-overs (channel YAML, live demo, downloadable tarballs, raw
+# template source files).
+#
+# Why two branches:
+#   gh-pages-source : markdown source + mkdocs.yml + this workflow
+#   gh-pages        : generated site + static artifacts (served to users)
+#
+# The workflow builds mkdocs from `gh-pages-source`, then *additively*
+# copies the static carry-overs from the existing `gh-pages` HEAD into
+# the freshly built site/ before deploying. That way the channel YAML
+# and tarballs aren't lost when we redeploy docs.
+name: Deploy docs
+
+on:
+  push:
+    branches: [gh-pages-source]
+    paths:
+      - 'docs/**'
+      - 'mkdocs.yml'
+      - '.github/workflows/docs.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-docs
+  cancel-in-progress: false
+
+permissions:
+  contents: write   # peaceiris/actions-gh-pages needs this to push to gh-pages
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout gh-pages-source (markdown sources)
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install mkdocs + plugins
+        run: |
+          pip install --no-cache-dir \
+            mkdocs-material \
+            mkdocs-macros-plugin \
+            mkdocs-include-markdown-plugin \
+            pymdown-extensions
+
+      - name: Build site
+        run: mkdocs build --strict
+
+      - name: Carry over static artifacts from current gh-pages
+        run: |
+          set -euo pipefail
+          git fetch origin gh-pages
+          git worktree add /tmp/ghp gh-pages
+
+          # ghcup channel YAML — MUST keep, end users hit this URL
+          cp /tmp/ghp/ghcup-wasm.yaml site/
+
+          # Live miso demo
+          mkdir -p site/demos
+          cp -r /tmp/ghp/demos/miso-counter site/demos/
+
+          # Downloadable example tarballs
+          mkdir -p site/examples
+          cp /tmp/ghp/examples/stable-haskell-wasm-*.tar.gz site/examples/
+
+          # Raw template source files (linked from anatomy docs etc.)
+          # We preserve everything in examples/{hello,miso-counter}/ EXCEPT
+          # README.md — the rendered mkdocs pages supersede those.
+          for tpl in hello miso-counter; do
+            mkdir -p site/examples/$tpl
+            rsync -a --exclude README.md \
+              /tmp/ghp/examples/$tpl/ site/examples/$tpl/
+          done
+
+          # Sanity check — fail loud if anything we depend on is missing
+          for f in site/ghcup-wasm.yaml \
+                   site/demos/miso-counter/index.html \
+                   site/demos/miso-counter/myapp.wasm \
+                   site/examples/stable-haskell-wasm-hello.tar.gz \
+                   site/examples/stable-haskell-wasm-miso-counter.tar.gz \
+                   site/examples/hello/Makefile \
+                   site/examples/miso-counter/Makefile; do
+            test -f "$f" || { echo "::error::carry-over missing: $f"; exit 1; }
+          done
+
+      - name: Deploy to gh-pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./site
+          publish_branch: gh-pages
+          # Don't keep history of generated content — gh-pages is squashed
+          # to a single commit per deploy, since the generated content has
+          # no review value and bloats clone size.
+          force_orphan: true
+          user_name: github-actions[bot]
+          user_email: 41898282+github-actions[bot]@users.noreply.github.com
+          commit_message: |
+            Deploy docs from ${{ github.sha }}
+
+            Source: gh-pages-source @ ${{ github.ref_name }}
+            Workflow: ${{ github.workflow }} #${{ github.run_number }}

@@ -1,0 +1,85 @@
+site_name: stable-haskell wasm
+site_description: Haskell-to-WebAssembly cross-compiler via ghcup
+site_url: https://stable-haskell.github.io/ghc/
+repo_url: https://github.com/stable-haskell/ghc
+edit_uri: edit/gh-pages-source/docs/
+strict: true
+
+# Snippets are include-markdown sources (used via {% include-markdown %}),
+# not standalone pages; bytecode crumbs from mkdocs-macros's double-load
+# shouldn't deploy either.
+exclude_docs: |
+  _snippets/
+  __pycache__/
+  *.pyc
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - content.code.copy
+    - content.code.annotate
+    - search.suggest
+    - search.highlight
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: deep purple
+      accent: purple
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: deep purple
+      accent: purple
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  icon:
+    repo: fontawesome/brands/github
+
+# Plugins:
+#   search        : default search bar
+#   macros        : DRY version strings — one place to bump wasm_version when releases tick
+#   include-markdown: pull shared snippets (install incantation) into multiple pages
+plugins:
+  - search
+  - macros:
+      module_name: _macros          # ../_macros.py (sibling of docs/), so it
+                                    # doesn't ship as a stray file in site/
+  - include-markdown
+
+# Variables exposed via mkdocs-macros — see docs/_macros.py for defaults; these
+# `extra:` keys override module values, useful for branch-specific previews.
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/stable-haskell/ghc
+
+markdown_extensions:
+  - admonition                       # !!! note / warning / tip blocks
+  - attr_list                        # {.class} attributes on markdown elements
+  - tables
+  - footnotes
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences             # nested code fences + diagrams
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+
+nav:
+  - Home: index.md
+  - Install: install.md
+  - Examples:
+      - hello (90 s): examples/hello.md
+      - miso-counter (full app): examples/miso-counter.md
+  - Anatomy of the template: anatomy.md
+  - Troubleshooting: troubleshooting.md
