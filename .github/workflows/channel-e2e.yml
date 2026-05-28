@@ -248,9 +248,10 @@ jobs:
           tar xf hello.tar.gz
           cd stable-haskell-wasm-hello
           make build
-          out=$(make run-node 2>&1)
-          echo "$out"
-          echo "$out" | grep -q 'Hello from the WASM reactor!' \
+          # Use tee so we see the output even when run-node exits non-zero;
+          # `out=$(...)` + set -e would swallow it.
+          make run-node 2>&1 | tee /tmp/run-node.out
+          grep -q 'Hello from the WASM reactor!' /tmp/run-node.out \
             || { echo "::error::expected 'Hello from the WASM reactor!' in run-node output"; exit 1; }
 
       # ---------------------------------------------------------------------
