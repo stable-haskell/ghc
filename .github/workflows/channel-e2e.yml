@@ -230,6 +230,17 @@ jobs:
             https://stable-haskell.github.io/ghc/examples/stable-haskell-wasm-hello.tar.gz
           tar xf hello.tar.gz
           cd stable-haskell-wasm-hello
+          # Workaround: in cabal's dual-compiler mode our cabal-3.17.0.0.stable.0
+          # currently fails to resolve the build-side cc by PATH lookup alone
+          # (Cabal-6666 'The program gcc is required but it could not be found').
+          # Standalone single-compiler `cabal build` finds gcc fine; the
+          # regression appears only with `with-compiler: wasm32-unknown-wasi-ghc`.
+          # Explicitly pin the build-side cc via cabal.project until the
+          # underlying lookup is fixed. End-users on Linux currently hit the
+          # same — document the workaround in the install docs in parallel.
+          if ! grep -q '^with-build-cc:' cabal.project; then
+            echo "with-build-cc: $(command -v gcc)" >> cabal.project
+          fi
           make build
           out=$(make run-node 2>&1)
           echo "$out"
