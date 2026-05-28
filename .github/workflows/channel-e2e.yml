@@ -190,15 +190,37 @@ jobs:
       #    and prints "Hello from the WASM reactor!" — covers reactor
       #    bring-up + ghc_wasm_jsffi_init + hs_start sequence.
       # ---------------------------------------------------------------------
-      - name: Debug — env before hello build
+      - name: Debug — env + cabal verbose
         if: steps.cabal.outputs.cabal_installed == 'true'
         run: |
+          set -x
           echo "PATH=$PATH"
-          which gcc || echo "::warning::gcc not on PATH"
-          which cc  || echo "::warning::cc not on PATH"
-          gcc --version | head -1 || true
-          ghc --print-libdir || true
-          ghc --info | grep -E "(C compiler|Tables)" | head -5 || true
+          which gcc cc cabal ghc
+          gcc --version | head -1
+          cabal --version
+          ghc --version
+          # Trigger the same lookup cabal would do, but verbose, in a tiny
+          # standalone project. This isolates the lookup from any project-
+          # specific cabal.project / dual-compiler complications.
+          mkdir -p /tmp/probe && cd /tmp/probe
+          cat > probe.cabal <<'EOF'
+          cabal-version: 3.0
+          name:          probe
+          version:       0.1
+          executable probe
+            main-is:        Main.hs
+            build-depends:  base
+            default-language: Haskell2010
+          EOF
+          echo 'main = return ()' > Main.hs
+          # Use the canonical native dual-compiler form
+          cat > cabal.project <<'EOF'
+          packages: .
+          with-build-compiler: ghc
+          with-build-hc-pkg:   ghc-pkg
+          EOF
+          cabal -v3 build 2>&1 | grep -iE "(gcc|cc|program|PATH|cabal-)" | head -40
+          true  # don't fail the step on grep exit
 
       - name: hello template — build + run-node
         if: steps.cabal.outputs.cabal_installed == 'true'
