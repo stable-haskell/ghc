@@ -57,7 +57,7 @@ jobs:
           - { plat: aarch64-linux, runs-on: ubuntu-24.04-arm }
 
     env:
-      WASM_VER:  wasm32-wasi-9.14.0.stable.1
+      WASM_VER:  wasm32-wasi-9.14.0.stable.2
       CABAL_VER: 3.17.0.0.stable.0
 
     steps:
