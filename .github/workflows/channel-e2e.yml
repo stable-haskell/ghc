@@ -215,19 +215,24 @@ jobs:
           echo "::warning::Template builds (hello + miso-counter) currently skipped on Linux pending fix for the dual-compiler gcc-lookup regression. Tracked as task #20. See: \
           https://github.com/stable-haskell/ghc/pull/181"
 
-      - name: hello template — build + run-node (DISABLED)
-        if: false
+      # Diagnostic: re-run hello build with -v3 to capture full cabal trace of
+      # the dual-compiler gcc-lookup regression (task #20). Tolerated as
+      # failure so the run stays green; we just want the log.
+      - name: hello template — DIAGNOSTIC -v3 (continue-on-error)
+        if: steps.cabal.outputs.cabal_installed == 'true'
+        continue-on-error: true
         run: |
-          set -euo pipefail
+          set +e
           curl -fL -o hello.tar.gz \
             https://stable-haskell.github.io/ghc/examples/stable-haskell-wasm-hello.tar.gz
           tar xf hello.tar.gz
           cd stable-haskell-wasm-hello
-          make build
-          out=$(make run-node 2>&1)
-          echo "$out"
-          echo "$out" | grep -q 'Hello from the WASM reactor!' \
-            || { echo "::error::expected 'Hello from the WASM reactor!' in run-node output"; exit 1; }
+          # Trigger the failing path with maximum verbosity. The Makefile's
+          # `cabal build myapp` doesn't take args; invoke cabal directly so
+          # we can pass -v3 and let stderr through unfiltered.
+          echo "═══ cabal -v3 build myapp ═══"
+          cabal -v3 build myapp 2>&1 | tail -300
+          echo "═══ end ═══"
 
       - name: miso-counter template — build + verify wasm artifact (DISABLED)
         if: false
