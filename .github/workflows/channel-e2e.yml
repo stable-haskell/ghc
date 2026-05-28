@@ -110,11 +110,28 @@ jobs:
           node --version
 
       # ---------------------------------------------------------------------
-      # 3a. Add the stable-haskell channel + install GHC. The channel URL is
-      #     the LIVE one — this test fails if gh-pages is mis-deployed or
-      #     the release assets aren't yet uploaded.
+      # 3a. Install a native GHC for the dual-compiler build. The hello
+      #     and miso templates' cabal.project sets
+      #         with-build-compiler: ghc
+      #         with-compiler:       wasm32-unknown-wasi-ghc
+      #     so we need both a native `ghc` (for Setup.hs + Template Haskell
+      #     host evaluation) and the wasm cross-compiler. An end-user
+      #     following our install docs would do `ghcup install ghc recommended`
+      #     before working on a project; replicate that here.
       # ---------------------------------------------------------------------
-      - name: Add stable-haskell channel + install GHC
+      - name: Install native GHC (recommended) for Setup.hs + TH host
+        run: |
+          set -euo pipefail
+          ghcup install ghc recommended
+          ghcup set    ghc recommended
+          ghc --version
+
+      # ---------------------------------------------------------------------
+      # 3b. Add the stable-haskell channel + install the wasm cross-compiler.
+      #     The channel URL is the LIVE one — this test fails if gh-pages
+      #     is mis-deployed or the release assets aren't yet uploaded.
+      # ---------------------------------------------------------------------
+      - name: Add stable-haskell channel + install wasm GHC
         run: |
           set -euo pipefail
           ghcup --version
