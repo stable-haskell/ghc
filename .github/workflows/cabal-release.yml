@@ -25,9 +25,12 @@ on:
   push:
     tags: ['cabal-3.17.0.0.stable.*']
   pull_request:
-    # validate workflow changes themselves before merging — same pattern as
-    # channel-e2e.yml. PRs that touch the workflow file get an actual build.
-    paths: ['.github/workflows/cabal-release.yml']
+    # validate workflow OR patch-source changes — same pattern as
+    # channel-e2e.yml. A PR that updates the workflow or a referenced patch
+    # gets a real cabal build to confirm everything still hangs together.
+    paths:
+      - '.github/workflows/cabal-release.yml'
+      - 'lode/r12-cabal-target-prefix-aware-tool-guess.patch'
   workflow_dispatch:
     inputs:
       cabal_sha:
