@@ -1,0 +1,151 @@
+# Channel end-to-end CI.
+#
+# Validates the SHIPPED wasm cross-compiler + cabal + ghcup channel YAML
+# by exercising the exact flow an end-user does:
+#   1. install ghcup fresh
+#   2. add the stable-haskell ghcup channel
+#   3. ghcup install ghc / ghcup install cabal
+#   4. build the published example templates (hello + miso-counter)
+#
+# This closes a gap left by `Cross: WASM` in nix-ci.yml — those jobs
+# validate the compiler in-tree (`_build/dist/bin/wasm32-unknown-wasi-ghc`)
+# from the active checkout, not the published ghcup-installed bundle that
+# real users actually get. Concretely, this catches:
+#   * channel YAML schema breakage
+#   * dlUri / dlHash mismatches (e.g. asset re-uploaded with different bytes)
+#   * relocate.sh / post-install hook regressions on a fresh install prefix
+#   * dual-compiler regressions in the shipped `cabal`
+#   * TH-heavy build regressions at scale (the miso template — 50+ deps
+#     incl. aeson, lens, jsaddle, jsaddle-wasm, miso)
+#
+# Runs only on free public-repo runners — no macOS (macos-14 is 10x billed
+# even on public repos). Self-hosted is deliberately avoided: a hermetic
+# end-to-end test should mirror the state an end-user gets, not a pre-baked
+# devx-warm /nix/store.
+name: Channel e2e
+
+on:
+  push:
+    tags: [wasm32-wasi-*]      # new GHC release → re-test
+  pull_request:
+    # validate workflow changes themselves end-to-end before merge
+    paths: ['.github/workflows/channel-e2e.yml']
+  workflow_dispatch:
+  # NOTE: cron only fires on the repo's default branch. Once this workflow
+  # lands on `stable-ghc-9.14`, uncomment to add a weekly silent-regression
+  # canary that catches drift (release asset re-uploaded, channel YAML
+  # mis-deployed, NodeSource setup_22.x breaking, etc.):
+  # schedule:
+  #   - cron: '0 6 * * 1'      # Monday 06:00 UTC
+
+# Only run one at a time per ref — avoids racing on cabal-store side effects
+# when the cron and a manual dispatch happen close together.
+concurrency:
+  group: channel-e2e-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  install-and-build:
+    name: e2e / ${{ matrix.plat }}
+    runs-on: ${{ matrix.runs-on }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { plat: x86_64-linux,  runs-on: ubuntu-latest    }
+          - { plat: aarch64-linux, runs-on: ubuntu-24.04-arm }
+
+    env:
+      WASM_VER:  wasm32-wasi-9.14.0.stable.1
+      CABAL_VER: 3.17.0.0.stable.0
+
+    steps:
+      # ---------------------------------------------------------------------
+      # 1. ghcup itself — fresh install. We DON'T use the pre-installed ghcup
+      #    on github-hosted runners; this validates the official installer
+      #    works as documented in the README and landing page.
+      #
+      #    MINIMAL=1 skips the auto-install of latest GHC/cabal; the channel
+      #    YAML installs the stable-haskell variants we actually want.
+      # ---------------------------------------------------------------------
+      - name: Install ghcup fresh
+        run: |
+          set -euo pipefail
+          curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org \
+            | BOOTSTRAP_HASKELL_NONINTERACTIVE=1 \
+              BOOTSTRAP_HASKELL_MINIMAL=1 \
+              sh
+          echo "$HOME/.ghcup/bin" >> "$GITHUB_PATH"
+
+      # ---------------------------------------------------------------------
+      # 2. Node 22. Ubuntu noble's apt nodejs is 18.19.1, but post-link.mjs
+      #    uses `import.meta.filename` (added Node 20.11). On Node 18 the
+      #    post-link step silently exits without writing the .mjs glue,
+      #    breaking subsequent JSFFI runs. NodeSource setup_22.x is the
+      #    canonical fix.
+      # ---------------------------------------------------------------------
+      - name: Install Node 22
+        run: |
+          set -euo pipefail
+          curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+          sudo apt-get install -y --no-install-recommends nodejs
+          node --version
+
+      # ---------------------------------------------------------------------
+      # 3. Add the stable-haskell channel + install the wasm toolchain.
+      #    The channel URL is the LIVE one — this test fails if gh-pages
+      #    is mis-deployed or the release assets aren't yet uploaded.
+      # ---------------------------------------------------------------------
+      - name: Add stable-haskell channel + install toolchain
+        run: |
+          set -euo pipefail
+          ghcup --version
+          ghcup config add-release-channel \
+            https://stable-haskell.github.io/ghc/ghcup-wasm.yaml
+          ghcup install ghc   "$WASM_VER"
+          ghcup install cabal "$CABAL_VER"
+          ghcup set    cabal  "$CABAL_VER"
+          # Put the cross-compiler on PATH for subsequent steps.
+          echo "$HOME/.ghcup/ghc/$WASM_VER/bin" >> "$GITHUB_PATH"
+
+      # ---------------------------------------------------------------------
+      # 4. Smoke test — the `hello` template. ~30 s build, runs via node:wasi
+      #    and prints "Hello from the WASM reactor!" — covers reactor
+      #    bring-up + ghc_wasm_jsffi_init + hs_start sequence.
+      # ---------------------------------------------------------------------
+      - name: hello template — build + run-node
+        run: |
+          set -euo pipefail
+          curl -fL -o hello.tar.gz \
+            https://stable-haskell.github.io/ghc/examples/stable-haskell-wasm-hello.tar.gz
+          tar xf hello.tar.gz
+          cd stable-haskell-wasm-hello
+          make build
+          out=$(make run-node 2>&1)
+          echo "$out"
+          echo "$out" | grep -q 'Hello from the WASM reactor!' \
+            || { echo "::error::expected 'Hello from the WASM reactor!' in run-node output"; exit 1; }
+
+      # ---------------------------------------------------------------------
+      # 5. Real-world test — the `miso-counter` template. 50+ TH-heavy deps
+      #    (aeson, lens, jsaddle, jsaddle-wasm, miso). ~5–7 min build first
+      #    time. Verifies the full dyld + JSFFI link chain works at scale
+      #    on a clean machine. No `make run-web` (would need a browser);
+      #    instead verify the built .wasm artifact exists + has WebAssembly
+      #    magic, which is enough to catch the linker-level regressions.
+      # ---------------------------------------------------------------------
+      - name: miso-counter template — build + verify wasm artifact
+        run: |
+          set -euo pipefail
+          curl -fL -o miso.tar.gz \
+            https://stable-haskell.github.io/ghc/examples/stable-haskell-wasm-miso-counter.tar.gz
+          tar xf miso.tar.gz
+          cd stable-haskell-wasm-miso-counter
+          make build
+          wasm_file=$(find dist-newstyle -name 'myapp.wasm' -type f | head -1)
+          test -n "$wasm_file" || { echo "::error::myapp.wasm not produced"; exit 1; }
+          ls -lh "$wasm_file"
+          file "$wasm_file" | tee /tmp/file_out
+          grep -q 'WebAssembly' /tmp/file_out \
+            || { echo "::error::artifact is not a wasm binary"; exit 1; }
