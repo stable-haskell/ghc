@@ -96,17 +96,23 @@ jobs:
           echo "GHCUP_INSTALL_BASE_PREFIX=$HOME" >> "$GITHUB_ENV"
 
       # ---------------------------------------------------------------------
-      # 2. Node 22. Ubuntu noble's apt nodejs is 18.19.1, but post-link.mjs
-      #    uses `import.meta.filename` (added Node 20.11). On Node 18 the
+      # 2. System tools: gcc (cabal needs it for the dual-compiler build's
+      #    native side — Setup.hs compiles + FFI cbits) and Node 22.
+      #
+      #    Ubuntu noble's apt nodejs is 18.19.1, but post-link.mjs uses
+      #    `import.meta.filename` (added Node 20.11). On Node 18 the
       #    post-link step silently exits without writing the .mjs glue,
       #    breaking subsequent JSFFI runs. NodeSource setup_22.x is the
       #    canonical fix.
       # ---------------------------------------------------------------------
-      - name: Install Node 22
+      - name: Install gcc + Node 22
         run: |
           set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends build-essential
           curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
           sudo apt-get install -y --no-install-recommends nodejs
+          gcc --version | head -1
           node --version
 
       # ---------------------------------------------------------------------
