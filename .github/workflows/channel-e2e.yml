@@ -78,15 +78,22 @@ jobs:
       - name: Install ghcup fresh
         run: |
           set -euo pipefail
-          # Wipe any pre-baked ghcup state in $HOME (github-hosted ubuntu
-          # images include partial ghcup state here that blocks re-install).
-          sudo rm -rf "$HOME/.ghcup"
+          # Wipe BOTH pre-baked ghcup locations on github-hosted ubuntu:
+          # /usr/local/.ghcup (the runner image's pre-installed one — owned
+          # root and detected by ghcup's start-up probe) and $HOME/.ghcup
+          # (sometimes also pre-baked with partial state). Without wiping
+          # /usr/local/.ghcup, fresh `ghcup install` lands there instead
+          # of $HOME, and our PATH addition points at the wrong location.
+          sudo rm -rf "$HOME/.ghcup" /usr/local/.ghcup
           curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org \
             | BOOTSTRAP_HASKELL_NONINTERACTIVE=1 \
               BOOTSTRAP_HASKELL_MINIMAL=1 \
               GHCUP_INSTALL_BASE_PREFIX="$HOME" \
               sh
           echo "$HOME/.ghcup/bin" >> "$GITHUB_PATH"
+          # Belt-and-suspenders: persist this for every subsequent step so
+          # ghcup's own re-derivation of its base prefix doesn't drift.
+          echo "GHCUP_INSTALL_BASE_PREFIX=$HOME" >> "$GITHUB_ENV"
 
       # ---------------------------------------------------------------------
       # 2. Node 22. Ubuntu noble's apt nodejs is 18.19.1, but post-link.mjs
