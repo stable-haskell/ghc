@@ -190,6 +190,16 @@ jobs:
       #    and prints "Hello from the WASM reactor!" — covers reactor
       #    bring-up + ghc_wasm_jsffi_init + hs_start sequence.
       # ---------------------------------------------------------------------
+      - name: Debug — env before hello build
+        if: steps.cabal.outputs.cabal_installed == 'true'
+        run: |
+          echo "PATH=$PATH"
+          which gcc || echo "::warning::gcc not on PATH"
+          which cc  || echo "::warning::cc not on PATH"
+          gcc --version | head -1 || true
+          ghc --print-libdir || true
+          ghc --info | grep -E "(C compiler|Tables)" | head -5 || true
+
       - name: hello template — build + run-node
         if: steps.cabal.outputs.cabal_installed == 'true'
         run: |
