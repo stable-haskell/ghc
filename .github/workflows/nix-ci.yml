@@ -1013,6 +1013,64 @@ jobs:
         echo "SHA256:"
         shasum -a 256 _build/dist/ghc-wasm32-unknown-wasi-${{ matrix.plat }}.tar.gz
 
+    # The wasm cross-compiler is built inside `devx` (a nix-shell), so all
+    # ELF binaries' interpreter (`PT_INTERP`) is pinned to a `/nix/store/.../
+    # ld-linux-*.so.*` path. On any non-nix Linux system that path doesn't
+    # exist, and the kernel fails to load the binary with ENOENT — manifesting
+    # as `cannot execute: required file not found`. The same broad class of
+    # problem `fixup-nix-deps` solves on Darwin (Mach-O dyld refs).
+    #
+    # Patchelf the interpreter back to the canonical system ld-linux path and
+    # drop the RPATH so dynamic libs resolve through ldconfig (libgmp10,
+    # libffi8, libc, libm — all stock on any modern Linux distro).
+    #
+    # Skipped on Darwin: Mach-O doesn't pin an interpreter path the way ELF
+    # does, so darwin bindists are portable as-is.
+    - name: Normalize ELF interpreters for portability (Linux only)
+      if: ${{ !cancelled() && contains(matrix.plat, 'linux') }}
+      shell: devx {0}
+      run: |
+        set -eux
+        # patchelf is in apt on ubuntu — keep PATH outside devx for sudo.
+        export PATH="$PATH:/usr/bin:/usr/sbin"
+        if ! command -v patchelf >/dev/null 2>&1; then
+          sudo apt-get install -y --no-install-recommends patchelf
+        fi
+        case "${{ matrix.plat }}" in
+          x86_64-linux)  INTERP=/lib64/ld-linux-x86-64.so.2 ;;
+          aarch64-linux) INTERP=/lib/ld-linux-aarch64.so.1 ;;
+          *) echo "::error::unexpected matrix.plat=${{ matrix.plat }}"; exit 1 ;;
+        esac
+
+        TGZ=_build/dist/ghc-wasm32-unknown-wasi-${{ matrix.plat }}.tar.gz
+        STAGE="$(mktemp -d)"
+        tar -C "$STAGE" -xzf "$TGZ"
+
+        echo "═══ Patchelfing binaries to interpreter $INTERP ═══"
+        # Scan everything executable; patchelf only on dynamically-linked ELFs
+        # whose interpreter still points into /nix/store.
+        patched=0
+        while IFS= read -r bin; do
+          if file -L "$bin" 2>/dev/null \
+               | grep -q "ELF.*dynamically linked.*interpreter /nix/store"; then
+            echo "  patching: ${bin#$STAGE/}"
+            patchelf --set-interpreter "$INTERP" "$bin"
+            patchelf --remove-rpath "$bin"
+            patched=$((patched + 1))
+          fi
+        done < <(find "$STAGE" -type f -executable)
+        echo "═══ Patched $patched binaries ═══"
+        test "$patched" -gt 0 || { echo "::error::no ELF binaries patched — something is wrong"; exit 1; }
+
+        # Repack — tar czhf was used to dereference symlinks originally; the
+        # staging dir is already real files (tar xzf preserves that), so plain
+        # tar czf is fine here. Keep the same filename for downstream uploads.
+        rm "$TGZ"
+        tar -C "$STAGE" -czf "$TGZ" .
+        ls -lh "$TGZ"
+        echo "SHA256 after patchelf:"
+        shasum -a 256 "$TGZ"
+
     - name: Upload WASM cross artifacts
       uses: actions/upload-artifact@v4
       if: ${{ !cancelled() }}
