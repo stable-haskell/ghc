@@ -888,13 +888,17 @@ jobs:
         # host compiler. WASM tools (wasm32-unknown-wasi-clang, etc.) have unique
         # prefixed names that don't clash.
         export PATH=$PATH:$WASI_BIN
-        # The cabal.project.stage3.settings now hard-codes
-        #   package * if arch(wasm32) shared:True executable-dynamic:True
+        # DYNAMIC=1 makes ./configure pass --enable-dynamic, which expands
+        # cabal.project.stage3.settings to:
+        #   package * { shared:True; executable-dynamic:True }
         #   constraints: rts +dynamic
-        # …so the stage3 wasm build always produces both .hi + .dyn_hi files
-        # AND ships .so libraries. This is what end-user TH-heavy apps
-        # (miso, jsaddle, aeson, …) need.
-        make DIST_BUILD=1 \
+        # …so the stage3 wasm build produces both .hi + .dyn_hi files AND
+        # ships .so libraries. Without it the bindist is static-only, and
+        # end-user TH-heavy apps (miso, jsaddle, aeson, …) hit
+        #   error: [GHC-47808] Failed to load dynamic interface file for X
+        # because cabal sets `shared: True` for wasm32 user packages but
+        # the system base/ghc-internal/etc. ship no .dyn_hi to link against.
+        make DYNAMIC=1 DIST_BUILD=1 \
              CABAL=$PWD/_build/dist/bin/cabal \
              GHC_TOOLCHAIN_BIN=$PWD/_build/dist/bin/ghc-toolchain-bin \
              DERIVE_CONSTANTS_BIN=$PWD/_build/dist/bin/deriveConstants \
@@ -1005,7 +1009,9 @@ jobs:
         # The same five DIST_BUILD vars the previous "Build WASM cross
         # libraries" step uses — stage3 phony deps invoke configure which
         # otherwise can't find deriveConstants/genapply/happy templates.
-        make DIST_BUILD=1 \
+        # DYNAMIC=1 mirrors the Build step so configure re-runs with the
+        # same --enable-dynamic flag (stage3-$plat is PHONY → re-runs).
+        make DYNAMIC=1 DIST_BUILD=1 \
              CABAL=$PWD/_build/dist/bin/cabal \
              GHC_TOOLCHAIN_BIN=$PWD/_build/dist/bin/ghc-toolchain-bin \
              DERIVE_CONSTANTS_BIN=$PWD/_build/dist/bin/deriveConstants \
