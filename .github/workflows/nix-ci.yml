@@ -777,7 +777,12 @@ jobs:
     - name: Download dist
       uses: actions/download-artifact@v4
       with:
-        name: ${{ matrix.plat }}-dynamic0-dist
+        # dynamic1 stage2 (with .dyn_hi for native base/filepath/process/etc.)
+        # is required by the stage3 build-side: when stage3 builds happy-lib
+        # / alex with shared:True via DYNAMIC=1 settings, cabal asks the
+        # build compiler (this stage2) for native Prelude.dyn_hi, which the
+        # dynamic0 variant doesn't ship.
+        name: ${{ matrix.plat }}-dynamic1-dist
         path: _build/dist
 
     - name: Set up stage2 from dist
