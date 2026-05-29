@@ -21,10 +21,11 @@
 -- …because the bootstrap GHC's bindist has no .dyn_hi files for native
 -- base. The conditional scopes the dynamic settings to wasm32 only.
 --
--- We deliberately hard-code this (no @ALL_PACKAGES@ substitution): the
--- wasm bindist should never ship without .dyn_hi files. DYNAMIC=0 vs
--- DYNAMIC=1 still controls the *stage2* (native GHC) dynamic build, but
--- has no effect on stage3 anymore.
+-- We deliberately hard-code this (no per-package autoconf substitution;
+-- avoid placing the literal package-list variable name here so autoconf
+-- does not expand it inside the comment): the wasm bindist should never
+-- ship without .dyn_hi files. DYNAMIC=0 vs DYNAMIC=1 still controls the
+-- stage2 (native GHC) dynamic build, but has no effect on stage3 anymore.
 
 package *
   if arch(wasm32)
