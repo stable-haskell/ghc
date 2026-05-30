@@ -1060,8 +1060,8 @@ jobs:
           sudo apt-get install -y --no-install-recommends patchelf
         fi
         case "${{ matrix.plat }}" in
-          x86_64-linux)  INTERP=/lib64/ld-linux-x86-64.so.2 ;;
-          aarch64-linux) INTERP=/lib/ld-linux-aarch64.so.1 ;;
+          x86_64-linux)  INTERP=/lib64/ld-linux-x86-64.so.2;   HOST_DIR=x86_64-unknown-linux ;;
+          aarch64-linux) INTERP=/lib/ld-linux-aarch64.so.1;    HOST_DIR=aarch64-unknown-linux ;;
           *) echo "::error::unexpected matrix.plat=${{ matrix.plat }}"; exit 1 ;;
         esac
 
@@ -1071,7 +1071,11 @@ jobs:
 
         echo "═══ Patchelfing binaries to interpreter $INTERP ═══"
         # Scan everything executable; patchelf only on dynamically-linked ELFs
-        # whose interpreter still points into /nix/store.
+        # whose interpreter still points into /nix/store. Also set an
+        # @ORIGIN-relative rpath so the dyn-linked binary can locate the
+        # libHS*.so files we ship in lib/$HOST_DIR/ (mirrors the
+        # @executable_path/../lib/$(HOST_PLATFORM) rpath stage2 sets on
+        # Darwin via install_name_tool).
         patched=0
         while IFS= read -r bin; do
           if file -L "$bin" 2>/dev/null \
@@ -1079,11 +1083,27 @@ jobs:
             echo "  patching: ${bin#$STAGE/}"
             patchelf --set-interpreter "$INTERP" "$bin"
             patchelf --remove-rpath "$bin"
+            patchelf --force-rpath --set-rpath "\$ORIGIN/../lib/$HOST_DIR" "$bin"
             patched=$((patched + 1))
           fi
         done < <(find "$STAGE" -type f -executable)
         echo "═══ Patched $patched binaries ═══"
         test "$patched" -gt 0 || { echo "::error::no ELF binaries patched — something is wrong"; exit 1; }
+
+        # Also fix rpath on the shipped host .so files (lib/$HOST_DIR/*.so):
+        # they reference each other (e.g. libHSghc.so needs libHSrts.so)
+        # and use $ORIGIN-relative rpath at stage2 build time. patchelf
+        # may have left a nix-store rpath in place; replace with the
+        # local-$ORIGIN form so cross-library lookups work from the
+        # bindist install location.
+        echo "═══ Setting rpath on lib/$HOST_DIR/*.so ═══"
+        so_patched=0
+        for so in "$STAGE"/lib/"$HOST_DIR"/*.so; do
+          [ -f "$so" ] || continue
+          patchelf --force-rpath --set-rpath "\$ORIGIN" "$so" 2>/dev/null || true
+          so_patched=$((so_patched + 1))
+        done
+        echo "═══ Set rpath on $so_patched shared libs ═══"
 
         # Repack — tar czhf was used to dereference symlinks originally; the
         # staging dir is already real files (tar xzf preserves that), so plain
