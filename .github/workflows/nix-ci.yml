@@ -777,12 +777,15 @@ jobs:
     - name: Download dist
       uses: actions/download-artifact@v4
       with:
-        # dynamic1 stage2 (with .dyn_hi for native base/filepath/process/etc.)
-        # is required by the stage3 build-side: when stage3 builds happy-lib
-        # / alex with shared:True via DYNAMIC=1 settings, cabal asks the
-        # build compiler (this stage2) for native Prelude.dyn_hi, which the
-        # dynamic0 variant doesn't ship.
-        name: ${{ matrix.plat }}-dynamic1-dist
+        # dynamic0 stage2 — its bin/ghc is statically linked, which is what
+        # ends up symlinked as bin/wasm32-unknown-wasi-ghc in the wasm
+        # bindist (Makefile line ~979). Using dynamic1 instead makes the
+        # symlinked wasm-ghc dyn-link against host libHS*.so files that
+        # the wasm bindist doesn't ship. We also no longer need dynamic1's
+        # native .dyn_hi here because `if arch(wasm32) shared: True` in
+        # cabal.project.stage3.settings scopes shared:True to wasm-target
+        # packages only (BUILD-side happy-lib stays static).
+        name: ${{ matrix.plat }}-dynamic0-dist
         path: _build/dist
 
     - name: Set up stage2 from dist

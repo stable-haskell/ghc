@@ -25,9 +25,32 @@
 -- but has no effect on stage3 anymore. The wasm bindist always ships
 -- shared stage3 libraries.
 
-package *
-  shared: True
-  executable-dynamic: False
+-- R7 path (i) from lode/phase6-miso-template-draft/REVIEW.md: use `if
+-- arch(wasm32) / shared: True` at the project top level — NOT inside
+-- a `package *` block. Relies on stable-haskell/cabal's
+-- Stage/Toolchain split: BUILD-side packages (deriveConstants,
+-- happy-lib, alex, etc.) are evaluated against the native build
+-- arch, so `arch(wasm32)` is FALSE for them and `shared: True`
+-- doesn't apply → no `-dynamic-too` on the build-side, no need for
+-- native base.dyn_hi from stage2.
+--
+-- HOST-side wasm-target packages (base, ghc-internal, etc.) evaluate
+-- `arch(wasm32)` as TRUE, get `shared: True`, and ship both .hi+.dyn_hi
+-- and .so. End-user TH-heavy apps (miso, jsaddle, aeson, lens, …)
+-- pick these up via cabal's -dynamic-too codepath.
+--
+-- This depends on the in-tree link fix f92963f43ef ("force rts into
+-- wasm32 .so deps even with -no-rts"). Earlier attempts (2026-05-26,
+-- before the link fix) failed with GHC-74335 + interface profile tag
+-- mismatch; the link fix resolves both.
+--
+-- DYNAMIC=0 vs DYNAMIC=1 has no effect on stage3 (the conditional
+-- is wasm-arch-driven, not configure-flag-driven). It still controls
+-- the stage2 native build.
+
+if arch(wasm32)
+  package *
+    shared: True
 
 constraints:
   rts +dynamic
