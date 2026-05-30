@@ -1044,10 +1044,21 @@ $(DIST_DIR)/ghc-$(1).tar.gz: stage3-$(1)
 	# bare-name targets aren't included. With -h, each cross-prefixed name
 	# becomes a real file (a copy of the native binary, which detects its
 	# invocation name to configure for the target).
+	#
+	# wasm only — lib/$(HOST_PLATFORM): when stage2 is built DYNAMIC=1
+	# (which is required for stage3's build-side happy-lib/alex to find
+	# native Prelude.dyn_hi when shared:True applies project-wide), the
+	# stage2 bin/ghc that gets symlinked-then-dereferenced as
+	# bin/wasm32-unknown-wasi-ghc is dyn-linked against libHS*.so files
+	# under lib/$(HOST_PLATFORM)/. The binary's @rpath is set to
+	# `$$ORIGIN/../lib/$(HOST_PLATFORM)` during stage2 packaging, so
+	# the libs need to ship in the wasm bindist at that path or the
+	# binary fails to load with dyld errors on end-user install.
 	tar czhf $$@ \
 		--directory=$$(DIST_DIR) \
 		$(foreach exe,$(STAGE3_EXECUTABLES),bin/$(1)-$(exe)$(EXE_EXT)) \
 		lib/targets/$(1) \
+		$(if $(filter wasm32-unknown-wasi,$(1)),lib/$(HOST_PLATFORM)) \
 		$(if $(filter wasm32-unknown-wasi,$(1)),relocate.sh configure Makefile)
 	@echo "::endgroup::"
 
