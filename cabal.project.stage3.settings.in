@@ -27,6 +27,7 @@
 
 package *
   shared: True
+  executable-dynamic: False
 
 constraints:
   rts +dynamic
