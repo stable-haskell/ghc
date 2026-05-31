@@ -9,7 +9,7 @@ that uses {{ wasm_version }} / {{ cabal_version }} updates automatically.
 
 def define_env(env):
     # Versions exposed in install commands / PATH exports / changelog links
-    env.variables["wasm_version"]  = "wasm32-wasi-9.14.0.stable.1"
+    env.variables["wasm_version"]  = "wasm32-wasi-9.14.0.stable.12"
     env.variables["cabal_version"] = "3.17.0.0.stable.0"
 
     # URLs we link to a lot
