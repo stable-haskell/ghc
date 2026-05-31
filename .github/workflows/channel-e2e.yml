@@ -138,29 +138,37 @@ jobs:
           gcc --version | head -1
           node --version
 
-      # Darwin: Xcode CLT supplies clang/gcc. Node 22 comes from nix
-      # (devx isn't entered, but our self-hosted Tart runners have nix
-      # available system-wide). nix-env installs into ~/.nix-profile;
-      # GITHUB_PATH addition makes it visible to subsequent steps.
+      # Darwin: Tart self-hosted VMs ship without Xcode CLT, which means
+      # nix can't build derivations that pull in stdenv (it needs clang).
+      # Empirically `nix-env -iA nixpkgs.nodejs_22` had to build the
+      # full nodejs.drv + user-environment.drv and failed with:
+      #   xcode-select: note: No developer tools were found, requesting install.
       #
-      # We DON'T use brew here — self-hosted Tart base may not have it,
-      # and pinning to nixpkgs nodejs_22 gives us a deterministic Node
-      # version that matches our Linux NodeSource setup_22.x in spirit.
-      - name: Install Node 22 (Darwin via nix)
+      # Download the official nodejs.org darwin-arm64 tarball directly —
+      # hermetic, no toolchain build required, matches what an end-user
+      # who just installed Node would have.
+      - name: Install Node 22 (Darwin via nodejs.org tarball)
         if: runner.os == 'macOS'
         run: |
           set -euo pipefail
-          # nix is in /nix/var/nix/profiles/default/bin and ~/.nix-profile/bin
-          # on the Tart base. Make sure both are on PATH.
-          export PATH="$HOME/.nix-profile/bin:/nix/var/nix/profiles/default/bin:$PATH"
-          # -A nixpkgs.nodejs_22 installs Node 22 into user profile; -i
-          # tracks the package so future ghcup install workflows still
-          # find it without re-installing.
-          nix-env -iA nixpkgs.nodejs_22
-          echo "$HOME/.nix-profile/bin" >> "$GITHUB_PATH"
-          # clang from Xcode CLT — should be on /usr/bin/clang already.
-          /usr/bin/clang --version | head -1
-          node --version
+          NODE_VER=v22.22.0
+          NODE_DIR="$HOME/node-$NODE_VER"
+          rm -rf "$NODE_DIR"
+          curl -fsSL "https://nodejs.org/dist/$NODE_VER/node-$NODE_VER-darwin-arm64.tar.xz" \
+            | tar -xJ -C "$HOME"
+          mv "$HOME/node-$NODE_VER-darwin-arm64" "$NODE_DIR"
+          echo "$NODE_DIR/bin" >> "$GITHUB_PATH"
+          # clang: on the Tart base Xcode CLT may not be installed.
+          # /usr/bin/clang exists as a stub that prompts for CLT install;
+          # actually invoking it returns exit 1. Cabal probes for cc, so
+          # if clang is broken, the sanity step will fail downstream and
+          # tell us. Try here so we get a clean signal early.
+          if /usr/bin/clang --version >/dev/null 2>&1; then
+            /usr/bin/clang --version | head -1
+          else
+            echo "::warning::/usr/bin/clang not functional (Xcode CLT missing). Downstream cabal steps may fail."
+          fi
+          "$NODE_DIR/bin/node" --version
 
       # ---------------------------------------------------------------------
       # 3a. Install a native GHC for the dual-compiler build. The hello
