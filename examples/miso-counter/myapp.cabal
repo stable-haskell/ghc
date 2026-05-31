@@ -1,0 +1,27 @@
+cabal-version: 3.0
+name:          myapp
+version:       0.1.0.0
+synopsis:      stable-haskell wasm — miso counter template
+license:       Apache-2.0
+build-type:    Simple
+
+executable myapp
+  main-is:          Main.hs
+  hs-source-dirs:   app
+  default-language: GHC2021
+  default-extensions: OverloadedStrings
+  ghc-options:      -Wall
+
+  build-depends:
+    , base   >= 4.18 && < 5
+    , miso   >= 1.11 && < 2
+    , mtl
+
+  if arch(wasm32)
+    -- Reactor pattern (see hello example for details).
+    ghc-options:
+        -no-hs-main
+        -optl-mexec-model=reactor
+        "-optl-Wl,--export=hs_start"
+    cpp-options:    -DWASM
+    build-depends:  jsaddle-wasm, ghc-experimental

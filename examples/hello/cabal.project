@@ -1,0 +1,20 @@
+packages: .
+
+-- Dual-compiler form (supported by the stable-haskell cabal-3.17.0.0.stable.0
+-- binary you got via `ghcup install cabal 3.17.0.0.stable.0`).
+--
+-- One cabal invocation drives two GHCs:
+--   BUILD side  (host machine arch): compiles Setup.hs, build-tools, TH host
+--   HOST side   (target arch wasm32): compiles the package's library/exe code
+--
+-- Replace the bare names below with absolute paths if you don't have them on
+-- $PATH. With `ghcup set ghc <native-version>` and `ghcup set cabal
+-- 3.17.0.0.stable.0`, the bare names work as-is.
+
+with-build-compiler: ghc
+with-build-hc-pkg:   ghc-pkg
+with-compiler:       wasm32-unknown-wasi-ghc
+with-hc-pkg:         wasm32-unknown-wasi-ghc-pkg
+
+if arch(wasm32)
+  shared: True

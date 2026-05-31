@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>stable-haskell miso wasm counter — live demo</title>
+<style>
+  :root { --fg:#222; --muted:#666; --accent:#0a58ca; --bg:#fff; --card:#f6f7f9; --rule:#e5e7eb; }
+  html { color-scheme: light dark; }
+  @media (prefers-color-scheme: dark) {
+    :root { --fg:#e5e7eb; --muted:#a1a1aa; --accent:#60a5fa; --bg:#0b0b0c; --card:#18181b; --rule:#27272a; }
+  }
+  body { font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; max-width: 44rem; margin: 2rem auto; padding: 0 1.25rem; color: var(--fg); background: var(--bg); line-height: 1.55; }
+  h1 { font-size: 1.5rem; margin: 0 0 .25rem; }
+  h2 { font-size: 1.1rem; margin-top: 2rem; padding-bottom: .25rem; border-bottom: 1px solid var(--rule); }
+  p  { margin: .55rem 0; }
+  a  { color: var(--accent); }
+  code, pre { font-family: ui-monospace, monospace; }
+  pre { background: var(--card); padding: 0.8rem; border-radius: 8px; overflow-x: auto; font-size: 0.9rem; }
+  .lede { color: var(--muted); }
+  .meta { color: var(--muted); font-size: 0.9em; }
+  /* The actual miso UI styling — copied from the template, kept consistent. */
+  #miso-root button {
+    font-size: 1.3rem; padding: 0.4rem 1rem; margin: 0 0.4rem;
+    border: 1px solid #aaa; border-radius: 6px; background: #f6f6f6; color: #222;
+    cursor: pointer;
+  }
+  #miso-root button:hover { background: #eaeaea; }
+  #miso-root span  { font-size: 1.6rem; margin: 0 0.7rem; min-width: 2em; display: inline-block; text-align: center; }
+  #miso-root h1    { font-size: 1.15rem; color: var(--muted); font-weight: 500; margin: 1rem 0 0.6rem; }
+  #status { color: var(--muted); font-size: 0.92em; margin-top: 0.4rem; font-style: italic; }
+</style>
+</head>
+<body>
+
+<h1>stable-haskell miso wasm counter — live demo</h1>
+<p class="lede">
+A real <a href="https://haskell-miso.org/">miso</a> 1.11 counter app, written in
+Haskell, compiled to WebAssembly by the stable-haskell wasm
+cross-compiler. The wasm module below was built by
+<a href="https://stable-haskell.github.io/ghc/examples/miso-counter/">the
+miso-counter template</a> and is loaded directly into your browser.
+</p>
+
+<h2>Live</h2>
+<div id="miso-root"></div>
+<div id="status">Loading wasm…</div>
+
+<h2>What's running</h2>
+<p>
+Click <code>+</code> / <code>-</code> above — the wasm module updates an
+<code>Int</code> model, miso diffs the virtual DOM, and patches the real
+DOM directly above this line. Open the browser console for the
+<code>[hs stdout]</code> lines coming out of the Haskell program through
+<code>browser_wasi_shim</code>'s <code>ConsoleStdout</code>.
+</p>
+<p class="meta">
+This page loads <code>myapp.wasm</code> (~2.8 MB) and
+<code>jsffi.mjs</code> (~48 KB) from the same directory.
+Built end-to-end via <code>ghcup install ghc wasm32-wasi-9.14.0.stable.1
++ cabal 3.17.0.0.stable.0</code> + the same Main.hs you'll see if you
+download the template.
+</p>
+
+<h2>Source</h2>
+<ul>
+<li><a href="../../examples/miso-counter/app/Main.hs"><code>app/Main.hs</code></a> — the miso component
+  (<code>component</code> smart constructor, <code>updateModel</code>, <code>viewModel</code>)</li>
+<li><a href="../../examples/miso-counter/cabal.project"><code>cabal.project</code></a> — dual-compiler + miso 1.11 source-repo pin</li>
+<li><a href="../../examples/miso-counter/myapp.cabal"><code>myapp.cabal</code></a> — wasm reactor flags + <code>ghc-experimental</code> dep</li>
+<li><a href="../../examples/miso-counter/"><code>examples/miso-counter/</code></a> — browse all files</li>
+</ul>
+<p>
+Build it yourself:
+</p>
+<pre><code>curl -L -o miso.tar.gz \
+  https://stable-haskell.github.io/ghc/examples/stable-haskell-wasm-miso-counter.tar.gz
+tar xf miso.tar.gz &amp;&amp; cd stable-haskell-wasm-miso-counter
+export PATH="$HOME/.ghcup/ghc/wasm32-wasi-9.14.0.stable.1/bin:$PATH"
+make run-web   # http://localhost:8000 — identical UI to the one above</code></pre>
+
+<p class="meta">
+<a href="../../">← back to the stable-haskell channel</a>
+</p>
+
+<script type="module" src="./index.js"></script>
+</body>
+</html>

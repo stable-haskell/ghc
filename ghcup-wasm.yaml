@@ -1,0 +1,266 @@
+---
+# stable-haskell custom ghcup channel.
+#
+# Usage:
+#   ghcup config add-release-channel \
+#     https://stable-haskell.github.io/ghc/ghcup-wasm.yaml
+#   ghcup install ghc   wasm32-wasi-9.14.0.stable.1
+#   ghcup install cabal 3.17.0.0.stable.0
+#
+# Ships:
+#   * GHC   wasm32-wasi-9.14.0.stable.1  — wasm32-unknown-wasi cross-compiler
+#                                          aarch64-darwin, x86_64-linux, aarch64-linux
+#   * Cabal 3.17.0.0.stable.0            — dual-compiler cabal-install
+#
+# Legacy entry kept for back-compat:
+#   * GHC   wasm32-wasi-9.14.0.stable.0  — aarch64-darwin only
+#
+# See https://github.com/stable-haskell/ghc/releases for the underlying
+# build artifacts.
+#
+# Schema: ghcup-0.0.9 (flat — no toolDetails / toolVersions indirection,
+# which ghcup's custom-channel parser doesn't accept).
+
+ghcupDownloads:
+  GHC:
+    wasm32-wasi-9.14.0.stable.12:
+      viTags:
+        - LatestPrerelease
+      viChangeLog: https://github.com/stable-haskell/ghc/releases/tag/wasm32-wasi-9.14.0.stable.12
+      viPostInstall: |
+        stable-haskell wasm32-unknown-wasi cross-compiler installed.
+
+        First fully-functional release that ships dynamic interfaces +
+        the host runtime libraries alongside (~444-494 MB tarballs):
+          * 4336 .dyn_hi files for stage3 wasm libraries
+          * 40 wasm-target .so shared libraries
+          * 49 host native libHS .so / .dylib + matching .dyn_hi
+            in lib/$HOST_PLATFORM/ — required so the wasm-ghc
+            executable (dyn-linked) can find its host runtime
+            dependencies via @rpath at runtime
+
+        End-user TH-heavy apps (miso, jsaddle, aeson, lens, ...) now
+        compile against this bindist. Earlier releases shipped
+        either no .dyn_hi (stable.5 and prior) or .dyn_hi without
+        the host dylibs (stable.7/.8/.9/.11 — broken bindists).
+
+        Template Haskell builds require Node.js >= 22 on PATH (the
+        wasm dynamic linker shim runs via node, and post-link.mjs
+        needs import.meta.filename from Node 20.11+).
+
+        Add the cross-compiler bin dir to PATH and try it:
+          export PATH="$HOME/.ghcup/ghc/wasm32-wasi-9.14.0.stable.12/bin:$PATH"
+          echo 'main = putStrLn "hello"' > hello.hs
+          wasm32-unknown-wasi-ghc hello.hs -o hello.wasm
+
+        For a TH-heavy / miso app, in your project's cabal.project:
+          if arch(wasm32)
+            shared: True
+
+        The package-db binary cache (package.cache) is regenerated
+        automatically by ghc-pkg on first read (mtime-based), so no
+        relocate step is required after install.
+      viArch:
+        A_64:
+          Linux_UnknownLinux:
+            unknown_versioning:
+              dlUri: https://github.com/stable-haskell/ghc/releases/download/wasm32-wasi-9.14.0.stable.12/ghc-wasm32-unknown-wasi-x86_64-linux.tar.gz
+              dlHash: 553eae9eac235b0370f4d0f93e94c5c82dab9e337c57c7039fec284c817f60ac
+        A_ARM64:
+          Darwin:
+            unknown_versioning:
+              dlUri: https://github.com/stable-haskell/ghc/releases/download/wasm32-wasi-9.14.0.stable.12/ghc-wasm32-unknown-wasi-aarch64-darwin.tar.gz
+              dlHash: 476b673801f5e4697b41eddc30e1c9c74253eaf6699d9eea203df5c99685c800
+          Linux_UnknownLinux:
+            unknown_versioning:
+              dlUri: https://github.com/stable-haskell/ghc/releases/download/wasm32-wasi-9.14.0.stable.12/ghc-wasm32-unknown-wasi-aarch64-linux.tar.gz
+              dlHash: e57a08da25f82d8ff6708bf4bb24f0142d9ebf6d3a39b850799d4a491b2def8a
+    wasm32-wasi-9.14.0.stable.5:
+      viTags: []
+      viChangeLog: https://github.com/stable-haskell/ghc/releases/tag/wasm32-wasi-9.14.0.stable.5
+      viPostInstall: |
+        stable-haskell wasm32-unknown-wasi cross-compiler installed.
+
+        This release is content-equivalent to stable.2 (rebuilt with
+        cleaned-up cabal.project.stage3.settings.in). It does NOT yet
+        ship .dyn_hi files for stage3 libraries — that is tracked as a
+        wasm-backend-side limitation (GHC-74335 + interface profile
+        mismatch).
+
+        Practical impact:
+          * trivial reactor apps build and run fine
+          * TH-heavy apps (miso, jsaddle, aeson, ...) need the
+            dyld.mjs main-rts preload workaround — see the channel
+            docs for the up-to-date recipe
+
+        Template Haskell builds also require Node.js >= 22 on PATH
+        (the wasm dynamic linker shim runs via 'node', and
+        post-link.mjs needs import.meta.filename from Node 20.11+).
+
+        Add the cross-compiler bin dir to PATH and try it:
+          export PATH="$HOME/.ghcup/ghc/wasm32-wasi-9.14.0.stable.5/bin:$PATH"
+          echo 'main = putStrLn "hello"' > hello.hs
+          wasm32-unknown-wasi-ghc hello.hs -o hello.wasm
+
+        The package-db binary cache (package.cache) is regenerated
+        automatically by ghc-pkg on first read (mtime-based), so no
+        relocate step is required after install.
+      viArch:
+        A_64:
+          Linux_UnknownLinux:
+            unknown_versioning:
+              dlUri: https://github.com/stable-haskell/ghc/releases/download/wasm32-wasi-9.14.0.stable.5/ghc-wasm32-unknown-wasi-x86_64-linux.tar.gz
+              dlHash: 3da8b2407428a5747ade7b7f2cbd5a6b535d64b12bb3c59f99a1f194e8e3589d
+        A_ARM64:
+          Darwin:
+            unknown_versioning:
+              dlUri: https://github.com/stable-haskell/ghc/releases/download/wasm32-wasi-9.14.0.stable.5/ghc-wasm32-unknown-wasi-aarch64-darwin.tar.gz
+              dlHash: 96b0d2de544bd8e7b95727e9c4fd966ad6c966a5690e0d8cd0ee1f182a0d3d82
+          Linux_UnknownLinux:
+            unknown_versioning:
+              dlUri: https://github.com/stable-haskell/ghc/releases/download/wasm32-wasi-9.14.0.stable.5/ghc-wasm32-unknown-wasi-aarch64-linux.tar.gz
+              dlHash: 921fedd37c9b85053e142969faa1f9a324ec22a37e8554d5c3da39887adb88d7
+    wasm32-wasi-9.14.0.stable.2:
+      viTags: []
+      viChangeLog: https://github.com/stable-haskell/ghc/releases/tag/wasm32-wasi-9.14.0.stable.2
+      viPostInstall: |
+        stable-haskell wasm32-unknown-wasi cross-compiler installed.
+
+        Template Haskell builds require Node.js >= 22 on PATH (the wasm
+        dynamic linker shim runs via `node`, and post-link.mjs needs
+        import.meta.filename which was added in Node 20.11). The
+        compiler emits a clear "requires `node` on PATH" error if a TH
+        build is attempted without node available. Non-TH builds work
+        without it.
+
+        Add the cross-compiler bin dir to PATH and try it:
+          export PATH="$HOME/.ghcup/ghc/wasm32-wasi-9.14.0.stable.2/bin:$PATH"
+          echo 'main = putStrLn "hello"' > hello.hs
+          wasm32-unknown-wasi-ghc hello.hs -o hello.wasm
+
+        The package-db binary cache (package.cache) is regenerated
+        automatically by ghc-pkg on first read (mtime-based), so no
+        relocate step is required after install.
+      viArch:
+        A_64:
+          Linux_UnknownLinux:
+            unknown_versioning:
+              dlUri: https://github.com/stable-haskell/ghc/releases/download/wasm32-wasi-9.14.0.stable.2/ghc-wasm32-unknown-wasi-x86_64-linux.tar.gz
+              dlHash: d8643882ed983b695731e8ceb1cd3e7661e6c5d1fe1e2f78a467da370f4a513e
+        A_ARM64:
+          Darwin:
+            unknown_versioning:
+              dlUri: https://github.com/stable-haskell/ghc/releases/download/wasm32-wasi-9.14.0.stable.2/ghc-wasm32-unknown-wasi-aarch64-darwin.tar.gz
+              dlHash: cfe4af3a164ec1cb84b0f7bdc79855fcc602c7bc58651176d84a88c18572a734
+          Linux_UnknownLinux:
+            unknown_versioning:
+              dlUri: https://github.com/stable-haskell/ghc/releases/download/wasm32-wasi-9.14.0.stable.2/ghc-wasm32-unknown-wasi-aarch64-linux.tar.gz
+              dlHash: b3161f4cd45a5dea5ddbbbd79e4f9c08ccb4e8db7bc26d0dc3e11a6c4177261e
+    wasm32-wasi-9.14.0.stable.1:
+      viTags: []
+      viChangeLog: https://github.com/stable-haskell/ghc/releases/tag/wasm32-wasi-9.14.0.stable.1
+      viPostInstall: |
+        stable-haskell wasm32-unknown-wasi cross-compiler (stable.1,
+        legacy — kept for back-compat. The Linux bindists in this
+        release had their ELF interpreter pinned to a /nix/store
+        path and only run on nix systems; the Darwin bindist is
+        unaffected. Prefer stable.2 which patchelfs the Linux
+        binaries to the canonical system interpreter and so works
+        on every modern Linux distro).
+      viArch:
+        # Only Darwin retained — Linux entries dropped because the stable.1
+        # Linux bindists need /nix/store/.../ld-linux-* to load (pinned PT_INTERP
+        # from devx-bundled glibc). End users on Linux should use stable.2.
+        A_ARM64:
+          Darwin:
+            unknown_versioning:
+              dlUri: https://github.com/stable-haskell/ghc/releases/download/wasm32-wasi-9.14.0.stable.1/ghc-wasm32-unknown-wasi-aarch64-darwin.tar.gz
+              dlHash: 888c329c0e57d969df13d6a72a62418f4b9ca300f9ba857026fc122fe07e99a9
+    wasm32-wasi-9.14.0.stable.0:
+      viTags: []
+      viChangeLog: https://github.com/stable-haskell/ghc/releases/tag/wasm32-wasi-9.14.0.stable.0
+      viPostInstall: |
+        stable-haskell wasm32-unknown-wasi cross-compiler (stable.0,
+        legacy — kept for back-compat; prefer stable.1 which adds
+        Linux bindists).
+
+        Template Haskell builds require Node.js on PATH (the wasm dynamic
+        linker shim runs via `node`).
+
+        Add the cross-compiler bin dir to PATH and try it:
+          export PATH="$HOME/.ghcup/ghc/wasm32-wasi-9.14.0.stable.0/bin:$PATH"
+          echo 'main = putStrLn "hello"' > hello.hs
+          wasm32-unknown-wasi-ghc hello.hs -o hello.wasm
+      viArch:
+        A_ARM64:
+          Darwin:
+            unknown_versioning:
+              dlUri: https://github.com/stable-haskell/ghc/releases/download/wasm32-wasi-9.14.0.stable.0/ghc-wasm32-unknown-wasi.tar.gz
+              dlHash: e80167f83cd7e48796f7667cad61e95c5408b7479b089d66783a677c53c70e79
+  Cabal:
+    3.17.0.0.stable.0:
+      viTags:
+        - LatestPrerelease
+      viChangeLog: https://github.com/stable-haskell/ghc/releases/tag/cabal-3.17.0.0.stable.0
+      viPostInstall: |
+        stable-haskell dual-compiler cabal-install installed.
+
+        This is the cabal-install needed to drive the
+        wasm32-unknown-wasi cross-compiler in a Stage/Toolchain
+        dual-compiler build (one `cabal build` uses a native build
+        compiler for Setup.hs and the wasm cross-compiler for host
+        packages).
+
+        To set this as your default cabal:
+          ghcup set cabal 3.17.0.0.stable.0
+
+        Or invoke it explicitly:
+          cabal-3.17.0.0.stable.0 --version
+
+        libgmp.10.dylib is bundled (Apple doesn't ship libgmp) with
+        @loader_path-relative rpath, so this binary runs without nix
+        or Homebrew on stock aarch64-darwin.
+      viArch:
+        A_64:
+          Linux_UnknownLinux:
+            unknown_versioning:
+              dlUri: https://github.com/stable-haskell/ghc/releases/download/cabal-3.17.0.0.stable.0/cabal-3.17.0.0.stable.0-x86_64-linux.tar.gz
+              dlHash: f68f5c29ff3ee0b4d42fc839c753551275ff9c090e7b183696f79777f1700547
+              dlInstallSpec:
+                exeRules:
+                  - installSource: cabal
+                exeSymLinked:
+                  - target: cabal
+                    linkName: "cabal-${PKGVER}"
+                    pVPMajorLinks: false
+                    setName: "cabal"
+                preserveMtimes: false
+        A_ARM64:
+          Darwin:
+            unknown_versioning:
+              dlUri: https://github.com/stable-haskell/ghc/releases/download/cabal-3.17.0.0.stable.0/cabal-3.17.0.0.stable.0-aarch64-darwin.tar.gz
+              dlHash: 7f755b0810f5167b7f776470b5219834cdcbdad562998fd3c074b091be77e4d6
+              dlInstallSpec:
+                exeRules:
+                  - installSource: cabal
+                dataRules:
+                  - installPattern: ["lib/**"]
+                exeSymLinked:
+                  - target: cabal
+                    linkName: "cabal-${PKGVER}"
+                    pVPMajorLinks: false
+                    setName: "cabal"
+                preserveMtimes: false
+          Linux_UnknownLinux:
+            unknown_versioning:
+              dlUri: https://github.com/stable-haskell/ghc/releases/download/cabal-3.17.0.0.stable.0/cabal-3.17.0.0.stable.0-aarch64-linux.tar.gz
+              dlHash: 04a7f80f813ff6c4405ae6be8f2e46d87f61c8f3982c7eee0f32822c15786bf5
+              dlInstallSpec:
+                exeRules:
+                  - installSource: cabal
+                exeSymLinked:
+                  - target: cabal
+                    linkName: "cabal-${PKGVER}"
+                    pVPMajorLinks: false
+                    setName: "cabal"
+                preserveMtimes: false
