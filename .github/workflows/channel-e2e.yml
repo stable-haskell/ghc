@@ -164,7 +164,7 @@ jobs:
       # Download the official nodejs.org darwin-arm64 tarball directly —
       # hermetic, no toolchain build required, matches what an end-user
       # who just installed Node would have.
-      - name: Install Node 22 (Darwin via nodejs.org tarball)
+      - name: Install Node 22 + clang (Darwin)
         if: runner.os == 'macOS'
         run: |
           set -euo pipefail
@@ -175,17 +175,40 @@ jobs:
             | tar -xJ -C "$HOME"
           mv "$HOME/node-$NODE_VER-darwin-arm64" "$NODE_DIR"
           echo "$NODE_DIR/bin" >> "$GITHUB_PATH"
-          # clang: on the Tart base Xcode CLT may not be installed.
-          # /usr/bin/clang exists as a stub that prompts for CLT install;
-          # actually invoking it returns exit 1. Cabal probes for cc, so
-          # if clang is broken, the sanity step will fail downstream and
-          # tell us. Try here so we get a clean signal early.
-          if /usr/bin/clang --version >/dev/null 2>&1; then
-            /usr/bin/clang --version | head -1
-          else
-            echo "::warning::/usr/bin/clang not functional (Xcode CLT missing). Downstream cabal steps may fail."
-          fi
           "$NODE_DIR/bin/node" --version
+
+          # clang: Tart base sometimes ships /Library/Developer/CommandLineTools
+          # but with xcode-select not pointing at it (or with /usr/bin/clang
+          # as a stub that triggers a GUI install prompt). Diagnose + fix.
+          echo "=== xcode-select / CLT state ==="
+          sudo xcode-select -p 2>&1 || true
+          ls /Library/Developer/CommandLineTools/usr/bin/clang 2>&1 || true
+          if [ -x /Library/Developer/CommandLineTools/usr/bin/clang ]; then
+            # CLT is present, just not selected — point xcode-select at it.
+            sudo xcode-select -s /Library/Developer/CommandLineTools 2>&1 || true
+            echo "=== After xcode-select -s ==="
+            sudo xcode-select -p
+          fi
+          # Make /usr/bin/clang actually work (it's a stub that calls xcrun)
+          if ! /usr/bin/clang --version >/dev/null 2>&1; then
+            echo "::warning::clang still not functional after xcode-select. Trying CLT install via softwareupdate (non-interactive)."
+            # Trigger non-interactive CLT install.
+            sudo touch /tmp/.com.apple.dt.CommandLineTools.installondemand.in-progress
+            label=$(softwareupdate --list 2>&1 \
+              | grep -oE '\* Label: Command Line Tools.*' \
+              | sed 's/^\* Label: //' \
+              | tail -1) || true
+            if [ -n "$label" ]; then
+              echo "Found CLT label: $label"
+              sudo softwareupdate -i "$label" --no-scan --verbose || true
+            else
+              echo "::error::no Command Line Tools label found in softwareupdate --list"
+              sudo rm -f /tmp/.com.apple.dt.CommandLineTools.installondemand.in-progress
+              exit 1
+            fi
+            sudo rm -f /tmp/.com.apple.dt.CommandLineTools.installondemand.in-progress
+          fi
+          /usr/bin/clang --version | head -1
 
       # ---------------------------------------------------------------------
       # 3a. Install a native GHC for the dual-compiler build. The hello
