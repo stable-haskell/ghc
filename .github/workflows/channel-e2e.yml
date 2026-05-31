@@ -136,7 +136,24 @@ jobs:
           curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
           sudo apt-get install -y --no-install-recommends nodejs
           gcc --version | head -1
+          # ubuntu-24.04-arm pre-bakes Node 20 in /opt/hostedtoolcache and
+          # adds it to PATH ahead of /usr/bin. That means even after we
+          # apt-install Node 22 to /usr/bin/node, `node` resolves to the
+          # toolcache v20 — which then runs dyld.mjs under a Node release
+          # that lacks features Node 22 introduced (stream.toWeb flow
+          # control over experimental .toWeb()), causing miso TH builds
+          # to deadlock against wasm-iserv.
+          # See aarch64-linux miso hang investigation (run 26700668292,
+          # logged v20.20.0 on aarch64 vs v22.22.3 on x86_64 with the
+          # same workflow).
+          # Force /usr/bin first so the NodeSource Node 22 binary wins.
+          echo "/usr/bin" >> "$GITHUB_PATH"
+          export PATH="/usr/bin:$PATH"
+          which node
           node --version
+          # Assert Node 22+ — fail loud if the toolcache still shadows.
+          ver=$(node --version | tr -d v | cut -d. -f1)
+          test "$ver" -ge 22 || { echo "::error::expected Node 22+, got $(node --version)"; exit 1; }
 
       # Darwin: Tart self-hosted VMs ship without Xcode CLT, which means
       # nix can't build derivations that pull in stdenv (it needs clang).
