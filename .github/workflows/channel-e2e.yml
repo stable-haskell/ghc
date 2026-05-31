@@ -67,13 +67,18 @@ jobs:
     # before miso started compiling. x86_64-linux fits comfortably in 30
     # min so this only adds slack for the slow runner.
     timeout-minutes: 60
+    # darwin currently expected-failing — Tart base lacks Xcode CLT and
+    # CLT install needs 11.8 GB that the APFS container doesn't have
+    # spare. continue-on-error so darwin job stays visible (and tells us
+    # when the Tart base image gets CLT) without failing the overall run.
+    continue-on-error: ${{ matrix.allow-failure == true }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - { plat: x86_64-linux,   runner: '["ubuntu-latest"]'                                  }
           - { plat: aarch64-linux,  runner: '["ubuntu-24.04-arm"]'                               }
-          - { plat: aarch64-darwin, runner: '["self-hosted", "macos", "arm64", "nix"]'           }
+          - { plat: aarch64-darwin, runner: '["self-hosted", "macos", "arm64", "nix"]', allow-failure: true }
 
     env:
       # Default is the current LatestPrerelease; workflow_dispatch can override.
