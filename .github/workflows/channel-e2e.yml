@@ -18,10 +18,16 @@
 #   * TH-heavy build regressions at scale (the miso template — 50+ deps
 #     incl. aeson, lens, jsaddle, jsaddle-wasm, miso)
 #
-# Runs only on free public-repo runners — no macOS (macos-14 is 10x billed
-# even on public repos). Self-hosted is deliberately avoided: a hermetic
-# end-to-end test should mirror the state an end-user gets, not a pre-baked
-# devx-warm /nix/store.
+# Runs on:
+#   * github-hosted ubuntu-latest    (x86_64-linux)
+#   * github-hosted ubuntu-24.04-arm (aarch64-linux)
+#   * self-hosted darwin             (aarch64-darwin)
+#
+# We avoid the github-hosted macos-14 runners (10x billing rate even on
+# public repos) and instead use the org's own aarch64-darwin Tart VMs.
+# These VMs DO have devx pre-imported in /nix/store, but the test never
+# enters devx — it installs ghcup vanilla and exercises the channel YAML
+# end-to-end. The pre-baked nix-store is irrelevant to the test surface.
 name: Channel e2e
 
 on:
@@ -51,7 +57,10 @@ concurrency:
 jobs:
   install-and-build:
     name: e2e / ${{ matrix.plat }}
-    runs-on: ${{ matrix.runs-on }}
+    # matrix.runner is a JSON-string ARRAY of labels: '["label1", "label2"]'
+    # so both github-hosted ("ubuntu-latest") and label-matched self-hosted
+    # ("self-hosted", "macos", ...) targeting work through one knob.
+    runs-on: ${{ fromJSON(matrix.runner) }}
     # 60min: aarch64-linux took 30min to build through aeson/lens/jsaddle
     # for the miso template; miso itself is sizeable, and ubuntu-24.04-arm
     # is meaningfully slower than ubuntu-latest. 30min hit timeout right
@@ -62,8 +71,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { plat: x86_64-linux,  runs-on: ubuntu-latest    }
-          - { plat: aarch64-linux, runs-on: ubuntu-24.04-arm }
+          - { plat: x86_64-linux,   runner: '["ubuntu-latest"]'                                  }
+          - { plat: aarch64-linux,  runner: '["ubuntu-24.04-arm"]'                               }
+          - { plat: aarch64-darwin, runner: '["self-hosted", "macos", "arm64", "nix"]'           }
 
     env:
       # Default is the current LatestPrerelease; workflow_dispatch can override.
@@ -89,13 +99,14 @@ jobs:
       - name: Install ghcup fresh
         run: |
           set -euo pipefail
-          # Wipe BOTH pre-baked ghcup locations on github-hosted ubuntu:
-          # /usr/local/.ghcup (the runner image's pre-installed one — owned
-          # root and detected by ghcup's start-up probe) and $HOME/.ghcup
-          # (sometimes also pre-baked with partial state). Without wiping
-          # /usr/local/.ghcup, fresh `ghcup install` lands there instead
-          # of $HOME, and our PATH addition points at the wrong location.
-          sudo rm -rf "$HOME/.ghcup" /usr/local/.ghcup
+          # Wipe pre-baked ghcup locations. github-hosted ubuntu runners
+          # ship /usr/local/.ghcup (root-owned); self-hosted darwin Tart
+          # VMs typically don't, so the sudo path runs only on Linux. The
+          # $HOME/.ghcup wipe is unconditional (cheap, no-op if absent).
+          rm -rf "$HOME/.ghcup"
+          if [ "$(uname -s)" = "Linux" ] && [ -d /usr/local/.ghcup ]; then
+            sudo rm -rf /usr/local/.ghcup
+          fi
           curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org \
             | BOOTSTRAP_HASKELL_NONINTERACTIVE=1 \
               BOOTSTRAP_HASKELL_MINIMAL=1 \
@@ -116,7 +127,8 @@ jobs:
       #    breaking subsequent JSFFI runs. NodeSource setup_22.x is the
       #    canonical fix.
       # ---------------------------------------------------------------------
-      - name: Install gcc + Node 22
+      - name: Install gcc + Node 22 (Linux via apt + NodeSource)
+        if: runner.os == 'Linux'
         run: |
           set -euo pipefail
           sudo apt-get update -qq
@@ -124,6 +136,30 @@ jobs:
           curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
           sudo apt-get install -y --no-install-recommends nodejs
           gcc --version | head -1
+          node --version
+
+      # Darwin: Xcode CLT supplies clang/gcc. Node 22 comes from nix
+      # (devx isn't entered, but our self-hosted Tart runners have nix
+      # available system-wide). nix-env installs into ~/.nix-profile;
+      # GITHUB_PATH addition makes it visible to subsequent steps.
+      #
+      # We DON'T use brew here — self-hosted Tart base may not have it,
+      # and pinning to nixpkgs nodejs_22 gives us a deterministic Node
+      # version that matches our Linux NodeSource setup_22.x in spirit.
+      - name: Install Node 22 (Darwin via nix)
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          # nix is in /nix/var/nix/profiles/default/bin and ~/.nix-profile/bin
+          # on the Tart base. Make sure both are on PATH.
+          export PATH="$HOME/.nix-profile/bin:/nix/var/nix/profiles/default/bin:$PATH"
+          # -A nixpkgs.nodejs_22 installs Node 22 into user profile; -i
+          # tracks the package so future ghcup install workflows still
+          # find it without re-installing.
+          nix-env -iA nixpkgs.nodejs_22
+          echo "$HOME/.nix-profile/bin" >> "$GITHUB_PATH"
+          # clang from Xcode CLT — should be on /usr/bin/clang already.
+          /usr/bin/clang --version | head -1
           node --version
 
       # ---------------------------------------------------------------------
@@ -284,6 +320,48 @@ jobs:
             https://stable-haskell.github.io/ghc/examples/stable-haskell-wasm-miso-counter.tar.gz
           tar xf miso.tar.gz
           cd stable-haskell-wasm-miso-counter
+
+          # ------------------------------------------------------------------
+          # Diagnostic monitor — captures process + memory state every 60s
+          # during the miso build, so when (if) the build hangs we know
+          # WHICH process is stuck and HOW (sleeping vs spinning, memory
+          # footprint, child relationships).
+          #
+          # Triggered by the aarch64-linux miso hang in stable.12's first
+          # e2e attempt (run 26700668292): jsaddle-wasm completed, then 47
+          # minutes of silence before timeout. Need module-level + process-
+          # level visibility to diagnose.
+          # ------------------------------------------------------------------
+          (
+            while true; do
+              echo "::group::diag $(date +%H:%M:%S)"
+              echo "--- ps (wasm/ghc/cabal/node) ---"
+              if [ "$(uname -s)" = "Darwin" ]; then
+                ps -A -o pid,ppid,%cpu,%mem,rss,etime,stat,comm,command 2>/dev/null \
+                  | head -1
+                ps -A -o pid,ppid,%cpu,%mem,rss,etime,stat,comm,command 2>/dev/null \
+                  | grep -E "(ghc|cabal|node|wasm32|iserv)" | grep -v grep || true
+                echo "--- memory ---"
+                vm_stat | head -10
+              else
+                ps -e -o pid,ppid,%cpu,%mem,rss,etime,stat,comm,command 2>/dev/null \
+                  | head -1
+                ps -e -o pid,ppid,%cpu,%mem,rss,etime,stat,comm,command 2>/dev/null \
+                  | grep -E "(ghc|cabal|node|wasm32|iserv)" | grep -v grep || true
+                echo "--- memory ---"
+                free -h 2>/dev/null
+              fi
+              echo "::endgroup::"
+              sleep 60
+            done
+          ) &
+          MONITOR_PID=$!
+          # Make sure the monitor goes down with the step, regardless of
+          # success/failure/cancellation. The cancellation case relies on
+          # GitHub sending SIGTERM to our shell, which propagates via
+          # default trap behavior — explicit trap is belt-and-suspenders.
+          trap 'kill $MONITOR_PID 2>/dev/null || true' EXIT INT TERM
+
           # Same WASM_VERSION override as the hello step.
           make WASM_VERSION="$WASM_VER" build
           wasm_file=$(find dist-newstyle -name 'myapp.wasm' -type f | head -1)
