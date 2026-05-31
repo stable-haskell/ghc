@@ -52,7 +52,12 @@ jobs:
   install-and-build:
     name: e2e / ${{ matrix.plat }}
     runs-on: ${{ matrix.runs-on }}
-    timeout-minutes: 30
+    # 60min: aarch64-linux took 30min to build through aeson/lens/jsaddle
+    # for the miso template; miso itself is sizeable, and ubuntu-24.04-arm
+    # is meaningfully slower than ubuntu-latest. 30min hit timeout right
+    # before miso started compiling. x86_64-linux fits comfortably in 30
+    # min so this only adds slack for the slow runner.
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
