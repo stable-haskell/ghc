@@ -19,6 +19,7 @@ on:
       - 'docs/**'
       - 'mkdocs.yml'
       - '.github/workflows/docs.yml'
+      - '_macros.py'
   workflow_dispatch:
 
 concurrency:
