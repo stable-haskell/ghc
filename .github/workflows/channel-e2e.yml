@@ -302,6 +302,39 @@ jobs:
           grep -q '^ok$' /tmp/probe-out
 
       # ---------------------------------------------------------------------
+      # 4b. Darwin diagnostic — pin down why cabal sees an empty
+      #     `wasm32-unknown-wasi-ghc --version` on github-hosted macos-15.
+      #     The bindist installs + reports 9.14 fine on aarch64-darwin macOS
+      #     26 (verified via ghcup's configure+make install path), so this is
+      #     macos-15-specific — suspect dyld/quarantine blocking the dyn-linked
+      #     host-dylib load via @rpath. Also surfaces the bindist's leaked
+      #     /Volumes/WorkSpace build rpath. Informational only (never fails);
+      #     remove once the cause is fixed.
+      # ---------------------------------------------------------------------
+      - name: Diagnose wasm-ghc version detection (Darwin)
+        if: runner.os == 'macOS'
+        run: |
+          set +e
+          echo "macOS: $(sw_vers -productVersion) ($(sw_vers -buildVersion))"
+          echo "resolved on PATH: $(command -v wasm32-unknown-wasi-ghc || true)"
+          PREFIX="$HOME/.ghcup/ghc/$WASM_VER"
+          BIN="$PREFIX/bin/wasm32-unknown-wasi-ghc"
+          echo "=== file ==="; file "$BIN"
+          echo "=== rpaths (watch for a leaked /Volumes/WorkSpace build path) ==="
+          otool -l "$BIN" 2>/dev/null | grep -A2 LC_RPATH | grep path
+          echo "=== host dylib dir present? ==="
+          ls "$PREFIX/lib/aarch64-apple-darwin" 2>&1 | head -5
+          echo "=== quarantine xattrs on binary + a host dylib? ==="
+          xattr "$BIN" 2>&1
+          xattr "$PREFIX/lib/aarch64-apple-darwin/"*.dylib 2>/dev/null | head -3
+          echo "=== direct --numeric-version (stdout / stderr / exit) ==="
+          out="$("$BIN" --numeric-version 2>/tmp/wghc.err)"; rc=$?
+          echo "stdout=[$out] exit=$rc"; echo "stderr:"; cat /tmp/wghc.err
+          echo "=== dyld trace of the same invocation ==="
+          DYLD_PRINT_LIBRARIES=1 DYLD_PRINT_RPATHS=1 "$BIN" --numeric-version 2>&1 | head -60
+          true
+
+      # ---------------------------------------------------------------------
       # 5. Smoke test — hello template. ~30 s build, runs via node:wasi
       #    and prints "Hello from the WASM reactor!" — covers reactor
       #    bring-up + ghc_wasm_jsffi_init + hs_start sequence.
