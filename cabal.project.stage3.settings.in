@@ -22,10 +22,11 @@
 --     → no shared, no -dynamic-too codepath
 --     → builds against vanilla native base (no need for native .dyn_hi)
 --
--- Hardcoded — no @ALL_PACKAGES@ autoconf substitution. DYNAMIC=1 / DYNAMIC=0
--- has no effect on stage3 (the wasm target ALWAYS needs shared:True
--- regardless of how stage2 was built; the conditional handles JS/native
--- exclusion).
+-- Hardcoded — no per-package autoconf substitution (we deliberately
+-- avoid the literal variable name in this comment so autoconf does
+-- not expand it). DYNAMIC=1 / DYNAMIC=0 has no effect on stage3
+-- (the wasm target ALWAYS needs shared:True regardless of how
+-- stage2 was built; the conditional handles JS/native exclusion).
 
 if arch(wasm32)
   package *
