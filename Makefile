@@ -1181,7 +1181,7 @@ $(DIST_DIR)/haskell-toolchain.tar.gz: $(STAGE2_STAMP) | stable-cabal stage3-java
 #
 # JS doesn't use ghc-iserv (the JS backend has its own evaluator); filter
 # it out of the JS bin list so we don't ship a useless prefixed copy.
-$(DIST_DIR)/ghc-multi-target.tar.gz: $(STAGE2_STAMP) | stage3-wasm32-unknown-wasi stage3-javascript-unknown-ghcjs
+$(DIST_DIR)/ghc-multi-target.tar.gz: | stage3-wasm32-unknown-wasi stage3-javascript-unknown-ghcjs
 	@echo "::group::Creating ghc-multi-target.tar.gz..."
 	@cp -f mk/multi-target-relocate.sh $(DIST_DIR)/relocate.sh
 	@chmod +x $(DIST_DIR)/relocate.sh
