@@ -423,3 +423,74 @@ jobs:
           file "$wasm_file" | tee /tmp/file_out
           grep -q 'WebAssembly' /tmp/file_out \
             || { echo "::error::artifact is not a wasm binary"; exit 1; }
+
+      # =====================================================================
+      # MULTI-TARGET CHANNEL TESTS (opt-in / continue-on-error per step until
+      # the channel is fully promoted). These exercise the NEW multi-target
+      # bindist installed via the 0.1.0-schema channel YAML.
+      # =====================================================================
+
+      - name: multi — add channel + install multi-9.14.0.stable.0
+        if: steps.cabal.outputs.cabal_installed == 'true'
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          ghcup config add-release-channel \
+            https://stable-haskell.github.io/ghc/ghcup-multi-target-0.1.0.yaml
+          ghcup install ghc multi-9.14.0.stable.0
+          # Switch ghcup's notion of "ghc" to the multi-target install. This
+          # makes the unprefixed `ghc`, `wasm32-unknown-wasi-ghc`,
+          # `javascript-unknown-ghcjs-ghc` symlinks all point at the
+          # multi-target bindist's binaries.
+          ghcup set ghc multi-9.14.0.stable.0
+          echo "$HOME/.ghcup/bin" >> "$GITHUB_PATH"
+          ghc        --numeric-version
+          wasm32-unknown-wasi-ghc      --numeric-version
+          javascript-unknown-ghcjs-ghc --numeric-version
+
+      - name: multi — native hello
+        if: steps.cabal.outputs.cabal_installed == 'true'
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/native-hello && cd /tmp/native-hello
+          echo 'main = putStrLn "Hello from native ghc"' > hello.hs
+          ghc hello.hs -o hello
+          ./hello | tee /tmp/native-out
+          grep -q 'Hello from native ghc' /tmp/native-out
+
+      - name: multi — wasm hello (same template, but now via multi-target ghc)
+        if: steps.cabal.outputs.cabal_installed == 'true'
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          curl -fL -o multi-hello.tar.gz \
+            https://stable-haskell.github.io/ghc/examples/stable-haskell-wasm-hello.tar.gz
+          mkdir -p /tmp/multi-hello && cd /tmp/multi-hello
+          tar xf "$GITHUB_WORKSPACE/multi-hello.tar.gz" || tar xf ../multi-hello.tar.gz || tar xf $OLDPWD/multi-hello.tar.gz
+          cd stable-haskell-wasm-hello
+          # Override WASM_VERSION so the template Makefile uses the
+          # multi-target install instead of its baked-in stable.X default.
+          make WASM_VERSION=multi-9.14.0.stable.0 build
+          make WASM_VERSION=multi-9.14.0.stable.0 run-node 2>&1 | tee /tmp/multi-run.out
+          grep -q 'Hello from the WASM reactor!' /tmp/multi-run.out
+
+      - name: multi — JS hello (proves the JS half of the multi-target works)
+        if: steps.cabal.outputs.cabal_installed == 'true'
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          # Need emscripten on PATH for the JS link step.
+          if ! command -v emcc >/dev/null 2>&1; then
+            git clone --depth 1 --branch 3.1.74 https://github.com/emscripten-core/emsdk.git /tmp/emsdk
+            cd /tmp/emsdk && ./emsdk install 3.1.74 && ./emsdk activate 3.1.74
+            source ./emsdk_env.sh
+          fi
+          mkdir -p /tmp/js-hello && cd /tmp/js-hello
+          echo 'main = putStrLn "Hello from JS backend"' > hello.hs
+          # The dual-compiler pattern: native ghc for Setup.hs (the
+          # multi-target's bin/ghc is the SAME binary), JS cross compiler
+          # for the target.
+          javascript-unknown-ghcjs-ghc hello.hs -o hello
+          node hello.jsexe/all.js | tee /tmp/js-out
+          grep -q 'Hello from JS backend' /tmp/js-out

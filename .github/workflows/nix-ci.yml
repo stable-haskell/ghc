@@ -10,7 +10,11 @@ on:
     # Tag pushes matching wasm32-wasi-* trigger the Cross: WASM jobs to
     # additionally upload their bindist tarballs to the matching GitHub
     # Release, populating the stable-haskell ghcup channel.
-    tags: [wasm32-wasi-*]
+    # multi-* trigger the Cross: MULTI job for the same reason (separate
+    # tag namespace, separate channel YAML).
+    tags:
+      - 'wasm32-wasi-*'
+      - 'multi-*'
 
   workflow_dispatch:
 
@@ -1154,6 +1158,13 @@ jobs:
     if: ${{ !cancelled() && contains(fromJSON('["success", "failure"]'), needs.build.result) }}
     runs-on: ${{ fromJSON(matrix.runner) }}
     continue-on-error: true
+
+    env:
+      # Pinned same as Cross: JS — emsdk's git tag, used in the
+      # `Install emscripten` step's `git clone --branch ${{ env.EMSDK_VERSION }}`.
+      # Workflow-level env doesn't exist on this workflow; each job
+      # needing EMSDK_VERSION declares it itself.
+      EMSDK_VERSION: "3.1.74"
 
     strategy:
       fail-fast: false
