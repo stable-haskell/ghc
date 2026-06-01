@@ -18,16 +18,19 @@
 #   * TH-heavy build regressions at scale (the miso template — 50+ deps
 #     incl. aeson, lens, jsaddle, jsaddle-wasm, miso)
 #
-# Runs on:
+# Runs on (all github-hosted; this repo is public, so standard runners —
+# macOS included — are free. The per-minute multipliers only apply to
+# billed minutes on private repos or to larger runners):
 #   * github-hosted ubuntu-latest    (x86_64-linux)
 #   * github-hosted ubuntu-24.04-arm (aarch64-linux)
-#   * self-hosted darwin             (aarch64-darwin)
+#   * github-hosted macos-15         (aarch64-darwin)
 #
-# We avoid the github-hosted macos-14 runners (10x billing rate even on
-# public repos) and instead use the org's own aarch64-darwin Tart VMs.
-# These VMs DO have devx pre-imported in /nix/store, but the test never
-# enters devx — it installs ghcup vanilla and exercises the channel YAML
-# end-to-end. The pre-baked nix-store is irrelevant to the test surface.
+# The darwin leg deliberately runs on a stock github-hosted macOS image
+# (Xcode + Command Line Tools preinstalled, no nix): the whole point is
+# to mirror what a real end-user has. Our self-hosted aarch64-darwin Tart
+# VMs are the opposite — nix + a pre-imported devx closure, and no CLT —
+# so they're the wrong environment for an end-user-fidelity test. They
+# stay reserved for the nix-based in-tree builds in nix-ci.yml.
 name: Channel e2e
 
 on:
@@ -57,9 +60,8 @@ concurrency:
 jobs:
   install-and-build:
     name: e2e / ${{ matrix.plat }}
-    # matrix.runner is a JSON-string ARRAY of labels: '["label1", "label2"]'
-    # so both github-hosted ("ubuntu-latest") and label-matched self-hosted
-    # ("self-hosted", "macos", ...) targeting work through one knob.
+    # matrix.runner is a JSON-string ARRAY of labels: '["label1", ...]',
+    # so every leg selects its github-hosted image through one knob.
     runs-on: ${{ fromJSON(matrix.runner) }}
     # 60min: aarch64-linux took 30min to build through aeson/lens/jsaddle
     # for the miso template; miso itself is sizeable, and ubuntu-24.04-arm
@@ -67,18 +69,13 @@ jobs:
     # before miso started compiling. x86_64-linux fits comfortably in 30
     # min so this only adds slack for the slow runner.
     timeout-minutes: 60
-    # darwin currently expected-failing — Tart base lacks Xcode CLT and
-    # CLT install needs 11.8 GB that the APFS container doesn't have
-    # spare. continue-on-error so darwin job stays visible (and tells us
-    # when the Tart base image gets CLT) without failing the overall run.
-    continue-on-error: ${{ matrix.allow-failure == true }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - { plat: x86_64-linux,   runner: '["ubuntu-latest"]'                                  }
           - { plat: aarch64-linux,  runner: '["ubuntu-24.04-arm"]'                               }
-          - { plat: aarch64-darwin, runner: '["self-hosted", "macos", "arm64", "nix"]', allow-failure: true }
+          - { plat: aarch64-darwin, runner: '["macos-15"]'                              }
 
     env:
       # Default is the current LatestPrerelease; workflow_dispatch can override.
@@ -105,9 +102,9 @@ jobs:
         run: |
           set -euo pipefail
           # Wipe pre-baked ghcup locations. github-hosted ubuntu runners
-          # ship /usr/local/.ghcup (root-owned); self-hosted darwin Tart
-          # VMs typically don't, so the sudo path runs only on Linux. The
-          # $HOME/.ghcup wipe is unconditional (cheap, no-op if absent).
+          # ship /usr/local/.ghcup (root-owned); the macOS runners don't,
+          # so the sudo path runs only on Linux. The $HOME/.ghcup wipe is
+          # unconditional (cheap, no-op if absent).
           rm -rf "$HOME/.ghcup"
           if [ "$(uname -s)" = "Linux" ] && [ -d /usr/local/.ghcup ]; then
             sudo rm -rf /usr/local/.ghcup
@@ -160,16 +157,16 @@ jobs:
           ver=$(node --version | tr -d v | cut -d. -f1)
           test "$ver" -ge 22 || { echo "::error::expected Node 22+, got $(node --version)"; exit 1; }
 
-      # Darwin: Tart self-hosted VMs ship without Xcode CLT, which means
-      # nix can't build derivations that pull in stdenv (it needs clang).
-      # Empirically `nix-env -iA nixpkgs.nodejs_22` had to build the
-      # full nodejs.drv + user-environment.drv and failed with:
-      #   xcode-select: note: No developer tools were found, requesting install.
+      # Darwin: install Node 22 from the official nodejs.org darwin-arm64
+      # tarball directly — hermetic, matches what an end-user who just
+      # installed Node would have, and independent of whatever Node the
+      # runner image happens to preinstall.
       #
-      # Download the official nodejs.org darwin-arm64 tarball directly —
-      # hermetic, no toolchain build required, matches what an end-user
-      # who just installed Node would have.
-      - name: Install Node 22 + clang (Darwin)
+      # No clang/CLT setup needed: github-hosted macOS images ship Xcode +
+      # Command Line Tools preinstalled, so /usr/bin/clang and the SDK are
+      # already there (the whole reason this leg moved off the self-hosted
+      # Tart VMs, which carry nix but no CLT).
+      - name: Install Node 22 (Darwin)
         if: runner.os == 'macOS'
         run: |
           set -euo pipefail
@@ -181,38 +178,8 @@ jobs:
           mv "$HOME/node-$NODE_VER-darwin-arm64" "$NODE_DIR"
           echo "$NODE_DIR/bin" >> "$GITHUB_PATH"
           "$NODE_DIR/bin/node" --version
-
-          # clang: Tart base sometimes ships /Library/Developer/CommandLineTools
-          # but with xcode-select not pointing at it (or with /usr/bin/clang
-          # as a stub that triggers a GUI install prompt). Diagnose + fix.
-          echo "=== xcode-select / CLT state ==="
-          sudo xcode-select -p 2>&1 || true
-          ls /Library/Developer/CommandLineTools/usr/bin/clang 2>&1 || true
-          if [ -x /Library/Developer/CommandLineTools/usr/bin/clang ]; then
-            # CLT is present, just not selected — point xcode-select at it.
-            sudo xcode-select -s /Library/Developer/CommandLineTools 2>&1 || true
-            echo "=== After xcode-select -s ==="
-            sudo xcode-select -p
-          fi
-          # Make /usr/bin/clang actually work (it's a stub that calls xcrun)
-          if ! /usr/bin/clang --version >/dev/null 2>&1; then
-            echo "::warning::clang still not functional after xcode-select. Trying CLT install via softwareupdate (non-interactive)."
-            # Trigger non-interactive CLT install.
-            sudo touch /tmp/.com.apple.dt.CommandLineTools.installondemand.in-progress
-            label=$(softwareupdate --list 2>&1 \
-              | grep -oE '\* Label: Command Line Tools.*' \
-              | sed 's/^\* Label: //' \
-              | tail -1) || true
-            if [ -n "$label" ]; then
-              echo "Found CLT label: $label"
-              sudo softwareupdate -i "$label" --no-scan --verbose || true
-            else
-              echo "::error::no Command Line Tools label found in softwareupdate --list"
-              sudo rm -f /tmp/.com.apple.dt.CommandLineTools.installondemand.in-progress
-              exit 1
-            fi
-            sudo rm -f /tmp/.com.apple.dt.CommandLineTools.installondemand.in-progress
-          fi
+          # Sanity-check the preinstalled Apple toolchain is wired up.
+          xcode-select -p
           /usr/bin/clang --version | head -1
 
       # ---------------------------------------------------------------------
