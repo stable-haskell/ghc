@@ -437,13 +437,15 @@ jobs:
         id: multi_install
         if: steps.cabal.outputs.cabal_installed == 'true'
         run: |
-          set -uo pipefail
-          # If the install fails (e.g. channel YAML not yet published),
-          # record installed=false and exit 0. Strict steps below gate on
-          # this. We don't use `continue-on-error: true` because that
-          # masks the step's CONCLUSION (= "success") — misleading. This
-          # explicit exit-0-with-output is honest: the step ran, made a
-          # best effort, and tells the world whether to gate.
+          # Use full strict mode (-euo pipefail). The two `if ! …; then …; fi`
+          # blocks below intentionally CAPTURE failures (channel YAML missing,
+          # install can't fetch the asset) and downgrade them to a recorded
+          # installed=false + exit 0. Anything else — including a failed
+          # `ghcup set` or a broken binary symlink — MUST surface as a job
+          # failure rather than be silently swallowed into installed=true.
+          # `set -e` inside an `if` test does not trigger, so the gate
+          # conditionals still work as written.
+          set -euo pipefail
           if ! ghcup config add-release-channel \
               https://stable-haskell.github.io/ghc/ghcup-multi-target-0.1.0.yaml 2>&1 | tee /tmp/multi-chan.log; then
             echo "::warning::could not add multi-target channel (yet?) — skipping multi-target tests"
@@ -455,14 +457,29 @@ jobs:
             echo "installed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          # Switch ghcup's `set` so the unprefixed ghc, wasm32-...-ghc,
-          # javascript-...-ghc all point at the multi-target install.
+          # Install path succeeded — from here, any failure (set, missing
+          # binary, broken symlink) is a real bug and MUST fail the step.
           ghcup set ghc multi-9.14.0.stable.0
           echo "$HOME/.ghcup/bin" >> "$GITHUB_PATH"
-          # Verify all three target invocations resolve to a real binary.
-          ghc        --numeric-version
+          # Resolve all three argv[0] frontends — exit-non-zero propagates
+          # under set -e if a symlink is broken or the binary is missing.
+          ghc                          --numeric-version
           wasm32-unknown-wasi-ghc      --numeric-version
           javascript-unknown-ghcjs-ghc --numeric-version
+          # Smoke-test argv[0] dispatch: each frontend MUST report its own
+          # Target platform — if the package were built wrong (or someone
+          # accidentally shipped 3 copies of the same native ghc) the
+          # downstream hello tests would still catch it, but failing here
+          # makes the packaging-vs-runtime distinction obvious.
+          ghc                          --info \
+            | grep -F -e '("Target platform","x86_64-' \
+                      -e '("Target platform","aarch64-' \
+                      >/dev/null \
+            || { echo "::error::native ghc reports unexpected Target platform"; ghc --info | grep "Target platform"; exit 1; }
+          wasm32-unknown-wasi-ghc      --info | grep -qF '("Target platform","wasm32-unknown-wasi")' \
+            || { echo "::error::wasm frontend reports wrong Target platform"; wasm32-unknown-wasi-ghc --info | grep "Target platform"; exit 1; }
+          javascript-unknown-ghcjs-ghc --info | grep -qF '("Target platform","javascript-unknown-ghcjs")' \
+            || { echo "::error::JS frontend reports wrong Target platform"; javascript-unknown-ghcjs-ghc --info | grep "Target platform"; exit 1; }
           echo "installed=true" >> "$GITHUB_OUTPUT"
 
       - name: multi — native hello (strict)
