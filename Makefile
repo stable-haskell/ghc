@@ -1164,6 +1164,46 @@ $(DIST_DIR)/haskell-toolchain.tar.gz: $(STAGE2_STAMP) | stable-cabal stage3-java
 		bin/cabal
 	@echo "::endgroup::"
 
+# Multi-target GHC bindist:
+#   native (lib/$(HOST_PLATFORM)) + wasm32-unknown-wasi + javascript-unknown-ghcjs
+#
+# The stage2 native ghc binary dispatches via argv[0]: invoking
+# bin/wasm32-unknown-wasi-ghc reads lib/targets/wasm32-unknown-wasi/lib/settings,
+# bin/javascript-unknown-ghcjs-ghc reads .../javascript-unknown-ghcjs/lib/settings,
+# bin/ghc reads lib/settings. Same physical binary, three targets.
+#
+# We use `tar czhf` (dereference symlinks) so the cross-prefixed bin entries
+# (which are symlinks to bin/<exe> per the stage3 rule's $(LN_SF) loop) become
+# standalone copies in the tarball. The native bin/<exe> entries are real
+# files. Cost: ~30 MB extra vs preserving symlinks; predictability gain:
+# ghcup's targetPattern glob picks up real files reliably regardless of
+# its symlink-following behaviour.
+#
+# JS doesn't use ghc-iserv (the JS backend has its own evaluator); filter
+# it out of the JS bin list so we don't ship a useless prefixed copy.
+$(DIST_DIR)/ghc-multi-target.tar.gz: $(STAGE2_STAMP) | stage3-wasm32-unknown-wasi stage3-javascript-unknown-ghcjs
+	@echo "::group::Creating ghc-multi-target.tar.gz..."
+	@cp -f mk/multi-target-relocate.sh $(DIST_DIR)/relocate.sh
+	@chmod +x $(DIST_DIR)/relocate.sh
+	@cp -f mk/multi-target-configure.sh $(DIST_DIR)/configure
+	@chmod +x $(DIST_DIR)/configure
+	@cp -f mk/multi-target-bindist-Makefile $(DIST_DIR)/Makefile
+	tar czhf $@ \
+		--directory=$(DIST_DIR) \
+		$(foreach exe,$(STAGE2_EXECUTABLES),bin/$(exe)$(EXE_EXT)) \
+		$(foreach exe,$(STAGE3_EXECUTABLES),bin/wasm32-unknown-wasi-$(exe)$(EXE_EXT)) \
+		$(foreach exe,$(filter-out ghc-iserv,$(STAGE3_EXECUTABLES)),bin/javascript-unknown-ghcjs-$(exe)$(EXE_EXT)) \
+		lib/ghc-usage.txt \
+		lib/ghci-usage.txt \
+		lib/package.conf.d \
+		lib/settings \
+		lib/template-hsc.h \
+		lib/$(HOST_PLATFORM) \
+		lib/targets/wasm32-unknown-wasi \
+		lib/targets/javascript-unknown-ghcjs \
+		relocate.sh configure Makefile
+	@echo "::endgroup::"
+
 $(DIST_DIR)/tests.tar.gz:
 	@echo "::group::Creating tests.tar.gz..."
 	@tar czf $@ \
