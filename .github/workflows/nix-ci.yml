@@ -1389,14 +1389,29 @@ jobs:
         echo "SHA256 after patchelf:"
         shasum -a 256 "$TGZ"
 
-    # Darwin: stage2 bakes a `/Volumes/WorkSpace/_work/ghc/ghc/_build/...`
-    # absolute LC_RPATH into every host Mach-O binary and dylib. macOS 14+
-    # dyld accepts it (falls through to the @executable_path/@loader_path
-    # rpath we also ship), but macos-15 GH-hosted runners abort-trap on
-    # the same binary — different dyld treats an unresolvable absolute
-    # rpath as fatal. Strip it post-build so the bindist runs on every
-    # darwin host, not just the build runner's filesystem layout.
-    - name: Strip leaked /Volumes/WorkSpace rpath (Darwin only)
+    # Darwin: stage2 bakes two classes of build-host leak into every
+    # host Mach-O binary and dylib, both of which abort the bindist
+    # at launch when it leaves the build runner:
+    #
+    #   (1) LC_RPATH — the absolute build-store path
+    #       `/Volumes/WorkSpace/_work/ghc/ghc/_build/...`. macOS 14
+    #       dyld silently falls through; macos-15 dyld treats it as
+    #       fatal.
+    #
+    #   (2) LC_LOAD_DYLIB — nix-store-pinned install names for system
+    #       deps clang/ld saw at link time (libiconv, libffi, libc++,
+    #       libz, libresolv). When the bindist is installed off the
+    #       build runner the nix store path doesn't exist, dyld can't
+    #       find the lib, and the binary abort-traps.
+    #
+    # Both classes get rewritten in this single step, then we re-sign
+    # each mutated Mach-O ad-hoc so dyld still accepts the binary on
+    # Apple Silicon (mutating a Mach-O invalidates the linker
+    # signature; codesign --force --sign - replaces it).
+    #
+    # The nix-store-fixup pattern matches devx's fixup-nix-deps
+    # (input-output-hk/devx static.nix, SHA 5f05c1e1af6).
+    - name: Strip build-host leaks (rpath + nix-store deps) — Darwin only
       if: ${{ !cancelled() && matrix.plat == 'aarch64-darwin' }}
       shell: devx {0}
       run: |
@@ -1415,48 +1430,89 @@ jobs:
         trap 'rm -rf "$STAGE"' EXIT
         tar -C "$STAGE" -xzf "$TGZ"
 
-        echo "═══ Stripping /Volumes/WorkSpace rpath from Mach-O binaries + dylibs ═══"
-        stripped=0
+        # Walk every Mach-O file once and apply BOTH classes of fixup.
+        # Re-sign once at the end of each file's mutations so we don't
+        # waste codesign cycles on otherwise-untouched binaries.
+        echo "═══ Walking Mach-O files for rpath + nix-store fixups ═══"
+        rpath_stripped=0
+        nix_rewritten=0
+        files_touched=0
         while IFS= read -r f; do
-          # Skip non-Mach-O quickly via `file`. Only act when otool actually
-          # finds the offending rpath — otherwise install_name_tool errors.
           file -L "$f" 2>/dev/null | grep -q 'Mach-O' || continue
-          # Collect ALL LC_RPATHs that start with /Volumes/ — defensive,
-          # in case different builds bake different absolute prefixes.
-          mapfile -t bad < <(otool -l "$f" 2>/dev/null \
+          changed=0
+
+          # ----- (1) Strip /Volumes/-prefixed LC_RPATHs -----
+          mapfile -t bad_rpaths < <(otool -l "$f" 2>/dev/null \
             | awk '/cmd LC_RPATH/{f=1; next} f && /path \/Volumes\//{print $2; f=0; next} f && /path /{f=0}')
-          [ "${#bad[@]}" -eq 0 ] && continue
-          for rp in "${bad[@]}"; do
+          for rp in "${bad_rpaths[@]}"; do
             install_name_tool -delete_rpath "$rp" "$f" 2>&1 \
-              || { echo "::error::install_name_tool failed on $f"; exit 1; }
+              || { echo "::error::install_name_tool -delete_rpath failed on $f"; exit 1; }
+            rpath_stripped=$((rpath_stripped + 1))
+            changed=1
           done
-          # Re-sign with ad-hoc to keep the linker signature valid after
-          # mutation — codesign --remove-signature + new --sign - .
-          codesign --force --sign - "$f" >/dev/null 2>&1 || true
-          stripped=$((stripped + 1))
+
+          # ----- (2) Rewrite nix-store LC_LOAD_DYLIB → /usr/lib -----
+          # Pattern adapted from devx/static.nix:fixup-nix-deps.
+          # `otool -L` first column when prefixed with whitespace is the
+          # full install-name path of each linked dylib.
+          while IFS= read -r nixdep; do
+            case "$nixdep" in
+              *libiconv.dylib)         new=/usr/lib/libiconv.dylib         ;;
+              *libiconv.2.dylib)       new=/usr/lib/libiconv.2.dylib       ;;
+              *libffi.*.dylib)         new=/usr/lib/libffi.dylib           ;;
+              *libc++.*.dylib)         new=/usr/lib/libc++.dylib           ;;
+              *libz.dylib)             new=/usr/lib/libz.dylib             ;;
+              *libresolv.*.dylib)      new=/usr/lib/libresolv.dylib        ;;
+              # ncurses comes in via haskeline → libHSterminfo. macOS does
+              # not ship libncursesw.6 — the system one is libncurses.5.4
+              # in the dyld shared cache (used by /bin/ls etc). It's
+              # ABI-compatible enough for terminfo lookups.
+              *libncursesw.*.dylib)    new=/usr/lib/libncurses.5.4.dylib   ;;
+              *libncurses.*.dylib)     new=/usr/lib/libncurses.5.4.dylib   ;;
+              *) continue ;;
+            esac
+            install_name_tool -change "$nixdep" "$new" "$f" 2>&1 \
+              || { echo "::error::install_name_tool -change $nixdep failed on $f"; exit 1; }
+            nix_rewritten=$((nix_rewritten + 1))
+            changed=1
+          done < <(otool -L "$f" 2>/dev/null | awk '/nix\/store/{print $1}')
+
+          # Re-sign once if anything was touched (codesign on every
+          # binary is slow on Apple Silicon and pointless if untouched).
+          if [ "$changed" -eq 1 ]; then
+            codesign --force --sign - "$f" >/dev/null 2>&1 || true
+            files_touched=$((files_touched + 1))
+          fi
         done < <(find "$STAGE" -type f \( -perm -u+x -o -name '*.dylib' \))
-        echo "═══ Stripped $stripped Mach-O files ═══"
-        # NOTE: stripped=0 is the EXPECTED steady state once the bundled
+        echo "═══ Stripped $rpath_stripped LC_RPATH entries, rewrote $nix_rewritten nix-store deps in $files_touched files ═══"
+
+        # rpath_stripped=0 is the EXPECTED steady state once the bundled
         # Cabal fix at stable-haskell/Cabal feat/rpath-relativize-absolute
-        # (SHA 723df03ec80a1e1b9b2fefde71f1ace8ba216287) is in effect.
-        # Pre-fix, every host Mach-O had the leak. We keep this step as
-        # belt-and-suspenders: if the Cabal pin gets reverted or a future
-        # patch reintroduces an absolute-rpath codepath, we still ship a
-        # clean bindist instead of a binary that abort-traps on macos-15.
-        if [ "$stripped" -eq 0 ]; then
+        # (SHA 6a5ce8161ca76356a9ea43f2e9e09483e6f5849d) is in effect.
+        # nix_rewritten=0 would only happen if devx upgrades its system
+        # libs to non-nix-store install-names, which currently is not
+        # the case — keep the rewrite even if it ever becomes idle.
+        if [ "$rpath_stripped" -eq 0 ]; then
           echo "::notice::No /Volumes-prefixed rpaths found — bundled Cabal fix is working as intended."
         fi
 
-        # Confirm the leak is gone on a representative binary.
-        echo "═══ Post-strip rpaths on bin/ghc ═══"
-        otool -l "$STAGE/bin/ghc" | awk '/cmd LC_RPATH/{f=1; next} f && /path /{print; f=0}'
-        otool -l "$STAGE/bin/ghc" | grep -F '/Volumes/WorkSpace' \
-          && { echo "::error::leak still present"; exit 1; } || true
+        # Verify both classes are gone on a representative binary +
+        # the ghc-internal dylib (which is what was abort-trapping on
+        # macos-15 in PR #184 e2e run 26805774141).
+        echo "═══ Post-fix LC_RPATH + nix-store refs on bin/ghc + libHSghc-internal ═══"
+        for probe in "$STAGE/bin/ghc" \
+                     "$STAGE/lib/aarch64-apple-darwin/libHSghc-internal-9.1400.0-ghc9.14.dylib"; do
+          [ -e "$probe" ] || continue
+          echo "--- $probe ---"
+          otool -l "$probe" | awk '/cmd LC_RPATH/{f=1; next} f && /path /{print; f=0}'
+          otool -L "$probe" | grep -E "nix\/store|/Volumes/WorkSpace" \
+            && { echo "::error::leak still present in $probe"; exit 1; } || true
+        done
 
         rm "$TGZ"
         tar -C "$STAGE" -czf "$TGZ" .
         ls -lh "$TGZ"
-        echo "SHA256 after rpath strip:"
+        echo "SHA256 after fixups:"
         shasum -a 256 "$TGZ"
 
     - name: Upload MULTI cross artifacts
