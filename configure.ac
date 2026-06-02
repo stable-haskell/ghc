@@ -45,12 +45,18 @@ AS_IF([test "x$enable_dynamic" = "xyes"], [
         ALL_PACKAGES=""
         APPEND_PKG_FIELD([shared: True])
         APPEND_PKG_FIELD([executable-dynamic: True])
-        # Tell cabal-install to emit loader-relative rpaths (relative
-        # to the artifact's install dir) when our patched cabal would
-        # otherwise bake the build-time store path absolutely. See
-        # libraries/Cabal feat/rpath-relativize-absolute, and lode/
-        # rpath-leak-investigation.md for the long-form rationale.
-        APPEND_PKG_FIELD([relocatable: True])
+        # NOTE: do NOT add `relocatable: True` here — even though it
+        # would activate the gated relativization codepath in our
+        # patched Cabal (libraries/Cabal feat/rpath-relativize-absolute),
+        # it ALSO makes cabal-install emit `library-dirs: ${pkgroot}/...`
+        # entries in the .conf files that the post-stage2 Makefile
+        # bindist-assembly rewriting can't cope with — producing
+        # paths like `_build/dist/lib/lib/...` (doubled `lib/`) that
+        # then break stage3 / Cross: MULTI consumers.
+        #
+        # The patched Cabal therefore relativizes absolute rpaths
+        # unconditionally (not gated on `relocatable`); see lode/
+        # rpath-leak-investigation.md for the full rationale.
         APPEND_CONSTRAINT([rts +dynamic])
 ])
 
