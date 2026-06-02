@@ -1389,6 +1389,58 @@ jobs:
         echo "SHA256 after patchelf:"
         shasum -a 256 "$TGZ"
 
+    # Darwin: stage2 bakes a `/Volumes/WorkSpace/_work/ghc/ghc/_build/...`
+    # absolute LC_RPATH into every host Mach-O binary and dylib. macOS 14+
+    # dyld accepts it (falls through to the @executable_path/@loader_path
+    # rpath we also ship), but macos-15 GH-hosted runners abort-trap on
+    # the same binary — different dyld treats an unresolvable absolute
+    # rpath as fatal. Strip it post-build so the bindist runs on every
+    # darwin host, not just the build runner's filesystem layout.
+    - name: Strip leaked /Volumes/WorkSpace rpath (Darwin only)
+      if: ${{ !cancelled() && matrix.plat == 'aarch64-darwin' }}
+      shell: devx {0}
+      run: |
+        set -euo pipefail
+        TGZ=_build/dist/ghc-multi-target-${{ matrix.plat }}.tar.gz
+        STAGE="$(mktemp -d)"
+        tar -C "$STAGE" -xzf "$TGZ"
+
+        echo "═══ Stripping /Volumes/WorkSpace rpath from Mach-O binaries + dylibs ═══"
+        stripped=0
+        while IFS= read -r f; do
+          # Skip non-Mach-O quickly via `file`. Only act when otool actually
+          # finds the offending rpath — otherwise install_name_tool errors.
+          file -L "$f" 2>/dev/null | grep -q 'Mach-O' || continue
+          # Collect ALL LC_RPATHs that start with /Volumes/ — defensive,
+          # in case different builds bake different absolute prefixes.
+          mapfile -t bad < <(otool -l "$f" 2>/dev/null \
+            | awk '/cmd LC_RPATH/{f=1; next} f && /path \/Volumes\//{print $2; f=0; next} f && /path /{f=0}')
+          [ "${#bad[@]}" -eq 0 ] && continue
+          for rp in "${bad[@]}"; do
+            install_name_tool -delete_rpath "$rp" "$f" 2>&1 \
+              || { echo "::error::install_name_tool failed on $f"; exit 1; }
+          done
+          # Re-sign with ad-hoc to keep the linker signature valid after
+          # mutation — codesign --remove-signature + new --sign - .
+          codesign --force --sign - "$f" >/dev/null 2>&1 || true
+          stripped=$((stripped + 1))
+        done < <(find "$STAGE" -type f \( -perm -u+x -o -name '*.dylib' \))
+        echo "═══ Stripped $stripped Mach-O files ═══"
+        test "$stripped" -gt 0 \
+          || { echo "::error::no Mach-O files modified — pattern broken?"; exit 1; }
+
+        # Confirm the leak is gone on a representative binary.
+        echo "═══ Post-strip rpaths on bin/ghc ═══"
+        otool -l "$STAGE/bin/ghc" | awk '/cmd LC_RPATH/{f=1; next} f && /path /{print; f=0}'
+        otool -l "$STAGE/bin/ghc" | grep -F '/Volumes/WorkSpace' \
+          && { echo "::error::leak still present"; exit 1; } || true
+
+        rm "$TGZ"
+        tar -C "$STAGE" -czf "$TGZ" .
+        ls -lh "$TGZ"
+        echo "SHA256 after rpath strip:"
+        shasum -a 256 "$TGZ"
+
     - name: Upload MULTI cross artifacts
       uses: actions/upload-artifact@v4
       if: ${{ !cancelled() }}
