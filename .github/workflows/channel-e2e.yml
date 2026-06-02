@@ -435,7 +435,15 @@ jobs:
 
       - name: multi — try install multi-9.14.0.stable.0 (sets a flag)
         id: multi_install
-        if: steps.cabal.outputs.cabal_installed == 'true'
+        # `!cancelled()` so the multi-target gate still runs even when an
+        # earlier wasm-only step failed — they exercise independent
+        # channels (ghcup-wasm.yaml vs ghcup-multi-target-0.1.0.yaml) and a
+        # broken stable.X bindist on one channel should not mask the other.
+        # Default Actions step-condition is `success()`, which would skip
+        # the multi block whenever the prior wasm-only template build
+        # failed (e.g. darwin stable.12 rpath leak from a Tart-built
+        # bindist).
+        if: ${{ !cancelled() && steps.cabal.outputs.cabal_installed == 'true' }}
         run: |
           # Use full strict mode (-euo pipefail). The two `if ! …; then …; fi`
           # blocks below intentionally CAPTURE failures (channel YAML missing,
@@ -483,7 +491,7 @@ jobs:
           echo "installed=true" >> "$GITHUB_OUTPUT"
 
       - name: multi — native hello (strict)
-        if: steps.multi_install.outputs.installed == 'true'
+        if: ${{ !cancelled() && steps.multi_install.outputs.installed == 'true' }}
         run: |
           set -euo pipefail
           mkdir -p /tmp/native-hello && cd /tmp/native-hello
@@ -493,7 +501,7 @@ jobs:
           grep -q 'Hello from native ghc' /tmp/native-out
 
       - name: multi — wasm hello via multi-target (strict)
-        if: steps.multi_install.outputs.installed == 'true'
+        if: ${{ !cancelled() && steps.multi_install.outputs.installed == 'true' }}
         run: |
           set -euo pipefail
           mkdir -p /tmp/multi-hello && cd /tmp/multi-hello
@@ -506,7 +514,7 @@ jobs:
           grep -q 'Hello from the WASM reactor!' /tmp/multi-run.out
 
       - name: multi — JS hello via multi-target (strict)
-        if: steps.multi_install.outputs.installed == 'true'
+        if: ${{ !cancelled() && steps.multi_install.outputs.installed == 'true' }}
         run: |
           set -euo pipefail
           if ! command -v emcc >/dev/null 2>&1; then
