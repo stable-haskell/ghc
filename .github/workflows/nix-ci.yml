@@ -1402,12 +1402,14 @@ jobs:
       run: |
         set -euo pipefail
         TGZ=_build/dist/ghc-multi-target-${{ matrix.plat }}.tar.gz
-        # Stage on /Volumes/WorkSpace (28 GB) — system disk on darwin Tart
-        # is a 41 GB APFS partition shared with macOS + the devx Nix store
-        # and runs out under a 3 GB tar extract. /tmp lives on the system
-        # disk; explicitly point STAGE at WorkSpace to avoid the runner
-        # running out of disk mid-step.
-        STAGE="/Volumes/WorkSpace/rpath-strip-stage-$$"
+        # Stage on the runner workspace (= /Volumes/WorkSpace via the
+        # ~/actions-runner/_work symlink) so we get the 28 GB build
+        # volume rather than the 41 GB APFS system disk shared with
+        # macOS + the devx Nix store. /tmp lives on the system disk
+        # and runs out under a 3 GB tar extract. We cannot mkdir
+        # directly at /Volumes/WorkSpace (owned by root) — only the
+        # runner-user-owned _work/ subtree is writable.
+        STAGE="$GITHUB_WORKSPACE/.rpath-strip-stage-$$"
         rm -rf "$STAGE"
         mkdir -p "$STAGE"
         trap 'rm -rf "$STAGE"' EXIT
