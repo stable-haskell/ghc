@@ -100,7 +100,19 @@ The darwin equivalent (install_name_tool can only `-add_rpath` / `-delete_rpath`
 | C | Patch `depLibraryPaths` to detect cabal-store-sibling layout and emit relative paths between siblings | `libraries/Cabal/.../LocalBuildInfo.hs:336-346` | Medium-high | More general but every cabal user inherits the change. Likely needs upstream discussion. |
 | D | Build stage2 with `relocatable: True` AND restructure store so siblings share a common prefix | `cabal.project.stage2.settings` | High | The prefix restructure is the hard part — cabal's store-by-unitid hash layout is what makes deps land in distinct prefixes. |
 
-**Recommendation:** keep **A** (current state). Open an upstream Cabal issue describing B/C with a minimal reproducer (`cabal init`, `cabal install -j --enable-executable-dynamic --store-dir=/tmp/store some-pkg-with-deps`, `otool -l ~/.cabal/store/.../bin/exe | grep LC_RPATH`). Drop both the darwin install_name_tool step and the Linux patchelf rpath rewrite once Cabal's `relPath` is fixed upstream — they become no-ops, not opinionated.
+**Status (2026-06-02):** taken option **B**, with one twist — see below.
+
+`stable-haskell/Cabal feat/rpath-relativize-absolute` (SHA `6a5ce8161`, PR #368) patches `Link.hs:644` to relativize absolute rpaths via `shortRelativePath` against the artifact's `bindir`/`libdir`. **Not gated on `relocatable lbi`** — first version was gated, but setting `relocatable: True` in `cabal.project.stage2.settings` to flip the gate ALSO triggers cabal-install's other relocatable-mode machinery:
+
+* `checkRelocatable` refuses any cabal-store layout where deps live in sibling prefixes (i.e. essentially always).
+* `library-dirs` in installed-package `.conf` files become `${pkgroot}/...`-prefixed, which the stable-haskell GHC bindist-assembly Makefile post-stage2 rewriting then mangles into `_build/dist/lib/lib/...` (doubled `lib/`), breaking every stage3 consumer.
+
+Both behaviors are independent of rpath generation, so the second iteration of the fix drops the gate. Side effects on non-relocatable cabal users:
+
+* Cabal-store layouts: relative form works the same as the absolute did (dyld walks `@loader_path/../../<sibling>/lib`).
+* System libs (e.g. `/usr/local/lib/libfoo.dylib`): relative form `@loader_path/../../../../usr/local/lib/libfoo.dylib` works as long as the binary stays at its original location. A binary moved to a host where `/usr/local/lib/libfoo.dylib` exists at the same absolute path no longer finds it — but moving a single binary cross-host with system-lib dependencies was never a documented cabal contract.
+
+stable-haskell/ghc commit pinning the new Cabal SHA: `9de9f58ce54` on `feat/multi-target-bindist`. Once a tagged release ships with this Cabal and CI confirms macos-15 dyld is happy with the resulting bindist, both the darwin `install_name_tool -delete_rpath` step (commit `010b365582c`) and the Linux `patchelf --set-rpath '$ORIGIN'` step become no-ops and can be retired.
 
 ## Files referenced
 
