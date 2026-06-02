@@ -1402,7 +1402,15 @@ jobs:
       run: |
         set -euo pipefail
         TGZ=_build/dist/ghc-multi-target-${{ matrix.plat }}.tar.gz
-        STAGE="$(mktemp -d)"
+        # Stage on /Volumes/WorkSpace (28 GB) — system disk on darwin Tart
+        # is a 41 GB APFS partition shared with macOS + the devx Nix store
+        # and runs out under a 3 GB tar extract. /tmp lives on the system
+        # disk; explicitly point STAGE at WorkSpace to avoid the runner
+        # running out of disk mid-step.
+        STAGE="/Volumes/WorkSpace/rpath-strip-stage-$$"
+        rm -rf "$STAGE"
+        mkdir -p "$STAGE"
+        trap 'rm -rf "$STAGE"' EXIT
         tar -C "$STAGE" -xzf "$TGZ"
 
         echo "═══ Stripping /Volumes/WorkSpace rpath from Mach-O binaries + dylibs ═══"
