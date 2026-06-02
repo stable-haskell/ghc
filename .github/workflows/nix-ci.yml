@@ -1434,8 +1434,16 @@ jobs:
           stripped=$((stripped + 1))
         done < <(find "$STAGE" -type f \( -perm -u+x -o -name '*.dylib' \))
         echo "═══ Stripped $stripped Mach-O files ═══"
-        test "$stripped" -gt 0 \
-          || { echo "::error::no Mach-O files modified — pattern broken?"; exit 1; }
+        # NOTE: stripped=0 is the EXPECTED steady state once the bundled
+        # Cabal fix at stable-haskell/Cabal feat/rpath-relativize-absolute
+        # (SHA 723df03ec80a1e1b9b2fefde71f1ace8ba216287) is in effect.
+        # Pre-fix, every host Mach-O had the leak. We keep this step as
+        # belt-and-suspenders: if the Cabal pin gets reverted or a future
+        # patch reintroduces an absolute-rpath codepath, we still ship a
+        # clean bindist instead of a binary that abort-traps on macos-15.
+        if [ "$stripped" -eq 0 ]; then
+          echo "::notice::No /Volumes-prefixed rpaths found — bundled Cabal fix is working as intended."
+        fi
 
         # Confirm the leak is gone on a representative binary.
         echo "═══ Post-strip rpaths on bin/ghc ═══"

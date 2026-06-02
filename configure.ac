@@ -45,6 +45,12 @@ AS_IF([test "x$enable_dynamic" = "xyes"], [
         ALL_PACKAGES=""
         APPEND_PKG_FIELD([shared: True])
         APPEND_PKG_FIELD([executable-dynamic: True])
+        # Tell cabal-install to emit loader-relative rpaths (relative
+        # to the artifact's install dir) when our patched cabal would
+        # otherwise bake the build-time store path absolutely. See
+        # libraries/Cabal feat/rpath-relativize-absolute, and lode/
+        # rpath-leak-investigation.md for the long-form rationale.
+        APPEND_PKG_FIELD([relocatable: True])
         APPEND_CONSTRAINT([rts +dynamic])
 ])
 
