@@ -682,6 +682,8 @@ STAGE2_LIBRARIES = \
 	stm \
 	system-cxx-std-lib \
 	template-haskell \
+	template-haskell-lift \
+	template-haskell-quasiquoter \
 	text \
 	time \
 	transformers \
