@@ -6,6 +6,7 @@ source-repository-package
           Cabal-syntax
           cabal-install
           cabal-install-solver
+          hooks-exe
 
 source-repository-package
   type: git
