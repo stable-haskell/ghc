@@ -1,6 +1,5 @@
 -- Configuration common to all stages
 import: cabal.project.common
-import: cabal.project.stage2.settings
 
 -- Disable Hackage, we explicitly include the packages we need.
 active-repositories: :none
@@ -82,7 +81,6 @@ packages:
   https://hackage.haskell.org/package/happy-2.1.5/happy-2.1.5.tar.gz
   https://hackage.haskell.org/package/happy-lib-2.1.5/happy-lib-2.1.5.tar.gz
 
--- wip/angerman/compile-less (cross-compilation + local store + recompilation avoidance)
 source-repository-package
   type: git
   location: https://github.com/stable-haskell/Cabal.git

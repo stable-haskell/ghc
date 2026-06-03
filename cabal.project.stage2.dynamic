@@ -1,0 +1,13 @@
+-- Dynamic stage2 build (DYNAMIC=1).
+--
+-- All shared stage2 configuration lives in cabal.project.stage2.common; this
+-- file only selects shared libraries, dynamic executables and the dynamic RTS.
+-- The Makefile uses this project file when DYNAMIC=1.
+import: cabal.project.stage2.common
+
+package *
+  shared: True
+  executable-dynamic: True
+
+constraints:
+  rts +dynamic
