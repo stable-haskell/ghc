@@ -36,7 +36,7 @@ packages:
   https://hackage.haskell.org/package/file-io-0.1.5/file-io-0.1.5.tar.gz
   https://hackage.haskell.org/package/filepath-1.5.4.0/filepath-1.5.4.0.tar.gz
   https://hackage.haskell.org/package/os-string-2.0.8/os-string-2.0.8.tar.gz
-  https://hackage.haskell.org/package/process-1.6.26.1/process-1.6.26.1.tar.gz
+  https://hackage.haskell.org/package/process-1.6.29.0/process-1.6.29.0.tar.gz
   https://hackage.haskell.org/package/semaphore-compat-1.0.0/semaphore-compat-1.0.0.tar.gz
   https://hackage.haskell.org/package/unix-2.8.8.0/unix-2.8.8.0.tar.gz
   https://hackage.haskell.org/package/Win32-2.14.2.1/Win32-2.14.2.1.tar.gz
