@@ -85,17 +85,15 @@ VERBOSE ?= 0
 
 UNAME := $(shell uname)
 
-# If using autoconf feature toggles you can instead run:
-#   ./configure --enable-dynamic --enable-profiling --enable-debug
-# which generates cabal.project.stage2.settings (imported by cabal.project.stage2).
-# The legacy DYNAMIC=1 path still appends flags directly; if both are used the
-# configure-generated settings file (import) and these args should agree.
-#
 # Enable dynamic runtime/linking support when DYNAMIC=1 is passed on the make
-# command line. This will build shared libraries, a dynamic RTS (defining
-# -DDYNAMIC) and allow tests requiring dynamic linking (e.g. plugins-external)
-# to run. The default remains static to keep rebuild cost low.
+# command line. This selects the cabal.project.stage2.dynamic project file
+# (shared libraries, dynamic executables, dynamic RTS) instead of
+# cabal.project.stage2.static, and enables the dynamic-only dist steps below.
+# The default remains static to keep rebuild cost low.
 DYNAMIC ?= 0
+
+# Suffix selecting the static/dynamic stage2 project file (see CABAL_PROJECT_FILE).
+DYNAMIC_SUFFIX := $(if $(filter 1,$(DYNAMIC)),dynamic,static)
 
 # Quiet mode: suppress output unless error (QUIET=1)
 QUIET ?= 0
@@ -150,10 +148,6 @@ endif
 CABAL_ARGS         ?=
 CC_LINK_OPT         =
 GHC_CONFIGURE_ARGS  =
-
-ifeq ($(DYNAMIC),1)
-GHC_CONFIGURE_ARGS += --enable-dynamic
-endif
 
 GHC_TOOLCHAIN_ARGS  = --disable-ld-override
 
@@ -308,13 +302,18 @@ endef
 #
 # NOTE: Do not pass --with-ar or --with-ld to cabal! it will screw up things
 #
+# Cabal project file for the current stage. stage2 has separate static/dynamic
+# variants selected by DYNAMIC (see DYNAMIC_SUFFIX); all other stages use a
+# single project file.
+CABAL_PROJECT_FILE = cabal.project.$(STAGE)$(if $(filter stage2,$(STAGE)),.$(DYNAMIC_SUFFIX))
+
 define CABAL_BUILD_WITH
 	$(1) \
 		--remote-repo-cache $(call NORMALIZE_FP,$(CURDIR)/$(BUILD_DIR)/packages) \
 		--store-dir $(call NORMALIZE_FP,$(CURDIR)/$(STORE_DIR)) \
 		--logs-dir $(call NORMALIZE_FP,$(CURDIR)/$(LOGS_DIR)) \
 	build \
-		--project-file cabal.project.$(STAGE) \
+		--project-file $(CABAL_PROJECT_FILE) \
 		--builddir $(call NORMALIZE_FP,$(CURDIR)/$(STAGE_DIR)) \
 		$(CABAL_ARGS)
 endef
@@ -330,7 +329,7 @@ define CABAL_INSTALL_STAGE0
 	install \
 		--installdir $(dir $(CABAL)) \
 		--builddir $(call NORMALIZE_FP,$(CURDIR)/$(STAGE_DIR)) \
-		--project-file cabal.project.$(STAGE) \
+		--project-file $(CABAL_PROJECT_FILE) \
 		--overwrite-policy=always --install-method=copy \
 		$(CABAL_ARGS)
 endef
@@ -508,8 +507,7 @@ CONFIGURED_FILES := \
 	libraries/ghc-internal/ghc-internal.cabal \
 	libraries/ghc-experimental/ghc-experimental.cabal \
 	libraries/base/base.cabal \
-	rts/include/ghcversion.h \
-	cabal.project.stage2.settings
+	rts/include/ghcversion.h
 
 # __  __       _         _                       _
 # |  \/  | __ _(_)_ __   | |_ __ _ _ __ __ _  ___| |_
@@ -718,7 +716,7 @@ STAGE2_CABAL_BUILD = \
 
 stage2: STAGE=stage2
 stage2: TARGET_PLATFORM:=$(HOST_PLATFORM)
-stage2: $(GHC1) stable-cabal $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) cabal.project.stage2 cabal.project.stage2.settings cabal.project.common libraries/ghc-boot-th-next | stage1
+stage2: $(GHC1) stable-cabal $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) cabal.project.stage2.common cabal.project.stage2.static cabal.project.stage2.dynamic cabal.project.common libraries/ghc-boot-th-next | stage1
 	$(call PHASE_START,stage2)
 	$(call LOG,Starting build of $(STAGE))
 
