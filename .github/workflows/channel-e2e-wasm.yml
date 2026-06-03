@@ -1,7 +1,7 @@
-# Channel end-to-end CI.
+# Channel end-to-end CI — wasm-only single-target bindist channel.
 #
 # Validates the SHIPPED wasm cross-compiler + cabal + ghcup channel YAML
-# by exercising the exact flow an end-user does:
+# (`ghcup-wasm.yaml`) by exercising the exact flow an end-user does:
 #   1. install ghcup fresh
 #   2. add the stable-haskell ghcup channel
 #   3. ghcup install ghc / ghcup install cabal
@@ -28,14 +28,18 @@
 # These VMs DO have devx pre-imported in /nix/store, but the test never
 # enters devx — it installs ghcup vanilla and exercises the channel YAML
 # end-to-end. The pre-baked nix-store is irrelevant to the test surface.
-name: Channel e2e
+#
+# Companion workflow: `Channel e2e (MULTI)` in
+# `.github/workflows/channel-e2e-multi.yml` covers the separate
+# `ghcup-multi-target-0.1.0.yaml` channel.
+name: Channel e2e (WASM)
 
 on:
   push:
     tags: [wasm32-wasi-*]      # new GHC release → re-test
   pull_request:
     # validate workflow changes themselves end-to-end before merge
-    paths: ['.github/workflows/channel-e2e.yml']
+    paths: ['.github/workflows/channel-e2e-wasm.yml']
   workflow_dispatch:
     inputs:
       wasm_version:
@@ -51,12 +55,12 @@ on:
 # Only run one at a time per ref — avoids racing on cabal-store side effects
 # when the cron and a manual dispatch happen close together.
 concurrency:
-  group: channel-e2e-${{ github.ref }}
+  group: channel-e2e-wasm-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   install-and-build:
-    name: e2e / ${{ matrix.plat }}
+    name: e2e WASM / ${{ matrix.plat }}
     # matrix.runner is a JSON-string ARRAY of labels: '["label1", "label2"]'
     # so both github-hosted ("ubuntu-latest") and label-matched self-hosted
     # ("self-hosted", "macos", ...) targeting work through one knob.
@@ -423,107 +427,3 @@ jobs:
           file "$wasm_file" | tee /tmp/file_out
           grep -q 'WebAssembly' /tmp/file_out \
             || { echo "::error::artifact is not a wasm binary"; exit 1; }
-
-      # =====================================================================
-      # MULTI-TARGET CHANNEL TESTS — gated on whether the channel YAML at
-      # https://stable-haskell.github.io/ghc/ghcup-multi-target-0.1.0.yaml
-      # is reachable + parseable AND the install actually succeeds. Once
-      # the channel is live (Phase 11 promotion), these steps run STRICT.
-      # Before that, the install step records a flag and the test steps
-      # skip — no misleading "green" on hidden failures.
-      # =====================================================================
-
-      - name: multi — try install multi-9.14.0.stable.0 (sets a flag)
-        id: multi_install
-        # `!cancelled()` so the multi-target gate still runs even when an
-        # earlier wasm-only step failed — they exercise independent
-        # channels (ghcup-wasm.yaml vs ghcup-multi-target-0.1.0.yaml) and a
-        # broken stable.X bindist on one channel should not mask the other.
-        # Default Actions step-condition is `success()`, which would skip
-        # the multi block whenever the prior wasm-only template build
-        # failed (e.g. darwin stable.12 rpath leak from a Tart-built
-        # bindist).
-        if: ${{ !cancelled() && steps.cabal.outputs.cabal_installed == 'true' }}
-        run: |
-          # Use full strict mode (-euo pipefail). The two `if ! …; then …; fi`
-          # blocks below intentionally CAPTURE failures (channel YAML missing,
-          # install can't fetch the asset) and downgrade them to a recorded
-          # installed=false + exit 0. Anything else — including a failed
-          # `ghcup set` or a broken binary symlink — MUST surface as a job
-          # failure rather than be silently swallowed into installed=true.
-          # `set -e` inside an `if` test does not trigger, so the gate
-          # conditionals still work as written.
-          set -euo pipefail
-          if ! ghcup config add-release-channel \
-              https://stable-haskell.github.io/ghc/ghcup-multi-target-0.1.0.yaml 2>&1 | tee /tmp/multi-chan.log; then
-            echo "::warning::could not add multi-target channel (yet?) — skipping multi-target tests"
-            echo "installed=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          if ! ghcup install ghc multi-9.14.0.stable.0 2>&1 | tee /tmp/multi-install.log; then
-            echo "::warning::multi-9.14.0.stable.0 not installable from channel (yet?) — skipping multi-target tests"
-            echo "installed=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          # Install path succeeded — from here, any failure (set, missing
-          # binary, broken symlink) is a real bug and MUST fail the step.
-          ghcup set ghc multi-9.14.0.stable.0
-          echo "$HOME/.ghcup/bin" >> "$GITHUB_PATH"
-          # Resolve all three argv[0] frontends — exit-non-zero propagates
-          # under set -e if a symlink is broken or the binary is missing.
-          ghc                          --numeric-version
-          wasm32-unknown-wasi-ghc      --numeric-version
-          javascript-unknown-ghcjs-ghc --numeric-version
-          # Smoke-test argv[0] dispatch: each frontend MUST report its own
-          # Target platform — if the package were built wrong (or someone
-          # accidentally shipped 3 copies of the same native ghc) the
-          # downstream hello tests would still catch it, but failing here
-          # makes the packaging-vs-runtime distinction obvious.
-          ghc                          --info \
-            | grep -F -e '("Target platform","x86_64-' \
-                      -e '("Target platform","aarch64-' \
-                      >/dev/null \
-            || { echo "::error::native ghc reports unexpected Target platform"; ghc --info | grep "Target platform"; exit 1; }
-          wasm32-unknown-wasi-ghc      --info | grep -qF '("Target platform","wasm32-unknown-wasi")' \
-            || { echo "::error::wasm frontend reports wrong Target platform"; wasm32-unknown-wasi-ghc --info | grep "Target platform"; exit 1; }
-          javascript-unknown-ghcjs-ghc --info | grep -qF '("Target platform","javascript-unknown-ghcjs")' \
-            || { echo "::error::JS frontend reports wrong Target platform"; javascript-unknown-ghcjs-ghc --info | grep "Target platform"; exit 1; }
-          echo "installed=true" >> "$GITHUB_OUTPUT"
-
-      - name: multi — native hello (strict)
-        if: ${{ !cancelled() && steps.multi_install.outputs.installed == 'true' }}
-        run: |
-          set -euo pipefail
-          mkdir -p /tmp/native-hello && cd /tmp/native-hello
-          echo 'main = putStrLn "Hello from native ghc"' > hello.hs
-          ghc hello.hs -o hello
-          ./hello | tee /tmp/native-out
-          grep -q 'Hello from native ghc' /tmp/native-out
-
-      - name: multi — wasm hello via multi-target (strict)
-        if: ${{ !cancelled() && steps.multi_install.outputs.installed == 'true' }}
-        run: |
-          set -euo pipefail
-          mkdir -p /tmp/multi-hello && cd /tmp/multi-hello
-          curl -fL -o multi-hello.tar.gz \
-            https://stable-haskell.github.io/ghc/examples/stable-haskell-wasm-hello.tar.gz
-          tar xf multi-hello.tar.gz
-          cd stable-haskell-wasm-hello
-          make WASM_VERSION=multi-9.14.0.stable.0 build
-          make WASM_VERSION=multi-9.14.0.stable.0 run-node 2>&1 | tee /tmp/multi-run.out
-          grep -q 'Hello from the WASM reactor!' /tmp/multi-run.out
-
-      - name: multi — JS hello via multi-target (strict)
-        if: ${{ !cancelled() && steps.multi_install.outputs.installed == 'true' }}
-        run: |
-          set -euo pipefail
-          if ! command -v emcc >/dev/null 2>&1; then
-            git clone --depth 1 --branch 3.1.74 https://github.com/emscripten-core/emsdk.git /tmp/emsdk
-            cd /tmp/emsdk && ./emsdk install 3.1.74 && ./emsdk activate 3.1.74
-            source ./emsdk_env.sh
-          fi
-          mkdir -p /tmp/js-hello && cd /tmp/js-hello
-          echo 'main = putStrLn "Hello from JS backend"' > hello.hs
-          javascript-unknown-ghcjs-ghc hello.hs -o hello
-          node hello.jsexe/all.js | tee /tmp/js-out
-          grep -q 'Hello from JS backend' /tmp/js-out
