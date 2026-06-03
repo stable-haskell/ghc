@@ -45,7 +45,7 @@ jobs:
         include:
           - { plat: x86_64-linux,   runner: '["ubuntu-latest"]'                                  }
           - { plat: aarch64-linux,  runner: '["ubuntu-24.04-arm"]'                               }
-          - { plat: aarch64-darwin, runner: '["self-hosted", "macos", "arm64", "nix"]'           }
+          - { plat: aarch64-darwin, runner: '["macos-15"]'                              }
 
     env:
       # Default to the current LatestPrerelease; workflow_dispatch can override.
