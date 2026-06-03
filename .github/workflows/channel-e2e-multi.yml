@@ -27,6 +27,14 @@ on:
       multi_version:
         description: 'Multi-target GHC version to test (e.g. multi-9.14.0.stable.1)'
         default: ''
+  # Weekly silent-regression canary on the default branch. Catches drift:
+  # release asset re-uploaded with different bytes, channel YAML
+  # mis-deployed, NodeSource setup_22.x breaking, ghcup-runner-image
+  # quirks, wasi-sdk bootstrap.sh layout changes, emscripten 3.1.74
+  # download server moves, etc. Cron only fires on the workflow's home
+  # default branch (stable-ghc-9.14 once this lands there).
+  schedule:
+    - cron: '0 6 * * 1'      # Monday 06:00 UTC
 
 # Per-ref concurrency so multiple pushes coalesce.
 concurrency:
