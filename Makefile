@@ -750,11 +750,15 @@ stage2: $(GHC1) stable-cabal $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) cabal.proj
 	$(call LOG,Creating $(DIST_DIR)/lib/template-hsc.h)
 	@cp $(STAGE2_PATH)/lib/hsc2hs-*-hsc2hs/share/template-hsc.h $(DIST_DIR)/lib/template-hsc.h
 
-	# set rpath
+ifeq ($(DYNAMIC),1)
+	# set rpath. Only needed for dynamic builds: statically-linked executables
+	# link only system libraries (libc/libm) and load nothing from ../lib, so
+	# they need no rpath. (patchelf also cannot rewrite the large static ghc,
+	# haddock and ghc-iserv binaries: it fails with "virtual address space
+	# underrun".)
 	@for binary in $(DIST_DIR)/bin/* ; do \
 		$(call SET_RPATH,../lib/$(HOST_PLATFORM),$${binary}) ; \
 	done
-ifeq ($(DYNAMIC),1)
 ifneq ($(UNAME), Darwin)
 	$(PATCHELF) --force-rpath --set-rpath "\$$ORIGIN" $(CURDIR)/$(DIST_DIR)/lib/$(TARGET_PLATFORM)/$(DLL)
 endif
