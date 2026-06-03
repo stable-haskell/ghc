@@ -1,0 +1,254 @@
+# Channel end-to-end CI — multi-target bindist channel.
+#
+# Validates the SHIPPED multi-target GHC + cabal + ghcup channel YAML by
+# exercising the exact flow an end-user does:
+#   1. install ghcup fresh
+#   2. add the multi-target stable-haskell ghcup channel
+#   3. ghcup install ghc multi-9.14.0.stable.X
+#   4. ghcup set ghc multi-9.14.0.stable.X
+#   5. compile + run a hello-world for each of native / wasm / JS — proves
+#      argv[0] dispatch is correctly wired by the bindist install
+#
+# Distinct from `Channel e2e (WASM)` which tests the legacy single-target
+# wasm channel (ghcup-wasm.yaml). The multi-target channel
+# (ghcup-multi-target-0.1.0.yaml) ships a different bindist layout with
+# all three target frontends in one tarball, and merits its own test
+# surface so failures attribute clearly.
+name: Channel e2e (MULTI)
+
+on:
+  push:
+    tags: [multi-*]              # new multi-target release → re-test
+  pull_request:
+    # validate workflow changes themselves end-to-end before merge
+    paths: ['.github/workflows/channel-e2e-multi.yml']
+  workflow_dispatch:
+    inputs:
+      multi_version:
+        description: 'Multi-target GHC version to test (e.g. multi-9.14.0.stable.1)'
+        default: ''
+
+# Per-ref concurrency so multiple pushes coalesce.
+concurrency:
+  group: channel-e2e-multi-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  install-and-multi:
+    name: e2e MULTI / ${{ matrix.plat }}
+    runs-on: ${{ fromJSON(matrix.runner) }}
+    timeout-minutes: 45
+    continue-on-error: ${{ matrix.allow-failure == true }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { plat: x86_64-linux,   runner: '["ubuntu-latest"]'                                  }
+          - { plat: aarch64-linux,  runner: '["ubuntu-24.04-arm"]'                               }
+          - { plat: aarch64-darwin, runner: '["macos-15"]'                              }
+
+    env:
+      # Default to the current LatestPrerelease; workflow_dispatch can override.
+      MULTI_VER: ${{ inputs.multi_version != '' && inputs.multi_version || 'multi-9.14.0.stable.1' }}
+      CABAL_VER: 3.17.0.0.stable.0
+
+    steps:
+      # ---------------------------------------------------------------------
+      # 1. Fresh ghcup (mirrors the Channel e2e (WASM) workflow).
+      # ---------------------------------------------------------------------
+      - name: Install ghcup fresh
+        run: |
+          set -euo pipefail
+          rm -rf "$HOME/.ghcup"
+          if [ "$(uname -s)" = "Linux" ] && [ -d /usr/local/.ghcup ]; then
+            sudo rm -rf /usr/local/.ghcup
+          fi
+          curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org \
+            | BOOTSTRAP_HASKELL_NONINTERACTIVE=1 \
+              BOOTSTRAP_HASKELL_MINIMAL=1 \
+              GHCUP_INSTALL_BASE_PREFIX="$HOME" \
+              sh
+          echo "$HOME/.ghcup/bin" >> "$GITHUB_PATH"
+          echo "GHCUP_INSTALL_BASE_PREFIX=$HOME" >> "$GITHUB_ENV"
+
+      # ---------------------------------------------------------------------
+      # 2. Node 22 (NodeSource on Linux, official tarball on Darwin).
+      # ---------------------------------------------------------------------
+      - name: Install gcc + Node 22 (Linux via apt + NodeSource)
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends build-essential
+          curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+          sudo apt-get install -y --no-install-recommends nodejs
+          # Force /usr/bin first so NodeSource Node 22 wins over toolcache Node 20
+          # (ubuntu-24.04-arm pre-bakes Node 20 in /opt/hostedtoolcache).
+          echo "/usr/bin" >> "$GITHUB_PATH"
+          export PATH="/usr/bin:$PATH"
+          ver=$(node --version | tr -d v | cut -d. -f1)
+          test "$ver" -ge 22 || { echo "::error::expected Node 22+, got $(node --version)"; exit 1; }
+
+      - name: Install Node 22 (Darwin)
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          NODE_VER=v22.22.0
+          NODE_DIR="$HOME/node-$NODE_VER"
+          rm -rf "$NODE_DIR"
+          curl -fsSL "https://nodejs.org/dist/$NODE_VER/node-$NODE_VER-darwin-arm64.tar.xz" \
+            | tar -xJ -C "$HOME"
+          mv "$HOME/node-$NODE_VER-darwin-arm64" "$NODE_DIR"
+          echo "$NODE_DIR/bin" >> "$GITHUB_PATH"
+          "$NODE_DIR/bin/node" --version
+
+      # ---------------------------------------------------------------------
+      # 3. wasi-sdk: needed for the wasm hello test to find
+      #    wasm32-unknown-wasi-clang at link time. The multi-target bindist
+      #    ships its own wasm GHC frontend but delegates to wasi-sdk's clang
+      #    for the actual C compilation / linking — same model as the WASM
+      #    channel.
+      # ---------------------------------------------------------------------
+      - name: Install wasi-sdk via ghc-wasm-meta bootstrap
+        run: |
+          set -euo pipefail
+          export TMPDIR="$GITHUB_WORKSPACE/_tmp"
+          mkdir -p "$TMPDIR"
+          curl -fsSL https://gitlab.haskell.org/ghc/ghc-wasm-meta/-/raw/master/bootstrap.sh | \
+            FLAVOUR=9.12 PREFIX=$HOME/.ghc-wasm sh
+          WASI_BIN="$HOME/.ghc-wasm/wasi-sdk/bin"
+          test -d "$WASI_BIN" || { echo "::error::$WASI_BIN missing"; exit 1; }
+          for tool in clang clang++; do
+            ln -sf "$WASI_BIN/wasm32-wasi-$tool" "$WASI_BIN/wasm32-unknown-wasi-$tool"
+          done
+          for tool in ar nm ranlib strip; do
+            ln -sf "$WASI_BIN/llvm-$tool" "$WASI_BIN/wasm32-unknown-wasi-$tool" 2>/dev/null || true
+          done
+          echo "$WASI_BIN" >> "$GITHUB_PATH"
+
+      # ---------------------------------------------------------------------
+      # 4. cabal — the wasm hello template's Makefile drives cabal-install.
+      #    JS hello compiles directly with javascript-unknown-ghcjs-ghc, no
+      #    cabal needed there.
+      # ---------------------------------------------------------------------
+      - name: Install cabal
+        id: cabal
+        run: |
+          set -euo pipefail
+          if ! ghcup install cabal "$CABAL_VER" 2>&1 | tee /tmp/cabal-install.log; then
+            if grep -q "Unable to find a download for Tool" /tmp/cabal-install.log; then
+              echo "::warning::cabal-$CABAL_VER not yet available for this platform"
+              echo "cabal_installed=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            else
+              exit 1
+            fi
+          fi
+          ghcup set cabal "$CABAL_VER"
+          echo "cabal_installed=true" >> "$GITHUB_OUTPUT"
+
+      # ---------------------------------------------------------------------
+      # 5. Install the multi-target GHC from the live channel. This is the
+      #    end-user-facing install path; if the channel YAML is missing or
+      #    the release asset is unreachable, record installed=false and
+      #    skip the strict tests below.
+      # ---------------------------------------------------------------------
+      - name: multi — try install (sets a flag)
+        id: multi_install
+        if: steps.cabal.outputs.cabal_installed == 'true'
+        run: |
+          # Use full strict mode (-euo pipefail). The two `if ! …; then …; fi`
+          # blocks below intentionally CAPTURE failures (channel YAML missing,
+          # install can't fetch the asset) and downgrade them to a recorded
+          # installed=false + exit 0. Anything else — including a failed
+          # `ghcup set` or a broken binary symlink — MUST surface as a job
+          # failure rather than be silently swallowed into installed=true.
+          # `set -e` inside an `if` test does not trigger, so the gate
+          # conditionals still work as written.
+          set -euo pipefail
+          if ! ghcup config add-release-channel \
+              https://stable-haskell.github.io/ghc/ghcup-multi-target-0.1.0.yaml 2>&1 | tee /tmp/multi-chan.log; then
+            echo "::warning::could not add multi-target channel (yet?) — skipping multi-target tests"
+            echo "installed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! ghcup install ghc "$MULTI_VER" 2>&1 | tee /tmp/multi-install.log; then
+            echo "::warning::$MULTI_VER not installable from channel — skipping multi-target tests"
+            echo "installed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Install path succeeded — from here, any failure (set, missing
+          # binary, broken symlink) is a real bug and MUST fail the step.
+          ghcup set ghc "$MULTI_VER"
+          echo "$HOME/.ghcup/bin" >> "$GITHUB_PATH"
+          # Resolve all three argv[0] frontends — exit-non-zero propagates
+          # under set -e if a symlink is broken or the binary is missing.
+          ghc                          --numeric-version
+          wasm32-unknown-wasi-ghc      --numeric-version
+          javascript-unknown-ghcjs-ghc --numeric-version
+          # Smoke-test argv[0] dispatch: each frontend MUST report its own
+          # Target platform — if the package were built wrong (or someone
+          # accidentally shipped 3 copies of the same native ghc) the
+          # downstream hello tests would still catch it, but failing here
+          # makes the packaging-vs-runtime distinction obvious.
+          ghc                          --info \
+            | grep -F -e '("Target platform","x86_64-' \
+                      -e '("Target platform","aarch64-' \
+                      >/dev/null \
+            || { echo "::error::native ghc reports unexpected Target platform"; ghc --info | grep "Target platform"; exit 1; }
+          wasm32-unknown-wasi-ghc      --info | grep -qF '("Target platform","wasm32-unknown-wasi")' \
+            || { echo "::error::wasm frontend reports wrong Target platform"; wasm32-unknown-wasi-ghc --info | grep "Target platform"; exit 1; }
+          javascript-unknown-ghcjs-ghc --info | grep -qF '("Target platform","javascript-unknown-ghcjs")' \
+            || { echo "::error::JS frontend reports wrong Target platform"; javascript-unknown-ghcjs-ghc --info | grep "Target platform"; exit 1; }
+          echo "installed=true" >> "$GITHUB_OUTPUT"
+
+      # ---------------------------------------------------------------------
+      # 6. Native hello — proves `ghc` frontend compiles and runs native.
+      # ---------------------------------------------------------------------
+      - name: multi — native hello (strict)
+        if: ${{ !cancelled() && steps.multi_install.outputs.installed == 'true' }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/native-hello && cd /tmp/native-hello
+          echo 'main = putStrLn "Hello from native ghc"' > hello.hs
+          ghc hello.hs -o hello
+          ./hello | tee /tmp/native-out
+          grep -q 'Hello from native ghc' /tmp/native-out
+
+      # ---------------------------------------------------------------------
+      # 7. Wasm hello — proves `wasm32-unknown-wasi-ghc` frontend produces a
+      #    Node:wasi-runnable .wasm via the published hello template.
+      # ---------------------------------------------------------------------
+      - name: multi — wasm hello via multi-target (strict)
+        if: ${{ !cancelled() && steps.multi_install.outputs.installed == 'true' }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/multi-hello && cd /tmp/multi-hello
+          curl -fL -o multi-hello.tar.gz \
+            https://stable-haskell.github.io/ghc/examples/stable-haskell-wasm-hello.tar.gz
+          tar xf multi-hello.tar.gz
+          cd stable-haskell-wasm-hello
+          make WASM_VERSION="$MULTI_VER" build
+          make WASM_VERSION="$MULTI_VER" run-node 2>&1 | tee /tmp/multi-run.out
+          grep -q 'Hello from the WASM reactor!' /tmp/multi-run.out
+
+      # ---------------------------------------------------------------------
+      # 8. JS hello — proves `javascript-unknown-ghcjs-ghc` frontend
+      #    produces Node-runnable .js. emscripten is installed here on demand
+      #    rather than as a global setup step because only this one test
+      #    needs it.
+      # ---------------------------------------------------------------------
+      - name: multi — JS hello via multi-target (strict)
+        if: ${{ !cancelled() && steps.multi_install.outputs.installed == 'true' }}
+        run: |
+          set -euo pipefail
+          if ! command -v emcc >/dev/null 2>&1; then
+            git clone --depth 1 --branch 3.1.74 https://github.com/emscripten-core/emsdk.git /tmp/emsdk
+            cd /tmp/emsdk && ./emsdk install 3.1.74 && ./emsdk activate 3.1.74
+            source ./emsdk_env.sh
+          fi
+          mkdir -p /tmp/js-hello && cd /tmp/js-hello
+          echo 'main = putStrLn "Hello from JS backend"' > hello.hs
+          javascript-unknown-ghcjs-ghc hello.hs -o hello
+          node hello.jsexe/all.js | tee /tmp/js-out
+          grep -q 'Hello from JS backend' /tmp/js-out

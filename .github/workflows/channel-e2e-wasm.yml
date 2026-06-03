@@ -1,7 +1,7 @@
-# Channel end-to-end CI.
+# Channel end-to-end CI — wasm-only single-target bindist channel.
 #
 # Validates the SHIPPED wasm cross-compiler + cabal + ghcup channel YAML
-# by exercising the exact flow an end-user does:
+# (`ghcup-wasm.yaml`) by exercising the exact flow an end-user does:
 #   1. install ghcup fresh
 #   2. add the stable-haskell ghcup channel
 #   3. ghcup install ghc / ghcup install cabal
@@ -31,14 +31,18 @@
 # VMs are the opposite — nix + a pre-imported devx closure, and no CLT —
 # so they're the wrong environment for an end-user-fidelity test. They
 # stay reserved for the nix-based in-tree builds in nix-ci.yml.
-name: Channel e2e
+#
+# Companion workflow: `Channel e2e (MULTI)` in
+# `.github/workflows/channel-e2e-multi.yml` covers the separate
+# `ghcup-multi-target-0.1.0.yaml` channel.
+name: Channel e2e (WASM)
 
 on:
   push:
     tags: [wasm32-wasi-*]      # new GHC release → re-test
   pull_request:
     # validate workflow changes themselves end-to-end before merge
-    paths: ['.github/workflows/channel-e2e.yml']
+    paths: ['.github/workflows/channel-e2e-wasm.yml']
   workflow_dispatch:
     inputs:
       wasm_version:
@@ -54,12 +58,12 @@ on:
 # Only run one at a time per ref — avoids racing on cabal-store side effects
 # when the cron and a manual dispatch happen close together.
 concurrency:
-  group: channel-e2e-${{ github.ref }}
+  group: channel-e2e-wasm-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   install-and-build:
-    name: e2e / ${{ matrix.plat }}
+    name: e2e WASM / ${{ matrix.plat }}
     # matrix.runner is a JSON-string ARRAY of labels: '["label1", ...]',
     # so every leg selects its github-hosted image through one knob.
     runs-on: ${{ fromJSON(matrix.runner) }}
