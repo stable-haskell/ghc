@@ -778,6 +778,12 @@ endif
 	$(call LOG,Create -dyn iserv executable symlink so ghc can find ghc-iserv-dyn)
 	@$(LN_SF) ghc-iserv$(EXE_EXT) "$(DIST_DIR)/bin/ghc-iserv-dyn$(EXE_EXT)"
 endif
+	# On Darwin, strip the build-host /Volumes/WorkSpace LC_RPATH leak
+	# and rewrite nix-store LC_LOAD_DYLIB install names to /usr/lib
+	# BEFORE the ghc-pkg recache below — otherwise recache itself can
+	# abort-trap on macOS 15 dyld (which rejects unresolvable absolute
+	# rpaths as fatal). The script is a no-op on non-Darwin hosts.
+	@./mk/clean-darwin-macho.sh $(DIST_DIR)
 	$(call LOG,Refreshing $(DIST_DIR)/lib/package.conf.d cache)
 	@$(DIST_DIR)/bin/ghc-pkg recache --package-db $(CURDIR)/$(DIST_DIR)/lib/package.conf.d
 
