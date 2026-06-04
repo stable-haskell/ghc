@@ -1,0 +1,26 @@
+cabal-version: 3.0
+name:          myapp
+version:       0.1.0.0
+synopsis:      Trivial wasm reactor demonstrating stable-haskell wasm cross + dual-compiler cabal
+license:       Apache-2.0
+author:        Moritz Angermann
+maintainer:    moritz.angermann@iohk.io
+build-type:    Simple
+
+executable myapp
+  main-is:          Main.hs
+  hs-source-dirs:   app
+  default-language: GHC2021
+  build-depends:    base >= 4.18 && < 5
+  ghc-options:      -Wall
+
+  if arch(wasm32)
+    -- Reactor pattern, per GHC user's guide §15:
+    --   -no-hs-main: don't auto-export Haskell's main as _start
+    --   -optl-mexec-model=reactor: WASI reactor (long-lived) module
+    --   -optl-Wl,--export=hs_start: linker exports our hs_start FFI function
+    ghc-options:
+        -no-hs-main
+        -optl-mexec-model=reactor
+        "-optl-Wl,--export=hs_start"
+    cpp-options:    -DWASM
