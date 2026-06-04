@@ -424,9 +424,11 @@ hs_init_ghc(int *argc, char **argv[], RtsConfig rts_config)
 
     init_ghc_hs_iface();
 
-#if !defined(mingw32_HOST_OS) && defined(RTLD_NOLOAD)
+#if !defined(mingw32_HOST_OS) && !defined(wasm32_HOST_ARCH) && defined(RTLD_NOLOAD)
     /* Promote boot libraries to RTLD_GLOBAL for dynamic code loading.
      * See Note [Promoting Boot Libraries to RTLD_GLOBAL] */
+    /* NOTE: matches the function definition's #if at line 108 — wasm32 needs
+     * to be excluded here too (the function is undefined for wasm). */
     promoteBootLibrariesToGlobal();
 #endif
 
