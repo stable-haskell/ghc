@@ -27,6 +27,14 @@ on:
       multi_version:
         description: 'Multi-target GHC version to test (e.g. multi-9.14.0.stable.1)'
         default: ''
+  # Weekly silent-regression canary on the default branch. Catches drift:
+  # release asset re-uploaded with different bytes, channel YAML
+  # mis-deployed, NodeSource setup_22.x breaking, ghcup-runner-image
+  # quirks, wasi-sdk bootstrap.sh layout changes, emscripten 3.1.74
+  # download server moves, etc. Cron only fires on the workflow's home
+  # default branch (stable-ghc-9.14 once this lands there).
+  schedule:
+    - cron: '0 6 * * 1'      # Monday 06:00 UTC
 
 # Per-ref concurrency so multiple pushes coalesce.
 concurrency:
@@ -125,27 +133,44 @@ jobs:
             ln -sf "$WASI_BIN/llvm-$tool" "$WASI_BIN/wasm32-unknown-wasi-$tool" 2>/dev/null || true
           done
           echo "$WASI_BIN" >> "$GITHUB_PATH"
+          # macos-15: WASI_BIN contains a wasm-only `clang` that, if it
+          # wins PATH lookup over /usr/bin/clang, gets invoked by GHC's
+          # native code generator and fails with
+          #   clang -cc1as: error: unknown target triple 'arm64-apple-macosx15.0.0'
+          # GITHUB_PATH prepends entries, so we re-prepend /usr/bin here
+          # to put Apple's clang back ahead of the wasm-only one. Linux
+          # is unaffected — there GHC's C compiler is `cc` (gcc), not
+          # `clang`.
+          if [ "$(uname -s)" = "Darwin" ]; then
+            echo "/usr/bin" >> "$GITHUB_PATH"
+          fi
 
       # ---------------------------------------------------------------------
-      # 4. cabal — the wasm hello template's Makefile drives cabal-install.
-      #    JS hello compiles directly with javascript-unknown-ghcjs-ghc, no
-      #    cabal needed there.
+      # 4. Add the wasm channel — that's where the stable-haskell `cabal`
+      #    download entry lives. The multi-target channel YAML itself
+      #    intentionally ships only the GHC frontends; cabal is shared
+      #    with the wasm channel rather than duplicated.
       # ---------------------------------------------------------------------
-      - name: Install cabal
-        id: cabal
+      - name: Add stable-haskell wasm channel (for cabal)
         run: |
           set -euo pipefail
-          if ! ghcup install cabal "$CABAL_VER" 2>&1 | tee /tmp/cabal-install.log; then
-            if grep -q "Unable to find a download for Tool" /tmp/cabal-install.log; then
-              echo "::warning::cabal-$CABAL_VER not yet available for this platform"
-              echo "cabal_installed=false" >> "$GITHUB_OUTPUT"
-              exit 0
-            else
-              exit 1
-            fi
-          fi
-          ghcup set cabal "$CABAL_VER"
-          echo "cabal_installed=true" >> "$GITHUB_OUTPUT"
+          ghcup config add-release-channel \
+            https://stable-haskell.github.io/ghc/ghcup-wasm.yaml
+
+      # ---------------------------------------------------------------------
+      # 5. cabal — the wasm hello template's Makefile drives cabal-install.
+      #    JS hello compiles directly with javascript-unknown-ghcjs-ghc, no
+      #    cabal needed there. cabal-$CABAL_VER MUST install successfully
+      #    on every supported platform; any failure (channel YAML missing
+      #    the entry, dlHash mismatch, platform classification drift) is a
+      #    real bug — fail loud rather than silently skip downstream tests.
+      # ---------------------------------------------------------------------
+      - name: Install cabal
+        run: |
+          set -euo pipefail
+          ghcup install cabal "$CABAL_VER"
+          ghcup set     cabal "$CABAL_VER"
+          cabal --version
 
       # ---------------------------------------------------------------------
       # 5. Install the multi-target GHC from the live channel. This is the
@@ -155,7 +180,6 @@ jobs:
       # ---------------------------------------------------------------------
       - name: multi — try install (sets a flag)
         id: multi_install
-        if: steps.cabal.outputs.cabal_installed == 'true'
         run: |
           # Use full strict mode (-euo pipefail). The two `if ! …; then …; fi`
           # blocks below intentionally CAPTURE failures (channel YAML missing,

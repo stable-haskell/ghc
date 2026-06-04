@@ -48,12 +48,13 @@ on:
       wasm_version:
         description: 'GHC wasm version to test (e.g. wasm32-wasi-9.14.0.stable.12)'
         default: ''
-  # NOTE: cron only fires on the repo's default branch. Once this workflow
-  # lands on `stable-ghc-9.14`, uncomment to add a weekly silent-regression
-  # canary that catches drift (release asset re-uploaded, channel YAML
-  # mis-deployed, NodeSource setup_22.x breaking, etc.):
-  # schedule:
-  #   - cron: '0 6 * * 1'      # Monday 06:00 UTC
+  # Weekly silent-regression canary on the default branch. Catches drift:
+  # release asset re-uploaded, channel YAML mis-deployed, NodeSource
+  # setup_22.x breaking, ghcup-runner-image quirks, wasi-sdk bootstrap.sh
+  # layout changes, etc. Cron only fires on the workflow's home default
+  # branch (stable-ghc-9.14 once this lands there).
+  schedule:
+    - cron: '0 6 * * 1'      # Monday 06:00 UTC
 
 # Only run one at a time per ref — avoids racing on cabal-store side effects
 # when the cron and a manual dispatch happen close together.
@@ -254,24 +255,23 @@ jobs:
           ls "$WASI_BIN" | grep -E "wasm32-unknown-wasi-(clang|ar|nm|ranlib|strip)" | head -10
 
       # ---------------------------------------------------------------------
-      # 3c. Install cabal from the channel. Should succeed on every platform
-      #     we test (channel was extended with Linux variants in stable.1).
+      # 3c. Install cabal from the channel. cabal-$CABAL_VER MUST install
+      #     successfully on every supported platform; any failure (channel
+      #     YAML missing the entry, dlHash mismatch, platform classification
+      #     drift, network issue) is a real bug — fail loud rather than
+      #     silently skip downstream tests.
+      #
+      #     Earlier iterations of this step had a soft fallback that set
+      #     cabal_installed=false and exited 0 when ghcup reported "Unable
+      #     to find a download for Tool", from the days when cabal wasn't
+      #     yet on every Linux variant. Removed: stale + masks real bugs.
       # ---------------------------------------------------------------------
       - name: Install cabal
-        id: cabal
         run: |
           set -euo pipefail
-          if ! ghcup install cabal "$CABAL_VER" 2>&1 | tee /tmp/cabal-install.log; then
-            if grep -q "Unable to find a download for Tool" /tmp/cabal-install.log; then
-              echo "::warning::cabal-$CABAL_VER not yet available for this platform"
-              echo "cabal_installed=false" >> "$GITHUB_OUTPUT"
-              exit 0
-            else
-              exit 1
-            fi
-          fi
-          ghcup set cabal "$CABAL_VER"
-          echo "cabal_installed=true" >> "$GITHUB_OUTPUT"
+          ghcup install cabal "$CABAL_VER"
+          ghcup set     cabal "$CABAL_VER"
+          cabal --version
 
       # ---------------------------------------------------------------------
       # 4. Sanity: verify the cabal binary and a standalone single-compiler
@@ -280,7 +280,6 @@ jobs:
       #    (gcc / pkg-config / ghc) all work in the basic case.
       # ---------------------------------------------------------------------
       - name: Sanity — single-compiler cabal build
-        if: steps.cabal.outputs.cabal_installed == 'true'
         run: |
           set -euo pipefail
           cabal --version
@@ -344,7 +343,6 @@ jobs:
       #    bring-up + ghc_wasm_jsffi_init + hs_start sequence.
       # ---------------------------------------------------------------------
       - name: hello template — build + run-node
-        if: steps.cabal.outputs.cabal_installed == 'true'
         run: |
           set -euo pipefail
           curl -fL -o hello.tar.gz \
@@ -370,7 +368,6 @@ jobs:
       #    regressions.
       # ---------------------------------------------------------------------
       - name: miso-counter template — build + verify wasm artifact
-        if: steps.cabal.outputs.cabal_installed == 'true'
         run: |
           set -euo pipefail
           curl -fL -o miso.tar.gz \
