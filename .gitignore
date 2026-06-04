@@ -290,3 +290,4 @@ CODEX.md
 
 # JetBrains Junie
 .aiignore
+testsuite/ghc-config/ghc-config
