@@ -7,7 +7,7 @@ AC_CONFIG_MACRO_DIR([m4])      # For any custom m4 macros
 # --- Define GHC Build Options ---
 # Usage: ./configure ProjectVersion=X.Y ...
 AC_ARG_WITH([project-version], [AS_HELP_STRING([--with-project-version=VER], [GHC version (default: 9.14)])], [ProjectVersion="$withval"], [ProjectVersion="9.14"])
-AC_ARG_WITH([project-version-int], [AS_HELP_STRING([--with-project-version-int=VER], [GHC version as int (default: 914)])], [ProjectVersionInt="$withval"], [ProjectVersionInt="914"])
+AC_ARG_WITH([project-version-int], [AS_HELP_STRING([--with-project-version-int=VER], [GHC version as int (default: 913)])], [ProjectVersionInt="$withval"], [ProjectVersionInt="913"])
 AC_ARG_WITH([project-version-munged], [AS_HELP_STRING([--with-project-version-munged=VER], [GHC version "munged" (default: 9.14)])], [ProjectVersionMunged="$withval"], [ProjectVersionMunged="9.14"])
 AC_ARG_WITH([project-version-for-lib], [AS_HELP_STRING([--with-project-version-for-lib=VER], [GHC version for libraries (default: 9.1400)])], [ProjectVersionForLib="$withval"], [ProjectVersionForLib="9.1400"])
 AC_ARG_WITH([project-patch-level], [AS_HELP_STRING([--with-project-patch-level=VER], [GHC patchlevel version (default: 0)])], [ProjectPatchLevel="$withval"], [ProjectPatchLevel="0"])
@@ -47,6 +47,15 @@ AS_IF([test "x$enable_dynamic" = "xyes"], [
         APPEND_PKG_FIELD([executable-dynamic: True])
         APPEND_CONSTRAINT([rts +dynamic])
 ])
+
+# Stage3 currently has no extra-over-stage2 settings. cabal-install at
+# SHA 44817477 doesn't fully populate library-dirs/dynamic-library-dirs
+# when library-vanilla:False is set, so we keep vanilla on. The wasm
+# makeDynFlagsConsistent rule (compiler/GHC/Driver/Session.hs) was
+# disabled instead so the -dynamic-too compile + link pipeline stays
+# consistent on wasm.
+STAGE3_EXTRA_PKG=""
+AC_SUBST([STAGE3_EXTRA_PKG])
 
 # Indent with two spaces for substitution blocks (uniform handling)
 ALL_PACKAGES=`printf '%b' "$ALL_PACKAGES"`
@@ -94,6 +103,7 @@ AC_CONFIG_FILES([
     libraries/base/base.cabal
     rts/include/ghcversion.h
     cabal.project.stage2.settings
+    cabal.project.stage3.settings
 ])
 
 AC_OUTPUT
