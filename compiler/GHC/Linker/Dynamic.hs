@@ -16,6 +16,7 @@ import GHC.SysTools.Tasks
 
 import GHC.Driver.Config.Linker
 import GHC.Driver.Session
+import GHC.Driver.DynFlags (rtsWayUnitId)
 
 import GHC.Unit.Env
 import GHC.Unit.Types
@@ -52,7 +53,27 @@ linkDynLib logger tmpfs dflags0 unit_env o_files dep_packages
         verbFlags = getVerbFlags dflags
         o_file = outputFile_ dflags
 
-    pkgs_with_rts <- mayThrowUnitErr (preloadUnitsInfo' unit_env dep_packages)
+    pkgs_with_rts <- do
+      pkgs0 <- mayThrowUnitErr (preloadUnitsInfo' unit_env dep_packages)
+      -- On wasm32, every Haskell .so must declare the current way's rts in
+      -- its `dylink.0/needed_dynlibs` section, otherwise the runtime dyld
+      -- can load it ahead of rts and the .so's `_initialize` references
+      -- unresolved rts symbols (e.g. `registerForeignExports`) — see
+      -- ghc-internal, which is built with `-no-rts` to bypass mkUnitState's
+      -- sanity check (compiler/GHC/Unit/State.hs:1652) but consequently has
+      -- cabal omit rts from its --depends list. wasm-ld populates
+      -- needed_dynlibs from the resolved `-l` flags, so we must inject the
+      -- current way's rts here whenever it isn't already present, even if
+      -- `-no-rts` is in effect. Other targets either link rts statically at
+      -- exe-link time or rely on host symbol resolution; on wasm32 the .so
+      -- itself carries the dependency.
+      let rts_uid = rtsWayUnitId dflags
+      pure $ case arch of
+        ArchWasm32
+          | not (any ((== rts_uid) . unitId) pkgs0)
+          , Just rts_info <- lookupUnitId (ue_units unit_env) rts_uid
+          -> rts_info : pkgs0
+        _ -> pkgs0
 
     let pkg_lib_paths = collectLibraryDirs (ways dflags) pkgs_with_rts
     let pkg_lib_path_opts = concatMap get_pkg_lib_path_opts pkg_lib_paths
@@ -84,7 +105,10 @@ linkDynLib logger tmpfs dflags0 unit_env o_files dep_packages
     --   * if -flink-rts is used, we link with the rts.
     --
     --   * on wasm we need to ensure libHSrts*.so is listed in
-    --   WASM_DYLINK_NEEDED, otherwise dyld can't load it.
+    --   WASM_DYLINK_NEEDED, otherwise dyld can't load it. We force the
+    --   current way's rts into `pkgs_with_rts` above so that even .so
+    --   files whose package was built with `-no-rts` (e.g. ghc-internal)
+    --   still declare the rts dependency.
     --
     --
     let pkgs_without_rts = filter ((/= PackageName (fsLit "rts")) . unitPackageName) pkgs_with_rts
