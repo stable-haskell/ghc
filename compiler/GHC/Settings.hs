@@ -67,6 +67,7 @@ module GHC.Settings
   , sGhcWithInterpreter
   , sLibFFI
   , sTargetRTSLinkerOnlySupportsSharedLibs
+  , sTargetShipsDynLibs
   ) where
 
 import GHC.Prelude
@@ -314,3 +315,11 @@ sLibFFI = platformMisc_libFFI . sPlatformMisc
 
 sTargetRTSLinkerOnlySupportsSharedLibs :: Settings -> Bool
 sTargetRTSLinkerOnlySupportsSharedLibs = platformMisc_targetRTSLinkerOnlySupportsSharedLibs . sPlatformMisc
+
+-- | Does this target's installed library tree ship .dyn_hi / .so files?
+-- Read from the per-target settings file key
+-- @"target ships dynamic libraries"@. Drives @ghc --info@'s @GHC Dynamic@
+-- value, which cabal-install reads to decide whether to enable
+-- @library-dynamic@ by default. See PlatformMisc note for the rationale.
+sTargetShipsDynLibs :: Settings -> Bool
+sTargetShipsDynLibs = platformMisc_targetShipsDynLibs . sPlatformMisc

@@ -185,6 +185,20 @@ initSettings top_dir = do
   ghcWithInterpreter <- getBooleanSetting "Use interpreter"
   useLibFFI <- getBooleanSetting "Use LibFFI"
 
+  -- Whether this target's installed library tree actually ships
+  -- .dyn_hi / .so files. cabal-install reads `GHC Dynamic` to
+  -- decide whether to enable library-dynamic by default; on a
+  -- multi-target bindist this needs to be per-target because the
+  -- shared stage2 GHC binary's RTS-baked-in dynamic-ness is fixed
+  -- but different targets may genuinely not ship dyn artifacts.
+  --
+  -- Default to True for backward compatibility with older bindist
+  -- settings files that predate this key (matches the historical
+  -- behaviour of always reporting GHC Dynamic when the binary is
+  -- dyn-built).
+  targetShipsDynLibs <- either (const $ pure True) pure $
+    getRawBooleanSetting settingsFile mySettings "target ships dynamic libraries"
+
   baseUnitId <- getSetting_raw "base unit-id"
 
   return $ Settings
@@ -267,6 +281,7 @@ initSettings top_dir = do
       , platformMisc_libFFI = useLibFFI
       , platformMisc_llvmTarget = llvmTarget
       , platformMisc_targetRTSLinkerOnlySupportsSharedLibs = targetRTSLinkerOnlySupportsSharedLibs
+      , platformMisc_targetShipsDynLibs = targetShipsDynLibs
       }
 
     , sRawSettings    = settingsList

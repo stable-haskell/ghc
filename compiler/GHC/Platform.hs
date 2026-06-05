@@ -291,6 +291,17 @@ data PlatformMisc = PlatformMisc
   , platformMisc_libFFI               :: Bool
   , platformMisc_llvmTarget           :: String
   , platformMisc_targetRTSLinkerOnlySupportsSharedLibs :: Bool
+    -- | Does the target's installed library tree ship @.dyn_hi@ /
+    -- @.so@ files? Set per-target by the bindist build (a hand-
+    -- editable @lib/targets/\<triple\>/lib/settings@ key —
+    -- @"target ships dynamic libraries"@). cabal-install reads
+    -- @ghc --info@'s @GHC Dynamic@ to decide whether to enable
+    -- @library-dynamic@ by default; on a multi-target bindist the
+    -- one stage2 GHC binary's RTS-baked-in dynamic-ness isn't a
+    -- good per-target proxy, since different targets may genuinely
+    -- not ship @.dyn_hi@ (e.g. a slimmed JS bindist whose iserv
+    -- only loads vanilla code).
+  , platformMisc_targetShipsDynLibs   :: Bool
   }
 
 platformSOName :: Platform -> FilePath -> FilePath

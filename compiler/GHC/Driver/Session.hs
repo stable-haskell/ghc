@@ -132,6 +132,7 @@ module GHC.Driver.Session (
         sGhcWithInterpreter,
         sLibFFI,
         sTargetRTSLinkerOnlySupportsSharedLibs,
+        sTargetShipsDynLibs,
         GhcNameVersion(..),
         FileSettings(..),
         PlatformMisc(..),
@@ -3569,8 +3570,17 @@ compilerInfo dflags
        ("Uses package keys",           "YES"),
        -- Whether or not we support the @-this-unit-id@ flag
        ("Uses unit IDs",               "YES"),
-       -- Whether or not GHC was compiled using -dynamic
-       ("GHC Dynamic",                 showBool hostIsDynamic),
+       -- Whether or not GHC was compiled using -dynamic AND this
+       -- target's installed library tree actually ships .dyn_hi / .so
+       -- files. cabal-install reads this to decide whether to enable
+       -- @library-dynamic@ by default; on a multi-target bindist the
+       -- shared stage2 GHC binary's RTS-baked-in @hostIsDynamic@ is
+       -- not a good per-target proxy. The @sTargetShipsDynLibs@ dial
+       -- comes from the per-target settings file key
+       -- @"target ships dynamic libraries"@ (defaults to True for
+       -- backward compatibility with older bindists), so different
+       -- targets in one bindist can correctly disagree.
+       ("GHC Dynamic",                 showBool (hostIsDynamic && sTargetShipsDynLibs (settings dflags))),
        -- Whether or not GHC was compiled using -prof
        ("GHC Profiled",                showBool hostIsProfiled),
        ("Debug on",                    showBool debugIsOn),

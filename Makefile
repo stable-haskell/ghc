@@ -1007,6 +1007,19 @@ ifeq ($(DYNAMIC),1)
 	$(SED) -i -e 's/"RTS ways","/"RTS ways","dyn /' $$(TARGET_DIR)/lib/settings
 endif
 
+	@# Inject the per-target "target ships dynamic libraries" key.
+	@# Drives `ghc --info`'s `GHC Dynamic` — cabal-install reads that
+	@# to decide whether to enable library-dynamic by default. On a
+	@# multi-target bindist the shared stage2 GHC binary's RTS-baked-
+	@# in dynamic-ness isn't a good per-target proxy. Default YES for
+	@# every target we currently build (wasm Path C ships .dyn_hi/.so,
+	@# JS Path C ships .dyn_hi via -dynamic-too in cabal.project.stage3.
+	@# settings.in, native inherits from host). Override in a target-
+	@# specific variable below if a target ever ships static-only.
+	@# The settings file is the literal list-of-pairs ghc-toolchain
+	@# emitted; insert before the closing `]`.
+	$(SED) -i -e 's/\]$$/,("target ships dynamic libraries","$(if $(STAGE3_$(1)_TARGET_SHIPS_DYN_LIBS),$(STAGE3_$(1)_TARGET_SHIPS_DYN_LIBS),YES)")]/' $$(TARGET_DIR)/lib/settings
+
 	$$(DIST_DIR)/bin/$(1)-ghc --info
 
 	@rm -rf $$(TARGET_DIR)/lib/package.conf.d
