@@ -44,14 +44,23 @@ if arch(wasm32)
     shared: True
     executable-dynamic: True
 
--- Path C for the JS target: emit .dyn_hi alongside .hi so cabal-
--- install's library-dynamic auto-detection (driven by
--- GHC Dynamic=YES on the shared stage2 GHC binary) is satisfied
--- when end-users build TH-heavy packages (miso, aeson, lens, …).
--- See header comment for the full reasoning.
-if arch(javascript)
-  package *
-    ghc-options: -dynamic-too
+-- NOTE: an earlier draft of #66 (PR #187) attempted Path C for the
+-- JS target via:
+--   if arch(javascript)
+--     package *
+--       ghc-options: -dynamic-too
+-- but cabal-install applies `ghc-options` differently from `shared`
+-- in the dual-compiler split: `shared` is properly per-target-arch
+-- (only host packages see it; native build-side packages like alex,
+-- happy-lib do NOT), but `ghc-options` leaks to build-side compiles
+-- regardless of the arch conditional. The native stage2 is built
+-- DYNAMIC=0 (no .dyn_hi for the host arch), so alex's first .hs
+-- module failed with
+--   Prelude.dyn_hi: does not exist (No such file or directory)
+-- when compiled by the build compiler with -dynamic-too.
+-- Path C for JS therefore needs deeper cabal work (or a Makefile-
+-- side .dyn_hi copy after the fact); the GHC Dynamic settings dial
+-- in the sibling commit (#67) is the proper long-term answer.
 
 constraints:
   rts +dynamic

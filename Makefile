@@ -919,6 +919,16 @@ STAGE3_javascript-unknown-ghcjs_NM                 = emnm
 STAGE3_javascript-unknown-ghcjs_RANLIB             = emranlib
 STAGE3_javascript-unknown-ghcjs_STRIP              = emstrip
 STAGE3_javascript-unknown-ghcjs_GHC_TOOLCHAIN_ARGS = $(GHC_TOOLCHAIN_ARGS) --disable-tables-next-to-code
+# The JS-target lib tree does NOT ship .dyn_hi (the wasm-style Path C
+# via `shared: True` fails for JS with `wasm-ld: error: unknown
+# argument: -h`, and a `ghc-options: -dynamic-too` workaround leaks
+# to BUILD-side native compiles via cabal's dual-compiler split —
+# see PR #187 retro). Tell end-user cabal-install via the
+# `target ships dynamic libraries` settings key that it should NOT
+# enable `library-dynamic` by default on the JS target — otherwise
+# TH-using packages (miso, aeson, lens, …) fail looking for missing
+# .dyn_hi. Drives compiler/GHC/Driver/Session.hs:3573's GHC Dynamic.
+STAGE3_javascript-unknown-ghcjs_TARGET_SHIPS_DYN_LIBS = NO
 
 STAGE3_wasm32-unknown-wasi_CC                 = wasm32-unknown-wasi-clang
 STAGE3_wasm32-unknown-wasi_CC_OPTS            = -fno-strict-aliasing -Wno-error=int-conversion -Oz -msimd128 -mnontrapping-fptoint -msign-ext -mbulk-memory -mmutable-globals -mmultivalue -mreference-types
