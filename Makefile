@@ -1018,7 +1018,13 @@ endif
 	@# specific variable below if a target ever ships static-only.
 	@# The settings file is the literal list-of-pairs ghc-toolchain
 	@# emitted; insert before the closing `]`.
-	$(SED) -i -e 's/\]$$/,("target ships dynamic libraries","$(if $(STAGE3_$(1)_TARGET_SHIPS_DYN_LIBS),$(STAGE3_$(1)_TARGET_SHIPS_DYN_LIBS),YES)")]/' $$(TARGET_DIR)/lib/settings
+	@# Note: `$$$$` (four dollars) collapses through two layers of
+	@# Make expansion (define-template + recipe-time) to a literal `$`
+	@# at shell time, which is what sed needs as the end-of-line anchor.
+	@# `$$` would collapse to `$` after template expansion, then Make
+	@# would interpret the lone `$/` in the recipe as a variable lookup
+	@# and drop the anchor entirely (verified: PR #187 first attempt).
+	$(SED) -i -e 's/\]$$$$/,("target ships dynamic libraries","$(if $(STAGE3_$(1)_TARGET_SHIPS_DYN_LIBS),$(STAGE3_$(1)_TARGET_SHIPS_DYN_LIBS),YES)")]/' $$(TARGET_DIR)/lib/settings
 
 	$$(DIST_DIR)/bin/$(1)-ghc --info
 
