@@ -203,6 +203,16 @@ initSettings top_dir = do
   targetShipsDynLibs <- either (const $ pure True) pure $
     getRawBooleanSetting settingsFile mySettings "target ships dynamic libraries"
 
+  -- Profiling-way analogues of the two dyn dials above. Drive
+  -- `GHC Profiled` the same way (sTargetIsProfiled && sTargetShipsProfLibs).
+  -- Defaults to True for backward compatibility with bindists that
+  -- predate the keys — matches the historical hostIsProfiled
+  -- behaviour when GHC was prof-built.
+  targetIsProfiled <- either (const $ pure True) pure $
+    getRawBooleanSetting settingsFile mySettings "target is profiled"
+  targetShipsProfLibs <- either (const $ pure True) pure $
+    getRawBooleanSetting settingsFile mySettings "target ships profiling libraries"
+
   baseUnitId <- getSetting_raw "base unit-id"
 
   return $ Settings
@@ -287,6 +297,8 @@ initSettings top_dir = do
       , platformMisc_targetRTSLinkerOnlySupportsSharedLibs = targetRTSLinkerOnlySupportsSharedLibs
       , platformMisc_targetIsDynamic = targetIsDynamic
       , platformMisc_targetShipsDynLibs = targetShipsDynLibs
+      , platformMisc_targetIsProfiled = targetIsProfiled
+      , platformMisc_targetShipsProfLibs = targetShipsProfLibs
       }
 
     , sRawSettings    = settingsList

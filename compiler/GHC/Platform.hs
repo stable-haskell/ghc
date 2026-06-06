@@ -308,6 +308,16 @@ data PlatformMisc = PlatformMisc
     -- 'platformMisc_targetIsDynamic' so a target can be dynamic-
     -- capable but not currently ship dyn artifacts (or vice versa).
   , platformMisc_targetShipsDynLibs   :: Bool
+    -- | Profiling-way analogue of 'platformMisc_targetIsDynamic'.
+    -- Per-target settings key @"target is profiled"@. Drives
+    -- @ghc --info@'s @GHC Profiled@ — cabal-install reads that to
+    -- decide whether to enable @library-profiling@.
+  , platformMisc_targetIsProfiled     :: Bool
+    -- | Profiling-way analogue of 'platformMisc_targetShipsDynLibs'.
+    -- Per-target settings key @"target ships profiling libraries"@.
+    -- Combined with 'platformMisc_targetIsProfiled' for the
+    -- @GHC Profiled@ report.
+  , platformMisc_targetShipsProfLibs  :: Bool
   }
 
 platformSOName :: Platform -> FilePath -> FilePath
