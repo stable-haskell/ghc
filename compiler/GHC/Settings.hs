@@ -67,6 +67,7 @@ module GHC.Settings
   , sGhcWithInterpreter
   , sLibFFI
   , sTargetRTSLinkerOnlySupportsSharedLibs
+  , sTargetIsDynamic
   , sTargetShipsDynLibs
   ) where
 
@@ -316,10 +317,15 @@ sLibFFI = platformMisc_libFFI . sPlatformMisc
 sTargetRTSLinkerOnlySupportsSharedLibs :: Settings -> Bool
 sTargetRTSLinkerOnlySupportsSharedLibs = platformMisc_targetRTSLinkerOnlySupportsSharedLibs . sPlatformMisc
 
+-- | Is the GHC for this target capable of producing dynamic output?
+-- Read from the per-target settings file key @"target is dynamic"@.
+-- Combined with 'sTargetShipsDynLibs' to drive @ghc --info@'s
+-- @GHC Dynamic@ value — the target's settings file completely
+-- controls that, no host-RTS dependency.
+sTargetIsDynamic :: Settings -> Bool
+sTargetIsDynamic = platformMisc_targetIsDynamic . sPlatformMisc
+
 -- | Does this target's installed library tree ship .dyn_hi / .so files?
--- Read from the per-target settings file key
--- @"target ships dynamic libraries"@. Drives @ghc --info@'s @GHC Dynamic@
--- value, which cabal-install reads to decide whether to enable
--- @library-dynamic@ by default. See PlatformMisc note for the rationale.
+-- Per-target settings key @"target ships dynamic libraries"@.
 sTargetShipsDynLibs :: Settings -> Bool
 sTargetShipsDynLibs = platformMisc_targetShipsDynLibs . sPlatformMisc

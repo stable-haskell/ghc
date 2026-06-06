@@ -185,17 +185,21 @@ initSettings top_dir = do
   ghcWithInterpreter <- getBooleanSetting "Use interpreter"
   useLibFFI <- getBooleanSetting "Use LibFFI"
 
-  -- Whether this target's installed library tree actually ships
-  -- .dyn_hi / .so files. cabal-install reads `GHC Dynamic` to
-  -- decide whether to enable library-dynamic by default; on a
-  -- multi-target bindist this needs to be per-target because the
-  -- shared stage2 GHC binary's RTS-baked-in dynamic-ness is fixed
-  -- but different targets may genuinely not ship dyn artifacts.
-  --
-  -- Default to True for backward compatibility with older bindist
-  -- settings files that predate this key (matches the historical
-  -- behaviour of always reporting GHC Dynamic when the binary is
-  -- dyn-built).
+  -- Per-target dial #1: is the GHC for THIS target capable of
+  -- producing dynamic output (i.e. honouring -dynamic /
+  -- -dynamic-too)? On a multi-target bindist with one shared stage2
+  -- GHC binary, this can't be derived from the binary's compile-
+  -- time `hostIsDynamic`. Default True for backward compatibility
+  -- with older bindist settings files that predate the key.
+  targetIsDynamic <- either (const $ pure True) pure $
+    getRawBooleanSetting settingsFile mySettings "target is dynamic"
+
+  -- Per-target dial #2: does this target's installed lib tree
+  -- actually ship .dyn_hi / .so files? Independent of
+  -- `target is dynamic` so a dynamic-capable target can still
+  -- truthfully say it doesn't ship artifacts (e.g. a slimmed
+  -- bindist). cabal-install combines both via GHC Dynamic to
+  -- decide whether to enable library-dynamic by default.
   targetShipsDynLibs <- either (const $ pure True) pure $
     getRawBooleanSetting settingsFile mySettings "target ships dynamic libraries"
 
@@ -281,6 +285,7 @@ initSettings top_dir = do
       , platformMisc_libFFI = useLibFFI
       , platformMisc_llvmTarget = llvmTarget
       , platformMisc_targetRTSLinkerOnlySupportsSharedLibs = targetRTSLinkerOnlySupportsSharedLibs
+      , platformMisc_targetIsDynamic = targetIsDynamic
       , platformMisc_targetShipsDynLibs = targetShipsDynLibs
       }
 

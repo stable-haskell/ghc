@@ -291,16 +291,22 @@ data PlatformMisc = PlatformMisc
   , platformMisc_libFFI               :: Bool
   , platformMisc_llvmTarget           :: String
   , platformMisc_targetRTSLinkerOnlySupportsSharedLibs :: Bool
+    -- | Is the GHC for this target capable of producing dynamic
+    -- output (i.e. can it honour @-dynamic@ / @-dynamic-too@)?
+    -- Per-target settings key @"target is dynamic"@ in
+    -- @lib/targets/\<triple\>/lib/settings@. On a multi-target bindist
+    -- the shared stage2 GHC binary's RTS-baked-in dynamic-ness is
+    -- not a per-target proxy — different targets in one binary may
+    -- need to disagree (e.g. a JS target whose iserv runs vanilla
+    -- and whose lib tree has no dyn artifacts). Combined with
+    -- 'platformMisc_targetShipsDynLibs' to drive @ghc --info@'s
+    -- @GHC Dynamic@ value, which cabal-install reads.
+  , platformMisc_targetIsDynamic      :: Bool
     -- | Does the target's installed library tree ship @.dyn_hi@ /
-    -- @.so@ files? Set per-target by the bindist build (a hand-
-    -- editable @lib/targets/\<triple\>/lib/settings@ key —
-    -- @"target ships dynamic libraries"@). cabal-install reads
-    -- @ghc --info@'s @GHC Dynamic@ to decide whether to enable
-    -- @library-dynamic@ by default; on a multi-target bindist the
-    -- one stage2 GHC binary's RTS-baked-in dynamic-ness isn't a
-    -- good per-target proxy, since different targets may genuinely
-    -- not ship @.dyn_hi@ (e.g. a slimmed JS bindist whose iserv
-    -- only loads vanilla code).
+    -- @.so@ files? Per-target settings key
+    -- @"target ships dynamic libraries"@. Set independently of
+    -- 'platformMisc_targetIsDynamic' so a target can be dynamic-
+    -- capable but not currently ship dyn artifacts (or vice versa).
   , platformMisc_targetShipsDynLibs   :: Bool
   }
 

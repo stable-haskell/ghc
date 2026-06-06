@@ -132,6 +132,7 @@ module GHC.Driver.Session (
         sGhcWithInterpreter,
         sLibFFI,
         sTargetRTSLinkerOnlySupportsSharedLibs,
+        sTargetIsDynamic,
         sTargetShipsDynLibs,
         GhcNameVersion(..),
         FileSettings(..),
@@ -3570,17 +3571,19 @@ compilerInfo dflags
        ("Uses package keys",           "YES"),
        -- Whether or not we support the @-this-unit-id@ flag
        ("Uses unit IDs",               "YES"),
-       -- Whether or not GHC was compiled using -dynamic AND this
-       -- target's installed library tree actually ships .dyn_hi / .so
-       -- files. cabal-install reads this to decide whether to enable
-       -- @library-dynamic@ by default; on a multi-target bindist the
-       -- shared stage2 GHC binary's RTS-baked-in @hostIsDynamic@ is
-       -- not a good per-target proxy. The @sTargetShipsDynLibs@ dial
-       -- comes from the per-target settings file key
-       -- @"target ships dynamic libraries"@ (defaults to True for
-       -- backward compatibility with older bindists), so different
-       -- targets in one bindist can correctly disagree.
-       ("GHC Dynamic",                 showBool (hostIsDynamic && sTargetShipsDynLibs (settings dflags))),
+       -- Reported as YES iff *both* per-target settings dials say so:
+       --   `target is dynamic`               — the GHC for this target
+       --                                       can produce dynamic output
+       --   `target ships dynamic libraries`  — the lib tree actually has
+       --                                       .dyn_hi / .so artifacts
+       -- cabal-install reads this to decide whether to enable
+       -- @library-dynamic@ by default. The target's per-target settings
+       -- file completely controls this value — no host-RTS dependency,
+       -- so on a multi-target bindist with one shared stage2 GHC binary
+       -- different targets can correctly disagree. Both keys default to
+       -- True if absent (matches pre-this-change behaviour).
+       ("GHC Dynamic",                 showBool (sTargetIsDynamic (settings dflags)
+                                              && sTargetShipsDynLibs (settings dflags))),
        -- Whether or not GHC was compiled using -prof
        ("GHC Profiled",                showBool hostIsProfiled),
        ("Debug on",                    showBool debugIsOn),

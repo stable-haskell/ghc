@@ -923,12 +923,15 @@ STAGE3_javascript-unknown-ghcjs_GHC_TOOLCHAIN_ARGS = $(GHC_TOOLCHAIN_ARGS) --dis
 # via `shared: True` fails for JS with `wasm-ld: error: unknown
 # argument: -h`, and a `ghc-options: -dynamic-too` workaround leaks
 # to BUILD-side native compiles via cabal's dual-compiler split —
-# see PR #187 retro). Tell end-user cabal-install via the
-# `target ships dynamic libraries` settings key that it should NOT
-# enable `library-dynamic` by default on the JS target — otherwise
-# TH-using packages (miso, aeson, lens, …) fail looking for missing
-# .dyn_hi. Drives compiler/GHC/Driver/Session.hs:3573's GHC Dynamic.
-STAGE3_javascript-unknown-ghcjs_TARGET_SHIPS_DYN_LIBS = NO
+# see PR #187 retro). And the JS-target iserv runs vanilla — there's
+# no dlopen in the JS host runtime, so the target can't meaningfully
+# do dynamic linking either. Both per-target dials NO → `ghc --info`
+# reports `GHC Dynamic: NO` for the JS target → end-user cabal-install
+# stops auto-enabling library-dynamic → TH-using packages (miso,
+# aeson, lens, …) build without demanding missing .dyn_hi. Drives
+# compiler/GHC/Driver/Session.hs's GHC Dynamic computation.
+STAGE3_javascript-unknown-ghcjs_TARGET_IS_DYNAMIC      = NO
+STAGE3_javascript-unknown-ghcjs_TARGET_SHIPS_DYN_LIBS  = NO
 
 STAGE3_wasm32-unknown-wasi_CC                 = wasm32-unknown-wasi-clang
 STAGE3_wasm32-unknown-wasi_CC_OPTS            = -fno-strict-aliasing -Wno-error=int-conversion -Oz -msimd128 -mnontrapping-fptoint -msign-ext -mbulk-memory -mmutable-globals -mmultivalue -mreference-types
@@ -1017,24 +1020,33 @@ ifeq ($(DYNAMIC),1)
 	$(SED) -i -e 's/"RTS ways","/"RTS ways","dyn /' $$(TARGET_DIR)/lib/settings
 endif
 
-	@# Inject the per-target "target ships dynamic libraries" key.
-	@# Drives `ghc --info`'s `GHC Dynamic` — cabal-install reads that
-	@# to decide whether to enable library-dynamic by default. On a
-	@# multi-target bindist the shared stage2 GHC binary's RTS-baked-
-	@# in dynamic-ness isn't a good per-target proxy. Default YES for
-	@# every target we currently build (wasm Path C ships .dyn_hi/.so,
-	@# JS Path C ships .dyn_hi via -dynamic-too in cabal.project.stage3.
-	@# settings.in, native inherits from host). Override in a target-
-	@# specific variable below if a target ever ships static-only.
-	@# The settings file is the literal list-of-pairs ghc-toolchain
-	@# emitted; insert before the closing `]`.
+	@# Inject the two per-target dials that drive `ghc --info`'s
+	@# `GHC Dynamic` value (cabal-install reads this to decide whether
+	@# to enable library-dynamic by default):
+	@#
+	@#   target is dynamic              — is the GHC for this target
+	@#                                    capable of producing dynamic
+	@#                                    output (-dynamic / -dynamic-too)?
+	@#   target ships dynamic libraries — does the lib tree actually
+	@#                                    ship .dyn_hi / .so artifacts?
+	@#
+	@# Together: `GHC Dynamic` = first && second. Per-target settings
+	@# file completely controls this — the shared stage2 GHC binary's
+	@# RTS-baked-in dynamic-ness is no longer consulted. Two dials
+	@# instead of one so a target can be dynamic-capable but not
+	@# currently ship dyn artifacts (or vice versa) — keeps the axes
+	@# orthogonal for slimming experiments.
+	@#
+	@# Defaults YES; override via STAGE3_<triple>_TARGET_IS_DYNAMIC
+	@# or STAGE3_<triple>_TARGET_SHIPS_DYN_LIBS Make variables.
+	@#
 	@# Note: `$$$$` (four dollars) collapses through two layers of
 	@# Make expansion (define-template + recipe-time) to a literal `$`
 	@# at shell time, which is what sed needs as the end-of-line anchor.
 	@# `$$` would collapse to `$` after template expansion, then Make
 	@# would interpret the lone `$/` in the recipe as a variable lookup
 	@# and drop the anchor entirely (verified: PR #187 first attempt).
-	$(SED) -i -e 's/\]$$$$/,("target ships dynamic libraries","$(if $(STAGE3_$(1)_TARGET_SHIPS_DYN_LIBS),$(STAGE3_$(1)_TARGET_SHIPS_DYN_LIBS),YES)")]/' $$(TARGET_DIR)/lib/settings
+	$(SED) -i -e 's/\]$$$$/,("target is dynamic","$(if $(STAGE3_$(1)_TARGET_IS_DYNAMIC),$(STAGE3_$(1)_TARGET_IS_DYNAMIC),YES)"),("target ships dynamic libraries","$(if $(STAGE3_$(1)_TARGET_SHIPS_DYN_LIBS),$(STAGE3_$(1)_TARGET_SHIPS_DYN_LIBS),YES)")]/' $$(TARGET_DIR)/lib/settings
 
 	$$(DIST_DIR)/bin/$(1)-ghc --info
 
