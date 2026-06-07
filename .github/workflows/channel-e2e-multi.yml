@@ -8,12 +8,15 @@
 #   4. ghcup set ghc multi-9.14.0.stable.X
 #   5. compile + run a hello-world for each of native / wasm / JS — proves
 #      argv[0] dispatch is correctly wired by the bindist install
+#   6. build the miso-counter template via the wasm frontend — 50+ TH-heavy
+#      deps (aeson / lens / jsaddle / jsaddle-wasm / miso); catches
+#      TH-at-scale regressions in dyld + JSFFI + cabal-dual-compiler that
+#      hello-worlds wouldn't notice
 #
-# Distinct from `Channel e2e (WASM)` which tests the legacy single-target
-# wasm channel (ghcup-wasm.yaml). The multi-target channel
-# (ghcup-multi-target-0.1.0.yaml) ships a different bindist layout with
-# all three target frontends in one tarball, and merits its own test
-# surface so failures attribute clearly.
+# This workflow is the sole end-to-end test surface — the legacy
+# `Channel e2e (WASM)` workflow (and the `ghcup-wasm.yaml` single-target
+# channel it covered) is retired: the multi-target bindist supersedes it
+# and we'd rather not maintain two near-identical CI surfaces.
 name: Channel e2e (MULTI)
 
 on:
@@ -45,7 +48,11 @@ jobs:
   install-and-multi:
     name: e2e MULTI / ${{ matrix.plat }}
     runs-on: ${{ fromJSON(matrix.runner) }}
-    timeout-minutes: 45
+    # 60min: the miso-counter step adds 5-10 min on x86_64-linux + macOS,
+    # and aarch64-linux is meaningfully slower (ubuntu-24.04-arm runner
+    # historically took ~30 min through the full aeson / lens / jsaddle /
+    # miso TH chain). Hello-worlds alone fit in 15 min; miso eats the rest.
+    timeout-minutes: 60
     continue-on-error: ${{ matrix.allow-failure == true }}
     strategy:
       fail-fast: false
@@ -62,7 +69,10 @@ jobs:
 
     steps:
       # ---------------------------------------------------------------------
-      # 1. Fresh ghcup (mirrors the Channel e2e (WASM) workflow).
+      # 1. Fresh ghcup install. Wipe pre-baked locations and run the
+      #    official installer the same way an end-user would — proves the
+      #    install-time documentation we publish actually works on the
+      #    standard runner images.
       # ---------------------------------------------------------------------
       - name: Install ghcup fresh
         run: |
@@ -257,10 +267,82 @@ jobs:
           grep -q 'Hello from the WASM reactor!' /tmp/multi-run.out
 
       # ---------------------------------------------------------------------
+      # 7b. miso-counter — full TH-heavy real-app build via the wasm
+      #     frontend.  50+ transitive deps including aeson, lens, jsaddle,
+      #     jsaddle-wasm, miso.  This is the load-bearing end-to-end test:
+      #     hello-worlds wouldn't notice TH-at-scale regressions in dyld /
+      #     JSFFI / the cabal-dual-compiler split.  Skip `run-web` (needs a
+      #     browser); verifying the .wasm artifact exists + parses as a
+      #     valid WebAssembly module is sufficient to catch link-level
+      #     regressions.
+      #
+      #     A background diagnostic monitor logs process + memory state
+      #     every 60 s during the build; this was added after the
+      #     aarch64-linux miso hang (stable.12 first e2e attempt, run
+      #     26700668292: jsaddle-wasm completed then 47 min of silence) so
+      #     a future hang surfaces WHICH process is stuck and HOW (sleeping
+      #     vs spinning).
+      # ---------------------------------------------------------------------
+      - name: multi — miso-counter via multi-target wasm (strict)
+        if: ${{ !cancelled() && steps.multi_install.outputs.installed == 'true' }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/multi-miso && cd /tmp/multi-miso
+          curl -fL -o miso.tar.gz \
+            https://stable-haskell.github.io/ghc/examples/stable-haskell-wasm-miso-counter.tar.gz
+          tar xf miso.tar.gz
+          cd stable-haskell-wasm-miso-counter
+
+          # Diagnostic monitor — see comment above. Goes down with the
+          # step via EXIT trap; SIGTERM from GitHub on cancellation also
+          # propagates via default trap behaviour.
+          (
+            while true; do
+              echo "::group::diag $(date +%H:%M:%S)"
+              echo "--- ps (wasm/ghc/cabal/node) ---"
+              if [ "$(uname -s)" = "Darwin" ]; then
+                ps -A -o pid,ppid,%cpu,%mem,rss,etime,stat,comm,command 2>/dev/null \
+                  | head -1
+                ps -A -o pid,ppid,%cpu,%mem,rss,etime,stat,comm,command 2>/dev/null \
+                  | grep -E "(ghc|cabal|node|wasm32|iserv)" | grep -v grep || true
+                echo "--- memory ---"
+                vm_stat | head -10
+              else
+                ps -e -o pid,ppid,%cpu,%mem,rss,etime,stat,comm,command 2>/dev/null \
+                  | head -1
+                ps -e -o pid,ppid,%cpu,%mem,rss,etime,stat,comm,command 2>/dev/null \
+                  | grep -E "(ghc|cabal|node|wasm32|iserv)" | grep -v grep || true
+                echo "--- memory ---"
+                free -h 2>/dev/null
+              fi
+              echo "::endgroup::"
+              sleep 60
+            done
+          ) &
+          MONITOR_PID=$!
+          trap 'kill $MONITOR_PID 2>/dev/null || true' EXIT INT TERM
+
+          # Override the template's pinned default; MULTI_VER ships the
+          # wasm32-unknown-wasi-ghc binary under $HOME/.ghcup/ghc/$MULTI_VER/bin/.
+          make WASM_VERSION="$MULTI_VER" build
+          wasm_file=$(find dist-newstyle -name 'myapp.wasm' -type f | head -1)
+          test -n "$wasm_file" || { echo "::error::myapp.wasm not produced"; exit 1; }
+          ls -lh "$wasm_file"
+          file "$wasm_file" | tee /tmp/file_out
+          grep -q 'WebAssembly' /tmp/file_out \
+            || { echo "::error::artifact is not a wasm binary"; exit 1; }
+
+      # ---------------------------------------------------------------------
       # 8. JS hello — proves `javascript-unknown-ghcjs-ghc` frontend
       #    produces Node-runnable .js. emscripten is installed here on demand
       #    rather than as a global setup step because only this one test
       #    needs it.
+      #
+      #    NOTE: there is no JS-target miso-counter test (yet). The wasm
+      #    miso template's Makefile is wasm-specific and the JS frontend
+      #    would need a parallel template (or a target-agnostic
+      #    cabal.project we don't yet ship).  TH-heavy JS-target coverage
+      #    is a follow-up once a template exists.
       # ---------------------------------------------------------------------
       - name: multi — JS hello via multi-target (strict)
         if: ${{ !cancelled() && steps.multi_install.outputs.installed == 'true' }}
