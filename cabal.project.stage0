@@ -1,3 +1,15 @@
+-- Cabal pin: stable-haskell/Cabal branch `feat/rpath-relativize-absolute`
+-- (= stable-haskell/Cabal PR #368). Patches Link.hs to unconditionally
+-- relativize absolute rpaths via `shortRelativePath` against the
+-- artifact's bindir/libdir, fixing the darwin LC_RPATH leak (task #51)
+-- without flipping cabal's `relocatable: True` flag — the latter also
+-- emits `library-dirs: ${pkgroot}/...` which our post-stage2 bindist
+-- path rewriting can't cope with. See lode/rpath-leak-investigation.md.
+--
+-- stage0/1/2 share this pin (host-side Cabal). stage3 deliberately stays
+-- on the older proven SHA `44817477...` — the cross-build doesn't hit
+-- the macOS rpath issue and we don't want to test the rpath patch on
+-- the wasm path.
 source-repository-package
   type: git
   location: https://github.com/stable-haskell/Cabal.git

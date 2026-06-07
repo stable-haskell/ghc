@@ -86,6 +86,8 @@ packages:
 
 -- wip/angerman/compile-less (cross-compilation + local store + recompilation avoidance)
 source-repository-package
+  -- See cabal.project.stage0 for what this Cabal SHA pins (rpath patch
+  -- for darwin LC_RPATH leak; stage0/1/2 share the same host-side Cabal).
   type: git
   location: https://github.com/stable-haskell/Cabal.git
   tag: 6a5ce8161ca76356a9ea43f2e9e09483e6f5849d
