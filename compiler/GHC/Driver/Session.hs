@@ -132,6 +132,10 @@ module GHC.Driver.Session (
         sGhcWithInterpreter,
         sLibFFI,
         sTargetRTSLinkerOnlySupportsSharedLibs,
+        sTargetIsDynamic,
+        sTargetShipsDynLibs,
+        sTargetIsProfiled,
+        sTargetShipsProfLibs,
         GhcNameVersion(..),
         FileSettings(..),
         PlatformMisc(..),
@@ -3548,8 +3552,16 @@ compilerInfo dflags
        ("Have native code generator",  showBool $ platformNcgSupported platform),
        ("target has RTS linker",       showBool $ platformHasRTSLinker platform),
        ("Target default backend",      show     $ platformDefaultBackend platform),
-       -- Whether or not we support @-dynamic-too@
-       ("Support dynamic-too",         showBool $ not isWindows),
+       -- Whether or not we support @-dynamic-too@ for this target.
+       -- Historically `not isWindows` (Windows tooling couldn't do
+       -- it). Now also gated on the per-target `sTargetIsDynamic`
+       -- dial — if the target isn't dynamic-capable, -dynamic-too
+       -- is meaningless. Keep the Windows guard as defence in depth
+       -- for pre-this-patch bindists on Windows that lack the key
+       -- and so default sTargetIsDynamic=True (the AND would
+       -- otherwise regress them).
+       ("Support dynamic-too",         showBool $ not isWindows
+                                              && sTargetIsDynamic (settings dflags)),
        -- Whether or not we support the @-j@ flag with @--make@.
        ("Support parallel --make",     "YES"),
        -- Whether or not we support "Foo from foo-0.1-XXX:Foo" syntax in
@@ -3569,10 +3581,27 @@ compilerInfo dflags
        ("Uses package keys",           "YES"),
        -- Whether or not we support the @-this-unit-id@ flag
        ("Uses unit IDs",               "YES"),
-       -- Whether or not GHC was compiled using -dynamic
-       ("GHC Dynamic",                 showBool hostIsDynamic),
-       -- Whether or not GHC was compiled using -prof
-       ("GHC Profiled",                showBool hostIsProfiled),
+       -- Reported as YES iff *both* per-target settings dials say so:
+       --   `target is dynamic`               — the GHC for this target
+       --                                       can produce dynamic output
+       --   `target ships dynamic libraries`  — the lib tree actually has
+       --                                       .dyn_hi / .so artifacts
+       -- cabal-install reads this to decide whether to enable
+       -- @library-dynamic@ by default. The target's per-target settings
+       -- file completely controls this value — no host-RTS dependency,
+       -- so on a multi-target bindist with one shared stage2 GHC binary
+       -- different targets can correctly disagree. Both keys default to
+       -- True if absent (matches pre-this-change behaviour).
+       ("GHC Dynamic",                 showBool (sTargetIsDynamic (settings dflags)
+                                              && sTargetShipsDynLibs (settings dflags))),
+       -- Profiling-way analogue of `GHC Dynamic`. Per-target dials
+       -- via `target is profiled` + `target ships profiling libraries`
+       -- settings keys. Drops the historical `hostIsProfiled` RTS-
+       -- baked-in for the same reason the dyn pair did: on a multi-
+       -- target bindist the shared stage2 GHC binary's prof-ness is
+       -- fixed but the lib trees can disagree per target.
+       ("GHC Profiled",                showBool (sTargetIsProfiled (settings dflags)
+                                              && sTargetShipsProfLibs (settings dflags))),
        ("Debug on",                    showBool debugIsOn),
        ("LibDir",                      topDir dflags),
        -- This is always an absolute path, unlike "Relative Global Package DB" which is
