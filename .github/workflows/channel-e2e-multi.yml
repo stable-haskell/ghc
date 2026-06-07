@@ -287,6 +287,16 @@ jobs:
         if: ${{ !cancelled() && steps.multi_install.outputs.installed == 'true' }}
         run: |
           set -euo pipefail
+          # Make sure the package index is populated.  Without this the
+          # solver fails resolving jsaddle-wasm (and any other
+          # not-already-source-repo-pinned dep) with
+          #   Could not resolve dependencies:
+          #     [__1] unknown package: host:jsaddle-wasm (dependency of host:myapp)
+          # — which is what bit the first e2e-MULTI run of this step (see
+          # run 27091838526). The hello steps above don't touch Hackage
+          # so they don't reveal the missing index.
+          cabal update
+
           mkdir -p /tmp/multi-miso && cd /tmp/multi-miso
           curl -fL -o miso.tar.gz \
             https://stable-haskell.github.io/ghc/examples/stable-haskell-wasm-miso-counter.tar.gz
