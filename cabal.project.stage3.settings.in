@@ -28,10 +28,12 @@
 --
 -- The package / constraint bodies below come from the same autoconf
 -- accumulation variables stage2.settings.in uses (APPEND_PKG_FIELD /
--- APPEND_CONSTRAINT in configure.ac), via the 4-space-indented
--- @ALL_PACKAGES_STAGE3@ / @CONSTRAINTS_STAGE3@ variants — so passing
--- --enable-dynamic to configure flips stage2 and stage3 (wasm) together,
--- without duplicating the package-fields list.
+-- APPEND_CONSTRAINT in configure.ac), via 4-space-indented variants
+-- (see configure.ac) — so passing --enable-dynamic to configure flips
+-- stage2 and stage3 (wasm) together, without duplicating the
+-- package-fields list.  Do not name the substitution tokens literally
+-- in this comment: autoconf would substitute them here too and inject
+-- multi-line content mid-comment, producing invalid cabal syntax.
 
 if arch(wasm32)
   package *
