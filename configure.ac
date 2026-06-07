@@ -69,7 +69,10 @@ AS_IF([test "x$enable_dynamic" = "xyes"], [
 STAGE3_EXTRA_PKG=""
 AC_SUBST([STAGE3_EXTRA_PKG])
 
-# Indent with two spaces for substitution blocks (uniform handling)
+# Indent with two spaces for the stage2 substitution blocks: in
+# cabal.project.stage2.settings.in the @ALL_PACKAGES@ / @CONSTRAINTS@
+# tokens sit one level deep (under `package *` / `constraints:` at
+# column 0).
 ALL_PACKAGES=`printf '%b' "$ALL_PACKAGES"`
 CONSTRAINTS=`printf '%b' "$CONSTRAINTS"`
 ALL_PACKAGES_INDENTED=`printf '%s' "$ALL_PACKAGES" | sed 's/^/  /'`
@@ -79,6 +82,16 @@ AS_IF([test "x$CONSTRAINTS" = "x"], [CONSTRAINTS="  -- (none)"], [CONSTRAINTS="$
 
 AC_SUBST([ALL_PACKAGES])
 AC_SUBST([CONSTRAINTS])
+
+# Stage3 substitution blocks live INSIDE `if arch(wasm32)` (since
+# shared:True / rts +dynamic are wasm-only there), so they need an
+# extra level of indent (4 spaces total) to nest correctly under
+# `package *` / `constraints:` at column 2.  Use the same source data
+# as stage2 — just re-indent.
+ALL_PACKAGES_STAGE3=`printf '%s' "$ALL_PACKAGES" | sed 's/^/  /'`
+CONSTRAINTS_STAGE3=`printf '%s' "$CONSTRAINTS" | sed 's/^/  /'`
+AC_SUBST([ALL_PACKAGES_STAGE3])
+AC_SUBST([CONSTRAINTS_STAGE3])
 
 # --- Define Programs ---
 # We don't need to check for CC, MAKE_SET, and others for now, we only want substitution.

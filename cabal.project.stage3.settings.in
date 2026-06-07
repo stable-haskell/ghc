@@ -26,17 +26,15 @@
 --     → no shared, no -dynamic-too codepath
 --     → builds against vanilla native base (no need for native .dyn_hi)
 --
--- Hardcoded — no per-package autoconf substitution. DYNAMIC=1/0 has
--- no effect on stage3: the wasm target ALWAYS needs shared:True
--- regardless of how stage2 was built; the conditional handles JS
--- and native build-side exclusion. The `rts +dynamic` constraint
--- lives inside the if-block too, so it's wasm-only by construction
--- and matches stage2's APPEND_CONSTRAINT(rts +dynamic) semantics
--- exactly when --enable-dynamic flows through.
+-- The package / constraint bodies below come from the same autoconf
+-- accumulation variables stage2.settings.in uses (APPEND_PKG_FIELD /
+-- APPEND_CONSTRAINT in configure.ac), via the 4-space-indented
+-- @ALL_PACKAGES_STAGE3@ / @CONSTRAINTS_STAGE3@ variants — so passing
+-- --enable-dynamic to configure flips stage2 and stage3 (wasm) together,
+-- without duplicating the package-fields list.
 
 if arch(wasm32)
   package *
-    shared: True
-    executable-dynamic: True
+@ALL_PACKAGES_STAGE3@@STAGE3_EXTRA_PKG@
   constraints:
-    rts +dynamic
+@CONSTRAINTS_STAGE3@
