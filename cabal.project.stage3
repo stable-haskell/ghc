@@ -71,14 +71,14 @@ packages:
   https://hackage.haskell.org/package/happy-lib-2.1.5/happy-lib-2.1.5.tar.gz
 
 source-repository-package
-  -- stage3 (cross-build) deliberately stays on the older proven SHA
-  -- `44817477...` instead of the rpath-patched `6a5ce816...` used by
-  -- stage0/1/2. The cross-build doesn't hit the macOS LC_RPATH leak,
-  -- and we don't want to take the rpath patch on the wasm path. See
-  -- cabal.project.stage0 for the rpath patch context.
+  -- See cabal.project.stage0 for what this Cabal SHA pins (rpath patch
+  -- for darwin LC_RPATH leak; all stages share the same host-side Cabal).
+  -- The rpath patch only touches host-linker codepaths (wasm-ld and the
+  -- JS backend don't use rpaths) so it's a no-op for stage3's cross
+  -- outputs, but unifying the pin avoids two-Cabal maintenance overhead.
   type: git
   location: https://github.com/stable-haskell/Cabal.git
-  tag: 44817477ff6d22de4bfa4307e061df58f319d3b6
+  tag: 6a5ce8161ca76356a9ea43f2e9e09483e6f5849d
   subdir: Cabal
           Cabal-syntax
 

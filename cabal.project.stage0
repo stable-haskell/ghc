@@ -6,10 +6,9 @@
 -- emits `library-dirs: ${pkgroot}/...` which our post-stage2 bindist
 -- path rewriting can't cope with. See lode/rpath-leak-investigation.md.
 --
--- stage0/1/2 share this pin (host-side Cabal). stage3 deliberately stays
--- on the older proven SHA `44817477...` — the cross-build doesn't hit
--- the macOS rpath issue and we don't want to test the rpath patch on
--- the wasm path.
+-- All stages (0/1/2/3) share this pin. The rpath patch only touches
+-- host-linker codepaths (wasm-ld/JS don't use rpaths), so it's a no-op
+-- for stage3's cross outputs but unifying avoids carrying two Cabals.
 source-repository-package
   type: git
   location: https://github.com/stable-haskell/Cabal.git
