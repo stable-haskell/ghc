@@ -7,10 +7,14 @@ on:
       - synchronize
   push:
     branches: [stable-ghc-9.14, stable-master]
-    # Tag pushes matching wasm32-wasi-* trigger the Cross: WASM jobs to
-    # additionally upload their bindist tarballs to the matching GitHub
-    # Release, populating the stable-haskell ghcup channel.
-    tags: [wasm32-wasi-*]
+    # Tag pushes matching multi-* trigger the Cross: MULTI job to
+    # additionally upload its multi-target bindist tarball to the
+    # matching GitHub Release, populating the stable-haskell
+    # ghcup-multi-target-0.1.0.yaml channel. The single multi-target
+    # bindist replaces the previously-separate wasm32-wasi-* and
+    # JS standalone channels — both targets ship via multi-* now.
+    tags:
+      - 'multi-*'
 
   workflow_dispatch:
 
@@ -556,163 +560,33 @@ jobs:
         fi
 
   # ---------------------------------------------------------------------------
-  # Cross: JS backend (aarch64-darwin, uses static dist)
+  # Cross: MULTI — the only Cross job. Builds the multi-target bindist
+  # combining native + wasm32-unknown-wasi + javascript-unknown-ghcjs in
+  # one tarball (argv[0] dispatched at runtime). Replaces the previously-
+  # separate Cross: WASM + Cross: JS jobs — those produced standalone
+  # bindists that we no longer ship; the multi-target bindist is the
+  # single end-user-facing artifact and covers both targets.
+  #
+  # Per-host: dynamic1 stage2 download, devx shell, wasi-sdk + Node
+  # install, emscripten install, then `make stage3-wasm32-unknown-wasi
+  # stage3-javascript-unknown-ghcjs` + the combined `ghc-multi-target.
+  # tar.gz` Makefile rule. patchelf adjusts ELF interpreter + $ORIGIN
+  # rpath on the linux runners.
+  #
+  # `continue-on-error: true` — failures are informative but don't
+  # block the main pipeline.
   # ---------------------------------------------------------------------------
-  cross-js:
-    name: "Cross: JS / aarch64-darwin"
-    # Cross-builds only need the dist artifact from build. They run in parallel
-    # with tests — each VM is independent (separate nix daemon, separate disk).
-    needs: [build]
-    if: ${{ !cancelled() && contains(fromJSON('["success", "failure"]'), needs.build.result) }}
-    runs-on: [self-hosted, nix]
-    continue-on-error: true
-
-    env:
-      EMSDK_VERSION: "3.1.74"
-
-    steps:
-    - name: Clean workspace
-      run: |
-        echo "$HOME/.nix-profile/bin" >> "$GITHUB_PATH"
-        echo "/nix/var/nix/profiles/default/bin" >> "$GITHUB_PATH"
-        echo "/usr/local/bin" >> "$GITHUB_PATH"
-
-        echo "CABAL_DIR=$GITHUB_WORKSPACE/_build/cabal-dir" >> "$GITHUB_ENV"
-
-        echo "=== Disk usage before cleanup ==="
-        df -h / || true
-        df -h "$GITHUB_WORKSPACE" || true
-        rm -rf "$GITHUB_WORKSPACE"/* "$GITHUB_WORKSPACE"/.??* || true
-        rm -rf ~/.cabal/store ~/.cabal-devx/store ~/.cabal-devx/packages || true
-        sudo rm -f /usr/local/bin/devx 2>/dev/null || true
-        export PATH="/nix/var/nix/profiles/default/bin:$PATH"
-        nix-collect-garbage -d 2>/dev/null || true
-        nix-store --gc 2>/dev/null || true
-        echo "=== Disk usage after cleanup ==="
-        df -h / || true
-
-    - uses: actions/checkout@v4
-      with:
-        submodules: "recursive"
-        fetch-depth: 1
-
-    # Minimize source tree BEFORE devx import to give devx more headroom.
-    - name: Minimize source tree
-      run: |
-        GIT_COMMIT_ID=$(git rev-parse HEAD)
-        echo "GIT_COMMIT_ID=$GIT_COMMIT_ID" >> "$GITHUB_ENV"
-        echo "Captured GIT_COMMIT_ID=$GIT_COMMIT_ID"
-        rm -rf .git
-        find . -name .git -type d -exec rm -rf {} + 2>/dev/null || true
-        rm -rf testsuite docs || true
-        echo "=== Disk after minimize ==="
-        df -h / || true
-
-    - name: Ensure devx prerequisites
-      run: |
-        export PATH="$HOME/.nix-profile/bin:/nix/var/nix/profiles/default/bin:$PATH"
-        command -v zstd || nix-env -iA nixpkgs.zstd
-        sudo mkdir -p /usr/local/bin
-
-    - uses: input-output-hk/actions/devx@latest
-      with:
-        platform: aarch64-darwin
-        compiler-nix-name: 'ghc98'
-        minimal: true
-        ghc: true
-
-    - name: Download dist
-      uses: actions/download-artifact@v4
-      with:
-        name: aarch64-darwin-dynamic0-dist
-        path: _build/dist
-
-    - name: Set up stage2 from dist
-      run: |
-        chmod +x _build/dist/bin/*
-        mkdir -p _build/stage2/bin _build/stage2/lib
-        for exe in _build/dist/bin/*; do
-          ln -sf "$(pwd)/$exe" "_build/stage2/bin/$(basename $exe)"
-        done
-        if [[ -f _build/dist/lib/settings ]]; then
-          cp -rfp _build/dist/lib/settings _build/stage2/lib/
-        fi
-
-    - name: Update hackage
-      shell: devx {0}
-      run: |
-        set -eo pipefail
-        export CABAL_DIR="$GITHUB_WORKSPACE/_build/cabal-dir"
-        mkdir -p "$CABAL_DIR"
-        _build/dist/bin/cabal update
-
-    - name: Free disk for cross build
-      run: |
-        rm -rf "${CABAL_DIR:-~/.cabal-devx}/packages" "${CABAL_DIR:-~/.cabal-devx}/logs" "${CABAL_DIR:-~/.cabal-devx}/store" || true
-        rm -rf ~/.cabal-devx/packages ~/.cabal-devx/logs ~/.cabal-devx/store || true
-        rm -rf ~/.cabal/store || true
-        echo "=== Disk before emscripten install ==="
-        df -h / || true
-        df -h /Volumes/WorkSpace || true
-
-    - name: Install emscripten
-      shell: devx {0}
-      run: |
-        set -eux
-        export TMPDIR="$GITHUB_WORKSPACE/_build/tmp"
-        mkdir -p "$TMPDIR"
-        git clone --depth 1 --branch ${{ env.EMSDK_VERSION }} https://github.com/emscripten-core/emsdk.git
-        cd emsdk
-        ./emsdk install ${{ env.EMSDK_VERSION }}
-        ./emsdk activate ${{ env.EMSDK_VERSION }}
-
-    - name: Build JS cross libraries
-      shell: devx {0}
-      run: |
-        set -eux
-        export CABAL_DIR="$GITHUB_WORKSPACE/_build/cabal-dir"
-        export TMPDIR="$GITHUB_WORKSPACE/_build/tmp"
-        mkdir -p "$TMPDIR"
-        source emsdk/emsdk_env.sh
-        make DIST_BUILD=1 \
-             CABAL=$PWD/_build/dist/bin/cabal \
-             GHC_TOOLCHAIN_BIN=$PWD/_build/dist/bin/ghc-toolchain-bin \
-             DERIVE_CONSTANTS_BIN=$PWD/_build/dist/bin/deriveConstants \
-             GENAPPLY_BIN=$PWD/_build/dist/bin/genapply \
-             HAPPY_TEMPLATE_DIR=$PWD/_build/dist/share/happy-lib/data \
-             stage3-javascript-unknown-ghcjs
-
-    - name: Smoke test
-      shell: devx {0}
-      run: |
-        set -eo pipefail
-        source emsdk/emsdk_env.sh
-        echo 'main = putStrLn "Hello from JS backend"' > /tmp/hello.hs
-        # JS backend creates a .jsexe directory; the entry point is all.js
-        _build/dist/bin/javascript-unknown-ghcjs-ghc /tmp/hello.hs -o /tmp/hello
-        node /tmp/hello.jsexe/all.js
-
-    - name: Upload JS cross artifacts
-      uses: actions/upload-artifact@v4
-      if: ${{ !cancelled() }}
-      with:
-        name: aarch64-darwin-cross-js
-        retention-days: 1
-        path: _build/dist/lib/targets/javascript-unknown-ghcjs
-
-  # ---------------------------------------------------------------------------
-  # Cross: WASM backend — matrixed across all build hosts so each one
-  # produces a host-specific bindist tarball that can be shipped through
-  # the stable-haskell ghcup channel.
-  # ---------------------------------------------------------------------------
-  cross-wasm:
-    name: "Cross: WASM / ${{ matrix.plat }}"
-    # Cross-builds only need the dist artifact from build. They run in parallel
-    # with tests — each VM/runner is independent (separate nix daemon, etc.).
+  cross-multi:
+    name: "Cross: MULTI / ${{ matrix.plat }}"
     needs: [build]
     if: ${{ !cancelled() && contains(fromJSON('["success", "failure"]'), needs.build.result) }}
     runs-on: ${{ fromJSON(matrix.runner) }}
     continue-on-error: true
+
+    env:
+      # emsdk's git tag — used by the `Install emscripten` step's
+      # `git clone --branch ${{ env.EMSDK_VERSION }}`.
+      EMSDK_VERSION: "3.1.74"
 
     strategy:
       fail-fast: false
@@ -736,7 +610,7 @@ jobs:
         df -h "$GITHUB_WORKSPACE" || true
         rm -rf "$GITHUB_WORKSPACE"/* "$GITHUB_WORKSPACE"/.??* || true
         rm -rf ~/.cabal/store ~/.cabal-devx/store ~/.cabal-devx/packages || true
-        rm -rf ~/.ghc-wasm || true
+        rm -rf ~/.ghc-wasm ~/.emsdk || true
         sudo rm -f /usr/local/bin/devx 2>/dev/null || true
         export PATH="/nix/var/nix/profiles/default/bin:$PATH"
         nix-collect-garbage -d 2>/dev/null || true
@@ -749,16 +623,12 @@ jobs:
         submodules: "recursive"
         fetch-depth: 1
 
-    # Minimize source tree BEFORE devx import — same strategy as cross-js.
     - name: Minimize source tree
       run: |
         GIT_COMMIT_ID=$(git rev-parse HEAD)
         echo "GIT_COMMIT_ID=$GIT_COMMIT_ID" >> "$GITHUB_ENV"
-        echo "Captured GIT_COMMIT_ID=$GIT_COMMIT_ID"
-        rm -rf .git
+        rm -rf .git testsuite docs || true
         find . -name .git -type d -exec rm -rf {} + 2>/dev/null || true
-        rm -rf testsuite docs || true
-        echo "=== Disk after minimize ==="
         df -h / || true
 
     - name: Ensure devx prerequisites
@@ -777,17 +647,11 @@ jobs:
     - name: Download dist
       uses: actions/download-artifact@v4
       with:
-        # dynamic1 stage2 (with .dyn_hi for native base/filepath/process/etc.)
-        # is needed for two reasons:
-        #   1. stage3 build-side: when happy-lib / alex etc. compile with
-        #      shared:True (via DYNAMIC=1 settings), cabal asks this build
-        #      compiler for native Prelude.dyn_hi.
-        #   2. wasm bindist runtime: bin/wasm32-unknown-wasi-ghc is a
-        #      Makefile symlink to bin/ghc which `tar -czhf` dereferences;
-        #      the dereferenced binary is dyn-linked against libHS*.so
-        #      files from THIS stage2. The wasm tar rule (Makefile) also
-        #      copies lib/$(HOST_PLATFORM)/ from THIS stage2 alongside,
-        #      so the binary's @rpath resolves at end-user install time.
+        # dynamic1 stage2:
+        #   1. happy-lib / alex etc. need native Prelude.dyn_hi at build-side
+        #   2. the dyn-linked native binary becomes bin/ghc + bin/<triple>-ghc
+        #      in the multi-target bindist and needs lib/$(HOST_PLATFORM)
+        #      shipped alongside.
         name: ${{ matrix.plat }}-dynamic1-dist
         path: _build/dist
 
@@ -810,84 +674,66 @@ jobs:
         mkdir -p "$CABAL_DIR"
         _build/dist/bin/cabal update
 
-    - name: Free disk for cross build
+    - name: Free disk for cross builds
       run: |
         rm -rf "${CABAL_DIR:-~/.cabal-devx}/packages" "${CABAL_DIR:-~/.cabal-devx}/logs" "${CABAL_DIR:-~/.cabal-devx}/store" || true
-        rm -rf ~/.cabal-devx/packages ~/.cabal-devx/logs ~/.cabal-devx/store || true
         rm -rf ~/.cabal/store || true
-        echo "=== Disk before wasi-sdk install ==="
         df -h / || true
-        df -h /Volumes/WorkSpace || true
 
-    - name: Install wasi-sdk
+    # Install wasi-sdk (wasm-target C toolchain) + Node 22 + wasmtime, same
+    # logic since this job builds the wasm half of the
+    # multi-target bindist.
+    - name: Install wasi-sdk + Node 22
       shell: devx {0}
       run: |
         set -eux
         export TMPDIR="$GITHUB_WORKSPACE/_build/tmp"
         mkdir -p "$TMPDIR"
-        # ghc-wasm-meta's bootstrap.sh needs jq + unzip; the smoke test below
-        # also needs node + wasmtime + wasm-objdump. The devx shell scrubs the
-        # system PATH so we install or expose them per host kind.
-        #
-        # Pick the installer based on uname -s — devx scrubs /usr/bin on both
-        # macOS and Linux, so `command -v apt-get` would falsely return no on
-        # both. Also CRUCIAL: on darwin we must NOT add /usr/bin to PATH, or
-        # BSD `find` (no `-mindepth`) takes precedence over GNU find used in
-        # Makefile:476 / 485 and the dist-copy step breaks.
         case "$(uname -s)" in
           Linux)
             export PATH="$HOME/.nix-profile/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
             sudo apt-get update -qq
-            sudo apt-get install -y --no-install-recommends \
-              jq unzip zstd wabt
-            # post-link.mjs uses import.meta.filename (added Node 20.11+),
-            # so we need Node >= 20.11. Ubuntu noble's apt nodejs is
-            # 18.19.1, and runner-preinstalled Node 20.x at
-            # /opt/hostedtoolcache isn't visible inside devx for the smoke
-            # test. Install Node 22 from NodeSource unconditionally so we
-            # land /usr/bin/node — devx scrubs random tool caches but
-            # /usr/bin survives via the smoke step's PATH append.
+            sudo apt-get install -y --no-install-recommends jq unzip zstd wabt
             curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
             sudo apt-get install -y --no-install-recommends nodejs
-            if ! command -v wasmtime >/dev/null 2>&1; then
-              curl -sSL https://wasmtime.dev/install.sh | bash
-              export PATH="$HOME/.wasmtime/bin:$PATH"
-              echo "$HOME/.wasmtime/bin" >> "$GITHUB_PATH"
-            fi
             ;;
           Darwin)
             export PATH="$HOME/.nix-profile/bin:/nix/var/nix/profiles/default/bin:$PATH"
-            for tool in jq unzip zstd node wasmtime; do
+            for tool in jq unzip zstd node; do
               if ! command -v "$tool" >/dev/null 2>&1; then
                 pkg="$tool"
                 [ "$tool" = "node" ] && pkg="nodejs"
-                echo "Installing $pkg via nix-env..."
                 /nix/var/nix/profiles/default/bin/nix-env -iA "nixpkgs.$pkg"
               fi
             done
-            if ! command -v wasm-objdump >/dev/null 2>&1; then
-              echo "Installing wabt (wasm-objdump) via nix-env..."
-              /nix/var/nix/profiles/default/bin/nix-env -iA nixpkgs.wabt
-            fi
             ;;
         esac
         curl -fsSL https://gitlab.haskell.org/ghc/ghc-wasm-meta/-/raw/master/bootstrap.sh | \
           FLAVOUR=9.12 PREFIX=$HOME/.ghc-wasm sh
 
-    - name: Build WASM cross libraries
+    # Install emscripten (JS-target C toolchain). EMSDK_VERSION is set in
+    # the workflow env.
+    - name: Install emscripten
+      shell: devx {0}
+      run: |
+        set -eux
+        export TMPDIR="$GITHUB_WORKSPACE/_build/tmp"
+        git clone --depth 1 --branch ${{ env.EMSDK_VERSION }} https://github.com/emscripten-core/emsdk.git
+        cd emsdk
+        ./emsdk install ${{ env.EMSDK_VERSION }}
+        ./emsdk activate ${{ env.EMSDK_VERSION }}
+
+    - name: Build multi-target bindist
       shell: devx {0}
       run: |
         set -eux
         export CABAL_DIR="$GITHUB_WORKSPACE/_build/cabal-dir"
         export TMPDIR="$GITHUB_WORKSPACE/_build/tmp"
         mkdir -p "$TMPDIR"
-        # Create wasm32-unknown-wasi-* symlinks for LLVM tools in wasi-sdk so they
-        # don't clash with devx's llvm-ar/llvm-nm/llvm-ranlib (which have
-        # different capabilities). Also symlink clang/clang++ from the
-        # wasm32-wasi- name bootstrap actually creates to the canonical autoconf
-        # triple wasm32-unknown-wasi- that ghc-toolchain-bin searches for —
-        # without these our build fails at "wasm32-unknown-wasi-clang not found
-        # in search path".
+        # Source emscripten env (provides emcc on PATH)
+        source emsdk/emsdk_env.sh
+        # Symlink wasi-sdk's wasm32-wasi-* tools as wasm32-unknown-wasi-*
+        #.
         WASI_BIN="$HOME/.ghc-wasm/wasi-sdk/bin"
         for tool in ar nm ranlib strip; do
           ln -sf "$WASI_BIN/llvm-$tool" "$WASI_BIN/wasm32-unknown-wasi-$tool"
@@ -895,166 +741,31 @@ jobs:
         for tool in clang clang++; do
           ln -sf "$WASI_BIN/wasm32-wasi-$tool" "$WASI_BIN/wasm32-unknown-wasi-$tool"
         done
-        # wasi-sdk at END of PATH so native tools (cc, clang) resolve to the
-        # host compiler. WASM tools (wasm32-unknown-wasi-clang, etc.) have unique
-        # prefixed names that don't clash.
         export PATH=$PATH:$WASI_BIN
-        # DYNAMIC=1 makes ./configure pass --enable-dynamic, which expands
-        # cabal.project.stage3.settings to:
-        #   package * { shared:True; executable-dynamic:True }
-        #   constraints: rts +dynamic
-        # …so the stage3 wasm build produces both .hi + .dyn_hi files AND
-        # ships .so libraries. Without it the bindist is static-only, and
-        # end-user TH-heavy apps (miso, jsaddle, aeson, …) hit
-        #   error: [GHC-47808] Failed to load dynamic interface file for X
-        # because cabal sets `shared: True` for wasm32 user packages but
-        # the system base/ghc-internal/etc. ship no .dyn_hi to link against.
+        # DYNAMIC=1 for both wasm and JS
+        # targets need .dyn_hi for end-user TH builds (miso, aeson, ...).
         make DYNAMIC=1 DIST_BUILD=1 \
              CABAL=$PWD/_build/dist/bin/cabal \
              GHC_TOOLCHAIN_BIN=$PWD/_build/dist/bin/ghc-toolchain-bin \
              DERIVE_CONSTANTS_BIN=$PWD/_build/dist/bin/deriveConstants \
              GENAPPLY_BIN=$PWD/_build/dist/bin/genapply \
              HAPPY_TEMPLATE_DIR=$PWD/_build/dist/share/happy-lib/data \
-             stage3-wasm32-unknown-wasi
-
-    - name: Smoke test
-      if: success()
-      shell: devx {0}
-      run: |
-        set -eo pipefail
-        # devx scrubs the user-installed tool locations. Add them back after
-        # devx's $PATH so devx wins where there's overlap, but the per-OS
-        # installer outputs are still findable:
-        #   Linux:  apt installs node / wasm-objdump to /usr/bin;
-        #           curl wasmtime installer drops into ~/.wasmtime/bin
-        #   Darwin: nix-env -iA puts everything (wasmtime, wabt, node, …)
-        #           into ~/.nix-profile/bin
-        # /usr/bin is not added on Darwin because it would shadow nix
-        # coreutils with BSD versions (no -mindepth on find, etc.).
-        case "$(uname -s)" in
-          Linux)  export PATH="$PATH:$HOME/.wasmtime/bin:$HOME/.ghc-wasm/wasi-sdk/bin:/usr/bin" ;;
-          Darwin) export PATH="$PATH:$HOME/.nix-profile/bin:$HOME/.ghc-wasm/wasi-sdk/bin" ;;
-        esac
-        echo 'main = putStrLn "Hello from WASM backend"' > /tmp/hello.hs
-        _build/dist/bin/wasm32-unknown-wasi-ghc /tmp/hello.hs -o /tmp/hello.wasm
-
-        # Verify the .wasm binary was produced
-        ls -lh /tmp/hello.wasm
-        file /tmp/hello.wasm
-
-        # Diagnostic: inspect WASM imports to determine execution strategy.
-        # If ghc_wasm_jsffi imports are present, we need post-link.mjs + Node.js.
-        # If not, wasmtime can run it directly as a pure WASI module.
-        echo "=== WASM import sections ==="
-        wasm-objdump -x /tmp/hello.wasm | head -60 || true
-        echo "=== Checking for ghc_wasm_jsffi imports ==="
-
-        if wasm-objdump -x /tmp/hello.wasm 2>/dev/null | grep -q 'ghc_wasm_jsffi'; then
-          echo "JSFFI imports detected → using post-link.mjs + Node.js"
-
-          # GHC WASM executables with ghc_wasm_jsffi custom sections require
-          # JavaScript FFI glue at instantiation time. The post-link.mjs tool
-          # (installed in libdir, maintained upstream at utils/jsffi/post-link.mjs)
-          # parses these sections and generates a JavaScript ESM module providing
-          # the ghc_wasm_jsffi imports.
-          #
-          # Workflow (from docs/users_guide/wasm.rst §"JSFFI"):
-          #   1. Compile:     wasm32-unknown-wasi-ghc hello.hs -o hello.wasm
-          #   2. Post-link:   $(ghc --print-libdir)/post-link.mjs -i hello.wasm -o hello.mjs
-          #   3. Run:         node runner.mjs
-          WASM_LIBDIR=_build/dist/lib/targets/wasm32-unknown-wasi/lib
-
-          # Generate JavaScript FFI glue from WASM custom sections
-          node "$WASM_LIBDIR/post-link.mjs" -i /tmp/hello.wasm -o /tmp/hello.mjs
-
-          # Instantiate WASM module with JSFFI + WASI imports, then run main.
-          # This mirrors the knot-tying pattern from docs/users_guide/wasm.rst:
-          # __exports starts empty, WASM is instantiated with JSFFI imports
-          # (which capture __exports by reference), then instance exports are
-          # assigned back into __exports before calling wasi.start().
-          node --input-type=module -e '
-          import { readFile } from "node:fs/promises";
-          import { WASI } from "node:wasi";
-          const mod = await WebAssembly.compile(await readFile("/tmp/hello.wasm"));
-          const jsffi = (await import("/tmp/hello.mjs")).default;
-          const wasi = new WASI({ version: "preview1", args: ["hello.wasm"] });
-          let __exports = {};
-          const instance = await WebAssembly.instantiate(mod, {
-            ghc_wasm_jsffi: jsffi(__exports),
-            wasi_snapshot_preview1: wasi.wasiImport,
-          });
-          Object.assign(__exports, instance.exports);
-          wasi.start(instance);
-          '
-        else
-          echo "No JSFFI imports → running with wasmtime (pure WASI module)"
-
-          # Per docs/users_guide/wasm.rst: "the same toolchain still generates
-          # self-contained wasm32-unknown-wasi modules by default" — these can be run
-          # directly with any WASI-compatible runtime.
-          wasmtime run /tmp/hello.wasm
-        fi
-
-    # Package the full ghcup-shippable bindist tarball — same recipe the
-    # Makefile uses locally (tar czhf -h dereferences the wasm-prefixed
-    # symlinks into real files, includes bin/ + lib/ + configure + Makefile
-    # + relocate.sh). Renamed with the host triple to disambiguate.
-    #
-    # NOTE: the tarball Makefile target depends on `stage3-$(plat)` which is
-    # .PHONY, so it re-runs ghc-toolchain-bin. That tool needs
-    # wasm32-unknown-wasi-clang on PATH — the symlinks were created by the
-    # previous step but PATH doesn't persist across CI steps, so we re-add
-    # the wasi-sdk bin dir here.
-    - name: Package bindist tarball
-      shell: devx {0}
-      if: ${{ !cancelled() }}
-      run: |
-        set -eux
-        export CABAL_DIR="$GITHUB_WORKSPACE/_build/cabal-dir"
-        export TMPDIR="$GITHUB_WORKSPACE/_build/tmp"
-        # Keep devx's $PATH first so `make` resolves to devx's GNU Make (4.4+)
-        # not Ubuntu's /usr/bin/make (4.3 — no $(let), silently returns empty
-        # which corrupts LIB_NAME_GLOB and breaks the package.conf copy phase).
-        export PATH="$PATH:$HOME/.ghc-wasm/wasi-sdk/bin"
-        rm -f _build/dist/ghc-wasm32-unknown-wasi.tar.gz
-        # The same five DIST_BUILD vars the previous "Build WASM cross
-        # libraries" step uses — stage3 phony deps invoke configure which
-        # otherwise can't find deriveConstants/genapply/happy templates.
-        # DYNAMIC=1 mirrors the Build step so configure re-runs with the
-        # same --enable-dynamic flag (stage3-$plat is PHONY → re-runs).
-        make DYNAMIC=1 DIST_BUILD=1 \
-             CABAL=$PWD/_build/dist/bin/cabal \
-             GHC_TOOLCHAIN_BIN=$PWD/_build/dist/bin/ghc-toolchain-bin \
-             DERIVE_CONSTANTS_BIN=$PWD/_build/dist/bin/deriveConstants \
-             GENAPPLY_BIN=$PWD/_build/dist/bin/genapply \
-             HAPPY_TEMPLATE_DIR=$PWD/_build/dist/share/happy-lib/data \
-             _build/dist/ghc-wasm32-unknown-wasi.tar.gz
-        # rename with the host triple so we ship one tarball per host
-        cp _build/dist/ghc-wasm32-unknown-wasi.tar.gz \
-           _build/dist/ghc-wasm32-unknown-wasi-${{ matrix.plat }}.tar.gz
-        ls -lh _build/dist/ghc-wasm32-unknown-wasi-${{ matrix.plat }}.tar.gz
+             _build/dist/ghc-multi-target.tar.gz
+        # Rename to add platform suffix.
+        cp _build/dist/ghc-multi-target.tar.gz \
+           _build/dist/ghc-multi-target-${{ matrix.plat }}.tar.gz
+        ls -lh _build/dist/ghc-multi-target-${{ matrix.plat }}.tar.gz
         echo "SHA256:"
-        shasum -a 256 _build/dist/ghc-wasm32-unknown-wasi-${{ matrix.plat }}.tar.gz
+        shasum -a 256 _build/dist/ghc-multi-target-${{ matrix.plat }}.tar.gz
 
-    # The wasm cross-compiler is built inside `devx` (a nix-shell), so all
-    # ELF binaries' interpreter (`PT_INTERP`) is pinned to a `/nix/store/.../
-    # ld-linux-*.so.*` path. On any non-nix Linux system that path doesn't
-    # exist, and the kernel fails to load the binary with ENOENT — manifesting
-    # as `cannot execute: required file not found`. The same broad class of
-    # problem `fixup-nix-deps` solves on Darwin (Mach-O dyld refs).
-    #
-    # Patchelf the interpreter back to the canonical system ld-linux path and
-    # drop the RPATH so dynamic libs resolve through ldconfig (libgmp10,
-    # libffi8, libc, libm — all stock on any modern Linux distro).
-    #
-    # Skipped on Darwin: Mach-O doesn't pin an interpreter path the way ELF
-    # does, so darwin bindists are portable as-is.
+    # Patchelf only the host-arch ELFs (bin/* native binaries + lib/<host>/
+    # libHS*.so). The wasm32 and JS target libraries aren't ELFs — they're
+    # .wasm modules and .js files respectively — patchelf skips them.
     - name: Normalize ELF interpreters for portability (Linux only)
       if: ${{ !cancelled() && contains(matrix.plat, 'linux') }}
       shell: devx {0}
       run: |
         set -eux
-        # patchelf is in apt on ubuntu — keep PATH outside devx for sudo.
         export PATH="$PATH:/usr/bin:/usr/sbin"
         if ! command -v patchelf >/dev/null 2>&1; then
           sudo apt-get install -y --no-install-recommends patchelf
@@ -1065,17 +776,11 @@ jobs:
           *) echo "::error::unexpected matrix.plat=${{ matrix.plat }}"; exit 1 ;;
         esac
 
-        TGZ=_build/dist/ghc-wasm32-unknown-wasi-${{ matrix.plat }}.tar.gz
+        TGZ=_build/dist/ghc-multi-target-${{ matrix.plat }}.tar.gz
         STAGE="$(mktemp -d)"
         tar -C "$STAGE" -xzf "$TGZ"
 
         echo "═══ Patchelfing binaries to interpreter $INTERP ═══"
-        # Scan everything executable; patchelf only on dynamically-linked ELFs
-        # whose interpreter still points into /nix/store. Also set an
-        # @ORIGIN-relative rpath so the dyn-linked binary can locate the
-        # libHS*.so files we ship in lib/$HOST_DIR/ (mirrors the
-        # @executable_path/../lib/$(HOST_PLATFORM) rpath stage2 sets on
-        # Darwin via install_name_tool).
         patched=0
         while IFS= read -r bin; do
           if file -L "$bin" 2>/dev/null \
@@ -1088,14 +793,9 @@ jobs:
           fi
         done < <(find "$STAGE" -type f -executable)
         echo "═══ Patched $patched binaries ═══"
-        test "$patched" -gt 0 || { echo "::error::no ELF binaries patched — something is wrong"; exit 1; }
+        test "$patched" -gt 0 || { echo "::error::no ELF binaries patched"; exit 1; }
 
-        # Also fix rpath on the shipped host .so files (lib/$HOST_DIR/*.so):
-        # they reference each other (e.g. libHSghc.so needs libHSrts.so)
-        # and use $ORIGIN-relative rpath at stage2 build time. patchelf
-        # may have left a nix-store rpath in place; replace with the
-        # local-$ORIGIN form so cross-library lookups work from the
-        # bindist install location.
+        # Fix rpath on the shipped host .so files.
         echo "═══ Setting rpath on lib/$HOST_DIR/*.so ═══"
         so_patched=0
         for so in "$STAGE"/lib/"$HOST_DIR"/*.so; do
@@ -1105,31 +805,77 @@ jobs:
         done
         echo "═══ Set rpath on $so_patched shared libs ═══"
 
-        # Repack — tar czhf was used to dereference symlinks originally; the
-        # staging dir is already real files (tar xzf preserves that), so plain
-        # tar czf is fine here. Keep the same filename for downstream uploads.
         rm "$TGZ"
         tar -C "$STAGE" -czf "$TGZ" .
         ls -lh "$TGZ"
         echo "SHA256 after patchelf:"
         shasum -a 256 "$TGZ"
 
-    - name: Upload WASM cross artifacts
+    # Darwin: verify the bindist is clean of build-host leaks.
+    #
+    # The Makefile's `stage2.dist` phase (CLEAN_DARWIN_DIST macro)
+    # strips two classes of leak at construction time, BEFORE the
+    # bindist tarball is built:
+    #
+    #   (1) Absolute LC_RPATH entries like
+    #       `/Volumes/WorkSpace/_work/ghc/ghc/_build/...` that
+    #       macOS 15 dyld treats as fatal.
+    #   (2) nix-store LC_LOAD_DYLIB install names for libiconv,
+    #       libffi, libc++, libz, libresolv, libncurses — rewritten
+    #       to their /usr/lib equivalents.
+    #
+    # This step just verifies — if the construction-site fix
+    # regresses, CI fails loud here rather than shipping a broken
+    # bindist that abort-traps on end-user macOS 15 hosts.
+    - name: Verify darwin bindist is clean (no /Volumes or nix-store leaks)
+      if: ${{ !cancelled() && matrix.plat == 'aarch64-darwin' }}
+      shell: devx {0}
+      run: |
+        set -euo pipefail
+        TGZ=_build/dist/ghc-multi-target-${{ matrix.plat }}.tar.gz
+        STAGE="$GITHUB_WORKSPACE/.bindist-verify-$$"
+        rm -rf "$STAGE"; mkdir -p "$STAGE"
+        trap 'rm -rf "$STAGE"' EXIT
+        tar -C "$STAGE" -xzf "$TGZ"
+
+        echo "═══ Scanning bindist Mach-O artefacts for build-host leaks ═══"
+        leaked=0
+        while IFS= read -r f; do
+          file -L "$f" 2>/dev/null | grep -q 'Mach-O' || continue
+          if otool -l "$f" 2>/dev/null \
+             | awk '/cmd LC_RPATH/{flag=1; next} flag && /path \/Volumes\//{found=1; exit} flag && /path /{flag=0} END{exit !found}'; then
+            echo "::error::leaked /Volumes/ LC_RPATH in $f"
+            otool -l "$f" | awk '/cmd LC_RPATH/{f=1; next} f && /path /{print; f=0}'
+            leaked=$((leaked + 1))
+          fi
+          if otool -L "$f" 2>/dev/null | awk '/nix\/store/{exit 0} END{exit 1}'; then
+            echo "::error::leaked /nix/store LC_LOAD_DYLIB in $f"
+            otool -L "$f" | grep 'nix/store' || true
+            leaked=$((leaked + 1))
+          fi
+        done < <(find "$STAGE" -type f \( -perm -u+x -o -name '*.dylib' \))
+
+        if [ "$leaked" -gt 0 ]; then
+          echo "::error::$leaked Mach-O files have build-host leaks. The Makefile's CLEAN_DARWIN_DIST step should have stripped these at construction time. Did stage2.dist run?"
+          exit 1
+        fi
+        echo "::notice::darwin bindist is clean — CLEAN_DARWIN_DIST did its job."
+
+    - name: Upload MULTI cross artifacts
       uses: actions/upload-artifact@v4
       if: ${{ !cancelled() }}
       with:
-        name: ${{ matrix.plat }}-cross-wasm
+        name: ${{ matrix.plat }}-cross-multi
         retention-days: 30
-        path: _build/dist/ghc-wasm32-unknown-wasi-${{ matrix.plat }}.tar.gz
+        path: _build/dist/ghc-multi-target-${{ matrix.plat }}.tar.gz
 
-    # On a tag push matching wasm32-wasi-*, also upload the bindist
-    # tarball directly to that GitHub Release so the ghcup channel can
-    # point at it. Other triggers (PR pushes, branch pushes) only produce
-    # workflow artifacts which is fine for review purposes.
+    # On a tag push matching multi-*, upload to that GitHub Release.
+    # (Separate tag namespace from the (no-longer-shipped) wasm32-wasi-* so the channels
+    # stay independent.)
     - name: Upload bindist to release (on tag push)
-      if: ${{ startsWith(github.ref, 'refs/tags/wasm32-wasi-') }}
+      if: ${{ startsWith(github.ref, 'refs/tags/multi-') }}
       uses: softprops/action-gh-release@v2
       with:
         tag_name: ${{ github.ref_name }}
-        files: _build/dist/ghc-wasm32-unknown-wasi-${{ matrix.plat }}.tar.gz
+        files: _build/dist/ghc-multi-target-${{ matrix.plat }}.tar.gz
         fail_on_unmatched_files: true
