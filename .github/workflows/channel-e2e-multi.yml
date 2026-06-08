@@ -1,370 +1,50 @@
-# Channel end-to-end CI — multi-target bindist channel.
+# Channel end-to-end CI — multi-target bindist channel (live).
 #
-# Validates the SHIPPED multi-target GHC + cabal + ghcup channel YAML by
-# exercising the exact flow an end-user does:
-#   1. install ghcup fresh
-#   2. add the multi-target stable-haskell ghcup channel
-#   3. ghcup install ghc multi-9.14.0.stable.X
-#   4. ghcup set ghc multi-9.14.0.stable.X
-#   5. compile + run a hello-world for each of native / wasm / JS — proves
-#      argv[0] dispatch is correctly wired by the bindist install
-#   6. build the miso-counter template via the wasm frontend — 50+ TH-heavy
-#      deps (aeson / lens / jsaddle / jsaddle-wasm / miso); catches
-#      TH-at-scale regressions in dyld + JSFFI + cabal-dual-compiler that
-#      hello-worlds wouldn't notice
+# Validates the SHIPPED multi-target GHC + cabal + ghcup channel YAML
+# by exercising the exact flow an end-user does: ghcup install fresh,
+# add the multi-target stable-haskell channel, install GHC + cabal,
+# compile + run a hello-world for each of native / wasm / JS, then
+# build a TH-heavy real-app (miso-counter) via the wasm frontend.
 #
-# This workflow is the sole end-to-end test surface — the legacy
-# `Channel e2e (WASM)` workflow (and the `ghcup-wasm.yaml` single-target
-# channel it covered) is retired: the multi-target bindist supersedes it
-# and we'd rather not maintain two near-identical CI surfaces.
+# This is a thin wrapper around reusable-channel-e2e.yml in install_mode
+# "channel" (live channel YAML, not this run's artifacts). The same
+# reusable workflow is also called from nix-ci.yml in install_mode
+# "artifact" against PR-built bindists.
+#
+# Triggers:
+#   * push of `multi-*` tag — re-validate after a new release ships
+#   * PR that touches this workflow OR the reusable
+#   * workflow_dispatch
+#   * weekly silent-regression canary
+#
+# The legacy `Channel e2e (WASM)` workflow is retired; the multi-target
+# bindist supersedes it.
 name: Channel e2e (MULTI)
 
 on:
   push:
-    tags: [multi-*]              # new multi-target release → re-test
+    tags: [multi-*]
   pull_request:
-    # validate workflow changes themselves end-to-end before merge
-    paths: ['.github/workflows/channel-e2e-multi.yml']
+    paths:
+      - '.github/workflows/channel-e2e-multi.yml'
+      - '.github/workflows/reusable-channel-e2e.yml'
   workflow_dispatch:
     inputs:
       multi_version:
         description: 'Multi-target GHC version to test (e.g. multi-9.14.0.stable.1)'
         default: ''
-  # Weekly silent-regression canary on the default branch. Catches drift:
-  # release asset re-uploaded with different bytes, channel YAML
-  # mis-deployed, NodeSource setup_22.x breaking, ghcup-runner-image
-  # quirks, wasi-sdk bootstrap.sh layout changes, emscripten 3.1.74
-  # download server moves, etc. Cron only fires on the workflow's home
-  # default branch (stable-ghc-9.14 once this lands there).
   schedule:
-    - cron: '0 6 * * 1'      # Monday 06:00 UTC
+    - cron: '0 6 * * 1'      # Monday 06:00 UTC — silent-regression canary
 
-# Per-ref concurrency so multiple pushes coalesce.
 concurrency:
   group: channel-e2e-multi-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  install-and-multi:
-    name: e2e MULTI / ${{ matrix.plat }}
-    runs-on: ${{ fromJSON(matrix.runner) }}
-    # 60min: the miso-counter step adds 5-10 min on x86_64-linux + macOS,
-    # and aarch64-linux is meaningfully slower (ubuntu-24.04-arm runner
-    # historically took ~30 min through the full aeson / lens / jsaddle /
-    # miso TH chain). Hello-worlds alone fit in 15 min; miso eats the rest.
-    timeout-minutes: 60
-    continue-on-error: ${{ matrix.allow-failure == true }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { plat: x86_64-linux,   runner: '["ubuntu-latest"]'                                  }
-          - { plat: aarch64-linux,  runner: '["ubuntu-24.04-arm"]'                               }
-          - { plat: aarch64-darwin, runner: '["macos-15"]'                              }
-
-    env:
-      # Default to the current LatestPrerelease; workflow_dispatch can override.
-      MULTI_VER: ${{ inputs.multi_version != '' && inputs.multi_version || 'multi-9.14.0.stable.1' }}
-      CABAL_VER: 3.17.0.0.stable.0
-
-    steps:
-      # ---------------------------------------------------------------------
-      # 1. Fresh ghcup install. Wipe pre-baked locations and run the
-      #    official installer the same way an end-user would — proves the
-      #    install-time documentation we publish actually works on the
-      #    standard runner images.
-      # ---------------------------------------------------------------------
-      - name: Install ghcup fresh
-        run: |
-          set -euo pipefail
-          rm -rf "$HOME/.ghcup"
-          if [ "$(uname -s)" = "Linux" ] && [ -d /usr/local/.ghcup ]; then
-            sudo rm -rf /usr/local/.ghcup
-          fi
-          curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org \
-            | BOOTSTRAP_HASKELL_NONINTERACTIVE=1 \
-              BOOTSTRAP_HASKELL_MINIMAL=1 \
-              GHCUP_INSTALL_BASE_PREFIX="$HOME" \
-              sh
-          echo "$HOME/.ghcup/bin" >> "$GITHUB_PATH"
-          echo "GHCUP_INSTALL_BASE_PREFIX=$HOME" >> "$GITHUB_ENV"
-
-      # ---------------------------------------------------------------------
-      # 2. Node 22 (NodeSource on Linux, official tarball on Darwin).
-      # ---------------------------------------------------------------------
-      - name: Install gcc + Node 22 (Linux via apt + NodeSource)
-        if: runner.os == 'Linux'
-        run: |
-          set -euo pipefail
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends build-essential
-          curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
-          sudo apt-get install -y --no-install-recommends nodejs
-          # Force /usr/bin first so NodeSource Node 22 wins over toolcache Node 20
-          # (ubuntu-24.04-arm pre-bakes Node 20 in /opt/hostedtoolcache).
-          echo "/usr/bin" >> "$GITHUB_PATH"
-          export PATH="/usr/bin:$PATH"
-          ver=$(node --version | tr -d v | cut -d. -f1)
-          test "$ver" -ge 22 || { echo "::error::expected Node 22+, got $(node --version)"; exit 1; }
-
-      - name: Install Node 22 (Darwin)
-        if: runner.os == 'macOS'
-        run: |
-          set -euo pipefail
-          NODE_VER=v22.22.0
-          NODE_DIR="$HOME/node-$NODE_VER"
-          rm -rf "$NODE_DIR"
-          curl -fsSL "https://nodejs.org/dist/$NODE_VER/node-$NODE_VER-darwin-arm64.tar.xz" \
-            | tar -xJ -C "$HOME"
-          mv "$HOME/node-$NODE_VER-darwin-arm64" "$NODE_DIR"
-          echo "$NODE_DIR/bin" >> "$GITHUB_PATH"
-          "$NODE_DIR/bin/node" --version
-
-      # ---------------------------------------------------------------------
-      # 3. wasi-sdk: needed for the wasm hello test to find
-      #    wasm32-unknown-wasi-clang at link time. The multi-target bindist
-      #    ships its own wasm GHC frontend but delegates to wasi-sdk's clang
-      #    for the actual C compilation / linking — same model as the WASM
-      #    channel.
-      # ---------------------------------------------------------------------
-      - name: Install wasi-sdk via ghc-wasm-meta bootstrap
-        run: |
-          set -euo pipefail
-          export TMPDIR="$GITHUB_WORKSPACE/_tmp"
-          mkdir -p "$TMPDIR"
-          curl -fsSL https://gitlab.haskell.org/ghc/ghc-wasm-meta/-/raw/master/bootstrap.sh | \
-            FLAVOUR=9.12 PREFIX=$HOME/.ghc-wasm sh
-          WASI_BIN="$HOME/.ghc-wasm/wasi-sdk/bin"
-          test -d "$WASI_BIN" || { echo "::error::$WASI_BIN missing"; exit 1; }
-          for tool in clang clang++; do
-            ln -sf "$WASI_BIN/wasm32-wasi-$tool" "$WASI_BIN/wasm32-unknown-wasi-$tool"
-          done
-          for tool in ar nm ranlib strip; do
-            ln -sf "$WASI_BIN/llvm-$tool" "$WASI_BIN/wasm32-unknown-wasi-$tool" 2>/dev/null || true
-          done
-          echo "$WASI_BIN" >> "$GITHUB_PATH"
-          # macos-15: WASI_BIN contains a wasm-only `clang` that, if it
-          # wins PATH lookup over /usr/bin/clang, gets invoked by GHC's
-          # native code generator and fails with
-          #   clang -cc1as: error: unknown target triple 'arm64-apple-macosx15.0.0'
-          # GITHUB_PATH prepends entries, so we re-prepend /usr/bin here
-          # to put Apple's clang back ahead of the wasm-only one. Linux
-          # is unaffected — there GHC's C compiler is `cc` (gcc), not
-          # `clang`.
-          if [ "$(uname -s)" = "Darwin" ]; then
-            echo "/usr/bin" >> "$GITHUB_PATH"
-          fi
-
-      # ---------------------------------------------------------------------
-      # 4. Add the wasm channel — that's where the stable-haskell `cabal`
-      #    download entry lives. The multi-target channel YAML itself
-      #    intentionally ships only the GHC frontends; cabal is shared
-      #    with the wasm channel rather than duplicated.
-      # ---------------------------------------------------------------------
-      - name: Add stable-haskell wasm channel (for cabal)
-        run: |
-          set -euo pipefail
-          ghcup config add-release-channel \
-            https://stable-haskell.github.io/ghc/ghcup-wasm.yaml
-
-      # ---------------------------------------------------------------------
-      # 5. cabal — the wasm hello template's Makefile drives cabal-install.
-      #    JS hello compiles directly with javascript-unknown-ghcjs-ghc, no
-      #    cabal needed there. cabal-$CABAL_VER MUST install successfully
-      #    on every supported platform; any failure (channel YAML missing
-      #    the entry, dlHash mismatch, platform classification drift) is a
-      #    real bug — fail loud rather than silently skip downstream tests.
-      # ---------------------------------------------------------------------
-      - name: Install cabal
-        run: |
-          set -euo pipefail
-          ghcup install cabal "$CABAL_VER"
-          ghcup set     cabal "$CABAL_VER"
-          cabal --version
-
-      # ---------------------------------------------------------------------
-      # 5. Install the multi-target GHC from the live channel. This is the
-      #    end-user-facing install path; if the channel YAML is missing or
-      #    the release asset is unreachable, record installed=false and
-      #    skip the strict tests below.
-      # ---------------------------------------------------------------------
-      - name: multi — try install (sets a flag)
-        id: multi_install
-        run: |
-          # Use full strict mode (-euo pipefail). The two `if ! …; then …; fi`
-          # blocks below intentionally CAPTURE failures (channel YAML missing,
-          # install can't fetch the asset) and downgrade them to a recorded
-          # installed=false + exit 0. Anything else — including a failed
-          # `ghcup set` or a broken binary symlink — MUST surface as a job
-          # failure rather than be silently swallowed into installed=true.
-          # `set -e` inside an `if` test does not trigger, so the gate
-          # conditionals still work as written.
-          set -euo pipefail
-          if ! ghcup config add-release-channel \
-              https://stable-haskell.github.io/ghc/ghcup-multi-target-0.1.0.yaml 2>&1 | tee /tmp/multi-chan.log; then
-            echo "::warning::could not add multi-target channel (yet?) — skipping multi-target tests"
-            echo "installed=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          if ! ghcup install ghc "$MULTI_VER" 2>&1 | tee /tmp/multi-install.log; then
-            echo "::warning::$MULTI_VER not installable from channel — skipping multi-target tests"
-            echo "installed=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          # Install path succeeded — from here, any failure (set, missing
-          # binary, broken symlink) is a real bug and MUST fail the step.
-          ghcup set ghc "$MULTI_VER"
-          echo "$HOME/.ghcup/bin" >> "$GITHUB_PATH"
-          # Resolve all three argv[0] frontends — exit-non-zero propagates
-          # under set -e if a symlink is broken or the binary is missing.
-          ghc                          --numeric-version
-          wasm32-unknown-wasi-ghc      --numeric-version
-          javascript-unknown-ghcjs-ghc --numeric-version
-          # Smoke-test argv[0] dispatch: each frontend MUST report its own
-          # Target platform — if the package were built wrong (or someone
-          # accidentally shipped 3 copies of the same native ghc) the
-          # downstream hello tests would still catch it, but failing here
-          # makes the packaging-vs-runtime distinction obvious.
-          ghc                          --info \
-            | grep -F -e '("Target platform","x86_64-' \
-                      -e '("Target platform","aarch64-' \
-                      >/dev/null \
-            || { echo "::error::native ghc reports unexpected Target platform"; ghc --info | grep "Target platform"; exit 1; }
-          wasm32-unknown-wasi-ghc      --info | grep -qF '("Target platform","wasm32-unknown-wasi")' \
-            || { echo "::error::wasm frontend reports wrong Target platform"; wasm32-unknown-wasi-ghc --info | grep "Target platform"; exit 1; }
-          javascript-unknown-ghcjs-ghc --info | grep -qF '("Target platform","javascript-unknown-ghcjs")' \
-            || { echo "::error::JS frontend reports wrong Target platform"; javascript-unknown-ghcjs-ghc --info | grep "Target platform"; exit 1; }
-          echo "installed=true" >> "$GITHUB_OUTPUT"
-
-      # ---------------------------------------------------------------------
-      # 6. Native hello — proves `ghc` frontend compiles and runs native.
-      # ---------------------------------------------------------------------
-      - name: multi — native hello (strict)
-        if: ${{ !cancelled() && steps.multi_install.outputs.installed == 'true' }}
-        run: |
-          set -euo pipefail
-          mkdir -p /tmp/native-hello && cd /tmp/native-hello
-          echo 'main = putStrLn "Hello from native ghc"' > hello.hs
-          ghc hello.hs -o hello
-          ./hello | tee /tmp/native-out
-          grep -q 'Hello from native ghc' /tmp/native-out
-
-      # ---------------------------------------------------------------------
-      # 7. Wasm hello — proves `wasm32-unknown-wasi-ghc` frontend produces a
-      #    Node:wasi-runnable .wasm via the published hello template.
-      # ---------------------------------------------------------------------
-      - name: multi — wasm hello via multi-target (strict)
-        if: ${{ !cancelled() && steps.multi_install.outputs.installed == 'true' }}
-        run: |
-          set -euo pipefail
-          mkdir -p /tmp/multi-hello && cd /tmp/multi-hello
-          curl -fL -o multi-hello.tar.gz \
-            https://stable-haskell.github.io/ghc/examples/stable-haskell-wasm-hello.tar.gz
-          tar xf multi-hello.tar.gz
-          cd stable-haskell-wasm-hello
-          make WASM_VERSION="$MULTI_VER" build
-          make WASM_VERSION="$MULTI_VER" run-node 2>&1 | tee /tmp/multi-run.out
-          grep -q 'Hello from the WASM reactor!' /tmp/multi-run.out
-
-      # ---------------------------------------------------------------------
-      # 7b. miso-counter — full TH-heavy real-app build via the wasm
-      #     frontend.  50+ transitive deps including aeson, lens, jsaddle,
-      #     jsaddle-wasm, miso.  This is the load-bearing end-to-end test:
-      #     hello-worlds wouldn't notice TH-at-scale regressions in dyld /
-      #     JSFFI / the cabal-dual-compiler split.  Skip `run-web` (needs a
-      #     browser); verifying the .wasm artifact exists + parses as a
-      #     valid WebAssembly module is sufficient to catch link-level
-      #     regressions.
-      #
-      #     A background diagnostic monitor logs process + memory state
-      #     every 60 s during the build; this was added after the
-      #     aarch64-linux miso hang (stable.12 first e2e attempt, run
-      #     26700668292: jsaddle-wasm completed then 47 min of silence) so
-      #     a future hang surfaces WHICH process is stuck and HOW (sleeping
-      #     vs spinning).
-      # ---------------------------------------------------------------------
-      - name: multi — miso-counter via multi-target wasm (strict)
-        if: ${{ !cancelled() && steps.multi_install.outputs.installed == 'true' }}
-        run: |
-          set -euo pipefail
-          # Make sure the package index is populated.  Without this the
-          # solver fails resolving jsaddle-wasm (and any other
-          # not-already-source-repo-pinned dep) with
-          #   Could not resolve dependencies:
-          #     [__1] unknown package: host:jsaddle-wasm (dependency of host:myapp)
-          # — which is what bit the first e2e-MULTI run of this step (see
-          # run 27091838526). The hello steps above don't touch Hackage
-          # so they don't reveal the missing index.
-          cabal update
-
-          mkdir -p /tmp/multi-miso && cd /tmp/multi-miso
-          curl -fL -o miso.tar.gz \
-            https://stable-haskell.github.io/ghc/examples/stable-haskell-wasm-miso-counter.tar.gz
-          tar xf miso.tar.gz
-          cd stable-haskell-wasm-miso-counter
-
-          # Diagnostic monitor — see comment above. Goes down with the
-          # step via EXIT trap; SIGTERM from GitHub on cancellation also
-          # propagates via default trap behaviour.
-          (
-            while true; do
-              echo "::group::diag $(date +%H:%M:%S)"
-              echo "--- ps (wasm/ghc/cabal/node) ---"
-              if [ "$(uname -s)" = "Darwin" ]; then
-                ps -A -o pid,ppid,%cpu,%mem,rss,etime,stat,comm,command 2>/dev/null \
-                  | head -1
-                ps -A -o pid,ppid,%cpu,%mem,rss,etime,stat,comm,command 2>/dev/null \
-                  | grep -E "(ghc|cabal|node|wasm32|iserv)" | grep -v grep || true
-                echo "--- memory ---"
-                vm_stat | head -10
-              else
-                ps -e -o pid,ppid,%cpu,%mem,rss,etime,stat,comm,command 2>/dev/null \
-                  | head -1
-                ps -e -o pid,ppid,%cpu,%mem,rss,etime,stat,comm,command 2>/dev/null \
-                  | grep -E "(ghc|cabal|node|wasm32|iserv)" | grep -v grep || true
-                echo "--- memory ---"
-                free -h 2>/dev/null
-              fi
-              echo "::endgroup::"
-              sleep 60
-            done
-          ) &
-          MONITOR_PID=$!
-          trap 'kill $MONITOR_PID 2>/dev/null || true' EXIT INT TERM
-
-          # Override the template's pinned default; MULTI_VER ships the
-          # wasm32-unknown-wasi-ghc binary under $HOME/.ghcup/ghc/$MULTI_VER/bin/.
-          make WASM_VERSION="$MULTI_VER" build
-          wasm_file=$(find dist-newstyle -name 'myapp.wasm' -type f | head -1)
-          test -n "$wasm_file" || { echo "::error::myapp.wasm not produced"; exit 1; }
-          ls -lh "$wasm_file"
-          file "$wasm_file" | tee /tmp/file_out
-          grep -q 'WebAssembly' /tmp/file_out \
-            || { echo "::error::artifact is not a wasm binary"; exit 1; }
-
-      # ---------------------------------------------------------------------
-      # 8. JS hello — proves `javascript-unknown-ghcjs-ghc` frontend
-      #    produces Node-runnable .js. emscripten is installed here on demand
-      #    rather than as a global setup step because only this one test
-      #    needs it.
-      #
-      #    NOTE: there is no JS-target miso-counter test (yet). The wasm
-      #    miso template's Makefile is wasm-specific and the JS frontend
-      #    would need a parallel template (or a target-agnostic
-      #    cabal.project we don't yet ship).  TH-heavy JS-target coverage
-      #    is a follow-up once a template exists.
-      # ---------------------------------------------------------------------
-      - name: multi — JS hello via multi-target (strict)
-        if: ${{ !cancelled() && steps.multi_install.outputs.installed == 'true' }}
-        run: |
-          set -euo pipefail
-          if ! command -v emcc >/dev/null 2>&1; then
-            git clone --depth 1 --branch 3.1.74 https://github.com/emscripten-core/emsdk.git /tmp/emsdk
-            cd /tmp/emsdk && ./emsdk install 3.1.74 && ./emsdk activate 3.1.74
-            source ./emsdk_env.sh
-          fi
-          mkdir -p /tmp/js-hello && cd /tmp/js-hello
-          echo 'main = putStrLn "Hello from JS backend"' > hello.hs
-          javascript-unknown-ghcjs-ghc hello.hs -o hello
-          node hello.jsexe/all.js | tee /tmp/js-out
-          grep -q 'Hello from JS backend' /tmp/js-out
+  e2e:
+    uses: ./.github/workflows/reusable-channel-e2e.yml
+    with:
+      install_mode: channel
+      multi_version: ${{ inputs.multi_version != '' && inputs.multi_version || 'multi-9.14.0.stable.1' }}
+      cabal_version: '3.17.0.0.stable.0'
+    secrets: inherit

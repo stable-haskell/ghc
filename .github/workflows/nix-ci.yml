@@ -879,3 +879,36 @@ jobs:
         tag_name: ${{ github.ref_name }}
         files: _build/dist/ghc-multi-target-${{ matrix.plat }}.tar.gz
         fail_on_unmatched_files: true
+
+  # ---------------------------------------------------------------------------
+  # Cabal Linux bindist — runs in parallel with the GHC build. The fresh
+  # cabal artifact is then consumed by `e2e-multi` so a PR-introduced cabal
+  # regression is caught BEFORE we ship.
+  # ---------------------------------------------------------------------------
+  cabal-release:
+    uses: ./.github/workflows/reusable-cabal-release.yml
+    permissions:
+      contents: write
+    secrets: inherit
+
+  # ---------------------------------------------------------------------------
+  # Channel end-to-end against THIS run's artifacts (artifact install mode):
+  # downloads ghc-multi-target-${plat}.tar.gz from cross-multi + cabal-${ver}-
+  # ${plat}.tar.gz from cabal-release, installs them locally and runs the
+  # same hello / miso / JS-hello test surface as the live-channel
+  # canary (channel-e2e-multi.yml). Closes the DAG: a PR-introduced
+  # regression in GHC packaging, cabal patches, or wasm sysroot wiring
+  # surfaces here BEFORE merge instead of at release time.
+  # ---------------------------------------------------------------------------
+  e2e-multi:
+    needs: [cross-multi, cabal-release]
+    if: ${{ !cancelled()
+            && needs.cross-multi.result == 'success'
+            && needs.cabal-release.result == 'success' }}
+    uses: ./.github/workflows/reusable-channel-e2e.yml
+    with:
+      install_mode: artifact
+      # PATH suffix only; in artifact mode no `ghcup install` is done.
+      multi_version: 'multi-pr-ci'
+      cabal_version: '3.17.0.0.stable.0'
+    secrets: inherit
