@@ -1,0 +1,246 @@
+---
+# stable-haskell custom ghcup channel — MULTI-TARGET (schema 0.1.0).
+#
+# Distinct from ghcup-wasm.yaml (which uses schema 0.0.9 and has the
+# single-target wasm32-wasi-9.14.0.stable.X entries). This channel is
+# for the multi-target bindist that ships native + wasm + JS in one
+# install.
+#
+# Usage:
+#   ghcup config add-release-channel \
+#     https://stable-haskell.github.io/ghc/ghcup-multi-target-0.1.0.yaml
+#   ghcup install ghc multi-9.14.0.stable.2
+#   ghcup set    ghc multi-9.14.0.stable.2
+#
+# After install, all three targets are on PATH:
+#   ghc                                — native
+#   wasm32-unknown-wasi-ghc            — wasm cross
+#   javascript-unknown-ghcjs-ghc       — JS cross
+#
+# Same physical binary; ghc dispatches per-target via argv[0].
+#
+# Schema: ghcup-0.1.0 (Installer DSL). Requires ghcup >= 0.2.5.
+
+toolRequirements: {}
+
+ghcupDownloads:
+  GHC:
+    multi-9.14.0.stable.2:
+      viTags:
+        - LatestPrerelease
+      viChangeLog: https://github.com/stable-haskell/ghc/releases/tag/multi-9.14.0.stable.2
+      viPreInstall: |
+        Multi-target GHC bindist (~700 MB per platform). Requires on PATH:
+          * Node.js >= 22       — wasm + JS dynamic linker shim
+          * wasi-sdk            — wasm target C toolchain
+          * emscripten          — JS target C toolchain
+
+        Install wasi-sdk via ghc-wasm-meta bootstrap:
+          curl -fsSL https://gitlab.haskell.org/ghc/ghc-wasm-meta/-/raw/master/bootstrap.sh \
+            | FLAVOUR=9.12 PREFIX=$HOME/.ghc-wasm sh
+          export PATH="$HOME/.ghc-wasm/wasi-sdk/bin:$PATH"
+
+        Install emscripten:
+          git clone --depth 1 --branch 3.1.74 https://github.com/emscripten-core/emsdk.git
+          cd emsdk && ./emsdk install 3.1.74 && ./emsdk activate 3.1.74
+          source emsdk_env.sh
+
+      viPostInstall: |
+        Multi-target GHC installed. argv[0] dispatch:
+          ghc                            — native compilation (this host)
+          wasm32-unknown-wasi-ghc        — wasm cross
+          javascript-unknown-ghcjs-ghc   — JS cross
+
+        Per-target package databases live under
+          lib/                                            (native)
+          lib/targets/wasm32-unknown-wasi/lib/            (wasm)
+          lib/targets/javascript-unknown-ghcjs/lib/       (JS)
+        Each is auto-recached on first use by ghc-pkg (mtime-based) or
+        eagerly by relocate.sh.
+
+        Run `ghcup set ghc multi-9.14.0.stable.2` to activate the
+        unversioned ghc / wasm32-…-ghc / javascript-…-ghc symlinks.
+
+      viArch:
+        A_64:
+          Linux_UnknownLinux:
+            unknown_versioning:
+              dlUri: https://github.com/stable-haskell/ghc/releases/download/multi-9.14.0.stable.2/ghc-multi-target-x86_64-linux.tar.gz
+              dlHash: 7c2d88d51da6ea1d13fa2cc7497e94a2ead67584dfdc20f1eb0c5163019cd8c9
+              dlInstallSpec:
+                configure:
+                  configArgs:
+                  - --prefix=${PREFIX}
+                  configEnv: null
+                  configFile: configure
+                make:
+                  makeArgs:
+                  - DESTDIR=${TMPDIR}
+                  - install
+                dataRules: []
+                exeRules: []
+                exeSymLinked:
+                  # Single pattern-based spec creates ~/.ghcup/bin/ entries
+                  # for every shipped binary. ${TARGETFN} resolves to each
+                  # matched filename (e.g. "ghc", "wasm32-unknown-wasi-ghc",
+                  # "javascript-unknown-ghcjs-ghc-pkg"). Versioned + setName
+                  # forms both created.
+                  - linkName: "${TARGETFN}-${PKGVER}"
+                    pVPMajorLinks: true
+                    setName: "${TARGETFN}"
+                    targetPattern: ["bin/**"]
+                preserveMtimes: false
+        A_ARM64:
+          Darwin:
+            unknown_versioning:
+              dlUri: https://github.com/stable-haskell/ghc/releases/download/multi-9.14.0.stable.2/ghc-multi-target-aarch64-darwin.tar.gz
+              dlHash: 046c5e8f513e64628df147c3735a99591bc46c2e3614a11702c74b9c6ab02f38
+              dlInstallSpec:
+                configure:
+                  configArgs:
+                  - --prefix=${PREFIX}
+                  configEnv: null
+                  configFile: configure
+                make:
+                  makeArgs:
+                  - DESTDIR=${TMPDIR}
+                  - install
+                dataRules: []
+                exeRules: []
+                exeSymLinked:
+                  - linkName: "${TARGETFN}-${PKGVER}"
+                    pVPMajorLinks: true
+                    setName: "${TARGETFN}"
+                    targetPattern: ["bin/**"]
+                preserveMtimes: false
+          Linux_UnknownLinux:
+            unknown_versioning:
+              dlUri: https://github.com/stable-haskell/ghc/releases/download/multi-9.14.0.stable.2/ghc-multi-target-aarch64-linux.tar.gz
+              dlHash: a7aa14145f6883adf8c1127de1f509cd9d2431d25680636d5199b60a5d415571
+              dlInstallSpec:
+                configure:
+                  configArgs:
+                  - --prefix=${PREFIX}
+                  configEnv: null
+                  configFile: configure
+                make:
+                  makeArgs:
+                  - DESTDIR=${TMPDIR}
+                  - install
+                dataRules: []
+                exeRules: []
+                exeSymLinked:
+                  - linkName: "${TARGETFN}-${PKGVER}"
+                    pVPMajorLinks: true
+                    setName: "${TARGETFN}"
+                    targetPattern: ["bin/**"]
+                preserveMtimes: false
+    multi-9.14.0.stable.1:
+      viTags: []
+      viChangeLog: https://github.com/stable-haskell/ghc/releases/tag/multi-9.14.0.stable.1
+      viPreInstall: |
+        Multi-target GHC bindist (~700 MB per platform). Requires on PATH:
+          * Node.js >= 22       — wasm + JS dynamic linker shim
+          * wasi-sdk            — wasm target C toolchain
+          * emscripten          — JS target C toolchain
+
+        Install wasi-sdk via ghc-wasm-meta bootstrap:
+          curl -fsSL https://gitlab.haskell.org/ghc/ghc-wasm-meta/-/raw/master/bootstrap.sh \
+            | FLAVOUR=9.12 PREFIX=$HOME/.ghc-wasm sh
+          export PATH="$HOME/.ghc-wasm/wasi-sdk/bin:$PATH"
+
+        Install emscripten:
+          git clone --depth 1 --branch 3.1.74 https://github.com/emscripten-core/emsdk.git
+          cd emsdk && ./emsdk install 3.1.74 && ./emsdk activate 3.1.74
+          source emsdk_env.sh
+
+      viPostInstall: |
+        Multi-target GHC installed. argv[0] dispatch:
+          ghc                            — native compilation (this host)
+          wasm32-unknown-wasi-ghc        — wasm cross
+          javascript-unknown-ghcjs-ghc   — JS cross
+
+        Per-target package databases live under
+          lib/                                            (native)
+          lib/targets/wasm32-unknown-wasi/lib/            (wasm)
+          lib/targets/javascript-unknown-ghcjs/lib/       (JS)
+        Each is auto-recached on first use by ghc-pkg (mtime-based) or
+        eagerly by relocate.sh.
+
+        Run `ghcup set ghc multi-9.14.0.stable.1` to activate the
+        unversioned ghc / wasm32-…-ghc / javascript-…-ghc symlinks.
+
+      viArch:
+        A_64:
+          Linux_UnknownLinux:
+            unknown_versioning:
+              dlUri: https://github.com/stable-haskell/ghc/releases/download/multi-9.14.0.stable.1/ghc-multi-target-x86_64-linux.tar.gz
+              dlHash: 0d93e241433879ad8a0b318aa87b355a5f3fa67571630cb4824ae348755f78c9
+              dlInstallSpec:
+                configure:
+                  configArgs:
+                  - --prefix=${PREFIX}
+                  configEnv: null
+                  configFile: configure
+                make:
+                  makeArgs:
+                  - DESTDIR=${TMPDIR}
+                  - install
+                dataRules: []
+                exeRules: []
+                exeSymLinked:
+                  # Single pattern-based spec creates ~/.ghcup/bin/ entries
+                  # for every shipped binary. ${TARGETFN} resolves to each
+                  # matched filename (e.g. "ghc", "wasm32-unknown-wasi-ghc",
+                  # "javascript-unknown-ghcjs-ghc-pkg"). Versioned + setName
+                  # forms both created.
+                  - linkName: "${TARGETFN}-${PKGVER}"
+                    pVPMajorLinks: true
+                    setName: "${TARGETFN}"
+                    targetPattern: ["bin/**"]
+                preserveMtimes: false
+        A_ARM64:
+          Darwin:
+            unknown_versioning:
+              dlUri: https://github.com/stable-haskell/ghc/releases/download/multi-9.14.0.stable.1/ghc-multi-target-aarch64-darwin.tar.gz
+              dlHash: 00bbf0ef3541a6b67746be3cf77204c61123b6889fa9f6e8e646958d87fd820d
+              dlInstallSpec:
+                configure:
+                  configArgs:
+                  - --prefix=${PREFIX}
+                  configEnv: null
+                  configFile: configure
+                make:
+                  makeArgs:
+                  - DESTDIR=${TMPDIR}
+                  - install
+                dataRules: []
+                exeRules: []
+                exeSymLinked:
+                  - linkName: "${TARGETFN}-${PKGVER}"
+                    pVPMajorLinks: true
+                    setName: "${TARGETFN}"
+                    targetPattern: ["bin/**"]
+                preserveMtimes: false
+          Linux_UnknownLinux:
+            unknown_versioning:
+              dlUri: https://github.com/stable-haskell/ghc/releases/download/multi-9.14.0.stable.1/ghc-multi-target-aarch64-linux.tar.gz
+              dlHash: 6b1cdc57f335c34ac731db4b34a0f5af7abfb3dc025cdbf4928942d1d249d6b3
+              dlInstallSpec:
+                configure:
+                  configArgs:
+                  - --prefix=${PREFIX}
+                  configEnv: null
+                  configFile: configure
+                make:
+                  makeArgs:
+                  - DESTDIR=${TMPDIR}
+                  - install
+                dataRules: []
+                exeRules: []
+                exeSymLinked:
+                  - linkName: "${TARGETFN}-${PKGVER}"
+                    pVPMajorLinks: true
+                    setName: "${TARGETFN}"
+                    targetPattern: ["bin/**"]
+                preserveMtimes: false

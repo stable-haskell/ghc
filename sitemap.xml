@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    <url>
+         <loc>https://stable-haskell.github.io/ghc/</loc>
+         <lastmod>2026-06-08</lastmod>
+    </url>
+    <url>
+         <loc>https://stable-haskell.github.io/ghc/anatomy/</loc>
+         <lastmod>2026-06-08</lastmod>
+    </url>
+    <url>
+         <loc>https://stable-haskell.github.io/ghc/install/</loc>
+         <lastmod>2026-06-08</lastmod>
+    </url>
+    <url>
+         <loc>https://stable-haskell.github.io/ghc/troubleshooting/</loc>
+         <lastmod>2026-06-08</lastmod>
+    </url>
+    <url>
+         <loc>https://stable-haskell.github.io/ghc/examples/hello-js/</loc>
+         <lastmod>2026-06-08</lastmod>
+    </url>
+    <url>
+         <loc>https://stable-haskell.github.io/ghc/examples/hello/</loc>
+         <lastmod>2026-06-08</lastmod>
+    </url>
+    <url>
+         <loc>https://stable-haskell.github.io/ghc/examples/miso-counter/</loc>
+         <lastmod>2026-06-08</lastmod>
+    </url>
+</urlset>

@@ -1,0 +1,7 @@
+packages: .
+
+-- Single-target JS build with the multi-target GHC's JS cross-compiler
+-- (cabal-3.17.0.0.stable.0 from `ghcup install cabal`). `make run-native`
+-- overrides this with the native `ghc` to build the same source for the host.
+with-compiler: javascript-unknown-ghcjs-ghc
+with-hc-pkg:   javascript-unknown-ghcjs-ghc-pkg

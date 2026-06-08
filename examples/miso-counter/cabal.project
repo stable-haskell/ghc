@@ -1,0 +1,25 @@
+packages: .
+
+-- Dual-compiler form (requires the stable-haskell cabal-3.17.0.0.stable.0).
+with-build-compiler: ghc
+with-build-hc-pkg:   ghc-pkg
+with-compiler:       wasm32-unknown-wasi-ghc
+with-hc-pkg:         wasm32-unknown-wasi-ghc-pkg
+
+if arch(wasm32)
+  shared: True
+
+-- miso 1.11 has wasm support but isn't always in cached hackage indexes —
+-- pin the source repository directly.
+source-repository-package
+  type:     git
+  location: https://github.com/dmjio/miso.git
+  tag:      1.11.0
+
+-- aeson's ordered-keymap flag triggers a TH path that's slower at
+-- compile-time for no runtime benefit here.
+package aeson
+  flags: -ordered-keymap
+
+-- jsaddle-wasm's upper bound on ghc-experimental predates GHC 9.14.
+allow-newer: jsaddle-wasm:ghc-experimental

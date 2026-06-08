@@ -1,0 +1,13 @@
+cabal-version: 3.0
+name:          myapp
+version:       0.1.0.0
+synopsis:      stable-haskell JS + native hello (multi-target GHC)
+license:       Apache-2.0
+build-type:    Simple
+
+executable myapp
+  main-is:          Main.hs
+  hs-source-dirs:   app
+  default-language: GHC2021
+  build-depends:    base >= 4.18 && < 5
+  ghc-options:      -Wall
