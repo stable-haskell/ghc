@@ -614,6 +614,12 @@ $(STAGE1_STAMP): $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) cabal.project.stage1 c
 ifeq ($(DYNAMIC),1)
 	$(SED) -i -e 's/"RTS ways","/"RTS ways","dyn debug_dyn thr_dyn thr_debug_dyn /' $(STORE_DIR)/host/$(HOST_PLATFORM)/lib/settings
 endif
+	@# Inject the four per-target dials into the native settings file
+	@# too — same keys as the stage3 cross targets (see the lengthy
+	@# comment above $(TARGET_DIR)/lib/settings injection). The native
+	@# target's dynamic state tracks our DYNAMIC=0/1 build flag; prof
+	@# is always NO because stage2 isn't built -prof.
+	$(SED) -i -e 's/\]$$/,("target is dynamic","$(if $(filter 1,$(DYNAMIC)),YES,NO)"),("target ships dynamic libraries","$(if $(filter 1,$(DYNAMIC)),YES,NO)"),("target is profiled","NO"),("target ships profiling libraries","NO")]/' $(STORE_DIR)/host/$(HOST_PLATFORM)/lib/settings
 
 	$(call LOG,Creating packagedb in $(STORE_DIR)/host/$(HOST_PLATFORM)/lib/package.conf.d)
 	@rm -rf $(STORE_DIR)/host/$(HOST_PLATFORM)/lib/package.conf.d
@@ -916,6 +922,17 @@ STAGE3_javascript-unknown-ghcjs_NM                 = emnm
 STAGE3_javascript-unknown-ghcjs_RANLIB             = emranlib
 STAGE3_javascript-unknown-ghcjs_STRIP              = emstrip
 STAGE3_javascript-unknown-ghcjs_GHC_TOOLCHAIN_ARGS = $(GHC_TOOLCHAIN_ARGS) --disable-tables-next-to-code
+# JS target overrides: NO across the board.
+#   * dyn: iserv runs vanilla (no dlopen in the JS runtime), lib tree
+#     ships no .dyn_hi (Path C doesn't apply to JS — see PR #187).
+#   * prof: stage2 isn't built -prof, no .p_hi shipped.
+# All four dials NO → `ghc --info` for the JS target reports
+# `GHC Dynamic: NO`, `GHC Profiled: NO`, `Support dynamic-too: NO`.
+# End-user cabal-install correctly skips library-{dynamic,profiling}.
+STAGE3_javascript-unknown-ghcjs_TARGET_IS_DYNAMIC      = NO
+STAGE3_javascript-unknown-ghcjs_TARGET_SHIPS_DYN_LIBS  = NO
+STAGE3_javascript-unknown-ghcjs_TARGET_IS_PROFILED     = NO
+STAGE3_javascript-unknown-ghcjs_TARGET_SHIPS_PROF_LIBS = NO
 
 STAGE3_wasm32-unknown-wasi_CC                 = wasm32-unknown-wasi-clang
 STAGE3_wasm32-unknown-wasi_CC_OPTS            = -fno-strict-aliasing -Wno-error=int-conversion -Oz -msimd128 -mnontrapping-fptoint -msign-ext -mbulk-memory -mmutable-globals -mmultivalue -mreference-types
@@ -1003,6 +1020,42 @@ stage3-$(1): $$(STAGE3_$(1)_PREREQS)
 ifeq ($(DYNAMIC),1)
 	$(SED) -i -e 's/"RTS ways","/"RTS ways","dyn /' $$(TARGET_DIR)/lib/settings
 endif
+
+	@# Inject the per-target dials that drive `ghc --info`'s
+	@# `GHC Dynamic` and `GHC Profiled` values (cabal-install reads
+	@# these to decide whether to enable library-dynamic /
+	@# library-profiling by default):
+	@#
+	@#   target is dynamic                 — GHC capable of -dynamic /
+	@#                                       -dynamic-too output
+	@#   target ships dynamic libraries    — lib tree has .dyn_hi / .so
+	@#   target is profiled                — GHC capable of -prof output
+	@#   target ships profiling libraries  — lib tree has .p_hi / .p_a
+	@#
+	@# Reported pairs:
+	@#   GHC Dynamic  = (target is dynamic)  && (target ships dynamic libraries)
+	@#   GHC Profiled = (target is profiled) && (target ships profiling libraries)
+	@#
+	@# Per-target settings file completely controls these — the
+	@# shared stage2 GHC binary's RTS-baked-in dynamic/prof-ness is
+	@# no longer consulted. Two dials per way (is / ships) so a
+	@# target can be capable but not currently ship artifacts (or
+	@# vice versa) — keeps the axes orthogonal for slimming
+	@# experiments and matches what cabal really wants to know.
+	@#
+	@# Defaults for our bindists: dynamic dials YES (most targets
+	@# ship dyn libs), prof dials NO (stage2 isn't built -prof so
+	@# no target currently ships prof libs).
+	@# Override via STAGE3_<triple>_TARGET_{IS_DYNAMIC,SHIPS_DYN_LIBS,
+	@# IS_PROFILED,SHIPS_PROF_LIBS}.
+	@#
+	@# Note: `$$$$` (four dollars) collapses through two layers of
+	@# Make expansion (define-template + recipe-time) to a literal `$`
+	@# at shell time, which is what sed needs as the end-of-line anchor.
+	@# `$$` would collapse to `$` after template expansion, then Make
+	@# would interpret the lone `$/` in the recipe as a variable lookup
+	@# and drop the anchor entirely (verified: PR #187 first attempt).
+	$(SED) -i -e 's/\]$$$$/,("target is dynamic","$(if $(STAGE3_$(1)_TARGET_IS_DYNAMIC),$(STAGE3_$(1)_TARGET_IS_DYNAMIC),YES)"),("target ships dynamic libraries","$(if $(STAGE3_$(1)_TARGET_SHIPS_DYN_LIBS),$(STAGE3_$(1)_TARGET_SHIPS_DYN_LIBS),YES)"),("target is profiled","$(if $(STAGE3_$(1)_TARGET_IS_PROFILED),$(STAGE3_$(1)_TARGET_IS_PROFILED),NO)"),("target ships profiling libraries","$(if $(STAGE3_$(1)_TARGET_SHIPS_PROF_LIBS),$(STAGE3_$(1)_TARGET_SHIPS_PROF_LIBS),NO)")]/' $$(TARGET_DIR)/lib/settings
 
 	$$(DIST_DIR)/bin/$(1)-ghc --info
 
@@ -1165,6 +1218,46 @@ $(DIST_DIR)/haskell-toolchain.tar.gz: $(STAGE2_STAMP) | stable-cabal stage3-java
 		$(foreach exe,$(STAGE3_EXECUTABLES),bin/javascript-unknown-ghcjs-$(exe)$(EXE_EXT)) \
 		lib/targets/javascript-unknown-ghcjs \
 		bin/cabal
+	@echo "::endgroup::"
+
+# Multi-target GHC bindist:
+#   native (lib/$(HOST_PLATFORM)) + wasm32-unknown-wasi + javascript-unknown-ghcjs
+#
+# The stage2 native ghc binary dispatches via argv[0]: invoking
+# bin/wasm32-unknown-wasi-ghc reads lib/targets/wasm32-unknown-wasi/lib/settings,
+# bin/javascript-unknown-ghcjs-ghc reads .../javascript-unknown-ghcjs/lib/settings,
+# bin/ghc reads lib/settings. Same physical binary, three targets.
+#
+# We use `tar czhf` (dereference symlinks) so the cross-prefixed bin entries
+# (which are symlinks to bin/<exe> per the stage3 rule's $(LN_SF) loop) become
+# standalone copies in the tarball. The native bin/<exe> entries are real
+# files. Cost: ~30 MB extra vs preserving symlinks; predictability gain:
+# ghcup's targetPattern glob picks up real files reliably regardless of
+# its symlink-following behaviour.
+#
+# JS doesn't use ghc-iserv (the JS backend has its own evaluator); filter
+# it out of the JS bin list so we don't ship a useless prefixed copy.
+$(DIST_DIR)/ghc-multi-target.tar.gz: | stage3-wasm32-unknown-wasi stage3-javascript-unknown-ghcjs
+	@echo "::group::Creating ghc-multi-target.tar.gz..."
+	@cp -f mk/multi-target-relocate.sh $(DIST_DIR)/relocate.sh
+	@chmod +x $(DIST_DIR)/relocate.sh
+	@cp -f mk/multi-target-configure.sh $(DIST_DIR)/configure
+	@chmod +x $(DIST_DIR)/configure
+	@cp -f mk/multi-target-bindist-Makefile $(DIST_DIR)/Makefile
+	tar czhf $@ \
+		--directory=$(DIST_DIR) \
+		$(foreach exe,$(STAGE2_EXECUTABLES),bin/$(exe)$(EXE_EXT)) \
+		$(foreach exe,$(STAGE3_EXECUTABLES),bin/wasm32-unknown-wasi-$(exe)$(EXE_EXT)) \
+		$(foreach exe,$(filter-out ghc-iserv,$(STAGE3_EXECUTABLES)),bin/javascript-unknown-ghcjs-$(exe)$(EXE_EXT)) \
+		lib/ghc-usage.txt \
+		lib/ghci-usage.txt \
+		lib/package.conf.d \
+		lib/settings \
+		lib/template-hsc.h \
+		lib/$(HOST_PLATFORM) \
+		lib/targets/wasm32-unknown-wasi \
+		lib/targets/javascript-unknown-ghcjs \
+		relocate.sh configure Makefile
 	@echo "::endgroup::"
 
 $(DIST_DIR)/tests.tar.gz:
