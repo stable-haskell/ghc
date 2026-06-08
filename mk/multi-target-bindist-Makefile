@@ -1,0 +1,45 @@
+# Makefile — bundled with the stable-haskell multi-target GHC bindist.
+#
+# ghcup's `install ghc <version>` flow is "./configure --prefix=DIR &&
+# make install". The bindist is already laid out as bin/ + lib/ +
+# relocate.sh; install just copies that layout into the prefix and
+# refreshes the per-target package-db caches.
+
+include config.mk
+
+.PHONY: install
+
+install:
+	@mkdir -p "$(DESTDIR)$(prefix)"
+	@cp -PR bin "$(DESTDIR)$(prefix)/"
+	@cp -PR lib "$(DESTDIR)$(prefix)/"
+	@if [ -f relocate.sh ]; then \
+	  cp relocate.sh "$(DESTDIR)$(prefix)/relocate.sh"; \
+	  chmod +x "$(DESTDIR)$(prefix)/relocate.sh"; \
+	  echo "Running relocate.sh to recache all per-target package dbs..."; \
+	  "$(DESTDIR)$(prefix)/relocate.sh" || \
+	    { echo "warning: relocate.sh failed; package.cache may be stale" >&2 ; }; \
+	fi
+	@echo ""
+	@echo "Tool prerequisites for each shipped target:"
+	@if ! command -v node >/dev/null 2>&1; then \
+	  echo "  [missing] node >= 22 — needed by wasm32 + javascript target TH eval"; \
+	else \
+	  echo "  [ok]      node ($$(node --version 2>/dev/null))"; \
+	fi
+	@if ! command -v wasm32-unknown-wasi-clang >/dev/null 2>&1; then \
+	  echo "  [missing] wasm32-unknown-wasi-clang — needed by wasm32 target (install wasi-sdk via ghc-wasm-meta bootstrap)"; \
+	else \
+	  echo "  [ok]      wasm32-unknown-wasi-clang"; \
+	fi
+	@if ! command -v emcc >/dev/null 2>&1; then \
+	  echo "  [missing] emcc — needed by javascript-unknown-ghcjs target (install emscripten)"; \
+	else \
+	  echo "  [ok]      emcc ($$(emcc --version 2>/dev/null | head -1))"; \
+	fi
+	@echo ""
+	@echo "Installed stable-haskell multi-target GHC to: $(DESTDIR)$(prefix)"
+	@echo "Invocations:"
+	@echo "  $(prefix)/bin/ghc                          (native)"
+	@echo "  $(prefix)/bin/wasm32-unknown-wasi-ghc      (wasm cross)"
+	@echo "  $(prefix)/bin/javascript-unknown-ghcjs-ghc (JS cross)"
