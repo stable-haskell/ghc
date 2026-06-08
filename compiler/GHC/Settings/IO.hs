@@ -185,6 +185,34 @@ initSettings top_dir = do
   ghcWithInterpreter <- getBooleanSetting "Use interpreter"
   useLibFFI <- getBooleanSetting "Use LibFFI"
 
+  -- Per-target dial #1: is the GHC for THIS target capable of
+  -- producing dynamic output (i.e. honouring -dynamic /
+  -- -dynamic-too)? On a multi-target bindist with one shared stage2
+  -- GHC binary, this can't be derived from the binary's compile-
+  -- time `hostIsDynamic`. Default True for backward compatibility
+  -- with older bindist settings files that predate the key.
+  targetIsDynamic <- either (const $ pure True) pure $
+    getRawBooleanSetting settingsFile mySettings "target is dynamic"
+
+  -- Per-target dial #2: does this target's installed lib tree
+  -- actually ship .dyn_hi / .so files? Independent of
+  -- `target is dynamic` so a dynamic-capable target can still
+  -- truthfully say it doesn't ship artifacts (e.g. a slimmed
+  -- bindist). cabal-install combines both via GHC Dynamic to
+  -- decide whether to enable library-dynamic by default.
+  targetShipsDynLibs <- either (const $ pure True) pure $
+    getRawBooleanSetting settingsFile mySettings "target ships dynamic libraries"
+
+  -- Profiling-way analogues of the two dyn dials above. Drive
+  -- `GHC Profiled` the same way (sTargetIsProfiled && sTargetShipsProfLibs).
+  -- Defaults to True for backward compatibility with bindists that
+  -- predate the keys — matches the historical hostIsProfiled
+  -- behaviour when GHC was prof-built.
+  targetIsProfiled <- either (const $ pure True) pure $
+    getRawBooleanSetting settingsFile mySettings "target is profiled"
+  targetShipsProfLibs <- either (const $ pure True) pure $
+    getRawBooleanSetting settingsFile mySettings "target ships profiling libraries"
+
   baseUnitId <- getSetting_raw "base unit-id"
 
   return $ Settings
@@ -267,6 +295,10 @@ initSettings top_dir = do
       , platformMisc_libFFI = useLibFFI
       , platformMisc_llvmTarget = llvmTarget
       , platformMisc_targetRTSLinkerOnlySupportsSharedLibs = targetRTSLinkerOnlySupportsSharedLibs
+      , platformMisc_targetIsDynamic = targetIsDynamic
+      , platformMisc_targetShipsDynLibs = targetShipsDynLibs
+      , platformMisc_targetIsProfiled = targetIsProfiled
+      , platformMisc_targetShipsProfLibs = targetShipsProfLibs
       }
 
     , sRawSettings    = settingsList
