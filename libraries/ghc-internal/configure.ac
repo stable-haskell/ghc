@@ -240,8 +240,8 @@ AC_SUBST(GhcGmpVerMi)
 AC_SUBST(GhcGmpVerPl)
 
 # Compute offsets/sizes used by jsbits/base.js
-if test "$host" = "javascript-ghcjs"
-then
+case "$host" in
+javascript*)
   FP_COMPUTE_OFFSET([OFFSET_STAT_ST_MODE],    [stat], [st_mode],    [#include <sys/stat.h>])
   FP_COMPUTE_OFFSET([OFFSET_STAT_ST_DEV],     [stat], [st_dev],     [#include <sys/stat.h>])
   FP_COMPUTE_OFFSET([OFFSET_STAT_ST_UID],     [stat], [st_uid],     [#include <sys/stat.h>])
@@ -281,7 +281,8 @@ then
   FP_COMPUTE_SIZE([SIZEOF_UTIMBUF_ACTIME],  [utimbuf], [actime],  [#include <utime.h>])
   FP_COMPUTE_SIZE([SIZEOF_UTIMBUF_MODTIME], [utimbuf], [modtime], [#include <utime.h>])
   AC_CHECK_SIZEOF([struct utimbuf], [], [#include <utime.h>])
-fi
+  ;;
+esac
 
 # map standard C types and ISO types to Haskell types
 FPTOOLS_CHECK_HTYPE(char)
