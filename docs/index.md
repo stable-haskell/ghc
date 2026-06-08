@@ -1,7 +1,7 @@
 # stable-haskell wasm
 
-Install a **Haskell-to-WebAssembly cross-compiler** in two `ghcup` commands
-and ship a wasm binary in three.
+Install a **multi-target GHC** — native + wasm + JS in one bindist — and ship a
+wasm (or JS) binary, all from a single `ghcup` install.
 
 ## Quick install
 
@@ -21,7 +21,7 @@ error when TH needs it.
 
 | Tool                              | Version                       |
 |-----------------------------------|-------------------------------|
-| GHC (wasm32-unknown-wasi)         | `{{ wasm_version }}`          |
+| GHC (multi-target: native + wasm + JS) | `{{ ghc_version }}`      |
 | `cabal-install` (dual-compiler)   | `{{ cabal_version }}`         |
 
 The `cabal-install` here ships a [target-prefix-aware
@@ -43,14 +43,16 @@ cross-compiler for the package code itself.
 
 - :material-rocket-launch: [**Install**](install.md) — the full install path with troubleshooting links
 - :material-package-down: [**hello template**](examples/hello.md) — 90 seconds to a working wasm reactor
+- :material-language-javascript: [**JS + native hello**](examples/hello-js.md) — the same source on the JavaScript backend and natively
 - :material-rocket: [**miso-counter template**](examples/miso-counter.md) — full interactive UI with 50+ TH-heavy deps
 - :material-file-tree: [**Anatomy**](anatomy.md) — what each file in the template actually does
 - :material-wrench: [**Troubleshooting**](troubleshooting.md) — common errors and fixes
 
 ## Project links
 
-- [Release: `{{ wasm_version }}` (GHC)]({{ release_base }}/{{ wasm_version }})
+- [Release: `{{ ghc_version }}` (GHC)]({{ release_base }}/{{ ghc_version }})
 - [Release: `cabal-{{ cabal_version }}`]({{ repo_url }}/releases/tag/cabal-{{ cabal_version }})
 - [PR #181 — wasm cross-compile infrastructure]({{ repo_url }}/pull/181)
+- [PR #184 — multi-target bindist (native + wasm + JS)]({{ repo_url }}/pull/184)
 - [stable-haskell/cabal#361 — target-prefix-aware `ghc-pkg` guess](https://github.com/stable-haskell/cabal/pull/361)
 - [Channel YAML]({{ channel_url }}) — the raw ghcup metadata

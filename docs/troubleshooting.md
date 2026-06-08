@@ -6,10 +6,12 @@ Common errors and fixes, ordered roughly by how often we've seen them.
 
 ### `wasm32-unknown-wasi-ghc: command not found`
 
-The cross-compiler is installed but not on `PATH`. Add it:
+The multi-target GHC is installed but its symlinks aren't on `PATH`. Run
+`ghcup set ghc {{ ghc_version }}` to (re)create the per-target symlinks in
+`~/.ghcup/bin`, then make sure that dir is on `PATH`:
 
 ```sh
-export PATH="$HOME/.ghcup/ghc/{{ wasm_version }}/bin:$PATH"
+export PATH="$HOME/.ghcup/bin:$PATH"
 ```
 
 For permanent use, add that line to your `~/.bashrc` / `~/.zshrc` etc.

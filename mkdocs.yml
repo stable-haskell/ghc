@@ -79,7 +79,8 @@ nav:
   - Home: index.md
   - Install: install.md
   - Examples:
-      - hello (90 s): examples/hello.md
+      - hello (wasm, 90 s): examples/hello.md
+      - hello (JS + native): examples/hello-js.md
       - miso-counter (full app): examples/miso-counter.md
   - Anatomy of the template: anatomy.md
   - Troubleshooting: troubleshooting.md

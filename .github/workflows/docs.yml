@@ -59,8 +59,9 @@ jobs:
           git fetch origin gh-pages
           git worktree add /tmp/ghp gh-pages
 
-          # ghcup channel YAML — MUST keep, end users hit this URL
-          cp /tmp/ghp/ghcup-wasm.yaml site/
+          # ghcup channel YAMLs — MUST keep, end users hit these URLs
+          # (glob so new channels like ghcup-multi-target-*.yaml survive too)
+          cp /tmp/ghp/ghcup-*.yaml site/
 
           # Live miso demo
           mkdir -p site/demos
@@ -68,12 +69,12 @@ jobs:
 
           # Downloadable example tarballs
           mkdir -p site/examples
-          cp /tmp/ghp/examples/stable-haskell-wasm-*.tar.gz site/examples/
+          cp /tmp/ghp/examples/stable-haskell-*.tar.gz site/examples/
 
           # Raw template source files (linked from anatomy docs etc.)
           # We preserve everything in examples/{hello,miso-counter}/ EXCEPT
           # README.md — the rendered mkdocs pages supersede those.
-          for tpl in hello miso-counter; do
+          for tpl in hello hello-js miso-counter; do
             mkdir -p site/examples/$tpl
             rsync -a --exclude README.md \
               /tmp/ghp/examples/$tpl/ site/examples/$tpl/
@@ -81,11 +82,14 @@ jobs:
 
           # Sanity check — fail loud if anything we depend on is missing
           for f in site/ghcup-wasm.yaml \
+                   site/ghcup-multi-target-0.1.0.yaml \
                    site/demos/miso-counter/index.html \
                    site/demos/miso-counter/myapp.wasm \
                    site/examples/stable-haskell-wasm-hello.tar.gz \
                    site/examples/stable-haskell-wasm-miso-counter.tar.gz \
+                   site/examples/stable-haskell-js-hello.tar.gz \
                    site/examples/hello/Makefile \
+                   site/examples/hello-js/Makefile \
                    site/examples/miso-counter/Makefile; do
             test -f "$f" || { echo "::error::carry-over missing: $f"; exit 1; }
           done

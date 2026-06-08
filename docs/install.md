@@ -26,7 +26,7 @@
 * **python3** — for the `make run-web` static server in the templates (any
   static server works; this just uses `python3 -m http.server`).
 
-* **wasi-sdk** — the wasm GHC's C compiler (`wasm32-unknown-wasi-clang`)
+* **wasi-sdk** *(for the wasm target)* — the wasm GHC's C compiler (`wasm32-unknown-wasi-clang`)
   lives here. We deliberately don't bundle wasi-sdk in the ghcup channel —
   its version pinning is [ghc-wasm-meta](https://gitlab.haskell.org/ghc/ghc-wasm-meta)'s
   domain, and we'd rather defer to a single source of truth. Install via
@@ -49,27 +49,43 @@
         for tool in clang clang++; do
           ln -sf "$WASI_BIN/wasm32-wasi-$tool" "$WASI_BIN/wasm32-unknown-wasi-$tool"
         done
+        for tool in ar nm ranlib strip; do
+          ln -sf "$WASI_BIN/llvm-$tool" "$WASI_BIN/wasm32-unknown-wasi-$tool"
+        done
         ```
 
         Once we ship a `ghc98-minimal-ghc-web` devx flavor (see
         [stable-haskell/devx#250](https://github.com/input-output-hk/devx/pull/250)),
         this dance disappears.
 
+* **emscripten** *(for the JS target)* — the JS backend's C toolchain, the
+  JS analogue of wasi-sdk. Install + activate:
+
+    ```sh
+    git clone --depth 1 --branch 3.1.74 https://github.com/emscripten-core/emsdk.git
+    cd emsdk && ./emsdk install 3.1.74 && ./emsdk activate 3.1.74 && source ./emsdk_env.sh
+    ```
+
 ## Install the toolchain
 
 {% include-markdown "_snippets/install-channel.md" %}
 
-Then add the cross-compiler bin dir to your `$PATH` so the
-`wasm32-unknown-wasi-*` binaries resolve:
+`ghcup set` (above) symlinks every per-target binary — `ghc` (native),
+`wasm32-unknown-wasi-*`, and `javascript-unknown-ghcjs-*` — into `~/.ghcup/bin`,
+which ghcup keeps on your `$PATH`. If it isn't already there, add it:
 
 ```sh
-export PATH="$HOME/.ghcup/ghc/{{ wasm_version }}/bin:$PATH"
+export PATH="$HOME/.ghcup/bin:$PATH"
 ```
 
 ## Verify
 
 ```sh
-$ wasm32-unknown-wasi-ghc --version
+$ ghc --version                          # native
+The Glorious Glasgow Haskell Compilation System, version 9.14.0
+$ wasm32-unknown-wasi-ghc --version      # wasm cross
+The Glorious Glasgow Haskell Compilation System, version 9.14.0
+$ javascript-unknown-ghcjs-ghc --version # JS cross
 The Glorious Glasgow Haskell Compilation System, version 9.14.0
 $ cabal --version
 cabal-install version {{ cabal_version }}
@@ -82,9 +98,9 @@ template](examples/hello.md).
 
 | Host                                | Status      | Tarball |
 |-------------------------------------|-------------|---------|
-| `aarch64-darwin` (Apple Silicon)    | ✅ shipping | [`ghc-wasm32-unknown-wasi-aarch64-darwin.tar.gz`]({{ release_base }}/{{ wasm_version }}/ghc-wasm32-unknown-wasi-aarch64-darwin.tar.gz) |
-| `x86_64-linux`                      | ✅ shipping | [`ghc-wasm32-unknown-wasi-x86_64-linux.tar.gz`]({{ release_base }}/{{ wasm_version }}/ghc-wasm32-unknown-wasi-x86_64-linux.tar.gz) |
-| `aarch64-linux`                     | ✅ shipping | [`ghc-wasm32-unknown-wasi-aarch64-linux.tar.gz`]({{ release_base }}/{{ wasm_version }}/ghc-wasm32-unknown-wasi-aarch64-linux.tar.gz) |
+| `aarch64-darwin` (Apple Silicon)    | ✅ shipping | [`ghc-multi-target-aarch64-darwin.tar.gz`]({{ release_base }}/{{ ghc_version }}/ghc-multi-target-aarch64-darwin.tar.gz) |
+| `x86_64-linux`                      | ✅ shipping | [`ghc-multi-target-x86_64-linux.tar.gz`]({{ release_base }}/{{ ghc_version }}/ghc-multi-target-x86_64-linux.tar.gz) |
+| `aarch64-linux`                     | ✅ shipping | [`ghc-multi-target-aarch64-linux.tar.gz`]({{ release_base }}/{{ ghc_version }}/ghc-multi-target-aarch64-linux.tar.gz) |
 | `x86_64-darwin`, Windows            | follow-up   | — |
 
 The package-db binary cache (`package.cache`) is regenerated automatically by
@@ -95,14 +111,15 @@ install — `ghcup` does the right thing out of the box.
 
 ```text
 $HOME/.ghcup/
-├── ghc/{{ wasm_version }}/
-│   ├── bin/                    # wasm32-unknown-wasi-* binaries
+├── bin/                        # ghcup symlinks: ghc, wasm32-unknown-wasi-*,
+│                               #   javascript-unknown-ghcjs-*, cabal, …
+├── ghc/{{ ghc_version }}/
+│   ├── bin/                    # one binary, three targets (argv[0] dispatch)
+│   ├── lib/                    # native package db + libraries
 │   ├── lib/targets/
-│   │   └── wasm32-unknown-wasi/
-│   │       ├── lib/            # the actual cross-compiler libraries
-│   │       ├── lib/dyld.mjs    # JS dyld shim for Template Haskell
-│   │       └── lib/post-link.mjs   # JSFFI glue generator
-│   └── share/                  # GHCi templates, settings, etc.
+│   │   ├── wasm32-unknown-wasi/lib/        # wasm libs (+ post-link.mjs, dyld.mjs)
+│   │   └── javascript-unknown-ghcjs/lib/   # JS libs
+│   └── share/                  # settings, GHCi templates, etc.
 └── cabal/{{ cabal_version }}/
     └── bin/cabal               # dual-compiler aware cabal-install
 ```

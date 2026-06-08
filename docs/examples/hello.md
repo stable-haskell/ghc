@@ -21,7 +21,7 @@ Plus **Node.js 22+** on `$PATH`.
 ```sh
 curl -L -o hello.tar.gz {{ site_url }}/examples/stable-haskell-wasm-hello.tar.gz
 tar xf hello.tar.gz && cd stable-haskell-wasm-hello
-export PATH="$HOME/.ghcup/ghc/{{ wasm_version }}/bin:$PATH"
+export PATH="$HOME/.ghcup/bin:$PATH"
 
 make build      # cabal build via the wasm cross-compiler
 make run-node   # post-link + node run.mjs       → prints "Hello from the WASM reactor!"
@@ -46,10 +46,9 @@ make clean      # remove build artifacts
   `wasi.initialize` → `__ghc_wasm_jsffi_init` → `hs_start`. All three steps
   are mandatory; skipping `__ghc_wasm_jsffi_init` yields *"RTS is not
   initialised; call hs_init() first"*.
-* **`Makefile`** — wires `post-link.mjs` (ships in
-  `~/.ghcup/ghc/{{ wasm_version }}/lib/targets/wasm32-unknown-wasi/lib/`) into
-  the build so you don't have to remember the path. Override `WASM_VERSION`
-  if you need a different one.
+* **`Makefile`** — wires `post-link.mjs` into the build. It finds the path
+  automatically via `wasm32-unknown-wasi-ghc --print-libdir`, so there's no
+  version to hardcode (works under any GHC install, multi-target or otherwise).
 
 ## Want more?
 

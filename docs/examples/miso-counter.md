@@ -35,7 +35,7 @@ Plus:
 ```sh
 curl -L -o miso.tar.gz {{ site_url }}/examples/stable-haskell-wasm-miso-counter.tar.gz
 tar xf miso.tar.gz && cd stable-haskell-wasm-miso-counter
-export PATH="$HOME/.ghcup/ghc/{{ wasm_version }}/bin:$PATH"
+export PATH="$HOME/.ghcup/bin:$PATH"
 
 make build      # FIRST run: ~5-10 min (50+ TH-heavy deps from scratch)
 make run-web    # post-link + serve public/ → http://localhost:8000
