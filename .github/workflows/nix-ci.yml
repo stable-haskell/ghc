@@ -83,7 +83,7 @@ jobs:
         echo "=== Disk usage after cleanup ==="
         df -h / || true
 
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
       with:
         submodules: "recursive"
         fetch-depth: 1
@@ -226,14 +226,14 @@ jobs:
     # Upload dist artifact FIRST so downstream jobs (test, cross) can start
     # as soon as the build job finishes, without waiting for metrics/plots.
     - name: Upload dist
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       with:
         name: ${{ matrix.plat }}-dynamic${{ matrix.dynamic }}-dist
         retention-days: 1
         path: _build/dist
 
     - name: Upload build logs and timing
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       if: ${{ !cancelled() }}
       with:
         name: ${{ matrix.plat }}-dynamic${{ matrix.dynamic }}-build-logs
@@ -243,7 +243,7 @@ jobs:
           _build/timing/
 
     - name: Upload metrics
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       if: ${{ !cancelled() }}
       with:
         name: ${{ matrix.plat }}-dynamic${{ matrix.dynamic }}-build-metrics
@@ -371,7 +371,7 @@ jobs:
         echo "=== Disk usage after cleanup ==="
         df -h / || true
 
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
       with:
         submodules: "recursive"
         fetch-depth: 1
@@ -390,7 +390,7 @@ jobs:
         ghc: true
 
     - name: Download dist
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v5
       with:
         name: ${{ matrix.plat }}-dynamic${{ matrix.dynamic }}-dist
         path: _build/dist
@@ -473,7 +473,7 @@ jobs:
 
     # Upload test artifacts FIRST, before slow metrics generation.
     - name: Upload test results
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       if: ${{ !cancelled() }}
       with:
         name: ${{ matrix.plat }}-dynamic${{ matrix.dynamic }}-testsuite-results
@@ -484,7 +484,7 @@ jobs:
           _build/test-junit.xml
 
     - name: Upload test metrics
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       if: ${{ !cancelled() }}
       with:
         name: ${{ matrix.plat }}-dynamic${{ matrix.dynamic }}-test-metrics
@@ -618,7 +618,7 @@ jobs:
         echo "=== Disk usage after cleanup ==="
         df -h / || true
 
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
       with:
         submodules: "recursive"
         fetch-depth: 1
@@ -645,7 +645,7 @@ jobs:
         ghc: true
 
     - name: Download dist
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v5
       with:
         # dynamic1 stage2:
         #   1. happy-lib / alex etc. need native Prelude.dyn_hi at build-side
@@ -862,7 +862,7 @@ jobs:
         echo "::notice::darwin bindist is clean — CLEAN_DARWIN_DIST did its job."
 
     - name: Upload MULTI cross artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       if: ${{ !cancelled() }}
       with:
         name: ${{ matrix.plat }}-cross-multi

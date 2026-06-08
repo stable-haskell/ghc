@@ -5,11 +5,11 @@
 # Linux users hit "Unable to find a download for Tool 'cabal'" during
 # `ghcup install cabal 3.17.0.0.stable.0`.
 #
-# This workflow rebuilds cabal-install from the same source the darwin
-# release used (stable-haskell/cabal SHA 44817477 + the r12 target-prefix-
-# aware ghc-pkg-guess patch — r8 GHCJS-removal is already absorbed by
-# upstream cleanup so we don't need to apply it) for x86_64-linux +
-# aarch64-linux, and uploads the binaries as workflow artifacts.
+# This workflow rebuilds cabal-install from the upstream branch
+# stable-haskell/cabal:stable-haskell/feature/wasm-cross-ghcup-stack
+# (a 2-commit stack of #368 rpath relativize + #361 target-prefix-aware
+# tool guess) for x86_64-linux + aarch64-linux, and uploads the binaries
+# as workflow artifacts.
 #
 # Triggers:
 #   * workflow_dispatch — manual, lets us preview the build before tagging
@@ -110,7 +110,7 @@ jobs:
       #    branch), so no patch application is required here.
       # ---------------------------------------------------------------------
       - name: Checkout stable-haskell/cabal @ CABAL_SHA
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: stable-haskell/cabal
           ref: ${{ env.CABAL_SHA }}
@@ -178,7 +178,7 @@ jobs:
       #    was a tag push or workflow_dispatch with release_tag set.
       # ---------------------------------------------------------------------
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: cabal-${{ env.CABAL_VER }}-${{ matrix.plat }}
           path: cabal-${{ env.CABAL_VER }}-${{ matrix.plat }}.tar.gz

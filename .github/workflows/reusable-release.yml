@@ -117,7 +117,7 @@ jobs:
       - name: Install GHC
         run: ghcup --no-verbose install ghc --set --install-targets "${{ env.GHC_TARGETS }}" "${{ env.GHC_VERSION }}"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ matrix.branch }}
           submodules: recursive
@@ -222,7 +222,7 @@ jobs:
                     }
                   ]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ matrix.branch }}
           submodules: recursive
@@ -304,7 +304,7 @@ jobs:
       matrix:
         branch: ${{ fromJSON(inputs.branches) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ matrix.branch }}
           submodules: recursive
@@ -359,7 +359,7 @@ jobs:
       matrix:
         branch: ${{ fromJSON(inputs.branches) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ matrix.branch }}
           submodules: recursive
@@ -415,7 +415,7 @@ jobs:
       run:
         shell: 'C:/msys64/usr/bin/bash.exe --login -e {0}'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ matrix.branch }}
           submodules: recursive
@@ -469,7 +469,7 @@ jobs:
       matrix:
         branch: ${{ fromJSON(inputs.branches) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ matrix.branch }}
           submodules: recursive
@@ -651,7 +651,7 @@ jobs:
       - name: git clone fix
         run: git config --system --add safe.directory $GITHUB_WORKSPACE
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ matrix.branch }}
 
@@ -703,7 +703,7 @@ jobs:
                     }
                   ]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ matrix.branch }}
 
@@ -736,7 +736,7 @@ jobs:
       matrix:
         branch: ${{ fromJSON(inputs.branches) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ matrix.branch }}
 
@@ -763,7 +763,7 @@ jobs:
       matrix:
         branch: ${{ fromJSON(inputs.branches) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ matrix.branch }}
           submodules: recursive
@@ -793,7 +793,7 @@ jobs:
       run:
         shell: 'C:/msys64/usr/bin/bash.exe --login -e {0}'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ matrix.branch }}
           submodules: recursive
@@ -825,7 +825,7 @@ jobs:
       matrix:
         branch: ${{ fromJSON(inputs.branches) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ matrix.branch }}
 
