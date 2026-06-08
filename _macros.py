@@ -10,7 +10,7 @@ that uses {{ ghc_version }} / {{ cabal_version }} updates automatically.
 def define_env(env):
     # Versions exposed in install commands / PATH exports / changelog links.
     # ghc_version is the MULTI-TARGET bindist (native + wasm + JS in one).
-    env.variables["ghc_version"]   = "multi-9.14.0.stable.1"
+    env.variables["ghc_version"]   = "multi-9.14.0.stable.2"
     env.variables["cabal_version"] = "3.17.0.0.stable.0"
 
     # URLs we link to a lot

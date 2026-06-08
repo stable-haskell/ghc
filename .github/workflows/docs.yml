@@ -76,7 +76,7 @@ jobs:
           # README.md — the rendered mkdocs pages supersede those.
           for tpl in hello hello-js miso-counter; do
             mkdir -p site/examples/$tpl
-            rsync -a --exclude README.md \
+            rsync -a --exclude README.md --exclude index.html \
               /tmp/ghp/examples/$tpl/ site/examples/$tpl/
           done
 
