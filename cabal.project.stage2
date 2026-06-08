@@ -58,8 +58,6 @@ packages:
   https://hackage.haskell.org/package/exceptions-0.10.11/exceptions-0.10.11.tar.gz
   https://hackage.haskell.org/package/file-io-0.1.5/file-io-0.1.5.tar.gz
   https://hackage.haskell.org/package/filepath-1.5.4.0/filepath-1.5.4.0.tar.gz
-  -- hackage security is patched
-  -- https://hackage.haskell.org/package/hackage-security-0.6.3.2/hackage-security-0.6.3.2.tar.gz
   https://hackage.haskell.org/package/haskeline-0.8.3.0/haskeline-0.8.3.0.tar.gz
   https://hackage.haskell.org/package/hpc-0.7.0.2/hpc-0.7.0.2.tar.gz
   https://hackage.haskell.org/package/libffi-clib-3.5.2/libffi-clib-3.5.2.tar.gz
