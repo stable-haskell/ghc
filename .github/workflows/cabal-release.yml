@@ -25,17 +25,15 @@ on:
   push:
     tags: ['cabal-3.17.0.0.stable.*']
   pull_request:
-    # validate workflow OR patch-source changes — same pattern as
-    # channel-e2e.yml. A PR that updates the workflow or a referenced patch
-    # gets a real cabal build to confirm everything still hangs together.
+    # validate workflow changes — a PR that updates the workflow gets a
+    # real cabal build to confirm everything still hangs together.
     paths:
       - '.github/workflows/cabal-release.yml'
-      - 'lode/r12-cabal-target-prefix-aware-tool-guess.patch'
   workflow_dispatch:
     inputs:
       cabal_sha:
         description: 'stable-haskell/cabal SHA to build'
-        default: '44817477ff6d22de4bfa4307e061df58f319d3b6'
+        default: '8b8433b736d45ec53a103baf4e4aabb8010ca2ed'
       release_tag:
         description: 'Release tag to upload to (leave blank to skip upload)'
         default: ''
@@ -60,7 +58,10 @@ jobs:
           - { plat: aarch64-linux, runs-on: ubuntu-24.04-arm }
 
     env:
-      CABAL_SHA: ${{ inputs.cabal_sha || '44817477ff6d22de4bfa4307e061df58f319d3b6' }}
+      # stable-haskell/cabal:stable-haskell/feature/wasm-cross-ghcup-stack
+      # — a 2-commit stack of #368 (rpath relativize) + #361 (target-prefix
+      # tool guess). Same SHA pinned by cabal.project.stage{0,1,2,3}.
+      CABAL_SHA: ${{ inputs.cabal_sha || '8b8433b736d45ec53a103baf4e4aabb8010ca2ed' }}
       # bootstrap GHC for compiling cabal-install itself
       BOOTSTRAP_GHC: '9.8.4'
       # the cabal-install version produced (used in the artifact filename)
@@ -103,15 +104,11 @@ jobs:
           cabal --version
 
       # ---------------------------------------------------------------------
-      # 3. Checkout stable-haskell/cabal at the recorded SHA + apply r12.
-      #    r8 (GHCJS removal) is already absorbed by upstream cleanup at this
-      #    SHA, so only r12 needs to apply.
+      # 3. Checkout stable-haskell/cabal at the recorded SHA — the rpath
+      #    relativize and target-prefix-aware tool guess patches are both
+      #    already in the SHA (stable-haskell/feature/wasm-cross-ghcup-stack
+      #    branch), so no patch application is required here.
       # ---------------------------------------------------------------------
-      - name: Checkout this repo (for r12 patch)
-        uses: actions/checkout@v4
-        with:
-          path: ghc
-
       - name: Checkout stable-haskell/cabal @ CABAL_SHA
         uses: actions/checkout@v4
         with:
@@ -121,13 +118,6 @@ jobs:
           # We need full history because the SHA might not be on the default
           # branch tip; the ref above pins a commit not a branch.
           fetch-depth: 0
-
-      - name: Apply r12 (target-prefix-aware ghc-pkg guess)
-        working-directory: cabal-src
-        run: |
-          set -euo pipefail
-          git apply --verbose ../ghc/lode/r12-cabal-target-prefix-aware-tool-guess.patch
-          git diff --stat | tail -5
 
       # ---------------------------------------------------------------------
       # 4. Build cabal-install. We use the release-project to get the
