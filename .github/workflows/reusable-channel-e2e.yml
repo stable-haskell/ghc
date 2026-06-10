@@ -160,20 +160,31 @@ jobs:
           cabal --version
 
       # ---------------------------------------------------------------------
-      # 4b (artifact mode). Download cabal artifact built by the
-      #     reusable-cabal-release job in this run; extract to ~/.local/bin.
-      #     Darwin: no cabal artifact (we build Linux only); fall back to
-      #     ghcup channel install.
+      # 4b (artifact mode). Two install paths for cabal:
+      #   * Linux  — download cabal artifact built by reusable-cabal-release
+      #              in this run, extract to ~/.local/bin
+      #   * Darwin — no cabal artifact (we build Linux only); fall back to
+      #              the ghcup wasm channel
+      #
+      # Download step uses continue-on-error so a failed cabal-release
+      # for one platform doesn't cascade into an e2e job failure — we
+      # detect the missing artifact via steps.dl_cabal.outcome and fall
+      # back to the channel install path instead.
       # ---------------------------------------------------------------------
       - name: Download cabal bindist artifact — artifact mode (Linux)
+        id: dl_cabal
         if: ${{ inputs.install_mode == 'artifact' && runner.os == 'Linux' }}
+        continue-on-error: true
         uses: actions/download-artifact@v5
         with:
           name: cabal-${{ inputs.cabal_version }}-${{ matrix.plat }}
           path: ${{ runner.temp }}/cabal-artifact
 
-      - name: Install cabal from artifact — artifact mode (Linux)
-        if: ${{ inputs.install_mode == 'artifact' && runner.os == 'Linux' }}
+      - name: Install cabal from artifact — artifact mode (Linux, present)
+        if: >-
+          ${{ inputs.install_mode == 'artifact'
+              && runner.os == 'Linux'
+              && steps.dl_cabal.outcome == 'success' }}
         run: |
           set -euo pipefail
           mkdir -p "$HOME/.local/bin"
@@ -181,6 +192,20 @@ jobs:
             -C "$HOME/.local/bin"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           "$HOME/.local/bin/cabal" --version
+
+      - name: Install cabal via wasm channel — artifact-mode fallback (Linux, missing)
+        if: >-
+          ${{ inputs.install_mode == 'artifact'
+              && runner.os == 'Linux'
+              && steps.dl_cabal.outcome != 'success' }}
+        run: |
+          set -euo pipefail
+          echo "::warning::cabal-${CABAL_VER}-${{ matrix.plat }} artifact missing (cabal-release failed?) — falling back to wasm channel install"
+          ghcup config add-release-channel \
+            https://stable-haskell.github.io/ghc/ghcup-wasm.yaml
+          ghcup install cabal "$CABAL_VER"
+          ghcup set     cabal "$CABAL_VER"
+          cabal --version
 
       - name: Install cabal via wasm channel — artifact mode (Darwin)
         if: ${{ inputs.install_mode == 'artifact' && runner.os == 'macOS' }}
@@ -222,17 +247,39 @@ jobs:
       #     Cross: MULTI in the same workflow run, extract it, and run
       #     the bundled ./configure + make install — the exact flow ghcup
       #     uses end-user-side. Then prepend its bin/ to PATH.
+      #
+      # Cross: MULTI is matrix'd with `continue-on-error: true` in
+      # nix-ci.yml so a single platform failure (e.g. transient github.com
+      # 504 during curl) doesn't block the other platforms. That means
+      # `needs.cross-multi.result` at the caller level resolves "success"
+      # even when one matrix entry didn't upload an artifact — so the
+      # gate has to happen here, per platform. Download is
+      # continue-on-error; install_artifact only runs if the download
+      # succeeded; downstream test steps gate on install_artifact's
+      # `installed=true` output, so a missing artifact cleanly skips
+      # the platform with a warning instead of cascading into failure.
       # ---------------------------------------------------------------------
       - name: Download multi-target GHC artifact — artifact mode
+        id: dl_multi
         if: ${{ inputs.install_mode == 'artifact' }}
+        continue-on-error: true
         uses: actions/download-artifact@v5
         with:
           name: ${{ matrix.plat }}-cross-multi
           path: ${{ runner.temp }}/multi-artifact
 
+      - name: Skip notice — multi-target artifact missing
+        if: >-
+          ${{ inputs.install_mode == 'artifact'
+              && steps.dl_multi.outcome != 'success' }}
+        run: |
+          echo "::warning::${{ matrix.plat }}-cross-multi artifact missing (cross-multi probably failed on this platform) — skipping multi-target tests for ${{ matrix.plat }}"
+
       - name: Install multi-target GHC from artifact
         id: install_artifact
-        if: ${{ inputs.install_mode == 'artifact' }}
+        if: >-
+          ${{ inputs.install_mode == 'artifact'
+              && steps.dl_multi.outcome == 'success' }}
         run: |
           set -euo pipefail
           PREFIX="$HOME/multi-target-install"
