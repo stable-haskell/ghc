@@ -985,9 +985,9 @@ STAGE3_$(1)_CABAL_BUILD = \
 # In DIST_BUILD mode, stage2 binaries come from a pre-built dist artifact;
 # skip the $(GHC2) prerequisite (it points into the stage2 store, not dist).
 ifdef DIST_BUILD
-STAGE3_$(1)_PREREQS = $$(GHC_TOOLCHAIN_BIN) $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) libraries/ghc-boot-th-next cabal.project.common cabal.project.stage3 cabal.project.stage3.settings stage3-$(1)-additional-files
+STAGE3_$(1)_PREREQS = $$(GHC_TOOLCHAIN_BIN) $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) libraries/ghc-boot-th-next cabal.project.common cabal.project.stage3 stage3-$(1)-additional-files
 else
-STAGE3_$(1)_PREREQS = $(GHC2) $$(GHC_TOOLCHAIN_BIN) $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) libraries/ghc-boot-th-next cabal.project.common cabal.project.stage3 cabal.project.stage3.settings stage3-$(1)-additional-files
+STAGE3_$(1)_PREREQS = $(GHC2) $$(GHC_TOOLCHAIN_BIN) $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) libraries/ghc-boot-th-next cabal.project.common cabal.project.stage3 stage3-$(1)-additional-files
 endif
 
 .PHONY: stage3-$(1)
