@@ -212,7 +212,12 @@ THREADS ?= $(shell echo $$(( $(CPUS) + 1 )))
 # Build macros
 #
 
-ifeq ($(MAKE_HOST),x86_64-pc-msys)
+# Detect a Windows host across the make flavours CI may provide: MSYS2 msys
+# (x86_64-pc-msys), MSYS2 mingw/clang64 (x86_64-w64-mingw32) and Cygwin
+# (x86_64-pc-cygwin). The hosted runner's `make` has switched between these
+# (e.g. msys -> cygwin), so match all three rather than a single triple — a
+# miss here silently drops the Windows CC/CXX/LD overrides below.
+ifneq (,$(filter x86_64-pc-msys x86_64-pc-cygwin x86_64-w64-mingw32,$(MAKE_HOST)))
 # Windows executables require .exe extension for native programs to find them
 EXE_EXT := .exe
 
@@ -692,7 +697,7 @@ STAGE2_LIBRARIES = \
 	transformers \
 	xhtml
 
-ifeq ($(MAKE_HOST),x86_64-pc-msys)
+ifneq (,$(filter x86_64-pc-msys x86_64-pc-cygwin x86_64-w64-mingw32,$(MAKE_HOST)))
 STAGE2_LIBRARIES += Win32
 else
 STAGE2_LIBRARIES += terminfo unix
