@@ -23,26 +23,12 @@ import Data.Char
 import GHC.ResponseFile
 import Distribution.System (Platform(..))
 
--- | Extract the 'Verbosity' from the configure flags.
---
--- Cabal 3.17 (commit edb808a0b8b) split the old @Verbosity@ type into
--- 'VerbosityFlags' (the CLI-passable part) and 'VerbosityHandles', so
--- 'configVerbosity' now yields a 'VerbosityFlags' which must be wrapped
--- back into a 'Verbosity' before passing it to the Cabal library functions.
-configVerbosity' :: ConfigFlags -> Verbosity
-#if MIN_VERSION_Cabal(3,17,0)
-configVerbosity' cfg =
-  mkVerbosity defaultVerbosityHandles (fromFlagOrDefault silent (configVerbosity cfg))
-#else
-configVerbosity' cfg = fromFlagOrDefault minBound (configVerbosity cfg)
-#endif
-
 main :: IO ()
 main = defaultMainWithHooks ghcHooks
   where
     ghcHooks = simpleUserHooks
       { confHook = \(gpd, hbi) cfg -> do
-          let verbosity = configVerbosity' cfg
+          let verbosity = fromFlagOrDefault minBound (configVerbosity cfg)
           lbi <- confHook simpleUserHooks (gpd, hbi) cfg
           gitCommitId <- lookupEnv "GIT_COMMIT_ID" >>= \case
             Just str -> return str
@@ -55,7 +41,7 @@ main = defaultMainWithHooks ghcHooks
           return lbi { configFlags = cfs { configProgramArgs = cPa } }
 
       , postConf = \args cfg pd lbi -> do
-          let verbosity = configVerbosity' cfg
+          let verbosity = fromFlagOrDefault minBound (configVerbosity cfg)
           ghcAutogen verbosity lbi
           postConf simpleUserHooks args cfg pd lbi
       }
