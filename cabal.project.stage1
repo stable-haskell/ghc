@@ -45,8 +45,8 @@ packages:
 source-repository-package
   type: git
   location: https://github.com/stable-haskell/Cabal.git
-  -- Pinned to aa57a49 (feature/wasm-cross-ghcup-stack); see cabal.project.stage0.
-  tag: aa57a49b187b067f060eb9f87499edefe5d05120
+  -- Pinned to feat/wasm-cross-ghcup-stack-next (ee3b55e6); see cabal.project.stage0.
+  tag: ee3b55e6df7e27b8909de6a285d14b4473aa0ff6
   subdir: Cabal
           Cabal-syntax
 
