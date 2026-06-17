@@ -152,6 +152,12 @@ GHC_TOOLCHAIN_ARGS  = --disable-ld-override
 GHC_TOOLCHAIN_BIN    ?= $(STAGE1_PATH)/bin/ghc-toolchain-bin
 DERIVE_CONSTANTS_BIN ?= $(STAGE1_PATH)/bin/deriveConstants
 GENAPPLY_BIN         ?= $(STAGE1_PATH)/bin/genapply
+# genprimopcode is invoked by compiler/Setup.hs by bare name (`readProcess
+# "genprimopcode"`), i.e. resolved via PATH rather than an env var. Its
+# directory is prepended to PATH for the stage3 cabal build (see below) so the
+# freshly-built one wins over the bootstrap GHC's, which predates the primop
+# `effect`/`NoEffect` grammar and dies at primops.txt:139:31.
+GENPRIMOPCODE_BIN    ?= $(STAGE1_PATH)/bin/genprimopcode
 
 #
 # Build directories and paths
@@ -805,6 +811,11 @@ endif
 	@cp -fp $(STAGE1_PATH)/bin/ghc-toolchain-bin $(DIST_DIR)/bin/ghc-toolchain-bin
 	@cp -fp $(STAGE1_PATH)/bin/deriveConstants $(DIST_DIR)/bin/deriveConstants
 	@cp -fp $(STAGE1_PATH)/bin/genapply $(DIST_DIR)/bin/genapply
+	# genprimopcode: compiler/Setup.hs resolves it from PATH; the stage3 cabal
+	# build prepends $(dir $(GENPRIMOPCODE_BIN)) so this dist copy wins over the
+	# bootstrap GHC's (which can't parse the primop effect grammar, dying at
+	# primops.txt:139:31). Required for DIST_BUILD (CI) cross builds.
+	@cp -fp $(STAGE1_PATH)/bin/genprimopcode $(DIST_DIR)/bin/genprimopcode
 
 	# Copy stage0 cabal (needed for cross-compilation from dist, has -W flag)
 	$(call LOG,Copying cabal to $(DIST_DIR)/bin)
@@ -967,6 +978,7 @@ define stage3
 
 STAGE3_$(1)_CABAL_BUILD = \
 	env \
+	PATH="$$(call NORMALIZE_FP,$$(abspath $$(dir $$(GENPRIMOPCODE_BIN)))):$$$$PATH" \
 	DERIVE_CONSTANTS=$$(call NORMALIZE_FP,$$(abspath $$(DERIVE_CONSTANTS_BIN))) \
 	GENAPPLY=$$(call NORMALIZE_FP,$$(abspath $$(GENAPPLY_BIN))) \
 	NM=$$(STAGE3_$(1)_NM) \

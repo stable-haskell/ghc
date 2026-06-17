@@ -749,6 +749,7 @@ jobs:
              GHC_TOOLCHAIN_BIN=$PWD/_build/dist/bin/ghc-toolchain-bin \
              DERIVE_CONSTANTS_BIN=$PWD/_build/dist/bin/deriveConstants \
              GENAPPLY_BIN=$PWD/_build/dist/bin/genapply \
+             GENPRIMOPCODE_BIN=$PWD/_build/dist/bin/genprimopcode \
              HAPPY_TEMPLATE_DIR=$PWD/_build/dist/share/happy-lib/data \
              _build/dist/ghc-multi-target.tar.gz
         # Rename to add platform suffix.
