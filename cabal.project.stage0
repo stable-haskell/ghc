@@ -1,20 +1,23 @@
 source-repository-package
   type: git
   location: https://github.com/stable-haskell/Cabal.git
-  -- Pin Cabal to feat/wasm-cross-ghcup-stack-next (ee3b55e6) — the POST-SPLIT
+  -- Pin Cabal to feat/wasm-cross-ghcup-stack-next (f2e0a89) — the POST-SPLIT
   -- integration branch: stable-haskell/cabal `wip/andrea/stage-qualified-options`
   -- (#378, the Host-only `package *` handling that keeps DYNAMIC=1 from building
   -- the BUILD-stage packages shared — those would otherwise fail to link against
   -- the bootstrap GHC on essentially every release platform) + target-prefixed
   -- ghc-pkg guess (#361, cross) + absolute-rpath relativization (#368) + the
-  -- $ORIGIN/@loader_path self-rpath (musl T14304, #385).
+  -- $ORIGIN/@loader_path self-rpath (musl T14304, #385) + Ar deriving -L/@-file
+  -- support from the actual ar program rather than the (cross-mismatched) host
+  -- compiler claim (fixes build-stage happy-lib archiving with GNU ar on
+  -- RockyLinux 8 and cctools ar on macOS x86_64 JS-cross).
   --
   -- Unlike the pre-split aa57a49 pin this replaces, it carries the Cabal-3.17
   -- VerbosityHandles API and the hooks-exe sub-dir, so this build no longer needs
   -- the compiler/ghc-boot Setup.hs revert nor the hooks-exe drop those forks did.
   --
   -- Tracked by stable-haskell/cabal#384; re-pin to `master` once #378 lands there.
-  tag: ee3b55e6df7e27b8909de6a285d14b4473aa0ff6
+  tag: f2e0a89e15cf6604cec9d93e26a4b3caf459b076
   subdir: Cabal
           Cabal-syntax
           cabal-install
