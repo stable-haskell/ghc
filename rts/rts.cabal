@@ -673,7 +673,7 @@ common rts-debug-flags
 common rts-threaded-flags
     ghc-options: -DTHREADED_RTS -optc-DTHREADED_RTS
     cpp-options: -DTHREADED_RTS
-    cmm-options: -DTHREADED_RTS
+    cmm-options: -DTHREADED_RTS -optc-DTHREADED_RTS
     cc-options:  -DTHREADED_RTS
 
 -- the _main_ library needs to deal with all the _configure_ time stuff.
