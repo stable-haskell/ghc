@@ -1,6 +1,15 @@
 -- Configuration common to all stages
 import: cabal.project.common
 
+-- Hermetic build: resolve only from the explicitly-listed packages (+ the
+-- bootstrap compiler's installed packages), never Hackage. Without this,
+-- build-tools (happy/alex for the compiler's Parser.y/Lexer.x) float to
+-- Hackage's newest — e.g. happy-2.1.7 once it was published — which then
+-- breaks the build (the resulting parser code mismatches the pinned happy
+-- template; genprimopcode GHC-44432). stage2/stage3 already set this; stage1
+-- didn't, so its build-tools floated. See stable-haskell/cabal#384.
+active-repositories: :none
+
 packages:
   -- NOTE: we need rts-headers, because the _newly_ built compiler depends
   --       on these potentially _new_ headers, we must not rely on those from
@@ -40,12 +49,37 @@ packages:
   https://hackage.haskell.org/package/semaphore-compat-1.0.0/semaphore-compat-1.0.0.tar.gz
   https://hackage.haskell.org/package/unix-2.8.8.0/unix-2.8.8.0.tar.gz
   https://hackage.haskell.org/package/Win32-2.14.2.1/Win32-2.14.2.1.tar.gz
+  -- time: built from source (not the bootstrap's installed time-1.12.2) so it
+  -- links against the pinned Win32-2.14.2.1 above. The post-split host:Cabal
+  -- (Cabal-3.17.0.1) pulls in `time`; if that resolves to the installed
+  -- time-1.12.2 it transitively forces installed Win32-2.13.4.0, which
+  -- conflicts with our Win32-2.14.2.1 pin on Windows (stage1 solver
+  -- backjumping: host:Win32, host:time).
+  --
+  -- Version must satisfy hpc-0.7.0.2's bound `time >=1.2 && <1.15` (hpc is a
+  -- dep of ghc and IS in stage1's plan — unlike stage3, where hpc isn't, which
+  -- is why stage3 can pin time-1.15). time-1.14 is the newest in-range release
+  -- (1.13 is deprecated on Hackage); a time-1.15 pin here backjumps on
+  -- host:hpc, host:time. cabal prefers the latest available version, so all
+  -- platforms build this from source — only Windows strictly needs it, but a
+  -- uniform source build is harmless elsewhere and matches stage3's pattern.
+  https://hackage.haskell.org/package/time-1.14/time-1.14.tar.gz
+
+  -- Build-tools for the compiler's Parser.y / Lexer.x, plus hpc (a dep of ghc
+  -- whose bootstrap-installed version wants the old directory). Pinned so the
+  -- `active-repositories: :none` above resolves them to vetted versions instead
+  -- of floating to Hackage's newest. Versions match stage2/stage3.
+  https://hackage.haskell.org/package/alex-3.5.2.0/alex-3.5.2.0.tar.gz
+  https://hackage.haskell.org/package/happy-2.1.5/happy-2.1.5.tar.gz
+  https://hackage.haskell.org/package/happy-lib-2.1.5/happy-lib-2.1.5.tar.gz
+  https://hackage.haskell.org/package/hpc-0.7.0.2/hpc-0.7.0.2.tar.gz
   -- hsc2hs: see source-repository-package below
 
 source-repository-package
   type: git
   location: https://github.com/stable-haskell/Cabal.git
-  tag: stable-haskell/master
+  -- Pinned to feat/wasm-cross-ghcup-stack-next (f2e0a89); see cabal.project.stage0.
+  tag: f2e0a89e15cf6604cec9d93e26a4b3caf459b076
   subdir: Cabal
           Cabal-syntax
 
@@ -57,6 +91,7 @@ allow-newer: directory:*
            , semaphore-compat:*
            , unix:*
            , Win32:*
+           , time:*
            , hsc2hs:*
 
 --
@@ -64,7 +99,11 @@ allow-newer: directory:*
 --
 
 constraints:
-  template-haskell <= 2.22
+  template-haskell <= 2.22,
+  -- Force `time` to build from the pinned source above rather than reuse the
+  -- bootstrap's installed time-1.12.2 (which is bound to installed
+  -- Win32-2.13.4.0 and conflicts with the Win32-2.14.2.1 pin on Windows).
+  time source
 
 --
 -- Package level configuration
@@ -77,6 +116,15 @@ package *
 if !os(windows)
   package *
     library-for-ghci: True
+
+-- libffi-clib compiles src/java_raw_api.c as a GHC c-source. Its deprecated
+-- ffi_java_raw_* calls are a hard error on Rocky Linux 8's gcc-8, failing the
+-- stage1 build. GHC's RTS/FFI uses ffi_call/closures, not the (Java) raw API,
+-- and java_raw_api.c is wholly `#if !FFI_NO_RAW_API`-guarded — so force-define
+-- FFI_NO_RAW_API on the C compiler to compile it to nothing. (libffi's own
+-- --disable-raw-api configure flag does not reach this GHC c-source compile.)
+package libffi-clib
+  ghc-options: -optc-DFFI_NO_RAW_API=1
 
 package ghc
   flags: +bootstrap
