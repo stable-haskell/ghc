@@ -1389,20 +1389,17 @@ hscMaybeWriteIface logger dflags is_simple iface old_iface mod_location = do
 
     if (write_interface || force_write_interface) then do
 
-      -- FIXME: with -dynamic-too, "change" is only meaningful for the
-      -- non-dynamic interface, not for the dynamic one. We should have another
-      -- flag for the dynamic interface. In the meantime:
-      --
-      --    * when we write a single full interface, we check if we are
-      --    currently writing the dynamic interface due to -dynamic-too, in
-      --    which case we ignore "change".
-      --
-      --    * when we write two simple interfaces at once because of
-      --    dynamic-too, we use "change" both for the non-dynamic and the
-      --    dynamic interfaces. Hopefully both the dynamic and the non-dynamic
-      --    interfaces stay in sync...
-      --
       let change = old_iface /= Just (mi_iface_hash iface)
+
+      -- Create a relative symlink from .dyn_hi -> .hi.
+      -- Used when -dynamic-too is active (deprecated).
+      let symlink_dyn_hi = do
+            let hi_file     = ml_hi_file mod_location
+                dyn_hi_file = ml_dyn_hi_file mod_location
+                rel_hi      = FilePath.takeFileName hi_file
+            exists <- doesPathExist dyn_hi_file
+            when exists $ removeFile dyn_hi_file
+            createFileLink rel_hi dyn_hi_file
 
       let dt = dynamicTooState dflags
 
@@ -1414,16 +1411,20 @@ hscMaybeWriteIface logger dflags is_simple iface old_iface mod_location = do
          ]
 
       if is_simple
-         then when change $ do -- FIXME: see 'change' comment above
+         then when change $ do
             write_iface dflags iface
             case dt of
                DT_Dont   -> return ()
                DT_Dyn    -> panic "Unexpected DT_Dyn state when writing simple interface"
-               DT_OK     -> write_iface (setDynamicNow dflags) iface
+               -- -dynamic-too is deprecated: create a symlink .dyn_hi -> .hi
+               -- instead of writing a second copy of the interface file.
+               DT_OK     -> symlink_dyn_hi
          else case dt of
                DT_Dont | change                    -> write_iface dflags iface
-               DT_OK   | change                    -> write_iface dflags iface
-               -- FIXME: see change' comment above
+               DT_OK   | change                    -> do
+                  write_iface dflags iface
+                  -- -dynamic-too is deprecated: create .dyn_hi -> .hi symlink
+                  symlink_dyn_hi
                DT_Dyn                              -> write_iface dflags iface
                _                                   -> return ()
 

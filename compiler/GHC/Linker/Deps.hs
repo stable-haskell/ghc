@@ -244,9 +244,12 @@ checkNonStdWay _opts interp _srcspan
   -- -dynamic-too)
   | ldForceDyn _opts = do
       let target_ways = fullWays $ ldWays _opts
-      pure $ if target_ways `hasWay` WayDyn
+      -- Ignore WayDyn: since -dynamic-too is deprecated, .dyn_o files are
+      -- symlinks to .o files. Use the plain .o suffix.
+      let non_dyn_ways = removeWay WayDyn target_ways
+      pure $ if null (waysTag non_dyn_ways)
         then Nothing
-        else Just $ waysTag (WayDyn `addWay` target_ways) ++ "_o"
+        else Just $ waysTag non_dyn_ways ++ "_o"
 
   | ExternalInterp {} <- interpInstance interp = return Nothing
     -- with -fexternal-interpreter we load the .o files, whatever way
@@ -257,17 +260,21 @@ checkNonStdWay _opts interp _srcspan
 -- complain that they are redundant.
 #if defined(HAVE_INTERNAL_INTERPRETER)
 checkNonStdWay opts _interp srcspan
-  | hostFullWays == targetFullWays = return Nothing
+  -- Ignore WayDyn when comparing host and target ways: since -dynamic-too
+  -- is deprecated, WayDyn no longer affects object file suffixes.
+  | removeWay WayDyn hostFullWays == removeWay WayDyn targetFullWays
+  = return Nothing
     -- Only if we are compiling with the same ways as GHC is built
     -- with, can we dynamically load those object files. (see #3604)
 
-  | ldObjSuffix opts == normalObjectSuffix && not (null targetFullWays)
+  | ldObjSuffix opts == normalObjectSuffix && not (null targetNonDynWays)
   = failNonStd opts srcspan
 
   | otherwise = return (Just (hostWayTag ++ "o"))
   where
     targetFullWays = fullWays (ldWays opts)
-    hostWayTag = case waysTag hostFullWays of
+    targetNonDynWays = waysTag (removeWay WayDyn targetFullWays)
+    hostWayTag = case waysTag (removeWay WayDyn hostFullWays) of
                   "" -> ""
                   tag -> tag ++ "_"
 
