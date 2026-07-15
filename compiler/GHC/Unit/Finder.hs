@@ -514,13 +514,18 @@ findPackageModule_ fc fopts mod pkg_conf = do
              (ppr (moduleUnit mod) <+> ppr (unitId pkg_conf))
   modLocationCache fc mod $
     let
-       tag = waysBuildTag (finder_ways fopts)
+       -- Ignore WayDyn when computing the build tag for package interface
+       -- lookups: since dynamic-too is deprecated, all .hi and .o files are
+       -- unified (no separate .dyn_hi / .dyn_o). Only non-dynamic ways
+       -- (e.g. profiling) contribute to the suffix.
+       tag = waysBuildTag (removeWay WayDyn (finder_ways fopts))
 
              -- hi-suffix for packages depends on the build tag.
        package_hisuf | null tag  = os "hi"
                      | otherwise = os (tag ++ "_hi")
 
-       package_dynhisuf = os $ waysBuildTag (addWay WayDyn (finder_ways fopts)) ++ "_hi"
+       package_dynhisuf | null tag  = os "hi"
+                        | otherwise = os (tag ++ "_hi")
 
        mk_hi_loc = mkHiOnlyModLocation fopts package_hisuf package_dynhisuf
 
@@ -649,22 +654,24 @@ mkHomeModHiOnlyLocation fopts mod path basename =
 
 -- This function is used to make a ModLocation for a package module. Hence why
 -- we explicitly pass in the interface file suffixes.
+-- Note: -dynamic-too is deprecated - dynhisuf parameter kept for API compat
+-- but now dyn paths are same as non-dyn paths
 mkHiOnlyModLocation :: FinderOpts -> FileExt -> FileExt -> OsPath -> OsPath
                     -> ModLocation
-mkHiOnlyModLocation fopts hisuf dynhisuf path basename
+mkHiOnlyModLocation fopts hisuf _dynhisuf path basename
  = let full_basename = path </> basename
        obj_fn = mkObjPath fopts full_basename basename
        dyn_obj_fn = mkDynObjPath fopts full_basename basename
        hie_fn = mkHiePath fopts full_basename basename
+       hi_fn = full_basename <.> hisuf
    in OsPathModLocation{  ml_hs_file_ospath   = Nothing,
-                          ml_hi_file_ospath   = full_basename <.> hisuf,
+                          ml_hi_file_ospath   = hi_fn,
                               -- Remove the .hi-boot suffix from
                               -- hi_file, if it had one.  We always
                               -- want the name of the real .hi file
                               -- in the ml_hi_file field.
                           ml_dyn_obj_file_ospath = dyn_obj_fn,
-                          -- MP: TODO
-                          ml_dyn_hi_file_ospath  = full_basename <.> dynhisuf,
+                          ml_dyn_hi_file_ospath  = hi_fn,  -- Same as non-dyn
                           ml_obj_file_ospath  = obj_fn,
                           ml_hie_file_ospath  = hie_fn
                   }
@@ -686,18 +693,13 @@ mkObjPath fopts basename mod_basename = obj_basename <.> osuf
 
 -- | Constructs the filename of a .dyn_o file for a given source file.
 -- Does /not/ check whether the .dyn_o file exists
+-- Note: -dynamic-too is deprecated - now returns same path as mkObjPath
 mkDynObjPath
   :: FinderOpts
   -> OsPath             -- the filename of the source file, minus the extension
   -> OsPath             -- the module name with dots replaced by slashes
   -> OsPath
-mkDynObjPath fopts basename mod_basename = obj_basename <.> dynosuf
-  where
-                odir = finder_objectDir fopts
-                dynosuf = finder_dynObjectSuf fopts
-
-                obj_basename | Just dir <- odir = dir </> mod_basename
-                             | otherwise        = basename
+mkDynObjPath fopts basename mod_basename = mkObjPath fopts basename mod_basename
 
 
 -- | Constructs the filename of a .hi file for a given source file.
@@ -717,18 +719,13 @@ mkHiPath fopts basename mod_basename = hi_basename <.> hisuf
 
 -- | Constructs the filename of a .dyn_hi file for a given source file.
 -- Does /not/ check whether the .dyn_hi file exists
+-- Note: -dynamic-too is deprecated - now returns same path as mkHiPath
 mkDynHiPath
   :: FinderOpts
   -> OsPath             -- the filename of the source file, minus the extension
   -> OsPath             -- the module name with dots replaced by slashes
   -> OsPath
-mkDynHiPath fopts basename mod_basename = hi_basename <.> dynhisuf
- where
-                hidir = finder_hiDir fopts
-                dynhisuf = finder_dynHiSuf fopts
-
-                hi_basename | Just dir <- hidir = dir </> mod_basename
-                            | otherwise         = basename
+mkDynHiPath fopts basename mod_basename = mkHiPath fopts basename mod_basename
 
 -- | Constructs the filename of a .hie file for a given source file.
 -- Does /not/ check whether the .hie file exists

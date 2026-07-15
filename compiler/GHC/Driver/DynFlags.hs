@@ -22,7 +22,8 @@ module GHC.Driver.DynFlags (
         xopt_DuplicateRecordFields,
         xopt_FieldSelectors,
         lang_set,
-        DynamicTooState(..), dynamicTooState, setDynamicNow,
+        -- Note: DynamicTooState, dynamicTooState, setDynamicNow removed
+        -- -dynamic-too is deprecated, only dynamic objects are produced
         OnOff(..),
         DynFlags(..),
         ParMakeCount(..),
@@ -296,10 +297,7 @@ data DynFlags = DynFlags {
   dynOutputHi           :: Maybe String,
   dynLibLoader          :: DynLibLoader,
 
-  dynamicNow            :: !Bool, -- ^ Indicate if we are now generating dynamic output
-                                  -- because of -dynamic-too. This predicate is
-                                  -- used to query the appropriate fields
-                                  -- (outputFile/dynOutputFile, ways, etc.)
+  -- Note: dynamicNow field removed - -dynamic-too is deprecated
 
   -- | This defaults to 'non-module'. It can be set by
   -- 'GHC.Driver.Pipeline.setDumpPrefix' or 'ghc.GHCi.UI.runStmt' based on
@@ -655,7 +653,6 @@ defaultDynFlags mySettings =
 
         dynObjectSuf_           = "dyn_" ++ phaseInputExt StopLn,
         dynHiSuf_               = "dyn_hi",
-        dynamicNow              = False,
 
         pluginModNames          = [],
         pluginModNameOpts       = [],
@@ -982,27 +979,8 @@ positionIndependent dflags = gopt Opt_PIC dflags || gopt Opt_PIE dflags
 -- need Template-Haskell and GHC is dynamically linked (cf
 -- GHC.Driver.Pipeline.compileOne').
 --
--- We used to try and fall back from a dynamic-too failure but this feature
--- didn't work as expected (#20446) so it was removed to simplify the
--- implementation and not obscure latent bugs.
-
-data DynamicTooState
-   = DT_Dont    -- ^ Don't try to build dynamic objects too
-   | DT_OK      -- ^ Will still try to generate dynamic objects
-   | DT_Dyn     -- ^ Currently generating dynamic objects (in the backend)
-   deriving (Eq,Show,Ord)
-
-dynamicTooState :: DynFlags -> DynamicTooState
-dynamicTooState dflags
-   | not (gopt Opt_BuildDynamicToo dflags) = DT_Dont
-   | dynamicNow dflags = DT_Dyn
-   | otherwise = DT_OK
-
-setDynamicNow :: DynFlags -> DynFlags
-setDynamicNow dflags0 =
-   dflags0
-      { dynamicNow = True
-      }
+-- Note: DynamicTooState type and dynamicTooState/setDynamicNow functions removed
+-- -dynamic-too is deprecated - only dynamic objects are produced now
 
 data PkgDbRef
   = GlobalPkgDb
@@ -1063,18 +1041,7 @@ dopt_unset :: DynFlags -> DumpFlag -> DynFlags
 dopt_unset dfs f = dfs{ dumpFlags = EnumSet.delete f (dumpFlags dfs) }
 
 -- | Test whether a 'GeneralFlag' is set
---
--- Note that `dynamicNow` (i.e., dynamic objects built with `-dynamic-too`)
--- always implicitly enables Opt_PIC, Opt_ExternalDynamicRefs, and disables
--- Opt_SplitSections.
---
 gopt :: GeneralFlag -> DynFlags -> Bool
-gopt Opt_PIC dflags
-   | dynamicNow dflags = True
-gopt Opt_ExternalDynamicRefs dflags
-   | dynamicNow dflags = True
-gopt Opt_SplitSections dflags
-   | dynamicNow dflags = False
 gopt f dflags = f `EnumSet.member` generalFlags dflags
 
 -- | Set a 'GeneralFlag'
@@ -1492,9 +1459,7 @@ languageExtensions (Just GHC2024)
        LangExt.RoleAnnotations]
 
 ways :: DynFlags -> Ways
-ways dflags
-   | dynamicNow dflags = addWay WayDyn (targetWays_ dflags)
-   | otherwise         = targetWays_ dflags
+ways dflags = targetWays_ dflags
 
 -- | Get target profile
 targetProfile :: DynFlags -> Profile

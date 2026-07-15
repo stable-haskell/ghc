@@ -1476,7 +1476,9 @@ locateLib interp hsc_env is_hs lib_dirs gcc_dirs lib0
      obj_file
        | is_hs && loading_profiled_hs_libs = lib <.> "p_o"
        | otherwise = lib <.> "o"
-     dyn_obj_file = lib <.> "dyn_o"
+     -- Note: -dynamic-too is deprecated - .dyn_o files no longer produced
+     -- dyn_obj_file now same as obj_file
+     dyn_obj_file = obj_file
      arch_files
        | verbatim = [lib]
        | otherwise = [ "lib" ++ lib ++ lib_tag <.> "a"

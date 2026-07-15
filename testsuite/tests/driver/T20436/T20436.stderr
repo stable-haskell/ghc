@@ -1,3 +1,2 @@
-
-when making flags consistent: warning: [GHC-74335] [-Winconsistent-flags (in -Wdefault)]
-    -dynamic-too is ignored when using -dynamic
+on the commandline: warning: [GHC-53692] [-Wdeprecated-flags]
+    -dynamic-too is deprecated: -dynamic-too is deprecated and ignored. Use -dynamic instead.

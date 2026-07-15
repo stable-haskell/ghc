@@ -1,6 +1,8 @@
+# -dynamic-too is deprecated and a no-op; all .o files are now dynamic-capable.
+# These tests exercised -dynamic-too functionality that no longer exists.
+
 opts = [ extra_files(['A.hs', 'B1.hs', 'B2.hs', 'C.hs']),
-      when(opsys('mingw32'), expect_broken(7665)), unless(have_vanilla(), skip),
-      unless(have_dynamic(), skip) ]
+      skip ]  # -dynamic-too is deprecated
 
 test('dynamicToo001', [opts], makefile_test, [])
 test('dynamicToo001MakeA', [opts], makefile_test, [])

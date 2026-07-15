@@ -21,7 +21,7 @@ test('T22840', [extra_files(
         ]),
         # barf signature mismatch on wasm32 due to -dtag-inference-checks
         when(arch('wasm32'), skip),
-        when(not(have_dynamic()),skip)], multimod_compile, ['T22840', '-dynamic-too -dtag-inference-checks'])
+        when(not(have_dynamic()),skip)], multimod_compile, ['T22840', '-dynamic -dtag-inference-checks'])
 test('inferTags003', [ only_ways(['optasm']),
                        grep_errmsg(r'(call stg\_ap\_0)', [1])
                      ], compile, ['-ddump-cmm -dno-typeable-binds -O'])

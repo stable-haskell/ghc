@@ -1,4 +1,3 @@
-test('recomp-boot-dyn-too', [ unless(have_dynamic(), skip)
-                            , extra_files(['A.hs', 'B1.hs', 'B2.hs', 'A.hs-boot'])
-                            , when(fast(), skip)],
+# -dynamic-too is deprecated and a no-op; all .o files are now dynamic-capable.
+test('recomp-boot-dyn-too', [ skip ],  # -dynamic-too is deprecated
      makefile_test, [])

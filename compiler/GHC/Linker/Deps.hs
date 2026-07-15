@@ -51,7 +51,7 @@ import System.Directory
 
 data LinkDepsOpts = LinkDepsOpts
   { ldObjSuffix   :: !String                        -- ^ Suffix of .o files
-  , ldForceDyn    :: !Bool                          -- ^ Always use .dyn_o?
+  , ldForceDyn    :: !Bool                          -- ^ Force dynamic loading (legacy, .dyn_o deprecated)
   , ldUnitEnv     :: !UnitEnv
   , ldPprOpts     :: !SDocContext                   -- ^ Rendering options for error messages
   , ldUseByteCode :: !Bool                          -- ^ Use bytecode rather than objects
@@ -239,14 +239,17 @@ throwProgramError opts doc = throwGhcExceptionIO (ProgramError (renderWithContex
 checkNonStdWay :: LinkDepsOpts -> Interp -> SrcSpan -> IO (Maybe FilePath)
 checkNonStdWay _opts interp _srcspan
   -- On some targets (e.g. wasm) the RTS linker only supports loading
-  -- dynamic code, in which case we need to ensure the .dyn_o object
-  -- is picked (instead of .o which is also present because of
-  -- -dynamic-too)
+  -- dynamic code. Since -dynamic-too is deprecated and all .o files are
+  -- now dynamic-capable, we just need to check that WayDyn is present
+  -- (or that the ways match modulo WayDyn).
   | ldForceDyn _opts = do
       let target_ways = fullWays $ ldWays _opts
-      pure $ if target_ways `hasWay` WayDyn
+      -- All .o files are dynamic-capable now, so WayDyn doesn't need
+      -- a separate object suffix. Just check non-dynamic ways match.
+      pure $ if removeWay WayDyn target_ways == removeWay WayDyn hostFullWays
         then Nothing
-        else Just $ waysTag (WayDyn `addWay` target_ways) ++ "_o"
+        else let tag = waysTag (removeWay WayDyn hostFullWays)
+             in Just $ if null tag then "o" else tag ++ "_o"
 
   | ExternalInterp {} <- interpInstance interp = return Nothing
     -- with -fexternal-interpreter we load the .o files, whatever way
@@ -257,17 +260,20 @@ checkNonStdWay _opts interp _srcspan
 -- complain that they are redundant.
 #if defined(HAVE_INTERNAL_INTERPRETER)
 checkNonStdWay opts _interp srcspan
-  | hostFullWays == targetFullWays = return Nothing
-    -- Only if we are compiling with the same ways as GHC is built
-    -- with, can we dynamically load those object files. (see #3604)
+  -- Since -dynamic-too is deprecated, all .o files are dynamic-capable.
+  -- WayDyn no longer affects the object file suffix, so we compare ways
+  -- ignoring WayDyn. (see #3604)
+  | hostNonDynWays == targetNonDynWays = return Nothing
 
-  | ldObjSuffix opts == normalObjectSuffix && not (null targetFullWays)
+  | ldObjSuffix opts == normalObjectSuffix && not (null targetNonDynWays)
   = failNonStd opts srcspan
 
   | otherwise = return (Just (hostWayTag ++ "o"))
   where
-    targetFullWays = fullWays (ldWays opts)
-    hostWayTag = case waysTag hostFullWays of
+    -- Compare ways ignoring WayDyn since all .o files are dynamic-capable
+    targetNonDynWays = removeWay WayDyn $ fullWays (ldWays opts)
+    hostNonDynWays   = removeWay WayDyn hostFullWays
+    hostWayTag = case waysTag hostNonDynWays of
                   "" -> ""
                   tag -> tag ++ "_"
 
@@ -293,16 +299,11 @@ failNonStd opts srcspan = dieWith opts srcspan $
             | hostIsDynamic = Dyn
             | hostIsProfiled = Prof
             | otherwise = Normal
-          buildTwiceMsg = case (ghciWay, compWay) of
-            (Normal, Dyn) -> dynamicTooMsg
-            (Dyn, Normal) -> dynamicTooMsg
-            _ ->
+          buildTwiceMsg =
               text "  (2) Build the program twice: once" <+>
                 pprWay' ghciWay <> text ", and then" $$
               text "      " <> pprWay' compWay <+>
                 text "using -osuf to set a different object file suffix."
-          dynamicTooMsg = text "  (2) Use -dynamic-too," <+>
-            text "and use -osuf and -dynosuf to set object file suffixes as needed."
           pprWay' :: Way' -> SDoc
           pprWay' way = text $ case way of
             Normal -> "the normal way"

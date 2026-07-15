@@ -2,7 +2,7 @@
 
 GHC="${TEST_HC}"
 
-flags="${TEST_HC_OPTS} -O0 -fhide-source-paths -isrc -ibuild -dynamic-too -outputdir build -package template-haskell"
+flags="${TEST_HC_OPTS} -O0 -fhide-source-paths -isrc -ibuild -dynamic -outputdir build -package template-haskell"
 
 function compile()
 {

@@ -545,7 +545,8 @@ runHscBackendPhase :: PipeEnv
 runHscBackendPhase pipe_env hsc_env mod_name src_flavour location result = do
   let dflags = hsc_dflags hsc_env
       logger = hsc_logger hsc_env
-      o_file = if dynamicNow dflags then ml_dyn_obj_file location else ml_obj_file location -- The real object file
+      -- Note: dynamicNow removed - always use standard object file path
+      o_file = ml_obj_file location -- The real object file
       next_phase = hscPostBackendPhase src_flavour (backend dflags)
   case result of
       HscUpdate iface ->
@@ -888,35 +889,26 @@ getOutputFilename
 getOutputFilename logger tmpfs stop_phase output basename dflags next_phase maybe_location
   -- 1. If we are generating object files for a .hs file, then return the odir as the ModLocation
   -- will have been modified to point to the accurate locations
+ -- Note: dynamicNow removed - always use standard object file path
  | StopLn <- next_phase, Just loc <- maybe_location  =
-      return $ if dynamicNow dflags then ml_dyn_obj_file loc
-                                    else ml_obj_file loc
+      return $ ml_obj_file loc
  -- 2. If output style is persistent then
  | is_last_phase, Persistent   <- output = persistent_fn
  -- 3. Specific file is only set when outputFile is set by -o
  -- If we are in dynamic mode but -dyno is not set then write to the same path as
  -- -o with a .dyn_* extension. This case is not triggered for object files which
  -- are always handled by the ModLocation.
+ -- Note: dynamicNow removed - always use standard output file
  | is_last_phase, SpecificFile <- output =
-    return $
-      if dynamicNow dflags
-        then case dynOutputFile_ dflags of
-                Nothing -> let ofile = getOutputFile_ dflags
-                               new_ext = case takeExtension ofile of
-                                            "" -> "dyn"
-                                            ext -> "dyn_" ++ tail ext
-                           in replaceExtension ofile new_ext
-                Just fn -> fn
-        else getOutputFile_ dflags
+    return $ getOutputFile_ dflags
  | keep_this_output                      = persistent_fn
  | Temporary lifetime <- output          = newTempName logger tmpfs (tmpDir dflags) lifetime suffix
  | otherwise                             = newTempName logger tmpfs (tmpDir dflags) TFL_CurrentModule
    suffix
     where
-          getOutputFile_ dflags =
-            case outputFile_ dflags of
-              Nothing -> pprPanic "SpecificFile: No filename" (ppr (dynamicNow dflags) $$
-                                                               text (fromMaybe "-" (dynOutputFile_ dflags)))
+          getOutputFile_ dflags' =
+            case outputFile_ dflags' of
+              Nothing -> pprPanic "SpecificFile: No filename" (text (fromMaybe "-" (dynOutputFile_ dflags')))
               Just fn -> fn
 
           hcsuf      = hcSuf dflags

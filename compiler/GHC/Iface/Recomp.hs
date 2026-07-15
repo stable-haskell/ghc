@@ -318,22 +318,12 @@ check_old_iface hsc_env mod_summary maybe_iface
                  Succeeded iface -> do
                      trace_if logger (text "Read the interface file" <+> text iface_path)
                      return $ Just iface
+        -- Note: check_dyn_hi removed - -dynamic-too is deprecated
+        -- We no longer check for .dyn_hi files
         check_dyn_hi :: ModIface
                   -> IfG (MaybeValidated ModIface)
                   -> IfG (MaybeValidated ModIface)
-        check_dyn_hi normal_iface recomp_check | gopt Opt_BuildDynamicToo dflags = do
-          res <- recomp_check
-          case res of
-            UpToDateItem _ -> do
-              maybe_dyn_iface <- liftIO $ loadIface (setDynamicNow dflags) (msDynHiFilePath mod_summary)
-              case maybe_dyn_iface of
-                Nothing -> return $ outOfDateItemBecause MissingDynHiFile Nothing
-                Just dyn_iface | mi_iface_hash dyn_iface
-                                    /= mi_iface_hash normal_iface
-                  -> return $ outOfDateItemBecause MismatchedDynHiFile Nothing
-                Just {} -> return res
-            _ -> return res
-        check_dyn_hi _ recomp_check = recomp_check
+        check_dyn_hi _normal_iface recomp_check = recomp_check
 
 
         src_changed
@@ -1888,19 +1878,9 @@ mkHashFun hsc_env eps name
                       -- requirements; we didn't do any /real/ typechecking
                       -- so there's no guarantee everything is loaded.
                       -- Kind of a heinous hack.
+                      -- Note: withoutDynamicNow call removed - -dynamic-too is deprecated
+                      -- We no longer need to disable dynamic-too for backpack
                       initIfaceLoad hsc_env . withIfaceErr ctx
-                          $ withoutDynamicNow
-                            -- If you try and load interfaces when dynamic-too
-                            -- enabled then it attempts to load the dyn_hi and hi
-                            -- interface files. Backpack doesn't really care about
-                            -- dynamic object files as it isn't doing any code
-                            -- generation so -dynamic-too is turned off.
-                            -- Some tests fail without doing this (such as T16219),
-                            -- but they fail because dyn_hi files are not found for
-                            -- one of the dependencies (because they are deliberately turned off)
-                            -- Why is this check turned off here? That is unclear but
-                            -- just one of the many horrible hacks in the backpack
-                            -- implementation.
                           $ loadInterface (text "lookupVers2") mod ImportBySystem
         return $ snd (mi_hash_fn iface occ `orElse`
                   pprPanic "lookupVers1" (ppr mod <+> ppr occ))

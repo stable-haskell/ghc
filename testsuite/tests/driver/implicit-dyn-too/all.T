@@ -1,3 +1,4 @@
-test('implicit-dyn-too', [when(opsys('mingw32'),skip)
-                         ,unless(have_dynamic(), skip)
-                         ,extra_files(['QuasiExpr.hs', 'QuasiQuote.hs']) ], makefile_test, [])
+# -dynamic-too is deprecated and a no-op; all .o files are now dynamic-capable.
+# This test exercised implicit -dynamic-too recompilation which no longer exists.
+test('implicit-dyn-too', [skip],  # -dynamic-too is deprecated
+     makefile_test, [])

@@ -25,7 +25,7 @@ module GHC.Tc.Utils.Monad(
   whenDOptM, whenGOptM, whenWOptM,
   whenXOptM, unlessXOptM,
   getGhcMode,
-  withoutDynamicNow,
+  -- Note: withoutDynamicNow removed - -dynamic-too is deprecated
   getEpsVar,
   getEps,
   updateEps, updateEps_,
@@ -624,8 +624,8 @@ unlessXOptM flag thing_inside = do b <- xoptM flag
 getGhcMode :: TcRnIf gbl lcl GhcMode
 getGhcMode = ghcMode <$> getDynFlags
 
-withoutDynamicNow :: TcRnIf gbl lcl a -> TcRnIf gbl lcl a
-withoutDynamicNow = updTopFlags (\dflags -> dflags { dynamicNow = False})
+-- Note: withoutDynamicNow removed - -dynamic-too is deprecated
+-- This function was used to disable dynamic-too mode, which no longer exists
 
 updTopFlags :: (DynFlags -> DynFlags) -> TcRnIf gbl lcl a -> TcRnIf gbl lcl a
 updTopFlags f = updTopEnv (hscUpdateFlags f)
