@@ -13,6 +13,7 @@ module GHC.Driver.Env
    , hsc_HUE
    , hsc_HUG
    , hsc_all_home_unit_ids
+   , hscUnitIndex
    , hscUpdateLoggerFlags
    , hscUpdateHUG
    , hscPluginEnv
@@ -26,7 +27,7 @@ module GHC.Driver.Env
    , runInteractiveHsc
    , hscEPS
    , hscEUD
-   , hscEUDC
+   , hscUIC
    , hscInterp
    , prepareAnnotations
    , discardIC
@@ -74,6 +75,7 @@ import GHC.Runtime.Interpreter.Types (Interp)
 
 import GHC.Unit
 import GHC.Unit.External.Database
+import GHC.Unit.External.Index
 import GHC.Unit.Module.ModGuts
 import GHC.Unit.Module.ModIface
 import GHC.Unit.Module.ModDetails
@@ -222,8 +224,8 @@ newPluginEnv hsc_env = do
         | gopt Opt_HideAllPluginPackages dflags =
             gopt_set host_flags1 Opt_HideAllPluginPackages
         | otherwise = host_flags1
-  eudc <- initExternalUnitDatabaseCache
-  host_units <- mkUnitState (hsc_logger hsc_env) host_flags (initPluginUnitConfig host_flags eudc)
+  host_uic <- initUnitIndexCache
+  host_units <- mkUnitState (hsc_logger hsc_env) host_flags host_uic (initPluginUnitConfig host_flags)
   -- Package names and version numbers alone do not establish plugin ABI
   -- compatibility. Keep loadPlugin's thisGhcUnit/type check as well.
   unless (isJust (lookupUnitId host_units (toUnitId thisGhcUnit))) $
@@ -236,8 +238,9 @@ newPluginEnv hsc_env = do
       flags = host_flags { pluginPackageDBFlags = [], pluginLibDir = Nothing }
       hug = HUG.unitEnv_singleton uid (HUG.mkHomeUnitEnv host_units flags hpt Nothing)
   unit_env0 <- initUnitEnv uid hug (ghcNameVersion flags) platform
-  -- Keep the host databases we just read in this environment's cache.
-  let unit_env = unit_env0 { ue_eud = eudc }
+  -- Keep the host units we just read in this environment's unit index, not
+  -- the target's.
+  let unit_env = unit_env0 { ue_uic = host_uic }
   pure hsc_env
     { hsc_dflags = flags
     , hsc_targets = []
@@ -331,10 +334,13 @@ hscEPS :: HscEnv -> IO ExternalPackageState
 hscEPS hsc_env = readIORef (euc_eps (ue_eps (hsc_unit_env hsc_env)))
 
 hscEUD :: HscEnv -> IO (ExternalUnitDatabases UnitId)
-hscEUD = readExternalUnitDatabases . hscEUDC
+hscEUD = readExternalUnitDatabases . hscUIC
 
-hscEUDC :: HscEnv -> ExternalUnitDatabaseCache UnitId
-hscEUDC hsc_env = ue_eud (hsc_unit_env hsc_env)
+hscUnitIndex :: HscEnv -> IO UnitIndex
+hscUnitIndex hsc_env = ueUI (hsc_unit_env hsc_env)
+
+hscUIC :: HscEnv -> UnitIndexCache
+hscUIC hsc_env = ue_uic (hsc_unit_env hsc_env)
 
 --------------------------------------------------------------------------------
 -- * Queries on Transitive Closure
