@@ -25,6 +25,8 @@ module GHC.Driver.Env
    , mkInteractiveHscEnv
    , runInteractiveHsc
    , hscEPS
+   , hscEUD
+   , hscEUDC
    , hscInterp
    , prepareAnnotations
    , discardIC
@@ -71,6 +73,7 @@ import GHC.Runtime.Context
 import GHC.Runtime.Interpreter.Types (Interp)
 
 import GHC.Unit
+import GHC.Unit.External.Database
 import GHC.Unit.Module.ModGuts
 import GHC.Unit.Module.ModIface
 import GHC.Unit.Module.ModDetails
@@ -219,7 +222,8 @@ newPluginEnv hsc_env = do
         | gopt Opt_HideAllPluginPackages dflags =
             gopt_set host_flags1 Opt_HideAllPluginPackages
         | otherwise = host_flags1
-  (host_units, dbs) <- mkUnitState (hsc_logger hsc_env) host_flags (initPluginUnitConfig host_flags)
+  eudc <- initExternalUnitDatabaseCache
+  host_units <- mkUnitState (hsc_logger hsc_env) host_flags (initPluginUnitConfig host_flags eudc)
   -- Package names and version numbers alone do not establish plugin ABI
   -- compatibility. Keep loadPlugin's thisGhcUnit/type check as well.
   unless (isJust (lookupUnitId host_units (toUnitId thisGhcUnit))) $
@@ -230,8 +234,10 @@ newPluginEnv hsc_env = do
       -- Clear the selection flags in the host view to prevent recursively
       -- consulting this cache when loadPlugin calls the plugin finder.
       flags = host_flags { pluginPackageDBFlags = [], pluginLibDir = Nothing }
-      hug = HUG.unitEnv_singleton uid (HUG.mkHomeUnitEnv host_units (Just dbs) flags hpt Nothing)
-  unit_env <- initUnitEnv uid hug (ghcNameVersion flags) platform
+      hug = HUG.unitEnv_singleton uid (HUG.mkHomeUnitEnv host_units flags hpt Nothing)
+  unit_env0 <- initUnitEnv uid hug (ghcNameVersion flags) platform
+  -- Keep the host databases we just read in this environment's cache.
+  let unit_env = unit_env0 { ue_eud = eudc }
   pure hsc_env
     { hsc_dflags = flags
     , hsc_targets = []
@@ -323,6 +329,12 @@ configured via command-line flags (in `GHC.setTopSessionDynFlags`).
 -- | Retrieve the ExternalPackageState cache.
 hscEPS :: HscEnv -> IO ExternalPackageState
 hscEPS hsc_env = readIORef (euc_eps (ue_eps (hsc_unit_env hsc_env)))
+
+hscEUD :: HscEnv -> IO (ExternalUnitDatabases UnitId)
+hscEUD = readExternalUnitDatabases . hscEUDC
+
+hscEUDC :: HscEnv -> ExternalUnitDatabaseCache UnitId
+hscEUDC hsc_env = ue_eud (hsc_unit_env hsc_env)
 
 --------------------------------------------------------------------------------
 -- * Queries on Transitive Closure
