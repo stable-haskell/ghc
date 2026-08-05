@@ -1976,6 +1976,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
              for the total range of 16 bits which is the function export limit
              of DLLs.  See note [GHC Linking model and import libraries].  */
           sname = (SymbolName*)section->start+2;
+          // load the symbol that specifies the dll we need to load to resolve this.
           COFF_symbol* sym = &oc->info->symbols[info->numberOfSymbols-1];
           addr = get_sym_name( getSymShortName (info, sym), oc);
 
@@ -2501,9 +2502,13 @@ SymbolAddr *lookupSymbol_PEi386(SymbolName *lbl, ObjectCode *dependent, SymType 
         if (pinfo && pinfo->owner && isSymbolImport (pinfo->owner, lbl))
         {
             /* See Note [BFD import library].  */
-            HINSTANCE dllInstance = (HINSTANCE)lookupDependentSymbol(pinfo->value, dependent, type);
-            if (!dllInstance && pinfo->value)
+            // we only want to _update_ the type, if the dependent symbol is _not_ a dllInstance.
+            SymType depType = 0;
+            HINSTANCE dllInstance = (HINSTANCE)lookupDependentSymbol(pinfo->value, dependent, &depType);
+            if (!dllInstance && pinfo->value) {
+               if (type) *type = depType;
                return pinfo->value;
+            }
 
             if (!dllInstance)
             {
