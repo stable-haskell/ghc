@@ -139,6 +139,86 @@
 #  include "elf_reloc.h"
 #endif
 
+/* Note [Linker memory pool for aarch64]
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ * On aarch64, ADRP relocations have a ±4GB range. When running under qemu
+ * user-mode emulation, mmap hint addresses are ignored, so the m32 allocator's
+ * rx and rw pages can end up far apart (>4GB). This causes ADR_GOT_PAGE
+ * relocation overflow (cf GHC #24432).
+ *
+ * To fix this, we pre-allocate a single contiguous pool and sub-allocate
+ * from it for all linker needs (sections, GOT, BSS, COMMON). The pool is
+ * split into RW (growing down from the middle) and RX (growing up from
+ * the middle), guaranteeing all allocations are within ±POOL_SIZE/2.
+ */
+#if USE_LINKER_POOL
+
+#define POOL_SIZE_MB 512
+#define POOL_SIZE ((size_t)POOL_SIZE_MB * 1024 * 1024)
+
+static void * pool_base = NULL;
+static void * pool_rw_ptr = NULL;  /* grows down from midpoint */
+static void * pool_rx_ptr = NULL;  /* grows up from midpoint */
+
+
+void linkerPoolProtect(void) {
+    /* The pool is initially mapped RWX by mmapAnonForLinker.
+     * We intentionally leave it RWX rather than flipping protections,
+     * as mprotect on large regions under qemu can hang or be very slow.
+     * This is a trade-off: we lose W^X hardening but gain reliability
+     * under emulation. */
+}
+
+/* Round a pointer up to the next aligned address */
+static void * poolAlignPtrUp(void *ptr, StgWord align) {
+    return (void*)(((uintptr_t)ptr + align) & ~(uintptr_t)align);
+}
+
+/* Round a pointer down to the previous aligned address */
+static void * poolAlignPtrDown(void *ptr, StgWord align) {
+    return (void*)((uintptr_t)ptr & ~(uintptr_t)align);
+}
+
+void * linkerPoolAlloc(SectionKind kind, StgWord align, StgWord size) {
+    if (pool_base == NULL) {
+        /* Map as RWX so code sections can execute without needing mprotect
+         * later. Avoids mprotect calls that can hang under qemu. */
+        pool_base = mmapForLinker(POOL_SIZE, MEM_READ_WRITE_EXECUTE,
+                                  MAP_ANONYMOUS, -1, 0);
+        if (pool_base == NULL) {
+            barf("linkerPoolAlloc: failed to allocate %dMB pool", POOL_SIZE_MB);
+        }
+        pool_rw_ptr = (uint8_t*)pool_base + POOL_SIZE / 4;
+        pool_rx_ptr = pool_rw_ptr;
+    }
+
+    void *ret;
+
+    if (kind == SECTIONKIND_CODE_OR_RODATA) {
+        pool_rx_ptr = poolAlignPtrUp(pool_rx_ptr, align);
+        ret = pool_rx_ptr;
+        pool_rx_ptr = (uint8_t*)pool_rx_ptr + size;
+        if ((uintptr_t)pool_rx_ptr > (uintptr_t)pool_base + POOL_SIZE) {
+            barf("linkerPoolAlloc: RX pool exhausted (tried to allocate %zu)", size);
+        }
+    } else {
+        pool_rw_ptr = (uint8_t*)pool_rw_ptr - size;
+        pool_rw_ptr = poolAlignPtrDown(pool_rw_ptr, align);
+        ret = pool_rw_ptr;
+        if ((uintptr_t)pool_rw_ptr < (uintptr_t)pool_base) {
+            barf("linkerPoolAlloc: RW pool exhausted (tried to allocate %zu)", size);
+        }
+    }
+    return ret;
+}
+
+/* GOT is data but must be near code, so use RX side */
+void * linkerPoolAllocGot(StgWord size) {
+    return linkerPoolAlloc(SECTIONKIND_CODE_OR_RODATA, 0x7, size);
+}
+
+#endif /* USE_LINKER_POOL */
+
 /*
    Note [Many ELF Sections]
    ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -839,6 +919,16 @@ ocGetNames_ELF ( ObjectCode* oc )
               /* Use mmapForLinker to allocate .bss, otherwise the malloced
                * address might be out of range for sections that are mmaped.
                */
+#if USE_LINKER_POOL
+              alloc = SECTION_MMAP;
+              start = linkerPoolAlloc(kind, align > 0 ? align - 1 : 0, size);
+              if (start == NULL) {
+                barf("failed to pool-allocate memory for bss.");
+              }
+              mapped_start = start;
+              mapped_offset = 0;
+              mapped_size = size;
+#else
               alloc = SECTION_MMAP;
               start = mmapAnonForLinker(size);
               if (start == NULL) {
@@ -848,6 +938,7 @@ ocGetNames_ELF ( ObjectCode* oc )
               mapped_start = start;
               mapped_offset = 0;
               mapped_size = roundUpToPage(size);
+#endif
           }
           CHECK(start != 0x0);
 #else
@@ -888,6 +979,11 @@ ocGetNames_ELF ( ObjectCode* oc )
           unsigned stub_space = STUB_SIZE * nstubs;
           unsigned full_size = size+stub_space;
 
+#if USE_LINKER_POOL
+          start = linkerPoolAlloc(kind, align > 0 ? align - 1 : 0, full_size);
+          if (start == NULL) goto fail;
+          alloc = SECTION_MMAP;
+#else
           // use M32 allocator to avoid fragmentation and relocations impossible
           // to fulfil (cf #24432)
           bool executable = kind == SECTIONKIND_CODE_OR_RODATA;
@@ -898,6 +994,7 @@ ocGetNames_ELF ( ObjectCode* oc )
           start = m32_alloc(allocator, full_size, align);
           if (start == NULL) goto fail;
           alloc = SECTION_M32;
+#endif
 
           /* copy only the image part over; we don't want to copy data
            * into the stub part.
@@ -992,7 +1089,11 @@ ocGetNames_ELF ( ObjectCode* oc )
       }
       void * common_mem = NULL;
       if(common_size > 0) {
+#if USE_LINKER_POOL
+          common_mem = linkerPoolAlloc(SECTIONKIND_RWDATA, 0x7, common_size);
+#else
           common_mem = mmapAnonForLinker(common_size);
+#endif
           if (common_mem == NULL) {
             barf("ocGetNames_ELF: Failed to allocate memory for SHN_COMMONs");
           }
@@ -2085,7 +2186,12 @@ ocResolve_ELF ( ObjectCode* oc )
     flushInstructionCache( oc );
 #endif
 
+#if USE_LINKER_POOL
+    linkerPoolProtect();
+    return true;
+#else
     return ocMprotect_Elf(oc);
+#endif
 }
 
 /*
