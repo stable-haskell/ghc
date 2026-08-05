@@ -1423,6 +1423,7 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
            break;
 
        case COMPAT_R_ARM_REL32:     /* ((S + A) | T) – P */
+       case COMPAT_R_ARM_PREL31:
            *(Elf32_Word *)P += S;
            *(Elf32_Word *)P |= T;
            *(Elf32_Word *)P -= P;

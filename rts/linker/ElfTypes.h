@@ -33,6 +33,9 @@
 #define Elf_Sym     Elf64_Sym
 #define Elf_Rel     Elf64_Rel
 #define Elf_Rela    Elf64_Rela
+#if !defined(ELF64_ST_VISIBILITY)
+#define ELF64_ST_VISIBILITY(o) ((o)&0x3)
+#endif
 #if !defined(ELF_ST_VISIBILITY)
 #define ELF_ST_VISIBILITY ELF64_ST_VISIBILITY
 #endif
@@ -60,6 +63,9 @@
 #define Elf_Sym     Elf32_Sym
 #define Elf_Rel     Elf32_Rel
 #define Elf_Rela    Elf32_Rela
+#if !defined(ELF32_ST_VISIBILITY)
+#define ELF32_ST_VISIBILITY(o) ((o)&0x3)
+#endif
 #if !defined(ELF_ST_VISIBILITY)
 #define ELF_ST_VISIBILITY ELF32_ST_VISIBILITY
 #endif /* ELF_ST_VISIBILITY */
