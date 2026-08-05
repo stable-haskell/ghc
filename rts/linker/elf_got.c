@@ -1,5 +1,6 @@
 #include "Rts.h"
 #include "elf_got.h"
+#include "linker/Elf.h"
 #include "linker/MMap.h"
 
 #include <string.h>
@@ -11,16 +12,21 @@
  */
 bool
 needGotSlot(Elf_Sym * symbol) {
-    /* using global here should give an upper bound */
-    /* I don't believe we need to relocate STB_LOCAL
-     * symbols via the GOT; however I'm unsure about
-     * STB_WEAK.
-     *
-     * Any more restrictive filter here would result
-     * in a smaller GOT, which is preferable.
+    /* Any symbol that might be referenced via a GOT relocation needs a slot.
+     * STB_LOCAL symbols can have GOT-relative relocations in some toolchains
+     * (e.g. Android NDK's libm.a has local data symbols like approx_tab
+     * referenced via R_AARCH64_ADR_GOT_PAGE).
      */
+    /* Include named local object/func symbols — some toolchains
+     * (e.g. Android NDK) generate GOT-relative relocations for local
+     * data symbols like approx_tab in libm.a. Exclude unnamed symbols,
+     * STT_FILE symbols (source filenames), and STT_NOTYPE symbols. */
     return ELF_ST_BIND(symbol->st_info) == STB_GLOBAL
         || ELF_ST_BIND(symbol->st_info) == STB_WEAK
+        || (ELF_ST_BIND(symbol->st_info) == STB_LOCAL
+            && symbol->st_name != 0
+            && ELF_ST_TYPE(symbol->st_info) != STT_FILE
+            && ELF_ST_TYPE(symbol->st_info) != STT_NOTYPE)
         // Section symbols exist primarily for relocation
         // and as such may need a GOT slot.
         || ELF_ST_TYPE(symbol->st_info) == STT_SECTION;
@@ -53,9 +59,13 @@ makeGot(ObjectCode * oc) {
     }
     if(got_slots > 0) {
         oc->info->got_size = got_slots * sizeof(void *);
+#if USE_LINKER_POOL
+        void * mem = linkerPoolAllocGot(oc->info->got_size);
+#else
         void * mem = mmapAnonForLinker(oc->info->got_size);
+#endif
         if (mem == NULL) {
-            errorBelch("MAP_FAILED. errno=%d", errno);
+            errorBelch("makeGot: allocation failed (size=%zu)", oc->info->got_size);
             return EXIT_FAILURE;
         }
 
@@ -139,10 +149,15 @@ fillGot(ObjectCode * oc) {
         }
     }
 
+#if USE_LINKER_POOL
+    // When using the linker pool, we cannot mprotect individual
+    // sub-allocations. Protection is handled by linkerPoolProtect().
+#else
     // We are done initializing the GOT; freeze it.
     if(mprotect(oc->info->got_start, oc->info->got_size, PROT_READ) != 0) {
         sysErrorBelch("unable to protect memory");
     }
+#endif
     return EXIT_SUCCESS;
 }
 
