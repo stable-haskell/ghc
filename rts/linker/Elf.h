@@ -16,4 +16,11 @@ int ocRunFini_ELF        ( ObjectCode* oc );
 int ocAllocateExtras_ELF ( ObjectCode *oc );
 void *loadNativeObjFromLinkerScript_ELF( char **errmsg );
 
+#if defined(aarch64_HOST_ARCH) && defined(OBJFORMAT_ELF) && RTS_LINKER_USE_MMAP
+#define USE_LINKER_POOL 1
+void linkerPoolProtect(void);
+void * linkerPoolAlloc(SectionKind kind, StgWord align, StgWord size);
+void * linkerPoolAllocGot(StgWord size);
+#endif
+
 #include "EndPrivate.h"
