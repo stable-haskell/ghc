@@ -345,7 +345,13 @@ common rts-cmm-sources-base
         AutoApply.cmm
         AutoApply_V16.cmm
 
-      if arch(x86_64)
+      -- Both x86 widths need the ISA flags; hadrian gates the same four
+      -- files on `archOS_arch tgt `elem` [ArchX86, ArchX86_64]` (see
+      -- `rtsPackageArgs` in hadrian/src/Settings/Packages.hs).  Without them
+      -- a 32-bit x86 target stops at
+      --   ghc: sorry! ... 256-bit wide vectors require -mavx2
+      -- on Jumps_V32.cmm.  Non-x86 targets take the flagless branch below.
+      if arch(x86_64) || arch(i386)
         cmm-sources:
           Jumps_V32.cmm (-mavx2)
           Jumps_V64.cmm (-mavx512f)
