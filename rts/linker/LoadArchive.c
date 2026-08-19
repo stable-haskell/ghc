@@ -384,7 +384,7 @@ HsInt loadArchive_ (pathchar *path)
     DEBUG_LOG("start\n");
     DEBUG_LOG("Loading archive `%" PATH_FMT "'\n", path);
 
-    if (endsWithPath(path, "/libc.a")) {
+    if (endsWithPath(path, WSTR("/libc.a"))) {
         IF_DEBUG(linker,
                  debugBelch("ignoring libc.a file %" PATH_FMT "\n", path));
         return 1; /* success */
