@@ -220,7 +220,23 @@ main' postLoadMode units dflags0 args flagWarnings = do
                DoMake          -> (CompManager, dflt_backend, LinkExecutable Dynamic)
                DoBackpack      -> (CompManager, dflt_backend, LinkExecutable Dynamic)
                DoMkDependHS    -> (MkDepend,    dflt_backend, LinkExecutable Dynamic)
-               DoAbiHash       -> (OneShot,     dflt_backend, LinkExecutable Dynamic)
+               -- `NoLink`, not `LinkExecutable`: `abiHash` reads interfaces and
+               -- prints hashes, it never links.  Claiming an executable link
+               -- makes `makeDynFlagsConsistent` apply link-time way
+               -- adjustments that then contradict the flags Cabal passed
+               -- alongside.  On wasm it strips `WayDyn` ("-dynamic is ignored
+               -- when linking binaries on WASM" -- correct for a real link,
+               -- since wasm-ld wants the static archives), so `ghc --abi-hash
+               -- -dynamic -hisuf dyn_hi` looks for interfaces tagged "" and
+               -- finds the dyn ones it was pointed at:
+               --
+               --   Exception when reading interface file .../Foo.dyn_hi
+               --   mismatched interface file profile tag (wanted "", got "dyn")
+               --
+               -- which is fatal for any package Cabal builds in the dyn way
+               -- for a wasm target.  (`DoMkDependHS` below does not link
+               -- either, but nothing has needed it yet.)
+               DoAbiHash       -> (OneShot,     dflt_backend, NoLink)
                _               -> (OneShot,     dflt_backend, LinkExecutable Dynamic)
 
   let dflags1 = dflags0{ ghcMode   = mode,
