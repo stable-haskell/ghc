@@ -513,7 +513,7 @@ common rts-c-sources-base
                sm/CNF.c
                sm/Compact.c
                sm/Evac.c
-               sm/Evac_thr.c
+               sm/Evac_par.c
                sm/GC.c
                sm/GCAux.c
                sm/GCUtils.c
@@ -528,7 +528,7 @@ common rts-c-sources-base
                sm/NonMovingSweep.c
                sm/Sanity.c
                sm/Scav.c
-               sm/Scav_thr.c
+               sm/Scav_par.c
                sm/Storage.c
                sm/Sweep.c
                  -- I wish we had wildcards..., this would be:
@@ -666,9 +666,9 @@ common rts-global-build-flags
 
 common rts-debug-flags
     ghc-options: -DDEBUG -optc-DDEBUG
-    cpp-options: -DDEBUG -fno-omit-frame-pointer -g3 -O0
+    cpp-options: -DDEBUG
     cmm-options: -DDEBUG
-    cc-options:  -DDEBUG -fno-omit-frame-pointer -g3 -O0
+    cc-options:  -DDEBUG -fno-omit-frame-pointer -g3 -O0 -U_FORTIFY_SOURCE
 
 common rts-threaded-flags
     ghc-options: -DTHREADED_RTS -optc-DTHREADED_RTS
