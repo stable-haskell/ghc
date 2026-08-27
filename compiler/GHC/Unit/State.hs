@@ -858,7 +858,6 @@ mungeUnitInfo :: OsPath -> OsPath
                    -> UnitInfo -> UnitInfo
 mungeUnitInfo top_dir pkgroot =
     mungeLibDirFields
-  . mungeDynLibFields
   . mungeUnitInfoPaths (ST.pack (OsPath.unsafeDecodeUtf top_dir)) (ST.pack (OsPath.unsafeDecodeUtf pkgroot))
 
 mungeLibDirFields :: UnitInfo -> UnitInfo
