@@ -8,7 +8,7 @@
 --  (c) The University of Glasgow 2002-2006
 --
 
-#include "Bytecodes.h"
+#include "rts/Bytecodes.h"
 
 -- | Bytecode assembler types
 module GHC.ByteCode.Types
