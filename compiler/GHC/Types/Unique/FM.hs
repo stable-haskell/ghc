@@ -52,6 +52,7 @@ module GHC.Types.Unique.FM (
         delListFromUFM,
         delListFromUFM_Directly,
         plusUFM,
+        strictPlusUFM,
         plusUFM_C,
         strictPlusUFM_C, strictPlusUFM_C_Directly,
         plusUFM_CD,
@@ -270,6 +271,10 @@ plusUFM :: UniqFM key elt -> UniqFM key elt -> UniqFM key elt
 plusUFM (UFM x) (UFM y) = UFM (M.union y x)
      -- Note (M.union y x), with arguments flipped
      -- M.union is left-biased, plusUFM should be right-biased.
+
+-- | Right biased
+strictPlusUFM :: UniqFM key elt -> UniqFM key elt -> UniqFM key elt
+strictPlusUFM (UFM x) (UFM y) = UFM (MS.union y x)
 
 plusUFM_C :: (elt -> elt -> elt) -> UniqFM key elt -> UniqFM key elt -> UniqFM key elt
 plusUFM_C f (UFM x) (UFM y) = UFM (M.unionWith f x y)
