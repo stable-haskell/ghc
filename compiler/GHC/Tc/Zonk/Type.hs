@@ -472,7 +472,7 @@ commitFlexi DefaultFlexi tv zonked_kind
        ; return manyDataConTy }
   | Just (ConcreteFRR origin) <- isConcreteTyVar_maybe tv
   = do { addErr $ TcRnZonkerMessage (ZonkerCannotDefaultConcrete origin)
-       ; newZonkAnyType zonked_kind }
+       ; return (anyTypeOfKind zonked_kind) }
   | otherwise
   = do { traceTc "Defaulting flexi tyvar to UnusedType:" (pprTyVar tv)
           -- See Note [The types Any and UnusedType] in GHC.Builtin.Types, esp wrinkle (Any6)
