@@ -2174,7 +2174,6 @@ T26615.$s$wdisjointSubtrees
                   case GHC.Internal.Classes.$fEqList_$s$c==1 kA kB of {
                         GHC.Internal.Classes.$fEqList_$s$fEqList1
                     GHC.Internal.Classes.$fEqList_$s$fEqList1
-                    GHC.Internal.Classes.$fEqList_$s$fEqList1
                     False -> GHC.Internal.Types.True;
                     True -> GHC.Internal.Types.False
                   };
