@@ -1,7 +1,11 @@
 source-repository-package
   type: git
   location: https://github.com/stable-haskell/Cabal.git
-  tag: stable-haskell/master
+  -- Pin to feat/wasm-cross-ghcup-stack-next (post-split Cabal #378): supports
+  -- `package host:*` / `package build:*` needed by cabal.project.stage2.dynamic
+  -- so DYNAMIC=1 does not build BUILD-stage tools shared against bootstrap GHC.
+  -- Re-pin to stable-haskell/master once #378 lands there (cabal#384).
+  tag: f2e0a89e15cf6604cec9d93e26a4b3caf459b076
   subdir: Cabal
           Cabal-syntax
           cabal-install
