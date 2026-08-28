@@ -2165,8 +2165,15 @@ T26615.$s$wdisjointSubtrees
               case GHC.Internal.Prim.neWord# bx bx1 of {
                 __DEFAULT ->
                       GHC.Internal.Classes.$fEqList_$s$fEqList1
+                GHC.Internal.Classes.$fEqList_$s$fEqList1
+                GHC.Internal.Classes.$fEqList_$s$fEqList1
+            GHC.Internal.Classes.$fEqList_$s$fEqList1
+                  @a GHC.Internal.Classes.$fEqList_$s$fEqList1 bx kB ww ds
+                  GHC.Internal.Classes.$fEqList_$s$fEqList1
+                @b GHC.Internal.Classes.$fEqList_$s$fEqList1 bx kA ww wild2;
                   case GHC.Internal.Classes.$fEqList_$s$c==1 kA kB of {
                         GHC.Internal.Classes.$fEqList_$s$fEqList1
+                    GHC.Internal.Classes.$fEqList_$s$fEqList1
                     GHC.Internal.Classes.$fEqList_$s$fEqList1
                     False -> GHC.Internal.Types.True;
                     True -> GHC.Internal.Types.False
