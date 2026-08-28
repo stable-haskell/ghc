@@ -82,12 +82,7 @@ jobs:
     - name: Build stage0 + stage1 (dynamic=${{ matrix.dynamic }})
       shell: devx {0}
       timeout-minutes: 45
-      run: |
-        set -eo pipefail
-        export CABAL_DIR="$GITHUB_WORKSPACE/_build/cabal-dir"
-        export TMPDIR="$GITHUB_WORKSPACE/_build/tmp"
-        mkdir -p "$TMPDIR"
-        make QUIET=1 DYNAMIC=${{ matrix.dynamic }} CABAL_ARGS="-j2" ${{ steps.cabal-cache.outputs.cache-hit == 'true' && 'USE_SYSTEM_CABAL=1' || '' }} stage1
+      run: make QUIET=1 DYNAMIC=${{ matrix.dynamic }} CABAL_ARGS="-j2" ${{ steps.cabal-cache.outputs.cache-hit == 'true' && 'USE_SYSTEM_CABAL=1' || '' }} stage1
 
     - name: Clean intermediates to free disk for stage2
       run: |
@@ -98,17 +93,11 @@ jobs:
         rm -rf _build/stage0/ 2>/dev/null || true
         find _build/stage1/ -maxdepth 1 -mindepth 1 -not -name store -exec rm -rf {} + 2>/dev/null || true
         rm -rf _build/packages/ _build/tmp/ 2>/dev/null || true
-        rm -rf "${CABAL_DIR:-$GITHUB_WORKSPACE/_build/cabal-dir}/packages/" 2>/dev/null || true
 
     - name: Build stage2 (dynamic=${{ matrix.dynamic }})
       shell: devx {0}
       timeout-minutes: 90
-      run: |
-        set -eo pipefail
-        export CABAL_DIR="$GITHUB_WORKSPACE/_build/cabal-dir"
-        export TMPDIR="$GITHUB_WORKSPACE/_build/tmp"
-        mkdir -p "$TMPDIR"
-        make QUIET=1 DYNAMIC=${{ matrix.dynamic }} CABAL_ARGS="-j2" USE_SYSTEM_CABAL=1 stage2
+      run: make QUIET=1 DYNAMIC=${{ matrix.dynamic }} CABAL_ARGS="-j2" USE_SYSTEM_CABAL=1 stage2
 
     - name: Display build timings
       if: ${{ !cancelled() }}
@@ -132,12 +121,7 @@ jobs:
 
     - name: Run the testsuite (dynamic=${{ matrix.dynamic }})
       shell: devx {0}
-      run: |
-        set -eo pipefail
-        export CABAL_DIR="$GITHUB_WORKSPACE/_build/cabal-dir"
-        export TMPDIR="$GITHUB_WORKSPACE/_build/tmp"
-        mkdir -p "$TMPDIR"
-        make test QUIET=1 DYNAMIC=${{ matrix.dynamic }} USE_SYSTEM_CABAL=1
+      run: make test QUIET=1 DYNAMIC=${{ matrix.dynamic }} USE_SYSTEM_CABAL=1
 
     - name: Stop metrics collection
       if: ${{ !cancelled() }}
