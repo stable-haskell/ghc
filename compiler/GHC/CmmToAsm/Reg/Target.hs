@@ -48,7 +48,9 @@ import GHC.CmmToAsm.Format
 
 import GHC.Utils.Outputable
 import GHC.Utils.Panic
+import GHC.Utils.Misc (HasDebugCallStack)
 import GHC.Types.Unique
+import GHC.Types.Unique.Set
 import GHC.Platform
 
 -- Architecture-specific imports (CPP required - modules are conditionally compiled)
