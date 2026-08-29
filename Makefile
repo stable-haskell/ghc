@@ -967,9 +967,11 @@ STAGE3_wasm32-unknown-wasi_GHC_TOOLCHAIN_ARGS = $(GHC_TOOLCHAIN_ARGS) \
 
 TARGET_DIR = $(DIST_DIR)/lib/targets/$(TARGET_PLATFORM)
 
-# Happy template directory: defaults to stage2's unpacked happy-lib source; can
-# be overridden for dist-based cross builds where stage2 build tree is unavailable.
-HAPPY_TEMPLATE_DIR ?= $(wildcard _build/stage2/src/happy-lib-*/data)
+# NOTE: do NOT pass --happy-options=--template=... here.
+# Cross CI's nix env has happy-2.1.7 on PATH while dist ships happy-lib-2.1.5
+# templates; forcing those templates yields GHC-44432 (happyDoParse unbound)
+# in GHC.Parser (and previously genprimopcode). Let happy use its own
+# packaged templates (nix 2.1.7 or cabal-built 2.1.5 — either is consistent).
 
 # NOTE: disable-library-for-ghci is repeated here but it should be sufficient
 # to put it in cabal.project.stage3
@@ -989,7 +991,6 @@ STAGE3_$(1)_CABAL_BUILD = \
 	--ghc-options "-ghcversion-file=$$(call NORMALIZE_FP,$$(CURDIR)/rts/include/ghcversion.h)" \
 	--with-hsc2hs=$$(call NORMALIZE_FP,$$(CURDIR)/$$(DIST_DIR)/bin/$(1)-hsc2hs) \
 	--hsc2hs-options='-x' \
-	--happy-options="--template=$$(abspath $$(HAPPY_TEMPLATE_DIR))" \
 	--with-gcc $$(STAGE3_$(1)_CC) \
 	$$(foreach dir,$$(STAGE3_$(1)_EXTRA_LIB_DIRS),--extra-lib-dirs=$$(dir)) \
 	$$(foreach dir,$$(STAGE3_$(1)_EXTRA_INCLUDE_DIRS),--extra-include-dirs=$$(dir))
