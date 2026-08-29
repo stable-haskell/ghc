@@ -56,7 +56,7 @@ import GHC.StgToJS.Linker.Types
 #else
 -- Use centralized stub types when interpreter is not available
 import GHC.Runtime.Interpreter.Stubs
-       ( HValue, ForeignRef, RemoteRef, HValueRef
+       ( HValue, ForeignRef, RemoteRef, RemotePtr, HValueRef
        , Pipe, LinkPlan(..), StgToJSConfig(..) )
 #endif
 
