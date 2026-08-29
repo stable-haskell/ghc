@@ -173,6 +173,9 @@ import GHC.Hs.Dump
 import GHC.Hs.Stats         ( ppSourceStats )
 
 import GHC.HsToCore
+-- ModBreaks lives here (not only in ByteCode.Types); needed for hscSimpleIface
+-- even when HAVE_INTERPRETER is off.
+import GHC.HsToCore.Breakpoints.Types ( ModBreaks )
 
 #if defined(HAVE_INTERPRETER)
 import GHC.StgToByteCode    ( byteCodeGen )
