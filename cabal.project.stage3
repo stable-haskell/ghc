@@ -74,7 +74,8 @@ packages:
   -- Match stage2: Cabal 3.17 (f2e0a89) rejects process-1.6.26.1
   -- (bounds: <1.6.24 || ==1.6.26.0 || >=1.6.26.2 && <1.7).
   https://hackage.haskell.org/package/process-1.6.29.0/process-1.6.29.0.tar.gz
-  https://hackage.haskell.org/package/semaphore-compat-1.0.0/semaphore-compat-1.0.0.tar.gz
+  -- Match stage2: SemaphoreError / getSemaphoreProtocolVersion need 2.0.1
+  https://hackage.haskell.org/package/semaphore-compat-2.0.1/semaphore-compat-2.0.1.tar.gz
   https://hackage.haskell.org/package/stm-2.5.3.1/stm-2.5.3.1.tar.gz
   https://hackage.haskell.org/package/text-2.1.3/text-2.1.3.tar.gz
   https://hackage.haskell.org/package/time-1.15/time-1.15.tar.gz
