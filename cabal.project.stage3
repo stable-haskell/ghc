@@ -51,9 +51,10 @@ packages:
   libraries/system-cxx-std-lib
   libraries/template-haskell
 
-  -- Internal tools
-  utils/genprimopcode
-  utils/deriveConstants
+  -- Internal tools: do NOT rebuild genprimopcode/deriveConstants here.
+  -- Makefile already puts stage1/dist binaries on PATH (GENPRIMOPCODE_BIN).
+  -- Rebuilding them under --happy-options=--template=_build/dist/... hits
+  -- GHC-44432 (happyDoParse stub vs template), same class as stage1 hermetic.
 
   -- The following are packages available on Hackage but included as submodules
   https://hackage.haskell.org/package/array-0.5.8.0/array-0.5.8.0.tar.gz
@@ -214,7 +215,8 @@ package libffi-clib
 -- build against this bindist.
 
 package ghc
-  flags: +build-tool-depends +internal-interpreter
+  -- -build-tool-depends: use PATH genprimopcode/deriveConstants (see packages note)
+  flags: -build-tool-depends +internal-interpreter
 
 package ghc-bin
   flags: +internal-interpreter
