@@ -1935,11 +1935,15 @@ async def makefile_test( name, way, target=None ):
     if target is None:
         target = name
 
-    # Pass CC/TEST_CC on the make cmdline so they ride in MAKEFLAGS for any
-    # recursive $(MAKE) and override a spurious empty CC= from the environment.
+    # Pass CC/TEST_CC/TEST_HC on the make cmdline so they ride in MAKEFLAGS for
+    # recursive $(MAKE) and override empty values from a sparse CI environment.
     cc = shlex.quote(_resolve_test_c_compiler())
-    cmd = '$MAKE -s --no-print-directory {target} CC={cc} TEST_CC={cc}'.format(
-        target=target, cc=cc)
+    extras = ' CC={cc} TEST_CC={cc}'.format(cc=cc)
+    hc = getattr(config, 'compiler', None)
+    if hc:
+        extras += ' TEST_HC={hc}'.format(hc=shlex.quote(str(hc)))
+    cmd = '$MAKE -s --no-print-directory {target}{extras}'.format(
+        target=target, extras=extras)
     return await run_command(name, way, cmd)
 
 # -----------------------------------------------------------------------------

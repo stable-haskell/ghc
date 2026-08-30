@@ -692,9 +692,18 @@ jobs:
           fi
           export CC="$CC_BIN"
           export TEST_CC="$CC_BIN"
-          echo "bindist testsuite using CC=$CC TEST_CC=$TEST_CC"
-          PATH=$(pwd)/_build/dist/bin:$PATH ${{ env.MAKE }} -C _build/dist/testsuite \
-            CC="$CC_BIN" TEST_CC="$CC_BIN"
+          # Nested makefile_test makes do not see make-local TEST_HC unless it is
+          # in the environment / MAKEFLAGS. Mac/Windows jobs previously only set
+          # THREADS, so "$(TEST_HC)" expanded empty → `/bin/sh: : command not found`.
+          DIST_BIN="$(pwd)/_build/dist/bin"
+          export TEST_HC="${TEST_HC:-$DIST_BIN/ghc}"
+          export GHC_PKG="${GHC_PKG:-$DIST_BIN/ghc-pkg}"
+          export HP2PS_ABS="${HP2PS_ABS:-$DIST_BIN/hp2ps}"
+          export HPC="${HPC:-$DIST_BIN/hpc}"
+          export RUNGHC="${RUNGHC:-$DIST_BIN/runghc}"
+          echo "bindist testsuite using CC=$CC TEST_CC=$TEST_CC TEST_HC=$TEST_HC"
+          PATH=$DIST_BIN:$PATH ${{ env.MAKE }} -C _build/dist/testsuite \
+            CC="$CC_BIN" TEST_CC="$CC_BIN" TEST_HC="$TEST_HC"
         env:
           THREADS: 4
           TEST_HC: ${{ steps.pwd_output.outputs.pwd }}/_build/dist/bin/ghc
