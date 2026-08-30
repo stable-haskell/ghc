@@ -682,6 +682,14 @@ jobs:
           cd _build/dist
           for file in *.tar.gz; do tar xzf "$file"; done
           )
+          # makefile_test cases (e.g. rts/linker/T27072) invoke $(CC) for
+          # companion .c files. Bindist test jobs do not inherit a compiler
+          # from the build container — default to clang/cc/gcc or T27072
+          # fails with `/bin/sh: : command not found`.
+          if [ -z "${CC:-}" ]; then
+            CC="$(command -v clang || command -v cc || command -v gcc || true)"
+            export CC
+          fi
           PATH=$(pwd)/_build/dist/bin:$PATH ${{ env.MAKE }} -C _build/dist/testsuite
         env:
           THREADS: 4
