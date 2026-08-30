@@ -1941,7 +1941,12 @@ async def makefile_test( name, way, target=None ):
     extras = ' CC={cc} TEST_CC={cc}'.format(cc=cc)
     hc = getattr(config, 'compiler', None)
     if hc:
-        extras += ' TEST_HC={hc}'.format(hc=shlex.quote(str(hc)))
+        # config.compiler often already includes make quote_path quotes
+        # ('"/path/ghc"'); do not feed those into TEST_HC= or nested makes
+        # look for a binary named ghc" and fail en masse.
+        hc_path = str(hc).strip().strip('"').strip("'")
+        if hc_path:
+            extras += ' TEST_HC={hc}'.format(hc=shlex.quote(hc_path))
     cmd = '$MAKE -s --no-print-directory {target}{extras}'.format(
         target=target, extras=extras)
     return await run_command(name, way, cmd)
