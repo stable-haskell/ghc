@@ -96,6 +96,15 @@ if !os(windows)
   package *
     library-for-ghci: False
 
+-- libffi-clib compiles src/java_raw_api.c as a GHC c-source. Its deprecated
+-- ffi_java_raw_* calls are a hard error on Rocky Linux 8's gcc-8, failing the
+-- stage1 build. GHC's RTS/FFI uses ffi_call/closures, not the (Java) raw API,
+-- and java_raw_api.c is wholly `#if !FFI_NO_RAW_API`-guarded — so force-define
+-- FFI_NO_RAW_API on the C compiler to compile it to nothing. (libffi's own
+-- --disable-raw-api configure flag does not reach this GHC c-source compile.)
+package libffi-clib
+  ghc-options: -optc-DFFI_NO_RAW_API=1
+
 package ghc
   flags: +bootstrap
          +x86-ncg +aarch64-ncg
