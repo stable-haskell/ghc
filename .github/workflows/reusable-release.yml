@@ -139,17 +139,16 @@ jobs:
             ln -s make /usr/local/bin/gmake
             echo "/usr/local/bin" >> $GITHUB_PATH
 
-      - if: matrix.platform.image == 'rockylinux:8'
-        name: Install emscripten
-        run : &emscripten |
-          set -eux
-
-          git clone https://github.com/emscripten-core/emsdk.git
-          cd emsdk
-          git fetch --tags
-          git checkout ${{ env.EMSDK_VERSION }}
-          ./emsdk install ${{ env.EMSDK_VERSION }}
-          ./emsdk activate ${{ env.EMSDK_VERSION }}
+      # Skip emscripten on Rocky: stage3-javascript fails looking up `alex` on
+      # PATH after hermetic stage1 (Cabal-4123), even though alex builds into the
+      # stage3 store. JS/multi-target bindists are covered by Nix CI Cross:MULTI;
+      # Rocky ships the native glibc bindist only (same stance as FreeBSD).
+      # - if: matrix.platform.image == 'rockylinux:8'
+      #   name: Install emscripten
+      #   run : &emscripten |
+      #     set -eux
+      #     git clone https://github.com/emscripten-core/emsdk.git
+      #     ...
 
       - name: Cache stage0 cabal binary
         uses: actions/cache@v5
