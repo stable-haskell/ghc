@@ -8,6 +8,7 @@ import io
 import shutil
 import os
 import re
+import shlex
 import traceback
 import time
 import datetime
@@ -1910,11 +1911,35 @@ def framework_warn(name: TestName, way: WayName, reason: str) -> None:
 async def run_command( name, way, cmd ):
     return await simple_run( name, '', override_options(cmd), '' )
 
+def _resolve_test_c_compiler() -> str:
+    """Find a C compiler for makefile_test companion .c files.
+
+    Bindist CI can leave CC empty through the make→python→make sandwich
+    (empty CC= in the environment overrides make's default and yields
+    ``/bin/sh: : command not found``). Prefer TEST_CC/CC from ghc_env, then
+    well-known absolute paths.
+    """
+    for key in ('TEST_CC', 'CC'):
+        val = (ghc_env.get(key) or '').strip()
+        if val:
+            return val
+    for cand in ('/usr/bin/clang', '/usr/bin/cc', 'clang', 'cc', 'gcc'):
+        if os.path.isfile(cand) and os.access(cand, os.X_OK):
+            return cand
+        which = shutil.which(cand)
+        if which:
+            return which
+    return 'cc'
+
 async def makefile_test( name, way, target=None ):
     if target is None:
         target = name
 
-    cmd = '$MAKE -s --no-print-directory {target}'.format(target=target)
+    # Pass CC/TEST_CC on the make cmdline so they ride in MAKEFLAGS for any
+    # recursive $(MAKE) and override a spurious empty CC= from the environment.
+    cc = shlex.quote(_resolve_test_c_compiler())
+    cmd = '$MAKE -s --no-print-directory {target} CC={cc} TEST_CC={cc}'.format(
+        target=target, cc=cc)
     return await run_command(name, way, cmd)
 
 # -----------------------------------------------------------------------------
