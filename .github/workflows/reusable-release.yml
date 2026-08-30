@@ -319,21 +319,10 @@ jobs:
           path: ${{ env.CABAL_CACHE_PATH }}
           key: cabal-${{ vars.CACHE_VERSION || 'v1' }}-${{ env.ARTIFACT }}-${{ hashFiles('cabal.project.stage0') }}
 
-      # Anchor for mac builds. Rocky deliberately does NOT install emsdk so it
-      # ships a native glibc bindist only: stage3-javascript fails there with
-      # Cabal-4123 (alex not on PATH) under hermetic stage1; JS/multi-target
-      # coverage stays on Nix CI Cross:MULTI.
-      - name: Install emscripten
-        run : &emscripten |
-          set -eux
-
-          git clone https://github.com/emscripten-core/emsdk.git
-          cd emsdk
-          git fetch --tags
-          git checkout ${{ env.EMSDK_VERSION }}
-          ./emsdk install ${{ env.EMSDK_VERSION }}
-          ./emsdk activate ${{ env.EMSDK_VERSION }}
-
+      # Do not install emsdk here: stage3-javascript fails with Cabal-4123
+      # (alex not on PATH) under hermetic stage1 — same as Rocky. macOS
+      # aarch64 already ships native-only; JS/multi-target stays on Nix CI
+      # Cross:MULTI.
       - name: Run build
         run: *build
 
@@ -684,11 +673,16 @@ jobs:
           )
           # makefile_test cases (e.g. rts/linker/T27072) invoke $(CC) for
           # companion .c files. Bindist test jobs do not inherit a compiler
-          # from the build container — default to clang/cc/gcc or T27072
-          # fails with `/bin/sh: : command not found`.
+          # from the build container. Prefer an absolute clang/cc; never export
+          # an empty CC (that overrides make's default and yields
+          # `/bin/sh: : command not found`).
           if [ -z "${CC:-}" ]; then
-            CC="$(command -v clang || command -v cc || command -v gcc || true)"
-            export CC
+            for c in /usr/bin/clang /usr/bin/cc clang cc gcc; do
+              if command -v "$c" >/dev/null 2>&1 || [ -x "$c" ]; then
+                export CC="$c"
+                break
+              fi
+            done
           fi
           PATH=$(pwd)/_build/dist/bin:$PATH ${{ env.MAKE }} -C _build/dist/testsuite
         env:
