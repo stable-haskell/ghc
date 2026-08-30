@@ -528,12 +528,15 @@ jobs:
           ghc --info
           cabal update
           gmake clean clean-cabal distclean
-          gmake _build/dist/haskell-toolchain.tar.gz _build/dist/ghc.tar.gz _build/dist/cabal.tar.gz _build/dist/tests.tar.gz _build/dist/ghc-javascript-unknown-ghcjs.tar.gz
+          # The FreeBSD self-hosted runner has no JS toolchain (llc/opt/
+          # emscripten), so it cannot build the javascript-unknown-ghcjs cross
+          # target. Skip both the JS bindist AND haskell-toolchain.tar.gz — the
+          # latter depends on stage3-javascript-unknown-ghcjs.
+          # Ship only the native FreeBSD ghc/cabal/tests bindists.
+          gmake _build/dist/ghc.tar.gz _build/dist/cabal.tar.gz _build/dist/tests.tar.gz
           cd _build/dist
           mv ghc.tar.gz ghc-$(bin/ghc --numeric-version)-${{ env.ARTIFACT }}.tar.gz
           mv cabal.tar.gz cabal-$(bin/cabal --numeric-version)-${{ env.ARTIFACT }}.tar.gz
-          mv haskell-toolchain.tar.gz haskell-toolchain-${{ env.ARTIFACT }}.tar.gz
-          mv ghc-javascript-unknown-ghcjs.tar.gz ghc-javascript-unknown-ghcjs-$(bin/ghc --numeric-version)-${{ env.ARTIFACT }}.tar.gz
           mv tests.tar.gz tests-${{ env.ARTIFACT }}.tar.gz
         env:
           EXTRA_LIB_DIRS: /usr/local/lib
