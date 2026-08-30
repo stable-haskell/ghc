@@ -43,7 +43,7 @@ import GHC.CmmToAsm.Format
 import GHC.CmmToAsm.Config
 import GHC.Platform.Reg.Class.Unified
 import GHC.Platform.Reg
-import GHC.CmmToAsm.Reg.Target
+import GHC.CmmToAsm.Reg.Target (targetClassOfReg)
 import GHC.Platform
 
 -- Our intermediate code:
@@ -182,7 +182,7 @@ stmtToInstrs stmt = do
               format = cmmTypeFormat ty
 
     CmmUnsafeForeignCall target result_regs args
-       -> genCCall target result_regs args
+       -> genCCall platform target result_regs args
 
     CmmBranch id          -> genBranch id
     CmmCondBranch arg true false prediction -> do
@@ -340,6 +340,8 @@ iselExpr64 (CmmReg (CmmLocal local_reg)) = do
   let Reg64 hi lo = localReg64 local_reg
   return (RegCode64 nilOL hi lo)
 
+iselExpr64 regoff@(CmmRegOff _ _) = iselExpr64 $ mangleIndexTree regoff
+
 iselExpr64 (CmmLit (CmmInt i _)) = do
   Reg64 rhi rlo <- getNewReg64
   let
@@ -469,48 +471,26 @@ getRegister' _ platform (CmmLoad mem pk _)
         return (Any II64 code)
 
 -- catch simple cases of zero- or sign-extended load
-getRegister' _ _ (CmmMachOp (MO_UU_Conv W8 W32) [CmmLoad mem _ _]) = do
-    Amode addr addr_code <- getAmode D mem
-    return (Any II32 (\dst -> addr_code `snocOL` LD II8 dst addr))
+getRegister' _ _ (CmmMachOp (MO_UU_Conv src tgt) [CmmLoad mem pk _])
+  | src < tgt
+  , cmmTypeFormat pk == intFormat src = loadZeroExpand mem pk tgt
 
-getRegister' _ _ (CmmMachOp (MO_XX_Conv W8 W32) [CmmLoad mem _ _]) = do
-    Amode addr addr_code <- getAmode D mem
-    return (Any II32 (\dst -> addr_code `snocOL` LD II8 dst addr))
+getRegister' _ _ (CmmMachOp (MO_XX_Conv src tgt) [CmmLoad mem pk _])
+  | src < tgt
+  , cmmTypeFormat pk == intFormat src = loadZeroExpand mem pk tgt
 
-getRegister' _ _ (CmmMachOp (MO_UU_Conv W8 W64) [CmmLoad mem _ _]) = do
-    Amode addr addr_code <- getAmode D mem
-    return (Any II64 (\dst -> addr_code `snocOL` LD II8 dst addr))
-
-getRegister' _ _ (CmmMachOp (MO_XX_Conv W8 W64) [CmmLoad mem _ _]) = do
-    Amode addr addr_code <- getAmode D mem
-    return (Any II64 (\dst -> addr_code `snocOL` LD II8 dst addr))
-
--- Note: there is no Load Byte Arithmetic instruction, so no signed case here
-
-getRegister' _ _ (CmmMachOp (MO_UU_Conv W16 W32) [CmmLoad mem _ _]) = do
-    Amode addr addr_code <- getAmode D mem
-    return (Any II32 (\dst -> addr_code `snocOL` LD II16 dst addr))
-
-getRegister' _ _ (CmmMachOp (MO_SS_Conv W16 W32) [CmmLoad mem _ _]) = do
-    Amode addr addr_code <- getAmode D mem
-    return (Any II32 (\dst -> addr_code `snocOL` LA II16 dst addr))
-
-getRegister' _ _ (CmmMachOp (MO_UU_Conv W16 W64) [CmmLoad mem _ _]) = do
-    Amode addr addr_code <- getAmode D mem
-    return (Any II64 (\dst -> addr_code `snocOL` LD II16 dst addr))
-
-getRegister' _ _ (CmmMachOp (MO_SS_Conv W16 W64) [CmmLoad mem _ _]) = do
-    Amode addr addr_code <- getAmode D mem
-    return (Any II64 (\dst -> addr_code `snocOL` LA II16 dst addr))
-
-getRegister' _ _ (CmmMachOp (MO_UU_Conv W32 W64) [CmmLoad mem _ _]) = do
-    Amode addr addr_code <- getAmode D mem
-    return (Any II64 (\dst -> addr_code `snocOL` LD II32 dst addr))
-
-getRegister' _ _ (CmmMachOp (MO_SS_Conv W32 W64) [CmmLoad mem _ _]) = do
-    -- lwa is DS-form. See Note [Power instruction format]
-    Amode addr addr_code <- getAmode DS mem
-    return (Any II64 (\dst -> addr_code `snocOL` LA II32 dst addr))
+  -- XXX: This is ugly, refactor
+getRegister' _ _ (CmmMachOp (MO_SS_Conv src tgt) [CmmLoad mem pk _])
+  -- Note: there is no Load Byte Arithmetic instruction
+  | cmmTypeFormat pk /= II8
+  , src < tgt = do
+      let format = cmmTypeFormat pk
+      -- lwa is DS-form. See Note [Power instruction format]
+      let form = if format >= II32 then DS else D
+      Amode addr addr_code <- getAmode form mem
+      let code dst = assert (format == intFormat src)
+                     $ addr_code `snocOL` LA format dst addr
+      return (Any (intFormat tgt) code)
 
 getRegister' config platform (CmmMachOp (MO_RelaxedRead w) [e]) =
       getRegister' config platform (CmmLoad e (cmmBits w) NaturallyAligned)
@@ -563,7 +543,7 @@ getRegister' config platform (CmmMachOp mop [x]) -- unary MachOps
                                  CLRLI arch_fmt dst src1 (arch_bits - size)
                  return (Any (intFormat to) code)
 
-getRegister' _ _ (CmmMachOp mop [x, y]) -- dyadic PrimOps
+getRegister' _ platform (CmmMachOp mop [x, y]) -- dyadic PrimOps
   = case mop of
       MO_F_Eq _ -> condFltReg EQQ x y
       MO_F_Ne _ -> condFltReg NE  x y
@@ -646,8 +626,9 @@ getRegister' _ _ (CmmMachOp mop [x, y]) -- dyadic PrimOps
                 (src, srcCode) <- getSomeReg x
                 let clear_mask = if imm == -4 then 2 else 3
                     fmt = intFormat rep
+                    arch_fmt = intFormat (wordWidth platform)
                     code dst = srcCode
-                               `appOL` unitOL (CLRRI fmt dst src clear_mask)
+                      `appOL` unitOL (CLRRI arch_fmt dst src clear_mask)
                 return (Any fmt code)
         _ -> trivialCode rep False AND x y
       MO_Or rep    -> trivialCode rep False OR x y
@@ -790,6 +771,12 @@ extendSExpr from to x = CmmMachOp (MO_SS_Conv from to) [x]
 
 extendUExpr :: Width -> Width -> CmmExpr -> CmmExpr
 extendUExpr from to x = CmmMachOp (MO_UU_Conv from to) [x]
+
+loadZeroExpand :: CmmExpr -> CmmType -> Width -> NatM Register
+loadZeroExpand mem pk tgt = do
+    Amode addr addr_code <- getAmode D mem
+    let code dst = addr_code `snocOL` LD (cmmTypeFormat pk) dst addr
+    return (Any (intFormat tgt) code)
 
 -- -----------------------------------------------------------------------------
 --  The 'Amode' type: Memory addressing modes passed up the tree.
@@ -1200,24 +1187,25 @@ genCondJump id bool prediction = do
 -- @get_arg@, which moves the arguments to the correct registers/stack
 -- locations.  Apart from that, the code is easy.
 
-genCCall :: ForeignTarget      -- function to call
+genCCall :: Platform
+         -> ForeignTarget      -- function to call
          -> [CmmFormal]        -- where to put the result
          -> [CmmActual]        -- arguments (of mixed type)
          -> NatM InstrBlock
-genCCall (PrimTarget MO_AcquireFence) _ _
+genCCall _ (PrimTarget MO_AcquireFence) _ _
  = return $ unitOL LWSYNC
-genCCall (PrimTarget MO_ReleaseFence) _ _
+genCCall _ (PrimTarget MO_ReleaseFence) _ _
  = return $ unitOL LWSYNC
-genCCall (PrimTarget MO_SeqCstFence) _ _
+genCCall _ (PrimTarget MO_SeqCstFence) _ _
  = return $ unitOL HWSYNC
 
-genCCall (PrimTarget MO_Touch) _ _
+genCCall _ (PrimTarget MO_Touch) _ _
  = return $ nilOL
 
-genCCall (PrimTarget (MO_Prefetch_Data _)) _ _
+genCCall _ (PrimTarget (MO_Prefetch_Data _)) _ _
  = return $ nilOL
 
-genCCall (PrimTarget (MO_AtomicRMW width amop)) [dst] [addr, n]
+genCCall _ (PrimTarget (MO_AtomicRMW width amop)) [dst] [addr, n]
  = do let fmt      = intFormat width
           reg_dst  = getLocalRegReg dst
       (instr, n_code) <- case amop of
@@ -1267,7 +1255,7 @@ genCCall (PrimTarget (MO_AtomicRMW width amop)) [dst] [addr, n]
                           (n_reg, n_code) <- getSomeReg n
                           return  (op dst dst (RIReg n_reg), n_code)
 
-genCCall (PrimTarget (MO_AtomicRead width _)) [dst] [addr]
+genCCall _ (PrimTarget (MO_AtomicRead width _)) [dst] [addr]
  = do let fmt      = intFormat width
           reg_dst  = getLocalRegReg dst
           form     = if widthInBits width == 64 then DS else D
@@ -1294,12 +1282,12 @@ genCCall (PrimTarget (MO_AtomicRead width _)) [dst] [addr]
 -- This is also what gcc does.
 
 
-genCCall (PrimTarget (MO_AtomicWrite width _)) [] [addr, val] = do
+genCCall _ (PrimTarget (MO_AtomicWrite width _)) [] [addr, val] = do
     code <- assignMem_IntCode (intFormat width) addr val
     return $ unitOL HWSYNC `appOL` code
 
-genCCall (PrimTarget (MO_Cmpxchg width)) [dst] [addr, old, new]
-  | width == W32 || width == W64
+genCCall platform (PrimTarget (MO_Cmpxchg width)) [dst] [addr, old, new]
+  | width == W32 || (width == W64 && not (target32Bit platform))
   = do
       (old_reg, old_code) <- getSomeReg old
       (new_reg, new_code) <- getSomeReg new
@@ -1328,9 +1316,8 @@ genCCall (PrimTarget (MO_Cmpxchg width)) [dst] [addr, old, new]
     format = intFormat width
 
 
-genCCall (PrimTarget (MO_Clz width)) [dst] [src]
- = do platform <- getPlatform
-      let reg_dst = getLocalRegReg dst
+genCCall platform (PrimTarget (MO_Clz width)) [dst] [src]
+ = do let reg_dst = getLocalRegReg dst
       if target32Bit platform && width == W64
         then do
           RegCode64 code vr_hi vr_lo <- iselExpr64 src
@@ -1378,9 +1365,8 @@ genCCall (PrimTarget (MO_Clz width)) [dst] [src]
           let cntlz = unitOL (CNTLZ format reg_dst reg)
           return $ s_code `appOL` pre `appOL` cntlz `appOL` post
 
-genCCall (PrimTarget (MO_Ctz width)) [dst] [src]
- = do platform <- getPlatform
-      let reg_dst = getLocalRegReg dst
+genCCall platform (PrimTarget (MO_Ctz width)) [dst] [src]
+ = do let reg_dst = getLocalRegReg dst
       if target32Bit platform && width == W64
         then do
           let format = II32
@@ -1442,9 +1428,8 @@ genCCall (PrimTarget (MO_Ctz width)) [dst] [src]
                           , SUBFC dst r' (RIImm (ImmInt (format_bits)))
                           ]
 
-genCCall target dest_regs argsAndHints
- = do platform <- getPlatform
-      case target of
+genCCall platform target dest_regs argsAndHints
+ = do case target of
         PrimTarget (MO_S_QuotRem  width) -> divOp1 True  width
                                                    dest_regs argsAndHints
         PrimTarget (MO_U_QuotRem  width) -> divOp1 False width
@@ -2450,8 +2435,8 @@ srCode width sgn instr x y = do
   let op_len = max W32 width
       extend = if sgn then extendSExpr else extendUExpr
   (src1, code1) <- getSomeReg (extend width op_len x)
-  (src2, code2) <- getSomeReg (extendUExpr width op_len y)
-  -- Note: Shift amount `y` is unsigned
+  (src2, code2) <- getSomeReg y
+
   let code dst = code1 `appOL` code2 `snocOL`
                  instr (intFormat op_len) dst src1 (RIReg src2)
   return (Any (intFormat width) code)

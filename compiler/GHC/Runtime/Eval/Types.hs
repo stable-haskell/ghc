@@ -6,6 +6,7 @@
 --
 -- -----------------------------------------------------------------------------
 
+{-# LANGUAGE CPP #-}
 module GHC.Runtime.Eval.Types (
         Resume(..), ResumeBindings, IcGlobalRdrEnv(..),
         History(..), ExecResult(..),
@@ -15,10 +16,17 @@ module GHC.Runtime.Eval.Types (
 
 import GHC.Prelude
 
+#if defined(HAVE_INTERPRETER)
 import GHCi.RemoteTypes
 import GHCi.Message (EvalExpr, ResumeContext)
 import GHC.ByteCode.Types (InternalBreakpointId(..))
 import GHC.Driver.Config (EvalStep(..))
+#else
+-- Use centralized stub types when interpreter is not available
+import GHC.Runtime.Interpreter.Stubs
+       ( HValue, ForeignRef, ForeignHValue, RemoteRef, RemotePtr, HValueRef
+       , InternalBreakpointId(..), EvalExpr, ResumeContext, EvalStep(..) )
+#endif
 import GHC.Types.Id
 import GHC.Types.Name
 import GHC.Types.TyThing

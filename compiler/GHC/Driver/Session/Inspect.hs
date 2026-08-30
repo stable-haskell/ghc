@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE LambdaCase #-}
 
 -- | GHC API utilities for inspecting the GHC session
@@ -7,7 +8,10 @@ import GHC.Prelude
 import GHC.Data.Maybe
 import Control.Monad
 
+#if defined(HAVE_INTERPRETER)
 import GHC.ByteCode.Types
+import GHC.ByteCode.Breakpoints (InternalModBreaks)
+#endif
 import GHC.Core.FamInstEnv
 import GHC.Core.InstEnv
 import GHC.Driver.Env
@@ -16,7 +20,9 @@ import GHC.Driver.Monad
 import GHC.Driver.Session
 import GHC.Rename.Names
 import GHC.Runtime.Context
+#if defined(HAVE_INTERPRETER)
 import GHC.Runtime.Interpreter
+#endif
 import GHC.Types.Avail
 import GHC.Types.Name
 import GHC.Types.Name.Ppr
@@ -36,6 +42,11 @@ import GHC.Unit.Module.ModIface
 import GHC.Utils.Misc
 import GHC.Utils.Outputable
 import qualified GHC.Unit.Home.Graph as HUG
+
+#if !defined(HAVE_INTERPRETER)
+-- Stub type when interpreter is not available (replaces GHC.ByteCode.Breakpoints.InternalModBreaks)
+data InternalModBreaks = InternalModBreaks
+#endif
 
 -- %************************************************************************
 -- %*                                                                      *
@@ -150,7 +161,11 @@ getHomeModuleInfo hsc_env mdl =
                         minf_instances = instEnvElts $ md_insts details,
                         minf_iface     = Just iface,
                         minf_safe      = getSafeMode $ mi_trust iface,
+#if defined(HAVE_INTERPRETER)
                         minf_modBreaks = getModBreaks hmi
+#else
+                        minf_modBreaks = Nothing  -- No bytecode support (HAVE_INTERPRETER not defined)
+#endif
                         }))
 
 -- | The list of top-level entities defined in a module

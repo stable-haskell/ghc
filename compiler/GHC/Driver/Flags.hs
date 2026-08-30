@@ -378,6 +378,7 @@ impliedGFlags = [(Opt_DeferTypeErrors, turnOn, Opt_DeferTypedHoles)
                 ,(Opt_ByteCodeAndObjectCode, turnOn, Opt_WriteIfSimplifiedCore)
                 ,(Opt_InfoTableMap, turnOn, Opt_InfoTableMapWithStack)
                 ,(Opt_InfoTableMap, turnOn, Opt_InfoTableMapWithFallback)
+                ,(Opt_InfoTableMap, turnOn, Opt_Ticky_AP)
                 ] ++ validHoleFitsImpliedGFlags
 
 -- | General flags that are switched on/off when other general flags are switched
@@ -760,6 +761,8 @@ data GeneralFlag
 
    -- | Instruct GHCi to load all targets on startup
    | Opt_GhciDoLoadTargets
+   -- | Instruct GHCi to import all loaded targets on startup
+   | Opt_GhciImportLoadedTargets
 
    | Opt_HelpfulErrors
    | Opt_DeferTypeErrors             -- Since 7.6
@@ -862,6 +865,8 @@ data GeneralFlag
 
    -- temporary flags
    | Opt_AutoLinkPackages
+   | Opt_NoRts
+   | Opt_NoGhcInternal
    | Opt_ImplicitImportQualified
 
    -- keeping stuff
@@ -1107,6 +1112,7 @@ data WarningFlag =
        -- See Note [Quantifying over equalities in RULES] in GHC.Tc.Gen.Sig
    | Opt_WarnUnusableUnpackPragmas                   -- Since 9.14
    | Opt_WarnPatternNamespaceSpecifier               -- Since 9.14
+   | Opt_WarnSemaphoreOpenFailure
    deriving (Eq, Ord, Show, Enum, Bounded)
 
 -- | Return the names of a WarningFlag
@@ -1228,6 +1234,7 @@ warnFlagNames wflag = case wflag of
   Opt_WarnRuleLhsEqualities                       -> "rule-lhs-equalities" :| []
   Opt_WarnUnusableUnpackPragmas                   -> "unusable-unpack-pragmas" :| []
   Opt_WarnPatternNamespaceSpecifier               -> "pattern-namespace-specifier" :| []
+  Opt_WarnSemaphoreOpenFailure                    -> "semaphore-open-failure" :| []
 
 -- -----------------------------------------------------------------------------
 -- Standard sets of warning options
@@ -1373,7 +1380,8 @@ standardWarnings -- see Note [Documenting warning flags]
         Opt_WarnUselessSpecialisations,
         Opt_WarnDeprecatedPragmas,
         Opt_WarnRuleLhsEqualities,
-        Opt_WarnUnusableUnpackPragmas
+        Opt_WarnUnusableUnpackPragmas,
+        Opt_WarnSemaphoreOpenFailure
       ]
 
 -- | Things you get with @-W@.

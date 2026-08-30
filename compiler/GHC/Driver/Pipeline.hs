@@ -22,7 +22,10 @@ module GHC.Driver.Pipeline (
    compileForeign, compileEmptyStub,
 
    -- * Linking
-   link, linkingNeeded, checkLinkInfo,
+   link,
+#if defined(HAVE_INTERPRETER)
+   linkingNeeded, checkLinkInfo,
+#endif
 
    -- * PipeEnv
    PipeEnv(..), mkPipeEnv, phaseOutputFilenameNew,
@@ -56,7 +59,6 @@ import GHC.Driver.Errors
 import GHC.Driver.Errors.Types
 import GHC.Driver.Pipeline.Monad
 import GHC.Driver.Config.Diagnostic
-import GHC.Driver.Config.StgToJS
 import GHC.Driver.Phases
 import GHC.Driver.Pipeline.Execute
 import GHC.Driver.Pipeline.Phases
@@ -71,12 +73,15 @@ import GHC.SysTools
 import GHC.SysTools.Cpp
 import GHC.Utils.TmpFs
 
-import GHC.Linker.ExtraObj
+import GHC.Linker.Executable
 import GHC.Linker.Static
 import GHC.Linker.Static.Utils
 import GHC.Linker.Types
 
+#if defined(HAVE_JS_BACKEND)
+import GHC.Driver.Config.StgToJS
 import GHC.StgToJS.Linker.Linker
+#endif
 
 import GHC.Utils.Outputable
 import GHC.Utils.Error
@@ -93,7 +98,9 @@ import GHC.Data.Maybe          ( expectJust )
 
 import GHC.Iface.Make          ( mkFullIface )
 import GHC.Iface.Load          ( getGhcPrimIface )
+#if defined(HAVE_INTERPRETER)
 import GHC.Runtime.Loader      ( initializePlugins )
+#endif
 
 
 import GHC.Types.Basic       ( SuccessFlag(..), ForeignSrcLang(..) )
@@ -241,7 +248,11 @@ compileOne' mHscMessage
                  [ml_obj_file $ ms_location summary]
 
    -- Initialise plugins here for any plugins enabled locally for a module.
+#if defined(HAVE_INTERPRETER)
    plugin_hsc_env <- initializePlugins hsc_env
+#else
+   let plugin_hsc_env = hsc_env
+#endif
    let pipe_env = mkPipeEnv NoStop input_fn Nothing pipelineOutput
    status <- hscRecompStatus mHscMessage plugin_hsc_env upd_summary
                 mb_old_iface mb_old_linkable (mod_index, nmods)
@@ -367,7 +378,7 @@ link ghcLink logger tmpfs fc hooks dflags unit_env batch_attempt_linking mHscMes
   case linkHook hooks of
       Nothing -> case ghcLink of
         NoLink        -> return Succeeded
-        LinkBinary    -> normal_link
+        LinkExecutable _  -> normal_link
         LinkStaticLib -> normal_link
         LinkDynLib    -> normal_link
         LinkMergedObj -> normal_link
@@ -441,16 +452,20 @@ link' logger tmpfs fc dflags unit_env batch_attempt_linking mHscMessager hpt
 
         -- Don't showPass in Batch mode; doLink will do that for us.
         case ghcLink dflags of
-          LinkBinary
+          LinkExecutable blm
+#if defined(HAVE_JS_BACKEND)
             | backendUseJSLinker (backend dflags) -> linkJSBinary logger tmpfs fc dflags unit_env obj_files pkg_deps
-            | otherwise -> linkBinary logger tmpfs dflags unit_env obj_files pkg_deps
+#endif
+            | otherwise -> do
+              let opts = initExecutableLinkOpts dflags
+              linkExecutable logger tmpfs opts unit_env obj_files pkg_deps
           LinkStaticLib -> linkStaticLib logger dflags unit_env obj_files pkg_deps
           LinkDynLib    -> linkDynLibCheck logger tmpfs dflags unit_env obj_files pkg_deps
           other         -> panicBadLink other
 
         debugTraceMsg logger 3 (text "link: done")
 
-        -- linkBinary only returns if it succeeds
+        -- linkExecutable only returns if it succeeds
         return Succeeded
 
    | otherwise
@@ -458,7 +473,7 @@ link' logger tmpfs fc dflags unit_env batch_attempt_linking mHscMessager hpt
                                 text "   Main.main not exported; not linking.")
         return Succeeded
 
-
+#if defined(HAVE_JS_BACKEND)
 linkJSBinary :: Logger -> TmpFs -> FinderCache -> DynFlags -> UnitEnv -> [FilePath] -> [UnitId] -> IO ()
 linkJSBinary logger tmpfs fc dflags unit_env obj_files pkg_deps = do
   -- we use the default configuration for now. In the future we may expose
@@ -466,6 +481,7 @@ linkJSBinary logger tmpfs fc dflags unit_env obj_files pkg_deps = do
   let lc_cfg   = initJSLinkConfig dflags
   let cfg      = initStgToJSConfig dflags
   jsLinkBinary fc lc_cfg cfg logger tmpfs dflags unit_env obj_files pkg_deps
+#endif
 
 linkingNeeded :: Logger -> DynFlags -> UnitEnv -> Bool -> [Linkable] -> [UnitId] -> IO RecompileRequired
 linkingNeeded logger dflags unit_env staticLink linkables pkg_deps = do
@@ -510,7 +526,8 @@ linkingNeeded logger dflags unit_env staticLink linkables pkg_deps = do
         if not (null lib_errs) || any (t <) lib_times
            then return $ needsRecompileBecause LibraryChanged
            else do
-            res <- checkLinkInfo logger dflags unit_env pkg_deps exe_file
+            let opts = initExecutableLinkOpts dflags
+            res <- checkLinkInfo logger opts unit_env pkg_deps exe_file
             if res
               then return $ needsRecompileBecause FlagsChanged
               else return UpToDate
@@ -535,7 +552,11 @@ oneShot orig_hsc_env stop_phase srcs = do
   -- we also initialise in ghc/Main but this might be used as an entry point by API clients who
   -- should initialise their own plugins but may not.
   -- See Note [Timing of plugin initialization]
+#if defined(HAVE_INTERPRETER)
   hsc_env <- initializePlugins orig_hsc_env
+#else
+  let hsc_env = orig_hsc_env
+#endif
   o_files <- mapMaybeM (compileFile hsc_env stop_phase) srcs
   case stop_phase of
     StopPreprocess -> return ()
@@ -581,10 +602,14 @@ doLink hsc_env o_files = do
 
   case ghcLink dflags of
     NoLink        -> return ()
-    LinkBinary
+    LinkExecutable blm
+#if defined(HAVE_JS_BACKEND)
       | backendUseJSLinker (backend dflags)
                   -> linkJSBinary logger tmpfs fc dflags unit_env o_files []
-      | otherwise -> linkBinary logger tmpfs dflags unit_env o_files []
+#endif
+      | otherwise -> do
+          let opts = initExecutableLinkOpts dflags
+          linkExecutable logger tmpfs opts unit_env o_files []
     LinkStaticLib -> linkStaticLib      logger       dflags unit_env o_files []
     LinkDynLib    -> linkDynLibCheck    logger tmpfs dflags unit_env o_files []
     LinkMergedObj

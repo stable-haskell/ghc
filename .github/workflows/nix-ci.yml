@@ -1,0 +1,915 @@
+name: Nix CI
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+  push:
+    branches: [stable-ghc-9.14, stable-master]
+    # Tag pushes matching multi-* trigger the Cross: MULTI job to
+    # additionally upload its multi-target bindist tarball to the
+    # matching GitHub Release, populating the stable-haskell
+    # ghcup-multi-target-0.1.0.yaml channel. The single multi-target
+    # bindist replaces the previously-separate wasm32-wasi-* and
+    # JS standalone channels — both targets ship via multi-* now.
+    tags:
+      - 'multi-*'
+
+  workflow_dispatch:
+
+permissions:
+  contents: write   # for upload of bindist tarballs to releases on tag push
+
+env:
+  CABAL_CACHE_PATH: _build/cabal/bin
+
+# Auto-cancel superseded runs on the same branch (except stable branches)
+concurrency:
+  group: nix-ci-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/heads/stable-') }}
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Build job: compile GHC and produce the dist artifact
+  # ---------------------------------------------------------------------------
+  build:
+    name: "Build / ${{ matrix.plat }} / dynamic=${{ matrix.dynamic }}"
+    runs-on: ${{ fromJSON(matrix.runner) }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { plat: x86_64-linux,   ghc: '98', dynamic: 0, runner: '"ubuntu-latest"' }
+          - { plat: x86_64-linux,   ghc: '98', dynamic: 1, runner: '"ubuntu-latest"' }
+          - { plat: aarch64-linux,  ghc: '98', dynamic: 0, runner: '"ubuntu-24.04-arm"' }
+          - { plat: aarch64-linux,  ghc: '98', dynamic: 1, runner: '"ubuntu-24.04-arm"' }
+          - { plat: aarch64-darwin, ghc: '98', dynamic: 0, runner: '["self-hosted", "nix"]' }
+          - { plat: aarch64-darwin, ghc: '98', dynamic: 1, runner: '["self-hosted", "nix"]' }
+
+    steps:
+    # Ephemeral Tart VMs: 80GB disk split between system (41GB APFS, ~7GB free
+    # after macOS) and WorkSpace (28GB, symlinked from ~/actions-runner/_work).
+    # The devx closure (~7GB) fills the system disk, leaving no room for cabal
+    # hackage index or GHC temp files. Redirect CABAL_DIR and TMPDIR to WorkSpace.
+    - name: Clean workspace
+      run: |
+        # Add nix paths and /usr/local/bin to GITHUB_PATH so that:
+        # - 'git' from nix is found before the Xcode CLT shim at /usr/bin/git
+        # - 'devx' symlink in /usr/local/bin is found after devx import
+        echo "$HOME/.nix-profile/bin" >> "$GITHUB_PATH"
+        echo "/nix/var/nix/profiles/default/bin" >> "$GITHUB_PATH"
+        echo "/usr/local/bin" >> "$GITHUB_PATH"
+
+        # Redirect CABAL_DIR to WorkSpace volume. The devx shell sets
+        # CABAL_DIR=~/.cabal-devx (on system disk), but after devx import
+        # the system disk has <1GB free. Override via GITHUB_ENV so all
+        # subsequent devx steps use WorkSpace for cabal packages/store.
+        echo "CABAL_DIR=$GITHUB_WORKSPACE/_build/cabal-dir" >> "$GITHUB_ENV"
+
+        echo "=== Disk usage before cleanup ==="
+        df -h / || true
+        df -h "$GITHUB_WORKSPACE" || true
+        rm -rf "$GITHUB_WORKSPACE"/* "$GITHUB_WORKSPACE"/.??* || true
+        rm -rf ~/.cabal/store ~/.cabal-devx/store ~/.cabal-devx/packages || true
+        # Remove old devx symlink so previous devx nix closure becomes
+        # unreferenced and can be garbage collected.
+        sudo rm -f /usr/local/bin/devx 2>/dev/null || true
+        # nix commands may fail if nix is not on PATH (fresh VMs)
+        export PATH="/nix/var/nix/profiles/default/bin:$PATH"
+        nix-collect-garbage -d 2>/dev/null || true
+        nix-store --gc 2>/dev/null || true
+        echo "=== Disk usage after cleanup ==="
+        df -h / || true
+
+    - uses: actions/checkout@v5
+      with:
+        submodules: "recursive"
+        fetch-depth: 1
+
+    # devx action needs: zstd (closure import), /usr/local/bin (symlink).
+    # These are baked into the base image but we verify defensively.
+    - name: Ensure devx prerequisites
+      run: |
+        export PATH="$HOME/.nix-profile/bin:/nix/var/nix/profiles/default/bin:$PATH"
+        command -v zstd || nix-env -iA nixpkgs.zstd
+        sudo mkdir -p /usr/local/bin
+
+    - uses: input-output-hk/actions/devx@latest
+      with:
+        platform: ${{ matrix.plat }}
+        compiler-nix-name: 'ghc${{ matrix.ghc }}'
+        minimal: true
+        ghc: true
+
+    - name: Cache stage0 cabal binary
+      id: cabal-cache
+      uses: actions/cache@v5
+      with:
+        path: ${{ env.CABAL_CACHE_PATH }}
+        key: cabal-${{ vars.CACHE_VERSION || 'v1' }}-${{ matrix.plat }}-${{ hashFiles('cabal.project.stage0') }}
+
+    - name: Check disk space
+      run: |
+        echo "=== Disk space available for build ==="
+        echo "--- WorkSpace (build output) ---"
+        df -h .
+        echo "--- System disk (nix store, devx, temp files) ---"
+        df -h /
+
+    - name: Update hackage
+      shell: devx {0}
+      run: |
+        set -eo pipefail
+        # Override devx's CABAL_DIR (~/.cabal-devx on system disk) to use
+        # WorkSpace volume. System disk has <1GB free after devx import.
+        export CABAL_DIR="$GITHUB_WORKSPACE/_build/cabal-dir"
+        mkdir -p "$CABAL_DIR"
+        cabal update
+
+    - name: Start metrics collection
+      shell: bash
+      run: ./mk/collect-metrics.sh start _build/metrics 0.5
+
+    # Split build into stages to manage disk space.
+    # After stage1 completes, aggressively clean everything except
+    # the stage1 store (compiler + installed packages) which stage2
+    # needs. Also remove .git since ghc-boot's Setup.hs accepts
+    # GIT_COMMIT_ID env var instead of running 'git rev-parse HEAD'.
+    - name: Build stage0 + stage1
+      shell: devx {0}
+      timeout-minutes: 30
+      run: |
+        set -eo pipefail
+        export CABAL_DIR="$GITHUB_WORKSPACE/_build/cabal-dir"
+        export TMPDIR="$GITHUB_WORKSPACE/_build/tmp"
+        mkdir -p "$TMPDIR"
+        make QUIET=1 DYNAMIC=${{ matrix.dynamic }} CABAL_ARGS="-j2" ${{ steps.cabal-cache.outputs.cache-hit == 'true' && 'USE_SYSTEM_CABAL=1' || '' }} stage1
+        echo "=== Disk after stage1 ==="
+        df -h .
+
+    - name: Clean intermediates to free disk for stage2
+      run: |
+        echo "=== Before cleanup ==="
+        du -sh _build/stage0/ _build/stage1/ _build/packages/ .git/ 2>/dev/null || true
+        df -h .
+
+        # Capture git commit ID before removing .git — ghc-boot's Setup.hs
+        # checks GIT_COMMIT_ID env var before falling back to 'git rev-parse'.
+        GIT_COMMIT_ID=$(git rev-parse HEAD)
+        echo "GIT_COMMIT_ID=$GIT_COMMIT_ID" >> "$GITHUB_ENV"
+        echo "Captured GIT_COMMIT_ID=$GIT_COMMIT_ID"
+
+        # Remove .git directory (200-500MB on shallow clone with submodules).
+        # No longer needed: ghc-boot will use GIT_COMMIT_ID env var.
+        rm -rf .git
+        find . -name .git -type d -exec rm -rf {} + 2>/dev/null || true
+
+        # Stage0: cabal binary is in _build/cabal/bin/ (separate from build dir).
+        # Remove all stage0 build artifacts — only the cabal binary matters.
+        rm -rf _build/stage0/ 2>/dev/null || true
+
+        # Stage1: keep ONLY the store/ (installed compiler + libs in store/host/*/bin/ and lib/).
+        # Remove everything else: build artifacts, cache, logs, etc.
+        find _build/stage1/ -maxdepth 1 -mindepth 1 -not -name store -exec rm -rf {} +
+
+        # Remove downloaded source tarballs (already unpacked by cabal)
+        rm -rf _build/packages/ 2>/dev/null || true
+
+        # Remove build temp files (redirected TMPDIR from stage1)
+        rm -rf _build/tmp/ 2>/dev/null || true
+
+        # Remove cabal hackage index (stage2 uses its own local cache via Makefile's
+        # hackage target, so the devx cabal-dir index is no longer needed)
+        rm -rf "${CABAL_DIR:-~/.cabal-devx}/packages/" 2>/dev/null || true
+
+        echo "=== After cleanup ==="
+        du -sh _build/stage1/ _build/cabal/ 2>/dev/null || true
+        df -h .
+
+    - name: Build stage2
+      shell: devx {0}
+      timeout-minutes: 60
+      run: |
+        set -eo pipefail
+        export CABAL_DIR="$GITHUB_WORKSPACE/_build/cabal-dir"
+        export TMPDIR="$GITHUB_WORKSPACE/_build/tmp"
+        mkdir -p "$TMPDIR"
+        make QUIET=1 DYNAMIC=${{ matrix.dynamic }} CABAL_ARGS="-j2" USE_SYSTEM_CABAL=1 stage2
+        echo "=== Disk after stage2 ==="
+        df -h .
+
+    - name: Stop metrics collection
+      if: ${{ !cancelled() }}
+      shell: bash
+      run: ./mk/collect-metrics.sh stop _build/metrics
+
+    - name: Display build timings
+      if: ${{ !cancelled() }}
+      shell: devx {0}
+      run: make timing-summary
+
+    # After build+dist, remove all intermediate files to free disk for
+    # artifact upload. Only keep dist/, timing/, metrics/.
+    # Note: tests.tar.gz is NOT needed — test job uses its own checkout.
+    - name: Clean build intermediates
+      if: ${{ !cancelled() }}
+      run: |
+        echo "=== Before final cleanup ==="
+        du -sh _build/stage0/ _build/stage1/ _build/stage2/ 2>/dev/null || true
+        df -h .
+        rm -rf _build/stage0 _build/stage1 _build/stage2 _build/packages 2>/dev/null || true
+        echo "=== After final cleanup ==="
+        df -h .
+
+    # Upload dist artifact FIRST so downstream jobs (test, cross) can start
+    # as soon as the build job finishes, without waiting for metrics/plots.
+    - name: Upload dist
+      uses: actions/upload-artifact@v5
+      with:
+        name: ${{ matrix.plat }}-dynamic${{ matrix.dynamic }}-dist
+        retention-days: 1
+        path: _build/dist
+
+    - name: Upload build logs and timing
+      uses: actions/upload-artifact@v5
+      if: ${{ !cancelled() }}
+      with:
+        name: ${{ matrix.plat }}-dynamic${{ matrix.dynamic }}-build-logs
+        retention-days: 1
+        path: |
+          _build/logs/
+          _build/timing/
+
+    - name: Upload metrics
+      uses: actions/upload-artifact@v5
+      if: ${{ !cancelled() }}
+      with:
+        name: ${{ matrix.plat }}-dynamic${{ matrix.dynamic }}-build-metrics
+        retention-days: 1
+        path: _build/metrics/
+
+    - name: Generate metrics plots
+      if: ${{ !cancelled() }}
+      continue-on-error: true
+      timeout-minutes: 5
+      shell: bash
+      run: |
+        # Generate build SVG plot.
+        # Use bash (not devx) because nix is not available inside the devx shell.
+        PYTHON_MPL=$(nix build --impure --no-link --print-out-paths \
+          --expr 'let pkgs = (builtins.getFlake "nixpkgs").legacyPackages.${builtins.currentSystem}; in pkgs.python3.withPackages (ps: [ps.matplotlib])')
+        "$PYTHON_MPL/bin/python3" ./mk/plot-metrics.py _build/metrics _build/timing _build/metrics/metrics
+
+    - name: Upload metrics plots to R2
+      if: ${{ !cancelled() }}
+      continue-on-error: true
+      timeout-minutes: 5
+      env:
+        AWS_ACCESS_KEY_ID: ${{ secrets.R2_METRICS_ACCESS_KEY_ID }}
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_METRICS_SECRET_ACCESS_KEY }}
+        R2_ENDPOINT: ${{ secrets.R2_METRICS_ENDPOINT }}
+        R2_PUBLIC_URL: ${{ vars.R2_METRICS_PUBLIC_URL }}
+        R2_BUCKET: ${{ vars.R2_METRICS_BUCKET_NAME }}
+      shell: bash
+      run: |
+        RUN_ID="${{ github.run_id }}"
+        PLAT="${{ matrix.plat }}"
+        DYN="${{ matrix.dynamic }}"
+
+        export AWS_ENDPOINT_URL="${R2_ENDPOINT}"
+        export AWS_DEFAULT_REGION=auto
+
+        # Use bash (not devx) because nix is not available inside the devx shell.
+        AWSCLI=$(nix build --no-link --print-out-paths nixpkgs#awscli2)
+        AWS="$AWSCLI/bin/aws"
+
+        # Upload build plot if it exists
+        if [[ -f "_build/metrics/metrics-build.svg" ]]; then
+          BUILD_PATH="runs/${RUN_ID}/${PLAT}-dynamic${DYN}-build.svg"
+          "$AWS" s3 cp _build/metrics/metrics-build.svg "s3://${R2_BUCKET}/${BUILD_PATH}" --content-type 'image/svg+xml' || echo "Failed to upload build plot (non-fatal)"
+          echo "BUILD_PLOT_URL=${R2_PUBLIC_URL}/${BUILD_PATH}" >> $GITHUB_ENV
+        fi
+
+    - name: Write build metrics summary
+      if: ${{ !cancelled() }}
+      continue-on-error: true
+      shell: devx {0}
+      run: |
+        echo "## Build Metrics Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+
+        # Embed build plot if available
+        if [[ -n "${BUILD_PLOT_URL:-}" ]]; then
+          echo "### Build Phases (CPU & Memory)" >> $GITHUB_STEP_SUMMARY
+          echo "<img src=\"${BUILD_PLOT_URL}\" alt=\"Build Metrics\" width=\"100%\">" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+        fi
+
+        echo "### Phase Timings" >> $GITHUB_STEP_SUMMARY
+        echo "| Phase | Duration | Status |" >> $GITHUB_STEP_SUMMARY
+        echo "|-------|----------|--------|" >> $GITHUB_STEP_SUMMARY
+
+        make timing-summary 2>/dev/null || true
+        if [[ -f "_build/timing/summary.txt" ]]; then
+          while read -r phase dur status; do
+            mins=$((dur / 60))
+            secs=$((dur % 60))
+            status_str="OK"
+            [[ "$status" == "1" ]] && status_str="FAIL"
+            if [[ "$phase" == *.* ]]; then
+              echo "| &nbsp;&nbsp;$phase | ${mins}m ${secs}s | $status_str |" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "| **$phase** | **${mins}m ${secs}s** | $status_str |" >> $GITHUB_STEP_SUMMARY
+            fi
+          done < "_build/timing/summary.txt"
+        fi
+        echo "" >> $GITHUB_STEP_SUMMARY
+        if [[ -f "_build/metrics/metrics.csv" ]]; then
+          max_mem=$(awk -F',' 'NR>1 {if($3>max) max=$3} END {printf "%.1f", max/1024}' _build/metrics/metrics.csv)
+          echo "**Peak Memory:** ${max_mem} GB" >> $GITHUB_STEP_SUMMARY
+        fi
+
+  # ---------------------------------------------------------------------------
+  # Test job: download the dist and run the testsuite standalone
+  # ---------------------------------------------------------------------------
+  test:
+    name: "Test / ${{ matrix.plat }} / dynamic=${{ matrix.dynamic }}"
+    needs: build
+    runs-on: ${{ fromJSON(matrix.runner) }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { plat: x86_64-linux,   ghc: '98', dynamic: 0, runner: '"ubuntu-latest"' }
+          - { plat: x86_64-linux,   ghc: '98', dynamic: 1, runner: '"ubuntu-latest"' }
+          - { plat: aarch64-linux,  ghc: '98', dynamic: 0, runner: '"ubuntu-24.04-arm"' }
+          - { plat: aarch64-linux,  ghc: '98', dynamic: 1, runner: '"ubuntu-24.04-arm"' }
+          - { plat: aarch64-darwin, ghc: '98', dynamic: 0, runner: '["self-hosted", "nix"]' }
+          - { plat: aarch64-darwin, ghc: '98', dynamic: 1, runner: '["self-hosted", "nix"]' }
+
+    steps:
+    - name: Clean workspace
+      run: |
+        echo "$HOME/.nix-profile/bin" >> "$GITHUB_PATH"
+        echo "/nix/var/nix/profiles/default/bin" >> "$GITHUB_PATH"
+        echo "/usr/local/bin" >> "$GITHUB_PATH"
+
+        echo "CABAL_DIR=$GITHUB_WORKSPACE/_build/cabal-dir" >> "$GITHUB_ENV"
+
+        echo "=== Disk usage before cleanup ==="
+        df -h / || true
+        df -h "$GITHUB_WORKSPACE" || true
+        rm -rf "$GITHUB_WORKSPACE"/* "$GITHUB_WORKSPACE"/.??* || true
+        rm -rf ~/.cabal/store ~/.cabal-devx/store ~/.cabal-devx/packages || true
+        sudo rm -f /usr/local/bin/devx 2>/dev/null || true
+        export PATH="/nix/var/nix/profiles/default/bin:$PATH"
+        nix-collect-garbage -d 2>/dev/null || true
+        nix-store --gc 2>/dev/null || true
+        echo "=== Disk usage after cleanup ==="
+        df -h / || true
+
+    - uses: actions/checkout@v5
+      with:
+        submodules: "recursive"
+        fetch-depth: 1
+
+    - name: Ensure devx prerequisites
+      run: |
+        export PATH="$HOME/.nix-profile/bin:/nix/var/nix/profiles/default/bin:$PATH"
+        command -v zstd || nix-env -iA nixpkgs.zstd
+        sudo mkdir -p /usr/local/bin
+
+    - uses: input-output-hk/actions/devx@latest
+      with:
+        platform: ${{ matrix.plat }}
+        compiler-nix-name: 'ghc${{ matrix.ghc }}'
+        minimal: true
+        ghc: true
+
+    - name: Download dist
+      uses: actions/download-artifact@v5
+      with:
+        name: ${{ matrix.plat }}-dynamic${{ matrix.dynamic }}-dist
+        path: _build/dist
+
+    - name: Restore permissions
+      run: |
+        chmod +x _build/dist/bin/*
+        # Recache package DB — paths change when dist is unpacked on a
+        # different machine, making the binary cache stale. Without this,
+        # every test gets "WARNING: cache is out of date" in stderr.
+        _build/dist/bin/ghc-pkg recache --package-db _build/dist/lib/package.conf.d
+
+    - name: Start metrics collection
+      shell: bash
+      run: ./mk/collect-metrics.sh start _build/metrics 0.5
+
+    - name: Free disk for tests
+      run: |
+        rm -rf .git
+        find . -name .git -type d -exec rm -rf {} + 2>/dev/null || true
+        rm -rf ~/.cabal-devx/packages/ 2>/dev/null || true
+        df -h .
+
+    - name: Build testsuite timeout tool
+      shell: devx {0}
+      run: |
+        set -eo pipefail
+        export TMPDIR="$GITHUB_WORKSPACE/_build/tmp"
+        mkdir -p "$TMPDIR"
+        make -C testsuite/timeout
+
+    - name: Record test start time
+      shell: bash
+      run: |
+        mkdir -p _build/timing
+        date +%s > _build/timing/test.start
+
+    - name: Run testsuite
+      id: run-testsuite
+      shell: devx {0}
+      timeout-minutes: 120
+      run: |
+        set -eo pipefail
+        export TMPDIR="$GITHUB_WORKSPACE/_build/tmp"
+        mkdir -p "$TMPDIR"
+        DIST_BIN="$GITHUB_WORKSPACE/_build/dist/bin"
+        # Pass the same variables the top-level 'make test' target uses.
+        # SKIP_PERF_TESTS=YES prevents performance tests from running
+        # (they timeout on CI). CANONICAL_TEST_HC_OPTS enables lint passes.
+        TEST_HC="$DIST_BIN/ghc" \
+        GHC_PKG="$DIST_BIN/ghc-pkg" \
+        HP2PS_ABS="$DIST_BIN/hp2ps" \
+        HPC="$DIST_BIN/hpc" \
+        RUNGHC="$DIST_BIN/runghc" \
+        TEST_CC="${CC:-cc}" \
+        TEST_HC_OPTS="-dcore-lint -dstg-lint -dcmm-lint -no-user-package-db -fno-dump-with-ways -fprint-error-index-links=never -rtsopts -fno-warn-missed-specialisations -fshow-warning-groups -fdiagnostics-color=never -fno-diagnostics-show-caret -Werror=compat -dno-debug-output" \
+        SKIP_PERF_TESTS=YES \
+        THREADS=4 \
+        METRICS_FILE="$GITHUB_WORKSPACE/_build/test-perf.csv" \
+        SUMMARY_FILE="$GITHUB_WORKSPACE/_build/test-summary.txt" \
+        JUNIT_FILE="$GITHUB_WORKSPACE/_build/test-junit.xml" \
+        make -C testsuite/tests test
+
+    - name: Record test end time
+      if: ${{ !cancelled() }}
+      shell: bash
+      run: |
+        mkdir -p _build/timing
+        date +%s > _build/timing/test.end
+        if [[ "${{ steps.run-testsuite.outcome }}" == "success" ]]; then
+          echo "0" > _build/timing/test.status
+        else
+          echo "1" > _build/timing/test.status
+        fi
+
+    - name: Stop metrics collection
+      if: ${{ !cancelled() }}
+      shell: bash
+      run: ./mk/collect-metrics.sh stop _build/metrics
+
+    # Upload test artifacts FIRST, before slow metrics generation.
+    - name: Upload test results
+      uses: actions/upload-artifact@v5
+      if: ${{ !cancelled() }}
+      with:
+        name: ${{ matrix.plat }}-dynamic${{ matrix.dynamic }}-testsuite-results
+        retention-days: 1
+        path: |
+          _build/test-perf.csv
+          _build/test-summary.txt
+          _build/test-junit.xml
+
+    - name: Upload test metrics
+      uses: actions/upload-artifact@v5
+      if: ${{ !cancelled() }}
+      with:
+        name: ${{ matrix.plat }}-dynamic${{ matrix.dynamic }}-test-metrics
+        retention-days: 1
+        path: _build/metrics/
+
+    - name: Generate metrics plots
+      if: ${{ !cancelled() }}
+      continue-on-error: true
+      timeout-minutes: 5
+      shell: bash
+      run: |
+        # Generate test SVG plot.
+        PYTHON_MPL=$(nix build --impure --no-link --print-out-paths \
+          --expr 'let pkgs = (builtins.getFlake "nixpkgs").legacyPackages.${builtins.currentSystem}; in pkgs.python3.withPackages (ps: [ps.matplotlib])')
+        "$PYTHON_MPL/bin/python3" ./mk/plot-metrics.py _build/metrics _build/timing _build/metrics/metrics
+
+    - name: Upload metrics plots to R2
+      if: ${{ !cancelled() }}
+      continue-on-error: true
+      timeout-minutes: 5
+      env:
+        AWS_ACCESS_KEY_ID: ${{ secrets.R2_METRICS_ACCESS_KEY_ID }}
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_METRICS_SECRET_ACCESS_KEY }}
+        R2_ENDPOINT: ${{ secrets.R2_METRICS_ENDPOINT }}
+        R2_PUBLIC_URL: ${{ vars.R2_METRICS_PUBLIC_URL }}
+        R2_BUCKET: ${{ vars.R2_METRICS_BUCKET_NAME }}
+      shell: bash
+      run: |
+        RUN_ID="${{ github.run_id }}"
+        PLAT="${{ matrix.plat }}"
+        DYN="${{ matrix.dynamic }}"
+
+        export AWS_ENDPOINT_URL="${R2_ENDPOINT}"
+        export AWS_DEFAULT_REGION=auto
+
+        AWSCLI=$(nix build --no-link --print-out-paths nixpkgs#awscli2)
+        AWS="$AWSCLI/bin/aws"
+
+        # Upload test plot if it exists
+        if [[ -f "_build/metrics/metrics-test.svg" ]]; then
+          TEST_PATH="runs/${RUN_ID}/${PLAT}-dynamic${DYN}-test.svg"
+          "$AWS" s3 cp _build/metrics/metrics-test.svg "s3://${R2_BUCKET}/${TEST_PATH}" --content-type 'image/svg+xml' || echo "Failed to upload test plot (non-fatal)"
+          echo "TEST_PLOT_URL=${R2_PUBLIC_URL}/${TEST_PATH}" >> $GITHUB_ENV
+        fi
+
+    - name: Write test metrics summary
+      if: ${{ !cancelled() }}
+      continue-on-error: true
+      shell: devx {0}
+      run: |
+        echo "## Test Results" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+
+        # Include test results from the summary file
+        if [[ -f "_build/test-summary.txt" ]]; then
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat _build/test-summary.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+        fi
+
+        # Embed test plot if available
+        if [[ -n "${TEST_PLOT_URL:-}" ]]; then
+          echo "### Test Phase (CPU & Memory)" >> $GITHUB_STEP_SUMMARY
+          echo "<img src=\"${TEST_PLOT_URL}\" alt=\"Test Metrics\" width=\"100%\">" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+        fi
+
+        if [[ -f "_build/metrics/metrics.csv" ]]; then
+          max_mem=$(awk -F',' 'NR>1 {if($3>max) max=$3} END {printf "%.1f", max/1024}' _build/metrics/metrics.csv)
+          echo "**Peak Memory:** ${max_mem} GB" >> $GITHUB_STEP_SUMMARY
+        fi
+
+  # ---------------------------------------------------------------------------
+  # Cross: MULTI — the only Cross job. Builds the multi-target bindist
+  # combining native + wasm32-unknown-wasi + javascript-unknown-ghcjs in
+  # one tarball (argv[0] dispatched at runtime). Replaces the previously-
+  # separate Cross: WASM + Cross: JS jobs — those produced standalone
+  # bindists that we no longer ship; the multi-target bindist is the
+  # single end-user-facing artifact and covers both targets.
+  #
+  # Per-host: dynamic1 stage2 download, devx shell, wasi-sdk + Node
+  # install, emscripten install, then `make stage3-wasm32-unknown-wasi
+  # stage3-javascript-unknown-ghcjs` + the combined `ghc-multi-target.
+  # tar.gz` Makefile rule. patchelf adjusts ELF interpreter + $ORIGIN
+  # rpath on the linux runners.
+  #
+  # `continue-on-error: true` — failures are informative but don't
+  # block the main pipeline.
+  # ---------------------------------------------------------------------------
+  cross-multi:
+    name: "Cross: MULTI / ${{ matrix.plat }}"
+    needs: [build]
+    if: ${{ !cancelled() && contains(fromJSON('["success", "failure"]'), needs.build.result) }}
+    runs-on: ${{ fromJSON(matrix.runner) }}
+    continue-on-error: true
+
+    env:
+      # emsdk's git tag — used by the `Install emscripten` step's
+      # `git clone --branch ${{ env.EMSDK_VERSION }}`.
+      EMSDK_VERSION: "3.1.74"
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { plat: aarch64-darwin, devx-plat: aarch64-darwin, runner: '["self-hosted", "nix"]' }
+          - { plat: x86_64-linux,   devx-plat: x86_64-linux,   runner: '"ubuntu-latest"' }
+          - { plat: aarch64-linux,  devx-plat: aarch64-linux,  runner: '"ubuntu-24.04-arm"' }
+
+    steps:
+    - name: Clean workspace
+      run: |
+        echo "$HOME/.nix-profile/bin" >> "$GITHUB_PATH"
+        echo "/nix/var/nix/profiles/default/bin" >> "$GITHUB_PATH"
+        echo "/usr/local/bin" >> "$GITHUB_PATH"
+
+        echo "CABAL_DIR=$GITHUB_WORKSPACE/_build/cabal-dir" >> "$GITHUB_ENV"
+
+        echo "=== Disk usage before cleanup ==="
+        df -h / || true
+        df -h "$GITHUB_WORKSPACE" || true
+        rm -rf "$GITHUB_WORKSPACE"/* "$GITHUB_WORKSPACE"/.??* || true
+        rm -rf ~/.cabal/store ~/.cabal-devx/store ~/.cabal-devx/packages || true
+        rm -rf ~/.ghc-wasm ~/.emsdk || true
+        sudo rm -f /usr/local/bin/devx 2>/dev/null || true
+        export PATH="/nix/var/nix/profiles/default/bin:$PATH"
+        nix-collect-garbage -d 2>/dev/null || true
+        nix-store --gc 2>/dev/null || true
+        echo "=== Disk usage after cleanup ==="
+        df -h / || true
+
+    - uses: actions/checkout@v5
+      with:
+        submodules: "recursive"
+        fetch-depth: 1
+
+    - name: Minimize source tree
+      run: |
+        GIT_COMMIT_ID=$(git rev-parse HEAD)
+        echo "GIT_COMMIT_ID=$GIT_COMMIT_ID" >> "$GITHUB_ENV"
+        rm -rf .git testsuite docs || true
+        find . -name .git -type d -exec rm -rf {} + 2>/dev/null || true
+        df -h / || true
+
+    - name: Ensure devx prerequisites
+      run: |
+        export PATH="$HOME/.nix-profile/bin:/nix/var/nix/profiles/default/bin:$PATH"
+        command -v zstd || nix-env -iA nixpkgs.zstd
+        sudo mkdir -p /usr/local/bin
+
+    - uses: input-output-hk/actions/devx@latest
+      with:
+        platform: ${{ matrix.devx-plat }}
+        compiler-nix-name: 'ghc98'
+        minimal: true
+        ghc: true
+
+    - name: Download dist
+      uses: actions/download-artifact@v5
+      with:
+        # dynamic1 stage2:
+        #   1. happy-lib / alex etc. need native Prelude.dyn_hi at build-side
+        #   2. the dyn-linked native binary becomes bin/ghc + bin/<triple>-ghc
+        #      in the multi-target bindist and needs lib/$(HOST_PLATFORM)
+        #      shipped alongside.
+        name: ${{ matrix.plat }}-dynamic1-dist
+        path: _build/dist
+
+    - name: Set up stage2 from dist
+      run: |
+        chmod +x _build/dist/bin/*
+        mkdir -p _build/stage2/bin _build/stage2/lib
+        for exe in _build/dist/bin/*; do
+          ln -sf "$(pwd)/$exe" "_build/stage2/bin/$(basename $exe)"
+        done
+        if [[ -f _build/dist/lib/settings ]]; then
+          cp -rfp _build/dist/lib/settings _build/stage2/lib/
+        fi
+
+    - name: Update hackage
+      shell: devx {0}
+      run: |
+        set -eo pipefail
+        export CABAL_DIR="$GITHUB_WORKSPACE/_build/cabal-dir"
+        mkdir -p "$CABAL_DIR"
+        _build/dist/bin/cabal update
+
+    - name: Free disk for cross builds
+      run: |
+        rm -rf "${CABAL_DIR:-~/.cabal-devx}/packages" "${CABAL_DIR:-~/.cabal-devx}/logs" "${CABAL_DIR:-~/.cabal-devx}/store" || true
+        rm -rf ~/.cabal/store || true
+        df -h / || true
+
+    # Install wasi-sdk (wasm-target C toolchain) + Node 22 + wasmtime, same
+    # logic since this job builds the wasm half of the
+    # multi-target bindist.
+    - name: Install wasi-sdk + Node 22
+      shell: devx {0}
+      run: |
+        set -eux
+        export TMPDIR="$GITHUB_WORKSPACE/_build/tmp"
+        mkdir -p "$TMPDIR"
+        case "$(uname -s)" in
+          Linux)
+            export PATH="$HOME/.nix-profile/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends jq unzip zstd wabt
+            curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+            sudo apt-get install -y --no-install-recommends nodejs
+            ;;
+          Darwin)
+            export PATH="$HOME/.nix-profile/bin:/nix/var/nix/profiles/default/bin:$PATH"
+            for tool in jq unzip zstd node; do
+              if ! command -v "$tool" >/dev/null 2>&1; then
+                pkg="$tool"
+                [ "$tool" = "node" ] && pkg="nodejs"
+                /nix/var/nix/profiles/default/bin/nix-env -iA "nixpkgs.$pkg"
+              fi
+            done
+            ;;
+        esac
+        curl -fsSL https://gitlab.haskell.org/ghc/ghc-wasm-meta/-/raw/master/bootstrap.sh | \
+          FLAVOUR=9.12 PREFIX=$HOME/.ghc-wasm sh
+
+    # Install emscripten (JS-target C toolchain). EMSDK_VERSION is set in
+    # the workflow env.
+    - name: Install emscripten
+      shell: devx {0}
+      run: |
+        set -eux
+        export TMPDIR="$GITHUB_WORKSPACE/_build/tmp"
+        git clone --depth 1 --branch ${{ env.EMSDK_VERSION }} https://github.com/emscripten-core/emsdk.git
+        cd emsdk
+        ./emsdk install ${{ env.EMSDK_VERSION }}
+        ./emsdk activate ${{ env.EMSDK_VERSION }}
+
+    - name: Build multi-target bindist
+      shell: devx {0}
+      run: |
+        set -eux
+        export CABAL_DIR="$GITHUB_WORKSPACE/_build/cabal-dir"
+        export TMPDIR="$GITHUB_WORKSPACE/_build/tmp"
+        mkdir -p "$TMPDIR"
+        # Source emscripten env (provides emcc on PATH)
+        source emsdk/emsdk_env.sh
+        # Symlink wasi-sdk's wasm32-wasi-* tools as wasm32-unknown-wasi-*
+        #.
+        WASI_BIN="$HOME/.ghc-wasm/wasi-sdk/bin"
+        for tool in ar nm ranlib strip; do
+          ln -sf "$WASI_BIN/llvm-$tool" "$WASI_BIN/wasm32-unknown-wasi-$tool"
+        done
+        for tool in clang clang++; do
+          ln -sf "$WASI_BIN/wasm32-wasi-$tool" "$WASI_BIN/wasm32-unknown-wasi-$tool"
+        done
+        export PATH=$PATH:$WASI_BIN
+        # DYNAMIC=1 for both wasm and JS
+        # targets need .dyn_hi for end-user TH builds (miso, aeson, ...).
+        make DYNAMIC=1 DIST_BUILD=1 \
+             CABAL=$PWD/_build/dist/bin/cabal \
+             GHC_TOOLCHAIN_BIN=$PWD/_build/dist/bin/ghc-toolchain-bin \
+             DERIVE_CONSTANTS_BIN=$PWD/_build/dist/bin/deriveConstants \
+             GENAPPLY_BIN=$PWD/_build/dist/bin/genapply \
+             GENPRIMOPCODE_BIN=$PWD/_build/dist/bin/genprimopcode \
+             HAPPY_TEMPLATE_DIR=$PWD/_build/dist/share/happy-lib/data \
+             _build/dist/ghc-multi-target.tar.gz
+        # Rename to add platform suffix.
+        cp _build/dist/ghc-multi-target.tar.gz \
+           _build/dist/ghc-multi-target-${{ matrix.plat }}.tar.gz
+        ls -lh _build/dist/ghc-multi-target-${{ matrix.plat }}.tar.gz
+        echo "SHA256:"
+        shasum -a 256 _build/dist/ghc-multi-target-${{ matrix.plat }}.tar.gz
+
+    # Patchelf only the host-arch ELFs (bin/* native binaries + lib/<host>/
+    # libHS*.so). The wasm32 and JS target libraries aren't ELFs — they're
+    # .wasm modules and .js files respectively — patchelf skips them.
+    - name: Normalize ELF interpreters for portability (Linux only)
+      if: ${{ !cancelled() && contains(matrix.plat, 'linux') }}
+      shell: devx {0}
+      run: |
+        set -eux
+        export PATH="$PATH:/usr/bin:/usr/sbin"
+        if ! command -v patchelf >/dev/null 2>&1; then
+          sudo apt-get install -y --no-install-recommends patchelf
+        fi
+        case "${{ matrix.plat }}" in
+          x86_64-linux)  INTERP=/lib64/ld-linux-x86-64.so.2;   HOST_DIR=x86_64-unknown-linux ;;
+          aarch64-linux) INTERP=/lib/ld-linux-aarch64.so.1;    HOST_DIR=aarch64-unknown-linux ;;
+          *) echo "::error::unexpected matrix.plat=${{ matrix.plat }}"; exit 1 ;;
+        esac
+
+        TGZ=_build/dist/ghc-multi-target-${{ matrix.plat }}.tar.gz
+        STAGE="$(mktemp -d)"
+        tar -C "$STAGE" -xzf "$TGZ"
+
+        echo "═══ Patchelfing binaries to interpreter $INTERP ═══"
+        patched=0
+        while IFS= read -r bin; do
+          if file -L "$bin" 2>/dev/null \
+               | grep -q "ELF.*dynamically linked.*interpreter /nix/store"; then
+            echo "  patching: ${bin#$STAGE/}"
+            patchelf --set-interpreter "$INTERP" "$bin"
+            patchelf --remove-rpath "$bin"
+            patchelf --force-rpath --set-rpath "\$ORIGIN/../lib/$HOST_DIR" "$bin"
+            patched=$((patched + 1))
+          fi
+        done < <(find "$STAGE" -type f -executable)
+        echo "═══ Patched $patched binaries ═══"
+        test "$patched" -gt 0 || { echo "::error::no ELF binaries patched"; exit 1; }
+
+        # Fix rpath on the shipped host .so files.
+        echo "═══ Setting rpath on lib/$HOST_DIR/*.so ═══"
+        so_patched=0
+        for so in "$STAGE"/lib/"$HOST_DIR"/*.so; do
+          [ -f "$so" ] || continue
+          patchelf --force-rpath --set-rpath "\$ORIGIN" "$so" 2>/dev/null || true
+          so_patched=$((so_patched + 1))
+        done
+        echo "═══ Set rpath on $so_patched shared libs ═══"
+
+        rm "$TGZ"
+        tar -C "$STAGE" -czf "$TGZ" .
+        ls -lh "$TGZ"
+        echo "SHA256 after patchelf:"
+        shasum -a 256 "$TGZ"
+
+    # Darwin: verify the bindist is clean of build-host leaks.
+    #
+    # The Makefile's `stage2.dist` phase (CLEAN_DARWIN_DIST macro)
+    # strips two classes of leak at construction time, BEFORE the
+    # bindist tarball is built:
+    #
+    #   (1) Absolute LC_RPATH entries like
+    #       `/Volumes/WorkSpace/_work/ghc/ghc/_build/...` that
+    #       macOS 15 dyld treats as fatal.
+    #   (2) nix-store LC_LOAD_DYLIB install names for libiconv,
+    #       libffi, libc++, libz, libresolv, libncurses — rewritten
+    #       to their /usr/lib equivalents.
+    #
+    # This step just verifies — if the construction-site fix
+    # regresses, CI fails loud here rather than shipping a broken
+    # bindist that abort-traps on end-user macOS 15 hosts.
+    - name: Verify darwin bindist is clean (no /Volumes or nix-store leaks)
+      if: ${{ !cancelled() && matrix.plat == 'aarch64-darwin' }}
+      shell: devx {0}
+      run: |
+        set -euo pipefail
+        TGZ=_build/dist/ghc-multi-target-${{ matrix.plat }}.tar.gz
+        STAGE="$GITHUB_WORKSPACE/.bindist-verify-$$"
+        rm -rf "$STAGE"; mkdir -p "$STAGE"
+        trap 'rm -rf "$STAGE"' EXIT
+        tar -C "$STAGE" -xzf "$TGZ"
+
+        echo "═══ Scanning bindist Mach-O artefacts for build-host leaks ═══"
+        leaked=0
+        while IFS= read -r f; do
+          file -L "$f" 2>/dev/null | grep -q 'Mach-O' || continue
+          if otool -l "$f" 2>/dev/null \
+             | awk '/cmd LC_RPATH/{flag=1; next} flag && /path \/Volumes\//{found=1; exit} flag && /path /{flag=0} END{exit !found}'; then
+            echo "::error::leaked /Volumes/ LC_RPATH in $f"
+            otool -l "$f" | awk '/cmd LC_RPATH/{f=1; next} f && /path /{print; f=0}'
+            leaked=$((leaked + 1))
+          fi
+          if otool -L "$f" 2>/dev/null | awk '/nix\/store/{exit 0} END{exit 1}'; then
+            echo "::error::leaked /nix/store LC_LOAD_DYLIB in $f"
+            otool -L "$f" | grep 'nix/store' || true
+            leaked=$((leaked + 1))
+          fi
+        done < <(find "$STAGE" -type f \( -perm -u+x -o -name '*.dylib' \))
+
+        if [ "$leaked" -gt 0 ]; then
+          echo "::error::$leaked Mach-O files have build-host leaks. The Makefile's CLEAN_DARWIN_DIST step should have stripped these at construction time. Did stage2.dist run?"
+          exit 1
+        fi
+        echo "::notice::darwin bindist is clean — CLEAN_DARWIN_DIST did its job."
+
+    - name: Upload MULTI cross artifacts
+      uses: actions/upload-artifact@v5
+      if: ${{ !cancelled() }}
+      with:
+        name: ${{ matrix.plat }}-cross-multi
+        retention-days: 30
+        path: _build/dist/ghc-multi-target-${{ matrix.plat }}.tar.gz
+
+    # On a tag push matching multi-*, upload to that GitHub Release.
+    # (Separate tag namespace from the (no-longer-shipped) wasm32-wasi-* so the channels
+    # stay independent.)
+    - name: Upload bindist to release (on tag push)
+      if: ${{ startsWith(github.ref, 'refs/tags/multi-') }}
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ github.ref_name }}
+        files: _build/dist/ghc-multi-target-${{ matrix.plat }}.tar.gz
+        fail_on_unmatched_files: true
+
+  # ---------------------------------------------------------------------------
+  # Cabal Linux bindist — runs in parallel with the GHC build. The fresh
+  # cabal artifact is then consumed by `e2e-multi` so a PR-introduced cabal
+  # regression is caught BEFORE we ship.
+  # ---------------------------------------------------------------------------
+  cabal-release:
+    uses: ./.github/workflows/reusable-cabal-release.yml
+    permissions:
+      contents: write
+    secrets: inherit
+
+  # ---------------------------------------------------------------------------
+  # Channel end-to-end against THIS run's artifacts (artifact install mode):
+  # downloads ghc-multi-target-${plat}.tar.gz from cross-multi + cabal-${ver}-
+  # ${plat}.tar.gz from cabal-release, installs them locally and runs the
+  # same hello / miso / JS-hello test surface as the live-channel
+  # canary (channel-e2e-multi.yml). Closes the DAG: a PR-introduced
+  # regression in GHC packaging, cabal patches, or wasm sysroot wiring
+  # surfaces here BEFORE merge instead of at release time.
+  # ---------------------------------------------------------------------------
+  e2e-multi:
+    needs: [cross-multi, cabal-release]
+    if: ${{ !cancelled()
+            && needs.cross-multi.result == 'success'
+            && needs.cabal-release.result == 'success' }}
+    uses: ./.github/workflows/reusable-channel-e2e.yml
+    with:
+      install_mode: artifact
+      # PATH suffix only; in artifact mode no `ghcup install` is done.
+      multi_version: 'multi-pr-ci'
+      cabal_version: '3.17.0.0.stable.0'
+    secrets: inherit

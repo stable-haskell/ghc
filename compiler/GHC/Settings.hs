@@ -67,6 +67,10 @@ module GHC.Settings
   , sGhcWithInterpreter
   , sLibFFI
   , sTargetRTSLinkerOnlySupportsSharedLibs
+  , sTargetIsDynamic
+  , sTargetShipsDynLibs
+  , sTargetIsProfiled
+  , sTargetShipsProfLibs
   ) where
 
 import GHC.Prelude
@@ -101,6 +105,7 @@ data ToolSettings = ToolSettings
   , toolSettings_ldSupportsSingleModule  :: Bool
   , toolSettings_mergeObjsSupportsResponseFiles :: Bool
   , toolSettings_ldIsGnuLd               :: Bool
+  , toolSettings_ldSupportsVerbatimNamespace :: Bool
   , toolSettings_ccSupportsNoPie         :: Bool
   , toolSettings_useInplaceMinGW         :: Bool
   , toolSettings_arSupportsDashL         :: Bool
@@ -313,3 +318,26 @@ sLibFFI = platformMisc_libFFI . sPlatformMisc
 
 sTargetRTSLinkerOnlySupportsSharedLibs :: Settings -> Bool
 sTargetRTSLinkerOnlySupportsSharedLibs = platformMisc_targetRTSLinkerOnlySupportsSharedLibs . sPlatformMisc
+
+-- | Is the GHC for this target capable of producing dynamic output?
+-- Read from the per-target settings file key @"target is dynamic"@.
+-- Combined with 'sTargetShipsDynLibs' to drive @ghc --info@'s
+-- @GHC Dynamic@ value — the target's settings file completely
+-- controls that, no host-RTS dependency.
+sTargetIsDynamic :: Settings -> Bool
+sTargetIsDynamic = platformMisc_targetIsDynamic . sPlatformMisc
+
+-- | Does this target's installed library tree ship .dyn_hi / .so files?
+-- Per-target settings key @"target ships dynamic libraries"@.
+sTargetShipsDynLibs :: Settings -> Bool
+sTargetShipsDynLibs = platformMisc_targetShipsDynLibs . sPlatformMisc
+
+-- | Profiling-way analogue of 'sTargetIsDynamic'. Per-target settings
+-- key @"target is profiled"@.
+sTargetIsProfiled :: Settings -> Bool
+sTargetIsProfiled = platformMisc_targetIsProfiled . sPlatformMisc
+
+-- | Profiling-way analogue of 'sTargetShipsDynLibs'. Per-target settings
+-- key @"target ships profiling libraries"@.
+sTargetShipsProfLibs :: Settings -> Bool
+sTargetShipsProfLibs = platformMisc_targetShipsProfLibs . sPlatformMisc

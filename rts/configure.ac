@@ -24,6 +24,10 @@ AC_PREREQ([2.69])
 
 AC_CONFIG_FILES([ghcplatform.h.top])
 
+AC_CONFIG_FILES([rts.buildinfo])
+AC_SUBST([EXTRA_LIBS],[` printf " %s " "$LIBS" | sed -E 's/ -l([[^ ]]*)/\1 /g' `])
+
+
 AC_CONFIG_HEADERS([ghcautoconf.h.autoconf])
 
 AC_ARG_ENABLE(asserts-all-ways,
@@ -52,6 +56,9 @@ AS_IF(
 dnl detect compiler (prefer gcc over clang) and set $CC (unless CC already set),
 dnl later CC is copied to CC_STAGE{1,2,3}
 AC_PROG_CC([cc gcc clang])
+
+dnl Portable mkdir -p (sets MKDIR_P)
+AC_PROG_MKDIR_P
 
 dnl make extensions visible to allow feature-tests to detect them lateron
 AC_USE_SYSTEM_EXTENSIONS
@@ -162,14 +169,7 @@ AC_CHECK_DECLS([program_invocation_short_name], , ,
 [#define _GNU_SOURCE 1
 #include <errno.h>])
 
-dnl ** check for math library
-dnl    Keep that check as early as possible.
-dnl    as we need to know whether we need libm
-dnl    for math functions or not
-dnl    (see https://gitlab.haskell.org/ghc/ghc/issues/3730)
-AS_IF(
-  [test "$CABAL_FLAG_libm" = 1],
-  [AC_DEFINE([HAVE_LIBM], [1], [Define to 1 if you need to link with libm])])
+AC_SEARCH_LIBS([exp2], [m])
 
 AS_IF([test "$CABAL_FLAG_libbfd" = 1], [FP_WHEN_ENABLED_BFD])
 
@@ -178,9 +178,12 @@ dnl Check for libraries
 dnl ################################################################
 
 dnl ** check whether we need -ldl to get dlopen()
-AC_CHECK_LIB([dl], [dlopen])
+AC_SEARCH_LIBS([dlopen], [dl])
 dnl ** check whether we have dlinfo
 AC_CHECK_FUNCS([dlinfo])
+
+FP_CHECK_PTHREAD_LIB
+
 
 dnl --------------------------------------------------
 dnl * Miscellaneous feature tests
@@ -231,6 +234,19 @@ AC_CHECK_HEADERS([sys/eventfd.h])
 AC_CHECK_FUNCS([eventfd])
 
 AC_CHECK_FUNCS([getpid getuid raise])
+
+dnl ** Check for __thread support in the compiler
+AC_MSG_CHECKING(for __thread support)
+AC_COMPILE_IFELSE(
+  [ AC_LANG_SOURCE([[__thread int tester = 0;]]) ],
+  [
+   AC_MSG_RESULT(yes)
+   AC_DEFINE([CC_SUPPORTS_TLS],[1],[Define to 1 if __thread is supported])
+  ],
+  [
+   AC_MSG_RESULT(no)
+   AC_DEFINE([CC_SUPPORTS_TLS],[0],[Define to 1 if __thread is supported])
+  ])
 
 dnl large address space support (see rts/include/rts/storage/MBlock.h)
 dnl
@@ -417,6 +433,8 @@ GHC_IOMANAGER_DEFAULT_AC_DEFINE([IOManagerThreadedDefault], [threaded],
                                 [winio], [IOMGR_DEFAULT_THREADED_WINIO])
 
 
+AC_SUBST([EXTRA_LIBS],[` printf " %s " "$LIBS" | sed -E 's/ -l([[^ ]]*)/\1 /g' `])
+
 dnl ** Write config files
 dnl --------------------------------------------------------------
 
@@ -427,7 +445,7 @@ dnl Generate ghcplatform.h
 dnl ######################################################################
 
 [
-mkdir -p include
+${MKDIR_P} include
 
 touch include/ghcplatform.h
 > include/ghcplatform.h
@@ -464,3 +482,110 @@ cat ghcautoconf.h.autoconf | sed \
    >> include/ghcautoconf.h
 echo "#endif /* __GHCAUTOCONF_H__ */" >> include/ghcautoconf.h
 ]
+dnl --------------------------------------------------------------
+dnl Generate derived constants
+dnl --------------------------------------------------------------
+
+AC_ARG_VAR([NM], [Path to the nm program])
+AC_PATH_PROG([NM], nm)
+if test -z "$NM"; then
+	AC_MSG_ERROR([Cannot find nm])
+fi
+
+AC_ARG_VAR([OBJDUMP], [Path to the objdump program])
+AC_PATH_PROG([OBJDUMP], objdump)
+if test -z "$OBJDUMP"; then
+	AC_MSG_ERROR([Cannot find objdump])
+fi
+
+AC_ARG_VAR([DERIVE_CONSTANTS], [Path to the deriveConstants program])
+AC_PATH_PROG([DERIVE_CONSTANTS], deriveConstants)
+AS_IF([test "x$DERIVE_CONSTANTS" = x], [AC_MSG_ERROR([deriveConstants executable not found. Please install deriveConstants or set DERIVE_CONSTANTS environment variable.])])
+
+AC_ARG_VAR([GENAPPLY], [Path to the genapply program])
+AC_PATH_PROG([GENAPPLY], genapply)
+AS_IF([test "x$GENAPPLY" = x], [AC_MSG_ERROR([genapply executable not found. Please install genapply or set GENAPPLY environment variable.])])
+
+AC_CHECK_PROGS([PYTHON], [python3 python python2])
+AS_IF([test "x$PYTHON" = x], [AC_MSG_ERROR([Python interpreter not found. Please install Python or set PYTHON environment variable.])])
+
+AC_MSG_CHECKING([for DerivedConstants.h])
+dnl NOTE:  dnl pass `-fcommon` to force symbols into the common section. If they end
+dnl up in the ro data section `nm` won't list their size, and thus derivedConstants
+dnl will fail. Recent clang (e.g. 16) will by default use `-fno-common`.
+dnl
+dnl FIXME: using a relative path here is TERRIBLE; Cabal should provide some
+dnl        env var for _build-dependencies_ headers!
+dnl
+
+if $DERIVE_CONSTANTS \
+  --gen-header \
+  -o include/DerivedConstants.h \
+  --target-os "$HostOS_CPP" \
+  --gcc-program "$CC" \
+  --nm-program "$NM" \
+  --objdump-program "$OBJDUMP" \
+  --tmpdir "$(mktemp -d)" \
+  --gcc-flag "-fcommon" \
+  --gcc-flag "-I$srcdir" \
+  --gcc-flag "-I$srcdir/include" \
+  --gcc-flag "-Iinclude" \
+  --gcc-flag "-I$srcdir/../rts-headers/include" ; then
+  AC_MSG_RESULT([created])
+else
+  AC_MSG_RESULT([failed to create])
+  AC_MSG_ERROR([Failed to run $DERIVE_CONSTANTS --gen-header ...])
+fi
+
+AC_MSG_CHECKING([for include/rts/AutoApply.cmm.h])
+if ${MKDIR_P} include/rts && $GENAPPLY include/DerivedConstants.h > include/rts/AutoApply.cmm.h; then
+  AC_MSG_RESULT([created])
+else
+  AC_MSG_RESULT([failed to create])
+  AC_MSG_ERROR([Failed to run $GENAPPLY include/DerivedConstants.h > include/rts/AutoApply.cmm.h])
+fi
+
+AC_MSG_CHECKING([for include/rts/AutoApply_V16.cmm.h])
+if ${MKDIR_P} include/rts && $GENAPPLY include/DerivedConstants.h -V16 > include/rts/AutoApply_V16.cmm.h; then
+  AC_MSG_RESULT([created])
+else
+  AC_MSG_RESULT([failed to create])
+  AC_MSG_ERROR([Failed to run $GENAPPLY include/DerivedConstants.h -V16 > include/rts/AutoApply_V16.cmm.h])
+fi
+
+AC_MSG_CHECKING([for include/rts/AutoApply_V32.cmm.h])
+if ${MKDIR_P} include/rts && $GENAPPLY include/DerivedConstants.h -V32 > include/rts/AutoApply_V32.cmm.h; then
+  AC_MSG_RESULT([created])
+else
+  AC_MSG_RESULT([failed to create])
+  AC_MSG_ERROR([Failed to run $GENAPPLY include/DerivedConstants.h -V32 > include/rts/AutoApply_V32.cmm.h])
+fi
+
+AC_MSG_CHECKING([for include/rts/AutoApply_V64.cmm.h])
+if ${MKDIR_P} include/rts && $GENAPPLY include/DerivedConstants.h -V64 > include/rts/AutoApply_V64.cmm.h; then
+  AC_MSG_RESULT([created])
+else
+  AC_MSG_RESULT([failed to create])
+  AC_MSG_ERROR([Failed to run $GENAPPLY include/DerivedConstants.h -V64 > include/rts/AutoApply_V64.cmm.h])
+fi
+
+AC_MSG_CHECKING([for include/rts/EventLogConstants.h])
+if ${MKDIR_P} include/rts && $PYTHON $srcdir/gen_event_types.py --event-types-defines include/rts/EventLogConstants.h; then
+  AC_MSG_RESULT([created])
+else
+  AC_MSG_RESULT([failed to create])
+  AC_MSG_ERROR([Failed to run $PYTHON gen_event_types.py])
+fi
+
+AC_MSG_CHECKING([for include/rts/EventTypes.h])
+if ${MKDIR_P} include/rts && $PYTHON $srcdir/gen_event_types.py --event-types-array include/rts/EventTypes.h; then
+  AC_MSG_RESULT([created])
+else
+  AC_MSG_RESULT([failed to create])
+  AC_MSG_ERROR([Failed to run $PYTHON gen_event_types.py])
+fi
+
+dnl ** Write config files
+dnl --------------------------------------------------------------
+
+AC_OUTPUT

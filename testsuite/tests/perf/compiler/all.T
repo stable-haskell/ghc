@@ -493,12 +493,30 @@ test('MultiComponentModulesRecomp',
 
 test('MultiComponentModules',
      [ collect_compiler_runtime(2),
-       pre_cmd('$PYTHON ./genMultiComp.py'),
+       pre_cmd('$PYTHON ./genMultiComp.py 20 20'),
        extra_files(['genMultiComp.py']),
        compile_timeout_multiplier(5)
      ],
      multiunit_compile,
      [['unitp%d' % n for n in range(20)], '-fno-code -fwrite-interface -v0'])
+
+test('MultiComponentModulesRecomp100',
+     [ collect_compiler_runtime(2),
+       pre_cmd('$MAKE -s --no-print-directory MultiComponentModulesRecomp100'),
+       extra_files(['genMultiComp.py']),
+       compile_timeout_multiplier(5)
+     ],
+     multiunit_compile,
+     [['unitp%d' % n for n in range(100)], '-fno-code -fwrite-interface -v0'])
+
+test('MultiComponentModules100',
+     [ collect_compiler_runtime(2),
+       pre_cmd('$PYTHON ./genMultiComp.py 100 20'),
+       extra_files(['genMultiComp.py']),
+       compile_timeout_multiplier(5)
+     ],
+     multiunit_compile,
+     [['unitp%d' % n for n in range(100)], '-fno-code -fwrite-interface -v0'])
 
 test('ManyConstructors',
      [ collect_compiler_stats('bytes allocated',2),
@@ -646,7 +664,7 @@ test ('T18140',
       ['-v0 -O'])
 test('T10421',
     [ only_ways(['normal']),
-      collect_compiler_runtime(1)
+      collect_compiler_runtime(2) # 1% tolerance was too small (#27289)
     ],
     multimod_compile,
     ['T10421', '-v0 -O'])
@@ -792,3 +810,8 @@ test('interpreter_steplocal',
      ],
      ghci_script,
      ['interpreter_steplocal.script'])
+
+test ('T26425',
+      [ collect_compiler_stats('all',5) ],
+      compile,
+      ['-O'])

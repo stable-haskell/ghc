@@ -137,7 +137,10 @@ parseArgs = do args <- getArgs
           f opts ("-o" : fn : args')
               = f (opts {o_outputFilename = Just fn}) args'
           f opts ("--gcc-program" : prog : args')
-              = f (opts {o_gccProg = Just prog}) args'
+              = case words prog of
+                  (p:flags) -> f (opts {o_gccProg = Just p,
+                                        o_gccFlags = flags ++ o_gccFlags opts}) args'
+                  []        -> f (opts {o_gccProg = Just prog}) args'
           f opts ("--gcc-flag" : flag : args')
               = f (opts {o_gccFlags = flag : o_gccFlags opts}) args'
           f opts ("--nm-program" : prog : args')
@@ -383,6 +386,7 @@ wanteds os = concat
           ,fieldOffset Both "StgRegTable" "rCurrentTSO"
           ,fieldOffset Both "StgRegTable" "rCurrentNursery"
           ,fieldOffset Both "StgRegTable" "rHpAlloc"
+          ,structField C    "StgRegTable" "rCurrentAlloc"
           ,structField C    "StgRegTable" "rRet"
           ,structField C    "StgRegTable" "rNursery"
 
@@ -402,6 +406,7 @@ wanteds os = concat
           ,structField C    "Capability" "weak_ptr_list_hd"
           ,structField C    "Capability" "weak_ptr_list_tl"
           ,structField C    "Capability" "n_run_queue"
+          ,structField C    "Capability" "pinned_object_block"
 
           ,structField Both "bdescr" "start"
           ,structField Both "bdescr" "free"
@@ -475,6 +480,7 @@ wanteds os = concat
           ,closureField  Both "StgTSO"      "alloc_limit"
           ,closureField_ Both "StgTSO_cccs" "StgTSO" "prof.cccs"
           ,closureField  Both "StgTSO"      "stackobj"
+          ,closureField  Both "StgTSO"      "ctoi_tuple_spill_words"
 
           ,closureField       Both "StgStack" "sp"
           ,closureFieldOffset Both "StgStack" "stack"
@@ -617,6 +623,8 @@ wanteds os = concat
                           "RTS_FLAGS" "DebugFlags.sanity"
           ,structField_ C "RtsFlags_DebugFlags_weak"
                           "RTS_FLAGS" "DebugFlags.weak"
+          ,structField_ C "RtsFlags_DebugFlags_zero_on_gc"
+                          "RTS_FLAGS" "DebugFlags.zero_on_gc"
           ,structField_ C "RtsFlags_GcFlags_initialStkSize"
                           "RTS_FLAGS" "GcFlags.initialStkSize"
           ,structField_ C "RtsFlags_MiscFlags_tickInterval"
@@ -648,12 +656,7 @@ wanteds os = concat
            -- Note that this conditional part only affects the C headers.
            -- That's important, as it means we get the same PlatformConstants
            -- type on all platforms.
-          ,if os == Just Windows
-           then concat [structSize  C "StgAsyncIOResult"
-                       ,structField C "StgAsyncIOResult" "reqID"
-                       ,structField C "StgAsyncIOResult" "len"
-                       ,structField C "StgAsyncIOResult" "errCode"]
-           else []
+          ,[]
 
            -- struct HsIface
           ,structField C "HsIface" "processRemoteCompletion_closure"
@@ -816,9 +819,6 @@ getWanted verbose os tmpdir gccProgram gccFlags nmProgram mobjdumpProgram
                      "",
                      "#define PROFILING",
                      "#define THREADED_RTS",
-                     -- We need to define this if we want StgAsyncIOResult
-                     -- struct to be present after CPP
-                     --
                      -- FIXME: rts/PosixSource.h should include ghcplatform.h
                      -- which should set this. There is a mismatch host/target
                      -- again...
@@ -894,8 +894,9 @@ getWanted verbose os tmpdir gccProgram gccFlags nmProgram mobjdumpProgram
           parseNmLine line
               = case words line of
                 ('_' : n) : "C" : s : _ -> mkP n s
-                n : "C" : s : _ -> mkP n s
-                [n, "D", _, s] -> mkP n s
+                n : "C" : s : _         -> mkP n s -- in common section
+                n : "B" : _off : s : _  -> mkP n s -- in .bss section
+                [n, "D", _, s]          -> mkP n s
                 [s, "O", "*COM*", _, n] -> mkP n s
                 _ -> Nothing
               where mkP r s = case (stripPrefix prefix r, readHex s) of

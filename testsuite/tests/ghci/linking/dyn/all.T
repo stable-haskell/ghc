@@ -3,7 +3,6 @@ setTestOpts(req_dynamic_lib_support)
 test('load_short_name', [ extra_files(['A.c'])
                         , unless(doing_ghci, skip)
                         , req_c
-                        , when(opsys('linux') and not ghc_dynamic(), expect_broken(20706))
                         ],
      makefile_test, ['load_short_name'])
 
@@ -12,8 +11,7 @@ test('T1407',
       unless(doing_ghci, skip),
       pre_cmd('$MAKE -s --no-print-directory compile_libT1407'),
       extra_hc_opts('-L"$PWD/T1407dir"'),
-      js_broken(22359),
-      when(opsys('linux') and not ghc_dynamic(), expect_broken(20706))],
+      js_broken(22359)],
      makefile_test, [])
 
 test('T3242',
@@ -34,9 +32,32 @@ test('T10955dyn',
     ],
      makefile_test, ['compile_libAB_dyn'])
 
+# Note [T10458 and musl dynamic linking]
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# T10458 tests FFI with a dynamically loaded C library. When GHC is built
+# with DYNAMIC=1, GHCi's dynLoadObjs creates a temporary .so file that
+# links against the test's libAS.so using -rpath.
+#
+# Modern linkers emit DT_RUNPATH (not DT_RPATH) by default. Per the ELF ABI
+# specification, DT_RUNPATH is non-transitive: "One object's DT_RUNPATH
+# entry does not affect the search for any other object's dependencies."
+#
+# - glibc: Has non-spec-compliant "forgiving" behavior that sometimes
+#   searches RUNPATH transitively
+# - musl: Correctly follows the ELF spec - RUNPATH is not inherited
+#
+# This test is skipped on musl with dynamic GHC because the ELF-compliant
+# behavior makes the test fail, and this is not a bug in GHC or musl.
+# The test still runs on:
+# - All platforms with static GHC (RTS linker used, no dlopen)
+# - glibc with dynamic GHC (non-compliant but working)
+#
+# See: https://bugs.launchpad.net/bugs/1253638
 test('T10458',
      [extra_files(['A.c']),
       unless(doing_ghci, skip),
+      # Skip on musl with dynamic GHC: DT_RUNPATH is non-transitive per ELF spec
+      when(is_musl() and config.ghc_dynamic, skip),
       pre_cmd('$MAKE -s --no-print-directory compile_libT10458'),
       extra_hc_opts('-L"$PWD/T10458dir" -lAS')],
      ghci_script, ['T10458.script'])

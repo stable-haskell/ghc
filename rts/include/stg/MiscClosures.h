@@ -74,18 +74,13 @@ RTS_RET(stg_restore_cccs_v64);
 RTS_RET(stg_restore_cccs_eval);
 RTS_RET(stg_prompt_frame);
 
-// RTS_FUN(stg_interp_constr1_entry);
-// RTS_FUN(stg_interp_constr2_entry);
-// RTS_FUN(stg_interp_constr3_entry);
-// RTS_FUN(stg_interp_constr4_entry);
-// RTS_FUN(stg_interp_constr5_entry);
-// RTS_FUN(stg_interp_constr6_entry);
-// RTS_FUN(stg_interp_constr7_entry);
-//
-// This is referenced using the FFI in the compiler (GHC.ByteCode.InfoTable),
-// so we can't give it the correct type here because the prototypes
-// would clash (FFI references are always declared with type StgWord[]
-// in the generated C code).
+RTS_FUN(stg_interp_constr1_entry);
+RTS_FUN(stg_interp_constr2_entry);
+RTS_FUN(stg_interp_constr3_entry);
+RTS_FUN(stg_interp_constr4_entry);
+RTS_FUN(stg_interp_constr5_entry);
+RTS_FUN(stg_interp_constr6_entry);
+RTS_FUN(stg_interp_constr7_entry);
 
 /* Magic glue code for when compiled code returns a value in R1/F1/D1
    or a VoidRep to the interpreter. */
@@ -96,7 +91,7 @@ RTS_RET(stg_ctoi_D1);
 RTS_RET(stg_ctoi_L1);
 RTS_RET(stg_ctoi_V);
 
-RTS_FUN_DECL(stg_ctoi_t);
+RTS_RET(stg_ctoi_t);
 RTS_RET(stg_ctoi_t0);
 RTS_RET(stg_ctoi_t1);
 RTS_RET(stg_ctoi_t2);
@@ -106,66 +101,6 @@ RTS_RET(stg_ctoi_t5);
 RTS_RET(stg_ctoi_t6);
 RTS_RET(stg_ctoi_t7);
 RTS_RET(stg_ctoi_t8);
-RTS_RET(stg_ctoi_t9);
-
-RTS_RET(stg_ctoi_t10);
-RTS_RET(stg_ctoi_t11);
-RTS_RET(stg_ctoi_t12);
-RTS_RET(stg_ctoi_t13);
-RTS_RET(stg_ctoi_t14);
-RTS_RET(stg_ctoi_t15);
-RTS_RET(stg_ctoi_t16);
-RTS_RET(stg_ctoi_t17);
-RTS_RET(stg_ctoi_t18);
-RTS_RET(stg_ctoi_t19);
-
-RTS_RET(stg_ctoi_t20);
-RTS_RET(stg_ctoi_t21);
-RTS_RET(stg_ctoi_t22);
-RTS_RET(stg_ctoi_t23);
-RTS_RET(stg_ctoi_t24);
-RTS_RET(stg_ctoi_t25);
-RTS_RET(stg_ctoi_t26);
-RTS_RET(stg_ctoi_t27);
-RTS_RET(stg_ctoi_t28);
-RTS_RET(stg_ctoi_t29);
-
-RTS_RET(stg_ctoi_t30);
-RTS_RET(stg_ctoi_t31);
-RTS_RET(stg_ctoi_t32);
-RTS_RET(stg_ctoi_t33);
-RTS_RET(stg_ctoi_t34);
-RTS_RET(stg_ctoi_t35);
-RTS_RET(stg_ctoi_t36);
-RTS_RET(stg_ctoi_t37);
-RTS_RET(stg_ctoi_t38);
-RTS_RET(stg_ctoi_t39);
-
-RTS_RET(stg_ctoi_t40);
-RTS_RET(stg_ctoi_t41);
-RTS_RET(stg_ctoi_t42);
-RTS_RET(stg_ctoi_t43);
-RTS_RET(stg_ctoi_t44);
-RTS_RET(stg_ctoi_t45);
-RTS_RET(stg_ctoi_t46);
-RTS_RET(stg_ctoi_t47);
-RTS_RET(stg_ctoi_t48);
-RTS_RET(stg_ctoi_t49);
-
-RTS_RET(stg_ctoi_t50);
-RTS_RET(stg_ctoi_t51);
-RTS_RET(stg_ctoi_t52);
-RTS_RET(stg_ctoi_t53);
-RTS_RET(stg_ctoi_t54);
-RTS_RET(stg_ctoi_t55);
-RTS_RET(stg_ctoi_t56);
-RTS_RET(stg_ctoi_t57);
-RTS_RET(stg_ctoi_t58);
-RTS_RET(stg_ctoi_t59);
-
-RTS_RET(stg_ctoi_t60);
-RTS_RET(stg_ctoi_t61);
-RTS_RET(stg_ctoi_t62);
 
 RTS_RET(stg_primcall);
 RTS_RET(stg_apply_interp);
@@ -212,6 +147,8 @@ RTS_ENTRY(stg_MSG_TRY_WAKEUP);
 RTS_ENTRY(stg_MSG_THROWTO);
 RTS_ENTRY(stg_MSG_BLACKHOLE);
 RTS_ENTRY(stg_MSG_CLONE_STACK);
+RTS_ENTRY(stg_MSG_SET_TSO_FLAG);
+RTS_ENTRY(stg_MSG_UNSET_TSO_FLAG);
 RTS_ENTRY(stg_MSG_NULL);
 RTS_ENTRY(stg_MVAR_TSO_QUEUE);
 RTS_ENTRY(stg_catch);
@@ -431,8 +368,6 @@ RTS_RET(stg_block_putmvar);
 #if defined(mingw32_HOST_OS)
 RTS_FUN_DECL(stg_block_async);
 RTS_RET(stg_block_async);
-RTS_FUN_DECL(stg_block_async_void);
-RTS_RET(stg_block_async_void);
 #endif
 RTS_FUN_DECL(stg_block_stmwait);
 RTS_FUN_DECL(stg_block_throwto);

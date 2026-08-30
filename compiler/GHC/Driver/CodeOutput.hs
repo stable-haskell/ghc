@@ -4,6 +4,7 @@
 \section{Code output phase}
 -}
 
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 module GHC.Driver.CodeOutput
@@ -20,7 +21,9 @@ import GHC.ForeignSrcLang
 import GHC.Data.FastString
 
 import GHC.CmmToAsm     ( nativeCodeGen )
+#if defined(HAVE_LLVM_BACKEND)
 import GHC.CmmToLlvm    ( llvmCodeGen )
+#endif
 
 import GHC.CmmToC           ( cmmToC )
 import GHC.Cmm.Lint         ( cmmLint )
@@ -32,12 +35,14 @@ import GHC.StgToCmm.CgUtils (CgStream)
 import GHC.Driver.DynFlags
 import GHC.Driver.Config.Finder    ( initFinderOpts   )
 import GHC.Driver.Config.CmmToAsm  ( initNCGConfig    )
+#if defined(HAVE_LLVM_BACKEND)
 import GHC.Driver.Config.CmmToLlvm ( initLlvmCgConfig )
+#endif
 import GHC.Driver.LlvmConfigCache  (LlvmConfigCache)
 import GHC.Driver.Ppr
 import GHC.Driver.Backend
 
-import GHC.Data.OsPath
+import GHC.Data.OsPath qualified as OsPath
 import qualified GHC.Data.ShortText as ST
 import GHC.Data.Stream           ( liftIO )
 import qualified GHC.Data.Stream as Stream
@@ -50,7 +55,7 @@ import GHC.Utils.Outputable
 import GHC.Utils.Logger
 import GHC.Utils.Exception ( bracket )
 import GHC.Utils.Ppr (Mode(..))
-import GHC.Utils.Panic.Plain ( pgmError )
+import GHC.Utils.Panic.Plain ( pgmError, panic )
 
 import GHC.Unit
 import GHC.Unit.Finder      ( mkStubPaths )
@@ -60,8 +65,6 @@ import GHC.Types.CostCentre
 import GHC.Types.ForeignStubs
 import GHC.Types.Unique.DSM
 
-import System.Directory
-import System.FilePath
 import System.IO
 import Data.Set (Set)
 import qualified Data.Set as Set
@@ -124,6 +127,7 @@ codeOutput logger tmpfs llvm_config dflags unit_state this_mod filenm location g
                   { a <- linted_cmm_stream
                   ; let stubs = genForeignStubs a
                   ; emitInitializerDecls this_mod stubs
+                  ; emitFinalizerDecls this_mod stubs
                   ; return (stubs, a) }
 
         ; let dus1 = newTagDUniqSupply 'n' dus0
@@ -131,26 +135,38 @@ codeOutput logger tmpfs llvm_config dflags unit_state this_mod filenm location g
                  NcgCodeOutput  -> outputAsm logger dflags this_mod location filenm dus1
                                              final_stream
                  ViaCCodeOutput -> outputC logger dflags filenm dus1 final_stream pkg_deps
+#if defined(HAVE_LLVM_BACKEND)
                  LlvmCodeOutput -> outputLlvm logger llvm_config dflags filenm dus1 final_stream
+#else
+                 LlvmCodeOutput -> panic "codeOutput: LLVM backend not available (HAVE_LLVM_BACKEND not defined)"
+#endif
+#if defined(HAVE_JS_BACKEND)
                  JSCodeOutput   -> outputJS logger llvm_config dflags filenm final_stream
+#else
+                 JSCodeOutput   -> panic "codeOutput: JS backend not available (HAVE_JS_BACKEND not defined)"
+#endif
         ; stubs_exist <- outputForeignStubs logger tmpfs dflags unit_state this_mod location stubs
         ; return (filenm, stubs_exist, foreign_fps, a)
         }
 
 -- | See Note [Initializers and finalizers in Cmm] in GHC.Cmm.InitFini for details.
-emitInitializerDecls :: Module -> ForeignStubs -> CgStream RawCmmGroup ()
-emitInitializerDecls this_mod (ForeignStubs _ cstub)
-  | initializers <- getInitializers cstub
-  , not $ null initializers =
-      let init_array = CmmData sect statics
-          lbl = mkInitializerArrayLabel this_mod
-          sect = Section InitArray lbl
+emitInitializerDecls, emitFinalizerDecls :: Module -> ForeignStubs -> CgStream RawCmmGroup ()
+emitInitializerDecls = emitInitFiniArrayDecls InitArray mkInitializerArrayLabel getInitializers
+emitFinalizerDecls   = emitInitFiniArrayDecls FiniArray mkFinalizerArrayLabel   getFinalizers
+
+emitInitFiniArrayDecls :: SectionType -> (Module -> CLabel) -> (CStub -> [CLabel])
+                       -> Module -> ForeignStubs -> CgStream RawCmmGroup ()
+emitInitFiniArrayDecls sect_type mk_lbl get_labels this_mod (ForeignStubs _ cstub)
+  | labels <- get_labels cstub
+  , not $ null labels =
+      let lbl     = mk_lbl this_mod
+          sect    = Section sect_type lbl
           statics = CmmStaticsRaw lbl
             [ CmmStaticLit $ CmmLabel fn_name
-            | fn_name <- initializers
+            | fn_name <- labels
             ]
-    in Stream.yield [init_array]
-emitInitializerDecls _ _ = return ()
+    in Stream.yield [CmmData sect statics]
+emitInitFiniArrayDecls _ _ _ _ _ = return ()
 
 doOutput :: String -> (Handle -> IO a) -> IO a
 doOutput filenm io_action = bracket (openFile filenm WriteMode) hClose io_action
@@ -216,6 +232,7 @@ outputAsm logger dflags this_mod location filenm dus cmm_stream = do
       runUDSMT dus $ setTagUDSMT 'n' $
       nativeCodeGen logger (toolSettings dflags) ncg_config location h cmm_stream
 
+#if defined(HAVE_LLVM_BACKEND)
 {-
 ************************************************************************
 *                                                                      *
@@ -233,7 +250,9 @@ outputLlvm logger llvm_config dflags filenm dus cmm_stream = do
   {-# SCC "llvm_output" #-} doOutput filenm $
     \f -> {-# SCC "llvm_CodeGen" #-}
       llvmCodeGen logger lcg_config f dus cmm_stream
+#endif
 
+#if defined(HAVE_JS_BACKEND)
 {-
 ************************************************************************
 *                                                                      *
@@ -245,6 +264,7 @@ outputJS :: Logger -> LlvmConfigCache -> DynFlags -> FilePath -> CgStream RawCmm
 outputJS _ _ _ _ _ = pgmError $ "codeOutput: Hit JavaScript case. We should never reach here!"
                               ++ "\nThe JS backend should shortcircuit to StgToJS after Stg."
                               ++ "\nIf you reached this point then you've somehow made it to Cmm!"
+#endif
 
 {-
 ************************************************************************
@@ -255,12 +275,11 @@ outputJS _ _ _ _ _ = pgmError $ "codeOutput: Hit JavaScript case. We should neve
 -}
 
 {-
-Note [Packaging libffi headers]
+Note [libffi headers]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 The C code emitted by GHC for libffi adjustors must depend upon the ffi_arg type,
-defined in <ffi.h>. For this reason, we must ensure that <ffi.h> is available
-in binary distributions. To do so, we install these headers as part of the
-`rts` package.
+defined in <ffi.h>. On systems where GHC uses the libffi adjustors, the libffi
+library, and headers must be installed.
 -}
 
 outputForeignStubs
@@ -323,10 +342,9 @@ outputForeignStubs logger tmpfs dflags unit_state mod location stubs
         stub_h_file_exists <-
           case mkStubPaths (initFinderOpts dflags) (moduleName mod) location of
             Nothing -> pure False
-            Just path -> do
-              let stub_h = unsafeDecodeUtf path
-              createDirectoryIfMissing True (takeDirectory stub_h)
-              outputForeignStubs_help stub_h stub_h_output_w
+            Just stub_h -> do
+              OsPath.createDirectoryIfMissing True (OsPath.takeDirectory stub_h)
+              outputForeignStubs_help (OsPath.unsafeDecodeUtf stub_h) stub_h_output_w
                     ("#include <HsFFI.h>\n" ++ cplusplus_hdr) cplusplus_ftr
 
         putDumpFileMaybe logger Opt_D_dump_foreign

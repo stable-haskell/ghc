@@ -260,6 +260,7 @@ test('T21651',
        when(opsys('mingw32'),skip), # uses POSIX pipes
        when(opsys('darwin'),extra_run_opts('8 12 2000 100')),
        unless(opsys('darwin'),extra_run_opts('8 12 2000 200')), # darwin runners complain of too many open files
+       when(opsys('darwin'),fragile(21651)), # times out on aarch64-darwin CI runners
        req_target_smp,
        req_ghc_smp
      ],
@@ -309,3 +310,19 @@ test('hs_try_putmvar003',
 
 # Check forkIO exception determinism under optimization
 test('T13330', normal, compile_and_run, ['-O'])
+
+test('T26341', normal, compile_and_run, [''])
+
+# Test EINTR for async I/O interrupted by an exception (#26341)
+test('T26341a'
+    # test uses pipe operations which are not supported by the JS/wasm backends
+    , when(arch('wasm32') or arch('javascript'), skip)
+    , compile_and_run, ['-package process'])
+
+# Stress test: many threads repeatedly interrupt and re-enter async-blocked
+# thunks (#26341). Before the fix, this would crash due to dangling
+# StgAsyncIOResult pointers on the stack.
+test('T26341b'
+    # test uses pipe operations which are not supported by the JS/wasm backends
+    , when(arch('wasm32') or arch('javascript'), skip)
+    , compile_and_run, ['-package process'])

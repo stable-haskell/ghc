@@ -12,9 +12,11 @@ import GHC.Prelude
 import GHC.Platform
 import GHC.Platform.Ways
 import GHC.Settings (ToolSettings(toolSettings_ldSupportsSingleModule))
+import GHC.SysTools.Tasks
 
 import GHC.Driver.Config.Linker
 import GHC.Driver.Session
+import GHC.Driver.DynFlags (rtsWayUnitId)
 
 import GHC.Unit.Env
 import GHC.Unit.Types
@@ -24,6 +26,7 @@ import GHC.Linker.Unit
 import GHC.Linker.External
 import GHC.Utils.Logger
 import GHC.Utils.TmpFs
+import GHC.Data.FastString
 
 import Control.Monad (when)
 import System.FilePath
@@ -50,7 +53,27 @@ linkDynLib logger tmpfs dflags0 unit_env o_files dep_packages
         verbFlags = getVerbFlags dflags
         o_file = outputFile_ dflags
 
-    pkgs_with_rts <- mayThrowUnitErr (preloadUnitsInfo' unit_env dep_packages)
+    pkgs_with_rts <- do
+      pkgs0 <- mayThrowUnitErr (preloadUnitsInfo' unit_env dep_packages)
+      -- On wasm32, every Haskell .so must declare the current way's rts in
+      -- its `dylink.0/needed_dynlibs` section, otherwise the runtime dyld
+      -- can load it ahead of rts and the .so's `_initialize` references
+      -- unresolved rts symbols (e.g. `registerForeignExports`) — see
+      -- ghc-internal, which is built with `-no-rts` to bypass mkUnitState's
+      -- sanity check (compiler/GHC/Unit/State.hs:1652) but consequently has
+      -- cabal omit rts from its --depends list. wasm-ld populates
+      -- needed_dynlibs from the resolved `-l` flags, so we must inject the
+      -- current way's rts here whenever it isn't already present, even if
+      -- `-no-rts` is in effect. Other targets either link rts statically at
+      -- exe-link time or rely on host symbol resolution; on wasm32 the .so
+      -- itself carries the dependency.
+      let rts_uid = rtsWayUnitId dflags
+      pure $ case arch of
+        ArchWasm32
+          | not (any ((== rts_uid) . unitId) pkgs0)
+          , Just rts_info <- lookupUnitId (ue_units unit_env) rts_uid
+          -> rts_info : pkgs0
+        _ -> pkgs0
 
     let pkg_lib_paths = collectLibraryDirs (ways dflags) pkgs_with_rts
     let pkg_lib_path_opts = concatMap get_pkg_lib_path_opts pkg_lib_paths
@@ -82,20 +105,21 @@ linkDynLib logger tmpfs dflags0 unit_env o_files dep_packages
     --   * if -flink-rts is used, we link with the rts.
     --
     --   * on wasm we need to ensure libHSrts*.so is listed in
-    --   WASM_DYLINK_NEEDED, otherwise dyld can't load it.
+    --   WASM_DYLINK_NEEDED, otherwise dyld can't load it. We force the
+    --   current way's rts into `pkgs_with_rts` above so that even .so
+    --   files whose package was built with `-no-rts` (e.g. ghc-internal)
+    --   still declare the rts dependency.
     --
     --
-    let pkgs_without_rts = filter ((/= rtsUnitId) . unitId) pkgs_with_rts
+    let pkgs_without_rts = filter ((/= PackageName (fsLit "rts")) . unitPackageName) pkgs_with_rts
         pkgs
          | ArchWasm32 <- arch      = pkgs_with_rts
          | OSMinGW32 <- os         = pkgs_with_rts
          | gopt Opt_LinkRts dflags = pkgs_with_rts
          | otherwise               = pkgs_without_rts
-        pkg_link_opts = hsLibs unit_link_opts ++ extraLibs unit_link_opts ++ otherFlags unit_link_opts
-          where
-            namever = ghcNameVersion dflags
-            ways_   = ways dflags
-            unit_link_opts = collectLinkOpts namever ways_ pkgs
+    unit_link_opts <- collectLinkOpts (ghcNameVersion dflags) (ways dflags) Nothing pkgs
+    let pkg_link_opts = hsLibs unit_link_opts ++ extraLibs unit_link_opts ++ otherFlags unit_link_opts
+
 
         -- probably _stub.o files
         -- and last temporary shared object file
@@ -106,6 +130,7 @@ linkDynLib logger tmpfs dflags0 unit_env o_files dep_packages
     let framework_opts = getFrameworkOpts (initFrameworkOpts dflags) platform
 
     let linker_config = initLinkerConfig dflags
+    let require_cxx = any ((==) (PackageName (fsLit "system-cxx-std-lib")) . unitPackageName) pkgs
 
     case os of
         OSMinGW32 -> do
@@ -116,7 +141,7 @@ linkDynLib logger tmpfs dflags0 unit_env o_files dep_packages
                             Just s -> s
                             Nothing -> "HSdll.dll"
 
-            runLink logger tmpfs linker_config (
+            runLink logger tmpfs linker_config require_cxx (
                     map Option verbFlags
                  ++ [ Option "-o"
                     , FileOption "" output_fn
@@ -175,7 +200,7 @@ linkDynLib logger tmpfs dflags0 unit_env o_files dep_packages
             instName <- case dylibInstallName dflags of
                 Just n -> return n
                 Nothing -> return $ "@rpath" `combine` (takeFileName output_fn)
-            runLink logger tmpfs linker_config (
+            runLink logger tmpfs linker_config require_cxx (
                     map Option verbFlags
                  ++ [ Option "-dynamiclib"
                     , Option "-o"
@@ -207,8 +232,10 @@ linkDynLib logger tmpfs dflags0 unit_env o_files dep_packages
                  ++ [ Option "-Wl,-dead_strip_dylibs", Option "-Wl,-headerpad,8000" ]
               )
             -- Make sure to honour -fno-use-rpaths if set on darwin as well; see #20004
-            when (gopt Opt_RPath dflags) $
-              runInjectRPaths logger (toolSettings dflags) pkg_lib_paths output_fn
+            when (gopt Opt_RPath dflags) $ do
+              let otool_opts = configureOtool dflags
+              let install_name_opts = configureInstallName dflags
+              runInjectRPaths logger otool_opts install_name_opts pkg_lib_paths output_fn
         _ -> do
             -------------------------------------------------------------------
             -- Making a DSO
@@ -224,7 +251,7 @@ linkDynLib logger tmpfs dflags0 unit_env o_files dep_packages
                                 -- wasm-ld accepts --Bsymbolic instead
                                 ["-Wl,-Bsymbolic" | not unregisterised && arch /= ArchWasm32 ]
 
-            runLink logger tmpfs linker_config (
+            runLink logger tmpfs linker_config require_cxx (
                     map Option verbFlags
                  ++ libmLinkOpts platform
                  ++ [ Option "-o"

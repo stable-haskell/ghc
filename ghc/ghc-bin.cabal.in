@@ -1,3 +1,4 @@
+Cabal-Version: 3.0
 -- WARNING: ghc-bin.cabal is automatically generated from ghc-bin.cabal.in by
 -- ./configure.  Make sure you are editing ghc-bin.cabal.in, not ghc-bin.cabal.
 
@@ -15,7 +16,6 @@ Description:
     to the Glasgow Haskell Compiler.
 Category: Development
 Build-Type: Simple
-Cabal-Version: >=1.10
 
 Flag internal-interpreter
     Description: Build with internal interpreter support.
@@ -24,6 +24,16 @@ Flag internal-interpreter
 
 Flag threaded
     Description: Link the ghc executable against the threaded RTS
+    Default: True
+    Manual: True
+
+Flag debug
+    Description: Link the ghc executable against the debug RTS
+    Default: True
+    Manual: True
+
+Flag frontend-plugins
+    Description: Build with frontend plugin loading support
     Default: True
     Manual: True
 
@@ -45,6 +55,21 @@ Executable ghc
                    ghc-boot      == @ProjectVersionMunged@,
                    ghc           == @ProjectVersionMunged@
 
+    if impl(ghc > 9.12)
+        -- we need to depend on the specific rts we want to link our
+        -- final GHC against.
+        -- TODO: add debug flag and extend those extra cases.
+        if flag(threaded)
+            if flag(debug)
+                Build-Depends: rts:threaded-debug
+            else
+                Build-Depends: rts:threaded-nodebug
+        else
+            if flag(debug)
+                Build-Depends: rts:nonthreaded-debug
+            else
+                Build-Depends: rts:nonthreaded-nodebug
+
     if os(windows)
         Build-Depends: Win32  >= 2.3 && < 2.15
     else
@@ -55,6 +80,21 @@ Executable ghc
                  -Wnoncanonical-monoid-instances
                  -rtsopts=all
                  "-with-rtsopts=-K512M -H -I5 -T"
+
+    -- Export RTS symbols to dynamically loaded libraries
+    -- See Note [ghc-iserv and dynamic symbol export] in utils/ghc-iserv/ghc-iserv.cabal.in
+    -- GHC loads Haskell shared libraries dynamically for TH/GHCi and these
+    -- libraries need access to RTS symbols. Without these flags, symbols
+    -- from the linked RTS are not visible to dlopen'd libraries.
+    if os(linux) || os(freebsd)
+      ghc-options: -rdynamic
+    if os(osx) || os(darwin)
+      ghc-options: -optl -Wl,-flat_namespace
+    -- Note: Windows has a hard limit of 65535 symbol exports (16-bit index).
+    -- We cannot use --export-all-symbols here as we exceed that limit.
+
+    if flag(frontend-plugins)
+        cpp-options: -DFRONTEND_PLUGINS
 
     if flag(internal-interpreter)
         -- NB: this is never built by the bootstrapping GHC+libraries

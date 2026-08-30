@@ -69,7 +69,9 @@ module GHC.Unit.State (
         pprRawUnitIds,
 
         -- * Utils
-        unwireUnit)
+        unwireUnit,
+        selectHptFlag,
+        )
 where
 
 import GHC.Prelude
@@ -101,6 +103,8 @@ import GHC.Data.Maybe
 
 import System.Environment ( getEnv )
 import GHC.Data.FastString
+import GHC.Data.OsPath ( OsPath )
+import qualified GHC.Data.OsPath as OsPath
 import qualified GHC.Data.ShortText as ST
 import GHC.Utils.Logger
 import GHC.Utils.Error
@@ -111,8 +115,9 @@ import System.FilePath as FilePath
 import Control.Monad
 import Data.Graph (stronglyConnComp, SCC(..))
 import Data.Char ( toUpper )
-import Data.List ( intersperse, partition, sortBy, isSuffixOf, sortOn )
+import Data.List ( intersperse, partition, sortBy, sortOn )
 import Data.Set (Set)
+import Data.String (fromString)
 import Data.Monoid (First(..))
 import qualified Data.Semigroup as Semigroup
 import qualified Data.Set as Set
@@ -371,7 +376,7 @@ initUnitConfig dflags cached_dbs home_units =
          -- Since "base" is not wired in, then the unit-id is discovered
          -- from the settings file by default, but can be overriden by power-users
          -- by specifying `-base-unit-id` flag.
-         | otherwise = filter (hu_id /=) [baseUnitId dflags, ghcInternalUnitId, rtsUnitId]
+         | otherwise = filter (hu_id /=) (baseUnitId dflags:wiredInUnitIds)
 
        -- if the home unit is indefinite, it means we are type-checking it only
        -- (not producing any code). Hence we can use virtual units instantiated
@@ -407,7 +412,7 @@ initUnitConfig dflags cached_dbs home_units =
 
   where
     offsetPackageDb :: Maybe FilePath -> PackageDBFlag -> PackageDBFlag
-    offsetPackageDb (Just offset) (PackageDB (PkgDbPath p)) | isRelative p = PackageDB (PkgDbPath (offset </> p))
+    offsetPackageDb (Just offset) (PackageDB (PkgDbPath p)) | OsPath.isRelative p = PackageDB (PkgDbPath (OsPath.unsafeEncodeUtf offset OsPath.</> p))
     offsetPackageDb _ p = p
 
 
@@ -458,7 +463,7 @@ data UnitState = UnitState {
   -- -Wunused-packages warning.
   explicitUnits :: [(Unit, Maybe PackageArg)],
 
-  homeUnitDepends    :: [UnitId],
+  homeUnitDepends    :: Set UnitId,
 
   -- | This is a full map from 'ModuleName' to all modules which may possibly
   -- be providing it.  These providers may be hidden (but we'll still want
@@ -493,7 +498,7 @@ emptyUnitState = UnitState {
     unwireMap      = emptyUniqMap,
     preloadUnits   = [],
     explicitUnits  = [],
-    homeUnitDepends = [],
+    homeUnitDepends = Set.empty,
     moduleNameProvidersMap       = emptyUniqMap,
     pluginModuleNameProvidersMap = emptyUniqMap,
     requirementContext           = emptyUniqMap,
@@ -502,12 +507,12 @@ emptyUnitState = UnitState {
 
 -- | Unit database
 data UnitDatabase unit = UnitDatabase
-   { unitDatabasePath  :: FilePath
+   { unitDatabasePath  :: OsPath
    , unitDatabaseUnits :: [GenUnitInfo unit]
    }
 
 instance Outputable u => Outputable (UnitDatabase u) where
-  ppr (UnitDatabase fp _u) = text "DB:" <+> text fp
+  ppr (UnitDatabase fp _u) = text "DB:" <+> ppr fp
 
 type UnitInfoMap = UniqMap UnitId UnitInfo
 
@@ -645,7 +650,7 @@ initUnits logger dflags cached_dbs home_units = do
 
   (unit_state,dbs) <- withTiming logger (text "initializing unit database")
                    forceUnitInfoMap
-                 $ mkUnitState logger (initUnitConfig dflags cached_dbs home_units)
+                 $ mkUnitState logger dflags (initUnitConfig dflags cached_dbs home_units)
 
   putDumpFileMaybe logger Opt_D_dump_mod_map "Module Map"
     FormatText (updSDocContext (\ctx -> ctx {sdocLineLength = 200})
@@ -722,9 +727,9 @@ getUnitDbRefs cfg = do
         Left _ -> system_conf_refs
         Right path
          | Just (xs, x) <- snocView path, isSearchPathSeparator x
-         -> map PkgDbPath (splitSearchPath xs) ++ system_conf_refs
+         -> map PkgDbPath (OsPath.splitSearchPath (OsPath.unsafeEncodeUtf xs)) ++ system_conf_refs
          | otherwise
-         -> map PkgDbPath (splitSearchPath path)
+         -> map PkgDbPath (OsPath.splitSearchPath (OsPath.unsafeEncodeUtf path))
 
   -- Apply the package DB-related flags from the command line to get the
   -- final list of package DBs.
@@ -753,24 +758,24 @@ getUnitDbRefs cfg = do
 -- NB: This logic is reimplemented in Cabal, so if you change it,
 -- make sure you update Cabal. (Or, better yet, dump it in the
 -- compiler info so Cabal can use the info.)
-resolveUnitDatabase :: UnitConfig -> PkgDbRef -> IO (Maybe FilePath)
-resolveUnitDatabase cfg GlobalPkgDb = return $ Just (unitConfigGlobalDB cfg)
+resolveUnitDatabase :: UnitConfig -> PkgDbRef -> IO (Maybe OsPath)
+resolveUnitDatabase cfg GlobalPkgDb = return $ Just $ OsPath.unsafeEncodeUtf $ unitConfigGlobalDB cfg
 resolveUnitDatabase cfg UserPkgDb = runMaybeT $ do
   dir <- versionedAppDir (unitConfigProgramName cfg) (unitConfigPlatformArchOS cfg)
   let pkgconf = dir </> unitConfigDBName cfg
   exist <- tryMaybeT $ doesDirectoryExist pkgconf
-  if exist then return pkgconf else mzero
+  if exist then return (OsPath.unsafeEncodeUtf pkgconf) else mzero
 resolveUnitDatabase _ (PkgDbPath name) = return $ Just name
 
-readUnitDatabase :: Logger -> UnitConfig -> FilePath -> IO (UnitDatabase UnitId)
+readUnitDatabase :: Logger -> UnitConfig -> OsPath -> IO (UnitDatabase UnitId)
 readUnitDatabase logger cfg conf_file = do
-  isdir <- doesDirectoryExist conf_file
+  isdir <- OsPath.doesDirectoryExist conf_file
 
   proto_pkg_configs <-
     if isdir
        then readDirStyleUnitInfo conf_file
        else do
-            isfile <- doesFileExist conf_file
+            isfile <- OsPath.doesFileExist conf_file
             if isfile
                then do
                  mpkgs <- tryReadOldFileStyleUnitInfo
@@ -778,48 +783,49 @@ readUnitDatabase logger cfg conf_file = do
                    Just pkgs -> return pkgs
                    Nothing   -> throwGhcExceptionIO $ InstallationError $
                       "ghc no longer supports single-file style package " ++
-                      "databases (" ++ conf_file ++
+                      "databases (" ++ show conf_file ++
                       ") use 'ghc-pkg init' to create the database with " ++
                       "the correct format."
                else throwGhcExceptionIO $ InstallationError $
-                      "can't find a package database at " ++ conf_file
+                      "can't find a package database at " ++ show conf_file
 
   let
       -- Fix #16360: remove trailing slash from conf_file before calculating pkgroot
-      conf_file' = dropTrailingPathSeparator conf_file
-      top_dir = unitConfigGHCDir cfg
-      pkgroot = takeDirectory conf_file'
+      conf_file' = OsPath.dropTrailingPathSeparator conf_file
+      top_dir = OsPath.unsafeEncodeUtf (unitConfigGHCDir cfg)
+      pkgroot = OsPath.takeDirectory conf_file'
       pkg_configs1 = map (mungeUnitInfo top_dir pkgroot . mapUnitInfo (\(UnitKey x) -> UnitId x) . mkUnitKeyInfo)
                          proto_pkg_configs
   --
   return $ UnitDatabase conf_file' pkg_configs1
   where
+    readDirStyleUnitInfo :: OsPath -> IO [DbUnitInfo]
     readDirStyleUnitInfo conf_dir = do
-      let filename = conf_dir </> "package.cache"
-      cache_exists <- doesFileExist filename
+      let filename = conf_dir OsPath.</> (OsPath.unsafeEncodeUtf "package.cache")
+      cache_exists <- OsPath.doesFileExist filename
       if cache_exists
         then do
-          debugTraceMsg logger 2 $ text "Using binary package database:" <+> text filename
-          readPackageDbForGhc filename
+          debugTraceMsg logger 2 $ text "Using binary package database:" <+> ppr filename
+          readPackageDbForGhc (OsPath.unsafeDecodeUtf filename)
         else do
           -- If there is no package.cache file, we check if the database is not
           -- empty by inspecting if the directory contains any .conf file. If it
           -- does, something is wrong and we fail. Otherwise we assume that the
           -- database is empty.
           debugTraceMsg logger 2 $ text "There is no package.cache in"
-                      <+> text conf_dir
+                      <+> ppr conf_dir
                        <> text ", checking if the database is empty"
-          db_empty <- all (not . isSuffixOf ".conf")
-                   <$> getDirectoryContents conf_dir
+          db_empty <- all (not . OsPath.isSuffixOf (OsPath.unsafeEncodeUtf ".conf"))
+                   <$> OsPath.getDirectoryContents conf_dir
           if db_empty
             then do
               debugTraceMsg logger 3 $ text "There are no .conf files in"
-                          <+> text conf_dir <> text ", treating"
+                          <+> ppr conf_dir <> text ", treating"
                           <+> text "package database as empty"
               return []
             else
               throwGhcExceptionIO $ InstallationError $
-                "there is no package.cache in " ++ conf_dir ++
+                "there is no package.cache in " ++ show conf_dir ++
                 " even though package database is not empty"
 
 
@@ -832,13 +838,13 @@ readUnitDatabase logger cfg conf_file = do
     -- assumes it's a file and tries to overwrite with 'writeFile'.
     -- ghc-pkg also cooperates with this workaround.
     tryReadOldFileStyleUnitInfo = do
-      content <- readFile conf_file `catchIO` \_ -> return ""
+      content <- readFile (OsPath.unsafeDecodeUtf conf_file) `catchIO` \_ -> return ""
       if take 2 content == "[]"
         then do
-          let conf_dir = conf_file <.> "d"
-          direxists <- doesDirectoryExist conf_dir
+          let conf_dir = conf_file OsPath.<.> OsPath.unsafeEncodeUtf "d"
+          direxists <- OsPath.doesDirectoryExist conf_dir
           if direxists
-             then do debugTraceMsg logger 2 (text "Ignoring old file-style db and trying:" <+> text conf_dir)
+             then do debugTraceMsg logger 2 (text "Ignoring old file-style db and trying:" <+> ppr conf_dir)
                      liftM Just (readDirStyleUnitInfo conf_dir)
              else return (Just []) -- ghc-pkg will create it when it's updated
         else return Nothing
@@ -848,16 +854,19 @@ distrustAllUnits pkgs = map distrust pkgs
   where
     distrust pkg = pkg{ unitIsTrusted = False }
 
-mungeUnitInfo :: FilePath -> FilePath
+mungeUnitInfo :: OsPath -> OsPath
                    -> UnitInfo -> UnitInfo
 mungeUnitInfo top_dir pkgroot =
-    mungeDynLibFields
-  . mungeUnitInfoPaths (ST.pack top_dir) (ST.pack pkgroot)
+    mungeLibDirFields
+  . mungeUnitInfoPaths (ST.pack (OsPath.unsafeDecodeUtf top_dir)) (ST.pack (OsPath.unsafeDecodeUtf pkgroot))
 
-mungeDynLibFields :: UnitInfo -> UnitInfo
-mungeDynLibFields pkg =
+mungeLibDirFields :: UnitInfo -> UnitInfo
+mungeLibDirFields pkg =
     pkg {
       unitLibraryDynDirs = case unitLibraryDynDirs pkg of
+         [] -> unitLibraryDirs pkg
+         ds -> ds
+      , unitLibraryDirsStatic = case unitLibraryDirsStatic pkg of
          [] -> unitLibraryDirs pkg
          ds -> ds
     }
@@ -1094,6 +1103,7 @@ type WiringMap = UniqMap UnitId UnitId
 
 findWiredInUnits
    :: Logger
+   -> [UnitId]            -- wired in unit ids
    -> UnitPrecedenceMap
    -> [UnitInfo]           -- database
    -> VisibilityMap             -- info on what units are visible
@@ -1101,13 +1111,22 @@ findWiredInUnits
    -> IO ([UnitInfo],  -- unit database updated for wired in
           WiringMap)   -- map from unit id to wired identity
 
-findWiredInUnits logger prec_map pkgs vis_map = do
+findWiredInUnits logger unitIdsToFind prec_map pkgs vis_map = do
   -- Now we must find our wired-in units, and rename them to
   -- their canonical names (eg. base-1.0 ==> base), as described
   -- in Note [Wired-in units] in GHC.Unit.Types
   let
         matches :: UnitInfo -> UnitId -> Bool
-        pc `matches` pid = unitPackageName pc == PackageName (unitIdFS pid)
+        pc `matches` pid | (pkg, comp) <- break (==':') (unitIdString pid)
+                         , not (null comp)
+          = unitPackageName pc == PackageName (fromString pkg)
+            -- note: GenericUnitInfo uses the same type for
+            --       unitPackageName and unitComponentName
+            && unitComponentName pc == Just (PackageName (fromString (drop 1 comp)))
+        pc `matches` pid
+          = unitPackageName pc == PackageName (unitIdFS pid)
+            && unitComponentName pc == Nothing
+
 
         -- find which package corresponds to each wired-in package
         -- delete any other packages with the same name
@@ -1127,7 +1146,8 @@ findWiredInUnits logger prec_map pkgs vis_map = do
         -- available.
         --
         findWiredInUnit :: [UnitInfo] -> UnitId -> IO (Maybe (UnitId, UnitInfo))
-        findWiredInUnit pkgs wired_pkg = firstJustsM [try all_exposed_ps, try all_ps, notfound]
+        findWiredInUnit pkgs wired_pkg = do
+            firstJustsM [try all_exposed_ps, try all_ps, notfound]
           where
                 all_ps = [ p | p <- pkgs, p `matches` wired_pkg ]
                 all_exposed_ps = [ p | p <- all_ps, (mkUnit p) `elemUniqMap` vis_map ]
@@ -1152,7 +1172,7 @@ findWiredInUnits logger prec_map pkgs vis_map = do
                         return (wired_pkg, pkg)
 
 
-  mb_wired_in_pkgs <- mapM (findWiredInUnit pkgs) wiredInUnitIds
+  mb_wired_in_pkgs <- mapM (findWiredInUnit pkgs) unitIdsToFind
   let
         wired_in_pkgs = catMaybes mb_wired_in_pkgs
 
@@ -1240,8 +1260,10 @@ instance Outputable UnusableUnitReason where
     ppr IgnoredWithFlag = text "[ignored with flag]"
     ppr (BrokenDependencies uids)   = brackets (text "broken" <+> ppr uids)
     ppr (CyclicDependencies uids)   = brackets (text "cyclic" <+> ppr uids)
-    ppr (IgnoredDependencies uids)  = brackets (text "ignored" <+> ppr uids)
-    ppr (ShadowedDependencies uids) = brackets (text "shadowed" <+> ppr uids)
+    ppr (IgnoredDependencies uids)  = brackets (text $ "unusable because the -ignore-package flag was used to " ++
+                                                       "ignore at least one of its dependencies:") $$
+                                        nest 2 (hsep (map ppr uids))
+    ppr (ShadowedDependencies uids) = brackets (text "unusable due to shadowed" <+> ppr uids)
 
 type UnusableUnits = UniqMap UnitId (UnitInfo, UnusableUnitReason)
 
@@ -1373,7 +1395,7 @@ mergeDatabases logger = foldM merge (emptyUniqMap, emptyUniqMap) . zip [1..]
   where
     merge (pkg_map, prec_map) (i, UnitDatabase db_path db) = do
       debugTraceMsg logger 2 $
-          text "loading package database" <+> text db_path
+          text "loading package database" <+> ppr db_path
       forM_ (Set.toList override_set) $ \pkg ->
           debugTraceMsg logger 2 $
               text "package" <+> ppr pkg <+>
@@ -1465,9 +1487,10 @@ validateDatabase cfg pkg_map1 =
 
 mkUnitState
     :: Logger
+    -> DynFlags
     -> UnitConfig
     -> IO (UnitState,[UnitDatabase UnitId])
-mkUnitState logger cfg = do
+mkUnitState logger dflags cfg = do
 {-
    Plan.
 
@@ -1622,8 +1645,79 @@ mkUnitState logger cfg = do
   -- it modifies the unit ids of wired in packages, but when we process
   -- package arguments we need to key against the old versions.
   --
-  (pkgs2, wired_map) <- findWiredInUnits logger prec_map pkgs1 vis_map2
-  let pkg_db = mkUnitInfoMap pkgs2
+  let wired_ids_all = rtsWayUnitId dflags : wiredInUnitIds
+      wired_ids
+        | gopt Opt_NoGhcInternal dflags = filter (/= ghcInternalUnitId) wired_ids_all
+        | otherwise                     = wired_ids_all
+  (pkgs2, wired_map) <- findWiredInUnits logger wired_ids prec_map pkgs1 vis_map2
+
+  --
+  -- Sanity check. If the rtsWayUnitId is not in the database, then we have a
+  -- problem.  The RTS is effectively missing.
+  unless (null pkgs1 || gopt Opt_NoRts dflags || anyUniqMap (== rtsWayUnitId dflags) wired_map) $ do
+    pprPanic "mkUnitState" $
+      vcat
+        [ text "debug details:"
+        , nest 2 $ vcat
+            [ text "pkgs1_count =" <+> ppr (length pkgs1)
+            , text "Opt_NoRts   =" <+> ppr (gopt Opt_NoRts dflags)
+            , text "Opt_NoGhcInternal =" <+> ppr (gopt Opt_NoGhcInternal dflags)
+            , text "ghcLink     =" <+> text (show (ghcLink dflags))
+            , text "platform    =" <+> text (show (targetPlatform dflags))
+            , text "rtsWayUnitId=" <+> ppr (rtsWayUnitId dflags)
+            , text "has_rts     =" <+> ppr (anyUniqMap (== rtsWayUnitId dflags) wired_map)
+            , text "wired_map   =" <+> ppr wired_map
+            , text "pkgs1 units (pre-wiring):" $$ nest 2 (pprWithCommas (\p -> ppr (unitId p) <+> parens (ppr (unitPackageName p))) pkgs1)
+            , text "pkgs2 units (post-wiring):" $$ nest 2 (pprWithCommas (\p -> ppr (unitId p) <+> parens (ppr (unitPackageName p))) pkgs2)
+            ]
+        ]
+      <> text "; The RTS for " <> ppr (rtsWayUnitId dflags)
+      <> text " is missing from the package database while building unit "
+      <> ppr (homeUnitId_ dflags)
+      <> text " (home units: " <> ppr (Set.toList (unitConfigHomeUnits cfg)) <> text ")."
+      <> text " Please check your installation."
+      <> text " If this target doesn't need the RTS (e.g. building a shared library), you can add -no-rts to the relevant package's ghc-options in cabal.project to bypass this check."
+
+  let pkgs3 = if gopt Opt_NoGhcInternal dflags
+         then pkgs2
+         else if gopt Opt_NoRts dflags && not (anyUniqMap (== ghcInternalUnitId) wired_map)
+              then pkgs2
+              else
+              -- At this point we should have `ghcInternalUnitId`, and the `rtsWiredUnitId dflags`.
+              -- The graph looks something like this:
+              --  ghc-internal
+              --    '- rtsWayUnitId dflags
+              --       '- rts ...
+              -- Notably the rtsWayUnitId is chosen by GHC _after_ the build plan by e.g. cabal
+              -- has been constructed.  We still need to ensure that ordering when linking
+              -- is correct. As such we'll manually make rtsWayUnitId dflags a dependency
+              -- of ghcInternalUnitId.
+
+              -- pkgs2: [UnitInfo] = [GenUnitInfo UnitId] = [GenericUnitInfo PackageId PackageName UnitId ModuleName (GenModule (GenUnit UnitId))]
+              -- GenericUnitInfo { unitId: UnitId, ..., unitAbiHash: ShortText, unitDepends: [UnitId], unitAbiDepends: [(UnitId, ShortText)], ... }
+              -- ghcInternalUnitId: UnitId
+              -- rtsWayUnitId dflags: UnitId
+                let rtsWayUnitIdHash = case [ unitAbiHash pkg | pkg <- pkgs2
+                                            , unitId pkg == rtsWayUnitId dflags] of
+                                            [] -> panic "rtsWayUnitId not found in wired-in packages"
+                                            [x] -> x
+                                            _ -> panic "rtsWayUnitId found multiple times in wired-in packages"
+                    ghcInternalUnit = case [ pkg | pkg <- pkgs2
+                                          , unitId pkg == ghcInternalUnitId ] of
+                                          [] -> panic "ghcInternalUnitId not found in wired-in packages"
+                                          [x] -> x
+                                          _ -> panic "ghcInternalUnitId found multiple times in wired-in packages"
+
+                    -- update ghcInternalUnit to depend on rtsWayUnitId dflags
+                    ghcInternalUnit' = ghcInternalUnit
+                      { unitDepends = rtsWayUnitId dflags : unitDepends ghcInternalUnit
+                      , unitAbiDepends = (rtsWayUnitId dflags, rtsWayUnitIdHash) : unitAbiDepends ghcInternalUnit
+                      }
+                in map (\pkg -> if unitId pkg == ghcInternalUnitId
+                                  then ghcInternalUnit'
+                                  else pkg) pkgs2
+
+  let pkg_db = mkUnitInfoMap pkgs3
 
   -- Update the visibility map, so we treat wired packages as visible.
   let vis_map = updateVisibilityMap wired_map vis_map2
@@ -1657,7 +1751,7 @@ mkUnitState logger cfg = do
                 return (updateVisibilityMap wired_map plugin_vis_map2)
 
   let pkgname_map = listToUFM [ (unitPackageName p, unitInstanceOf p)
-                              | p <- pkgs2
+                              | p <- pkgs3
                               ]
   -- The explicitUnits accurately reflects the set of units we have turned
   -- on; as such, it also is the only way one can come up with requirements.
@@ -1700,7 +1794,7 @@ mkUnitState logger cfg = do
   let !state = UnitState
          { preloadUnits                 = dep_preload
          , explicitUnits                = explicit_pkgs
-         , homeUnitDepends              = Set.toList home_unit_deps
+         , homeUnitDepends              = home_unit_deps
          , unitInfoMap                  = pkg_db
          , preloadClosure               = emptyUniqSet
          , moduleNameProvidersMap       = mod_map
@@ -1902,7 +1996,7 @@ data LookupResult =
     -- | No modules found, but there were some hidden ones with
     -- an exact name match.  First is due to package hidden, second
     -- is due to module being hidden
-  | LookupHidden [(Module, ModuleOrigin)] [(Module, ModuleOrigin)]
+  | LookupHidden [UnitInfo] [(Module, ModuleOrigin)]
     -- | No modules found, but there were some unusable ones with
     -- an exact name match
   | LookupUnusable [(Module, ModuleOrigin)]
@@ -1951,8 +2045,8 @@ lookupModuleWithSuggestions' :: UnitState
                             -> ModuleName
                             -> PkgQual
                             -> LookupResult
-lookupModuleWithSuggestions' pkgs mod_map m mb_pn
-  = case lookupUniqMap mod_map m of
+lookupModuleWithSuggestions' pkgs mod_map name mb_pn
+  = case lookupUniqMap mod_map name of
         Nothing -> LookupNotFound suggestions
         Just xs ->
           case foldl' classify ([],[],[], []) (sortOn fst $ nonDetUniqMapToList xs) of
@@ -1971,14 +2065,21 @@ lookupModuleWithSuggestions' pkgs mod_map m mb_pn
             -> (hidden_pkg, x:hidden_mod, unusable, exposed)
           ModUnusable _
             -> (hidden_pkg, hidden_mod, x:unusable, exposed)
-          _ | originEmpty origin
+          ModOrigin { fromOrigUnit = origAvailableUnderSameName, fromHiddenReexport }
+            | originEmpty origin
             -> (hidden_pkg,   hidden_mod, unusable, exposed)
             | originVisible origin
             -> (hidden_pkg, hidden_mod, unusable, x:exposed)
             | otherwise
-            -> (x:hidden_pkg, hidden_mod, unusable, exposed)
+            -> (reexports ++ maybe id (:) origUnit hidden_pkg, hidden_mod, unusable, exposed)
+            where
+              reexports :: [UnitInfo]
+              reexports = sortOn unitId fromHiddenReexport
 
-    unit_lookup p = lookupUnit pkgs p `orElse` pprPanic "lookupModuleWithSuggestions" (ppr p <+> ppr m)
+              origUnit :: Maybe UnitInfo
+              origUnit = origAvailableUnderSameName >> lookupUnit pkgs (moduleUnit m)
+
+    unit_lookup p = lookupUnit pkgs p `orElse` pprPanic "lookupModuleWithSuggestions" (ppr p <+> ppr name)
     mod_unit = unit_lookup . moduleUnit
 
     -- Filters out origins which are not associated with the given package
@@ -2008,7 +2109,7 @@ lookupModuleWithSuggestions' pkgs mod_map m mb_pn
                 , fromPackageFlag     = False -- always excluded
                 }
 
-    suggestions = fuzzyLookup (moduleNameString m) all_mods
+    suggestions = fuzzyLookup (moduleNameString name) all_mods
 
     all_mods :: [(String, ModuleSuggestion)]     -- All modules
     all_mods = sortBy (comparing fst) $

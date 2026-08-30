@@ -8,6 +8,10 @@
 --
 -- Running statements interactively
 --
+-- NOTE: This module is only compiled when flag(interpreter) is enabled
+-- (see ghc.cabal.in). However, CPP is still needed for HAVE_INTERNAL_INTERPRETER
+-- guards within the module.
+--
 -- -----------------------------------------------------------------------------
 
 module GHC.Runtime.Eval (
@@ -62,7 +66,6 @@ import GHC.Runtime.Context
 import GHCi.Message
 import GHCi.RemoteTypes
 import GHC.ByteCode.Types
-
 import GHC.Linker.Loader as Loader
 import GHC.Linker.Types (LinkedBreaks (..))
 

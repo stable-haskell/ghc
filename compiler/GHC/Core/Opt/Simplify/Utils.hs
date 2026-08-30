@@ -15,7 +15,7 @@ module GHC.Core.Opt.Simplify.Utils (
         preInlineUnconditionally, postInlineUnconditionally,
         activeRule,
         getUnfoldingInRuleMatch,
-        updModeForStableUnfoldings, updModeForRules,
+        updModeForStableUnfoldings, updModeForRuleLHS, updModeForRuleRHS,
 
         -- The BindContext type
         BindContext(..), bindContextLevel,
@@ -24,7 +24,7 @@ module GHC.Core.Opt.Simplify.Utils (
         SimplCont(..), DupFlag(..), FromWhat(..), StaticEnv,
         isSimplified, contIsStop,
         contIsDupable, contResultType, contHoleType, contHoleScaling,
-        contIsTrivial, contArgs, contIsRhs,
+        contIsTrivial, contArgs, contIsRhs, mkBottomCont,
         countArgs, contOutArgs, dropContArgs,
         mkBoringStop, mkRhsStop, mkLazyArgStop,
         interestingCallContext,
@@ -72,6 +72,7 @@ import GHC.Types.Tickish
 import GHC.Types.Demand
 import GHC.Types.Var.Set
 import GHC.Types.Basic
+import GHC.Types.Name.Env
 
 import GHC.Data.OrdList ( isNilOL )
 import GHC.Data.FastString ( fsLit )
@@ -81,10 +82,12 @@ import GHC.Utils.Monad
 import GHC.Utils.Outputable
 import GHC.Utils.Panic
 
-import Control.Monad    ( when )
+import Control.Monad    ( guard, when )
 import Data.List        ( sortBy )
-import GHC.Types.Name.Env
+import Data.Maybe
 import Data.Graph
+import GHC.Core.TyCo.Compare (eqTypeIgnoringMultiplicity)
+import GHC.Core.Make (mkWildValBinder)
 
 {- *********************************************************************
 *                                                                      *
@@ -461,6 +464,20 @@ contIsTrivial (CastIt { sc_cont = k })                          = contIsTrivial 
 contIsTrivial _                                                 = False
 
 -------------------
+contStop :: SimplCont -> SimplCont
+-- ^ Get the 'Stop' at the tail of the continuation
+--
+-- Always returns a continuation of form @(Stop ...)@.
+contStop stop@(Stop {})               = stop
+contStop (CastIt { sc_cont = k })     = contStop k
+contStop (StrictBind { sc_cont = k }) = contStop k
+contStop (StrictArg { sc_cont = k })  = contStop k
+contStop (Select { sc_cont = k })     = contStop k
+contStop (ApplyToTy  { sc_cont = k }) = contStop k
+contStop (ApplyToVal { sc_cont = k }) = contStop k
+contStop (TickIt _ k)                 = contStop k
+
+-------------------
 contResultType :: SimplCont -> OutType
 contResultType (Stop ty _ _)                = ty
 contResultType (CastIt { sc_cont = k })     = contResultType k
@@ -607,6 +624,39 @@ contEvalContext k = case k of
     -- and case binder dmds, see addCaseBndrDmd. No priority right now.
 
 -------------------
+mkBottomCont :: StaticEnv -> SimplCont -> SimplCont
+-- ^ Given a continuation `cont`, return a `cont` /of the same type/,
+-- looking like @(case \<hole\> of {})@.
+--
+-- This is used when we are going to fill in the @<hole>@ with bottom.
+-- See (TC2,3) in Note [Trimming the continuation for bottoming functions]
+--
+-- Don't bother to trim, making a @case <hole> of {}@, if we have only
+-- an essentially-trivial continuation; e.g. @(<hole> \@ty |> co)@.
+mkBottomCont se cont = go cont
+  where
+    go k@(Stop {})                    = k
+    go (TickIt t k')                  = TickIt t (go k')
+    go k@(CastIt    { sc_cont = k' }) = k { sc_cont = go k' }
+    go k@(ApplyToTy { sc_cont = k' }) = k { sc_cont = go k' }
+    go k@(Select { sc_alts = [], sc_cont = Stop {} }) = k  -- Optimisation only
+    go k | Stop res_ty _ _ <- stop_cont
+         = if  hole_ty `eqTypeIgnoringMultiplicity` res_ty
+              then stop_cont
+              else Select { sc_alts = []
+                          , sc_bndr = mkWildValBinder OneTy hole_ty
+                          , sc_dup  = OkToDup
+                          , sc_env  = zapSubstEnv se
+                          -- `hole_ty` is an `OutType`, but `sc_bndr` is an `InId`;
+                          -- so we must zap the substitution in `sc_env`.
+                          , sc_cont = stop_cont }
+         | otherwise = panic "stop_cont is not Stop {}"
+         where
+           hole_ty   = contHoleType k
+           stop_cont = contStop k
+
+
+-------------------
 mkArgInfo :: SimplEnv -> Id -> [CoreRule] -> SimplCont -> ArgInfo
 mkArgInfo env fun rules_for_fun cont
   | n_val_args < idArity fun            -- Note [Unsaturated functions]
@@ -719,7 +769,7 @@ the LHS.
 
 This is a pretty pathological example, so I'm not losing sleep over
 it, but the simplest solution was to check sm_inline; if it is False,
-which it is on the LHS of a rule (see updModeForRules), then don't
+which it is on the LHS of a rule (see updModeForRuleLHS), then don't
 make use of the strictness info for the function.
 -}
 
@@ -1069,22 +1119,22 @@ Reason for (b): we want to inline integerCompare here
 
 updModeForStableUnfoldings :: Activation -> SimplMode -> SimplMode
 -- See Note [The environments of the Simplify pass]
+-- See Note [Simplifying inside stable unfoldings]
 updModeForStableUnfoldings unf_act current_mode
-  = current_mode { sm_phase      = phaseFromActivation unf_act
-                 , sm_eta_expand = False
-                 , sm_inline     = True }
-       -- sm_eta_expand: see Note [Eta expansion in stable unfoldings and rules]
-       -- sm_rules: just inherit; sm_rules might be "off"
-       --           because of -fno-enable-rewrite-rules
-  where
-    phaseFromActivation (ActiveAfter _ n) = Phase n
-    phaseFromActivation _                 = InitialPhase
+  = current_mode
+    { sm_phase = phaseForRuleOrUnf (sm_phase current_mode) unf_act
+        -- See Note [What is active in the RHS of a RULE or unfolding?]
+    , sm_eta_expand = False
+        -- See Note [Eta expansion in stable unfoldings and rules]
+    , sm_inline     = True
+   -- sm_rules: just inherit; sm_rules might be "off" because of -fno-enable-rewrite-rules
+    }
 
-updModeForRules :: SimplMode -> SimplMode
+updModeForRuleLHS :: SimplMode -> SimplMode
 -- See Note [Simplifying rules]
 -- See Note [The environments of the Simplify pass]
-updModeForRules current_mode
-  = current_mode { sm_phase        = InitialPhase
+updModeForRuleLHS current_mode
+  = current_mode { sm_phase        = SimplPhase InitialPhase -- doesn't matter
                  , sm_inline       = False
                       -- See Note [Do not expose strictness if sm_inline=False]
                  , sm_rules        = False
@@ -1092,8 +1142,39 @@ updModeForRules current_mode
                       -- See Note [Cast swizzling on rule LHSs]
                  , sm_eta_expand   = False }
 
+updModeForRuleRHS :: Activation -> SimplMode -> SimplMode
+updModeForRuleRHS rule_act current_mode =
+  current_mode
+    -- See Note [What is active in the RHS of a RULE or unfolding?]
+    { sm_phase = phaseForRuleOrUnf (sm_phase current_mode) rule_act
+    , sm_eta_expand = False
+        -- See Note [Eta expansion in stable unfoldings and rules]
+    }
+
+-- | `phaseForRuleOrUnf` computes the phase range to use when
+-- simplifying the RHS of a rule or of a stable unfolding.
+--
+-- This subtle function implements the careful plan described in
+-- See Note [What is active in the RHS of a RULE or unfolding?]
+phaseForRuleOrUnf
+  :: SimplPhase    -- ^ the current simplifier phase
+  -> Activation    -- ^ the activation of the RULE or stable unfolding
+  -> SimplPhase
+phaseForRuleOrUnf current_phase act
+  | start == end
+  = SimplPhase start
+  | otherwise
+  = SimplPhaseRange start end
+  where
+    start, end :: CompilerPhase
+    start = beginPhase act `earliestPhase` simplStartPhase current_phase
+    end   = endPhase   act `latestPhase`   simplEndPhase   current_phase
+    -- The beginPhase/endPhase           implements (WAR1)
+    -- The simplStartPhase/simplEndPhase implements (WAR2)
+    -- of Note [What is active in the RHS of a RULE or unfolding?]
+
 {- Note [Simplifying rules]
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 When simplifying a rule LHS, refrain from /any/ inlining or applying
 of other RULES. Doing anything to the LHS is plain confusing, because
 it means that what the rule matches is not what the user
@@ -1136,7 +1217,7 @@ where `cv` is a coercion variable.  Critically, we really only want
 coercion /variables/, not general coercions, on the LHS of a RULE.  So
 we don't want to swizzle this to
       (\x. blah) |> (Refl xty `FunCo` CoVar cv)
-So we switch off cast swizzling in updModeForRules.
+So we switch off cast swizzling in updModeForRuleLHS.
 
 Note [Eta expansion in stable unfoldings and rules]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1200,6 +1281,84 @@ running it, we don't want to use -O2.  Indeed, we don't want to inline
 anything, because the byte-code interpreter might get confused about
 unboxed tuples and suchlike.
 
+Note [What is active in the RHS of a RULE or unfolding?]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Suppose we have either a RULE or an inline pragma with an explicit activation:
+
+  {-# RULE "R" [p] lhs = rhs #-}
+  {-# INLINE [p] foo #-}
+
+We should do some modest rules/inlining stuff in the right-hand sides, partly to
+eliminate senseless crap, and partly to break the recursive knots generated by
+instance declarations. However, we have to be careful about precisely which
+rules/inlinings are active. In particular:
+
+  a) Rules/inlinings that *cease* being active before p should not apply.
+  b) Rules/inlinings that only become active *after* p should also not apply.
+
+In the rest of this Note, we will focus on rules, but everything applies equally
+to the RHSs of stable unfoldings.
+
+Our carefully crafted plan is as follows:
+
+  -------------------------------------------------------------
+  When simplifying the RHS of a RULE R with activation range A,
+  fire only other rules R' that are active
+      (WAR1) throughout all of A
+      (WAR2) in the current phase
+  See `phaseForRuleOrUnf`.
+  -------------------------------------------------------------
+
+Reasons for (WAR1):
+  * R might fire in any phase in A. Then R' can fire only if R' is active in that
+    phase. If not, it's not safe to unconditionally fire R' in the RHS of R.
+
+Reasons for (WAR2):
+  * If A is empty (e.g. a NOINLINE pragma, so the unfolding is never active)
+    we don't want to vacuously satisfy (WAR1) and thereby fire /all/ RULES in
+    the unfolding.  Two RULES may be crafted so that they are never simultaneously
+    active, and will loop if they are.
+
+  * Suppose we are in Phase 2, looking at a stable unfolding for INLINE [1].
+    If we just do (WAR1) we will fire RULES active in phase 1; but the
+    occurrence analyser ignores any rules not active in the current phase.
+    So occ-anal may fail to detect a loop breaker; see #26826 for details.
+    See Note [Rules and loop breakers] in GHC.Core.Opt.OccurAnal.
+
+  * Aesthetically, this means that when the simplifer is in phase N, it
+    won't switch to a phase-range that doesn't include N (e.g. might be later
+    than N).  This is what caused #26826.
+
+  * Also note that as the current phase advances, it'll eventually be inside
+    the range specified by (WAR1), and hence will not widen the range.
+    Unless the latter is empty, of course.
+
+This plan is implemented by:
+
+  1. Setting the simplifier phase to the /range/ of phases
+     corresponding to the start/end phases of the rule's activation, implementing
+     (WAR1) and (WAR2). This happens in `phaseForRuleOrUnf`.
+
+  2. When checking whether another rule is active, we use the function
+       isActive :: SimplPhase -> Activation -> Bool
+     from GHC.Core.Opt.Simplify.Env, which checks whether the other rule is
+     active throughout the whole range of phases.
+
+You might wonder about a situation such as the following:
+
+  module M1 where
+    {-# RULES "r1" [1] lhs1 = rhs1 #-}
+    {-# RULES "r2" [2] lhs2 = rhs2 #-}
+
+    Current simplifier phase: 1
+
+It looks tempting to use "r1" when simplifying the RHS of "r2", yet we
+**must not** do so: for any module M that imports M1, we are going to start
+simplification in M starting at InitialPhase, and we will see the
+fully simplified rules RHSs imported from M1.
+
+Conclusion: stick to the plan.
+
 Note [Simplifying inside stable unfoldings]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 We must take care with simplification inside stable unfoldings (which come from
@@ -1216,33 +1375,9 @@ and thence copied multiple times when g is inlined. HENCE we treat
 any occurrence in a stable unfolding as a multiple occurrence, not a single
 one; see OccurAnal.addRuleUsage.
 
-Second, we do want *do* to some modest rules/inlining stuff in stable
-unfoldings, partly to eliminate senseless crap, and partly to break
-the recursive knots generated by instance declarations.
-
-However, suppose we have
-        {-# INLINE <act> f #-}
-        f = <rhs>
-meaning "inline f in phases p where activation <act>(p) holds".
-Then what inlinings/rules can we apply to the copy of <rhs> captured in
-f's stable unfolding?  Our model is that literally <rhs> is substituted for
-f when it is inlined.  So our conservative plan (implemented by
-updModeForStableUnfoldings) is this:
-
-  -------------------------------------------------------------
-  When simplifying the RHS of a stable unfolding, set the phase
-  to the phase in which the stable unfolding first becomes active
-  -------------------------------------------------------------
-
-That ensures that
-
-  a) Rules/inlinings that *cease* being active before p will
-     not apply to the stable unfolding, consistent with it being
-     inlined in its *original* form in phase p.
-
-  b) Rules/inlinings that only become active *after* p will
-     not apply to the stable unfolding, again to be consistent with
-     inlining the *original* rhs in phase p.
+Second, we must be careful when simplifying the RHS that we do not apply RULES
+which are not active over the whole active range of the stable unfolding.
+This is all explained in Note [What is active in the RHS of a RULE or unfolding?].
 
 For example,
         {-# INLINE f #-}
@@ -1291,8 +1426,7 @@ getUnfoldingInRuleMatch env
   = ISE in_scope id_unf
   where
     in_scope = seInScope env
-    phase    = sePhase env
-    id_unf   = whenActiveUnfoldingFun (isActive phase)
+    id_unf   = whenActiveUnfoldingFun (isActive (sePhase env))
      -- When sm_rules was off we used to test for a /stable/ unfolding,
      -- but that seems wrong (#20941)
 
@@ -1468,7 +1602,8 @@ preInlineUnconditionally env top_lvl bndr rhs rhs_env
     one_occ _                                     = False
 
     pre_inline_unconditionally = sePreInline env
-    active = isActive (sePhase env) (inlinePragmaActivation inline_prag)
+    active = isActive (sePhase env)
+           $ inlinePragmaActivation inline_prag
              -- See Note [pre/postInlineUnconditionally in gentle mode]
     inline_prag = idInlinePragma bndr
 
@@ -1504,7 +1639,10 @@ preInlineUnconditionally env top_lvl bndr rhs rhs_env
       -- not ticks.  Counting ticks cannot be duplicated, and non-counting
       -- ticks around a Lam will disappear anyway.
 
-    early_phase = sePhase env /= FinalPhase
+    early_phase =
+      case sePhase env of
+        SimplPhase p -> p /= FinalPhase
+        SimplPhaseRange _start end -> end /= FinalPhase
     -- If we don't have this early_phase test, consider
     --      x = length [1,2,3]
     -- The full laziness pass carefully floats all the cons cells to
@@ -1515,9 +1653,8 @@ preInlineUnconditionally env top_lvl bndr rhs rhs_env
     --
     -- On the other hand, I have seen cases where top-level fusion is
     -- lost if we don't inline top level thing (e.g. string constants)
-    -- Hence the test for phase zero (which is the phase for all the final
-    -- simplifications).  Until phase zero we take no special notice of
-    -- top level things, but then we become more leery about inlining
+    -- Hence the final phase test: until the final phase, we take no special
+    -- notice of top level things, but then we become more leery about inlining
     -- them.
     --
     -- What exactly to check in `early_phase` above is the subject of #17910.
@@ -1644,8 +1781,7 @@ postInlineUnconditionally env bind_cxt old_bndr bndr rhs
     occ_info    = idOccInfo old_bndr
     unfolding   = idUnfolding bndr
     uf_opts     = seUnfoldingOpts env
-    phase       = sePhase env
-    active      = isActive phase (idInlineActivation bndr)
+    active      = isActive (sePhase env) $ idInlineActivation bndr
         -- See Note [pre/postInlineUnconditionally in gentle mode]
 
 {- Note [Inline small things to avoid creating a thunk]
@@ -2456,7 +2592,27 @@ Note [Eliminate Identity Case]
                 True  -> True;
                 False -> False
 
-and similar friends.
+and similar friends.  There are some tricky wrinkles:
+
+(EIC1) Casts. We've seen this:
+            case e of x { _ -> x `cast` c }
+       And we definitely want to eliminate this case, to give
+            e `cast` c
+(EIC2) Ticks. Similarly
+            case e of x { _ -> Tick t x }
+       At least if the tick is 'floatable' we want to eliminate the case
+       to give
+            Tick t e
+
+So `check_eq` strips off enclosing casts and ticks from the RHS of the
+alternative, returning a wrapper function that will rebuild them around
+the scrutinee if case-elim is successful.
+
+(EIC3) What if there are many alternatives, all identities. If casts
+  are involved they must be the same cast, to make the types line up.
+  In principle there could be different ticks in each RHS, but we just
+  pick the ticks from the first alternative.  (In the common case there
+  is only one alternative.)
 
 Note [Scrutinee Constant Folding]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -2633,7 +2789,7 @@ mkCase, mkCase1, mkCase2, mkCase3
 
 mkCase mode scrut outer_bndr alts_ty alts
   | sm_case_merge mode
-  , Just (joins, alts') <- mergeCaseAlts outer_bndr alts
+  , Just (joins, alts') <- mergeCaseAlts scrut outer_bndr alts
   = do  { tick (CaseMerge outer_bndr)
         ; case_expr <- mkCase1 mode scrut outer_bndr alts_ty alts'
         ; return (mkLets joins case_expr) }
@@ -2650,44 +2806,46 @@ mkCase mode scrut outer_bndr alts_ty alts
 --         See Note [Eliminate Identity Case]
 --------------------------------------------------
 
-mkCase1 _mode scrut case_bndr _ alts@(Alt _ _ rhs1 : alts')      -- Identity case
-  | all identity_alt alts
+mkCase1 _mode scrut case_bndr _ (alt1 : alts)      -- Identity case
+  | Just wrap <- identity_alt alt1   -- `wrap`: see (EIC1) and (EIC2)
+  , all (isJust . identity_alt) alts -- See (EIC3) in Note [Eliminate Identity Case]
   = do { tick (CaseIdentity case_bndr)
-       ; return (mkTicks ticks $ re_cast scrut rhs1) }
+       ; return (wrap scrut) }
   where
-    ticks = concatMap (\(Alt _ _ rhs) -> stripTicksT tickishFloatable rhs) alts'
-    identity_alt (Alt con args rhs) = check_eq rhs con args
+    identity_alt :: CoreAlt -> Maybe (CoreExpr -> CoreExpr)
+    identity_alt (Alt con args rhs) = check_eq con args rhs
 
-    check_eq (Cast rhs co) con args        -- See Note [RHS casts]
-      = not (any (`elemVarSet` tyCoVarsOfCo co) args) && check_eq rhs con args
-    check_eq (Tick t e) alt args
-      = tickishFloatable t && check_eq e alt args
+    check_eq :: AltCon -> [Var] -> CoreExpr -> Maybe (CoreExpr -> CoreExpr)
+    -- (check_eq con args e) return True if
+    --       e   looks like   (Tick (Cast (Tick (con args))))
+    -- where (con args) is the LHS of the alternative
+    -- In that case it returns (\e. Tick (Cast (Tick e))),
+    -- a wrapper function that can rebuild the tick/cast stuff
+    -- See (EIC1) and (EIC2) in Note [Eliminate Identity Case]
+    check_eq alt_con args (Cast e co)         -- See (EIC1)
+      = do { guard (not (any (`elemVarSet` tyCoVarsOfCo co) args))
+           ; wrap <- check_eq alt_con args e
+           ; return (flip mkCast co . wrap) }
+    check_eq alt_con args (Tick t e)          -- See (EIC2)
+      = do { guard (tickishFloatable t)
+           ; wrap <- check_eq alt_con args e
+           ; return (Tick t . wrap) }
+    check_eq alt_con args e
+      | is_id alt_con args e = Just (\e -> e)
+      | otherwise            = Nothing
 
-    check_eq (Lit lit) (LitAlt lit') _     = lit == lit'
-    check_eq (Var v) _ _  | v == case_bndr = True
-    check_eq (Var v)   (DataAlt con) args
-      | null arg_tys, null args            = v == dataConWorkId con
-                                             -- Optimisation only
-    check_eq rhs        (DataAlt con) args = cheapEqExpr' tickishFloatable rhs $
-                                             mkConApp2 con arg_tys args
-    check_eq _          _             _    = False
+    is_id :: AltCon -> [Var] -> CoreExpr -> Bool
+    is_id _ _  (Var v) | v == case_bndr = True
+    is_id (LitAlt lit') _ (Lit lit)     = lit == lit'
+    is_id (DataAlt con) args rhs
+      | Var v <- rhs   -- Optimisation only
+      , null arg_tys
+      , null args      = v == dataConWorkId con
+      | otherwise      = cheapEqExpr' tickishFloatable rhs $
+                         mkConApp2 con arg_tys args
+    is_id _ _ _ = False
 
     arg_tys = tyConAppArgs (idType case_bndr)
-
-        -- Note [RHS casts]
-        -- ~~~~~~~~~~~~~~~~
-        -- We've seen this:
-        --      case e of x { _ -> x `cast` c }
-        -- And we definitely want to eliminate this case, to give
-        --      e `cast` c
-        -- So we throw away the cast from the RHS, and reconstruct
-        -- it at the other end.  All the RHS casts must be the same
-        -- if (all identity_alt alts) holds.
-        --
-        -- Don't worry about nested casts, because the simplifier combines them
-
-    re_cast scrut (Cast rhs co) = Cast (re_cast scrut rhs) co
-    re_cast scrut _             = scrut
 
 mkCase1 mode scrut bndr alts_ty alts = mkCase2 mode scrut bndr alts_ty alts
 

@@ -217,11 +217,15 @@ cmmMetaLlvmPrelude = do
               Nothing -> [ MetaStr name ]
 
   platform <- getPlatform
-  cfg <- getConfig
   let stack_alignment_metas =
           case platformArch platform of
-            ArchX86_64 | llvmCgAvxEnabled cfg -> [mkStackAlignmentMeta 32]
-            _                                 -> []
+            -- LLVM inserts stack realignment prologue/epilogue when it wants to place __m256 or __m512 on the stack.
+            -- However, it reserves %rbp as the frame pointer, conflicting with our use of it.
+            -- Therefore, we tell LLVM that the stack is already aligned to avoid stack realignment.
+            -- See also Note [Stack Alignment on X86] and https://gitlab.haskell.org/ghc/ghc/-/issues/26595.
+            ArchX86    -> [mkStackAlignmentMeta 64]
+            ArchX86_64 -> [mkStackAlignmentMeta 64]
+            _          -> []
   let codel_model_metas =
           case platformArch platform of
             -- FIXME: We should not rely on LLVM
@@ -271,15 +275,23 @@ cmmUsedLlvmGens = do
   -- used if we didn't provide these hints. This will generate a
   -- definition of the form
   --
-  --   @llvm.used = appending global [42 x i8*] [i8* bitcast <var> to i8*, ...]
+  --   @llvm.compiler.used = appending global [42 x i8*] [i8* bitcast <var> to i8*, ...]
   --
   -- Which is the LLVM way of protecting them against getting removed.
+  --
+  -- We used to emit @llvm.used, but it's too strong and results in
+  -- SHF_GNU_RETAIN section flag in the object, which prevents linker
+  -- gc-sections from working properly for LLVM backend (#26770).
+  -- @llvm.compiler.used serves a similar purpose that protects the
+  -- variable from being dropped by llc/opt, but it allows linker
+  -- gc-sections to work. See
+  -- https://llvm.org/docs/LangRef.html#the-llvm-compiler-used-global-variable
   ivars <- getUsedVars
   let cast x = LMBitc (LMStaticPointer (pVarLift x)) i8Ptr
       ty     = LMArray (length ivars) i8Ptr
       usedArray = LMStaticArray (map cast ivars) ty
       sectName  = Just $ fsLit "llvm.metadata"
-      lmUsedVar = LMGlobalVar (fsLit "llvm.used") ty Appending sectName Nothing Constant
+      lmUsedVar = LMGlobalVar (fsLit "llvm.compiler.used") ty Appending sectName Nothing Constant
       lmUsed    = LMGlobal lmUsedVar (Just usedArray)
   if null ivars
      then return ()

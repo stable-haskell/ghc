@@ -4441,7 +4441,12 @@ data TcRnMessage where
     Test cases: T24159_type_syntax_rn_fail
   -}
   TcRnUnexpectedTypeSyntaxInTerms :: TypeSyntax -> TcRnMessage
+
+  -- `TcRnStaticFormWarning` is a temporary deprecation in GHC 9.14
+  TcRnStaticFormWarning :: [Name] -> TcRnMessage
+
   deriving Generic
+
 
 ----
 
@@ -6242,7 +6247,7 @@ data WrongThingSort
 
 data LevelCheckReason
   = LevelCheckInstance !InstanceWhat !PredType
-  | LevelCheckSplice !Name !(Maybe GlobalRdrElt)
+  | LevelCheckSplice !(WithUserRdr GlobalRdrElt)
 
 data UninferrableTyVarCtx
   = UninfTyCtx_ClassContext [TcType]

@@ -38,6 +38,8 @@ from my_typing import *
 from threading import Timer
 from collections import OrderedDict
 
+from _elffile import ELFFile
+
 import asyncio
 import contextvars
 
@@ -362,6 +364,20 @@ def req_ghc_smp( name, opts ):
     if not config.ghc_has_smp:
         opts.skip = True
 
+def req_target_debug_rts( name, opts ):
+    """
+    Mark a test as requiring the debug rts (e.g. compile with -debug or -ticky)
+    """
+    if not config.debug_rts:
+        opts.skip = True
+
+def req_target_threaded_rts( name, opts ):
+    # FIXME: this is probably wrong: we should have a different flag for the
+    # compiler's rts and the target rts...
+    if not config.ghc_with_threaded_rts:
+        opts.skip = True
+
+
 def req_target_smp( name, opts ):
     """
     Mark a test as requiring smp when run on the target. If the target does
@@ -647,7 +663,19 @@ def collect_size ( deviation, path ):
     return collect_size_func(deviation, lambda: path)
 
 def collect_size_func ( deviation, path_func ):
-    return collect_generic_stat ( 'size', deviation, lambda way: os.path.getsize(in_testdir(path_func())) )
+    # Wrap path resolution to avoid passing None/invalid paths to Path APIs.
+    def current(_way):
+        p = path_func()
+        if p is None:
+            raise StatsException("No path returned for size collection")
+        # If p looks absolute, use it directly; else resolve relative to testdir
+        pth = Path(p)
+        if not pth.is_absolute():
+            pth = in_testdir(p)
+        if not pth.exists():
+            raise StatsException(f"Path not found for size collection: {pth}")
+        return os.path.getsize(pth)
+    return collect_generic_stat ( 'size', deviation, current )
 
 def get_dir_size(path):
     total = 0
@@ -660,7 +688,7 @@ def get_dir_size(path):
                     total += get_dir_size(entry.path)
         return total
     except FileNotFoundError:
-        print("Exception: Could not find: " + path)
+        raise StatsException(f"Directory not found for size collection: {path}")
 
 def collect_size_dir ( deviation, path ):
     return collect_size_dir_func ( deviation, lambda: path )
@@ -692,7 +720,12 @@ def collect_size_ghc_pkg (deviation, library):
 # same for collect_size and find_so
 def collect_object_size (deviation, library, use_non_inplace=False):
     if use_non_inplace:
-        return collect_size_func(deviation, lambda: find_non_inplace_so(library))
+        try:
+            return collect_size_func(deviation, lambda: find_non_inplace_so(library))
+        except Exception as _:
+            # should we fail to find inplace, let's try to find non-inplace.
+            # FIXME: remove the whole inplace nonsense outright.
+            return collect_size_func(deviation, lambda: find_so(library))
     else:
         return collect_size_func(deviation, lambda: find_so(library))
 
@@ -709,21 +742,20 @@ def path_from_ghcPkg (library, field):
 
     try:
         result = subprocess.run(ghcPkgCmd, capture_output=True, shell=True)
-
         # check_returncode throws an exception if the return code is not 0.
         result.check_returncode()
-
-        # if we get here then the call worked and we have the path we split by
-        # whitespace and then return the path which becomes the second element
-        # in the array
-        return re.split(r'\s+', result.stdout.decode("utf-8"))[1]
+        out = result.stdout.decode("utf-8").strip()
+        # Expected format: "<field>: <value>" possibly spanning lines; grab text after first colon.
+        m = re.split(r"^\s*[^:]+:\s*", out, maxsplit=1, flags=re.MULTILINE)
+        if len(m) == 2:
+            val = m[1].strip().splitlines()[0].strip()
+            if val:
+                return val
+        raise StatsException(f"ghc-pkg returned no {field} for {library}. Output: {out}")
+    except subprocess.CalledProcessError as e:
+        raise StatsException(f"ghc-pkg failed for {library} {field}: {e}")
     except Exception as e:
-        message = f"""
-        Attempt to find {field} of {library} using ghc-pkg failed.
-        ghc-pkg path: {config.ghc_pkg}
-        error" {e}
-        """
-        print(message)
+        raise StatsException(f"Error parsing ghc-pkg output for {library} {field}: {e}")
 
 
 def _find_so(lib, directory, in_place):
@@ -758,8 +790,9 @@ def _find_so(lib, directory, in_place):
         to_match = r'libHS{}-\d+(\.\d+)+-ghc\S+\.' + suffix
 
     matches = []
-    # wrap this in some exception handling, hadrian test will error out because
-    # these files don't exist yet, so we pass when this occurs
+    # Robust error handling: raise a stats exception for missing directory or no match
+    if directory is None:
+        raise StatsException(f"No directory provided to find shared object for {lib}")
     try:
         for f in os.listdir(directory):
             if f.endswith(suffix):
@@ -767,12 +800,22 @@ def _find_so(lib, directory, in_place):
                 match   = re.match(pattern, f)
                 if match:
                     matches.append(match.group())
+        if not matches:
+            raise StatsException(f"Could not find shared object file for {lib} in {directory}")
         return os.path.join(directory, matches[0])
-    except:
-        failBecause('Could not find shared object file: ' + lib)
+    except FileNotFoundError:
+        raise StatsException(f"Directory not found while searching shared object for {lib}: {directory}")
+    except Exception as e:
+        raise StatsException(f"Error while searching shared object for {lib} in {directory}: {e}")
 
 def find_so(lib):
-    return _find_so(lib,path_from_ghcPkg(lib, "dynamic-library-dirs"),True)
+    try:
+        return _find_so(lib,path_from_ghcPkg(lib, "dynamic-library-dirs"),True)
+    except Exception as _:
+        # if we fail to find the inplace so, fallback to trying to find the
+        # non-inplace so indead;
+        # FIXME: This whole inplace logic needs to be ripped out!
+        return _find_so(lib,path_from_ghcPkg(lib, "dynamic-library-dirs"),False)
 
 def find_non_inplace_so(lib):
     return _find_so(lib,path_from_ghcPkg(lib, "dynamic-library-dirs"),False)
@@ -1040,6 +1083,17 @@ def have_llvm( ) -> bool:
 def have_dynamic( ) -> bool:
     ''' Were libraries built in the dynamic way? '''
     return config.have_dynamic
+
+def is_musl( ) -> bool:
+    ''' Whether we're on a musl system '''
+    try:
+        with open(sys.executable, "rb") as f:
+            ld = ELFFile(f).interpreter
+    except (OSError, TypeError, ValueError):
+        return False
+    if ld is None or "musl" not in ld:
+        return False
+    return True
 
 def have_dynamic_prof( ) -> bool:
     ''' Were libraries built in the profiled dynamic way? '''
@@ -1376,9 +1430,13 @@ def normalise_win32_io_errors(name, opts):
 
 def normalise_version_( *pkgs ):
     def normalise_version__( str ):
+        # First strip the ghc-version_ prefix if present at the start of package names
+        # Use word boundary to ensure we only match actual package name prefixes
+        str_no_ghc_prefix = re.sub(r'\bghc-[0-9.]+_([a-zA-Z])', r'\1', str)
         # (name)(-version)(-hash)(-components)
-        return re.sub('(' + '|'.join(map(re.escape,pkgs)) + r')-[0-9.]+(-[0-9a-zA-Z+]+)?(-[0-9a-zA-Z]+)?',
-                      r'\1-<VERSION>-<HASH>', str)
+        ver_hash = re.sub('(' + '|'.join(map(re.escape,pkgs)) + r')-[0-9.]+(-[0-9a-zA-Z+]+)?(-[0-9a-zA-Z+]+)?',
+                      r'\1-<VERSION>-<HASH>', str_no_ghc_prefix)
+        return re.sub(r'\bghc_([a-zA-Z-]+-<VERSION>-<HASH>)', r'\1', ver_hash)
     return normalise_version__
 
 def normalise_version( *pkgs ):
@@ -1586,6 +1644,7 @@ async def test_common_work(name: TestName, opts,
             and (only_ways is None
                  or (only_ways is not None and way in only_ways)) \
             and (config.cmdline_ways == [] or way in config.cmdline_ways) \
+            and (not (config.skip_uniques_test and name == "uniques")) \
             and (not (config.skip_perf_tests and isStatsTest())) \
             and (not (config.only_perf_tests and not isStatsTest())) \
             and way not in getTestOpts().omit_ways
@@ -2896,6 +2955,11 @@ def normalise_callstacks(s: str) -> str:
     def repl(matches):
         location = matches.group(1)
         location = normalise_slashes_(location)
+        # backtrace paths contain the package path when building with Hadrian
+        location = re.sub(r'libraries/\w+(-\w+)*/', '', location)
+        location = re.sub(r'utils/\w+(-\w+)*/', '', location)
+        location = re.sub(r'compiler/', '', location)
+        location = re.sub(r'\./', '', location)
         return ', called at {0}:<line>:<column> in <package-id>:'.format(location)
     # Ignore line number differences in call stacks (#10834).
     s = re.sub(callSite_re, repl, s)
@@ -2986,6 +3050,9 @@ def normalise_errmsg(s: str) -> str:
         s = re.sub('Failed to remove file (.*); error= (.*)$', '', s)
         s = re.sub(r'DeleteFile "(.+)": permission denied \(Access is denied\.\)(.*)$', '', s)
 
+    # newer mac x86_64 ld emits these warnings when linking against libffi-clib
+    s = re.sub('.* warning: alignment .* of atom .* is too small and may result in unaligned pointers.*\n', '', s)
+
     # filter out unsupported GNU_PROPERTY_TYPE (5), which is emitted by LLVM10
     # and not understood by older binutils (ar, ranlib, ...)
     s = modify_lines(s, lambda l: re.sub(r'^(.+)warning: (.+): unsupported GNU_PROPERTY_TYPE (?:\(5\) )?type: 0xc000000(.*)$', '', l))
@@ -2994,6 +3061,8 @@ def normalise_errmsg(s: str) -> str:
     s = re.sub('ld: warning: -sdk_version and -platform_version are not compatible, ignoring -sdk_version','',s)
     # ignore superfluous dylibs passed to the linker.
     s = re.sub('ld: warning: .*, ignoring unexpected dylib file\n','',s)
+    # ignore macOS ld warning about reexported libraries (e.g. Homebrew llvm libunwind)
+    s = re.sub('ld: warning: reexported library with install name .* couldn.t be matched with any parent library and will be linked directly\n','',s)
     # ignore LLVM Version mismatch garbage; this will just break tests.
     s = re.sub('You are using an unsupported version of LLVM!.*\n','',s)
     s = re.sub('Currently only [\\.0-9]+ is supported. System LLVM version: [\\.0-9]+.*\n','',s)
@@ -3108,6 +3177,8 @@ def normalise_output( s: str ) -> str:
     s = re.sub('ld: warning: -sdk_version and -platform_version are not compatible, ignoring -sdk_version','',s)
     # ignore superfluous dylibs passed to the linker.
     s = re.sub('ld: warning: .*, ignoring unexpected dylib file\n','',s)
+    # ignore macOS ld warning about reexported libraries (e.g. Homebrew llvm libunwind)
+    s = re.sub('ld: warning: reexported library with install name .* couldn.t be matched with any parent library and will be linked directly\n','',s)
     # ignore LLVM Version mismatch garbage; this will just break tests.
     s = re.sub('You are using an unsupported version of LLVM!.*\n','',s)
     s = re.sub('Currently only [\\.0-9]+ is supported. System LLVM version: [\\.0-9]+.*\n','',s)
@@ -3229,7 +3300,7 @@ async def runCmd(cmd: str,
         # to invoke the Bourne shell
 
         proc = await asyncio.create_subprocess_exec(timeout_prog, timeout, cmd,
-                                                   stdin=stdin_file,
+                                                   stdin=stdin_file if stdin_file else asyncio.subprocess.PIPE,
                                                    stdout=asyncio.subprocess.PIPE,
                                                    stderr=hStdErr,
                                                    env=ghc_env

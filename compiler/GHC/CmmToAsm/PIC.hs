@@ -33,6 +33,7 @@
       that wasn't in the original Cmm code (e.g. floating point literals).
 -}
 
+{-# LANGUAGE CPP #-}
 module GHC.CmmToAsm.PIC (
         cmmMakeDynamicReference,
         CmmMakeDynamicReferenceM(..),
@@ -41,17 +42,25 @@ module GHC.CmmToAsm.PIC (
         pprImportedSymbol,
         pprGotDeclaration,
 
+#if defined(HAVE_PPC_NCG)
         initializePicBase_ppc,
+#endif
+#if defined(HAVE_X86_NCG)
         initializePicBase_x86
+#endif
 )
 
 where
 
 import GHC.Prelude
 
+#if defined(HAVE_PPC_NCG)
 import qualified GHC.CmmToAsm.PPC.Instr as PPC
 import qualified GHC.CmmToAsm.PPC.Regs  as PPC
+#endif
+#if defined(HAVE_X86_NCG)
 import qualified GHC.CmmToAsm.X86.Instr as X86
+#endif
 
 import GHC.Platform
 import GHC.Platform.Reg
@@ -714,6 +723,7 @@ pprImportedSymbol config importedLbl = case (arch,os) of
 
 
 
+#if defined(HAVE_PPC_NCG)
 -- Get a pointer to our own fake GOT, which is defined on a per-module basis.
 -- This is exactly how GCC does it in linux.
 
@@ -783,8 +793,10 @@ initializePicBase_ppc (ArchPPC_64 ELF_V2) OSLinux picReg
 
 initializePicBase_ppc _ _ _ _
         = panic "initializePicBase_ppc: not needed"
+#endif
 
 
+#if defined(HAVE_X86_NCG)
 -- We cheat a bit here by defining a pseudo-instruction named FETCHGOT
 -- which pretty-prints as:
 --              call 1f
@@ -824,3 +836,4 @@ initializePicBase_x86 OSDarwin picReg
 
 initializePicBase_x86 _ _ _
         = panic "initializePicBase_x86: not needed"
+#endif

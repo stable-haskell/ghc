@@ -1,6 +1,7 @@
-
-
 -- | Dynamically lookup up values from modules and loading them.
+--
+-- NOTE: This module is only compiled when flag(interpreter) is enabled
+-- (see ghc.cabal.in). No CPP guards needed.
 module GHC.Runtime.Loader (
         initializePlugins, initializeSessionPlugins,
         -- * Loading plugins
@@ -219,7 +220,7 @@ loadPlugin' occ_name plugin_name hsc_env mod_name
                           [ text "The value", ppr name
                           , text "with type", ppr actual_type
                           , text "did not have the type"
-                          , text "GHC.Plugins.Plugin"
+                          , ppr (mkTyConTy plugin_tycon)
                           , text "as required"])
             Right (plugin, links, pkgs) -> return (plugin, mod_iface, links, pkgs) } } } } }
 

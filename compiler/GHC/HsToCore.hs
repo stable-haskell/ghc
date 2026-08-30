@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE MonadComprehensions #-}
 {-# LANGUAGE TypeFamilies #-}
 
@@ -35,7 +36,9 @@ import GHC.HsToCore.Binds
 import GHC.HsToCore.Foreign.Decl
 import GHC.HsToCore.Ticks
 import GHC.HsToCore.Breakpoints
+#if defined(HAVE_HPC)
 import GHC.HsToCore.Coverage
+#endif
 import GHC.HsToCore.Docs
 
 import GHC.Tc.Types
@@ -48,7 +51,7 @@ import GHC.Core.TyCo.Compare( eqType )
 import GHC.Core.TyCon       ( tyConDataCons )
 import GHC.Core
 import GHC.Core.FVs       ( exprsSomeFreeVarsList, exprFreeVars )
-import GHC.Core.SimpleOpt ( simpleOptPgm, simpleOptExpr )
+import GHC.Core.SimpleOpt ( simpleOptExpr )
 import GHC.Core.Utils
 import GHC.Core.Unfold.Make
 import GHC.Core.Coercion
@@ -65,7 +68,9 @@ import GHC.Builtin.Types
 
 import GHC.Data.Maybe    ( expectJust )
 import GHC.Data.OrdList
+#if defined(HAVE_HPC)
 import GHC.Data.SizedSeq ( sizeSS )
+#endif
 
 import GHC.Utils.Error
 import GHC.Utils.Outputable
@@ -98,7 +103,7 @@ import GHC.Unit.Module.Deps
 import Data.List (partition)
 import Data.IORef
 import GHC.Iface.Make (mkRecompUsageInfo)
-import GHC.Runtime.Interpreter (interpreterProfiled)
+import GHC.Runtime.Interpreter.Types (interpreterProfiled)
 
 {-
 ************************************************************************
@@ -169,6 +174,7 @@ deSugar hsc_env
                 | otherwise
                 = Nothing
 
+#if defined(HAVE_HPC)
         ; ds_hpc_info <- case m_tickInfo of
             Just (orig_file2, ticks)
               | gopt Opt_Hpc $ hsc_dflags hsc_env
@@ -178,6 +184,9 @@ deSugar hsc_env
                 else return 0 -- dummy hash when none are written
               pure $ HpcInfo (fromIntegral $ sizeSS ticks) hashNo
             _ -> pure $ emptyHpcInfo
+#else
+        ; let ds_hpc_info = emptyHpcInfo
+#endif
 
         ; (msgs, mb_res) <- initDs hsc_env tcg_env $
                        do { dsEvBinds ev_binds $ \ ds_ev_binds -> do
@@ -187,7 +196,9 @@ deSugar hsc_env
                           ; (ds_fords, foreign_prs) <- dsForeigns fords
                           ; ds_rules <- mapMaybeM dsRule rules
                           ; let hpc_init
+#if defined(HAVE_HPC)
                                   | gopt Opt_Hpc dflags = hpcInitCode (targetPlatform $ hsc_dflags hsc_env) mod ds_hpc_info
+#endif
                                   | otherwise = mempty
                           ; return ( ds_ev_binds
                                    , foreign_prs `appOL` core_prs `appOL` spec_prs
@@ -200,27 +211,18 @@ deSugar hsc_env
 
      do {       -- Add export flags to bindings
           keep_alive <- readIORef keep_var
-        ; let (rules_for_locals, rules_for_imps) = partition isLocalRule all_rules
+        ; let (rules_for_locals, ds_rules_for_imps) = partition isLocalRule all_rules
               final_prs = addExportFlagsAndRules bcknd export_set keep_alive
                                                  rules_for_locals (fromOL all_prs)
 
-              final_pgm = combineEvBinds ds_ev_binds final_prs
+              ds_binds = combineEvBinds ds_ev_binds final_prs
         -- Notice that we put the whole lot in a big Rec, even the foreign binds
         -- When compiling PrelFloat, which defines data Float = F# Float#
         -- we want F# to be in scope in the foreign marshalling code!
         -- You might think it doesn't matter, but the simplifier brings all top-level
         -- things into the in-scope set before simplifying; so we get no unfolding for F#!
 
-        ; endPassHscEnvIO hsc_env name_ppr_ctx CoreDesugar final_pgm rules_for_imps
-        ; let simpl_opts = initSimpleOpts dflags
-        ; let (ds_binds, ds_rules_for_imps, occ_anald_binds)
-                = simpleOptPgm simpl_opts mod final_pgm rules_for_imps
-                         -- The simpleOptPgm gets rid of type
-                         -- bindings plus any stupid dead code
-        ; putDumpFileMaybe logger Opt_D_dump_occur_anal "Occurrence analysis"
-            FormatCore (pprCoreBindings occ_anald_binds $$ pprRules ds_rules_for_imps )
-
-        ; endPassHscEnvIO hsc_env name_ppr_ctx CoreDesugarOpt ds_binds ds_rules_for_imps
+        ; endPassHscEnvIO hsc_env name_ppr_ctx CoreDesugar ds_binds ds_rules_for_imps
 
         ; let pluginModules = map lpModule (loadedPlugins (hsc_plugins hsc_env))
               home_unit = hsc_home_unit hsc_env

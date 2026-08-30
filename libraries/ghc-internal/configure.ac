@@ -6,12 +6,15 @@ AC_CONFIG_SRCDIR([include/HsBase.h])
 
 AC_CONFIG_HEADERS([include/HsBaseConfig.h include/EventConfig.h])
 
+CPPFLAGS="-I$srcdir $CPPFLAGS"
+
 AC_PROG_CC
 dnl make extensions visible to allow feature-tests to detect them later on
 AC_USE_SYSTEM_EXTENSIONS
+AC_CANONICAL_HOST
 
 AC_MSG_CHECKING(for WINDOWS platform)
-case $host_alias in
+case $host in
     *mingw32*|*mingw64*|*cygwin*|*msys*|*windows*)
         WINDOWS=YES;;
     *)
@@ -237,8 +240,8 @@ AC_SUBST(GhcGmpVerMi)
 AC_SUBST(GhcGmpVerPl)
 
 # Compute offsets/sizes used by jsbits/base.js
-if test "$host" = "javascript-ghcjs"
-then
+case "$host" in
+javascript*)
   FP_COMPUTE_OFFSET([OFFSET_STAT_ST_MODE],    [stat], [st_mode],    [#include <sys/stat.h>])
   FP_COMPUTE_OFFSET([OFFSET_STAT_ST_DEV],     [stat], [st_dev],     [#include <sys/stat.h>])
   FP_COMPUTE_OFFSET([OFFSET_STAT_ST_UID],     [stat], [st_uid],     [#include <sys/stat.h>])
@@ -278,7 +281,8 @@ then
   FP_COMPUTE_SIZE([SIZEOF_UTIMBUF_ACTIME],  [utimbuf], [actime],  [#include <utime.h>])
   FP_COMPUTE_SIZE([SIZEOF_UTIMBUF_MODTIME], [utimbuf], [modtime], [#include <utime.h>])
   AC_CHECK_SIZEOF([struct utimbuf], [], [#include <utime.h>])
-fi
+  ;;
+esac
 
 # map standard C types and ISO types to Haskell types
 FPTOOLS_CHECK_HTYPE(char)
@@ -402,10 +406,40 @@ AS_IF([test "x$with_libcharset" != xno],
 
 fi
 
-dnl Calling AC_CHECK_TYPE(T) makes AC_CHECK_SIZEOF(T) abort on failure
-dnl instead of considering sizeof(T) as 0.
-AC_CHECK_TYPE([struct MD5Context], [], [AC_MSG_ERROR([internal error])], [#include "include/md5.h"])
 AC_CHECK_SIZEOF([struct MD5Context], [], [#include "include/md5.h"])
+AS_IF([test "$ac_cv_sizeof_struct_MD5Context" -eq 0],[
+  AC_MSG_ERROR([cannot determine sizeof(struct MD5Context)])
+])
+
+AC_ARG_VAR([GHC], [Path to the ghc program])
+
+AC_ARG_WITH([compiler],
+  [AS_HELP_STRING([--with-compiler],
+    [The haskell compiler to use])],
+      [GHC="$withval"
+       AC_MSG_NOTICE([Using GHC $GHC])
+      ],
+      [AC_PATH_PROG([GHC], ghc)])
+
+if test -z "$GHC"; then
+	AC_MSG_ERROR([Cannot find ghc])
+fi
+
+AC_MSG_CHECKING([for GHC/Internal/Prim.hs])
+if mkdir -p GHC/Internal && $GHC --print-prim-module > GHC/Internal/Prim.hs; then
+  AC_MSG_RESULT([created])
+else
+  AC_MSG_RESULT([failed to create])
+  AC_MSG_ERROR([Failed to run $GHC --print-prim-module > GHC/Internal/Prim.hs])
+fi
+
+AC_MSG_CHECKING([for GHC/Internal/PrimopWrappers.hs])
+if mkdir -p GHC/Internal && $GHC --print-prim-wrappers-module > GHC/Internal/PrimopWrappers.hs; then
+  AC_MSG_RESULT([created])
+else
+  AC_MSG_RESULT([failed to create])
+  AC_MSG_ERROR([Failed to run $GHC --print-prim-wrappers-module > GHC/Internal/PrimopWrappers.hs])
+fi
 
 AC_SUBST(EXTRA_LIBS)
 AC_CONFIG_FILES([ghc-internal.buildinfo include/HsIntegerGmp.h])

@@ -225,6 +225,8 @@ test('PrimFFIInt32', [req_c], compile_and_run, ['PrimFFIInt32_c.c'])
 
 test('PrimFFIWord32', [req_c], compile_and_run, ['PrimFFIWord32_c.c'])
 
+test('PrimFFIUnboxedSum', req_cmm, compile_and_run, ['PrimFFIUnboxedSum_cmm.cmm'])
+
 test('T493', [ req_c], compile_and_run, ['T493_c.c'])
 
 test('UnliftedNewtypesByteArrayOffset', [req_c], compile_and_run, ['UnliftedNewtypesByteArrayOffset_c.c'])
@@ -247,6 +249,7 @@ test('T21305', [cmm_src], multi_compile_and_run,
 
 test('T22159',
      [unless(opsys('mingw32'), skip),
+      fragile(27248),
       extra_files(['T22159_c.c'])],
      makefile_test, ['T22159'])
 

@@ -4,6 +4,7 @@
 {-# LANGUAGE LambdaCase          #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies        #-}
+{-# LANGUAGE MultiWayIf          #-}
 
 {-
 (c) The GRASP/AQUA Project, Glasgow University, 1992-1998
@@ -47,7 +48,7 @@ module GHC.Rename.HsType (
 
 import GHC.Prelude
 
-import {-# SOURCE #-} GHC.Rename.Splice( rnSpliceType, checkThLocalTyName )
+import {-# SOURCE #-} GHC.Rename.Splice( rnSpliceType, checkThLocalTyName, checkThLocalNameNoLift )
 
 import GHC.Core.TyCo.FVs ( tyCoVarsOfTypeList )
 import GHC.Core.TyCon    ( isKindName )
@@ -543,10 +544,19 @@ rnHsTyKi env tv@(HsTyVar _ ip (L loc rdr_name))
          TcRnUnexpectedKindVar rdr_name
            -- Any type variable at the kind level is illegal without the use
            -- of PolyKinds (see #14710)
-       ; name <- rnTyVar env rdr_name
+       ; gre <- rnTyVar env rdr_name
        ; this_mod <- getModule
-       ; when (nameIsLocalOrFrom this_mod name) $
-         checkThLocalTyName name
+       ; explicit_level_imports <- xoptM LangExt.ExplicitLevelImports
+       ; let loc_gre_with_rdr = L loc $ WithUserRdr rdr_name gre
+             name = greName gre
+       ; if  | explicit_level_imports
+             -- See Note [Strict level checks with ExplicitLevelImports]
+             -> checkThLocalNameNoLift loc_gre_with_rdr
+
+             | nameIsLocalOrFrom this_mod name
+             -> checkThLocalTyName gre
+
+             | otherwise -> pure ()
        ; when (isDataConName name && not (isKindName name)) $
            -- Any use of a promoted data constructor name (that is not
            -- specifically exempted by isKindName) is illegal without the use
@@ -556,7 +566,7 @@ rnHsTyKi env tv@(HsTyVar _ ip (L loc rdr_name))
        ; when (isDataConName name && not (isPromoted ip)) $
          -- NB: a prefix symbolic operator such as (:) is represented as HsTyVar.
             addDiagnostic (TcRnUntickedPromotedThing $ UntickedConstructor Prefix name)
-       ; return (HsTyVar noAnn ip (L loc $ WithUserRdr rdr_name name), unitFV name) }
+       ; return (HsTyVar noAnn ip $ fmap greName <$> loc_gre_with_rdr, unitFV name) }
 
 rnHsTyKi env ty@(HsOpTy _ prom ty1 l_op ty2)
   = setSrcSpan (getLocA l_op) $
@@ -702,6 +712,37 @@ rnHsTyLit tyLit@(HsNumTy x i) = do
   pure (HsNumTy x i)
 rnHsTyLit (HsCharTy x c) = pure (HsCharTy x c)
 
+{-
+Note [Strict level checks with ExplicitLevelImports]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Since the proposed change specification of `ExplicitLevelImports` [1] talks about
+all identifiers as if they were created equally in the context of TemplateHaskell,
+we want to adhere to that specification and at the same time use this unique
+chance of being able to guard the "correct" behaviour behind an extension, without
+breaking too many users. That is why, if ExplicitLevelImports is on, we
+- do not allow non-well-levelled types to be imported
+- do not allow locally defined type names to be used in an ill-levelled way, more
+  most importantly, we do not allow locally defined names to be used in quotes.
+
+When doing level checks, we historically have been glancing over some
+not-well-levelled programs - e.g. the following program was historically
+accepted from the perspective of the stage restriction:
+
+type T = ExpQ
+x = $(_ :: T)
+
+However, when type-checking the splice `$(_ :: T)`, we found that `T`
+had not yet been made part of the type-checking environment - we would
+insert an ad-hoc check in `notFound` which would report the staging error.
+
+See Note [Out of scope might be a staging error]
+
+This is obviously not very rigorous - our "specification" of a program
+being well-staged becomes "if the type checker needs the thing to be in scope
+and it is not, the program is not well-staged, otherwise it is".
+
+[1]: https://github.com/ghc-proposals/ghc-proposals/blob/8e4d0e9340c04b904373f9dfe5cbcebc354cd01f/proposals/0682-explicit-level-imports.rst
+-}
 
 rnHsMultAnnWith :: (LocatedA (mult GhcPs) -> RnM (LocatedA (mult GhcRn), FreeVars))
                   -> HsMultAnnOf (LocatedA (mult GhcPs)) GhcPs
@@ -745,13 +786,13 @@ throw an error accordingly.
 -}
 
 --------------
-rnTyVar :: RnTyKiEnv -> RdrName -> RnM Name
+rnTyVar :: RnTyKiEnv -> RdrName -> RnM GlobalRdrElt
 rnTyVar env rdr_name
-  = do { name <- lookupTypeOccRn rdr_name
-       ; checkNamedWildCard env name
-       ; return name }
+  = do { gre <- lookupTypeOccRn rdr_name
+       ; checkNamedWildCard env $ greName gre
+       ; return gre }
 
-rnLTyVar :: LocatedN RdrName -> RnM (LocatedN Name)
+rnLTyVar :: LocatedN RdrName -> RnM (LocatedN GlobalRdrElt)
 -- Called externally; does not deal with wildcards
 rnLTyVar (L loc rdr_name)
   = do { tyvar <- lookupTypeOccRn rdr_name
@@ -761,12 +802,13 @@ rnLTyVar (L loc rdr_name)
 rnHsTyOp :: RnTyKiEnv -> SDoc -> LocatedN RdrName
          -> RnM (LocatedN Name, FreeVars)
 rnHsTyOp env overall_ty (L loc op)
-  = do { op' <- rnTyVar env op
+  = do { opgre <- rnTyVar env op
+       ; let opName = greName opgre
        ; unlessXOptM LangExt.TypeOperators $
-           if (op' `hasKey` eqTyConKey) -- See [eqTyCon (~) compatibility fallback] in GHC.Rename.Env
+           if opName `hasKey` eqTyConKey -- See [eqTyCon (~) compatibility fallback] in GHC.Rename.Env
            then addDiagnostic TcRnTypeEqualityRequiresOperators
            else addErr $ TcRnIllegalTypeOperator overall_ty op
-       ; return (L loc op', unitFV op') }
+       ; return (L loc opName, unitFV opName) }
 
 --------------
 checkWildCard :: RnTyKiEnv

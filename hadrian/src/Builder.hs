@@ -236,25 +236,16 @@ instance H.Builder Builder where
           -- changes (#18001).
           _bootGhcVersion <- setting GhcVersion
           pure []
-        Ghc _ st -> do
+        Ghc _ _ -> do
             root <- buildRoot
             unlitPath  <- builderPath Unlit
             distro_mingw <- lookupSystemConfig "settings-use-distro-mingw"
-            libffi_adjustors <- useLibffiForAdjustors
-            use_system_ffi <- flag UseSystemFfi
 
             return $ [ unlitPath ]
                   ++ [ root -/- mingwStamp | windowsHost, distro_mingw == "NO" ]
                      -- proxy for the entire mingw toolchain that
                      -- we have in inplace/mingw initially, and then at
                      -- root -/- mingw.
-                  -- ffi.h needed by the compiler when using libffi_adjustors (#24864)
-                  -- It would be nicer to not duplicate this logic between here
-                  -- and needRtsLibffiTargets and libffiHeaderFiles but this doesn't change
-                  -- very often.
-                  ++ [ root -/- buildDir (rtsContext st) -/- "include" -/- header
-                     | header <- ["ffi.h", "ffitarget.h"]
-                     , libffi_adjustors && not use_system_ffi ]
 
         Hsc2Hs stage -> (\p -> [p]) <$> templateHscPath stage
         Make dir  -> return [dir -/- "Makefile"]
@@ -361,6 +352,12 @@ instance H.Builder Builder where
 
                 Haddock BuildPackage -> runHaddock path buildArgs buildInputs
 
+                Ghc FindHsDependencies _ -> do
+                  -- Use a response file for ghc -M invocations, to
+                  -- avoid issues with command line size limit on
+                  -- Windows (#26637)
+                  runGhcWithResponse path buildArgs buildInputs
+
                 HsCpp    -> captureStdout
 
                 Make dir -> cmd' buildOptions path ["-C", dir] buildArgs
@@ -402,6 +399,17 @@ runHaddock :: FilePath    -- ^ path to @haddock@
 runHaddock haddockPath flagArgs fileInputs = withTempFile $ \tmp -> do
     writeFile' tmp $ escapeArgs fileInputs
     cmd [haddockPath] flagArgs ('@' : tmp)
+
+runGhcWithResponse :: FilePath -> [String] -> [FilePath] -> Action ()
+runGhcWithResponse ghcPath flagArgs fileInputs = withTempFile $ \tmp -> do
+
+    writeFile' tmp $ escapeArgs fileInputs
+
+    -- We can't put the flags in a response file, because some flags
+    -- require empty arguments (such as the -dep-suffix flag), but
+    -- that isn't supported yet due to #26560.
+    cmd [ghcPath] flagArgs ('@' : tmp)
+
 
 -- TODO: Some builders are required only on certain platforms. For example,
 -- 'Objdump' is only required on OpenBSD and AIX. Add support for platform

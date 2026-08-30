@@ -1,0 +1,1432 @@
+# Top-level Makefile
+#
+# This file is still _TOO_ large (should be < 100L). There are too many moving
+# _global_ parts, most of this should be relegated to the respective packages.
+# The whole version replacement therapy is utterly ridiculous. It should be done
+# in the respective packages.
+
+# ┌─────────────────────────────────────────────────────────────────────────┐
+# │                        GHC Bootstrapping Stages                         │
+# ├─────────────────────────────────────────────────────────────────────────┤
+# │                                                                         │
+# │  Stage 0 (Bootstrap)                                                    │
+# │  ┌─────────┐     ┌─────────┐                                            │
+# │  │  ghc0   │     │  pkg0   │  (initial boot packages)                   │
+# │  │ (binary)│     │         │                                            │
+# │  └────┬────┘     └────┬────┘                                            │
+# │       │               │                                                 │
+# │       └───────┬───────┘                                                 │
+# │               ▼                                                         │
+# │         ┌─────────┐                                                     │
+# │         │  pkg0+  │  (augmented boot packages)                          │
+# │         └────┬────┘                                                     │
+# │              │                                                          │
+# │  ············│························································· │
+# │              ▼                                                          │
+# │  Stage 1     │                                                          │
+# │  ┌─────────┐ │                                                          │
+# │  │  ghc1   │◄┘  (built with ghc0, linked with rts0)                     │
+# │  │         │                                                            │
+# │  └────┬────┘                                                            │
+# │       │                                                                 │
+# │       │     ┌─────────┐                                                 │
+# │       └────►│  pkg1   │  (initially empty, then populated)              │
+# │       ┌─────│         │  (built with ghc1)                              │
+# │       │     └─────────┘                                                 │
+# │       │           ▲                                                     │
+# │       │           │ (mutual dependency; ghc1 needs to sees pkg1)        │
+# │       ▼           │                                                     │
+# │  ┌─────────┐      │                                                     │
+# │  │  ghc1   │──────┘                                                     │
+# │  │ (uses)  │                                                            │
+# │  └────┬────┘                                                            │
+# │       │                                                                 │
+# │  ·····│································································ │
+# │       ▼                                                                 │
+# │  Stage 2                                                                │
+# │  ┌─────────┐  ┌──────────┐  ┌─────────┐                                 │
+# │  │  ghc2   │  │ ghc-pkg2 │  │  ...    │                                 │
+# │  │         │  │          │  │         │                                 │
+# │  └─────────┘  └──────────┘  └─────────┘                                 │
+# │  (built with ghc1, linked with rts1)                                    │
+# │                                                                         │
+# │  ┌─────────────────────────────────┐                                    │
+# │  │        SHIPPED RESULT           │                                    │
+# │  │  ┌─────────┐   ┌─────────┐      │                                    │
+# │  │  │  pkg1   │ + │  ghc2   │      │                                    │
+# │  │  └─────────┘   └─────────┘      │                                    │
+# │  └─────────────────────────────────┘                                    │
+# │                                                                         │
+# │  Notes:                                                                 │
+# │  • Binaries: one stage ahead (ghc1 builds pkg1, ghc2 ships with pkg1)   │
+# │  • Libraries: one stage below (pkg1 ships with ghc2)                    │
+# │  • ghc1 and ghc2 are ABI compatible                                     |
+# |  • ghc0 and ghc1 are not guaranteed to be ABI compatible                |
+# │  • ghc1 is linked against rts0, ghc2 against rts1                       │
+# |  • augmented packages are needed because ghc1 may require newer         |
+# |    versions or even new packages, not shipped with the boot compiler    |
+# │                                                                         │
+# └─────────────────────────────────────────────────────────────────────────┘
+
+
+# ISSUES:
+# - [ ] Where do we get the version number from? The configure script _does_ contain
+#       one and sets it, but should it come from the last release tag this branch is
+#       contains?
+# - [ ] The hadrian folder needs to be removed.
+# - [ ] All sublibs should be SRPs in the relevant cabal.project files. No more
+#       submodules.
+
+SHELL := bash
+.SHELLFLAGS := -eu -o pipefail -c
+.DEFAULT_GOAL := all
+
+VERBOSE ?= 0
+
+UNAME := $(shell uname)
+
+# Enable dynamic runtime/linking support when DYNAMIC=1 is passed on the make
+# command line. This selects the cabal.project.stage2.dynamic project file
+# (shared libraries, dynamic executables, dynamic RTS) instead of
+# cabal.project.stage2.static, and enables the dynamic-only dist steps below.
+# The default remains static to keep rebuild cost low.
+DYNAMIC ?= 0
+
+# Suffix selecting the static/dynamic stage2 project file (see CABAL_PROJECT_FILE).
+DYNAMIC_SUFFIX := $(if $(filter 1,$(DYNAMIC)),dynamic,static)
+
+# Quiet mode: suppress output unless error (QUIET=1)
+QUIET ?= 0
+
+# Metrics collection: start background CPU/memory sampling (METRICS=1)
+METRICS ?= 0
+METRICS_INTERVAL ?= 0.5
+
+#
+# System tools
+#
+# Note: ?= uses the environment variable if set
+#
+
+CABAL0 ?= cabal
+GHC0   ?= ghc-9.8.4
+
+AR     ?= ar
+CC     ?= cc
+LD     ?= ld
+PYTHON ?= python3
+SED    ?= sed
+LN     ?= ln
+LN_S   ?= $(LN) -s
+LN_SF  ?= $(LN) -sf
+
+ifeq ($(UNAME), Darwin)
+DLL       := *.dylib
+else
+DLL       := *.so
+endif
+
+# Notes
+#
+# - rts configure script is a bit evil.
+#   λ rg AC_PATH rts/configure.ac
+#   489:AC_PATH_PROG([NM], nm)
+#   495:AC_PATH_PROG([OBJDUMP], objdump)
+#   501:AC_PATH_PROG([DERIVE_CONSTANTS], deriveConstants)
+#   505:AC_PATH_PROG([GENAPPLY], genapply)
+#
+
+#
+# Some compiler toolchain settings
+#
+
+CABAL_ARGS         ?=
+CC_LINK_OPT         =
+GHC_CONFIGURE_ARGS  =
+
+GHC_TOOLCHAIN_ARGS  = --disable-ld-override
+
+# Cross-compilation tool paths: default to stage1 build tree; can be
+# overridden for dist-based cross builds (CI) where only the dist
+# artifact is available.
+GHC_TOOLCHAIN_BIN    ?= $(STAGE1_PATH)/bin/ghc-toolchain-bin
+DERIVE_CONSTANTS_BIN ?= $(STAGE1_PATH)/bin/deriveConstants
+GENAPPLY_BIN         ?= $(STAGE1_PATH)/bin/genapply
+# genprimopcode is invoked by compiler/Setup.hs by bare name (`readProcess
+# "genprimopcode"`), i.e. resolved via PATH rather than an env var. Its
+# directory is prepended to PATH for the stage3 cabal build (see below) so the
+# freshly-built one wins over the bootstrap GHC's, which predates the primop
+# `effect`/`NoEffect` grammar and dies at primops.txt:139:31.
+GENPRIMOPCODE_BIN    ?= $(STAGE1_PATH)/bin/genprimopcode
+
+#
+# Build directories and paths
+#
+
+# NOTE: it's tricky to know when and where we need an absolute path or we can
+# get away with a relative path. We make BUILD_DIR absolute and all derived
+# paths will be absolute too.
+BUILD_DIR  := _build
+STAGE_DIR   = $(BUILD_DIR)/$(STAGE)
+STORE_DIR   = $(STAGE_DIR)/store
+LOGS_DIR    = $(STAGE_DIR)/logs
+
+DIST_DIR   := $(BUILD_DIR)/dist
+
+# Timing directory for phase start/end timestamps
+TIMING_DIR := $(BUILD_DIR)/timing
+
+# Metrics directory for CPU/memory CSV data
+METRICS_DIR := $(BUILD_DIR)/metrics
+
+# Stamp files — Make uses these to know a stage is complete.
+# Phony targets like `stage2` always re-run their recipe, which causes `test`
+# (which depends on `stage2`) to re-execute the entire build even when nothing
+# changed. File-based stamps let Make skip already-completed stages.
+STAGE0_STAMP := $(BUILD_DIR)/.stamp-stage0
+STAGE1_STAMP := $(BUILD_DIR)/.stamp-stage1
+STAGE2_STAMP := $(BUILD_DIR)/.stamp-stage2
+
+# Each stamp is the real Make target for its stage's recipe; PHONY aliases
+# (stage1, stage2) are provided for convenience.  This lets Make resolve the
+# full dependency graph in a single invocation (e.g. `make _build/dist/ghc.tar.gz`)
+# while still skipping already-completed stages.
+
+# HOST_PLATFROM is always from the bootstrap compiler
+HOST_PLATFORM := $(shell $(GHC0) --print-host-platform)
+
+CABAL      ?= $(BUILD_DIR)/cabal/bin/cabal$(EXE_EXT)
+
+STAGE1_PATH := $(let STAGE,stage1,$(STORE_DIR)/host/$(HOST_PLATFORM))
+STAGE2_PATH := $(let STAGE,stage2,$(STORE_DIR)/host/$(HOST_PLATFORM))
+
+GHC1        := $(STAGE1_PATH)/bin/ghc$(EXE_EXT)
+GHC2        := $(STAGE2_PATH)/bin/ghc$(EXE_EXT)
+
+#
+# Misc settings
+#
+
+# Handle CPUS and THREADS
+CPUS_DETECT_SCRIPT := ./mk/detect-cpu-count.sh
+CPUS := $(shell if [ -x $(CPUS_DETECT_SCRIPT) ]; then $(CPUS_DETECT_SCRIPT); else echo 2; fi)
+THREADS ?= $(shell echo $$(( $(CPUS) + 1 )))
+
+#
+# Build macros
+#
+
+ifeq ($(MAKE_HOST),x86_64-pc-msys)
+# Windows executables require .exe extension for native programs to find them
+EXE_EXT := .exe
+
+# FIXME Are we sure about this? Do we need to check if it exists?
+CC      = x86_64-w64-mingw32-clang.exe
+CXX     = x86_64-w64-mingw32-clang++.exe
+LD      = ld.lld.exe
+
+# https://gitlab.haskell.org/ghc/ghc/-/issues/7289#note_646155
+CC_LINK_OPT   = -Wl,CRT_fp8.o
+CYGPATH       = cygpath --windows -f -
+CYGPATH_MIXED = cygpath --mixed -f -
+
+PATCHELF ?= echo
+else
+EXE_EXT      :=
+CYGPATH       = cat
+CYGPATH_MIXED = cat
+
+PATCHELF ?= patchelf
+INSTALL_NAME_TOOL ?= install_name_tool
+endif
+
+
+#
+# Logging utilities
+#
+
+# LOG_GROUP_START = @echo "::group::$1"
+# LOG_GROUP_END = @echo "::endgroup::"
+
+BOLD = $(shell tput bold)
+NORMAL = $(shell tput sgr0)
+
+LOG_GROUP_START = @echo "$(BOLD)>>>>> $1$(NORMAL)"
+LOG_GROUP_END = @echo ""
+
+LOG = @echo "$(BOLD)[$(STAGE)]$(NORMAL): $(1)"
+
+ifeq ($(QUIET),1)
+LOG = @:
+LOG_GROUP_START = @:
+LOG_GROUP_END = @:
+endif
+
+# Phase timing: records start/end timestamps and status.
+#
+# Guards prevent overwrites when PHONY targets re-run without doing real work.
+# For example, `test: stage2` triggers the PHONY stage2 recipe again; without
+# guards, the no-op re-check would overwrite the real stage2 build timings with
+# near-zero durations.
+#
+# Policy:
+#   - If a phase already completed successfully (status=0), skip re-timing.
+#   - If a phase failed (status=1) or never ran, (re)start timing.
+define PHASE_START
+	@mkdir -p $(TIMING_DIR)
+	@if [ ! -f $(TIMING_DIR)/$(1).end ] || [ "$$(cat $(TIMING_DIR)/$(1).status 2>/dev/null)" != "0" ]; then \
+		date +%s > $(TIMING_DIR)/$(1).start; \
+		rm -f $(TIMING_DIR)/$(1).end $(TIMING_DIR)/$(1).status; \
+	fi
+endef
+
+define PHASE_END_OK
+	@if [ ! -f $(TIMING_DIR)/$(1).end ]; then \
+		date +%s > $(TIMING_DIR)/$(1).end; \
+		echo "0" > $(TIMING_DIR)/$(1).status; \
+	fi
+endef
+
+define PHASE_END_FAIL
+	@if [ ! -f $(TIMING_DIR)/$(1).end ]; then \
+		date +%s > $(TIMING_DIR)/$(1).end; \
+		echo "1" > $(TIMING_DIR)/$(1).status; \
+	fi
+endef
+
+define NORMALIZE_FP
+$(shell echo $(1) | $(CYGPATH_MIXED))
+endef
+
+# CABAL_BUILD
+#
+# Generic "cabal build"
+#
+# $(1): the cabal binary to use
+#
+# NOTE: Do not pass --with-ar or --with-ld to cabal! it will screw up things
+#
+# Cabal project file for the current stage. stage2 has separate static/dynamic
+# variants selected by DYNAMIC (see DYNAMIC_SUFFIX); all other stages use a
+# single project file.
+CABAL_PROJECT_FILE = cabal.project.$(STAGE)$(if $(filter stage2,$(STAGE)),.$(DYNAMIC_SUFFIX))
+
+define CABAL_BUILD_WITH
+	$(1) \
+		--remote-repo-cache $(call NORMALIZE_FP,$(CURDIR)/$(BUILD_DIR)/packages) \
+		--store-dir $(call NORMALIZE_FP,$(CURDIR)/$(STORE_DIR)) \
+		--logs-dir $(call NORMALIZE_FP,$(CURDIR)/$(LOGS_DIR)) \
+	build \
+		--project-file $(CABAL_PROJECT_FILE) \
+		--builddir $(call NORMALIZE_FP,$(CURDIR)/$(STAGE_DIR)) \
+		$(CABAL_ARGS)
+endef
+
+define CABAL_BUILD
+	$(call CABAL_BUILD_WITH,$(CABAL))
+endef
+
+define CABAL_INSTALL_STAGE0
+	$(CABAL0) \
+		--store-dir $(call NORMALIZE_FP,$(CURDIR)/$(STORE_DIR)) \
+		--logs-dir $(call NORMALIZE_FP,$(CURDIR)/$(LOGS_DIR)) \
+	install \
+		--installdir $(dir $(CABAL)) \
+		--builddir $(call NORMALIZE_FP,$(CURDIR)/$(STAGE_DIR)) \
+		--project-file $(CABAL_PROJECT_FILE) \
+		--overwrite-policy=always --install-method=copy \
+		$(CABAL_ARGS)
+endef
+
+# LIB_NAME_GLOB
+#
+# $(1): library target, possibly with sublibrary after colon
+#
+# pkg     -> pkg-*
+# pkg:lib -> pkg-*-lib
+LIB_NAME_GLOB = $(let pkg lib,$(subst :, ,$(1)),$(pkg)-*$(if $(lib),-$(lib)))
+
+# DIST_COPY_EXE
+#
+# Copies a executable named $(1) from the local store into the distribution
+# directory.
+#
+# $(1) name of the executable to copy
+#
+# NOTE: the ending empty line is important
+define DIST_COPY_EXE
+	$(call LOG,Copying executable $(1) into $(DIST_DIR)/bin)
+	@cp -a \
+		$(CURDIR)/$(STORE_DIR)/host/$(HOST_PLATFORM)/bin/$(1)$(EXE_EXT) \
+		$(CURDIR)/$(DIST_DIR)/bin/$(1)$(EXE_EXT)
+
+endef
+
+# $(1) name of the executable to link
+# $(2) platform
+define DIST_TARGET_EXE_LINK
+	@$(LN_S) \
+		$(1)$(EXE_EXT) \
+		$(CURDIR)/$(DIST_DIR)/bin/$(2)-$(1)$(EXE_EXT)
+
+endef
+
+# DIST_COPY_LIB
+#
+# Copies a library from the local store into the distribution directory.
+#
+# $(1) name of the library to copy
+#
+# NOTE: the ending empty line is important
+define DIST_COPY_LIB
+	$(call LOG,Copying library $(1) into $(DIST_DIR)/lib/$(TARGET_PLATFORM))
+	@cp -a \
+		$(CURDIR)/$(STORE_DIR)/host/$(TARGET_PLATFORM)/lib/$(call LIB_NAME_GLOB,$(1)) \
+		$(CURDIR)/$(DIST_DIR)/lib/$(TARGET_PLATFORM)
+
+endef
+
+# DIST_COPY_LIB_CROSS
+#
+# Copies a library from the local store into the distribution directory.
+#
+# $(1) name of the library to copy
+#
+# NOTE: the ending empty line is important
+define DIST_COPY_LIB_CROSS
+	$(call LOG,Copying library $(1) into $(DIST_DIR)/lib/targets/$(TARGET_PLATFORM)/lib/$(TARGET_PLATFORM))
+	@cp -a \
+		$(CURDIR)/$(STORE_DIR)/host/$(TARGET_PLATFORM)/lib/$(call LIB_NAME_GLOB,$(1)) \
+		$(CURDIR)/$(DIST_DIR)/lib/targets/$(TARGET_PLATFORM)/lib/$(TARGET_PLATFORM)
+
+endef
+
+# DIST_COPY_LIB_CONF
+#
+# Copies a library packagedb entry from the local store into the distribution
+# directory.
+#
+# $(1) library to copy
+#
+# NOTE: the ending empty line is important
+# NOTE: sed *has* to run in-place becase we do not know the exact filename of
+# the file. With -i we can get away with a glob.
+define DIST_COPY_LIB_CONF
+	$(call LOG,Copying $(1) packagedb entry into $(DIST_DIR)/lib/package.conf.d/)
+	@cp -a \
+		$(CURDIR)/$(STORE_DIR)/host/$(TARGET_PLATFORM)/package.conf.d/$(call LIB_NAME_GLOB,$(1)).conf \
+		$(CURDIR)/$(DIST_DIR)/lib/package.conf.d/
+	@$(SED) -i \
+		-e "s|$(call PATH_REGEX,$(CURDIR)/$(STORE_DIR)/host/$(TARGET_PLATFORM)/lib)|\$${pkgroot}/../lib/$(TARGET_PLATFORM)|g" \
+		$(CURDIR)/$(DIST_DIR)/lib/package.conf.d/$(call LIB_NAME_GLOB,$(1)).conf
+
+endef
+
+# PATH_REGEX
+#
+# Creates a path regex that, on windows, matches any path separator
+# and starts with a proper drive.
+#
+# On unix, this should do nothing.
+# $(1) path to create regex for
+define PATH_REGEX
+$(shell echo $(1) | $(CYGPATH_MIXED) | sed 's|/|[/\\]|g')
+endef
+
+# DIST_COPY_LIB_CONF_CROSS
+#
+# Copies a library packagedb entry from the local store into the distribution
+# directory.
+#
+# $(1) library to copy
+#
+# NOTE: the ending empty line is important
+# NOTE: sed *has* to run in-place becase we do not know the exact filename of
+# the file. With -i we can get away with a glob.
+define DIST_COPY_LIB_CONF_CROSS
+	$(call LOG,Copying $(1) packagedb entry into $(DIST_DIR)/lib/targets/$(TARGET_PLATFORM)/lib/package.conf.d/)
+	@cp -a \
+		$(CURDIR)/$(STORE_DIR)/host/$(TARGET_PLATFORM)/package.conf.d/$(call LIB_NAME_GLOB,$(1)).conf \
+		$(CURDIR)/$(DIST_DIR)/lib/targets/$(TARGET_PLATFORM)/lib/package.conf.d/
+	@$(SED) -i \
+		-e 's|$(CURDIR)/$(STORE_DIR)/host/$(TARGET_PLATFORM)/lib|\$${pkgroot}/../lib/$(TARGET_PLATFORM)|g' \
+		$(CURDIR)/$(DIST_DIR)/lib/targets/$(TARGET_PLATFORM)/lib/package.conf.d/$(call LIB_NAME_GLOB,$(1)).conf
+
+endef
+
+# SET_RPATH
+#
+# $(1) = rpath
+# $(2) = binary
+# set rpath relative to the current executable
+# TODO: on darwin, this doesn't overwrite rpath, but just adds to it,
+#       so we'll have the old rpaths from the build host in there as well
+# set_rpath: Add rpath to binary. On Darwin, check if rpath already exists
+# before adding (install_name_tool fails if rpath is duplicate).
+define SET_RPATH
+	$(if $(filter Darwin,$(UNAME)), \
+		if ! otool -l "$(2)" 2>/dev/null | grep -A2 'LC_RPATH' | grep -q "@executable_path/$(1)"; then \
+			$(INSTALL_NAME_TOOL) -add_rpath "@executable_path/$(1)" "$(2)"; \
+		fi, \
+		$(PATCHELF) --force-rpath --set-rpath "\$$ORIGIN/$(1)" "$(2)")
+endef
+
+DIST_COPY_EXES            = $(if $(1),$(foreach exe,$(1),$(call DIST_COPY_EXE,$(exe),$(2))))
+DIST_COPY_LIBS            = $(if $(1),$(foreach lib,$(1),$(call DIST_COPY_LIB,$(lib))))
+DIST_COPY_LIBS_CROSS      = $(if $(1),$(foreach lib,$(1),$(call DIST_COPY_LIB_CROSS,$(lib))))
+DIST_COPY_LIBS_CONF       = $(if $(1),$(foreach lib,$(1),$(call DIST_COPY_LIB_CONF,$(lib))))
+DIST_COPY_LIBS_CONF_CROSS = $(if $(1),$(foreach lib,$(1),$(call DIST_COPY_LIB_CONF_CROSS,$(lib))))
+
+define DIST_COPY_LIBS_SO
+	@find $(CURDIR)/$(STORE_DIR)/host/$(TARGET_PLATFORM)/lib/ -mindepth 1 -type f -name "$(DLL)" -execdir cp '{}' $(CURDIR)/$(DIST_DIR)/lib/$(TARGET_PLATFORM)/'{}' \;
+endef
+
+define DIST_COPY_LIBS_SO_CROSS
+	@# $(DLL) is set based on BUILD host (.dylib on Darwin, .so on Linux), but
+	@# cross targets have their own shared-library extension. wasm32-* and
+	@# Linux-style targets produce .so; Mac/Darwin targets would produce .dylib.
+	@# Search for both extensions so cross-stage SO/DYLIB files land in dist
+	@# regardless of build-host vs target-platform mismatch.
+	@find $(CURDIR)/$(STORE_DIR)/host/$(TARGET_PLATFORM)/lib/ -mindepth 1 -type f \( -name "*.so" -o -name "*.dylib" \) -execdir cp '{}' $(CURDIR)/$(DIST_DIR)/lib/targets/$(TARGET_PLATFORM)/lib/$(TARGET_PLATFORM)/'{}' \;
+endef
+
+
+#
+# Files and targets
+#
+
+CONFIGURE_SCRIPTS = \
+	configure \
+	rts/configure \
+	libraries/ghc-internal/configure
+
+# Files that will be generated by config.status from their .in counterparts
+CONFIGURED_FILES := \
+	ghc/ghc-bin.cabal \
+	compiler/GHC/CmmToLlvm/Version/Bounds.hs \
+	compiler/ghc.cabal \
+	libraries/ghc-boot/ghc-boot.cabal \
+	libraries/ghc-boot-th/ghc-boot-th.cabal \
+	libraries/ghc-heap/ghc-heap.cabal \
+	libraries/template-haskell/template-haskell.cabal \
+	libraries/ghci/ghci.cabal \
+	utils/ghc-pkg/ghc-pkg.cabal \
+	utils/ghc-iserv/ghc-iserv.cabal \
+	utils/runghc/runghc.cabal \
+	libraries/ghc-internal/ghc-internal.cabal \
+	libraries/ghc-experimental/ghc-experimental.cabal \
+	libraries/base/base.cabal \
+	rts/include/ghcversion.h
+
+# __  __       _         _                       _
+# |  \/  | __ _(_)_ __   | |_ __ _ _ __ __ _  ___| |_
+# | |\/| |/ _` | | '_ \  | __/ _` | '__/ _` |/ _ \ __|
+# | |  | | (_| | | | | | | || (_| | | | (_| |  __/ |_
+# |_|  |_|\__,_|_|_| |_|  \__\__,_|_|  \__, |\___|\__|
+#                                      |___/
+
+.PHONY: timing-summary
+timing-summary:
+	@./mk/timing-summary.sh $(TIMING_DIR)
+
+.PHONY: metrics-start metrics-stop metrics-plot
+metrics-start:
+	@./mk/collect-metrics.sh start $(METRICS_DIR) $(METRICS_INTERVAL)
+
+metrics-stop:
+	@./mk/collect-metrics.sh stop $(METRICS_DIR)
+
+metrics-plot:
+	@if [ -f "$(METRICS_DIR)/metrics.csv" ]; then \
+		$(PYTHON) ./mk/plot-metrics.py $(METRICS_DIR) $(TIMING_DIR) $(METRICS_DIR)/metrics; \
+	else \
+		echo "No metrics data found. Run 'make METRICS=1 all' first."; \
+	fi
+
+.PHONY: all
+all: stage2
+
+#            _           _       _           _        _ _
+#   ___ __ _| |__   __ _| |     (_)_ __  ___| |_ __ _| | |
+#  / __/ _` | '_ \ / _` | |_____| | '_ \/ __| __/ _` | | |
+# | (_| (_| | |_) | (_| | |_____| | | | \__ \ || (_| | | |
+#  \___\__,_|_.__/ \__,_|_|     |_|_| |_|___/\__\__,_|_|_|
+
+# TODO: Building cabal-install from source as part of the Makefile is a
+# temporary workaround. We should eventually require cabal to be provided
+# externally (e.g. via ghcup) and drop this target entirely.
+.PHONY: stable-cabal
+stable-cabal: STAGE=stage0
+stable-cabal:
+ifeq (,$(USE_SYSTEM_CABAL))
+	$(call PHASE_START,cabal)
+	$(call LOG,Building $(CABAL))
+	$(CABAL_INSTALL_STAGE0) --with-compiler $(GHC0) cabal-install:exe:cabal
+	$(call PHASE_END_OK,cabal)
+	@touch $(STAGE0_STAMP)
+endif
+
+#  ____  _                     _
+# / ___|| |_ __ _  __ _  ___  / |
+# \___ \| __/ _` |/ _` |/ _ \ | |
+#  ___) | || (_| | (_| |  __/ | |
+# |____/ \__\__,_|\__, |\___| |_|
+#                 |___/
+
+# These are configuration variables for stage one
+
+# TODO we should not need genprimops code here, it is needed by compiler/Setup.hs
+# but it is also listed as a build-tool-depends in compiler/ghc.cabal so cabal-install
+# will build it automatically. The effect of listing genprimops here is that it
+# will be included as a host target rather as a build target. So we end up compiling it
+# twice for no reason.
+STAGE1_EXECUTABLES = \
+	deriveConstants \
+	genapply \
+	genprimopcode \
+	ghc \
+	ghc-pkg \
+	ghc-toolchain-bin \
+	hsc2hs \
+	unlit
+
+STAGE1_LIBRARIES =
+
+STAGE1_EXTRA_INCLUDE_DIRS ?=
+STAGE1_EXTRA_LIB_DIRS	  ?=
+
+STAGE1_CABAL_BUILD = \
+	$(CABAL_BUILD) \
+	--with-compiler=$(GHC0) \
+	--with-build-compiler=$(GHC0) \
+	--ghc-options "-ghcversion-file=$(call NORMALIZE_FP,$(CURDIR)/rts/include/ghcversion.h)"
+
+ifndef DIST_BUILD
+# The stamp file is the real target so that Make can resolve it as a
+# prerequisite (e.g. stage2 -> $(GHC1) -> $(STAGE1_STAMP)).  The PHONY
+# alias below lets users run `make stage1` as before.
+$(STAGE1_STAMP): STAGE=stage1
+$(STAGE1_STAMP): $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) cabal.project.stage1 cabal.project.common | stable-cabal libraries/ghc-boot-th-next hackage
+	$(call PHASE_START,stage1)
+	$(call LOG,Starting build of $(STAGE))
+
+	$(call PHASE_START,stage1.executables)
+	$(call LOG,Building executables $(STAGE1_EXECUTABLES))
+	$(STAGE1_CABAL_BUILD) $(addprefix exe:,$(STAGE1_EXECUTABLES))
+	$(call PHASE_END_OK,stage1.executables)
+
+	$(call LOG,Creating $(STORE_DIR)/host/$(HOST_PLATFORM)/lib/settings)
+	@$(STORE_DIR)/host/$(HOST_PLATFORM)/bin/ghc-toolchain-bin $(GHC_TOOLCHAIN_ARGS) --triple $(HOST_PLATFORM) --cc $(CC) --cxx $(CXX) --cc-link-opt "$(CC_LINK_OPT)" --output-settings -o $(STORE_DIR)/host/$(HOST_PLATFORM)/lib/settings
+ifeq ($(DYNAMIC),1)
+	$(SED) -i -e 's/"RTS ways","/"RTS ways","dyn debug_dyn thr_dyn thr_debug_dyn /' $(STORE_DIR)/host/$(HOST_PLATFORM)/lib/settings
+endif
+	@# Inject the four per-target dials into the native settings file
+	@# too — same keys as the stage3 cross targets (see the lengthy
+	@# comment above $(TARGET_DIR)/lib/settings injection). The native
+	@# target's dynamic state tracks our DYNAMIC=0/1 build flag; prof
+	@# is always NO because stage2 isn't built -prof.
+	$(SED) -i -e 's/\]$$/,("target is dynamic","$(if $(filter 1,$(DYNAMIC)),YES,NO)"),("target ships dynamic libraries","$(if $(filter 1,$(DYNAMIC)),YES,NO)"),("target is profiled","NO"),("target ships profiling libraries","NO")]/' $(STORE_DIR)/host/$(HOST_PLATFORM)/lib/settings
+
+	$(call LOG,Creating packagedb in $(STORE_DIR)/host/$(HOST_PLATFORM)/lib/package.conf.d)
+	@rm -rf $(STORE_DIR)/host/$(HOST_PLATFORM)/lib/package.conf.d
+	@$(STORE_DIR)/host/$(HOST_PLATFORM)/bin/ghc-pkg init $(STORE_DIR)/host/$(HOST_PLATFORM)/lib/package.conf.d
+
+	$(call LOG,Finished building $(STAGE))
+	$(call PHASE_END_OK,stage1)
+	@touch $@
+
+.PHONY: stage1
+stage1: $(STAGE1_STAMP)
+
+$(addprefix $(STAGE1_PATH)/bin/,$(STAGE1_EXECUTABLES)) : $(STAGE1_STAMP)
+endif # DIST_BUILD (stage1)
+
+#  ____  _                     ____
+# / ___|| |_ __ _  __ _  ___  |___ \
+# \___ \| __/ _` |/ _` |/ _ \   __) |
+#  ___) | || (_| | (_| |  __/  / __/
+# |____/ \__\__,_|\__, |\___| |_____|
+#                 |___/
+
+# These are configuration variables for the second stage
+
+STAGE2_EXECUTABLES = \
+	ghc \
+	ghc-iserv \
+	ghc-pkg \
+	haddock \
+	hsc2hs \
+	hpc \
+	hp2ps \
+	runghc \
+	unlit
+
+STAGE2_LIBRARIES = \
+	array \
+	base \
+	binary \
+	bytestring \
+	Cabal \
+	Cabal-syntax \
+	containers \
+	deepseq \
+	directory \
+	exceptions \
+	file-io \
+	filepath \
+	ghc \
+	ghc-bignum \
+	ghc-boot \
+	ghc-boot-th \
+	ghc-compact \
+	ghc-experimental \
+	ghc-heap \
+	ghci \
+	ghc-internal \
+	ghc-platform \
+	ghc-prim \
+	ghc-toolchain \
+	haddock-api \
+	haddock-library \
+	haskeline \
+	hpc \
+	integer-gmp \
+	libffi-clib \
+	mtl \
+	os-string \
+	parsec \
+	pretty \
+	process \
+	rts \
+	rts:nonthreaded-debug \
+	rts:nonthreaded-nodebug \
+	rts:threaded-debug \
+	rts:threaded-nodebug \
+	rts-fs \
+	rts-headers \
+	semaphore-compat \
+	stm \
+	system-cxx-std-lib \
+	template-haskell \
+	text \
+	time \
+	transformers \
+	xhtml
+
+ifeq ($(MAKE_HOST),x86_64-pc-msys)
+STAGE2_LIBRARIES += Win32
+else
+STAGE2_LIBRARIES += terminfo unix
+endif
+
+STAGE2_EXTRA_INCLUDE_DIRS ?=
+STAGE2_EXTRA_LIB_DIRS     ?=
+
+STAGE2_CABAL_BUILD = \
+	env \
+	DERIVE_CONSTANTS=$(call NORMALIZE_FP,$(CURDIR)/$(STAGE1_PATH)/bin/deriveConstants) \
+	GENAPPLY=$(call NORMALIZE_FP,$(CURDIR)/$(STAGE1_PATH)/bin/genapply) \
+	NM=$(NM) \
+	OBJDUMP=$(OBJDUMP) \
+	$(CABAL_BUILD) \
+	--with-compiler=$(call NORMALIZE_FP,$(CURDIR)/$(GHC1)) \
+	--with-build-compiler=$(GHC0) \
+	--ghc-options "-ghcversion-file=$(call NORMALIZE_FP,$(CURDIR)/rts/include/ghcversion.h)" \
+	$(foreach dir,$(STAGE2_EXTRA_LIB_DIRS),--extra-lib-dirs=$(dir)) \
+	$(foreach dir,$(STAGE2_EXTRA_INCLUDE_DIRS),--extra-include-dirs=$(dir))
+
+ifndef DIST_BUILD
+$(STAGE2_STAMP): STAGE=stage2
+$(STAGE2_STAMP): TARGET_PLATFORM:=$(HOST_PLATFORM)
+$(STAGE2_STAMP): $(GHC1) $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) cabal.project.stage2.common cabal.project.stage2.static cabal.project.stage2.dynamic cabal.project.common | stable-cabal libraries/ghc-boot-th-next $(STAGE1_STAMP)
+	$(call PHASE_START,stage2)
+	$(call LOG,Starting build of $(STAGE))
+
+	$(call PHASE_START,stage2.rts)
+	$(call LOG,Building rts)
+	$(STAGE2_CABAL_BUILD) rts
+	$(call PHASE_END_OK,stage2.rts)
+
+	$(call PHASE_START,stage2.executables)
+	$(call LOG,Building executables $(STAGE2_EXECUTABLES))
+	$(STAGE2_CABAL_BUILD) $(addprefix exe:,$(STAGE2_EXECUTABLES))
+	$(call PHASE_END_OK,stage2.executables)
+
+	$(call PHASE_START,stage2.libraries)
+	$(call LOG,Building libraries $(filter-out rts%,$(STAGE2_LIBRARIES)))
+	$(STAGE2_CABAL_BUILD) $(filter-out rts%,$(STAGE2_LIBRARIES))
+	$(call PHASE_END_OK,stage2.libraries)
+
+	$(call PHASE_START,stage2.dist)
+	$(call LOG,Building distribution in $(DIST_DIR))
+	@rm -rf $(DIST_DIR)
+
+	@mkdir -p $(DIST_DIR)/bin
+	$(call DIST_COPY_EXES,$(STAGE2_EXECUTABLES))
+
+	@mkdir -p $(DIST_DIR)/lib/$(TARGET_PLATFORM)
+	$(call DIST_COPY_LIBS,$(filter-out system-cxx-std-lib%,$(STAGE2_LIBRARIES)))
+	$(call DIST_COPY_LIBS_SO)
+
+	@mkdir -p $(DIST_DIR)/lib/package.conf.d
+	$(call DIST_COPY_LIBS_CONF,$(STAGE2_LIBRARIES))
+
+	$(call LOG,Creating $(DIST_DIR)/lib/settings)
+	@cp $(STAGE1_PATH)/lib/settings $(DIST_DIR)/lib/settings
+
+	$(call LOG,Creating $(DIST_DIR)/lib/template-hsc.h)
+	@cp $(STAGE2_PATH)/lib/hsc2hs-*-hsc2hs/share/template-hsc.h $(DIST_DIR)/lib/template-hsc.h
+
+	# set rpath
+	@for binary in $(DIST_DIR)/bin/* ; do \
+		$(call SET_RPATH,../lib/$(HOST_PLATFORM),$${binary}) ; \
+	done
+ifeq ($(DYNAMIC),1)
+ifneq ($(UNAME), Darwin)
+	@for so in $(CURDIR)/$(DIST_DIR)/lib/$(TARGET_PLATFORM)/$(DLL) ; do \
+		[ -f "$$so" ] && $(PATCHELF) --force-rpath --set-rpath "\$$ORIGIN" "$$so" ; \
+	done ; true
+endif
+	$(call LOG,Create -dyn iserv executable symlink so ghc can find ghc-iserv-dyn)
+	@$(LN_SF) ghc-iserv$(EXE_EXT) "$(DIST_DIR)/bin/ghc-iserv-dyn$(EXE_EXT)"
+endif
+	# On Darwin, strip the build-host /Volumes/WorkSpace LC_RPATH leak
+	# and rewrite nix-store LC_LOAD_DYLIB install names to /usr/lib
+	# BEFORE the ghc-pkg recache below — otherwise recache itself can
+	# abort-trap on macOS 15 dyld (which rejects unresolvable absolute
+	# rpaths as fatal). The script is a no-op on non-Darwin hosts.
+	@./mk/clean-darwin-macho.sh $(DIST_DIR)
+	$(call LOG,Refreshing $(DIST_DIR)/lib/package.conf.d cache)
+	@$(DIST_DIR)/bin/ghc-pkg recache --package-db $(CURDIR)/$(DIST_DIR)/lib/package.conf.d
+
+	$(call LOG,Verifying $(DIST_DIR)/lib/package.conf.d)
+	@$(DIST_DIR)/bin/ghc-pkg check --package-db $(CURDIR)/$(DIST_DIR)/lib/package.conf.d
+
+	$(call LOG,Copying ghc-usage files)
+	@cp -rfp driver/ghc-usage.txt $(DIST_DIR)/lib/
+	@cp -rfp driver/ghci-usage.txt $(DIST_DIR)/lib/
+
+	# Copy stage1 tools needed for cross-compilation from dist
+	$(call LOG,Copying cross-compilation tools to $(DIST_DIR)/bin)
+	@cp -fp $(STAGE1_PATH)/bin/ghc-toolchain-bin $(DIST_DIR)/bin/ghc-toolchain-bin
+	@cp -fp $(STAGE1_PATH)/bin/deriveConstants $(DIST_DIR)/bin/deriveConstants
+	@cp -fp $(STAGE1_PATH)/bin/genapply $(DIST_DIR)/bin/genapply
+	# genprimopcode: compiler/Setup.hs resolves it from PATH; the stage3 cabal
+	# build prepends $(dir $(GENPRIMOPCODE_BIN)) so this dist copy wins over the
+	# bootstrap GHC's (which can't parse the primop effect grammar, dying at
+	# primops.txt:139:31). Required for DIST_BUILD (CI) cross builds.
+	@cp -fp $(STAGE1_PATH)/bin/genprimopcode $(DIST_DIR)/bin/genprimopcode
+
+	# Copy stage0 cabal (needed for cross-compilation from dist, has -W flag)
+	$(call LOG,Copying cabal to $(DIST_DIR)/bin)
+	@cp -fp $(CABAL) $(DIST_DIR)/bin/cabal
+
+	# Copy happy-lib templates (needed for cross-compilation from dist)
+	$(call LOG,Copying happy-lib templates to $(DIST_DIR)/share)
+	@mkdir -p $(DIST_DIR)/share/happy-lib/data
+	@cp -rfp _build/stage2/src/happy-lib-*/data/* $(DIST_DIR)/share/happy-lib/data/
+
+	$(call LOG,Finished building $(STAGE) in $(DIST_DIR))
+	$(call PHASE_END_OK,stage2.dist)
+	$(call PHASE_END_OK,stage2)
+	@touch $@
+
+.PHONY: stage2
+stage2: $(STAGE2_STAMP)
+
+$(addprefix $(STAGE2_PATH)/bin/,$(STAGE2_EXECUTABLES)) : $(STAGE2_STAMP)
+endif # DIST_BUILD (stage2)
+
+#  ____  _                     _____
+# / ___|| |_ __ _  __ _  ___  |___ /
+# \___ \| __/ _` |/ _` |/ _ \   |_ \
+#  ___) | || (_| | (_| |  __/  ___) |
+# |____/ \__\__,_|\__, |\___| |____/
+#                 |___/
+
+# these are GHC names
+# TODO: x86_64-musl-linux -> x86_64-unknown-linux-musl
+STAGE3_PLATFORMS := \
+	x86_64-musl-linux \
+	javascript-unknown-ghcjs \
+	wasm32-unknown-wasi
+
+STAGE3_EXECUTABLES := \
+    ghc \
+    ghc-iserv \
+    ghc-pkg \
+    hp2ps \
+    hpc \
+    hsc2hs \
+    runghc \
+    unlit \
+    haddock
+
+# TODO: this won't work for musl stage3
+STAGE3_LIBRARIES = \
+	array \
+	base \
+	binary \
+	bytestring \
+	Cabal \
+	Cabal-syntax \
+	containers \
+	deepseq \
+	directory \
+	exceptions \
+	file-io \
+	filepath \
+	ghc \
+	ghc-bignum \
+	ghc-boot \
+	ghc-boot-th \
+	ghc-compact \
+	ghc-experimental \
+	ghc-heap \
+	ghci \
+	ghc-internal \
+	ghc-platform \
+	ghc-prim \
+	hpc \
+	integer-gmp \
+	mtl \
+	os-string \
+	parsec \
+	pretty \
+	process \
+	rts \
+	rts:nonthreaded-nodebug \
+	rts-fs \
+	rts-headers \
+	semaphore-compat \
+	stm \
+	template-haskell \
+	text \
+	time \
+	transformers \
+	unix \
+	xhtml
+
+STAGE3_x86_64-musl-linux_AR                 = x86_64-unknown-linux-musl-ar
+STAGE3_x86_64-musl-linux_CC                 = x86_64-unknown-linux-musl-gcc
+STAGE3_x86_64-musl-linux_CC_OPTS            =
+STAGE3_x86_64-musl-linux_CXX                = x86_64-unknown-linux-musl-g++
+STAGE3_x86_64-musl-linux_CXX_OPTS           =
+STAGE3_x86_64-musl-linux_EXTRA_INCLUDE_DIRS =
+STAGE3_x86_64-musl-linux_EXTRA_LIB_DIRS     =
+STAGE3_x86_64-musl-linux_LD                 = x86_64-unknown-linux-musl-ld
+STAGE3_x86_64-musl-linux_RANLIB             = x86_64-unknown-linux-musl-ranlib
+STAGE3_x86_64-musl-linux_GHC_TOOLCHAIN_ARGS = $(GHC_TOOLCHAIN_ARGS)
+
+STAGE3_javascript-unknown-ghcjs_AR                 = emar
+STAGE3_javascript-unknown-ghcjs_CC                 = emcc
+STAGE3_javascript-unknown-ghcjs_CC_OPTS            =
+STAGE3_javascript-unknown-ghcjs_CXX                = em++
+STAGE3_javascript-unknown-ghcjs_CXX_OPTS           =
+STAGE3_javascript-unknown-ghcjs_CPP                = emcc
+STAGE3_javascript-unknown-ghcjs_HS_CPP             = emcc
+STAGE3_javascript-unknown-ghcjs_CMM_CPP            = emcc
+STAGE3_javascript-unknown-ghcjs_EXTRA_INCLUDE_DIRS =
+STAGE3_javascript-unknown-ghcjs_EXTRA_LIB_DIRS     =
+STAGE3_javascript-unknown-ghcjs_LD                 = emcc
+STAGE3_javascript-unknown-ghcjs_NM                 = emnm
+STAGE3_javascript-unknown-ghcjs_RANLIB             = emranlib
+STAGE3_javascript-unknown-ghcjs_STRIP              = emstrip
+STAGE3_javascript-unknown-ghcjs_GHC_TOOLCHAIN_ARGS = $(GHC_TOOLCHAIN_ARGS) --disable-tables-next-to-code
+# JS target overrides: NO across the board.
+#   * dyn: iserv runs vanilla (no dlopen in the JS runtime), lib tree
+#     ships no .dyn_hi (Path C doesn't apply to JS — see PR #187).
+#   * prof: stage2 isn't built -prof, no .p_hi shipped.
+# All four dials NO → `ghc --info` for the JS target reports
+# `GHC Dynamic: NO`, `GHC Profiled: NO`, `Support dynamic-too: NO`.
+# End-user cabal-install correctly skips library-{dynamic,profiling}.
+STAGE3_javascript-unknown-ghcjs_TARGET_IS_DYNAMIC      = NO
+STAGE3_javascript-unknown-ghcjs_TARGET_SHIPS_DYN_LIBS  = NO
+STAGE3_javascript-unknown-ghcjs_TARGET_IS_PROFILED     = NO
+STAGE3_javascript-unknown-ghcjs_TARGET_SHIPS_PROF_LIBS = NO
+
+STAGE3_wasm32-unknown-wasi_CC                 = wasm32-unknown-wasi-clang
+STAGE3_wasm32-unknown-wasi_CC_OPTS            = -fno-strict-aliasing -Wno-error=int-conversion -Oz -msimd128 -mnontrapping-fptoint -msign-ext -mbulk-memory -mmutable-globals -mmultivalue -mreference-types
+STAGE3_wasm32-unknown-wasi_CXX                = wasm32-unknown-wasi-clang++
+STAGE3_wasm32-unknown-wasi_CXX_OPTS           = $(STAGE3_wasm32-unknown-wasi_CC_OPTS) -fno-exceptions
+STAGE3_wasm32-unknown-wasi_CPP                = wasm32-unknown-wasi-clang
+STAGE3_wasm32-unknown-wasi_HS_CPP             = wasm32-unknown-wasi-clang
+STAGE3_wasm32-unknown-wasi_CMM_CPP            = wasm32-unknown-wasi-clang
+STAGE3_wasm32-unknown-wasi_AR                 = wasm32-unknown-wasi-ar
+STAGE3_wasm32-unknown-wasi_RANLIB             = wasm32-unknown-wasi-ranlib
+STAGE3_wasm32-unknown-wasi_EXTRA_INCLUDE_DIRS =
+STAGE3_wasm32-unknown-wasi_EXTRA_LIB_DIRS     =
+STAGE3_wasm32-unknown-wasi_GHC_TOOLCHAIN_ARGS = $(GHC_TOOLCHAIN_ARGS) \
+  --merge-objs wasm-ld --merge-objs-opt="-r" \
+  --disable-tables-next-to-code --disable-libffi-adjustors \
+  --cc-link-opt="-Wl,--keep-section=ghc_wasm_jsffi" \
+  --cc-link-opt="-Wl,--keep-section=target_features" \
+  --cc-link-opt="-Wl,--stack-first" \
+  --cc-link-opt="-Wl,--strip-debug"
+
+
+TARGET_DIR = $(DIST_DIR)/lib/targets/$(TARGET_PLATFORM)
+
+# NOTE: do NOT pass --happy-options=--template=... here.
+# Cross CI's nix env has happy-2.1.7 on PATH while dist ships happy-lib-2.1.5
+# templates; forcing those templates yields GHC-44432 (happyDoParse unbound)
+# in GHC.Parser (and previously genprimopcode). Let happy use its own
+# packaged templates (nix 2.1.7 or cabal-built 2.1.5 — either is consistent).
+
+# NOTE: disable-library-for-ghci is repeated here but it should be sufficient
+# to put it in cabal.project.stage3
+
+define stage3
+
+STAGE3_$(1)_CABAL_BUILD = \
+	env \
+	PATH="$$(call NORMALIZE_FP,$$(abspath $$(dir $$(GENPRIMOPCODE_BIN)))):$$$$PATH" \
+	DERIVE_CONSTANTS=$$(call NORMALIZE_FP,$$(abspath $$(DERIVE_CONSTANTS_BIN))) \
+	GENAPPLY=$$(call NORMALIZE_FP,$$(abspath $$(GENAPPLY_BIN))) \
+	NM=$$(STAGE3_$(1)_NM) \
+	OBJDUMP=$$(STAGE3_$(1)_OBJDUMP) \
+	$$(CABAL_BUILD) \
+	--with-compiler=$$(call NORMALIZE_FP,$$(CURDIR)/$$(DIST_DIR)/bin/$(1)-ghc) \
+	--with-build-compiler=$$(call NORMALIZE_FP,$$(CURDIR)/$$(DIST_DIR)/bin/ghc) \
+	--ghc-options "-ghcversion-file=$$(call NORMALIZE_FP,$$(CURDIR)/rts/include/ghcversion.h)" \
+	--with-hsc2hs=$$(call NORMALIZE_FP,$$(CURDIR)/$$(DIST_DIR)/bin/$(1)-hsc2hs) \
+	--hsc2hs-options='-x' \
+	--with-gcc $$(STAGE3_$(1)_CC) \
+	$$(foreach dir,$$(STAGE3_$(1)_EXTRA_LIB_DIRS),--extra-lib-dirs=$$(dir)) \
+	$$(foreach dir,$$(STAGE3_$(1)_EXTRA_INCLUDE_DIRS),--extra-include-dirs=$$(dir))
+
+# In DIST_BUILD mode, stage2 binaries come from a pre-built dist artifact;
+# skip the $(GHC2) prerequisite (it points into the stage2 store, not dist).
+ifdef DIST_BUILD
+STAGE3_$(1)_PREREQS = $$(GHC_TOOLCHAIN_BIN) $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) libraries/ghc-boot-th-next cabal.project.common cabal.project.stage3 stage3-$(1)-additional-files
+else
+STAGE3_$(1)_PREREQS = $(GHC2) $$(GHC_TOOLCHAIN_BIN) $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) libraries/ghc-boot-th-next cabal.project.common cabal.project.stage3 stage3-$(1)-additional-files
+endif
+
+.PHONY: stage3-$(1)
+stage3-$(1): STAGE=stage3
+stage3-$(1): TARGET_PLATFORM=$(1)
+stage3-$(1): $$(STAGE3_$(1)_PREREQS)
+	$$(call PHASE_START,stage3-$(1))
+	$$(call LOG,Linking executables)
+	$$(foreach exe,$$(STAGE3_EXECUTABLES),$(LN_SF) $$(exe) $(DIST_DIR)/bin/$(1)-$$(exe);)
+
+	@mkdir -p $$(TARGET_DIR)/lib
+	$$(GHC_TOOLCHAIN_BIN) \
+		--output-settings \
+		--output $$(TARGET_DIR)/lib/settings \
+		--triple $(1) \
+		--cc $$(STAGE3_$(1)_CC) \
+		$$(foreach opt,$$(STAGE3_$(1)_CC_OPTS),--cc-opt=$$(opt)) \
+		--cxx $$(STAGE3_$(1)_CXX) \
+		$$(foreach opt,$$(STAGE3_$(1)_CXX_OPTS),--cxx-opt=$$(opt)) \
+		$(if $(STAGE3_$(1)_CPP),--cpp $$(STAGE3_$(1)_CPP),) \
+		$(if $(STAGE3_$(1)_HS_CPP),--hs-cpp $$(STAGE3_$(1)_HS_CPP),) \
+		$(if $(STAGE3_$(1)_CMM_CPP),--cmm-cpp $$(STAGE3_$(1)_CMM_CPP),) \
+		$(if $(STAGE3_$(1)_AR),--ar $$(STAGE3_$(1)_AR),) \
+		$(if $(STAGE3_$(1)_LD),--ld $$(STAGE3_$(1)_LD),) \
+		$(if $(STAGE3_$(1)_ND),--nm $$(STAGE3_$(1)_NM),) \
+		$(if $(STAGE3_$(1)_RANLIB),--ranlib $$(STAGE3_$(1)_RANLIB),) \
+		--disable-ld-override \
+		$$(STAGE3_$(1)_GHC_TOOLCHAIN_ARGS)
+
+ifeq ($(DYNAMIC),1)
+	$(SED) -i -e 's/"RTS ways","/"RTS ways","dyn /' $$(TARGET_DIR)/lib/settings
+endif
+
+	@# Inject the per-target dials that drive `ghc --info`'s
+	@# `GHC Dynamic` and `GHC Profiled` values (cabal-install reads
+	@# these to decide whether to enable library-dynamic /
+	@# library-profiling by default):
+	@#
+	@#   target is dynamic                 — GHC capable of -dynamic /
+	@#                                       -dynamic-too output
+	@#   target ships dynamic libraries    — lib tree has .dyn_hi / .so
+	@#   target is profiled                — GHC capable of -prof output
+	@#   target ships profiling libraries  — lib tree has .p_hi / .p_a
+	@#
+	@# Reported pairs:
+	@#   GHC Dynamic  = (target is dynamic)  && (target ships dynamic libraries)
+	@#   GHC Profiled = (target is profiled) && (target ships profiling libraries)
+	@#
+	@# Per-target settings file completely controls these — the
+	@# shared stage2 GHC binary's RTS-baked-in dynamic/prof-ness is
+	@# no longer consulted. Two dials per way (is / ships) so a
+	@# target can be capable but not currently ship artifacts (or
+	@# vice versa) — keeps the axes orthogonal for slimming
+	@# experiments and matches what cabal really wants to know.
+	@#
+	@# Defaults for our bindists: dynamic dials YES (most targets
+	@# ship dyn libs), prof dials NO (stage2 isn't built -prof so
+	@# no target currently ships prof libs).
+	@# Override via STAGE3_<triple>_TARGET_{IS_DYNAMIC,SHIPS_DYN_LIBS,
+	@# IS_PROFILED,SHIPS_PROF_LIBS}.
+	@#
+	@# Note: `$$$$` (four dollars) collapses through two layers of
+	@# Make expansion (define-template + recipe-time) to a literal `$`
+	@# at shell time, which is what sed needs as the end-of-line anchor.
+	@# `$$` would collapse to `$` after template expansion, then Make
+	@# would interpret the lone `$/` in the recipe as a variable lookup
+	@# and drop the anchor entirely (verified: PR #187 first attempt).
+	$(SED) -i -e 's/\]$$$$/,("target is dynamic","$(if $(STAGE3_$(1)_TARGET_IS_DYNAMIC),$(STAGE3_$(1)_TARGET_IS_DYNAMIC),YES)"),("target ships dynamic libraries","$(if $(STAGE3_$(1)_TARGET_SHIPS_DYN_LIBS),$(STAGE3_$(1)_TARGET_SHIPS_DYN_LIBS),YES)"),("target is profiled","$(if $(STAGE3_$(1)_TARGET_IS_PROFILED),$(STAGE3_$(1)_TARGET_IS_PROFILED),NO)"),("target ships profiling libraries","$(if $(STAGE3_$(1)_TARGET_SHIPS_PROF_LIBS),$(STAGE3_$(1)_TARGET_SHIPS_PROF_LIBS),NO)")]/' $$(TARGET_DIR)/lib/settings
+
+	$$(DIST_DIR)/bin/$(1)-ghc --info
+
+	@rm -rf $$(TARGET_DIR)/lib/package.conf.d
+	$$(DIST_DIR)/bin/$(1)-ghc-pkg init $$(TARGET_DIR)/lib/package.conf.d
+
+	$$(call PHASE_START,stage3-$(1).rts)
+	$$(call LOG,Building library rts:nonthreaded-nodebug)
+	$$(STAGE3_$(1)_CABAL_BUILD) rts:nonthreaded-nodebug
+	$$(call PHASE_END_OK,stage3-$(1).rts)
+
+	$$(call PHASE_START,stage3-$(1).libraries)
+	$$(call LOG,Building libraries $(STAGE3_LIBRARIES))
+	$$(STAGE3_$(1)_CABAL_BUILD) $(filter-out rts%,$(STAGE3_LIBRARIES))
+	$$(call PHASE_END_OK,stage3-$(1).libraries)
+
+	$$(call PHASE_START,stage3-$(1).dist)
+	$$(call LOG,Copying libraries into distribution for target $(1))
+	@mkdir -p $$(TARGET_DIR)/lib/package.conf.d
+	@mkdir -p $$(TARGET_DIR)/lib/$(1)
+	$$(call DIST_COPY_LIBS_CROSS,$(STAGE3_LIBRARIES),$(1))
+	$$(call DIST_COPY_LIBS_SO_CROSS)
+	$$(call DIST_COPY_LIBS_CONF_CROSS,$(STAGE3_LIBRARIES),$(1))
+
+	$(call LOG,Refreshing $$(TARGET_DIR)/lib/package.conf.d cache)
+	@$(DIST_DIR)/bin/$(1)-ghc-pkg recache --package-db $$(CURDIR)/$$(TARGET_DIR)/lib/package.conf.d
+
+	$(call LOG,Verifying $$(TARGET_DIR)/lib/package.conf.d)
+	@$(DIST_DIR)/bin/$(1)-ghc-pkg check --package-db $$(CURDIR)/$$(TARGET_DIR)/lib/package.conf.d
+
+	$$(call LOG,Copying ghc-usage files)
+	@cp -rfp driver/ghc-usage.txt $$(TARGET_DIR)/lib/
+	@cp -rfp driver/ghci-usage.txt $$(TARGET_DIR)/lib/
+	$$(call PHASE_END_OK,stage3-$(1).dist)
+	$$(call PHASE_END_OK,stage3-$(1))
+
+$(DIST_DIR)/ghc-$(1).tar.gz: stage3-$(1)
+	@echo "::group::Creating ghc-$(1).tar.gz..."
+	# -h: dereference symlinks. The stage3 cross bin/$(1)-* entries are
+	# symlinks to the native stage2 binaries (bin/ghc, bin/ghc-pkg, etc.).
+	# Without -h, the tarball would extract to broken symlinks since the
+	# bare-name targets aren't included. With -h, each cross-prefixed name
+	# becomes a real file (a copy of the native binary, which detects its
+	# invocation name to configure for the target).
+	#
+	# wasm only — lib/$(HOST_PLATFORM): when stage2 is built DYNAMIC=1
+	# (which is required for stage3's build-side happy-lib/alex to find
+	# native Prelude.dyn_hi when shared:True applies project-wide), the
+	# stage2 bin/ghc that gets symlinked-then-dereferenced as
+	# bin/wasm32-unknown-wasi-ghc is dyn-linked against libHS*.so files
+	# under lib/$(HOST_PLATFORM)/. The binary's @rpath is set to
+	# `$$ORIGIN/../lib/$(HOST_PLATFORM)` during stage2 packaging, so
+	# the libs need to ship in the wasm bindist at that path or the
+	# binary fails to load with dyld errors on end-user install.
+	tar czhf $$@ \
+		--directory=$$(DIST_DIR) \
+		$(foreach exe,$(STAGE3_EXECUTABLES),bin/$(1)-$(exe)$(EXE_EXT)) \
+		lib/targets/$(1) \
+		$(if $(filter wasm32-unknown-wasi,$(1)),lib/$(HOST_PLATFORM)) \
+		$(if $(filter wasm32-unknown-wasi,$(1)),relocate.sh configure Makefile)
+	@echo "::endgroup::"
+
+endef
+
+stage3-javascript-unknown-ghcjs-additional-files: STAGE=stage3
+stage3-javascript-unknown-ghcjs-additional-files: TARGET_PLATFORM=javascript-unknown-ghcjs
+stage3-javascript-unknown-ghcjs-additional-files:
+	@mkdir -p $(TARGET_DIR)/lib/
+	$(call LOG,Copying dyld.mjs)
+	@cp -f utils/jsffi/dyld.mjs $(TARGET_DIR)/lib/dyld.mjs
+	$(call LOG,Copying ghc-interp.js)
+	@cp -f ghc-interp.js $(TARGET_DIR)/lib/ghc-interp.js
+	$(call LOG,Copying post-link.mjs)
+	@cp -f utils/jsffi/post-link.mjs $(TARGET_DIR)/lib/post-link.mjs
+	$(call LOG,Copying prelude.mjs)
+	@cp -f utils/jsffi/prelude.mjs $(TARGET_DIR)/lib/prelude.mjs
+
+stage3-wasm32-unknown-wasi-additional-files: STAGE=stage3
+stage3-wasm32-unknown-wasi-additional-files: TARGET_PLATFORM=wasm32-unknown-wasi
+stage3-wasm32-unknown-wasi-additional-files:
+	@mkdir -p $(TARGET_DIR)/lib/
+	$(call LOG,Copying dyld.mjs)
+	@cp -f utils/jsffi/dyld.mjs $(TARGET_DIR)/lib/dyld.mjs
+	$(call LOG,Copying ghc-interp.js)
+	@cp -f ghc-interp.js $(TARGET_DIR)/lib/ghc-interp.js
+	$(call LOG,Copying post-link.mjs)
+	@cp -f utils/jsffi/post-link.mjs $(TARGET_DIR)/lib/post-link.mjs
+	$(call LOG,Copying prelude.mjs)
+	@cp -f utils/jsffi/prelude.mjs $(TARGET_DIR)/lib/prelude.mjs
+	# Phase 3: relocate.sh at the top of the bindist — re-runs ghc-pkg recache
+	# for the new install prefix (binary cache is not portable; *.conf files
+	# already use ${pkgroot}-relative paths from DIST_COPY_LIB_CONF_CROSS).
+	# Note: ghc-pkg auto-recaches by mtime on first read, so this is just an
+	# eager refresh.
+	$(call LOG,Copying relocate.sh to bindist root)
+	@cp -f mk/wasm-relocate.sh $(DIST_DIR)/relocate.sh
+	@chmod +x $(DIST_DIR)/relocate.sh
+	# Phase 4: autoconf-shaped stubs so `ghcup install ghc <ver>` can do its
+	# standard "./configure --prefix=DIR && make install" flow. The configure
+	# script just records the prefix; the Makefile install target copies
+	# bin/ + lib/ + relocate.sh and refreshes the package-db cache.
+	$(call LOG,Copying configure + Makefile to bindist root)
+	@cp -f mk/wasm-configure.sh $(DIST_DIR)/configure
+	@chmod +x $(DIST_DIR)/configure
+	@cp -f mk/wasm-bindist-Makefile $(DIST_DIR)/Makefile
+
+stage3-x86_64-musl-linux-additional-files: STAGE=stage3
+stage3-x86_64-musl-linux-additional-files: TARGET_PLATFORM=x86_64-musl-linux
+stage3-x86_64-musl-linux-additional-files:
+	$(call LOG,No additional files to be copied)
+
+
+$(foreach platform,$(STAGE3_PLATFORMS),$(eval $(call stage3,$(platform))))
+
+stage3: $(foreach platform,$(STAGE3_PLATFORMS),stage3-$(platform))
+
+#  ____  _           _ _     _
+# | __ )(_)_ __   __| (_)___| |_ ___
+# |  _ \| | '_ \ / _` | / __| __/ __|
+# | |_) | | | | | (_| | \__ \ |_\__ \
+# |____/|_|_| |_|\__,_|_|___/\__|___/
+#
+
+$(DIST_DIR)/ghc.tar.gz: $(STAGE2_STAMP)
+	@echo "::group::Creating ghc.tar.gz..."
+	@tar czf $@ \
+		--directory=$(DIST_DIR) \
+		$(foreach exe,$(STAGE2_EXECUTABLES),bin/$(exe)$(EXE_EXT)) \
+		$(shell if [ "$(DYNAMIC)" = 1 ] ; then echo "bin/ghc-iserv-dyn$(EXE_EXT)" ; fi) \
+		lib/ghc-usage.txt \
+		lib/ghci-usage.txt \
+		lib/package.conf.d \
+		lib/settings \
+		lib/template-hsc.h \
+		lib/$(HOST_PLATFORM)
+	@echo "::endgroup::"
+
+$(DIST_DIR)/cabal.tar.gz: | stable-cabal
+	@echo "::group::Creating cabal.tar.gz..."
+	@mkdir -p $(DIST_DIR)/bin
+	@cp $(CABAL) $(DIST_DIR)/bin/
+	@tar czf $@ \
+		--directory=$(DIST_DIR) \
+		bin/cabal
+	@echo "::endgroup::"
+
+$(DIST_DIR)/haskell-toolchain.tar.gz: $(STAGE2_STAMP) | stable-cabal stage3-javascript-unknown-ghcjs
+	@echo "::group::Creating haskell-toolchain.tar.gz..."
+	@mkdir -p $(DIST_DIR)/bin
+	@cp $(CABAL) $(DIST_DIR)/bin/
+	@tar czf $@ \
+		--directory=$(DIST_DIR) \
+		$(foreach exe,$(STAGE2_EXECUTABLES),bin/$(exe)$(EXE_EXT)) \
+		lib/ghc-usage.txt \
+		lib/ghci-usage.txt \
+		lib/package.conf.d \
+		lib/settings \
+		lib/template-hsc.h \
+		lib/$(HOST_PLATFORM) \
+		$(foreach exe,$(STAGE3_EXECUTABLES),bin/javascript-unknown-ghcjs-$(exe)$(EXE_EXT)) \
+		lib/targets/javascript-unknown-ghcjs \
+		bin/cabal
+	@echo "::endgroup::"
+
+# Multi-target GHC bindist:
+#   native (lib/$(HOST_PLATFORM)) + wasm32-unknown-wasi + javascript-unknown-ghcjs
+#
+# The stage2 native ghc binary dispatches via argv[0]: invoking
+# bin/wasm32-unknown-wasi-ghc reads lib/targets/wasm32-unknown-wasi/lib/settings,
+# bin/javascript-unknown-ghcjs-ghc reads .../javascript-unknown-ghcjs/lib/settings,
+# bin/ghc reads lib/settings. Same physical binary, three targets.
+#
+# We use `tar czhf` (dereference symlinks) so the cross-prefixed bin entries
+# (which are symlinks to bin/<exe> per the stage3 rule's $(LN_SF) loop) become
+# standalone copies in the tarball. The native bin/<exe> entries are real
+# files. Cost: ~30 MB extra vs preserving symlinks; predictability gain:
+# ghcup's targetPattern glob picks up real files reliably regardless of
+# its symlink-following behaviour.
+#
+# JS doesn't use ghc-iserv (the JS backend has its own evaluator); filter
+# it out of the JS bin list so we don't ship a useless prefixed copy.
+$(DIST_DIR)/ghc-multi-target.tar.gz: | stage3-wasm32-unknown-wasi stage3-javascript-unknown-ghcjs
+	@echo "::group::Creating ghc-multi-target.tar.gz..."
+	@cp -f mk/multi-target-relocate.sh $(DIST_DIR)/relocate.sh
+	@chmod +x $(DIST_DIR)/relocate.sh
+	@cp -f mk/multi-target-configure.sh $(DIST_DIR)/configure
+	@chmod +x $(DIST_DIR)/configure
+	@cp -f mk/multi-target-bindist-Makefile $(DIST_DIR)/Makefile
+	tar czhf $@ \
+		--directory=$(DIST_DIR) \
+		$(foreach exe,$(STAGE2_EXECUTABLES),bin/$(exe)$(EXE_EXT)) \
+		$(foreach exe,$(STAGE3_EXECUTABLES),bin/wasm32-unknown-wasi-$(exe)$(EXE_EXT)) \
+		$(foreach exe,$(filter-out ghc-iserv,$(STAGE3_EXECUTABLES)),bin/javascript-unknown-ghcjs-$(exe)$(EXE_EXT)) \
+		lib/ghc-usage.txt \
+		lib/ghci-usage.txt \
+		lib/package.conf.d \
+		lib/settings \
+		lib/template-hsc.h \
+		lib/$(HOST_PLATFORM) \
+		lib/targets/wasm32-unknown-wasi \
+		lib/targets/javascript-unknown-ghcjs \
+		relocate.sh configure Makefile
+	@echo "::endgroup::"
+
+$(DIST_DIR)/tests.tar.gz:
+	@echo "::group::Creating tests.tar.gz..."
+	@tar czf $@ \
+		testsuite
+	@echo "::endgroup::"
+
+#  _   _            _
+# | | | | __ _  ___| | ____ _  __ _  ___
+# | |_| |/ _` |/ __| |/ / _` |/ _` |/ _ \
+# |  _  | (_| | (__|   < (_| | (_| |  __/
+# |_| |_|\__,_|\___|_|\_\__,_|\__, |\___|
+#                             |___/
+
+ifndef DIST_BUILD
+# .PHONY: hackage
+hackage: $(BUILD_DIR)/packages/hackage.haskell.org/01-index.tar.gz
+
+$(BUILD_DIR)/packages/hackage.haskell.org/01-index.tar.gz: | stable-cabal
+	$(CABAL) --remote-repo-cache $(call NORMALIZE_FP,$(CURDIR)/$(BUILD_DIR)/packages) update
+endif # DIST_BUILD (hackage)
+
+#   ____             __ _
+#  / ___|___  _ __  / _(_) __ _ _   _ _ __ ___
+# | |   / _ \| '_ \| |_| |/ _` | | | | '__/ _ \
+# | |__| (_) | | | |  _| | (_| | |_| | | |  __/
+#  \____\___/|_| |_|_| |_|\__, |\__,_|_|  \___|
+#                         |___/
+
+$(CONFIGURE_SCRIPTS) : % : %.ac
+	@echo ">>> Running autoreconf $(@D)"
+	autoreconf $(@D)
+	@echo "::endgroup::"
+
+# Top level configure script.
+#
+# NOTE: configure scripts in packages with `Build-Type: Configure`
+# are run by Cabal not here.
+#
+# We use --no-create to avoid regenerating files if not needed.
+# Each configured file is tracked independently below.
+config.status: configure
+	@echo ">>> Running $(@D)/configure"
+	$(@D)/configure --no-create $(GHC_CONFIGURE_ARGS)
+	@echo "::endgroup::"
+
+# Configured files are obtained from their .in counterparts via config.status
+$(CONFIGURED_FILES) : % : ./config.status %.in
+	./config.status $@
+
+libraries/ghc-boot-th-next/%: libraries/ghc-boot-th/%
+	@mkdir -p $(@D)
+	@cp -v $< $@
+
+libraries/ghc-boot-th-next/ghc-boot-th-next.cabal: libraries/ghc-boot-th/ghc-boot-th.cabal
+	@echo "::group::Synthesizing ghc-boot-th-next (copy & sed from ghc-boot-th)..."
+	@mkdir -p $(@D)
+	@$(SED) -e 's/^name:[[:space:]]*ghc-boot-th$$/name:           ghc-boot-th-next/' $< > $@
+	@echo "::endgroup::"
+
+.PHONY: libraries/ghc-boot-th-next
+libraries/ghc-boot-th-next: \
+	libraries/ghc-boot-th-next/changelog.md \
+	libraries/ghc-boot-th-next/LICENSE \
+	libraries/ghc-boot-th-next/ghc-boot-th-next.cabal
+
+# --- Clean Targets ---
+clean-cabal: clean-stage0
+clean-stage0:
+	@echo "::group::Cleaning build artifacts..."
+ifeq (,$(USE_SYSTEM_CABAL))
+	rm -rf $(BUILD_DIR)/cabal
+endif
+	rm -rf $(BUILD_DIR)/stage0
+	rm -f $(STAGE0_STAMP)
+	@echo "::endgroup::"
+
+clean: clean-stage1 clean-stage2 clean-stage3
+	@echo "Not removing stage0 (cabal), use clean-stage0 to remove cabal too."
+
+clean-stage1:
+	@echo "::group::Cleaning stage1 build artifacts..."
+	rm -rf $(BUILD_DIR)/stage1
+	rm -f $(STAGE1_STAMP)
+	@echo "::endgroup::"
+
+clean-stage2:
+	@echo "::group::Cleaning stage2 build artifacts..."
+	rm -rf $(BUILD_DIR)/stage2
+	rm -f $(STAGE2_STAMP)
+	@echo "::endgroup::"
+
+clean-stage3:
+	@echo "::group::Cleaning stage3 build artifacts..."
+	rm -rf $(BUILD_DIR)/stage3
+	@echo "::endgroup::"
+
+distclean: clean
+	@echo "::group::Cleaning all generated files (distclean)..."
+	rm -rf autom4te.cache
+	rm -f config.status config.log config.h aclocal.m4
+	rm -f $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES)
+	rm -rf libraries/ghc-boot-th-next
+	@echo "::endgroup::"
+
+# Default: skip performance tests (can override with SKIP_PERF_TESTS=NO)
+SKIP_PERF_TESTS ?= YES
+export SKIP_PERF_TESTS
+
+# --- Test Suite Helper Tool Paths & Flags (Hadrian parity light) ---
+# We approximate Hadrian's test invocation without depending on Hadrian.
+# $(CURDIR) is needed because the test recipe runs $(MAKE) -C testsuite/tests,
+# so relative paths would resolve from the wrong directory. This matters both
+# for CI and local `make test` invocations.
+TEST_TOOLS_DIR := $(CURDIR)/$(DIST_DIR)/bin
+TEST_GHC       := $(TEST_TOOLS_DIR)/ghc
+TEST_GHC_PKG   := $(TEST_TOOLS_DIR)/ghc-pkg
+TEST_HP2PS     := $(TEST_TOOLS_DIR)/hp2ps
+TEST_HPC       := $(TEST_TOOLS_DIR)/hpc
+TEST_RUN_GHC   := $(TEST_TOOLS_DIR)/runghc
+
+# Canonical GHC flags used by the testsuite (mirrors testsuite/mk/test.mk & Hadrian runTestGhcFlags)
+CANONICAL_TEST_HC_OPTS = \
+	-dcore-lint -dstg-lint -dcmm-lint -no-user-package-db -fno-dump-with-ways \
+	-fprint-error-index-links=never -rtsopts -fno-warn-missed-specialisations \
+	-fshow-warning-groups -fdiagnostics-color=never -fno-diagnostics-show-caret \
+	-Werror=compat -dno-debug-output
+
+# Build timeout utility (needed for some tests) if not already built.
+.PHONY: testsuite-timeout
+testsuite-timeout:
+	$(MAKE) -C testsuite/timeout
+
+# --- Test Target ---
+
+test: $(STAGE2_STAMP) testsuite-timeout
+	$(call PHASE_START,test)
+	@echo "::group::Running tests with THREADS=$(THREADS)" >&2
+	# If any required tool is missing, testsuite logic will skip related tests.
+	TEST_HC='$(TEST_GHC)' \
+	GHC_PKG='$(TEST_GHC_PKG)' \
+	HP2PS_ABS='$(TEST_HP2PS)' \
+	HPC='$(TEST_HPC)' \
+	RUNGHC='$(TEST_RUN_GHC)' \
+	TEST_CC='$(CC)' \
+	TEST_CXX='$(CXX)' \
+	TEST_HC_OPTS='$(CANONICAL_TEST_HC_OPTS)' \
+	METRICS_FILE='$(CURDIR)/$(BUILD_DIR)/test-perf.csv' \
+	SUMMARY_FILE='$(CURDIR)/$(BUILD_DIR)/test-summary.txt' \
+	JUNIT_FILE='$(CURDIR)/$(BUILD_DIR)/test-junit.xml' \
+	SKIP_PERF_TESTS='$(SKIP_PERF_TESTS)' \
+	THREADS='$(THREADS)' \
+	$(MAKE) -C testsuite/tests test
+	@echo "::endgroup::"
+	$(call PHASE_END_OK,test)
+
+# Inform Make that these are not actual files if they get deleted by other means
+.PHONY: clean clean-stage1 clean-stage2 clean-stage3 distclean test

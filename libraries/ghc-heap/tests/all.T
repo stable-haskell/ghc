@@ -94,7 +94,8 @@ test('stack_misc_closures',
      [
         extra_files(['stack_misc_closures_c.c', 'stack_misc_closures_prim.cmm', 'TestUtils.hs']),
         ignore_stdout,
-        ignore_stderr
+        ignore_stderr,
+        req_target_debug_rts # Debug RTS to use checkSTACK()
       ],
      multi_compile_and_run,
      ['stack_misc_closures',
@@ -103,3 +104,8 @@ test('stack_misc_closures',
          ]
       , '-debug' # Debug RTS to use checkSTACK() (Sanity.c)
       ])
+
+test('T27465',
+     [ when(have_profiling(), extra_ways(['prof']))
+     ],
+     compile_and_run, [''])

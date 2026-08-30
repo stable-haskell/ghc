@@ -11,6 +11,7 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeInType #-}
 {-# LANGUAGE UnboxedTuples #-}
+{-# LANGUAGE UnboxedSums #-}
 {-# LANGUAGE UnliftedFFITypes #-}
 
 module GHC.Internal.Stack.Decode (
@@ -214,21 +215,19 @@ getStackFields stackSnapshot# =
 stackHead :: StackSnapshot# -> StackFrameLocation
 stackHead s# = (StackSnapshot s#, 0) -- GHC stacks are never empty
 
--- | Advance to the next stack frame (if any)
---
--- The last `Int#` in the result tuple is meant to be treated as bool
--- (has_next).
+-- | Advance to the next stack frame (if any).
 foreign import prim "advanceStackFrameLocationzh"
   advanceStackFrameLocation# ::
-    StackSnapshot# -> Word# -> (# StackSnapshot#, Word#, Int# #)
+    StackSnapshot# -> Word# -> (# (# #) | (# StackSnapshot#, Word# #) #)
 
 -- | Advance to the next stack frame (if any)
 advanceStackFrameLocation :: StackFrameLocation -> Maybe StackFrameLocation
 advanceStackFrameLocation ((StackSnapshot stackSnapshot#), index) =
-  let !(# s', i', hasNext #) = advanceStackFrameLocation# stackSnapshot# (wordOffsetToWord# index)
-   in if I# hasNext > 0
-        then Just (StackSnapshot s', primWordToWordOffset i')
-        else Nothing
+  case advanceStackFrameLocation# stackSnapshot# (wordOffsetToWord# index) of
+    (# (# #) | #) ->
+      Nothing
+    (# | (# s', i' #) #) ->
+      Just (StackSnapshot s', primWordToWordOffset i')
   where
     primWordToWordOffset :: Word# -> WordOffset
     primWordToWordOffset w# = fromIntegral (W# w#)
@@ -269,7 +268,7 @@ decodeLargeBitmap getterFun# stackSnapshot# index relativePayloadOffset = do
     cWordArrayToList ptr size = mapM (peekElemOff ptr) [0 .. (size - 1)]
 
     usedBitmapWords :: Int -> Int
-    usedBitmapWords 0 = error "Invalid large bitmap size 0."
+    usedBitmapWords 0 = 0
     usedBitmapWords size = (size `div` fromIntegral wORD_SIZE_IN_BITS) + 1
 
     bitmapWordsPointerness :: Word -> [Word] -> [Pointerness]

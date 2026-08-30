@@ -1,0 +1,123 @@
+-- Configuration common to all stages
+import: cabal.project.common
+
+-- Hermetic build: resolve only from the explicitly-listed packages (+ the
+-- bootstrap compiler's installed packages), never Hackage. stage2/stage3
+-- already set this, but stage1 did not — so stage1's build-tools (happy/alex
+-- for the compiler's Parser.y/Lexer.x) floated to Hackage's newest. That was
+-- latent until happy-2.1.7 was published, after which stage1 built
+-- happy-lib-2.1.7 and the resulting parser code broke the build
+-- (genprimopcode GHC-44432: happyDoParse vs the pinned happy template).
+active-repositories: :none
+
+packages:
+  -- NOTE: we need rts-headers, because the _newly_ built compiler depends
+  --       on these potentially _new_ headers, we must not rely on those from
+  --       the rts as shipped with the bootstrap compiler. For the stage2
+  --       compiler we have the `rts` available, which would have the correct
+  --       headers around, now it has them through the rts -> rts-headers
+  --       dependency.
+  rts-headers
+  rts-fs
+
+  -- Compiler
+  ghc
+  compiler
+
+  -- Internal libraries
+  libraries/ghc-boot
+  libraries/ghc-boot-th-next
+  libraries/ghc-platform
+  https://hackage.haskell.org/package/libffi-clib-3.5.2/libffi-clib-3.5.2.tar.gz
+
+  -- Internal tools
+  utils/deriveConstants
+  utils/genapply
+  utils/genprimopcode
+  utils/ghc-pkg
+  utils/ghc-toolchain
+  utils/ghc-toolchain/exe
+  utils/unlit
+
+  -- The following are packages available on Hackage but included as submodules
+  https://hackage.haskell.org/package/directory-1.3.10.0/directory-1.3.10.0.tar.gz
+  https://hackage.haskell.org/package/file-io-0.1.5/file-io-0.1.5.tar.gz
+  https://hackage.haskell.org/package/filepath-1.5.4.0/filepath-1.5.4.0.tar.gz
+  https://hackage.haskell.org/package/os-string-2.0.8/os-string-2.0.8.tar.gz
+  https://hackage.haskell.org/package/process-1.6.29.0/process-1.6.29.0.tar.gz
+  https://hackage.haskell.org/package/semaphore-compat-2.0.1/semaphore-compat-2.0.1.tar.gz
+  https://hackage.haskell.org/package/unix-2.8.8.0/unix-2.8.8.0.tar.gz
+  https://hackage.haskell.org/package/Win32-2.14.2.1/Win32-2.14.2.1.tar.gz
+
+  -- Build-tools for the compiler's Parser.y / Lexer.x, plus hpc (a dep of ghc
+  -- whose bootstrap-installed version wants the old directory). Pinned so the
+  -- `active-repositories: :none` above resolves them to the same vetted
+  -- versions as stage2/stage3 instead of floating to Hackage's newest.
+  https://hackage.haskell.org/package/alex-3.5.2.0/alex-3.5.2.0.tar.gz
+  https://hackage.haskell.org/package/happy-2.1.5/happy-2.1.5.tar.gz
+  https://hackage.haskell.org/package/happy-lib-2.1.5/happy-lib-2.1.5.tar.gz
+  https://hackage.haskell.org/package/hpc-0.7.0.2/hpc-0.7.0.2.tar.gz
+  -- hsc2hs: see source-repository-package below
+
+source-repository-package
+  type: git
+  location: https://github.com/stable-haskell/Cabal.git
+  -- See cabal.project.stage0 for why this SHA (post-split host:*/build:*).
+  tag: f2e0a89e15cf6604cec9d93e26a4b3caf459b076
+  subdir: Cabal
+          Cabal-syntax
+
+
+allow-newer: directory:*
+           , file-io:*
+           , os-string:*
+           , process:*
+           , semaphore-compat:*
+           , unix:*
+           , Win32:*
+           , hsc2hs:*
+
+--
+-- Constraints
+--
+
+constraints:
+  template-haskell <= 2.22
+
+--
+-- Package level configuration
+--
+
+package *
+  shared: False
+  executable-dynamic: False
+
+if !os(windows)
+  package *
+    library-for-ghci: False
+
+package ghc
+  flags: +bootstrap
+         +x86-ncg +aarch64-ncg
+         -ppc-ncg -riscv64-ncg -loongarch64-ncg
+         +host-ncg-only
+         -js-backend -wasm-backend
+         -llvm-backend
+         -interpreter -dynamic-linker
+         -hpc
+
+package ghc-bin
+  flags: -frontend-plugins
+
+package ghc-boot
+  flags: +bootstrap
+
+package ghc-boot-th-next
+  flags: +bootstrap
+
+-- hsc2hs with batch cross-compilation support
+-- https://github.com/stable-haskell/hsc2hs/tree/feat/batch-cross-compilation
+source-repository-package
+  type: git
+  location: https://github.com/stable-haskell/hsc2hs.git
+  tag: d07eea1260894ce5fe456f881fbc62366c9eb1b7

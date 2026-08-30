@@ -8,6 +8,8 @@
 --
 --  (c) The University of Glasgow 2002-2006
 --
+-- NOTE: This module is only compiled when flag(interpreter) is enabled
+-- (see ghc.cabal.in). No CPP guards needed.
 
 -- | Bytecode assembler and linker
 module GHC.ByteCode.Linker
@@ -46,6 +48,7 @@ import qualified GHC.Types.Id as Id
 import GHC.Types.Unique.DFM
 
 -- Standard libraries
+import Control.Concurrent
 import Data.Array.Unboxed
 import Foreign.Ptr
 import GHC.Exts
@@ -92,9 +95,12 @@ lookupLiteral interp pkgs_loaded le lb ptr = case ptr of
   BCONPtrStr bs -> do
     RemotePtr p <- fmap head $ interpCmd interp $ MallocStrings [bs]
     pure $ fromIntegral p
-  BCONPtrFS fs -> do
-    RemotePtr p <- fmap head $ interpCmd interp $ MallocStrings [bytesFS fs]
-    pure $ fromIntegral p
+  BCONPtrFS fs -> modifyMVar (interpStringCache interp) $ \fs_env ->
+    case lookupFsEnv fs_env fs of
+      Just (RemotePtr p) -> pure (fs_env, fromIntegral p)
+      Nothing -> do
+        rp@(RemotePtr p) <- fmap head $ interpCmd interp $ MallocStrings [bytesFS fs]
+        pure (extendFsEnv fs_env fs rp, fromIntegral p)
   BCONPtrFFIInfo (FFIInfo {..}) -> do
     RemotePtr p <- interpCmd interp $ PrepFFI ffiInfoArgs ffiInfoRet
     pure $ fromIntegral p
@@ -190,26 +196,57 @@ resolvePtr interp pkgs_loaded le lb bco_ix ptr = case ptr of
     withForeignRef (expectJust (lookupModuleEnv (breakarray_env lb) tick_mod)) $
       \ba -> pure $ ResolvedBCOPtrBreakArray ba
 
+{-
+Note [Symbol lookup order for boot libraries]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+When looking up symbols for bytecode linking, we must check the main program's
+symbol table BEFORE looking in dynamically loaded libraries. This is critical
+for boot library symbols like 'stdout' from ghc-internal.
+
+The issue: When GHC compiles Template Haskell code, it loads boot libraries
+(like ghc-internal) as dynamic libraries for bytecode execution. These
+dynamically loaded libraries contain their OWN copies of CAFs (Constant
+Applicative Forms) like 'stdout'. If bytecode uses the DLL's stdout instead
+of GHC's native stdout, output buffering becomes inconsistent:
+
+  - GHC's native code flushes GHC's stdout
+  - Bytecode writes to DLL's stdout (a different buffer!)
+  - Output is lost because the wrong buffer is flushed
+
+The fix: Look up symbols in the main program first (via lookupSymbol, which
+uses dlsym(RTLD_DEFAULT) and checks the main executable before loaded
+libraries). Only if not found there do we search the loaded DLLs.
+
+This aligns with the RTS's internal_dlsym() which also checks the main
+program first. See Note [RTLD_LOCAL] in rts/Linker.c.
+-}
+
 -- | Look up the address of a Haskell symbol in the currently
 -- loaded units.
 --
 -- See Note [Looking up symbols in the relevant objects].
+-- See Note [Symbol lookup order for boot libraries].
 lookupHsSymbol :: Interp -> PkgsLoaded -> InterpSymbol (Suffix s) -> IO (Maybe (Ptr ()))
 lookupHsSymbol interp pkgs_loaded sym_to_find = do
   massertPpr (isExternalName (interpSymbolName sym_to_find)) (ppr sym_to_find)
   let pkg_id = moduleUnitId $ nameModule (interpSymbolName sym_to_find)
       loaded_dlls = maybe [] loaded_pkg_hs_dlls $ lookupUDFM pkgs_loaded pkg_id
 
-      go (dll:dlls) = do
-        mb_ptr <- lookupSymbolInDLL interp dll sym_to_find
-        case mb_ptr of
-          Just ptr -> pure (Just ptr)
-          Nothing -> go dlls
-      go [] =
-        -- See Note [Symbols may not be found in pkgs_loaded] in GHC.Linker.Types
-        lookupSymbol interp sym_to_find
-
-  go loaded_dlls
+  -- First try the main program / global symbol table.
+  -- This is important for boot library symbols (like stdout from ghc-internal)
+  -- to ensure bytecode uses the same CAFs as GHC's native code.
+  -- See Note [Symbol lookup order for boot libraries].
+  mb_main <- lookupSymbol interp sym_to_find
+  case mb_main of
+    Just ptr -> pure (Just ptr)
+    Nothing -> go loaded_dlls
+  where
+    go (dll:dlls) = do
+      mb_ptr <- lookupSymbolInDLL interp dll sym_to_find
+      case mb_ptr of
+        Just ptr -> pure (Just ptr)
+        Nothing -> go dlls
+    go [] = pure Nothing
 
 linkFail :: String -> SDoc -> IO a
 linkFail who what
@@ -223,7 +260,7 @@ linkFail who what
                 , "flags, or simply by naming the relevant files on the GHCi command line."
                 , "Alternatively, this link failure might indicate a bug in GHCi."
                 , "If you suspect the latter, please report this as a GHC bug:"
-                , "  https://www.haskell.org/ghc/reportabug"
+                , "  https://github.com/stable-haskell/ghc/issues"
                 ])
 
 
@@ -238,3 +275,4 @@ primopToCLabel primop suffix = concat
     , zString (zEncodeFS (occNameFS (primOpOcc primop)))
     , '_':suffix
     ]
+

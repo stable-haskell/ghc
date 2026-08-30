@@ -705,6 +705,8 @@ printStackChunk( StgPtr sp, StgPtr spBottom )
                 debugBelch("stg_apply_interp_info" );
             } else if (c == (StgWord)&stg_ret_t_info) {
                 debugBelch("stg_ret_t_info" );
+            } else if (c == (StgWord)&stg_ctoi_t_info) {
+                debugBelch("stg_ctoi_t_info" );
             } else if (c == (StgWord)&stg_ctoi_t0_info) {
                 debugBelch("stg_ctoi_t0_info" );
             } else if (c == (StgWord)&stg_ctoi_t1_info) {
@@ -723,8 +725,6 @@ printStackChunk( StgPtr sp, StgPtr spBottom )
                 debugBelch("stg_ctoi_t7_info" );
             } else if (c == (StgWord)&stg_ctoi_t8_info) {
                 debugBelch("stg_ctoi_t8_info" );
-            /* there are more stg_ctoi_tN_info frames,
-               but we don't print them all */
             } else {
                 debugBelch("RET_BCO");
             }
@@ -1033,8 +1033,8 @@ findPtr(P_ p, int follow)
 {
   uint32_t g, n;
   bdescr *bd;
-  const int arr_size = 1024;
-  StgPtr arr[arr_size];
+#define ARR_SIZE 1024
+  StgPtr arr[ARR_SIZE];
   int i = 0;
   searched = 0;
 
@@ -1044,24 +1044,24 @@ findPtr(P_ p, int follow)
   // just before a block is used.
   for (n = 0; n < getNumCapabilities(); n++) {
       bd = nurseries[i].blocks;
-      i = findPtrBlocks(p,bd,arr,arr_size,i);
-      if (i >= arr_size) return;
+      i = findPtrBlocks(p,bd,arr,ARR_SIZE,i);
+      if (i >= ARR_SIZE) return;
   }
 #endif
 
   for (g = 0; g < RtsFlags.GcFlags.generations; g++) {
       bd = generations[g].blocks;
-      i = findPtrBlocks(p,bd,arr,arr_size,i);
+      i = findPtrBlocks(p,bd,arr,ARR_SIZE,i);
       bd = generations[g].large_objects;
-      i = findPtrBlocks(p,bd,arr,arr_size,i);
-      if (i >= arr_size) return;
+      i = findPtrBlocks(p,bd,arr,ARR_SIZE,i);
+      if (i >= ARR_SIZE) return;
       for (n = 0; n < getNumCapabilities(); n++) {
           i = findPtrBlocks(p, gc_threads[n]->gens[g].part_list,
-                            arr, arr_size, i);
+                            arr, ARR_SIZE, i);
           i = findPtrBlocks(p, gc_threads[n]->gens[g].todo_bd,
-                            arr, arr_size, i);
+                            arr, ARR_SIZE, i);
       }
-      if (i >= arr_size) return;
+      if (i >= ARR_SIZE) return;
   }
   if (follow && i == 1) {
       debugBelch("-->\n");

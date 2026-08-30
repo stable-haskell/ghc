@@ -1,0 +1,24 @@
+-- Dynamic stage2 build (DYNAMIC=1).
+--
+-- All shared stage2 configuration lives in cabal.project.stage2.common; this
+-- file only selects shared libraries, dynamic executables and the dynamic RTS.
+-- The Makefile uses this project file when DYNAMIC=1.
+import: cabal.project.stage2.common
+
+-- Stage-qualified so `shared`/`executable-dynamic` only hit the HOST stage.
+-- The post-split Cabal (stable-haskell/cabal #378, `package <stage>:*`) does
+-- NOT treat an unqualified `package *` as host-only the way the pre-split pin
+-- did; a bare `package * { shared: True }` here would also build the BUILD-stage
+-- tools shared, which then fail to link against the bootstrap GHC's
+-- static-only libs ("ld: cannot find -lHSbytestring-...-ghc9.8.4"). Forcing
+-- `build:*` static keeps the build tools linkable. (See cabal#384.)
+package host:*
+  shared: True
+  executable-dynamic: True
+
+package build:*
+  shared: False
+  executable-dynamic: False
+
+constraints:
+  rts +dynamic

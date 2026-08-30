@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE NondecreasingIndentation #-}
 {-# LANGUAGE GADTs #-}
@@ -52,11 +53,13 @@ module GHC.Driver.Main
     , hscCompileCmmFile
 
     , hscGenHardCode
+#if defined(HAVE_INTERPRETER)
     , hscInteractive
     , mkCgInteractiveGuts
     , CgInteractiveGuts
     , generateByteCode
     , generateFreshByteCode
+#endif
 
     -- * Running passes separately
     , hscRecompStatus
@@ -81,18 +84,24 @@ module GHC.Driver.Main
     , hscGetModuleInterface
     , hscRnImportDecls
     , hscTcRnLookupRdrName
+#if defined(HAVE_INTERPRETER)
     , hscStmt, hscParseStmtWithLocation, hscStmtWithLocation, hscParsedStmt
     , hscParseDeclsWithLocation, hscParsedDecls
+#endif
     , hscParseModuleWithLocation
     , hscTcExpr, TcRnExprMode(..), hscImport, hscKcType
     , hscParseExpr
     , hscParseType
+#if defined(HAVE_INTERPRETER)
     , hscCompileCoreExpr
+#endif
     , hscTidy
 
 
     -- * Low-level exports for hooks
+#if defined(HAVE_INTERPRETER)
     , hscCompileCoreExpr'
+#endif
       -- We want to make sure that we export enough to be able to redefine
       -- hsc_typecheck in client code
     , hscParse', hscSimplify', hscDesugar', tcRnModule', doCodeGen
@@ -102,7 +111,9 @@ module GHC.Driver.Main
     , dumpIfaceStats
     , ioMsgMaybe
     , showModuleIndex
+#if defined(HAVE_INTERPRETER)
     , hscAddSptEntries
+#endif
     , writeInterfaceOnlyMode
     , loadByteCode
     , genModDetails
@@ -134,13 +145,18 @@ import GHC.Driver.Config.Stg.Pipeline (initStgPipelineOpts)
 import GHC.Driver.Config.StgToCmm  (initStgToCmmConfig)
 import GHC.Driver.Config.Cmm       (initCmmConfig)
 import GHC.Driver.LlvmConfigCache  (initLlvmConfigCache)
+#if defined(HAVE_JS_BACKEND)
 import GHC.Driver.Config.StgToJS  (initStgToJSConfig)
+#endif
 import GHC.Driver.Config.Diagnostic
 import GHC.Driver.Config.Tidy
 import GHC.Driver.Hooks
 import GHC.Driver.GenerateCgIPEStub (generateCgIPEStub, lookupEstimatedTicks)
 
+import GHC.Runtime.Interpreter.Types  ( Interp, interpreterDynamic, interpreterProfiled, StgToJSConfig(..) )
 import GHC.Runtime.Context
+
+#if defined(HAVE_INTERPRETER)
 import GHC.Runtime.Interpreter
 import GHC.Runtime.Interpreter.JS
 import GHC.Runtime.Loader      ( initializePlugins )
@@ -148,20 +164,28 @@ import GHCi.RemoteTypes
 import GHC.ByteCode.Types
 
 import GHC.Linker.Loader
-import GHC.Linker.Types
 import GHC.Linker.Deps
+#endif
+import GHC.Linker.Types
 
 import GHC.Hs
 import GHC.Hs.Dump
 import GHC.Hs.Stats         ( ppSourceStats )
 
 import GHC.HsToCore
+-- ModBreaks lives here (not only in ByteCode.Types); needed for hscSimpleIface
+-- even when HAVE_INTERPRETER is off.
+import GHC.HsToCore.Breakpoints.Types ( ModBreaks )
 
+#if defined(HAVE_INTERPRETER)
 import GHC.StgToByteCode    ( byteCodeGen )
+#endif
+#if defined(HAVE_JS_BACKEND)
 import GHC.StgToJS          ( stgToJS )
 import GHC.StgToJS.Ids
 import GHC.StgToJS.Types
 import GHC.JS.Syntax
+#endif
 
 import GHC.IfaceToCore  ( typecheckIface, typecheckWholeCoreBindings )
 
@@ -305,6 +329,28 @@ import GHC.Cmm.Config (CmmConfig)
 import Data.Bifunctor
 import qualified GHC.Unit.Home.Graph as HUG
 import GHC.Unit.Home.PackageTable
+
+#if !defined(HAVE_INTERPRETER)
+-- Stub when interpreter not available: plugin initialization requires the
+-- interpreter to load compiled plugin code, so we skip it in minimal builds.
+-- If plugins are specified in the flags but the interpreter is unavailable,
+-- they will simply be ignored.
+initializePlugins :: HscEnv -> IO HscEnv
+initializePlugins hsc_env = do
+  let logger = hsc_logger hsc_env
+  logMsg logger MCInfo noSrcSpan $
+    text "initializePlugins: interpreter not available; skipping plugin initialization"
+  return hsc_env
+#endif
+
+#if !defined(HAVE_JS_BACKEND)
+-- Stub when JS backend not available
+initStgToJSConfig :: DynFlags -> StgToJSConfig
+initStgToJSConfig _ = StgToJSConfig  -- StgToJSConfig stub is from GHC.Runtime.Interpreter.Types
+
+stgToJS :: Logger -> StgToJSConfig -> [CgStgTopBinding] -> Module -> [SptEntry] -> ForeignStubs -> ([CostCentre], [CostCentreStack]) -> FilePath -> IO ()
+stgToJS _ _ _ _ _ _ _ _ = panic "stgToJS: not available (HAVE_JS_BACKEND not defined)"
+#endif
 
 {- **********************************************************************
 %*                                                                      *
@@ -693,7 +739,7 @@ hsc_typecheck keep_rn mod_summary mb_rdr_module = do
                     Nothing -> hscParse' mod_summary
             tc_result0 <- tcRnModule' mod_summary keep_rn' hpm
             if hsc_src == HsigFile
-                then do (iface, _) <- liftIO $ hscSimpleIface hsc_env Nothing tc_result0 mod_summary
+                then do (iface, _) <- liftIO $ hscSimpleIface hsc_env Nothing Nothing tc_result0 mod_summary
                         ioMsgMaybe $ hoistTcRnMessage $
                             tcRnMergeSignatures hsc_env hpm tc_result0 iface
                 else return tc_result0
@@ -732,7 +778,11 @@ tcRnModule' sum save_rn_syntax mod = do
     if not (safeHaskellOn dflags)
          || (safeInferOn dflags && not allSafeOK)
       -- if safe Haskell off or safe infer failed, mark unsafe
+#if !defined(HAVE_INTERPRETER)
+      then return tcg_res
+#else
       then markUnsafeInfer tcg_res whyUnsafe
+#endif
 
       -- module (could be) safe, throw warning if needed
       else do
@@ -871,7 +921,7 @@ hscRecompStatus
                -- we will decide if we need them or not.
                bc_linkable <- checkByteCode checked_iface mod_summary (homeMod_bytecode old_linkable)
                obj_linkable <- liftIO $ checkObjects lcl_dflags (homeMod_object old_linkable) mod_summary
-               trace_if (hsc_logger hsc_env) (vcat [text "BCO linkable", nest 2 (ppr bc_linkable), text "Object Linkable", ppr obj_linkable])
+               trace_if (hsc_logger hsc_env) (vcat [text "BCO linkable", nest 2 (ppr bc_linkable), text "Object Linkable", nest 2 (ppr obj_linkable)])
 
                let just_bc = justBytecode <$> bc_linkable
                    just_o  = justObjects  <$> obj_linkable
@@ -1018,12 +1068,13 @@ compile_for_interpreter hsc_env use =
 -- | Assemble 'WholeCoreBindings' if the interface contains Core bindings.
 iface_core_bindings :: ModIface -> ModLocation -> Maybe WholeCoreBindings
 iface_core_bindings iface wcb_mod_location =
-  mi_simplified_core <&> \(IfaceSimplifiedCore bindings foreign') ->
+  mi_simplified_core <&> \(IfaceSimplifiedCore bindings wcb_modBreaks foreign') ->
     WholeCoreBindings {
       wcb_bindings = bindings,
       wcb_module = mi_module,
       wcb_mod_location,
-      wcb_foreign = foreign'
+      wcb_foreign = foreign',
+      wcb_modBreaks
     }
   where
     ModIface {mi_module, mi_simplified_core} = iface
@@ -1046,6 +1097,9 @@ loadIfaceByteCode ::
   ModLocation ->
   TypeEnv ->
   Maybe (IO Linkable)
+#if !defined(HAVE_INTERPRETER)
+loadIfaceByteCode _ _ _ _ = Nothing
+#else
 loadIfaceByteCode hsc_env iface location type_env =
   compile <$> iface_core_bindings iface location
   where
@@ -1054,9 +1108,10 @@ loadIfaceByteCode hsc_env iface location type_env =
       linkable $ BCOs bcos :| [DotO fo ForeignObject | fo <- fos]
 
     linkable parts = do
-      if_time <- modificationTimeIfExists (ml_hi_file location)
+      if_time <- modificationTimeIfExists (ml_hi_file_ospath location)
       time <- maybe getCurrentTime pure if_time
       return $! Linkable time (mi_module iface) parts
+#endif
 
 loadIfaceByteCodeLazy ::
   HscEnv ->
@@ -1064,6 +1119,9 @@ loadIfaceByteCodeLazy ::
   ModLocation ->
   TypeEnv ->
   IO (Maybe Linkable)
+#if !defined(HAVE_INTERPRETER)
+loadIfaceByteCodeLazy _ _ _ _ = return Nothing
+#else
 loadIfaceByteCodeLazy hsc_env iface location type_env =
   case iface_core_bindings iface location of
     Nothing -> return Nothing
@@ -1075,9 +1133,10 @@ loadIfaceByteCodeLazy hsc_env iface location type_env =
       linkable $ NE.singleton (LazyBCOs bcos fos)
 
     linkable parts = do
-      if_time <- modificationTimeIfExists (ml_hi_file location)
+      if_time <- modificationTimeIfExists (ml_hi_file_ospath location)
       time <- maybe getCurrentTime pure if_time
       return $!Linkable time (mi_module iface) parts
+#endif
 
 -- | If the 'Linkable' contains Core bindings loaded from an interface, replace
 -- them with a lazy IO thunk that compiles them to bytecode and foreign objects,
@@ -1107,6 +1166,9 @@ initWholeCoreBindings ::
   ModDetails ->
   Linkable ->
   IO Linkable
+#if !defined(HAVE_INTERPRETER)
+initWholeCoreBindings _ _ _ l = return l
+#else
 initWholeCoreBindings hsc_env iface details (Linkable utc_time this_mod uls) = do
   Linkable utc_time this_mod <$> mapM (go hsc_env) uls
   where
@@ -1119,6 +1181,7 @@ initWholeCoreBindings hsc_env iface details (Linkable utc_time this_mod uls) = d
       l -> pure l
 
     type_env = md_types details
+#endif
 
 -- | Hydrate interface Core bindings and compile them to bytecode.
 --
@@ -1134,6 +1197,7 @@ initWholeCoreBindings hsc_env iface details (Linkable utc_time this_mod uls) = d
 --
 -- 3. Generating bytecode and foreign objects from the results of the previous
 --    steps using the usual pipeline actions.
+#if defined(HAVE_INTERPRETER)
 compileWholeCoreBindings ::
   HscEnv ->
   TypeEnv ->
@@ -1161,13 +1225,14 @@ compileWholeCoreBindings hsc_env type_env wcb = do
     gen_bytecode core_binds stubs foreign_files = do
       let cgi_guts = CgInteractiveGuts wcb_module core_binds
                       (typeEnvTyCons type_env) stubs foreign_files
-                      Nothing []
+                      wcb_modBreaks []
       trace_if logger (text "Generating ByteCode for" <+> ppr wcb_module)
       generateByteCode hsc_env cgi_guts wcb_mod_location
 
-    WholeCoreBindings {wcb_module, wcb_mod_location, wcb_foreign} = wcb
+    WholeCoreBindings {wcb_module, wcb_mod_location, wcb_foreign, wcb_modBreaks} = wcb
 
     logger = hsc_logger hsc_env
+#endif
 
 {-
 Note [ModDetails and --make mode]
@@ -1263,7 +1328,12 @@ hscDesugarAndSimplify summary (FrontendTypecheck tc_result) tc_warnings mb_old_h
   case mb_desugar of
       -- Just cause we desugared doesn't mean we are generating code, see above.
       Just desugared_guts | backendGeneratesCode bcknd -> do
+#if !defined(HAVE_INTERPRETER)
+          -- No TH plugins can be registered (HAVE_INTERPRETER not defined)
+          let plugins = []
+#else
           plugins <- liftIO $ readIORef (tcg_th_coreplugins tc_result)
+#endif
           simplified_guts <- hscSimplify' plugins desugared_guts
 
           (cg_guts, details) <-
@@ -1286,13 +1356,19 @@ hscDesugarAndSimplify summary (FrontendTypecheck tc_result) tc_warnings mb_old_h
           -- Running the simplifier once is necessary before doing byte code generation
           -- in order to inline data con wrappers but we honour whatever level of simplificication the
           -- user requested. See #22008 for some discussion.
+#if !defined(HAVE_INTERPRETER)
+          -- No TH plugins can be registered (HAVE_INTERPRETER not defined)
+          let plugins = []
+#else
           plugins <- liftIO $ readIORef (tcg_th_coreplugins tc_result)
+#endif
           simplified_guts <- hscSimplify' plugins desugared_guts
           (cg_guts, _) <-
               liftIO $ hscTidy hsc_env simplified_guts
 
           (iface, _details) <- liftIO $
-            hscSimpleIface hsc_env (Just $ cg_binds cg_guts) tc_result summary
+            hscSimpleIface hsc_env (Just $ cg_binds cg_guts)
+             (cg_modBreaks cg_guts) tc_result summary
 
           liftIO $ hscMaybeWriteIface logger dflags True iface mb_old_hash (ms_location summary)
 
@@ -1307,7 +1383,7 @@ hscDesugarAndSimplify summary (FrontendTypecheck tc_result) tc_warnings mb_old_h
       -- and generate a simple interface.
       _ -> do
         (iface, _details) <- liftIO $
-          hscSimpleIface hsc_env Nothing tc_result summary
+          hscSimpleIface hsc_env Nothing Nothing tc_result summary
 
         liftIO $ hscMaybeWriteIface logger dflags True iface mb_old_hash (ms_location summary)
 
@@ -1886,17 +1962,19 @@ hscSimplify' plugins ds_result = do
 -- generates interface files. See Note [simpleTidyPgm - mkBootModDetailsTc]
 hscSimpleIface :: HscEnv
                -> Maybe CoreProgram
+               -> Maybe ModBreaks
                -> TcGblEnv
                -> ModSummary
                -> IO (ModIface, ModDetails)
-hscSimpleIface hsc_env mb_core_program tc_result summary
-    = runHsc hsc_env $ hscSimpleIface' mb_core_program tc_result summary
+hscSimpleIface hsc_env mb_core_program mb_modBreaks tc_result summary
+    = runHsc hsc_env $ hscSimpleIface' mb_core_program mb_modBreaks tc_result summary
 
 hscSimpleIface' :: Maybe CoreProgram
+                -> Maybe ModBreaks
                 -> TcGblEnv
                 -> ModSummary
                 -> Hsc (ModIface, ModDetails)
-hscSimpleIface' mb_core_program tc_result summary = do
+hscSimpleIface' mb_core_program mb_modBreaks tc_result summary = do
     hsc_env   <- getHscEnv
     logger    <- getLogger
     details   <- liftIO $ mkBootModDetailsTc logger tc_result
@@ -1904,7 +1982,7 @@ hscSimpleIface' mb_core_program tc_result summary = do
     new_iface
         <- {-# SCC "MkFinalIface" #-}
            liftIO $
-               mkIfaceTc hsc_env safe_mode details summary mb_core_program tc_result
+               mkIfaceTc hsc_env safe_mode details summary mb_core_program mb_modBreaks tc_result
     -- And the answer is ...
     liftIO $ dumpIfaceStats hsc_env
     return (new_iface, details)
@@ -2100,6 +2178,7 @@ hscGenHardCode hsc_env cgguts mod_loc output_filename = do
                       , Just stg_cg_infos, Just cmm_cg_infos)
 
 
+#if defined(HAVE_INTERPRETER)
 -- The part of CgGuts that we need for HscInteractive
 data CgInteractiveGuts = CgInteractiveGuts { cgi_module :: Module
                                            , cgi_binds  :: CoreProgram
@@ -2188,6 +2267,7 @@ generateFreshByteCode hsc_env mod_name cgguts mod_location = do
     Linkable bco_time
     (mkHomeModule (hsc_home_unit hsc_env) mod_name)
     (BCOs bcos :| [DotO fo ForeignObject | fo <- fos])
+#endif
 ------------------------------
 
 hscCompileCmmFile :: HscEnv -> FilePath -> FilePath -> FilePath -> IO (Maybe FilePath)
@@ -2396,6 +2476,7 @@ myCoreToStg logger dflags ic_inscope for_bytecode this_mod ml prepd_binds = do
 %*                                                                      *
 %********************************************************************* -}
 
+#if defined(HAVE_INTERPRETER)
 {-
 When the UnlinkedBCOExpr is linked you get an HValue of type *IO [HValue]* When
 you run it you get a list of HValues that should be the same length as the list
@@ -2455,6 +2536,7 @@ hscParsedStmt hsc_env stmt = runInteractiveHsc hsc_env $ do
   (hval,_,_) <- liftIO $ hscCompileCoreExpr hsc_env src_span ds_expr
 
   return $ Just (ids, hval, fix_env)
+#endif
 
 hscParseModuleWithLocation :: HscEnv -> String -> Int -> String -> IO (HsModule GhcPs)
 hscParseModuleWithLocation hsc_env source line_num str = do
@@ -2468,6 +2550,7 @@ hscParseDeclsWithLocation hsc_env source line_num str = do
   HsModule { hsmodDecls = decls } <- hscParseModuleWithLocation hsc_env source line_num str
   return decls
 
+#if defined(HAVE_INTERPRETER)
 hscParsedDecls :: HscEnv -> [LHsDecl GhcPs] -> IO ([TyThing], InteractiveContext)
 hscParsedDecls hsc_env decls = runInteractiveHsc hsc_env $ do
     hsc_env <- getHscEnv
@@ -2553,6 +2636,7 @@ hscAddSptEntries hsc_env entries = do
             (val, _, _) <- loadName interp hsc_env (idName i)
             addSptEntry interp fpr val
     mapM_ add_spt_entry entries
+#endif
 
 {-
   Note [Fixity declarations in GHCi]
@@ -2700,6 +2784,7 @@ hscTidy hsc_env guts = do
   pure (cgguts, details)
 
 
+#if defined(HAVE_INTERPRETER)
 {- **********************************************************************
 %*                                                                      *
         Desugar, simplify, convert to bytecode, and link an expression
@@ -2782,7 +2867,7 @@ hscCompileCoreExpr' hsc_env srcspan ds_expr = do
 
   case interp of
     -- always generate JS code for the JS interpreter (no bytecode!)
-    Interp (ExternalInterp (ExtJS i)) _ _ ->
+    Interp { interpInstance = ExternalInterp (ExtJS i) } ->
       jsCodeGen hsc_env srcspan i this_mod stg_binds_with_deps binding_id
 
     _ -> do
@@ -2891,6 +2976,7 @@ jsCodeGen hsc_env srcspan i this_mod stg_binds_with_deps binding_id = do
                     mkForeignRef href (freeReallyRemoteRef inst href)
 
   return (castForeignRef binding_fref, dep_linkables, dep_units)
+#endif
 
 
 {- **********************************************************************

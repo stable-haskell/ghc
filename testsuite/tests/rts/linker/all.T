@@ -123,14 +123,17 @@ test('linker_unload_native',
 ######################################
 test('linker_error1', [extra_files(['linker_error.c']),
                        js_skip, # dynamic linking not supported by the JS backend
+                       req_target_debug_rts,
                        ignore_stderr], makefile_test, ['linker_error1'])
 
 test('linker_error2', [extra_files(['linker_error.c']),
                        js_skip, # dynamic linking not supported by the JS backend
+                       req_target_debug_rts,
                        ignore_stderr], makefile_test, ['linker_error2'])
 
 test('linker_error3', [extra_files(['linker_error.c']),
                        js_skip, # dynamic linking not supported by the JS backend
+                       req_target_debug_rts,
                        ignore_stderr], makefile_test, ['linker_error3'])
 
 ######################################
@@ -149,11 +152,12 @@ test('rdynamic', [ unless(opsys('linux') or opsys('mingw32'), skip)
 test('T7072',
 	[extra_files(['load-object.c', 'T7072.c']),
 		unless(opsys('linux'), skip),
-		req_rts_linker],
+		req_rts_linker,
+                req_target_debug_rts
+                ],
 	makefile_test, ['T7072'])
 
-test('T20494', [req_rts_linker, when(opsys('linux') and not ghc_dynamic(), expect_broken(20706))],
-     makefile_test, ['T20494'])
+test('T20494', [req_rts_linker], makefile_test, ['T20494'])
 
 test('T20918',
      [extra_files(['T20918_v.cc']),
@@ -181,3 +185,11 @@ test('T25191',
       when(opsys('mingw32'), expect_broken(25191)) # not supported in the PE linker yet
      ],
      makefile_test, ['T25191'])
+
+
+# Test that COMMON symbols from multiple object files are merged correctly
+test('T6107',
+     [req_rts_linker,
+      extra_files(['T6107_sym1.s', 'T6107_sym2.s'])
+     ],
+     makefile_test, ['T6107'])

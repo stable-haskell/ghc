@@ -1,0 +1,50 @@
+# Channel end-to-end CI — multi-target bindist channel (live).
+#
+# Validates the SHIPPED multi-target GHC + cabal + ghcup channel YAML
+# by exercising the exact flow an end-user does: ghcup install fresh,
+# add the multi-target stable-haskell channel, install GHC + cabal,
+# compile + run a hello-world for each of native / wasm / JS, then
+# build a TH-heavy real-app (miso-counter) via the wasm frontend.
+#
+# This is a thin wrapper around reusable-channel-e2e.yml in install_mode
+# "channel" (live channel YAML, not this run's artifacts). The same
+# reusable workflow is also called from nix-ci.yml in install_mode
+# "artifact" against PR-built bindists.
+#
+# Triggers:
+#   * push of `multi-*` tag — re-validate after a new release ships
+#   * PR that touches this workflow OR the reusable
+#   * workflow_dispatch
+#   * weekly silent-regression canary
+#
+# The legacy `Channel e2e (WASM)` workflow is retired; the multi-target
+# bindist supersedes it.
+name: Channel e2e (MULTI)
+
+on:
+  push:
+    tags: [multi-*]
+  pull_request:
+    paths:
+      - '.github/workflows/channel-e2e-multi.yml'
+      - '.github/workflows/reusable-channel-e2e.yml'
+  workflow_dispatch:
+    inputs:
+      multi_version:
+        description: 'Multi-target GHC version to test (e.g. multi-9.14.0.stable.1)'
+        default: ''
+  schedule:
+    - cron: '0 6 * * 1'      # Monday 06:00 UTC — silent-regression canary
+
+concurrency:
+  group: channel-e2e-multi-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  e2e:
+    uses: ./.github/workflows/reusable-channel-e2e.yml
+    with:
+      install_mode: channel
+      multi_version: ${{ inputs.multi_version != '' && inputs.multi_version || 'multi-9.14.0.stable.1' }}
+      cabal_version: '3.17.0.0.stable.0'
+    secrets: inherit

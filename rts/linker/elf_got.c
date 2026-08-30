@@ -5,6 +5,51 @@
 #include <string.h>
 
 #if defined(OBJFORMAT_ELF)
+
+/*
+ * Check whether a symbol (identified by its symbol table section index and
+ * its index within that table) is referenced by any relocation whose type
+ * is not R_*_NONE (type 0).  R_*_NONE is a no-op relocation for every ELF
+ * architecture, so symbols referenced exclusively by NONE relocations need
+ * not be resolved.
+ *
+ * This is used by fillGot() to avoid hard failures on undefined symbols that
+ * the assembler emitted NONE relocations for (e.g. zero-length arrays
+ * optimised away by the compiler but still present in the symbol table).
+ */
+static bool
+symbolHasNonNoneRelocation(ObjectCode *oc, unsigned symTabIndex,
+                           size_t symIdx)
+{
+    /* Scan REL relocation tables */
+    for (ElfRelocationTable *relTab = oc->info->relTable;
+         relTab != NULL; relTab = relTab->next) {
+        if (relTab->sectionHeader->sh_link == symTabIndex) {
+            for (size_t i = 0; i < relTab->n_relocations; i++) {
+                Elf_Rel *rel = &relTab->relocations[i];
+                if (ELF_R_SYM(rel->r_info) == symIdx
+                    && ELF_R_TYPE(rel->r_info) != 0) {
+                    return true;
+                }
+            }
+        }
+    }
+    /* Scan RELA relocation tables */
+    for (ElfRelocationATable *relaTab = oc->info->relaTable;
+         relaTab != NULL; relaTab = relaTab->next) {
+        if (relaTab->sectionHeader->sh_link == symTabIndex) {
+            for (size_t i = 0; i < relaTab->n_relocations; i++) {
+                Elf_Rela *rel = &relaTab->relocations[i];
+                if (ELF_R_SYM(rel->r_info) == symIdx
+                    && ELF_R_TYPE(rel->r_info) != 0) {
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
 /*
  * Check if we need a global offset table slot for a
  * given symbol
@@ -96,6 +141,21 @@ fillGot(ObjectCode * oc) {
                         if(0x0 == symbol->addr) {
                             if(0 == strncmp(symbol->name,"_GLOBAL_OFFSET_TABLE_",21)) {
                                 symbol->addr = oc->info->got_start;
+                            } else if (!symbolHasNonNoneRelocation(oc, symTab->index, i)) {
+                                /* Symbol is only referenced by R_*_NONE
+                                 * (type 0) relocations, which are no-ops.
+                                 * This can happen when e.g. a zero-length
+                                 * array is optimised away by the compiler
+                                 * but the assembler still emits NONE relocs
+                                 * against the (now undefined) symbol.
+                                 * Assign a dummy address so the GOT slot is
+                                 * filled; it will never be dereferenced. */
+                                IF_DEBUG(linker,
+                                    debugBelch("Skipping unresolvable symbol"
+                                              " '%s' (only referenced by"
+                                              " NONE relocations)\n",
+                                              symbol->name));
+                                symbol->addr = (void*)0xDEAD0000;
                             } else {
                                 errorBelch("Failed to lookup symbol: %s,"
                                            " you might consider using --optimistic-linking\n",
