@@ -671,20 +671,30 @@ jobs:
           cd _build/dist
           for file in *.tar.gz; do tar xzf "$file"; done
           )
-          # makefile_test cases (e.g. rts/linker/T27072) invoke $(CC) for
-          # companion .c files. Bindist test jobs do not inherit a compiler
-          # from the build container. Prefer an absolute clang/cc; never export
-          # an empty CC (that overrides make's default and yields
-          # `/bin/sh: : command not found`).
-          if [ -z "${CC:-}" ]; then
-            for c in /usr/bin/clang /usr/bin/cc clang cc gcc; do
-              if command -v "$c" >/dev/null 2>&1 || [ -x "$c" ]; then
-                export CC="$c"
-                break
-              fi
-            done
+          # makefile_test runs nested make via python, so only env / MAKEFLAGS
+          # variables reach T27072 etc. An empty CC= overrides make's default and
+          # yields `/bin/sh: : command not found`. Force a real absolute compiler
+          # onto both the environment and the make command line (MAKEFLAGS).
+          CC_BIN=""
+          for c in /usr/bin/clang /usr/bin/cc /usr/bin/gcc clang cc gcc; do
+            if [ -x "$c" ]; then
+              CC_BIN="$c"
+              break
+            fi
+            if command -v "$c" >/dev/null 2>&1; then
+              CC_BIN="$(command -v "$c")"
+              break
+            fi
+          done
+          if [ -z "$CC_BIN" ]; then
+            echo "error: no C compiler found for bindist makefile_tests" >&2
+            exit 1
           fi
-          PATH=$(pwd)/_build/dist/bin:$PATH ${{ env.MAKE }} -C _build/dist/testsuite
+          export CC="$CC_BIN"
+          export TEST_CC="$CC_BIN"
+          echo "bindist testsuite using CC=$CC TEST_CC=$TEST_CC"
+          PATH=$(pwd)/_build/dist/bin:$PATH ${{ env.MAKE }} -C _build/dist/testsuite \
+            CC="$CC_BIN" TEST_CC="$CC_BIN"
         env:
           THREADS: 4
           TEST_HC: ${{ steps.pwd_output.outputs.pwd }}/_build/dist/bin/ghc
