@@ -21,7 +21,6 @@ Lib.o: Lib.c
 	  if [ -z "$$c" ] && [ -x /usr/bin/clang ]; then c=/usr/bin/clang; fi; \
 	  if [ -z "$$c" ] && [ -x /usr/bin/cc ]; then c=/usr/bin/cc; fi; \
 	  if [ -z "$$c" ]; then echo 'T27072: no C compiler found' >&2; exit 1; fi; \
-	  echo "T27072: compiling Lib.c with $$c"; \
 	  "$$c" -c -fPIC Lib.c -o Lib.o
 
 main: main.c
