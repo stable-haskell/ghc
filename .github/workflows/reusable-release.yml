@@ -139,17 +139,6 @@ jobs:
             ln -s make /usr/local/bin/gmake
             echo "/usr/local/bin" >> $GITHUB_PATH
 
-      # Skip emscripten on Rocky: stage3-javascript fails looking up `alex` on
-      # PATH after hermetic stage1 (Cabal-4123), even though alex builds into the
-      # stage3 store. JS/multi-target bindists are covered by Nix CI Cross:MULTI;
-      # Rocky ships the native glibc bindist only (same stance as FreeBSD).
-      # - if: matrix.platform.image == 'rockylinux:8'
-      #   name: Install emscripten
-      #   run : &emscripten |
-      #     set -eux
-      #     git clone https://github.com/emscripten-core/emsdk.git
-      #     ...
-
       - name: Cache stage0 cabal binary
         uses: actions/cache@v5
         with:
@@ -330,8 +319,20 @@ jobs:
           path: ${{ env.CABAL_CACHE_PATH }}
           key: cabal-${{ vars.CACHE_VERSION || 'v1' }}-${{ env.ARTIFACT }}-${{ hashFiles('cabal.project.stage0') }}
 
+      # Anchor for mac builds. Rocky deliberately does NOT install emsdk so it
+      # ships a native glibc bindist only: stage3-javascript fails there with
+      # Cabal-4123 (alex not on PATH) under hermetic stage1; JS/multi-target
+      # coverage stays on Nix CI Cross:MULTI.
       - name: Install emscripten
-        run : *emscripten
+        run : &emscripten |
+          set -eux
+
+          git clone https://github.com/emscripten-core/emsdk.git
+          cd emsdk
+          git fetch --tags
+          git checkout ${{ env.EMSDK_VERSION }}
+          ./emsdk install ${{ env.EMSDK_VERSION }}
+          ./emsdk activate ${{ env.EMSDK_VERSION }}
 
       - name: Run build
         run: *build
