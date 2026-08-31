@@ -524,9 +524,9 @@ jobs:
           # Ship only the native FreeBSD ghc/cabal/tests bindists.
           #
           # Memory: this runner OOMs (Cabal-7125 / SIGKILL) when building
-          # Cabal-syntax under default cabal parallelism. Cap jobs for the
-          # whole FreeBSD bindist build.
-          gmake CABAL_ARGS='--jobs=1' _build/dist/ghc.tar.gz _build/dist/cabal.tar.gz _build/dist/tests.tar.gz
+          # Cabal-syntax under default parallelism. Cap both package jobs
+          # (--jobs) and per-package GHC module parallelism (-j).
+          gmake CABAL_ARGS='--jobs=1 --ghc-options=-j1' _build/dist/ghc.tar.gz _build/dist/cabal.tar.gz _build/dist/tests.tar.gz
           cd _build/dist
           mv ghc.tar.gz ghc-$(bin/ghc --numeric-version)-${{ env.ARTIFACT }}.tar.gz
           mv cabal.tar.gz cabal-$(bin/cabal --numeric-version)-${{ env.ARTIFACT }}.tar.gz
