@@ -12,12 +12,8 @@ import GHC.Utils.Outputable
 import GHC.Utils.Panic
 
 import GHC.Platform.Reg
-<<<<<<< HEAD
-#if defined(HAVE_X86_NCG)
-||||||| parent of ff7850cffb (Enable DWARF debug info on MachO/darwin targets)
-=======
 import GHC.Cmm.CLabel (asmTempLabelPrefix)
->>>>>>> ff7850cffb (Enable DWARF debug info on MachO/darwin targets)
+#if defined(HAVE_X86_NCG)
 import GHC.CmmToAsm.X86.Regs
 #endif
 

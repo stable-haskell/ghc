@@ -20,12 +20,8 @@ import GHC.Cmm.Dataflow.Label
 
 import GHC.Cmm.BlockId
 import GHC.Cmm.CLabel
-<<<<<<< HEAD
 import GHC.Cmm.InitFini
-||||||| parent of 58ba8cf94b (AArch64: implement DWARF unwind support (GHC #19913))
-=======
 import GHC.Cmm.DebugBlock (pprUnwindTable)
->>>>>>> 58ba8cf94b (AArch64: implement DWARF unwind support (GHC #19913))
 
 import GHC.Types.Unique ( pprUniqueAlways, getUnique )
 import GHC.Platform
