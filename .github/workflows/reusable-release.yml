@@ -510,11 +510,19 @@ jobs:
       - name: Run build
         run: |
           set -eux
-          if [ -x "${{ env.CABAL_CACHE_PATH }}/cabal" ]; then
-            export USE_SYSTEM_CABAL=1
-          fi
           which ghc
           ghc --info
+          # Memory: building cabal-install from source OOMs this runner even
+          # with --jobs=1 -O0 -j1 (eventually kills the runner process).
+          # ghcup's default 3.14 lacks --with-build-compiler; use the FreeBSD
+          # cabal 3.18 bindist instead and ship that in cabal.tar.gz.
+          ghcup --no-verbose install cabal --set 3.18.1.0
+          hash -r
+          cabal --version
+          mkdir -p "${{ env.CABAL_CACHE_PATH }}"
+          cp "$(command -v cabal)" "${{ env.CABAL_CACHE_PATH }}/cabal"
+          export USE_SYSTEM_CABAL=1
+          export CABAL="${{ github.workspace }}/${{ env.CABAL_CACHE_PATH }}/cabal"
           cabal update
           gmake clean clean-cabal distclean
           # The FreeBSD self-hosted runner has no JS toolchain (llc/opt/
@@ -522,14 +530,6 @@ jobs:
           # target. Skip both the JS bindist AND haskell-toolchain.tar.gz — the
           # latter depends on stage3-javascript-unknown-ghcjs.
           # Ship only the native FreeBSD ghc/cabal/tests bindists.
-          #
-          # Memory: this runner OOMs (Cabal-7125 / SIGKILL) building
-          # cabal-install even with --jobs=1 --ghc-options=-j1. Use -O0 as
-          # well for stable-cabal only; stage1/2 keep default opts. ghcup
-          # cabal 3.14 cannot substitute (no --with-build-compiler).
-          if [ -z "${USE_SYSTEM_CABAL:-}" ]; then
-            gmake CABAL_ARGS='--jobs=1 --ghc-options=-O0 --ghc-options=-j1' stable-cabal
-          fi
           gmake _build/dist/ghc.tar.gz _build/dist/cabal.tar.gz _build/dist/tests.tar.gz
           cd _build/dist
           mv ghc.tar.gz ghc-$(bin/ghc --numeric-version)-${{ env.ARTIFACT }}.tar.gz
