@@ -830,6 +830,7 @@ void traceUserMsg(Capability *cap, char *msg)
         }
     }
     dtraceUserMsg(cap->no, msg);
+    signpostUserMsg((uint32_t)cap->no, msg);
 }
 
 void traceUserBinaryMsg(Capability *cap, uint8_t *msg, size_t size)
@@ -859,6 +860,7 @@ void traceUserMarker(Capability *cap, char *markername)
         }
     }
     dtraceUserMarker(cap->no, markername);
+    signpostUserMarker((uint32_t)cap->no, markername);
 }
 
 
@@ -978,11 +980,13 @@ void traceEnd (void)
 void dtraceUserMsgWrapper(Capability *cap, char *msg)
 {
     dtraceUserMsg(cap->no, msg);
+    signpostUserMsg((uint32_t)cap->no, msg);
 }
 
 void dtraceUserMarkerWrapper(Capability *cap, char *msg)
 {
     dtraceUserMarker(cap->no, msg);
+    signpostUserMarker((uint32_t)cap->no, msg);
 }
 
 #endif /* !defined(DEBUG) && !defined(TRACING) && defined(DTRACE) */

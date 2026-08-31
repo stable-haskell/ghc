@@ -5,6 +5,7 @@ module GHC.CmmToAsm.AArch64.CodeGen (
       cmmTopCodeGen
     , generateJumpTableForInstr
     , makeFarBranches
+    , extractUnwindPoints
 )
 
 where
@@ -16,11 +17,15 @@ import Data.Word
 
 import GHC.Platform.Regs
 import GHC.CmmToAsm.AArch64.Instr
+import GHC.CmmToAsm.AArch64.Ppr (pprInstr)
 import GHC.CmmToAsm.AArch64.Regs
 import GHC.CmmToAsm.AArch64.Cond (Cond(..), invertCond)
 
 import GHC.CmmToAsm.CPrim
 import GHC.Cmm.DebugBlock
+   ( DebugBlock(..), UnwindPoint(..), UnwindTable
+   , UnwindExpr(UwReg), toUnwindExpr
+   )
 import GHC.CmmToAsm.Monad
    ( NatM, getNewRegNat
    , getPicBaseMaybeNat, getPlatform, getConfig
@@ -52,6 +57,7 @@ import GHC.Data.OrdList
 import GHC.Utils.Outputable
 
 import Control.Monad    ( mapAndUnzipM )
+import Data.Foldable (fold)
 import GHC.Float
 
 import GHC.Types.Basic
@@ -61,6 +67,8 @@ import GHC.Utils.Misc
 import GHC.Utils.Panic
 import GHC.Utils.Constants (debugIsOn)
 import GHC.Utils.Monad (mapAccumLM)
+
+import qualified Data.Map as Map
 
 -- Note [General layout of an NCG]
 -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -122,6 +130,32 @@ cmmTopCodeGen _cmm@(CmmData sec dat) = do
   --         ++ showSDocUnsafe (ppr cmm)
   return [CmmData sec dat] -- no translation, we just use CmmStatic
 
+-- | Validate basic block structure: no non-control-flow instructions should
+-- appear after a block-terminating jump. This catches NCG bugs early.
+-- Mirrors the X86 implementation in GHC.CmmToAsm.X86.CodeGen.
+verifyBasicBlock :: Platform -> [Instr] -> ()
+verifyBasicBlock platform instrs
+  | debugIsOn     = go False instrs
+  | otherwise     = ()
+  where
+    go _     [] = ()
+    go atEnd (i:rest)
+        = case i of
+            -- Start a new basic block
+            NEWBLOCK {} -> go False rest
+            -- BL is a call (returns to caller), not a block terminator
+            BL{} | atEnd -> faultyBlockWith i
+                 | not atEnd -> go atEnd rest
+            -- All instructions ok, check if we reached the end and continue.
+            _ | not atEnd -> go (isJumpishInstr i) rest
+              -- Only jumps allowed at the end of basic blocks.
+              | otherwise -> if isJumpishInstr i || isMetaInstr i
+                                then go True rest
+                                else faultyBlockWith i
+    faultyBlockWith i
+        = pprPanic "Non control flow instructions after end of basic block."
+                   (pprInstr platform i <+> text "in:" $$ vcat (map (pprInstr platform) instrs))
+
 basicBlockCodeGen
         :: Block CmmNode C C
         -> NatM ( [NatBasicBlock Instr]
@@ -152,15 +186,20 @@ basicBlockCodeGen block = do
   mid_instrs <- stmtsToInstrs stmts
   (!tail_instrs) <- stmtToInstrs tail
   let instrs = header_comment_instr `appOL` loc_instrs `appOL` mid_instrs `appOL` tail_instrs
-  -- TODO: Then x86 backend run @verifyBasicBlock@ here and inserts
-  --      unwinding info. See Ticket 19913
+  -- Verify basic block structure: no non-control-flow instructions after
+  -- a block-terminating jump. See X86 backend for the original implementation.
+  let platform = ncgPlatform config
+  return $! verifyBasicBlock platform (fromOL instrs)
+  -- Insert UNWIND pseudo-instructions after DELTA instructions to track
+  -- stack pointer changes for DWARF unwinding. See GHC #19913.
+  instrs' <- fold <$> traverse addSpUnwindings instrs
   -- code generation may introduce new basic block boundaries, which
   -- are indicated by the NEWBLOCK instruction.  We must split up the
   -- instruction stream into basic blocks again. Also, we may extract
   -- LDATAs here too (if they are implemented by AArch64 again - See
   -- PPC how to do that.)
   let
-        (top,other_blocks,statics) = foldrOL mkBlocks ([],[],[]) instrs
+        (top,other_blocks,statics) = foldrOL mkBlocks ([],[],[]) instrs'
 
   return (BasicBlock id top : other_blocks, statics)
 
@@ -171,6 +210,27 @@ mkBlocks (NEWBLOCK id) (instrs,blocks,statics)
   = ([], BasicBlock id instrs : blocks, statics)
 mkBlocks instr (instrs,blocks,statics)
   = (instr:instrs, blocks, statics)
+
+-- | Convert 'DELTA' instructions into 'UNWIND' instructions to capture changes
+-- in the @sp@ register. See Note [What is this unwinding business?] in
+-- "GHC.Cmm.DebugBlock" for details.
+addSpUnwindings :: Instr -> NatM (OrdList Instr)
+addSpUnwindings instr@(DELTA d) = do
+    config <- getConfig
+    let platform = ncgPlatform config
+    if ncgDwarfUnwindings config
+        then do lbl <- mkAsmTempLabel <$> getUniqueM
+                let unwind = Map.singleton MachSp (Just $ UwReg (GlobalRegUse MachSp (bWord platform)) $ negate d)
+                return $ toOL [ instr, UNWIND lbl unwind ]
+        else return (unitOL instr)
+addSpUnwindings instr = return $ unitOL instr
+
+-- | Extract unwind points from the instruction stream.
+-- Used by the DWARF debug info generator to produce .debug_frame entries.
+extractUnwindPoints :: [Instr] -> [UnwindPoint]
+extractUnwindPoints instrs =
+    [ UnwindPoint lbl unwinds | UNWIND lbl unwinds <- instrs ]
+
 -- -----------------------------------------------------------------------------
 -- | Utilities
 ann :: SDoc -> Instr -> Instr
@@ -340,7 +400,14 @@ stmtToInstrs stmt = do
 
       CmmCall { cml_target = arg } -> genJump arg
 
-      CmmUnwind _regs -> return nilOL
+      CmmUnwind regs -> do
+        let to_unwind_entry :: (GlobalReg, Maybe CmmExpr) -> UnwindTable
+            to_unwind_entry (reg, expr) = Map.singleton reg (fmap (toUnwindExpr platform) expr)
+        case foldMap to_unwind_entry regs of
+          tbl | Map.null tbl -> return nilOL
+              | otherwise    -> do
+                  lbl <- mkAsmTempLabel <$> getUniqueM
+                  return $ unitOL $ UNWIND lbl tbl
 
       _ -> pprPanic "stmtToInstrs: statement should have been cps'd away" (pdoc platform stmt)
 
