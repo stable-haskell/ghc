@@ -120,7 +120,12 @@ if config.os == 'darwin':
 else:
   only_darwin = skip
 
-test('static001', [extra_files(['Static001.hs']), only_darwin],
+test('static001',
+     [extra_files(['Static001.hs']),
+      only_darwin,
+      # Newer Xcode ranlib warns "has no symbols" for empty .o members;
+      # macOS-15-intel BaR sees this as unexpected stderr.
+      ignore_stderr],
      makefile_test, ['static001'])
 
 test('dynHelloWorld',

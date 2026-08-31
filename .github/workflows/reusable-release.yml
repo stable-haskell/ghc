@@ -139,18 +139,6 @@ jobs:
             ln -s make /usr/local/bin/gmake
             echo "/usr/local/bin" >> $GITHUB_PATH
 
-      - if: matrix.platform.image == 'rockylinux:8'
-        name: Install emscripten
-        run : &emscripten |
-          set -eux
-
-          git clone https://github.com/emscripten-core/emsdk.git
-          cd emsdk
-          git fetch --tags
-          git checkout ${{ env.EMSDK_VERSION }}
-          ./emsdk install ${{ env.EMSDK_VERSION }}
-          ./emsdk activate ${{ env.EMSDK_VERSION }}
-
       - name: Cache stage0 cabal binary
         uses: actions/cache@v5
         with:
@@ -331,9 +319,10 @@ jobs:
           path: ${{ env.CABAL_CACHE_PATH }}
           key: cabal-${{ vars.CACHE_VERSION || 'v1' }}-${{ env.ARTIFACT }}-${{ hashFiles('cabal.project.stage0') }}
 
-      - name: Install emscripten
-        run : *emscripten
-
+      # Do not install emsdk here: stage3-javascript fails with Cabal-4123
+      # (alex not on PATH) under hermetic stage1 — same as Rocky. macOS
+      # aarch64 already ships native-only; JS/multi-target stays on Nix CI
+      # Cross:MULTI.
       - name: Run build
         run: *build
 
@@ -521,19 +510,30 @@ jobs:
       - name: Run build
         run: |
           set -eux
-          if [ -x "${{ env.CABAL_CACHE_PATH }}/cabal" ]; then
-            export USE_SYSTEM_CABAL=1
-          fi
           which ghc
           ghc --info
+          # Memory: building cabal-install from source OOMs this runner even
+          # with --jobs=1 -O0 -j1 (eventually kills the runner process).
+          # ghcup's default 3.14 lacks --with-build-compiler; use the FreeBSD
+          # cabal 3.18 bindist instead and ship that in cabal.tar.gz.
+          ghcup --no-verbose install cabal --set 3.18.1.0
+          hash -r
+          cabal --version
+          mkdir -p "${{ env.CABAL_CACHE_PATH }}"
+          cp "$(command -v cabal)" "${{ env.CABAL_CACHE_PATH }}/cabal"
+          export USE_SYSTEM_CABAL=1
+          export CABAL="${{ github.workspace }}/${{ env.CABAL_CACHE_PATH }}/cabal"
           cabal update
           gmake clean clean-cabal distclean
-          gmake _build/dist/haskell-toolchain.tar.gz _build/dist/ghc.tar.gz _build/dist/cabal.tar.gz _build/dist/tests.tar.gz _build/dist/ghc-javascript-unknown-ghcjs.tar.gz
+          # The FreeBSD self-hosted runner has no JS toolchain (llc/opt/
+          # emscripten), so it cannot build the javascript-unknown-ghcjs cross
+          # target. Skip both the JS bindist AND haskell-toolchain.tar.gz — the
+          # latter depends on stage3-javascript-unknown-ghcjs.
+          # Ship only the native FreeBSD ghc/cabal/tests bindists.
+          gmake _build/dist/ghc.tar.gz _build/dist/cabal.tar.gz _build/dist/tests.tar.gz
           cd _build/dist
           mv ghc.tar.gz ghc-$(bin/ghc --numeric-version)-${{ env.ARTIFACT }}.tar.gz
           mv cabal.tar.gz cabal-$(bin/cabal --numeric-version)-${{ env.ARTIFACT }}.tar.gz
-          mv haskell-toolchain.tar.gz haskell-toolchain-${{ env.ARTIFACT }}.tar.gz
-          mv ghc-javascript-unknown-ghcjs.tar.gz ghc-javascript-unknown-ghcjs-$(bin/ghc --numeric-version)-${{ env.ARTIFACT }}.tar.gz
           mv tests.tar.gz tests-${{ env.ARTIFACT }}.tar.gz
         env:
           EXTRA_LIB_DIRS: /usr/local/lib
@@ -679,7 +679,39 @@ jobs:
           cd _build/dist
           for file in *.tar.gz; do tar xzf "$file"; done
           )
-          PATH=$(pwd)/_build/dist/bin:$PATH ${{ env.MAKE }} -C _build/dist/testsuite
+          # makefile_test runs nested make via python, so only env / MAKEFLAGS
+          # variables reach T27072 etc. An empty CC= overrides make's default and
+          # yields `/bin/sh: : command not found`. Force a real absolute compiler
+          # onto both the environment and the make command line (MAKEFLAGS).
+          CC_BIN=""
+          for c in /usr/bin/clang /usr/bin/cc /usr/bin/gcc clang cc gcc; do
+            if [ -x "$c" ]; then
+              CC_BIN="$c"
+              break
+            fi
+            if command -v "$c" >/dev/null 2>&1; then
+              CC_BIN="$(command -v "$c")"
+              break
+            fi
+          done
+          if [ -z "$CC_BIN" ]; then
+            echo "error: no C compiler found for bindist makefile_tests" >&2
+            exit 1
+          fi
+          export CC="$CC_BIN"
+          export TEST_CC="$CC_BIN"
+          # Nested makefile_test makes do not see make-local TEST_HC unless it is
+          # in the environment / MAKEFLAGS. Mac/Windows jobs previously only set
+          # THREADS, so "$(TEST_HC)" expanded empty → `/bin/sh: : command not found`.
+          DIST_BIN="$(pwd)/_build/dist/bin"
+          export TEST_HC="${TEST_HC:-$DIST_BIN/ghc}"
+          export GHC_PKG="${GHC_PKG:-$DIST_BIN/ghc-pkg}"
+          export HP2PS_ABS="${HP2PS_ABS:-$DIST_BIN/hp2ps}"
+          export HPC="${HPC:-$DIST_BIN/hpc}"
+          export RUNGHC="${RUNGHC:-$DIST_BIN/runghc}"
+          echo "bindist testsuite using CC=$CC TEST_CC=$TEST_CC TEST_HC=$TEST_HC"
+          PATH=$DIST_BIN:$PATH ${{ env.MAKE }} -C _build/dist/testsuite \
+            CC="$CC_BIN" TEST_CC="$CC_BIN" TEST_HC="$TEST_HC"
         env:
           THREADS: 4
           TEST_HC: ${{ steps.pwd_output.outputs.pwd }}/_build/dist/bin/ghc

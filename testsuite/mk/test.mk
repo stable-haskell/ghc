@@ -23,6 +23,9 @@
 
 # export the value of $MAKE for invocation in tests/driver/
 export MAKE
+# Nested makefile_test $(MAKE) invocations need TEST_HC in the environment;
+# make-local assignments alone are not visible through the python sandwich.
+export TEST_HC
 
 RUNTESTS     = $(TOP)/driver/runtests.py
 COMPILER     = ghc
