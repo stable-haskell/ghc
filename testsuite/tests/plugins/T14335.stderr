@@ -1,1 +1,3 @@
-ghc: Plugins require -fno-external-interpreter
+Simple Plugin Passes Queried
+Got options: 
+Simple Plugin Pass Run

@@ -15,6 +15,7 @@ module GHC.Driver.Env
    , hsc_all_home_unit_ids
    , hscUpdateLoggerFlags
    , hscUpdateHUG
+   , hscSetCurrentUnitState
    , hscInsertHPT
    , hscSetActiveHomeUnit
    , hscSetActiveUnitId
@@ -143,6 +144,15 @@ hscInsertHPT hmi hsc_env = UnitEnv.insertHpt hmi (hsc_unit_env hsc_env)
 
 hscUpdateHUG :: (HomeUnitGraph -> HomeUnitGraph) -> HscEnv -> HscEnv
 hscUpdateHUG f hsc_env = hsc_env { hsc_unit_env = updateHug f (hsc_unit_env hsc_env) }
+
+-- | Replace the 'UnitState' in the current 'HomeUnitEnv'.
+-- Used by plugin loading to swap in a host-side 'UnitState' built from
+-- @-plugin-package-db@ databases during cross-compilation.
+hscSetCurrentUnitState :: UnitState -> HscEnv -> HscEnv
+hscSetCurrentUnitState us hsc_env =
+  let uid = ue_currentUnit (hsc_unit_env hsc_env)
+      upd hue = hue { HUG.homeUnitEnv_units = us }
+  in hscUpdateHUG (HUG.unitEnv_adjust upd uid) hsc_env
 
 setModuleGraph :: ModuleGraph -> HscEnv -> HscEnv
 setModuleGraph mod_graph hsc_env = hsc_env { hsc_unit_env = (hsc_unit_env hsc_env) { ue_module_graph = mod_graph } }
