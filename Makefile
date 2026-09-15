@@ -198,10 +198,16 @@ HOST_PLATFORM := $(shell $(GHC0) --print-host-platform)
 CABAL      ?= $(BUILD_DIR)/cabal/bin/cabal$(EXE_EXT)
 
 # --with-build-compiler is a stable-haskell/cabal extension (dual-compiler).
-# Stock ghcup cabal rejects it. FreeBSD CI sets USE_SYSTEM_CABAL=1 and ships
-# only a native bindist (no stage3 cross), so omitting the flag is fine there:
-# --with-compiler alone drives the whole native stage1/stage2 build.
-ifeq (,$(USE_SYSTEM_CABAL))
+# Stock ghcup cabal rejects it. Do NOT key this off USE_SYSTEM_CABAL: CI sets
+# USE_SYSTEM_CABAL=1 for stage2 to reuse the already-built stable-haskell
+# cabal binary (see .github/workflows/ci.yml), which still needs the flag.
+# Probe the binary instead; if it is not built yet, assume stable-haskell
+# (stable-cabal will produce one that supports the flag).
+CABAL_HAS_BUILD_COMPILER := $(shell \
+	if [ ! -x "$(CABAL)" ]; then echo YES; \
+	elif $(CABAL) build --help 2>/dev/null | grep -q -- '--with-build-compiler'; then echo YES; \
+	else echo NO; fi)
+ifeq ($(CABAL_HAS_BUILD_COMPILER),YES)
 CABAL_OPT_BUILD_COMPILER = --with-build-compiler
 else
 CABAL_OPT_BUILD_COMPILER =
