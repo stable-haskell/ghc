@@ -514,9 +514,11 @@ jobs:
           ghc --info
           # Memory: building stable-haskell cabal-install from source OOMs this
           # runner even with --jobs=1 -O0 -j1. Use stock ghcup cabal instead.
-          # Makefile omits --with-build-compiler when USE_SYSTEM_CABAL=1 (that
-          # flag is stable-haskell/cabal-only); FreeBSD ships native-only
-          # bindists so dual-compiler is not required here.
+          # Makefile probes cabal for --with-build-compiler and omits it when
+          # unsupported (stock cabal). FreeBSD ships native-only bindists so
+          # dual-compiler is not required here.
+          # NOTE: do not key that probe off USE_SYSTEM_CABAL — CI uses
+          # USE_SYSTEM_CABAL=1 with the already-built stable-haskell cabal.
           ghcup --no-verbose install cabal --set ${{ env.CABAL_VERSION }}
           hash -r
           cabal --version
