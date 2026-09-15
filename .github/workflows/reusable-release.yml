@@ -458,6 +458,16 @@ jobs:
       matrix:
         branch: ${{ fromJSON(inputs.branches) }}
     steps:
+      # actions/checkout@v5 (and cache/upload) need node on PATH. The FreeBSD
+      # self-hosted act runner sometimes comes up without it.
+      - name: Ensure Node.js for GitHub Actions
+        run: |
+          if ! command -v node >/dev/null 2>&1; then
+            sudo pkg install -y node22 || sudo pkg install -y www/node || sudo pkg install -y node
+          fi
+          command -v node
+          node --version
+
       - uses: actions/checkout@v5
         with:
           ref: ${{ matrix.branch }}
@@ -860,6 +870,14 @@ jobs:
       matrix:
         branch: ${{ fromJSON(inputs.branches) }}
     steps:
+      - name: Ensure Node.js for GitHub Actions
+        run: |
+          if ! command -v node >/dev/null 2>&1; then
+            sudo pkg install -y node22 || sudo pkg install -y www/node || sudo pkg install -y node
+          fi
+          command -v node
+          node --version
+
       - uses: actions/checkout@v5
         with:
           ref: ${{ matrix.branch }}
