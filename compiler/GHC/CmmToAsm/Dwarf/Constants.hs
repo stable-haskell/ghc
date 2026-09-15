@@ -190,19 +190,46 @@ dwarfSection platform name =
 
 
 -- * Dwarf section labels
-dwarfInfoLabel, dwarfAbbrevLabel, dwarfLineLabel, dwarfFrameLabel :: IsLine doc => doc
-dwarfInfoLabel   = text ".Lsection_info"
-dwarfAbbrevLabel = text ".Lsection_abbrev"
-dwarfLineLabel   = text ".Lsection_line"
-dwarfFrameLabel  = text ".Lsection_frame"
-{-# SPECIALIZE dwarfInfoLabel :: SDoc #-}
-{-# SPECIALIZE dwarfInfoLabel :: HLine #-} -- see Note [SPECIALIZE to HDoc] in GHC.Utils.Outputable
-{-# SPECIALIZE dwarfAbbrevLabel :: SDoc #-}
-{-# SPECIALIZE dwarfAbbrevLabel :: HLine #-} -- see Note [SPECIALIZE to HDoc] in GHC.Utils.Outputable
-{-# SPECIALIZE dwarfLineLabel :: SDoc #-}
-{-# SPECIALIZE dwarfLineLabel :: HLine #-} -- see Note [SPECIALIZE to HDoc] in GHC.Utils.Outputable
-{-# SPECIALIZE dwarfFrameLabel :: SDoc #-}
-{-# SPECIALIZE dwarfFrameLabel :: HLine #-} -- see Note [SPECIALIZE to HDoc] in GHC.Utils.Outputable
+-- These use the platform-specific local label prefix:
+-- "L" on darwin (MachO), ".L" on ELF (Linux etc.)
+dwarfInfoLabel, dwarfAbbrevLabel, dwarfLineLabel, dwarfFrameLabel :: IsLine doc => Platform -> doc
+dwarfInfoLabel   platform = dwarfLocalLabel platform <> text "section_info"
+dwarfAbbrevLabel platform = dwarfLocalLabel platform <> text "section_abbrev"
+dwarfLineLabel   platform = dwarfLocalLabel platform <> text "section_line"
+dwarfFrameLabel  platform = dwarfLocalLabel platform <> text "section_frame"
+
+-- | Local label prefix for DWARF section labels.
+-- Must match the assembler's convention for local (non-exported) labels.
+dwarfLocalLabel :: IsLine doc => Platform -> doc
+dwarfLocalLabel platform = case platformOS platform of
+  OSDarwin -> text "L"
+  _        -> text ".L"
+
+-- | On MachO, the assembler cannot create relocations against
+-- temporary symbols (L-prefixed) unless there is a non-temporary
+-- symbol earlier in the section to serve as the relocation base.
+-- We emit a linker-private anchor (l_ prefix) at the start of each
+-- DWARF section. The l_ prefix gives us a symbol table entry (unlike
+-- L_ which is assembler-temporary) while keeping the symbol local to
+-- the object file (no duplicate symbol errors across compilation units).
+-- On ELF and other platforms, this is not needed.
+-- See Note [MachO DWARF section anchors].
+dwarfSectionAnchor :: IsDoc doc => Platform -> String -> doc
+dwarfSectionAnchor platform name
+  | osMachOTarget (platformOS platform)
+  = line (text "l_ghc_debug_" <> text name <> colon)
+  | otherwise
+  = empty
+{-# SPECIALIZE dwarfSectionAnchor :: Platform -> String -> SDoc #-}
+{-# SPECIALIZE dwarfSectionAnchor :: Platform -> String -> HDoc #-} -- see Note [SPECIALIZE to HDoc] in GHC.Utils.Outputable
+{-# SPECIALIZE dwarfInfoLabel :: Platform -> SDoc #-}
+{-# SPECIALIZE dwarfInfoLabel :: Platform -> HLine #-} -- see Note [SPECIALIZE to HDoc] in GHC.Utils.Outputable
+{-# SPECIALIZE dwarfAbbrevLabel :: Platform -> SDoc #-}
+{-# SPECIALIZE dwarfAbbrevLabel :: Platform -> HLine #-} -- see Note [SPECIALIZE to HDoc] in GHC.Utils.Outputable
+{-# SPECIALIZE dwarfLineLabel :: Platform -> SDoc #-}
+{-# SPECIALIZE dwarfLineLabel :: Platform -> HLine #-} -- see Note [SPECIALIZE to HDoc] in GHC.Utils.Outputable
+{-# SPECIALIZE dwarfFrameLabel :: Platform -> SDoc #-}
+{-# SPECIALIZE dwarfFrameLabel :: Platform -> HLine #-} -- see Note [SPECIALIZE to HDoc] in GHC.Utils.Outputable
 
 -- | Mapping of registers to DWARF register numbers
 dwarfRegNo :: Platform -> Reg -> Word8
@@ -279,3 +306,37 @@ dwarfReturnRegNo p
     ArchRISCV64 -> 1 -- ra (return address)
     ArchLoongArch64 -> 1 -- ra (return address)
     _other     -> error "dwarfReturnRegNo: Unsupported platform!"
+
+{-
+Note [MachO DWARF section anchors]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+On MachO (macOS/darwin), the assembler represents relocations against
+temporary symbols (those with an L prefix) by looking up the nearest
+preceding non-temporary symbol in the same section and encoding the
+relocation as an offset from that symbol. If no such symbol exists in
+the section, the assembler emits:
+
+  error: unsupported relocation of local symbol 'Lfoo'.
+  Must have non-local symbol earlier in section.
+
+GHC's DWARF generation creates many temporary labels in debug sections:
+  - Lsection_info, Lsection_abbrev, etc. (section markers)
+  - Lc123_die (DIE labels in .debug_info)
+  - Lc123, Lc123_end (CIE/FDE labels in .debug_frame)
+
+When one of these labels is referenced (even in a same-section
+subtraction like `.long Lc134_die - Lsection_info`), a forward
+reference may not be resolvable immediately, so the assembler creates
+a relocation — which fails without an anchor.
+
+The fix: emit a linker-private anchor symbol (l_ prefix, NOT L_) at
+the start of each DWARF section. The l_ prefix gives us:
+  1. A symbol table entry (the assembler can create relocations against it)
+  2. Local binding (no duplicate symbol errors when linking multiple .o files)
+
+This is the same mechanism LLVM uses internally for generated MachO symbols
+that need to be local but not assembler-temporary.
+
+The anchors are emitted by 'dwarfSectionAnchor' and placed immediately
+after each section directive, before any L-prefixed labels.
+-}

@@ -63,17 +63,29 @@ initNCGConfig dflags this_mod = NCGConfig
    , ncgAvx2Enabled = isAvx2Enabled dflags
    , ncgAvx512fEnabled = isAvx512fEnabled dflags
 
-   , ncgDwarfEnabled        = osElfTarget (platformOS (targetPlatform dflags)) && debugLevel dflags > 0 && platformArch (targetPlatform dflags) /= ArchAArch64
-   , ncgDwarfUnwindings     = osElfTarget (platformOS (targetPlatform dflags)) && debugLevel dflags > 0
-   , ncgDwarfStripBlockInfo = osElfTarget (platformOS (targetPlatform dflags)) && debugLevel dflags < 2 -- We strip out block information when running with -g0 or -g1.
-   , ncgDwarfSourceNotes    = osElfTarget (platformOS (targetPlatform dflags)) && debugLevel dflags > 2 -- We produce GHC-specific source-note DIEs only with -g3
+     -- DWARF debug info is supported on ELF and MachO targets.
+     -- MachO requires non-temporary anchor symbols (l_ prefix) at the
+     -- start of each debug section so the assembler can create
+     -- relocations against temporary (L-prefixed) labels within them.
+     -- See Note [MachO DWARF section anchors] in GHC.CmmToAsm.Dwarf.Constants.
+   , ncgDwarfEnabled        = osDwarfTarget os && debugLevel dflags > 0
+   , ncgDwarfUnwindings     = osDwarfTarget os && debugLevel dflags > 0
+   , ncgDwarfStripBlockInfo = osDwarfTarget os && debugLevel dflags < 2 -- We strip out block information when running with -g0 or -g1.
+   , ncgDwarfSourceNotes    = osDwarfTarget os && debugLevel dflags > 2 -- We produce GHC-specific source-note DIEs only with -g3
    , ncgExposeInternalSymbols = gopt Opt_ExposeInternalSymbols dflags
    , ncgCmmStaticPred       = gopt Opt_CmmStaticPred dflags
    , ncgEnableShortcutting  = gopt Opt_AsmShortcutting dflags
    , ncgEnableInterModuleFarJumps = gopt Opt_InterModuleFarJumps dflags
-   , ncgComputeUnwinding    = debugLevel dflags > 0
+   , ncgComputeUnwinding    = osDwarfTarget os && debugLevel dflags > 0
+                               -- Only compute unwinding tables on platforms
+                               -- that can actually emit DWARF debug info.
    , ncgEnableDeadCodeElimination = not (gopt Opt_InfoTableMap dflags)
                                      -- Disable when -finfo-table-map is on (#20428)
                                      && backendMaintainsCfg (targetPlatform dflags)
                                      -- Enable if the platform maintains the CFG
    }
+  where
+    os = platformOS (targetPlatform dflags)
+    -- | DWARF debug info is supported on ELF and MachO targets.
+    osDwarfTarget x = osElfTarget x || osMachOTarget x
+

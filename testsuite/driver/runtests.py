@@ -52,6 +52,30 @@ ghc_env['GHC_ENVIRONMENT'] = "-"
 os.environ['EMCC_LOGGING'] = '0'
 ghc_env['EMCC_LOGGING'] = '0'
 
+# Empty CC= in the environment overrides make's default cc and breaks
+# makefile_test companions (e.g. T27072 → `/bin/sh: : command not found`).
+# Prefer a real compiler path when CC/TEST_CC are missing or blank.
+def _fix_empty_c_compiler_env():
+    cc = (ghc_env.get('TEST_CC') or ghc_env.get('CC') or '').strip()
+    if not cc:
+        for cand in ('/usr/bin/clang', '/usr/bin/cc', 'clang', 'cc', 'gcc'):
+            if os.path.isfile(cand) and os.access(cand, os.X_OK):
+                cc = cand
+                break
+            which = shutil.which(cand)
+            if which:
+                cc = which
+                break
+        if not cc:
+            cc = 'cc'
+    ghc_env['CC'] = cc
+    if not (ghc_env.get('TEST_CC') or '').strip():
+        ghc_env['TEST_CC'] = cc
+    os.environ['CC'] = ghc_env['CC']
+    os.environ['TEST_CC'] = ghc_env['TEST_CC']
+
+_fix_empty_c_compiler_env()
+
 global config
 config = getConfig() # get it from testglobals
 config.validate()

@@ -257,4 +257,10 @@ test('CCallConv', [req_c], compile_and_run, ['CCallConv_c.c'])
 test('T25364', normal, compile_and_run, [''])
 test('T26061', normal, compile_and_run, [''])
 test('T24016', normal, compile_and_run, ['-O1 -fPIC'])
-test('T26537', [js_broken(26558), compile_timeout_multiplier(5)], compile_and_run, ['-O2 -fregs-graph'])
+test('T26537',
+     [js_broken(26558),
+      # -O2 -fregs-graph is very slow; macos-latest BaR runners have timed out
+      # even at 5x (T27072 gate otherwise green after TEST_HC/CC fixes).
+      when(opsys('darwin'), [fragile(0), compile_timeout_multiplier(15)]),
+      unless(opsys('darwin'), compile_timeout_multiplier(5))],
+     compile_and_run, ['-O2 -fregs-graph'])

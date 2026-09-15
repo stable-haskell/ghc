@@ -48,6 +48,7 @@
 #include "TopHandler.h"
 #include "sm/NonMoving.h"
 #include "sm/NonMovingMark.h"
+#include "Signpost.h"
 
 #if defined(HAVE_SYS_TYPES_H)
 #include <sys/types.h>
@@ -2382,6 +2383,9 @@ setNumCapabilities (uint32_t new_n_capabilities USED_IF_THREADS)
             // them to existing capsets.
             tracingAddCapabilities(n_capabilities, new_n_capabilities);
 #endif
+
+            // Resize signpost per-capability arrays (macOS Instruments)
+            signpostsAddCapabilities(n_capabilities, new_n_capabilities);
 
             // Resize the capabilities array
             // NB. after this, capabilities points somewhere new.  Any pointers

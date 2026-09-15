@@ -197,6 +197,22 @@ HOST_PLATFORM := $(shell $(GHC0) --print-host-platform)
 
 CABAL      ?= $(BUILD_DIR)/cabal/bin/cabal$(EXE_EXT)
 
+# --with-build-compiler is a stable-haskell/cabal extension (dual-compiler).
+# Stock ghcup cabal rejects it. Do NOT key this off USE_SYSTEM_CABAL: CI sets
+# USE_SYSTEM_CABAL=1 for stage2 to reuse the already-built stable-haskell
+# cabal binary (see .github/workflows/ci.yml), which still needs the flag.
+# Probe the binary instead; if it is not built yet, assume stable-haskell
+# (stable-cabal will produce one that supports the flag).
+CABAL_HAS_BUILD_COMPILER := $(shell \
+	if [ ! -x "$(CABAL)" ]; then echo YES; \
+	elif $(CABAL) build --help 2>/dev/null | grep -q -- '--with-build-compiler'; then echo YES; \
+	else echo NO; fi)
+ifeq ($(CABAL_HAS_BUILD_COMPILER),YES)
+CABAL_OPT_BUILD_COMPILER = --with-build-compiler
+else
+CABAL_OPT_BUILD_COMPILER =
+endif
+
 STAGE1_PATH := $(let STAGE,stage1,$(STORE_DIR)/host/$(HOST_PLATFORM))
 STAGE2_PATH := $(let STAGE,stage2,$(STORE_DIR)/host/$(HOST_PLATFORM))
 
@@ -216,7 +232,12 @@ THREADS ?= $(shell echo $$(( $(CPUS) + 1 )))
 # Build macros
 #
 
-ifeq ($(MAKE_HOST),x86_64-pc-msys)
+# Detect a Windows host across the make flavours CI may provide: MSYS2 msys
+# (x86_64-pc-msys), MSYS2 mingw/clang64 (x86_64-w64-mingw32) and Cygwin
+# (x86_64-pc-cygwin). The hosted runner's `make` has switched between these
+# (e.g. msys -> cygwin), so match all three rather than a single triple — a
+# miss here silently drops the Windows CC/CXX/LD overrides below.
+ifneq (,$(filter x86_64-pc-msys x86_64-pc-cygwin x86_64-w64-mingw32,$(MAKE_HOST)))
 # Windows executables require .exe extension for native programs to find them
 EXE_EXT := .exe
 
@@ -598,7 +619,7 @@ STAGE1_EXTRA_LIB_DIRS	  ?=
 STAGE1_CABAL_BUILD = \
 	$(CABAL_BUILD) \
 	--with-compiler=$(GHC0) \
-	--with-build-compiler=$(GHC0) \
+	$(if $(CABAL_OPT_BUILD_COMPILER),$(CABAL_OPT_BUILD_COMPILER)=$(GHC0)) \
 	--ghc-options "-ghcversion-file=$(call NORMALIZE_FP,$(CURDIR)/rts/include/ghcversion.h)"
 
 ifndef DIST_BUILD
@@ -713,7 +734,7 @@ STAGE2_LIBRARIES = \
 	transformers \
 	xhtml
 
-ifeq ($(MAKE_HOST),x86_64-pc-msys)
+ifneq (,$(filter x86_64-pc-msys x86_64-pc-cygwin x86_64-w64-mingw32,$(MAKE_HOST)))
 STAGE2_LIBRARIES += Win32
 else
 STAGE2_LIBRARIES += terminfo unix
@@ -730,7 +751,7 @@ STAGE2_CABAL_BUILD = \
 	OBJDUMP=$(OBJDUMP) \
 	$(CABAL_BUILD) \
 	--with-compiler=$(call NORMALIZE_FP,$(CURDIR)/$(GHC1)) \
-	--with-build-compiler=$(GHC0) \
+	$(if $(CABAL_OPT_BUILD_COMPILER),$(CABAL_OPT_BUILD_COMPILER)=$(GHC0)) \
 	--ghc-options "-ghcversion-file=$(call NORMALIZE_FP,$(CURDIR)/rts/include/ghcversion.h)" \
 	$(foreach dir,$(STAGE2_EXTRA_LIB_DIRS),--extra-lib-dirs=$(dir)) \
 	$(foreach dir,$(STAGE2_EXTRA_INCLUDE_DIRS),--extra-include-dirs=$(dir))
@@ -987,7 +1008,7 @@ STAGE3_$(1)_CABAL_BUILD = \
 	OBJDUMP=$$(STAGE3_$(1)_OBJDUMP) \
 	$$(CABAL_BUILD) \
 	--with-compiler=$$(call NORMALIZE_FP,$$(CURDIR)/$$(DIST_DIR)/bin/$(1)-ghc) \
-	--with-build-compiler=$$(call NORMALIZE_FP,$$(CURDIR)/$$(DIST_DIR)/bin/ghc) \
+	$$(if $$(CABAL_OPT_BUILD_COMPILER),$$(CABAL_OPT_BUILD_COMPILER)=$$(call NORMALIZE_FP,$$(CURDIR)/$$(DIST_DIR)/bin/ghc)) \
 	--ghc-options "-ghcversion-file=$$(call NORMALIZE_FP,$$(CURDIR)/rts/include/ghcversion.h)" \
 	--with-hsc2hs=$$(call NORMALIZE_FP,$$(CURDIR)/$$(DIST_DIR)/bin/$(1)-hsc2hs) \
 	--hsc2hs-options='-x' \

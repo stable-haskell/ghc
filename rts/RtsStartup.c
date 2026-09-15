@@ -50,6 +50,7 @@
 #include "sm/CNF.h"
 #include "TopHandler.h"
 #include "CheckVectorSupport.h"
+#include "Signpost.h"
 
 #if defined(PROFILING)
 # include "ProfHeap.h"
@@ -538,6 +539,11 @@ hs_init_ghc(int *argc, char **argv[], RtsConfig rts_config)
      */
     initScheduler();
 
+    /* Initialize os_signpost for macOS Instruments integration.
+     * Must be after initScheduler() so getNumCapabilities() returns
+     * the correct value for per-capability signpost ID allocation. */
+    initSignposts();
+
     /* Trace some basic information about the process */
     traceInitEvent(traceWallClockTime);
     traceInitEvent(traceOSProcessInfo);
@@ -765,6 +771,9 @@ hs_exit_(bool wait_foreign)
     // during endProfiling().
     if (prof_file != NULL) fclose(prof_file);
 #endif
+
+    /* Free os_signpost resources */
+    freeSignposts();
 
 #if defined(TRACING)
     endTracing();

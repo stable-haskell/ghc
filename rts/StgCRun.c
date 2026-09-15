@@ -29,10 +29,12 @@
 #include "rts/PosixSource.h"
 #include "ghcconfig.h"
 
-// Enable DWARF Call-Frame Information (used for stack unwinding) on Linux.
-// This is not supported on Darwin and SmartOS due to assembler differences
-// (#15207).
-#if defined(linux_HOST_OS)
+// Enable DWARF Call-Frame Information (used for stack unwinding).
+// On x86_64, this is limited to Linux due to GCC/Clang assembler
+// incompatibilities on Darwin (#15207).
+// On AArch64, both Linux and Darwin use Clang-compatible assemblers,
+// so CFI directives work on both platforms.
+#if defined(linux_HOST_OS) || (defined(aarch64_HOST_ARCH) && defined(darwin_HOST_OS))
 #define ENABLE_UNWINDING
 #endif
 
@@ -957,6 +959,49 @@ StgRun(StgFunPtr f, StgRegTable *basereg) {
         "stp d10, d11, [sp, #-16]!\n\t"
         "stp d12, d13, [sp, #-16]!\n\t"
         "stp d14, d15, [sp, #-16]!\n\t"
+
+#if defined(ENABLE_UNWINDING)
+        /*
+         * DWARF CFI directives for unwinding through the STG boundary.
+         * After the prologue, the stack frame layout (growing down) is:
+         *   CFA (= original sp)
+         *   [CFA-16]  x29/fp    [CFA-8]   x30/lr
+         *   [CFA-32]  x16       [CFA-24]  x17
+         *   [CFA-48]  x19       [CFA-40]  x20
+         *   [CFA-64]  x21       [CFA-56]  x22
+         *   [CFA-80]  x23       [CFA-72]  x24
+         *   [CFA-96]  x25       [CFA-88]  x26
+         *   [CFA-112] x27       [CFA-104] x28
+         *   [CFA-128] d8        [CFA-120] d9
+         *   [CFA-144] d10       [CFA-136] d11
+         *   [CFA-160] d12       [CFA-152] d13
+         *   [CFA-176] d14       [CFA-168] d15
+         *   [CFA-176-RESERVED_C_STACK_BYTES]  = sp
+         */
+        ".cfi_def_cfa x29, 16\n\t"
+        ".cfi_offset x29, -16\n\t"    /* stp x29, x30: x29@[CFA-16], x30@[CFA-8] */
+        ".cfi_offset x30, -8\n\t"
+        ".cfi_offset x16, -32\n\t"    /* stp x16, x17: x16@[CFA-32], x17@[CFA-24] */
+        ".cfi_offset x17, -24\n\t"
+        ".cfi_offset x19, -48\n\t"    /* stp x19, x20: x19@[CFA-48], x20@[CFA-40] */
+        ".cfi_offset x20, -40\n\t"
+        ".cfi_offset x21, -64\n\t"    /* stp x21, x22: x21@[CFA-64], x22@[CFA-56] */
+        ".cfi_offset x22, -56\n\t"
+        ".cfi_offset x23, -80\n\t"    /* stp x23, x24: x23@[CFA-80], x24@[CFA-72] */
+        ".cfi_offset x24, -72\n\t"
+        ".cfi_offset x25, -96\n\t"    /* stp x25, x26: x25@[CFA-96], x26@[CFA-88] */
+        ".cfi_offset x26, -88\n\t"
+        ".cfi_offset x27, -112\n\t"   /* stp x27, x28: x27@[CFA-112], x28@[CFA-104] */
+        ".cfi_offset x28, -104\n\t"
+        ".cfi_offset d8,  -128\n\t"   /* stp d8,  d9:  d8@[CFA-128], d9@[CFA-120] */
+        ".cfi_offset d9,  -120\n\t"
+        ".cfi_offset d10, -144\n\t"   /* stp d10, d11: d10@[CFA-144], d11@[CFA-136] */
+        ".cfi_offset d11, -136\n\t"
+        ".cfi_offset d12, -160\n\t"   /* stp d12, d13: d12@[CFA-160], d13@[CFA-152] */
+        ".cfi_offset d13, -152\n\t"
+        ".cfi_offset d14, -176\n\t"   /* stp d14, d15: d14@[CFA-176], d15@[CFA-168] */
+        ".cfi_offset d15, -168\n\t"
+#endif /* ENABLE_UNWINDING */
 
         /*
          * allocate some space for Stg machine's temporary storage.
