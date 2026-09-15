@@ -197,6 +197,16 @@ HOST_PLATFORM := $(shell $(GHC0) --print-host-platform)
 
 CABAL      ?= $(BUILD_DIR)/cabal/bin/cabal$(EXE_EXT)
 
+# --with-build-compiler is a stable-haskell/cabal extension (dual-compiler).
+# Stock ghcup cabal rejects it. FreeBSD CI sets USE_SYSTEM_CABAL=1 and ships
+# only a native bindist (no stage3 cross), so omitting the flag is fine there:
+# --with-compiler alone drives the whole native stage1/stage2 build.
+ifeq (,$(USE_SYSTEM_CABAL))
+CABAL_OPT_BUILD_COMPILER = --with-build-compiler
+else
+CABAL_OPT_BUILD_COMPILER =
+endif
+
 STAGE1_PATH := $(let STAGE,stage1,$(STORE_DIR)/host/$(HOST_PLATFORM))
 STAGE2_PATH := $(let STAGE,stage2,$(STORE_DIR)/host/$(HOST_PLATFORM))
 
@@ -603,7 +613,7 @@ STAGE1_EXTRA_LIB_DIRS	  ?=
 STAGE1_CABAL_BUILD = \
 	$(CABAL_BUILD) \
 	--with-compiler=$(GHC0) \
-	--with-build-compiler=$(GHC0) \
+	$(if $(CABAL_OPT_BUILD_COMPILER),$(CABAL_OPT_BUILD_COMPILER)=$(GHC0)) \
 	--ghc-options "-ghcversion-file=$(call NORMALIZE_FP,$(CURDIR)/rts/include/ghcversion.h)"
 
 ifndef DIST_BUILD
@@ -735,7 +745,7 @@ STAGE2_CABAL_BUILD = \
 	OBJDUMP=$(OBJDUMP) \
 	$(CABAL_BUILD) \
 	--with-compiler=$(call NORMALIZE_FP,$(CURDIR)/$(GHC1)) \
-	--with-build-compiler=$(GHC0) \
+	$(if $(CABAL_OPT_BUILD_COMPILER),$(CABAL_OPT_BUILD_COMPILER)=$(GHC0)) \
 	--ghc-options "-ghcversion-file=$(call NORMALIZE_FP,$(CURDIR)/rts/include/ghcversion.h)" \
 	$(foreach dir,$(STAGE2_EXTRA_LIB_DIRS),--extra-lib-dirs=$(dir)) \
 	$(foreach dir,$(STAGE2_EXTRA_INCLUDE_DIRS),--extra-include-dirs=$(dir))
@@ -992,7 +1002,7 @@ STAGE3_$(1)_CABAL_BUILD = \
 	OBJDUMP=$$(STAGE3_$(1)_OBJDUMP) \
 	$$(CABAL_BUILD) \
 	--with-compiler=$$(call NORMALIZE_FP,$$(CURDIR)/$$(DIST_DIR)/bin/$(1)-ghc) \
-	--with-build-compiler=$$(call NORMALIZE_FP,$$(CURDIR)/$$(DIST_DIR)/bin/ghc) \
+	$$(if $$(CABAL_OPT_BUILD_COMPILER),$$(CABAL_OPT_BUILD_COMPILER)=$$(call NORMALIZE_FP,$$(CURDIR)/$$(DIST_DIR)/bin/ghc)) \
 	--ghc-options "-ghcversion-file=$$(call NORMALIZE_FP,$$(CURDIR)/rts/include/ghcversion.h)" \
 	--with-hsc2hs=$$(call NORMALIZE_FP,$$(CURDIR)/$$(DIST_DIR)/bin/$(1)-hsc2hs) \
 	--hsc2hs-options='-x' \

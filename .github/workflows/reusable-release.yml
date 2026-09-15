@@ -512,11 +512,12 @@ jobs:
           set -eux
           which ghc
           ghc --info
-          # Memory: building cabal-install from source OOMs this runner even
-          # with --jobs=1 -O0 -j1 (eventually kills the runner process).
-          # ghcup's default 3.14 lacks --with-build-compiler; use the FreeBSD
-          # cabal 3.18 bindist instead and ship that in cabal.tar.gz.
-          ghcup --no-verbose install cabal --set 3.18.1.0
+          # Memory: building stable-haskell cabal-install from source OOMs this
+          # runner even with --jobs=1 -O0 -j1. Use stock ghcup cabal instead.
+          # Makefile omits --with-build-compiler when USE_SYSTEM_CABAL=1 (that
+          # flag is stable-haskell/cabal-only); FreeBSD ships native-only
+          # bindists so dual-compiler is not required here.
+          ghcup --no-verbose install cabal --set ${{ env.CABAL_VERSION }}
           hash -r
           cabal --version
           mkdir -p "${{ env.CABAL_CACHE_PATH }}"
