@@ -320,7 +320,7 @@ rtsPackageArgs = package rts ? do
           , notM (targetSupportsSMP stage)   ? arg "-optc-DNOSMP"
           , isWinHost                        ? arg "-optl-Wl,--disable-runtime-pseudo-reloc"
 
-            -- See Note [AutoApply.cmm for vectors] in genapply/Main.hs
+            -- See Note [AutoApply.cmm for vectors] in GHC.StgToCmm.AutoApply
             --
             -- In particular, we **do not** pass -mavx when compiling
             -- AutoApply_V16.cmm, as that would lock out targets with SSE2 but not AVX.
@@ -372,7 +372,7 @@ rtsPackageArgs = package rts ? do
 
           , inputs ["**/Evac.c", "**/Evac_thr.c"] ? arg "-funroll-loops"
 
-            -- See Note [AutoApply.cmm for vectors] in genapply/Main.hs
+            -- See Note [AutoApply.cmm for vectors] in GHC.StgToCmm.AutoApply
           , inputs ["**/AutoApply_V32.c"] ? pure [ "-mavx2"    | x86 ]
           , inputs ["**/AutoApply_V64.c"] ? pure [ "-mavx512f" | x86 ]
 

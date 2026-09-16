@@ -140,31 +140,8 @@ argRepSizeW platform = \case
 idArgRep :: Platform -> Id -> ArgRep
 idArgRep platform = toArgRepOrV platform . idPrimRep1
 
--- This list of argument patterns should be kept in sync with at least
--- the following:
---
---  * GHC.StgToCmm.Layout.stdPattern maybe to some degree?
---
---  * the RTS_RET(stg_ap_*) and RTS_FUN_DECL(stg_ap_*_fast)
---  declarations in rts/include/stg/MiscClosures.h
---
---  * the SLOW_CALL_*_ctr declarations in rts/include/stg/Ticky.h,
---
---  * the TICK_SLOW_CALL_*() #defines in rts/include/Cmm.h,
---
---  * the PR_CTR(SLOW_CALL_*_ctr) calls in rts/Ticky.c,
---
---  * and the SymI_HasProto(stg_ap_*_{ret,info,fast}) calls and
---  SymI_HasProto(SLOW_CALL_*_ctr) calls in rts/Linker.c
---
--- There may be more places that I haven't found; I merely igrep'd for
--- pppppp and excluded things that seemed ghci-specific.
---
--- Also, it seems at the moment that ticky counters with void
--- arguments will never be bumped, but I'm still declaring those
--- counters, defensively.
---
--- NSF 6 Mar 2013
+-- The patterns matched here must be exactly those in 'applyTypes', for
+-- which the RTS has generic apply routines; see Note [Generic apply tables].
 
 slowCallPattern :: [ArgRep] -> (FastString, RepArity)
 -- Returns the generic apply function and arity

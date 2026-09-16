@@ -128,10 +128,7 @@ bindistPackageTargets conf@BindistConfig{..} = do
     lib_pkgs <- stagePackages library_stage
     (lib_targets, _) <- partitionEithers <$> mapM (pkgTarget conf) lib_pkgs
 
-    bin_pkgs_all <- stagePackages executable_stage
-    -- Things we don't want to distribute ever
-    let excluded_packages = [ genapply ]
-        bin_pkgs = filter (`notElem` excluded_packages) bin_pkgs_all
+    bin_pkgs <- stagePackages executable_stage
     (_, bin_targets) <- partitionEithers <$> mapM (pkgTarget conf) bin_pkgs
     return (lib_targets, bin_targets)
 

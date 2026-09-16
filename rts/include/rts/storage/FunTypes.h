@@ -19,12 +19,12 @@
 
 /*
  * Specialised function types: bitmaps and calling sequences
- * for these functions are pre-generated: see ghc/utils/genapply and
- * generated code in ghc/rts/AutoApply.cmm.
+ * for these functions are pre-generated into rts/AutoApply.cmm by
+ * GHC.StgToCmm.AutoApply (ghc --gen-apply).
  *
- *  NOTE: other places to change if you change this table:
- *       - utils/genapply/Main.hs: stackApplyTypes
- *       - GHC.StgToCmm.Layout: stdPattern
+ * This table must match GHC.StgToCmm.ArgRep.stackApplyTypes: the value of
+ * each ARG_* is ARG_NONE plus the index of its pattern in that list.
+ * See Note [Generic apply tables] in GHC.StgToCmm.ArgRep.
  */
 #define ARG_NONE     3
 #define ARG_N        4

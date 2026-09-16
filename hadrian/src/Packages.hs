@@ -4,7 +4,7 @@ module Packages (
     array, base, binary, bytestring, cabal, cabalSyntax, changelogD, checkPpr,
     checkExact, countDeps,
     compareSizes, compiler, containers, deepseq, deriveConstants, directory, dumpDecls,
-    exceptions, filepath, fileio, genapply, genprimopcode, ghc, ghcBignum, ghcBoot, ghcBootTh, ghcBootThNext, ghcPlatform,
+    exceptions, filepath, fileio, genprimopcode, ghc, ghcBignum, ghcBoot, ghcBootTh, ghcBootThNext, ghcPlatform,
     ghcCompact, ghcConfig, ghcExperimental, ghcHeap, ghcInternal, ghci, ghciWrapper, ghcPkg, ghcPrim,
     ghcToolchain, ghcToolchainBin, haddockApi, haddockLibrary, haddock, haskeline,
     hsc2hs, hp2ps, hpc, hpcBin, integerGmp, iservProxy,
@@ -34,7 +34,7 @@ ghcPackages :: [Package]
 ghcPackages =
     [ array, base, binary, bytestring, cabalSyntax, cabal, changelogD, checkPpr, checkExact, countDeps
     , compareSizes, compiler, containers, deepseq, deriveConstants, directory, dumpDecls
-    , exceptions, filepath, genapply, genprimopcode, ghc, ghcBignum, ghcBoot, ghcBootTh, ghcBootThNext, ghcPlatform
+    , exceptions, filepath, genprimopcode, ghc, ghcBignum, ghcBoot, ghcBootTh, ghcBootThNext, ghcPlatform
     , ghcCompact, ghcConfig, ghcExperimental, ghcHeap, ghcInternal, ghci, ghciWrapper, ghcPkg, ghcPrim
     , ghcToolchain, ghcToolchainBin, haddockApi, haddockLibrary, haddock, haskeline, hsc2hs
     , hp2ps, hpc, hpcBin, integerGmp, libffi, mtl, osString
@@ -51,7 +51,7 @@ isGhcPackage = (`elem` ghcPackages)
 -- | Package definitions, see 'Package'.
 array, base, binary, bytestring, cabalSyntax, cabal, changelogD, checkPpr, checkExact, countDeps,
   compareSizes, compiler, containers, deepseq, deriveConstants, directory, dumpDecls,
-  exceptions, filepath, genapply, genprimopcode, ghc, ghcBignum, ghcBoot, ghcBootTh, ghcBootThNext, ghcPlatform,
+  exceptions, filepath, genprimopcode, ghc, ghcBignum, ghcBoot, ghcBootTh, ghcBootThNext, ghcPlatform,
   ghcCompact, ghcConfig, ghcExperimental, ghcHeap, ghci, ghcInternal, ghciWrapper, ghcPkg, ghcPrim,
   ghcToolchain, ghcToolchainBin, haddockLibrary, haddockApi, haddock, haskeline, hsc2hs,
   hp2ps, hpc, hpcBin, integerGmp, iservProxy, remoteIserv, libffi, mtl,
@@ -80,7 +80,6 @@ dumpDecls           = util "dump-decls"
 exceptions          = lib  "exceptions"
 filepath            = lib  "filepath"
 fileio              = lib  "file-io"
-genapply            = util "genapply"
 genprimopcode       = util "genprimopcode"
 ghc                 = prg  "ghc-bin"         `setPath` "ghc"
 ghcBignum           = lib  "ghc-bignum"
