@@ -267,8 +267,8 @@ RTS_THUNK(stg_ap_7_upd);
 RTS_ENTRY(stg_unpack_cstring);
 RTS_ENTRY(stg_unpack_cstring_utf8);
 
-/* standard application routines (see also utils/genapply,
- * and GHC.StgToCmm.ArgRep).
+/* standard application routines (generated into AutoApply.cmm by
+ * GHC.StgToCmm.AutoApply; see also GHC.StgToCmm.ArgRep).
  */
 RTS_RET(stg_ap_v);
 RTS_RET(stg_ap_f);

@@ -59,17 +59,22 @@ instance Binary   DependencyType
 instance Hashable DependencyType
 instance NFData   DependencyType
 
--- | GHC can be used in four different modes:
+-- | GHC can be used in several different modes:
 -- * Compile a Haskell source file.
 -- * Compile a C source file.
 -- * Extract source dependencies by passing @-M@ command line argument.
 -- * Link object files & static libraries into an executable.
+-- * Generate the RTS generic apply code (@--gen-apply@).
 data GhcMode = CompileHs
              | CompileCWithGhc
              | CompileCppWithGhc
              | FindHsDependencies
              | LinkHs
              | ToolArgs
+             | GenApply (Maybe Int)
+               -- ^ Generate rts/AutoApply.cmm (@Nothing@) or one of the
+               -- AutoApply_V{16,32,64}.cmm vector variants (@Just width@);
+               -- see GHC.StgToCmm.AutoApply.
     deriving (Eq, Generic, Show)
 
 instance Binary   GhcMode
@@ -164,7 +169,6 @@ data Builder = Alex
              | Cc CcMode Stage
              | Configure FilePath
              | DeriveConstants
-             | GenApply (Maybe Int) -- ^ vector size, or Nothing for non-vectors
              | GenPrimopCode
              | Ghc GhcMode Stage
              | GhcPkg GhcPkgMode Stage
@@ -203,7 +207,6 @@ instance NFData   Builder
 builderProvenance :: Builder -> Maybe Context
 builderProvenance = \case
     DeriveConstants  -> context stage0Boot deriveConstants
-    GenApply {}      -> context stage0Boot genapply
     GenPrimopCode    -> context stage0Boot genprimopcode
     Ghc _ (Stage0 {})-> Nothing
     Ghc _ stage      -> context (predStage stage) ghc
@@ -326,8 +329,6 @@ instance H.Builder Builder where
                     bash <- bashPath
                     let env = AddEnv "CONFIG_SHELL" bash
                     cmd' env [Cwd dir] ["sh", path] buildOptions buildArgs
-
-                GenApply {} -> captureStdout
 
                 GenPrimopCode -> do
                     need [input]
