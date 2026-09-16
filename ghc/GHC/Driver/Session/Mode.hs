@@ -89,6 +89,9 @@ data PostLoadMode
   | DoAbiHash               -- ghc --abi-hash
   | ShowPackages            -- ghc --show-packages
   | DoFrontend ModuleName   -- ghc --frontend Plugin.Module
+  | DoGenApply (Maybe Int)  -- ghc --gen-apply[=v16|v32|v64]
+                            -- generate the RTS generic apply code
+                            -- (see GHC.StgToCmm.AutoApply)
 
 doMkDependHSMode, doMakeMode, doInteractiveMode, doRunMode,
   doAbiHashMode, showUnitsMode :: Mode
@@ -116,6 +119,19 @@ doFrontendMode str = mkPostLoadMode (DoFrontend (mkModuleName str))
 
 doBackpackMode :: Mode
 doBackpackMode = mkPostLoadMode DoBackpack
+
+doGenApplyMode :: Maybe Int -> Mode
+doGenApplyMode = mkPostLoadMode . DoGenApply
+
+-- | Parse the optional argument of @--gen-apply@: nothing for the main
+-- AutoApply.cmm, or a vector width for one of the AutoApply_V*.cmm files.
+parseGenApplyArg :: String -> Maybe (Maybe Int)
+parseGenApplyArg s = case map toLower s of
+  ""    -> Just Nothing
+  "v16" -> Just (Just 16)
+  "v32" -> Just (Just 32)
+  "v64" -> Just (Just 64)
+  _     -> Nothing
 
 mkPostLoadMode :: PostLoadMode -> Mode
 mkPostLoadMode = Right . Right
@@ -254,6 +270,10 @@ mode_flags =
   , defFlag "-backpack"    (PassFlag (setMode doBackpackMode))
   , defFlag "-interactive" (PassFlag (setMode doInteractiveMode))
   , defFlag "-abi-hash"    (PassFlag (setMode doAbiHashMode))
+  , defFlag "-gen-apply"   (OptPrefix (\s -> case parseGenApplyArg s of
+                                          Just v  -> setMode (doGenApplyMode v) "--gen-apply"
+                                          Nothing -> addErr ("unrecognised --gen-apply argument: " ++ s
+                                                             ++ " (expected v16, v32 or v64)")))
   , defFlag "e"            (SepArg   (\s -> setMode (doEvalMode s) "-e"))
   , defFlag "-frontend"    (SepArg   (\s -> setMode (doFrontendMode s) "-frontend"))
   ]
