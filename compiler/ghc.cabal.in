@@ -775,6 +775,7 @@ Library
         GHC.Stg.Utils
         GHC.StgToCmm
         GHC.StgToCmm.ArgRep
+        GHC.StgToCmm.AutoApply
         GHC.StgToCmm.Bind
         GHC.StgToCmm.CgUtils
         GHC.StgToCmm.Closure
