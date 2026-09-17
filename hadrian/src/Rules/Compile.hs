@@ -250,7 +250,7 @@ compileNonHsObject rs lang path = do
   src <- case lang of
       Asm -> obj2src "S"   (const False)      ctx path
       C   -> obj2src "c"   (const False)      ctx path
-      Cmm -> obj2src "cmm" isGeneratedCmmFile ctx path
+      Cmm -> obj2src "cmm" (const False)      ctx path
       Cxx -> obj2src "cpp" (const False) ctx path
       JS  -> obj2src "js" (const False) ctx path
   need [src]

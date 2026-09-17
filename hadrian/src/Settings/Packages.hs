@@ -313,13 +313,8 @@ rtsPackageArgs = package rts ? do
           , Threaded  `wayUnit` way          ? arg "-DTHREADED_RTS"
           , notM targetSupportsSMP           ? arg "-optc-DNOSMP"
 
-            -- See Note [AutoApply.cmm for vectors] in GHC.StgToCmm.AutoApply
-            --
-            -- In particular, we **do not** pass -mavx when compiling
-            -- AutoApply_V16.cmm, as that would lock out targets with SSE2 but not AVX.
-          , inputs ["**/AutoApply_V32.cmm"] ? pure [ "-mavx2"    | x86 ]
-          , inputs ["**/AutoApply_V64.cmm"] ? pure [ "-mavx512f" | x86 ]
-
+            -- See Note [realArgRegsCover] in GHC.Cmm.CallConv: the vector
+            -- variants need the matching -m flags.
           , inputs ["**/Jumps_V32.cmm"] ? pure [ "-mavx2"    | x86 ]
           , inputs ["**/Jumps_V64.cmm"] ? pure [ "-mavx512f" | x86 ]
           ]
@@ -365,9 +360,6 @@ rtsPackageArgs = package rts ? do
 
           , inputs ["**/Evac.c", "**/Evac_thr.c"] ? arg "-funroll-loops"
 
-            -- See Note [AutoApply.cmm for vectors] in GHC.StgToCmm.AutoApply
-          , inputs ["**/AutoApply_V32.c"] ? pure [ "-mavx2"    | x86 ]
-          , inputs ["**/AutoApply_V64.c"] ? pure [ "-mavx512f" | x86 ]
 
           , inputs ["**/Jumps_V32.c"] ? pure [ "-mavx2"    | x86 ]
           , inputs ["**/Jumps_V64.c"] ? pure [ "-mavx512f" | x86 ]

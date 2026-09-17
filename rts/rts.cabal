@@ -40,7 +40,6 @@ extra-source-files:
     Apply.h
     Arena.h
     ARMOutlineAtomicsSymbols.h
-    AutoApply.h
     AutoApplyVecs.h
     BeginPrivate.h
     Capability.h
@@ -338,25 +337,17 @@ common rts-base-config
 
 common rts-cmm-sources-base
     if !arch(javascript)
-      -- Note: These .cmm files are thin wrappers that #include the corresponding
-      -- .cmm.h files. This ensures each sublibrary compiles them with its own
-      -- flags (-DDEBUG, -DTHREADED_RTS, etc.) applied correctly.
-      cmm-sources:
-        AutoApply.cmm
-        AutoApply_V16.cmm
-
+      -- The generic apply code (stg_ap_*) is not part of the RTS: GHC
+      -- generates and links it into each program, see
+      -- Note [Linking the generic apply code] in GHC.Driver.Pipeline.
       if arch(x86_64)
         cmm-sources:
           Jumps_V32.cmm (-mavx2)
           Jumps_V64.cmm (-mavx512f)
-          AutoApply_V32.cmm (-mavx2)
-          AutoApply_V64.cmm (-mavx512f)
       else
         cmm-sources:
           Jumps_V32.cmm
           Jumps_V64.cmm
-          AutoApply_V32.cmm
-          AutoApply_V64.cmm
 
     -- this is required so we don't have ghc inject ghc-internal (which depends on the rts)
     -- during the build phase of this library.
