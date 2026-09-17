@@ -2657,6 +2657,7 @@ fFlagsDeps = [
   flagSpec "whole-archive-hs-libs"            Opt_WholeArchiveHsLibs,
   flagSpec "keep-cafs"                        Opt_KeepCAFs,
   flagSpec "link-rts"                         Opt_LinkRts,
+  flagSpec "link-autoapply"                   Opt_LinkAutoApply,
   flagSpec "byte-code-and-object-code"        Opt_ByteCodeAndObjectCode,
   -- See Note [-fwrite-byte-code is not the default]
   flagSpec "write-byte-code"                  Opt_WriteByteCode,

@@ -3,6 +3,7 @@
 -- | Dynamic linker
 module GHC.Linker.Dynamic
    ( linkDynLib
+   , dynLibLinksRts
    -- * Platform-specifics
    , libmLinkOpts
    )
@@ -88,10 +89,8 @@ linkDynLib logger tmpfs dflags0 unit_env o_files dep_packages
     --
     let pkgs_without_rts = filter ((/= rtsUnitId) . unitId) pkgs_with_rts
         pkgs
-         | ArchWasm32 <- arch      = pkgs_with_rts
-         | OSMinGW32 <- os         = pkgs_with_rts
-         | gopt Opt_LinkRts dflags = pkgs_with_rts
-         | otherwise               = pkgs_without_rts
+         | dynLibLinksRts dflags platform = pkgs_with_rts
+         | otherwise                      = pkgs_without_rts
     unit_link_opts <- collectLinkOpts (ghcNameVersion dflags) (ways dflags) Nothing pkgs
     let pkg_link_opts = hsLibs unit_link_opts ++ extraLibs unit_link_opts ++ otherFlags unit_link_opts
 
@@ -295,3 +294,14 @@ Unregisterised compiler can't evade R_*_COPY relocations easily thus we disable
 
 See related tickets: #4210, #15338
 -}
+
+-- | Does 'linkDynLib' link the RTS into the shared library?  Normally it
+-- does not, so that the RTS flavour can be chosen when an executable is
+-- linked; see the comment in 'linkDynLib'.  Also used to decide whether the
+-- generic apply code accompanies the library, see
+-- Note [Linking the generic apply code] in GHC.Driver.Pipeline.
+dynLibLinksRts :: DynFlags -> Platform -> Bool
+dynLibLinksRts dflags platform
+  | ArchWasm32 <- platformArch platform = True
+  | OSMinGW32  <- platformOS   platform = True
+  | otherwise                           = gopt Opt_LinkRts dflags

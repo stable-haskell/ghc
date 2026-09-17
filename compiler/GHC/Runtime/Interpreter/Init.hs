@@ -56,6 +56,9 @@ data InterpOpts = InterpOpts
   , interpBrowserPlaywrightBrowserType :: Maybe String
   , interpBrowserPlaywrightLaunchOpts :: Maybe String
   , interpExecutableLinkOpts :: ExecutableLinkOpts
+  , interpExtraLinkObjs :: IO [FilePath]
+    -- ^ extra objects to link into a generated iserv; see
+    -- Note [Linking the generic apply code] in GHC.Driver.Pipeline
   }
 
 -- | Initialize code interpreter
@@ -132,7 +135,9 @@ initInterpreter dflags tmpfs logger platform finder_cache unit_env opts = do
           dynamic  = interpWays opts `hasWay` WayDyn
         prog <- case interpProg opts of
           -- build iserv program if none specified
-          "" -> generateIservC dflags logger tmpfs (interpExecutableLinkOpts opts) unit_env
+          "" -> do
+            extra_objs <- interpExtraLinkObjs opts
+            generateIservC dflags logger tmpfs (interpExecutableLinkOpts opts) unit_env extra_objs
           _  -> pure $ interpProg opts
         let msg = text "Starting " <> text prog
         tr <- if interpVerbosity opts >= 3

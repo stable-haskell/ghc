@@ -22,8 +22,10 @@ import GHC.Linker.Executable
 import GHC.Linker.Config
 
 -- | Generate iserv program for the target
-generateIservC :: DynFlags -> Logger -> TmpFs -> ExecutableLinkOpts -> UnitEnv -> IO FilePath
-generateIservC dflags logger tmpfs opts unit_env = do
+generateIservC :: DynFlags -> Logger -> TmpFs -> ExecutableLinkOpts -> UnitEnv
+               -> [FilePath]  -- ^ extra objects to link (the generic apply code)
+               -> IO FilePath
+generateIservC dflags logger tmpfs opts unit_env extra_objs = do
   -- get the unit-id of the ghci package. We need this to load the
   -- interpreter code.
   let unit_state = ue_homeUnitState unit_env
@@ -87,6 +89,6 @@ generateIservC dflags logger tmpfs opts unit_env = do
             | otherwise
             -> leLinkerConfig opts
         }
-  linkExecutable logger tmpfs opts' unit_env [] [ghci_unit_id]
+  linkExecutable logger tmpfs opts' unit_env extra_objs [ghci_unit_id]
 
   pure exe_file
