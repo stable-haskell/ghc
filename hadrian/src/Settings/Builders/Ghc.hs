@@ -16,23 +16,7 @@ import Data.Version.Extra
 ghcBuilderArgs :: Args
 ghcBuilderArgs = mconcat
   [ compileAndLinkHs, compileC, compileCxx, findHsDependencies
-  , toolArgs, genApplyArgs ]
-
--- | Generate the RTS generic apply code (rts/AutoApply*.cmm) with
--- @ghc --gen-apply@.  The single input is the RTS's DerivedConstants.h,
--- from which GHC reads the target's platform constants; it is found through
--- @-I@ because the RTS unit is not in a package database while it is being
--- built.  See Note [Target information for the generic apply code] in
--- GHC.StgToCmm.AutoApply.
-genApplyArgs :: Args
-genApplyArgs = mconcat
-    [ builder (Ghc (GenApply mb_vec)) ? do
-        derived_constants <- getInput
-        mconcat [ packageGhcArgs
-                , arg ("-I" ++ takeDirectory derived_constants)
-                , arg ("--gen-apply" ++ maybe "" (\w -> "=v" ++ show w) mb_vec)
-                , arg "-o", arg =<< getOutput ]
-    | mb_vec <- [Nothing, Just 16, Just 32, Just 64] ]
+  , toolArgs ]
 
 toolArgs :: Args
 toolArgs = do

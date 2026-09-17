@@ -57,22 +57,17 @@ instance Binary   DependencyType
 instance Hashable DependencyType
 instance NFData   DependencyType
 
--- | GHC can be used in several different modes:
+-- | GHC can be used in four different modes:
 -- * Compile a Haskell source file.
 -- * Compile a C source file.
 -- * Extract source dependencies by passing @-M@ command line argument.
 -- * Link object files & static libraries into an executable.
--- * Generate the RTS generic apply code (@--gen-apply@).
 data GhcMode = CompileHs
              | CompileCWithGhc
              | CompileCppWithGhc
              | FindHsDependencies
              | LinkHs
              | ToolArgs
-             | GenApply (Maybe Int)
-               -- ^ Generate rts/AutoApply.cmm (@Nothing@) or one of the
-               -- AutoApply_V{16,32,64}.cmm vector variants (@Just width@);
-               -- see GHC.StgToCmm.AutoApply.
     deriving (Eq, Generic, Show)
 
 instance Binary   GhcMode
