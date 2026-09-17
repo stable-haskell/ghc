@@ -46,6 +46,7 @@ initInterpOpts dflags = do
     , interpLdConfig = configureLd dflags
     , interpCcConfig = configureCc dflags
     , interpExecutableLinkOpts = initExecutableLinkOpts dflags
+    , interpExtraLinkObjs = pure []
     }
 
 #else

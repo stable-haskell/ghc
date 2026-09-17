@@ -802,6 +802,8 @@ data GeneralFlag
    | Opt_ByteCodeAndObjectCode
    | Opt_UnoptimizedCoreForInterpreter
    | Opt_LinkRts
+   | Opt_LinkAutoApply -- ^ link the generic apply code into programs;
+                       -- see Note [Linking the generic apply code] in GHC.Driver.Pipeline
 
    -- output style opts
    | Opt_ErrorSpans -- ^ Include full span info in error messages,

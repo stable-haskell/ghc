@@ -13,9 +13,11 @@
 -- @stg_ap_stk_*@ / @stg_stk_save_*@ routines used by @stg_PAP_apply@ and
 -- the heap-check failure code.
 --
--- The generated code is Cmm source text, written by @ghc --gen-apply@ into
--- @rts/AutoApply.cmm@ (and the vector variants, see
--- Note [AutoApply.cmm for vectors]) when the RTS is built.
+-- The generated code is Cmm source text.  It is not part of libHSrts: GHC
+-- compiles it and links it into each program when the program is linked,
+-- see Note [Linking the generic apply code] in GHC.Driver.Pipeline.  The
+-- @ghc --gen-apply@ mode prints the same text (and the vector variants,
+-- see Note [AutoApply.cmm for vectors]).
 --
 -- Everything the generator knows about the target comes from the
 -- 'Platform': word size, the argument registers (through
@@ -65,10 +67,10 @@ All of this is available from the compiler's 'Platform':
 
   * the constants come from 'platformConstants', which GHC reads from the
     RTS's DerivedConstants.h header (see Note [Platform constants] in
-    GHC.Platform).  This is why "ghc --gen-apply" must be able to find that
-    header: when building the RTS itself, GHC looks in the -I include
-    directories (see GHC.Unit.State.initUnits), which is what Hadrian
-    arranges.
+    GHC.Platform).  When a program is linked the header comes from the rts
+    unit in the package database; "ghc --gen-apply" can also find it in the
+    -I include directories when the RTS itself is being built (see
+    GHC.Unit.State.initUnits).
 
 Historically this generator was a standalone program (utils/genapply) that
 re-implemented the register assignment and parsed the constants from
@@ -154,7 +156,8 @@ However, there isn't currently a way to set CPU flags per function in Cmm, à la
 Instead, we put all V16 code in AutoApply_V16.cmm, all V32 code into
 AutoApply_V32.cmm, and all V64 code in AutoApply_V64.cmm.
 On X86, we then compile AutoApply_V32.cmm with -mavx2, and AutoApply_V64.cmm
-with -mavx512f. See references to AutoApply in Hadrian, Settings/Packages.hs.
+with -mavx512f. These are the four objects that GHC compiles when a program
+is linked, see mkAutoApplyObjs in GHC.Driver.Pipeline.
 
 Note that it is very important to set these flags. For example, were we to
 compile AutoApply_V32.cmm without -mavx2 using the LLVM backend, LLVM would
@@ -165,6 +168,111 @@ This violates the expected calling convention, and leads to segfaults
 See also Note [realArgRegsCover] in GHC.Cmm.CallConv, which deals with similar
 concerns.
 -}
+
+-- -----------------------------------------------------------------------------
+-- Helper macros emitted at the top of the generated file
+--
+-- These used to live in rts/AutoApply.h.  The generated file must be
+-- compilable outside the RTS build (see Note [Linking the generic apply code]
+-- in GHC.Driver.Pipeline), where only the installed RTS headers such as Cmm.h
+-- are available, so the macros are part of the generated text.
+
+autoApplyMacros :: Doc
+autoApplyMacros = vcat $ map text
+  [ "// Build a new PAP: function is in R1"
+  , "// ret addr and m arguments taking up n words are on the stack."
+  , "// NB. x is a dummy argument attached to the 'for' label so that"
+  , "// BUILD_PAP can be used multiple times in the same function."
+  , "// m: number of arguments provided"
+  , "// n: words on the stack for arguments (could be > m e.g. double args on x32)"
+  , "// f: function"
+  , "#define BUILD_PAP(m,n,f,x)                              \\"
+  , "    W_ pap;                                             \\"
+  , "    W_ size;                                            \\"
+  , "    W_ i;                                               \\"
+  , "    size = SIZEOF_StgPAP + WDS(n);                      \\"
+  , "    HP_CHK_NP_ASSIGN_SP0(size,f);                       \\"
+  , "    TICK_ALLOC_PAP(size, 0);                            \\"
+  , "    CCCS_ALLOC(size);                                   \\"
+  , "    pap = Hp + WDS(1) - size;                           \\"
+  , "    SET_HDR(pap, stg_PAP_info, CCCS);                   \\"
+  , "    StgPAP_arity(pap) = HALF_W_(arity - m);             \\"
+  , "    StgPAP_fun(pap)   = R1;                             \\"
+  , "    StgPAP_n_args(pap) = HALF_W_(n);                    \\"
+  , "    i = 0;                                              \\"
+  , "  for##x:                                               \\"
+  , "    if (i < n) {                                        \\"
+  , "        StgPAP_payload(pap,i) = Sp(1+i);                \\"
+  , "        i = i + 1;                                      \\"
+  , "        goto for##x;                                    \\"
+  , "    }                                                   \\"
+  , "    R1 = pap;                                           \\"
+  , "    Sp_adj(1 + n);                                      \\"
+  , "    jump %ENTRY_CODE(Sp(0)) [R1];"
+  , ""
+  , "// Just like when we enter a PAP, if we're building a new PAP by applying more"
+  , "// arguments to an existing PAP, we must construct the CCS for the new PAP as if"
+  , "// we had entered the existing PAP from the current CCS.  Otherwise, we lose any"
+  , "// stack information in the existing PAP.  See #5654, and the test T5654b-O0."
+  , "#if defined(PROFILING)"
+  , "#define ENTER_FUN_CCS_NEW_PAP(pap) \\"
+  , "  ccall enterFunCCS(BaseReg \"ptr\", StgHeader_ccs(pap) \"ptr\");"
+  , "#else"
+  , "#define ENTER_FUN_CCS_NEW_PAP(pap) /* empty */"
+  , "#endif"
+  , ""
+  , "// Copy the old PAP, build a new one with the extra arg(s)"
+  , "// ret addr and m arguments taking up n words are on the stack."
+  , "// NB. x is a dummy argument attached to the 'for' label so that"
+  , "// BUILD_PAP can be used multiple times in the same function."
+  , "#define NEW_PAP(m,n,f,x)                                        \\"
+  , "     W_ pap;                                                    \\"
+  , "     W_ new_pap;                                                \\"
+  , "     W_ size;                                                   \\"
+  , "     W_ i;                                                      \\"
+  , "     pap = R1;                                                  \\"
+  , "     size = SIZEOF_StgPAP + WDS(TO_W_(StgPAP_n_args(pap))) + WDS(n);    \\"
+  , "     HP_CHK_NP_ASSIGN_SP0(size,f);                              \\"
+  , "     TICK_ALLOC_PAP(size, 0);                                   \\"
+  , "     CCCS_ALLOC(size);                                          \\"
+  , "     ENTER_FUN_CCS_NEW_PAP(pap);                                \\"
+  , "     new_pap = Hp + WDS(1) - size;                              \\"
+  , "     SET_HDR(new_pap, stg_PAP_info, CCCS);                      \\"
+  , "     StgPAP_arity(new_pap) = HALF_W_(arity - m);                \\"
+  , "     W_ n_args;                                                 \\"
+  , "     n_args = TO_W_(StgPAP_n_args(pap));                        \\"
+  , "     StgPAP_n_args(new_pap) = HALF_W_(n_args + n);              \\"
+  , "     StgPAP_fun(new_pap) = StgPAP_fun(pap);                     \\"
+  , "     i = 0;                                                     \\"
+  , "   for1##x:                                                     \\"
+  , "     if (i < n_args) {                                          \\"
+  , "         StgPAP_payload(new_pap,i) = StgPAP_payload(pap,i);     \\"
+  , "         i = i + 1;                                             \\"
+  , "         goto for1##x;                                          \\"
+  , "     }                                                          \\"
+  , "     i = 0;                                                     \\"
+  , "   for2##x:                                                     \\"
+  , "     if (i < n) {                                               \\"
+  , "         StgPAP_payload(new_pap,n_args+i) = Sp(1+i);            \\"
+  , "         i = i + 1;                                             \\"
+  , "         goto for2##x;                                          \\"
+  , "     }                                                          \\"
+  , "     R1 = new_pap;                                              \\"
+  , "     Sp_adj(n+1);                                               \\"
+  , "     jump %ENTRY_CODE(Sp(0)) [R1];"
+  , ""
+  , "// Jump to target, saving CCCS and restoring it on return"
+  , "// See Note [jump_SAVE_CCCS] in GHC.StgToCmm.AutoApply"
+  , "#if defined(PROFILING)"
+  , "#define jump_SAVE_CCCS(restore_fun, target,...) \\"
+  , "    Sp(-1) = CCCS;                              \\"
+  , "    Sp(-2) = (restore_fun);                     \\"
+  , "    Sp_adj(-2);                                 \\"
+  , "    jump (target) [__VA_ARGS__]"
+  , "#else"
+  , "#define jump_SAVE_CCCS(restore_fun, target,...) jump (target) [__VA_ARGS__]"
+  , "#endif"
+  ]
 
 -- -----------------------------------------------------------------------------
 -- Argument kinds
@@ -691,8 +799,8 @@ genMkPAP platform macro jump live _ticker disamb
 -- When profiling, if we have some extra arguments to apply that we
 -- save to the stack, we must also save the current cost centre stack
 -- and restore it when applying the extra arguments.  This is all
--- handled by the macro jump_SAVE_CCCS(target), defined in
--- rts/AutoApply.h.
+-- handled by the macro jump_SAVE_CCCS(target), defined at the top of
+-- the generated file ('autoApplyMacros').
 --
 -- At the jump, the stack will look like this:
 --
@@ -1166,7 +1274,8 @@ genAutoApply platform mbVec = renderStyle style the_code
                 text "// Automatically generated by GHC.StgToCmm.AutoApply (ghc --gen-apply)",
                 text "",
                 text "#include \"Cmm.h\"",
-                text "#include \"AutoApply.h\"",
+                text "",
+                autoApplyMacros,
                 text "#if !defined(UnregisterisedCompiler)",
                 text "import CLOSURE ALLOC_RTS_ctr;",
                 text "import CLOSURE ALLOC_RTS_tot;",
