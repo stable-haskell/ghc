@@ -711,8 +711,13 @@ The generated code follows the RTS flavour being linked: -DPROFILING comes
 through wayOptc as for any Cmm file, and we add THREADED_RTS for -threaded
 and DEBUG/TICKY_TICKY for -debug, matching the defines Hadrian uses for
 those RTS ways.  The V16/V32/V64 vector routines are compiled as separate
-objects with -mavx2/-mavx512f on x86, see Note [AutoApply.cmm for vectors]
-in GHC.StgToCmm.AutoApply.
+objects, see Note [AutoApply.cmm for vectors] in GHC.StgToCmm.AutoApply.
+Their instruction-set level is fixed per variant (baseline, -mavx2,
+-mavx512f on x86) rather than taken from the link command line: the
+baseline objects go into every program and must run on any target CPU,
+exactly as when they were part of libHSrts.  Everything else about the
+compilation (ways, optimisation level, backend) does follow the link
+command line, so that the objects match the program they join.
 
 -fno-link-autoapply disables all this; "ghc --gen-apply" prints the same
 Cmm for anyone who needs to link the code by other means.
@@ -776,10 +781,21 @@ mkRtsCmmObjs hsc_env dep_units
                   }
           d2 = foldl' (flip unSetGeneralFlag') d1
                  [Opt_InfoTableMap, Opt_InfoTableMapWithStack, Opt_InfoTableMapWithFallback]
+          -- The vector ISA level is fixed per variant and does not follow
+          -- the flags of the link command line (a link with -mavx2 must
+          -- not turn the baseline variants, which every program shares,
+          -- into AVX code).  So reset the x86 ISA knobs to the target's
+          -- baseline first and enable only what each variant needs.
+          d3 | x86 = d2 { sseVersion = Nothing, bmiVersion = Nothing
+                        , avx = False, avx2 = False
+                        , avx512cd = False, avx512er = False
+                        , avx512f = False, avx512pf = False
+                        , fma = False }
+             | otherwise = d2
       in case mb_vec of
-           Just 32 | x86 -> d2 { avx2 = True }
-           Just 64 | x86 -> d2 { avx512f = True }
-           _             -> d2
+           Just 32 | x86 -> d3 { avx2 = True }
+           Just 64 | x86 -> d3 { avx512f = True }
+           _             -> d3
 
     -- The defines Hadrian uses for the corresponding RTS ways (see wayCcArgs
     -- and rtsPackageArgs in hadrian); PROFILING is already added by wayOptc.
