@@ -79,7 +79,7 @@ import GHC.Linker.Static
 import GHC.Linker.Static.Utils
 import GHC.Linker.Types
 import GHC.Linker.Dynamic      ( dynLibLinksRts )
-import GHC.StgToCmm.AutoApply  ( genAutoApply )
+import GHC.StgToCmm.AutoApply ( GenFile, genFiles, genFile, genFileVecWidth )
 import GHC.Settings            ( ToolSettings(..) )
 import GHC.Driver.IncludeSpecs ( addGlobalInclude )
 import qualified GHC.Data.ShortText as ST
@@ -681,6 +681,13 @@ link, in the same way the JS backend emits rts.js at link time.  The
 references in the RTS are resolved at that final link, like
 init_ghc_hs_iface (Note [RTS/ghc-internal interface] in rts/RtsToHsIface.c).
 
+The same goes for the register-saving frames stg_stack_underflow_frame_* and
+stg_restore_cccs_* of rts/Jumps.h: they exist once per argument-register
+width for the same reason the apply code does, need the same per-file -mavx
+flags, and are referred to by the RTS in the same way, so their four
+instantiations are generated and compiled here too.  See
+Note [Link-time RTS Cmm files] in GHC.StgToCmm.AutoApply for the list.
+
 The object goes wherever the RTS goes:
 
   * into every executable, including -no-hs-main ones.  When the RTS is a
@@ -736,15 +743,15 @@ mkAutoApplyObjs hsc_env dep_units
     ws       = ways dflags
     x86      = platformArch platform `elem` [ArchX86, ArchX86_64]
 
-    -- See Note [AutoApply.cmm for vectors] in GHC.StgToCmm.AutoApply
-    variants = [ ("AutoApply.cmm",     Nothing)
-               , ("AutoApply_V16.cmm", Just 16)
-               , ("AutoApply_V32.cmm", Just 32)
-               , ("AutoApply_V64.cmm", Just 64) ]
+    -- See Note [Link-time RTS Cmm files] and Note [AutoApply.cmm for vectors]
+    -- in GHC.StgToCmm.AutoApply
+    variants = genFiles
 
-    gen dir rts_incs (file_name, mb_vec) = do
-      let src = dir </> file_name
-      writeFile src (genAutoApply platform mb_vec)
+    gen :: FilePath -> [FilePath] -> (FilePath, GenFile) -> IO FilePath
+    gen dir rts_incs (file_name, gf) = do
+      let src    = dir </> file_name
+          mb_vec = genFileVecWidth gf
+      writeFile src (genFile platform gf)
       addFilesToClean tmpfs TFL_GhcSession [src]
       let pipe_env = mkPipeEnv NoStop src Nothing (Temporary TFL_GhcSession)
           hsc_env' = setDumpPrefix pipe_env (hscUpdateFlags (variant_flags rts_incs mb_vec) hsc_env)

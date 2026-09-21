@@ -756,9 +756,12 @@ Linking the runtime's generic apply code
 The runtime system library does not contain the *generic apply code*: the
 ``stg_ap_*`` entry points and return frames that compiled Haskell code jumps
 to when it calls a function whose arity it does not know statically.  The
-runtime only refers to these symbols.  GHC generates the code when it links
-a program and adds it to the link, so in the common case nothing needs to be
-done.  Concretely, GHC adds the generic apply code to
+same holds for the runtime's register-saving frames
+``stg_stack_underflow_frame_*`` and ``stg_restore_cccs_*``, which like the
+apply code exist once per argument-register width.  The runtime only refers
+to these symbols.  GHC generates the code when it links a program and adds
+it to the link, so in the common case nothing needs to be done.  Concretely,
+GHC adds the generated code to
 
 - every executable it links, including those linked with
   :ghc-flag:`-no-hs-main`;
@@ -786,18 +789,22 @@ and add the resulting objects wherever you link ``libHSrts``:
 
 .. code-block:: none
 
-    ghc --gen-apply     -o AutoApply.cmm
-    ghc --gen-apply=v16 -o AutoApply_V16.cmm
-    ghc --gen-apply=v32 -o AutoApply_V32.cmm
-    ghc --gen-apply=v64 -o AutoApply_V64.cmm
-    ghc -c AutoApply.cmm AutoApply_V16.cmm
-    ghc -c -mavx2    AutoApply_V32.cmm
-    ghc -c -mavx512f AutoApply_V64.cmm
+    ghc --gen-apply           -o AutoApply.cmm
+    ghc --gen-apply=v16       -o AutoApply_V16.cmm
+    ghc --gen-apply=v32       -o AutoApply_V32.cmm
+    ghc --gen-apply=v64       -o AutoApply_V64.cmm
+    ghc --gen-apply=jumps     -o Jumps_D.cmm
+    ghc --gen-apply=jumps-v16 -o Jumps_V16.cmm
+    ghc --gen-apply=jumps-v32 -o Jumps_V32.cmm
+    ghc --gen-apply=jumps-v64 -o Jumps_V64.cmm
+    ghc -c AutoApply.cmm AutoApply_V16.cmm Jumps_D.cmm Jumps_V16.cmm
+    ghc -c -mavx2    AutoApply_V32.cmm Jumps_V32.cmm
+    ghc -c -mavx512f AutoApply_V64.cmm Jumps_V64.cmm
 
-The three ``_V*`` files contain the entry points for vector arguments of
-the given width; on x86 they must be compiled with the corresponding
-``-mavx2`` and ``-mavx512f`` flags, as above, and on other architectures
-without them.  All four objects are needed.
+The ``_V*`` files contain the code for vector arguments of the given width;
+on x86 they must be compiled with the corresponding ``-mavx2`` and
+``-mavx512f`` flags, as above, and on other architectures without them.  All
+eight objects are needed.
 
 The generated code is specific to the GHC that generated it and to the
 flavour of the runtime it will be linked with, so

@@ -3,6 +3,12 @@
 // the RTS with different levels of support for vector registers.
 //
 // See Note [realArgRegsCover] in GHC.Cmm.CallConv for more details.
+//
+// The four instantiations (scalar, V16, V32, V64) are not compiled into
+// libHSrts: GHC generates the wrappers that set ARG_REGS_V* and include this
+// header when it links the RTS into a program, and compiles them with the
+// matching -mavx flags.  See Note [Linking the generic apply code] in
+// GHC.Driver.Pipeline.  This header is therefore installed with the RTS.
 
 #if defined(ARG_REGS_V64)
   #define MK_FUN_NM(f) f##_v64

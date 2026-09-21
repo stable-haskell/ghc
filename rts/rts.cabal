@@ -336,18 +336,10 @@ common rts-base-config
       rts
 
 common rts-cmm-sources-base
-    if !arch(javascript)
-      -- The generic apply code (stg_ap_*) is not part of the RTS: GHC
-      -- generates and links it into each program, see
-      -- Note [Linking the generic apply code] in GHC.Driver.Pipeline.
-      if arch(x86_64)
-        cmm-sources:
-          Jumps_V32.cmm (-mavx2)
-          Jumps_V64.cmm (-mavx512f)
-      else
-        cmm-sources:
-          Jumps_V32.cmm
-          Jumps_V64.cmm
+    -- The generic apply code (stg_ap_*) and the register-saving frames
+    -- (stg_stack_underflow_frame_*, stg_restore_cccs_*; rts/Jumps.h) are not
+    -- part of the RTS: GHC generates and links them into each program, see
+    -- Note [Linking the generic apply code] in GHC.Driver.Pipeline.
 
     -- this is required so we don't have ghc inject ghc-internal (which depends on the rts)
     -- during the build phase of this library.
@@ -362,8 +354,6 @@ common rts-c-sources-base
         ContinuationOps.cmm
         Exception.cmm
         HeapStackCheck.cmm
-        Jumps_D.cmm
-        Jumps_V16.cmm
         PrimOps.cmm
         StgMiscClosures.cmm
         StgStartup.cmm

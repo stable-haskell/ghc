@@ -79,7 +79,7 @@ import GHC.SysTools.BaseDir
 import GHC.Iface.Load
 import GHC.Iface.Recomp.Binary ( fingerprintBinMem )
 
-import GHC.StgToCmm.AutoApply ( genAutoApply )
+import GHC.StgToCmm.AutoApply ( GenFile, genFile )
 
 import GHC.Tc.Utils.Monad      ( initIfaceCheck )
 import GHC.Iface.Errors.Ppr
@@ -327,7 +327,7 @@ main' postLoadMode units dflags0 args flagWarnings = do
        ShowPackages           -> liftIO $ showUnits hsc_env
        DoFrontend f           -> doFrontend f srcs
        DoBackpack             -> doBackpack (map fst srcs)
-       DoGenApply mb_vec      -> liftIO $ doGenApply hsc_env mb_vec
+       DoGenApply gf          -> liftIO $ doGenApply hsc_env gf
 
   liftIO $ dumpFinalStats logger
 
@@ -545,8 +545,8 @@ to get a hash of the package's ABI.
 -- from the RTS's DerivedConstants.h (see Note [Platform constants] in
 -- GHC.Platform).  When building the RTS itself they are not available from
 -- the unit database, so fall back to looking in the @-I@ directories.
-doGenApply :: HscEnv -> Maybe Int -> IO ()
-doGenApply hsc_env mb_vec = do
+doGenApply :: HscEnv -> GenFile -> IO ()
+doGenApply hsc_env gf = do
   let dflags    = hsc_dflags hsc_env
       platform0 = targetPlatform dflags
   platform <- case platform_constants platform0 of
@@ -558,7 +558,7 @@ doGenApply hsc_env mb_vec = do
         Nothing -> throwGhcException $ UsageError $
           "--gen-apply: cannot find DerivedConstants.h; pass the RTS include "
           ++ "directory with -I, or use -this-unit-id rts"
-  let code = genAutoApply platform mb_vec
+  let code = genFile platform gf
   case outputFile dflags of
     Just out -> writeFile out code
     Nothing  -> putStr code

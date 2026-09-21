@@ -1117,8 +1117,10 @@ for example).
     :default: on
 
     The runtime system's generic application code (the ``stg_ap_*``
-    entry points used for calls to functions of unknown arity) is not part
-    of the RTS library.  GHC generates it and links it into every program,
+    entry points used for calls to functions of unknown arity) and its
+    register-saving frames (``stg_stack_underflow_frame_*`` and
+    ``stg_restore_cccs_*``) are not part of the RTS library.  GHC generates
+    them and links them into every program,
     and into shared and static libraries that contain the RTS
     (:ghc-flag:`-flink-rts`).  ``-fno-link-autoapply`` turns this off, for
     example when the code is linked by other means;

@@ -7,6 +7,7 @@ module GHC.Driver.Session.Mode where
 import GHC.Driver.CmdLine
 import GHC.Driver.Phases
 import GHC.Driver.Session
+import GHC.StgToCmm.AutoApply ( GenFile(..) )
 import GHC.Unit.Module ( ModuleName, mkModuleName )
 
 import GHC.Types.SrcLoc
@@ -94,7 +95,7 @@ data PostLoadMode
   | DoAbiHash               -- ghc --abi-hash
   | ShowPackages            -- ghc --show-packages
   | DoFrontend ModuleName   -- ghc --frontend Plugin.Module
-  | DoGenApply (Maybe Int)  -- ghc --gen-apply[=v16|v32|v64]
+  | DoGenApply GenFile      -- ghc --gen-apply[=v16|v32|v64|jumps[-v16|-v32|-v64]]
                             -- generate the RTS generic apply code
                             -- (see GHC.StgToCmm.AutoApply)
 
@@ -122,18 +123,24 @@ doFrontendMode str = mkPostLoadMode (DoFrontend (mkModuleName str))
 doBackpackMode :: Mode
 doBackpackMode = mkPostLoadMode DoBackpack
 
-doGenApplyMode :: Maybe Int -> Mode
+doGenApplyMode :: GenFile -> Mode
 doGenApplyMode = mkPostLoadMode . DoGenApply
 
 -- | Parse the optional argument of @--gen-apply@: nothing for the main
--- AutoApply.cmm, or a vector width for one of the AutoApply_V*.cmm files.
-parseGenApplyArg :: String -> Maybe (Maybe Int)
+-- AutoApply.cmm, a vector width for one of the AutoApply_V*.cmm files, or
+-- @jumps@ (optionally with a vector width) for the rts/Jumps.h wrappers.
+-- See Note [Link-time RTS Cmm files] in GHC.StgToCmm.AutoApply.
+parseGenApplyArg :: String -> Maybe GenFile
 parseGenApplyArg s = case map toLower s of
-  ""    -> Just Nothing
-  "v16" -> Just (Just 16)
-  "v32" -> Just (Just 32)
-  "v64" -> Just (Just 64)
-  _     -> Nothing
+  ""          -> Just (GenAutoApply Nothing)
+  "v16"       -> Just (GenAutoApply (Just 16))
+  "v32"       -> Just (GenAutoApply (Just 32))
+  "v64"       -> Just (GenAutoApply (Just 64))
+  "jumps"     -> Just (GenJumps Nothing)
+  "jumps-v16" -> Just (GenJumps (Just 16))
+  "jumps-v32" -> Just (GenJumps (Just 32))
+  "jumps-v64" -> Just (GenJumps (Just 64))
+  _           -> Nothing
 
 mkPostLoadMode :: PostLoadMode -> Mode
 mkPostLoadMode = Right . Right
@@ -275,7 +282,7 @@ mode_flags =
   , defFlag "-gen-apply"   (OptPrefix (\s -> case parseGenApplyArg s of
                                           Just v  -> setMode (doGenApplyMode v) "--gen-apply"
                                           Nothing -> addErr ("unrecognised --gen-apply argument: " ++ s
-                                                             ++ " (expected v16, v32 or v64)")))
+                                                             ++ " (expected v16, v32, v64, jumps, jumps-v16, jumps-v32 or jumps-v64)")))
   , defFlag "e"            (SepArg   (\s -> setMode (doEvalMode s) "-e"))
   , defFlag "-frontend"    (SepArg   (\s -> setMode (doFrontendMode s) "-frontend"))
   ]

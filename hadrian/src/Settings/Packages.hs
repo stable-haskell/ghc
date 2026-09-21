@@ -312,11 +312,6 @@ rtsPackageArgs = package rts ? do
           , Profiling `wayUnit` way          ? arg "-DPROFILING"
           , Threaded  `wayUnit` way          ? arg "-DTHREADED_RTS"
           , notM targetSupportsSMP           ? arg "-optc-DNOSMP"
-
-            -- See Note [realArgRegsCover] in GHC.Cmm.CallConv: the vector
-            -- variants need the matching -m flags.
-          , inputs ["**/Jumps_V32.cmm"] ? pure [ "-mavx2"    | x86 ]
-          , inputs ["**/Jumps_V64.cmm"] ? pure [ "-mavx512f" | x86 ]
           ]
 
     let cArgs = mconcat
@@ -359,10 +354,6 @@ rtsPackageArgs = package rts ? do
           , input "**/Hash.c" ? pure [ "-O3" ]
 
           , inputs ["**/Evac.c", "**/Evac_thr.c"] ? arg "-funroll-loops"
-
-
-          , inputs ["**/Jumps_V32.c"] ? pure [ "-mavx2"    | x86 ]
-          , inputs ["**/Jumps_V64.c"] ? pure [ "-mavx512f" | x86 ]
 
           -- inlining warnings happen in Compact
           , inputs ["**/Compact.c"] ? arg "-Wno-inline"
