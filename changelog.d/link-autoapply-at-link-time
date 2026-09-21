@@ -1,0 +1,16 @@
+section: linker
+synopsis:
+  The runtime's generic apply code (the ``stg_ap_*`` entry points) is no longer
+  part of the RTS library; GHC generates and links it into every program, and
+  into shared and static libraries that contain the RTS.
+issues: #24347
+mrs: !0
+description: {
+  Programs and libraries linked by GHC need no changes.  A Haskell shared
+  library that is loaded by a program GHC did not link must now be built with
+  ``-flink-rts``, or the generic apply code must be generated with the new
+  ``ghc --gen-apply`` mode and added to the final link by hand; see the new
+  "Linking the runtime's generic apply code" section of the users guide.  The
+  new ``-fno-link-autoapply`` flag stops GHC from adding the code to a link.
+  The standalone ``genapply`` build tool has been removed.
+}

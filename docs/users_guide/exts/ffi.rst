@@ -624,7 +624,9 @@ reliably re-initialise after this has happened; see :ref:`infelicities-ffi`.
     When linking the final program, it is normally easiest to do the
     link using GHC, although this isn't essential. If you do use GHC, then
     don't forget the flag :ghc-flag:`-no-hs-main`, otherwise GHC
-    will try to link to the ``Main`` Haskell module.
+    will try to link to the ``Main`` Haskell module. If you do not, you
+    must add the runtime's generic apply code to the link yourself; see
+    :ref:`linking-autoapply`.
 
 .. note::
     On Windows hs_init treats argv as UTF8-encoded. Passing other encodings
@@ -741,6 +743,80 @@ The initialisation routine, ``mylib_init``, calls ``hs_init()`` as
 normal to initialise the Haskell runtime, and the corresponding
 deinitialisation function ``mylib_end()`` calls ``hs_exit()`` to shut
 down the runtime.
+
+.. _linking-autoapply:
+
+Linking the runtime's generic apply code
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. index::
+   single: generic apply code; linking
+   single: stg_ap
+
+The runtime system library does not contain the *generic apply code*: the
+``stg_ap_*`` entry points and return frames that compiled Haskell code jumps
+to when it calls a function whose arity it does not know statically.  The
+runtime only refers to these symbols.  GHC generates the code when it links
+a program and adds it to the link, so in the common case nothing needs to be
+done.  Concretely, GHC adds the generic apply code to
+
+- every executable it links, including those linked with
+  :ghc-flag:`-no-hs-main`;
+
+- shared libraries that contain the runtime, that is those linked with
+  :ghc-flag:`-flink-rts` (and all shared libraries on Windows and wasm);
+
+- static libraries built with :ghc-flag:`-staticlib`, unless
+  ``-fno-link-rts`` is given.
+
+A shared library built *without* :ghc-flag:`-flink-rts` therefore relies on
+the program that loads it to provide the generic apply code, just as it
+relies on it to provide the runtime.  That is always the case when the
+program was linked by GHC.  When the final link is performed by another
+tool, for instance a C program linked with the system C compiler against
+``libHSrts`` and a Haskell shared library, or a plugin host that is not a
+Haskell program, nothing provides the ``stg_ap_*`` symbols and linking or
+loading fails with undefined references to them.
+
+There are two ways to avoid this.  The simplest is to build the shared
+library with :ghc-flag:`-flink-rts`, so that the runtime and the generic
+apply code travel with it; see :ref:`shared-libraries-c-api`.  Otherwise,
+generate and compile the code yourself with :ghc-flag:`--gen-apply[=⟨width⟩]`
+and add the resulting objects wherever you link ``libHSrts``:
+
+.. code-block:: none
+
+    ghc --gen-apply     -o AutoApply.cmm
+    ghc --gen-apply=v16 -o AutoApply_V16.cmm
+    ghc --gen-apply=v32 -o AutoApply_V32.cmm
+    ghc --gen-apply=v64 -o AutoApply_V64.cmm
+    ghc -c AutoApply.cmm AutoApply_V16.cmm
+    ghc -c -mavx2    AutoApply_V32.cmm
+    ghc -c -mavx512f AutoApply_V64.cmm
+
+The three ``_V*`` files contain the entry points for vector arguments of
+the given width; on x86 they must be compiled with the corresponding
+``-mavx2`` and ``-mavx512f`` flags, as above, and on other architectures
+without them.  All four objects are needed.
+
+The generated code is specific to the GHC that generated it and to the
+flavour of the runtime it will be linked with, so
+
+- run the ``ghc`` you compile the Haskell code with, and regenerate the
+  files when you switch to a different GHC;
+
+- compile the files with the same way flags as the Haskell code and the
+  runtime: :ghc-flag:`-dynamic` and :ghc-flag:`-fPIC` when the objects go
+  into a shared library, :ghc-flag:`-prof` for the profiling runtime;
+
+- when linking against the threaded runtime, add ``-optCmmP-DTHREADED_RTS``
+  when compiling the files, and ``-optCmmP-DDEBUG`` for the debug runtime
+  (see :ghc-flag:`-optCmmP ⟨option⟩`).  GHC does not derive these from
+  :ghc-flag:`-threaded` and :ghc-flag:`-debug` when compiling Cmm.
+
+If GHC performs the final link and would add the generic apply code itself,
+pass :ghc-flag:`-fno-link-autoapply` as well, otherwise the symbols are
+defined twice.
 
 .. _glasgow-foreign-headers:
 
