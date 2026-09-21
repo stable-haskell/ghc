@@ -133,7 +133,6 @@ endif
 #   489:AC_PATH_PROG([NM], nm)
 #   495:AC_PATH_PROG([OBJDUMP], objdump)
 #   501:AC_PATH_PROG([DERIVE_CONSTANTS], deriveConstants)
-#   505:AC_PATH_PROG([GENAPPLY], genapply)
 #
 
 #
@@ -151,7 +150,6 @@ GHC_TOOLCHAIN_ARGS  = --disable-ld-override
 # artifact is available.
 GHC_TOOLCHAIN_BIN    ?= $(STAGE1_PATH)/bin/ghc-toolchain-bin
 DERIVE_CONSTANTS_BIN ?= $(STAGE1_PATH)/bin/deriveConstants
-GENAPPLY_BIN         ?= $(STAGE1_PATH)/bin/genapply
 # genprimopcode is invoked by compiler/Setup.hs by bare name (`readProcess
 # "genprimopcode"`), i.e. resolved via PATH rather than an env var. Its
 # directory is prepended to PATH for the stage3 cabal build (see below) so the
@@ -582,7 +580,6 @@ endif
 # twice for no reason.
 STAGE1_EXECUTABLES = \
 	deriveConstants \
-	genapply \
 	genprimopcode \
 	ghc \
 	ghc-pkg \
@@ -725,7 +722,6 @@ STAGE2_EXTRA_LIB_DIRS     ?=
 STAGE2_CABAL_BUILD = \
 	env \
 	DERIVE_CONSTANTS=$(call NORMALIZE_FP,$(CURDIR)/$(STAGE1_PATH)/bin/deriveConstants) \
-	GENAPPLY=$(call NORMALIZE_FP,$(CURDIR)/$(STAGE1_PATH)/bin/genapply) \
 	NM=$(NM) \
 	OBJDUMP=$(OBJDUMP) \
 	$(CABAL_BUILD) \
@@ -810,7 +806,6 @@ endif
 	$(call LOG,Copying cross-compilation tools to $(DIST_DIR)/bin)
 	@cp -fp $(STAGE1_PATH)/bin/ghc-toolchain-bin $(DIST_DIR)/bin/ghc-toolchain-bin
 	@cp -fp $(STAGE1_PATH)/bin/deriveConstants $(DIST_DIR)/bin/deriveConstants
-	@cp -fp $(STAGE1_PATH)/bin/genapply $(DIST_DIR)/bin/genapply
 	# genprimopcode: compiler/Setup.hs resolves it from PATH; the stage3 cabal
 	# build prepends $(dir $(GENPRIMOPCODE_BIN)) so this dist copy wins over the
 	# bootstrap GHC's (which can't parse the primop effect grammar, dying at
@@ -982,7 +977,6 @@ STAGE3_$(1)_CABAL_BUILD = \
 	env \
 	PATH="$$(call NORMALIZE_FP,$$(abspath $$(dir $$(GENPRIMOPCODE_BIN)))):$$$$PATH" \
 	DERIVE_CONSTANTS=$$(call NORMALIZE_FP,$$(abspath $$(DERIVE_CONSTANTS_BIN))) \
-	GENAPPLY=$$(call NORMALIZE_FP,$$(abspath $$(GENAPPLY_BIN))) \
 	NM=$$(STAGE3_$(1)_NM) \
 	OBJDUMP=$$(STAGE3_$(1)_OBJDUMP) \
 	$$(CABAL_BUILD) \

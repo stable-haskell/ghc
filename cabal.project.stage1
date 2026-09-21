@@ -32,7 +32,6 @@ packages:
 
   -- Internal tools
   utils/deriveConstants
-  utils/genapply
   utils/genprimopcode
   utils/ghc-pkg
   utils/ghc-toolchain

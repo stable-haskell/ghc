@@ -502,10 +502,6 @@ AC_ARG_VAR([DERIVE_CONSTANTS], [Path to the deriveConstants program])
 AC_PATH_PROG([DERIVE_CONSTANTS], deriveConstants)
 AS_IF([test "x$DERIVE_CONSTANTS" = x], [AC_MSG_ERROR([deriveConstants executable not found. Please install deriveConstants or set DERIVE_CONSTANTS environment variable.])])
 
-AC_ARG_VAR([GENAPPLY], [Path to the genapply program])
-AC_PATH_PROG([GENAPPLY], genapply)
-AS_IF([test "x$GENAPPLY" = x], [AC_MSG_ERROR([genapply executable not found. Please install genapply or set GENAPPLY environment variable.])])
-
 AC_CHECK_PROGS([PYTHON], [python3 python python2])
 AS_IF([test "x$PYTHON" = x], [AC_MSG_ERROR([Python interpreter not found. Please install Python or set PYTHON environment variable.])])
 
@@ -535,38 +531,6 @@ if $DERIVE_CONSTANTS \
 else
   AC_MSG_RESULT([failed to create])
   AC_MSG_ERROR([Failed to run $DERIVE_CONSTANTS --gen-header ...])
-fi
-
-AC_MSG_CHECKING([for include/rts/AutoApply.cmm.h])
-if ${MKDIR_P} include/rts && $GENAPPLY include/DerivedConstants.h > include/rts/AutoApply.cmm.h; then
-  AC_MSG_RESULT([created])
-else
-  AC_MSG_RESULT([failed to create])
-  AC_MSG_ERROR([Failed to run $GENAPPLY include/DerivedConstants.h > include/rts/AutoApply.cmm.h])
-fi
-
-AC_MSG_CHECKING([for include/rts/AutoApply_V16.cmm.h])
-if ${MKDIR_P} include/rts && $GENAPPLY include/DerivedConstants.h -V16 > include/rts/AutoApply_V16.cmm.h; then
-  AC_MSG_RESULT([created])
-else
-  AC_MSG_RESULT([failed to create])
-  AC_MSG_ERROR([Failed to run $GENAPPLY include/DerivedConstants.h -V16 > include/rts/AutoApply_V16.cmm.h])
-fi
-
-AC_MSG_CHECKING([for include/rts/AutoApply_V32.cmm.h])
-if ${MKDIR_P} include/rts && $GENAPPLY include/DerivedConstants.h -V32 > include/rts/AutoApply_V32.cmm.h; then
-  AC_MSG_RESULT([created])
-else
-  AC_MSG_RESULT([failed to create])
-  AC_MSG_ERROR([Failed to run $GENAPPLY include/DerivedConstants.h -V32 > include/rts/AutoApply_V32.cmm.h])
-fi
-
-AC_MSG_CHECKING([for include/rts/AutoApply_V64.cmm.h])
-if ${MKDIR_P} include/rts && $GENAPPLY include/DerivedConstants.h -V64 > include/rts/AutoApply_V64.cmm.h; then
-  AC_MSG_RESULT([created])
-else
-  AC_MSG_RESULT([failed to create])
-  AC_MSG_ERROR([Failed to run $GENAPPLY include/DerivedConstants.h -V64 > include/rts/AutoApply_V64.cmm.h])
 fi
 
 AC_MSG_CHECKING([for include/rts/EventLogConstants.h])
