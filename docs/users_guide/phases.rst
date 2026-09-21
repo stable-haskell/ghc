@@ -1121,8 +1121,9 @@ for example).
     of the RTS library.  GHC generates it and links it into every program,
     and into shared and static libraries that contain the RTS
     (:ghc-flag:`-flink-rts`).  ``-fno-link-autoapply`` turns this off, for
-    example when linking the code by other means; ``ghc --gen-apply`` prints
-    the corresponding Cmm source.
+    example when the code is linked by other means;
+    :ghc-flag:`--gen-apply[=⟨width⟩]` prints the corresponding Cmm source.
+    See :ref:`linking-autoapply`.
 
 .. ghc-flag:: -main-is ⟨thing⟩
     :shortdesc: Set main module and function

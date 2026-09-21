@@ -122,9 +122,11 @@ the :ghc-flag:`-dynamic`, :ghc-flag:`-fPIC` and :ghc-flag:`-shared` flags:
 As before, the :ghc-flag:`-dynamic` flag specifies that this library links
 against the shared library versions of the ``base`` package.
 :ghc-flag:`-flink-rts` additionally links against the shared library version of
-the ``rts`` package (linking against the ``rts`` package is not enabled by
-default when building shared libraries). You may also omit ``-flink-rts``
-and link the RTS library into your final executable.
+the ``rts`` package, and adds the runtime's generic apply code to the library
+(linking against the ``rts`` package is not enabled by default when building
+shared libraries). You may also omit ``-flink-rts`` and link the RTS library
+into your final executable, but then that executable must also provide the
+generic apply code: either link it with GHC, or see :ref:`linking-autoapply`.
 
 The :ghc-flag:`-fPIC` flag is required for all code that will end up in a
 shared library. The :ghc-flag:`-shared` flag specifies to make a shared library
