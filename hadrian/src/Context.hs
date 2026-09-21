@@ -182,7 +182,7 @@ pkgStampFile c@Context{..} = do
 -- | Given a 'Context' and a 'FilePath' to a source file, compute the 'FilePath'
 -- to its object file. For example:
 -- * "Task.c"                              -> "_build/stage1/rts/Task.thr_o"
--- * "_build/stage1/rts/cmm/AutoApply.cmm" -> "_build/stage1/rts/cmm/AutoApply.o"
+-- * "_build/stage1/rts/build/cmm/AutoApply.cmm" -> "_build/stage1/rts/build/cmm/AutoApply.o"
 objectPath :: Context -> FilePath -> Action FilePath
 objectPath context@Context {..} src = do
     isGenerated <- isGeneratedSource src

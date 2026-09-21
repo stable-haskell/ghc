@@ -79,6 +79,8 @@ import GHC.SysTools.BaseDir
 import GHC.Iface.Load
 import GHC.Iface.Recomp.Binary ( fingerprintBinMem )
 
+import GHC.Linker.RtsCmm ( GenFile, genFile )
+
 import GHC.Tc.Utils.Monad      ( initIfaceCheck )
 import GHC.Iface.Errors.Ppr
 
@@ -325,6 +327,7 @@ main' postLoadMode units dflags0 args flagWarnings = do
        ShowPackages           -> liftIO $ showUnits hsc_env
        DoFrontend f           -> doFrontend f srcs
        DoBackpack             -> doBackpack (map fst srcs)
+       DoGenApply gf          -> liftIO $ doGenApply hsc_env gf
 
   liftIO $ dumpFinalStats logger
 
@@ -532,6 +535,35 @@ to get a hash of the package's ABI.
 -- The resulting hash is the MD5 of the GHC version used (#5328,
 -- see 'hiVersion') and of the existing ABI hash from each module (see
 -- 'mi_mod_hash').
+-- -----------------------------------------------------------------------------
+-- --gen-apply mode: generate one of the RTS Cmm files that GHC links into
+-- programs (rts/AutoApply.cmm and the Jumps.h wrappers, see GHC.Linker.RtsCmm)
+
+-- | Generate the RTS generic apply code for the target platform and write
+-- it to the @-o@ file, or to stdout.  See "GHC.StgToCmm.AutoApply".
+--
+-- The generator needs the target's platform constants, which GHC reads
+-- from the RTS's DerivedConstants.h (see Note [Platform constants] in
+-- GHC.Platform).  When building the RTS itself they are not available from
+-- the unit database, so fall back to looking in the @-I@ directories.
+doGenApply :: HscEnv -> GenFile -> IO ()
+doGenApply hsc_env gf = do
+  let dflags    = hsc_dflags hsc_env
+      platform0 = targetPlatform dflags
+  platform <- case platform_constants platform0 of
+    Just _  -> return platform0
+    Nothing -> do
+      mconstants <- lookupPlatformConstants (includePathsGlobal (includePaths dflags))
+      case mconstants of
+        Just constants -> return platform0 { platform_constants = Just constants }
+        Nothing -> throwGhcException $ UsageError $
+          "--gen-apply: cannot find DerivedConstants.h; pass the RTS include "
+          ++ "directory with -I, or use -this-unit-id rts"
+  let code = genFile platform gf
+  case outputFile dflags of
+    Just out -> writeFile out code
+    Nothing  -> putStr code
+
 abiHash :: [String] -- ^ List of module names
         -> Ghc ()
 abiHash strs = do

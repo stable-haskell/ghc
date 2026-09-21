@@ -2674,6 +2674,7 @@ fFlagsDeps = [
   flagSpec "whole-archive-hs-libs"            Opt_WholeArchiveHsLibs,
   flagSpec "keep-cafs"                        Opt_KeepCAFs,
   flagSpec "link-rts"                         Opt_LinkRts,
+  flagSpec "link-autoapply"                   Opt_LinkAutoApply,
   flagSpec "byte-code-and-object-code"        Opt_ByteCodeAndObjectCode,
   flagSpec "prefer-byte-code"                 Opt_UseBytecodeRatherThanObjects,
   flagSpec "object-determinism"               Opt_ObjectDeterminism,

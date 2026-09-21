@@ -20,6 +20,7 @@ module GHC.Driver.Pipeline (
    preprocess,
    compileOne, compileOne',
    compileForeign, compileEmptyStub,
+   mkRtsCmmObjs, rtsCmmObjsForLink,
 
    -- * Linking
    link,
@@ -77,6 +78,11 @@ import GHC.Linker.Executable
 import GHC.Linker.Static
 import GHC.Linker.Static.Utils
 import GHC.Linker.Types
+import GHC.Linker.Dynamic      ( dynLibLinksRts )
+import GHC.Linker.RtsCmm ( GenFile, genFiles, genFile, genFileVecWidth )
+import GHC.Settings            ( ToolSettings(..) )
+import GHC.Driver.IncludeSpecs ( addGlobalInclude )
+import qualified GHC.Data.ShortText as ST
 
 #if defined(HAVE_JS_BACKEND)
 import GHC.Driver.Config.StgToJS
@@ -356,12 +362,7 @@ compileOne' mHscMessage
 -- folders, such that one runpath would be sufficient for multiple/all
 -- libraries.
 link :: GhcLink                 -- ^ interactive or batch
-     -> Logger                  -- ^ Logger
-     -> TmpFs
-     -> FinderCache
-     -> Hooks
-     -> DynFlags                -- ^ dynamic flags
-     -> UnitEnv                 -- ^ unit environment
+     -> HscEnv
      -> Bool                    -- ^ attempt linking in batch mode?
      -> Maybe (RecompileRequired -> IO ())
      -> HomePackageTable        -- ^ what to link
@@ -374,8 +375,8 @@ link :: GhcLink                 -- ^ interactive or batch
 -- exports main, i.e., we have good reason to believe that linking
 -- will succeed.
 
-link ghcLink logger tmpfs fc hooks dflags unit_env batch_attempt_linking mHscMessage hpt =
-  case linkHook hooks of
+link ghcLink hsc_env batch_attempt_linking mHscMessage hpt =
+  case linkHook (hsc_hooks hsc_env) of
       Nothing -> case ghcLink of
         NoLink        -> return Succeeded
         LinkExecutable _  -> normal_link
@@ -390,24 +391,21 @@ link ghcLink logger tmpfs fc hooks dflags unit_env batch_attempt_linking mHscMes
             -> panicBadLink LinkInMemory
       Just h  -> h ghcLink dflags batch_attempt_linking hpt
   where
-    normal_link = link' logger tmpfs fc dflags unit_env batch_attempt_linking mHscMessage hpt
+    dflags = hsc_dflags hsc_env
+    normal_link = link' hsc_env batch_attempt_linking mHscMessage hpt
 
 
 panicBadLink :: GhcLink -> a
 panicBadLink other = panic ("link: GHC not built to link this way: " ++
                             show other)
 
-link' :: Logger
-      -> TmpFs
-      -> FinderCache
-      -> DynFlags                -- ^ dynamic flags
-      -> UnitEnv                 -- ^ unit environment
+link' :: HscEnv
       -> Bool                    -- ^ attempt linking in batch mode?
       -> Maybe (RecompileRequired -> IO ())
       -> HomePackageTable        -- ^ what to link
       -> IO SuccessFlag
 
-link' logger tmpfs fc dflags unit_env batch_attempt_linking mHscMessager hpt
+link' hsc_env batch_attempt_linking mHscMessager hpt
    | batch_attempt_linking
    = do
         let
@@ -458,9 +456,15 @@ link' logger tmpfs fc dflags unit_env batch_attempt_linking mHscMessager hpt
 #endif
             | otherwise -> do
               let opts = initExecutableLinkOpts dflags
-              linkExecutable logger tmpfs opts unit_env obj_files pkg_deps
-          LinkStaticLib -> linkStaticLib logger dflags unit_env obj_files pkg_deps
-          LinkDynLib    -> linkDynLibCheck logger tmpfs dflags unit_env obj_files pkg_deps
+              -- See Note [Linking the generic apply code]
+              apply_objs <- rtsCmmObjsForLink hsc_env pkg_deps
+              linkExecutable logger tmpfs opts unit_env (obj_files ++ apply_objs) pkg_deps
+          LinkStaticLib -> do
+            apply_objs <- rtsCmmObjsForLink hsc_env pkg_deps
+            linkStaticLib logger dflags unit_env (obj_files ++ apply_objs) pkg_deps
+          LinkDynLib    -> do
+            apply_objs <- rtsCmmObjsForLink hsc_env pkg_deps
+            linkDynLibCheck logger tmpfs dflags unit_env (obj_files ++ apply_objs) pkg_deps
           other         -> panicBadLink other
 
         debugTraceMsg logger 3 (text "link: done")
@@ -472,6 +476,14 @@ link' logger tmpfs fc dflags unit_env batch_attempt_linking mHscMessager hpt
    = do debugTraceMsg logger 3 (text "link(batch): upsweep (partially) failed OR" $$
                                 text "   Main.main not exported; not linking.")
         return Succeeded
+   where
+     logger   = hsc_logger hsc_env
+     tmpfs    = hsc_tmpfs hsc_env
+     dflags   = hsc_dflags hsc_env
+     unit_env = hsc_unit_env hsc_env
+#if defined(HAVE_JS_BACKEND)
+     fc       = hsc_FC hsc_env
+#endif
 
 #if defined(HAVE_JS_BACKEND)
 linkJSBinary :: Logger -> TmpFs -> FinderCache -> DynFlags -> UnitEnv -> [FilePath] -> [UnitId] -> IO ()
@@ -609,9 +621,15 @@ doLink hsc_env o_files = do
 #endif
       | otherwise -> do
           let opts = initExecutableLinkOpts dflags
-          linkExecutable logger tmpfs opts unit_env o_files []
-    LinkStaticLib -> linkStaticLib      logger       dflags unit_env o_files []
-    LinkDynLib    -> linkDynLibCheck    logger tmpfs dflags unit_env o_files []
+          -- See Note [Linking the generic apply code]
+          apply_objs <- rtsCmmObjsForLink hsc_env []
+          linkExecutable logger tmpfs opts unit_env (o_files ++ apply_objs) []
+    LinkStaticLib -> do
+          apply_objs <- rtsCmmObjsForLink hsc_env []
+          linkStaticLib      logger       dflags unit_env (o_files ++ apply_objs) []
+    LinkDynLib    -> do
+          apply_objs <- rtsCmmObjsForLink hsc_env []
+          linkDynLibCheck    logger tmpfs dflags unit_env (o_files ++ apply_objs) []
     LinkMergedObj
       | Just out <- outputFile dflags
       , let objs = [ f | FileOption _ f <- ldInputs dflags ]
@@ -651,6 +669,156 @@ compileForeign hsc_env lang stub_c = do
           -- Future refactoring to not check StopC for this case
           Nothing -> pprPanic "compileForeign" (text stub_c)
           Just fp -> return fp
+
+{- Note [Linking the generic apply code]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+The RTS's generic application code (the stg_ap_*_fast entry points, the
+stg_ap_* return frames, stg_ap_stk_*, stg_stk_save_* and the ARG_*-indexed
+tables; see GHC.StgToCmm.AutoApply) is not part of libHSrts.  The RTS only
+*refers* to those symbols.  GHC generates the Cmm from the compiler's own
+tables when a program is linked, compiles it, and adds the object to the
+link, in the same way the JS backend emits rts.js at link time.  The
+references in the RTS are resolved at that final link, like
+init_ghc_hs_iface (Note [RTS/ghc-internal interface] in rts/RtsToHsIface.c).
+
+The same goes for the register-saving frames stg_stack_underflow_frame_* and
+stg_restore_cccs_* of rts/Jumps.h: they exist once per argument-register
+width for the same reason the apply code does, need the same per-file -mavx
+flags, and are referred to by the RTS in the same way, so their four
+instantiations are generated and compiled here too.  See
+Note [Link-time RTS Cmm files] in GHC.Linker.RtsCmm for the list.
+
+The object goes wherever the RTS goes:
+
+  * into every executable, including -no-hs-main ones.  When the RTS is a
+    shared library, its undefined stg_ap_* references bind to the
+    executable's definitions; the static linker exports them from the
+    executable because a shared object on the link line references them,
+    so no -rdynamic is needed.  RtsSymbols.c takes their addresses, which
+    also keeps them alive under --gc-sections and lets the RTS linker
+    resolve them for GHCi.
+
+  * into a shared library only when the library contains the RTS itself:
+    -flink-rts, or Windows and wasm where linkDynLib always links the RTS
+    (see dynLibLinksRts).  A Haskell shared library that depends on
+    libHSrts.so and is loaded by a program that GHC did not link has no
+    provider for these symbols; such libraries must be built with -flink-rts,
+    as the users guide already recommends for foreign hosts.
+
+  * into a -staticlib archive unless -fno-link-rts.
+
+The generated code follows the RTS flavour being linked: -DPROFILING comes
+through wayOptc as for any Cmm file, and we add THREADED_RTS for -threaded
+and DEBUG/TICKY_TICKY for -debug, matching the defines Hadrian uses for
+those RTS ways.  The V16/V32/V64 vector routines are compiled as separate
+objects, see Note [AutoApply.cmm for vectors] in GHC.StgToCmm.AutoApply.
+Their instruction-set level is fixed per variant (baseline, -mavx2,
+-mavx512f on x86) rather than taken from the link command line: the
+baseline objects go into every program and must run on any target CPU,
+exactly as when they were part of libHSrts.  Everything else about the
+compilation (ways, optimisation level, backend) does follow the link
+command line, so that the objects match the program they join.
+
+-fno-link-autoapply disables all this; "ghc --gen-apply" prints the same
+Cmm for anyone who needs to link the code by other means.
+-}
+
+-- | Generate and compile the RTS Cmm that is linked into programs rather
+-- than into libHSrts (the generic apply code and the Jumps.h frames, see
+-- Note [Link-time RTS Cmm files] in GHC.Linker.RtsCmm) for the RTS flavour
+-- and target of the given session; see Note [Linking the generic apply code].
+--
+-- The second argument lists the units being linked (in addition to the
+-- preload units).  Nothing is generated when the RTS is not among them, for
+-- instance when GHC merely links a C program.
+mkRtsCmmObjs :: HscEnv -> [UnitId] -> IO [FilePath]
+mkRtsCmmObjs hsc_env dep_units
+  | not (gopt Opt_LinkAutoApply dflags) = return []
+  | otherwise = do
+      units <- mayThrowUnitErr (preloadUnitsInfo' (hsc_unit_env hsc_env) dep_units)
+      case [ u | u <- units, unitId u == rtsUnitId ] of
+        [] -> return []
+        rts_unit : _ -> do
+          let rts_incs = map ST.unpack (unitIncludeDirs rts_unit)
+          dir <- newTempSubDir logger tmpfs (tmpDir dflags)
+          mapM (gen dir rts_incs) variants
+  where
+    dflags   = hsc_dflags hsc_env
+    logger   = hsc_logger hsc_env
+    tmpfs    = hsc_tmpfs hsc_env
+    platform = targetPlatform dflags
+    ws       = ways dflags
+    x86      = platformArch platform `elem` [ArchX86, ArchX86_64]
+
+    -- See Note [Link-time RTS Cmm files] in GHC.Linker.RtsCmm and
+    -- Note [AutoApply.cmm for vectors] in GHC.StgToCmm.AutoApply
+    variants = genFiles
+
+    gen :: FilePath -> [FilePath] -> (FilePath, GenFile) -> IO FilePath
+    gen dir rts_incs (file_name, gf) = do
+      let src    = dir </> file_name
+          mb_vec = genFileVecWidth gf
+      writeFile src (genFile platform gf)
+      addFilesToClean tmpfs TFL_GhcSession [src]
+      let pipe_env = mkPipeEnv NoStop src Nothing (Temporary TFL_GhcSession)
+          hsc_env' = setDumpPrefix pipe_env (hscUpdateFlags (variant_flags rts_incs mb_vec) hsc_env)
+      res <- runPipeline (hsc_hooks hsc_env) (cmmCppPipeline pipe_env hsc_env' src)
+      case res of
+        Just obj -> return obj
+        Nothing  -> pprPanic "mkRtsCmmObjs: no object produced for" (text src)
+
+    variant_flags rts_incs mb_vec d0 =
+      let ts = toolSettings d0
+          d1 = d0 { ghcLink = NoLink
+                    -- Keep the temporary path out of the object.
+                  , debugLevel = 0
+                  , toolSettings = ts { toolSettings_opt_CmmP = way_defines ++ toolSettings_opt_CmmP ts }
+                    -- Cmm.h and the generated RTS headers live in the rts
+                    -- unit's include directories, which are not on the
+                    -- include path when the rts is not a preload unit
+                    -- (-hide-all-packages).
+                  , includePaths = addGlobalInclude (includePaths d0) rts_incs
+                  }
+          d2 = foldl' (flip unSetGeneralFlag') d1
+                 [Opt_InfoTableMap, Opt_InfoTableMapWithStack, Opt_InfoTableMapWithFallback]
+          -- The vector ISA level is fixed per variant and does not follow
+          -- the flags of the link command line (a link with -mavx2 must
+          -- not turn the baseline variants, which every program shares,
+          -- into AVX code).  So reset the x86 ISA knobs to the target's
+          -- baseline first and enable only what each variant needs.
+          d3 | x86 = d2 { sseVersion = Nothing, bmiVersion = Nothing
+                        , avx = False, avx2 = False
+                        , avx512cd = False, avx512er = False
+                        , avx512f = False, avx512pf = False
+                        , fma = False }
+             | otherwise = d2
+      in case mb_vec of
+           Just 32 | x86 -> d3 { avx2 = True }
+           Just 64 | x86 -> d3 { avx512f = True }
+           _             -> d3
+
+    -- The defines Hadrian uses for the corresponding RTS ways (see wayCcArgs
+    -- and rtsPackageArgs in hadrian); PROFILING is already added by wayOptc.
+    -- Ticky counters only exist in the non-threaded debug RTS.
+    way_defines = [ "-DTHREADED_RTS" | ws `hasWay` WayThreaded ]
+               ++ [ "-DDEBUG"        | ws `hasWay` WayDebug ]
+               ++ [ "-DTICKY_TICKY"  | ws `hasWay` WayDebug, not (ws `hasWay` WayThreaded) ]
+
+-- | The generic apply objects to add to the current link, if this kind of
+-- link includes the RTS; see Note [Linking the generic apply code].
+rtsCmmObjsForLink :: HscEnv -> [UnitId] -> IO [FilePath]
+rtsCmmObjsForLink hsc_env dep_units
+  | backendUseJSLinker (backend dflags) = return []
+  | links_rts                           = mkRtsCmmObjs hsc_env dep_units
+  | otherwise                           = return []
+  where
+    dflags = hsc_dflags hsc_env
+    links_rts = case ghcLink dflags of
+      LinkExecutable {} -> True
+      LinkStaticLib     -> gopt Opt_LinkRts dflags
+      LinkDynLib        -> dynLibLinksRts dflags (targetPlatform dflags)
+      _                 -> False
+
 
 compileEmptyStub :: DynFlags -> HscEnv -> FilePath -> ModLocation -> ModuleName -> IO ()
 compileEmptyStub dflags hsc_env basename location mod_name = do

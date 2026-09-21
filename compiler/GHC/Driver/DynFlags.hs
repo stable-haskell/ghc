@@ -1228,6 +1228,7 @@ defaultFlags settings
       Opt_KeepHiFiles,
       Opt_KeepOFiles,
       Opt_OmitYields,
+      Opt_LinkAutoApply,
       Opt_PrintBindContents,
       Opt_ProfCountEntries,
       Opt_SharedImplib,

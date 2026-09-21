@@ -11,9 +11,12 @@
 module GHC.StgToCmm.ArgRep (
         ArgRep(..), toArgRep, toArgRepOrV, argRepSizeW,
 
-        argRepString, isNonV, idArgRep,
+        argRepString, argRepSuffix, argRepVecWidth, isNonV, idArgRep,
 
         slowCallPattern,
+
+        -- * Generic apply tables (shared with GHC.StgToCmm.AutoApply)
+        applyTypes, stackApplyTypes, mkApplyName,
 
         ) where
 
@@ -29,6 +32,12 @@ import GHC.Settings.Constants  ( wORD64_SIZE, dOUBLE_SIZE )
 
 import GHC.Utils.Outputable
 import GHC.Data.FastString
+
+import GHC.Utils.Panic ( pprPanic )
+
+import Data.Char ( toLower )
+import Data.List ( isPrefixOf, sortBy )
+import Data.Ord  ( Down(..), comparing )
 
 -- I extricated this code as this new module in order to avoid a
 -- cyclic dependency between GHC.StgToCmm.Layout and GHC.StgToCmm.Ticky.
@@ -65,6 +74,25 @@ argRepString D = "D"
 argRepString V16 = "V16"
 argRepString V32 = "V32"
 argRepString V64 = "V64"
+
+-- | Lower-case name of an 'ArgRep' as used in the names of the RTS generic
+-- apply routines: @stg_ap_pp_fast@, @stg_ap_v16@, @stg_ap_stk_ppp@, ...
+argRepSuffix :: ArgRep -> String
+argRepSuffix = map toLower . argRepString
+
+-- | Width in bytes of a vector 'ArgRep', 'Nothing' for the scalar ones.
+argRepVecWidth :: ArgRep -> Maybe Int
+argRepVecWidth = \case
+  V16 -> Just 16
+  V32 -> Just 32
+  V64 -> Just 64
+  _   -> Nothing
+
+-- | Name of the generic apply routine for a list of argument
+-- representations, e.g. @stg_ap_ppv@.  The @_fast@, @_info@ and @_ret@
+-- variants are formed by appending the corresponding suffix.
+mkApplyName :: [ArgRep] -> String
+mkApplyName args = "stg_ap_" ++ concatMap argRepSuffix args
 
 toArgRep :: Platform -> PrimRep -> ArgRep
 toArgRep platform rep = case rep of
@@ -117,56 +145,118 @@ argRepSizeW platform = \case
 idArgRep :: Platform -> Id -> ArgRep
 idArgRep platform = toArgRepOrV platform . idPrimRep1
 
--- This list of argument patterns should be kept in sync with at least
--- the following:
---
---  * GHC.StgToCmm.Layout.stdPattern maybe to some degree?
---
---  * the RTS_RET(stg_ap_*) and RTS_FUN_DECL(stg_ap_*_fast)
---  declarations in rts/include/stg/MiscClosures.h
---
---  * the SLOW_CALL_*_ctr declarations in rts/include/stg/Ticky.h,
---
---  * the TICK_SLOW_CALL_*() #defines in rts/include/Cmm.h,
---
---  * the PR_CTR(SLOW_CALL_*_ctr) calls in rts/Ticky.c,
---
---  * and the SymI_HasProto(stg_ap_*_{ret,info,fast}) calls and
---  SymI_HasProto(SLOW_CALL_*_ctr) calls in rts/Linker.c
---
--- There may be more places that I haven't found; I merely igrep'd for
--- pppppp and excluded things that seemed ghci-specific.
---
--- Also, it seems at the moment that ticky counters with void
--- arguments will never be bumped, but I'm still declaring those
--- counters, defensively.
---
--- NSF 6 Mar 2013
-
 slowCallPattern :: [ArgRep] -> (FastString, RepArity)
 -- Returns the generic apply function and arity
 --
--- The first batch of cases match (some) specialised entries
--- The last group deals exhaustively with the cases for the first argument
---   (and the zero-argument case)
+-- Picks the longest pattern in 'applyTypes' (see Note [Generic apply
+-- tables]) that is a prefix of the arguments.  Every non-empty argument
+-- list matches, because the table has a one-argument pattern for each
+-- ArgRep; the zero-argument case is stg_ap_0, which is hand-written in
+-- rts/StgMiscClosures.cmm.
 --
 -- In 99% of cases this function will match *all* the arguments in one batch
+slowCallPattern [] = (fsLit "stg_ap_0", 0)
+slowCallPattern args
+  = case [ entry | (pat, entry) <- slowCallPatterns, pat `isPrefixOf` args ] of
+      entry : _ -> entry
+      []        -> pprPanic "slowCallPattern" (ppr args)
 
-slowCallPattern (P: P: P: P: P: P: _) = (fsLit "stg_ap_pppppp", 6)
-slowCallPattern (P: P: P: P: P: _)    = (fsLit "stg_ap_ppppp", 5)
-slowCallPattern (P: P: P: P: _)       = (fsLit "stg_ap_pppp", 4)
-slowCallPattern (P: P: P: V: _)       = (fsLit "stg_ap_pppv", 4)
-slowCallPattern (P: P: P: _)          = (fsLit "stg_ap_ppp", 3)
-slowCallPattern (P: P: V: _)          = (fsLit "stg_ap_ppv", 3)
-slowCallPattern (P: P: _)             = (fsLit "stg_ap_pp", 2)
-slowCallPattern (P: V: _)             = (fsLit "stg_ap_pv", 2)
-slowCallPattern (P: _)                = (fsLit "stg_ap_p", 1)
-slowCallPattern (V: _)                = (fsLit "stg_ap_v", 1)
-slowCallPattern (N: _)                = (fsLit "stg_ap_n", 1)
-slowCallPattern (F: _)                = (fsLit "stg_ap_f", 1)
-slowCallPattern (D: _)                = (fsLit "stg_ap_d", 1)
-slowCallPattern (L: _)                = (fsLit "stg_ap_l", 1)
-slowCallPattern (V16: _)              = (fsLit "stg_ap_v16", 1)
-slowCallPattern (V32: _)              = (fsLit "stg_ap_v32", 1)
-slowCallPattern (V64: _)              = (fsLit "stg_ap_v64", 1)
-slowCallPattern []                    = (fsLit "stg_ap_0", 0)
+-- | 'applyTypes' with their apply routine names and arities, longest first.
+slowCallPatterns :: [([ArgRep], (FastString, RepArity))]
+slowCallPatterns
+  = [ (pat, (mkFastString (mkApplyName pat), length pat))
+    | pat <- sortBy (comparing (Down . length)) applyTypes ]
+
+-------------------------------------------------------------------------
+--      The generic apply tables
+-------------------------------------------------------------------------
+
+-- Note [Generic apply tables]
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+-- The RTS contains pre-generated generic application code for a fixed set
+-- of argument patterns (see GHC.StgToCmm.AutoApply, which generates
+-- rts/AutoApply.cmm).  The two tables below are the single source of truth
+-- for that set:
+--
+--  * 'applyTypes' lists the patterns for which the RTS has an
+--    @stg_ap_<pat>_fast@ entry point and an @stg_ap_<pat>@ return frame.
+--    Unknown calls whose argument pattern is not in the table are split
+--    into a chain of calls from the table; see 'slowCallPattern' and
+--    GHC.StgToCmm.Layout.slowArgs.
+--
+--  * 'stackApplyTypes' lists the argument-descriptor patterns for which
+--    the RTS has @stg_ap_stk_<pat>@ and @stg_stk_save_<pat>@ routines.
+--    Its order is load-bearing: the index of a pattern in the table, plus
+--    the three generic descriptors ARG_GEN, ARG_GEN_BIG and ARG_BCO, is
+--    the ARG_* value in rts/include/rts/storage/FunTypes.h, and indexes
+--    the stg_ap_stack_entries, stg_stack_save_entries and stg_arg_bitmaps
+--    arrays generated by GHC.StgToCmm.AutoApply.
+--    GHC.StgToCmm.Layout.stdPattern picks the ARG_* value for a function.
+--
+-- The generated code and the compiler's call sites ('slowCallPattern',
+-- 'GHC.StgToCmm.Layout.stdPattern') follow the tables automatically.  The
+-- hand-written RTS declarations do not: the RTS_RET/RTS_FUN_DECL lines in
+-- rts/include/stg/MiscClosures.h, the SymI_HasProto lines in
+-- rts/RtsSymbols.c, the ARG_* constants in FunTypes.h, and the ticky
+-- counters (SLOW_CALL_*_ctr in rts/include/stg/Ticky.h, TICK_SLOW_CALL_*
+-- in rts/include/Cmm.h, PR_CTR in rts/Ticky.c).
+
+-- | Argument patterns with a generic apply routine in the RTS.
+-- These have been shown to cover about 99% of cases in practice...
+applyTypes :: [[ArgRep]]
+applyTypes = [
+        [V],
+        [F],
+        [D],
+        [L],
+        [V16],
+        [V32],
+        [V64],
+        [N],
+        [P],
+        [P,V],
+        [P,P],
+        [P,P,V],
+        [P,P,P],
+        [P,P,P,V],
+        [P,P,P,P],
+        [P,P,P,P,P],
+        [P,P,P,P,P,P]
+   ]
+
+-- | Argument-descriptor patterns with stack-apply and stack-save routines
+-- in the RTS, in ARG_* order.  See Note [Generic apply tables].
+--
+-- No need for V args in the stack apply cases.
+-- ToDo: the stack apply and stack save code doesn't make a distinction
+-- between N and P (they both live in the same register), only the bitmap
+-- changes, so we could share the apply/save code between lots of cases.
+stackApplyTypes :: [[ArgRep]]
+stackApplyTypes = [
+        [],
+        [N],
+        [P],
+        [F],
+        [D],
+        [L],
+        [V16],
+        [V32],
+        [V64],
+        [N,N],
+        [N,P],
+        [P,N],
+        [P,P],
+        [N,N,N],
+        [N,N,P],
+        [N,P,N],
+        [N,P,P],
+        [P,N,N],
+        [P,N,P],
+        [P,P,N],
+        [P,P,P],
+        [P,P,P,P],
+        [P,P,P,P,P],
+        [P,P,P,P,P,P],
+        [P,P,P,P,P,P,P],
+        [P,P,P,P,P,P,P,P]
+   ]

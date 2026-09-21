@@ -1108,6 +1108,25 @@ for example).
     automatically, you can reverse this behaviour by reversing this flag:
     ``-fno-link-rts``.
 
+.. ghc-flag:: -flink-autoapply
+    :shortdesc: Generate and link the RTS generic application code
+    :type: dynamic
+    :reverse: -fno-link-autoapply
+    :category: linking
+
+    :default: on
+
+    The runtime system's generic application code (the ``stg_ap_*``
+    entry points used for calls to functions of unknown arity) and its
+    register-saving frames (``stg_stack_underflow_frame_*`` and
+    ``stg_restore_cccs_*``) are not part of the RTS library.  GHC generates
+    them and links them into every program,
+    and into shared and static libraries that contain the RTS
+    (:ghc-flag:`-flink-rts`).  ``-fno-link-autoapply`` turns this off, for
+    example when the code is linked by other means;
+    :ghc-flag:`--gen-apply[=⟨width⟩]` prints the corresponding Cmm source.
+    See :ref:`linking-autoapply`.
+
 .. ghc-flag:: -main-is ⟨thing⟩
     :shortdesc: Set main module and function
     :type: dynamic

@@ -315,7 +315,8 @@ vector support. Then, in the RTS, we dispatch at runtime based on the support
 for vectors provided by the architecture on the current machine (see e.g.
 'threadStackOverflow' and its 'switch (vectorSupportGlobalVar)'.)
 
-Note that, like in Note [AutoApply.cmm for vectors], it is **critical** that we
+Note that, like in Note [AutoApply.cmm for vectors] in GHC.StgToCmm.AutoApply,
+it is **critical** that we
 compile e.g. stack_underflow_frame_v64 with -mavx512f. If we don't, the LLVM
 backend is liable to compile code using e.g. the ZMM1 STG register to uses of
 X86 machine registers xmm1, xmm2, xmm3, xmm4, instead of just zmm1. This would

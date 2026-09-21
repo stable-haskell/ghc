@@ -40,7 +40,6 @@ extra-source-files:
     Apply.h
     Arena.h
     ARMOutlineAtomicsSymbols.h
-    AutoApply.h
     AutoApplyVecs.h
     BeginPrivate.h
     Capability.h
@@ -337,26 +336,10 @@ common rts-base-config
       rts
 
 common rts-cmm-sources-base
-    if !arch(javascript)
-      -- Note: These .cmm files are thin wrappers that #include the corresponding
-      -- .cmm.h files. This ensures each sublibrary compiles them with its own
-      -- flags (-DDEBUG, -DTHREADED_RTS, etc.) applied correctly.
-      cmm-sources:
-        AutoApply.cmm
-        AutoApply_V16.cmm
-
-      if arch(x86_64)
-        cmm-sources:
-          Jumps_V32.cmm (-mavx2)
-          Jumps_V64.cmm (-mavx512f)
-          AutoApply_V32.cmm (-mavx2)
-          AutoApply_V64.cmm (-mavx512f)
-      else
-        cmm-sources:
-          Jumps_V32.cmm
-          Jumps_V64.cmm
-          AutoApply_V32.cmm
-          AutoApply_V64.cmm
+    -- The generic apply code (stg_ap_*) and the register-saving frames
+    -- (stg_stack_underflow_frame_*, stg_restore_cccs_*; rts/Jumps.h) are not
+    -- part of the RTS: GHC generates and links them into each program, see
+    -- Note [Linking the generic apply code] in GHC.Driver.Pipeline.
 
     -- this is required so we don't have ghc inject ghc-internal (which depends on the rts)
     -- during the build phase of this library.
@@ -371,8 +354,6 @@ common rts-c-sources-base
         ContinuationOps.cmm
         Exception.cmm
         HeapStackCheck.cmm
-        Jumps_D.cmm
-        Jumps_V16.cmm
         PrimOps.cmm
         StgMiscClosures.cmm
         StgStartup.cmm
@@ -681,31 +662,12 @@ library
     ghc-options: -this-unit-id rts -ghcversion-file=include/ghcversion.h -optc-DFS_NAMESPACE=rts
     cmm-options: -this-unit-id rts
 
-    -- [The AutoApply story]
-    --
-    -- We use GenApply to generate the AutoApply[_V{16,32,64}].cmm files.
-    -- However cabal will run the ./configure script only for the main library.
-    -- To work around this shortcoming, we'll generate .cmm.h files (same
-    -- content as .cmm), and create AutoApply*.cmm files that just
-    --
-    --   #include <rts/AutoApply_...cmm.h>
-    --
-    -- This way each sublib has it's own properly parameterized .cmm file, while
-    -- we only generate them once and stick them into the rts library.
-    --
-    -- This is a hack, and it would be great if sublibs had access to their
-    -- parent libraries auto-gen folders, however as sublibs are supposed to be
-    -- separate components, this is a non-trivial (impossible?) task to resolve.
     autogen-includes:
       ghcautoconf.h
       ghcplatform.h
       DerivedConstants.h
       rts/EventLogConstants.h
       rts/EventTypes.h
-      rts/AutoApply.cmm.h
-      rts/AutoApply_V16.cmm.h
-      rts/AutoApply_V32.cmm.h
-      rts/AutoApply_V64.cmm.h
 
     install-includes:
       ghcautoconf.h
@@ -713,10 +675,6 @@ library
       DerivedConstants.h
       rts/EventLogConstants.h
       rts/EventTypes.h
-      rts/AutoApply.cmm.h
-      rts/AutoApply_V16.cmm.h
-      rts/AutoApply_V32.cmm.h
-      rts/AutoApply_V64.cmm.h
 
     install-includes:
       -- Common headers for non-JS builds

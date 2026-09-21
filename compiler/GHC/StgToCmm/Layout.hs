@@ -568,37 +568,20 @@ argBits platform (arg : args) = replicate (argRepSizeW platform arg) True
 
 ----------------------
 stdPattern :: [ArgRep] -> Maybe Int
-stdPattern reps
-  = case reps of
-        []    -> Just ARG_NONE        -- just void args, probably
-        [N]   -> Just ARG_N
-        [P]   -> Just ARG_P
-        [F]   -> Just ARG_F
-        [D]   -> Just ARG_D
-        [L]   -> Just ARG_L
-        [V16] -> Just ARG_V16
-        [V32] -> Just ARG_V32
-        [V64] -> Just ARG_V64
+-- The ARG_* descriptor of a standard argument pattern: its index in
+-- 'stackApplyTypes' offset by the three generic descriptors, see
+-- Note [Generic apply tables] in GHC.StgToCmm.ArgRep.
+stdPattern reps = lookup reps stdPatterns
 
-        [N,N] -> Just ARG_NN
-        [N,P] -> Just ARG_NP
-        [P,N] -> Just ARG_PN
-        [P,P] -> Just ARG_PP
-
-        [N,N,N] -> Just ARG_NNN
-        [N,N,P] -> Just ARG_NNP
-        [N,P,N] -> Just ARG_NPN
-        [N,P,P] -> Just ARG_NPP
-        [P,N,N] -> Just ARG_PNN
-        [P,N,P] -> Just ARG_PNP
-        [P,P,N] -> Just ARG_PPN
-        [P,P,P] -> Just ARG_PPP
-
-        [P,P,P,P]     -> Just ARG_PPPP
-        [P,P,P,P,P]   -> Just ARG_PPPPP
-        [P,P,P,P,P,P] -> Just ARG_PPPPPP
-
-        _ -> Nothing
+stdPatterns :: [([ArgRep], Int)]
+stdPatterns
+  = [ (pat, ARG_NONE + i)
+    | (i, pat) <- zip [0..] stackApplyTypes
+      -- The RTS also has stg_ap_stk_ppppppp and stg_ap_stk_pppppppp
+      -- (ARG_PPPPPPP, ARG_PPPPPPPP), but functions of seven or eight pointer
+      -- arguments have always been given a generic ARG_GEN descriptor
+      -- instead; using them is a separate change to be measured.
+    , length pat <= 6 ]
 
 -------------------------------------------------------------------------
 --        Amodes for arguments

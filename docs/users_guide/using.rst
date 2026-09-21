@@ -389,6 +389,29 @@ The available mode flags are:
     Run GHC using the given frontend plugin. See :ref:`frontend_plugins` for
     details.
 
+.. ghc-flag:: --gen-apply[=⟨width⟩]
+    :shortdesc: print the Cmm source of the runtime's generic apply code; see
+        :ref:`linking-autoapply` for details.
+    :type: mode
+    :category: modes
+
+    .. index::
+       single: generic apply code; generating
+
+    Print the Cmm source of one of the runtime system files that GHC
+    generates for the target platform when it links the runtime: the generic
+    application code (the ``stg_ap_*`` entry points) or the register-saving
+    frames of ``Jumps.h``. Without an argument the main ``AutoApply.cmm`` is
+    printed; with ``=v16``, ``=v32`` or ``=v64`` the apply code for the
+    corresponding vector width; with ``=jumps``, ``=jumps-v16``,
+    ``=jumps-v32`` or ``=jumps-v64`` the ``Jumps_D.cmm`` and ``Jumps_V*.cmm``
+    wrappers. The output goes to standard output, or to the file given with
+    ``-o``.
+
+    GHC generates and links this code itself whenever it links the runtime
+    (see :ghc-flag:`-flink-autoapply`); this mode is for linking it by other
+    means, see :ref:`linking-autoapply`.
+
 .. ghc-flag:: -shared
     :shortdesc: Create a shared object.
     :type: mode

@@ -164,7 +164,6 @@ data Builder = Alex
              | Cc CcMode Stage
              | Configure FilePath
              | DeriveConstants
-             | GenApply (Maybe Int) -- ^ vector size, or Nothing for non-vectors
              | GenPrimopCode
              | Ghc GhcMode Stage
              | GhcPkg GhcPkgMode Stage
@@ -203,7 +202,6 @@ instance NFData   Builder
 builderProvenance :: Builder -> Maybe Context
 builderProvenance = \case
     DeriveConstants  -> context stage0Boot deriveConstants
-    GenApply {}      -> context stage0Boot genapply
     GenPrimopCode    -> context stage0Boot genprimopcode
     Ghc _ (Stage0 {})-> Nothing
     Ghc _ stage      -> context (predStage stage) ghc
@@ -326,8 +324,6 @@ instance H.Builder Builder where
                     bash <- bashPath
                     let env = AddEnv "CONFIG_SHELL" bash
                     cmd' env [Cwd dir] ["sh", path] buildOptions buildArgs
-
-                GenApply {} -> captureStdout
 
                 GenPrimopCode -> do
                     need [input]
