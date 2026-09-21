@@ -7,7 +7,7 @@ module GHC.Driver.Session.Mode where
 import GHC.Driver.CmdLine
 import GHC.Driver.Phases
 import GHC.Driver.Session
-import GHC.StgToCmm.AutoApply ( GenFile(..) )
+import GHC.Linker.RtsCmm ( GenFile(..) )
 import GHC.Unit.Module ( ModuleName, mkModuleName )
 
 import GHC.Types.SrcLoc
@@ -97,7 +97,7 @@ data PostLoadMode
   | DoFrontend ModuleName   -- ghc --frontend Plugin.Module
   | DoGenApply GenFile      -- ghc --gen-apply[=v16|v32|v64|jumps[-v16|-v32|-v64]]
                             -- generate the RTS generic apply code
-                            -- (see GHC.StgToCmm.AutoApply)
+                            -- (see GHC.Linker.RtsCmm)
 
 doMkDependHSMode, doMakeMode, doInteractiveMode, doRunMode,
   doAbiHashMode, showUnitsMode :: Mode
@@ -129,7 +129,7 @@ doGenApplyMode = mkPostLoadMode . DoGenApply
 -- | Parse the optional argument of @--gen-apply@: nothing for the main
 -- AutoApply.cmm, a vector width for one of the AutoApply_V*.cmm files, or
 -- @jumps@ (optionally with a vector width) for the rts/Jumps.h wrappers.
--- See Note [Link-time RTS Cmm files] in GHC.StgToCmm.AutoApply.
+-- See Note [Link-time RTS Cmm files] in GHC.Linker.RtsCmm.
 parseGenApplyArg :: String -> Maybe GenFile
 parseGenApplyArg s = case map toLower s of
   ""          -> Just (GenAutoApply Nothing)

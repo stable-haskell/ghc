@@ -20,7 +20,7 @@ module GHC.Driver.Pipeline (
    preprocess,
    compileOne, compileOne',
    compileForeign, compileEmptyStub,
-   mkAutoApplyObjs, autoApplyObjsForLink,
+   mkRtsCmmObjs, rtsCmmObjsForLink,
 
    -- * Linking
    link,
@@ -79,7 +79,7 @@ import GHC.Linker.Static
 import GHC.Linker.Static.Utils
 import GHC.Linker.Types
 import GHC.Linker.Dynamic      ( dynLibLinksRts )
-import GHC.StgToCmm.AutoApply ( GenFile, genFiles, genFile, genFileVecWidth )
+import GHC.Linker.RtsCmm ( GenFile, genFiles, genFile, genFileVecWidth )
 import GHC.Settings            ( ToolSettings(..) )
 import GHC.Driver.IncludeSpecs ( addGlobalInclude )
 import qualified GHC.Data.ShortText as ST
@@ -457,13 +457,13 @@ link' hsc_env batch_attempt_linking mHscMessager hpt
             | otherwise -> do
               let opts = initExecutableLinkOpts dflags
               -- See Note [Linking the generic apply code]
-              apply_objs <- autoApplyObjsForLink hsc_env pkg_deps
+              apply_objs <- rtsCmmObjsForLink hsc_env pkg_deps
               linkExecutable logger tmpfs opts unit_env (obj_files ++ apply_objs) pkg_deps
           LinkStaticLib -> do
-            apply_objs <- autoApplyObjsForLink hsc_env pkg_deps
+            apply_objs <- rtsCmmObjsForLink hsc_env pkg_deps
             linkStaticLib logger dflags unit_env (obj_files ++ apply_objs) pkg_deps
           LinkDynLib    -> do
-            apply_objs <- autoApplyObjsForLink hsc_env pkg_deps
+            apply_objs <- rtsCmmObjsForLink hsc_env pkg_deps
             linkDynLibCheck logger tmpfs dflags unit_env (obj_files ++ apply_objs) pkg_deps
           other         -> panicBadLink other
 
@@ -622,13 +622,13 @@ doLink hsc_env o_files = do
       | otherwise -> do
           let opts = initExecutableLinkOpts dflags
           -- See Note [Linking the generic apply code]
-          apply_objs <- autoApplyObjsForLink hsc_env []
+          apply_objs <- rtsCmmObjsForLink hsc_env []
           linkExecutable logger tmpfs opts unit_env (o_files ++ apply_objs) []
     LinkStaticLib -> do
-          apply_objs <- autoApplyObjsForLink hsc_env []
+          apply_objs <- rtsCmmObjsForLink hsc_env []
           linkStaticLib      logger       dflags unit_env (o_files ++ apply_objs) []
     LinkDynLib    -> do
-          apply_objs <- autoApplyObjsForLink hsc_env []
+          apply_objs <- rtsCmmObjsForLink hsc_env []
           linkDynLibCheck    logger tmpfs dflags unit_env (o_files ++ apply_objs) []
     LinkMergedObj
       | Just out <- outputFile dflags
@@ -686,7 +686,7 @@ stg_restore_cccs_* of rts/Jumps.h: they exist once per argument-register
 width for the same reason the apply code does, need the same per-file -mavx
 flags, and are referred to by the RTS in the same way, so their four
 instantiations are generated and compiled here too.  See
-Note [Link-time RTS Cmm files] in GHC.StgToCmm.AutoApply for the list.
+Note [Link-time RTS Cmm files] in GHC.Linker.RtsCmm for the list.
 
 The object goes wherever the RTS goes:
 
@@ -718,14 +718,16 @@ in GHC.StgToCmm.AutoApply.
 Cmm for anyone who needs to link the code by other means.
 -}
 
--- | Generate and compile the RTS generic apply code for the RTS flavour and
--- target of the given session; see Note [Linking the generic apply code].
+-- | Generate and compile the RTS Cmm that is linked into programs rather
+-- than into libHSrts (the generic apply code and the Jumps.h frames, see
+-- Note [Link-time RTS Cmm files] in GHC.Linker.RtsCmm) for the RTS flavour
+-- and target of the given session; see Note [Linking the generic apply code].
 --
 -- The second argument lists the units being linked (in addition to the
 -- preload units).  Nothing is generated when the RTS is not among them, for
 -- instance when GHC merely links a C program.
-mkAutoApplyObjs :: HscEnv -> [UnitId] -> IO [FilePath]
-mkAutoApplyObjs hsc_env dep_units
+mkRtsCmmObjs :: HscEnv -> [UnitId] -> IO [FilePath]
+mkRtsCmmObjs hsc_env dep_units
   | not (gopt Opt_LinkAutoApply dflags) = return []
   | otherwise = do
       units <- mayThrowUnitErr (preloadUnitsInfo' (hsc_unit_env hsc_env) dep_units)
@@ -743,8 +745,8 @@ mkAutoApplyObjs hsc_env dep_units
     ws       = ways dflags
     x86      = platformArch platform `elem` [ArchX86, ArchX86_64]
 
-    -- See Note [Link-time RTS Cmm files] and Note [AutoApply.cmm for vectors]
-    -- in GHC.StgToCmm.AutoApply
+    -- See Note [Link-time RTS Cmm files] in GHC.Linker.RtsCmm and
+    -- Note [AutoApply.cmm for vectors] in GHC.StgToCmm.AutoApply
     variants = genFiles
 
     gen :: FilePath -> [FilePath] -> (FilePath, GenFile) -> IO FilePath
@@ -758,7 +760,7 @@ mkAutoApplyObjs hsc_env dep_units
       res <- runPipeline (hsc_hooks hsc_env) (cmmCppPipeline pipe_env hsc_env' src)
       case res of
         Just obj -> return obj
-        Nothing  -> pprPanic "mkAutoApplyObjs: no object produced for" (text src)
+        Nothing  -> pprPanic "mkRtsCmmObjs: no object produced for" (text src)
 
     variant_flags rts_incs mb_vec d0 =
       let ts = toolSettings d0
@@ -788,10 +790,10 @@ mkAutoApplyObjs hsc_env dep_units
 
 -- | The generic apply objects to add to the current link, if this kind of
 -- link includes the RTS; see Note [Linking the generic apply code].
-autoApplyObjsForLink :: HscEnv -> [UnitId] -> IO [FilePath]
-autoApplyObjsForLink hsc_env dep_units
+rtsCmmObjsForLink :: HscEnv -> [UnitId] -> IO [FilePath]
+rtsCmmObjsForLink hsc_env dep_units
   | backendUseJSLinker (backend dflags) = return []
-  | links_rts                           = mkAutoApplyObjs hsc_env dep_units
+  | links_rts                           = mkRtsCmmObjs hsc_env dep_units
   | otherwise                           = return []
   where
     dflags = hsc_dflags hsc_env

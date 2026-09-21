@@ -367,7 +367,7 @@ import GHC.Driver.Config.Logger (initLogFlags)
 import GHC.Driver.Config.Diagnostic
 import GHC.Driver.Main
 import GHC.Driver.Make
-import GHC.Driver.Pipeline ( mkAutoApplyObjs )
+import GHC.Driver.Pipeline ( mkRtsCmmObjs )
 import GHC.Driver.Hooks
 import GHC.Driver.Monad
 import GHC.Driver.Ppr
@@ -739,7 +739,7 @@ setTopSessionDynFlags dflags = do
   let interp_opts = interp_opts'
                       { interpCreateProcess = createIservProcessHook (hsc_hooks hsc_env)
                         -- See Note [Linking the generic apply code] in GHC.Driver.Pipeline
-                      , interpExtraLinkObjs = mkAutoApplyObjs (hscSetFlags dflags hsc_env) []
+                      , interpExtraLinkObjs = mkRtsCmmObjs (hscSetFlags dflags hsc_env) []
                       }
 
   interp <- liftIO $ initInterpreter tmpfs logger platform finder_cache unit_env interp_opts

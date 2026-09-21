@@ -688,6 +688,7 @@ Library
         GHC.Linker.External
         GHC.Linker.Executable
         GHC.Linker.MacOS
+        GHC.Linker.RtsCmm
         GHC.Linker.Static
         GHC.Linker.Static.Utils
         GHC.Linker.Unit

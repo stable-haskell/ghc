@@ -79,7 +79,7 @@ import GHC.SysTools.BaseDir
 import GHC.Iface.Load
 import GHC.Iface.Recomp.Binary ( fingerprintBinMem )
 
-import GHC.StgToCmm.AutoApply ( GenFile, genFile )
+import GHC.Linker.RtsCmm ( GenFile, genFile )
 
 import GHC.Tc.Utils.Monad      ( initIfaceCheck )
 import GHC.Iface.Errors.Ppr
@@ -536,7 +536,8 @@ to get a hash of the package's ABI.
 -- see 'hiVersion') and of the existing ABI hash from each module (see
 -- 'mi_mod_hash').
 -- -----------------------------------------------------------------------------
--- --gen-apply mode: generate the RTS generic apply code (rts/AutoApply.cmm)
+-- --gen-apply mode: generate one of the RTS Cmm files that GHC links into
+-- programs (rts/AutoApply.cmm and the Jumps.h wrappers, see GHC.Linker.RtsCmm)
 
 -- | Generate the RTS generic apply code for the target platform and write
 -- it to the @-o@ file, or to stdout.  See "GHC.StgToCmm.AutoApply".
