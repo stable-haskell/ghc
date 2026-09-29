@@ -1502,6 +1502,11 @@ shortcutJump fn insn = shortcutJump' fn (setEmpty :: LabelSet) insn
         let updateBlock (Just (DestBlockId bid))  =
                 case fn bid of
                     Nothing   -> Just (DestBlockId bid )
+                    -- A table of offsets relative to a block of this proc
+                    -- may only point at blocks of this proc.  See
+                    -- Note [Shortcutting relative jump tables].
+                    Just (DestImm _) | Just _ <- rel_lbl
+                              -> Just (DestBlockId bid)
                     Just dest -> Just dest
             updateBlock dest = dest
             blocks' = map updateBlock blocks
@@ -1524,11 +1529,46 @@ shortcutStatic :: (BlockId -> Maybe JumpDest) -> CmmStatic -> CmmStatic
 shortcutStatic fn (CmmStaticLit (CmmLabel lab))
   = CmmStaticLit (CmmLabel (shortcutLabel fn lab))
 shortcutStatic fn (CmmStaticLit (CmmLabelDiffOff lbl1 lbl2 off w))
-  = CmmStaticLit (CmmLabelDiffOff (shortcutLabel fn lbl1) lbl2 off w)
-        -- slightly dodgy, we're ignoring the second label, but this
-        -- works with the way we use CmmLabelDiffOff for jump tables now.
+  = CmmStaticLit (CmmLabelDiffOff (shortcutLocalLabel fn lbl1) lbl2 off w)
+        -- We ignore the second label: this works with the way we use
+        -- CmmLabelDiffOff for jump tables, whose second label is a block of
+        -- the same proc.  See Note [Shortcutting relative jump tables].
 shortcutStatic _ other_static
         = other_static
+
+{- Note [Shortcutting relative jump tables]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+A PIC jump table holds offsets `target_lbl - base_lbl`, where base_lbl is the
+block containing the jump (see Note [Jump tables] in GHC.CmmToAsm.X86.CodeGen).
+Neither label is in the table's own section, so the assembler can only compute
+the difference if both are in the SAME section.  Blocks of one proc always are,
+but shortcutting may retarget an entry at a label outside the proc: a block
+that just does `jmp foo_info` (a tail call) is a `DestImm` shortcut to foo.
+Without -split-sections every proc is in .text and that happens to work; with
+it foo has its own section and assembly fails:
+
+    Error: can't resolve .text..LreDh_info - .Lcvha
+
+(prettyprinter's Prettyprinter.Internal at -O2).  So for relative tables only
+follow shortcuts that stay within the proc, both in the table contents
+('shortcutLocalLabel') and in the JMP_TBL's own targets ('shortcutJump').  The
+entry then points at the trampoline block; that costs one extra jump.
+Absolute tables (non-PIC) have no such constraint and shortcut fully.
+-}
+
+-- | Like 'shortcutLabel', but only follows shortcuts to other blocks of the
+-- same proc, never to a label outside it.
+-- See Note [Shortcutting relative jump tables].
+shortcutLocalLabel :: (BlockId -> Maybe JumpDest) -> CLabel -> CLabel
+shortcutLocalLabel fn lab
+  | Just blkId <- maybeLocalBlockLabel lab = go emptyUniqueSet blkId
+  | otherwise                              = lab
+  where
+    go seen blockid =
+      case (memberUniqueSet uq seen, fn blockid) of
+        (False, Just (DestBlockId blockid')) -> go (insertUniqueSet uq seen) blockid'
+        _                                    -> blockLbl blockid
+      where uq = getUnique blockid
 
 shortBlockId
         :: (BlockId -> Maybe JumpDest)
