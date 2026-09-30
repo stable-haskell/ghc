@@ -392,3 +392,4 @@ test('GhciPackageRename',
      [extra_hc_opts("-hide-all-packages -package 'containers (Data.Map as Prelude)'")],
      ghci_script,
      ['GhciPackageRename.script'])
+test('T27834', [extra_hc_opts("-fpackage-trust -trust base -trust ghc-internal -package ghc-internal")], ghci_script, ['T27834.script'])
