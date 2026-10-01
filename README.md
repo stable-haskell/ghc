@@ -86,6 +86,41 @@ To build *javascript-unknown-ghcjs*:
   3. `make stage3-javascript-unknown-ghcjs`
 
 
+Building with Buck2 (experimental)
+==================================
+
+Stage 1 can be built with [Buck2](https://buck2.build) through the
+experimental `cabal buck2` command
+([announcement](https://discourse.haskell.org/t/buck2-build-system-for-cabal-projects/14770)).
+`cabal buck2` builds the dependencies with Cabal and generates a
+`BUCK.cabal.bzl` file per package; `buck2` then builds the packages.
+
+You need:
+
+  1. `buck2` (the release that `haskell-buck2` pins in its CI).
+  2. `cabal` built from https://github.com/simonmar/cabal, branch `buck2`.
+  3. haskell-buck2 checked out at `./buck2`. Until the changes GHC needs
+     are upstream, use branch `cabal-buck2-ghc` of the Stable Haskell fork:
+
+         $ git clone -b cabal-buck2-ghc https://github.com/stable-haskell/haskell-buck2.git buck2
+
+Then:
+
+    $ make buck2-stage1 CABAL_BUCK2=/path/to/cabal-with-buck2   # configure + cabal buck2
+    $ buck2 build //...                                           # dev mode: -O0, dynamic
+    $ buck2 build //ghc:ghc --show-output                         # the stage-1 compiler
+
+The compiler needs a `settings` file and a package db to run, like the one
+the `Makefile` creates in `_build/stage1/store/host/<platform>/lib`.
+
+Packages with a Custom `Setup.hs` have a hand-maintained `BUCK` file next
+to the generated `BUCK.cabal.bzl`: `compiler/BUCK` (primop `.hs-incl`
+files, `GHC.Platform.Constants`, `GHC.Settings.Config`) and
+`libraries/ghc-boot/BUCK` (`GHC.Platform.Host`). `libraries/ghc-boot-th`
+and `libraries/ghc-internal/src` have a `BUCK` that exports their sources
+for `ghc-boot-th-next`. Stage 2 is not supported yet: its project files
+need the Stable Haskell `cabal`, which does not have the `buck2` command.
+
 Filing bugs and feature requests
 ================================
 

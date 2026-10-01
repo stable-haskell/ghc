@@ -1294,6 +1294,36 @@ $(BUILD_DIR)/packages/hackage.haskell.org/01-index.tar.gz: | stable-cabal
 	$(CABAL) --remote-repo-cache $(call NORMALIZE_FP,$(CURDIR)/$(BUILD_DIR)/packages) update
 endif # DIST_BUILD (hackage)
 
+#  ____             _    ____
+# | __ ) _   _  ___| | _|___ \
+# |  _ \| | | |/ __| |/ / __) |
+# | |_) | |_| | (__|   < / __/
+# |____/ \__,_|\___|_|\_\_____|
+
+# Experimental: generate Buck2 build files for stage1 with `cabal buck2`
+# (https://github.com/simonmar/cabal, branch buck2) and build with buck2.
+# See README.md, "Building with Buck2". Needs a checkout of haskell-buck2
+# at ./buck2 (branch cabal-buck2-ghc of stable-haskell/haskell-buck2 until
+# its changes are upstream).
+#
+#   make buck2-stage1 CABAL_BUCK2=/path/to/cabal-with-buck2
+#   buck2 build //...
+#
+# --enable-shared: buck2's default (dev) mode links dynamically, so the
+# store dependencies need shared libraries (cabal.project.stage1 says
+# shared: False).
+CABAL_BUCK2 ?= cabal
+
+.PHONY: buck2-stage1
+buck2-stage1: STAGE=stage1
+buck2-stage1: $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) libraries/ghc-boot-th-next
+	@test -d buck2 || { echo "buck2-stage1: ./buck2 is missing; run: git clone -b cabal-buck2-ghc https://github.com/stable-haskell/haskell-buck2.git buck2"; exit 1; }
+	$(CABAL_BUCK2) buck2 \
+		--project-file cabal.project.stage1 \
+		--with-compiler=$(GHC0) \
+		--enable-shared \
+		--ghc-options "-ghcversion-file=$(call NORMALIZE_FP,$(CURDIR)/rts/include/ghcversion.h)"
+
 #   ____             __ _
 #  / ___|___  _ __  / _(_) __ _ _   _ _ __ ___
 # | |   / _ \| '_ \| |_| |/ _` | | | | '__/ _ \

@@ -292,3 +292,14 @@ CODEX.md
 # JetBrains Junie
 .aiignore
 testsuite/ghc-config/ghc-config
+
+# Buck2 build (see README.md, "Building with Buck2"): the haskell-buck2
+# checkout, the files `cabal buck2` generates, and buck2's own output.
+/buck2/
+/buck-out/
+/.buckconfig
+/PACKAGE
+/third-party/
+BUCK.cabal.bzl
+**/cabal-buck2/autogen/
+/_buck2-stage1/
