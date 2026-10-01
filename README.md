@@ -86,6 +86,62 @@ To build *javascript-unknown-ghcjs*:
   3. `make stage3-javascript-unknown-ghcjs`
 
 
+Building with Buck2 (experimental)
+==================================
+
+Stages 1 and 2 can be built with [Buck2](https://buck2.build) through the
+experimental `cabal buck2` command
+([announcement](https://discourse.haskell.org/t/buck2-build-system-for-cabal-projects/14770)).
+`cabal buck2` builds the dependencies with Cabal and generates a
+`BUCK.cabal.bzl` file per package; `buck2` then builds the packages.
+
+You need:
+
+  1. `buck2` (the release that `haskell-buck2` pins in its CI).
+  2. `cabal` built from https://github.com/simonmar/cabal, branch `buck2`.
+  3. haskell-buck2 checked out at `./buck2`. Until the changes GHC needs
+     are upstream, use branch `cabal-buck2-ghc` of the Stable Haskell fork:
+
+         $ git clone -b cabal-buck2-ghc https://github.com/stable-haskell/haskell-buck2.git buck2
+
+Then:
+
+    $ make buck2-stage1 CABAL_BUCK2=/path/to/cabal-with-buck2   # configure + cabal buck2
+    $ buck2 build //...                                           # dev mode: -O0, dynamic
+    $ buck2 build //ghc:ghc --show-output                         # the stage-1 compiler
+
+Stage 2 is built by the stage-1 compiler, through the wrappers of
+`buck2-ghc/BUCK` (`//buck2-ghc:ghc` runs `//ghc:ghc` with a libdir of its
+own). `make buck2-stage2` runs `cabal buck2 --variant stage2` on
+`cabal.project.stage2.buck2`: every package gets a `BUCK.stage2.cabal.bzl`
+with targets suffixed `-stage2`, built in the `stage2` platform
+(`buck2/platforms/BUCK`) where the toolchain is the stage-1 compiler.
+
+    $ make buck2-stage2 CABAL_BUCK2=/path/to/cabal-with-buck2
+    $ buck2 build //buck2-ghc:stage2-libdir -m opt --show-output   # the stage-2 installation
+
+`//buck2-ghc:stage2-libdir` is an installation: `bin/ghc` is
+`//ghc:ghc-stage2` with a libdir where every stage-2 library is
+registered, next to `ghc-pkg`, `hsc2hs`, `haddock`, `hpc`, `hp2ps`,
+`runghc`, `ghc-iserv` and `unlit`. `mk/buck2-smoke-test.sh <store>`
+compiles and runs programs with it (libraries, `-threaded`, Template
+Haskell, the FFI, hsc2hs, runghc). The stage-2 libraries are static (the
+`stage2` platform selects static linkage).
+
+`mk/buck2-tools.sh <prefix>` installs the tools (buck2, the cabal with
+the `buck2` command, haskell-buck2 at `./buck2`); the workflow
+`.github/workflows/buck2.yml` runs all of this on CI.
+
+Packages with a Custom `Setup.hs` have a hand-maintained `BUCK` file next
+to the generated `BUCK.cabal.bzl`: `compiler/BUCK` (primop `.hs-incl`
+files, `GHC.Platform.Constants`, `GHC.Settings.Config`) and
+`libraries/ghc-boot/BUCK` (`GHC.Platform.Host`). `libraries/ghc-boot-th`
+and `libraries/ghc-internal` have a `BUCK` that exports their sources for
+`ghc-boot-th-next`. `rts/BUCK` registers the RTS ways as sub-libraries of
+the `rts` unit, `libraries/ghc-internal/BUCK` generates the two modules
+the compiler prints (`GHC.Internal.Prim`, `GHC.Internal.PrimopWrappers`).
+Stage 3 is not supported.
+
 Filing bugs and feature requests
 ================================
 

@@ -1294,6 +1294,67 @@ $(BUILD_DIR)/packages/hackage.haskell.org/01-index.tar.gz: | stable-cabal
 	$(CABAL) --remote-repo-cache $(call NORMALIZE_FP,$(CURDIR)/$(BUILD_DIR)/packages) update
 endif # DIST_BUILD (hackage)
 
+#  ____             _    ____
+# | __ ) _   _  ___| | _|___ \
+# |  _ \| | | |/ __| |/ / __) |
+# | |_) | |_| | (__|   < / __/
+# |____/ \__,_|\___|_|\_\_____|
+
+# Experimental: generate Buck2 build files for stage1 with `cabal buck2`
+# (https://github.com/simonmar/cabal, branch buck2) and build with buck2.
+# See README.md, "Building with Buck2". Needs a checkout of haskell-buck2
+# at ./buck2 (branch cabal-buck2-ghc of stable-haskell/haskell-buck2 until
+# its changes are upstream).
+#
+#   make buck2-stage1 CABAL_BUCK2=/path/to/cabal-with-buck2
+#   buck2 build //...
+#
+# --enable-shared: buck2's default (dev) mode links dynamically, so the
+# store dependencies need shared libraries (cabal.project.stage1 says
+# shared: False).
+CABAL_BUCK2 ?= cabal
+
+.PHONY: buck2-stage1
+buck2-stage1: STAGE=stage1
+buck2-stage1: $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) libraries/ghc-boot-th-next
+	@test -d buck2 || { echo "buck2-stage1: ./buck2 is missing; run: git clone -b cabal-buck2-ghc https://github.com/stable-haskell/haskell-buck2.git buck2"; exit 1; }
+	$(CABAL_BUCK2) buck2 \
+		--project-file cabal.project.stage1 \
+		--with-compiler=$(GHC0) \
+		--enable-shared \
+		--ghc-options "-ghcversion-file=$(call NORMALIZE_FP,$(CURDIR)/rts/include/ghcversion.h)"
+
+# Stage 2 with buck2: generate BUCK.stage2.cabal.bzl files (targets
+# suffixed -stage2, built in the stage2 platform by the stage-1 compiler
+# that buck2 built, through the wrappers of buck2-ghc/BUCK), then
+#
+#   buck2 build //buck2-ghc:stage2-libdir -m opt --show-output
+#
+# gives the installation (bin/ghc with a libdir where every stage-2
+# library is registered, bin/ghc-pkg, hsc2hs, haddock, ...). The targets
+# are the local packages plus the executables of the two
+# source-repository packages (hsc2hs, hpc), as STAGE2_EXECUTABLES. Needs
+# `buck2` on $PATH and a stage-1 build (make buck2-stage1 && buck2 build
+# //...).
+.PHONY: buck2-stage2
+buck2-stage2: STAGE=stage2
+buck2-stage2: $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) libraries/ghc-boot-th-next cabal.project.stage2.buck2 cabal.project.stage2.common
+	@# The configure scripts of rts and ghc-internal run while cabal buck2
+	@# configures the packages; they need the stage-1 tools, as in
+	@# STAGE2_CABAL_BUILD.
+	env \
+	DERIVE_CONSTANTS=$(CURDIR)/$$(buck2 build //utils/deriveConstants:deriveConstants --show-simple-output 2>/dev/null) \
+	GENAPPLY=$(CURDIR)/$$(buck2 build //utils/genapply:genapply --show-simple-output 2>/dev/null) \
+	NM=$(NM) \
+	OBJDUMP=$(OBJDUMP) \
+	$(CABAL_BUCK2) buck2 \
+		--variant stage2 \
+		--project-file cabal.project.stage2.buck2 \
+		--with-compiler=$(CURDIR)/$$(buck2 build //buck2-ghc:ghc --show-simple-output 2>/dev/null) \
+		--with-hc-pkg=$(CURDIR)/$$(buck2 build //buck2-ghc:ghc-pkg --show-simple-output 2>/dev/null) \
+		--ghc-options "-ghcversion-file=$(call NORMALIZE_FP,$(CURDIR)/rts/include/ghcversion.h)" \
+		all exe:hsc2hs exe:hpc
+
 #   ____             __ _
 #  / ___|___  _ __  / _(_) __ _ _   _ _ __ ___
 # | |   / _ \| '_ \| |_| |/ _` | | | | '__/ _ \

@@ -1,0 +1,18 @@
+# Hand-maintained BUCK file for the rts, stage 2 only (stage 1 uses the
+# boot compiler's rts).
+#
+# The generated rules (BUCK.stage2.cabal.bzl) give the main library
+# `rts-stage2` (header-only: include-dirs and the configure-generated
+# headers, DerivedConstants.h among them) and one GHC-compiled C+Cmm
+# library per RTS way (nonthreaded-nodebug-stage2, ...).
+#
+# GHC links the way it selects (`rts:threaded-nodebug` for -threaded)
+# through the package db, so the ways are `sublibraries` of the main
+# library: registered wherever `rts` is, linked by GHC rather than by
+# buck2. The ways then cannot depend on the main library (a cycle), but
+# GHC reads its platform constants from the include-dirs of the unit
+# `rts` when it compiles them: `rts-constants-stage2` is that unit for
+# the ways only, with the same headers.
+load(":BUCK.stage2.bzl", "stage2_rules")
+
+stage2_rules()

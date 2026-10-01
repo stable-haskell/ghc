@@ -1,0 +1,82 @@
+# The two GHC installations of the buck2 build (see store.bzl):
+#
+# - the stage-2 toolchain: wrappers that run the stage-1 compiler built
+#   here (//ghc:ghc) with a libdir of its own, like the Makefile's
+#   _build/stage1/store/host/<platform>/lib. .buckconfig names them in
+#   [haskell_stage2]; buck2/toolchains/BUCK selects them in the `stage2`
+#   configuration (see buck2/constraints/BUCK). As exec deps of the
+#   toolchain they are built with the boot compiler.
+#
+# - the result of stage 2: the stage-2 compiler (//ghc:ghc-stage2) with
+#   every stage-2 library registered:
+#
+#     buck2 build //buck2-ghc:ghc-stage2 -m opt --show-output
+#
+#   gives a `ghc` that compiles programs.
+load(":store.bzl", "ghc_store", "stage2_installation", "store_program")
+
+ghc_store(
+    name = "stage1-libdir",
+    ghc = "//ghc:ghc",
+    ghc_pkg = "//utils/ghc-pkg:ghc-pkg",
+    tools = {"unlit": "//utils/unlit:unlit"},
+)
+
+store_program(name = "ghc", store = ":stage1-libdir", program = "ghc")
+
+store_program(name = "ghc-pkg", store = ":stage1-libdir", program = "ghc-pkg")
+
+# Stage 2, once generated (see Note [Variant stubs] in cabal-install's
+# Distribution.Client.Buck2.Generate): the installation `stage2-libdir`
+# and the programs `ghc-stage2`, `ghc-pkg-stage2`. The libraries are
+# every stage-2 library (the sub-libraries of the rts come with
+# //rts:rts-stage2).
+stage2_installation(libraries = [
+    "//compiler:ghc-stage2",
+    "//dist-newstyle/src:Cabal-stage2",
+    "//dist-newstyle/src:Cabal-syntax-stage2",
+    "//dist-newstyle/src:array-stage2",
+    "//dist-newstyle/src:binary-stage2",
+    "//dist-newstyle/src:bytestring-stage2",
+    "//dist-newstyle/src:containers-stage2",
+    "//dist-newstyle/src:deepseq-stage2",
+    "//dist-newstyle/src:directory-stage2",
+    "//dist-newstyle/src:exceptions-stage2",
+    "//dist-newstyle/src:file-io-stage2",
+    "//dist-newstyle/src:filepath-stage2",
+    "//dist-newstyle/src:backend-glr-stage2",
+    "//dist-newstyle/src:backend-lalr-stage2",
+    "//dist-newstyle/src:frontend-stage2",
+    "//dist-newstyle/src:grammar-stage2",
+    "//dist-newstyle/src:happy-lib-stage2",
+    "//dist-newstyle/src:tabular-stage2",
+    "//dist-newstyle/src:haskeline-stage2",
+    "//dist-newstyle/src:hpc/hpc-stage2",
+    "//dist-newstyle/src:mtl-stage2",
+    "//dist-newstyle/src:os-string-stage2",
+    "//dist-newstyle/src:parsec-stage2",
+    "//dist-newstyle/src:pretty-stage2",
+    "//dist-newstyle/src:process-stage2",
+    "//dist-newstyle/src:semaphore-compat-stage2",
+    "//dist-newstyle/src:stm-stage2",
+    "//dist-newstyle/src:text-stage2",
+    "//dist-newstyle/src:time-stage2",
+    "//dist-newstyle/src:transformers-stage2",
+    "//dist-newstyle/src:unix-stage2",
+    "//dist-newstyle/src:xhtml-stage2",
+    "//libraries/base:base-stage2",
+    "//libraries/ghc-bignum:ghc-bignum-stage2",
+    "//libraries/ghc-boot:ghc-boot-stage2",
+    "//libraries/ghc-compact:ghc-compact-stage2",
+    "//libraries/ghc-experimental:ghc-experimental-stage2",
+    "//libraries/ghc-heap:ghc-heap-stage2",
+    "//libraries/ghc-internal:ghc-internal-stage2",
+    "//libraries/ghc-platform:ghc-platform-stage2",
+    "//libraries/ghc-prim:ghc-prim-stage2",
+    "//libraries/ghci:ghci-stage2",
+    "//libraries/integer-gmp:integer-gmp-stage2",
+    "//libraries/system-cxx-std-lib:system-cxx-std-lib-stage2",
+    "//libraries/template-haskell:template-haskell-stage2",
+    "//rts:rts-stage2",
+    "//rts-headers:rts-headers-stage2",
+])
