@@ -1,0 +1,5 @@
+# Hand-maintained: ghc-boot-th-next lists this directory in its
+# hs-source-dirs (../ghc-boot-th). buck2 cannot reference files of another
+# package by path, so every Haskell source here is exported as a target
+# named after its path, e.g. //libraries/ghc-boot-th:GHC/Lexeme.hs.
+[export_file(name = f, src = f, visibility = ["PUBLIC"]) for f in glob(["**/*.hs"])]
