@@ -1554,6 +1554,17 @@ follow shortcuts that stay within the proc, both in the table contents
 ('shortcutLocalLabel') and in the JMP_TBL's own targets ('shortcutJump').  The
 entry then points at the trampoline block; that costs one extra jump.
 Absolute tables (non-PIC) have no such constraint and shortcut fully.
+
+That only works if the trampoline block still exists.  'build_mapping' in
+GHC.CmmToAsm normally drops every block it can shortcut, which left the entry
+naming a label that is never defined, with or without -split-sections:
+
+    Error: can't resolve .LcvAS - .Lcvwv
+
+So for x86 PIC code it keeps the blocks whose shortcut leaves the proc.  Other
+jumps to such a block are still shortcut to foo directly; the block is then
+only reached through relative jump tables (or not at all, a few dead bytes).
+It also stays a node of the CFG, which must match the block list.
 -}
 
 -- | Like 'shortcutLabel', but only follows shortcuts to other blocks of the
