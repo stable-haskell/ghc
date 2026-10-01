@@ -1,19 +1,30 @@
 #!/usr/bin/env python3
 """Generate GHC/Settings/Config.hs like compiler/Setup.hs does.
 
-Usage: gen_settings_config.py <ghc> <ghc-pkg> <output-file>
+Usage: gen_settings_config.py --ghc GHC --unit-id UID
+          (--ghc-internal-unit-id UID | --ghc-pkg GHC_PKG) -o OUT
 
 compiler/Setup.hs (build-type Custom) writes this module at configure
-time from `ghc --info` of the boot compiler. cabal buck2 does not run
-Custom setups, so a buck2 genrule runs this script instead.
+time from `ghc --info` of the compiler that builds the library, the
+library's own unit id, and the unit id of the ghc-internal it depends on.
+cabal buck2 does not run Custom setups, so a buck2 genrule runs this
+script instead. Without --ghc-internal-unit-id (stage 1), ghc-internal is
+looked up in the compiler's package db with --ghc-pkg; a boot compiler
+before 9.10 has none ("<unavailable>", as in Setup.hs).
 """
+import argparse
 import ast
 import subprocess
-import sys
 
-ghc, ghc_pkg, out = sys.argv[1:4]
+ap = argparse.ArgumentParser()
+ap.add_argument("--ghc", required=True)
+ap.add_argument("--unit-id", required=True)
+ap.add_argument("--ghc-internal-unit-id")
+ap.add_argument("--ghc-pkg")
+ap.add_argument("-o", required=True)
+args = ap.parse_args()
 
-info = dict(ast.literal_eval(subprocess.check_output([ghc, "--info"], text=True)))
+info = dict(ast.literal_eval(subprocess.check_output([args.ghc, "--info"], text=True)))
 
 # Setup.hs: cStage is hard-coded to 2, even for the stage-1 compiler.
 settings = {
@@ -24,17 +35,15 @@ settings = {
     "cStage": "2",
 }
 
-# The unit id of the library being built is fixed to "ghc" by
-# `-this-unit-id ghc` (compiler/ghc.cabal) and by the buck2 rules.
-project_unit_id = "ghc"
-
-# Boot compilers before 9.10 have no ghc-internal package.
-r = subprocess.run([ghc_pkg, "field", "ghc-internal", "id"],
-                   capture_output=True, text=True)
-if r.returncode == 0 and r.stdout.strip():
-    ghc_internal_unit_id = r.stdout.split(":", 1)[1].strip()
+if args.ghc_internal_unit_id is not None:
+    ghc_internal_unit_id = args.ghc_internal_unit_id
 else:
-    ghc_internal_unit_id = "<unavailable>"
+    r = subprocess.run([args.ghc_pkg, "field", "ghc-internal", "id"],
+                       capture_output=True, text=True)
+    if r.returncode == 0 and r.stdout.strip():
+        ghc_internal_unit_id = r.stdout.split(":", 1)[1].strip()
+    else:
+        ghc_internal_unit_id = "<unavailable>"
 
 def hs_str(s):
     return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
@@ -71,11 +80,11 @@ lines = [
     "cStage                = show (" + settings["cStage"] + " :: Int)",
     "",
     "cProjectUnitId :: String",
-    "cProjectUnitId = " + hs_str(project_unit_id),
+    "cProjectUnitId = " + hs_str(args.unit_id),
     "",
     "cGhcInternalUnitId :: String",
     "cGhcInternalUnitId = " + hs_str(ghc_internal_unit_id),
 ]
 
-with open(out, "w") as f:
+with open(args.o, "w") as f:
     f.write("\n".join(lines) + "\n")

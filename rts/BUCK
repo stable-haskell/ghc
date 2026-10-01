@@ -1,0 +1,60 @@
+# Hand-maintained BUCK file for the rts, stage 2 only (stage 1 uses the
+# boot compiler's rts).
+#
+# The generated rules (BUCK.stage2.cabal.bzl) give the main library
+# `rts-stage2` (header-only: include-dirs and the configure-generated
+# headers, DerivedConstants.h among them) and one GHC-compiled C+Cmm
+# library per RTS way (nonthreaded-nodebug-stage2, ...).
+#
+# GHC links the way it selects (`rts:threaded-nodebug` for -threaded)
+# through the package db, so the ways are `sublibraries` of the main
+# library: registered wherever `rts` is, linked by GHC rather than by
+# buck2. The ways then cannot depend on the main library (a cycle), but
+# GHC reads its platform constants from the include-dirs of the unit
+# `rts` when it compiles them: `rts-constants-stage2` is that unit for
+# the ways only, with the same headers.
+load(":BUCK.stage2.cabal.bzl", generated_targets_stage2 = "generated_targets", VERSION = "VERSION")
+load("//buck2:haskell.bzl", "haskell_library")
+load("//buck2:cabal_overrides.bzl", "remove")
+
+WAYS = ["nonthreaded-nodebug", "threaded-nodebug", "nonthreaded-debug", "threaded-debug"]
+
+haskell_library(
+    name = "rts-constants-stage2",
+    srcs = {},
+    unit_id = "rts",
+    package_name = "rts",
+    version = VERSION,
+    # the same headers as rts-stage2 (GHC compiles a C stub against Rts.h
+    # when it links a program, with the include-dirs of the unit `rts`)
+    include_dirs = ["//rts/cabal-buck2/autogen-stage2:rts-stage2-configure-include", "include"],
+    deps = ["//rts-headers:rts-headers-stage2"],
+    default_target_platform = "root//buck2/platforms:stage2",
+)
+
+generated_targets_stage2(overrides = dict(
+    {
+        way + "-stage2": {
+            "deps": [remove(["//rts:rts-stage2"]), ":rts-constants-stage2"],
+            # The rts-headers for GHC's Cmm preprocessing: the prelude
+            # passes the headers of a dependency to the Haskell
+            # preprocessor (-optP) and the C compiler (-optc) only.
+            "compiler_flags": ["-Irts-headers/include"],
+            # rts.cabal gives these files per-file options too
+            # (`AutoApply_V32.cmm (-mavx2)`); upstream Cabal keeps only the
+            # first of two identical `(-mavx2)` entries, so the generated
+            # per_src_flags has them for Jumps_V*.cmm only.
+            "per_src_flags": {
+                "AutoApply_V32.cmm": ["-mavx2"],
+                "AutoApply_V64.cmm": ["-mavx512f"],
+            },
+        }
+        for way in WAYS
+    },
+    **{
+        "rts-stage2": {
+            "sublibraries": [":" + way + "-stage2" for way in WAYS],
+        },
+    }
+))
+
