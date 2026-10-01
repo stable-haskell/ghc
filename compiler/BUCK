@@ -1,0 +1,86 @@
+# Hand-maintained BUCK file for the `ghc` library (compiler/, build-type:
+# Custom).
+#
+# compiler/Setup.hs generates, at configure time:
+#   * primop-*.hs-incl files: cpp of GHC/Builtin/primops.txt.pp piped
+#     through genprimopcode, one file per flag (the table below is the
+#     one in Setup.hs). The .hs files #include them, so the output
+#     directory goes on the include path of the `ghc` target.
+#   * GHC/Platform/Constants.hs: from the deriveConstants tool.
+#   * GHC/Settings/Config.hs: from `ghc --info` of the boot compiler
+#     (cabal-buck2/gen_settings_config.py replicates Setup.hs).
+# `cabal buck2` does not run Custom setups, so this file provides them as
+# genrules. The autogen modules are wired in through the
+# :autogen-<Module> convention of the generated BUCK.cabal.bzl.
+load(":BUCK.cabal.bzl", "generated_targets")
+load("@third-party-haskell//:tools.bzl", "GHC_VERSION")
+
+# Setup.hs: `Haskell CPP flags` of the boot compiler (`-E -undef
+# -traditional` for ghc-9.8.4) plus -P -x c, and -I<compiler root>.
+genrule(
+    name = "primops-txt",
+    srcs = ["GHC/Builtin/primops.txt.pp"],
+    out = "primops.txt",
+    cmd = "gcc -E -undef -traditional -P -x c -I$SRCDIR $SRCDIR/GHC/Builtin/primops.txt.pp > $OUT",
+)
+
+PRIMOP_INCLS = {
+    "primop-data-decl.hs-incl": "--data-decl",
+    "primop-tag.hs-incl": "--primop-tag",
+    "primop-list.hs-incl": "--primop-list",
+    "primop-effects.hs-incl": "--primop-effects",
+    "primop-out-of-line.hs-incl": "--out-of-line",
+    "primop-commutable.hs-incl": "--commutable",
+    "primop-code-size.hs-incl": "--code-size",
+    "primop-strictness.hs-incl": "--strictness",
+    "primop-is-work-free.hs-incl": "--is-work-free",
+    "primop-is-cheap.hs-incl": "--is-cheap",
+    "primop-fixity.hs-incl": "--fixity",
+    "primop-primop-info.hs-incl": "--primop-primop-info",
+    "primop-vector-uniques.hs-incl": "--primop-vector-uniques",
+    "primop-vector-tys.hs-incl": "--primop-vector-tys",
+    "primop-vector-tys-exports.hs-incl": "--primop-vector-tys-exports",
+    "primop-vector-tycons.hs-incl": "--primop-vector-tycons",
+    "primop-docs.hs-incl": "--wired-in-docs",
+    "primop-deprecations.hs-incl": "--wired-in-deprecations",
+    "primop-prim-module.hs-incl": "--prim-module",
+    "primop-wrappers-module.hs-incl": "--wrappers-module",
+}
+
+# One directory with all the .hs-incl files, put on the include path of
+# the `ghc` target with -I$(location :primop-incls).
+genrule(
+    name = "primop-incls",
+    out = "primop-incls",
+    cmd = "mkdir -p $OUT && " + " && ".join([
+        "$(exe //utils/genprimopcode:genprimopcode) {flag} < $(location :primops-txt) > $OUT/{file}".format(flag = flag, file = file)
+        for file, flag in PRIMOP_INCLS.items()
+    ]),
+)
+
+# Setup.hs: deriveConstants --gen-haskell-type -o <out> --target-os <os>
+# with <os> the `target os` entry of `ghc --info` of the boot compiler
+# (e.g. OSLinux). Backquotes, not $(...): buck2 expands $(...) itself.
+genrule(
+    name = "autogen-GHC.Platform.Constants",
+    out = "Constants.hs",
+    cmd = "$(exe //utils/deriveConstants:deriveConstants) --gen-haskell-type -o $OUT --target-os \"`ghc-" + GHC_VERSION + " --info | sed -n 's/.*(\"target os\",\"\\([^\"]*\\)\").*/\\1/p'`\"",
+)
+
+genrule(
+    name = "autogen-GHC.Settings.Config",
+    srcs = ["cabal-buck2/gen_settings_config.py"],
+    out = "Config.hs",
+    cmd = "python3 $SRCDIR/cabal-buck2/gen_settings_config.py ghc-" + GHC_VERSION + " ghc-pkg-" + GHC_VERSION + " $OUT",
+)
+
+generated_targets(overrides = {
+    "ghc": {
+        "compiler_flags": ["-I$(location :primop-incls)"],
+    },
+    # cbits/*.c include <Rts.h>, <HsFFI.h>, <ghcversion.h> from the boot
+    # compiler's RTS; the prebuilt rts target exports that include dir.
+    "ghc-cxx": {
+        "deps": ["@third-party-haskell//:rts"],
+    },
+})
