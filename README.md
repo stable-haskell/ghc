@@ -118,12 +118,19 @@ with targets suffixed `-stage2`, built in the `stage2` platform
 (`buck2/platforms/BUCK`) where the toolchain is the stage-1 compiler.
 
     $ make buck2-stage2 CABAL_BUCK2=/path/to/cabal-with-buck2
-    $ buck2 build //buck2-ghc:ghc-stage2 -m opt --show-output   # the stage-2 compiler
+    $ buck2 build //buck2-ghc:stage2-libdir -m opt --show-output   # the stage-2 installation
 
-`//buck2-ghc:ghc-stage2` is `//ghc:ghc-stage2` with a libdir where every
-stage-2 library is registered (`//buck2-ghc:stage2-libdir`); it compiles
-and links programs. The stage-2 libraries are static (the `stage2`
-platform selects static linkage).
+`//buck2-ghc:stage2-libdir` is an installation: `bin/ghc` is
+`//ghc:ghc-stage2` with a libdir where every stage-2 library is
+registered, next to `ghc-pkg`, `hsc2hs`, `haddock`, `hpc`, `hp2ps`,
+`runghc`, `ghc-iserv` and `unlit`. `mk/buck2-smoke-test.sh <store>`
+compiles and runs programs with it (libraries, `-threaded`, Template
+Haskell, the FFI, hsc2hs, runghc). The stage-2 libraries are static (the
+`stage2` platform selects static linkage).
+
+`mk/buck2-tools.sh <prefix>` installs the tools (buck2, the cabal with
+the `buck2` command, haskell-buck2 at `./buck2`); the workflow
+`.github/workflows/buck2.yml` runs all of this on CI.
 
 Packages with a Custom `Setup.hs` have a hand-maintained `BUCK` file next
 to the generated `BUCK.cabal.bzl`: `compiler/BUCK` (primop `.hs-incl`

@@ -13,8 +13,7 @@
 # puts the macro inside a string literal, which GHC's traditional CPP does
 # not expand, so the define has no effect in the cabal build either.
 load(":BUCK.cabal.bzl", "generated_targets")
-load(":BUCK.stage2.cabal.bzl", generated_targets_stage2 = "generated_targets")
-load(":BUCK.autogen.bzl", "autogen_rules")
+load(":BUCK.autogen.bzl", "autogen_rules", "stage2_rules")
 load("@third-party-haskell//:tools.bzl", "GHC_VERSION")
 
 # Stage 1: built by the boot compiler (a name on $PATH).
@@ -22,7 +21,6 @@ autogen_rules(target = "ghc-boot", ghc = "ghc-" + GHC_VERSION)
 
 generated_targets()
 
-# Stage 2: built by the stage-1 compiler (the //buck2-ghc wrapper).
-autogen_rules(target = "ghc-boot-stage2", ghc = "$(exe //buck2-ghc:ghc)")
-
-generated_targets_stage2()
+# Stage 2 (once generated): built by the stage-1 compiler (the //buck2-ghc
+# wrapper).
+stage2_rules()

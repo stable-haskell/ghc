@@ -1,0 +1,77 @@
+# The experimental Buck2 build (see README.md, "Building with Buck2"):
+# stage 1 and stage 2 through `cabal buck2`, then a smoke test of the
+# stage-2 installation. Linux x86_64 only, with GHC 9.8 as boot compiler.
+name: Buck2
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+  push:
+    branches: [stable-ghc-9.14, stable-ghc-9.14-rebased, stable-master]
+  workflow_dispatch:
+
+jobs:
+  buck2:
+    name: "x86_64-linux / ghc 9.8 / buck2"
+    runs-on: ubuntu-24.04
+    env:
+      GHC0: ghc-9.8.4
+      TOOLS: ${{ github.workspace }}/_build/buck2-tools
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: "recursive"
+
+    - uses: haskell-actions/setup@v2
+      id: setup
+      with:
+        ghc-version: '9.8.4'
+        cabal-version: '3.14'
+
+    - name: Install system packages
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y zstd autoconf automake build-essential pkg-config python3 libgmp-dev libffi-dev libncurses-dev libnuma-dev
+
+    - name: Pin the tool sources
+      id: pins
+      run: |
+        echo "cabal=$(git ls-remote https://github.com/stable-haskell/cabal.git refs/heads/cabal-buck2-ghc | cut -f1)" >> "$GITHUB_OUTPUT"
+        echo "haskell-buck2=$(git ls-remote https://github.com/stable-haskell/haskell-buck2.git refs/heads/cabal-buck2-ghc | cut -f1)" >> "$GITHUB_OUTPUT"
+
+    - name: Cache the tools (buck2, cabal with the buck2 command)
+      uses: actions/cache@v4
+      with:
+        path: _build/buck2-tools/bin
+        key: buck2-tools-${{ runner.os }}-${{ runner.arch }}-${{ steps.setup.outputs.ghc-version }}-${{ steps.pins.outputs.cabal }}
+
+    - name: Install the tools
+      timeout-minutes: 40
+      run: mk/buck2-tools.sh "$TOOLS" "$GHC0"
+
+    - name: Stage 1
+      timeout-minutes: 90
+      run: |
+        set -eo pipefail
+        export PATH="$TOOLS/bin:$PATH"
+        make buck2-stage1 GHC0=$GHC0 USE_SYSTEM_CABAL=1 CABAL=cabal CABAL_BUCK2="$TOOLS/bin/cabal"
+        buck2 build //... -m opt
+
+    - name: Stage 2
+      timeout-minutes: 300
+      run: |
+        set -eo pipefail
+        export PATH="$TOOLS/bin:$PATH"
+        make buck2-stage2 GHC0=$GHC0 USE_SYSTEM_CABAL=1 CABAL=cabal CABAL_BUCK2="$TOOLS/bin/cabal"
+        buck2 build //buck2-ghc:stage2-libdir -m opt
+
+    - name: Smoke test of the stage-2 installation
+      run: |
+        set -eo pipefail
+        export PATH="$TOOLS/bin:$PATH"
+        mk/buck2-smoke-test.sh "$(buck2 build //buck2-ghc:stage2-libdir -m opt --show-simple-output)"
+
+    - name: Stop buck2
+      if: ${{ always() }}
+      run: _build/buck2-tools/bin/buck2 kill || true
