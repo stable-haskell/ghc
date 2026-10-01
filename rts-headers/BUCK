@@ -1,6 +1,16 @@
-# Hand-maintained: add extra targets below, pass overrides = {...} to
-# generated_targets() to extend a generated rule, or stop calling it to
-# fully take over this package's BUCK rules.
+# Hand-maintained BUCK file for rts-headers (header-only package; the
+# library rules are generated).
 load(":BUCK.cabal.bzl", "generated_targets")
+load(":BUCK.stage2.cabal.bzl", generated_targets_stage2 = "generated_targets")
+
+# The headers as a directory tree, for rts/BUCK's configure genrule
+# (deriveConstants compiles against them).
+filegroup(
+    name = "include",
+    srcs = glob(["include/**"]),
+    visibility = ["PUBLIC"],
+)
 
 generated_targets()
+
+generated_targets_stage2()

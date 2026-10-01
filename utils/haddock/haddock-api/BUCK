@@ -1,11 +1,6 @@
 # Hand-maintained: add extra targets below, pass overrides = {...} to
 # generated_targets() to extend a generated rule, or stop calling it to
 # fully take over this package's BUCK rules.
-load(":BUCK.cabal.bzl", "generated_targets")
-
-generated_targets()
-
-# Targets of variant `stage2`, added by `cabal buck2 --variant`.
 load(":BUCK.stage2.cabal.bzl", generated_targets_stage2 = "generated_targets")
 
 generated_targets_stage2()

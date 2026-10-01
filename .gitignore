@@ -297,9 +297,9 @@ testsuite/ghc-config/ghc-config
 # checkout, the files `cabal buck2` generates, and buck2's own output.
 /buck2/
 /buck-out/
-/.buckconfig
 /PACKAGE
 /third-party/
 BUCK.cabal.bzl
+BUCK.stage2.cabal.bzl
 **/cabal-buck2/autogen/
-/_buck2-stage1/
+**/cabal-buck2/autogen-stage2/

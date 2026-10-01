@@ -89,7 +89,7 @@ To build *javascript-unknown-ghcjs*:
 Building with Buck2 (experimental)
 ==================================
 
-Stage 1 can be built with [Buck2](https://buck2.build) through the
+Stages 1 and 2 can be built with [Buck2](https://buck2.build) through the
 experimental `cabal buck2` command
 ([announcement](https://discourse.haskell.org/t/buck2-build-system-for-cabal-projects/14770)).
 `cabal buck2` builds the dependencies with Cabal and generates a
@@ -110,16 +110,30 @@ Then:
     $ buck2 build //...                                           # dev mode: -O0, dynamic
     $ buck2 build //ghc:ghc --show-output                         # the stage-1 compiler
 
-The compiler needs a `settings` file and a package db to run, like the one
-the `Makefile` creates in `_build/stage1/store/host/<platform>/lib`.
+Stage 2 is built by the stage-1 compiler, through the wrappers of
+`buck2-ghc/BUCK` (`//buck2-ghc:ghc` runs `//ghc:ghc` with a libdir of its
+own). `make buck2-stage2` runs `cabal buck2 --variant stage2` on
+`cabal.project.stage2.buck2`: every package gets a `BUCK.stage2.cabal.bzl`
+with targets suffixed `-stage2`, built in the `stage2` platform
+(`buck2/platforms/BUCK`) where the toolchain is the stage-1 compiler.
+
+    $ make buck2-stage2 CABAL_BUCK2=/path/to/cabal-with-buck2
+    $ buck2 build //buck2-ghc:ghc-stage2 -m opt --show-output   # the stage-2 compiler
+
+`//buck2-ghc:ghc-stage2` is `//ghc:ghc-stage2` with a libdir where every
+stage-2 library is registered (`//buck2-ghc:stage2-libdir`); it compiles
+and links programs. The stage-2 libraries are static (the `stage2`
+platform selects static linkage).
 
 Packages with a Custom `Setup.hs` have a hand-maintained `BUCK` file next
 to the generated `BUCK.cabal.bzl`: `compiler/BUCK` (primop `.hs-incl`
 files, `GHC.Platform.Constants`, `GHC.Settings.Config`) and
 `libraries/ghc-boot/BUCK` (`GHC.Platform.Host`). `libraries/ghc-boot-th`
-and `libraries/ghc-internal/src` have a `BUCK` that exports their sources
-for `ghc-boot-th-next`. Stage 2 is not supported yet: its project files
-need the Stable Haskell `cabal`, which does not have the `buck2` command.
+and `libraries/ghc-internal` have a `BUCK` that exports their sources for
+`ghc-boot-th-next`. `rts/BUCK` registers the RTS ways as sub-libraries of
+the `rts` unit, `libraries/ghc-internal/BUCK` generates the two modules
+the compiler prints (`GHC.Internal.Prim`, `GHC.Internal.PrimopWrappers`).
+Stage 3 is not supported.
 
 Filing bugs and feature requests
 ================================
