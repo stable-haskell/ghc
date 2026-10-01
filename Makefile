@@ -1350,28 +1350,37 @@ buck2-stage1: $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) libraries/ghc-boot-th-nex
 # suffixed -stage2, built in the stage2 platform by the stage-1 compiler
 # that buck2 built, through the wrappers of buck2-ghc/BUCK), then
 #
-#   buck2 build //buck2-ghc:ghc-stage2 -m opt --show-output
+#   buck2 build //buck2-ghc:stage2-libdir -m opt --show-output
 #
-# gives the stage-2 compiler with a libdir where every stage-2 library is
-# registered. Needs `buck2` on $PATH and a stage-1 build (make
-# buck2-stage1 && buck2 build //...).
+# gives the installation (bin/ghc with a libdir where every stage-2
+# library is registered, bin/ghc-pkg, hsc2hs, haddock, ...). The targets
+# are the local packages plus the executables of the two
+# source-repository packages (hsc2hs, hpc), as STAGE2_EXECUTABLES. Needs
+# `buck2` on $PATH and a stage-1 build (make buck2-stage1 && buck2 build
+# //...).
 .PHONY: buck2-stage2
 buck2-stage2: STAGE=stage2
 buck2-stage2: $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) libraries/ghc-boot-th-next cabal.project.stage2.buck2 cabal.project.stage2.common
 	@# The configure scripts of rts and ghc-internal run while cabal buck2
 	@# configures the packages; they need the stage-1 tools, as in
 	@# STAGE2_CABAL_BUILD.
+	@set -eu; \
+	derive_constants=$$(buck2 build //utils/deriveConstants:deriveConstants --show-simple-output); \
+	genapply=$$(buck2 build //utils/genapply:genapply --show-simple-output); \
+	compiler=$$(buck2 build //buck2-ghc:ghc --show-simple-output); \
+	packager=$$(buck2 build //buck2-ghc:ghc-pkg --show-simple-output); \
 	env \
-	DERIVE_CONSTANTS=$(CURDIR)/$$(buck2 build //utils/deriveConstants:deriveConstants --show-simple-output 2>/dev/null) \
-	GENAPPLY=$(CURDIR)/$$(buck2 build //utils/genapply:genapply --show-simple-output 2>/dev/null) \
+	DERIVE_CONSTANTS="$(CURDIR)/$$derive_constants" \
+	GENAPPLY="$(CURDIR)/$$genapply" \
 	NM=$(NM) \
 	OBJDUMP=$(OBJDUMP) \
 	$(CABAL_BUCK2) buck2 \
 		--variant stage2 \
 		--project-file cabal.project.stage2.buck2 \
-		--with-compiler=$(CURDIR)/$$(buck2 build //buck2-ghc:ghc --show-simple-output 2>/dev/null) \
-		--with-hc-pkg=$(CURDIR)/$$(buck2 build //buck2-ghc:ghc-pkg --show-simple-output 2>/dev/null) \
-		--ghc-options "-ghcversion-file=$(call NORMALIZE_FP,$(CURDIR)/rts/include/ghcversion.h)"
+		--with-compiler="$(CURDIR)/$$compiler" \
+		--with-hc-pkg="$(CURDIR)/$$packager" \
+		--ghc-options "-ghcversion-file=$(call NORMALIZE_FP,$(CURDIR)/rts/include/ghcversion.h)" \
+		all exe:hsc2hs exe:hpc
 
 #   ____             __ _
 #  / ___|___  _ __  / _(_) __ _ _   _ _ __ ___

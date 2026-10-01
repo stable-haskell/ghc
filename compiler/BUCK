@@ -17,9 +17,7 @@
 # (genprimopcode, deriveConstants) are exec deps, built once with the boot
 # compiler.
 load(":BUCK.cabal.bzl", "generated_targets", STAGE1_UNIT_IDS = "UNIT_IDS")
-load(":BUCK.stage2.cabal.bzl", generated_targets_stage2 = "generated_targets", STAGE2_UNIT_IDS = "UNIT_IDS")
-load("//libraries/ghc-internal:BUCK.stage2.cabal.bzl", GHC_INTERNAL_STAGE2_UNIT_IDS = "UNIT_IDS")
-load(":BUCK.autogen.bzl", "autogen_rules")
+load(":BUCK.autogen.bzl", "autogen_rules", "stage2_rules")
 load("@third-party-haskell//:tools.bzl", "GHC_VERSION")
 
 # Setup.hs: `Haskell CPP flags` of the compiler (`-E -undef -traditional`
@@ -79,28 +77,9 @@ generated_targets(overrides = {
     "ghc": {
         "compiler_flags": ["-I$(location :primop-incls)"],
     },
-    # cbits/*.c include <Rts.h>, <HsFFI.h>, <ghcversion.h> from the boot
-    # compiler's RTS; the prebuilt rts target exports that include dir.
-    "ghc-cxx": {
-        "deps": ["@third-party-haskell//:rts"],
-    },
 })
 
-# Stage 2: built by the stage-1 compiler (the //buck2-ghc wrapper, an exec
-# dep); ghc-internal is the one built here.
-autogen_rules(
-    target = "ghc-stage2",
-    ghc = "$(exe //buck2-ghc:ghc)",
-    ghc_pkg_or_internal = "--ghc-internal-unit-id " + GHC_INTERNAL_STAGE2_UNIT_IDS["ghc-internal-stage2"],
-    unit_id = STAGE2_UNIT_IDS["ghc-stage2"],
-)
-
-generated_targets_stage2(overrides = {
-    "ghc-stage2": {
-        "compiler_flags": ["-I$(location :primop-incls)"],
-    },
-    # cbits/*.c include <Rts.h>: the stage-2 rts headers.
-    "ghc-stage2-cxx": {
-        "deps": ["//rts:rts-stage2"],
-    },
-})
+# Stage 2 (once generated, see Note [Variant stubs] in cabal-install's
+# Distribution.Client.Buck2.Generate): built by the stage-1 compiler (the
+# //buck2-ghc wrapper, an exec dep); ghc-internal is the one built here.
+stage2_rules()
