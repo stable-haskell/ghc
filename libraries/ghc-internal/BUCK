@@ -1,12 +1,9 @@
 # Hand-maintained BUCK file for ghc-internal, stage 2 only: stage 1 uses
 # the boot compiler's ghc-internal. BUCK.autogen.bzl adds the two
 # modules the compiler prints.
-load(":BUCK.stage2.cabal.bzl", generated_targets_stage2 = "generated_targets")
-load(":BUCK.autogen.bzl", "ghc_internal_autogen_rules")
+load(":BUCK.autogen.bzl", "stage2_rules")
 
-ghc_internal_autogen_rules(target = "ghc-internal-stage2", ghc = "$(exe //buck2-ghc:ghc)")
-
-generated_targets_stage2()
+stage2_rules()
 
 # ghc-boot-th-next lists src/ in its hs-source-dirs (../ghc-internal/src).
 # buck2 cannot reference files of another package by path, so every
