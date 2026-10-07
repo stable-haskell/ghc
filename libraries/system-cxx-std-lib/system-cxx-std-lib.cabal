@@ -19,3 +19,16 @@ library
   -- standard libraries when linking with the C toolchain, or to directly use
   -- the C++ toolchain to link.
   
+  --
+  -- The C++ runtime still has to be named here for the interpreter, though:
+  -- linking with the C++ toolchain covers executables and shared libraries
+  -- (GHC.Linker.Executable/Dynamic), but nothing loads the C++ runtime when
+  -- the RTS linker loads a package's static archive -- e.g. an external
+  -- interpreter (iserv under wine or qemu) running a cross-compiled splice
+  -- that calls into `double-conversion`.  Without it the archive's references
+  -- to `__cxa_guard_acquire` and friends stay unresolved, and with
+  -- --optimistic-linking the splice then hangs instead of failing.  These are
+  -- the libraries the configure-generated system-cxx-std-lib-1.0.conf names
+  -- for a GNU toolchain (mk/system-cxx-std-lib-1.0.conf.in).
+  if os(windows) || os(linux)
+    extra-libraries: stdc++
