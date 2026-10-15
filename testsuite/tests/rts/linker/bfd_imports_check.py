@@ -26,6 +26,8 @@ def gnu_dlltool():
             # GNU prints argv[0] after its vendor prefix, so the banner may
             # contain a qualified path or a cross-prefixed executable name.
             if version.returncode == 0 and version.stdout.startswith("GNU "):
+                with open("bfd-producer.txt", "a", encoding="utf-8") as trace:
+                    trace.write(f"{tool}\n{version.stdout}\n")
                 return tool
             output = (version.stdout or version.stderr).splitlines()
             banner = output[0] if output else "no version output"

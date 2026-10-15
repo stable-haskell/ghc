@@ -1,0 +1,86 @@
+name: Focused Windows BFD diagnosis
+
+on:
+  push:
+    branches: [diagnose/bfd-runtime]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  bfd-runtime:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    env:
+      MSYSTEM: CLANG64
+      GHCUP_MSYS2_ENV: CLANG64
+      CHERE_INVOKING: 1
+      MAKE: make
+      THREADS: 1
+    defaults:
+      run:
+        shell: 'C:/msys64/usr/bin/bash.exe --login -e {0}'
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Install the release test toolchain
+        run: |
+          pacman --noconfirm -S --needed --overwrite '*' git vim winpty tar bsdtar unzip binutils autoconf make xz curl libtool automake p7zip patch ca-certificates python3 zip mingw-w64-clang-x86_64-toolchain mingw-w64-clang-x86_64-python-sphinx mingw-w64-clang-x86_64-python-requests mingw-w64-clang-x86_64-tools-git mingw-w64-clang-x86_64-ghostscript gzip
+      - name: Download the exact final PR 197 Windows compiler
+        uses: actions/download-artifact@v5
+        with:
+          name: artifacts-x86_64-mingw64-refs_pull_197_merge
+          run-id: '38730229809'
+          github-token: ${{ github.token }}
+          path: _build/dist
+      - name: Run only the BFD regression with file diagnostics
+        run: |
+          export PATH="/c/ghcup/bin:$PATH"
+          (
+            cd _build/dist
+            for file in *.tar.gz; do tar xzf "$file"; done
+          )
+          export PATH="$(pwd)/_build/dist/bin:$PATH"
+          pacman -Q binutils mingw-w64-clang-x86_64-clang make
+          python3 --version
+          bfd_status=0
+          run_bfd_case() {
+            bfd_case=$1
+            bfd_case_status=0
+            make -C _build/dist/testsuite TEST=bfd_imports CLEANUP=0 THREADS=1 || bfd_case_status=$?
+            bfd_saved_dir="_build/bfd-diagnostics/$bfd_case"
+            mkdir -p "$bfd_saved_dir"
+            printf '%s\n' "$bfd_case_status" > "$bfd_saved_dir/exit-status.txt"
+            bfd_run_dir=_build/dist/testsuite/tests/rts/linker/bfd_imports.run
+            if [ -d "$bfd_run_dir" ]; then
+              cp -a "$bfd_run_dir/." "$bfd_saved_dir/"
+              for trace in "$bfd_saved_dir"/bfd-trace.txt "$bfd_saved_dir"/bfd-producer.txt; do
+                if [ -f "$trace" ]; then cat "$trace"; fi
+              done
+              /usr/bin/objdump.exe --version
+              /usr/bin/objdump.exe -x "$bfd_saved_dir/libbfd_imports.a" > "$bfd_saved_dir/archive-dump.txt" || true
+              /usr/bin/objdump.exe -dr "$bfd_saved_dir/bfd_imports_client.o" > "$bfd_saved_dir/client-dump.txt" || true
+              /usr/bin/objdump.exe -x "$bfd_saved_dir/bfd_imports.dll" > "$bfd_saved_dir/dll-dump.txt" || true
+              /usr/bin/objdump.exe -d "$bfd_saved_dir/bfd_imports.exe" > "$bfd_saved_dir/executable-dump.txt" || true
+            fi
+            if [ "$bfd_case_status" -ne 0 ]; then bfd_status=1; fi
+          }
+          run_bfd_case original
+          cp testsuite/tests/rts/linker/bfd_imports.hs _build/dist/testsuite/tests/rts/linker/
+          cp testsuite/tests/rts/linker/bfd_imports_check.py _build/dist/testsuite/tests/rts/linker/
+          run_bfd_case traced
+          exit "$bfd_status"
+      - name: Preserve the reproducer and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bfd-runtime-diagnostics
+          retention-days: 2
+          if-no-files-found: warn
+          include-hidden-files: true
+          path: |
+            _build/bfd-diagnostics/
+            _build/dist/testsuite/test-summary.txt
+            _build/dist/testsuite/test-junit.xml
