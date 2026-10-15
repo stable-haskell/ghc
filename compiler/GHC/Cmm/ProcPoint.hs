@@ -240,7 +240,8 @@ splitAtProcPoints :: Platform -> CLabel -> ProcPointSet-> ProcPointSet -> LabelM
 splitAtProcPoints _ _ _ _ _ t@(CmmData _ _) = return [t]
 splitAtProcPoints platform entry_label callPPs procPoints procMap cmmProc = do
   -- Build a map from procpoints to the blocks they reach
-  let (CmmProc (TopInfo {info_tbls = info_tbls}) top_l _ g@(CmmGraph {g_entry=entry})) = cmmProc
+  let (CmmProc (TopInfo {info_tbls = info_tbls, proc_attrs = proc_attrs})
+               top_l _ g@(CmmGraph {g_entry=entry})) = cmmProc
 
   let add graphEnv procId bid b = mapInsert procId graph' graphEnv
         where
@@ -340,16 +341,19 @@ splitAtProcPoints platform entry_label callPPs procPoints procMap cmmProc = do
   let to_proc (bid, g)
           | bid == entry
           =  CmmProc (TopInfo {info_tbls  = info_tbls,
-                               stack_info = stack_info})
+                               stack_info = stack_info,
+                               proc_attrs = proc_attrs})
                      top_l live g'
           | otherwise
           = case expectJust $ mapLookup bid procLabels of
               (lbl, Just info_lbl)
                  -> CmmProc (TopInfo { info_tbls = mapSingleton (g_entry g) (mkEmptyContInfoTable info_lbl)
-                                     , stack_info=stack_info})
+                                     , stack_info=stack_info
+                                     , proc_attrs = proc_attrs})
                             lbl live g'
               (lbl, Nothing)
-                 -> CmmProc (TopInfo {info_tbls = mapEmpty, stack_info=stack_info})
+                 -> CmmProc (TopInfo {info_tbls = mapEmpty, stack_info=stack_info
+                                     , proc_attrs = proc_attrs})
                             lbl live g'
              where
               g' = replacePPIds g

@@ -160,6 +160,7 @@ data CmmToken
   | CmmT_INFO_TABLE_FUN
   | CmmT_INFO_TABLE_CONSTR
   | CmmT_INFO_TABLE_SELECTOR
+  | CmmT___attribute__
   | CmmT_else
   | CmmT_export
   | CmmT_section
@@ -259,6 +260,8 @@ reservedWordsFM = listToUFM $
         ( "INFO_TABLE_FUN",     CmmT_INFO_TABLE_FUN ),
         ( "INFO_TABLE_CONSTR",  CmmT_INFO_TABLE_CONSTR ),
         ( "INFO_TABLE_SELECTOR",CmmT_INFO_TABLE_SELECTOR ),
+        -- See Note [Cmm target attributes] in GHC.Cmm
+        ( "__attribute__",      CmmT___attribute__ ),
         ( "else",               CmmT_else ),
         ( "export",             CmmT_export ),
         ( "section",            CmmT_section ),

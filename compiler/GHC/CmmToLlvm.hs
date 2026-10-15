@@ -140,7 +140,7 @@ llvmGroupLlvmGens cmm = do
         let split (CmmData s d' )     = return $ Just (s, d')
             split (CmmProc h l live g) = do
               -- Set function type
-              let l' = case mapLookup (g_entry g) h :: Maybe RawCmmStatics of
+              let l' = case mapLookup (g_entry g) (raw_info_tbls h) of
                          Nothing                   -> l
                          Just (CmmStaticsRaw info_lbl _) -> info_lbl
               lml <- strCLabel_llvm l'

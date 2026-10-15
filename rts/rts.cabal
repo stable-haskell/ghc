@@ -344,21 +344,12 @@ common rts-cmm-sources-base
       cmm-sources:
         AutoApply.cmm
         AutoApply_V16.cmm
-
-      -- Vector Cmm needs the same ISA flags on both x86 widths, matching
-      -- rtsPackageArgs in hadrian/src/Settings/Packages.hs.
-      if arch(x86_64) || arch(i386)
-        cmm-sources:
-          Jumps_V32.cmm (-mavx2)
-          Jumps_V64.cmm (-mavx512f)
-          AutoApply_V32.cmm (-mavx2)
-          AutoApply_V64.cmm (-mavx512f)
-      else
-        cmm-sources:
-          Jumps_V32.cmm
-          Jumps_V64.cmm
-          AutoApply_V32.cmm
-          AutoApply_V64.cmm
+        AutoApply_V32.cmm
+        AutoApply_V64.cmm
+        Jumps_V32.cmm
+        Jumps_V64.cmm
+      -- Vector procedures declare their CPU requirements in the Cmm source.
+      -- Keep the component-wide flags at the baseline required by scalar/V16.
 
     -- this is required so we don't have ghc inject ghc-internal (which depends on the rts)
     -- during the build phase of this library.

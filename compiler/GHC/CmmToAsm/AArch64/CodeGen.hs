@@ -67,7 +67,7 @@ import GHC.Utils.Monad (mapAccumLM)
 -- @cmmTopCodeGen@ will be our main entry point to code gen.  Here we'll get
 -- @RawCmmDecl@; see GHC.Cmm
 --
---   RawCmmDecl = GenCmmDecl RawCmmStatics (LabelMap RawCmmStatics) CmmGraph
+--   RawCmmDecl = GenCmmDecl RawCmmStatics RawCmmProcInfo CmmGraph
 --
 --   GenCmmDecl d h g = CmmProc h CLabel [GlobalReg] g
 --                    | CmmData Section d
@@ -76,12 +76,12 @@ import GHC.Utils.Monad (mapAccumLM)
 -- defined @GHC.CmmToAsm.Instr@ as
 --
 --   type NatCmmDecl statics instr
---        = GenCmmDecl statics (LabelMap RawCmmStatics) (ListGraph instr)
+--        = GenCmmDecl statics RawCmmProcInfo (ListGraph instr)
 --
 -- Thus well' turn
---   GenCmmDecl RawCmmStatics (LabelMap RawCmmStatics) CmmGraph
+--   GenCmmDecl RawCmmStatics RawCmmProcInfo CmmGraph
 -- into
---   [GenCmmDecl RawCmmStatics (LabelMap RawCmmStatics) (ListGraph Instr)]
+--   [GenCmmDecl RawCmmStatics RawCmmProcInfo (ListGraph Instr)]
 --
 -- where @CmmGraph@ is
 --

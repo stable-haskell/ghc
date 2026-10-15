@@ -127,8 +127,8 @@ detRenameCmmGroup dufm group = swap (runState (mapM detRenameCmmDecl group) dufm
       = CmmData <$> detRenameSection sec <*> detRenameCmmStatics d
 
     detRenameCmmTop :: DCmmTopInfo -> DetRnM CmmTopInfo
-    detRenameCmmTop (TopInfo (DWrap i) b)
-      = TopInfo . mapFromList <$> mapM (detRenamePair detRenameLabel detRenameCmmInfoTable) i <*> pure b
+    detRenameCmmTop (TopInfo (DWrap i) b c)
+      = TopInfo . mapFromList <$> mapM (detRenamePair detRenameLabel detRenameCmmInfoTable) i <*> pure b <*> pure c
 
     detRenameCmmGraph :: DCmmGraph -> DetRnM CmmGraph
     detRenameCmmGraph (CmmGraph entry bs)

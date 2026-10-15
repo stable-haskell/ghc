@@ -1,0 +1,1 @@
+256-bit wide vectors require -mavx2
