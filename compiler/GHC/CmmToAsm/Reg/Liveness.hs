@@ -199,7 +199,8 @@ data Liveness
 -- | Stash regs live on entry to each basic block in the info part of the cmm code.
 data LiveInfo
         = LiveInfo
-                (LabelMap RawCmmStatics)  -- cmm info table static stuff
+                RawCmmProcInfo            -- cmm info table static stuff, plus
+                                          -- the proc's target attributes
                 [BlockId]                 -- entry points (first one is the
                                           -- entry point for the proc).
                 (BlockMap Regs)       -- argument locals live on entry to this block
@@ -715,7 +716,9 @@ natCmmTopToLive mCfg proc@(CmmProc info lbl live (ListGraph blocks@(first : _)))
 
         entry_ids       = filter (reachable_node) .
                           filter (/= first_id) $ all_entry_ids
-        info'           = mapFilterWithKey (\node _ -> reachable_node node) info
+        info'           = info { raw_info_tbls =
+                              mapFilterWithKey (\node _ -> reachable_node node)
+                                               (raw_info_tbls info) }
         reachable_node
           | Just cfg <- mCfg
           = hasNode cfg

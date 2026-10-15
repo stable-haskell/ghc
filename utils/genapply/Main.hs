@@ -127,15 +127,19 @@ This means that:
   - stg_ap_v32_fast (and friends) should be compiled with -mavx2.
   - stg_ap_v64_fast (and friends) should be compiled with -mavx512f.
 
-However, there isn't currently a way to set CPU flags per function in Cmm, à la
+The V32 and V64 requirements are stated per procedure, with a target attribute:
 
-  __attribute__(("target"="avx2"))
+  __attribute__((target("avx2")))
   stg_ap_v32_fast ...
 
-Instead, we put all V16 code in AutoApply_V16.cmm, all V32 code into
-AutoApply_V32.cmm, and all V64 code in AutoApply_V64.cmm.
-On X86, we then compile AutoApply_V32.cmm with -mavx2, and AutoApply_V64.cmm
-with -mavx512f. See references to AutoApply in Hadrian, Settings/Packages.hs.
+See Note [Cmm target attributes] in GHC.Cmm.  The attribute only turns features
+on (there is no target("no-avx")), so the V16 requirement, that it must NOT be
+built with AVX, still depends on not passing -mavx globally.
+
+The code is nonetheless still split across AutoApply_V16.cmm, AutoApply_V32.cmm
+and AutoApply_V64.cmm, which is what gave Hadrian a per-file handle on the
+flags.  That split predates the attribute and could be undone now; see the
+references to AutoApply in Hadrian, Settings/Packages.hs.
 
 Note that it is very important to set these flags. For example, were we to
 compile AutoApply_V32.cmm without -mavx2 using the LLVM backend, LLVM would
@@ -884,6 +888,7 @@ genApply targetInfo args =
     regs = map fst regsOffs
    in
     vcat [
+      vecTargetAttr,
       text "INFO_TABLE_RET(" <> applyName <> text ", " <>
         text "RET_SMALL, W_ info_ptr, " <> (cat $ zipWith formalParam args [1..]) <>
         text ")\n{",
@@ -1082,6 +1087,7 @@ genApplyFast targetInfo args =
 
    in
     vcat $ [
+     vecTargetAttr,
      fun_fast_label,
      char '{',
      nest 4 (vcat $ vecsCpp fun_fast_label (map fst reg_locs) [
@@ -1151,6 +1157,7 @@ mkStackApplyEntryLabel args = text "stg_ap_stk_" <> text (concatMap showArg args
 genStackApply :: TargetInfo -> [ArgRep] -> Doc
 genStackApply targetInfo args =
   vcat [
+    vecTargetAttr,
     fn_entry_label,
     text "{", nest 4 body, text "}"
    ]
@@ -1179,6 +1186,7 @@ mkStackSaveEntryLabel args = text "stg_stk_save_" <> text (concatMap showArg arg
 genStackSave :: TargetInfo -> [ArgRep] -> Doc
 genStackSave targetInfo args =
   vcat [
+    vecTargetAttr,
     fn_entry_label,
     text "{", nest 4 body, text "}"
    ]
@@ -1242,6 +1250,7 @@ main = do
                 text "",
                 text "#include \"Cmm.h\"",
                 text "#include \"AutoApply.h\"",
+                vecTargetAttrDefn mbVec,
                 text "#if !defined(UnregisterisedCompiler)",
                 text "import CLOSURE ALLOC_RTS_ctr;",
                 text "import CLOSURE ALLOC_RTS_tot;",
@@ -1293,6 +1302,37 @@ main = do
               ]
 
   putStr (render the_code)
+
+-- | The CPU features this file's procedures need, as a macro the generated Cmm
+-- prefixes each procedure with.
+--
+-- See Note [AutoApply.cmm for vectors]: the requirement only holds when the
+-- target has the registers, i.e. when CPP has defined REG_YMM1/REG_ZMM1.
+-- Stating it in terms of that same condition is what keeps it out of Hadrian's
+-- per-file rules.  See Note [Cmm target attributes] in GHC.Cmm.
+vecTargetAttrDefn :: Maybe ArgRep -> Doc
+vecTargetAttrDefn mbVec = case mbVec of
+    -- No attribute for V16 or the scalar file: -mavx there would lock out
+    -- targets with SSE2 but not AVX.  None for unregisterised builds either:
+    -- there the vector registers are not in the calling convention, and the C
+    -- backend those builds use rejects the attribute.
+    Just V32 -> defn "REG_YMM1" "avx2"
+    Just V64 -> defn "REG_ZMM1" "avx512f"
+    _        -> text "#define VEC_TARGET_ATTR"
+  where
+    defn reg feat = vcat
+      [ text "#if defined(" <> text reg <> text ") && !defined(UnregisterisedCompiler)"
+      , text "#define VEC_TARGET_ATTR __attribute__((target("
+          <> doubleQuotes (text feat) <> text ")))"
+      , text "#else"
+      , text "#define VEC_TARGET_ATTR"
+      , text "#endif"
+      ]
+
+-- | Prefix emitted before every generated procedure.
+-- See Note [Cmm target attributes] in GHC.Cmm.
+vecTargetAttr :: Doc
+vecTargetAttr = text "VEC_TARGET_ATTR"
 
 -- These have been shown to cover about 99% of cases in practice...
 applyTypes :: [[ArgRep]]

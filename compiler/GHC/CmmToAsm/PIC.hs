@@ -746,7 +746,7 @@ initializePicBase_ppc ArchPPC os picReg
                        (b:bs) -> fetchPC b : map maybeFetchPC bs
 
             maybeFetchPC b@(BasicBlock bID _)
-              | bID `mapMember` info = fetchPC b
+              | bID `mapMember` raw_info_tbls info = fetchPC b
               | otherwise            = b
 
             -- GCC does PIC prologs thusly:
@@ -821,7 +821,7 @@ initializePicBase_x86 os picReg
           -- every block that is an entry point, which corresponds to
           -- the blocks that have entries in the info-table mapping.
           maybeFetchGOT b@(BasicBlock bID _)
-            | bID `mapMember` info = fetchGOT b
+            | bID `mapMember` raw_info_tbls info = fetchGOT b
             | otherwise            = b
 
           fetchGOT (BasicBlock bID insns) =

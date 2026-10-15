@@ -1,0 +1,7 @@
+/* An unrecognised CPU feature must be an error, never ignored. */
+
+__attribute__((target("nosuchfeature")))
+badFeature (bits64 p)
+{
+  return ();
+}

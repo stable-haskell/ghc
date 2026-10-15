@@ -104,7 +104,7 @@ type BlockContext = (CmmBlock, RawCmmDeclNoStatics)
 type RawCmmDeclNoStatics
    = GenCmmDecl
         Void
-        (LabelMap RawCmmStatics)
+        RawCmmProcInfo
         CmmGraph
 
 -- | Extract debug data from a group of procedures. We will prefer
@@ -188,7 +188,7 @@ cmmDebugGen modLoc decls = map (blocksForScope Nothing) topScopes
                              , dblUnwind       = []
                              }
                 where (infos, graph) = case prc of
-                          CmmProc infos _ _ graph -> (infos, graph)
+                          CmmProc infos _ _ graph -> (raw_info_tbls infos, graph)
                           CmmData _ v -> case v of
                       label = entryLabel block
                       info = mapLookup label infos
@@ -212,9 +212,9 @@ cmmDebugGen modLoc decls = map (blocksForScope Nothing) topScopes
 -- This involves a pre-order traversal, as we want blocks in rough
 -- control flow order (so ticks have a chance to be sorted in the
 -- right order).
-blockContexts :: [GenCmmDecl a (LabelMap RawCmmStatics) CmmGraph] -> Map.Map CmmTickScope (NonEmpty BlockContext)
+blockContexts :: [GenCmmDecl a RawCmmProcInfo CmmGraph] -> Map.Map CmmTickScope (NonEmpty BlockContext)
 blockContexts = Map.map NE.reverse . foldr walkProc Map.empty
-  where walkProc :: GenCmmDecl a (LabelMap RawCmmStatics) CmmGraph
+  where walkProc :: GenCmmDecl a RawCmmProcInfo CmmGraph
                  -> Map.Map CmmTickScope (NonEmpty BlockContext)
                  -> Map.Map CmmTickScope (NonEmpty BlockContext)
         walkProc CmmData{}                 m = m
@@ -225,7 +225,7 @@ blockContexts = Map.map NE.reverse . foldr walkProc Map.empty
                 entry  = [mapFind (g_entry graph) blocks]
                 emptyLbls = setEmpty :: LabelSet
 
-        walkBlock :: GenCmmDecl a (LabelMap RawCmmStatics) CmmGraph -> [Block CmmNode C C]
+        walkBlock :: GenCmmDecl a RawCmmProcInfo CmmGraph -> [Block CmmNode C C]
                   -> (LabelSet, Map.Map CmmTickScope (NonEmpty BlockContext))
                   -> (LabelSet, Map.Map CmmTickScope (NonEmpty BlockContext))
         walkBlock _   []             c            = c

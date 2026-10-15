@@ -1753,7 +1753,11 @@ onCmmDecl :: RawCmmDecl -> WasmCodeGenM w ()
 onCmmDecl decl
   | Just (iof, lbls) <- isInitOrFiniArray decl = onCmmInitFini iof lbls
 onCmmDecl (CmmData s (CmmStaticsRaw lbl statics)) = onCmmData lbl s statics
-onCmmDecl (CmmProc _ lbl _ g) = onCmmProc lbl g
+onCmmDecl (CmmProc info lbl _ g) = do
+  -- See Note [Cmm target attributes] in GHC.Cmm
+  platform <- wasmPlatformM
+  checkNoCmmProcAttrs "the wasm backend" (pdoc platform lbl) (raw_proc_attrs info) $
+    onCmmProc lbl g
 
 -- | Invoked for each 'RawCmmGroup'.
 onCmmGroup :: RawCmmGroup -> WasmCodeGenM w ()

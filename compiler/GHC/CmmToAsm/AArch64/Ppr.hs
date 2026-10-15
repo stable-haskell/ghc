@@ -32,7 +32,7 @@ pprNatCmmDecl :: IsDoc doc => NCGConfig -> NatCmmDecl RawCmmStatics Instr -> doc
 pprNatCmmDecl config (CmmData section dats) =
   pprSectionAlign config section $$ pprDatas config dats
 
-pprNatCmmDecl config proc@(CmmProc top_info lbl _ (ListGraph blocks)) =
+pprNatCmmDecl config proc@(CmmProc (RawCmmProcInfo { raw_info_tbls = top_info }) lbl _ (ListGraph blocks)) =
   let platform = ncgPlatform config
       with_dwarf = ncgDwarfEnabled config
   in
