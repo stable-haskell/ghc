@@ -1,0 +1,75 @@
+name: Focused Intel T26537 comparison
+
+on:
+  push:
+    branches: [diagnose/t26537-intel]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  compare:
+    runs-on: macOS-15-intel
+    timeout-minutes: 75
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Record the common runner and toolchain
+        run: |
+          test "$(uname -m)" = x86_64
+          test -d "$DEVELOPER_DIR"
+          sw_vers
+          sysctl machdep.cpu.brand_string hw.logicalcpu hw.memsize
+          xcrun --find clang
+          xcrun clang --version
+          python3 --version
+      - name: Download final PR 196 Intel compiler
+        uses: actions/download-artifact@v5
+        with:
+          artifact-ids: '11986008507'
+          merge-multiple: true
+          run-id: '38730232981'
+          github-token: ${{ github.token }}
+          path: _build/t26537-input/196
+      - name: Download final PR 197 Intel compiler
+        uses: actions/download-artifact@v5
+        with:
+          artifact-ids: '11990188469'
+          merge-multiple: true
+          run-id: '38730229809'
+          github-token: ${{ github.token }}
+          path: _build/t26537-input/197
+      - name: Extract native compilers and identical test fixtures only
+        run: |
+          for pr in 196 197; do
+            archive_dir="_build/t26537-input/$pr"
+            prefix="_build/t26537-prefix/$pr"
+            mkdir -p "$prefix"
+            test -f "$archive_dir/ghc.tar.gz"
+            test -f "$archive_dir/tests.tar.gz"
+            tar -xzf "$archive_dir/ghc.tar.gz" -C "$prefix"
+            tar -xzf "$archive_dir/tests.tar.gz" -C "$prefix" \
+              testsuite/tests/codeGen/should_run/T26537.hs \
+              testsuite/tests/codeGen/should_run/T26537.stdout \
+              testsuite/tests/codeGen/should_run/all.T
+            # These directories contain only this job's downloaded archives.
+            rm -f "$archive_dir"/*.tar.gz
+          done
+      - name: Compare one clean compilation per compiler, preserving limits
+        run: |
+          python3 .github/scripts/compare-t26537.py \
+            --baseline _build/t26537-prefix/196 \
+            --candidate _build/t26537-prefix/197 \
+            --output _build/t26537-results --timings
+      - name: Preserve phase timings, commands, and golden-output checks
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: t26537-intel-comparison
+          retention-days: 3
+          if-no-files-found: warn
+          path: _build/t26537-results/
