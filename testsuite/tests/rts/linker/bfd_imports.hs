@@ -30,7 +30,7 @@ main = do
     checkpoint "initLinker before"
     initLinker
     checkpoint "loadArchive before"
-    loadedArchive <- withCWString "libbfd_imports.a" loadArchive
+    loadedArchive <- withCWString "./libbfd_imports.a" loadArchive
     checkpoint ("loadArchive after: " ++ show loadedArchive)
     unless (loadedArchive == 1) $ error "loadArchive failed"
     -- Public lookupSymbol passes NULL for the optional type output.
