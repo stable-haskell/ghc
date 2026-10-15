@@ -1,3 +1,7 @@
+TOP=../../../..
+include $(TOP)/mk/boilerplate.mk
+include $(TOP)/mk/test.mk
+
 .PHONY: clean_build_and_run build_and_run clean build
 
 clean_build_and_run:
@@ -13,7 +17,7 @@ clean:
 build: Lib.o main
 
 Lib.o: Lib.c
-	$(CC) -c -fPIC Lib.c -o Lib.o
+	"$(TEST_CC)" $(TEST_CC_OPTS) -c -fPIC Lib.c -o Lib.o
 
 main: main.c
 	"$(TEST_HC)" $(filter-out -rtsopts, $(TEST_HC_OPTS)) \

@@ -56,16 +56,26 @@ symbolHasNonNoneRelocation(ObjectCode *oc, unsigned symTabIndex,
  */
 bool
 needGotSlot(Elf_Sym * symbol) {
-    /* using global here should give an upper bound */
-    /* I don't believe we need to relocate STB_LOCAL
-     * symbols via the GOT; however I'm unsure about
-     * STB_WEAK.
-     *
-     * Any more restrictive filter here would result
-     * in a smaller GOT, which is preferable.
+    /* Local definitions can be referenced through the GOT too (for example,
+     * Android NDK libm objects use ADR_GOT_PAGE for local data). Include the
+     * named local definitions whose addresses ocGetNames_ELF can populate.
+     * In particular, do not select unrelated TLS or absolute symbols: fillGot
+     * would then require an address even if no GOT relocation uses them.
      */
+    unsigned type = ELF_ST_TYPE(symbol->st_info);
+    bool local_definition = ELF_ST_BIND(symbol->st_info) == STB_LOCAL
+        && symbol->st_name != 0
+        && symbol->st_shndx != SHN_UNDEF
+        && (symbol->st_shndx < SHN_LORESERVE
+#if defined(SHN_XINDEX)
+            || symbol->st_shndx == SHN_XINDEX
+#endif
+           )
+        && (type == STT_OBJECT || type == STT_FUNC || type == STT_NOTYPE);
+
     return ELF_ST_BIND(symbol->st_info) == STB_GLOBAL
         || ELF_ST_BIND(symbol->st_info) == STB_WEAK
+        || local_definition
         // Section symbols exist primarily for relocation
         // and as such may need a GOT slot.
         || ELF_ST_TYPE(symbol->st_info) == STT_SECTION;

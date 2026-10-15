@@ -10,7 +10,7 @@ AC_DEFUN([GHC_CONVERT_OS],[
       ios|watchos|tvos)
         $3="ios"
         ;;
-      linux-android*)
+      linux-android*|android)
         $3="linux-android"
         ;;
       linux-*|linux)

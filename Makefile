@@ -199,6 +199,7 @@ CABAL      ?= $(BUILD_DIR)/cabal/bin/cabal$(EXE_EXT)
 
 STAGE1_PATH := $(let STAGE,stage1,$(STORE_DIR)/host/$(HOST_PLATFORM))
 STAGE2_PATH := $(let STAGE,stage2,$(STORE_DIR)/host/$(HOST_PLATFORM))
+STAGE3_TOOLS_PATH := $(BUILD_DIR)/stage3-tools/store/host/$(HOST_PLATFORM)
 
 GHC1        := $(STAGE1_PATH)/bin/ghc$(EXE_EXT)
 GHC2        := $(STAGE2_PATH)/bin/ghc$(EXE_EXT)
@@ -216,7 +217,9 @@ THREADS ?= $(shell echo $$(( $(CPUS) + 1 )))
 # Build macros
 #
 
-ifeq ($(MAKE_HOST),x86_64-pc-msys)
+# Windows CI may provide MSYS2, Cygwin, or mingw/clang64 make. All three
+# need Windows tool paths and executable suffixes.
+ifneq (,$(filter x86_64-pc-msys x86_64-pc-cygwin x86_64-w64-mingw32,$(MAKE_HOST)))
 # Windows executables require .exe extension for native programs to find them
 EXE_EXT := .exe
 
@@ -713,7 +716,7 @@ STAGE2_LIBRARIES = \
 	transformers \
 	xhtml
 
-ifeq ($(MAKE_HOST),x86_64-pc-msys)
+ifneq (,$(filter x86_64-pc-msys x86_64-pc-cygwin x86_64-w64-mingw32,$(MAKE_HOST)))
 STAGE2_LIBRARIES += Win32
 else
 STAGE2_LIBRARIES += terminfo unix
@@ -967,11 +970,20 @@ STAGE3_wasm32-unknown-wasi_GHC_TOOLCHAIN_ARGS = $(GHC_TOOLCHAIN_ARGS) \
 
 TARGET_DIR = $(DIST_DIR)/lib/targets/$(TARGET_PLATFORM)
 
-# NOTE: do NOT pass --happy-options=--template=... here.
-# Cross CI's nix env has happy-2.1.7 on PATH while dist ships happy-lib-2.1.5
-# templates; forcing those templates yields GHC-44432 (happyDoParse unbound)
-# in GHC.Parser (and previously genprimopcode). Let happy use its own
-# packaged templates (nix 2.1.7 or cabal-built 2.1.5 — either is consistent).
+# Stage3 disables the compiler's build-tool-depends to reuse the internal
+# generators from stage1 or the bindist. Alex and Happy still need native
+# executables: listing their packages in the cross project does not put them
+# on PATH. Build them separately with the bootstrap compiler, including in
+# DIST_BUILD mode, and let Happy use its own matching installed templates.
+.PHONY: stage3-tools
+stage3-tools: STAGE=stage3-tools
+stage3-tools: cabal.project.stage3-tools
+ifndef DIST_BUILD
+stage3-tools: | stable-cabal
+endif
+stage3-tools:
+	$(call LOG,Building native Alex and Happy for stage3)
+	$(CABAL_BUILD) --with-compiler="$(GHC0)" --with-build-compiler="$(GHC0)" exe:alex exe:happy
 
 # NOTE: disable-library-for-ghci is repeated here but it should be sufficient
 # to put it in cabal.project.stage3
@@ -990,6 +1002,8 @@ STAGE3_$(1)_CABAL_BUILD = \
 	--with-build-compiler=$$(call NORMALIZE_FP,$$(CURDIR)/$$(DIST_DIR)/bin/ghc) \
 	--ghc-options "-ghcversion-file=$$(call NORMALIZE_FP,$$(CURDIR)/rts/include/ghcversion.h)" \
 	--with-hsc2hs=$$(call NORMALIZE_FP,$$(CURDIR)/$$(DIST_DIR)/bin/$(1)-hsc2hs) \
+	--with-alex="$$(call NORMALIZE_FP,$$(CURDIR)/$$(STAGE3_TOOLS_PATH)/bin/alex$$(EXE_EXT))" \
+	--with-happy="$$(call NORMALIZE_FP,$$(CURDIR)/$$(STAGE3_TOOLS_PATH)/bin/happy$$(EXE_EXT))" \
 	--hsc2hs-options='-x' \
 	--with-gcc $$(STAGE3_$(1)_CC) \
 	$$(foreach dir,$$(STAGE3_$(1)_EXTRA_LIB_DIRS),--extra-lib-dirs=$$(dir)) \
@@ -1006,7 +1020,7 @@ endif
 .PHONY: stage3-$(1)
 stage3-$(1): STAGE=stage3
 stage3-$(1): TARGET_PLATFORM=$(1)
-stage3-$(1): $$(STAGE3_$(1)_PREREQS)
+stage3-$(1): $$(STAGE3_$(1)_PREREQS) | stage3-tools
 	$$(call PHASE_START,stage3-$(1))
 	$$(call LOG,Linking executables)
 	$$(foreach exe,$$(STAGE3_EXECUTABLES),$(LN_SF) $$(exe) $(DIST_DIR)/bin/$(1)-$$(exe);)
@@ -1273,10 +1287,18 @@ $(DIST_DIR)/ghc-multi-target.tar.gz: | stage3-wasm32-unknown-wasi stage3-javascr
 		relocate.sh configure Makefile
 	@echo "::endgroup::"
 
-$(DIST_DIR)/tests.tar.gz:
+TESTSUITE_SOURCE_INPUTS = \
+	m4/ghc_convert_os.m4 \
+	rts/linker/ElfTypes.h \
+	rts/linker/InitFini.h
+
+$(DIST_DIR)/tests.tar.gz: $(TESTSUITE_SOURCE_INPUTS)
 	@echo "::group::Creating tests.tar.gz..."
+	# Source-level portability probes need these authoritative inputs even
+	# when the testsuite runs against an installed compiler.
 	@tar czf $@ \
-		testsuite
+		testsuite \
+		$(TESTSUITE_SOURCE_INPUTS)
 	@echo "::endgroup::"
 
 #  _   _            _

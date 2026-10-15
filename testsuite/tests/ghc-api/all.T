@@ -70,3 +70,7 @@ test('T25577', [ extra_run_opts(f'"{config.libdir}"')
 
 test('T26120', [], compile_and_run, ['-package ghc'])
 test('TypeMapStringLiteral', normal, compile_and_run, ['-package ghc'])
+test('UnitHsLibs', normal, compile_and_run, ['-package ghc'])
+test('X86JumpTableShortcut',
+     [unless(arch('x86_64') or arch('i386'), skip), when(not have_ncg(), skip)],
+     compile_and_run, ['-package ghc'])

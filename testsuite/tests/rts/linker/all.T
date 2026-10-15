@@ -1,5 +1,25 @@
 # -*-: mode: python -*-
 
+test('elf_visibility', [req_c, extra_files(['elf_visibility.py'])],
+     makefile_test, [])
+
+test('elf_local_got',
+     [req_rts_linker, unless(arch('aarch64') and opsys('linux'), skip),
+      extra_files(['elf_local_got.s', 'elf_local_got.hs'])],
+     makefile_test, [])
+
+test('elf_got_symbols',
+     [req_rts_linker, unless(opsys('linux'), skip),
+      extra_files(['elf_got_symbols.c'])],
+     makefile_test, [])
+
+test('bfd_imports',
+     [req_rts_linker, unless(opsys('mingw32') and arch('x86_64'), skip),
+      extra_files(['bfd_imports.hs', 'bfd_imports.def',
+                   'bfd_imports_library.c', 'bfd_imports_client.c',
+                   'bfd_imports_check.py'])],
+     makefile_test, [])
+
 test('unsigned_reloc_macho_x64',
      [
          extra_files(['runner.c', 'unsigned_reloc_macho_x64.s']),
