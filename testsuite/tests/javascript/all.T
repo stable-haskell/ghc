@@ -27,3 +27,7 @@ test('T23479', normal, makefile_test, ['T23479'])
 test('T24744', normal, makefile_test, ['T24744'])
 
 test('T25633', normal, compile_and_run, [''])
+
+test('JSHeapViews',
+     extra_files(['JSHeapViews_c.c', 'JSHeapViews_js.js']),
+     compile_and_run, ['JSHeapViews_c.c JSHeapViews_js.js'])

@@ -85,6 +85,10 @@ To build *javascript-unknown-ghcjs*:
   2. Activate the environment using `source ./emsdk_env.sh`
   3. `make stage3-javascript-unknown-ghcjs`
 
+Stage3 builds pinned native Alex and Happy with the bootstrap compiler, including
+when `DIST_BUILD=1` uses a prebuilt bindist. These tools and their matching data
+files live under `_build/stage3-tools`; stage3 does not require them on `PATH`.
+
 
 Filing bugs and feature requests
 ================================

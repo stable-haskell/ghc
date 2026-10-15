@@ -89,8 +89,10 @@ endif
 
 ifeq "$(GhcWithNativeCodeGen)" "YES"
 RUNTEST_OPTS += -e ghc_with_native_codegen=True
+RUNTEST_OPTS += -e config.have_ncg=True
 else
 RUNTEST_OPTS += -e ghc_with_native_codegen=False
+RUNTEST_OPTS += -e config.have_ncg=False
 endif
 
 ifeq "$(GhcLeadingUnderscore)" "YES"

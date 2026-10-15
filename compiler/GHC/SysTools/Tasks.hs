@@ -61,8 +61,9 @@ import GHC.Utils.TmpFs
 import GHC.Utils.Panic
 
 import Control.Monad
-import Data.List (tails, isPrefixOf)
+import Data.List (tails, findIndex, isPrefixOf, isSuffixOf, stripPrefix)
 import Data.Maybe (fromMaybe)
+import System.FilePath (isAbsolute, takeFileName)
 import System.IO
 import System.Process
 import GHC.Driver.Config.Diagnostic
@@ -472,7 +473,29 @@ configureRanlib dflags = RanlibConfig
 runRanlib :: Logger -> RanlibConfig -> [Option] -> IO ()
 runRanlib logger opts args = traceSystoolCommand logger "ranlib" $ do
   let ranlib = ranlibProg opts
-  runSomethingFiltered logger id "Ranlib" ranlib args Nothing Nothing
+  runSomethingFiltered logger (filterRanlibWarnings ranlib) "Ranlib" ranlib args Nothing Nothing
+
+-- Empty object files are valid archive members, e.g. RTS files whose contents
+-- are disabled by CPP. Apple ranlib warns about these, but LLVM ranlib rejects
+-- Apple's -no_warning_for_no_symbols flag. Apple launchers can report the
+-- resolved absolute tool path instead of the configured command. Also accept
+-- that path when its basename matches, keeping the complete diagnostic check.
+filterRanlibWarnings :: FilePath -> [String] -> [String]
+filterRanlibWarnings ranlib = filter (not . emptyMemberWarning)
+  where
+    emptyMemberWarning output =
+         matches ": file: " ") has no symbols" output
+      || matches ": warning: '" ")' has no symbols" output
+    matches marker suffix output
+      | Just offset <- findIndex (isPrefixOf marker) (tails output)
+      , let (program, rest) = splitAt offset output
+      , program == ranlib || program == takeFileName ranlib
+        || (isAbsolute program && takeFileName program == takeFileName ranlib)
+      , Just body <- stripPrefix marker rest
+      , (archive, '(' : member) <- break (== '(') body
+      = not (null archive) && length member > length suffix
+        && suffix `isSuffixOf` member
+      | otherwise = False
 
 data WindresConfig = WindresConfig
   { windresProg :: String

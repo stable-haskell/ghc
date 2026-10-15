@@ -2530,9 +2530,16 @@ SymbolAddr *lookupSymbol_PEi386(SymbolName *lbl, ObjectCode *dependent, SymType 
         if (pinfo && pinfo->owner && isSymbolImport (pinfo->owner, lbl))
         {
             /* See Note [BFD import library].  */
-            HINSTANCE dllInstance = (HINSTANCE)lookupDependentSymbol(pinfo->value, dependent, type);
-            if (!dllInstance && pinfo->value)
-               return pinfo->value;
+            /* The helper's type describes a DLL handle, not the imported
+             * function or data. Preserve the import's own type when we use
+             * the handle to resolve its address below. Keep the existing
+             * dependent-symbol type on the fallback path. */
+            SymType depType = 0;
+            HINSTANCE dllInstance = (HINSTANCE)lookupDependentSymbol(pinfo->value, dependent, &depType);
+            if (!dllInstance && pinfo->value) {
+                if (type) *type = depType;
+                return pinfo->value;
+            }
 
             if (!dllInstance)
             {

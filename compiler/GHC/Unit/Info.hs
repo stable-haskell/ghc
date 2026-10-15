@@ -212,13 +212,20 @@ libraryDirsForWay' is_dyn
   | otherwise = map ST.unpack . unitLibraryDirsStatic
 
 unitHsLibs :: GhcNameVersion -> Ways -> UnitInfo -> [String]
-unitHsLibs namever ways0 p = map (mkDynName . ST.unpack) (unitLibraries p)
+unitHsLibs namever ways0 p = map (mkDynName . addSuffix . ST.unpack) (unitLibraries p)
   where
         ways1 = removeWay WayDyn ways0
         -- the name of a shared library is libHSfoo-ghc<version>.so
         -- we leave out the _dyn, because it is superfluous
 
         tag     = waysTag (fullWays ways1)
+
+        -- RTS-only ways now select RTS sub-libraries instead of suffixes.
+        -- Full ways still need suffixes: in particular, profiling must select
+        -- libHSfoo_p.a rather than the vanilla archive, for every package.
+        addSuffix lib
+         | null tag  = lib
+         | otherwise = lib ++ '_' : tag
 
         mkDynName x
          | not (ways0 `hasWay` WayDyn) = x

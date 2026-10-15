@@ -345,7 +345,9 @@ common rts-cmm-sources-base
         AutoApply.cmm
         AutoApply_V16.cmm
 
-      if arch(x86_64)
+      -- Vector Cmm needs the same ISA flags on both x86 widths, matching
+      -- rtsPackageArgs in hadrian/src/Settings/Packages.hs.
+      if arch(x86_64) || arch(i386)
         cmm-sources:
           Jumps_V32.cmm (-mavx2)
           Jumps_V64.cmm (-mavx512f)

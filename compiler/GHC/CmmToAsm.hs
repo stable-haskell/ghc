@@ -861,20 +861,31 @@ shortcutBranches config ncgImpl tops weights
   | otherwise
   = (tops, weights)
   where
-    (tops', mappings) = mapAndUnzip (build_mapping ncgImpl) tops
+    (tops', mappings, kepts) =
+        unzip3 (map (build_mapping ncgImpl keepImmTrampolines) tops)
     mapping = mapUnions mappings :: LabelMap jumpDest
-    mappingBid = fmap (getJumpDestBlockId ncgImpl) mapping
+    kept = setUnions kepts
+    -- A kept trampoline is still a block, so it stays a CFG node too.
+    mappingBid = fmap (getJumpDestBlockId ncgImpl)
+               $ mapFilterWithKey (\k _ -> not (setMember k kept)) mapping
+    -- x86 PIC jump tables hold block-relative offsets that can only name
+    -- blocks of their own proc.
+    -- See Note [Shortcutting relative jump tables] in GHC.CmmToAsm.X86.Instr.
+    keepImmTrampolines =
+        ncgPIC config && platformArch (ncgPlatform config) `elem` [ArchX86, ArchX86_64]
 
 build_mapping :: forall instr t d statics jumpDest.
                  NcgImpl statics instr jumpDest
+              -> Bool
               -> GenCmmDecl d (LabelMap t) (ListGraph instr)
               -> (GenCmmDecl d (LabelMap t) (ListGraph instr)
-                 ,LabelMap jumpDest)
-build_mapping _ top@(CmmData _ _) = (top, mapEmpty)
-build_mapping _ (CmmProc info lbl live (ListGraph []))
-  = (CmmProc info lbl live (ListGraph []), mapEmpty)
-build_mapping ncgImpl (CmmProc info lbl live (ListGraph (head:blocks)))
-  = (CmmProc info lbl live (ListGraph (head:others)), mapping)
+                 ,LabelMap jumpDest
+                 ,LabelSet)
+build_mapping _ _ top@(CmmData _ _) = (top, mapEmpty, setEmpty)
+build_mapping _ _ (CmmProc info lbl live (ListGraph []))
+  = (CmmProc info lbl live (ListGraph []), mapEmpty, setEmpty)
+build_mapping ncgImpl keepImm (CmmProc info lbl live (ListGraph (head:blocks)))
+  = (CmmProc info lbl live (ListGraph (head:others)), mapping, kept)
         -- drop the shorted blocks, but don't ever drop the first one,
         -- because it is pointed to by a global label.
   where
@@ -882,19 +893,27 @@ build_mapping ncgImpl (CmmProc info lbl live (ListGraph (head:blocks)))
     -- shorted.
     -- Don't completely eliminate loops here -- that can leave a dangling jump!
     shortcut_blocks :: [(BlockId, jumpDest)]
-    (_, shortcut_blocks, others) =
-        foldl' split (setEmpty :: LabelSet, [], []) blocks
-    split (s, shortcut_blocks, others) b@(BasicBlock id [insn])
+    (_, shortcut_blocks, others, kept) =
+        foldl' split (setEmpty :: LabelSet, [], [], setEmpty) blocks
+    split (s, shortcut_blocks, others, kept) b@(BasicBlock id [insn])
         | Just jd <- canShortcut ncgImpl insn
         , Just dest <- getJumpDestBlockId ncgImpl jd
         , not (has_info id)
         , (setMember dest s) || dest == id -- loop checks
-        = (s, shortcut_blocks, b : others)
-    split (s, shortcut_blocks, others) (BasicBlock id [insn])
+        = (s, shortcut_blocks, b : others, kept)
+    split (s, shortcut_blocks, others, kept) b@(BasicBlock id [insn])
         | Just dest <- canShortcut ncgImpl insn
         , not (has_info id)
-        = (setInsert id s, (id,dest) : shortcut_blocks, others)
-    split (s, shortcut_blocks, others) other = (s, shortcut_blocks, other : others)
+        -- A jump out of the proc (a tail call) is still shortcut everywhere
+        -- it can be, but the block itself is kept when keepImm is set: a
+        -- relative jump-table entry can only name it, not the jump's target.
+        -- See Note [Shortcutting relative jump tables] in GHC.CmmToAsm.X86.Instr.
+        , keepImm, isNothing (getJumpDestBlockId ncgImpl dest)
+        = (setInsert id s, (id,dest) : shortcut_blocks, b : others, setInsert id kept)
+        | Just dest <- canShortcut ncgImpl insn
+        , not (has_info id)
+        = (setInsert id s, (id,dest) : shortcut_blocks, others, kept)
+    split (s, shortcut_blocks, others, kept) other = (s, shortcut_blocks, other : others, kept)
 
     -- do not eliminate blocks that have an info table
     has_info l = mapMember l info
