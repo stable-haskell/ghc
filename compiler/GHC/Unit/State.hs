@@ -13,6 +13,8 @@ module GHC.Unit.State (
         UnitErr (..),
         emptyUnitState,
         initUnits,
+        initPluginUnitConfig,
+        mkUnitState,
         readUnitDatabases,
         readUnitDatabase,
         getUnitDbRefs,
@@ -79,6 +81,7 @@ import GHC.Prelude
 import GHC.Driver.DynFlags
 
 import GHC.Platform
+import GHC.Platform.Host (hostPlatformArchOS)
 import GHC.Platform.Ways
 
 import GHC.Unit.Database
@@ -414,6 +417,39 @@ initUnitConfig dflags cached_dbs home_units =
     offsetPackageDb :: Maybe FilePath -> PackageDBFlag -> PackageDBFlag
     offsetPackageDb (Just offset) (PackageDB (PkgDbPath p)) | OsPath.isRelative p = PackageDB (PkgDbPath (OsPath.unsafeEncodeUtf offset OsPath.</> p))
     offsetPackageDb _ p = p
+
+-- | Build a 'UnitConfig' for plugin packages using host-side package
+-- databases. Used in cross-compilation scenarios where plugin packages
+-- are built for the host platform, not the target.
+--
+-- When @-plugin-package-db@ flags are specified, this config is used to
+-- create a separate 'UnitState' so that plugins resolve from host package
+-- DBs while TH\/bytecode uses the target 'UnitState'.
+initPluginUnitConfig :: DynFlags -> UnitConfig
+initPluginUnitConfig dflags =
+   UnitConfig
+      { unitConfigPlatformArchOS = hostPlatformArchOS
+      , unitConfigProgramName    = programName dflags
+      , unitConfigWays           = ways dflags
+      , unitConfigAllowVirtual   = False
+
+      , unitConfigGlobalDB       = globalPackageDatabasePath dflags
+      , unitConfigGHCDir         = topDir dflags
+      , unitConfigDBName         = "package.conf.d"
+
+      , unitConfigAutoLink       = []
+      , unitConfigDistrustAll    = False
+      , unitConfigHideAll        = gopt Opt_HideAllPluginPackages dflags
+      , unitConfigHideAllPlugins = gopt Opt_HideAllPluginPackages dflags
+
+      , unitConfigDBCache        = Nothing  -- no cache, read from plugin DBs
+      , unitConfigFlagsDB        = pluginPackageDBFlags dflags
+      , unitConfigFlagsExposed   = pluginPackageFlags dflags
+      , unitConfigFlagsIgnored   = []
+      , unitConfigFlagsTrusted   = []
+      , unitConfigFlagsPlugins   = pluginPackageFlags dflags
+      , unitConfigHomeUnits      = Set.empty
+      }
 
 
 -- | Map from 'ModuleName' to a set of module providers (i.e. a 'Module' and
