@@ -1,0 +1,2 @@
+#!/bin/sh
+exec "/nix/store/0l9gxc70v3g74ql9bzf5dlgmnl79wk0b-wasi-sdk/bin/llc" "$@"

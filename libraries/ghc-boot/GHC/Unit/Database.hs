@@ -170,6 +170,10 @@ data GenericUnitInfo srcpkgid srcpkgname uid modulename mod = GenericUnitInfo
    , unitExtDepLibsSys  :: [ST.ShortText]
       -- ^ Names of the external system libraries that this unit depends on. See
       -- also `unitExtDepLibsGhc` field.
+      --
+   , unitExtDepLibsStaticSys  :: [ST.ShortText]
+      -- ^ Names of the external static system libraries that this unit depends on. See
+      -- also `unitExtDepLibsGhc` field.
 
    , unitExtDepLibsGhc  :: [ST.ShortText]
       -- ^ Because of slight differences between the GHC dynamic linker (in
@@ -184,6 +188,13 @@ data GenericUnitInfo srcpkgid srcpkgname uid modulename mod = GenericUnitInfo
 
    , unitLibraryDirs    :: [FilePathST]
       -- ^ Directories containing libraries provided by this unit. See also
+      -- `unitLibraryDynDirs`.
+      --
+      -- It seems to be used to store paths to external library dependencies
+      -- too.
+      --
+   , unitLibraryDirsStatic :: [FilePathST]
+      -- ^ Directories containing static libraries provided by this unit. See also
       -- `unitLibraryDynDirs`.
       --
       -- It seems to be used to store paths to external library dependencies
@@ -223,6 +234,10 @@ data GenericUnitInfo srcpkgid srcpkgname uid modulename mod = GenericUnitInfo
 
    , unitHaddockHTMLs   :: [FilePathST]
       -- ^ Paths to Haddock directories containing HTML files
+
+   , unitDataDir        :: Maybe FilePathST
+      -- ^ Data directory for package data files (e.g., templates, resources)
+      -- Exposed to the compiler for packages that need data files during compilation/linking
 
    , unitExposedModules :: [(modulename, Maybe mod)]
       -- ^ Modules exposed by the unit.
@@ -538,12 +553,13 @@ instance Binary DbUnitInfo where
          unitPackageName unitPackageVersion
          unitComponentName
          unitAbiHash unitDepends unitAbiDepends unitImportDirs
-         unitLibraries unitExtDepLibsSys unitExtDepLibsGhc
-         unitLibraryDirs unitLibraryDynDirs
+         unitLibraries unitExtDepLibsSys unitExtDepLibsStaticSys unitExtDepLibsGhc
+         unitLibraryDirs unitLibraryDirsStatic unitLibraryDynDirs
          unitExtDepFrameworks unitExtDepFrameworkDirs
          unitLinkerOptions unitCcOptions
          unitIncludes unitIncludeDirs
          unitHaddockInterfaces unitHaddockHTMLs
+         unitDataDir
          unitExposedModules unitHiddenModules
          unitIsIndefinite unitIsExposed unitIsTrusted) = do
     put unitPackageId
@@ -559,8 +575,10 @@ instance Binary DbUnitInfo where
     put unitImportDirs
     put unitLibraries
     put unitExtDepLibsSys
+    put unitExtDepLibsStaticSys
     put unitExtDepLibsGhc
     put unitLibraryDirs
+    put unitLibraryDirsStatic
     put unitLibraryDynDirs
     put unitExtDepFrameworks
     put unitExtDepFrameworkDirs
@@ -570,6 +588,7 @@ instance Binary DbUnitInfo where
     put unitIncludeDirs
     put unitHaddockInterfaces
     put unitHaddockHTMLs
+    put unitDataDir
     put unitExposedModules
     put unitHiddenModules
     put unitIsIndefinite
@@ -590,8 +609,10 @@ instance Binary DbUnitInfo where
     unitImportDirs     <- get
     unitLibraries      <- get
     unitExtDepLibsSys  <- get
+    unitExtDepLibsStaticSys <- get
     unitExtDepLibsGhc  <- get
     libraryDirs        <- get
+    libraryDirsStatic  <- get
     libraryDynDirs     <- get
     frameworks         <- get
     frameworkDirs      <- get
@@ -601,6 +622,7 @@ instance Binary DbUnitInfo where
     unitIncludeDirs    <- get
     unitHaddockInterfaces <- get
     unitHaddockHTMLs   <- get
+    unitDataDir        <- get
     unitExposedModules <- get
     unitHiddenModules  <- get
     unitIsIndefinite   <- get
@@ -618,12 +640,13 @@ instance Binary DbUnitInfo where
               unitDepends
               unitAbiDepends
               unitImportDirs
-              unitLibraries unitExtDepLibsSys unitExtDepLibsGhc
-              libraryDirs libraryDynDirs
+              unitLibraries unitExtDepLibsSys unitExtDepLibsStaticSys unitExtDepLibsGhc
+              libraryDirs libraryDirsStatic libraryDynDirs
               frameworks frameworkDirs
               unitLinkerOptions unitCcOptions
               unitIncludes unitIncludeDirs
               unitHaddockInterfaces unitHaddockHTMLs
+              unitDataDir
               unitExposedModules
               unitHiddenModules
               unitIsIndefinite unitIsExposed unitIsTrusted)
@@ -713,10 +736,12 @@ mungeUnitInfoPaths top_dir pkgroot pkg =
       , unitIncludeDirs         = munge_paths (unitIncludeDirs pkg)
       , unitLibraryDirs         = munge_paths (unitLibraryDirs pkg)
       , unitLibraryDynDirs      = munge_paths (unitLibraryDynDirs pkg)
+      , unitLibraryDirsStatic   = munge_paths (unitLibraryDirsStatic pkg)
       , unitExtDepFrameworkDirs = munge_paths (unitExtDepFrameworkDirs pkg)
       , unitHaddockInterfaces   = munge_paths (unitHaddockInterfaces pkg)
         -- haddock-html is allowed to be either a URL or a file
       , unitHaddockHTMLs        = munge_paths (munge_urls (unitHaddockHTMLs pkg))
+      , unitDataDir             = fmap munge_path (unitDataDir pkg)
       }
    where
       munge_paths = map munge_path

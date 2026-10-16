@@ -45,6 +45,7 @@ GHC.Core.TyCo.Tidy
 GHC.Core.TyCon
 GHC.Core.TyCon.Env
 GHC.Core.TyCon.RecWalk
+GHC.Core.TyCon.Set
 GHC.Core.Type
 GHC.Core.Unfold
 GHC.Core.Unfold.Make
@@ -104,6 +105,7 @@ GHC.Hs.Pat
 GHC.Hs.Specificity
 GHC.Hs.Type
 GHC.Hs.Utils
+GHC.HsToCore.Breakpoints.Types
 GHC.Iface.Errors.Types
 GHC.Iface.Ext.Fields
 GHC.Iface.Flags

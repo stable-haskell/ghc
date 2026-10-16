@@ -10,6 +10,7 @@ import GHC.Linker.Config
 
 import GHC.Driver.DynFlags
 import GHC.Driver.Session
+import GHC.Settings
 
 import Data.List (isPrefixOf)
 
@@ -47,11 +48,14 @@ initLinkerConfig dflags =
     post_args    = map Option (getOpts dflags opt_l)
 
   in LinkerConfig
-    { linkerProgram     = p
+    { linkerC           = p
+    , linkerCXX         = pgm_cxx dflags
     , linkerOptionsPre  = pre_args
     , linkerOptionsPost = post_args
     , linkerTempDir     = tmpDir dflags
     , linkerFilter      = ld_filter
+    , linkerSupportsCompactUnwind = toolSettings_ldSupportsCompactUnwind (toolSettings dflags)
+    , linkerIsGnuLd     = toolSettings_ldIsGnuLd (toolSettings dflags)
     }
 
 {- Note [Solaris linker]

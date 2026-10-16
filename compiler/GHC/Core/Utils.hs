@@ -11,6 +11,7 @@ module GHC.Core.Utils (
         -- * Constructing expressions
         mkCast, mkCastMCo, mkPiMCo,
         mkTick, mkTicks, mkTickNoHNF, tickHNFArgs,
+        mkTickCpe,
         bindNonRec, needsCaseBinding, needsCaseBindingL,
         mkAltExpr, mkDefaultCase, mkSingleAltCase,
 
@@ -19,6 +20,7 @@ module GHC.Core.Utils (
         mergeAlts, mergeCaseAlts, trimConArgs,
         filterAlts, combineIdenticalAlts, refineDefaultAlt,
         scaleAltsBy,
+        BinderSwapDecision(..), scrutOkForBinderSwap,
 
         -- * Properties of expressions
         exprType, coreAltType, coreAltsType,
@@ -72,7 +74,7 @@ import GHC.Platform
 
 import GHC.Core
 import GHC.Core.Ppr
-import GHC.Core.FVs( bindFreeVars )
+import GHC.Core.FVs( exprFreeVars, bindFreeVars )
 import GHC.Core.DataCon
 import GHC.Core.Type as Type
 import GHC.Core.Predicate( isEqPred )
@@ -100,7 +102,7 @@ import GHC.Types.Basic( Arity )
 import GHC.Types.Unique
 import GHC.Types.Unique.Set
 import GHC.Types.Demand
-import GHC.Types.RepType (isZeroBitTy)
+import GHC.Types.RepType (isZeroBitTy, mightBeFunTy)
 
 import GHC.Data.FastString
 import GHC.Data.Maybe
@@ -112,12 +114,12 @@ import GHC.Utils.Outputable
 import GHC.Utils.Panic
 import GHC.Utils.Misc
 
+import Control.Monad       ( guard )
 import Data.ByteString     ( ByteString )
 import Data.Function       ( on )
 import Data.List           ( sort, sortBy, partition, zipWith4, mapAccumL )
 import qualified Data.List as Partial ( init, last )
 import Data.Ord            ( comparing )
-import Control.Monad       ( guard )
 import qualified Data.Set as Set
 
 {-
@@ -252,7 +254,7 @@ applyTypeToArgs op_ty args
 
 mkCastMCo :: CoreExpr -> MCoercionR -> CoreExpr
 mkCastMCo e MRefl    = e
-mkCastMCo e (MCo co) = Cast e co
+mkCastMCo e (MCo co) = mkCast e co
   -- We are careful to use (MCo co) only when co is not reflexive
   -- Hence (Cast e co) rather than (mkCast e co)
 
@@ -303,40 +305,52 @@ mkCast expr co
 -- | Wraps the given expression in the source annotation, dropping the
 -- annotation if possible.
 mkTick :: CoreTickish -> CoreExpr -> CoreExpr
-mkTick t orig_expr = mkTick' id id orig_expr
+mkTick = mk_tick False
+
+-- | A version of 'mkTick' that preserves ANF, for use in Core Prep.
+--
+-- See Note [mkTick breaks ANF] in GHC.CoreToStg.Prep.
+mkTickCpe :: CoreTickish -> CoreExpr -> CoreExpr
+mkTickCpe = mk_tick True
+
+-- | Internal function used to define both 'mkTick' and 'mkTickCpe'
+-- without duplication.
+mk_tick :: Bool -> CoreTickish -> CoreExpr -> CoreExpr
+mk_tick preserve_anf t orig_expr = mkTick' id orig_expr
  where
   -- Some ticks (cost-centres) can be split in two, with the
   -- non-counting part having laxer placement properties.
   canSplit = tickishCanSplit t && tickishPlace (mkNoCount t) /= tickishPlace t
+
   -- mkTick' handles floating of ticks *into* the expression.
-  -- In this function, `top` is applied after adding the tick, and `rest` before.
-  -- This will result in applications that look like (top $ Tick t $ rest expr).
-  -- If we want to push the tick deeper, we pre-compose `top` with a function
-  -- adding the tick.
-  mkTick' :: (CoreExpr -> CoreExpr) -- apply after adding tick (float through)
-          -> (CoreExpr -> CoreExpr) -- apply before adding tick (float with)
-          -> CoreExpr               -- current expression
+  mkTick' :: (CoreExpr -> CoreExpr) -- Apply before adding tick (float with)
+                                    -- Always a composition of (Tick t) wrappers
+          -> CoreExpr               -- Current expression
           -> CoreExpr
-  mkTick' top rest expr = case expr of
+          -- So in the call (mkTick' rest e), the expression
+          --   (rest e)
+          -- has the same type as e
+          -- Returns an expression equivalent to (Tick t (rest e))
+  mkTick' rest expr = case expr of
     -- Float ticks into unsafe coerce the same way we would do with a cast.
     Case scrut bndr ty alts@[Alt ac abs _rhs]
       | Just rhs <- isUnsafeEqualityCase scrut bndr alts
-      -> top $ mkTick' (\e -> Case scrut bndr ty [Alt ac abs e]) rest rhs
+      -> Case scrut bndr ty [Alt ac abs (mkTick' rest rhs)]
 
     -- Cost centre ticks should never be reordered relative to each
     -- other. Therefore we can stop whenever two collide.
     Tick t2 e
-      | ProfNote{} <- t2, ProfNote{} <- t -> top $ Tick t $ rest expr
+      | ProfNote{} <- t2, ProfNote{} <- t -> Tick t $ rest expr
 
     -- Otherwise we assume that ticks of different placements float
     -- through each other.
-      | tickishPlace t2 /= tickishPlace t -> mkTick' (top . Tick t2) rest e
+      | tickishPlace t2 /= tickishPlace t -> Tick t2 $ mkTick' rest e
 
     -- For annotations this is where we make sure to not introduce
     -- redundant ticks.
-      | tickishContains t t2              -> mkTick' top rest e
-      | tickishContains t2 t              -> orig_expr
-      | otherwise                         -> mkTick' top (rest . Tick t2) e
+      | tickishContains t t2              -> mkTick' rest e  -- Drop t2
+      | tickishContains t2 t              -> rest e          -- Drop t
+      | otherwise                         -> mkTick' (rest . Tick t2) e
 
     -- Ticks don't care about types, so we just float all ticks
     -- through them. Note that it's not enough to check for these
@@ -344,14 +358,14 @@ mkTick t orig_expr = mkTick' id id orig_expr
     -- expressions below ticks, such constructs can be the result of
     -- unfoldings. We therefore make an effort to put everything into
     -- the right place no matter what we start with.
-    Cast e co   -> mkTick' (top . flip Cast co) rest e
+    Cast e co   -> mkCast (mkTick' rest e) co
     Coercion co -> Coercion co
 
     Lam x e
       -- Always float through type lambdas. Even for non-type lambdas,
       -- floating is allowed for all but the most strict placement rule.
       | not (isRuntimeVar x) || tickishPlace t /= PlaceRuntime
-      -> mkTick' (top . Lam x) rest e
+      -> Lam x $ mkTick' rest e
 
       -- If it is both counting and scoped, we split the tick into its
       -- two components, often allowing us to keep the counting tick on
@@ -360,25 +374,27 @@ mkTick t orig_expr = mkTick' id id orig_expr
       -- floated, and the lambda may then be in a position to be
       -- beta-reduced.
       | canSplit
-      -> top $ Tick (mkNoScope t) $ rest $ Lam x $ mkTick (mkNoCount t) e
+      -> Tick (mkNoScope t) $ rest $ Lam x $ mk_tick preserve_anf (mkNoCount t) e
 
     App f arg
       -- Always float through type applications.
       | not (isRuntimeArg arg)
-      -> mkTick' (top . flip App arg) rest f
+      -> App (mkTick' rest f) arg
 
       -- We can also float through constructor applications, placement
       -- permitting. Again we can split.
-      | isSaturatedConApp expr && (tickishPlace t==PlaceCostCentre || canSplit)
+      | not preserve_anf -- this optimisation breaks ANF;
+                         -- see Note [mkTick breaks ANF] in GHC.CoreToStg.Prep
+      , isSaturatedConApp expr && (tickishPlace t==PlaceCostCentre || canSplit)
       -> if tickishPlace t == PlaceCostCentre
-         then top $ rest $ tickHNFArgs t expr
-         else top $ Tick (mkNoScope t) $ rest $ tickHNFArgs (mkNoCount t) expr
+         then rest $ tickHNFArgs t expr
+         else Tick (mkNoScope t) $ rest $ tickHNFArgs (mkNoCount t) expr
 
     Var x
       | notFunction && tickishPlace t == PlaceCostCentre
-      -> orig_expr
+      -> rest expr  -- Drop t
       | notFunction && canSplit
-      -> top $ Tick (mkNoScope t) $ rest expr
+      -> Tick (mkNoScope t) $ rest expr
       where
         -- SCCs can be eliminated on variables provided the variable
         -- is not a function.  In these cases the SCC makes no difference:
@@ -386,14 +402,20 @@ mkTick t orig_expr = mkTick' id id orig_expr
         -- definition site.  When the variable refers to a function, however,
         -- an SCC annotation on the variable affects the cost-centre stack
         -- when the function is called, so we must retain those.
-        notFunction = not (isFunTy (idType x))
+        -- We must keep the tick around anything that might be a function,
+        -- including:
+        --
+        --  1. Definite function types such as 'Int -> Bool'.
+        --  2. Newtypes around function types, e.g. 'IO ()'. (#27225)
+        --  3. Type family applications that reduce to (1) or (2).
+        notFunction = not (mightBeFunTy (idType x))
 
     Lit{}
       | tickishPlace t == PlaceCostCentre
-      -> orig_expr
+      -> rest expr   -- Drop t
 
     -- Catch-all: Annotate where we stand
-    _any -> top $ Tick t $ rest expr
+    _any -> Tick t $ rest expr
 
 mkTicks :: [CoreTickish] -> CoreExpr -> CoreExpr
 mkTicks ticks expr = foldr mkTick expr ticks
@@ -589,6 +611,28 @@ The default alternative must be first, if it exists at all.
 This makes it easy to find, though it makes matching marginally harder.
 -}
 
+data BinderSwapDecision
+  = NoBinderSwap
+  | DoBinderSwap OutVar MCoercion
+
+scrutOkForBinderSwap :: OutExpr -> BinderSwapDecision
+-- If (scrutOkForBinderSwap e = DoBinderSwap v mco, then
+--    e = v |> mco
+-- See Note [Case of cast]
+-- See Historical Note [Care with binder-swap on dictionaries]
+--
+-- We use this same function in SpecConstr, and Simplify.Iteration,
+-- when something binder-swap-like is happening
+--
+-- See Note [Binder swap] in GHC.Core.Opt.OccurAnal
+scrutOkForBinderSwap e
+  = case e of
+      Tick _ e        -> scrutOkForBinderSwap e  -- Drop ticks
+      Var v           -> DoBinderSwap v MRefl
+      Cast (Var v) co -> DoBinderSwap v (MCo co)
+                         -- Cast: see Note [Case of cast]
+      _               -> NoBinderSwap
+
 -- | Extract the default case alternative
 findDefault :: [Alt b] -> ([Alt b], Maybe (Expr b))
 findDefault (Alt DEFAULT args rhs : alts) = assert (null args) (alts, Just rhs)
@@ -650,11 +694,12 @@ filters down the matching alternatives in GHC.Core.Opt.Simplify.rebuildCase.
 -}
 
 ---------------------------------
-mergeCaseAlts :: Id -> [CoreAlt] -> Maybe ([CoreBind], [CoreAlt])
+mergeCaseAlts :: CoreExpr -> Id -> [CoreAlt] -> Maybe ([CoreBind], [CoreAlt])
 -- See Note [Merge Nested Cases]
-mergeCaseAlts outer_bndr (Alt DEFAULT _ deflt_rhs : outer_alts)
+mergeCaseAlts scrut outer_bndr (Alt DEFAULT _ deflt_rhs : outer_alts)
   | Just (joins, inner_alts) <- go deflt_rhs
-  = Just (joins, mergeAlts outer_alts inner_alts)
+  , Just aux_binds <- mk_aux_binds joins
+  = Just ( aux_binds ++ joins, mergeAlts outer_alts inner_alts )
                 -- NB: mergeAlts gives priority to the left
                 --      case x of
                 --        A -> e1
@@ -664,6 +709,20 @@ mergeCaseAlts outer_bndr (Alt DEFAULT _ deflt_rhs : outer_alts)
                 -- When we merge, we must ensure that e1 takes
                 -- precedence over e2 as the value for A!
   where
+    scrut_fvs = exprFreeVars scrut
+
+    -- See Note [Floating join points out of DEFAULT alternatives]
+    mk_aux_binds join_binds
+      | not (any mentions_outer_bndr join_binds)
+      = Just []                         -- Good!  No auxiliary bindings needed
+      | exprIsTrivial scrut
+      , not (outer_bndr `elemVarSet` scrut_fvs)
+      = Just [NonRec outer_bndr scrut]  -- Need a fixup binding
+      | otherwise
+      = Nothing                         -- Can't do it
+
+    mentions_outer_bndr bind = outer_bndr `elemVarSet` bindFreeVars bind
+
     go :: CoreExpr -> Maybe ([CoreBind], [CoreAlt])
 
     -- Whizzo: we can merge!
@@ -701,23 +760,38 @@ mergeCaseAlts outer_bndr (Alt DEFAULT _ deflt_rhs : outer_alts)
       = do { (joins, alts) <- go body
 
              -- Check for capture; but only if we could otherwise do a merge
-           ; let capture = outer_bndr `elem` bindersOf bind
-                           || outer_bndr `elemVarSet` bindFreeVars bind
-           ; guard (not capture)
+             --    (i.e. the recursive `go` succeeds)
+           ; guard (okToFloatJoin scrut_fvs outer_bndr bind)
 
-           ; return (bind:joins, alts ) }
+           ; return (bind : joins, alts ) }
       | otherwise
       = Nothing
 
-    -- We don't want ticks to get in the way; just push them inwards.
-    -- (This happens when you add SourceTicks e.g. GHC.Num.Integer.integerLt#)
+    -- Push ticks **inwards** (when possible).
+    -- See (MC5) in Note [Merge Nested Cases].
     go (Tick t body)
-      = do { (joins, alts) <- go body
-           ; return (joins, [Alt con bs (Tick t rhs) | Alt con bs rhs <- alts]) }
+      = do { (joins, alts) <- go body -- (MC4): any join points inside are floated out of the tick.
+
+             -- Abort if this would put a non-soft-scope tick in between
+             -- a join point binding and its jumps. See (MC6).
+           ; guard $ null joins || t `tickishScopesLike` SoftScope
+           ; return (joins, [Alt con bs (mkTick t rhs) | Alt con bs rhs <- alts])
+           }
 
     go _ = Nothing
 
-mergeCaseAlts _ _ = Nothing
+mergeCaseAlts _ _ _ = Nothing
+
+okToFloatJoin :: VarSet -> Id -> CoreBind -> Bool
+-- Check a join-point binding to see if it can be floated out of
+-- the DEFAULT branch of a `case`.
+-- See Note [Floating join points out of DEFAULT alternatives]
+okToFloatJoin scrut_fvs outer_bndr bind
+  = not (any bad_bndr (bindersOf bind))
+  where
+    bad_bndr bndr = bndr == outer_bndr              -- (a)
+                    || bndr `elemVarSet` scrut_fvs  -- (b)
+
 
 ---------------------------------
 mergeAlts :: [Alt a] -> [Alt a] -> [Alt a]
@@ -802,8 +876,9 @@ refineDefaultAlt :: [Unique]          -- ^ Uniques for constructing new binders
 refineDefaultAlt us mult tycon tys imposs_deflt_cons all_alts
   | Alt DEFAULT _ rhs : rest_alts <- all_alts
   , isAlgTyCon tycon            -- It's a data type, tuple, or unboxed tuples.
-  , not (isNewTyCon tycon)      -- Exception 1 in Note [Refine DEFAULT case alternatives]
-  , not (isTypeDataTyCon tycon) -- Exception 2 in Note [Refine DEFAULT case alternatives]
+  , not (isNewTyCon tycon)        -- (DALT1) in Note [DataAlt restrictions] in GHC.Core
+  , not (isTypeDataTyCon tycon)   -- (DALT2) in Note [DataAlt restrictions] in GHC.Core
+  , not (isUnaryClassTyCon tycon) -- (DALT3) in Note [DataAlt restrictions] in GHC.Core
   , Just all_cons <- tyConDataCons_maybe tycon
   , let imposs_data_cons = mkUniqSet [con | DataAlt con <- imposs_deflt_cons]
                              -- We now know it's a data type, so we can use
@@ -924,11 +999,108 @@ Wrinkles
 
       So `mergeCaseAlts` floats out any join points. It doesn't float out
       non-join-points unless the /outer/ case has just one alternative; doing
-      so would risk more allocation
+      so would risk more allocation.
 
-(MC5) See Note [Cascading case merge]
+      Floating out join points isn't entirely straightforward.
+      See Note [Floating join points out of DEFAULT alternatives]
+
+      Note also that `mergeCaseAlts` floats join points out of ticks, for which
+      we need to be extra careful; see (MC6).
+
+(MC5) We want to move ticks out of the way if possible, to prevent them from
+      inhibiting optimisation. For example, say we have:
+
+        case expensive of r {
+          C1 -> rhs1; -- happy path
+          _  -> scctick<doEdgeCase> (case r of { C2 -> rhs2; C3 -> rhs3 })
+        }
+
+      In this situation, we push the "doEdgeCase" tick **inwards** and proceed
+      to merge cases, like so:
+
+        case expensive of
+          C1 -> rhs1
+          C2 -> scctick<doEdgeCase> rhs2
+          C3 -> scctick<doEdgeCase> rhs3
+
+      This preserves the tick semantics, because this transformation:
+
+        1. preserves counts,
+        2. does not move cost in or out of the tick scope.
+
+      (1) is clear: we will tick 'doEdgeCase' exactly in the C2/C3 alternatives,
+      and we won't otherwise.
+      For (2), recall that case is strict in Core. We already evaluated 'expensive',
+      so re-scrutinising 'r' is free.
+
+      This means that, perhaps surprisingly, this transformation is valid for
+      **all** ticks, including non-floatable ones.
+
+      In contrast, we would not want to move the tick outwards, because this:
+
+        - will lead to additional counting of 'doEdgeCase' in the 'C1' (happy path) case,
+        - risks attributing the cost of evaluating 'expensive' to 'doEdgeCase'.
+
+(MC6) There is a dangerous interaction between (MC4) and (MC5), which can lead
+      to invalid Core (as reported in #26642, #26929). Suppose we have:
+
+        case f x of r ->
+          scctick<foo>
+            join j y = rhs in
+            case r of { C1 -> j 1; C2 -> bar }
+
+      If we naively carried out (MC4) and (MC5) together, this would result in:
+
+        join j y = rhs in
+          case f x of
+            C1 -> scctick<foo> (j 1)
+            C2 -> scctick<foo> bar
+
+      This has moved the tick in between the join point binding 'j' and the
+      join point jump, which is invalid. The simplifier cannot deal with such
+      Core, resulting in #26642.
+
+      The solution: abort whenever we would position a non-soft-scope tick
+      inside a join point in this manner.
+      An alternative would be to float the tick outwards, but as we saw in (MC5)
+      this risks a grave misattribution of profiling costs, so we don't do that.
+
+(MC7) See Note [Cascading case merge]
 
 See also Note [Example of case-merging and caseRules] in GHC.Core.Opt.Simplify.Utils
+
+Note [Floating join points out of DEFAULT alternatives]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Consider this, from (MC4) of Note [Merge Nested Cases]
+   case x of r
+     DEFAULT -> join j = rhs in case r of ...
+     alts
+
+We want to float that join point out to give this
+   join j = rhs
+   case x of r
+     DEFAULT -> case r of ...
+     alts
+
+But doing so is flat-out wrong if the scoping gets messed up:
+    (a) case x of r { DEFAULT -> join r = ... in ...r... }
+    (b) case j of r { DEFAULT -> join j = ... in ... }
+    (c) case x of r { DEFAULT -> join j = ...r.. in ... }
+In all these cases we can't float the join point out because r changes its
+meaning.  For (a) and (b) the Simplifier removes shadowing, so they'll
+be solved in the next iteration.  But case (c) will persist.
+
+Happily, we can fix up case (c) by adding an auxiliary binding, like this
+    let r = e in
+    join j = rhs[r]
+    case e of r
+       DEFAULT -> ...r...
+       ...other alts...
+
+We can only do this if
+  * We don't introduce shadowing: that is `j` and `r` do not appear free in `e`.
+    (Again the Simplifier will eliminate such shadowing.)
+  * The scrutinee `e` is trivial so that the transformation doesn't duplicate work.
 
 
 Note [Cascading case merge]
@@ -1046,38 +1218,9 @@ with a specific constructor is desirable.
    `imposs_deflt_cons` argument is populated with constructors which
    are matched elsewhere.
 
-There are two exceptions where we avoid refining a DEFAULT case:
-
-* Exception 1: Newtypes
-
-  We can have a newtype, if we are just doing an eval:
-
-    case x of { DEFAULT -> e }
-
-  And we don't want to fill in a default for them!
-
-* Exception 2: `type data` declarations
-
-  The data constructors for a `type data` declaration (see
-  Note [Type data declarations] in GHC.Rename.Module) do not exist at the
-  value level. Nevertheless, it is possible to strictly evaluate a value
-  whose type is a `type data` declaration. Test case
-  type-data/should_compile/T2294b.hs contains an example:
-
-    type data T a where
-      A :: T Int
-
-    f :: T a -> ()
-    f !x = ()
-
-  We want to generate the following Core for f:
-
-    f = \(@a) (x :: T a) ->
-         case x of
-           __DEFAULT -> ()
-
-  Namely, we do _not_ want to match on `A`, as it doesn't exist at the value
-  level! See wrinkle (W2b) in Note [Type data declarations] in GHC.Rename.Module
+We must not refine the DEFAULT into a DataAlt for newtypes, `type data`
+declarations, or unary classes, since none of these have a data constructor
+that can appear in a DataAlt. See Note [DataAlt restrictions] in GHC.Core.
 
 
 Note [Combine identical alternatives]
@@ -2856,7 +2999,7 @@ tag inference we get:
     Str=<1L><ML>,
     Unf=OtherCon []] =
         {} \r [x y]
-            case x<TagProper> of x' [Occ=Once1] {
+            case x<TagVal[TagEPT]> of x' [Occ=Once1] {
               __DEFAULT ->
                   case y of y' [Occ=Once1] {
                   __DEFAULT ->
@@ -2881,8 +3024,8 @@ Here comes the tricky part: If we make $wloop strict in both x/y and we get:
     Str=<1L><!L>,
     Unf=OtherCon []] =
         {} \r [x y]
-            case y<TagProper> of y' [Occ=Once1] { __DEFAULT ->
-            case x<TagProper> of x' [Occ=Once1] {
+            case y<TagVal[TagEPT]> of y' [Occ=Once1] { __DEFAULT ->
+            case x<TagVal[TagEPT]> of x' [Occ=Once1] {
               __DEFAULT ->
                   case Find.$wmyPred y' of pred_y [Occ=Once1] {
                   __DEFAULT ->

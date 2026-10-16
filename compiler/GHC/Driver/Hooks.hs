@@ -3,6 +3,7 @@
 -- NB: this module is SOURCE-imported by DynFlags, and should primarily
 --     refer to *types*, rather than *code*
 
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE RankNTypes, TypeFamilies #-}
 
 module GHC.Driver.Hooks
@@ -65,7 +66,12 @@ import GHC.StgToCmm.Types (ModuleLFInfos)
 import GHC.StgToCmm.Config
 import GHC.Cmm
 
+#if defined(HAVE_INTERPRETER)
 import GHCi.RemoteTypes
+#else
+-- Use centralized stub types when interpreter is not available
+import GHC.Runtime.Interpreter.Stubs ( HValue, ForeignHValue )
+#endif
 
 import GHC.Data.Bag
 

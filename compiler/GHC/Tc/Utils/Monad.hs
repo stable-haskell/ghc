@@ -146,7 +146,7 @@ module GHC.Tc.Utils.Monad(
   getCCIndexM, getCCIndexTcM,
 
   -- * Zonking
-  liftZonkM, newZonkAnyType,
+  liftZonkM, newUnusedType,
 
   -- * Complete matches
   localAndImportedCompleteMatches, getCompleteMatchesTcM,
@@ -160,7 +160,7 @@ import GHC.Prelude
 
 
 import GHC.Builtin.Names
-import GHC.Builtin.Types( zonkAnyTyCon )
+import GHC.Builtin.Types( unusedTypeTyCon )
 
 import GHC.Tc.Errors.Types
 import GHC.Tc.Types     -- Re-export all
@@ -186,7 +186,7 @@ import GHC.Core.UsageEnv
 import GHC.Core.Multiplicity
 import GHC.Core.InstEnv
 import GHC.Core.FamInstEnv
-import GHC.Core.Type( mkNumLitTy )
+import GHC.Core.Type( mkStrLitTy )
 
 import GHC.Driver.Env
 import GHC.Driver.Env.KnotVars
@@ -1865,17 +1865,24 @@ chooseUniqueOccTc fn =
      ; writeTcRef dfun_n_var (extendOccSet set occ)
      ; return occ }
 
-newZonkAnyType :: Kind -> TcM Type
--- Return a type (ZonkAny @k n), where n is fresh
--- Recall  ZonkAny :: forall k. Natural -> k
--- See Note [Any types] in GHC.Builtin.Types, wrinkle (Any4)
-newZonkAnyType kind
+newUnusedType :: Name -> Kind -> TcM Type
+-- Return a type (UnusedType @k sym_n), where sym
+-- is a name and n is a fresh Integer.
+-- Recall  UnusedType :: forall k. Symbol -> k
+-- See Note [The types Any and UnusedType] in GHC.Builtin.Types, wrinkle (Any6)
+newUnusedType name kind
   = do { env <- getGblEnv
        ; let zany_n_var = tcg_zany_n env
        ; i <- readTcRef zany_n_var
        ; let !i2 = i+1
        ; writeTcRef zany_n_var i2
-       ; return (mkTyConApp zonkAnyTyCon [kind, mkNumLitTy i]) }
+       -- Mind that the "_" here is load-bearing:
+       -- name foo1 with zany_n_var = 1 musn't be equal to
+       -- name foo with zany_n_var = 11 b/c that way the Pmc
+       -- would consider them equal. Using "_" suffices because
+       -- numbers never start with _ and so (legal) identfiers like
+       -- foo_ would become foo__1 which is distinct from e.g. foo_1
+       ; return (mkTyConApp unusedTypeTyCon [kind, mkStrLitTy $ getOccFS name `appendFS` fsLit "_" `appendFS` fsLit (show i) ]) }
 
 getConstraintVar :: TcM (TcRef WantedConstraints)
 getConstraintVar = do { env <- getLclEnv; return (tcl_lie env) }
@@ -2166,32 +2173,22 @@ keepAlive name
 getThLevel :: TcM ThLevel
 getThLevel = do { env <- getLclEnv; return (getLclEnvThLevel env) }
 
-getCurrentAndBindLevel :: Name -> TcRn (Maybe (TopLevelFlag, Set.Set ThLevelIndex, ThLevel))
-getCurrentAndBindLevel name
+getCurrentAndBindLevel :: GlobalRdrElt -> TcRn (Maybe (TopLevelFlag, Set.Set ThLevelIndex, ThLevel))
+getCurrentAndBindLevel gre
   = do { env <- getLclEnv;
-       ; case lookupNameEnv (getLclEnvThBndrs env) name of
-           Nothing                  -> do
-              lvls <- getExternalBindLvl name
-              if Set.empty == lvls
-                -- This case happens when code is generated for identifiers which are not
-                -- in scope.
-                --
-                -- TODO: What happens if someone generates [|| GHC.Magic.dataToTag# ||]
-                then do
-                  return Nothing
-                else return (Just (TopLevel, lvls, getLclEnvThLevel env))
-           Just (top_lvl, bind_lvl) -> return (Just (top_lvl, Set.singleton bind_lvl, getLclEnvThLevel env)) }
+       ; return $ case lookupNameEnv (getLclEnvThBndrs env) $ greName gre  of
+           Nothing
+             | Set.null lvls  -> Nothing
+             -- This case happens when code is generated for identifiers which are not
+             -- in scope.
+             --
+             -- TODO: What happens if someone generates [|| GHC.Magic.dataToTag# ||]
+             | otherwise -> Just (TopLevel, lvls, getLclEnvThLevel env)
+           Just (top_lvl, bind_lvl) -> Just (top_lvl, Set.singleton bind_lvl, getLclEnvThLevel env) }
+  where lvls = getExternalBindLvl gre
 
-getExternalBindLvl :: Name -> TcRn (Set.Set ThLevelIndex)
-getExternalBindLvl name = do
-  env <- getGlobalRdrEnv
-  mod <- getModule
-  case lookupGRE_Name env name of
-    Just gre -> return $ (Set.map thLevelIndexFromImportLevel (greLevels gre))
-    Nothing ->
-      if nameIsLocalOrFrom mod name
-        then return $ Set.singleton topLevelIndex
-        else return Set.empty
+getExternalBindLvl :: GlobalRdrElt -> Set.Set ThLevelIndex
+getExternalBindLvl gre = Set.map thLevelIndexFromImportLevel (greLevels gre)
 
 setThLevel :: ThLevel -> TcM a -> TcRn a
 setThLevel l = updLclEnv (setLclEnvThLevel l)

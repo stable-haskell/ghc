@@ -1103,6 +1103,7 @@ export async function main({ rpc, libdir, ghciSoPath, args }) {
       rpc,
     });
     await dyld.addLibrarySearchPath(libdir);
+
     await dyld.loadDLL(ghciSoPath);
 
     const reader = rpc.readStream.getReader();

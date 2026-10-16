@@ -1,0 +1,7 @@
+/* An unrecognised attribute must be an error, never ignored. */
+
+__attribute__((nosuchattr("avx2")))
+badAttr (bits64 p)
+{
+  return ();
+}

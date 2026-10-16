@@ -102,9 +102,11 @@ stage0Packages = do
              , hpcBin
              , hsc2hs
              , osString -- new library not yet present for boot compilers
+             , parsec -- depends on text
              , process -- depends on filepath
              , runGhc
              , semaphoreCompat -- depends on
+             , text -- depends on thLift
              , time -- depends on win32
              , thLift -- new library not yet present for boot compilers
              , thQuasiquoter -- new library not yet present for boot compilers
@@ -137,6 +139,7 @@ stage1Packages = do
     libraries0 <- filter good_stage0_package <$> stage0Packages
     cross      <- flag CrossCompiling
     winTarget  <- isWinTarget
+    useSystemFfi <- flag UseSystemFfi
 
     let when c xs = if c then xs else mempty
 
@@ -185,6 +188,10 @@ stage1Packages = do
       , when (winTarget && not cross)
         [ -- See Note [Hadrian's ghci-wrapper package]
           ghciWrapper
+        ]
+      , when (not useSystemFfi)
+        [
+          libffi
         ]
       ]
 

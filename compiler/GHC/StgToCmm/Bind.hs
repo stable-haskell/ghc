@@ -280,7 +280,7 @@ cgRhs id (StgRhsClosure fvs cc upd_flag args body _typ)
   = do
     profile <- getProfile
     check_tags <- stgToCmmDoTagCheck <$> getStgToCmmConfig
-    use_std_ap_thunk <- stgToCmmTickyAP <$> getStgToCmmConfig
+    use_std_ap_thunk <- stgToCmmUseStdApThunk <$> getStgToCmmConfig
     mkRhsClosure profile use_std_ap_thunk check_tags id cc (nonVoidIds (dVarSetElems fvs)) upd_flag args body
 
 ------------------------------------------------------------------------
@@ -587,9 +587,8 @@ closureCodeBody top_lvl bndr cl_info cc args@(arg0:_) body fv_details
                 -- ticky after heap check to avoid double counting
                 ; tickyEnterFun cl_info
                 ; enterCostCentreFun cc
-                    (CmmMachOp (mo_wordSub platform)
-                         [ CmmReg (CmmLocal node) -- See [NodeReg clobbered with loopification]
-                         , mkIntExpr platform (funTag platform cl_info) ])
+                    (cmmUntag platform (CmmReg (CmmLocal node))) -- See [NodeReg clobbered with loopification]
+
                 ; fv_bindings <- mapM bind_fv fv_details
                 -- Load free vars out of closure *after*
                 -- heap check, to reduce live vars over check
@@ -866,7 +865,7 @@ link_caf node = do
   ; let profile  = stgToCmmProfile cfg
   ; let platform = profilePlatform profile
   ; bh <- newTemp (bWord platform)
-  ; emitRtsCallGen [(bh,AddrHint)] newCAF_lbl
+  ; emitRtsCallGen [(bh,AddrHint)] newCAF_lbl CmmMayReturn
       [ (baseExpr platform,  AddrHint),
         (CmmReg (CmmLocal node), AddrHint) ]
       False

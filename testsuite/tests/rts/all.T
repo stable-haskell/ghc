@@ -2,6 +2,11 @@ test('testblockalloc',
      [c_src, only_ways(['normal','threaded1']), extra_run_opts('+RTS -I0')],
      compile_and_run, [''])
 
+test('numeric_version_eventlog_flush',
+     [ignore_stdout, req_ghc_with_threaded_rts],
+     run_command,
+     ['{compiler} --numeric-version +RTS -l --eventlog-flush-interval=1 -RTS'])
+
 test('testmblockalloc',
      [c_src, only_ways(['normal','threaded1']), extra_run_opts('+RTS -I0 -xr0.125T'),
       when(arch('wasm32'), skip)], # MBlocks can't be freed on wasm32, see Note [Megablock allocator on wasm] in rts
@@ -241,6 +246,7 @@ test('return_mem_to_os', normal, compile_and_run, [''])
 test('T4850',
   [ when(opsys('mingw32'), expect_broken(4850))
   , js_broken(22261) # FFI "dynamic" convention unsupported
+  , req_target_debug_rts
   ], makefile_test, ['T4850'])
 
 def config_T5250(name, opts):
@@ -282,7 +288,7 @@ test('T7040_ghci',
       # Fragile when unregisterised; see #16085
       when(unregisterised(), skip),
       pre_cmd('$MAKE -s --no-print-directory T7040_ghci_setup ghciWayFlags=' + config.ghci_way_flags),
-      when(opsys('linux') and not ghc_dynamic() and not arch('wasm32'), fragile(20706))],
+      when((opsys('linux') and not ghc_dynamic() and not arch('wasm32')) or platform('x86_64-apple-darwin'), fragile(20706))],
      compile_and_run, ['T7040_ghci_c.o'])
 
 test('T7227', [extra_run_opts('+RTS -tT7227.stat --machine-readable -RTS')],
@@ -413,7 +419,7 @@ test('T10904', [ extra_run_opts('20000'), req_c ],
 test('T10728', [extra_run_opts('+RTS -maxN3 -RTS'), only_ways(['threaded2'])],
                compile_and_run, [''])
 
-test('T9405', [when(opsys('mingw32'), fragile(21361)), js_broken(22261)], makefile_test, ['T9405'])
+test('T9405', [when(opsys('mingw32'), fragile(21361)), req_target_debug_rts], makefile_test, ['T9405'])
 
 test('T11788', [ when(ghc_dynamic(), skip)
                , req_interp
@@ -467,6 +473,8 @@ test('T14900',
 
 test('InternalCounters',
   [ js_skip # JS backend doesn't support internal counters
+    # Require threaded RTS
+  , req_target_smp
     # The ways which build against the debug RTS are built with PROF_SPIN and
     # therefore differ in output
   , omit_ways(['nonmoving_thr_sanity', 'threaded2_sanity', 'sanity'])
@@ -501,6 +509,7 @@ test('keep-cafs-fail',
     filter_stdout_lines('Evaluated a CAF|exit.*'),
     ignore_stderr, # on OS X the shell emits an "Abort trap" message to stderr
     req_rts_linker,
+    req_target_debug_rts
   ],
   makefile_test, ['KeepCafsFail'])
 
@@ -510,7 +519,8 @@ test('keep-cafs',
                  'KeepCafs2.hs', 'KeepCafsMain.hs']),
     when(opsys('mingw32'), expect_broken (5987)),
     when(opsys('freebsd') or opsys('openbsd'), expect_broken(16035)),
-    req_rts_linker
+    req_rts_linker,
+    req_target_debug_rts
   ],
   makefile_test, ['KeepCafs'])
 
@@ -520,12 +530,11 @@ test('T11829', [ req_c, check_errmsg("This is a test"), when(arch('wasm32'), fra
      ['T11829_c.cpp -package system-cxx-std-lib'])
 
 test('T16514', [req_c, omit_ghci], compile_and_run, ['T16514_c.c'])
-test('test-zeroongc', extra_run_opts('-DZ'), compile_and_run, ['-debug'])
+test('test-zeroongc', [extra_run_opts('-DZ'), req_target_debug_rts], compile_and_run, ['-debug'])
 
 test('T13676',
      [when(opsys('mingw32'), expect_broken(17447)),
-      extra_files(['T13676.hs']),
-      when(opsys('linux') and not ghc_dynamic(), expect_broken(20706))],
+      extra_files(['T13676.hs'])],
      ghci_script, ['T13676.script'])
 test('InitEventLogging',
      [ only_ways(['normal'])
@@ -581,6 +590,15 @@ test('cloneMyStack_retBigStackFrame', [req_c, extra_files(['cloneStackLib.c']), 
 
 test('cloneThreadStack', [req_c, only_ways(['threaded1']), extra_ways(['threaded1']), extra_files(['cloneStackLib.c']), req_ghc_with_threaded_rts], compile_and_run, ['cloneStackLib.c -threaded'])
 
+test('cloneThreadStackMigrating',
+  [ ignore_stdout
+  , only_ways(['threaded1'])
+  , extra_ways(['threaded1'])
+  , extra_run_opts('+RTS -N -DS -RTS')
+  , req_ghc_with_threaded_rts
+  , req_target_smp
+  ], compile_and_run, ['-threaded -debug -rtsopts'])
+
 test('decodeMyStack',
   [ omit_ghci, js_broken(22261) # cloneMyStack# not yet implemented
   ], compile_and_run, ['-finfo-table-map'])
@@ -603,7 +621,14 @@ test('decodeMyStack_emptyListForMissingFlag',
 test('T20201a', [js_skip, exit_code(1)], compile_and_run, ['-with-rtsopts -AturtlesM'])
 test('T20201b', [js_skip, exit_code(1)], compile_and_run, ['-with-rtsopts -A64z'])
 
-test('T22012', [js_skip, extra_ways(['ghci'])], compile_and_run, ['T22012_c.c'])
+test('T22012', [js_skip, fragile(23043), extra_ways(['ghci'])], compile_and_run, ['T22012_c.c'])
+
+test('T27131',
+     [ only_ways(['threaded1', 'threaded2'])
+     , req_ghc_with_threaded_rts
+     , req_target_smp
+     ],
+     compile_and_run, ['T27131_c.c'])
 
 # Skip for JS platform as the JS RTS is always single threaded
 test('T22795a', [only_ways(['normal']), js_skip, req_ghc_with_threaded_rts], compile_and_run, ['-threaded'])
@@ -623,7 +648,7 @@ test('T23221',
      compile_and_run,
      ['-O -with-rtsopts -T'])
 
-test('T23142', [unless(debug_rts(), skip), req_interp], makefile_test, ['T23142'])
+test('T23142', [req_target_debug_rts, req_interp], makefile_test, ['T23142'])
 
 test('T23400', [], compile_and_run, ['-with-rtsopts -A8k'])
 
@@ -646,3 +671,9 @@ test('T22859',
       # Allocation behaviour differs with the wasm backend so we get different output
       when(arch('wasm32'), skip)],
      compile_and_run, ['-with-rtsopts -A8K'])
+
+test('T27123', [when(have_profiling(), extra_ways(['prof']))], compile_and_run, ['-O -package ghc'])
+
+test('T27434',
+     extra_ways(['compacting_gc']),
+     compile_and_run, [''])

@@ -91,6 +91,80 @@ See also Note [Width of parameters] for some more motivation.
 
 /* #define INTERP_STATS */
 
+// Note [Instruction dispatch in the bytecode interpreter]
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// Like all bytecode interpreters out there, instruction dispatch is
+// the backbone of our bytecode interpreter:
+//
+// - Each instruction starts with a unique integer tag
+// - Each instruction has a piece of code to handle it
+// - Fetch next instruction's tag, interpret, repeat
+//
+// There are two classical approaches to organize the interpreter loop
+// and implement instruction dispatch:
+//
+// 1. switch-case: fetch the instruction tag, then a switch statement
+//    contains each instruction's handler code as a case within it.
+//    This is the simplest and most portable approach, but the
+//    compiler often generates suboptimal code that involves two jumps
+//    per instruction: the first one that jumps back to the switch
+//    statement, followed by the second one that jumps to the handler
+//    case statement.
+// 2. computed-goto (direct threaded code): GNU C has an extension
+//    (https://gcc.gnu.org/onlinedocs/gcc/Labels-as-Values.html) that
+//    allows storing a code label as a pointer and using the goto
+//    statement to jump to such a pointer. So we can organize the
+//    handler code as a code block under a label, have a pointer array
+//    that maps an instruction tag to its handler's code label, then
+//    instruction dispatch can happen with a single jump after a
+//    memory load.
+//
+// A classical paper "The Structure and Performance of Efficient
+// Interpreters" by M. Anton Ertl and David Gregg in 2003 explains it
+// in further details with profiling data:
+// https://jilp.org/vol5/v5paper12.pdf. There exist more subtle issues
+// like interaction with modern CPU's branch predictors, though in
+// practice computed-goto does outperform switch-case, and I've
+// observed around 10%-15% wall clock time speedup in simple
+// benchmarks, so our bytecode interpreter now defaults to using
+// computed-goto when applicable, and falls back to switch-case in
+// other cases.
+//
+// The COMPUTED_GOTO macro is defined when we use computed-goto. We
+// don't do autoconf feature detection since it works with all
+// versions of gcc/clang on all platforms we currently support.
+// Exceptions include:
+//
+// - When DEBUG or other macros are enabled so that there's extra
+//   logic per instruction: assertions, statistics, etc. To make
+//   computed-goto support those would need us to duplicate the extra
+//   code in every instruction's handler code block, not really worth
+//   it when speed is not the primary concern.
+// - On wasm, because wasm prohibits goto anyway and LLVM has to lower
+//   goto in C to br_table, so there's no performance benefit of
+//   computed-goto, only slight penalty due to an extra load from the
+//   user-defined dispatch table in the linear memory.
+//
+// The source of truth for our bytecode definition is
+// rts/include/rts/Bytecodes.h. For each bytecode `#define bci_FOO
+// tag`, we have jumptable[tag] which stores the 32-bit offset
+// `&&lbl_bci_FOO - &&lbl_bci_DEFAULT`, so the goto destination can
+// always be computed by adding the jumptable[tag] offset to the base
+// address `&&lbl_bci_DEFAULT`. Whenever you change the bytecode
+// definitions, always remember to update `jumptable` as well!
+
+#if !defined(DEBUG) && !defined(ASSERTS_ENABLED) && !defined(INTERP_STATS) && !defined(wasm32_HOST_ARCH)
+#define COMPUTED_GOTO
+#endif
+
+#if defined(COMPUTED_GOTO)
+#pragma GCC diagnostic ignored "-Wpointer-arith"
+#define INSTRUCTION(name) lbl_##name
+#define NEXT_INSTRUCTION goto *(&&lbl_bci_DEFAULT + jumptable[(bci = instrs[bciPtr++]) & 0xFF])
+#else
+#define INSTRUCTION(name) case name
+#define NEXT_INSTRUCTION goto nextInsn
+#endif
 
 /* Sp points to the lowest live word on the stack. */
 
@@ -197,6 +271,24 @@ See also Note [Width of parameters] for some more motivation.
 #define WITHIN_CHUNK_BOUNDS_W(n, s)  \
     (RTS_LIKELY(((StgWord*) Sp_plusW(n)) < ((s)->stack + (s)->stack_size - sizeofW(StgUnderflowFrame))))
 
+/* Note [Checking for underflow frames]
+   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+   We look at the stack slot at offset sizeof(StgUnderflowFrame) from
+   the start of the chunk to check if we're in the first check chunk.
+   Every non-first stack chunk has an underflow frame header at that offset.
+
+   We really should change this check, since this stack slot in the first
+   chunk may not be the start of a stack frame and could in theory contain
+   an arbitrary value.
+
+   In practice we're unlikely to have interpreted frames that low on the stack.
+ */
+#define IS_UNDERFLOW_FRAME(info) \
+    ((info) == &stg_stack_underflow_frame_d_info ||   \
+     (info) == &stg_stack_underflow_frame_v16_info || \
+     (info) == &stg_stack_underflow_frame_v32_info || \
+     (info) == &stg_stack_underflow_frame_v64_info)
 
 #define W64_TO_WDS(n) ((n * sizeof(StgWord64) / sizeof(StgWord)))
 
@@ -324,12 +416,22 @@ void rts_disableStopNextBreakpointAll(void)
 
 void rts_enableStopNextBreakpoint(StgTSO* tso)
 {
-    tso->flags |= TSO_STOP_NEXT_BREAKPOINT;
+#if defined(THREADED_RTS)
+  Capability* cap = rts_unsafeGetMyCapability();
+  setThreadFlag(cap, tso, TSO_STOP_NEXT_BREAKPOINT);
+#else
+  tso->flags |= TSO_STOP_NEXT_BREAKPOINT;
+#endif
 }
 
 void rts_disableStopNextBreakpoint(StgTSO* tso)
 {
-    tso->flags &= ~TSO_STOP_NEXT_BREAKPOINT;
+#if defined(THREADED_RTS)
+  Capability* cap = rts_unsafeGetMyCapability();
+  unsetThreadFlag(cap, tso, TSO_STOP_NEXT_BREAKPOINT);
+#else
+  tso->flags &= ~TSO_STOP_NEXT_BREAKPOINT;
+#endif
 }
 
 /* ---------------------------------------------------------------------------
@@ -338,12 +440,22 @@ void rts_disableStopNextBreakpoint(StgTSO* tso)
 
 void rts_enableStopAfterReturn(StgTSO* tso)
 {
+#if defined(THREADED_RTS)
+  Capability* cap = rts_unsafeGetMyCapability();
+  setThreadFlag(cap, tso, TSO_STOP_AFTER_RETURN);
+#else
   tso->flags |= TSO_STOP_AFTER_RETURN;
+#endif
 }
 
 void rts_disableStopAfterReturn(StgTSO* tso)
 {
+#if defined(THREADED_RTS)
+  Capability* cap = rts_unsafeGetMyCapability();
+  unsetThreadFlag(cap, tso, TSO_STOP_AFTER_RETURN);
+#else
   tso->flags &= ~TSO_STOP_AFTER_RETURN;
+#endif
 }
 
 /*
@@ -541,11 +653,9 @@ slow_spw(void *Sp, StgStack *cur_stack, StgWord offset_words){
     frame = (StgUnderflowFrame*)(cur_stack->stack + cur_stack->stack_size
                - sizeofW(StgUnderflowFrame));
 
-    // 2a. Check it is an underflow frame (the top stack chunk won't have one).
-    if( frame->info == &stg_stack_underflow_frame_d_info
-       || frame->info == &stg_stack_underflow_frame_v16_info
-       || frame->info == &stg_stack_underflow_frame_v32_info
-       || frame->info == &stg_stack_underflow_frame_v64_info )
+    // 2a. Check it is an underflow frame (the first stack chunk won't have one).
+    //     See Note [Checking for underflow frames]
+    if( IS_UNDERFLOW_FRAME(frame->info) )
     {
 
       INTERP_TICK(it_underflow_lookups);
@@ -554,7 +664,7 @@ slow_spw(void *Sp, StgStack *cur_stack, StgWord offset_words){
 
       // How many words were on the stack
       stackWords = (StgWord *)frame - (StgWord *) Sp;
-      ASSERT(offset_words > stackWords);
+      ASSERT(offset_words >= stackWords);
 
       // Recursive, in the very unlikely case we have to traverse two
       // stack chunks.
@@ -562,9 +672,11 @@ slow_spw(void *Sp, StgStack *cur_stack, StgWord offset_words){
     }
     // 2b. Access the element if there is no underflow frame, it must be right
     // at the top of the stack.
-    else {
-        // Not actually in the underflow case
+    else if(Sp_plusW(offset_words) < (void*)(cur_stack->stack + cur_stack->stack_size)) {
+        // Still inside the stack chunk
         return Sp_plusW(offset_words);
+    } else {
+        barf("slow_spw: offset_words %d is out of bounds", (int)offset_words);
     }
   }
 }
@@ -1159,10 +1271,12 @@ do_return_nonpointer:
                  things on the stack. Therefore we store the CCCS inside the
                  stg_ctoi_t frame.
 
-                 If we have a tuple being returned, the stack looks like this:
+                 If we have a tuple being returned, the stack looks like this
+                 for the generic stg_ctoi_t frame:
 
                      ...
-                     <CCCS>           <- to restore, Sp offset <next frame + 4 words>
+                     <CCCS>           <- to restore, Sp offset <next frame + 5 words>
+                     old_spill
                      tuple_BCO
                      tuple_info
                      cont_BCO
@@ -1173,12 +1287,30 @@ do_return_nonpointer:
                      tuple_info
                      tuple_BCO
                      stg_ret_t        <- Sp
+
+                 Small frames (stg_ctoi_tN) omit the old_spill slot,
+                 so CCCS is at offset <next frame + 4 words>.
                */
 
               if(SpW(0) == (W_)&stg_ret_t_info) {
-                  cap->r.rCCCS = (CostCentreStack*)ReadSpW(offset + 4);
+                  StgWord cccs_offset =
+                      (ReadSpW(offset) == (W_)&stg_ctoi_t_info) ? 5 : 4;
+                  cap->r.rCCCS = (CostCentreStack*)ReadSpW(offset + cccs_offset);
               }
 #endif
+
+              /* When returning a tuple to a generic stg_ctoi_t frame
+                 (as opposed to a small stg_ctoi_tN frame), restore
+                 tso->ctoi_tuple_spill_words from the frame's old_spill
+                 slot.
+
+                 See Note [GHCi unboxed tuples stack spills] in
+                 StgMiscClosures.cmm. */
+              if(SpW(0) == (W_)&stg_ret_t_info
+                 && ReadSpW(offset) == (W_)&stg_ctoi_t_info) {
+                  cap->r.rCurrentTSO->ctoi_tuple_spill_words =
+                      ReadSpW(offset + CTOI_OLD_TUPLE_SPILL_WORDS_OFFSET);
+              }
 
               /* Keep the ret frame and the ctoi frame for run_BCO.
                * See Note [Stack layout when entering run_BCO] */
@@ -1476,7 +1608,9 @@ run_BCO:
         it_lastopc = 0; /* no opcode */
 #endif
 
+#if !defined(COMPUTED_GOTO)
     nextInsn:
+#endif
         ASSERT(bciPtr < bcoSize);
         IF_DEBUG(interpreter,
                  //if (do_print_stack) {
@@ -1506,15 +1640,263 @@ run_BCO:
         it_lastopc = (int)instrs[bciPtr];
 #endif
 
-        bci = BCO_NEXT;
+#if defined(COMPUTED_GOTO)
+        static const int32_t jumptable[] = {
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_STKCHECK - &&lbl_bci_DEFAULT,
+            &&lbl_bci_PUSH_L - &&lbl_bci_DEFAULT,
+            &&lbl_bci_PUSH_LL - &&lbl_bci_DEFAULT,
+            &&lbl_bci_PUSH_LLL - &&lbl_bci_DEFAULT,
+            &&lbl_bci_PUSH8 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_PUSH16 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_PUSH32 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_PUSH8_W - &&lbl_bci_DEFAULT,
+            &&lbl_bci_PUSH16_W - &&lbl_bci_DEFAULT,
+            &&lbl_bci_PUSH32_W - &&lbl_bci_DEFAULT,
+            &&lbl_bci_PUSH_G - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_PUSH_ALTS_P - &&lbl_bci_DEFAULT,
+            &&lbl_bci_PUSH_ALTS_N - &&lbl_bci_DEFAULT,
+            &&lbl_bci_PUSH_ALTS_F - &&lbl_bci_DEFAULT,
+            &&lbl_bci_PUSH_ALTS_D - &&lbl_bci_DEFAULT,
+            &&lbl_bci_PUSH_ALTS_L - &&lbl_bci_DEFAULT,
+            &&lbl_bci_PUSH_ALTS_V - &&lbl_bci_DEFAULT,
+            &&lbl_bci_PUSH_PAD8 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_PUSH_PAD16 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_PUSH_PAD32 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_PUSH_UBX8 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_PUSH_UBX16 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_PUSH_UBX32 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_PUSH_UBX - &&lbl_bci_DEFAULT,
+            &&lbl_bci_PUSH_APPLY_N - &&lbl_bci_DEFAULT,
+            &&lbl_bci_PUSH_APPLY_F - &&lbl_bci_DEFAULT,
+            &&lbl_bci_PUSH_APPLY_D - &&lbl_bci_DEFAULT,
+            &&lbl_bci_PUSH_APPLY_L - &&lbl_bci_DEFAULT,
+            &&lbl_bci_PUSH_APPLY_V - &&lbl_bci_DEFAULT,
+            &&lbl_bci_PUSH_APPLY_P - &&lbl_bci_DEFAULT,
+            &&lbl_bci_PUSH_APPLY_PP - &&lbl_bci_DEFAULT,
+            &&lbl_bci_PUSH_APPLY_PPP - &&lbl_bci_DEFAULT,
+            &&lbl_bci_PUSH_APPLY_PPPP - &&lbl_bci_DEFAULT,
+            &&lbl_bci_PUSH_APPLY_PPPPP - &&lbl_bci_DEFAULT,
+            &&lbl_bci_PUSH_APPLY_PPPPPP - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_SLIDE - &&lbl_bci_DEFAULT,
+            &&lbl_bci_ALLOC_AP - &&lbl_bci_DEFAULT,
+            &&lbl_bci_ALLOC_AP_NOUPD - &&lbl_bci_DEFAULT,
+            &&lbl_bci_ALLOC_PAP - &&lbl_bci_DEFAULT,
+            &&lbl_bci_MKAP - &&lbl_bci_DEFAULT,
+            &&lbl_bci_MKPAP - &&lbl_bci_DEFAULT,
+            &&lbl_bci_UNPACK - &&lbl_bci_DEFAULT,
+            &&lbl_bci_PACK - &&lbl_bci_DEFAULT,
+            &&lbl_bci_TESTLT_I - &&lbl_bci_DEFAULT,
+            &&lbl_bci_TESTEQ_I - &&lbl_bci_DEFAULT,
+            &&lbl_bci_TESTLT_F - &&lbl_bci_DEFAULT,
+            &&lbl_bci_TESTEQ_F - &&lbl_bci_DEFAULT,
+            &&lbl_bci_TESTLT_D - &&lbl_bci_DEFAULT,
+            &&lbl_bci_TESTEQ_D - &&lbl_bci_DEFAULT,
+            &&lbl_bci_TESTLT_P - &&lbl_bci_DEFAULT,
+            &&lbl_bci_TESTEQ_P - &&lbl_bci_DEFAULT,
+            &&lbl_bci_CASEFAIL - &&lbl_bci_DEFAULT,
+            &&lbl_bci_JMP - &&lbl_bci_DEFAULT,
+            &&lbl_bci_CCALL - &&lbl_bci_DEFAULT,
+            &&lbl_bci_SWIZZLE - &&lbl_bci_DEFAULT,
+            &&lbl_bci_ENTER - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_RETURN_P - &&lbl_bci_DEFAULT,
+            &&lbl_bci_RETURN_N - &&lbl_bci_DEFAULT,
+            &&lbl_bci_RETURN_F - &&lbl_bci_DEFAULT,
+            &&lbl_bci_RETURN_D - &&lbl_bci_DEFAULT,
+            &&lbl_bci_RETURN_L - &&lbl_bci_DEFAULT,
+            &&lbl_bci_RETURN_V - &&lbl_bci_DEFAULT,
+            &&lbl_bci_BRK_FUN - &&lbl_bci_DEFAULT,
+            &&lbl_bci_TESTLT_W - &&lbl_bci_DEFAULT,
+            &&lbl_bci_TESTEQ_W - &&lbl_bci_DEFAULT,
+            &&lbl_bci_RETURN_T - &&lbl_bci_DEFAULT,
+            &&lbl_bci_PUSH_ALTS_T - &&lbl_bci_DEFAULT,
+            &&lbl_bci_TESTLT_I64 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_TESTEQ_I64 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_TESTLT_I32 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_TESTEQ_I32 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_TESTLT_I16 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_TESTEQ_I16 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_TESTLT_I8 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_TESTEQ_I8 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_TESTLT_W64 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_TESTEQ_W64 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_TESTLT_W32 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_TESTEQ_W32 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_TESTLT_W16 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_TESTEQ_W16 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_TESTLT_W8 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_TESTEQ_W8 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_PRIMCALL - &&lbl_bci_DEFAULT,
+            &&lbl_bci_BCO_NAME - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_ADD_64 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_SUB_64 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_AND_64 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_XOR_64 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_NOT_64 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_NEG_64 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_MUL_64 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_SHL_64 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_ASR_64 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_LSR_64 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_OR_64 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_NEQ_64 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_EQ_64 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_U_GE_64 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_U_GT_64 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_U_LT_64 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_U_LE_64 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_S_GE_64 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_S_GT_64 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_S_LT_64 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_S_LE_64 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_ADD_32 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_SUB_32 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_AND_32 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_XOR_32 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_NOT_32 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_NEG_32 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_MUL_32 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_SHL_32 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_ASR_32 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_LSR_32 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_OR_32 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_NEQ_32 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_EQ_32 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_U_GE_32 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_U_GT_32 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_U_LT_32 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_U_LE_32 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_S_GE_32 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_S_GT_32 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_S_LT_32 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_S_LE_32 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_ADD_16 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_SUB_16 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_AND_16 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_XOR_16 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_NOT_16 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_NEG_16 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_MUL_16 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_SHL_16 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_ASR_16 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_LSR_16 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_OR_16 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_NEQ_16 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_EQ_16 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_U_GE_16 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_U_GT_16 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_U_LT_16 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_U_LE_16 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_S_GE_16 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_S_GT_16 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_S_LT_16 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_S_LE_16 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_ADD_08 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_SUB_08 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_AND_08 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_XOR_08 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_NOT_08 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_NEG_08 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_MUL_08 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_SHL_08 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_ASR_08 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_LSR_08 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_OR_08 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_NEQ_08 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_EQ_08 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_U_GE_08 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_U_GT_08 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_U_LT_08 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_U_LE_08 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_S_GE_08 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_S_GT_08 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_S_LT_08 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_S_LE_08 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_DEFAULT - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_INDEX_ADDR_08 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_INDEX_ADDR_16 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_INDEX_ADDR_32 - &&lbl_bci_DEFAULT,
+            &&lbl_bci_OP_INDEX_ADDR_64 - &&lbl_bci_DEFAULT};
+        NEXT_INSTRUCTION;
+#else
+    bci = BCO_NEXT;
     /* We use the high 8 bits for flags. The highest of which is
      * currently allocated to LARGE_ARGS */
     ASSERT((bci & 0xFF00) == (bci & ( bci_FLAG_LARGE_ARGS )));
-
     switch (bci & 0xFF) {
+#endif
 
         /* check for a breakpoint on the beginning of a BCO */
-        case bci_BRK_FUN:
+        INSTRUCTION(bci_BRK_FUN):
         {
             W_ arg1_brk_array, arg2_info_mod_name, arg3_info_mod_id, arg4_info_index;
 #if defined(PROFILING)
@@ -1713,10 +2095,10 @@ run_BCO:
             cap->r.rCurrentTSO->flags &= ~TSO_STOPPED_ON_BREAKPOINT;
 
             // continue normal execution of the byte code instructions
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_STKCHECK: {
+        INSTRUCTION(bci_STKCHECK): {
             // Explicit stack check at the beginning of a function
             // *only* (stack checks in case alternatives are
             // propagated to the enclosing function).
@@ -1727,27 +2109,27 @@ run_BCO:
                 SpW(0) = (W_)&stg_apply_interp_info;
                 RETURN_TO_SCHEDULER(ThreadInterpret, StackOverflow);
             } else {
-                goto nextInsn;
+                NEXT_INSTRUCTION;
             }
         }
 
-        case bci_PUSH_L: {
+        INSTRUCTION(bci_PUSH_L): {
             W_ o1 = BCO_GET_LARGE_ARG;
             SpW(-1) = ReadSpW(o1);
             Sp_subW(1);
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_PUSH_LL: {
+        INSTRUCTION(bci_PUSH_LL): {
             W_ o1 = BCO_GET_LARGE_ARG;
             W_ o2 = BCO_GET_LARGE_ARG;
             SpW(-1) = ReadSpW(o1);
             SpW(-2) = ReadSpW(o2);
             Sp_subW(2);
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_PUSH_LLL: {
+        INSTRUCTION(bci_PUSH_LLL): {
             W_ o1 = BCO_GET_LARGE_ARG;
             W_ o2 = BCO_GET_LARGE_ARG;
             W_ o3 = BCO_GET_LARGE_ARG;
@@ -1755,52 +2137,52 @@ run_BCO:
             SpW(-2) = ReadSpW(o2);
             SpW(-3) = ReadSpW(o3);
             Sp_subW(3);
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_PUSH8: {
+        INSTRUCTION(bci_PUSH8): {
             W_ off = BCO_GET_LARGE_ARG;
             Sp_subB(1);
             *(StgWord8*)Sp = (StgWord8) (ReadSpB(off+1));
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_PUSH16: {
+        INSTRUCTION(bci_PUSH16): {
             W_ off = BCO_GET_LARGE_ARG;
             Sp_subB(2);
             *(StgWord16*)Sp = (StgWord16) (ReadSpB(off+2));
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_PUSH32: {
+        INSTRUCTION(bci_PUSH32): {
             W_ off = BCO_GET_LARGE_ARG;
             Sp_subB(4);
             *(StgWord32*)Sp = (StgWord32) (ReadSpB(off+4));
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_PUSH8_W: {
+        INSTRUCTION(bci_PUSH8_W): {
             W_ off = BCO_GET_LARGE_ARG;
             *(StgWord*)(Sp_minusW(1)) = (StgWord) ((StgWord8) (ReadSpB(off)));
             Sp_subW(1);
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_PUSH16_W: {
+        INSTRUCTION(bci_PUSH16_W): {
             W_ off = BCO_GET_LARGE_ARG;
             *(StgWord*)(Sp_minusW(1)) = (StgWord) ((StgWord16) (ReadSpB(off)));
             Sp_subW(1);
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_PUSH32_W: {
+        INSTRUCTION(bci_PUSH32_W): {
             W_ off = BCO_GET_LARGE_ARG;
             *(StgWord*)(Sp_minusW(1)) = (StgWord) ((StgWord32) (ReadSpB(off)));
             Sp_subW(1);
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_PUSH_G: {
+        INSTRUCTION(bci_PUSH_G): {
             W_ o1 = BCO_GET_LARGE_ARG;
             StgClosure *tagged_obj = (StgClosure*) BCO_PTR(o1);
 
@@ -1839,10 +2221,10 @@ run_BCO:
 
             SpW(-1) = (W_) tagged_obj;
             Sp_subW(1);
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_PUSH_ALTS_P: {
+        INSTRUCTION(bci_PUSH_ALTS_P): {
             W_ o_bco  = BCO_GET_LARGE_ARG;
             Sp_subW(2);
             SpW(1) = BCO_PTR(o_bco);
@@ -1852,10 +2234,10 @@ run_BCO:
             SpW(1) = (W_)cap->r.rCCCS;
             SpW(0) = (W_)&stg_restore_cccs_d_info;
 #endif
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_PUSH_ALTS_N: {
+        INSTRUCTION(bci_PUSH_ALTS_N): {
             W_ o_bco  = BCO_GET_LARGE_ARG;
             SpW(-2) = (W_)&stg_ctoi_R1n_info;
             SpW(-1) = BCO_PTR(o_bco);
@@ -1865,10 +2247,10 @@ run_BCO:
             SpW(1) = (W_)cap->r.rCCCS;
             SpW(0) = (W_)&stg_restore_cccs_d_info;
 #endif
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_PUSH_ALTS_F: {
+        INSTRUCTION(bci_PUSH_ALTS_F): {
             W_ o_bco  = BCO_GET_LARGE_ARG;
             SpW(-2) = (W_)&stg_ctoi_F1_info;
             SpW(-1) = BCO_PTR(o_bco);
@@ -1878,10 +2260,10 @@ run_BCO:
             SpW(1) = (W_)cap->r.rCCCS;
             SpW(0) = (W_)&stg_restore_cccs_d_info;
 #endif
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_PUSH_ALTS_D: {
+        INSTRUCTION(bci_PUSH_ALTS_D): {
             W_ o_bco  = BCO_GET_LARGE_ARG;
             SpW(-2) = (W_)&stg_ctoi_D1_info;
             SpW(-1) = BCO_PTR(o_bco);
@@ -1891,10 +2273,10 @@ run_BCO:
             SpW(1) = (W_)cap->r.rCCCS;
             SpW(0) = (W_)&stg_restore_cccs_d_info;
 #endif
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_PUSH_ALTS_L: {
+        INSTRUCTION(bci_PUSH_ALTS_L): {
             W_ o_bco  = BCO_GET_LARGE_ARG;
             SpW(-2) = (W_)&stg_ctoi_L1_info;
             SpW(-1) = BCO_PTR(o_bco);
@@ -1904,10 +2286,10 @@ run_BCO:
             SpW(1) = (W_)cap->r.rCCCS;
             SpW(0) = (W_)&stg_restore_cccs_d_info;
 #endif
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_PUSH_ALTS_V: {
+        INSTRUCTION(bci_PUSH_ALTS_V): {
             W_ o_bco  = BCO_GET_LARGE_ARG;
             SpW(-2) = (W_)&stg_ctoi_V_info;
             SpW(-1) = BCO_PTR(o_bco);
@@ -1917,177 +2299,131 @@ run_BCO:
             SpW(1) = (W_)cap->r.rCCCS;
             SpW(0) = (W_)&stg_restore_cccs_d_info;
 #endif
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_PUSH_ALTS_T: {
+        INSTRUCTION(bci_PUSH_ALTS_T): {
             W_ o_bco = BCO_GET_LARGE_ARG;
             W_ tuple_info = (W_)BCO_LIT(BCO_GET_LARGE_ARG);
             W_ o_tuple_bco = BCO_GET_LARGE_ARG;
+            int tuple_stack_words = tuple_info >> 24;
 
 #if defined(PROFILING)
             SpW(-1) = (W_)cap->r.rCCCS;
             Sp_subW(1);
 #endif
 
-            SpW(-1) = BCO_PTR(o_tuple_bco);
-            SpW(-2) = tuple_info;
-            SpW(-3) = BCO_PTR(o_bco);
-            W_ ctoi_t_offset;
-            int tuple_stack_words = (tuple_info >> 24) & 0xff;
-            switch(tuple_stack_words) {
-                case 0:  ctoi_t_offset = (W_)&stg_ctoi_t0_info;  break;
-                case 1:  ctoi_t_offset = (W_)&stg_ctoi_t1_info;  break;
-                case 2:  ctoi_t_offset = (W_)&stg_ctoi_t2_info;  break;
-                case 3:  ctoi_t_offset = (W_)&stg_ctoi_t3_info;  break;
-                case 4:  ctoi_t_offset = (W_)&stg_ctoi_t4_info;  break;
-                case 5:  ctoi_t_offset = (W_)&stg_ctoi_t5_info;  break;
-                case 6:  ctoi_t_offset = (W_)&stg_ctoi_t6_info;  break;
-                case 7:  ctoi_t_offset = (W_)&stg_ctoi_t7_info;  break;
-                case 8:  ctoi_t_offset = (W_)&stg_ctoi_t8_info;  break;
-                case 9:  ctoi_t_offset = (W_)&stg_ctoi_t9_info;  break;
-
-                case 10: ctoi_t_offset = (W_)&stg_ctoi_t10_info; break;
-                case 11: ctoi_t_offset = (W_)&stg_ctoi_t11_info; break;
-                case 12: ctoi_t_offset = (W_)&stg_ctoi_t12_info; break;
-                case 13: ctoi_t_offset = (W_)&stg_ctoi_t13_info; break;
-                case 14: ctoi_t_offset = (W_)&stg_ctoi_t14_info; break;
-                case 15: ctoi_t_offset = (W_)&stg_ctoi_t15_info; break;
-                case 16: ctoi_t_offset = (W_)&stg_ctoi_t16_info; break;
-                case 17: ctoi_t_offset = (W_)&stg_ctoi_t17_info; break;
-                case 18: ctoi_t_offset = (W_)&stg_ctoi_t18_info; break;
-                case 19: ctoi_t_offset = (W_)&stg_ctoi_t19_info; break;
-
-                case 20: ctoi_t_offset = (W_)&stg_ctoi_t20_info; break;
-                case 21: ctoi_t_offset = (W_)&stg_ctoi_t21_info; break;
-                case 22: ctoi_t_offset = (W_)&stg_ctoi_t22_info; break;
-                case 23: ctoi_t_offset = (W_)&stg_ctoi_t23_info; break;
-                case 24: ctoi_t_offset = (W_)&stg_ctoi_t24_info; break;
-                case 25: ctoi_t_offset = (W_)&stg_ctoi_t25_info; break;
-                case 26: ctoi_t_offset = (W_)&stg_ctoi_t26_info; break;
-                case 27: ctoi_t_offset = (W_)&stg_ctoi_t27_info; break;
-                case 28: ctoi_t_offset = (W_)&stg_ctoi_t28_info; break;
-                case 29: ctoi_t_offset = (W_)&stg_ctoi_t29_info; break;
-
-                case 30: ctoi_t_offset = (W_)&stg_ctoi_t30_info; break;
-                case 31: ctoi_t_offset = (W_)&stg_ctoi_t31_info; break;
-                case 32: ctoi_t_offset = (W_)&stg_ctoi_t32_info; break;
-                case 33: ctoi_t_offset = (W_)&stg_ctoi_t33_info; break;
-                case 34: ctoi_t_offset = (W_)&stg_ctoi_t34_info; break;
-                case 35: ctoi_t_offset = (W_)&stg_ctoi_t35_info; break;
-                case 36: ctoi_t_offset = (W_)&stg_ctoi_t36_info; break;
-                case 37: ctoi_t_offset = (W_)&stg_ctoi_t37_info; break;
-                case 38: ctoi_t_offset = (W_)&stg_ctoi_t38_info; break;
-                case 39: ctoi_t_offset = (W_)&stg_ctoi_t39_info; break;
-
-                case 40: ctoi_t_offset = (W_)&stg_ctoi_t40_info; break;
-                case 41: ctoi_t_offset = (W_)&stg_ctoi_t41_info; break;
-                case 42: ctoi_t_offset = (W_)&stg_ctoi_t42_info; break;
-                case 43: ctoi_t_offset = (W_)&stg_ctoi_t43_info; break;
-                case 44: ctoi_t_offset = (W_)&stg_ctoi_t44_info; break;
-                case 45: ctoi_t_offset = (W_)&stg_ctoi_t45_info; break;
-                case 46: ctoi_t_offset = (W_)&stg_ctoi_t46_info; break;
-                case 47: ctoi_t_offset = (W_)&stg_ctoi_t47_info; break;
-                case 48: ctoi_t_offset = (W_)&stg_ctoi_t48_info; break;
-                case 49: ctoi_t_offset = (W_)&stg_ctoi_t49_info; break;
-
-                case 50: ctoi_t_offset = (W_)&stg_ctoi_t50_info; break;
-                case 51: ctoi_t_offset = (W_)&stg_ctoi_t51_info; break;
-                case 52: ctoi_t_offset = (W_)&stg_ctoi_t52_info; break;
-                case 53: ctoi_t_offset = (W_)&stg_ctoi_t53_info; break;
-                case 54: ctoi_t_offset = (W_)&stg_ctoi_t54_info; break;
-                case 55: ctoi_t_offset = (W_)&stg_ctoi_t55_info; break;
-                case 56: ctoi_t_offset = (W_)&stg_ctoi_t56_info; break;
-                case 57: ctoi_t_offset = (W_)&stg_ctoi_t57_info; break;
-                case 58: ctoi_t_offset = (W_)&stg_ctoi_t58_info; break;
-                case 59: ctoi_t_offset = (W_)&stg_ctoi_t59_info; break;
-
-                case 60: ctoi_t_offset = (W_)&stg_ctoi_t60_info; break;
-                case 61: ctoi_t_offset = (W_)&stg_ctoi_t61_info; break;
-                case 62: ctoi_t_offset = (W_)&stg_ctoi_t62_info; break;
-
-                default: barf("unsupported tuple size %d", tuple_stack_words);
+            /* See Note [GHCi unboxed tuples stack spills] in
+               StgMiscClosures.cmm */
+            if (tuple_stack_words <= MAX_SMALL_TUPLE_CTOI) {
+                /* Use a small info table that encodes the spill
+                   count statically, avoiding access to
+                   TSO->ctoi_tuple_spill_words entirely.
+                   The frame is one word smaller than stg_ctoi_t
+                   (no old_spill slot). */
+                static const StgInfoTable *const ctoi_t_small[] = {
+                    &stg_ctoi_t0_info, &stg_ctoi_t1_info,
+                    &stg_ctoi_t2_info, &stg_ctoi_t3_info,
+                    &stg_ctoi_t4_info, &stg_ctoi_t5_info,
+                    &stg_ctoi_t6_info, &stg_ctoi_t7_info,
+                    &stg_ctoi_t8_info
+                };
+                _Static_assert(sizeof(ctoi_t_small) / sizeof(ctoi_t_small[0])
+                    == MAX_SMALL_TUPLE_CTOI + 1,
+                    "ctoi_t_small must have MAX_SMALL_TUPLE_CTOI + 1 entries");
+                SpW(-1) = BCO_PTR(o_tuple_bco);
+                SpW(-2) = tuple_info;
+                SpW(-3) = BCO_PTR(o_bco);
+                SpW(-4) = (W_)ctoi_t_small[tuple_stack_words];
+                Sp_subW(4);
+            } else {
+                /* Generic path: save/restore ctoi_tuple_spill_words
+                   via the TSO */
+                SpW(-1) = cap->r.rCurrentTSO->ctoi_tuple_spill_words;
+                SpW(-2) = BCO_PTR(o_tuple_bco);
+                SpW(-3) = tuple_info;
+                SpW(-4) = BCO_PTR(o_bco);
+                SpW(-5) = (W_)&stg_ctoi_t_info;
+                Sp_subW(5);
+                cap->r.rCurrentTSO->ctoi_tuple_spill_words = tuple_stack_words;
             }
-
-            SpW(-4) = ctoi_t_offset;
-            Sp_subW(4);
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_PUSH_APPLY_N:
+        INSTRUCTION(bci_PUSH_APPLY_N):
             Sp_subW(1); SpW(0) = (W_)&stg_ap_n_info;
-            goto nextInsn;
-        case bci_PUSH_APPLY_V:
+            NEXT_INSTRUCTION;
+        INSTRUCTION(bci_PUSH_APPLY_V):
             Sp_subW(1); SpW(0) = (W_)&stg_ap_v_info;
-            goto nextInsn;
-        case bci_PUSH_APPLY_F:
+            NEXT_INSTRUCTION;
+        INSTRUCTION(bci_PUSH_APPLY_F):
             Sp_subW(1); SpW(0) = (W_)&stg_ap_f_info;
-            goto nextInsn;
-        case bci_PUSH_APPLY_D:
+            NEXT_INSTRUCTION;
+        INSTRUCTION(bci_PUSH_APPLY_D):
             Sp_subW(1); SpW(0) = (W_)&stg_ap_d_info;
-            goto nextInsn;
-        case bci_PUSH_APPLY_L:
+            NEXT_INSTRUCTION;
+        INSTRUCTION(bci_PUSH_APPLY_L):
             Sp_subW(1); SpW(0) = (W_)&stg_ap_l_info;
-            goto nextInsn;
-        case bci_PUSH_APPLY_P:
+            NEXT_INSTRUCTION;
+        INSTRUCTION(bci_PUSH_APPLY_P):
             Sp_subW(1); SpW(0) = (W_)&stg_ap_p_info;
-            goto nextInsn;
-        case bci_PUSH_APPLY_PP:
+            NEXT_INSTRUCTION;
+        INSTRUCTION(bci_PUSH_APPLY_PP):
             Sp_subW(1); SpW(0) = (W_)&stg_ap_pp_info;
-            goto nextInsn;
-        case bci_PUSH_APPLY_PPP:
+            NEXT_INSTRUCTION;
+        INSTRUCTION(bci_PUSH_APPLY_PPP):
             Sp_subW(1); SpW(0) = (W_)&stg_ap_ppp_info;
-            goto nextInsn;
-        case bci_PUSH_APPLY_PPPP:
+            NEXT_INSTRUCTION;
+        INSTRUCTION(bci_PUSH_APPLY_PPPP):
             Sp_subW(1); SpW(0) = (W_)&stg_ap_pppp_info;
-            goto nextInsn;
-        case bci_PUSH_APPLY_PPPPP:
+            NEXT_INSTRUCTION;
+        INSTRUCTION(bci_PUSH_APPLY_PPPPP):
             Sp_subW(1); SpW(0) = (W_)&stg_ap_ppppp_info;
-            goto nextInsn;
-        case bci_PUSH_APPLY_PPPPPP:
+            NEXT_INSTRUCTION;
+        INSTRUCTION(bci_PUSH_APPLY_PPPPPP):
             Sp_subW(1); SpW(0) = (W_)&stg_ap_pppppp_info;
-            goto nextInsn;
+            NEXT_INSTRUCTION;
 
-        case bci_PUSH_PAD8: {
+        INSTRUCTION(bci_PUSH_PAD8): {
             Sp_subB(1);
             *(StgWord8*)Sp = 0;
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_PUSH_PAD16: {
+        INSTRUCTION(bci_PUSH_PAD16): {
             Sp_subB(2);
             *(StgWord16*)Sp = 0;
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_PUSH_PAD32: {
+        INSTRUCTION(bci_PUSH_PAD32): {
             Sp_subB(4);
             *(StgWord32*)Sp = 0;
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_PUSH_UBX8: {
+        INSTRUCTION(bci_PUSH_UBX8): {
             W_ o_lit = BCO_GET_LARGE_ARG;
             Sp_subB(1);
             *(StgWord8*)Sp = (StgWord8) BCO_LIT(o_lit);
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_PUSH_UBX16: {
+        INSTRUCTION(bci_PUSH_UBX16): {
             W_ o_lit = BCO_GET_LARGE_ARG;
             Sp_subB(2);
             *(StgWord16*)Sp = (StgWord16) BCO_LIT(o_lit);
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_PUSH_UBX32: {
+        INSTRUCTION(bci_PUSH_UBX32): {
             W_ o_lit = BCO_GET_LARGE_ARG;
             Sp_subB(4);
             *(StgWord32*)Sp = (StgWord32) BCO_LIT(o_lit);
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_PUSH_UBX: {
+        INSTRUCTION(bci_PUSH_UBX): {
             W_ i;
             W_ o_lits = BCO_GET_LARGE_ARG;
             W_ n_words = BCO_GET_LARGE_ARG;
@@ -2095,10 +2431,10 @@ run_BCO:
             for (i = 0; i < n_words; i++) {
                 SpW(i) = (W_)BCO_LIT(o_lits+i);
             }
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_SLIDE: {
+        INSTRUCTION(bci_SLIDE): {
             W_ n  = BCO_GET_LARGE_ARG;
             W_ by = BCO_GET_LARGE_ARG;
             /*
@@ -2106,15 +2442,46 @@ run_BCO:
              *           =>
              * a_1 ... a_n, k
              */
-            while(n-- > 0) {
-                SpW(n+by) = ReadSpW(n);
+            if (n == 0 || WITHIN_CAP_CHUNK_BOUNDS_W(n - 1 + by)) {
+                while(n-- > 0) {
+                    SpW(n+by) = ReadSpW(n);
+                }
+            } else {
+                // We write across a chunk boundary: Use safe access
+                while(n-- > 0) {
+                    *((StgWord*)SafeSpWP(n+by)) = ReadSpW(n);
+                }
+            }
+
+            // If we SLIDE Sp past the chunk bounds we need to handle the underflow
+            // (possibly multiple times)
+            while (!WITHIN_CAP_CHUNK_BOUNDS_W(by)) {
+                StgStack *stk = cap->r.rCurrentTSO->stackobj;
+                StgUnderflowFrame *uf = (StgUnderflowFrame*)
+                    (stk->stack + stk->stack_size
+                     - sizeofW(StgUnderflowFrame));
+                // See Note [Checking for underflow frames]
+                if (IS_UNDERFLOW_FRAME(uf->info)) {
+                    W_ sp_to_uf = (StgWord*)uf - (StgWord*)Sp;
+                    Sp = (StgPtr)uf;
+                    SAVE_STACK_POINTERS;
+                    threadStackUnderflow(cap, cap->r.rCurrentTSO);
+                    LOAD_STACK_POINTERS;
+                    by -= sp_to_uf;
+                } else if (Sp_plusW(by) < (void*)(stk->stack + stk->stack_size)) {
+                    // we're within the first stack chunk, this chunk has
+                    // no underflow frame
+                    break;
+                } else {
+                    barf("bci_SLIDE: Sp+by outside stack bounds");
+                }
             }
             Sp_addW(by);
             INTERP_TICK(it_slides);
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_ALLOC_AP: {
+        INSTRUCTION(bci_ALLOC_AP): {
             StgHalfWord n_payload = BCO_GET_LARGE_ARG;
             StgAP *ap = (StgAP*)allocate(cap, AP_sizeW(n_payload));
             SpW(-1) = (W_)ap;
@@ -2124,10 +2491,10 @@ run_BCO:
             // visible only from our stack
             SET_HDR(ap, &stg_AP_info, cap->r.rCCCS)
             Sp_subW(1);
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_ALLOC_AP_NOUPD: {
+        INSTRUCTION(bci_ALLOC_AP_NOUPD): {
             StgHalfWord n_payload = BCO_GET_LARGE_ARG;
             StgAP *ap = (StgAP*)allocate(cap, AP_sizeW(n_payload));
             SpW(-1) = (W_)ap;
@@ -2137,10 +2504,10 @@ run_BCO:
             // visible only from our stack
             SET_HDR(ap, &stg_AP_NOUPD_info, cap->r.rCCCS)
             Sp_subW(1);
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_ALLOC_PAP: {
+        INSTRUCTION(bci_ALLOC_PAP): {
             StgPAP* pap;
             StgHalfWord arity = BCO_GET_LARGE_ARG;
             StgHalfWord n_payload = BCO_GET_LARGE_ARG;
@@ -2152,10 +2519,10 @@ run_BCO:
             // visible only from our stack
             SET_HDR(pap, &stg_PAP_info, cap->r.rCCCS)
             Sp_subW(1);
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_MKAP: {
+        INSTRUCTION(bci_MKAP): {
             StgHalfWord i;
             W_ stkoff = BCO_GET_LARGE_ARG;
             StgHalfWord n_payload = BCO_GET_LARGE_ARG;
@@ -2176,10 +2543,10 @@ run_BCO:
                      debugBelch("\tBuilt ");
                      printObj((StgClosure*)ap);
                 );
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_MKPAP: {
+        INSTRUCTION(bci_MKPAP): {
             StgHalfWord i;
             W_ stkoff = BCO_GET_LARGE_ARG;
             StgHalfWord n_payload = BCO_GET_LARGE_ARG;
@@ -2203,10 +2570,10 @@ run_BCO:
                      debugBelch("\tBuilt ");
                      printObj((StgClosure*)pap);
                 );
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_UNPACK: {
+        INSTRUCTION(bci_UNPACK): {
             /* Unpack N ptr words from t.o.s constructor */
             W_ i;
             W_ n_words = BCO_GET_LARGE_ARG;
@@ -2215,10 +2582,10 @@ run_BCO:
             for (i = 0; i < n_words; i++) {
                 SpW(i) = (W_)con->payload[i];
             }
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_PACK: {
+        INSTRUCTION(bci_PACK): {
             W_ o_itbl         = BCO_GET_LARGE_ARG;
             W_ n_words        = BCO_GET_LARGE_ARG;
             StgConInfoTable* itbl = CON_INFO_PTR_TO_STRUCT((StgInfoTable *)BCO_LIT(o_itbl));
@@ -2249,220 +2616,220 @@ run_BCO:
                      debugBelch("\tBuilt ");
                      printObj((StgClosure*)tagged_con);
                 );
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_TESTLT_P: {
+        INSTRUCTION(bci_TESTLT_P): {
             unsigned int discr  = BCO_NEXT;
             int failto = BCO_GET_LARGE_ARG;
             StgClosure* con = UNTAG_CLOSURE((StgClosure*)ReadSpW(0));
             if (GET_TAG(con) >= discr) {
                 bciPtr = failto;
             }
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_TESTEQ_P: {
+        INSTRUCTION(bci_TESTEQ_P): {
             unsigned int discr  = BCO_NEXT;
             int failto = BCO_GET_LARGE_ARG;
             StgClosure* con = UNTAG_CLOSURE((StgClosure*)ReadSpW(0));
             if (GET_TAG(con) != discr) {
                 bciPtr = failto;
             }
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_TESTLT_I: {
+        INSTRUCTION(bci_TESTLT_I): {
             int discr   = BCO_GET_LARGE_ARG;
             int failto  = BCO_GET_LARGE_ARG;
             I_ stackInt = (I_)ReadSpW(0);
             if (stackInt >= (I_)BCO_LIT(discr))
                 bciPtr = failto;
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_TESTLT_I64: {
+        INSTRUCTION(bci_TESTLT_I64): {
             int discr   = BCO_GET_LARGE_ARG;
             int failto  = BCO_GET_LARGE_ARG;
             StgInt64 stackInt = ReadSpW64(0);
             if (stackInt >= BCO_LITI64(discr))
                 bciPtr = failto;
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_TESTLT_I32: {
+        INSTRUCTION(bci_TESTLT_I32): {
             int discr   = BCO_GET_LARGE_ARG;
             int failto  = BCO_GET_LARGE_ARG;
             StgInt32 stackInt = (StgInt32) ReadSpW(0);
             if (stackInt >= (StgInt32)BCO_LIT(discr))
                 bciPtr = failto;
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_TESTLT_I16: {
+        INSTRUCTION(bci_TESTLT_I16): {
             int discr   = BCO_GET_LARGE_ARG;
             int failto  = BCO_GET_LARGE_ARG;
             StgInt16 stackInt = (StgInt16) ReadSpW(0);
             if (stackInt >= (StgInt16)BCO_LIT(discr))
                 bciPtr = failto;
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_TESTLT_I8: {
+        INSTRUCTION(bci_TESTLT_I8): {
             int discr   = BCO_GET_LARGE_ARG;
             int failto  = BCO_GET_LARGE_ARG;
             StgInt8 stackInt = (StgInt8) ReadSpW(0);
             if (stackInt >= (StgInt8)BCO_LIT(discr))
                 bciPtr = failto;
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_TESTEQ_I: {
+        INSTRUCTION(bci_TESTEQ_I): {
             int discr   = BCO_GET_LARGE_ARG;
             int failto  = BCO_GET_LARGE_ARG;
             I_ stackInt = (I_)ReadSpW(0);
             if (stackInt != (I_)BCO_LIT(discr)) {
                 bciPtr = failto;
             }
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_TESTEQ_I64: {
+        INSTRUCTION(bci_TESTEQ_I64): {
             int discr   = BCO_GET_LARGE_ARG;
             int failto  = BCO_GET_LARGE_ARG;
             StgInt64 stackInt = ReadSpW64(0);
             if (stackInt != BCO_LITI64(discr)) {
                 bciPtr = failto;
             }
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_TESTEQ_I32: {
+        INSTRUCTION(bci_TESTEQ_I32): {
             int discr   = BCO_GET_LARGE_ARG;
             int failto  = BCO_GET_LARGE_ARG;
             StgInt32 stackInt = (StgInt32) ReadSpW(0);
             if (stackInt != (StgInt32)BCO_LIT(discr)) {
                 bciPtr = failto;
             }
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_TESTEQ_I16: {
+        INSTRUCTION(bci_TESTEQ_I16): {
             int discr   = BCO_GET_LARGE_ARG;
             int failto  = BCO_GET_LARGE_ARG;
             StgInt16 stackInt = (StgInt16) ReadSpW(0);
             if (stackInt != (StgInt16)BCO_LIT(discr)) {
                 bciPtr = failto;
             }
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_TESTEQ_I8: {
+        INSTRUCTION(bci_TESTEQ_I8): {
             int discr   = BCO_GET_LARGE_ARG;
             int failto  = BCO_GET_LARGE_ARG;
             StgInt8 stackInt = (StgInt8) ReadSpW(0);
             if (stackInt != (StgInt8)BCO_LIT(discr)) {
                 bciPtr = failto;
             }
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_TESTLT_W: {
+        INSTRUCTION(bci_TESTLT_W): {
             int discr   = BCO_GET_LARGE_ARG;
             int failto  = BCO_GET_LARGE_ARG;
             W_ stackWord = (W_)ReadSpW(0);
             if (stackWord >= (W_)BCO_LIT(discr))
                 bciPtr = failto;
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_TESTLT_W64: {
+        INSTRUCTION(bci_TESTLT_W64): {
             int discr   = BCO_GET_LARGE_ARG;
             int failto  = BCO_GET_LARGE_ARG;
             StgWord64 stackWord = ReadSpW64(0);
             if (stackWord >= BCO_LITW64(discr))
                 bciPtr = failto;
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_TESTLT_W32: {
+        INSTRUCTION(bci_TESTLT_W32): {
             int discr   = BCO_GET_LARGE_ARG;
             int failto  = BCO_GET_LARGE_ARG;
             StgWord32 stackWord = (StgWord32) ReadSpW(0);
             if (stackWord >= (StgWord32)BCO_LIT(discr))
                 bciPtr = failto;
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_TESTLT_W16: {
+        INSTRUCTION(bci_TESTLT_W16): {
             int discr   = BCO_GET_LARGE_ARG;
             int failto  = BCO_GET_LARGE_ARG;
             StgWord16 stackWord = (StgInt16) ReadSpW(0);
             if (stackWord >= (StgWord16)BCO_LIT(discr))
                 bciPtr = failto;
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_TESTLT_W8: {
+        INSTRUCTION(bci_TESTLT_W8): {
             int discr   = BCO_GET_LARGE_ARG;
             int failto  = BCO_GET_LARGE_ARG;
             StgWord8 stackWord = (StgInt8) ReadSpW(0);
             if (stackWord >= (StgWord8)BCO_LIT(discr))
                 bciPtr = failto;
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_TESTEQ_W: {
+        INSTRUCTION(bci_TESTEQ_W): {
             int discr   = BCO_GET_LARGE_ARG;
             int failto  = BCO_GET_LARGE_ARG;
             W_ stackWord = (W_)ReadSpW(0);
             if (stackWord != (W_)BCO_LIT(discr)) {
                 bciPtr = failto;
             }
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_TESTEQ_W64: {
+        INSTRUCTION(bci_TESTEQ_W64): {
             int discr   = BCO_GET_LARGE_ARG;
             int failto  = BCO_GET_LARGE_ARG;
             StgWord64 stackWord = ReadSpW64(0);
             if (stackWord != BCO_LITW64(discr)) {
                 bciPtr = failto;
             }
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_TESTEQ_W32: {
+        INSTRUCTION(bci_TESTEQ_W32): {
             int discr   = BCO_GET_LARGE_ARG;
             int failto  = BCO_GET_LARGE_ARG;
             StgWord32 stackWord = (StgWord32) ReadSpW(0);
             if (stackWord != (StgWord32)BCO_LIT(discr)) {
                 bciPtr = failto;
             }
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_TESTEQ_W16: {
+        INSTRUCTION(bci_TESTEQ_W16): {
             int discr   = BCO_GET_LARGE_ARG;
             int failto  = BCO_GET_LARGE_ARG;
             StgWord16 stackWord = (StgWord16) ReadSpW(0);
             if (stackWord != (StgWord16)BCO_LIT(discr)) {
                 bciPtr = failto;
             }
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_TESTEQ_W8: {
+        INSTRUCTION(bci_TESTEQ_W8): {
             int discr   = BCO_GET_LARGE_ARG;
             int failto  = BCO_GET_LARGE_ARG;
             StgWord8 stackWord = (StgWord8) ReadSpW(0);
             if (stackWord != (StgWord8)BCO_LIT(discr)) {
                 bciPtr = failto;
             }
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_TESTLT_D: {
+        INSTRUCTION(bci_TESTLT_D): {
             int discr   = BCO_GET_LARGE_ARG;
             int failto  = BCO_GET_LARGE_ARG;
             StgDouble stackDbl, discrDbl;
@@ -2471,10 +2838,10 @@ run_BCO:
             if (stackDbl >= discrDbl) {
                 bciPtr = failto;
             }
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_TESTEQ_D: {
+        INSTRUCTION(bci_TESTEQ_D): {
             int discr   = BCO_GET_LARGE_ARG;
             int failto  = BCO_GET_LARGE_ARG;
             StgDouble stackDbl, discrDbl;
@@ -2483,10 +2850,10 @@ run_BCO:
             if (stackDbl != discrDbl) {
                 bciPtr = failto;
             }
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_TESTLT_F: {
+        INSTRUCTION(bci_TESTLT_F): {
             int discr   = BCO_GET_LARGE_ARG;
             int failto  = BCO_GET_LARGE_ARG;
             StgFloat stackFlt, discrFlt;
@@ -2495,10 +2862,10 @@ run_BCO:
             if (stackFlt >= discrFlt) {
                 bciPtr = failto;
             }
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_TESTEQ_F: {
+        INSTRUCTION(bci_TESTEQ_F): {
             int discr   = BCO_GET_LARGE_ARG;
             int failto  = BCO_GET_LARGE_ARG;
             StgFloat stackFlt, discrFlt;
@@ -2507,11 +2874,11 @@ run_BCO:
             if (stackFlt != discrFlt) {
                 bciPtr = failto;
             }
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
         // Control-flow ish things
-        case bci_ENTER:
+        INSTRUCTION(bci_ENTER):
             // Context-switch check.  We put it here to ensure that
             // the interpreter has done at least *some* work before
             // context switching: sometimes the scheduler can invoke
@@ -2523,50 +2890,50 @@ run_BCO:
             }
             goto eval;
 
-        case bci_RETURN_P:
+        INSTRUCTION(bci_RETURN_P):
             tagged_obj = (StgClosure *)ReadSpW(0);
             Sp_addW(1);
             goto do_return_pointer;
 
-        case bci_RETURN_N:
+        INSTRUCTION(bci_RETURN_N):
             Sp_subW(1);
             SpW(0) = (W_)&stg_ret_n_info;
             goto do_return_nonpointer;
-        case bci_RETURN_F:
+        INSTRUCTION(bci_RETURN_F):
             Sp_subW(1);
             SpW(0) = (W_)&stg_ret_f_info;
             goto do_return_nonpointer;
-        case bci_RETURN_D:
+        INSTRUCTION(bci_RETURN_D):
             Sp_subW(1);
             SpW(0) = (W_)&stg_ret_d_info;
             goto do_return_nonpointer;
-        case bci_RETURN_L:
+        INSTRUCTION(bci_RETURN_L):
             Sp_subW(1);
             SpW(0) = (W_)&stg_ret_l_info;
             goto do_return_nonpointer;
-        case bci_RETURN_V:
+        INSTRUCTION(bci_RETURN_V):
             Sp_subW(1);
             SpW(0) = (W_)&stg_ret_v_info;
             goto do_return_nonpointer;
-        case bci_RETURN_T: {
+        INSTRUCTION(bci_RETURN_T): {
             /* tuple_info and tuple_bco must already be on the stack */
             Sp_subW(1);
             SpW(0) = (W_)&stg_ret_t_info;
             goto do_return_nonpointer;
         }
 
-        case bci_BCO_NAME:
+        INSTRUCTION(bci_BCO_NAME):
             bciPtr++;
-            goto nextInsn;
+            NEXT_INSTRUCTION;
 
-        case bci_SWIZZLE: {
+        INSTRUCTION(bci_SWIZZLE): {
             W_ stkoff = BCO_GET_LARGE_ARG;
             StgInt n = BCO_GET_LARGE_ARG;
             (*(StgInt*)(SafeSpWP(stkoff))) += n;
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_PRIMCALL: {
+        INSTRUCTION(bci_PRIMCALL): {
             Sp_subW(1);
             SpW(0) = (W_)&stg_primcall_info;
             RETURN_TO_SCHEDULER_NO_PAUSE(ThreadRunGHC, ThreadYielding);
@@ -2582,7 +2949,7 @@ run_BCO:
             ty r = op ((ty) ReadSpW(0));                          \
             SpW(0) = (StgWord) r;                                   \
         }                                                           \
-        goto nextInsn;                                              \
+        NEXT_INSTRUCTION;                                              \
     }
 
 // op :: ty -> ty -> ty
@@ -2597,22 +2964,22 @@ run_BCO:
                 Sp_addW(1);                                                     \
                 SpW(0) = (StgWord) r;                                           \
             };                                                                  \
-            goto nextInsn;                                                      \
+            NEXT_INSTRUCTION;                                                      \
         }
 
 // op :: ty -> Int -> ty
 #define SIZED_BIN_OP_TY_INT(op,ty)                                      \
 {                                                                       \
     if(sizeof(ty) > sizeof(StgWord)) {                                  \
-        ty r = ((ty) ReadSpW64(0)) op ((ty) ReadSpW(2));                \
+        ty r = ((ty) ReadSpW64(0)) op ((StgInt) ReadSpW(2));                \
         Sp_addW(1);                                                     \
         SpW64(0) = (StgWord64) r;                                       \
     } else {                                                            \
-        ty r = ((ty) ReadSpW(0)) op ((ty) ReadSpW(1));                  \
+        ty r = ((ty) ReadSpW(0)) op ((StgInt) ReadSpW(1));                  \
         Sp_addW(1);                                                     \
         SpW(0) = (StgWord) r;                                           \
     };                                                                  \
-    goto nextInsn;                                                      \
+    NEXT_INSTRUCTION;                                                      \
 }
 
 // op :: ty -> ty -> Int
@@ -2627,113 +2994,113 @@ run_BCO:
         Sp_addW(1);                                                     \
         SpW(0) = (StgWord) r;                                           \
     };                                                                  \
-    goto nextInsn;                                                      \
+    NEXT_INSTRUCTION;                                                      \
 }
 
-        case bci_OP_ADD_64: SIZED_BIN_OP(+, StgInt64)
-        case bci_OP_SUB_64: SIZED_BIN_OP(-, StgInt64)
-        case bci_OP_AND_64: SIZED_BIN_OP(&, StgInt64)
-        case bci_OP_XOR_64: SIZED_BIN_OP(^, StgInt64)
-        case bci_OP_OR_64:  SIZED_BIN_OP(|, StgInt64)
-        case bci_OP_MUL_64: SIZED_BIN_OP(*, StgInt64)
-        case bci_OP_SHL_64: SIZED_BIN_OP_TY_INT(<<, StgWord64)
-        case bci_OP_LSR_64: SIZED_BIN_OP_TY_INT(>>, StgWord64)
-        case bci_OP_ASR_64: SIZED_BIN_OP_TY_INT(>>, StgInt64)
+        INSTRUCTION(bci_OP_ADD_64): SIZED_BIN_OP(+, StgInt64)
+        INSTRUCTION(bci_OP_SUB_64): SIZED_BIN_OP(-, StgInt64)
+        INSTRUCTION(bci_OP_AND_64): SIZED_BIN_OP(&, StgInt64)
+        INSTRUCTION(bci_OP_XOR_64): SIZED_BIN_OP(^, StgInt64)
+        INSTRUCTION(bci_OP_OR_64):  SIZED_BIN_OP(|, StgInt64)
+        INSTRUCTION(bci_OP_MUL_64): SIZED_BIN_OP(*, StgInt64)
+        INSTRUCTION(bci_OP_SHL_64): SIZED_BIN_OP_TY_INT(<<, StgWord64)
+        INSTRUCTION(bci_OP_LSR_64): SIZED_BIN_OP_TY_INT(>>, StgWord64)
+        INSTRUCTION(bci_OP_ASR_64): SIZED_BIN_OP_TY_INT(>>, StgInt64)
 
-        case bci_OP_NEQ_64:  SIZED_BIN_OP_TY_TY_INT(!=, StgWord64)
-        case bci_OP_EQ_64:   SIZED_BIN_OP_TY_TY_INT(==, StgWord64)
-        case bci_OP_U_GT_64: SIZED_BIN_OP_TY_TY_INT(>, StgWord64)
-        case bci_OP_U_GE_64: SIZED_BIN_OP_TY_TY_INT(>=, StgWord64)
-        case bci_OP_U_LT_64: SIZED_BIN_OP_TY_TY_INT(<, StgWord64)
-        case bci_OP_U_LE_64: SIZED_BIN_OP_TY_TY_INT(<=, StgWord64)
+        INSTRUCTION(bci_OP_NEQ_64):  SIZED_BIN_OP_TY_TY_INT(!=, StgWord64)
+        INSTRUCTION(bci_OP_EQ_64):   SIZED_BIN_OP_TY_TY_INT(==, StgWord64)
+        INSTRUCTION(bci_OP_U_GT_64): SIZED_BIN_OP_TY_TY_INT(>, StgWord64)
+        INSTRUCTION(bci_OP_U_GE_64): SIZED_BIN_OP_TY_TY_INT(>=, StgWord64)
+        INSTRUCTION(bci_OP_U_LT_64): SIZED_BIN_OP_TY_TY_INT(<, StgWord64)
+        INSTRUCTION(bci_OP_U_LE_64): SIZED_BIN_OP_TY_TY_INT(<=, StgWord64)
 
-        case bci_OP_S_GT_64: SIZED_BIN_OP_TY_TY_INT(>, StgInt64)
-        case bci_OP_S_GE_64: SIZED_BIN_OP_TY_TY_INT(>=, StgInt64)
-        case bci_OP_S_LT_64: SIZED_BIN_OP_TY_TY_INT(<, StgInt64)
-        case bci_OP_S_LE_64: SIZED_BIN_OP_TY_TY_INT(<=, StgInt64)
+        INSTRUCTION(bci_OP_S_GT_64): SIZED_BIN_OP_TY_TY_INT(>, StgInt64)
+        INSTRUCTION(bci_OP_S_GE_64): SIZED_BIN_OP_TY_TY_INT(>=, StgInt64)
+        INSTRUCTION(bci_OP_S_LT_64): SIZED_BIN_OP_TY_TY_INT(<, StgInt64)
+        INSTRUCTION(bci_OP_S_LE_64): SIZED_BIN_OP_TY_TY_INT(<=, StgInt64)
 
-        case bci_OP_NOT_64: UN_SIZED_OP(~, StgWord64)
-        case bci_OP_NEG_64: UN_SIZED_OP(-, StgInt64)
-
-
-        case bci_OP_ADD_32: SIZED_BIN_OP(+, StgInt32)
-        case bci_OP_SUB_32: SIZED_BIN_OP(-, StgInt32)
-        case bci_OP_AND_32: SIZED_BIN_OP(&, StgInt32)
-        case bci_OP_XOR_32: SIZED_BIN_OP(^, StgInt32)
-        case bci_OP_OR_32:  SIZED_BIN_OP(|, StgInt32)
-        case bci_OP_MUL_32: SIZED_BIN_OP(*, StgInt32)
-        case bci_OP_SHL_32: SIZED_BIN_OP_TY_INT(<<, StgWord32)
-        case bci_OP_LSR_32: SIZED_BIN_OP_TY_INT(>>, StgWord32)
-        case bci_OP_ASR_32: SIZED_BIN_OP_TY_INT(>>, StgInt32)
-
-        case bci_OP_NEQ_32:  SIZED_BIN_OP_TY_TY_INT(!=, StgWord32)
-        case bci_OP_EQ_32:   SIZED_BIN_OP_TY_TY_INT(==, StgWord32)
-        case bci_OP_U_GT_32: SIZED_BIN_OP_TY_TY_INT(>, StgWord32)
-        case bci_OP_U_GE_32: SIZED_BIN_OP_TY_TY_INT(>=, StgWord32)
-        case bci_OP_U_LT_32: SIZED_BIN_OP_TY_TY_INT(<, StgWord32)
-        case bci_OP_U_LE_32: SIZED_BIN_OP_TY_TY_INT(<=, StgWord32)
-
-        case bci_OP_S_GT_32: SIZED_BIN_OP_TY_TY_INT(>, StgInt32)
-        case bci_OP_S_GE_32: SIZED_BIN_OP_TY_TY_INT(>=, StgInt32)
-        case bci_OP_S_LT_32: SIZED_BIN_OP_TY_TY_INT(<, StgInt32)
-        case bci_OP_S_LE_32: SIZED_BIN_OP_TY_TY_INT(<=, StgInt32)
-
-        case bci_OP_NOT_32: UN_SIZED_OP(~, StgWord32)
-        case bci_OP_NEG_32: UN_SIZED_OP(-, StgInt32)
+        INSTRUCTION(bci_OP_NOT_64): UN_SIZED_OP(~, StgWord64)
+        INSTRUCTION(bci_OP_NEG_64): UN_SIZED_OP(-, StgInt64)
 
 
-        case bci_OP_ADD_16: SIZED_BIN_OP(+, StgInt16)
-        case bci_OP_SUB_16: SIZED_BIN_OP(-, StgInt16)
-        case bci_OP_AND_16: SIZED_BIN_OP(&, StgInt16)
-        case bci_OP_XOR_16: SIZED_BIN_OP(^, StgInt16)
-        case bci_OP_OR_16:  SIZED_BIN_OP(|, StgInt16)
-        case bci_OP_MUL_16: SIZED_BIN_OP(*, StgInt16)
-        case bci_OP_SHL_16: SIZED_BIN_OP_TY_INT(<<, StgWord16)
-        case bci_OP_LSR_16: SIZED_BIN_OP_TY_INT(>>, StgWord16)
-        case bci_OP_ASR_16: SIZED_BIN_OP_TY_INT(>>, StgInt16)
+        INSTRUCTION(bci_OP_ADD_32): SIZED_BIN_OP(+, StgInt32)
+        INSTRUCTION(bci_OP_SUB_32): SIZED_BIN_OP(-, StgInt32)
+        INSTRUCTION(bci_OP_AND_32): SIZED_BIN_OP(&, StgInt32)
+        INSTRUCTION(bci_OP_XOR_32): SIZED_BIN_OP(^, StgInt32)
+        INSTRUCTION(bci_OP_OR_32):  SIZED_BIN_OP(|, StgInt32)
+        INSTRUCTION(bci_OP_MUL_32): SIZED_BIN_OP(*, StgInt32)
+        INSTRUCTION(bci_OP_SHL_32): SIZED_BIN_OP_TY_INT(<<, StgWord32)
+        INSTRUCTION(bci_OP_LSR_32): SIZED_BIN_OP_TY_INT(>>, StgWord32)
+        INSTRUCTION(bci_OP_ASR_32): SIZED_BIN_OP_TY_INT(>>, StgInt32)
 
-        case bci_OP_NEQ_16:  SIZED_BIN_OP_TY_TY_INT(!=, StgWord16)
-        case bci_OP_EQ_16:   SIZED_BIN_OP_TY_TY_INT(==, StgWord16)
-        case bci_OP_U_GT_16: SIZED_BIN_OP_TY_TY_INT(>, StgWord16)
-        case bci_OP_U_GE_16: SIZED_BIN_OP_TY_TY_INT(>=, StgWord16)
-        case bci_OP_U_LT_16: SIZED_BIN_OP_TY_TY_INT(<, StgWord16)
-        case bci_OP_U_LE_16: SIZED_BIN_OP_TY_TY_INT(<=, StgWord16)
+        INSTRUCTION(bci_OP_NEQ_32):  SIZED_BIN_OP_TY_TY_INT(!=, StgWord32)
+        INSTRUCTION(bci_OP_EQ_32):   SIZED_BIN_OP_TY_TY_INT(==, StgWord32)
+        INSTRUCTION(bci_OP_U_GT_32): SIZED_BIN_OP_TY_TY_INT(>, StgWord32)
+        INSTRUCTION(bci_OP_U_GE_32): SIZED_BIN_OP_TY_TY_INT(>=, StgWord32)
+        INSTRUCTION(bci_OP_U_LT_32): SIZED_BIN_OP_TY_TY_INT(<, StgWord32)
+        INSTRUCTION(bci_OP_U_LE_32): SIZED_BIN_OP_TY_TY_INT(<=, StgWord32)
 
-        case bci_OP_S_GT_16: SIZED_BIN_OP(>, StgInt16)
-        case bci_OP_S_GE_16: SIZED_BIN_OP(>=, StgInt16)
-        case bci_OP_S_LT_16: SIZED_BIN_OP(<, StgInt16)
-        case bci_OP_S_LE_16: SIZED_BIN_OP(<=, StgInt16)
+        INSTRUCTION(bci_OP_S_GT_32): SIZED_BIN_OP_TY_TY_INT(>, StgInt32)
+        INSTRUCTION(bci_OP_S_GE_32): SIZED_BIN_OP_TY_TY_INT(>=, StgInt32)
+        INSTRUCTION(bci_OP_S_LT_32): SIZED_BIN_OP_TY_TY_INT(<, StgInt32)
+        INSTRUCTION(bci_OP_S_LE_32): SIZED_BIN_OP_TY_TY_INT(<=, StgInt32)
 
-        case bci_OP_NOT_16: UN_SIZED_OP(~, StgWord16)
-        case bci_OP_NEG_16: UN_SIZED_OP(-, StgInt16)
+        INSTRUCTION(bci_OP_NOT_32): UN_SIZED_OP(~, StgWord32)
+        INSTRUCTION(bci_OP_NEG_32): UN_SIZED_OP(-, StgInt32)
 
 
-        case bci_OP_ADD_08: SIZED_BIN_OP(+, StgInt8)
-        case bci_OP_SUB_08: SIZED_BIN_OP(-, StgInt8)
-        case bci_OP_AND_08: SIZED_BIN_OP(&, StgInt8)
-        case bci_OP_XOR_08: SIZED_BIN_OP(^, StgInt8)
-        case bci_OP_OR_08:  SIZED_BIN_OP(|, StgInt8)
-        case bci_OP_MUL_08: SIZED_BIN_OP(*, StgInt8)
-        case bci_OP_SHL_08: SIZED_BIN_OP_TY_INT(<<, StgWord8)
-        case bci_OP_LSR_08: SIZED_BIN_OP_TY_INT(>>, StgWord8)
-        case bci_OP_ASR_08: SIZED_BIN_OP_TY_INT(>>, StgInt8)
+        INSTRUCTION(bci_OP_ADD_16): SIZED_BIN_OP(+, StgInt16)
+        INSTRUCTION(bci_OP_SUB_16): SIZED_BIN_OP(-, StgInt16)
+        INSTRUCTION(bci_OP_AND_16): SIZED_BIN_OP(&, StgInt16)
+        INSTRUCTION(bci_OP_XOR_16): SIZED_BIN_OP(^, StgInt16)
+        INSTRUCTION(bci_OP_OR_16):  SIZED_BIN_OP(|, StgInt16)
+        INSTRUCTION(bci_OP_MUL_16): SIZED_BIN_OP(*, StgInt16)
+        INSTRUCTION(bci_OP_SHL_16): SIZED_BIN_OP_TY_INT(<<, StgWord16)
+        INSTRUCTION(bci_OP_LSR_16): SIZED_BIN_OP_TY_INT(>>, StgWord16)
+        INSTRUCTION(bci_OP_ASR_16): SIZED_BIN_OP_TY_INT(>>, StgInt16)
 
-        case bci_OP_NEQ_08:  SIZED_BIN_OP_TY_TY_INT(!=, StgWord8)
-        case bci_OP_EQ_08:   SIZED_BIN_OP_TY_TY_INT(==, StgWord8)
-        case bci_OP_U_GT_08: SIZED_BIN_OP_TY_TY_INT(>, StgWord8)
-        case bci_OP_U_GE_08: SIZED_BIN_OP_TY_TY_INT(>=, StgWord8)
-        case bci_OP_U_LT_08: SIZED_BIN_OP_TY_TY_INT(<, StgWord8)
-        case bci_OP_U_LE_08: SIZED_BIN_OP_TY_TY_INT(<=, StgWord8)
+        INSTRUCTION(bci_OP_NEQ_16):  SIZED_BIN_OP_TY_TY_INT(!=, StgWord16)
+        INSTRUCTION(bci_OP_EQ_16):   SIZED_BIN_OP_TY_TY_INT(==, StgWord16)
+        INSTRUCTION(bci_OP_U_GT_16): SIZED_BIN_OP_TY_TY_INT(>, StgWord16)
+        INSTRUCTION(bci_OP_U_GE_16): SIZED_BIN_OP_TY_TY_INT(>=, StgWord16)
+        INSTRUCTION(bci_OP_U_LT_16): SIZED_BIN_OP_TY_TY_INT(<, StgWord16)
+        INSTRUCTION(bci_OP_U_LE_16): SIZED_BIN_OP_TY_TY_INT(<=, StgWord16)
 
-        case bci_OP_S_GT_08: SIZED_BIN_OP_TY_TY_INT(>, StgInt8)
-        case bci_OP_S_GE_08: SIZED_BIN_OP_TY_TY_INT(>=, StgInt8)
-        case bci_OP_S_LT_08: SIZED_BIN_OP_TY_TY_INT(<, StgInt8)
-        case bci_OP_S_LE_08: SIZED_BIN_OP_TY_TY_INT(<=, StgInt8)
+        INSTRUCTION(bci_OP_S_GT_16): SIZED_BIN_OP(>, StgInt16)
+        INSTRUCTION(bci_OP_S_GE_16): SIZED_BIN_OP(>=, StgInt16)
+        INSTRUCTION(bci_OP_S_LT_16): SIZED_BIN_OP(<, StgInt16)
+        INSTRUCTION(bci_OP_S_LE_16): SIZED_BIN_OP(<=, StgInt16)
 
-        case bci_OP_NOT_08: UN_SIZED_OP(~, StgWord8)
-        case bci_OP_NEG_08: UN_SIZED_OP(-, StgInt8)
+        INSTRUCTION(bci_OP_NOT_16): UN_SIZED_OP(~, StgWord16)
+        INSTRUCTION(bci_OP_NEG_16): UN_SIZED_OP(-, StgInt16)
 
-        case bci_OP_INDEX_ADDR_64:
+
+        INSTRUCTION(bci_OP_ADD_08): SIZED_BIN_OP(+, StgInt8)
+        INSTRUCTION(bci_OP_SUB_08): SIZED_BIN_OP(-, StgInt8)
+        INSTRUCTION(bci_OP_AND_08): SIZED_BIN_OP(&, StgInt8)
+        INSTRUCTION(bci_OP_XOR_08): SIZED_BIN_OP(^, StgInt8)
+        INSTRUCTION(bci_OP_OR_08):  SIZED_BIN_OP(|, StgInt8)
+        INSTRUCTION(bci_OP_MUL_08): SIZED_BIN_OP(*, StgInt8)
+        INSTRUCTION(bci_OP_SHL_08): SIZED_BIN_OP_TY_INT(<<, StgWord8)
+        INSTRUCTION(bci_OP_LSR_08): SIZED_BIN_OP_TY_INT(>>, StgWord8)
+        INSTRUCTION(bci_OP_ASR_08): SIZED_BIN_OP_TY_INT(>>, StgInt8)
+
+        INSTRUCTION(bci_OP_NEQ_08):  SIZED_BIN_OP_TY_TY_INT(!=, StgWord8)
+        INSTRUCTION(bci_OP_EQ_08):   SIZED_BIN_OP_TY_TY_INT(==, StgWord8)
+        INSTRUCTION(bci_OP_U_GT_08): SIZED_BIN_OP_TY_TY_INT(>, StgWord8)
+        INSTRUCTION(bci_OP_U_GE_08): SIZED_BIN_OP_TY_TY_INT(>=, StgWord8)
+        INSTRUCTION(bci_OP_U_LT_08): SIZED_BIN_OP_TY_TY_INT(<, StgWord8)
+        INSTRUCTION(bci_OP_U_LE_08): SIZED_BIN_OP_TY_TY_INT(<=, StgWord8)
+
+        INSTRUCTION(bci_OP_S_GT_08): SIZED_BIN_OP_TY_TY_INT(>, StgInt8)
+        INSTRUCTION(bci_OP_S_GE_08): SIZED_BIN_OP_TY_TY_INT(>=, StgInt8)
+        INSTRUCTION(bci_OP_S_LT_08): SIZED_BIN_OP_TY_TY_INT(<, StgInt8)
+        INSTRUCTION(bci_OP_S_LE_08): SIZED_BIN_OP_TY_TY_INT(<=, StgInt8)
+
+        INSTRUCTION(bci_OP_NOT_08): UN_SIZED_OP(~, StgWord8)
+        INSTRUCTION(bci_OP_NEG_08): UN_SIZED_OP(-, StgInt8)
+
+        INSTRUCTION(bci_OP_INDEX_ADDR_64):
         {
             StgWord64* addr = (StgWord64*) SpW(0);
             StgInt offset = (StgInt) SpW(1);
@@ -2741,35 +3108,35 @@ run_BCO:
                 Sp_addW(1);
             }
             SpW64(0) = *(addr+offset);
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_OP_INDEX_ADDR_32:
+        INSTRUCTION(bci_OP_INDEX_ADDR_32):
         {
             StgWord32* addr = (StgWord32*) SpW(0);
             StgInt offset = (StgInt) SpW(1);
             Sp_addW(1);
             SpW(0) = (StgWord) *(addr+offset);
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
-        case bci_OP_INDEX_ADDR_16:
+        INSTRUCTION(bci_OP_INDEX_ADDR_16):
         {
             StgWord16* addr = (StgWord16*) SpW(0);
             StgInt offset = (StgInt) SpW(1);
             Sp_addW(1);
             SpW(0) = (StgWord) *(addr+offset);
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
-        case bci_OP_INDEX_ADDR_08:
+        INSTRUCTION(bci_OP_INDEX_ADDR_08):
         {
             StgWord8* addr = (StgWord8*) SpW(0);
             StgInt offset = (StgInt) SpW(1);
             Sp_addW(1);
             SpW(0) = (StgWord) *(addr+offset);
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_CCALL: {
+        INSTRUCTION(bci_CCALL): {
             void *tok;
             W_ stk_offset             = BCO_GET_LARGE_ARG;
             int o_itbl                = BCO_GET_LARGE_ARG;
@@ -2926,25 +3293,33 @@ run_BCO:
             memcpy(Sp, ret, sizeof(W_) * ret_size);
 #endif
 
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_JMP: {
+        INSTRUCTION(bci_JMP): {
             /* BCO_NEXT modifies bciPtr, so be conservative. */
             int nextpc = BCO_GET_LARGE_ARG;
             bciPtr     = nextpc;
-            goto nextInsn;
+            NEXT_INSTRUCTION;
         }
 
-        case bci_CASEFAIL:
+        INSTRUCTION(bci_CASEFAIL):
             barf("interpretBCO: hit a CASEFAIL");
 
-            // Errors
+
+
+#if defined(COMPUTED_GOTO)
+        INSTRUCTION(bci_DEFAULT):
+            barf("interpretBCO: unknown or unimplemented opcode %d",
+                 (int)(bci & 0xFF));
+#else
+        // Errors
         default:
             barf("interpretBCO: unknown or unimplemented opcode %d",
                  (int)(bci & 0xFF));
-
         } /* switch on opcode */
+#endif
+
     }
     }
 

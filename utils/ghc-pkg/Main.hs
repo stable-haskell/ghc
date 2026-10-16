@@ -5,6 +5,7 @@
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -23,7 +24,6 @@
 
 module Main (main) where
 
-import Debug.Trace
 import qualified GHC.Unit.Database as GhcPkg
 import GHC.Unit.Database hiding (mkMungePathUrl)
 import GHC.HandleEncoding
@@ -151,6 +151,7 @@ data Flag
   | FlagVerbosity (Maybe String)
   | FlagUnitId
   | FlagShowUnitIds
+  | FlagTarget String
   deriving Eq
 
 flags :: [OptDescr Flag]
@@ -198,7 +199,9 @@ flags = [
   Option [] ["ipid", "unit-id"] (NoArg FlagUnitId)
         "interpret package arguments as unit IDs (e.g. installed package IDs)",
   Option ['v'] ["verbose"] (OptArg FlagVerbosity "Verbosity")
-        "verbosity level (0-2, default 1)"
+        "verbosity level (0-2, default 1)",
+  Option [] ["target"] (ReqArg FlagTarget "TARGET")
+        "run against the specified target (this has no effect if --global-package-db is specified)"
   ]
 
 data Verbosity = Silent | Normal | Verbose
@@ -267,6 +270,10 @@ usageHeader prog = substProg prog $
   "    Generate a graph of the package dependencies in a form suitable\n" ++
   "    for input for the graphviz tools.  For example, to generate a PDF\n" ++
   "    of the dependency graph: ghc-pkg dot | tred | dot -Tpdf >pkgs.pdf\n" ++
+  "\n" ++
+  "  $p mermaid\n" ++
+  "    Generate a graph of the package dependencies in Mermaid format\n" ++
+  "    suitable for embedding in Markdown files.\n" ++
   "\n" ++
   "  $p find-module {module}\n" ++
   "    List registered packages exposing module {module} in the global\n" ++
@@ -464,6 +471,8 @@ runit verbosity cli nonopts = do
                                  (Just (Substring pkgarg_str m)) Nothing
     ["dot"] -> do
         showPackageDot verbosity cli
+    ["mermaid"] -> do
+        showPackageMermaid verbosity cli
     ["find-module", mod_name] -> do
         let match = maybe (==mod_name) id (substringCheck mod_name)
         listPackages verbosity cli Nothing (Just match)
@@ -587,6 +596,29 @@ readFromSettingsFile settingsFile f = do
       Right archOS -> Right archOS
       Left e -> Left e
 
+-- | Get the cross target.
+--
+-- This is either extracted from the '--target' flag or inferred
+-- from the current program name.
+getTarget :: [Flag] -> IO (Maybe String)
+getTarget my_flags = do
+  case [ t | FlagTarget t <- my_flags ] of
+    [] -> do
+      -- when no target is specified on the command line, infer it from the program name.
+      -- e.g. x86_64-unknown-linux-ghc-pkg
+      progN <- getProgName
+      if | "-ghc-pkg" `isSuffixOf` progN
+         , parts <- split '-' progN
+         , length parts > 3 -> pure (Just (take (length progN - 8) progN))
+         | otherwise -> pure Nothing
+    ts -> pure (Just (last ts))
+ where
+  split :: Char -> String -> [String]
+  split c s = case rest of
+                  []     -> [chunk]
+                  _:rest' -> chunk : split c rest'
+    where (chunk, rest) = break (==c) s
+
 getPkgDatabases :: Verbosity
                 -> GhcPkg.DbOpenMode mode DbModifySelector
                 -> Bool    -- use the user db
@@ -616,7 +648,12 @@ getPkgDatabases verbosity mode use_user use_cache expand_vars my_flags = do
         [] -> do mb_dir <- getBaseDir
                  case mb_dir of
                    Nothing  -> die err_msg
-                   Just dir -> do
+                   Just dir' -> do
+                     mt <- getTarget my_flags
+                     dir <- case mt of
+                              Nothing -> pure dir'
+                              Just target -> pure (dir' </> "targets" </> target </> "lib")
+
                      -- Look for where it is given in the settings file, if marked there.
                      let settingsFile = dir </> "settings"
                      exists_settings_file <- doesFileExist settingsFile
@@ -1431,8 +1468,10 @@ convertPackageInfoToCacheFormat pkg =
        GhcPkg.unitImportDirs     = map ST.pack $ importDirs pkg,
        GhcPkg.unitLibraries      = map ST.pack $ hsLibraries pkg,
        GhcPkg.unitExtDepLibsSys  = map ST.pack $ extraLibraries pkg,
+       GhcPkg.unitExtDepLibsStaticSys = map ST.pack $ extraLibrariesStatic pkg,
        GhcPkg.unitExtDepLibsGhc  = map ST.pack $ extraGHCiLibraries pkg,
        GhcPkg.unitLibraryDirs    = map ST.pack $ libraryDirs pkg,
+       GhcPkg.unitLibraryDirsStatic = map ST.pack $ libraryDirsStatic pkg,
        GhcPkg.unitLibraryDynDirs = map ST.pack $ libraryDynDirs pkg,
        GhcPkg.unitExtDepFrameworks = map ST.pack $ frameworks pkg,
        GhcPkg.unitExtDepFrameworkDirs = map ST.pack $ frameworkDirs pkg,
@@ -1442,6 +1481,10 @@ convertPackageInfoToCacheFormat pkg =
        GhcPkg.unitIncludeDirs    = map ST.pack $ includeDirs pkg,
        GhcPkg.unitHaddockInterfaces = map ST.pack $ haddockInterfaces pkg,
        GhcPkg.unitHaddockHTMLs   = map ST.pack $ haddockHTMLs pkg,
+       GhcPkg.unitDataDir        = let dir = dataDir pkg
+                                   in if null dir
+                                      then Nothing
+                                      else Just (ST.pack dir),
        GhcPkg.unitExposedModules = map convertExposed (exposedModules pkg),
        GhcPkg.unitHiddenModules  = hiddenModules pkg,
        GhcPkg.unitIsIndefinite   = indefinite pkg,
@@ -1616,7 +1659,7 @@ listPackages verbosity my_flags mPackageName mModuleName = do
 simplePackageList :: [Flag] -> [InstalledPackageInfo] -> IO ()
 simplePackageList my_flags pkgs = do
    let showPkg :: InstalledPackageInfo -> String
-       showPkg | FlagShowUnitIds `elem` my_flags = traceId . display . installedUnitId
+       showPkg | FlagShowUnitIds `elem` my_flags = display . installedUnitId
                | FlagNamesOnly `elem` my_flags   = display . mungedName . mungedId
                | otherwise                       = display . mungedId
        strs = map showPkg pkgs
@@ -1642,6 +1685,27 @@ showPackageDot verbosity myflags = do
                    let to = display (mungedId dep)
                  ]
   putStrLn "}"
+
+showPackageMermaid :: Verbosity -> [Flag] -> IO ()
+showPackageMermaid verbosity myflags = do
+  (_, GhcPkg.DbOpenReadOnly, flag_db_stack) <-
+    getPkgDatabases verbosity GhcPkg.DbOpenReadOnly
+      False{-use user-} True{-use cache-} False{-expand vars-} myflags
+
+  let all_pkgs = allPackagesInStack flag_db_stack
+      ipix  = PackageIndex.fromList all_pkgs
+
+  putStrLn "```mermaid"
+  putStrLn "graph TD"
+  mapM_ putStrLn [ "  " ++ from ++ " --> " ++ to
+                 | p <- all_pkgs,
+                   let from = display (mungedId p),
+                   key <- depends p,
+                   Just dep <- [PackageIndex.lookupUnitId ipix key],
+                   let to = display (mungedId dep)
+                 ]
+  putStrLn "```"
+
 
 -- -----------------------------------------------------------------------------
 -- Prints the highest (hidden or exposed) version of a package
@@ -1792,7 +1856,7 @@ checkConsistency verbosity my_flags = do
               all_ps = map mungedId pkgs1
 
   let not_broken_pkgs = filterOut broken_pkgs pkgs
-      (_, trans_broken_pkgs) = closure [] not_broken_pkgs
+      trans_broken_pkgs = brokenPackages not_broken_pkgs
 
       all_broken_pkgs :: [InstalledPackageInfo]
       all_broken_pkgs = broken_pkgs ++ trans_broken_pkgs
@@ -1811,26 +1875,26 @@ checkConsistency verbosity my_flags = do
   when (not (null all_broken_pkgs)) $ exitWith (ExitFailure 1)
 
 
-closure :: [InstalledPackageInfo] -> [InstalledPackageInfo]
-        -> ([InstalledPackageInfo], [InstalledPackageInfo])
-closure pkgs db_stack = go pkgs db_stack
- where
-   go avail not_avail =
-     case partition (depsAvailable avail) not_avail of
-        ([],        not_avail') -> (avail, not_avail')
-        (new_avail, not_avail') -> go (new_avail ++ avail) not_avail'
-
-   depsAvailable :: [InstalledPackageInfo] -> InstalledPackageInfo
-                 -> Bool
-   depsAvailable pkgs_ok pkg = null dangling
-        where dangling = filter (`notElem` pids) (depends pkg)
-              pids = map installedUnitId pkgs_ok
-
-        -- we want mutually recursive groups of package to show up
-        -- as broken. (#1750)
-
+-- | Compute the set of transitive broken packages.
+--
+-- A package is assumed to be broken if any of its dependencies is not
+-- found in the 'db_stack' after a transitive reduction.
 brokenPackages :: [InstalledPackageInfo] -> [InstalledPackageInfo]
-brokenPackages pkgs = snd (closure [] pkgs)
+brokenPackages db_stack = go Set.empty db_stack
+  where
+    go avail_ids not_avail =
+      case partition (depsAvailable avail_ids) not_avail of
+        ([],        not_avail') -> not_avail'
+        (new_avail, not_avail') -> go (add new_avail avail_ids) not_avail'
+
+    add new_avail avail_ids =
+      foldl' (flip Set.insert) avail_ids (map installedUnitId new_avail)
+
+    depsAvailable :: Set.Set UnitId -> InstalledPackageInfo -> Bool
+    depsAvailable pids pkg = all (`Set.member` pids) (depends pkg)
+
+      -- we want mutually recursive groups of package to show up
+      -- as broken. (#1750)
 
 -----------------------------------------------------------------------------
 -- Sanity-check a new package config, and automatically build GHCi libs

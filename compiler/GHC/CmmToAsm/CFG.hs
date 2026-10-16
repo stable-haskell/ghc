@@ -696,7 +696,7 @@ optimizeCFG doStaticPred weights proc@(CmmProc _info _lab _live graph) cfg =
 -- Most importantly we penalize jumps across info tables.
 optHsPatterns :: Weights -> RawCmmDecl -> CFG -> CFG
 optHsPatterns _ (CmmData {}) cfg = cfg
-optHsPatterns weights (CmmProc info _lab _live graph) cfg =
+optHsPatterns weights (CmmProc (RawCmmProcInfo { raw_info_tbls = info }) _lab _live graph) cfg =
     {-# SCC optHsPatterns #-}
     -- pprTrace "Initial:" (pprEdgeWeights cfg) $
     -- pprTrace "Initial:" (ppr $ mkGlobalWeights (g_entry graph) cfg) $

@@ -158,6 +158,56 @@ your source files, but in some circumstances, the ``OPTIONS_GHC`` pragma
 is the Right Thing. (If you use :ghc-flag:`-keep-hc-file` and have ``OPTION`` flags in
 your module, the ``OPTIONS_GHC`` will get put into the generated ``.hc`` file).
 
+.. _cmm-target-attributes:
+
+CPU target attributes in Cmm source files
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. index::
+   single: Cmm; target attributes
+
+A procedure in a hand-written Cmm (``.cmm``) file can declare the CPU features
+it needs, using an attribute spelled after the GCC function attribute of the
+same name::
+
+    __attribute__((target("avx2")))
+    stg_ap_v32_fast ( ... )
+    {
+        ...
+    }
+
+The recognised features are ``avx``, ``avx2`` and ``avx512f``. Several may be
+given in one string, separated by commas, as in ``target("avx2,avx512f")``, and
+a feature implies its predecessors, so ``avx512f`` also enables ``avx2`` and
+``avx``.
+
+This declares that the procedure cannot be compiled correctly without those
+features; it is not a way to pass compiler flags. The RTS's
+``stg_ap_v32_fast`` really does use 256-bit vector registers, while
+``stg_ap_v16_fast`` in the same library must **not** be compiled with AVX
+enabled, or the generated code faults on targets that have only SSE2. An
+unrecognised attribute or feature is therefore a compile error; GHC never
+ignores one.
+
+The attribute applies to the procedure it precedes, not to the rest of the
+file. Cmm has no inter-procedural inlining, so per-procedure granularity is
+sound.
+
+.. note::
+   A backend that cannot honour the attribute rejects it: the C backend, the
+   wasm backend, and both the native code generator and the LLVM backend on a
+   non-x86 target. An **unregisterised** build routes Cmm through the C
+   backend, so RTS sources have to guard the attribute with CPP.
+
+.. note::
+   The attribute only enables features. There is no ``target("no-avx")``, so a
+   procedure that must be compiled *without* a feature still depends on that
+   feature not being enabled globally.
+
+   The C preprocessor runs before GHC sees the attribute, so ``__AVX2__`` and
+   friends still reflect the command line alone; a ``.cmm`` file cannot use
+   ``#if defined(__AVX2__)`` to detect its own attribute.
+
 Setting options in GHCi
 ~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -797,7 +847,12 @@ There are two kinds of participants in the GHC Jobserver protocol:
 
     Perform compilation in parallel when possible, coordinating with other
     processes through the semaphore ⟨sem⟩ (specified as a string).
-    Error if the semaphore doesn't exist.
+
+    If the semaphore cannot be opened (e.g. the socket does not exist
+    or its protocol version is incompatible with this GHC), GHC emits
+    a :ghc-flag:`-Wsemaphore-open-failure` warning and compiles
+    sequentially, using only the implicit token inherited from the
+    parent process.
 
     Use of ``-jsem`` will override use of :ghc-flag:`-j[⟨n⟩]`,
     and vice-versa.
@@ -1428,7 +1483,7 @@ messages and in GHCi:
     a new line.
 
     The structure of the output is described by a `JSON Schema <https://json-schema.org/>`_.
-    The schema can be downloaded :download:`here <diagnostics-as-json-schema-1_1.json>`.
+    The schema can be downloaded :download:`here <diagnostics-as-json-schema-1_2.json>`.
 
 .. ghc-flag:: -fdiagnostics-color=⟨always|auto|never⟩
     :shortdesc: Use colors in error messages

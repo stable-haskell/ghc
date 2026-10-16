@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MonadComprehensions #-}
+{-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE DataKinds #-}
@@ -1517,9 +1518,9 @@ instance Diagnostic TcRnMessage where
       -> pprTcRnBadlyLevelled reason bind_lvls use_lvl lift_attempt
     TcRnBadlyLevelledType name bind_lvls use_lvl
       -> mkSimpleDecorated $
-         text "Badly levelled type:" <+> ppr name <+>
-         fsep [text "is bound at" <+> pprThBindLevel bind_lvls,
-               text "but used at level" <+> ppr use_lvl]
+         fsep [ text "Level error:"
+              , ppr name <+> text "is used at level" <+> ppr use_lvl
+              , text "but is bound at" <+> ppr_th_bind_level bind_lvls]
     TcRnTyThingUsedWrong sort thing name
       -> mkSimpleDecorated $
          pprTyThingUsedWrong sort thing name
@@ -1657,7 +1658,7 @@ instance Diagnostic TcRnMessage where
     TcRnRoleValidationFailed role reason -> mkSimpleDecorated $
       vcat [text "Internal error in role inference:",
             pprRoleValidationFailedReason role reason,
-            text "Please report this as a GHC bug:  https://www.haskell.org/ghc/reportabug"]
+            text "Please report this as a GHC bug:  https://github.com/stable-haskell/ghc/issues"]
     TcRnCommonFieldResultTypeMismatch con1 con2 field_name -> mkSimpleDecorated $
       vcat [sep [text "Constructors" <+> ppr con1 <+> text "and" <+> ppr con2,
                  text "have a common field" <+> quotes (ppr field_name) <> comma],
@@ -1833,6 +1834,11 @@ instance Diagnostic TcRnMessage where
     TcRnUnusedName name reason
       -> mkSimpleDecorated $
          pprUnusedName name reason
+    TcRnStaticFormWarning names
+      -> mkSimpleDecorated $
+         vcat [ hang (text "From GHC 9.16, static forms cannot mention nested let-bound variables")
+                   2 (text "Offending variables:" <+> pprWithCommas ppr names)
+              , text "Solution: move these free variables to top level" ]
     TcRnQualifiedBinder rdr_name
       -> mkSimpleDecorated $
          text "Qualified name in binding position:" <+> ppr rdr_name
@@ -2220,6 +2226,8 @@ instance Diagnostic TcRnMessage where
       -> ErrorWithoutFlag
     TcRnStaticFormNotClosed{}
       -> ErrorWithoutFlag
+    TcRnStaticFormWarning{}
+      -> WarningWithoutFlag
     TcRnUselessTypeable
       -> WarningWithFlag Opt_WarnDerivingTypeable
     TcRnDerivingDefaults{}
@@ -3316,6 +3324,8 @@ instance Diagnostic TcRnMessage where
       -> [SuggestRemoveRecordWildcard]
     TcRnUnusedName{}
       -> noHints
+    TcRnStaticFormWarning{}
+      -> noHints
     TcRnQualifiedBinder{}
       -> noHints
     TcRnTypeApplicationsDisabled{}
@@ -3386,20 +3396,29 @@ instance Diagnostic TcRnMessage where
 
 pprTcRnBadlyLevelled :: LevelCheckReason -> Set.Set ThLevelIndex -> ThLevelIndex -> Maybe ErrorItem -> DecoratedSDoc
 pprTcRnBadlyLevelled reason bind_lvls use_lvl lift_attempt = mkDecorated $
-         [ fsep [ text "Level error:", pprLevelCheckReason reason
-                , text "is bound at" <+> pprThBindLevel bind_lvls
-                , text "but used at level" <+> ppr use_lvl]
+         [ fsep [ text "Level error:"
+                , hang (fsep [what <+> text "is used at level" <+> ppr use_lvl, "but it is bound at" <+> ppr_th_bind_level bind_lvls]) 2
+                  if | LevelCheckSplice (unwrapUserRdr -> gre) <- reason
+                     , imps <- gre_imp gre
+                     , not (isEmptyBag imps) -> ppr_imports imps
+                     | otherwise -> empty
+
+                ]
          ] ++
          [hang (text "Could not be resolved by implicit lifting due to the following error:") 2
           (text "No instance for:" <+> quotes (ppr (errorItemPred item)))
-         | Just item <- [lift_attempt]
-         ] ++
-         [ vcat (text "Available from the imports:" : ppr_imports (gre_imp gre))
-         | LevelCheckSplice _ (Just gre) <- [reason]
-         , not (isEmptyBag (gre_imp gre)) ]
+         | Just item <- [lift_attempt] ]
   where
-    ppr_imports :: Bag ImportSpec -> [SDoc]
-    ppr_imports = map ((bullet <+>) . ppr ) . bagToList
+    what = case reason of
+      LevelCheckInstance _ t -> text "instance for" <+> quotes (ppr t)
+      LevelCheckSplice n -> quotes $ ppr $ userRdrName n
+
+    ppr_imports :: Bag ImportSpec -> SDoc
+    ppr_imports bag = vcat $ map ((bullet <+>) .  ppr) impspecs
+      where impspecs = bagToList bag
+
+ppr_th_bind_level :: Set.Set ThLevelIndex -> SDoc
+ppr_th_bind_level levels_set = text "level" <> pluralSet levels_set <+> pprUnquotedSet levels_set
 
 note :: SDoc -> SDoc
 note note = "Note" <> colon <+> note <> dot
@@ -5820,13 +5839,6 @@ pprWrongThingSort =
     WrongThingTyCon -> "type constructor"
     WrongThingAxiom -> "axiom"
 
-pprLevelCheckReason :: LevelCheckReason -> SDoc
-pprLevelCheckReason = \case
-  LevelCheckInstance _ t ->
-    text "instance for" <+> quotes (ppr t)
-  LevelCheckSplice t _ ->
-    quotes (ppr t)
-
 pprUninferrableTyVarCtx :: UninferrableTyVarCtx -> SDoc
 pprUninferrableTyVarCtx = \case
   UninfTyCtx_ClassContext theta ->
@@ -7545,7 +7557,3 @@ pprErrCtxtMsg = \case
       text "implements signature" <+> quotes (ppr req_mod_name) <+>
       text "in" <+> quotes (ppr req_uid) <> dot
 
---------------------------------------------------------------------------------
-
-pprThBindLevel :: Set.Set ThLevelIndex -> SDoc
-pprThBindLevel levels_set = text "level" <> pluralSet levels_set <+> pprUnquotedSet levels_set

@@ -1,4 +1,5 @@
 
+{-# LANGUAGE CPP                        #-}
 {-# LANGUAGE DerivingStrategies         #-}
 {-# LANGUAGE ExistentialQuantification  #-}
 {-# LANGUAGE FlexibleInstances          #-}
@@ -178,8 +179,12 @@ import GHC.Utils.Logger
 
 import GHC.Builtin.Names ( isUnboundName )
 
+#if defined(HAVE_INTERPRETER)
 import GHCi.Message
 import GHCi.RemoteTypes
+#else
+import Foreign.ForeignPtr (ForeignPtr)
+#endif
 
 import Data.Set      ( Set )
 import qualified Data.Set as S
@@ -188,6 +193,11 @@ import Data.Dynamic  ( Dynamic )
 import Data.Map ( Map )
 import Data.Typeable ( TypeRep )
 import Data.Maybe    ( mapMaybe )
+
+#if !defined(HAVE_INTERPRETER)
+-- Stub types when interpreter is not available (no ghci dependency)
+data QState = QState  -- Stub for Template Haskell state
+#endif
 
 -- | The import specification as written by the user, including
 -- the list of explicitly imported names. Used in 'ModIface' to
@@ -576,8 +586,8 @@ data TcGblEnv
           -- ^ Allows us to choose unique DFun names.
 
         tcg_zany_n :: TcRef Integer,
-          -- ^ A source of unique identities for ZonkAny instances
-          -- See Note [Any types] in GHC.Builtin.Types, wrinkle (Any4)
+          -- ^ A source of unique identities for UnusedType instances
+          -- See Note [The types Any and UnusedType] in GHC.Builtin.Types, wrinkle (Any6)
 
         tcg_merged :: [(Module, Fingerprint)],
           -- ^ The requirements we merged with; we always have to recompile

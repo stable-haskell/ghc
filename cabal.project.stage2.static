@@ -1,0 +1,10 @@
+-- Static stage2 build (default).
+--
+-- All shared stage2 configuration lives in cabal.project.stage2.common; this
+-- file only selects static libraries. The Makefile uses this project file when
+-- DYNAMIC is not set to 1.
+import: cabal.project.stage2.common
+
+package *
+  shared: False
+  executable-dynamic: False

@@ -10,7 +10,7 @@ import GHC.Core ( CoreProgram )
 import GHC.Core.Opt.Monad ( CoreM, FloatOutSwitches )
 import GHC.Core.Opt.Simplify ( SimplifyOpts(..) )
 
-import GHC.Types.Basic  ( CompilerPhase(..) )
+import GHC.Types.Basic  ( CompilerPhase )
 import GHC.Unit.Module.ModGuts
 import GHC.Utils.Outputable as Outputable
 
@@ -52,14 +52,13 @@ data CoreToDo           -- These are diff core-to-core passes,
   | CoreDoSpecialising
   | CoreDoSpecConstr
   | CoreCSE
-  | CoreDoRuleCheck CompilerPhase String   -- Check for non-application of rules
-                                           -- matching this string
+  | CoreDoRuleCheck CompilerPhase String  -- Check for non-application of rules
+                                       -- matching this string
   | CoreDoNothing                -- Useful when building up
   | CoreDoPasses [CoreToDo]      -- lists of these things
 
   | CoreDesugar    -- Right after desugaring, no simple optimisation yet!
-  | CoreDesugarOpt -- CoreDesugarXXX: Not strictly a core-to-core pass, but produces
-                       --                 Core output, and hence useful to pass to endPass
+  | CoreDesugarOpt -- Simple optimisation after desugaring
 
   | CoreTidy
   | CorePrep

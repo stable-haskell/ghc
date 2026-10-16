@@ -59,6 +59,24 @@ vbarf(const char*s, va_list ap)
 }
 
 void
+sbarf(const char*s)
+{
+  barf("%s", s);
+}
+
+void
+pbarf(const char*fmt, void *p)
+{
+  barf(fmt, p);
+}
+
+void
+ssbarf(const char *fmt, const char *s)
+{
+  barf(fmt, s);
+}
+
+void
 _assertFail(const char*filename, unsigned int linenum)
 {
     barf("ASSERTION FAILED: file %s, line %u\n", filename, linenum);
@@ -179,7 +197,7 @@ rtsFatalInternalErrorFn(const char *s, va_list ap)
 #endif
      fprintf(stderr, "\n");
      fprintf(stderr, "    (GHC version %s for %s)\n", __GLASGOW_HASKELL_FULL_VERSION__, xstr(HostPlatform_TYPE));
-     fprintf(stderr, "    Please report this as a GHC bug:  https://www.haskell.org/ghc/reportabug\n");
+     fprintf(stderr, "    Please report this as a GHC bug:  https://github.com/stable-haskell/ghc/issues\n");
      fflush(stderr);
   }
 #if defined(mingw32_HOST_OS)

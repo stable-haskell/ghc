@@ -22,8 +22,8 @@ import GHC.Core.TyCo.Compare( eqType )
 import GHC.Core.Opt.Simplify.Env
 import GHC.Core.Opt.Simplify.Inline
 import GHC.Core.Opt.Simplify.Utils
-import GHC.Core.Opt.OccurAnal ( occurAnalyseExpr, zapLambdaBndrs, scrutOkForBinderSwap, BinderSwapDecision (..) )
-import GHC.Core.Make       ( FloatBind, mkImpossibleExpr, castBottomExpr )
+import GHC.Core.Opt.OccurAnal ( occurAnalyseExpr, zapLambdaBndrs )
+import GHC.Core.Make       ( FloatBind, mkImpossibleExpr )
 import qualified GHC.Core.Make
 import GHC.Core.Coercion hiding ( substCo, substCoVar )
 import GHC.Core.Reduction
@@ -471,14 +471,14 @@ leaving a simpler job for demand-analysis worker/wrapper.  See #19874.
 
 Wrinkles
 
-1. We must /not/ do cast w/w on
+(CWW1) We must /not/ do cast w/w on
      f = g |> co
    otherwise it'll just keep repeating forever! You might think this
    is avoided because the call to tryCastWorkerWrapper is guarded by
-   preInlineUnconditinally, but I'm worried that a loop-breaker or an
-   exported Id might say False to preInlineUnonditionally.
+   preInlineUnconditionally, but I'm worried that a loop-breaker or an
+   exported Id might say False to preInlineUnconditionally.
 
-2. We need to be careful with inline/noinline pragmas:
+(CWW2) We need to be careful with inline/noinline pragmas:
        rec { {-# NOINLINE f #-}
              f = (...g...) |> co
            ; g = ...f... }
@@ -493,15 +493,15 @@ Wrinkles
            f = $wf |> co
          ; g = ...f... }
    and that is bad: the whole point is that we want to inline that
-   cast!  We want to transfer the pagma to $wf:
+   cast!  We want to transfer the pragma to $wf:
       rec { {-# NOINLINE $wf #-}
             $wf = ...g...
           ; f = $wf |> co
           ; g = ...f... }
    c.f. Note [Worker/wrapper for NOINLINE functions] in GHC.Core.Opt.WorkWrap.
 
-3. We should still do cast w/w even if `f` is INLINEABLE.  E.g.
-      {- f: Stable unfolding = <stable-big> -}
+(CWW3) We should still do cast w/w even if `f` is INLINEABLE.  E.g.
+      {- f: Stable unfolding (arity 2) = <stable-big> -}
       f = (\xy. <big-body>) |> co
    Then we want to w/w to
       {- $wf: Stable unfolding = <stable-big> |> sym co -}
@@ -510,15 +510,43 @@ Wrinkles
    Notice that the stable unfolding moves to the worker!  Now demand analysis
    will work fine on $wf, whereas it has trouble with the original f.
    c.f. Note [Worker/wrapper for INLINABLE functions] in GHC.Core.Opt.WorkWrap.
-   This point also applies to strong loopbreakers with INLINE pragmas, see
-   wrinkle (4).
 
-4. We should /not/ do cast w/w for non-loop-breaker INLINE functions (hence
-   hasInlineUnfolding in tryCastWorkerWrapper, which responds False to
-   loop-breakers) because they'll definitely be inlined anyway, cast and
-   all. And if we do cast w/w for an INLINE function with arity zero, we get
+(CWW4) We should /not/ do cast w/w for INLINE functions (hence `hasInlineUnfolding`
+   in `tryCastWorkerWrapper`) because they'll definitely be inlined anyway, cast
+   and all.
+
+   Moreover, if we do cast w/w for an INLINE function with arity zero, we get
    something really silly: we inline that "worker" right back into the wrapper!
-   Worse than a no-op, because we have then lost the stable unfolding.
+   In fact it is Much Worse than a no-op, because we have then lost the stable
+   unfolding --- aargh (see #26903).  E.g. similar example to (CWW3)
+      {- g: Stable unfolding (arity 0) = <stable-big> -}   NB arity 0!
+      g = (\xy. <big-body>) |> co
+   If we w/w to this:
+      {- $wg: Stable unfolding (arity 0) = <stable-big> |> sym co -}
+      $wg = \xy. <big-body>
+      g = $wg |> co
+   then we'll inline $wg at the call site in `g` giving
+      {- $wg: Stable unfolding (arity 0) = <stable-big> |> sym co -}
+      $wg = \xy. <big-body>
+      g = (<stable-big> |> sym co) |> co
+   and now we'll drop `$wg` as dead and we have lost the unfolding on `g`.
+   (We could /also/ give the binding `g = $wf |> co` a stable unfolding. Then
+   things would work right; but there is also no point in doing the cast
+   worker/wrapper in the first place.)
+
+   NB: you might wonder about a loop-breaker with an INLINE pragma; after all, a
+   loop breaker won't "definitely be inlined anyway", so arguably we should not
+   disable cast w/w/ for it.  But a Rec group can /look/ recursive at an early
+   stage, and subsequently /become/ non-recursive after some simplification.
+   (This is common in instance decls; see Note [Checking for INLINE loop breakers]
+   in GHC.Core.Lint.)  So the danger is that we'll permanently lose that stable
+   unfolding that we specifically wanted (#26903).  Simple solution: disable cast
+   w/w for /any/ INLINE function.  See the defn
+   of `GHC.Types.Id.Info.hasInlineUnfolding`.
+
+   The danger is that an INLINE pragma on a genuninely-recursive function
+   will kill worker-wrapper.  Well, so be it.  They are pretty suspicious anyway;
+   see Note [Checking for INLINE loop breakers].
 
 All these wrinkles are exactly like worker/wrapper for strictness analysis:
   f is the wrapper and must inline like crazy
@@ -583,11 +611,11 @@ tryCastWorkerWrapper env bind_cxt old_bndr bndr (Cast rhs co)
   | BC_Let top_lvl is_rec <- bind_cxt  -- Not join points
   , not (isDFunId bndr) -- nor DFuns; cast w/w is no help, and we can't transform
                         --            a DFunUnfolding in mk_worker_unfolding
-  , not (exprIsTrivial rhs)        -- Not x = y |> co; Wrinkle 1
-  , not (hasInlineUnfolding info)  -- Not INLINE things: Wrinkle 4
-  , typeHasFixedRuntimeRep work_ty    -- Don't peel off a cast if doing so would
-                                      -- lose the underlying runtime representation.
-                                      -- See Note [Preserve RuntimeRep info in cast w/w]
+  , not (exprIsTrivial rhs)          -- Not x = y |> co; see (CWW1)
+  , not (hasInlineUnfolding info)    -- Not INLINE things: see (CWW4)
+  , typeHasFixedRuntimeRep work_ty   -- Don't peel off a cast if doing so would
+                                     -- lose the underlying runtime representation.
+                                     -- See Note [Preserve RuntimeRep info in cast w/w]
   , not (isOpaquePragma (idInlinePragma old_bndr)) -- Not for OPAQUE bindings
                                                    -- See Note [OPAQUE pragma]
   = do  { uniq <- getUniqueM
@@ -634,13 +662,13 @@ tryCastWorkerWrapper env bind_cxt old_bndr bndr (Cast rhs co)
                               `setArityInfo`      work_arity
            -- We do /not/ want to transfer OccInfo, Rules
            -- Note [Preserve strictness in cast w/w]
-           -- and Wrinkle 2 of Note [Cast worker/wrapper]
+           -- and (CWW2) of Note [Cast worker/wrapper]
 
     ----------- Worker unfolding -----------
     -- Stable case: if there is a stable unfolding we have to compose with (Sym co);
     --   the next round of simplification will do the job
     -- Non-stable case: use work_rhs
-    -- Wrinkle 3 of Note [Cast worker/wrapper]
+    -- See (CWW4) of Note [Cast worker/wrapper]
     mk_worker_unfolding top_lvl work_id work_rhs
       = case realUnfoldingInfo info of -- NB: the real one, even for loop-breakers
            unf@(CoreUnfolding { uf_tmpl = unf_rhs, uf_src = src })
@@ -1705,6 +1733,7 @@ simplCast env body co0 cont0
                                    , sc_hole_ty = coercionLKind co }) }
                                         -- NB!  As the cast goes past, the
                                         -- type of the hole changes (#16312)
+
         -- (f |> co) e   ===>   (f (e |> co1)) |> co2
         -- where   co :: (s1->s2) ~ (t1->t2)
         --         co1 :: t1 ~ s1
@@ -1839,7 +1868,7 @@ simpl_lam env bndr body (ApplyToVal { sc_arg = arg, sc_env = arg_se
             , not ( isSimplified dup &&  -- See (SR2) in Note [Avoiding simplifying repeatedly]
                     not (exprIsTrivial arg) &&
                     not (isDeadOcc (idOccInfo bndr)) )
-            -> do { simplTrace "SimplBindr:inline-uncond3" (ppr bndr) $
+            -> do { simplTrace "SimplBindr:inline-uncond3" (ppr bndr <+> text ":=" <+> ppr arg $$ ppr (seIdSubst env)) $
                     tick (PreInlineUnconditionally bndr)
                   ; simplLam env' body cont }
 
@@ -2370,24 +2399,9 @@ rebuildCall env arg_info _cont
 
 ---------- Bottoming applications --------------
 rebuildCall env (ArgInfo { ai_fun = fun, ai_args = rev_args, ai_dmds = [] }) cont
-  -- When we run out of strictness args, it means
-  -- that the call is definitely bottom; see GHC.Core.Opt.Simplify.Utils.mkArgInfo
-  -- Then we want to discard the entire strict continuation.  E.g.
-  --    * case (error "hello") of { ... }
-  --    * (error "Hello") arg
-  --    * f (error "Hello") where f is strict
-  --    etc
-  -- Then, especially in the first of these cases, we'd like to discard
-  -- the continuation, leaving just the bottoming expression.  But the
-  -- type might not be right, so we may have to add a coerce.
-  | not (contIsTrivial cont)     -- Only do this if there is a non-trivial
-                                 -- continuation to discard, else we do it
-                                 -- again and again!
-  = seqType cont_ty `seq`        -- See Note [Avoiding space leaks in OutType]
-    return (emptyFloats env, castBottomExpr res cont_ty)
-  where
-    res     = argInfoExpr fun rev_args
-    cont_ty = contResultType cont
+  -- When we run out of demands, it means that the call is definitely bottom.
+  -- See (TC2) in Note [Trimming the continuation for bottoming functions]
+  = rebuild env (argInfoExpr fun rev_args) (mkBottomCont env cont)
 
 ---------- Simplify type applications --------------
 rebuildCall env info (ApplyToTy { sc_arg_ty = arg_ty, sc_hole_ty = hole_ty, sc_cont = cont })
@@ -2458,7 +2472,11 @@ tryInlining env logger var cont
       | not (logHasDumpFlag logger Opt_D_verbose_core2core)
       = when (isExternalName (idName var)) $
             log_inlining $
-                sep [text "Inlining done:", nest 4 (ppr var)]
+              sep [text "Inlining done:", nest 4 (ppr var)]
+            --  $$ nest 2 (vcat
+            --       [ text "Simplifier phase:" <+> ppr (sePhase env)
+            --       , text "Unfolding activation:" <+> ppr (idInlineActivation var)
+            --       ])
       | otherwise
       = log_inlining $
            sep [text "Inlining done: " <> ppr var,
@@ -2645,6 +2663,8 @@ tryRules env rules fn args
       = log_rule Opt_D_dump_rule_rewrites "Rule fired" $ vcat
           [ text "Rule:" <+> ftext (ruleName rule)
           , text "Module:" <+>  printRuleModule rule
+        --, text "Simplifier phase:" <+> ppr (sePhase env)
+        --, text "Rule activation:" <+> ppr (ruleActivation rule)
           , text "Full arity:" <+>  ppr (ruleArity rule)
           , text "Before:" <+> hang (ppr fn) 2 (sep (map ppr args))
           , text "After: " <+> pprCoreExpr rule_rhs ]
@@ -3596,11 +3616,13 @@ addAltUnfoldings env case_bndr bndr_swap con_app
     env1 = addBinderUnfolding env case_bndr con_app_unf
 
     -- See Note [Add unfolding for scrutinee]
+    -- e.g. case (x |> co) of K a b -> blah
+    --      We add to `x` the unfolding  (K a b |> sym co)
     env2 | DoBinderSwap v mco <- bndr_swap
          = addBinderUnfolding env1 v $
               if isReflMCo mco  -- isReflMCo: avoid calling mk_simple_unf
               then con_app_unf  --            twice in the common case
-              else mk_simple_unf (mkCastMCo con_app mco)
+              else mk_simple_unf (mkCastMCo con_app (mkSymMCo mco))
 
          | otherwise = env1
 
@@ -3821,6 +3843,41 @@ When we have
 then we can just duplicate those alts because the A and C cases
 will disappear immediately.  This is more direct than creating
 join points and inlining them away.  See #4930.
+
+Note [Trimming the continuation for bottoming functions]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Suppose
+   f :: Int -> Int -> Int
+   f x = error "urk"
+
+   foo = f 3 4
+
+f's demand signature say "after one arg I return bottom".  We can drop
+the remaining arguments, thus
+
+   foo = case f 3 of {}
+
+This trimming can also be done with other continuations:
+   * case (error "hello") of { ... }
+   * f (error "Hello") where f is strict
+   etc
+
+We implement the trimming in three parts:
+
+(TC1) In `mkArgInfo`, for a bottoming function, we make a list of `RemainingArgDmds`
+  with a finite list of elements (in the example above, just one).
+
+  For comparison, note that, for non-bottoming functions, the `RemainingArgDmds`
+  always finishes with an infinite list of `topDmd`.
+
+(TC2) In `rebuildCall`, when we run out of `RemainingArgDmds` we discard the
+  remaining continuation.
+
+  After discarding the continuation, the types might not match, in which case
+  we leave behind a (case <hole> of {}) wrapper.  See the call to `mkBottomCont`.
+
+(TC3) In `mkDupableContWithDmds`, we similarly discard the continuation when
+  we run out of `RemainingArgDmds`.
 -}
 
 --------------------
@@ -3867,6 +3924,13 @@ mkDupableContWithDmds env _ cont
   = return (emptyFloats env, cont)
 
 mkDupableContWithDmds _ _ (Stop {}) = panic "mkDupableCont"     -- Handled by previous eqn
+
+mkDupableContWithDmds env dmds cont
+  -- No more demands => function is definitely bottom
+  --                 => simply trim the continuation
+  -- c.f. the null-demands case in `rebuildCall`
+  -- See (TC3) in Note [Trimming the continuation for bottoming functions]
+  | [] <- dmds = return (emptyFloats env, mkBottomCont env cont)
 
 mkDupableContWithDmds env dmds (CastIt { sc_co = co, sc_opt = opt, sc_cont = cont })
   = do  { (floats, cont') <- mkDupableContWithDmds env dmds cont
@@ -3943,7 +4007,7 @@ mkDupableContWithDmds env dmds
         ; return (floats, ApplyToTy { sc_cont = cont'
                                     , sc_arg_ty = arg_ty, sc_hole_ty = hole_ty }) }
 
-mkDupableContWithDmds env dmds
+mkDupableContWithDmds env (dmd : cont_dmds)
     (ApplyToVal { sc_arg = arg, sc_dup = dup, sc_env = se
                 , sc_cont = cont, sc_hole_ty = hole_ty })
   =     -- e.g.         [...hole...] (...arg...)
@@ -3951,8 +4015,7 @@ mkDupableContWithDmds env dmds
         --              let a = ...arg...
         --              in [...hole...] a
         -- NB: sc_dup /= OkToDup; that is caught earlier by contIsDupable
-    do  { let dmd:|cont_dmds = expectNonEmpty dmds
-        ; (floats1, cont') <- mkDupableContWithDmds env cont_dmds cont
+    do  { (floats1, cont') <- mkDupableContWithDmds env cont_dmds cont
         ; let env' = env `setInScopeFromF` floats1
         ; (_, se', arg') <- simplLazyArg env' dup hole_ty Nothing se arg
         ; (let_floats2, arg'') <- makeTrivial env NotTopLevel dmd (fsLit "karg") arg'
@@ -3966,7 +4029,6 @@ mkDupableContWithDmds env dmds
                                          -- See Note [StaticEnv invariant] in GHC.Core.Opt.Simplify.Utils
                               , sc_dup = OkToDup, sc_cont = cont'
                               , sc_hole_ty = hole_ty }) }
-
 mkDupableContWithDmds env _
     (Select { sc_bndr = case_bndr, sc_alts = alts, sc_env = se, sc_cont = cont })
   =     -- e.g.         (case [...hole...] of { pi -> ei })
@@ -4790,9 +4852,12 @@ simplRules env mb_new_id rules bind_cxt
                  rhs_cont = case bind_cxt of  -- See Note [Rules and unfolding for join points]
                                 BC_Let {}      -> mkBoringStop rhs_ty
                                 BC_Join _ cont -> assertPpr join_ok bad_join_msg cont
-                 lhs_env = updMode updModeForRules env'
-                 rhs_env = updMode (updModeForStableUnfoldings act) env'
-                           -- See Note [Simplifying the RHS of a RULE]
+
+    -- See Note [Simplifying rules] and Note [What is active in the RHS of a RULE or unfolding?]
+    -- in GHC.Core.Opt.Simplify.Utils.
+                 lhs_env = updMode updModeForRuleLHS env'
+                 rhs_env = updMode (updModeForRuleRHS act) env'
+
                  -- Force this to avoid retaining reference to old Id
                  !fn_name' = case mb_new_id of
                               Just id -> idName id
@@ -4816,12 +4881,3 @@ simplRules env mb_new_id rules bind_cxt
                           , ru_rhs   = occurAnalyseExpr rhs' }) }
                             -- Remember to occ-analyse, to drop dead code.
                             -- See Note [OccInfo in unfoldings and rules] in GHC.Core
-
-{- Note [Simplifying the RHS of a RULE]
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-We can simplify the RHS of a RULE much as we do the RHS of a stable
-unfolding.  We used to use the much more conservative updModeForRules
-for the RHS as well as the LHS, but that seems more conservative
-than necesary.  Allowing some inlining might, for example, eliminate
-a binding.
--}

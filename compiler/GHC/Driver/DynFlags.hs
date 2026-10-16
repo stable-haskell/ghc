@@ -28,13 +28,16 @@ module GHC.Driver.DynFlags (
         ParMakeCount(..),
         ways,
         HasDynFlags(..), ContainsDynFlags(..),
-        RtsOptsEnabled(..),
+        RtsOptsEnabled(..), haveRtsOptsFlags,
         GhcMode(..), isOneShot,
         GhcLink(..), isNoLink,
+        isExecutableLink,
+        ExecutableLinkMode(..),
         PackageFlag(..), PackageArg(..), ModRenaming(..),
         packageFlagsChanged,
         IgnorePackageFlag(..), TrustFlag(..),
         PackageDBFlag(..), PkgDbRef(..),
+        isPackageDbRef,
         Option(..), showOpt,
         DynLibLoader(..),
         positionIndependent,
@@ -64,6 +67,8 @@ module GHC.Driver.DynFlags (
 
         --
         baseUnitId,
+        rtsWayUnitId',
+        rtsWayUnitId,
 
 
         -- * Include specifications
@@ -101,6 +106,7 @@ import GHC.Core.Unfold
 import GHC.Data.Bool
 import GHC.Data.EnumSet (EnumSet)
 import GHC.Data.Maybe
+import GHC.Data.OsPath ( OsPath )
 import GHC.Builtin.Names ( mAIN_NAME )
 import GHC.Driver.Backend
 import GHC.Driver.Flags
@@ -143,6 +149,7 @@ import System.Directory
 import GHC.Foreign (withCString, peekCString)
 
 import qualified Data.Set as Set
+import GHC.Types.Unique.Set
 
 import qualified GHC.LanguageExtensions as LangExt
 
@@ -261,7 +268,7 @@ data DynFlags = DynFlags {
   -- Note [Filepaths and Multiple Home Units]
   workingDirectory      :: Maybe FilePath,
   thisPackageName       :: Maybe String, -- ^ What the package is called, use with multiple home units
-  hiddenModules         :: Set.Set ModuleName,
+  hiddenModules         :: !(UniqSet ModuleName),
   reexportedModules     :: [ReexportedModule],
 
   -- ways
@@ -476,8 +483,45 @@ data DynFlags = DynFlags {
     -- 'Int' because it can be used to test uniques in decreasing order.
 
   -- | Temporary: CFG Edge weights for fast iterations
-  cfgWeights            :: Weights
+  cfgWeights            :: Weights,
+
+  -- | Archive prelinking configuration
+  -- See Note [Archive Prelinking]
+  prelinkArchiveThreshold :: Maybe Word64,
+    -- ^ Size threshold in bytes for prelinking archives.
+    --   Nothing = prelinking disabled
+    --   Just n = prelink archives larger than n bytes
+  prelinkCacheDir         :: Maybe FilePath
+    -- ^ Persistent cache directory for prelinked objects.
+    --   Nothing = use per-session temp files only
+    --   Just dir = store prelinked objects in dir for reuse across sessions
 }
+
+-- Note [Archive Prelinking]
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~
+-- Historically, GHC generated prelinked objects (.o files) at build time
+-- for use with GHCi. This was slow and disk-intensive. Instead, we now
+-- create prelinked objects on-demand when the internal linker loads large
+-- static archives.
+--
+-- When loading an archive (.a file), instead of loading each member object
+-- individually, we use 'ld -r' to merge all members into a single object.
+-- This provides several benefits:
+--
+-- 1. Faster loading: Fewer objects for the RTS linker to process
+-- 2. Fewer system calls: Single loadObj instead of many
+-- 3. Better relocation handling: 'ld -r' resolves internal relocations
+-- 4. On-demand: Only prelink when actually needed
+-- 5. Cacheable: Optional persistent cache for reuse across sessions
+--
+-- Configuration:
+-- - prelinkArchiveThreshold: Size threshold (default 5MB). Archives larger
+--   than this are prelinked on first load. Set to Nothing to disable.
+-- - prelinkCacheDir: Optional persistent cache directory. If set, prelinked
+--   objects are cached here for reuse across GHC sessions. If Nothing, temp
+--   files are used and discarded after the session.
+--
+-- See also: GHC.Linker.ArchivePrelink
 
 class HasDynFlags m where
     getDynFlags :: m DynFlags
@@ -547,7 +591,7 @@ defaultDynFlags mySettings =
 -- See Note [Updating flag description in the User's Guide]
      DynFlags {
         ghcMode                 = CompManager,
-        ghcLink                 = LinkBinary,
+        ghcLink                 = LinkExecutable Dynamic,
         backend                 = platformDefaultBackend (sTargetPlatform mySettings),
         verbosity               = 0,
         debugLevel              = 0,
@@ -597,7 +641,7 @@ defaultDynFlags mySettings =
 
         workingDirectory        = Nothing,
         thisPackageName         = Nothing,
-        hiddenModules           = Set.empty,
+        hiddenModules           = emptyUniqSet,
         reexportedModules       = [],
 
         objectDir               = Nothing,
@@ -738,7 +782,14 @@ defaultDynFlags mySettings =
 
         reverseErrors = False,
         maxErrors     = Nothing,
-        cfgWeights    = defaultWeights
+        cfgWeights    = defaultWeights,
+
+        -- Archive prelinking defaults
+        -- Default threshold: 5MB (5 * 1024 * 1024 bytes)
+        -- This avoids prelinking overhead for small archives while fixing
+        -- "strange closure type" crashes for large archives in DYNAMIC=1 builds
+        prelinkArchiveThreshold = Just (5 * 1024 * 1024),
+        prelinkCacheDir         = Nothing  -- No persistent cache by default
       }
 
 type FatalMessager = String -> IO ()
@@ -797,13 +848,28 @@ isOneShot _other  = False
 -- | What to do in the link step, if there is one.
 data GhcLink
   = NoLink              -- ^ Don't link at all
-  | LinkBinary          -- ^ Link object code into a binary
+  | LinkExecutable ExecutableLinkMode -- ^ Link object code into an executable
   | LinkInMemory        -- ^ Use the in-memory dynamic linker (works for both
                         --   bytecode and object code).
   | LinkDynLib          -- ^ Link objects into a dynamic lib (DLL on Windows, DSO on ELF platforms)
   | LinkStaticLib       -- ^ Link objects into a static lib
   | LinkMergedObj       -- ^ Link objects into a merged "GHCi object"
   deriving (Eq, Show)
+
+isExecutableLink :: GhcLink -> Bool
+isExecutableLink (LinkExecutable _) = True
+isExecutableLink _              = False
+
+-- | How we link the binary.
+--
+-- This mostly deals with how external system dependencies are treated.
+-- The 'Ways' determine how Haskell libraries are linked.
+data ExecutableLinkMode
+  = FullyStatic            -- ^ fully static binary (incompatible with 'WayDyn')
+  | MostlyStatic [String]  -- ^ we link system libraries statically, except the ones provided
+  | Dynamic                -- ^ default
+  deriving (Eq, Show)
+
 
 isNoLink :: GhcLink -> Bool
 isNoLink NoLink = True
@@ -815,7 +881,7 @@ isNoLink _      = False
 data PackageArg =
       PackageArg String    -- ^ @-package@, by 'PackageName'
     | UnitIdArg Unit       -- ^ @-package-id@, by 'Unit'
-  deriving (Eq, Show)
+  deriving (Eq, Ord, Show)
 
 instance Outputable PackageArg where
     ppr (PackageArg pn) = text "package" <+> text pn
@@ -836,7 +902,7 @@ data ModRenaming = ModRenaming {
     modRenamingWithImplicit :: Bool, -- ^ Bring all exposed modules into scope?
     modRenamings :: [(ModuleName, ModuleName)] -- ^ Bring module @m@ into scope
                                                --   under name @n@.
-  } deriving (Eq)
+  } deriving (Eq, Ord)
 instance Outputable ModRenaming where
     ppr (ModRenaming b rns) = ppr b <+> parens (ppr rns)
 
@@ -854,14 +920,21 @@ data TrustFlag
 data PackageFlag
   = ExposePackage   String PackageArg ModRenaming -- ^ @-package@, @-package-id@
   | HidePackage     String -- ^ @-hide-package@
-  deriving (Eq) -- NB: equality instance is used by packageFlagsChanged
+  deriving (Eq, Ord) -- NB: equality instance is used by packageFlagsChanged
 
 data PackageDBFlag
   = PackageDB PkgDbRef
   | NoUserPackageDB
   | NoGlobalPackageDB
   | ClearPackageDBs
-  deriving (Eq)
+  deriving (Eq, Ord)
+
+isPackageDbRef :: PackageDBFlag -> Maybe PkgDbRef
+isPackageDbRef = \ case
+  PackageDB ref -> Just ref
+  NoUserPackageDB -> Nothing
+  NoGlobalPackageDB -> Nothing
+  ClearPackageDBs -> Nothing
 
 packageFlagsChanged :: DynFlags -> DynFlags -> Bool
 packageFlagsChanged idflags1 idflags0 =
@@ -875,7 +948,9 @@ packageFlagsChanged idflags1 idflags0 =
    packageGFlags dflags = map (`gopt` dflags)
      [ Opt_HideAllPackages
      , Opt_HideAllPluginPackages
-     , Opt_AutoLinkPackages ]
+     , Opt_AutoLinkPackages
+     , Opt_NoRts
+     , Opt_NoGhcInternal ]
 
 instance Outputable PackageFlag where
     ppr (ExposePackage n arg rn) = text n <> braces (ppr arg <+> ppr rn)
@@ -890,6 +965,13 @@ data RtsOptsEnabled
   = RtsOptsNone | RtsOptsIgnore | RtsOptsIgnoreAll | RtsOptsSafeOnly
   | RtsOptsAll
   deriving (Show)
+
+haveRtsOptsFlags :: DynFlags -> Bool
+haveRtsOptsFlags dflags =
+        isJust (rtsOpts dflags) || case rtsOptsEnabled dflags of
+                                       RtsOptsSafeOnly -> False
+                                       _ -> True
+
 
 -- | Are we building with @-fPIE@ or @-fPIC@ enabled?
 positionIndependent :: DynFlags -> Bool
@@ -935,8 +1017,8 @@ setDynamicNow dflags0 =
 data PkgDbRef
   = GlobalPkgDb
   | UserPkgDb
-  | PkgDbPath FilePath
-  deriving Eq
+  | PkgDbPath OsPath
+  deriving (Eq, Ord)
 
 
 
@@ -1278,7 +1360,7 @@ default_PIC platform =
     -- there will be a 4GB __ZEROPAGE that prevents us from using 32bit addresses
     -- while we could work around this on x86_64 (like WINE does), we won't be
     -- able on aarch64, where this is enforced.
-    (OSDarwin,  ArchX86_64)  -> [Opt_PIC]
+    (OSDarwin,  ArchX86_64)  -> [Opt_PIC, Opt_ExternalDynamicRefs]
     -- For AArch64, we need to always have PIC enabled.  The relocation model
     -- on AArch64 does not permit arbitrary relocations.  Under ASLR, we can't
     -- control much how far apart symbols are in memory for our in-memory static
@@ -1286,17 +1368,24 @@ default_PIC platform =
     -- This requires PIC on AArch64, and ExternalDynamicRefs on Linux as on top
     -- of that.  Subsequently we expect all code on aarch64/linux (and macOS) to
     -- be built with -fPIC.
-    (OSDarwin,  ArchAArch64) -> [Opt_PIC]
+    (OSDarwin,  ArchAArch64) -> [Opt_PIC, Opt_ExternalDynamicRefs]
     (OSLinux,   ArchAArch64) -> [Opt_PIC, Opt_ExternalDynamicRefs]
     (OSLinux,   ArchARM {})  -> [Opt_PIC, Opt_ExternalDynamicRefs]
     (OSLinux,   ArchRISCV64 {}) -> [Opt_PIC, Opt_ExternalDynamicRefs]
-    (OSOpenBSD, ArchX86_64)  -> [Opt_PIC] -- Due to PIE support in
+    (OSOpenBSD, ArchX86_64)  -> [Opt_PIC, Opt_ExternalDynamicRefs]
+                                         -- Due to PIE support in
                                          -- OpenBSD since 5.3 release
                                          -- (1 May 2013) we need to
                                          -- always generate PIC. See
                                          -- #10597 for more
                                          -- information.
     (OSLinux,   ArchLoongArch64) -> [Opt_PIC, Opt_ExternalDynamicRefs]
+    -- On x86_64, PIC is required for correct RTS static linker behavior when
+    -- loading .o files into processes with shared libraries at high addresses.
+    -- Without ExternalDynamicRefs, R_X86_64_PC32 relocations can overflow and
+    -- the X86_64_ELF_NONPIC_HACK jump islands corrupt data references. See #26390.
+    (OSLinux,   ArchX86_64)      -> [Opt_PIC, Opt_ExternalDynamicRefs]
+    (OSFreeBSD, ArchX86_64)      -> [Opt_PIC, Opt_ExternalDynamicRefs]
     _                      -> []
 
 -- | The language extensions implied by the various language variants.
@@ -1472,6 +1561,20 @@ versionedFilePath platform = uniqueSubdir platform
 -- against.
 baseUnitId :: DynFlags -> UnitId
 baseUnitId dflags = unitSettings_baseUnitId (unitSettings dflags)
+
+rtsWayUnitId' :: Ways -> UnitId
+rtsWayUnitId' ways | ways `hasWay` WayThreaded
+                   , ways `hasWay` WayDebug
+                   = stringToUnitId "rts:threaded-debug"
+                   | ways `hasWay` WayThreaded
+                   = stringToUnitId "rts:threaded-nodebug"
+                   | ways `hasWay` WayDebug
+                   = stringToUnitId "rts:nonthreaded-debug"
+                   | otherwise
+                   = stringToUnitId "rts:nonthreaded-nodebug"
+
+rtsWayUnitId :: DynFlags -> UnitId
+rtsWayUnitId dflags = rtsWayUnitId' (ways dflags)
 
 -- SDoc
 -------------------------------------------

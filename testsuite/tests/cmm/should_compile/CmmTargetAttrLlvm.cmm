@@ -1,0 +1,20 @@
+/* The local AVX2 requirement must retain global -msse4.2 (including LLVM's
+   separate popcnt feature), and must not attach features to the next procedure.
+   See Note [Cmm target attributes] in GHC.Cmm. */
+
+__attribute__((target("avx2")))
+cmmTargetAttrLlvm (bits64 p)
+{
+  vec256 v;
+  v = vec256[p];
+  vec256[p + 32] = v;
+  return ();
+}
+
+cmmTargetAttrLlvmBaseline (bits64 p)
+{
+  vec128 v;
+  v = vec128[p];
+  vec128[p + 16] = v;
+  return ();
+}

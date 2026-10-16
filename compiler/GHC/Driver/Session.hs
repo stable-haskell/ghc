@@ -132,6 +132,10 @@ module GHC.Driver.Session (
         sGhcWithInterpreter,
         sLibFFI,
         sTargetRTSLinkerOnlySupportsSharedLibs,
+        sTargetIsDynamic,
+        sTargetShipsDynLibs,
+        sTargetIsProfiled,
+        sTargetShipsProfLibs,
         GhcNameVersion(..),
         FileSettings(..),
         PlatformMisc(..),
@@ -280,6 +284,9 @@ import GHC.Parser.Lexer (mkParserOpts, initParserState, P(..), ParseResult(..))
 
 import GHC.SysTools.BaseDir ( expandToolDir, expandTopDir )
 
+import System.Semaphore ( getSemaphoreProtocolVersion, semaphoreVersion )
+
+
 import Data.IORef
 import Control.Arrow ((&&&))
 import Control.Monad
@@ -293,8 +300,11 @@ import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map as Map
 import qualified Data.Set as Set
+import GHC.Types.Unique.Set
 import Data.Word
 import System.FilePath
+import qualified GHC.Data.OsPath as OsPath
+
 import Text.ParserCombinators.ReadP hiding (char)
 import Text.ParserCombinators.ReadP as R
 
@@ -635,6 +645,47 @@ setHiDir      f d = d { hiDir      = Just f}
 setHieDir     f d = d { hieDir     = Just f}
 setStubDir    f d = d { stubDir    = Just f
                       , includePaths = addGlobalInclude (includePaths d) [f] }
+
+-- | Set the archive prelinking size threshold from a string like "5m", "10M", "1024"
+-- Accepts: plain bytes (e.g., "1024"), kilobytes ("5k"), megabytes ("5m")
+-- Suffixes are case-insensitive
+setPrelinkArchiveThreshold :: String -> DynFlags -> Either String DynFlags
+setPrelinkArchiveThreshold str d =
+  case parseSize str of
+    Left err -> Left err
+    Right size -> Right $ d { prelinkArchiveThreshold = Just size }
+  where
+    parseSize :: String -> Either String Word64
+    parseSize s =
+      let (numStr, suffix) = span (\c -> c `elem` "0123456789") s
+      in case reads numStr of
+           [(n, "")] ->
+             case map toLower suffix of
+               "" -> Right n
+               "k" -> Right (n * 1024)
+               "m" -> Right (n * 1024 * 1024)
+               "g" -> Right (n * 1024 * 1024 * 1024)
+               _ -> Left $ "Invalid size suffix in -fprelink-archives=" ++ str ++
+                          ". Valid suffixes: k, m, g (case-insensitive)"
+           _ -> Left $ "Invalid size number in -fprelink-archives=" ++ str
+
+    toLower :: Char -> Char
+    toLower c | c >= 'A' && c <= 'Z' = toEnum (fromEnum c + 32)
+              | otherwise = c
+
+setPrelinkCacheDir :: FilePath -> DynFlags -> DynFlags
+setPrelinkCacheDir dir d = d { prelinkCacheDir = Just dir }
+
+-- | Disable archive prelinking
+disablePrelinkArchives :: DynFlags -> DynFlags
+disablePrelinkArchives d = d { prelinkArchiveThreshold = Nothing }
+
+-- | Wrapper for setPrelinkArchiveThreshold that works with DynP monad
+setPrelinkArchiveThresholdM :: String -> DynFlags -> DynP DynFlags
+setPrelinkArchiveThresholdM str d =
+  case setPrelinkArchiveThreshold str d of
+    Left err -> addErr err >> return d
+    Right d' -> return d'
   -- -stubdir D adds an implicit -I D, so that gcc can find the _stub.h file
   -- \#included from the .hc file when compiling via C (i.e. unregisterised
   -- builds).
@@ -1113,6 +1164,15 @@ dynamic_flags_deps = [
       (NoArg (setGeneralFlag Opt_SingleLibFolder))
   , make_ord_flag defGhcFlag "pie"            (NoArg (setGeneralFlag Opt_PICExecutable))
   , make_ord_flag defGhcFlag "no-pie"         (NoArg (unSetGeneralFlag Opt_PICExecutable))
+  , make_ord_flag defGhcFlag "static-external" (noArg (\d -> d { ghcLink=LinkExecutable (MostlyStatic ["c", "m", "rt", "dl", "pthread", "stdc++", "c++", "c++abi", "atomic", "wsock32", "gdi32", "winmm", "dbghelp", "psapi", "user32", "shell32", "mingw32", "kernel32", "advapi32", "mingwex", "ws2_32", "shlwapi", "ole32", "rpcrt4", "ntdll", "ucrt"]) }))
+  , make_ord_flag defGhcFlag "exclude-static-external"
+      (OptPrefix (\str -> upd $ \d -> case ghcLink d of
+                                        LinkExecutable (MostlyStatic _) ->
+                                          d { ghcLink = LinkExecutable (MostlyStatic (split ',' str)) }
+                                        _ -> d
+                 )
+      )
+  , make_ord_flag defGhcFlag "fully-static"    (noArg (\d -> d { ghcLink=LinkExecutable FullyStatic }))
 
         ------- Specific phases  --------------------------------------------
     -- need to appear before -pgmL to be parsed as LLVM flags.
@@ -1233,6 +1293,15 @@ dynamic_flags_deps = [
   , make_ord_flag defGhcFlag "dynload"            (hasArg parseDynLibLoaderMode)
   , make_ord_flag defGhcFlag "dylib-install-name" (hasArg setDylibInstallName)
 
+        -------- Archive Prelinking -----------------------------------------
+        -- See Note [Archive Prelinking] in GHC.Driver.DynFlags
+  , make_ord_flag defGhcFlag "prelink-archives"
+        (sepArgM setPrelinkArchiveThresholdM)
+  , make_ord_flag defGhcFlag "prelink-cache"
+        (hasArg setPrelinkCacheDir)
+  , make_ord_flag defGhcFlag "no-prelink-archives"
+        (noArg disablePrelinkArchives)
+
         ------- Libraries ---------------------------------------------------
   , make_ord_flag defFlag "L"   (Prefix addLibraryPath)
   , make_ord_flag defFlag "l"   (hasArg (addLdInputs . Option . ("-l" ++)))
@@ -1312,6 +1381,13 @@ dynamic_flags_deps = [
         (NoArg (unSetGeneralFlag Opt_AutoLinkPackages))
   , make_ord_flag defGhcFlag "no-hs-main"
         (NoArg (setGeneralFlag Opt_NoHsMain))
+  , make_ord_flag defGhcFlag "no-rts"
+        (NoArg (setGeneralFlag Opt_NoRts))
+  -- Prevent ghc-internal from being auto-injected when building RTS sublibraries.
+  -- When building rts sublibaries with GHC, we may try to load ghc-internal
+  -- due to auto-injection. This flag, like -no-rts, prevents that.
+  , make_ord_flag defGhcFlag "no-ghc-internal"
+        (NoArg (setGeneralFlag Opt_NoGhcInternal))
   , make_ord_flag defGhcFlag "fno-state-hack"
         (NoArg (setGeneralFlag Opt_G_NoStateHack))
   , make_ord_flag defGhcFlag "fno-opt-coercion"
@@ -2047,7 +2123,7 @@ package_flags_deps :: [(Deprecation, Flag (CmdLineP DynFlags))]
 package_flags_deps = [
         ------- Packages ----------------------------------------------------
     make_ord_flag defFlag "package-db"
-      (HasArg (addPkgDbRef . PkgDbPath))
+      (HasArg (addPkgDbRef . PkgDbPath . OsPath.unsafeEncodeUtf))
   , make_ord_flag defFlag "clear-package-db"      (NoArg clearPkgDb)
   , make_ord_flag defFlag "no-global-package-db"  (NoArg removeGlobalPkgDb)
   , make_ord_flag defFlag "no-user-package-db"    (NoArg removeUserPkgDb)
@@ -2057,7 +2133,7 @@ package_flags_deps = [
       (NoArg (addPkgDbRef UserPkgDb))
     -- backwards compat with GHC<=7.4 :
   , make_dep_flag defFlag "package-conf"
-      (HasArg $ addPkgDbRef . PkgDbPath) "Use -package-db instead"
+      (HasArg $ addPkgDbRef . PkgDbPath . OsPath.unsafeEncodeUtf) "Use -package-db instead"
   , make_dep_flag defFlag "no-user-package-conf"
       (NoArg removeUserPkgDb)              "Use -no-user-package-db instead"
   , make_ord_flag defGhcFlag "package-name"       (HasArg $ \name ->
@@ -2391,6 +2467,7 @@ wWarningFlagsDeps = [minBound..maxBound] >>= \x -> case x of
   Opt_WarnRuleLhsEqualities -> warnSpec x
   Opt_WarnUnusableUnpackPragmas -> warnSpec x
   Opt_WarnPatternNamespaceSpecifier -> warnSpec x
+  Opt_WarnSemaphoreOpenFailure -> warnSpec x
 
 warningGroupsDeps :: [(Deprecation, FlagSpec WarningGroup)]
 warningGroupsDeps = map mk warningGroups
@@ -2507,6 +2584,7 @@ fFlagsDeps = [
 
   -- load all targets on GHCi startup
   flagGhciSpec "load-initial-targets"         Opt_GhciDoLoadTargets,
+  flagGhciSpec "import-loaded-targets"        Opt_GhciImportLoadedTargets,
 
   flagSpec "helpful-errors"                   Opt_HelpfulErrors,
   flagSpec "hpc"                              Opt_Hpc,
@@ -2852,6 +2930,9 @@ hasArg fn = HasArg (upd . fn)
 sepArg :: (String -> DynFlags -> DynFlags) -> OptKind (CmdLineP DynFlags)
 sepArg fn = SepArg (upd . fn)
 
+sepArgM :: (String -> DynFlags -> DynP DynFlags) -> OptKind (CmdLineP DynFlags)
+sepArgM fn = SepArg (\s -> updM (fn s))
+
 intSuffix :: (Int -> DynFlags -> DynFlags) -> OptKind (CmdLineP DynFlags)
 intSuffix fn = IntSuffix (\n -> upd (fn n))
 
@@ -3153,7 +3234,7 @@ setPackageName p d = d { thisPackageName =  Just p }
 
 addHiddenModule :: String -> DynP ()
 addHiddenModule p =
-  upd (\s -> s{ hiddenModules  = Set.insert (mkModuleName p) (hiddenModules s) })
+  upd (\s -> s{ hiddenModules  = addOneToUniqSet (hiddenModules s) (mkModuleName p) })
 
 addReexportedModule :: String -> DynP ()
 addReexportedModule p =
@@ -3181,7 +3262,7 @@ parseReexportedModule str
 -- code are allowed (requests for other target types are ignored).
 setBackend :: Backend -> DynP ()
 setBackend l = upd $ \ dfs ->
-  if ghcLink dfs /= LinkBinary || backendWritesFiles l
+  if not (isExecutableLink (ghcLink dfs)) || backendWritesFiles l
   then dfs{ backend = l }
   else dfs
 
@@ -3249,7 +3330,7 @@ parseEnvFile :: FilePath -> String -> DynP ()
 parseEnvFile envfile = mapM_ parseEntry . lines
   where
     parseEntry str = case words str of
-      ("package-db": _)     -> addPkgDbRef (PkgDbPath (envdir </> db))
+      ("package-db": _)     -> addPkgDbRef (PkgDbPath (OsPath.unsafeEncodeUtf (envdir </> db)))
         -- relative package dbs are interpreted relative to the env file
         where envdir = takeDirectory envfile
               db     = drop 11 str
@@ -3457,6 +3538,7 @@ compilerInfo dflags
     : map (fmap $ expandDirectories (topDir dflags) (toolDir dflags))
           (rawSettings dflags)
    ++ [("Project version",             projectVersion dflags),
+       ("Edition",                     "Stable Haskell"),
        ("Project Git commit id",       cProjectGitCommitId),
        ("Project Version Int",         cProjectVersionInt),
        ("Project Patch Level",         cProjectPatchLevel),
@@ -3477,10 +3559,20 @@ compilerInfo dflags
        ("Have native code generator",  showBool $ platformNcgSupported platform),
        ("target has RTS linker",       showBool $ platformHasRTSLinker platform),
        ("Target default backend",      show     $ platformDefaultBackend platform),
-       -- Whether or not we support @-dynamic-too@
-       ("Support dynamic-too",         showBool $ not isWindows),
+       -- Whether or not we support @-dynamic-too@ for this target.
+       -- Historically `not isWindows` (Windows tooling couldn't do
+       -- it). Now also gated on the per-target `sTargetIsDynamic`
+       -- dial — if the target isn't dynamic-capable, -dynamic-too
+       -- is meaningless. Keep the Windows guard as defence in depth
+       -- for pre-this-patch bindists on Windows that lack the key
+       -- and so default sTargetIsDynamic=True (the AND would
+       -- otherwise regress them).
+       ("Support dynamic-too",         showBool $ not isWindows
+                                              && sTargetIsDynamic (settings dflags)),
        -- Whether or not we support the @-j@ flag with @--make@.
        ("Support parallel --make",     "YES"),
+       -- The semaphore protocol version supported by @-jsem@.
+       ("Semaphore version",           show (getSemaphoreProtocolVersion semaphoreVersion)),
        -- Whether or not we support "Foo from foo-0.1-XXX:Foo" syntax in
        -- installed package info.
        ("Support reexported-modules",  "YES"),
@@ -3498,10 +3590,27 @@ compilerInfo dflags
        ("Uses package keys",           "YES"),
        -- Whether or not we support the @-this-unit-id@ flag
        ("Uses unit IDs",               "YES"),
-       -- Whether or not GHC was compiled using -dynamic
-       ("GHC Dynamic",                 showBool hostIsDynamic),
-       -- Whether or not GHC was compiled using -prof
-       ("GHC Profiled",                showBool hostIsProfiled),
+       -- Reported as YES iff *both* per-target settings dials say so:
+       --   `target is dynamic`               — the GHC for this target
+       --                                       can produce dynamic output
+       --   `target ships dynamic libraries`  — the lib tree actually has
+       --                                       .dyn_hi / .so artifacts
+       -- cabal-install reads this to decide whether to enable
+       -- @library-dynamic@ by default. The target's per-target settings
+       -- file completely controls this value — no host-RTS dependency,
+       -- so on a multi-target bindist with one shared stage2 GHC binary
+       -- different targets can correctly disagree. Both keys default to
+       -- True if absent (matches pre-this-change behaviour).
+       ("GHC Dynamic",                 showBool (sTargetIsDynamic (settings dflags)
+                                              && sTargetShipsDynLibs (settings dflags))),
+       -- Profiling-way analogue of `GHC Dynamic`. Per-target dials
+       -- via `target is profiled` + `target ships profiling libraries`
+       -- settings keys. Drops the historical `hostIsProfiled` RTS-
+       -- baked-in for the same reason the dyn pair did: on a multi-
+       -- target bindist the shared stage2 GHC binary's prof-ness is
+       -- fixed but the lib trees can disagree per target.
+       ("GHC Profiled",                showBool (sTargetIsProfiled (settings dflags)
+                                              && sTargetShipsProfLibs (settings dflags))),
        ("Debug on",                    showBool debugIsOn),
        ("LibDir",                      topDir dflags),
        -- This is always an absolute path, unlike "Relative Global Package DB" which is
@@ -3701,6 +3810,36 @@ makeDynFlagsConsistent dflags
         -- way (-prof, -static, or -dynamic).
         setGeneralFlag' Opt_ExternalInterpreter $
         addWay' WayDyn dflags
+
+ | LinkExecutable FullyStatic <- ghcLink dflags
+ , ways dflags `hasWay` WayDyn
+    = let warn = "-dynamic is ignored when using -fully-static"
+      in loop dflags{targetWays_ = removeWay WayDyn (targetWays_ dflags)} warn
+ | LinkStaticLib <- ghcLink dflags
+ , ways dflags `hasWay` WayDyn
+    = let warn = "-dynamic is ignored when using -staticlib"
+      in loop dflags{targetWays_ = removeWay WayDyn (targetWays_ dflags)} warn
+ -- For the wasm target, when ghc is invoked with -dynamic,
+ -- (DISABLED Phase 6.5, 2026-05-26) — the original rule below was meant
+ -- to strip WayDyn only when linking the final .wasm binary, but the
+ -- default `ghcLink` in `defaultDynFlags` is `LinkExecutable Dynamic`, so
+ -- the rule fired for EVERY --make invocation that didn't override it.
+ -- That broke cabal library builds with `shared:True, library-vanilla:False`
+ -- (the rule stripped WayDyn mid-compile, then GHC looked for vanilla .hi
+ -- files that don't exist since only .dyn_hi was produced).
+ --
+ -- The wasm linker (wasm-ld) silently handles -dynamic without issue —
+ -- wasm binaries are inherently single-file artifacts, and PIC objects
+ -- link fine into them. Removing the strip lets WayDyn flow through to
+ -- the actual link step, where wasm-ld does the right thing.
+ -- (If a future regression surfaces, narrow the rule to fire ONLY in the
+ -- actual link phase, not at flag-consistency time.)
+ --
+ -- | LinkExecutable _ <- ghcLink dflags
+ -- , ArchWasm32 <- arch
+ -- , ways dflags `hasWay` WayDyn
+ --    = let warn = "-dynamic is ignored when linking binaries on WASM"
+ --      in loop dflags{targetWays_ = removeWay WayDyn (targetWays_ dflags)} warn
 
  | LinkInMemory <- ghcLink dflags
  , not (gopt Opt_ExternalInterpreter dflags)

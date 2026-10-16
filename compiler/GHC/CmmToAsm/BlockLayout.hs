@@ -799,24 +799,25 @@ sequenceTop _       _           top@(CmmData _ _) = pure top
 sequenceTop ncgImpl edgeWeights (CmmProc info lbl live (ListGraph blocks)) = do
     let config     = ncgConfig ncgImpl
         platform   = ncgPlatform config
+        info_tbls  = raw_info_tbls info
 
         seq_blocks =
                   if -- Chain based algorithm
                       | ncgCfgBlockLayout config
                       , backendMaintainsCfg platform
                       , Just cfg <- edgeWeights
-                      -> {-# SCC layoutBlocks #-} sequenceChain info cfg blocks
+                      -> {-# SCC layoutBlocks #-} sequenceChain info_tbls cfg blocks
 
                       -- Old algorithm without edge weights
                       | ncgCfgWeightlessLayout config
                         || not (backendMaintainsCfg platform)
-                      -> {-# SCC layoutBlocks #-} sequenceBlocks Nothing info blocks
+                      -> {-# SCC layoutBlocks #-} sequenceBlocks Nothing info_tbls blocks
 
                       -- Old algorithm with edge weights (if any)
                       | otherwise
-                      -> {-# SCC layoutBlocks #-} sequenceBlocks edgeWeights info blocks
+                      -> {-# SCC layoutBlocks #-} sequenceBlocks edgeWeights info_tbls blocks
 
-    far_blocks <- (ncgMakeFarBranches ncgImpl) platform info seq_blocks
+    far_blocks <- (ncgMakeFarBranches ncgImpl) platform info_tbls seq_blocks
     pure $ CmmProc info lbl live $ ListGraph far_blocks
 
 

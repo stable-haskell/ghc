@@ -1,0 +1,9 @@
+/* A backend that cannot honour a target attribute must reject it.  Ignoring it
+   would produce code that faults at runtime instead of a build failure.
+   See Note [Cmm target attributes] in GHC.Cmm.  */
+
+__attribute__((target("avx2")))
+cmmTargetAttrViaC (bits64 p)
+{
+  return ();
+}

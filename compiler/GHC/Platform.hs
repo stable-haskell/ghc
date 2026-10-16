@@ -291,6 +291,33 @@ data PlatformMisc = PlatformMisc
   , platformMisc_libFFI               :: Bool
   , platformMisc_llvmTarget           :: String
   , platformMisc_targetRTSLinkerOnlySupportsSharedLibs :: Bool
+    -- | Is the GHC for this target capable of producing dynamic
+    -- output (i.e. can it honour @-dynamic@ / @-dynamic-too@)?
+    -- Per-target settings key @"target is dynamic"@ in
+    -- @lib/targets/\<triple\>/lib/settings@. On a multi-target bindist
+    -- the shared stage2 GHC binary's RTS-baked-in dynamic-ness is
+    -- not a per-target proxy — different targets in one binary may
+    -- need to disagree (e.g. a JS target whose iserv runs vanilla
+    -- and whose lib tree has no dyn artifacts). Combined with
+    -- 'platformMisc_targetShipsDynLibs' to drive @ghc --info@'s
+    -- @GHC Dynamic@ value, which cabal-install reads.
+  , platformMisc_targetIsDynamic      :: Bool
+    -- | Does the target's installed library tree ship @.dyn_hi@ /
+    -- @.so@ files? Per-target settings key
+    -- @"target ships dynamic libraries"@. Set independently of
+    -- 'platformMisc_targetIsDynamic' so a target can be dynamic-
+    -- capable but not currently ship dyn artifacts (or vice versa).
+  , platformMisc_targetShipsDynLibs   :: Bool
+    -- | Profiling-way analogue of 'platformMisc_targetIsDynamic'.
+    -- Per-target settings key @"target is profiled"@. Drives
+    -- @ghc --info@'s @GHC Profiled@ — cabal-install reads that to
+    -- decide whether to enable @library-profiling@.
+  , platformMisc_targetIsProfiled     :: Bool
+    -- | Profiling-way analogue of 'platformMisc_targetShipsDynLibs'.
+    -- Per-target settings key @"target ships profiling libraries"@.
+    -- Combined with 'platformMisc_targetIsProfiled' for the
+    -- @GHC Profiled@ report.
+  , platformMisc_targetShipsProfLibs  :: Bool
   }
 
 platformSOName :: Platform -> FilePath -> FilePath

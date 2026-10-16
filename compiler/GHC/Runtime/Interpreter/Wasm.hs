@@ -10,11 +10,13 @@ import GHC.Runtime.Interpreter.Types
 #if !defined(mingw32_HOST_OS)
 
 import Control.Concurrent.MVar
+import Control.Exception (throwIO)
 import Data.Maybe
 import GHC.Data.FastString
 import qualified GHC.Data.ShortText as ST
 import GHC.Platform
 import GHC.Unit
+import GHC.Utils.Panic (GhcException (InstallationError))
 import GHCi.Message
 import System.Directory
 import System.Environment.Blank
@@ -34,6 +36,21 @@ spawnWasmInterp :: WasmInterpConfig -> IO (ExtInterpInstance ())
 
 -- See Note [The Wasm Dynamic Linker] for details
 spawnWasmInterp WasmInterpConfig {..} = do
+  -- Pre-flight: dyld.mjs (the wasm dynamic linker) has a
+  -- `#!/usr/bin/env -S node` shebang and needs `node` on $PATH. Without
+  -- it the iserv child exits with code 127, which the generic
+  -- "External interpreter terminated (127)" message in
+  -- Process.hs:129 doesn't explain. Emit a clear, actionable error
+  -- here instead.
+  mb_node <- findExecutable "node"
+  case mb_node of
+    Just _ -> pure ()
+    Nothing -> throwIO . InstallationError $
+      "Template Haskell evaluation on the wasm32 backend requires `node` "
+        ++ "(Node.js) on PATH. The wasm dynamic linker shim ("
+        ++ wasmInterpDyLD
+        ++ ") is a Node script. Install Node.js and ensure `node` is "
+        ++ "reachable, then retry."
   let Just ghci_unit_id =
         lookupPackageName
           wasmInterpUnitState

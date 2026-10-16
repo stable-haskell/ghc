@@ -42,6 +42,7 @@ import GHC.Utils.Outputable
 import GHC.Utils.Panic
 
 import GHC.Iface.Errors.Types
+import qualified Data.List as List
 
 defaultIfaceMessageOpts :: IfaceMessageOpts
 defaultIfaceMessageOpts = IfaceMessageOpts { ifaceShowTriedFiles = False
@@ -174,14 +175,12 @@ cantFindErrorX pkg_hidden_hint may_show_locations mod_or_interface (CantFindInst
           looks_like_srcpkgid =
      -- Unsafely coerce a unit id (i.e. an installed package component
      -- identifier) into a PackageId and see if it means anything.
-           case cands of
-             (pkg:pkgs) ->
-              parens (text "This unit ID looks like the source package ID;" $$
-                      text "the real unit ID is" <+> quotes (ftext (unitIdFS (unitId pkg))) $$
-                     (if null pkgs then empty
-                                  else text "and" <+> int (length pkgs) <+> text "other candidate" <> plural pkgs))
+           case List.sortOn unitPackageNameString cands of
              -- Todo: also check if it looks like a package name!
              [] -> empty
+             pkgs ->
+              parens (text "This unit-id looks like a source package name-version;" <+>
+                      text "candidates real unit-ids are:" $$ vcat (map (quotes . ftext . unitIdFS . unitId)  pkgs))
 
       in hsep [ text "no unit id matching" <+> quotes (ppr pkg)
               , text "was found"] $$ looks_like_srcpkgid
@@ -267,13 +266,13 @@ cantFindErrorX pkg_hidden_hint may_show_locations mod_or_interface (CantFindInst
                 .ppr.mkUnit) res ++
       if f then [text "a package flag"] else []
       )
-    pkg_hidden :: (Unit, Maybe UnitInfo) -> SDoc
-    pkg_hidden (uid, uif) =
+    pkg_hidden :: UnitInfo -> SDoc
+    pkg_hidden unit =
         text "It is a member of the hidden package"
-        <+> quotes (ppr uid)
+        <+> quotes (ppr $ unitId unit)
         --FIXME: we don't really want to show the unit id here we should
         -- show the source package id or installed package id if it's ambiguous
-        <> dot $$ maybe empty pkg_hidden_hint uif
+        <> dot $$ pkg_hidden_hint unit
 
 
     mod_hidden pkg =
@@ -346,6 +345,7 @@ hiModuleNameMismatchWarn requested_mod read_mod
          , ppr requested_mod
          , text "differs from name found in the interface file"
          , ppr read_mod
+         , parens (text "if these names look the same, try again with -dppr-debug")
          ]
 
 dynamicHashMismatchError :: Module -> ModLocation -> SDoc

@@ -1,6 +1,8 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE LambdaCase #-}
 module GHC.Runtime.Interpreter.Process
   (
+#if defined(HAVE_INTERPRETER)
   -- * Message API
     Message(..)
   , DelayedResponse (..)
@@ -13,13 +15,16 @@ module GHC.Runtime.Interpreter.Process
   , sendAnyValue
   , receiveAnyValue
   , receiveTHMessage
+#endif
   )
 where
 
 import GHC.Prelude
 
 import GHC.Runtime.Interpreter.Types
+#if defined(HAVE_INTERPRETER)
 import GHCi.Message
+#endif
 
 import GHC.IO (catchException)
 import GHC.Utils.Panic
@@ -35,6 +40,7 @@ data DelayedResponse a = DelayedResponse
 -- -----------------------------------------------------------------------------
 -- Top-level Message API
 
+#if defined(HAVE_INTERPRETER)
 -- | Send a message to the interpreter process that doesn't expect a response
 --   (locks the interpreter while sending)
 sendMessageNoResponse :: ExtInterpInstance d -> Message () -> IO ()
@@ -65,10 +71,12 @@ receiveDelayedResponse i DelayedResponse = do
   r <- readInterpProcess (instProcess i) get
   unlock i
   pure r
+#endif
 
 -- -----------------------------------------------------------------------------
 -- Nested Message API
 
+#if defined(HAVE_INTERPRETER)
 -- | Send any value (requires locked interpreter)
 sendAnyValue :: Binary a => ExtInterpInstance d -> a -> IO ()
 sendAnyValue i m = ensureLocked i >> writeInterpProcess (instProcess i) (put m)
@@ -80,6 +88,7 @@ receiveAnyValue i get = ensureLocked i >> readInterpProcess (instProcess i) get
 -- | Wait for a Template Haskell message (requires locked interpreter)
 receiveTHMessage :: ExtInterpInstance d -> IO THMsg
 receiveTHMessage i = ensureLocked i >> receiveAnyValue i getTHMessage
+#endif
 
 -- -----------------------------------------------------------------------------
 
@@ -102,6 +111,7 @@ ensureLocked i =
     _     -> pure ()
 
 
+#if defined(HAVE_INTERPRETER)
 -- | Send a 'Message' and receive the response from the interpreter process
 callInterpProcess :: Binary a => InterpProcess -> Message a -> IO a
 callInterpProcess i msg =
@@ -131,3 +141,4 @@ handleInterpProcessFailure i e = do
       terminateProcess hdl
       _ <- waitForProcess hdl
       throw e
+#endif

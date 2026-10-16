@@ -1,0 +1,2 @@
+CmmTargetAttrBadName.cmm:3:1: error: [GHC-09848]
+    unknown attribute nosuchattr

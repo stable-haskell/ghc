@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 module GHC.Driver.Config.Stg.Pipeline
   ( initStgPipelineOpts
   ) where
@@ -42,7 +43,9 @@ getStgToDo for_bytecode dflags =
     -- See Note [StgCse after unarisation] in GHC.Stg.CSE
     , optional Opt_StgCSE StgCSE
     , optional Opt_StgLiftLams $ StgLiftLams $ initStgLiftConfig dflags
+#if defined(HAVE_INTERPRETER)
     , runWhen for_bytecode StgBcPrep
+#endif
     , optional Opt_StgStats StgStats
     ] where
       optional opt = runWhen (gopt opt dflags)

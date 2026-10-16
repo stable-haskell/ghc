@@ -12,12 +12,13 @@ import GHC.Prelude
 import GHC.Unit
 import GHC.Data.OsPath
 import qualified Data.Map as M
+import GHC.Types.Unique.Map
 import GHC.Fingerprint
 import GHC.Platform.Ways
 import GHC.Unit.Env
 
 import GHC.Data.FastString
-import qualified Data.Set as Set
+import GHC.Types.Unique.Set
 
 -- | The 'FinderCache' maps modules to the result of
 -- searching for that module. It records the results of searching for
@@ -68,7 +69,7 @@ data FindResult
       , fr_mods_hidden :: [Unit]           -- ^ Module is in these units,
                                            --   but the *module* is hidden
 
-      , fr_pkgs_hidden :: [Unit]           -- ^ Module is in these units,
+      , fr_pkgs_hidden :: [UnitInfo]       -- ^ Module is in these units,
                                            --   but the *unit* is hidden
 
         -- | Module is in these units, but it is unusable
@@ -101,8 +102,8 @@ data FinderOpts = FinderOpts
       -- that have a similar name.
   , finder_workingDirectory :: Maybe OsPath
   , finder_thisPackageName  :: Maybe FastString
-  , finder_hiddenModules    :: Set.Set ModuleName
-  , finder_reexportedModules :: M.Map ModuleName ModuleName -- Reverse mapping, if you are looking for this name then look for this module.
+  , finder_hiddenModules    :: !(UniqSet ModuleName)
+  , finder_reexportedModules :: !(UniqMap ModuleName ModuleName) -- Reverse mapping, if you are looking for this name then look for this module.
   , finder_hieDir :: Maybe OsPath
   , finder_hieSuf :: OsString
   , finder_hiDir :: Maybe OsPath

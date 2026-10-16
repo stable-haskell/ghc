@@ -19,6 +19,11 @@ module GHC.Cmm (
      CmmGraph, GenCmmGraph, GenGenCmmGraph(..),
      toBlockMap, revPostorder, toBlockList,
      CmmBlock, RawCmmDecl,
+     RawCmmProcInfo(..),
+     CmmProcAttrs(..), emptyCmmProcAttrs, CmmTargetFeature(..),
+     parseCmmTargetFeature, pprCmmTargetFeature, cmmTargetFeatureName,
+     cmmTargetFeatureImplies,
+     cmmTargetFeaturesSupportedOn, checkNoCmmProcAttrs,
      Section(..), SectionType(..),
      GenCmmStatics(..), type CmmStatics, type RawCmmStatics, CmmStatic(..),
      SectionProtection(..), sectionProtection,
@@ -59,6 +64,7 @@ import GHC.Cmm.Dataflow.Block
 import GHC.Cmm.Dataflow.Graph
 import GHC.Cmm.Dataflow.Label
 import GHC.Utils.Outputable
+import GHC.Utils.Panic (sorryDoc)
 
 import Data.Void (Void)
 import Data.List (intersperse)
@@ -87,7 +93,7 @@ type CmmGroup     = GenCmmGroup CmmStatics    CmmTopInfo               CmmGraph
 -- | Cmm group with SRTs
 type CmmGroupSRTs = GenCmmGroup RawCmmStatics CmmTopInfo               CmmGraph
 -- | "Raw" cmm group (TODO (osa): not sure what that means)
-type RawCmmGroup  = GenCmmGroup RawCmmStatics (LabelMap RawCmmStatics) CmmGraph
+type RawCmmGroup  = GenCmmGroup RawCmmStatics RawCmmProcInfo CmmGraph
 
 -----------------------------------------------------------------------------
 --  CmmDecl, GenCmmDecl
@@ -140,8 +146,26 @@ cmmDataDeclCmmDecl = \ case
 type RawCmmDecl
    = GenCmmDecl
         RawCmmStatics
-        (LabelMap RawCmmStatics)
+        RawCmmProcInfo
         CmmGraph
+
+-- | The header of a "raw" 'CmmProc', i.e. after 'GHC.Cmm.Info.cmmToRawCmm'
+-- has turned the info tables into static data.
+data RawCmmProcInfo = RawCmmProcInfo
+     { raw_info_tbls  :: !(LabelMap RawCmmStatics)
+       -- ^ The procedure's info tables, as static data.
+     , raw_proc_attrs :: !CmmProcAttrs
+       -- ^ Attributes the procedure carried in the source.
+       -- See Note [Cmm target attributes].
+       --
+       -- Strict: lazy, this field holds on to the pre-raw 'CmmTopInfo'
+       -- through the thunk 'GHC.Cmm.Info.mkInfoTable' builds, which is the
+       -- leak the seqList there avoids.
+     }
+
+instance OutputableP Platform RawCmmProcInfo where
+    pdoc platform (RawCmmProcInfo tbls attrs) =
+      vcat [ pdoc platform tbls, ppr attrs ]
 
 -----------------------------------------------------------------------------
 --     Graphs
@@ -185,7 +209,156 @@ toBlockList g = mapElems $ toBlockMap g
 -- | CmmTopInfo is attached to each CmmDecl (see defn of CmmGroup), and contains
 -- the extra info (beyond the executable code) that belongs to that CmmDecl.
 data GenCmmTopInfo f = TopInfo { info_tbls  :: f CmmInfoTable
-                               , stack_info :: CmmStackInfo }
+                               , stack_info :: CmmStackInfo
+                               , proc_attrs :: CmmProcAttrs
+                                 -- ^ See Note [Cmm target attributes]
+                               }
+
+{- Note [Cmm target attributes]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Some hand-written Cmm procedures need particular CPU features, and others in the
+same file must not have them.  The RTS's vector code is the case that forced
+this: stg_ap_v32_fast moves 256-bit vectors, so it needs -mavx2 for the code
+generator to emit YMM moves, while stg_ap_v16_fast in the same library must not
+see -mavx, or it emits AVX instructions on targets that only have SSE2.  See
+Note [AutoApply.cmm for vectors] in utils/genapply/Main.hs and
+Note [realArgRegsCover] in GHC.Cmm.CallConv.
+
+Per-file flags in the build system can only approximate this.  Whether a
+procedure actually touches the 256-bit registers is decided in the source, by
+#if defined(REG_YMM1), the same test that sets REGS_ALLOWED in rts/Jumps.h.
+Hadrian used to match on a filename (Jumps_V32.cmm) and the target arch
+instead, which is a second copy of that condition, kept in step by hand, and
+one that can be no finer than a whole file.  The V16/V32/V64 file split exists
+largely to give it something to match on.
+
+So the procedure states the requirement itself, spelled after the GCC function
+attribute:
+
+    __attribute__((target("avx2")))
+    stg_ap_v32_fast ( ... )
+    {
+        ...
+    }
+
+'CmmProcAttrs' carries that from the parser to the backends:
+
+  * the parser attaches it to the proc's 'CmmTopInfo';
+
+  * 'GHC.Cmm.ProcPoint.splitAtProcPoints' copies it to every proc it splits
+    out, so a continuation is compiled like the proc it came from.  This is why
+    it sits on 'CmmTopInfo' and not in a side table keyed on entry label, which
+    would lose it here;
+
+  * 'GHC.Cmm.Info.cmmToRawCmm' carries it into 'RawCmmProcInfo';
+
+  * 'GHC.CmmToAsm.cmmNativeGens' derives a per-procedure 'NCGConfig', so
+    instruction selection and the register allocator's spill code agree on
+    which registers exist.
+
+Per-procedure granularity is sound because Cmm has no inter-procedural
+inlining.
+
+None of this can be checked after the fact: an attribute that a backend ignored
+shows up as a segfault, not as a build failure.  That is why the vocabulary is
+closed, so that an unknown feature is a parse error, and why a backend that
+cannot honour the attribute refuses it through 'checkNoCmmProcAttrs'.
+
+The C backend refuses it outright.  It is reached by unregisterised builds,
+where MACHREGS_NO_REGS is 1, so REG_YMM1 is not defined and there are no vector
+registers in the calling convention to get wrong; nothing there needs the
+feature in the first place.
+
+Two limitations:
+
+  * The attribute only turns features on.  There is no target("no-avx"), so
+    under a global -mavx2 stg_ap_v16_fast still gets AVX; that half of the RTS
+    invariant still depends on not passing -mavx2 globally.
+
+  * CPP runs before the parser, so __AVX2__ and friends still come from the
+    command line alone (see GHC.SysTools.Cpp).  A .cmm file cannot test for its
+    own attribute.
+-}
+
+-- | A CPU feature a Cmm procedure can require.  A closed set, so that an
+-- unknown feature is a parse error.  See Note [Cmm target attributes].
+data CmmTargetFeature
+  = CmmTargetAvx
+  | CmmTargetAvx2
+  | CmmTargetAvx512f
+  deriving (Eq, Ord, Enum, Bounded)
+
+-- | Attributes attached to a Cmm procedure in the source.
+-- See Note [Cmm target attributes].
+newtype CmmProcAttrs = CmmProcAttrs
+  { cpa_target_features :: [CmmTargetFeature] }
+  deriving (Eq)
+
+emptyCmmProcAttrs :: CmmProcAttrs
+emptyCmmProcAttrs = CmmProcAttrs []
+
+-- | Recognise a @target(...)@ feature name, as written in the source.
+-- Inverse of 'cmmTargetFeatureName'.
+parseCmmTargetFeature :: String -> Maybe CmmTargetFeature
+parseCmmTargetFeature = \case
+  "avx"     -> Just CmmTargetAvx
+  "avx2"    -> Just CmmTargetAvx2
+  "avx512f" -> Just CmmTargetAvx512f
+  _         -> Nothing
+
+-- | The feature's name, as written in the source and as LLVM spells it.
+cmmTargetFeatureName :: CmmTargetFeature -> String
+cmmTargetFeatureName = \case
+  CmmTargetAvx     -> "avx"
+  CmmTargetAvx2    -> "avx2"
+  CmmTargetAvx512f -> "avx512f"
+
+-- | The features a feature implies, including itself.  Follows
+-- 'isAvxEnabled' and friends in GHC.Driver.DynFlags, where -mavx512f implies
+-- -mavx2 implies -mavx.
+cmmTargetFeatureImplies :: CmmTargetFeature -> [CmmTargetFeature]
+cmmTargetFeatureImplies = \case
+  CmmTargetAvx     -> [CmmTargetAvx]
+  CmmTargetAvx2    -> [CmmTargetAvx, CmmTargetAvx2]
+  CmmTargetAvx512f -> [CmmTargetAvx, CmmTargetAvx2, CmmTargetAvx512f]
+
+-- | Refuse a procedure whose target attributes this backend cannot honour.
+-- See Note [Cmm target attributes].
+checkNoCmmProcAttrs :: String   -- ^ what cannot honour them, e.g. "the C backend"
+                     -> SDoc     -- ^ the procedure, for the message
+                     -> CmmProcAttrs -> a -> a
+checkNoCmmProcAttrs _ _ (CmmProcAttrs []) k = k
+checkNoCmmProcAttrs what who (CmmProcAttrs fs) _ =
+  sorryDoc ("Cmm target attributes are not supported by " ++ what) $
+    vcat [ text "In procedure:" <+> who
+         , text "Attributes:"
+             <+> hcat (punctuate comma (map pprCmmTargetFeature fs)) ]
+
+-- | Can this architecture have these features at all?  Shared by the backends
+-- that honour the attribute, so they refuse the same things.
+cmmTargetFeaturesSupportedOn :: Arch -> [CmmTargetFeature] -> Bool
+cmmTargetFeaturesSupportedOn arch = all supported
+  where
+    supported f = case f of
+      CmmTargetAvx     -> is_x86
+      CmmTargetAvx2    -> is_x86
+      CmmTargetAvx512f -> is_x86
+    is_x86 = case arch of
+      ArchX86    -> True
+      ArchX86_64 -> True
+      _          -> False
+
+pprCmmTargetFeature :: CmmTargetFeature -> SDoc
+pprCmmTargetFeature = text . cmmTargetFeatureName
+
+instance Outputable CmmTargetFeature where
+  ppr = pprCmmTargetFeature
+
+instance Outputable CmmProcAttrs where
+  ppr (CmmProcAttrs []) = empty
+  ppr (CmmProcAttrs fs) =
+    text "__attribute__((target(" <>
+      doubleQuotes (hcat (intersperse comma (map ppr fs))) <> text ")))"
 
 newtype DWrap a = DWrap [(BlockId, a)]
 
@@ -199,9 +372,13 @@ instance OutputableP Platform CmmTopInfo where
     pdoc = pprTopInfo
 
 pprTopInfo :: Platform -> CmmTopInfo -> SDoc
-pprTopInfo platform (TopInfo {info_tbls=info_tbl, stack_info=stack_info}) =
+pprTopInfo platform (TopInfo {info_tbls=info_tbl, stack_info=stack_info,
+                              proc_attrs=attrs}) =
   vcat [text "info_tbls: " <> pdoc platform info_tbl,
-        text "stack_info: " <> ppr stack_info]
+        text "stack_info: " <> ppr stack_info,
+        -- Empty for generated code, where 'ppr' gives 'empty', so dump output
+        -- is unchanged.
+        ppr attrs]
 
 topInfoTableD :: GenCmmDecl a DCmmTopInfo (GenGenCmmGraph s n) -> Maybe CmmInfoTable
 topInfoTableD (CmmProc infos _ _ g) = case (info_tbls infos) of
@@ -288,8 +465,8 @@ data SectionProtection
   deriving (Eq)
 
 -- | Should a data in this section be considered constant at runtime
-sectionProtection :: Section -> SectionProtection
-sectionProtection (Section t _) = case t of
+sectionProtection :: SectionType -> SectionProtection
+sectionProtection t = case t of
     Text                    -> ReadOnlySection
     ReadOnlyData            -> ReadOnlySection
     RelocatableReadOnlyData -> WriteProtectedSection
@@ -402,7 +579,7 @@ removeDetermDecl (CmmProc h e r g) = CmmProc (removeDetermTop h) e r (removeDete
 removeDetermDecl (CmmData a b) = CmmData a b
 
 removeDetermTop :: DCmmTopInfo -> CmmTopInfo
-removeDetermTop (TopInfo a b) = TopInfo (mapFromList $ unDeterm a) b
+removeDetermTop (TopInfo a b c) = TopInfo (mapFromList $ unDeterm a) b c
 
 removeDetermGraph :: DCmmGraph -> CmmGraph
 removeDetermGraph (CmmGraph x y) =

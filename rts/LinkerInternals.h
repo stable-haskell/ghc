@@ -268,6 +268,12 @@ struct _ObjectCode {
        after allocation, so that we can use realloc */
     int        misalignment;
 
+    /* Set to true after initializers (.init_array, .ctors, etc.) have been
+     * executed. Used by freeObjectCode to decide whether finalizers should
+     * run: only objects whose initializers ran should have their finalizers
+     * executed. See Note [Object unloading and finalizers]. */
+    bool initializersRan;
+
     /* The address of __cxa_finalize; set when at least one finalizer was
      * register and therefore we must call __cxa_finalize before unloading.
      * See Note [Resolving __dso_handle]. */
@@ -418,6 +424,7 @@ typedef struct _RtsSymbolInfo {
     ObjectCode *owner;
     SymStrength strength;
     SymType type;
+    unsigned long size; // symbol size: only used for COMMON symbols
 } RtsSymbolInfo;
 
 #include "BeginPrivate.h"
@@ -441,6 +448,7 @@ int ghciInsertSymbolTable(
     SymbolAddr* data,
     SymStrength weak,
     SymType type,
+    unsigned long size,
     ObjectCode *owner);
 
 /* Lock-free version of lookupSymbol. When 'dependent' is not NULL, adds it as a

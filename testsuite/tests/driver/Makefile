@@ -2,6 +2,10 @@ TOP=../..
 include $(TOP)/mk/boilerplate.mk
 include $(TOP)/mk/test.mk
 
+.PHONY: android_target_os
+android_target_os:
+	$(PYTHON) android_target_os.py "$(TOP_ABS)/../m4/ghc_convert_os.m4"
+
 # A set of driver tests
 
 # Things to test:

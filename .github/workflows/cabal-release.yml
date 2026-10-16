@@ -1,0 +1,60 @@
+# Build stable-haskell cabal-install Linux bindists (channel gap).
+#
+# The wasm ghcup channel ships GHC for aarch64-darwin + x86_64-linux +
+# aarch64-linux, but cabal-3.17.0.0.stable.0 only shipped for darwin —
+# Linux users hit "Unable to find a download for Tool 'cabal'" during
+# `ghcup install cabal 3.17.0.0.stable.0`.
+#
+# This workflow rebuilds cabal-install from the upstream branch
+# stable-haskell/cabal:stable-haskell/feature/wasm-cross-ghcup-stack
+# (a 2-commit stack of #368 rpath relativize + #361 target-prefix-aware
+# tool guess) for x86_64-linux + aarch64-linux, and uploads the binaries
+# as workflow artifacts.
+#
+# This is a thin wrapper around the reusable workflow (the same one
+# nix-ci.yml calls as a DAG node). Triggers:
+#   * workflow_dispatch — manual, lets us preview the build before tagging
+#   * push of tag `cabal-3.17.0.0.stable.*` — auto-uploads bindists to
+#     the matching release
+#   * pull_request touching this workflow — sanity-check changes here
+name: Build cabal Linux bindists
+
+on:
+  push:
+    tags: ['cabal-3.17.0.0.stable.*']
+  pull_request:
+    paths:
+      - '.github/workflows/cabal-release.yml'
+      - '.github/workflows/reusable-cabal-release.yml'
+  workflow_dispatch:
+    inputs:
+      cabal_sha:
+        description: 'stable-haskell/cabal SHA to build'
+        default: '8b8433b736d45ec53a103baf4e4aabb8010ca2ed'
+      release_tag:
+        description: 'Release tag to upload to (leave blank to skip upload)'
+        default: ''
+
+permissions:
+  contents: write     # for asset upload to releases on tag push
+
+concurrency:
+  group: cabal-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    uses: ./.github/workflows/reusable-cabal-release.yml
+    with:
+      # workflow_dispatch passes inputs.*; tag/PR triggers fall back to
+      # the reusable workflow's own defaults.
+      cabal_sha: ${{ inputs.cabal_sha || '8b8433b736d45ec53a103baf4e4aabb8010ca2ed' }}
+      # On a tag push, route the asset upload to that tag's release. On
+      # workflow_dispatch, only if the operator filled release_tag.
+      release_tag: >-
+        ${{ startsWith(github.ref, 'refs/tags/cabal-3.17.0.0.stable.')
+            && github.ref_name
+            || (github.event_name == 'workflow_dispatch' && inputs.release_tag || '') }}
+    permissions:
+      contents: write
+    secrets: inherit

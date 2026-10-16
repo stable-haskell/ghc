@@ -54,8 +54,10 @@ import GHC.Platform
 import GHC.Tc.Utils.Backpack
 import GHC.Tc.Utils.Monad  ( initIfaceCheck, concatMapM )
 
-import GHC.Runtime.Interpreter
+import GHC.Runtime.Interpreter.Types (Interp)
+#if defined(HAVE_INTERPRETER)
 import qualified GHC.Linker.Loader as Linker
+#endif
 import GHC.Linker.Types
 
 
@@ -72,7 +74,9 @@ import GHC.Driver.MakeSem
 import GHC.Driver.Downsweep
 import GHC.Driver.MakeAction
 
+#if defined(HAVE_INTERPRETER)
 import GHC.ByteCode.Types
+#endif
 
 import GHC.Iface.Load      ( cannotFindModule, readIface )
 import GHC.IfaceToCore     ( typecheckIface )
@@ -109,13 +113,14 @@ import GHC.Unit.Module.ModDetails
 
 import qualified Data.Map as Map
 import qualified Data.Set as Set
+import GHC.Types.Unique.Set
 
 import Control.Concurrent.MVar
 import Control.Monad
 import qualified Control.Monad.Catch as MC
 import Data.IORef
 import Data.Maybe
-import Data.List (sortOn, groupBy, sortBy)
+import Data.List (sort, sortOn, groupBy, sortBy)
 import qualified Data.List as List
 import System.FilePath
 
@@ -127,7 +132,9 @@ import Control.Monad.Trans.State.Lazy
 import Control.Monad.Trans.Class
 import GHC.Driver.Env.KnotVars
 import Control.Monad.Trans.Maybe
+#if defined(HAVE_INTERPRETER)
 import GHC.Runtime.Loader
+#endif
 import GHC.Utils.Constants
 import GHC.Iface.Errors.Types
 import Data.Function
@@ -313,14 +320,15 @@ warnUnknownModules hsc_env dflags mod_graph = do
   where
     diag_opts = initDiagOpts dflags
 
-    unit_mods = Set.fromList (map ms_mod_name
+    unit_mods :: UniqSet ModuleName
+    unit_mods = mkUniqSet (map ms_mod_name
                   (filter (\ms -> ms_unitid ms == homeUnitId_ dflags)
                        (mgModSummaries mod_graph)))
 
     reexported_mods = reexportedModules dflags
     hidden_mods     = hiddenModules dflags
 
-    hidden_warns = hidden_mods `Set.difference` unit_mods
+    hidden_warns = hidden_mods `minusUniqSet` unit_mods
 
     lookupModule mn = findImportedModule hsc_env mn NoPkgQual
 
@@ -337,7 +345,7 @@ warnUnknownModules hsc_env dflags mod_graph = do
     final_msgs hidden_warns reexported_warns
           =
         unionManyMessages $
-          [warn (DriverUnknownHiddenModules (homeUnitId_ dflags) (Set.toList hidden_warns)) | not (Set.null hidden_warns)]
+          [warn (DriverUnknownHiddenModules (homeUnitId_ dflags) (sort $ nonDetEltsUniqSet hidden_warns)) | not (isEmptyUniqSet hidden_warns)]
           ++ [warn (DriverUnknownReexportedModules (homeUnitId_ dflags) reexported_warns) | not (null reexported_warns)]
 
 -- | Describes which modules of the module graph need to be loaded.
@@ -621,7 +629,9 @@ load' mhmi_cache how_much diag_wrapper mHscMessage mod_graph = do
     -- In normal usage plugins are initialised already by ghc/Main.hs this is protective
     -- for any client who might interact with GHC via load'.
     -- See Note [Timing of plugin initialization]
+#if defined(HAVE_INTERPRETER)
     initializeSessionPlugins
+#endif
     modifySession (setModuleGraph mod_graph)
     guessOutputFile
     hsc_env <- getSession
@@ -819,7 +829,9 @@ pruneCache hpt summ
 unload :: Interp -> HscEnv -> IO ()
 unload interp hsc_env
   = case ghcLink (hsc_dflags hsc_env) of
+#if defined(HAVE_INTERPRETER)
         LinkInMemory -> Linker.unload interp hsc_env []
+#endif
         _other -> return ()
 
 
@@ -1247,6 +1259,7 @@ upsweep_mod hsc_env mHscMessage old_hmi summary mod_index nmods =  do
 -- | Add the entries from a BCO linkable to the SPT table, see
 -- See Note [Grand plan for static forms] in GHC.Iface.Tidy.StaticPtrTable.
 addSptEntries :: HscEnv -> Maybe Linkable -> IO ()
+#if defined(HAVE_INTERPRETER)
 addSptEntries hsc_env mlinkable =
   hscAddSptEntries hsc_env
      [ spt
@@ -1254,6 +1267,9 @@ addSptEntries hsc_env mlinkable =
      , bco <- linkableBCOs linkable
      , spt <- bc_spt_entries bco
      ]
+#else
+addSptEntries _ _ = return ()  -- No bytecode support (HAVE_INTERPRETER not defined)
+#endif
 
 
 -- Note [When source is considered modified]

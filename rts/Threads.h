@@ -19,6 +19,11 @@ void checkBlockingQueues (Capability *cap, StgTSO *tso);
 void tryWakeupThread     (Capability *cap, StgTSO *tso);
 void migrateThread       (Capability *from, StgTSO *tso, Capability *to);
 
+#if defined(THREADED_RTS)
+void setThreadFlag       (Capability *from, StgTSO *tso, StgWord32 flag);
+void unsetThreadFlag     (Capability *from, StgTSO *tso, StgWord32 flag);
+#endif
+
 // Wakes up a thread on a Capability (probably a different Capability
 // from the one held by the current Task).
 //
@@ -38,9 +43,12 @@ StgBool isThreadBound (StgTSO* tso);
 
 // Overflow/underflow
 void threadStackOverflow  (Capability *cap, StgTSO *tso);
-W_   threadStackUnderflow (Capability *cap, StgTSO *tso);
 
 bool performTryPutMVar(Capability *cap, StgMVar *mvar, StgClosure *value);
+
+#define CTOI_OLD_TUPLE_SPILL_WORDS_OFFSET 4
+#define CTOI_TUPLE_INFO_OFFSET 2
+void restoreStackInvariants(StgTSO *tso, StgPtr sp, StgWord words);
 
 #if defined(DEBUG)
 void printThreadBlockage (StgTSO *tso);
@@ -51,3 +59,5 @@ void printThreadQueue (StgTSO *t);
 #endif
 
 #include "EndPrivate.h"
+
+W_   threadStackUnderflow (Capability *cap, StgTSO *tso);

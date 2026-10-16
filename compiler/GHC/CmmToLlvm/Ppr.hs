@@ -49,8 +49,9 @@ pprLlvmCmmDecl (CmmData _ lmdata) = do
   return ( vcat $ map (pprLlvmData opts) lmdata
          , vcat $ map (pprLlvmData opts) lmdata)
 
-pprLlvmCmmDecl (CmmProc mb_info entry_lbl live (ListGraph blks))
-  = do let lbl = case mb_info of
+pprLlvmCmmDecl (CmmProc proc_info entry_lbl live (ListGraph blks))
+  = do let mb_info = lpi_info_tbl proc_info
+           lbl = case mb_info of
                      Nothing -> entry_lbl
                      Just (CmmStaticsRaw info_lbl _) -> info_lbl
            link = if externallyVisibleCLabel lbl
@@ -75,7 +76,9 @@ pprLlvmCmmDecl (CmmProc mb_info entry_lbl live (ListGraph blks))
                        return $ Just $ LMStaticStruc infoStatics infoTy
 
 
-       let fun = LlvmFunction funDec funArgs llvmStdFunAttrs funSect
+       let -- See Note [Cmm target attributes] in GHC.Cmm
+           attr_fs = llvmTargetFeatureAttrs cfg entry_lbl (lpi_proc_attrs proc_info)
+           fun = LlvmFunction funDec funArgs (llvmStdFunAttrs ++ attr_fs) funSect
                               prefix lmblocks
            name = decName $ funcDecl fun
            defName = llvmDefLabel name

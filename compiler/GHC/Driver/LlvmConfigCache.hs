@@ -1,14 +1,19 @@
+{-# LANGUAGE CPP #-}
+
 -- | LLVM config cache
 module GHC.Driver.LlvmConfigCache
   ( LlvmConfigCache
   , initLlvmConfigCache
+#if defined(HAVE_LLVM_BACKEND)
   , readLlvmConfigCache
+#endif
   )
 where
 
 import GHC.Prelude
-import GHC.CmmToLlvm.Config
 
+#if defined(HAVE_LLVM_BACKEND)
+import GHC.CmmToLlvm.Config
 import System.IO.Unsafe
 
 -- | Cache LLVM configuration read from files in top_dir
@@ -24,3 +29,14 @@ initLlvmConfigCache top_dir = pure $ LlvmConfigCache (unsafePerformIO $ initLlvm
 
 readLlvmConfigCache :: LlvmConfigCache -> IO LlvmConfig
 readLlvmConfigCache (LlvmConfigCache !config) = pure config
+
+#else
+
+-- | Stub when LLVM backend is not available. The type must exist because
+-- it is a field in HscEnv (GHC.Driver.Env.Types).
+data LlvmConfigCache = LlvmConfigCache
+
+initLlvmConfigCache :: FilePath -> IO LlvmConfigCache
+initLlvmConfigCache _ = pure LlvmConfigCache
+
+#endif

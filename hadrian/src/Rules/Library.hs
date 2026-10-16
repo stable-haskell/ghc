@@ -1,4 +1,4 @@
-module Rules.Library (libraryRules, needLibrary, libraryTargets) where
+module Rules.Library (libraryRules, needLibrary, libraryTargets, LibDyn(..), parseGhcPkgLibDyn) where
 
 import Hadrian.BuildPath
 import Hadrian.Haskell.Cabal
@@ -36,7 +36,7 @@ libraryRules = do
         root -/- "stage*/lib/**/libHS*-*.dll"   %> registerDynamicLib root "dll"
         root -/- "stage*/lib/**/*.a"            %> registerStaticLib  root
         root -/- "**/HS*-*.o"   %> buildGhciLibO root
-        root -/- "**/HS*-*.p_o" %> buildGhciLibO root
+        root -/- "**/HS*-*.*_o" %> buildGhciLibO root
 
 -- * 'Action's for building libraries
 
@@ -94,6 +94,9 @@ buildDynamicLib root suffix dynlibpath = do
     deps <- contextDependencies context
     registerPackages deps
     objs <- libraryObjects context
+    -- The rts links against libffi, so it must be copied into the rts build
+    -- directory before we get here.
+    need =<< extraTargets context
     build $ target context (Ghc LinkHs $ Context.stage context) objs [dynlibpath]
     putSuccess $
       renderLibrary

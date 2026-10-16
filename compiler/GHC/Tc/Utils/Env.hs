@@ -8,6 +8,7 @@
                                       -- in module Language.Haskell.Syntax.Extension
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE MultiWayIf #-}
 
 module GHC.Tc.Utils.Env(
         TyThing(..), TcTyThing(..), TcId,
@@ -138,7 +139,7 @@ import GHC.Types.Unique.Set ( nonDetEltsUniqSet )
 import qualified GHC.LanguageExtensions as LangExt
 
 import GHC.Iface.Errors.Types
-import GHC.Rename.Unbound ( unknownNameSuggestions )
+import GHC.Rename.Unbound ( unknownNameSuggestions, mkUnboundGREName )
 import GHC.Tc.Errors.Types.PromotionErr
 import {-# SOURCE #-} GHC.Tc.Errors.Hole (getHoleFitDispConfig)
 
@@ -234,7 +235,7 @@ tcLookupLocatedGlobal name
   = addLocM tcLookupGlobal name
 
 tcLookupGlobal :: Name -> TcM TyThing
--- The Name is almost always an ExternalName, but not always
+-- The Name is almost always an ExternalName, but not always:
 -- In GHCi, we may make command-line bindings (ghci> let x = True)
 -- that bind a GlobalId, but with an InternalName
 tcLookupGlobal name
@@ -242,15 +243,12 @@ tcLookupGlobal name
           env <- getGblEnv
         ; case lookupNameEnv (tcg_type_env env) name of {
                 Just thing -> return thing ;
-                Nothing    ->
-
                 -- Should it have been in the local envt?
                 -- (NB: use semantic mod here, since names never use
                 -- identity module, see Note [Identity versus semantic module].)
-          if nameIsLocalOrFrom (tcg_semantic_mod env) name
-          then notFound name  -- Internal names can happen in GHCi
-          else
-
+                Nothing | nameIsLocalOrFrom (tcg_semantic_mod env) name ->
+                              notFound $ mkUnboundGREName <$> noUserRdr name  -- Internal names can happen in GHCi
+                        | otherwise ->
            -- Try home package table and external package table
     do  { mb_thing <- tcLookupImported_maybe name
         ; case mb_thing of
@@ -1210,9 +1208,28 @@ pprBinders :: [Name] -> SDoc
 pprBinders [bndr] = quotes (ppr bndr)
 pprBinders bndrs  = pprWithCommas ppr bndrs
 
-notFound :: Name -> TcM TyThing
-notFound name
+notFound :: WithUserRdr GlobalRdrElt -> TcM TyThing
+notFound (WithUserRdr rdr gre)
   = do { lcl_env <- getLclEnv
+       ; lvls <- getCurrentAndBindLevel gre
+       ; if    -- See Note [Out of scope might be a staging error]
+           | isUnboundName name -> failM  -- If the name really isn't in scope
+                                          -- don't report it again (#11941)
+                                          -- the
+                                          -- the 'Nothing' case of 'getCurrentAndBindLevel'
+                                          -- currently means 'isUnboundName' but to avoid
+                                          -- introducing bugs after a refactoring of that
+                                          -- function, we check this completely independently
+                                          -- before scrutinizing lvls
+           | Just (_top_lvl_flag, bind_lvls, lvl@Splice {}) <- lvls -> failWithTc $
+             TcRnBadlyLevelled
+               (LevelCheckSplice (WithUserRdr rdr gre))
+               bind_lvls
+               (thLevelIndex lvl)
+               Nothing
+               ErrorWithoutFlag
+           | otherwise  -> pure ()
+
        ; if isTermVarOrFieldNameSpace (nameNameSpace name)
            then
                -- This code path is only reachable with RequiredTypeArguments enabled
@@ -1235,6 +1252,7 @@ notFound name
                   -- so let's just not print it!  Getting a loop here is
                   -- very unhelpful, because it hides one compiler bug with another
        }
+       where name = greName gre
 
 wrongThingErr :: WrongThingSort -> TcTyThing -> Name -> TcM a
 wrongThingErr expected thing name =
@@ -1243,14 +1261,23 @@ wrongThingErr expected thing name =
 {- Note [Out of scope might be a staging error]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Consider
-  x = 3
-  data T = MkT $(foo x)
+  type T = Int
+  foo = $(1 :: T)
 
-where 'foo' is imported from somewhere.
+GHC currently leaves the user some liberty when it comes to using
+types in a manner that is theoretically not well-staged.
+E.g. if `T` here were to be a value, we would reject the program with
+a staging error. Since it is a type though, we allow it for backwards
+compatibility reasons.
 
-This is really a staging error, because we can't run code involving 'x'.
-But in fact the type checker processes types first, so 'x' won't even be
-in the type envt when we look for it in $(foo x).  So inside splices we
-report something missing from the type env as a staging error.
-See #5752 and #5795.
+However, in this case, we're just in the process of renaming a splice
+when trying to type check an expression involving a type, that hasn't
+even been added to the (type checking) environment yet. That is, why
+it is out of scope.
+
+The reason why we cannot recognise this issue earlier is, that if we
+are not actually type checking the splice, i.e. if we're only using the
+name of the type (e.g. ''T), the program should be accepted.
+
+We stop and report a staging error.
 -}

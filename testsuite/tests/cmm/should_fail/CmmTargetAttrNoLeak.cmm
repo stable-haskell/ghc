@@ -1,0 +1,21 @@
+/* The attribute applies to one procedure, not to the file: the second
+   procedure must still be rejected for using 256-bit vectors without AVX2.
+   If this test ever starts passing, the attribute has leaked to the whole
+   compilation unit.  See Note [Cmm target attributes] in GHC.Cmm.  */
+
+__attribute__((target("avx2")))
+attributed (bits64 p)
+{
+  vec256 v;
+  v = vec256[p];
+  vec256[p + 32] = v;
+  return ();
+}
+
+unattributed (bits64 p)
+{
+  vec256 v;
+  v = vec256[p];
+  vec256[p + 32] = v;
+  return ();
+}
