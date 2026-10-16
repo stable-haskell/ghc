@@ -45,14 +45,20 @@ jobs:
           path: _build/t26537-input/197
       - name: Extract native compilers and identical test fixtures only
         run: |
+          shopt -s nullglob
           for pr in 196 197; do
             archive_dir="_build/t26537-input/$pr"
             prefix="_build/t26537-prefix/$pr"
+            # The release workflow adds the version and platform before upload.
+            # Require exactly one native compiler; exclude the JavaScript one.
+            ghc_archives=("$archive_dir"/ghc-[0-9]*-x86_64-apple-darwin.tar.gz)
+            tests_archives=("$archive_dir"/tests-x86_64-apple-darwin.tar.gz)
+            test "${#ghc_archives[@]}" -eq 1
+            test "${#tests_archives[@]}" -eq 1
+            printf 'PR %s: %s and %s\n' "$pr" "${ghc_archives[0]}" "${tests_archives[0]}"
             mkdir -p "$prefix"
-            test -f "$archive_dir/ghc.tar.gz"
-            test -f "$archive_dir/tests.tar.gz"
-            tar -xzf "$archive_dir/ghc.tar.gz" -C "$prefix"
-            tar -xzf "$archive_dir/tests.tar.gz" -C "$prefix" \
+            tar -xzf "${ghc_archives[0]}" -C "$prefix"
+            tar -xzf "${tests_archives[0]}" -C "$prefix" \
               testsuite/tests/codeGen/should_run/T26537.hs \
               testsuite/tests/codeGen/should_run/T26537.stdout \
               testsuite/tests/codeGen/should_run/all.T
