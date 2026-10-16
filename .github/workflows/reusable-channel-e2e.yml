@@ -62,6 +62,13 @@ jobs:
       INSTALL_MODE: ${{ inputs.install_mode }}
 
     steps:
+      - name: Checkout toolchain bootstrap helper
+        uses: actions/checkout@v5
+        timeout-minutes: 5
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+
       # ---------------------------------------------------------------------
       # 1. Fresh ghcup install (needed for cabal install via channel; in
       #    artifact mode the GHC + cabal come from artifacts but ghcup is
@@ -122,8 +129,8 @@ jobs:
           set -euo pipefail
           export TMPDIR="$GITHUB_WORKSPACE/_tmp"
           mkdir -p "$TMPDIR"
-          curl -fsSL https://gitlab.haskell.org/ghc/ghc-wasm-meta/-/raw/master/bootstrap.sh | \
-            FLAVOUR=9.12 PREFIX=$HOME/.ghc-wasm sh
+          FLAVOUR=9.12 PREFIX="$HOME/.ghc-wasm" \
+            bash .github/scripts/install-ghc-wasm-meta.sh
           WASI_BIN="$HOME/.ghc-wasm/wasi-sdk/bin"
           test -d "$WASI_BIN" || { echo "::error::$WASI_BIN missing"; exit 1; }
           for tool in clang clang++; do
