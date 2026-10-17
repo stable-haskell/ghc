@@ -23,6 +23,8 @@ import GHC.Cmm.BlockId
 import GHC.Cmm.Dataflow.Label
 import GHC.Cmm
 import GHC.Cmm.CLabel
+import GHC.Cmm.DebugBlock (UnwindTable, UnwindExpr(..))
+import qualified Data.Map as Map
 import GHC.Utils.Outputable
 import GHC.Platform
 import GHC.Types.Unique.DSM
@@ -77,6 +79,7 @@ regUsageOfInstr platform instr = case instr of
   PUSH_STACK_FRAME         -> usage ([], [])
   POP_STACK_FRAME          -> usage ([], [])
   DELTA{}                  -> usage ([], [])
+  UNWIND{}                 -> usage ([], [])
 
   -- 1. Arithmetic Instructions ------------------------------------------------
   ADD dst src1 src2        -> usage (regOp src1 ++ regOp src2, regOp dst)
@@ -241,6 +244,7 @@ patchRegsOfInstr instr env = case instr of
     PUSH_STACK_FRAME    -> instr
     POP_STACK_FRAME     -> instr
     DELTA{}             -> instr
+    UNWIND{}            -> instr
     -- 1. Arithmetic Instructions ----------------------------------------------
     ADD o1 o2 o3   -> ADD (patchOp o1) (patchOp o2) (patchOp o3)
     CMP o1 o2      -> CMP (patchOp o1) (patchOp o2)
@@ -491,6 +495,7 @@ isMetaInstr instr
     LOCATION{}  -> True
     NEWBLOCK{}  -> True
     DELTA{}     -> True
+    UNWIND{}    -> True
     PUSH_STACK_FRAME -> True
     POP_STACK_FRAME -> True
     _           -> False
@@ -563,26 +568,58 @@ allocMoreStack platform slots proc@(CmmProc info lbl live (ListGraph code)) = do
       new_blockmap :: LabelMap BlockId
       new_blockmap = mapFromList retargetList
 
-      insert_stack_insn (BasicBlock id insns)
-        | Just new_blockid <- mapLookup id new_blockmap
-        = [ BasicBlock id $ alloc ++ [ B (TBlock new_blockid) ]
-          , BasicBlock new_blockid block' ]
-        | otherwise
-        = [ BasicBlock id block' ]
+      -- This pass runs after instruction selection inserted machine-SP unwind
+      -- rules. Account for the extra spill area in those rules, and describe
+      -- each new stack adjustment at the instruction where it takes effect.
+      withUnwind = any (any isUnwind . blockInstrs) code
+      blockInstrs (BasicBlock _ insns) = insns
+      isUnwind UNWIND{} = True
+      isUnwind _ = False
+      unwind d = do
+        u <- getUniqueM
+        let expr = UwReg (GlobalRegUse MachSp (bWord platform)) d
+        return $ UNWIND (mkAsmTempLabel u) (Map.singleton MachSp (Just expr))
+
+      stackCode _ [] = return []
+      stackCode d (insn:rest) = do
+        let d' = case insn of
+              ANN _ (SUB _ _ (OpImm (ImmInt n))) -> d + n
+              ANN _ (ADD _ _ (OpImm (ImmInt n))) -> d - n
+              _ -> panic "allocMoreStack: unexpected stack adjustment"
+        more <- stackCode d' rest
+        if withUnwind
+          then do uw <- unwind d'
+                  return (insn : uw : more)
+          else return (insn : more)
+
+      shift (UwReg r@(GlobalRegUse MachSp _) o) = UwReg r (o + delta)
+      shift (UwDeref e) = UwDeref (shift e)
+      shift (UwPlus x y) = UwPlus (shift x) (shift y)
+      shift (UwMinus x y) = UwMinus (shift x) (shift y)
+      shift (UwTimes x y) = UwTimes (shift x) (shift y)
+      shift e = e
+
+      insert_stack_insn (BasicBlock id insns) = do
+        block' <- concat <$> mapM insert_dealloc insns
+        case mapLookup id new_blockmap of
+          Just new_blockid -> do
+            alloc' <- stackCode 0 alloc
+            return [BasicBlock id (alloc' ++ [B (TBlock new_blockid)]),
+                    BasicBlock new_blockid block']
+          Nothing -> return [BasicBlock id block']
+
+      insert_dealloc insn = case insn of
+        J _ -> finish
+        ANN _ (J _) -> finish
+        UNWIND lbl tbl -> return [UNWIND lbl (Map.map (fmap shift) tbl)]
+        _ | jumpDestsOfInstr insn /= [] -> return [patchJumpInstr insn retarget]
+          | otherwise -> return [insn]
         where
-          block' = foldr insert_dealloc [] insns
+          finish = do dealloc' <- stackCode delta dealloc
+                      return (dealloc' ++ [insn])
+          retarget b = fromMaybe b (mapLookup b new_blockmap)
 
-      insert_dealloc insn r = case insn of
-        J _ -> dealloc ++ (insn : r)
-        ANN _ (J _) -> dealloc ++ (insn : r)
-        _other | jumpDestsOfInstr insn /= []
-            -> patchJumpInstr insn retarget : r
-        _other -> insn : r
-
-        where retarget b = fromMaybe b (mapLookup b new_blockmap)
-
-      new_code = concatMap insert_stack_insn code
-    -- in
+    new_code <- concat <$> mapM insert_stack_insn code
     return (CmmProc info lbl live (ListGraph new_code), retargetList)
 -- -----------------------------------------------------------------------------
 -- Machine's assembly language
@@ -612,6 +649,10 @@ data Instr
     -- specify current stack offset for
     -- benefit of subsequent passes
     | DELTA   Int
+
+    -- unwinding information
+    -- See Note [Unwinding information in the NCG] in GHC.CmmToAsm
+    | UNWIND CLabel UnwindTable
 
     -- 0. Pseudo Instructions --------------------------------------------------
     | SXTB Operand Operand
@@ -756,6 +797,7 @@ instrCon i =
       LOCATION{} -> "LOCATION"
       NEWBLOCK{} -> "NEWBLOCK"
       DELTA{} -> "DELTA"
+      UNWIND{} -> "UNWIND"
       SXTB{} -> "SXTB"
       UXTB{} -> "UXTB"
       SXTH{} -> "SXTH"

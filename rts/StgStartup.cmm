@@ -68,7 +68,7 @@ INFO_TABLE_RET(stg_stop_thread, STOP_FRAME,
     */
 
     // See Note [Unwinding foreign exports on x86-64].
-#if defined(x86_64_HOST_ARCH)
+#if defined(x86_64_HOST_ARCH) || (defined(aarch64_HOST_ARCH) && (defined(linux_HOST_OS) || defined(darwin_HOST_OS)))
     unwind UnwindReturnReg = STG_RUN_JMP;
 #else
     // FIXME: Fill in for other platforms
