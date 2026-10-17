@@ -693,3 +693,13 @@ test('StgRunUnwindAArch64',
       extra_files(['StgRunUnwindAArch64_asm.S'])],
      compile_and_run, ['StgRunUnwindAArch64_asm.S -optc-fno-omit-frame-pointer'])
 
+# Source-level wrapper probes need the production sources, absent from bindists.
+test('SignpostMock',
+     [c_src, unless(opsys('darwin') and in_tree_compiler(), skip),
+      only_ways(['normal']),
+      extra_files(['../../../rts/Signpost.c', '../../../rts/Signpost.h', 'SignpostMock'])],
+     compile_and_run, ['-ISignpostMock -optc-std=c11'])
+test('SignpostDisabled',
+     [c_src, unless(in_tree_compiler(), skip), only_ways(['normal']),
+      extra_files(['../../../rts/Signpost.h', 'SignpostDisabled'])],
+     compile_and_run, ['-ISignpostDisabled -optc-std=c11'])
