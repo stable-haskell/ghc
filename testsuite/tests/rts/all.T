@@ -677,3 +677,21 @@ test('T27123', [when(have_profiling(), extra_ways(['prof']))], compile_and_run, 
 test('T27434',
      extra_ways(['compacting_gc']),
      compile_and_run, [''])
+
+# Preserve the C ABI across nested entries into the AArch64 STG runner.
+# Force the assembly phase: bare .S filenames also look like Haskell module
+# names to the --make driver.
+test('StgRunAArch64',
+     [unless(arch('aarch64') and (opsys('linux') or opsys('darwin')), skip),
+      when(unregisterised(), skip), req_c, extra_files(['StgRunAArch64_asm.S'])],
+     compile_and_run, ['-x S StgRunAArch64_asm.S -x none'])
+
+# Apple libunwind must recover the C caller after STG's unsafe foreign-call
+# frame replaced x29. ELF CFI is also emitted, but this live consumer is Darwin.
+test('StgRunUnwindAArch64',
+     [c_src, only_ways(['normal']),
+      unless(arch('aarch64') and opsys('darwin'), skip),
+      when(unregisterised(), skip),
+      extra_files(['StgRunUnwindAArch64_asm.S'])],
+     compile_and_run, ['-x S StgRunUnwindAArch64_asm.S -x none -optc-fno-omit-frame-pointer'])
+

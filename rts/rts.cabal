@@ -389,7 +389,7 @@ common rts-c-sources-base
       if !arch(x86_64) && !arch(i386)
         c-sources: adjustor/LibffiAdjustor.c
 
-    if arch(ppc) || arch(ppc64) || arch(s390x) || arch(riscv64) || arch(loongarch64)
+    if arch(ppc) || arch(ppc64) || arch(s390x) || arch(riscv64) || arch(loongarch64) || arch(aarch64)
       asm-sources: StgCRunAsm.S
 
     if arch(wasm32)

@@ -35,7 +35,7 @@ ncgAArch64 config
        ,allocatableRegs           = AArch64.allocatableRegs platform
        ,ncgAllocMoreStack         = AArch64.allocMoreStack platform
        ,ncgMakeFarBranches        = AArch64.makeFarBranches
-       ,extractUnwindPoints       = const []
+       ,extractUnwindPoints       = AArch64.extractUnwindPoints
        ,invertCondBranches        = \_ _ blocks -> blocks
   }
     where

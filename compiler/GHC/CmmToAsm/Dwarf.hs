@@ -65,8 +65,9 @@ dwarfGen compPath config modLoc us blocks =
   -- .debug_info section: Information records on procedures and blocks
       -- unique to identify start and end compilation unit .debug_inf
       (unitU, us') = takeUniqueFromDSupply us
-      infoSct = vcat [ line (dwarfInfoLabel <> colon)
-                     , dwarfInfoSection platform
+      infoSct = vcat [ dwarfInfoSection platform
+                     , dwarfSectionAnchor platform "info"
+                     , line (dwarfInfoLabel platform <> colon)
                      , compileUnitHeader platform unitU
                      , pprDwarfInfo platform haveSrc dwarfUnit
                      , compileUnitFooter platform unitU
@@ -75,18 +76,22 @@ dwarfGen compPath config modLoc us blocks =
   -- .debug_line section: Generated mainly by the assembler, but we
   -- need to label it
       lineSct = dwarfLineSection platform $$
-                line (dwarfLineLabel <> colon)
+                dwarfSectionAnchor platform "line" $$
+                line (dwarfLineLabel platform <> colon)
 
   -- .debug_frame section: Information about the layout of the GHC stack
       (framesU, us'') = takeUniqueFromDSupply us'
       frameSct = dwarfFrameSection platform $$
-                 line (dwarfFrameLabel <> colon) $$
+                 dwarfSectionAnchor platform "frame" $$
+                 line (dwarfFrameLabel platform <> colon) $$
                  pprDwarfFrame platform (debugFrame platform framesU procs)
 
   -- .aranges section: Information about the bounds of compilation units
       aranges' | ncgSplitSections config = map mkDwarfARange procs
                | otherwise               = [DwarfARange lowLabel highLabel]
-      aranges = dwarfARangesSection platform $$ pprDwarfARanges platform aranges' unitU
+      aranges = dwarfARangesSection platform $$
+                dwarfSectionAnchor platform "aranges" $$
+                pprDwarfARanges platform aranges' unitU
 
   in (infoSct $$ abbrevSct $$ lineSct $$ frameSct $$ aranges, us'')
 {-# SPECIALIZE dwarfGen :: String -> NCGConfig -> ModLocation -> DUniqSupply -> [DebugBlock] -> (SDoc, DUniqSupply) #-}
@@ -112,7 +117,7 @@ compileUnitHeader platform unitU =
   in vcat [ line (pprAsmLabel platform cuLabel <> colon)
           , line (text "\t.long " <> length)  -- compilation unit size
           , pprHalf 3                          -- DWARF version
-          , sectionOffset platform dwarfAbbrevLabel dwarfAbbrevLabel
+          , sectionOffset platform (dwarfAbbrevLabel platform) (dwarfAbbrevLabel platform)
                                                -- abbrevs offset
           , line (text "\t.byte " <> int (platformWordSizeInBytes platform)) -- word size
           ]
