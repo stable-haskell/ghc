@@ -1,0 +1,9 @@
+#include "Cmm.h"
+aarch64_unwind (W_ x)
+{
+    unwind Sp = Sp + WDS(1);
+    unwind D1 = D2;
+    unwind D3 = W_[Sp - WDS(1)];
+    ccall unwind_foreign(x, x, x, x, x, x, x, x, x);
+    return ();
+}

@@ -16,6 +16,7 @@
 #include "HsFFI.h"
 
 #include "GC.h"
+#include "Signpost.h"
 #include "GCThread.h"
 #include "GCTDecl.h"            // NB. before RtsSignals.h which
                                 // clobbers REG_R1 on arm/Linux
@@ -329,6 +330,8 @@ GarbageCollect (struct GcConfig config,
 
   // tell the stats department that we've started a GC
   stat_startGC(cap, gct);
+  uint64_t signpost_gc_id STG_UNUSED =
+      signpostGcBegin((uint32_t)cap->no, config.collect_gen);
 
   // Lock the StablePtr table. This prevents FFI calls manipulating
   // the table from occurring during GC.
@@ -1141,6 +1144,8 @@ GarbageCollect (struct GcConfig config,
              N, n_gc_threads, gc_threads,
              par_max_copied, par_balanced_copied,
              any_work, scav_find_work, max_n_todo_overflow);
+  signpostGcEnd(signpost_gc_id, copied * sizeof(W_),
+                (live_blocks * BLOCK_SIZE_W - live_words) * sizeof(W_));
 
 #if defined(RTS_USER_SIGNALS)
   if (RtsFlags.MiscFlags.install_signal_handlers) {

@@ -1,0 +1,1 @@
+/* The mock needs no RTS platform feature macros. */

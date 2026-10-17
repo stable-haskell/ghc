@@ -31,3 +31,10 @@ test('aarch64-ushr-subword', is_aarch64_codegen, compile_grep_asm, ['hs', True, 
 test('aarch64-shl-subword', is_aarch64_codegen, compile_grep_asm, ['hs', True, '-O'])
 test('aarch64-sxtw', is_aarch64_codegen, compile_grep_asm, ['cmm', True, ''])
 test('aarch64-sxth-mul2', is_aarch64_codegen, compile_grep_asm, ['cmm', True, ''])
+
+# Assemble as well as inspecting DWARF. The floating point unwind rules exercise
+# DWARF register numbers above the compact opcode range. Nine C arguments also
+# require an adjusted machine SP, independently of the Haskell stack's CFA.
+test('aarch64-dwarf-unwind',
+     is_aarch64_codegen + [only_ways(['normal']), unless(opsys('linux') or opsys('darwin'), skip)],
+     compile_grep_asm, ['cmm', False, '-fasm -g3 -dasm-lint -dcmm-lint'])
