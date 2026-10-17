@@ -2590,6 +2590,10 @@ stg_traceEventzh ( W_ msg )
     }
 
 #endif
+#if defined(darwin_HOST_OS)
+    // Independent of eventlog ways and DTrace's enabled-probe gate.
+    ccall signpostUserMsg(TO_W_(Capability_no(MyCapability())), msg "ptr");
+#endif
     return ();
 }
 
@@ -2622,6 +2626,10 @@ stg_traceMarkerzh ( W_ msg )
         ccall dtraceUserMarkerWrapper(MyCapability() "ptr", msg "ptr");
     }
 
+#endif
+#if defined(darwin_HOST_OS)
+    // Independent of eventlog ways and DTrace's enabled-probe gate.
+    ccall signpostUserMarker(TO_W_(Capability_no(MyCapability())), msg "ptr");
 #endif
     return ();
 }

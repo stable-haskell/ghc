@@ -50,6 +50,7 @@
 #include "sm/CNF.h"
 #include "TopHandler.h"
 #include "CheckVectorSupport.h"
+#include "Signpost.h"
 
 #if defined(PROFILING)
 # include "ProfHeap.h"
@@ -536,6 +537,8 @@ hs_init_ghc(int *argc, char **argv[], RtsConfig rts_config)
     /* initialise scheduler data structures (needs to be done before
      * initStorage()).
      */
+    /* Publish the process-lifetime log before scheduler events can use it. */
+    initSignposts();
     initScheduler();
 
     /* Trace some basic information about the process */
