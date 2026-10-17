@@ -22,3 +22,9 @@ package build:*
 
 constraints:
   rts +dynamic
+
+-- All build dependencies should be installed, i.e. from stage1.
+-- I cannot write build:* but ghc-internal is enough to do the job.
+-- (See cabal.project.stage2.common for why this is here.)
+constraints:
+  build:any.ghc-internal installed

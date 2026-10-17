@@ -90,6 +90,69 @@ when `DIST_BUILD=1` uses a prebuilt bindist. These tools and their matching data
 files live under `_build/stage3-tools`; stage3 does not require them on `PATH`.
 
 
+Building with Buck2 (experimental)
+==================================
+
+Stages 1 and 2 can be built with [Buck2](https://buck2.build) through the
+experimental `cabal buck2` command
+([announcement](https://discourse.haskell.org/t/buck2-build-system-for-cabal-projects/14770)).
+`cabal buck2` builds the dependencies with Cabal and generates a
+`BUCK.cabal.bzl` file per package; `buck2` then builds the packages.
+
+This experimental path is tested on x86_64 Linux with GHC 9.8.4 as the
+boot compiler. Install GHC 9.8.4, cabal-install, the usual GHC build
+prerequisites, GNU coreutils, curl, git, Python 3 and zstd. The helper
+installs the compatible Buck2 release and patched Cabal and haskell-buck2
+sources at exact commits (the patches are not upstream yet):
+
+    $ mk/buck2-tools.sh _build/buck2-tools ghc-9.8.4
+    $ export PATH="$PWD/_build/buck2-tools/bin:$PATH"
+    $ make buck2-stage1 CABAL_BUCK2="$PWD/_build/buck2-tools/bin/cabal" GHC0=ghc-9.8.4
+    $ buck2 build //... -m opt
+    $ buck2 build //ghc:ghc -m opt --show-output              # the stage-1 compiler
+
+The helper currently supports Linux only. It checks the downloaded
+Buck2 archive's SHA-256 before running it and records source identities
+alongside the cached tools. To try other tool sources, override the
+repository/revision variables listed in `mk/buck2-tools.sh` and use a
+fresh prefix and a clean `./buck2` checkout of the requested revision.
+The CI cache key includes this script, so changing a pin invalidates it.
+
+Stage 2 is built by the stage-1 compiler, through the wrappers of
+`buck2-ghc/BUCK` (`//buck2-ghc:ghc` runs `//ghc:ghc` with a libdir of its
+own). `make buck2-stage2` runs `cabal buck2 --variant stage2` on
+`cabal.project.stage2.buck2`: every package gets a `BUCK.stage2.cabal.bzl`
+with targets suffixed `-stage2`, built in the `stage2` platform
+(`buck2/platforms/BUCK`) where the toolchain is the stage-1 compiler.
+
+    $ make buck2-stage2 CABAL_BUCK2="$PWD/_build/buck2-tools/bin/cabal" GHC0=ghc-9.8.4
+    $ buck2 build //buck2-ghc:stage2-libdir -m opt --show-output   # the stage-2 installation
+
+`//buck2-ghc:stage2-libdir` is an installation: `bin/ghc` is
+`//ghc:ghc-stage2` with a libdir where every stage-2 library is
+registered, next to `ghc-pkg`, `hsc2hs`, `haddock`, `hpc`, `hp2ps`,
+`runghc`, `ghc-iserv` and `unlit`. `mk/buck2-smoke-test.sh <store>`
+compiles and runs programs with it (libraries, `-threaded`, Template
+Haskell with both interpreters, the FFI, hsc2hs, runghc and Haddock HTML
+generation). The runghc and Haddock wrappers select the installed compiler
+and libdir; Haddock's auxiliary files are copied from haddock-api's data
+files. The stage-2 libraries are static (the `stage2` platform selects
+static linkage).
+
+`mk/buck2-tools.sh <prefix>` installs the tools (buck2, the cabal with
+the `buck2` command, haskell-buck2 at `./buck2`); the workflow
+`.github/workflows/buck2.yml` runs all of this on CI.
+
+Packages with a Custom `Setup.hs` have a hand-maintained `BUCK` file next
+to the generated `BUCK.cabal.bzl`: `compiler/BUCK` (primop `.hs-incl`
+files, `GHC.Platform.Constants`, `GHC.Settings.Config`) and
+`libraries/ghc-boot/BUCK` (`GHC.Platform.Host`). `libraries/ghc-boot-th`
+and `libraries/ghc-internal` have a `BUCK` that exports their sources for
+`ghc-boot-th-next`. `rts/BUCK` registers the RTS ways as sub-libraries of
+the `rts` unit, `libraries/ghc-internal/BUCK` generates the two modules
+the compiler prints (`GHC.Internal.Prim`, `GHC.Internal.PrimopWrappers`).
+Stage 3 is not supported.
+
 Filing bugs and feature requests
 ================================
 

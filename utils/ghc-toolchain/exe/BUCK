@@ -1,0 +1,5 @@
+# Hand-maintained: add extra targets below, or stop calling
+# generated_targets() to fully take over this package's BUCK rules.
+load(":BUCK.cabal.bzl", "generated_targets")
+
+generated_targets()
