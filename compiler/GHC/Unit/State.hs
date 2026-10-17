@@ -13,6 +13,8 @@ module GHC.Unit.State (
         UnitErr (..),
         emptyUnitState,
         initUnits,
+        initPluginUnitConfig,
+        mkUnitState,
         readUnitDatabases,
         readUnitDatabase,
         getUnitDbRefs,
@@ -79,6 +81,7 @@ import GHC.Prelude
 import GHC.Driver.DynFlags
 
 import GHC.Platform
+import GHC.Platform.Host (hostPlatformArchOS)
 import GHC.Platform.Ways
 
 import GHC.Unit.Database
@@ -398,14 +401,14 @@ initUnitConfig dflags cached_dbs home_units =
       , unitConfigAutoLink       = autoLink
       , unitConfigDistrustAll    = gopt Opt_DistrustAllPackages dflags
       , unitConfigHideAll        = gopt Opt_HideAllPackages dflags
-      , unitConfigHideAllPlugins = gopt Opt_HideAllPluginPackages dflags
+      , unitConfigHideAllPlugins = hasPluginPackageConfig dflags || gopt Opt_HideAllPluginPackages dflags
 
       , unitConfigDBCache      = cached_dbs
       , unitConfigFlagsDB      = map (offsetPackageDb (workingDirectory dflags)) $ packageDBFlags dflags
       , unitConfigFlagsExposed = packageFlags dflags
       , unitConfigFlagsIgnored = ignorePackageFlags dflags
       , unitConfigFlagsTrusted = trustFlags dflags
-      , unitConfigFlagsPlugins = pluginPackageFlags dflags
+      , unitConfigFlagsPlugins = if hasPluginPackageConfig dflags then [] else pluginPackageFlags dflags
       , unitConfigHomeUnits    = home_units
 
       }
@@ -414,6 +417,35 @@ initUnitConfig dflags cached_dbs home_units =
     offsetPackageDb :: Maybe FilePath -> PackageDBFlag -> PackageDBFlag
     offsetPackageDb (Just offset) (PackageDB (PkgDbPath p)) | OsPath.isRelative p = PackageDB (PkgDbPath (OsPath.unsafeEncodeUtf offset OsPath.</> p))
     offsetPackageDb _ p = p
+
+-- | Build a 'UnitConfig' for plugin packages using host-side package
+-- databases. Used in cross-compilation scenarios where plugin packages
+-- are built for the host platform, not the target.
+--
+-- When a separate plugin package configuration is selected, this config
+-- creates a separate 'UnitState' so that plugins resolve from host package
+-- DBs while TH\/bytecode uses the target 'UnitState'.
+initPluginUnitConfig :: DynFlags -> UnitConfig
+initPluginUnitConfig dflags =
+  (initUnitConfig dflags Nothing Set.empty)
+    { unitConfigPlatformArchOS = hostPlatformArchOS
+    , unitConfigAllowVirtual = False
+    , unitConfigAutoLink = []
+    , unitConfigHideAll = gopt Opt_HideAllPluginPackages dflags
+    -- This entire UnitState is the plugin namespace. Reuse its normal
+    -- visibility map instead of applying thinning/renaming flags twice.
+    , unitConfigHideAllPlugins = False
+    -- Ignore GHC_PACKAGE_PATH: it describes target packages. Start with the
+    -- explicitly configured host installation's defaults instead.
+    , unitConfigFlagsDB = unitConfigFlagsDB (initUnitConfig db_flags Nothing Set.empty)
+                         ++ [PackageDB UserPkgDb, PackageDB GlobalPkgDb, ClearPackageDBs]
+    , unitConfigFlagsExposed = pluginPackageFlags dflags
+    , unitConfigFlagsIgnored = []
+    , unitConfigFlagsTrusted = []
+    , unitConfigFlagsPlugins = []
+    }
+  where
+    db_flags = dflags { packageDBFlags = pluginPackageDBFlags dflags }
 
 
 -- | Map from 'ModuleName' to a set of module providers (i.e. a 'Module' and

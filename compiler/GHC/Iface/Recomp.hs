@@ -635,11 +635,12 @@ checkMergedSignatures hsc_env mod_summary self_recomp = do
 checkDependencies :: HscEnv -> ModSummary -> ModIface -> IfG RecompileRequired
 checkDependencies hsc_env summary iface
  = do
-    res_normal <- classify_import (findImportedModule hsc_env)
+    res_normal <- classify_import False (findImportedModule hsc_env)
                                   ([(st, p, m) | (st, p, m) <- (ms_textual_imps summary)]
                                   ++
                                   [(NormalLevel, NoPkgQual, m) | m <- ms_srcimps summary ])
-    res_plugin <- classify_import (\mod _ -> findPluginModule hsc_env mod)
+    res_plugin <- classify_import (hasPluginPackageConfig (hsc_dflags hsc_env))
+                    (\mod _ -> findPluginModule hsc_env mod)
                     [(st, p, m) | (st, p, m) <- (ms_plugin_imps summary) ]
     case sequence (res_normal ++ res_plugin) of
       Left recomp -> return $ NeedsRecompile recomp
@@ -652,15 +653,16 @@ checkDependencies hsc_env summary iface
             in check_packages allPkgDeps prev_dep_pkgs
  where
 
-   classify_import :: (ModuleName -> t -> IO FindResult)
+   classify_import :: Bool -- Plugins in a separate namespace are always external
+                      -> (ModuleName -> t -> IO FindResult)
                       -> [(ImportLevel, t, GenLocated l ModuleName)]
                     -> IfG
                        [Either
                           CompileReason (Either (ImportLevel, UnitId, ModuleName) (FastString, (ImportLevel, UnitId)))]
-   classify_import find_import imports =
+   classify_import external find_import imports =
     liftIO $ traverse (\(st, mb_pkg, L _ mod) ->
            let reason = ModuleChanged mod
-           in classify st reason <$> find_import mod mb_pkg)
+           in classify external st reason <$> find_import mod mb_pkg)
            imports
    logger        = hsc_logger hsc_env
    all_home_units = hsc_all_home_unit_ids hsc_env
@@ -668,10 +670,10 @@ checkDependencies hsc_env summary iface
    prev_dep_pkgs = Set.toAscList (Set.union (Set.map (first tcImportLevel) (dep_direct_pkgs (mi_deps iface)))
                                             (Set.map ((SpliceLevel),) (dep_plugin_pkgs (mi_deps iface))))
 
-   classify st _ (Found _ mod)
-    | (toUnitId $ moduleUnit mod) `elem` all_home_units = Right (Left ((st, toUnitId $ moduleUnit mod, moduleName mod)))
+   classify external st _ (Found _ mod)
+    | not external, (toUnitId $ moduleUnit mod) `elem` all_home_units = Right (Left ((st, toUnitId $ moduleUnit mod, moduleName mod)))
     | otherwise = Right (Right (moduleNameFS (moduleName mod), (st, toUnitId $ moduleUnit mod)))
-   classify _ reason _ = Left (RecompBecause reason)
+   classify _ _ reason _ = Left (RecompBecause reason)
 
    check_mods :: [(ImportLevel, UnitId, ModuleName)] -> [(ImportLevel, UnitId, ModuleName)] -> IO RecompileRequired
    check_mods [] [] = return UpToDate

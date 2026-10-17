@@ -63,12 +63,9 @@ import GHC.Linker.Types
 import GHC.Types.PkgQual
 import GHC.Types.SourceFile
 
-import GHC.Fingerprint
-import Data.IORef
 import Control.Applicative ((<|>))
 import Control.Monad
 import Data.Time
-import qualified Data.Map as M
 import GHC.Types.Unique.Map
 import GHC.Driver.Env
 import GHC.Driver.Config.Finder
@@ -94,57 +91,6 @@ type BaseName = OsPath  -- Basename of file
 
 -- -----------------------------------------------------------------------------
 -- The finder's cache
-
-{-
-[Note: Monotonic addToFinderCache]
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-addToFinderCache is only used by functions that return the cached value
-if there is one, or by functions that always write an InstalledFound value.
-Without multithreading it is then safe to always directly write the value
-without checking the previously cached value.
-
-However, with multithreading, it is possible that another function has
-written a value into cache between the lookup and the addToFinderCache call.
-in this case we should check to not overwrite an InstalledFound with an
-InstalledNotFound.
--}
-
-initFinderCache :: IO FinderCache
-initFinderCache = do
-  mod_cache <- newIORef emptyInstalledModuleEnv
-  file_cache <- newIORef M.empty
-  let flushFinderCaches :: UnitEnv -> IO ()
-      flushFinderCaches ue = do
-        atomicModifyIORef' mod_cache $ \fm -> (filterInstalledModuleEnv is_ext fm, ())
-        atomicModifyIORef' file_cache $ \_ -> (M.empty, ())
-       where
-        is_ext mod _ = not (isUnitEnvInstalledModule ue mod)
-
-      addToFinderCache :: InstalledModule -> InstalledFindResult -> IO ()
-      addToFinderCache key val =
-        atomicModifyIORef' mod_cache $ \c ->
-          case (lookupInstalledModuleEnv c key, val) of
-            -- Don't overwrite an InstalledFound with an InstalledNotFound
-            -- See [Note Monotonic addToFinderCache]
-            (Just InstalledFound{}, InstalledNotFound{}) -> (c, ())
-            _ -> (extendInstalledModuleEnv c key val, ())
-
-      lookupFinderCache :: InstalledModule -> IO (Maybe InstalledFindResult)
-      lookupFinderCache key = do
-         c <- readIORef mod_cache
-         return $! lookupInstalledModuleEnv c key
-
-      lookupFileCache :: FilePath -> IO Fingerprint
-      lookupFileCache key = do
-         c <- readIORef file_cache
-         case M.lookup key c of
-           Nothing -> do
-             hash <- getFileHash key
-             atomicModifyIORef' file_cache $ \c -> (M.insert key hash c, ())
-             return hash
-           Just fp -> return fp
-  return FinderCache{..}
 
 -- -----------------------------------------------------------------------------
 -- The three external entry points
@@ -311,7 +257,8 @@ findPluginModuleNoHsc fc fopts units Nothing mod_name =
   findExposedPluginPackageModule fc fopts units mod_name
 
 findPluginModule :: HscEnv -> ModuleName -> IO FindResult
-findPluginModule hsc_env mod_name = do
+findPluginModule target_env mod_name = do
+  hsc_env <- hscPluginEnv target_env
   let fc = hsc_FC hsc_env
   let units = hsc_units hsc_env
   let mb_home_unit = hsc_home_unit_maybe hsc_env

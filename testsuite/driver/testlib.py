@@ -345,12 +345,10 @@ def req_th( name, opts ):
 
 def req_plugins( name, opts ):
     """
-    Mark a test as requiring GHC plugins. In additional to having
-    interpreter support, currently we don't run the test for cross
-    GHCs, since plugin support for cross GHC (!7377) is unfinished
-    work (#14335) and completely untested in CI, and we don't enable
-    the internal-interpreter flag for the ghc library for cross GHC
-    anyway.
+    Mark a test as requiring GHC plugins. These fixtures build plugins with
+    the compiler under test, so they require a native compiler. Cross tests
+    must build their plugin with a native host compiler and provide its
+    installation separately; see tests/plugins/test-host-cross.py.
     """
     req_interp(name, opts)
 

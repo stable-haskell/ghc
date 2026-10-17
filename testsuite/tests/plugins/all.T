@@ -150,9 +150,23 @@ test('T14335',
      [extra_files(['simple-plugin/', 'plugins01.hs']),
 
       pre_cmd('$MAKE -s --no-print-directory -C simple-plugin package.plugins01 TOP={top}')],
-     compile_fail,
+     compile,
      ['-package-db simple-plugin/pkg.plugins01/local.package.conf -fplugin Simple.Plugin \
-       -fexternal-interpreter -package simple-plugin ' + config.plugin_way_flags])
+       -fexternal-interpreter -fplugin-opt Simple.Plugin:external -package simple-plugin ' + config.plugin_way_flags])
+
+test('PluginHostUsage',
+     [only_ways(['normal']),
+      extra_run_opts('"' + config.libdir + '"')],
+     compile_and_run,
+     ['-package ghc ' + config.plugin_way_flags])
+
+test('PluginHostSession',
+     [extra_files(['simple-plugin/', 'PluginHostTH.hs', 'PluginHostShadow/']),
+      only_ways(['normal']),
+      extra_run_opts('"' + config.libdir + '" "simple-plugin/pkg.PluginHostSession/local.package.conf"'),
+      pre_cmd('$MAKE -s --no-print-directory -C simple-plugin package.PluginHostSession TOP={top}')],
+     compile_and_run,
+     ['-package ghc -package process ' + config.plugin_way_flags])
 
 test('plugin-recomp-pure',
      [extra_files(['plugin-recomp/', 'plugin-recomp-test.hs']),

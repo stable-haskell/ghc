@@ -303,6 +303,7 @@ import Data.Functor ((<&>))
 import Data.List ( nub, isPrefixOf, partition )
 import qualified Data.List.NonEmpty as NE
 import Control.Monad
+import Control.Concurrent.MVar (newMVar)
 import Data.IORef
 import System.FilePath as FilePath
 import System.Directory
@@ -376,6 +377,8 @@ newHscEnvWithHUG top_dir top_dynflags cur_unit home_unit_graph = do
     let dflags = homeUnitEnv_dflags $ HUG.unitEnv_lookup cur_unit home_unit_graph
     unit_env <- initUnitEnv cur_unit home_unit_graph (ghcNameVersion dflags) (targetPlatform dflags)
     llvm_config <- initLlvmConfigCache top_dir
+    plugin_interp <- newMVar Nothing
+    plugin_env <- newMVar Nothing
     return HscEnv { hsc_dflags         = top_dynflags
                   , hsc_logger         = setLogFlags logger (initLogFlags top_dynflags)
                   , hsc_targets        = []
@@ -384,6 +387,8 @@ newHscEnvWithHUG top_dir top_dynflags cur_unit home_unit_graph = do
                   , hsc_FC             = fc_var
                   , hsc_type_env_vars  = emptyKnotVars
                   , hsc_interp         = Nothing
+                  , hsc_plugin_interp  = plugin_interp
+                  , hsc_plugin_env     = plugin_env
                   , hsc_unit_env       = unit_env
                   , hsc_plugins        = emptyPlugins
                   , hsc_hooks          = emptyHooks

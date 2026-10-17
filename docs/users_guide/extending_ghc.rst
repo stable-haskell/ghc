@@ -185,8 +185,11 @@ the constraint solver. If you feel strongly that any of these
 restrictions are too onerous,
 :ghc-wiki:`please give the GHC team a shout <mailing-lists-and-irc>`.
 
-Plugins do not work with ``-fexternal-interpreter``. If you need to run plugins
-with ``-fexternal-interpreter`` let GHC developers know in :ghc-ticket:`14335`.
+Plugins run in the compiler process, including when
+:ghc-flag:`-fexternal-interpreter` runs Template Haskell in another process.
+This requires a compiler built with the internal interpreter. For a different
+target platform or library way, configure a separate host installation with
+:ghc-flag:`-plugin-libdir ⟨dir⟩`.
 
 .. _using-compiler-plugins:
 
@@ -286,8 +289,9 @@ would invoke GHC like this:
     $
 
 
-Plugins can be also be loaded from libraries directly. It allows plugins to be
-loaded in cross-compilers (as a workaround for :ghc-ticket:`14335`).
+Plugins can also be loaded from libraries directly, without consulting package
+interfaces. This remains an alternative to configuring host plugin packages in a
+cross-compiler.
 
 .. ghc-flag:: -fplugin-library=⟨file-path⟩;⟨unit-id⟩;⟨module⟩;⟨args⟩
     :shortdesc: Load a pre-compiled static plugin from an external library
@@ -314,6 +318,65 @@ Plugin modules live in a separate namespace from
 the user import namespace.  By default, these two namespaces are
 the same; however, there are a few command line options which
 control specifically plugin packages:
+
+.. ghc-flag:: -plugin-libdir ⟨dir⟩
+    :shortdesc: Use a native host GHC installation for plugin loading
+    :type: dynamic
+    :category: plugins
+
+    Read ``settings`` and the default package databases from ⟨dir⟩ for plugin
+    loading. Use the library directory reported by a native host compiler's
+    ``--print-libdir``. Its architecture, operating system, word size and byte order must
+    match the process running GHC. The compiler libraries and plugin packages
+    must be ABI-compatible with that process: use the same compiler build,
+    including profiling and dynamic library ways.
+
+    This option is required when loading host plugin packages in a
+    cross-compiler. It supplies host tools and platform settings as well as
+    package paths; target tools and target linker options are not used for
+    plugins. The target interpreter must run externally; on a native compiler
+    also pass :ghc-flag:`-fexternal-interpreter`. The compiler itself must have
+    been built with the internal interpreter.
+
+    Plugin interfaces, package visibility and loaded code are kept separate
+    from target compilation and Template Haskell. Only installed packages are
+    searched in this separate host namespace. Relative paths are resolved with
+    respect to :ghc-flag:`-working-dir ⟨dir⟩` when it is supplied.
+
+.. ghc-flag:: -plugin-package-db ⟨file⟩
+    :shortdesc: Add a host package database for plugins
+    :type: dynamic
+    :category: plugins
+
+    Add ⟨file⟩ to the host plugin package database stack. Later databases shadow
+    earlier ones. This selects a separate plugin namespace even on a native
+    compiler, and requires an external target interpreter. Without
+    :ghc-flag:`-plugin-libdir ⟨dir⟩`, the native compiler's own installation
+    supplies the host settings and default databases.
+
+    The stack starts with the host global and user databases; it does not read
+    ``GHC_PACKAGE_PATH`` or target :ghc-flag:`-package-db ⟨file⟩` flags. Use
+    :ghc-flag:`-plugin-package ⟨pkg⟩`, :ghc-flag:`-plugin-package-id ⟨pkg-id⟩`
+    and :ghc-flag:`-hide-all-plugin-packages` to control host package visibility.
+    These flags are checked against host packages when a separate namespace is
+    selected. Host packages are not exposed to target source imports or linked
+    into the target program.
+
+.. ghc-flag:: -clear-plugin-package-dbs
+    :shortdesc: Clear the host plugin package database stack
+    :type: dynamic
+    :category: plugins
+
+    Discard all preceding plugin package databases, including the host defaults.
+    Subsequent :ghc-flag:`-plugin-package-db ⟨file⟩` flags build a new stack.
+    Include the host compiler's global database if its packages are needed.
+
+For example, with a native compiler and a cross-compiler from the same build::
+
+    host_libdir=$(ghc --print-libdir)
+    wasm32-unknown-wasi-ghc -plugin-libdir "$host_libdir" \
+      -plugin-package-db /path/to/host/plugin-db \
+      -plugin-package my-plugin -fplugin My.Plugin Main.hs
 
 .. ghc-flag:: -plugin-package ⟨pkg⟩
     :shortdesc: Expose ⟨pkg⟩ for plugins

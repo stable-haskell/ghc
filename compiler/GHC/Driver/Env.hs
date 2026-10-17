@@ -15,6 +15,7 @@ module GHC.Driver.Env
    , hsc_all_home_unit_ids
    , hscUpdateLoggerFlags
    , hscUpdateHUG
+   , hscPluginEnv
    , hscInsertHPT
    , hscSetActiveHomeUnit
    , hscSetActiveUnitId
@@ -50,6 +51,21 @@ import GHC.Driver.Errors.Types ( GhcMessage )
 import GHC.Driver.Config.Logger (initLogFlags)
 import GHC.Driver.Config.Diagnostic (initDiagOpts, initPrintConfig)
 import GHC.Driver.Env.Types ( Hsc(..), HscEnv(..) )
+import {-# SOURCE #-} GHC.Driver.Plugins (emptyPlugins)
+import GHC.Driver.Env.KnotVars (emptyKnotVars)
+import GHC.Unit.Finder.Types (initFinderCache)
+import GHC.Platform
+import GHC.Platform.Host (hostPlatformArchOS)
+import GHC.Platform.Ways (hostWays)
+import GHC.Settings
+import GHC.Settings.IO
+import Control.Monad (unless)
+import Control.Concurrent.MVar (modifyMVar)
+import Control.Monad.Trans.Except (runExceptT)
+import Foreign.Storable (sizeOf)
+import GHC.ByteOrder (targetByteOrder)
+import System.Directory (makeAbsolute)
+import System.FilePath ((</>), isRelative)
 
 import GHC.Runtime.Context
 import GHC.Runtime.Interpreter.Types (Interp)
@@ -143,6 +159,93 @@ hscInsertHPT hmi hsc_env = UnitEnv.insertHpt hmi (hsc_unit_env hsc_env)
 
 hscUpdateHUG :: (HomeUnitGraph -> HomeUnitGraph) -> HscEnv -> HscEnv
 hscUpdateHUG f hsc_env = hsc_env { hsc_unit_env = updateHug f (hsc_unit_env hsc_env) }
+
+-- | The host namespace used to find and load installed compiler plugins.
+--
+-- The cache belongs to the session, but the returned environment is a private
+-- immutable view: exceptions cannot leave target compilation using host state.
+-- The finder and EPS must be separate, even when host and target unit IDs agree.
+hscPluginEnv :: HscEnv -> IO HscEnv
+hscPluginEnv hsc_env
+  | not (hasPluginPackageConfig dflags) = pure hsc_env
+  | otherwise = modifyMVar (hsc_plugin_env hsc_env) $ \cached -> do
+      case cached of
+        Just (old_flags, host_env) | sameConfig old_flags dflags ->
+          pure (cached, host_env { hsc_logger = hsc_logger hsc_env
+                                , hsc_hooks = hsc_hooks hsc_env })
+        _ -> do
+          host_env <- newPluginEnv hsc_env
+          pure (Just (dflags, host_env), host_env)
+  where
+    dflags = hsc_dflags hsc_env
+    sameConfig a b =
+      pluginLibDir a == pluginLibDir b &&
+      pluginPackageDBFlags a == pluginPackageDBFlags b &&
+      pluginPackageFlags a == pluginPackageFlags b &&
+      gopt Opt_HideAllPluginPackages a == gopt Opt_HideAllPluginPackages b &&
+      workingDirectory a == workingDirectory b &&
+      rawSettings a == rawSettings b &&
+      topDir a == topDir b
+
+newPluginEnv :: HscEnv -> IO HscEnv
+newPluginEnv hsc_env = do
+  host_dir <- case pluginLibDir dflags of
+    Just dir -> makeAbsolute (offset dir)
+    Nothing
+      | platformIsCrossCompiling (targetPlatform dflags) ||
+        platformArchOS (targetPlatform dflags) /= hostPlatformArchOS ->
+          badSettings "cross-compilation requires -plugin-libdir pointing to a native host GHC installation"
+      | otherwise -> makeAbsolute (topDir dflags)
+  host_settings <- runExceptT (initSettings host_dir) >>= \case
+    Right settings -> pure settings
+    Left (SettingsError_MissingData msg) -> badSettings msg
+    Left (SettingsError_BadData msg) -> badSettings msg
+  let platform = sTargetPlatform host_settings
+  unless (platformArchOS platform == hostPlatformArchOS &&
+          platformWordSizeInBytes platform == sizeOf (0 :: Int) &&
+          platformByteOrder platform == targetByteOrder &&
+          not (platformIsCrossCompiling platform)) $
+    badSettings "-plugin-libdir must describe the native platform running GHC"
+  host_flags0 <- initDynFlags (defaultDynFlags host_settings)
+  let host_flags1 = host_flags0
+        { targetWays_ = hostWays
+        , homeUnitId_ = stringToUnitId "ghc-plugin-host"
+        , pluginPackageDBFlags = pluginPackageDBFlags dflags
+        , pluginPackageFlags = pluginPackageFlags dflags
+        , workingDirectory = workingDirectory dflags
+        , verbosity = verbosity dflags
+        }
+      host_flags
+        | gopt Opt_HideAllPluginPackages dflags =
+            gopt_set host_flags1 Opt_HideAllPluginPackages
+        | otherwise = host_flags1
+  (host_units, dbs) <- mkUnitState (hsc_logger hsc_env) host_flags (initPluginUnitConfig host_flags)
+  -- Package names and version numbers alone do not establish plugin ABI
+  -- compatibility. Keep loadPlugin's thisGhcUnit/type check as well.
+  unless (isJust (lookupUnitId host_units (toUnitId thisGhcUnit))) $
+    badSettings "host package databases do not contain the running compiler's ghc unit"
+  hpt <- emptyHomePackageTable
+  fc <- initFinderCache
+  let uid = homeUnitId_ host_flags
+      -- Clear the selection flags in the host view to prevent recursively
+      -- consulting this cache when loadPlugin calls the plugin finder.
+      flags = host_flags { pluginPackageDBFlags = [], pluginLibDir = Nothing }
+      hug = HUG.unitEnv_singleton uid (HUG.mkHomeUnitEnv host_units (Just dbs) flags hpt Nothing)
+  unit_env <- initUnitEnv uid hug (ghcNameVersion flags) platform
+  pure hsc_env
+    { hsc_dflags = flags
+    , hsc_targets = []
+    , hsc_IC = emptyInteractiveContext flags
+    , hsc_FC = fc
+    , hsc_type_env_vars = emptyKnotVars
+    , hsc_unit_env = unit_env
+    , hsc_plugins = emptyPlugins
+    }
+  where
+    dflags = hsc_dflags hsc_env
+    offset dir | isRelative dir, Just wd <- workingDirectory dflags = wd </> dir
+               | otherwise = dir
+    badSettings msg = throwGhcExceptionIO (InstallationError ("Plugin host configuration: " ++ msg))
 
 setModuleGraph :: ModuleGraph -> HscEnv -> HscEnv
 setModuleGraph mod_graph hsc_env = hsc_env { hsc_unit_env = (hsc_unit_env hsc_env) { ue_module_graph = mod_graph } }

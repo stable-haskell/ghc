@@ -175,10 +175,15 @@ instance Outputable IfaceImportLevel where
 -- | Extract information from the rename and typecheck phases to produce
 -- a dependencies information for the module being compiled.
 --
--- The fourth argument is a list of plugin modules.
-mkDependencies :: HomeUnit -> Module -> ImportAvails -> [Module] -> Dependencies
-mkDependencies home_unit mod imports plugin_mods =
-  let (home_plugins, external_plugins) = partition (isHomeUnit home_unit . moduleUnit) plugin_mods
+-- The final argument lists plugin modules; the preceding flag selects the
+-- separate host namespace, where these modules are always external.
+mkDependencies :: HomeUnit -> Module -> ImportAvails
+               -> Bool -- ^ Plugins come from a separate host namespace
+               -> [Module] -> Dependencies
+mkDependencies home_unit mod imports host_plugins plugin_mods =
+  let (home_plugins, external_plugins)
+        | host_plugins = ([], plugin_mods)
+        | otherwise = partition (isHomeUnit home_unit . moduleUnit) plugin_mods
       plugin_units = Set.fromList (map (toUnitId . moduleUnit) external_plugins)
       all_direct_mods = foldr (\(s, mn) m -> extendInstalledModuleEnv m mn (s, (GWIB (moduleName mn) NotBoot)))
                               (imp_direct_dep_mods imports)
