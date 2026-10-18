@@ -5,7 +5,134 @@
  * then functions StgRun/StgReturn are implemented in file StgCRun.c */
 #if !defined(USE_MINIINTERPRETER)
 
-#if defined(powerpc64le_HOST_ARCH) || defined(powerpc64_HOST_ARCH)
+#if defined(aarch64_HOST_ARCH) && (defined(linux_HOST_OS) || defined(darwin_HOST_OS))
+/* Use a complete assembly function: CFI in inline assembly cannot describe the
+ * compiler's surrounding frame, whose layout depends on optimisation flags.
+ * x29 anchors the saves, but the STG boundary must use machine SP: an unsafe
+ * foreign call temporarily replaces x29 and its STG unwind rules restore only
+ * machine SP. The boundary's CFA must remain correct with that stale x29.
+ */
+#if defined(LEADING_UNDERSCORE)
+#define STG_RUN_ASM _StgRun
+#define STG_RETURN_ASM _StgReturn
+#else
+#define STG_RUN_ASM StgRun
+#define STG_RETURN_ASM StgReturn
+#endif
+        .text
+        .balign 4
+        .globl STG_RUN_ASM
+        .globl STG_RUN_JMP
+        .globl STG_RETURN_ASM
+#if defined(darwin_HOST_OS)
+        .private_extern STG_RUN_JMP
+        .alt_entry STG_RUN_JMP
+        .alt_entry STG_RETURN_ASM
+        .no_dead_strip STG_RUN_JMP
+#else
+        .hidden STG_RUN_JMP
+        .type STG_RUN_ASM, %function
+        .type STG_RETURN_ASM, %function
+#endif
+STG_RUN_ASM:
+        .cfi_startproc
+        stp x29, x30, [sp, #-16]!
+        .cfi_def_cfa_offset 16
+        .cfi_offset 29, -16
+        .cfi_offset 30, -8
+        mov x29, sp
+        .cfi_def_cfa_register 29
+        stp x16, x17, [sp, #-16]!
+        .cfi_offset 16, -32
+        .cfi_offset 17, -24
+        stp x19, x20, [sp, #-16]!
+        .cfi_offset 19, -48
+        .cfi_offset 20, -40
+        stp x21, x22, [sp, #-16]!
+        .cfi_offset 21, -64
+        .cfi_offset 22, -56
+        stp x23, x24, [sp, #-16]!
+        .cfi_offset 23, -80
+        .cfi_offset 24, -72
+        stp x25, x26, [sp, #-16]!
+        .cfi_offset 25, -96
+        .cfi_offset 26, -88
+        stp x27, x28, [sp, #-16]!
+        .cfi_offset 27, -112
+        .cfi_offset 28, -104
+        stp d8, d9, [sp, #-16]!
+        .cfi_offset 72, -128
+        .cfi_offset 73, -120
+        stp d10, d11, [sp, #-16]!
+        .cfi_offset 74, -144
+        .cfi_offset 75, -136
+        stp d12, d13, [sp, #-16]!
+        .cfi_offset 76, -160
+        .cfi_offset 77, -152
+        stp d14, d15, [sp, #-16]!
+        .cfi_offset 78, -176
+        .cfi_offset 79, -168
+        sub sp, sp, #RESERVED_C_STACK_BYTES
+        .cfi_def_cfa 31, (176 + RESERVED_C_STACK_BYTES)
+        mov x19, x1
+STG_RUN_JMP:
+        br x0
+STG_RETURN_ASM:
+        add sp, sp, #RESERVED_C_STACK_BYTES
+        .cfi_def_cfa_offset 176
+        mov x0, x22
+        ldp d14, d15, [sp], #16
+        .cfi_def_cfa_offset 160
+        .cfi_restore 78
+        .cfi_restore 79
+        ldp d12, d13, [sp], #16
+        .cfi_def_cfa_offset 144
+        .cfi_restore 76
+        .cfi_restore 77
+        ldp d10, d11, [sp], #16
+        .cfi_def_cfa_offset 128
+        .cfi_restore 74
+        .cfi_restore 75
+        ldp d8, d9, [sp], #16
+        .cfi_def_cfa_offset 112
+        .cfi_restore 72
+        .cfi_restore 73
+        ldp x27, x28, [sp], #16
+        .cfi_def_cfa_offset 96
+        .cfi_restore 27
+        .cfi_restore 28
+        ldp x25, x26, [sp], #16
+        .cfi_def_cfa_offset 80
+        .cfi_restore 25
+        .cfi_restore 26
+        ldp x23, x24, [sp], #16
+        .cfi_def_cfa_offset 64
+        .cfi_restore 23
+        .cfi_restore 24
+        ldp x21, x22, [sp], #16
+        .cfi_def_cfa_offset 48
+        .cfi_restore 21
+        .cfi_restore 22
+        ldp x19, x20, [sp], #16
+        .cfi_def_cfa_offset 32
+        .cfi_restore 19
+        .cfi_restore 20
+        ldp x16, x17, [sp], #16
+        .cfi_def_cfa_offset 16
+        .cfi_restore 16
+        .cfi_restore 17
+        ldp x29, x30, [sp], #16
+        .cfi_def_cfa 31, 0
+        .cfi_restore 29
+        .cfi_restore 30
+        ret
+        .cfi_endproc
+#if defined(linux_HOST_OS)
+        .size STG_RUN_ASM, .-STG_RUN_ASM
+        .section .note.GNU-stack,"",%progbits
+#endif
+
+#elif defined(powerpc64le_HOST_ARCH) || defined(powerpc64_HOST_ARCH)
 # if defined(_CALL_ELF) && _CALL_ELF == 2
 /* 64-bit PowerPC ELF V2 ABI Revision 1.5
  *

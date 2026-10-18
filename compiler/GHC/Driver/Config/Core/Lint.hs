@@ -20,7 +20,7 @@ import GHC.Core.Lint
 import GHC.Core.Lint.Interactive
 import GHC.Core.Opt.Pipeline.Types
 import GHC.Core.Opt.Simplify ( SimplifyOpts(..) )
-import GHC.Core.Opt.Simplify.Env ( SimplMode(..) )
+import GHC.Core.Opt.Simplify.Env ( SimplMode(..), SimplPhase(..) )
 import GHC.Core.Opt.Monad
 import GHC.Core.Coercion
 
@@ -114,9 +114,9 @@ initLintPassResultConfig dflags extra_vars pass = LintPassResultConfig
 showLintWarnings :: CoreToDo -> Bool
 -- Disable Lint warnings on the first simplifier pass, because
 -- there may be some INLINE knots still tied, which is tiresomely noisy
-showLintWarnings (CoreDoSimplify cfg) = case sm_phase (so_mode cfg) of
-  InitialPhase -> False
-  _ -> True
+showLintWarnings (CoreDoSimplify cfg)
+  | SimplPhase InitialPhase <- sm_phase (so_mode cfg)
+  = False
 showLintWarnings _ = True
 
 perPassFlags :: DynFlags -> CoreToDo -> LintFlags
@@ -147,6 +147,12 @@ perPassFlags dflags pass
     check_lbs = case pass of
                       CoreDesugar    -> False
                       CoreDesugarOpt -> False
+
+                      -- Disable Lint warnings on the first simplifier pass, because
+                      -- there may be some INLINE knots still tied, which is tiresomely noisy
+                      CoreDoSimplify cfg
+                        | SimplPhase InitialPhase <- sm_phase (so_mode cfg)
+                        -> False
                       _              -> True
 
     -- See Note [Checking StaticPtrs]

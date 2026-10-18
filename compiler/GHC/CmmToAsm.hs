@@ -1,3 +1,6 @@
+{-# LANGUAGE CPP #-}
+{-# LANGUAGE LambdaCase #-}
+
 -- -----------------------------------------------------------------------------
 --
 -- (c) The University of Glasgow 1993-2004
@@ -27,7 +30,7 @@
 -- possible.
 --
 -- The machine-dependent bits are generally contained under
---  GHC/CmmToAsm/<Arch>/* and generally breaks down as follows:
+--  GHC/CmmToAsm/<Arch> and generally breaks down as follows:
 --
 --   * "Regs": Everything about the target platform's machine
 --     registers (and immediate operands, and addresses, which tend to
@@ -63,12 +66,25 @@ where
 
 import GHC.Prelude hiding (head)
 
+#if defined(HAVE_X86_NCG)
 import qualified GHC.CmmToAsm.X86   as X86
-import qualified GHC.CmmToAsm.PPC   as PPC
+#endif
+#if defined(HAVE_AARCH64_NCG)
 import qualified GHC.CmmToAsm.AArch64 as AArch64
-import qualified GHC.CmmToAsm.Wasm as Wasm32
+#endif
+#if defined(HAVE_PPC_NCG)
+import qualified GHC.CmmToAsm.PPC   as PPC
+#endif
+#if defined(HAVE_RISCV64_NCG)
 import qualified GHC.CmmToAsm.RV64  as RV64
+#endif
+#if defined(HAVE_LOONGARCH64_NCG)
 import qualified GHC.CmmToAsm.LA64 as LA64
+#endif
+#if defined(HAVE_WASM_BACKEND)
+import qualified GHC.CmmToAsm.Wasm as Wasm32
+#endif
+
 
 import GHC.CmmToAsm.Reg.Liveness
 import qualified GHC.CmmToAsm.Reg.Linear                as Linear
@@ -81,6 +97,7 @@ import qualified GHC.CmmToAsm.Reg.Graph.TrivColorable   as Color
 import GHC.Utils.Asm
 import GHC.CmmToAsm.Reg.Target
 import GHC.Platform
+import GHC.Platform.ArchOS (stringEncodeArch)
 import GHC.CmmToAsm.BlockLayout as BlockLayout
 import GHC.Settings.Config
 import GHC.CmmToAsm.Instr
@@ -123,7 +140,7 @@ import GHC.Data.Stream (liftIO)
 import qualified GHC.Data.Stream as Stream
 import GHC.Settings
 
-import Data.List (sortBy)
+import Data.List (sortBy, nub)
 import Data.List.NonEmpty (groupAllWith, head)
 import Data.Maybe
 import Data.Ord         ( comparing )
@@ -137,25 +154,42 @@ nativeCodeGen :: forall a . Logger -> ToolSettings -> NCGConfig -> ModLocation -
               -> UniqDSMT IO a
 nativeCodeGen logger ts config modLoc h cmms
  = let platform = ncgPlatform config
+       -- Takes the NcgImpl constructor unapplied: a procedure with target
+       -- attributes gets its own NCGConfig.
+       -- See Note [Cmm target attributes] in GHC.Cmm.
        nCG' :: ( OutputableP Platform statics, Outputable jumpDest, Instruction instr)
-            => NcgImpl statics instr jumpDest -> UniqDSMT IO a
-       nCG' ncgImpl = nativeCodeGen' logger config modLoc ncgImpl h cmms
+            => (NCGConfig -> NcgImpl statics instr jumpDest) -> UniqDSMT IO a
+       nCG' mkNcgImpl = nativeCodeGen' logger config modLoc mkNcgImpl h cmms
    in case platformArch platform of
-      ArchX86       -> nCG' (X86.ncgX86     config)
-      ArchX86_64    -> nCG' (X86.ncgX86_64  config)
-      ArchPPC       -> nCG' (PPC.ncgPPC     config)
-      ArchPPC_64 _  -> nCG' (PPC.ncgPPC     config)
+#if defined(HAVE_X86_NCG)
+      ArchX86       -> nCG' X86.ncgX86
+      ArchX86_64    -> nCG' X86.ncgX86_64
+#endif
+#if defined(HAVE_PPC_NCG)
+      ArchPPC       -> nCG' PPC.ncgPPC
+      ArchPPC_64 _  -> nCG' PPC.ncgPPC
+#endif
       ArchS390X     -> panic "nativeCodeGen: No NCG for S390X"
       ArchARM {}    -> panic "nativeCodeGen: No NCG for ARM"
-      ArchAArch64   -> nCG' (AArch64.ncgAArch64 config)
+#if defined(HAVE_AARCH64_NCG)
+      ArchAArch64   -> nCG' AArch64.ncgAArch64
+#endif
       ArchAlpha     -> panic "nativeCodeGen: No NCG for Alpha"
       ArchMipseb    -> panic "nativeCodeGen: No NCG for mipseb"
       ArchMipsel    -> panic "nativeCodeGen: No NCG for mipsel"
-      ArchRISCV64   -> nCG' (RV64.ncgRV64 config)
-      ArchLoongArch64 -> nCG' (LA64.ncgLA64 config)
+#if defined(HAVE_RISCV64_NCG)
+      ArchRISCV64   -> nCG' RV64.ncgRV64
+#endif
+#if defined(HAVE_LOONGARCH64_NCG)
+      ArchLoongArch64 -> nCG' LA64.ncgLA64
+#endif
       ArchUnknown   -> panic "nativeCodeGen: No NCG for unknown arch"
       ArchJavaScript-> panic "nativeCodeGen: No NCG for JavaScript"
+#if defined(HAVE_WASM_BACKEND)
       ArchWasm32    -> Wasm32.ncgWasm config logger platform ts modLoc h cmms
+#endif
+      _             -> panic "nativeCodeGen: No NCG for this architecture"
+
 
 -- | Data accumulated during code generation. Mostly about statistics,
 -- but also collects debug data for DWARF generation.
@@ -204,18 +238,18 @@ nativeCodeGen' :: (OutputableP Platform statics, Outputable jumpDest, Instructio
                => Logger
                -> NCGConfig
                -> ModLocation
-               -> NcgImpl statics instr jumpDest
+               -> (NCGConfig -> NcgImpl statics instr jumpDest)
                -> Handle
                -> CgStream RawCmmGroup a
                -> UniqDSMT IO a
-nativeCodeGen' logger config modLoc ncgImpl h cmms
+nativeCodeGen' logger config modLoc mkNcgImpl h cmms
  = do
         -- BufHandle is a performance hack.  We could hide it inside
         -- Pretty if it weren't for the fact that we do lots of little
         -- printDocs here (in order to do codegen in constant space).
         bufh <- liftIO $ newBufHandle h
         let ngs0 = NGS [] [] [] [] [] [] emptyUFM mapEmpty
-        (ngs, a) <- cmmNativeGenStream logger config modLoc ncgImpl bufh cmms ngs0
+        (ngs, a) <- cmmNativeGenStream logger config modLoc mkNcgImpl bufh cmms ngs0
         _ <- finishNativeGen logger config modLoc bufh ngs
         return a
 
@@ -284,13 +318,13 @@ cmmNativeGenStream :: forall statics jumpDest instr a . (OutputableP Platform st
               => Logger
               -> NCGConfig
               -> ModLocation
-              -> NcgImpl statics instr jumpDest
+              -> (NCGConfig -> NcgImpl statics instr jumpDest)
               -> BufHandle
               -> CgStream RawCmmGroup a
               -> NativeGenAcc statics instr
               -> UniqDSMT IO (NativeGenAcc statics instr, a)
 
-cmmNativeGenStream logger config modLoc ncgImpl h cmm_stream ngs
+cmmNativeGenStream logger config modLoc mkNcgImpl h cmm_stream ngs
  = loop (Stream.runStream cmm_stream) ngs
   where
     ncglabel = text "NCG"
@@ -316,7 +350,7 @@ cmmNativeGenStream logger config modLoc ncgImpl h cmm_stream ngs
                   dbgMap = debugToMap ndbgs
 
               -- Generate native code
-              ngs' <- withDUS $ cmmNativeGens logger config ncgImpl h
+              ngs' <- withDUS $ cmmNativeGens logger config mkNcgImpl h
                                   dbgMap cmms ngs 0
 
               -- Link native code information into debug blocks
@@ -334,13 +368,44 @@ cmmNativeGenStream logger config modLoc ncgImpl h cmm_stream ngs
           loop cmm_stream' ngs''
 
 
+-- | Does this declaration carry target attributes?  Checked so that the
+-- common case does not build an 'NcgImpl' per declaration.
+declHasCmmProcAttrs :: RawCmmDecl -> Bool
+declHasCmmProcAttrs (CmmProc info _ _ _) =
+  not (null (cpa_target_features (raw_proc_attrs info)))
+declHasCmmProcAttrs _ = False
+
+-- | Refine an 'NCGConfig' with the CPU features a procedure asks for.
+-- See Note [Cmm target attributes] in GHC.Cmm.
+ncgConfigForProc :: NCGConfig -> RawCmmDecl -> NCGConfig
+ncgConfigForProc config (CmmProc info lbl _ _)
+  | null features
+  = config
+  | not (cmmTargetFeaturesSupportedOn arch features)
+  = sorryDoc "Cmm target attributes not supported on this architecture" $
+      vcat [ text "In procedure:" <+> pprAsmLabel (ncgPlatform config) lbl
+           , text "Attributes:"
+               <+> hcat (punctuate comma (map pprCmmTargetFeature features))
+           , text "Target architecture:" <+> text (stringEncodeArch arch) ]
+  | otherwise
+  = foldl' setFeature config (nub (concatMap cmmTargetFeatureImplies features))
+  where
+    arch     = platformArch (ncgPlatform config)
+    features = cpa_target_features (raw_proc_attrs info)
+    -- Enable the implied features as well, matching -mavx2/-mavx512f.
+    -- See Note [Implications between X86 CPU feature flags].
+    setFeature cfg = \case
+      CmmTargetAvx     -> cfg { ncgAvxEnabled = True }
+      CmmTargetAvx2    -> cfg { ncgAvx2Enabled = True }
+      CmmTargetAvx512f -> cfg { ncgAvx512fEnabled = True }
+ncgConfigForProc config _ = config
+
 -- | Do native code generation on all these cmms.
---
 cmmNativeGens :: forall statics instr jumpDest.
                  (OutputableP Platform statics, Outputable jumpDest, Instruction instr)
               => Logger
               -> NCGConfig
-              -> NcgImpl statics instr jumpDest
+              -> (NCGConfig -> NcgImpl statics instr jumpDest)
               -> BufHandle
               -> LabelMap DebugBlock
               -> [RawCmmDecl]
@@ -349,8 +414,11 @@ cmmNativeGens :: forall statics instr jumpDest.
               -> DUniqSupply
               -> IO (NativeGenAcc statics instr, DUniqSupply)
 
-cmmNativeGens logger config ncgImpl h dbgMap = go
+cmmNativeGens logger config mkNcgImpl h dbgMap = go
   where
+    -- The shared NcgImpl, built once per module as before.
+    ncgImpl = mkNcgImpl config
+
     go :: [RawCmmDecl]
        -> NativeGenAcc statics instr -> Int -> DUniqSupply
        -> IO (NativeGenAcc statics instr, DUniqSupply)
@@ -360,9 +428,17 @@ cmmNativeGens logger config ncgImpl h dbgMap = go
 
     go (cmm : cmms) ngs count us = do
         let fileIds = ngs_dwarfFiles ngs
+            -- A procedure asking for extra CPU features gets its own
+            -- NCGConfig, and so its own NcgImpl, for all of cmmNativeGen:
+            -- instruction selection, the register allocator's spill code and
+            -- the pretty-printer must agree on which registers exist.
+            -- See Note [Cmm target attributes] in GHC.Cmm.
+            !proc_ncgImpl
+              | not (declHasCmmProcAttrs cmm) = ncgImpl
+              | otherwise                     = mkNcgImpl (ncgConfigForProc config cmm)
         (us', fileIds', native, imports, colorStats, linearStats, unwinds, mcfg)
           <- {-# SCC "cmmNativeGen" #-}
-             cmmNativeGen logger ncgImpl us fileIds dbgMap
+             cmmNativeGen logger proc_ncgImpl us fileIds dbgMap
                           cmm count
 
         -- Generate .file directives for every new file that has been
@@ -378,10 +454,10 @@ cmmNativeGens logger config ncgImpl h dbgMap = go
         emitNativeCode logger config h
           (vcat $
            map pprDecl newFileIds ++
-           map (pprNatCmmDeclH ncgImpl) native)
+           map (pprNatCmmDeclH proc_ncgImpl) native)
           (vcat $
            map pprDecl newFileIds ++
-           map (pprNatCmmDeclS ncgImpl) native)
+           map (pprNatCmmDeclS proc_ncgImpl) native)
 
         -- force evaluation all this stuff to avoid space leaks
         let platform = ncgPlatform config
@@ -661,7 +737,7 @@ cmmNativeGen logger ncgImpl us fileIds dbgMap cmm count
                 invertConds = invertCondBranches ncgImpl optimizedCFG
                 invert top@CmmData {} = top
                 invert (CmmProc info lbl live (ListGraph blocks)) =
-                    CmmProc info lbl live (ListGraph $ invertConds info blocks)
+                    CmmProc info lbl live (ListGraph $ invertConds (raw_info_tbls info) blocks)
 
         -- generate unwinding information from cmm
         let unwinds :: BlockMap [UnwindPoint]
@@ -832,20 +908,31 @@ shortcutBranches config ncgImpl tops weights
   | otherwise
   = (tops, weights)
   where
-    (tops', mappings) = mapAndUnzip (build_mapping ncgImpl) tops
+    (tops', mappings, kepts) =
+        unzip3 (map (build_mapping ncgImpl keepImmTrampolines) tops)
     mapping = mapUnions mappings :: LabelMap jumpDest
-    mappingBid = fmap (getJumpDestBlockId ncgImpl) mapping
+    kept = setUnions kepts
+    -- A kept trampoline is still a block, so it stays a CFG node too.
+    mappingBid = fmap (getJumpDestBlockId ncgImpl)
+               $ mapFilterWithKey (\k _ -> not (setMember k kept)) mapping
+    -- x86 PIC jump tables hold block-relative offsets that can only name
+    -- blocks of their own proc.
+    -- See Note [Shortcutting relative jump tables] in GHC.CmmToAsm.X86.Instr.
+    keepImmTrampolines =
+        ncgPIC config && platformArch (ncgPlatform config) `elem` [ArchX86, ArchX86_64]
 
-build_mapping :: forall instr t d statics jumpDest.
+build_mapping :: forall instr d statics jumpDest.
                  NcgImpl statics instr jumpDest
-              -> GenCmmDecl d (LabelMap t) (ListGraph instr)
-              -> (GenCmmDecl d (LabelMap t) (ListGraph instr)
-                 ,LabelMap jumpDest)
-build_mapping _ top@(CmmData _ _) = (top, mapEmpty)
-build_mapping _ (CmmProc info lbl live (ListGraph []))
-  = (CmmProc info lbl live (ListGraph []), mapEmpty)
-build_mapping ncgImpl (CmmProc info lbl live (ListGraph (head:blocks)))
-  = (CmmProc info lbl live (ListGraph (head:others)), mapping)
+              -> Bool
+              -> GenCmmDecl d RawCmmProcInfo (ListGraph instr)
+              -> (GenCmmDecl d RawCmmProcInfo (ListGraph instr)
+                 ,LabelMap jumpDest
+                 ,LabelSet)
+build_mapping _ _ top@(CmmData _ _) = (top, mapEmpty, setEmpty)
+build_mapping _ _ (CmmProc info lbl live (ListGraph []))
+  = (CmmProc info lbl live (ListGraph []), mapEmpty, setEmpty)
+build_mapping ncgImpl keepImm (CmmProc info lbl live (ListGraph (head:blocks)))
+  = (CmmProc info lbl live (ListGraph (head:others)), mapping, kept)
         -- drop the shorted blocks, but don't ever drop the first one,
         -- because it is pointed to by a global label.
   where
@@ -853,22 +940,30 @@ build_mapping ncgImpl (CmmProc info lbl live (ListGraph (head:blocks)))
     -- shorted.
     -- Don't completely eliminate loops here -- that can leave a dangling jump!
     shortcut_blocks :: [(BlockId, jumpDest)]
-    (_, shortcut_blocks, others) =
-        foldl' split (setEmpty :: LabelSet, [], []) blocks
-    split (s, shortcut_blocks, others) b@(BasicBlock id [insn])
+    (_, shortcut_blocks, others, kept) =
+        foldl' split (setEmpty :: LabelSet, [], [], setEmpty) blocks
+    split (s, shortcut_blocks, others, kept) b@(BasicBlock id [insn])
         | Just jd <- canShortcut ncgImpl insn
         , Just dest <- getJumpDestBlockId ncgImpl jd
         , not (has_info id)
         , (setMember dest s) || dest == id -- loop checks
-        = (s, shortcut_blocks, b : others)
-    split (s, shortcut_blocks, others) (BasicBlock id [insn])
+        = (s, shortcut_blocks, b : others, kept)
+    split (s, shortcut_blocks, others, kept) b@(BasicBlock id [insn])
         | Just dest <- canShortcut ncgImpl insn
         , not (has_info id)
-        = (setInsert id s, (id,dest) : shortcut_blocks, others)
-    split (s, shortcut_blocks, others) other = (s, shortcut_blocks, other : others)
+        -- A jump out of the proc (a tail call) is still shortcut everywhere
+        -- it can be, but the block itself is kept when keepImm is set: a
+        -- relative jump-table entry can only name it, not the jump's target.
+        -- See Note [Shortcutting relative jump tables] in GHC.CmmToAsm.X86.Instr.
+        , keepImm, isNothing (getJumpDestBlockId ncgImpl dest)
+        = (setInsert id s, (id,dest) : shortcut_blocks, b : others, setInsert id kept)
+        | Just dest <- canShortcut ncgImpl insn
+        , not (has_info id)
+        = (setInsert id s, (id,dest) : shortcut_blocks, others, kept)
+    split (s, shortcut_blocks, others, kept) other = (s, shortcut_blocks, other : others, kept)
 
     -- do not eliminate blocks that have an info table
-    has_info l = mapMember l info
+    has_info l = mapMember l (raw_info_tbls info)
 
     -- build a mapping from BlockId to JumpDest for shorting branches
     mapping = mapFromList shortcut_blocks

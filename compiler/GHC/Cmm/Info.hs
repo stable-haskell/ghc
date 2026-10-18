@@ -122,7 +122,7 @@ mkInfoTable profile proc@(CmmProc infos entry_lbl live blocks)
   = case topInfoTable proc of   --  must be at most one
       -- no info table
       Nothing ->
-         return [CmmProc mapEmpty entry_lbl live blocks]
+         return [CmmProc (rawProcInfo mapEmpty) entry_lbl live blocks]
 
       Just info@CmmInfoTable { cit_lbl = info_lbl } -> do
         (top_decls, (std_info, extra_bits)) <-
@@ -135,7 +135,7 @@ mkInfoTable profile proc@(CmmProc infos entry_lbl live blocks)
         -- point as first entry) and the entry code
         --
         return (top_decls ++
-                [CmmProc mapEmpty entry_lbl live blocks,
+                [CmmProc (rawProcInfo mapEmpty) entry_lbl live blocks,
                  mkRODataLits info_lbl
                     (CmmLabel entry_lbl : rel_std_info ++ rel_extra_bits)])
 
@@ -150,9 +150,13 @@ mkInfoTable profile proc@(CmmProc infos entry_lbl live blocks)
     (top_declss, raw_infos) <-
        unzip `fmap` mapM do_one_info (mapToList (info_tbls infos))
     return (concat top_declss ++
-            [CmmProc (mapFromList raw_infos) entry_lbl live blocks])
+            [CmmProc (rawProcInfo (mapFromList raw_infos)) entry_lbl live blocks])
 
   where
+   -- Carry the procedure's attributes into the raw header.
+   -- See Note [Cmm target attributes] in GHC.Cmm.
+   rawProcInfo tbls = RawCmmProcInfo { raw_info_tbls  = tbls
+                                     , raw_proc_attrs = proc_attrs infos }
    platform = profilePlatform profile
    do_one_info (lbl,itbl) = do
      (top_decls, (std_info, extra_bits)) <-

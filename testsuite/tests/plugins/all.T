@@ -131,7 +131,7 @@ test('T10294a',
       pre_cmd('$MAKE -s --no-print-directory -C annotation-plugin package.T10294a TOP={top}')],
      makefile_test, [])
 
-test('frontend01', [extra_files(['FrontendPlugin.hs']), when(opsys('linux') and not ghc_dynamic(), expect_broken(20706))],
+test('frontend01', [extra_files(['FrontendPlugin.hs'])],
      makefile_test, [])
 
 test('T11244',
@@ -150,9 +150,23 @@ test('T14335',
      [extra_files(['simple-plugin/', 'plugins01.hs']),
 
       pre_cmd('$MAKE -s --no-print-directory -C simple-plugin package.plugins01 TOP={top}')],
-     compile_fail,
+     compile,
      ['-package-db simple-plugin/pkg.plugins01/local.package.conf -fplugin Simple.Plugin \
-       -fexternal-interpreter -package simple-plugin ' + config.plugin_way_flags])
+       -fexternal-interpreter -fplugin-opt Simple.Plugin:external -package simple-plugin ' + config.plugin_way_flags])
+
+test('PluginHostUsage',
+     [only_ways(['normal']),
+      extra_run_opts('"' + config.libdir + '"')],
+     compile_and_run,
+     ['-package ghc ' + config.plugin_way_flags])
+
+test('PluginHostSession',
+     [extra_files(['simple-plugin/', 'PluginHostTH.hs', 'PluginHostShadow/']),
+      only_ways(['normal']),
+      extra_run_opts('"' + config.libdir + '" "simple-plugin/pkg.PluginHostSession/local.package.conf"'),
+      pre_cmd('$MAKE -s --no-print-directory -C simple-plugin package.PluginHostSession TOP={top}')],
+     compile_and_run,
+     ['-package ghc -package process ' + config.plugin_way_flags])
 
 test('plugin-recomp-pure',
      [extra_files(['plugin-recomp/', 'plugin-recomp-test.hs']),
@@ -355,14 +369,13 @@ test('test-echo-in-line-many-args',
 test('plugins-external',
      [extra_files(['shared-plugin/']),
       pre_cmd('$MAKE -s --no-print-directory -C shared-plugin package.plugins01 TOP={top}'),
-      when(opsys('mingw32') or (opsys('linux') and not ghc_dynamic()), expect_broken(20706))],
+      unless(ghc_dynamic(), skip),
+      when(opsys('mingw32'), expect_broken(20706))],
      makefile_test, [])
 
 test('test-phase-hooks-plugin',
      [extra_files(['hooks-plugin/']),
-      pre_cmd('$MAKE -s --no-print-directory -C hooks-plugin package.test-phase-hooks-plugin TOP={top}'),
-
-      when(opsys('linux') and not ghc_dynamic(), expect_broken(20706))],
+      pre_cmd('$MAKE -s --no-print-directory -C hooks-plugin package.test-phase-hooks-plugin TOP={top}')],
      compile,
      ['-package-db hooks-plugin/pkg.test-phase-hooks-plugin/local.package.conf -fplugin Hooks.PhasePlugin -package hooks-plugin ' + config.plugin_way_flags])
 
@@ -376,3 +389,10 @@ test('test-late-plugin',
      [extra_files(['late-plugin/LatePlugin.hs']), ignore_stdout],
      makefile_test,
      [])
+
+test('T24486',
+     [extra_files(['T24486-plugin/', 'T24486_Helper.hs']),
+      when(opsys('mingw32'), skip),
+      pre_cmd('$MAKE -s --no-print-directory -C T24486-plugin package.T24486-plugin TOP={top}')
+      ],
+     makefile_test, [])

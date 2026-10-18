@@ -20,3 +20,6 @@ test('T14931', [test_opts, unless(have_dynamic(), skip)],
 test('T15108', [test_opts], compile, ['-O -prof -fprof-auto'])
 test('T19894', [test_opts, extra_files(['T19894'])], multimod_compile, ['Main', '-v0 -O2 -prof -fprof-auto -iT19894'])
 test('T20938', [test_opts], compile, ['-O -prof'])
+test('T27121', [test_opts, extra_files(['T27121_aux.hs'])], multimod_compile, ['T27121', '-v0 -O -prof -fprof-auto'])
+test('T27182', [test_opts], compile, ['-O -prof -fprof-late'])
+test('T27386', [test_opts], compile, ['-O -prof -fprof-auto -finfo-table-map'])

@@ -5,6 +5,7 @@
 -}
 
 
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -26,7 +27,9 @@ import GHC.Stg.Lint     ( lintStgTopBindings )
 import GHC.Stg.Stats    ( showStgStats )
 import GHC.Stg.FVs      ( depSortWithAnnotStgPgm )
 import GHC.Stg.Unarise  ( unarise )
+#if defined(HAVE_INTERPRETER)
 import GHC.Stg.BcPrep   ( bcPrep )
+#endif
 import GHC.Stg.CSE      ( stgCse )
 import GHC.Stg.Lift     ( StgLiftConfig, stgLiftLams )
 import GHC.Unit.Module ( Module )
@@ -136,10 +139,12 @@ stg2stg logger extra_vars opts this_mod binds
             let binds' = {-# SCC "StgLiftLams" #-} stgLiftLams this_mod cfg us binds
             end_pass "StgLiftLams" binds'
 
+#if defined(HAVE_INTERPRETER)
           StgBcPrep -> do
             us <- getUniqueSupplyM
             let binds' = {-# SCC "StgBcPrep" #-} bcPrep us binds
             end_pass "StgBcPrep" binds'
+#endif
 
           StgUnarise -> do
             us <- getUniqueSupplyM
@@ -173,8 +178,10 @@ data StgToDo
   | StgStats
   | StgUnarise
   -- ^ Mandatory unarise pass, desugaring unboxed tuple and sum binders
+#if defined(HAVE_INTERPRETER)
   | StgBcPrep
   -- ^ Mandatory when compiling to bytecode
+#endif
   | StgDoNothing
   -- ^ Useful for building up 'getStgToDo'
   deriving (Show, Read, Eq, Ord)

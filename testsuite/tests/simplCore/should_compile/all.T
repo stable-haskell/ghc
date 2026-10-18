@@ -536,6 +536,7 @@ test('T25197', [req_th, extra_files(["T25197_TH.hs"]), only_ways(['optasm'])], m
 test('T25389', normal, compile, ['-O -ddump-simpl -dsuppress-uniques -dno-typeable-binds'])
 test('T24359a', normal, compile, ['-O -ddump-rules'])
 test('T25713', [grep_errmsg('W:::')], compile, ['-O -ddump-simpl'])
+test('T26323b', normal, compile, ['-O'])
 
 test('T25883', normal, compile_grep_core, [''])
 test('T25883b', normal, compile_grep_core, [''])
@@ -557,3 +558,23 @@ test('T26051',   [ grep_errmsg(r'\$wspecMe')
 test('T26115', [grep_errmsg(r'DFun')], compile, ['-O -ddump-simpl -dsuppress-uniques'])
 test('T26116', normal, compile, ['-O -ddump-rules'])
 test('T26117', [grep_errmsg(r'==')], compile, ['-O -ddump-simpl -dsuppress-uniques'])
+test('T26349',  normal, compile, ['-O -ddump-rules -dsuppress-uniques'])
+test('T26681',  normal, compile, ['-O'])
+
+# T26709: we expect three `case` expressions not four
+test('T26709', [grep_errmsg(r'case')],
+       multimod_compile,
+       ['T26709', '-O -ddump-simpl -dsuppress-uniques -dno-typeable-binds'])
+test('T26682',  normal, multimod_compile, ['T26682', '-O -v0'])
+
+# T26615: we expect NO calls to overloaded functions in T26615.hs
+# In the bug report #26615, the overloaded calls were signalled by a dictionary
+#    argument like fEqList_xxxx, so we grep for that. Not a very robust test
+test('T26615',  [grep_errmsg(r'fEqList')], multimod_compile, ['T26615', '-O -fspec-constr -ddump-simpl -dsuppress-uniques'])
+
+# T26722: there should be no reboxing in $wg
+test('T26722', [grep_errmsg(r'SPEC')], compile, ['-O -dno-typeable-binds'])
+
+test('T26805', [grep_errmsg(r'fromInteger')], compile, ['-O -dno-typeable-binds -ddump-simpl -dsuppress-uniques'])
+test('T26826', normal, compile, ['-O'])
+test('T26903', [grep_errmsg(r'reverse')], compile, ['-O -dno-typeable-binds -ddump-simpl -dsuppress-uniques -dsuppress-all'])

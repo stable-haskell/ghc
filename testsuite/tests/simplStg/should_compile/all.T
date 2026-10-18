@@ -19,12 +19,11 @@ test('T22840', [extra_files(
         [ 'T22840A.hs'
         , 'T22840B.hs'
         ]),
-        # barf signature mismatch on wasm32 due to -dtag-inference-checks
-        when(arch('wasm32'), skip),
         when(not(have_dynamic()),skip)], multimod_compile, ['T22840', '-dynamic-too -dtag-inference-checks'])
 test('inferTags003', [ only_ways(['optasm']),
                        grep_errmsg(r'(call stg\_ap\_0)', [1])
                      ], compile, ['-ddump-cmm -dno-typeable-binds -O'])
 test('inferTags004', normal, compile, ['-O -ddump-stg-tags -dno-typeable-binds -dsuppress-uniques'])
+test('T27005b', normal, compile, ['-O -ddump-stg-tags -dno-typeable-binds -dsuppress-uniques'])
 
 test('T24806', grep_errmsg('^\\(T24806\\.\\$wgo'), compile, ['-O -ddump-stg-tags -dno-typeable-binds -dsuppress-uniques'])

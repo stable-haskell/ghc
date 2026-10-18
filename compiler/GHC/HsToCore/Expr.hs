@@ -413,7 +413,7 @@ dsExpr (HsPragE _ (HsPragSCC _ cc) expr)
 
 dsExpr (HsCase ctxt discrim matches)
   = do { core_discrim <- dsLExpr discrim
-       ; ([discrim_var], matching_code) <- matchWrapper ctxt (Just [discrim]) matches
+       ; ([discrim_var], matching_code) <- matchWrapper ctxt (Just [core_discrim]) matches
        ; return (bindNonRec discrim_var core_discrim matching_code) }
 
 -- Pepe: The binds are in scope in the body but NOT in the binding group
@@ -695,6 +695,15 @@ ds_app (XExpr (ConLikeTc con tvs tys)) _hs_args core_args
 ds_app (XExpr (HsRecSelTc (FieldOcc { foLabel = L _ sel_id }))) _hs_args core_args
   = ds_app_rec_sel sel_id sel_id core_args
 
+ds_app (XExpr (ExpandedThingTc _orig e)) hs_args core_args
+  = ds_app e hs_args core_args
+  -- NB: this is important for the 'getField' case of 'ds_app_var', which needs
+  -- to see all type arguments to 'getField' at once, while for record field
+  -- projections such as (.fld) we may get:
+  --
+  --   XExpr (ExpandedThingTc (.fld) (getField @Symbol @LiftedRep @LiftedRep "fld"))
+  --     `HsAppType` rec_ty `HsAppType` fld
+
 ds_app (HsVar _ lfun) hs_args core_args
   = ds_app_var lfun hs_args core_args
 
@@ -710,8 +719,10 @@ ds_app_var (L loc fun_id) hs_args core_args
   -----------------------
   -- Deal with getField applications. General form:
   --   getField
-  --     @GHC.Types.Symbol                        {k}
-  --     @"sel"                                   x_ty
+  --     @Symbol                                  {k}
+  --     @LiftedRep                               {r_rep}
+  --     @LiftedRep                               {a_rep}
+  --     @"sel"                                   fld
   --     @T                                       r_ty
   --     @Int                                     a_ty
   --     ($dHasField :: HasField "sel" T Int)     dict
@@ -1247,11 +1258,11 @@ warnDiscardedDoBindings rhs m_ty elt_ty
     do { fam_inst_envs <- dsGetFamInstEnvs
        ; let norm_elt_ty = topNormaliseType fam_inst_envs elt_ty
              supressible_ty =
-               isUnitTy norm_elt_ty || isAnyTy norm_elt_ty || isZonkAnyTy norm_elt_ty
+               isUnitTy norm_elt_ty || isAnyTy norm_elt_ty || isUnusedTypeTy norm_elt_ty
          -- Warn about discarding things in 'monadic' binding,
          -- however few types are excluded:
          --   * Unit type `()`
-         --   * `ZonkAny` or `Any` type see (Any8) of Note [Any types]
+         --   * `UnusedType` or `Any` type see (Any5) of Note [The types Any and UnusedType]
        ; if warn_unused && not supressible_ty
          then diagnosticDs (DsUnusedDoBind rhs elt_ty)
          else

@@ -255,12 +255,25 @@ endif
 # This way we cache the results for different values of $(TEST_HC)
 
 $(TOP)/ghc-config/ghc-config : $(TOP)/ghc-config/ghc-config.hs
-	"$(TEST_HC)" --make -o $@ $<
+	"$(TEST_HC)" $(EXTRA_HC_OPTS) --make -o $@ $<
 
 empty=
 space=$(empty) $(empty)
 ifeq "$(ghc_config_mk)" ""
-ghc_config_mk = $(TOP)/mk/ghcconfig$(subst $(space),_,$(subst :,_,$(subst /,_,$(subst \,_,$(TEST_HC))))).mk
+sanitized_hc := $(subst $(space),_,$(subst :,_,$(subst /,_,$(subst \,_,$(TEST_HC)))))
+# Hash the TEST_HC binary to ensure we recompute ghcconfig when the compiler changes.
+# This prevents stale config values when switching between different GHC versions.
+test_hc_hash := $(shell \
+  if command -v openssl >/dev/null 2>&1; then \
+    openssl dgst -sha256 $(TEST_HC) | awk '{print substr($$2, 1, 8)}'; \
+  elif command -v sha256sum >/dev/null 2>&1; then \
+    sha256sum $(TEST_HC) | awk '{print substr($$1, 1, 8)}'; \
+  elif command -v shasum >/dev/null 2>&1; then \
+    shasum -a 256 $(TEST_HC) | awk '{print substr($$1, 1, 8)}'; \
+  else \
+    echo "no_hash"; \
+  fi)
+ghc_config_mk = $(TOP)/mk/$(test_hc_hash)_ghcconfig$(sanitized_hc).mk
 
 $(ghc_config_mk) : $(TOP)/ghc-config/ghc-config
 	$(TOP)/ghc-config/ghc-config "$(TEST_HC)" >"$@"; if [ "$$?" != "0" ]; then $(RM) "$@"; exit 1; fi
@@ -289,18 +302,22 @@ ifeq "$(GhcDynamic)$(GhcProfiled)" "YESYES"
 ghcThWayFlags     ?= -prof -dynamic
 ghciWayFlags      ?= -prof -dynamic
 ghcPluginWayFlags ?= -prof -dynamic
+ghciWayExt        ?= p_dyn_hi
 else ifeq "$(GhcDynamic)" "YES"
 ghcThWayFlags     ?= -dynamic
 ghciWayFlags      ?= -dynamic
 ghcPluginWayFlags ?= -dynamic
+ghciWayExt        ?= dyn_hi
 else ifeq "$(GhcProfiled)" "YES"
 ghcThWayFlags     ?= -prof
 ghciWayFlags      ?= -prof
 ghcPluginWayFlags ?= -prof
+ghciWayExt        ?= p_hi
 else
 ghcThWayFlags     ?= -static
 ghciWayFlags      ?= -static
 ghcPluginWayFlags ?= -static
+ghciWayExt        ?= hi
 endif
 
 # -----------------------------------------------------------------------------

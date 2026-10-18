@@ -1,0 +1,12 @@
+# Hand-maintained BUCK file for ghc-boot-th.
+#
+# Stage 1 builds ghc-boot-th-next instead, which lists this directory in
+# its hs-source-dirs (../ghc-boot-th). buck2 cannot reference files of
+# another package by path, so every Haskell source here is exported as a
+# target named after its path, e.g. //libraries/ghc-boot-th:GHC/Lexeme.hs.
+[export_file(name = f, src = f, visibility = ["PUBLIC"]) for f in glob(["**/*.hs"])]
+
+# Stage 2 builds ghc-boot-th itself.
+load(":BUCK.stage2.cabal.bzl", generated_targets_stage2 = "generated_targets")
+
+generated_targets_stage2()

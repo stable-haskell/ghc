@@ -32,10 +32,14 @@ module GHC.Tc.Gen.Splice(
      tcTypedSplice, tcTypedBracket, tcUntypedBracket,
      runAnnotation, getUntypedSpliceBody,
 
-     runMetaE, runMetaP, runMetaT, runMetaD, runQuasi,
+     runMetaE, runMetaP, runMetaT, runMetaD,
      tcTopSpliceExpr, lookupThName_maybe,
-     defaultRunMeta, runMeta', runRemoteModFinalizers,
-     finishTH, runTopSplice
+     finishTH, runRemoteModFinalizers,
+#if defined(HAVE_INTERPRETER)
+     runQuasi,
+     defaultRunMeta, runMeta',
+#endif
+     runTopSplice
       ) where
 
 import GHC.Prelude
@@ -49,7 +53,11 @@ import GHC.Driver.Hooks
 import GHC.Driver.Config.Diagnostic
 import GHC.Driver.Config.Finder
 
+#if !defined(HAVE_INTERPRETER)
+import GHC.Hs hiding (ForeignRef)
+#else
 import GHC.Hs
+#endif
 
 import GHC.Tc.Errors.Types
 import GHC.Tc.Utils.Monad
@@ -86,8 +94,15 @@ import GHC.HsToCore.Monad
 import GHC.IfaceToCore
 import GHC.Iface.Load
 
+#if defined(HAVE_INTERPRETER)
 import GHCi.Message
 import GHCi.RemoteTypes
+#else
+-- Use centralized stub types when interpreter is not available
+import GHC.Runtime.Interpreter.Stubs
+       ( HValue, ForeignRef, ForeignHValue, Pipe
+       , THMessage(..), THResultType(..) )
+#endif
 import GHC.Runtime.Interpreter
 
 import GHC.Rename.Splice( traceSplice, SpliceInfo(..) )
@@ -1146,6 +1161,8 @@ convertAnnotationWrapper fhv = do
 ************************************************************************
 -}
 
+#if defined(HAVE_INTERPRETER)
+-- Template Haskell execution functions - not needed for parsing/typechecking
 runQuasi :: TH.Q a -> TcM a
 runQuasi act = TH.runQ act
 
@@ -1951,6 +1968,34 @@ getAnnotationsByTypeRep th_name tyrep
        ; let selectedEpsHptAnns = findAnnsByTypeRep epsHptAnns name tyrep
        ; let selectedTcgAnns = findAnnsByTypeRep (tcg_ann_env tcg) name tyrep
        ; return (selectedEpsHptAnns ++ selectedTcgAnns) }
+#else
+-- Template Haskell execution not supported (HAVE_INTERPRETER not defined)
+-- Provide stub implementations that error at runtime for functions called from unguarded code
+
+runMetaE :: LHsExpr GhcTc -> TcM (LHsExpr GhcPs)
+runMetaE _ = fail "Template Haskell execution is not supported (HAVE_INTERPRETER not defined)"
+
+runMetaP :: LHsExpr GhcTc -> TcM (LPat GhcPs)
+runMetaP _ = fail "Template Haskell execution is not supported (HAVE_INTERPRETER not defined)"
+
+runMetaT :: LHsExpr GhcTc -> TcM (LHsType GhcPs)
+runMetaT _ = fail "Template Haskell execution is not supported (HAVE_INTERPRETER not defined)"
+
+runMetaD :: LHsExpr GhcTc -> TcM [LHsDecl GhcPs]
+runMetaD _ = fail "Template Haskell execution is not supported (HAVE_INTERPRETER not defined)"
+
+runMetaAW :: LHsExpr GhcTc -> TcM Serialized
+runMetaAW _ = fail "Template Haskell execution is not supported (HAVE_INTERPRETER not defined)"
+
+runTH :: THResultType -> ForeignHValue -> TcM a
+runTH _ _ = fail "Template Haskell execution is not supported (HAVE_INTERPRETER not defined)"
+
+finishTH :: TcM ()
+finishTH = return ()  -- Nothing to finish (HAVE_INTERPRETER not defined)
+
+runRemoteModFinalizers :: ThModFinalizers -> TcM ()
+runRemoteModFinalizers _ = fail "Template Haskell mod finalizers not supported (HAVE_INTERPRETER not defined)"
+#endif
 
 {-
 ************************************************************************

@@ -10,6 +10,8 @@
 --
 -----------------------------------------------------------------------------
 
+{-# LANGUAGE CPP #-}
+
 module GHC.Runtime.Debugger (pprintClosureCommand, showTerm, pprTypeAndContents) where
 
 import GHC.Prelude
@@ -24,7 +26,9 @@ import GHC.Driver.Ppr
 import GHC.Driver.Monad
 import GHC.Driver.Env
 
+#if defined(HAVE_INTERPRETER)
 import GHC.Linker.Loader
+#endif
 
 import GHC.Runtime.Heap.Inspect
 import GHC.Runtime.Interpreter

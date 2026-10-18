@@ -1,0 +1,5 @@
+LIBRARY bfd_imports.dll
+EXPORTS
+    bfd_imports_function
+    bfd_imports_nullable
+    bfd_imports_data DATA

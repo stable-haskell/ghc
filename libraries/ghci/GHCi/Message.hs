@@ -37,9 +37,7 @@ import GHCi.ResolvedBCO
 
 import GHC.LanguageExtensions
 import GHC.InfoProv
-#if MIN_VERSION_ghc_internal(9,1500,0)
-import qualified GHC.Exts.Heap as Heap
-#else
+#ifndef BOOTSTRAPPING
 import qualified GHC.Exts.Heap as Heap
 #endif
 import GHC.ForeignSrcLang
@@ -122,9 +120,15 @@ data Message a where
   FreeFFI :: RemotePtr C_ffi_cif -> Message ()
 
   -- | Create an info table for a constructor
+#ifndef BOOTSTRAPPING
   MkConInfoTable
    :: !ConInfoTable
    -> Message (RemotePtr Heap.StgInfoTable)
+#else
+  MkConInfoTable
+   :: !ConInfoTable
+   -> Message (RemotePtr ())
+#endif
 
   -- | Evaluate a statement
   EvalStmt
@@ -225,9 +229,11 @@ data Message a where
   -- | Remote interface to GHC.Internal.Heap.getClosureData. This is used by
   -- the GHCi debugger to inspect values in the heap for :print and
   -- type reconstruction.
+#ifndef BOOTSTRAPPING
   GetClosure
     :: HValueRef
     -> Message (Heap.GenClosure HValueRef)
+#endif
 
   -- | Remote interface to GHC.InfoProv.whereFrom. This is used by
   -- the GHCi debugger to inspect the provenance of thunks for :print.
@@ -244,6 +250,11 @@ data Message a where
   ResumeSeq
     :: RemoteRef (ResumeContext ())
     -> Message (EvalStatus ())
+
+  -- | User-defined request encoded as a tag/payload pair.  This is left
+  -- uninterpreted by GHC and is meant for GHC API applications to be able to supply
+  -- their own interpreter which understands additional commands.
+  CustomMessage :: Word8 -> ByteString -> Message ByteString
 
 deriving instance Show (Message a)
 
@@ -522,10 +533,13 @@ instance Binary (FunPtr a) where
   put = put . castFunPtrToPtr
   get = castPtrToFunPtr <$> get
 
+#ifndef BOOTSTRAPPING
+#if defined(MIN_VERSION_ghc_internal)
 #if MIN_VERSION_ghc_internal(9,1400,0)
 instance Binary Heap.HalfWord where
   put x = put (fromIntegral x :: Word32)
   get = fromIntegral <$> (get :: Get Word32)
+#endif
 #endif
 
 -- Binary instances to support the GetClosure message
@@ -541,6 +555,7 @@ instance Binary Heap.StgInfoTable
 instance Binary Heap.ClosureType
 instance Binary Heap.PrimType
 instance Binary a => Binary (Heap.GenClosure a)
+#endif
 instance Binary InfoProv where
 #if MIN_VERSION_base(4,20,0)
   get = InfoProv <$> get <*> get <*> get <*> get <*> get <*> get <*> get <*> get
@@ -593,12 +608,15 @@ getMessage = do
       32 -> Msg <$> (RunModFinalizers <$> get <*> get)
       33 -> Msg <$> (AddSptEntry <$> get <*> get)
       34 -> Msg <$> (RunTH <$> get <*> get <*> get <*> get)
+#ifndef BOOTSTRAPPING
       35 -> Msg <$> (GetClosure <$> get)
+#endif
       36 -> Msg <$> (Seq <$> get)
       37 -> Msg <$> return RtsRevertCAFs
       38 -> Msg <$> (ResumeSeq <$> get)
       39 -> Msg <$> (LookupSymbolInDLL <$> get <*> get)
       40 -> Msg <$> (WhereFrom <$> get)
+      41 -> Msg <$> (CustomMessage <$> get <*> get)
       _  -> error $ "Unknown Message code " ++ (show b)
 
 putMessage :: Message a -> Put
@@ -639,12 +657,15 @@ putMessage m = case m of
   RunModFinalizers a b        -> putWord8 32 >> put a >> put b
   AddSptEntry a b             -> putWord8 33 >> put a >> put b
   RunTH st q loc ty           -> putWord8 34 >> put st >> put q >> put loc >> put ty
+#ifndef BOOTSTRAPPING
   GetClosure a                -> putWord8 35 >> put a
+#endif
   Seq a                       -> putWord8 36 >> put a
   RtsRevertCAFs               -> putWord8 37
   ResumeSeq a                 -> putWord8 38 >> put a
   LookupSymbolInDLL dll str   -> putWord8 39 >> put dll >> put str
   WhereFrom a                 -> putWord8 40 >> put a
+  CustomMessage tag payload   -> putWord8 41 >> put tag >> put payload
 
 {-
 Note [Parallelize CreateBCOs serialization]

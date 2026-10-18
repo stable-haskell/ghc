@@ -36,6 +36,7 @@ module GHC.SysTools.Ar
 
 import GHC.Prelude
 
+import Data.Bits ((.&.))
 import Data.List (mapAccumL, isPrefixOf)
 import Data.Monoid ((<>))
 import Data.Binary.Get
@@ -112,8 +113,51 @@ getBSDArchEntries = do
         when (odd st_size) $
           void (getByteString 1)
 
+        -- Apple ranlib includes newline padding in BSD archive member sizes.
+        -- Unlike Mach-O, wasm objects cannot be passed to the linker with
+        -- these extra bytes (see trimWasmPadding).
+        let file' = trimWasmPadding file
+
         rest    <- getBSDArchEntries
-        return $ (ArchiveEntry name time own grp mode (st_size - (off2 - off1)) file) : rest
+        return $ (ArchiveEntry name time own grp mode (B.length file') file') : rest
+
+-- | Remove Apple ranlib's alignment padding from a wasm archive member.
+-- Section lengths let us distinguish trailing padding from newlines inside
+-- section payloads. Leave other object formats and malformed lengths alone.
+trimWasmPadding :: B.ByteString -> B.ByteString
+trimWasmPadding bs
+  | B.take 8 bs == "\0asm\1\0\0\0"
+  , Just end <- walk 8
+  = B.take end bs
+  | otherwise = bs
+  where
+    len = B.length bs
+    walk off
+      | off == len = Just off
+      -- ranlib aligns members to eight bytes, so padding is at most seven.
+      | len - off <= 7, B.all (== 0x0a) (B.drop off bs) = Just off
+      | otherwise = sectionEnd off >>= walk
+
+    sectionEnd off = do
+      (sz, off') <- uleb (off + 1) 0 0
+      -- Check before converting to Int or adding offsets, including on
+      -- 32-bit hosts. Integer accumulation below cannot wrap on bad input.
+      guard (sz <= toInteger (len - off'))
+      return (off' + fromInteger sz)
+
+    -- Wasm section lengths are unsigned 32-bit LEB128 values. The fifth
+    -- byte has only four payload bits and cannot request another byte.
+    uleb :: Int -> Int -> Integer -> Maybe (Integer, Int)
+    uleb off sh acc
+      | off >= len = Nothing
+      | otherwise =
+          let b = B.index bs off
+              acc' = acc + toInteger (b .&. 0x7f) * (2 ^ sh)
+          in if sh == 28 && b .&. 0xf0 /= 0
+               then Nothing
+               else if b .&. 0x80 /= 0
+                 then uleb (off + 1) (sh + 7) acc'
+                 else Just (acc', off + 1)
 
 -- | GNU Archives feature a special '//' entry that contains the
 -- extended names. Those are referred to as /<num>, where num is the

@@ -1,9 +1,10 @@
+cabal-version:  3.8
 -- WARNING: ghci.cabal is automatically generated from ghci.cabal.in by
 -- ../../configure.  Make sure you are editing ghci.cabal.in, not ghci.cabal.
 
 name:           ghci
 version:        @ProjectVersionMunged@
-license:        BSD3
+license:        BSD-3-Clause
 license-file:   LICENSE
 category:       GHC
 maintainer:     ghc-devs@haskell.org
@@ -13,7 +14,6 @@ description:
             This library offers interfaces which mediate interactions between the
             @ghci@ interactive shell and @iserv@, GHC's out-of-process interpreter
             backend.
-cabal-version:  >=1.10
 build-type:     Simple
 extra-source-files: changelog.md
 
@@ -30,6 +30,10 @@ Flag bootstrap
           See Note [Bootstrapping Template Haskell]
         Default: False
         Manual: True
+
+flag use-system-libffi
+  default: False
+  manual: True
 
 source-repository head
     type:     git
@@ -86,7 +90,6 @@ library
         rts,
         array            == 0.5.*,
         base             >= 4.8 && < 4.23,
-        ghc-internal     >= 9.1001.0 && <=@ProjectVersionForLib@.0,
         ghc-prim         >= 0.5.0 && < 0.14,
         binary           == 0.8.*,
         bytestring       >= 0.10 && < 0.13,
@@ -94,15 +97,40 @@ library
         deepseq          >= 1.4 && < 1.6,
         filepath         >= 1.4 && < 1.6,
         ghc-boot         == @ProjectVersionMunged@,
-        ghc-heap         >= 9.10.1 && <=@ProjectVersionMunged@,
         transformers     >= 0.5 && < 0.7
 
+    -- libffi is not available on JS (no native RTS) or WASM/WASI (libffi's
+    -- WASM support is Emscripten-only; the WASI sysroot has no libffi).
+    -- See Note [FFI for the JS-Backend and WASM-Backend] in GHCi/FFI.hsc.
+    if !arch(javascript) && !arch(wasm32)
+      if flag(use-system-libffi)
+         extra-libraries: ffi
+         extra-libraries-static: ffi
+      else
+         build-depends: libffi-clib
+
+    if impl(ghc > 9.10)
+        -- ghc-internal is only available (and required) when building
+        -- with a compiler that itself provides the ghc-internal
+        -- library.  Older bootstrap compilers (<= 9.10) don't ship it,
+        -- so we must not depend on it in that case.
+        --
+        -- When available we depend on the in-tree version (matching
+        -- @ProjectVersionForLib@) and define HAVE_GHC_INTERNAL so that
+        -- sources can import the non-deprecated modules from
+        -- GHC.Internal.* instead of the legacy (deprecated) locations.
+        Build-Depends:
+            ghc-internal      >= 9.1001.0 && <=@ProjectVersionForLib@.0
+        CPP-Options:          -DHAVE_GHC_INTERNAL
+
     if flag(bootstrap)
+      CPP-Options: -DBOOTSTRAPPING
       build-depends:
             ghc-boot-th-next  == @ProjectVersionMunged@
     else
       build-depends:
-            ghc-boot-th       == @ProjectVersionMunged@
+            ghc-boot-th       == @ProjectVersionMunged@,
+            ghc-heap          >= 9.10.1 && <=@ProjectVersionMunged@
 
     if !os(windows)
         Build-Depends: unix >= 2.7 && < 2.9

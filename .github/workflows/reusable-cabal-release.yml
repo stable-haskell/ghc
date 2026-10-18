@@ -1,0 +1,177 @@
+# Reusable: build stable-haskell cabal-install Linux bindists.
+#
+# Called from:
+#   * cabal-release.yml — standalone trigger surface (tag push, PR-on-self,
+#     workflow_dispatch). Drives release-asset upload on a `cabal-*` tag.
+#   * nix-ci.yml — DAG node, runs in parallel with the GHC build. The
+#     fresh cabal bindist is then consumed by the channel-e2e job so a
+#     PR-introduced cabal regression is caught before merge.
+#
+# The build itself is a small thing — Ubuntu apt deps + ghcup bootstrap
+# GHC + checkout stable-haskell/cabal at the pinned SHA + `cabal build`
+# + tarball — but doing it on both x86_64-linux and aarch64-linux runners
+# (with the same SHA used by cabal.project.stage{0,1,2,3}) keeps the
+# channel's cabal bytes in lock-step with the GHC bytes shipped from
+# the same PR.
+
+name: reusable-cabal-release
+
+on:
+  workflow_call:
+    inputs:
+      cabal_sha:
+        description: 'stable-haskell/cabal SHA to build'
+        type: string
+        default: '8b8433b736d45ec53a103baf4e4aabb8010ca2ed'
+      cabal_ver:
+        description: 'cabal-install version baked into artifact name'
+        type: string
+        default: '3.17.0.0.stable.0'
+      bootstrap_ghc:
+        description: 'GHC used to compile cabal-install'
+        type: string
+        default: '9.8.4'
+      release_tag:
+        description: 'GitHub Release tag to upload to (empty = no release upload)'
+        type: string
+        default: ''
+    outputs:
+      cabal_ver:
+        description: 'cabal-install version that was built'
+        value: ${{ inputs.cabal_ver }}
+
+permissions:
+  contents: write     # for asset upload to releases on tag push
+
+jobs:
+  build:
+    name: build / ${{ matrix.plat }}
+    runs-on: ${{ matrix.runs-on }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { plat: x86_64-linux,  runs-on: ubuntu-latest    }
+          - { plat: aarch64-linux, runs-on: ubuntu-24.04-arm }
+
+    env:
+      CABAL_SHA:     ${{ inputs.cabal_sha }}
+      BOOTSTRAP_GHC: ${{ inputs.bootstrap_ghc }}
+      CABAL_VER:     ${{ inputs.cabal_ver }}
+
+    steps:
+      # ---------------------------------------------------------------------
+      # 1. Workspace + apt deps (Ubuntu base — recent glibc, broad-enough
+      #    compat for modern Debian/Ubuntu/RHEL9+/Fedora).
+      # ---------------------------------------------------------------------
+      - name: System dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential git curl xz-utils libgmp10 libgmp-dev zlib1g-dev \
+            libffi-dev libncurses-dev pkg-config
+
+      # ---------------------------------------------------------------------
+      # 2. Bootstrap GHC + a recent cabal-install via ghcup.
+      # ---------------------------------------------------------------------
+      - name: Install ghcup + bootstrap GHC
+        run: |
+          set -euo pipefail
+          sudo rm -rf "$HOME/.ghcup"
+          curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org \
+            | BOOTSTRAP_HASKELL_NONINTERACTIVE=1 \
+              BOOTSTRAP_HASKELL_MINIMAL=1 \
+              GHCUP_INSTALL_BASE_PREFIX="$HOME" \
+              sh
+          export PATH="$HOME/.ghcup/bin:$PATH"
+          ghcup install ghc   "$BOOTSTRAP_GHC"
+          ghcup set    ghc    "$BOOTSTRAP_GHC"
+          ghcup install cabal 3.14.2.0       # any recent upstream cabal is fine
+          ghcup set    cabal 3.14.2.0
+          echo "$HOME/.ghcup/bin"                    >> "$GITHUB_PATH"
+          echo "$HOME/.ghcup/ghc/$BOOTSTRAP_GHC/bin" >> "$GITHUB_PATH"
+          ghc --version
+          cabal --version
+
+      # ---------------------------------------------------------------------
+      # 3. Checkout stable-haskell/cabal at the recorded SHA — both the
+      #    rpath relativize and target-prefix-aware tool guess patches
+      #    are in the SHA (stable-haskell/feature/wasm-cross-ghcup-stack
+      #    branch), so no patch application is required here.
+      # ---------------------------------------------------------------------
+      - name: Checkout stable-haskell/cabal @ CABAL_SHA
+        uses: actions/checkout@v5
+        with:
+          repository: stable-haskell/cabal
+          ref: ${{ env.CABAL_SHA }}
+          path: cabal-src
+          # We need full history because the SHA might not be on the
+          # default branch tip; ref above pins a commit not a branch.
+          fetch-depth: 0
+
+      # ---------------------------------------------------------------------
+      # 4. Build cabal-install using stable-haskell/cabal's release
+      #    project (split-sections for size; dynamic-link gmp because
+      #    static-link requires PIC gmp which Ubuntu's libgmp-dev isn't
+      #    always built with).
+      # ---------------------------------------------------------------------
+      - name: cabal build
+        working-directory: cabal-src
+        run: |
+          set -euo pipefail
+          cabal update
+          PROJ=cabal.project
+          if [ -f cabal.release.project ]; then PROJ=cabal.release.project; fi
+          echo "Using project: $PROJ"
+          cabal build cabal-install:exe:cabal \
+            --project-file "$PROJ" \
+            --enable-split-sections \
+            -O2
+
+      # ---------------------------------------------------------------------
+      # 5. Stage the binary; libgmp stays dynamically linked (every modern
+      #    Linux ships it).
+      # ---------------------------------------------------------------------
+      - name: Stage + package
+        id: stage
+        working-directory: cabal-src
+        run: |
+          set -euo pipefail
+          stage="$HOME/cabal-stage"
+          mkdir -p "$stage"
+          bin=$(find dist-newstyle -type f -name cabal -executable | head -1)
+          test -n "$bin" || { echo "::error::built cabal not found"; exit 1; }
+          cp "$bin" "$stage/cabal"
+          strip "$stage/cabal"
+          ls -lh "$stage/cabal"
+          file "$stage/cabal"
+          "$stage/cabal" --version
+          ldd "$stage/cabal" | sed 's/^/  /'
+          tarball="cabal-${CABAL_VER}-${{ matrix.plat }}.tar.gz"
+          tar -C "$stage" -czf "$GITHUB_WORKSPACE/$tarball" cabal
+          echo
+          echo "═══ artifact: $tarball ═══"
+          ls -lh  "$GITHUB_WORKSPACE/$tarball"
+          shasum -a 256 "$GITHUB_WORKSPACE/$tarball"
+          echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
+
+      # ---------------------------------------------------------------------
+      # 6. Upload as workflow artifact (always) — release-asset upload
+      #    only triggered if the caller passed a release_tag input.
+      # ---------------------------------------------------------------------
+      - name: Upload artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: cabal-${{ env.CABAL_VER }}-${{ matrix.plat }}
+          path: cabal-${{ env.CABAL_VER }}-${{ matrix.plat }}.tar.gz
+          retention-days: 30
+
+      - name: Upload to release (if release_tag provided)
+        if: ${{ inputs.release_tag != '' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.release_tag }}
+          files: cabal-${{ env.CABAL_VER }}-${{ matrix.plat }}.tar.gz
+          fail_on_unmatched_files: true

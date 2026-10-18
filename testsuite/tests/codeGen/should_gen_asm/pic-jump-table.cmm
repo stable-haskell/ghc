@@ -1,0 +1,20 @@
+// Every switch arm becomes a tail-call trampoline. Asm shortcutting must
+// retain the local labels used by a PIC jump table, including with split
+// sections, where its targets and base must stay in the same section.
+pic_switch {
+    switch [0 .. 5] (R1) {
+        case 0: { jump pic_target0 []; }
+        case 1: { jump pic_target1 []; }
+        case 2: { jump pic_target2 []; }
+        case 3: { jump pic_target3 []; }
+        case 4: { jump pic_target4 []; }
+        case 5: { jump pic_target5 []; }
+    }
+}
+
+pic_target0 { R1 = 10; jump %ENTRY_CODE(bits64[Sp]) [R1]; }
+pic_target1 { R1 = 11; jump %ENTRY_CODE(bits64[Sp]) [R1]; }
+pic_target2 { R1 = 12; jump %ENTRY_CODE(bits64[Sp]) [R1]; }
+pic_target3 { R1 = 13; jump %ENTRY_CODE(bits64[Sp]) [R1]; }
+pic_target4 { R1 = 14; jump %ENTRY_CODE(bits64[Sp]) [R1]; }
+pic_target5 { R1 = 15; jump %ENTRY_CODE(bits64[Sp]) [R1]; }

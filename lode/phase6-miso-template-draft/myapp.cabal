@@ -1,0 +1,31 @@
+cabal-version: 3.0
+name:          myapp
+version:       0.1.0.0
+synopsis:      Minimal miso counter built with stable-haskell wasm cross-GHC
+license:       Apache-2.0
+author:        Moritz Angermann
+maintainer:    moritz.angermann@iohk.io
+build-type:    Simple
+
+executable myapp
+  main-is:          Main.hs
+  hs-source-dirs:   app
+  default-language: GHC2021
+  default-extensions: OverloadedStrings RecordWildCards LambdaCase
+  ghc-options:      -Wall -Wno-name-shadowing
+  build-depends:
+    , base   >= 4.18 && < 5
+    , miso   >= 1.11 && < 2
+
+  if arch(wasm32)
+    -- Reactor pattern: no Haskell main, export hs_start instead.
+    -- See GHC user's guide §15. Quotes around -optl-Wl,... are required
+    -- so cabal preserves the comma during argv flattening.
+    ghc-options:
+        -no-hs-main
+        -optl-mexec-model=reactor
+        "-optl-Wl,--export=hs_start"
+    cpp-options:  -DWASM
+    build-depends: jsaddle-wasm
+  else
+    build-depends: jsaddle-warp

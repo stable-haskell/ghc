@@ -1,0 +1,13 @@
+-- Native parser generators for stage3, including builds from a bindist.
+-- Keep these versions in sync with the stage1/stage2/stage3 projects.
+active-repositories: :none
+packages:
+  https://hackage.haskell.org/package/alex-3.5.2.0/alex-3.5.2.0.tar.gz
+  https://hackage.haskell.org/package/happy-2.1.5/happy-2.1.5.tar.gz
+  https://hackage.haskell.org/package/happy-lib-2.1.5/happy-lib-2.1.5.tar.gz
+
+package *
+  shared: False
+  executable-dynamic: False
+  tests: False
+  benchmarks: False

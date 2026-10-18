@@ -176,8 +176,9 @@ several liked-named Ids bouncing around at the same time---absolute
 mischief.)
 
 Notice that we refrain from w/w'ing an INLINE function even if it is
-in a recursive group.  It might not be the loop breaker.  (We could
-test for loop-breaker-hood, but I'm not sure that ever matters.)
+in a recursive group.  It might not be the loop breaker.  (We used to
+test for loop-breaker-hood, but see (CWW4) in Note [Cast worker/wrapper]
+in GHC.Core.Opt.Simplify.Iteration.)
 
 Note [Worker/wrapper for INLINABLE functions]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -549,7 +550,7 @@ tryWW ww_opts is_rec fn_id rhs
   -- See Note [Drop absent bindings]
   | isAbsDmd (demandInfo fn_info)
   , not (isJoinId fn_id)
-  , Just filler <- mkAbsentFiller ww_opts fn_id NotMarkedStrict
+  , Just filler <- mkAbsentFiller (wo_module ww_opts) fn_id NotMarkedStrict
   = return [(new_fn_id, filler)]
 
   -- See Note [Don't w/w INLINE things]
@@ -910,9 +911,9 @@ mkStrWrapperInlinePrag (InlinePragma { inl_inline = fn_inl
                  , inl_rule   = rule_info }  -- RuleMatchInfo is (and must be) unaffected
   where
     -- See Note [Wrapper activation]
-    wrapper_phase = foldr (laterPhase . get_rule_phase) earliest_inline_phase rules
-    earliest_inline_phase = beginPhase fn_act `laterPhase` nextPhase InitialPhase
-          -- laterPhase (nextPhase InitialPhase) is a temporary hack
+    wrapper_phase = foldr (latestPhase . get_rule_phase) earliest_inline_phase rules
+    earliest_inline_phase = beginPhase fn_act `latestPhase` nextPhase InitialPhase
+          -- latestPhase (nextPhase InitialPhase) is a temporary hack
           -- to inline no earlier than phase 2.  I got regressions in
           -- 'mate', due to changes in full laziness due to Note [Case
           -- MFEs], when I did earlier inlining.
@@ -921,10 +922,8 @@ mkStrWrapperInlinePrag (InlinePragma { inl_inline = fn_inl
     -- The phase /after/ the rule is first active
     get_rule_phase rule = nextPhase (beginPhase (ruleActivation rule))
 
-{-
-Note [Demand on the worker]
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
+{- Note [Demand on the worker]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 If the original function is called once, according to its demand info, then
 so is the worker. This is important so that the occurrence analyser can
 attach OneShot annotations to the worker’s lambda binders.

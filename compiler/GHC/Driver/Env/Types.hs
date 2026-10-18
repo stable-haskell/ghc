@@ -27,6 +27,7 @@ import Control.Monad.IO.Class
 import Control.Monad.Trans.Reader
 import Control.Monad.Trans.State
 import Data.IORef
+import Control.Concurrent.MVar (MVar)
 import GHC.Driver.Env.KnotVars
 
 -- | The Hsc monad: Passing an environment and diagnostic state
@@ -82,6 +83,14 @@ data HscEnv
         , hsc_interp :: Maybe Interp
                 -- ^ target code interpreter (if any) to use for TH and GHCi.
                 -- See Note [Target code interpreter]
+
+        , hsc_plugin_interp :: MVar (Maybe Interp)
+                -- ^ Session-lived in-process interpreter for plugins when
+                -- target code runs in an external interpreter.
+
+        , hsc_plugin_env :: MVar (Maybe (DynFlags, HscEnv))
+                -- ^ Cached host environment and the flags that selected it.
+                -- Its interfaces and finder entries must not enter target caches.
 
         , hsc_plugins :: !Plugins
                 -- ^ Plugins

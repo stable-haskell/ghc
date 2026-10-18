@@ -1,0 +1,31 @@
+# Makefile — bundled with the stable-haskell wasm32-unknown-wasi GHC bindist.
+#
+# ghcup's `install ghc <version>` flow is "./configure --prefix=DIR &&
+# make install". The bindist is already laid out as bin/ + lib/ +
+# relocate.sh, so install just copies that layout into the prefix and
+# refreshes the package-db cache (the wasm32-unknown-wasi-ghc-pkg
+# binary auto-recaches by mtime on first read too, but we do it
+# eagerly here so the first invocation is fast).
+
+include config.mk
+
+.PHONY: install
+
+install:
+	@mkdir -p "$(DESTDIR)$(prefix)"
+	@cp -PR bin "$(DESTDIR)$(prefix)/"
+	@cp -PR lib "$(DESTDIR)$(prefix)/"
+	@if [ -f relocate.sh ]; then \
+	  cp relocate.sh "$(DESTDIR)$(prefix)/relocate.sh"; \
+	  chmod +x "$(DESTDIR)$(prefix)/relocate.sh"; \
+	fi
+	@if ! command -v node >/dev/null 2>&1; then \
+	  echo ""; \
+	  echo "NOTE: Node.js was not found on PATH. Template Haskell"; \
+	  echo "      evaluation will fail without it (the wasm dynamic"; \
+	  echo "      linker shim runs via node). Non-TH builds work fine."; \
+	  echo ""; \
+	fi
+	@echo "Installed stable-haskell wasm32-unknown-wasi GHC to: $(DESTDIR)$(prefix)"
+	@echo "(ghc-pkg auto-recaches package.cache by mtime on first read;"
+	@echo "no relocate step required after install.)"

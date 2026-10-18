@@ -1,4 +1,5 @@
 {-# LANGUAGE NamedFieldPuns #-}
+{-# LANGUAGE CPP #-}
 module Main where
 
 import Distribution.Simple
@@ -12,6 +13,9 @@ import Distribution.Simple.Program
 import Distribution.Simple.Utils
 import Distribution.Simple.Setup
 import Distribution.Simple.PackageIndex
+#if MIN_VERSION_Cabal(3,14,0)
+import Distribution.Simple.LocalBuildInfo (interpretSymbolicPathLBI)
+#endif
 
 import System.IO
 import System.Process
@@ -23,12 +27,26 @@ import qualified Data.Map as Map
 import GHC.ResponseFile
 import System.Environment
 
+-- | Extract the 'Verbosity' from the configure flags.
+--
+-- Cabal 3.17 (commit edb808a0b8b) split the old @Verbosity@ type into
+-- 'VerbosityFlags' (the CLI-passable part) and 'VerbosityHandles', so
+-- 'configVerbosity' now yields a 'VerbosityFlags' which must be wrapped
+-- back into a 'Verbosity' before passing it to the Cabal library functions.
+configVerbosity' :: ConfigFlags -> Verbosity
+#if MIN_VERSION_Cabal(3,17,0)
+configVerbosity' cfg =
+  mkVerbosity defaultVerbosityHandles (fromFlagOrDefault silent (configVerbosity cfg))
+#else
+configVerbosity' cfg = fromFlagOrDefault minBound (configVerbosity cfg)
+#endif
+
 main :: IO ()
 main = defaultMainWithHooks ghcHooks
   where
     ghcHooks = simpleUserHooks
       { postConf = \args cfg pd lbi -> do
-          let verbosity = fromFlagOrDefault minBound (configVerbosity cfg)
+          let verbosity = configVerbosity' cfg
           ghcAutogen verbosity lbi
           postConf simpleUserHooks args cfg pd lbi
       }
@@ -54,19 +72,28 @@ primopIncls =
     , ("primop-vector-tycons.hs-incl"     , "--primop-vector-tycons")
     , ("primop-docs.hs-incl"              , "--wired-in-docs")
     , ("primop-deprecations.hs-incl"      , "--wired-in-deprecations")
+    , ("primop-prim-module.hs-incl"       , "--prim-module")
+    , ("primop-wrappers-module.hs-incl"   , "--wrappers-module")
     ]
 
 ghcAutogen :: Verbosity -> LocalBuildInfo -> IO ()
 ghcAutogen verbosity lbi@LocalBuildInfo{pkgDescrFile,withPrograms,componentNameMap,installedPkgs}
   = do
+
+#if MIN_VERSION_Cabal(3,14,0)
+  let fromSymPath = interpretSymbolicPathLBI lbi
+#else
+  let fromSymPath = id
+#endif
+
   -- Get compiler/ root directory from the cabal file
-  let Just compilerRoot = takeDirectory <$> pkgDescrFile
+  let Just compilerRoot = (takeDirectory . fromSymPath) <$> pkgDescrFile
 
   -- Require the necessary programs
-  (gcc   ,withPrograms) <- requireProgram normal gccProgram withPrograms
-  (ghc   ,withPrograms) <- requireProgram normal ghcProgram withPrograms
+  (gcc   ,withPrograms) <- requireProgram verbosity gccProgram withPrograms
+  (ghc   ,withPrograms) <- requireProgram verbosity ghcProgram withPrograms
 
-  settings <- read <$> getProgramOutput normal ghc ["--info"]
+  settings <- read <$> getProgramOutput verbosity ghc ["--info"]
   -- We are reinstalling GHC
   -- Write primop-*.hs-incl
   let hsCppOpts = case lookup "Haskell CPP flags" settings of
@@ -76,34 +103,44 @@ ghcAutogen verbosity lbi@LocalBuildInfo{pkgDescrFile,withPrograms,componentNameM
       cppOpts = hsCppOpts ++ ["-P","-x","c"]
       cppIncludes = map ("-I"++) [compilerRoot]
   -- Preprocess primops.txt.pp
-  primopsStr <- getProgramOutput normal gcc (cppOpts ++ cppIncludes ++ [primopsTxtPP])
+  primopsStr <- getProgramOutput verbosity gcc (cppOpts ++ cppIncludes ++ [primopsTxtPP])
   -- Call genprimopcode to generate *.hs-incl
   forM_ primopIncls $ \(file,command) -> do
     contents <- readProcess "genprimopcode" [command] primopsStr
-    rewriteFileEx verbosity (buildDir lbi </> file) contents
+    rewriteFileEx verbosity (fromSymPath (buildDir lbi) </> file) contents
 
   -- Write GHC.Platform.Constants
-  let platformConstantsPath = autogenPackageModulesDir lbi </> "GHC/Platform/Constants.hs"
+  let platformConstantsPath = fromSymPath (autogenPackageModulesDir lbi) </> "GHC/Platform/Constants.hs"
       targetOS = case lookup "target os" settings of
         Nothing -> error "no target os in settings"
         Just os -> os
   createDirectoryIfMissingVerbose verbosity True (takeDirectory platformConstantsPath)
+#if MIN_VERSION_Cabal(3,15,0)
+  -- temp files are now always created in system temp directory
+  -- (cf 8161f5f99dbe5d6c7564d9e163754935ddde205d)
+  withTempFile "Constants_tmp.hs" $ \tmp h -> do
+#else
   withTempFile (takeDirectory platformConstantsPath) "Constants_tmp.hs" $ \tmp h -> do
+#endif
     hClose h
     callProcess "deriveConstants" ["--gen-haskell-type","-o",tmp,"--target-os",targetOS]
-    renameFile tmp platformConstantsPath
+    copyFile tmp platformConstantsPath
 
   let cProjectUnitId = case Map.lookup (CLibName LMainLibName) componentNameMap of
                          Just [LibComponentLocalBuildInfo{componentUnitId}] -> unUnitId componentUnitId
                          _ -> error "Couldn't find unique cabal library when building ghc"
 
   let cGhcInternalUnitId = case lookupPackageName installedPkgs (mkPackageName "ghc-internal")  of
-          -- We assume there is exactly one copy of `ghc-internal` in our dependency closure
+        -- We assume there is exactly one copy of `ghc-internal` in our dependency closure for
+        -- ghc >= 9.10 that have the ghc-internal library.
         [(_,[packageInfo])] -> unUnitId $ installedUnitId packageInfo
+        -- for ghc < 9.10 we expect to find none.
+        [] -> "<unavailable>"
+        -- for anything else this is an issue.
         _ -> error "Couldn't find unique ghc-internal library when building ghc"
 
   -- Write GHC.Settings.Config
-      configHsPath = autogenPackageModulesDir lbi </> "GHC/Settings/Config.hs"
+      configHsPath = fromSymPath (autogenPackageModulesDir lbi) </> "GHC/Settings/Config.hs"
       configHs = generateConfigHs cProjectUnitId cGhcInternalUnitId settings
   createDirectoryIfMissingVerbose verbosity True (takeDirectory configHsPath)
   rewriteFileEx verbosity configHsPath configHs
@@ -119,6 +156,8 @@ generateConfigHs :: String -- ^ ghc's cabal-generated unit-id, which matches its
                  -> String -- ^ ghc-internal's cabal-generated unit-id, which matches its package-id/key
                  -> [(String,String)] -> String
 generateConfigHs cProjectUnitId cGhcInternalUnitId settings = either error id $ do
+    -- cStage = 2 is clearly wrong. As we compile the stage 1 compiler with this
+    -- file as well!
     let getSetting' = getSetting $ (("cStage","2"):) settings
     buildPlatform  <- getSetting' "cBuildPlatformString" "Host platform"
     hostPlatform   <- getSetting' "cHostPlatformString" "Target platform"

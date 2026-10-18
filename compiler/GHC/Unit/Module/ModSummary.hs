@@ -105,9 +105,12 @@ ms_installed_mod = fst . getModuleInstantiation . ms_mod
 ms_mod_name :: ModSummary -> ModuleName
 ms_mod_name = moduleName . ms_mod
 
--- | Textual imports, plus plugin imports but not SOURCE imports.
+-- | Imports used to construct the target module graph, excluding SOURCE
+-- imports. Separately configured host plugins never depend on target modules.
 ms_imps :: ModSummary -> [(ImportLevel, PkgQual, Located ModuleName)]
-ms_imps ms = ms_textual_imps ms ++ ms_plugin_imps ms
+ms_imps ms
+  | hasPluginPackageConfig (ms_hspp_opts ms) = ms_textual_imps ms
+  | otherwise = ms_textual_imps ms ++ ms_plugin_imps ms
 
 -- | Plugin imports
 ms_plugin_imps :: ModSummary -> [(ImportLevel, PkgQual, Located ModuleName)]
