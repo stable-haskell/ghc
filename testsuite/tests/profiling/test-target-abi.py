@@ -21,6 +21,7 @@ import textwrap
 from toolchain_trace import (
     check_no_logical_profiling_target_in_toolchain,
     check_profile_cpp_trace,
+    check_hsc2hs_wrapper_path_independence,
     check_profile_hsc2hs_invocations,
     command_program_name,
     command_target_selectors,
@@ -979,6 +980,7 @@ def main():
                     profile_info["Target name"] + "-hsc2hs" + hsc2hs_suffix)
                 assert hsc2hs_helper.is_file(), \
                     "missing target-dispatched profiling hsc2hs helper: " + str(hsc2hs_helper)
+                check_hsc2hs_wrapper_path_independence(hsc2hs_helper, work, env, write)
                 hsc2hs_wrapper, hsc2hs_log, hsc2hs_env = make_hsc2hs_recording_wrapper(
                     hsc2hs_helper, work, env, write)
                 shutil.rmtree(work / "build/build/host" / profile_info["Target name"] /

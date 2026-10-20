@@ -4,6 +4,8 @@ import json
 import os
 from pathlib import Path
 import shlex
+import subprocess
+import sys
 
 
 def command_target_selectors(command):
@@ -94,12 +96,14 @@ def check_no_logical_profiling_target_in_toolchain(info):
         "logical profiling name leaked into LLVM target: " + info["LLVM target"]
 
 
-def make_hsc2hs_recording_wrapper(real_hsc2hs, work, env, write_file):
+def make_hsc2hs_recording_wrapper(real_hsc2hs, work, env, write_file,
+                                  python_executable=None):
     """Record real Cabal -> hsc2hs arguments/response files, then exec helper."""
     log = work / "hsc2hs-invocations.jsonl"
-    wrapper = work / ("record-hsc2hs.py")
-    write_file(wrapper, r'''
-        #!/usr/bin/env python3
+    recorder = work / "record-hsc2hs.py"
+    wrapper = work / "record-hsc2hs"
+    write_file(recorder, r'''
+        # Executed by the adjacent /bin/sh launcher with sys.executable.
         import json
         import os
         from pathlib import Path
@@ -125,10 +129,46 @@ def make_hsc2hs_recording_wrapper(real_hsc2hs, work, env, write_file):
         os.execv(os.environ["T11_HSC2HS_REAL"],
                  [os.environ["T11_HSC2HS_REAL"], *sys.argv[1:]])
     ''')
+    # Keep the interpreter out of a shebang: Nix paths can be long or contain
+    # spaces, while /bin/sh is available in the minimal build environment.
+    python_executable = python_executable or sys.executable
+    write_file(wrapper, '''
+        #!/bin/sh
+        exec {python} {recorder} "$@"
+    '''.format(python=shlex.quote(python_executable), recorder=shlex.quote(str(recorder))))
     wrapper.chmod(0o755)
     env = env.copy()
     env.update(T11_HSC2HS_REAL=str(real_hsc2hs), T11_HSC2HS_LOG=str(log))
     return wrapper, log, env
+
+
+def check_hsc2hs_wrapper_path_independence(real_hsc2hs, work, env, write_file):
+    """Exercise the recorder with PATH lacking Python and paths containing spaces."""
+    probe = work / "hsc2hs wrapper path with spaces"
+    python_dir = probe / "python runtime path with spaces"
+    python_dir.mkdir(parents=True)
+    spaced_python = python_dir / "python"
+    spaced_python.symlink_to(sys.executable)
+    wrapper, log, wrapper_env = make_hsc2hs_recording_wrapper(
+        real_hsc2hs, probe, env, write_file, python_executable=str(spaced_python))
+    no_python_path = probe / "PATH without python3"
+    no_python_path.mkdir(parents=True)
+    response = probe / "version arguments.rsp"
+    response.write_text("-V\n")
+    expected = subprocess.run([real_hsc2hs, "-V"], env=env, text=True,
+                              capture_output=True, check=True, timeout=30)
+    isolated_env = wrapper_env.copy()
+    isolated_env["PATH"] = str(no_python_path)
+    actual = subprocess.run([wrapper, "@" + str(response)], env=isolated_env,
+                            text=True, capture_output=True, check=True, timeout=30)
+    assert actual.stdout == expected.stdout, "recorder changed hsc2hs version output"
+    invocations = [json.loads(line) for line in log.read_text().splitlines() if line]
+    assert len(invocations) == 1, "recorder did not log exactly one hsc2hs invocation"
+    invocation = invocations[0]
+    assert invocation["argv"] == ["@" + str(response)], invocation
+    assert invocation["responses"] == [{
+        "path": str(response), "content": "-V\n", "error": None
+    }], invocation
 
 
 def check_profile_hsc2hs_invocations(log, profile_info):
