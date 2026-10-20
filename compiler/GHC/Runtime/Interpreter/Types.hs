@@ -134,12 +134,12 @@ data InterpStatus inst
 
 -- | Configuration needed to spawn an external interpreter
 data IServConfig = IServConfig
-  { iservConfProgram  :: !String   -- ^ External program to run
+  { iservConfProgram  :: IO String -- ^ Resolve/build the program only when starting it
   , iservConfOpts     :: ![String] -- ^ Command-line options
   , iservConfProfiled :: !Bool     -- ^ Use Profiling way
   , iservConfDynamic  :: !Bool     -- ^ Use Dynamic way
   , iservConfHook     :: !(Maybe (CreateProcess -> IO ProcessHandle)) -- ^ Hook
-  , iservConfTrace    :: IO ()     -- ^ Trace action executed after spawn
+  , iservConfTrace    :: String -> IO () -- ^ Trace the resolved program before spawn
   }
 
 -- | Common field between native external interpreter and the JS one

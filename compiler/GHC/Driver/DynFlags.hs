@@ -43,7 +43,7 @@ module GHC.Driver.DynFlags (
         positionIndependent,
         optimisationFlags,
 
-        targetProfile,
+        targetProfile, targetABI,
 
         ReexportedModule(..),
 
@@ -64,6 +64,7 @@ module GHC.Driver.DynFlags (
         programName, projectVersion,
         ghcUsagePath, ghciUsagePath, topDir, toolDir,
         versionedAppDir, versionedFilePath,
+        versionedAppDirForABI, versionedFilePathForABI,
         extraGccViaCFlags, globalPackageDatabasePath,
 
         --
@@ -125,7 +126,7 @@ import GHC.Unit.Module
 import GHC.Unit.Module.Warnings
 import GHC.Utils.CliOption
 import GHC.SysTools.Terminal ( stderrSupportsAnsiColors )
-import GHC.UniqueSubdir (uniqueSubdir)
+import GHC.UniqueSubdir (uniqueSubdir, uniqueSubdirWithAbi)
 import GHC.Utils.Outputable
 import GHC.Utils.Panic
 import GHC.Utils.TmpFs
@@ -1270,6 +1271,10 @@ defaultFlags settings
 
     ++ validHoleFitDefaults
 
+    -- A same-architecture ABI cross compiler must not load target closures in
+    -- its host RTS. Plugins use the separate host installation instead.
+    ++ [Opt_ExternalInterpreter | sTargetABI settings == ProfilingABI]
+
     where platform = sTargetPlatform settings
 
 -- | These are the default settings for the display and sorting of valid hole
@@ -1525,7 +1530,11 @@ ways dflags
 
 -- | Get target profile
 targetProfile :: DynFlags -> Profile
-targetProfile dflags = Profile (targetPlatform dflags) (ways dflags)
+targetProfile dflags = Profile (targetPlatform dflags) (ways dflags) (targetABI dflags)
+
+-- | ABI intrinsic to this target's settings and private package universe.
+targetABI :: DynFlags -> TargetABI
+targetABI = platformMisc_targetABI . platformMisc
 
 --
 -- System tool settings and locations
@@ -1559,10 +1568,13 @@ globalPackageDatabasePath dflags = fileSettings_globalPackageDatabase $ fileSett
 --
 -- UNIQUE_SUBDIR is typically a combination of the target platform and GHC version
 versionedAppDir :: String -> ArchOS -> MaybeT IO FilePath
-versionedAppDir appname platform = do
+versionedAppDir appname platform = versionedAppDirForABI appname platform DefaultABI
+
+versionedAppDirForABI :: String -> ArchOS -> TargetABI -> MaybeT IO FilePath
+versionedAppDirForABI appname platform abi = do
   -- Make sure we handle the case the HOME isn't set (see #11678)
   -- We need to fallback to the old scheme if the subdirectory exists.
-  msum $ map (checkIfExists <=< fmap (</> versionedFilePath platform))
+  msum $ map (checkIfExists <=< fmap (</> versionedFilePathForABI platform abi))
        [ tryMaybeT $ getAppUserDataDirectory appname  -- this is ~/.ghc/
        , tryMaybeT $ getXdgDirectory XdgData appname -- this is $XDG_DATA_HOME/
        ]
@@ -1573,6 +1585,9 @@ versionedAppDir appname platform = do
 
 versionedFilePath :: ArchOS -> FilePath
 versionedFilePath platform = uniqueSubdir platform
+
+versionedFilePathForABI :: ArchOS -> TargetABI -> FilePath
+versionedFilePathForABI platform = uniqueSubdirWithAbi platform . targetABIName
 
 -- | Access the unit-id of the version of `base` which we will automatically link
 -- against.

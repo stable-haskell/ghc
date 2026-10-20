@@ -1329,10 +1329,10 @@ The allowed fields, with their types, are:
     (string list) A list of directories containing interface files
     (``.hi`` files) for this package.
 
-    If the package contains profiling libraries, then the interface
-    files for those library modules should have the suffix ``.p_hi``. So
-    the package can contain both normal and profiling versions of the
-    same library without conflict (see also ``library_dirs`` below).
+    Profiling targets also use ``.hi`` files. Register their libraries in the
+    profiling compiler's separate package database, with import directories
+    belonging to that target installation. Ordinary and profiling interfaces
+    cannot be mixed despite sharing the same suffix.
 
 ``library-dirs``
     .. index::
@@ -1371,15 +1371,11 @@ The allowed fields, with their types, are:
        single: extra-libraries; package specification
 
     (string list) A list of extra libraries for this package. The
-    difference between ``hs-libraries`` and ``extra-libraries`` is that
-    ``hs-libraries`` normally have several versions, to support
-    profiling, parallel and other build options. The various versions
-    are given different suffixes to distinguish them, for example the
-    profiling version of the standard prelude library is named
-    ``libHSbase_p.a``, with the ``_p`` indicating that this is a
-    profiling version. The suffix is added automatically by GHC for
-    ``hs-libraries`` only, no suffix is added for libraries in
-    ``extra-libraries``.
+    difference between ``hs-libraries`` and ``extra-libraries`` is that GHC
+    applies its Haskell library naming conventions to ``hs-libraries``, such as
+    the compiler version suffix for shared libraries. No such suffix is added
+    for ``extra-libraries``. Profiling targets use ordinary Haskell library
+    names in a separate installation; GHC does not add a profiling suffix.
 
     The libraries listed in ``extra-libraries`` may be any libraries
     supported by your system's linker, including dynamic libraries

@@ -182,10 +182,6 @@ programName :: Context -> Action String
 programName Context {..} = do
     prefix <- crossPrefix
     -- TODO: Can we extract this information from Cabal files?
-    -- Alp: We could, but then the iserv package would have to
-    --      use Cabal conditionals + a 'profiling' flag
-    --      to declare the executable name, and I'm not sure
-    --      this is allowed (or desired for that matter).
     return $ prefix ++ basename
   where
     basename
@@ -197,7 +193,6 @@ programName Context {..} = do
                                             then suffix
                                             else ""
                                         | (wayUnit', suffix) <- [
-                                            (Profiling, "-prof"),
                                             (Dynamic,   "-dyn")
                                         ]]
       | otherwise               = pkgName package

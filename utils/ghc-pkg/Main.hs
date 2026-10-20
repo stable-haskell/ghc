@@ -30,7 +30,7 @@ import GHC.HandleEncoding
 import GHC.BaseDir (getBaseDir)
 import GHC.Settings.Utils (getTargetArchOS, maybeReadFuzzy, getGlobalPackageDb, RawSettings)
 import GHC.Platform.Host (hostPlatformArchOS)
-import GHC.UniqueSubdir (uniqueSubdir)
+import GHC.UniqueSubdir (uniqueSubdirWithAbi)
 import qualified GHC.Data.ShortText as ST
 import GHC.Version ( cProjectVersion )
 import qualified Distribution.Simple.PackageIndex as PackageIndex
@@ -692,17 +692,23 @@ getPkgDatabases verbosity mode use_user use_cache expand_vars my_flags = do
         -- See Note [Settings file] about this file, and why we need GHC to share it with us.
         let settingsFile = top_dir </> "settings"
         exists_settings_file <- doesFileExist settingsFile
-        targetArchOS <- case exists_settings_file of
+        (targetArchOS, targetAbi) <- case exists_settings_file of
           False -> do
             warn $ "WARNING: settings file doesn't exist " ++ show settingsFile
             warn "cannot know target platform so guessing target == host (native compiler)."
-            pure hostPlatformArchOS
+            pure (hostPlatformArchOS, "")
           True ->
-            readFromSettingsFile settingsFile getTargetArchOS >>= \case
+            readFromSettingsFile settingsFile (\file settings -> do
+              archOS <- getTargetArchOS file settings
+              let abi = Map.findWithDefault "" "target ABI" settings
+              case abi of
+                "" -> pure (archOS, abi)
+                "profiling" -> pure (archOS, abi)
+                _ -> Left ("Unsupported target ABI in " ++ file ++ ": " ++ show abi)) >>= \case
               Right v -> pure v
               Left e -> die e
 
-        let subdir = uniqueSubdir targetArchOS
+        let subdir = uniqueSubdirWithAbi targetArchOS targetAbi
 
             getFirstSuccess :: [IO a] -> IO (Maybe a)
             getFirstSuccess [] = pure Nothing
@@ -2100,13 +2106,9 @@ checkDuplicateDepends deps
 checkHSLib :: Verbosity -> [String] -> String -> Validate ()
 checkHSLib _verbosity dirs lib = do
   let filenames = ["lib" ++ lib ++ ".a",
-                   "lib" ++ lib ++ "_p.a",
                    "lib" ++ lib ++ "-ghc" ++ GHC.Version.cProjectVersion ++ ".so",
-                   "lib" ++ lib ++ "_p" ++ "-ghc" ++ GHC.Version.cProjectVersion ++ ".so",
                    "lib" ++ lib ++ "-ghc" ++ GHC.Version.cProjectVersion ++ ".dylib",
-                   "lib" ++ lib ++ "_p" ++ "-ghc" ++ GHC.Version.cProjectVersion ++ ".dylib",
-                   lib ++ "-ghc" ++ GHC.Version.cProjectVersion ++ ".dll",
-                   lib ++ "_p" ++ "-ghc" ++ GHC.Version.cProjectVersion ++ ".dll"
+                   lib ++ "-ghc" ++ GHC.Version.cProjectVersion ++ ".dll"
                   ]
   b <- liftIO $ doesFileExistOnPath filenames dirs
   when (not b) $
@@ -2143,7 +2145,7 @@ checkModuleFile pkg modl =
       -- there's no interface file for GHC.Prim
       unless (modl == ModuleName.fromString "GHC.Prim") $ do
       let files = [ ModuleName.toFilePath modl <.> extension
-                  | extension <- ["hi", "p_hi", "dyn_hi", "p_dyn_hi"] ]
+                  | extension <- ["hi", "dyn_hi"] ]
       b <- liftIO $ doesFileExistOnPath files (importDirs pkg)
       when (not b) $
          verror ForceFiles ("cannot find any of " ++ show files)

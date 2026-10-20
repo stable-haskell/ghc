@@ -22,17 +22,20 @@ install:
 	fi
 	@echo ""
 	@echo "Tool prerequisites for each shipped target:"
-	@if ! command -v node >/dev/null 2>&1; then \
+	@if [ ! -d lib/targets/wasm32-unknown-wasi ] && [ ! -d lib/targets/javascript-unknown-ghcjs ]; then :; \
+	elif ! command -v node >/dev/null 2>&1; then \
 	  echo "  [missing] node >= 22 — needed by wasm32 + javascript target TH eval"; \
 	else \
 	  echo "  [ok]      node ($$(node --version 2>/dev/null))"; \
 	fi
-	@if ! command -v wasm32-unknown-wasi-clang >/dev/null 2>&1; then \
+	@if [ ! -d lib/targets/wasm32-unknown-wasi ]; then :; \
+	elif ! command -v wasm32-unknown-wasi-clang >/dev/null 2>&1; then \
 	  echo "  [missing] wasm32-unknown-wasi-clang — needed by wasm32 target (install wasi-sdk via ghc-wasm-meta bootstrap)"; \
 	else \
 	  echo "  [ok]      wasm32-unknown-wasi-clang"; \
 	fi
-	@if ! command -v emcc >/dev/null 2>&1; then \
+	@if [ ! -d lib/targets/javascript-unknown-ghcjs ]; then :; \
+	elif ! command -v emcc >/dev/null 2>&1; then \
 	  echo "  [missing] emcc — needed by javascript-unknown-ghcjs target (install emscripten)"; \
 	else \
 	  echo "  [ok]      emcc ($$(emcc --version 2>/dev/null | head -1))"; \
@@ -41,5 +44,8 @@ install:
 	@echo "Installed stable-haskell multi-target GHC to: $(DESTDIR)$(prefix)"
 	@echo "Invocations:"
 	@echo "  $(prefix)/bin/ghc                          (native)"
-	@echo "  $(prefix)/bin/wasm32-unknown-wasi-ghc      (wasm cross)"
-	@echo "  $(prefix)/bin/javascript-unknown-ghcjs-ghc (JS cross)"
+	@for target in "$(DESTDIR)$(prefix)/lib/targets/"*/; do \
+	  [ -d "$$target" ] || continue; \
+	  name=$$(basename "$$target"); \
+	  echo "  $(prefix)/bin/$$name-ghc"; \
+	done

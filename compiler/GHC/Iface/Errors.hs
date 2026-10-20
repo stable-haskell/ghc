@@ -68,11 +68,7 @@ cantFindInstalledErr unit_state mhome_unit profile mod_name find_result
 
     not_found_in_package pkg files
        | build_tag /= ""
-       = let
-            build = if build_tag == "p" then "profiling"
-                                        else "\"" ++ build_tag ++ "\""
-         in
-         MissingPackageWayFiles build pkg files
+       = MissingPackageWayFiles ("\"" ++ build_tag ++ "\"") pkg files
        | otherwise
        = MissingPackageFiles pkg files
 
@@ -139,11 +135,7 @@ cantFindErr unit_env profile mod_name find_result
 
     not_found_in_package pkg files
        | build_tag /= ""
-       = let
-            build = if build_tag == "p" then "profiling"
-                                        else "\"" ++ build_tag ++ "\""
-         in
-         MissingPackageWayFiles build pkg files
+       = MissingPackageWayFiles ("\"" ++ build_tag ++ "\"") pkg files
 
        | otherwise
        = MissingPackageFiles pkg files

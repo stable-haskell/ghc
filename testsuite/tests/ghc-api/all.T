@@ -71,6 +71,9 @@ test('T25577', [ extra_run_opts(f'"{config.libdir}"')
 test('T26120', [], compile_and_run, ['-package ghc'])
 test('TypeMapStringLiteral', normal, compile_and_run, ['-package ghc'])
 test('UnitHsLibs', normal, compile_and_run, ['-package ghc'])
+test('ProfilingTargetABI',
+     [extra_run_opts('"' + config.libdir + '"'), js_skip, wasm_skip],
+     compile_and_run, ['-package ghc'])
 # Re-executes its own binary as a mock tool, so it needs a compiled executable.
 test('RanlibWarnings', [only_ways(['normal']), req_process, js_skip, wasm_skip],
      compile_and_run, ['-package ghc'])

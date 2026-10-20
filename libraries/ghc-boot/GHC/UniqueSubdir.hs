@@ -1,5 +1,6 @@
 module GHC.UniqueSubdir
   ( uniqueSubdir
+  , uniqueSubdirWithAbi
   ) where
 
 import Prelude -- See Note [Why do we import Prelude here?]
@@ -20,3 +21,10 @@ uniqueSubdir (ArchOS arch os) = intercalate "-"
   -- NB: This functionality is reimplemented in Cabal, so if you
   -- change it, be sure to update Cabal.
   -- TODO make Cabal use this now that it is in ghc-boot.
+
+-- | Keep same-architecture target ABIs out of each other's user databases and
+-- package environments. The empty ABI preserves existing native paths.
+uniqueSubdirWithAbi :: ArchOS -> String -> FilePath
+uniqueSubdirWithAbi platform abi = uniqueSubdir platform ++ case abi of
+  "" -> ""
+  _ -> "-" ++ abi

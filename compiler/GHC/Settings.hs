@@ -69,8 +69,7 @@ module GHC.Settings
   , sTargetRTSLinkerOnlySupportsSharedLibs
   , sTargetIsDynamic
   , sTargetShipsDynLibs
-  , sTargetIsProfiled
-  , sTargetShipsProfLibs
+  , sTargetABI
   ) where
 
 import GHC.Prelude
@@ -332,12 +331,6 @@ sTargetIsDynamic = platformMisc_targetIsDynamic . sPlatformMisc
 sTargetShipsDynLibs :: Settings -> Bool
 sTargetShipsDynLibs = platformMisc_targetShipsDynLibs . sPlatformMisc
 
--- | Profiling-way analogue of 'sTargetIsDynamic'. Per-target settings
--- key @"target is profiled"@.
-sTargetIsProfiled :: Settings -> Bool
-sTargetIsProfiled = platformMisc_targetIsProfiled . sPlatformMisc
-
--- | Profiling-way analogue of 'sTargetShipsDynLibs'. Per-target settings
--- key @"target ships profiling libraries"@.
-sTargetShipsProfLibs :: Settings -> Bool
-sTargetShipsProfLibs = platformMisc_targetShipsProfLibs . sPlatformMisc
+-- | ABI intrinsic to the selected target installation.
+sTargetABI :: Settings -> TargetABI
+sTargetABI = platformMisc_targetABI . sPlatformMisc

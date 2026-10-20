@@ -1,5 +1,9 @@
 import shutil
 
+test('runghc_target_dispatch',
+     [extra_files(['runghc_target_dispatch.py']), when(config.cross, skip), req_process],
+     makefile_test, [])
+
 test('android_target_os',
      [extra_files(['android_target_os.py']),
       unless(shutil.which('autoconf'), skip)],

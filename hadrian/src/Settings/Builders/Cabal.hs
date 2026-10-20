@@ -146,20 +146,12 @@ libraryArgs = do
     ghciObjsSupported <- expr platformSupportsGhciObjects
     let ways = Set.insert contextWay flavourWays
         hasVanilla = vanilla `elem` ways
-        hasProfiling = any (wayUnit Profiling) ways
-        hasProfilingShared = profilingDynamic `elem` ways
         hasDynamic = any (wayUnit Dynamic) ways
     pure [ if hasVanilla
            then  "--enable-library-vanilla"
            else "--disable-library-vanilla"
-         , if hasProfiling
-           then  "--enable-library-profiling"
-           else "--disable-library-profiling"
-         , if hasProfilingShared
-            then "--enable-profiling-shared"
-            else "--disable-profiling-shared"
          , if ghciObjsSupported &&
-              (hasVanilla || hasProfiling) &&
+              hasVanilla &&
               package /= rts && withGhci && not dynPrograms
            then  "--enable-library-for-ghci"
            else "--disable-library-for-ghci"

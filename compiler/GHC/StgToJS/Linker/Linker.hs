@@ -669,7 +669,7 @@ renderLinkerStats s =
 getPackageArchives :: StgToJSConfig -> UnitEnv -> [UnitId] -> IO [FilePath]
 getPackageArchives cfg unit_env units = do
   fmap concat $ forM units $ \u -> do
-    let archives = [ ST.unpack p </> "lib" ++ ST.unpack l ++ profSuff <.> "a"
+    let archives = [ ST.unpack p </> "lib" ++ ST.unpack l <.> "a"
                    | p <- getInstalledPackageLibDirs ue_state u
                    , l <- getInstalledPackageHsLibs  ue_state u
                    ]
@@ -682,10 +682,6 @@ getPackageArchives cfg unit_env units = do
        -> pure foundArchives
   where
     ue_state = ue_homeUnitState unit_env
-
-    -- XXX the profiling library name is probably wrong now
-    profSuff | csProf cfg = "_p"
-             | otherwise  = ""
 
 
 -- | Combine rts.js, lib.js, out.js to all.js that can be run
@@ -1147,7 +1143,7 @@ readBlockInfoFromObj file = do
 -- JS object header. See JSOptions.
 embedJsFile :: Logger -> DynFlags -> TmpFs -> UnitEnv -> FilePath -> FilePath -> IO ()
 embedJsFile logger dflags tmpfs unit_env input_fn output_fn = do
-  let profiling  = False -- FIXME: add support for profiling way
+  let profiling  = False -- FIXME: add support for profiling targets
 
   createDirectoryIfMissing True (takeDirectory output_fn)
 

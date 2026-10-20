@@ -205,14 +205,12 @@ testsuitePackages = return ([ timeout | windowsHost ] ++ [ checkPpr, checkExact,
 
 -- | Default build ways for library packages:
 -- * We always build 'vanilla' way.
--- * We build 'profiling' way when stage > Stage0.
 -- * We build 'dynamic' way when stage > Stage0 and the platform supports it.
 defaultLibraryWays :: Ways
 defaultLibraryWays = Set.fromList <$>
     mconcat
     [ pure [vanilla]
-    , notStage0 ? pure [profiling]
-    , notStage0 ? platformSupportsSharedLibs ? pure [dynamic, profilingDynamic]
+    , notStage0 ? platformSupportsSharedLibs ? pure [dynamic]
     ]
 
 -- | Default build ways for the RTS.
@@ -220,17 +218,12 @@ defaultRtsWays :: Ways
 defaultRtsWays = Set.fromList <$>
   mconcat
   [ pure [vanilla]
-  , notStage0 ? pure
-      [ profiling, debugProfiling
-      , debug
-      ]
-  , notStage0 ? targetSupportsThreadedRts ? pure [threaded, threadedProfiling, threadedDebugProfiling, threadedDebug]
+  , notStage0 ? pure [debug]
+  , notStage0 ? targetSupportsThreadedRts ? pure [threaded, threadedDebug]
   , notStage0 ? platformSupportsSharedLibs ? pure
-      [ dynamic, profilingDynamic, debugDynamic, debugProfilingDynamic
-      ]
+      [ dynamic, debugDynamic ]
   , notStage0 ? platformSupportsSharedLibs ? targetSupportsThreadedRts ? pure
-      [ threadedDynamic, threadedDebugDynamic, threadedProfilingDynamic, threadedDebugProfilingDynamic
-      ]
+      [ threadedDynamic, threadedDebugDynamic ]
   ]
 
 -- TODO: Move C source arguments here
@@ -286,7 +279,6 @@ defaultFlavour = Flavour
     , libraryWays        = defaultLibraryWays
     , rtsWays            = defaultRtsWays
     , dynamicGhcPrograms = defaultDynamicGhcPrograms
-    , ghcProfiled        = const False
     , ghcDebugged        = const False
     , ghcThreaded        = const True
     , ghcDebugAssertions = const False

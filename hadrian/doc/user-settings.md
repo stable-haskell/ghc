@@ -33,9 +33,6 @@ data Flavour = Flavour {
     rtsWays :: Ways,
     -- | Build dynamic GHC programs.
     dynamicGhcPrograms :: Action Bool,
-    -- | Build profiled GHC.
-    ghcProfiled :: Stage -- ^ stage of the /built/ compiler
-                -> Bool,
     -- | Build GHC with the debug RTS.
     ghcDebugged :: Stage -- ^ stage of the /built/ compiler
                 -> Bool,
@@ -303,23 +300,16 @@ Using this mechanism we can also build a `Stage3` compiler by setting
 
 ### Build ways
 
-Packages can be built in a number of ways, such as `vanilla`, `profiling` (with
-profiling information enabled), and many others as defined in `src/Way.hs`. You
-can change the default build ways by modifying `libraryWays` and `rtsWays` fields
-of the `Flavour` record as required. As an example, below we remove `profiling`
-from the list of library ways:
-```haskell
-noProfilingFlavour :: Flavour
-noProfilingFlavour = defaultFlavour
-    { name        = "no-profiling"
-    , libraryWays = remove [profiling] defaultLibraryWays
-    , ghcProfiled = False } -- Can't build profiled GHC without profiled libraries
-```
-Note that `rtsWays` is computed from `libraryWays` by default, therefore the above
-change will lead to the removal of `threadedProfiling` way from `rtsWays`. To
-change this behaviour, you can override the default `rtsWays` setting.
+Packages can be built in ways such as `vanilla` and `dynamic`, as defined in
+`src/Way.hs`. Change the default build ways with the `libraryWays` and `rtsWays`
+fields of the `Flavour` record.
 
-Similarly, if we want to completely turn off dynamic linking, we can define a custom
+Profiling is a separate target ABI rather than a build way. Build it with
+`make stage3-profile` from the repository root. Hadrian does not yet build that
+target. The old `profiling` way and `ghcProfiled` field have been removed; native
+Hadrian builds do not produce profiling suffixes.
+
+To turn off dynamic linking, we can define a custom
 `Flavour` to this effect:
 ``` haskell
 noDynamicFlavour :: Flavour

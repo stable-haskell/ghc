@@ -27,8 +27,7 @@
 # string "${docdir}", not the value of docdir! This is crucial for the GNU
 # coding standards. See #1924.
 
-# The build.mk contains information about the bindist such as whether there are
-# profiled libraries.
+# The build.mk contains the bindist's target configuration.
 include build.mk
 
 define set_default

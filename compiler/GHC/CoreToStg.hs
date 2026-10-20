@@ -45,7 +45,6 @@ import GHC.Types.IPE
 
 import GHC.Unit.Module
 import GHC.Platform        ( Platform )
-import GHC.Platform.Ways
 import GHC.Builtin.PrimOps
 
 import GHC.Utils.Outputable
@@ -245,7 +244,7 @@ import Control.Monad (ap)
 coreToStg :: CoreToStgOpts -> Module -> ModLocation -> CoreProgram
           -> ([StgTopBinding], InfoTableProvMap, CollectedCCs)
 coreToStg opts@CoreToStgOpts
-  { coreToStg_ways = ways
+  { coreToStg_profiling = prof
   , coreToStg_AutoSccsOnIndividualCafs = opt_AutoSccsOnIndividualCafs
   , coreToStg_InfoTableMap = opt_InfoTableMap
   , coreToStg_stgDebugOpts = stgDebugOpts
@@ -260,8 +259,6 @@ coreToStg opts@CoreToStgOpts
       | opt_InfoTableMap
       = collectDebugInformation stgDebugOpts ml pgm'
       | otherwise = (pgm', emptyInfoTableProvMap)
-
-    prof = hasWay ways WayProf
 
     final_ccs
       | prof && opt_AutoSccsOnIndividualCafs
@@ -892,7 +889,7 @@ stgArity _ LambdaBound        = 0
 
 data CoreToStgOpts = CoreToStgOpts
   { coreToStg_platform :: Platform
-  , coreToStg_ways :: Ways
+  , coreToStg_profiling :: Bool
   , coreToStg_AutoSccsOnIndividualCafs :: Bool
   , coreToStg_InfoTableMap :: Bool
   , coreToStg_ExternalDynamicRefs :: Bool

@@ -9,13 +9,10 @@ import Data.Maybe
 import Development.Shake.Classes
 import Hadrian.Utilities
 
--- Note: order of constructors is important for compatibility with the old build
--- system, e.g. we want "thr_p", not "p_thr" (see instance Show Way).
 -- | A 'WayUnit' is a single way of building source code, for example with
--- profiling enabled, or dynamically linked.
+-- the threaded RTS, or dynamically linked. Profiling is a target ABI, not a way.
 data WayUnit = Threaded
              | Debug
-             | Profiling
              | Logging
              | Dynamic
              deriving (Bounded, Enum, Eq, Ord)
@@ -25,7 +22,6 @@ instance Show WayUnit where
     show unit = case unit of
         Threaded  -> "thr"
         Debug     -> "debug"
-        Profiling -> "p"
         Logging   -> "l"
         Dynamic   -> "dyn"
 
@@ -34,7 +30,6 @@ instance Read WayUnit where
     readsPrec _ = \case
         "thr"   -> [(Threaded,"")]
         "debug" -> [(Debug,"")]
-        "p"     -> [(Profiling,"")]
         "l"     -> [(Logging,"")]
         "dyn"   -> [(Dynamic,"")]
         _       -> []

@@ -32,6 +32,8 @@ module GHC.Platform
    , platformCConvNeedsExtension
    , platformHasRTSLinker
    , PlatformMisc(..)
+   , TargetABI(..)
+   , targetABIName
    , SseVersion (..)
    , BmiVersion (..)
    , wordAlignment
@@ -280,6 +282,16 @@ data BmiVersion
    | BMI2
    deriving (Eq, Ord)
 
+-- | An ABI selected by a target installation, independently of its CPU and OS.
+-- Profiling targets have their own closure layout and package universe.
+data TargetABI = DefaultABI | ProfilingABI
+  deriving (Eq, Ord, Read, Show)
+
+-- | Stable spelling used in settings, compiler identity and package paths.
+targetABIName :: TargetABI -> String
+targetABIName DefaultABI = ""
+targetABIName ProfilingABI = "profiling"
+
 -- | Platform-specific settings formerly hard-coded in Config.hs.
 --
 -- These should probably be all be triaged whether they can be computed from
@@ -287,6 +299,7 @@ data BmiVersion
 data PlatformMisc = PlatformMisc
   { -- TODO Recalculate string from richer info?
     platformMisc_targetPlatformString :: String
+  , platformMisc_targetABI            :: TargetABI
   , platformMisc_ghcWithInterpreter   :: Bool
   , platformMisc_libFFI               :: Bool
   , platformMisc_llvmTarget           :: String
@@ -308,16 +321,6 @@ data PlatformMisc = PlatformMisc
     -- 'platformMisc_targetIsDynamic' so a target can be dynamic-
     -- capable but not currently ship dyn artifacts (or vice versa).
   , platformMisc_targetShipsDynLibs   :: Bool
-    -- | Profiling-way analogue of 'platformMisc_targetIsDynamic'.
-    -- Per-target settings key @"target is profiled"@. Drives
-    -- @ghc --info@'s @GHC Profiled@ — cabal-install reads that to
-    -- decide whether to enable @library-profiling@.
-  , platformMisc_targetIsProfiled     :: Bool
-    -- | Profiling-way analogue of 'platformMisc_targetShipsDynLibs'.
-    -- Per-target settings key @"target ships profiling libraries"@.
-    -- Combined with 'platformMisc_targetIsProfiled' for the
-    -- @GHC Profiled@ report.
-  , platformMisc_targetShipsProfLibs  :: Bool
   }
 
 platformSOName :: Platform -> FilePath -> FilePath

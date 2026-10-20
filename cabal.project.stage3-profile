@@ -1,0 +1,33 @@
+-- The compiler executable remains the ordinary native stage2 compiler.
+-- Its target settings select the profiling ABI for all target-side code.
+import: cabal.project.stage3
+
+-- Match the ordinary native target: iserv links the bundled archive rather
+-- than requiring a system libffi development library at the install prefix.
+packages:
+  https://hackage.haskell.org/package/libffi-clib-3.5.2/libffi-clib-3.5.2.tar.gz
+allow-newer: libffi-clib:*
+constraints: libffi-clib source
+
+package host:*
+  library-vanilla: True
+  library-profiling: False
+  executable-profiling: False
+  shared: False
+  executable-dynamic: False
+
+package build:*
+  library-profiling: False
+  executable-profiling: False
+  shared: False
+  executable-dynamic: False
+
+-- The native ABI uses tables next to code, unlike the wasm/JS targets.
+package rts
+  flags: -use-system-libffi +tables-next-to-code -dynamic
+
+package ghci
+  flags: +internal-interpreter -use-system-libffi
+
+package libffi-clib
+  ghc-options: -no-rts -optc-Wno-error

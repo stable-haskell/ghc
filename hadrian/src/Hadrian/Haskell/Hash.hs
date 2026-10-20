@@ -28,7 +28,6 @@ import Builder
 import Flavour.Type
 import Settings
 import Way
-import Packages
 import Development.Shake.Classes
 import Control.Monad
 import Base
@@ -83,8 +82,6 @@ data PackageHashConfigInputs = PackageHashConfigInputs {
        pkgHashSharedLib           :: Bool,
        pkgHashDynExe              :: Bool,
        pkgHashGHCiLib             :: Bool,
-       pkgHashProfLib             :: Bool,
-       pkgHashProfExe             :: Bool,
        pkgHashSplitObjs           :: Bool,
        pkgHashSplitSections       :: Bool,
        pkgHashStripLibs           :: Bool,
@@ -97,9 +94,7 @@ data PackageHashConfigInputs = PackageHashConfigInputs {
 --       pkgHashDebugInfo           :: DebugInfoLevel,
 --       pkgHashCoverage            :: Bool,
 --       pkgHashFullyStaticExe      :: Bool,
---       pkgHashProfLibDetail       :: ProfDetailLevel,
 --       pkgHashOptimization        :: Int,
---       pkgHashProfExeDetail       :: ProfDetailLevel,
 --       pkgHashExtraLibDirs        :: [FilePath],
 --       pkgHashExtraLibDirsStatic  :: [FilePath],
 --       pkgHashExtraFrameworkDirs  :: [FilePath],
@@ -140,8 +135,6 @@ pkgHashOracle = void $ addOracleCache $ \(PkgHashKey (stag, pkg)) -> do
       pkgHashSharedLib = dynamic `Set.member` libWays
       pkgHashDynExe = dyn_ghc
       pkgHashGHCiLib = False
-      pkgHashProfLib = profiling `Set.member` libWays
-      pkgHashProfExe = pkg == ghc && ghcProfiled flav stag
       pkgHashSplitObjs = False -- Deprecated
       pkgHashSplitSections = ghcSplitSections flav
       pkgHashStripExes = False
@@ -240,8 +233,6 @@ renderPackageHashInputs PackageHashInputs{
       , opt   "shared-lib"  False show pkgHashSharedLib
       , opt   "dynamic-exe" False show pkgHashDynExe
       , opt   "ghci-lib"    False show pkgHashGHCiLib
-      , opt   "prof-lib"    False show pkgHashProfLib
-      , opt   "prof-exe"    False show pkgHashProfExe
       , opt   "split-objs"   False show pkgHashSplitObjs
       , opt   "split-sections" False show pkgHashSplitSections
       , opt   "stripped-lib" False show pkgHashStripLibs

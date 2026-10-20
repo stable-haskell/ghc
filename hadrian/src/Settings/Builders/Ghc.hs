@@ -34,8 +34,6 @@ compileAndLinkHs = (builder (Ghc CompileHs) ||^ builder (Ghc LinkHs)) ? do
     useColor <- shakeColor <$> expr getShakeOptions
     let hasVanilla = elem vanilla ways
         hasDynamic = elem dynamic ways
-        hasProfiling = elem profiling ways
-        hasProfilingDynamic = elem profilingDynamic ways
     hieFiles <- ghcHieFiles <$> expr flavour
     stage <- getStage
     hie_path <- getHieBuildPath
@@ -49,12 +47,6 @@ compileAndLinkHs = (builder (Ghc CompileHs) ||^ builder (Ghc LinkHs)) ? do
             , (hasVanilla && hasDynamic) ? builder (Ghc CompileHs) ?
               platformSupportsSharedLibs ? way vanilla ?
               arg "-dynamic-too"
-            , (hasProfiling && hasProfilingDynamic) ? builder (Ghc CompileHs) ?
-              platformSupportsSharedLibs ? way profiling ? mconcat
-              [ arg "-dynamic-too"
-              , arg "-dynosuf", arg $ osuf profilingDynamic
-              , arg "-dynhisuf", arg $ hisuf profilingDynamic
-              ]
             , commonGhcArgs
             , ghcLinkArgs
             , defaultGhcWarningsArgs
@@ -222,7 +214,6 @@ wayGhcArgs = do
     mconcat [ if Dynamic `wayUnit` way
                 then pure ["-fPIC", "-dynamic"]
                 else arg "-static"
-            , (Profiling `wayUnit` way) ? arg "-prof"
             , (way == debug || way == debugDynamic) ? arg "-ticky"
             , wayCcArgs
               -- We must pass CPP flags via -optc as well to ensure that they

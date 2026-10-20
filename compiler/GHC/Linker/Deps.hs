@@ -16,6 +16,7 @@ where
 
 import GHC.Prelude
 
+import GHC.Platform (TargetABI(..))
 import GHC.Platform.Ways
 
 import GHC.Runtime.Interpreter
@@ -56,6 +57,7 @@ data LinkDepsOpts = LinkDepsOpts
   , ldPprOpts     :: !SDocContext                   -- ^ Rendering options for error messages
   , ldUseByteCode :: !Bool                          -- ^ Use bytecode rather than objects
   , ldMsgOpts     :: !(DiagnosticOpts IfaceMessage) -- ^ Options for diagnostics
+  , ldTargetABI   :: !TargetABI
   , ldWays        :: !Ways                          -- ^ Enabled ways
   , ldFinderCache :: !FinderCache
   , ldFinderOpts  :: !FinderOpts
@@ -241,6 +243,10 @@ throwProgramError opts doc = throwGhcExceptionIO (ProgramError (renderWithContex
 
 checkNonStdWay :: LinkDepsOpts -> Interp -> SrcSpan -> IO (Maybe FilePath)
 checkNonStdWay _opts interp _srcspan
+  | interpreterProfiled interp /= (ldTargetABI _opts == ProfilingABI)
+  = dieWith _opts _srcspan $
+      text "Interpreter ABI does not match the target ABI; use -fexternal-interpreter with the matching target compiler"
+
   -- On some targets (e.g. wasm) the RTS linker only supports loading
   -- dynamic code, in which case we need to ensure the .dyn_o object
   -- is picked (instead of .o which is also present because of
@@ -277,7 +283,7 @@ checkNonStdWay opts _interp srcspan
     normalObjectSuffix :: String
     normalObjectSuffix = "o"
 
-data Way' = Normal | Prof | Dyn | ProfDyn
+data Way' = Normal | Dyn
 
 failNonStd :: LinkDepsOpts -> SrcSpan -> IO (Maybe FilePath)
 failNonStd opts srcspan = dieWith opts srcspan $
@@ -287,14 +293,10 @@ failNonStd opts srcspan = dieWith opts srcspan $
   text "  (1) Use -fexternal-interpreter, or" $$
   buildTwiceMsg
     where compWay
-            | ldWays opts `hasWay` WayDyn && ldWays opts `hasWay` WayProf = ProfDyn
-            | ldWays opts `hasWay` WayDyn  = Dyn
-            | ldWays opts `hasWay` WayProf = Prof
+            | ldWays opts `hasWay` WayDyn = Dyn
             | otherwise = Normal
           ghciWay
-            | hostIsDynamic && hostIsProfiled = ProfDyn
             | hostIsDynamic = Dyn
-            | hostIsProfiled = Prof
             | otherwise = Normal
           buildTwiceMsg = case (ghciWay, compWay) of
             (Normal, Dyn) -> dynamicTooMsg
@@ -309,7 +311,5 @@ failNonStd opts srcspan = dieWith opts srcspan $
           pprWay' :: Way' -> SDoc
           pprWay' way = text $ case way of
             Normal -> "the normal way"
-            Prof -> "with -prof"
             Dyn -> "with -dynamic"
-            ProfDyn -> "with -prof and -dynamic"
 #endif

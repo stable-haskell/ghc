@@ -196,7 +196,7 @@ ghcVersionStage (Stage0 {}) = setting GhcVersion
 ghcVersionStage _      = setting ProjectVersion
 
 -- | The file suffix used for libraries of a given build 'Way'. For example,
--- @_p.a@ corresponds to a static profiled library, and @-ghc7.11.20141222.so@
+-- @_thr.a@ corresponds to a static threaded library, and @-ghc7.11.20141222.so@
 -- is a dynamic vanilla library. Why do we need GHC version number in the
 -- dynamic suffix? Here is a possible reason: dynamic libraries are placed in a
 -- single giant directory in the load path of the dynamic linker, and hence we
@@ -206,7 +206,7 @@ ghcVersionStage _      = setting ProjectVersion
 -- or @.so@.
 libsuf :: Stage -> Way -> Action String
 libsuf st way
-    | not (wayUnit Dynamic way) = return (waySuffix way ++ ".a") -- e.g., _p.a
+    | not (wayUnit Dynamic way) = return (waySuffix way ++ ".a") -- e.g., _thr.a
     | otherwise = do
         extension <- setting DynamicExtension -- e.g., .dll or .so
         version   <- ghcVersionStage st -- e.g. 8.4.4 or 8.9.xxxx

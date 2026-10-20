@@ -21,6 +21,7 @@ import GHC.Settings
 import GHC.SysTools.BaseDir
 import GHC.Unit.Types
 
+import Control.Monad (when)
 import Control.Monad.Trans.Except
 import Control.Monad.IO.Class
 import Data.Char
@@ -96,6 +97,11 @@ initSettings top_dir = do
   -- just partially applying those functions and throwing 'Left's; they're
   -- written in a very portable style to keep ghc-boot light.
   targetPlatformString <- getSetting_raw "target platform string"
+  targetABI <- case Map.findWithDefault "" "target ABI" mySettings of
+    "" -> pure DefaultABI
+    "profiling" -> pure ProfilingABI
+    abi -> throwE $ SettingsError_BadData $
+      "Unsupported target ABI " ++ show abi ++ " in " ++ settingsFile
   cc_prog <- getToolSetting "C compiler command"
   cxx_prog <- getToolSetting "C++ compiler command"
   cc_args0 <- getFlagsSetting "C compiler flags"
@@ -112,6 +118,9 @@ initSettings top_dir = do
   cmmCpp_args <- map Option <$> getFlagsSetting "C-- CPP flags"
 
   platform <- either pgmError pure $ getTargetPlatform settingsFile mySettings
+  when (targetABI == ProfilingABI &&
+        platformArch platform `elem` [ArchJavaScript, ArchWasm32]) $
+    throwE $ SettingsError_BadData "The profiling target ABI currently requires a native target"
 
   let unreg_cc_args = if platformUnregisterised platform
                       then ["-DNO_REGS", "-DUSE_MINIINTERPRETER"]
@@ -203,16 +212,6 @@ initSettings top_dir = do
   targetShipsDynLibs <- either (const $ pure True) pure $
     getRawBooleanSetting settingsFile mySettings "target ships dynamic libraries"
 
-  -- Profiling-way analogues of the two dyn dials above. Drive
-  -- `GHC Profiled` the same way (sTargetIsProfiled && sTargetShipsProfLibs).
-  -- Defaults to True for backward compatibility with bindists that
-  -- predate the keys — matches the historical hostIsProfiled
-  -- behaviour when GHC was prof-built.
-  targetIsProfiled <- either (const $ pure True) pure $
-    getRawBooleanSetting settingsFile mySettings "target is profiled"
-  targetShipsProfLibs <- either (const $ pure True) pure $
-    getRawBooleanSetting settingsFile mySettings "target ships profiling libraries"
-
   baseUnitId <- getSetting_raw "base unit-id"
 
   return $ Settings
@@ -265,7 +264,7 @@ initSettings top_dir = do
       , toolSettings_pgm_lo  = (lo_prog,[])
       , toolSettings_pgm_lc  = (lc_prog,[])
       , toolSettings_pgm_las = (las_prog, las_args)
-      , toolSettings_pgm_i   = iserv_prog
+      , toolSettings_pgm_i   = if targetABI == ProfilingABI then "" else iserv_prog
       , toolSettings_opt_L       = []
       , toolSettings_opt_P       = []
       , toolSettings_opt_JSP     = []
@@ -291,14 +290,13 @@ initSettings top_dir = do
     , sTargetPlatform = platform
     , sPlatformMisc = PlatformMisc
       { platformMisc_targetPlatformString = targetPlatformString
+      , platformMisc_targetABI = targetABI
       , platformMisc_ghcWithInterpreter = ghcWithInterpreter
       , platformMisc_libFFI = useLibFFI
       , platformMisc_llvmTarget = llvmTarget
       , platformMisc_targetRTSLinkerOnlySupportsSharedLibs = targetRTSLinkerOnlySupportsSharedLibs
       , platformMisc_targetIsDynamic = targetIsDynamic
       , platformMisc_targetShipsDynLibs = targetShipsDynLibs
-      , platformMisc_targetIsProfiled = targetIsProfiled
-      , platformMisc_targetShipsProfLibs = targetShipsProfLibs
       }
 
     , sRawSettings    = settingsList

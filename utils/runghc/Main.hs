@@ -19,6 +19,8 @@
 module Main (main) where
 
 import Control.Exception
+import Data.Char (isDigit, toLower)
+import Data.List (stripPrefix)
 import Data.Semigroup as Semi
 import System.Directory
 import System.Environment
@@ -62,12 +64,37 @@ main = do
 -- covers this scenario just as nicely.
 findGhc :: FilePath -> IO FilePath
 findGhc path = do
+    invocation <- getProgName
     let ghcDir = takeDirectory (normalise path)
-        ghc    = ghcDir </> "ghc" <.> exeExtension
+        program = if map toLower (takeExtension invocation) == ".exe"
+                  then dropExtension invocation
+                  else invocation
+        -- getExecutablePath may resolve a target-prefixed symlink to runghc.
+        -- Use argv[0] for the target identity and the executable path only for
+        -- its installation directory. As before, the sibling compiler name
+        -- is unversioned, even for a versioned runghc executable.
+        ghcName = compilerName program
+        ghc    = ghcDir </> ghcName <.> exeExtension
     ghcExists <- doesFileExist ghc
     return $ if ghcExists
              then ghc
-             else ghcDir </> "ghc-stage2" <.> exeExtension
+             else if ghcName == "ghc"
+                  then ghcDir </> "ghc-stage2" <.> exeExtension
+                  else ghc
+
+-- Replace the final runghc component, optionally followed by a version. A
+-- missing target compiler must not silently run the ordinary native compiler.
+compilerName :: String -> String
+compilerName name = go "" name
+  where
+    go prefix rest
+      | Just version <- stripPrefix "runghc" rest
+      , null version || validVersion version = prefix ++ "ghc"
+      | (part, '-':remaining) <- break (== '-') rest
+      = go (prefix ++ part ++ "-") remaining
+      | otherwise = "ghc"
+    validVersion ('-':version) = not (null version) && all (\c -> isDigit c || c == '.') version
+    validVersion _ = False
 
 data RunGhcFlags = RunGhcFlags (Maybe FilePath) -- GHC location
                  | Help -- Print help text

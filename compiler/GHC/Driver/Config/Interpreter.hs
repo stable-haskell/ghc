@@ -28,6 +28,7 @@ initInterpOpts dflags = do
     , interpProg = pgm_i dflags
     , interpOpts = getOpts dflags opt_i
     , interpWays = ways dflags
+    , interpTargetABI = targetABI dflags
     , interpNameVer = ghcNameVersion dflags
     , interpCreateProcess = Nothing
     , interpWasmDyld = wasm_dyld

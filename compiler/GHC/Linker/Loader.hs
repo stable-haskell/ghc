@@ -644,6 +644,7 @@ initLinkDepsOpts hsc_env = opts
             , ldFinderOpts  = initFinderOpts dflags
             , ldUseByteCode = gopt Opt_UseBytecodeRatherThanObjects dflags
             , ldMsgOpts     = initIfaceMessageOpts dflags
+            , ldTargetABI   = targetABI dflags
             , ldWays        = ways dflags
             , ldGetDependencies = get_reachable_nodes hsc_env
             , ldLoadByteCode
@@ -887,6 +888,8 @@ dynLoadObjs _      _       pls                           []   = return pls
 dynLoadObjs interp hsc_env pls@LoaderState{..} objs = do
     let unit_env = hsc_unit_env hsc_env
     let dflags   = hsc_dflags hsc_env
+    when (interpreterProfiled interp /= sccProfilingEnabled dflags) $
+      throwGhcExceptionIO (ProgramError "Interpreter ABI does not match the target ABI")
     let logger   = hsc_logger hsc_env
     let tmpfs    = hsc_tmpfs hsc_env
     let platform = ue_platform unit_env
@@ -931,13 +934,7 @@ dynLoadObjs interp hsc_env pls@LoaderState{..} objs = do
                       -- When running TH for a non-dynamic way, we still
                       -- need to make -l flags to link against the dynamic
                       -- libraries, so we need to add WayDyn to ways.
-                      --
-                      -- Likewise if loading if the profiled way then need to
-                      -- add WayProf.
-                      targetWays_ = let ws = Set.singleton WayDyn
-                                     in if interpreterProfiled interp
-                                        then addWay WayProf ws
-                                        else ws,
+                      targetWays_ = Set.singleton WayDyn,
                       outputFile_ = Just soFile
                   }
     -- link all "loaded packages" so symbols in those can be resolved
@@ -1482,7 +1479,7 @@ locateLib interp hsc_env is_hs lib_dirs gcc_dirs lib0
     assumeDll
 
   | otherwise
-    -- use HSfoo.{o,p_o} if it exists, otherwise fallback to libHSfoo{,_p}.a
+    -- use HSfoo.o if it exists, otherwise fall back to libHSfoo.a
   = findObject  `orElse`
     findArchive `orElse`
     assumeDll
@@ -1502,20 +1499,15 @@ locateLib interp hsc_env is_hs lib_dirs gcc_dirs lib0
        ':' : rest -> (rest, True)
        other      -> (other, False)
 
-     obj_file
-       | is_hs && loading_profiled_hs_libs = lib <.> "p_o"
-       | otherwise = lib <.> "o"
+     obj_file = lib <.> "o"
      dyn_obj_file = lib <.> "dyn_o"
      arch_files
        | verbatim = [lib]
-       | otherwise = [ "lib" ++ lib ++ lib_tag <.> "a"
-                     , lib <.> "a" -- native code has no lib_tag
+       | otherwise = [ "lib" ++ lib <.> "a"
+                     , lib <.> "a"
                      , "lib" ++ lib
                      , lib
                      ]
-     lib_tag = if is_hs && loading_profiled_hs_libs then "_p" else ""
-
-     loading_profiled_hs_libs = interpreterProfiled interp
      loading_dynamic_hs_libs  = interpreterDynamic  interp
 
      import_libs
@@ -1526,7 +1518,7 @@ locateLib interp hsc_env is_hs lib_dirs gcc_dirs lib0
                      , lib <.> "dll.a"
                      ]
 
-     hs_dyn_lib_name = lib ++ lib_tag ++ dynLibSuffix (ghcNameVersion dflags)
+     hs_dyn_lib_name = lib ++ dynLibSuffix (ghcNameVersion dflags)
      hs_dyn_lib_file = platformHsSOName platform hs_dyn_lib_name
 
 #if defined(CAN_LOAD_DLL)

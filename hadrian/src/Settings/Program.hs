@@ -7,7 +7,6 @@ import Base
 import Context
 import Oracles.Flavour
 import Oracles.Flag
-import Packages
 
 import GHC.Platform.ArchOS
 import Settings.Builders.Common (anyTargetOs, anyTargetArch, isArmTarget)
@@ -17,13 +16,10 @@ import Settings.Builders.Common (anyTargetOs, anyTargetArch, isArmTarget)
 -- get a context/contexts for a given stage and package.
 programContext :: Stage -> Package -> Action Context
 programContext stage pkg = do
-    profiled <- askGhcProfiled stage
     dynGhcProgs <- askDynGhcPrograms --dynamicGhcPrograms =<< flavour
-    return $ Context stage pkg (wayFor profiled dynGhcProgs) Final
+    return $ Context stage pkg (wayFor dynGhcProgs) Final
 
-    where wayFor prof dyn
-            | prof && dyn                          = profilingDynamic
-            | pkg == ghc && prof && notStage0 stage = profiling
+    where wayFor dyn
             | dyn && notStage0 stage                = dynamic
             | otherwise                            = vanilla
 

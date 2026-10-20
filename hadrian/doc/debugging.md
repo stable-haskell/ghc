@@ -60,7 +60,7 @@ Error when running Shake build system:
 * OracleQ (PackageDataKey ("_build/stage0/utils/genprimopcode/package-data.mk","C_SRCS"))
 * _build/stage0/utils/genprimopcode/package-data.mk
 user error (Development.Shake.cmd, system command failed
-Command: _build/stage0/utils/ghc-cabal/ghc-cabal configure utils/genprimopcode /Users/zz/Repos/ghc2/_build/stage0/utils/genprimopcode '' --with-ghc=/usr/local/bin/ghc --with-ghc-pkg=/usr/local/bin/ghc-pkg --package-db=_build/stage0/bootstrapping.conf --enable-library-vanilla --enable-library-for-ghci --disable-library-profiling --disable-shared --with-hscolour=/Users/zz/Library/Haskell/bin/HsColour '--configure-option=CFLAGS=-fno-stack-protector -I/Users/zz/Repos/ghc2/_build/generated' --configure-option=CPPFLAGS=-I_build/generated '--gcc-options=-fno-stack-protector -I/Users/zz/Repos/ghc2/_build/generated' --configure-option=--with-cc=/usr/bin/gcc --constraint 'Cabal == 2.0.0.0' --constraint 'binary == 0.8.4.1' --constraint 'ghc-boot == 8.3' --constraint 'ghc-boot-th == 8.3' --constraint 'ghci == 8.3' --constraint 'hoopl == 3.10.2.2' --constraint 'hpc == 0.6.0.3' --constraint 'template-haskell == 2.12.0.0' --constraint 'terminfo == 0.4.1.0' --constraint 'transformers == 0.5.2.0' --with-gcc=/usr/bin/gcc --with-ar=/usr/bin/ar --with-alex=/Users/zz/Library/Haskell/bin/alex --with-happy=/Users/zz/Library/Haskell/bin/happy -v0 --configure-option=--quiet --configure-option=--disable-option-checking
+Command: _build/stage0/utils/ghc-cabal/ghc-cabal configure utils/genprimopcode /Users/zz/Repos/ghc2/_build/stage0/utils/genprimopcode '' --with-ghc=/usr/local/bin/ghc --with-ghc-pkg=/usr/local/bin/ghc-pkg --package-db=_build/stage0/bootstrapping.conf --enable-library-vanilla --enable-library-for-ghci --disable-shared --with-hscolour=/Users/zz/Library/Haskell/bin/HsColour '--configure-option=CFLAGS=-fno-stack-protector -I/Users/zz/Repos/ghc2/_build/generated' --configure-option=CPPFLAGS=-I_build/generated '--gcc-options=-fno-stack-protector -I/Users/zz/Repos/ghc2/_build/generated' --configure-option=--with-cc=/usr/bin/gcc --constraint 'Cabal == 2.0.0.0' --constraint 'binary == 0.8.4.1' --constraint 'ghc-boot == 8.3' --constraint 'ghc-boot-th == 8.3' --constraint 'ghci == 8.3' --constraint 'hoopl == 3.10.2.2' --constraint 'hpc == 0.6.0.3' --constraint 'template-haskell == 2.12.0.0' --constraint 'terminfo == 0.4.1.0' --constraint 'transformers == 0.5.2.0' --with-gcc=/usr/bin/gcc --with-ar=/usr/bin/ar --with-alex=/Users/zz/Library/Haskell/bin/alex --with-happy=/Users/zz/Library/Haskell/bin/happy -v0 --configure-option=--quiet --configure-option=--disable-option-checking
 Exit code: 1
 Stderr:
 ghc-cabal: ghc-pkg dump failed: dieVerbatim: user error (ghc-cabal:
@@ -94,16 +94,19 @@ Sometimes it is useful to run a few lines of code for debugging purpose, for exa
 
 ## How to enable stack trace
 
-first, build shake with profile support:
+First build the separate profiling compiler with `make stage3-profile` from the
+repository root. Use it to install Shake with profiling support:
 
 ```
 # inside shake source directory
-cabal install --enable-profiling
+cabal install --lib . --package-env=. \
+  --with-compiler="/path/to/<host-triple>-profiling-ghc" \
+  --with-build-compiler=/path/to/ghc
 ```
 
 ```
 # for an example source file
-cabal exec -- ghc -prof -fprof-auto examples/Main.hs
+"/path/to/<host-triple>-profiling-ghc" -fprof-auto examples/Main.hs
 ```
 
 and a work-in-progress [traced fork of shake](https://github.com/monad-systems/shake/tree/traced)

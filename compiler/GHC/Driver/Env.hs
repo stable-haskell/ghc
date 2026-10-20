@@ -56,7 +56,7 @@ import GHC.Driver.Env.KnotVars (emptyKnotVars)
 import GHC.Unit.Finder.Types (initFinderCache)
 import GHC.Platform
 import GHC.Platform.Host (hostPlatformArchOS)
-import GHC.Platform.Ways (hostWays)
+import GHC.Platform.Ways (hostABI, hostWays)
 import GHC.Settings
 import GHC.Settings.IO
 import Control.Monad (unless)
@@ -206,6 +206,8 @@ newPluginEnv hsc_env = do
           platformByteOrder platform == targetByteOrder &&
           not (platformIsCrossCompiling platform)) $
     badSettings "-plugin-libdir must describe the native platform running GHC"
+  unless (sTargetABI host_settings == hostABI) $
+    badSettings "-plugin-libdir must describe the ABI of the running compiler"
   host_flags0 <- initDynFlags (defaultDynFlags host_settings)
   let host_flags1 = host_flags0
         { targetWays_ = hostWays

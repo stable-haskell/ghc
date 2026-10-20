@@ -134,8 +134,7 @@ buildingCompilerStage :: Stage -> Predicate
 buildingCompilerStage s = buildingCompilerStage' (== s)
 
 -- | Like 'buildingCompilerStage', but lifts an arbitrary predicate on 'Stage',
--- which is useful for checking flavour fields like 'ghcProfiled' and
--- 'ghcDebugged'.
+-- which is useful for checking flavour fields like 'ghcDebugged'.
 buildingCompilerStage' :: (Stage -> Bool) -> Predicate
 buildingCompilerStage' f = f . succStage <$> getStage
 

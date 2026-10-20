@@ -89,6 +89,90 @@ Stage3 builds pinned native Alex and Happy with the bootstrap compiler, includin
 when `DIST_BUILD=1` uses a prebuilt bindist. These tools and their matching data
 files live under `_build/stage3-tools`; stage3 does not require them on `PATH`.
 
+Profiling as a target ABI
+=========================
+
+`make stage3-profile` builds a separate profiling target for the native ISA and
+OS. The ordinary stage2 compiler remains the host compiler. Its
+`<host-triple>-profiling-ghc` entry point selects the profiling settings and
+package database under `_build/dist/lib/targets/<host-triple>-profiling/lib`.
+`--info` reports the same `Target platform` as native GHC and
+`Target ABI: profiling` and `GHC Profiled: YES`; the ordinary compiler reports
+`GHC Profiled: NO`. Profiling status comes from the target ABI, with no separate
+profiling-library capability setting. Target code always uses the profiling ABI,
+and its libraries and interfaces use ordinary `.a`, `.o` and `.hi` filenames.
+This is a separate package universe, not an additional library way in the native
+package database.
+
+Ordinary `ghc -prof` and profiling library ways have been removed. Select
+`<host-triple>-profiling-ghc` for every profiling build. Hadrian no longer builds
+profiling ways or accepts `prof`, `+profiled_ghc`, `+late_ccs` or
+`+no_profiled_libs`; use `make stage3-profile` for the separate target and remove
+`+no_profiled_libs` from ordinary Hadrian builds. Hadrian does not yet build the
+separate profiling target itself.
+
+The target's `settings` file selects this ABI with `("target ABI", "profiling")`.
+An absent or empty value keeps the existing ABI.
+
+Build and test it in the existing development environment:
+
+```sh
+nix develop -c make stage3-profile
+nix develop -c make test-profile
+nix develop -c make test-profile-install
+```
+
+Use the patched Cabal built by `make stable-cabal`. It distinguishes the target
+ABI even when the host and target ISA and OS match. Both the host compiler and
+target compiler must come from the same build:
+
+```sh
+host=$PWD/_build/dist/bin/ghc
+triple=$($host --print-host-platform)
+profile=$PWD/_build/dist/bin/$triple-profiling-ghc
+_build/cabal/bin/cabal build \
+  --with-compiler="$profile" --with-build-compiler="$host"
+"$profile" Main.hs -fprof-auto -rtsopts -o app
+./app +RTS -p
+```
+
+This writes `app.prof`. Template Haskell and GHCi run in an external interpreter
+generated from the profiling target's `ghci` and RTS packages. Custom Setup
+programs and build tools use the ordinary host compiler. Profiling GHC and
+`ghc-pkg` also use a separate user package database and package environments.
+The profiling target ships nonthreaded and threaded RTS libraries; debug RTS
+variants are not included. Its bundled `libffi-clib` supplies iserv's libffi;
+the installation does not require a system libffi development library.
+`<host-triple>-profiling-runghc` selects the same target; an explicit `-f` still
+overrides its compiler. The profiling target does not provide a Haddock alias.
+
+Build compiler plugins with the ordinary host compiler from the same build.
+Pass its library directory and the host plugin database explicitly:
+
+```sh
+"$profile" -plugin-libdir "$("$host" --print-libdir)" \
+  -plugin-package-db /path/to/host/plugin-db \
+  -plugin-package my-plugin -fplugin My.Plugin Main.hs
+```
+
+`make _build/dist/ghc-profile.tar.gz` packages the ordinary compiler and profiling
+target together. Extract it and run `./configure --prefix=/desired/path && make
+install`; installation recaches both package databases. No wasm or JavaScript
+SDK is needed for this bindist. The workflow regression builds a local library
+with C code and `hsc2hs`, a Template Haskell splice, native build tool and custom
+Setup. It rejects an ordinary interface in the profiling universe, loads a host
+plugin alongside profiling TH, and checks runtime reports and separate library
+and executable instrumentation flags from explicit Cabal profiling. It also
+writes and uses distinct local native/profiling package environments:
+
+```sh
+python3 testsuite/tests/profiling/test-target-abi.py \
+  --host-ghc "$host" --profile-ghc "$profile" \
+  --host-ghc-pkg "$PWD/_build/dist/bin/ghc-pkg" \
+  --profile-ghc-pkg "$PWD/_build/dist/bin/$triple-profiling-ghc-pkg" \
+  --cabal "$PWD/_build/cabal/bin/cabal"
+```
+
 
 Building with Buck2 (experimental)
 ==================================

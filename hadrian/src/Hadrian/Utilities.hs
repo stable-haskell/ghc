@@ -240,8 +240,8 @@ makeRelativeNoSysLink a b
         isDot _ = False
 
 -- | Like Shake's '%>' but gives higher priority to longer patterns. Useful
--- in situations when a family of build rules, e.g. @"**/*.a"@ and @"**/*_p.a"@
--- can be matched by the same file, such as @library_p.a@. We break the tie
+-- in situations when a family of build rules, e.g. @"**/*.a"@ and @"**/*_thr.a"@
+-- can be matched by the same file, such as @library_thr.a@. We break the tie
 -- by preferring longer matches, which correspond to longer patterns.
 (%%>) :: FilePattern -> (FilePath -> Action ()) -> Rules ()
 p %%> a = priority (fromIntegral (length p) + 1) $ p %> a

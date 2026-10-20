@@ -7,14 +7,11 @@ module Flavour
   , addArgs
   , splitSections
   , enableThreadSanitizer
-  , enableLateCCS
   , enableHashUnitIds
   , enableDebugInfo, enableTickyGhc
   , viaLlvmBackend
-  , enableProfiledGhc
   , disableDynamicGhcPrograms
   , disableDynamicLibs
-  , disableProfiledLibs
   , enableLinting
   , enableHaddock
   , disableSelfRecompInfo
@@ -54,12 +51,10 @@ flavourTransformers = M.fromList
     , "thread_sanitizer" =: enableThreadSanitizer False
     , "thread_sanitizer_cmm" =: enableThreadSanitizer True
     , "llvm"             =: viaLlvmBackend
-    , "profiled_ghc"     =: enableProfiledGhc
     , "no_dynamic_ghc"   =: disableDynamicGhcPrograms
     , "no_dynamic_libs"  =: disableDynamicLibs
     , "native_bignum"    =: useNativeBignum
     , "text_simdutf"     =: enableTextWithSIMDUTF
-    , "no_profiled_libs" =: disableProfiledLibs
     , "omit_pragmas"     =: omitPragmas
     , "ipe"              =: enableIPE
     , "fully_static"     =: fullyStatic
@@ -72,7 +67,6 @@ flavourTransformers = M.fromList
     , "haddock"          =: enableHaddock
     , "no_self_recomp"   =: disableSelfRecompInfo
     , "hi_core"          =: enableHiCore
-    , "late_ccs"         =: enableLateCCS
     , "boot_nonmoving_gc" =: enableBootNonmovingGc
     , "dump_stg"         =: enableDumpStg
     , "hash_unit_ids"    =: enableHashUnitIds
@@ -86,7 +80,14 @@ parseFlavour :: [Flavour]  -- ^ base flavours
              -> Map String (Flavour -> Flavour) -- ^ modifiers
              -> String
              -> Either String Flavour
-parseFlavour baseFlavours transformers str =
+parseFlavour baseFlavours transformers str
+  | any (`elem` retired) (splitOn "+" str) =
+      Left $ unlines
+        [ "Legacy profiling ways and flavours have been removed."
+        , "Build the separate profiling target with `make stage3-profile`; Hadrian does not build that target yet."
+        , "Remove obsolete +no_profiled_libs from ordinary builds."
+        ]
+  | otherwise =
     case P.runParser parser () "" str of
       Left perr -> Left $ unlines $
                    [ "error parsing flavour specifier: " ++ show perr
@@ -100,6 +101,7 @@ parseFlavour baseFlavours transformers str =
                     [ "  " ++ nm | nm <- M.keys transformers ]
       Right f -> Right f
   where
+    retired = ["prof", "profiled_ghc", "no_profiled_libs", "late_ccs"]
     parser :: Parser Flavour
     parser = do
       base <- baseFlavour
@@ -258,30 +260,6 @@ enableThreadSanitizer instrumentCmm = addArgs $ notStage0 ? mconcat
 viaLlvmBackend :: Flavour -> Flavour
 viaLlvmBackend = addArgs $ notStage0 ? builder Ghc ? arg "-fllvm"
 
--- | Build the GHC executable with profiling enabled in stages 2 and later. It
--- is also recommended that you use this with @'dynamicGhcPrograms' = False@
--- since GHC does not support loading of profiled libraries with the
--- dynamically-linker.
-enableProfiledGhc :: Flavour -> Flavour
-enableProfiledGhc flavour =
-  enableLateCCS flavour
-    { rtsWays = do
-        ws <- rtsWays flavour
-        mconcat
-          [ pure ws
-          , buildingCompilerStage' (>= Stage2) ? pure (foldMap profiled_ways ws)
-          ]
-    , libraryWays = mconcat
-        [ libraryWays flavour
-        , buildingCompilerStage' (>= Stage2) ? pure (Set.singleton profiling)
-        ]
-    , ghcProfiled = (>= Stage2)
-    }
-    where
-      profiled_ways w
-        | wayUnit Dynamic w = Set.empty
-        | otherwise         = Set.singleton (w <> profiling)
-
 -- | Disable 'dynamicGhcPrograms'.
 disableDynamicGhcPrograms :: Flavour -> Flavour
 disableDynamicGhcPrograms flavour = flavour { dynamicGhcPrograms = pure False }
@@ -297,16 +275,6 @@ disableDynamicLibs flavour =
     prune :: Ways -> Ways
     prune = fmap $ Set.filter (not . wayUnit Dynamic)
 
-
--- | Don't build libraries in profiled 'Way's.
-disableProfiledLibs :: Flavour -> Flavour
-disableProfiledLibs flavour =
-    flavour { libraryWays = prune $ libraryWays flavour
-            , rtsWays     = prune $ rtsWays flavour
-            }
-  where
-    prune :: Ways -> Ways
-    prune = fmap $ Set.filter (not . wayUnit Profiling)
 
 useNativeBignum :: Flavour -> Flavour
 useNativeBignum flavour =
@@ -338,12 +306,6 @@ enableIPE :: Flavour -> Flavour
 enableIPE = addArgs
     $ notStage0 ? builder (Ghc CompileHs)
     ? pure ["-finfo-table-map", "-fdistinct-constructor-tables"]
-
-enableLateCCS :: Flavour -> Flavour
-enableLateCCS = addArgs
-  $ notStage0 ? builder (Ghc CompileHs)
-  ? ((Profiling `wayUnit`) <$> getWay)
-  ? arg "-fprof-late"
 
 -- | Enable assertions for the stage2 compiler
 enableAssertions :: Flavour -> Flavour

@@ -12,11 +12,31 @@ GHC comes with a time and space profiling system, so that you can answer
 questions like "why is my program so slow?", or "why is my program using
 so much memory?". We'll start by describing how to do time profiling.
 
+Profiling uses a separate compiler target with its own package databases and
+libraries, for example ``aarch64-apple-darwin-profiling-ghc``. This target has
+the same CPU and operating system as the ordinary compiler, but uses a different
+closure layout. Select it for every Haskell module and library in the program.
+Its files have ordinary names such as ``Main.hi``, ``Main.o``, and ``libHSfoo.a``;
+the separate target installation and Cabal store keep them apart from ordinary
+builds. Existing ``.p_hi``, ``.p_o``, and ``_p`` libraries must be rebuilt.
+
+With Cabal, select the profiling target and keep the ordinary compiler for Setup
+scripts and build tools, for example::
+
+    cabal build --with-compiler=aarch64-apple-darwin-profiling-ghc \
+      --with-build-compiler=ghc --profiling-detail=late
+
+Use the target name for your platform. The examples below use ``profiling-ghc``
+as shorthand for that compiler. The ordinary compiler rejects :ghc-flag:`-prof`;
+the profiling compiler accepts it redundantly. Template Haskell and GHCi use a
+matching external interpreter. Compiler plugins run in the compiler process and
+need ordinary host packages, selected with :ghc-flag:`-plugin-libdir` when using
+the profiling target.
+
 Time profiling a program is a three-step process:
 
-1. Re-compile your program for profiling with the :ghc-flag:`-prof` option, and
-   probably one of the options for adding automatic annotations:
-   :ghc-flag:`-fprof-late` is the recommended option.
+1. Re-compile your program with the profiling compiler and an option for adding
+   automatic annotations. :ghc-flag:`-fprof-late` is the recommended option.
 
 2. Having compiled the program for profiling, you now need to run it to
    generate the profile. For example, a simple time profile can be
@@ -58,7 +78,7 @@ Compile and run this program as follows:
 
 .. code-block:: none
 
-    $ ghc -prof -fprof-auto -rtsopts Main.hs
+    $ profiling-ghc -fprof-auto -rtsopts Main.hs
     $ ./Main +RTS -p
     121393
     $
@@ -363,21 +383,21 @@ Compiler options for profiling
    single: options; for profiling
 
 .. ghc-flag:: -prof
-    :shortdesc: Turn on profiling
+    :shortdesc: Require the profiling target ABI
     :type: dynamic
     :category:
 
-    To make use of the profiling system *all* modules must be compiled
-    and linked with the :ghc-flag:`-prof` option. Any :pragma:`SCC` annotations you've
-    put in your source will spring to life.
+    Accepted for compatibility when using a profiling-target compiler, which
+    already generates profiling code. An ordinary compiler reports an error
+    directing you to select the separate profiling compiler instead.
 
-    Without a :ghc-flag:`-prof` option, :pragma:`SCC` annotations are ignored; so you can
-    compile ``SCC``-laden code without changing it.
+    Profiling changes code generation and the runtime closure layout. All
+    modules and libraries linked into a profiling program must therefore use
+    the profiling target ABI. Its interface tags detect incompatible imports
+    even though both targets use ordinary filenames.
 
-    Since :ghc-flag:`-prof` affects not just code generation but also memory layout at runtime
-    code compiled with and without :ghc-flag:`-prof` is fundamentally incompatible.
-    To get a functional executable a project has to be built
-    either fully with or fully without :ghc-flag:`-prof`.
+    :pragma:`SCC` annotations take effect with the profiling target and are
+    ignored by the ordinary target, so the same source can be built with both.
 
 .. ghc-flag:: -fno-prof-count-entries
     :shortdesc: Do not collect entry counts
@@ -395,9 +415,9 @@ Compiler options for profiling
     do heap profiling).
 
 
-There are a few other profiling-related compilation options. Use them
-*in addition to* :ghc-flag:`-prof`. These do not have to be used consistently
-for all modules in a program.
+There are a few other profiling-related compilation options. Use them with
+the profiling compiler. These do not have to be used consistently for all
+modules in a program.
 
 Automatically placing cost-centres
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -933,23 +953,23 @@ following RTS options select which break-down to use:
 
 .. rts-flag:: -hc
 
-    *Requires* :ghc-flag:`-prof`. Breaks down the graph by the cost-centre stack
+    *Requires* the profiling target ABI. Breaks down the graph by the cost-centre stack
     which produced the data.
 
 .. rts-flag:: -hm
 
-    *Requires* :ghc-flag:`-prof`. Break down the live heap by the module
+    *Requires* the profiling target ABI. Break down the live heap by the module
     containing the code which produced the data.
 
 .. rts-flag:: -hd
 
-    *Requires* :ghc-flag:`-prof`. Breaks down the graph by closure description.
+    *Requires* the profiling target ABI. Breaks down the graph by closure description.
     For actual data, the description is just the constructor name, for other
     closures it is a compiler-generated string identifying the closure.
 
 .. rts-flag:: -hy
 
-    *Requires* :ghc-flag:`-prof`. Breaks down the graph by type. For closures
+    *Requires* the profiling target ABI. Breaks down the graph by type. For closures
     which have function type or unknown/polymorphic type, the string will
     represent an approximation to the actual type.
 
@@ -957,7 +977,7 @@ following RTS options select which break-down to use:
 
     :since: 9.10.1
 
-    *Requires* :ghc-flag:`-prof`. Break down the graph by era.
+    *Requires* the profiling target ABI. Break down the graph by era.
 
     Each closure is tagged with the era in which it is created. Eras start at 1
     and can be set in your program to domain specific values using functions from
@@ -966,12 +986,12 @@ following RTS options select which break-down to use:
 
 .. rts-flag:: -hr
 
-    *Requires* :ghc-flag:`-prof`. Break down the graph by retainer set. Retainer
+    *Requires* the profiling target ABI. Break down the graph by retainer set. Retainer
     profiling is described in more detail below (:ref:`retainer-prof`).
 
 .. rts-flag:: -hb
 
-    *Requires* :ghc-flag:`-prof`. Break down the graph by biography.
+    *Requires* the profiling target ABI. Break down the graph by biography.
     Biographical profiling is described in more detail below
     (:ref:`biography-prof`).
 
@@ -1006,47 +1026,47 @@ follows:
 .. rts-flag:: -hc ⟨name⟩
     :noindex:
 
-    *Requires* :ghc-flag:`-prof`. Restrict the profile to closures produced by cost-centre stacks with
+    *Requires* the profiling target ABI. Restrict the profile to closures produced by cost-centre stacks with
     one of the specified cost centres at the top.
 
 .. rts-flag:: -hC ⟨name⟩
     :noindex:
 
-    *Requires* :ghc-flag:`-prof`. Restrict the profile to closures produced by cost-centre stacks with
+    *Requires* the profiling target ABI. Restrict the profile to closures produced by cost-centre stacks with
     one of the specified cost centres anywhere in the stack.
 
 .. rts-flag:: -hm ⟨module⟩
     :noindex:
 
-    *Requires* :ghc-flag:`-prof`. Restrict the profile to closures produced by the specified modules.
+    *Requires* the profiling target ABI. Restrict the profile to closures produced by the specified modules.
 
 .. rts-flag:: -hd ⟨desc⟩
     :noindex:
 
-    *Requires* :ghc-flag:`-prof`. Restrict the profile to closures with the specified description
+    *Requires* the profiling target ABI. Restrict the profile to closures with the specified description
     strings.
 
 .. rts-flag:: -hy ⟨type⟩
     :noindex:
 
-    *Requires* :ghc-flag:`-prof`. Restrict the profile to closures with the specified types.
+    *Requires* the profiling target ABI. Restrict the profile to closures with the specified types.
 
 .. rts-flag:: -he ⟨era⟩
     :noindex:
 
-    *Requires* :ghc-flag:`-prof`. Restrict the profile to the specified era.
+    *Requires* the profiling target ABI. Restrict the profile to the specified era.
 
 .. rts-flag:: -hr ⟨cc⟩
     :noindex:
 
-    *Requires* :ghc-flag:`-prof`. Restrict the profile to closures with retainer sets containing
+    *Requires* the profiling target ABI. Restrict the profile to closures with retainer sets containing
     cost-centre stacks with one of the specified cost centres at the
     top.
 
 .. rts-flag:: -hb ⟨bio⟩
     :noindex:
 
-    *Requires* :ghc-flag:`-prof`. Restrict the profile to closures with one of the specified
+    *Requires* the profiling target ABI. Restrict the profile to closures with one of the specified
     biographies, where ⟨bio⟩ is one of ``lag``, ``drag``, ``void``, or
     ``use``.
 
@@ -1393,7 +1413,7 @@ The flags are:
 Profiling Parallel and Concurrent Programs
 ------------------------------------------
 
-Combining :ghc-flag:`-threaded` and :ghc-flag:`-prof` is perfectly fine, and
+Using :ghc-flag:`-threaded` with the profiling compiler is supported, and
 indeed it is possible to profile a program running on multiple processors with
 the RTS :rts-flag:`-N ⟨x⟩` option. [3]_
 

@@ -481,17 +481,15 @@ ghciScriptWrapper = do
     [ "executable=\"$bindir/" ++ prefix ++ "ghc-" ++ version ++ "\""
     , "exec $executable --interactive \"$@\"" ]
 
--- | When not on Windows, we want to ship the 3 flavours of the iserv program
---   in binary distributions. This isn't easily achievable by just asking for
---   the package to be built, since here we're generating 3 different
---   executables out of just one package, so we need to specify all 3 contexts
+-- | When not on Windows, ship the ordinary and dynamic iserv programs
+--   in binary distributions. These come from one package, so specify both contexts
 --   explicitly and 'need' the result of building them.
 iservBins :: Action [(Package, FilePath)]
 iservBins = do
   rtsways <- interpretInContext (vanillaContext Stage1 ghc) getRtsWays
   traverse (fmap (\p -> (iserv, p)) . programPath)
       [ Context Stage1 iserv w Final
-      | w <- [vanilla, profiling, dynamic]
+      | w <- [vanilla, dynamic]
       , w `elem` rtsways
       ]
 

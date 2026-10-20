@@ -86,12 +86,12 @@ instance NFData   GhcMode
 --
 --   > package rts
 --   >   ? builder (Cabal Flags)
---   >   ? any (wayUnit Profiling) rtsWays
---   >   ? arg "profiling"
+--   >   ? any (wayUnit Threaded) rtsWays
+--   >   ? arg "threaded"
 --
 --   This instructs package configuration functions (such as 'configurePackage')
---   to enable the @profiling@ Cabal flag when processing @rts.cabal@ and
---   building RTS with profiling information.
+--   to enable the @threaded@ Cabal flag when processing @rts.cabal@ and
+--   building the threaded RTS.
 data ConfigurationInfo
   = Setup
   | Flags

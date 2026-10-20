@@ -10,7 +10,7 @@ import GHC.StgToJS.Linker.Types
 import GHC.Driver.DynFlags
 import GHC.Driver.Config.Linker
 
-import GHC.Platform.Ways
+import GHC.Platform.Profile (profileIsProfiling)
 import GHC.Utils.Outputable
 
 import GHC.Prelude
@@ -30,7 +30,7 @@ initStgToJSConfig dflags = StgToJSConfig
   , csBoundsCheck     = gopt Opt_DoBoundsChecking dflags
   , csDebugAlloc      = False
   , csTraceForeign    = False
-  , csProf            = ways dflags `hasWay` WayProf
+  , csProf            = profileIsProfiling (targetProfile dflags)
   , csRuntimeAssert   = False
   -- settings
   , csContext         = initSDocContext dflags defaultDumpStyle
