@@ -18,6 +18,17 @@ import sys
 import tempfile
 import textwrap
 
+from toolchain_trace import (
+    check_no_logical_profiling_target_in_toolchain,
+    check_profile_cpp_trace,
+    check_profile_hsc2hs_invocations,
+    command_program_name,
+    command_target_selectors,
+    compile_command_tokens,
+    link_command_tokens,
+    make_hsc2hs_recording_wrapper,
+)
+
 
 def run(command, *, cwd=None, env=None, check=True):
     print("+ " + " ".join(map(str, command)), flush=True)
@@ -608,35 +619,6 @@ def check_profile_codegen_commands(profile, profile_info, work, env):
     assert 'target triple = "' + llvm_target + '"' in ir, ir
 
 
-def command_target_selectors(command):
-    """Return machine and LLVM target selectors from settings or a real command."""
-    tokens = shlex.split(command)
-    machine, llvm = set(), set()
-    index = 0
-    while index < len(tokens):
-        token = tokens[index]
-        if token.startswith("--target="):
-            machine.add(token.split("=", 1)[1])
-        elif token in ("--target", "-target") and index + 1 < len(tokens):
-            index += 1
-            machine.add(tokens[index])
-        elif token == "-mtriple" and index + 1 < len(tokens):
-            index += 1
-            llvm.add(tokens[index])
-        elif token.startswith("-mtriple="):
-            llvm.add(token.split("=", 1)[1])
-        index += 1
-    return machine, llvm
-
-
-def command_program_name(command):
-    try:
-        tokens = shlex.split(command)
-    except ValueError:
-        return ""
-    return Path(tokens[0]).name if tokens else ""
-
-
 def cabal_plan_ids(path):
     plan = json.loads(path.read_text())
     entries = plan["install-plan"]
@@ -869,13 +851,14 @@ def main():
             assert len(targets) == 1, "expected exactly one profiling target"
             target = targets[0].name
             suffix = ".exe" if os.name == "nt" else ""
-            result = run([sys.executable, Path(__file__).absolute(),
-                          "--host-ghc", installed / ("bin/ghc" + suffix),
-                          "--host-ghc-pkg", installed / ("bin/ghc-pkg" + suffix),
-                          "--profile-ghc", installed / ("bin/" + target + "-ghc" + suffix),
-                          "--profile-ghc-pkg", installed / ("bin/" + target + "-ghc-pkg" + suffix),
-                          "--cabal", args.cabal.absolute()])
-            print(result.stdout, end="")
+            child_command = [sys.executable, Path(__file__).absolute(),
+                             "--host-ghc", installed / ("bin/ghc" + suffix),
+                             "--host-ghc-pkg", installed / ("bin/ghc-pkg" + suffix),
+                             "--profile-ghc", installed / ("bin/" + target + "-ghc" + suffix),
+                             "--profile-ghc-pkg", installed / ("bin/" + target + "-ghc-pkg" + suffix),
+                             "--cabal", args.cabal.absolute()]
+            print("+ " + " ".join(map(str, child_command)), flush=True)
+            subprocess.run(child_command, check=True, timeout=1800)
         return
     if not all((args.host_ghc, args.profile_ghc, args.host_ghc_pkg, args.profile_ghc_pkg)):
         parser.error("provide --bindist or all four --*-ghc/--*-ghc-pkg paths")
@@ -963,6 +946,8 @@ def main():
         check_caf_instrumentation(profile, work, env)
 
         fixture(work)
+        check_no_logical_profiling_target_in_toolchain(profile_info)
+        check_profile_cpp_trace(profile, profile_info, work, env, run)
         check_package_tool_mismatch(host, profile, host_pkg, cabal, work, env)
         # Inference must preserve target dispatch even though both compiler
         # names resolve to the same executable. Explicit pairing is covered by
@@ -989,9 +974,20 @@ def main():
             if label == "profile":
                 component_log = work / "build/logs/host" / profile_info["Target name"] / "abi-workflow-0"
                 component_log.unlink(missing_ok=True)
+                hsc2hs_suffix = ".exe" if os.name == "nt" else ""
+                hsc2hs_helper = profile.with_name(
+                    profile_info["Target name"] + "-hsc2hs" + hsc2hs_suffix)
+                assert hsc2hs_helper.is_file(), \
+                    "missing target-dispatched profiling hsc2hs helper: " + str(hsc2hs_helper)
+                hsc2hs_wrapper, hsc2hs_log, hsc2hs_env = make_hsc2hs_recording_wrapper(
+                    hsc2hs_helper, work, env, write)
+                shutil.rmtree(work / "build/build/host" / profile_info["Target name"] /
+                              "abi-workflow-0", ignore_errors=True)
                 instrumented = run([*command, "build", "all", *options, "-v2", "--enable-profiling",
                                     "--profiling-detail=toplevel-functions",
-                                    "--library-profiling-detail=late"], cwd=work, env=env)
+                                    "--library-profiling-detail=late",
+                                    "--with-hsc2hs=" + str(hsc2hs_wrapper)], cwd=work, env=hsc2hs_env)
+                check_profile_hsc2hs_invocations(hsc2hs_log, profile_info)
                 check_cabal_alias_plans(cabal, host, profile, profile_pkg, profile_info,
                                         profile_lib, work, env,
                                         work / "build/cache/plan.json")
@@ -1006,14 +1002,11 @@ def main():
                 cc_program = command_program_name(cc_command)
                 cxx_program = command_program_name(cxx_command)
                 c_commands = [line for line in command_output.splitlines()
-                              if "profiling.c" in line and
-                              command_program_name(line) == cc_program]
+                              if compile_command_tokens(line, cc_program, "profiling.c")]
                 cxx_commands = [line for line in command_output.splitlines()
-                                if "profiling-cxx.cpp" in line and
-                                command_program_name(line) == cxx_program]
+                                if compile_command_tokens(line, cxx_program, "profiling-cxx.cpp")]
                 link_commands = [line for line in command_output.splitlines()
-                                 if "-o" in line and "abi-workflow" in line and
-                                 command_program_name(line) == cc_program]
+                                 if link_command_tokens(line, cc_program, "abi-workflow")]
                 assert c_commands, "profile GHC -v log omitted the C compiler command"
                 assert cxx_commands, "profile GHC -v log omitted the C++ compiler command"
                 assert link_commands, "profile GHC -v log omitted the linker command"
