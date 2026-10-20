@@ -14,7 +14,7 @@ import GHC.Data.ShortText (pack)
 import GHC.Types.SrcLoc (noLoc)
 import GHC.Driver.Config.Finder (initFinderOpts)
 import GHC.Driver.Session hiding (Option)
-import GHC.Platform (TargetABI(..), targetABIName, platformArchOS, platformUnregisterised)
+import GHC.Platform (TargetABI(..), targetABIName, platformArchOS, platformOS, platformUnregisterised, PlatformMisc(..), OS(..))
 import GHC.Platform.Profile (Profile(..), profileBuildTag, profileIsProfiling)
 import GHC.Platform.Ways
 import GHC.Settings.IO (initSettings)
@@ -189,8 +189,43 @@ main = do
     -- to link iserv (and therefore require ghci) before it is actually used.
     initializedNormal <- initDynFlags normal
     initializedTarget <- initDynFlags target
+    let replaceRaw key value rows = (key, value) : filter ((/= key) . fst) rows
+        unsupportedTarget = initializedTarget
+          { platformMisc = (platformMisc initializedTarget)
+              { platformMisc_targetIsDynamic = False }
+          , rawSettings = replaceRaw "RTS ways" "v thr" (rawSettings initializedTarget)
+          }
+        capableTarget = initializedTarget
+          { platformMisc = (platformMisc initializedTarget)
+              { platformMisc_targetIsDynamic = True }
+          , rawSettings = replaceRaw "RTS ways" "v thr debug thr_debug" (rawSettings initializedTarget)
+          }
     runGhc (Just libdir) $ do
       logger <- getLogger
+      forM_ ["-dynamic", "-dynamic-too", "-debug"] $ \flag -> do
+        rejected <- liftIO $ try (parseDynamicFlags logger unsupportedTarget [noLoc flag])
+        liftIO $ check ("profiling target accepted " ++ flag) $ case rejected of
+          Left (err :: SomeException) ->
+            flag `isInfixOf` displayException err &&
+            (machine ++ "-prof") `isInfixOf` displayException err &&
+            "static non-debug" `isInfixOf` displayException err
+          Right _ -> False
+      forM_ ["-dynamic", "-dynamic-too", "-debug"] $ \flag -> do
+        accepted <- liftIO $ try (parseDynamicFlags logger capableTarget [noLoc flag])
+        let shouldAccept = flag /= "-dynamic-too" || platformOS (targetPlatform target) /= OSMinGW32
+        liftIO $ check ("profiling target capability mismatch for " ++ flag) $ case accepted of
+          Right _ -> shouldAccept
+          Left (_ :: SomeException) -> not shouldAccept
+      threadDebugRejected <- liftIO $ try $ parseDynamicFlags logger unsupportedTarget $ map noLoc
+        ["-threaded", "-debug"]
+      liftIO $ check "profiling target accepted unavailable threaded-debug RTS" $ case threadDebugRejected of
+        Left (err :: SomeException) -> "-debug" `isInfixOf` displayException err
+        Right _ -> False
+      threadDebugAccepted <- liftIO $ try $ parseDynamicFlags logger capableTarget $ map noLoc
+        ["-threaded", "-debug"]
+      liftIO $ check "profiling target rejected advertised threaded-debug RTS" $ case threadDebugAccepted of
+        Right _ -> True
+        Left (_ :: SomeException) -> False
       legacy <- liftIO $ try (parseDynamicFlags logger initializedNormal [noLoc "-prof"])
       liftIO $ check "ordinary compiler accepted legacy -prof" $
         case legacy of

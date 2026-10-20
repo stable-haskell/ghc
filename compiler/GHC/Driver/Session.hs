@@ -944,6 +944,22 @@ parseDynamicFlagsFull activeFlags cmdline logger dflags0 args = do
   let (dflags2, sh_warns) = safeFlagCheck cmdline dflags1
       theWays = ways dflags2
 
+  when (targetABI dflags2 == ProfilingABI) $ do
+    let targetSupportsDynamic = sTargetIsDynamic (settings dflags2)
+        targetSupportsDynamicToo =
+          platformOS (targetPlatform dflags2) /= OSMinGW32 && targetSupportsDynamic
+        requestedRTSWay = waysTag (targetWays_ dflags2)
+        targetRTSWays = maybe [] words (lookup "RTS ways" (rawSettings dflags2))
+        targetSupportsDebug = requestedRTSWay `elem` targetRTSWays
+        unsupported =
+          ["-dynamic" | targetWays_ dflags2 `hasWay` WayDyn && not targetSupportsDynamic] ++
+          ["-debug" | targetWays_ dflags2 `hasWay` WayDebug && not targetSupportsDebug] ++
+          ["-dynamic-too" | gopt Opt_BuildDynamicToo dflags2 && not targetSupportsDynamicToo]
+        target = sTargetPlatformString (settings dflags2) ++ "-prof"
+    unless (null unsupported) $ liftIO $ throwGhcExceptionIO $ CmdLineError $
+      "unsupported " ++ intercalate ", " unsupported ++ " for profiling target " ++ show target ++
+      "; supported alternative: static non-debug profiling output (omit these options)"
+
   unless (allowed_combination theWays) $ liftIO $
       throwGhcExceptionIO (CmdLineError ("combination not supported: " ++
                                intercalate "/" (map wayDesc (Set.toAscList theWays))))

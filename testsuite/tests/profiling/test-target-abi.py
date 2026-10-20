@@ -940,6 +940,11 @@ def main():
         run([profile, "Direct.lhs", "-threaded", "-rtsopts", "-o", threaded], cwd=work, env=env)
         assert run([threaded, "+RTS", "-N2", "-p"], cwd=work, env=env).stdout.strip() == "1"
         assert (work / "threaded.prof").is_file(), "threaded profiling report missing"
+        for flag in ("-dynamic", "-dynamic-too", "-debug"):
+            unsupported = run([profile, "Direct.lhs", flag, "-o", work / "unsupported"],
+                              cwd=work, env=env, check=False)
+            assert unsupported.returncode != 0, "unsupported profiling variant accepted: " + flag
+            assert "profil" in unsupported.stderr.lower() and "support" in unsupported.stderr.lower(), unsupported.stderr
         suffix = ".exe" if os.name == "nt" else ""
         program_name = profile.stem if suffix else profile.name
         runghc = profile.with_name(program_name.removesuffix("ghc") + "runghc" + suffix)
