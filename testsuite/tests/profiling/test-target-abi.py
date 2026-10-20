@@ -7,9 +7,12 @@ package databases, Cabal stores and build products created here are temporary.
 
 import argparse
 import ast
+import json
 import os
 from pathlib import Path
 import re
+import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -31,6 +34,103 @@ def run(command, *, cwd=None, env=None, check=True):
 def write(path, content):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(textwrap.dedent(content).lstrip())
+
+
+def read_info(program, env=None):
+    pairs = ast.literal_eval(run([program, "--info"], env=env).stdout)
+    keys = [key for key, _ in pairs]
+    for field in ("Project version", "Target platform", "Target name", "Target ABI",
+                  "LibDir", "Global Package DB"):
+        assert keys.count(field) == 1, "missing or duplicate identity field: " + field
+    return dict(pairs)
+
+
+def check_target_entry_points(host, profile, host_pkg, profile_pkg, host_info, profile_info, env):
+    fields = ("Project version", "Target platform", "Target name", "Target ABI",
+              "LibDir", "Global Package DB")
+    for compiler, pkg, expected in ((host, host_pkg, host_info), (profile, profile_pkg, profile_info)):
+        package_info = read_info(pkg, env)
+        assert all(package_info[field] == expected[field] for field in fields), "package tool identity mismatch"
+        assert run([compiler, "--print-target-name"], env=env).stdout.strip() == expected["Target name"]
+    # Package database overrides cannot spoof the package tool's own target.
+    overridden = ast.literal_eval(run([host_pkg, "--info", "--global-package-db",
+                                      profile_info["Global Package DB"]], env=env).stdout)
+    assert dict(overridden)["Target name"] == host_info["Target name"]
+    libdir = Path(profile_info["LibDir"])
+    aliases = ast.literal_eval((libdir.parent / "target.aliases").read_text())
+    assert aliases, "profiling target has no short executable alias"
+    suffix = ".exe" if os.name == "nt" else ""
+    for target in (profile_info["Target name"], *aliases):
+        for version in ("", "-" + profile_info["Project version"]):
+            for tool in ("ghc", "ghc-pkg"):
+                executable = profile.parent / (target + "-" + tool + version + suffix)
+                actual = read_info(executable, env)
+                assert all(actual[field] == profile_info[field] for field in fields), str(executable)
+
+
+def check_package_tool_mismatch(host, profile, host_pkg, cabal, work, env):
+    def databases():
+        files = set(work.rglob("package.cache")) | set(work.rglob("*.conf"))
+        return {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in files}
+
+    before = databases()
+    failed = run([cabal, "build", "all", "--dry-run", "--offline",
+                  "--project-file=cabal.project.profile", "--builddir=" + str(work / "wrong-tool"),
+                  "--with-compiler=" + str(profile), "--with-build-compiler=" + str(host),
+                  "--with-hc-pkg=" + str(host_pkg)], cwd=work, env=env, check=False)
+    assert failed.returncode != 0, "same-version native ghc-pkg accepted for profiling target"
+    assert "ghc-pkg target metadata mismatch" in failed.stdout + failed.stderr, failed.stdout + failed.stderr
+    after = databases()
+    assert after == before, "mismatched package tool wrote a package database"
+
+
+def check_invalid_target_settings(host, host_pkg, host_info, work, env):
+    original = ast.literal_eval((Path(host_info["LibDir"]) / "settings").read_text())
+    cases = (
+        ("unsafe", "target name", "../unsafe", "target name"),
+        ("contradictory", "target name", host_info["Target name"] + "-prof", "contradicts"),
+        ("unknown-abi", "target ABI", "unknown-abi", "unsupported target abi"),
+    )
+    for label, key, value, diagnostic in cases:
+        directory = work / "bad-settings" / label
+        directory.mkdir(parents=True)
+        pairs = [(k, value if k == key else v) for k, v in original]
+        content = "[" + ",".join("(" + json.dumps(k) + "," + json.dumps(v) + ")"
+                                  for k, v in pairs) + "]\n"
+        (directory / "settings").write_text(content)
+        failed = run([host, "-B" + str(directory), "--info"], cwd=work, env=env, check=False)
+        assert failed.returncode != 0 and diagnostic in failed.stderr.lower(), failed.stderr
+    duplicate = work / "bad-settings/duplicate"
+    duplicate.mkdir()
+    pairs = original + [("target name", host_info["Target name"])]
+    (duplicate / "settings").write_text("[" + ",".join(
+        "(" + json.dumps(k) + "," + json.dumps(v) + ")" for k, v in pairs) + "]\n")
+    failed = run([host, "-B" + str(duplicate), "--info"], cwd=work, env=env, check=False)
+    assert failed.returncode != 0 and "duplicate target identity" in failed.stderr.lower(), failed.stderr
+
+    # Run the real package-tool binary against an isolated installation. Keep
+    # its native shared libraries reachable without sharing any writable DB.
+    installation = work / "bad-package-tool"
+    libdir = installation / "lib"
+    libdir.mkdir(parents=True)
+    executable = installation / "bin" / host_pkg.name
+    executable.parent.mkdir()
+    shutil.copy2(host_pkg.resolve(), executable)
+    for child in Path(host_info["LibDir"]).iterdir():
+        if child.is_dir() and child.name not in ("package.conf.d", "targets"):
+            (libdir / child.name).symlink_to(child, target_is_directory=True)
+    database = libdir / "package.conf.d"
+    database.mkdir()
+    sentinel = database / "package.cache"
+    sentinel.write_bytes(b"invalid identity must be rejected before recaching\n")
+    for source, diagnostic in ((work / "bad-settings/contradictory", "contradicts"),
+                               (duplicate, "duplicate target identity")):
+        shutil.copy2(source / "settings", libdir / "settings")
+        before = sentinel.read_bytes(), sentinel.stat().st_mtime_ns
+        failed = run([executable, "--no-user-package-db", "--global", "recache"],
+                     cwd=work, env=env, check=False)
+        assert failed.returncode != 0 and diagnostic in failed.stderr.lower(), failed.stderr
+        assert (sentinel.read_bytes(), sentinel.stat().st_mtime_ns) == before, "invalid settings mutated global DB"
 
 
 def check_profile_file_names(root):
@@ -121,7 +221,7 @@ def fixture(work):
           cxx-sources: cbits/profiling-cxx.cpp
           build-depends: base, template-haskell
           build-tool-depends: abi-generator:abi-generator
-          ghc-options: -F -pgmF abi-generator
+          ghc-options: -F -pgmF abi-generator -v
           ghc-prof-options: -fprof-cafs
           default-language: Haskell2010
           if flag(profile-target)
@@ -130,7 +230,7 @@ def fixture(work):
           hs-source-dirs: exe
           main-is: Main.hs
           build-depends: base, abi-workflow
-          ghc-options: -rtsopts
+          ghc-options: -rtsopts -v
           default-language: Haskell2010
           if flag(profile-target)
             cpp-options: -DEXPECT_PROFILE
@@ -312,6 +412,239 @@ def check_bundled_ffi(profile_pkg, profile_lib, env):
     assert archives and all(path.stat().st_size for path in archives), "bundled libffi archive missing from target installation"
 
 
+def haskell_settings(rows):
+    """Serialize settings as a Haskell Read list, not a Python repr."""
+    pairs = ["(" + json.dumps(key, ensure_ascii=False) + ", " +
+             json.dumps(value, ensure_ascii=False) + ")" for key, value in rows]
+    return "[" + ", ".join(pairs) + "]\n"
+
+
+def shadow_target_install(profile_lib, host_pkg, host_lib, work):
+    """Build a private target libdir and ghc-pkg base dir for settings probes."""
+    profile_lib = profile_lib.resolve()
+    target_dir = profile_lib.parent
+    name = target_dir.name
+    root = work / "settings-validation-install"
+    shadow_base = root / "lib"
+    shadow_base.mkdir(parents=True)
+    for item in Path(host_lib).resolve().iterdir():
+        if item.name not in ("settings", "package.conf.d", "targets"):
+            (shadow_base / item.name).symlink_to(item, target_is_directory=item.is_dir())
+    (shadow_base / "package.conf.d").mkdir()
+    shadow_targets = shadow_base / "targets"
+    shadow_targets.mkdir()
+    installed_targets = Path(host_lib).resolve() / "targets"
+    if installed_targets.is_dir():
+        for installed_target in installed_targets.iterdir():
+            if installed_target.name == name:
+                continue
+            shadow_target = shadow_targets / installed_target.name
+            shadow_target.mkdir()
+            for item in installed_target.iterdir():
+                if item.name != "lib":
+                    (shadow_target / item.name).symlink_to(item, target_is_directory=item.is_dir())
+                    continue
+                shadow_target_lib = shadow_target / "lib"
+                shadow_target_lib.mkdir()
+                for lib_item in item.iterdir():
+                    if lib_item.name == "package.conf.d":
+                        (shadow_target_lib / lib_item.name).mkdir()
+                    else:
+                        (shadow_target_lib / lib_item.name).symlink_to(
+                            lib_item, target_is_directory=lib_item.is_dir())
+    shadow_target = shadow_targets / name
+    shadow_lib = shadow_target / "lib"
+    shadow_lib.mkdir(parents=True)
+    for item in profile_lib.iterdir():
+        if item.name not in ("settings", "package.conf.d"):
+            (shadow_lib / item.name).symlink_to(item, target_is_directory=item.is_dir())
+    (shadow_lib / "package.conf.d").mkdir()
+    shutil.copy2(target_dir / "target.aliases", shadow_target / "target.aliases")
+    pkg_name = "ghc-pkg.exe" if os.name == "nt" else "ghc-pkg"
+    pkg_candidates = [Path(host_lib).parent / "bin" / pkg_name,
+                      Path(host_lib) / "bin" / pkg_name,
+                      Path(os.path.realpath(host_pkg))]
+    def is_executable_binary(candidate):
+        if not candidate.is_file():
+            return False
+        with candidate.open("rb") as executable:
+            return executable.read(2) != b"#!"
+
+    pkg_binary = next((candidate for candidate in pkg_candidates
+                       if is_executable_binary(candidate)), None)
+    assert pkg_binary is not None, "could not locate the installed ghc-pkg executable"
+    shadow_pkg = root / "bin" / pkg_binary.name
+    shadow_pkg.parent.mkdir(parents=True)
+    shutil.copy2(pkg_binary, shadow_pkg)
+    return shadow_lib, shadow_pkg, name
+
+
+def check_settings_info_invariants(profile, profile_lib, host_pkg, host_lib, work, env):
+    """New identity settings own computed info fields; old settings retain overrides."""
+    original_settings = profile_lib / "settings"
+    rows = ast.literal_eval(original_settings.read_text())
+    shadow_lib, shadow_pkg, target = shadow_target_install(profile_lib, host_pkg, host_lib, work)
+    shadow_topdir = shadow_lib.parent.parent.parent
+    settings_file = shadow_lib / "settings"
+    keys = ("Project version", "LibDir", "Global Package DB")
+    for key in keys:
+        # Duplicate and single injected values must both fail before ghc-pkg
+        # can initialize a package database, even with user DBs disabled.
+        for injected in ([(key, "injected")],
+                         [(key, "first"), (key, "second")]):
+            settings_file.write_text(haskell_settings(rows + injected))
+            compiler_result = run([profile, "-B" + str(shadow_topdir), "--info"],
+                                  env=env, check=False)
+            pkg_result = run([shadow_pkg, "--target", target, "--info"],
+                             env=env, check=False)
+            for label, result in (("ghc", compiler_result), ("ghc-pkg", pkg_result)):
+                assert result.returncode != 0, label + " accepted reserved setting " + key
+                assert key in result.stderr, result.stderr
+            db = work / "must-not-be-created" / key.replace(" ", "-")
+            result = run([shadow_pkg, "--target", target, "--no-user-package-db",
+                          "--global-package-db", db, "init", db], env=env, check=False)
+            assert result.returncode != 0, "ghc-pkg accepted malformed settings with --no-user-package-db"
+            assert key in result.stderr, result.stderr
+            assert not db.exists(), "ghc-pkg created a database after settings validation failed"
+            recache_db = work / "must-not-be-recached" / key.replace(" ", "-")
+            recache_db.mkdir(parents=True, exist_ok=True)
+            result = run([shadow_pkg, "--target", target, "--no-user-package-db",
+                          "--global-package-db", recache_db, "recache"], env=env, check=False)
+            assert result.returncode != 0, "ghc-pkg accepted malformed settings while recaching"
+            assert key in result.stderr, result.stderr
+            assert not any(recache_db.iterdir()), "ghc-pkg mutated a package database after settings validation failed"
+
+    # The legacy settings format had no target name and allowed these raw
+    # values to override the computed --info fields.
+    legacy_rows = [(key, value) for key, value in rows if key != "target name"]
+    overrides = {key: "legacy override for " + key for key in keys}
+    legacy_rows.extend(overrides.items())
+    settings_file.write_text(haskell_settings(legacy_rows))
+    info = ast.literal_eval(run([profile, "-B" + str(shadow_topdir), "--info"], env=env).stdout)
+    first_values = {}
+    for key, value in info:
+        first_values.setdefault(key, value)
+    for key, value in overrides.items():
+        assert first_values.get(key) == value, "legacy --info override changed for " + key
+
+    # A settings file can be internally coherent while belonging to a different
+    # target than the canonical directory selected by an alias or executable.
+    machine = dict(rows)["target platform string"]
+    wrong_rows = [(key, value) for key, value in rows
+                  if key not in ("target ABI", "target name")]
+    wrong_rows.extend((("target ABI", ""), ("target name", machine)))
+    settings_file.write_text(haskell_settings(wrong_rows))
+    aliases = ast.literal_eval((profile_lib.parent / "target.aliases").read_text())
+    for index, selection in enumerate((target, aliases[0])):
+        compiler_result = run([profile, "-B" + str(shadow_topdir),
+                               "--target=" + selection, "--info"],
+                              env=env, check=False)
+        assert compiler_result.returncode != 0, \
+            "GHC accepted coherent settings under a different canonical target directory"
+        assert "contradicts settings target name" in compiler_result.stderr, compiler_result.stderr
+        for selector_index, selector_args in enumerate((("--target=" + selection,),
+                                                          ("--target", selection))):
+            pkg_result = run([shadow_pkg, *selector_args, "--info"], env=env, check=False)
+            assert pkg_result.returncode != 0, \
+                "ghc-pkg --info accepted settings for a different canonical target"
+            assert "contradicts settings target name" in pkg_result.stderr, pkg_result.stderr
+            db = work / ("wrong-target-init-" + str(index) + "-" + str(selector_index))
+            result = run([shadow_pkg, *selector_args, "--no-user-package-db",
+                          "--global-package-db", db, "init", db], env=env, check=False)
+            assert result.returncode != 0, "ghc-pkg init accepted a different canonical target"
+            assert "contradicts settings target name" in result.stderr, result.stderr
+            assert not db.exists(), "ghc-pkg init wrote a database for the wrong target identity"
+            recache_db = work / ("wrong-target-recache-" + str(index) + "-" + str(selector_index))
+            recache_db.mkdir(parents=True, exist_ok=True)
+            result = run([shadow_pkg, *selector_args, "--no-user-package-db",
+                          "--global-package-db", recache_db, "recache"], env=env, check=False)
+            assert result.returncode != 0, "ghc-pkg recache accepted a different canonical target"
+            assert "contradicts settings target name" in result.stderr, result.stderr
+            assert not any(recache_db.iterdir()), "ghc-pkg recache wrote a database for the wrong target identity"
+
+
+def check_ghc_pkg_target_precedence(host_pkg, profile_info, profile_lib, env):
+    """ghc-pkg --info and read-only list use the same last target option."""
+    aliases_file = profile_lib.parent / "target.aliases"
+    aliases = ast.literal_eval(aliases_file.read_text())
+    assert isinstance(aliases, list) and all(isinstance(alias, str) for alias in aliases), \
+        "invalid target.aliases manifest"
+    assert aliases, "profiling target has no explicit dispatch alias"
+    alias = aliases[0]
+    canonical = profile_info["Target name"]
+    assert alias != canonical, "target.aliases unexpectedly repeats its canonical name"
+    option_orders = (("--target=missing-target", "--target", alias),
+                     ("--target", "missing-target", "--target=" + alias))
+    for options in option_orders:
+        info = dict(ast.literal_eval(run([host_pkg, *options, "--info"], env=env).stdout))
+        assert info["Target name"] == canonical, "ghc-pkg --info did not select the last target alias"
+        listing = run([host_pkg, *options, "list"], env=env).stdout
+        assert profile_info["Global Package DB"] in listing, \
+            "ghc-pkg list did not use the target selected by the last --target option"
+
+
+def check_profile_codegen_commands(profile, profile_info, work, env):
+    """Inspect generated LLVM IR identity; real commands come from GHC's -v log."""
+    source = work / "qualified-target-commands"
+    source.mkdir(parents=True, exist_ok=True)
+    llvm_tools = []
+    for key in ("LLVM llc command", "LLVM opt command"):
+        command = profile_info.get(key, "")
+        executable_name = shlex.split(command)[0] if command else ""
+        if executable_name and (Path(executable_name).is_file() or shutil.which(executable_name)):
+            llvm_tools.append(key)
+    if len(llvm_tools) != 2:
+        print("SKIP LLVM IR triple assertion: configured llc/opt tools are unavailable", flush=True)
+        return
+    ir_source = source / "LLVMProbe.hs"
+    write(ir_source, "module LLVMProbe where\nvalue :: Int\nvalue = 42\n")
+    run([profile, "-S", "-fllvm", "-keep-llvm-files", "LLVMProbe.hs", "-v"],
+        cwd=source, env=env)
+    ir_files = list(source.glob("*.ll"))
+    assert ir_files, "LLVM mode did not retain an LLVM IR file"
+    llvm_target = profile_info.get("LLVM target", "")
+    assert llvm_target, "profile settings omitted LLVM target"
+    ir = "\n".join(path.read_text() for path in ir_files)
+    assert 'target triple = "' + llvm_target + '"' in ir, ir
+
+
+def command_target_selectors(command):
+    """Return machine and LLVM target selectors from settings or a real command."""
+    tokens = shlex.split(command)
+    machine, llvm = set(), set()
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if token.startswith("--target="):
+            machine.add(token.split("=", 1)[1])
+        elif token in ("--target", "-target") and index + 1 < len(tokens):
+            index += 1
+            machine.add(tokens[index])
+        elif token == "-mtriple" and index + 1 < len(tokens):
+            index += 1
+            llvm.add(tokens[index])
+        elif token.startswith("-mtriple="):
+            llvm.add(token.split("=", 1)[1])
+        index += 1
+    return machine, llvm
+
+
+def command_program_name(command):
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        return ""
+    return Path(tokens[0]).name if tokens else ""
+
+
+def cabal_plan_ids(path):
+    plan = json.loads(path.read_text())
+    entries = plan["install-plan"]
+    ids = sorted(entry.get("id", entry.get("unit-id")) for entry in entries)
+    assert all(ids), "Cabal install plan omitted component IDs"
+    return ids
+
+
 def check_native_interface(host, profile, work, env):
     """A shared ISA/OS and ordinary filename must not hide either ABI mismatch."""
     for label, producer, consumer in (("native", host, profile), ("profiling", profile, host)):
@@ -432,11 +765,9 @@ def install_package_environment(label, compiler, host, pkg, cabal, project, work
     created = installed - environments
     assert len(created) == 1, "Cabal did not write a separate " + label + " package environment"
     environment = created.pop()
-    assert environment.name.endswith("-profiling") == (label == "profile"), environment.name
-    info = dict(ast.literal_eval(run([compiler, "--info"], env=env).stdout))
-    identity = info["Target platform"]
-    if info.get("Target ABI"):
-        identity += "-" + info["Target ABI"]
+    info = read_info(compiler, env)
+    identity = info["Target name"]
+    assert environment.name == ".ghc.environment." + identity + "-" + info["Project version"], environment.name
     store = Path(store_dir) if store_dir else Path(env["CABAL_DIR"]) / "store"
     if not store.is_absolute():
         store = work / store
@@ -472,6 +803,48 @@ def check_package_environments(host, profile, host_pkg, profile_pkg, cabal, work
     assert len(set(environments)) == 2, "native and profiling package environments overlap"
 
 
+def check_cabal_alias_plans(cabal, host, profile, profile_pkg, profile_info,
+                            profile_lib, work, env, canonical_plan):
+    """Infer matching tools for each alias and preserve canonical unit IDs."""
+    expected_ids = cabal_plan_ids(canonical_plan)
+    aliases = ast.literal_eval((profile_lib.parent / "target.aliases").read_text())
+    assert aliases, "profiling target has no dispatch aliases"
+    alias = aliases[0]
+    version = run([profile, "--numeric-version"], env=env).stdout.strip()
+    entries = []
+    for label, target, suffix in (("canonical-versioned", profile_info["Target name"], "-" + version),
+                                  ("short", alias, ""),
+                                  ("short-versioned", alias, "-" + version)):
+        compiler = profile.with_name(target + "-ghc" + suffix + (".exe" if os.name == "nt" else ""))
+        pkg = profile_pkg.with_name(target + "-ghc-pkg" + suffix + (".exe" if os.name == "nt" else ""))
+        assert compiler.is_file() and pkg.is_file(), "missing " + label + " target dispatch aliases"
+        entries.append((label, compiler))
+    if os.name != "nt":
+        # An invocation symlink may live outside the installation. Its native
+        # executable still has the canonical target companions beside it.
+        external = work / "external compiler entry"
+        external.mkdir()
+        compiler = external / (alias + "-ghc")
+        compiler.symlink_to(profile)
+        entries.append(("external-short", compiler))
+    for label, compiler in entries:
+        info = dict(ast.literal_eval(run([compiler, "--info"], env=env).stdout))
+        assert info.get("Target name") == profile_info["Target name"], \
+            label + " GHC alias selected a noncanonical target"
+        assert info.get("Target ABI") == "profiling", label + " GHC alias lost the profiling ABI"
+        build_dir = work / ("build-alias-" + label)
+        options = ["--offline", "--project-file=cabal.project.profile",
+                   "--builddir=" + str(build_dir), "--with-compiler=" + str(compiler),
+                   "--with-build-compiler=" + str(host)]
+        run([cabal, "build", "all", *options, "--enable-profiling",
+             "--profiling-detail=toplevel-functions", "--library-profiling-detail=late",
+             "--dry-run"], cwd=work, env=env)
+        plan = build_dir / "cache/plan.json"
+        assert plan.is_file(), label + " Cabal dry-run did not write its install plan"
+        assert cabal_plan_ids(plan) == expected_ids, \
+            label + " target alias changed Cabal unit IDs"
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("host-ghc", "profile-ghc", "host-ghc-pkg", "profile-ghc-pkg"):
@@ -483,12 +856,16 @@ def main():
     if args.bindist:
         with tempfile.TemporaryDirectory(prefix="ghc-profile-install-") as scratch:
             work = Path(scratch)
-            extracted, installed = work / "extracted", work / "installed"
+            extracted, installed = work / "extracted", work / "installed prefix with spaces"
             extracted.mkdir()
             run(["tar", "xzf", args.bindist.absolute(), "-C", extracted])
             run(["sh", "configure", "--prefix=" + str(installed)], cwd=extracted)
             run(["make", "install"], cwd=extracted)
-            targets = list((installed / "lib/targets").glob("*-profiling"))
+            relocated = work / "relocated prefix with spaces"
+            shutil.move(installed, relocated)
+            installed = relocated
+            run(["sh", "relocate.sh"], cwd=installed)
+            targets = list((installed / "lib/targets").glob("*-prof"))
             assert len(targets) == 1, "expected exactly one profiling target"
             target = targets[0].name
             suffix = ".exe" if os.name == "nt" else ""
@@ -506,13 +883,16 @@ def main():
     host, profile = args.host_ghc.absolute(), args.profile_ghc.absolute()
     host_pkg, profile_pkg = args.host_ghc_pkg.absolute(), args.profile_ghc_pkg.absolute()
     cabal = args.cabal.absolute()
-    host_info = dict(ast.literal_eval(run([host, "--info"]).stdout))
-    profile_info = dict(ast.literal_eval(run([profile, "--info"]).stdout))
+    host_info = read_info(host)
+    profile_info = read_info(profile)
     triple = host_info["Target platform"]
     assert host_info.get("Target ABI", "") == "", "host compiler is already a target ABI"
     assert profile_info.get("Target ABI") == "profiling", "not a profiling target compiler"
     assert host_info["Target platform"] == profile_info["Target platform"], "ISA/OS changed"
-    assert host_info["Host platform"] == host_info["Target platform"], "host compiler is not native"
+    assert host_info["Target name"] == triple, "native logical target differs from machine target"
+    assert profile_info["Target name"] == triple + "-prof", "profiling logical target lost machine ABI"
+    # Native execution below tests executability; older Host platform macros
+    # may omit the environment component now retained in Target platform.
     host_lib = Path(run([host, "--print-libdir"]).stdout.strip())
     profile_lib = Path(run([profile, "--print-libdir"]).stdout.strip())
     assert host_lib != profile_lib, "target package universes overlap"
@@ -526,12 +906,18 @@ def main():
         for variable in ("GHC_PACKAGE_PATH", "GHC_ENVIRONMENT", "GHC_CHARENC"):
             env.pop(variable, None)
         (work / "home").mkdir()
+        check_target_entry_points(host, profile, host_pkg, profile_pkg, host_info, profile_info, env)
+        check_invalid_target_settings(host, host_pkg, host_info, work, env)
+        check_ghc_pkg_target_precedence(host_pkg, profile_info, profile_lib, env)
+        check_settings_info_invariants(profile, profile_lib, host_pkg, host_lib, work, env)
         check_bundled_ffi(profile_pkg, profile_lib, env)
         for pkg in (host_pkg, profile_pkg):
             run([pkg, "recache", "--user"], env=env)
         native_db = run([host_pkg, "list", "--user"], env=env).stdout.splitlines()[0]
         target_db = run([profile_pkg, "list", "--user"], env=env).stdout.splitlines()[0]
-        assert native_db != target_db and "-profiling" in target_db, "user package databases overlap"
+        assert native_db != target_db, "user package databases overlap"
+        assert host_info["Target name"] + "-" + host_info["Project version"] in native_db, native_db
+        assert profile_info["Target name"] + "-" + profile_info["Project version"] in target_db, target_db
         check_host_dynamic_th(host, host_info, work, env)
 
         # A source module must have ordinary names and the profiling RTS ABI.
@@ -558,19 +944,32 @@ def main():
         program_name = profile.stem if suffix else profile.name
         runghc = profile.with_name(program_name.removesuffix("ghc") + "runghc" + suffix)
         assert run([runghc, "Direct.lhs"], cwd=work, env=env).stdout.strip() == "1"
+        host_program_name = host.stem if suffix else host.name
+        host_runghc = host.with_name(host_program_name.removesuffix("ghc") + "runghc" + suffix)
+        assert run([host_runghc, "Direct.lhs"], cwd=work, env=env).stdout.strip() == "0"
+        aliases = ast.literal_eval((profile_lib.parent / "target.aliases").read_text())
+        compiler_version = run([profile, "--numeric-version"], env=env).stdout.strip()
+        for alias_name in (aliases[0] + "-runghc",
+                           aliases[0] + "-runghc-" + compiler_version):
+            alias_runghc = profile.with_name(alias_name + suffix)
+            assert alias_runghc.is_file(), "missing runghc dispatch alias " + str(alias_runghc)
+            assert run([alias_runghc, "Direct.lhs"], cwd=work, env=env).stdout.strip() == "1"
         check_native_interface(host, profile, work, env)
         check_caf_instrumentation(profile, work, env)
 
         fixture(work)
-        for label, compiler, pkg, project in (
-            ("native", host, host_pkg, "cabal.project"),
-            ("profile", profile, profile_pkg, "cabal.project.profile"),
+        check_package_tool_mismatch(host, profile, host_pkg, cabal, work, env)
+        # Inference must preserve target dispatch even though both compiler
+        # names resolve to the same executable. Explicit pairing is covered by
+        # the package-environment workflow and the wrong-tool rejection above.
+        for label, compiler, project in (
+            ("native", host, "cabal.project"),
+            ("profile", profile, "cabal.project.profile"),
         ):
             options = ["--offline", "--project-file=" + project,
                        "--builddir=" + str(work / "build"),
                        "--with-compiler=" + str(compiler),
-                       "--with-build-compiler=" + str(host),
-                       "--with-hc-pkg=" + str(pkg)]
+                       "--with-build-compiler=" + str(host)]
             command = [cabal]
             if label == "native":
                 legacy = run([*command, "build", "all", *options, "--enable-profiling", "--dry-run"],
@@ -583,17 +982,55 @@ def main():
             runtime = [binary, "+RTS", "-p"] if label == "profile" else [binary]
             assert run(runtime, cwd=work, env=env).stdout.strip() == "42"
             if label == "profile":
-                component_log = work / "build/logs/host" / (triple + "-profiling") / "abi-workflow-0"
+                component_log = work / "build/logs/host" / profile_info["Target name"] / "abi-workflow-0"
                 component_log.unlink(missing_ok=True)
                 instrumented = run([*command, "build", "all", *options, "-v2", "--enable-profiling",
                                     "--profiling-detail=toplevel-functions",
                                     "--library-profiling-detail=late"], cwd=work, env=env)
+                check_cabal_alias_plans(cabal, host, profile, profile_pkg, profile_info,
+                                        profile_lib, work, env,
+                                        work / "build/cache/plan.json")
                 command_output = instrumented.stdout + instrumented.stderr
                 if component_log.exists():
                     command_output += component_log.read_text()
                 compiler_commands = [line.replace("\\", "/") for line in
                                      command_output.splitlines()
                                      if "--make" in line]
+                cc_command = profile_info.get("C compiler command", "")
+                cxx_command = profile_info.get("C++ compiler command", "")
+                cc_program = command_program_name(cc_command)
+                cxx_program = command_program_name(cxx_command)
+                c_commands = [line for line in command_output.splitlines()
+                              if "profiling.c" in line and
+                              command_program_name(line) == cc_program]
+                cxx_commands = [line for line in command_output.splitlines()
+                                if "profiling-cxx.cpp" in line and
+                                command_program_name(line) == cxx_program]
+                link_commands = [line for line in command_output.splitlines()
+                                 if "-o" in line and "abi-workflow" in line and
+                                 command_program_name(line) == cc_program]
+                assert c_commands, "profile GHC -v log omitted the C compiler command"
+                assert cxx_commands, "profile GHC -v log omitted the C++ compiler command"
+                assert link_commands, "profile GHC -v log omitted the linker command"
+                llvm_target = profile_info["LLVM target"]
+                configured_tools = (
+                    ("C", c_commands, ("C compiler flags",)),
+                    ("C++", cxx_commands, ("C++ compiler flags",)),
+                    ("link", link_commands, ("C compiler flags", "C compiler link flags")),
+                )
+                for tool, lines, setting_keys in configured_tools:
+                    expected_machine, _ = command_target_selectors(" ".join(
+                        profile_info.get(key, "") for key in setting_keys))
+                    for line in lines:
+                        tokens = shlex.split(line)
+                        actual_machine, actual_llvm = command_target_selectors(line)
+                        assert "-prof" not in tokens and all(
+                            not target.endswith("-prof") for target in actual_machine | actual_llvm), \
+                            "logical -prof target leaked into tool command: " + line
+                        assert expected_machine == actual_machine, \
+                            tool + " command target selectors differ from configured flags: " + line
+                        assert all(target == llvm_target for target in actual_llvm), \
+                            "LLVM command selected a target different from LLVM target: " + line
                 library_commands = [line for line in compiler_commands
                                     if "-this-unit-id" in line and "AbiLibrary" in line]
                 executable_commands = [line for line in compiler_commands if "exe/Main.hs" in line]
@@ -607,14 +1044,15 @@ def main():
         report = (work / "abi-workflow.prof").read_text()
         assert "COST CENTRE" in report and "Main" in report, "profiling report is incomplete"
         store_dirs = {path.name for path in (work / "build/store/host").iterdir()}
-        assert {triple, triple + "-profiling"} <= store_dirs, "Cabal stores overlap"
-        profile_build = work / "build/build/host" / (triple + "-profiling")
+        assert {host_info["Target name"], profile_info["Target name"]} <= store_dirs, "Cabal stores overlap"
+        profile_build = work / "build/build/host" / profile_info["Target name"]
         products = list(profile_build.rglob("*"))
         assert any(path.name == "AbiLibrary.hi" for path in products)
         check_profile_file_names(profile_build)
-        check_profile_file_names(work / "build/store/host" / (triple + "-profiling"))
+        check_profile_file_names(work / "build/store/host" / profile_info["Target name"])
         check_host_plugin(host, profile, host_pkg, host_lib, cabal, triple, work, env)
         check_package_environments(host, profile, host_pkg, profile_pkg, cabal, work, env)
+        check_profile_codegen_commands(profile, profile_info, work, env)
         check_profile_file_names(profile_lib)
     print("native host tools/plugin, profiling TH/foreign objects/C/C++/hsc2hs, ABI rejection and profiling report verified")
 

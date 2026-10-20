@@ -1970,7 +1970,7 @@ interpretPackageEnv logger dflags = do
 
     namedEnvPath :: String -> MaybeT IO FilePath
     namedEnvPath name = do
-     appdir <- versionedAppDirForABI (programName dflags) archOS (targetABI dflags)
+     appdir <- versionedAppDirForABI (programName dflags) archOS (targetABI dflags) (sTargetName (settings dflags))
      return $ appdir </> "environments" </> name
 
     probeEnvName :: String -> MaybeT IO FilePath
@@ -2007,7 +2007,7 @@ interpretPackageEnv logger dflags = do
 
     -- e.g. .ghc.environment.x86_64-linux-7.6.3
     localEnvFileName :: FilePath
-    localEnvFileName = ".ghc.environment" <.> versionedFilePathForABI archOS (targetABI dflags)
+    localEnvFileName = ".ghc.environment" <.> versionedFilePathForABI archOS (targetABI dflags) (sTargetName (settings dflags))
 
     -- Search for an env file, starting in the current dir and looking upwards.
     -- Fail if we get to the users home dir or the filesystem root. That is,

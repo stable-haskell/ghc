@@ -514,6 +514,8 @@ generateSettings settingsFile = do
         , ("unlit command", ("$topdir/../bin/" <>) <$> expr (programName (ctx { Context.package = unlit })))
         , ("cross compiling", expr $ yesNo <$> flag CrossCompiling)
         , ("target platform string", queryTarget targetPlatformTriple)
+        , ("target name", queryTarget targetPlatformTriple)
+        , ("target ABI", pure "")
         , ("target os",        queryTarget (show . archOS_OS . tgtArchOs))
         , ("target arch",      queryTarget (show . archOS_arch . tgtArchOs))
         , ("target word size", queryTarget wordSize)

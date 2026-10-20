@@ -85,6 +85,8 @@ import GHC.Iface.Errors.Ppr
 import GHC.Driver.Session.Mode
 import GHC.Driver.Session.Lint
 import GHC.Driver.Session.Units
+import GHC.TargetDispatch (resolveTargetAlias, targetNameFromProgram, stripWindowsExeExtension)
+import GHC.TargetName (targetNameString)
 
 -- Standard Haskell libraries
 import System.IO
@@ -95,7 +97,10 @@ import System.Exit
 import Control.Monad
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.Except (throwE, runExceptT)
-import Data.List ( isPrefixOf, isSuffixOf, partition, intercalate )
+import Data.List ( isPrefixOf, partition, intercalate )
+#if defined(mingw32_HOST_OS)
+import Data.List ( isSuffixOf )
+#endif
 import Prelude
 import qualified Data.List.NonEmpty as NE
 
@@ -111,6 +116,17 @@ import qualified Data.List.NonEmpty as NE
 -----------------------------------------------------------------------------
 -- GHC's command-line interface
 
+targetFromProgram :: String -> Maybe String
+targetFromProgram program0 =
+  targetNameFromProgram "ghc" cProjectVersion (stripExeExtension program0)
+
+stripExeExtension :: String -> String
+#if defined(mingw32_HOST_OS)
+stripExeExtension = stripWindowsExeExtension
+#else
+stripExeExtension program = program
+#endif
+
 main :: IO ()
 main = do
    hSetBuffering stdout LineBuffering
@@ -125,11 +141,13 @@ main = do
     -- either pass @--target=...@ to select the target, or use a symbolic
     -- or (copy of the executable) name that ends with @-ghc@. E.g.
     -- x86_64-unknown-linux-ghc would select the x86_64-unknown-linux target.
-    let (target_args, argv1) = partition ("-target=" `isPrefixOf`) argv0
-        mbTarget | not (null target_args) = Just (drop 8 (last target_args))
-                 | "-ghc" `isSuffixOf` prog0
-                 , parts <- split '-' prog0
-                 , length parts > 2 = Just (take (length prog0 - 4) prog0)
+    let isTargetArg arg = "--target=" `isPrefixOf` arg || "-target=" `isPrefixOf` arg
+        targetArgValue arg
+          | "--target=" `isPrefixOf` arg = drop 9 arg
+          | otherwise = drop 8 arg
+        (target_args, argv1) = partition isTargetArg argv0
+        mbTarget | not (null target_args) = Just (targetArgValue (last target_args))
+                 | Just target <- targetFromProgram prog0 = Just target
                  | otherwise = Nothing
 
 
@@ -141,7 +159,7 @@ main = do
         list_targets = not (null list_targets_args)
 
     -- find top directory for the given target. Or default to usual topdir.
-    targettopdir <- Just <$> do
+    (targettopdir, selectedTargetName) <- do
       topdir <- findTopDir mbMinusB
       let targets_dir = topdir </> "targets"
       -- list targets when asked
@@ -155,11 +173,13 @@ main = do
         exitSuccess
       -- otherwise select the appropriate target
       case mbTarget of
-        Nothing -> pure topdir
+        Nothing -> pure (Just topdir, Nothing)
         Just target -> do
-          let r = targets_dir </> target </> "lib"
+          canonical <- resolveTargetAlias targets_dir target >>= either
+            (throwGhcException . UsageError) pure
+          let r = targets_dir </> canonical </> "lib"
           doesDirectoryExist r >>= \case
-            True -> pure r
+            True -> pure (Just r, Just canonical)
             False -> throwGhcException (UsageError $ "Couldn't find specific target `" ++ target ++ "' in `" ++ r ++ "'")
 
     let argv2 = map (mkGeneralLocated "on the commandline") argv1''
@@ -189,6 +209,14 @@ main = do
             GHC.runGhc targettopdir $ do
 
             dflags <- GHC.getSessionDynFlags
+            case selectedTargetName of
+              Just selected -> case sTargetName (settings dflags) of
+                Just configured | targetNameString configured /= selected ->
+                  liftIO $ throwGhcException (UsageError $
+                    "Selected target directory " ++ show selected ++
+                    " contradicts settings target name " ++ show (targetNameString configured))
+                _ -> pure ()
+              Nothing -> pure ()
 
             case postStartupMode of
                 Left preLoadMode ->

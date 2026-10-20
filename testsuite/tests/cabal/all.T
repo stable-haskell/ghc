@@ -34,6 +34,7 @@ test('ghcpkg05',
 test('ghcpkg06', [extra_files(['test.pkg', 'testdup.pkg'])], makefile_test, [])
 
 test('ghcpkg07', [extra_files(['test.pkg', 'test7a.pkg', 'test7b.pkg'])], makefile_test, [])
+test('ghcpkg08', [], makefile_test, [])
 
 # Test that we *can* compile a module that also belongs to a package
 # (this was disallowed in GHC 6.4 and earlier)

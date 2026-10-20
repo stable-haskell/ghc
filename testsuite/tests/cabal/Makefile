@@ -284,6 +284,17 @@ ghcpkg07:
 	$(LOCAL_GHC_PKG07) register --force test7b.pkg 2>&1 | grep "module" || :
 	$(LOCAL_GHC_PKG07) field testpkg7b exposed-modules
 
+# An explicit unknown target must fail before even an explicit package DB is
+# initialized; --no-user-package-db must not bypass target selection.
+PKGCONF08=local08.package.conf
+ghcpkg08:
+	@rm -rf $(PKGCONF08) ghcpkg08.log
+	@if '$(GHC_PKG)' --no-user-package-db --global-package-db=$(PKGCONF08) --target=unknown-target-identity init $(PKGCONF08) >ghcpkg08.log 2>&1; then echo "ghc-pkg accepted an unknown target"; exit 1; fi
+	@grep -Eq 'Unknown target|Target directory does not exist' ghcpkg08.log
+	@test ! -e $(PKGCONF08)
+	@rm -f ghcpkg08.log
+	@echo PASS
+
 recache_reexport:
 	@rm -rf recache_reexport_db/package.cache
 	'$(GHC_PKG)' --no-user-package-db --global-package-db=recache_reexport_db recache

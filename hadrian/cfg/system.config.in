@@ -45,12 +45,14 @@ use-ghc-toolchain    = @EnableGhcToolchain@
 # Information about build, host and target systems:
 #==================================================
 
+build-platform-full    = @BuildPlatformFull@
+host-platform-full     = @HostPlatformFull@
+target-platform-full   = @TargetPlatformFull@
+
 # Q: Is the *-platform information available in the target?
 # A: Yes, it is. We pass @BuildPlatform@ and @HostPlatform@ and @TargetPlatform@ to ghc-toolchain using --target=that
 #     And we can reconstruct the platform info using targetPlatformTriple
 # Q: What is TargetPlatformFull?
-target-platform-full  = @TargetPlatformFull@
-
 cross-compiling       = @CrossCompiling@
 
 dynamic-extension     = @soext_target@

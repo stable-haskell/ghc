@@ -78,6 +78,7 @@ import GHC.Utils.CliOption
 import GHC.Utils.Fingerprint
 import GHC.Platform
 import GHC.Unit.Types
+import GHC.TargetName (TargetName)
 
 data Settings = Settings
   { sGhcNameVersion    :: {-# UNPACk #-} !GhcNameVersion
@@ -90,6 +91,7 @@ data Settings = Settings
   -- You shouldn't need to look things up in rawSettings directly.
   -- They should have their own fields instead.
   , sRawSettings       :: [(String, String)]
+  , sTargetName        :: Maybe TargetName
   }
 
 data UnitSettings = UnitSettings { unitSettings_baseUnitId :: !UnitId }

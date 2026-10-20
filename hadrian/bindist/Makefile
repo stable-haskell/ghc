@@ -118,6 +118,8 @@ lib/settings : config.mk
 	@echo ',("unlit command", "$$topdir/../bin/$(CrossCompilePrefix)unlit")' >> $@
 	@echo ',("cross compiling", "$(CrossCompiling)")' >> $@
 	@echo ',("target platform string", "$(TARGETPLATFORM)")' >> $@
+	@echo ',("target name", "$(TARGETPLATFORM)")' >> $@
+	@echo ',("target ABI", "")' >> $@
 	@echo ',("target os", "$(HaskellTargetOs)")' >> $@
 	@echo ',("target arch", "$(HaskellTargetArch)")' >> $@
 	@echo ',("target word size", "$(TargetWordSize)")' >> $@

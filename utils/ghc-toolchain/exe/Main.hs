@@ -439,7 +439,12 @@ ldOverrideWhitelist a =
 
 mkTarget :: Opts -> M Target
 mkTarget opts = do
-    normalised_triple <- normaliseTriple (fromMaybe (error "missing --triple") (optTriple opts))
+    let machineTriple = fromMaybe (error "missing --triple") (optTriple opts)
+    when ("-prof" `List.isSuffixOf` machineTriple) $
+      throwE "--triple takes a machine target; select the Haskell target ABI separately (for example, target ABI = profiling)"
+    normalised_triple <- normaliseTriple machineTriple
+    when ("-prof" `List.isSuffixOf` normalised_triple) $
+      throwE "--triple takes a machine target; select the Haskell target ABI separately (for example, target ABI = profiling)"
     -- Use Llvm target if specified, otherwise use triple as llvm target.
     -- Normalise for platform conventions (e.g. aarch64-apple-* -> arm64-apple-*).
     let tgtLlvmTarget = normaliseLlvmTarget $ fromMaybe normalised_triple (optLlvmTriple opts)
@@ -518,7 +523,8 @@ mkTarget opts = do
             compileC cc' (dir </> "test.o") prog
             return ()
 
-    let t = Target { tgtArchOs = archOs
+    let t = Target { tgtPlatformTriple = normalised_triple
+                   , tgtArchOs = archOs
                    , tgtVendor
                    , tgtLocallyExecutable = fromMaybe True (optLocallyExecutable opts)
                    , tgtCCompiler = cc
@@ -589,8 +595,8 @@ targetToSettings tgt@Target{..} =
   , ("windres command", maybe "/bin/false" prgPath tgtWindres) -- TODO: /bin/false is not available on many distributions by default, but we keep it as it were before the ghc-toolchain patch. Fix-me.
   , ("unlit command", "$topdir/../bin/unlit") -- FIXME
   , ("cross compiling", yesNo False) -- FIXME: why do we need this settings at all?
-  , ("target platform string", targetPlatformTriple tgt)
-  , ("target os",        (show $ archOS_OS tgtArchOs))
+  ] ++ targetIdentitySettings tgt ++
+  [ ("target os",        (show $ archOS_OS tgtArchOs))
   , ("target arch",      (show $ archOS_arch tgtArchOs))
   , ("target word size", wordSize)
   , ("target word big endian",       isBigEndian)

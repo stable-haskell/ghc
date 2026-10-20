@@ -20,6 +20,8 @@ import GHC.ResponseFile
 import GHC.Settings
 import GHC.SysTools.BaseDir
 import GHC.Unit.Types
+import GHC.TargetName (parseTargetName, targetNameForABI, validateTargetNameNamespace)
+import GHC.Version (cProjectVersion)
 
 import Control.Monad (when)
 import Control.Monad.Trans.Except
@@ -56,6 +58,23 @@ initSettings top_dir = do
     Just s -> pure s
     Nothing -> throwE $ SettingsError_BadData $
       "Can't parse " ++ show settingsFile
+  let identityKeys = ["target platform string", "target ABI", "target name"]
+      duplicateIdentity = [ key | key <- identityKeys
+        , length (filter ((== key) . fst) settingsList) > 1 ]
+      queryIdentityKeys = ["Target platform", "Target ABI", "Target name", "GHC Profiled"]
+      rawQueryIdentity = [ key | key <- queryIdentityKeys, any ((== key) . fst) settingsList ]
+      computedInfoKeys = ["Project version", "LibDir", "Global Package DB"]
+      rawComputedInfo = [ key | key <- computedInfoKeys, any ((== key) . fst) settingsList ]
+      hasTargetName = any ((== "target name") . fst) settingsList
+  when (not (null duplicateIdentity)) $
+    throwE $ SettingsError_BadData $ "Duplicate target identity setting in " ++ settingsFile
+      ++ ": " ++ show duplicateIdentity
+  when (not (null rawQueryIdentity)) $
+    throwE $ SettingsError_BadData $ "Reserved query identity key in raw settings file " ++ settingsFile
+      ++ ": " ++ show rawQueryIdentity
+  when (hasTargetName && not (null rawComputedInfo)) $
+    throwE $ SettingsError_BadData $ "Reserved computed info key in target settings file " ++ settingsFile
+      ++ ": " ++ show rawComputedInfo
   let mySettings = Map.fromList settingsList
       getBooleanSetting :: String -> ExceptT SettingsError m Bool
       getBooleanSetting key = either pgmError pure $
@@ -102,6 +121,20 @@ initSettings top_dir = do
     "profiling" -> pure ProfilingABI
     abi -> throwE $ SettingsError_BadData $
       "Unsupported target ABI " ++ show abi ++ " in " ++ settingsFile
+  targetName <- case Map.lookup "target name" mySettings of
+    Nothing -> pure Nothing
+    Just name -> do
+      parsed <- either (throwE . SettingsError_BadData . (\e -> "Invalid target name in " ++ settingsFile ++ ": " ++ e)) pure
+        (parseTargetName name)
+      _ <- either (throwE . SettingsError_BadData . (\e -> "Invalid target namespace in " ++ settingsFile ++ ": " ++ e)) pure
+        (validateTargetNameNamespace parsed cProjectVersion)
+      expected <- either (throwE . SettingsError_BadData . (\e -> "Invalid target identity in " ++ settingsFile ++ ": " ++ e)) pure
+        (targetNameForABI targetPlatformString (targetABIName targetABI))
+      when (parsed /= expected) $
+        throwE $ SettingsError_BadData $ "Target name " ++ show name
+          ++ " contradicts target platform " ++ show targetPlatformString
+          ++ " and target ABI " ++ show (targetABIName targetABI)
+      pure (Just parsed)
   cc_prog <- getToolSetting "C compiler command"
   cxx_prog <- getToolSetting "C++ compiler command"
   cc_args0 <- getFlagsSetting "C compiler flags"
@@ -300,6 +333,7 @@ initSettings top_dir = do
       }
 
     , sRawSettings    = settingsList
+    , sTargetName     = targetName
     }
 
 getTargetPlatform

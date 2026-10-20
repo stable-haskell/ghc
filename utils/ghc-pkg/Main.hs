@@ -28,9 +28,12 @@ import qualified GHC.Unit.Database as GhcPkg
 import GHC.Unit.Database hiding (mkMungePathUrl)
 import GHC.HandleEncoding
 import GHC.BaseDir (getBaseDir)
-import GHC.Settings.Utils (getTargetArchOS, maybeReadFuzzy, getGlobalPackageDb, RawSettings)
+import GHC.Settings.Utils (getTargetArchOS, maybeReadFuzzy, getGlobalPackageDb, getRawSetting, RawSettings)
+import GHC.Platform.ArchOS (ArchOS)
 import GHC.Platform.Host (hostPlatformArchOS)
-import GHC.UniqueSubdir (uniqueSubdirWithAbi)
+import GHC.UniqueSubdir (uniqueSubdirWithAbi, uniqueSubdirForTargetName)
+import GHC.TargetName (TargetName, parseTargetName, targetNameForABI, targetNameString, validateTargetNameNamespace)
+import GHC.TargetDispatch (resolveTargetAlias, targetNameFromProgram, lastTargetName)
 import qualified GHC.Data.ShortText as ST
 import GHC.Version ( cProjectVersion )
 import qualified Distribution.Simple.PackageIndex as PackageIndex
@@ -114,6 +117,9 @@ main = do
   args <- getArgs
 
   case getOpt Permute (flags ++ deprecFlags) args of
+        (cli,_,[]) | FlagInfo `elem` cli -> do
+           pkgToolInfo cli >>= either die putStrLn
+           exitWith ExitSuccess
         (cli,_,[]) | FlagHelp `elem` cli -> do
            prog <- getProgramName
            bye (usageInfo (usageHeader prog) flags)
@@ -135,6 +141,7 @@ data Flag
   | FlagGlobal
   | FlagHelp
   | FlagVersion
+  | FlagInfo
   | FlagConfig FilePath
   | FlagGlobalConfig FilePath
   | FlagUserConfig FilePath
@@ -188,6 +195,8 @@ flags = [
         "display this help and exit",
   Option ['V'] ["version"] (NoArg FlagVersion)
         "output version information and exit",
+  Option [] ["info"] (NoArg FlagInfo)
+        "output target identity information and exit",
   Option [] ["simple-output"] (NoArg FlagSimpleOutput)
         "print output in easy-to-parse format for some commands",
   Option [] ["show-unit-ids"] (NoArg FlagShowUnitIds)
@@ -201,8 +210,41 @@ flags = [
   Option ['v'] ["verbose"] (OptArg FlagVerbosity "Verbosity")
         "verbosity level (0-2, default 1)",
   Option [] ["target"] (ReqArg FlagTarget "TARGET")
-        "run against the specified target (this has no effect if --global-package-db is specified)"
+        "select target settings; --global-package-db overrides its default package database"
   ]
+
+pkgToolInfo :: [Flag] -> IO (Either String String)
+pkgToolInfo flags = getBaseDir >>= \case
+  Nothing -> pure (Left "Cannot locate ghc-pkg installation")
+  Just root -> do
+    target <- maybe (getTarget []) (pure . Just) (lastTargetName [name | FlagTarget name <- flags])
+    selected <- case target of
+      Nothing -> pure (Right (root, Nothing))
+      Just name -> do
+        result <- resolveTargetAlias (root </> "targets") name
+        pure ((\canonical -> (root </> "targets" </> canonical </> "lib", Just canonical)) <$> result)
+    case selected of
+      Left err -> pure (Left err)
+      Right (libdir, selectedCanonical) -> do
+        let settingsFile = libdir </> "settings"
+        values <- readFromSettingsFile settingsFile $ \file settings -> do
+          archOS <- getTargetArchOS file settings
+          let abi = Map.findWithDefault "" "target ABI" settings
+          (_, _, mName) <- targetIdentity file settings archOS abi
+          case (selectedCanonical, mName) of
+            (Just canonical, Just configured)
+              | targetNameString configured /= canonical ->
+                  Left ("Selected target directory " ++ show canonical ++
+                        " contradicts settings target name " ++ show (targetNameString configured))
+            _ -> Right ()
+          name <- maybe (Left "ghc-pkg --info requires new target name settings")
+                        (Right . targetNameString) mName
+          platform <- getRawSetting file settings "target platform string"
+          globalDb <- getGlobalPackageDb file settings
+          Right [("Project version", cProjectVersion), ("Target platform", platform),
+                 ("Target name", name), ("Target ABI", abi), ("LibDir", libdir),
+                 ("Global Package DB", globalDb)]
+        pure (show <$> values)
 
 data Verbosity = Silent | Normal | Verbose
     deriving (Show, Eq, Ord)
@@ -588,13 +630,42 @@ readFromSettingsFile settingsFile f = do
   settingsStr <- readFile settingsFile
   pure $ do
     mySettings <- case maybeReadFuzzy settingsStr of
-      Just s -> pure $ Map.fromList s
+      Just s -> do
+        let identityKeys = ["target platform string", "target ABI", "target name"]
+            duplicates = [ key | key <- identityKeys, length (filter ((== key) . fst) s) > 1 ]
+            queryIdentityKeys = ["Target platform", "Target ABI", "Target name", "GHC Profiled"]
+            rawQueryIdentity = [ key | key <- queryIdentityKeys, any ((== key) . fst) s ]
+            computedInfoKeys = ["Project version", "LibDir", "Global Package DB"]
+            rawComputedInfo = [ key | key <- computedInfoKeys, any ((== key) . fst) s ]
+            hasTargetName = any ((== "target name") . fst) s
+        if not (null duplicates)
+          then Left ("Duplicate target identity setting in " ++ show settingsFile ++ ": " ++ show duplicates)
+          else if not (null rawQueryIdentity)
+            then Left ("Reserved query identity key in raw settings file " ++ show settingsFile ++ ": " ++ show rawQueryIdentity)
+            else if hasTargetName && not (null rawComputedInfo)
+              then Left ("Reserved computed info key in target settings file " ++ show settingsFile ++ ": " ++ show rawComputedInfo)
+            else pure (Map.fromList s)
       -- It's excusable to not have a settings file (for now at
       -- least) but completely inexcusable to have a malformed one.
       Nothing -> Left $ "Can't parse settings file " ++ show settingsFile
     case f settingsFile mySettings of
       Right archOS -> Right archOS
       Left e -> Left e
+
+targetIdentity :: FilePath -> RawSettings -> ArchOS -> String
+               -> Either String (ArchOS, String, Maybe TargetName)
+targetIdentity file settings archOS abi = case Map.lookup "target name" settings of
+  Nothing -> Right (archOS, abi, Nothing)
+  Just rawName -> do
+    name <- either (\err -> Left ("Invalid target name in " ++ show file ++ ": " ++ err)) Right
+      (parseTargetName rawName)
+    _ <- either (\err -> Left ("Invalid target namespace in " ++ show file ++ ": " ++ err)) Right
+      (validateTargetNameNamespace name cProjectVersion)
+    machine <- getRawSetting file settings "target platform string"
+    expected <- targetNameForABI machine abi
+    if name == expected
+      then Right (archOS, abi, Just name)
+      else Left ("Target name " ++ show rawName ++ " contradicts target platform/ABI in " ++ show file)
 
 -- | Get the cross target.
 --
@@ -607,17 +678,53 @@ getTarget my_flags = do
       -- when no target is specified on the command line, infer it from the program name.
       -- e.g. x86_64-unknown-linux-ghc-pkg
       progN <- getProgName
-      if | "-ghc-pkg" `isSuffixOf` progN
-         , parts <- split '-' progN
-         , length parts > 3 -> pure (Just (take (length progN - 8) progN))
-         | otherwise -> pure Nothing
+      pure $ targetNameFromProgram "ghc-pkg" cProjectVersion (stripExeExtension progN)
     ts -> pure (Just (last ts))
  where
-  split :: Char -> String -> [String]
-  split c s = case rest of
-                  []     -> [chunk]
-                  _:rest' -> chunk : split c rest'
-    where (chunk, rest) = break (==c) s
+  stripExeExtension program
+#if defined(mingw32_HOST_OS)
+    | ".exe" `isSuffixOf` map toLower program = take (length program - 4) program
+#endif
+    | otherwise = program
+
+-- | Validate target metadata before any command creates or changes a package
+-- database. An old native installation without a settings file remains
+-- usable for `ghc-pkg init` during bootstrap; an explicitly selected target
+-- must always have its own settings file.
+validateSelectedInstallation :: [Flag] -> IO (Maybe FilePath)
+validateSelectedInstallation my_flags = do
+  selectedTarget <- getTarget my_flags
+  baseDir <- getBaseDir
+  selectedInstall <- case (baseDir, selectedTarget) of
+    (Just root, Nothing) -> pure (Just (root, Nothing))
+    (Just root, Just name) -> do
+      canonical <- resolveTargetAlias (root </> "targets") name >>= either die pure
+      pure (Just (root </> "targets" </> canonical </> "lib", Just canonical))
+    (Nothing, Just _) -> die "Cannot locate ghc-pkg installation for target selection"
+    (Nothing, Nothing) -> pure Nothing
+  case selectedInstall of
+    Nothing -> pure Nothing
+    Just (libdir, selectedCanonical) -> do
+      let settingsFile = libdir </> "settings"
+      exists <- doesFileExist settingsFile
+      unless exists $ when (isJust selectedTarget) $
+        die ("Settings file doesn't exist: " ++ settingsFile)
+      when exists $ do
+        valid <- readFromSettingsFile settingsFile $ \file settings -> do
+          archOS <- getTargetArchOS file settings
+          let abi = Map.findWithDefault "" "target ABI" settings
+          (_, _, mName) <- case abi of
+            "" -> targetIdentity file settings archOS abi
+            "profiling" -> targetIdentity file settings archOS abi
+            _ -> Left ("Unsupported target ABI in " ++ file ++ ": " ++ show abi)
+          case (selectedCanonical, mName) of
+            (Just canonical, Just configured)
+              | targetNameString configured /= canonical ->
+                  Left ("Selected target directory " ++ show canonical ++
+                        " contradicts settings target name " ++ show (targetNameString configured))
+            _ -> Right ()
+        either die pure valid
+      pure (Just libdir)
 
 getPkgDatabases :: Verbosity
                 -> GhcPkg.DbOpenMode mode DbModifySelector
@@ -637,6 +744,10 @@ getPkgDatabases :: Verbosity
                           -- commands that just read the DB, such as 'list'.
 
 getPkgDatabases verbosity mode use_user use_cache expand_vars my_flags = do
+  -- Validate the selected installation before package DB lookup or mutation.
+  -- In particular, --no-user-package-db must not bypass target identity checks.
+  selectedInstall <- validateSelectedInstallation my_flags
+
   -- Second we determine the location of the global package config.  On Windows,
   -- this is found relative to the ghc-pkg.exe binary, whereas on Unix the
   -- location is passed to the binary using the --global-package-db flag by the
@@ -649,10 +760,7 @@ getPkgDatabases verbosity mode use_user use_cache expand_vars my_flags = do
                  case mb_dir of
                    Nothing  -> die err_msg
                    Just dir' -> do
-                     mt <- getTarget my_flags
-                     dir <- case mt of
-                              Nothing -> pure dir'
-                              Just target -> pure (dir' </> "targets" </> target </> "lib")
+                     dir <- maybe (pure dir') pure selectedInstall
 
                      -- Look for where it is given in the settings file, if marked there.
                      let settingsFile = dir </> "settings"
@@ -692,23 +800,23 @@ getPkgDatabases verbosity mode use_user use_cache expand_vars my_flags = do
         -- See Note [Settings file] about this file, and why we need GHC to share it with us.
         let settingsFile = top_dir </> "settings"
         exists_settings_file <- doesFileExist settingsFile
-        (targetArchOS, targetAbi) <- case exists_settings_file of
+        (targetArchOS, targetAbi, targetName) <- case exists_settings_file of
           False -> do
             warn $ "WARNING: settings file doesn't exist " ++ show settingsFile
             warn "cannot know target platform so guessing target == host (native compiler)."
-            pure (hostPlatformArchOS, "")
+            pure (hostPlatformArchOS, "", Nothing)
           True ->
             readFromSettingsFile settingsFile (\file settings -> do
               archOS <- getTargetArchOS file settings
               let abi = Map.findWithDefault "" "target ABI" settings
               case abi of
-                "" -> pure (archOS, abi)
-                "profiling" -> pure (archOS, abi)
+                "" -> targetIdentity file settings archOS abi
+                "profiling" -> targetIdentity file settings archOS abi
                 _ -> Left ("Unsupported target ABI in " ++ file ++ ": " ++ show abi)) >>= \case
               Right v -> pure v
               Left e -> die e
 
-        let subdir = uniqueSubdirWithAbi targetArchOS targetAbi
+        let subdir = maybe (uniqueSubdirWithAbi targetArchOS targetAbi) uniqueSubdirForTargetName targetName
 
             getFirstSuccess :: [IO a] -> IO (Maybe a)
             getFirstSuccess [] = pure Nothing
@@ -1164,7 +1272,8 @@ adjustOldDatabasePath = (<.> "d")
 -- Creating a new package DB
 
 initPackageDB :: FilePath -> Verbosity -> [Flag] -> IO ()
-initPackageDB filename verbosity _flags = do
+initPackageDB filename verbosity flags = do
+  validateSelectedInstallation flags
   let eexist = die ("cannot create: " ++ filename ++ " already exists")
   b1 <- doesFileExist filename
   when b1 eexist

@@ -126,7 +126,8 @@ import GHC.Unit.Module
 import GHC.Unit.Module.Warnings
 import GHC.Utils.CliOption
 import GHC.SysTools.Terminal ( stderrSupportsAnsiColors )
-import GHC.UniqueSubdir (uniqueSubdir, uniqueSubdirWithAbi)
+import GHC.UniqueSubdir (uniqueSubdir, uniqueSubdirWithAbi, uniqueSubdirForTargetName)
+import GHC.TargetName (TargetName)
 import GHC.Utils.Outputable
 import GHC.Utils.Panic
 import GHC.Utils.TmpFs
@@ -187,6 +188,7 @@ data DynFlags = DynFlags {
   toolSettings      :: {-# UNPACK #-} !ToolSettings,
   platformMisc      :: {-# UNPACK #-} !PlatformMisc,
   rawSettings       :: [(String, String)],
+  targetName        :: Maybe TargetName,
   tmpDir            :: TempDir,
 
   llvmOptLevel          :: Int,         -- ^ LLVM optimisation level
@@ -716,6 +718,7 @@ defaultDynFlags mySettings =
         targetPlatform = sTargetPlatform mySettings,
         platformMisc = sPlatformMisc mySettings,
         rawSettings = sRawSettings mySettings,
+        targetName = sTargetName mySettings,
 
         tmpDir                  = panic "defaultDynFlags: uninitialized tmpDir",
 
@@ -1568,13 +1571,12 @@ globalPackageDatabasePath dflags = fileSettings_globalPackageDatabase $ fileSett
 --
 -- UNIQUE_SUBDIR is typically a combination of the target platform and GHC version
 versionedAppDir :: String -> ArchOS -> MaybeT IO FilePath
-versionedAppDir appname platform = versionedAppDirForABI appname platform DefaultABI
+versionedAppDir appname platform = versionedAppDirForABI appname platform DefaultABI Nothing
 
-versionedAppDirForABI :: String -> ArchOS -> TargetABI -> MaybeT IO FilePath
-versionedAppDirForABI appname platform abi = do
-  -- Make sure we handle the case the HOME isn't set (see #11678)
-  -- We need to fallback to the old scheme if the subdirectory exists.
-  msum $ map (checkIfExists <=< fmap (</> versionedFilePathForABI platform abi))
+versionedAppDirForABI :: String -> ArchOS -> TargetABI -> Maybe TargetName -> MaybeT IO FilePath
+versionedAppDirForABI appname platform abi targetName = do
+  -- Prefer the ~/.ghc namespace when it exists, then check XDG data storage.
+  msum $ map (checkIfExists <=< fmap (</> versionedFilePathForABI platform abi targetName))
        [ tryMaybeT $ getAppUserDataDirectory appname  -- this is ~/.ghc/
        , tryMaybeT $ getXdgDirectory XdgData appname -- this is $XDG_DATA_HOME/
        ]
@@ -1586,8 +1588,8 @@ versionedAppDirForABI appname platform abi = do
 versionedFilePath :: ArchOS -> FilePath
 versionedFilePath platform = uniqueSubdir platform
 
-versionedFilePathForABI :: ArchOS -> TargetABI -> FilePath
-versionedFilePathForABI platform = uniqueSubdirWithAbi platform . targetABIName
+versionedFilePathForABI :: ArchOS -> TargetABI -> Maybe TargetName -> FilePath
+versionedFilePathForABI platform abi = maybe (uniqueSubdirWithAbi platform (targetABIName abi)) uniqueSubdirForTargetName
 
 -- | Access the unit-id of the version of `base` which we will automatically link
 -- against.

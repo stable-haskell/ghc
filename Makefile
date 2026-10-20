@@ -192,14 +192,18 @@ STAGE2_STAMP := $(BUILD_DIR)/.stamp-stage2
 # full dependency graph in a single invocation (e.g. `make _build/dist/ghc.tar.gz`)
 # while still skipping already-completed stages.
 
-# HOST_PLATFROM is always from the bootstrap compiler
-HOST_PLATFORM := $(shell $(GHC0) --print-host-platform)
+# Bootstrap package stores use the identity reported by the bootstrap compiler.
+# Stage1's new settings retain config.sub's complete machine target, including
+# C ABI environments such as -gnu, so stage2 has its own store identity.
+HOST_PLATFORM := $(shell $(GHC0) --print-target-platform)
+BOOTSTRAP_TARGET := $(shell $(GHC0) --print-target-name 2>/dev/null || $(GHC0) --print-target-platform)
+STAGE2_PLATFORM := $(shell sh config.sub $(HOST_PLATFORM))
 
 CABAL      ?= $(BUILD_DIR)/cabal/bin/cabal$(EXE_EXT)
 
-STAGE1_PATH := $(let STAGE,stage1,$(STORE_DIR)/host/$(HOST_PLATFORM))
-STAGE2_PATH := $(let STAGE,stage2,$(STORE_DIR)/host/$(HOST_PLATFORM))
-STAGE3_TOOLS_PATH := $(BUILD_DIR)/stage3-tools/store/host/$(HOST_PLATFORM)
+STAGE1_PATH := $(let STAGE,stage1,$(STORE_DIR)/host/$(BOOTSTRAP_TARGET))
+STAGE2_PATH := $(let STAGE,stage2,$(STORE_DIR)/host/$(STAGE2_PLATFORM))
+STAGE3_TOOLS_PATH := $(BUILD_DIR)/stage3-tools/store/host/$(BOOTSTRAP_TARGET)
 
 GHC1        := $(STAGE1_PATH)/bin/ghc$(EXE_EXT)
 GHC2        := $(STAGE2_PATH)/bin/ghc$(EXE_EXT)
@@ -360,7 +364,7 @@ LIB_NAME_GLOB = $(let pkg lib,$(subst :, ,$(1)),$(pkg)-*$(if $(lib),-$(lib)))
 define DIST_COPY_EXE
 	$(call LOG,Copying executable $(1) into $(DIST_DIR)/bin)
 	@cp -a \
-		$(CURDIR)/$(STORE_DIR)/host/$(HOST_PLATFORM)/bin/$(1)$(EXE_EXT) \
+		$(CURDIR)/$(STORE_DIR)/host/$(TARGET_PLATFORM)/bin/$(1)$(EXE_EXT) \
 		$(CURDIR)/$(DIST_DIR)/bin/$(1)$(EXE_EXT)
 
 endef
@@ -618,18 +622,18 @@ $(STAGE1_STAMP): $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) cabal.project.stage1 c
 	$(STAGE1_CABAL_BUILD) $(addprefix exe:,$(STAGE1_EXECUTABLES))
 	$(call PHASE_END_OK,stage1.executables)
 
-	$(call LOG,Creating $(STORE_DIR)/host/$(HOST_PLATFORM)/lib/settings)
-	@$(STORE_DIR)/host/$(HOST_PLATFORM)/bin/ghc-toolchain-bin $(GHC_TOOLCHAIN_ARGS) --triple $(HOST_PLATFORM) --cc $(CC) --cxx $(CXX) --cc-link-opt "$(CC_LINK_OPT)" --output-settings -o $(STORE_DIR)/host/$(HOST_PLATFORM)/lib/settings
+	$(call LOG,Creating $(STAGE1_PATH)/lib/settings)
+	@$(STAGE1_PATH)/bin/ghc-toolchain-bin $(GHC_TOOLCHAIN_ARGS) --triple $(HOST_PLATFORM) --cc $(CC) --cxx $(CXX) --cc-link-opt "$(CC_LINK_OPT)" --output-settings -o $(STAGE1_PATH)/lib/settings
 ifeq ($(DYNAMIC),1)
-	$(SED) -i -e 's/"RTS ways","/"RTS ways","dyn debug_dyn thr_dyn thr_debug_dyn /' $(STORE_DIR)/host/$(HOST_PLATFORM)/lib/settings
+	$(SED) -i -e 's/"RTS ways","/"RTS ways","dyn debug_dyn thr_dyn thr_debug_dyn /' $(STAGE1_PATH)/lib/settings
 endif
 	@# Native dynamic capability settings track the DYNAMIC=0/1 build flag.
 	@# Profiling is selected only by a separate target ABI.
-	$(SED) -i -e 's/\]$$/,("target is dynamic","$(if $(filter 1,$(DYNAMIC)),YES,NO)"),("target ships dynamic libraries","$(if $(filter 1,$(DYNAMIC)),YES,NO)")]/' $(STORE_DIR)/host/$(HOST_PLATFORM)/lib/settings
+	$(SED) -i -e 's/\]$$/,("target is dynamic","$(if $(filter 1,$(DYNAMIC)),YES,NO)"),("target ships dynamic libraries","$(if $(filter 1,$(DYNAMIC)),YES,NO)")]/' $(STAGE1_PATH)/lib/settings
 
-	$(call LOG,Creating packagedb in $(STORE_DIR)/host/$(HOST_PLATFORM)/lib/package.conf.d)
-	@rm -rf $(STORE_DIR)/host/$(HOST_PLATFORM)/lib/package.conf.d
-	@$(STORE_DIR)/host/$(HOST_PLATFORM)/bin/ghc-pkg init $(STORE_DIR)/host/$(HOST_PLATFORM)/lib/package.conf.d
+	$(call LOG,Creating packagedb in $(STAGE1_PATH)/lib/package.conf.d)
+	@rm -rf $(STAGE1_PATH)/lib/package.conf.d
+	@$(STAGE1_PATH)/bin/ghc-pkg init $(STAGE1_PATH)/lib/package.conf.d
 
 	$(call LOG,Finished building $(STAGE))
 	$(call PHASE_END_OK,stage1)
@@ -737,12 +741,14 @@ STAGE2_CABAL_BUILD = \
 
 ifndef DIST_BUILD
 $(STAGE2_STAMP): STAGE=stage2
-$(STAGE2_STAMP): TARGET_PLATFORM:=$(HOST_PLATFORM)
+$(STAGE2_STAMP): TARGET_PLATFORM:=$(STAGE2_PLATFORM)
 $(STAGE2_STAMP): $(GHC1) $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) cabal.project.stage2.common cabal.project.stage2.static cabal.project.stage2.dynamic cabal.project.common | stable-cabal libraries/ghc-boot-th-next $(STAGE1_STAMP)
 	$(call PHASE_START,stage2)
 	$(call LOG,Starting build of $(STAGE))
 
 	$(call PHASE_START,stage2.rts)
+	@test "$$($(GHC1) --print-target-platform)" = "$(STAGE2_PLATFORM)" || \
+		{ echo "stage1 target settings differ from $(STAGE2_PLATFORM); rebuild stage1" >&2; exit 1; }
 	$(call LOG,Building rts)
 	$(STAGE2_CABAL_BUILD) rts
 	$(call PHASE_END_OK,stage2.rts)
@@ -772,14 +778,18 @@ $(STAGE2_STAMP): $(GHC1) $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) cabal.project.
 	$(call DIST_COPY_LIBS_CONF,$(STAGE2_LIBRARIES))
 
 	$(call LOG,Creating $(DIST_DIR)/lib/settings)
-	@cp $(STAGE1_PATH)/lib/settings $(DIST_DIR)/lib/settings
+	@$(GHC_TOOLCHAIN_BIN) $(GHC_TOOLCHAIN_ARGS) --triple $(STAGE2_PLATFORM) --cc $(CC) --cxx $(CXX) --cc-link-opt "$(CC_LINK_OPT)" --output-settings -o $(DIST_DIR)/lib/settings
+ifeq ($(DYNAMIC),1)
+	$(SED) -i -e 's/"RTS ways","/"RTS ways","dyn debug_dyn thr_dyn thr_debug_dyn /' $(DIST_DIR)/lib/settings
+endif
+	$(SED) -i -e 's/\]$$/,("target is dynamic","$(if $(filter 1,$(DYNAMIC)),YES,NO)"),("target ships dynamic libraries","$(if $(filter 1,$(DYNAMIC)),YES,NO)")]/' $(DIST_DIR)/lib/settings
 
 	$(call LOG,Creating $(DIST_DIR)/lib/template-hsc.h)
 	@cp $(STAGE2_PATH)/lib/hsc2hs-*-hsc2hs/share/template-hsc.h $(DIST_DIR)/lib/template-hsc.h
 
 	# set rpath
 	@for binary in $(DIST_DIR)/bin/* ; do \
-		$(call SET_RPATH,../lib/$(HOST_PLATFORM),$${binary}) ; \
+		$(call SET_RPATH,../lib/$(STAGE2_PLATFORM),$${binary}) ; \
 	done
 ifeq ($(DYNAMIC),1)
 ifneq ($(UNAME), Darwin)
@@ -808,7 +818,7 @@ endif
 
 	# Copy stage1 tools needed for cross-compilation from dist
 	$(call LOG,Copying cross-compilation tools to $(DIST_DIR)/bin)
-	@cp -fp $(STAGE1_PATH)/bin/ghc-toolchain-bin $(DIST_DIR)/bin/ghc-toolchain-bin
+	@cp -fp $(GHC_TOOLCHAIN_BIN) $(DIST_DIR)/bin/ghc-toolchain-bin
 	@cp -fp $(STAGE1_PATH)/bin/deriveConstants $(DIST_DIR)/bin/deriveConstants
 	@cp -fp $(STAGE1_PATH)/bin/genapply $(DIST_DIR)/bin/genapply
 	# genprimopcode: compiler/Setup.hs resolves it from PATH; the stage3 cabal
@@ -844,18 +854,18 @@ endif # DIST_BUILD (stage2)
 # |____/ \__\__,_|\__, |\___| |____/
 #                 |___/
 
-# these are GHC names
-# TODO: x86_64-musl-linux -> x86_64-unknown-linux-musl
+# Canonical machine targets retain the C ABI environment. The former musl
+# spelling remains an explicit installation alias, never the package identity.
 STAGE3_PLATFORMS := \
-	x86_64-musl-linux \
+	x86_64-unknown-linux-musl \
 	javascript-unknown-ghcjs \
 	wasm32-unknown-wasi
 
 # A profiling target has the host's ISA and OS, but a separate Haskell ABI.
 # The dispatch name identifies its package universe; it is not a C triple.
-PROFILING_TARGET := $(HOST_PLATFORM)-profiling
+PROFILING_TARGET := $(STAGE2_PLATFORM)-prof
 STAGE3_$(PROFILING_TARGET)_STAGE = stage3-profile
-STAGE3_$(PROFILING_TARGET)_TRIPLE = $(HOST_PLATFORM)
+STAGE3_$(PROFILING_TARGET)_TRIPLE = $(STAGE2_PLATFORM)
 STAGE3_$(PROFILING_TARGET)_ABI = profiling
 STAGE3_$(PROFILING_TARGET)_CC = $(CC)
 STAGE3_$(PROFILING_TARGET)_CXX = $(CXX)
@@ -931,16 +941,17 @@ STAGE3_LIBRARIES = \
 # library selection, such as the same-ISA profiling target on Windows.
 STAGE3_LIBRARIES_FOR = $(if $(STAGE3_$(1)_LIBRARIES),$(STAGE3_$(1)_LIBRARIES),$(STAGE3_LIBRARIES))
 
-STAGE3_x86_64-musl-linux_AR                 = x86_64-unknown-linux-musl-ar
-STAGE3_x86_64-musl-linux_CC                 = x86_64-unknown-linux-musl-gcc
-STAGE3_x86_64-musl-linux_CC_OPTS            =
-STAGE3_x86_64-musl-linux_CXX                = x86_64-unknown-linux-musl-g++
-STAGE3_x86_64-musl-linux_CXX_OPTS           =
-STAGE3_x86_64-musl-linux_EXTRA_INCLUDE_DIRS =
-STAGE3_x86_64-musl-linux_EXTRA_LIB_DIRS     =
-STAGE3_x86_64-musl-linux_LD                 = x86_64-unknown-linux-musl-ld
-STAGE3_x86_64-musl-linux_RANLIB             = x86_64-unknown-linux-musl-ranlib
-STAGE3_x86_64-musl-linux_GHC_TOOLCHAIN_ARGS = $(GHC_TOOLCHAIN_ARGS)
+STAGE3_x86_64-unknown-linux-musl_AR                 = x86_64-unknown-linux-musl-ar
+STAGE3_x86_64-unknown-linux-musl_CC                 = x86_64-unknown-linux-musl-gcc
+STAGE3_x86_64-unknown-linux-musl_CC_OPTS            =
+STAGE3_x86_64-unknown-linux-musl_CXX                = x86_64-unknown-linux-musl-g++
+STAGE3_x86_64-unknown-linux-musl_CXX_OPTS           =
+STAGE3_x86_64-unknown-linux-musl_EXTRA_INCLUDE_DIRS =
+STAGE3_x86_64-unknown-linux-musl_EXTRA_LIB_DIRS     =
+STAGE3_x86_64-unknown-linux-musl_LD                 = x86_64-unknown-linux-musl-ld
+STAGE3_x86_64-unknown-linux-musl_RANLIB             = x86_64-unknown-linux-musl-ranlib
+STAGE3_x86_64-unknown-linux-musl_GHC_TOOLCHAIN_ARGS = $(GHC_TOOLCHAIN_ARGS)
+STAGE3_x86_64-unknown-linux-musl_ALIASES = x86_64-musl-linux
 
 STAGE3_javascript-unknown-ghcjs_AR                 = emar
 STAGE3_javascript-unknown-ghcjs_CC                 = emcc
@@ -962,6 +973,7 @@ STAGE3_javascript-unknown-ghcjs_GHC_TOOLCHAIN_ARGS = $(GHC_TOOLCHAIN_ARGS) --dis
 # settings are NO, so Cabal selects ordinary JS library builds.
 STAGE3_javascript-unknown-ghcjs_TARGET_IS_DYNAMIC      = NO
 STAGE3_javascript-unknown-ghcjs_TARGET_SHIPS_DYN_LIBS  = NO
+STAGE3_javascript-unknown-ghcjs_EXECUTABLES = $(filter-out ghc-iserv,$(STAGE3_EXECUTABLES))
 
 STAGE3_wasm32-unknown-wasi_CC                 = wasm32-unknown-wasi-clang
 STAGE3_wasm32-unknown-wasi_CC_OPTS            = -fno-strict-aliasing -Wno-error=int-conversion -Oz -msimd128 -mnontrapping-fptoint -msign-ext -mbulk-memory -mmutable-globals -mmultivalue -mreference-types
@@ -1072,7 +1084,18 @@ endif
 	@# The profiling ABI uses ordinary library/interface names in its separate
 	@# package universe. It never adds a profiling filename way.
 	@# `$$$$` survives both template and recipe expansion as sed's `$` anchor.
-	$(SED) -i -e 's/\]$$$$/,("target is dynamic","$(if $(STAGE3_$(1)_TARGET_IS_DYNAMIC),$(STAGE3_$(1)_TARGET_IS_DYNAMIC),YES)"),("target ships dynamic libraries","$(if $(STAGE3_$(1)_TARGET_SHIPS_DYN_LIBS),$(STAGE3_$(1)_TARGET_SHIPS_DYN_LIBS),YES)"),("target ABI","$(STAGE3_$(1)_ABI)")]/' $$(TARGET_DIR)/lib/settings
+	$(SED) -i \
+		-e 's/"target name","[^"]*"/"target name","$(1)"/' \
+		-e 's/"target ABI","[^"]*"/"target ABI","$(STAGE3_$(1)_ABI)"/' \
+		-e 's/\]$$$$/,("target is dynamic","$(if $(STAGE3_$(1)_TARGET_IS_DYNAMIC),$(STAGE3_$(1)_TARGET_IS_DYNAMIC),YES)"),("target ships dynamic libraries","$(if $(STAGE3_$(1)_TARGET_SHIPS_DYN_LIBS),$(STAGE3_$(1)_TARGET_SHIPS_DYN_LIBS),YES)")]/' $$(TARGET_DIR)/lib/settings
+
+	$$(PYTHON) mk/target-aliases.py \
+		--target-directory "$$(TARGET_DIR)" --bin-directory "$$(DIST_DIR)/bin" \
+		--machine-target "$(if $(STAGE3_$(1)_TRIPLE),$(STAGE3_$(1)_TRIPLE),$(1))" \
+		--abi "$(STAGE3_$(1)_ABI)" --version "$$$$($$(DIST_DIR)/bin/ghc --numeric-version)" \
+		--exe-extension "$$(EXE_EXT)" \
+		$(foreach alias,$(STAGE3_$(1)_ALIASES),--alias "$(alias)") \
+		$(foreach exe,$(if $(STAGE3_$(1)_EXECUTABLES),$(STAGE3_$(1)_EXECUTABLES),$(STAGE3_EXECUTABLES)),--program "$(exe)")
 
 	$$(DIST_DIR)/bin/$(1)-ghc --info
 
@@ -1120,20 +1143,20 @@ $(DIST_DIR)/ghc-$(1).tar.gz: stage3-$(1)
 	# becomes a real file (a copy of the native binary, which detects its
 	# invocation name to configure for the target).
 	#
-	# wasm only — lib/$(HOST_PLATFORM): when stage2 is built DYNAMIC=1
+	# wasm only — lib/$(STAGE2_PLATFORM): when stage2 is built DYNAMIC=1
 	# (which is required for stage3's build-side happy-lib/alex to find
 	# native Prelude.dyn_hi when shared:True applies project-wide), the
 	# stage2 bin/ghc that gets symlinked-then-dereferenced as
 	# bin/wasm32-unknown-wasi-ghc is dyn-linked against libHS*.so files
-	# under lib/$(HOST_PLATFORM)/. The binary's @rpath is set to
-	# `$$ORIGIN/../lib/$(HOST_PLATFORM)` during stage2 packaging, so
+	# under lib/$(STAGE2_PLATFORM)/. The binary's @rpath is set to
+	# `$$ORIGIN/../lib/$(STAGE2_PLATFORM)` during stage2 packaging, so
 	# the libs need to ship in the wasm bindist at that path or the
 	# binary fails to load with dyld errors on end-user install.
 	tar czhf $$@ \
 		--directory=$$(DIST_DIR) \
-		$(foreach exe,$(STAGE3_EXECUTABLES),bin/$(1)-$(exe)$(EXE_EXT)) \
+		--files-from=$$(CURDIR)/$$(DIST_DIR)/lib/targets/$(1)/target.executables \
 		lib/targets/$(1) \
-		$(if $(filter wasm32-unknown-wasi,$(1)),lib/$(HOST_PLATFORM)) \
+		$(if $(filter wasm32-unknown-wasi,$(1)),lib/$(STAGE2_PLATFORM)) \
 		$(if $(filter wasm32-unknown-wasi,$(1)),relocate.sh configure Makefile)
 	@echo "::endgroup::"
 endif
@@ -1182,14 +1205,20 @@ stage3-wasm32-unknown-wasi-additional-files:
 	@chmod +x $(DIST_DIR)/configure
 	@cp -f mk/wasm-bindist-Makefile $(DIST_DIR)/Makefile
 
-stage3-x86_64-musl-linux-additional-files: STAGE=stage3
-stage3-x86_64-musl-linux-additional-files: TARGET_PLATFORM=x86_64-musl-linux
-stage3-x86_64-musl-linux-additional-files:
+stage3-x86_64-unknown-linux-musl-additional-files: STAGE=stage3
+stage3-x86_64-unknown-linux-musl-additional-files: TARGET_PLATFORM=x86_64-unknown-linux-musl
+stage3-x86_64-unknown-linux-musl-additional-files:
 	$(call LOG,No additional files to be copied)
 
 
 $(foreach platform,$(STAGE3_PLATFORMS),$(eval $(call stage3,$(platform))))
 $(eval $(call stage3,$(PROFILING_TARGET)))
+
+.PHONY: stage3-x86_64-musl-linux test-target-aliases
+stage3-x86_64-musl-linux: stage3-x86_64-unknown-linux-musl
+
+test-target-aliases: ## Check target alias manifests and archive entry points
+	$(PYTHON) mk/test-target-aliases.py
 
 .PHONY: stage3-profile stage3-$(PROFILING_TARGET)-additional-files
 stage3-profile: stage3-$(PROFILING_TARGET) ## Build the native profiling ABI and its separate package universe
@@ -1226,9 +1255,9 @@ $(DIST_DIR)/ghc-profile.tar.gz: stage3-profile
 		--directory=$(DIST_DIR) \
 		$(foreach exe,$(STAGE2_EXECUTABLES),bin/$(exe)$(EXE_EXT)) \
 		$(if $(filter 1,$(DYNAMIC)),bin/ghc-iserv-dyn$(EXE_EXT)) \
-		$(foreach exe,$(STAGE3_$(PROFILING_TARGET)_EXECUTABLES),bin/$(PROFILING_TARGET)-$(exe)$(EXE_EXT)) \
+		--files-from=$(CURDIR)/$(DIST_DIR)/lib/targets/$(PROFILING_TARGET)/target.executables \
 		lib/ghc-usage.txt lib/ghci-usage.txt lib/template-hsc.h \
-		lib/package.conf.d lib/settings lib/$(HOST_PLATFORM) \
+		lib/package.conf.d lib/settings lib/$(STAGE2_PLATFORM) \
 		lib/targets/$(PROFILING_TARGET) \
 		relocate.sh configure Makefile
 
@@ -1250,7 +1279,7 @@ $(DIST_DIR)/ghc.tar.gz: $(STAGE2_STAMP)
 		lib/package.conf.d \
 		lib/settings \
 		lib/template-hsc.h \
-		lib/$(HOST_PLATFORM)
+		lib/$(STAGE2_PLATFORM)
 	@echo "::endgroup::"
 
 $(DIST_DIR)/cabal.tar.gz: | stable-cabal
@@ -1274,14 +1303,14 @@ $(DIST_DIR)/haskell-toolchain.tar.gz: $(STAGE2_STAMP) | stable-cabal stage3-java
 		lib/package.conf.d \
 		lib/settings \
 		lib/template-hsc.h \
-		lib/$(HOST_PLATFORM) \
-		$(foreach exe,$(STAGE3_EXECUTABLES),bin/javascript-unknown-ghcjs-$(exe)$(EXE_EXT)) \
+		lib/$(STAGE2_PLATFORM) \
+		--files-from=$(CURDIR)/$(DIST_DIR)/lib/targets/javascript-unknown-ghcjs/target.executables \
 		lib/targets/javascript-unknown-ghcjs \
 		bin/cabal
 	@echo "::endgroup::"
 
 # Multi-target GHC bindist:
-#   native (lib/$(HOST_PLATFORM)) + wasm32-unknown-wasi + javascript-unknown-ghcjs
+#   native (lib/$(STAGE2_PLATFORM)) + wasm32-unknown-wasi + javascript-unknown-ghcjs
 #
 # The stage2 native ghc binary dispatches via argv[0]: invoking
 # bin/wasm32-unknown-wasi-ghc reads lib/targets/wasm32-unknown-wasi/lib/settings,
@@ -1307,14 +1336,14 @@ $(DIST_DIR)/ghc-multi-target.tar.gz: | stage3-wasm32-unknown-wasi stage3-javascr
 	tar czhf $@ \
 		--directory=$(DIST_DIR) \
 		$(foreach exe,$(STAGE2_EXECUTABLES),bin/$(exe)$(EXE_EXT)) \
-		$(foreach exe,$(STAGE3_EXECUTABLES),bin/wasm32-unknown-wasi-$(exe)$(EXE_EXT)) \
-		$(foreach exe,$(filter-out ghc-iserv,$(STAGE3_EXECUTABLES)),bin/javascript-unknown-ghcjs-$(exe)$(EXE_EXT)) \
+		--files-from=$(CURDIR)/$(DIST_DIR)/lib/targets/wasm32-unknown-wasi/target.executables \
+		--files-from=$(CURDIR)/$(DIST_DIR)/lib/targets/javascript-unknown-ghcjs/target.executables \
 		lib/ghc-usage.txt \
 		lib/ghci-usage.txt \
 		lib/package.conf.d \
 		lib/settings \
 		lib/template-hsc.h \
-		lib/$(HOST_PLATFORM) \
+		lib/$(STAGE2_PLATFORM) \
 		lib/targets/wasm32-unknown-wasi \
 		lib/targets/javascript-unknown-ghcjs \
 		relocate.sh configure Makefile

@@ -276,6 +276,7 @@ import GHC.Utils.Fingerprint
 import GHC.Utils.Outputable
 import GHC.Utils.Error (emptyDiagOpts, logInfo)
 import GHC.Settings
+import GHC.TargetName (targetNameString)
 import GHC.CmmToAsm.CFG.Weight
 import GHC.Core.Opt.CallerCC
 import GHC.Parser (parseIdentifier)
@@ -412,6 +413,7 @@ settings dflags = Settings
   , sToolSettings = toolSettings dflags
   , sPlatformMisc = platformMisc dflags
   , sRawSettings = rawSettings dflags
+  , sTargetName = targetName dflags
   }
 
 pgm_L                 :: DynFlags -> String
@@ -3557,7 +3559,8 @@ compilerInfo dflags
       -- in the settings file (as "lookup" uses the first match for the
       -- key)
     : map (fmap $ expandDirectories (topDir dflags) (toolDir dflags))
-          (rawSettings dflags)
+          (filter (\(key, _) -> key `notElem` reservedRawInfoKeys)
+            (rawSettings dflags))
    ++ [("Project version",             projectVersion dflags),
        ("Edition",                     "Stable Haskell"),
        ("Project Git commit id",       cProjectGitCommitId),
@@ -3571,7 +3574,8 @@ compilerInfo dflags
        ("Stage",                       cStage),
        ("Build platform",              cBuildPlatformString),
        ("Host platform",               cHostPlatformString),
-       ("Target platform",             platformMisc_targetPlatformString $ platformMisc dflags),
+       ("Target platform",             platformMisc_targetPlatformString $ platformMisc dflags)
+      ] ++ maybe [] (\name -> [("Target name", targetNameString name)]) (sTargetName (settings dflags)) ++ [
        ("target os string",            stringEncodeOS (platformOS (targetPlatform dflags))),
        ("target arch string",          stringEncodeArch (platformArch (targetPlatform dflags))),
        ("target word size in bits",    show (platformWordSizeInBits (targetPlatform dflags))),
@@ -3635,6 +3639,11 @@ compilerInfo dflags
        ("Global Package DB",           globalPackageDatabasePath dflags)
       ]
   where
+    reservedRawInfoKeys =
+      ["Target platform", "Target name", "Target ABI", "GHC Profiled"] ++
+      case sTargetName (settings dflags) of
+        Nothing -> []
+        Just _  -> ["Project version", "LibDir", "Global Package DB"]
     showBool True  = "YES"
     showBool False = "NO"
     platform  = targetPlatform dflags

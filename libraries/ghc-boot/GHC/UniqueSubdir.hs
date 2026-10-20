@@ -1,6 +1,7 @@
 module GHC.UniqueSubdir
   ( uniqueSubdir
   , uniqueSubdirWithAbi
+  , uniqueSubdirForTargetName
   ) where
 
 import Prelude -- See Note [Why do we import Prelude here?]
@@ -9,6 +10,7 @@ import Data.List (intercalate)
 
 import GHC.Platform.ArchOS
 import GHC.Version (cProjectVersion)
+import GHC.TargetName (TargetName, targetNameNamespace)
 
 -- | A filepath like @x86_64-linux-7.6.3@ with the platform string to use when
 -- constructing platform-version-dependent files that need to co-exist.
@@ -28,3 +30,7 @@ uniqueSubdirWithAbi :: ArchOS -> String -> FilePath
 uniqueSubdirWithAbi platform abi = uniqueSubdir platform ++ case abi of
   "" -> ""
   _ -> "-" ++ abi
+
+-- | Namespace selected by the lossless target identity protocol.
+uniqueSubdirForTargetName :: TargetName -> FilePath
+uniqueSubdirForTargetName name = targetNameNamespace name cProjectVersion
