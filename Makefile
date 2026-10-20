@@ -1251,7 +1251,7 @@ $(DIST_DIR)/ghc-profile.tar.gz: stage3-profile
 	@cp -f mk/multi-target-configure.sh $(DIST_DIR)/configure
 	@chmod +x $(DIST_DIR)/configure
 	@cp -f mk/multi-target-bindist-Makefile $(DIST_DIR)/Makefile
-	tar czhf $@ \
+	tar czf $@ \
 		--directory=$(DIST_DIR) \
 		$(foreach exe,$(STAGE2_EXECUTABLES),bin/$(exe)$(EXE_EXT)) \
 		$(if $(filter 1,$(DYNAMIC)),bin/ghc-iserv-dyn$(EXE_EXT)) \
