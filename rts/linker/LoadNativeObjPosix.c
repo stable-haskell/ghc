@@ -76,7 +76,7 @@ static void copyErrmsg(char** errmsg_dest, char* errmsg) {
 }
 
 void freeNativeCode_POSIX (ObjectCode *nc) {
-  ASSERT_LOCK_HELD(&linker_mutex);
+  ll_assert_lock_held(&linker_mutex);
 
   dlclose(nc->dlopen_handle);
 
@@ -114,7 +114,7 @@ void * loadNativeObj_POSIX (pathchar *path, char **errmsg)
    ObjectCode* nc;
    void *hdl, *retval;
 
-   ASSERT_LOCK_HELD(&linker_mutex);
+   ll_assert_lock_held(&linker_mutex);
 
    LL_IF_DEBUG(linker, LL_DEBUG("loadNativeObj_POSIX %" PATH_FMT "\n", path));
 

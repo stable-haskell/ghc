@@ -207,10 +207,8 @@ extern void iconv(void);
  */
 StrHashTable *symhash;
 
-#if defined(THREADED_RTS)
-/* This protects all the Linker's global state */
-Mutex linker_mutex;
-#endif
+/* This protects all the Linker's global state in every RTS way. */
+ll_mutex linker_mutex;
 
 uint8_t object_code_mark_bit = 0;
 
@@ -514,9 +512,7 @@ initLinker_ (int retain_cafs)
         ll_host.init_unload_check(ll_host.ctx);
     }
 
-#if defined(THREADED_RTS)
-    initMutex(&linker_mutex);
-#endif
+    ll_mutex_init(&linker_mutex);
 
     symhash = allocStrHashTable();
 
@@ -567,9 +563,7 @@ exitLinker( void ) {
            ll_host.exit_unload_check(ll_host.ctx);
        }
    }
-#if defined(THREADED_RTS)
-   closeMutex(&linker_mutex);
-#endif
+   ll_mutex_close(&linker_mutex);
 }
 
 /* -----------------------------------------------------------------------------
@@ -617,7 +611,7 @@ internal_dlsym(const char *symbol) {
     void *v;
 
     // concurrent dl* calls may alter dlerror
-    ASSERT_LOCK_HELD(&linker_mutex);
+    ll_assert_lock_held(&linker_mutex);
 
     // clears dlerror
     dlerror();
@@ -681,7 +675,7 @@ internal_dlsym(const char *symbol) {
 
 void *lookupSymbolInNativeObj(void *handle, const char *symbol_name)
 {
-    ACQUIRE_LOCK(&linker_mutex);
+    ll_lock(&linker_mutex);
 
 #if defined(OBJFORMAT_MACHO)
     // The Mach-O standard says ccall symbols representing a function are prefixed with _
@@ -700,7 +694,7 @@ void *lookupSymbolInNativeObj(void *handle, const char *symbol_name)
     LL_FATAL("lookupSymbolInNativeObj: Unsupported platform");
 #endif
 
-    RELEASE_LOCK(&linker_mutex);
+    ll_unlock(&linker_mutex);
     return result;
 }
 
@@ -806,7 +800,7 @@ HsInt insertSymbol(pathchar* obj_name, SymbolName* key, SymbolAddr* data)
 #if defined(OBJFORMAT_PEi386)
 SymbolAddr* lookupDependentSymbol (SymbolName* lbl, ObjectCode *dependent, SymType *type)
 {
-    ASSERT_LOCK_HELD(&linker_mutex);
+    ll_assert_lock_held(&linker_mutex);
     return lookupSymbol_PEi386(lbl, dependent, type);
 }
 
@@ -814,7 +808,7 @@ SymbolAddr* lookupDependentSymbol (SymbolName* lbl, ObjectCode *dependent, SymTy
 
 SymbolAddr* lookupDependentSymbol (SymbolName* lbl, ObjectCode *dependent, SymType *type)
 {
-    ASSERT_LOCK_HELD(&linker_mutex);
+    ll_assert_lock_held(&linker_mutex);
     LL_IF_DEBUG(linker_verbose, LL_DEBUG("lookupSymbol: looking up '%s'\n", lbl));
 
     ASSERT(symhash != NULL);
@@ -985,7 +979,7 @@ printLoadedObjects(void) {
 
 SymbolAddr* lookupSymbol( SymbolName* lbl )
 {
-    ACQUIRE_LOCK(&linker_mutex);
+    ll_lock(&linker_mutex);
     // NULL for "don't add dependent". When adding a dependency we call
     // lookupDependentSymbol directly.
     SymbolAddr* r = lookupDependentSymbol(lbl, NULL, NULL);
@@ -1009,7 +1003,7 @@ SymbolAddr* lookupSymbol( SymbolName* lbl )
     if (!runPendingInitializers()) {
         LL_LOG_ERROR("lookupSymbol: Failed to run initializers.");
     }
-    RELEASE_LOCK(&linker_mutex);
+    ll_unlock(&linker_mutex);
     return r;
 }
 
@@ -1154,9 +1148,9 @@ void freeObjectCode (ObjectCode *oc)
 
     if (oc->type == DYNAMIC_OBJECT) {
 #if defined(OBJFORMAT_ELF) || defined(darwin_HOST_OS)
-        ACQUIRE_LOCK(&linker_mutex);
+        ll_lock(&linker_mutex);
         freeNativeCode_POSIX(oc);
-        RELEASE_LOCK(&linker_mutex);
+        ll_unlock(&linker_mutex);
 #else
         LL_FATAL("freeObjectCode: This shouldn't happen");
 #endif
@@ -1515,9 +1509,9 @@ static HsInt loadObj_ (pathchar *path)
 
 HsInt loadObj (pathchar *path)
 {
-   ACQUIRE_LOCK(&linker_mutex);
+   ll_lock(&linker_mutex);
    HsInt r = loadObj_(path);
-   RELEASE_LOCK(&linker_mutex);
+   ll_unlock(&linker_mutex);
    return r;
 }
 
@@ -1760,9 +1754,9 @@ static HsInt resolveObjs_ (void)
 
 HsInt resolveObjs (void)
 {
-    ACQUIRE_LOCK(&linker_mutex);
+    ll_lock(&linker_mutex);
     HsInt r = resolveObjs_();
-    RELEASE_LOCK(&linker_mutex);
+    ll_unlock(&linker_mutex);
     return r;
 }
 
@@ -1817,17 +1811,17 @@ static HsInt unloadObj_ (pathchar *path, bool just_purge)
 
 HsInt unloadObj (pathchar *path)
 {
-    ACQUIRE_LOCK(&linker_mutex);
+    ll_lock(&linker_mutex);
     HsInt r = unloadObj_(path, false);
-    RELEASE_LOCK(&linker_mutex);
+    ll_unlock(&linker_mutex);
     return r;
 }
 
 HsInt purgeObj (pathchar *path)
 {
-    ACQUIRE_LOCK(&linker_mutex);
+    ll_lock(&linker_mutex);
     HsInt r = unloadObj_(path, true);
-    RELEASE_LOCK(&linker_mutex);
+    ll_unlock(&linker_mutex);
     return r;
 }
 
@@ -1851,9 +1845,9 @@ OStatus getObjectLoadStatus_ (pathchar *path)
 
 OStatus getObjectLoadStatus (pathchar *path)
 {
-    ACQUIRE_LOCK(&linker_mutex);
+    ll_lock(&linker_mutex);
     OStatus r = getObjectLoadStatus_(path);
-    RELEASE_LOCK(&linker_mutex);
+    ll_unlock(&linker_mutex);
     return r;
 }
 
@@ -1888,7 +1882,7 @@ addSection (Section *s, SectionKind kind, SectionAlloc alloc,
 void * loadNativeObj (pathchar *path, char **errmsg)
 {
    LL_IF_DEBUG(linker, LL_DEBUG("loadNativeObj: path = '%" PATH_FMT "'\n", path));
-   ACQUIRE_LOCK(&linker_mutex);
+   ll_lock(&linker_mutex);
 
 #if defined(OBJFORMAT_ELF) || defined(OBJFORMAT_MACHO)
    void *r = loadNativeObj_POSIX(path, errmsg);
@@ -1909,7 +1903,7 @@ void * loadNativeObj (pathchar *path, char **errmsg)
    }
 #endif
 
-   RELEASE_LOCK(&linker_mutex);
+   ll_unlock(&linker_mutex);
    return r;
 }
 
@@ -1954,9 +1948,9 @@ static HsInt unloadNativeObj_(void *handle)
 }
 
 HsInt unloadNativeObj(void *handle) {
-  ACQUIRE_LOCK(&linker_mutex);
+  ll_lock(&linker_mutex);
   HsInt r = unloadNativeObj_(handle);
-  RELEASE_LOCK(&linker_mutex);
+  ll_unlock(&linker_mutex);
   return r;
 }
 

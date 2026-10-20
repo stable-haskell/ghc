@@ -138,6 +138,7 @@ extra-source-files:
     LinkerGlue.h
     linker/ll_compat.h
     linker/ll_host.h
+    linker/ll_mutex.h
     linker/CacheFlush.h
     linker/elf_compat.h
     linker/elf_got.h
@@ -429,6 +430,7 @@ common rts-c-sources-base
                Linker.c
                LinkerGlue.c
                linker/ll_host.c
+               linker/ll_mutex.c
                ReportMemoryMap.c
                Messages.c
                OldARMAtomic.c

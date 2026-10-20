@@ -2257,7 +2257,7 @@ void * loadNativeObjFromLinkerScript_ELF(char **errmsg)
    int result;
    void* r = NULL;
 
-   ASSERT_LOCK_HELD(&linker_mutex);
+   ll_assert_lock_held(&linker_mutex);
 
    // see if the error message is due to an invalid ELF header
    LL_IF_DEBUG(linker, LL_DEBUG("errmsg = '%s'\n", *errmsg));

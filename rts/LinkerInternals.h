@@ -12,6 +12,7 @@
 #include "RtsSymbols.h"
 #include "Hash.h"
 #include "linker/ll_compat.h"
+#include "linker/ll_mutex.h"
 #include "linker/M32Alloc.h"
 #include "linker/ProddableBlocks.h"
 
@@ -398,9 +399,7 @@ extern Elf_Word shndx_table_uninit_label;
                ##__VA_ARGS__)
 
 
-#if defined(THREADED_RTS)
-extern Mutex linker_mutex;
-#endif /* THREADED_RTS */
+extern ll_mutex linker_mutex;
 
 /* Type of an initializer */
 typedef void (*init_t) (int argc, char **argv, char **env);

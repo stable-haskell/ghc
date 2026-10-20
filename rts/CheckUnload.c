@@ -372,7 +372,7 @@ static bool markObjectLive(void *data STG_UNUSED, StgWord key, const void *value
         return true; // for hash table iteration
     }
 
-    ACQUIRE_LOCK(&linker_mutex);
+    ll_lock(&linker_mutex);
     // Remove from 'old_objects' list
     if (oc->prev != NULL) {
         // TODO(osa): Maybe 'prev' should be a pointer to the referencing
@@ -392,7 +392,7 @@ static bool markObjectLive(void *data STG_UNUSED, StgWord key, const void *value
         objects->prev = oc;
     }
     objects = oc;
-    RELEASE_LOCK(&linker_mutex);
+    ll_unlock(&linker_mutex);
 
     // Mark its dependencies
     iterHashTable(oc->dependencies, NULL, markObjectLive);

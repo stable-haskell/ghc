@@ -722,9 +722,9 @@ fail:
 
 HsInt loadArchive (pathchar *path)
 {
-   ACQUIRE_LOCK(&linker_mutex);
+   ll_lock(&linker_mutex);
    HsInt r = loadArchive_(path);
-   RELEASE_LOCK(&linker_mutex);
+   ll_unlock(&linker_mutex);
    return r;
 }
 
