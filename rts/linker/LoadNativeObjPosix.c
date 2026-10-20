@@ -116,7 +116,7 @@ void * loadNativeObj_POSIX (pathchar *path, char **errmsg)
 
    ASSERT_LOCK_HELD(&linker_mutex);
 
-   IF_DEBUG(linker, debugBelch("loadNativeObj_POSIX %" PATH_FMT "\n", path));
+   LL_IF_DEBUG(linker, LL_DEBUG("loadNativeObj_POSIX %" PATH_FMT "\n", path));
 
    retval = NULL;
 
@@ -168,8 +168,8 @@ try_again:
 
    const int dlopen_mode = load_now ? RTLD_NOW : RTLD_LAZY;
 
-   IF_DEBUG(linker, debugBelch("loadNativeObj: about to dlopen %" PATH_FMT "\n", path));
-   IF_DEBUG(linker, debugBelch("loadNativeObj: mode = %s|RTLD_LOCAL\n",
+   LL_IF_DEBUG(linker, LL_DEBUG("loadNativeObj: about to dlopen %" PATH_FMT "\n", path));
+   LL_IF_DEBUG(linker, LL_DEBUG("loadNativeObj: mode = %s|RTLD_LOCAL\n",
               load_now ? "RTLD_NOW" : "RTLD_LAZY"));
 
    hdl = dlopen(path, dlopen_mode|RTLD_LOCAL); /* see Note [RTLD_LOCAL] */
@@ -179,11 +179,11 @@ try_again:
    // Save dlerror immediately - it can only be retrieved once
    const char *dl_err = hdl ? NULL : dlerror();
 
-   IF_DEBUG(linker,
+   LL_IF_DEBUG(linker,
        if (hdl) {
-           debugBelch("loadNativeObj: dlopen succeeded, handle=%p\n", hdl);
+           LL_DEBUG("loadNativeObj: dlopen succeeded, handle=%p\n", hdl);
        } else {
-           debugBelch("loadNativeObj: dlopen failed: %s\n", dl_err ? dl_err : "(unknown)");
+           LL_DEBUG("loadNativeObj: dlopen failed: %s\n", dl_err ? dl_err : "(unknown)");
        }
    );
 
@@ -260,7 +260,7 @@ dlinfo_fail:
 dlopen_fail:
 success:
 
-   IF_DEBUG(linker, debugBelch("loadNativeObj_POSIX result=%p\n", retval));
+   LL_IF_DEBUG(linker, LL_DEBUG("loadNativeObj_POSIX result=%p\n", retval));
 
    return retval;
 }

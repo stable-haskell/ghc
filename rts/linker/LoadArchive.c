@@ -27,11 +27,11 @@
 #include <fs_rts.h>
 
 #define FAIL(...) do {\
-   errorBelch("loadArchive: "__VA_ARGS__); \
+   LL_LOG_ERROR("loadArchive: "__VA_ARGS__); \
    goto fail;\
 } while (0)
 
-#define DEBUG_LOG(...) IF_DEBUG(linker, debugBelch("loadArchive: " __VA_ARGS__))
+#define DEBUG_LOG(...) LL_IF_DEBUG(linker, LL_DEBUG("loadArchive: " __VA_ARGS__))
 
 
 #if defined(darwin_HOST_OS) || defined(ios_HOST_OS)
@@ -67,7 +67,7 @@ static bool loadFatArchive(char input[static 20], FILE* f, pathchar* path)
         /* search for the right arch */
         int n = fread(tmp, 1, 12, f);
         if (n != 12) {
-            errorBelch("Failed reading arch from `%" PATH_FMT "'", path);
+            LL_LOG_ERROR("Failed reading arch from `%" PATH_FMT "'", path);
             return false;
         }
         cputype = read4Bytes(tmp);
@@ -79,7 +79,7 @@ static bool loadFatArchive(char input[static 20], FILE* f, pathchar* path)
         }
     }
     if (nfat_offset == 0) {
-        errorBelch("Fat archive contains %d architectures, "
+        LL_LOG_ERROR("Fat archive contains %d architectures, "
                    "but none of them are compatible with the host",
                    (int)nfat_arch);
         return false;
@@ -87,7 +87,7 @@ static bool loadFatArchive(char input[static 20], FILE* f, pathchar* path)
         /* Seek to the correct architecture */
         int n = fseek(f, nfat_offset, SEEK_SET);
         if (n != 0) {
-            errorBelch("Failed to seek to arch in `%" PATH_FMT "'", path);
+            LL_LOG_ERROR("Failed to seek to arch in `%" PATH_FMT "'", path);
             return false;
         }
 
@@ -95,13 +95,13 @@ static bool loadFatArchive(char input[static 20], FILE* f, pathchar* path)
         char tmp[20];
         n = fread(tmp, 1, 8, f);
         if (n != 8) {
-            errorBelch("Failed reading header from `%" PATH_FMT "'", path);
+            LL_LOG_ERROR("Failed reading header from `%" PATH_FMT "'", path);
             return false;
         }
 
         /* Check the magic number */
         if (strncmp(tmp, "!<arch>\n", 8) != 0) {
-            errorBelch("couldn't find archive in `%" PATH_FMT "'"
+            LL_LOG_ERROR("couldn't find archive in `%" PATH_FMT "'"
                        "at offset %d", path, nfat_offset);
             return false;
         }
@@ -177,13 +177,13 @@ static bool readThinArchiveMember(int n, int memberSize, pathchar* path,
     stgFree(dirName);
     member = pathopen(memberPath, WSTR("rb"));
     if (!member) {
-        errorBelch("loadObj: can't read thin archive `%" PATH_FMT "'",
+        LL_LOG_ERROR("loadObj: can't read thin archive `%" PATH_FMT "'",
                    memberPath);
         goto inner_fail;
     }
     n = fread(image, 1, memberSize, member);
     if (n != memberSize) {
-        errorBelch("loadArchive: error whilst reading `%s'",
+        LL_LOG_ERROR("loadArchive: error whilst reading `%s'",
                    fileName);
         goto inner_fail;
     }
@@ -204,12 +204,12 @@ static bool checkFatArchive(char magic[static 4], FILE* f, pathchar* path)
     if (read4Bytes(magic) == FAT_MAGIC)
         success = loadFatArchive(magic, f, path);
     else
-        errorBelch("loadArchive: Neither an archive, nor a fat archive: "
+        LL_LOG_ERROR("loadArchive: Neither an archive, nor a fat archive: "
                    "`%" PATH_FMT "'", path);
 #else
     (void)magic;
     (void)f;
-    errorBelch("loadArchive: Not an archive: `%" PATH_FMT "'", path);
+    LL_LOG_ERROR("loadArchive: Not an archive: `%" PATH_FMT "'", path);
 #endif
     return success;
 }
@@ -230,7 +230,7 @@ lookupGNUArchiveIndex(int gnuFileIndexSize, char **fileName_,
     char *fileName = *fileName_;
     if (isdigit(fileName[1])) {
         if (gnuFileIndex == NULL) {
-            errorBelch("loadArchive: GNU-variant filename "
+            LL_LOG_ERROR("loadArchive: GNU-variant filename "
                     "without an index while reading from `%" PATH_FMT "'",
                     path);
             return false;
@@ -244,7 +244,7 @@ lookupGNUArchiveIndex(int gnuFileIndexSize, char **fileName_,
         fileName[n] = '\0';
         n = strtol(fileName + 1, &end, 10);
         if (n < 0 || n > gnuFileIndexSize) {
-            errorBelch("loadArchive: GNU-variant filename "
+            LL_LOG_ERROR("loadArchive: GNU-variant filename "
                     "offset %d out of range [0..%d] "
                     "while reading filename from `%" PATH_FMT "'",
                     n, gnuFileIndexSize, path);
@@ -259,7 +259,7 @@ lookupGNUArchiveIndex(int gnuFileIndexSize, char **fileName_,
 #define IS_SYMBOL_DELIMITER(STR) (STR =='\n')
 #endif
         if (n != 0 && !IS_SYMBOL_DELIMITER(gnuFileIndex[n - 1])) {
-            errorBelch("loadArchive: GNU-variant filename offset "
+            LL_LOG_ERROR("loadArchive: GNU-variant filename offset "
                     "%d invalid (range [0..%d]) while reading "
                     "filename from `%" PATH_FMT "'",
                     n, gnuFileIndexSize, path);
@@ -297,7 +297,7 @@ lookupGNUArchiveIndex(int gnuFileIndexSize, char **fileName_,
         *thisFileNameSize = 0;
     }
     else {
-        errorBelch("loadArchive: invalid GNU-variant filename `%.16s' "
+        LL_LOG_ERROR("loadArchive: invalid GNU-variant filename `%.16s' "
                    "while reading filename from `%" PATH_FMT "'",
                    fileName, path);
         return false;
@@ -317,7 +317,7 @@ static bool identifyArchiveFormat(FILE *f, pathchar *path, enum ArchiveFormat *o
     char tmp[8];
     size_t n = fread(tmp, 1, 8, f);
     if (n != 8) {
-        errorBelch("loadArchive: Failed reading header from `%" PATH_FMT "'", path); \
+        LL_LOG_ERROR("loadArchive: Failed reading header from `%" PATH_FMT "'", path); \
         return false;
     }
 
@@ -387,8 +387,8 @@ HsInt loadArchive_ (pathchar *path)
     /* Check that we haven't already loaded this archive.
        Ignore requests to load multiple times */
     if (isAlreadyLoaded(path)) {
-        IF_DEBUG(linker,
-                 debugBelch("ignoring repeated load of %" PATH_FMT "\n", path));
+        LL_IF_DEBUG(linker,
+                 LL_DEBUG("ignoring repeated load of %" PATH_FMT "\n", path));
         return 1; /* success */
     }
 
@@ -488,7 +488,7 @@ HsInt loadArchive_ (pathchar *path)
                 }
                 n = fread(fileName, 1, thisFileNameSize, f);
                 if (n != thisFileNameSize) {
-                    errorBelch("Failed reading filename from `%" PATH_FMT "'",
+                    LL_LOG_ERROR("Failed reading filename from `%" PATH_FMT "'",
                                path);
                     goto fail;
                 }
@@ -498,7 +498,7 @@ HsInt loadArchive_ (pathchar *path)
                    itself. */
                 thisFileNameSize = strlen(fileName);
             } else {
-                errorBelch("BSD-variant filename size not found "
+                LL_LOG_ERROR("BSD-variant filename size not found "
                            "while reading filename from `%" PATH_FMT "'", path);
                 goto fail;
             }
