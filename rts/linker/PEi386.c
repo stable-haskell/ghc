@@ -555,7 +555,7 @@ static void addLoadedDll(LoadedDllCache *cache, const pathchar *dll_name, HINSTA
     // dll_name might be deallocated, we need to copy it to have a stable reference to the contents
     // See #26613
     size_t size = wcslen(dll_name) + 1;
-    pathchar* dll_name_copy = stgMallocBytes(size * sizeof(pathchar), "addLoadedDll");
+    pathchar* dll_name_copy = LL_MALLOC(size * sizeof(pathchar), "addLoadedDll");
     wcsncpy(dll_name_copy, dll_name, size);
     insertHashTable_(cache->hash, (StgWord) dll_name_copy, instance, hash_path);
 }
@@ -608,7 +608,7 @@ static void addDLLHandle(const pathchar* dll_name, HINSTANCE instance) {
     }
 
     OpenedDLL* o_dll;
-    o_dll           = stgMallocBytes( sizeof(OpenedDLL), "addDLLHandle" );
+    o_dll           = LL_MALLOC( sizeof(OpenedDLL), "addDLLHandle" );
     o_dll->name     = dll_name ? pathdup(dll_name) : NULL;
     o_dll->instance = instance;
     o_dll->next     = opened_dlls;
@@ -646,7 +646,7 @@ static void addDLLHandle(const pathchar* dll_name, HINSTANCE instance) {
             /* Now recursively load dependencies too.  */
             addDLLHandle(module, module_instance);
         }
-        stgFree(module);
+        LL_FREE(module);
         imports++;
     } while (imports->Name);
     LL_IF_DEBUG(linker, LL_DEBUG("done: addDLLHandle(%" PATH_FMT ")\n", dll_name));
@@ -672,7 +672,7 @@ static bool checkIfDllLoaded(HINSTANCE instance)
 void freePreloadObjectFile_PEi386(ObjectCode *oc)
 {
     if (oc->image) {
-        stgFree (oc->image);
+        LL_FREE (oc->image);
         oc->image = NULL;
     }
 
@@ -688,9 +688,9 @@ void freePreloadObjectFile_PEi386(ObjectCode *oc)
         }
 
         if (oc->info->ch_info) {
-           stgFree (oc->info->ch_info);
+           LL_FREE (oc->info->ch_info);
         }
-        stgFree (oc->info);
+        LL_FREE (oc->info);
         oc->info = NULL;
     }
 }
@@ -702,21 +702,21 @@ static void releaseOcInfo(ObjectCode* oc) {
     if (oc->info) {
         freeInitFiniList(oc->info->init);
         freeInitFiniList(oc->info->fini);
-        stgFree (oc->info->ch_info);
-        stgFree (oc->info->symbols);
-        stgFree (oc->info->str_tab);
-        stgFree (oc->info);
+        LL_FREE (oc->info->ch_info);
+        LL_FREE (oc->info->symbols);
+        LL_FREE (oc->info->str_tab);
+        LL_FREE (oc->info);
         oc->info = NULL;
     }
     for (int i = 0; i < oc->n_sections; i++){
         Section *section = &oc->sections[i];
         if (section->info) {
-            stgFree (section->info->name);
+            LL_FREE (section->info->name);
             if (section->info->relocs) {
-                stgFree (section->info->relocs);
+                LL_FREE (section->info->relocs);
                 section->info->relocs = NULL;
             }
-            stgFree (section->info);
+            LL_FREE (section->info);
             section->info = NULL;
         }
     }
@@ -783,7 +783,7 @@ COFF_HEADER_INFO* getHeaderInfo ( ObjectCode* oc )
    COFF_OBJ_TYPE coff_type = getObjectType (oc->image, OC_INFORMATIVE_FILENAME(oc));
 
    COFF_HEADER_INFO* info
-     = stgMallocBytes (sizeof(COFF_HEADER_INFO), "getHeaderInfo");
+     = LL_MALLOC (sizeof(COFF_HEADER_INFO), "getHeaderInfo");
    memset (info, 0, sizeof(COFF_HEADER_INFO));
    info->type = coff_type;
    switch (coff_type)
@@ -810,7 +810,7 @@ COFF_HEADER_INFO* getHeaderInfo ( ObjectCode* oc )
         break;
        default:
         {
-         stgFree (info);
+         LL_FREE (info);
          info = NULL;
          LL_LOG_ERROR ("Unknown COFF %d type in getHeaderInfo.", coff_type);
         }
@@ -963,7 +963,7 @@ addDLL_PEi386( const pathchar *dll_name, HINSTANCE *loaded )
         extension. */
 
     size_t bufsize = pathlen(dll_name) + 10;
-    pathchar *buf = stgMallocBytes(bufsize * sizeof(wchar_t), "addDLL");
+    pathchar *buf = LL_MALLOC(bufsize * sizeof(wchar_t), "addDLL");
 
     /* These are ordered by probability of success and order we'd like them.  */
     const wchar_t *formats[] = { L"%ls.DLL", L"%ls.DRV", L"lib%ls.DLL", L"%ls" };
@@ -993,14 +993,14 @@ loaded_ok:
     if (loaded) {
         *loaded = instance;
     }
-    stgFree(buf);
+    LL_FREE(buf);
 
     return NULL;
 
 error:
-    stgFree(buf);
+    LL_FREE(buf);
 
-    char* errormsg = stgMallocBytes(sizeof(char) * 80, "addDLL_PEi386");
+    char* errormsg = LL_MALLOC(sizeof(char) * 80, "addDLL_PEi386");
     if (loaded) *loaded = NULL;
     snprintf(errormsg, 80, "addDLL: %" PATH_FMT " or dependencies not loaded. (Win32 error %lu)", dll_name, GetLastError());
     /* LoadLibrary failed; return a ptr to the error msg. */
@@ -1011,7 +1011,7 @@ pathchar* findSystemLibrary_PEi386( pathchar* dll_name )
 {
     const unsigned int init_buf_size = 1024;
     unsigned int bufsize             = init_buf_size;
-    wchar_t* result = stgMallocBytes(sizeof(wchar_t) * bufsize, "findSystemLibrary_PEi386");
+    wchar_t* result = LL_MALLOC(sizeof(wchar_t) * bufsize, "findSystemLibrary_PEi386");
     DWORD wResult   = SearchPathW(NULL, dll_name, NULL, bufsize, result, NULL);
 
     if (wResult > bufsize) {
@@ -1021,7 +1021,7 @@ pathchar* findSystemLibrary_PEi386( pathchar* dll_name )
 
 
     if (!wResult) {
-        stgFree(result);
+        LL_FREE(result);
         return NULL;
     }
 
@@ -1037,11 +1037,11 @@ HsPtr addLibrarySearchPath_PEi386(pathchar* dll_path)
     HsPtr result = AddDllDirectory(abs_path);
     if (!result) {
         LL_LOG_SYSERROR("addLibrarySearchPath: %" PATH_FMT " (Win32 error %lu)", abs_path, GetLastError());
-        stgFree(abs_path);
+        LL_FREE(abs_path);
         return NULL;
     }
 
-    stgFree(abs_path);
+    LL_FREE(abs_path);
     return result;
 }
 
@@ -1128,7 +1128,7 @@ bool checkAndLoadImportLibrary( pathchar* arch_name, char* member_name, FILE* f 
 
     LL_IF_DEBUG(linker, LL_DEBUG("loadArchive: reading %lu bytes at %ld\n", hdr.SizeOfData, ftell(f)));
 
-    image = stgMallocBytes(hdr.SizeOfData, "checkAndLoadImportLibrary(image)");
+    image = LL_MALLOC(hdr.SizeOfData, "checkAndLoadImportLibrary(image)");
     n = fread(image, 1, hdr.SizeOfData, f);
     if (n != hdr.SizeOfData) {
         LL_LOG_ERROR("loadArchive: error whilst reading `%s' header in `%" PATH_FMT "'. Did not read enough bytes.\n",
@@ -1140,13 +1140,13 @@ bool checkAndLoadImportLibrary( pathchar* arch_name, char* member_name, FILE* f 
     char* symbol  = strtok(image, "\0");
     int symLen    = strlen(symbol) + 1;
     int nameLen   = n - symLen;
-    char* dllName = stgMallocBytes(sizeof(char) * nameLen,
+    char* dllName = LL_MALLOC(sizeof(char) * nameLen,
                                    "checkAndLoadImportLibrary(dllname)");
     dllName       = strncpy(dllName, image + symLen, nameLen);
-    pathchar* dll = stgMallocBytes(sizeof(wchar_t) * nameLen,
+    pathchar* dll = LL_MALLOC(sizeof(wchar_t) * nameLen,
                                    "checkAndLoadImportLibrary(dll)");
     mbstowcs(dll, dllName, nameLen);
-    stgFree(dllName);
+    LL_FREE(dllName);
 
     LL_IF_DEBUG(linker, LL_DEBUG("loadArchive: read symbol %s from lib `%" PATH_FMT "'\n", symbol, dll));
     // We must call `addDLL_PEi386` directly rather than `addDLL` because `addDLL`
@@ -1155,18 +1155,18 @@ bool checkAndLoadImportLibrary( pathchar* arch_name, char* member_name, FILE* f 
     HINSTANCE instance;
     const char* result = addDLL_PEi386(dll, &instance);
 
-    stgFree(image);
+    LL_FREE(image);
 
     if (result != NULL) {
         LL_LOG_ERROR("Could not load `%" PATH_FMT "'. Reason: %s\n", dll, result);
         load_dll_warn = true;
 
-        stgFree(dll);
+        LL_FREE(dll);
         fseek(f, -(n + sizeof_COFF_import_Header), SEEK_CUR);
         return false;
     }
 
-    stgFree(dll);
+    LL_FREE(dll);
 
     // See Note [Windows API Set]
     // We must immediately tie the symbol to the shared library.  The easiest
@@ -1249,7 +1249,7 @@ get_sym_name ( uint8_t* name, ObjectCode* oc )
    /* The annoying case: 8 bytes.  Copy into a temporary
       (XXX which is never freed ...)
    */
-   newstr = stgMallocBytes(9, "get_sym_name");
+   newstr = LL_MALLOC(9, "get_sym_name");
    ASSERT(newstr);
    strncpy (newstr, (char*)name,8);
    newstr[8] = 0;
@@ -1271,13 +1271,13 @@ get_name_string (uint8_t* name, ObjectCode* oc)
         char* str = oc->info->str_tab + strtab_offset;
         int len   = strlen(str);
 
-        newstr = stgMallocBytes(len + 1, "cstring_from_section_symbol_name");
+        newstr = LL_MALLOC(len + 1, "cstring_from_section_symbol_name");
         strncpy(newstr, str, len + 1);
         return newstr;
     }
     else
     {
-        newstr = stgMallocBytes(9, "cstring_from_section_symbol_name");
+        newstr = LL_MALLOC(9, "cstring_from_section_symbol_name");
         ASSERT(newstr);
         strncpy(newstr,(char*)name,8);
         newstr[8] = 0;
@@ -1408,13 +1408,13 @@ ocVerifyImage_PEi386 ( ObjectCode* oc )
    /* .BSS Section is initialized in ocGetNames_PEi386
       but we need the Sections array initialized here already. */
    Section *sections;
-   sections = (Section*)stgCallocBytes(
+   sections = (Section*)LL_CALLOC(
        sizeof(Section),
        info->numberOfSections + 1, /* +1 for the global BSS section see ocGetNames_PEi386 */
        "ocVerifyImage_PEi386(sections)");
    oc->sections = sections;
    oc->n_sections = info->numberOfSections + 1;
-   oc->info       = stgCallocBytes (sizeof(struct ObjectCodeFormatInfo), 1,
+   oc->info       = LL_CALLOC (sizeof(struct ObjectCodeFormatInfo), 1,
                                     "ocVerifyImage_PEi386(info)");
    oc->info->init          = NULL;
    oc->info->fini          = NULL;
@@ -1431,13 +1431,13 @@ ocVerifyImage_PEi386 ( ObjectCode* oc )
    uint32_t s_symbols = info->numberOfSymbols * sizeof(COFF_symbol);
    uint32_t sym_size  = getSymbolSize (info);
    oc->info->symbols
-     = stgMallocBytes (s_symbols, "ocVerifyImage_PEi386(oc->info->symbols)");
+     = LL_MALLOC (s_symbols, "ocVerifyImage_PEi386(oc->info->symbols)");
    for (i = 0; i < info->numberOfSymbols; i++)
      memcpy (oc->info->symbols+i, (char*)symtab + sym_size * i, sym_size);
 
    uint32_t n_strtab = (*(uint32_t*)strtab) - PEi386_STRTAB_OFFSET;
    oc->info->str_tab
-     = stgMallocBytes (n_strtab, "ocVerifyImage_PEi386(oc->info->str_tab)");
+     = LL_MALLOC (n_strtab, "ocVerifyImage_PEi386(oc->info->str_tab)");
    memcpy (oc->info->str_tab, strtab + PEi386_STRTAB_OFFSET, n_strtab);
 
    /* Initialize the Sections */
@@ -1451,7 +1451,7 @@ ocVerifyImage_PEi386 ( ObjectCode* oc )
       /* Calculate the start of the section data.  */
       section->start = oc->image + sectab_i->PointerToRawData;
       section->size  = sectab_i->SizeOfRawData;
-      section->info  = stgCallocBytes (sizeof(struct SectionFormatInfo), 1,
+      section->info  = LL_CALLOC (sizeof(struct SectionFormatInfo), 1,
                                        "ocVerifyImage_PEi386(section.info)");
       section->info->name        = get_name_string (sectab_i->Name, oc);
       section->info->alignment   = getSectionAlignment (*section);
@@ -1481,7 +1481,7 @@ ocVerifyImage_PEi386 ( ObjectCode* oc )
       section->info->relocs   = NULL;
       if (noRelocs > 0) {
         section->info->relocs
-            = stgMallocBytes (noRelocs * sizeof (COFF_reloc),
+            = LL_MALLOC (noRelocs * sizeof (COFF_reloc),
                             "ocVerifyImage_PEi386(section->info->relocs)");
         memcpy (section->info->relocs, reltab + relocs_offset,
                 noRelocs * sizeof (COFF_reloc));
@@ -1491,7 +1491,7 @@ ocVerifyImage_PEi386 ( ObjectCode* oc )
    /* Initialize the last section's info field which contains the .bss
       section, the .info of which will be initialized by ocGetNames. Discard the
       .info that we computed above. */
-  stgFree(sections[info->numberOfSections].info);
+  LL_FREE(sections[info->numberOfSections].info);
   sections[info->numberOfSections].info = NULL;
 
    /* No further verification after this point; only debug printing.  */
@@ -1815,7 +1815,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
    /* Copy exported symbols into the ObjectCode. */
 
    oc->n_symbols = info->numberOfSymbols;
-   oc->symbols   = stgCallocBytes(sizeof(Symbol_t), oc->n_symbols,
+   oc->symbols   = LL_CALLOC(sizeof(Symbol_t), oc->n_symbols,
                                   "ocGetNames_PEi386(oc->symbols)");
 
    /* Work out the size of the global BSS section */
@@ -1854,7 +1854,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
 
    /* At this point we're done with oc->image and all relevant memory have
       been copied. Release it to free up the memory.  */
-   stgFree (oc->image);
+   LL_FREE (oc->image);
    oc->image = NULL;
 
    for (unsigned int i = 0; i < (uint32_t)oc->n_symbols; i++) {
@@ -2020,7 +2020,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
           if (!ghciInsertSymbolTable(oc->fileName, symhash, sname,
                                      addr, false, type, 0, oc)) {
              releaseOcInfo (oc);
-             stgFree (oc->image);
+             LL_FREE (oc->image);
              oc->image = NULL;
              return false;
           }
@@ -2029,7 +2029,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
           /* Don't process this oc any further. Just exit.  */
           oc->n_symbols = 0;
           oc->symbols   = NULL;
-          stgFree (oc->image);
+          LL_FREE (oc->image);
           oc->image = NULL;
           releaseOcInfo (oc);
           // There is nothing that we need to resolve in this object since we
@@ -2049,7 +2049,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
 
           pathchar* dirName = pathdir(oc->fileName);
           HsPtr token       = addLibrarySearchPath(dirName);
-          stgFree(dirName);
+          LL_FREE(dirName);
 
           sym   = &oc->info->symbols[oc->n_symbols-1];
           sname = get_sym_name (getSymShortName (info, sym), oc);
@@ -2062,12 +2062,12 @@ ocGetNames_PEi386 ( ObjectCode* oc )
           HINSTANCE dllInstance = 0;
           const char* result = addDLL_PEi386(dll, &dllInstance);
           removeLibrarySearchPath(token);
-          stgFree(dll);
+          LL_FREE(dll);
 
           if (result != NULL || dllInstance == 0) {
               LL_LOG_ERROR("Could not load `%s'. Reason: %s\n",
                          (char*)dllName, result);
-              stgFree((void*)result);
+              LL_FREE((void*)result);
               return false;
           }
 
@@ -2078,7 +2078,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
              _head_<name> when looked up. (Ugh. thanks GCC.) So correct it when
              stored so we don't have to correct it each time when retrieved.  */
           int size  = strlen(sname)+1;
-          char *tmp = stgMallocBytes(size * sizeof(char),
+          char *tmp = LL_MALLOC(size * sizeof(char),
                                      "ocGetNames_PEi386");
           strncpy (tmp, sname, size);
           char *pos = strstr(tmp, "_iname");
@@ -2095,7 +2095,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
 
           snprintf (sname, size, "_head_%s", tmp+start);
           sname[size-start]='\0';
-          stgFree(tmp);
+          LL_FREE(tmp);
           sname = strdup (sname);
           if(secNumber == IMAGE_SYM_UNDEFINED)
             type |= SYM_TYPE_HIDDEN;
@@ -2395,9 +2395,9 @@ ocResolve_PEi386 ( ObjectCode* oc )
    }
 
    // We now have no more need of info->ch_info and info->symbols.
-   stgFree(oc->info->ch_info);
+   LL_FREE(oc->info->ch_info);
    oc->info->ch_info = NULL;
-   stgFree(oc->info->symbols);
+   LL_FREE(oc->info->symbols);
    oc->info->symbols = NULL;
 
    LL_IF_DEBUG(linker, LL_DEBUG("completed %" PATH_FMT "\n", oc->fileName));
@@ -2603,7 +2603,7 @@ resolveSymbolAddr_PEi386 (pathchar* buffer, int size,
       wcscat (buffer, WSTR(" "));
       pathchar* name = mkPath (sym.Name);
       wcscat (buffer, name);
-      stgFree (name);
+      LL_FREE (name);
       if (uDisplacement != 0)
       {
         int64_t displacement = (int64_t)uDisplacement;
@@ -2652,7 +2652,7 @@ resolveSymbolAddr_PEi386 (pathchar* buffer, int size,
       HMODULE *hMods = NULL;
       DWORD cbNeeded;
       EnumProcessModules (hProcess, hMods, 0, &cbNeeded);
-      hMods = stgMallocBytes (cbNeeded, "resolveSymbolAddr_PEi386");
+      hMods = LL_MALLOC (cbNeeded, "resolveSymbolAddr_PEi386");
       if (EnumProcessModules (hProcess, hMods, cbNeeded, &cbNeeded))
       {
         uintptr_t loc = (uintptr_t)symbol;
@@ -2681,7 +2681,7 @@ resolveSymbolAddr_PEi386 (pathchar* buffer, int size,
         }
       }
 
-      stgFree(hMods);
+      LL_FREE(hMods);
     }
 
     /* Finally any file/line number.  */
@@ -2707,7 +2707,7 @@ resolveSymbolAddr_PEi386 (pathchar* buffer, int size,
     else if (obj)
     {
       /* Try to calculate from information inside the rts.  */
-      SymX* locs = stgCallocBytes (sizeof(SymX), obj->n_symbols,
+      SymX* locs = LL_CALLOC (sizeof(SymX), obj->n_symbols,
                                    "resolveSymbolAddr");
       int blanks = 0;
       for (int i = 0; i < obj->n_symbols; i++) {
@@ -2754,7 +2754,7 @@ resolveSymbolAddr_PEi386 (pathchar* buffer, int size,
                       res->name, res->loc - key);
           wcscat (buffer, s_disp);
       }
-      stgFree (locs);
+      LL_FREE (locs);
     }
 
     return buffer;

@@ -303,7 +303,7 @@ doMmap(void *map_addr, size_t bytes, int prot, uint32_t flags, int fd, int offse
     void * result = mmap(map_addr, bytes, prot, flags, fd, offset);
     if (result == MAP_FAILED) {
         LL_LOG_SYSERROR("mmap %zx bytes at %p", bytes, map_addr);
-        reportMemoryMap();
+        ll_report_mem_failure();
         LL_LOG_ERROR("Try specifying an address with +RTS -xm<addr> -RTS");
         return NULL;
     }
@@ -358,7 +358,7 @@ mmapInRegion (
         } else if (wrapped) {
             // We failed to find a suitable mapping
             munmap(result, bytes);
-            reportMemoryMap();
+            ll_report_mem_failure();
             LL_LOG_ERROR("mmapForLinker: failed to mmap() memory between %p and %p; "
                        "asked for %zu bytes at %p. "
                        "Try specifying an address with +RTS -xm<addr> -RTS",
@@ -386,7 +386,7 @@ mmapInRegion (
 void *
 mmapForLinker (size_t bytes, MemoryAccess access, uint32_t flags, int fd, int offset)
 {
-    bytes = roundUpToPage(bytes);
+    bytes = ll_round_up_to_page(bytes);
     struct MemoryRegion *region;
 
     LL_IF_DEBUG(linker_verbose, LL_DEBUG("mmapForLinker: start\n"));

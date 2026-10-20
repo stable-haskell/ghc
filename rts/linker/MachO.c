@@ -83,7 +83,7 @@ ocInit_MachO(ObjectCode * oc)
 {
     ocDeinit_MachO(oc);
 
-    oc->info = (struct ObjectCodeFormatInfo*)stgCallocBytes(
+    oc->info = (struct ObjectCodeFormatInfo*)LL_CALLOC(
                 1, sizeof *oc->info,
                 "ocInit_MachO(ObjectCodeFormatInfo)");
     oc->info->header  = (MachOHeader *) oc->image;
@@ -126,7 +126,7 @@ ocInit_MachO(ObjectCode * oc)
 
     if(NULL != oc->info->nlist) {
         oc->info->n_macho_symbols = oc->info->symCmd->nsyms;
-        oc->info->macho_symbols = (MachOSymbol*)stgCallocBytes(
+        oc->info->macho_symbols = (MachOSymbol*)LL_CALLOC(
                                     oc->info->symCmd->nsyms,
                                     sizeof(MachOSymbol),
                                     "ocInit_MachO(MachOSymbol)");
@@ -148,7 +148,7 @@ void
 ocDeinit_MachO(ObjectCode * oc) {
     if (oc->info != NULL) {
         if(oc->info->n_macho_symbols > 0) {
-            stgFree(oc->info->macho_symbols);
+            LL_FREE(oc->info->macho_symbols);
         }
 #if defined(aarch64_HOST_ARCH)
         freeGot(oc);
@@ -158,7 +158,7 @@ ocDeinit_MachO(ObjectCode * oc) {
             }
         }
 #endif
-        stgFree(oc->info);
+        LL_FREE(oc->info);
         oc->info = NULL;
     }
 }
@@ -1155,9 +1155,9 @@ ocBuildSegments_MachO(ObjectCode *oc)
         }
     }
 
-    size_compound = roundUpToPage(size_rxSegment) +
-        roundUpToPage(size_rwSegment) +
-        roundUpToPage(size_gbZerofillSegment);
+    size_compound = ll_round_up_to_page(size_rxSegment) +
+        ll_round_up_to_page(size_rwSegment) +
+        ll_round_up_to_page(size_gbZerofillSegment);
 
     if (n_rxSections > 0) {
         n_activeSegments++;
@@ -1182,7 +1182,7 @@ ocBuildSegments_MachO(ObjectCode *oc)
     if (NULL == mem) return 0;
 
     LL_IF_DEBUG(linker, LL_DEBUG("ocBuildSegments: allocating %d segments\n", n_activeSegments));
-    segments = (Segment*)stgCallocBytes(n_activeSegments, sizeof(Segment),
+    segments = (Segment*)LL_CALLOC(n_activeSegments, sizeof(Segment),
                                         "ocBuildSegments_MachO(segments)");
     curMem = mem;
 
@@ -1191,7 +1191,7 @@ ocBuildSegments_MachO(ObjectCode *oc)
         rxSegment = &segments[curSegment];
         initSegment(rxSegment,
                     curMem,
-                    roundUpToPage(size_rxSegment),
+                    ll_round_up_to_page(size_rxSegment),
                     SEGMENT_PROT_RX,
                     n_rxSections);
         LL_IF_DEBUG(linker, LL_DEBUG("ocBuildSegments_MachO: init segment %d (RX) at %p size %zu\n",
@@ -1205,7 +1205,7 @@ ocBuildSegments_MachO(ObjectCode *oc)
         rwSegment = &segments[curSegment];
         initSegment(rwSegment,
                     curMem,
-                    roundUpToPage(size_rwSegment),
+                    ll_round_up_to_page(size_rwSegment),
                     SEGMENT_PROT_RWO,
                     n_rwSections);
         LL_IF_DEBUG(linker, LL_DEBUG("ocBuildSegments_MachO: init segment %d (RWO) at %p size %zu\n",
@@ -1219,7 +1219,7 @@ ocBuildSegments_MachO(ObjectCode *oc)
         gbZerofillSegment = &segments[curSegment];
         initSegment(gbZerofillSegment,
                     curMem,
-                    roundUpToPage(size_gbZerofillSegment),
+                    ll_round_up_to_page(size_gbZerofillSegment),
                     SEGMENT_PROT_RWO,
                     n_gbZerofills);
         LL_IF_DEBUG(linker, LL_DEBUG("ocBuildSegments_MachO: init segment %d (GB_ZEROFILL) at %p size %zu\n",
@@ -1267,7 +1267,7 @@ ocGetNames_MachO(ObjectCode* oc)
     LL_IF_DEBUG(linker,LL_DEBUG("ocGetNames_MachO: %s start\n",  OC_INFORMATIVE_FILENAME(oc)));
 
     Section *secArray;
-    secArray = (Section*)stgCallocBytes(
+    secArray = (Section*)LL_CALLOC(
         oc->info->segCmd->nsects,
         sizeof(Section),
         "ocGetNames_MachO(sections)");
@@ -1341,7 +1341,7 @@ ocGetNames_MachO(ObjectCode* oc)
 
                 alloc = SECTION_MMAP;
                 mapped_offset = 0;
-                mapped_size = roundUpToPage(size+stub_space);
+                mapped_size = ll_round_up_to_page(size+stub_space);
                 start = mem;
                 mapped_start = mem;
 #else
@@ -1441,7 +1441,7 @@ ocGetNames_MachO(ObjectCode* oc)
      */
     LL_IF_DEBUG(linker, LL_DEBUG("ocGetNames_MachO: %d external symbols\n",
                                 oc->n_symbols));
-    oc->symbols = stgCallocBytes(oc->n_symbols, sizeof(Symbol_t),
+    oc->symbols = LL_CALLOC(oc->n_symbols, sizeof(Symbol_t),
                                    "ocGetNames_MachO(oc->symbols)");
 
     if (oc->info->symCmd) {
@@ -1495,7 +1495,7 @@ ocGetNames_MachO(ObjectCode* oc)
 
     /* setup the common storage */
     if (commonSize > 0) {
-        commonStorage = stgCallocBytes(1, commonSize, "ocGetNames_MachO(common symbols)");
+        commonStorage = LL_CALLOC(1, commonSize, "ocGetNames_MachO(common symbols)");
         commonCounter = (unsigned long)commonStorage;
     }
 

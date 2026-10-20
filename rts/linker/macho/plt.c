@@ -51,7 +51,7 @@ makeStub(Section * section,
           void* * addr,
           uint8_t flags) {
 
-    Stub * s = (Stub *)stgCallocBytes(sizeof(Stub), 1, "makeStub");
+    Stub * s = (Stub *)LL_CALLOC(sizeof(Stub), 1, "makeStub");
     CHECK(s != NULL);
     s->target = *addr;
     s->flags  = flags;
@@ -83,7 +83,7 @@ freeStubs(Section * section) {
     while(last->next != NULL) {
         Stub * t = last;
         last = last->next;
-        stgFree(t);
+        LL_FREE(t);
     }
     section->info->stubs = NULL;
     section->info->nstubs = 0;

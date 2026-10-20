@@ -225,9 +225,9 @@ static void ghciRemoveSymbolTable(StrHashTable *table, const SymbolName* key,
     if (!pinfo || owner != pinfo->owner) return;
     removeStrHashTable(table, key, NULL);
     if (isSymbolImport (owner, key))
-      stgFree(pinfo->value);
+      LL_FREE(pinfo->value);
 
-    stgFree(pinfo);
+    LL_FREE(pinfo);
 }
 
 static const char *
@@ -275,7 +275,7 @@ int ghciInsertSymbolTable(
    RtsSymbolInfo *pinfo = lookupStrHashTable(table, key);
    if (!pinfo) /* new entry */
    {
-      pinfo = stgMallocBytes(sizeof (*pinfo), "ghciInsertToSymbolTable");
+      pinfo = LL_MALLOC(sizeof (*pinfo), "ghciInsertToSymbolTable");
       pinfo->value = data;
       pinfo->owner = owner;
       pinfo->strength = strength;
@@ -1072,7 +1072,7 @@ static void removeOcSymbols (ObjectCode *oc)
         }
     }
 
-    stgFree(oc->symbols);
+    LL_FREE(oc->symbols);
     oc->symbols = NULL;
 }
 
@@ -1091,7 +1091,7 @@ static void freeOcStablePtrs (ObjectCode *oc)
         for (int i = 0; i < exports->n_entries; i++) {
             freeStablePtr(exports->stable_ptrs[i]);
         }
-        stgFree(exports->stable_ptrs);
+        LL_FREE(exports->stable_ptrs);
         exports->stable_ptrs = NULL;
         exports->next = NULL;
     }
@@ -1109,7 +1109,7 @@ freePreloadObjectFile (ObjectCode *oc)
         munmapForLinker(oc->image, oc->fileSize, "freePreloadObjectFile");
     }
     else {
-        stgFree(oc->image);
+        LL_FREE(oc->image);
     }
 
 #endif
@@ -1178,7 +1178,7 @@ void freeObjectCode (ObjectCode *oc)
     freePreloadObjectFile(oc);
 
     if (oc->symbols != NULL) {
-        stgFree(oc->symbols);
+        LL_FREE(oc->symbols);
         oc->symbols = NULL;
     }
 
@@ -1207,17 +1207,17 @@ void freeObjectCode (ObjectCode *oc)
                     LL_IF_DEBUG(zero_on_gc,
                         memset(oc->sections[i].start,
                             0x00, oc->sections[i].size));
-                    stgFree(oc->sections[i].start);
+                    LL_FREE(oc->sections[i].start);
                     break;
                 default:
                     break;
                 }
             }
             if (oc->sections[i].info) {
-                stgFree(oc->sections[i].info);
+                LL_FREE(oc->sections[i].info);
             }
         }
-        stgFree(oc->sections);
+        LL_FREE(oc->sections);
     }
 
     freeProddableBlocks(&oc->proddables);
@@ -1234,7 +1234,7 @@ void freeObjectCode (ObjectCode *oc)
       }
     }
     else {
-        stgFree(oc->symbol_extras);
+        LL_FREE(oc->symbol_extras);
     }
 #endif
 
@@ -1250,12 +1250,12 @@ void freeObjectCode (ObjectCode *oc)
     m32_allocator_free(oc->rw_m32);
 #endif
 
-    stgFree(oc->fileName);
-    stgFree(oc->archiveMemberName);
+    LL_FREE(oc->fileName);
+    LL_FREE(oc->archiveMemberName);
 
     freeHashSet(oc->dependencies);
 
-    stgFree(oc);
+    LL_FREE(oc);
 }
 
 ObjectCode*
@@ -1265,7 +1265,7 @@ mkOc( ObjectType type, pathchar *path, char *image, int imageSize,
 
 
    LL_IF_DEBUG(linker, LL_DEBUG("mkOc: %" PATH_FMT "\n", path));
-   oc = stgMallocBytes(sizeof(ObjectCode), "mkOc(oc)");
+   oc = LL_MALLOC(sizeof(ObjectCode), "mkOc(oc)");
 
    oc->info = NULL;
    oc->type = type;
@@ -1277,7 +1277,7 @@ mkOc( ObjectType type, pathchar *path, char *image, int imageSize,
 #  elif defined(OBJFORMAT_MACHO)
    oc->formatName = "Mach-O";
 #  else
-   stgFree(oc);
+   LL_FREE(oc);
    LL_FATAL("loadObj: not implemented on this platform");
 #  endif
 
@@ -1285,7 +1285,7 @@ mkOc( ObjectType type, pathchar *path, char *image, int imageSize,
    oc->fileName = pathdup(path);
 
    if (archiveMemberName) {
-       oc->archiveMemberName = stgMallocBytes( (pathlen(archiveMemberName)+1) * pathsize,
+       oc->archiveMemberName = LL_MALLOC( (pathlen(archiveMemberName)+1) * pathsize,
                                                "loadObj" );
        pathcopy(oc->archiveMemberName, archiveMemberName);
    } else {
@@ -1443,12 +1443,12 @@ preloadObjectFile (pathchar *path)
     // reading the file, and then we misalign image on purpose so
     // that the actual sections end up aligned again.
    misalignment = machoGetMisalignment(f);
-   image = stgMallocBytes(fileSize + misalignment, "loadObj(image)");
+   image = LL_MALLOC(fileSize + misalignment, "loadObj(image)");
    image += misalignment;
 
 # else /* !defined(darwin_HOST_OS) */
 
-   image = stgMallocBytes(fileSize, "loadObj(image)");
+   image = LL_MALLOC(fileSize, "loadObj(image)");
 
 #endif /* !defined(darwin_HOST_OS) */
 
@@ -1457,7 +1457,7 @@ preloadObjectFile (pathchar *path)
    fclose(f);
    if (n != fileSize) {
        LL_LOG_ERROR("loadObj: error whilst reading `%" PATH_FMT "'", path);
-       stgFree(image);
+       LL_FREE(image);
        return NULL;
    }
 
@@ -1881,7 +1881,7 @@ addSection (Section *s, SectionKind kind, SectionAlloc alloc,
 
    if (!s->info)
      s->info
-       = (struct SectionFormatInfo*)stgCallocBytes(1, sizeof *s->info,
+       = (struct SectionFormatInfo*)LL_CALLOC(1, sizeof *s->info,
                                             "addSection(SectionFormatInfo)");
 
    LL_IF_DEBUG(linker,
@@ -1972,7 +1972,7 @@ initSegment (Segment *s, void *start, size_t size, SegmentProt prot, int n_secti
     s->start = start;
     s->size = size;
     s->prot = prot;
-    s->sections_idx = (int *)stgCallocBytes(n_sections, sizeof(int),
+    s->sections_idx = (int *)LL_CALLOC(n_sections, sizeof(int),
                                                "initSegment(segment)");
     s->n_sections = n_sections;
 }
@@ -1988,7 +1988,7 @@ void freeSegments (ObjectCode *oc)
             LL_IF_DEBUG(linker, ocDebugBelch(oc, "freeing segment %d at %p size %zu\n",
                                           i, s->start, s->size));
 
-            stgFree(s->sections_idx);
+            LL_FREE(s->sections_idx);
             s->sections_idx = NULL;
 
             if (0 == s->size) {
@@ -1998,13 +1998,13 @@ void freeSegments (ObjectCode *oc)
 #if RTS_LINKER_USE_MMAP
                 munmapForLinker(s->start, s->size, "freeSegments");
 #else
-                stgFree(s->start);
+                LL_FREE(s->start);
 #endif
             }
             s->start = NULL;
         }
 
-        stgFree(oc->segments);
+        LL_FREE(oc->segments);
         oc->segments = NULL;
     }
 }

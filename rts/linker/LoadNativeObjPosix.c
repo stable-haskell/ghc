@@ -56,7 +56,7 @@ static int loadNativeObjCb_(struct dl_phdr_info *info,
     while (--n >= 0) {
       if (info->dlpi_phdr[n].p_type == PT_LOAD) {
         NativeCodeRange* ncr =
-          stgMallocBytes(sizeof(NativeCodeRange), "loadNativeObjCb_");
+          LL_MALLOC(sizeof(NativeCodeRange), "loadNativeObjCb_");
         ncr->start = (void*) ((char*) s->l_addr + info->dlpi_phdr[n].p_vaddr);
         ncr->end = (void*) ((char*) ncr->start + info->dlpi_phdr[n].p_memsz);
 
@@ -71,7 +71,7 @@ static int loadNativeObjCb_(struct dl_phdr_info *info,
 
 static void copyErrmsg(char** errmsg_dest, char* errmsg) {
   if (errmsg == NULL) errmsg = "loadNativeObj_POSIX: unknown error";
-  *errmsg_dest = stgMallocBytes(strlen(errmsg)+1, "loadNativeObj_POSIX");
+  *errmsg_dest = LL_MALLOC(strlen(errmsg)+1, "loadNativeObj_POSIX");
   strcpy(*errmsg_dest, errmsg);
 }
 
@@ -84,7 +84,7 @@ void freeNativeCode_POSIX (ObjectCode *nc) {
   while (ncr) {
     NativeCodeRange* last_ncr = ncr;
     ncr = ncr->next;
-    stgFree(last_ncr);
+    LL_FREE(last_ncr);
   }
 }
 

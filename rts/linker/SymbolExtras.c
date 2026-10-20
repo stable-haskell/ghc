@@ -67,7 +67,7 @@ int ocAllocateExtras(ObjectCode* oc, int count, int first, int bssSize)
       int misalignment = oc->misalignment;
 
       oc->image -= misalignment;
-      oc->image = stgReallocBytes( oc->image,
+      oc->image = LL_REALLOC( oc->image,
                                misalignment +
                                aligned + extras_size,
                                "ocAllocateExtras" );
@@ -78,10 +78,10 @@ int ocAllocateExtras(ObjectCode* oc, int count, int first, int bssSize)
       /* Keep image, bssExtras and symbol_extras contiguous */
       /* N.B. We currently can't mark symbol extras as non-executable in this
        * case. */
-      size_t n = roundUpToPage(oc->fileSize);
+      size_t n = ll_round_up_to_page(oc->fileSize);
       // round bssSize up to the nearest page size since we need to ensure that
       // symbol_extras is aligned to a page boundary so it can be mprotect'd.
-      bssSize = roundUpToPage(bssSize);
+      bssSize = ll_round_up_to_page(bssSize);
       size_t allocated_size = n + bssSize + extras_size;
       void *new = mmapAnonForLinker(allocated_size);
       if (new) {

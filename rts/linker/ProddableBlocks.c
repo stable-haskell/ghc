@@ -44,7 +44,7 @@ initProddableBlockSet ( ProddableBlockSet* set )
 void
 freeProddableBlocks (ProddableBlockSet *set)
 {
-    stgFree(set->data);
+    LL_FREE(set->data);
     set->data = NULL;
     set->size = 0;
     set->capacity = 0;
@@ -94,7 +94,7 @@ ensureCapacity(ProddableBlockSet *set, size_t new_capacity) {
         if (cap < new_capacity) {
             cap = new_capacity;
         }
-        ProddableBlock *tmp = stgReallocBytes(set->data, cap * sizeof(ProddableBlock), "addProddableBlock");
+        ProddableBlock *tmp = LL_REALLOC(set->data, cap * sizeof(ProddableBlock), "addProddableBlock");
         set->data = tmp;
         set->capacity = cap;
     }

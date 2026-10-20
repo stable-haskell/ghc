@@ -63,3 +63,34 @@ static inline _Noreturn void ll_compat_fatal(const char *fmt, ...)
 #else
 #define LL_IF_DEBUG(category, statement) do { } while (0)
 #endif
+
+/* Linker-local adapters keep allocation and memory queries on the host ABI. */
+#define LL_MALLOC(size, what) \
+    ll_host.malloc_(ll_host.ctx, (size), (what))
+#define LL_CALLOC(count, size, what) \
+    ll_host.calloc_(ll_host.ctx, (count), (size), (what))
+#define LL_REALLOC(ptr, size, what) \
+    ll_host.realloc_(ll_host.ctx, (ptr), (size), (what))
+#define LL_FREE(ptr) ll_host.free_(ll_host.ctx, (ptr))
+
+static inline size_t ll_page_size(void)
+{
+    return ll_host.page_size(ll_host.ctx);
+}
+
+static inline void ll_report_mem_failure(void)
+{
+    ll_host.on_mem_failure(ll_host.ctx);
+}
+
+static inline size_t ll_round_down_to_page(size_t x)
+{
+    size_t size = ll_page_size();
+    return (x & ~(size - 1));
+}
+
+static inline size_t ll_round_up_to_page(size_t x)
+{
+    size_t size = ll_page_size();
+    return (x + size - 1) & ~(size - 1);
+}

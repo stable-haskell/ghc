@@ -30,7 +30,7 @@ void setSymbolInfo(ObjectCode *owner, const void *label, symbolUpdater updater)
 
         if (!info)
         {
-            info = stgMallocBytes(sizeof(SymbolInfo), "setSymbolInfo");
+            info = LL_MALLOC(sizeof(SymbolInfo), "setSymbolInfo");
             info->kind = 0;
         }
 

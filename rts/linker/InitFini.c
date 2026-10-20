@@ -54,7 +54,7 @@
 // lowest-to-highest, finalizers run highest-to-lowest.
 void addInitFini(struct InitFiniList **head, Section *section, enum InitFiniKind kind, uint32_t priority)
 {
-    struct InitFiniList *slist = stgMallocBytes(sizeof(struct InitFiniList), "addInitFini");
+    struct InitFiniList *slist = LL_MALLOC(sizeof(struct InitFiniList), "addInitFini");
     slist->section = section;
     slist->kind = kind;
     slist->priority = priority;
@@ -96,7 +96,7 @@ void freeInitFiniList(struct InitFiniList *slist)
 {
     while (slist != NULL) {
         struct InitFiniList *next = slist->next;
-        stgFree(slist);
+        LL_FREE(slist);
         slist = next;
     }
 }

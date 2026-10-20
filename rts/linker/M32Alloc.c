@@ -202,7 +202,7 @@ struct m32_page_t {
 /* Consistency-checking infrastructure */
 #if defined(M32_DEBUG)
 static void ASSERT_PAGE_ALIGNED(void *page) {
-  const size_t pgsz = getPageSize();
+  const size_t pgsz = ll_page_size();
   if ((((uintptr_t) page) & (pgsz-1)) != 0) {
     LL_FATAL("m32: invalid page alignment");
   }
@@ -288,7 +288,7 @@ m32_release_page(struct m32_page_t *page)
   ASSERT_VALID_PAGE(page);
   ASSERT_PAGE_NOT_FREE(page);
 
-  const size_t pgsz = getPageSize();
+  const size_t pgsz = ll_page_size();
   ssize_t sz = page->filled_page.size;
 
   // Break the page, which may be a large multi-page allocation, into
@@ -326,11 +326,11 @@ m32_alloc_page(void)
      * Free page pool is empty; refill it with a new batch of M32_MAP_PAGES
      * pages.
      */
-    const size_t pgsz = getPageSize();
+    const size_t pgsz = ll_page_size();
     const size_t map_sz = pgsz * M32_MAP_PAGES;
     uint8_t *chunk = mmapAnonForLinker(map_sz);
     if (! is_okay_address(chunk + map_sz)) {
-      reportMemoryMap();
+      ll_report_mem_failure();
       LL_FATAL("m32_alloc_page: failed to allocate pages within 4GB of program text (got %p)", chunk);
     }
     LL_IF_DEBUG(sanity, memset(chunk, 0xaa, map_sz));
@@ -364,7 +364,7 @@ m32_allocator *
 m32_allocator_new(bool executable)
 {
   m32_allocator *alloc =
-    stgMallocBytes(sizeof(m32_allocator), "m32_new_allocator");
+    LL_MALLOC(sizeof(m32_allocator), "m32_new_allocator");
   memset(alloc, 0, sizeof(struct m32_allocator_t));
   alloc->executable = executable;
   return alloc;
@@ -400,7 +400,7 @@ void m32_allocator_free(m32_allocator *alloc)
     }
   }
 
-  stgFree(alloc);
+  LL_FREE(alloc);
 }
 
 /**
@@ -463,7 +463,7 @@ m32_allocator_flush(m32_allocator *alloc) {
 static bool
 m32_is_large_object(size_t size, size_t alignment)
 {
-   return size >= getPageSize() - ROUND_UP(sizeof(struct m32_page_t), alignment);
+   return size >= ll_page_size() - ROUND_UP(sizeof(struct m32_page_t), alignment);
 }
 
 static void
@@ -484,7 +484,7 @@ m32_report_allocation(struct m32_allocator_t *alloc STG_UNUSED, void *addr STG_U
 void *
 m32_alloc(struct m32_allocator_t *alloc, size_t size, size_t alignment)
 {
-   size_t pgsz = getPageSize();
+   size_t pgsz = ll_page_size();
 
    if (m32_is_large_object(size,alignment)) {
       // large object
@@ -496,7 +496,7 @@ m32_alloc(struct m32_allocator_t *alloc, size_t size, size_t alignment)
           LL_LOG_SYSERROR("m32_alloc: Failed to map pages for %zd bytes", size);
           return NULL;
       } else if (! is_okay_address(page)) {
-          reportMemoryMap();
+          ll_report_mem_failure();
           LL_FATAL("m32_alloc: warning: Allocation of %zd bytes resulted in pages above 4GB (%p)",
                size, page);
       }

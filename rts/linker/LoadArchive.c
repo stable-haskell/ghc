@@ -169,12 +169,12 @@ static bool readThinArchiveMember(int n, int memberSize, pathchar* path,
     /* Append the relative member name to the dirname.  This should be
      be the full path to the actual thin member. */
     int memberLen = pathlen(dirName) + 1 + strlen(fileName) + 1;
-    memberPath = stgMallocBytes(pathsize * memberLen, "loadArchive(file)");
+    memberPath = LL_MALLOC(pathsize * memberLen, "loadArchive(file)");
     objFileName = mkPath(fileName);
     pathprintf(memberPath, memberLen, WSTR("%" PATH_FMT "%" PATH_FMT), dirName,
             objFileName);
-    stgFree(objFileName);
-    stgFree(dirName);
+    LL_FREE(objFileName);
+    LL_FREE(dirName);
     member = pathopen(memberPath, WSTR("rb"));
     if (!member) {
         LL_LOG_ERROR("loadObj: can't read thin archive `%" PATH_FMT "'",
@@ -191,8 +191,8 @@ static bool readThinArchiveMember(int n, int memberSize, pathchar* path,
 
 inner_fail:
     fclose(member);
-    stgFree(memberPath);
-    stgFree(pathCopy);
+    LL_FREE(memberPath);
+    LL_FREE(pathCopy);
     return has_succeeded;
 }
 
@@ -275,7 +275,7 @@ lookupGNUArchiveIndex(int gnuFileIndexSize, char **fileName_,
             /* Double it to avoid potentially continually
              increasing it by 1 */
             *fileNameSize = FileNameSize * 2;
-            *fileName_ = fileName = stgReallocBytes(fileName, *fileNameSize,
+            *fileName_ = fileName = LL_REALLOC(fileName, *fileNameSize,
                     "loadArchive(fileName)");
         }
         memcpy(fileName, gnuFileIndex + n, FileNameSize);
@@ -396,7 +396,7 @@ HsInt loadArchive_ (pathchar *path)
     int gnuFileIndexSize = 0;
 
     size_t fileNameSize = 32;
-    char *fileName = stgMallocBytes(fileNameSize, "loadArchive(fileName)");
+    char *fileName = LL_MALLOC(fileNameSize, "loadArchive(fileName)");
 
     f = pathopen(path, WSTR("rb"));
     if (!f)
@@ -483,7 +483,7 @@ HsInt loadArchive_ (pathchar *path)
                     /* Double it to avoid potentially continually
                        increasing it by 1 */
                     fileNameSize = thisFileNameSize * 2;
-                    fileName = stgReallocBytes(fileName, fileNameSize,
+                    fileName = LL_REALLOC(fileName, fileNameSize,
                                                "loadArchive(fileName)");
                 }
                 n = fread(fileName, 1, thisFileNameSize, f);
@@ -580,13 +580,13 @@ HsInt loadArchive_ (pathchar *path)
             else {
                 /* See loadObj() */
                 misalignment = machoGetMisalignment(f);
-                image = stgMallocBytes(memberSize + misalignment,
+                image = LL_MALLOC(memberSize + misalignment,
                                         "loadArchive(image)");
                 image += misalignment;
             }
 
 #else // not darwin
-            image = stgMallocBytes(memberSize, "loadArchive(image)");
+            image = LL_MALLOC(memberSize, "loadArchive(image)");
 #endif
             if (isThin) {
                 if (!readThinArchiveMember(n, memberSize, path, fileName, image)) {
@@ -609,7 +609,7 @@ HsInt loadArchive_ (pathchar *path)
             // I don't understand why this extra +1 is needed here; pathprintf
             // should have given us the correct length but in practice it seems
             // to be one byte short on Win32.
-            pathchar *archiveMemberName = stgMallocBytes((size+1+1) * sizeof(pathchar), "loadArchive(file)");
+            pathchar *archiveMemberName = LL_MALLOC((size+1+1) * sizeof(pathchar), "loadArchive(file)");
             pathprintf(archiveMemberName, size+1, WSTR("%" PATH_FMT "(#%d:%.*s)"),
                        path, memberIdx, (int)thisFileNameSize, fileName);
 
@@ -624,10 +624,10 @@ HsInt loadArchive_ (pathchar *path)
             ocInit_ELF( oc );
 #endif
 
-            stgFree(archiveMemberName);
+            LL_FREE(archiveMemberName);
 
             if (0 == loadOc(oc)) {
-                stgFree(fileName);
+                LL_FREE(fileName);
                 fclose(f);
                 return 0;
             } else {
@@ -645,7 +645,7 @@ while reading filename from `%" PATH_FMT "'", path);
 #if RTS_LINKER_USE_MMAP
             gnuFileIndex = mmapAnonForLinker(memberSize + 1);
 #else
-            gnuFileIndex = stgMallocBytes(memberSize + 1, "loadArchive(image)");
+            gnuFileIndex = LL_MALLOC(memberSize + 1, "loadArchive(image)");
 #endif
             n = fread ( gnuFileIndex, 1, memberSize, f );
             if (n != memberSize) {
@@ -705,12 +705,12 @@ fail:
         fclose(f);
 
     if (fileName != NULL)
-        stgFree(fileName);
+        LL_FREE(fileName);
     if (gnuFileIndex != NULL) {
 #if RTS_LINKER_USE_MMAP
         munmapForLinker(gnuFileIndex, gnuFileIndexSize + 1, "loadArchive_");
 #else
-        stgFree(gnuFileIndex);
+        LL_FREE(gnuFileIndex);
 #endif
     }
 

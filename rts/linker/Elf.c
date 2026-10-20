@@ -221,7 +221,7 @@ ocInit_ELF(ObjectCode * oc)
 {
     ocDeinit_ELF(oc);
 
-    oc->info = (struct ObjectCodeFormatInfo*)stgCallocBytes(
+    oc->info = (struct ObjectCodeFormatInfo*)LL_CALLOC(
             1, sizeof *oc->info,
             "ocInit_Elf(ObjectCodeFormatInfo)");
     // TODO: fill info
@@ -242,7 +242,7 @@ ocInit_ELF(ObjectCode * oc)
     /* get the symbol table(s) */
     for(int i=0; i < oc->n_sections; i++) {
         if(SHT_REL  == oc->info->sectionHeader[i].sh_type) {
-            ElfRelocationTable *relTab = (ElfRelocationTable *)stgCallocBytes(
+            ElfRelocationTable *relTab = (ElfRelocationTable *)LL_CALLOC(
                     1, sizeof(ElfRelocationTable),
                     "ocInit_Elf(ElfRelocationTable");
             relTab->index = i;
@@ -265,7 +265,7 @@ ocInit_ELF(ObjectCode * oc)
             }
 
         } else if(SHT_RELA == oc->info->sectionHeader[i].sh_type) {
-            ElfRelocationATable *relTab = (ElfRelocationATable *)stgCallocBytes(
+            ElfRelocationATable *relTab = (ElfRelocationATable *)LL_CALLOC(
                     1, sizeof(ElfRelocationATable),
                     "ocInit_Elf(ElfRelocationTable");
             relTab->index = i;
@@ -289,7 +289,7 @@ ocInit_ELF(ObjectCode * oc)
 
         } else if(SHT_SYMTAB == oc->info->sectionHeader[i].sh_type) {
 
-            ElfSymbolTable *symTab = (ElfSymbolTable *)stgCallocBytes(
+            ElfSymbolTable *symTab = (ElfSymbolTable *)LL_CALLOC(
                     1, sizeof(ElfSymbolTable),
                     "ocInit_Elf(ElfSymbolTable");
 
@@ -301,7 +301,7 @@ ocInit_ELF(ObjectCode * oc)
                                        + oc->info->sectionHeader[i].sh_offset);
             symTab->n_symbols = oc->info->sectionHeader[i].sh_size
                                 / sizeof(Elf_Sym);
-            symTab->symbols = (ElfSymbol *)stgCallocBytes(
+            symTab->symbols = (ElfSymbol *)LL_CALLOC(
                     symTab->n_symbols, sizeof(ElfSymbol),
                     "ocInit_Elf(ElfSymbol)");
 
@@ -351,8 +351,8 @@ ocDeinit_ELF(ObjectCode * oc)
         while(last != NULL) {
             ElfSymbolTable * t = last;
             last = last->next;
-            stgFree(t->symbols);
-            stgFree(t);
+            LL_FREE(t->symbols);
+            LL_FREE(t);
         }
 
         {
@@ -360,7 +360,7 @@ ocDeinit_ELF(ObjectCode * oc)
             while (last != NULL) {
                 ElfRelocationTable *t = last;
                 last = last->next;
-                stgFree(t);
+                LL_FREE(t);
             }
         }
 
@@ -369,11 +369,11 @@ ocDeinit_ELF(ObjectCode * oc)
             while (last != NULL) {
                 ElfRelocationATable *t = last;
                 last = last->next;
-                stgFree(t);
+                LL_FREE(t);
             }
         }
 
-        stgFree(oc->info);
+        LL_FREE(oc->info);
         oc->info = NULL;
 #if defined(SHN_XINDEX)
         oc->shndx_table = SHNDX_TABLE_UNINIT;
@@ -706,8 +706,8 @@ mapObjectFileSection (int fd, Elf_Word offset, Elf_Word size,
     void *p;
     size_t pageOffset, pageSize;
 
-    pageOffset = roundDownToPage(offset);
-    pageSize = roundUpToPage(offset-pageOffset+size);
+    pageOffset = ll_round_down_to_page(offset);
+    pageSize = ll_round_up_to_page(offset-pageOffset+size);
     p = mmapForLinker(pageSize, MEM_READ_WRITE, 0, fd, pageOffset);
     if (p == NULL) return NULL;
     *mapped_size = pageSize;
@@ -735,7 +735,7 @@ ocGetNames_ELF ( ObjectCode* oc )
 
    ASSERT(symhash != NULL);
 
-   sections = (Section*)stgCallocBytes(shnum, sizeof(Section),
+   sections = (Section*)LL_CALLOC(shnum, sizeof(Section),
                                        "ocGetNames_ELF(sections)");
    oc->sections = sections;
    oc->n_sections = shnum;
@@ -848,12 +848,12 @@ ocGetNames_ELF ( ObjectCode* oc )
               }
               mapped_start = start;
               mapped_offset = 0;
-              mapped_size = roundUpToPage(size);
+              mapped_size = ll_round_up_to_page(size);
           }
           CHECK(start != 0x0);
 #else
           alloc = SECTION_MALLOC;
-          start = stgCallocBytes(1, size, "ocGetNames_ELF(BSS)");
+          start = LL_CALLOC(1, size, "ocGetNames_ELF(BSS)");
           mapped_start = start;
 #endif
          /*
@@ -913,7 +913,7 @@ ocGetNames_ELF ( ObjectCode* oc )
           // use the m32 allocator if either the image is not mapped
           // (i.e. we cannot map the sections separately), or if the section
           // size is small.
-          else if (!oc->imageMapped || size < getPageSize() / 3) {
+          else if (!oc->imageMapped || size < ll_page_size() / 3) {
               bool executable = kind == SECTIONKIND_CODE_OR_RODATA;
               m32_allocator *allocator = executable ? oc->rx_m32 : oc->rw_m32;
               // Correctly align the section. This is particularly important for
@@ -972,7 +972,7 @@ ocGetNames_ELF ( ObjectCode* oc )
           oc->n_symbols += symTab->n_symbols;
       }
 
-      oc->symbols = stgCallocBytes(oc->n_symbols, sizeof(Symbol_t),
+      oc->symbols = LL_CALLOC(oc->n_symbols, sizeof(Symbol_t),
                                    "ocGetNames_ELF(oc->symbols)");
       // Note calloc: if we fail partway through initializing symbols, we need
       // to undo the additions to the symbol table so far. We know which ones
@@ -2281,7 +2281,7 @@ void * loadNativeObjFromLinkerScript_ELF(char **errmsg)
             // success -- try to dlopen the first named file
             LL_IF_DEBUG(linker, LL_DEBUG("match%s\n",""));
             line[match[2].rm_eo] = '\0';
-            stgFree((void*)*errmsg); // Free old message before creating new one
+            LL_FREE((void*)*errmsg); // Free old message before creating new one
             r = loadNativeObj_POSIX(line+match[2].rm_so, errmsg);
             break;
          }
