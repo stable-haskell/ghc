@@ -1,6 +1,5 @@
 #pragma once
 
-#include "Rts.h"
 #include "LinkerInternals.h"
 
 #include "ll_begin_private.h"

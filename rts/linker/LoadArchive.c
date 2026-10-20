@@ -1,14 +1,9 @@
 #define LL_INTERNAL_SOURCE 1
-
-#include <Rts.h>
+#include "linker/ll_compat.h"
 
 #include "linker/ll_path.h"
 
-#include "sm/Storage.h"
-#include "sm/OSMem.h"
-#include "RtsUtils.h"
 #include "LinkerInternals.h"
-#include "CheckUnload.h" // loaded_objects, insertOCSectionIndices
 #include "linker/M32Alloc.h"
 #include "linker/MMap.h"
 
@@ -27,7 +22,7 @@
 #include <string.h>
 #include <stddef.h>
 #include <ctype.h>
-#include <fs_rts.h>
+#include "linker/ll_fs.h"
 
 #define FAIL(...) do {\
    LL_LOG_ERROR("loadArchive: "__VA_ARGS__); \
@@ -375,10 +370,10 @@ static bool identifyArchiveFormat(FILE *f, pathchar *path, enum ArchiveFormat *o
     }
 }
 
-HsInt loadArchive_ (pathchar *path)
+ll_hs_int loadArchive_ (pathchar *path)
 {
     char *image = NULL;
-    HsInt retcode = 0;
+    ll_hs_int retcode = 0;
     int memberIdx = 0;
     FILE *f = NULL;
     size_t thisFileNameSize = (size_t) -1; /* shut up bogus GCC warning */
@@ -723,10 +718,10 @@ fail:
     return retcode;
 }
 
-HsInt loadArchive (pathchar *path)
+ll_hs_int loadArchive (pathchar *path)
 {
    ll_lock(&linker_mutex);
-   HsInt r = loadArchive_(path);
+   ll_hs_int r = loadArchive_(path);
    ll_unlock(&linker_mutex);
    return r;
 }

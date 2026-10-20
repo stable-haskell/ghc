@@ -1,6 +1,5 @@
 #define LL_INTERNAL_SOURCE 1
-
-#include "Rts.h"
+#include "linker/ll_compat.h"
 
 #if defined(linux_HOST_OS) || defined(solaris2_HOST_OS) \
 || defined(linux_android_HOST_OS) \
@@ -15,23 +14,18 @@
 // const unsigned COMPAT_R_ARM_ARM32 = 0x03;
 #include "elf_compat.h"
 
-#include "RtsUtils.h"
-#include "RtsSymbolInfo.h"
-#include "CheckUnload.h"
 #include "LinkerInternals.h"
+#include "RtsSymbolInfo.h"
 #include "linker/MMap.h"
 #include "linker/Elf.h"
 #include "linker/CacheFlush.h"
 #include "linker/M32Alloc.h"
 #include "linker/SymbolExtras.h"
-#include "ForeignExports.h"
-#include "Profiling.h"
-#include "sm/OSMem.h"
 #include "linker/util.h"
 #include "linker/elf_util.h"
 #include "linker/LoadNativeObjPosix.h"
 
-#include <fs_rts.h>
+#include "linker/ll_fs.h"
 #include <link.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -1013,7 +1007,7 @@ ocGetNames_ELF ( ObjectCode* oc )
            for (size_t j = 0; j < symTab->n_symbols; j++) {
 
                char isLocal = false; /* avoids uninit-var warning */
-               ll_hs_bool isWeak = HS_BOOL_FALSE;
+               ll_hs_bool isWeak = LL_HS_BOOL_FALSE;
                ll_symbol_name *nm = symTab->symbols[j].name;
                unsigned short shndx = symTab->symbols[j].elf_sym->st_shndx;
 
@@ -1132,7 +1126,7 @@ ocGetNames_ELF ( ObjectCode* oc )
                    /* Acquire! */
                    if (!isLocal && !common_already_defined) {
 
-                       if (isWeak == HS_BOOL_TRUE) {
+                       if (isWeak == LL_HS_BOOL_TRUE) {
                            setWeakSymbol(oc, nm);
                        }
                        if (!ghciInsertSymbolTable(oc->fileName, symhash,

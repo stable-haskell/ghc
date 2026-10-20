@@ -438,14 +438,13 @@
 
 */
 
-#include "Rts.h"
+
+#include "linker/ll_compat.h"
 
 #if defined(mingw32_HOST_OS)
 
-#include "RtsUtils.h"
-#include "RtsSymbolInfo.h"
-#include "CheckUnload.h"
 #include "LinkerInternals.h"
+#include "RtsSymbolInfo.h"
 #include "linker/PEi386.h"
 #include "linker/PEi386Types.h"
 #include "linker/SymbolExtras.h"
@@ -460,6 +459,7 @@
 #include <inttypes.h>
 #include <dbghelp.h>
 #include <stdlib.h>
+#include <string.h>
 #include <psapi.h>
 
 #if defined(x86_64_HOST_ARCH)
@@ -574,7 +574,7 @@ void initLinker_PEi386(void)
 
     if (!ghciInsertSymbolTable(WSTR("(GHCi/Ld special symbols)"),
                                symhash, "__image_base__",
-                               GetModuleHandleW (NULL), HS_BOOL_TRUE,
+                               GetModuleHandleW (NULL), LL_HS_BOOL_TRUE,
                                LL_SYM_CODE, 0, NULL)) {
         LL_FATAL("ghciInsertSymbolTable failed");
     }

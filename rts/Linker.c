@@ -8,42 +8,19 @@
 
 #define LL_INTERNAL_SOURCE 1
 
-#if 0
-#include "rts/PosixSource.h"
-#endif
-
-#include "Rts.h"
-#include "HsFFI.h"
-
-#include "sm/Storage.h"
-#include "Stats.h"
+#include "linker/ll_compat.h"
 #include "linker/ll_hash.h"
 #include "LinkerInternals.h"
-#include "RtsUtils.h"
-#include "Trace.h"
-#include "StgPrimFloat.h" // for __int_encodeFloat etc.
-#include "Proftimer.h"
-#include "GetEnv.h"
-#include "StablePtr.h"
 #include "RtsSymbolInfo.h"
-#include "Profiling.h"
-#include "ForeignExports.h"
-#include "sm/OSMem.h"
 #include "linker/M32Alloc.h"
-#include "linker/ll_compat.h"
 #include "linker/CacheFlush.h"
 #include "linker/SymbolExtras.h"
 #include "linker/MMap.h"
 #include "linker/ll_path.h"
-#include "CheckUnload.h" // createOCSectionIndices
-#include "ReportMemoryMap.h"
-
-#if !defined(mingw32_HOST_OS) && defined(HAVE_SIGNAL_H)
-#include "posix/Signals.h"
-#endif
 
 // get protos for is*()
 #include <ctype.h>
+#include <errno.h>
 
 #if defined(HAVE_SYS_TYPES_H)
 #include <sys/types.h>
@@ -55,7 +32,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
-#include <fs_rts.h>
+#include "linker/ll_fs.h"
 
 #if defined(HAVE_SYS_STAT_H)
 #include <sys/stat.h>
@@ -448,7 +425,7 @@ ll_hs_bool ghciLookupSymbolInfo(StrHashTable *table,
     RtsSymbolInfo *pinfo = lookupStrHashTable(table, key);
     if (!pinfo) {
         *result = NULL;
-        return HS_BOOL_FALSE;
+        return LL_HS_BOOL_FALSE;
     }
     if (pinfo->strength == LL_STRENGTH_WEAK) {
         LL_IF_DEBUG(linker, LL_DEBUG("lookupSymbolInfo: promoting %s\n", key));
@@ -457,7 +434,7 @@ ll_hs_bool ghciLookupSymbolInfo(StrHashTable *table,
     }
 
     *result = pinfo;
-    return HS_BOOL_TRUE;
+    return LL_HS_BOOL_TRUE;
 }
 
 /* -----------------------------------------------------------------------------
@@ -738,10 +715,10 @@ pathchar* findSystemLibrary(pathchar* dll_name)
 */
 void warnMissingKBLibraryPaths( void )
 {
-    static ll_hs_bool missing_update_warn = HS_BOOL_FALSE;
+    static ll_hs_bool missing_update_warn = LL_HS_BOOL_FALSE;
     if (!missing_update_warn) {
         LL_DEBUG("Warning: If linking fails, consider installing KB2533623.\n");
-        missing_update_warn = HS_BOOL_TRUE;
+        missing_update_warn = LL_HS_BOOL_TRUE;
     }
 }
 
@@ -767,7 +744,7 @@ ll_hs_ptr addLibrarySearchPath(pathchar* dll_path)
 /* -----------------------------------------------------------------------------
 * removes a directory from the process DLL Load path
 *
-* Returns: HS_BOOL_TRUE on success, otherwise HS_BOOL_FALSE
+* Returns: LL_HS_BOOL_TRUE on success, otherwise LL_HS_BOOL_FALSE
 */
 ll_hs_bool removeLibrarySearchPath(ll_hs_ptr dll_path_index)
 {
@@ -778,7 +755,7 @@ ll_hs_bool removeLibrarySearchPath(ll_hs_ptr dll_path_index)
     return removeLibrarySearchPath_PEi386(dll_path_index);
 #else
     (void)(dll_path_index); // Function not implemented for other platforms.
-    return HS_BOOL_FALSE;
+    return LL_HS_BOOL_FALSE;
 #endif
 }
 
@@ -789,7 +766,7 @@ ll_hs_bool removeLibrarySearchPath(ll_hs_ptr dll_path_index)
  */
 ll_hs_int insertSymbol(pathchar* obj_name, ll_symbol_name* key, ll_symbol_addr* data)
 {
-    return ghciInsertSymbolTable(obj_name, symhash, key, data, HS_BOOL_FALSE,
+    return ghciInsertSymbolTable(obj_name, symhash, key, data, LL_HS_BOOL_FALSE,
                                  LL_SYM_CODE, 0, NULL);
 }
 

@@ -2,7 +2,7 @@
 
 #if defined(OBJFORMAT_MACHO)
 
-#include "ghcplatform.h"
+#include "linker/ll_platform.h"
 
 #include <mach-o/loader.h>
 

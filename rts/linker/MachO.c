@@ -1,15 +1,11 @@
 #define LL_INTERNAL_SOURCE 1
-
-#include "Rts.h"
+#include "linker/ll_compat.h"
 
 #if defined(darwin_HOST_OS) || defined(ios_HOST_OS)
 
 /* for roundUpToPage */
 
-#include "sm/OSMem.h"
 
-#include "RtsUtils.h"
-#include "GetEnv.h"
 #include "LinkerInternals.h"
 #include "linker/MachO.h"
 #include "linker/CacheFlush.h"
@@ -17,6 +13,7 @@
 #include "linker/MMap.h"
 
 #include <string.h>
+#include <errno.h>
 #include <regex.h>
 #include <mach/machine.h>
 #include <mach-o/fat.h>
@@ -1473,7 +1470,7 @@ ocGetNames_MachO(ObjectCode* oc)
                                                  , symhash
                                                  , nm
                                                  , addr
-                                                 , HS_BOOL_FALSE
+                                                 , LL_HS_BOOL_FALSE
                                                  , sym_type
                                                  , 0
                                                  , oc);
@@ -1541,7 +1538,7 @@ ocGetNames_MachO(ObjectCode* oc)
                     LL_IF_DEBUG(linker_verbose,
                              LL_DEBUG("ocGetNames_MachO: inserting common symbol: %s\n", nm));
                     ghciInsertSymbolTable(oc->fileName, symhash, nm,
-                                         (void*)commonCounter, HS_BOOL_FALSE,
+                                         (void*)commonCounter, LL_HS_BOOL_FALSE,
                                          sym_type,
                                          sz, oc);
                     oc->symbols[curSymbol].name = nm;

@@ -1,13 +1,11 @@
+#define LL_INTERNAL_SOURCE 1
+#include "linker/ll_compat.h"
 #include "elf_reloc_riscv64.h"
 #include "LinkerInternals.h"
-#include "Rts.h"
-#include "linker/ll_compat.h"
-#include "Stg.h"
 #include "SymbolExtras.h"
 #include "linker/ElfTypes.h"
 #include "elf_plt.h"
 #include "elf_util.h"
-#include "rts/Messages.h"
 #include "util.h"
 
 #include <stdint.h>

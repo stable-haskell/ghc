@@ -9,6 +9,8 @@
  * PEi386 has its own implementation of symbol extras.
  */
 
+#define LL_INTERNAL_SOURCE 1
+#include "linker/ll_compat.h"
 #include "LinkerInternals.h"
 #include "linker/ll_host.h"
 #include "linker/MMap.h"
@@ -16,8 +18,6 @@
 #if defined(NEED_SYMBOL_EXTRAS)
 #if !defined(x86_64_HOST_ARCH) || !defined(mingw32_HOST_OS)
 
-#include "RtsUtils.h"
-#include "sm/OSMem.h"
 #include "linker/SymbolExtras.h"
 #include "linker/M32Alloc.h"
 

@@ -1,12 +1,9 @@
+#define LL_INTERNAL_SOURCE 1
+#include "linker/ll_compat.h"
 #include "LinkerInternals.h"
-#include "Rts.h"
 
 #if defined(OBJFORMAT_ELF) || defined(OBJFORMAT_MACHO)
 
-#include "CheckUnload.h"
-#include "ForeignExports.h"
-#include "RtsUtils.h"
-#include "Profiling.h"
 
 #include "linker/LoadNativeObjPosix.h"
 

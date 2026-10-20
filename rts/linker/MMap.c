@@ -1,10 +1,7 @@
-#include "Rts.h"
-
-#include "sm/OSMem.h"
+#define LL_INTERNAL_SOURCE 1
 #include "linker/ll_compat.h"
+
 #include "linker/MMap.h"
-#include "Trace.h"
-#include "ReportMemoryMap.h"
 
 #if RTS_LINKER_USE_MMAP
 #include <sys/mman.h>
@@ -477,7 +474,7 @@ void mprotectForLinker(void *start, size_t len, MemoryAccess mode)
     LL_IF_DEBUG(linker_verbose,
              LL_DEBUG("mprotectForLinker: protecting %" LL_FMT_WORD
                         " bytes starting at %p as %s\n",
-                        (W_)len, start, memoryAccessDescription(mode)));
+                        (ll_w)len, start, memoryAccessDescription(mode)));
 
     int prot = memoryAccessToProt(mode);
 

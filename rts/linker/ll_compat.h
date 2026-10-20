@@ -46,6 +46,9 @@ typedef ll_word *ll_stg_ptr;
 typedef int ll_stg_bool;
 typedef ll_word ll_w;
 
+#define LL_HS_BOOL_FALSE 0
+#define LL_HS_BOOL_TRUE 1
+
 typedef void ll_symbol_addr;
 typedef char ll_symbol_name;
 
@@ -55,6 +58,8 @@ typedef ll_hs_bool HsBool;
 typedef ll_hs_ptr HsPtr;
 typedef ll_hs_stable_ptr StgStablePtr;
 typedef ll_stg_ptr StgPtr;
+
+#include "rts/Linker.h"
 
 typedef enum {
     LL_SYM_CODE = 1 << 0,

@@ -2,7 +2,7 @@
 
 #if defined(OBJFORMAT_PEi386)
 
-#include "ghcplatform.h"
+#include "linker/ll_platform.h"
 #include "PEi386.h"
 #include "linker/InitFini.h"
 #include <stdint.h>

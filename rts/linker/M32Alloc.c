@@ -6,13 +6,10 @@
  *
  * ---------------------------------------------------------------------------*/
 
-#include "Rts.h"
-#include "sm/OSMem.h"
-#include "RtsUtils.h"
-#include "linker/M32Alloc.h"
+#define LL_INTERNAL_SOURCE 1
 #include "linker/ll_compat.h"
+#include "linker/M32Alloc.h"
 #include "linker/MMap.h"
-#include "ReportMemoryMap.h"
 
 #include <inttypes.h>
 #include <stdlib.h>

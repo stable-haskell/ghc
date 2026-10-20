@@ -1,6 +1,7 @@
 #pragma once
 
-#include "Rts.h"
+#include <stdio.h>
+
 #include "MachOTypes.h"
 
 #include "ll_begin_private.h"

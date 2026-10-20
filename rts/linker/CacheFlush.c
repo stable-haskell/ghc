@@ -1,6 +1,6 @@
 /* Platform-dependent cache flushing logic */
 
-#include "Rts.h"
+#define LL_INTERNAL_SOURCE 1
 #include "linker/ll_compat.h"
 #include "linker/CacheFlush.h"
 

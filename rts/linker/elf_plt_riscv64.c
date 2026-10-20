@@ -1,7 +1,7 @@
-#include "Rts.h"
+#define LL_INTERNAL_SOURCE 1
+#include "linker/ll_compat.h"
 #include "elf_compat.h"
 #include "elf_plt_riscv64.h"
-#include "rts/Messages.h"
 #include "linker/ElfTypes.h"
 
 #include <stdint.h>

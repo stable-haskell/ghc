@@ -1,4 +1,4 @@
-#include "Rts.h"
+#define LL_INTERNAL_SOURCE 1
 #include "linker/ll_compat.h"
 
 #if defined(x86_64_HOST_ARCH) && defined(freebsd_HOST_OS)
@@ -156,7 +156,7 @@ typedef struct tls_sym {
     const char   *tls_sym_name;
     unsigned long tls_sym_indx;
     unsigned long tls_sym_hash;
-    StgInt64      tls_sym_reloc;
+    ll_int64      tls_sym_reloc;
 } tls_sym;
 
 typedef struct dl_phdr_info dlpi;
@@ -223,7 +223,7 @@ find_tls_sym(dlpi *info, size_t sz LL_UNUSED, void *data)
                                 info->dlpi_tls_modid);
             /* Copy the target address to GOT[1] (a.k.a. jumpIsland) */
             memcpy(extra->jumpIsland, &target, sizeof(target));
-            wanted->tls_sym_reloc = (StgInt64) extra;
+            wanted->tls_sym_reloc = (ll_int64) extra;
             /* Signal success, no more modules will be tried */
             return 1;
         }
@@ -232,7 +232,7 @@ find_tls_sym(dlpi *info, size_t sz LL_UNUSED, void *data)
     return 0;
 }
 
-StgInt64
+ll_int64
 lookupTlsgdSymbol(const char *symbol, unsigned long symnum, ObjectCode *oc)
 {
     tls_sym t;

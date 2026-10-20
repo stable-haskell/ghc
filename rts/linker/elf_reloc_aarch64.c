@@ -1,4 +1,4 @@
-#include "Rts.h"
+#define LL_INTERNAL_SOURCE 1
 #include "linker/ll_compat.h"
 #include "elf_compat.h"
 #include "elf_reloc_aarch64.h"

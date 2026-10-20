@@ -3,7 +3,7 @@
 
 #if defined(OBJFORMAT_ELF)
 
-#include "ghcplatform.h"
+#include "linker/ll_platform.h"
 
 #include <elf.h>
 #include "linker/InitFini.h"

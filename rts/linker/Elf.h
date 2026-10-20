@@ -1,6 +1,5 @@
 #pragma once
 
-#include "Rts.h"
 #include "LinkerInternals.h"
 #include "linker/ElfTypes.h"
 

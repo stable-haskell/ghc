@@ -20,8 +20,7 @@
  * try and write outside any of these.
  */
 
-#include "Rts.h"
-#include "RtsUtils.h"
+#define LL_INTERNAL_SOURCE 1
 #include "linker/ll_compat.h"
 #include "linker/ProddableBlocks.h"
 

@@ -42,7 +42,7 @@
 // that we map code near the executable image. We use stg_upd_frame_info as a
 // proxy for the image location.
 #define LINKER_LOAD_BASE ((void *)ll_cfg.near_hint)
-#elif defined(MAP_32BIT) || DEFAULT_LINKER_ALWAYS_PIC
+#elif defined(MAP_32BIT) || defined(darwin_HOST_OS) || defined(aarch64_HOST_ARCH) || defined(arm_HOST_ARCH)
 // Try to use MAP_32BIT
 #define LINKER_LOAD_BASE ((void *) 0x0)
 #else

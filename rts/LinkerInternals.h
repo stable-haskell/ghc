@@ -8,13 +8,9 @@
 
 #pragma once
 
-#include "Rts.h"
-#if defined(LL_INTERNAL_SOURCE)
-#include "linker/ll_hash.h"
-#else
-#include "Hash.h"
-#endif
+#include "linker/ll_platform.h"
 #include "linker/ll_compat.h"
+#include "linker/ll_hash.h"
 #include "linker/ll_mutex.h"
 #include "linker/M32Alloc.h"
 #include "linker/ProddableBlocks.h"
@@ -41,6 +37,7 @@ void printLoadedObjects(void);
 #endif
 
 typedef struct _ObjectCode ObjectCode;
+
 typedef struct _Section    Section;
 
 /*
@@ -431,6 +428,12 @@ typedef struct _RtsSymbolInfo {
 } RtsSymbolInfo;
 
 #include "linker/ll_begin_private.h"
+
+/* Linker state shared with the RTS unload checker and archive loader. */
+extern ObjectCode *objects;
+extern ObjectCode *loaded_objects;
+extern uint8_t object_code_mark_bit;
+extern int n_unloaded_objects;
 
 void exitLinker( void );
 

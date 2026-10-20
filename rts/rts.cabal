@@ -37,6 +37,7 @@ extra-source-files:
     xxhash.h
     linker/xxhash.h
     linker/ll_hash.h
+    linker/ll_fs.h
     linker/ll_path.h
     adjustor/AdjustorPool.h
     Adjustor.h

@@ -68,7 +68,7 @@ pathchar* mkPath(const char* path)
 #endif
 }
 
-HsBool endsWithPath(const pathchar* base, const pathchar* str) {
+ll_hs_bool endsWithPath(const pathchar* base, const pathchar* str) {
     int blen = pathlen(base);
     int slen = pathlen(str);
     return (blen >= slen) && (0 == pathcmp(base + blen - slen, str));

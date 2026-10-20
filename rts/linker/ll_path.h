@@ -17,7 +17,7 @@
 #if defined(LL_INTERNAL_SOURCE)
 // Use wchar_t for pathnames on Windows (#5697)
 #if defined(mingw32_HOST_OS)
-#include "fs_rts.h"
+#include "linker/ll_fs.h"
 
 #define pathcmp wcscmp
 #define pathlen wcslen
@@ -49,7 +49,7 @@
 pathchar* pathdup(const pathchar *path);
 pathchar* pathdir(const pathchar *path);
 pathchar* mkPath(const char* path);
-HsBool endsWithPath(const pathchar* base, const pathchar* str);
+ll_hs_bool endsWithPath(const pathchar* base, const pathchar* str);
 
 #include "ll_end_private.h"
 
