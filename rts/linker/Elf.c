@@ -1,3 +1,5 @@
+#define LL_INTERNAL_SOURCE 1
+
 #include "Rts.h"
 
 #if defined(linux_HOST_OS) || defined(solaris2_HOST_OS) \
@@ -92,6 +94,7 @@
  * Sym*_NeedsProto: the symbol is undefined and we add a dummy
  *                  default proto extern void sym(void);
  */
+
 /* Note [X86_64_ELF_NONPIC_HACK and data references]
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  * When a relocation overflows 32-bit range, X86_64_ELF_NONPIC_HACK creates

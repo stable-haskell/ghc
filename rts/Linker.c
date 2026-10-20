@@ -6,6 +6,8 @@
  *
  * ---------------------------------------------------------------------------*/
 
+#define LL_INTERNAL_SOURCE 1
+
 #if 0
 #include "rts/PosixSource.h"
 #endif
@@ -15,7 +17,7 @@
 
 #include "sm/Storage.h"
 #include "Stats.h"
-#include "Hash.h"
+#include "linker/ll_hash.h"
 #include "LinkerInternals.h"
 #include "RtsUtils.h"
 #include "Trace.h"
@@ -32,7 +34,7 @@
 #include "linker/CacheFlush.h"
 #include "linker/SymbolExtras.h"
 #include "linker/MMap.h"
-#include "PathUtils.h"
+#include "linker/ll_path.h"
 #include "CheckUnload.h" // createOCSectionIndices
 #include "ReportMemoryMap.h"
 

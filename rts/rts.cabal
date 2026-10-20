@@ -35,6 +35,9 @@ extra-source-files:
     -- headers files that are not installed by the rts package but only used to
     -- build the rts C code
     xxhash.h
+    linker/xxhash.h
+    linker/ll_hash.h
+    linker/ll_path.h
     adjustor/AdjustorPool.h
     Adjustor.h
     Apply.h
@@ -432,6 +435,8 @@ common rts-c-sources-base
                Libdw.c
                LibdwPool.c
                Linker.c
+               linker/ll_hash.c
+               linker/ll_path.c
                LinkerGlue.c
                linker/ll_host.c
                linker/ll_mutex.c

@@ -9,7 +9,11 @@
 #pragma once
 
 #include "Rts.h"
+#if defined(LL_INTERNAL_SOURCE)
+#include "linker/ll_hash.h"
+#else
 #include "Hash.h"
+#endif
 #include "linker/ll_compat.h"
 #include "linker/ll_mutex.h"
 #include "linker/M32Alloc.h"

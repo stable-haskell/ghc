@@ -2,7 +2,11 @@
 
 #include "Rts.h"
 #include "LinkerInternals.h"
+#if defined(LL_INTERNAL_SOURCE)
+#include "linker/ll_path.h"
+#else
 #include "PathUtils.h"
+#endif
 #include <windows.h>
 #include <stdint.h>
 #include <stdbool.h>

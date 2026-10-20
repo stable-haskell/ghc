@@ -165,6 +165,18 @@ static inline intmax_t ll_min_intmax(intmax_t a, intmax_t b)
 #define LL_DEBUG_CODE 0
 #endif
 
+#if LL_DEBUG_CODE
+#define LL_STATIC_INLINE static
+#else
+#define LL_STATIC_INLINE static inline
+#endif
+
+#if SIZEOF_VOID_P == 8
+#define LL_WORD_SIZE_IN_BITS 64
+#elif SIZEOF_VOID_P == 4
+#define LL_WORD_SIZE_IN_BITS 32
+#endif
+
 #define LL_CHECK(predicate)                                                   \
     do {                                                                      \
         if (!LL_LIKELY(predicate)) {                                          \

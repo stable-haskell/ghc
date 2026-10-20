@@ -13,6 +13,7 @@
 
 #include "RtsUtils.h"
 #include "Hash.h"
+#include "linker/ll_hash.h"
 #include "LinkerInternals.h"
 #include "CheckUnload.h"
 #include "sm/Storage.h"
@@ -395,7 +396,7 @@ static bool markObjectLive(void *data STG_UNUSED, StgWord key, const void *value
     ll_unlock(&linker_mutex);
 
     // Mark its dependencies
-    iterHashTable(oc->dependencies, NULL, markObjectLive);
+    ll_hash_iter(oc->dependencies, NULL, markObjectLive);
 
     return true; // for hash table iteration
 }

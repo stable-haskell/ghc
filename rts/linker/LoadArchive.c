@@ -1,5 +1,8 @@
+#define LL_INTERNAL_SOURCE 1
+
 #include <Rts.h>
-#include "PathUtils.h"
+
+#include "linker/ll_path.h"
 
 #include "sm/Storage.h"
 #include "sm/OSMem.h"

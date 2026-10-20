@@ -6,12 +6,14 @@
  *
  * ---------------------------------------------------------------------------*/
 
+#define LL_INTERNAL_SOURCE 1
+
 #include "ghcplatform.h"
 #include "Rts.h"
 #include "RtsSymbolInfo.h"
 #include "HsFFI.h"
 
-#include "Hash.h"
+#include "linker/ll_hash.h"
 #include "RtsUtils.h"
 
 #include <stdbool.h>

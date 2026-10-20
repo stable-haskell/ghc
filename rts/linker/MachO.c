@@ -1,8 +1,11 @@
+#define LL_INTERNAL_SOURCE 1
+
 #include "Rts.h"
 
 #if defined(darwin_HOST_OS) || defined(ios_HOST_OS)
 
 /* for roundUpToPage */
+
 #include "sm/OSMem.h"
 
 #include "RtsUtils.h"
