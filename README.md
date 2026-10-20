@@ -190,7 +190,7 @@ writes and uses distinct local native/profiling package environments:
 python3 testsuite/tests/profiling/test-target-abi.py \
   --host-ghc "$host" --profile-ghc "$profile" \
   --host-ghc-pkg "$PWD/_build/dist/bin/ghc-pkg" \
-  --profile-ghc-pkg "$PWD/_build/dist/bin/$triple-profiling-ghc-pkg" \
+  --profile-ghc-pkg "$PWD/_build/dist/bin/$triple-prof-ghc-pkg" \
   --cabal "$PWD/_build/cabal/bin/cabal"
 ```
 
