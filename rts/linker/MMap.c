@@ -1,6 +1,7 @@
 #include "Rts.h"
 
 #include "sm/OSMem.h"
+#include "linker/ll_host.h"
 #include "linker/MMap.h"
 #include "Trace.h"
 #include "ReportMemoryMap.h"
@@ -38,13 +39,12 @@
 #define MAP_ANONYMOUS 0
 #endif
 
-void *mmap_32bit_base = LINKER_LOAD_BASE;
+void *mmap_32bit_base = NULL;
 
 void initLinkerMMap(void) {
-    if (RtsFlags.MiscFlags.linkerMemBase != 0) {
-        // User-override for mmap_32bit_base
-        mmap_32bit_base = (void*)RtsFlags.MiscFlags.linkerMemBase;
-    }
+    mmap_32bit_base = ll_cfg.mem_base != 0
+        ? (void *)ll_cfg.mem_base
+        : LINKER_LOAD_BASE;
 }
 
 static const char *memoryAccessDescription(MemoryAccess mode)
@@ -390,7 +390,7 @@ mmapForLinker (size_t bytes, MemoryAccess access, uint32_t flags, int fd, int of
     struct MemoryRegion *region;
 
     IF_DEBUG(linker_verbose, debugBelch("mmapForLinker: start\n"));
-    if (RtsFlags.MiscFlags.linkerAlwaysPic) {
+    if (ll_cfg.always_pic) {
         /* make no attempt at mapping low memory if we are assuming PIC */
         region = NULL;
     } else {

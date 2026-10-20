@@ -17,6 +17,7 @@
 #include "RtsSymbolInfo.h"
 #include "CheckUnload.h"
 #include "LinkerInternals.h"
+#include "linker/ll_host.h"
 #include "linker/MMap.h"
 #include "linker/Elf.h"
 #include "linker/CacheFlush.h"
@@ -114,7 +115,7 @@
  * (STT_OBJECT, STT_NOTYPE — which includes GHC's _con_info symbols) trigger
  * a clear error message directing the user to recompile with -fPIC.
  */
-#define X86_64_ELF_NONPIC_HACK (!RtsFlags.MiscFlags.linkerAlwaysPic)
+#define X86_64_ELF_NONPIC_HACK (!ll_cfg.always_pic)
 
 #if defined(i386_HOST_ARCH)
 #  define ELF_TARGET_386    /* Used inside <elf.h> */
@@ -826,7 +827,7 @@ ocGetNames_ELF ( ObjectCode* oc )
             it, and set its .sh_offset field such that
             ehdrC + .sh_offset == addr_of_zeroed_space.  */
 #if RTS_LINKER_USE_MMAP
-          if (USE_CONTIGUOUS_MMAP || RtsFlags.MiscFlags.linkerAlwaysPic) {
+          if (USE_CONTIGUOUS_MMAP || ll_cfg.always_pic) {
               /* The space for bss sections is already preallocated */
               CHECK(oc->bssBegin != NULL);
               alloc = SECTION_NOMEM;
@@ -904,7 +905,7 @@ ocGetNames_ELF ( ObjectCode* oc )
            */
           memcpy(start, oc->image + offset, size);
 #else
-          if (USE_CONTIGUOUS_MMAP || RtsFlags.MiscFlags.linkerAlwaysPic) {
+          if (USE_CONTIGUOUS_MMAP || ll_cfg.always_pic) {
               // already mapped.
               start = oc->image + offset;
               alloc = SECTION_NOMEM;

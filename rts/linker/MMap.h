@@ -1,6 +1,7 @@
 #pragma once
 
 #include "BeginPrivate.h"
+#include "linker/ll_host.h"
 
 #if defined(aarch64_HOST_ARCH)
 // On AArch64 MAP_32BIT is not available but we are still bound by the small
@@ -35,12 +36,12 @@
 // can potentially reference any of the ones we bake into the binary (and list)
 // in RtsSymbols. Thus we'll need to be within +-4GB of those,
 // stg_upd_frame_info is a good candidate as it's referenced often.
-#define LINKER_LOAD_BASE ((void *) &stg_upd_frame_info)
+#define LINKER_LOAD_BASE ((void *)ll_cfg.near_hint)
 #elif defined(x86_64_HOST_ARCH) && defined(mingw32_HOST_OS)
 // On Windows (which now uses high-entropy ASLR by default) we need to ensure
 // that we map code near the executable image. We use stg_upd_frame_info as a
 // proxy for the image location.
-#define LINKER_LOAD_BASE ((void *) &stg_upd_frame_info)
+#define LINKER_LOAD_BASE ((void *)ll_cfg.near_hint)
 #elif defined(MAP_32BIT) || DEFAULT_LINKER_ALWAYS_PIC
 // Try to use MAP_32BIT
 #define LINKER_LOAD_BASE ((void *) 0x0)

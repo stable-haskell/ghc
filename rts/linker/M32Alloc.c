@@ -10,6 +10,7 @@
 #include "sm/OSMem.h"
 #include "RtsUtils.h"
 #include "linker/M32Alloc.h"
+#include "linker/ll_host.h"
 #include "linker/MMap.h"
 #include "ReportMemoryMap.h"
 
@@ -158,7 +159,7 @@ is_okay_address(void *p) {
   ssize_t displacement = (int8_t *) p - here;
   // if we assume -fPIC, we don't care where we load code.
   // But we still want to use the m32 allocator to avoid fragmentation (#24432)
-  return RtsFlags.MiscFlags.linkerAlwaysPic
+  return ll_cfg.always_pic
          || ((displacement > -0x7fffffff) && (displacement < 0x7fffffff));
 }
 

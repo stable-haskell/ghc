@@ -1,4 +1,5 @@
 #include "Rts.h"
+#include "linker/ll_host.h"
 #include "elf_got.h"
 #include "linker/MMap.h"
 
@@ -174,7 +175,7 @@ fillGot(ObjectCode * oc) {
                                 // if --optimistic-linking is passed into the
                                 // RTS we allow the linker to optimistically
                                 // continue
-                                if (RtsFlags.MiscFlags.linkerOptimistic) {
+                                if (ll_cfg.optimistic) {
                                     errorBelch("Failed to lookup symbol: %s,"
                                                " optimistically continuing.\n",
                                                symbol->name);

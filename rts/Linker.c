@@ -29,6 +29,7 @@
 #include "ForeignExports.h"
 #include "sm/OSMem.h"
 #include "linker/M32Alloc.h"
+#include "linker/ll_host.h"
 #include "linker/CacheFlush.h"
 #include "linker/SymbolExtras.h"
 #include "linker/MMap.h"
@@ -980,7 +981,7 @@ SymbolAddr* lookupSymbol( SymbolName* lbl )
     // lookupDependentSymbol directly.
     SymbolAddr* r = lookupDependentSymbol(lbl, NULL, NULL);
     if (!r) {
-        if (!RtsFlags.MiscFlags.linkerOptimistic) {
+        if (!ll_cfg.optimistic) {
           errorBelch("^^ Could not load '%s', dependency unresolved. "
                      "See top entry above. You might consider using --optimistic-linking\n",
                      lbl);
@@ -1227,7 +1228,7 @@ void freeObjectCode (ObjectCode *oc)
 #if defined(NEED_SYMBOL_EXTRAS) && (!defined(x86_64_HOST_ARCH) \
                                     || !defined(mingw32_HOST_OS))
     if (RTS_LINKER_USE_MMAP) {
-      if (!USE_CONTIGUOUS_MMAP && !RtsFlags.MiscFlags.linkerAlwaysPic &&
+      if (!USE_CONTIGUOUS_MMAP && !ll_cfg.always_pic &&
           oc->symbol_extras != NULL) {
         // Freed by m32_allocator_free
       }

@@ -10,6 +10,7 @@
  */
 
 #include "LinkerInternals.h"
+#include "linker/ll_host.h"
 #include "linker/MMap.h"
 
 #if defined(NEED_SYMBOL_EXTRAS)
@@ -73,7 +74,7 @@ int ocAllocateExtras(ObjectCode* oc, int count, int first, int bssSize)
       oc->image += misalignment;
 
       oc->symbol_extras = (SymbolExtra *) (oc->image + aligned);
-    } else if (USE_CONTIGUOUS_MMAP || RtsFlags.MiscFlags.linkerAlwaysPic) {
+    } else if (USE_CONTIGUOUS_MMAP || ll_cfg.always_pic) {
       /* Keep image, bssExtras and symbol_extras contiguous */
       /* N.B. We currently can't mark symbol extras as non-executable in this
        * case. */
@@ -142,7 +143,7 @@ void ocProtectExtras(ObjectCode* oc)
      * in this case is hope that the platform doesn't mark such allocations as
      * non-executable.
      */
-  } else if (USE_CONTIGUOUS_MMAP || RtsFlags.MiscFlags.linkerAlwaysPic) {
+  } else if (USE_CONTIGUOUS_MMAP || ll_cfg.always_pic) {
     mprotectForLinker(oc->symbol_extras, sizeof(SymbolExtra) * oc->n_symbol_extras, MEM_READ_EXECUTE);
   } else {
     /*
