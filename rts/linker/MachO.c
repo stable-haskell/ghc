@@ -105,7 +105,7 @@ ocInit_MachO(ObjectCode * oc)
         lc = (MachOLoadCommand *) ( ((char*)lc) + lc->cmdsize );
     }
     if (NULL == oc->info->segCmd) {
-        barf("ocGetNames_MachO: no segment load command");
+        LL_FATAL("ocGetNames_MachO: no segment load command");
     }
 
     oc->info->macho_sections = (MachOSection*) (oc->info->segCmd+1);
@@ -175,19 +175,19 @@ resolveImports(
 int
 ocAllocateExtras_MachO(ObjectCode* oc)
 {
-    IF_DEBUG(linker, debugBelch("ocAllocateExtras_MachO: start\n"));
+    LL_IF_DEBUG(linker, LL_DEBUG("ocAllocateExtras_MachO: start\n"));
 
     if (NULL != oc->info->symCmd) {
-        IF_DEBUG(linker,
-            debugBelch("ocAllocateExtras_MachO: allocate %d symbols\n",
+        LL_IF_DEBUG(linker,
+            LL_DEBUG("ocAllocateExtras_MachO: allocate %d symbols\n",
                 oc->info->symCmd->nsyms));
-        IF_DEBUG(linker, debugBelch("ocAllocateExtras_MachO: done\n"));
+        LL_IF_DEBUG(linker, LL_DEBUG("ocAllocateExtras_MachO: done\n"));
         return ocAllocateExtras(oc, oc->info->symCmd->nsyms, 0, 0);
     }
 
-    IF_DEBUG(linker,
-        debugBelch("ocAllocateExtras_MachO: allocated no symbols\n"));
-    IF_DEBUG(linker, debugBelch("ocAllocateExtras_MachO: done\n"));
+    LL_IF_DEBUG(linker,
+        LL_DEBUG("ocAllocateExtras_MachO: allocated no symbols\n"));
+    LL_IF_DEBUG(linker, LL_DEBUG("ocAllocateExtras_MachO: done\n"));
     return ocAllocateExtras(oc, 0, 0, 0);
 }
 
@@ -202,10 +202,10 @@ ocVerifyImage_MachO(ObjectCode * oc)
     char *image = (char*) oc->image;
     MachOHeader *header = (MachOHeader*) image;
 
-    IF_DEBUG(linker, debugBelch("ocVerifyImage_MachO: start\n"));
+    LL_IF_DEBUG(linker, LL_DEBUG("ocVerifyImage_MachO: start\n"));
 
     if(header->magic != MH_MAGIC_64) {
-        errorBelch("Could not load image %s: bad magic!\n"
+        LL_LOG_ERROR("Could not load image %s: bad magic!\n"
                    "  Expected %08x (64bit), got %08x%s\n",
                    oc->fileName, MH_MAGIC_64, header->magic,
                    header->magic == MH_MAGIC ? " (32bit)." : ".");
@@ -213,7 +213,7 @@ ocVerifyImage_MachO(ObjectCode * oc)
     }
 
     // FIXME: do some more verifying here
-    IF_DEBUG(linker, debugBelch("ocVerifyImage_MachO: done\n"));
+    LL_IF_DEBUG(linker, LL_DEBUG("ocVerifyImage_MachO: done\n"));
     return 1;
 }
 
@@ -225,7 +225,7 @@ resolveImports(
 {
     size_t itemSize = 4;
 
-    IF_DEBUG(linker, debugBelch("resolveImports: start\n"));
+    LL_IF_DEBUG(linker, LL_DEBUG("resolveImports: start\n"));
 
     for(unsigned i = 0; i * itemSize < sect->size; i++)
     {
@@ -235,20 +235,20 @@ resolveImports(
         MachOSymbol *symbol = &oc->info->macho_symbols[indirectSymbolIndex];
         SymbolAddr* addr = NULL;
 
-        IF_DEBUG(linker, debugBelch("resolveImports: resolving %s\n", symbol->name));
+        LL_IF_DEBUG(linker, LL_DEBUG("resolveImports: resolving %s\n", symbol->name));
 
         if ((symbol->nlist->n_type & N_TYPE) == N_UNDF
             && (symbol->nlist->n_type & N_EXT) && (symbol->nlist->n_value != 0)) {
             addr = (SymbolAddr*) (symbol->nlist->n_value);
-            IF_DEBUG(linker, debugBelch("resolveImports: undefined external %s has value %p\n", symbol->name, addr));
+            LL_IF_DEBUG(linker, LL_DEBUG("resolveImports: undefined external %s has value %p\n", symbol->name, addr));
         } else {
             addr = lookupDependentSymbol(symbol->name, oc, NULL);
-            IF_DEBUG(linker, debugBelch("resolveImports: looking up %s, %p\n", symbol->name, addr));
+            LL_IF_DEBUG(linker, LL_DEBUG("resolveImports: looking up %s, %p\n", symbol->name, addr));
         }
 
         if (addr == NULL)
         {
-            errorBelch("\nlookupSymbol failed in resolveImports\n"
+            LL_LOG_ERROR("\nlookupSymbol failed in resolveImports\n"
                        "%s: unknown symbol `%s'", oc->fileName, symbol->name);
             return 0;
         }
@@ -259,7 +259,7 @@ resolveImports(
         ((void**)(oc->image + sect->offset))[i] = addr;
     }
 
-    IF_DEBUG(linker, debugBelch("resolveImports: done\n"));
+    LL_IF_DEBUG(linker, LL_DEBUG("resolveImports: done\n"));
     return 1;
 }
 
@@ -297,7 +297,7 @@ decodeAddend(ObjectCode * oc, Section * section, MachORelocationInfo * ri) {
                 case 2: return signExtend(*(uint32_t*)p, 8 << ri->r_length);
                 case 3: return signExtend(*(uint64_t*)p, 8 << ri->r_length);
                 default:
-                    barf("Unsupported r_length (%d) for UNSIGNED relocation",
+                    LL_FATAL("Unsupported r_length (%d) for UNSIGNED relocation",
                          ri->r_length);
             }
         }
@@ -308,7 +308,7 @@ decodeAddend(ObjectCode * oc, Section * section, MachORelocationInfo * ri) {
                 case 2: return signExtend(*(uint32_t*)p, 8 << ri->r_length);
                 case 3: return signExtend(*(uint64_t*)p, 8 << ri->r_length);
                 default:
-                    barf("Unsupported r_length (%d) for SUBTRACTOR relocation",
+                    LL_FATAL("Unsupported r_length (%d) for SUBTRACTOR relocation",
                          ri->r_length);
             }
         }
@@ -348,13 +348,13 @@ decodeAddend(ObjectCode * oc, Section * section, MachORelocationInfo * ri) {
             return a << shift;
         }
     }
-    barf("unsupported relocation type: %d\n", ri->r_type);
+    LL_FATAL("unsupported relocation type: %d\n", ri->r_type);
 }
 
 inline static bool
 fitsBits(size_t bits, int64_t value) {
     if(bits == 64) return true;
-    if(bits > 64) barf("fits_bits with %zu bits and an 64bit integer!", bits);
+    if(bits > 64) LL_FATAL("fits_bits with %zu bits and an 64bit integer!", bits);
     return  0 == (value >> bits)   // All bits off: 0
         || -1 == (value >> bits);  // All bits on: -1
 }
@@ -373,7 +373,7 @@ encodeAddend(ObjectCode * oc, Section * section,
         case ARM64_RELOC_UNSIGNED: {
             if(!fitsBits(8 << ri->r_length, addend)) {
                 const char *library_info = OC_INFORMATIVE_FILENAME(oc);
-                barf("Relocation out of range for UNSIGNED in %s: symbol '%s', addend 0x%llx, address 0x%llx, library: %s",
+                LL_FATAL("Relocation out of range for UNSIGNED in %s: symbol '%s', addend 0x%llx, address 0x%llx, library: %s",
                      file_name, symbol_name, (long long)addend, (long long)ri->r_address, library_info ? (char*)library_info : "<unknown>");
             }
             switch (ri->r_length) {
@@ -382,7 +382,7 @@ encodeAddend(ObjectCode * oc, Section * section,
                 case 2: *(uint32_t*)p = (uint32_t)addend; break;
                 case 3: *(uint64_t*)p = (uint64_t)addend; break;
                 default:
-                    barf("Unsupported r_length (%d) for UNSIGNED relocation",
+                    LL_FATAL("Unsupported r_length (%d) for UNSIGNED relocation",
                          ri->r_length);
             }
             return;
@@ -390,7 +390,7 @@ encodeAddend(ObjectCode * oc, Section * section,
         case ARM64_RELOC_SUBTRACTOR: {
             if(!fitsBits(8 << ri->r_length, addend)) {
                 const char *library_info = OC_INFORMATIVE_FILENAME(oc);
-                barf("Relocation out of range for SUBTRACTOR in %s: symbol '%s', addend 0x%llx, address 0x%llx, library: %s",
+                LL_FATAL("Relocation out of range for SUBTRACTOR in %s: symbol '%s', addend 0x%llx, address 0x%llx, library: %s",
                      file_name, symbol_name, (long long)addend, (long long)ri->r_address, library_info ? (char*)library_info : "<unknown>");
             }
             switch (ri->r_length) {
@@ -399,7 +399,7 @@ encodeAddend(ObjectCode * oc, Section * section,
                 case 2: *(uint32_t*)p = (uint32_t)addend; break;
                 case 3: *(uint64_t*)p = (uint64_t)addend; break;
                 default:
-                    barf("Unsupported r_length (%d) for SUBTRACTOR relocation",
+                    LL_FATAL("Unsupported r_length (%d) for SUBTRACTOR relocation",
                          ri->r_length);
             }
             return;
@@ -411,7 +411,7 @@ encodeAddend(ObjectCode * oc, Section * section,
              */
             if(!fitsBits(26, addend >> 2)) {
                 const char *library_info = OC_INFORMATIVE_FILENAME(oc);
-                barf("Relocation target for BRANCH26 out of range in %s: symbol '%s', addend 0x%llx (0x%llx >> 2), address 0x%llx, library: %s",
+                LL_FATAL("Relocation target for BRANCH26 out of range in %s: symbol '%s', addend 0x%llx (0x%llx >> 2), address 0x%llx, library: %s",
                      file_name, symbol_name, (long long)addend, (long long)(addend >> 2), (long long)ri->r_address, library_info ? (char*)library_info : "<unknown>");
             }
             *p = (*p & 0xFC000000) | ((uint32_t)(addend >> 2) & 0x03FFFFFF);
@@ -427,7 +427,7 @@ encodeAddend(ObjectCode * oc, Section * section,
             if(!fitsBits(21, addend >> 12)) {
                 const char *reloc_type = (ri->r_type == ARM64_RELOC_PAGE21) ? "PAGE21" : "GOT_LOAD_PAGE21";
                 const char *library_info = OC_INFORMATIVE_FILENAME(oc);
-                barf("Relocation target for %s out of range in %s: symbol '%s', addend 0x%llx (0x%llx >> 12), address 0x%llx, library: %s",
+                LL_FATAL("Relocation target for %s out of range in %s: symbol '%s', addend 0x%llx (0x%llx >> 12), address 0x%llx, library: %s",
                      reloc_type, file_name, symbol_name, (long long)addend, (long long)(addend >> 12), (long long)ri->r_address, library_info ? (char*)library_info : "<unknown>");
             }
             *p = (*p & 0x9F00001F) | (uint32_t)((addend << 17) & 0x60000000)
@@ -441,7 +441,7 @@ encodeAddend(ObjectCode * oc, Section * section,
              */
             if(!fitsBits(12, addend)) {
                 const char *library_info = OC_INFORMATIVE_FILENAME(oc);
-                barf("Relocation target for PAGEOFF12 out of range in %s: symbol '%s', addend 0x%llx, address 0x%llx, library: %s",
+                LL_FATAL("Relocation target for PAGEOFF12 out of range in %s: symbol '%s', addend 0x%llx, address 0x%llx, library: %s",
                      file_name, symbol_name, (long long)addend, (long long)ri->r_address, library_info ? (char*)library_info : "<unknown>");
             }
 
@@ -457,7 +457,7 @@ encodeAddend(ObjectCode * oc, Section * section,
             return;
         }
     }
-    barf("unsupported relocation type: %d\n", ri->r_type);
+    LL_FATAL("unsupported relocation type: %d\n", ri->r_type);
 }
 
 /* Note [Symbols in need of GOT entries]
@@ -537,7 +537,7 @@ makeGot(ObjectCode * oc) {
         oc->info->got_size =  got_slots * sizeof(void*);
         oc->info->got_start = mmapAnonForLinker(oc->info->got_size);
         if( oc->info->got_start == NULL ) {
-            barf("MAP_FAILED. errno=%d", errno );
+            LL_FATAL("MAP_FAILED. errno=%d", errno );
             return EXIT_FAILURE;
         }
         /* update got_addr */
@@ -573,7 +573,7 @@ static uint64_t symbol_value(ObjectCode* oc, MachOSymbol* symbol) {
        */
       value = (uint64_t)lookupDependentSymbol((char*)symbol->name, oc, NULL);
       if(!value)
-          barf("Could not lookup symbol: %s!", symbol->name);
+          LL_FATAL("Could not lookup symbol: %s!", symbol->name);
   } else {
       value = (uint64_t)symbol->addr;    // address of the symbol.
   }
@@ -623,7 +623,7 @@ relocateSectionAarch64(ObjectCode * oc, Section * section)
                 if(!(i+1 < nreloc)
                    || !(section->info->relocation_info[i+1].r_type
                           == ARM64_RELOC_UNSIGNED))
-                    barf("SUBTRACTOR relocation *must* be followed by UNSIGNED relocation.");
+                    LL_FATAL("SUBTRACTOR relocation *must* be followed by UNSIGNED relocation.");
 
                 // we *know* that the next relocation is ARM64_RELOC_UNSIGNED
                 // (see above). So let's process both relocations and write the
@@ -659,7 +659,7 @@ relocateSectionAarch64(ObjectCode * oc, Section * section)
                 if(symbol->nlist->n_type & N_EXT) {
                     value = (uint64_t)lookupDependentSymbol((char*)symbol->name, oc, NULL);
                     if(!value)
-                        barf("Could not lookup symbol: %s!", symbol->name);
+                        LL_FATAL("Could not lookup symbol: %s!", symbol->name);
                 } else {
                     value = (uint64_t)symbol->addr;    // address of the symbol.
                 }
@@ -679,7 +679,7 @@ relocateSectionAarch64(ObjectCode * oc, Section * section)
                     if(findStub(section, (void**)&value, 0)) {
                         /* did not find it. Crete a new stub. */
                         if(makeStub(section, (void**)&value, 0)) {
-                            barf("could not find or make stub");
+                            LL_FATAL("could not find or make stub");
                         }
                     }
                 }
@@ -691,7 +691,7 @@ relocateSectionAarch64(ObjectCode * oc, Section * section)
                 MachOSymbol* symbol = &oc->info->macho_symbols[ri->r_symbolnum];
                 int64_t addend = decodeAddend(oc, section, ri);
                 if(!(explicit_addend == 0 || addend == 0))
-                    barf("explicit_addend and addend can't be set at the same time.");
+                    LL_FATAL("explicit_addend and addend can't be set at the same time.");
                 uint64_t pc = (uint64_t)section->start + ri->r_address;
                 uint64_t value = (uint64_t)(isGotLoad(ri) ? symbol->got_addr : symbol->addr);
                 ASSERT(!isGotLoad(ri) || (symbol->got_addr != 0));
@@ -706,7 +706,7 @@ relocateSectionAarch64(ObjectCode * oc, Section * section)
                 MachOSymbol* symbol = &oc->info->macho_symbols[ri->r_symbolnum];
                 int64_t addend = decodeAddend(oc, section, ri);
                 if(!(explicit_addend == 0 || addend == 0))
-                    barf("explicit_addend and addend can't be set at the same time.");
+                    LL_FATAL("explicit_addend and addend can't be set at the same time.");
                 uint64_t value = (uint64_t)(isGotLoad(ri) ? symbol->got_addr : symbol->addr);
                 ASSERT(!isGotLoad(ri) || (symbol->got_addr != 0));
                 encodeAddend(oc, section, ri, 0xFFF & (value + addend + explicit_addend), symbol);
@@ -720,11 +720,11 @@ relocateSectionAarch64(ObjectCode * oc, Section * section)
                 if(!(i+1 < nreloc)
                    || !(section->info->relocation_info[i+1].r_type == ARM64_RELOC_PAGE21
                         || section->info->relocation_info[i+1].r_type == ARM64_RELOC_PAGEOFF12))
-                    barf("ADDEND relocation *must* be followed by PAGE or PAGEOFF relocation");
+                    LL_FATAL("ADDEND relocation *must* be followed by PAGE or PAGEOFF relocation");
                 break;
             }
             default: {
-                barf("Relocation of type: %d not (yet) supported!\n", ri->r_type);
+                LL_FATAL("Relocation of type: %d not (yet) supported!\n", ri->r_type);
             }
         }
     }
@@ -738,7 +738,7 @@ relocateSection(ObjectCode* oc, int curSection)
 {
     Section * sect = &oc->sections[curSection];
 
-    IF_DEBUG(linker, debugBelch("relocateSection %d, info: %p\n", curSection, (void*)sect->info));
+    LL_IF_DEBUG(linker, LL_DEBUG("relocateSection %d, info: %p\n", curSection, (void*)sect->info));
 
     // empty sections (without segments), won't have their info filled.
     // there is no relocation to be done for them.
@@ -749,7 +749,7 @@ relocateSection(ObjectCode* oc, int curSection)
     MachORelocationInfo * relocs = sect->info->relocation_info;
     MachOSymbol * symbols = oc->info->macho_symbols;
 
-    IF_DEBUG(linker, debugBelch("relocateSection %d (%s, %s): start\n",
+    LL_IF_DEBUG(linker, LL_DEBUG("relocateSection %d (%s, %s): start\n",
                                 curSection, msect->segname, msect->sectname));
 
     if(!strcmp(msect->sectname,"__la_symbol_ptr"))
@@ -761,7 +761,7 @@ relocateSection(ObjectCode* oc, int curSection)
     else if(!strcmp(msect->sectname,"__la_sym_ptr3"))
         return 1;
 
-    IF_DEBUG(linker, debugBelch("relocateSection: number of relocations: %d\n", msect->nreloc));
+    LL_IF_DEBUG(linker, LL_DEBUG("relocateSection: number of relocations: %d\n", msect->nreloc));
 
     for(uint32_t i = 0; i < msect->nreloc; i++)
     {
@@ -777,14 +777,14 @@ relocateSection(ObjectCode* oc, int curSection)
         int relocLenBytes;
         int nextInstrAdj = 0;
 
-        IF_DEBUG(linker_verbose, debugBelch("relocateSection: relocation %d\n", i));
-        IF_DEBUG(linker_verbose, debugBelch("               : type      = %d\n", reloc->r_type));
-        IF_DEBUG(linker_verbose, debugBelch("               : address   = %d\n", reloc->r_address));
-        IF_DEBUG(linker_verbose, debugBelch("               : symbolnum = %u\n", reloc->r_symbolnum));
-        IF_DEBUG(linker_verbose, debugBelch("               : pcrel     = %d\n", reloc->r_pcrel));
-        IF_DEBUG(linker_verbose, debugBelch("               : length    = %d\n", reloc->r_length));
-        IF_DEBUG(linker_verbose, debugBelch("               : extern    = %d\n", reloc->r_extern));
-        IF_DEBUG(linker_verbose, debugBelch("               : type      = %d\n", reloc->r_type));
+        LL_IF_DEBUG(linker_verbose, LL_DEBUG("relocateSection: relocation %d\n", i));
+        LL_IF_DEBUG(linker_verbose, LL_DEBUG("               : type      = %d\n", reloc->r_type));
+        LL_IF_DEBUG(linker_verbose, LL_DEBUG("               : address   = %d\n", reloc->r_address));
+        LL_IF_DEBUG(linker_verbose, LL_DEBUG("               : symbolnum = %u\n", reloc->r_symbolnum));
+        LL_IF_DEBUG(linker_verbose, LL_DEBUG("               : pcrel     = %d\n", reloc->r_pcrel));
+        LL_IF_DEBUG(linker_verbose, LL_DEBUG("               : length    = %d\n", reloc->r_length));
+        LL_IF_DEBUG(linker_verbose, LL_DEBUG("               : extern    = %d\n", reloc->r_extern));
+        LL_IF_DEBUG(linker_verbose, LL_DEBUG("               : type      = %d\n", reloc->r_type));
 
         switch(reloc->r_length)
         {
@@ -805,7 +805,7 @@ relocateSection(ObjectCode* oc, int curSection)
                 relocLenBytes = 8;
                 break;
             default:
-                barf("Unknown size.");
+                LL_FATAL("Unknown size.");
         }
         checkProddableBlock(&oc->proddables,thingPtr,relocLenBytes);
 
@@ -828,8 +828,8 @@ relocateSection(ObjectCode* oc, int curSection)
 
 
 
-        IF_DEBUG(linker_verbose,
-                 debugBelch("relocateSection: length = %d, thing = %" PRId64 ", baseValue = %p\n",
+        LL_IF_DEBUG(linker_verbose,
+                 LL_DEBUG("relocateSection: length = %d, thing = %" PRId64 ", baseValue = %p\n",
                             reloc->r_length, thing, (char *)baseValue));
 
         if (type == X86_64_RELOC_GOT
@@ -839,11 +839,11 @@ relocateSection(ObjectCode* oc, int curSection)
             SymbolName* nm = symbol->name;
             SymbolAddr* addr = NULL;
 
-            IF_DEBUG(linker_verbose, debugBelch("relocateSection: making jump island for %s, extern = %d, X86_64_RELOC_GOT\n",
+            LL_IF_DEBUG(linker_verbose, LL_DEBUG("relocateSection: making jump island for %s, extern = %d, X86_64_RELOC_GOT\n",
                                         nm, reloc->r_extern));
 
             if (reloc->r_extern == 0) {
-                    errorBelch("\nrelocateSection: global offset table relocation for symbol with r_extern == 0\n");
+                    LL_LOG_ERROR("\nrelocateSection: global offset table relocation for symbol with r_extern == 0\n");
             }
 
             if (symbol->nlist->n_type & N_EXT) {
@@ -853,18 +853,18 @@ relocateSection(ObjectCode* oc, int curSection)
                     // to resolve it.
 
                     addr = lookupDependentSymbol(nm, oc, NULL);
-                    IF_DEBUG(linker_verbose,
-                             debugBelch("relocateSection: looked up %s, "
+                    LL_IF_DEBUG(linker_verbose,
+                             LL_DEBUG("relocateSection: looked up %s, "
                                         "external X86_64_RELOC_GOT or X86_64_RELOC_GOT_LOAD\n"
                                         "               : addr = %p\n", nm, addr));
 
                     if (addr == NULL) {
-                            errorBelch("\nlookupSymbol failed in relocateSection (RELOC_GOT)\n"
+                            LL_LOG_ERROR("\nlookupSymbol failed in relocateSection (RELOC_GOT)\n"
                                        "%s: unknown symbol `%s'", oc->fileName, nm);
                             return 0;
                     }
             } else {
-                    IF_DEBUG(linker_verbose, debugBelch("relocateSection: %s is not an exported symbol\n", nm));
+                    LL_IF_DEBUG(linker_verbose, LL_DEBUG("relocateSection: %s is not an exported symbol\n", nm));
 
                     // The symbol is not exported, or defined in another
                     // module, so it must be in the current object module,
@@ -873,19 +873,19 @@ relocateSection(ObjectCode* oc, int curSection)
 
                     if ((symbol->nlist->n_type & N_TYPE) == N_SECT) {
                         if (symbol->addr == NULL) {
-                            errorBelch("relocateSection: address of internal symbol %s was not resolved\n", nm);
+                            LL_LOG_ERROR("relocateSection: address of internal symbol %s was not resolved\n", nm);
                             return 0;
                         }
 
                         addr = symbol->addr;
 
-                        IF_DEBUG(linker_verbose,
-                                 debugBelch("relocateSection: calculated relocation of "
+                        LL_IF_DEBUG(linker_verbose,
+                                 LL_DEBUG("relocateSection: calculated relocation of "
                                             "non-external X86_64_RELOC_GOT or X86_64_RELOC_GOT_LOAD\n"));
-                        IF_DEBUG(linker_verbose,
-                                 debugBelch("               : addr = %p\n", addr));
+                        LL_IF_DEBUG(linker_verbose,
+                                 LL_DEBUG("               : addr = %p\n", addr));
                     } else {
-                        errorBelch("\nrelocateSection: %s is not exported,"
+                        LL_LOG_ERROR("\nrelocateSection: %s is not exported,"
                                    " and should be defined in a section, but isn't!\n", nm);
                         return 0;
                     }
@@ -903,31 +903,31 @@ relocateSection(ObjectCode* oc, int curSection)
             SymbolName* nm = symbol->name;
             SymbolAddr* addr = NULL;
 
-            IF_DEBUG(linker_verbose, debugBelch("relocateSection: looking up external symbol %s\n", nm));
-            IF_DEBUG(linker_verbose, debugBelch("               : type  = %d\n", symbol->nlist->n_type));
-            IF_DEBUG(linker_verbose, debugBelch("               : sect  = %d\n", symbol->nlist->n_sect));
-            IF_DEBUG(linker_verbose, debugBelch("               : desc  = %d\n", symbol->nlist->n_desc));
-            IF_DEBUG(linker_verbose, debugBelch("               : value = %p\n", (void *)symbol->nlist->n_value));
+            LL_IF_DEBUG(linker_verbose, LL_DEBUG("relocateSection: looking up external symbol %s\n", nm));
+            LL_IF_DEBUG(linker_verbose, LL_DEBUG("               : type  = %d\n", symbol->nlist->n_type));
+            LL_IF_DEBUG(linker_verbose, LL_DEBUG("               : sect  = %d\n", symbol->nlist->n_sect));
+            LL_IF_DEBUG(linker_verbose, LL_DEBUG("               : desc  = %d\n", symbol->nlist->n_desc));
+            LL_IF_DEBUG(linker_verbose, LL_DEBUG("               : value = %p\n", (void *)symbol->nlist->n_value));
 
             if ((symbol->nlist->n_type & N_TYPE) == N_SECT) {
                 CHECK(symbol->addr != NULL);
                 value = (uint64_t) symbol->addr;
-                IF_DEBUG(linker_verbose,
-                         debugBelch("relocateSection, defined external symbol %s, relocated address %p\n",
+                LL_IF_DEBUG(linker_verbose,
+                         LL_DEBUG("relocateSection, defined external symbol %s, relocated address %p\n",
                                     nm, (void *)value));
             }
             else {
                 addr = lookupDependentSymbol(nm, oc, NULL);
                 if (addr == NULL)
                 {
-                     errorBelch("\nlookupSymbol failed in relocateSection (relocate external)\n"
+                     LL_LOG_ERROR("\nlookupSymbol failed in relocateSection (relocate external)\n"
                                 "%s: unknown symbol `%s'", oc->fileName, nm);
                      return 0;
                 }
 
                 value = (uint64_t) addr;
-                IF_DEBUG(linker_verbose,
-                         debugBelch("relocateSection: external symbol %s, address %p\n",
+                LL_IF_DEBUG(linker_verbose,
+                         LL_DEBUG("relocateSection: external symbol %s, address %p\n",
                                     nm, (void *)value));
             }
         }
@@ -952,8 +952,8 @@ relocateSection(ObjectCode* oc, int curSection)
             Section * targetSec = &oc->sections[targetSecNum];
             MachOSection * targetMacho = targetSec->info->macho_section;
 
-            IF_DEBUG(linker_verbose,
-                     debugBelch("relocateSection: internal relocation relative to section %d (%s, %s)\n",
+            LL_IF_DEBUG(linker_verbose,
+                     LL_DEBUG("relocateSection: internal relocation relative to section %d (%s, %s)\n",
                                 targetSecNum, targetMacho->segname, targetMacho->sectname));
 
             switch (type) {
@@ -963,14 +963,14 @@ relocateSection(ObjectCode* oc, int curSection)
                        thing, (uint64_t) targetMacho->addr);
 
                 uint64_t thingRelativeOffset = thing - targetMacho->addr;
-                IF_DEBUG(linker_verbose,
-                         debugBelch("                 "
+                LL_IF_DEBUG(linker_verbose,
+                         LL_DEBUG("                 "
                                     "unsigned displacement %" PRIx64 " with section relative offset %" PRIx64 "\n",
                                             thing, thingRelativeOffset));
 
                 thing = (uint64_t) targetSec->start + thingRelativeOffset;
-                IF_DEBUG(linker_verbose,
-                         debugBelch("                 "
+                LL_IF_DEBUG(linker_verbose,
+                         LL_DEBUG("                 "
                                     "relocated address is %p\n", (void *) thing));
 
                 /* Compared to external relocation we don't need to adjust value
@@ -991,27 +991,27 @@ relocateSection(ObjectCode* oc, int curSection)
                        (void *) imThingLoc, (void *) targetMacho->addr);
 
                 int64_t thingRelativeOffset = imThingLoc - targetMacho->addr;
-                IF_DEBUG(linker_verbose,
-                     debugBelch("                 "
+                LL_IF_DEBUG(linker_verbose,
+                     LL_DEBUG("                 "
                                 "original displacement %" PRId64 " to %p with section relative offset %" PRIu64 "\n",
                                 thing, (void *) imThingLoc, thingRelativeOffset));
 
                 thing = (int64_t) ((uint64_t) targetSec->start + thingRelativeOffset)
                                 - ((uint64_t) sect->start + baseValueOffset);
                 value = baseValue; // so that it further cancels out with baseValue
-                IF_DEBUG(linker_verbose,
-                         debugBelch("                 "
+                LL_IF_DEBUG(linker_verbose,
+                         LL_DEBUG("                 "
                                     "relocated displacement %" PRId64 " to %p\n",
                                     (int64_t) thing, (void *) (baseValue + thing)));
                 break;
             }
             default:
-                barf("relocateSection: unexpected internal relocation type %d\n", type);
+                LL_FATAL("relocateSection: unexpected internal relocation type %d\n", type);
                 return 0;
             }
         }
 
-        IF_DEBUG(linker_verbose, debugBelch("relocateSection: value = %p\n", (void *) value));
+        LL_IF_DEBUG(linker_verbose, LL_DEBUG("relocateSection: value = %p\n", (void *) value));
 
         if (type == X86_64_RELOC_BRANCH)
         {
@@ -1043,10 +1043,10 @@ relocateSection(ObjectCode* oc, int curSection)
                 thing -= value;
                 break;
             default:
-                barf("unknown relocation");
+                LL_FATAL("unknown relocation");
         }
 
-        IF_DEBUG(linker_verbose, debugBelch("relocateSection: thing = %p\n", (void *) thing));
+        LL_IF_DEBUG(linker_verbose, LL_DEBUG("relocateSection: thing = %p\n", (void *) thing));
 
         /* Thing points to memory within one of the relocated sections. We can
          * probe the first byte to sanity check internal relocations.
@@ -1076,7 +1076,7 @@ relocateSection(ObjectCode* oc, int curSection)
         }
     }
 
-    IF_DEBUG(linker, debugBelch("relocateSection: done\n"));
+    LL_IF_DEBUG(linker, LL_DEBUG("relocateSection: done\n"));
     return 1;
 }
 #endif /* x86_64_HOST_ARCH */
@@ -1134,7 +1134,7 @@ ocBuildSegments_MachO(ObjectCode *oc)
     for (int i = 0; i < oc->n_sections; i++) {
         MachOSection *macho = &oc->info->macho_sections[i];
         if (0 == macho->size) {
-            IF_DEBUG(linker, debugBelch("ocBuildSegments_MachO: found a zero length section, skipping\n"));
+            LL_IF_DEBUG(linker, LL_DEBUG("ocBuildSegments_MachO: found a zero length section, skipping\n"));
             continue;
         }
 
@@ -1174,14 +1174,14 @@ ocBuildSegments_MachO(ObjectCode *oc)
     // fail either here or further down the road, e.g. on size > 0 assert in
     // addProddableBlock. See #16701.
     if (0 == size_compound) {
-        IF_DEBUG(linker, debugBelch("ocBuildSegments_MachO: all segments are empty, skipping\n"));
+        LL_IF_DEBUG(linker, LL_DEBUG("ocBuildSegments_MachO: all segments are empty, skipping\n"));
         return 1;
     }
 
     mem = mmapAnonForLinker(size_compound);
     if (NULL == mem) return 0;
 
-    IF_DEBUG(linker, debugBelch("ocBuildSegments: allocating %d segments\n", n_activeSegments));
+    LL_IF_DEBUG(linker, LL_DEBUG("ocBuildSegments: allocating %d segments\n", n_activeSegments));
     segments = (Segment*)stgCallocBytes(n_activeSegments, sizeof(Segment),
                                         "ocBuildSegments_MachO(segments)");
     curMem = mem;
@@ -1194,7 +1194,7 @@ ocBuildSegments_MachO(ObjectCode *oc)
                     roundUpToPage(size_rxSegment),
                     SEGMENT_PROT_RX,
                     n_rxSections);
-        IF_DEBUG(linker, debugBelch("ocBuildSegments_MachO: init segment %d (RX) at %p size %zu\n",
+        LL_IF_DEBUG(linker, LL_DEBUG("ocBuildSegments_MachO: init segment %d (RX) at %p size %zu\n",
                                     curSegment, rxSegment->start, rxSegment->size));
         curMem = (char *)curMem + rxSegment->size;
         curSegment++;
@@ -1208,7 +1208,7 @@ ocBuildSegments_MachO(ObjectCode *oc)
                     roundUpToPage(size_rwSegment),
                     SEGMENT_PROT_RWO,
                     n_rwSections);
-        IF_DEBUG(linker, debugBelch("ocBuildSegments_MachO: init segment %d (RWO) at %p size %zu\n",
+        LL_IF_DEBUG(linker, LL_DEBUG("ocBuildSegments_MachO: init segment %d (RWO) at %p size %zu\n",
                                     curSegment, rwSegment->start, rwSegment->size));
         curMem = (char *)curMem + rwSegment->size;
         curSegment++;
@@ -1222,7 +1222,7 @@ ocBuildSegments_MachO(ObjectCode *oc)
                     roundUpToPage(size_gbZerofillSegment),
                     SEGMENT_PROT_RWO,
                     n_gbZerofills);
-        IF_DEBUG(linker, debugBelch("ocBuildSegments_MachO: init segment %d (GB_ZEROFILL) at %p size %zu\n",
+        LL_IF_DEBUG(linker, LL_DEBUG("ocBuildSegments_MachO: init segment %d (GB_ZEROFILL) at %p size %zu\n",
                                     curSegment, gbZerofillSegment->start, gbZerofillSegment->size));
         curMem = (char *)curMem + gbZerofillSegment->size;
         curSegment++;
@@ -1264,7 +1264,7 @@ ocGetNames_MachO(ObjectCode* oc)
     SymbolAddr* commonStorage = NULL;
     unsigned long commonCounter;
 
-    IF_DEBUG(linker,debugBelch("ocGetNames_MachO: %s start\n",  OC_INFORMATIVE_FILENAME(oc)));
+    LL_IF_DEBUG(linker,LL_DEBUG("ocGetNames_MachO: %s start\n",  OC_INFORMATIVE_FILENAME(oc)));
 
     Section *secArray;
     secArray = (Section*)stgCallocBytes(
@@ -1274,7 +1274,7 @@ ocGetNames_MachO(ObjectCode* oc)
 
     oc->sections = secArray;
 
-    IF_DEBUG(linker, debugBelch("ocGetNames_MachO: will load %d sections\n",
+    LL_IF_DEBUG(linker, LL_DEBUG("ocGetNames_MachO: will load %d sections\n",
                                 oc->n_sections));
 
     CHECKM(ocBuildSegments_MachO(oc), "ocGetNames_MachO: failed to build segments\n");
@@ -1283,8 +1283,8 @@ ocGetNames_MachO(ObjectCode* oc)
         Segment *segment = &oc->segments[seg_n];
         void *curMem = segment->start;
 
-        IF_DEBUG(linker,
-                 debugBelch("ocGetNames_MachO: loading segment %d "
+        LL_IF_DEBUG(linker,
+                 LL_DEBUG("ocGetNames_MachO: loading segment %d "
                             "(address = %p, size = %zu) "
                             "with %d sections\n",
                             seg_n, segment->start, segment->size, segment->n_sections));
@@ -1304,8 +1304,8 @@ ocGetNames_MachO(ObjectCode* oc)
 
             start = secMem;
 
-            IF_DEBUG(linker,
-                     debugBelch("ocGetNames_MachO: loading section %d in segment %d "
+            LL_IF_DEBUG(linker,
+                     LL_DEBUG("ocGetNames_MachO: loading section %d in segment %d "
                                 "(#%d, %s %s)\n"
                                 "                  skipped %zu bytes due to alignment of %zu\n",
                                 sec_n, seg_n, sec_idx, section->segname, section->sectname,
@@ -1314,14 +1314,14 @@ ocGetNames_MachO(ObjectCode* oc)
             switch (section->flags & SECTION_TYPE) {
             case S_ZEROFILL:
             case S_GB_ZEROFILL:
-                IF_DEBUG(linker, debugBelch("ocGetNames_MachO: memset to 0 a ZEROFILL section\n"));
+                LL_IF_DEBUG(linker, LL_DEBUG("ocGetNames_MachO: memset to 0 a ZEROFILL section\n"));
                 memset(secMem, 0, section->size);
                 addSection(&secArray[sec_idx], kind, alloc, start, size,
                             mapped_offset, mapped_start, mapped_size);
                 break;
             default:
-                IF_DEBUG(linker,
-                         debugBelch("ocGetNames_MachO: copying from %p to %p"
+                LL_IF_DEBUG(linker,
+                         LL_DEBUG("ocGetNames_MachO: copying from %p to %p"
                                     " a block of %" PRIu64 " bytes\n",
                                     (void *) (oc->image + section->offset), secMem, section->size));
 #if defined(NEED_PLT)
@@ -1331,7 +1331,7 @@ ocGetNames_MachO(ObjectCode* oc)
                 void * mem = mmapForLinker(section->size+stub_space, MEM_READ_WRITE, MAP_ANON, -1, 0);
 
                 if( mem == MAP_FAILED ) {
-                    sysErrorBelch("failed to mmap allocated memory to load section %d. "
+                    LL_LOG_SYSERROR("failed to mmap allocated memory to load section %d. "
                                   "errno = %d", sec_idx, errno);
                 }
                 /* copy only the image part over; we don't want to copy data
@@ -1382,7 +1382,7 @@ ocGetNames_MachO(ObjectCode* oc)
         MachOSymbol * s = &oc->info->macho_symbols[i];
         if( N_SECT == (s->nlist->n_type & N_TYPE) ) {
             if( NO_SECT == s->nlist->n_sect )
-                barf("Symbol with N_SECT type, but no section.");
+                LL_FATAL("Symbol with N_SECT type, but no section.");
 
             /* section is given, and n_sect is >0 */
             uint8_t n = s->nlist->n_sect - 1;
@@ -1405,7 +1405,7 @@ ocGetNames_MachO(ObjectCode* oc)
                               - oc->info->macho_sections[n].addr
                               + s->nlist->n_value;
             if(NULL == s->addr)
-                barf("Failed to compute address for symbol %s", s->name);
+                LL_FATAL("Failed to compute address for symbol %s", s->name);
         }
     }
 
@@ -1439,7 +1439,7 @@ ocGetNames_MachO(ObjectCode* oc)
      * which symbols will have to be removed when
      * this object code is unloaded
      */
-    IF_DEBUG(linker, debugBelch("ocGetNames_MachO: %d external symbols\n",
+    LL_IF_DEBUG(linker, LL_DEBUG("ocGetNames_MachO: %d external symbols\n",
                                 oc->n_symbols));
     oc->symbols = stgCallocBytes(oc->n_symbols, sizeof(Symbol_t),
                                    "ocGetNames_MachO(oc->symbols)");
@@ -1449,7 +1449,7 @@ ocGetNames_MachO(ObjectCode* oc)
             SymbolName* nm = oc->info->macho_symbols[i].name;
             if (oc->info->nlist[i].n_type & N_STAB)
             {
-                IF_DEBUG(linker_verbose, debugBelch("ocGetNames_MachO: Skip STAB: %s\n", nm));
+                LL_IF_DEBUG(linker_verbose, LL_DEBUG("ocGetNames_MachO: Skip STAB: %s\n", nm));
             }
             else if ((oc->info->nlist[i].n_type & N_TYPE) == N_SECT)
             {
@@ -1458,11 +1458,11 @@ ocGetNames_MachO(ObjectCode* oc)
                     if (   (oc->info->nlist[i].n_desc & N_WEAK_DEF)
                         && lookupDependentSymbol(nm, oc, NULL)) {
                         // weak definition, and we already have a definition
-                        IF_DEBUG(linker_verbose, debugBelch("    weak: %s\n", nm));
+                        LL_IF_DEBUG(linker_verbose, LL_DEBUG("    weak: %s\n", nm));
                     }
                     else
                     {
-                            IF_DEBUG(linker_verbose, debugBelch("ocGetNames_MachO: inserting %s\n", nm));
+                            LL_IF_DEBUG(linker_verbose, LL_DEBUG("ocGetNames_MachO: inserting %s\n", nm));
                             SymbolAddr* addr = oc->info->macho_symbols[i].addr;
                             // TODO: Make figure out how to determine this from the object file
                             SymType sym_type = SYM_TYPE_CODE;
@@ -1483,12 +1483,12 @@ ocGetNames_MachO(ObjectCode* oc)
                 }
                 else
                 {
-                    IF_DEBUG(linker_verbose, debugBelch("ocGetNames_MachO: \t...not external, skipping %s\n", nm));
+                    LL_IF_DEBUG(linker_verbose, LL_DEBUG("ocGetNames_MachO: \t...not external, skipping %s\n", nm));
                 }
             }
             else
             {
-                IF_DEBUG(linker_verbose, debugBelch("ocGetNames_MachO: \t...not defined in this section, skipping %s\n", nm));
+                LL_IF_DEBUG(linker_verbose, LL_DEBUG("ocGetNames_MachO: \t...not defined in this section, skipping %s\n", nm));
             }
         }
     }
@@ -1516,7 +1516,7 @@ ocGetNames_MachO(ObjectCode* oc)
                      * object; reuse that address so relocations resolve to
                      * the same storage. */
                     if (sz > existing->size) {
-                        barf("linker: trying to link COMMON symbols %s with"
+                        LL_FATAL("linker: trying to link COMMON symbols %s with"
                              " incompatible sizes: previous size %llu,"
                              " new size %lu\n",
                              nm,
@@ -1525,8 +1525,8 @@ ocGetNames_MachO(ObjectCode* oc)
                     }
                     nlist->n_value = (unsigned long)existing->value;
                     oc->info->macho_symbols[i].addr = existing->value;
-                    IF_DEBUG(linker_verbose,
-                             debugBelch("ocGetNames_MachO: COMMON symbol %s"
+                    LL_IF_DEBUG(linker_verbose,
+                             LL_DEBUG("ocGetNames_MachO: COMMON symbol %s"
                                         " reusing address %p\n",
                                         nm, existing->value));
                     /* Don't add to oc->symbols: not the owner */
@@ -1535,8 +1535,8 @@ ocGetNames_MachO(ObjectCode* oc)
                     /* also set the final address to the macho_symbol */
                     oc->info->macho_symbols[i].addr = (void*)commonCounter;
 
-                    IF_DEBUG(linker_verbose,
-                             debugBelch("ocGetNames_MachO: inserting common symbol: %s\n", nm));
+                    LL_IF_DEBUG(linker_verbose,
+                             LL_DEBUG("ocGetNames_MachO: inserting common symbol: %s\n", nm));
                     ghciInsertSymbolTable(oc->fileName, symhash, nm,
                                          (void*)commonCounter, HS_BOOL_FALSE,
                                          sym_type,
@@ -1574,7 +1574,7 @@ ocGetNames_MachO(ObjectCode* oc)
      * - those that are undefined, but have a value (common storage).
      */
 #endif
-    IF_DEBUG(linker, debugBelch("ocGetNames_MachO: done\n"));
+    LL_IF_DEBUG(linker, LL_DEBUG("ocGetNames_MachO: done\n"));
     return 1;
 }
 
@@ -1615,19 +1615,19 @@ ocMprotect_MachO( ObjectCode *oc )
 int
 ocResolve_MachO(ObjectCode* oc)
 {
-    IF_DEBUG(linker, debugBelch("ocResolve_MachO: %s start\n", OC_INFORMATIVE_FILENAME(oc)));
+    LL_IF_DEBUG(linker, LL_DEBUG("ocResolve_MachO: %s start\n", OC_INFORMATIVE_FILENAME(oc)));
 
     if(NULL != oc->info->dsymCmd)
     {
         unsigned long *indirectSyms
             = (unsigned long*) (oc->image + oc->info->dsymCmd->indirectsymoff);
 
-        IF_DEBUG(linker, debugBelch("ocResolve_MachO: resolving dsymLC\n"));
+        LL_IF_DEBUG(linker, LL_DEBUG("ocResolve_MachO: resolving dsymLC\n"));
         for (int i = 0; i < oc->n_sections; i++)
         {
             const char * sectionName = oc->info->macho_sections[i].sectname;
 
-            IF_DEBUG(linker, debugBelch("ocResolve_MachO: section %d/%d: %s\n", i, oc->n_sections, sectionName));
+            LL_IF_DEBUG(linker, LL_DEBUG("ocResolve_MachO: section %d/%d: %s\n", i, oc->n_sections, sectionName));
 
             if(    !strcmp(sectionName,"__la_symbol_ptr")
                 || !strcmp(sectionName,"__la_sym_ptr2")
@@ -1652,7 +1652,7 @@ ocResolve_MachO(ObjectCode* oc)
             }
             else
             {
-                IF_DEBUG(linker, debugBelch("ocResolve_MachO: unknown section %d/%d\n", i, oc->n_sections));
+                LL_IF_DEBUG(linker, LL_DEBUG("ocResolve_MachO: unknown section %d/%d\n", i, oc->n_sections));
             }
         }
     }
@@ -1668,7 +1668,7 @@ ocResolve_MachO(ObjectCode* oc)
                 if(NULL == symbol->addr) {
                     symbol->addr = lookupDependentSymbol((char*)symbol->name, oc, NULL);
                     if(NULL == symbol->addr) {
-                        errorBelch("Failed to lookup symbol: %s", symbol->name);
+                        LL_LOG_ERROR("Failed to lookup symbol: %s", symbol->name);
                         return 0;
                     }
                 } else {
@@ -1679,11 +1679,11 @@ ocResolve_MachO(ObjectCode* oc)
                * the address as well already
                */
             if(NULL == symbol->addr) {
-                errorBelch("Symbol %s has no address!\n", (char*)symbol->name);
+                LL_LOG_ERROR("Symbol %s has no address!\n", (char*)symbol->name);
                 return 0;
             }
             if(NULL == symbol->got_addr) {
-                errorBelch("Symbol %s has no Global Offset Table address!\n", (char*)symbol->name);
+                LL_LOG_ERROR("Symbol %s has no Global Offset Table address!\n", (char*)symbol->name);
                 return 0;
             }
             *(uint64_t*)symbol->got_addr = (uint64_t)symbol->addr;
@@ -1693,7 +1693,7 @@ ocResolve_MachO(ObjectCode* oc)
 
     for(int i = 0; i < oc->n_sections; i++)
     {
-        IF_DEBUG(linker, debugBelch("ocResolve_MachO: relocating section %d/%d\n", i, oc->n_sections));
+        LL_IF_DEBUG(linker, LL_DEBUG("ocResolve_MachO: relocating section %d/%d\n", i, oc->n_sections));
 
 #if defined(aarch64_HOST_ARCH)
         if (!relocateSectionAarch64(oc, &oc->sections[i]))
@@ -1713,7 +1713,7 @@ int
 ocRunInit_MachO ( ObjectCode *oc )
 {
     if (NULL == oc->info->segCmd) {
-        barf("ocRunInit_MachO: no segment load command");
+        LL_FATAL("ocRunInit_MachO: no segment load command");
     }
 
     int argc, envc;
@@ -1723,10 +1723,10 @@ ocRunInit_MachO ( ObjectCode *oc )
     getProgEnvv(&envc, &envv);
 
     for (int i = 0; i < oc->n_sections; i++) {
-        IF_DEBUG(linker, debugBelch("ocRunInit_MachO: checking section %d\n", i));
+        LL_IF_DEBUG(linker, LL_DEBUG("ocRunInit_MachO: checking section %d\n", i));
 
         if (oc->sections[i].kind == SECTIONKIND_INIT_ARRAY) {
-            IF_DEBUG(linker, debugBelch("ocRunInit_MachO:     running mod init functions\n"));
+            LL_IF_DEBUG(linker, LL_DEBUG("ocRunInit_MachO:     running mod init functions\n"));
 
             void *init_startC = oc->sections[i].start;
             init_t *init = (init_t*)init_startC;
@@ -1734,7 +1734,7 @@ ocRunInit_MachO ( ObjectCode *oc )
                              + oc->sections[i].info->macho_section->size);
 
             for (int pn = 0; init < init_end; init++, pn++) {
-                IF_DEBUG(linker, debugBelch("ocRunInit_MachO:     function pointer %d at %p to %p\n",
+                LL_IF_DEBUG(linker, LL_DEBUG("ocRunInit_MachO:     function pointer %d at %p to %p\n",
                                             pn, (void *) init, (void *) *init));
                 (*init)(argc, argv, envv);
             }
@@ -1749,14 +1749,14 @@ int
 ocRunFini_MachO ( ObjectCode *oc )
 {
     if (NULL == oc->info->segCmd) {
-        barf("ocRunInit_MachO: no segment load command");
+        LL_FATAL("ocRunInit_MachO: no segment load command");
     }
 
     for (int i = 0; i < oc->n_sections; i++) {
-        IF_DEBUG(linker, debugBelch("ocRunFini_MachO: checking section %d\n", i));
+        LL_IF_DEBUG(linker, LL_DEBUG("ocRunFini_MachO: checking section %d\n", i));
 
         if (oc->sections[i].kind == SECTIONKIND_FINI_ARRAY) {
-            IF_DEBUG(linker, debugBelch("ocRunFini_MachO:     running mod fini functions\n"));
+            LL_IF_DEBUG(linker, LL_DEBUG("ocRunFini_MachO:     running mod fini functions\n"));
 
             void *fini_startC = oc->sections[i].start;
             fini_t *fini = (fini_t*)fini_startC;
@@ -1764,7 +1764,7 @@ ocRunFini_MachO ( ObjectCode *oc )
                              + oc->sections[i].info->macho_section->size);
 
             for (int pn = 0; fini < fini_end; fini++, pn++) {
-                IF_DEBUG(linker, debugBelch("ocRunFini_MachO:     function pointer %d at %p to %p\n",
+                LL_IF_DEBUG(linker, LL_DEBUG("ocRunFini_MachO:     function pointer %d at %p to %p\n",
                                             pn, (void *) fini, (void *) *fini));
                 (*fini)();
             }
@@ -1787,20 +1787,20 @@ machoGetMisalignment( FILE * f )
     {
         size_t n = fread(&header, sizeof(header), 1, f);
         if (n != 1) {
-            barf("machoGetMisalignment: can't read the Mach-O header");
+            LL_FATAL("machoGetMisalignment: can't read the Mach-O header");
         }
     }
     fseek(f, -sizeof(header), SEEK_CUR);
 
     if(header.magic != MH_MAGIC_64) {
-        barf("Bad magic. Expected: %08x, got: %08x.",
+        LL_FATAL("Bad magic. Expected: %08x, got: %08x.",
              MH_MAGIC_64, header.magic);
     }
 
     misalignment = (header.sizeofcmds + sizeof(header))
                     & 0xF;
 
-    IF_DEBUG(linker, debugBelch("mach-o misalignment %d\n", misalignment));
+    LL_IF_DEBUG(linker, LL_DEBUG("mach-o misalignment %d\n", misalignment));
     return misalignment ? (16 - misalignment) : 0;
 }
 

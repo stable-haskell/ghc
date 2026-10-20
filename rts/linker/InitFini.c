@@ -172,7 +172,7 @@ static bool runInitFini(struct InitFiniList **head)
             }
             break;
         }
-        default: barf("unknown InitFiniKind");
+        default: LL_FATAL("unknown InitFiniKind");
         }
     }
     freeInitFiniList(*head);
