@@ -14,6 +14,8 @@
 #include "GetEnv.h"
 #include "ForeignExports.h"
 #include "Profiling.h"
+#include "StablePtr.h"
+#include "CheckUnload.h"
 #include "linker/ll_host.h"
 
 static void *host_malloc(void *ctx STG_UNUSED, size_t n, const char *what)
@@ -123,6 +125,78 @@ static void host_after_native_load(void *ctx STG_UNUSED,
     foreignExportsFinishedLoadingObject();
 }
 
+/*
+ * Release StablePtrs and free oc->stable_ptrs.
+ * This operation is idempotent.
+ */
+static void host_on_unload(void *ctx STG_UNUSED, ObjectCode *oc)
+{
+    // Release any StablePtrs that were created when this
+    // object module was initialized.
+    struct ForeignExportsList *exports, *next;
+
+    for (exports = oc->foreign_exports; exports != NULL; exports = next) {
+        next = exports->next;
+        for (int i = 0; i < exports->n_entries; i++) {
+            freeStablePtr(exports->stable_ptrs[i]);
+        }
+        // processForeignExports allocates this array with the RTS allocator.
+        stgFree(exports->stable_ptrs);
+        exports->stable_ptrs = NULL;
+        exports->next = NULL;
+    }
+    oc->foreign_exports = NULL;
+}
+
+static void host_object_registered(void *ctx STG_UNUSED, ObjectCode *oc)
+{
+    insertOCSectionIndices(oc);
+}
+
+static void host_init_unload_check(void *ctx STG_UNUSED)
+{
+    initUnloadCheck();
+}
+
+static void host_exit_unload_check(void *ctx STG_UNUSED)
+{
+    exitUnloadCheck();
+}
+
+static void host_populate_builtins(void *ctx STG_UNUSED, int retain_cafs,
+                                   ll_builtin_fn insert, void *insert_ctx)
+{
+    /* populate the symbol table with stuff from the RTS */
+    LL_IF_DEBUG(linker, LL_DEBUG("populating linker symbol table with built-in RTS symbols\n"));
+    for (const RtsSymbolVal *sym = rtsSyms; sym->lbl != NULL; sym++) {
+        LL_IF_DEBUG(linker, LL_DEBUG("initLinker: inserting rts symbol %s, %p\n", sym->lbl, sym->addr));
+        insert(insert_ctx, sym->lbl, sym->addr,
+               sym->strength, sym->type);
+    }
+    LL_IF_DEBUG(linker, LL_DEBUG("done with built-in RTS symbols\n"));
+
+    /* Add extra symbols. rtsExtraSyms() is a weakly defined symbol in the rts,
+     * that can be overrided by linking in an object with a corresponding
+     * definition later. This is useful to build an external-interpreter or some
+     * other process with extra symbols (mostly libc, or similar).
+     * See Note [Extra RTS symbols]
+     */
+    LL_IF_DEBUG(linker, LL_DEBUG("populating linker symbol table with extra RTS symbols\n"));
+    if(rtsExtraSyms && rtsExtraSyms() != NULL) {
+        for(RtsSymbolVal *sym = rtsExtraSyms(); sym->lbl != NULL; sym++) {
+            LL_IF_DEBUG(linker, LL_DEBUG("initLinker: inserting extra rts symbol %s, %p\n", sym->lbl, sym->addr));
+            insert(insert_ctx, sym->lbl, sym->addr,
+                   sym->strength, sym->type);
+        }
+    }
+    LL_IF_DEBUG(linker, LL_DEBUG("done with extra RTS symbols\n"));
+
+    // Redirect newCAF to newRetainedCAF if retain_cafs is true.
+    insert(insert_ctx, MAYBE_LEADING_UNDERSCORE_STR("newCAF"),
+           retain_cafs ? newRetainedCAF : newGCdCAF,
+           HS_BOOL_FALSE, SYM_TYPE_CODE);
+}
+
 void ll_rts_install_host(void)
 {
     const ll_host_ops host = {
@@ -144,6 +218,11 @@ void ll_rts_install_host(void)
 #endif
         .before_native_load = host_before_native_load,
         .after_native_load = host_after_native_load,
+        .on_unload = host_on_unload,
+        .object_registered = host_object_registered,
+        .init_unload_check = host_init_unload_check,
+        .exit_unload_check = host_exit_unload_check,
+        .populate_builtins = host_populate_builtins,
     };
     const ll_config cfg = {
         .near_hint = &stg_upd_frame_info,

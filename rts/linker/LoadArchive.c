@@ -631,7 +631,9 @@ HsInt loadArchive_ (pathchar *path)
                 fclose(f);
                 return 0;
             } else {
-                insertOCSectionIndices(oc); // also adds the object to `objects` list
+                if (ll_host.object_registered != NULL) {
+                    ll_host.object_registered(ll_host.ctx, oc); // also adds the object to `objects` list
+                }
                 oc->next_loaded_object = loaded_objects;
                 loaded_objects = oc;
             }

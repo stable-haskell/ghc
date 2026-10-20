@@ -109,8 +109,6 @@
 //   object and we don't delete existing dependencies.
 //
 
-uint8_t object_code_mark_bit = 0;
-
 typedef struct {
     W_ start;
     W_ end;
@@ -127,38 +125,9 @@ typedef struct {
     OCSectionIndex *indices;
 } OCSectionIndices;
 
-// List of currently live objects. Moved to `old_objects` before unload check.
-// Marked objects moved back to this list in `markObjectLive`. Remaining objects
-// are freed at the end of `checkUnload`.
-//
-// Double-linked list to be able to remove marked objects. List formed with
-// `next` and `prev` fields of `ObjectCode`.
-//
-// Not static: used in Linker.c.
-ObjectCode *objects = NULL;
-
 // `objects` list is moved here before unload check. Marked objects are moved
 // back to `objects`. Remaining objects are freed.
 static ObjectCode *old_objects = NULL;
-
-// Number of objects that we want to unload. When this value is 0 we skip static
-// object marking during GC and `checkUnload`.
-//
-// Not static: we use this value to skip static object marking in evacuate when
-// this is 0.
-//
-// Incremented in `unloadObj_`, decremented as we unload objects in
-// `checkUnload`.
-int n_unloaded_objects = 0;
-
-// List of objects that we don't want to unload (i.e. we haven't called
-// unloadObj on these yet). Used as root set for unload check in checkUnload.
-// Objects are added with loadObj_ and removed with unloadObj_.
-//
-// List formed with `next_loaded_object` field of `ObjectCode`.
-//
-// Not static: used in Linker.c.
-ObjectCode *loaded_objects;
 
 // Section index table for currently loaded objects. New indices are added by
 // `loadObj_`, indices of unloaded objects are removed in `checkUnload`. Used to

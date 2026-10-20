@@ -212,6 +212,37 @@ StrHashTable *symhash;
 Mutex linker_mutex;
 #endif
 
+uint8_t object_code_mark_bit = 0;
+
+// List of currently live objects. Moved to `old_objects` before unload check.
+// Marked objects moved back to this list in `markObjectLive`. Remaining objects
+// are freed at the end of `checkUnload`.
+//
+// Double-linked list to be able to remove marked objects. List formed with
+// `next` and `prev` fields of `ObjectCode`.
+//
+// Not static: used in Linker.c.
+ObjectCode *objects = NULL;
+
+// Number of objects that we want to unload. When this value is 0 we skip static
+// object marking during GC and `checkUnload`.
+//
+// Not static: we use this value to skip static object marking in evacuate when
+// this is 0.
+//
+// Incremented in `unloadObj_`, decremented as we unload objects in
+// `checkUnload`.
+int n_unloaded_objects = 0;
+
+// List of objects that we don't want to unload (i.e. we haven't called
+// unloadObj on these yet). Used as root set for unload check in checkUnload.
+// Objects are added with loadObj_ and removed with unloadObj_.
+//
+// List formed with `next_loaded_object` field of `ObjectCode`.
+//
+// Not static: used in Linker.c.
+ObjectCode *loaded_objects;
+
 /* Generic wrapper function to try and resolve oc files */
 static int ocTryLoad( ObjectCode* oc );
 /* Run initializers */
@@ -435,6 +466,15 @@ HsBool ghciLookupSymbolInfo(StrHashTable *table,
  */
 
 
+static void insertBuiltin(void *ctx, const char *name, void *addr,
+                          int strength, int type)
+{
+    if (! ghciInsertSymbolTable(WSTR("(GHCi built-in symbols)"),
+                                ctx, name, addr, strength, type, 0, NULL)) {
+        LL_FATAL("ghciInsertSymbolTable failed");
+    }
+}
+
 static int linker_init_done = 0 ;
 
 #if defined(OBJFORMAT_ELF) || defined(OBJFORMAT_MACHO)
@@ -470,7 +510,9 @@ initLinker_ (int retain_cafs)
         linker_init_done = 1;
     }
 
-    initUnloadCheck();
+    if (ll_host.init_unload_check != NULL) {
+        ll_host.init_unload_check(ll_host.ctx);
+    }
 
 #if defined(THREADED_RTS)
     initMutex(&linker_mutex);
@@ -478,43 +520,8 @@ initLinker_ (int retain_cafs)
 
     symhash = allocStrHashTable();
 
-    /* populate the symbol table with stuff from the RTS */
-    LL_IF_DEBUG(linker, LL_DEBUG("populating linker symbol table with built-in RTS symbols\n"));
-    for (const RtsSymbolVal *sym = rtsSyms; sym->lbl != NULL; sym++) {
-        LL_IF_DEBUG(linker, LL_DEBUG("initLinker: inserting rts symbol %s, %p\n", sym->lbl, sym->addr));
-        if (! ghciInsertSymbolTable(WSTR("(GHCi built-in symbols)"),
-                                    symhash, sym->lbl, sym->addr,
-                                    sym->strength, sym->type, 0, NULL)) {
-            LL_FATAL("ghciInsertSymbolTable failed");
-        }
-    }
-    LL_IF_DEBUG(linker, LL_DEBUG("done with built-in RTS symbols\n"));
-
-    /* Add extra symbols. rtsExtraSyms() is a weakly defined symbol in the rts,
-     * that can be overrided by linking in an object with a corresponding
-     * definition later. This is useful to build an external-interpreter or some
-     * other process with extra symbols (mostly libc, or similar).
-     * See Note [Extra RTS symbols]
-     */
-    LL_IF_DEBUG(linker, LL_DEBUG("populating linker symbol table with extra RTS symbols\n"));
-    if(rtsExtraSyms && rtsExtraSyms() != NULL) {
-        for(RtsSymbolVal *sym = rtsExtraSyms(); sym->lbl != NULL; sym++) {
-            LL_IF_DEBUG(linker, LL_DEBUG("initLinker: inserting extra rts symbol %s, %p\n", sym->lbl, sym->addr));
-            if (! ghciInsertSymbolTable(WSTR("(GHCi built-in symbols)"),
-                                        symhash, sym->lbl, sym->addr,
-                                        sym->strength, sym->type, 0, NULL)) {
-                LL_FATAL("ghciInsertSymbolTable failed");
-            }
-        }
-    }
-    LL_IF_DEBUG(linker, LL_DEBUG("done with extra RTS symbols\n"));
-
-    // Redirect newCAF to newRetainedCAF if retain_cafs is true.
-    if (! ghciInsertSymbolTable(WSTR("(GHCi built-in symbols)"), symhash,
-                                MAYBE_LEADING_UNDERSCORE_STR("newCAF"),
-                                retain_cafs ? newRetainedCAF : newGCdCAF,
-                                HS_BOOL_FALSE, SYM_TYPE_CODE, 0, NULL)) {
-        LL_FATAL("ghciInsertSymbolTable failed");
+    if (ll_host.populate_builtins != NULL) {
+        ll_host.populate_builtins(ll_host.ctx, retain_cafs, insertBuiltin, symhash);
     }
 
 #   if defined(OBJFORMAT_ELF) || defined(OBJFORMAT_MACHO)
@@ -556,7 +563,9 @@ exitLinker( void ) {
 #endif
    if (linker_init_done == 1) {
        freeStrHashTable(symhash, free);
-       exitUnloadCheck();
+       if (ll_host.exit_unload_check != NULL) {
+           ll_host.exit_unload_check(ll_host.ctx);
+       }
    }
 #if defined(THREADED_RTS)
    closeMutex(&linker_mutex);
@@ -1076,28 +1085,6 @@ static void removeOcSymbols (ObjectCode *oc)
     oc->symbols = NULL;
 }
 
-/*
- * Release StablePtrs and free oc->stable_ptrs.
- * This operation is idempotent.
- */
-static void freeOcStablePtrs (ObjectCode *oc)
-{
-    // Release any StablePtrs that were created when this
-    // object module was initialized.
-    struct ForeignExportsList *exports, *next;
-
-    for (exports = oc->foreign_exports; exports != NULL; exports = next) {
-        next = exports->next;
-        for (int i = 0; i < exports->n_entries; i++) {
-            freeStablePtr(exports->stable_ptrs[i]);
-        }
-        LL_FREE(exports->stable_ptrs);
-        exports->stable_ptrs = NULL;
-        exports->next = NULL;
-    }
-    oc->foreign_exports = NULL;
-}
-
 static void
 freePreloadObjectFile (ObjectCode *oc)
 {
@@ -1512,12 +1499,14 @@ static HsInt loadObj_ (pathchar *path)
    if (! loadOc(oc)) {
        // failed; free everything we've allocated
        removeOcSymbols(oc);
-       // no need to freeOcStablePtrs, they aren't created until resolveObjs()
+       // no StablePtrs to release, they aren't created until resolveObjs()
        freeObjectCode(oc);
        return 0;
    }
 
-   insertOCSectionIndices(oc);
+   if (ll_host.object_registered != NULL) {
+       ll_host.object_registered(ll_host.ctx, oc);
+   }
 
    oc->next_loaded_object = loaded_objects;
    loaded_objects = oc;
@@ -1798,7 +1787,9 @@ static HsInt unloadObj_ (pathchar *path, bool just_purge)
             // These are both idempotent, so in just_purge mode we can later
             // call unloadObj() to really unload the object.
             removeOcSymbols(oc);
-            freeOcStablePtrs(oc);
+            if (ll_host.on_unload != NULL) {
+                ll_host.on_unload(ll_host.ctx, oc);
+            }
 
             unloadedAnyObj = true;
 
@@ -1938,7 +1929,9 @@ static HsInt unloadNativeObj_(void *handle)
 
             // dynamic objects have no symbols
             CHECK(nc->symbols == NULL);
-            freeOcStablePtrs(nc);
+            if (ll_host.on_unload != NULL) {
+                ll_host.on_unload(ll_host.ctx, nc);
+            }
 
             // Remove object code from root set
             if (prev == NULL) {

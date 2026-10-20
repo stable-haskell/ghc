@@ -224,7 +224,9 @@ try_again:
    nc->unloadable = false;
 #endif /* defined (HAVE_DLINFO) */
 
-   insertOCSectionIndices(nc);
+   if (ll_host.object_registered != NULL) {
+       ll_host.object_registered(ll_host.ctx, nc);
+   }
 
    nc->next_loaded_object = loaded_objects;
    loaded_objects = nc;
