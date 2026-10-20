@@ -1235,6 +1235,13 @@ stage3-x86_64-musl-linux: stage3-x86_64-unknown-linux-musl
 test-target-aliases: ## Check target alias manifests and archive entry points
 	$(PYTHON) mk/test-target-aliases.py
 
+HOST_PLATFORM_TEST_GHC ?= $(GHC0)
+HOST_PLATFORM_TEST_ARGS ?=
+.PHONY: test-ghc-boot-host-generator
+test-ghc-boot-host-generator: ## Compile/run ghc-boot Host generator with candidate Cabal; pass package DBs in HOST_PLATFORM_TEST_ARGS
+	$(PYTHON) libraries/ghc-boot/tests/test_setup_host_platform.py \
+		--ghc "$(HOST_PLATFORM_TEST_GHC)" $(HOST_PLATFORM_TEST_ARGS)
+
 .PHONY: stage3-profile stage3-$(PROFILING_TARGET)-additional-files
 stage3-profile: stage3-$(PROFILING_TARGET) ## Build the native profiling ABI and its separate package universe
 stage3-$(PROFILING_TARGET): cabal.project.stage3-profile
