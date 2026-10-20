@@ -1,0 +1,41 @@
+cabal-version: 3.0
+name: liblink
+version: 0.1.0.0
+synopsis: GHC runtime linker library package
+description: Native runtime linker library for GHC.
+license: BSD-3-Clause
+license-file: LICENSE
+maintainer: glasgow-haskell-users@haskell.org
+build-type: Configure
+
+extra-source-files:
+    configure.ac
+    configure
+    build-aux/config.guess
+    build-aux/config.sub
+    liblink.buildinfo.in
+    include/ll_autoconf.h.in
+    include/ll_platform.h.in
+
+flag asserts
+    description: Enable linker assertions.
+    default: False
+    manual: True
+
+flag all-backends
+    description: Include every supported linker backend.
+    default: False
+    manual: True
+
+library
+    build-depends: rts-fs
+    c-sources: src/ll_version.c
+    include-dirs: include
+    install-includes: ll_autoconf.h ll_platform.h
+    autogen-includes: ll_autoconf.h ll_platform.h
+    cc-options: -std=c11 -fvisibility=hidden
+    if flag(asserts)
+        cc-options: -DLL_ASSERTS
+    if flag(all-backends)
+        cc-options: -DLL_ALL_BACKENDS
+    default-language: Haskell2010
