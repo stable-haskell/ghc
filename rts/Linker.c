@@ -29,7 +29,7 @@
 #include "ForeignExports.h"
 #include "sm/OSMem.h"
 #include "linker/M32Alloc.h"
-#include "linker/ll_host.h"
+#include "linker/ll_compat.h"
 #include "linker/CacheFlush.h"
 #include "linker/SymbolExtras.h"
 #include "linker/MMap.h"
@@ -237,7 +237,7 @@ symbolTypeString (SymType type)
         case SYM_TYPE_CODE: return "code";
         case SYM_TYPE_DATA: return "data";
         case SYM_TYPE_INDIRECT_DATA: return "indirect-data";
-        default: barf("symbolTypeString: unknown symbol type (%d)", type);
+        default: LL_FATAL("symbolTypeString: unknown symbol type (%d)", type);
     }
 }
 
@@ -299,10 +299,10 @@ int ghciInsertSymbolTable(
        /* We were asked to discard the symbol on duplicates, do so quietly.  */
        if (!(type & (SYM_TYPE_DUP_DISCARD | SYM_TYPE_HIDDEN)))
        {
-         debugBelch("Symbol type mismatch (existing %d, new %d).\n", pinfo->type, type);
-         debugBelch("Symbol %s was defined by %" PATH_FMT " to be a %s symbol.\n",
+         LL_DEBUG("Symbol type mismatch (existing %d, new %d).\n", pinfo->type, type);
+         LL_DEBUG("Symbol %s was defined by %" PATH_FMT " to be a %s symbol.\n",
                     key, obj_name, symbolTypeString(type));
-         debugBelch("      yet was defined by %" PATH_FMT " to be a %s symbol.\n",
+         LL_DEBUG("      yet was defined by %" PATH_FMT " to be a %s symbol.\n",
                     pinfo->owner ? pinfo->owner->fileName : WSTR("<builtin>"),
                     symbolTypeString(pinfo->type));
        }
@@ -311,7 +311,7 @@ int ghciInsertSymbolTable(
    else if (pinfo->strength == STRENGTH_STRONG)
    {
        /* The existing symbol is strong meaning we must never override it */
-       IF_DEBUG(linker, debugBelch("%s is already defined as a strong symbol; ignoring redefinition...", key));
+       LL_IF_DEBUG(linker, LL_DEBUG("%s is already defined as a strong symbol; ignoring redefinition...", key));
        return 1;
    }
    else if (strength == STRENGTH_WEAK &&
@@ -384,7 +384,7 @@ int ghciInsertSymbolTable(
         return 1;
     }
 
-   debugBelch(
+   LL_DEBUG(
       "GHC runtime linker: fatal error: I found a duplicate definition for symbol\n"
       "   %s\n"
       "whilst processing object file\n"
@@ -421,7 +421,7 @@ HsBool ghciLookupSymbolInfo(StrHashTable *table,
         return HS_BOOL_FALSE;
     }
     if (pinfo->strength == STRENGTH_WEAK) {
-        IF_DEBUG(linker, debugBelch("lookupSymbolInfo: promoting %s\n", key));
+        LL_IF_DEBUG(linker, LL_DEBUG("lookupSymbolInfo: promoting %s\n", key));
         /* Once it's looked up, it can no longer be overridden */
         pinfo->strength = STRENGTH_NORMAL;
     }
@@ -458,13 +458,13 @@ initLinker_ (int retain_cafs)
     int compileResult;
 #endif
 
-    IF_DEBUG(linker, debugBelch("initLinker: start\n"));
+    LL_IF_DEBUG(linker, LL_DEBUG("initLinker: start\n"));
 
     /* Make initLinker idempotent, so we can call it
        before every relevant operation; that means we
        don't need to initialise the linker separately */
     if (linker_init_done == 1) {
-        IF_DEBUG(linker, debugBelch("initLinker: idempotent return\n"));
+        LL_IF_DEBUG(linker, LL_DEBUG("initLinker: idempotent return\n"));
         return;
     } else {
         linker_init_done = 1;
@@ -479,16 +479,16 @@ initLinker_ (int retain_cafs)
     symhash = allocStrHashTable();
 
     /* populate the symbol table with stuff from the RTS */
-    IF_DEBUG(linker, debugBelch("populating linker symbol table with built-in RTS symbols\n"));
+    LL_IF_DEBUG(linker, LL_DEBUG("populating linker symbol table with built-in RTS symbols\n"));
     for (const RtsSymbolVal *sym = rtsSyms; sym->lbl != NULL; sym++) {
-        IF_DEBUG(linker, debugBelch("initLinker: inserting rts symbol %s, %p\n", sym->lbl, sym->addr));
+        LL_IF_DEBUG(linker, LL_DEBUG("initLinker: inserting rts symbol %s, %p\n", sym->lbl, sym->addr));
         if (! ghciInsertSymbolTable(WSTR("(GHCi built-in symbols)"),
                                     symhash, sym->lbl, sym->addr,
                                     sym->strength, sym->type, 0, NULL)) {
-            barf("ghciInsertSymbolTable failed");
+            LL_FATAL("ghciInsertSymbolTable failed");
         }
     }
-    IF_DEBUG(linker, debugBelch("done with built-in RTS symbols\n"));
+    LL_IF_DEBUG(linker, LL_DEBUG("done with built-in RTS symbols\n"));
 
     /* Add extra symbols. rtsExtraSyms() is a weakly defined symbol in the rts,
      * that can be overrided by linking in an object with a corresponding
@@ -496,25 +496,25 @@ initLinker_ (int retain_cafs)
      * other process with extra symbols (mostly libc, or similar).
      * See Note [Extra RTS symbols]
      */
-    IF_DEBUG(linker, debugBelch("populating linker symbol table with extra RTS symbols\n"));
+    LL_IF_DEBUG(linker, LL_DEBUG("populating linker symbol table with extra RTS symbols\n"));
     if(rtsExtraSyms && rtsExtraSyms() != NULL) {
         for(RtsSymbolVal *sym = rtsExtraSyms(); sym->lbl != NULL; sym++) {
-            IF_DEBUG(linker, debugBelch("initLinker: inserting extra rts symbol %s, %p\n", sym->lbl, sym->addr));
+            LL_IF_DEBUG(linker, LL_DEBUG("initLinker: inserting extra rts symbol %s, %p\n", sym->lbl, sym->addr));
             if (! ghciInsertSymbolTable(WSTR("(GHCi built-in symbols)"),
                                         symhash, sym->lbl, sym->addr,
                                         sym->strength, sym->type, 0, NULL)) {
-                barf("ghciInsertSymbolTable failed");
+                LL_FATAL("ghciInsertSymbolTable failed");
             }
         }
     }
-    IF_DEBUG(linker, debugBelch("done with extra RTS symbols\n"));
+    LL_IF_DEBUG(linker, LL_DEBUG("done with extra RTS symbols\n"));
 
     // Redirect newCAF to newRetainedCAF if retain_cafs is true.
     if (! ghciInsertSymbolTable(WSTR("(GHCi built-in symbols)"), symhash,
                                 MAYBE_LEADING_UNDERSCORE_STR("newCAF"),
                                 retain_cafs ? newRetainedCAF : newGCdCAF,
                                 HS_BOOL_FALSE, SYM_TYPE_CODE, 0, NULL)) {
-        barf("ghciInsertSymbolTable failed");
+        LL_FATAL("ghciInsertSymbolTable failed");
     }
 
 #   if defined(OBJFORMAT_ELF) || defined(OBJFORMAT_MACHO)
@@ -528,13 +528,13 @@ initLinker_ (int retain_cafs)
            "(([^ \t()])+\\.so([^ \t:()])*):([ \t])*(invalid ELF header|file too short|invalid file format|Exec format error)",
            REG_EXTENDED);
     if (compileResult != 0) {
-        barf("Compiling re_invalid failed");
+        LL_FATAL("Compiling re_invalid failed");
     }
     compileResult = regcomp(&re_realso,
            "(GROUP|INPUT) *\\( *([^ )]+)",
            REG_EXTENDED);
     if (compileResult != 0) {
-        barf("Compiling re_realso failed");
+        LL_FATAL("Compiling re_realso failed");
     }
 #   endif
 
@@ -542,7 +542,7 @@ initLinker_ (int retain_cafs)
     initLinker_PEi386();
 #endif
 
-    IF_DEBUG(linker, debugBelch("initLinker: done\n"));
+    LL_IF_DEBUG(linker, LL_DEBUG("initLinker: done\n"));
     return;
 }
 
@@ -616,7 +616,7 @@ internal_dlsym(const char *symbol) {
     // look in program first
     v = dlsym(dl_prog_handle, symbol);
     if (dlerror() == NULL) {
-        IF_DEBUG(linker, debugBelch("internal_dlsym: found symbol '%s' in program\n", symbol));
+        LL_IF_DEBUG(linker, LL_DEBUG("internal_dlsym: found symbol '%s' in program\n", symbol));
         return v;
     }
 
@@ -624,13 +624,13 @@ internal_dlsym(const char *symbol) {
         if (nc->type == DYNAMIC_OBJECT) {
           v = dlsym(nc->dlopen_handle, symbol);
           if (dlerror() == NULL) {
-            IF_DEBUG(linker, debugBelch("internal_dlsym: found symbol '%s' in shared object\n", symbol));
+            LL_IF_DEBUG(linker, LL_DEBUG("internal_dlsym: found symbol '%s' in shared object\n", symbol));
             return v;
           }
         }
     }
 
-    IF_DEBUG(linker, debugBelch("internal_dlsym: looking for symbol '%s' in special cases\n", symbol));
+    LL_IF_DEBUG(linker, LL_DEBUG("internal_dlsym: looking for symbol '%s' in special cases\n", symbol));
 #   define SPECIAL_SYMBOL(sym) \
       if (strcmp(symbol, #sym) == 0) return (void*)&sym;
 
@@ -688,7 +688,7 @@ void *lookupSymbolInNativeObj(void *handle, const char *symbol_name)
     void* result;
     UNUSED(handle);
     UNUSED(symbol_name);
-    barf("lookupSymbolInNativeObj: Unsupported platform");
+    LL_FATAL("lookupSymbolInNativeObj: Unsupported platform");
 #endif
 
     RELEASE_LOCK(&linker_mutex);
@@ -716,7 +716,7 @@ const char *addDLL(pathchar* dll_name)
 */
 pathchar* findSystemLibrary(pathchar* dll_name)
 {
-    IF_DEBUG(linker, debugBelch("\nfindSystemLibrary: dll_name = `%"
+    LL_IF_DEBUG(linker, LL_DEBUG("\nfindSystemLibrary: dll_name = `%"
                                 PATH_FMT "'\n", dll_name));
 
 #if defined(OBJFORMAT_PEi386)
@@ -735,7 +735,7 @@ void warnMissingKBLibraryPaths( void )
 {
     static HsBool missing_update_warn = HS_BOOL_FALSE;
     if (!missing_update_warn) {
-        debugBelch("Warning: If linking fails, consider installing KB2533623.\n");
+        LL_DEBUG("Warning: If linking fails, consider installing KB2533623.\n");
         missing_update_warn = HS_BOOL_TRUE;
     }
 }
@@ -748,7 +748,7 @@ void warnMissingKBLibraryPaths( void )
 */
 HsPtr addLibrarySearchPath(pathchar* dll_path)
 {
-    IF_DEBUG(linker, debugBelch("\naddLibrarySearchPath: dll_path = `%"
+    LL_IF_DEBUG(linker, LL_DEBUG("\naddLibrarySearchPath: dll_path = `%"
                                 PATH_FMT "'\n", dll_path));
 
 #if defined(OBJFORMAT_PEi386)
@@ -766,7 +766,7 @@ HsPtr addLibrarySearchPath(pathchar* dll_path)
 */
 HsBool removeLibrarySearchPath(HsPtr dll_path_index)
 {
-    IF_DEBUG(linker, debugBelch("\nremoveLibrarySearchPath: ptr = `%p'\n",
+    LL_IF_DEBUG(linker, LL_DEBUG("\nremoveLibrarySearchPath: ptr = `%p'\n",
                                 dll_path_index));
 
 #if defined(OBJFORMAT_PEi386)
@@ -806,7 +806,7 @@ SymbolAddr* lookupDependentSymbol (SymbolName* lbl, ObjectCode *dependent, SymTy
 SymbolAddr* lookupDependentSymbol (SymbolName* lbl, ObjectCode *dependent, SymType *type)
 {
     ASSERT_LOCK_HELD(&linker_mutex);
-    IF_DEBUG(linker_verbose, debugBelch("lookupSymbol: looking up '%s'\n", lbl));
+    LL_IF_DEBUG(linker_verbose, LL_DEBUG("lookupSymbol: looking up '%s'\n", lbl));
 
     ASSERT(symhash != NULL);
     RtsSymbolInfo *pinfo;
@@ -836,7 +836,7 @@ SymbolAddr* lookupDependentSymbol (SymbolName* lbl, ObjectCode *dependent, SymTy
 #endif
 
     if (!ghciLookupSymbolInfo(symhash, lbl, &pinfo)) {
-        IF_DEBUG(linker_verbose, debugBelch("lookupSymbol: symbol '%s' not found, trying dlsym\n", lbl));
+        LL_IF_DEBUG(linker_verbose, LL_DEBUG("lookupSymbol: symbol '%s' not found, trying dlsym\n", lbl));
 
 #       if defined(OBJFORMAT_ELF)
         SymbolAddr *ret = internal_dlsym(lbl);
@@ -868,7 +868,7 @@ SymbolAddr* lookupDependentSymbol (SymbolName* lbl, ObjectCode *dependent, SymTy
                  searching for the symbol. For now, we simply strip it off here
                  (and ONLY here).
         */
-        IF_DEBUG(linker, debugBelch("lookupSymbol: looking up %s with dlsym\n",
+        LL_IF_DEBUG(linker, LL_DEBUG("lookupSymbol: looking up %s with dlsym\n",
                                     lbl));
         CHECK(lbl[0] == '_');
         if (type) {
@@ -932,8 +932,8 @@ SymbolAddr* lookupDependentSymbol (SymbolName* lbl, ObjectCode *dependent, SymTy
  * Symbol name only used for diagnostics output.
  */
 SymbolAddr* loadSymbol(SymbolName *lbl, RtsSymbolInfo *pinfo) {
-    IF_DEBUG(linker_verbose,
-             debugBelch("lookupSymbol: value of %s is %p, owned by %" PATH_FMT "\n", lbl,
+    LL_IF_DEBUG(linker_verbose,
+             LL_DEBUG("lookupSymbol: value of %s is %p, owned by %" PATH_FMT "\n", lbl,
                         pinfo->value,
                         pinfo->owner ? OC_INFORMATIVE_FILENAME(pinfo->owner) : WSTR("No owner, probably built-in.")));
     ObjectCode* oc = pinfo->owner;
@@ -942,7 +942,7 @@ SymbolAddr* loadSymbol(SymbolName *lbl, RtsSymbolInfo *pinfo) {
         See Note [runtime-linker-phases] */
     if (oc && lbl && oc->status == OBJECT_LOADED) {
         oc->status = OBJECT_NEEDED;
-        IF_DEBUG(linker, debugBelch("lookupSymbol: on-demand "
+        LL_IF_DEBUG(linker, LL_DEBUG("lookupSymbol: on-demand "
                                     "loading symbol '%s'\n", lbl));
         int r = ocTryLoad(oc);
         if (!r) {
@@ -982,15 +982,15 @@ SymbolAddr* lookupSymbol( SymbolName* lbl )
     SymbolAddr* r = lookupDependentSymbol(lbl, NULL, NULL);
     if (!r) {
         if (!ll_cfg.optimistic) {
-          errorBelch("^^ Could not load '%s', dependency unresolved. "
+          LL_LOG_ERROR("^^ Could not load '%s', dependency unresolved. "
                      "See top entry above. You might consider using --optimistic-linking\n",
                      lbl);
-          IF_DEBUG(linker, printLoadedObjects());
+          LL_IF_DEBUG(linker, printLoadedObjects());
           fflush(stderr);
         } else {
           // if --optimistic-linking is passed into the RTS we allow the linker
           // to optimistically continue
-          errorBelch("^^ Could not load '%s', dependency unresolved, "
+          LL_LOG_ERROR("^^ Could not load '%s', dependency unresolved, "
                      "optimistically continuing\n",
                      lbl);
           r = (void*) 0xDEADBEEF;
@@ -998,7 +998,7 @@ SymbolAddr* lookupSymbol( SymbolName* lbl )
     }
 
     if (!runPendingInitializers()) {
-        errorBelch("lookupSymbol: Failed to run initializers.");
+        LL_LOG_ERROR("lookupSymbol: Failed to run initializers.");
     }
     RELEASE_LOCK(&linker_mutex);
     return r;
@@ -1033,7 +1033,7 @@ void ghci_enquire(SymbolAddr* addr)
          else if (   a->value
                   && (char*)addr-DELTA <= (char*)a->value
                   && (char*)a->value <= (char*)addr+DELTA) {
-             debugBelch("%p + %3d  ==  `%s'\n", addr,
+             LL_DEBUG("%p + %3d  ==  `%s'\n", addr,
                         (int)((char*)a->value - (char*)addr), sym);
          }
       }
@@ -1146,7 +1146,7 @@ freePreloadObjectFile (ObjectCode *oc)
  */
 void freeObjectCode (ObjectCode *oc)
 {
-    IF_DEBUG(linker, ocDebugBelch(oc, "freeObjectCode: start\n"));
+    LL_IF_DEBUG(linker, ocDebugBelch(oc, "freeObjectCode: start\n"));
 
     // Run finalizers only if initializers have been run.
     // See Note [Object unloading and finalizers].
@@ -1171,7 +1171,7 @@ void freeObjectCode (ObjectCode *oc)
         freeNativeCode_POSIX(oc);
         RELEASE_LOCK(&linker_mutex);
 #else
-        barf("freeObjectCode: This shouldn't happen");
+        LL_FATAL("freeObjectCode: This shouldn't happen");
 #endif
     }
 
@@ -1204,7 +1204,7 @@ void freeObjectCode (ObjectCode *oc)
                     // Freed by m32_allocator_free
                     break;
                 case SECTION_MALLOC:
-                    IF_DEBUG(zero_on_gc,
+                    LL_IF_DEBUG(zero_on_gc,
                         memset(oc->sections[i].start,
                             0x00, oc->sections[i].size));
                     stgFree(oc->sections[i].start);
@@ -1264,7 +1264,7 @@ mkOc( ObjectType type, pathchar *path, char *image, int imageSize,
    ObjectCode* oc;
 
 
-   IF_DEBUG(linker, debugBelch("mkOc: %" PATH_FMT "\n", path));
+   LL_IF_DEBUG(linker, LL_DEBUG("mkOc: %" PATH_FMT "\n", path));
    oc = stgMallocBytes(sizeof(ObjectCode), "mkOc(oc)");
 
    oc->info = NULL;
@@ -1278,7 +1278,7 @@ mkOc( ObjectType type, pathchar *path, char *image, int imageSize,
    oc->formatName = "Mach-O";
 #  else
    stgFree(oc);
-   barf("loadObj: not implemented on this platform");
+   LL_FATAL("loadObj: not implemented on this platform");
 #  endif
 
    oc->image = image;
@@ -1377,7 +1377,7 @@ preloadObjectFile (pathchar *path)
 
    r = pathstat(path, &st);
    if (r == -1) {
-       errorBelch("loadObj: %" PATH_FMT ": file doesn't exist", path);
+       LL_LOG_ERROR("loadObj: %" PATH_FMT ": file doesn't exist", path);
        return NULL;
    }
 
@@ -1395,7 +1395,7 @@ preloadObjectFile (pathchar *path)
    fd = open(path, O_RDONLY);
 #endif
    if (fd == -1) {
-      errorBelch("loadObj: can't open %s", path);
+      LL_LOG_ERROR("loadObj: can't open %s", path);
       return NULL;
    }
 
@@ -1415,7 +1415,7 @@ preloadObjectFile (pathchar *path)
 #endif
 
    if (image == MAP_FAILED) {
-       errorBelch("mmap: failed. errno = %d", errno);
+       LL_LOG_ERROR("mmap: failed. errno = %d", errno);
    }
    // not 32-bit yet, we'll remap later
    close(fd);
@@ -1427,7 +1427,7 @@ preloadObjectFile (pathchar *path)
    /* coverity[toctou] */
    f = pathopen(path, WSTR("rb"));
    if (!f) {
-       errorBelch("loadObj: can't preload `%" PATH_FMT "'", path);
+       LL_LOG_ERROR("loadObj: can't preload `%" PATH_FMT "'", path);
        return NULL;
    }
 
@@ -1456,14 +1456,14 @@ preloadObjectFile (pathchar *path)
    n = fread ( image, 1, fileSize, f );
    fclose(f);
    if (n != fileSize) {
-       errorBelch("loadObj: error whilst reading `%" PATH_FMT "'", path);
+       LL_LOG_ERROR("loadObj: error whilst reading `%" PATH_FMT "'", path);
        stgFree(image);
        return NULL;
    }
 
 #endif /* RTS_LINKER_USE_MMAP */
 
-   IF_DEBUG(linker, debugBelch("loadObj: preloaded image at %p\n", (void *) image));
+   LL_IF_DEBUG(linker, LL_DEBUG("loadObj: preloaded image at %p\n", (void *) image));
 
    /* FIXME (AP): =mapped= parameter unconditionally set to true */
    oc = mkOc(STATIC_OBJECT, path, image, fileSize, true, NULL, misalignment);
@@ -1490,8 +1490,8 @@ static HsInt loadObj_ (pathchar *path)
    // Ignore requests to load multiple times
 
    if (isAlreadyLoaded(path)) {
-       IF_DEBUG(linker,
-                debugBelch("ignoring repeated load of %" PATH_FMT "\n", path));
+       LL_IF_DEBUG(linker,
+                LL_DEBUG("ignoring repeated load of %" PATH_FMT "\n", path));
        return 1; // success
    }
 
@@ -1501,8 +1501,8 @@ static HsInt loadObj_ (pathchar *path)
        if (loadArchive_(path)) {
             return 1; // success
        } else {
-            IF_DEBUG(linker,
-                        debugBelch("tried and failed to load %" PATH_FMT " as an archive\n", path));
+            LL_IF_DEBUG(linker,
+                        LL_DEBUG("tried and failed to load %" PATH_FMT " as an archive\n", path));
        }
    }
 
@@ -1536,7 +1536,7 @@ HsInt loadOc (ObjectCode* oc)
 {
    int r;
 
-   IF_DEBUG(linker, ocDebugBelch(oc, "start\n"));
+   LL_IF_DEBUG(linker, ocDebugBelch(oc, "start\n"));
 
    /* verify the in-memory image */
 #  if defined(OBJFORMAT_ELF)
@@ -1546,10 +1546,10 @@ HsInt loadOc (ObjectCode* oc)
 #  elif defined(OBJFORMAT_MACHO)
    r = ocVerifyImage_MachO ( oc );
 #  else
-   barf("loadObj: no verify method");
+   LL_FATAL("loadObj: no verify method");
 #  endif
    if (!r) {
-       IF_DEBUG(linker, ocDebugBelch(oc, "ocVerifyImage_* failed\n"));
+       LL_IF_DEBUG(linker, ocDebugBelch(oc, "ocVerifyImage_* failed\n"));
        return r;
    }
 
@@ -1574,14 +1574,14 @@ HsInt loadOc (ObjectCode* oc)
 #  if defined(OBJFORMAT_MACHO)
    r = ocAllocateExtras_MachO ( oc );
    if (!r) {
-       IF_DEBUG(linker,
+       LL_IF_DEBUG(linker,
                 ocDebugBelch(oc, "ocAllocateExtras_MachO failed\n"));
        return r;
    }
 #  elif defined(OBJFORMAT_ELF)
    r = ocAllocateExtras_ELF ( oc );
    if (!r) {
-       IF_DEBUG(linker,
+       LL_IF_DEBUG(linker,
                 ocDebugBelch(oc, "ocAllocateExtras_ELF failed\n"));
        return r;
    }
@@ -1596,10 +1596,10 @@ HsInt loadOc (ObjectCode* oc)
 #  elif defined(OBJFORMAT_MACHO)
    r = ocGetNames_MachO ( oc );
 #  else
-   barf("loadObj: no getNames method");
+   LL_FATAL("loadObj: no getNames method");
 #  endif
    if (!r) {
-       IF_DEBUG(linker, ocDebugBelch(oc, "ocGetNames_* failed\n"));
+       LL_IF_DEBUG(linker, ocDebugBelch(oc, "ocGetNames_* failed\n"));
        return r;
    }
 
@@ -1614,7 +1614,7 @@ HsInt loadOc (ObjectCode* oc)
            oc->status = OBJECT_LOADED;
        }
    }
-   IF_DEBUG(linker, ocDebugBelch(oc, "done\n"));
+   LL_IF_DEBUG(linker, ocDebugBelch(oc, "done\n"));
 
    return 1;
 }
@@ -1655,7 +1655,7 @@ int ocTryLoad (ObjectCode* oc) {
         }
     }
 
-    IF_DEBUG(linker, ocDebugBelch(oc, "resolving\n"));
+    LL_IF_DEBUG(linker, ocDebugBelch(oc, "resolving\n"));
 #   if defined(OBJFORMAT_ELF)
     r = ocResolve_ELF ( oc );
 #   elif defined(OBJFORMAT_PEi386)
@@ -1663,14 +1663,14 @@ int ocTryLoad (ObjectCode* oc) {
 #   elif defined(OBJFORMAT_MACHO)
     r = ocResolve_MachO ( oc );
 #   else
-    barf("ocTryLoad: not implemented on this platform");
+    LL_FATAL("ocTryLoad: not implemented on this platform");
 #   endif
     if (!r) {
-        IF_DEBUG(linker, ocDebugBelch(oc, "resolution failed\n"));
+        LL_IF_DEBUG(linker, ocDebugBelch(oc, "resolution failed\n"));
         return r;
     }
 
-    IF_DEBUG(linker, ocDebugBelch(oc, "protecting mappings\n"));
+    LL_IF_DEBUG(linker, ocDebugBelch(oc, "protecting mappings\n"));
 #if defined(NEED_SYMBOL_EXTRAS)
     ocProtectExtras(oc);
 #endif
@@ -1682,7 +1682,7 @@ int ocTryLoad (ObjectCode* oc) {
     m32_allocator_flush(oc->rw_m32);
 #endif
 
-    IF_DEBUG(linker, ocDebugBelch(oc, "resolved\n"));
+    LL_IF_DEBUG(linker, ocDebugBelch(oc, "resolved\n"));
     oc->status = OBJECT_RESOLVED;
 
     return 1;
@@ -1695,7 +1695,7 @@ int ocRunInit(ObjectCode *oc)
         return 1;
     }
 
-    IF_DEBUG(linker, ocDebugBelch(oc, "running initializers\n"));
+    LL_IF_DEBUG(linker, ocDebugBelch(oc, "running initializers\n"));
 
     // See Note [Tracking foreign exports] in ForeignExports.c
     foreignExportsLoadingObject(oc);
@@ -1707,7 +1707,7 @@ int ocRunInit(ObjectCode *oc)
 #elif defined(OBJFORMAT_MACHO)
     r = ocRunInit_MachO ( oc );
 #else
-    barf("ocTryLoad: initializers not implemented on this platform");
+    LL_FATAL("ocTryLoad: initializers not implemented on this platform");
 #endif
     foreignExportsFinishedLoadingObject();
 
@@ -1723,8 +1723,8 @@ int runPendingInitializers (void)
     for (ObjectCode *oc = objects; oc; oc = oc->next) {
         int r = ocRunInit(oc);
         if (!r) {
-            errorBelch("Could not run initializers of Object Code %" PATH_FMT ".\n", OC_INFORMATIVE_FILENAME(oc));
-            IF_DEBUG(linker, printLoadedObjects());
+            LL_LOG_ERROR("Could not run initializers of Object Code %" PATH_FMT ".\n", OC_INFORMATIVE_FILENAME(oc));
+            LL_IF_DEBUG(linker, printLoadedObjects());
             fflush(stderr);
             return r;
         }
@@ -1745,13 +1745,13 @@ int runPendingInitializers (void)
  */
 static HsInt resolveObjs_ (void)
 {
-    IF_DEBUG(linker, debugBelch("resolveObjs: start\n"));
+    LL_IF_DEBUG(linker, LL_DEBUG("resolveObjs: start\n"));
 
     for (ObjectCode *oc = objects; oc; oc = oc->next) {
         int r = ocTryLoad(oc);
         if (!r) {
-            errorBelch("Could not load Object Code %" PATH_FMT ".\n", OC_INFORMATIVE_FILENAME(oc));
-            IF_DEBUG(linker, printLoadedObjects());
+            LL_LOG_ERROR("Could not load Object Code %" PATH_FMT ".\n", OC_INFORMATIVE_FILENAME(oc));
+            LL_IF_DEBUG(linker, printLoadedObjects());
             fflush(stderr);
             return r;
         }
@@ -1761,7 +1761,7 @@ static HsInt resolveObjs_ (void)
         return 0;
     }
 
-    IF_DEBUG(linker, debugBelch("resolveObjs: done\n"));
+    LL_IF_DEBUG(linker, LL_DEBUG("resolveObjs: done\n"));
     return 1;
 }
 
@@ -1781,7 +1781,7 @@ static HsInt unloadObj_ (pathchar *path, bool just_purge)
     ASSERT(symhash != NULL);
     ASSERT(objects != NULL);
 
-    IF_DEBUG(linker, debugBelch("unloadObj: %" PATH_FMT "\n", path));
+    LL_IF_DEBUG(linker, LL_DEBUG("unloadObj: %" PATH_FMT "\n", path));
 
     bool unloadedAnyObj = false;
     ObjectCode *prev = NULL;
@@ -1815,7 +1815,7 @@ static HsInt unloadObj_ (pathchar *path, bool just_purge)
     if (unloadedAnyObj) {
         return 1;
     } else {
-        errorBelch("unloadObj: can't find `%" PATH_FMT "' to unload", path);
+        LL_LOG_ERROR("unloadObj: can't find `%" PATH_FMT "' to unload", path);
         return 0;
     }
 }
@@ -1884,15 +1884,15 @@ addSection (Section *s, SectionKind kind, SectionAlloc alloc,
        = (struct SectionFormatInfo*)stgCallocBytes(1, sizeof *s->info,
                                             "addSection(SectionFormatInfo)");
 
-   IF_DEBUG(linker,
-            debugBelch("addSection: %p-%p (size %" FMT_Word "), kind %d\n",
+   LL_IF_DEBUG(linker,
+            LL_DEBUG("addSection: %p-%p (size %" FMT_Word "), kind %d\n",
                        start, (void*)((StgWord)start + size),
                        size, kind ));
 }
 
 void * loadNativeObj (pathchar *path, char **errmsg)
 {
-   IF_DEBUG(linker, debugBelch("loadNativeObj: path = '%" PATH_FMT "'\n", path));
+   LL_IF_DEBUG(linker, LL_DEBUG("loadNativeObj: path = '%" PATH_FMT "'\n", path));
    ACQUIRE_LOCK(&linker_mutex);
 
 #if defined(OBJFORMAT_ELF) || defined(OBJFORMAT_MACHO)
@@ -1903,7 +1903,7 @@ void * loadNativeObj (pathchar *path, char **errmsg)
 #else
    void *r;
    UNUSED(errmsg);
-   barf("loadNativeObj: not implemented on this platform");
+   LL_FATAL("loadNativeObj: not implemented on this platform");
 #endif
 
 #if defined(OBJFORMAT_ELF)
@@ -1922,7 +1922,7 @@ static HsInt unloadNativeObj_(void *handle)
 {
     bool unloadedAnyObj = false;
 
-    IF_DEBUG(linker, debugBelch("unloadNativeObj: %p\n", handle));
+    LL_IF_DEBUG(linker, LL_DEBUG("unloadNativeObj: %p\n", handle));
 
     ObjectCode *prev = NULL, *next;
     for (ObjectCode *nc = loaded_objects; nc; nc = next) {
@@ -1951,7 +1951,7 @@ static HsInt unloadNativeObj_(void *handle)
     if (unloadedAnyObj) {
         return 1;
     } else {
-        errorBelch("unloadObjNativeObj_: can't find `%p' to unload", handle);
+        LL_LOG_ERROR("unloadObjNativeObj_: can't find `%p' to unload", handle);
         return 0;
     }
 }
@@ -1980,19 +1980,19 @@ initSegment (Segment *s, void *start, size_t size, SegmentProt prot, int n_secti
 void freeSegments (ObjectCode *oc)
 {
     if (oc->segments != NULL) {
-        IF_DEBUG(linker, ocDebugBelch(oc, "freeing %d segments\n", oc->n_segments));
+        LL_IF_DEBUG(linker, ocDebugBelch(oc, "freeing %d segments\n", oc->n_segments));
 
         for (int i = 0; i < oc->n_segments; i++) {
             Segment *s = &oc->segments[i];
 
-            IF_DEBUG(linker, ocDebugBelch(oc, "freeing segment %d at %p size %zu\n",
+            LL_IF_DEBUG(linker, ocDebugBelch(oc, "freeing segment %d at %p size %zu\n",
                                           i, s->start, s->size));
 
             stgFree(s->sections_idx);
             s->sections_idx = NULL;
 
             if (0 == s->size) {
-                IF_DEBUG(linker, ocDebugBelch(oc, "skipping segment of 0 size\n"));
+                LL_IF_DEBUG(linker, ocDebugBelch(oc, "skipping segment of 0 size\n"));
                 continue;
             } else {
 #if RTS_LINKER_USE_MMAP
