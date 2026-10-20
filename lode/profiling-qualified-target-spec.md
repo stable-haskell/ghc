@@ -195,6 +195,17 @@ directing the caller to the separate Haskell ABI selection. The Makefile's
 stage3 target name changes from `M-profiling` to `M-prof`; its `TRIPLE` remains
 `M`, and its `ABI` remains `profiling`.
 
+Configure-script probes follow the selected Cabal stage. For a Host package,
+the default configure arguments are `--host=<Host M>` and
+`--build=<Build M>`; for a Build package, both default to the Build compiler's
+full machine triple. These are the complete configured triples, including any
+environment component. An explicit user `--host` or `--build` value takes
+precedence over its inferred default. Preserve these values through both
+Setup hook paths and through the serializable external-Setup configuration
+used to invoke `configure`. Reject a logical `M-prof` at this C-toolchain
+boundary with guidance to pass machine-only `M` and select the Haskell ABI
+separately.
+
 Installed target directories use `targets/T/lib`; the manifest and all
 dispatched programs select the same directory. Cover `ghc`, `ghc-pkg`,
 `runghc`, hsc2hs, and other actually shipped target helpers. Do not invent a
@@ -476,7 +487,7 @@ real boundaries, not just compare a helper's output to itself.
 | T8 | Both directions of explicit incompatible interface import fail; normal package discovery never mixes target DBs, including in a reused project directory. | R4 |
 | T9 | Ordinary compiler/client/Setup legacy-way requests fail; profiling compiler default and redundant flags build once. Explicit unavailable shared/debug requests fail; automatic choices use supported static output. Inspect archives, interfaces, and objects for retired automatic suffixes. | R3, R8 |
 | T10 | Global, local, install-local, explicit Build stage, and explicit package profiling options preserve scope and precedence through cache serialization. | R5, R8, R10 |
-| T11 | Capture C/C++/hsc2hs/linker/LLVM command lines and generated LLVM module targets. Machine ABI is intact; no `-prof` reaches toolchain target fields. | R2, R6 |
+| T11 | Capture actual C/C++/hsc2hs/linker/LLVM commands, generated LLVM module targets, and configure argv for Build and Host probes. Verify full stage-specific machine triples, explicit `--host`/`--build` precedence, and that no logical `-prof` reaches toolchain target fields. | R2, R6 |
 | T12 | Fresh bindist configure/install, relocation to a path with spaces, separate consumer project, and testsuite archive execution pass with matching final GHC/Cabal revisions. | R1, R3, R4, R11 |
 | T13 | Native nonprofiling and an existing Wasm cross project preserve package conditions, Build/Host routing, and capability handling. | R5, R10 |
 | D1 | Independent source review confirms generic identity code, the thin profiling adapter, legacy-way deletion, and unrelated store/HPC fixes have the boundaries specified in the plan. | R12 |

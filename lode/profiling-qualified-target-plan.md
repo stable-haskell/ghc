@@ -106,6 +106,16 @@ environment field, unknown/unsafe logical names, old settings, and native
 metadata. Exit when producer serialization and consumer queries agree and no
 qualified name reaches C toolchain inputs.
 
+Cover R6 at the configure boundary as part of the same identity flow. A Host
+package defaults configure probes to `--host=<Host M>` and
+`--build=<Build M>`; a Build package defaults both to its Build machine
+triple. Preserve each complete configured triple, including environment
+components. Explicit `--host` and `--build` values override their respective
+inferred defaults. Exercise default and custom Setup hook paths, plus the
+serializable external-Setup route that invokes configure. Reject `M-prof`
+there with migration guidance to use machine-only `M` and choose the Haskell
+ABI separately.
+
 ## Phase 2 Centralize Cabal identity
 
 ### Library API and metadata ingestion
@@ -260,7 +270,7 @@ Capability skips for unavailable shared/debug variants stay explicit.
 | T2, T5 | Driver/package environment tests and installed profiling workflow | Do all programs resolve aliases and namespaces identically? |
 | T4 | Cabal/cabal-install unit tests for compiler properties, package hashes, layouts, and plan output | Can incompatible targets collide despite equal `Platform`? |
 | T6, T10 | Existing Cabal profiling target, Custom Setup, build-tool, and install-local integration fixtures | Are option origin and stage identity preserved through elaboration and cache reload? |
-| T7, T8, T9, T11 | Existing GHC profiling target regression fixtures and Cabal compiler fixtures | Are actual ABI semantics and ordinary filenames correct? |
+| T7, T8, T9, T11 | Existing GHC profiling target regression fixtures and Cabal compiler fixtures | Are actual ABI semantics and ordinary filenames correct? Does captured configure argv use full stage-specific machine triples and preserve explicit option precedence? |
 | T12 | `make test-profile-install` and testsuite archive smoke harness | Does a clean installed/relocated consumer work without build-tree leakage? |
 | T13 | Existing native/Wasm cross regression projects | Did general target identity alter unrelated platform behaviour? |
 | D1 | Integrated diff and PR boundaries | Is profiling policy thin, with general identity and independent fixes separately reviewable? |
@@ -305,3 +315,9 @@ Astra's focused follow-up review closed both findings and found no remaining
 consequential design defect or unresolved central contract in this scope.
 This is design review; implementation and runtime qualification remain the
 work described above.
+
+Astra's focused R6/T11 review on 2026-10-21 found no design blockers for the
+stage-specific machine triples, explicit configure-option precedence,
+`-prof` rejection at the C boundary, or Setup/configuration serialization
+paths. Implementation and captured-configure-argv regressions remain separate
+verification work.
