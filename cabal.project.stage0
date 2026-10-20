@@ -1,11 +1,12 @@
 source-repository-package
   type: git
   location: https://github.com/stable-haskell/Cabal.git
-  -- Pin to feat/wasm-cross-ghcup-stack-next (post-split Cabal #378): supports
-  -- `package host:*` / `package build:*` needed by cabal.project.stage2.dynamic
-  -- so DYNAMIC=1 does not build BUILD-stage tools shared against bootstrap GHC.
-  -- Re-pin to stable-haskell/master once #378 lands there (cabal#384).
-  tag: f2e0a89e15cf6604cec9d93e26a4b3caf459b076
+  -- stable-haskell/merge: the trunk-based fork (cabal-install 3.19), i.e. the
+  -- cross-compilation chain (haskell/cabal#12356), stage-qualified
+  -- constraints and `package host:*` / `package build:*` stanzas, the
+  -- per-stage store and `inplace-builds`, plus the configure-script,
+  -- toolchain and rpath fixes GHC needs. See stable-haskell/cabal.
+  tag: 04a8f755a8f02c5b744260d501909458605f8f33
   subdir: Cabal
           Cabal-syntax
           cabal-install
@@ -17,3 +18,8 @@ source-repository-package
   location: https://github.com/stable-haskell/hackage-security.git
   tag: baaad2e189a8203966f7d3f752a348f02eefd1b2
   subdir: hackage-security
+
+-- The pinned hackage-security is 0.6.3.2 (plus a Windows path-separator
+-- fix) and bounds Cabal and Cabal-syntax < 3.18; the pinned Cabal is 3.19.
+-- hackage-security-0.6.4.0 on Hackage already accepts < 3.20.
+allow-newer: hackage-security:Cabal, hackage-security:Cabal-syntax
