@@ -1141,15 +1141,15 @@ ocBuildSegments_MachO(ObjectCode *oc)
         size_t alignment = 1 << macho->align;
 
         if (S_GB_ZEROFILL == (macho->flags & SECTION_TYPE)) {
-            size_gbZerofillSegment = roundUpToAlign(size_gbZerofillSegment, alignment);
+            size_gbZerofillSegment = ll_round_up_to_align(size_gbZerofillSegment, alignment);
             size_gbZerofillSegment += macho->size;
             n_gbZerofills++;
         } else if (getSectionKind_MachO(macho) == SECTIONKIND_CODE_OR_RODATA) {
-            size_rxSegment = roundUpToAlign(size_rxSegment, alignment);
+            size_rxSegment = ll_round_up_to_align(size_rxSegment, alignment);
             size_rxSegment += macho->size;
             n_rxSections++;
         } else {
-            size_rwSegment = roundUpToAlign(size_rwSegment, alignment);
+            size_rwSegment = ll_round_up_to_align(size_rwSegment, alignment);
             size_rwSegment += macho->size;
             n_rwSections++;
         }
@@ -1300,7 +1300,7 @@ ocGetNames_MachO(ObjectCode* oc)
             ll_word mapped_size = 0, mapped_offset = 0;
             ll_word size = section->size;
 
-            void *secMem = (void *)roundUpToAlign((size_t)curMem, alignment);
+            void *secMem = (void *)ll_round_up_to_align((size_t)curMem, alignment);
 
             start = secMem;
 

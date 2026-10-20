@@ -3,7 +3,7 @@
 #include "Rts.h"
 #include "MachOTypes.h"
 
-#include "BeginPrivate.h"
+#include "ll_begin_private.h"
 
 void   ocInit_MachO                 ( ObjectCode* oc );
 void   ocDeinit_MachO               ( ObjectCode* oc );
@@ -18,4 +18,4 @@ int    ocAllocateExtras_MachO       ( ObjectCode* oc );
 
 SectionKind getSectionKind_MachO    ( MachOSection *macho );
 
-#include "EndPrivate.h"
+#include "ll_end_private.h"

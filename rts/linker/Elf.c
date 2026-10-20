@@ -191,7 +191,7 @@ static Elf_Word elf_shstrndx(Elf_Ehdr* ehdr)
 static Elf_Word*
 get_shndx_table(ObjectCode* oc)
 {
-   if (RTS_LIKELY(oc->shndx_table != SHNDX_TABLE_UNINIT)) {
+   if (LL_LIKELY(oc->shndx_table != SHNDX_TABLE_UNINIT)) {
       return oc->shndx_table;
    }
 
@@ -832,7 +832,7 @@ ocGetNames_ELF ( ObjectCode* oc )
               alloc = SECTION_NOMEM;
               LL_CHECK(oc->image != 0x0);
               start =
-                oc->image + roundUpToAlign(oc->bssBegin - oc->image, align);
+                oc->image + ll_round_up_to_align(oc->bssBegin - oc->image, align);
               oc->bssBegin = (char*)start + size;
               LL_CHECK(oc->bssBegin <= oc->bssEnd);
           } else {
@@ -1612,7 +1612,7 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
 #        endif // arm_HOST_ARCH
 
        default:
-           LL_LOG_ERROR("%s: unhandled ELF relocation(Rel) type %" FMT_Word "\n",
+           LL_LOG_ERROR("%s: unhandled ELF relocation(Rel) type %" LL_FMT_WORD "\n",
                       oc->fileName, (ll_w)ELF_R_TYPE(info));
            return 0;
        }
@@ -1772,7 +1772,7 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
 
          case R_PPC_PLTREL24:
             value -= 0x8000; /* See Note [.LCTOC1 in PPC PIC code] */
-            FALLTHROUGH;
+            LL_FALLTHROUGH;
          case R_PPC_REL24:
             delta = value - P;
 
@@ -1996,7 +1996,7 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
 #endif
 
          default:
-            LL_FATAL("%s: unhandled ELF relocation(RelA) type %" FMT_Word "\n",
+            LL_FATAL("%s: unhandled ELF relocation(RelA) type %" LL_FMT_WORD "\n",
                   oc->fileName, (ll_w)ELF_R_TYPE(info));
             return 0;
       }
@@ -2191,7 +2191,7 @@ int ocAllocateExtras_ELF( ObjectCode *oc )
       int isBss = 0;
       getSectionKind_ELF(&shdr[i], &isBss);
       if (isBss && shdr[i].sh_size > 0) {
-        bssSize += roundUpToAlign(shdr[i].sh_size, shdr[i].sh_addralign);
+        bssSize += ll_round_up_to_align(shdr[i].sh_size, shdr[i].sh_addralign);
       }
     }
   }
@@ -2264,7 +2264,7 @@ void * loadNativeObjFromLinkerScript_ELF(char **errmsg)
    LL_IF_DEBUG(linker, LL_DEBUG("result = %i\n", result));
    if (result == 0) {
       // success -- try to read the named file as a linker script
-      match_length = (size_t) stg_min((match[1].rm_eo - match[1].rm_so),
+      match_length = (size_t) ll_min_intmax((match[1].rm_eo - match[1].rm_so),
                                  MAXLINE-1);
       strncpy(line, (*errmsg+(match[1].rm_so)),match_length);
       line[match_length] = '\0'; // make sure string is null-terminated

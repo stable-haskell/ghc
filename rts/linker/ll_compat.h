@@ -49,6 +49,13 @@ typedef ll_word ll_w;
 typedef void ll_symbol_addr;
 typedef char ll_symbol_name;
 
+/* Prerequisites for the unchanged public rts/Linker.h interface. */
+typedef ll_hs_int HsInt;
+typedef ll_hs_bool HsBool;
+typedef ll_hs_ptr HsPtr;
+typedef ll_hs_stable_ptr StgStablePtr;
+typedef ll_stg_ptr StgPtr;
+
 typedef enum {
     LL_SYM_CODE = 1 << 0,
     LL_SYM_DATA = 1 << 1,
@@ -103,6 +110,27 @@ static inline _Noreturn void ll_compat_fatal(const char *fmt, ...)
 
 #undef LL_COMPAT_PRINTF
 
+#if defined(__GNUC__) || defined(__clang__)
+#define LL_UNUSED __attribute__((__unused__))
+#else
+#define LL_UNUSED
+#endif
+#define LL_NORETURN _Noreturn
+#define LL_INLINE_HEADER static inline
+
+#if defined(__GNUC__) && __GNUC__ >= 7
+#define LL_FALLTHROUGH __attribute__((fallthrough))
+#else
+#define LL_FALLTHROUGH ((void)0)
+#endif
+
+#if SIZEOF_VOID_P == 8
+#define LL_FMT_WORD PRIu64
+#elif SIZEOF_VOID_P == 4
+#define LL_FMT_WORD PRIu32
+#endif
+#define LL_FMT_SIZE_T "zu"
+
 #define LL_LOG_ERROR(...) ll_compat_log(LL_LOG_ERROR, __VA_ARGS__)
 #define LL_LOG_SYSERROR(...) ll_compat_log(LL_LOG_SYSERROR, __VA_ARGS__)
 #define LL_DEBUG(...) ll_compat_log(LL_LOG_DEBUG, __VA_ARGS__)
@@ -113,6 +141,17 @@ static inline _Noreturn void ll_compat_fatal(const char *fmt, ...)
 #else
 #define LL_LIKELY(predicate) (!!(predicate))
 #endif
+
+static inline size_t ll_round_up_to_align(size_t size, size_t align)
+{
+    /* alignment must always be a power of 2 */
+    return (size + align - 1) & ~(align - 1);
+}
+
+static inline intmax_t ll_min_intmax(intmax_t a, intmax_t b)
+{
+    return a <= b ? a : b;
+}
 
 #if defined(LL_ASSERTS) || defined(DEBUG) || defined(USE_ASSERTS_ALL_WAYS)
 #define LL_ASSERTS_ENABLED 1

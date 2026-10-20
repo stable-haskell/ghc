@@ -3,7 +3,7 @@
 #include "Rts.h"
 #include "LinkerInternals.h"
 
-#include "BeginPrivate.h"
+#include "ll_begin_private.h"
 
 #if defined(NEED_SYMBOL_EXTRAS)
 
@@ -24,4 +24,4 @@ SymbolExtra* makeSymbolExtra( ObjectCode const* oc,
 #endif /* powerpc_HOST_ARCH || x86_64_HOST_ARCH */
 #endif /* NEED_SYMBOL_EXTRAS */
 
-#include "EndPrivate.h"
+#include "ll_end_private.h"

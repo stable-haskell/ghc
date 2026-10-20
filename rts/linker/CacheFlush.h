@@ -2,8 +2,8 @@
 
 #include "LinkerInternals.h"
 
-#include "BeginPrivate.h"
+#include "ll_begin_private.h"
 
 void ocFlushInstructionCache( ObjectCode *oc );
 
-#include "EndPrivate.h"
+#include "ll_end_private.h"

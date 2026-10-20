@@ -1,4 +1,5 @@
 #include "Rts.h"
+#include "linker/ll_compat.h"
 
 #if defined(x86_64_HOST_ARCH) && defined(freebsd_HOST_OS)
 
@@ -161,7 +162,7 @@ typedef struct tls_sym {
 typedef struct dl_phdr_info dlpi;
 
 static int
-find_tls_sym(dlpi *info, size_t sz STG_UNUSED, void *data)
+find_tls_sym(dlpi *info, size_t sz LL_UNUSED, void *data)
 {
     tls_sym *wanted = (tls_sym *)data;
     const Elf_Addr base = info->dlpi_addr;

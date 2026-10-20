@@ -4,7 +4,7 @@
 #include "LinkerInternals.h"
 #include "linker/ElfTypes.h"
 
-#include "BeginPrivate.h"
+#include "ll_begin_private.h"
 
 void ocInit_ELF          ( ObjectCode* oc );
 void ocDeinit_ELF        ( ObjectCode* oc );
@@ -16,4 +16,4 @@ int ocRunFini_ELF        ( ObjectCode* oc );
 int ocAllocateExtras_ELF ( ObjectCode *oc );
 void *loadNativeObjFromLinkerScript_ELF( char **errmsg );
 
-#include "EndPrivate.h"
+#include "ll_end_private.h"

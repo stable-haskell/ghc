@@ -8,6 +8,8 @@
 
 #pragma once
 
+#include "ll_compat.h"
+
 /*
  * We use the m32 allocator for symbol extras on Windows and other mmap-using
  * platforms.
@@ -16,23 +18,23 @@
 #define NEED_M32 1
 #endif
 
-#include "BeginPrivate.h"
+#include "ll_begin_private.h"
 
 #if defined(NEED_M32)
-#define M32_NO_RETURN    /* Nothing */
+#define M32_NO_RETURN_PREFIX    /* Nothing */
 #else
-#define M32_NO_RETURN    STG_NORETURN
+#define M32_NO_RETURN_PREFIX    LL_NORETURN
 #endif
 
 struct m32_allocator_t;
 typedef struct m32_allocator_t m32_allocator;
 
-m32_allocator *m32_allocator_new(bool executable) M32_NO_RETURN;
+M32_NO_RETURN_PREFIX m32_allocator *m32_allocator_new(bool executable);
 
-void m32_allocator_free(m32_allocator *alloc) M32_NO_RETURN;
+M32_NO_RETURN_PREFIX void m32_allocator_free(m32_allocator *alloc);
 
-void m32_allocator_flush(m32_allocator *alloc) M32_NO_RETURN;
+M32_NO_RETURN_PREFIX void m32_allocator_flush(m32_allocator *alloc);
 
-void * m32_alloc(m32_allocator *alloc, size_t size, size_t alignment) M32_NO_RETURN;
+M32_NO_RETURN_PREFIX void * m32_alloc(m32_allocator *alloc, size_t size, size_t alignment);
 
-#include "EndPrivate.h"
+#include "ll_end_private.h"

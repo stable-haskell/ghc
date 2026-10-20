@@ -79,7 +79,7 @@ static int virtualQuery(void *baseAddr, PMEMORY_BASIC_INFORMATION info)
 {
     int res = VirtualQuery (baseAddr, info, sizeof (*info));
     LL_IF_DEBUG(linker_verbose,
-        LL_DEBUG("Probing region 0x%p (0x%p) - 0x%p (%" FMT_SizeT ") [%ld] with base 0x%p\n",
+        LL_DEBUG("Probing region 0x%p (0x%p) - 0x%p (%" LL_FMT_SIZE_T ") [%ld] with base 0x%p\n",
                    baseAddr,
                    info->BaseAddress,
                    (uint8_t *) info->BaseAddress + info->RegionSize,
@@ -108,7 +108,7 @@ static void *allocateBytes(void* baseAddr, void *endAddr, size_t sz, size_t *req
     SYSTEM_INFO sys;
     GetSystemInfo(&sys);
 
-    LL_IF_DEBUG(linker_verbose, LL_DEBUG("Requesting mapping of %" FMT_SizeT " bytes between %p and %p\n",
+    LL_IF_DEBUG(linker_verbose, LL_DEBUG("Requesting mapping of %" LL_FMT_SIZE_T " bytes between %p and %p\n",
                                 sz, baseAddr, endAddr));
 
     MEMORY_BASIC_INFORMATION info;
@@ -475,7 +475,7 @@ void mprotectForLinker(void *start, size_t len, MemoryAccess mode)
         return;
     }
     LL_IF_DEBUG(linker_verbose,
-             LL_DEBUG("mprotectForLinker: protecting %" FMT_Word
+             LL_DEBUG("mprotectForLinker: protecting %" LL_FMT_WORD
                         " bytes starting at %p as %s\n",
                         (W_)len, start, memoryAccessDescription(mode)));
 

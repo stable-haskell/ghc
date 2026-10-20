@@ -1,6 +1,7 @@
 #include "elf_reloc_riscv64.h"
 #include "LinkerInternals.h"
 #include "Rts.h"
+#include "linker/ll_compat.h"
 #include "Stg.h"
 #include "SymbolExtras.h"
 #include "linker/ElfTypes.h"
@@ -109,9 +110,8 @@ char *relocationTypeToString(Elf64_Xword type) {
   }
 }
 
-STG_NORETURN
-int32_t decodeAddendRISCV64(Section *section STG_UNUSED,
-                            Elf_Rel *rel STG_UNUSED) {
+LL_NORETURN int32_t decodeAddendRISCV64(Section *section LL_UNUSED,
+                                        Elf_Rel *rel LL_UNUSED) {
   LL_FATAL("decodeAddendRISCV64: Relocations with explicit addend are not supported."
        " Please open a ticket; providing the causing code/binary.");
 }
@@ -466,7 +466,7 @@ int32_t computeAddend(ElfRelocationATable * relaTab, unsigned relNo, Elf_Rel *re
     // the symbol actually points the corresponding R_RISCV_PCREL_HI20
     // relocation, and the target VA is calculated using PCREL_HI20's symbol.
   case R_RISCV_PCREL_LO12_S:
-    FALLTHROUGH;
+    LL_FALLTHROUGH;
   case R_RISCV_PCREL_LO12_I: {
     // Lookup related HI20 relocation and use that value. I'm still confused why
     // relocations aren't self-contained, but this is how LLVM does it. And,
@@ -551,34 +551,34 @@ int32_t computeAddend(ElfRelocationATable * relaTab, unsigned relNo, Elf_Rel *re
     return (S + A) - P;
   }
   case R_RISCV_ADD8:
-    FALLTHROUGH;
+    LL_FALLTHROUGH;
   case R_RISCV_ADD16:
-    FALLTHROUGH;
+    LL_FALLTHROUGH;
   case R_RISCV_ADD32:
-    FALLTHROUGH;
+    LL_FALLTHROUGH;
   case R_RISCV_ADD64:
     return S + A; // Add V when the value is set
   case R_RISCV_SUB6:
-    FALLTHROUGH;
+    LL_FALLTHROUGH;
   case R_RISCV_SUB8:
-    FALLTHROUGH;
+    LL_FALLTHROUGH;
   case R_RISCV_SUB16:
-    FALLTHROUGH;
+    LL_FALLTHROUGH;
   case R_RISCV_SUB32:
-    FALLTHROUGH;
+    LL_FALLTHROUGH;
   case R_RISCV_SUB64:
     return S + A; // Subtract from V when value is set
   case R_RISCV_SET6:
-    FALLTHROUGH;
+    LL_FALLTHROUGH;
   case R_RISCV_SET8:
-    FALLTHROUGH;
+    LL_FALLTHROUGH;
   case R_RISCV_SET16:
-    FALLTHROUGH;
+    LL_FALLTHROUGH;
   case R_RISCV_SET32:
     return S + A;
   case R_RISCV_RELAX:
     // This "relocation" has no addend.
-    FALLTHROUGH;
+    LL_FALLTHROUGH;
   case R_RISCV_ALIGN:
     // I guess we don't need to implement this relaxation. Otherwise, this
     // should return the number of blank bytes to insert via NOPs.

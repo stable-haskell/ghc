@@ -426,7 +426,7 @@ typedef struct _RtsSymbolInfo {
     unsigned long size; // symbol size: only used for COMMON symbols
 } RtsSymbolInfo;
 
-#include "BeginPrivate.h"
+#include "linker/ll_begin_private.h"
 
 void exitLinker( void );
 
@@ -501,4 +501,4 @@ ObjectCode* mkOc( ObjectType type, pathchar *path, char *image, int imageSize,
 void initSegment(Segment *s, void *start, size_t size, SegmentProt prot, int n_sections);
 void freeSegments(ObjectCode *oc);
 
-#include "EndPrivate.h"
+#include "linker/ll_end_private.h"

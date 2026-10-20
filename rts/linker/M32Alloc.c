@@ -467,7 +467,7 @@ m32_is_large_object(size_t size, size_t alignment)
 }
 
 static void
-m32_report_allocation(struct m32_allocator_t *alloc STG_UNUSED, void *addr STG_UNUSED, size_t size STG_UNUSED)
+m32_report_allocation(struct m32_allocator_t *alloc LL_UNUSED, void *addr LL_UNUSED, size_t size LL_UNUSED)
 {
     LL_IF_DEBUG(linker_verbose, LL_DEBUG(
       "m32_allocated(%p:%s): %p - %p\n",
@@ -568,26 +568,26 @@ m32_alloc(struct m32_allocator_t *alloc, size_t size, size_t alignment)
 // See the note titled "Compile Time Trickery" at the top of this file.
 
 m32_allocator *
-m32_allocator_new(bool executable STG_UNUSED)
+m32_allocator_new(bool executable LL_UNUSED)
 {
     LL_FATAL("%s: RTS_LINKER_USE_MMAP is %d", __func__, RTS_LINKER_USE_MMAP);
 }
 
-void m32_allocator_free(m32_allocator *alloc STG_UNUSED)
+void m32_allocator_free(m32_allocator *alloc LL_UNUSED)
 {
     LL_FATAL("%s: RTS_LINKER_USE_MMAP is %d", __func__, RTS_LINKER_USE_MMAP);
 }
 
 void
-m32_allocator_flush(m32_allocator *alloc STG_UNUSED)
+m32_allocator_flush(m32_allocator *alloc LL_UNUSED)
 {
     LL_FATAL("%s: RTS_LINKER_USE_MMAP is %d", __func__, RTS_LINKER_USE_MMAP);
 }
 
 void *
-m32_alloc(m32_allocator *alloc STG_UNUSED,
-          size_t size STG_UNUSED,
-          size_t alignment STG_UNUSED)
+m32_alloc(m32_allocator *alloc LL_UNUSED,
+          size_t size LL_UNUSED,
+          size_t alignment LL_UNUSED)
 {
     LL_FATAL("%s: RTS_LINKER_USE_MMAP is %d", __func__, RTS_LINKER_USE_MMAP);
 }

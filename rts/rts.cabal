@@ -137,10 +137,12 @@ extra-source-files:
     LibdwPool.h
     LinkerGlue.h
     linker/ll_compat.h
+    linker/ll_begin_private.h
     linker/ll_autoconf.h
     linker/ll_host.h
     linker/ll_mutex.h
     linker/ll_platform.h
+    linker/ll_end_private.h
     linker/CacheFlush.h
     linker/elf_compat.h
     linker/elf_got.h

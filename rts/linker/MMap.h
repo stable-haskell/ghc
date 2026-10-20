@@ -1,6 +1,6 @@
 #pragma once
 
-#include "BeginPrivate.h"
+#include "ll_begin_private.h"
 #include "linker/ll_host.h"
 
 #if defined(aarch64_HOST_ARCH)
@@ -86,4 +86,4 @@ void munmapForLinker (void *addr, size_t bytes, const char *caller);
 void *mmapForLinker (size_t bytes, MemoryAccess prot, uint32_t flags, int fd, int offset);
 #endif
 
-#include "EndPrivate.h"
+#include "ll_end_private.h"

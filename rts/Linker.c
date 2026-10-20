@@ -1874,7 +1874,7 @@ addSection (Section *s, SectionKind kind, SectionAlloc alloc,
                                             "addSection(SectionFormatInfo)");
 
    LL_IF_DEBUG(linker,
-            LL_DEBUG("addSection: %p-%p (size %" FMT_Word "), kind %d\n",
+            LL_DEBUG("addSection: %p-%p (size %" LL_FMT_WORD "), kind %d\n",
                        start, (void*)((ll_word)start + size),
                        size, kind ));
 }

@@ -1,6 +1,7 @@
 /* Platform-dependent cache flushing logic */
 
 #include "Rts.h"
+#include "linker/ll_compat.h"
 #include "linker/CacheFlush.h"
 
 #if defined(powerpc_HOST_ARCH)
@@ -45,6 +46,6 @@ ocFlushInstructionCache( ObjectCode *oc )
 
 #else
 
-void ocFlushInstructionCache( ObjectCode *oc STG_UNUSED ) {}
+void ocFlushInstructionCache( ObjectCode *oc LL_UNUSED ) {}
 
 #endif /* powerpc_HOST_ARCH */

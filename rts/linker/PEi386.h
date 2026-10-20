@@ -8,7 +8,7 @@
 #include <stdbool.h>
 #include <inttypes.h>
 
-#include "BeginPrivate.h"
+#include "ll_begin_private.h"
 
 #if defined(x86_64_HOST_ARCH)
 #define PEi386_IMAGE_OFFSET 4
@@ -70,7 +70,7 @@ ll_symbol_addr *lookupSymbolInDLL_PEi386 (const ll_symbol_name* lbl, HINSTANCE i
    arising from using normal C indexing or pointer arithmetic
    are just plain wrong.  Sigh.
 */
-INLINE_HEADER unsigned char *
+LL_INLINE_HEADER unsigned char *
 myindex ( int scale, void* base, int index )
 {
     return
@@ -150,4 +150,4 @@ uint8_t getSymNumberOfAuxSymbols ( COFF_HEADER_INFO *info, COFF_symbol* sym );
 uint16_t getSymType ( COFF_HEADER_INFO *info, COFF_symbol* sym );
 uint8_t* getSymShortName ( COFF_HEADER_INFO *info, COFF_symbol* sym );
 
-#include "EndPrivate.h"
+#include "ll_end_private.h"

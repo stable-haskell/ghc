@@ -1298,7 +1298,7 @@ lookupSymbolInDLLs ( const ll_symbol_name* lbl, ObjectCode *dependent )
 }
 
 ll_symbol_addr*
-lookupSymbolInDLL_PEi386 ( const ll_symbol_name* lbl, HINSTANCE instance, pathchar* dll_name STG_UNUSED, ObjectCode *dependent)
+lookupSymbolInDLL_PEi386 ( const ll_symbol_name* lbl, HINSTANCE instance, pathchar* dll_name LL_UNUSED, ObjectCode *dependent)
 {
     ll_symbol_addr* sym;
 
@@ -1499,11 +1499,11 @@ ocVerifyImage_PEi386 ( ObjectCode* oc )
    LL_IF_DEBUG(linker, i=1);
    if (i == 0) return true;
 
-   LL_DEBUG("sectab offset = %" FMT_SizeT "\n",
+   LL_DEBUG("sectab offset = %" LL_FMT_SIZE_T "\n",
               ((uint8_t*)sectab) - ((uint8_t*)oc->image) );
-   LL_DEBUG("symtab offset = %" FMT_SizeT "\n",
+   LL_DEBUG("symtab offset = %" LL_FMT_SIZE_T "\n",
               ((uint8_t*)symtab) - ((uint8_t*)oc->image) );
-   LL_DEBUG("strtab offset = %" FMT_SizeT "\n",
+   LL_DEBUG("strtab offset = %" LL_FMT_SIZE_T "\n",
               ((uint8_t*)strtab) - ((uint8_t*)oc->image) );
 
    LL_DEBUG("\n" );
@@ -1798,7 +1798,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
           start = m32_alloc(oc->rx_m32, sz, alignment);
       }
       if (!start) {
-        LL_FATAL("Could not allocate any heap memory from private heap (requested %" FMT_SizeT " bytes).",
+        LL_FATAL("Could not allocate any heap memory from private heap (requested %" LL_FMT_SIZE_T " bytes).",
              sz);
       }
 
@@ -1845,7 +1845,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
        addSection(&oc->sections[oc->n_sections-1],
                   SECTIONKIND_RWDATA, SECTION_MALLOC,
                   bss, globalBssSize, 0, 0, 0);
-       LL_IF_DEBUG(linker_verbose, LL_DEBUG("bss @ %p %" FMT_Word "\n", bss, globalBssSize));
+       LL_IF_DEBUG(linker_verbose, LL_DEBUG("bss @ %p %" LL_FMT_WORD "\n", bss, globalBssSize));
        addProddableBlock(&oc->proddables, bss, globalBssSize);
    } else {
        addSection(&oc->sections[oc->n_sections-1],
@@ -2145,7 +2145,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
 #if defined(x86_64_HOST_ARCH)
 
 static size_t
-makeSymbolExtra_PEi386( ObjectCode* oc, uint64_t index STG_UNUSED, size_t s, char* symbol STG_UNUSED, ll_sym_type type )
+makeSymbolExtra_PEi386( ObjectCode* oc, uint64_t index LL_UNUSED, size_t s, char* symbol LL_UNUSED, ll_sym_type type )
 {
     SymbolExtra *extra;
     switch(type & ~(LL_SYM_DUP_DISCARD | LL_SYM_HIDDEN)) {
@@ -2177,7 +2177,7 @@ makeSymbolExtra_PEi386( ObjectCode* oc, uint64_t index STG_UNUSED, size_t s, cha
     }
 }
 
-void ocProtectExtras(ObjectCode* oc STG_UNUSED) { }
+void ocProtectExtras(ObjectCode* oc LL_UNUSED) { }
 
 #endif /* x86_64_HOST_ARCH */
 
