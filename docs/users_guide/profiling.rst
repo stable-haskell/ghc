@@ -13,7 +13,7 @@ questions like "why is my program so slow?", or "why is my program using
 so much memory?". We'll start by describing how to do time profiling.
 
 Profiling uses a separate compiler target with its own package databases and
-libraries, for example ``aarch64-apple-darwin-profiling-ghc``. This target has
+libraries, for example ``aarch64-apple-darwin-prof-ghc``. This target has
 the same CPU and operating system as the ordinary compiler, but uses a different
 closure layout. Select it for every Haskell module and library in the program.
 Its files have ordinary names such as ``Main.hi``, ``Main.o``, and ``libHSfoo.a``;
@@ -23,7 +23,7 @@ builds. Existing ``.p_hi``, ``.p_o``, and ``_p`` libraries must be rebuilt.
 With Cabal, select the profiling target and keep the ordinary compiler for Setup
 scripts and build tools, for example::
 
-    cabal build --with-compiler=aarch64-apple-darwin-profiling-ghc \
+    cabal build --with-compiler=aarch64-darwin-prof-ghc \
       --with-build-compiler=ghc --profiling-detail=late
 
 Use the target name for your platform. The examples below use ``profiling-ghc``
@@ -32,6 +32,36 @@ the profiling compiler accepts it redundantly. Template Haskell and GHCi use a
 matching external interpreter. Compiler plugins run in the compiler process and
 need ordinary host packages, selected with :ghc-flag:`-plugin-libdir` when using
 the profiling target.
+
+The short Darwin name above is an installation alias. The compiler reports
+its canonical logical identity, such as ``aarch64-apple-darwin-prof``, in
+``--print-target-name`` and the ``Target name`` field of ``--info``. Its
+``Target platform`` remains the underlying machine triple. For example,
+``arm-unknown-linux-gnueabihf-prof`` keeps the hard-float machine ABI and adds
+the Haskell profiling ABI independently. C and LLVM tools receive the machine
+target without the terminal ``-prof`` qualifier.
+
+Use the matching Cabal client supplied for this compiler. It keeps complete
+target names in hashes and stores and checks the selected package tool with
+``ghc-pkg --info``. An explicit ``--with-hc-pkg`` must match the compiler's
+target, version, and installation. Build tools and Setup scripts retain their
+separately configured Build compiler, even when both compilers use the same
+CPU and OS.
+
+Compilers exposing ``Target name`` use ``<target-name>-<version>`` for user
+database subdirectories and ``.ghc.environment.<target-name>-<version>`` for
+local environment files. Native compilers adopt these namespaces too, so
+different machine ABI environments stay separate. Rebuild old dependencies
+in the new store and namespace; existing databases are neither moved nor
+automatically searched. Older Cabal clients calculate the old names and are
+not supported for default discovery with the new protocol. New Cabal retains
+the old namespace rules when using an older compiler without ``Target name``.
+
+The initial profiling target supplies static nonthreaded and threaded RTS
+libraries. Explicit requests for unavailable shared or debug variants fail
+with a capability diagnostic. Automatic linkage defaults use supported static
+output. Profiling enablement flags are redundant for a profiling compiler;
+instrumentation detail options still control which cost centres are added.
 
 Time profiling a program is a three-step process:
 
