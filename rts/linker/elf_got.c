@@ -1,5 +1,5 @@
 #include "Rts.h"
-#include "linker/ll_host.h"
+#include "linker/ll_compat.h"
 #include "elf_got.h"
 #include "linker/MMap.h"
 
@@ -111,7 +111,7 @@ makeGot(ObjectCode * oc) {
         oc->info->got_size = got_slots * sizeof(void *);
         void * mem = mmapAnonForLinker(oc->info->got_size);
         if (mem == NULL) {
-            errorBelch("MAP_FAILED. errno=%d", errno);
+            LL_LOG_ERROR("MAP_FAILED. errno=%d", errno);
             return EXIT_FAILURE;
         }
 
@@ -161,14 +161,14 @@ fillGot(ObjectCode * oc) {
                                  * against the (now undefined) symbol.
                                  * Assign a dummy address so the GOT slot is
                                  * filled; it will never be dereferenced. */
-                                IF_DEBUG(linker,
-                                    debugBelch("Skipping unresolvable symbol"
+                                LL_IF_DEBUG(linker,
+                                    LL_DEBUG("Skipping unresolvable symbol"
                                               " '%s' (only referenced by"
                                               " NONE relocations)\n",
                                               symbol->name));
                                 symbol->addr = (void*)0xDEAD0000;
                             } else {
-                                errorBelch("Failed to lookup symbol: %s,"
+                                LL_LOG_ERROR("Failed to lookup symbol: %s,"
                                            " you might consider using --optimistic-linking\n",
                                            symbol->name);
 
@@ -176,7 +176,7 @@ fillGot(ObjectCode * oc) {
                                 // RTS we allow the linker to optimistically
                                 // continue
                                 if (ll_cfg.optimistic) {
-                                    errorBelch("Failed to lookup symbol: %s,"
+                                    LL_LOG_ERROR("Failed to lookup symbol: %s,"
                                                " optimistically continuing.\n",
                                                symbol->name);
                                     symbol->addr = (void*) 0xDEADBEEF;
@@ -194,14 +194,14 @@ fillGot(ObjectCode * oc) {
                   */
 
                 if(0x0 == symbol->addr) {
-                    errorBelch(
+                    LL_LOG_ERROR(
                         "Something went wrong! Symbol %s has null address.\n",
                             symbol->name);
                     return EXIT_FAILURE;
                 }
 
                 if(0x0 == symbol->got_addr) {
-                    errorBelch("Not good either!");
+                    LL_LOG_ERROR("Not good either!");
                     return EXIT_FAILURE;
                 }
 
@@ -212,7 +212,7 @@ fillGot(ObjectCode * oc) {
 
     // We are done initializing the GOT; freeze it.
     if(mprotect(oc->info->got_start, oc->info->got_size, PROT_READ) != 0) {
-        sysErrorBelch("unable to protect memory");
+        LL_LOG_SYSERROR("unable to protect memory");
     }
     return EXIT_SUCCESS;
 }

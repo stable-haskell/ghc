@@ -22,6 +22,7 @@
 
 #include "Rts.h"
 #include "RtsUtils.h"
+#include "linker/ll_compat.h"
 #include "linker/ProddableBlocks.h"
 
 #include <stdlib.h>
@@ -81,7 +82,7 @@ void
 checkProddableBlock (const ProddableBlockSet *set, void *addr, size_t size )
 {
     if (! containsSpan(set, (uintptr_t) addr, (uintptr_t) addr+size)) {
-        barf("checkProddableBlock: invalid fixup in runtime linker: %p", addr);
+        LL_FATAL("checkProddableBlock: invalid fixup in runtime linker: %p", addr);
     }
 }
 
