@@ -9,7 +9,6 @@
 #pragma once
 
 #include "Rts.h"
-#include "RtsSymbols.h"
 #include "Hash.h"
 #include "linker/ll_compat.h"
 #include "linker/ll_mutex.h"
@@ -72,9 +71,9 @@ typedef struct _Section    Section;
    late stage.  */
 typedef struct _Symbol
 {
-    SymbolName *name;
-    SymbolAddr *addr;
-    SymType type;
+    ll_symbol_name *name;
+    ll_symbol_addr *addr;
+    ll_sym_type type;
 } Symbol_t;
 
 typedef struct NativeCodeRange_ {
@@ -161,16 +160,16 @@ typedef enum {
 
 struct _Section {
   void*    start;              /* actual start of section in memory */
-  StgWord  size;               /* actual size of section in memory */
+  ll_word  size;               /* actual size of section in memory */
   SectionKind kind;
   SectionAlloc alloc;
 
   /*
    * The following fields are relevant for SECTION_MMAP sections only
    */
-  StgWord mapped_offset;      /* offset from the image of mapped_start */
+  ll_word mapped_offset;      /* offset from the image of mapped_start */
   void* mapped_start;         /* start of mmap() block */
-  StgWord mapped_size;        /* size of mmap() block */
+  ll_word mapped_size;        /* size of mmap() block */
 
   /* A customizable type to augment the Section type.
    * See Note [No typedefs for customizable types]
@@ -303,7 +302,7 @@ struct _ObjectCode {
 
     // Mark bit
     // N.B. This is a full word as we CAS it.
-    StgWord mark;
+    ll_word mark;
 
     // Can this object be safely unloaded? Not true for
     // dynamic objects when dlinfo is not available as
@@ -420,10 +419,10 @@ typedef void (*fini_t) (void);
    in the `ObjectCode` but in the `RtsSymbolInfo` it won't be.
 */
 typedef struct _RtsSymbolInfo {
-    SymbolAddr* value;
+    ll_symbol_addr* value;
     ObjectCode *owner;
-    SymStrength strength;
-    SymType type;
+    ll_strength strength;
+    ll_sym_type type;
     unsigned long size; // symbol size: only used for COMMON symbols
 } RtsSymbolInfo;
 
@@ -432,42 +431,42 @@ typedef struct _RtsSymbolInfo {
 void exitLinker( void );
 
 void freeObjectCode (ObjectCode *oc);
-SymbolAddr* loadSymbol(SymbolName *lbl, RtsSymbolInfo *pinfo);
+ll_symbol_addr* loadSymbol(ll_symbol_name *lbl, RtsSymbolInfo *pinfo);
 
 void addSection (Section *s, SectionKind kind, SectionAlloc alloc,
-                 void* start, StgWord size, StgWord mapped_offset,
-                 void* mapped_start, StgWord mapped_size);
+                 void* start, ll_word size, ll_word mapped_offset,
+                 void* mapped_start, ll_word mapped_size);
 
-HsBool ghciLookupSymbolInfo(StrHashTable *table,
-                            const SymbolName* key, RtsSymbolInfo **result);
+ll_hs_bool ghciLookupSymbolInfo(StrHashTable *table,
+                            const ll_symbol_name* key, RtsSymbolInfo **result);
 
 int ghciInsertSymbolTable(
     pathchar* obj_name,
     StrHashTable *table,
-    const SymbolName* key,
-    SymbolAddr* data,
-    SymStrength weak,
-    SymType type,
+    const ll_symbol_name* key,
+    ll_symbol_addr* data,
+    ll_strength weak,
+    ll_sym_type type,
     unsigned long size,
     ObjectCode *owner);
 
 /* Lock-free version of lookupSymbol. When 'dependent' is not NULL, adds it as a
  * dependent to the owner of the symbol. The type of the symbol is stored in 'type'. */
-SymbolAddr* lookupDependentSymbol (SymbolName* lbl, ObjectCode *dependent, SymType *type);
+ll_symbol_addr* lookupDependentSymbol (ll_symbol_name* lbl, ObjectCode *dependent, ll_sym_type *type);
 
 /* Perform TLSGD symbol lookup returning the address of the resulting GOT entry,
  * which in this case holds the module id and the symbol offset. */
-StgInt64 lookupTlsgdSymbol(const char *, unsigned long, ObjectCode *);
+ll_int64 lookupTlsgdSymbol(const char *, unsigned long, ObjectCode *);
 
 extern StrHashTable *symhash;
 
 pathchar*
 resolveSymbolAddr (pathchar* buffer, int size,
-                   SymbolAddr* symbol, uintptr_t* top);
+                   ll_symbol_addr* symbol, uintptr_t* top);
 
 /* defined in LoadArchive.c */
 bool isArchive (pathchar *path);
-HsInt loadArchive_ (pathchar *path);
+ll_hs_int loadArchive_ (pathchar *path);
 
 /*************************************************
  * Various bits of configuration
@@ -490,10 +489,10 @@ HsInt loadArchive_ (pathchar *path);
 #define USE_CONTIGUOUS_MMAP 0
 #endif
 
-HsInt isAlreadyLoaded( pathchar *path );
+ll_hs_int isAlreadyLoaded( pathchar *path );
 OStatus getObjectLoadStatus_ (pathchar *path);
 ObjectCode *lookupObjectByPath(pathchar *path);
-HsInt loadOc( ObjectCode* oc );
+ll_hs_int loadOc( ObjectCode* oc );
 ObjectCode* mkOc( ObjectType type, pathchar *path, char *image, int imageSize,
                   bool mapped, pathchar *archiveMemberName,
                   int misalignment

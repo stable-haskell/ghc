@@ -16,6 +16,60 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdlib.h>
+#include <wchar.h>
+
+/* Local scalar spellings mirror the RTS types used by the linker. */
+typedef int8_t ll_int8;
+typedef uint8_t ll_word8;
+typedef int16_t ll_int16;
+typedef uint16_t ll_word16;
+typedef int32_t ll_int32;
+typedef uint32_t ll_word32;
+typedef int64_t ll_int64;
+typedef uint64_t ll_word64;
+
+#if SIZEOF_VOID_P == 8
+typedef int64_t ll_int;
+typedef uint64_t ll_word;
+#elif SIZEOF_VOID_P == 4
+typedef int32_t ll_int;
+typedef uint32_t ll_word;
+#else
+#error "The RTS linker requires a 32-bit or 64-bit pointer width"
+#endif
+
+typedef ll_int ll_hs_int;
+typedef ll_int ll_hs_bool;
+typedef void *ll_hs_ptr;
+typedef void *ll_hs_stable_ptr;
+typedef ll_word *ll_stg_ptr;
+typedef int ll_stg_bool;
+typedef ll_word ll_w;
+
+typedef void ll_symbol_addr;
+typedef char ll_symbol_name;
+
+typedef enum {
+    LL_SYM_CODE = 1 << 0,
+    LL_SYM_DATA = 1 << 1,
+    LL_SYM_INDIRECT_DATA = 1 << 2,
+    LL_SYM_DUP_DISCARD = 1 << 3,
+    LL_SYM_HIDDEN = 1 << 4
+} ll_sym_type;
+
+typedef enum {
+    LL_STRENGTH_NORMAL = 0,
+    LL_STRENGTH_WEAK = 1,
+    LL_STRENGTH_STRONG = 2
+} ll_strength;
+
+#ifndef MAYBE_LEADING_UNDERSCORE_STR
+#if defined(LEADING_UNDERSCORE)
+#define MAYBE_LEADING_UNDERSCORE_STR(s) ("_" s)
+#else
+#define MAYBE_LEADING_UNDERSCORE_STR(s) (s)
+#endif
+#endif
 
 #if defined(__GNUC__) || defined(__clang__)
 #define LL_COMPAT_PRINTF(fmt_index, first_arg) \

@@ -84,8 +84,8 @@
 #endif /* ELF_64BIT */
 
 typedef struct _ElfSymbol {
-    SymbolName * name;  /* the name of the symbol. */
-    SymbolAddr * addr;  /* the final resting place of the symbol */
+    ll_symbol_name * name;  /* the name of the symbol. */
+    ll_symbol_addr * addr;  /* the final resting place of the symbol */
     void * got_addr;    /* address of the got slot for this symbol, if any */
     Elf_Sym * elf_sym;  /* the elf symbol entry */
 } ElfSymbol;

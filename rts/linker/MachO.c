@@ -233,13 +233,13 @@ resolveImports(
         // indirect symbol table
         unsigned long indirectSymbolIndex = indirectSyms[sect->reserved1+i];
         MachOSymbol *symbol = &oc->info->macho_symbols[indirectSymbolIndex];
-        SymbolAddr* addr = NULL;
+        ll_symbol_addr* addr = NULL;
 
         LL_IF_DEBUG(linker, LL_DEBUG("resolveImports: resolving %s\n", symbol->name));
 
         if ((symbol->nlist->n_type & N_TYPE) == N_UNDF
             && (symbol->nlist->n_type & N_EXT) && (symbol->nlist->n_value != 0)) {
-            addr = (SymbolAddr*) (symbol->nlist->n_value);
+            addr = (ll_symbol_addr*) (symbol->nlist->n_value);
             LL_IF_DEBUG(linker, LL_DEBUG("resolveImports: undefined external %s has value %p\n", symbol->name, addr));
         } else {
             addr = lookupDependentSymbol(symbol->name, oc, NULL);
@@ -836,8 +836,8 @@ relocateSection(ObjectCode* oc, int curSection)
          || type == X86_64_RELOC_GOT_LOAD)
         {
             MachOSymbol *symbol = &symbols[reloc->r_symbolnum];
-            SymbolName* nm = symbol->name;
-            SymbolAddr* addr = NULL;
+            ll_symbol_name* nm = symbol->name;
+            ll_symbol_addr* addr = NULL;
 
             LL_IF_DEBUG(linker_verbose, LL_DEBUG("relocateSection: making jump island for %s, extern = %d, X86_64_RELOC_GOT\n",
                                         nm, reloc->r_extern));
@@ -900,8 +900,8 @@ relocateSection(ObjectCode* oc, int curSection)
         else if (reloc->r_extern)
         {
             MachOSymbol *symbol = &symbols[reloc->r_symbolnum];
-            SymbolName* nm = symbol->name;
-            SymbolAddr* addr = NULL;
+            ll_symbol_name* nm = symbol->name;
+            ll_symbol_addr* addr = NULL;
 
             LL_IF_DEBUG(linker_verbose, LL_DEBUG("relocateSection: looking up external symbol %s\n", nm));
             LL_IF_DEBUG(linker_verbose, LL_DEBUG("               : type  = %d\n", symbol->nlist->n_type));
@@ -1261,7 +1261,7 @@ ocGetNames_MachO(ObjectCode* oc)
     unsigned curSymbol = 0;
 
     unsigned long commonSize = 0;
-    SymbolAddr* commonStorage = NULL;
+    ll_symbol_addr* commonStorage = NULL;
     unsigned long commonCounter;
 
     LL_IF_DEBUG(linker,LL_DEBUG("ocGetNames_MachO: %s start\n",  OC_INFORMATIVE_FILENAME(oc)));
@@ -1297,8 +1297,8 @@ ocGetNames_MachO(ObjectCode* oc)
             SectionKind kind = getSectionKind_MachO(section);
             SectionAlloc alloc = SECTION_NOMEM;
             void *start = NULL, *mapped_start = NULL;
-            StgWord mapped_size = 0, mapped_offset = 0;
-            StgWord size = section->size;
+            ll_word mapped_size = 0, mapped_offset = 0;
+            ll_word size = section->size;
 
             void *secMem = (void *)roundUpToAlign((size_t)curMem, alignment);
 
@@ -1424,7 +1424,7 @@ ocGetNames_MachO(ObjectCode* oc)
                     oc->n_symbols++;
                     /* Only allocate space for COMMON symbols not already
                      * defined by a previously-loaded object. */
-                    SymbolName *nm_c = oc->info->macho_symbols[i].name;
+                    ll_symbol_name *nm_c = oc->info->macho_symbols[i].name;
                     if (!lookupStrHashTable(symhash, nm_c)) {
                         commonSize += oc->info->nlist[i].n_value;
                     }
@@ -1446,7 +1446,7 @@ ocGetNames_MachO(ObjectCode* oc)
 
     if (oc->info->symCmd) {
         for (size_t i = 0; i < oc->info->n_macho_symbols; i++) {
-            SymbolName* nm = oc->info->macho_symbols[i].name;
+            ll_symbol_name* nm = oc->info->macho_symbols[i].name;
             if (oc->info->nlist[i].n_type & N_STAB)
             {
                 LL_IF_DEBUG(linker_verbose, LL_DEBUG("ocGetNames_MachO: Skip STAB: %s\n", nm));
@@ -1463,9 +1463,9 @@ ocGetNames_MachO(ObjectCode* oc)
                     else
                     {
                             LL_IF_DEBUG(linker_verbose, LL_DEBUG("ocGetNames_MachO: inserting %s\n", nm));
-                            SymbolAddr* addr = oc->info->macho_symbols[i].addr;
+                            ll_symbol_addr* addr = oc->info->macho_symbols[i].addr;
                             // TODO: Make figure out how to determine this from the object file
-                            SymType sym_type = SYM_TYPE_CODE;
+                            ll_sym_type sym_type = LL_SYM_CODE;
                             ghciInsertSymbolTable( oc->fileName
                                                  , symhash
                                                  , nm
@@ -1501,14 +1501,14 @@ ocGetNames_MachO(ObjectCode* oc)
 
     if (oc->info->symCmd) {
         for (size_t i = 0; i < oc->info->n_macho_symbols; i++) {
-            SymbolName* nm = oc->info->macho_symbols[i].name;
+            ll_symbol_name* nm = oc->info->macho_symbols[i].name;
             MachONList *nlist = &oc->info->nlist[i];
             if((nlist->n_type & N_TYPE) == N_UNDF
              && (nlist->n_type & N_EXT)
              && (nlist->n_value != 0)) {
                 unsigned long sz = nlist->n_value;
                 /* TODO: Figure out how to determine this from object */
-                SymType sym_type = SYM_TYPE_CODE;
+                ll_sym_type sym_type = LL_SYM_CODE;
 
                 RtsSymbolInfo *existing = lookupStrHashTable(symhash, nm);
                 if (existing != NULL) {

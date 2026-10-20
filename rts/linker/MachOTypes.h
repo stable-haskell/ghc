@@ -27,8 +27,8 @@ typedef struct scattered_relocation_info MachOScatteredRelocationInfo;
  * some more information (like addr).
  */
 typedef struct _MachOSymbol {
-    SymbolName * name;  /* the name of the symbol. */
-    SymbolAddr * addr;  /* the final resting place of the symbol */
+    ll_symbol_name * name;  /* the name of the symbol. */
+    ll_symbol_addr * addr;  /* the final resting place of the symbol */
     void * got_addr;    /* address of the got slot for this symbol, if any */
     MachONList * nlist; /* the nlist symbol entry */
     bool needs_got;     /* See Note [Symbols in need of GOT entries] */

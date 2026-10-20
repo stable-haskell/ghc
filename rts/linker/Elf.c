@@ -17,7 +17,6 @@
 #include "RtsSymbolInfo.h"
 #include "CheckUnload.h"
 #include "LinkerInternals.h"
-#include "linker/ll_compat.h"
 #include "linker/MMap.h"
 #include "linker/Elf.h"
 #include "linker/CacheFlush.h"
@@ -700,8 +699,8 @@ static SectionKind getSectionKind_ELF( Elf_Shdr *hdr, int *is_bss )
 
 static void *
 mapObjectFileSection (int fd, Elf_Word offset, Elf_Word size,
-                      void **mapped_start, StgWord *mapped_size,
-                      StgWord *mapped_offset)
+                      void **mapped_start, ll_word *mapped_size,
+                      ll_word *mapped_offset)
 {
     void *p;
     size_t pageOffset, pageSize;
@@ -713,7 +712,7 @@ mapObjectFileSection (int fd, Elf_Word offset, Elf_Word size,
     *mapped_size = pageSize;
     *mapped_offset = pageOffset;
     *mapped_start = p;
-    return (void*)((StgWord)p + offset - pageOffset);
+    return (void*)((ll_word)p + offset - pageOffset);
 }
 #endif
 
@@ -757,10 +756,10 @@ ocGetNames_ELF ( ObjectCode* oc )
       SectionKind kind   = getSectionKind_ELF(&shdr[i], &is_bss);
       SectionAlloc alloc = SECTION_NOMEM;
       void *start = NULL, *mapped_start = NULL;
-      StgWord mapped_size = 0, mapped_offset = 0;
-      StgWord size = shdr[i].sh_size;
-      StgWord offset = shdr[i].sh_offset;
-      StgWord align = shdr[i].sh_addralign;
+      ll_word mapped_size = 0, mapped_offset = 0;
+      ll_word size = shdr[i].sh_size;
+      ll_word offset = shdr[i].sh_offset;
+      ll_word align = shdr[i].sh_addralign;
       const char *sh_name = oc->info->sectionHeaderStrtab + shdr[i].sh_name;
 
       /*
@@ -1011,8 +1010,8 @@ ocGetNames_ELF ( ObjectCode* oc )
            for (size_t j = 0; j < symTab->n_symbols; j++) {
 
                char isLocal = false; /* avoids uninit-var warning */
-               HsBool isWeak = HS_BOOL_FALSE;
-               SymbolName *nm = symTab->symbols[j].name;
+               ll_hs_bool isWeak = HS_BOOL_FALSE;
+               ll_symbol_name *nm = symTab->symbols[j].name;
                unsigned short shndx = symTab->symbols[j].elf_sym->st_shndx;
 
                ElfSymbol *symbol = &symTab->symbols[j];
@@ -1096,7 +1095,7 @@ ocGetNames_ELF ( ObjectCode* oc )
                                       stab[j].st_size, stab[j].st_value, nm);
                    }
                    */
-                   symbol->addr = (SymbolAddr*)(
+                   symbol->addr = (ll_symbol_addr*)(
                            (intptr_t) oc->sections[secno].start +
                            (intptr_t) symbol->elf_sym->st_value);
                    LL_CHECK(symbol->addr != 0x0);
@@ -1113,14 +1112,14 @@ ocGetNames_ELF ( ObjectCode* oc )
                    }
                }
 
-               SymType sym_type;
+               ll_sym_type sym_type;
                if (ELF_ST_TYPE(symbol->elf_sym->st_info) == STT_FUNC) {
-                   sym_type = SYM_TYPE_CODE;
+                   sym_type = LL_SYM_CODE;
                } else {
-                   sym_type = SYM_TYPE_DATA;
+                   sym_type = LL_SYM_DATA;
                }
                if(ELF_ST_VISIBILITY(symbol->elf_sym->st_other) == STV_HIDDEN) {
-                   sym_type |= SYM_TYPE_HIDDEN;
+                   sym_type |= LL_SYM_HIDDEN;
                }
 
                /* And the decision is ... */
@@ -1381,11 +1380,11 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
        {
            // N.B. LLVM's LLD linker's relocation implementation is a fantastic
            // resource
-           StgWord32 *word = (StgWord32 *)P;
-           StgInt32 imm = (*word & ((1<<24)-1)) << 2;
+           ll_word32 *word = (ll_word32 *)P;
+           ll_int32 imm = (*word & ((1<<24)-1)) << 2;
 
-           const StgBool is_blx = (*word & 0xf0000000) == 0xf0000000;
-           const StgWord32 hBit = is_blx ? ((*word >> 24) & 1) : 0;
+           const ll_stg_bool is_blx = (*word & 0xf0000000) == 0xf0000000;
+           const ll_word32 hBit = is_blx ? ((*word >> 24) & 1) : 0;
            imm |= hBit << 1;
 
            // Sign extend to 32 bits
@@ -1395,11 +1394,11 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
 
            S = S + A; A = 0;
 
-           StgWord32 result = ((S + A) | T) - P;
+           ll_word32 result = ((S + A) | T) - P;
 
-           const StgBool overflow = !isInt(26, (StgInt32) result);
+           const ll_stg_bool overflow = !isInt(26, (ll_int32) result);
            // Handle overflow and Thumb interworking
-           const StgBool needs_veneer =
+           const ll_stg_bool needs_veneer =
                (is_target_thm && ELF_R_TYPE(info) == COMPAT_R_ARM_JUMP24)
                || overflow;
 
@@ -1435,15 +1434,15 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
            }
 
            // Update the branch target
-           const StgWord32 imm24 = (result & 0x03fffffc) >> 2;
+           const ll_word32 imm24 = (result & 0x03fffffc) >> 2;
            *word = (*word & ~0x00ffffff)
                  | (imm24 & 0x00ffffff);
 
            // Change the relocated branch into a BLX if necessary
-           const StgBool switch_mode =
+           const ll_stg_bool switch_mode =
                is_target_thm && (reloc_type == COMPAT_R_ARM_CALL);
            if (!needs_veneer && switch_mode) {
-               const StgWord32 hBit = (result & 0x2) >> 1;
+               const ll_word32 hBit = (result & 0x2) >> 1;
                // Change instruction to BLX
                *word = (*word & ~0xFF000000) | ((0xfa | hBit) << 24);
                LL_IF_DEBUG(linker_verbose, LL_DEBUG("Changed BL to BLX at %p\n", word));
@@ -1454,17 +1453,17 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
        case COMPAT_R_ARM_MOVT_ABS:
        case COMPAT_R_ARM_MOVW_ABS_NC:
        {
-           StgWord32 *word = (StgWord32 *)P;
-           StgWord32 imm12 = *word & 0xfff;
-           StgWord32 imm4 = (*word >> 16) & 0xf;
-           StgInt32 offset = imm4 << 12 | imm12;
-           StgWord32 result = (S + offset) | T;
+           ll_word32 *word = (ll_word32 *)P;
+           ll_word32 imm12 = *word & 0xfff;
+           ll_word32 imm4 = (*word >> 16) & 0xf;
+           ll_int32 offset = imm4 << 12 | imm12;
+           ll_word32 result = (S + offset) | T;
 
            if (reloc_type == COMPAT_R_ARM_MOVT_ABS)
                result = (result & 0xffff0000) >> 16;
 
-           StgWord32 result12 = result & 0xfff;
-           StgWord32 result4 = (result >> 12) & 0xf;
+           ll_word32 result12 = result & 0xfff;
+           ll_word32 result4 = (result >> 12) & 0xf;
            *word = (*word & ~0xf0fff) | (result4 << 16) | result12;
            break;
        }
@@ -1472,8 +1471,8 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
        case COMPAT_R_ARM_THM_CALL:
        case COMPAT_R_ARM_THM_JUMP24:
        {
-           StgWord16 *upper = (StgWord16 *)P;
-           StgWord16 *lower = (StgWord16 *)(P + 2);
+           ll_word16 *upper = (ll_word16 *)P;
+           ll_word16 *lower = (ll_word16 *)(P + 2);
 
            int overflow;
            int to_thm = (*lower >> 12) & 1;
@@ -1484,7 +1483,7 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
            j1 = (*lower >> 13) & 1; i1 = ~(j1 ^ sign) & 1;
            j2 = (*lower >> 11) & 1; i2 = ~(j2 ^ sign) & 1;
 
-           StgInt32 A = (sign << 24)
+           ll_int32 A = (sign << 24)
                         | (i1 << 23)
                         | (i2 << 22)
                         | ((*upper & 0x03ff) << 12)
@@ -1497,8 +1496,8 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
            S = S + A; A = 0;
 
            offset = ((S + A) | T) - P;
-           overflow = offset <= (StgWord32)0xff000000
-                   || offset >= (StgWord32)0x01000000;
+           overflow = offset <= (ll_word32)0xff000000
+                   || offset >= (ll_word32)0x01000000;
 
            if ((!is_target_thm && ELF_R_TYPE(info) == COMPAT_R_ARM_THM_JUMP24)
                || overflow) {
@@ -1547,9 +1546,9 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
        case COMPAT_R_ARM_THM_MOVT_ABS:
        case COMPAT_R_ARM_THM_MOVW_ABS_NC:
        {
-           StgWord16 *upper = (StgWord16 *)P;
-           StgWord16 *lower = (StgWord16 *)(P + 2);
-           StgInt32 offset = ((*upper & 0x000f) << 12)
+           ll_word16 *upper = (ll_word16 *)P;
+           ll_word16 *lower = (ll_word16 *)(P + 2);
+           ll_int32 offset = ((*upper & 0x000f) << 12)
                            | ((*upper & 0x0400) << 1)
                            | ((*lower & 0x7000) >> 4)
                            | (*lower & 0x00ff);
@@ -1572,8 +1571,8 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
 
        case COMPAT_R_ARM_THM_JUMP8:
        {
-           StgWord16 *word = (StgWord16 *)P;
-           StgWord offset = *word & 0x01fe;
+           ll_word16 *word = (ll_word16 *)P;
+           ll_word offset = *word & 0x01fe;
            offset += S - P;
            if (!is_target_thm) {
                LL_LOG_ERROR("%s: Thumb to ARM transition with JUMP8 relocation "
@@ -1589,8 +1588,8 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
 
        case COMPAT_R_ARM_THM_JUMP11:
        {
-           StgWord16 *word = (StgWord16 *)P;
-           StgWord offset = *word & 0x0ffe;
+           ll_word16 *word = (ll_word16 *)P;
+           ll_word offset = *word & 0x0ffe;
            offset += S - P;
            if (!is_target_thm) {
                LL_LOG_ERROR("%s: Thumb to ARM transition with JUMP11 relocation "
@@ -1614,7 +1613,7 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
 
        default:
            LL_LOG_ERROR("%s: unhandled ELF relocation(Rel) type %" FMT_Word "\n",
-                      oc->fileName, (W_)ELF_R_TYPE(info));
+                      oc->fileName, (ll_w)ELF_R_TYPE(info));
            return 0;
        }
 
@@ -1628,7 +1627,7 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
                           Elf_Shdr* shdr, int shnum )
 {
    int j;
-   SymbolName* symbol = NULL;
+   ll_symbol_name* symbol = NULL;
    Elf_Rela* rtab = (Elf_Rela*) (ehdrC + shdr[shnum].sh_offset);
    Elf_Sym*  stab;
    char*     strtab;
@@ -1821,7 +1820,7 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
 
       case COMPAT_R_X86_64_PC32:
       {
-          StgInt64 off = value - P;
+          ll_int64 off = value - P;
           if (off != (Elf64_Sword)off && X86_64_ELF_NONPIC_HACK) {
               /* Check symbol type: jump islands only work for code (functions).
                * For data references (STT_OBJECT, STT_NOTYPE), the jump island
@@ -1838,8 +1837,8 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
                       symbol, symtype, (uint64_t)(value - P), oc->fileName);
                   return 0;
               }
-              StgInt64 pltAddress =
-                  (StgInt64) &makeSymbolExtra(oc, ELF_R_SYM(info), S)
+              ll_int64 pltAddress =
+                  (ll_int64) &makeSymbolExtra(oc, ELF_R_SYM(info), S)
                                             -> jumpIsland;
               off = pltAddress + A - P;
           }
@@ -1876,8 +1875,8 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
                       symbol, symtype, (uint64_t)value, oc->fileName);
                   return 0;
               }
-              StgInt64 pltAddress =
-                  (StgInt64) &makeSymbolExtra(oc, ELF_R_SYM(info), S)
+              ll_int64 pltAddress =
+                  (ll_int64) &makeSymbolExtra(oc, ELF_R_SYM(info), S)
                                             -> jumpIsland;
               value = pltAddress + A;
           }
@@ -1895,7 +1894,7 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
 
       case COMPAT_R_X86_64_32S:
       {
-          if ((StgInt64)value != (Elf64_Sword)value && X86_64_ELF_NONPIC_HACK) {
+          if ((ll_int64)value != (Elf64_Sword)value && X86_64_ELF_NONPIC_HACK) {
               /* See Note [X86_64_ELF_NONPIC_HACK and data references] */
               unsigned char symtype = ELF_ST_TYPE(stab[ELF_R_SYM(info)].st_info);
               if (symtype != STT_FUNC) {
@@ -1907,12 +1906,12 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
                       symbol, symtype, (uint64_t)value, oc->fileName);
                   return 0;
               }
-              StgInt64 pltAddress =
-                  (StgInt64) &makeSymbolExtra(oc, ELF_R_SYM(info), S)
+              ll_int64 pltAddress =
+                  (ll_int64) &makeSymbolExtra(oc, ELF_R_SYM(info), S)
                                             -> jumpIsland;
               value = pltAddress + A;
           }
-          if ((StgInt64)value != (Elf64_Sword)value) {
+          if ((ll_int64)value != (Elf64_Sword)value) {
               LL_LOG_ERROR(
                   "R_X86_64_32S relocation out of range: %s = %" PRIx64
                   "\nRecompile %s with -fPIC -fexternal-dynamic-refs.",
@@ -1927,8 +1926,8 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
       case COMPAT_R_X86_64_GOTPCRELX:
       case COMPAT_R_X86_64_GOTPCREL:
       {
-          StgInt64 gotAddress = (StgInt64) &makeSymbolExtra(oc, ELF_R_SYM(info), S)->addr;
-          StgInt64 off = gotAddress + A - P;
+          ll_int64 gotAddress = (ll_int64) &makeSymbolExtra(oc, ELF_R_SYM(info), S)->addr;
+          ll_int64 off = gotAddress + A - P;
           if (off != (Elf64_Sword)off) {
               LL_FATAL(
                   "COMPAT_R_X86_64_GOTPCREL relocation out of range: "
@@ -1941,7 +1940,7 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
       }
       case COMPAT_R_X86_64_TLSGD:
       {
-          StgInt64 off = S + A - P;
+          ll_int64 off = S + A - P;
           if (off != (Elf64_Sword)off) {
               LL_FATAL(
                   "COMPAT_R_X86_64_TLSGD relocation out of range: "
@@ -1961,9 +1960,9 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
           struct tls_info ti;
           get_tls_area(0, &ti, sizeof(ti));
           /* make entry in GOT that contains said offset */
-          StgInt64 gotEntry = (StgInt64) &makeSymbolExtra(oc, ELF_R_SYM(info),
+          ll_int64 gotEntry = (ll_int64) &makeSymbolExtra(oc, ELF_R_SYM(info),
                                          (S - (Elf64_Addr)(ti.base)))->addr;
-          StgInt64 off = gotEntry + A - P;
+          ll_int64 off = gotEntry + A - P;
           if (off != (Elf64_Sword)off) {
               LL_FATAL(
                   "COMPAT_R_X86_64_GOTTPOFF relocation out of range: "
@@ -1978,9 +1977,9 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
 
       case COMPAT_R_X86_64_PLT32:
       {
-          StgInt64 off = value - P;
+          ll_int64 off = value - P;
           if (off != (Elf64_Sword)off) {
-              StgInt64 pltAddress = (StgInt64) &makeSymbolExtra(oc, ELF_R_SYM(info), S)
+              ll_int64 pltAddress = (ll_int64) &makeSymbolExtra(oc, ELF_R_SYM(info), S)
                                                     -> jumpIsland;
               off = pltAddress + A - P;
           }
@@ -1998,7 +1997,7 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
 
          default:
             LL_FATAL("%s: unhandled ELF relocation(RelA) type %" FMT_Word "\n",
-                  oc->fileName, (W_)ELF_R_TYPE(info));
+                  oc->fileName, (ll_w)ELF_R_TYPE(info));
             return 0;
       }
 

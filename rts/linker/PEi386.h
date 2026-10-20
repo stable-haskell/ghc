@@ -51,16 +51,16 @@ void freePreloadObjectFile_PEi386( ObjectCode *oc );
 bool checkAndLoadImportLibrary( pathchar* arch_name, char* member_name, FILE* f);
 
 pathchar* findSystemLibrary_PEi386( pathchar* dll_name );
-HsPtr addLibrarySearchPath_PEi386( pathchar* dll_path );
-bool removeLibrarySearchPath_PEi386( HsPtr dll_path_index );
+ll_hs_ptr addLibrarySearchPath_PEi386( pathchar* dll_path );
+bool removeLibrarySearchPath_PEi386( ll_hs_ptr dll_path_index );
 
 bool ocResolve_PEi386     ( ObjectCode* oc );
 bool ocRunInit_PEi386     ( ObjectCode *oc );
 bool ocRunFini_PEi386     ( ObjectCode *oc );
 bool ocGetNames_PEi386    ( ObjectCode* oc );
 bool ocVerifyImage_PEi386 ( ObjectCode* oc );
-SymbolAddr *lookupSymbol_PEi386(SymbolName *lbl, ObjectCode *dependent, SymType *type);
-SymbolAddr *lookupSymbolInDLL_PEi386 (const SymbolName* lbl, HINSTANCE instance, pathchar* dll_name, ObjectCode *dependent);
+ll_symbol_addr *lookupSymbol_PEi386(ll_symbol_name *lbl, ObjectCode *dependent, ll_sym_type *type);
+ll_symbol_addr *lookupSymbolInDLL_PEi386 (const ll_symbol_name* lbl, HINSTANCE instance, pathchar* dll_name, ObjectCode *dependent);
 
 /* We use myindex to calculate array addresses, rather than
    simply doing the normal subscript thing.  That's because
@@ -77,7 +77,7 @@ myindex ( int scale, void* base, int index )
         ((unsigned char*)base) + scale * index;
 }
 pathchar* resolveSymbolAddr_PEi386 ( pathchar* buffer, int size,
-                                     SymbolAddr* symbol, uintptr_t* top );
+                                     ll_symbol_addr* symbol, uintptr_t* top );
 
 char *get_name_string(
     unsigned char* name,

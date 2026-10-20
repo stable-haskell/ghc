@@ -465,8 +465,8 @@ static size_t makeSymbolExtra_PEi386(
     ObjectCode* oc,
     uint64_t index,
     size_t s,
-    SymbolName* symbol,
-    SymType sym_type);
+    ll_symbol_name* symbol,
+    ll_sym_type sym_type);
 #endif
 
 static void addDLLHandle(
@@ -491,7 +491,7 @@ static size_t getAlignedValue(
 static void releaseOcInfo(
     ObjectCode* oc);
 
-static SymbolAddr *lookupSymbolInDLLs ( const SymbolName* lbl, ObjectCode *dependent );
+static ll_symbol_addr *lookupSymbolInDLLs ( const ll_symbol_name* lbl, ObjectCode *dependent );
 
 const Alignments pe_alignments[] = {
   { IMAGE_SCN_ALIGN_1BYTES   , 1   },
@@ -539,13 +539,13 @@ static void initLoadedDllCache(LoadedDllCache *cache) {
     cache->hash = allocHashTable();
 }
 
-static int hash_path(const HashTable *table, StgWord w)
+static int hash_path(const HashTable *table, ll_word w)
 {
     const pathchar *key = (pathchar*) w;
     return hashBuffer(table, key, sizeof(pathchar) * wcslen(key));
 }
 
-static int compare_path(StgWord key1, StgWord key2)
+static int compare_path(ll_word key1, ll_word key2)
 {
     return wcscmp((pathchar*) key1, (pathchar*) key2) == 0;
 }
@@ -557,12 +557,12 @@ static void addLoadedDll(LoadedDllCache *cache, const pathchar *dll_name, HINSTA
     size_t size = wcslen(dll_name) + 1;
     pathchar* dll_name_copy = LL_MALLOC(size * sizeof(pathchar), "addLoadedDll");
     wcsncpy(dll_name_copy, dll_name, size);
-    insertHashTable_(cache->hash, (StgWord) dll_name_copy, instance, hash_path);
+    insertHashTable_(cache->hash, (ll_word) dll_name_copy, instance, hash_path);
 }
 
 static HINSTANCE isDllLoaded(const LoadedDllCache *cache, const pathchar *dll_name)
 {
-    void *result = lookupHashTable_(cache->hash, (StgWord) dll_name, hash_path, compare_path);
+    void *result = lookupHashTable_(cache->hash, (ll_word) dll_name, hash_path, compare_path);
     return (HINSTANCE) result;
 }
 
@@ -573,7 +573,7 @@ void initLinker_PEi386(void)
     if (!ghciInsertSymbolTable(WSTR("(GHCi/Ld special symbols)"),
                                symhash, "__image_base__",
                                GetModuleHandleW (NULL), HS_BOOL_TRUE,
-                               SYM_TYPE_CODE, 0, NULL)) {
+                               LL_SYM_CODE, 0, NULL)) {
         LL_FATAL("ghciInsertSymbolTable failed");
     }
 
@@ -1028,13 +1028,13 @@ pathchar* findSystemLibrary_PEi386( pathchar* dll_name )
     return result;
 }
 
-HsPtr addLibrarySearchPath_PEi386(pathchar* dll_path)
+ll_hs_ptr addLibrarySearchPath_PEi386(pathchar* dll_path)
 {
     // Make sure the path is an absolute path in UNC-style to ensure that we
     // aren't subject to the MAX_PATH restriction. See #21059.
     wchar_t *abs_path = __rts_create_device_name(dll_path);
 
-    HsPtr result = AddDllDirectory(abs_path);
+    ll_hs_ptr result = AddDllDirectory(abs_path);
     if (!result) {
         LL_LOG_SYSERROR("addLibrarySearchPath: %" PATH_FMT " (Win32 error %lu)", abs_path, GetLastError());
         LL_FREE(abs_path);
@@ -1045,7 +1045,7 @@ HsPtr addLibrarySearchPath_PEi386(pathchar* dll_path)
     return result;
 }
 
-bool removeLibrarySearchPath_PEi386(HsPtr dll_path_index)
+bool removeLibrarySearchPath_PEi386(ll_hs_ptr dll_path_index)
 {
     bool result = false;
 
@@ -1172,7 +1172,7 @@ bool checkAndLoadImportLibrary( pathchar* arch_name, char* member_name, FILE* f 
     // We must immediately tie the symbol to the shared library.  The easiest
     // way is to load the symbol immediately. We already have all the
     // information so might as well
-    SymbolAddr* sym = lookupSymbolInDLL_PEi386 (symbol, instance, dll, NULL);
+    ll_symbol_addr* sym = lookupSymbolInDLL_PEi386 (symbol, instance, dll, NULL);
 
     // Could be an import descriptor etc, skip if no symbol.
     if (!sym)
@@ -1183,8 +1183,8 @@ bool checkAndLoadImportLibrary( pathchar* arch_name, char* member_name, FILE* f 
     // Because the symbol has been loaded before we actually need it, if a
     // stronger reference wants to add a duplicate we should discard this
     // one to preserve link order.
-    SymType symType = SYM_TYPE_DUP_DISCARD | SYM_TYPE_HIDDEN;
-    symType |= hdr.Type == IMPORT_OBJECT_CODE ? SYM_TYPE_CODE : SYM_TYPE_DATA;
+    ll_sym_type symType = LL_SYM_DUP_DISCARD | LL_SYM_HIDDEN;
+    symType |= hdr.Type == IMPORT_OBJECT_CODE ? LL_SYM_CODE : LL_SYM_DATA;
 
     if (!ghciInsertSymbolTable(dll, symhash, symbol, sym, false, symType, 0, NULL))
       return false;
@@ -1285,11 +1285,11 @@ get_name_string (uint8_t* name, ObjectCode* oc)
     }
 }
 
-SymbolAddr*
-lookupSymbolInDLLs ( const SymbolName* lbl, ObjectCode *dependent )
+ll_symbol_addr*
+lookupSymbolInDLLs ( const ll_symbol_name* lbl, ObjectCode *dependent )
 {
     OpenedDLL* o_dll;
-    SymbolAddr* res;
+    ll_symbol_addr* res;
 
     for (o_dll = opened_dlls; o_dll != NULL; o_dll = o_dll->next)
         if ((res = lookupSymbolInDLL_PEi386(lbl, o_dll->instance, o_dll->name, dependent)))
@@ -1297,10 +1297,10 @@ lookupSymbolInDLLs ( const SymbolName* lbl, ObjectCode *dependent )
     return NULL;
 }
 
-SymbolAddr*
-lookupSymbolInDLL_PEi386 ( const SymbolName* lbl, HINSTANCE instance, pathchar* dll_name STG_UNUSED, ObjectCode *dependent)
+ll_symbol_addr*
+lookupSymbolInDLL_PEi386 ( const ll_symbol_name* lbl, HINSTANCE instance, pathchar* dll_name STG_UNUSED, ObjectCode *dependent)
 {
-    SymbolAddr* sym;
+    ll_symbol_addr* sym;
 
     /* debugBelch("look in %ls for %s\n", dll_name, lbl); */
 
@@ -1322,7 +1322,7 @@ lookupSymbolInDLL_PEi386 ( const SymbolName* lbl, HINSTANCE instance, pathchar* 
         sym = GetProcAddress(instance,
                              lbl + 6);
         if (sym != NULL) {
-            SymbolAddr** indirect = m32_alloc(dependent->rw_m32, sizeof(SymbolAddr*), 8);
+            ll_symbol_addr** indirect = m32_alloc(dependent->rw_m32, sizeof(ll_symbol_addr*), 8);
             if (indirect == NULL) {
                 LL_FATAL("lookupSymbolInDLLs: Failed to allocation indirection");
             }
@@ -1819,7 +1819,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
                                   "ocGetNames_PEi386(oc->symbols)");
 
    /* Work out the size of the global BSS section */
-   StgWord globalBssSize = 0;
+   ll_word globalBssSize = 0;
    for (unsigned int i=0; i < info->numberOfSymbols; i++) {
       COFF_symbol* sym = &oc->info->symbols[i];
       if (getSymSectionNumber (info, sym) == PE_SECTION_UNDEFINED
@@ -1827,7 +1827,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
            && getSymStorageClass (info, sym) != IMAGE_SYM_CLASS_SECTION) {
            /* Only count COMMON symbols not already defined by a
             * previously-loaded object; we will reuse their allocation. */
-           SymbolName *nm = get_sym_name (getSymShortName (info, sym), oc);
+           ll_symbol_name *nm = get_sym_name (getSymShortName (info, sym), oc);
            if (!lookupStrHashTable(symhash, nm)) {
                globalBssSize += getSymValue (info, sym);
            }
@@ -1836,7 +1836,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
    }
 
    /* Allocate BSS space */
-   SymbolAddr* bss = NULL;
+   ll_symbol_addr* bss = NULL;
    if (globalBssSize > 0) {
        bss = m32_alloc(oc->rw_m32, globalBssSize, 16);
        if (bss == NULL) {
@@ -1862,11 +1862,11 @@ ocGetNames_PEi386 ( ObjectCode* oc )
 
       uint32_t symValue = getSymValue (info, sym);
       uint8_t symStorageClass = getSymStorageClass (info, sym);
-      SymbolAddr *addr = NULL;
+      ll_symbol_addr *addr = NULL;
       bool isWeak = false;
       bool common_already_defined = false;
       unsigned long symSize = 0;
-      SymbolName *sname = get_sym_name (getSymShortName (info, sym), oc);
+      ll_symbol_name *sname = get_sym_name (getSymShortName (info, sym), oc);
 
       uint32_t secNumber = getSymSectionNumber (info, sym);
       Section *section;
@@ -1888,10 +1888,10 @@ ocGetNames_PEi386 ( ObjectCode* oc )
           section = &oc->sections[secNumber-1];
       }
 
-      SymType type;
+      ll_sym_type type;
       switch (getSymType(oc->info->ch_info, sym)) {
-      case 0x00: type = SYM_TYPE_DATA; break;
-      case 0x20: type = SYM_TYPE_CODE; break;
+      case 0x00: type = LL_SYM_DATA; break;
+      case 0x20: type = LL_SYM_CODE; break;
       default:
           LL_DEBUG("Symbol %s has invalid type 0x%x\n",
                      sname, getSymType(oc->info->ch_info, sym));
@@ -1915,7 +1915,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
             || (   symStorageClass == IMAGE_SYM_CLASS_STATIC
                 && section->info->props & IMAGE_SCN_LNK_COMDAT)
             ) {
-                addr   = (SymbolAddr*)((size_t)section->start + symValue);
+                addr   = (ll_symbol_addr*)((size_t)section->start + symValue);
                 isWeak = section->info->props & IMAGE_SCN_LNK_COMDAT;
          }
       }
@@ -1941,7 +1941,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
               targetSection = targetSecNumber > 0 ? &oc->sections[targetSecNumber-1] : NULL;
           }
           if(NULL != targetSection)
-              addr = (SymbolAddr*) ((size_t) targetSection->start + getSymValue(info, targetSym));
+              addr = (ll_symbol_addr*) ((size_t) targetSection->start + getSymValue(info, targetSym));
           else
             {
                 // Do the symbol lookup based on name, this follows Microsoft's weak external's
@@ -1956,7 +1956,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
                 // AUX lnno 3 size 0x0 tagndx 2
                 //
                 // https://learn.microsoft.com/en-us/windows/win32/debug/pe-format#auxiliary-format-3-weak-externals
-                SymbolName *target_sname = get_sym_name (getSymShortName (info, targetSym), oc);
+                ll_symbol_name *target_sname = get_sym_name (getSymShortName (info, targetSym), oc);
                 if (target_sname)
                   addr = lookupSymbol_PEi386 (target_sname, oc, &type);
 
@@ -1987,7 +1987,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
                        LL_DEBUG("bss symbol reusing @ %p %u\n", addr, symValue));
           } else {
               addr = bss;
-              bss = (SymbolAddr*)((StgWord)bss + (StgWord)symValue);
+              bss = (ll_symbol_addr*)((ll_word)bss + (ll_word)symValue);
               symSize = (unsigned long)symValue;
               LL_IF_DEBUG(linker_verbose, LL_DEBUG("bss symbol @ %p %u\n", addr, symValue));
           }
@@ -2003,7 +2003,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
              in the format of lowpart highpart. The two bytes combined
              for the total range of 16 bits which is the function export limit
              of DLLs.  See note [GHC Linking model and import libraries].  */
-          sname = (SymbolName*)section->start+2;
+          sname = (ll_symbol_name*)section->start+2;
           COFF_symbol* sym = &oc->info->symbols[info->numberOfSymbols-1];
           addr = get_sym_name( getSymShortName (info, sym), oc);
 
@@ -2015,8 +2015,8 @@ ocGetNames_PEi386 ( ObjectCode* oc )
              the symbol name and values before the pointers become invalid.  */
           sname = strdup (sname);
           addr  = strdup (addr);
-          type = has_code_section ? SYM_TYPE_CODE : SYM_TYPE_DATA;
-          type |= SYM_TYPE_DUP_DISCARD;
+          type = has_code_section ? LL_SYM_CODE : LL_SYM_DATA;
+          type |= LL_SYM_DUP_DISCARD;
           if (!ghciInsertSymbolTable(oc->fileName, symhash, sname,
                                      addr, false, type, 0, oc)) {
              releaseOcInfo (oc);
@@ -2048,7 +2048,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
               continue;
 
           pathchar* dirName = pathdir(oc->fileName);
-          HsPtr token       = addLibrarySearchPath(dirName);
+          ll_hs_ptr token       = addLibrarySearchPath(dirName);
           LL_FREE(dirName);
 
           sym   = &oc->info->symbols[oc->n_symbols-1];
@@ -2072,7 +2072,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
           }
 
           /* Set the _dll_iname symbol to the dll's handle.  */
-          addr = (SymbolAddr*)dllInstance;
+          addr = (ll_symbol_addr*)dllInstance;
 
           /* the symbols are named <name>_iname when defined, but are named
              _head_<name> when looked up. (Ugh. thanks GCC.) So correct it when
@@ -2098,7 +2098,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
           LL_FREE(tmp);
           sname = strdup (sname);
           if(secNumber == IMAGE_SYM_UNDEFINED)
-            type |= SYM_TYPE_HIDDEN;
+            type |= LL_SYM_HIDDEN;
 
           if (!ghciInsertSymbolTable(oc->fileName, symhash, sname,
                                      addr, false, type, 0, oc))
@@ -2116,7 +2116,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
          /* debugBelch("addSymbol %p `%s' Weak:%lld \n", addr, sname, isWeak); */
          sname = strdup (sname);
          if(secNumber == IMAGE_SYM_UNDEFINED)
-           type |= SYM_TYPE_HIDDEN;
+           type |= LL_SYM_HIDDEN;
          LL_IF_DEBUG(linker_verbose, LL_DEBUG("addSymbol %p `%s'\n", addr, sname));
          LL_ASSERT(i < (uint32_t)oc->n_symbols);
          oc->symbols[i].name = sname;
@@ -2145,11 +2145,11 @@ ocGetNames_PEi386 ( ObjectCode* oc )
 #if defined(x86_64_HOST_ARCH)
 
 static size_t
-makeSymbolExtra_PEi386( ObjectCode* oc, uint64_t index STG_UNUSED, size_t s, char* symbol STG_UNUSED, SymType type )
+makeSymbolExtra_PEi386( ObjectCode* oc, uint64_t index STG_UNUSED, size_t s, char* symbol STG_UNUSED, ll_sym_type type )
 {
     SymbolExtra *extra;
-    switch(type & ~(SYM_TYPE_DUP_DISCARD | SYM_TYPE_HIDDEN)) {
-        case SYM_TYPE_CODE: {
+    switch(type & ~(LL_SYM_DUP_DISCARD | LL_SYM_HIDDEN)) {
+        case LL_SYM_CODE: {
             // jmp *-14(%rip)
             extra = m32_alloc(oc->rx_m32, sizeof(SymbolExtra), 8);
             LL_CHECK(extra);
@@ -2159,7 +2159,7 @@ makeSymbolExtra_PEi386( ObjectCode* oc, uint64_t index STG_UNUSED, size_t s, cha
             LL_IF_DEBUG(linker_verbose, LL_DEBUG("makeSymbolExtra(code): %s -> %p\n", symbol, &extra->jumpIsland));
             return (size_t)&extra->jumpIsland;
         }
-        case SYM_TYPE_INDIRECT_DATA: {
+        case LL_SYM_INDIRECT_DATA: {
             extra = m32_alloc(oc->rw_m32, sizeof(SymbolExtra), 8);
             LL_CHECK(extra);
             void *v = *(void**) s;
@@ -2186,7 +2186,7 @@ ocResolve_PEi386 ( ObjectCode* oc )
 {
    uint64_t    A;
    size_t      S;
-   SymbolAddr* pP;
+   ll_symbol_addr* pP;
 
    unsigned int i;
    uint32_t j, noRelocs;
@@ -2216,7 +2216,7 @@ ocResolve_PEi386 ( ObjectCode* oc )
          COFF_reloc* reloc = &section.info->relocs[j];
 
          /* the location to patch */
-         pP = (SymbolAddr*)(
+         pP = (ll_symbol_addr*)(
                    (uintptr_t)section.start
                  + (uintptr_t)reloc->VirtualAddress
                  - (uintptr_t)section.info->virtualAddr
@@ -2227,7 +2227,7 @@ ocResolve_PEi386 ( ObjectCode* oc )
          uint64_t symIndex = reloc->SymbolTableIndex;
          sym = &oc->info->symbols[symIndex];
 
-         SymType sym_type;
+         ll_sym_type sym_type;
 
          LL_IF_DEBUG(linker_verbose,
                   LL_DEBUG(
@@ -2507,20 +2507,20 @@ bool ocRunFini_PEi386( ObjectCode *oc )
     return true;
 }
 
-SymbolAddr *lookupSymbol_PEi386(SymbolName *lbl, ObjectCode *dependent, SymType *type)
+ll_symbol_addr *lookupSymbol_PEi386(ll_symbol_name *lbl, ObjectCode *dependent, ll_sym_type *type)
 {
     RtsSymbolInfo *pinfo;
 
     if (!ghciLookupSymbolInfo(symhash, lbl, &pinfo)) {
         LL_IF_DEBUG(linker, LL_DEBUG("lookupSymbol: symbol '%s' not found\n", lbl));
 
-        SymbolAddr* sym;
+        ll_symbol_addr* sym;
 
         if (type) {
             // Unfortunately we can only assume that this is the case. Ideally
             // the user would have given us an import library, which would allow
             // us to determine the symbol type precisely.
-            *type = SYM_TYPE_CODE;
+            *type = LL_SYM_CODE;
         }
         sym = lookupSymbolInDLLs(lbl, dependent);
         return sym; // might be NULL if not found
@@ -2534,7 +2534,7 @@ SymbolAddr *lookupSymbol_PEi386(SymbolName *lbl, ObjectCode *dependent, SymType 
              * function or data. Preserve the import's own type when we use
              * the handle to resolve its address below. Keep the existing
              * dependent-symbol type on the fallback path. */
-            SymType depType = 0;
+            ll_sym_type depType = 0;
             HINSTANCE dllInstance = (HINSTANCE)lookupDependentSymbol(pinfo->value, dependent, &depType);
             if (!dllInstance && pinfo->value) {
                 if (type) *type = depType;
@@ -2559,7 +2559,7 @@ SymbolAddr *lookupSymbol_PEi386(SymbolName *lbl, ObjectCode *dependent, SymType 
                 ObjectCode *owner = pinfo->owner;
                 if (owner) {
                     // TODO: what does it mean for a symbol to not have an owner?
-                    insertHashSet(dependent->dependencies, (W_)owner);
+                    insertHashSet(dependent->dependencies, (ll_w)owner);
                 }
             }
             return loadSymbol(lbl, pinfo);
@@ -2571,7 +2571,7 @@ SymbolAddr *lookupSymbol_PEi386(SymbolName *lbl, ObjectCode *dependent, SymType 
  * Debugging operations.
  */
 
-typedef struct _SymX { SymbolName* name; uintptr_t loc; } SymX;
+typedef struct _SymX { ll_symbol_name* name; uintptr_t loc; } SymX;
 
 static int comp (const void * elem1, const void * elem2)
 {
@@ -2584,7 +2584,7 @@ static int comp (const void * elem1, const void * elem2)
 
 pathchar*
 resolveSymbolAddr_PEi386 (pathchar* buffer, int size,
-                          SymbolAddr* symbol, uintptr_t* top ){
+                          ll_symbol_addr* symbol, uintptr_t* top ){
     SYMBOL_INFO sym;
     ZeroMemory (&sym, sizeof(SYMBOL_INFO));
     sym.MaxNameLen = sizeof(char) * 1024;
@@ -2711,7 +2711,7 @@ resolveSymbolAddr_PEi386 (pathchar* buffer, int size,
                                    "resolveSymbolAddr");
       int blanks = 0;
       for (int i = 0; i < obj->n_symbols; i++) {
-          SymbolName* sym = obj->symbols[i].name;
+          ll_symbol_name* sym = obj->symbols[i].name;
           if (sym == NULL)
             {
                blanks++;

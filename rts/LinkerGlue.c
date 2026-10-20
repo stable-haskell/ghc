@@ -7,6 +7,8 @@
  * ---------------------------------------------------------------------------*/
 
 #include "Rts.h"
+#include "RtsSymbols.h"
+#include "linker/ll_compat.h"
 #include "LinkerGlue.h"
 #include "RtsUtils.h"
 #include "ReportMemoryMap.h"
@@ -17,6 +19,75 @@
 #include "StablePtr.h"
 #include "CheckUnload.h"
 #include "linker/ll_host.h"
+
+_Static_assert(sizeof(ll_word) == sizeof(StgWord), "linker word size mismatch");
+_Static_assert(sizeof(void *) == SIZEOF_VOID_P, "configured pointer size mismatch");
+_Static_assert(_Alignof(ll_word) == _Alignof(StgWord), "linker word alignment mismatch");
+_Static_assert(((ll_word)-1) > (ll_word)0, "linker word must be unsigned");
+_Static_assert(sizeof(ll_int) == sizeof(StgInt), "linker integer size mismatch");
+_Static_assert(_Alignof(ll_int) == _Alignof(StgInt), "linker integer alignment mismatch");
+_Static_assert(((ll_int)-1) < (ll_int)0, "linker integer must be signed");
+_Static_assert(sizeof(ll_int8) == sizeof(StgInt8), "linker int8 size mismatch");
+_Static_assert(_Alignof(ll_int8) == _Alignof(StgInt8), "linker int8 alignment mismatch");
+_Static_assert(((ll_int8)-1) < (ll_int8)0, "linker int8 must be signed");
+_Static_assert(sizeof(ll_word8) == sizeof(StgWord8), "linker word8 size mismatch");
+_Static_assert(_Alignof(ll_word8) == _Alignof(StgWord8), "linker word8 alignment mismatch");
+_Static_assert(((ll_word8)-1) > (ll_word8)0, "linker word8 must be unsigned");
+_Static_assert(sizeof(ll_int16) == sizeof(StgInt16), "linker int16 size mismatch");
+_Static_assert(_Alignof(ll_int16) == _Alignof(StgInt16), "linker int16 alignment mismatch");
+_Static_assert(((ll_int16)-1) < (ll_int16)0, "linker int16 must be signed");
+_Static_assert(sizeof(ll_word16) == sizeof(StgWord16), "linker word16 size mismatch");
+_Static_assert(_Alignof(ll_word16) == _Alignof(StgWord16), "linker word16 alignment mismatch");
+_Static_assert(((ll_word16)-1) > (ll_word16)0, "linker word16 must be unsigned");
+_Static_assert(sizeof(ll_int32) == sizeof(StgInt32), "linker int32 size mismatch");
+_Static_assert(_Alignof(ll_int32) == _Alignof(StgInt32), "linker int32 alignment mismatch");
+_Static_assert(((ll_int32)-1) < (ll_int32)0, "linker int32 must be signed");
+_Static_assert(sizeof(ll_word32) == sizeof(StgWord32), "linker word32 size mismatch");
+_Static_assert(_Alignof(ll_word32) == _Alignof(StgWord32), "linker word32 alignment mismatch");
+_Static_assert(((ll_word32)-1) > (ll_word32)0, "linker word32 must be unsigned");
+_Static_assert(sizeof(ll_int64) == sizeof(StgInt64), "linker int64 size mismatch");
+_Static_assert(_Alignof(ll_int64) == _Alignof(StgInt64), "linker int64 alignment mismatch");
+_Static_assert(((ll_int64)-1) < (ll_int64)0, "linker int64 must be signed");
+_Static_assert(sizeof(ll_word64) == sizeof(StgWord64), "linker word64 size mismatch");
+_Static_assert(_Alignof(ll_word64) == _Alignof(StgWord64), "linker word64 alignment mismatch");
+_Static_assert(((ll_word64)-1) > (ll_word64)0, "linker word64 must be unsigned");
+_Static_assert(sizeof(ll_hs_int) == sizeof(HsInt), "linker HsInt size mismatch");
+_Static_assert(_Alignof(ll_hs_int) == _Alignof(HsInt), "linker HsInt alignment mismatch");
+_Static_assert(((ll_hs_int)-1) < (ll_hs_int)0, "linker HsInt must be signed");
+_Static_assert(sizeof(ll_hs_bool) == sizeof(HsBool), "linker HsBool size mismatch");
+_Static_assert(_Alignof(ll_hs_bool) == _Alignof(HsBool), "linker HsBool alignment mismatch");
+_Static_assert(((ll_hs_bool)-1) < (ll_hs_bool)0, "linker HsBool must be signed");
+_Static_assert(sizeof(ll_hs_ptr) == sizeof(HsPtr), "linker HsPtr size mismatch");
+_Static_assert(_Alignof(ll_hs_ptr) == _Alignof(HsPtr), "linker HsPtr alignment mismatch");
+_Static_assert(sizeof(ll_hs_stable_ptr) == sizeof(HsStablePtr), "linker stable pointer size mismatch");
+_Static_assert(_Alignof(ll_hs_stable_ptr) == _Alignof(HsStablePtr), "linker stable pointer alignment mismatch");
+_Static_assert(sizeof(ll_stg_ptr) == sizeof(StgPtr), "linker StgPtr size mismatch");
+_Static_assert(_Alignof(ll_stg_ptr) == _Alignof(StgPtr), "linker StgPtr alignment mismatch");
+_Static_assert(sizeof(ll_stg_bool) == sizeof(StgBool), "linker StgBool size mismatch");
+_Static_assert(_Alignof(ll_stg_bool) == _Alignof(StgBool), "linker StgBool alignment mismatch");
+_Static_assert(((ll_stg_bool)-1) < (ll_stg_bool)0, "linker StgBool must be signed");
+_Static_assert(sizeof(ll_w) == sizeof(W_), "linker W_ size mismatch");
+_Static_assert(_Alignof(ll_w) == _Alignof(W_), "linker W_ alignment mismatch");
+_Static_assert(((ll_w)-1) > (ll_w)0, "linker W_ must be unsigned");
+_Static_assert(sizeof(ll_symbol_name) == sizeof(SymbolName), "linker symbol name size mismatch");
+_Static_assert(_Alignof(ll_symbol_name) == _Alignof(SymbolName), "linker symbol name alignment mismatch");
+_Static_assert(sizeof(ll_symbol_addr *) == sizeof(SymbolAddr *), "linker symbol address pointer size mismatch");
+_Static_assert(_Alignof(ll_symbol_addr *) == _Alignof(SymbolAddr *), "linker symbol address pointer alignment mismatch");
+
+_Static_assert(sizeof(ll_sym_type) == sizeof(SymType), "linker symbol type representation mismatch");
+_Static_assert(_Alignof(ll_sym_type) == _Alignof(SymType), "linker symbol type alignment mismatch");
+_Static_assert(((ll_sym_type)-1 < (ll_sym_type)0) == ((SymType)-1 < (SymType)0), "linker symbol type signedness mismatch");
+_Static_assert((int)LL_SYM_CODE == (int)SYM_TYPE_CODE, "LL_SYM_CODE mismatch");
+_Static_assert((int)LL_SYM_DATA == (int)SYM_TYPE_DATA, "LL_SYM_DATA mismatch");
+_Static_assert((int)LL_SYM_INDIRECT_DATA == (int)SYM_TYPE_INDIRECT_DATA, "LL_SYM_INDIRECT_DATA mismatch");
+_Static_assert((int)LL_SYM_DUP_DISCARD == (int)SYM_TYPE_DUP_DISCARD, "LL_SYM_DUP_DISCARD mismatch");
+_Static_assert((int)LL_SYM_HIDDEN == (int)SYM_TYPE_HIDDEN, "LL_SYM_HIDDEN mismatch");
+_Static_assert(sizeof(ll_strength) == sizeof(SymStrength), "linker strength representation mismatch");
+_Static_assert(_Alignof(ll_strength) == _Alignof(SymStrength), "linker strength alignment mismatch");
+_Static_assert(((ll_strength)-1 < (ll_strength)0) == ((SymStrength)-1 < (SymStrength)0), "linker strength signedness mismatch");
+_Static_assert((int)LL_STRENGTH_NORMAL == (int)STRENGTH_NORMAL, "LL_STRENGTH_NORMAL mismatch");
+_Static_assert((int)LL_STRENGTH_WEAK == (int)STRENGTH_WEAK, "LL_STRENGTH_WEAK mismatch");
+_Static_assert((int)LL_STRENGTH_STRONG == (int)STRENGTH_STRONG, "LL_STRENGTH_STRONG mismatch");
 
 static void *host_malloc(void *ctx STG_UNUSED, size_t n, const char *what)
 {

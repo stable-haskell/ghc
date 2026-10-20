@@ -23,7 +23,6 @@
 #include "Proftimer.h"
 #include "GetEnv.h"
 #include "StablePtr.h"
-#include "RtsSymbols.h"
 #include "RtsSymbolInfo.h"
 #include "Profiling.h"
 #include "ForeignExports.h"
@@ -247,7 +246,7 @@ static int ocTryLoad( ObjectCode* oc );
 static int ocRunInit( ObjectCode* oc );
 static int runPendingInitializers (void);
 
-static void ghciRemoveSymbolTable(StrHashTable *table, const SymbolName* key,
+static void ghciRemoveSymbolTable(StrHashTable *table, const ll_symbol_name* key,
     ObjectCode *owner)
 {
     RtsSymbolInfo *pinfo = lookupStrHashTable(table, key);
@@ -260,12 +259,12 @@ static void ghciRemoveSymbolTable(StrHashTable *table, const SymbolName* key,
 }
 
 static const char *
-symbolTypeString (SymType type)
+symbolTypeString (ll_sym_type type)
 {
-    switch (type & ~(SYM_TYPE_DUP_DISCARD | SYM_TYPE_HIDDEN)) {
-        case SYM_TYPE_CODE: return "code";
-        case SYM_TYPE_DATA: return "data";
-        case SYM_TYPE_INDIRECT_DATA: return "indirect-data";
+    switch (type & ~(LL_SYM_DUP_DISCARD | LL_SYM_HIDDEN)) {
+        case LL_SYM_CODE: return "code";
+        case LL_SYM_DATA: return "data";
+        case LL_SYM_INDIRECT_DATA: return "indirect-data";
         default: LL_FATAL("symbolTypeString: unknown symbol type (%d)", type);
     }
 }
@@ -294,10 +293,10 @@ symbolTypeString (SymType type)
 int ghciInsertSymbolTable(
    pathchar* obj_name,
    StrHashTable *table,
-   const SymbolName* key,
-   SymbolAddr* data,
-   SymStrength strength,
-   SymType type,
+   const ll_symbol_name* key,
+   ll_symbol_addr* data,
+   ll_strength strength,
+   ll_sym_type type,
    unsigned long size,
    ObjectCode *owner)
 {
@@ -315,7 +314,7 @@ int ghciInsertSymbolTable(
    }
    else if (pinfo->type ^ type)
    {
-       if(pinfo->type & SYM_TYPE_HIDDEN)
+       if(pinfo->type & LL_SYM_HIDDEN)
        {
             /* The existing symbol is hidden, let's replace it */
             pinfo->value = data;
@@ -326,7 +325,7 @@ int ghciInsertSymbolTable(
             return 1;
        }
        /* We were asked to discard the symbol on duplicates, do so quietly.  */
-       if (!(type & (SYM_TYPE_DUP_DISCARD | SYM_TYPE_HIDDEN)))
+       if (!(type & (LL_SYM_DUP_DISCARD | LL_SYM_HIDDEN)))
        {
          LL_DEBUG("Symbol type mismatch (existing %d, new %d).\n", pinfo->type, type);
          LL_DEBUG("Symbol %s was defined by %" PATH_FMT " to be a %s symbol.\n",
@@ -337,15 +336,15 @@ int ghciInsertSymbolTable(
        }
        return 1;
    }
-   else if (pinfo->strength == STRENGTH_STRONG)
+   else if (pinfo->strength == LL_STRENGTH_STRONG)
    {
        /* The existing symbol is strong meaning we must never override it */
        LL_IF_DEBUG(linker, LL_DEBUG("%s is already defined as a strong symbol; ignoring redefinition...", key));
        return 1;
    }
-   else if (strength == STRENGTH_WEAK &&
+   else if (strength == LL_STRENGTH_WEAK &&
             data &&
-            pinfo->strength == STRENGTH_WEAK &&
+            pinfo->strength == LL_STRENGTH_WEAK &&
             !pinfo->value)
    {
        /* The existing symbol is weak with a zero value; replace it with the new symbol. */
@@ -354,7 +353,7 @@ int ghciInsertSymbolTable(
        pinfo->size = size;
        return 1;
    }
-   else if (strength == STRENGTH_WEAK)
+   else if (strength == LL_STRENGTH_WEAK)
    {
        return 1; /* weak symbol, because the symbol is weak, data = 0 and we
                  already know of another copy throw this one away.
@@ -364,7 +363,7 @@ int ghciInsertSymbolTable(
                  This also preserves the semantics of linking against
                  the first symbol we find. */
    }
-   else if (pinfo->strength == STRENGTH_WEAK && strength != STRENGTH_WEAK) /* weak symbol is in the table */
+   else if (pinfo->strength == LL_STRENGTH_WEAK && strength != LL_STRENGTH_WEAK) /* weak symbol is in the table */
    {
       /* override the weak definition with the non-weak one */
       pinfo->value = data;
@@ -441,18 +440,18 @@ int ghciInsertSymbolTable(
 * Returns: 0 on failure and result is not set,
 *          nonzero on success and result set to nonzero pointer
 */
-HsBool ghciLookupSymbolInfo(StrHashTable *table,
-    const SymbolName* key, RtsSymbolInfo **result)
+ll_hs_bool ghciLookupSymbolInfo(StrHashTable *table,
+    const ll_symbol_name* key, RtsSymbolInfo **result)
 {
     RtsSymbolInfo *pinfo = lookupStrHashTable(table, key);
     if (!pinfo) {
         *result = NULL;
         return HS_BOOL_FALSE;
     }
-    if (pinfo->strength == STRENGTH_WEAK) {
+    if (pinfo->strength == LL_STRENGTH_WEAK) {
         LL_IF_DEBUG(linker, LL_DEBUG("lookupSymbolInfo: promoting %s\n", key));
         /* Once it's looked up, it can no longer be overridden */
-        pinfo->strength = STRENGTH_NORMAL;
+        pinfo->strength = LL_STRENGTH_NORMAL;
     }
 
     *result = pinfo;
@@ -468,7 +467,8 @@ static void insertBuiltin(void *ctx, const char *name, void *addr,
                           int strength, int type)
 {
     if (! ghciInsertSymbolTable(WSTR("(GHCi built-in symbols)"),
-                                ctx, name, addr, strength, type, 0, NULL)) {
+                                ctx, name, addr, (ll_strength)strength,
+                                (ll_sym_type)type, 0, NULL)) {
         LL_FATAL("ghciInsertSymbolTable failed");
     }
 }
@@ -736,7 +736,7 @@ pathchar* findSystemLibrary(pathchar* dll_name)
 */
 void warnMissingKBLibraryPaths( void )
 {
-    static HsBool missing_update_warn = HS_BOOL_FALSE;
+    static ll_hs_bool missing_update_warn = HS_BOOL_FALSE;
     if (!missing_update_warn) {
         LL_DEBUG("Warning: If linking fails, consider installing KB2533623.\n");
         missing_update_warn = HS_BOOL_TRUE;
@@ -749,7 +749,7 @@ void warnMissingKBLibraryPaths( void )
 * Returns: NULL on failure, or pointer to be passed to removeLibrarySearchPath to
 *          restore the search path to what it was before this call.
 */
-HsPtr addLibrarySearchPath(pathchar* dll_path)
+ll_hs_ptr addLibrarySearchPath(pathchar* dll_path)
 {
     LL_IF_DEBUG(linker, LL_DEBUG("\naddLibrarySearchPath: dll_path = `%"
                                 PATH_FMT "'\n", dll_path));
@@ -767,7 +767,7 @@ HsPtr addLibrarySearchPath(pathchar* dll_path)
 *
 * Returns: HS_BOOL_TRUE on success, otherwise HS_BOOL_FALSE
 */
-HsBool removeLibrarySearchPath(HsPtr dll_path_index)
+ll_hs_bool removeLibrarySearchPath(ll_hs_ptr dll_path_index)
 {
     LL_IF_DEBUG(linker, LL_DEBUG("\nremoveLibrarySearchPath: ptr = `%p'\n",
                                 dll_path_index));
@@ -785,10 +785,10 @@ HsBool removeLibrarySearchPath(HsPtr dll_path_index)
  *
  * Returns: 0 on failure, nonzero on success
  */
-HsInt insertSymbol(pathchar* obj_name, SymbolName* key, SymbolAddr* data)
+ll_hs_int insertSymbol(pathchar* obj_name, ll_symbol_name* key, ll_symbol_addr* data)
 {
     return ghciInsertSymbolTable(obj_name, symhash, key, data, HS_BOOL_FALSE,
-                                 SYM_TYPE_CODE, 0, NULL);
+                                 LL_SYM_CODE, 0, NULL);
 }
 
 /* -----------------------------------------------------------------------------
@@ -798,7 +798,7 @@ HsInt insertSymbol(pathchar* obj_name, SymbolName* key, SymbolAddr* data)
  * symbol.
  */
 #if defined(OBJFORMAT_PEi386)
-SymbolAddr* lookupDependentSymbol (SymbolName* lbl, ObjectCode *dependent, SymType *type)
+ll_symbol_addr* lookupDependentSymbol (ll_symbol_name* lbl, ObjectCode *dependent, ll_sym_type *type)
 {
     ll_assert_lock_held(&linker_mutex);
     return lookupSymbol_PEi386(lbl, dependent, type);
@@ -806,7 +806,7 @@ SymbolAddr* lookupDependentSymbol (SymbolName* lbl, ObjectCode *dependent, SymTy
 
 #else
 
-SymbolAddr* lookupDependentSymbol (SymbolName* lbl, ObjectCode *dependent, SymType *type)
+ll_symbol_addr* lookupDependentSymbol (ll_symbol_name* lbl, ObjectCode *dependent, ll_sym_type *type)
 {
     ll_assert_lock_held(&linker_mutex);
     LL_IF_DEBUG(linker_verbose, LL_DEBUG("lookupSymbol: looking up '%s'\n", lbl));
@@ -842,11 +842,11 @@ SymbolAddr* lookupDependentSymbol (SymbolName* lbl, ObjectCode *dependent, SymTy
         LL_IF_DEBUG(linker_verbose, LL_DEBUG("lookupSymbol: symbol '%s' not found, trying dlsym\n", lbl));
 
 #       if defined(OBJFORMAT_ELF)
-        SymbolAddr *ret = internal_dlsym(lbl);
+        ll_symbol_addr *ret = internal_dlsym(lbl);
         if (type) {
             // We assume that the symbol is code since this is usually the case
             // and dlsym doesn't tell us.
-            *type = SYM_TYPE_CODE;
+            *type = LL_SYM_CODE;
         }
 
         // Generally the dynamic linker would define _DYNAMIC, which is
@@ -857,9 +857,9 @@ SymbolAddr* lookupDependentSymbol (SymbolName* lbl, ObjectCode *dependent, SymTy
         // [1] https://wiki.gentoo.org/wiki/Hardened/Introduction_to_Position_Independent_Code
         if (ret == NULL && strcmp(lbl, "_DYNAMIC") == 0) {
             static void *RTS_DYNAMIC = NULL;
-            ret = (SymbolAddr *) &RTS_DYNAMIC;
+            ret = (ll_symbol_addr *) &RTS_DYNAMIC;
             if (type) {
-                *type = SYM_TYPE_DATA;
+                *type = LL_SYM_DATA;
             }
         }
         return ret;
@@ -877,7 +877,7 @@ SymbolAddr* lookupDependentSymbol (SymbolName* lbl, ObjectCode *dependent, SymTy
         if (type) {
             // We assume that the symbol is code since this is usually the case
             // and dlsym doesn't tell us.
-            *type = SYM_TYPE_CODE;
+            *type = LL_SYM_CODE;
         }
         return internal_dlsym(lbl + 1);
 
@@ -888,8 +888,8 @@ SymbolAddr* lookupDependentSymbol (SymbolName* lbl, ObjectCode *dependent, SymTy
 #       endif
     } else {
         static void *RTS_NO_FINI = NULL;
-        if (strcmp(lbl, "__fini_array_end") == 0) { return (SymbolAddr *) &RTS_NO_FINI; }
-        if (strcmp(lbl, "__fini_array_start") == 0) { return (SymbolAddr *) &RTS_NO_FINI; }
+        if (strcmp(lbl, "__fini_array_end") == 0) { return (ll_symbol_addr *) &RTS_NO_FINI; }
+        if (strcmp(lbl, "__fini_array_start") == 0) { return (ll_symbol_addr *) &RTS_NO_FINI; }
         if (type) {
             // This is an assumption
             *type = pinfo->type;
@@ -900,7 +900,7 @@ SymbolAddr* lookupDependentSymbol (SymbolName* lbl, ObjectCode *dependent, SymTy
             ObjectCode *owner = pinfo->owner;
             if (owner) {
                 // TODO: what does it mean for a symbol to not have an owner?
-                insertHashSet(dependent->dependencies, (W_)owner);
+                insertHashSet(dependent->dependencies, (ll_w)owner);
             }
         }
         return loadSymbol(lbl, pinfo);
@@ -934,7 +934,7 @@ SymbolAddr* lookupDependentSymbol (SymbolName* lbl, ObjectCode *dependent, SymTy
  * Load and relocate the object code for a symbol as necessary.
  * Symbol name only used for diagnostics output.
  */
-SymbolAddr* loadSymbol(SymbolName *lbl, RtsSymbolInfo *pinfo) {
+ll_symbol_addr* loadSymbol(ll_symbol_name *lbl, RtsSymbolInfo *pinfo) {
     LL_IF_DEBUG(linker_verbose,
              LL_DEBUG("lookupSymbol: value of %s is %p, owned by %" PATH_FMT "\n", lbl,
                         pinfo->value,
@@ -977,12 +977,12 @@ printLoadedObjects(void) {
    }
 }
 
-SymbolAddr* lookupSymbol( SymbolName* lbl )
+ll_symbol_addr* lookupSymbol( ll_symbol_name* lbl )
 {
     ll_lock(&linker_mutex);
     // NULL for "don't add dependent". When adding a dependency we call
     // lookupDependentSymbol directly.
-    SymbolAddr* r = lookupDependentSymbol(lbl, NULL, NULL);
+    ll_symbol_addr* r = lookupDependentSymbol(lbl, NULL, NULL);
     if (!r) {
         if (!ll_cfg.optimistic) {
           LL_LOG_ERROR("^^ Could not load '%s', dependency unresolved. "
@@ -1012,12 +1012,12 @@ SymbolAddr* lookupSymbol( SymbolName* lbl )
  * within DELTA bytes of the specified address, and show their names.
  */
 #if LL_DEBUG_CODE
-void ghci_enquire ( SymbolAddr* addr );
+void ghci_enquire ( ll_symbol_addr* addr );
 
-void ghci_enquire(SymbolAddr* addr)
+void ghci_enquire(ll_symbol_addr* addr)
 {
    int   i;
-   SymbolName* sym;
+   ll_symbol_name* sym;
    RtsSymbolInfo* a;
    const int DELTA = 64;
    ObjectCode* oc;
@@ -1046,7 +1046,7 @@ void ghci_enquire(SymbolAddr* addr)
 
 pathchar*
 resolveSymbolAddr (pathchar* buffer, int size,
-                   SymbolAddr* symbol, uintptr_t* top)
+                   ll_symbol_addr* symbol, uintptr_t* top)
 {
 #if defined(OBJFORMAT_PEi386)
   return resolveSymbolAddr_PEi386 (buffer, size, symbol, top);
@@ -1329,7 +1329,7 @@ mkOc( ObjectType type, pathchar *path, char *image, int imageSize,
  *
  * Returns: 1 if the path is already loaded, 0 otherwise.
  */
-HsInt
+ll_hs_int
 isAlreadyLoaded( pathchar *path )
 {
     for (ObjectCode *o = objects; o; o = o->next) {
@@ -1465,7 +1465,7 @@ preloadObjectFile (pathchar *path)
  *
  * Returns: 1 if ok, 0 on error.
  */
-static HsInt loadObj_ (pathchar *path)
+static ll_hs_int loadObj_ (pathchar *path)
 {
    // Check that we haven't already loaded this object.
    // Ignore requests to load multiple times
@@ -1507,15 +1507,15 @@ static HsInt loadObj_ (pathchar *path)
    return 1;
 }
 
-HsInt loadObj (pathchar *path)
+ll_hs_int loadObj (pathchar *path)
 {
    ll_lock(&linker_mutex);
-   HsInt r = loadObj_(path);
+   ll_hs_int r = loadObj_(path);
    ll_unlock(&linker_mutex);
    return r;
 }
 
-HsInt loadOc (ObjectCode* oc)
+ll_hs_int loadOc (ObjectCode* oc)
 {
    int r;
 
@@ -1730,7 +1730,7 @@ int runPendingInitializers (void)
  *
  * Returns: 1 if ok, 0 on error.
  */
-static HsInt resolveObjs_ (void)
+static ll_hs_int resolveObjs_ (void)
 {
     LL_IF_DEBUG(linker, LL_DEBUG("resolveObjs: start\n"));
 
@@ -1752,10 +1752,10 @@ static HsInt resolveObjs_ (void)
     return 1;
 }
 
-HsInt resolveObjs (void)
+ll_hs_int resolveObjs (void)
 {
     ll_lock(&linker_mutex);
-    HsInt r = resolveObjs_();
+    ll_hs_int r = resolveObjs_();
     ll_unlock(&linker_mutex);
     return r;
 }
@@ -1763,7 +1763,7 @@ HsInt resolveObjs (void)
 /* -----------------------------------------------------------------------------
  * delete an object from the pool
  */
-static HsInt unloadObj_ (pathchar *path, bool just_purge)
+static ll_hs_int unloadObj_ (pathchar *path, bool just_purge)
 {
     LL_ASSERT(symhash != NULL);
     LL_ASSERT(objects != NULL);
@@ -1809,18 +1809,18 @@ static HsInt unloadObj_ (pathchar *path, bool just_purge)
     }
 }
 
-HsInt unloadObj (pathchar *path)
+ll_hs_int unloadObj (pathchar *path)
 {
     ll_lock(&linker_mutex);
-    HsInt r = unloadObj_(path, false);
+    ll_hs_int r = unloadObj_(path, false);
     ll_unlock(&linker_mutex);
     return r;
 }
 
-HsInt purgeObj (pathchar *path)
+ll_hs_int purgeObj (pathchar *path)
 {
     ll_lock(&linker_mutex);
-    HsInt r = unloadObj_(path, true);
+    ll_hs_int r = unloadObj_(path, true);
     ll_unlock(&linker_mutex);
     return r;
 }
@@ -1856,8 +1856,8 @@ OStatus getObjectLoadStatus (pathchar *path)
  */
 void
 addSection (Section *s, SectionKind kind, SectionAlloc alloc,
-            void* start, StgWord size,
-            StgWord mapped_offset, void* mapped_start, StgWord mapped_size)
+            void* start, ll_word size,
+            ll_word mapped_offset, void* mapped_start, ll_word mapped_size)
 {
    s->start        = start;     /* actual start of section in memory */
    s->size         = size;      /* actual size of section in memory */
@@ -1875,7 +1875,7 @@ addSection (Section *s, SectionKind kind, SectionAlloc alloc,
 
    LL_IF_DEBUG(linker,
             LL_DEBUG("addSection: %p-%p (size %" FMT_Word "), kind %d\n",
-                       start, (void*)((StgWord)start + size),
+                       start, (void*)((ll_word)start + size),
                        size, kind ));
 }
 
@@ -1907,7 +1907,7 @@ void * loadNativeObj (pathchar *path, char **errmsg)
    return r;
 }
 
-static HsInt unloadNativeObj_(void *handle)
+static ll_hs_int unloadNativeObj_(void *handle)
 {
     bool unloadedAnyObj = false;
 
@@ -1947,9 +1947,9 @@ static HsInt unloadNativeObj_(void *handle)
     }
 }
 
-HsInt unloadNativeObj(void *handle) {
+ll_hs_int unloadNativeObj(void *handle) {
   ll_lock(&linker_mutex);
-  HsInt r = unloadNativeObj_(handle);
+  ll_hs_int r = unloadNativeObj_(handle);
   ll_unlock(&linker_mutex);
   return r;
 }
