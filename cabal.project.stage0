@@ -6,7 +6,7 @@ source-repository-package
   -- Based on feat/wasm-cross-ghcup-stack-next (post-split Cabal #378), with
   -- `package host:*` / `package build:*` for the staged compiler toolchains.
   -- Re-pin to stable-haskell/master once #378 lands there (cabal#384).
-  tag: 45a2320fb32c9f6c10b101af2d3a024da1d7f5f6
+  tag: dd4e24519c37216c95bccc7f1aa95bdafebaf90a
   subdir: Cabal
           Cabal-syntax
           cabal-install
