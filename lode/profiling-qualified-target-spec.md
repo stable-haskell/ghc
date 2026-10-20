@@ -206,6 +206,20 @@ used to invoke `configure`. Reject a logical `M-prof` at this C-toolchain
 boundary with guidance to pass machine-only `M` and select the Haskell ABI
 separately.
 
+Autoconf compares raw `--host` and `--build` aliases before running native
+probes; some Configure packages do not use `config.sub`. At this argument
+boundary only, reconcile a legacy bare `-linux` tail with the otherwise
+identical `-linux-gnu` spelling. When both values are inferred, use the full
+GNU spelling for both. When one value is explicit, preserve that literal and
+align only its inferred counterpart. Preserve all explicit arguments and
+their order; the effective last explicit value controls this reconciliation.
+When both values are explicit, preserve both unchanged. Perform this step
+while provenance is known, before Setup serialization or inferred defaults
+are merged with user arguments. This rule does not equate GNU with musl,
+`gnueabi` with `gnueabihf`, or different machines or vendors. It does not
+rewrite `M`, `T`, hashes, or namespaces, and is not a binary compatibility
+predicate. Continue rejecting every logical `M-prof` argument before dispatch.
+
 Installed target directories use `targets/T/lib`; the manifest and all
 dispatched programs select the same directory. Cover `ghc`, `ghc-pkg`,
 `runghc`, hsc2hs, and other actually shipped target helpers. Do not invent a
@@ -487,7 +501,7 @@ real boundaries, not just compare a helper's output to itself.
 | T8 | Both directions of explicit incompatible interface import fail; normal package discovery never mixes target DBs, including in a reused project directory. | R4 |
 | T9 | Ordinary compiler/client/Setup legacy-way requests fail; profiling compiler default and redundant flags build once. Explicit unavailable shared/debug requests fail; automatic choices use supported static output. Inspect archives, interfaces, and objects for retired automatic suffixes. | R3, R8 |
 | T10 | Global, local, install-local, explicit Build stage, and explicit package profiling options preserve scope and precedence through cache serialization. | R5, R8, R10 |
-| T11 | Capture actual C/C++/hsc2hs/linker/LLVM commands, generated LLVM module targets, and configure argv for Build and Host probes. Verify full stage-specific machine triples, explicit `--host`/`--build` precedence, and that no logical `-prof` reaches toolchain target fields. | R2, R6 |
+| T11 | Capture actual C/C++/hsc2hs/linker/LLVM commands, generated LLVM module targets, and configure argv for Build and Host probes. Verify full stage-specific machine triples, explicit `--host`/`--build` precedence, and that no logical `-prof` reaches toolchain target fields. In a Configure package without `config.sub`, verify that equivalent inferred legacy Linux/GNU aliases run a native `AC_RUN_IFELSE` probe, mixed explicit/inferred aliases preserve the explicit spelling, both-explicit aliases remain untouched, and GNU/musl and soft/hard-float distinctions remain cross targets. | R2, R6 |
 | T12 | Fresh bindist configure/install, relocation to a path with spaces, separate consumer project, and testsuite archive execution pass with matching final GHC/Cabal revisions. | R1, R3, R4, R11 |
 | T13 | Native nonprofiling and an existing Wasm cross project preserve package conditions, Build/Host routing, and capability handling. | R5, R10 |
 | D1 | Independent source review confirms generic identity code, the thin profiling adapter, legacy-way deletion, and unrelated store/HPC fixes have the boundaries specified in the plan. | R12 |

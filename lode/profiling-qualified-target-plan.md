@@ -116,6 +116,18 @@ serializable external-Setup route that invokes configure. Reject `M-prof`
 there with migration guidance to use machine-only `M` and choose the Haskell
 ABI separately.
 
+Before merging or serializing configure defaults, reconcile only the exact
+legacy bare Linux versus otherwise identical Linux GNU alias pair. Autoconf
+compares raw aliases before native probes, including in packages without
+`config.sub`. For two inferred aliases use the full GNU spelling; for one
+explicit option preserve its literal and align only the inferred counterpart.
+Use the last explicit value when options repeat, retain all explicit arguments
+in order, and leave both-explicit pairs untouched. Share this policy between
+client injection and Setup-only defaults. Keep machine metadata and target
+identity unchanged. Add a process-like no-`config.sub` `AC_RUN_IFELSE`
+regression for native probing, both mixed-explicit directions, and explicit
+cross-mode preservation, plus GNU/musl and ARM soft/hard-float negatives.
+
 ## Phase 2 Centralize Cabal identity
 
 ### Library API and metadata ingestion
@@ -321,3 +333,8 @@ stage-specific machine triples, explicit configure-option precedence,
 `-prof` rejection at the C boundary, or Setup/configuration serialization
 paths. Implementation and captured-configure-argv regressions remain separate
 verification work.
+
+A subsequent Linux build exposed Autoconf's raw-alias comparison before native
+probes. Astra approved the bounded configure-only Linux/GNU reconciliation
+above and its no-`config.sub` runtime-probe regression, with explicit argument
+provenance and all target identity fields preserved.
