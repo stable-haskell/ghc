@@ -56,9 +56,9 @@ bool makeStubRISCV64(Stub *s) {
   uint64_t hi = (addr + 0x800) >> 12;
   uint64_t lo = addr - (hi << 12);
 
-  IF_DEBUG(
+  LL_IF_DEBUG(
       linker,
-      debugBelch(
+      LL_DEBUG(
           "makeStubRISCV64: P = %p, got_addr = %p, target = %p, addr = 0x%x "
           ", hi = 0x%lx, lo = 0x%lx\n",
           P, s->got_addr, s->target, addr, hi, lo));
