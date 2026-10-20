@@ -172,6 +172,7 @@ STORE_DIR   = $(STAGE_DIR)/store
 LOGS_DIR    = $(STAGE_DIR)/logs
 
 DIST_DIR   := $(BUILD_DIR)/dist
+LLVM_TABLE_FILES := $(DIST_DIR)/lib/llvm-targets $(DIST_DIR)/lib/llvm-passes
 
 # Timing directory for phase start/end timestamps
 TIMING_DIR := $(BUILD_DIR)/timing
@@ -186,6 +187,14 @@ METRICS_DIR := $(BUILD_DIR)/metrics
 STAGE0_STAMP := $(BUILD_DIR)/.stamp-stage0
 STAGE1_STAMP := $(BUILD_DIR)/.stamp-stage1
 STAGE2_STAMP := $(BUILD_DIR)/.stamp-stage2
+
+$(DIST_DIR)/lib/llvm-targets: llvm-targets $(if $(DIST_BUILD),,$(STAGE2_STAMP))
+	@mkdir -p $(dir $@)
+	@cp $< $@
+
+$(DIST_DIR)/lib/llvm-passes: llvm-passes $(if $(DIST_BUILD),,$(STAGE2_STAMP))
+	@mkdir -p $(dir $@)
+	@cp $< $@
 
 # Each stamp is the real Make target for its stage's recipe; PHONY aliases
 # (stage1, stage2) are provided for convenience.  This lets Make resolve the
@@ -771,6 +780,9 @@ $(STAGE2_STAMP): $(GHC1) $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) cabal.project.
 	$(call DIST_COPY_EXES,$(STAGE2_EXECUTABLES))
 
 	@mkdir -p $(DIST_DIR)/lib/$(TARGET_PLATFORM)
+	# GHC loads these tables from the selected compiler libdir for -fllvm.
+	@cp llvm-targets $(DIST_DIR)/lib/llvm-targets
+	@cp llvm-passes $(DIST_DIR)/lib/llvm-passes
 	$(call DIST_COPY_LIBS,$(filter-out system-cxx-std-lib%,$(STAGE2_LIBRARIES)))
 	$(call DIST_COPY_LIBS_SO)
 
@@ -842,7 +854,7 @@ endif
 	@touch $@
 
 .PHONY: stage2
-stage2: $(STAGE2_STAMP)
+stage2: $(STAGE2_STAMP) $(LLVM_TABLE_FILES)
 
 $(addprefix $(STAGE2_PATH)/bin/,$(STAGE2_EXECUTABLES)) : $(STAGE2_STAMP)
 endif # DIST_BUILD (stage2)
@@ -1117,6 +1129,9 @@ endif
 	$$(call LOG,Copying libraries into distribution for target $(1))
 	@mkdir -p $$(TARGET_DIR)/lib/package.conf.d
 	@mkdir -p $$(TARGET_DIR)/lib/$(1)
+	# Every target compiler reads LLVM backend tables from its own libdir.
+	@cp llvm-targets $$(TARGET_DIR)/lib/llvm-targets
+	@cp llvm-passes $$(TARGET_DIR)/lib/llvm-passes
 	$$(call DIST_COPY_LIBS_CROSS,$(call STAGE3_LIBRARIES_FOR,$(1)) $(STAGE3_$(1)_ADDITIONAL_LIBRARIES),$(1))
 	$$(call DIST_COPY_LIBS_SO_CROSS)
 	$$(call DIST_COPY_LIBS_CONF_CROSS,$(call STAGE3_LIBRARIES_FOR,$(1)) $(STAGE3_$(1)_ADDITIONAL_LIBRARIES) $(STAGE3_$(1)_CONF_ONLY_LIBRARIES),$(1))
@@ -1245,7 +1260,7 @@ stage3: $(foreach platform,$(STAGE3_PLATFORMS),stage3-$(platform))
 
 # A standalone native + profiling bindist needs neither the wasm nor JS SDK.
 # Generated profiling iservs link against this target's ghci and RTS packages.
-$(DIST_DIR)/ghc-profile.tar.gz: stage3-profile
+$(DIST_DIR)/ghc-profile.tar.gz: stage3-profile $(LLVM_TABLE_FILES)
 	@cp -f mk/multi-target-relocate.sh $(DIST_DIR)/relocate.sh
 	@chmod +x $(DIST_DIR)/relocate.sh
 	@cp -f mk/multi-target-configure.sh $(DIST_DIR)/configure
@@ -1257,7 +1272,7 @@ $(DIST_DIR)/ghc-profile.tar.gz: stage3-profile
 		$(if $(filter 1,$(DYNAMIC)),bin/ghc-iserv-dyn$(EXE_EXT)) \
 		--files-from=$(CURDIR)/$(DIST_DIR)/lib/targets/$(PROFILING_TARGET)/target.executables \
 		lib/ghc-usage.txt lib/ghci-usage.txt lib/template-hsc.h \
-		lib/package.conf.d lib/settings lib/$(STAGE2_PLATFORM) \
+		lib/package.conf.d lib/settings lib/llvm-targets lib/llvm-passes lib/$(STAGE2_PLATFORM) \
 		lib/targets/$(PROFILING_TARGET) \
 		relocate.sh configure Makefile
 
@@ -1268,7 +1283,7 @@ $(DIST_DIR)/ghc-profile.tar.gz: stage3-profile
 # |____/|_|_| |_|\__,_|_|___/\__|___/
 #
 
-$(DIST_DIR)/ghc.tar.gz: $(STAGE2_STAMP)
+$(DIST_DIR)/ghc.tar.gz: $(STAGE2_STAMP) $(LLVM_TABLE_FILES)
 	@echo "::group::Creating ghc.tar.gz..."
 	@tar czf $@ \
 		--directory=$(DIST_DIR) \
@@ -1278,6 +1293,8 @@ $(DIST_DIR)/ghc.tar.gz: $(STAGE2_STAMP)
 		lib/ghci-usage.txt \
 		lib/package.conf.d \
 		lib/settings \
+		lib/llvm-targets \
+		lib/llvm-passes \
 		lib/template-hsc.h \
 		lib/$(STAGE2_PLATFORM)
 	@echo "::endgroup::"
@@ -1291,7 +1308,7 @@ $(DIST_DIR)/cabal.tar.gz: | stable-cabal
 		bin/cabal
 	@echo "::endgroup::"
 
-$(DIST_DIR)/haskell-toolchain.tar.gz: $(STAGE2_STAMP) | stable-cabal stage3-javascript-unknown-ghcjs
+$(DIST_DIR)/haskell-toolchain.tar.gz: $(STAGE2_STAMP) $(LLVM_TABLE_FILES) | stable-cabal stage3-javascript-unknown-ghcjs
 	@echo "::group::Creating haskell-toolchain.tar.gz..."
 	@mkdir -p $(DIST_DIR)/bin
 	@cp $(CABAL) $(DIST_DIR)/bin/
@@ -1302,6 +1319,8 @@ $(DIST_DIR)/haskell-toolchain.tar.gz: $(STAGE2_STAMP) | stable-cabal stage3-java
 		lib/ghci-usage.txt \
 		lib/package.conf.d \
 		lib/settings \
+		lib/llvm-targets \
+		lib/llvm-passes \
 		lib/template-hsc.h \
 		lib/$(STAGE2_PLATFORM) \
 		--files-from=$(CURDIR)/$(DIST_DIR)/lib/targets/javascript-unknown-ghcjs/target.executables \
@@ -1326,7 +1345,7 @@ $(DIST_DIR)/haskell-toolchain.tar.gz: $(STAGE2_STAMP) | stable-cabal stage3-java
 #
 # JS doesn't use ghc-iserv (the JS backend has its own evaluator); filter
 # it out of the JS bin list so we don't ship a useless prefixed copy.
-$(DIST_DIR)/ghc-multi-target.tar.gz: | stage3-wasm32-unknown-wasi stage3-javascript-unknown-ghcjs
+$(DIST_DIR)/ghc-multi-target.tar.gz: $(LLVM_TABLE_FILES) | stage3-wasm32-unknown-wasi stage3-javascript-unknown-ghcjs
 	@echo "::group::Creating ghc-multi-target.tar.gz..."
 	@cp -f mk/multi-target-relocate.sh $(DIST_DIR)/relocate.sh
 	@chmod +x $(DIST_DIR)/relocate.sh
@@ -1342,6 +1361,8 @@ $(DIST_DIR)/ghc-multi-target.tar.gz: | stage3-wasm32-unknown-wasi stage3-javascr
 		lib/ghci-usage.txt \
 		lib/package.conf.d \
 		lib/settings \
+		lib/llvm-targets \
+		lib/llvm-passes \
 		lib/template-hsc.h \
 		lib/$(STAGE2_PLATFORM) \
 		lib/targets/wasm32-unknown-wasi \
