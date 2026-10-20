@@ -11,6 +11,7 @@
 #include "Rts.h"
 #include "RtsSymbols.h"
 #include "Hash.h"
+#include "linker/ll_compat.h"
 #include "linker/M32Alloc.h"
 #include "linker/ProddableBlocks.h"
 
@@ -391,7 +392,7 @@ extern Elf_Word shndx_table_uninit_label;
     )
 
 #define ocDebugBelch(oc, s, ...) \
-    debugBelch("%s(%" PATH_FMT ": " s, \
+    LL_DEBUG("%s(%" PATH_FMT ": " s, \
                __func__, \
                OC_INFORMATIVE_FILENAME(oc), \
                ##__VA_ARGS__)

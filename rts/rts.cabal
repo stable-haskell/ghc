@@ -136,6 +136,7 @@ extra-source-files:
     Libdw.h
     LibdwPool.h
     LinkerGlue.h
+    linker/ll_compat.h
     linker/ll_host.h
     linker/CacheFlush.h
     linker/elf_compat.h
