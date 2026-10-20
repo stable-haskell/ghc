@@ -147,6 +147,8 @@ extra-source-files:
     linker/ll_mutex.h
     linker/ll_platform.h
     linker/ll_end_private.h
+    linker/ll_visibility.h
+    linker/rts_friend.h
     linker/CacheFlush.h
     linker/elf_compat.h
     linker/elf_got.h

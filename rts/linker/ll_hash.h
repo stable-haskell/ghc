@@ -1,4 +1,6 @@
 #pragma once
+
+#include "ll_visibility.h"
 #include "linker/ll_compat.h"
 #define allocHashTable ll_hash_alloc_table
 #define insertHashTable ll_hash_insert_table
@@ -65,7 +67,7 @@ typedef bool (*IterHashFn)(void *data, ll_word key, const void *value);
 
 void mapHashTable(HashTable *table, void *data, MapHashFn fn);
 void mapHashTableKeys(HashTable *table, void *data, MapHashFnKeys fn);
-void iterHashTable(HashTable *table, void *data, IterHashFn);
+LL_FRIEND_API void iterHashTable(HashTable *table, void *data, IterHashFn);
 
 /* Hash table access where the keys are C strings (the strings are
  * assumed to be allocated by the caller, and mustn't be deallocated

@@ -17,7 +17,6 @@
 #include "HsFFI.h"
 
 #include "sm/Storage.h"
-#include "linker/MMap.h"
 #include "RtsFlags.h"
 #include "RtsUtils.h"
 #include "BuiltinClosures.h"
@@ -45,7 +44,7 @@
 #include "Timer.h"
 #include "Globals.h"
 #include "FileLock.h"
-#include "LinkerInternals.h"
+#include "linker/rts_friend.h"
 #include "LinkerGlue.h"
 #include "LibdwPool.h"
 #include "sm/CNF.h"

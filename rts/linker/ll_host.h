@@ -8,6 +8,8 @@
 
 #pragma once
 
+#include "ll_visibility.h"
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -69,4 +71,4 @@ typedef struct ll_config {
  * during RTS startup, before any linker allocation or adjustor mapping. */
 extern ll_host_ops ll_host;
 extern ll_config ll_cfg;
-void ll_install_host(const ll_host_ops *host, const ll_config *cfg);
+LL_FRIEND_API void ll_install_host(const ll_host_ops *host, const ll_config *cfg);

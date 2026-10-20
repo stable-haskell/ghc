@@ -1,7 +1,8 @@
 #pragma once
 
+#include "rts_friend.h"
+
 #include "ll_begin_private.h"
-#include "linker/ll_host.h"
 
 #if defined(aarch64_HOST_ARCH)
 // On AArch64 MAP_32BIT is not available but we are still bound by the small
@@ -50,33 +51,11 @@
 #define LINKER_LOAD_BASE ((void *) 0x40000000)
 #endif
 
-void initLinkerMMap(void);
-
-/** Access modes for mprotectForLinker */
-typedef enum {
-    MEM_NO_ACCESS,
-    MEM_READ_ONLY,
-    MEM_READ_WRITE,
-    // Initially map pages as rw- and then switch to r-x later.
-    MEM_READ_WRITE_THEN_READ_EXECUTE,
-    MEM_READ_EXECUTE,
-    MEM_READ_WRITE_EXECUTE,
-} MemoryAccess;
-
 extern void *mmap_32bit_base;
-
-// Map read/write anonymous memory anywhere in memory.
-void *mmapAnon(size_t bytes);
 
 // Map read/write anonymous memory, enforcing the constraint of
 // placing the mapping within 4GB of the executable image.
 void *mmapAnonForLinker (size_t bytes);
-
-// Change protection of previous mapping memory.
-void mprotectForLinker(void *start, size_t len, MemoryAccess mode);
-
-// Release a mapping.
-void munmapForLinker (void *addr, size_t bytes, const char *caller);
 
 #if !defined(mingw32_HOST_OS)
 // Map a file.

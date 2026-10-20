@@ -7,7 +7,7 @@
 
 #include "Rts.h"
 #include "sm/OSMem.h"
-#include "linker/MMap.h"
+#include "linker/rts_friend.h"
 
 ExecPage *allocateExecPage(void) {
     ExecPage *page = (ExecPage *) mmapAnon(getPageSize());

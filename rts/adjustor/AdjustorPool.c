@@ -3,7 +3,6 @@
 
 #include "sm/OSMem.h"
 #include "RtsUtils.h"
-#include "linker/MMap.h"
 #include "AdjustorPool.h"
 
 #include <string.h>

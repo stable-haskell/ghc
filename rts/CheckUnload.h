@@ -10,22 +10,9 @@
 
 #pragma once
 
-#include "LinkerInternals.h"
+#include "linker/rts_friend.h"
 
 #include "BeginPrivate.h"
-
-// Currently live objects
-extern ObjectCode *objects;
-
-// Root set for object collection
-extern ObjectCode *loaded_objects;
-
-// Mark bit for live objects
-extern uint8_t object_code_mark_bit;
-
-// Number of object code currently marked for unloading. See the definition in
-// Linker.c for details.
-extern int n_unloaded_objects;
 
 void initUnloadCheck(void);
 void exitUnloadCheck(void);
