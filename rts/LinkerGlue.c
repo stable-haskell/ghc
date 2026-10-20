@@ -11,6 +11,9 @@
 #include "RtsUtils.h"
 #include "ReportMemoryMap.h"
 #include "sm/OSMem.h"
+#include "GetEnv.h"
+#include "ForeignExports.h"
+#include "Profiling.h"
 #include "linker/ll_host.h"
 
 static void *host_malloc(void *ctx STG_UNUSED, size_t n, const char *what)
@@ -64,6 +67,62 @@ static void host_flush_icache(void *ctx STG_UNUSED, void *p, size_t len)
     flushExec(len, p);
 }
 
+static void host_prog_args(void *ctx STG_UNUSED, int *argc, char ***argv,
+                           int *envc, char ***envp)
+{
+    getProgArgv(argc, argv);
+    getProgEnvv(envc, envp);
+}
+
+static void host_free_prog_env(void *ctx STG_UNUSED, int envc, char **envp)
+{
+    freeProgEnvv(envc, envp);
+}
+
+static void host_before_init(void *ctx STG_UNUSED, ObjectCode *oc)
+{
+    foreignExportsLoadingObject(oc);
+}
+
+static void host_after_init(void *ctx STG_UNUSED, ObjectCode *oc STG_UNUSED,
+                            bool ok STG_UNUSED)
+{
+    foreignExportsFinishedLoadingObject();
+}
+
+#if defined(PROFILING)
+static void host_after_init_batch(void *ctx STG_UNUSED)
+{
+    refreshProfilingCCSs();
+}
+#endif
+
+static void host_before_native_load(void *ctx STG_UNUSED, ObjectCode *oc)
+{
+    foreignExportsLoadingObject(oc);
+
+    // When dlopen() loads a profiled dynamic library, it calls the ctors which
+    // will call registerCcsList() to append the defined CostCentreStacks to
+    // CCS_LIST. However, another thread may be doing other things with the RTS
+    // linker that transitively calls refreshProfilingCCSs() which also accesses
+    // CCS_LIST. So there's a risk of data race that may lead to segfaults
+    // (#24423), and we need to ensure the ctors are also protected by
+    // ccs_mutex.
+#if defined(PROFILING)
+    ACQUIRE_LOCK(&ccs_mutex);
+#endif
+}
+
+static void host_after_native_load(void *ctx STG_UNUSED,
+                                   ObjectCode *oc STG_UNUSED,
+                                   bool ok STG_UNUSED)
+{
+#if defined(PROFILING)
+    RELEASE_LOCK(&ccs_mutex);
+#endif
+    foreignExportsFinishedLoadingObject();
+}
+
 void ll_rts_install_host(void)
 {
     const ll_host_ops host = {
@@ -76,6 +135,15 @@ void ll_rts_install_host(void)
         .on_mem_failure = host_mem_failure,
         .page_size = host_page_size,
         .flush_icache = host_flush_icache,
+        .prog_args = host_prog_args,
+        .free_prog_env = host_free_prog_env,
+        .before_init = host_before_init,
+        .after_init = host_after_init,
+#if defined(PROFILING)
+        .after_init_batch = host_after_init_batch,
+#endif
+        .before_native_load = host_before_native_load,
+        .after_native_load = host_after_native_load,
     };
     const ll_config cfg = {
         .near_hint = &stg_upd_frame_info,

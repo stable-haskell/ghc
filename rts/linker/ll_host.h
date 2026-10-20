@@ -36,9 +36,14 @@ typedef struct ll_host_ops {
     size_t (*page_size)(void *ctx);
     void (*flush_icache)(void *ctx, void *p, size_t len);
 
-    /* Reserved for the subsequent call-site conversion. These hooks are
-     * nullable and are not called until their host implementation is installed. */
-    void (*prog_args)(void *ctx, int *argc, char ***argv, char ***envp);
+    /* Acquire vectors for each initializer/finalizer pass; argv is borrowed.
+     * Release envp with its returned count when free_prog_env is supplied.
+     * A NULL release callback means envp is borrowed. */
+    void (*prog_args)(void *ctx, int *argc, char ***argv,
+                      int *envc, char ***envp);
+    void (*free_prog_env)(void *ctx, int envc, char **envp);
+
+    /* Nullable lifecycle services are called only when supplied by the host. */
     void (*before_init)(void *ctx, struct _ObjectCode *o);
     void (*after_init)(void *ctx, struct _ObjectCode *o, bool ok);
     void (*after_init_batch)(void *ctx);

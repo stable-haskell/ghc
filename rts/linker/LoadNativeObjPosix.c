@@ -153,18 +153,9 @@ void * loadNativeObj_POSIX (pathchar *path, char **errmsg)
 #endif
 
 try_again:
-   foreignExportsLoadingObject(nc);
-
-   // When dlopen() loads a profiled dynamic library, it calls the ctors which
-   // will call registerCcsList() to append the defined CostCentreStacks to
-   // CCS_LIST. However, another thread may be doing other things with the RTS
-   // linker that transitively calls refreshProfilingCCSs() which also accesses
-   // CCS_LIST. So there's a risk of data race that may lead to segfaults
-   // (#24423), and we need to ensure the ctors are also protected by
-   // ccs_mutex.
-#if defined(PROFILING)
-   ACQUIRE_LOCK(&ccs_mutex);
-#endif
+   if (ll_host.before_native_load != NULL) {
+       ll_host.before_native_load(ll_host.ctx, nc);
+   }
 
    const int dlopen_mode = load_now ? RTLD_NOW : RTLD_LAZY;
 
@@ -187,11 +178,9 @@ try_again:
        }
    );
 
-#if defined(PROFILING)
-   RELEASE_LOCK(&ccs_mutex);
-#endif
-
-   foreignExportsFinishedLoadingObject();
+   if (ll_host.after_native_load != NULL) {
+       ll_host.after_native_load(ll_host.ctx, nc, hdl != NULL);
+   }
 
    if (hdl == NULL) {
      if (load_now) {
@@ -242,10 +231,10 @@ try_again:
 
    retval = nc->dlopen_handle;
 
-#if defined(PROFILING)
-  // collect any new cost centres that were defined in the loaded object.
-  refreshProfilingCCSs();
-#endif
+   if (ll_host.after_init_batch != NULL) {
+       // collect any new cost centres that were defined in the loaded object.
+       ll_host.after_init_batch(ll_host.ctx);
+   }
 
    goto success;
 

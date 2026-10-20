@@ -103,11 +103,12 @@ void freeInitFiniList(struct InitFiniList *slist)
 
 static bool runInitFini(struct InitFiniList **head)
 {
-    int argc, envc;
-    char **argv, **envv;
+    int argc = 0, envc = 0;
+    char **argv = NULL, **envv = NULL;
 
-    getProgArgv(&argc, &argv);
-    getProgEnvv(&envc, &envv);
+    if (ll_host.prog_args != NULL) {
+        ll_host.prog_args(ll_host.ctx, &argc, &argv, &envc, &envv);
+    }
 
     for (struct InitFiniList *slist = *head;
            slist != NULL;
@@ -178,7 +179,9 @@ static bool runInitFini(struct InitFiniList **head)
     freeInitFiniList(*head);
     *head = NULL;
 
-    freeProgEnvv(envc, envv);
+    if (ll_host.free_prog_env != NULL) {
+        ll_host.free_prog_env(ll_host.ctx, envc, envv);
+    }
     return true;
 }
 

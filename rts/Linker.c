@@ -1698,7 +1698,9 @@ int ocRunInit(ObjectCode *oc)
     LL_IF_DEBUG(linker, ocDebugBelch(oc, "running initializers\n"));
 
     // See Note [Tracking foreign exports] in ForeignExports.c
-    foreignExportsLoadingObject(oc);
+    if (ll_host.before_init != NULL) {
+        ll_host.before_init(ll_host.ctx, oc);
+    }
     int r;
 #if defined(OBJFORMAT_ELF)
     r = ocRunInit_ELF ( oc );
@@ -1709,7 +1711,9 @@ int ocRunInit(ObjectCode *oc)
 #else
     LL_FATAL("ocTryLoad: initializers not implemented on this platform");
 #endif
-    foreignExportsFinishedLoadingObject();
+    if (ll_host.after_init != NULL) {
+        ll_host.after_init(ll_host.ctx, oc, r != 0);
+    }
 
     if (!r) { return r; }
     oc->initializersRan = true;
@@ -1730,10 +1734,10 @@ int runPendingInitializers (void)
         }
     }
 
-#if defined(PROFILING)
-    // collect any new cost centres & CCSs that were defined during runInit
-    refreshProfilingCCSs();
-#endif
+    if (ll_host.after_init_batch != NULL) {
+        // collect any new cost centres & CCSs that were defined during runInit
+        ll_host.after_init_batch(ll_host.ctx);
+    }
 
     return 1;
 }
