@@ -135,6 +135,8 @@ extra-source-files:
     LdvProfile.h
     Libdw.h
     LibdwPool.h
+    LinkerGlue.h
+    linker/ll_host.h
     linker/CacheFlush.h
     linker/elf_compat.h
     linker/elf_got.h
@@ -424,6 +426,8 @@ common rts-c-sources-base
                Libdw.c
                LibdwPool.c
                Linker.c
+               LinkerGlue.c
+               linker/ll_host.c
                ReportMemoryMap.c
                Messages.c
                OldARMAtomic.c
