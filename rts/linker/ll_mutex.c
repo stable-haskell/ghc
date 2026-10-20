@@ -10,10 +10,7 @@
 #define _POSIX_C_SOURCE 200809L
 #endif
 
-/* Temporary build configuration; replaced by the standalone configuration when
- * the linker is detached from the RTS headers.
- */
-#include "ghcautoconf.h"
+#include "ll_autoconf.h"
 #include "ll_mutex.h"
 
 #if defined(wasm32_HOST_ARCH)
@@ -56,11 +53,7 @@ void ll_assert_lock_held_at(ll_mutex *mutex, const char *file, int line)
 
 #include <errno.h>
 
-#if defined(LL_ASSERTS) || defined(DEBUG) || defined(USE_ASSERTS_ALL_WAYS)
-#define LL_MUTEX_ASSERTS 1
-#else
-#define LL_MUTEX_ASSERTS 0
-#endif
+#define LL_MUTEX_ASSERTS LL_ASSERTS_ENABLED
 
 static void require_mutex(ll_mutex *mutex)
 {

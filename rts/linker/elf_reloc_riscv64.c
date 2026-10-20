@@ -433,9 +433,9 @@ int32_t computeAddend(ElfRelocationATable * relaTab, unsigned relNo, Elf_Rel *re
   // instruction to rewrite (P: Position of the relocation)
   addr_t P = (addr_t)((uint8_t *)section->start + rel->r_offset);
 
-  CHECK(0x0 != P);
-  CHECK((uint64_t)section->start <= P);
-  CHECK(P <= (uint64_t)section->start + section->size);
+  LL_CHECK(0x0 != P);
+  LL_CHECK((uint64_t)section->start <= P);
+  LL_CHECK(P <= (uint64_t)section->start + section->size);
   // S: Value of the symbol in the symbol table
   addr_t S = (addr_t)symbol->addr;
   /* GOT slot for the symbol (G + GOT) */
@@ -487,7 +487,7 @@ int32_t computeAddend(ElfRelocationATable * relaTab, unsigned relNo, Elf_Rel *re
             findSymbol(oc, relaTab->sectionHeader->sh_link,
                        ELF64_R_SYM((Elf64_Xword)rel_prime->r_info));
 
-        CHECK(0x0 != symbol_prime);
+        LL_CHECK(0x0 != symbol_prime);
 
         /* take explicit addend */
         int64_t addend_prime = rel_prime->r_addend;
@@ -632,7 +632,7 @@ bool relocateObjectCodeRISCV64(ObjectCode *oc) {
       ElfSymbol *symbol = findSymbol(oc, relTab->sectionHeader->sh_link,
                                      ELF64_R_SYM((Elf64_Xword)rel->r_info));
 
-      CHECK(0x0 != symbol);
+      LL_CHECK(0x0 != symbol);
 
       // This always fails, because we don't support Rel locations, yet: Do we
       // need this case? Leaving it in to spot the potential bug when it
@@ -659,7 +659,7 @@ bool relocateObjectCodeRISCV64(ObjectCode *oc) {
       ElfSymbol *symbol = findSymbol(oc, relaTab->sectionHeader->sh_link,
                                      ELF64_R_SYM((Elf64_Xword)rel->r_info));
 
-      CHECK(0x0 != symbol);
+      LL_CHECK(0x0 != symbol);
 
       /* take explicit addend */
       int64_t addend = rel->r_addend;

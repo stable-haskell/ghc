@@ -134,7 +134,7 @@ The allocator is *not* thread-safe.
 */
 
 // Enable internal consistency checking
-#if defined(DEBUG)
+#if LL_DEBUG_CODE
 #define M32_DEBUG
 #endif
 

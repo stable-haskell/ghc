@@ -826,7 +826,7 @@ COFF_HEADER_INFO* getHeaderInfo ( ObjectCode* oc )
 __attribute__ ((always_inline)) inline
 size_t getSymbolSize ( COFF_HEADER_INFO *info )
 {
-    ASSERT(info);
+    LL_ASSERT(info);
     switch (info->type)
     {
         case COFF_ANON_BIG_OBJ:
@@ -847,8 +847,8 @@ size_t getSymbolSize ( COFF_HEADER_INFO *info )
 __attribute__ ((always_inline)) inline
 uint32_t getSymSectionNumber ( COFF_HEADER_INFO *info, COFF_symbol* sym )
 {
-    ASSERT(info);
-    ASSERT(sym);
+    LL_ASSERT(info);
+    LL_ASSERT(sym);
     switch (info->type)
     {
         case COFF_ANON_BIG_OBJ:
@@ -861,7 +861,7 @@ uint32_t getSymSectionNumber ( COFF_HEADER_INFO *info, COFF_symbol* sym )
                 case IMAGE_SYM_DEBUG: return PE_SECTION_DEBUG;
                 default:
                   // Ensure that we catch if SectionNumber is made wider in the future
-                  ASSERT(sizeof(sym->og.SectionNumber) == 2);
+                  LL_ASSERT(sizeof(sym->og.SectionNumber) == 2);
                   return (uint16_t) sym->og.SectionNumber;
             }
     }
@@ -870,8 +870,8 @@ uint32_t getSymSectionNumber ( COFF_HEADER_INFO *info, COFF_symbol* sym )
 __attribute__ ((always_inline)) inline
 uint32_t getSymValue ( COFF_HEADER_INFO *info, COFF_symbol* sym )
 {
-    ASSERT(info);
-    ASSERT(sym);
+    LL_ASSERT(info);
+    LL_ASSERT(sym);
     switch (info->type)
     {
         case COFF_ANON_BIG_OBJ:
@@ -884,8 +884,8 @@ uint32_t getSymValue ( COFF_HEADER_INFO *info, COFF_symbol* sym )
 __attribute__ ((always_inline)) inline
 uint8_t getSymStorageClass ( COFF_HEADER_INFO *info, COFF_symbol* sym )
 {
-    ASSERT(info);
-    ASSERT(sym);
+    LL_ASSERT(info);
+    LL_ASSERT(sym);
     switch (info->type)
     {
         case COFF_ANON_BIG_OBJ:
@@ -898,8 +898,8 @@ uint8_t getSymStorageClass ( COFF_HEADER_INFO *info, COFF_symbol* sym )
 __attribute__ ((always_inline)) inline
 uint8_t getSymNumberOfAuxSymbols ( COFF_HEADER_INFO *info, COFF_symbol* sym )
 {
-    ASSERT(info);
-    ASSERT(sym);
+    LL_ASSERT(info);
+    LL_ASSERT(sym);
     switch (info->type)
     {
         case COFF_ANON_BIG_OBJ:
@@ -912,8 +912,8 @@ uint8_t getSymNumberOfAuxSymbols ( COFF_HEADER_INFO *info, COFF_symbol* sym )
 __attribute__ ((always_inline)) inline
 uint16_t getSymType ( COFF_HEADER_INFO *info, COFF_symbol* sym )
 {
-    ASSERT(info);
-    ASSERT(sym);
+    LL_ASSERT(info);
+    LL_ASSERT(sym);
     switch (info->type)
     {
         case COFF_ANON_BIG_OBJ:
@@ -926,8 +926,8 @@ uint16_t getSymType ( COFF_HEADER_INFO *info, COFF_symbol* sym )
 __attribute__ ((always_inline)) inline
 uint8_t* getSymShortName ( COFF_HEADER_INFO *info, COFF_symbol* sym )
 {
-    ASSERT(info);
-    ASSERT(sym);
+    LL_ASSERT(info);
+    LL_ASSERT(sym);
     switch (info->type)
     {
         case COFF_ANON_BIG_OBJ:
@@ -1250,7 +1250,7 @@ get_sym_name ( uint8_t* name, ObjectCode* oc )
       (XXX which is never freed ...)
    */
    newstr = LL_MALLOC(9, "get_sym_name");
-   ASSERT(newstr);
+   LL_ASSERT(newstr);
    strncpy (newstr, (char*)name,8);
    newstr[8] = 0;
    return newstr;
@@ -1278,7 +1278,7 @@ get_name_string (uint8_t* name, ObjectCode* oc)
     else
     {
         newstr = LL_MALLOC(9, "cstring_from_section_symbol_name");
-        ASSERT(newstr);
+        LL_ASSERT(newstr);
         strncpy(newstr,(char*)name,8);
         newstr[8] = 0;
         return newstr;
@@ -1780,7 +1780,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
         LL_IF_DEBUG(linker_verbose, LL_DEBUG("BSS anon section\n"));
       }
 
-      CHECK(section->size == 0 || section->info->virtualSize == 0);
+      LL_CHECK(section->size == 0 || section->info->virtualSize == 0);
       if (sz < section->info->virtualSize) {
           sz = section->info->virtualSize;
       }
@@ -1884,7 +1884,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
           i += getSymNumberOfAuxSymbols (info, sym);
           continue;
         default:
-          CHECK(secNumber < (uint32_t) oc->n_sections);
+          LL_CHECK(secNumber < (uint32_t) oc->n_sections);
           section = &oc->sections[secNumber-1];
       }
 
@@ -1921,8 +1921,8 @@ ocGetNames_PEi386 ( ObjectCode* oc )
       }
       else if (symStorageClass == IMAGE_SYM_CLASS_WEAK_EXTERNAL) {
           isWeak = true;
-          CHECK(getSymNumberOfAuxSymbols (info, sym) == 1);
-          CHECK(symValue == 0);
+          LL_CHECK(getSymNumberOfAuxSymbols (info, sym) == 1);
+          LL_CHECK(symValue == 0);
           COFF_symbol_aux_weak_external *aux = (COFF_symbol_aux_weak_external *) (sym+1);
           COFF_symbol* targetSym = &oc->info->symbols[aux->TagIndex];
 
@@ -2118,7 +2118,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
          if(secNumber == IMAGE_SYM_UNDEFINED)
            type |= SYM_TYPE_HIDDEN;
          LL_IF_DEBUG(linker_verbose, LL_DEBUG("addSymbol %p `%s'\n", addr, sname));
-         ASSERT(i < (uint32_t)oc->n_symbols);
+         LL_ASSERT(i < (uint32_t)oc->n_symbols);
          oc->symbols[i].name = sname;
          oc->symbols[i].addr = addr;
          oc->symbols[i].type = type;
@@ -2152,7 +2152,7 @@ makeSymbolExtra_PEi386( ObjectCode* oc, uint64_t index STG_UNUSED, size_t s, cha
         case SYM_TYPE_CODE: {
             // jmp *-14(%rip)
             extra = m32_alloc(oc->rx_m32, sizeof(SymbolExtra), 8);
-            CHECK(extra);
+            LL_CHECK(extra);
             extra->addr = (uint64_t)s;
             static uint8_t jmp[] = { 0xFF, 0x25, 0xF2, 0xFF, 0xFF, 0xFF };
             memcpy(extra->jumpIsland, jmp, 6);
@@ -2161,7 +2161,7 @@ makeSymbolExtra_PEi386( ObjectCode* oc, uint64_t index STG_UNUSED, size_t s, cha
         }
         case SYM_TYPE_INDIRECT_DATA: {
             extra = m32_alloc(oc->rw_m32, sizeof(SymbolExtra), 8);
-            CHECK(extra);
+            LL_CHECK(extra);
             void *v = *(void**) s;
             extra->addr = (uint64_t)v;
             LL_IF_DEBUG(linker_verbose, LL_DEBUG("makeSymbolExtra(data): %s -> %p\n", symbol, &extra->addr));
@@ -2169,7 +2169,7 @@ makeSymbolExtra_PEi386( ObjectCode* oc, uint64_t index STG_UNUSED, size_t s, cha
         }
         default: {
             extra = m32_alloc(oc->rw_m32, sizeof(SymbolExtra), 8);
-            CHECK(extra);
+            LL_CHECK(extra);
             extra->addr = (uint64_t)s;
             LL_IF_DEBUG(linker_verbose, LL_DEBUG("makeSymbolExtra(indirect-data): %s -> %p\n", symbol, &extra->addr));
             return (size_t)&extra->addr;
@@ -2251,7 +2251,7 @@ ocResolve_PEi386 ( ObjectCode* oc )
                 default:
                     break;
             }
-            CHECK(sect_n < (uint32_t) oc->n_sections);
+            LL_CHECK(sect_n < (uint32_t) oc->n_sections);
             Section section = oc->sections[sect_n - 1];
             S = ((size_t)(section.start))
               + ((size_t)(getSymValue (info, sym)));
@@ -2282,7 +2282,7 @@ ocResolve_PEi386 ( ObjectCode* oc )
            case 11: /* IMAGE_REL_AMD64_SECREL (PE constant 11) */
               {
                   uint64_t offset = S - (uint64_t) section.start;
-                  CHECK((uint32_t) offset == offset);
+                  LL_CHECK((uint32_t) offset == offset);
                    *(uint32_t *)pP = offset + A;
                   break;
               }

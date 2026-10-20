@@ -157,7 +157,7 @@ static bool runInitFini(struct InitFiniList **head)
             init_t *init_start = (init_t*)init_startC;
             init_t *init_end = (init_t*)(init_startC + section->size);
             for (init_t *init = init_start; init < init_end; init++) {
-                CHECK(0x0 != *init);
+                LL_CHECK(0x0 != *init);
                 (*init)(argc, argv, envv);
             }
             break;
@@ -168,7 +168,7 @@ static bool runInitFini(struct InitFiniList **head)
             fini_t *fini_end = (fini_t*)(fini_startC + section->size);
             // .fini_array finalizers are run backwards
             for (fini_t *fini = fini_end - 1; fini >= fini_start; fini--) {
-                CHECK(0x0 != *fini);
+                LL_CHECK(0x0 != *fini);
                 (*fini)();
             }
             break;

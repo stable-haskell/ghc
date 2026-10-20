@@ -151,7 +151,7 @@ static enum ObjectFileFormat identifyObjectFile(FILE *f)
 {
     char buf[32];
     ssize_t sz = fread(buf, 1, 32, f);
-    CHECK(fseek(f, -sz, SEEK_CUR) == 0);
+    LL_CHECK(fseek(f, -sz, SEEK_CUR) == 0);
     return identifyObjectFile_(buf, sz);
 }
 
@@ -616,11 +616,11 @@ HsInt loadArchive_ (pathchar *path)
             ObjectCode *oc = mkOc(STATIC_OBJECT, path, image, memberSize, false, archiveMemberName,
                                   misalignment);
 #if defined(OBJFORMAT_MACHO)
-            ASSERT(object_fmt == MachO32 || object_fmt == MachO64);
+            LL_ASSERT(object_fmt == MachO32 || object_fmt == MachO64);
             ocInit_MachO( oc );
 #endif
 #if defined(OBJFORMAT_ELF)
-            ASSERT(object_fmt == ELF);
+            LL_ASSERT(object_fmt == ELF);
             ocInit_ELF( oc );
 #endif
 

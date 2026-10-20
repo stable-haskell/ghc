@@ -694,7 +694,7 @@ relocateSectionAarch64(ObjectCode * oc, Section * section)
                     LL_FATAL("explicit_addend and addend can't be set at the same time.");
                 uint64_t pc = (uint64_t)section->start + ri->r_address;
                 uint64_t value = (uint64_t)(isGotLoad(ri) ? symbol->got_addr : symbol->addr);
-                ASSERT(!isGotLoad(ri) || (symbol->got_addr != 0));
+                LL_ASSERT(!isGotLoad(ri) || (symbol->got_addr != 0));
                 encodeAddend(oc, section, ri, ((value + addend + explicit_addend) & (-4096)) - (pc & (-4096)), symbol);
 
                 // reset, just in case.
@@ -708,7 +708,7 @@ relocateSectionAarch64(ObjectCode * oc, Section * section)
                 if(!(explicit_addend == 0 || addend == 0))
                     LL_FATAL("explicit_addend and addend can't be set at the same time.");
                 uint64_t value = (uint64_t)(isGotLoad(ri) ? symbol->got_addr : symbol->addr);
-                ASSERT(!isGotLoad(ri) || (symbol->got_addr != 0));
+                LL_ASSERT(!isGotLoad(ri) || (symbol->got_addr != 0));
                 encodeAddend(oc, section, ri, 0xFFF & (value + addend + explicit_addend), symbol);
 
                 // reset, just in case.
@@ -910,7 +910,7 @@ relocateSection(ObjectCode* oc, int curSection)
             LL_IF_DEBUG(linker_verbose, LL_DEBUG("               : value = %p\n", (void *)symbol->nlist->n_value));
 
             if ((symbol->nlist->n_type & N_TYPE) == N_SECT) {
-                CHECK(symbol->addr != NULL);
+                LL_CHECK(symbol->addr != NULL);
                 value = (uint64_t) symbol->addr;
                 LL_IF_DEBUG(linker_verbose,
                          LL_DEBUG("relocateSection, defined external symbol %s, relocated address %p\n",
@@ -944,7 +944,7 @@ relocateSection(ObjectCode* oc, int curSection)
              * (1) needs to be updated due to different section placement in memory.
              */
 
-            CHECKM(reloc->r_symbolnum > 0,
+            LL_CHECKM(reloc->r_symbolnum > 0,
                    "relocateSection: unsupported r_symbolnum = %" PRIu32 " < 1 for internal relocation",
                    reloc->r_symbolnum);
 
@@ -958,7 +958,7 @@ relocateSection(ObjectCode* oc, int curSection)
 
             switch (type) {
             case X86_64_RELOC_UNSIGNED: {
-                CHECKM(thing >= targetMacho->addr,
+                LL_CHECKM(thing >= targetMacho->addr,
                        "relocateSection: unsigned displacement %" PRIx64 "before target section start address %" PRIx64 "\n",
                        thing, (uint64_t) targetMacho->addr);
 
@@ -986,7 +986,7 @@ relocateSection(ObjectCode* oc, int curSection)
                 uint32_t baseValueOffset = reloc->r_address + relocLenBytes + nextInstrAdj;
                 uint64_t imThingLoc = msect->addr + baseValueOffset + (int64_t) thing;
 
-                CHECKM(imThingLoc >= targetMacho->addr,
+                LL_CHECKM(imThingLoc >= targetMacho->addr,
                        "relocateSection: target location %p in image before target section start address %p\n",
                        (void *) imThingLoc, (void *) targetMacho->addr);
 
@@ -1017,29 +1017,29 @@ relocateSection(ObjectCode* oc, int curSection)
         {
             if((int32_t)(value - baseValue) != (int64_t)(value - baseValue))
             {
-                CHECK(reloc->r_extern);
+                LL_CHECK(reloc->r_extern);
                 value = (uint64_t) &makeSymbolExtra(oc, reloc->r_symbolnum, value)
                                         -> jumpIsland;
             }
-            CHECK((int32_t)(value - baseValue) == (int64_t)(value - baseValue));
+            LL_CHECK((int32_t)(value - baseValue) == (int64_t)(value - baseValue));
             type = X86_64_RELOC_SIGNED;
         }
 
         switch(type)
         {
             case X86_64_RELOC_UNSIGNED:
-                CHECK(!reloc->r_pcrel);
+                LL_CHECK(!reloc->r_pcrel);
                 thing += value;
                 break;
             case X86_64_RELOC_SIGNED:
             case X86_64_RELOC_SIGNED_1:
             case X86_64_RELOC_SIGNED_2:
             case X86_64_RELOC_SIGNED_4:
-                CHECK(reloc->r_pcrel);
+                LL_CHECK(reloc->r_pcrel);
                 thing += value - baseValue;
                 break;
             case X86_64_RELOC_SUBTRACTOR:
-                CHECK(!reloc->r_pcrel);
+                LL_CHECK(!reloc->r_pcrel);
                 thing -= value;
                 break;
             default:
@@ -1277,7 +1277,7 @@ ocGetNames_MachO(ObjectCode* oc)
     LL_IF_DEBUG(linker, LL_DEBUG("ocGetNames_MachO: will load %d sections\n",
                                 oc->n_sections));
 
-    CHECKM(ocBuildSegments_MachO(oc), "ocGetNames_MachO: failed to build segments\n");
+    LL_CHECKM(ocBuildSegments_MachO(oc), "ocGetNames_MachO: failed to build segments\n");
 
     for (int seg_n = 0; seg_n < oc->n_segments; seg_n++) {
         Segment *segment = &oc->segments[seg_n];

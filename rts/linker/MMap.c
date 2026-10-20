@@ -255,7 +255,7 @@ mprotectForLinker(void *start, size_t len, MemoryAccess mode)
   if (VirtualProtect(start, len, prot, &old) == 0) {
     LL_LOG_SYSERROR("mprotectForLinker: failed to protect %zd bytes at %p as %s",
                   len, start, memoryAccessDescription(mode));
-    ASSERT(false);
+    LL_ASSERT(false);
   }
 }
 

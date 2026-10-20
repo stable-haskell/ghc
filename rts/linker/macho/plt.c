@@ -52,7 +52,7 @@ makeStub(Section * section,
           uint8_t flags) {
 
     Stub * s = (Stub *)LL_CALLOC(sizeof(Stub), 1, "makeStub");
-    CHECK(s != NULL);
+    LL_CHECK(s != NULL);
     s->target = *addr;
     s->flags  = flags;
     s->next = NULL;
@@ -62,7 +62,7 @@ makeStub(Section * section,
         return EXIT_FAILURE;
 
     if(section->info->stubs == NULL) {
-        CHECK(section->info->nstubs == 0);
+        LL_CHECK(section->info->nstubs == 0);
         /* no stubs yet, let's just create this one */
         section->info->stubs = s;
     } else {

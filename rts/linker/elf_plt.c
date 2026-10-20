@@ -53,7 +53,7 @@ makeStub(Section * section,
           uint8_t flags) {
 
     Stub * s = calloc(1, sizeof(Stub));
-    ASSERT(s != NULL);
+    LL_ASSERT(s != NULL);
     s->target = *addr;
     s->got_addr = got_addr;
     s->flags  = flags;
@@ -64,7 +64,7 @@ makeStub(Section * section,
         return EXIT_FAILURE;
 
     if(section->info->stubs == NULL) {
-        ASSERT(section->info->nstubs == 0);
+        LL_ASSERT(section->info->nstubs == 0);
         /* no stubs yet, let's just create this one */
         section->info->stubs = s;
     } else {

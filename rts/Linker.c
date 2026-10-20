@@ -680,7 +680,7 @@ void *lookupSymbolInNativeObj(void *handle, const char *symbol_name)
 #if defined(OBJFORMAT_MACHO)
     // The Mach-O standard says ccall symbols representing a function are prefixed with _
     // https://math-atlas.sourceforge.net/devel/assembly/MachORuntime.pdf
-    CHECK(symbol_name[0] == '_');
+    LL_CHECK(symbol_name[0] == '_');
     symbol_name = symbol_name+1;
 #endif
 #if defined(OBJFORMAT_ELF) || defined(OBJFORMAT_MACHO)
@@ -704,7 +704,7 @@ const char *addDLL(pathchar* dll_name)
    if (loadNativeObj(dll_name, &errmsg)) {
      return NULL;
    } else {
-     ASSERT(errmsg != NULL);
+     LL_ASSERT(errmsg != NULL);
      return errmsg;
    }
 }
@@ -811,7 +811,7 @@ SymbolAddr* lookupDependentSymbol (SymbolName* lbl, ObjectCode *dependent, SymTy
     ll_assert_lock_held(&linker_mutex);
     LL_IF_DEBUG(linker_verbose, LL_DEBUG("lookupSymbol: looking up '%s'\n", lbl));
 
-    ASSERT(symhash != NULL);
+    LL_ASSERT(symhash != NULL);
     RtsSymbolInfo *pinfo;
 
     /* See Note [Resolving __dso_handle] */
@@ -873,7 +873,7 @@ SymbolAddr* lookupDependentSymbol (SymbolName* lbl, ObjectCode *dependent, SymTy
         */
         LL_IF_DEBUG(linker, LL_DEBUG("lookupSymbol: looking up %s with dlsym\n",
                                     lbl));
-        CHECK(lbl[0] == '_');
+        LL_CHECK(lbl[0] == '_');
         if (type) {
             // We assume that the symbol is code since this is usually the case
             // and dlsym doesn't tell us.
@@ -1011,7 +1011,7 @@ SymbolAddr* lookupSymbol( SymbolName* lbl )
  * Debugging aid: look in GHCi's object symbol tables for symbols
  * within DELTA bytes of the specified address, and show their names.
  */
-#if defined(DEBUG)
+#if LL_DEBUG_CODE
 void ghci_enquire ( SymbolAddr* addr );
 
 void ghci_enquire(SymbolAddr* addr)
@@ -1765,8 +1765,8 @@ HsInt resolveObjs (void)
  */
 static HsInt unloadObj_ (pathchar *path, bool just_purge)
 {
-    ASSERT(symhash != NULL);
-    ASSERT(objects != NULL);
+    LL_ASSERT(symhash != NULL);
+    LL_ASSERT(objects != NULL);
 
     LL_IF_DEBUG(linker, LL_DEBUG("unloadObj: %" PATH_FMT "\n", path));
 
@@ -1922,7 +1922,7 @@ static HsInt unloadNativeObj_(void *handle)
             n_unloaded_objects += 1;
 
             // dynamic objects have no symbols
-            CHECK(nc->symbols == NULL);
+            LL_CHECK(nc->symbols == NULL);
             if (ll_host.on_unload != NULL) {
                 ll_host.on_unload(ll_host.ctx, nc);
             }

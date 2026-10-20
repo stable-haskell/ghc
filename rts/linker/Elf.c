@@ -480,7 +480,7 @@ ocVerifyImage_ELF ( ObjectCode* oc )
              "\nSection header table: start %ld, n_entries %d, ent_size %d\n",
              (long)ehdr->e_shoff, shnum, ehdr->e_shentsize  ));
 
-   CHECK(ehdr->e_shentsize == sizeof(Elf_Shdr));
+   LL_CHECK(ehdr->e_shentsize == sizeof(Elf_Shdr));
 
    shdr = (Elf_Shdr*) (ehdrC + ehdr->e_shoff);
 
@@ -601,7 +601,7 @@ ocVerifyImage_ELF ( ObjectCode* oc )
 #if defined(SHN_XINDEX)
          /* See Note [Many ELF Sections] */
          if (secno == SHN_XINDEX) {
-            CHECK(shndxTable);
+            LL_CHECK(shndxTable);
             secno = shndxTable[j];
          }
 #endif
@@ -733,7 +733,7 @@ ocGetNames_ELF ( ObjectCode* oc )
 #endif
    const Elf_Word shnum = elf_shnum(ehdr);
 
-   ASSERT(symhash != NULL);
+   LL_ASSERT(symhash != NULL);
 
    sections = (Section*)LL_CALLOC(shnum, sizeof(Section),
                                        "ocGetNames_ELF(sections)");
@@ -829,13 +829,13 @@ ocGetNames_ELF ( ObjectCode* oc )
 #if RTS_LINKER_USE_MMAP
           if (USE_CONTIGUOUS_MMAP || ll_cfg.always_pic) {
               /* The space for bss sections is already preallocated */
-              CHECK(oc->bssBegin != NULL);
+              LL_CHECK(oc->bssBegin != NULL);
               alloc = SECTION_NOMEM;
-              CHECK(oc->image != 0x0);
+              LL_CHECK(oc->image != 0x0);
               start =
                 oc->image + roundUpToAlign(oc->bssBegin - oc->image, align);
               oc->bssBegin = (char*)start + size;
-              CHECK(oc->bssBegin <= oc->bssEnd);
+              LL_CHECK(oc->bssBegin <= oc->bssEnd);
           } else {
               /* Use mmapForLinker to allocate .bss, otherwise the malloced
                * address might be out of range for sections that are mmaped.
@@ -850,7 +850,7 @@ ocGetNames_ELF ( ObjectCode* oc )
               mapped_offset = 0;
               mapped_size = ll_round_up_to_page(size);
           }
-          CHECK(start != 0x0);
+          LL_CHECK(start != 0x0);
 #else
           alloc = SECTION_MALLOC;
           start = LL_CALLOC(1, size, "ocGetNames_ELF(BSS)");
@@ -1029,7 +1029,7 @@ ocGetNames_ELF ( ObjectCode* oc )
                secno = shndx;
 #if defined(SHN_XINDEX)
                if (shndx == SHN_XINDEX) {
-                  CHECK(shndxTable);
+                  LL_CHECK(shndxTable);
                   secno = shndxTable[j];
                }
 #endif
@@ -1056,11 +1056,11 @@ ocGetNames_ELF ( ObjectCode* oc )
                                 LL_DEBUG("COMMON symbol, size %llu name %s reusing address %p\n",
                                            (long long unsigned int) symbol->elf_sym->st_size, nm, symbol->addr));
                    } else {
-                       CHECK(common_used < common_size);
-                       CHECK(common_mem);
+                       LL_CHECK(common_used < common_size);
+                       LL_CHECK(common_mem);
                        symbol->addr = (void*)((uintptr_t)common_mem + common_used);
                        common_used += symbol->elf_sym->st_size;
-                       CHECK(common_used <= common_size);
+                       LL_CHECK(common_used <= common_size);
                        LL_IF_DEBUG(linker_verbose,
                                 LL_DEBUG("COMMON symbol, size %llu name %s allocated at %p\n",
                                            (long long unsigned int) symbol->elf_sym->st_size, nm, symbol->addr));
@@ -1089,7 +1089,7 @@ ocGetNames_ELF ( ObjectCode* oc )
                           )
                        ) {
                    /* Section 0 is the undefined section, hence > and not >=. */
-                   CHECK(secno > 0 && secno < shnum);
+                   LL_CHECK(secno > 0 && secno < shnum);
                    /*
                    if (shdr[secno].sh_type == SHT_NOBITS) {
                       debugBelch("   BSS symbol, size %d off %d name %s\n",
@@ -1099,7 +1099,7 @@ ocGetNames_ELF ( ObjectCode* oc )
                    symbol->addr = (SymbolAddr*)(
                            (intptr_t) oc->sections[secno].start +
                            (intptr_t) symbol->elf_sym->st_value);
-                   CHECK(symbol->addr != 0x0);
+                   LL_CHECK(symbol->addr != 0x0);
                    if (ELF_ST_BIND(symbol->elf_sym->st_info) == STB_LOCAL) {
                        isLocal = true;
                        isWeak = false;
@@ -1126,7 +1126,7 @@ ocGetNames_ELF ( ObjectCode* oc )
                /* And the decision is ... */
 
                if (symbol->addr != NULL) {
-                   CHECK(nm != NULL);
+                   LL_CHECK(nm != NULL);
                    /* Acquire! */
                    if (!isLocal && !common_already_defined) {
 
@@ -1209,7 +1209,7 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
            break;
        }
    }
-   CHECK(stab != NULL);
+   LL_CHECK(stab != NULL);
 
    targ  = (Elf_Word*)oc->sections[target_shndx].start;
    LL_IF_DEBUG(linker_verbose,LL_DEBUG(
@@ -1244,7 +1244,7 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
 
        Elf_Addr  P  = ((Elf_Addr)targ) + offset;
        Elf_Word* pP = (Elf_Word*)P;
-#if defined(i386_HOST_ARCH) || defined(DEBUG)
+#if defined(i386_HOST_ARCH) || LL_DEBUG_CODE
        Elf_Addr  A  = *pP;
 #endif
        Elf_Addr  S;
@@ -1319,7 +1319,7 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
        LL_IF_DEBUG(linker_verbose,
                 LL_DEBUG("Reloc: P = %p   S = %p   A = %p   type=%d\n",
                            (void*)P, (void*)S, (void*)A, reloc_type ));
-#if defined(DEBUG)
+#if LL_DEBUG_CODE
        checkProddableBlock ( &oc->proddables, pP, sizeof(Elf_Word) );
 #else
        (void) pP; /* suppress unused varialbe warning in non-debug build */
@@ -1339,8 +1339,8 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
        case COMPAT_R_386_GOTPC:  *pP = (Elf_Addr)oc->info->got_start + A - P; break;
        case COMPAT_R_386_GOT32:
        case COMPAT_R_386_GOT32X:
-           CHECK(symbol);
-           CHECK(symbol->got_addr);
+           LL_CHECK(symbol);
+           LL_CHECK(symbol->got_addr);
            *pP = (Elf_Addr)symbol->got_addr
                - (Elf_Addr)oc->info->got_start + A;
            break;
@@ -1431,7 +1431,7 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
                result = ((S + A) | T) - P;
                result &= ~1; // Clear thumb indicator bit
 
-               CHECK(isInt(26, result)); /* X in range */
+               LL_CHECK(isInt(26, result)); /* X in range */
            }
 
            // Update the branch target
@@ -1606,7 +1606,7 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
        case COMPAT_R_ARM_GOT_PREL: {
               int32_t A = *pP;
               void* GOT_S = symbol->got_addr;
-              CHECK(GOT_S);
+              LL_CHECK(GOT_S);
               *(uint32_t *)P = (uint32_t) GOT_S + A - P;
               break;
        }
@@ -1639,7 +1639,7 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
 #if defined(SHN_XINDEX)
    Elf_Word* shndx_table = get_shndx_table(oc);
 #endif
-#if defined(DEBUG) || defined(powerpc_HOST_ARCH) || defined(x86_64_HOST_ARCH)
+#if LL_DEBUG_CODE || defined(powerpc_HOST_ARCH) || defined(x86_64_HOST_ARCH)
    /* This #if def only serves to avoid unused-var warnings. */
    Elf_Addr targ = (Elf_Addr) oc->sections[target_shndx].start;
 #endif
@@ -1657,7 +1657,7 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
    }
 
    for (j = 0; j < nent; j++) {
-#if defined(DEBUG) || defined(powerpc_HOST_ARCH) || defined(x86_64_HOST_ARCH)
+#if LL_DEBUG_CODE || defined(powerpc_HOST_ARCH) || defined(x86_64_HOST_ARCH)
       /* This #if def only serves to avoid unused-var warnings. */
       Elf_Addr  offset = rtab[j].r_offset;
       Elf_Addr  P      = targ + offset;
@@ -1739,7 +1739,7 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
          LL_IF_DEBUG(linker_verbose,LL_DEBUG("`%s' resolves to %p\n", symbol, (void*)S));
       }
 
-#if defined(DEBUG)
+#if LL_DEBUG_CODE
       LL_IF_DEBUG(linker_verbose,LL_DEBUG("Reloc: P = %p   S = %p   A = %p\n",
                                          (void*)P, (void*)S, (void*)A ));
       checkProddableBlock(&oc->proddables, (void*)P, sizeof(Elf_Word));
@@ -2072,13 +2072,13 @@ ocResolve_ELF ( ObjectCode* oc )
                 Elf_Word secno = symbol->elf_sym->st_shndx;
 #if defined(SHN_XINDEX)
                 if (secno == SHN_XINDEX) {
-                    CHECK(shndxTable);
+                    LL_CHECK(shndxTable);
                     secno = shndxTable[i];
                 }
 #endif
-                CHECK(symbol->elf_sym->st_name == 0);
-                CHECK(symbol->elf_sym->st_value == 0);
-                CHECK(0x0 != oc->sections[ secno ].start);
+                LL_CHECK(symbol->elf_sym->st_name == 0);
+                LL_CHECK(symbol->elf_sym->st_value == 0);
+                LL_CHECK(0x0 != oc->sections[ secno ].start);
                 symbol->addr = oc->sections[ secno ].start;
             }
         }

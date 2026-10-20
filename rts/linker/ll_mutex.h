@@ -8,8 +8,7 @@
 
 #pragma once
 
-/* Temporary platform configuration until the standalone headers are added. */
-#include "ghcplatform.h"
+#include "ll_platform.h"
 
 #include <stdbool.h>
 

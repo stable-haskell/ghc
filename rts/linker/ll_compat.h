@@ -8,8 +8,13 @@
 
 #pragma once
 
+#include "ll_autoconf.h"
+#include "ll_platform.h"
 #include "ll_host.h"
 
+#include <inttypes.h>
+#include <stdbool.h>
+#include <stddef.h>
 #include <stdlib.h>
 
 #if defined(__GNUC__) || defined(__clang__)
@@ -49,20 +54,55 @@ static inline _Noreturn void ll_compat_fatal(const char *fmt, ...)
 #define LL_DEBUG(...) ll_compat_log(LL_LOG_DEBUG, __VA_ARGS__)
 #define LL_FATAL(...) ll_compat_fatal(__VA_ARGS__)
 
+#if defined(__GNUC__) || defined(__clang__)
+#define LL_LIKELY(predicate) __builtin_expect(!!(predicate), 1)
+#else
+#define LL_LIKELY(predicate) (!!(predicate))
+#endif
+
+#if defined(LL_ASSERTS) || defined(DEBUG) || defined(USE_ASSERTS_ALL_WAYS)
+#define LL_ASSERTS_ENABLED 1
+#else
+#define LL_ASSERTS_ENABLED 0
+#endif
+
+#if defined(LL_ASSERTS) || defined(DEBUG)
+#define LL_DEBUG_CODE 1
+#else
+#define LL_DEBUG_CODE 0
+#endif
+
+#define LL_CHECK(predicate)                                                   \
+    do {                                                                      \
+        if (!LL_LIKELY(predicate)) {                                          \
+            LL_FATAL("ASSERTION FAILED: file %s, line %u\n",                \
+                     __FILE__, (unsigned int)__LINE__);                       \
+        }                                                                     \
+    } while (0)
+
+#define LL_CHECKM(predicate, ...)                                             \
+    do {                                                                      \
+        if (!LL_LIKELY(predicate)) {                                          \
+            LL_FATAL(__VA_ARGS__);                                            \
+        }                                                                     \
+    } while (0)
+
+#if LL_ASSERTS_ENABLED
+#define LL_ASSERT(predicate) LL_CHECK(predicate)
+#else
+#define LL_ASSERT(predicate) do { (void)sizeof(predicate); } while (0)
+#endif
+
 #define LL_DEBUG_MASK_linker LL_DBG_LINKER
 #define LL_DEBUG_MASK_linker_verbose LL_DBG_LINKER_VERBOSE
 #define LL_DEBUG_MASK_sanity LL_DBG_SANITY
 #define LL_DEBUG_MASK_zero_on_gc LL_DBG_ZERO_ON_FREE
 
-#if defined(DEBUG)
 #define LL_IF_DEBUG(category, statement)                                      \
     if ((ll_cfg.debug_mask & LL_DEBUG_MASK_##category) != 0u) {               \
         statement;                                                            \
     }                                                                         \
     do { } while (0)
-#else
-#define LL_IF_DEBUG(category, statement) do { } while (0)
-#endif
 
 /* Linker-local adapters keep allocation and memory queries on the host ABI. */
 #define LL_MALLOC(size, what) \

@@ -91,8 +91,8 @@ makeGot(ObjectCode * oc) {
      * and need to iterate over all symbols, to check how many
      * got slots we need at most
      */
-    ASSERT( oc->info != NULL );
-    ASSERT( oc->info->sectionHeader != NULL );
+    LL_ASSERT( oc->info != NULL );
+    LL_ASSERT( oc->info->sectionHeader != NULL );
     for(int i=0; i < oc->n_sections; i++) {
         if(SHT_SYMTAB == oc->info->sectionHeader[i].sh_type) {
             Elf_Sym *symTab =
@@ -224,10 +224,10 @@ verifyGot(ObjectCode * oc) {
         for(size_t i=0; i < symTab->n_symbols; i++) {
             ElfSymbol * symbol = &symTab->symbols[i];
             if(symbol->got_addr) {
-                CHECK((void*)(*(void**)symbol->got_addr)
+                LL_CHECK((void*)(*(void**)symbol->got_addr)
                       == (void*)symbol->addr);
             }
-            CHECK(0 == ((uintptr_t)symbol->addr & 0xffff000000000000));
+            LL_CHECK(0 == ((uintptr_t)symbol->addr & 0xffff000000000000));
         }
     }
     return EXIT_SUCCESS;

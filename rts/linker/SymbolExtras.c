@@ -161,7 +161,7 @@ SymbolExtra* makeSymbolExtra( ObjectCode const* oc,
 {
     SymbolExtra *extra;
 
-    ASSERT( symbolNumber >= oc->first_symbol_extra
+    LL_ASSERT( symbolNumber >= oc->first_symbol_extra
             && symbolNumber - oc->first_symbol_extra < oc->n_symbol_extras);
 
     extra = &oc->symbol_extras[symbolNumber - oc->first_symbol_extra];
