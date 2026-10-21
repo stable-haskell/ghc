@@ -220,9 +220,8 @@ unitHsLibs namever ways0 p = map (mkDynName . addSuffix . ST.unpack) (unitLibrar
 
         tag     = waysTag (fullWays ways1)
 
-        -- RTS-only ways now select RTS sub-libraries instead of suffixes.
-        -- Full ways still need suffixes: in particular, profiling must select
-        -- libHSfoo_p.a rather than the vanilla archive, for every package.
+        -- Profiling belongs to the target ABI, not its filename. Only custom
+        -- full ways add a library suffix here.
         addSuffix lib
          | null tag  = lib
          | otherwise = lib ++ '_' : tag

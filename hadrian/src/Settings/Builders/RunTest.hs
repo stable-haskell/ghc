@@ -125,7 +125,9 @@ inTreeCompilerArgs stg = do
           | otherwise = succStage stg
     debugAssertions     <- ghcDebugAssertions <$> flavour <*> pure ghcStage
     debugged            <- ghcDebugged        <$> flavour <*> pure ghcStage
-    profiled            <- ghcProfiled        <$> flavour <*> pure ghcStage
+    -- Hadrian builds ordinary compilers. Profiling targets are built separately
+    -- by make stage3-profile and queried through outOfTreeCompilerArgs.
+    let profiled = False
 
     os          <- queryHostTarget queryOS
     arch        <- queryTargetTarget queryArch

@@ -243,15 +243,6 @@ The supported transformers are listed below:
         <td>Use GHC's LLVM backend (`-fllvm`) for all stage1+ compilation.</td>
     </tr>
     <tr>
-        <td><code>profiled_ghc</code></td>
-        <td>Build the GHC executable with cost-centre profiling support.
-            It is recommended that you use this in conjunction with `no_dynamic_ghc` since
-            GHC does not support loading of profiled libraries with the
-            dynamic linker. You should use a flavour that builds profiling libs and rts,
-            i.e. not <code>quick</code>. <br>
-            This flag adds cost centres with the -fprof-late flag.</td>
-    </tr>
-    <tr>
         <td><code>no_dynamic_ghc</code></td>
         <td>Linked GHC against the statically-linked RTS. This causes GHC to
             default to loading static rather than dynamic library when,
@@ -269,10 +260,6 @@ The supported transformers are listed below:
     <tr>
         <td><code>text_simdutf</code></td>
         <td>Enable building the <code>text</code> package with <code>simdutf</code> support.</td>
-    </tr>
-    <tr>
-        <td><code>no_profiled_libs</code></td>
-        <td>Disables building of libraries in profiled build ways.</td>
     </tr>
     <tr>
         <td><code>omit_pragmas</code></td>
@@ -322,10 +309,6 @@ The supported transformers are listed below:
         <td>Emit whole Core bindings into the interface files via <code>-fwrite-if-simplified-core</code>.</td>
     </tr>
     <tr>
-        <td><code>late_ccs</code></td>
-        <td>Enable <code>-fprof-late</code> in profiled libraries. Enabled in <code>perf</code> and <code>release</code> flavours.</td>
-    </tr>
-    <tr>
         <td><code>dump_stg</code></td>
         <td>Dump STG of all modules compiled by a stage1 compiler to a file</td>
     </tr>
@@ -353,53 +336,15 @@ a great fit for the flavour system, so it's a little bit hacky.
 
 ## Ways
 
-Libraries and GHC can be built in different _ways_, e.g. with or without profiling
-information. The following table lists ways that are built in different flavours.
+Hadrian builds ordinary libraries in `vanilla` and, on supported platforms,
+`dynamic` ways. Its default stage1+ RTS ways are `vanilla`, `debug`, `threaded`,
+`threadedDebug`, `dynamic`, `debugDynamic`, `threadedDynamic` and
+`threadedDebugDynamic`; dynamic and threaded variants depend on platform support.
+Stage0 defaults to `vanilla`. Other flavours can choose a subset through
+`libraryWays` and `rtsWays` (see [user settings](user-settings.md#build-ways)).
 
-<table>
-    <tr>
-        <th rowspan="2">Flavour</th>
-        <th colspan="2">Library ways</th>
-        <th colspan="2">RTS ways</th>
-    </tr>
-    <tr>
-        <th>stage0</th>
-        <th>stage1+</th>
-        <th>stage0</th>
-        <th>stage1+</th>
-        <th>stage0</th>
-        <th>stage1+</th>
-    </tr>
-    <tr>
-    <th>default<br>perf<br>prof<br>devel1<br>devel2</td>
-    <td>vanilla</td>
-    <td>vanilla<br>profiling<br>dynamic</td>
-    <td>debug<br>threaded<br>threadedDebug<br>debugDynamic<br>threadedDynamic<br>threadedDebugDynamic</td>
-    <td>debug<br>threaded<br>threadedDebug<br>threadedProfiling<br>debugDynamic<br>threadedDynamic<br>threadedDebugDynamic</td>
-</tr>
-<tr>
-    <th>static</td>
-    <td>vanilla</td>
-    <td>vanilla<br>profiling</td>
-    <td>debug<br>threaded<br>threadedDebug</td>
-    <td>
-        debug<br>threaded<br>threadedDebug<br>threadedProfiling
-    </td>
-    <td>Only in<br>prof<br>flavour</td>
-    <td>Only in<br>prof<br>flavour</td>
-</tr>
-<tr>
-    <th>quick<br>quick-validate<br>quick-debug</th>
-    <td>vanilla</td>
-    <td>vanilla<br>dynamic</td>
-    <td>debug<br>threaded<br>threadedDebug<br>debugDynamic<br>threadedDynamic<br>threadedDebugDynamic</td>
-    <td>debug<br>threaded<br>threadedDebug<br>debugDynamic<br>threadedDynamic<br>threadedDebugDynamic</td>
-</tr>
-<tr>
-    <th>quickest<br>bench</th>
-    <td>vanilla</td>
-    <td>vanilla</td>
-    <td>vanilla<br>threaded</td>
-    <td>vanilla<br>threaded</td>
-</tr>
-</table>
+Profiling is a separate target ABI. Build its compiler and package universe with
+`make stage3-profile` from the repository root. Hadrian does not build that target
+yet. The legacy `prof` flavour and `profiled_ghc`, `late_ccs` and
+`no_profiled_libs` transformers are rejected with a migration diagnostic. Remove
+`+no_profiled_libs` from ordinary build commands.

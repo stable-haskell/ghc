@@ -94,9 +94,6 @@ buildDynamicLib root suffix dynlibpath = do
     deps <- contextDependencies context
     registerPackages deps
     objs <- libraryObjects context
-    -- The rts links against libffi, so it must be copied into the rts build
-    -- directory before we get here.
-    need =<< extraTargets context
     build $ target context (Ghc LinkHs $ Context.stage context) objs [dynlibpath]
     putSuccess $
       renderLibrary

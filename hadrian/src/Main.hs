@@ -56,6 +56,8 @@ main = do
     let options :: ShakeOptions
         options = shakeOptions
             { shakeChange   = ChangeModtimeAndDigest
+            -- Removing the profiling WayUnit changes cached Way encodings.
+            , shakeVersion  = "target-abi-ways-1"
             , shakeFiles    = buildRoot -/- Base.shakeFilesDir
             , shakeProgress = Progress.hadrianProgress cwd
             , shakeRebuild  = rebuild

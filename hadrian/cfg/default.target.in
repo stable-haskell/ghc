@@ -1,5 +1,6 @@
 Target
-{ tgtArchOs = ArchOS {archOS_arch = @HaskellTargetArch@, archOS_OS = @HaskellTargetOs@}
+{ tgtPlatformTriple = "@TargetPlatformFull@"
+, tgtArchOs = ArchOS {archOS_arch = @HaskellTargetArch@, archOS_OS = @HaskellTargetOs@}
 , tgtVendor = @TargetVendor_CPPMaybeStr@
 , tgtLocallyExecutable = @NotCrossCompilingBool@
 , tgtSupportsGnuNonexecStack = @TargetHasGnuNonexecStackBool@

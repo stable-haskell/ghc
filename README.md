@@ -89,6 +89,111 @@ Stage3 builds pinned native Alex and Happy with the bootstrap compiler, includin
 when `DIST_BUILD=1` uses a prebuilt bindist. These tools and their matching data
 files live under `_build/stage3-tools`; stage3 does not require them on `PATH`.
 
+Profiling as a target ABI
+=========================
+
+`make stage3-profile` builds a separate profiling target for the native ISA and
+OS. The ordinary stage2 compiler remains the host compiler. Its
+`<machine-target>-prof-ghc` entry point selects the profiling settings and
+package database under `_build/dist/lib/targets/<machine-target>-prof/lib`.
+`--info` reports the complete machine triple as `Target platform`, including
+C ABI environments such as `gnueabihf`. It reports the qualified logical
+`Target name`, `Target ABI: profiling`, and `GHC Profiled: YES`. The ordinary
+compiler reports its machine target as `Target name`, an empty `Target ABI`,
+and `GHC Profiled: NO`. Query the logical name with `--print-target-name`.
+The `-prof` qualifier never goes to C or LLVM toolchain target arguments.
+Profiling status comes from the target ABI, with no separate
+profiling-library capability setting. Target code always uses the profiling ABI,
+and its libraries and interfaces use ordinary `.a`, `.o` and `.hi` filenames.
+This is a separate package universe, not an additional library way in the native
+package database.
+
+Ordinary `ghc -prof` and profiling library ways have been removed. Select
+`<machine-target>-prof-ghc` for every profiling build. Hadrian no longer builds
+profiling ways or accepts `prof`, `+profiled_ghc`, `+late_ccs` or
+`+no_profiled_libs`; use `make stage3-profile` for the separate target and remove
+`+no_profiled_libs` from ordinary Hadrian builds. Hadrian does not yet build the
+separate profiling target itself.
+
+The target's `settings` file selects this ABI with `("target ABI", "profiling")`
+and `("target name", "<machine-target>-prof")`. Its machine target remains
+unchanged. Installed aliases such as `aarch64-darwin-prof-ghc` select the
+canonical `aarch64-apple-darwin-prof` target through its `target.aliases`
+manifest. Versioned aliases report the same metadata and use the same stores.
+
+Build and test it in the existing development environment:
+
+```sh
+nix develop -c make stage3-profile
+nix develop -c make test-profile
+nix develop -c make test-profile-install
+```
+
+Use the matching patched Cabal built by `make stable-cabal`. It retains the
+full target name in hashes, stores, and plans, including when CPU and OS match.
+It validates the selected compiler against `ghc-pkg --info`; an explicit
+`--with-hc-pkg` must select the package tool from the same target and installation.
+Both the host compiler and target compiler must come from the same build:
+
+```sh
+host=$PWD/_build/dist/bin/ghc
+triple=$("$host" --print-target-name)
+profile=$PWD/_build/dist/bin/$triple-prof-ghc
+_build/cabal/bin/cabal build \
+  --with-compiler="$profile" --with-build-compiler="$host"
+"$profile" Main.hs -fprof-auto -rtsopts -o app
+./app +RTS -p
+```
+
+This writes `app.prof`. Template Haskell and GHCi run in an external interpreter
+generated from the profiling target's `ghci` and RTS packages. Custom Setup
+programs and build tools use the ordinary host compiler. Profiling GHC and
+`ghc-pkg` also use a separate user package database and package environments.
+The profiling target ships static nonthreaded and threaded RTS libraries;
+shared and debug RTS variants are not included. Explicit requests for an
+unsupported shared or debug variant fail; automatic defaults select supported
+static output. Its bundled `libffi-clib` supplies iserv's libffi;
+the installation does not require a system libffi development library.
+`<machine-target>-prof-runghc` selects the same target; an explicit `-f` still
+overrides its compiler. The profiling target does not provide a Haddock alias.
+
+Compilers reporting `Target name` use `<target-name>-<version>` for user
+package database directories and `.ghc.environment.<target-name>-<version>`
+for local environment files. This changes native namespaces too, preserving
+machine ABI distinctions. Existing databases and environments are left in
+place and are not automatically searched or migrated. Rebuild dependencies
+with the matching compiler and Cabal; old Cabal uses the old discovery names
+and is not a supported default-discovery client for the new protocol. New
+Cabal retains legacy discovery for older compilers without `Target name`,
+including the earlier experimental `-profiling` target spelling.
+
+Build compiler plugins with the ordinary host compiler from the same build.
+Pass its library directory and the host plugin database explicitly:
+
+```sh
+"$profile" -plugin-libdir "$("$host" --print-libdir)" \
+  -plugin-package-db /path/to/host/plugin-db \
+  -plugin-package my-plugin -fplugin My.Plugin Main.hs
+```
+
+`make _build/dist/ghc-profile.tar.gz` packages the ordinary compiler and profiling
+target together. Extract it and run `./configure --prefix=/desired/path && make
+install`; installation recaches both package databases. No wasm or JavaScript
+SDK is needed for this bindist. The workflow regression builds a local library
+with C code and `hsc2hs`, a Template Haskell splice, native build tool and custom
+Setup. It rejects an ordinary interface in the profiling universe, loads a host
+plugin alongside profiling TH, and checks runtime reports and separate library
+and executable instrumentation flags from explicit Cabal profiling. It also
+writes and uses distinct local native/profiling package environments:
+
+```sh
+python3 testsuite/tests/profiling/test-target-abi.py \
+  --host-ghc "$host" --profile-ghc "$profile" \
+  --host-ghc-pkg "$PWD/_build/dist/bin/ghc-pkg" \
+  --profile-ghc-pkg "$PWD/_build/dist/bin/$triple-prof-ghc-pkg" \
+  --cabal "$PWD/_build/cabal/bin/cabal"
+```
+
 
 Building with Buck2 (experimental)
 ==================================

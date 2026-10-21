@@ -191,7 +191,7 @@ the hash of relevant DynFlags in the resulting interface file.
 -optP flags can come from multiple places:
 
   1. -optP flags directly passed on command line.
-  2. -optP flags implied by other flags. Eg. -DPROFILING implied by -prof.
+  2. -optP flags implied by other flags. Eg. -DPROFILING implied by the profiling target ABI.
   3. -optP flags added with {-# OPTIONS -optP-D__F__ #-} in a file.
 
 When compiling many modules at once with many -optP command line arguments

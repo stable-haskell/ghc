@@ -3,18 +3,16 @@
 --
 -- The central concept of a "way" is that all objects in a given
 -- program must be compiled in the same "way". Certain options change
--- parameters of the virtual machine, eg. profiling adds an extra word
--- to the object header, so profiling objects cannot be linked with
--- non-profiling objects.
+-- parameters of the virtual machine. Profiling is a separate target ABI,
+-- selected by the compiler installation, rather than a build way.
 --
 -- After parsing the command-line options, we determine which "way" we
--- are building - this might be a combination way, eg. profiling+threaded.
+-- are building - this might be a combination way, eg. dynamic+threaded.
 --
 -- There are two kinds of ways:
 --    - RTS only: only affect the runtime system (RTS) and don't affect code
 --    generation (e.g. threaded, debug)
---    - Full ways: affect code generation and the RTS (e.g. profiling, dynamic
---    linking)
+--    - Full ways: affect code generation and the RTS (e.g. dynamic linking)
 --
 -- We then find the "build-tag" associated with this way, and this
 -- becomes the suffix used to find .hi files and libraries used in
@@ -43,6 +41,7 @@ module GHC.Platform.Ways
    -- * Host GHC ways
    , hostWays
    , hostFullWays
+   , hostABI
    , hostIsProfiled
    , hostIsDynamic
    , hostIsThreaded
@@ -62,12 +61,11 @@ import Data.List (intersperse)
 -- | A way
 --
 -- Don't change the constructor order as it is used by `waysTag` to create a
--- unique tag (e.g. thr_debug_p) which is expected by other tools (e.g. Cabal).
+-- unique tag (e.g. thr_debug_dyn) which is expected by other tools (e.g. Cabal).
 data Way
   = WayCustom String -- ^ for GHC API clients building custom variants
   | WayThreaded      -- ^ (RTS only) Multithreaded runtime system
   | WayDebug         -- ^ Debugging, enable trace messages and extra checks
-  | WayProf          -- ^ Profiling, enable cost-centre stacks and profiling reports
   | WayDyn           -- ^ Dynamic linking
   deriving (Eq, Ord, Show, Read)
 
@@ -116,13 +114,11 @@ wayTag (WayCustom xs) = xs
 wayTag WayThreaded    = "thr"
 wayTag WayDebug       = "debug"
 wayTag WayDyn         = "dyn"
-wayTag WayProf        = "p"
 
 -- | Return true for ways that only impact the RTS, not the generated code
 wayRTSOnly :: Way -> Bool
 wayRTSOnly (WayCustom {}) = False
 wayRTSOnly WayDyn         = False
-wayRTSOnly WayProf        = False
 wayRTSOnly WayThreaded    = True
 wayRTSOnly WayDebug       = True
 
@@ -139,7 +135,6 @@ wayDesc (WayCustom xs) = xs
 wayDesc WayThreaded    = "Threaded"
 wayDesc WayDebug       = "Debug"
 wayDesc WayDyn         = "Dynamic"
-wayDesc WayProf        = "Profiling"
 
 -- | Turn these flags on when enabling this way
 wayGeneralFlags :: Platform -> Way -> [GeneralFlag]
@@ -158,7 +153,6 @@ wayGeneralFlags _ WayDyn = [Opt_PIC, Opt_ExternalDynamicRefs]
     -- Note: For WASM, this is especially important as dyld.mjs can
     -- only load PIC objects for GHCi/Template Haskell. WASM executables
     -- handle GlobalRegs differently - see GHC.Linker.Executable.mkWasmGlobalRegsObj
-wayGeneralFlags _ WayProf     = []
 
 -- | Turn these flags off when enabling this way
 wayUnsetGeneralFlags :: Platform -> Way -> [GeneralFlag]
@@ -168,7 +162,6 @@ wayUnsetGeneralFlags _ WayDebug    = []
 wayUnsetGeneralFlags _ WayDyn      = [Opt_SplitSections]
    -- There's no point splitting when we're going to be dynamically linking.
    -- Plus it breaks compilation on OSX x86.
-wayUnsetGeneralFlags _ WayProf     = []
 
 -- | Pass these options to the C compiler when enabling this way
 wayOptc :: Platform -> Way -> [String]
@@ -179,7 +172,6 @@ wayOptc platform WayThreaded = case platformOS platform of
                                _         -> []
 wayOptc _ WayDebug      = []
 wayOptc _ WayDyn        = []
-wayOptc _ WayProf       = ["-DPROFILING"]
 
 wayOptcxx :: Platform -> Way -> [String]
 wayOptcxx = wayOptc -- Use the same flags as C
@@ -197,7 +189,6 @@ wayOptl platform WayThreaded =
    _          -> []
 wayOptl _ WayDebug      = []
 wayOptl _ WayDyn        = []
-wayOptl _ WayProf       = []
 
 -- | Pass these options to the preprocessor when enabling this way
 wayOptP :: Platform -> Way -> [String]
@@ -205,8 +196,11 @@ wayOptP _ (WayCustom {}) = []
 wayOptP _ WayThreaded = []
 wayOptP _ WayDebug    = []
 wayOptP _ WayDyn      = []
-wayOptP _ WayProf     = ["-DPROFILING"]
 
+
+-- | ABI of code that can run inside the compiler process.
+hostABI :: TargetABI
+hostABI = if hostIsProfiled then ProfilingABI else DefaultABI
 
 -- | Consult the RTS to find whether it has been built with profiling enabled.
 hostIsProfiled :: Bool
@@ -249,7 +243,6 @@ foreign import ccall unsafe "rts_isTracing" rtsIsTracing_ :: Int
 hostWays :: Ways
 hostWays = Set.unions
    [ if hostIsDynamic  then Set.singleton WayDyn      else Set.empty
-   , if hostIsProfiled then Set.singleton WayProf     else Set.empty
    , if hostIsThreaded then Set.singleton WayThreaded else Set.empty
    , if hostIsDebugged then Set.singleton WayDebug    else Set.empty
    ]

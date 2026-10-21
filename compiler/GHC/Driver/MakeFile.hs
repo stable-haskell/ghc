@@ -205,10 +205,10 @@ processDeps :: DynFlags
 --                      this.o : this.hs
 --
 -- If the dependency is on something other than a .hi file:
---                      this.o this.p_o ... : dep
+--                      this.o this.dyn_o ... : dep
 -- otherwise
 --                      this.o ...   : dep.hi
---                      this.p_o ... : dep.p_hi
+--                      this.dyn_o ... : dep.dyn_hi
 --                      ...
 -- (where .o is $osuf, and the other suffixes come from
 -- the cmdline -s options).
@@ -244,7 +244,7 @@ processDeps dflags hsc_env excl_mods root hdl (AcyclicSCC (ModuleNode _ (ModuleN
                            Just hi_file -> do
                      { let hi_files = case kind of
                              -- Host plugin interfaces do not acquire target
-                             -- profiling/dynamic suffixes.
+                             -- target dynamic suffixes.
                              PluginDependency | hasPluginPackageConfig (hsc_dflags hsc_env)
                                -> repeat hi_file
                              _ -> insertSuffixes hi_file extra_suffixes

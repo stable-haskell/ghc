@@ -1,7 +1,7 @@
 {-# LANGUAGE TypeApplications #-}
 module Rules.Register (
     configurePackageRules, registerPackageRules, registerPackages,
-    libraryTargets, extraTargets
+    libraryTargets
     ) where
 
 import Base

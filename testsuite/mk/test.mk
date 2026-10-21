@@ -175,6 +175,12 @@ RUNTEST_OPTS += -e config.ghc_dynamic=False
 CABAL_PLUGIN_BUILD = --enable-library-vanilla --disable-shared
 endif
 
+ifeq "$(GhcProfiled)" "YES"
+RUNTEST_OPTS += -e config.compiler_profiled=True
+else
+RUNTEST_OPTS += -e config.compiler_profiled=False
+endif
+
 ifeq "$(GhcWithSMP)" "YES"
 RUNTEST_OPTS += -e config.target_has_smp=True
 else

@@ -88,7 +88,7 @@ echo ""
 echo "Stable Haskell multi-target GHC ready."
 echo "Invocations:"
 echo "  $PREFIX/bin/ghc                          (native)"
-[ -d "$PREFIX/lib/targets/wasm32-unknown-wasi" ] && \
-  echo "  $PREFIX/bin/wasm32-unknown-wasi-ghc      (wasm cross)"
-[ -d "$PREFIX/lib/targets/javascript-unknown-ghcjs" ] && \
-  echo "  $PREFIX/bin/javascript-unknown-ghcjs-ghc (JS cross)"
+for target_dir in "$PREFIX/lib/targets/"*/; do
+  [ -d "$target_dir" ] || continue
+  echo "  $PREFIX/bin/$(basename "$target_dir")-ghc"
+done

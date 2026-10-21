@@ -69,8 +69,7 @@ module GHC.Settings
   , sTargetRTSLinkerOnlySupportsSharedLibs
   , sTargetIsDynamic
   , sTargetShipsDynLibs
-  , sTargetIsProfiled
-  , sTargetShipsProfLibs
+  , sTargetABI
   ) where
 
 import GHC.Prelude
@@ -79,6 +78,7 @@ import GHC.Utils.CliOption
 import GHC.Utils.Fingerprint
 import GHC.Platform
 import GHC.Unit.Types
+import GHC.TargetName (TargetName)
 
 data Settings = Settings
   { sGhcNameVersion    :: {-# UNPACk #-} !GhcNameVersion
@@ -91,6 +91,7 @@ data Settings = Settings
   -- You shouldn't need to look things up in rawSettings directly.
   -- They should have their own fields instead.
   , sRawSettings       :: [(String, String)]
+  , sTargetName        :: Maybe TargetName
   }
 
 data UnitSettings = UnitSettings { unitSettings_baseUnitId :: !UnitId }
@@ -332,12 +333,6 @@ sTargetIsDynamic = platformMisc_targetIsDynamic . sPlatformMisc
 sTargetShipsDynLibs :: Settings -> Bool
 sTargetShipsDynLibs = platformMisc_targetShipsDynLibs . sPlatformMisc
 
--- | Profiling-way analogue of 'sTargetIsDynamic'. Per-target settings
--- key @"target is profiled"@.
-sTargetIsProfiled :: Settings -> Bool
-sTargetIsProfiled = platformMisc_targetIsProfiled . sPlatformMisc
-
--- | Profiling-way analogue of 'sTargetShipsDynLibs'. Per-target settings
--- key @"target ships profiling libraries"@.
-sTargetShipsProfLibs :: Settings -> Bool
-sTargetShipsProfLibs = platformMisc_targetShipsProfLibs . sPlatformMisc
+-- | ABI intrinsic to the selected target installation.
+sTargetABI :: Settings -> TargetABI
+sTargetABI = platformMisc_targetABI . sPlatformMisc

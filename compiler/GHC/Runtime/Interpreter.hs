@@ -733,11 +733,12 @@ findSystemLibrary interp str = interpCmd interp (FindSystemLibrary str)
 -- | Spawn an external interpreter
 spawnIServ :: IServConfig -> IO (ExtInterpInstance ())
 spawnIServ conf = do
-  iservConfTrace conf
+  program <- iservConfProgram conf
+  iservConfTrace conf program
   let createProc = fromMaybe (\cp -> do { (_,_,_,ph) <- createProcess cp
                                         ; return ph })
                              (iservConfHook conf)
-  (ph, rh, wh) <- runWithPipes createProc (iservConfProgram conf)
+  (ph, rh, wh) <- runWithPipes createProc program
                                           []
                                           (iservConfOpts    conf)
   interpPipe <- mkPipeFromHandles rh wh

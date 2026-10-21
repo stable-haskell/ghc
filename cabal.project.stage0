@@ -1,11 +1,12 @@
 source-repository-package
   type: git
   location: https://github.com/stable-haskell/Cabal.git
-  -- Pin to feat/wasm-cross-ghcup-stack-next (post-split Cabal #378): supports
-  -- `package host:*` / `package build:*` needed by cabal.project.stage2.dynamic
-  -- so DYNAMIC=1 does not build BUILD-stage tools shared against bootstrap GHC.
+  -- Cabal #501 builds profiling as a separate target with ordinary filenames,
+  -- rejects legacy profiling ways, and preserves native Setup/build tools.
+  -- Based on feat/wasm-cross-ghcup-stack-next (post-split Cabal #378), with
+  -- `package host:*` / `package build:*` for the staged compiler toolchains.
   -- Re-pin to stable-haskell/master once #378 lands there (cabal#384).
-  tag: f2e0a89e15cf6604cec9d93e26a4b3caf459b076
+  tag: f7ff31802b43bf0868e402a7f37ef53f5cf584e1
   subdir: Cabal
           Cabal-syntax
           cabal-install

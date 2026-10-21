@@ -42,7 +42,7 @@ import GHC.Runtime.Interpreter ( wormhole )
 #if defined(HAVE_INTERNAL_INTERPRETER)
 import GHC.Platform
 import GHC.Platform.Host (hostPlatformArchOS)
-import GHC.Platform.Ways (hostFullWays, fullWays)
+import GHC.Platform.Ways (hostABI, hostFullWays, fullWays)
 #endif
 import GHC.Runtime.Interpreter.Types
 
@@ -225,8 +225,9 @@ withPluginInterp hsc_env = case interpInstance <$> hsc_interp hsc_env of
        if not (hasPluginPackageConfig dflags) &&
           (platformIsCrossCompiling (targetPlatform dflags) ||
            platformArchOS (targetPlatform dflags) /= hostPlatformArchOS ||
+           targetABI dflags /= hostABI ||
            fullWays (ways dflags) /= hostFullWays)
-         then throwIO (InstallationError "Plugins for a different target platform or library way require -plugin-libdir")
+         then throwIO (InstallationError "Plugins for a different target platform, ABI or library way require -plugin-libdir")
          else pure ()
        plugin_interp <- modifyMVar (hsc_plugin_interp hsc_env) $ \case
          Just interp -> pure (Just interp, interp)

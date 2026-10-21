@@ -271,7 +271,7 @@ optDescrs =
     , Option ['o'] ["build-root"] (ReqArg readBuildRoot "BUILD_ROOT")
       "Where to store build artifacts. (Default _build)."
     , Option [] ["flavour"] (OptArg readFlavour "FLAVOUR")
-      "Build flavour (Default, Devel1, Devel2, Perf, Prof, Quick or Quickest)."
+      "Build flavour (Default, Devel1, Devel2, Perf, Quick or Quickest)."
     , Option [] ["freeze1"] (NoArg readFreeze1)
       "Freeze Stage1 GHC."
     , Option [] ["freeze2"] (NoArg readFreeze2)

@@ -3,6 +3,28 @@ AC_PREREQ([2.69])
 AC_INIT([ghc-builder], [0.1.0], [your-email@example.com])
 AC_CONFIG_SRCDIR([.]) # A representative .in file
 AC_CONFIG_MACRO_DIR([m4])      # For any custom m4 macros
+AC_CONFIG_AUX_DIR([.])
+
+# A terminal -prof suffix denotes GHC's profiling ABI, not a machine triple.
+# Reject it before config.sub or toolchain probes can interpret it as a target.
+AS_CASE([$build_alias], [*-prof],
+  [AC_MSG_ERROR([--build=$build_alias selects a Haskell profiling ABI; pass the machine triple without -prof])])
+AS_CASE([$host_alias], [*-prof],
+  [AC_MSG_ERROR([--host=$host_alias selects a Haskell profiling ABI; pass the machine triple without -prof])])
+AS_CASE([$target_alias], [*-prof],
+  [AC_MSG_ERROR([--target=$target_alias selects a Haskell profiling ABI, not a machine triple; pass the machine triple without -prof and select target ABI separately])])
+
+# Keep Autoconf's complete canonical machine triples before GHC's platform
+# conversion reduces them to architecture/vendor/OS components.
+AC_CANONICAL_BUILD
+AC_CANONICAL_HOST
+AC_CANONICAL_TARGET
+BuildPlatformFull=$build
+HostPlatformFull=$host
+TargetPlatformFull=$target
+AC_SUBST([BuildPlatformFull])
+AC_SUBST([HostPlatformFull])
+AC_SUBST([TargetPlatformFull])
 
 # --- Define GHC Build Options ---
 # Usage: ./configure ProjectVersion=X.Y ...
@@ -49,6 +71,7 @@ AC_SUBST([LlvmMaxVersion])
 # --- Files to generate ---
 # config.status will create these files by substituting @VAR@ placeholders.
 AC_CONFIG_FILES([
+    hadrian/cfg/system.config
     ghc/ghc-bin.cabal
     compiler/ghc.cabal
     compiler/GHC/CmmToLlvm/Version/Bounds.hs

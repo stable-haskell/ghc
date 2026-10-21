@@ -37,6 +37,7 @@ data InterpOpts = InterpOpts
   , interpProg :: String
   , interpOpts :: [String]
   , interpWays :: Ways
+  , interpTargetABI :: TargetABI
   , interpNameVer :: GhcNameVersion
   , interpLdConfig :: LdConfig
   , interpCcConfig :: CcConfig
@@ -80,8 +81,7 @@ initInterpreter tmpfs logger platform finder_cache unit_env opts = do
         s <- liftIO $ newMVar InterpPending
         loader <- liftIO Loader.uninitializedLoader
         libdir <- liftIO $ last <$> Loader.getGccSearchDirectory logger (interpLdConfig opts) "libraries"
-        let profiled = interpWays opts `hasWay` WayProf
-            way_tag = if profiled then "_p" else ""
+        let profiled = interpTargetABI opts == ProfilingABI
         let cfg =
               WasmInterpConfig
                 { wasmInterpDyLD = interpWasmDyld opts
@@ -96,7 +96,7 @@ initInterpreter tmpfs logger platform finder_cache unit_env opts = do
                 , wasmInterpBrowserPlaywrightLaunchOpts = interpBrowserPlaywrightLaunchOpts opts
                 , wasmInterpTargetPlatform = platform
                 , wasmInterpProfiled = profiled
-                , wasmInterpHsSoSuffix = way_tag ++ dynLibSuffix (interpNameVer opts)
+                , wasmInterpHsSoSuffix = dynLibSuffix (interpNameVer opts)
                 , wasmInterpUnitState = ue_homeUnitState unit_env
                 }
         pure $ Just $ Interp (ExternalInterp $ ExtWasm $ ExtInterpState cfg s) loader lookup_cache fs_cache
@@ -124,23 +124,21 @@ initInterpreter tmpfs logger platform finder_cache unit_env opts = do
     -- external interpreter
     | interpExternal opts
     -> do
-        let
-          profiled = interpWays opts `hasWay` WayProf
-          dynamic  = interpWays opts `hasWay` WayDyn
-        prog <- case interpProg opts of
-          -- build iserv program if none specified
-          "" -> generateIservC logger tmpfs (interpExecutableLinkOpts opts) unit_env
-          _ -> pure (interpProg opts ++ flavour)
-            where
-              flavour
-                | profiled && dynamic = "-prof-dyn"
-                | profiled  = "-prof"
-                | dynamic   = "-dyn"
-                | otherwise = ""
-        let msg = text "Starting " <> text prog
-        tr <- if interpVerbosity opts >= 3
-               then return (logInfo logger $ withPprStyle defaultDumpStyle msg)
-               else return (pure ())
+        let profiled = interpTargetABI opts == ProfilingABI
+            dynamic  = interpWays opts `hasWay` WayDyn
+            flavour
+              | dynamic = "-dyn"
+              | otherwise = ""
+            -- Construct the target interpreter only when it is first needed.
+            -- Session initialization also runs while bootstrapping its libraries.
+            prog = case interpProg opts of
+              "" -> generateIservC logger tmpfs (interpExecutableLinkOpts opts) unit_env
+              _ -> pure (interpProg opts ++ flavour)
+            tr program
+              | interpVerbosity opts >= 3
+              = logInfo logger $ withPprStyle defaultDumpStyle $
+                  text "Starting " <> text program
+              | otherwise = pure ()
         let
          conf = IServConfig
            { iservConfProgram  = prog

@@ -6,13 +6,17 @@ import Test.QuickCheck
 
 import Base
 import Context
+import Flavour
+import Hadrian.BuildPath
 import Oracles.ModuleFiles
 import Packages
 import Settings
+import Settings.Default (defaultFlavour)
 import Target
 import Utilities
 
 import qualified System.FilePath.Posix as Posix ((</>))
+import qualified Text.Parsec as Parsec
 
 instance Arbitrary Way where
     arbitrary = wayFromUnits <$> arbitrary
@@ -24,7 +28,7 @@ test :: Testable a => a -> Action ()
 test = liftIO . quickCheck
 
 selftestRules :: Rules ()
-selftestRules =
+selftestRules = do
     "selftest" ~> do
         testBuilder
         testChunksOfSize
@@ -34,6 +38,9 @@ selftestRules =
         testPackages
         testPaths
         testWay
+        testRetiredProfiling
+    -- This subset needs no configured compiler or built GHC packages.
+    "selftest-profiling-ways" ~> testRetiredProfiling
 
 testBuilder :: Action ()
 testBuilder = do
@@ -112,6 +119,34 @@ testWay :: Action ()
 testWay = do
     putBuild "==== Read Way, Show Way"
     test $ \(x :: Way) -> read (show x) == x
+
+testRetiredProfiling :: Action ()
+testRetiredProfiling = do
+    putBuild "==== Profiling uses a separate target ABI"
+    check "ordinary suffixes" $ osuf vanilla == "o" && hisuf vanilla == "hi"
+    check "dynamic/threaded/debug suffixes" $
+        osuf dynamic == "dyn_o" && osuf threadedDebug == "thr_debug_o"
+    forM_ allWays $ \w ->
+        check ("roundtrip " ++ show w) $ read (show w) == w
+    forM_ ["p", "p_dyn", "thr_p", "thr_debug_p_dyn"] $ \oldWay ->
+        check ("retired way " ++ oldWay) $ null (reads oldWay :: [(Way, String)])
+    forM_ ["_p", "_thr_p", "_p_dyn"] $ \suffix ->
+        check ("retired suffix " ++ suffix) $
+            migrationError $ Parsec.parse (parseWaySuffix vanilla <* Parsec.eof) "" suffix
+    forM_ ["p_", "thr_p_", "p_dyn_"] $ \prefix ->
+        check ("retired prefix " ++ prefix) $
+            migrationError $ Parsec.parse (parseWayPrefix vanilla <* Parsec.eof) "" prefix
+    forM_ ["prof", "default+profiled_ghc", "default+no_profiled_libs", "default+late_ccs"] $ \spec ->
+        check ("retired flavour " ++ spec) $ case parseFlavour [defaultFlavour] flavourTransformers spec of
+            Left err -> "make stage3-profile" `isInfixOf` err
+            Right _ -> False
+    check "ordinary flavour modifier" $ case parseFlavour [defaultFlavour] flavourTransformers "default+no_dynamic_libs" of
+        Left _ -> False
+        Right _ -> True
+  where
+    check label ok = unless ok $ fail $ "Profiling way regression: " ++ label
+    migrationError (Left err) = "make stage3-profile" `isInfixOf` show err
+    migrationError (Right _) = False
 
 testPaths :: Action ()
 testPaths = do

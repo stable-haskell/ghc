@@ -6,8 +6,7 @@
 #
 # Two classes of leak to remove:
 #
-#   (1) Absolute LC_RPATH entries like
-#       /Volumes/WorkSpace/_work/ghc/ghc/_build/stage2/store/host/...
+#   (1) Absolute LC_RPATH entries under this build's _build/ tree
 #       that the bundled Cabal's depLibraryPaths bakes in via the
 #       link line. macOS 14 dyld silently falls through to the
 #       portable @executable_path/../lib/<host> rpath SET_RPATH adds,
@@ -29,14 +28,17 @@
 # Pattern adapted from input-output-hk/devx static.nix:fixup-nix-deps,
 # SHA 5f05c1e1af6.
 #
-# Usage: clean-darwin-macho.sh <DIST_DIR>
+# Usage: clean-darwin-macho.sh <DIST_DIR> <BUILD_ROOT>
 
 set -euo pipefail
 
 [ "$(uname -s)" = "Darwin" ] || { echo "Not Darwin — skipping Mach-O cleanup."; exit 0; }
 
 DIST_DIR="${1:?DIST_DIR required}"
+[ -n "${2:-}" ] || { echo "::error::BUILD_ROOT required" >&2; exit 1; }
+BUILD_ROOT="${2%/}"
 [ -d "$DIST_DIR" ] || { echo "::error::$DIST_DIR not a directory"; exit 1; }
+[ -d "$BUILD_ROOT" ] || { echo "::error::$BUILD_ROOT not a directory"; exit 1; }
 
 echo "[stage2] Stripping build-host leaks from Mach-O artefacts in $DIST_DIR"
 
@@ -48,15 +50,28 @@ while IFS= read -r -d '' f; do
   file -L "$f" 2>/dev/null | grep -q 'Mach-O' || continue
   changed=0
 
-  # (1) Strip /Volumes/-prefixed LC_RPATH entries
+  # (1) Strip only paths inside this build's _build tree. Parse the complete
+  # path field because workspace names and build roots can contain spaces.
+  if ! rpath_data=$(otool -l "$f" 2>/dev/null); then
+    echo "::error::failed to inspect LC_RPATH entries in '$f'" >&2
+    exit 1
+  fi
   while IFS= read -r rp; do
     [ -z "$rp" ] && continue
-    install_name_tool -delete_rpath "$rp" "$f" 2>/dev/null && {
+    case "$rp" in
+      "$BUILD_ROOT"/*) ;;
+      *) continue ;;
+    esac
+    if ! install_name_tool -delete_rpath "$rp" "$f" 2>/dev/null; then
+      echo "::error::failed to delete build-root LC_RPATH '$rp' from '$f'" >&2
+      exit 1
+    fi
+    {
       rpath_stripped=$((rpath_stripped + 1))
       changed=1
-    } || true
-  done < <(otool -l "$f" 2>/dev/null \
-    | awk '/cmd LC_RPATH/{flag=1; next} flag && /path \/Volumes\//{print $2; flag=0; next} flag && /path /{flag=0}')
+    }
+  done < <(printf '%s\n' "$rpath_data" \
+    | awk '/cmd LC_RPATH/{flag=1; next} flag && /path /{value=$0; sub(/^[[:space:]]*path /,"",value); sub(/ \(offset [0-9]+\)$/,"",value); print value; flag=0; next} flag && /cmd /{flag=0}')
 
   # (2) Rewrite nix-store LC_LOAD_DYLIB → /usr/lib equivalents
   while IFS= read -r nixdep; do
@@ -79,7 +94,25 @@ while IFS= read -r -d '' f; do
   done < <(otool -L "$f" 2>/dev/null | awk '/nix\/store/{print $1}')
 
   if [ "$changed" -eq 1 ]; then
-    codesign --force --sign - "$f" >/dev/null 2>&1 || true
+    if command -v codesign >/dev/null 2>&1; then
+      codesign_tool=$(command -v codesign)
+    elif [ -x /usr/bin/codesign ]; then
+      # The Nix devx PATH on self-hosted Darwin runners omits this system tool.
+      codesign_tool=/usr/bin/codesign
+    else
+      echo "::error::no codesign executable found on PATH or at /usr/bin/codesign" >&2
+      exit 1
+    fi
+    if sign_output=$("$codesign_tool" --force --sign - "$f" 2>&1); then
+      :
+    else
+      sign_status=$?
+      echo "::error::failed to ad-hoc sign modified Mach-O '$f' (codesign exited $sign_status)" >&2
+      if [ -n "$sign_output" ]; then
+        printf '%s\n' "$sign_output" >&2
+      fi
+      exit 1
+    fi
     files_touched=$((files_touched + 1))
   fi
 done < <(find "$DIST_DIR" -type f \( -perm -u+x -o -name '*.dylib' \) -print0)

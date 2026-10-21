@@ -653,13 +653,14 @@ The available mode flags are:
     :category: modes
 
     Packages, like the Runtime System, can be built in a number of ways:
-    - profiling - with profiling support
     - dynamic - with dynamic linking
     - logging - RTS event logging
     - threaded - mulithreaded RTS
     - debug - RTS with debug information
 
-    Various combinations of these flavours are possible.
+    Various combinations of these flavours are possible. Profiling is selected
+    by the compiler's target ABI and has its own installation, rather than
+    being an additional RTS build way.
 
 .. ghc-flag:: --print-stage
     :shortdesc: display ``stage`` number of GHC

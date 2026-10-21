@@ -58,7 +58,6 @@ packageArgs = do
           , builder (Ghc CompileHs) ? mconcat
             [ compilerStageOption ghcDebugAssertions ? arg "-DDEBUG"
 
-            , inputs ["**/GHC.hs", "**/GHC/Driver/Make.hs"] ? arg "-fprof-auto"
             , input "**/Parser.hs" ?
               pure ["-fno-ignore-interface-pragmas", "-fcmm-sink"]
             -- Enable -haddock and -Winvalid-haddock for the compiler
@@ -73,7 +72,7 @@ packageArgs = do
           , builder (Cabal Setup) ? mconcat
             [ arg "--disable-library-for-ghci"
             , anyTargetOs [OSOpenBSD] ? arg "--ld-options=-E"
-            , compilerStageOption ghcProfiled ? arg "--ghc-pkg-option=--force" ]
+            ]
 
           , builder (Cabal Flags) ? mconcat
             -- For the ghc library, internal-interpreter only makes
@@ -307,7 +306,6 @@ rtsPackageArgs = package rts ? do
           , arg $ "-I" ++ path
           , way `elem` [debug, debugDynamic] ? pure [ "-DTICKY_TICKY"
                                                     , "-optc-DTICKY_TICKY"]
-          , Profiling `wayUnit` way          ? arg "-DPROFILING"
           , Threaded  `wayUnit` way          ? arg "-DTHREADED_RTS"
           , notM targetSupportsSMP           ? arg "-optc-DNOSMP"
 
@@ -383,8 +381,7 @@ rtsPackageArgs = package rts ? do
 
     mconcat
         [ builder (Cabal Flags) ? mconcat
-          [ any (wayUnit Profiling) rtsWays `cabalFlag` "profiling"
-          , any (wayUnit Debug) rtsWays     `cabalFlag` "debug"
+          [ any (wayUnit Debug) rtsWays     `cabalFlag` "debug"
           , any (wayUnit Dynamic) rtsWays   `cabalFlag` "dynamic"
           , any (wayUnit Threaded) rtsWays  `cabalFlag` "threaded"
           , flag UseLibm                    `cabalFlag` "libm"

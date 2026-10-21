@@ -7,6 +7,7 @@ module GHC.Driver.Session.Mode where
 import GHC.Driver.CmdLine
 import GHC.Driver.Phases
 import GHC.Driver.Session
+import GHC.Platform (PlatformMisc(..), TargetABI(..))
 import GHC.Unit.Module ( ModuleName, mkModuleName )
 
 import GHC.Types.SrcLoc
@@ -67,8 +68,12 @@ showInfoMode = mkPreLoadMode ShowInfo
 
 printSetting :: String -> Mode
 printSetting k = mkPreLoadMode (PrintWithDynFlags f)
-    where f dflags = fromMaybe (panic ("Setting not found: " ++ show k))
-                   $ lookup k (compilerInfo dflags)
+    where f dflags = case lookup k (compilerInfo dflags) of
+            Just value -> value
+            Nothing | k == "Target name" ->
+              let machine = platformMisc_targetPlatformString (platformMisc dflags)
+              in machine ++ if targetABI dflags == ProfilingABI then "-prof" else ""
+            Nothing -> panic ("Setting not found: " ++ show k)
 
 mkPreLoadMode :: PreLoadMode -> Mode
 mkPreLoadMode = Right . Left
@@ -206,6 +211,7 @@ mode_flags =
   , defFlag "-version"              (PassFlag (setMode showVersionMode))
   , defFlag "-numeric-version"      (PassFlag (setMode showNumVersionMode))
   , defFlag "-info"                 (PassFlag (setMode showInfoMode))
+  , defFlag "-print-target-name"    (PassFlag (setMode (printSetting "Target name")))
   , defFlag "-show-options"         (PassFlag (setMode showOptionsMode))
   , defFlag "-print-prim-module"    (PassFlag (setMode printPrimModule))
   , defFlag "-print-prim-wrappers-module"  (PassFlag (setMode printPrimWrappersModule))

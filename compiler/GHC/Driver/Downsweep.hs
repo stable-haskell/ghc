@@ -1002,7 +1002,7 @@ enableCodeGenWhen logger tmpfs staticLife dynLife unit_env mod_graph = do
        internalInterpreter = not (gopt Opt_ExternalInterpreter lcl_dflags)
        dyn_too_enabled = gopt Opt_BuildDynamicToo lcl_dflags
        isDynWay    = hasWay (ways lcl_dflags) WayDyn
-       isProfWay   = hasWay (ways lcl_dflags) WayProf
+       isProfWay   = sccProfilingEnabled lcl_dflags
        enable_object = case enable_spec of
                             EnableByteCode -> False
                             EnableByteCodeAndObject -> True

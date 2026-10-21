@@ -77,9 +77,10 @@ ghcAutogen verbosity lbi@LocalBuildInfo {hostPlatform, pkgDescrFile} = do
   createDirectoryIfMissingVerbose verbosity True (takeDirectory platformHostPath)
 
   -- hostPlatform is listed in LocalBuildInfo as "the platform we are building for"
-  let Platform arch os = hostPlatform
+  rewriteFileEx verbosity platformHostPath (renderPlatformHost hostPlatform)
 
-  rewriteFileEx verbosity platformHostPath $
+renderPlatformHost :: Platform -> String
+renderPlatformHost (Platform arch os) =
     unlines
         [ "module GHC.Platform.Host where"
         , ""
@@ -87,10 +88,10 @@ ghcAutogen verbosity lbi@LocalBuildInfo {hostPlatform, pkgDescrFile} = do
         , "import Distribution.System hiding (Arch, OS)"
         , ""
         , "hostPlatformArch :: Arch"
-        , "hostPlatformArch = toArch " ++ show arch
+        , "hostPlatformArch = toArch (" ++ show arch ++ ")"
         , ""
         , "hostPlatformOS   :: OS"
-        , "hostPlatformOS   = toOS " ++ show os
+        , "hostPlatformOS   = toOS (" ++ show os ++ ")"
         , ""
         , "hostPlatformArchOS :: ArchOS"
         , "hostPlatformArchOS = ArchOS hostPlatformArch hostPlatformOS"

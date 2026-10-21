@@ -9,10 +9,10 @@ import GHC.Generics
 --
 -- @
 -- preludeTarget = Target (GHC.Context) (GHC.Builder)
---     { context = Context Stage1 base profiling
+--     { context = Context Stage1 base vanilla
 --     , builder = Ghc Stage1
 --     , inputs = ["libraries/base/Prelude.hs"]
---     , outputs = ["build/stage1/libraries/base/Prelude.p_o"] }
+--     , outputs = ["build/stage1/libraries/base/Prelude.o"] }
 -- @
 data Target c b = Target
     { context :: c          -- ^ Current build context

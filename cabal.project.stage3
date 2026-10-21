@@ -89,15 +89,10 @@ packages:
   https://hackage.haskell.org/package/happy-lib-2.1.5/happy-lib-2.1.5.tar.gz
 
 source-repository-package
-  -- See cabal.project.stage0 for what this Cabal SHA pins (rpath patch
-  -- for darwin LC_RPATH leak; all stages share the same host-side Cabal).
-  -- The rpath patch only touches host-linker codepaths (wasm-ld and the
-  -- JS backend don't use rpaths) so it's a no-op for stage3's cross
-  -- outputs, but unifying the pin avoids two-Cabal maintenance overhead.
   type: git
   location: https://github.com/stable-haskell/Cabal.git
-  -- See cabal.project.stage0 for why this SHA (post-split host:*/build:*).
-  tag: f2e0a89e15cf6604cec9d93e26a4b3caf459b076
+  -- Keep staged build/host toolchains and profiling ABI support in sync with stage0.
+  tag: f7ff31802b43bf0868e402a7f37ef53f5cf584e1
   subdir: Cabal
           Cabal-syntax
 

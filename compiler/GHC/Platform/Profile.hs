@@ -16,12 +16,13 @@ import GHC.Platform.Ways
 -- | A platform profile fully describes the kind of objects that are generated
 -- for a platform.
 --
--- 'Platform' doesn't fully describe the ABI of an object. Compiler ways
--- (profiling, debug, dynamic) also modify the ABI.
+-- 'Platform' doesn't fully describe the ABI of an object. The target ABI
+-- selects its closure layout; compiler ways additionally select dynamic linking.
 --
 data Profile = Profile
-   { profilePlatform :: !Platform -- ^ Platform
-   , profileWays     :: !Ways     -- ^ Ways
+   { profilePlatform  :: !Platform -- ^ Platform
+   , profileWays      :: !Ways     -- ^ Ways
+   , profileTargetABI :: !TargetABI -- ^ ABI intrinsic to the target installation
    }
   deriving (Eq, Ord, Show, Read)
 
@@ -33,7 +34,7 @@ profileConstants profile = platformConstants (profilePlatform profile)
 -- | Is profiling enabled
 profileIsProfiling :: Profile -> Bool
 {-# INLINE profileIsProfiling #-}
-profileIsProfiling profile = profileWays profile `hasWay` WayProf
+profileIsProfiling profile = profileTargetABI profile == ProfilingABI
 
 -- | Word size in bytes
 profileWordSizeInBytes :: Profile -> Int
@@ -50,4 +51,7 @@ profileBuildTag profile
   | otherwise                       =     wayTag
   where
    platform = profilePlatform profile
-   wayTag   = waysBuildTag (profileWays profile)
+   -- Interface compatibility includes the ABI even though filenames do not.
+   wayTag = case profileTargetABI profile of
+     DefaultABI -> waysBuildTag (profileWays profile)
+     ProfilingABI -> "profiling:" ++ waysBuildTag (profileWays profile)

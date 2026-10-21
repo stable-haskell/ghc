@@ -87,10 +87,10 @@ parseWaySuffix w = Parsec.choice
     [ Parsec.char '_' *>
         (wayFromUnits <$> Parsec.sepBy1 parseWayUnit (Parsec.char '_'))
     , pure w
-    ] Parsec.<?> "way suffix (e.g _thr_p, or none for vanilla)"
+    ] Parsec.<?> "way suffix (e.g _thr_debug, or none for vanilla)"
 
--- | Same as 'parseWaySuffix', but for parsing e.g @thr_p_@
---   instead of @_thr_p@, like 'parseWaySuffix' does.
+-- | Same as 'parseWaySuffix', but for parsing e.g @thr_debug_@
+--   instead of @_thr_debug@, like 'parseWaySuffix' does.
 --
 --   This is used to parse paths to object files,
 --   in Rules.Compile.
@@ -98,7 +98,7 @@ parseWayPrefix :: Way -> Parsec.Parsec String () Way
 parseWayPrefix w = Parsec.choice
     [ wayFromUnits <$> Parsec.endBy1 parseWayUnit (Parsec.char '_')
     , pure w
-    ] Parsec.<?> "way prefix (e.g thr_p_, or none for vanilla)"
+    ] Parsec.<?> "way prefix (e.g thr_debug_, or none for vanilla)"
 
 parseWayUnit :: Parsec.Parsec String () WayUnit
 parseWayUnit = Parsec.choice
@@ -106,9 +106,9 @@ parseWayUnit = Parsec.choice
     , Parsec.char   'd'   *>
       (Parsec.choice [ Parsec.string "ebug" *> pure Debug
                      , Parsec.string "yn"   *> pure Dynamic ])
-    , Parsec.char 'p'     *> pure Profiling
+    , Parsec.char 'p'     *> fail "legacy profiling ways have been removed; use make stage3-profile"
     , Parsec.char 'l'     *> pure Logging
-    ] Parsec.<?> "way unit (thr, debug, dyn, p, l)"
+    ] Parsec.<?> "way unit (thr, debug, dyn, l)"
 
 -- | Parse a @"pkgname-pkgversion-pkghash"@ string into the package name and the
 -- integers that make up the package version.

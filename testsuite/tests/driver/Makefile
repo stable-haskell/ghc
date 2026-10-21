@@ -6,6 +6,10 @@ include $(TOP)/mk/test.mk
 android_target_os:
 	$(PYTHON) android_target_os.py "$(TOP_ABS)/../m4/ghc_convert_os.m4"
 
+.PHONY: runghc_target_dispatch
+runghc_target_dispatch:
+	$(PYTHON) runghc_target_dispatch.py --ghc "$(TEST_HC)" --source "$(TOP_ABS)/../utils/runghc/Main.hs"
+
 # A set of driver tests
 
 # Things to test:

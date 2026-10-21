@@ -19,7 +19,7 @@ import GHC.Driver.Config.Core.Opt.LiberateCase ( initLiberateCaseOpts )
 import GHC.Driver.Config.Core.Opt.Simplify ( initSimplifyOpts, initSimplMode, initGentleSimplMode )
 import GHC.Driver.Config.Core.Opt.WorkWrap ( initWorkWrapOpts )
 import GHC.Driver.Config.Core.Rules ( initRuleOpts )
-import GHC.Platform.Ways  ( hasWay, Way(WayProf) )
+import GHC.Platform.Profile (profileIsProfiling)
 
 import GHC.Core
 import GHC.Core.SimpleOpt (simpleOptPgm)
@@ -143,7 +143,7 @@ getCoreToDo dflags hpt_rule_base extra_vars
     rules_on      = gopt Opt_EnableRewriteRules           dflags
     ww_on         = gopt Opt_WorkerWrapper                dflags
     static_ptrs   = xopt LangExt.StaticPointers           dflags
-    profiling     = ways dflags `hasWay` WayProf
+    profiling     = profileIsProfiling (targetProfile dflags)
 
     do_presimplify = do_specialise -- TODO: any other optimizations benefit from pre-simplification?
     do_simpl3      = const_fold || rules_on -- TODO: any other optimizations benefit from three-phase simplification?

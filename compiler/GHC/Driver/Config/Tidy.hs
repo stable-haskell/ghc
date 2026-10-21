@@ -20,7 +20,7 @@ import GHC.Core.Make (getMkStringIds)
 import GHC.Builtin.Names
 import GHC.Tc.Utils.Env (lookupGlobal)
 import GHC.Types.TyThing
-import GHC.Platform.Ways
+import GHC.Platform.Profile (profileIsProfiling)
 
 import qualified GHC.LanguageExtensions as LangExt
 
@@ -32,7 +32,7 @@ initTidyOpts hsc_env = do
     else Just <$> initStaticPtrOpts hsc_env
   pure $ TidyOpts
     { opt_name_cache        = hsc_NC hsc_env
-    , opt_collect_ccs       = ways dflags `hasWay` WayProf
+    , opt_collect_ccs       = profileIsProfiling (targetProfile dflags)
     , opt_unfolding_opts    = unfoldingOpts dflags
     , opt_expose_unfoldings = if | gopt Opt_OmitInterfacePragmas dflags -> ExposeNone
                                  | gopt Opt_ExposeAllUnfoldings dflags  -> ExposeAll

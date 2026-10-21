@@ -108,10 +108,10 @@ From `hadrian/src/Hadrian/Target.hs`:
 >
 > ```haskell
 > preludeTarget = Target (GHC.Context) (GHC.Builder)
->     { context = Context Stage1 base profiling
+>     { context = Context Stage1 base vanilla
 >     , builder = Ghc Stage1
 >     , inputs = ["libraries/base/Prelude.hs"]
->     , outputs = ["build/stage1/libraries/base/Prelude.p_o"] }
+>     , outputs = ["build/stage1/libraries/base/Prelude.o"] }
 > ```
 
 The data type is as follows and is fairly self-explanatory:
@@ -198,7 +198,6 @@ Where `Way` is a set of enumerated `WayUnit`s wrapped in a `newtype`.
 ```haskell
 data WayUnit = Threaded
              | Debug
-             | Profiling
              | Logging
              | Dynamic
              deriving (Bounded, Enum, Eq, Ord)
@@ -217,8 +216,8 @@ wayFromUnits = Way . Set.fromList . map fromEnum
 `wayFromUnits` converts the `[WayUnit]` into `[Int]` using `map fromEnum`,
 creates an `IntSet` from them using `Set.fromList`, and then wraps the `IntSet`
 with the `Way` constructor. So we can use `wayFromUnits` to create a `Way` that
-builds Hadrian with both multi-threading and profiling by simply writing
-`wayFromUnits [Threaded, Profiling]`.
+builds Hadrian with both multi-threading and debugging by simply writing
+`wayFromUnits [Threaded, Debug]`.
 
 We can also check if a `Way` contains a particular `WayUnit` by using
 `wayUnit :: WayUnit -> Way -> Bool`. This is useful if we need to do something
@@ -230,9 +229,9 @@ For example, using `getWay :: Expr Context b Way` from `hadrian/src/Context.hs`:
 foo :: Expr ()
 foo = do
   w <- getWay
-  if wayUnit Profiling w
-    then liftIO $ putStrLn "We're building this target with profiling"
-    else liftIO $ putStrLn "We're not building this target with profiling"
+  if wayUnit Debug w
+    then liftIO $ putStrLn "We're building this target with debugging"
+    else liftIO $ putStrLn "We're not building this target with debugging"
 ```
 
 ### Builder

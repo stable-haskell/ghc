@@ -90,6 +90,7 @@ import GHC.Unit.Ppr
 import GHC.Unit.Types
 import GHC.Unit.Module
 import GHC.Unit.Home
+import GHC.TargetName (TargetName)
 
 import GHC.Types.Unique.FM
 import GHC.Types.Unique.DFM
@@ -331,6 +332,8 @@ instance Monoid UnitVisibility where
 -- | Unit configuration
 data UnitConfig = UnitConfig
    { unitConfigPlatformArchOS :: !ArchOS        -- ^ Platform arch and OS
+   , unitConfigTargetABI      :: !TargetABI     -- ^ Same-architecture ABI namespace
+   , unitConfigTargetName     :: !(Maybe TargetName)
    , unitConfigWays           :: !Ways          -- ^ Ways to use
 
    , unitConfigAllowVirtual   :: !Bool          -- ^ Allow virtual units
@@ -390,6 +393,8 @@ initUnitConfig dflags cached_dbs home_units =
 
    in UnitConfig
       { unitConfigPlatformArchOS = platformArchOS (targetPlatform dflags)
+      , unitConfigTargetABI      = targetABI dflags
+      , unitConfigTargetName     = targetName dflags
       , unitConfigProgramName    = programName dflags
       , unitConfigWays           = ways dflags
       , unitConfigAllowVirtual   = allow_virtual_units
@@ -793,7 +798,8 @@ getUnitDbRefs cfg = do
 resolveUnitDatabase :: UnitConfig -> PkgDbRef -> IO (Maybe OsPath)
 resolveUnitDatabase cfg GlobalPkgDb = return $ Just $ OsPath.unsafeEncodeUtf $ unitConfigGlobalDB cfg
 resolveUnitDatabase cfg UserPkgDb = runMaybeT $ do
-  dir <- versionedAppDir (unitConfigProgramName cfg) (unitConfigPlatformArchOS cfg)
+  dir <- versionedAppDirForABI (unitConfigProgramName cfg)
+           (unitConfigPlatformArchOS cfg) (unitConfigTargetABI cfg) (unitConfigTargetName cfg)
   let pkgconf = dir </> unitConfigDBName cfg
   exist <- tryMaybeT $ doesDirectoryExist pkgconf
   if exist then return (OsPath.unsafeEncodeUtf pkgconf) else mzero

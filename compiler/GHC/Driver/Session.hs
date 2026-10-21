@@ -69,7 +69,7 @@ module GHC.Driver.Session (
         pprDynFlagsDiff,
         flagSpecOf,
 
-        targetProfile,
+        targetProfile, targetABI,
 
         -- ** Safe Haskell
         safeHaskellOn, safeHaskellModeEnabled,
@@ -134,8 +134,6 @@ module GHC.Driver.Session (
         sTargetRTSLinkerOnlySupportsSharedLibs,
         sTargetIsDynamic,
         sTargetShipsDynLibs,
-        sTargetIsProfiled,
-        sTargetShipsProfLibs,
         GhcNameVersion(..),
         FileSettings(..),
         PlatformMisc(..),
@@ -143,6 +141,7 @@ module GHC.Driver.Session (
         programName, projectVersion,
         ghcUsagePath, ghciUsagePath, topDir,
         versionedAppDir, versionedFilePath,
+        versionedAppDirForABI, versionedFilePathForABI,
         extraGccViaCFlags, globalPackageDatabasePath,
         pgm_L, pgm_P, pgm_JSP, pgm_CmmP, pgm_F, pgm_c, pgm_cxx, pgm_cpp, pgm_a, pgm_l,
         pgm_lm, pgm_windres, pgm_ar,
@@ -277,6 +276,7 @@ import GHC.Utils.Fingerprint
 import GHC.Utils.Outputable
 import GHC.Utils.Error (emptyDiagOpts, logInfo)
 import GHC.Settings
+import GHC.TargetName (targetNameString)
 import GHC.CmmToAsm.CFG.Weight
 import GHC.Core.Opt.CallerCC
 import GHC.Parser (parseIdentifier)
@@ -413,6 +413,7 @@ settings dflags = Settings
   , sToolSettings = toolSettings dflags
   , sPlatformMisc = platformMisc dflags
   , sRawSettings = rawSettings dflags
+  , sTargetName = targetName dflags
   }
 
 pgm_L                 :: DynFlags -> String
@@ -454,11 +455,16 @@ pgm_i dflags = toolSettings_pgm_i $ toolSettings dflags
 opt_L                 :: DynFlags -> [String]
 opt_L dflags = toolSettings_opt_L $ toolSettings dflags
 opt_P                 :: DynFlags -> [String]
-opt_P dflags = concatMap (wayOptP (targetPlatform dflags)) (ways dflags)
+opt_P dflags = profilingCppOpts dflags ++ concatMap (wayOptP (targetPlatform dflags)) (ways dflags)
             ++ toolSettings_opt_P (toolSettings dflags)
 opt_JSP               :: DynFlags -> [String]
-opt_JSP dflags = concatMap (wayOptP (targetPlatform dflags)) (ways dflags)
+opt_JSP dflags = profilingCppOpts dflags ++ concatMap (wayOptP (targetPlatform dflags)) (ways dflags)
             ++ toolSettings_opt_JSP (toolSettings dflags)
+-- The target ABI controls closure layout in C, C++ and preprocessed Haskell.
+-- Keep these arguments in the CPP signatures as well as the actual command.
+profilingCppOpts :: DynFlags -> [String]
+profilingCppOpts dflags = ["-DPROFILING" | targetABI dflags == ProfilingABI]
+
 opt_CmmP              :: DynFlags -> [String]
 opt_CmmP dflags = toolSettings_opt_CmmP $ toolSettings dflags
 
@@ -466,14 +472,14 @@ opt_CmmP dflags = toolSettings_opt_CmmP $ toolSettings dflags
 -- flags. See Note [Repeated -optP hashing].
 opt_P_signature       :: DynFlags -> ([String], Fingerprint)
 opt_P_signature dflags =
-  ( concatMap (wayOptP (targetPlatform dflags)) (ways dflags)
+  ( profilingCppOpts dflags ++ concatMap (wayOptP (targetPlatform dflags)) (ways dflags)
   , toolSettings_opt_P_fingerprint $ toolSettings dflags
   )
 -- This function packages everything that's needed to fingerprint opt_P
 -- flags. See Note [Repeated -optP hashing].
 opt_JSP_signature     :: DynFlags -> ([String], Fingerprint)
 opt_JSP_signature dflags =
-  ( concatMap (wayOptP (targetPlatform dflags)) (ways dflags)
+  ( profilingCppOpts dflags ++ concatMap (wayOptP (targetPlatform dflags)) (ways dflags)
   , toolSettings_opt_JSP_fingerprint $ toolSettings dflags
   )
 -- This function packages everything that's needed to fingerprint opt_CmmP
@@ -484,10 +490,10 @@ opt_CmmP_signature = toolSettings_opt_CmmP_fingerprint . toolSettings
 opt_F                 :: DynFlags -> [String]
 opt_F dflags= toolSettings_opt_F $ toolSettings dflags
 opt_c                 :: DynFlags -> [String]
-opt_c dflags = concatMap (wayOptc (targetPlatform dflags)) (ways dflags)
+opt_c dflags = profilingCppOpts dflags ++ concatMap (wayOptc (targetPlatform dflags)) (ways dflags)
             ++ toolSettings_opt_c (toolSettings dflags)
 opt_cxx               :: DynFlags -> [String]
-opt_cxx dflags = concatMap (wayOptcxx (targetPlatform dflags)) (ways dflags)
+opt_cxx dflags = profilingCppOpts dflags ++ concatMap (wayOptcxx (targetPlatform dflags)) (ways dflags)
            ++ toolSettings_opt_cxx (toolSettings dflags)
 opt_a                 :: DynFlags -> [String]
 opt_a dflags= toolSettings_opt_a $ toolSettings dflags
@@ -938,6 +944,22 @@ parseDynamicFlagsFull activeFlags cmdline logger dflags0 args = do
   let (dflags2, sh_warns) = safeFlagCheck cmdline dflags1
       theWays = ways dflags2
 
+  when (targetABI dflags2 == ProfilingABI) $ do
+    let targetSupportsDynamic = sTargetIsDynamic (settings dflags2)
+        targetSupportsDynamicToo =
+          platformOS (targetPlatform dflags2) /= OSMinGW32 && targetSupportsDynamic
+        requestedRTSWay = waysTag (targetWays_ dflags2)
+        targetRTSWays = maybe [] words (lookup "RTS ways" (rawSettings dflags2))
+        targetSupportsDebug = requestedRTSWay `elem` targetRTSWays
+        unsupported =
+          ["-dynamic" | targetWays_ dflags2 `hasWay` WayDyn && not targetSupportsDynamic] ++
+          ["-debug" | targetWays_ dflags2 `hasWay` WayDebug && not targetSupportsDebug] ++
+          ["-dynamic-too" | gopt Opt_BuildDynamicToo dflags2 && not targetSupportsDynamicToo]
+        target = sTargetPlatformString (settings dflags2) ++ "-prof"
+    unless (null unsupported) $ liftIO $ throwGhcExceptionIO $ CmdLineError $
+      "unsupported " ++ intercalate ", " unsupported ++ " for profiling target " ++ show target ++
+      "; supported alternative: static non-debug profiling output (omit these options)"
+
   unless (allowed_combination theWays) $ liftIO $
       throwGhcExceptionIO (CmdLineError ("combination not supported: " ++
                                intercalate "/" (map wayDesc (Set.toAscList theWays))))
@@ -1131,7 +1153,10 @@ dynamic_flags_deps = [
                                                d { enableTimeStats = True })))
 
     ------- ways ---------------------------------------------------------------
-  , make_ord_flag defGhcFlag "prof"           (NoArg (addWayDynP WayProf))
+  , make_ord_flag defGhcFlag "prof" $ noArgM $ \dflags -> do
+      unless (targetABI dflags == ProfilingABI) $
+        addErr "-prof requires a separate profiling compiler; use a compiler configured for the profiling target ABI"
+      pure dflags
   , (Deprecated, defFlag     "eventlog"
      $ noArgM $ \d -> do
          deprecate "the eventlog is now enabled in all runtime system ways"
@@ -3550,7 +3575,8 @@ compilerInfo dflags
       -- in the settings file (as "lookup" uses the first match for the
       -- key)
     : map (fmap $ expandDirectories (topDir dflags) (toolDir dflags))
-          (rawSettings dflags)
+          (filter (\(key, _) -> key `notElem` reservedRawInfoKeys)
+            (rawSettings dflags))
    ++ [("Project version",             projectVersion dflags),
        ("Edition",                     "Stable Haskell"),
        ("Project Git commit id",       cProjectGitCommitId),
@@ -3564,7 +3590,8 @@ compilerInfo dflags
        ("Stage",                       cStage),
        ("Build platform",              cBuildPlatformString),
        ("Host platform",               cHostPlatformString),
-       ("Target platform",             platformMisc_targetPlatformString $ platformMisc dflags),
+       ("Target platform",             platformMisc_targetPlatformString $ platformMisc dflags)
+      ] ++ maybe [] (\name -> [("Target name", targetNameString name)]) (sTargetName (settings dflags)) ++ [
        ("target os string",            stringEncodeOS (platformOS (targetPlatform dflags))),
        ("target arch string",          stringEncodeArch (platformArch (targetPlatform dflags))),
        ("target word size in bits",    show (platformWordSizeInBits (targetPlatform dflags))),
@@ -3617,14 +3644,10 @@ compilerInfo dflags
        -- True if absent (matches pre-this-change behaviour).
        ("GHC Dynamic",                 showBool (sTargetIsDynamic (settings dflags)
                                               && sTargetShipsDynLibs (settings dflags))),
-       -- Profiling-way analogue of `GHC Dynamic`. Per-target dials
-       -- via `target is profiled` + `target ships profiling libraries`
-       -- settings keys. Drops the historical `hostIsProfiled` RTS-
-       -- baked-in for the same reason the dyn pair did: on a multi-
-       -- target bindist the shared stage2 GHC binary's prof-ness is
-       -- fixed but the lib trees can disagree per target.
-       ("GHC Profiled",                showBool (sTargetIsProfiled (settings dflags)
-                                              && sTargetShipsProfLibs (settings dflags))),
+       -- Profiling is intrinsic to the selected target, independently of
+       -- the ABI of the compiler process and of any additional build ways.
+       ("Target ABI",                  targetABIName (targetABI dflags)),
+       ("GHC Profiled",                showBool (targetABI dflags == ProfilingABI)),
        ("Debug on",                    showBool debugIsOn),
        ("LibDir",                      topDir dflags),
        -- This is always an absolute path, unlike "Relative Global Package DB" which is
@@ -3632,6 +3655,11 @@ compilerInfo dflags
        ("Global Package DB",           globalPackageDatabasePath dflags)
       ]
   where
+    reservedRawInfoKeys =
+      ["Target platform", "Target name", "Target ABI", "GHC Profiled"] ++
+      case sTargetName (settings dflags) of
+        Nothing -> []
+        Just _  -> ["Project version", "LibDir", "Global Package DB"]
     showBool True  = "YES"
     showBool False = "NO"
     platform  = targetPlatform dflags
@@ -3717,6 +3745,11 @@ makeDynFlagsConsistent :: DynFlags -> (DynFlags, [Warn], [Located SDoc])
 -- ensure that a later change doesn't invalidate an earlier check.
 -- Be careful not to introduce potential loops!
 makeDynFlagsConsistent dflags
+ | targetABI dflags == ProfilingABI
+ , not (gopt Opt_ExternalInterpreter dflags)
+    = loop (gopt_set dflags Opt_ExternalInterpreter)
+        "Using the external interpreter for the profiling target ABI"
+
  -- Disable -dynamic-too on Windows (#8228, #7134, #5987)
  | os == OSMinGW32 && gopt Opt_BuildDynamicToo dflags
     = let dflags' = gopt_unset dflags Opt_BuildDynamicToo
@@ -3786,20 +3819,13 @@ makeDynFlagsConsistent dflags
       backendDescription (backend dflags) ++
       ". Pass -fno-unoptimized-core-for-interpreter to enable this feature."
 
- | LinkInMemory <- ghcLink dflags
+ -- The package universe and ABI belong to the target installation. Never
+ -- change the ABI to match the compiler process while retaining its target DB.
+ | ghcLink dflags == LinkInMemory || gopt Opt_ByteCode dflags || gopt Opt_ByteCodeAndObjectCode dflags
  , not (gopt Opt_ExternalInterpreter dflags)
- , hostIsProfiled
- , backendWritesFiles (backend dflags)
- , ways dflags `hasNotWay` WayProf
-    = loop dflags{targetWays_ = addWay WayProf (targetWays_ dflags)}
-         "Enabling -prof, because -fobject-code is enabled and GHCi is profiled"
-
- | gopt Opt_ByteCode dflags || gopt Opt_ByteCodeAndObjectCode dflags
- , not (gopt Opt_ExternalInterpreter dflags)
- , hostIsProfiled
- , ways dflags `hasNotWay` WayProf
+ , targetABI dflags /= hostABI
     = loop (gopt_set dflags Opt_ExternalInterpreter)
-         "Enabling external interpreter, because GHC is profiled and bytecode is being used for TH"
+         "Using the external interpreter because the target ABI differs from the compiler process"
 
  | LinkMergedObj <- ghcLink dflags
  , Nothing <- outputFile dflags
@@ -3821,7 +3847,7 @@ makeDynFlagsConsistent dflags
     = flip loopNoWarn "Forcing dynamic way because target RTS linker only supports dynamic code" $
         -- See checkOptions, -fexternal-interpreter is
         -- required when using --interactive with a non-standard
-        -- way (-prof, -static, or -dynamic).
+        -- way (-static or -dynamic).
         setGeneralFlag' Opt_ExternalInterpreter $
         addWay' WayDyn dflags
 

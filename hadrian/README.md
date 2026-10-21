@@ -55,7 +55,7 @@ changes. Build results are placed into `_build` by default.
 There are many different ways to build a compiler, each way is called a flavour.
 
 * `--flavour=FLAVOUR`: choose a build flavour. The following settings are
-currently supported: `default`, `quick`, `quickest`, `perf`, `prof`, `devel1`
+currently supported: `default`, `quick`, `quickest`, `perf`, `devel1`
 and `devel2`. As an example, the `quickest` flavour adds `-O0` flag to all GHC
 invocations and builds libraries only in the `vanilla` way, which speeds up
 builds by 3-4x.
@@ -64,7 +64,6 @@ In addition to the overall build flavour there are also "flavour transformers"
 which can slightly modify the build settings for a flavour. Some common flavour
 transformers are:
 
-* `no_profiled_libs`: Don't build profiled libraries
 * `lint`: Build with core lint enabled.
 * etc
 
@@ -76,6 +75,12 @@ A flavour transformer is appended to a normal flavour name using `+`
 
 Build flavours and flavour transformers are documented
 [here](https://gitlab.haskell.org/ghc/ghc/blob/master/hadrian/doc/flavours.md).
+
+Profiling is a separate target ABI. Use `make stage3-profile` from the repository
+root; Hadrian does not build that target yet. The legacy `prof` flavour and
+`profiled_ghc`, `late_ccs` and `no_profiled_libs` transformers are rejected with a
+migration diagnostic. Ordinary Hadrian builds no longer produce profiling
+library ways; remove `+no_profiled_libs` from existing commands.
 
 #### Command line flags
 

@@ -336,13 +336,12 @@ stageOf _ = Nothing
 
 needIservBins :: Stage -> Action ()
 needIservBins stg = do
-  let ws = [vanilla, profiling, dynamic]
+  let ws = [vanilla, dynamic]
   progs <- catMaybes <$> mapM (canBuild stg) ws
   need progs
   where
     -- Only build iserv binaries if all dependencies are built the right
-    -- way already. In particular this fixes the case of no_profiled_libs
-    -- not working with the testsuite, see #19624
+    -- way already.
     canBuild (Stage0 {}) _ = pure Nothing
     canBuild stg w = do
       contextDeps <- contextDependencies (Context stg iserv w Final)
@@ -358,5 +357,5 @@ needIservBins stg = do
 
 pkgFile :: Stage -> Package -> Action FilePath
 pkgFile stage pkg
-    | isLibrary pkg = pkgConfFile (Context stage pkg profilingDynamic Final)
+    | isLibrary pkg = pkgConfFile (vanillaContext stage pkg)
     | otherwise     = programPath =<< programContext stage pkg

@@ -1059,13 +1059,16 @@ initModDetails hsc_env iface =
 -- bytecode linking in 'HomeModLinkable', so the usual hack for switching
 -- between ways in 'get_link_deps' doesn't work.
 compile_for_interpreter :: HscEnv -> (HscEnv -> IO a) -> IO a
-compile_for_interpreter hsc_env use =
+compile_for_interpreter hsc_env use = do
+  -- Foreign objects must use the target's ABI and package universe. Only
+  -- dynamic linking can be adapted for the interpreter within that universe.
+  when (interpreterProfiled (hscInterp hsc_env) /=
+        sccProfilingEnabled (hsc_dflags hsc_env)) $
+    throwGhcExceptionIO (ProgramError "Interpreter ABI does not match the target ABI")
   use (hscUpdateFlags update hsc_env)
   where
     update dflags = dflags {
-      targetWays_ = adapt_way interpreterDynamic WayDyn $
-                    adapt_way interpreterProfiled WayProf $
-                    targetWays_ dflags
+      targetWays_ = adapt_way interpreterDynamic WayDyn (targetWays_ dflags)
       }
 
     adapt_way want = if want (hscInterp hsc_env) then addWay else removeWay

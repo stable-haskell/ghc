@@ -298,11 +298,13 @@ endif
 #
 # See #11495 and TEST=TH_spliceE5_prof for a complication: trying to compile
 # code that uses TemplateHaskell with -prof, while GhcDynamic=YES.
+# Profiling is a target ABI, so -prof is redundant on its compiler and does
+# not add a filename suffix. Both ABIs use hi/dyn_hi interface extensions.
 ifeq "$(GhcDynamic)$(GhcProfiled)" "YESYES"
 ghcThWayFlags     ?= -prof -dynamic
 ghciWayFlags      ?= -prof -dynamic
 ghcPluginWayFlags ?= -prof -dynamic
-ghciWayExt        ?= p_dyn_hi
+ghciWayExt        ?= dyn_hi
 else ifeq "$(GhcDynamic)" "YES"
 ghcThWayFlags     ?= -dynamic
 ghciWayFlags      ?= -dynamic
@@ -312,7 +314,7 @@ else ifeq "$(GhcProfiled)" "YES"
 ghcThWayFlags     ?= -prof
 ghciWayFlags      ?= -prof
 ghcPluginWayFlags ?= -prof
-ghciWayExt        ?= p_hi
+ghciWayExt        ?= hi
 else
 ghcThWayFlags     ?= -static
 ghciWayFlags      ?= -static
