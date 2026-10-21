@@ -214,6 +214,13 @@ STAGE1_PATH := $(let STAGE,stage1,$(STORE_DIR)/host/$(BOOTSTRAP_TARGET))
 STAGE2_PATH := $(let STAGE,stage2,$(STORE_DIR)/host/$(STAGE2_PLATFORM))
 STAGE3_TOOLS_PATH := $(BUILD_DIR)/stage3-tools/store/host/$(BOOTSTRAP_TARGET)
 
+# Read Happy's installed data from the selected Build unit. Cabal's unpack
+# cache is content-addressed and may contain sources from several old plans.
+COPY_HAPPY_TEMPLATES = $(PYTHON) mk/copy-happy-templates.py \
+	--plan "$(BUILD_DIR)/stage2/cache/plan.json" \
+	--build-store "$(BUILD_DIR)/stage2/store/build/$(BOOTSTRAP_TARGET)" \
+	--destination "$(DIST_DIR)/share/happy-lib/data"
+
 GHC1        := $(STAGE1_PATH)/bin/ghc$(EXE_EXT)
 GHC2        := $(STAGE2_PATH)/bin/ghc$(EXE_EXT)
 
@@ -751,7 +758,7 @@ STAGE2_CABAL_BUILD = \
 ifndef DIST_BUILD
 $(STAGE2_STAMP): STAGE=stage2
 $(STAGE2_STAMP): TARGET_PLATFORM:=$(STAGE2_PLATFORM)
-$(STAGE2_STAMP): $(GHC1) $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) cabal.project.stage2.common cabal.project.stage2.static cabal.project.stage2.dynamic cabal.project.common | stable-cabal libraries/ghc-boot-th-next $(STAGE1_STAMP)
+$(STAGE2_STAMP): $(GHC1) $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) cabal.project.stage2.common cabal.project.stage2.static cabal.project.stage2.dynamic cabal.project.common mk/copy-happy-templates.py | stable-cabal libraries/ghc-boot-th-next $(STAGE1_STAMP)
 	$(call PHASE_START,stage2)
 	$(call LOG,Starting build of $(STAGE))
 
@@ -845,8 +852,7 @@ endif
 
 	# Copy happy-lib templates (needed for cross-compilation from dist)
 	$(call LOG,Copying happy-lib templates to $(DIST_DIR)/share)
-	@mkdir -p $(DIST_DIR)/share/happy-lib/data
-	@cp -rfp _build/stage2/src/happy-lib-*/data/* $(DIST_DIR)/share/happy-lib/data/
+	@$(COPY_HAPPY_TEMPLATES)
 
 	$(call LOG,Finished building $(STAGE) in $(DIST_DIR))
 	$(call PHASE_END_OK,stage2.dist)
@@ -1235,6 +1241,10 @@ stage3-x86_64-musl-linux: stage3-x86_64-unknown-linux-musl
 test-target-aliases: ## Check target alias manifests and archive entry points
 	$(PYTHON) mk/test-target-aliases.py
 
+.PHONY: test-happy-templates
+test-happy-templates: ## Check selected Build-stage Happy data in distribution packaging
+	$(PYTHON) mk/tests/test-happy-templates.py --make "$(MAKE)"
+
 HOST_PLATFORM_TEST_GHC ?= $(GHC0)
 HOST_PLATFORM_TEST_ARGS ?=
 .PHONY: test-ghc-boot-host-generator
@@ -1586,7 +1596,7 @@ testsuite-timeout:
 
 # --- Test Target ---
 
-test: $(STAGE2_STAMP) testsuite-timeout
+test: $(STAGE2_STAMP) testsuite-timeout test-happy-templates
 	$(call PHASE_START,test)
 	@echo "::group::Running tests with THREADS=$(THREADS)" >&2
 	# If any required tool is missing, testsuite logic will skip related tests.
