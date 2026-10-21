@@ -699,9 +699,9 @@ test('StgRunUnwindAArch64',
 test('SignpostMock',
      [c_src, unless(opsys('darwin') and in_tree_compiler(), skip),
       only_ways(['normal']),
-      extra_files(['../../../rts/Signpost.c', '../../../rts/Signpost.h', 'SignpostMock'])],
-     compile_and_run, ['-ISignpostMock -optc-std=c11'])
+      extra_files(['../../../rts/Signpost.c', '../../../rts/Signpost.h', 'SignpostMock-src'])],
+     compile_and_run, ['-ISignpostMock-src -optc-std=c11'])
 test('SignpostDisabled',
      [c_src, unless(in_tree_compiler(), skip), only_ways(['normal']),
-      extra_files(['../../../rts/Signpost.h', 'SignpostDisabled'])],
-     compile_and_run, ['-ISignpostDisabled -optc-std=c11'])
+      extra_files(['../../../rts/Signpost.h', 'SignpostDisabled-src'])],
+     compile_and_run, ['-ISignpostDisabled-src -optc-std=c11'])
