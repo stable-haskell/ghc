@@ -974,7 +974,10 @@ def main():
             assert run(runtime, cwd=work, env=env).stdout.strip() == "42"
             if label == "profile":
                 component_log = work / "build/logs/host" / profile_info["Target name"] / "abi-workflow-0"
-                component_log.unlink(missing_ok=True)
+                try:
+                    component_log.unlink()
+                except FileNotFoundError:
+                    pass
                 hsc2hs_suffix = ".exe" if os.name == "nt" else ""
                 hsc2hs_helper = profile.with_name(
                     profile_info["Target name"] + "-hsc2hs" + hsc2hs_suffix)

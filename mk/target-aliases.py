@@ -72,7 +72,10 @@ def atomic_write(path, content):
             handle.close()
             temporary.replace(path)
         finally:
-            temporary.unlink(missing_ok=True)
+            try:
+                temporary.unlink()
+            except FileNotFoundError:
+                pass
 
 
 def write_aliases(target_dir, bin_dir, machine, abi, version, programs, extra_aliases=(), extension=""):
