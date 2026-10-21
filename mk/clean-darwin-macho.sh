@@ -94,7 +94,16 @@ while IFS= read -r -d '' f; do
   done < <(otool -L "$f" 2>/dev/null | awk '/nix\/store/{print $1}')
 
   if [ "$changed" -eq 1 ]; then
-    if sign_output=$(codesign --force --sign - "$f" 2>&1); then
+    if command -v codesign >/dev/null 2>&1; then
+      codesign_tool=$(command -v codesign)
+    elif [ -x /usr/bin/codesign ]; then
+      # The Nix devx PATH on self-hosted Darwin runners omits this system tool.
+      codesign_tool=/usr/bin/codesign
+    else
+      echo "::error::no codesign executable found on PATH or at /usr/bin/codesign" >&2
+      exit 1
+    fi
+    if sign_output=$("$codesign_tool" --force --sign - "$f" 2>&1); then
       :
     else
       sign_status=$?
