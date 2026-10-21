@@ -42,6 +42,8 @@ EOF
 cat >"$mock_bin/codesign" <<'EOF'
 #!/usr/bin/env bash
 if [ "${FAIL_CODESIGN:-0}" = 1 ]; then
+  printf 'mock codesign stdout\n'
+  printf 'mock codesign diagnostic\n' >&2
   exit 1
 fi
 EOF
@@ -92,5 +94,6 @@ if FAIL_CODESIGN=1 "$script" "$dist_dir" "$build_root" >"$scratch/codesign-failu
   exit 1
 fi
 grep -F "failed to ad-hoc sign modified Mach-O" "$scratch/codesign-failure.log" >/dev/null
+grep -F "mock codesign diagnostic" "$scratch/codesign-failure.log" >/dev/null
 
 echo "Mach-O RPATH scope, spaces, and failure handling passed"

@@ -94,8 +94,14 @@ while IFS= read -r -d '' f; do
   done < <(otool -L "$f" 2>/dev/null | awk '/nix\/store/{print $1}')
 
   if [ "$changed" -eq 1 ]; then
-    if ! codesign --force --sign - "$f" >/dev/null 2>&1; then
-      echo "::error::failed to ad-hoc sign modified Mach-O '$f'" >&2
+    if sign_output=$(codesign --force --sign - "$f" 2>&1); then
+      :
+    else
+      sign_status=$?
+      echo "::error::failed to ad-hoc sign modified Mach-O '$f' (codesign exited $sign_status)" >&2
+      if [ -n "$sign_output" ]; then
+        printf '%s\n' "$sign_output" >&2
+      fi
       exit 1
     fi
     files_touched=$((files_touched + 1))
