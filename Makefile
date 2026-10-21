@@ -1275,9 +1275,9 @@ $(DIST_DIR)/ghc-profile.tar.gz: stage3-profile $(LLVM_TABLE_FILES)
 	@cp -f mk/multi-target-bindist-Makefile $(DIST_DIR)/Makefile
 	tar czf $@ \
 		--directory=$(DIST_DIR) \
+		--files-from=$(CURDIR)/$(DIST_DIR)/lib/targets/$(PROFILING_TARGET)/target.executables \
 		$(foreach exe,$(STAGE2_EXECUTABLES),bin/$(exe)$(EXE_EXT)) \
 		$(if $(filter 1,$(DYNAMIC)),bin/ghc-iserv-dyn$(EXE_EXT)) \
-		--files-from=$(CURDIR)/$(DIST_DIR)/lib/targets/$(PROFILING_TARGET)/target.executables \
 		lib/ghc-usage.txt lib/ghci-usage.txt lib/template-hsc.h \
 		lib/package.conf.d lib/settings lib/llvm-targets lib/llvm-passes lib/$(STAGE2_PLATFORM) \
 		lib/targets/$(PROFILING_TARGET) \
@@ -1321,6 +1321,7 @@ $(DIST_DIR)/haskell-toolchain.tar.gz: $(STAGE2_STAMP) $(LLVM_TABLE_FILES) | stab
 	@cp $(CABAL) $(DIST_DIR)/bin/
 	@tar czf $@ \
 		--directory=$(DIST_DIR) \
+		--files-from=$(CURDIR)/$(DIST_DIR)/lib/targets/javascript-unknown-ghcjs/target.executables \
 		$(foreach exe,$(STAGE2_EXECUTABLES),bin/$(exe)$(EXE_EXT)) \
 		lib/ghc-usage.txt \
 		lib/ghci-usage.txt \
@@ -1330,7 +1331,6 @@ $(DIST_DIR)/haskell-toolchain.tar.gz: $(STAGE2_STAMP) $(LLVM_TABLE_FILES) | stab
 		lib/llvm-passes \
 		lib/template-hsc.h \
 		lib/$(STAGE2_PLATFORM) \
-		--files-from=$(CURDIR)/$(DIST_DIR)/lib/targets/javascript-unknown-ghcjs/target.executables \
 		lib/targets/javascript-unknown-ghcjs \
 		bin/cabal
 	@echo "::endgroup::"
@@ -1361,9 +1361,9 @@ $(DIST_DIR)/ghc-multi-target.tar.gz: $(LLVM_TABLE_FILES) | stage3-wasm32-unknown
 	@cp -f mk/multi-target-bindist-Makefile $(DIST_DIR)/Makefile
 	tar czhf $@ \
 		--directory=$(DIST_DIR) \
-		$(foreach exe,$(STAGE2_EXECUTABLES),bin/$(exe)$(EXE_EXT)) \
 		--files-from=$(CURDIR)/$(DIST_DIR)/lib/targets/wasm32-unknown-wasi/target.executables \
 		--files-from=$(CURDIR)/$(DIST_DIR)/lib/targets/javascript-unknown-ghcjs/target.executables \
+		$(foreach exe,$(STAGE2_EXECUTABLES),bin/$(exe)$(EXE_EXT)) \
 		lib/ghc-usage.txt \
 		lib/ghci-usage.txt \
 		lib/package.conf.d \

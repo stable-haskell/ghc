@@ -3,9 +3,12 @@
 
 import ast
 import importlib.util
+import os
 from pathlib import Path
+import shlex
 import subprocess
 import sys
+import tarfile
 import tempfile
 import unittest
 
@@ -116,7 +119,8 @@ class TargetAliases(unittest.TestCase):
         directory = self.generate()
         archive = self.root / "bindist.tar.gz"
         subprocess.run(["tar", "czhf", archive, "--directory=" + str(self.root),
-                        "--files-from=" + str(directory / "target.executables")], check=True,
+                        "--files-from=" + str(directory / "target.executables"),
+                        "lib/targets/" + directory.name], check=True,
                        capture_output=True, timeout=30)
         extracted = self.root / "unpacked bindist"
         extracted.mkdir()
@@ -126,6 +130,52 @@ class TargetAliases(unittest.TestCase):
             executable = extracted / name
             self.assertFalse(executable.is_symlink())
             self.assertEqual(executable.read_text(), "selected target executable\n")
+
+    def test_haskell_toolchain_recipe_reads_target_manifest(self):
+        source_root = Path(__file__).resolve().parent.parent
+        fixture = tempfile.TemporaryDirectory(prefix="toolchain-archive-")
+        self.addCleanup(fixture.cleanup)
+        root = Path(fixture.name)
+        dist = root / "dist"
+        target = dist / "lib/targets/javascript-unknown-ghcjs"
+        for path in (dist / "bin", dist / "lib/package.conf.d",
+                     dist / "lib/x86_64-unknown-linux", target / "lib"):
+            path.mkdir(parents=True, exist_ok=True)
+        for path, contents in (
+            (dist / "bin/ghc", "native ghc\n"),
+            (dist / "bin/javascript-unknown-ghcjs-ghc", "target ghc\n"),
+            (dist / "lib/ghc-usage.txt", "usage\n"),
+            (dist / "lib/ghci-usage.txt", "usage\n"),
+            (dist / "lib/settings", "[]\n"),
+            (dist / "lib/llvm-targets", "targets\n"),
+            (dist / "lib/llvm-passes", "passes\n"),
+            (dist / "lib/template-hsc.h", "/* template */\n"),
+            (target / "lib/settings", "[]\n"),
+        ):
+            path.write_text(contents)
+        (target / "target.executables").write_text("bin/javascript-unknown-ghcjs-ghc\n")
+        cabal = root / "cabal"
+        cabal.write_text("cabal\n")
+        relative_dist = os.path.relpath(dist, source_root)
+        stamp = os.path.relpath(root / "stage2-stamp", source_root)
+        archive = dist / "haskell-toolchain.tar.gz"
+        make = shlex.split(os.environ.get("MAKE", "make")) or ["make"]
+        command = [*make, "--no-print-directory", "-f", str(source_root / "Makefile"), "-B",
+                   "-o", stamp, "-o", "stable-cabal", "-o", "stage3-javascript-unknown-ghcjs",
+                   "GHC0=:", "HOST_PLATFORM=x86_64-unknown-linux",
+                   "BOOTSTRAP_TARGET=x86_64-unknown-linux",
+                   "STAGE2_PLATFORM=x86_64-unknown-linux", "DIST_DIR=" + relative_dist,
+                   "STAGE2_STAMP=" + stamp,
+                   "LLVM_TABLE_FILES=" + relative_dist + "/lib/llvm-targets "
+                   + relative_dist + "/lib/llvm-passes",
+                   "CABAL=" + str(cabal), "STAGE2_EXECUTABLES=ghc",
+                   relative_dist + "/haskell-toolchain.tar.gz"]
+        subprocess.run(command, cwd=source_root, check=True, text=True,
+                       capture_output=True, timeout=60)
+        with tarfile.open(archive, "r:gz") as bindist:
+            names = bindist.getnames()
+        self.assertIn("bin/javascript-unknown-ghcjs-ghc", names)
+        self.assertIn("lib/targets/javascript-unknown-ghcjs", names)
 
 
 if __name__ == "__main__":
