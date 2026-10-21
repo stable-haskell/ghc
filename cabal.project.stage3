@@ -92,7 +92,7 @@ source-repository-package
   type: git
   location: https://github.com/stable-haskell/Cabal.git
   -- Keep staged build/host toolchains and profiling ABI support in sync with stage0.
-  tag: 313ae7dd1bec79828bd29f07f15ff021f70da393
+  tag: 2b1c30bce7e377519d8aef13595424d383ee51ef
   subdir: Cabal
           Cabal-syntax
 
