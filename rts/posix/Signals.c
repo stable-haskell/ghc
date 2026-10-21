@@ -334,6 +334,15 @@ generic_handler(int sig USED_IF_THREADS,
  * Blocking/Unblocking of the user signals
  * -------------------------------------------------------------------------- */
 
+#if !defined(THREADED_RTS)
+/* Caller-owned mask for atomic signal-aware I/O waits. */
+int
+blockUserSignalsWithSavedMask(sigset_t *saved_mask)
+{
+    return sigprocmask(SIG_BLOCK, &userSignals, saved_mask);
+}
+#endif
+
 void
 blockUserSignals(void)
 {

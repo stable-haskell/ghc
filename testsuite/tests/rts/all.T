@@ -705,3 +705,12 @@ test('SignpostDisabled',
      [c_src, unless(in_tree_compiler(), skip), only_ways(['normal']),
       extra_files(['../../../rts/Signpost.h', 'SignpostDisabled-src'])],
      compile_and_run, ['-ISignpostDisabled-src -optc-std=c11'])
+
+# Exercise the production POSIX wait helper with deterministic signal delivery.
+test('SelectSignalWait',
+     [c_src, unless(in_tree_compiler(), skip), js_skip,
+      when(opsys('mingw32') or arch('wasm32'), skip),
+      only_ways(['normal']),
+      extra_files(['../../../rts/posix/Select.c']),
+      pre_cmd('"$PYTHON" SelectSignalWait.py Select.c')],
+     compile_and_run, ['-optc-std=c11'])
