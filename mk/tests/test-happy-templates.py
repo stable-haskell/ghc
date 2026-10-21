@@ -2,6 +2,7 @@
 """Exercise distribution template copying without building a compiler."""
 
 import argparse
+import importlib.util
 import json
 from pathlib import Path
 import shlex
@@ -10,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -47,7 +49,8 @@ class HappyTemplates(unittest.TestCase):
              "copy-happy-test", "BUILD_DIR=" + str(self.build), "BOOTSTRAP_TARGET=bootstrap-target",
              "HOST_PLATFORM=x86_64-unknown-linux", "STAGE2_PLATFORM=x86_64-unknown-linux-gnu",
              "GHC0=true", "PYTHON=" + shlex.quote(str(self.python))],
-            input=rule, cwd=ROOT, text=True, capture_output=True, timeout=30)
+            input=rule, cwd=ROOT, universal_newlines=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
 
     def test_selected_installed_data_without_source_cache(self):
         for state in ("configured", "installed"):
@@ -86,6 +89,23 @@ class HappyTemplates(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("missing installed Happy template", result.stderr)
         self.assertFalse(self.destination.exists())
+
+    def test_copy_with_pre_python38_api(self):
+        data = self.write_data("happy-lib-2.1.5-selected", "selected ")
+        self.plan.write_text(json.dumps({"install-plan": [self.unit]}))
+        spec = importlib.util.spec_from_file_location("copy_happy_templates", ROOT / "mk/copy-happy-templates.py")
+        helper = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(helper)
+        original_copytree = shutil.copytree
+
+        # Older hosts support copy_function but reject dirs_exist_ok.
+        def old_copytree(source, destination, copy_function):
+            return original_copytree(source, destination, copy_function=copy_function)
+
+        with mock.patch.object(helper.shutil, "copytree", old_copytree):
+            helper.copy_templates(self.plan, self.store, self.destination)
+        for name in TEMPLATES:
+            self.assertEqual((self.destination / name).read_bytes(), (data / name).read_bytes())
 
 
 if __name__ == "__main__":

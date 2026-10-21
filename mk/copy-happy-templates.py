@@ -28,7 +28,9 @@ def copy_templates(plan, build_store, destination):
     for name in ("HappyTemplate.hs", "GLR_Base.hs", "GLR_Lib.hs"):
         if not (data / name).is_file():
             raise ValueError("missing installed Happy template: " + str(data / name))
-    shutil.copytree(data, destination, dirs_exist_ok=True, copy_function=shutil.copy2)
+    # Stage2 creates a fresh distribution. Avoid dirs_exist_ok, which is not
+    # available in the older Python shipped by supported build hosts.
+    shutil.copytree(data, destination, copy_function=shutil.copy2)
 
 
 def main():
