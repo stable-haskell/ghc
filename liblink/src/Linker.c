@@ -188,7 +188,7 @@ extern void iconv(void);
 static int ocTryLoad( ObjectCode* oc );
 /* Run initializers */
 static int ocRunInit( ObjectCode* oc );
-static int runPendingInitializers (void);
+static int runPendingInitializers (ll_linker *L);
 
 static void ghciRemoveSymbolTable(ll_linker *L, const ll_symbol_name* key,
     ObjectCode *owner)
@@ -892,9 +892,9 @@ ll_symbol_addr* loadSymbol(ll_symbol_name *lbl, RtsSymbolInfo *pinfo) {
 }
 
 void
-printLoadedObjects(void) {
+printLoadedObjects(ll_linker *L) {
     ObjectCode* oc;
-    for (oc = ll_default_linker.gc.objects; oc; oc = oc->next) {
+    for (oc = L->gc.objects; oc; oc = oc->next) {
         if (oc->sections != NULL) {
             int i;
             printf("%" PATH_FMT "\n", OC_INFORMATIVE_FILENAME(oc));
@@ -923,7 +923,7 @@ ll_symbol_addr* lookupSymbol( ll_symbol_name* lbl )
           LL_LOG_ERROR("^^ Could not load '%s', dependency unresolved. "
                      "See top entry above. You might consider using --optimistic-linking\n",
                      lbl);
-          LL_IF_DEBUG(linker, printLoadedObjects());
+          LL_IF_DEBUG(linker, printLoadedObjects(&ll_default_linker));
           fflush(stderr);
         } else {
           // if --optimistic-linking is passed into the RTS we allow the linker
@@ -935,7 +935,7 @@ ll_symbol_addr* lookupSymbol( ll_symbol_name* lbl )
         }
     }
 
-    if (!runPendingInitializers()) {
+    if (!runPendingInitializers(&ll_default_linker)) {
         LL_LOG_ERROR("lookupSymbol: Failed to run initializers.");
     }
     ll_mutex_unlock(&ll_default_linker.linker_mutex);
@@ -1267,9 +1267,9 @@ mkOc( ll_linker *L, ObjectType type, pathchar *path, char *image, int imageSize,
  * Returns: 1 if the path is already loaded, 0 otherwise.
  */
 ll_hs_int
-isAlreadyLoaded( pathchar *path )
+isAlreadyLoaded( ll_linker *L, pathchar *path )
 {
-    for (ObjectCode *o = ll_default_linker.gc.objects; o; o = o->next) {
+    for (ObjectCode *o = L->gc.objects; o; o = o->next) {
        if (0 == pathcmp(o->fileName, path)
            && o->status != OBJECT_UNLOADED) {
            return 1; /* already loaded */
@@ -1284,7 +1284,7 @@ isAlreadyLoaded( pathchar *path )
 // address space, properly aligned.
 //
 static ObjectCode *
-preloadObjectFile (pathchar *path)
+preloadObjectFile (ll_linker *L, pathchar *path)
 {
    int fileSize;
    struct_stat st;
@@ -1295,7 +1295,7 @@ preloadObjectFile (pathchar *path)
 
    r = pathstat(path, &st);
    if (r == -1) {
-       LL_LOG_ERROR("loadObj: %" PATH_FMT ": file doesn't exist", path);
+       LL_LOG_ERROR_FOR(L, "loadObj: %" PATH_FMT ": file doesn't exist", path);
        return NULL;
    }
 
@@ -1313,7 +1313,7 @@ preloadObjectFile (pathchar *path)
    fd = open(path, O_RDONLY);
 #endif
    if (fd == -1) {
-      LL_LOG_ERROR("loadObj: can't open %s", path);
+      LL_LOG_ERROR_FOR(L, "loadObj: can't open %s", path);
       return NULL;
    }
 
@@ -1327,13 +1327,13 @@ preloadObjectFile (pathchar *path)
     * See also the misalignment logic for darwin below.
     */
 #if defined(darwin_HOST_OS) || defined(openbsd_HOST_OS)
-   image = mmapForLinker(fileSize, MEM_READ_WRITE, MAP_PRIVATE, fd, 0);
+   image = ll_mmap_for_linker(L, fileSize, MEM_READ_WRITE, MAP_PRIVATE, fd, 0);
 #else
-   image = mmapForLinker(fileSize, MEM_READ_WRITE_EXECUTE, MAP_PRIVATE, fd, 0);
+   image = ll_mmap_for_linker(L, fileSize, MEM_READ_WRITE_EXECUTE, MAP_PRIVATE, fd, 0);
 #endif
 
    if (image == MAP_FAILED) {
-       LL_LOG_ERROR("mmap: failed. errno = %d", errno);
+       LL_LOG_ERROR_FOR(L, "mmap: failed. errno = %d", errno);
    }
    // not 32-bit yet, we'll remap later
    close(fd);
@@ -1345,7 +1345,7 @@ preloadObjectFile (pathchar *path)
    /* coverity[toctou] */
    f = pathopen(path, WSTR("rb"));
    if (!f) {
-       LL_LOG_ERROR("loadObj: can't preload `%" PATH_FMT "'", path);
+       LL_LOG_ERROR_FOR(L, "loadObj: can't preload `%" PATH_FMT "'", path);
        return NULL;
    }
 
@@ -1361,12 +1361,12 @@ preloadObjectFile (pathchar *path)
     // reading the file, and then we misalign image on purpose so
     // that the actual sections end up aligned again.
    misalignment = machoGetMisalignment(f);
-   image = LL_MALLOC(fileSize + misalignment, "loadObj(image)");
+   image = LL_MALLOC_FOR(L, fileSize + misalignment, "loadObj(image)");
    image += misalignment;
 
 # else /* !defined(darwin_HOST_OS) */
 
-   image = LL_MALLOC(fileSize, "loadObj(image)");
+   image = LL_MALLOC_FOR(L, fileSize, "loadObj(image)");
 
 #endif /* !defined(darwin_HOST_OS) */
 
@@ -1374,17 +1374,17 @@ preloadObjectFile (pathchar *path)
    n = fread ( image, 1, fileSize, f );
    fclose(f);
    if (n != fileSize) {
-       LL_LOG_ERROR("loadObj: error whilst reading `%" PATH_FMT "'", path);
-       LL_FREE(image);
+       LL_LOG_ERROR_FOR(L, "loadObj: error whilst reading `%" PATH_FMT "'", path);
+       LL_FREE_FOR(L, image);
        return NULL;
    }
 
 #endif /* RTS_LINKER_USE_MMAP */
 
-   LL_IF_DEBUG(linker, LL_DEBUG("loadObj: preloaded image at %p\n", (void *) image));
+   LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "loadObj: preloaded image at %p\n", (void *) image));
 
    /* FIXME (AP): =mapped= parameter unconditionally set to true */
-   oc = mkOc(&ll_default_linker, STATIC_OBJECT, path, image, fileSize, true, NULL, misalignment);
+   oc = mkOc(L, STATIC_OBJECT, path, image, fileSize, true, NULL, misalignment);
 
 #if defined(OBJFORMAT_MACHO)
    if (ocVerifyImage_MachO( oc ))
@@ -1402,29 +1402,29 @@ preloadObjectFile (pathchar *path)
  *
  * Returns: 1 if ok, 0 on error.
  */
-static ll_hs_int loadObj_ (pathchar *path)
+static ll_hs_int loadObj_ (ll_linker *L, pathchar *path)
 {
    // Check that we haven't already loaded this object.
    // Ignore requests to load multiple times
 
-   if (isAlreadyLoaded(path)) {
-       LL_IF_DEBUG(linker,
-                LL_DEBUG("ignoring repeated load of %" PATH_FMT "\n", path));
+   if (isAlreadyLoaded(L, path)) {
+       LL_IF_DEBUG_FOR(L, linker,
+                LL_DEBUG_FOR(L, "ignoring repeated load of %" PATH_FMT "\n", path));
        return 1; // success
    }
 
    // Things that look like object files (e.g. end in `.o`) may nevertheless be
    // archives, as noted in Note [Object merging] in GHC.Driver.Pipeline.Execute.
    if (isArchive(path)) {
-       if (loadArchive_(path)) {
+       if (loadArchive_(L, path)) {
             return 1; // success
        } else {
-            LL_IF_DEBUG(linker,
-                        LL_DEBUG("tried and failed to load %" PATH_FMT " as an archive\n", path));
+            LL_IF_DEBUG_FOR(L, linker,
+                        LL_DEBUG_FOR(L, "tried and failed to load %" PATH_FMT " as an archive\n", path));
        }
    }
 
-   ObjectCode *oc = preloadObjectFile(path);
+   ObjectCode *oc = preloadObjectFile(L, path);
    if (oc == NULL) return 0;
 
    if (! loadOc(oc)) {
@@ -1435,19 +1435,19 @@ static ll_hs_int loadObj_ (pathchar *path)
        return 0;
    }
 
-   if (ll_host.object_registered != NULL) {
-       ll_host.object_registered(ll_host.ctx, oc);
+   if (L->services.host.object_registered != NULL) {
+       L->services.host.object_registered(L->services.host.ctx, oc);
    }
 
-   oc->next_loaded_object = ll_default_linker.gc.loaded_objects;
-   ll_default_linker.gc.loaded_objects = oc;
+   oc->next_loaded_object = L->gc.loaded_objects;
+   L->gc.loaded_objects = oc;
    return 1;
 }
 
 ll_hs_int loadObj (pathchar *path)
 {
    ll_mutex_lock(&ll_default_linker.linker_mutex);
-   ll_hs_int r = loadObj_(path);
+   ll_hs_int r = loadObj_(&ll_default_linker, path);
    ll_mutex_unlock(&ll_default_linker.linker_mutex);
    return r;
 }
@@ -1642,21 +1642,21 @@ int ocRunInit(ObjectCode *oc)
     return 1;
 }
 
-int runPendingInitializers (void)
+int runPendingInitializers (ll_linker *L)
 {
-    for (ObjectCode *oc = ll_default_linker.gc.objects; oc; oc = oc->next) {
+    for (ObjectCode *oc = L->gc.objects; oc; oc = oc->next) {
         int r = ocRunInit(oc);
         if (!r) {
-            LL_LOG_ERROR("Could not run initializers of Object Code %" PATH_FMT ".\n", OC_INFORMATIVE_FILENAME(oc));
-            LL_IF_DEBUG(linker, printLoadedObjects());
+            LL_LOG_ERROR_FOR(L, "Could not run initializers of Object Code %" PATH_FMT ".\n", OC_INFORMATIVE_FILENAME(oc));
+            LL_IF_DEBUG_FOR(L, linker, printLoadedObjects(L));
             fflush(stderr);
             return r;
         }
     }
 
-    if (ll_host.after_init_batch != NULL) {
+    if (L->services.host.after_init_batch != NULL) {
         // collect any new cost centres & CCSs that were defined during runInit
-        ll_host.after_init_batch(ll_host.ctx);
+        L->services.host.after_init_batch(L->services.host.ctx);
     }
 
     return 1;
@@ -1667,32 +1667,32 @@ int runPendingInitializers (void)
  *
  * Returns: 1 if ok, 0 on error.
  */
-static ll_hs_int resolveObjs_ (void)
+static ll_hs_int resolveObjs_ (ll_linker *L)
 {
-    LL_IF_DEBUG(linker, LL_DEBUG("resolveObjs: start\n"));
+    LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "resolveObjs: start\n"));
 
-    for (ObjectCode *oc = ll_default_linker.gc.objects; oc; oc = oc->next) {
+    for (ObjectCode *oc = L->gc.objects; oc; oc = oc->next) {
         int r = ocTryLoad(oc);
         if (!r) {
-            LL_LOG_ERROR("Could not load Object Code %" PATH_FMT ".\n", OC_INFORMATIVE_FILENAME(oc));
-            LL_IF_DEBUG(linker, printLoadedObjects());
+            LL_LOG_ERROR_FOR(L, "Could not load Object Code %" PATH_FMT ".\n", OC_INFORMATIVE_FILENAME(oc));
+            LL_IF_DEBUG_FOR(L, linker, printLoadedObjects(L));
             fflush(stderr);
             return r;
         }
     }
 
-    if (!runPendingInitializers()) {
+    if (!runPendingInitializers(L)) {
         return 0;
     }
 
-    LL_IF_DEBUG(linker, LL_DEBUG("resolveObjs: done\n"));
+    LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "resolveObjs: done\n"));
     return 1;
 }
 
 ll_hs_int resolveObjs (void)
 {
     ll_mutex_lock(&ll_default_linker.linker_mutex);
-    ll_hs_int r = resolveObjs_();
+    ll_hs_int r = resolveObjs_(&ll_default_linker);
     ll_mutex_unlock(&ll_default_linker.linker_mutex);
     return r;
 }
@@ -1700,35 +1700,35 @@ ll_hs_int resolveObjs (void)
 /* -----------------------------------------------------------------------------
  * delete an object from the pool
  */
-static ll_hs_int unloadObj_ (pathchar *path, bool just_purge)
+static ll_hs_int unloadObj_ (ll_linker *L, pathchar *path, bool just_purge)
 {
-    LL_ASSERT(ll_default_linker.symhash != NULL);
-    LL_ASSERT(ll_default_linker.gc.objects != NULL);
+    LL_ASSERT_FOR(L, L->symhash != NULL);
+    LL_ASSERT_FOR(L, L->gc.objects != NULL);
 
-    LL_IF_DEBUG(linker, LL_DEBUG("unloadObj: %" PATH_FMT "\n", path));
+    LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "unloadObj: %" PATH_FMT "\n", path));
 
     bool unloadedAnyObj = false;
     ObjectCode *prev = NULL;
     // NOTE (osa): There may be more than one object with the same file name
     // (happens when loading archive files) so we don't stop after unloading one
-    for (ObjectCode *oc = ll_default_linker.gc.loaded_objects; oc; oc = oc->next_loaded_object) {
+    for (ObjectCode *oc = L->gc.loaded_objects; oc; oc = oc->next_loaded_object) {
         if (pathcmp(oc->fileName,path) == 0) {
             oc->status = OBJECT_UNLOADED;
 
             // These are both idempotent, so in just_purge mode we can later
             // call unloadObj() to really unload the object.
             removeOcSymbols(oc);
-            if (ll_host.on_unload != NULL) {
-                ll_host.on_unload(ll_host.ctx, oc);
+            if (L->services.host.on_unload != NULL) {
+                L->services.host.on_unload(L->services.host.ctx, oc);
             }
 
             unloadedAnyObj = true;
 
             if (!just_purge) {
-                ll_default_linker.gc.n_unloaded_objects += 1;
+                L->gc.n_unloaded_objects += 1;
                 // Remove object code from root set
                 if (prev == NULL) {
-                    ll_default_linker.gc.loaded_objects = oc->next_loaded_object;
+                    L->gc.loaded_objects = oc->next_loaded_object;
                 } else {
                     prev->next_loaded_object = oc->next_loaded_object;
                 }
@@ -1741,7 +1741,7 @@ static ll_hs_int unloadObj_ (pathchar *path, bool just_purge)
     if (unloadedAnyObj) {
         return 1;
     } else {
-        LL_LOG_ERROR("unloadObj: can't find `%" PATH_FMT "' to unload", path);
+        LL_LOG_ERROR_FOR(L, "unloadObj: can't find `%" PATH_FMT "' to unload", path);
         return 0;
     }
 }
@@ -1749,7 +1749,7 @@ static ll_hs_int unloadObj_ (pathchar *path, bool just_purge)
 ll_hs_int unloadObj (pathchar *path)
 {
     ll_mutex_lock(&ll_default_linker.linker_mutex);
-    ll_hs_int r = unloadObj_(path, false);
+    ll_hs_int r = unloadObj_(&ll_default_linker, path, false);
     ll_mutex_unlock(&ll_default_linker.linker_mutex);
     return r;
 }
@@ -1757,7 +1757,7 @@ ll_hs_int unloadObj (pathchar *path)
 ll_hs_int purgeObj (pathchar *path)
 {
     ll_mutex_lock(&ll_default_linker.linker_mutex);
-    ll_hs_int r = unloadObj_(path, true);
+    ll_hs_int r = unloadObj_(&ll_default_linker, path, true);
     ll_mutex_unlock(&ll_default_linker.linker_mutex);
     return r;
 }
@@ -1771,9 +1771,9 @@ ObjectCode *lookupObjectByPath(ll_linker *L, pathchar *path) {
   return NULL;
 }
 
-OStatus getObjectLoadStatus_ (pathchar *path)
+OStatus getObjectLoadStatus_ (ll_linker *L, pathchar *path)
 {
-    ObjectCode *oc = lookupObjectByPath(&ll_default_linker, path);
+    ObjectCode *oc = lookupObjectByPath(L, path);
     if (oc) {
       return oc->status;
     }
@@ -1783,7 +1783,7 @@ OStatus getObjectLoadStatus_ (pathchar *path)
 OStatus getObjectLoadStatus (pathchar *path)
 {
     ll_mutex_lock(&ll_default_linker.linker_mutex);
-    OStatus r = getObjectLoadStatus_(path);
+    OStatus r = getObjectLoadStatus_(&ll_default_linker, path);
     ll_mutex_unlock(&ll_default_linker.linker_mutex);
     return r;
 }

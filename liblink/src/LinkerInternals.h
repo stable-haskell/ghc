@@ -11,7 +11,7 @@
 #include "liblink/rts_friend.h"
 #include "ll_linker.h"
 
-void printLoadedObjects(void);
+void printLoadedObjects(ll_linker *L);
 
 /*
  * Note [Processing overflowed relocations]
@@ -120,7 +120,7 @@ ll_int64 lookupTlsgdSymbol(const char *, unsigned long, ObjectCode *);
 
 /* defined in LoadArchive.c */
 bool isArchive (pathchar *path);
-ll_hs_int loadArchive_ (pathchar *path);
+ll_hs_int loadArchive_ (ll_linker *L, pathchar *path);
 
 /*************************************************
  * Various bits of configuration
@@ -143,8 +143,8 @@ ll_hs_int loadArchive_ (pathchar *path);
 #define USE_CONTIGUOUS_MMAP 0
 #endif
 
-ll_hs_int isAlreadyLoaded( pathchar *path );
-OStatus getObjectLoadStatus_ (pathchar *path);
+ll_hs_int isAlreadyLoaded( ll_linker *L, pathchar *path );
+OStatus getObjectLoadStatus_ (ll_linker *L, pathchar *path);
 ObjectCode *lookupObjectByPath(ll_linker *L, pathchar *path);
 ll_hs_int loadOc( ObjectCode* oc );
 ObjectCode* mkOc( ll_linker *L, ObjectType type, pathchar *path, char *image, int imageSize,
