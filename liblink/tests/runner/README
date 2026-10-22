@@ -1,0 +1,48 @@
+Native-host relocation capture
+=============================
+
+The runner is a one-object-per-process capture client for the native linker.
+It is currently built for the arm64 Darwin host and Mach-O fixtures. The
+input snapshot and command-line handling live in `runner.c`; host callbacks
+and phase snapshots live in `runner_host.c`; the JSON writer is in
+`runner_json.c`; and `runner_internal.h` shares their capture state. The
+runner links through installed `liblink` headers and the native archive with
+the literal `-llink` name. It contains no expected relocation formulas.
+
+Compile and link with the configured host C compiler, installed liblink
+headers, the source tree needed for the private Mach-O metadata structure, and
+the directory containing `liblink.a`:
+
+    for source in runner runner_host runner_json; do
+      "$CC" -std=c11 -Wall -Wextra -Werror=vla -pedantic \
+        -isystem "$LIBLINK_INCLUDE" -I liblink/src \
+        -c "liblink/tests/runner/$source.c" -o "$source.o"
+    done
+    "$CC" -std=c11 -Wall -Wextra -Werror=vla -pedantic \
+      runner.o runner_host.o runner_json.o \
+      -L"$LIBLINK_LIBRARY_DIR" -llink -o liblink-runner
+
+Run one object per process:
+
+    ./liblink-runner liblink/tests/fixtures/generated/macho-arm64/ARM64_RELOC_UNSIGNED.o
+
+The JSON contains the original object bytes, section addresses and raw
+relocation records, pre-resolution section bytes, implicit field bytes,
+explicit ADDEND records and their pairing, observed external symbol addresses,
+GOT and stub layout, and bytes captured after relocation but before
+initialization. It also records the host-provided symbol map and object-image
+base. Each external relocation keeps the backend's observed `S` apart from a
+host-map or image-base input when one exists. Symbols supplied by the object
+are left for the independent oracle to derive from the retained object bytes.
+
+The `A` value preserves its object-file representation; an independent oracle
+must decode the mathematical addend. `pre_resolve_bytes` are copied in the
+object registration callback. Relocated section, GOT, and stub bytes are copied
+by the before-initialization hook. `post_init_live_bytes` are read after
+resolution returns, so a fixture can show how an initializer changed already
+relocated memory. `events_after_resolve` records initializer callbacks before
+that read. Finalizers run only after JSON emission.
+
+This slice exercises native arm64 Darwin Mach-O only. Unsupported relocations
+terminate through the host fatal callback and must run in separate processes.
+The runner does not claim ELF, COFF, or other host-backend coverage.
