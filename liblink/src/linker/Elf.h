@@ -13,6 +13,6 @@ int ocResolve_ELF        ( ObjectCode* oc );
 int ocRunInit_ELF        ( ObjectCode* oc );
 int ocRunFini_ELF        ( ObjectCode* oc );
 int ocAllocateExtras_ELF ( ObjectCode *oc );
-void *loadNativeObjFromLinkerScript_ELF( char **errmsg );
+void *loadNativeObjFromLinkerScript_ELF( ll_linker *L, char **errmsg );
 
 #include "ll_end_private.h"

@@ -30,6 +30,7 @@ struct piterate_cb_info {
 static int loadNativeObjCb_(struct dl_phdr_info *info,
     size_t _size LL_UNUSED, void *data) {
   struct piterate_cb_info *s = (struct piterate_cb_info *) data;
+  ll_linker *L = s->nc->L;
 
   // This logic mimicks _dl_addr_inside_object from glibc
   // For reference:
@@ -53,7 +54,7 @@ static int loadNativeObjCb_(struct dl_phdr_info *info,
     while (--n >= 0) {
       if (info->dlpi_phdr[n].p_type == PT_LOAD) {
         NativeCodeRange* ncr =
-          LL_MALLOC(sizeof(NativeCodeRange), "loadNativeObjCb_");
+          LL_MALLOC_FOR(L, sizeof(NativeCodeRange), "loadNativeObjCb_");
         ncr->start = (void*) ((char*) s->l_addr + info->dlpi_phdr[n].p_vaddr);
         ncr->end = (void*) ((char*) ncr->start + info->dlpi_phdr[n].p_memsz);
 
@@ -66,14 +67,15 @@ static int loadNativeObjCb_(struct dl_phdr_info *info,
 }
 #endif /* defined(HAVE_DLINFO) */
 
-static void copyErrmsg(char** errmsg_dest, char* errmsg) {
+static void copyErrmsg(ll_linker *L, char** errmsg_dest, char* errmsg) {
   if (errmsg == NULL) errmsg = "loadNativeObj_POSIX: unknown error";
-  *errmsg_dest = LL_MALLOC(strlen(errmsg)+1, "loadNativeObj_POSIX");
+  *errmsg_dest = LL_MALLOC_FOR(L, strlen(errmsg)+1, "loadNativeObj_POSIX");
   strcpy(*errmsg_dest, errmsg);
 }
 
 void freeNativeCode_POSIX (ObjectCode *nc) {
-  ll_assert_lock_held(&ll_default_linker.linker_mutex);
+  ll_linker *L = nc->L;
+  ll_assert_lock_held_for(L, &L->linker_mutex);
 
   dlclose(nc->dlopen_handle);
 
@@ -81,7 +83,7 @@ void freeNativeCode_POSIX (ObjectCode *nc) {
   while (ncr) {
     NativeCodeRange* last_ncr = ncr;
     ncr = ncr->next;
-    LL_FREE(last_ncr);
+    LL_FREE_FOR(L, last_ncr);
   }
 }
 
@@ -106,14 +108,14 @@ void freeNativeCode_POSIX (ObjectCode *nc) {
  * (taking care to mark the object as not unloadable in this case).
  */
 
-void * loadNativeObj_POSIX (pathchar *path, char **errmsg)
+void * loadNativeObj_POSIX (ll_linker *L, pathchar *path, char **errmsg)
 {
    ObjectCode* nc;
    void *hdl, *retval;
 
-   ll_assert_lock_held(&ll_default_linker.linker_mutex);
+   ll_assert_lock_held_for(L, &L->linker_mutex);
 
-   LL_IF_DEBUG(linker, LL_DEBUG("loadNativeObj_POSIX %" PATH_FMT "\n", path));
+   LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "loadNativeObj_POSIX %" PATH_FMT "\n", path));
 
    retval = NULL;
 
@@ -121,17 +123,17 @@ void * loadNativeObj_POSIX (pathchar *path, char **errmsg)
     * already-loaded handle. Note that this is broken if unloadNativeObj
     * is used, as we don’t do any reference counting; see #24345.
     */
-   ObjectCode *existing_oc = lookupObjectByPath(path);
+   ObjectCode *existing_oc = lookupObjectByPath(L, path);
    if (existing_oc && existing_oc->status != OBJECT_UNLOADED) {
      if (existing_oc->type == DYNAMIC_OBJECT) {
        retval = existing_oc->dlopen_handle;
        goto success;
      }
-     copyErrmsg(errmsg, "loadNativeObj_POSIX: already loaded as non-dynamic object");
+     copyErrmsg(L, errmsg, "loadNativeObj_POSIX: already loaded as non-dynamic object");
      goto dlopen_fail;
    }
 
-   nc = mkOc(&ll_default_linker, DYNAMIC_OBJECT, path, NULL, 0, false, NULL, 0);
+   nc = mkOc(L, DYNAMIC_OBJECT, path, NULL, 0, false, NULL, 0);
 
    // If we HAVE_DLINFO, we use RTLD_NOW rather than RTLD_LAZY because we want
    // to learn eagerly about all external functions. Otherwise, there is no
@@ -150,14 +152,14 @@ void * loadNativeObj_POSIX (pathchar *path, char **errmsg)
 #endif
 
 try_again:
-   if (ll_host.before_native_load != NULL) {
-       ll_host.before_native_load(ll_host.ctx, nc);
+   if (L->services.host.before_native_load != NULL) {
+       L->services.host.before_native_load(L->services.host.ctx, nc);
    }
 
    const int dlopen_mode = load_now ? RTLD_NOW : RTLD_LAZY;
 
-   LL_IF_DEBUG(linker, LL_DEBUG("loadNativeObj: about to dlopen %" PATH_FMT "\n", path));
-   LL_IF_DEBUG(linker, LL_DEBUG("loadNativeObj: mode = %s|RTLD_LOCAL\n",
+   LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "loadNativeObj: about to dlopen %" PATH_FMT "\n", path));
+   LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "loadNativeObj: mode = %s|RTLD_LOCAL\n",
               load_now ? "RTLD_NOW" : "RTLD_LAZY"));
 
    hdl = dlopen(path, dlopen_mode|RTLD_LOCAL); /* see Note [RTLD_LOCAL] */
@@ -167,16 +169,16 @@ try_again:
    // Save dlerror immediately - it can only be retrieved once
    const char *dl_err = hdl ? NULL : dlerror();
 
-   LL_IF_DEBUG(linker,
+   LL_IF_DEBUG_FOR(L, linker,
        if (hdl) {
-           LL_DEBUG("loadNativeObj: dlopen succeeded, handle=%p\n", hdl);
+           LL_DEBUG_FOR(L, "loadNativeObj: dlopen succeeded, handle=%p\n", hdl);
        } else {
-           LL_DEBUG("loadNativeObj: dlopen failed: %s\n", dl_err ? dl_err : "(unknown)");
+           LL_DEBUG_FOR(L, "loadNativeObj: dlopen failed: %s\n", dl_err ? dl_err : "(unknown)");
        }
    );
 
-   if (ll_host.after_native_load != NULL) {
-       ll_host.after_native_load(ll_host.ctx, nc, hdl != NULL);
+   if (L->services.host.after_native_load != NULL) {
+       L->services.host.after_native_load(L->services.host.ctx, nc, hdl != NULL);
    }
 
    if (hdl == NULL) {
@@ -186,7 +188,7 @@ try_again:
        goto try_again;
      } else {
        /* dlopen failed; save the message in errmsg */
-       copyErrmsg(errmsg, (char*)dl_err);
+       copyErrmsg(L, errmsg, (char*)dl_err);
        goto dlopen_fail;
      }
    }
@@ -196,7 +198,7 @@ try_again:
      struct link_map *map;
      if (dlinfo(hdl, RTLD_DI_LINKMAP, &map) == -1) {
        /* dlinfo failed; save the message in errmsg */
-       copyErrmsg(errmsg, dlerror());
+       copyErrmsg(L, errmsg, dlerror());
        goto dlinfo_fail;
      }
 
@@ -208,7 +210,7 @@ try_again:
      };
      dl_iterate_phdr(loadNativeObjCb_, &piterate_info);
      if (!nc->nc_ranges) {
-       copyErrmsg(errmsg, "dl_iterate_phdr failed to find obj");
+       copyErrmsg(L, errmsg, "dl_iterate_phdr failed to find obj");
        goto dl_iterate_phdr_fail;
      }
      nc->unloadable = true;
@@ -221,18 +223,18 @@ try_again:
    nc->unloadable = false;
 #endif /* defined (HAVE_DLINFO) */
 
-   if (ll_host.object_registered != NULL) {
-       ll_host.object_registered(ll_host.ctx, nc);
+   if (L->services.host.object_registered != NULL) {
+       L->services.host.object_registered(L->services.host.ctx, nc);
    }
 
-   nc->next_loaded_object = ll_default_linker.gc.loaded_objects;
-   ll_default_linker.gc.loaded_objects = nc;
+   nc->next_loaded_object = L->gc.loaded_objects;
+   L->gc.loaded_objects = nc;
 
    retval = nc->dlopen_handle;
 
-   if (ll_host.after_init_batch != NULL) {
+   if (L->services.host.after_init_batch != NULL) {
        // collect any new cost centres that were defined in the loaded object.
-       ll_host.after_init_batch(ll_host.ctx);
+       L->services.host.after_init_batch(L->services.host.ctx);
    }
 
    goto success;
@@ -248,7 +250,7 @@ dlinfo_fail:
 dlopen_fail:
 success:
 
-   LL_IF_DEBUG(linker, LL_DEBUG("loadNativeObj_POSIX result=%p\n", retval));
+   LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "loadNativeObj_POSIX result=%p\n", retval));
 
    return retval;
 }

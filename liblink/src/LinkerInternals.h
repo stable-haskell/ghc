@@ -145,7 +145,7 @@ ll_hs_int loadArchive_ (pathchar *path);
 
 ll_hs_int isAlreadyLoaded( pathchar *path );
 OStatus getObjectLoadStatus_ (pathchar *path);
-ObjectCode *lookupObjectByPath(pathchar *path);
+ObjectCode *lookupObjectByPath(ll_linker *L, pathchar *path);
 ll_hs_int loadOc( ObjectCode* oc );
 ObjectCode* mkOc( ll_linker *L, ObjectType type, pathchar *path, char *image, int imageSize,
                   bool mapped, pathchar *archiveMemberName,

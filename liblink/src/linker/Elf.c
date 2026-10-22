@@ -2220,7 +2220,7 @@ int ocAllocateExtras_ELF( ObjectCode *oc )
 // Returns the handle to the loaded object first mentioned in the linker script.
 // If this process fails at any point, the function returns NULL and outputs a
 // new error message.
-void * loadNativeObjFromLinkerScript_ELF(char **errmsg)
+void * loadNativeObjFromLinkerScript_ELF(ll_linker *L, char **errmsg)
 {
    // GHC #2615
    // On some systems (e.g., Gentoo Linux) dynamic files (e.g. libc.so)
@@ -2245,32 +2245,32 @@ void * loadNativeObjFromLinkerScript_ELF(char **errmsg)
    int result;
    void* r = NULL;
 
-   ll_assert_lock_held(&ll_default_linker.linker_mutex);
+   ll_assert_lock_held_for(L, &L->linker_mutex);
 
    // see if the error message is due to an invalid ELF header
-   LL_IF_DEBUG(linker, LL_DEBUG("errmsg = '%s'\n", *errmsg));
-   result = regexec(&ll_default_linker.re_invalid, *errmsg, (size_t) NMATCH, match, 0);
-   LL_IF_DEBUG(linker, LL_DEBUG("result = %i\n", result));
+   LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "errmsg = '%s'\n", *errmsg));
+   result = regexec(&L->re_invalid, *errmsg, (size_t) NMATCH, match, 0);
+   LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "result = %i\n", result));
    if (result == 0) {
       // success -- try to read the named file as a linker script
       match_length = (size_t) ll_min_intmax((match[1].rm_eo - match[1].rm_so),
                                  MAXLINE-1);
       strncpy(line, (*errmsg+(match[1].rm_so)),match_length);
       line[match_length] = '\0'; // make sure string is null-terminated
-      LL_IF_DEBUG(linker, LL_DEBUG("file name = '%s'\n", line));
+      LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "file name = '%s'\n", line));
       if ((fp = __rts_fopen(line, "r")) == NULL) {
          // return original error if open fails
          return NULL;
       }
       // try to find a GROUP or INPUT ( ... ) command
       while (fgets(line, MAXLINE, fp) != NULL) {
-         LL_IF_DEBUG(linker, LL_DEBUG("input line = %s", line));
-         if (regexec(&ll_default_linker.re_realso, line, (size_t) NMATCH, match, 0) == 0) {
+         LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "input line = %s", line));
+         if (regexec(&L->re_realso, line, (size_t) NMATCH, match, 0) == 0) {
             // success -- try to dlopen the first named file
-            LL_IF_DEBUG(linker, LL_DEBUG("match%s\n",""));
+            LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "match%s\n",""));
             line[match[2].rm_eo] = '\0';
-            LL_FREE((void*)*errmsg); // Free old message before creating new one
-            r = loadNativeObj_POSIX(line+match[2].rm_so, errmsg);
+            LL_FREE_FOR(L, (void*)*errmsg); // Free old message before creating new one
+            r = loadNativeObj_POSIX(L, line+match[2].rm_so, errmsg);
             break;
          }
          // if control reaches here, no GROUP or INPUT ( ... ) directive

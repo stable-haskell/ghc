@@ -1762,8 +1762,8 @@ ll_hs_int purgeObj (pathchar *path)
     return r;
 }
 
-ObjectCode *lookupObjectByPath(pathchar *path) {
-  for (ObjectCode *o = ll_default_linker.gc.objects; o; o = o->next) {
+ObjectCode *lookupObjectByPath(ll_linker *L, pathchar *path) {
+  for (ObjectCode *o = L->gc.objects; o; o = o->next) {
      if (0 == pathcmp(o->fileName, path)) {
          return o;
      }
@@ -1773,7 +1773,7 @@ ObjectCode *lookupObjectByPath(pathchar *path) {
 
 OStatus getObjectLoadStatus_ (pathchar *path)
 {
-    ObjectCode *oc = lookupObjectByPath(path);
+    ObjectCode *oc = lookupObjectByPath(&ll_default_linker, path);
     if (oc) {
       return oc->status;
     }
@@ -1822,7 +1822,7 @@ void * loadNativeObj (pathchar *path, char **errmsg)
    ll_mutex_lock(&ll_default_linker.linker_mutex);
 
 #if defined(OBJFORMAT_ELF) || defined(OBJFORMAT_MACHO)
-   void *r = loadNativeObj_POSIX(path, errmsg);
+   void *r = loadNativeObj_POSIX(&ll_default_linker, path, errmsg);
 #elif defined(OBJFORMAT_PEi386)
    void *r = NULL;
    *errmsg = (char*)addDLL_PEi386(path, (HINSTANCE*)&r);
@@ -1836,7 +1836,7 @@ void * loadNativeObj (pathchar *path, char **errmsg)
    if (!r) {
        // Check if native object may be a linker script and try loading a native
        // object from it
-       r = loadNativeObjFromLinkerScript_ELF(errmsg);
+       r = loadNativeObjFromLinkerScript_ELF(&ll_default_linker, errmsg);
    }
 #endif
 
