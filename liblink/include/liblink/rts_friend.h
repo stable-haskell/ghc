@@ -372,6 +372,28 @@ extern LL_FRIEND_API int n_unloaded_objects;
 
 extern LL_FRIEND_API ll_mutex linker_mutex;
 
+/* Borrowed RTS view into the default linker's state. The RTS binds this once
+ * before adjustor initialization and accesses the fields directly during GC.
+ * The owner mutex is referenced, never copied. */
+typedef struct {
+    /* Live objects form a doubly linked list through next/prev. Before an
+     * unload check the RTS moves it to old_objects, then moves marked objects
+     * back here and frees the remaining unloadable objects. */
+    ObjectCode *objects;
+    /* Objects not yet requested for unloading are GC roots. loadObj_ adds to
+     * this list through next_loaded_object; unloadObj_ removes from it. */
+    ObjectCode *loaded_objects;
+    /* Mark bit for live objects, complemented before each unload check. */
+    uint8_t object_code_mark_bit;
+    /* Pending unload count: incremented by unloadObj_, decremented when the
+     * RTS frees an object. */
+    int n_unloaded_objects;
+    ll_mutex *mutex;
+} ll_gc_state;
+
+LL_FRIEND_API ll_gc_state *ll_compat_default_gc_state(void);
+
+
 LL_FRIEND_API void exitLinker(void);
 LL_FRIEND_API void freeObjectCode(ObjectCode *oc);
 LL_FRIEND_API ll_compat_pathchar *resolveSymbolAddr(ll_compat_pathchar *buffer, int size,

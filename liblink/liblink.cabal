@@ -90,6 +90,7 @@ extra-source-files:
     src/ll_hash.h
     src/ll_host.c
     src/ll_host.h
+    src/ll_linker.h
     src/ll_mutex.c
     src/ll_mutex.h
     src/ll_path.c

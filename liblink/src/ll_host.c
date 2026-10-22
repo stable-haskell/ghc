@@ -6,7 +6,7 @@
  *
  * ---------------------------------------------------------------------------*/
 
-#include "ll_host.h"
+#include "ll_linker.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -78,6 +78,19 @@ static void default_fatal(void *ctx, const char *fmt, va_list ap)
 #define DEFAULT_HOST { .malloc_ = default_malloc, .calloc_ = default_calloc, \
     .realloc_ = default_realloc, .free_ = default_free, \
     .log = default_log, .fatal = default_fatal }
+
+ll_linker ll_default_linker = {
+    .services = { .host = DEFAULT_HOST },
+    .gc = { .mutex = &ll_default_linker.linker_mutex },
+};
+
+ll_compat_services *const ll_default_services = &ll_default_linker.services;
+
+ll_gc_state *ll_compat_default_gc_state(void)
+{
+    return &ll_default_linker.gc;
+}
+
 
 /* These globals are temporary: stage 2 moves them into each linker instance. */
 ll_compat_host_ops ll_host = DEFAULT_HOST;
