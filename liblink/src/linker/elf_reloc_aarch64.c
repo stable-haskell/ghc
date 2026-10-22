@@ -24,7 +24,7 @@ bool isLoadStore(addr_t p);
 bool isAddSub(addr_t p);
 bool isVectorOp(addr_t p);
 LL_NORETURN int64_t decodeAddendAarch64(Section * section, Elf_Rel * rel);
-bool encodeAddendAarch64(Section * section, Elf_Rel * rel, int64_t addend);
+bool encodeAddendAarch64(ll_linker *L, Section * section, Elf_Rel * rel, int64_t addend);
 
 bool isBranch(addr_t p) {
     return (*(addr_t*)p & 0xFC000000) == 0x14000000;
@@ -59,7 +59,7 @@ decodeAddendAarch64(Section * section LL_UNUSED,
 }
 
 bool
-encodeAddendAarch64(Section * section, Elf_Rel * rel, int64_t addend) {
+encodeAddendAarch64(ll_linker *L, Section * section, Elf_Rel * rel, int64_t addend) {
     /* instructions are 32bit! */
     addr_t P = (addr_t)((uint8_t*)section->start + rel->r_offset);
     int exp_shift = -1;
@@ -71,17 +71,17 @@ encodeAddendAarch64(Section * section, Elf_Rel * rel, int64_t addend) {
             *(uint64_t*)P = (uint64_t)addend;
             break;
         case COMPAT_R_AARCH64_ABS32:
-            LL_CHECK(isInt64(32, addend));
+            LL_CHECK_FOR(L, isInt64(32, addend));
             LL_FALLTHROUGH;
         case COMPAT_R_AARCH64_PREL32:
-            LL_CHECK(isInt64(32, addend));
+            LL_CHECK_FOR(L, isInt64(32, addend));
             *(uint32_t*)P = (uint32_t)addend;
             break;
         case COMPAT_R_AARCH64_ABS16:
-            LL_CHECK(isInt64(16, addend));
+            LL_CHECK_FOR(L, isInt64(16, addend));
             LL_FALLTHROUGH;
         case COMPAT_R_AARCH64_PREL16:
-            LL_CHECK(isInt64(16, addend));
+            LL_CHECK_FOR(L, isInt64(16, addend));
             *(uint16_t*)P = (uint16_t)addend;
             break;
         /* static aarch64 relocations */
@@ -97,8 +97,8 @@ encodeAddendAarch64(Section * section, Elf_Rel * rel, int64_t addend) {
             // imm64 = SignExtend(hi:lo:0x000,64)
             // Range is 21 bits + the 12 page relative bits
             // known to be 0. -2^32 <= X < 2^32
-            LL_CHECK(isInt64(21+12, addend));
-            LL_CHECK((addend & 0xfff) == 0); /* page relative */
+            LL_CHECK_FOR(L, isInt64(21+12, addend));
+            LL_CHECK_FOR(L, (addend & 0xfff) == 0); /* page relative */
 
             *(inst_t *)P = (*(inst_t *)P & 0x9f00001f)
                         | (inst_t) (((uint64_t) addend << 17) & 0x60000000)
@@ -108,7 +108,7 @@ encodeAddendAarch64(Section * section, Elf_Rel * rel, int64_t addend) {
         /* - control flow relocations */
         case COMPAT_R_AARCH64_JUMP26:   /* relocate b ... */
         case COMPAT_R_AARCH64_CALL26: { /* relocate bl ... */
-            LL_CHECK(isInt64(26+2, addend)); /* X in range */
+            LL_CHECK_FOR(L, isInt64(26+2, addend)); /* X in range */
             *(inst_t *)P = (*(inst_t *)P & 0xfc000000) /* keep upper 6 (32-6)
  * bits */
                          | ((uint32_t)(addend >> 2) & 0x03ffffff);
@@ -116,8 +116,8 @@ encodeAddendAarch64(Section * section, Elf_Rel * rel, int64_t addend) {
         }
         case COMPAT_R_AARCH64_ADR_GOT_PAGE: {
             /* range is -2^32 <= X < 2^32 */
-            LL_CHECK(isInt64(21+12, addend)); /* X in range */
-            LL_CHECK((addend & 0xfff) == 0); /* page relative */
+            LL_CHECK_FOR(L, isInt64(21+12, addend)); /* X in range */
+            LL_CHECK_FOR(L, (addend & 0xfff) == 0); /* page relative */
 
             *(inst_t *)P = (*(inst_t *)P & 0x9f00001f)
                | (inst_t)(((uint64_t)addend << 17) & 0x60000000)  // lo
@@ -151,10 +151,10 @@ encodeAddendAarch64(Section * section, Elf_Rel * rel, int64_t addend) {
             LL_FALLTHROUGH;
         case COMPAT_R_AARCH64_LD64_GOT_LO12_NC: {
             if(exp_shift == -1) {
-                LL_CHECK( (addend & 7) == 0 );
+                LL_CHECK_FOR(L, (addend & 7) == 0 );
                 exp_shift = 3;
             }
-            LL_CHECK((addend & 0xfff) == addend);
+            LL_CHECK_FOR(L, (addend & 0xfff) == addend);
             int shift = 0;
             if(isLoadStore(P)) {
                 /* bits 31, 30 encode the size. */
@@ -163,7 +163,7 @@ encodeAddendAarch64(Section * section, Elf_Rel * rel, int64_t addend) {
                     shift = 4;
                 }
             }
-            LL_CHECK(addend == 0 || exp_shift == shift);
+            LL_CHECK_FOR(L, addend == 0 || exp_shift == shift);
             *(inst_t *)P = (*(inst_t *)P & 0xffc003ff)
                | ((inst_t)(addend >> shift << 10) & 0x003ffc00);
             break;
@@ -184,18 +184,18 @@ encodeAddendAarch64(Section * section, Elf_Rel * rel, int64_t addend) {
  * @return The new computed addend.
  */
 static int64_t
-computeAddend(Section * section, Elf_Rel * rel,
+computeAddend(ll_linker *L, Section * section, Elf_Rel * rel,
               ElfSymbol * symbol, int64_t addend) {
 
     /* Position where something is relocated */
     addr_t P = (addr_t)((uint8_t*)section->start + rel->r_offset);
 
-    LL_CHECK(0x0 != P);
-    LL_CHECK((uint64_t)section->start <= P);
-    LL_CHECK(P <= (uint64_t)section->start + section->size);
+    LL_CHECK_FOR(L, 0x0 != P);
+    LL_CHECK_FOR(L, (uint64_t)section->start <= P);
+    LL_CHECK_FOR(L, P <= (uint64_t)section->start + section->size);
     /* Address of the symbol */
     addr_t S = (addr_t) symbol->addr;
-    LL_CHECK(0x0 != S);
+    LL_CHECK_FOR(L, 0x0 != S);
     /* GOT slot for the symbol */
     addr_t GOT_S = (addr_t) symbol->got_addr;
 
@@ -241,21 +241,21 @@ computeAddend(Section * section, Elf_Rel * rel,
                 /* check if we already have that stub */
                 if(findStub(section, (void**)&S, 0)) {
                     /* did not find it. Crete a new stub. */
-                    if(makeStub(section, (void**)&S, NULL, 0)) {
+                    if(makeStub(L, section, (void**)&S, NULL, 0)) {
                         abort(/* could not find or make stub */);
                     }
                 }
 
-                LL_CHECK(0 == (0xffff000000000000 & S));
+                LL_CHECK_FOR(L, 0 == (0xffff000000000000 & S));
                 V = S + A - P;
-                LL_CHECK(isInt64(26+2, V)); /* X in range */
+                LL_CHECK_FOR(L, isInt64(26+2, V)); /* X in range */
             }
             return V;
         }
-        case COMPAT_R_AARCH64_LDST128_ABS_LO12_NC: LL_CHECK(0 == ((S+A) & 0x0f)); LL_FALLTHROUGH;
-        case COMPAT_R_AARCH64_LDST64_ABS_LO12_NC:  LL_CHECK(0 == ((S+A) & 0x07)); LL_FALLTHROUGH;
-        case COMPAT_R_AARCH64_LDST32_ABS_LO12_NC:  LL_CHECK(0 == ((S+A) & 0x03)); LL_FALLTHROUGH;
-        case COMPAT_R_AARCH64_LDST16_ABS_LO12_NC:  LL_CHECK(0 == ((S+A) & 0x01)); LL_FALLTHROUGH;
+        case COMPAT_R_AARCH64_LDST128_ABS_LO12_NC: LL_CHECK_FOR(L, 0 == ((S+A) & 0x0f)); LL_FALLTHROUGH;
+        case COMPAT_R_AARCH64_LDST64_ABS_LO12_NC:  LL_CHECK_FOR(L, 0 == ((S+A) & 0x07)); LL_FALLTHROUGH;
+        case COMPAT_R_AARCH64_LDST32_ABS_LO12_NC:  LL_CHECK_FOR(L, 0 == ((S+A) & 0x03)); LL_FALLTHROUGH;
+        case COMPAT_R_AARCH64_LDST16_ABS_LO12_NC:  LL_CHECK_FOR(L, 0 == ((S+A) & 0x01)); LL_FALLTHROUGH;
         case COMPAT_R_AARCH64_LDST8_ABS_LO12_NC:
             /* type: static, class: aarch64, op: S + A */
             return (S + A) & 0xfff;
@@ -269,12 +269,12 @@ computeAddend(Section * section, Elf_Rel * rel,
             // TODO: fix this story proper, so that the transformation
             //       makes sense without resorting to: everyone else
             //       does it like this as well.
-            LL_CHECK(0x0 != GOT_S);
+            LL_CHECK_FOR(L, 0x0 != GOT_S);
             return Page(GOT_S+A) - Page(P);
         }
         case COMPAT_R_AARCH64_LD64_GOT_LO12_NC: {
             // G(GDAT(S+A))
-            LL_CHECK(0x0 != GOT_S);
+            LL_CHECK_FOR(L, 0x0 != GOT_S);
             return (GOT_S + A) & 0xfff;
         }
         default:
@@ -303,13 +303,13 @@ relocateObjectCodeAarch64(ObjectCode * oc) {
                                relTab->sectionHeader->sh_link,
                                ELF64_R_SYM(rel->r_info));
 
-            LL_CHECK(0x0 != symbol);
+            LL_CHECK_FOR(oc->L, 0x0 != symbol);
 
             /* decode implicit addend */
             int64_t addend = decodeAddendAarch64(targetSection, rel);
 
-            addend = computeAddend(targetSection, rel, symbol, addend);
-            encodeAddendAarch64(targetSection, rel, addend);
+            addend = computeAddend(oc->L, targetSection, rel, symbol, addend);
+            encodeAddendAarch64(oc->L, targetSection, rel, addend);
         }
     }
     for(ElfRelocationATable *relaTab = oc->info->relaTable;
@@ -332,16 +332,16 @@ relocateObjectCodeAarch64(ObjectCode * oc) {
                                relaTab->sectionHeader->sh_link,
                                ELF64_R_SYM(rel->r_info));
 
-            LL_CHECK(0x0 != symbol);
+            LL_CHECK_FOR(oc->L, 0x0 != symbol);
             if(0x0 == symbol->addr)
-                LL_FATAL("0x0 address for %s + %ld of type %ld in %s for relocation %d in section %d of kind: %d\n", symbol->name, rel->r_addend, ELF64_R_TYPE((Elf64_Xword)rel->r_info), OC_INFORMATIVE_FILENAME(oc), i, relaTab->targetSectionIndex, oc->sections[relaTab->targetSectionIndex].kind);
+                LL_FATAL_FOR(oc->L, "0x0 address for %s + %ld of type %ld in %s for relocation %d in section %d of kind: %d\n", symbol->name, rel->r_addend, ELF64_R_TYPE((Elf64_Xword)rel->r_info), OC_INFORMATIVE_FILENAME(oc), i, relaTab->targetSectionIndex, oc->sections[relaTab->targetSectionIndex].kind);
 
             /* take explicit addend */
             int64_t addend = rel->r_addend;
 
-            addend = computeAddend(targetSection, (Elf_Rel*)rel,
+            addend = computeAddend(oc->L, targetSection, (Elf_Rel*)rel,
                                    symbol, addend);
-            encodeAddendAarch64(targetSection, (Elf_Rel*)rel, addend);
+            encodeAddendAarch64(oc->L, targetSection, (Elf_Rel*)rel, addend);
         }
     }
     return EXIT_SUCCESS;

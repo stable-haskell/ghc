@@ -48,24 +48,28 @@ findStub(Section * section,
 }
 
 bool
-makeStub(Section * section,
+makeStub(ll_linker *L, Section * section,
           void* * addr,
           void* got_addr,
           uint8_t flags) {
 
-    Stub * s = calloc(1, sizeof(Stub));
-    LL_ASSERT(s != NULL);
+    Stub * s = LL_CALLOC_FOR(L, 1, sizeof(Stub), "makeStub");
+    LL_ASSERT_FOR(L, s != NULL);
     s->target = *addr;
     s->got_addr = got_addr;
     s->flags  = flags;
     s->next = NULL;
     s->addr = (uint8_t *)section->info->stub_offset + STUB_SIZE * section->info->nstubs;
 
+#if defined(riscv64_HOST_ARCH)
+    if((*_makeStub)(L, s))
+#else
     if((*_makeStub)(s))
+#endif
         return EXIT_FAILURE;
 
     if(section->info->stubs == NULL) {
-        LL_ASSERT(section->info->nstubs == 0);
+        LL_ASSERT_FOR(L, section->info->nstubs == 0);
         /* no stubs yet, let's just create this one */
         section->info->stubs = s;
     } else {
@@ -79,14 +83,14 @@ makeStub(Section * section,
 }
 
 void
-freeStubs(Section * section) {
+freeStubs(ll_linker *L, Section * section) {
     if(section->info->nstubs == 0)
         return;
     Stub * last = section->info->stubs;
     while(last->next != NULL) {
         Stub * t = last;
         last = last->next;
-        free(t);
+        LL_FREE_FOR(L, t);
     }
     section->info->stubs = NULL;
     section->info->nstubs = 0;

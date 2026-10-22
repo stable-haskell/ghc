@@ -49,16 +49,16 @@ bool needStubForRelaRISCV64(Elf_Rela *rela) {
 // So far, PC-relative addressing seems to be good enough. If it ever turns out
 // to be not, one could (additionally for out-of-range cases?) encode absolute
 // addressing here.
-bool makeStubRISCV64(Stub *s) {
+bool makeStubRISCV64(ll_linker *L, Stub *s) {
   uint32_t *P = (uint32_t *)s->addr;
   int32_t addr = (uint64_t)s->got_addr - (uint64_t)P;
 
   uint64_t hi = (addr + 0x800) >> 12;
   uint64_t lo = addr - (hi << 12);
 
-  LL_IF_DEBUG(
+  LL_IF_DEBUG_FOR(L,
       linker,
-      LL_DEBUG(
+      LL_DEBUG_FOR(L,
           "makeStubRISCV64: P = %p, got_addr = %p, target = %p, addr = 0x%x "
           ", hi = 0x%lx, lo = 0x%lx\n",
           P, s->got_addr, s->target, addr, hi, lo));

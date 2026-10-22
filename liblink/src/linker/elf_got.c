@@ -91,8 +91,8 @@ makeGot(ObjectCode * oc) {
      * and need to iterate over all symbols, to check how many
      * got slots we need at most
      */
-    LL_ASSERT( oc->info != NULL );
-    LL_ASSERT( oc->info->sectionHeader != NULL );
+    LL_ASSERT_FOR(oc->L, oc->info != NULL );
+    LL_ASSERT_FOR(oc->L, oc->info->sectionHeader != NULL );
     for(int i=0; i < oc->n_sections; i++) {
         if(SHT_SYMTAB == oc->info->sectionHeader[i].sh_type) {
             Elf_Sym *symTab =
@@ -109,9 +109,9 @@ makeGot(ObjectCode * oc) {
     }
     if(got_slots > 0) {
         oc->info->got_size = got_slots * sizeof(void *);
-        void * mem = mmapAnonForLinker(oc->info->got_size);
+        void * mem = ll_mmap_anon_for_linker(oc->L, oc->info->got_size);
         if (mem == NULL) {
-            LL_LOG_ERROR("MAP_FAILED. errno=%d", errno);
+            LL_LOG_ERROR_FOR(oc->L, "MAP_FAILED. errno=%d", errno);
             return EXIT_FAILURE;
         }
 
@@ -161,22 +161,22 @@ fillGot(ObjectCode * oc) {
                                  * against the (now undefined) symbol.
                                  * Assign a dummy address so the GOT slot is
                                  * filled; it will never be dereferenced. */
-                                LL_IF_DEBUG(linker,
-                                    LL_DEBUG("Skipping unresolvable symbol"
+                                LL_IF_DEBUG_FOR(oc->L, linker,
+                                    LL_DEBUG_FOR(oc->L, "Skipping unresolvable symbol"
                                               " '%s' (only referenced by"
                                               " NONE relocations)\n",
                                               symbol->name));
                                 symbol->addr = (void*)0xDEAD0000;
                             } else {
-                                LL_LOG_ERROR("Failed to lookup symbol: %s,"
+                                LL_LOG_ERROR_FOR(oc->L, "Failed to lookup symbol: %s,"
                                            " you might consider using --optimistic-linking\n",
                                            symbol->name);
 
                                 // if --optimistic-linking is passed into the
                                 // RTS we allow the linker to optimistically
                                 // continue
-                                if (ll_cfg.optimistic) {
-                                    LL_LOG_ERROR("Failed to lookup symbol: %s,"
+                                if (oc->L->services.cfg.optimistic) {
+                                    LL_LOG_ERROR_FOR(oc->L, "Failed to lookup symbol: %s,"
                                                " optimistically continuing.\n",
                                                symbol->name);
                                     symbol->addr = (void*) 0xDEADBEEF;
@@ -194,14 +194,14 @@ fillGot(ObjectCode * oc) {
                   */
 
                 if(0x0 == symbol->addr) {
-                    LL_LOG_ERROR(
+                    LL_LOG_ERROR_FOR(oc->L,
                         "Something went wrong! Symbol %s has null address.\n",
                             symbol->name);
                     return EXIT_FAILURE;
                 }
 
                 if(0x0 == symbol->got_addr) {
-                    LL_LOG_ERROR("Not good either!");
+                    LL_LOG_ERROR_FOR(oc->L, "Not good either!");
                     return EXIT_FAILURE;
                 }
 
@@ -212,7 +212,7 @@ fillGot(ObjectCode * oc) {
 
     // We are done initializing the GOT; freeze it.
     if(mprotect(oc->info->got_start, oc->info->got_size, PROT_READ) != 0) {
-        LL_LOG_SYSERROR("unable to protect memory");
+        LL_LOG_SYSERROR_FOR(oc->L, "unable to protect memory");
     }
     return EXIT_SUCCESS;
 }
@@ -224,10 +224,10 @@ verifyGot(ObjectCode * oc) {
         for(size_t i=0; i < symTab->n_symbols; i++) {
             ElfSymbol * symbol = &symTab->symbols[i];
             if(symbol->got_addr) {
-                LL_CHECK((void*)(*(void**)symbol->got_addr)
+                LL_CHECK_FOR(oc->L, (void*)(*(void**)symbol->got_addr)
                       == (void*)symbol->addr);
             }
-            LL_CHECK(0 == ((uintptr_t)symbol->addr & 0xffff000000000000));
+            LL_CHECK_FOR(oc->L, 0 == ((uintptr_t)symbol->addr & 0xffff000000000000));
         }
     }
     return EXIT_SUCCESS;

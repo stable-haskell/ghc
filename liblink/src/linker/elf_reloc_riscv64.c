@@ -26,8 +26,8 @@ typedef uint16_t cinst_t;
 // TODO: These instances could be static. They are not yet, because we might
 // need their debugging symbols.
 char *relocationTypeToString(Elf64_Xword type);
-int32_t decodeAddendRISCV64(Section *section, Elf_Rel *rel);
-bool encodeAddendRISCV64(Section *section, Elf_Rel *rel, int32_t addend);
+int32_t decodeAddendRISCV64(ll_linker *L, Section *section, Elf_Rel *rel);
+bool encodeAddendRISCV64(ll_linker *L, Section *section, Elf_Rel *rel, int32_t addend);
 void write8le(uint8_t *p, uint8_t v);
 uint8_t read8le(const uint8_t *P);
 void write16le(cinst_t *p, uint16_t v);
@@ -37,16 +37,16 @@ void write32le(inst_t *p, uint32_t v);
 uint64_t read64le(const uint64_t *P);
 void write64le(uint64_t *p, uint64_t v);
 uint32_t extractBits(uint64_t v, uint32_t begin, uint32_t end);
-void setCJType(cinst_t *loc, uint32_t val);
-void setCBType(cinst_t *loc, uint32_t val);
-void setBType(inst_t *loc, uint32_t val);
+void setCJType(ll_linker *L, cinst_t *loc, uint32_t val);
+void setCBType(ll_linker *L, cinst_t *loc, uint32_t val);
+void setBType(ll_linker *L, inst_t *loc, uint32_t val);
 void setSType(inst_t *loc, uint32_t val);
 int32_t computeAddend(ElfRelocationATable * relaTab, unsigned relNo, Elf_Rel *rel, ElfSymbol *symbol,
                       int64_t addend, ObjectCode *oc);
-void setJType(inst_t *loc, uint32_t val);
-void setIType(inst_t *loc, int32_t val);
-void checkInt(inst_t *loc, int32_t v, int n);
-void setUType(inst_t *loc, int32_t val);
+void setJType(ll_linker *L, inst_t *loc, uint32_t val);
+void setIType(ll_linker *L, inst_t *loc, int32_t val);
+void checkInt(ll_linker *L, inst_t *loc, int32_t v, int n);
+void setUType(ll_linker *L, inst_t *loc, int32_t val);
 
 
 char *relocationTypeToString(Elf64_Xword type) {
@@ -108,16 +108,16 @@ char *relocationTypeToString(Elf64_Xword type) {
   }
 }
 
-LL_NORETURN int32_t decodeAddendRISCV64(Section *section LL_UNUSED,
+LL_NORETURN int32_t decodeAddendRISCV64(ll_linker *L, Section *section LL_UNUSED,
                                         Elf_Rel *rel LL_UNUSED) {
-  LL_FATAL("decodeAddendRISCV64: Relocations with explicit addend are not supported."
+  LL_FATAL_FOR(L, "decodeAddendRISCV64: Relocations with explicit addend are not supported."
        " Please open a ticket; providing the causing code/binary.");
 }
 
 // Make sure that V can be represented as an N bit signed integer.
-void checkInt(inst_t *loc, int32_t v, int n) {
+void checkInt(ll_linker *L, inst_t *loc, int32_t v, int n) {
   if (!isInt(n, v)) {
-    LL_FATAL("Relocation at 0x%x is out of range. value: 0x%x (%d), "
+    LL_FATAL_FOR(L, "Relocation at 0x%x is out of range. value: 0x%x (%d), "
                "sign-extended value: 0x%x (%d), max bits 0x%x (%d)\n",
                *loc, v, v, signExtend32(v, n), signExtend32(v, n), n, n);
   }
@@ -153,11 +153,11 @@ uint32_t extractBits(uint64_t v, uint32_t begin, uint32_t end) {
 
 // Set immediate val in the instruction at *loc. In U-type instructions the
 // upper 20bits carry the upper 20bits of the immediate.
-void setUType(inst_t *loc, int32_t val) {
+void setUType(ll_linker *L, inst_t *loc, int32_t val) {
   const unsigned bits = 32;
   uint32_t hi = val + 0x800;
-  checkInt(loc, signExtend32(hi, bits) >> 12, 20);
-  LL_IF_DEBUG(linker, LL_DEBUG("setUType: hi 0x%x val 0x%x\n", hi, val));
+  checkInt(L, loc, signExtend32(hi, bits) >> 12, 20);
+  LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "setUType: hi 0x%x val 0x%x\n", hi, val));
 
   uint32_t imm = hi & 0xFFFFF000;
   write32le(loc, (read32le(loc) & 0xFFF) | imm);
@@ -165,20 +165,20 @@ void setUType(inst_t *loc, int32_t val) {
 
 // Set immediate val in the instruction at *loc. In I-type instructions the
 // upper 12bits carry the lower 12bit of the immediate.
-void setIType(inst_t *loc, int32_t val) {
+void setIType(ll_linker *L, inst_t *loc, int32_t val) {
   uint64_t hi = (val + 0x800) >> 12;
   uint64_t lo = val - (hi << 12);
 
-  LL_IF_DEBUG(linker, LL_DEBUG("setIType: hi 0x%lx lo 0x%lx\n", hi, lo));
-  LL_IF_DEBUG(linker, LL_DEBUG("setIType: loc %p  *loc 0x%x  val 0x%x\n", loc,
+  LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "setIType: hi 0x%lx lo 0x%lx\n", hi, lo));
+  LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "setIType: loc %p  *loc 0x%x  val 0x%x\n", loc,
                               *loc, val));
 
   uint32_t imm = lo & 0xfff;
   uint32_t instr = (read32le(loc) & 0xfffff) | (imm << 20);
 
-  LL_IF_DEBUG(linker, LL_DEBUG("setIType: insn 0x%x\n", instr));
+  LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "setIType: insn 0x%x\n", instr));
   write32le(loc, instr);
-  LL_IF_DEBUG(linker, LL_DEBUG("setIType: loc %p  *loc' 0x%x  val 0x%x\n", loc,
+  LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "setIType: loc %p  *loc' 0x%x  val 0x%x\n", loc,
                               *loc, val));
 }
 
@@ -205,8 +205,8 @@ void setSType(inst_t *loc, uint32_t val) {
 // [19:12] -> [19:12]
 //
 // N.B. bit 0 of the immediate is missing!
-void setJType(inst_t *loc, uint32_t val) {
-  checkInt(loc, val, 21);
+void setJType(ll_linker *L, inst_t *loc, uint32_t val) {
+  checkInt(L, loc, val, 21);
 
   uint32_t insn = read32le(loc) & 0xFFF;
   uint32_t imm20 = extractBits(val, 20, 20) << 31;
@@ -227,8 +227,8 @@ void setJType(inst_t *loc, uint32_t val) {
 // 7 -> 11
 //
 // N.B. bit 0 of the immediate is missing!
-void setBType(inst_t *loc, uint32_t val) {
-  checkInt(loc, val, 13);
+void setBType(ll_linker *L, inst_t *loc, uint32_t val) {
+  checkInt(L, loc, val, 13);
 
   uint32_t insn = read32le(loc) & 0x1FFF07F;
   uint32_t imm12 = extractBits(val, 12, 12) << 31;
@@ -252,8 +252,8 @@ void setBType(inst_t *loc, uint32_t val) {
 // 2 -> 5
 //
 // N.B. bit 0 of the immediate is missing!
-void setCBType(cinst_t *loc, uint32_t val) {
-  checkInt((inst_t *)loc, val, 9);
+void setCBType(ll_linker *L, cinst_t *loc, uint32_t val) {
+  checkInt(L, (inst_t *)loc, val, 9);
   uint16_t insn = read16le(loc) & 0xE383;
   uint16_t imm8 = extractBits(val, 8, 8) << 12;
   uint16_t imm4_3 = extractBits(val, 4, 3) << 10;
@@ -279,8 +279,8 @@ void setCBType(cinst_t *loc, uint32_t val) {
 // 2 -> 5
 //
 // N.B. bit 0 of the immediate is missing!
-void setCJType(cinst_t *loc, uint32_t val) {
-  checkInt((inst_t *)loc, val, 12);
+void setCJType(ll_linker *L, cinst_t *loc, uint32_t val) {
+  checkInt(L, (inst_t *)loc, val, 12);
   uint16_t insn = read16le(loc) & 0xE003;
   uint16_t imm11 = extractBits(val, 11, 11) << 12;
   uint16_t imm4 = extractBits(val, 4, 4) << 11;
@@ -296,11 +296,11 @@ void setCJType(cinst_t *loc, uint32_t val) {
 }
 
 // Encode the addend according to the relocaction into the instruction.
-bool encodeAddendRISCV64(Section *section, Elf_Rel *rel, int32_t addend) {
+bool encodeAddendRISCV64(ll_linker *L, Section *section, Elf_Rel *rel, int32_t addend) {
   // instruction to rewrite (P: Position of the relocation)
   addr_t P = (addr_t)((uint8_t *)section->start + rel->r_offset);
-  LL_IF_DEBUG(linker,
-           LL_DEBUG(
+  LL_IF_DEBUG_FOR(L, linker,
+           LL_DEBUG_FOR(L,
                "Relocation type %s 0x%lx (%lu) symbol 0x%lx addend 0x%x (%u / "
                "%d) P 0x%lx\n",
                relocationTypeToString(rel->r_info), ELF64_R_TYPE(rel->r_info),
@@ -317,36 +317,36 @@ bool encodeAddendRISCV64(Section *section, Elf_Rel *rel, int32_t addend) {
   case R_RISCV_GOT_HI20:
   case R_RISCV_PCREL_HI20:
   case R_RISCV_HI20: {
-    setUType((inst_t *)P, addend);
+    setUType(L, (inst_t *)P, addend);
     break;
   }
   case R_RISCV_PCREL_LO12_I:
   case R_RISCV_LO12_I: {
-    setIType((inst_t *)P, addend);
+    setIType(L, (inst_t *)P, addend);
     break;
   }
   case R_RISCV_RVC_JUMP: {
-    setCJType((cinst_t *)P, addend);
+    setCJType(L, (cinst_t *)P, addend);
     break;
   }
   case R_RISCV_RVC_BRANCH: {
-    setCBType((cinst_t *)P, addend);
+    setCBType(L, (cinst_t *)P, addend);
     break;
   }
   case R_RISCV_BRANCH: {
-    setBType((inst_t *)P, addend);
+    setBType(L, (inst_t *)P, addend);
     break;
   }
   case R_RISCV_CALL:
   case R_RISCV_CALL_PLT: {
     // We could relax more (in some cases) but right now most important is to
     // make it work.
-    setUType((inst_t *)P, addend);
-    setIType(((inst_t *)P) + 1, addend);
+    setUType(L, (inst_t *)P, addend);
+    setIType(L, ((inst_t *)P) + 1, addend);
     break;
   }
   case R_RISCV_JAL: {
-    setJType((inst_t *)P, addend);
+    setJType(L, (inst_t *)P, addend);
     break;
   }
   case R_RISCV_ADD8:
@@ -411,7 +411,7 @@ bool encodeAddendRISCV64(Section *section, Elf_Rel *rel, int32_t addend) {
     // would need machinery to squeeze or extend memory at the current location.
     break;
   default:
-    LL_FATAL("Missing relocation 0x%lx\n", ELF64_R_TYPE(rel->r_info));
+    LL_FATAL_FOR(L, "Missing relocation 0x%lx\n", ELF64_R_TYPE(rel->r_info));
   }
   return EXIT_SUCCESS;
 }
@@ -431,9 +431,9 @@ int32_t computeAddend(ElfRelocationATable * relaTab, unsigned relNo, Elf_Rel *re
   // instruction to rewrite (P: Position of the relocation)
   addr_t P = (addr_t)((uint8_t *)section->start + rel->r_offset);
 
-  LL_CHECK(0x0 != P);
-  LL_CHECK((uint64_t)section->start <= P);
-  LL_CHECK(P <= (uint64_t)section->start + section->size);
+  LL_CHECK_FOR(oc->L, 0x0 != P);
+  LL_CHECK_FOR(oc->L, (uint64_t)section->start <= P);
+  LL_CHECK_FOR(oc->L, P <= (uint64_t)section->start + section->size);
   // S: Value of the symbol in the symbol table
   addr_t S = (addr_t)symbol->addr;
   /* GOT slot for the symbol (G + GOT) */
@@ -442,7 +442,7 @@ int32_t computeAddend(ElfRelocationATable * relaTab, unsigned relNo, Elf_Rel *re
   // A: Addend field in the relocation entry associated with the symbol
   int64_t A = addend;
 
-  LL_IF_DEBUG(linker, LL_DEBUG("%s: P 0x%lx S 0x%lx %s GOT_S 0x%lx A 0x%lx relNo %u\n",
+  LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "%s: P 0x%lx S 0x%lx %s GOT_S 0x%lx A 0x%lx relNo %u\n",
                               relocationTypeToString(rel->r_info), P, S,
                               symbol->name, GOT_S, A, relNo));
   switch (ELF64_R_TYPE(rel->r_info)) {
@@ -485,7 +485,7 @@ int32_t computeAddend(ElfRelocationATable * relaTab, unsigned relNo, Elf_Rel *re
             findSymbol(oc, relaTab->sectionHeader->sh_link,
                        ELF64_R_SYM((Elf64_Xword)rel_prime->r_info));
 
-        LL_CHECK(0x0 != symbol_prime);
+        LL_CHECK_FOR(oc->L, 0x0 != symbol_prime);
 
         /* take explicit addend */
         int64_t addend_prime = rel_prime->r_addend;
@@ -496,8 +496,8 @@ int32_t computeAddend(ElfRelocationATable * relaTab, unsigned relNo, Elf_Rel *re
             type_prime == R_RISCV_GOT_HI20 ||
             type_prime == R_RISCV_TLS_GD_HI20 ||
             type_prime == R_RISCV_TLS_GOT_HI20) {
-          LL_IF_DEBUG(linker,
-                   LL_DEBUG(
+          LL_IF_DEBUG_FOR(oc->L, linker,
+                   LL_DEBUG_FOR(oc->L,
                        "Found matching relocation: %s (P: 0x%lx, S: 0x%lx, "
                        "sym-name: %s) -> %s (P: 0x%lx, S: %p, sym-name: %s, relNo: %ld)",
                        relocationTypeToString(rel->r_info), P, S, symbol->name,
@@ -505,12 +505,12 @@ int32_t computeAddend(ElfRelocationATable * relaTab, unsigned relNo, Elf_Rel *re
                        symbol_prime->addr, symbol_prime->name, i));
           int32_t result = computeAddend(relaTab, i, (Elf_Rel *)rel_prime,
                                          symbol_prime, addend_prime, oc);
-          LL_IF_DEBUG(linker, LL_DEBUG("Result of computeAddend: 0x%x (%d)\n",
+          LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "Result of computeAddend: 0x%x (%d)\n",
                                       result, result));
           return result;
         }
     }
-    LL_DEBUG("Missing HI relocation for %s: P 0x%lx S 0x%lx %s\n",
+    LL_DEBUG_FOR(oc->L, "Missing HI relocation for %s: P 0x%lx S 0x%lx %s\n",
                relocationTypeToString(rel->r_info), P, S, symbol->name);
     abort();
   }
@@ -531,7 +531,7 @@ int32_t computeAddend(ElfRelocationATable * relaTab, unsigned relNo, Elf_Rel *re
       // 2. Fake GOT entry with symbol extra entry.
       SymbolExtra *symbolExtra = makeSymbolExtra(oc, ELF_R_SYM(rel->r_info), S);
       addr_t* FAKE_GOT_S = &symbolExtra->addr;
-      LL_IF_DEBUG(linker, LL_DEBUG("R_RISCV_CALL_PLT w/ SymbolExtra = %p , "
+      LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "R_RISCV_CALL_PLT w/ SymbolExtra = %p , "
                                   "entry = %p\n",
                                   symbolExtra, FAKE_GOT_S));
       GOT_Target = (addr_t) FAKE_GOT_S;
@@ -539,11 +539,11 @@ int32_t computeAddend(ElfRelocationATable * relaTab, unsigned relNo, Elf_Rel *re
 
     if (findStub(section, (void **)&S, 0)) {
       /* did not find it. Crete a new stub. */
-      if (makeStub(section, (void **)&S, (void *)GOT_Target, 0)) {
+      if (makeStub(oc->L, section, (void **)&S, (void *)GOT_Target, 0)) {
         abort(/* could not find or make stub */);
       }
     }
-    LL_IF_DEBUG(linker, LL_DEBUG("R_RISCV_CALL_PLT: S = 0x%lx A = 0x%lx P = "
+    LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "R_RISCV_CALL_PLT: S = 0x%lx A = 0x%lx P = "
                                 "0x%lx (S + A) - P = 0x%lx \n",
                                 S, A, P, (S + A) - P));
     return (S + A) - P;
@@ -601,17 +601,17 @@ int32_t computeAddend(ElfRelocationATable * relaTab, unsigned relNo, Elf_Rel *re
       SymbolExtra *symbolExtra = makeSymbolExtra(oc, ELF_R_SYM(rel->r_info), S);
       addr_t* FAKE_GOT_S = &symbolExtra->addr;
       addr_t res = (addr_t) FAKE_GOT_S + A - P;
-      LL_IF_DEBUG(linker, LL_DEBUG("R_RISCV_GOT_HI20 w/ SymbolExtra = %p , "
+      LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "R_RISCV_GOT_HI20 w/ SymbolExtra = %p , "
                                   "entry = %p , reloc-addend = 0x%lu ",
                                   symbolExtra, FAKE_GOT_S, res));
       return res;
     }
   }
   default:
-    LL_FATAL("Unimplemented relocation: 0x%lx\n (%lu)",
+    LL_FATAL_FOR(oc->L, "Unimplemented relocation: 0x%lx\n (%lu)",
                ELF64_R_TYPE(rel->r_info), ELF64_R_TYPE(rel->r_info));
   }
-  LL_FATAL("This should never happen!");
+  LL_FATAL_FOR(oc->L, "This should never happen!");
 }
 
 // Iterate over all relocations and perform them.
@@ -630,16 +630,16 @@ bool relocateObjectCodeRISCV64(ObjectCode *oc) {
       ElfSymbol *symbol = findSymbol(oc, relTab->sectionHeader->sh_link,
                                      ELF64_R_SYM((Elf64_Xword)rel->r_info));
 
-      LL_CHECK(0x0 != symbol);
+      LL_CHECK_FOR(oc->L, 0x0 != symbol);
 
       // This always fails, because we don't support Rel locations, yet: Do we
       // need this case? Leaving it in to spot the potential bug when it
       // appears.
       /* decode implicit addend */
-      int64_t addend = decodeAddendRISCV64(targetSection, rel);
+      int64_t addend = decodeAddendRISCV64(oc->L, targetSection, rel);
 
       addend = computeAddend((ElfRelocationATable*) relTab, i, rel, symbol, addend, oc);
-      encodeAddendRISCV64(targetSection, rel, addend);
+      encodeAddendRISCV64(oc->L, targetSection, rel, addend);
     }
   }
   for (ElfRelocationATable *relaTab = oc->info->relaTable; relaTab != NULL;
@@ -657,13 +657,13 @@ bool relocateObjectCodeRISCV64(ObjectCode *oc) {
       ElfSymbol *symbol = findSymbol(oc, relaTab->sectionHeader->sh_link,
                                      ELF64_R_SYM((Elf64_Xword)rel->r_info));
 
-      LL_CHECK(0x0 != symbol);
+      LL_CHECK_FOR(oc->L, 0x0 != symbol);
 
       /* take explicit addend */
       int64_t addend = rel->r_addend;
 
       addend = computeAddend(relaTab, i, (Elf_Rel *)rel, symbol, addend, oc);
-      encodeAddendRISCV64(targetSection, (Elf_Rel *)rel, addend);
+      encodeAddendRISCV64(oc->L, targetSection, (Elf_Rel *)rel, addend);
     }
   }
   return EXIT_SUCCESS;
