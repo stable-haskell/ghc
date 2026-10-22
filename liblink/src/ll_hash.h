@@ -39,6 +39,7 @@
 
 typedef struct hashtable HashTable; /* abstract */
 typedef struct strhashtable StrHashTable;
+struct ll_linker;
 
 /* Hash table access where the keys are StgWords.
  * Values are passed into the hash table and stored as `const void *` values,
@@ -46,7 +47,7 @@ typedef struct strhashtable StrHashTable;
  * `const` so that calling function can mutate what the pointer points to if it
  * needs to.
  */
-HashTable * allocHashTable  ( void );
+HashTable * allocHashTable  ( struct ll_linker *L );
 void        insertHashTable ( HashTable *table, ll_word key, const void *data );
 void *      lookupHashTable ( const HashTable *table, ll_word key );
 void *      removeHashTable ( HashTable *table, ll_word key, const void *data );
@@ -73,9 +74,9 @@ LL_FRIEND_API void iterHashTable(HashTable *table, void *data, IterHashFn);
  * assumed to be allocated by the caller, and mustn't be deallocated
  * until the corresponding hash table entry has been removed).
  */
-LL_INLINE_HEADER StrHashTable * allocStrHashTable ( void )
+LL_INLINE_HEADER StrHashTable * allocStrHashTable ( struct ll_linker *L )
 {
-    return (StrHashTable*) allocHashTable();
+    return (StrHashTable*) allocHashTable(L);
 }
 
 void        insertStrHashTable ( StrHashTable *table, const char * key,
@@ -128,9 +129,9 @@ LL_INLINE_HEADER void freeStrHashTable ( StrHashTable *table, void (*freeDataFun
 
 typedef struct hashtable HashSet;
 
-LL_INLINE_HEADER HashSet *allocHashSet ( void )
+LL_INLINE_HEADER HashSet *allocHashSet ( struct ll_linker *L )
 {
-    return (HashSet*)allocHashTable();
+    return (HashSet*)allocHashTable(L);
 }
 
 LL_INLINE_HEADER void freeHashSet ( HashSet *set )

@@ -45,9 +45,11 @@
 
 #include "ll_begin_private.h"
 
-pathchar* pathdup(const pathchar *path);
-pathchar* pathdir(const pathchar *path);
-pathchar* mkPath(const char* path);
+struct ll_linker;
+
+pathchar* pathdup(struct ll_linker *L, const pathchar *path);
+pathchar* pathdir(struct ll_linker *L, const pathchar *path);
+pathchar* mkPath(struct ll_linker *L, const char* path);
 ll_hs_bool endsWithPath(const pathchar* base, const pathchar* str);
 
 #include "ll_end_private.h"

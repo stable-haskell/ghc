@@ -22,7 +22,7 @@ void setSymbolInfo(ObjectCode *owner, const void *label, symbolUpdater updater)
     {
         info = NULL;
         if (!owner->extraInfos)
-            owner->extraInfos = allocStrHashTable();
+            owner->extraInfos = allocStrHashTable(&ll_default_linker);
         else
             info = lookupStrHashTable(owner->extraInfos, label);
 

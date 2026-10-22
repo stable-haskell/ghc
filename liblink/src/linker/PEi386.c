@@ -526,7 +526,7 @@ const int default_alignment = 8;
  */
 
 static void initLoadedDllCache(LoadedDllCache *cache) {
-    cache->hash = allocHashTable();
+    cache->hash = allocHashTable(&ll_default_linker);
 }
 
 static int hash_path(const HashTable *table, ll_word w)
@@ -596,7 +596,7 @@ static void addDLLHandle(const pathchar* dll_name, HINSTANCE instance) {
 
     OpenedDLL* o_dll;
     o_dll           = LL_MALLOC( sizeof(OpenedDLL), "addDLLHandle" );
-    o_dll->name     = dll_name ? pathdup(dll_name) : NULL;
+    o_dll->name     = dll_name ? pathdup(&ll_default_linker, dll_name) : NULL;
     o_dll->instance = instance;
     o_dll->next     = ll_default_linker.opened_dlls;
     ll_default_linker.opened_dlls     = o_dll;
@@ -623,7 +623,8 @@ static void addDLLHandle(const pathchar* dll_name, HINSTANCE instance) {
     const int len = wcslen(ms_dll);
 
     do {
-        pathchar* module = mkPath((char*)(BYTE *)instance + imports->Name);
+        pathchar* module = mkPath(&ll_default_linker,
+                                  (char*)(BYTE *)instance + imports->Name);
         HINSTANCE module_instance = GetModuleHandleW(module);
         if (0 != wcsncmp(module, ms_dll, len)
             && module_instance
@@ -2032,7 +2033,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
           if (strlen(dllName) == 0 || dllName[0] == 0 || has_code_section)
               continue;
 
-          pathchar* dirName = pathdir(oc->fileName);
+          pathchar* dirName = pathdir(&ll_default_linker, oc->fileName);
           ll_hs_ptr token       = addLibrarySearchPath(dirName);
           LL_FREE(dirName);
 
@@ -2043,7 +2044,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
                    LL_DEBUG("loading symbol `%s' from dll: '%ls' => `%s'\n",
                               sname, oc->fileName, dllName));
 
-          pathchar* dll = mkPath(dllName);
+          pathchar* dll = mkPath(&ll_default_linker, dllName);
           HINSTANCE dllInstance = 0;
           const char* result = addDLL_PEi386(dll, &dllInstance);
           removeLibrarySearchPath(token);
@@ -2586,7 +2587,7 @@ resolveSymbolAddr_PEi386 (pathchar* buffer, int size,
     {
       /* Try using Windows symbols.  */
       wcscat (buffer, WSTR(" "));
-      pathchar* name = mkPath (sym.Name);
+      pathchar* name = mkPath (&ll_default_linker, sym.Name);
       wcscat (buffer, name);
       LL_FREE (name);
       if (uDisplacement != 0)

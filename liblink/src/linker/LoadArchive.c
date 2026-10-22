@@ -162,13 +162,13 @@ static bool readThinArchiveMember(int n, int memberSize, pathchar* path,
     memberPath = NULL;
     /* Allocate and setup the dirname of the archive.  We'll need
      this to locate the thin member */
-    pathCopy = pathdup(path); // Convert the char* to a pathchar*
-    dirName = pathdir(pathCopy);
+    pathCopy = pathdup(&ll_default_linker, path); // Convert the char* to a pathchar*
+    dirName = pathdir(&ll_default_linker, pathCopy);
     /* Append the relative member name to the dirname.  This should be
      be the full path to the actual thin member. */
     int memberLen = pathlen(dirName) + 1 + strlen(fileName) + 1;
     memberPath = LL_MALLOC(pathsize * memberLen, "loadArchive(file)");
-    objFileName = mkPath(fileName);
+    objFileName = mkPath(&ll_default_linker, fileName);
     pathprintf(memberPath, memberLen, WSTR("%" PATH_FMT "%" PATH_FMT), dirName,
             objFileName);
     LL_FREE(objFileName);

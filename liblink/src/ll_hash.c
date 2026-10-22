@@ -32,6 +32,7 @@ If using PosixSource.h make sure it is the first header included."
 #endif
 
 #include "ll_hash.h"
+#include "ll_linker.h"
 
 
 #define XXH_INLINE_ALL
@@ -62,6 +63,7 @@ typedef struct chunklist {
 } HashListChunk;
 
 struct hashtable {
+    struct ll_linker *owner;
     int split;              /* Next bucket to split when expanding */
     int max;                /* Max bucket of smaller table */
     int mask1;              /* Mask for doing the mod of h_1 (smaller table) */
@@ -149,8 +151,9 @@ compareStr(ll_word key1, ll_word key2)
 LL_STATIC_INLINE void
 allocSegment(HashTable *table, int segment)
 {
-    table->dir[segment] = LL_MALLOC(HSEGSIZE * sizeof(HashList *),
-                                         "allocSegment");
+    table->dir[segment] = LL_MALLOC_FOR(table->owner,
+                                        HSEGSIZE * sizeof(HashList *),
+                                        "allocSegment");
 }
 
 
@@ -315,7 +318,9 @@ allocHashList (HashTable *table)
          *     placed on the freeList.
          *
          */
-        HashListChunk *cl = LL_MALLOC(sizeof(HashListChunk) + HCHUNK * sizeof(HashList), "allocHashList");
+        HashListChunk *cl = LL_MALLOC_FOR(table->owner,
+                                          sizeof(HashListChunk) + HCHUNK * sizeof(HashList),
+                                          "allocHashList");
         HashList *hl = (HashList *) &cl[1];
         cl->next = table->chunks;
         table->chunks = cl;
@@ -416,7 +421,7 @@ removeHashTable_inlined(HashTable *table, ll_word key, const void *data,
     }
 
     /* It's not there */
-    LL_ASSERT(data == NULL);
+    LL_ASSERT_FOR(table->owner, data == NULL);
     return NULL;
 }
 
@@ -465,7 +470,7 @@ freeHashTable(HashTable *table, void (*freeDataFun)(void *) )
                 index--;
             }
         }
-        LL_FREE(table->dir[segment]);
+        LL_FREE_FOR(table->owner, table->dir[segment]);
         segment--;
         index = HSEGSIZE - 1;
     }
@@ -475,10 +480,10 @@ freeHashTable(HashTable *table, void (*freeDataFun)(void *) )
     while (cl != NULL) {
         HashListChunk *old = cl;
         cl = cl->next;
-        LL_FREE(old);
+        LL_FREE_FOR(table->owner, old);
     }
 
-    LL_FREE(table);
+    LL_FREE_FOR(table->owner, table);
 }
 
 /* -----------------------------------------------------------------------------
@@ -550,12 +555,13 @@ iterHashTable(HashTable *table, void *data, IterHashFn fn)
  * -------------------------------------------------------------------------- */
 
 HashTable *
-allocHashTable(void)
+allocHashTable(struct ll_linker *L)
 {
     HashTable *table;
     HashList **hb;
 
-    table = LL_MALLOC(sizeof(HashTable),"allocHashTable");
+    table = LL_MALLOC_FOR(L, sizeof(HashTable), "allocHashTable");
+    table->owner = L;
 
     allocSegment(table, 0);
 

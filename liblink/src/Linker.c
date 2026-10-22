@@ -451,7 +451,7 @@ initLinker_ (int retain_cafs)
 
     ll_mutex_init(&ll_default_linker.linker_mutex);
 
-    ll_default_linker.symhash = allocStrHashTable();
+    ll_default_linker.symhash = allocStrHashTable(&ll_default_linker);
 
     if (ll_host.populate_builtins != NULL) {
         ll_host.populate_builtins(ll_host.ctx, retain_cafs, insertBuiltin, ll_default_linker.symhash);
@@ -1197,7 +1197,7 @@ mkOc( ObjectType type, pathchar *path, char *image, int imageSize,
 #  endif
 
    oc->image = image;
-   oc->fileName = pathdup(path);
+   oc->fileName = pathdup(&ll_default_linker, path);
 
    if (archiveMemberName) {
        oc->archiveMemberName = LL_MALLOC( (pathlen(archiveMemberName)+1) * pathsize,
@@ -1241,7 +1241,7 @@ mkOc( ObjectType type, pathchar *path, char *image, int imageSize,
    oc->mark              = ll_default_linker.gc.object_code_mark_bit;
    /* this will get cleared by the caller if object is not safely unloadable */
    oc->unloadable        = true;
-   oc->dependencies      = allocHashSet();
+   oc->dependencies      = allocHashSet(&ll_default_linker);
 
 #if defined(NEED_M32)
    oc->rw_m32 = m32_allocator_new(false);
