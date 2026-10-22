@@ -100,6 +100,7 @@ extra-source-files:
     src/ll_visibility.h
     src/xxhash.h
     tests/unit/README.md
+    tests/unit/core_error_status.c
     tests/unit/error_state.c
     tests/unit/hash_destroy_owner.c
     tests/unit/owner_services.c

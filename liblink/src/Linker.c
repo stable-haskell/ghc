@@ -29,6 +29,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <inttypes.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -356,6 +357,9 @@ int ghciInsertSymbolTable(
         return 1;
     }
 
+   ll_error_set(L, LL_E_DUPSYM,
+                "duplicate definition for symbol %s in %" PATH_FMT,
+                key, obj_name);
    LL_DEBUG_FOR(L,
       "GHC runtime linker: fatal error: I found a duplicate definition for symbol\n"
       "   %s\n"
@@ -1322,10 +1326,22 @@ preloadObjectFile (ll_linker *L, pathchar *path)
 
    r = pathstat(path, &st);
    if (r == -1) {
+       ll_error_set(L, LL_E_IO, "loadObj: %" PATH_FMT ": file doesn't exist", path);
        LL_LOG_ERROR_FOR(L, "loadObj: %" PATH_FMT ": file doesn't exist", path);
        return NULL;
    }
 
+   if (st.st_size <= 0) {
+       ll_error_set(L, LL_E_FORMAT, "loadObj: %" PATH_FMT ": empty object file", path);
+       LL_LOG_ERROR_FOR(L, "loadObj: %" PATH_FMT ": empty object file", path);
+       return NULL;
+   }
+   if ((uintmax_t)st.st_size > INT_MAX) {
+       ll_error_set(L, LL_E_UNSUPPORTED,
+                    "loadObj: %" PATH_FMT ": object file is too large", path);
+       LL_LOG_ERROR_FOR(L, "loadObj: %" PATH_FMT ": object file is too large", path);
+       return NULL;
+   }
    fileSize = st.st_size;
 
 #if RTS_LINKER_USE_MMAP
@@ -1340,6 +1356,7 @@ preloadObjectFile (ll_linker *L, pathchar *path)
    fd = open(path, O_RDONLY);
 #endif
    if (fd == -1) {
+      ll_error_set(L, LL_E_IO, "loadObj: can't open %" PATH_FMT, path);
       LL_LOG_ERROR_FOR(L, "loadObj: can't open %s", path);
       return NULL;
    }
@@ -1359,8 +1376,11 @@ preloadObjectFile (ll_linker *L, pathchar *path)
    image = ll_mmap_for_linker(L, fileSize, MEM_READ_WRITE_EXECUTE, MAP_PRIVATE, fd, 0);
 #endif
 
-   if (image == MAP_FAILED) {
+   if (image == NULL) {
+       ll_error_set(L, LL_E_IO, "mmap: failed. errno = %d", errno);
        LL_LOG_ERROR_FOR(L, "mmap: failed. errno = %d", errno);
+       close(fd);
+       return NULL;
    }
    // not 32-bit yet, we'll remap later
    close(fd);
@@ -1372,6 +1392,7 @@ preloadObjectFile (ll_linker *L, pathchar *path)
    /* coverity[toctou] */
    f = pathopen(path, WSTR("rb"));
    if (!f) {
+       ll_error_set(L, LL_E_IO, "loadObj: can't preload `%" PATH_FMT "'", path);
        LL_LOG_ERROR_FOR(L, "loadObj: can't preload `%" PATH_FMT "'", path);
        return NULL;
    }
@@ -1401,6 +1422,7 @@ preloadObjectFile (ll_linker *L, pathchar *path)
    n = fread ( image, 1, fileSize, f );
    fclose(f);
    if (n != fileSize) {
+       ll_error_set(L, LL_E_IO, "loadObj: error whilst reading `%" PATH_FMT "'", path);
        LL_LOG_ERROR_FOR(L, "loadObj: error whilst reading `%" PATH_FMT "'", path);
        LL_FREE_FOR(L, image);
        return NULL;
@@ -1431,6 +1453,10 @@ preloadObjectFile (ll_linker *L, pathchar *path)
  */
 static ll_hs_int loadObj_ (ll_linker *L, pathchar *path)
 {
+   if (path == NULL) {
+       ll_error_set(L, LL_E_STATE, "loadObj: object path is NULL");
+       return 0;
+   }
    // Check that we haven't already loaded this object.
    // Ignore requests to load multiple times
 
@@ -1474,6 +1500,7 @@ static ll_hs_int loadObj_ (ll_linker *L, pathchar *path)
 ll_hs_int loadObj (pathchar *path)
 {
    ll_mutex_lock(&ll_default_linker.linker_mutex);
+    ll_error_clear(&ll_default_linker);
    ll_hs_int r = loadObj_(&ll_default_linker, path);
    ll_mutex_unlock(&ll_default_linker.linker_mutex);
    return r;
@@ -1496,6 +1523,11 @@ ll_hs_int loadOc (ObjectCode* oc)
    LL_FATAL_FOR(oc->L, "loadObj: no verify method");
 #  endif
    if (!r) {
+       if (oc->L->error_status == LL_OK) {
+           ll_error_set(oc->L, LL_E_FORMAT,
+                        "loadObj: invalid object image in %" PATH_FMT,
+                        OC_INFORMATIVE_FILENAME(oc));
+       }
        LL_IF_DEBUG_FOR(oc->L, linker, ocDebugBelch(oc, "ocVerifyImage_* failed\n"));
        return r;
    }
@@ -1521,6 +1553,11 @@ ll_hs_int loadOc (ObjectCode* oc)
 #  if defined(OBJFORMAT_MACHO)
    r = ocAllocateExtras_MachO ( oc );
    if (!r) {
+       if (oc->L->error_status == LL_OK) {
+           ll_error_set(oc->L, LL_E_NOMEM,
+                        "loadObj: could not allocate symbol extras in %" PATH_FMT,
+                        OC_INFORMATIVE_FILENAME(oc));
+       }
        LL_IF_DEBUG_FOR(oc->L, linker,
                 ocDebugBelch(oc, "ocAllocateExtras_MachO failed\n"));
        return r;
@@ -1528,6 +1565,11 @@ ll_hs_int loadOc (ObjectCode* oc)
 #  elif defined(OBJFORMAT_ELF)
    r = ocAllocateExtras_ELF ( oc );
    if (!r) {
+       if (oc->L->error_status == LL_OK) {
+           ll_error_set(oc->L, LL_E_NOMEM,
+                        "loadObj: could not allocate symbol extras in %" PATH_FMT,
+                        OC_INFORMATIVE_FILENAME(oc));
+       }
        LL_IF_DEBUG_FOR(oc->L, linker,
                 ocDebugBelch(oc, "ocAllocateExtras_ELF failed\n"));
        return r;
@@ -1546,6 +1588,11 @@ ll_hs_int loadOc (ObjectCode* oc)
    LL_FATAL_FOR(oc->L, "loadObj: no getNames method");
 #  endif
    if (!r) {
+       if (oc->L->error_status == LL_OK) {
+           ll_error_set(oc->L, LL_E_FORMAT,
+                        "loadObj: could not read symbols in %" PATH_FMT,
+                        OC_INFORMATIVE_FILENAME(oc));
+       }
        LL_IF_DEBUG_FOR(oc->L, linker, ocDebugBelch(oc, "ocGetNames_* failed\n"));
        return r;
    }
@@ -1613,6 +1660,11 @@ int ocTryLoad (ObjectCode* oc) {
     LL_FATAL_FOR(oc->L, "ocTryLoad: not implemented on this platform");
 #   endif
     if (!r) {
+        if (oc->L->error_status == LL_OK) {
+            ll_error_set(oc->L, LL_E_UNRESOLVED,
+                         "could not resolve object %" PATH_FMT,
+                         OC_INFORMATIVE_FILENAME(oc));
+        }
         LL_IF_DEBUG_FOR(oc->L, linker, ocDebugBelch(oc, "resolution failed\n"));
         return r;
     }
@@ -1662,7 +1714,14 @@ int ocRunInit(ObjectCode *oc)
         oc->L->services.host.after_init(oc->L->services.host.ctx, oc, r != 0);
     }
 
-    if (!r) { return r; }
+    if (!r) {
+        if (oc->L->error_status == LL_OK) {
+            ll_error_set(oc->L, LL_E_INIT,
+                         "could not run initializers of %" PATH_FMT,
+                         OC_INFORMATIVE_FILENAME(oc));
+        }
+        return r;
+    }
     oc->initializersRan = true;
     oc->status = OBJECT_READY;
 
@@ -1719,6 +1778,7 @@ static ll_hs_int resolveObjs_ (ll_linker *L)
 ll_hs_int resolveObjs (void)
 {
     ll_mutex_lock(&ll_default_linker.linker_mutex);
+    ll_error_clear(&ll_default_linker);
     ll_hs_int r = resolveObjs_(&ll_default_linker);
     ll_mutex_unlock(&ll_default_linker.linker_mutex);
     return r;
@@ -1768,6 +1828,8 @@ static ll_hs_int unloadObj_ (ll_linker *L, pathchar *path, bool just_purge)
     if (unloadedAnyObj) {
         return 1;
     } else {
+        ll_error_set(L, LL_E_NOT_FOUND,
+                     "unloadObj: can't find `%" PATH_FMT "' to unload", path);
         LL_LOG_ERROR_FOR(L, "unloadObj: can't find `%" PATH_FMT "' to unload", path);
         return 0;
     }
@@ -1776,6 +1838,7 @@ static ll_hs_int unloadObj_ (ll_linker *L, pathchar *path, bool just_purge)
 ll_hs_int unloadObj (pathchar *path)
 {
     ll_mutex_lock(&ll_default_linker.linker_mutex);
+    ll_error_clear(&ll_default_linker);
     ll_hs_int r = unloadObj_(&ll_default_linker, path, false);
     ll_mutex_unlock(&ll_default_linker.linker_mutex);
     return r;
@@ -1784,6 +1847,7 @@ ll_hs_int unloadObj (pathchar *path)
 ll_hs_int purgeObj (pathchar *path)
 {
     ll_mutex_lock(&ll_default_linker.linker_mutex);
+    ll_error_clear(&ll_default_linker);
     ll_hs_int r = unloadObj_(&ll_default_linker, path, true);
     ll_mutex_unlock(&ll_default_linker.linker_mutex);
     return r;

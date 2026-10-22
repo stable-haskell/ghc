@@ -76,3 +76,25 @@ allocation or diagnostic hooks. Run from the repository root and set
       liblink/tests/unit/error_state.c liblink/src/ll_error.c \
       liblink/src/ll_host.c -o error-state-sanitized
     ./error-state-sanitized
+
+Core linker error statuses and mmap failure
+===========================================
+
+`core_error_status.c` includes the current private `Linker.c` and links its
+dependencies from a freshly rebuilt static `liblink.a`. It covers the core
+error statuses and checks that a NULL mapping result closes the input file
+descriptor before returning. Set `LL_CONFIG_DIR` and `RTS_FS_INCLUDE` to the
+generated liblink and `rts-fs` include directories, and `LIBLINK_BUILD_LIB` to
+the directory containing the fresh archive. The link-map option below uses
+Darwin linker syntax.
+
+    : "${LL_CONFIG_DIR:?set the generated liblink include directory}"
+    : "${RTS_FS_INCLUDE:?set the generated rts-fs include directory}"
+    : "${LIBLINK_BUILD_LIB:?set the directory containing fresh liblink.a}"
+    CC=${CC:-cc}
+    "$CC" -std=c11 -Wall -Wextra -Werror=vla -pedantic -DLL_ASSERTS \
+      -isystem "$LL_CONFIG_DIR" -isystem "$RTS_FS_INCLUDE" \
+      -Iliblink/include -Iliblink/src \
+      liblink/tests/unit/core_error_status.c -L"$LIBLINK_BUILD_LIB" -llink \
+      -Wl,-map,core-error-status.map -o core-error-status
+    ./core-error-status

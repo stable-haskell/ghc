@@ -2200,6 +2200,9 @@ int ocAllocateExtras_ELF( ObjectCode *oc )
 
   if( symtab->sh_entsize != sizeof( Elf_Sym ) )
   {
+    ll_error_set(oc->L, LL_E_FORMAT,
+      "The entry size (%d) of the symtab isn't %d\n",
+      (int) symtab->sh_entsize, (int) sizeof( Elf_Sym ) );
     LL_LOG_ERROR_FOR(oc->L, "The entry size (%d) of the symtab isn't %d\n",
       (int) symtab->sh_entsize, (int) sizeof( Elf_Sym ) );
 
