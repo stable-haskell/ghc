@@ -80,12 +80,12 @@ static void default_fatal(void *ctx, const char *fmt, va_list ap)
     .log = default_log, .fatal = default_fatal }
 
 /* These globals are temporary: stage 2 moves them into each linker instance. */
-ll_host_ops ll_host = DEFAULT_HOST;
-ll_config ll_cfg;
+ll_compat_host_ops ll_host = DEFAULT_HOST;
+ll_compat_config ll_cfg;
 
-void ll_install_host(const ll_host_ops *host, const ll_config *cfg)
+void ll_install_host(const ll_compat_host_ops *host, const ll_compat_config *cfg)
 {
-    ll_host_ops installed = DEFAULT_HOST;
+    ll_compat_host_ops installed = DEFAULT_HOST;
     if (host != NULL) {
         installed = *host;
         if (installed.malloc_ == NULL) installed.malloc_ = default_malloc;
@@ -96,5 +96,5 @@ void ll_install_host(const ll_host_ops *host, const ll_config *cfg)
         if (installed.fatal == NULL) installed.fatal = default_fatal;
     }
     ll_host = installed;
-    ll_cfg = cfg != NULL ? *cfg : (ll_config){0};
+    ll_cfg = cfg != NULL ? *cfg : (ll_compat_config){0};
 }

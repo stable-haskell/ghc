@@ -45,8 +45,8 @@ static int read_input(RunnerState *state, const char *path)
 int main(int argc, char **argv)
 {
     RunnerState state = {0};
-    ll_host_ops host;
-    ll_config config;
+    ll_compat_host_ops host;
+    ll_compat_config config;
     const char *object_path;
     bool debug = argc == 3 && strcmp(argv[1], "--debug") == 0;
     int ok;

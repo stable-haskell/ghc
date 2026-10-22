@@ -45,7 +45,7 @@ LL_FRIEND_API void ll_unlock_at(ll_mutex *mutex, const char *file, int line);
 void ll_assert_lock_held_at(ll_mutex *mutex, const char *file, int line);
 
 /* Keep lock failure diagnostics attributed to the original call sites. */
-#define ll_lock(mutex) ll_lock_at((mutex), __FILE__, __LINE__)
-#define ll_unlock(mutex) ll_unlock_at((mutex), __FILE__, __LINE__)
+#define ll_mutex_lock(mutex) ll_lock_at((mutex), __FILE__, __LINE__)
+#define ll_mutex_unlock(mutex) ll_unlock_at((mutex), __FILE__, __LINE__)
 #define ll_assert_lock_held(mutex) \
     ll_assert_lock_held_at((mutex), __FILE__, __LINE__)

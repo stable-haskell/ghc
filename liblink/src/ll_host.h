@@ -9,6 +9,7 @@
 #pragma once
 
 #include "ll_visibility.h"
+#include "liblink.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -17,16 +18,12 @@
 
 struct _ObjectCode;
 
-enum { LL_LOG_ERROR = 1, LL_LOG_SYSERROR = 2, LL_LOG_DEBUG = 4 };
-enum { LL_DBG_LINKER = 1u << 0, LL_DBG_LINKER_VERBOSE = 1u << 1,
-       LL_DBG_SANITY = 1u << 2, LL_DBG_ZERO_ON_FREE = 1u << 3 };
-
 /* The linker supplies the insertion callback; the host supplies its builtins.
  * Symbol type and strength retain their existing integer representations. */
 typedef void (*ll_builtin_fn)(void *ctx, const char *name, void *addr,
                               int strength, int type);
 
-typedef struct ll_host_ops {
+typedef struct ll_compat_host_ops {
     void *ctx;
     void *(*malloc_)(void *ctx, size_t n, const char *what);
     void *(*calloc_)(void *ctx, size_t n, size_t size, const char *what);
@@ -57,18 +54,18 @@ typedef struct ll_host_ops {
     void (*exit_unload_check)(void *ctx);
     void (*populate_builtins)(void *ctx, int retain_cafs,
                              ll_builtin_fn insert, void *insert_ctx);
-} ll_host_ops;
+} ll_compat_host_ops;
 
-typedef struct ll_config {
+typedef struct ll_compat_config {
     const void *near_hint;
     uintptr_t mem_base;
     bool always_pic;
     bool optimistic;
     unsigned debug_mask;
-} ll_config;
+} ll_compat_config;
 
 /* Stage 1 retains one process-wide linker. Installation copies both structures
  * during RTS startup, before any linker allocation or adjustor mapping. */
-extern LL_FRIEND_API ll_host_ops ll_host;
-extern LL_FRIEND_API ll_config ll_cfg;
-LL_FRIEND_API void ll_install_host(const ll_host_ops *host, const ll_config *cfg);
+extern LL_FRIEND_API ll_compat_host_ops ll_host;
+extern LL_FRIEND_API ll_compat_config ll_cfg;
+LL_FRIEND_API void ll_install_host(const ll_compat_host_ops *host, const ll_compat_config *cfg);

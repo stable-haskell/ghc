@@ -72,8 +72,8 @@ typedef struct {
     void *image_anchor;
 } RunnerState;
 
-void runner_host_configure(RunnerState *state, ll_host_ops *host,
-                           ll_config *config, bool debug);
+void runner_host_configure(RunnerState *state, ll_compat_host_ops *host,
+                           ll_compat_config *config, bool debug);
 void runner_host_cleanup(RunnerState *state);
 int runner_json_emit(RunnerState *state);
 

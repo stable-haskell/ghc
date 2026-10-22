@@ -13,6 +13,7 @@ extra-source-files:
     build-aux/config.sub
     configure
     configure.ac
+    include/liblink.h
     include/liblink/compat.h
     include/liblink/rts_friend.h
     include/ll_autoconf.h.in
@@ -78,6 +79,7 @@ extra-source-files:
     src/linker/macho/plt_aarch64.c
     src/linker/macho/plt_aarch64.h
     src/linker/util.h
+    src/ll_backend.h
     src/ll_begin_private.h
     src/ll_compat.h
     src/ll_compat_aliases.h
@@ -114,6 +116,7 @@ library
     include-dirs: src include
     autogen-includes: ll_autoconf.h ll_platform.h
     install-includes:
+        liblink.h
         ll_autoconf.h
         ll_platform.h
         ll_compat.h

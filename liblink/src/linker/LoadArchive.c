@@ -720,9 +720,9 @@ fail:
 
 ll_hs_int loadArchive (pathchar *path)
 {
-   ll_lock(&linker_mutex);
+   ll_mutex_lock(&linker_mutex);
    ll_hs_int r = loadArchive_(path);
-   ll_unlock(&linker_mutex);
+   ll_mutex_unlock(&linker_mutex);
    return r;
 }
 

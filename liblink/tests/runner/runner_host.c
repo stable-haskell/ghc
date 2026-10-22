@@ -290,11 +290,11 @@ static void before_init(void *ctx, ObjectCode *object)
     state->captured_before_init = true;
 }
 
-void runner_host_configure(RunnerState *state, ll_host_ops *host,
-                           ll_config *config, bool debug)
+void runner_host_configure(RunnerState *state, ll_compat_host_ops *host,
+                           ll_compat_config *config, bool debug)
 {
     active_state = state;
-    *host = (ll_host_ops){0};
+    *host = (ll_compat_host_ops){0};
     host->ctx = state;
     host->log = host_log;
     host->fatal = host_fatal;
@@ -304,7 +304,7 @@ void runner_host_configure(RunnerState *state, ll_host_ops *host,
     host->before_init = before_init;
     host->populate_builtins = populate_builtins;
 
-    *config = (ll_config){0};
+    *config = (ll_compat_config){0};
     config->near_hint = &state->image_anchor;
     config->always_pic = true;
     if (debug) {

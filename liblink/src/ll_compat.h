@@ -58,20 +58,6 @@ typedef char ll_symbol_name;
 #include "ll_compat_aliases.h"
 #endif
 
-typedef enum {
-    LL_SYM_CODE = 1 << 0,
-    LL_SYM_DATA = 1 << 1,
-    LL_SYM_INDIRECT_DATA = 1 << 2,
-    LL_SYM_DUP_DISCARD = 1 << 3,
-    LL_SYM_HIDDEN = 1 << 4
-} ll_sym_type;
-
-typedef enum {
-    LL_STRENGTH_NORMAL = 0,
-    LL_STRENGTH_WEAK = 1,
-    LL_STRENGTH_STRONG = 2
-} ll_strength;
-
 #ifndef MAYBE_LEADING_UNDERSCORE_STR
 #if defined(LEADING_UNDERSCORE)
 #define MAYBE_LEADING_UNDERSCORE_STR(s) ("_" s)

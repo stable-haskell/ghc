@@ -89,6 +89,17 @@ _Static_assert((int)LL_STRENGTH_NORMAL == (int)STRENGTH_NORMAL, "LL_STRENGTH_NOR
 _Static_assert((int)LL_STRENGTH_WEAK == (int)STRENGTH_WEAK, "LL_STRENGTH_WEAK mismatch");
 _Static_assert((int)LL_STRENGTH_STRONG == (int)STRENGTH_STRONG, "LL_STRENGTH_STRONG mismatch");
 
+_Static_assert(sizeof(ll_obj_status) == sizeof(OStatus), "linker object status size mismatch");
+_Static_assert(_Alignof(ll_obj_status) == _Alignof(OStatus), "linker object status alignment mismatch");
+_Static_assert(((ll_obj_status)-1 < (ll_obj_status)0) == ((OStatus)-1 < (OStatus)0), "linker object status signedness mismatch");
+_Static_assert((int)LL_OBJ_LOADED == (int)OBJECT_LOADED, "LL_OBJ_LOADED mismatch");
+_Static_assert((int)LL_OBJ_NEEDED == (int)OBJECT_NEEDED, "LL_OBJ_NEEDED mismatch");
+_Static_assert((int)LL_OBJ_RESOLVED == (int)OBJECT_RESOLVED, "LL_OBJ_RESOLVED mismatch");
+_Static_assert((int)LL_OBJ_READY == (int)OBJECT_READY, "LL_OBJ_READY mismatch");
+_Static_assert((int)LL_OBJ_UNLOADED == (int)OBJECT_UNLOADED, "LL_OBJ_UNLOADED mismatch");
+_Static_assert((int)LL_OBJ_DONT_RESOLVE == (int)OBJECT_DONT_RESOLVE, "LL_OBJ_DONT_RESOLVE mismatch");
+_Static_assert((int)LL_OBJ_NOT_LOADED == (int)OBJECT_NOT_LOADED, "LL_OBJ_NOT_LOADED mismatch");
+
 static void *host_malloc(void *ctx STG_UNUSED, size_t n, const char *what)
 {
     return stgMallocBytes(n, (char *)what);
@@ -270,7 +281,7 @@ static void host_populate_builtins(void *ctx STG_UNUSED, int retain_cafs,
 
 void ll_rts_install_host(void)
 {
-    const ll_host_ops host = {
+    const ll_compat_host_ops host = {
         .malloc_ = host_malloc,
         .calloc_ = host_calloc,
         .realloc_ = host_realloc,
@@ -295,7 +306,7 @@ void ll_rts_install_host(void)
         .exit_unload_check = host_exit_unload_check,
         .populate_builtins = host_populate_builtins,
     };
-    const ll_config cfg = {
+    const ll_compat_config cfg = {
         .near_hint = &stg_upd_frame_info,
         .mem_base = RtsFlags.MiscFlags.linkerMemBase,
         .always_pic = RtsFlags.MiscFlags.linkerAlwaysPic,
