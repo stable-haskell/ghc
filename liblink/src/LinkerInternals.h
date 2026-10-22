@@ -47,7 +47,7 @@ void printLoadedObjects(void);
  * is valid return value of get_shndx_table. Thus SHNDX_TABLE_UNINIT is defined
  * as the address of the linker's shndx_table_uninit_label, which is definitely
  * unequal to any heap-allocated address. */
-#define SHNDX_TABLE_UNINIT (&ll_default_linker.shndx_table_uninit_label)
+#define SHNDX_TABLE_UNINIT(L) (&(L)->shndx_table_uninit_label)
 #endif
 
 #define OC_INFORMATIVE_FILENAME(OC)             \
@@ -147,7 +147,7 @@ ll_hs_int isAlreadyLoaded( pathchar *path );
 OStatus getObjectLoadStatus_ (pathchar *path);
 ObjectCode *lookupObjectByPath(pathchar *path);
 ll_hs_int loadOc( ObjectCode* oc );
-ObjectCode* mkOc( ObjectType type, pathchar *path, char *image, int imageSize,
+ObjectCode* mkOc( ll_linker *L, ObjectType type, pathchar *path, char *image, int imageSize,
                   bool mapped, pathchar *archiveMemberName,
                   int misalignment
                   );

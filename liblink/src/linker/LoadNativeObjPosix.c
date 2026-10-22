@@ -131,7 +131,7 @@ void * loadNativeObj_POSIX (pathchar *path, char **errmsg)
      goto dlopen_fail;
    }
 
-   nc = mkOc(DYNAMIC_OBJECT, path, NULL, 0, false, NULL, 0);
+   nc = mkOc(&ll_default_linker, DYNAMIC_OBJECT, path, NULL, 0, false, NULL, 0);
 
    // If we HAVE_DLINFO, we use RTLD_NOW rather than RTLD_LAZY because we want
    // to learn eagerly about all external functions. Otherwise, there is no

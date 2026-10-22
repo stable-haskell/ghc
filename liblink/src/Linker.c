@@ -1174,13 +1174,15 @@ void freeObjectCode (ObjectCode *oc)
 }
 
 ObjectCode*
-mkOc( ObjectType type, pathchar *path, char *image, int imageSize,
+mkOc( ll_linker *L, ObjectType type, pathchar *path, char *image, int imageSize,
       bool mapped, pathchar *archiveMemberName, int misalignment ) {
    ObjectCode* oc;
 
 
-   LL_IF_DEBUG(linker, LL_DEBUG("mkOc: %" PATH_FMT "\n", path));
-   oc = LL_MALLOC(sizeof(ObjectCode), "mkOc(oc)");
+   LL_IF_DEBUG_FOR(L, linker,
+                   LL_DEBUG_FOR(L, "mkOc: %" PATH_FMT "\n", path));
+   oc = LL_MALLOC_FOR(L, sizeof(ObjectCode), "mkOc(oc)");
+   oc->L = L;
 
    oc->info = NULL;
    oc->type = type;
@@ -1192,16 +1194,16 @@ mkOc( ObjectType type, pathchar *path, char *image, int imageSize,
 #  elif defined(OBJFORMAT_MACHO)
    oc->formatName = "Mach-O";
 #  else
-   LL_FREE(oc);
-   LL_FATAL("loadObj: not implemented on this platform");
+   LL_FREE_FOR(L, oc);
+   LL_FATAL_FOR(L, "loadObj: not implemented on this platform");
 #  endif
 
    oc->image = image;
-   oc->fileName = pathdup(&ll_default_linker, path);
+   oc->fileName = pathdup(L, path);
 
    if (archiveMemberName) {
-       oc->archiveMemberName = LL_MALLOC( (pathlen(archiveMemberName)+1) * pathsize,
-                                               "loadObj" );
+       oc->archiveMemberName = LL_MALLOC_FOR(
+           L, (pathlen(archiveMemberName)+1) * pathsize, "loadObj");
        pathcopy(oc->archiveMemberName, archiveMemberName);
    } else {
        oc->archiveMemberName = NULL;
@@ -1238,18 +1240,18 @@ mkOc( ObjectType type, pathchar *path, char *image, int imageSize,
    oc->next              = NULL;
    oc->prev              = NULL;
    oc->next_loaded_object = NULL;
-   oc->mark              = ll_default_linker.gc.object_code_mark_bit;
+   oc->mark              = L->gc.object_code_mark_bit;
    /* this will get cleared by the caller if object is not safely unloadable */
    oc->unloadable        = true;
-   oc->dependencies      = allocHashSet(&ll_default_linker);
+   oc->dependencies      = allocHashSet(L);
 
 #if defined(NEED_M32)
-   oc->rw_m32 = m32_allocator_new(false);
-   oc->rx_m32 = m32_allocator_new(true);
+   oc->rw_m32 = m32_allocator_new_for(L, false);
+   oc->rx_m32 = m32_allocator_new_for(L, true);
 #endif
 
 #if defined(OBJFORMAT_ELF) && defined(SHN_XINDEX)
-   oc->shndx_table = SHNDX_TABLE_UNINIT;
+   oc->shndx_table = SHNDX_TABLE_UNINIT(L);
 #endif
 
    oc->nc_ranges = NULL;
@@ -1381,7 +1383,7 @@ preloadObjectFile (pathchar *path)
    LL_IF_DEBUG(linker, LL_DEBUG("loadObj: preloaded image at %p\n", (void *) image));
 
    /* FIXME (AP): =mapped= parameter unconditionally set to true */
-   oc = mkOc(STATIC_OBJECT, path, image, fileSize, true, NULL, misalignment);
+   oc = mkOc(&ll_default_linker, STATIC_OBJECT, path, image, fileSize, true, NULL, misalignment);
 
 #if defined(OBJFORMAT_MACHO)
    if (ocVerifyImage_MachO( oc ))

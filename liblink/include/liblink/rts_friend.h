@@ -217,6 +217,9 @@ typedef void (*cxa_finalize_fn)(void *);
  * for each object file in use.
  */
 struct _ObjectCode {
+    /* Linker that owns this object's allocations, caches, and services. */
+    ll_linker *L;
+
     ll_compat_ostatus    status;
     ll_compat_pathchar  *fileName;
     int        fileSize;     /* also mapped image size when using mmap() */

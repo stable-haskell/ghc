@@ -611,7 +611,7 @@ ll_hs_int loadArchive_ (pathchar *path)
             pathprintf(archiveMemberName, size+1, WSTR("%" PATH_FMT "(#%d:%.*s)"),
                        path, memberIdx, (int)thisFileNameSize, fileName);
 
-            ObjectCode *oc = mkOc(STATIC_OBJECT, path, image, memberSize, false, archiveMemberName,
+            ObjectCode *oc = mkOc(&ll_default_linker, STATIC_OBJECT, path, image, memberSize, false, archiveMemberName,
                                   misalignment);
 #if defined(OBJFORMAT_MACHO)
             LL_ASSERT(object_fmt == MachO32 || object_fmt == MachO64);

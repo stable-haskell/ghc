@@ -183,7 +183,7 @@ static Elf_Word elf_shstrndx(Elf_Ehdr* ehdr)
 static Elf_Word*
 get_shndx_table(ObjectCode* oc)
 {
-   if (LL_LIKELY(oc->shndx_table != SHNDX_TABLE_UNINIT)) {
+   if (LL_LIKELY(oc->shndx_table != SHNDX_TABLE_UNINIT(oc->L))) {
       return oc->shndx_table;
    }
 
@@ -367,7 +367,7 @@ ocDeinit_ELF(ObjectCode * oc)
         LL_FREE(oc->info);
         oc->info = NULL;
 #if defined(SHN_XINDEX)
-        oc->shndx_table = SHNDX_TABLE_UNINIT;
+        oc->shndx_table = SHNDX_TABLE_UNINIT(oc->L);
 #endif
     }
 }
