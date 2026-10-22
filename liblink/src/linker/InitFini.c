@@ -51,9 +51,9 @@
 
 // Priority follows the init_array definition: initializers are run
 // lowest-to-highest, finalizers run highest-to-lowest.
-void addInitFini(struct InitFiniList **head, Section *section, enum InitFiniKind kind, uint32_t priority)
+void addInitFini(ll_linker *L, struct InitFiniList **head, Section *section, enum InitFiniKind kind, uint32_t priority)
 {
-    struct InitFiniList *slist = LL_MALLOC(sizeof(struct InitFiniList), "addInitFini");
+    struct InitFiniList *slist = LL_MALLOC_FOR(L, sizeof(struct InitFiniList), "addInitFini");
     slist->section = section;
     slist->kind = kind;
     slist->priority = priority;
@@ -91,22 +91,22 @@ static void sortInitFiniList(struct InitFiniList **slist, enum SortOrder order)
     }
 }
 
-void freeInitFiniList(struct InitFiniList *slist)
+void freeInitFiniList(ll_linker *L, struct InitFiniList *slist)
 {
     while (slist != NULL) {
         struct InitFiniList *next = slist->next;
-        LL_FREE(slist);
+        LL_FREE_FOR(L, slist);
         slist = next;
     }
 }
 
-static bool runInitFini(struct InitFiniList **head)
+static bool runInitFini(ll_linker *L, struct InitFiniList **head)
 {
     int argc = 0, envc = 0;
     char **argv = NULL, **envv = NULL;
 
-    if (ll_host.prog_args != NULL) {
-        ll_host.prog_args(ll_host.ctx, &argc, &argv, &envc, &envv);
+    if (L->services.host.prog_args != NULL) {
+        L->services.host.prog_args(L->services.host.ctx, &argc, &argv, &envc, &envv);
     }
 
     for (struct InitFiniList *slist = *head;
@@ -156,7 +156,7 @@ static bool runInitFini(struct InitFiniList **head)
             init_t *init_start = (init_t*)init_startC;
             init_t *init_end = (init_t*)(init_startC + section->size);
             for (init_t *init = init_start; init < init_end; init++) {
-                LL_CHECK(0x0 != *init);
+                LL_CHECK_FOR(L, 0x0 != *init);
                 (*init)(argc, argv, envv);
             }
             break;
@@ -167,19 +167,19 @@ static bool runInitFini(struct InitFiniList **head)
             fini_t *fini_end = (fini_t*)(fini_startC + section->size);
             // .fini_array finalizers are run backwards
             for (fini_t *fini = fini_end - 1; fini >= fini_start; fini--) {
-                LL_CHECK(0x0 != *fini);
+                LL_CHECK_FOR(L, 0x0 != *fini);
                 (*fini)();
             }
             break;
         }
-        default: LL_FATAL("unknown InitFiniKind");
+        default: LL_FATAL_FOR(L, "unknown InitFiniKind");
         }
     }
-    freeInitFiniList(*head);
+    freeInitFiniList(L, *head);
     *head = NULL;
 
-    if (ll_host.free_prog_env != NULL) {
-        ll_host.free_prog_env(ll_host.ctx, envc, envv);
+    if (L->services.host.free_prog_env != NULL) {
+        L->services.host.free_prog_env(L->services.host.ctx, envc, envv);
     }
     return true;
 }
@@ -187,17 +187,17 @@ static bool runInitFini(struct InitFiniList **head)
 // Run the constructors/initializers of an ObjectCode.
 // Returns 1 on success.
 // See Note [Initializers and finalizers (PEi386/ELF)].
-bool runInit(struct InitFiniList **head)
+bool runInit(ll_linker *L, struct InitFiniList **head)
 {
     sortInitFiniList(head, INCREASING);
-    return runInitFini(head);
+    return runInitFini(L, head);
 }
 
 // Run the finalizers of an ObjectCode.
 // Returns 1 on success.
 // See Note [Initializers and finalizers (PEi386/ELF)].
-bool runFini(struct InitFiniList **head)
+bool runFini(ll_linker *L, struct InitFiniList **head)
 {
     sortInitFiniList(head, DECREASING);
-    return runInitFini(head);
+    return runInitFini(L, head);
 }

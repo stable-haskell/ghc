@@ -688,8 +688,8 @@ static void releaseOcInfo(ObjectCode* oc) {
     if (!oc) return;
 
     if (oc->info) {
-        freeInitFiniList(oc->info->init);
-        freeInitFiniList(oc->info->fini);
+        freeInitFiniList(oc->L, oc->info->init);
+        freeInitFiniList(oc->L, oc->info->fini);
         LL_FREE (oc->info->ch_info);
         LL_FREE (oc->info->symbols);
         LL_FREE (oc->info->str_tab);
@@ -1685,7 +1685,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
           // .ctors/.dtors are executed in reverse order: higher numbers are
           // executed first
           prio = 0xffff - prio;
-          addInitFini(&oc->info->init, &oc->sections[i], INITFINI_CTORS, prio);
+          addInitFini(oc->L, &oc->info->init, &oc->sections[i], INITFINI_CTORS, prio);
           kind = SECTIONKIND_INIT_ARRAY;
       }
 
@@ -1698,7 +1698,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
           // .ctors/.dtors are executed in reverse order: higher numbers are
           // executed first
           prio = 0xffff - prio;
-          addInitFini(&oc->info->fini, &oc->sections[i], INITFINI_DTORS, prio);
+          addInitFini(oc->L, &oc->info->fini, &oc->sections[i], INITFINI_DTORS, prio);
           kind = SECTIONKIND_FINI_ARRAY;
       }
 
@@ -2480,7 +2480,7 @@ bool
 ocRunInit_PEi386 ( ObjectCode *oc )
 {
     if (oc && oc->info && oc->info->init) {
-        return runInit(&oc->info->init);
+        return runInit(oc->L, &oc->info->init);
     }
     return true;
 }
@@ -2488,7 +2488,7 @@ ocRunInit_PEi386 ( ObjectCode *oc )
 bool ocRunFini_PEi386( ObjectCode *oc )
 {
     if (oc && oc->info && oc->info->fini) {
-        return runFini(&oc->info->fini);
+        return runFini(oc->L, &oc->info->fini);
     }
     return true;
 }

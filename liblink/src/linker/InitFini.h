@@ -17,7 +17,7 @@ struct InitFiniList {
     struct InitFiniList *next;
 };
 
-void addInitFini(struct InitFiniList **slist, Section *section, enum InitFiniKind kind, uint32_t priority);
-void freeInitFiniList(struct InitFiniList *slist);
-bool runInit(struct InitFiniList **slist);
-bool runFini(struct InitFiniList **slist);
+void addInitFini(ll_linker *L, struct InitFiniList **slist, Section *section, enum InitFiniKind kind, uint32_t priority);
+void freeInitFiniList(ll_linker *L, struct InitFiniList *slist);
+bool runInit(ll_linker *L, struct InitFiniList **slist);
+bool runFini(ll_linker *L, struct InitFiniList **slist);

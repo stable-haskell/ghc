@@ -761,10 +761,10 @@ ocGetNames_ELF ( ObjectCode* oc )
        */
       if (kind == SECTIONKIND_CODE_OR_RODATA
             && 0 == memcmp(".init", sh_name, 5)) {
-          addInitFini(&oc->info->init, &oc->sections[i], INITFINI_INIT, 0);
+          addInitFini(oc->L, &oc->info->init, &oc->sections[i], INITFINI_INIT, 0);
       } else if (kind == SECTIONKIND_CODE_OR_RODATA
             && 0 == memcmp(".fini", sh_name, 5)) {
-          addInitFini(&oc->info->fini, &oc->sections[i], INITFINI_FINI, 0);
+          addInitFini(oc->L, &oc->info->fini, &oc->sections[i], INITFINI_FINI, 0);
       } else if (kind == SECTIONKIND_INIT_ARRAY
             || 0 == memcmp(".init_array", sh_name, 11)) {
           uint32_t prio;
@@ -773,7 +773,7 @@ ocGetNames_ELF ( ObjectCode* oc )
               prio = 0;
           }
           prio += 0x10000; // .init_arrays run after .ctors
-          addInitFini(&oc->info->init, &oc->sections[i], INITFINI_INIT_ARRAY, prio);
+          addInitFini(oc->L, &oc->info->init, &oc->sections[i], INITFINI_INIT_ARRAY, prio);
           kind = SECTIONKIND_INIT_ARRAY;
       } else if (kind == SECTIONKIND_FINI_ARRAY
             || 0 == memcmp(".fini_array", sh_name, 11)) {
@@ -783,7 +783,7 @@ ocGetNames_ELF ( ObjectCode* oc )
               prio = 0;
           }
           prio += 0x10000; // .fini_arrays run before .dtors
-          addInitFini(&oc->info->fini, &oc->sections[i], INITFINI_FINI_ARRAY, prio);
+          addInitFini(oc->L, &oc->info->fini, &oc->sections[i], INITFINI_FINI_ARRAY, prio);
           kind = SECTIONKIND_FINI_ARRAY;
 
       /* N.B. a compilation unit may have more than one .ctor section; we
@@ -797,7 +797,7 @@ ocGetNames_ELF ( ObjectCode* oc )
           // .ctors/.dtors are executed in reverse order: higher numbers are
           // executed first
           prio = 0xffff - prio;
-          addInitFini(&oc->info->init, &oc->sections[i], INITFINI_CTORS, prio);
+          addInitFini(oc->L, &oc->info->init, &oc->sections[i], INITFINI_CTORS, prio);
           kind = SECTIONKIND_INIT_ARRAY;
       } else if (0 == memcmp(".dtors", sh_name, 6)) {
           uint32_t prio;
@@ -808,7 +808,7 @@ ocGetNames_ELF ( ObjectCode* oc )
           // .ctors/.dtors are executed in reverse order: higher numbers are
           // executed first
           prio = 0xffff - prio;
-          addInitFini(&oc->info->fini, &oc->sections[i], INITFINI_DTORS, prio);
+          addInitFini(oc->L, &oc->info->fini, &oc->sections[i], INITFINI_DTORS, prio);
           kind = SECTIONKIND_FINI_ARRAY;
       }
 
@@ -2146,7 +2146,7 @@ ocResolve_ELF ( ObjectCode* oc )
 int ocRunInit_ELF( ObjectCode *oc )
 {
     if (oc && oc->info && oc->info->init) {
-        return runInit(&oc->info->init);
+        return runInit(oc->L, &oc->info->init);
     }
     return true;
 }
@@ -2157,7 +2157,7 @@ int ocRunInit_ELF( ObjectCode *oc )
 int ocRunFini_ELF( ObjectCode *oc )
 {
     if (oc && oc->info && oc->info->fini) {
-        return runFini(&oc->info->fini);
+        return runFini(oc->L, &oc->info->fini);
     }
     return true;
 }
