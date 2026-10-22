@@ -22,13 +22,13 @@ void setSymbolInfo(ObjectCode *owner, const void *label, symbolUpdater updater)
     {
         info = NULL;
         if (!owner->extraInfos)
-            owner->extraInfos = allocStrHashTable(&ll_default_linker);
+            owner->extraInfos = allocStrHashTable(owner->L);
         else
             info = lookupStrHashTable(owner->extraInfos, label);
 
         if (!info)
         {
-            info = LL_MALLOC(sizeof(SymbolInfo), "setSymbolInfo");
+            info = LL_MALLOC_FOR(owner->L, sizeof(SymbolInfo), "setSymbolInfo");
             info->kind = 0;
         }
 

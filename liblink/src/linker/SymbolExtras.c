@@ -67,27 +67,27 @@ int ocAllocateExtras(ObjectCode* oc, int count, int first, int bssSize)
       int misalignment = oc->misalignment;
 
       oc->image -= misalignment;
-      oc->image = LL_REALLOC( oc->image,
+      oc->image = LL_REALLOC_FOR(oc->L, oc->image,
                                misalignment +
                                aligned + extras_size,
                                "ocAllocateExtras" );
       oc->image += misalignment;
 
       oc->symbol_extras = (SymbolExtra *) (oc->image + aligned);
-    } else if (USE_CONTIGUOUS_MMAP || ll_cfg.always_pic) {
+    } else if (USE_CONTIGUOUS_MMAP || oc->L->services.cfg.always_pic) {
       /* Keep image, bssExtras and symbol_extras contiguous */
       /* N.B. We currently can't mark symbol extras as non-executable in this
        * case. */
-      size_t n = ll_round_up_to_page(oc->fileSize);
+      size_t n = ll_round_up_to_page_for(oc->L, oc->fileSize);
       // round bssSize up to the nearest page size since we need to ensure that
       // symbol_extras is aligned to a page boundary so it can be mprotect'd.
-      bssSize = ll_round_up_to_page(bssSize);
+      bssSize = ll_round_up_to_page_for(oc->L, bssSize);
       size_t allocated_size = n + bssSize + extras_size;
-      void *new = mmapAnonForLinker(allocated_size);
+      void *new = ll_mmap_anon_for_linker(oc->L, allocated_size);
       if (new) {
           memcpy(new, oc->image, oc->fileSize);
           if (oc->imageMapped) {
-              munmapForLinker(oc->image, n, "ocAllocateExtras");
+              ll_munmap_for_linker(oc->L, oc->image, n, "ocAllocateExtras");
           }
           oc->image = new;
           oc->imageMapped = true;
@@ -103,7 +103,7 @@ int ocAllocateExtras(ObjectCode* oc, int count, int first, int bssSize)
     } else {
         /* m32_allocator_flush ensures that these are marked as executable when
          * we finish building them. */
-        oc->symbol_extras = m32_alloc(oc->rx_m32, extras_size, 8);
+        oc->symbol_extras = m32_alloc_for(oc->L, oc->rx_m32, extras_size, 8);
         if (oc->symbol_extras == NULL) return 0;
     }
   }
@@ -143,8 +143,8 @@ void ocProtectExtras(ObjectCode* oc)
      * in this case is hope that the platform doesn't mark such allocations as
      * non-executable.
      */
-  } else if (USE_CONTIGUOUS_MMAP || ll_cfg.always_pic) {
-    mprotectForLinker(oc->symbol_extras, sizeof(SymbolExtra) * oc->n_symbol_extras, MEM_READ_EXECUTE);
+  } else if (USE_CONTIGUOUS_MMAP || oc->L->services.cfg.always_pic) {
+    ll_mprotect_for_linker(oc->L, oc->symbol_extras, sizeof(SymbolExtra) * oc->n_symbol_extras, MEM_READ_EXECUTE);
   } else {
     /*
      * The symbol extras were allocated via m32. They will be protected when
@@ -161,7 +161,7 @@ SymbolExtra* makeSymbolExtra( ObjectCode const* oc,
 {
     SymbolExtra *extra;
 
-    LL_ASSERT( symbolNumber >= oc->first_symbol_extra
+    LL_ASSERT_FOR(oc->L, symbolNumber >= oc->first_symbol_extra
             && symbolNumber - oc->first_symbol_extra < oc->n_symbol_extras);
 
     extra = &oc->symbol_extras[symbolNumber - oc->first_symbol_extra];
