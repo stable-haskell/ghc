@@ -20,6 +20,16 @@
 #include "CheckUnload.h"
 #include "ll_host.h"
 
+#if defined(mingw32_HOST_OS)
+#include <stdio.h>
+
+/* See Note [_iob_func symbol]
+   In order to emulate __iob_func the memory location needs to point the
+   location of the I/O structures in memory.  As such we need RODATA to contain
+   the pointer as a redirect.  Essentially it's a DATA DLL reference.  */
+const void* __rts_iob_func = (void*)&__acrt_iob_func;
+#endif
+
 _Static_assert(sizeof(ll_word) == sizeof(StgWord), "linker word size mismatch");
 _Static_assert(sizeof(void *) == SIZEOF_VOID_P, "configured pointer size mismatch");
 _Static_assert(_Alignof(ll_word) == _Alignof(StgWord), "linker word alignment mismatch");

@@ -51,8 +51,6 @@
 #define LINKER_LOAD_BASE ((void *) 0x40000000)
 #endif
 
-extern void *mmap_32bit_base;
-
 // Map read/write anonymous memory, enforcing the constraint of
 // placing the mapping within 4GB of the executable image.
 void *mmapAnonForLinker (size_t bytes);

@@ -9,6 +9,7 @@
 #define LL_INTERNAL_SOURCE 1
 #include "ll_compat.h"
 #include "linker/M32Alloc.h"
+#include "ll_linker.h"
 #include "linker/MMap.h"
 
 #include <inttypes.h>
@@ -271,10 +272,6 @@ struct m32_allocator_t {
  *
  * We keep a small pool of free pages around to avoid fragmentation.
  */
-struct m32_page_t *m32_free_page_pool = NULL;
-/** Number of pages in free page pool */
-unsigned int m32_free_page_pool_size = 0;
-
 /**
  * Free a filled page or, if possible, place it in the free page pool.
  */
@@ -291,13 +288,13 @@ m32_release_page(struct m32_page_t *page)
   // Break the page, which may be a large multi-page allocation, into
   // individual pages for the page pool
   while (sz > 0) {
-    if (m32_free_page_pool_size < M32_MAX_FREE_PAGE_POOL_SIZE) {
+    if (ll_default_linker.m32_free_page_pool_size < M32_MAX_FREE_PAGE_POOL_SIZE) {
       mprotectForLinker(page, pgsz, MEM_READ_WRITE);
       LL_IF_DEBUG(sanity, memset(page, 0xaa, pgsz));
       SET_PAGE_TYPE(page, FREE_PAGE);
-      page->free_page.next = m32_free_page_pool;
-      m32_free_page_pool = page;
-      m32_free_page_pool_size ++;
+      page->free_page.next = ll_default_linker.m32_free_page_pool;
+      ll_default_linker.m32_free_page_pool = page;
+      ll_default_linker.m32_free_page_pool_size ++;
     } else {
       break;
     }
@@ -318,7 +315,7 @@ m32_release_page(struct m32_page_t *page)
 static struct m32_page_t *
 m32_alloc_page(void)
 {
-  if (m32_free_page_pool_size == 0) {
+  if (ll_default_linker.m32_free_page_pool_size == 0) {
     /*
      * Free page pool is empty; refill it with a new batch of M32_MAP_PAGES
      * pages.
@@ -339,15 +336,15 @@ m32_alloc_page(void)
       page->free_page.next = GET_PAGE(i+1);
     }
 
-    GET_PAGE(M32_MAP_PAGES-1)->free_page.next = m32_free_page_pool;
-    m32_free_page_pool = (struct m32_page_t *) chunk;
-    m32_free_page_pool_size += M32_MAP_PAGES;
+    GET_PAGE(M32_MAP_PAGES-1)->free_page.next = ll_default_linker.m32_free_page_pool;
+    ll_default_linker.m32_free_page_pool = (struct m32_page_t *) chunk;
+    ll_default_linker.m32_free_page_pool_size += M32_MAP_PAGES;
 #undef GET_PAGE
   }
 
-  struct m32_page_t *page = m32_free_page_pool;
-  m32_free_page_pool = page->free_page.next;
-  m32_free_page_pool_size --;
+  struct m32_page_t *page = ll_default_linker.m32_free_page_pool;
+  ll_default_linker.m32_free_page_pool = page->free_page.next;
+  ll_default_linker.m32_free_page_pool_size --;
   ASSERT_PAGE_TYPE(page, FREE_PAGE);
   return page;
 }

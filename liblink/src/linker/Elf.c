@@ -159,11 +159,6 @@
 
 */
 
-#if defined(SHN_XINDEX)
-/* global variable which address is used to signal an uninitialised shndx_table */
-Elf_Word shndx_table_uninit_label = 0;
-#endif
-
 static Elf_Word elf_shnum(Elf_Ehdr* ehdr)
 {
    Elf_Shdr* shdr = (Elf_Shdr*) ((char*)ehdr + ehdr->e_shoff);
@@ -2215,7 +2210,6 @@ int ocAllocateExtras_ELF( ObjectCode *oc )
 }
 
 #endif /* NEED_SYMBOL_EXTRAS */
-
 
 // Try interpreting an object which couldn't be loaded as a linker script and
 // load the first object in the linker GROUP ( ... ) directive (see comment below).

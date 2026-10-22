@@ -45,10 +45,9 @@ void printLoadedObjects(void);
 #if defined(OBJFORMAT_ELF) && defined(SHN_XINDEX)
 /* We cannot simply use NULL to signal uninitialised shndx_table because NULL
  * is valid return value of get_shndx_table. Thus SHNDX_TABLE_UNINIT is defined
- * as the address of global variable shndx_table_uninit_label, defined in
- * rts/linker/Elf.c, which is definitely unequal to any heap-allocated address */
-extern Elf_Word shndx_table_uninit_label;
-#define SHNDX_TABLE_UNINIT (&shndx_table_uninit_label)
+ * as the address of the linker's shndx_table_uninit_label, which is definitely
+ * unequal to any heap-allocated address. */
+#define SHNDX_TABLE_UNINIT (&ll_default_linker.shndx_table_uninit_label)
 #endif
 
 #define OC_INFORMATIVE_FILENAME(OC)             \
@@ -118,7 +117,6 @@ ll_symbol_addr* lookupDependentSymbol (ll_symbol_name* lbl, ObjectCode *dependen
 /* Perform TLSGD symbol lookup returning the address of the resulting GOT entry,
  * which in this case holds the module id and the symbol offset. */
 ll_int64 lookupTlsgdSymbol(const char *, unsigned long, ObjectCode *);
-
 
 /* defined in LoadArchive.c */
 bool isArchive (pathchar *path);

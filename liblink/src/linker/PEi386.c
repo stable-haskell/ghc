@@ -515,12 +515,6 @@ const Alignments pe_alignments[] = {
 const int pe_alignments_cnt = sizeof (pe_alignments) / sizeof (Alignments);
 const int default_alignment = 8;
 
-/* See Note [_iob_func symbol]
-   In order to emulate __iob_func the memory location needs to point the
-   location of the I/O structures in memory.  As such we need RODATA to contain
-   the pointer as a redirect.  Essentially it's a DATA DLL reference.  */
-const void* __rts_iob_func = (void*)&__acrt_iob_func;
-
 /*
  * Note [Avoiding repeated DLL loading]
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -530,12 +524,6 @@ const void* __rts_iob_func = (void*)&__acrt_iob_func;
  * addDLL_PEi386 and is mapped to its HINSTANCE. This serves as a quick check
  * to avoid repeated calls to LoadLibraryEx for the identical DLL. See #26009.
  */
-
-typedef struct {
-    HashTable *hash;
-} LoadedDllCache;
-
-LoadedDllCache loaded_dll_cache;
 
 static void initLoadedDllCache(LoadedDllCache *cache) {
     cache->hash = allocHashTable();
@@ -570,7 +558,7 @@ static HINSTANCE isDllLoaded(const LoadedDllCache *cache, const pathchar *dll_na
 
 void initLinker_PEi386(void)
 {
-    initLoadedDllCache(&loaded_dll_cache);
+    initLoadedDllCache(&ll_default_linker.loaded_dll_cache);
 
     if (!ghciInsertSymbolTable(WSTR("(GHCi/Ld special symbols)"),
                                ll_default_linker.symhash, "__image_base__",
@@ -594,9 +582,6 @@ void exitLinker_PEi386(void)
 {
 }
 
-/* A list thereof. */
-static OpenedDLL* opened_dlls = NULL;
-
 /* Adds a DLL instance to the list of DLLs in which to search for symbols. */
 static void addDLLHandle(const pathchar* dll_name, HINSTANCE instance) {
 
@@ -613,8 +598,8 @@ static void addDLLHandle(const pathchar* dll_name, HINSTANCE instance) {
     o_dll           = LL_MALLOC( sizeof(OpenedDLL), "addDLLHandle" );
     o_dll->name     = dll_name ? pathdup(dll_name) : NULL;
     o_dll->instance = instance;
-    o_dll->next     = opened_dlls;
-    opened_dlls     = o_dll;
+    o_dll->next     = ll_default_linker.opened_dlls;
+    ll_default_linker.opened_dlls     = o_dll;
 
     /* Now discover the dependencies of dll_name that were
        just loaded in our process space. The reason is we have access to them
@@ -656,7 +641,7 @@ static void addDLLHandle(const pathchar* dll_name, HINSTANCE instance) {
 
 static OpenedDLL* findLoadedDll(HINSTANCE instance)
 {
-    for (OpenedDLL* o_dll = opened_dlls; o_dll != NULL; o_dll = o_dll->next) {
+    for (OpenedDLL* o_dll = ll_default_linker.opened_dlls; o_dll != NULL; o_dll = o_dll->next) {
         if (o_dll->instance == instance)
         {
             return o_dll;
@@ -946,7 +931,7 @@ addDLL_PEi386( const pathchar *dll_name, HINSTANCE *loaded )
     LL_IF_DEBUG(linker, LL_DEBUG("addDLL; dll_name = `%" PATH_FMT "'\n", dll_name));
 
     // See Note [Avoiding repeated DLL loading]
-    HINSTANCE instance = isDllLoaded(&loaded_dll_cache, dll_name);
+    HINSTANCE instance = isDllLoaded(&ll_default_linker.loaded_dll_cache, dll_name);
     if (instance) {
         if (loaded) {
             *loaded = instance;
@@ -990,7 +975,7 @@ addDLL_PEi386( const pathchar *dll_name, HINSTANCE *loaded )
     goto error;
 
 loaded_ok:
-    addLoadedDll(&loaded_dll_cache, dll_name, instance);
+    addLoadedDll(&ll_default_linker.loaded_dll_cache, dll_name, instance);
     addDLLHandle(buf, instance);
     if (loaded) {
         *loaded = instance;
@@ -1102,9 +1087,7 @@ static size_t getAlignedValue(
 bool checkAndLoadImportLibrary( pathchar* arch_name, char* member_name, FILE* f )
 {
     char* image;
-    static bool load_dll_warn = false;
-
-    if (load_dll_warn) { return 0; }
+    if (ll_default_linker.load_dll_warn) { return 0; }
 
     /* Based on Import Library specification. PE Spec section 7.1 */
 
@@ -1161,7 +1144,7 @@ bool checkAndLoadImportLibrary( pathchar* arch_name, char* member_name, FILE* f 
 
     if (result != NULL) {
         LL_LOG_ERROR("Could not load `%" PATH_FMT "'. Reason: %s\n", dll, result);
-        load_dll_warn = true;
+        ll_default_linker.load_dll_warn = true;
 
         LL_FREE(dll);
         fseek(f, -(n + sizeof_COFF_import_Header), SEEK_CUR);
@@ -1293,7 +1276,7 @@ lookupSymbolInDLLs ( const ll_symbol_name* lbl, ObjectCode *dependent )
     OpenedDLL* o_dll;
     ll_symbol_addr* res;
 
-    for (o_dll = opened_dlls; o_dll != NULL; o_dll = o_dll->next)
+    for (o_dll = ll_default_linker.opened_dlls; o_dll != NULL; o_dll = o_dll->next)
         if ((res = lookupSymbolInDLL_PEi386(lbl, o_dll->instance, o_dll->name, dependent)))
             return res;
     return NULL;

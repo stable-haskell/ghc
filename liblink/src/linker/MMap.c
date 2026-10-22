@@ -1,5 +1,6 @@
 #define LL_INTERNAL_SOURCE 1
 #include "ll_compat.h"
+#include "ll_linker.h"
 
 #include "linker/MMap.h"
 
@@ -36,10 +37,8 @@
 #define MAP_ANONYMOUS 0
 #endif
 
-void *mmap_32bit_base = NULL;
-
 void initLinkerMMap(void) {
-    mmap_32bit_base = ll_cfg.mem_base != 0
+    ll_default_linker.mmap_32bit_base = ll_cfg.mem_base != 0
         ? (void *)ll_cfg.mem_base
         : LINKER_LOAD_BASE;
 }
@@ -58,16 +57,6 @@ static const char *memoryAccessDescription(MemoryAccess mode)
   default: LL_FATAL("invalid MemoryAccess");
   }
 }
-
-/* A region of memory that we might map into. */
-struct MemoryRegion {
-    void *start;
-    void *end;
-    void *last;
-      /* the end of the last mapping which we made into this region.
-       * this is where we will start searching next time we need to allocate.
-       */
-};
 
 #if defined(mingw32_HOST_OS)
 
@@ -160,30 +149,28 @@ static void *allocateLocalBytes(size_t sz, size_t *req)
     // necessary.
     size_t max_range = 0x7fffffff - sz;
 
-    static void *base_addr = NULL;
-    if (base_addr == NULL) {
-        base_addr = GetModuleHandleW(NULL);
+    if (ll_default_linker.base_addr == NULL) {
+        ll_default_linker.base_addr = GetModuleHandleW(NULL);
     }
-    uint8_t *end_addr = (uint8_t *) base_addr + max_range;
+    uint8_t *end_addr = (uint8_t *) ll_default_linker.base_addr + max_range;
 
     // We track the location of the last allocation to avoid having to
     // do a linear search of address space looking for space on every allocation
     // as this can easily devolve into quadratic complexity.
-    static void *last_alloca = NULL;
-    if (last_alloca == NULL) {
+    if (ll_default_linker.last_alloca == NULL) {
         // Start the search at the image base
-        last_alloca = base_addr;
+        ll_default_linker.last_alloca = ll_default_linker.base_addr;
     }
 
     void *result = NULL;
-    result = allocateBytes (last_alloca, end_addr, sz, req);
+    result = allocateBytes (ll_default_linker.last_alloca, end_addr, sz, req);
     if (result == NULL) {
         // We failed to find suitable address space; restart the search at base_addr.
-        result = allocateBytes (base_addr, end_addr, sz, req);
+        result = allocateBytes (ll_default_linker.base_addr, end_addr, sz, req);
     }
 
     if (result != NULL) {
-        last_alloca = (uint8_t *) result + *req;
+        ll_default_linker.last_alloca = (uint8_t *) result + *req;
     }
     return result;
 }
@@ -308,15 +295,16 @@ doMmap(void *map_addr, size_t bytes, int prot, uint32_t flags, int fd, int offse
 }
 
 
+/* A region of memory that we might map into. Its last field is the end of
+ * the last mapping, where we start searching on the next allocation. */
 static struct MemoryRegion *
 nearImage(void) {
-    static struct MemoryRegion region = { NULL, NULL, NULL };
-    if (region.end == NULL) {
-        region.start = mmap_32bit_base;
-        region.end = (uint8_t *) region.start + 0x80000000;
-        region.last = region.start;
+    if (ll_default_linker.mmap_region.end == NULL) {
+        ll_default_linker.mmap_region.start = ll_default_linker.mmap_32bit_base;
+        ll_default_linker.mmap_region.end = (uint8_t *) ll_default_linker.mmap_region.start + 0x80000000;
+        ll_default_linker.mmap_region.last = ll_default_linker.mmap_region.start;
     }
-    return &region;
+    return &ll_default_linker.mmap_region;
 }
 
 static void *
