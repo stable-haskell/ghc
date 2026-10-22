@@ -13,7 +13,7 @@ with tempfile.TemporaryDirectory() as directory:
     # Only preprocessing matters here. Empty system headers let the test model
     # libcs with missing macros, independently of the build machine's elf.h.
     (work / "elf.h").write_text("")
-    (work / "ghcplatform.h").write_text("")
+    (work / "ll_platform.h").write_text("")
     for bits in (32, 64):
         native = f"ELF{bits}_ST_VISIBILITY"
         for supplied in (None, native, "ELF_ST_VISIBILITY"):

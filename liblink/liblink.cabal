@@ -1,4 +1,4 @@
-cabal-version: 3.0
+cabal-version: 3.8
 name: liblink
 version: 0.1.0.0
 synopsis: GHC runtime linker library package
@@ -6,16 +6,96 @@ description: Native runtime linker library for GHC.
 license: BSD-3-Clause
 license-file: LICENSE
 maintainer: glasgow-haskell-users@haskell.org
-build-type: Configure
+build-type: Custom
 
 extra-source-files:
-    configure.ac
-    configure
     build-aux/config.guess
     build-aux/config.sub
-    liblink.buildinfo.in
+    configure
+    configure.ac
+    include/liblink/compat.h
+    include/liblink/rts_friend.h
     include/ll_autoconf.h.in
     include/ll_platform.h.in
+    liblink.buildinfo.in
+    native-sources.list
+    src/Linker.c
+    src/LinkerInternals.h
+    src/RtsSymbolInfo.c
+    src/RtsSymbolInfo.h
+    src/linker/CacheFlush.c
+    src/linker/CacheFlush.h
+    src/linker/ELFRelocs/AArch64.def
+    src/linker/ELFRelocs/ARM.def
+    src/linker/ELFRelocs/LICENSE-LLVM.TXT
+    src/linker/ELFRelocs/i386.def
+    src/linker/ELFRelocs/x86_64.def
+    src/linker/Elf.c
+    src/linker/Elf.h
+    src/linker/ElfTypes.h
+    src/linker/InitFini.c
+    src/linker/InitFini.h
+    src/linker/LoadArchive.c
+    src/linker/LoadNativeObjPosix.c
+    src/linker/LoadNativeObjPosix.h
+    src/linker/M32Alloc.c
+    src/linker/M32Alloc.h
+    src/linker/MMap.c
+    src/linker/MMap.h
+    src/linker/MachO.c
+    src/linker/MachO.h
+    src/linker/MachOTypes.h
+    src/linker/PEi386.c
+    src/linker/PEi386.h
+    src/linker/PEi386Types.h
+    src/linker/ProddableBlocks.c
+    src/linker/ProddableBlocks.h
+    src/linker/SymbolExtras.c
+    src/linker/SymbolExtras.h
+    src/linker/Wasm32Types.h
+    src/linker/elf_compat.h
+    src/linker/elf_got.c
+    src/linker/elf_got.h
+    src/linker/elf_plt.c
+    src/linker/elf_plt.h
+    src/linker/elf_plt_aarch64.c
+    src/linker/elf_plt_aarch64.h
+    src/linker/elf_plt_arm.c
+    src/linker/elf_plt_arm.h
+    src/linker/elf_plt_riscv64.c
+    src/linker/elf_plt_riscv64.h
+    src/linker/elf_reloc.c
+    src/linker/elf_reloc.h
+    src/linker/elf_reloc_aarch64.c
+    src/linker/elf_reloc_aarch64.h
+    src/linker/elf_reloc_riscv64.c
+    src/linker/elf_reloc_riscv64.h
+    src/linker/elf_tlsgd.c
+    src/linker/elf_util.c
+    src/linker/elf_util.h
+    src/linker/macho/plt.c
+    src/linker/macho/plt.h
+    src/linker/macho/plt_aarch64.c
+    src/linker/macho/plt_aarch64.h
+    src/linker/util.h
+    src/ll_begin_private.h
+    src/ll_compat.h
+    src/ll_compat_aliases.h
+    src/ll_end_private.h
+    src/ll_fs.h
+    src/ll_hash.c
+    src/ll_hash.h
+    src/ll_host.c
+    src/ll_host.h
+    src/ll_mutex.c
+    src/ll_mutex.h
+    src/ll_path.c
+    src/ll_path.h
+    src/ll_visibility.h
+    src/xxhash.h
+
+custom-setup
+    setup-depends: base, Cabal >= 3.17 && < 3.18, Cabal-syntax >= 3.17 && < 3.18, directory, filepath
 
 flag asserts
     description: Enable linker assertions.
@@ -29,13 +109,32 @@ flag all-backends
 
 library
     build-depends: rts-fs
+    extra-libraries: link
     c-sources: src/ll_version.c
-    include-dirs: include
-    install-includes: ll_autoconf.h ll_platform.h
+    include-dirs: src include
     autogen-includes: ll_autoconf.h ll_platform.h
+    install-includes:
+        ll_autoconf.h
+        ll_platform.h
+        ll_compat.h
+        ll_host.h
+        ll_hash.h
+        ll_mutex.h
+        ll_visibility.h
+        ll_begin_private.h
+        ll_end_private.h
+        linker/M32Alloc.h
+        linker/ProddableBlocks.h
+        liblink/compat.h
+        liblink/rts_friend.h
     cc-options: -std=c11 -fvisibility=hidden
     if flag(asserts)
         cc-options: -DLL_ASSERTS
     if flag(all-backends)
         cc-options: -DLL_ALL_BACKENDS
+    if os(windows)
+        cc-options: -D_WIN32_WINNT=0x06010000
+        cpp-options: -D_WIN32_WINNT=0x06010000
+        extra-libraries: dbghelp, psapi
+        extra-libraries-static: dbghelp, psapi
     default-language: Haskell2010

@@ -4,7 +4,7 @@ include $(TOP)/mk/test.mk
 
 .PHONY: elf_visibility
 elf_visibility:
-	$(PYTHON) elf_visibility.py "$(TOP_ABS)/../rts" "$(TEST_CC)"
+	$(PYTHON) elf_visibility.py "$(TOP_ABS)/../liblink/src" "$(TEST_CC)"
 
 .PHONY: elf_local_got
 ELF_GOT_OBJCOPY ?= $(shell "$(TEST_CC)" $(TEST_CC_OPTS) -print-prog-name=objcopy)

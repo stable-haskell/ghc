@@ -1,6 +1,5 @@
 #define LL_INTERNAL_SOURCE 1
 #include "ll_compat.h"
-#include "rts/Linker.h"
 #include "ll_path.h"
 
 #include <string.h>

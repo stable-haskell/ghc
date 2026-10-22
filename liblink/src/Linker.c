@@ -991,7 +991,7 @@ ll_symbol_addr* lookupSymbol( ll_symbol_name* lbl )
  * within DELTA bytes of the specified address, and show their names.
  */
 #if LL_DEBUG_CODE
-void ghci_enquire ( ll_symbol_addr* addr );
+LL_FRIEND_API void ghci_enquire ( ll_symbol_addr* addr );
 
 void ghci_enquire(ll_symbol_addr* addr)
 {

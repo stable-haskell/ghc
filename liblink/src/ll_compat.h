@@ -52,14 +52,11 @@ typedef ll_word ll_w;
 typedef void ll_symbol_addr;
 typedef char ll_symbol_name;
 
-/* Prerequisites for the unchanged public rts/Linker.h interface. */
-typedef ll_hs_int HsInt;
-typedef ll_hs_bool HsBool;
-typedef ll_hs_ptr HsPtr;
-typedef ll_hs_stable_ptr StgStablePtr;
-typedef ll_stg_ptr StgPtr;
+#include "liblink/compat.h"
 
-#include "rts/Linker.h"
+#if defined(LL_INTERNAL_SOURCE)
+#include "ll_compat_aliases.h"
+#endif
 
 typedef enum {
     LL_SYM_CODE = 1 << 0,

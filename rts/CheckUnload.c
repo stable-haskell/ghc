@@ -455,7 +455,7 @@ void checkUnload(void)
         ObjectCode *next = NULL;
         for (ObjectCode *oc = old_objects; oc != NULL; oc = next) {
             next = oc->next;
-            ASSERT(oc->status == OBJECT_UNLOADED);
+            ASSERT(oc->status == LL_COMPAT_OBJECT_UNLOADED);
 
             // Symbols should be removed by unloadObj_.
             // NB (osa): If this assertion doesn't hold then freeObjectCode below

@@ -1,5 +1,5 @@
 #define LL_INTERNAL_SOURCE 1
-#include "linker/ll_compat.h"
+#include "ll_compat.h"
 #include "elf_reloc.h"
 #include "elf_plt.h"
 

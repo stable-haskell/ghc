@@ -217,8 +217,8 @@ typedef void (*cxa_finalize_fn)(void *);
  * for each object file in use.
  */
 struct _ObjectCode {
-    OStatus    status;
-    pathchar  *fileName;
+    ll_compat_ostatus    status;
+    ll_compat_pathchar  *fileName;
     int        fileSize;     /* also mapped image size when using mmap() */
     char*      formatName;   /* e.g. "ELF32", "DLL", "COFF", etc. */
     ObjectType type;         /* who loaded this object? */
@@ -226,7 +226,7 @@ struct _ObjectCode {
     /* If this object is a member of an archive, archiveMemberName is
      * like "libarchive.a(object.o)". Otherwise it's NULL.
      */
-    pathchar*      archiveMemberName;
+    ll_compat_pathchar*      archiveMemberName;
 
     /* An array containing ptrs to all the symbol names copied from
        this object into the global symbol hash table.  This is so that
@@ -374,7 +374,7 @@ extern LL_FRIEND_API ll_mutex linker_mutex;
 
 LL_FRIEND_API void exitLinker(void);
 LL_FRIEND_API void freeObjectCode(ObjectCode *oc);
-LL_FRIEND_API pathchar *resolveSymbolAddr(pathchar *buffer, int size,
+LL_FRIEND_API ll_compat_pathchar *resolveSymbolAddr(ll_compat_pathchar *buffer, int size,
                                         ll_symbol_addr *symbol, uintptr_t *top);
 
 LL_FRIEND_API void initLinkerMMap(void);

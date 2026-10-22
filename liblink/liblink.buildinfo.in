@@ -1,2 +1,2 @@
 extra-libraries: @EXTRA_LIBS@
-extra-libraries-static: @EXTRA_LIBS@
+extra-libraries-static: link @EXTRA_LIBS@

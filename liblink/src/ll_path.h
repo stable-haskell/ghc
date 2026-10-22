@@ -1,6 +1,5 @@
 #pragma once
 #include "ll_compat.h"
-#include "rts/Linker.h"
 #define pathdup ll_path_dup
 #define pathdir ll_path_dir
 #define mkPath ll_path_make

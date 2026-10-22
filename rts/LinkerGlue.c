@@ -8,7 +8,7 @@
 
 #include "Rts.h"
 #include "RtsSymbols.h"
-#include "liblink/ll_compat.h"
+#include "ll_compat.h"
 #include "LinkerGlue.h"
 #include "RtsUtils.h"
 #include "ReportMemoryMap.h"
@@ -18,7 +18,7 @@
 #include "Profiling.h"
 #include "StablePtr.h"
 #include "CheckUnload.h"
-#include "liblink/ll_host.h"
+#include "ll_host.h"
 
 _Static_assert(sizeof(ll_word) == sizeof(StgWord), "linker word size mismatch");
 _Static_assert(sizeof(void *) == SIZEOF_VOID_P, "configured pointer size mismatch");

@@ -69,6 +69,6 @@ typedef struct ll_config {
 
 /* Stage 1 retains one process-wide linker. Installation copies both structures
  * during RTS startup, before any linker allocation or adjustor mapping. */
-extern ll_host_ops ll_host;
-extern ll_config ll_cfg;
+extern LL_FRIEND_API ll_host_ops ll_host;
+extern LL_FRIEND_API ll_config ll_cfg;
 LL_FRIEND_API void ll_install_host(const ll_host_ops *host, const ll_config *cfg);
