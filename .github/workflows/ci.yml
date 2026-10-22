@@ -119,6 +119,11 @@ jobs:
         mkdir -p "$TMPDIR"
         make QUIET=1 DYNAMIC=${{ matrix.dynamic }} CABAL_ARGS="-j2" USE_SYSTEM_CABAL=1 stage2
 
+    - name: Run liblink native C units
+      if: ${{ matrix.plat == 'x86_64-linux' && matrix.dynamic == 0 }}
+      shell: devx {0}
+      run: python3 liblink/tests/unit/run_native_tests.py
+
     - name: Display build timings
       if: ${{ !cancelled() }}
       shell: devx {0}
@@ -272,3 +277,69 @@ jobs:
         name: ${{ matrix.plat }}-dynamic${{ matrix.dynamic }}-metrics
         path: |
           _build/metrics/
+
+  windows-native-foundation:
+    name: Windows native liblink foundation unit
+    runs-on: windows-latest
+    timeout-minutes: 240
+    env:
+      CABAL_DIR: "C:\\Users\\runneradmin\\AppData\\Roaming\\cabal"
+      GHCUP_INSTALL_BASE_PREFIX: "C:\\"
+      GHCUP_MSYS2: "C:/msys64"
+      GHCUP_MSYS2_ENV: CLANG64
+      MSYSTEM: CLANG64
+      CHERE_INVOKING: 1
+      GHC_VERSION: "9.8.4"
+      CABAL_VERSION: "3.14.2.0"
+      GHC_TARGETS: "install_bin install_lib update_package_db"
+    defaults:
+      run:
+        shell: 'C:/msys64/usr/bin/bash.exe --login -e {0}'
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: "recursive"
+
+    - name: Install MSYS2 CLANG64 dependencies
+      run: |
+        pacman --noconfirm -S --needed --overwrite '*' git vim winpty git tar bsdtar unzip binutils autoconf make xz curl libtool automake p7zip patch ca-certificates python3 zip mingw-w64-clang-x86_64-toolchain mingw-w64-clang-x86_64-python-sphinx mingw-w64-clang-x86_64-python-requests mingw-w64-clang-x86_64-tools-git mingw-w64-clang-x86_64-ghostscript tar gzip
+
+    - name: Install GHCup
+      uses: haskell/ghcup-setup@v1
+      with:
+        cabal: ${{ env.CABAL_VERSION }}
+
+    - name: Install GHC
+      shell: pwsh
+      run: ghcup --no-verbose install ghc --set --install-targets "${{ env.GHC_TARGETS }}" "${{ env.GHC_VERSION }}"
+
+    - name: Build stage1
+      timeout-minutes: 90
+      run: |
+        set -eo pipefail
+        export PATH="/c/ghcup/bin:$PATH"
+        mkdir -p _build/logs
+        cabal update 2>&1 | tee _build/logs/windows-cabal-update.log
+        make QUIET=1 DYNAMIC=0 CABAL_ARGS="-j2" stage1 2>&1 | tee _build/logs/windows-stage1.log
+
+    - name: Build stage2
+      timeout-minutes: 120
+      run: |
+        set -eo pipefail
+        export PATH="/c/ghcup/bin:$PATH"
+        test -f _build/cabal/bin/cabal.exe
+        make QUIET=1 DYNAMIC=0 CABAL_ARGS="-j2" USE_SYSTEM_CABAL=1 stage2 2>&1 | tee _build/logs/windows-stage2.log
+
+    - name: Run Windows foundation-only C unit
+      run: |
+        set -eo pipefail
+        export PATH="/c/ghcup/bin:$PATH"
+        python3 liblink/tests/unit/run_native_tests.py --foundation-only --cc clang 2>&1 | tee _build/logs/windows-liblink-foundation.log
+
+    - name: Upload Windows build and unit logs on failure
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: windows-native-foundation-logs
+        if-no-files-found: ignore
+        path: _build/logs/*.log

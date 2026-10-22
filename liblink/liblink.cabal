@@ -105,6 +105,7 @@ extra-source-files:
     tests/unit/error_state.c
     tests/unit/hash_destroy_owner.c
     tests/unit/owner_services.c
+    tests/unit/run_native_tests.py
 
 custom-setup
     setup-depends: base, Cabal >= 3.17 && < 3.18, Cabal-syntax >= 3.17 && < 3.18, directory, filepath

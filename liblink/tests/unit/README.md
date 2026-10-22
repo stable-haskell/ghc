@@ -96,8 +96,31 @@ Darwin linker syntax.
       -isystem "$LL_CONFIG_DIR" -isystem "$RTS_FS_INCLUDE" \
       -Iliblink/include -Iliblink/src \
       liblink/tests/unit/core_error_status.c -L"$LIBLINK_BUILD_LIB" -llink \
+      -pthread \
       -Wl,-map,core-error-status.map -o core-error-status
     ./core-error-status
+
+Stage2 native C unit driver
+===========================
+
+After a successful top-level `make stage2`, run the focused units from the
+repository root with:
+
+    python3 liblink/tests/unit/run_native_tests.py
+
+The driver locates the generated `liblink` configuration headers, installed
+`rts-fs` headers, and stage2 `native-linker/liblink.a`. It compiles the private
+error-state, core status/negative-input, and archive status tests with
+assertions. The core and archive fixtures include their implementation source
+and link dependencies from the real archive using `-llink`; linker maps check
+that the corresponding archive object is not also selected. It accepts
+`--build-root` and `--store-root` when the stage2 build uses non-default
+directories, and `--cc` to select a C compiler command.
+
+The core and archive fixtures use POSIX file descriptors and mmap injection.
+On Windows, `Linker.c` follows its stdio path (`RTS_LINKER_USE_MMAP=0`); run
+only the platform-neutral foundation test with `--foundation-only` until
+Windows fixtures cover those paths.
 
 Archive input status
 ====================
