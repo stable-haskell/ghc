@@ -37,13 +37,13 @@
 #define MAP_ANONYMOUS 0
 #endif
 
-void initLinkerMMap(void) {
-    ll_default_linker.mmap_32bit_base = ll_cfg.mem_base != 0
-        ? (void *)ll_cfg.mem_base
-        : LINKER_LOAD_BASE;
+void ll_init_linker_mmap(ll_linker *L) {
+    L->mmap_32bit_base = L->services.cfg.mem_base != 0
+        ? (void *)L->services.cfg.mem_base
+        : LINKER_LOAD_BASE(L);
 }
 
-static const char *memoryAccessDescription(MemoryAccess mode)
+static const char *memoryAccessDescription(ll_linker *L, MemoryAccess mode)
 {
   switch (mode) {
   case MEM_NO_ACCESS:    return "no-access";
@@ -54,25 +54,25 @@ static const char *memoryAccessDescription(MemoryAccess mode)
   case MEM_READ_EXECUTE: return "read-execute";
   case MEM_READ_WRITE_EXECUTE:
                          return "read-write-execute";
-  default: LL_FATAL("invalid MemoryAccess");
+  default: LL_FATAL_FOR(L, "invalid MemoryAccess");
   }
 }
 
 #if defined(mingw32_HOST_OS)
 
 /* A wrapper for VirtualQuery() providing useful debug output */
-static int virtualQuery(void *baseAddr, PMEMORY_BASIC_INFORMATION info)
+static int virtualQuery(ll_linker *L, void *baseAddr, PMEMORY_BASIC_INFORMATION info)
 {
     int res = VirtualQuery (baseAddr, info, sizeof (*info));
-    LL_IF_DEBUG(linker_verbose,
-        LL_DEBUG("Probing region 0x%p (0x%p) - 0x%p (%" LL_FMT_SIZE_T ") [%ld] with base 0x%p\n",
+    LL_IF_DEBUG_FOR(L, linker_verbose,
+        LL_DEBUG_FOR(L, "Probing region 0x%p (0x%p) - 0x%p (%" LL_FMT_SIZE_T ") [%ld] with base 0x%p\n",
                    baseAddr,
                    info->BaseAddress,
                    (uint8_t *) info->BaseAddress + info->RegionSize,
                    info->RegionSize, info->State,
                    info->AllocationBase));
     if (!res) {
-        LL_IF_DEBUG(linker_verbose, LL_DEBUG("Querying 0x%p failed. Aborting..\n", baseAddr));
+        LL_IF_DEBUG_FOR(L, linker_verbose, LL_DEBUG_FOR(L, "Querying 0x%p failed. Aborting..\n", baseAddr));
         return 1;
     }
     return 0;
@@ -89,12 +89,12 @@ static inline uintptr_t round_up(uintptr_t num, uint64_t factor)
  * bytes you *must* allocate is returned in REQ.  You are free to use less but
  * you must allocate the amount given in REQ.  If not successful NULL.
  */
-static void *allocateBytes(void* baseAddr, void *endAddr, size_t sz, size_t *req)
+static void *allocateBytes(ll_linker *L, void* baseAddr, void *endAddr, size_t sz, size_t *req)
 {
     SYSTEM_INFO sys;
     GetSystemInfo(&sys);
 
-    LL_IF_DEBUG(linker_verbose, LL_DEBUG("Requesting mapping of %" LL_FMT_SIZE_T " bytes between %p and %p\n",
+    LL_IF_DEBUG_FOR(L, linker_verbose, LL_DEBUG_FOR(L, "Requesting mapping of %" LL_FMT_SIZE_T " bytes between %p and %p\n",
                                 sz, baseAddr, endAddr));
 
     MEMORY_BASIC_INFORMATION info;
@@ -104,32 +104,32 @@ static void *allocateBytes(void* baseAddr, void *endAddr, size_t sz, size_t *req
            && initialAddr <= (uint8_t *) endAddr
            && (void *) initialAddr < sys.lpMaximumApplicationAddress)
     {
-        int res = virtualQuery(initialAddr, &info);
+        int res = virtualQuery(L, initialAddr, &info);
         if (res) {
             return NULL;
         }
 
         if ((info.State & MEM_FREE) == MEM_FREE) {
-            LL_IF_DEBUG(linker_verbose, LL_DEBUG("Free range at 0x%p of %zu bytes\n",
+            LL_IF_DEBUG_FOR(L, linker_verbose, LL_DEBUG_FOR(L, "Free range at 0x%p of %zu bytes\n",
                                         info.BaseAddress, info.RegionSize));
 
             if (info.RegionSize >= sz) {
                 if (info.AllocationBase == 0) {
                     size_t needed_sz = round_up (sz, sys.dwAllocationGranularity);
                     if (info.RegionSize >= needed_sz) {
-                        LL_IF_DEBUG(linker_verbose, LL_DEBUG("Range is unmapped, Allocation "
+                        LL_IF_DEBUG_FOR(L, linker_verbose, LL_DEBUG_FOR(L, "Range is unmapped, Allocation "
                                                     "required by granule...\n"));
                         *req = needed_sz;
                         region
                         = (void*)(uintptr_t)round_up ((uintptr_t)initialAddr,
                                                         sys.dwAllocationGranularity);
-                        LL_IF_DEBUG(linker_verbose, LL_DEBUG("Requested %" PRId64 ", rounded: %"
+                        LL_IF_DEBUG_FOR(L, linker_verbose, LL_DEBUG_FOR(L, "Requested %" PRId64 ", rounded: %"
                                                     PRId64 ".\n", sz, *req));
-                        LL_IF_DEBUG(linker_verbose, LL_DEBUG("Aligned region claimed 0x%p -> "
+                        LL_IF_DEBUG_FOR(L, linker_verbose, LL_DEBUG_FOR(L, "Aligned region claimed 0x%p -> "
                                                     "0x%p.\n", initialAddr, region));
                     }
                 } else {
-                    LL_IF_DEBUG(linker_verbose, LL_DEBUG("Range is usable for us, claiming...\n"));
+                    LL_IF_DEBUG_FOR(L, linker_verbose, LL_DEBUG_FOR(L, "Range is usable for us, claiming...\n"));
                     *req = sz;
                     region = initialAddr;
                 }
@@ -142,41 +142,41 @@ static void *allocateBytes(void* baseAddr, void *endAddr, size_t sz, size_t *req
 }
 
 /* Find free address space for mapping anonymous memory. */
-static void *allocateLocalBytes(size_t sz, size_t *req)
+static void *allocateLocalBytes(ll_linker *L, size_t sz, size_t *req)
 {
     // We currently don't attempt to take address space from the region below
     // the image as malloc() tends to like to use this space, but we could do if
     // necessary.
     size_t max_range = 0x7fffffff - sz;
 
-    if (ll_default_linker.base_addr == NULL) {
-        ll_default_linker.base_addr = GetModuleHandleW(NULL);
+    if (L->base_addr == NULL) {
+        L->base_addr = GetModuleHandleW(NULL);
     }
-    uint8_t *end_addr = (uint8_t *) ll_default_linker.base_addr + max_range;
+    uint8_t *end_addr = (uint8_t *) L->base_addr + max_range;
 
     // We track the location of the last allocation to avoid having to
     // do a linear search of address space looking for space on every allocation
     // as this can easily devolve into quadratic complexity.
-    if (ll_default_linker.last_alloca == NULL) {
+    if (L->last_alloca == NULL) {
         // Start the search at the image base
-        ll_default_linker.last_alloca = ll_default_linker.base_addr;
+        L->last_alloca = L->base_addr;
     }
 
     void *result = NULL;
-    result = allocateBytes (ll_default_linker.last_alloca, end_addr, sz, req);
+    result = allocateBytes (L, L->last_alloca, end_addr, sz, req);
     if (result == NULL) {
         // We failed to find suitable address space; restart the search at base_addr.
-        result = allocateBytes (ll_default_linker.base_addr, end_addr, sz, req);
+        result = allocateBytes (L, L->base_addr, end_addr, sz, req);
     }
 
     if (result != NULL) {
-        ll_default_linker.last_alloca = (uint8_t *) result + *req;
+        L->last_alloca = (uint8_t *) result + *req;
     }
     return result;
 }
 
 static DWORD
-memoryAccessToProt(MemoryAccess access)
+memoryAccessToProt(ll_linker *L, MemoryAccess access)
 {
   switch (access) {
   case MEM_NO_ACCESS:    return PAGE_NOACCESS;
@@ -187,12 +187,12 @@ memoryAccessToProt(MemoryAccess access)
   case MEM_READ_EXECUTE: return PAGE_EXECUTE_READ;
   case MEM_READ_WRITE_EXECUTE:
                          return PAGE_EXECUTE_READWRITE;
-  default: LL_FATAL("invalid MemoryAccess");
+  default: LL_FATAL_FOR(L, "invalid MemoryAccess");
   }
 }
 
 void *
-mmapAnon (size_t bytes)
+ll_mmap_anon(ll_linker *L LL_UNUSED, size_t bytes)
 {
   return VirtualAlloc(NULL, bytes, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
 }
@@ -201,13 +201,13 @@ mmapAnon (size_t bytes)
 // Returns NULL on failure.
 //
 void *
-mmapAnonForLinker (size_t bytes)
+ll_mmap_anon_for_linker(ll_linker *L, size_t bytes)
 {
   size_t size = 0;
   /* For linking purposes we want to load code within a 4GB range from the
      load address of the application.  As such we need to find a location to
      allocate at.   */
-  void* region = allocateLocalBytes (bytes, &size);
+  void* region = allocateLocalBytes (L, bytes, &size);
   if (region == NULL) {
       return NULL;
   }
@@ -215,10 +215,10 @@ mmapAnonForLinker (size_t bytes)
 }
 
 void
-munmapForLinker (void *addr, size_t bytes, const char *caller)
+ll_munmap_for_linker(ll_linker *L, void *addr, size_t bytes, const char *caller)
 {
   if (VirtualFree(addr, 0, MEM_RELEASE) == 0) {
-    LL_LOG_SYSERROR("munmapForLinker: %s: Failed to unmap %zd bytes at %p",
+    LL_LOG_SYSERROR_FOR(L, "munmapForLinker: %s: Failed to unmap %zd bytes at %p",
                   caller, bytes, addr);
   }
 }
@@ -228,25 +228,25 @@ munmapForLinker (void *addr, size_t bytes, const char *caller)
  * with mmapAnonForLinker.
  */
 void
-mprotectForLinker(void *start, size_t len, MemoryAccess mode)
+ll_mprotect_for_linker(ll_linker *L, void *start, size_t len, MemoryAccess mode)
 {
   DWORD old;
   if (len == 0) {
     return;
   }
-  DWORD prot = memoryAccessToProt(mode);
+  DWORD prot = memoryAccessToProt(L, mode);
 
   if (VirtualProtect(start, len, prot, &old) == 0) {
-    LL_LOG_SYSERROR("mprotectForLinker: failed to protect %zd bytes at %p as %s",
-                  len, start, memoryAccessDescription(mode));
-    LL_ASSERT(false);
+    LL_LOG_SYSERROR_FOR(L, "mprotectForLinker: failed to protect %zd bytes at %p as %s",
+                  len, start, memoryAccessDescription(L, mode));
+    LL_ASSERT_FOR(L, false);
   }
 }
 
 #elif RTS_LINKER_USE_MMAP
 
 static int
-memoryAccessToProt(MemoryAccess access)
+memoryAccessToProt(ll_linker *L, MemoryAccess access)
 {
     switch (access) {
     case MEM_NO_ACCESS:    return 0;
@@ -266,29 +266,29 @@ memoryAccessToProt(MemoryAccess access)
     case MEM_READ_EXECUTE: return PROT_READ | PROT_EXEC;
     case MEM_READ_WRITE_EXECUTE:
                            return PROT_READ | PROT_WRITE | PROT_EXEC;
-    default: LL_FATAL("invalid MemoryAccess");
+    default: LL_FATAL_FOR(L, "invalid MemoryAccess");
     }
 }
 
 static void *
-doMmap(void *map_addr, size_t bytes, int prot, uint32_t flags, int fd, int offset)
+doMmap(ll_linker *L, void *map_addr, size_t bytes, int prot, uint32_t flags, int fd, int offset)
 {
     flags |= MAP_PRIVATE;
 
-    LL_IF_DEBUG(linker_verbose,
-             LL_DEBUG("mmapForLinker: \tprotection %#0x\n", prot));
-    LL_IF_DEBUG(linker_verbose,
-             LL_DEBUG("mmapForLinker: \tflags      %#0x\n", flags));
-    LL_IF_DEBUG(linker_verbose,
-             LL_DEBUG("mmapForLinker: \tsize       %#0zx\n", bytes));
-    LL_IF_DEBUG(linker_verbose,
-             LL_DEBUG("mmapForLinker: \tmap_addr   %p\n", map_addr));
+    LL_IF_DEBUG_FOR(L, linker_verbose,
+             LL_DEBUG_FOR(L, "mmapForLinker: \tprotection %#0x\n", prot));
+    LL_IF_DEBUG_FOR(L, linker_verbose,
+             LL_DEBUG_FOR(L, "mmapForLinker: \tflags      %#0x\n", flags));
+    LL_IF_DEBUG_FOR(L, linker_verbose,
+             LL_DEBUG_FOR(L, "mmapForLinker: \tsize       %#0zx\n", bytes));
+    LL_IF_DEBUG_FOR(L, linker_verbose,
+             LL_DEBUG_FOR(L, "mmapForLinker: \tmap_addr   %p\n", map_addr));
 
     void * result = mmap(map_addr, bytes, prot, flags, fd, offset);
     if (result == MAP_FAILED) {
-        LL_LOG_SYSERROR("mmap %zx bytes at %p", bytes, map_addr);
-        ll_report_mem_failure();
-        LL_LOG_ERROR("Try specifying an address with +RTS -xm<addr> -RTS");
+        LL_LOG_SYSERROR_FOR(L, "mmap %zx bytes at %p", bytes, map_addr);
+        ll_report_mem_failure_for(L);
+        LL_LOG_ERROR_FOR(L, "Try specifying an address with +RTS -xm<addr> -RTS");
         return NULL;
     }
     return result;
@@ -298,29 +298,31 @@ doMmap(void *map_addr, size_t bytes, int prot, uint32_t flags, int fd, int offse
 /* A region of memory that we might map into. Its last field is the end of
  * the last mapping, where we start searching on the next allocation. */
 static struct MemoryRegion *
-nearImage(void) {
-    if (ll_default_linker.mmap_region.end == NULL) {
-        ll_default_linker.mmap_region.start = ll_default_linker.mmap_32bit_base;
-        ll_default_linker.mmap_region.end = (uint8_t *) ll_default_linker.mmap_region.start + 0x80000000;
-        ll_default_linker.mmap_region.last = ll_default_linker.mmap_region.start;
+nearImage(ll_linker *L) {
+    if (L->mmap_region.end == NULL) {
+        L->mmap_region.start = L->mmap_32bit_base;
+        L->mmap_region.end = (uint8_t *) L->mmap_region.start + 0x80000000;
+        L->mmap_region.last = L->mmap_region.start;
     }
-    return &ll_default_linker.mmap_region;
+    return &L->mmap_region;
 }
 
 static void *
 mmapAnywhere (
+        ll_linker *L,
         size_t bytes,
         MemoryAccess access,
         uint32_t flags,
         int fd,
         int offset)
 {
-    int prot = memoryAccessToProt(access);
-    return doMmap(NULL, bytes, prot, flags, fd, offset);
+    int prot = memoryAccessToProt(L, access);
+    return doMmap(L, NULL, bytes, prot, flags, fd, offset);
 }
 
 static void *
 mmapInRegion (
+        ll_linker *L,
         struct MemoryRegion *region,
         size_t bytes,
         MemoryAccess access,
@@ -329,10 +331,10 @@ mmapInRegion (
         int offset)
 {
     bool wrapped = false;
-    int prot = memoryAccessToProt(access);
+    int prot = memoryAccessToProt(L, access);
     void *p = region->last;
     while (1) {
-        void *result = doMmap(p, bytes, prot, flags, fd, offset);
+        void *result = doMmap(L, p, bytes, prot, flags, fd, offset);
         if (result == NULL) {
             // The mapping failed
             return NULL;
@@ -343,8 +345,8 @@ mmapInRegion (
         } else if (wrapped) {
             // We failed to find a suitable mapping
             munmap(result, bytes);
-            ll_report_mem_failure();
-            LL_LOG_ERROR("mmapForLinker: failed to mmap() memory between %p and %p; "
+            ll_report_mem_failure_for(L);
+            LL_LOG_ERROR_FOR(L, "mmapForLinker: failed to mmap() memory between %p and %p; "
                        "asked for %zu bytes at %p. "
                        "Try specifying an address with +RTS -xm<addr> -RTS",
                        region->start, region->end, bytes, p);
@@ -369,17 +371,17 @@ mmapInRegion (
  * Returns NULL on failure.
  */
 void *
-mmapForLinker (size_t bytes, MemoryAccess access, uint32_t flags, int fd, int offset)
+ll_mmap_for_linker(ll_linker *L, size_t bytes, MemoryAccess access, uint32_t flags, int fd, int offset)
 {
-    bytes = ll_round_up_to_page(bytes);
+    bytes = ll_round_up_to_page_for(L, bytes);
     struct MemoryRegion *region;
 
-    LL_IF_DEBUG(linker_verbose, LL_DEBUG("mmapForLinker: start\n"));
-    if (ll_cfg.always_pic) {
+    LL_IF_DEBUG_FOR(L, linker_verbose, LL_DEBUG_FOR(L, "mmapForLinker: start\n"));
+    if (L->services.cfg.always_pic) {
         /* make no attempt at mapping low memory if we are assuming PIC */
         region = NULL;
     } else {
-        region = nearImage();
+        region = nearImage(L);
     }
 
     /* Use MAP_32BIT if appropriate */
@@ -389,16 +391,16 @@ mmapForLinker (size_t bytes, MemoryAccess access, uint32_t flags, int fd, int of
 
     void *result;
     if (region) {
-        result = mmapInRegion(region, bytes, access, flags, fd, offset);
+        result = mmapInRegion(L, region, bytes, access, flags, fd, offset);
     }
     else {
-        result = mmapAnywhere(bytes, access, flags, fd, offset);
+        result = mmapAnywhere(L, bytes, access, flags, fd, offset);
     }
-    LL_IF_DEBUG(linker_verbose,
-             LL_DEBUG("mmapForLinker: mapped %zd bytes starting at %p\n",
+    LL_IF_DEBUG_FOR(L, linker_verbose,
+             LL_DEBUG_FOR(L, "mmapForLinker: mapped %zd bytes starting at %p\n",
                         bytes, result));
-    LL_IF_DEBUG(linker_verbose,
-             LL_DEBUG("mmapForLinker: done\n"));
+    LL_IF_DEBUG_FOR(L, linker_verbose,
+             LL_DEBUG_FOR(L, "mmapForLinker: done\n"));
     return result;
 }
 
@@ -406,26 +408,26 @@ mmapForLinker (size_t bytes, MemoryAccess access, uint32_t flags, int fd, int of
  * Map read/write pages anywhere in memory. Returns NULL on failure.
  */
 void *
-mmapAnon (size_t bytes)
+ll_mmap_anon(ll_linker *L, size_t bytes)
 {
-    return mmapAnywhere(bytes, MEM_READ_WRITE_THEN_READ_EXECUTE, MAP_ANONYMOUS, -1, 0);
+    return mmapAnywhere(L, bytes, MEM_READ_WRITE_THEN_READ_EXECUTE, MAP_ANONYMOUS, -1, 0);
 }
 
 /*
  * Map read/write pages in low memory. Returns NULL on failure.
  */
 void *
-mmapAnonForLinker (size_t bytes)
+ll_mmap_anon_for_linker(ll_linker *L, size_t bytes)
 {
-    return mmapForLinker (bytes, MEM_READ_WRITE_THEN_READ_EXECUTE, MAP_ANONYMOUS, -1, 0);
+    return ll_mmap_for_linker (L, bytes, MEM_READ_WRITE_THEN_READ_EXECUTE, MAP_ANONYMOUS, -1, 0);
 }
 
-void munmapForLinker (void *addr, size_t bytes, const char *caller)
+void ll_munmap_for_linker(ll_linker *L, void *addr, size_t bytes, const char *caller)
 {
     int r = munmap(addr, bytes);
     if (r == -1) {
         // Should we abort here?
-        LL_LOG_SYSERROR("munmap: %s", caller);
+        LL_LOG_SYSERROR_FOR(L, "munmap: %s", caller);
     }
 }
 
@@ -454,21 +456,58 @@ void munmapForLinker (void *addr, size_t bytes, const char *caller)
  * Mark an portion of a mapping previously reserved by mmapForLinker
  * as executable (but not writable).
  */
-void mprotectForLinker(void *start, size_t len, MemoryAccess mode)
+void ll_mprotect_for_linker(ll_linker *L, void *start, size_t len, MemoryAccess mode)
 {
     if (len == 0) {
         return;
     }
-    LL_IF_DEBUG(linker_verbose,
-             LL_DEBUG("mprotectForLinker: protecting %" LL_FMT_WORD
+    LL_IF_DEBUG_FOR(L, linker_verbose,
+             LL_DEBUG_FOR(L, "mprotectForLinker: protecting %" LL_FMT_WORD
                         " bytes starting at %p as %s\n",
-                        (ll_w)len, start, memoryAccessDescription(mode)));
+                        (ll_w)len, start, memoryAccessDescription(L, mode)));
 
-    int prot = memoryAccessToProt(mode);
+    int prot = memoryAccessToProt(L, mode);
 
     if (mprotect(start, len, prot) == -1) {
-        LL_LOG_SYSERROR("mprotectForLinker: failed to protect %zd bytes at %p as %s",
-                      len, start, memoryAccessDescription(mode));
+        LL_LOG_SYSERROR_FOR(L, "mprotectForLinker: failed to protect %zd bytes at %p as %s",
+                      len, start, memoryAccessDescription(L, mode));
     }
 }
+#endif
+
+/* Frozen RTS friend entry points select the fixed compatibility owner. */
+void initLinkerMMap(void)
+{
+    ll_init_linker_mmap(&ll_default_linker);
+}
+
+#if defined(mingw32_HOST_OS) || RTS_LINKER_USE_MMAP
+void *mmapAnon(size_t bytes)
+{
+    return ll_mmap_anon(&ll_default_linker, bytes);
+}
+
+void mprotectForLinker(void *start, size_t len, MemoryAccess mode)
+{
+    ll_mprotect_for_linker(&ll_default_linker, start, len, mode);
+}
+
+void munmapForLinker(void *addr, size_t bytes, const char *caller)
+{
+    ll_munmap_for_linker(&ll_default_linker, addr, bytes, caller);
+}
+
+/* Temporary default adapters for callers not yet migrated to explicit L. */
+void *mmapAnonForLinker(size_t bytes)
+{
+    return ll_mmap_anon_for_linker(&ll_default_linker, bytes);
+}
+
+#if !defined(mingw32_HOST_OS)
+void *mmapForLinker(size_t bytes, MemoryAccess access, uint32_t flags,
+                    int fd, int offset)
+{
+    return ll_mmap_for_linker(&ll_default_linker, bytes, access, flags, fd, offset);
+}
+#endif
 #endif

@@ -153,7 +153,7 @@ The allocator is *not* thread-safe.
 /* A utility to verify that a given address is "acceptable" for use by m32. */
 static bool
 is_okay_address(void *p) {
-  int8_t *here = LINKER_LOAD_BASE;
+  int8_t *here = LINKER_LOAD_BASE(&ll_default_linker);
   ssize_t displacement = (int8_t *) p - here;
   // if we assume -fPIC, we don't care where we load code.
   // But we still want to use the m32 allocator to avoid fragmentation (#24432)

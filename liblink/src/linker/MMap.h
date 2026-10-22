@@ -37,20 +37,34 @@
 // can potentially reference any of the ones we bake into the binary (and list)
 // in RtsSymbols. Thus we'll need to be within +-4GB of those,
 // stg_upd_frame_info is a good candidate as it's referenced often.
-#define LINKER_LOAD_BASE ((void *)ll_cfg.near_hint)
+#define LINKER_LOAD_BASE(L) ((void *)(L)->services.cfg.near_hint)
 #elif defined(x86_64_HOST_ARCH) && defined(mingw32_HOST_OS)
 // On Windows (which now uses high-entropy ASLR by default) we need to ensure
 // that we map code near the executable image. We use stg_upd_frame_info as a
 // proxy for the image location.
-#define LINKER_LOAD_BASE ((void *)ll_cfg.near_hint)
+#define LINKER_LOAD_BASE(L) ((void *)(L)->services.cfg.near_hint)
 #elif defined(MAP_32BIT) || defined(darwin_HOST_OS) || defined(aarch64_HOST_ARCH) || defined(arm_HOST_ARCH)
 // Try to use MAP_32BIT
-#define LINKER_LOAD_BASE ((void *) 0x0)
+#define LINKER_LOAD_BASE(L) ((void *) 0x0)
 #else
 // A guess: 1 GB.
-#define LINKER_LOAD_BASE ((void *) 0x40000000)
+#define LINKER_LOAD_BASE(L) ((void *) 0x40000000)
 #endif
 
+/* Owner-aware implementations; raw mapping addresses carry no owner. */
+void ll_init_linker_mmap(ll_linker *L);
+void *ll_mmap_anon(ll_linker *L, size_t bytes);
+void *ll_mmap_anon_for_linker(ll_linker *L, size_t bytes);
+void ll_mprotect_for_linker(ll_linker *L, void *start, size_t len,
+                            MemoryAccess mode);
+void ll_munmap_for_linker(ll_linker *L, void *addr, size_t bytes,
+                          const char *caller);
+#if !defined(mingw32_HOST_OS)
+void *ll_mmap_for_linker(ll_linker *L, size_t bytes, MemoryAccess prot,
+                         uint32_t flags, int fd, int offset);
+#endif
+
+/* Temporary default adapters until the remaining private callers migrate. */
 // Map read/write anonymous memory, enforcing the constraint of
 // placing the mapping within 4GB of the executable image.
 void *mmapAnonForLinker (size_t bytes);
