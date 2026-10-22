@@ -97,6 +97,8 @@ extra-source-files:
     src/ll_path.h
     src/ll_visibility.h
     src/xxhash.h
+    tests/unit/README.md
+    tests/unit/owner_services.c
 
 custom-setup
     setup-depends: base, Cabal >= 3.17 && < 3.18, Cabal-syntax >= 3.17 && < 3.18, directory, filepath
