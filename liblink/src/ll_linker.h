@@ -9,6 +9,7 @@
 #pragma once
 
 #include "ll_host.h"
+#include "ll_error.h"
 #include "liblink/rts_friend.h"
 
 #if defined(OBJFORMAT_ELF) || defined(OBJFORMAT_MACHO)
@@ -34,6 +35,8 @@ struct m32_page_t;
 
 struct ll_linker {
     ll_compat_services services;
+    ll_status error_status;
+    char error_message[LL_ERROR_CAPACITY];
     /* One mutex protects this owner's linker state in every RTS way. */
     ll_mutex linker_mutex;
     ll_gc_state gc;

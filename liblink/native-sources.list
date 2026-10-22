@@ -24,6 +24,7 @@ src/linker/elf_util.c
 src/linker/macho/plt.c
 src/linker/macho/plt_aarch64.c
 src/ll_hash.c
+src/ll_error.c
 src/ll_host.c
 src/ll_mutex.c
 src/ll_path.c

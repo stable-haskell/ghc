@@ -49,3 +49,30 @@ repository root:
 
 Repeat with `-DLL_ASSERTS` to run the assertion build. The test is silent on
 success and exits nonzero with a diagnostic on failure.
+
+Private linker error state
+==========================
+
+`error_state.c` checks status/diagnostic storage, owner isolation, formatting
+boundaries, errno preservation, and that recording an error does not call host
+allocation or diagnostic hooks. Run from the repository root and set
+`LL_CONFIG_DIR` to the generated include directory from a static liblink build.
+
+    : "${LL_CONFIG_DIR:?set the generated static liblink include directory}"
+    CC=${CC:-cc}
+    "$CC" -std=c11 -Wall -Wextra -Werror=vla -pedantic -DLL_ASSERTS \
+      -isystem "$LL_CONFIG_DIR" -Iliblink/include -Iliblink/src \
+      liblink/tests/unit/error_state.c liblink/src/ll_error.c \
+      liblink/src/ll_host.c -o error-state-asserts
+    ./error-state-asserts
+    "$CC" -std=c11 -Wall -Wextra -Werror=vla -pedantic \
+      -isystem "$LL_CONFIG_DIR" -Iliblink/include -Iliblink/src \
+      liblink/tests/unit/error_state.c liblink/src/ll_error.c \
+      liblink/src/ll_host.c -o error-state-noasserts
+    ./error-state-noasserts
+    "$CC" -std=c11 -Wall -Wextra -Werror=vla -pedantic -DLL_ASSERTS \
+      -fsanitize=address,undefined -fno-omit-frame-pointer \
+      -isystem "$LL_CONFIG_DIR" -Iliblink/include -Iliblink/src \
+      liblink/tests/unit/error_state.c liblink/src/ll_error.c \
+      liblink/src/ll_host.c -o error-state-sanitized
+    ./error-state-sanitized
