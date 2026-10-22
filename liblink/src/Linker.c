@@ -545,33 +545,33 @@ exitLinker( void ) {
 */
 
 static void *
-internal_dlsym(const char *symbol) {
+internal_dlsym(ll_linker *L, const char *symbol) {
     void *v;
 
     // concurrent dl* calls may alter dlerror
-    ll_assert_lock_held(&ll_default_linker.linker_mutex);
+    ll_assert_lock_held_for(L, &L->linker_mutex);
 
     // clears dlerror
     dlerror();
 
     // look in program first
-    v = dlsym(ll_default_linker.dl_prog_handle, symbol);
+    v = dlsym(L->dl_prog_handle, symbol);
     if (dlerror() == NULL) {
-        LL_IF_DEBUG(linker, LL_DEBUG("internal_dlsym: found symbol '%s' in program\n", symbol));
+        LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "internal_dlsym: found symbol '%s' in program\n", symbol));
         return v;
     }
 
-    for (ObjectCode *nc = ll_default_linker.gc.loaded_objects; nc; nc = nc->next_loaded_object) {
+    for (ObjectCode *nc = L->gc.loaded_objects; nc; nc = nc->next_loaded_object) {
         if (nc->type == DYNAMIC_OBJECT) {
           v = dlsym(nc->dlopen_handle, symbol);
           if (dlerror() == NULL) {
-            LL_IF_DEBUG(linker, LL_DEBUG("internal_dlsym: found symbol '%s' in shared object\n", symbol));
+            LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "internal_dlsym: found symbol '%s' in shared object\n", symbol));
             return v;
           }
         }
     }
 
-    LL_IF_DEBUG(linker, LL_DEBUG("internal_dlsym: looking for symbol '%s' in special cases\n", symbol));
+    LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "internal_dlsym: looking for symbol '%s' in special cases\n", symbol));
 #   define SPECIAL_SYMBOL(sym) \
       if (strcmp(symbol, #sym) == 0) return (void*)&sym;
 
@@ -624,7 +624,7 @@ void *lookupSymbolInNativeObj(void *handle, const char *symbol_name)
 #if defined(OBJFORMAT_ELF) || defined(OBJFORMAT_MACHO)
     void *result = dlsym(handle, symbol_name);
 #elif defined(OBJFORMAT_PEi386)
-    void *result = lookupSymbolInDLL_PEi386(symbol_name, handle, NULL, NULL);
+    void *result = lookupSymbolInDLL_PEi386(&ll_default_linker, symbol_name, handle, NULL, NULL);
 #else
     void* result;
     UNUSED(handle);
@@ -735,20 +735,24 @@ ll_hs_int insertSymbol(pathchar* obj_name, ll_symbol_name* key, ll_symbol_addr* 
  * symbol.
  */
 #if defined(OBJFORMAT_PEi386)
-ll_symbol_addr* lookupDependentSymbol (ll_symbol_name* lbl, ObjectCode *dependent, ll_sym_type *type)
+ll_symbol_addr* lookupDependentSymbol (ll_linker *L, ll_symbol_name* lbl,
+                                       ObjectCode *dependent, ll_sym_type *type)
 {
-    ll_assert_lock_held(&ll_default_linker.linker_mutex);
-    return lookupSymbol_PEi386(lbl, dependent, type);
+    ll_assert_lock_held_for(L, &L->linker_mutex);
+    LL_ASSERT_FOR(L, dependent == NULL || dependent->L == L);
+    return lookupSymbol_PEi386(L, lbl, dependent, type);
 }
 
 #else
 
-ll_symbol_addr* lookupDependentSymbol (ll_symbol_name* lbl, ObjectCode *dependent, ll_sym_type *type)
+ll_symbol_addr* lookupDependentSymbol (ll_linker *L, ll_symbol_name* lbl,
+                                       ObjectCode *dependent, ll_sym_type *type)
 {
-    ll_assert_lock_held(&ll_default_linker.linker_mutex);
-    LL_IF_DEBUG(linker_verbose, LL_DEBUG("lookupSymbol: looking up '%s'\n", lbl));
+    ll_assert_lock_held_for(L, &L->linker_mutex);
+    LL_ASSERT_FOR(L, dependent == NULL || dependent->L == L);
+    LL_IF_DEBUG_FOR(L, linker_verbose, LL_DEBUG_FOR(L, "lookupSymbol: looking up '%s'\n", lbl));
 
-    LL_ASSERT(ll_default_linker.symhash != NULL);
+    LL_ASSERT_FOR(L, L->symhash != NULL);
     RtsSymbolInfo *pinfo;
 
     /* See Note [Resolving __dso_handle] */
@@ -763,6 +767,7 @@ ll_symbol_addr* lookupDependentSymbol (ll_symbol_name* lbl, ObjectCode *dependen
     }
     if (strcmp(lbl, MAYBE_LEADING_UNDERSCORE_STR("__cxa_atexit")) == 0 && dependent) {
         dependent->cxa_finalize = (cxa_finalize_fn) lookupDependentSymbol(
+                L,
                 MAYBE_LEADING_UNDERSCORE_STR("__cxa_finalize"),
                 dependent,
                 NULL);
@@ -775,11 +780,11 @@ ll_symbol_addr* lookupDependentSymbol (ll_symbol_name* lbl, ObjectCode *dependen
     }
 #endif
 
-    if (!ghciLookupSymbolInfo(&ll_default_linker, lbl, &pinfo)) {
-        LL_IF_DEBUG(linker_verbose, LL_DEBUG("lookupSymbol: symbol '%s' not found, trying dlsym\n", lbl));
+    if (!ghciLookupSymbolInfo(L, lbl, &pinfo)) {
+        LL_IF_DEBUG_FOR(L, linker_verbose, LL_DEBUG_FOR(L, "lookupSymbol: symbol '%s' not found, trying dlsym\n", lbl));
 
 #       if defined(OBJFORMAT_ELF)
-        ll_symbol_addr *ret = internal_dlsym(lbl);
+        ll_symbol_addr *ret = internal_dlsym(L, lbl);
         if (type) {
             // We assume that the symbol is code since this is usually the case
             // and dlsym doesn't tell us.
@@ -793,7 +798,7 @@ ll_symbol_addr* lookupDependentSymbol (ll_symbol_name* lbl, ObjectCode *dependen
         //
         // [1] https://wiki.gentoo.org/wiki/Hardened/Introduction_to_Position_Independent_Code
         if (ret == NULL && strcmp(lbl, "_DYNAMIC") == 0) {
-            ret = (ll_symbol_addr *) &ll_default_linker.rts_dynamic;
+            ret = (ll_symbol_addr *) &L->rts_dynamic;
             if (type) {
                 *type = LL_SYM_DATA;
             }
@@ -807,15 +812,15 @@ ll_symbol_addr* lookupDependentSymbol (ll_symbol_name* lbl, ObjectCode *dependen
                  searching for the symbol. For now, we simply strip it off here
                  (and ONLY here).
         */
-        LL_IF_DEBUG(linker, LL_DEBUG("lookupSymbol: looking up %s with dlsym\n",
+        LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "lookupSymbol: looking up %s with dlsym\n",
                                     lbl));
-        LL_CHECK(lbl[0] == '_');
+        LL_CHECK_FOR(L, lbl[0] == '_');
         if (type) {
             // We assume that the symbol is code since this is usually the case
             // and dlsym doesn't tell us.
             *type = LL_SYM_CODE;
         }
-        return internal_dlsym(lbl + 1);
+        return internal_dlsym(L, lbl + 1);
 
 #       elif defined(OBJFORMAT_WASM32)
         return NULL;
@@ -823,8 +828,8 @@ ll_symbol_addr* lookupDependentSymbol (ll_symbol_name* lbl, ObjectCode *dependen
 #       error No OBJFORMAT_* macro set
 #       endif
     } else {
-        if (strcmp(lbl, "__fini_array_end") == 0) { return (ll_symbol_addr *) &ll_default_linker.rts_no_fini; }
-        if (strcmp(lbl, "__fini_array_start") == 0) { return (ll_symbol_addr *) &ll_default_linker.rts_no_fini; }
+        if (strcmp(lbl, "__fini_array_end") == 0) { return (ll_symbol_addr *) &L->rts_no_fini; }
+        if (strcmp(lbl, "__fini_array_start") == 0) { return (ll_symbol_addr *) &L->rts_no_fini; }
         if (type) {
             // This is an assumption
             *type = pinfo->type;
@@ -838,7 +843,8 @@ ll_symbol_addr* lookupDependentSymbol (ll_symbol_name* lbl, ObjectCode *dependen
                 insertHashSet(dependent->dependencies, (ll_w)owner);
             }
         }
-        return loadSymbol(lbl, pinfo);
+        LL_ASSERT_FOR(L, pinfo->owner == NULL || pinfo->owner->L == L);
+        return loadSymbol(L, lbl, pinfo);
     }
 }
 #endif /* OBJFORMAT_PEi386 */
@@ -869,9 +875,11 @@ ll_symbol_addr* lookupDependentSymbol (ll_symbol_name* lbl, ObjectCode *dependen
  * Load and relocate the object code for a symbol as necessary.
  * Symbol name only used for diagnostics output.
  */
-ll_symbol_addr* loadSymbol(ll_symbol_name *lbl, RtsSymbolInfo *pinfo) {
-    LL_IF_DEBUG(linker_verbose,
-             LL_DEBUG("lookupSymbol: value of %s is %p, owned by %" PATH_FMT "\n", lbl,
+ll_symbol_addr* loadSymbol(ll_linker *L, ll_symbol_name *lbl, RtsSymbolInfo *pinfo) {
+    LL_ASSERT_FOR(L, pinfo != NULL);
+    LL_ASSERT_FOR(L, pinfo->owner == NULL || pinfo->owner->L == L);
+    LL_IF_DEBUG_FOR(L, linker_verbose,
+             LL_DEBUG_FOR(L, "lookupSymbol: value of %s is %p, owned by %" PATH_FMT "\n", lbl,
                         pinfo->value,
                         pinfo->owner ? OC_INFORMATIVE_FILENAME(pinfo->owner) : WSTR("No owner, probably built-in.")));
     ObjectCode* oc = pinfo->owner;
@@ -880,7 +888,7 @@ ll_symbol_addr* loadSymbol(ll_symbol_name *lbl, RtsSymbolInfo *pinfo) {
         See Note [runtime-linker-phases] */
     if (oc && lbl && oc->status == OBJECT_LOADED) {
         oc->status = OBJECT_NEEDED;
-        LL_IF_DEBUG(linker, LL_DEBUG("lookupSymbol: on-demand "
+        LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "lookupSymbol: on-demand "
                                     "loading symbol '%s'\n", lbl));
         int r = ocTryLoad(oc);
         if (!r) {
@@ -917,7 +925,7 @@ ll_symbol_addr* lookupSymbol( ll_symbol_name* lbl )
     ll_mutex_lock(&ll_default_linker.linker_mutex);
     // NULL for "don't add dependent". When adding a dependency we call
     // lookupDependentSymbol directly.
-    ll_symbol_addr* r = lookupDependentSymbol(lbl, NULL, NULL);
+    ll_symbol_addr* r = lookupDependentSymbol(&ll_default_linker, lbl, NULL, NULL);
     if (!r) {
         if (!ll_cfg.optimistic) {
           LL_LOG_ERROR("^^ Could not load '%s', dependency unresolved. "

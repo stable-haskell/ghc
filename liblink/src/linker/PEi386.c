@@ -493,7 +493,8 @@ static size_t getAlignedValue(
 static void releaseOcInfo(
     ObjectCode* oc);
 
-static ll_symbol_addr *lookupSymbolInDLLs ( const ll_symbol_name* lbl, ObjectCode *dependent );
+static ll_symbol_addr *lookupSymbolInDLLs ( ll_linker *L, const ll_symbol_name* lbl,
+                                            ObjectCode *dependent );
 
 const Alignments pe_alignments[] = {
   { IMAGE_SCN_ALIGN_1BYTES   , 1   },
@@ -1158,7 +1159,8 @@ bool checkAndLoadImportLibrary( pathchar* arch_name, char* member_name, FILE* f 
     // We must immediately tie the symbol to the shared library.  The easiest
     // way is to load the symbol immediately. We already have all the
     // information so might as well
-    ll_symbol_addr* sym = lookupSymbolInDLL_PEi386 (symbol, instance, dll, NULL);
+    ll_symbol_addr* sym = lookupSymbolInDLL_PEi386 (&ll_default_linker, symbol,
+                                                    instance, dll, NULL);
 
     // Could be an import descriptor etc, skip if no symbol.
     if (!sym)
@@ -1272,21 +1274,27 @@ get_name_string (uint8_t* name, ObjectCode* oc)
 }
 
 ll_symbol_addr*
-lookupSymbolInDLLs ( const ll_symbol_name* lbl, ObjectCode *dependent )
+lookupSymbolInDLLs ( ll_linker *L, const ll_symbol_name* lbl,
+                     ObjectCode *dependent )
 {
     OpenedDLL* o_dll;
     ll_symbol_addr* res;
 
-    for (o_dll = ll_default_linker.opened_dlls; o_dll != NULL; o_dll = o_dll->next)
-        if ((res = lookupSymbolInDLL_PEi386(lbl, o_dll->instance, o_dll->name, dependent)))
+    for (o_dll = L->opened_dlls; o_dll != NULL; o_dll = o_dll->next)
+        if ((res = lookupSymbolInDLL_PEi386(L, lbl, o_dll->instance,
+                                            o_dll->name, dependent)))
             return res;
     return NULL;
 }
 
 ll_symbol_addr*
-lookupSymbolInDLL_PEi386 ( const ll_symbol_name* lbl, HINSTANCE instance, pathchar* dll_name LL_UNUSED, ObjectCode *dependent)
+lookupSymbolInDLL_PEi386 ( ll_linker *L, const ll_symbol_name* lbl,
+                           HINSTANCE instance, pathchar* dll_name LL_UNUSED,
+                           ObjectCode *dependent)
 {
     ll_symbol_addr* sym;
+
+    LL_ASSERT_FOR(L, dependent == NULL || dependent->L == L);
 
     /* debugBelch("look in %ls for %s\n", dll_name, lbl); */
 
@@ -1308,13 +1316,13 @@ lookupSymbolInDLL_PEi386 ( const ll_symbol_name* lbl, HINSTANCE instance, pathch
         sym = GetProcAddress(instance,
                              lbl + 6);
         if (sym != NULL) {
-            ll_symbol_addr** indirect = m32_alloc(dependent->rw_m32, sizeof(ll_symbol_addr*), 8);
+            ll_symbol_addr** indirect = m32_alloc_for(L, dependent->rw_m32, sizeof(ll_symbol_addr*), 8);
             if (indirect == NULL) {
-                LL_FATAL("lookupSymbolInDLLs: Failed to allocation indirection");
+                LL_FATAL_FOR(L, "lookupSymbolInDLLs: Failed to allocation indirection");
             }
             *indirect = sym;
-            LL_IF_DEBUG(linker,
-              LL_DEBUG("warning: %s from %S is linked instead of %s\n",
+            LL_IF_DEBUG_FOR(L, linker,
+              LL_DEBUG_FOR(L, "warning: %s from %S is linked instead of %s\n",
                          lbl+6, dll_name, lbl));
             return (void*) indirect;
            }
@@ -1944,7 +1952,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
                 // https://learn.microsoft.com/en-us/windows/win32/debug/pe-format#auxiliary-format-3-weak-externals
                 ll_symbol_name *target_sname = get_sym_name (getSymShortName (info, targetSym), oc);
                 if (target_sname)
-                  addr = lookupSymbol_PEi386 (target_sname, oc, &type);
+                  addr = lookupSymbol_PEi386 (oc->L, target_sname, oc, &type);
 
                 LL_IF_DEBUG(linker, LL_DEBUG("weak external symbol @ %s => %s resolved to %p\n", \
                                             sname, target_sname, addr));
@@ -2244,7 +2252,7 @@ ocResolve_PEi386 ( ObjectCode* oc )
          } else {
             copyName ( getSymShortName (info, sym), oc, symbol,
                        sizeof(symbol)-1 );
-            S = (size_t) lookupDependentSymbol( (char*)symbol, oc, &sym_type );
+            S = (size_t) lookupDependentSymbol( oc->L, (char*)symbol, oc, &sym_type );
             if ((void*)S == NULL) {
                 LL_LOG_ERROR(" | %" PATH_FMT ": unknown symbol `%s'", oc->fileName, symbol);
                 releaseOcInfo (oc);
@@ -2493,12 +2501,15 @@ bool ocRunFini_PEi386( ObjectCode *oc )
     return true;
 }
 
-ll_symbol_addr *lookupSymbol_PEi386(ll_symbol_name *lbl, ObjectCode *dependent, ll_sym_type *type)
+ll_symbol_addr *lookupSymbol_PEi386(ll_linker *L, ll_symbol_name *lbl,
+                                    ObjectCode *dependent, ll_sym_type *type)
 {
     RtsSymbolInfo *pinfo;
 
-    if (!ghciLookupSymbolInfo(&ll_default_linker, lbl, &pinfo)) {
-        LL_IF_DEBUG(linker, LL_DEBUG("lookupSymbol: symbol '%s' not found\n", lbl));
+    LL_ASSERT_FOR(L, dependent == NULL || dependent->L == L);
+
+    if (!ghciLookupSymbolInfo(L, lbl, &pinfo)) {
+        LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "lookupSymbol: symbol '%s' not found\n", lbl));
 
         ll_symbol_addr* sym;
 
@@ -2508,7 +2519,7 @@ ll_symbol_addr *lookupSymbol_PEi386(ll_symbol_name *lbl, ObjectCode *dependent, 
             // us to determine the symbol type precisely.
             *type = LL_SYM_CODE;
         }
-        sym = lookupSymbolInDLLs(lbl, dependent);
+        sym = lookupSymbolInDLLs(L, lbl, dependent);
         return sym; // might be NULL if not found
     } else {
         if (type) *type = pinfo->type;
@@ -2521,7 +2532,9 @@ ll_symbol_addr *lookupSymbol_PEi386(ll_symbol_name *lbl, ObjectCode *dependent, 
              * the handle to resolve its address below. Keep the existing
              * dependent-symbol type on the fallback path. */
             ll_sym_type depType = 0;
-            HINSTANCE dllInstance = (HINSTANCE)lookupDependentSymbol(pinfo->value, dependent, &depType);
+            LL_ASSERT_FOR(L, dependent == NULL || dependent->L == L);
+            LL_ASSERT_FOR(L, pinfo->owner == NULL || pinfo->owner->L == L);
+            HINSTANCE dllInstance = (HINSTANCE)lookupDependentSymbol(L, pinfo->value, dependent, &depType);
             if (!dllInstance && pinfo->value) {
                 if (type) *type = depType;
                 return pinfo->value;
@@ -2529,12 +2542,12 @@ ll_symbol_addr *lookupSymbol_PEi386(ll_symbol_name *lbl, ObjectCode *dependent, 
 
             if (!dllInstance)
             {
-               LL_LOG_ERROR("Unable to load import dll symbol `%s'. "
+               LL_LOG_ERROR_FOR(L, "Unable to load import dll symbol `%s'. "
                           "No _iname symbol.", lbl);
                return NULL;
             }
-            LL_IF_DEBUG(linker,
-               LL_DEBUG("indexing import %s => %s using dll instance %p\n",
+            LL_IF_DEBUG_FOR(L, linker,
+               LL_DEBUG_FOR(L, "indexing import %s => %s using dll instance %p\n",
                    lbl, (char*)pinfo->value, dllInstance));
             pinfo->value = GetProcAddress((HMODULE)dllInstance, lbl);
             clearImportSymbol (pinfo->owner, lbl);
@@ -2548,7 +2561,8 @@ ll_symbol_addr *lookupSymbol_PEi386(ll_symbol_name *lbl, ObjectCode *dependent, 
                     insertHashSet(dependent->dependencies, (ll_w)owner);
                 }
             }
-            return loadSymbol(lbl, pinfo);
+            LL_ASSERT_FOR(L, pinfo->owner == NULL || pinfo->owner->L == L);
+            return loadSymbol(L, lbl, pinfo);
         }
     }
 }

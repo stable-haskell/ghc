@@ -60,8 +60,11 @@ bool ocRunInit_PEi386     ( ObjectCode *oc );
 bool ocRunFini_PEi386     ( ObjectCode *oc );
 bool ocGetNames_PEi386    ( ObjectCode* oc );
 bool ocVerifyImage_PEi386 ( ObjectCode* oc );
-ll_symbol_addr *lookupSymbol_PEi386(ll_symbol_name *lbl, ObjectCode *dependent, ll_sym_type *type);
-ll_symbol_addr *lookupSymbolInDLL_PEi386 (const ll_symbol_name* lbl, HINSTANCE instance, pathchar* dll_name, ObjectCode *dependent);
+ll_symbol_addr *lookupSymbol_PEi386(ll_linker *L, ll_symbol_name *lbl,
+                                    ObjectCode *dependent, ll_sym_type *type);
+ll_symbol_addr *lookupSymbolInDLL_PEi386 (ll_linker *L, const ll_symbol_name* lbl,
+                                          HINSTANCE instance, pathchar* dll_name,
+                                          ObjectCode *dependent);
 
 /* We use myindex to calculate array addresses, rather than
    simply doing the normal subscript thing.  That's because

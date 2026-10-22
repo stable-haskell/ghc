@@ -91,7 +91,7 @@ typedef struct _RtsSymbolInfo {
 
 #include "ll_begin_private.h"
 
-ll_symbol_addr* loadSymbol(ll_symbol_name *lbl, RtsSymbolInfo *pinfo);
+ll_symbol_addr* loadSymbol(ll_linker *L, ll_symbol_name *lbl, RtsSymbolInfo *pinfo);
 
 void addSection (ll_linker *L, Section *s, SectionKind kind, SectionAlloc alloc,
                  void* start, ll_word size, ll_word mapped_offset,
@@ -112,7 +112,8 @@ int ghciInsertSymbolTable(
 
 /* Lock-free version of lookupSymbol. When 'dependent' is not NULL, adds it as a
  * dependent to the owner of the symbol. The type of the symbol is stored in 'type'. */
-ll_symbol_addr* lookupDependentSymbol (ll_symbol_name* lbl, ObjectCode *dependent, ll_sym_type *type);
+ll_symbol_addr* lookupDependentSymbol (ll_linker *L, ll_symbol_name* lbl,
+                                       ObjectCode *dependent, ll_sym_type *type);
 
 /* Perform TLSGD symbol lookup returning the address of the resulting GOT entry,
  * which in this case holds the module id and the symbol offset. */

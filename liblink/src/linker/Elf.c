@@ -1260,7 +1260,7 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
            if (ELF_ST_BIND(symbol->elf_sym->st_info) == STB_LOCAL || strncmp(symbol->name, "_GLOBAL_OFFSET_TABLE_", 21) == 0) {
                S = (Elf_Addr)symbol->addr;
            } else {
-               S_tmp = lookupDependentSymbol( symbol->name, oc, NULL );
+               S_tmp = lookupDependentSymbol( oc->L, symbol->name, oc, NULL );
                S = (Elf_Addr)S_tmp;
            }
            if (!S) {
@@ -1720,7 +1720,7 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
          } else {
             /* If not local, look up the name in our global table. */
             symbol = strtab + sym.st_name;
-            S_tmp = lookupDependentSymbol( symbol, oc, NULL );
+            S_tmp = lookupDependentSymbol( oc->L, symbol, oc, NULL );
             S = (Elf_Addr)S_tmp;
          }
          if (!S) {
