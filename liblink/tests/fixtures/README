@@ -76,3 +76,24 @@ and compared strictly by `check`.
 Malformed or unsupported recipe inputs fail before output promotion. These
 recipes supply format fixtures, including expected-unsupported relocations;
 LLVM reader acceptance does not establish liblink backend support.
+
+The versioned catalogs are `<format>-<arch>.json` beside this file. Sources
+live under `src/<format>-<arch>/`, and reference objects, archives, and their
+manifest live under `generated/<format>-<arch>/`. For example, from the
+repository root:
+
+```sh
+python3 liblink/tests/fixtures/generate.py check \
+  --catalog liblink/tests/fixtures/macho-arm64.json \
+  --output-dir liblink/tests/fixtures/generated/macho-arm64 \
+  --clang /path/to/unwrapped/clang \
+  --llvm-mc /path/to/llvm-mc --llvm-ar /path/to/llvm-ar
+```
+
+Use `regen` in place of `check` to update one target's reference tree. Each
+catalog records emitted relocations and the expected backend outcome.
+Unsupported entries remain fixtures. PPC64LE covers architecture rejection;
+x86_64 ELF TLSGD is FreeBSD-only. RISC-V RELAX and ALIGN are accepted no-ops.
+Branch `layout_cases` prepare later near/far veneer and island checks.
+Symbol selection, initializer order, branch execution, and rejection status
+require linker runner tests; object generation alone does not prove them.

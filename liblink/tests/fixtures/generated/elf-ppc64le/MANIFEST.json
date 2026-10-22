@@ -1,0 +1,42 @@
+{
+  "archive_formats": [
+    "gnu"
+  ],
+  "artifacts": {
+    "powerpc64le-linux-gnu/libelf-fixtures.a": {
+      "sha256": "494d17cea173d1ac2cadda449b7fc2669e5ec6529543c3667a255a45c96f9afb",
+      "size": 696
+    },
+    "powerpc64le-linux-gnu/unsupported_backend.o": {
+      "sha256": "084ec845c9823646a816fff9c12ce047fc5500d4939f1ea9ef416349f37bdcbf",
+      "size": 440
+    }
+  },
+  "catalog_sha256": "5ea60f799256d8e8f3c0ec3884dc42e49d04092a0324d16e93355bc538adfec4",
+  "generator_sha256": "1d27932f1734f1b2f8a97760d242a2563ee33686f934a80cf00f876c8dcc0efa",
+  "recipe_sha256": "a85e8995a015c363e0217f852af73ed739dfc06bac7a1f5162569da90bae0142",
+  "schema": 1,
+  "sources": {
+    "src/elf-ppc64le/unsupported_backend.s": {
+      "sha256": "5395ba047841e673dc3358bdb9638cd3d66d35d76ee3bcd86cbfa68267db5cca",
+      "size": 92
+    }
+  },
+  "targets": [
+    "powerpc64le-linux-gnu"
+  ],
+  "tools": {
+    "clang": {
+      "major": "21",
+      "version": "clang version 21.1.2"
+    },
+    "llvm-ar": {
+      "major": "21",
+      "version": "LLVM version 21.1.2"
+    },
+    "llvm-mc": {
+      "major": "21",
+      "version": "LLVM version 21.1.2"
+    }
+  }
+}
