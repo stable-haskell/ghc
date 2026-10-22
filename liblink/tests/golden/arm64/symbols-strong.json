@@ -1,0 +1,48 @@
+{
+  "fields": [],
+  "format": "Mach-O arm64",
+  "got_slots": {},
+  "object_sha256": "0d948c549e9b95a1a97dc02e810bea952c9ef474a3674008bc39d1487ec52e4e",
+  "reference_layout": {
+    "got": {
+      "address": "0x102380000",
+      "bytes": "00c0370201000000",
+      "capture_phase": "after-resolve-before-init",
+      "size": 8
+    },
+    "host_symbols": {
+      "___cxa_atexit": "0x102347a58",
+      "___cxa_finalize": "0x102347adc",
+      "_fixture_record_event": "0x1023471dc",
+      "_ll_fixture_target": "0x1023471c8"
+    },
+    "image_base": "0x102378000",
+    "sections": [
+      {
+        "address": null,
+        "index": 0,
+        "relocated_bytes": "",
+        "size": 0
+      },
+      {
+        "address": "0x10237c000",
+        "index": 1,
+        "relocated_bytes": "1d000000",
+        "size": 4
+      }
+    ],
+    "stubs": [
+      {
+        "capture_phase": "after-resolve-before-init",
+        "count": 0,
+        "entries": [],
+        "reserved_bytes": "",
+        "reserved_size": 0,
+        "reserved_start": "0x10237c004",
+        "section_index": 1
+      }
+    ]
+  },
+  "schema": 1,
+  "semantic": []
+}
