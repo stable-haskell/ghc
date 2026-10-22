@@ -44,16 +44,16 @@ typedef struct _COFF_HEADER_INFO {
  * COFF/PE prototypes
  ********************************************/
 
-void initLinker_PEi386( void );
+void initLinker_PEi386( ll_linker *L );
 void exitLinker_PEi386( void );
-const char * addDLL_PEi386( const pathchar *dll_name, HINSTANCE *instance  );
+const char * addDLL_PEi386( ll_linker *L, const pathchar *dll_name, HINSTANCE *instance  );
 void freePreloadObjectFile_PEi386( ObjectCode *oc );
 
-bool checkAndLoadImportLibrary( pathchar* arch_name, char* member_name, FILE* f);
+bool checkAndLoadImportLibrary( ll_linker *L, pathchar* arch_name, char* member_name, FILE* f);
 
-pathchar* findSystemLibrary_PEi386( pathchar* dll_name );
-ll_hs_ptr addLibrarySearchPath_PEi386( pathchar* dll_path );
-bool removeLibrarySearchPath_PEi386( ll_hs_ptr dll_path_index );
+pathchar* findSystemLibrary_PEi386( ll_linker *L, pathchar* dll_name );
+ll_hs_ptr addLibrarySearchPath_PEi386( ll_linker *L, pathchar* dll_path );
+bool removeLibrarySearchPath_PEi386( ll_linker *L, ll_hs_ptr dll_path_index );
 
 bool ocResolve_PEi386     ( ObjectCode* oc );
 bool ocRunInit_PEi386     ( ObjectCode *oc );
@@ -80,7 +80,7 @@ myindex ( int scale, void* base, int index )
     return
         ((unsigned char*)base) + scale * index;
 }
-pathchar* resolveSymbolAddr_PEi386 ( pathchar* buffer, int size,
+pathchar* resolveSymbolAddr_PEi386 ( ll_linker *L, pathchar* buffer, int size,
                                      ll_symbol_addr* symbol, uintptr_t* top );
 
 char *get_name_string(
@@ -89,6 +89,7 @@ char *get_name_string(
     ObjectCode* oc);
 
 char* get_sym_name(
+    ll_linker *L,
     uint8_t* name,
     ObjectCode* oc);
 
@@ -145,14 +146,14 @@ struct _Alignments {
 } Alignments;
 
 /* Util symbol handling functions.  */
-COFF_OBJ_TYPE getObjectType ( char* image, pathchar* fileName );
+COFF_OBJ_TYPE getObjectType ( ll_linker *L, char* image, pathchar* fileName );
 COFF_HEADER_INFO* getHeaderInfo ( ObjectCode* oc );
-size_t getSymbolSize ( COFF_HEADER_INFO *info );
-uint32_t getSymSectionNumber ( COFF_HEADER_INFO *info, COFF_symbol* sym );
-uint32_t getSymValue ( COFF_HEADER_INFO *info, COFF_symbol* sym );
-uint8_t getSymStorageClass ( COFF_HEADER_INFO *info, COFF_symbol* sym );
-uint8_t getSymNumberOfAuxSymbols ( COFF_HEADER_INFO *info, COFF_symbol* sym );
-uint16_t getSymType ( COFF_HEADER_INFO *info, COFF_symbol* sym );
-uint8_t* getSymShortName ( COFF_HEADER_INFO *info, COFF_symbol* sym );
+size_t getSymbolSize ( ll_linker *L, COFF_HEADER_INFO *info );
+uint32_t getSymSectionNumber ( ll_linker *L, COFF_HEADER_INFO *info, COFF_symbol* sym );
+uint32_t getSymValue ( ll_linker *L, COFF_HEADER_INFO *info, COFF_symbol* sym );
+uint8_t getSymStorageClass ( ll_linker *L, COFF_HEADER_INFO *info, COFF_symbol* sym );
+uint8_t getSymNumberOfAuxSymbols ( ll_linker *L, COFF_HEADER_INFO *info, COFF_symbol* sym );
+uint16_t getSymType ( ll_linker *L, COFF_HEADER_INFO *info, COFF_symbol* sym );
+uint8_t* getSymShortName ( ll_linker *L, COFF_HEADER_INFO *info, COFF_symbol* sym );
 
 #include "ll_end_private.h"

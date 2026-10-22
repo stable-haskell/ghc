@@ -656,7 +656,7 @@ while reading filename from `%" PATH_FMT "'", path);
         }
         else if (isImportLib) {
 #if defined(OBJFORMAT_PEi386)
-            if (checkAndLoadImportLibrary(path, fileName, f)) {
+            if (checkAndLoadImportLibrary(L, path, fileName, f)) {
                 DEBUG_LOG(L, "Member is an import file section... "
                           "Corresponding DLL has been loaded...\n");
             }

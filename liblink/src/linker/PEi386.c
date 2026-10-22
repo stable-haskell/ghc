@@ -472,15 +472,18 @@ static size_t makeSymbolExtra_PEi386(
 #endif
 
 static void addDLLHandle(
+    ll_linker *L,
     const pathchar* dll_name,
     HINSTANCE instance);
 
 static bool verifyCOFFHeader(
+    ll_linker *L,
     uint16_t machine,
     IMAGE_FILE_HEADER *hdr,
     pathchar *fileName);
 
 static bool checkIfDllLoaded(
+    ll_linker *L,
     HINSTANCE instance);
 
 static uint32_t getSectionAlignment(
@@ -526,8 +529,8 @@ const int default_alignment = 8;
  * to avoid repeated calls to LoadLibraryEx for the identical DLL. See #26009.
  */
 
-static void initLoadedDllCache(LoadedDllCache *cache) {
-    cache->hash = allocHashTable(&ll_default_linker);
+static void initLoadedDllCache(ll_linker *L, LoadedDllCache *cache) {
+    cache->hash = allocHashTable(L);
 }
 
 static int hash_path(const HashTable *table, ll_word w)
@@ -541,12 +544,13 @@ static int compare_path(ll_word key1, ll_word key2)
     return wcscmp((pathchar*) key1, (pathchar*) key2) == 0;
 }
 
-static void addLoadedDll(LoadedDllCache *cache, const pathchar *dll_name, HINSTANCE instance)
+static void addLoadedDll(ll_linker *L, LoadedDllCache *cache,
+                         const pathchar *dll_name, HINSTANCE instance)
 {
     // dll_name might be deallocated, we need to copy it to have a stable reference to the contents
     // See #26613
     size_t size = wcslen(dll_name) + 1;
-    pathchar* dll_name_copy = LL_MALLOC(size * sizeof(pathchar), "addLoadedDll");
+    pathchar* dll_name_copy = LL_MALLOC_FOR(L, size * sizeof(pathchar), "addLoadedDll");
     wcsncpy(dll_name_copy, dll_name, size);
     insertHashTable_(cache->hash, (ll_word) dll_name_copy, instance, hash_path);
 }
@@ -557,19 +561,19 @@ static HINSTANCE isDllLoaded(const LoadedDllCache *cache, const pathchar *dll_na
     return (HINSTANCE) result;
 }
 
-void initLinker_PEi386(void)
+void initLinker_PEi386(ll_linker *L)
 {
-    initLoadedDllCache(&ll_default_linker.loaded_dll_cache);
+    initLoadedDllCache(L, &L->loaded_dll_cache);
 
-    if (!ghciInsertSymbolTable(&ll_default_linker,
+    if (!ghciInsertSymbolTable(L,
                                WSTR("(GHCi/Ld special symbols)"), "__image_base__",
                                GetModuleHandleW (NULL), LL_HS_BOOL_TRUE,
                                LL_SYM_CODE, 0, NULL)) {
-        LL_FATAL("ghciInsertSymbolTable failed");
+        LL_FATAL_FOR(L, "ghciInsertSymbolTable failed");
     }
 
 #if defined(mingw32_HOST_OS)
-    addDLLHandle(WSTR("*.exe"), GetModuleHandle(NULL));
+    addDLLHandle(L, WSTR("*.exe"), GetModuleHandle(NULL));
 #endif
 
     /* Register the cleanup routine as an exit handler,  this gives other exit handlers
@@ -584,23 +588,23 @@ void exitLinker_PEi386(void)
 }
 
 /* Adds a DLL instance to the list of DLLs in which to search for symbols. */
-static void addDLLHandle(const pathchar* dll_name, HINSTANCE instance) {
+static void addDLLHandle(ll_linker *L, const pathchar* dll_name, HINSTANCE instance) {
 
-    LL_IF_DEBUG(linker, LL_DEBUG("addDLLHandle(%" PATH_FMT ")...\n", dll_name));
+    LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "addDLLHandle(%" PATH_FMT ")...\n", dll_name));
     /* At this point, we actually know what was loaded.
        So bail out if it's already been loaded.  */
-    if (checkIfDllLoaded(instance))
+    if (checkIfDllLoaded(L, instance))
     {
-        LL_IF_DEBUG(linker, LL_DEBUG("already loaded: addDLLHandle(%" PATH_FMT ")\n", dll_name));
+        LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "already loaded: addDLLHandle(%" PATH_FMT ")\n", dll_name));
         return;
     }
 
     OpenedDLL* o_dll;
-    o_dll           = LL_MALLOC( sizeof(OpenedDLL), "addDLLHandle" );
-    o_dll->name     = dll_name ? pathdup(&ll_default_linker, dll_name) : NULL;
+    o_dll           = LL_MALLOC_FOR(L, sizeof(OpenedDLL), "addDLLHandle" );
+    o_dll->name     = dll_name ? pathdup(L, dll_name) : NULL;
     o_dll->instance = instance;
-    o_dll->next     = ll_default_linker.opened_dlls;
-    ll_default_linker.opened_dlls     = o_dll;
+    o_dll->next     = L->opened_dlls;
+    L->opened_dlls  = o_dll;
 
     /* Now discover the dependencies of dll_name that were
        just loaded in our process space. The reason is we have access to them
@@ -624,26 +628,26 @@ static void addDLLHandle(const pathchar* dll_name, HINSTANCE instance) {
     const int len = wcslen(ms_dll);
 
     do {
-        pathchar* module = mkPath(&ll_default_linker,
+        pathchar* module = mkPath(L,
                                   (char*)(BYTE *)instance + imports->Name);
         HINSTANCE module_instance = GetModuleHandleW(module);
         if (0 != wcsncmp(module, ms_dll, len)
             && module_instance
-            && !checkIfDllLoaded(module_instance))
+            && !checkIfDllLoaded(L, module_instance))
         {
-            LL_IF_DEBUG(linker, LL_DEBUG("Loading dependency %" PATH_FMT " -> %" PATH_FMT ".\n", dll_name, module));
+            LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "Loading dependency %" PATH_FMT " -> %" PATH_FMT ".\n", dll_name, module));
             /* Now recursively load dependencies too.  */
-            addDLLHandle(module, module_instance);
+            addDLLHandle(L, module, module_instance);
         }
-        LL_FREE(module);
+        LL_FREE_FOR(L, module);
         imports++;
     } while (imports->Name);
-    LL_IF_DEBUG(linker, LL_DEBUG("done: addDLLHandle(%" PATH_FMT ")\n", dll_name));
+    LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "done: addDLLHandle(%" PATH_FMT ")\n", dll_name));
 }
 
-static OpenedDLL* findLoadedDll(HINSTANCE instance)
+static OpenedDLL* findLoadedDll(ll_linker *L, HINSTANCE instance)
 {
-    for (OpenedDLL* o_dll = ll_default_linker.opened_dlls; o_dll != NULL; o_dll = o_dll->next) {
+    for (OpenedDLL* o_dll = L->opened_dlls; o_dll != NULL; o_dll = o_dll->next) {
         if (o_dll->instance == instance)
         {
             return o_dll;
@@ -653,9 +657,9 @@ static OpenedDLL* findLoadedDll(HINSTANCE instance)
     return NULL;
 }
 
-static bool checkIfDllLoaded(HINSTANCE instance)
+static bool checkIfDllLoaded(ll_linker *L, HINSTANCE instance)
 {
-    return findLoadedDll (instance) != NULL;
+    return findLoadedDll (L, instance) != NULL;
 }
 
 void freePreloadObjectFile_PEi386(ObjectCode *oc)
@@ -716,7 +720,7 @@ static void releaseOcInfo(ObjectCode* oc) {
  * This is needed in order to correctly load and verify objects and their
  * sections.
  *************/
-COFF_OBJ_TYPE getObjectType ( char* image, pathchar* fileName )
+COFF_OBJ_TYPE getObjectType ( ll_linker *L, char* image, pathchar* fileName )
 {
     /* {D1BAA1C7-BAEE-4ba9-AF20-FAF66AA4DCB8} */
     static const char header_bigobj_classid[16] =
@@ -736,7 +740,7 @@ COFF_OBJ_TYPE getObjectType ( char* image, pathchar* fileName )
         && anon->Sig2 == IMPORT_OBJECT_HDR_SIG2)
     {
         machine = anon->Machine;
-        if (verifyCOFFHeader (machine, NULL, fileName))
+        if (verifyCOFFHeader (L, machine, NULL, fileName))
         {
             switch (anon->Version)
             {
@@ -758,7 +762,7 @@ COFF_OBJ_TYPE getObjectType ( char* image, pathchar* fileName )
         /* If it's not an ANON_OBJECT then try an image file.  */
         IMAGE_FILE_HEADER* img = (IMAGE_FILE_HEADER*)image;
         machine = img->Machine;
-        if (verifyCOFFHeader (machine, img, fileName))
+        if (verifyCOFFHeader (L, machine, img, fileName))
             ret = COFF_IMAGE;
     }
     return ret;
@@ -769,7 +773,7 @@ COFF_OBJ_TYPE getObjectType ( char* image, pathchar* fileName )
  *************/
 COFF_HEADER_INFO* getHeaderInfo ( ObjectCode* oc )
 {
-   COFF_OBJ_TYPE coff_type = getObjectType (oc->image, OC_INFORMATIVE_FILENAME(oc));
+   COFF_OBJ_TYPE coff_type = getObjectType (oc->L, oc->image, OC_INFORMATIVE_FILENAME(oc));
 
    COFF_HEADER_INFO* info
      = LL_MALLOC_FOR(oc->L, sizeof(COFF_HEADER_INFO), "getHeaderInfo");
@@ -813,9 +817,9 @@ COFF_HEADER_INFO* getHeaderInfo ( ObjectCode* oc )
  * Symbol utility functions
  *************/
 __attribute__ ((always_inline)) inline
-size_t getSymbolSize ( COFF_HEADER_INFO *info )
+size_t getSymbolSize ( ll_linker *L LL_UNUSED, COFF_HEADER_INFO *info )
 {
-    LL_ASSERT(info);
+    LL_ASSERT_FOR(L, info);
     switch (info->type)
     {
         case COFF_ANON_BIG_OBJ:
@@ -834,10 +838,10 @@ size_t getSymbolSize ( COFF_HEADER_INFO *info )
 // Returns either PE_SECTION_{UNDEFINED,ABSOLUTE,DEBUG} or the (one-based)
 // section number of the given symbol.
 __attribute__ ((always_inline)) inline
-uint32_t getSymSectionNumber ( COFF_HEADER_INFO *info, COFF_symbol* sym )
+uint32_t getSymSectionNumber ( ll_linker *L LL_UNUSED, COFF_HEADER_INFO *info, COFF_symbol* sym )
 {
-    LL_ASSERT(info);
-    LL_ASSERT(sym);
+    LL_ASSERT_FOR(L, info);
+    LL_ASSERT_FOR(L, sym);
     switch (info->type)
     {
         case COFF_ANON_BIG_OBJ:
@@ -850,17 +854,17 @@ uint32_t getSymSectionNumber ( COFF_HEADER_INFO *info, COFF_symbol* sym )
                 case IMAGE_SYM_DEBUG: return PE_SECTION_DEBUG;
                 default:
                   // Ensure that we catch if SectionNumber is made wider in the future
-                  LL_ASSERT(sizeof(sym->og.SectionNumber) == 2);
+                  LL_ASSERT_FOR(L, sizeof(sym->og.SectionNumber) == 2);
                   return (uint16_t) sym->og.SectionNumber;
             }
     }
 }
 
 __attribute__ ((always_inline)) inline
-uint32_t getSymValue ( COFF_HEADER_INFO *info, COFF_symbol* sym )
+uint32_t getSymValue ( ll_linker *L LL_UNUSED, COFF_HEADER_INFO *info, COFF_symbol* sym )
 {
-    LL_ASSERT(info);
-    LL_ASSERT(sym);
+    LL_ASSERT_FOR(L, info);
+    LL_ASSERT_FOR(L, sym);
     switch (info->type)
     {
         case COFF_ANON_BIG_OBJ:
@@ -871,10 +875,10 @@ uint32_t getSymValue ( COFF_HEADER_INFO *info, COFF_symbol* sym )
 }
 
 __attribute__ ((always_inline)) inline
-uint8_t getSymStorageClass ( COFF_HEADER_INFO *info, COFF_symbol* sym )
+uint8_t getSymStorageClass ( ll_linker *L LL_UNUSED, COFF_HEADER_INFO *info, COFF_symbol* sym )
 {
-    LL_ASSERT(info);
-    LL_ASSERT(sym);
+    LL_ASSERT_FOR(L, info);
+    LL_ASSERT_FOR(L, sym);
     switch (info->type)
     {
         case COFF_ANON_BIG_OBJ:
@@ -885,10 +889,10 @@ uint8_t getSymStorageClass ( COFF_HEADER_INFO *info, COFF_symbol* sym )
 }
 
 __attribute__ ((always_inline)) inline
-uint8_t getSymNumberOfAuxSymbols ( COFF_HEADER_INFO *info, COFF_symbol* sym )
+uint8_t getSymNumberOfAuxSymbols ( ll_linker *L LL_UNUSED, COFF_HEADER_INFO *info, COFF_symbol* sym )
 {
-    LL_ASSERT(info);
-    LL_ASSERT(sym);
+    LL_ASSERT_FOR(L, info);
+    LL_ASSERT_FOR(L, sym);
     switch (info->type)
     {
         case COFF_ANON_BIG_OBJ:
@@ -899,10 +903,10 @@ uint8_t getSymNumberOfAuxSymbols ( COFF_HEADER_INFO *info, COFF_symbol* sym )
 }
 
 __attribute__ ((always_inline)) inline
-uint16_t getSymType ( COFF_HEADER_INFO *info, COFF_symbol* sym )
+uint16_t getSymType ( ll_linker *L LL_UNUSED, COFF_HEADER_INFO *info, COFF_symbol* sym )
 {
-    LL_ASSERT(info);
-    LL_ASSERT(sym);
+    LL_ASSERT_FOR(L, info);
+    LL_ASSERT_FOR(L, sym);
     switch (info->type)
     {
         case COFF_ANON_BIG_OBJ:
@@ -913,10 +917,10 @@ uint16_t getSymType ( COFF_HEADER_INFO *info, COFF_symbol* sym )
 }
 
 __attribute__ ((always_inline)) inline
-uint8_t* getSymShortName ( COFF_HEADER_INFO *info, COFF_symbol* sym )
+uint8_t* getSymShortName ( ll_linker *L LL_UNUSED, COFF_HEADER_INFO *info, COFF_symbol* sym )
 {
-    LL_ASSERT(info);
-    LL_ASSERT(sym);
+    LL_ASSERT_FOR(L, info);
+    LL_ASSERT_FOR(L, sym);
     switch (info->type)
     {
         case COFF_ANON_BIG_OBJ:
@@ -927,13 +931,13 @@ uint8_t* getSymShortName ( COFF_HEADER_INFO *info, COFF_symbol* sym )
 }
 
 const char *
-addDLL_PEi386( const pathchar *dll_name, HINSTANCE *loaded )
+addDLL_PEi386( ll_linker *L, const pathchar *dll_name, HINSTANCE *loaded )
 {
     /* ------------------- Win32 DLL loader ------------------- */
-    LL_IF_DEBUG(linker, LL_DEBUG("addDLL; dll_name = `%" PATH_FMT "'\n", dll_name));
+    LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "addDLL; dll_name = `%" PATH_FMT "'\n", dll_name));
 
     // See Note [Avoiding repeated DLL loading]
-    HINSTANCE instance = isDllLoaded(&ll_default_linker.loaded_dll_cache, dll_name);
+    HINSTANCE instance = isDllLoaded(&L->loaded_dll_cache, dll_name);
     if (instance) {
         if (loaded) {
             *loaded = instance;
@@ -952,7 +956,7 @@ addDLL_PEi386( const pathchar *dll_name, HINSTANCE *loaded )
         extension. */
 
     size_t bufsize = pathlen(dll_name) + 10;
-    pathchar *buf = LL_MALLOC(bufsize * sizeof(wchar_t), "addDLL");
+    pathchar *buf = LL_MALLOC_FOR(L, bufsize * sizeof(wchar_t), "addDLL");
 
     /* These are ordered by probability of success and order we'd like them.  */
     const wchar_t *formats[] = { L"%ls.DLL", L"%ls.DRV", L"lib%ls.DLL", L"%ls" };
@@ -977,47 +981,47 @@ addDLL_PEi386( const pathchar *dll_name, HINSTANCE *loaded )
     goto error;
 
 loaded_ok:
-    addLoadedDll(&ll_default_linker.loaded_dll_cache, dll_name, instance);
-    addDLLHandle(buf, instance);
+    addLoadedDll(L, &L->loaded_dll_cache, dll_name, instance);
+    addDLLHandle(L, buf, instance);
     if (loaded) {
         *loaded = instance;
     }
-    LL_FREE(buf);
+    LL_FREE_FOR(L, buf);
 
     return NULL;
 
 error:
-    LL_FREE(buf);
+    LL_FREE_FOR(L, buf);
 
-    char* errormsg = LL_MALLOC(sizeof(char) * 80, "addDLL_PEi386");
+    char* errormsg = LL_MALLOC_FOR(L, sizeof(char) * 80, "addDLL_PEi386");
     if (loaded) *loaded = NULL;
     snprintf(errormsg, 80, "addDLL: %" PATH_FMT " or dependencies not loaded. (Win32 error %lu)", dll_name, GetLastError());
     /* LoadLibrary failed; return a ptr to the error msg. */
     return errormsg;
 }
 
-pathchar* findSystemLibrary_PEi386( pathchar* dll_name )
+pathchar* findSystemLibrary_PEi386( ll_linker *L, pathchar* dll_name )
 {
     const unsigned int init_buf_size = 1024;
     unsigned int bufsize             = init_buf_size;
-    wchar_t* result = LL_MALLOC(sizeof(wchar_t) * bufsize, "findSystemLibrary_PEi386");
+    wchar_t* result = LL_MALLOC_FOR(L, sizeof(wchar_t) * bufsize, "findSystemLibrary_PEi386");
     DWORD wResult   = SearchPathW(NULL, dll_name, NULL, bufsize, result, NULL);
 
     if (wResult > bufsize) {
-        result  = realloc(result, sizeof(wchar_t) * wResult);
+        result  = LL_REALLOC_FOR(L, result, sizeof(wchar_t) * wResult, "findSystemLibrary_PEi386");
         wResult = SearchPathW(NULL, dll_name, NULL, wResult, result, NULL);
     }
 
 
     if (!wResult) {
-        LL_FREE(result);
+        LL_FREE_FOR(L, result);
         return NULL;
     }
 
     return result;
 }
 
-ll_hs_ptr addLibrarySearchPath_PEi386(pathchar* dll_path)
+ll_hs_ptr addLibrarySearchPath_PEi386(ll_linker *L, pathchar* dll_path)
 {
     // Make sure the path is an absolute path in UNC-style to ensure that we
     // aren't subject to the MAX_PATH restriction. See #21059.
@@ -1025,16 +1029,16 @@ ll_hs_ptr addLibrarySearchPath_PEi386(pathchar* dll_path)
 
     ll_hs_ptr result = AddDllDirectory(abs_path);
     if (!result) {
-        LL_LOG_SYSERROR("addLibrarySearchPath: %" PATH_FMT " (Win32 error %lu)", abs_path, GetLastError());
-        LL_FREE(abs_path);
+        LL_LOG_SYSERROR_FOR(L, "addLibrarySearchPath: %" PATH_FMT " (Win32 error %lu)", abs_path, GetLastError());
+        free(abs_path);
         return NULL;
     }
 
-    LL_FREE(abs_path);
+    free(abs_path);
     return result;
 }
 
-bool removeLibrarySearchPath_PEi386(ll_hs_ptr dll_path_index)
+bool removeLibrarySearchPath_PEi386(ll_linker *L, ll_hs_ptr dll_path_index)
 {
     bool result = false;
 
@@ -1043,7 +1047,7 @@ bool removeLibrarySearchPath_PEi386(ll_hs_ptr dll_path_index)
         // dll_path_index is now invalid, do not use it after this point.
 
         if (!result) {
-            LL_LOG_SYSERROR("removeLibrarySearchPath: (Win32 error %lu)", GetLastError());
+            LL_LOG_SYSERROR_FOR(L, "removeLibrarySearchPath: (Win32 error %lu)", GetLastError());
             return false;
         }
     }
@@ -1086,10 +1090,10 @@ static size_t getAlignedValue(
  * This function must fail gracefully and if it does, the filestream needs to
  * be reset to what it was when the function was called.
  */
-bool checkAndLoadImportLibrary( pathchar* arch_name, char* member_name, FILE* f )
+bool checkAndLoadImportLibrary( ll_linker *L, pathchar* arch_name, char* member_name, FILE* f )
 {
     char* image;
-    if (ll_default_linker.load_dll_warn) { return 0; }
+    if (L->load_dll_warn) { return 0; }
 
     /* Based on Import Library specification. PE Spec section 7.1 */
 
@@ -1098,7 +1102,7 @@ bool checkAndLoadImportLibrary( pathchar* arch_name, char* member_name, FILE* f 
 
     n = fread(&hdr, 1, sizeof_COFF_import_Header, f);
     if (n != sizeof_COFF_import_Header)  {
-        LL_LOG_ERROR("loadImportLibrary: error whilst reading `%s' header "
+        LL_LOG_ERROR_FOR(L, "loadImportLibrary: error whilst reading `%s' header "
                    "in `%" PATH_FMT "'\n",
                    member_name, arch_name);
         fseek(f, -(long int)sizeof_COFF_import_Header, SEEK_CUR);
@@ -1107,18 +1111,18 @@ bool checkAndLoadImportLibrary( pathchar* arch_name, char* member_name, FILE* f 
 
     if (   hdr.Sig1 != IMAGE_FILE_MACHINE_UNKNOWN
         || hdr.Sig2 != IMPORT_OBJECT_HDR_SIG2
-        || getObjectType ((char*)&hdr, arch_name) != COFF_IMPORT_LIB) {
+        || getObjectType (L, (char*)&hdr, arch_name) != COFF_IMPORT_LIB) {
         fseek(f, -(long int)sizeof_COFF_import_Header, SEEK_CUR);
-        LL_IF_DEBUG(linker, LL_DEBUG("loadArchive: Object `%s` is not an import lib. Skipping...\n", member_name));
+        LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "loadArchive: Object `%s` is not an import lib. Skipping...\n", member_name));
         return false;
     }
 
-    LL_IF_DEBUG(linker, LL_DEBUG("loadArchive: reading %lu bytes at %ld\n", hdr.SizeOfData, ftell(f)));
+    LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "loadArchive: reading %lu bytes at %ld\n", hdr.SizeOfData, ftell(f)));
 
-    image = LL_MALLOC(hdr.SizeOfData, "checkAndLoadImportLibrary(image)");
+    image = LL_MALLOC_FOR(L, hdr.SizeOfData, "checkAndLoadImportLibrary(image)");
     n = fread(image, 1, hdr.SizeOfData, f);
     if (n != hdr.SizeOfData) {
-        LL_LOG_ERROR("loadArchive: error whilst reading `%s' header in `%" PATH_FMT "'. Did not read enough bytes.\n",
+        LL_LOG_ERROR_FOR(L, "loadArchive: error whilst reading `%s' header in `%" PATH_FMT "'. Did not read enough bytes.\n",
             member_name, arch_name);
         fseek(f, -(n + sizeof_COFF_import_Header), SEEK_CUR);
         return false;
@@ -1127,39 +1131,39 @@ bool checkAndLoadImportLibrary( pathchar* arch_name, char* member_name, FILE* f 
     char* symbol  = strtok(image, "\0");
     int symLen    = strlen(symbol) + 1;
     int nameLen   = n - symLen;
-    char* dllName = LL_MALLOC(sizeof(char) * nameLen,
+    char* dllName = LL_MALLOC_FOR(L, sizeof(char) * nameLen,
                                    "checkAndLoadImportLibrary(dllname)");
     dllName       = strncpy(dllName, image + symLen, nameLen);
-    pathchar* dll = LL_MALLOC(sizeof(wchar_t) * nameLen,
+    pathchar* dll = LL_MALLOC_FOR(L, sizeof(wchar_t) * nameLen,
                                    "checkAndLoadImportLibrary(dll)");
     mbstowcs(dll, dllName, nameLen);
-    LL_FREE(dllName);
+    LL_FREE_FOR(L, dllName);
 
-    LL_IF_DEBUG(linker, LL_DEBUG("loadArchive: read symbol %s from lib `%" PATH_FMT "'\n", symbol, dll));
+    LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "loadArchive: read symbol %s from lib `%" PATH_FMT "'\n", symbol, dll));
     // We must call `addDLL_PEi386` directly rather than `addDLL` because `addDLL`
     // is now a wrapper around `loadNativeObj` which acquires a lock which we
     // already have here.
     HINSTANCE instance;
-    const char* result = addDLL_PEi386(dll, &instance);
+    const char* result = addDLL_PEi386(L, dll, &instance);
 
-    LL_FREE(image);
+    LL_FREE_FOR(L, image);
 
     if (result != NULL) {
-        LL_LOG_ERROR("Could not load `%" PATH_FMT "'. Reason: %s\n", dll, result);
-        ll_default_linker.load_dll_warn = true;
+        LL_LOG_ERROR_FOR(L, "Could not load `%" PATH_FMT "'. Reason: %s\n", dll, result);
+        L->load_dll_warn = true;
 
-        LL_FREE(dll);
+        LL_FREE_FOR(L, dll);
         fseek(f, -(n + sizeof_COFF_import_Header), SEEK_CUR);
         return false;
     }
 
-    LL_FREE(dll);
+    LL_FREE_FOR(L, dll);
 
     // See Note [Windows API Set]
     // We must immediately tie the symbol to the shared library.  The easiest
     // way is to load the symbol immediately. We already have all the
     // information so might as well
-    ll_symbol_addr* sym = lookupSymbolInDLL_PEi386 (&ll_default_linker, symbol,
+    ll_symbol_addr* sym = lookupSymbolInDLL_PEi386 (L, symbol,
                                                     instance, dll, NULL);
 
     // Could be an import descriptor etc, skip if no symbol.
@@ -1167,14 +1171,14 @@ bool checkAndLoadImportLibrary( pathchar* arch_name, char* member_name, FILE* f 
       return true;
 
     // The symbol must have been found, and we can add it to the RTS symbol table
-    LL_IF_DEBUG(linker, LL_DEBUG("checkAndLoadImportLibrary: resolved symbol %s to %p\n", symbol, sym));
+    LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "checkAndLoadImportLibrary: resolved symbol %s to %p\n", symbol, sym));
     // Because the symbol has been loaded before we actually need it, if a
     // stronger reference wants to add a duplicate we should discard this
     // one to preserve link order.
     ll_sym_type symType = LL_SYM_DUP_DISCARD | LL_SYM_HIDDEN;
     symType |= hdr.Type == IMPORT_OBJECT_CODE ? LL_SYM_CODE : LL_SYM_DATA;
 
-    if (!ghciInsertSymbolTable(&ll_default_linker, dll, symbol, sym, false, symType, 0, NULL))
+    if (!ghciInsertSymbolTable(L, dll, symbol, sym, false, symType, 0, NULL))
       return false;
 
     return true;
@@ -1185,13 +1189,13 @@ printName ( uint8_t* name, ObjectCode* oc )
 {
    if (name[0]==0 && name[1]==0 && name[2]==0 && name[3]==0) {
       uint32_t strtab_offset = * (uint32_t*)(name + 4);
-      LL_DEBUG("%s",
+      LL_DEBUG_FOR(oc->L, "%s",
                  oc->info->str_tab + strtab_offset - PEi386_STRTAB_OFFSET);
    } else {
       int i;
       for (i = 0; i < 8; i++) {
          if (name[i] == 0) break;
-         LL_DEBUG("%c", name[i] );
+         LL_DEBUG_FOR(oc->L, "%c", name[i] );
       }
    }
 }
@@ -1220,7 +1224,7 @@ copyName ( uint8_t* name, ObjectCode* oc, uint8_t* dst, int dstSize )
 
 
 char*
-get_sym_name ( uint8_t* name, ObjectCode* oc )
+get_sym_name ( ll_linker *L, uint8_t* name, ObjectCode* oc )
 {
    char* newstr;
    /* If the string is longer than 8 bytes, look in the
@@ -1237,8 +1241,8 @@ get_sym_name ( uint8_t* name, ObjectCode* oc )
    /* The annoying case: 8 bytes.  Copy into a temporary
       (XXX which is never freed ...)
    */
-   newstr = LL_MALLOC(9, "get_sym_name");
-   LL_ASSERT(newstr);
+   newstr = LL_MALLOC_FOR(L, 9, "get_sym_name");
+   LL_ASSERT_FOR(L, newstr);
    strncpy (newstr, (char*)name,8);
    newstr[8] = 0;
    return newstr;
@@ -1332,40 +1336,40 @@ lookupSymbolInDLL_PEi386 ( ll_linker *L, const ll_symbol_name* lbl,
 }
 
 static bool
-verifyCOFFHeader ( uint16_t machine, IMAGE_FILE_HEADER *hdr,
+verifyCOFFHeader ( ll_linker *L, uint16_t machine, IMAGE_FILE_HEADER *hdr,
                    pathchar *fileName )
 {
 #if defined(x86_64_HOST_ARCH)
    if (machine != IMAGE_FILE_MACHINE_AMD64) {
-      LL_LOG_ERROR("%" PATH_FMT ": Not a x86_64 PE+ file.", fileName);
+      LL_LOG_ERROR_FOR(L, "%" PATH_FMT ": Not a x86_64 PE+ file.", fileName);
       return false;
    }
 #elif defined(aarch64_HOST_ARCH)
    if (machine != IMAGE_FILE_MACHINE_ARM64) {
-      LL_LOG_ERROR("%" PATH_FMT ": Not a ARM64 PE+ file.", fileName);
+      LL_LOG_ERROR_FOR(L, "%" PATH_FMT ": Not a ARM64 PE+ file.", fileName);
       return false;
    }
-   LL_LOG_ERROR("PE/PE+ not supported on ARM64.");
+   LL_LOG_ERROR_FOR(L, "PE/PE+ not supported on ARM64.");
 #else
-   LL_LOG_ERROR("PE/PE+ not supported on this arch.");
+   LL_LOG_ERROR_FOR(L, "PE/PE+ not supported on this arch.");
 #endif
 
    if (!hdr)
      return true;
 
    if (hdr->SizeOfOptionalHeader != 0) {
-      LL_LOG_ERROR("%" PATH_FMT ": PE/PE+ with nonempty optional header",
+      LL_LOG_ERROR_FOR(L, "%" PATH_FMT ": PE/PE+ with nonempty optional header",
                  fileName);
       return 0;
    }
    if ( (hdr->Characteristics & IMAGE_FILE_EXECUTABLE_IMAGE) ||
         (hdr->Characteristics & IMAGE_FILE_DLL             ) ||
         (hdr->Characteristics & IMAGE_FILE_SYSTEM          ) ) {
-      LL_LOG_ERROR("%" PATH_FMT ": Not a PE/PE+ object file", fileName);
+      LL_LOG_ERROR_FOR(L, "%" PATH_FMT ": Not a PE/PE+ object file", fileName);
       return false;
    }
    if ( (hdr->Characteristics & IMAGE_FILE_BYTES_REVERSED_HI)) {
-      LL_LOG_ERROR("%" PATH_FMT ": Invalid PE/PE+ word size or endianness: %d",
+      LL_LOG_ERROR_FOR(L, "%" PATH_FMT ": Invalid PE/PE+ word size or endianness: %d",
                  fileName,
                  (int)(hdr->Characteristics));
       return false;
@@ -1397,7 +1401,7 @@ ocVerifyImage_PEi386 ( ObjectCode* oc )
                + info->pointerToSymbolTable
             );
    strtab = ((uint8_t*)symtab)
-            + info->numberOfSymbols * getSymbolSize (info);
+            + info->numberOfSymbols * getSymbolSize(oc->L, info);
 
    /* .BSS Section is initialized in ocGetNames_PEi386
       but we need the Sections array initialized here already. */
@@ -1423,7 +1427,7 @@ ocVerifyImage_PEi386 ( ObjectCode* oc )
       to access it using normal subscript notation. This eliminates the complex
       indexing later on.  */
    uint32_t s_symbols = info->numberOfSymbols * sizeof(COFF_symbol);
-   uint32_t sym_size  = getSymbolSize (info);
+   uint32_t sym_size  = getSymbolSize(oc->L, info);
    oc->info->symbols
      = LL_MALLOC_FOR(oc->L, s_symbols, "ocVerifyImage_PEi386(oc->info->symbols)");
    for (i = 0; i < info->numberOfSymbols; i++)
@@ -1589,7 +1593,7 @@ ocVerifyImage_PEi386 ( ObjectCode* oc )
                    rel.Type,
                    rel.VirtualAddress );
          COFF_symbol sym = oc->info->symbols[rel.SymbolTableIndex];
-         printName (getSymShortName (info, &sym), oc);
+         printName (getSymShortName(oc->L, info, &sym), oc);
          LL_DEBUG_FOR(oc->L, "'\n" );
       }
 
@@ -1614,7 +1618,7 @@ ocVerifyImage_PEi386 ( ObjectCode* oc )
                 "     name `",
                 i
               );
-      printName (getSymShortName (info, symtab_i), oc);
+      printName (getSymShortName(oc->L, info, symtab_i), oc);
       LL_DEBUG_FOR(oc->L,
                 "'\n"
                 "    value 0x%x\n"
@@ -1622,13 +1626,13 @@ ocVerifyImage_PEi386 ( ObjectCode* oc )
                 "     type 0x%x\n"
                 "   sclass 0x%x\n"
                 "     nAux %d\n",
-                getSymValue (info, symtab_i),
-                getSymSectionNumber (info, symtab_i),
-                getSymType (info, symtab_i),
-                getSymStorageClass (info, symtab_i),
-                getSymNumberOfAuxSymbols (info, symtab_i)
+                getSymValue(oc->L, info, symtab_i),
+                getSymSectionNumber(oc->L, info, symtab_i),
+                getSymType(oc->L, info, symtab_i),
+                getSymStorageClass(oc->L, info, symtab_i),
+                getSymNumberOfAuxSymbols(oc->L, info, symtab_i)
               );
-      i += getSymNumberOfAuxSymbols (info, symtab_i);
+      i += getSymNumberOfAuxSymbols(oc->L, info, symtab_i);
    }
 
    LL_DEBUG_FOR(oc->L, "\n" );
@@ -1816,17 +1820,17 @@ ocGetNames_PEi386 ( ObjectCode* oc )
    ll_word globalBssSize = 0;
    for (unsigned int i=0; i < info->numberOfSymbols; i++) {
       COFF_symbol* sym = &oc->info->symbols[i];
-      if (getSymSectionNumber (info, sym) == PE_SECTION_UNDEFINED
-           && getSymValue (info, sym) > 0
-           && getSymStorageClass (info, sym) != IMAGE_SYM_CLASS_SECTION) {
+      if (getSymSectionNumber(oc->L, info, sym) == PE_SECTION_UNDEFINED
+           && getSymValue(oc->L, info, sym) > 0
+           && getSymStorageClass(oc->L, info, sym) != IMAGE_SYM_CLASS_SECTION) {
            /* Only count COMMON symbols not already defined by a
             * previously-loaded object; we will reuse their allocation. */
-           ll_symbol_name *nm = get_sym_name (getSymShortName (info, sym), oc);
+           ll_symbol_name *nm = get_sym_name (oc->L, getSymShortName(oc->L, info, sym), oc);
            if (!lookupStrHashTable(oc->L->symhash, nm)) {
-               globalBssSize += getSymValue (info, sym);
+               globalBssSize += getSymValue(oc->L, info, sym);
            }
       }
-      i += getSymNumberOfAuxSymbols (info, sym);
+      i += getSymNumberOfAuxSymbols(oc->L, info, sym);
    }
 
    /* Allocate BSS space */
@@ -1854,15 +1858,15 @@ ocGetNames_PEi386 ( ObjectCode* oc )
    for (unsigned int i = 0; i < (uint32_t)oc->n_symbols; i++) {
       COFF_symbol* sym = &oc->info->symbols[i];
 
-      uint32_t symValue = getSymValue (info, sym);
-      uint8_t symStorageClass = getSymStorageClass (info, sym);
+      uint32_t symValue = getSymValue(oc->L, info, sym);
+      uint8_t symStorageClass = getSymStorageClass(oc->L, info, sym);
       ll_symbol_addr *addr = NULL;
       bool isWeak = false;
       bool common_already_defined = false;
       unsigned long symSize = 0;
-      ll_symbol_name *sname = get_sym_name (getSymShortName (info, sym), oc);
+      ll_symbol_name *sname = get_sym_name (oc->L, getSymShortName(oc->L, info, sym), oc);
 
-      uint32_t secNumber = getSymSectionNumber (info, sym);
+      uint32_t secNumber = getSymSectionNumber(oc->L, info, sym);
       Section *section;
       switch (secNumber) {
         case PE_SECTION_UNDEFINED:
@@ -1871,11 +1875,11 @@ ocGetNames_PEi386 ( ObjectCode* oc )
           break;
         case PE_SECTION_ABSOLUTE:
           LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "symbol %s is ABSOLUTE, skipping...\n", sname));
-          i += getSymNumberOfAuxSymbols (info, sym);
+          i += getSymNumberOfAuxSymbols(oc->L, info, sym);
           continue;
         case PE_SECTION_DEBUG:
           LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "symbol %s is DEBUG, skipping...\n", sname));
-          i += getSymNumberOfAuxSymbols (info, sym);
+          i += getSymNumberOfAuxSymbols(oc->L, info, sym);
           continue;
         default:
           LL_CHECK_FOR(oc->L, secNumber < (uint32_t) oc->n_sections);
@@ -1883,12 +1887,12 @@ ocGetNames_PEi386 ( ObjectCode* oc )
       }
 
       ll_sym_type type;
-      switch (getSymType(oc->info->ch_info, sym)) {
+      switch (getSymType(oc->L, oc->info->ch_info, sym)) {
       case 0x00: type = LL_SYM_DATA; break;
       case 0x20: type = LL_SYM_CODE; break;
       default:
           LL_DEBUG_FOR(oc->L, "Symbol %s has invalid type 0x%x\n",
-                     sname, getSymType(oc->info->ch_info, sym));
+                     sname, getSymType(oc->L, oc->info->ch_info, sym));
           return 1;
       }
 
@@ -1915,12 +1919,12 @@ ocGetNames_PEi386 ( ObjectCode* oc )
       }
       else if (symStorageClass == IMAGE_SYM_CLASS_WEAK_EXTERNAL) {
           isWeak = true;
-          LL_CHECK_FOR(oc->L, getSymNumberOfAuxSymbols (info, sym) == 1);
+          LL_CHECK_FOR(oc->L, getSymNumberOfAuxSymbols(oc->L, info, sym) == 1);
           LL_CHECK_FOR(oc->L, symValue == 0);
           COFF_symbol_aux_weak_external *aux = (COFF_symbol_aux_weak_external *) (sym+1);
           COFF_symbol* targetSym = &oc->info->symbols[aux->TagIndex];
 
-          uint32_t targetSecNumber = getSymSectionNumber (info, targetSym);
+          uint32_t targetSecNumber = getSymSectionNumber(oc->L, info, targetSym);
           Section *targetSection;
           switch (targetSecNumber) {
             case PE_SECTION_UNDEFINED:
@@ -1935,7 +1939,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
               targetSection = targetSecNumber > 0 ? &oc->sections[targetSecNumber-1] : NULL;
           }
           if(NULL != targetSection)
-              addr = (ll_symbol_addr*) ((size_t) targetSection->start + getSymValue(info, targetSym));
+              addr = (ll_symbol_addr*) ((size_t) targetSection->start + getSymValue(oc->L, info, targetSym));
           else
             {
                 // Do the symbol lookup based on name, this follows Microsoft's weak external's
@@ -1950,7 +1954,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
                 // AUX lnno 3 size 0x0 tagndx 2
                 //
                 // https://learn.microsoft.com/en-us/windows/win32/debug/pe-format#auxiliary-format-3-weak-externals
-                ll_symbol_name *target_sname = get_sym_name (getSymShortName (info, targetSym), oc);
+                ll_symbol_name *target_sname = get_sym_name (oc->L, getSymShortName(oc->L, info, targetSym), oc);
                 if (target_sname)
                   addr = lookupSymbol_PEi386 (oc->L, target_sname, oc, &type);
 
@@ -1999,7 +2003,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
              of DLLs.  See note [GHC Linking model and import libraries].  */
           sname = (ll_symbol_name*)section->start+2;
           COFF_symbol* sym = &oc->info->symbols[info->numberOfSymbols-1];
-          addr = get_sym_name( getSymShortName (info, sym), oc);
+          addr = get_sym_name( oc->L, getSymShortName(oc->L, info, sym), oc);
 
           LL_IF_DEBUG_FOR(oc->L, linker,
                    LL_DEBUG_FOR(oc->L, "addImportSymbol `%s' => `%s'\n",
@@ -2042,11 +2046,13 @@ ocGetNames_PEi386 ( ObjectCode* oc )
               continue;
 
           pathchar* dirName = pathdir(oc->L, oc->fileName);
-          ll_hs_ptr token       = addLibrarySearchPath(dirName);
+          LL_IF_DEBUG_FOR(oc->L, linker,
+                          LL_DEBUG_FOR(oc->L, "\naddLibrarySearchPath: dll_path = `%" PATH_FMT "'\n", dirName));
+          ll_hs_ptr token       = addLibrarySearchPath_PEi386(oc->L, dirName);
           LL_FREE_FOR(oc->L, dirName);
 
           sym   = &oc->info->symbols[oc->n_symbols-1];
-          sname = get_sym_name (getSymShortName (info, sym), oc);
+          sname = get_sym_name (oc->L, getSymShortName(oc->L, info, sym), oc);
 
           LL_IF_DEBUG_FOR(oc->L, linker_verbose,
                    LL_DEBUG_FOR(oc->L, "loading symbol `%s' from dll: '%ls' => `%s'\n",
@@ -2054,14 +2060,16 @@ ocGetNames_PEi386 ( ObjectCode* oc )
 
           pathchar* dll = mkPath(oc->L, dllName);
           HINSTANCE dllInstance = 0;
-          const char* result = addDLL_PEi386(dll, &dllInstance);
-          removeLibrarySearchPath(token);
+          const char* result = addDLL_PEi386(oc->L, dll, &dllInstance);
+          LL_IF_DEBUG_FOR(oc->L, linker,
+                          LL_DEBUG_FOR(oc->L, "\nremoveLibrarySearchPath: ptr = `%p'\n", token));
+          removeLibrarySearchPath_PEi386(oc->L, token);
           LL_FREE_FOR(oc->L, dll);
 
           if (result != NULL || dllInstance == 0) {
               LL_LOG_ERROR_FOR(oc->L, "Could not load `%s'. Reason: %s\n",
                          (char*)dllName, result);
-              LL_FREE((void*)result);
+              LL_FREE_FOR(oc->L, (void*)result);
               return false;
           }
 
@@ -2101,7 +2109,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
           break;
       } else if (secNumber == PE_SECTION_UNDEFINED) {
           LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "symbol %s is UNDEFINED, skipping...\n", sname));
-          i += getSymNumberOfAuxSymbols (info, sym);
+          i += getSymNumberOfAuxSymbols(oc->L, info, sym);
       }
 
       if ((addr != NULL || isWeak)
@@ -2130,7 +2138,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
           oc->symbols[i].addr = NULL;
       }
 
-      i += getSymNumberOfAuxSymbols (info, sym);
+      i += getSymNumberOfAuxSymbols(oc->L, info, sym);
    }
 
    return true;
@@ -2230,11 +2238,11 @@ ocResolve_PEi386 ( ObjectCode* oc )
                             i, j, pP,
                             reloc->Type,
                             reloc->VirtualAddress );
-                            printName (getSymShortName (info, sym), oc);
+                            printName (getSymShortName(oc->L, info, sym), oc);
                   LL_DEBUG_FOR(oc->L, "'\n" ));
 
-         if (getSymStorageClass (info, sym) == IMAGE_SYM_CLASS_STATIC) {
-            uint32_t sect_n = getSymSectionNumber (info, sym);
+         if (getSymStorageClass(oc->L, info, sym) == IMAGE_SYM_CLASS_STATIC) {
+            uint32_t sect_n = getSymSectionNumber(oc->L, info, sym);
             switch (sect_n) {
                 case PE_SECTION_UNDEFINED:
                 case PE_SECTION_ABSOLUTE:
@@ -2248,9 +2256,9 @@ ocResolve_PEi386 ( ObjectCode* oc )
             LL_CHECK_FOR(oc->L, sect_n < (uint32_t) oc->n_sections);
             Section section = oc->sections[sect_n - 1];
             S = ((size_t)(section.start))
-              + ((size_t)(getSymValue (info, sym)));
+              + ((size_t)(getSymValue(oc->L, info, sym)));
          } else {
-            copyName ( getSymShortName (info, sym), oc, symbol,
+            copyName ( getSymShortName(oc->L, info, sym), oc, symbol,
                        sizeof(symbol)-1 );
             S = (size_t) lookupDependentSymbol( oc->L, (char*)symbol, oc, &sym_type );
             if ((void*)S == NULL) {
@@ -2294,7 +2302,7 @@ ocResolve_PEi386 ( ObjectCode* oc )
                    // N.B. in the case of the sign-extended relocations we must ensure that v
                    // fits in a signed 32-bit value. See #15808.
                    if (((int64_t) v > (int64_t) INT32_MAX) || ((int64_t) v < (int64_t) INT32_MIN)) {
-                       copyName (getSymShortName (info, sym), oc,
+                       copyName (getSymShortName(oc->L, info, sym), oc,
                                  symbol, sizeof(symbol)-1);
                        S = makeSymbolExtra_PEi386(oc, symIndex, S, (char *)symbol, sym_type);
                        /* And retry */
@@ -2327,7 +2335,7 @@ ocResolve_PEi386 ( ObjectCode* oc )
                    v = S + (int32_t)A - ((intptr_t)pP) - 4;
                    if ((v > (int64_t) INT32_MAX) || (v < (int64_t) INT32_MIN)) {
                        /* Make the trampoline then */
-                       copyName (getSymShortName (info, sym),
+                       copyName (getSymShortName(oc->L, info, sym),
                                  oc, symbol, sizeof(symbol)-1);
                        S = makeSymbolExtra_PEi386(oc, symIndex, S, (char *)symbol, sym_type);
                        /* And retry */
@@ -2583,7 +2591,7 @@ static int comp (const void * elem1, const void * elem2)
 }
 
 pathchar*
-resolveSymbolAddr_PEi386 (pathchar* buffer, int size,
+resolveSymbolAddr_PEi386 (ll_linker *L, pathchar* buffer, int size,
                           ll_symbol_addr* symbol, uintptr_t* top ){
     SYMBOL_INFO sym;
     ZeroMemory (&sym, sizeof(SYMBOL_INFO));
@@ -2601,9 +2609,9 @@ resolveSymbolAddr_PEi386 (pathchar* buffer, int size,
     {
       /* Try using Windows symbols.  */
       wcscat (buffer, WSTR(" "));
-      pathchar* name = mkPath (&ll_default_linker, sym.Name);
+      pathchar* name = mkPath (L, sym.Name);
       wcscat (buffer, name);
-      LL_FREE (name);
+      LL_FREE_FOR(L, name);
       if (uDisplacement != 0)
       {
         int64_t displacement = (int64_t)uDisplacement;
@@ -2620,7 +2628,7 @@ resolveSymbolAddr_PEi386 (pathchar* buffer, int size,
     {
       /* Try to calculate from information inside the rts.  */
       uintptr_t loc = (uintptr_t)symbol;
-      for (ObjectCode* oc = ll_default_linker.gc.objects; oc; oc = oc->next) {
+      for (ObjectCode* oc = L->gc.objects; oc; oc = oc->next) {
           for (int i = 0; i < oc->n_sections; i++) {
               Section section = oc->sections[i];
               start = (uintptr_t)section.start;
@@ -2652,7 +2660,7 @@ resolveSymbolAddr_PEi386 (pathchar* buffer, int size,
       HMODULE *hMods = NULL;
       DWORD cbNeeded;
       EnumProcessModules (hProcess, hMods, 0, &cbNeeded);
-      hMods = LL_MALLOC (cbNeeded, "resolveSymbolAddr_PEi386");
+      hMods = LL_MALLOC_FOR(L, cbNeeded, "resolveSymbolAddr_PEi386");
       if (EnumProcessModules (hProcess, hMods, cbNeeded, &cbNeeded))
       {
         uintptr_t loc = (uintptr_t)symbol;
@@ -2681,7 +2689,7 @@ resolveSymbolAddr_PEi386 (pathchar* buffer, int size,
         }
       }
 
-      LL_FREE(hMods);
+      LL_FREE_FOR(L, hMods);
     }
 
     /* Finally any file/line number.  */
@@ -2707,7 +2715,7 @@ resolveSymbolAddr_PEi386 (pathchar* buffer, int size,
     else if (obj)
     {
       /* Try to calculate from information inside the rts.  */
-      SymX* locs = LL_CALLOC (sizeof(SymX), obj->n_symbols,
+      SymX* locs = LL_CALLOC_FOR(L, sizeof(SymX), obj->n_symbols,
                                    "resolveSymbolAddr");
       int blanks = 0;
       for (int i = 0; i < obj->n_symbols; i++) {
@@ -2718,7 +2726,7 @@ resolveSymbolAddr_PEi386 (pathchar* buffer, int size,
                continue;
             }
           RtsSymbolInfo* a = NULL;
-          ghciLookupSymbolInfo(&ll_default_linker, sym, &a);
+          ghciLookupSymbolInfo(L, sym, &a);
           if (a) {
               SymX sx = {0};
               sx.name = sym;
@@ -2754,7 +2762,7 @@ resolveSymbolAddr_PEi386 (pathchar* buffer, int size,
                       res->name, res->loc - key);
           wcscat (buffer, s_disp);
       }
-      LL_FREE (locs);
+      LL_FREE_FOR(L, locs);
     }
 
     return buffer;

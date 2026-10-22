@@ -480,7 +480,7 @@ initLinker_ (int retain_cafs)
 #   endif
 
 #if defined(OBJFORMAT_PEi386)
-    initLinker_PEi386();
+    initLinker_PEi386(&ll_default_linker);
 #endif
 
     LL_IF_DEBUG(linker, LL_DEBUG("initLinker: done\n"));
@@ -661,7 +661,7 @@ pathchar* findSystemLibrary(pathchar* dll_name)
                                 PATH_FMT "'\n", dll_name));
 
 #if defined(OBJFORMAT_PEi386)
-    return findSystemLibrary_PEi386(dll_name);
+    return findSystemLibrary_PEi386(&ll_default_linker, dll_name);
 #else
     (void)(dll_name); // Function not implemented for other platforms.
     return NULL;
@@ -692,7 +692,7 @@ ll_hs_ptr addLibrarySearchPath(pathchar* dll_path)
                                 PATH_FMT "'\n", dll_path));
 
 #if defined(OBJFORMAT_PEi386)
-    return addLibrarySearchPath_PEi386(dll_path);
+    return addLibrarySearchPath_PEi386(&ll_default_linker, dll_path);
 #else
     (void)(dll_path); // Function not implemented for other platforms.
     return NULL;
@@ -710,7 +710,7 @@ ll_hs_bool removeLibrarySearchPath(ll_hs_ptr dll_path_index)
                                 dll_path_index));
 
 #if defined(OBJFORMAT_PEi386)
-    return removeLibrarySearchPath_PEi386(dll_path_index);
+    return removeLibrarySearchPath_PEi386(&ll_default_linker, dll_path_index);
 #else
     (void)(dll_path_index); // Function not implemented for other platforms.
     return LL_HS_BOOL_FALSE;
@@ -992,7 +992,7 @@ resolveSymbolAddr (pathchar* buffer, int size,
                    ll_symbol_addr* symbol, uintptr_t* top)
 {
 #if defined(OBJFORMAT_PEi386)
-  return resolveSymbolAddr_PEi386 (buffer, size, symbol, top);
+  return resolveSymbolAddr_PEi386 (&ll_default_linker, buffer, size, symbol, top);
 #else /* OBJFORMAT_PEi386 */
   (void)buffer;
   (void)size;
@@ -1833,7 +1833,7 @@ void * loadNativeObj (pathchar *path, char **errmsg)
    void *r = loadNativeObj_POSIX(&ll_default_linker, path, errmsg);
 #elif defined(OBJFORMAT_PEi386)
    void *r = NULL;
-   *errmsg = (char*)addDLL_PEi386(path, (HINSTANCE*)&r);
+   *errmsg = (char*)addDLL_PEi386(&ll_default_linker, path, (HINSTANCE*)&r);
 #else
    void *r;
    UNUSED(errmsg);
