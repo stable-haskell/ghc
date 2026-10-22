@@ -1469,12 +1469,7 @@ static ll_hs_int loadObj_ (ll_linker *L, pathchar *path)
    // Things that look like object files (e.g. end in `.o`) may nevertheless be
    // archives, as noted in Note [Object merging] in GHC.Driver.Pipeline.Execute.
    if (isArchive(path)) {
-       if (loadArchive_(L, path)) {
-            return 1; // success
-       } else {
-            LL_IF_DEBUG_FOR(L, linker,
-                        LL_DEBUG_FOR(L, "tried and failed to load %" PATH_FMT " as an archive\n", path));
-       }
+       return loadArchive_(L, path);
    }
 
    ObjectCode *oc = preloadObjectFile(L, path);

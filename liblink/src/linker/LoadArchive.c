@@ -2,6 +2,7 @@
 #include "ll_compat.h"
 
 #include "ll_path.h"
+#include "ll_error.h"
 
 #include "LinkerInternals.h"
 #include "linker/M32Alloc.h"
@@ -21,25 +22,58 @@
 
 #include <string.h>
 #include <stddef.h>
-#include <ctype.h>
+#include <limits.h>
 #include "ll_fs.h"
 
-#define FAIL(L, ...) do {\
+#define ARCHIVE_ERROR(L, STATUS, ...) do {\
+   ll_error_set(L, STATUS, "loadArchive: "__VA_ARGS__); \
    LL_LOG_ERROR_FOR(L, "loadArchive: "__VA_ARGS__); \
+} while (0)
+
+#define FAIL_STATUS(L, STATUS, ...) do {\
+   ARCHIVE_ERROR(L, STATUS, __VA_ARGS__); \
    goto fail;\
 } while (0)
 
+#define FAIL(L, ...) FAIL_STATUS(L, LL_E_FORMAT, __VA_ARGS__)
+#define FAIL_READ(L, F, ...) \
+   FAIL_STATUS(L, ferror(F) ? LL_E_IO : LL_E_FORMAT, __VA_ARGS__)
+
 #define DEBUG_LOG(L, ...) LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "loadArchive: " __VA_ARGS__))
 
+/* Archive numeric fields contain decimal digits followed by padding spaces.
+ * Parse within the field, without narrowing or relying on a NUL terminator. */
+static bool parseArchiveSize(const char *field, size_t len, uintmax_t *out)
+{
+    uintmax_t value = 0;
+    size_t i = 0;
+    while (i < len && field[i] >= '0' && field[i] <= '9') {
+        unsigned digit = (unsigned)(field[i] - '0');
+        if (value > (UINTMAX_MAX - digit) / 10)
+            return false;
+        value = value * 10 + digit;
+        i++;
+    }
+    if (i == 0)
+        return false;
+    for (; i < len; i++) {
+        if (field[i] != ' ')
+            return false;
+    }
+    *out = value;
+    return true;
+}
 
 #if defined(darwin_HOST_OS) || defined(ios_HOST_OS)
 /* Read 4 bytes and convert to host byte order */
 static uint32_t read4Bytes(const char buf[static 4])
 {
-    return ntohl(*(uint32_t*)buf);
+    uint32_t value;
+    memcpy(&value, buf, sizeof(value));
+    return ntohl(value);
 }
 
-static bool loadFatArchive(ll_linker *L, char input[static 20], FILE* f, pathchar* path)
+static bool loadFatArchive(ll_linker *L, char input[static 8], FILE* f, pathchar* path)
 {
     uint32_t nfat_arch, nfat_offset, cputype, cpusubtype;
 #if defined(i386_HOST_ARCH)
@@ -65,7 +99,8 @@ static bool loadFatArchive(ll_linker *L, char input[static 20], FILE* f, pathcha
         /* search for the right arch */
         int n = fread(tmp, 1, 12, f);
         if (n != 12) {
-            LL_LOG_ERROR_FOR(L, "Failed reading arch from `%" PATH_FMT "'", path);
+            ARCHIVE_ERROR(L, ferror(f) ? LL_E_IO : LL_E_FORMAT,
+                          "Failed reading arch from `%" PATH_FMT "'", path);
             return false;
         }
         cputype = read4Bytes(tmp);
@@ -77,7 +112,7 @@ static bool loadFatArchive(ll_linker *L, char input[static 20], FILE* f, pathcha
         }
     }
     if (nfat_offset == 0) {
-        LL_LOG_ERROR_FOR(L, "Fat archive contains %d architectures, "
+        ARCHIVE_ERROR(L, LL_E_UNSUPPORTED, "Fat archive contains %d architectures, "
                    "but none of them are compatible with the host",
                    (int)nfat_arch);
         return false;
@@ -85,7 +120,7 @@ static bool loadFatArchive(ll_linker *L, char input[static 20], FILE* f, pathcha
         /* Seek to the correct architecture */
         int n = fseek(f, nfat_offset, SEEK_SET);
         if (n != 0) {
-            LL_LOG_ERROR_FOR(L, "Failed to seek to arch in `%" PATH_FMT "'", path);
+            ARCHIVE_ERROR(L, LL_E_IO, "Failed to seek to arch in `%" PATH_FMT "'", path);
             return false;
         }
 
@@ -93,13 +128,14 @@ static bool loadFatArchive(ll_linker *L, char input[static 20], FILE* f, pathcha
         char tmp[20];
         n = fread(tmp, 1, 8, f);
         if (n != 8) {
-            LL_LOG_ERROR_FOR(L, "Failed reading header from `%" PATH_FMT "'", path);
+            ARCHIVE_ERROR(L, ferror(f) ? LL_E_IO : LL_E_FORMAT,
+                          "Failed reading header from `%" PATH_FMT "'", path);
             return false;
         }
 
         /* Check the magic number */
         if (strncmp(tmp, "!<arch>\n", 8) != 0) {
-            LL_LOG_ERROR_FOR(L, "couldn't find archive in `%" PATH_FMT "'"
+            ARCHIVE_ERROR(L, LL_E_FORMAT, "couldn't find archive in `%" PATH_FMT "'"
                        "at offset %d", path, nfat_offset);
             return false;
         }
@@ -120,40 +156,60 @@ enum ObjectFileFormat {
 
 static enum ObjectFileFormat identifyObjectFile_(char* buf, size_t sz)
 {
-    if (sz > 2 && ((uint16_t*)buf)[0] == 0x8664) {
+    uint16_t magic16 = 0;
+    uint32_t magic32 = 0;
+    uint64_t magic64 = 0;
+    if (sz >= sizeof(magic16))
+        memcpy(&magic16, buf, sizeof(magic16));
+    if (sz >= sizeof(magic32))
+        memcpy(&magic32, buf, sizeof(magic32));
+    if (sz >= sizeof(magic64))
+        memcpy(&magic64, buf, sizeof(magic64));
+    if (sz > 2 && magic16 == 0x8664) {
         return COFFAmd64;
     }
-    if (sz > 2 && ((uint16_t*)buf)[0] == 0x014c) {
+    if (sz > 2 && magic16 == 0x014c) {
         return COFFI386;
     }
-    if (sz > 2 && ((uint16_t*)buf)[0] == 0xaa64) {
+    if (sz > 2 && magic16 == 0xaa64) {
         return COFFAArch64;
     }
     if (sz > 4 && memcmp(buf, "\x7f" "ELF", 4) == 0) {
         return ELF;
     }
-    if (sz > 4 && ((uint32_t*)buf)[0] == 0xfeedface) {
+    if (sz > 4 && magic32 == 0xfeedface) {
         return MachO32;
     }
-    if (sz > 4 && ((uint32_t*)buf)[0] == 0xfeedfacf) {
+    if (sz > 4 && magic32 == 0xfeedfacf) {
         return MachO64;
     }
     // BigObj COFF files ...
-    if (sz > 8 && ((uint64_t*)buf)[0] == 0x86640002ffff0000) {
+    if (sz > 8 && magic64 == UINT64_C(0x86640002ffff0000)) {
         return COFFAmd64;
     }
     return NotObject;
 }
 
-static enum ObjectFileFormat identifyObjectFile(ll_linker *L, FILE *f)
+static bool identifyObjectFile(ll_linker *L, FILE *f, size_t memberSize,
+                               pathchar *path, enum ObjectFileFormat *out)
 {
     char buf[32];
-    ssize_t sz = fread(buf, 1, 32, f);
-    LL_CHECK_FOR(L, fseek(f, -sz, SEEK_CUR) == 0);
-    return identifyObjectFile_(buf, sz);
+    size_t len = memberSize < sizeof(buf) ? memberSize : sizeof(buf);
+    size_t sz = fread(buf, 1, len, f);
+    if (sz != len) {
+        ARCHIVE_ERROR(L, ferror(f) ? LL_E_IO : LL_E_FORMAT,
+                      "truncated member in `%" PATH_FMT "'", path);
+        return false;
+    }
+    if (fseek(f, -(long)sz, SEEK_CUR) != 0) {
+        ARCHIVE_ERROR(L, LL_E_IO, "cannot seek in `%" PATH_FMT "'", path);
+        return false;
+    }
+    *out = identifyObjectFile_(buf, sz);
+    return true;
 }
 
-static bool readThinArchiveMember(ll_linker *L, int n, int memberSize, pathchar* path,
+static bool readThinArchiveMember(ll_linker *L, size_t memberSize, pathchar* path,
         char* fileName, char* image)
 {
     bool has_succeeded = false;
@@ -166,29 +222,49 @@ static bool readThinArchiveMember(ll_linker *L, int n, int memberSize, pathchar*
     dirName = pathdir(L, pathCopy);
     /* Append the relative member name to the dirname.  This should be
      be the full path to the actual thin member. */
-    int memberLen = pathlen(dirName) + 1 + strlen(fileName) + 1;
-    memberPath = LL_MALLOC_FOR(L, pathsize * memberLen, "loadArchive(file)");
     objFileName = mkPath(L, fileName);
-    pathprintf(memberPath, memberLen, WSTR("%" PATH_FMT "%" PATH_FMT), dirName,
-            objFileName);
+    size_t dirLen = pathlen(dirName);
+    size_t objLen = pathlen(objFileName);
+    if (dirLen > INT_MAX - 1 || objLen > (size_t)INT_MAX - 1 - dirLen) {
+        ARCHIVE_ERROR(L, LL_E_UNSUPPORTED, "thin member path is too long");
+        LL_FREE_FOR(L, objFileName);
+        LL_FREE_FOR(L, dirName);
+        goto inner_fail;
+    }
+    size_t memberLen = dirLen + objLen + 1;
+    if (memberLen > SIZE_MAX / pathsize) {
+        ARCHIVE_ERROR(L, LL_E_UNSUPPORTED, "thin member path is too long");
+        LL_FREE_FOR(L, objFileName);
+        LL_FREE_FOR(L, dirName);
+        goto inner_fail;
+    }
+    memberPath = LL_MALLOC_FOR(L, pathsize * memberLen, "loadArchive(file)");
+    int written = pathprintf(memberPath, memberLen, WSTR("%" PATH_FMT "%" PATH_FMT),
+                            dirName, objFileName);
     LL_FREE_FOR(L, objFileName);
     LL_FREE_FOR(L, dirName);
+    if (written < 0 || (size_t)written >= memberLen) {
+        ARCHIVE_ERROR(L, LL_E_FORMAT, "cannot encode thin member path");
+        goto inner_fail;
+    }
     member = pathopen(memberPath, WSTR("rb"));
     if (!member) {
-        LL_LOG_ERROR_FOR(L, "loadObj: can't read thin archive `%" PATH_FMT "'",
+        ARCHIVE_ERROR(L, LL_E_IO, "can't read thin archive member `%" PATH_FMT "'",
                    memberPath);
         goto inner_fail;
     }
-    n = fread(image, 1, memberSize, member);
+    size_t n = fread(image, 1, memberSize, member);
     if (n != memberSize) {
-        LL_LOG_ERROR_FOR(L, "loadArchive: error whilst reading `%s'",
+        ARCHIVE_ERROR(L, ferror(member) ? LL_E_IO : LL_E_FORMAT,
+                     "error whilst reading `%s'",
                    fileName);
         goto inner_fail;
     }
     has_succeeded = true;
 
 inner_fail:
-    fclose(member);
+    if (member != NULL)
+        fclose(member);
     LL_FREE_FOR(L, memberPath);
     LL_FREE_FOR(L, pathCopy);
     return has_succeeded;
@@ -202,12 +278,12 @@ static bool checkFatArchive(ll_linker *L, char magic[static 4], FILE* f, pathcha
     if (read4Bytes(magic) == FAT_MAGIC)
         success = loadFatArchive(L, magic, f, path);
     else
-        LL_LOG_ERROR_FOR(L, "loadArchive: Neither an archive, nor a fat archive: "
+        ARCHIVE_ERROR(L, LL_E_FORMAT, "Neither an archive, nor a fat archive: "
                    "`%" PATH_FMT "'", path);
 #else
     (void)magic;
     (void)f;
-    LL_LOG_ERROR_FOR(L, "loadArchive: Not an archive: `%" PATH_FMT "'", path);
+    ARCHIVE_ERROR(L, LL_E_FORMAT, "Not an archive: `%" PATH_FMT "'", path);
 #endif
     return success;
 }
@@ -221,33 +297,33 @@ static bool checkFatArchive(ll_linker *L, char magic[static 4], FILE* f, pathcha
  * @param gnuFileIndexSize The size of the index.
  */
 static bool
-lookupGNUArchiveIndex(ll_linker *L, int gnuFileIndexSize, char **fileName_,
+lookupGNUArchiveIndex(ll_linker *L, size_t gnuFileIndexSize, char **fileName_,
     char* gnuFileIndex, pathchar* path, size_t* thisFileNameSize,
     size_t* fileNameSize)
 {
     char *fileName = *fileName_;
-    if (isdigit(fileName[1])) {
+    if (fileName[1] >= '0' && fileName[1] <= '9') {
         if (gnuFileIndex == NULL) {
-            LL_LOG_ERROR_FOR(L, "loadArchive: GNU-variant filename "
+            ARCHIVE_ERROR(L, LL_E_FORMAT, "GNU-variant filename "
                     "without an index while reading from `%" PATH_FMT "'",
                     path);
             return false;
         }
 
-        int n;
-        for (n = 2; isdigit(fileName[n]); n++)
-            ;
-
-        char *end;
-        fileName[n] = '\0';
-        n = strtol(fileName + 1, &end, 10);
-        if (n < 0 || n > gnuFileIndexSize) {
-            LL_LOG_ERROR_FOR(L, "loadArchive: GNU-variant filename "
-                    "offset %d out of range [0..%d] "
-                    "while reading filename from `%" PATH_FMT "'",
-                    n, gnuFileIndexSize, path);
+        uintmax_t offset;
+        if (!parseArchiveSize(fileName + 1, 15, &offset)) {
+            ARCHIVE_ERROR(L, LL_E_FORMAT, "invalid GNU-variant filename offset "
+                          "in `%" PATH_FMT "'", path);
             return false;
         }
+        if (offset >= gnuFileIndexSize) {
+            ARCHIVE_ERROR(L, LL_E_FORMAT, "GNU-variant filename "
+                    "offset %ju out of range [0..%zu) "
+                    "while reading filename from `%" PATH_FMT "'",
+                    offset, gnuFileIndexSize, path);
+            return false;
+        }
+        size_t n = (size_t)offset;
 
         // Check that the previous entry ends with the expected
         // end-of-string delimiter.
@@ -257,16 +333,22 @@ lookupGNUArchiveIndex(ll_linker *L, int gnuFileIndexSize, char **fileName_,
 #define IS_SYMBOL_DELIMITER(STR) (STR =='\n')
 #endif
         if (n != 0 && !IS_SYMBOL_DELIMITER(gnuFileIndex[n - 1])) {
-            LL_LOG_ERROR_FOR(L, "loadArchive: GNU-variant filename offset "
-                    "%d invalid (range [0..%d]) while reading "
+            ARCHIVE_ERROR(L, LL_E_FORMAT, "GNU-variant filename offset "
+                    "%zu invalid (range [0..%zu)) while reading "
                     "filename from `%" PATH_FMT "'",
                     n, gnuFileIndexSize, path);
             return false;
         }
 
-        int i;
-        for (i = n; !IS_SYMBOL_DELIMITER(gnuFileIndex[i]); i++)
+        size_t i;
+        for (i = n; i < gnuFileIndexSize && !IS_SYMBOL_DELIMITER(gnuFileIndex[i]); i++)
             ;
+
+        if (i == gnuFileIndexSize || i == n) {
+            ARCHIVE_ERROR(L, LL_E_FORMAT, "unterminated or empty GNU-variant "
+                          "filename in `%" PATH_FMT "'", path);
+            return false;
+        }
 
         size_t FileNameSize = i - n;
         if (FileNameSize >= *fileNameSize) {
@@ -284,6 +366,11 @@ lookupGNUArchiveIndex(ll_linker *L, int gnuFileIndexSize, char **fileName_,
            FileNameSize--;
        }
 
+        if (FileNameSize == 0) {
+            ARCHIVE_ERROR(L, LL_E_FORMAT, "empty GNU-variant filename in `%" PATH_FMT "'", path);
+            return false;
+        }
+
         fileName[FileNameSize] = '\0';
         *thisFileNameSize = FileNameSize;
     }
@@ -295,7 +382,7 @@ lookupGNUArchiveIndex(ll_linker *L, int gnuFileIndexSize, char **fileName_,
         *thisFileNameSize = 0;
     }
     else {
-        LL_LOG_ERROR_FOR(L, "loadArchive: invalid GNU-variant filename `%.16s' "
+        ARCHIVE_ERROR(L, LL_E_FORMAT, "invalid GNU-variant filename `%.16s' "
                    "while reading filename from `%" PATH_FMT "'",
                    fileName, path);
         return false;
@@ -315,7 +402,8 @@ static bool identifyArchiveFormat(ll_linker *L, FILE *f, pathchar *path, enum Ar
     char tmp[8];
     size_t n = fread(tmp, 1, 8, f);
     if (n != 8) {
-        LL_LOG_ERROR_FOR(L, "loadArchive: Failed reading header from `%" PATH_FMT "'", path); \
+        ARCHIVE_ERROR(L, ferror(f) ? LL_E_IO : LL_E_FORMAT,
+                      "Failed reading header from `%" PATH_FMT "'", path);
         return false;
     }
 
@@ -370,14 +458,40 @@ static bool identifyArchiveFormat(ll_linker *L, FILE *f, pathchar *path, enum Ar
     }
 }
 
+/* Seeking alone can succeed past EOF. Touch the last declared payload byte
+ * before continuing, including for skipped symbol tables/nonobject members. */
+static bool skipArchiveMember(ll_linker *L, FILE *f, pathchar *path, size_t size)
+{
+    if (size == 0)
+        return true;
+    if (fseek(f, (long)(size - 1), SEEK_CUR) != 0) {
+        ARCHIVE_ERROR(L, LL_E_IO, "cannot seek over member in `%" PATH_FMT "'", path);
+        return false;
+    }
+    if (fgetc(f) == EOF) {
+        ARCHIVE_ERROR(L, ferror(f) ? LL_E_IO : LL_E_FORMAT,
+                      "truncated member in `%" PATH_FMT "'", path);
+        return false;
+    }
+    return true;
+}
+
 ll_hs_int loadArchive_ (ll_linker *L, pathchar *path)
 {
     char *image = NULL;
+    char *imageBase = NULL;
+    size_t imageSize = 0;
+    bool imageMapped = false;
     ll_hs_int retcode = 0;
     int memberIdx = 0;
     FILE *f = NULL;
     size_t thisFileNameSize = (size_t) -1; /* shut up bogus GCC warning */
     int misalignment = 0;
+
+    if (path == NULL) {
+        ll_error_set(L, LL_E_STATE, "loadArchive: archive path is NULL");
+        return 0;
+    }
 
     DEBUG_LOG(L, "start\n");
     DEBUG_LOG(L, "Loading archive `%" PATH_FMT "'\n", path);
@@ -391,18 +505,18 @@ ll_hs_int loadArchive_ (ll_linker *L, pathchar *path)
     }
 
     char *gnuFileIndex = NULL;
-    int gnuFileIndexSize = 0;
+    size_t gnuFileIndexSize = 0;
 
     size_t fileNameSize = 32;
     char *fileName = LL_MALLOC_FOR(L, fileNameSize, "loadArchive(fileName)");
 
     f = pathopen(path, WSTR("rb"));
     if (!f)
-        FAIL(L, "loadObj: can't read `%" PATH_FMT "'", path);
+        FAIL_STATUS(L, LL_E_IO, "can't read `%" PATH_FMT "'", path);
 
     enum ArchiveFormat archive_fmt;
     if (!identifyArchiveFormat(L, f, path, &archive_fmt)) {
-        FAIL(L, "failed to identify archive format of %" PATH_FMT ".", path);
+        goto fail;
     }
     bool isThin = archive_fmt == ThinArchive;
 
@@ -412,55 +526,55 @@ ll_hs_int loadArchive_ (ll_linker *L, pathchar *path)
         size_t n;
         DEBUG_LOG(L, "reading at %ld\n", ftell(f));
         n = fread ( fileName, 1, 16, f );
-        if (n != 16) {
-            if (feof(f)) {
-                DEBUG_LOG(L, "EOF while reading from '%" PATH_FMT "'\n", path);
-                break;
-            }
-            else {
-                FAIL(L, "Failed reading file name from `%" PATH_FMT "'", path);
-            }
-        }
-
 #if defined(darwin_HOST_OS) || defined(ios_HOST_OS)
-        if (strncmp(fileName, "!<arch>\n", 8) == 0) {
+        /* A following FAT slice can consist only of its eight-byte archive
+         * magic. Recognize the slice boundary before rejecting a short name. */
+        if (archive_fmt == FatArchive && n >= 8 &&
+            memcmp(fileName, "!<arch>\n", 8) == 0) {
             DEBUG_LOG(L, "found the start of another archive, breaking\n");
             break;
         }
 #endif
+        if (n != 16) {
+            if (n == 0 && feof(f) && !ferror(f)) {
+                DEBUG_LOG(L, "EOF while reading from '%" PATH_FMT "'\n", path);
+                break;
+            }
+            else {
+                FAIL_READ(L, f, "Failed reading file name from `%" PATH_FMT "'", path);
+            }
+        }
+        fileName[16] = '\0';
 
         char tmp[32];
         n = fread ( tmp, 1, 12, f );
         if (n != 12)
-            FAIL(L, "Failed reading mod time from `%" PATH_FMT "'", path);
+            FAIL_READ(L, f, "Failed reading mod time from `%" PATH_FMT "'", path);
         n = fread ( tmp, 1, 6, f );
         if (n != 6)
-            FAIL(L, "Failed reading owner from `%" PATH_FMT "'", path);
+            FAIL_READ(L, f, "Failed reading owner from `%" PATH_FMT "'", path);
         n = fread ( tmp, 1, 6, f );
         if (n != 6)
-            FAIL(L, "Failed reading group from `%" PATH_FMT "'", path);
+            FAIL_READ(L, f, "Failed reading group from `%" PATH_FMT "'", path);
         n = fread ( tmp, 1, 8, f );
         if (n != 8)
-            FAIL(L, "Failed reading mode from `%" PATH_FMT "'", path);
+            FAIL_READ(L, f, "Failed reading mode from `%" PATH_FMT "'", path);
         n = fread ( tmp, 1, 10, f );
         if (n != 10)
-            FAIL(L, "Failed reading size from `%" PATH_FMT "'", path);
-        tmp[10] = '\0';
-        for (n = 0; isdigit(tmp[n]); n++);
-        tmp[n] = '\0';
-        size_t memberSize;
-        {
-            char *end;
-            memberSize = strtol(tmp, &end, 10);
-            if (tmp == end) {
-                FAIL(L, "Failed to decode member size");
-            }
-        }
+            FAIL_READ(L, f, "Failed reading size from `%" PATH_FMT "'", path);
+        uintmax_t memberSizeField;
+        if (!parseArchiveSize(tmp, 10, &memberSizeField))
+            FAIL(L, "Failed to decode member size in `%" PATH_FMT "'", path);
+        if (memberSizeField > INT_MAX)
+            FAIL_STATUS(L, LL_E_UNSUPPORTED,
+                        "member is too large in `%" PATH_FMT "'", path);
+        size_t memberSize = (size_t)memberSizeField;
+        size_t storedMemberSize = memberSize;
 
         DEBUG_LOG(L, "size of this archive member is %zd\n", memberSize);
         n = fread ( tmp, 1, 2, f );
         if (n != 2)
-            FAIL(L, "Failed reading magic from `%" PATH_FMT "'", path);
+            FAIL_READ(L, f, "Failed reading magic from `%" PATH_FMT "'", path);
         if (strncmp(tmp, "\x60\x0A", 2) != 0)
             FAIL(L, "Failed reading magic from `%" PATH_FMT "' at %ld. Got %c%c",
                  path, ftell(f), tmp[0], tmp[1]);
@@ -468,14 +582,10 @@ ll_hs_int loadArchive_ (ll_linker *L, pathchar *path)
         bool isGnuIndex = false;
         /* Check for BSD-variant large filenames */
         if (0 == strncmp(fileName, "#1/", 3)) {
-            size_t n = 0;
-            fileName[16] = '\0';
-            if (isdigit(fileName[3])) {
-                for (n = 4; isdigit(fileName[n]); n++)
-                    ;
-
-                fileName[n] = '\0';
-                thisFileNameSize = atoi(fileName + 3);
+            uintmax_t nameSize;
+            if (parseArchiveSize(fileName + 3, 13, &nameSize)
+                && nameSize > 0 && nameSize <= memberSize) {
+                thisFileNameSize = (size_t)nameSize;
                 memberSize -= thisFileNameSize;
                 if (thisFileNameSize >= fileNameSize) {
                     /* Double it to avoid potentially continually
@@ -486,9 +596,7 @@ ll_hs_int loadArchive_ (ll_linker *L, pathchar *path)
                 }
                 n = fread(fileName, 1, thisFileNameSize, f);
                 if (n != thisFileNameSize) {
-                    LL_LOG_ERROR_FOR(L, "Failed reading filename from `%" PATH_FMT "'",
-                               path);
-                    goto fail;
+                    FAIL_READ(L, f, "Failed reading filename from `%" PATH_FMT "'", path);
                 }
                 fileName[thisFileNameSize] = 0;
                 /* On OS X at least, thisFileNameSize is the size of the
@@ -496,9 +604,7 @@ ll_hs_int loadArchive_ (ll_linker *L, pathchar *path)
                    itself. */
                 thisFileNameSize = strlen(fileName);
             } else {
-                LL_LOG_ERROR_FOR(L, "BSD-variant filename size not found "
-                           "while reading filename from `%" PATH_FMT "'", path);
-                goto fail;
+                FAIL(L, "invalid BSD-variant filename size in `%" PATH_FMT "'", path);
             }
         }
         /* Check for GNU file index file */
@@ -547,7 +653,10 @@ ll_hs_int loadArchive_ (ll_linker *L, pathchar *path)
         DEBUG_LOG(L, "Found member file `%s'\n", fileName);
 
         bool is_symbol_table = strcmp("", fileName) == 0;
-        enum ObjectFileFormat object_fmt = is_symbol_table ? NotObject : identifyObjectFile(L, f);
+        enum ObjectFileFormat object_fmt = NotObject;
+        if (!is_symbol_table && !isThin &&
+            !identifyObjectFile(L, f, memberSize, path, &object_fmt))
+            goto fail;
 
 #if defined(OBJFORMAT_PEi386)
         /*
@@ -571,23 +680,32 @@ ll_hs_int loadArchive_ (ll_linker *L, pathchar *path)
 
         if ((!is_symbol_table && isThin) || object_fmt != NotObject) {
             DEBUG_LOG(L, "Member is an object file...loading...\n");
+            if (memberSize == 0)
+                FAIL(L, "empty object member in `%" PATH_FMT "'", path);
+            imageSize = memberSize;
 
 #if defined(darwin_HOST_OS) || defined(ios_HOST_OS)
-            if (RTS_LINKER_USE_MMAP)
+            if (RTS_LINKER_USE_MMAP) {
                 image = ll_mmap_anon_for_linker(L, memberSize);
+                imageMapped = true;
+            }
             else {
                 /* See loadObj() */
                 misalignment = machoGetMisalignment(L, f);
-                image = LL_MALLOC_FOR(L, memberSize + misalignment,
-                                        "loadArchive(image)");
-                image += misalignment;
+                imageBase = LL_MALLOC_FOR(L, memberSize + misalignment,
+                                         "loadArchive(image)");
+                image = imageBase + misalignment;
             }
 
 #else // not darwin
             image = LL_MALLOC_FOR(L, memberSize, "loadArchive(image)");
 #endif
+            if (image == NULL)
+                FAIL_STATUS(L, LL_E_NOMEM, "cannot allocate member image in `%" PATH_FMT "'", path);
+            if (imageBase == NULL)
+                imageBase = image;
             if (isThin) {
-                if (!readThinArchiveMember(L, n, memberSize, path, fileName, image)) {
+                if (!readThinArchiveMember(L, memberSize, path, fileName, image)) {
                     goto fail;
                 }
                 // Unlike for regular archives for thin archives we can only identify the object format
@@ -598,12 +716,14 @@ ll_hs_int loadArchive_ (ll_linker *L, pathchar *path)
             {
                 size_t n = fread ( image, 1, memberSize, f );
                 if (n != memberSize) {
-                    FAIL(L, "error whilst reading `%" PATH_FMT "'", path);
+                    FAIL_READ(L, f, "error whilst reading `%" PATH_FMT "'", path);
                 }
             }
 
             int size = pathprintf(NULL, 0, WSTR("%" PATH_FMT "(#%d:%.*s)"),
                                   path, memberIdx, (int)thisFileNameSize, fileName);
+            if (size < 0 || size > INT_MAX - 2)
+                FAIL(L, "cannot encode member name in `%" PATH_FMT "'", path);
             // I don't understand why this extra +1 is needed here; pathprintf
             // should have given us the correct length but in practice it seems
             // to be one byte short on Win32.
@@ -613,6 +733,11 @@ ll_hs_int loadArchive_ (ll_linker *L, pathchar *path)
 
             ObjectCode *oc = mkOc(L, STATIC_OBJECT, path, image, memberSize, false, archiveMemberName,
                                   misalignment);
+            /* mkOc owns the image from here. Previously registered members
+             * retain their existing ownership when a later member fails. */
+            image = NULL;
+            imageBase = NULL;
+            imageMapped = false;
 #if defined(OBJFORMAT_MACHO)
             LL_ASSERT_FOR(L, object_fmt == MachO32 || object_fmt == MachO64);
             ocInit_MachO( oc );
@@ -625,9 +750,7 @@ ll_hs_int loadArchive_ (ll_linker *L, pathchar *path)
             LL_FREE_FOR(L, archiveMemberName);
 
             if (0 == loadOc(oc)) {
-                LL_FREE_FOR(L, fileName);
-                fclose(f);
-                return 0;
+                goto fail;
             } else {
                 if (L->services.host.object_registered != NULL) {
                     L->services.host.object_registered(L->services.host.ctx, oc); // also adds the object to `objects` list
@@ -647,12 +770,14 @@ while reading filename from `%" PATH_FMT "'", path);
 #else
             gnuFileIndex = LL_MALLOC_FOR(L, memberSize + 1, "loadArchive(image)");
 #endif
+            if (gnuFileIndex == NULL)
+                FAIL_STATUS(L, LL_E_NOMEM, "cannot allocate GNU filename index in `%" PATH_FMT "'", path);
+            gnuFileIndexSize = memberSize;
             n = fread ( gnuFileIndex, 1, memberSize, f );
             if (n != memberSize) {
-                FAIL(L, "error whilst reading `%" PATH_FMT "'", path);
+                FAIL_READ(L, f, "error whilst reading `%" PATH_FMT "'", path);
             }
             gnuFileIndex[memberSize] = '/';
-            gnuFileIndexSize = memberSize;
         }
         else if (isImportLib) {
 #if defined(OBJFORMAT_PEi386)
@@ -663,10 +788,8 @@ while reading filename from `%" PATH_FMT "'", path);
             else {
                 DEBUG_LOG(L, "Member is not a valid import file section... "
                           "Skipping...\n");
-                n = fseek(f, memberSize, SEEK_CUR);
-                if (n != 0)
-                    FAIL(L, "error whilst seeking by %zd in `%" PATH_FMT "'",
-                    memberSize, path);
+                if (!skipArchiveMember(L, f, path, memberSize))
+                    goto fail;
             }
 #endif
         }
@@ -674,25 +797,17 @@ while reading filename from `%" PATH_FMT "'", path);
             DEBUG_LOG(L, "`%s' does not appear to be an object file\n",
                       fileName);
             if (!isThin || thisFileNameSize == 0) {
-                n = fseek(f, memberSize, SEEK_CUR);
-                if (n != 0)
-                    FAIL(L, "error whilst seeking by %zd in `%" PATH_FMT "'",
-                         memberSize, path);
+                if (!skipArchiveMember(L, f, path, memberSize))
+                    goto fail;
             }
         }
 
         /* .ar files are 2-byte aligned */
-        if (!(isThin && thisFileNameSize > 0) && memberSize % 2) {
+        if (!(isThin && thisFileNameSize > 0) && storedMemberSize % 2) {
             DEBUG_LOG(L, "trying to read one pad byte\n");
             n = fread ( tmp, 1, 1, f );
             if (n != 1) {
-                if (feof(f)) {
-                    DEBUG_LOG(L, "found EOF while reading one pad byte\n");
-                    break;
-                }
-                else {
-                    FAIL(L, "Failed reading padding from `%" PATH_FMT "'", path);
-                }
+                FAIL_READ(L, f, "Failed reading padding from `%" PATH_FMT "'", path);
             }
             DEBUG_LOG(L, "successfully read one pad byte\n");
         }
@@ -701,6 +816,12 @@ while reading filename from `%" PATH_FMT "'", path);
     }
     retcode = 1;
 fail:
+    if (imageBase != NULL) {
+        if (imageMapped)
+            ll_munmap_for_linker(L, imageBase, imageSize, "loadArchive_");
+        else
+            LL_FREE_FOR(L, imageBase);
+    }
     if (f != NULL)
         fclose(f);
 
@@ -721,6 +842,7 @@ fail:
 ll_hs_int loadArchive (pathchar *path)
 {
    ll_mutex_lock(&ll_default_linker.linker_mutex);
+   ll_error_clear(&ll_default_linker);
    ll_hs_int r = loadArchive_(&ll_default_linker, path);
    ll_mutex_unlock(&ll_default_linker.linker_mutex);
    return r;
@@ -729,7 +851,8 @@ ll_hs_int loadArchive (pathchar *path)
 bool isArchive (pathchar *path)
 {
     static const char ARCHIVE_HEADER[] = "!<arch>\n";
-    char buffer[10];
+    static const char THIN_ARCHIVE_HEADER[] = "!<thin>\n";
+    char buffer[8];
     FILE *f = pathopen(path, WSTR("rb"));
     if (f == NULL) {
         return false;
@@ -740,6 +863,7 @@ bool isArchive (pathchar *path)
     if (ret < sizeof(buffer)) {
         return false;
     }
-    return strncmp(ARCHIVE_HEADER, buffer, sizeof(ARCHIVE_HEADER)-1) == 0;
+    return memcmp(ARCHIVE_HEADER, buffer, sizeof(buffer)) == 0 ||
+           memcmp(THIN_ARCHIVE_HEADER, buffer, sizeof(buffer)) == 0;
 }
 

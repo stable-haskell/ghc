@@ -98,3 +98,30 @@ Darwin linker syntax.
       liblink/tests/unit/core_error_status.c -L"$LIBLINK_BUILD_LIB" -llink \
       -Wl,-map,core-error-status.map -o core-error-status
     ./core-error-status
+
+Archive input status
+====================
+
+`archive_error_status.c` exercises the private archive reader with deterministic
+archive-byte fixtures. It checks per-owner status, cleanup, registration, and
+default-linker isolation for archive framing, GNU/BSD names, thin-member IO, and
+pending-image mapping failures. On AArch64 Darwin it also checks a two-slice FAT archive
+whose slices are empty standard archives. The fixture includes `LoadArchive.c`
+to interpose only its image-mapping call; its other linker dependencies come
+from the built static archive. Set `LL_CONFIG_DIR`, `RTS_FS_INCLUDE`, and
+`LIBLINK_BUILD_LIB` to the generated liblink include, generated `rts-fs`
+include, and directory containing the freshly built `liblink.a`.
+
+The manual link-map flag below uses Darwin syntax. On Linux, use
+`-Wl,-Map,archive-error-status.map` and add `-ldl` to the link flags.
+
+    : "${LL_CONFIG_DIR:?set the generated liblink include directory}"
+    : "${RTS_FS_INCLUDE:?set the generated rts-fs include directory}"
+    : "${LIBLINK_BUILD_LIB:?set the directory containing fresh liblink.a}"
+    CC=${CC:-cc}
+    "$CC" -std=c11 -Wall -Wextra -Werror=vla -pedantic -DLL_ASSERTS \
+      -isystem "$LL_CONFIG_DIR" -isystem "$RTS_FS_INCLUDE" \
+      -Iliblink/include -Iliblink/src \
+      liblink/tests/unit/archive_error_status.c -L"$LIBLINK_BUILD_LIB" -llink -pthread \
+      -Wl,-map,archive-error-status.map -o archive-error-status
+    ./archive-error-status

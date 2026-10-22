@@ -1,4 +1,5 @@
 #define _DARWIN_C_SOURCE 1
+#define _POSIX_C_SOURCE 200809L
 #define LL_INTERNAL_SOURCE 1
 #include "LinkerInternals.h"
 #include "linker/MMap.h"
@@ -304,6 +305,51 @@ static void cleanup_inputs(const char *empty_path, const char *loaded_path,
           "temporary input cleanup failed");
 }
 
+static void archive_dispatch(ll_linker *L, Host *host, const char *dir)
+{
+    static const char magic[] = "!<arch>\n";
+    static const char incomplete_member[] = "short";
+    char path[256];
+    make_path(path, sizeof(path), dir, "archive.o");
+    int fd = open(path, O_CREAT | O_EXCL | O_RDWR, 0600);
+    CHECK(fd >= 0, "archive dispatch fixture create failed");
+    if (fd < 0) return;
+    CHECK(write(fd, magic, sizeof(magic) - 1) == (ssize_t)(sizeof(magic) - 1),
+          "archive dispatch magic write failed");
+
+    for (unsigned malformed = 0; malformed < 2; ++malformed) {
+        if (malformed) {
+            CHECK(write(fd, incomplete_member, sizeof(incomplete_member) - 1)
+                      == (ssize_t)(sizeof(incomplete_member) - 1),
+                  "archive dispatch truncated member write failed");
+        }
+        ll_mutex_lock_for(L, &L->linker_mutex);
+        ll_error_clear(L);
+        Snapshot before = snapshot(L, host);
+        unsigned maps_before = map_calls;
+        int result = loadObj_(L, path);
+        Snapshot after = snapshot(L, host);
+        ll_mutex_unlock_for(L, &L->linker_mutex);
+        CHECK(result == (malformed ? 0 : 1)
+                  && L->error_status == (malformed ? LL_E_FORMAT : LL_OK),
+              "loadObj did not preserve archive success or failure");
+        CHECK(map_calls == maps_before,
+              "recognized archive was retried as an ordinary object");
+        CHECK(after.live == before.live && after.symhash == before.symhash
+                  && after.objects == before.objects && after.loaded == before.loaded
+                  && after.unloaded == before.unloaded
+                  && after.alloc_calls - before.alloc_calls
+                      == after.free_calls - before.free_calls,
+              "archive dispatch changed owner state or leaked reader allocations");
+        if (malformed) {
+            CHECK(strncmp(L->error_message, "loadArchive:", 12) == 0,
+                  "ordinary object fallback replaced the archive diagnostic");
+        }
+    }
+    CHECK(close(fd) == 0 && unlink(path) == 0,
+          "archive dispatch fixture cleanup failed");
+}
+
 int main(int argc, char **argv)
 {
     ll_linker owner_a = {0};
@@ -384,6 +430,7 @@ int main(int argc, char **argv)
                  "NULL path did not return STATE without state changes");
     load_failure(&owner_b, &host_b, large_path, LL_E_UNSUPPORTED,
                  "large input did not return UNSUPPORTED without state changes");
+    archive_dispatch(&owner_b, &host_b, dir);
 
     ObjectCode loaded = {.L = &owner_a, .fileName = loaded_path,
                          .status = OBJECT_READY};
