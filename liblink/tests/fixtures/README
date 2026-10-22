@@ -48,3 +48,31 @@ python3 -m unittest discover -s liblink/tests/fixtures -p 'test_*.py'
 
 The test inputs live only in temporary directories. Tool locations can be set
 with `LL_FIXTURE_CLANG`, `LL_FIXTURE_LLVM_MC`, and `LL_FIXTURE_LLVM_AR`.
+
+Two opt-in recipes cover additional fixture encodings. They run inside the
+temporary generation tree and never patch product binaries. The helper
+`fixture_recipes.py` is SHA-256-bound as `recipe_sha256` in every manifest
+and compared strictly by `check`.
+
+- A source entry may set `coff_rel32_variant` to an integer 1 through 5, only
+  for `asm` with target `x86_64-w64-windows-gnu`. LLVM 21.1.2's
+  `llvm/lib/Target/X86/MCTargetDesc/X86WinCOFFObjectWriter.cpp` emits plain
+  `IMAGE_REL_AMD64_REL32`. The recipe requires exactly one such relocation
+  in an ordinary AMD64 COFF object, changes its type to `REL32_N`, and adds
+  N to its signed inline addend. Thus `S + A - (P + 4)` equals
+  `S + (A + N) - (P + 4 + N)`. Versioned assembly must supply at least N
+  bytes after the four-byte relocation field. Other bytes remain unchanged;
+  bounds, symbol indices, overlapping regions and addend overflow are checked.
+- A GNU archive entry may set `symbol_table_bits` to `64`. The generator
+  invokes deterministic `llvm-ar` with a per-command `SYM64_THRESHOLD=0`
+  environment and requires a leading `/SYM64/` index. LLVM's
+  `llvm/lib/Object/ArchiveWriter.cpp` exposes this test knob to generate
+  small 64-bit-index archives without multi-gigabyte inputs. There is no
+  custom archive-byte rewriting. Other archive recipes explicitly use the
+  default threshold of 2^32, overriding any ambient value. Tests verify
+  widened big-endian counts/offsets, preserved member bytes and symbol names,
+  plus independent `llvm-ar`/`llvm-nm` reader results.
+
+Malformed or unsupported recipe inputs fail before output promotion. These
+recipes supply format fixtures, including expected-unsupported relocations;
+LLVM reader acceptance does not establish liblink backend support.

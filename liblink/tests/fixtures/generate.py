@@ -14,6 +14,8 @@ import subprocess
 import sys
 import tempfile
 
+import fixture_recipes
+
 
 SCHEMA = 1
 TIMEOUT_SECONDS = 30
@@ -53,11 +55,12 @@ def _tool_path(value: str | None, name: str, required: bool = False) -> Path:
     return path
 
 
-def _run(argv: list[str], cwd: Path) -> subprocess.CompletedProcess[bytes]:
+def _run(argv: list[str], cwd: Path, env_overrides: dict[str, str] | None = None) -> subprocess.CompletedProcess[bytes]:
     try:
         result = subprocess.run(
             argv, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             timeout=TIMEOUT_SECONDS, check=False,
+            env={**os.environ, **(env_overrides or {})},
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise FixtureError(f"command failed within {TIMEOUT_SECONDS}s: {argv[0]}: {exc}") from exc
@@ -130,6 +133,10 @@ def _load_catalog(path: Path) -> tuple[dict[str, object], Path, bytes]:
         triple = source.get("triple")
         if triple not in TARGETS:
             raise FixtureError(f"unsupported target triple for {source_id}: {triple!r}")
+        if "coff_rel32_variant" in source:
+            variant = source["coff_rel32_variant"]
+            if type(variant) is not int or not 1 <= variant <= 5 or triple != "x86_64-w64-windows-gnu" or language != "asm":
+                raise FixtureError("coff_rel32_variant requires AMD64 COFF assembly and integer 1..5")
         output = _safe_output(source.get("object"), f"object output for {source_id}")
         if output in outputs:
             raise FixtureError(f"duplicate object output for {source_id}: {output!r}")
@@ -158,6 +165,10 @@ def _load_catalog(path: Path) -> tuple[dict[str, object], Path, bytes]:
         kind = archive.get("format")
         if kind not in ARCHIVES:
             raise FixtureError(f"unsupported archive format: {kind!r}")
+        if "symbol_table_bits" in archive:
+            bits = archive["symbol_table_bits"]
+            if type(bits) is not int or bits != 64 or kind != "gnu":
+                raise FixtureError("symbol_table_bits must be 64 for a GNU archive")
         members = archive.get("members")
         if not isinstance(members, list) or not members or any(not isinstance(item, str) for item in members):
             raise FixtureError(f"archive {output} requires a non-empty member id list")
@@ -264,13 +275,23 @@ def _generate_tree(
                 "-fno-asynchronous-unwind-tables", "-ffreestanding", source_path, "-o", str(output),
             ]
         _run(argv, source_root)
+        if "coff_rel32_variant" in item:
+            try:
+                output.write_bytes(fixture_recipes.coff_rel32_variant(output.read_bytes(), item["coff_rel32_variant"]))
+            except fixture_recipes.RecipeError as exc:
+                raise FixtureError(f"COFF recipe for {source_path}: {exc}") from exc
 
     for archive in archives:
         output = root / archive["path"]
         output.parent.mkdir(parents=True, exist_ok=True)
         member_names = [Path(source_by_id[name]["object"]).name for name in archive["members"]]
         args = [str(tools["llvm-ar"]), *ARCHIVES[archive["format"]], "rcsD", output.name, *member_names]
-        _run(args, output.parent)
+        wide_index = archive.get("symbol_table_bits") == 64
+        # LLVM's own archive tests use this knob to avoid multi-gigabyte inputs.
+        # Pin the default too, so ambient SYM64_THRESHOLD cannot change recipes.
+        _run(args, output.parent, {"SYM64_THRESHOLD": "0" if wide_index else str(1 << 32)})
+        if wide_index and output.read_bytes()[:24] != b"!<arch>\n/SYM64/         ":
+            raise FixtureError(f"LLVM did not emit a GNU64 symbol index for {archive['path']}")
         listed = _run([str(tools["llvm-ar"]), "t", output.name], output.parent)
         members = (listed.stdout or b"").decode("utf-8", "replace").splitlines()
         if members != member_names:
@@ -285,6 +306,7 @@ def _generate_tree(
     formats = list(dict.fromkeys(item["format"] for item in archives))
     return {
         "schema": SCHEMA,
+        "recipe_sha256": sha256(Path(fixture_recipes.__file__).read_bytes()),
         "generator_sha256": sha256(Path(__file__).read_bytes()),
         "catalog_sha256": sha256(catalog_bytes),
         "targets": targets,
@@ -322,7 +344,7 @@ def _warn_tool_major_changes(expected: dict[str, object], current: dict[str, dic
 
 def _compare_manifests(expected: dict[str, object], actual: dict[str, object]) -> list[str]:
     return [
-        key for key in ("schema", "generator_sha256", "catalog_sha256", "targets", "archive_formats", "sources", "artifacts")
+        key for key in ("schema", "recipe_sha256", "generator_sha256", "catalog_sha256", "targets", "archive_formats", "sources", "artifacts")
         if expected.get(key) != actual.get(key)
     ]
 
