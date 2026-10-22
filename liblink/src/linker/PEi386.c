@@ -1795,7 +1795,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
       }
 
       addSection(section, kind, SECTION_NOMEM, start, sz, 0, 0, 0);
-      addProddableBlock(&oc->proddables, oc->sections[i].start, sz);
+      addProddableBlock(oc->L, &oc->proddables, oc->sections[i].start, sz);
    }
 
    /* Copy exported symbols into the ObjectCode. */
@@ -1832,7 +1832,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
                   SECTIONKIND_RWDATA, SECTION_MALLOC,
                   bss, globalBssSize, 0, 0, 0);
        LL_IF_DEBUG(linker_verbose, LL_DEBUG("bss @ %p %" LL_FMT_WORD "\n", bss, globalBssSize));
-       addProddableBlock(&oc->proddables, bss, globalBssSize);
+       addProddableBlock(oc->L, &oc->proddables, bss, globalBssSize);
    } else {
        addSection(&oc->sections[oc->n_sections-1],
                   SECTIONKIND_OTHER, SECTION_NOMEM, NULL, 0, 0, 0, 0);
@@ -2254,13 +2254,13 @@ ocResolve_PEi386 ( ObjectCode* oc )
          LL_IF_DEBUG(linker_verbose, LL_DEBUG("S=%zx\n", S));
 
          /* All supported relocations write at least 4 bytes */
-         checkProddableBlock(&oc->proddables, pP, 4);
+         checkProddableBlock(oc->L, &oc->proddables, pP, 4);
          switch (reloc->Type) {
 #if defined(x86_64_HOST_ARCH)
             case 1: /* R_X86_64_64 (ELF constant 1) - IMAGE_REL_AMD64_ADDR64 (PE constant 1) */
                {
                    uint64_t A;
-                   checkProddableBlock(&oc->proddables, pP, 8);
+                   checkProddableBlock(oc->L, &oc->proddables, pP, 8);
                    A = *(uint64_t*)pP;
                    *(uint64_t *)pP = S + A;
                    break;
@@ -2308,7 +2308,7 @@ ocResolve_PEi386 ( ObjectCode* oc )
                {
                    /* mingw will emit this for a pc-rel 64 relocation */
                    uint64_t A;
-                   checkProddableBlock(&oc->proddables, pP, 8);
+                   checkProddableBlock(oc->L, &oc->proddables, pP, 8);
                    A = *(uint64_t*)pP;
                    *(uint64_t *)pP = S + A - (intptr_t)pP;
                    break;

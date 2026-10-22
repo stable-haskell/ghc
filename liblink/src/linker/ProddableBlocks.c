@@ -22,6 +22,7 @@
 
 #define LL_INTERNAL_SOURCE 1
 #include "ll_compat.h"
+#include "ll_linker.h"
 #include "linker/ProddableBlocks.h"
 
 #include <stdlib.h>
@@ -41,9 +42,9 @@ initProddableBlockSet ( ProddableBlockSet* set )
 }
 
 void
-freeProddableBlocks (ProddableBlockSet *set)
+freeProddableBlocks (ll_linker *L, ProddableBlockSet *set)
 {
-    LL_FREE(set->data);
+    LL_FREE_FOR(L, set->data);
     set->data = NULL;
     set->size = 0;
     set->capacity = 0;
@@ -78,29 +79,33 @@ containsSpan ( const ProddableBlockSet *set, uintptr_t start, uintptr_t end )
 }
 
 void
-checkProddableBlock (const ProddableBlockSet *set, void *addr, size_t size )
+checkProddableBlock (ll_linker *L, const ProddableBlockSet *set,
+                     void *addr, size_t size )
 {
     if (! containsSpan(set, (uintptr_t) addr, (uintptr_t) addr+size)) {
-        LL_FATAL("checkProddableBlock: invalid fixup in runtime linker: %p", addr);
+        LL_FATAL_FOR(L, "checkProddableBlock: invalid fixup in runtime linker: %p", addr);
     }
 }
 
 // Ensure capacity for at least new_capacity intervals
 static void
-ensureCapacity(ProddableBlockSet *set, size_t new_capacity) {
+ensureCapacity(ll_linker *L, ProddableBlockSet *set, size_t new_capacity) {
     if (new_capacity > set->capacity) {
         size_t cap = set->capacity ? set->capacity * 2 : 4;
         if (cap < new_capacity) {
             cap = new_capacity;
         }
-        ProddableBlock *tmp = LL_REALLOC(set->data, cap * sizeof(ProddableBlock), "addProddableBlock");
+        ProddableBlock *tmp = LL_REALLOC_FOR(L, set->data,
+                                            cap * sizeof(ProddableBlock),
+                                            "addProddableBlock");
         set->data = tmp;
         set->capacity = cap;
     }
 }
 
 void
-addProddableBlock ( ProddableBlockSet* set, void* start_ptr, size_t size )
+addProddableBlock ( ll_linker *L, ProddableBlockSet* set,
+                    void* start_ptr, size_t size )
 {
     const uintptr_t start = (uintptr_t) start_ptr;
     const uintptr_t end = (uintptr_t) start + size;
@@ -115,7 +120,7 @@ addProddableBlock ( ProddableBlockSet* set, void* start_ptr, size_t size )
         }
     } else {
         // insert new interval
-        ensureCapacity(set, set->size + 1);
+        ensureCapacity(L, set, set->size + 1);
         memmove(&set->data[i+1], &set->data[i], sizeof(ProddableBlock) * (set->size - i));
         set->data[i].start = start;
         set->data[i].end = end;

@@ -1135,7 +1135,7 @@ void freeObjectCode (ObjectCode *oc)
         LL_FREE(oc->sections);
     }
 
-    freeProddableBlocks(&oc->proddables);
+    freeProddableBlocks(oc->L, &oc->proddables);
     freeSegments(oc);
 
     /* Free symbol_extras.  On x86_64 Windows, symbol_extras are allocated

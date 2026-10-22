@@ -253,7 +253,7 @@ resolveImports(
             return 0;
         }
 
-        checkProddableBlock(&oc->proddables,
+        checkProddableBlock(oc->L, &oc->proddables,
                             ((void**)(oc->image + sect->offset)) + i,
                             sizeof(void *));
         ((void**)(oc->image + sect->offset))[i] = addr;
@@ -287,7 +287,7 @@ decodeAddend(ObjectCode * oc, Section * section, MachORelocationInfo * ri) {
     /* the instruction. It is 32bit wide */
     uint32_t * p = (uint32_t*)((uint8_t*)section->start + ri->r_address);
 
-    checkProddableBlock(&oc->proddables, (void*)p, 1 << ri->r_length);
+    checkProddableBlock(oc->L, &oc->proddables, (void*)p, 1 << ri->r_length);
 
     switch(ri->r_type) {
         case ARM64_RELOC_UNSIGNED: {
@@ -364,7 +364,7 @@ encodeAddend(ObjectCode * oc, Section * section,
              MachORelocationInfo * ri, int64_t addend, MachOSymbol * symbol) {
     uint32_t * p = (uint32_t*)((uint8_t*)section->start + ri->r_address);
 
-    checkProddableBlock(&oc->proddables, (void*)p, 1 << ri->r_length);
+    checkProddableBlock(oc->L, &oc->proddables, (void*)p, 1 << ri->r_length);
 
     const char *symbol_name = symbol && symbol->name ? (char*)symbol->name : "<unknown>";
     const char *file_name = oc->fileName ? (char*)oc->fileName : "<unknown>";
@@ -807,7 +807,7 @@ relocateSection(ObjectCode* oc, int curSection)
             default:
                 LL_FATAL("Unknown size.");
         }
-        checkProddableBlock(&oc->proddables,thingPtr,relocLenBytes);
+        checkProddableBlock(oc->L, &oc->proddables,thingPtr,relocLenBytes);
 
         /*
          * With SIGNED_N the relocation is not at the end of the
@@ -1053,9 +1053,9 @@ relocateSection(ObjectCode* oc, int curSection)
          */
         if (0 == reloc->r_extern) {
             if (reloc->r_pcrel) {
-                checkProddableBlock(&oc->proddables, (void *)((char *)thing + baseValue), 1);
+                checkProddableBlock(oc->L, &oc->proddables, (void *)((char *)thing + baseValue), 1);
             } else {
-                checkProddableBlock(&oc->proddables, (void *)thing, 1);
+                checkProddableBlock(oc->L, &oc->proddables, (void *)thing, 1);
             }
         }
 
@@ -1362,7 +1362,7 @@ ocGetNames_MachO(ObjectCode* oc)
                 secArray[sec_idx].info->stub_size = 0;
                 secArray[sec_idx].info->stubs = NULL;
 #endif
-                addProddableBlock(&oc->proddables, start, section->size);
+                addProddableBlock(oc->L, &oc->proddables, start, section->size);
             }
 
             curMem = (char*) secMem + section->size;

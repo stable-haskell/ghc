@@ -14,6 +14,7 @@
 
 // An interval set on uintptr_t.
 struct _ProddableBlock;
+struct ll_linker;
 
 typedef struct {
     size_t size;
@@ -25,14 +26,16 @@ typedef struct {
 void initProddableBlockSet ( ProddableBlockSet* set );
 
 // Insert an interval.
-void addProddableBlock ( ProddableBlockSet* set, void* start, size_t size );
+void addProddableBlock ( struct ll_linker *L, ProddableBlockSet* set,
+                        void* start, size_t size );
 
 // Check that an address belongs to the set.
-void checkProddableBlock (const ProddableBlockSet *set, void *addr, size_t size );
+void checkProddableBlock (struct ll_linker *L, const ProddableBlockSet *set,
+                         void *addr, size_t size );
 
 
 // Free a set.
-void freeProddableBlocks (ProddableBlockSet *set);
+void freeProddableBlocks (struct ll_linker *L, ProddableBlockSet *set);
 
 // For testing.
 bool containsSpan ( const ProddableBlockSet *set, uintptr_t start, uintptr_t end );
