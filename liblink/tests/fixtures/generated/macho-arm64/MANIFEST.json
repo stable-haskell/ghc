@@ -1,0 +1,154 @@
+{
+  "archive_formats": [
+    "bsd"
+  ],
+  "artifacts": {
+    "ARM64_RELOC_ADDEND.o": {
+      "sha256": "040e0fdb3c95dc857006b10f3d1400682f9d28e29131a3a50f15cd1e922e9729",
+      "size": 472
+    },
+    "ARM64_RELOC_BRANCH26.o": {
+      "sha256": "499d4a40f64462389f6b0d83b51338f1100f3a8cefbec27f6aa5a176aabd1172",
+      "size": 440
+    },
+    "ARM64_RELOC_GOT_LOAD_PAGE21.o": {
+      "sha256": "27ad81a1b9218416b476fecf92fff612e20b4d724f076f01c9d45ac32a58e627",
+      "size": 448
+    },
+    "ARM64_RELOC_GOT_LOAD_PAGEOFF12.o": {
+      "sha256": "e6e26a0fa5aa9d30d0941338087d303cbf91779e6de10d1b8f042ee4047b6edf",
+      "size": 448
+    },
+    "ARM64_RELOC_PAGE21.o": {
+      "sha256": "a76647c076e0dc256954350c58d5ac6ee1aef7b4454bfb32264211691d07f686",
+      "size": 440
+    },
+    "ARM64_RELOC_PAGEOFF12.o": {
+      "sha256": "c4fc579a6c7889b2823c2f5b44fe3860c8fade05d01a0ad4aafadc70caaa346a",
+      "size": 440
+    },
+    "ARM64_RELOC_POINTER_TO_GOT.o": {
+      "sha256": "9a6fab5bfc235b4ebeacb9cb54316d0a764ae8c681b638eb28244359512db435",
+      "size": 536
+    },
+    "ARM64_RELOC_UNSIGNED.o": {
+      "sha256": "1581389138bad960459d762769a85af992a69d707ef56fadc8772ba1f06b7aac",
+      "size": 528
+    },
+    "fixtures.a": {
+      "sha256": "565713b98a09f043db27a7e7d821ecd066301cbe8e5bf04e2fee47529d71733b",
+      "size": 9560
+    },
+    "init-fini-arrays.o": {
+      "sha256": "0e75ac7d5733e73a0bcebcca09cb86149d50caa4792f8b7af1ca3ca17cb26fb5",
+      "size": 800
+    },
+    "init-fini.o": {
+      "sha256": "f650fae8b5ddac701cd7918ac7e83e5b7937c83749ae5e92ef0b33f562257311",
+      "size": 896
+    },
+    "symbols-common-strong.o": {
+      "sha256": "22c823225660506df7ef793448d5787a6c98b67de8311125eda4702e34f21bd8",
+      "size": 480
+    },
+    "symbols-common.o": {
+      "sha256": "d0099336fc05219a064595155b10474253249659fc1f27846694671b7837b6e9",
+      "size": 376
+    },
+    "symbols-hidden.o": {
+      "sha256": "aa6e77cc6cf0f1f97449bb473c3e3a79b7e756fd1664e3057b12b31f9dc7a20d",
+      "size": 480
+    },
+    "symbols-strong.o": {
+      "sha256": "0d948c549e9b95a1a97dc02e810bea952c9ef474a3674008bc39d1487ec52e4e",
+      "size": 480
+    },
+    "symbols-weak.o": {
+      "sha256": "13bceb2c92655c3593ca3e83aee26d4d4c59c1ac84ab27c3889623ed61c5087d",
+      "size": 480
+    }
+  },
+  "catalog_sha256": "b15a0ebe26ee6ace8b5f4dc46916805d88e9a2b95fb5d86eaa6821ea9a2b5e2f",
+  "generator_sha256": "1d27932f1734f1b2f8a97760d242a2563ee33686f934a80cf00f876c8dcc0efa",
+  "recipe_sha256": "a85e8995a015c363e0217f852af73ed739dfc06bac7a1f5162569da90bae0142",
+  "schema": 1,
+  "sources": {
+    "src/macho-arm64/ARM64_RELOC_ADDEND.s": {
+      "sha256": "ea773447d837b309e62c4708b0e35749b4701a100005c08a787a19cb43c976c4",
+      "size": 257
+    },
+    "src/macho-arm64/ARM64_RELOC_BRANCH26.s": {
+      "sha256": "d66b09d8090065b392395fa4fa0e43ffee8f7c68a3ef8a531d63206e5b252911",
+      "size": 191
+    },
+    "src/macho-arm64/ARM64_RELOC_GOT_LOAD_PAGE21.s": {
+      "sha256": "8f25a062fcba895e5d3086b9cd748255965f3e3961418baa284606e18c6b763c",
+      "size": 220
+    },
+    "src/macho-arm64/ARM64_RELOC_GOT_LOAD_PAGEOFF12.s": {
+      "sha256": "a47a83030b62272f1c5a360985edc5ab60692df98c54f66273dd12cfd7ee6885",
+      "size": 234
+    },
+    "src/macho-arm64/ARM64_RELOC_PAGE21.s": {
+      "sha256": "3b43356173fbe5244154419169082ced8ef9feff84972c1a9c6a6a61e7a4b061",
+      "size": 199
+    },
+    "src/macho-arm64/ARM64_RELOC_PAGEOFF12.s": {
+      "sha256": "9e66dc95f3ece4be0f5140df8256af88ace51fa1bdb4d65d857a9091219d3574",
+      "size": 211
+    },
+    "src/macho-arm64/ARM64_RELOC_POINTER_TO_GOT.s": {
+      "sha256": "83cb518cd2dea787203215863b5819c6bd3c152874d17b318b936b5b49d6d07b",
+      "size": 183
+    },
+    "src/macho-arm64/ARM64_RELOC_UNSIGNED.s": {
+      "sha256": "202d1815ff41f7c1f2ced671e6769e482eab313fb973e7fc595ba0b4cf3ddd40",
+      "size": 163
+    },
+    "src/macho-arm64/init-fini-arrays.c": {
+      "sha256": "e45f1d5aa60b9deb8f0768cabd6af0b402c7701841fd2d29d2f491b040617573",
+      "size": 611
+    },
+    "src/macho-arm64/init-fini.c": {
+      "sha256": "a34b91739e8f34d628c973e4f703335822ca2a8625da2a72701057bc45b4d34b",
+      "size": 243
+    },
+    "src/macho-arm64/symbols-common-strong.c": {
+      "sha256": "b07e8d68c844a846412feffdab528a63c87c364654df23d43556147acd719e45",
+      "size": 28
+    },
+    "src/macho-arm64/symbols-common.c": {
+      "sha256": "e03116f0edce010ceb375d5069af66fa62d89a30fa152c2b685edea31495d14b",
+      "size": 47
+    },
+    "src/macho-arm64/symbols-hidden.c": {
+      "sha256": "056a5a4844008d4c23261f5644aa469b0c7d29c70ccf41138cea6dcff28ba567",
+      "size": 66
+    },
+    "src/macho-arm64/symbols-strong.c": {
+      "sha256": "87693b7a9a94c2472170707d831b53f5cfd5bfe34051807a9300a13e37b7c20e",
+      "size": 28
+    },
+    "src/macho-arm64/symbols-weak.c": {
+      "sha256": "6f335c194414460486a5d3af0245e66d210b45790a116a24cc558674bc2bb0c7",
+      "size": 50
+    }
+  },
+  "targets": [
+    "arm64-apple-macos11"
+  ],
+  "tools": {
+    "clang": {
+      "major": "21",
+      "version": "clang version 21.1.2"
+    },
+    "llvm-ar": {
+      "major": "21",
+      "version": "LLVM version 21.1.2"
+    },
+    "llvm-mc": {
+      "major": "21",
+      "version": "LLVM version 21.1.2"
+    }
+  }
+}
