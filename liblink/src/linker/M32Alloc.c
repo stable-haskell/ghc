@@ -602,32 +602,3 @@ m32_alloc_for(ll_linker *L, m32_allocator *alloc LL_UNUSED,
 }
 
 #endif
-
-/* Temporary default adapters until the remaining private callers migrate. */
-m32_allocator *m32_allocator_new(bool executable)
-{
-#if defined(NEED_M32)
-  return m32_allocator_new_for(&ll_default_linker, executable);
-#else
-  m32_allocator_new_for(&ll_default_linker, executable);
-#endif
-}
-
-void m32_allocator_free(m32_allocator *alloc)
-{
-  m32_allocator_free_for(&ll_default_linker, alloc);
-}
-
-void m32_allocator_flush(m32_allocator *alloc)
-{
-  m32_allocator_flush_for(&ll_default_linker, alloc);
-}
-
-void *m32_alloc(m32_allocator *alloc, size_t size, size_t alignment)
-{
-#if defined(NEED_M32)
-  return m32_alloc_for(&ll_default_linker, alloc, size, alignment);
-#else
-  m32_alloc_for(&ll_default_linker, alloc, size, alignment);
-#endif
-}

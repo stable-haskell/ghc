@@ -497,17 +497,4 @@ void munmapForLinker(void *addr, size_t bytes, const char *caller)
     ll_munmap_for_linker(&ll_default_linker, addr, bytes, caller);
 }
 
-/* Temporary default adapters for callers not yet migrated to explicit L. */
-void *mmapAnonForLinker(size_t bytes)
-{
-    return ll_mmap_anon_for_linker(&ll_default_linker, bytes);
-}
-
-#if !defined(mingw32_HOST_OS)
-void *mmapForLinker(size_t bytes, MemoryAccess access, uint32_t flags,
-                    int fd, int offset)
-{
-    return ll_mmap_for_linker(&ll_default_linker, bytes, access, flags, fd, offset);
-}
-#endif
 #endif

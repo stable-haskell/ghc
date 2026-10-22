@@ -64,17 +64,4 @@ void *ll_mmap_for_linker(ll_linker *L, size_t bytes, MemoryAccess prot,
                          uint32_t flags, int fd, int offset);
 #endif
 
-/* Temporary default adapters until the remaining private callers migrate. */
-// Map read/write anonymous memory, enforcing the constraint of
-// placing the mapping within 4GB of the executable image.
-void *mmapAnonForLinker (size_t bytes);
-
-#if !defined(mingw32_HOST_OS)
-// Map a file.
-//
-// Note that this not available on Windows since file mapping on Windows is
-// sufficiently different to warrant its own interface.
-void *mmapForLinker (size_t bytes, MemoryAccess prot, uint32_t flags, int fd, int offset);
-#endif
-
 #include "ll_end_private.h"
