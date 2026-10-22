@@ -10,6 +10,11 @@ functions in rts/LinkerCompat.c. The headers under include/liblink provide the
 compatibility and RTS friend interfaces; they are internal interfaces, not a
 stable public embedding API. Unload checking and the GC remain in the RTS.
 
+The installed liblink.h declares the handle API. Its current entry points are
+unsupported stubs: ll_new returns NULL, and functions returning ll_status
+return LL_E_UNSUPPORTED. RTS clients continue to use the compatibility
+interface.
+
 Locking
 -------
 

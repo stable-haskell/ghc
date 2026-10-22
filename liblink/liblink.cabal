@@ -79,6 +79,7 @@ extra-source-files:
     src/linker/macho/plt_aarch64.c
     src/linker/macho/plt_aarch64.h
     src/linker/util.h
+    src/ll_api.c
     src/ll_backend.h
     src/ll_begin_private.h
     src/ll_compat.h
