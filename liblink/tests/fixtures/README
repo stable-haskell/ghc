@@ -1,0 +1,50 @@
+# Reproducible object and archive fixtures
+
+`generate.py` consumes a JSON catalog. The catalog names versioned source files,
+source language, target triple, generated object path, and explicit archive
+recipes. It compiles those inputs; it does not synthesize product fixture
+sources. A later fixture expansion can add relocation inputs by extending the
+catalog without changing the generator.
+
+Supported triples are `x86_64-linux-gnu`, `i386-linux-gnu`,
+`aarch64-linux-gnu`, `armv7-linux-gnueabihf`, `riscv64-linux-gnu`,
+`powerpc64le-linux-gnu`, `x86_64-apple-macos11`, `arm64-apple-macos11`, and
+`x86_64-w64-windows-gnu`. Object generation does not claim target runtime or
+relocation-handler qualification.
+
+The catalog schema is intentionally small. `sources` is an array of entries
+with `id`, `path`, `language` (`c` or `asm`), `triple`, and `object`. `archives`
+is an array with output `path`, `format` (`gnu`, `bsd`, or `thin`), and member
+source IDs. Source paths are relative to the catalog directory. Object paths
+must share a directory with their archive members so thin archives keep
+portable relative references.
+
+Use LLVM 17 or newer. Pass paths explicitly when the environment has compiler
+wrappers that add target-inappropriate flags:
+
+```sh
+python3 generate.py regen --catalog /path/to/catalog.json \
+  --output-dir /path/to/generated --clang /path/to/unwrapped/clang \
+  --llvm-mc /path/to/llvm-mc --llvm-ar /path/to/llvm-ar
+python3 generate.py check --catalog /path/to/catalog.json \
+  --output-dir /path/to/generated --clang /path/to/unwrapped/clang \
+  --llvm-mc /path/to/llvm-mc --llvm-ar /path/to/llvm-ar
+```
+
+Keep generated output in a directory separate from the catalog and its source
+tree. The output directory must be empty or a tree previously created by this
+generator. Regeneration builds into a temporary tree before replacing managed
+files, so a tool failure leaves existing fixtures intact. `check` never writes
+to expected data. It fails on missing or unknown output files, changed catalog
+sources, or different artifact bytes. A tool-major mismatch emits a warning;
+source or byte differences still fail. The manifest records only relative paths,
+SHA-256 hashes, sizes, and tool versions.
+
+Run the tests with:
+
+```sh
+python3 -m unittest discover -s liblink/tests/fixtures -p 'test_*.py'
+```
+
+The test inputs live only in temporary directories. Tool locations can be set
+with `LL_FIXTURE_CLANG`, `LL_FIXTURE_LLVM_MC`, and `LL_FIXTURE_LLVM_AR`.
