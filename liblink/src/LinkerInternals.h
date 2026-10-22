@@ -144,6 +144,13 @@ ll_hs_int loadArchive_ (ll_linker *L, pathchar *path);
 #define USE_CONTIGUOUS_MMAP 0
 #endif
 
+/* Initialization and exit require exclusive access. Lookup and unload callers
+ * hold the owner lock. */
+void ll_init_linker(ll_linker *L, int retain_cafs);
+void ll_exit_linker(ll_linker *L);
+ll_symbol_addr *lookupSymbol_(ll_linker *L, ll_symbol_name *lbl);
+ll_hs_int unloadNativeObj_(ll_linker *L, void *handle);
+
 ll_hs_int isAlreadyLoaded( ll_linker *L, pathchar *path );
 OStatus getObjectLoadStatus_ (ll_linker *L, pathchar *path);
 ObjectCode *lookupObjectByPath(ll_linker *L, pathchar *path);

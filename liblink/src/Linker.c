@@ -428,80 +428,93 @@ void initLinker (void)
 }
 
 void
-initLinker_ (int retain_cafs)
+ll_init_linker (ll_linker *L, int retain_cafs)
 {
 #if defined(OBJFORMAT_ELF) || defined(OBJFORMAT_MACHO)
     int compileResult;
 #endif
 
-    LL_IF_DEBUG(linker, LL_DEBUG("initLinker: start\n"));
+    LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "initLinker: start\n"));
 
     /* Make initLinker idempotent, so we can call it
        before every relevant operation; that means we
        don't need to initialise the linker separately */
-    if (ll_default_linker.linker_init_done == 1) {
-        LL_IF_DEBUG(linker, LL_DEBUG("initLinker: idempotent return\n"));
+    if (L->linker_init_done == 1) {
+        LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "initLinker: idempotent return\n"));
         return;
     } else {
-        ll_default_linker.linker_init_done = 1;
+        L->linker_init_done = 1;
     }
 
-    if (ll_host.init_unload_check != NULL) {
-        ll_host.init_unload_check(ll_host.ctx);
+    L->gc.mutex = &L->linker_mutex;
+    if (L->services.host.init_unload_check != NULL) {
+        L->services.host.init_unload_check(L->services.host.ctx);
     }
 
-    ll_mutex_init(&ll_default_linker.linker_mutex);
+    ll_mutex_init_for(&L->services, &L->linker_mutex);
 
-    ll_default_linker.symhash = allocStrHashTable(&ll_default_linker);
+    L->symhash = allocStrHashTable(L);
 
-    if (ll_host.populate_builtins != NULL) {
-        ll_host.populate_builtins(ll_host.ctx, retain_cafs, insertBuiltin, &ll_default_linker);
+    if (L->services.host.populate_builtins != NULL) {
+        L->services.host.populate_builtins(L->services.host.ctx, retain_cafs, insertBuiltin, L);
     }
 
 #   if defined(OBJFORMAT_ELF) || defined(OBJFORMAT_MACHO)
 #   if defined(RTLD_DEFAULT)
-    ll_default_linker.dl_prog_handle = RTLD_DEFAULT;
+    L->dl_prog_handle = RTLD_DEFAULT;
 #   else
-    ll_default_linker.dl_prog_handle = dlopen(NULL, RTLD_LAZY);
+    L->dl_prog_handle = dlopen(NULL, RTLD_LAZY);
 #   endif /* RTLD_DEFAULT */
 
-    compileResult = regcomp(&ll_default_linker.re_invalid,
+    compileResult = regcomp(&L->re_invalid,
            "(([^ \t()])+\\.so([^ \t:()])*):([ \t])*(invalid ELF header|file too short|invalid file format|Exec format error)",
            REG_EXTENDED);
     if (compileResult != 0) {
-        LL_FATAL("Compiling re_invalid failed");
+        LL_FATAL_FOR(L, "Compiling re_invalid failed");
     }
-    compileResult = regcomp(&ll_default_linker.re_realso,
+    compileResult = regcomp(&L->re_realso,
            "(GROUP|INPUT) *\\( *([^ )]+)",
            REG_EXTENDED);
     if (compileResult != 0) {
-        LL_FATAL("Compiling re_realso failed");
+        LL_FATAL_FOR(L, "Compiling re_realso failed");
     }
 #   endif
 
 #if defined(OBJFORMAT_PEi386)
-    initLinker_PEi386(&ll_default_linker);
+    initLinker_PEi386(L);
 #endif
 
-    LL_IF_DEBUG(linker, LL_DEBUG("initLinker: done\n"));
+    LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "initLinker: done\n"));
     return;
 }
 
 void
-exitLinker( void ) {
+ll_exit_linker(ll_linker *L) {
 #if defined(OBJFORMAT_ELF) || defined(OBJFORMAT_MACHO)
-   if (ll_default_linker.linker_init_done == 1) {
-      regfree(&ll_default_linker.re_invalid);
-      regfree(&ll_default_linker.re_realso);
+   if (L->linker_init_done == 1) {
+      regfree(&L->re_invalid);
+      regfree(&L->re_realso);
    }
 #endif
-   if (ll_default_linker.linker_init_done == 1) {
-       freeStrHashTable(ll_default_linker.symhash, free);
-       if (ll_host.exit_unload_check != NULL) {
-           ll_host.exit_unload_check(ll_host.ctx);
+   if (L->linker_init_done == 1) {
+       ll_hash_free_owned_table((HashTable *)L->symhash);
+       if (L->services.host.exit_unload_check != NULL) {
+           L->services.host.exit_unload_check(L->services.host.ctx);
        }
    }
-   ll_mutex_close(&ll_default_linker.linker_mutex);
+   ll_mutex_close_for(&L->services, &L->linker_mutex);
+}
+
+void
+initLinker_ (int retain_cafs)
+{
+    ll_init_linker(&ll_default_linker, retain_cafs);
+}
+
+void
+exitLinker(void)
+{
+    ll_exit_linker(&ll_default_linker);
 }
 
 /* -----------------------------------------------------------------------------
@@ -920,32 +933,38 @@ printLoadedObjects(ll_linker *L) {
    }
 }
 
-ll_symbol_addr* lookupSymbol( ll_symbol_name* lbl )
+ll_symbol_addr* lookupSymbol_(ll_linker *L, ll_symbol_name* lbl)
 {
-    ll_mutex_lock(&ll_default_linker.linker_mutex);
     // NULL for "don't add dependent". When adding a dependency we call
     // lookupDependentSymbol directly.
-    ll_symbol_addr* r = lookupDependentSymbol(&ll_default_linker, lbl, NULL, NULL);
+    ll_symbol_addr* r = lookupDependentSymbol(L, lbl, NULL, NULL);
     if (!r) {
-        if (!ll_cfg.optimistic) {
-          LL_LOG_ERROR("^^ Could not load '%s', dependency unresolved. "
+        if (!L->services.cfg.optimistic) {
+          LL_LOG_ERROR_FOR(L, "^^ Could not load '%s', dependency unresolved. "
                      "See top entry above. You might consider using --optimistic-linking\n",
                      lbl);
-          LL_IF_DEBUG(linker, printLoadedObjects(&ll_default_linker));
+          LL_IF_DEBUG_FOR(L, linker, printLoadedObjects(L));
           fflush(stderr);
         } else {
           // if --optimistic-linking is passed into the RTS we allow the linker
           // to optimistically continue
-          LL_LOG_ERROR("^^ Could not load '%s', dependency unresolved, "
+          LL_LOG_ERROR_FOR(L, "^^ Could not load '%s', dependency unresolved, "
                      "optimistically continuing\n",
                      lbl);
           r = (void*) 0xDEADBEEF;
         }
     }
 
-    if (!runPendingInitializers(&ll_default_linker)) {
-        LL_LOG_ERROR("lookupSymbol: Failed to run initializers.");
+    if (!runPendingInitializers(L)) {
+        LL_LOG_ERROR_FOR(L, "lookupSymbol: Failed to run initializers.");
     }
+    return r;
+}
+
+ll_symbol_addr* lookupSymbol(ll_symbol_name* lbl)
+{
+    ll_mutex_lock(&ll_default_linker.linker_mutex);
+    ll_symbol_addr* r = lookupSymbol_(&ll_default_linker, lbl);
     ll_mutex_unlock(&ll_default_linker.linker_mutex);
     return r;
 }
@@ -1852,29 +1871,29 @@ void * loadNativeObj (pathchar *path, char **errmsg)
    return r;
 }
 
-static ll_hs_int unloadNativeObj_(void *handle)
+ll_hs_int unloadNativeObj_(ll_linker *L, void *handle)
 {
     bool unloadedAnyObj = false;
 
-    LL_IF_DEBUG(linker, LL_DEBUG("unloadNativeObj: %p\n", handle));
+    LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "unloadNativeObj: %p\n", handle));
 
     ObjectCode *prev = NULL, *next;
-    for (ObjectCode *nc = ll_default_linker.gc.loaded_objects; nc; nc = next) {
+    for (ObjectCode *nc = L->gc.loaded_objects; nc; nc = next) {
         next = nc->next_loaded_object; // we might move nc
 
         if (nc->type == DYNAMIC_OBJECT && nc->dlopen_handle == handle) {
             nc->status = OBJECT_UNLOADED;
-            ll_default_linker.gc.n_unloaded_objects += 1;
+            L->gc.n_unloaded_objects += 1;
 
             // dynamic objects have no symbols
-            LL_CHECK(nc->symbols == NULL);
-            if (ll_host.on_unload != NULL) {
-                ll_host.on_unload(ll_host.ctx, nc);
+            LL_CHECK_FOR(L, nc->symbols == NULL);
+            if (L->services.host.on_unload != NULL) {
+                L->services.host.on_unload(L->services.host.ctx, nc);
             }
 
             // Remove object code from root set
             if (prev == NULL) {
-              ll_default_linker.gc.loaded_objects = nc->next_loaded_object;
+              L->gc.loaded_objects = nc->next_loaded_object;
             } else {
               prev->next_loaded_object = nc->next_loaded_object;
             }
@@ -1887,14 +1906,14 @@ static ll_hs_int unloadNativeObj_(void *handle)
     if (unloadedAnyObj) {
         return 1;
     } else {
-        LL_LOG_ERROR("unloadObjNativeObj_: can't find `%p' to unload", handle);
+        LL_LOG_ERROR_FOR(L, "unloadObjNativeObj_: can't find `%p' to unload", handle);
         return 0;
     }
 }
 
 ll_hs_int unloadNativeObj(void *handle) {
   ll_mutex_lock(&ll_default_linker.linker_mutex);
-  ll_hs_int r = unloadNativeObj_(handle);
+  ll_hs_int r = unloadNativeObj_(&ll_default_linker, handle);
   ll_mutex_unlock(&ll_default_linker.linker_mutex);
   return r;
 }
