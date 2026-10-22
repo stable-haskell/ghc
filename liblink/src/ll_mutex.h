@@ -9,6 +9,7 @@
 #pragma once
 
 #include "ll_visibility.h"
+#include "ll_host.h"
 
 #include "ll_platform.h"
 
@@ -44,8 +45,28 @@ LL_FRIEND_API void ll_lock_at(ll_mutex *mutex, const char *file, int line);
 LL_FRIEND_API void ll_unlock_at(ll_mutex *mutex, const char *file, int line);
 void ll_assert_lock_held_at(ll_mutex *mutex, const char *file, int line);
 
+#include "ll_begin_private.h"
+
+void ll_mutex_init_for(const ll_compat_services *services, ll_mutex *mutex);
+void ll_mutex_close_for(const ll_compat_services *services, ll_mutex *mutex);
+void ll_mutex_lock_for_at(const ll_compat_services *services, ll_mutex *mutex,
+                          const char *file, int line);
+void ll_mutex_unlock_for_at(const ll_compat_services *services, ll_mutex *mutex,
+                            const char *file, int line);
+void ll_assert_lock_held_for_at(const ll_compat_services *services,
+                                ll_mutex *mutex, const char *file, int line);
+
+#include "ll_end_private.h"
+
 /* Keep lock failure diagnostics attributed to the original call sites. */
 #define ll_mutex_lock(mutex) ll_lock_at((mutex), __FILE__, __LINE__)
 #define ll_mutex_unlock(mutex) ll_unlock_at((mutex), __FILE__, __LINE__)
 #define ll_assert_lock_held(mutex) \
     ll_assert_lock_held_at((mutex), __FILE__, __LINE__)
+
+#define ll_mutex_lock_for(L, mutex) \
+    ll_mutex_lock_for_at(&(L)->services, (mutex), __FILE__, __LINE__)
+#define ll_mutex_unlock_for(L, mutex) \
+    ll_mutex_unlock_for_at(&(L)->services, (mutex), __FILE__, __LINE__)
+#define ll_assert_lock_held_for(L, mutex) \
+    ll_assert_lock_held_for_at(&(L)->services, (mutex), __FILE__, __LINE__)
