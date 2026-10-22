@@ -13,7 +13,7 @@
 
 #include "RtsUtils.h"
 #include "Hash.h"
-#include "linker/rts_friend.h"
+#include "liblink/rts_friend.h"
 #include "CheckUnload.h"
 #include "sm/Storage.h"
 #include "sm/GCThread.h"

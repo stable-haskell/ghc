@@ -44,7 +44,7 @@
 #include "Timer.h"
 #include "Globals.h"
 #include "FileLock.h"
-#include "linker/rts_friend.h"
+#include "liblink/rts_friend.h"
 #include "LinkerGlue.h"
 #include "LibdwPool.h"
 #include "sm/CNF.h"

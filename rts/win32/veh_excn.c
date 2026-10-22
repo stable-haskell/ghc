@@ -9,7 +9,7 @@
 #include "Rts.h"
 #include "ghcconfig.h"
 #include "veh_excn.h"
-#include "linker/rts_friend.h"
+#include "liblink/rts_friend.h"
 #include <stdbool.h>
 #include <dbghelp.h>
 #include <shellapi.h>
