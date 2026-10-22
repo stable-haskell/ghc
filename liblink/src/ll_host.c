@@ -91,7 +91,8 @@ ll_gc_state *ll_compat_default_gc_state(void)
     return &ll_default_linker.gc;
 }
 
-void ll_install_host(const ll_compat_host_ops *host, const ll_compat_config *cfg)
+void ll_install_host_for(ll_linker *L, const ll_compat_host_ops *host,
+                         const ll_compat_config *cfg)
 {
     ll_compat_host_ops installed = DEFAULT_HOST;
     if (host != NULL) {
@@ -103,6 +104,11 @@ void ll_install_host(const ll_compat_host_ops *host, const ll_compat_config *cfg
         if (installed.log == NULL) installed.log = default_log;
         if (installed.fatal == NULL) installed.fatal = default_fatal;
     }
-    ll_host = installed;
-    ll_cfg = cfg != NULL ? *cfg : (ll_compat_config){0};
+    L->services.host = installed;
+    L->services.cfg = cfg != NULL ? *cfg : (ll_compat_config){0};
+}
+
+void ll_install_host(const ll_compat_host_ops *host, const ll_compat_config *cfg)
+{
+    ll_install_host_for(&ll_default_linker, host, cfg);
 }

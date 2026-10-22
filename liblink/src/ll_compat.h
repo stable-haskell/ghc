@@ -96,6 +96,36 @@ static inline _Noreturn void ll_compat_fatal(const char *fmt, ...)
     abort();
 }
 
+/* Explicit-owner calls lower L to services at the macro call site. Keeping the
+ * inline primitives independent of struct ll_linker avoids an include cycle
+ * through the shared ObjectCode layout. */
+static inline void ll_compat_log_for(const ll_compat_services *services,
+                                      int kind, const char *fmt, ...)
+    LL_COMPAT_PRINTF(3, 4);
+
+static inline void ll_compat_log_for(const ll_compat_services *services,
+                                      int kind, const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    services->host.log(services->host.ctx, kind, fmt, ap);
+    va_end(ap);
+}
+
+static inline _Noreturn void
+ll_compat_fatal_for(const ll_compat_services *services, const char *fmt, ...)
+    LL_COMPAT_PRINTF(2, 3);
+
+static inline _Noreturn void
+ll_compat_fatal_for(const ll_compat_services *services, const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    services->host.fatal(services->host.ctx, fmt, ap);
+    va_end(ap);
+    abort();
+}
+
 #undef LL_COMPAT_PRINTF
 
 #if defined(__GNUC__) || defined(__clang__)
@@ -227,3 +257,109 @@ static inline size_t ll_round_up_to_page(size_t x)
     size_t size = ll_page_size();
     return (x + size - 1) & ~(size - 1);
 }
+
+/* Legacy forms above remain only while compatibility consumers migrate. New
+ * owned code must use these explicit forms, including its diagnostic paths. */
+static inline void *ll_compat_malloc_for(const ll_compat_services *services,
+                                        size_t size, const char *what)
+{
+    return services->host.malloc_(services->host.ctx, size, what);
+}
+
+static inline void *ll_compat_calloc_for(const ll_compat_services *services,
+                                        size_t count, size_t size,
+                                        const char *what)
+{
+    return services->host.calloc_(services->host.ctx, count, size, what);
+}
+
+static inline void *ll_compat_realloc_for(const ll_compat_services *services,
+                                         void *ptr, size_t size,
+                                         const char *what)
+{
+    return services->host.realloc_(services->host.ctx, ptr, size, what);
+}
+
+static inline void ll_compat_free_for(const ll_compat_services *services,
+                                      void *ptr)
+{
+    services->host.free_(services->host.ctx, ptr);
+}
+
+static inline size_t
+ll_compat_page_size_for(const ll_compat_services *services)
+{
+    return services->host.page_size(services->host.ctx);
+}
+
+static inline void
+ll_compat_report_mem_failure_for(const ll_compat_services *services)
+{
+    services->host.on_mem_failure(services->host.ctx);
+}
+
+static inline size_t
+ll_compat_round_down_to_page_for(const ll_compat_services *services, size_t x)
+{
+    size_t size = ll_compat_page_size_for(services);
+    return x & ~(size - 1);
+}
+
+static inline size_t
+ll_compat_round_up_to_page_for(const ll_compat_services *services, size_t x)
+{
+    size_t size = ll_compat_page_size_for(services);
+    return (x + size - 1) & ~(size - 1);
+}
+
+#define LL_MALLOC_FOR(L, size, what) \
+    ll_compat_malloc_for(&(L)->services, (size), (what))
+#define LL_CALLOC_FOR(L, count, size, what) \
+    ll_compat_calloc_for(&(L)->services, (count), (size), (what))
+#define LL_REALLOC_FOR(L, ptr, size, what) \
+    ll_compat_realloc_for(&(L)->services, (ptr), (size), (what))
+#define LL_FREE_FOR(L, ptr) ll_compat_free_for(&(L)->services, (ptr))
+
+#define LL_LOG_ERROR_FOR(L, ...) \
+    ll_compat_log_for(&(L)->services, LL_LOG_ERROR, __VA_ARGS__)
+#define LL_LOG_SYSERROR_FOR(L, ...) \
+    ll_compat_log_for(&(L)->services, LL_LOG_SYSERROR, __VA_ARGS__)
+#define LL_DEBUG_FOR(L, ...) \
+    ll_compat_log_for(&(L)->services, LL_LOG_DEBUG, __VA_ARGS__)
+#define LL_FATAL_FOR(L, ...) \
+    ll_compat_fatal_for(&(L)->services, __VA_ARGS__)
+
+#define LL_CHECK_FOR(L, predicate)                                            \
+    do {                                                                     \
+        if (!LL_LIKELY(predicate)) {                                         \
+            LL_FATAL_FOR(L, "ASSERTION FAILED: file %s, line %u\n",          \
+                         __FILE__, (unsigned int)__LINE__);                  \
+        }                                                                    \
+    } while (0)
+
+#define LL_CHECKM_FOR(L, predicate, ...)                                      \
+    do {                                                                     \
+        if (!LL_LIKELY(predicate)) {                                         \
+            LL_FATAL_FOR(L, __VA_ARGS__);                                    \
+        }                                                                    \
+    } while (0)
+
+#if LL_ASSERTS_ENABLED
+#define LL_ASSERT_FOR(L, predicate) LL_CHECK_FOR(L, predicate)
+#else
+#define LL_ASSERT_FOR(L, predicate) do { (void)sizeof(predicate); } while (0)
+#endif
+
+#define LL_IF_DEBUG_FOR(L, category, statement)                               \
+    if (((L)->services.cfg.debug_mask & LL_DEBUG_MASK_##category) != 0u) {     \
+        statement;                                                           \
+    }                                                                        \
+    do { } while (0)
+
+#define ll_page_size_for(L) ll_compat_page_size_for(&(L)->services)
+#define ll_report_mem_failure_for(L) \
+    ll_compat_report_mem_failure_for(&(L)->services)
+#define ll_round_down_to_page_for(L, x) \
+    ll_compat_round_down_to_page_for(&(L)->services, (x))
+#define ll_round_up_to_page_for(L, x) \
+    ll_compat_round_up_to_page_for(&(L)->services, (x))

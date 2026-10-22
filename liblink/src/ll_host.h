@@ -75,3 +75,11 @@ extern LL_FRIEND_API ll_compat_services *const ll_default_services;
 #define ll_host (ll_default_services->host)
 #define ll_cfg (ll_default_services->cfg)
 LL_FRIEND_API void ll_install_host(const ll_compat_host_ops *host, const ll_compat_config *cfg);
+
+#include "ll_begin_private.h"
+
+/* Install services before this owner's first allocation or mapping. */
+void ll_install_host_for(ll_linker *L, const ll_compat_host_ops *host,
+                         const ll_compat_config *cfg);
+
+#include "ll_end_private.h"
