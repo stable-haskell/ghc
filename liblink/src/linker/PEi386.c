@@ -560,8 +560,8 @@ void initLinker_PEi386(void)
 {
     initLoadedDllCache(&ll_default_linker.loaded_dll_cache);
 
-    if (!ghciInsertSymbolTable(WSTR("(GHCi/Ld special symbols)"),
-                               ll_default_linker.symhash, "__image_base__",
+    if (!ghciInsertSymbolTable(&ll_default_linker,
+                               WSTR("(GHCi/Ld special symbols)"), "__image_base__",
                                GetModuleHandleW (NULL), LL_HS_BOOL_TRUE,
                                LL_SYM_CODE, 0, NULL)) {
         LL_FATAL("ghciInsertSymbolTable failed");
@@ -1172,7 +1172,7 @@ bool checkAndLoadImportLibrary( pathchar* arch_name, char* member_name, FILE* f 
     ll_sym_type symType = LL_SYM_DUP_DISCARD | LL_SYM_HIDDEN;
     symType |= hdr.Type == IMPORT_OBJECT_CODE ? LL_SYM_CODE : LL_SYM_DATA;
 
-    if (!ghciInsertSymbolTable(dll, ll_default_linker.symhash, symbol, sym, false, symType, 0, NULL))
+    if (!ghciInsertSymbolTable(&ll_default_linker, dll, symbol, sym, false, symType, 0, NULL))
       return false;
 
     return true;
@@ -2003,7 +2003,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
           addr  = strdup (addr);
           type = has_code_section ? LL_SYM_CODE : LL_SYM_DATA;
           type |= LL_SYM_DUP_DISCARD;
-          if (!ghciInsertSymbolTable(oc->fileName, ll_default_linker.symhash, sname,
+          if (!ghciInsertSymbolTable(oc->L, oc->fileName, sname,
                                      addr, false, type, 0, oc)) {
              releaseOcInfo (oc);
              LL_FREE (oc->image);
@@ -2086,7 +2086,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
           if(secNumber == IMAGE_SYM_UNDEFINED)
             type |= LL_SYM_HIDDEN;
 
-          if (!ghciInsertSymbolTable(oc->fileName, ll_default_linker.symhash, sname,
+          if (!ghciInsertSymbolTable(oc->L, oc->fileName, sname,
                                      addr, false, type, 0, oc))
                return false;
 
@@ -2112,7 +2112,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
              setWeakSymbol(oc, sname);
          }
 
-         if (! ghciInsertSymbolTable(oc->fileName, ll_default_linker.symhash, sname, addr,
+         if (! ghciInsertSymbolTable(oc->L, oc->fileName, sname, addr,
                                      isWeak, type, symSize, oc))
              return false;
       } else {
@@ -2497,7 +2497,7 @@ ll_symbol_addr *lookupSymbol_PEi386(ll_symbol_name *lbl, ObjectCode *dependent, 
 {
     RtsSymbolInfo *pinfo;
 
-    if (!ghciLookupSymbolInfo(ll_default_linker.symhash, lbl, &pinfo)) {
+    if (!ghciLookupSymbolInfo(&ll_default_linker, lbl, &pinfo)) {
         LL_IF_DEBUG(linker, LL_DEBUG("lookupSymbol: symbol '%s' not found\n", lbl));
 
         ll_symbol_addr* sym;
@@ -2704,7 +2704,7 @@ resolveSymbolAddr_PEi386 (pathchar* buffer, int size,
                continue;
             }
           RtsSymbolInfo* a = NULL;
-          ghciLookupSymbolInfo(ll_default_linker.symhash, sym, &a);
+          ghciLookupSymbolInfo(&ll_default_linker, sym, &a);
           if (a) {
               SymX sx = {0};
               sx.name = sym;

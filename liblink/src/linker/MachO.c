@@ -1466,8 +1466,8 @@ ocGetNames_MachO(ObjectCode* oc)
                             ll_symbol_addr* addr = oc->info->macho_symbols[i].addr;
                             // TODO: Make figure out how to determine this from the object file
                             ll_sym_type sym_type = LL_SYM_CODE;
-                            ghciInsertSymbolTable( oc->fileName
-                                                 , ll_default_linker.symhash
+                            ghciInsertSymbolTable( oc->L
+                                                 , oc->fileName
                                                  , nm
                                                  , addr
                                                  , LL_HS_BOOL_FALSE
@@ -1537,7 +1537,7 @@ ocGetNames_MachO(ObjectCode* oc)
 
                     LL_IF_DEBUG(linker_verbose,
                              LL_DEBUG("ocGetNames_MachO: inserting common symbol: %s\n", nm));
-                    ghciInsertSymbolTable(oc->fileName, ll_default_linker.symhash, nm,
+                    ghciInsertSymbolTable(oc->L, oc->fileName, nm,
                                          (void*)commonCounter, LL_HS_BOOL_FALSE,
                                          sym_type,
                                          sz, oc);

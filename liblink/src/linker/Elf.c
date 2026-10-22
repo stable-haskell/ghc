@@ -1124,7 +1124,7 @@ ocGetNames_ELF ( ObjectCode* oc )
                        if (isWeak == LL_HS_BOOL_TRUE) {
                            setWeakSymbol(oc, nm);
                        }
-                       if (!ghciInsertSymbolTable(oc->fileName, ll_default_linker.symhash,
+                       if (!ghciInsertSymbolTable(oc->L, oc->fileName,
                                                   nm, symbol->addr, isWeak, sym_type, symbol->elf_sym->st_size, oc)
                            ) {
                            goto fail;

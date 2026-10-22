@@ -190,26 +190,26 @@ static int ocTryLoad( ObjectCode* oc );
 static int ocRunInit( ObjectCode* oc );
 static int runPendingInitializers (void);
 
-static void ghciRemoveSymbolTable(StrHashTable *table, const ll_symbol_name* key,
+static void ghciRemoveSymbolTable(ll_linker *L, const ll_symbol_name* key,
     ObjectCode *owner)
 {
-    RtsSymbolInfo *pinfo = lookupStrHashTable(table, key);
+    RtsSymbolInfo *pinfo = lookupStrHashTable(L->symhash, key);
     if (!pinfo || owner != pinfo->owner) return;
-    removeStrHashTable(table, key, NULL);
+    removeStrHashTable(L->symhash, key, NULL);
     if (isSymbolImport (owner, key))
-      LL_FREE(pinfo->value);
+      LL_FREE_FOR(L, pinfo->value);
 
-    LL_FREE(pinfo);
+    LL_FREE_FOR(L, pinfo);
 }
 
 static const char *
-symbolTypeString (ll_sym_type type)
+symbolTypeString (ll_linker *L, ll_sym_type type)
 {
     switch (type & ~(LL_SYM_DUP_DISCARD | LL_SYM_HIDDEN)) {
         case LL_SYM_CODE: return "code";
         case LL_SYM_DATA: return "data";
         case LL_SYM_INDIRECT_DATA: return "indirect-data";
-        default: LL_FATAL("symbolTypeString: unknown symbol type (%d)", type);
+        default: LL_FATAL_FOR(L, "symbolTypeString: unknown symbol type (%d)", type);
     }
 }
 
@@ -235,8 +235,8 @@ symbolTypeString (ll_sym_type type)
  See #11223
  */
 int ghciInsertSymbolTable(
+   ll_linker *L,
    pathchar* obj_name,
-   StrHashTable *table,
    const ll_symbol_name* key,
    ll_symbol_addr* data,
    ll_strength strength,
@@ -244,16 +244,16 @@ int ghciInsertSymbolTable(
    unsigned long size,
    ObjectCode *owner)
 {
-   RtsSymbolInfo *pinfo = lookupStrHashTable(table, key);
+   RtsSymbolInfo *pinfo = lookupStrHashTable(L->symhash, key);
    if (!pinfo) /* new entry */
    {
-      pinfo = LL_MALLOC(sizeof (*pinfo), "ghciInsertToSymbolTable");
+      pinfo = LL_MALLOC_FOR(L, sizeof (*pinfo), "ghciInsertToSymbolTable");
       pinfo->value = data;
       pinfo->owner = owner;
       pinfo->strength = strength;
       pinfo->type = type;
       pinfo->size = size;
-      insertStrHashTable(table, key, pinfo);
+      insertStrHashTable(L->symhash, key, pinfo);
       return 1;
    }
    else if (pinfo->type ^ type)
@@ -271,19 +271,19 @@ int ghciInsertSymbolTable(
        /* We were asked to discard the symbol on duplicates, do so quietly.  */
        if (!(type & (LL_SYM_DUP_DISCARD | LL_SYM_HIDDEN)))
        {
-         LL_DEBUG("Symbol type mismatch (existing %d, new %d).\n", pinfo->type, type);
-         LL_DEBUG("Symbol %s was defined by %" PATH_FMT " to be a %s symbol.\n",
-                    key, obj_name, symbolTypeString(type));
-         LL_DEBUG("      yet was defined by %" PATH_FMT " to be a %s symbol.\n",
+         LL_DEBUG_FOR(L, "Symbol type mismatch (existing %d, new %d).\n", pinfo->type, type);
+         LL_DEBUG_FOR(L, "Symbol %s was defined by %" PATH_FMT " to be a %s symbol.\n",
+                    key, obj_name, symbolTypeString(L, type));
+         LL_DEBUG_FOR(L, "      yet was defined by %" PATH_FMT " to be a %s symbol.\n",
                     pinfo->owner ? pinfo->owner->fileName : WSTR("<builtin>"),
-                    symbolTypeString(pinfo->type));
+                    symbolTypeString(L, pinfo->type));
        }
        return 1;
    }
    else if (pinfo->strength == LL_STRENGTH_STRONG)
    {
        /* The existing symbol is strong meaning we must never override it */
-       LL_IF_DEBUG(linker, LL_DEBUG("%s is already defined as a strong symbol; ignoring redefinition...", key));
+       LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "%s is already defined as a strong symbol; ignoring redefinition...", key));
        return 1;
    }
    else if (strength == LL_STRENGTH_WEAK &&
@@ -356,7 +356,7 @@ int ghciInsertSymbolTable(
         return 1;
     }
 
-   LL_DEBUG(
+   LL_DEBUG_FOR(L,
       "GHC runtime linker: fatal error: I found a duplicate definition for symbol\n"
       "   %s\n"
       "whilst processing object file\n"
@@ -384,16 +384,16 @@ int ghciInsertSymbolTable(
 * Returns: 0 on failure and result is not set,
 *          nonzero on success and result set to nonzero pointer
 */
-ll_hs_bool ghciLookupSymbolInfo(StrHashTable *table,
+ll_hs_bool ghciLookupSymbolInfo(ll_linker *L,
     const ll_symbol_name* key, RtsSymbolInfo **result)
 {
-    RtsSymbolInfo *pinfo = lookupStrHashTable(table, key);
+    RtsSymbolInfo *pinfo = lookupStrHashTable(L->symhash, key);
     if (!pinfo) {
         *result = NULL;
         return LL_HS_BOOL_FALSE;
     }
     if (pinfo->strength == LL_STRENGTH_WEAK) {
-        LL_IF_DEBUG(linker, LL_DEBUG("lookupSymbolInfo: promoting %s\n", key));
+        LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "lookupSymbolInfo: promoting %s\n", key));
         /* Once it's looked up, it can no longer be overridden */
         pinfo->strength = LL_STRENGTH_NORMAL;
     }
@@ -410,10 +410,11 @@ ll_hs_bool ghciLookupSymbolInfo(StrHashTable *table,
 static void insertBuiltin(void *ctx, const char *name, void *addr,
                           int strength, int type)
 {
-    if (! ghciInsertSymbolTable(WSTR("(GHCi built-in symbols)"),
-                                ctx, name, addr, (ll_strength)strength,
+    ll_linker *L = ctx;
+    if (! ghciInsertSymbolTable(L, WSTR("(GHCi built-in symbols)"),
+                                name, addr, (ll_strength)strength,
                                 (ll_sym_type)type, 0, NULL)) {
-        LL_FATAL("ghciInsertSymbolTable failed");
+        LL_FATAL_FOR(L, "ghciInsertSymbolTable failed");
     }
 }
 
@@ -454,7 +455,7 @@ initLinker_ (int retain_cafs)
     ll_default_linker.symhash = allocStrHashTable(&ll_default_linker);
 
     if (ll_host.populate_builtins != NULL) {
-        ll_host.populate_builtins(ll_host.ctx, retain_cafs, insertBuiltin, ll_default_linker.symhash);
+        ll_host.populate_builtins(ll_host.ctx, retain_cafs, insertBuiltin, &ll_default_linker);
     }
 
 #   if defined(OBJFORMAT_ELF) || defined(OBJFORMAT_MACHO)
@@ -723,7 +724,7 @@ ll_hs_bool removeLibrarySearchPath(ll_hs_ptr dll_path_index)
  */
 ll_hs_int insertSymbol(pathchar* obj_name, ll_symbol_name* key, ll_symbol_addr* data)
 {
-    return ghciInsertSymbolTable(obj_name, ll_default_linker.symhash, key, data, LL_HS_BOOL_FALSE,
+    return ghciInsertSymbolTable(&ll_default_linker, obj_name, key, data, LL_HS_BOOL_FALSE,
                                  LL_SYM_CODE, 0, NULL);
 }
 
@@ -774,7 +775,7 @@ ll_symbol_addr* lookupDependentSymbol (ll_symbol_name* lbl, ObjectCode *dependen
     }
 #endif
 
-    if (!ghciLookupSymbolInfo(ll_default_linker.symhash, lbl, &pinfo)) {
+    if (!ghciLookupSymbolInfo(&ll_default_linker, lbl, &pinfo)) {
         LL_IF_DEBUG(linker_verbose, LL_DEBUG("lookupSymbol: symbol '%s' not found, trying dlsym\n", lbl));
 
 #       if defined(OBJFORMAT_ELF)
@@ -962,7 +963,7 @@ void ghci_enquire(ll_symbol_addr* addr)
          if (sym == NULL) continue;
          a = NULL;
          if (a == NULL) {
-             ghciLookupSymbolInfo(ll_default_linker.symhash, sym, &a);
+             ghciLookupSymbolInfo(&ll_default_linker, sym, &a);
          }
          if (a == NULL) {
              // debugBelch("ghci_enquire: can't find %s\n", sym);
@@ -1005,11 +1006,11 @@ static void removeOcSymbols (ObjectCode *oc)
     int i;
     for (i = 0; i < oc->n_symbols; i++) {
         if (oc->symbols[i].name != NULL) {
-            ghciRemoveSymbolTable(ll_default_linker.symhash, oc->symbols[i].name, oc);
+            ghciRemoveSymbolTable(oc->L, oc->symbols[i].name, oc);
         }
     }
 
-    LL_FREE(oc->symbols);
+    LL_FREE_FOR(oc->L, oc->symbols);
     oc->symbols = NULL;
 }
 
@@ -1566,7 +1567,7 @@ int ocTryLoad (ObjectCode* oc) {
     for (x = 0; x < oc->n_symbols; x++) {
         symbol = oc->symbols[x];
         if (   symbol.name
-            && !ghciInsertSymbolTable(oc->fileName, ll_default_linker.symhash, symbol.name,
+            && !ghciInsertSymbolTable(oc->L, oc->fileName, symbol.name,
                                       symbol.addr,
                                       isSymbolWeak(oc, symbol.name),
                                       symbol.type, 0, oc)) {

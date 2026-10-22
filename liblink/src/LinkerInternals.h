@@ -97,12 +97,12 @@ void addSection (Section *s, SectionKind kind, SectionAlloc alloc,
                  void* start, ll_word size, ll_word mapped_offset,
                  void* mapped_start, ll_word mapped_size);
 
-ll_hs_bool ghciLookupSymbolInfo(StrHashTable *table,
+ll_hs_bool ghciLookupSymbolInfo(ll_linker *L,
                             const ll_symbol_name* key, RtsSymbolInfo **result);
 
 int ghciInsertSymbolTable(
+    ll_linker *L,
     pathchar* obj_name,
-    StrHashTable *table,
     const ll_symbol_name* key,
     ll_symbol_addr* data,
     ll_strength weak,
