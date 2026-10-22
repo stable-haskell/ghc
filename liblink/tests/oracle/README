@@ -1,0 +1,53 @@
+Independent native relocation oracle
+====================================
+
+The initial oracle checks arm64 Mach-O captures from the native runner. Build
+that runner as described in ../runner/README. Use LLVM 17 or later; the tools
+are mandatory and a missing tool fails the check.
+
+Check a capture and its committed semantic reference:
+
+    python3 liblink/tests/oracle/reloc_check.py \
+      --object liblink/tests/fixtures/generated/macho-arm64/ARM64_RELOC_UNSIGNED.o \
+      --capture capture.json --readobj "$LLVM_READOBJ" \
+      --golden liblink/tests/golden/arm64/ARM64_RELOC_UNSIGNED.json \
+      --evidence-dir check-results
+
+Run the native suite with a built runner:
+
+    LIBLINK_TEST_RUNNER=/absolute/path/to/liblink-runner \
+      LLVM_READOBJ=/absolute/path/to/llvm-readobj \
+      LLVM_MC=/absolute/path/to/llvm-mc \
+      python3 -m unittest discover -s liblink/tests/oracle -p 'test_oracle.py' -v
+
+The suite checks all supported native fixtures, the expected unsupported
+POINTER_TO_GOT case, and mutations that corrupt fields, claimed symbols,
+addends, GOT slots, stub code, metadata, or bytes outside relocation fields.
+An additional page-carry case checks the oracle against llvm-mc encodings.
+
+macho_metadata.py parses LLVM's expanded Mach-O sections, symbols, and
+relocations, then binds them to the original file. macho_arm64.py calculates
+S from those symbols and independently supplied host addresses, P from layout,
+and A from original field bytes and ADDEND records. It checks every relocated
+field and every byte of the resulting sections. GOT and stub addresses are
+layout inputs; their contents and targets must also pass independent checks.
+Backend-observed S, P, A, and relocated bytes are never expected values.
+
+A golden stores the checked numeric fields, the sampled layout, and a semantic
+signature. golden_reference.py replays the saved observations through the
+oracle before comparing the current signature. The signature uses symbol
+names and section/stub offsets, allowing different ASLR addresses. Each fresh
+capture must first pass the numerical checks. Initial numeric samples remain
+reviewable in the reference files. --write-golden creates a new file only;
+replacement is explicit outside this command and needs review.
+
+Sources for the arithmetic are Apple's Mach-O arm64 relocation definitions
+and the Arm AArch64 relocation field definitions:
+
+https://github.com/apple-oss-distributions/xnu/blob/main/EXTERNAL_HEADERS/mach-o/arm64/reloc.h
+https://github.com/ARM-software/abi-aa/blob/main/aaelf64/aaelf64.rst
+
+The Apple SDK's mach-o/arm64/reloc.h provides further object-file examples.
+No backend implementation is imported. Other formats, local relocation
+forms, and post-NO_EXEC coverage are later extensions; unsupported oracle
+inputs fail explicitly.
