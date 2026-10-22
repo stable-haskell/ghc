@@ -1,0 +1,29 @@
+liblink
+-------
+
+liblink contains the runtime object linker used by GHC. The Cabal package is
+named liblink; the native library is named link. Native clients link with
+-llink (liblink.a or the platform's shared-library equivalent).
+
+The current extraction preserves the RTS linker interface through forwarding
+functions in rts/LinkerCompat.c. The headers under include/liblink provide the
+compatibility and RTS friend interfaces; they are internal interfaces, not a
+stable public embedding API. Unload checking and the GC remain in the RTS.
+
+Locking
+-------
+
+On native platforms, linker locks use pthread mutexes or Windows SRW locks in
+both threaded and non-threaded RTS builds. Assertion-enabled pthread builds
+use error-checking mutexes. Initialization and shutdown require exclusive
+access; the mutex helpers do not implement one-time initialization.
+
+Wasm deliberately preserves the existing single-threaded RTS behavior:
+initialization, shutdown, lock, unlock, and held-lock assertions are no-ops
+when wasm32_HOST_ARCH is defined. This is an explicit exception to the native
+always-on locking rule. It provides no synchronization and does not establish
+support for concurrent Wasm linker calls. Supporting those calls requires a
+Wasm mutex backend and validation of that backend.
+
+The Wasm helper branch has focused compile and no-op checks. These checks do
+not qualify a complete GHC/WASI build or runtime.
