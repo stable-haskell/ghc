@@ -29,6 +29,16 @@
 struct m32_allocator_t;
 typedef struct m32_allocator_t m32_allocator;
 
+M32_NO_RETURN_PREFIX m32_allocator *m32_allocator_new_for(ll_linker *L,
+                                                         bool executable);
+M32_NO_RETURN_PREFIX void m32_allocator_free_for(ll_linker *L,
+                                                 m32_allocator *alloc);
+M32_NO_RETURN_PREFIX void m32_allocator_flush_for(ll_linker *L,
+                                                  m32_allocator *alloc);
+M32_NO_RETURN_PREFIX void *m32_alloc_for(ll_linker *L, m32_allocator *alloc,
+                                         size_t size, size_t alignment);
+
+/* Temporary default adapters until the remaining private callers migrate. */
 M32_NO_RETURN_PREFIX m32_allocator *m32_allocator_new(bool executable);
 
 M32_NO_RETURN_PREFIX void m32_allocator_free(m32_allocator *alloc);

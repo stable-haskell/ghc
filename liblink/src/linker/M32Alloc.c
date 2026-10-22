@@ -152,12 +152,12 @@ The allocator is *not* thread-safe.
 
 /* A utility to verify that a given address is "acceptable" for use by m32. */
 static bool
-is_okay_address(void *p) {
-  int8_t *here = LINKER_LOAD_BASE(&ll_default_linker);
+is_okay_address(ll_linker *L, void *p) {
+  int8_t *here = LINKER_LOAD_BASE(L);
   ssize_t displacement = (int8_t *) p - here;
   // if we assume -fPIC, we don't care where we load code.
   // But we still want to use the m32 allocator to avoid fragmentation (#24432)
-  return ll_cfg.always_pic
+  return L->services.cfg.always_pic
          || ((displacement > -0x7fffffff) && (displacement < 0x7fffffff));
 }
 
@@ -199,55 +199,55 @@ struct m32_page_t {
 
 /* Consistency-checking infrastructure */
 #if defined(M32_DEBUG)
-static void ASSERT_PAGE_ALIGNED(void *page) {
-  const size_t pgsz = ll_page_size();
+static void ASSERT_PAGE_ALIGNED(ll_linker *L, void *page) {
+  const size_t pgsz = ll_page_size_for(L);
   if ((((uintptr_t) page) & (pgsz-1)) != 0) {
-    LL_FATAL("m32: invalid page alignment");
+    LL_FATAL_FOR(L, "m32: invalid page alignment");
   }
 }
-static void ASSERT_VALID_PAGE(struct m32_page_t *page) {
-  ASSERT_PAGE_ALIGNED(page);
+static void ASSERT_VALID_PAGE(ll_linker *L, struct m32_page_t *page) {
+  ASSERT_PAGE_ALIGNED(L, page);
   switch (page->type) {
   case FREE_PAGE:
   case NURSERY_PAGE:
   case FILLED_PAGE:
     break;
   default:
-    LL_FATAL("m32: invalid page state\n");
+    LL_FATAL_FOR(L, "m32: invalid page state\n");
   }
 }
-static void ASSERT_PAGE_TYPE(struct m32_page_t *page, enum m32_page_type ty) {
-  if (page->type != ty) { LL_FATAL("m32: unexpected page type"); }
+static void ASSERT_PAGE_TYPE(ll_linker *L, struct m32_page_t *page, enum m32_page_type ty) {
+  if (page->type != ty) { LL_FATAL_FOR(L, "m32: unexpected page type"); }
 }
-static void ASSERT_PAGE_NOT_FREE(struct m32_page_t *page) {
-  if (page->type == FREE_PAGE) { LL_FATAL("m32: unexpected free page"); }
+static void ASSERT_PAGE_NOT_FREE(ll_linker *L, struct m32_page_t *page) {
+  if (page->type == FREE_PAGE) { LL_FATAL_FOR(L, "m32: unexpected free page"); }
 }
 static void SET_PAGE_TYPE(struct m32_page_t *page, enum m32_page_type ty) {
   page->type = ty;
 }
 #else
-#define ASSERT_PAGE_ALIGNED(page)
-#define ASSERT_VALID_PAGE(page)
-#define ASSERT_PAGE_NOT_FREE(page)
-#define ASSERT_PAGE_TYPE(page, ty)
+#define ASSERT_PAGE_ALIGNED(L, page)
+#define ASSERT_VALID_PAGE(L, page)
+#define ASSERT_PAGE_NOT_FREE(L, page)
+#define ASSERT_PAGE_TYPE(L, page, ty)
 #define SET_PAGE_TYPE(page, ty)
 #endif
 
 /* Accessors */
 static void
-m32_filled_page_set_next(struct m32_page_t *page, struct m32_page_t *next)
+m32_filled_page_set_next(ll_linker *L, struct m32_page_t *page, struct m32_page_t *next)
 {
-  ASSERT_PAGE_TYPE(page, FILLED_PAGE);
-  if (next != NULL && ! is_okay_address(next)) {
-    LL_FATAL("m32_filled_page_set_next: Page %p not within 4GB of program text", next);
+  ASSERT_PAGE_TYPE(L, page, FILLED_PAGE);
+  if (next != NULL && ! is_okay_address(L, next)) {
+    LL_FATAL_FOR(L, "m32_filled_page_set_next: Page %p not within 4GB of program text", next);
   }
   page->filled_page.next = next;
 }
 
 static struct m32_page_t *
-m32_filled_page_get_next(struct m32_page_t *page)
+m32_filled_page_get_next(ll_linker *L LL_UNUSED, struct m32_page_t *page)
 {
-  ASSERT_PAGE_TYPE(page, FILLED_PAGE);
+  ASSERT_PAGE_TYPE(L, page, FILLED_PAGE);
   return (struct m32_page_t *) (uintptr_t) page->filled_page.next;
 }
 
@@ -258,6 +258,7 @@ m32_filled_page_get_next(struct m32_page_t *page)
  * number of pages can be configured with M32_MAX_PAGES.
  */
 struct m32_allocator_t {
+   ll_linker *L;
    bool executable;
    // List of pages that have been filled but not yet protected.
    struct m32_page_t *unprotected_list;
@@ -267,8 +268,18 @@ struct m32_allocator_t {
    struct m32_page_t *pages[M32_MAX_PAGES];
 };
 
+/* NULL keeps its original operation-specific behavior; only nonnull retained
+ * allocators can be checked for an owner mismatch. */
+static void
+m32_check_owner(ll_linker *L, const m32_allocator *alloc)
+{
+  if (alloc != NULL) {
+    LL_CHECK_FOR(L, alloc->L == L);
+  }
+}
+
 /**
- * Global free page pool
+ * Per-linker free page pool
  *
  * We keep a small pool of free pages around to avoid fragmentation.
  */
@@ -276,25 +287,25 @@ struct m32_allocator_t {
  * Free a filled page or, if possible, place it in the free page pool.
  */
 static void
-m32_release_page(struct m32_page_t *page)
+m32_release_page(ll_linker *L, struct m32_page_t *page)
 {
   // Some sanity-checking
-  ASSERT_VALID_PAGE(page);
-  ASSERT_PAGE_NOT_FREE(page);
+  ASSERT_VALID_PAGE(L, page);
+  ASSERT_PAGE_NOT_FREE(L, page);
 
-  const size_t pgsz = ll_page_size();
+  const size_t pgsz = ll_page_size_for(L);
   ssize_t sz = page->filled_page.size;
 
   // Break the page, which may be a large multi-page allocation, into
   // individual pages for the page pool
   while (sz > 0) {
-    if (ll_default_linker.m32_free_page_pool_size < M32_MAX_FREE_PAGE_POOL_SIZE) {
-      mprotectForLinker(page, pgsz, MEM_READ_WRITE);
-      LL_IF_DEBUG(sanity, memset(page, 0xaa, pgsz));
+    if (L->m32_free_page_pool_size < M32_MAX_FREE_PAGE_POOL_SIZE) {
+      ll_mprotect_for_linker(L, page, pgsz, MEM_READ_WRITE);
+      LL_IF_DEBUG_FOR(L, sanity, memset(page, 0xaa, pgsz));
       SET_PAGE_TYPE(page, FREE_PAGE);
-      page->free_page.next = ll_default_linker.m32_free_page_pool;
-      ll_default_linker.m32_free_page_pool = page;
-      ll_default_linker.m32_free_page_pool_size ++;
+      page->free_page.next = L->m32_free_page_pool;
+      L->m32_free_page_pool = page;
+      L->m32_free_page_pool_size ++;
     } else {
       break;
     }
@@ -304,7 +315,7 @@ m32_release_page(struct m32_page_t *page)
 
   // The free page pool is full, release the rest back to the system
   if (sz > 0) {
-    munmapForLinker((void *) page, ROUND_UP(sz, pgsz), "m32_release_page");
+    ll_munmap_for_linker(L, (void *) page, ROUND_UP(sz, pgsz), "m32_release_page");
   }
 }
 
@@ -313,21 +324,21 @@ m32_release_page(struct m32_page_t *page)
  * made regarding the state of the m32_page_t fields.
  */
 static struct m32_page_t *
-m32_alloc_page(void)
+m32_alloc_page(ll_linker *L)
 {
-  if (ll_default_linker.m32_free_page_pool_size == 0) {
+  if (L->m32_free_page_pool_size == 0) {
     /*
      * Free page pool is empty; refill it with a new batch of M32_MAP_PAGES
      * pages.
      */
-    const size_t pgsz = ll_page_size();
+    const size_t pgsz = ll_page_size_for(L);
     const size_t map_sz = pgsz * M32_MAP_PAGES;
-    uint8_t *chunk = mmapAnonForLinker(map_sz);
-    if (! is_okay_address(chunk + map_sz)) {
-      ll_report_mem_failure();
-      LL_FATAL("m32_alloc_page: failed to allocate pages within 4GB of program text (got %p)", chunk);
+    uint8_t *chunk = ll_mmap_anon_for_linker(L, map_sz);
+    if (! is_okay_address(L, chunk + map_sz)) {
+      ll_report_mem_failure_for(L);
+      LL_FATAL_FOR(L, "m32_alloc_page: failed to allocate pages within 4GB of program text (got %p)", chunk);
     }
-    LL_IF_DEBUG(sanity, memset(chunk, 0xaa, map_sz));
+    LL_IF_DEBUG_FOR(L, sanity, memset(chunk, 0xaa, map_sz));
 
 #define GET_PAGE(i) ((struct m32_page_t *) (chunk + (i) * pgsz))
     for (int i=0; i < M32_MAP_PAGES; i++) {
@@ -336,16 +347,16 @@ m32_alloc_page(void)
       page->free_page.next = GET_PAGE(i+1);
     }
 
-    GET_PAGE(M32_MAP_PAGES-1)->free_page.next = ll_default_linker.m32_free_page_pool;
-    ll_default_linker.m32_free_page_pool = (struct m32_page_t *) chunk;
-    ll_default_linker.m32_free_page_pool_size += M32_MAP_PAGES;
+    GET_PAGE(M32_MAP_PAGES-1)->free_page.next = L->m32_free_page_pool;
+    L->m32_free_page_pool = (struct m32_page_t *) chunk;
+    L->m32_free_page_pool_size += M32_MAP_PAGES;
 #undef GET_PAGE
   }
 
-  struct m32_page_t *page = ll_default_linker.m32_free_page_pool;
-  ll_default_linker.m32_free_page_pool = page->free_page.next;
-  ll_default_linker.m32_free_page_pool_size --;
-  ASSERT_PAGE_TYPE(page, FREE_PAGE);
+  struct m32_page_t *page = L->m32_free_page_pool;
+  L->m32_free_page_pool = page->free_page.next;
+  L->m32_free_page_pool_size --;
+  ASSERT_PAGE_TYPE(L, page, FREE_PAGE);
   return page;
 }
 
@@ -355,11 +366,12 @@ m32_alloc_page(void)
  * See the note titled "Compile Time Trickery" at the top of this file.
  */
 m32_allocator *
-m32_allocator_new(bool executable)
+m32_allocator_new_for(ll_linker *L, bool executable)
 {
   m32_allocator *alloc =
-    LL_MALLOC(sizeof(m32_allocator), "m32_new_allocator");
+    LL_MALLOC_FOR(L, sizeof(m32_allocator), "m32_new_allocator");
   memset(alloc, 0, sizeof(struct m32_allocator_t));
+  alloc->L = L;
   alloc->executable = executable;
   return alloc;
 }
@@ -368,12 +380,12 @@ m32_allocator_new(bool executable)
  * Unmap all pages on the given list.
  */
 static void
-m32_allocator_unmap_list(struct m32_page_t *head)
+m32_allocator_unmap_list(ll_linker *L, struct m32_page_t *head)
 {
   while (head != NULL) {
-    ASSERT_VALID_PAGE(head);
-    struct m32_page_t *next = m32_filled_page_get_next(head);
-    m32_release_page(head);
+    ASSERT_VALID_PAGE(L, head);
+    struct m32_page_t *next = m32_filled_page_get_next(L, head);
+    m32_release_page(L, head);
     head = next;
   }
 }
@@ -381,31 +393,32 @@ m32_allocator_unmap_list(struct m32_page_t *head)
 /**
  * Free an m32_allocator and the pages that it has allocated.
  */
-void m32_allocator_free(m32_allocator *alloc)
+void m32_allocator_free_for(ll_linker *L, m32_allocator *alloc)
 {
+  m32_check_owner(L, alloc);
   /* free filled pages */
-  m32_allocator_unmap_list(alloc->unprotected_list);
-  m32_allocator_unmap_list(alloc->protected_list);
+  m32_allocator_unmap_list(L, alloc->unprotected_list);
+  m32_allocator_unmap_list(L, alloc->protected_list);
 
   /* free partially-filled pages */
   for (int i=0; i < M32_MAX_PAGES; i++) {
     if (alloc->pages[i]) {
-      m32_release_page(alloc->pages[i]);
+      m32_release_page(L, alloc->pages[i]);
     }
   }
 
-  LL_FREE(alloc);
+  LL_FREE_FOR(L, alloc);
 }
 
 /**
  * Push a page onto the given filled page list.
  */
 static void
-m32_allocator_push_filled_list(struct m32_page_t **head, struct m32_page_t *page)
+m32_allocator_push_filled_list(ll_linker *L, struct m32_page_t **head, struct m32_page_t *page)
 {
-  ASSERT_PAGE_TYPE(page, FILLED_PAGE);
+  ASSERT_PAGE_TYPE(L, page, FILLED_PAGE);
     // N.B. it's the caller's responsibility to set the pagetype to FILLED_PAGE
-  m32_filled_page_set_next(page, *head);
+  m32_filled_page_set_next(L, page, *head);
   *head = page;
 }
 
@@ -422,17 +435,18 @@ m32_allocator_push_filled_list(struct m32_page_t **head, struct m32_page_t *page
  * See the note titled "Compile Time Trickery" at the top of this file.
  */
 void
-m32_allocator_flush(m32_allocator *alloc) {
+m32_allocator_flush_for(ll_linker *L, m32_allocator *alloc) {
+   m32_check_owner(L, alloc);
    for (int i=0; i<M32_MAX_PAGES; i++) {
      if (alloc->pages[i] == NULL) {
        continue;
      } else if (alloc->pages[i]->current_size == sizeof(struct m32_page_t)) {
        // the page is empty, free it
-       m32_release_page(alloc->pages[i]);
+       m32_release_page(L, alloc->pages[i]);
      } else {
        // the page contains data, move it to the unprotected list
        SET_PAGE_TYPE(alloc->pages[i], FILLED_PAGE);
-       m32_allocator_push_filled_list(&alloc->unprotected_list, alloc->pages[i]);
+       m32_allocator_push_filled_list(L, &alloc->unprotected_list, alloc->pages[i]);
      }
      alloc->pages[i] = NULL;
    }
@@ -441,10 +455,10 @@ m32_allocator_flush(m32_allocator *alloc) {
    if (alloc->executable) {
      struct m32_page_t *page = alloc->unprotected_list;
      while (page != NULL) {
-       ASSERT_PAGE_TYPE(page, FILLED_PAGE);
-       struct m32_page_t *next = m32_filled_page_get_next(page);
-       m32_allocator_push_filled_list(&alloc->protected_list, page);
-       mprotectForLinker(page, page->filled_page.size, MEM_READ_EXECUTE);
+       ASSERT_PAGE_TYPE(L, page, FILLED_PAGE);
+       struct m32_page_t *next = m32_filled_page_get_next(L, page);
+       m32_allocator_push_filled_list(L, &alloc->protected_list, page);
+       ll_mprotect_for_linker(L, page, page->filled_page.size, MEM_READ_EXECUTE);
        page = next;
      }
      alloc->unprotected_list = NULL;
@@ -455,15 +469,15 @@ m32_allocator_flush(m32_allocator *alloc) {
  * Return true if the allocation request should be considered "large".
  */
 static bool
-m32_is_large_object(size_t size, size_t alignment)
+m32_is_large_object(ll_linker *L, size_t size, size_t alignment)
 {
-   return size >= ll_page_size() - ROUND_UP(sizeof(struct m32_page_t), alignment);
+   return size >= ll_page_size_for(L) - ROUND_UP(sizeof(struct m32_page_t), alignment);
 }
 
 static void
-m32_report_allocation(struct m32_allocator_t *alloc LL_UNUSED, void *addr LL_UNUSED, size_t size LL_UNUSED)
+m32_report_allocation(ll_linker *L, struct m32_allocator_t *alloc LL_UNUSED, void *addr LL_UNUSED, size_t size LL_UNUSED)
 {
-    LL_IF_DEBUG(linker_verbose, LL_DEBUG(
+    LL_IF_DEBUG_FOR(L, linker_verbose, LL_DEBUG_FOR(L,
       "m32_allocated(%p:%s): %p - %p\n",
       alloc, alloc->executable ? "RX": "RW",
       addr, (uint8_t*) addr + size));
@@ -476,29 +490,30 @@ m32_report_allocation(struct m32_allocator_t *alloc LL_UNUSED, void *addr LL_UNU
  * See the note titled "Compile Time Trickery" at the top of this file.
  */
 void *
-m32_alloc(struct m32_allocator_t *alloc, size_t size, size_t alignment)
+m32_alloc_for(ll_linker *L, struct m32_allocator_t *alloc, size_t size, size_t alignment)
 {
-   size_t pgsz = ll_page_size();
+   m32_check_owner(L, alloc);
+   size_t pgsz = ll_page_size_for(L);
 
-   if (m32_is_large_object(size,alignment)) {
+   if (m32_is_large_object(L, size,alignment)) {
       // large object
       size_t alsize = ROUND_UP(sizeof(struct m32_page_t), alignment);
       // TODO: lower-bound allocation size to allocation granularity and return
       // remainder to free pool.
-      struct m32_page_t *page = mmapAnonForLinker(alsize+size);
+      struct m32_page_t *page = ll_mmap_anon_for_linker(L, alsize+size);
       if (page == NULL) {
-          LL_LOG_SYSERROR("m32_alloc: Failed to map pages for %zd bytes", size);
+          LL_LOG_SYSERROR_FOR(L, "m32_alloc: Failed to map pages for %zd bytes", size);
           return NULL;
-      } else if (! is_okay_address(page)) {
-          ll_report_mem_failure();
-          LL_FATAL("m32_alloc: warning: Allocation of %zd bytes resulted in pages above 4GB (%p)",
+      } else if (! is_okay_address(L, page)) {
+          ll_report_mem_failure_for(L);
+          LL_FATAL_FOR(L, "m32_alloc: warning: Allocation of %zd bytes resulted in pages above 4GB (%p)",
                size, page);
       }
       SET_PAGE_TYPE(page, FILLED_PAGE);
       page->filled_page.size = alsize + size;
-      m32_allocator_push_filled_list(&alloc->unprotected_list, (struct m32_page_t *) page);
+      m32_allocator_push_filled_list(L, &alloc->unprotected_list, (struct m32_page_t *) page);
       uint8_t *res = (uint8_t *) page + alsize;
-      m32_report_allocation(alloc, res, size);
+      m32_report_allocation(L, alloc, res, size);
       return res;
    }
 
@@ -515,13 +530,13 @@ m32_alloc(struct m32_allocator_t *alloc, size_t size, size_t alignment)
       }
 
       // page can contain the buffer?
-      ASSERT_VALID_PAGE(alloc->pages[i]);
-      ASSERT_PAGE_TYPE(alloc->pages[i], NURSERY_PAGE);
+      ASSERT_VALID_PAGE(L, alloc->pages[i]);
+      ASSERT_PAGE_TYPE(L, alloc->pages[i], NURSERY_PAGE);
       size_t alsize = ROUND_UP(alloc->pages[i]->current_size, alignment);
       if (size <= pgsz - alsize) {
          void * addr = (char*)alloc->pages[i] + alsize;
          alloc->pages[i]->current_size = alsize + size;
-         m32_report_allocation(alloc, addr, size);
+         m32_report_allocation(L, alloc, addr, size);
          return addr;
       }
 
@@ -536,13 +551,13 @@ m32_alloc(struct m32_allocator_t *alloc, size_t size, size_t alignment)
    // If we haven't found an empty page, flush the most filled one
    if (empty == -1) {
       SET_PAGE_TYPE(alloc->pages[most_filled], FILLED_PAGE);
-      m32_allocator_push_filled_list(&alloc->unprotected_list, alloc->pages[most_filled]);
+      m32_allocator_push_filled_list(L, &alloc->unprotected_list, alloc->pages[most_filled]);
       alloc->pages[most_filled] = NULL;
       empty = most_filled;
    }
 
    // Allocate a new page
-   struct m32_page_t *page = m32_alloc_page();
+   struct m32_page_t *page = m32_alloc_page(L);
    if (page == NULL) {
       return NULL;
    }
@@ -551,7 +566,7 @@ m32_alloc(struct m32_allocator_t *alloc, size_t size, size_t alignment)
    // Add header size and padding
    alloc->pages[empty]->current_size = size + ROUND_UP(sizeof(struct m32_page_t),alignment);
    uint8_t *res = (uint8_t *) page + ROUND_UP(sizeof(struct m32_page_t), alignment);
-   m32_report_allocation(alloc, res, size);
+   m32_report_allocation(L, alloc, res, size);
    return res;
 }
 
@@ -562,28 +577,57 @@ m32_alloc(struct m32_allocator_t *alloc, size_t size, size_t alignment)
 // See the note titled "Compile Time Trickery" at the top of this file.
 
 m32_allocator *
-m32_allocator_new(bool executable LL_UNUSED)
+m32_allocator_new_for(ll_linker *L, bool executable LL_UNUSED)
 {
-    LL_FATAL("%s: RTS_LINKER_USE_MMAP is %d", __func__, RTS_LINKER_USE_MMAP);
+    LL_FATAL_FOR(L, "%s: RTS_LINKER_USE_MMAP is %d", "m32_allocator_new", RTS_LINKER_USE_MMAP);
 }
 
-void m32_allocator_free(m32_allocator *alloc LL_UNUSED)
+void m32_allocator_free_for(ll_linker *L, m32_allocator *alloc LL_UNUSED)
 {
-    LL_FATAL("%s: RTS_LINKER_USE_MMAP is %d", __func__, RTS_LINKER_USE_MMAP);
+    LL_FATAL_FOR(L, "%s: RTS_LINKER_USE_MMAP is %d", "m32_allocator_free", RTS_LINKER_USE_MMAP);
 }
 
 void
-m32_allocator_flush(m32_allocator *alloc LL_UNUSED)
+m32_allocator_flush_for(ll_linker *L, m32_allocator *alloc LL_UNUSED)
 {
-    LL_FATAL("%s: RTS_LINKER_USE_MMAP is %d", __func__, RTS_LINKER_USE_MMAP);
+    LL_FATAL_FOR(L, "%s: RTS_LINKER_USE_MMAP is %d", "m32_allocator_flush", RTS_LINKER_USE_MMAP);
 }
 
 void *
-m32_alloc(m32_allocator *alloc LL_UNUSED,
+m32_alloc_for(ll_linker *L, m32_allocator *alloc LL_UNUSED,
           size_t size LL_UNUSED,
           size_t alignment LL_UNUSED)
 {
-    LL_FATAL("%s: RTS_LINKER_USE_MMAP is %d", __func__, RTS_LINKER_USE_MMAP);
+    LL_FATAL_FOR(L, "%s: RTS_LINKER_USE_MMAP is %d", "m32_alloc", RTS_LINKER_USE_MMAP);
 }
 
 #endif
+
+/* Temporary default adapters until the remaining private callers migrate. */
+m32_allocator *m32_allocator_new(bool executable)
+{
+#if defined(NEED_M32)
+  return m32_allocator_new_for(&ll_default_linker, executable);
+#else
+  m32_allocator_new_for(&ll_default_linker, executable);
+#endif
+}
+
+void m32_allocator_free(m32_allocator *alloc)
+{
+  m32_allocator_free_for(&ll_default_linker, alloc);
+}
+
+void m32_allocator_flush(m32_allocator *alloc)
+{
+  m32_allocator_flush_for(&ll_default_linker, alloc);
+}
+
+void *m32_alloc(m32_allocator *alloc, size_t size, size_t alignment)
+{
+#if defined(NEED_M32)
+  return m32_alloc_for(&ll_default_linker, alloc, size, alignment);
+#else
+  m32_alloc_for(&ll_default_linker, alloc, size, alignment);
+#endif
+}
