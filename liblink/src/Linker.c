@@ -1022,10 +1022,10 @@ freePreloadObjectFile (ObjectCode *oc)
 #else
 
     if (RTS_LINKER_USE_MMAP && oc->imageMapped) {
-        munmapForLinker(oc->image, oc->fileSize, "freePreloadObjectFile");
+        ll_munmap_for_linker(oc->L, oc->image, oc->fileSize, "freePreloadObjectFile");
     }
     else {
-        LL_FREE(oc->image);
+        LL_FREE_FOR(oc->L, oc->image);
     }
 
 #endif
@@ -1062,7 +1062,7 @@ freePreloadObjectFile (ObjectCode *oc)
  */
 void freeObjectCode (ObjectCode *oc)
 {
-    LL_IF_DEBUG(linker, ocDebugBelch(oc, "freeObjectCode: start\n"));
+    LL_IF_DEBUG_FOR(oc->L, linker, ocDebugBelch(oc, "freeObjectCode: start\n"));
 
     // Run finalizers only if initializers have been run.
     // See Note [Object unloading and finalizers].
@@ -1083,18 +1083,18 @@ void freeObjectCode (ObjectCode *oc)
 
     if (oc->type == DYNAMIC_OBJECT) {
 #if defined(OBJFORMAT_ELF) || defined(darwin_HOST_OS)
-        ll_mutex_lock(&ll_default_linker.linker_mutex);
+        ll_mutex_lock_for(oc->L, &oc->L->linker_mutex);
         freeNativeCode_POSIX(oc);
-        ll_mutex_unlock(&ll_default_linker.linker_mutex);
+        ll_mutex_unlock_for(oc->L, &oc->L->linker_mutex);
 #else
-        LL_FATAL("freeObjectCode: This shouldn't happen");
+        LL_FATAL_FOR(oc->L, "freeObjectCode: This shouldn't happen");
 #endif
     }
 
     freePreloadObjectFile(oc);
 
     if (oc->symbols != NULL) {
-        LL_FREE(oc->symbols);
+        LL_FREE_FOR(oc->L, oc->symbols);
         oc->symbols = NULL;
     }
 
@@ -1110,7 +1110,7 @@ void freeObjectCode (ObjectCode *oc)
                 switch(oc->sections[i].alloc){
 #if RTS_LINKER_USE_MMAP
                 case SECTION_MMAP:
-                    munmapForLinker(
+                    ll_munmap_for_linker(oc->L,
                         oc->sections[i].mapped_start,
                         oc->sections[i].mapped_size,
                         "freeObjectCode");
@@ -1120,20 +1120,20 @@ void freeObjectCode (ObjectCode *oc)
                     // Freed by m32_allocator_free
                     break;
                 case SECTION_MALLOC:
-                    LL_IF_DEBUG(zero_on_gc,
+                    LL_IF_DEBUG_FOR(oc->L, zero_on_gc,
                         memset(oc->sections[i].start,
                             0x00, oc->sections[i].size));
-                    LL_FREE(oc->sections[i].start);
+                    LL_FREE_FOR(oc->L, oc->sections[i].start);
                     break;
                 default:
                     break;
                 }
             }
             if (oc->sections[i].info) {
-                LL_FREE(oc->sections[i].info);
+                LL_FREE_FOR(oc->L, oc->sections[i].info);
             }
         }
-        LL_FREE(oc->sections);
+        LL_FREE_FOR(oc->L, oc->sections);
     }
 
     freeProddableBlocks(oc->L, &oc->proddables);
@@ -1144,13 +1144,13 @@ void freeObjectCode (ObjectCode *oc)
 #if defined(NEED_SYMBOL_EXTRAS) && (!defined(x86_64_HOST_ARCH) \
                                     || !defined(mingw32_HOST_OS))
     if (RTS_LINKER_USE_MMAP) {
-      if (!USE_CONTIGUOUS_MMAP && !ll_cfg.always_pic &&
+      if (!USE_CONTIGUOUS_MMAP && !oc->L->services.cfg.always_pic &&
           oc->symbol_extras != NULL) {
         // Freed by m32_allocator_free
       }
     }
     else {
-        LL_FREE(oc->symbol_extras);
+        LL_FREE_FOR(oc->L, oc->symbol_extras);
     }
 #endif
 
@@ -1162,16 +1162,16 @@ void freeObjectCode (ObjectCode *oc)
 #endif
 
 #if defined(NEED_M32)
-    m32_allocator_free(oc->rx_m32);
-    m32_allocator_free(oc->rw_m32);
+    m32_allocator_free_for(oc->L, oc->rx_m32);
+    m32_allocator_free_for(oc->L, oc->rw_m32);
 #endif
 
-    LL_FREE(oc->fileName);
-    LL_FREE(oc->archiveMemberName);
+    LL_FREE_FOR(oc->L, oc->fileName);
+    LL_FREE_FOR(oc->L, oc->archiveMemberName);
 
     freeHashSet(oc->dependencies);
 
-    LL_FREE(oc);
+    LL_FREE_FOR(oc->L, oc);
 }
 
 ObjectCode*
@@ -1456,7 +1456,7 @@ ll_hs_int loadOc (ObjectCode* oc)
 {
    int r;
 
-   LL_IF_DEBUG(linker, ocDebugBelch(oc, "start\n"));
+   LL_IF_DEBUG_FOR(oc->L, linker, ocDebugBelch(oc, "start\n"));
 
    /* verify the in-memory image */
 #  if defined(OBJFORMAT_ELF)
@@ -1466,10 +1466,10 @@ ll_hs_int loadOc (ObjectCode* oc)
 #  elif defined(OBJFORMAT_MACHO)
    r = ocVerifyImage_MachO ( oc );
 #  else
-   LL_FATAL("loadObj: no verify method");
+   LL_FATAL_FOR(oc->L, "loadObj: no verify method");
 #  endif
    if (!r) {
-       LL_IF_DEBUG(linker, ocDebugBelch(oc, "ocVerifyImage_* failed\n"));
+       LL_IF_DEBUG_FOR(oc->L, linker, ocDebugBelch(oc, "ocVerifyImage_* failed\n"));
        return r;
    }
 
@@ -1494,14 +1494,14 @@ ll_hs_int loadOc (ObjectCode* oc)
 #  if defined(OBJFORMAT_MACHO)
    r = ocAllocateExtras_MachO ( oc );
    if (!r) {
-       LL_IF_DEBUG(linker,
+       LL_IF_DEBUG_FOR(oc->L, linker,
                 ocDebugBelch(oc, "ocAllocateExtras_MachO failed\n"));
        return r;
    }
 #  elif defined(OBJFORMAT_ELF)
    r = ocAllocateExtras_ELF ( oc );
    if (!r) {
-       LL_IF_DEBUG(linker,
+       LL_IF_DEBUG_FOR(oc->L, linker,
                 ocDebugBelch(oc, "ocAllocateExtras_ELF failed\n"));
        return r;
    }
@@ -1516,10 +1516,10 @@ ll_hs_int loadOc (ObjectCode* oc)
 #  elif defined(OBJFORMAT_MACHO)
    r = ocGetNames_MachO ( oc );
 #  else
-   LL_FATAL("loadObj: no getNames method");
+   LL_FATAL_FOR(oc->L, "loadObj: no getNames method");
 #  endif
    if (!r) {
-       LL_IF_DEBUG(linker, ocDebugBelch(oc, "ocGetNames_* failed\n"));
+       LL_IF_DEBUG_FOR(oc->L, linker, ocDebugBelch(oc, "ocGetNames_* failed\n"));
        return r;
    }
 
@@ -1534,7 +1534,7 @@ ll_hs_int loadOc (ObjectCode* oc)
            oc->status = OBJECT_LOADED;
        }
    }
-   LL_IF_DEBUG(linker, ocDebugBelch(oc, "done\n"));
+   LL_IF_DEBUG_FOR(oc->L, linker, ocDebugBelch(oc, "done\n"));
 
    return 1;
 }
@@ -1575,7 +1575,7 @@ int ocTryLoad (ObjectCode* oc) {
         }
     }
 
-    LL_IF_DEBUG(linker, ocDebugBelch(oc, "resolving\n"));
+    LL_IF_DEBUG_FOR(oc->L, linker, ocDebugBelch(oc, "resolving\n"));
 #   if defined(OBJFORMAT_ELF)
     r = ocResolve_ELF ( oc );
 #   elif defined(OBJFORMAT_PEi386)
@@ -1583,14 +1583,14 @@ int ocTryLoad (ObjectCode* oc) {
 #   elif defined(OBJFORMAT_MACHO)
     r = ocResolve_MachO ( oc );
 #   else
-    LL_FATAL("ocTryLoad: not implemented on this platform");
+    LL_FATAL_FOR(oc->L, "ocTryLoad: not implemented on this platform");
 #   endif
     if (!r) {
-        LL_IF_DEBUG(linker, ocDebugBelch(oc, "resolution failed\n"));
+        LL_IF_DEBUG_FOR(oc->L, linker, ocDebugBelch(oc, "resolution failed\n"));
         return r;
     }
 
-    LL_IF_DEBUG(linker, ocDebugBelch(oc, "protecting mappings\n"));
+    LL_IF_DEBUG_FOR(oc->L, linker, ocDebugBelch(oc, "protecting mappings\n"));
 #if defined(NEED_SYMBOL_EXTRAS)
     ocProtectExtras(oc);
 #endif
@@ -1598,11 +1598,11 @@ int ocTryLoad (ObjectCode* oc) {
     // We have finished loading and relocating; flush the m32 allocators to
     // setup page protections.
 #if defined(NEED_M32)
-    m32_allocator_flush(oc->rx_m32);
-    m32_allocator_flush(oc->rw_m32);
+    m32_allocator_flush_for(oc->L, oc->rx_m32);
+    m32_allocator_flush_for(oc->L, oc->rw_m32);
 #endif
 
-    LL_IF_DEBUG(linker, ocDebugBelch(oc, "resolved\n"));
+    LL_IF_DEBUG_FOR(oc->L, linker, ocDebugBelch(oc, "resolved\n"));
     oc->status = OBJECT_RESOLVED;
 
     return 1;
@@ -1615,11 +1615,11 @@ int ocRunInit(ObjectCode *oc)
         return 1;
     }
 
-    LL_IF_DEBUG(linker, ocDebugBelch(oc, "running initializers\n"));
+    LL_IF_DEBUG_FOR(oc->L, linker, ocDebugBelch(oc, "running initializers\n"));
 
     // See Note [Tracking foreign exports] in ForeignExports.c
-    if (ll_host.before_init != NULL) {
-        ll_host.before_init(ll_host.ctx, oc);
+    if (oc->L->services.host.before_init != NULL) {
+        oc->L->services.host.before_init(oc->L->services.host.ctx, oc);
     }
     int r;
 #if defined(OBJFORMAT_ELF)
@@ -1629,10 +1629,10 @@ int ocRunInit(ObjectCode *oc)
 #elif defined(OBJFORMAT_MACHO)
     r = ocRunInit_MachO ( oc );
 #else
-    LL_FATAL("ocTryLoad: initializers not implemented on this platform");
+    LL_FATAL_FOR(oc->L, "ocTryLoad: initializers not implemented on this platform");
 #endif
-    if (ll_host.after_init != NULL) {
-        ll_host.after_init(ll_host.ctx, oc, r != 0);
+    if (oc->L->services.host.after_init != NULL) {
+        oc->L->services.host.after_init(oc->L->services.host.ctx, oc, r != 0);
     }
 
     if (!r) { return r; }
@@ -1792,7 +1792,7 @@ OStatus getObjectLoadStatus (pathchar *path)
  * Section management.
  */
 void
-addSection (Section *s, SectionKind kind, SectionAlloc alloc,
+addSection (ll_linker *L, Section *s, SectionKind kind, SectionAlloc alloc,
             void* start, ll_word size,
             ll_word mapped_offset, void* mapped_start, ll_word mapped_size)
 {
@@ -1807,11 +1807,11 @@ addSection (Section *s, SectionKind kind, SectionAlloc alloc,
 
    if (!s->info)
      s->info
-       = (struct SectionFormatInfo*)LL_CALLOC(1, sizeof *s->info,
+       = (struct SectionFormatInfo*)LL_CALLOC_FOR(L, 1, sizeof *s->info,
                                             "addSection(SectionFormatInfo)");
 
-   LL_IF_DEBUG(linker,
-            LL_DEBUG("addSection: %p-%p (size %" LL_FMT_WORD "), kind %d\n",
+   LL_IF_DEBUG_FOR(L, linker,
+            LL_DEBUG_FOR(L, "addSection: %p-%p (size %" LL_FMT_WORD "), kind %d\n",
                        start, (void*)((ll_word)start + size),
                        size, kind ));
 }
@@ -1895,12 +1895,13 @@ ll_hs_int unloadNativeObj(void *handle) {
  * Segment management
  */
 void
-initSegment (Segment *s, void *start, size_t size, SegmentProt prot, int n_sections)
+initSegment (ll_linker *L, Segment *s, void *start, size_t size,
+             SegmentProt prot, int n_sections)
 {
     s->start = start;
     s->size = size;
     s->prot = prot;
-    s->sections_idx = (int *)LL_CALLOC(n_sections, sizeof(int),
+    s->sections_idx = (int *)LL_CALLOC_FOR(L, n_sections, sizeof(int),
                                                "initSegment(segment)");
     s->n_sections = n_sections;
 }
@@ -1908,31 +1909,31 @@ initSegment (Segment *s, void *start, size_t size, SegmentProt prot, int n_secti
 void freeSegments (ObjectCode *oc)
 {
     if (oc->segments != NULL) {
-        LL_IF_DEBUG(linker, ocDebugBelch(oc, "freeing %d segments\n", oc->n_segments));
+        LL_IF_DEBUG_FOR(oc->L, linker, ocDebugBelch(oc, "freeing %d segments\n", oc->n_segments));
 
         for (int i = 0; i < oc->n_segments; i++) {
             Segment *s = &oc->segments[i];
 
-            LL_IF_DEBUG(linker, ocDebugBelch(oc, "freeing segment %d at %p size %zu\n",
+            LL_IF_DEBUG_FOR(oc->L, linker, ocDebugBelch(oc, "freeing segment %d at %p size %zu\n",
                                           i, s->start, s->size));
 
-            LL_FREE(s->sections_idx);
+            LL_FREE_FOR(oc->L, s->sections_idx);
             s->sections_idx = NULL;
 
             if (0 == s->size) {
-                LL_IF_DEBUG(linker, ocDebugBelch(oc, "skipping segment of 0 size\n"));
+                LL_IF_DEBUG_FOR(oc->L, linker, ocDebugBelch(oc, "skipping segment of 0 size\n"));
                 continue;
             } else {
 #if RTS_LINKER_USE_MMAP
-                munmapForLinker(s->start, s->size, "freeSegments");
+                ll_munmap_for_linker(oc->L, s->start, s->size, "freeSegments");
 #else
-                LL_FREE(s->start);
+                LL_FREE_FOR(oc->L, s->start);
 #endif
             }
             s->start = NULL;
         }
 
-        LL_FREE(oc->segments);
+        LL_FREE_FOR(oc->L, oc->segments);
         oc->segments = NULL;
     }
 }

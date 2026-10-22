@@ -57,7 +57,7 @@ void printLoadedObjects(void);
     )
 
 #define ocDebugBelch(oc, s, ...) \
-    LL_DEBUG("%s(%" PATH_FMT ": " s, \
+    LL_DEBUG_FOR((oc)->L, "%s(%" PATH_FMT ": " s, \
                __func__, \
                OC_INFORMATIVE_FILENAME(oc), \
                ##__VA_ARGS__)
@@ -93,7 +93,7 @@ typedef struct _RtsSymbolInfo {
 
 ll_symbol_addr* loadSymbol(ll_symbol_name *lbl, RtsSymbolInfo *pinfo);
 
-void addSection (Section *s, SectionKind kind, SectionAlloc alloc,
+void addSection (ll_linker *L, Section *s, SectionKind kind, SectionAlloc alloc,
                  void* start, ll_word size, ll_word mapped_offset,
                  void* mapped_start, ll_word mapped_size);
 
@@ -152,7 +152,8 @@ ObjectCode* mkOc( ll_linker *L, ObjectType type, pathchar *path, char *image, in
                   int misalignment
                   );
 
-void initSegment(Segment *s, void *start, size_t size, SegmentProt prot, int n_sections);
+void initSegment(ll_linker *L, Segment *s, void *start, size_t size,
+                 SegmentProt prot, int n_sections);
 void freeSegments(ObjectCode *oc);
 
 #include "ll_end_private.h"

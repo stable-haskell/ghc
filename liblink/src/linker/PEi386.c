@@ -1794,7 +1794,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
         memset(start, 0, sz);
       }
 
-      addSection(section, kind, SECTION_NOMEM, start, sz, 0, 0, 0);
+      addSection(oc->L, section, kind, SECTION_NOMEM, start, sz, 0, 0, 0);
       addProddableBlock(oc->L, &oc->proddables, oc->sections[i].start, sz);
    }
 
@@ -1828,13 +1828,13 @@ ocGetNames_PEi386 ( ObjectCode* oc )
        if (bss == NULL) {
            LL_FATAL("ocGetNames_PEi386: Failed to allocate global bss section");
        }
-       addSection(&oc->sections[oc->n_sections-1],
+       addSection(oc->L, &oc->sections[oc->n_sections-1],
                   SECTIONKIND_RWDATA, SECTION_MALLOC,
                   bss, globalBssSize, 0, 0, 0);
        LL_IF_DEBUG(linker_verbose, LL_DEBUG("bss @ %p %" LL_FMT_WORD "\n", bss, globalBssSize));
        addProddableBlock(oc->L, &oc->proddables, bss, globalBssSize);
    } else {
-       addSection(&oc->sections[oc->n_sections-1],
+       addSection(oc->L, &oc->sections[oc->n_sections-1],
                   SECTIONKIND_OTHER, SECTION_NOMEM, NULL, 0, 0, 0, 0);
    }
 

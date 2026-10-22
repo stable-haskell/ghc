@@ -1189,7 +1189,7 @@ ocBuildSegments_MachO(ObjectCode *oc)
     /* Allocate space for RX segment */
     if (n_rxSections > 0) {
         rxSegment = &segments[curSegment];
-        initSegment(rxSegment,
+        initSegment(oc->L, rxSegment,
                     curMem,
                     ll_round_up_to_page(size_rxSegment),
                     SEGMENT_PROT_RX,
@@ -1203,7 +1203,7 @@ ocBuildSegments_MachO(ObjectCode *oc)
     /* Allocate space for RW segment */
     if (n_rwSections > 0) {
         rwSegment = &segments[curSegment];
-        initSegment(rwSegment,
+        initSegment(oc->L, rwSegment,
                     curMem,
                     ll_round_up_to_page(size_rwSegment),
                     SEGMENT_PROT_RWO,
@@ -1217,7 +1217,7 @@ ocBuildSegments_MachO(ObjectCode *oc)
     /* Allocate space for GB_ZEROFILL segment */
     if (n_gbZerofills > 0) {
         gbZerofillSegment = &segments[curSegment];
-        initSegment(gbZerofillSegment,
+        initSegment(oc->L, gbZerofillSegment,
                     curMem,
                     ll_round_up_to_page(size_gbZerofillSegment),
                     SEGMENT_PROT_RWO,
@@ -1316,7 +1316,7 @@ ocGetNames_MachO(ObjectCode* oc)
             case S_GB_ZEROFILL:
                 LL_IF_DEBUG(linker, LL_DEBUG("ocGetNames_MachO: memset to 0 a ZEROFILL section\n"));
                 memset(secMem, 0, section->size);
-                addSection(&secArray[sec_idx], kind, alloc, start, size,
+                addSection(oc->L, &secArray[sec_idx], kind, alloc, start, size,
                             mapped_offset, mapped_start, mapped_size);
                 break;
             default:
@@ -1347,7 +1347,7 @@ ocGetNames_MachO(ObjectCode* oc)
 #else
                 memcpy(secMem, oc->image + section->offset, section->size);
 #endif
-                addSection(&secArray[sec_idx], kind, alloc, start, size,
+                addSection(oc->L, &secArray[sec_idx], kind, alloc, start, size,
                             mapped_offset, mapped_start, mapped_size);
             /* SECTION_NOMEM since memory is already allocated in segments */
 

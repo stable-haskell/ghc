@@ -851,7 +851,7 @@ ocGetNames_ELF ( ObjectCode* oc )
          debugBelch("BSS section at 0x%x, size %d\n",
                          zspace, shdr[i].sh_size);
          */
-          addSection(&sections[i], kind, alloc, start, size,
+          addSection(oc->L, &sections[i], kind, alloc, start, size,
                      mapped_offset, mapped_start, mapped_size);
 
           oc->sections[i].info->nstubs = 0;
@@ -926,7 +926,7 @@ ocGetNames_ELF ( ObjectCode* oc )
               alloc = SECTION_MMAP;
           }
 #endif
-          addSection(&sections[i], kind, alloc, start, size,
+          addSection(oc->L, &sections[i], kind, alloc, start, size,
                      mapped_offset, mapped_start, mapped_size);
 
 #if defined(NEED_PLT)
@@ -943,7 +943,7 @@ ocGetNames_ELF ( ObjectCode* oc )
 
           addProddableBlock(oc->L, &oc->proddables, start, size);
       } else {
-          addSection(&oc->sections[i], kind, alloc, oc->image+offset, size,
+          addSection(oc->L, &oc->sections[i], kind, alloc, oc->image+offset, size,
                      0, 0, 0);
           oc->sections[i].info->nstubs = 0;
           oc->sections[i].info->stub_offset = NULL;
