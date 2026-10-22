@@ -28,3 +28,24 @@ The optional `fatal`, `check`, `checkm`, and `assert` modes call the fatal
 callback with the second owner's services. Expected statuses are 102 for
 `fatal`, `check`, and `checkm` in both builds; `assert` returns 102 with
 assertions enabled and 0 without them.
+
+Hash table owner destruction
+============================
+
+`hash_destroy_owner.c` links the actual hash and host implementations to check
+that owned values and table storage use the table owner's allocator, including
+the empty-table path. It also checks that `freeHashTable` retains its
+caller-provided value callback and callback order. Set `LIBLINK_BUILD_INCLUDE`
+to the configured liblink build `include` directory, then run from the
+repository root:
+
+    : "${LIBLINK_BUILD_INCLUDE:?set the configured liblink include directory}"
+    CC=${CC:-cc}
+    "$CC" -std=c11 -Wall -Wextra -Werror=vla -pedantic -DLL_INTERNAL_SOURCE=1 \
+      -isystem "$LIBLINK_BUILD_INCLUDE" -Iliblink/include -Iliblink/src \
+      liblink/tests/unit/hash_destroy_owner.c liblink/src/ll_hash.c \
+      liblink/src/ll_host.c -o hash-destroy-owner
+    ./hash-destroy-owner
+
+Repeat with `-DLL_ASSERTS` to run the assertion build. The test is silent on
+success and exits nonzero with a diagnostic on failure.

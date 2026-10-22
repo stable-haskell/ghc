@@ -116,6 +116,11 @@ void *      removeHashTable_ ( HashTable *table, ll_word key,
  */
 void freeHashTable ( HashTable *table, void (*freeDataFun)(void *) );
 
+/* Free table values through the table owner's allocator. Values must have been
+ * allocated by that same owner. Keys remain borrowed.
+ */
+void ll_hash_free_owned_table ( HashTable *table );
+
 LL_INLINE_HEADER void freeStrHashTable ( StrHashTable *table, void (*freeDataFun)(void *) )
 {
     freeHashTable((HashTable*)table, freeDataFun);

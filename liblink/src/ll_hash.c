@@ -451,8 +451,8 @@ removeStrHashTable(StrHashTable *table, const char * key, const void *data)
  * us how to do it.
  * -------------------------------------------------------------------------- */
 
-void
-freeHashTable(HashTable *table, void (*freeDataFun)(void *) )
+static void
+freeHashTable_(HashTable *table, void (*freeDataFun)(void *), bool ownedValues)
 {
     /* The last bucket with something in it is table->max + table->split - 1 */
     long segment = (table->max + table->split - 1) / HSEGSIZE;
@@ -460,12 +460,16 @@ freeHashTable(HashTable *table, void (*freeDataFun)(void *) )
 
     /* Free table segments */
     while (segment >= 0) {
-        if (freeDataFun) {
+        if (ownedValues || freeDataFun) {
             while (index >= 0) {
                 HashList *next;
                 for (HashList *hl = table->dir[segment][index]; hl != NULL; hl = next) {
                     next = hl->next;
-                    (*freeDataFun)((void *) hl->data);
+                    if (ownedValues) {
+                        LL_FREE_FOR(table->owner, (void *)hl->data);
+                    } else {
+                        (*freeDataFun)((void *) hl->data);
+                    }
                 }
                 index--;
             }
@@ -484,6 +488,18 @@ freeHashTable(HashTable *table, void (*freeDataFun)(void *) )
     }
 
     LL_FREE_FOR(table->owner, table);
+}
+
+void
+freeHashTable(HashTable *table, void (*freeDataFun)(void *))
+{
+    freeHashTable_(table, freeDataFun, false);
+}
+
+void
+ll_hash_free_owned_table(HashTable *table)
+{
+    freeHashTable_(table, NULL, true);
 }
 
 /* -----------------------------------------------------------------------------
