@@ -84,6 +84,7 @@ pathchar* resolveSymbolAddr_PEi386 ( pathchar* buffer, int size,
                                      ll_symbol_addr* symbol, uintptr_t* top );
 
 char *get_name_string(
+    ll_linker *L,
     unsigned char* name,
     ObjectCode* oc);
 

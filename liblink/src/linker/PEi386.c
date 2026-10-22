@@ -661,7 +661,7 @@ static bool checkIfDllLoaded(HINSTANCE instance)
 void freePreloadObjectFile_PEi386(ObjectCode *oc)
 {
     if (oc->image) {
-        LL_FREE (oc->image);
+        LL_FREE_FOR(oc->L, oc->image);
         oc->image = NULL;
     }
 
@@ -670,16 +670,16 @@ void freePreloadObjectFile_PEi386(ObjectCode *oc)
            See Note [Exception Unwinding].  */
         if (oc->info->pdata) {
             if (!RtlDeleteFunctionTable (oc->info->pdata->start))
-              LL_DEBUG ("Unable to remove Exception handlers for %" PATH_FMT "\n",
+              LL_DEBUG_FOR(oc->L, "Unable to remove Exception handlers for %" PATH_FMT "\n",
                           oc->fileName);
             oc->info->xdata = NULL;
             oc->info->pdata = NULL;
         }
 
         if (oc->info->ch_info) {
-           LL_FREE (oc->info->ch_info);
+           LL_FREE_FOR(oc->L, oc->info->ch_info);
         }
-        LL_FREE (oc->info);
+        LL_FREE_FOR(oc->L, oc->info);
         oc->info = NULL;
     }
 }
@@ -691,21 +691,21 @@ static void releaseOcInfo(ObjectCode* oc) {
     if (oc->info) {
         freeInitFiniList(oc->L, oc->info->init);
         freeInitFiniList(oc->L, oc->info->fini);
-        LL_FREE (oc->info->ch_info);
-        LL_FREE (oc->info->symbols);
-        LL_FREE (oc->info->str_tab);
-        LL_FREE (oc->info);
+        LL_FREE_FOR(oc->L, oc->info->ch_info);
+        LL_FREE_FOR(oc->L, oc->info->symbols);
+        LL_FREE_FOR(oc->L, oc->info->str_tab);
+        LL_FREE_FOR(oc->L, oc->info);
         oc->info = NULL;
     }
     for (int i = 0; i < oc->n_sections; i++){
         Section *section = &oc->sections[i];
         if (section->info) {
-            LL_FREE (section->info->name);
+            LL_FREE_FOR(oc->L, section->info->name);
             if (section->info->relocs) {
-                LL_FREE (section->info->relocs);
+                LL_FREE_FOR(oc->L, section->info->relocs);
                 section->info->relocs = NULL;
             }
-            LL_FREE (section->info);
+            LL_FREE_FOR(oc->L, section->info);
             section->info = NULL;
         }
     }
@@ -772,7 +772,7 @@ COFF_HEADER_INFO* getHeaderInfo ( ObjectCode* oc )
    COFF_OBJ_TYPE coff_type = getObjectType (oc->image, OC_INFORMATIVE_FILENAME(oc));
 
    COFF_HEADER_INFO* info
-     = LL_MALLOC (sizeof(COFF_HEADER_INFO), "getHeaderInfo");
+     = LL_MALLOC_FOR(oc->L, sizeof(COFF_HEADER_INFO), "getHeaderInfo");
    memset (info, 0, sizeof(COFF_HEADER_INFO));
    info->type = coff_type;
    switch (coff_type)
@@ -799,9 +799,9 @@ COFF_HEADER_INFO* getHeaderInfo ( ObjectCode* oc )
         break;
        default:
         {
-         LL_FREE (info);
+         LL_FREE_FOR(oc->L, info);
          info = NULL;
-         LL_LOG_ERROR ("Unknown COFF %d type in getHeaderInfo.", coff_type);
+         LL_LOG_ERROR_FOR(oc->L, "Unknown COFF %d type in getHeaderInfo.", coff_type);
         }
         break;
    }
@@ -1250,7 +1250,7 @@ get_sym_name ( uint8_t* name, ObjectCode* oc )
    consistency we *always* copy the string; the caller must free it
 */
 char *
-get_name_string (uint8_t* name, ObjectCode* oc)
+get_name_string (ll_linker *L, uint8_t* name, ObjectCode* oc)
 {
     char *newstr;
 
@@ -1259,14 +1259,14 @@ get_name_string (uint8_t* name, ObjectCode* oc)
         char* str = oc->info->str_tab + strtab_offset;
         int len   = strlen(str);
 
-        newstr = LL_MALLOC(len + 1, "cstring_from_section_symbol_name");
+        newstr = LL_MALLOC_FOR(L, len + 1, "cstring_from_section_symbol_name");
         strncpy(newstr, str, len + 1);
         return newstr;
     }
     else
     {
-        newstr = LL_MALLOC(9, "cstring_from_section_symbol_name");
-        LL_ASSERT(newstr);
+        newstr = LL_MALLOC_FOR(L, 9, "cstring_from_section_symbol_name");
+        LL_ASSERT_FOR(L, newstr);
         strncpy(newstr,(char*)name,8);
         newstr[8] = 0;
         return newstr;
@@ -1402,13 +1402,13 @@ ocVerifyImage_PEi386 ( ObjectCode* oc )
    /* .BSS Section is initialized in ocGetNames_PEi386
       but we need the Sections array initialized here already. */
    Section *sections;
-   sections = (Section*)LL_CALLOC(
+   sections = (Section*)LL_CALLOC_FOR(oc->L,
        sizeof(Section),
        info->numberOfSections + 1, /* +1 for the global BSS section see ocGetNames_PEi386 */
        "ocVerifyImage_PEi386(sections)");
    oc->sections = sections;
    oc->n_sections = info->numberOfSections + 1;
-   oc->info       = LL_CALLOC (sizeof(struct ObjectCodeFormatInfo), 1,
+   oc->info       = LL_CALLOC_FOR(oc->L, sizeof(struct ObjectCodeFormatInfo), 1,
                                     "ocVerifyImage_PEi386(info)");
    oc->info->init          = NULL;
    oc->info->fini          = NULL;
@@ -1425,13 +1425,13 @@ ocVerifyImage_PEi386 ( ObjectCode* oc )
    uint32_t s_symbols = info->numberOfSymbols * sizeof(COFF_symbol);
    uint32_t sym_size  = getSymbolSize (info);
    oc->info->symbols
-     = LL_MALLOC (s_symbols, "ocVerifyImage_PEi386(oc->info->symbols)");
+     = LL_MALLOC_FOR(oc->L, s_symbols, "ocVerifyImage_PEi386(oc->info->symbols)");
    for (i = 0; i < info->numberOfSymbols; i++)
      memcpy (oc->info->symbols+i, (char*)symtab + sym_size * i, sym_size);
 
    uint32_t n_strtab = (*(uint32_t*)strtab) - PEi386_STRTAB_OFFSET;
    oc->info->str_tab
-     = LL_MALLOC (n_strtab, "ocVerifyImage_PEi386(oc->info->str_tab)");
+     = LL_MALLOC_FOR(oc->L, n_strtab, "ocVerifyImage_PEi386(oc->info->str_tab)");
    memcpy (oc->info->str_tab, strtab + PEi386_STRTAB_OFFSET, n_strtab);
 
    /* Initialize the Sections */
@@ -1445,9 +1445,9 @@ ocVerifyImage_PEi386 ( ObjectCode* oc )
       /* Calculate the start of the section data.  */
       section->start = oc->image + sectab_i->PointerToRawData;
       section->size  = sectab_i->SizeOfRawData;
-      section->info  = LL_CALLOC (sizeof(struct SectionFormatInfo), 1,
+      section->info  = LL_CALLOC_FOR(oc->L, sizeof(struct SectionFormatInfo), 1,
                                        "ocVerifyImage_PEi386(section.info)");
-      section->info->name        = get_name_string (sectab_i->Name, oc);
+      section->info->name        = get_name_string (oc->L, sectab_i->Name, oc);
       section->info->alignment   = getSectionAlignment (*section);
       section->info->props       = sectab_i->Characteristics;
       section->info->virtualSize = sectab_i->Misc.VirtualSize;
@@ -1475,7 +1475,7 @@ ocVerifyImage_PEi386 ( ObjectCode* oc )
       section->info->relocs   = NULL;
       if (noRelocs > 0) {
         section->info->relocs
-            = LL_MALLOC (noRelocs * sizeof (COFF_reloc),
+            = LL_MALLOC_FOR(oc->L, noRelocs * sizeof (COFF_reloc),
                             "ocVerifyImage_PEi386(section->info->relocs)");
         memcpy (section->info->relocs, reltab + relocs_offset,
                 noRelocs * sizeof (COFF_reloc));
@@ -1485,81 +1485,81 @@ ocVerifyImage_PEi386 ( ObjectCode* oc )
    /* Initialize the last section's info field which contains the .bss
       section, the .info of which will be initialized by ocGetNames. Discard the
       .info that we computed above. */
-  LL_FREE(sections[info->numberOfSections].info);
+  LL_FREE_FOR(oc->L, sections[info->numberOfSections].info);
   sections[info->numberOfSections].info = NULL;
 
    /* No further verification after this point; only debug printing.  */
    i = 0;
-   LL_IF_DEBUG(linker, i=1);
+   LL_IF_DEBUG_FOR(oc->L, linker, i=1);
    if (i == 0) return true;
 
-   LL_DEBUG("sectab offset = %" LL_FMT_SIZE_T "\n",
+   LL_DEBUG_FOR(oc->L, "sectab offset = %" LL_FMT_SIZE_T "\n",
               ((uint8_t*)sectab) - ((uint8_t*)oc->image) );
-   LL_DEBUG("symtab offset = %" LL_FMT_SIZE_T "\n",
+   LL_DEBUG_FOR(oc->L, "symtab offset = %" LL_FMT_SIZE_T "\n",
               ((uint8_t*)symtab) - ((uint8_t*)oc->image) );
-   LL_DEBUG("strtab offset = %" LL_FMT_SIZE_T "\n",
+   LL_DEBUG_FOR(oc->L, "strtab offset = %" LL_FMT_SIZE_T "\n",
               ((uint8_t*)strtab) - ((uint8_t*)oc->image) );
 
-   LL_DEBUG("\n" );
+   LL_DEBUG_FOR(oc->L, "\n" );
    if (info->type == COFF_IMAGE)
     {
       IMAGE_FILE_HEADER* hdr = (IMAGE_FILE_HEADER*)oc->image;
-      LL_DEBUG( "COFF Type:         IMAGE_FILE_HEADER\n");
-      LL_DEBUG( "Machine:           0x%x\n",
+      LL_DEBUG_FOR(oc->L,  "COFF Type:         IMAGE_FILE_HEADER\n");
+      LL_DEBUG_FOR(oc->L,  "Machine:           0x%x\n",
                   (uint32_t)(hdr->Machine) );
-      LL_DEBUG( "# sections:        %d\n",
+      LL_DEBUG_FOR(oc->L,  "# sections:        %d\n",
                   (uint32_t)(hdr->NumberOfSections) );
-      LL_DEBUG( "time/date:         0x%x\n",
+      LL_DEBUG_FOR(oc->L,  "time/date:         0x%x\n",
                   (uint32_t)(hdr->TimeDateStamp) );
-      LL_DEBUG( "symtab offset:     %d\n",
+      LL_DEBUG_FOR(oc->L,  "symtab offset:     %d\n",
                   (uint32_t)(hdr->PointerToSymbolTable) );
-      LL_DEBUG( "# symbols:         %d\n",
+      LL_DEBUG_FOR(oc->L,  "# symbols:         %d\n",
                   (uint32_t)(hdr->NumberOfSymbols) );
-      LL_DEBUG( "sz of opt hdr:     %d\n",
+      LL_DEBUG_FOR(oc->L,  "sz of opt hdr:     %d\n",
                   (uint32_t)(hdr->SizeOfOptionalHeader) );
-      LL_DEBUG( "characteristics:   0x%x\n",
+      LL_DEBUG_FOR(oc->L,  "characteristics:   0x%x\n",
                   (uint32_t)(hdr->Characteristics) );
     }
    else if (info->type == COFF_ANON_BIG_OBJ)
     {
       ANON_OBJECT_HEADER_BIGOBJ* hdr = (ANON_OBJECT_HEADER_BIGOBJ*)oc->image;
-      LL_DEBUG( "COFF Type:         ANON_OBJECT_HEADER_BIGOBJ\n");
-      LL_DEBUG( "Machine:           0x%x\n",
+      LL_DEBUG_FOR(oc->L,  "COFF Type:         ANON_OBJECT_HEADER_BIGOBJ\n");
+      LL_DEBUG_FOR(oc->L,  "Machine:           0x%x\n",
                   (uint32_t)(hdr->Machine) );
-      LL_DEBUG( "# sections:        %d\n",
+      LL_DEBUG_FOR(oc->L,  "# sections:        %d\n",
                   (uint32_t)(hdr->NumberOfSections) );
-      LL_DEBUG( "time/date:         0x%x\n",
+      LL_DEBUG_FOR(oc->L,  "time/date:         0x%x\n",
                   (uint32_t)(hdr->TimeDateStamp) );
-      LL_DEBUG( "symtab offset:     %d\n",
+      LL_DEBUG_FOR(oc->L,  "symtab offset:     %d\n",
                   (uint32_t)(hdr->PointerToSymbolTable) );
-      LL_DEBUG( "# symbols:         %d\n",
+      LL_DEBUG_FOR(oc->L,  "# symbols:         %d\n",
                   (uint32_t)(hdr->NumberOfSymbols) );
     }
    else
     {
-      LL_DEBUG( "COFF Type:         UNKNOWN\n");
+      LL_DEBUG_FOR(oc->L,  "COFF Type:         UNKNOWN\n");
       return false;
     }
 
    i = 0;
-   LL_IF_DEBUG(linker_verbose, i=1);
+   LL_IF_DEBUG_FOR(oc->L, linker_verbose, i=1);
    if (i == 0) return true;
 
    /* Print the section table. */
-   LL_DEBUG("\n" );
+   LL_DEBUG_FOR(oc->L, "\n" );
    for (i = 0; i < info->numberOfSections; i++) {
       COFF_section* sectab_i
          = (COFF_section*)
            myindex ( sizeof_COFF_section, sectab, i );
       Section section = sections[i];
-      LL_DEBUG(
+      LL_DEBUG_FOR(oc->L,
                 "\n"
                 "section %d\n"
                 "     name `",
                 i
               );
       printName (sectab_i->Name, oc);
-      LL_DEBUG(
+      LL_DEBUG_FOR(oc->L,
                 "'\n"
                 "    vsize %lu\n"
                 "    vaddr %lu\n"
@@ -1584,38 +1584,38 @@ ocVerifyImage_PEi386 ( ObjectCode* oc )
       noRelocs = section.info->noRelocs;
       for (uint32_t j = 0; j < noRelocs; j++) {
          COFF_reloc rel = section.info->relocs[j];
-         LL_DEBUG(
+         LL_DEBUG_FOR(oc->L,
                    "        type 0x%-4x   vaddr 0x%-8lx   name `",
                    rel.Type,
                    rel.VirtualAddress );
          COFF_symbol sym = oc->info->symbols[rel.SymbolTableIndex];
          printName (getSymShortName (info, &sym), oc);
-         LL_DEBUG("'\n" );
+         LL_DEBUG_FOR(oc->L, "'\n" );
       }
 
-      LL_DEBUG("\n" );
+      LL_DEBUG_FOR(oc->L, "\n" );
    }
-   LL_DEBUG("\n" );
-   LL_DEBUG("string table has size 0x%x\n", n_strtab + PEi386_STRTAB_OFFSET);
-   LL_DEBUG("---START of string table---\n");
+   LL_DEBUG_FOR(oc->L, "\n" );
+   LL_DEBUG_FOR(oc->L, "string table has size 0x%x\n", n_strtab + PEi386_STRTAB_OFFSET);
+   LL_DEBUG_FOR(oc->L, "---START of string table---\n");
    for (i = 4; i < n_strtab; i++) {
       if (strtab[i] == 0)
-         LL_DEBUG("\n"); else
-         LL_DEBUG("%c", strtab[i] );
+         LL_DEBUG_FOR(oc->L, "\n"); else
+         LL_DEBUG_FOR(oc->L, "%c", strtab[i] );
    }
-   LL_DEBUG("--- END  of string table---\n");
+   LL_DEBUG_FOR(oc->L, "--- END  of string table---\n");
 
-   LL_DEBUG("\n" );
+   LL_DEBUG_FOR(oc->L, "\n" );
 
    for (i = 0; i < info->numberOfSymbols; i++) {
       COFF_symbol* symtab_i = &oc->info->symbols[i];
-      LL_DEBUG(
+      LL_DEBUG_FOR(oc->L,
                 "symbol %d\n"
                 "     name `",
                 i
               );
       printName (getSymShortName (info, symtab_i), oc);
-      LL_DEBUG(
+      LL_DEBUG_FOR(oc->L,
                 "'\n"
                 "    value 0x%x\n"
                 "   1+sec# %d\n"
@@ -1631,7 +1631,7 @@ ocVerifyImage_PEi386 ( ObjectCode* oc )
       i += getSymNumberOfAuxSymbols (info, symtab_i);
    }
 
-   LL_DEBUG("\n" );
+   LL_DEBUG_FOR(oc->L, "\n" );
    return true;
 }
 
@@ -1656,7 +1656,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
       bool do_copy = true;
       bool do_zero = false;
 
-      LL_IF_DEBUG(linker, LL_DEBUG("section name = %s (%x)\n", section->info->name, section->info->props ));
+      LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "section name = %s (%x)\n", section->info->name, section->info->props ));
 
       /* The PE file section flag indicates whether the section
          contains code or data. */
@@ -1762,7 +1762,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
          * TODO: check if this comment is still relevant.
          */
         if (section->info->virtualSize == 0 && section->size == 0) {
-          LL_IF_DEBUG(linker_verbose, LL_DEBUG("skipping empty .bss section\n"));
+          LL_IF_DEBUG_FOR(oc->L, linker_verbose, LL_DEBUG_FOR(oc->L, "skipping empty .bss section\n"));
           continue;
         }
 
@@ -1771,10 +1771,10 @@ ocGetNames_PEi386 ( ObjectCode* oc )
         kind = SECTIONKIND_RWDATA;
         do_zero = true;
         do_copy = false;
-        LL_IF_DEBUG(linker_verbose, LL_DEBUG("BSS anon section\n"));
+        LL_IF_DEBUG_FOR(oc->L, linker_verbose, LL_DEBUG_FOR(oc->L, "BSS anon section\n"));
       }
 
-      LL_CHECK(section->size == 0 || section->info->virtualSize == 0);
+      LL_CHECK_FOR(oc->L, section->size == 0 || section->info->virtualSize == 0);
       if (sz < section->info->virtualSize) {
           sz = section->info->virtualSize;
       }
@@ -1787,12 +1787,12 @@ ocGetNames_PEi386 ( ObjectCode* oc )
       // Allocate memory for the section.
       uint8_t *start;
       if (section->info->props & IMAGE_SCN_MEM_WRITE) {
-          start = m32_alloc(oc->rw_m32, sz, alignment);
+          start = m32_alloc_for(oc->L, oc->rw_m32, sz, alignment);
       } else {
-          start = m32_alloc(oc->rx_m32, sz, alignment);
+          start = m32_alloc_for(oc->L, oc->rx_m32, sz, alignment);
       }
       if (!start) {
-        LL_FATAL("Could not allocate any heap memory from private heap (requested %" LL_FMT_SIZE_T " bytes).",
+        LL_FATAL_FOR(oc->L, "Could not allocate any heap memory from private heap (requested %" LL_FMT_SIZE_T " bytes).",
              sz);
       }
 
@@ -1809,7 +1809,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
    /* Copy exported symbols into the ObjectCode. */
 
    oc->n_symbols = info->numberOfSymbols;
-   oc->symbols   = LL_CALLOC(sizeof(Symbol_t), oc->n_symbols,
+   oc->symbols   = LL_CALLOC_FOR(oc->L, sizeof(Symbol_t), oc->n_symbols,
                                   "ocGetNames_PEi386(oc->symbols)");
 
    /* Work out the size of the global BSS section */
@@ -1822,7 +1822,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
            /* Only count COMMON symbols not already defined by a
             * previously-loaded object; we will reuse their allocation. */
            ll_symbol_name *nm = get_sym_name (getSymShortName (info, sym), oc);
-           if (!lookupStrHashTable(ll_default_linker.symhash, nm)) {
+           if (!lookupStrHashTable(oc->L->symhash, nm)) {
                globalBssSize += getSymValue (info, sym);
            }
       }
@@ -1832,14 +1832,14 @@ ocGetNames_PEi386 ( ObjectCode* oc )
    /* Allocate BSS space */
    ll_symbol_addr* bss = NULL;
    if (globalBssSize > 0) {
-       bss = m32_alloc(oc->rw_m32, globalBssSize, 16);
+       bss = m32_alloc_for(oc->L, oc->rw_m32, globalBssSize, 16);
        if (bss == NULL) {
-           LL_FATAL("ocGetNames_PEi386: Failed to allocate global bss section");
+           LL_FATAL_FOR(oc->L, "ocGetNames_PEi386: Failed to allocate global bss section");
        }
        addSection(oc->L, &oc->sections[oc->n_sections-1],
                   SECTIONKIND_RWDATA, SECTION_MALLOC,
                   bss, globalBssSize, 0, 0, 0);
-       LL_IF_DEBUG(linker_verbose, LL_DEBUG("bss @ %p %" LL_FMT_WORD "\n", bss, globalBssSize));
+       LL_IF_DEBUG_FOR(oc->L, linker_verbose, LL_DEBUG_FOR(oc->L, "bss @ %p %" LL_FMT_WORD "\n", bss, globalBssSize));
        addProddableBlock(oc->L, &oc->proddables, bss, globalBssSize);
    } else {
        addSection(oc->L, &oc->sections[oc->n_sections-1],
@@ -1848,7 +1848,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
 
    /* At this point we're done with oc->image and all relevant memory have
       been copied. Release it to free up the memory.  */
-   LL_FREE (oc->image);
+   LL_FREE_FOR(oc->L, oc->image);
    oc->image = NULL;
 
    for (unsigned int i = 0; i < (uint32_t)oc->n_symbols; i++) {
@@ -1870,15 +1870,15 @@ ocGetNames_PEi386 ( ObjectCode* oc )
           section = NULL;
           break;
         case PE_SECTION_ABSOLUTE:
-          LL_IF_DEBUG(linker, LL_DEBUG("symbol %s is ABSOLUTE, skipping...\n", sname));
+          LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "symbol %s is ABSOLUTE, skipping...\n", sname));
           i += getSymNumberOfAuxSymbols (info, sym);
           continue;
         case PE_SECTION_DEBUG:
-          LL_IF_DEBUG(linker, LL_DEBUG("symbol %s is DEBUG, skipping...\n", sname));
+          LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "symbol %s is DEBUG, skipping...\n", sname));
           i += getSymNumberOfAuxSymbols (info, sym);
           continue;
         default:
-          LL_CHECK(secNumber < (uint32_t) oc->n_sections);
+          LL_CHECK_FOR(oc->L, secNumber < (uint32_t) oc->n_sections);
           section = &oc->sections[secNumber-1];
       }
 
@@ -1887,7 +1887,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
       case 0x00: type = LL_SYM_DATA; break;
       case 0x20: type = LL_SYM_CODE; break;
       default:
-          LL_DEBUG("Symbol %s has invalid type 0x%x\n",
+          LL_DEBUG_FOR(oc->L, "Symbol %s has invalid type 0x%x\n",
                      sname, getSymType(oc->info->ch_info, sym));
           return 1;
       }
@@ -1915,8 +1915,8 @@ ocGetNames_PEi386 ( ObjectCode* oc )
       }
       else if (symStorageClass == IMAGE_SYM_CLASS_WEAK_EXTERNAL) {
           isWeak = true;
-          LL_CHECK(getSymNumberOfAuxSymbols (info, sym) == 1);
-          LL_CHECK(symValue == 0);
+          LL_CHECK_FOR(oc->L, getSymNumberOfAuxSymbols (info, sym) == 1);
+          LL_CHECK_FOR(oc->L, symValue == 0);
           COFF_symbol_aux_weak_external *aux = (COFF_symbol_aux_weak_external *) (sym+1);
           COFF_symbol* targetSym = &oc->info->symbols[aux->TagIndex];
 
@@ -1954,7 +1954,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
                 if (target_sname)
                   addr = lookupSymbol_PEi386 (oc->L, target_sname, oc, &type);
 
-                LL_IF_DEBUG(linker, LL_DEBUG("weak external symbol @ %s => %s resolved to %p\n", \
+                LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "weak external symbol @ %s => %s resolved to %p\n", \
                                             sname, target_sname, addr));
             }
       }
@@ -1962,13 +1962,13 @@ ocGetNames_PEi386 ( ObjectCode* oc )
          /* This symbol isn't in any section at all, ie, global bss.
             Allocate zeroed space for it from the BSS section, unless a
             previously-loaded object already allocated storage for it. */
-          RtsSymbolInfo *existing = lookupStrHashTable(ll_default_linker.symhash, sname);
+          RtsSymbolInfo *existing = lookupStrHashTable(oc->L->symhash, sname);
           if (existing != NULL) {
               /* COMMON symbol already allocated by a previously-loaded
                * object; reuse that address so relocations resolve to
                * the same storage. */
               if (symValue > existing->size) {
-                  LL_FATAL("linker: trying to link COMMON symbols %s with"
+                  LL_FATAL_FOR(oc->L, "linker: trying to link COMMON symbols %s with"
                        " incompatible sizes: previous size %llu,"
                        " new size %u\n",
                        sname,
@@ -1977,13 +1977,13 @@ ocGetNames_PEi386 ( ObjectCode* oc )
               }
               addr = existing->value;
               common_already_defined = true;
-              LL_IF_DEBUG(linker_verbose,
-                       LL_DEBUG("bss symbol reusing @ %p %u\n", addr, symValue));
+              LL_IF_DEBUG_FOR(oc->L, linker_verbose,
+                       LL_DEBUG_FOR(oc->L, "bss symbol reusing @ %p %u\n", addr, symValue));
           } else {
               addr = bss;
               bss = (ll_symbol_addr*)((ll_word)bss + (ll_word)symValue);
               symSize = (unsigned long)symValue;
-              LL_IF_DEBUG(linker_verbose, LL_DEBUG("bss symbol @ %p %u\n", addr, symValue));
+              LL_IF_DEBUG_FOR(oc->L, linker_verbose, LL_DEBUG_FOR(oc->L, "bss symbol @ %p %u\n", addr, symValue));
           }
       }
       else if (section && section->kind == SECTIONKIND_BFD_IMPORT_LIBRARY) {
@@ -2001,8 +2001,8 @@ ocGetNames_PEi386 ( ObjectCode* oc )
           COFF_symbol* sym = &oc->info->symbols[info->numberOfSymbols-1];
           addr = get_sym_name( getSymShortName (info, sym), oc);
 
-          LL_IF_DEBUG(linker,
-                   LL_DEBUG("addImportSymbol `%s' => `%s'\n",
+          LL_IF_DEBUG_FOR(oc->L, linker,
+                   LL_DEBUG_FOR(oc->L, "addImportSymbol `%s' => `%s'\n",
                               sname, (char*)addr));
           /* We're going to free the any data associated with the import
              library without copying the sections.  So we have to duplicate
@@ -2014,7 +2014,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
           if (!ghciInsertSymbolTable(oc->L, oc->fileName, sname,
                                      addr, false, type, 0, oc)) {
              releaseOcInfo (oc);
-             LL_FREE (oc->image);
+             LL_FREE_FOR(oc->L, oc->image);
              oc->image = NULL;
              return false;
           }
@@ -2023,7 +2023,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
           /* Don't process this oc any further. Just exit.  */
           oc->n_symbols = 0;
           oc->symbols   = NULL;
-          LL_FREE (oc->image);
+          LL_FREE_FOR(oc->L, oc->image);
           oc->image = NULL;
           releaseOcInfo (oc);
           // There is nothing that we need to resolve in this object since we
@@ -2041,25 +2041,25 @@ ocGetNames_PEi386 ( ObjectCode* oc )
           if (strlen(dllName) == 0 || dllName[0] == 0 || has_code_section)
               continue;
 
-          pathchar* dirName = pathdir(&ll_default_linker, oc->fileName);
+          pathchar* dirName = pathdir(oc->L, oc->fileName);
           ll_hs_ptr token       = addLibrarySearchPath(dirName);
-          LL_FREE(dirName);
+          LL_FREE_FOR(oc->L, dirName);
 
           sym   = &oc->info->symbols[oc->n_symbols-1];
           sname = get_sym_name (getSymShortName (info, sym), oc);
 
-          LL_IF_DEBUG(linker_verbose,
-                   LL_DEBUG("loading symbol `%s' from dll: '%ls' => `%s'\n",
+          LL_IF_DEBUG_FOR(oc->L, linker_verbose,
+                   LL_DEBUG_FOR(oc->L, "loading symbol `%s' from dll: '%ls' => `%s'\n",
                               sname, oc->fileName, dllName));
 
-          pathchar* dll = mkPath(&ll_default_linker, dllName);
+          pathchar* dll = mkPath(oc->L, dllName);
           HINSTANCE dllInstance = 0;
           const char* result = addDLL_PEi386(dll, &dllInstance);
           removeLibrarySearchPath(token);
-          LL_FREE(dll);
+          LL_FREE_FOR(oc->L, dll);
 
           if (result != NULL || dllInstance == 0) {
-              LL_LOG_ERROR("Could not load `%s'. Reason: %s\n",
+              LL_LOG_ERROR_FOR(oc->L, "Could not load `%s'. Reason: %s\n",
                          (char*)dllName, result);
               LL_FREE((void*)result);
               return false;
@@ -2072,7 +2072,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
              _head_<name> when looked up. (Ugh. thanks GCC.) So correct it when
              stored so we don't have to correct it each time when retrieved.  */
           int size  = strlen(sname)+1;
-          char *tmp = LL_MALLOC(size * sizeof(char),
+          char *tmp = LL_MALLOC_FOR(oc->L, size * sizeof(char),
                                      "ocGetNames_PEi386");
           strncpy (tmp, sname, size);
           char *pos = strstr(tmp, "_iname");
@@ -2089,7 +2089,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
 
           snprintf (sname, size, "_head_%s", tmp+start);
           sname[size-start]='\0';
-          LL_FREE(tmp);
+          LL_FREE_FOR(oc->L, tmp);
           sname = strdup (sname);
           if(secNumber == IMAGE_SYM_UNDEFINED)
             type |= LL_SYM_HIDDEN;
@@ -2100,7 +2100,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
 
           break;
       } else if (secNumber == PE_SECTION_UNDEFINED) {
-          LL_IF_DEBUG(linker, LL_DEBUG("symbol %s is UNDEFINED, skipping...\n", sname));
+          LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "symbol %s is UNDEFINED, skipping...\n", sname));
           i += getSymNumberOfAuxSymbols (info, sym);
       }
 
@@ -2111,8 +2111,8 @@ ocGetNames_PEi386 ( ObjectCode* oc )
          sname = strdup (sname);
          if(secNumber == IMAGE_SYM_UNDEFINED)
            type |= LL_SYM_HIDDEN;
-         LL_IF_DEBUG(linker_verbose, LL_DEBUG("addSymbol %p `%s'\n", addr, sname));
-         LL_ASSERT(i < (uint32_t)oc->n_symbols);
+         LL_IF_DEBUG_FOR(oc->L, linker_verbose, LL_DEBUG_FOR(oc->L, "addSymbol %p `%s'\n", addr, sname));
+         LL_ASSERT_FOR(oc->L, i < (uint32_t)oc->n_symbols);
          oc->symbols[i].name = sname;
          oc->symbols[i].addr = addr;
          oc->symbols[i].type = type;
@@ -2145,27 +2145,27 @@ makeSymbolExtra_PEi386( ObjectCode* oc, uint64_t index LL_UNUSED, size_t s, char
     switch(type & ~(LL_SYM_DUP_DISCARD | LL_SYM_HIDDEN)) {
         case LL_SYM_CODE: {
             // jmp *-14(%rip)
-            extra = m32_alloc(oc->rx_m32, sizeof(SymbolExtra), 8);
-            LL_CHECK(extra);
+            extra = m32_alloc_for(oc->L, oc->rx_m32, sizeof(SymbolExtra), 8);
+            LL_CHECK_FOR(oc->L, extra);
             extra->addr = (uint64_t)s;
             static uint8_t jmp[] = { 0xFF, 0x25, 0xF2, 0xFF, 0xFF, 0xFF };
             memcpy(extra->jumpIsland, jmp, 6);
-            LL_IF_DEBUG(linker_verbose, LL_DEBUG("makeSymbolExtra(code): %s -> %p\n", symbol, &extra->jumpIsland));
+            LL_IF_DEBUG_FOR(oc->L, linker_verbose, LL_DEBUG_FOR(oc->L, "makeSymbolExtra(code): %s -> %p\n", symbol, &extra->jumpIsland));
             return (size_t)&extra->jumpIsland;
         }
         case LL_SYM_INDIRECT_DATA: {
-            extra = m32_alloc(oc->rw_m32, sizeof(SymbolExtra), 8);
-            LL_CHECK(extra);
+            extra = m32_alloc_for(oc->L, oc->rw_m32, sizeof(SymbolExtra), 8);
+            LL_CHECK_FOR(oc->L, extra);
             void *v = *(void**) s;
             extra->addr = (uint64_t)v;
-            LL_IF_DEBUG(linker_verbose, LL_DEBUG("makeSymbolExtra(data): %s -> %p\n", symbol, &extra->addr));
+            LL_IF_DEBUG_FOR(oc->L, linker_verbose, LL_DEBUG_FOR(oc->L, "makeSymbolExtra(data): %s -> %p\n", symbol, &extra->addr));
             return (size_t)&extra->addr;
         }
         default: {
-            extra = m32_alloc(oc->rw_m32, sizeof(SymbolExtra), 8);
-            LL_CHECK(extra);
+            extra = m32_alloc_for(oc->L, oc->rw_m32, sizeof(SymbolExtra), 8);
+            LL_CHECK_FOR(oc->L, extra);
             extra->addr = (uint64_t)s;
-            LL_IF_DEBUG(linker_verbose, LL_DEBUG("makeSymbolExtra(indirect-data): %s -> %p\n", symbol, &extra->addr));
+            LL_IF_DEBUG_FOR(oc->L, linker_verbose, LL_DEBUG_FOR(oc->L, "makeSymbolExtra(indirect-data): %s -> %p\n", symbol, &extra->addr));
             return (size_t)&extra->addr;
         }
     }
@@ -2223,15 +2223,15 @@ ocResolve_PEi386 ( ObjectCode* oc )
 
          ll_sym_type sym_type;
 
-         LL_IF_DEBUG(linker_verbose,
-                  LL_DEBUG(
+         LL_IF_DEBUG_FOR(oc->L, linker_verbose,
+                  LL_DEBUG_FOR(oc->L,
                             "reloc sec %2d num %3d:  P=%p, type 0x%-4x   "
                             "vaddr 0x%-8lx   name `",
                             i, j, pP,
                             reloc->Type,
                             reloc->VirtualAddress );
                             printName (getSymShortName (info, sym), oc);
-                  LL_DEBUG("'\n" ));
+                  LL_DEBUG_FOR(oc->L, "'\n" ));
 
          if (getSymStorageClass (info, sym) == IMAGE_SYM_CLASS_STATIC) {
             uint32_t sect_n = getSymSectionNumber (info, sym);
@@ -2239,13 +2239,13 @@ ocResolve_PEi386 ( ObjectCode* oc )
                 case PE_SECTION_UNDEFINED:
                 case PE_SECTION_ABSOLUTE:
                 case PE_SECTION_DEBUG:
-                    LL_LOG_ERROR(" | %" PATH_FMT ": symbol `%s' has invalid section number %02x",
+                    LL_LOG_ERROR_FOR(oc->L, " | %" PATH_FMT ": symbol `%s' has invalid section number %02x",
                                oc->fileName, symbol, sect_n);
                     return false;
                 default:
                     break;
             }
-            LL_CHECK(sect_n < (uint32_t) oc->n_sections);
+            LL_CHECK_FOR(oc->L, sect_n < (uint32_t) oc->n_sections);
             Section section = oc->sections[sect_n - 1];
             S = ((size_t)(section.start))
               + ((size_t)(getSymValue (info, sym)));
@@ -2254,12 +2254,12 @@ ocResolve_PEi386 ( ObjectCode* oc )
                        sizeof(symbol)-1 );
             S = (size_t) lookupDependentSymbol( oc->L, (char*)symbol, oc, &sym_type );
             if ((void*)S == NULL) {
-                LL_LOG_ERROR(" | %" PATH_FMT ": unknown symbol `%s'", oc->fileName, symbol);
+                LL_LOG_ERROR_FOR(oc->L, " | %" PATH_FMT ": unknown symbol `%s'", oc->fileName, symbol);
                 releaseOcInfo (oc);
                 return false;
             }
          }
-         LL_IF_DEBUG(linker_verbose, LL_DEBUG("S=%zx\n", S));
+         LL_IF_DEBUG_FOR(oc->L, linker_verbose, LL_DEBUG_FOR(oc->L, "S=%zx\n", S));
 
          /* All supported relocations write at least 4 bytes */
          checkProddableBlock(oc->L, &oc->proddables, pP, 4);
@@ -2276,7 +2276,7 @@ ocResolve_PEi386 ( ObjectCode* oc )
            case 11: /* IMAGE_REL_AMD64_SECREL (PE constant 11) */
               {
                   uint64_t offset = S - (uint64_t) section.start;
-                  LL_CHECK((uint32_t) offset == offset);
+                  LL_CHECK_FOR(oc->L, (uint32_t) offset == offset);
                    *(uint32_t *)pP = offset + A;
                   break;
               }
@@ -2305,7 +2305,7 @@ ocResolve_PEi386 ( ObjectCode* oc )
                          v -= (uint64_t) GetModuleHandleW(NULL);
 
                        if (((int64_t) v > (int64_t) INT32_MAX) || ((int64_t) v < (int64_t) INT32_MIN)) {
-                           LL_FATAL("IMAGE_REL_AMD64_ADDR32[NB]: High bits are set in 0x%zx for %s",
+                           LL_FATAL_FOR(oc->L, "IMAGE_REL_AMD64_ADDR32[NB]: High bits are set in 0x%zx for %s",
                                 v, (char *)symbol);
                        }
                    }
@@ -2333,7 +2333,7 @@ ocResolve_PEi386 ( ObjectCode* oc )
                        /* And retry */
                        v = S + (int32_t)A - ((intptr_t)pP) - 4;
                        if ((v > (int64_t) INT32_MAX) || (v < (int64_t) INT32_MIN)) {
-                           LL_FATAL("IMAGE_REL_AMD64_REL32: High bits are set in 0x%zx for %s",
+                           LL_FATAL_FOR(oc->L, "IMAGE_REL_AMD64_REL32: High bits are set in 0x%zx for %s",
                                 v, (char *)symbol);
                        }
                    }
@@ -2348,14 +2348,14 @@ ocResolve_PEi386 ( ObjectCode* oc )
                     uint64_t v;
                     v = S + A;
 
-                    LL_DEBUG("%" PATH_FMT ": Catch ARM64 PEi386 relocation type %d, %llx\n",
+                    LL_DEBUG_FOR(oc->L, "%" PATH_FMT ": Catch ARM64 PEi386 relocation type %d, %llx\n",
                         oc->fileName, reloc->Type, v);
                     releaseOcInfo (oc);
                     return false;
                }
 #endif
             default:
-               LL_DEBUG("%" PATH_FMT ": unhandled PEi386 relocation type %d\n",
+               LL_DEBUG_FOR(oc->L, "%" PATH_FMT ": unhandled PEi386 relocation type %d\n",
                      oc->fileName, reloc->Type);
                releaseOcInfo (oc);
                return false;
@@ -2375,7 +2375,7 @@ ocResolve_PEi386 ( ObjectCode* oc )
           /* Now register the exception handler for the range and point it
              to the unwind data.  */
           if (!RtlAddFunctionTable (section.start, numEntries, (uintptr_t) GetModuleHandleW(NULL))) {
-            LL_LOG_SYSERROR("Unable to register Exception handler for %p for "
+            LL_LOG_SYSERROR_FOR(oc->L, "Unable to register Exception handler for %p for "
                           "section %s in %" PATH_FMT " (Win32 error %lu)",
                           section.start, section.info->name, oc->fileName,
                           GetLastError());
@@ -2389,12 +2389,12 @@ ocResolve_PEi386 ( ObjectCode* oc )
    }
 
    // We now have no more need of info->ch_info and info->symbols.
-   LL_FREE(oc->info->ch_info);
+   LL_FREE_FOR(oc->L, oc->info->ch_info);
    oc->info->ch_info = NULL;
-   LL_FREE(oc->info->symbols);
+   LL_FREE_FOR(oc->L, oc->info->symbols);
    oc->info->symbols = NULL;
 
-   LL_IF_DEBUG(linker, LL_DEBUG("completed %" PATH_FMT "\n", oc->fileName));
+   LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "completed %" PATH_FMT "\n", oc->fileName));
    return true;
 }
 
