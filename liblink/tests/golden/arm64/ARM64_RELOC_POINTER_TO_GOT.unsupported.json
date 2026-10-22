@@ -1,0 +1,10 @@
+{
+  "diagnostic": "Relocation of type: 7 not (yet) supported!\n\n",
+  "exit": -6,
+  "expected_relocations": [
+    "ARM64_RELOC_POINTER_TO_GOT"
+  ],
+  "format": "Mach-O arm64",
+  "object_sha256": "9a6fab5bfc235b4ebeacb9cb54316d0a764ae8c681b638eb28244359512db435",
+  "schema": 1
+}
