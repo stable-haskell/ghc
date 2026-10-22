@@ -60,7 +60,7 @@ static bool isLoadStore(uint32_t *p);
  * where we want to write the address offset to. Thus decoding as well
  * as encoding is needed.
  */
-static bool fitsBits(size_t bits, int64_t value);
+static bool fitsBits(ll_linker *L, size_t bits, int64_t value);
 static int64_t decodeAddend(ObjectCode * oc, Section * section,
                      MachORelocationInfo * ri);
 static void encodeAddend(ObjectCode * oc, Section * section,
@@ -225,7 +225,7 @@ resolveImports(
 {
     size_t itemSize = 4;
 
-    LL_IF_DEBUG(linker, LL_DEBUG("resolveImports: start\n"));
+    LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "resolveImports: start\n"));
 
     for(unsigned i = 0; i * itemSize < sect->size; i++)
     {
@@ -235,20 +235,20 @@ resolveImports(
         MachOSymbol *symbol = &oc->info->macho_symbols[indirectSymbolIndex];
         ll_symbol_addr* addr = NULL;
 
-        LL_IF_DEBUG(linker, LL_DEBUG("resolveImports: resolving %s\n", symbol->name));
+        LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "resolveImports: resolving %s\n", symbol->name));
 
         if ((symbol->nlist->n_type & N_TYPE) == N_UNDF
             && (symbol->nlist->n_type & N_EXT) && (symbol->nlist->n_value != 0)) {
             addr = (ll_symbol_addr*) (symbol->nlist->n_value);
-            LL_IF_DEBUG(linker, LL_DEBUG("resolveImports: undefined external %s has value %p\n", symbol->name, addr));
+            LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "resolveImports: undefined external %s has value %p\n", symbol->name, addr));
         } else {
             addr = lookupDependentSymbol(oc->L, symbol->name, oc, NULL);
-            LL_IF_DEBUG(linker, LL_DEBUG("resolveImports: looking up %s, %p\n", symbol->name, addr));
+            LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "resolveImports: looking up %s, %p\n", symbol->name, addr));
         }
 
         if (addr == NULL)
         {
-            LL_LOG_ERROR("\nlookupSymbol failed in resolveImports\n"
+            LL_LOG_ERROR_FOR(oc->L, "\nlookupSymbol failed in resolveImports\n"
                        "%s: unknown symbol `%s'", oc->fileName, symbol->name);
             return 0;
         }
@@ -259,7 +259,7 @@ resolveImports(
         ((void**)(oc->image + sect->offset))[i] = addr;
     }
 
-    LL_IF_DEBUG(linker, LL_DEBUG("resolveImports: done\n"));
+    LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "resolveImports: done\n"));
     return 1;
 }
 
@@ -297,7 +297,7 @@ decodeAddend(ObjectCode * oc, Section * section, MachORelocationInfo * ri) {
                 case 2: return signExtend(*(uint32_t*)p, 8 << ri->r_length);
                 case 3: return signExtend(*(uint64_t*)p, 8 << ri->r_length);
                 default:
-                    LL_FATAL("Unsupported r_length (%d) for UNSIGNED relocation",
+                    LL_FATAL_FOR(oc->L, "Unsupported r_length (%d) for UNSIGNED relocation",
                          ri->r_length);
             }
         }
@@ -308,7 +308,7 @@ decodeAddend(ObjectCode * oc, Section * section, MachORelocationInfo * ri) {
                 case 2: return signExtend(*(uint32_t*)p, 8 << ri->r_length);
                 case 3: return signExtend(*(uint64_t*)p, 8 << ri->r_length);
                 default:
-                    LL_FATAL("Unsupported r_length (%d) for SUBTRACTOR relocation",
+                    LL_FATAL_FOR(oc->L, "Unsupported r_length (%d) for SUBTRACTOR relocation",
                          ri->r_length);
             }
         }
@@ -348,13 +348,13 @@ decodeAddend(ObjectCode * oc, Section * section, MachORelocationInfo * ri) {
             return a << shift;
         }
     }
-    LL_FATAL("unsupported relocation type: %d\n", ri->r_type);
+    LL_FATAL_FOR(oc->L, "unsupported relocation type: %d\n", ri->r_type);
 }
 
 inline static bool
-fitsBits(size_t bits, int64_t value) {
+fitsBits(ll_linker *L, size_t bits, int64_t value) {
     if(bits == 64) return true;
-    if(bits > 64) LL_FATAL("fits_bits with %zu bits and an 64bit integer!", bits);
+    if(bits > 64) LL_FATAL_FOR(L, "fits_bits with %zu bits and an 64bit integer!", bits);
     return  0 == (value >> bits)   // All bits off: 0
         || -1 == (value >> bits);  // All bits on: -1
 }
@@ -371,9 +371,9 @@ encodeAddend(ObjectCode * oc, Section * section,
 
     switch (ri->r_type) {
         case ARM64_RELOC_UNSIGNED: {
-            if(!fitsBits(8 << ri->r_length, addend)) {
+            if(!fitsBits(oc->L, 8 << ri->r_length, addend)) {
                 const char *library_info = OC_INFORMATIVE_FILENAME(oc);
-                LL_FATAL("Relocation out of range for UNSIGNED in %s: symbol '%s', addend 0x%llx, address 0x%llx, library: %s",
+                LL_FATAL_FOR(oc->L, "Relocation out of range for UNSIGNED in %s: symbol '%s', addend 0x%llx, address 0x%llx, library: %s",
                      file_name, symbol_name, (long long)addend, (long long)ri->r_address, library_info ? (char*)library_info : "<unknown>");
             }
             switch (ri->r_length) {
@@ -382,15 +382,15 @@ encodeAddend(ObjectCode * oc, Section * section,
                 case 2: *(uint32_t*)p = (uint32_t)addend; break;
                 case 3: *(uint64_t*)p = (uint64_t)addend; break;
                 default:
-                    LL_FATAL("Unsupported r_length (%d) for UNSIGNED relocation",
+                    LL_FATAL_FOR(oc->L, "Unsupported r_length (%d) for UNSIGNED relocation",
                          ri->r_length);
             }
             return;
         }
         case ARM64_RELOC_SUBTRACTOR: {
-            if(!fitsBits(8 << ri->r_length, addend)) {
+            if(!fitsBits(oc->L, 8 << ri->r_length, addend)) {
                 const char *library_info = OC_INFORMATIVE_FILENAME(oc);
-                LL_FATAL("Relocation out of range for SUBTRACTOR in %s: symbol '%s', addend 0x%llx, address 0x%llx, library: %s",
+                LL_FATAL_FOR(oc->L, "Relocation out of range for SUBTRACTOR in %s: symbol '%s', addend 0x%llx, address 0x%llx, library: %s",
                      file_name, symbol_name, (long long)addend, (long long)ri->r_address, library_info ? (char*)library_info : "<unknown>");
             }
             switch (ri->r_length) {
@@ -399,7 +399,7 @@ encodeAddend(ObjectCode * oc, Section * section,
                 case 2: *(uint32_t*)p = (uint32_t)addend; break;
                 case 3: *(uint64_t*)p = (uint64_t)addend; break;
                 default:
-                    LL_FATAL("Unsupported r_length (%d) for SUBTRACTOR relocation",
+                    LL_FATAL_FOR(oc->L, "Unsupported r_length (%d) for SUBTRACTOR relocation",
                          ri->r_length);
             }
             return;
@@ -409,9 +409,9 @@ encodeAddend(ObjectCode * oc, Section * section,
              * do not need the last two bits of the value. If the value >> 2
              * still exceeds 26bits, we won't be able to reach it.
              */
-            if(!fitsBits(26, addend >> 2)) {
+            if(!fitsBits(oc->L, 26, addend >> 2)) {
                 const char *library_info = OC_INFORMATIVE_FILENAME(oc);
-                LL_FATAL("Relocation target for BRANCH26 out of range in %s: symbol '%s', addend 0x%llx (0x%llx >> 2), address 0x%llx, library: %s",
+                LL_FATAL_FOR(oc->L, "Relocation target for BRANCH26 out of range in %s: symbol '%s', addend 0x%llx (0x%llx >> 2), address 0x%llx, library: %s",
                      file_name, symbol_name, (long long)addend, (long long)(addend >> 2), (long long)ri->r_address, library_info ? (char*)library_info : "<unknown>");
             }
             *p = (*p & 0xFC000000) | ((uint32_t)(addend >> 2) & 0x03FFFFFF);
@@ -424,10 +424,10 @@ encodeAddend(ObjectCode * oc, Section * section,
              * with the PAGEOFF12 relocation allows to address a relative range
              * of +-4GB.
              */
-            if(!fitsBits(21, addend >> 12)) {
+            if(!fitsBits(oc->L, 21, addend >> 12)) {
                 const char *reloc_type = (ri->r_type == ARM64_RELOC_PAGE21) ? "PAGE21" : "GOT_LOAD_PAGE21";
                 const char *library_info = OC_INFORMATIVE_FILENAME(oc);
-                LL_FATAL("Relocation target for %s out of range in %s: symbol '%s', addend 0x%llx (0x%llx >> 12), address 0x%llx, library: %s",
+                LL_FATAL_FOR(oc->L, "Relocation target for %s out of range in %s: symbol '%s', addend 0x%llx (0x%llx >> 12), address 0x%llx, library: %s",
                      reloc_type, file_name, symbol_name, (long long)addend, (long long)(addend >> 12), (long long)ri->r_address, library_info ? (char*)library_info : "<unknown>");
             }
             *p = (*p & 0x9F00001F) | (uint32_t)((addend << 17) & 0x60000000)
@@ -439,9 +439,9 @@ encodeAddend(ObjectCode * oc, Section * section,
             /* Store an offset into a page (4k). Depending on the instruction
              * the bits are stored at slightly different positions.
              */
-            if(!fitsBits(12, addend)) {
+            if(!fitsBits(oc->L, 12, addend)) {
                 const char *library_info = OC_INFORMATIVE_FILENAME(oc);
-                LL_FATAL("Relocation target for PAGEOFF12 out of range in %s: symbol '%s', addend 0x%llx, address 0x%llx, library: %s",
+                LL_FATAL_FOR(oc->L, "Relocation target for PAGEOFF12 out of range in %s: symbol '%s', addend 0x%llx, address 0x%llx, library: %s",
                      file_name, symbol_name, (long long)addend, (long long)ri->r_address, library_info ? (char*)library_info : "<unknown>");
             }
 
@@ -457,7 +457,7 @@ encodeAddend(ObjectCode * oc, Section * section,
             return;
         }
     }
-    LL_FATAL("unsupported relocation type: %d\n", ri->r_type);
+    LL_FATAL_FOR(oc->L, "unsupported relocation type: %d\n", ri->r_type);
 }
 
 /* Note [Symbols in need of GOT entries]
@@ -573,7 +573,7 @@ static uint64_t symbol_value(ObjectCode* oc, MachOSymbol* symbol) {
        */
       value = (uint64_t)lookupDependentSymbol(oc->L, (char*)symbol->name, oc, NULL);
       if(!value)
-          LL_FATAL("Could not lookup symbol: %s!", symbol->name);
+          LL_FATAL_FOR(oc->L, "Could not lookup symbol: %s!", symbol->name);
   } else {
       value = (uint64_t)symbol->addr;    // address of the symbol.
   }
@@ -623,7 +623,7 @@ relocateSectionAarch64(ObjectCode * oc, Section * section)
                 if(!(i+1 < nreloc)
                    || !(section->info->relocation_info[i+1].r_type
                           == ARM64_RELOC_UNSIGNED))
-                    LL_FATAL("SUBTRACTOR relocation *must* be followed by UNSIGNED relocation.");
+                    LL_FATAL_FOR(oc->L, "SUBTRACTOR relocation *must* be followed by UNSIGNED relocation.");
 
                 // we *know* that the next relocation is ARM64_RELOC_UNSIGNED
                 // (see above). So let's process both relocations and write the
@@ -659,7 +659,7 @@ relocateSectionAarch64(ObjectCode * oc, Section * section)
                 if(symbol->nlist->n_type & N_EXT) {
                     value = (uint64_t)lookupDependentSymbol(oc->L, (char*)symbol->name, oc, NULL);
                     if(!value)
-                        LL_FATAL("Could not lookup symbol: %s!", symbol->name);
+                        LL_FATAL_FOR(oc->L, "Could not lookup symbol: %s!", symbol->name);
                 } else {
                     value = (uint64_t)symbol->addr;    // address of the symbol.
                 }
@@ -679,7 +679,7 @@ relocateSectionAarch64(ObjectCode * oc, Section * section)
                     if(findStub(section, (void**)&value, 0)) {
                         /* did not find it. Crete a new stub. */
                         if(makeStub(oc->L, section, (void**)&value, 0)) {
-                            LL_FATAL("could not find or make stub");
+                            LL_FATAL_FOR(oc->L, "could not find or make stub");
                         }
                     }
                 }
@@ -691,10 +691,10 @@ relocateSectionAarch64(ObjectCode * oc, Section * section)
                 MachOSymbol* symbol = &oc->info->macho_symbols[ri->r_symbolnum];
                 int64_t addend = decodeAddend(oc, section, ri);
                 if(!(explicit_addend == 0 || addend == 0))
-                    LL_FATAL("explicit_addend and addend can't be set at the same time.");
+                    LL_FATAL_FOR(oc->L, "explicit_addend and addend can't be set at the same time.");
                 uint64_t pc = (uint64_t)section->start + ri->r_address;
                 uint64_t value = (uint64_t)(isGotLoad(ri) ? symbol->got_addr : symbol->addr);
-                LL_ASSERT(!isGotLoad(ri) || (symbol->got_addr != 0));
+                LL_ASSERT_FOR(oc->L, !isGotLoad(ri) || (symbol->got_addr != 0));
                 encodeAddend(oc, section, ri, ((value + addend + explicit_addend) & (-4096)) - (pc & (-4096)), symbol);
 
                 // reset, just in case.
@@ -706,9 +706,9 @@ relocateSectionAarch64(ObjectCode * oc, Section * section)
                 MachOSymbol* symbol = &oc->info->macho_symbols[ri->r_symbolnum];
                 int64_t addend = decodeAddend(oc, section, ri);
                 if(!(explicit_addend == 0 || addend == 0))
-                    LL_FATAL("explicit_addend and addend can't be set at the same time.");
+                    LL_FATAL_FOR(oc->L, "explicit_addend and addend can't be set at the same time.");
                 uint64_t value = (uint64_t)(isGotLoad(ri) ? symbol->got_addr : symbol->addr);
-                LL_ASSERT(!isGotLoad(ri) || (symbol->got_addr != 0));
+                LL_ASSERT_FOR(oc->L, !isGotLoad(ri) || (symbol->got_addr != 0));
                 encodeAddend(oc, section, ri, 0xFFF & (value + addend + explicit_addend), symbol);
 
                 // reset, just in case.
@@ -720,11 +720,11 @@ relocateSectionAarch64(ObjectCode * oc, Section * section)
                 if(!(i+1 < nreloc)
                    || !(section->info->relocation_info[i+1].r_type == ARM64_RELOC_PAGE21
                         || section->info->relocation_info[i+1].r_type == ARM64_RELOC_PAGEOFF12))
-                    LL_FATAL("ADDEND relocation *must* be followed by PAGE or PAGEOFF relocation");
+                    LL_FATAL_FOR(oc->L, "ADDEND relocation *must* be followed by PAGE or PAGEOFF relocation");
                 break;
             }
             default: {
-                LL_FATAL("Relocation of type: %d not (yet) supported!\n", ri->r_type);
+                LL_FATAL_FOR(oc->L, "Relocation of type: %d not (yet) supported!\n", ri->r_type);
             }
         }
     }
@@ -738,7 +738,7 @@ relocateSection(ObjectCode* oc, int curSection)
 {
     Section * sect = &oc->sections[curSection];
 
-    LL_IF_DEBUG(linker, LL_DEBUG("relocateSection %d, info: %p\n", curSection, (void*)sect->info));
+    LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "relocateSection %d, info: %p\n", curSection, (void*)sect->info));
 
     // empty sections (without segments), won't have their info filled.
     // there is no relocation to be done for them.
@@ -749,7 +749,7 @@ relocateSection(ObjectCode* oc, int curSection)
     MachORelocationInfo * relocs = sect->info->relocation_info;
     MachOSymbol * symbols = oc->info->macho_symbols;
 
-    LL_IF_DEBUG(linker, LL_DEBUG("relocateSection %d (%s, %s): start\n",
+    LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "relocateSection %d (%s, %s): start\n",
                                 curSection, msect->segname, msect->sectname));
 
     if(!strcmp(msect->sectname,"__la_symbol_ptr"))
@@ -761,7 +761,7 @@ relocateSection(ObjectCode* oc, int curSection)
     else if(!strcmp(msect->sectname,"__la_sym_ptr3"))
         return 1;
 
-    LL_IF_DEBUG(linker, LL_DEBUG("relocateSection: number of relocations: %d\n", msect->nreloc));
+    LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "relocateSection: number of relocations: %d\n", msect->nreloc));
 
     for(uint32_t i = 0; i < msect->nreloc; i++)
     {
@@ -777,14 +777,14 @@ relocateSection(ObjectCode* oc, int curSection)
         int relocLenBytes;
         int nextInstrAdj = 0;
 
-        LL_IF_DEBUG(linker_verbose, LL_DEBUG("relocateSection: relocation %d\n", i));
-        LL_IF_DEBUG(linker_verbose, LL_DEBUG("               : type      = %d\n", reloc->r_type));
-        LL_IF_DEBUG(linker_verbose, LL_DEBUG("               : address   = %d\n", reloc->r_address));
-        LL_IF_DEBUG(linker_verbose, LL_DEBUG("               : symbolnum = %u\n", reloc->r_symbolnum));
-        LL_IF_DEBUG(linker_verbose, LL_DEBUG("               : pcrel     = %d\n", reloc->r_pcrel));
-        LL_IF_DEBUG(linker_verbose, LL_DEBUG("               : length    = %d\n", reloc->r_length));
-        LL_IF_DEBUG(linker_verbose, LL_DEBUG("               : extern    = %d\n", reloc->r_extern));
-        LL_IF_DEBUG(linker_verbose, LL_DEBUG("               : type      = %d\n", reloc->r_type));
+        LL_IF_DEBUG_FOR(oc->L, linker_verbose, LL_DEBUG_FOR(oc->L, "relocateSection: relocation %d\n", i));
+        LL_IF_DEBUG_FOR(oc->L, linker_verbose, LL_DEBUG_FOR(oc->L, "               : type      = %d\n", reloc->r_type));
+        LL_IF_DEBUG_FOR(oc->L, linker_verbose, LL_DEBUG_FOR(oc->L, "               : address   = %d\n", reloc->r_address));
+        LL_IF_DEBUG_FOR(oc->L, linker_verbose, LL_DEBUG_FOR(oc->L, "               : symbolnum = %u\n", reloc->r_symbolnum));
+        LL_IF_DEBUG_FOR(oc->L, linker_verbose, LL_DEBUG_FOR(oc->L, "               : pcrel     = %d\n", reloc->r_pcrel));
+        LL_IF_DEBUG_FOR(oc->L, linker_verbose, LL_DEBUG_FOR(oc->L, "               : length    = %d\n", reloc->r_length));
+        LL_IF_DEBUG_FOR(oc->L, linker_verbose, LL_DEBUG_FOR(oc->L, "               : extern    = %d\n", reloc->r_extern));
+        LL_IF_DEBUG_FOR(oc->L, linker_verbose, LL_DEBUG_FOR(oc->L, "               : type      = %d\n", reloc->r_type));
 
         switch(reloc->r_length)
         {
@@ -805,7 +805,7 @@ relocateSection(ObjectCode* oc, int curSection)
                 relocLenBytes = 8;
                 break;
             default:
-                LL_FATAL("Unknown size.");
+                LL_FATAL_FOR(oc->L, "Unknown size.");
         }
         checkProddableBlock(oc->L, &oc->proddables,thingPtr,relocLenBytes);
 
@@ -828,8 +828,8 @@ relocateSection(ObjectCode* oc, int curSection)
 
 
 
-        LL_IF_DEBUG(linker_verbose,
-                 LL_DEBUG("relocateSection: length = %d, thing = %" PRId64 ", baseValue = %p\n",
+        LL_IF_DEBUG_FOR(oc->L, linker_verbose,
+                 LL_DEBUG_FOR(oc->L, "relocateSection: length = %d, thing = %" PRId64 ", baseValue = %p\n",
                             reloc->r_length, thing, (char *)baseValue));
 
         if (type == X86_64_RELOC_GOT
@@ -839,11 +839,11 @@ relocateSection(ObjectCode* oc, int curSection)
             ll_symbol_name* nm = symbol->name;
             ll_symbol_addr* addr = NULL;
 
-            LL_IF_DEBUG(linker_verbose, LL_DEBUG("relocateSection: making jump island for %s, extern = %d, X86_64_RELOC_GOT\n",
+            LL_IF_DEBUG_FOR(oc->L, linker_verbose, LL_DEBUG_FOR(oc->L, "relocateSection: making jump island for %s, extern = %d, X86_64_RELOC_GOT\n",
                                         nm, reloc->r_extern));
 
             if (reloc->r_extern == 0) {
-                    LL_LOG_ERROR("\nrelocateSection: global offset table relocation for symbol with r_extern == 0\n");
+                    LL_LOG_ERROR_FOR(oc->L, "\nrelocateSection: global offset table relocation for symbol with r_extern == 0\n");
             }
 
             if (symbol->nlist->n_type & N_EXT) {
@@ -853,18 +853,18 @@ relocateSection(ObjectCode* oc, int curSection)
                     // to resolve it.
 
                     addr = lookupDependentSymbol(oc->L, nm, oc, NULL);
-                    LL_IF_DEBUG(linker_verbose,
-                             LL_DEBUG("relocateSection: looked up %s, "
+                    LL_IF_DEBUG_FOR(oc->L, linker_verbose,
+                             LL_DEBUG_FOR(oc->L, "relocateSection: looked up %s, "
                                         "external X86_64_RELOC_GOT or X86_64_RELOC_GOT_LOAD\n"
                                         "               : addr = %p\n", nm, addr));
 
                     if (addr == NULL) {
-                            LL_LOG_ERROR("\nlookupSymbol failed in relocateSection (RELOC_GOT)\n"
+                            LL_LOG_ERROR_FOR(oc->L, "\nlookupSymbol failed in relocateSection (RELOC_GOT)\n"
                                        "%s: unknown symbol `%s'", oc->fileName, nm);
                             return 0;
                     }
             } else {
-                    LL_IF_DEBUG(linker_verbose, LL_DEBUG("relocateSection: %s is not an exported symbol\n", nm));
+                    LL_IF_DEBUG_FOR(oc->L, linker_verbose, LL_DEBUG_FOR(oc->L, "relocateSection: %s is not an exported symbol\n", nm));
 
                     // The symbol is not exported, or defined in another
                     // module, so it must be in the current object module,
@@ -873,19 +873,19 @@ relocateSection(ObjectCode* oc, int curSection)
 
                     if ((symbol->nlist->n_type & N_TYPE) == N_SECT) {
                         if (symbol->addr == NULL) {
-                            LL_LOG_ERROR("relocateSection: address of internal symbol %s was not resolved\n", nm);
+                            LL_LOG_ERROR_FOR(oc->L, "relocateSection: address of internal symbol %s was not resolved\n", nm);
                             return 0;
                         }
 
                         addr = symbol->addr;
 
-                        LL_IF_DEBUG(linker_verbose,
-                                 LL_DEBUG("relocateSection: calculated relocation of "
+                        LL_IF_DEBUG_FOR(oc->L, linker_verbose,
+                                 LL_DEBUG_FOR(oc->L, "relocateSection: calculated relocation of "
                                             "non-external X86_64_RELOC_GOT or X86_64_RELOC_GOT_LOAD\n"));
-                        LL_IF_DEBUG(linker_verbose,
-                                 LL_DEBUG("               : addr = %p\n", addr));
+                        LL_IF_DEBUG_FOR(oc->L, linker_verbose,
+                                 LL_DEBUG_FOR(oc->L, "               : addr = %p\n", addr));
                     } else {
-                        LL_LOG_ERROR("\nrelocateSection: %s is not exported,"
+                        LL_LOG_ERROR_FOR(oc->L, "\nrelocateSection: %s is not exported,"
                                    " and should be defined in a section, but isn't!\n", nm);
                         return 0;
                     }
@@ -903,31 +903,31 @@ relocateSection(ObjectCode* oc, int curSection)
             ll_symbol_name* nm = symbol->name;
             ll_symbol_addr* addr = NULL;
 
-            LL_IF_DEBUG(linker_verbose, LL_DEBUG("relocateSection: looking up external symbol %s\n", nm));
-            LL_IF_DEBUG(linker_verbose, LL_DEBUG("               : type  = %d\n", symbol->nlist->n_type));
-            LL_IF_DEBUG(linker_verbose, LL_DEBUG("               : sect  = %d\n", symbol->nlist->n_sect));
-            LL_IF_DEBUG(linker_verbose, LL_DEBUG("               : desc  = %d\n", symbol->nlist->n_desc));
-            LL_IF_DEBUG(linker_verbose, LL_DEBUG("               : value = %p\n", (void *)symbol->nlist->n_value));
+            LL_IF_DEBUG_FOR(oc->L, linker_verbose, LL_DEBUG_FOR(oc->L, "relocateSection: looking up external symbol %s\n", nm));
+            LL_IF_DEBUG_FOR(oc->L, linker_verbose, LL_DEBUG_FOR(oc->L, "               : type  = %d\n", symbol->nlist->n_type));
+            LL_IF_DEBUG_FOR(oc->L, linker_verbose, LL_DEBUG_FOR(oc->L, "               : sect  = %d\n", symbol->nlist->n_sect));
+            LL_IF_DEBUG_FOR(oc->L, linker_verbose, LL_DEBUG_FOR(oc->L, "               : desc  = %d\n", symbol->nlist->n_desc));
+            LL_IF_DEBUG_FOR(oc->L, linker_verbose, LL_DEBUG_FOR(oc->L, "               : value = %p\n", (void *)symbol->nlist->n_value));
 
             if ((symbol->nlist->n_type & N_TYPE) == N_SECT) {
-                LL_CHECK(symbol->addr != NULL);
+                LL_CHECK_FOR(oc->L, symbol->addr != NULL);
                 value = (uint64_t) symbol->addr;
-                LL_IF_DEBUG(linker_verbose,
-                         LL_DEBUG("relocateSection, defined external symbol %s, relocated address %p\n",
+                LL_IF_DEBUG_FOR(oc->L, linker_verbose,
+                         LL_DEBUG_FOR(oc->L, "relocateSection, defined external symbol %s, relocated address %p\n",
                                     nm, (void *)value));
             }
             else {
                 addr = lookupDependentSymbol(oc->L, nm, oc, NULL);
                 if (addr == NULL)
                 {
-                     LL_LOG_ERROR("\nlookupSymbol failed in relocateSection (relocate external)\n"
+                     LL_LOG_ERROR_FOR(oc->L, "\nlookupSymbol failed in relocateSection (relocate external)\n"
                                 "%s: unknown symbol `%s'", oc->fileName, nm);
                      return 0;
                 }
 
                 value = (uint64_t) addr;
-                LL_IF_DEBUG(linker_verbose,
-                         LL_DEBUG("relocateSection: external symbol %s, address %p\n",
+                LL_IF_DEBUG_FOR(oc->L, linker_verbose,
+                         LL_DEBUG_FOR(oc->L, "relocateSection: external symbol %s, address %p\n",
                                     nm, (void *)value));
             }
         }
@@ -944,7 +944,7 @@ relocateSection(ObjectCode* oc, int curSection)
              * (1) needs to be updated due to different section placement in memory.
              */
 
-            LL_CHECKM(reloc->r_symbolnum > 0,
+            LL_CHECKM_FOR(oc->L, reloc->r_symbolnum > 0,
                    "relocateSection: unsupported r_symbolnum = %" PRIu32 " < 1 for internal relocation",
                    reloc->r_symbolnum);
 
@@ -952,25 +952,25 @@ relocateSection(ObjectCode* oc, int curSection)
             Section * targetSec = &oc->sections[targetSecNum];
             MachOSection * targetMacho = targetSec->info->macho_section;
 
-            LL_IF_DEBUG(linker_verbose,
-                     LL_DEBUG("relocateSection: internal relocation relative to section %d (%s, %s)\n",
+            LL_IF_DEBUG_FOR(oc->L, linker_verbose,
+                     LL_DEBUG_FOR(oc->L, "relocateSection: internal relocation relative to section %d (%s, %s)\n",
                                 targetSecNum, targetMacho->segname, targetMacho->sectname));
 
             switch (type) {
             case X86_64_RELOC_UNSIGNED: {
-                LL_CHECKM(thing >= targetMacho->addr,
+                LL_CHECKM_FOR(oc->L, thing >= targetMacho->addr,
                        "relocateSection: unsigned displacement %" PRIx64 "before target section start address %" PRIx64 "\n",
                        thing, (uint64_t) targetMacho->addr);
 
                 uint64_t thingRelativeOffset = thing - targetMacho->addr;
-                LL_IF_DEBUG(linker_verbose,
-                         LL_DEBUG("                 "
+                LL_IF_DEBUG_FOR(oc->L, linker_verbose,
+                         LL_DEBUG_FOR(oc->L, "                 "
                                     "unsigned displacement %" PRIx64 " with section relative offset %" PRIx64 "\n",
                                             thing, thingRelativeOffset));
 
                 thing = (uint64_t) targetSec->start + thingRelativeOffset;
-                LL_IF_DEBUG(linker_verbose,
-                         LL_DEBUG("                 "
+                LL_IF_DEBUG_FOR(oc->L, linker_verbose,
+                         LL_DEBUG_FOR(oc->L, "                 "
                                     "relocated address is %p\n", (void *) thing));
 
                 /* Compared to external relocation we don't need to adjust value
@@ -986,67 +986,67 @@ relocateSection(ObjectCode* oc, int curSection)
                 uint32_t baseValueOffset = reloc->r_address + relocLenBytes + nextInstrAdj;
                 uint64_t imThingLoc = msect->addr + baseValueOffset + (int64_t) thing;
 
-                LL_CHECKM(imThingLoc >= targetMacho->addr,
+                LL_CHECKM_FOR(oc->L, imThingLoc >= targetMacho->addr,
                        "relocateSection: target location %p in image before target section start address %p\n",
                        (void *) imThingLoc, (void *) targetMacho->addr);
 
                 int64_t thingRelativeOffset = imThingLoc - targetMacho->addr;
-                LL_IF_DEBUG(linker_verbose,
-                     LL_DEBUG("                 "
+                LL_IF_DEBUG_FOR(oc->L, linker_verbose,
+                     LL_DEBUG_FOR(oc->L, "                 "
                                 "original displacement %" PRId64 " to %p with section relative offset %" PRIu64 "\n",
                                 thing, (void *) imThingLoc, thingRelativeOffset));
 
                 thing = (int64_t) ((uint64_t) targetSec->start + thingRelativeOffset)
                                 - ((uint64_t) sect->start + baseValueOffset);
                 value = baseValue; // so that it further cancels out with baseValue
-                LL_IF_DEBUG(linker_verbose,
-                         LL_DEBUG("                 "
+                LL_IF_DEBUG_FOR(oc->L, linker_verbose,
+                         LL_DEBUG_FOR(oc->L, "                 "
                                     "relocated displacement %" PRId64 " to %p\n",
                                     (int64_t) thing, (void *) (baseValue + thing)));
                 break;
             }
             default:
-                LL_FATAL("relocateSection: unexpected internal relocation type %d\n", type);
+                LL_FATAL_FOR(oc->L, "relocateSection: unexpected internal relocation type %d\n", type);
                 return 0;
             }
         }
 
-        LL_IF_DEBUG(linker_verbose, LL_DEBUG("relocateSection: value = %p\n", (void *) value));
+        LL_IF_DEBUG_FOR(oc->L, linker_verbose, LL_DEBUG_FOR(oc->L, "relocateSection: value = %p\n", (void *) value));
 
         if (type == X86_64_RELOC_BRANCH)
         {
             if((int32_t)(value - baseValue) != (int64_t)(value - baseValue))
             {
-                LL_CHECK(reloc->r_extern);
+                LL_CHECK_FOR(oc->L, reloc->r_extern);
                 value = (uint64_t) &makeSymbolExtra(oc, reloc->r_symbolnum, value)
                                         -> jumpIsland;
             }
-            LL_CHECK((int32_t)(value - baseValue) == (int64_t)(value - baseValue));
+            LL_CHECK_FOR(oc->L, (int32_t)(value - baseValue) == (int64_t)(value - baseValue));
             type = X86_64_RELOC_SIGNED;
         }
 
         switch(type)
         {
             case X86_64_RELOC_UNSIGNED:
-                LL_CHECK(!reloc->r_pcrel);
+                LL_CHECK_FOR(oc->L, !reloc->r_pcrel);
                 thing += value;
                 break;
             case X86_64_RELOC_SIGNED:
             case X86_64_RELOC_SIGNED_1:
             case X86_64_RELOC_SIGNED_2:
             case X86_64_RELOC_SIGNED_4:
-                LL_CHECK(reloc->r_pcrel);
+                LL_CHECK_FOR(oc->L, reloc->r_pcrel);
                 thing += value - baseValue;
                 break;
             case X86_64_RELOC_SUBTRACTOR:
-                LL_CHECK(!reloc->r_pcrel);
+                LL_CHECK_FOR(oc->L, !reloc->r_pcrel);
                 thing -= value;
                 break;
             default:
-                LL_FATAL("unknown relocation");
+                LL_FATAL_FOR(oc->L, "unknown relocation");
         }
 
-        LL_IF_DEBUG(linker_verbose, LL_DEBUG("relocateSection: thing = %p\n", (void *) thing));
+        LL_IF_DEBUG_FOR(oc->L, linker_verbose, LL_DEBUG_FOR(oc->L, "relocateSection: thing = %p\n", (void *) thing));
 
         /* Thing points to memory within one of the relocated sections. We can
          * probe the first byte to sanity check internal relocations.
@@ -1076,7 +1076,7 @@ relocateSection(ObjectCode* oc, int curSection)
         }
     }
 
-    LL_IF_DEBUG(linker, LL_DEBUG("relocateSection: done\n"));
+    LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "relocateSection: done\n"));
     return 1;
 }
 #endif /* x86_64_HOST_ARCH */
@@ -1782,7 +1782,7 @@ ocRunFini_MachO ( ObjectCode *oc )
  * when loading so that its single segment ends up 16-byte-aligned
  */
 int
-machoGetMisalignment( FILE * f )
+machoGetMisalignment( ll_linker *L, FILE * f )
 {
     MachOHeader header;
     int misalignment;
@@ -1790,20 +1790,20 @@ machoGetMisalignment( FILE * f )
     {
         size_t n = fread(&header, sizeof(header), 1, f);
         if (n != 1) {
-            LL_FATAL("machoGetMisalignment: can't read the Mach-O header");
+            LL_FATAL_FOR(L, "machoGetMisalignment: can't read the Mach-O header");
         }
     }
     fseek(f, -sizeof(header), SEEK_CUR);
 
     if(header.magic != MH_MAGIC_64) {
-        LL_FATAL("Bad magic. Expected: %08x, got: %08x.",
+        LL_FATAL_FOR(L, "Bad magic. Expected: %08x, got: %08x.",
              MH_MAGIC_64, header.magic);
     }
 
     misalignment = (header.sizeofcmds + sizeof(header))
                     & 0xF;
 
-    LL_IF_DEBUG(linker, LL_DEBUG("mach-o misalignment %d\n", misalignment));
+    LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "mach-o misalignment %d\n", misalignment));
     return misalignment ? (16 - misalignment) : 0;
 }
 

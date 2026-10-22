@@ -4,6 +4,8 @@
 
 #include "MachOTypes.h"
 
+struct ll_linker;
+
 #include "ll_begin_private.h"
 
 void   ocInit_MachO                 ( ObjectCode* oc );
@@ -14,7 +16,7 @@ int    ocGetNames_MachO             ( ObjectCode* oc );
 int    ocResolve_MachO              ( ObjectCode* oc );
 int    ocRunInit_MachO              ( ObjectCode* oc );
 int    ocRunFini_MachO              ( ObjectCode* oc );
-int    machoGetMisalignment         ( FILE * );
+int    machoGetMisalignment         ( struct ll_linker *L, FILE * );
 int    ocAllocateExtras_MachO       ( ObjectCode* oc );
 
 SectionKind getSectionKind_MachO    ( MachOSection *macho );

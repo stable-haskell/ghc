@@ -1368,7 +1368,7 @@ preloadObjectFile (ll_linker *L, pathchar *path)
     // We calculate the correct alignment from the header before
     // reading the file, and then we misalign image on purpose so
     // that the actual sections end up aligned again.
-   misalignment = machoGetMisalignment(f);
+   misalignment = machoGetMisalignment(L, f);
    image = LL_MALLOC_FOR(L, fileSize + misalignment, "loadObj(image)");
    image += misalignment;
 
