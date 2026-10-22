@@ -47,12 +47,12 @@ findStub(Section * section,
 }
 
 bool
-makeStub(Section * section,
+makeStub(ll_linker *L, Section * section,
           void* * addr,
           uint8_t flags) {
 
-    Stub * s = (Stub *)LL_CALLOC(sizeof(Stub), 1, "makeStub");
-    LL_CHECK(s != NULL);
+    Stub * s = (Stub *)LL_CALLOC_FOR(L, sizeof(Stub), 1, "makeStub");
+    LL_CHECK_FOR(L, s != NULL);
     s->target = *addr;
     s->flags  = flags;
     s->next = NULL;
@@ -62,7 +62,7 @@ makeStub(Section * section,
         return EXIT_FAILURE;
 
     if(section->info->stubs == NULL) {
-        LL_CHECK(section->info->nstubs == 0);
+        LL_CHECK_FOR(L, section->info->nstubs == 0);
         /* no stubs yet, let's just create this one */
         section->info->stubs = s;
     } else {
@@ -76,14 +76,14 @@ makeStub(Section * section,
 }
 
 void
-freeStubs(Section * section) {
+freeStubs(ll_linker *L, Section * section) {
     if(NULL == section || section->info->nstubs == 0)
         return;
     Stub * last = section->info->stubs;
     while(last->next != NULL) {
         Stub * t = last;
         last = last->next;
-        LL_FREE(t);
+        LL_FREE_FOR(L, t);
     }
     section->info->stubs = NULL;
     section->info->nstubs = 0;

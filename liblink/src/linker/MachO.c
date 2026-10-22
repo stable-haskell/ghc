@@ -83,7 +83,7 @@ ocInit_MachO(ObjectCode * oc)
 {
     ocDeinit_MachO(oc);
 
-    oc->info = (struct ObjectCodeFormatInfo*)LL_CALLOC(
+    oc->info = (struct ObjectCodeFormatInfo*)LL_CALLOC_FOR(oc->L,
                 1, sizeof *oc->info,
                 "ocInit_MachO(ObjectCodeFormatInfo)");
     oc->info->header  = (MachOHeader *) oc->image;
@@ -105,7 +105,7 @@ ocInit_MachO(ObjectCode * oc)
         lc = (MachOLoadCommand *) ( ((char*)lc) + lc->cmdsize );
     }
     if (NULL == oc->info->segCmd) {
-        LL_FATAL("ocGetNames_MachO: no segment load command");
+        LL_FATAL_FOR(oc->L, "ocGetNames_MachO: no segment load command");
     }
 
     oc->info->macho_sections = (MachOSection*) (oc->info->segCmd+1);
@@ -126,7 +126,7 @@ ocInit_MachO(ObjectCode * oc)
 
     if(NULL != oc->info->nlist) {
         oc->info->n_macho_symbols = oc->info->symCmd->nsyms;
-        oc->info->macho_symbols = (MachOSymbol*)LL_CALLOC(
+        oc->info->macho_symbols = (MachOSymbol*)LL_CALLOC_FOR(oc->L,
                                     oc->info->symCmd->nsyms,
                                     sizeof(MachOSymbol),
                                     "ocInit_MachO(MachOSymbol)");
@@ -148,17 +148,17 @@ void
 ocDeinit_MachO(ObjectCode * oc) {
     if (oc->info != NULL) {
         if(oc->info->n_macho_symbols > 0) {
-            LL_FREE(oc->info->macho_symbols);
+            LL_FREE_FOR(oc->L, oc->info->macho_symbols);
         }
 #if defined(aarch64_HOST_ARCH)
         freeGot(oc);
         if(oc->sections != NULL) {
             for(int i = 0; i < oc->n_sections; i++) {
-                freeStubs(&oc->sections[i]);
+                freeStubs(oc->L, &oc->sections[i]);
             }
         }
 #endif
-        LL_FREE(oc->info);
+        LL_FREE_FOR(oc->L, oc->info);
         oc->info = NULL;
     }
 }
@@ -175,19 +175,19 @@ resolveImports(
 int
 ocAllocateExtras_MachO(ObjectCode* oc)
 {
-    LL_IF_DEBUG(linker, LL_DEBUG("ocAllocateExtras_MachO: start\n"));
+    LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "ocAllocateExtras_MachO: start\n"));
 
     if (NULL != oc->info->symCmd) {
-        LL_IF_DEBUG(linker,
-            LL_DEBUG("ocAllocateExtras_MachO: allocate %d symbols\n",
+        LL_IF_DEBUG_FOR(oc->L, linker,
+            LL_DEBUG_FOR(oc->L, "ocAllocateExtras_MachO: allocate %d symbols\n",
                 oc->info->symCmd->nsyms));
-        LL_IF_DEBUG(linker, LL_DEBUG("ocAllocateExtras_MachO: done\n"));
+        LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "ocAllocateExtras_MachO: done\n"));
         return ocAllocateExtras(oc, oc->info->symCmd->nsyms, 0, 0);
     }
 
-    LL_IF_DEBUG(linker,
-        LL_DEBUG("ocAllocateExtras_MachO: allocated no symbols\n"));
-    LL_IF_DEBUG(linker, LL_DEBUG("ocAllocateExtras_MachO: done\n"));
+    LL_IF_DEBUG_FOR(oc->L, linker,
+        LL_DEBUG_FOR(oc->L, "ocAllocateExtras_MachO: allocated no symbols\n"));
+    LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "ocAllocateExtras_MachO: done\n"));
     return ocAllocateExtras(oc, 0, 0, 0);
 }
 
@@ -202,10 +202,10 @@ ocVerifyImage_MachO(ObjectCode * oc)
     char *image = (char*) oc->image;
     MachOHeader *header = (MachOHeader*) image;
 
-    LL_IF_DEBUG(linker, LL_DEBUG("ocVerifyImage_MachO: start\n"));
+    LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "ocVerifyImage_MachO: start\n"));
 
     if(header->magic != MH_MAGIC_64) {
-        LL_LOG_ERROR("Could not load image %s: bad magic!\n"
+        LL_LOG_ERROR_FOR(oc->L, "Could not load image %s: bad magic!\n"
                    "  Expected %08x (64bit), got %08x%s\n",
                    oc->fileName, MH_MAGIC_64, header->magic,
                    header->magic == MH_MAGIC ? " (32bit)." : ".");
@@ -213,7 +213,7 @@ ocVerifyImage_MachO(ObjectCode * oc)
     }
 
     // FIXME: do some more verifying here
-    LL_IF_DEBUG(linker, LL_DEBUG("ocVerifyImage_MachO: done\n"));
+    LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "ocVerifyImage_MachO: done\n"));
     return 1;
 }
 
@@ -535,9 +535,9 @@ makeGot(ObjectCode * oc) {
 
     if(got_slots > 0) {
         oc->info->got_size =  got_slots * sizeof(void*);
-        oc->info->got_start = mmapAnonForLinker(oc->info->got_size);
+        oc->info->got_start = ll_mmap_anon_for_linker(oc->L, oc->info->got_size);
         if( oc->info->got_start == NULL ) {
-            LL_FATAL("MAP_FAILED. errno=%d", errno );
+            LL_FATAL_FOR(oc->L, "MAP_FAILED. errno=%d", errno );
             return EXIT_FAILURE;
         }
         /* update got_addr */
@@ -555,7 +555,7 @@ static void
 freeGot(ObjectCode * oc) {
     /* sanity check */
     if(NULL != oc->info->got_start && oc->info->got_size > 0) {
-        munmapForLinker(oc->info->got_start, oc->info->got_size, "freeGot");
+        ll_munmap_for_linker(oc->L, oc->info->got_start, oc->info->got_size, "freeGot");
     }
     oc->info->got_start = NULL;
     oc->info->got_size = 0;
@@ -678,7 +678,7 @@ relocateSectionAarch64(ObjectCode * oc, Section * section)
                     /* check if we already have that stub */
                     if(findStub(section, (void**)&value, 0)) {
                         /* did not find it. Crete a new stub. */
-                        if(makeStub(section, (void**)&value, 0)) {
+                        if(makeStub(oc->L, section, (void**)&value, 0)) {
                             LL_FATAL("could not find or make stub");
                         }
                     }
@@ -1134,7 +1134,7 @@ ocBuildSegments_MachO(ObjectCode *oc)
     for (int i = 0; i < oc->n_sections; i++) {
         MachOSection *macho = &oc->info->macho_sections[i];
         if (0 == macho->size) {
-            LL_IF_DEBUG(linker, LL_DEBUG("ocBuildSegments_MachO: found a zero length section, skipping\n"));
+            LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "ocBuildSegments_MachO: found a zero length section, skipping\n"));
             continue;
         }
 
@@ -1155,9 +1155,9 @@ ocBuildSegments_MachO(ObjectCode *oc)
         }
     }
 
-    size_compound = ll_round_up_to_page(size_rxSegment) +
-        ll_round_up_to_page(size_rwSegment) +
-        ll_round_up_to_page(size_gbZerofillSegment);
+    size_compound = ll_round_up_to_page_for(oc->L, size_rxSegment) +
+        ll_round_up_to_page_for(oc->L, size_rwSegment) +
+        ll_round_up_to_page_for(oc->L, size_gbZerofillSegment);
 
     if (n_rxSections > 0) {
         n_activeSegments++;
@@ -1174,15 +1174,15 @@ ocBuildSegments_MachO(ObjectCode *oc)
     // fail either here or further down the road, e.g. on size > 0 assert in
     // addProddableBlock. See #16701.
     if (0 == size_compound) {
-        LL_IF_DEBUG(linker, LL_DEBUG("ocBuildSegments_MachO: all segments are empty, skipping\n"));
+        LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "ocBuildSegments_MachO: all segments are empty, skipping\n"));
         return 1;
     }
 
-    mem = mmapAnonForLinker(size_compound);
+    mem = ll_mmap_anon_for_linker(oc->L, size_compound);
     if (NULL == mem) return 0;
 
-    LL_IF_DEBUG(linker, LL_DEBUG("ocBuildSegments: allocating %d segments\n", n_activeSegments));
-    segments = (Segment*)LL_CALLOC(n_activeSegments, sizeof(Segment),
+    LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "ocBuildSegments: allocating %d segments\n", n_activeSegments));
+    segments = (Segment*)LL_CALLOC_FOR(oc->L, n_activeSegments, sizeof(Segment),
                                         "ocBuildSegments_MachO(segments)");
     curMem = mem;
 
@@ -1191,10 +1191,10 @@ ocBuildSegments_MachO(ObjectCode *oc)
         rxSegment = &segments[curSegment];
         initSegment(oc->L, rxSegment,
                     curMem,
-                    ll_round_up_to_page(size_rxSegment),
+                    ll_round_up_to_page_for(oc->L, size_rxSegment),
                     SEGMENT_PROT_RX,
                     n_rxSections);
-        LL_IF_DEBUG(linker, LL_DEBUG("ocBuildSegments_MachO: init segment %d (RX) at %p size %zu\n",
+        LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "ocBuildSegments_MachO: init segment %d (RX) at %p size %zu\n",
                                     curSegment, rxSegment->start, rxSegment->size));
         curMem = (char *)curMem + rxSegment->size;
         curSegment++;
@@ -1205,10 +1205,10 @@ ocBuildSegments_MachO(ObjectCode *oc)
         rwSegment = &segments[curSegment];
         initSegment(oc->L, rwSegment,
                     curMem,
-                    ll_round_up_to_page(size_rwSegment),
+                    ll_round_up_to_page_for(oc->L, size_rwSegment),
                     SEGMENT_PROT_RWO,
                     n_rwSections);
-        LL_IF_DEBUG(linker, LL_DEBUG("ocBuildSegments_MachO: init segment %d (RWO) at %p size %zu\n",
+        LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "ocBuildSegments_MachO: init segment %d (RWO) at %p size %zu\n",
                                     curSegment, rwSegment->start, rwSegment->size));
         curMem = (char *)curMem + rwSegment->size;
         curSegment++;
@@ -1219,10 +1219,10 @@ ocBuildSegments_MachO(ObjectCode *oc)
         gbZerofillSegment = &segments[curSegment];
         initSegment(oc->L, gbZerofillSegment,
                     curMem,
-                    ll_round_up_to_page(size_gbZerofillSegment),
+                    ll_round_up_to_page_for(oc->L, size_gbZerofillSegment),
                     SEGMENT_PROT_RWO,
                     n_gbZerofills);
-        LL_IF_DEBUG(linker, LL_DEBUG("ocBuildSegments_MachO: init segment %d (GB_ZEROFILL) at %p size %zu\n",
+        LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "ocBuildSegments_MachO: init segment %d (GB_ZEROFILL) at %p size %zu\n",
                                     curSegment, gbZerofillSegment->start, gbZerofillSegment->size));
         curMem = (char *)curMem + gbZerofillSegment->size;
         curSegment++;
@@ -1264,27 +1264,27 @@ ocGetNames_MachO(ObjectCode* oc)
     ll_symbol_addr* commonStorage = NULL;
     unsigned long commonCounter;
 
-    LL_IF_DEBUG(linker,LL_DEBUG("ocGetNames_MachO: %s start\n",  OC_INFORMATIVE_FILENAME(oc)));
+    LL_IF_DEBUG_FOR(oc->L, linker,LL_DEBUG_FOR(oc->L, "ocGetNames_MachO: %s start\n",  OC_INFORMATIVE_FILENAME(oc)));
 
     Section *secArray;
-    secArray = (Section*)LL_CALLOC(
+    secArray = (Section*)LL_CALLOC_FOR(oc->L,
         oc->info->segCmd->nsects,
         sizeof(Section),
         "ocGetNames_MachO(sections)");
 
     oc->sections = secArray;
 
-    LL_IF_DEBUG(linker, LL_DEBUG("ocGetNames_MachO: will load %d sections\n",
+    LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "ocGetNames_MachO: will load %d sections\n",
                                 oc->n_sections));
 
-    LL_CHECKM(ocBuildSegments_MachO(oc), "ocGetNames_MachO: failed to build segments\n");
+    LL_CHECKM_FOR(oc->L, ocBuildSegments_MachO(oc), "ocGetNames_MachO: failed to build segments\n");
 
     for (int seg_n = 0; seg_n < oc->n_segments; seg_n++) {
         Segment *segment = &oc->segments[seg_n];
         void *curMem = segment->start;
 
-        LL_IF_DEBUG(linker,
-                 LL_DEBUG("ocGetNames_MachO: loading segment %d "
+        LL_IF_DEBUG_FOR(oc->L, linker,
+                 LL_DEBUG_FOR(oc->L, "ocGetNames_MachO: loading segment %d "
                             "(address = %p, size = %zu) "
                             "with %d sections\n",
                             seg_n, segment->start, segment->size, segment->n_sections));
@@ -1304,8 +1304,8 @@ ocGetNames_MachO(ObjectCode* oc)
 
             start = secMem;
 
-            LL_IF_DEBUG(linker,
-                     LL_DEBUG("ocGetNames_MachO: loading section %d in segment %d "
+            LL_IF_DEBUG_FOR(oc->L, linker,
+                     LL_DEBUG_FOR(oc->L, "ocGetNames_MachO: loading section %d in segment %d "
                                 "(#%d, %s %s)\n"
                                 "                  skipped %zu bytes due to alignment of %zu\n",
                                 sec_n, seg_n, sec_idx, section->segname, section->sectname,
@@ -1314,24 +1314,24 @@ ocGetNames_MachO(ObjectCode* oc)
             switch (section->flags & SECTION_TYPE) {
             case S_ZEROFILL:
             case S_GB_ZEROFILL:
-                LL_IF_DEBUG(linker, LL_DEBUG("ocGetNames_MachO: memset to 0 a ZEROFILL section\n"));
+                LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "ocGetNames_MachO: memset to 0 a ZEROFILL section\n"));
                 memset(secMem, 0, section->size);
                 addSection(oc->L, &secArray[sec_idx], kind, alloc, start, size,
                             mapped_offset, mapped_start, mapped_size);
                 break;
             default:
-                LL_IF_DEBUG(linker,
-                         LL_DEBUG("ocGetNames_MachO: copying from %p to %p"
+                LL_IF_DEBUG_FOR(oc->L, linker,
+                         LL_DEBUG_FOR(oc->L, "ocGetNames_MachO: copying from %p to %p"
                                     " a block of %" PRIu64 " bytes\n",
                                     (void *) (oc->image + section->offset), secMem, section->size));
 #if defined(NEED_PLT)
                 unsigned nstubs = numberOfStubsForSection(oc, sec_idx);
                 unsigned stub_space = STUB_SIZE * nstubs;
 
-                void * mem = mmapForLinker(section->size+stub_space, MEM_READ_WRITE, MAP_ANON, -1, 0);
+                void * mem = ll_mmap_for_linker(oc->L, section->size+stub_space, MEM_READ_WRITE, MAP_ANON, -1, 0);
 
                 if( mem == MAP_FAILED ) {
-                    LL_LOG_SYSERROR("failed to mmap allocated memory to load section %d. "
+                    LL_LOG_SYSERROR_FOR(oc->L, "failed to mmap allocated memory to load section %d. "
                                   "errno = %d", sec_idx, errno);
                 }
                 /* copy only the image part over; we don't want to copy data
@@ -1341,7 +1341,7 @@ ocGetNames_MachO(ObjectCode* oc)
 
                 alloc = SECTION_MMAP;
                 mapped_offset = 0;
-                mapped_size = ll_round_up_to_page(size+stub_space);
+                mapped_size = ll_round_up_to_page_for(oc->L, size+stub_space);
                 start = mem;
                 mapped_start = mem;
 #else
@@ -1382,7 +1382,7 @@ ocGetNames_MachO(ObjectCode* oc)
         MachOSymbol * s = &oc->info->macho_symbols[i];
         if( N_SECT == (s->nlist->n_type & N_TYPE) ) {
             if( NO_SECT == s->nlist->n_sect )
-                LL_FATAL("Symbol with N_SECT type, but no section.");
+                LL_FATAL_FOR(oc->L, "Symbol with N_SECT type, but no section.");
 
             /* section is given, and n_sect is >0 */
             uint8_t n = s->nlist->n_sect - 1;
@@ -1405,7 +1405,7 @@ ocGetNames_MachO(ObjectCode* oc)
                               - oc->info->macho_sections[n].addr
                               + s->nlist->n_value;
             if(NULL == s->addr)
-                LL_FATAL("Failed to compute address for symbol %s", s->name);
+                LL_FATAL_FOR(oc->L, "Failed to compute address for symbol %s", s->name);
         }
     }
 
@@ -1425,7 +1425,7 @@ ocGetNames_MachO(ObjectCode* oc)
                     /* Only allocate space for COMMON symbols not already
                      * defined by a previously-loaded object. */
                     ll_symbol_name *nm_c = oc->info->macho_symbols[i].name;
-                    if (!lookupStrHashTable(ll_default_linker.symhash, nm_c)) {
+                    if (!lookupStrHashTable(oc->L->symhash, nm_c)) {
                         commonSize += oc->info->nlist[i].n_value;
                     }
                 }
@@ -1439,9 +1439,9 @@ ocGetNames_MachO(ObjectCode* oc)
      * which symbols will have to be removed when
      * this object code is unloaded
      */
-    LL_IF_DEBUG(linker, LL_DEBUG("ocGetNames_MachO: %d external symbols\n",
+    LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "ocGetNames_MachO: %d external symbols\n",
                                 oc->n_symbols));
-    oc->symbols = LL_CALLOC(oc->n_symbols, sizeof(Symbol_t),
+    oc->symbols = LL_CALLOC_FOR(oc->L, oc->n_symbols, sizeof(Symbol_t),
                                    "ocGetNames_MachO(oc->symbols)");
 
     if (oc->info->symCmd) {
@@ -1449,7 +1449,7 @@ ocGetNames_MachO(ObjectCode* oc)
             ll_symbol_name* nm = oc->info->macho_symbols[i].name;
             if (oc->info->nlist[i].n_type & N_STAB)
             {
-                LL_IF_DEBUG(linker_verbose, LL_DEBUG("ocGetNames_MachO: Skip STAB: %s\n", nm));
+                LL_IF_DEBUG_FOR(oc->L, linker_verbose, LL_DEBUG_FOR(oc->L, "ocGetNames_MachO: Skip STAB: %s\n", nm));
             }
             else if ((oc->info->nlist[i].n_type & N_TYPE) == N_SECT)
             {
@@ -1458,11 +1458,11 @@ ocGetNames_MachO(ObjectCode* oc)
                     if (   (oc->info->nlist[i].n_desc & N_WEAK_DEF)
                         && lookupDependentSymbol(oc->L, nm, oc, NULL)) {
                         // weak definition, and we already have a definition
-                        LL_IF_DEBUG(linker_verbose, LL_DEBUG("    weak: %s\n", nm));
+                        LL_IF_DEBUG_FOR(oc->L, linker_verbose, LL_DEBUG_FOR(oc->L, "    weak: %s\n", nm));
                     }
                     else
                     {
-                            LL_IF_DEBUG(linker_verbose, LL_DEBUG("ocGetNames_MachO: inserting %s\n", nm));
+                            LL_IF_DEBUG_FOR(oc->L, linker_verbose, LL_DEBUG_FOR(oc->L, "ocGetNames_MachO: inserting %s\n", nm));
                             ll_symbol_addr* addr = oc->info->macho_symbols[i].addr;
                             // TODO: Make figure out how to determine this from the object file
                             ll_sym_type sym_type = LL_SYM_CODE;
@@ -1483,19 +1483,19 @@ ocGetNames_MachO(ObjectCode* oc)
                 }
                 else
                 {
-                    LL_IF_DEBUG(linker_verbose, LL_DEBUG("ocGetNames_MachO: \t...not external, skipping %s\n", nm));
+                    LL_IF_DEBUG_FOR(oc->L, linker_verbose, LL_DEBUG_FOR(oc->L, "ocGetNames_MachO: \t...not external, skipping %s\n", nm));
                 }
             }
             else
             {
-                LL_IF_DEBUG(linker_verbose, LL_DEBUG("ocGetNames_MachO: \t...not defined in this section, skipping %s\n", nm));
+                LL_IF_DEBUG_FOR(oc->L, linker_verbose, LL_DEBUG_FOR(oc->L, "ocGetNames_MachO: \t...not defined in this section, skipping %s\n", nm));
             }
         }
     }
 
     /* setup the common storage */
     if (commonSize > 0) {
-        commonStorage = LL_CALLOC(1, commonSize, "ocGetNames_MachO(common symbols)");
+        commonStorage = LL_CALLOC_FOR(oc->L, 1, commonSize, "ocGetNames_MachO(common symbols)");
         commonCounter = (unsigned long)commonStorage;
     }
 
@@ -1510,13 +1510,13 @@ ocGetNames_MachO(ObjectCode* oc)
                 /* TODO: Figure out how to determine this from object */
                 ll_sym_type sym_type = LL_SYM_CODE;
 
-                RtsSymbolInfo *existing = lookupStrHashTable(ll_default_linker.symhash, nm);
+                RtsSymbolInfo *existing = lookupStrHashTable(oc->L->symhash, nm);
                 if (existing != NULL) {
                     /* COMMON symbol already allocated by a previously-loaded
                      * object; reuse that address so relocations resolve to
                      * the same storage. */
                     if (sz > existing->size) {
-                        LL_FATAL("linker: trying to link COMMON symbols %s with"
+                        LL_FATAL_FOR(oc->L, "linker: trying to link COMMON symbols %s with"
                              " incompatible sizes: previous size %llu,"
                              " new size %lu\n",
                              nm,
@@ -1525,8 +1525,8 @@ ocGetNames_MachO(ObjectCode* oc)
                     }
                     nlist->n_value = (unsigned long)existing->value;
                     oc->info->macho_symbols[i].addr = existing->value;
-                    LL_IF_DEBUG(linker_verbose,
-                             LL_DEBUG("ocGetNames_MachO: COMMON symbol %s"
+                    LL_IF_DEBUG_FOR(oc->L, linker_verbose,
+                             LL_DEBUG_FOR(oc->L, "ocGetNames_MachO: COMMON symbol %s"
                                         " reusing address %p\n",
                                         nm, existing->value));
                     /* Don't add to oc->symbols: not the owner */
@@ -1535,8 +1535,8 @@ ocGetNames_MachO(ObjectCode* oc)
                     /* also set the final address to the macho_symbol */
                     oc->info->macho_symbols[i].addr = (void*)commonCounter;
 
-                    LL_IF_DEBUG(linker_verbose,
-                             LL_DEBUG("ocGetNames_MachO: inserting common symbol: %s\n", nm));
+                    LL_IF_DEBUG_FOR(oc->L, linker_verbose,
+                             LL_DEBUG_FOR(oc->L, "ocGetNames_MachO: inserting common symbol: %s\n", nm));
                     ghciInsertSymbolTable(oc->L, oc->fileName, nm,
                                          (void*)commonCounter, LL_HS_BOOL_FALSE,
                                          sym_type,
@@ -1574,7 +1574,7 @@ ocGetNames_MachO(ObjectCode* oc)
      * - those that are undefined, but have a value (common storage).
      */
 #endif
-    LL_IF_DEBUG(linker, LL_DEBUG("ocGetNames_MachO: done\n"));
+    LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "ocGetNames_MachO: done\n"));
     return 1;
 }
 
@@ -1586,7 +1586,7 @@ ocMprotect_MachO( ObjectCode *oc )
         if(segment->size == 0) continue;
 
         if(segment->prot == SEGMENT_PROT_RX) {
-            mprotectForLinker(segment->start, segment->size, MEM_READ_EXECUTE);
+            ll_mprotect_for_linker(oc->L, segment->start, segment->size, MEM_READ_EXECUTE);
         }
     }
 
@@ -1601,7 +1601,7 @@ ocMprotect_MachO( ObjectCode *oc )
         if(section->alloc == SECTION_M32) continue;
         switch (section->kind) {
         case SECTIONKIND_CODE_OR_RODATA: {
-            mprotectForLinker(section->mapped_start, section->mapped_size, MEM_READ_EXECUTE);
+            ll_mprotect_for_linker(oc->L, section->mapped_start, section->mapped_size, MEM_READ_EXECUTE);
             break;
         }
         default:
@@ -1615,19 +1615,19 @@ ocMprotect_MachO( ObjectCode *oc )
 int
 ocResolve_MachO(ObjectCode* oc)
 {
-    LL_IF_DEBUG(linker, LL_DEBUG("ocResolve_MachO: %s start\n", OC_INFORMATIVE_FILENAME(oc)));
+    LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "ocResolve_MachO: %s start\n", OC_INFORMATIVE_FILENAME(oc)));
 
     if(NULL != oc->info->dsymCmd)
     {
         unsigned long *indirectSyms
             = (unsigned long*) (oc->image + oc->info->dsymCmd->indirectsymoff);
 
-        LL_IF_DEBUG(linker, LL_DEBUG("ocResolve_MachO: resolving dsymLC\n"));
+        LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "ocResolve_MachO: resolving dsymLC\n"));
         for (int i = 0; i < oc->n_sections; i++)
         {
             const char * sectionName = oc->info->macho_sections[i].sectname;
 
-            LL_IF_DEBUG(linker, LL_DEBUG("ocResolve_MachO: section %d/%d: %s\n", i, oc->n_sections, sectionName));
+            LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "ocResolve_MachO: section %d/%d: %s\n", i, oc->n_sections, sectionName));
 
             if(    !strcmp(sectionName,"__la_symbol_ptr")
                 || !strcmp(sectionName,"__la_sym_ptr2")
@@ -1652,7 +1652,7 @@ ocResolve_MachO(ObjectCode* oc)
             }
             else
             {
-                LL_IF_DEBUG(linker, LL_DEBUG("ocResolve_MachO: unknown section %d/%d\n", i, oc->n_sections));
+                LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "ocResolve_MachO: unknown section %d/%d\n", i, oc->n_sections));
             }
         }
     }
@@ -1668,7 +1668,7 @@ ocResolve_MachO(ObjectCode* oc)
                 if(NULL == symbol->addr) {
                     symbol->addr = lookupDependentSymbol(oc->L, (char*)symbol->name, oc, NULL);
                     if(NULL == symbol->addr) {
-                        LL_LOG_ERROR("Failed to lookup symbol: %s", symbol->name);
+                        LL_LOG_ERROR_FOR(oc->L, "Failed to lookup symbol: %s", symbol->name);
                         return 0;
                     }
                 } else {
@@ -1679,11 +1679,11 @@ ocResolve_MachO(ObjectCode* oc)
                * the address as well already
                */
             if(NULL == symbol->addr) {
-                LL_LOG_ERROR("Symbol %s has no address!\n", (char*)symbol->name);
+                LL_LOG_ERROR_FOR(oc->L, "Symbol %s has no address!\n", (char*)symbol->name);
                 return 0;
             }
             if(NULL == symbol->got_addr) {
-                LL_LOG_ERROR("Symbol %s has no Global Offset Table address!\n", (char*)symbol->name);
+                LL_LOG_ERROR_FOR(oc->L, "Symbol %s has no Global Offset Table address!\n", (char*)symbol->name);
                 return 0;
             }
             *(uint64_t*)symbol->got_addr = (uint64_t)symbol->addr;
@@ -1693,7 +1693,7 @@ ocResolve_MachO(ObjectCode* oc)
 
     for(int i = 0; i < oc->n_sections; i++)
     {
-        LL_IF_DEBUG(linker, LL_DEBUG("ocResolve_MachO: relocating section %d/%d\n", i, oc->n_sections));
+        LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "ocResolve_MachO: relocating section %d/%d\n", i, oc->n_sections));
 
 #if defined(aarch64_HOST_ARCH)
         if (!relocateSectionAarch64(oc, &oc->sections[i]))
@@ -1713,21 +1713,21 @@ int
 ocRunInit_MachO ( ObjectCode *oc )
 {
     if (NULL == oc->info->segCmd) {
-        LL_FATAL("ocRunInit_MachO: no segment load command");
+        LL_FATAL_FOR(oc->L, "ocRunInit_MachO: no segment load command");
     }
 
     int argc = 0, envc = 0;
     char **argv = NULL, **envv = NULL;
 
-    if (ll_host.prog_args != NULL) {
-        ll_host.prog_args(ll_host.ctx, &argc, &argv, &envc, &envv);
+    if (oc->L->services.host.prog_args != NULL) {
+        oc->L->services.host.prog_args(oc->L->services.host.ctx, &argc, &argv, &envc, &envv);
     }
 
     for (int i = 0; i < oc->n_sections; i++) {
-        LL_IF_DEBUG(linker, LL_DEBUG("ocRunInit_MachO: checking section %d\n", i));
+        LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "ocRunInit_MachO: checking section %d\n", i));
 
         if (oc->sections[i].kind == SECTIONKIND_INIT_ARRAY) {
-            LL_IF_DEBUG(linker, LL_DEBUG("ocRunInit_MachO:     running mod init functions\n"));
+            LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "ocRunInit_MachO:     running mod init functions\n"));
 
             void *init_startC = oc->sections[i].start;
             init_t *init = (init_t*)init_startC;
@@ -1735,15 +1735,15 @@ ocRunInit_MachO ( ObjectCode *oc )
                              + oc->sections[i].info->macho_section->size);
 
             for (int pn = 0; init < init_end; init++, pn++) {
-                LL_IF_DEBUG(linker, LL_DEBUG("ocRunInit_MachO:     function pointer %d at %p to %p\n",
+                LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "ocRunInit_MachO:     function pointer %d at %p to %p\n",
                                             pn, (void *) init, (void *) *init));
                 (*init)(argc, argv, envv);
             }
         }
     }
 
-    if (ll_host.free_prog_env != NULL) {
-        ll_host.free_prog_env(ll_host.ctx, envc, envv);
+    if (oc->L->services.host.free_prog_env != NULL) {
+        oc->L->services.host.free_prog_env(oc->L->services.host.ctx, envc, envv);
     }
     return 1;
 }
@@ -1752,14 +1752,14 @@ int
 ocRunFini_MachO ( ObjectCode *oc )
 {
     if (NULL == oc->info->segCmd) {
-        LL_FATAL("ocRunInit_MachO: no segment load command");
+        LL_FATAL_FOR(oc->L, "ocRunInit_MachO: no segment load command");
     }
 
     for (int i = 0; i < oc->n_sections; i++) {
-        LL_IF_DEBUG(linker, LL_DEBUG("ocRunFini_MachO: checking section %d\n", i));
+        LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "ocRunFini_MachO: checking section %d\n", i));
 
         if (oc->sections[i].kind == SECTIONKIND_FINI_ARRAY) {
-            LL_IF_DEBUG(linker, LL_DEBUG("ocRunFini_MachO:     running mod fini functions\n"));
+            LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "ocRunFini_MachO:     running mod fini functions\n"));
 
             void *fini_startC = oc->sections[i].start;
             fini_t *fini = (fini_t*)fini_startC;
@@ -1767,7 +1767,7 @@ ocRunFini_MachO ( ObjectCode *oc )
                              + oc->sections[i].info->macho_section->size);
 
             for (int pn = 0; fini < fini_end; fini++, pn++) {
-                LL_IF_DEBUG(linker, LL_DEBUG("ocRunFini_MachO:     function pointer %d at %p to %p\n",
+                LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "ocRunFini_MachO:     function pointer %d at %p to %p\n",
                                             pn, (void *) fini, (void *) *fini));
                 (*fini)();
             }
