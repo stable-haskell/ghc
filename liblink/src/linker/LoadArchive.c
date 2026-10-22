@@ -632,8 +632,8 @@ ll_hs_int loadArchive_ (pathchar *path)
                 if (ll_host.object_registered != NULL) {
                     ll_host.object_registered(ll_host.ctx, oc); // also adds the object to `objects` list
                 }
-                oc->next_loaded_object = loaded_objects;
-                loaded_objects = oc;
+                oc->next_loaded_object = ll_default_linker.gc.loaded_objects;
+                ll_default_linker.gc.loaded_objects = oc;
             }
         }
         else if (isGnuIndex) {
@@ -720,9 +720,9 @@ fail:
 
 ll_hs_int loadArchive (pathchar *path)
 {
-   ll_mutex_lock(&linker_mutex);
+   ll_mutex_lock(&ll_default_linker.linker_mutex);
    ll_hs_int r = loadArchive_(path);
-   ll_mutex_unlock(&linker_mutex);
+   ll_mutex_unlock(&ll_default_linker.linker_mutex);
    return r;
 }
 

@@ -91,11 +91,6 @@ ll_gc_state *ll_compat_default_gc_state(void)
     return &ll_default_linker.gc;
 }
 
-
-/* These globals are temporary: stage 2 moves them into each linker instance. */
-ll_compat_host_ops ll_host = DEFAULT_HOST;
-ll_compat_config ll_cfg;
-
 void ll_install_host(const ll_compat_host_ops *host, const ll_compat_config *cfg)
 {
     ll_compat_host_ops installed = DEFAULT_HOST;

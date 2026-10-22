@@ -263,15 +263,16 @@ static int copy_preinit_layout(RunnerState *state, ObjectCode *object)
 static void register_object(void *ctx, ObjectCode *object)
 {
     RunnerState *state = ctx;
+    ll_gc_state *gc = ll_compat_default_gc_state();
     if (state->object != NULL) {
         fputs("runner accepts exactly one loaded object\n", stderr);
         abort();
     }
-    if (objects != NULL) {
-        objects->prev = object;
+    if (gc->objects != NULL) {
+        gc->objects->prev = object;
     }
-    object->next = objects;
-    objects = object;
+    object->next = gc->objects;
+    gc->objects = object;
     state->object = object;
     if (!copy_sections(state, object, false)) {
         abort();

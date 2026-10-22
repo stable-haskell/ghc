@@ -14,6 +14,7 @@
 
 #include "BeginPrivate.h"
 
+void setUnloadLinkerState(ll_gc_state *state);
 void initUnloadCheck(void);
 void exitUnloadCheck(void);
 

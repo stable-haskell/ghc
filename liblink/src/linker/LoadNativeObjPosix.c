@@ -73,7 +73,7 @@ static void copyErrmsg(char** errmsg_dest, char* errmsg) {
 }
 
 void freeNativeCode_POSIX (ObjectCode *nc) {
-  ll_assert_lock_held(&linker_mutex);
+  ll_assert_lock_held(&ll_default_linker.linker_mutex);
 
   dlclose(nc->dlopen_handle);
 
@@ -111,7 +111,7 @@ void * loadNativeObj_POSIX (pathchar *path, char **errmsg)
    ObjectCode* nc;
    void *hdl, *retval;
 
-   ll_assert_lock_held(&linker_mutex);
+   ll_assert_lock_held(&ll_default_linker.linker_mutex);
 
    LL_IF_DEBUG(linker, LL_DEBUG("loadNativeObj_POSIX %" PATH_FMT "\n", path));
 
@@ -225,8 +225,8 @@ try_again:
        ll_host.object_registered(ll_host.ctx, nc);
    }
 
-   nc->next_loaded_object = loaded_objects;
-   loaded_objects = nc;
+   nc->next_loaded_object = ll_default_linker.gc.loaded_objects;
+   ll_default_linker.gc.loaded_objects = nc;
 
    retval = nc->dlopen_handle;
 

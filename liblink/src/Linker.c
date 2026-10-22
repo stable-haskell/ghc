@@ -183,41 +183,6 @@ extern void iconv(void);
    2) The number of duplicate symbols, since now only symbols that are
       true duplicates will display the error.
  */
-StrHashTable *symhash;
-
-/* This protects all the Linker's global state in every RTS way. */
-ll_mutex linker_mutex;
-
-uint8_t object_code_mark_bit = 0;
-
-// List of currently live objects. Moved to `old_objects` before unload check.
-// Marked objects moved back to this list in `markObjectLive`. Remaining objects
-// are freed at the end of `checkUnload`.
-//
-// Double-linked list to be able to remove marked objects. List formed with
-// `next` and `prev` fields of `ObjectCode`.
-//
-// Not static: used in Linker.c.
-ObjectCode *objects = NULL;
-
-// Number of objects that we want to unload. When this value is 0 we skip static
-// object marking during GC and `checkUnload`.
-//
-// Not static: we use this value to skip static object marking in evacuate when
-// this is 0.
-//
-// Incremented in `unloadObj_`, decremented as we unload objects in
-// `checkUnload`.
-int n_unloaded_objects = 0;
-
-// List of objects that we don't want to unload (i.e. we haven't called
-// unloadObj on these yet). Used as root set for unload check in checkUnload.
-// Objects are added with loadObj_ and removed with unloadObj_.
-//
-// List formed with `next_loaded_object` field of `ObjectCode`.
-//
-// Not static: used in Linker.c.
-ObjectCode *loaded_objects;
 
 /* Generic wrapper function to try and resolve oc files */
 static int ocTryLoad( ObjectCode* oc );
@@ -452,13 +417,6 @@ static void insertBuiltin(void *ctx, const char *name, void *addr,
     }
 }
 
-static int linker_init_done = 0 ;
-
-#if defined(OBJFORMAT_ELF) || defined(OBJFORMAT_MACHO)
-static void *dl_prog_handle;
-regex_t re_invalid;
-regex_t re_realso;
-#endif
 
 void initLinker (void)
 {
@@ -480,39 +438,39 @@ initLinker_ (int retain_cafs)
     /* Make initLinker idempotent, so we can call it
        before every relevant operation; that means we
        don't need to initialise the linker separately */
-    if (linker_init_done == 1) {
+    if (ll_default_linker.linker_init_done == 1) {
         LL_IF_DEBUG(linker, LL_DEBUG("initLinker: idempotent return\n"));
         return;
     } else {
-        linker_init_done = 1;
+        ll_default_linker.linker_init_done = 1;
     }
 
     if (ll_host.init_unload_check != NULL) {
         ll_host.init_unload_check(ll_host.ctx);
     }
 
-    ll_mutex_init(&linker_mutex);
+    ll_mutex_init(&ll_default_linker.linker_mutex);
 
-    symhash = allocStrHashTable();
+    ll_default_linker.symhash = allocStrHashTable();
 
     if (ll_host.populate_builtins != NULL) {
-        ll_host.populate_builtins(ll_host.ctx, retain_cafs, insertBuiltin, symhash);
+        ll_host.populate_builtins(ll_host.ctx, retain_cafs, insertBuiltin, ll_default_linker.symhash);
     }
 
 #   if defined(OBJFORMAT_ELF) || defined(OBJFORMAT_MACHO)
 #   if defined(RTLD_DEFAULT)
-    dl_prog_handle = RTLD_DEFAULT;
+    ll_default_linker.dl_prog_handle = RTLD_DEFAULT;
 #   else
-    dl_prog_handle = dlopen(NULL, RTLD_LAZY);
+    ll_default_linker.dl_prog_handle = dlopen(NULL, RTLD_LAZY);
 #   endif /* RTLD_DEFAULT */
 
-    compileResult = regcomp(&re_invalid,
+    compileResult = regcomp(&ll_default_linker.re_invalid,
            "(([^ \t()])+\\.so([^ \t:()])*):([ \t])*(invalid ELF header|file too short|invalid file format|Exec format error)",
            REG_EXTENDED);
     if (compileResult != 0) {
         LL_FATAL("Compiling re_invalid failed");
     }
-    compileResult = regcomp(&re_realso,
+    compileResult = regcomp(&ll_default_linker.re_realso,
            "(GROUP|INPUT) *\\( *([^ )]+)",
            REG_EXTENDED);
     if (compileResult != 0) {
@@ -531,18 +489,18 @@ initLinker_ (int retain_cafs)
 void
 exitLinker( void ) {
 #if defined(OBJFORMAT_ELF) || defined(OBJFORMAT_MACHO)
-   if (linker_init_done == 1) {
-      regfree(&re_invalid);
-      regfree(&re_realso);
+   if (ll_default_linker.linker_init_done == 1) {
+      regfree(&ll_default_linker.re_invalid);
+      regfree(&ll_default_linker.re_realso);
    }
 #endif
-   if (linker_init_done == 1) {
-       freeStrHashTable(symhash, free);
+   if (ll_default_linker.linker_init_done == 1) {
+       freeStrHashTable(ll_default_linker.symhash, free);
        if (ll_host.exit_unload_check != NULL) {
            ll_host.exit_unload_check(ll_host.ctx);
        }
    }
-   ll_mutex_close(&linker_mutex);
+   ll_mutex_close(&ll_default_linker.linker_mutex);
 }
 
 /* -----------------------------------------------------------------------------
@@ -590,19 +548,19 @@ internal_dlsym(const char *symbol) {
     void *v;
 
     // concurrent dl* calls may alter dlerror
-    ll_assert_lock_held(&linker_mutex);
+    ll_assert_lock_held(&ll_default_linker.linker_mutex);
 
     // clears dlerror
     dlerror();
 
     // look in program first
-    v = dlsym(dl_prog_handle, symbol);
+    v = dlsym(ll_default_linker.dl_prog_handle, symbol);
     if (dlerror() == NULL) {
         LL_IF_DEBUG(linker, LL_DEBUG("internal_dlsym: found symbol '%s' in program\n", symbol));
         return v;
     }
 
-    for (ObjectCode *nc = loaded_objects; nc; nc = nc->next_loaded_object) {
+    for (ObjectCode *nc = ll_default_linker.gc.loaded_objects; nc; nc = nc->next_loaded_object) {
         if (nc->type == DYNAMIC_OBJECT) {
           v = dlsym(nc->dlopen_handle, symbol);
           if (dlerror() == NULL) {
@@ -654,7 +612,7 @@ internal_dlsym(const char *symbol) {
 
 void *lookupSymbolInNativeObj(void *handle, const char *symbol_name)
 {
-    ll_mutex_lock(&linker_mutex);
+    ll_mutex_lock(&ll_default_linker.linker_mutex);
 
 #if defined(OBJFORMAT_MACHO)
     // The Mach-O standard says ccall symbols representing a function are prefixed with _
@@ -673,7 +631,7 @@ void *lookupSymbolInNativeObj(void *handle, const char *symbol_name)
     LL_FATAL("lookupSymbolInNativeObj: Unsupported platform");
 #endif
 
-    ll_mutex_unlock(&linker_mutex);
+    ll_mutex_unlock(&ll_default_linker.linker_mutex);
     return result;
 }
 
@@ -715,10 +673,9 @@ pathchar* findSystemLibrary(pathchar* dll_name)
 */
 void warnMissingKBLibraryPaths( void )
 {
-    static ll_hs_bool missing_update_warn = LL_HS_BOOL_FALSE;
-    if (!missing_update_warn) {
+    if (!ll_default_linker.missing_update_warn) {
         LL_DEBUG("Warning: If linking fails, consider installing KB2533623.\n");
-        missing_update_warn = LL_HS_BOOL_TRUE;
+        ll_default_linker.missing_update_warn = LL_HS_BOOL_TRUE;
     }
 }
 
@@ -766,7 +723,7 @@ ll_hs_bool removeLibrarySearchPath(ll_hs_ptr dll_path_index)
  */
 ll_hs_int insertSymbol(pathchar* obj_name, ll_symbol_name* key, ll_symbol_addr* data)
 {
-    return ghciInsertSymbolTable(obj_name, symhash, key, data, LL_HS_BOOL_FALSE,
+    return ghciInsertSymbolTable(obj_name, ll_default_linker.symhash, key, data, LL_HS_BOOL_FALSE,
                                  LL_SYM_CODE, 0, NULL);
 }
 
@@ -779,7 +736,7 @@ ll_hs_int insertSymbol(pathchar* obj_name, ll_symbol_name* key, ll_symbol_addr* 
 #if defined(OBJFORMAT_PEi386)
 ll_symbol_addr* lookupDependentSymbol (ll_symbol_name* lbl, ObjectCode *dependent, ll_sym_type *type)
 {
-    ll_assert_lock_held(&linker_mutex);
+    ll_assert_lock_held(&ll_default_linker.linker_mutex);
     return lookupSymbol_PEi386(lbl, dependent, type);
 }
 
@@ -787,10 +744,10 @@ ll_symbol_addr* lookupDependentSymbol (ll_symbol_name* lbl, ObjectCode *dependen
 
 ll_symbol_addr* lookupDependentSymbol (ll_symbol_name* lbl, ObjectCode *dependent, ll_sym_type *type)
 {
-    ll_assert_lock_held(&linker_mutex);
+    ll_assert_lock_held(&ll_default_linker.linker_mutex);
     LL_IF_DEBUG(linker_verbose, LL_DEBUG("lookupSymbol: looking up '%s'\n", lbl));
 
-    LL_ASSERT(symhash != NULL);
+    LL_ASSERT(ll_default_linker.symhash != NULL);
     RtsSymbolInfo *pinfo;
 
     /* See Note [Resolving __dso_handle] */
@@ -817,7 +774,7 @@ ll_symbol_addr* lookupDependentSymbol (ll_symbol_name* lbl, ObjectCode *dependen
     }
 #endif
 
-    if (!ghciLookupSymbolInfo(symhash, lbl, &pinfo)) {
+    if (!ghciLookupSymbolInfo(ll_default_linker.symhash, lbl, &pinfo)) {
         LL_IF_DEBUG(linker_verbose, LL_DEBUG("lookupSymbol: symbol '%s' not found, trying dlsym\n", lbl));
 
 #       if defined(OBJFORMAT_ELF)
@@ -835,8 +792,7 @@ ll_symbol_addr* lookupDependentSymbol (ll_symbol_name* lbl, ObjectCode *dependen
         //
         // [1] https://wiki.gentoo.org/wiki/Hardened/Introduction_to_Position_Independent_Code
         if (ret == NULL && strcmp(lbl, "_DYNAMIC") == 0) {
-            static void *RTS_DYNAMIC = NULL;
-            ret = (ll_symbol_addr *) &RTS_DYNAMIC;
+            ret = (ll_symbol_addr *) &ll_default_linker.rts_dynamic;
             if (type) {
                 *type = LL_SYM_DATA;
             }
@@ -866,9 +822,8 @@ ll_symbol_addr* lookupDependentSymbol (ll_symbol_name* lbl, ObjectCode *dependen
 #       error No OBJFORMAT_* macro set
 #       endif
     } else {
-        static void *RTS_NO_FINI = NULL;
-        if (strcmp(lbl, "__fini_array_end") == 0) { return (ll_symbol_addr *) &RTS_NO_FINI; }
-        if (strcmp(lbl, "__fini_array_start") == 0) { return (ll_symbol_addr *) &RTS_NO_FINI; }
+        if (strcmp(lbl, "__fini_array_end") == 0) { return (ll_symbol_addr *) &ll_default_linker.rts_no_fini; }
+        if (strcmp(lbl, "__fini_array_start") == 0) { return (ll_symbol_addr *) &ll_default_linker.rts_no_fini; }
         if (type) {
             // This is an assumption
             *type = pinfo->type;
@@ -938,7 +893,7 @@ ll_symbol_addr* loadSymbol(ll_symbol_name *lbl, RtsSymbolInfo *pinfo) {
 void
 printLoadedObjects(void) {
     ObjectCode* oc;
-    for (oc = objects; oc; oc = oc->next) {
+    for (oc = ll_default_linker.gc.objects; oc; oc = oc->next) {
         if (oc->sections != NULL) {
             int i;
             printf("%" PATH_FMT "\n", OC_INFORMATIVE_FILENAME(oc));
@@ -958,7 +913,7 @@ printLoadedObjects(void) {
 
 ll_symbol_addr* lookupSymbol( ll_symbol_name* lbl )
 {
-    ll_mutex_lock(&linker_mutex);
+    ll_mutex_lock(&ll_default_linker.linker_mutex);
     // NULL for "don't add dependent". When adding a dependency we call
     // lookupDependentSymbol directly.
     ll_symbol_addr* r = lookupDependentSymbol(lbl, NULL, NULL);
@@ -982,7 +937,7 @@ ll_symbol_addr* lookupSymbol( ll_symbol_name* lbl )
     if (!runPendingInitializers()) {
         LL_LOG_ERROR("lookupSymbol: Failed to run initializers.");
     }
-    ll_mutex_unlock(&linker_mutex);
+    ll_mutex_unlock(&ll_default_linker.linker_mutex);
     return r;
 }
 
@@ -1001,13 +956,13 @@ void ghci_enquire(ll_symbol_addr* addr)
    const int DELTA = 64;
    ObjectCode* oc;
 
-   for (oc = objects; oc; oc = oc->next) {
+   for (oc = ll_default_linker.gc.objects; oc; oc = oc->next) {
       for (i = 0; i < oc->n_symbols; i++) {
          sym = oc->symbols[i].name;
          if (sym == NULL) continue;
          a = NULL;
          if (a == NULL) {
-             ghciLookupSymbolInfo(symhash, sym, &a);
+             ghciLookupSymbolInfo(ll_default_linker.symhash, sym, &a);
          }
          if (a == NULL) {
              // debugBelch("ghci_enquire: can't find %s\n", sym);
@@ -1050,7 +1005,7 @@ static void removeOcSymbols (ObjectCode *oc)
     int i;
     for (i = 0; i < oc->n_symbols; i++) {
         if (oc->symbols[i].name != NULL) {
-            ghciRemoveSymbolTable(symhash, oc->symbols[i].name, oc);
+            ghciRemoveSymbolTable(ll_default_linker.symhash, oc->symbols[i].name, oc);
         }
     }
 
@@ -1127,9 +1082,9 @@ void freeObjectCode (ObjectCode *oc)
 
     if (oc->type == DYNAMIC_OBJECT) {
 #if defined(OBJFORMAT_ELF) || defined(darwin_HOST_OS)
-        ll_mutex_lock(&linker_mutex);
+        ll_mutex_lock(&ll_default_linker.linker_mutex);
         freeNativeCode_POSIX(oc);
-        ll_mutex_unlock(&linker_mutex);
+        ll_mutex_unlock(&ll_default_linker.linker_mutex);
 #else
         LL_FATAL("freeObjectCode: This shouldn't happen");
 #endif
@@ -1283,7 +1238,7 @@ mkOc( ObjectType type, pathchar *path, char *image, int imageSize,
    oc->next              = NULL;
    oc->prev              = NULL;
    oc->next_loaded_object = NULL;
-   oc->mark              = object_code_mark_bit;
+   oc->mark              = ll_default_linker.gc.object_code_mark_bit;
    /* this will get cleared by the caller if object is not safely unloadable */
    oc->unloadable        = true;
    oc->dependencies      = allocHashSet();
@@ -1311,7 +1266,7 @@ mkOc( ObjectType type, pathchar *path, char *image, int imageSize,
 ll_hs_int
 isAlreadyLoaded( pathchar *path )
 {
-    for (ObjectCode *o = objects; o; o = o->next) {
+    for (ObjectCode *o = ll_default_linker.gc.objects; o; o = o->next) {
        if (0 == pathcmp(o->fileName, path)
            && o->status != OBJECT_UNLOADED) {
            return 1; /* already loaded */
@@ -1481,16 +1436,16 @@ static ll_hs_int loadObj_ (pathchar *path)
        ll_host.object_registered(ll_host.ctx, oc);
    }
 
-   oc->next_loaded_object = loaded_objects;
-   loaded_objects = oc;
+   oc->next_loaded_object = ll_default_linker.gc.loaded_objects;
+   ll_default_linker.gc.loaded_objects = oc;
    return 1;
 }
 
 ll_hs_int loadObj (pathchar *path)
 {
-   ll_mutex_lock(&linker_mutex);
+   ll_mutex_lock(&ll_default_linker.linker_mutex);
    ll_hs_int r = loadObj_(path);
-   ll_mutex_unlock(&linker_mutex);
+   ll_mutex_unlock(&ll_default_linker.linker_mutex);
    return r;
 }
 
@@ -1609,7 +1564,7 @@ int ocTryLoad (ObjectCode* oc) {
     for (x = 0; x < oc->n_symbols; x++) {
         symbol = oc->symbols[x];
         if (   symbol.name
-            && !ghciInsertSymbolTable(oc->fileName, symhash, symbol.name,
+            && !ghciInsertSymbolTable(oc->fileName, ll_default_linker.symhash, symbol.name,
                                       symbol.addr,
                                       isSymbolWeak(oc, symbol.name),
                                       symbol.type, 0, oc)) {
@@ -1686,7 +1641,7 @@ int ocRunInit(ObjectCode *oc)
 
 int runPendingInitializers (void)
 {
-    for (ObjectCode *oc = objects; oc; oc = oc->next) {
+    for (ObjectCode *oc = ll_default_linker.gc.objects; oc; oc = oc->next) {
         int r = ocRunInit(oc);
         if (!r) {
             LL_LOG_ERROR("Could not run initializers of Object Code %" PATH_FMT ".\n", OC_INFORMATIVE_FILENAME(oc));
@@ -1713,7 +1668,7 @@ static ll_hs_int resolveObjs_ (void)
 {
     LL_IF_DEBUG(linker, LL_DEBUG("resolveObjs: start\n"));
 
-    for (ObjectCode *oc = objects; oc; oc = oc->next) {
+    for (ObjectCode *oc = ll_default_linker.gc.objects; oc; oc = oc->next) {
         int r = ocTryLoad(oc);
         if (!r) {
             LL_LOG_ERROR("Could not load Object Code %" PATH_FMT ".\n", OC_INFORMATIVE_FILENAME(oc));
@@ -1733,9 +1688,9 @@ static ll_hs_int resolveObjs_ (void)
 
 ll_hs_int resolveObjs (void)
 {
-    ll_mutex_lock(&linker_mutex);
+    ll_mutex_lock(&ll_default_linker.linker_mutex);
     ll_hs_int r = resolveObjs_();
-    ll_mutex_unlock(&linker_mutex);
+    ll_mutex_unlock(&ll_default_linker.linker_mutex);
     return r;
 }
 
@@ -1744,8 +1699,8 @@ ll_hs_int resolveObjs (void)
  */
 static ll_hs_int unloadObj_ (pathchar *path, bool just_purge)
 {
-    LL_ASSERT(symhash != NULL);
-    LL_ASSERT(objects != NULL);
+    LL_ASSERT(ll_default_linker.symhash != NULL);
+    LL_ASSERT(ll_default_linker.gc.objects != NULL);
 
     LL_IF_DEBUG(linker, LL_DEBUG("unloadObj: %" PATH_FMT "\n", path));
 
@@ -1753,7 +1708,7 @@ static ll_hs_int unloadObj_ (pathchar *path, bool just_purge)
     ObjectCode *prev = NULL;
     // NOTE (osa): There may be more than one object with the same file name
     // (happens when loading archive files) so we don't stop after unloading one
-    for (ObjectCode *oc = loaded_objects; oc; oc = oc->next_loaded_object) {
+    for (ObjectCode *oc = ll_default_linker.gc.loaded_objects; oc; oc = oc->next_loaded_object) {
         if (pathcmp(oc->fileName,path) == 0) {
             oc->status = OBJECT_UNLOADED;
 
@@ -1767,10 +1722,10 @@ static ll_hs_int unloadObj_ (pathchar *path, bool just_purge)
             unloadedAnyObj = true;
 
             if (!just_purge) {
-                n_unloaded_objects += 1;
+                ll_default_linker.gc.n_unloaded_objects += 1;
                 // Remove object code from root set
                 if (prev == NULL) {
-                    loaded_objects = oc->next_loaded_object;
+                    ll_default_linker.gc.loaded_objects = oc->next_loaded_object;
                 } else {
                     prev->next_loaded_object = oc->next_loaded_object;
                 }
@@ -1790,22 +1745,22 @@ static ll_hs_int unloadObj_ (pathchar *path, bool just_purge)
 
 ll_hs_int unloadObj (pathchar *path)
 {
-    ll_mutex_lock(&linker_mutex);
+    ll_mutex_lock(&ll_default_linker.linker_mutex);
     ll_hs_int r = unloadObj_(path, false);
-    ll_mutex_unlock(&linker_mutex);
+    ll_mutex_unlock(&ll_default_linker.linker_mutex);
     return r;
 }
 
 ll_hs_int purgeObj (pathchar *path)
 {
-    ll_mutex_lock(&linker_mutex);
+    ll_mutex_lock(&ll_default_linker.linker_mutex);
     ll_hs_int r = unloadObj_(path, true);
-    ll_mutex_unlock(&linker_mutex);
+    ll_mutex_unlock(&ll_default_linker.linker_mutex);
     return r;
 }
 
 ObjectCode *lookupObjectByPath(pathchar *path) {
-  for (ObjectCode *o = objects; o; o = o->next) {
+  for (ObjectCode *o = ll_default_linker.gc.objects; o; o = o->next) {
      if (0 == pathcmp(o->fileName, path)) {
          return o;
      }
@@ -1824,9 +1779,9 @@ OStatus getObjectLoadStatus_ (pathchar *path)
 
 OStatus getObjectLoadStatus (pathchar *path)
 {
-    ll_mutex_lock(&linker_mutex);
+    ll_mutex_lock(&ll_default_linker.linker_mutex);
     OStatus r = getObjectLoadStatus_(path);
-    ll_mutex_unlock(&linker_mutex);
+    ll_mutex_unlock(&ll_default_linker.linker_mutex);
     return r;
 }
 
@@ -1861,7 +1816,7 @@ addSection (Section *s, SectionKind kind, SectionAlloc alloc,
 void * loadNativeObj (pathchar *path, char **errmsg)
 {
    LL_IF_DEBUG(linker, LL_DEBUG("loadNativeObj: path = '%" PATH_FMT "'\n", path));
-   ll_mutex_lock(&linker_mutex);
+   ll_mutex_lock(&ll_default_linker.linker_mutex);
 
 #if defined(OBJFORMAT_ELF) || defined(OBJFORMAT_MACHO)
    void *r = loadNativeObj_POSIX(path, errmsg);
@@ -1882,7 +1837,7 @@ void * loadNativeObj (pathchar *path, char **errmsg)
    }
 #endif
 
-   ll_mutex_unlock(&linker_mutex);
+   ll_mutex_unlock(&ll_default_linker.linker_mutex);
    return r;
 }
 
@@ -1893,12 +1848,12 @@ static ll_hs_int unloadNativeObj_(void *handle)
     LL_IF_DEBUG(linker, LL_DEBUG("unloadNativeObj: %p\n", handle));
 
     ObjectCode *prev = NULL, *next;
-    for (ObjectCode *nc = loaded_objects; nc; nc = next) {
+    for (ObjectCode *nc = ll_default_linker.gc.loaded_objects; nc; nc = next) {
         next = nc->next_loaded_object; // we might move nc
 
         if (nc->type == DYNAMIC_OBJECT && nc->dlopen_handle == handle) {
             nc->status = OBJECT_UNLOADED;
-            n_unloaded_objects += 1;
+            ll_default_linker.gc.n_unloaded_objects += 1;
 
             // dynamic objects have no symbols
             LL_CHECK(nc->symbols == NULL);
@@ -1908,7 +1863,7 @@ static ll_hs_int unloadNativeObj_(void *handle)
 
             // Remove object code from root set
             if (prev == NULL) {
-              loaded_objects = nc->next_loaded_object;
+              ll_default_linker.gc.loaded_objects = nc->next_loaded_object;
             } else {
               prev->next_loaded_object = nc->next_loaded_object;
             }
@@ -1927,9 +1882,9 @@ static ll_hs_int unloadNativeObj_(void *handle)
 }
 
 ll_hs_int unloadNativeObj(void *handle) {
-  ll_mutex_lock(&linker_mutex);
+  ll_mutex_lock(&ll_default_linker.linker_mutex);
   ll_hs_int r = unloadNativeObj_(handle);
-  ll_mutex_unlock(&linker_mutex);
+  ll_mutex_unlock(&ll_default_linker.linker_mutex);
   return r;
 }
 

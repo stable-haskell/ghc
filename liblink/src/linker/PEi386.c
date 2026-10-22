@@ -573,7 +573,7 @@ void initLinker_PEi386(void)
     initLoadedDllCache(&loaded_dll_cache);
 
     if (!ghciInsertSymbolTable(WSTR("(GHCi/Ld special symbols)"),
-                               symhash, "__image_base__",
+                               ll_default_linker.symhash, "__image_base__",
                                GetModuleHandleW (NULL), LL_HS_BOOL_TRUE,
                                LL_SYM_CODE, 0, NULL)) {
         LL_FATAL("ghciInsertSymbolTable failed");
@@ -1188,7 +1188,7 @@ bool checkAndLoadImportLibrary( pathchar* arch_name, char* member_name, FILE* f 
     ll_sym_type symType = LL_SYM_DUP_DISCARD | LL_SYM_HIDDEN;
     symType |= hdr.Type == IMPORT_OBJECT_CODE ? LL_SYM_CODE : LL_SYM_DATA;
 
-    if (!ghciInsertSymbolTable(dll, symhash, symbol, sym, false, symType, 0, NULL))
+    if (!ghciInsertSymbolTable(dll, ll_default_linker.symhash, symbol, sym, false, symType, 0, NULL))
       return false;
 
     return true;
@@ -1830,7 +1830,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
            /* Only count COMMON symbols not already defined by a
             * previously-loaded object; we will reuse their allocation. */
            ll_symbol_name *nm = get_sym_name (getSymShortName (info, sym), oc);
-           if (!lookupStrHashTable(symhash, nm)) {
+           if (!lookupStrHashTable(ll_default_linker.symhash, nm)) {
                globalBssSize += getSymValue (info, sym);
            }
       }
@@ -1970,7 +1970,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
          /* This symbol isn't in any section at all, ie, global bss.
             Allocate zeroed space for it from the BSS section, unless a
             previously-loaded object already allocated storage for it. */
-          RtsSymbolInfo *existing = lookupStrHashTable(symhash, sname);
+          RtsSymbolInfo *existing = lookupStrHashTable(ll_default_linker.symhash, sname);
           if (existing != NULL) {
               /* COMMON symbol already allocated by a previously-loaded
                * object; reuse that address so relocations resolve to
@@ -2019,7 +2019,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
           addr  = strdup (addr);
           type = has_code_section ? LL_SYM_CODE : LL_SYM_DATA;
           type |= LL_SYM_DUP_DISCARD;
-          if (!ghciInsertSymbolTable(oc->fileName, symhash, sname,
+          if (!ghciInsertSymbolTable(oc->fileName, ll_default_linker.symhash, sname,
                                      addr, false, type, 0, oc)) {
              releaseOcInfo (oc);
              LL_FREE (oc->image);
@@ -2102,7 +2102,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
           if(secNumber == IMAGE_SYM_UNDEFINED)
             type |= LL_SYM_HIDDEN;
 
-          if (!ghciInsertSymbolTable(oc->fileName, symhash, sname,
+          if (!ghciInsertSymbolTable(oc->fileName, ll_default_linker.symhash, sname,
                                      addr, false, type, 0, oc))
                return false;
 
@@ -2128,7 +2128,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
              setWeakSymbol(oc, sname);
          }
 
-         if (! ghciInsertSymbolTable(oc->fileName, symhash, sname, addr,
+         if (! ghciInsertSymbolTable(oc->fileName, ll_default_linker.symhash, sname, addr,
                                      isWeak, type, symSize, oc))
              return false;
       } else {
@@ -2513,7 +2513,7 @@ ll_symbol_addr *lookupSymbol_PEi386(ll_symbol_name *lbl, ObjectCode *dependent, 
 {
     RtsSymbolInfo *pinfo;
 
-    if (!ghciLookupSymbolInfo(symhash, lbl, &pinfo)) {
+    if (!ghciLookupSymbolInfo(ll_default_linker.symhash, lbl, &pinfo)) {
         LL_IF_DEBUG(linker, LL_DEBUG("lookupSymbol: symbol '%s' not found\n", lbl));
 
         ll_symbol_addr* sym;
@@ -2622,7 +2622,7 @@ resolveSymbolAddr_PEi386 (pathchar* buffer, int size,
     {
       /* Try to calculate from information inside the rts.  */
       uintptr_t loc = (uintptr_t)symbol;
-      for (ObjectCode* oc = objects; oc; oc = oc->next) {
+      for (ObjectCode* oc = ll_default_linker.gc.objects; oc; oc = oc->next) {
           for (int i = 0; i < oc->n_sections; i++) {
               Section section = oc->sections[i];
               start = (uintptr_t)section.start;
@@ -2720,7 +2720,7 @@ resolveSymbolAddr_PEi386 (pathchar* buffer, int size,
                continue;
             }
           RtsSymbolInfo* a = NULL;
-          ghciLookupSymbolInfo(symhash, sym, &a);
+          ghciLookupSymbolInfo(ll_default_linker.symhash, sym, &a);
           if (a) {
               SymX sx = {0};
               sx.name = sym;

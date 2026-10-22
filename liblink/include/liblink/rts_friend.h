@@ -357,21 +357,6 @@ struct _ObjectCode {
     NativeCodeRange *nc_ranges;
 };
 
-// Currently live objects
-extern LL_FRIEND_API ObjectCode *objects;
-
-// Root set for object collection
-extern LL_FRIEND_API ObjectCode *loaded_objects;
-
-// Mark bit for live objects
-extern LL_FRIEND_API uint8_t object_code_mark_bit;
-
-// Number of object code currently marked for unloading. See the definition in
-// Linker.c for details.
-extern LL_FRIEND_API int n_unloaded_objects;
-
-extern LL_FRIEND_API ll_mutex linker_mutex;
-
 /* Borrowed RTS view into the default linker's state. The RTS binds this once
  * before adjustor initialization and accesses the fields directly during GC.
  * The owner mutex is referenced, never copied. */
@@ -392,7 +377,6 @@ typedef struct {
 } ll_gc_state;
 
 LL_FRIEND_API ll_gc_state *ll_compat_default_gc_state(void);
-
 
 LL_FRIEND_API void exitLinker(void);
 LL_FRIEND_API void freeObjectCode(ObjectCode *oc);

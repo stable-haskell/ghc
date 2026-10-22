@@ -69,10 +69,9 @@ typedef struct {
     ll_compat_config cfg;
 } ll_compat_services;
 
+/* The fixed compatibility owner supplies services before lazy initialization.
+ * The pointer binding is constant; the structures belong to that owner. */
 extern LL_FRIEND_API ll_compat_services *const ll_default_services;
-
-/* Stage 1 retains one process-wide linker. Installation copies both structures
- * during RTS startup, before any linker allocation or adjustor mapping. */
-extern LL_FRIEND_API ll_compat_host_ops ll_host;
-extern LL_FRIEND_API ll_compat_config ll_cfg;
+#define ll_host (ll_default_services->host)
+#define ll_cfg (ll_default_services->cfg)
 LL_FRIEND_API void ll_install_host(const ll_compat_host_ops *host, const ll_compat_config *cfg);

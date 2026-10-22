@@ -1425,7 +1425,7 @@ ocGetNames_MachO(ObjectCode* oc)
                     /* Only allocate space for COMMON symbols not already
                      * defined by a previously-loaded object. */
                     ll_symbol_name *nm_c = oc->info->macho_symbols[i].name;
-                    if (!lookupStrHashTable(symhash, nm_c)) {
+                    if (!lookupStrHashTable(ll_default_linker.symhash, nm_c)) {
                         commonSize += oc->info->nlist[i].n_value;
                     }
                 }
@@ -1467,7 +1467,7 @@ ocGetNames_MachO(ObjectCode* oc)
                             // TODO: Make figure out how to determine this from the object file
                             ll_sym_type sym_type = LL_SYM_CODE;
                             ghciInsertSymbolTable( oc->fileName
-                                                 , symhash
+                                                 , ll_default_linker.symhash
                                                  , nm
                                                  , addr
                                                  , LL_HS_BOOL_FALSE
@@ -1510,7 +1510,7 @@ ocGetNames_MachO(ObjectCode* oc)
                 /* TODO: Figure out how to determine this from object */
                 ll_sym_type sym_type = LL_SYM_CODE;
 
-                RtsSymbolInfo *existing = lookupStrHashTable(symhash, nm);
+                RtsSymbolInfo *existing = lookupStrHashTable(ll_default_linker.symhash, nm);
                 if (existing != NULL) {
                     /* COMMON symbol already allocated by a previously-loaded
                      * object; reuse that address so relocations resolve to
@@ -1537,7 +1537,7 @@ ocGetNames_MachO(ObjectCode* oc)
 
                     LL_IF_DEBUG(linker_verbose,
                              LL_DEBUG("ocGetNames_MachO: inserting common symbol: %s\n", nm));
-                    ghciInsertSymbolTable(oc->fileName, symhash, nm,
+                    ghciInsertSymbolTable(oc->fileName, ll_default_linker.symhash, nm,
                                          (void*)commonCounter, LL_HS_BOOL_FALSE,
                                          sym_type,
                                          sz, oc);

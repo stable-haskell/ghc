@@ -729,7 +729,7 @@ ocGetNames_ELF ( ObjectCode* oc )
 #endif
    const Elf_Word shnum = elf_shnum(ehdr);
 
-   LL_ASSERT(symhash != NULL);
+   LL_ASSERT(ll_default_linker.symhash != NULL);
 
    sections = (Section*)LL_CALLOC(shnum, sizeof(Section),
                                        "ocGetNames_ELF(sections)");
@@ -985,7 +985,7 @@ ocGetNames_ELF ( ObjectCode* oc )
                if (SHN_COMMON == symTab->symbols[j].elf_sym->st_shndx) {
                    /* Skip COMMON symbols already defined by a previously-loaded
                     * object; we will reuse the existing allocation. */
-                   if (!lookupStrHashTable(symhash, symTab->symbols[j].name)) {
+                   if (!lookupStrHashTable(ll_default_linker.symhash, symTab->symbols[j].name)) {
                        common_size += symbol->elf_sym->st_size;
                    }
                }
@@ -1035,7 +1035,7 @@ ocGetNames_ELF ( ObjectCode* oc )
                bool common_already_defined = false;
                if (shndx == SHN_COMMON) {
                    isLocal = false;
-                   RtsSymbolInfo *existing = lookupStrHashTable(symhash, nm);
+                   RtsSymbolInfo *existing = lookupStrHashTable(ll_default_linker.symhash, nm);
                    if (existing != NULL) {
                        /* COMMON symbol already allocated by a previously-loaded
                         * object; reuse that address so relocations resolve to
@@ -1129,7 +1129,7 @@ ocGetNames_ELF ( ObjectCode* oc )
                        if (isWeak == LL_HS_BOOL_TRUE) {
                            setWeakSymbol(oc, nm);
                        }
-                       if (!ghciInsertSymbolTable(oc->fileName, symhash,
+                       if (!ghciInsertSymbolTable(oc->fileName, ll_default_linker.symhash,
                                                   nm, symbol->addr, isWeak, sym_type, symbol->elf_sym->st_size, oc)
                            ) {
                            goto fail;
@@ -2216,8 +2216,6 @@ int ocAllocateExtras_ELF( ObjectCode *oc )
 
 #endif /* NEED_SYMBOL_EXTRAS */
 
-extern regex_t re_invalid;
-extern regex_t re_realso;
 
 // Try interpreting an object which couldn't be loaded as a linker script and
 // load the first object in the linker GROUP ( ... ) directive (see comment below).
@@ -2253,11 +2251,11 @@ void * loadNativeObjFromLinkerScript_ELF(char **errmsg)
    int result;
    void* r = NULL;
 
-   ll_assert_lock_held(&linker_mutex);
+   ll_assert_lock_held(&ll_default_linker.linker_mutex);
 
    // see if the error message is due to an invalid ELF header
    LL_IF_DEBUG(linker, LL_DEBUG("errmsg = '%s'\n", *errmsg));
-   result = regexec(&re_invalid, *errmsg, (size_t) NMATCH, match, 0);
+   result = regexec(&ll_default_linker.re_invalid, *errmsg, (size_t) NMATCH, match, 0);
    LL_IF_DEBUG(linker, LL_DEBUG("result = %i\n", result));
    if (result == 0) {
       // success -- try to read the named file as a linker script
@@ -2273,7 +2271,7 @@ void * loadNativeObjFromLinkerScript_ELF(char **errmsg)
       // try to find a GROUP or INPUT ( ... ) command
       while (fgets(line, MAXLINE, fp) != NULL) {
          LL_IF_DEBUG(linker, LL_DEBUG("input line = %s", line));
-         if (regexec(&re_realso, line, (size_t) NMATCH, match, 0) == 0) {
+         if (regexec(&ll_default_linker.re_realso, line, (size_t) NMATCH, match, 0) == 0) {
             // success -- try to dlopen the first named file
             LL_IF_DEBUG(linker, LL_DEBUG("match%s\n",""));
             line[match[2].rm_eo] = '\0';

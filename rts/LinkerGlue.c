@@ -318,4 +318,5 @@ void ll_rts_install_host(void)
             (RtsFlags.DebugFlags.zero_on_gc ? LL_DBG_ZERO_ON_FREE : 0),
     };
     ll_install_host(&host, &cfg);
+    setUnloadLinkerState(ll_compat_default_gc_state());
 }

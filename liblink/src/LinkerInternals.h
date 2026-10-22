@@ -9,6 +9,7 @@
 #pragma once
 
 #include "liblink/rts_friend.h"
+#include "ll_linker.h"
 
 void printLoadedObjects(void);
 
@@ -118,7 +119,6 @@ ll_symbol_addr* lookupDependentSymbol (ll_symbol_name* lbl, ObjectCode *dependen
  * which in this case holds the module id and the symbol offset. */
 ll_int64 lookupTlsgdSymbol(const char *, unsigned long, ObjectCode *);
 
-extern StrHashTable *symhash;
 
 /* defined in LoadArchive.c */
 bool isArchive (pathchar *path);
