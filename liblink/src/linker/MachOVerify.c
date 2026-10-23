@@ -168,7 +168,7 @@ int ocVerifyImage_MachO(ObjectCode *oc)
     uint32_t symbolCount = symbols == NULL ? 0 : symbols->nsyms;
     if (symbols != NULL &&
         (!machoTable(image, size, symbols->symoff, symbolCount,
-                      sizeof(MachONList), _Alignof(MachONList)) ||
+                      sizeof(MachONList), 1) ||
          !machoSpan(size, symbols->stroff, symbols->strsize) ||
          symbolCount > INT_MAX || !machoAllocationFits(symbolCount, sizeof(MachOSymbol), SIZE_MAX) ||
          !machoAllocationFits(symbolCount, sizeof(Symbol_t), SIZE_MAX) ||
@@ -188,7 +188,7 @@ int ocVerifyImage_MachO(ObjectCode *oc)
             !machoSpan(size, section->offset, section->size))
             return invalidMachO(oc, "Mach-O section extends past the image");
         if (!machoTable(image, size, section->reloff, section->nreloc,
-                         sizeof(MachORelocationInfo), _Alignof(MachORelocationInfo)))
+                         sizeof(MachORelocationInfo), 1))
             return invalidMachO(oc, "invalid Mach-O relocation table");
         if ((type == S_MOD_INIT_FUNC_POINTERS || type == S_MOD_TERM_FUNC_POINTERS) &&
             section->size % sizeof(init_t) != 0)
@@ -206,10 +206,11 @@ int ocVerifyImage_MachO(ObjectCode *oc)
             if (!machoAccumulate(&totals[kind], section->size, alignment))
                 return invalidMachO(oc, "Mach-O segment size overflow");
         }
-        const MachORelocationInfo *relocs =
-            (const MachORelocationInfo *)(image + section->reloff);
+        const char *relocs = image + section->reloff;
         for (uint32_t j = 0; j < section->nreloc; ++j) {
-            const MachORelocationInfo *reloc = &relocs[j];
+            MachORelocationInfo record;
+            memcpy(&record, relocs + (size_t)j * sizeof(record), sizeof(record));
+            const MachORelocationInfo *reloc = &record;
 #if defined(aarch64_HOST_ARCH)
             if (reloc->r_type == ARM64_RELOC_ADDEND) continue;
 #endif
@@ -259,8 +260,10 @@ int ocVerifyImage_MachO(ObjectCode *oc)
     while (terminatedSize != 0 && strings[terminatedSize - 1] != '\0')
         --terminatedSize;
     for (uint32_t i = 0; i < symbolCount; ++i) {
-        const MachONList *table = (const MachONList *)(image + symbols->symoff);
-        const MachONList *symbol = &table[i];
+        MachONList record;
+        memcpy(&record, image + symbols->symoff + (size_t)i * sizeof(record),
+               sizeof(record));
+        const MachONList *symbol = &record;
         uint32_t name = symbol->n_un.n_strx;
         if (name >= terminatedSize)
             return invalidMachO(oc, "invalid Mach-O symbol name");

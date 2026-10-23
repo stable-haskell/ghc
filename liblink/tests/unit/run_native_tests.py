@@ -64,6 +64,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="run only the native Windows M32 and PE COMMON ownership units",
     )
+    parser.add_argument(
+        "--macho-table-alignment-only",
+        action="store_true",
+        help="run only packed Mach-O symbol/relocation table alignment cases",
+    )
     return parser.parse_args()
 
 
@@ -449,10 +454,42 @@ def run_macho_load_errors(cc: list[str], archive: Path, output: Path,
     run(command, label="run macho_load_errors")
 
 
+def run_macho_table_alignment(cc: list[str], archive: Path, output: Path,
+                              host: str) -> None:
+    if host != "Darwin":
+        raise RuntimeError("--macho-table-alignment-only requires Darwin")
+    fixture_dir = ROOT / "liblink/tests/fixtures/macho-input"
+    fixture = output / "macho_table_alignment_data.o"
+    run(
+        cc + ["-fno-sanitize=all", "-fcommon", "-c",
+              str(fixture_dir / "table_alignment_data.c"),
+              "-o", str(fixture)],
+        label="compile Mach-O table-alignment fixture",
+    )
+    test = output / "macho_table_alignment"
+    map_file = output / "macho_table_alignment.map"
+    trace = run(
+        cc + [str(ROOT / "liblink/tests/unit/macho_table_alignment.c"),
+              f"-L{archive.parent}", "-llink", *core_link_flags(host), "-Wl,-t",
+              linker_map_flag(map_file), "-o", str(test)],
+        label="compile and link macho_table_alignment",
+    )
+    verify_macho_link_map(
+        map_file,
+        archive,
+        trace,
+        included_source="macho_input.c test harness",
+        forbidden_members=(),
+        required_members=("MachOVerify",),
+    )
+    run([str(test), str(fixture)], label="run macho_table_alignment")
+
+
 def main() -> int:
     args = parse_args()
     selected_modes = sum((args.foundation_only, args.protection_only,
-                          args.protection_gap_probes, args.windows_m32_only))
+                          args.protection_gap_probes, args.windows_m32_only,
+                          args.macho_table_alignment_only))
     if selected_modes > 1:
         raise RuntimeError("native unit modes are mutually exclusive")
     system = platform.system()
@@ -465,6 +502,8 @@ def main() -> int:
     )
     if args.windows_m32_only and host != "Windows":
         raise RuntimeError("--windows-m32-only requires a native Windows host")
+    if args.macho_table_alignment_only and host != "Darwin":
+        raise RuntimeError("--macho-table-alignment-only requires a native Darwin Mach-O build")
     if host == "Windows" and not (args.foundation_only or args.windows_m32_only):
         raise RuntimeError(
             "core_error_status.c is POSIX-only: the Windows linker path uses "
@@ -507,6 +546,12 @@ def main() -> int:
         str(ROOT / "liblink/src"),
     ]
     cc = compiler + common_flags
+
+    if args.macho_table_alignment_only:
+        with tempfile.TemporaryDirectory(prefix="liblink-macho-table-alignment-") as temporary:
+            run_macho_table_alignment(cc, archive, Path(temporary), host)
+        print("liblink Mach-O table alignment unit: PASS")
+        return 0
 
     with tempfile.TemporaryDirectory(prefix="liblink-native-units-") as temporary:
         output = Path(temporary)
@@ -775,6 +820,8 @@ def main() -> int:
                 ],
                 label="run macho_input",
             )
+
+            run_macho_table_alignment(cc, archive, output, host)
 
             segment_padding_test = output / "macho_segment_padding"
             segment_padding_map = output / "macho_segment_padding.map"

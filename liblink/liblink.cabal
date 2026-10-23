@@ -111,6 +111,7 @@ extra-source-files:
     tests/unit/error_state.c
     tests/unit/hash_destroy_owner.c
     tests/unit/macho_input.c
+    tests/unit/macho_table_alignment.c
     tests/unit/macho_import_status.c
     tests/unit/macho_prefile_error.c
     tests/unit/macho_load_errors.c
@@ -125,6 +126,7 @@ extra-source-files:
     tests/unit/pei386_common_ownership.c
     tests/fixtures/macho-input/common_only.c
     tests/fixtures/macho-input/ordinary.c
+    tests/fixtures/macho-input/table_alignment_data.c
     tests/fixtures/macho-input/zero_size.c
     tests/unit/riscv_u_type.c
     tests/unit/riscv_u_type_source.py

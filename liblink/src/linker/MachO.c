@@ -117,9 +117,24 @@ ocInit_MachO(ObjectCode * oc)
     oc->info->macho_sections = (MachOSection*) (oc->info->segCmd+1);
     oc->n_sections = oc->info->segCmd->nsects;
 
-    oc->info->nlist = oc->info->symCmd == NULL
-              ? NULL
-              : (MachONList *)(oc->image + oc->info->symCmd->symoff);
+    if (oc->info->symCmd != NULL && oc->info->symCmd->nsyms != 0) {
+        const char *table = oc->image + oc->info->symCmd->symoff;
+        if ((uintptr_t)table % _Alignof(MachONList) == 0) {
+            oc->info->nlist = (MachONList *)table;
+        } else {
+            /* Merged objects can pack tables without native C alignment. */
+            size_t bytes = (size_t)oc->info->symCmd->nsyms * sizeof(MachONList);
+            oc->info->owned_nlist = LL_MALLOC_FOR(oc->L, bytes,
+                                                 "ocInit_MachO(nlist)");
+            if (oc->info->owned_nlist == NULL) {
+                ll_error_set(oc->L, LL_E_NOMEM,
+                             "cannot allocate aligned Mach-O symbol table");
+                return 0;
+            }
+            memcpy(oc->info->owned_nlist, table, bytes);
+            oc->info->nlist = oc->info->owned_nlist;
+        }
+    }
     oc->info->names = oc->info->symCmd == NULL
               ? NULL
               : (oc->image + oc->info->symCmd->stroff);
@@ -164,14 +179,20 @@ ocDeinit_MachO(ObjectCode * oc) {
         }
 #if defined(aarch64_HOST_ARCH)
         freeGot(oc);
+#endif
         if(oc->sections != NULL) {
             for(int i = 0; i < oc->n_sections; i++) {
                 /* Empty sections and partially built loads have no metadata. */
-                if (oc->sections[i].info != NULL)
+                if (oc->sections[i].info != NULL) {
+#if defined(aarch64_HOST_ARCH)
                     freeStubs(oc->L, &oc->sections[i]);
+#endif
+                    LL_FREE_FOR(oc->L, oc->sections[i].info->owned_relocations);
+                    oc->sections[i].info->owned_relocations = NULL;
+                }
             }
         }
-#endif
+        LL_FREE_FOR(oc->L, oc->info->owned_nlist);
         LL_FREE_FOR(oc->L, oc->info);
         oc->info = NULL;
     }
@@ -1570,8 +1591,26 @@ ocGetNames_MachO(ObjectCode* oc)
             curMem = (char*) secMem + section->size;
 
             secArray[sec_idx].info->macho_section = section;
-            secArray[sec_idx].info->relocation_info
-                = (MachORelocationInfo*)(oc->image + section->reloff);
+            if (section->nreloc != 0) {
+                const char *table = oc->image + section->reloff;
+                if ((uintptr_t)table % _Alignof(MachORelocationInfo) == 0) {
+                    secArray[sec_idx].info->relocation_info
+                        = (MachORelocationInfo *)table;
+                } else {
+                    size_t bytes = (size_t)section->nreloc
+                                 * sizeof(MachORelocationInfo);
+                    MachORelocationInfo *copy = LL_MALLOC_FOR(oc->L, bytes,
+                                                "ocGetNames_MachO(relocations)");
+                    if (copy == NULL) {
+                        ll_error_set(oc->L, LL_E_NOMEM,
+                                     "cannot allocate aligned Mach-O relocations");
+                        return 0;
+                    }
+                    memcpy(copy, table, bytes);
+                    secArray[sec_idx].info->owned_relocations = copy;
+                    secArray[sec_idx].info->relocation_info = copy;
+                }
+            }
 
         }
 

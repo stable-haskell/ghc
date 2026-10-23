@@ -196,6 +196,37 @@ initializers. It is native Darwin evidence and does not qualify another host or
 architecture. The separate unit below covers legacy indirect-import errors.
 Pre-file misalignment error conversion remains outside this preflight slice.
 
+Mach-O packed table alignment
+============================
+
+On Darwin, `macho_table_alignment.c` reuses the owner-scoped harness from
+`macho_input.c` and loads a data-only fixture with a defined integer, a pointer
+relocation, and a `-fcommon` zero-initialized symbol. The test repacks the
+symbol and relocation tables at deliberately unaligned file offsets, then
+checks aligned input, symbol-only, relocation-only, and combined cases through
+`ll_init_object`, `loadOc`, and lookup-triggered relocation resolution. It
+checks whether each table is borrowed or held in an owned aligned copy, verifies
+the resolved pointer and zeroed COMMON storage, and checks owner teardown.
+Invalid symbol and relocation spans and indexes still must return
+`LL_E_FORMAT`, including malformed indexes repacked into unaligned tables.
+Zero-relocation and zero-symbol-plus-zero-relocation controls verify that empty
+tables do not acquire owned copies. A load-time re-verification failure after
+`ll_init_object` has copied the unaligned symbol table checks partial cleanup
+without violating the host allocator's non-NULL contract. Archive-member state
+is left intact through initialization; lookup then checks the real transition
+to `OBJECT_RESOLVED`. After discard, all fixture symbols must be absent from
+the owner hash. No mapped function is called and no initializer is run.
+
+The fixture contains only data, keeping its relocation target naturally
+aligned under both ARM64 and x86_64. The test uses the generated native Mach-O
+configuration and is intended to run from the existing Darwin branch of
+`run_native_tests.py`; it does not qualify other hosts or architectures.
+Run only this unit with `python3 liblink/tests/unit/run_native_tests.py
+--macho-table-alignment-only` on a configured Darwin build.
+The data-only fixture isolates table storage; it does not qualify the separate
+typed relocation-operand alignment behavior observed with a function-bearing
+fixture under x86_64 UBSan.
+
 Mach-O indirect-import status
 =============================
 

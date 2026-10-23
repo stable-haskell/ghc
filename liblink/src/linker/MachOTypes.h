@@ -44,7 +44,7 @@ struct ObjectCodeFormatInfo {
     MachOSymtabCommand   *symCmd;
     MachOSegmentCommand  *segCmd;
     MachODsymtabCommand  *dsymCmd;
-    /* points to the first nlist in the image */
+    /* Borrowed from the image when aligned; otherwise points to the owned aligned copy. */
     MachONList           *nlist;
     /* points to the names offset in the image */
     char                 *names;
@@ -62,6 +62,9 @@ struct ObjectCodeFormatInfo {
 
     /* Owned by this image, including while a load is being unwound. */
     void                 *common_mem;
+
+    /* Owned aligned symbol-table copy, or NULL when the image table is borrowed. */
+    MachONList           *owned_nlist;
 };
 
 /* When loading sections of the macho
@@ -130,6 +133,8 @@ struct SectionFormatInfo {
      */
     MachOSection * macho_section;
     MachORelocationInfo * relocation_info;
+    /* Aligned copy only when the image's relocation table is unaligned. */
+    MachORelocationInfo * owned_relocations;
 };
 
 #endif /* OBJECTFORMAT_MACHO */

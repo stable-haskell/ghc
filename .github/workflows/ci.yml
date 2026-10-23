@@ -120,7 +120,7 @@ jobs:
         make QUIET=1 DYNAMIC=${{ matrix.dynamic }} CABAL_ARGS="-j2" USE_SYSTEM_CABAL=1 stage2
 
     - name: Run liblink native C units
-      if: ${{ matrix.plat == 'x86_64-linux' && matrix.dynamic == 0 }}
+      if: ${{ matrix.dynamic == 0 }}
       shell: devx {0}
       run: python3 liblink/tests/unit/run_native_tests.py
 

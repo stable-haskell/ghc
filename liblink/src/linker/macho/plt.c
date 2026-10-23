@@ -1,6 +1,7 @@
 #define LL_INTERNAL_SOURCE 1
 #include "ll_compat.h"
 #include "plt.h"
+#include <string.h>
 
 #if defined(aarch64_HOST_ARCH)
 
@@ -23,11 +24,16 @@ numberOfStubsForSection( ObjectCode *oc, unsigned sectionIndex) {
     unsigned n = 0;
 
     MachOSection *section = &oc->info->macho_sections[sectionIndex];
-    MachORelocationInfo *relocation_info = (MachORelocationInfo*)(oc->image + section->reloff);
-    if(section->size > 0)
-        for(size_t i = 0; i < section->nreloc; i++)
-            if(needStubForRel(&relocation_info[i]))
+    const char *relocations = oc->image + section->reloff;
+    if(section->size > 0) {
+        for(size_t i = 0; i < section->nreloc; i++) {
+            MachORelocationInfo relocation;
+            memcpy(&relocation, relocations + i * sizeof(relocation),
+                   sizeof(relocation));
+            if(needStubForRel(&relocation))
                 n += 1;
+        }
+    }
 
     return n;
 }
