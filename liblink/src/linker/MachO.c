@@ -169,8 +169,10 @@ ocDeinit_MachO(ObjectCode * oc) {
 static int
 resolveImports(
     ObjectCode* oc,
-    MachOSection *sect,    // ptr to lazy or non-lazy symbol pointer section
-    unsigned long *indirectSyms);
+    MachOSection *sect,
+    Section *target,
+    const uint32_t *indirectSyms,
+    uint32_t nIndirectSyms);
 
 #if NEED_SYMBOL_EXTRAS
 #if defined(x86_64_HOST_ARCH) || defined(aarch64_HOST_ARCH)
@@ -223,18 +225,47 @@ ocVerifyImage_MachO(ObjectCode * oc)
 static int
 resolveImports(
     ObjectCode* oc,
-    MachOSection *sect,    // ptr to lazy or non-lazy symbol pointer section
-    unsigned long *indirectSyms)
+    MachOSection *sect,
+    Section *target,
+    const uint32_t *indirectSyms,
+    uint32_t nIndirectSyms)
 {
-    size_t itemSize = 4;
-
     LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "resolveImports: start\n"));
 
-    for(unsigned i = 0; i * itemSize < sect->size; i++)
+    if (target == NULL || target->size != sect->size ||
+        (sect->size != 0 && target->start == NULL) ||
+        sect->size % sizeof(void *) != 0 ||
+        sect->reserved1 > nIndirectSyms ||
+        sect->size / sizeof(void *) > nIndirectSyms - sect->reserved1) {
+        ll_error_set(oc->L, LL_E_FORMAT, "Mach-O indirect pointer range is invalid");
+        LL_LOG_ERROR_FOR(oc->L, "Mach-O indirect pointer range is invalid");
+        return 0;
+    }
+
+    size_t slots = sect->size / sizeof(void *);
+    /* Validate all entries before looking up symbols or writing any slot. */
+    for (size_t i = 0; i < slots; i++)
     {
-        // according to otool, reserved1 contains the first index into the
-        // indirect symbol table
-        unsigned long indirectSymbolIndex = indirectSyms[sect->reserved1+i];
+        uint32_t indirectSymbolIndex = indirectSyms[sect->reserved1+i];
+        /* LOCAL/ABS entries need local or absolute resolution, which this
+         * legacy importer does not implement. They are not symbol indexes.
+         */
+        if (indirectSymbolIndex & (INDIRECT_SYMBOL_LOCAL | INDIRECT_SYMBOL_ABS)) {
+            ll_error_set(oc->L, LL_E_UNSUPPORTED,
+                         "Mach-O local indirect pointer entries are unsupported");
+            LL_LOG_ERROR_FOR(oc->L,
+                         "Mach-O local indirect pointer entries are unsupported");
+            return 0;
+        }
+        if (indirectSymbolIndex >= oc->info->n_macho_symbols) {
+            ll_error_set(oc->L, LL_E_FORMAT, "Mach-O indirect symbol index is invalid");
+            LL_LOG_ERROR_FOR(oc->L, "Mach-O indirect symbol index is invalid");
+            return 0;
+        }
+    }
+    for (size_t i = 0; i < slots; i++)
+    {
+        uint32_t indirectSymbolIndex = indirectSyms[sect->reserved1+i];
         MachOSymbol *symbol = &oc->info->macho_symbols[indirectSymbolIndex];
         ll_symbol_addr* addr = NULL;
 
@@ -251,15 +282,18 @@ resolveImports(
 
         if (addr == NULL)
         {
+            ll_error_set(oc->L, LL_E_UNRESOLVED,
+                         "%s: unknown symbol `%s'", oc->fileName, symbol->name);
             LL_LOG_ERROR_FOR(oc->L, "\nlookupSymbol failed in resolveImports\n"
                        "%s: unknown symbol `%s'", oc->fileName, symbol->name);
             return 0;
         }
 
         checkProddableBlock(oc->L, &oc->proddables,
-                            ((void**)(oc->image + sect->offset)) + i,
+                            (char *)target->start + i * sizeof(void *),
                             sizeof(void *));
-        ((void**)(oc->image + sect->offset))[i] = addr;
+        /* A file's section alignment need not align a C pointer lvalue. */
+        memcpy((char *)target->start + i * sizeof(void *), &addr, sizeof(addr));
     }
 
     LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "resolveImports: done\n"));
@@ -1649,8 +1683,17 @@ ocResolve_MachO(ObjectCode* oc)
 
     if(NULL != oc->info->dsymCmd)
     {
-        unsigned long *indirectSyms
-            = (unsigned long*) (oc->image + oc->info->dsymCmd->indirectsymoff);
+        uint32_t offset = oc->info->dsymCmd->indirectsymoff;
+        uint32_t count = oc->info->dsymCmd->nindirectsyms;
+        if (oc->fileSize < 0 || offset > (size_t)oc->fileSize ||
+            count > ((size_t)oc->fileSize - offset) / sizeof(uint32_t) ||
+            (count != 0 && (uintptr_t)(oc->image + offset) % _Alignof(uint32_t) != 0)) {
+            ll_error_set(oc->L, LL_E_FORMAT, "Mach-O indirect symbol table is invalid");
+            LL_LOG_ERROR_FOR(oc->L, "Mach-O indirect symbol table is invalid");
+            return 0;
+        }
+        const uint32_t *indirectSyms
+            = (const uint32_t*) (oc->image + offset);
 
         LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "ocResolve_MachO: resolving dsymLC\n"));
         for (int i = 0; i < oc->n_sections; i++)
@@ -1664,21 +1707,27 @@ ocResolve_MachO(ObjectCode* oc)
                 || !strcmp(sectionName,"__la_sym_ptr3"))
             {
                 if(!resolveImports(oc,&oc->info->macho_sections[i],
-                                   indirectSyms))
+                                   &oc->sections[i], indirectSyms,
+                                   oc->info->dsymCmd->nindirectsyms))
                     return 0;
             }
             else if(!strcmp(sectionName,"__nl_symbol_ptr")
                 ||  !strcmp(sectionName,"__pointers"))
             {
                 if(!resolveImports(oc,&oc->info->macho_sections[i],
-                                   indirectSyms))
+                                   &oc->sections[i], indirectSyms,
+                                   oc->info->dsymCmd->nindirectsyms))
                     return 0;
             }
             else if(!strcmp(sectionName,"__jump_table"))
             {
-                if(!resolveImports(oc,&oc->info->macho_sections[i],
-                                   indirectSyms))
-                    return 0;
+                /* This legacy alias has no established slot format. Standard
+                 * S_SYMBOL_STUBS uses reserved2 byte strides, not pointers. */
+                ll_error_set(oc->L, LL_E_UNSUPPORTED,
+                             "Mach-O __jump_table format is unsupported");
+                LL_LOG_ERROR_FOR(oc->L,
+                             "Mach-O __jump_table format is unsupported");
+                return 0;
             }
             else
             {

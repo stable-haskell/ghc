@@ -149,6 +149,26 @@ The manual link-map flag below uses Darwin syntax. On Linux, use
       -Wl,-map,archive-error-status.map -o archive-error-status
     ./archive-error-status
 
+Mach-O indirect-import status
+=============================
+
+`macho_import_status.c` is a Darwin-only function-level fixture. It includes
+the current `MachO.c` and calls its static indirect-import resolver with
+explicit Mach-O metadata, while linking the remaining linker dependencies
+from the selected stage2 `liblink.a`. The positive case checks two 64-bit
+pointer entries selected by a nonzero `reserved1`, writes to an intentionally
+unaligned loaded section, verifies the original image bytes remain untouched,
+and checks surrounding canaries. Negative cases cover invalid table spans,
+an invalid second symbol index before any writes, unresolved symbols,
+LOCAL/ABS entries, and the approved `__jump_table` policy: return
+`LL_E_UNSUPPORTED` because its slot format is not established by the legacy
+importer. This is synthetic metadata coverage; it does not establish that a
+current compiler or linker producer emits these exact import sections.
+
+The native test driver runs this unit only on Darwin. Its linker map verifies
+that the included `MachO.c` is not also selected from the archive. Run the
+driver after a static stage2 build as described above.
+
 RISC-V U-type arithmetic
 ========================
 

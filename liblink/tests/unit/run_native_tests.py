@@ -163,6 +163,35 @@ def verify_link_map(
     )
 
 
+def is_macho_archive_member(member: str) -> bool:
+    basename = member.replace("\\", "/").rsplit("/", 1)[-1]
+    return re.fullmatch(
+        r"(?:src_)?(?:linker_)?MachO(?:\.c)?\.(?:o|obj)",
+        basename,
+        flags=re.IGNORECASE,
+    ) is not None
+
+
+def verify_macho_link_map(map_path: Path, archive: Path, link_trace: str) -> None:
+    if not map_path.is_file():
+        raise RuntimeError(f"linker did not create map file: {map_path}")
+    text = map_path.read_text(errors="replace")
+    if str(archive) not in text + link_trace:
+        raise RuntimeError(f"link did not use expected stage2 archive: {archive}")
+
+    selected = []
+    for line in text.splitlines():
+        match = re.search(r"liblink\.a\(([^)]*)\)", line)
+        if match and is_macho_archive_member(match.group(1)):
+            selected.append(line)
+    if selected:
+        raise RuntimeError(
+            "link map selected an archived MachO implementation beside included MachO.c:\n"
+            + "\n".join(selected)
+        )
+    print("[MachO.c] link map uses stage2 archive without an archived MachO implementation")
+
+
 def main() -> int:
     args = parse_args()
     system = platform.system()
@@ -279,6 +308,26 @@ def main() -> int:
             forbidden_member="LoadArchive",
         )
         run([str(archive_test)], label="run archive_error_status")
+
+        if host == "Darwin":
+            macho_test = output / "macho_import_status"
+            macho_map_file = output / "macho_import_status.map"
+            macho_link_trace = run(
+                cc
+                + [
+                    str(ROOT / "liblink/tests/unit/macho_import_status.c"),
+                    f"-L{archive.parent}",
+                    "-llink",
+                    *core_link_flags(host),
+                    "-Wl,-t",
+                    linker_map_flag(macho_map_file),
+                    "-o",
+                    str(macho_test),
+                ],
+                label="compile and link macho_import_status",
+            )
+            verify_macho_link_map(macho_map_file, archive, macho_link_trace)
+            run([str(macho_test)], label="run macho_import_status")
 
         riscv_u_type_test = output / "riscv_u_type"
         riscv_u_type_source = output / "riscv_u_type_generated.c"
