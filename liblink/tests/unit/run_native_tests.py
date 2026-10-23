@@ -462,6 +462,32 @@ def main() -> int:
             )
             run([str(segment_padding_test)], label="run macho_segment_padding")
 
+            macho_prefile_test = output / "macho_prefile_error"
+            macho_prefile_map = output / "macho_prefile_error.map"
+            macho_prefile_trace = run(
+                cc
+                + [
+                    str(ROOT / "liblink/tests/unit/macho_prefile_error.c"),
+                    f"-L{archive.parent}",
+                    "-llink",
+                    *core_link_flags(host),
+                    "-Wl,-t",
+                    linker_map_flag(macho_prefile_map),
+                    "-o",
+                    str(macho_prefile_test),
+                ],
+                label="compile and link macho_prefile_error",
+            )
+            verify_macho_link_map(
+                macho_prefile_map,
+                archive,
+                macho_prefile_trace,
+                included_source="MachO.c",
+                forbidden_members=("MachO",),
+                required_members=("MachOVerify",),
+            )
+            run([str(macho_prefile_test)], label="run macho_prefile_error")
+
     print("liblink native unit tests: PASS")
     return 0
 

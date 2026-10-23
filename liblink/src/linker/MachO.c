@@ -1836,7 +1836,8 @@ ocRunFini_MachO ( ObjectCode *oc )
 
 /*
  * Figure out by how much to shift the entire Mach-O file in memory
- * when loading so that its single segment ends up 16-byte-aligned
+ * when loading so that its single segment ends up 16-byte-aligned.
+ * Return -1 with an owner-local error if the header cannot be read or rewound.
  */
 int
 machoGetMisalignment( ll_linker *L, FILE * f )
@@ -1847,14 +1848,24 @@ machoGetMisalignment( ll_linker *L, FILE * f )
     {
         size_t n = fread(&header, sizeof(header), 1, f);
         if (n != 1) {
-            LL_FATAL_FOR(L, "machoGetMisalignment: can't read the Mach-O header");
+            ll_error_set(L, ferror(f) ? LL_E_IO : LL_E_FORMAT,
+                         "machoGetMisalignment: can't read the Mach-O header");
+            LL_LOG_ERROR_FOR(L, "machoGetMisalignment: can't read the Mach-O header");
+            return -1;
         }
     }
-    fseek(f, -sizeof(header), SEEK_CUR);
+    if (fseek(f, -(long)sizeof(header), SEEK_CUR) != 0) {
+        ll_error_set(L, LL_E_IO, "machoGetMisalignment: can't rewind the Mach-O header");
+        LL_LOG_ERROR_FOR(L, "machoGetMisalignment: can't rewind the Mach-O header");
+        return -1;
+    }
 
     if(header.magic != MH_MAGIC_64) {
-        LL_FATAL_FOR(L, "Bad magic. Expected: %08x, got: %08x.",
+        ll_error_set(L, LL_E_FORMAT, "Bad magic. Expected: %08x, got: %08x.",
              MH_MAGIC_64, header.magic);
+        LL_LOG_ERROR_FOR(L, "Bad magic. Expected: %08x, got: %08x.",
+             MH_MAGIC_64, header.magic);
+        return -1;
     }
 
     misalignment = (header.sizeofcmds + sizeof(header))

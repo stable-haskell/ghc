@@ -692,6 +692,8 @@ ll_hs_int loadArchive_ (ll_linker *L, pathchar *path)
             else {
                 /* See loadObj() */
                 misalignment = machoGetMisalignment(L, f);
+                if (misalignment < 0)
+                    goto fail;
                 imageBase = LL_MALLOC_FOR(L, memberSize + misalignment,
                                          "loadArchive(image)");
                 image = imageBase + misalignment;

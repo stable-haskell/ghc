@@ -1456,6 +1456,10 @@ preloadObjectFile (ll_linker *L, pathchar *path)
     // reading the file, and then we misalign image on purpose so
     // that the actual sections end up aligned again.
    misalignment = machoGetMisalignment(L, f);
+   if (misalignment < 0) {
+       fclose(f);
+       return NULL;
+   }
    image = LL_MALLOC_FOR(L, fileSize + misalignment, "loadObj(image)");
    image += misalignment;
 
@@ -1471,7 +1475,7 @@ preloadObjectFile (ll_linker *L, pathchar *path)
    if (n != fileSize) {
        ll_error_set(L, LL_E_IO, "loadObj: error whilst reading `%" PATH_FMT "'", path);
        LL_LOG_ERROR_FOR(L, "loadObj: error whilst reading `%" PATH_FMT "'", path);
-       LL_FREE_FOR(L, image);
+       LL_FREE_FOR(L, (char *)image - misalignment);
        return NULL;
    }
 

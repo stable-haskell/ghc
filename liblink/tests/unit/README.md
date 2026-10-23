@@ -234,3 +234,22 @@ runtime now reserves the worst-case alignment headroom per class and rejects
 padding-add overflow with `LL_E_FORMAT`. This unit exercises segment
 construction only; it does not copy or zero section payloads, resolve symbols,
 apply relocations, or run initializers. It is native Darwin evidence only.
+
+Mach-O pre-file alignment errors
+================================
+
+On Darwin, `macho_prefile_error.c` includes the current `MachO.c` and exercises
+`machoGetMisalignment` against real `FILE *` streams. Positive cases cover all
+four 4-byte-aligned command-size residues modulo 16 and verify the prior
+nonzero stream position is restored. Negative cases cover bad magic, empty
+and short headers, a real read error, and rewind failure on a nonseekable pipe.
+They check the `LL_E_FORMAT`
+or `LL_E_IO` status on the owning linker, preserve a default-linker sentinel,
+and reject unexpected fatal callbacks. The driver requires the selected
+stage2 archive in both linker map and trace, requires its `MachOVerify.o`
+dependency, and rejects an archived `MachO.o` beside the included source.
+
+The native Darwin configuration enables mmap, so the non-mmap caller branches
+in `Linker.c` and `LoadArchive.c` are compiled out here. This unit verifies the
+error-conversion helper only; those caller cleanup paths need a supported
+non-mmap configuration to execute.

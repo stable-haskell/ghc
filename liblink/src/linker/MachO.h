@@ -16,6 +16,7 @@ int    ocGetNames_MachO             ( ObjectCode* oc );
 int    ocResolve_MachO              ( ObjectCode* oc );
 int    ocRunInit_MachO              ( ObjectCode* oc );
 int    ocRunFini_MachO              ( ObjectCode* oc );
+/* Returns padding in [0, 15], or -1 after recording a read/format/seek error. */
 int    machoGetMisalignment         ( struct ll_linker *L, FILE * );
 int    ocAllocateExtras_MachO       ( ObjectCode* oc );
 

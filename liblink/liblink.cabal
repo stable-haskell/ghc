@@ -108,6 +108,7 @@ extra-source-files:
     tests/unit/hash_destroy_owner.c
     tests/unit/macho_input.c
     tests/unit/macho_import_status.c
+    tests/unit/macho_prefile_error.c
     tests/unit/owner_services.c
     tests/unit/macho_segment_padding.c
     tests/fixtures/macho-input/common_only.c
