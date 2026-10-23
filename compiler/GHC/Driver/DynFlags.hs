@@ -67,6 +67,7 @@ module GHC.Driver.DynFlags (
 
         --
         baseUnitId,
+        ghciUnitId,
 
 
         -- * Include specifications
@@ -1571,6 +1572,11 @@ versionedFilePath platform = uniqueSubdir platform
 -- against.
 baseUnitId :: DynFlags -> UnitId
 baseUnitId dflags = unitSettings_baseUnitId (unitSettings dflags)
+
+-- | The unit the external interpreter program is linked against, from the
+-- settings file (@ghci unit-id@) or @-ghci-unit-id@.
+ghciUnitId :: DynFlags -> UnitId
+ghciUnitId dflags = unitSettings_ghciUnitId (unitSettings dflags)
 
 -- SDoc
 -------------------------------------------

@@ -987,7 +987,6 @@ Library
         GHC.Unit.External.Substitution
         GHC.Unit.External.Validate
         GHC.Unit.External.Visibility
-        GHC.Unit.External.Wired
         GHC.Unit.Finder
         GHC.Unit.Finder.Types
         GHC.Unit.Home

@@ -51,6 +51,7 @@ import qualified Data.Set    as Set
 import qualified Data.ByteString as B
 
 import Foreign.C.String
+import Data.Maybe (isNothing)
 
 
 -- Note [The JS interpreter]
@@ -160,11 +161,11 @@ spawnJSInterp cfg = do
                 , jsServerStarted = False
                 })
 
-  -- get the unit-id of the ghci package. We need this to load the
-  -- interpreter code.
-  ghci_unit_id <- case lookupPackageName (ue_homeUnitState unit_env) (PackageName (fsLit "ghci")) of
-    Nothing -> cmdLineErrorIO "JS interpreter: couldn't find \"ghci\" package"
-    Just i  -> pure i
+  -- the ghci unit, which the interpreter code is loaded from, must be
+  -- available. Its id comes from the settings file (see 'ghciUnitId').
+  let ghci_unit_id = jsInterpGhciUnitId cfg
+  when (isNothing (lookupUnitId (ue_homeUnitState unit_env) ghci_unit_id)) $
+    cmdLineErrorIO ("JS interpreter: couldn't find the ghci unit " ++ unitIdString ghci_unit_id)
 
   let extra = JSInterpExtra
         { instStdIn        = std_in

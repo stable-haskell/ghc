@@ -287,6 +287,57 @@ second a corner case), `:set -package foo` in GHCi still switches the
 session to the by-name path on the next `initUnits`, and the by-name path
 itself is untouched.
 
+### Stage 3, implemented
+
+Done on 2026-10-23 (commit `feat(driver): fixed ids for the compiler's own
+units, no wiring`). The sketch said "settings-file ids for `ghc-internal`,
+`rts`, `ghci`"; the tree said something more precise, and the
+implementation follows the tree:
+
+- **`ghc-internal` and `rts` already have fixed ids.** Their cabal files
+  compile them with `-this-unit-id ghc-internal` and `-this-unit-id rts`,
+  so every symbol (`ghczminternal_...`), every interface file and the RTS's
+  C references to Haskell closures already use the unversioned ids that
+  the compiler's constants name. Hadrian merely *registered* them under
+  versioned installed ids (`ghc-internal-10.100.0-inplace`, `rts-1.0.3`),
+  and the whole wiring machinery existed to map the registered id back to
+  the compiled one. A settings-file id for them would not have worked
+  anyway: the known-key names are compile-time constants built from
+  `ghcInternalUnitId`. So stage 3 does for them what Note [GHC's Unit Id]
+  did for the `ghc` library: hadrian's `pkgUnitId` returns `ghc-internal`
+  and `rts` for those two packages, the installed id equals the compiled
+  id, and the compiler uses the installed unit as it is.
+- **The wiring is gone.** `GHC.Unit.External.Wired` is deleted, together
+  with the `WireMap`/`UnwireMap` in the unit index, `setupWiredInUnits`,
+  `updateWiredInUnitIndex`, `unwireUnit` (two uses in the Backpack
+  driver), `updateVisibilityMap`, `extendForWireMap`, and the rewriting of
+  the home unit's instantiations. What stays of that code is the sharing
+  of `UnitInfo`s across home units (`shareUnitInfos`), which never had
+  anything to do with wiring. `Note [Wired-in units]` now describes fixed
+  ids, not rewriting.
+- **`ghci` comes from the settings file.** Hadrian writes `ghci unit-id`
+  next to `base unit-id` (and the bindist `configure`/`Makefile` carry it
+  like the others), `GHC.Settings` reads it, `-ghci-unit-id` overrides it
+  like `-base-unit-id`, and the three interpreter back ends use
+  `ghciUnitId dflags` instead of looking the name up.
+- **No by-name lookup is left on the ids-only path.** `compilerUnitRoots`
+  is deleted; `idsOnlyRoots` adds `wiredInUnitIds` and, when the external
+  interpreter may run, the settings-file `ghci` id. Through a pure
+  `-unit-store` stack the compiler's own units are now probed by id like
+  everything else, which stage 2 could not do.
+
+Name and version stay what they were: `ghc-internal` is still version
+10.100.0 in its manifest, messages still say `ghc-internal-10.100.0` where
+they print a package id, and the testsuite expectations that mention it
+all normalise the version already. Two incidental changes were needed:
+hadrian's `parsePkgId` (the parser of `libHS<id>` and `stamp-<id>` file
+names) accepted only `name-version[-hash]` and now also accepts a bare
+name, and the in-tree Haddock dropped its "unwire" step, which is the
+identity now. Rebuilding an existing build root needs the old
+`ghc-internal-<version>-inplace.conf` and `rts-<version>.conf` removed from
+the stage package database by hand, since hadrian does not delete the confs
+of ids it no longer produces.
+
 ## The simpler compiler
 
 Put together with the first two stages of the spike, the driver that

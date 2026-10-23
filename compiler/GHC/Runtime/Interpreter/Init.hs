@@ -102,6 +102,7 @@ initInterpreter dflags tmpfs logger platform finder_cache unit_env opts = do
                 , wasmInterpProfiled = profiled
                 , wasmInterpHsSoSuffix = way_tag ++ dynLibSuffix (interpNameVer opts)
                 , wasmInterpUnitState = ue_homeUnitState unit_env
+                , wasmInterpGhciUnitId = ghciUnitId dflags
                 }
         pure $ Just $ Interp (ExternalInterp $ ExtWasm $ ExtInterpState cfg s) loader lookup_cache fs_cache
 #endif
@@ -119,6 +120,7 @@ initInterpreter dflags tmpfs logger platform finder_cache unit_env opts = do
               , jsInterpLogger      = logger
               , jsInterpCodegenCfg  = interpJsCodegenCfg opts
               , jsInterpUnitEnv     = unit_env
+              , jsInterpGhciUnitId  = ghciUnitId dflags
               , jsInterpFinderOpts  = interpFinderOpts opts
               , jsInterpFinderCache = finder_cache
               }

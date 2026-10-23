@@ -11,7 +11,6 @@ import GHC.Runtime.Interpreter.Types
 
 import Control.Concurrent.MVar
 import Data.Maybe
-import GHC.Data.FastString
 import qualified GHC.Data.ShortText as ST
 import GHC.Platform
 import GHC.Unit
@@ -34,11 +33,7 @@ spawnWasmInterp :: WasmInterpConfig -> IO (ExtInterpInstance ())
 
 -- See Note [The Wasm Dynamic Linker] for details
 spawnWasmInterp WasmInterpConfig {..} = do
-  let Just ghci_unit_id =
-        lookupPackageName
-          wasmInterpUnitState
-          (PackageName $ fsLit "ghci")
-      ghci_unit_info = unsafeLookupUnitId wasmInterpUnitState ghci_unit_id
+  let ghci_unit_info = unsafeLookupUnitId wasmInterpUnitState wasmInterpGhciUnitId
       ghci_so_dirs = map ST.unpack $ unitLibraryDynDirs ghci_unit_info
       [ghci_lib_name] = map ST.unpack $ unitLibraries ghci_unit_info
       ghci_so_name = ghci_lib_name ++ wasmInterpHsSoSuffix

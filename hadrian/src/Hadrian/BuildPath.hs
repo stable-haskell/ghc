@@ -110,25 +110,32 @@ parseWayUnit = Parsec.choice
     , Parsec.char 'l'     *> pure Logging
     ] Parsec.<?> "way unit (thr, debug, dyn, p, l)"
 
--- | Parse a @"pkgname-pkgversion-pkghash"@ string into the package name and the
+-- | Parse a @"pkgname-pkgversion-pkghash"@ (or bare @"pkgname"@) string into the package name and the
 -- integers that make up the package version.
 --
 -- If no hash was assigned, an empty string is returned in its place.
 parsePkgId :: Parsec.Parsec String () (String, [Integer], String)
-parsePkgId = parsePkgId' "" Parsec.<?> "package identifier (<name>-<version>(-<hash>?))"
+parsePkgId = parsePkgId' "" Parsec.<?> "package identifier (<name>(-<version>(-<hash>)?)?)"
   where
     parsePkgId' currName = do
         s <- Parsec.many1 Parsec.alphaNum
-        _ <- Parsec.char '-'
         let newName = if null currName then s else currName ++ "-" ++ s
         Parsec.choice
-          [ (,,) newName <$> parsePkgVersion
-                         <*> Parsec.option "" (Parsec.try $ do
-                              _ <- Parsec.char '-'
-                              -- Ensure we're not parsing a libDynName as a hash
-                              _ <- Parsec.notFollowedBy (Parsec.string "ghc" *> parsePkgVersion)
-                              parsePkgHash)
-          , parsePkgId' newName ]
+          [ Parsec.try $ do
+              _ <- Parsec.char '-'
+              -- Ensure we're not parsing a libDynName (-ghc<version>) as part of the id
+              _ <- Parsec.notFollowedBy (Parsec.string "ghc" *> parsePkgVersion)
+              Parsec.choice
+                [ (,,) newName <$> parsePkgVersion
+                               <*> Parsec.option "" (Parsec.try $ do
+                                    _ <- Parsec.char '-'
+                                    -- Ensure we're not parsing a libDynName as a hash
+                                    _ <- Parsec.notFollowedBy (Parsec.string "ghc" *> parsePkgVersion)
+                                    parsePkgHash)
+                , parsePkgId' newName ]
+            -- No version: a unit whose id is just its name, such as
+            -- ghc-internal or rts (see 'Hadrian.Haskell.Hash.pkgUnitId').
+          , pure (newName, [], "") ]
 
 parsePkgHash :: Parsec.Parsec String () String
 parsePkgHash = Parsec.many1 Parsec.alphaNum

@@ -42,14 +42,13 @@ pkgUnitId :: Stage -> Package -> Action String
 pkgUnitId stg pkg = do
   pid   <- pkgSimpleIdentifier pkg
   use_hash <- hashUnitIds <$> flavour
-  if pkgName pkg == "rts"
-     -- The unit-id will change depending on the way, we need to treat the rts separately
-     then pure pid
+  if pkgName pkg `elem` fixedUnitIdPackages
+     -- These packages fix their unit id to their name with -this-unit-id in
+     -- their cabal file, because the compiler refers to them by that id
+     -- (see Note [Wired-in units] in GHC.Unit.Types). They are registered
+     -- under the same id, so that the compiler needs no rewriting.
+     then pure (pkgName pkg)
      else do
-        -- Other boot packages still hardcode their unit-id to just <name>, but we
-        -- can have hadrian generate a different unit-id for them just as cabal does
-        -- because the boot packages unit-ids are overriden by setting -this-unit-id
-        -- in the cabal file
         hash <- if use_hash
                   then do
                     phash <- pkgHash stg pkg
@@ -61,6 +60,11 @@ pkgUnitId stg pkg = do
   where
     truncateHash :: Int -> String -> String
     truncateHash = take
+
+-- | The packages whose unit id is their name, by -this-unit-id in their cabal
+-- file; the compiler knows these ids.
+fixedUnitIdPackages :: [String]
+fixedUnitIdPackages = ["ghc-internal", "rts"]
 
 data PackageHashInputs = PackageHashInputs {
        pkgHashPkgId         :: String, -- ^ name-version

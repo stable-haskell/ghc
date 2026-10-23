@@ -75,7 +75,6 @@ module GHC.Unit.State (
         pprRawUnitIds,
 
         -- * Utils
-        unwireUnit,
         selectHptFlag,
         )
 where
@@ -104,7 +103,6 @@ import GHC.Unit.External.Query
 import GHC.Unit.External.Substitution
 import GHC.Unit.External.Validate
 import GHC.Unit.External.Visibility
-import GHC.Unit.External.Wired
 
 import GHC.Types.PkgQual
 import GHC.Types.SrcLoc (unLoc)
@@ -211,11 +209,10 @@ data UnitConfig = UnitConfig
    , unitConfigHomeInstantiations :: [(ModuleName, Module)]
       -- ^ What the home unit is instantiated with (@-instantiated-with@);
       -- the units named there must be available.
-   , unitConfigExternalInterp :: !Bool
-      -- ^ The external interpreter may be used (@-fexternal-interpreter@, or
-      -- a target that has no other), so the @ghci@ unit must be available.
-      -- See Note [The compiler's own units are still found by name] in
-      -- GHC.Unit.External.Names.
+   , unitConfigGhciUnit :: Maybe UnitId
+      -- ^ The unit the external interpreter program is linked against
+      -- ('ghciUnitId'), when that interpreter may be used
+      -- (@-fexternal-interpreter@, or a target that has no other).
    }
 
 initUnitConfig :: DynFlags -> Set.Set UnitId -> UnitConfig
@@ -233,6 +230,13 @@ initUnitConfig dflags home_units =
          -- from the settings file by default, but can be overriden by power-users
          -- by specifying `-base-unit-id` flag.
          | otherwise = filter (hu_id /=) (baseUnitId dflags:wiredInUnitIds)
+
+       -- the external interpreter program is linked against the ghci unit
+       ghci_unit
+         | gopt Opt_ExternalInterpreter dflags
+           || platformArch (targetPlatform dflags) `elem` [ArchJavaScript, ArchWasm32]
+         = Just (ghciUnitId dflags)
+         | otherwise = Nothing
 
        -- if the home unit is indefinite, it means we are type-checking it only
        -- (not producing any code). Hence we can use virtual units instantiated
@@ -264,9 +268,7 @@ initUnitConfig dflags home_units =
       , unitConfigHomeUnits    = home_units
       , unitConfigHomeInstanceOf = hu_instanceof
       , unitConfigHomeInstantiations = hu_instantiations
-      , unitConfigExternalInterp =
-             gopt Opt_ExternalInterpreter dflags
-          || platformArch (targetPlatform dflags) `elem` [ArchJavaScript, ArchWasm32]
+      , unitConfigGhciUnit = ghci_unit
       }
 
   where
@@ -303,21 +305,6 @@ trustUnits elements (TrustOverlay to) = TrustOverlay $ foldl' (\ acc uid -> addT
 emptyTrustOverlay :: TrustOverlay
 emptyTrustOverlay = TrustOverlay emptyUniqMap
 
--- | For all values in the 'WireMap', copy the recorded trust/distrust
--- for the wired-in unit id.
---
-extendForWireMap :: TrustOverlay -> WireMap -> TrustOverlay
-extendForWireMap to wmap =
-  nonDetFoldWireMap go to wmap
-  where
-    go (onDiskUid, wiredInUid) overlay =
-      case lookupTrustOverlay overlay onDiskUid of
-        Nothing -> overlay
-        Just Trusted ->
-          trustUnits [wiredInUid] overlay
-        Just Distrusted ->
-          distrustUnits [wiredInUid] overlay
-
 {-
 Note [Sharing 'UnitInfo's across the 'UnitEnv']
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -337,11 +324,9 @@ This what the 'UnitIndex' takes care of.
 
 The 'UnitIndex' stores all fully-resolved 'UnitInfo's that can be referenced
 by the 'UnitState'.'unitInfoMap'.
-We consider a 'UnitInfo' as fully-resolved, if its dependencies were updated to reference the
-wired-in units (e.g., 'wiringMap') and the wired-in units are updated as well.
-See Note [Wired-in units] for more details on wired-in units.
-Further, the 'UnitInfo' is based on the 'ExternalUnitDatabases' results, resolving
-variables such as @${pkgroot}@ in paths.
+We consider a 'UnitInfo' as fully-resolved once it is based on the
+'ExternalUnitDatabases' results, resolving variables such as @${pkgroot}@ in
+paths.
 
 As such, we can consider the 'UnitIndex' to be global data that is referenced by
 the 'UnitState' for better sharing of 'UnitInfo's.
@@ -351,10 +336,11 @@ of live 'UnitInfo's in a GHC session:
 
 > For each on-disk 'GenericUnitInfo', there are at most two objects alive.
 
-One instance is stored in 'ExternalUnitDatabases' where variables are resolved,
-but the wired-in units haven't been resolved.
+One instance is stored in 'ExternalUnitDatabases' as read from disk, with
+variables resolved.
 
-The second instance is the fully-resolved 'UnitInfo' stored in the 'UnitIndex'.
+The second instance is the forced copy stored in the 'UnitIndex' and shared
+by every 'UnitState'.
 
 See the module documentation for 'GHC.Unit.External.Index' for an overview
 of how the types relate to each other.
@@ -562,10 +548,7 @@ initUnits logger dflags unit_index home_units = do
     FormatText (updSDocContext (\ctx -> ctx {sdocLineLength = 200})
                 $ pprModuleMap (moduleNameProvidersMap unit_state))
 
-  wireMap <- wiringMap <$> readUnitIndex unit_index
-
-  let home_unit = mkHomeUnit wireMap
-                             (homeUnitId_ dflags)
+  let home_unit = mkHomeUnit (homeUnitId_ dflags)
                              (homeUnitInstanceOf_ dflags)
                              (homeUnitInstantiations_ dflags)
 
@@ -589,17 +572,12 @@ initUnits logger dflags unit_index home_units = do
   return (unit_state,home_unit,mconstants)
 
 mkHomeUnit
-    :: WireMap
-    -> UnitId                 -- ^ Home unit id
+    :: UnitId                 -- ^ Home unit id
     -> Maybe UnitId           -- ^ Home unit instance of
     -> [(ModuleName, Module)] -- ^ Home unit instantiations
     -> HomeUnit
-mkHomeUnit wmap hu_id hu_instanceof hu_instantiations_ =
-    let
-        -- Some wired units can be used to instantiate the home unit. We need to
-        -- replace their unit keys with their wired unit ids.
-        hu_instantiations = map (fmap (updateWiredInUnitIdInModule wmap)) hu_instantiations_
-    in case (hu_instanceof, hu_instantiations) of
+mkHomeUnit hu_id hu_instanceof hu_instantiations =
+    case (hu_instanceof, hu_instantiations) of
       (Nothing,[]) -> DefiniteHomeUnit hu_id Nothing
       (Nothing, _) -> throwGhcException $ CmdLineError ("Use of -instantiated-with requires -this-component-id")
       (Just _, []) -> throwGhcException $ CmdLineError ("Use of -this-component-id requires -instantiated-with")
@@ -722,13 +700,6 @@ applyPackageFlag prec_map pkg_map unusable no_hide_others pkgs vm flag =
          Left ps  -> Failed (PackageFlagErr flag ps)
          Right ps -> Succeeded $ foldl' delFromUniqMap vm (map mkUnit ps)
 
-updateVisibilityMap :: WireMap -> VisibilityMap -> VisibilityMap
-updateVisibilityMap wiredInMap vis_map = foldl' f vis_map (listWireMap wiredInMap)
-  where f vm (from, to) = case lookupUniqMap vis_map (RealUnit (Definite from)) of
-                    Nothing -> vm
-                    Just r -> addToUniqMap (delFromUniqMap vm (RealUnit (Definite from)))
-                              (RealUnit (Definite to)) r
-
   -- ----------------------------------------------------------------------------
 
 reportCycles :: Logger -> [SCC UnitInfo] -> IO ()
@@ -754,11 +725,13 @@ the case for Cabal and for environment files), the unit state is built by
 'mkUnitStateIdsOnly' instead of 'mkUnitStateByName':
 
   1. Roots. The unit ids from -package-id and -plugin-package-id (for an
-     instantiated id, the units it is made of), the units linked implicitly
-     (base from the settings file, the wired-in units) and, for a Backpack
-     home unit, the indefinite unit it instantiates (-this-component-id)
-     and the units it is instantiated with. 'idsOnlyRoots' computes them
-     and is also the switch between the two paths.
+     instantiated id, the units it is made of), the units the compiler
+     needs for itself (ghc-internal and rts by their fixed ids, base and,
+     when the external interpreter may run, ghci by the ids in the settings
+     file) and, for a Backpack home unit, the indefinite unit it
+     instantiates (-this-component-id) and the units it is instantiated
+     with. 'idsOnlyRoots' computes them and is also the switch between the
+     two paths.
 
   2. Closure. Unit stores on the stack are probed for the roots and for
      whatever they reference, never enumerated ('readUnitDatabasesOnDemand');
@@ -776,21 +749,16 @@ the case for Cabal and for environment files), the unit state is built by
   4. Visibility is exactly what the flags say: no default visibility, no
      preferred version, no hiding of a same-named unit by a later flag.
 
-  5. Wiring, the plugin visibility, the module map and the preload set are
-     shared with the by-name path ('finishUnitState').
+  5. The plugin visibility, the module map and the preload set are shared
+     with the by-name path ('finishUnitState').
 
-The units the compiler needs for itself (ghc-internal and rts, and ghci
-when the external interpreter may be used) are not reachable from the roots
-in general and are added to them by name at the boundary; see
-Note [The compiler's own units are still found by name] in
-GHC.Unit.External.Names. That is the one by-name lookup left on this path.
+No package name is looked up anywhere on this path.
 
 The by-name path ('mkUnitStateByName') is the historical one: it runs the
 plan written at the top of it over everything installed, with the package
 names in the flags resolved to ids first (Note [Names are resolved in the
-front end] in GHC.Unit.External.Names). This is stage 2 of
-docs/unit-artifact-ids-only.md; stage 3 removes the by-name hold-out and
-stage 4 the by-name path.
+front end] in GHC.Unit.External.Names). This is stages 2 and 3 of
+docs/unit-artifact-ids-only.md; stage 4 makes this path the default.
 -}
 
 mkUnitState
@@ -820,7 +788,7 @@ mkUnitStateIdsOnly logger unit_index cfg roots = do
   -- everything outside the closure of the roots is dropped.
   dbs <- readUnitDatabases logger unit_index (initUnitDbConfig cfg)
   (pkg_map1, prec_map) <- mergeDatabases logger dbs
-  let closure = closeOverReferences (roots ++ compilerUnitRoots (unitConfigExternalInterp cfg) pkg_map1) pkg_map1
+  let closure = closeOverReferences roots pkg_map1
   debugTraceMsg logger 2 $
       text "unit closure:" <+> int (sizeUniqMap closure) <+> text "of"
         <+> int (sizeUniqMap pkg_map1) <+> text "units"
@@ -898,10 +866,7 @@ mkUnitStateByName logger unit_index cfg = do
           * this step is done TWICE if -plugin-package/-hide-all-plugin-packages
             are used
 
-       c) based on the visibility map, we pick wired packages and rewrite
-          them to have the expected unitId.
-
-       d) finally, using the visibility map and the package database,
+       c) finally, using the visibility map and the package database,
           we build a mapping saying what every in scope module name points to.
 -}
 
@@ -1020,8 +985,8 @@ initialTrustOverlay cfg pkgs
   | otherwise                 = emptyTrustOverlay
 
 -- | From the usable units and the visibility the flags gave them to the
--- 'UnitState': wiring, plugin visibility, the module map, the preload set.
--- Shared by both ways of building the unit state.
+-- 'UnitState': plugin visibility, the module map, the preload set. Shared
+-- by both ways of building the unit state.
 finishUnitState
     :: Logger
     -> UnitIndexCache
@@ -1037,18 +1002,12 @@ finishUnitState
 finishUnitState logger unit_index cfg prec_map pkgs1 unusable trustUnitsOverlay vis_map2 plugin_flags home_unit_deps = do
   let prelim_pkg_db = mkUnitInfoMap pkgs1
 
-  --
-  -- Sort out which packages are wired in. This has to be done last, since
-  -- it modifies the unit ids of wired in packages, but when we process
-  -- package arguments we need to key against the old versions.
-  --
-  wired_map <- setupWiredInUnits logger prec_map pkgs1 vis_map2 unit_index
-  pkgs2 <- updateWiredInUnitIndex wired_map pkgs1 unit_index
+  -- Share the 'UnitInfo's with the other home units of the session.
+  -- See Note [Sharing 'UnitInfo's across the 'UnitEnv']
+  pkgs2 <- shareUnitInfos pkgs1 unit_index
 
   let pkg_db = mkUnitInfoMap pkgs2
-
-  -- Update the visibility map, so we treat wired packages as visible.
-  let vis_map = updateVisibilityMap wired_map vis_map2
+      vis_map = vis_map2
 
   let hide_plugin_pkgs = unitConfigHideAllPlugins cfg
   plugin_vis_map <-
@@ -1058,25 +1017,12 @@ finishUnitState logger unit_index cfg prec_map pkgs1 unusable trustUnitsOverlay 
            | otherwise -> return emptyUniqMap
         _ -> do let plugin_vis_map1
                         | hide_plugin_pkgs = emptyUniqMap
-                        -- Use the vis_map PRIOR to wired in,
-                        -- because otherwise applyPackageFlag
-                        -- won't work.
-                        | otherwise = vis_map2
-                plugin_vis_map2
-                    <- mayThrowUnitErr
-                        $ foldM (applyPackageFlag prec_map prelim_pkg_db unusable
-                                hide_plugin_pkgs pkgs1)
-                             plugin_vis_map1
-                             plugin_flags
-                -- Updating based on wired in packages is mostly
-                -- good hygiene, because it won't matter: no wired in
-                -- package has a compiler plugin.
-                -- TODO: If a wired in package had a compiler plugin,
-                -- and you tried to pick different wired in packages
-                -- with the plugin flags and the normal flags... what
-                -- would happen?  I don't know!  But this doesn't seem
-                -- likely to actually happen.
-                return (updateVisibilityMap wired_map plugin_vis_map2)
+                        | otherwise = vis_map
+                mayThrowUnitErr
+                    $ foldM (applyPackageFlag prec_map prelim_pkg_db unusable
+                            hide_plugin_pkgs pkgs1)
+                         plugin_vis_map1
+                         plugin_flags
 
   let pkgname_map = listToUFM [ (unitPackageName p, unitInstanceOf p)
                               | p <- pkgs2
@@ -1126,7 +1072,7 @@ finishUnitState logger unit_index cfg prec_map pkgs1 unusable trustUnitsOverlay 
          , explicitUnits                = explicit_pkgs
          , homeUnitDepends              = home_unit_deps
          , unitInfoMap                  = pkg_db
-         , trustedUnits                 = trustUnitsOverlay `extendForWireMap` wired_map
+         , trustedUnits                 = trustUnitsOverlay
          , moduleNameProvidersMap       = mod_map
          , pluginModuleNameProvidersMap = mkModuleNameProvidersMap logger (unitConfigAllowVirtual cfg) pkg_db plugin_vis_map
          , packageNameMap               = pkgname_map
@@ -1161,10 +1107,12 @@ initUnitDbConfig uc = UnitDbConfig
 -- | The roots of the ids-only unit state, if this compilation qualifies for
 -- it: @-hide-all-packages@ is set and every flag names units by id. They are
 -- the units named by @-package-id@ and @-plugin-package-id@ (for an
--- instantiated unit, the units it is made of), the units linked implicitly,
--- and for a Backpack home unit the indefinite unit it instantiates and the
--- units it is instantiated with. Unit stores are probed for exactly these
--- and what they reference ('unitDbConfigDemandRoots').
+-- instantiated unit, the units it is made of), the units the compiler needs
+-- for itself (the implicitly linked ones, the ones with fixed ids, the ghci
+-- unit when the external interpreter may run), and for a Backpack home unit
+-- the indefinite unit it instantiates and the units it is instantiated
+-- with. Unit stores are probed for exactly these and what they reference
+-- ('unitDbConfigDemandRoots').
 --
 -- 'Nothing' when some flag names a unit by package name, which cannot be
 -- probed for and needs everything installed to be resolved. See
@@ -1175,7 +1123,8 @@ idsOnlyRoots uc
   , all trustById  (unitConfigFlagsTrusted uc)
   , all ignoreById (unitConfigFlagsIgnored uc)
   = do flag_roots <- concat <$> mapM exposeRoots (unitConfigFlagsExposed uc ++ unitConfigFlagsPlugins uc)
-       Just (flag_roots ++ unitConfigAutoLink uc ++ instantiation_roots)
+       Just (flag_roots ++ unitConfigAutoLink uc ++ wiredInUnitIds
+             ++ maybeToList (unitConfigGhciUnit uc) ++ instantiation_roots)
   | otherwise
   = Nothing
   where

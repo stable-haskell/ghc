@@ -6,7 +6,6 @@ module GHC.Unit.External.Visibility (
 import GHC.Prelude
 
 import GHC.Data.FastString
-import GHC.Driver.DynFlags
 import GHC.Types.Unique.Map
 import GHC.Unit.Module
 import GHC.Utils.Outputable as Outputable

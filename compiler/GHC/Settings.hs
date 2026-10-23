@@ -98,6 +98,8 @@ data UnitSettings = UnitSettings
   { unitSettings_baseUnitId        :: !UnitId
   , unitSettings_ghcUnitId         :: !UnitId
   , unitSettings_ghcInternalUnitId :: !UnitId
+  , unitSettings_ghciUnitId        :: !UnitId
+    -- ^ The unit the external interpreter program is linked against.
   }
 
 -- | Settings for other executables GHC calls.

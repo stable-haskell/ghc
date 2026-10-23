@@ -271,6 +271,19 @@ The GHC command line options that control packages are:
     Distributors can set a default unit-id for base at install time by specifying
     the ``BASE_UNIT_ID`` environment variable.
 
+.. ghc-flag:: -ghci-unit-id ⟨unit-id⟩
+    :shortdesc: The unit-id of the "ghci" package, which the external interpreter is linked against.
+    :type: dynamic
+    :category:
+
+    :since: 10.2.1
+
+    The external interpreter (:ghc-flag:`-fexternal-interpreter`) is a
+    program GHC links against the ``ghci`` package on demand. By default the
+    unit-id of that package comes from the settings file (``ghci unit-id``);
+    this flag overrides it. You should only need to pass this flag if you
+    really know what you are doing.
+
 
 
 .. ghc-flag:: -this-unit-id ⟨unit-id⟩

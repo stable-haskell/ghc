@@ -15,21 +15,23 @@ import GHC.Utils.Logger
 import GHC.Utils.TmpFs
 import GHC.Unit.Types
 import GHC.Unit.Env
-import GHC.Unit.Info
 import GHC.Unit.State
 import GHC.Utils.Panic.Plain
 import GHC.Linker.Executable
 import GHC.Linker.Config
 
+import Control.Monad (when)
+import Data.Maybe (isNothing)
+
 -- | Generate iserv program for the target
 generateIservC :: DynFlags -> Logger -> TmpFs -> ExecutableLinkOpts -> UnitEnv -> IO FilePath
 generateIservC dflags logger tmpfs opts unit_env = do
-  -- get the unit-id of the ghci package. We need this to load the
-  -- interpreter code.
+  -- the ghci unit, which the interpreter program is linked against, must be
+  -- available. Its id comes from the settings file (see 'ghciUnitId').
   let unit_state = ue_homeUnitState unit_env
-  ghci_unit_id <- case lookupPackageName unit_state (PackageName (fsLit "ghci")) of
-    Nothing -> cmdLineErrorIO "C interpreter: couldn't find \"ghci\" package"
-    Just i  -> pure i
+      ghci_unit_id = ghciUnitId dflags
+  when (isNothing (lookupUnitId unit_state ghci_unit_id)) $
+    cmdLineErrorIO ("C interpreter: couldn't find the ghci unit " ++ unitIdString ghci_unit_id)
 
   -- generate a temporary name for the iserv program
   let tmpdir = leTempDir opts

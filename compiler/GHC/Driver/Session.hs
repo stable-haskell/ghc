@@ -76,6 +76,7 @@ module GHC.Driver.Session (
 
         -- ** base
         baseUnitId,
+        ghciUnitId,
 
         -- ** System tool settings and locations
         Settings(..),
@@ -548,6 +549,10 @@ opt_i dflags= toolSettings_opt_i $ toolSettings dflags
 setBaseUnitId :: String -> DynP ()
 setBaseUnitId s = upd $ \d -> d
   { unitSettings = (unitSettings d) { unitSettings_baseUnitId = stringToUnitId s } }
+
+setGhciUnitId :: String -> DynP ()
+setGhciUnitId s = upd $ \d -> d
+  { unitSettings = (unitSettings d) { unitSettings_ghciUnitId = stringToUnitId s } }
 
 -----------------------------------------------------------------------------
 
@@ -2177,6 +2182,7 @@ package_flags_deps = [
   , make_ord_flag defFlag "trust-id"              (HasArg trustPackageId)
   , make_ord_flag defFlag "distrust-id"           (HasArg distrustPackageId)
   , make_ord_flag defFlag "base-unit-id"          (HasArg setBaseUnitId)
+  , make_ord_flag defFlag "ghci-unit-id"          (HasArg setGhciUnitId)
   ]
   where
     setPackageEnv env = upd $ \s -> s { packageEnv = Just env }

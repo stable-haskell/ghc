@@ -584,27 +584,26 @@ newtype Definite unit = Definite { unDefinite :: unit }
 Note [Wired-in units]
 ~~~~~~~~~~~~~~~~~~~~~
 
-Certain packages are known to the compiler, in that we know about certain
-entities that reside in these packages, and the compiler needs to
-declare static Modules and Names that refer to these packages.  Hence
-the wired-in packages can't include version numbers in their package UnitId,
-since we don't want to bake the version numbers of these packages into GHC.
+Certain units are known to the compiler, in that we know about certain
+entities that reside in them, and the compiler declares static Modules and
+Names that refer to them: ghc-internal, home of the known-key names, and
+rts, whose labels the code generator refers to. Their unit ids are therefore
+constants of the compiler, 'ghcInternalUnitId' and 'rtsUnitId', and they are
+unversioned, so that the version of these units is not baked into GHC.
 
-So here's the plan.  Wired-in units are still versioned as
-normal in the packages database, and you can still have multiple
-versions of them installed. To the user, everything looks normal.
+These units are compiled with @-this-unit-id ghc-internal@ and
+@-this-unit-id rts@ (set in their cabal files), so the symbols in their
+object files and the modules in their interface files carry exactly these
+ids, and they are *registered* under the same ids by the build system. The
+compiler therefore uses the installed unit as it is: there is no rewriting
+of unit ids ("wiring") anywhere in the unit state. Only one unit with each
+of these ids can be installed in a database, which is the same restriction
+as before: only one version of each could ever be used by a compiler.
 
-However, for each invocation of GHC, only a single instance of each wired-in
-package will be recognised (the desired one is selected via
-@-package@\/@-hide-package@), and GHC will internally pretend that it has the
-*unversioned* 'UnitId', including in .hi files and object file symbols.
-
-Unselected versions of wired-in packages will be ignored, as will any other
-package that depends directly or indirectly on it (much as if you
-had used @-ignore-package@).
-
-The affected packages are compiled with, e.g., @-this-unit-id base@, so that
-the symbols in the object files have the unversioned unit id in their name.
+The same holds for the ghc library, whose id is a build-time constant too
+(Note [GHC's Unit Id]). The remaining units the compiler needs for itself,
+base and ghci, have no fixed id: the compiler reads their ids from the
+settings file ('GHC.Driver.DynFlags.baseUnitId', 'ghciUnitId').
 
 Make sure you change 'wiredInUnitIds' if you add an entry here.
 

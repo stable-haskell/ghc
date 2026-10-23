@@ -207,6 +207,7 @@ data JSInterpConfig = JSInterpConfig
   , jsInterpLogger      :: !Logger
   , jsInterpCodegenCfg  :: !StgToJSConfig
   , jsInterpUnitEnv     :: !UnitEnv
+  , jsInterpGhciUnitId  :: !UnitId          -- ^ The unit the interpreter is linked against
   , jsInterpFinderOpts  :: !FinderOpts
   , jsInterpFinderCache :: !FinderCache
   }
@@ -234,4 +235,5 @@ data WasmInterpConfig = WasmInterpConfig
   , wasmInterpProfiled       :: !Bool      -- ^ Are we profiling yet?
   , wasmInterpHsSoSuffix     :: !String    -- ^ Shared lib filename common suffix sans .so, e.g. p-ghc9.13.20241001
   , wasmInterpUnitState      :: !UnitState
+  , wasmInterpGhciUnitId     :: !UnitId    -- ^ The unit the interpreter is linked against
   }

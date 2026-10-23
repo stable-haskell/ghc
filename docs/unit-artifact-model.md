@@ -306,8 +306,9 @@ Under `-hide-all-packages`, the only units that can become visible are
 those named by `-package-id` and `-plugin-package-id` flags and whatever
 they reference. So `readUnitDatabases` (`GHC.Unit.External.Index`):
 
-1. reads the package databases in full, as before, which is where the
-   wired-in units come from;
+1. reads the package databases in full, as before (since stage 3 of the
+   ids-only work the compiler's own units are probed by id like any other,
+   so a stack of stores alone is enough);
 2. takes the flagged unit ids as roots (for an instantiated id, the
    indefinite unit plus the units of its instantiation);
 3. probes every store on the stack for each root and follows

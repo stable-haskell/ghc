@@ -22,3 +22,10 @@ description:
   ``-trust-id ⟨unit-id⟩`` and ``-distrust-id ⟨unit-id⟩`` flags are the
   by-id forms of ``-trust`` and ``-distrust``. Nothing changes for command
   lines that name a package by name.
+
+  The ``ghc-internal`` and ``rts`` units are now registered under the unit
+  ids they are compiled with, ``ghc-internal`` and ``rts``, instead of
+  versioned ids, so the compiler no longer rewrites ("wires") unit ids when
+  it reads a package database. The unit of the external interpreter is read
+  from the settings file (``ghci unit-id``) and can be overridden with
+  ``-ghci-unit-id ⟨unit-id⟩``.

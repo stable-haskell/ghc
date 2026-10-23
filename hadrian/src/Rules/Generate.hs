@@ -455,6 +455,7 @@ bindistRules = do
     , interpolateVar "BaseUnitId" $ bindistUnitId base
     , interpolateVar "GhcUnitId" $ bindistUnitId compiler
     , interpolateVar "GhcInternalUnitId" $ bindistUnitId ghcInternal
+    , interpolateVar "GhciUnitId" $ bindistUnitId ghci
     , interpolateVar "GhcWithSMP" $ yesNo <$> targetSupportsSMP Stage2
     , interpolateVar "TargetPlatformFull" (setting TargetPlatformFull)
     , interpolateVar "BuildPlatformFull" (setting BuildPlatformFull)
@@ -503,6 +504,7 @@ generateSettings libraryStage settingsFile includeLibDir rel_pkg_db = do
     base_unit_id <- expr $ pkgUnitId libraryStage base
     ghc_unit_id <- expr $ pkgUnitId libraryStage compiler
     ghc_internal_unit_id <- expr $ pkgUnitId libraryStage ghcInternal
+    ghci_unit_id <- expr $ pkgUnitId libraryStage ghci
 
     -- For cross compilers, LibDir points to the succeeding stage's lib dir
     -- (which contains the target architecture's libraries). For non-cross,
@@ -525,6 +527,7 @@ generateSettings libraryStage settingsFile includeLibDir rel_pkg_db = do
           , ("RTS ways", unwords . map show . Set.toList <$> getRtsWays)
           , ("Relative Global Package DB", pure rel_pkg_db)
           , ("base unit-id", pure base_unit_id)
+          , ("ghci unit-id", pure ghci_unit_id)
           , ("Project Unit Id", pure ghc_unit_id)
           , ("ghc-internal Unit Id", pure ghc_internal_unit_id)
           ]
