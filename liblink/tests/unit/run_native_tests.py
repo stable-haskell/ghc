@@ -315,6 +315,47 @@ def main() -> int:
         )
         run([str(riscv_u_type_test)], label="run riscv_u_type")
 
+        if host == "Darwin":
+            segment_padding_test = output / "macho_segment_padding"
+            segment_padding_map = output / "macho_segment_padding.map"
+            segment_padding_trace = run(
+                cc
+                + [
+                    str(ROOT / "liblink/tests/unit/macho_segment_padding.c"),
+                    f"-L{archive.parent}",
+                    "-llink",
+                    *core_link_flags(host),
+                    "-Wl,-t",
+                    linker_map_flag(segment_padding_map),
+                    "-o",
+                    str(segment_padding_test),
+                ],
+                label="compile and link macho_segment_padding",
+            )
+            if not segment_padding_map.is_file():
+                raise RuntimeError(
+                    f"linker did not create map file: {segment_padding_map}"
+                )
+            segment_padding_map_text = segment_padding_map.read_text(errors="replace")
+            if str(archive) not in segment_padding_map_text:
+                raise RuntimeError(
+                    f"macho_segment_padding map omitted expected archive: {archive}"
+                )
+            for member in ("MachO", "Linker"):
+                included_member = re.compile(
+                    rf"{re.escape(str(archive))}"
+                    rf"\((?:[^)]*[/_])?{member}(?:\.c)?\.(?:o|obj)\)"
+                )
+                if included_member.search(segment_padding_map_text):
+                    raise RuntimeError(
+                        f"archive {member}.o was selected beside the included source"
+                    )
+            if str(archive) not in segment_padding_trace:
+                raise RuntimeError(
+                    f"macho_segment_padding trace omitted expected archive: {archive}"
+                )
+            run([str(segment_padding_test)], label="run macho_segment_padding")
+
     print("liblink native unit tests: PASS")
     return 0
 

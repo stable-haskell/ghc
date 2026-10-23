@@ -1126,6 +1126,8 @@ ocBuildSegments_MachO(ObjectCode *oc)
     size_t size_gbZerofillSegment = 0;
     Segment *gbZerofillSegment = NULL;
 
+    size_t max_alignment[3] = {1, 1, 1};
+
     int n_activeSegments = 0;
     int curSegment = 0;
     size_t size_compound;
@@ -1145,16 +1147,32 @@ ocBuildSegments_MachO(ObjectCode *oc)
         if (S_GB_ZEROFILL == (macho->flags & SECTION_TYPE)) {
             size_gbZerofillSegment = ll_round_up_to_align(size_gbZerofillSegment, alignment);
             size_gbZerofillSegment += macho->size;
+            if (alignment > max_alignment[2]) max_alignment[2] = alignment;
             n_gbZerofills++;
         } else if (getSectionKind_MachO(macho) == SECTIONKIND_CODE_OR_RODATA) {
             size_rxSegment = ll_round_up_to_align(size_rxSegment, alignment);
             size_rxSegment += macho->size;
+            if (alignment > max_alignment[0]) max_alignment[0] = alignment;
             n_rxSections++;
         } else {
             size_rwSegment = ll_round_up_to_align(size_rwSegment, alignment);
             size_rwSegment += macho->size;
+            if (alignment > max_alignment[1]) max_alignment[1] = alignment;
             n_rwSections++;
         }
+    }
+
+    /* Offsets were sized from zero, but mmap guarantees only page alignment.
+     * Reserve the worst-case initial phase before any larger alignment. */
+    size_t page = ll_page_size_for(oc->L);
+    size_t *sizes[3] = {&size_rxSegment, &size_rwSegment, &size_gbZerofillSegment};
+    for (size_t i = 0; i < 3; ++i) {
+        size_t padding = max_alignment[i] > page ? max_alignment[i] - page : 0;
+        if (*sizes[i] > SIZE_MAX - padding) {
+            ll_error_set(oc->L, LL_E_FORMAT, "Mach-O segment alignment padding overflow");
+            return 0;
+        }
+        *sizes[i] += padding;
     }
 
     size_compound = ll_round_up_to_page_for(oc->L, size_rxSegment) +

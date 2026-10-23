@@ -106,6 +106,7 @@ extra-source-files:
     tests/unit/error_state.c
     tests/unit/hash_destroy_owner.c
     tests/unit/owner_services.c
+    tests/unit/macho_segment_padding.c
     tests/unit/riscv_u_type.c
     tests/unit/riscv_u_type_source.py
     tests/unit/run_native_tests.py

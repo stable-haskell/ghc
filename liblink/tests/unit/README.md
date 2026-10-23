@@ -175,3 +175,24 @@ checks the rounded high field as a signed 32-bit value before shifting and
 checking its 20-bit range. The test exercises the actual extracted definitions,
 not a maintained copy. It does not build or execute the RISC-V relocation
 backend on this host; full backend execution remains for RISC-V CI.
+
+Mach-O segment alignment headroom
+=================================
+
+On Darwin, `macho_segment_padding.c` includes the actual `MachO.c` and
+`Linker.c` implementations and interposes only their anonymous segment mapper
+and segment unmapper. The mapper uses real `mmap` storage but chooses a base
+that is page aligned and exactly one page off a two-page boundary, so the
+regression does not depend on ASLR. Tests cover page-aligned sections,
+over-page-aligned RX/RW/GB sections, mixed regular and zero-fill sections, and
+padding-add overflow in each segment class. They check every computed section
+span against its segment before any section payload write, and verify mapping
+teardown through the matching unmap wrapper.
+
+The loader originally sized each class from offset zero, although the mapper
+promised only page alignment. Rounding the returned base up to a larger section
+alignment could therefore place a section beyond its segment allocation. The
+runtime now reserves the worst-case alignment headroom per class and rejects
+padding addition overflow with `LL_E_FORMAT`. This unit exercises segment
+construction only; it does not copy or zero section payloads, resolve symbols,
+apply relocations, or run initializers. It is native Darwin evidence only.
