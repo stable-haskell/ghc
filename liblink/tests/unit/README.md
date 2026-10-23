@@ -422,9 +422,24 @@ the host allocator's bookkeeping free. The large query case also checks that a
 failed cleanup release preserves the primary diagnostic and retries once at
 shutdown.
 Use `python3 liblink/tests/unit/run_native_tests.py --windows-m32-only` on a
-native Windows build to run only this unit. This checkout has no Windows
-compiler or runner, so its OS behavior remains unqualified until that native
-run occurs. The Windows-only archive check normalizes slash direction and case
-and adds `cygpath -m` spelling when available, while still requiring the
-selected archive in both the link map and trace and rejecting duplicate
-included implementation members.
+native Windows build to run this unit and `pei386_common_ownership.c`. The PE
+fixture writes a small AMD64 COFF object with a writable data section, an
+`ADDR64` relocation, and a COMMON symbol, then loads, resolves, unloads, and
+disposes it through the real PE linker and `freeObjectCode` paths. It checks
+zero-filled COMMON storage, the relocation target, smaller-COMMON reuse, and
+that disposing reuse and empty objects leaves the provider's bytes intact.
+Its host allocation ledger detects a COMMON M32 address sent to `host_free`
+without calling `free` on that address. The driver also compiles a temporary
+one-line `SECTION_MALLOC` mutation and requires the ledger diagnostic, so the
+stale classification is a discriminating failure while remaining safe to run.
+After normal disposal the fixture reports and checks the known host-ledger
+metadata residue: three copied COFF string tables, two section names, and two
+relocation copies. It releases those allocations only after recording the
+observation as fixture-owned harness cleanup. This is not a claim about
+CRT-allocated duplicated symbol names or whole-process leak freedom.
+
+This checkout has no Windows compiler or runner, so the Windows behavior
+remains unqualified until that native command runs. The Windows-only archive
+checks normalize slash direction and case and add `cygpath -m` spelling when
+available, while requiring the selected archive in both link map and trace and
+rejecting duplicate included implementation members.

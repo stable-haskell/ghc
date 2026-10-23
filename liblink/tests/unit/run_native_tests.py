@@ -17,6 +17,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 TIMEOUT_SECONDS = 90
+PE_SUPPORT_LIBS = ["-ldbghelp", "-lpsapi"]
 
 
 def parse_args() -> argparse.Namespace:
@@ -61,7 +62,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--windows-m32-only",
         action="store_true",
-        help="run only the native Windows M32 reservation ownership unit",
+        help="run only the native Windows M32 and PE COMMON ownership units",
     )
     return parser.parse_args()
 
@@ -240,6 +241,146 @@ def verify_link_map(
     )
 
 
+def verify_overlay_include_argv() -> None:
+    synthetic = ["clang", "-I", "src", "-c", "fixture.c"]
+    pair = synthetic.index("-I")
+    synthetic[pair:pair] = ["-I", "overlay", "-I", "linker"]
+    expected = ["clang", "-I", "overlay", "-I", "linker",
+                "-I", "src", "-c", "fixture.c"]
+    if synthetic != expected:
+        raise RuntimeError("synthetic compiler argv overlay probe failed")
+    for index, token in enumerate(synthetic[:-1]):
+        if token == "src" and synthetic[index - 1] != "-I":
+            raise RuntimeError("synthetic compiler argv has a bare include path")
+    link_args = ["-llink", *PE_SUPPORT_LIBS]
+    if link_args != ["-llink", "-ldbghelp", "-lpsapi"]:
+        raise RuntimeError("synthetic PE support-library argv probe failed")
+
+
+def run_pei386_common_ownership(cc: list[str], archive: Path,
+                                output: Path) -> None:
+    verify_overlay_include_argv()
+    test_source = ROOT / "liblink/tests/unit/pei386_common_ownership.c"
+    test_binary = output / "pei386_common_ownership.exe"
+    test_map = output / "pei386_common_ownership.map"
+    trace = run(
+        cc
+        + [
+            str(test_source),
+            f"-L{archive.parent}",
+            "-llink",
+            *PE_SUPPORT_LIBS,
+            "-Wl,-t",
+            linker_map_flag(test_map),
+            "-o",
+            str(test_binary),
+        ],
+        label="compile and link pei386_common_ownership",
+    )
+    included = (
+        "PEi386.c, Linker.c, M32Alloc.c, M32Reservations.c, and MMap.c"
+    )
+    for member in ("PEi386", "Linker", "M32Alloc", "M32Reservations", "MMap"):
+        verify_link_map(
+            test_map,
+            archive,
+            trace,
+            included_source=included,
+            forbidden_member=member,
+            windows_paths=True,
+        )
+    run([str(test_binary)], label="run pei386_common_ownership")
+
+    # Compile an isolated one-line old-tag mutation. The fixture ledger spots
+    # the M32 address at host_free and deliberately declines to call free().
+    source_text = (ROOT / "liblink/src/linker/PEi386.c").read_text()
+    old_line = (
+        "SECTIONKIND_RWDATA, SECTION_M32,\n"
+        "                  bss, globalBssSize, 0, 0, 0);"
+    )
+    if source_text.count(old_line) != 1:
+        raise RuntimeError("could not uniquely locate the approved PE COMMON tag")
+    overlay = output / "old-tag-overlay"
+    overlay_file = overlay / "linker/PEi386.c"
+    overlay_file.parent.mkdir(parents=True, exist_ok=True)
+    overlay_file.write_text(
+        source_text.replace(
+            old_line,
+            old_line.replace("SECTION_M32", "SECTION_MALLOC"),
+            1,
+        )
+    )
+    mutant_cc = list(cc)
+    source_include = str(ROOT / "liblink/src")
+    source_include_index = mutant_cc.index(source_include)
+    overlay_includes = ["-I", str(overlay), "-I", str(ROOT / "liblink/src/linker")]
+    include_pair_index = source_include_index - 1
+    if mutant_cc[include_pair_index] != "-I":
+        raise RuntimeError("could not locate the existing source -I pair")
+    mutant_cc[include_pair_index:include_pair_index] = overlay_includes
+    expected_include_window = [
+        "-I", str(overlay), "-I", str(ROOT / "liblink/src/linker"),
+        "-I", source_include,
+    ]
+    if mutant_cc[include_pair_index:include_pair_index + 6] != expected_include_window:
+        raise RuntimeError("old-tag overlay include argv order is malformed")
+    mutant_binary = output / "pei386_common_ownership_old_tag.exe"
+    mutant_map = output / "pei386_common_ownership_old_tag.map"
+    mutant_trace = run(
+        mutant_cc
+        + [
+            str(test_source),
+            f"-L{archive.parent}",
+            "-llink",
+            *PE_SUPPORT_LIBS,
+            "-Wl,-t",
+            linker_map_flag(mutant_map),
+            "-o",
+            str(mutant_binary),
+        ],
+        label="compile old-tag ownership regression mutant",
+    )
+    for member in ("PEi386", "Linker", "M32Alloc", "M32Reservations", "MMap"):
+        verify_link_map(
+            mutant_map,
+            archive,
+            mutant_trace,
+            included_source=included,
+            forbidden_member=member,
+            windows_paths=True,
+        )
+    print(
+        "[run old-tag ownership regression mutant] + "
+        + command_text([mutant_binary]),
+        flush=True,
+    )
+    try:
+        mutant_result = subprocess.run(
+            [str(mutant_binary)],
+            cwd=ROOT,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=TIMEOUT_SECONDS,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise RuntimeError("old-tag mutant timed out") from error
+    mutant_output = mutant_result.stdout + mutant_result.stderr
+    expected_diagnostic = "PE COMMON M32 BSS passed to host_free"
+    if mutant_result.returncode == 0 or expected_diagnostic not in mutant_output:
+        print(mutant_output, end="", file=sys.stderr)
+        raise RuntimeError(
+            "old-tag mutant did not produce the bounded host-free ledger failure"
+        )
+    print(
+        "[old-tag mutation] PASS: host-free ledger detected the stale tag; "
+        "the fixture did not free the M32 address",
+        flush=True,
+    )
+
+
 def verify_macho_link_map(
     map_path: Path,
     archive: Path,
@@ -397,7 +538,8 @@ def main() -> int:
                     windows_paths=True,
                 )
             run([str(m32_test)], label="run m32_windows_reservations")
-            print("liblink native unit tests: PASS (Windows M32 only)")
+            run_pei386_common_ownership(cc, archive, output)
+            print("liblink native unit tests: PASS (Windows M32/PE ownership only)")
             return 0
 
         error_state = output / "error_state"

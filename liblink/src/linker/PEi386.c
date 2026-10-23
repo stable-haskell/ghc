@@ -1842,7 +1842,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
            LL_FATAL_FOR(oc->L, "ocGetNames_PEi386: Failed to allocate global bss section");
        }
        addSection(oc->L, &oc->sections[oc->n_sections-1],
-                  SECTIONKIND_RWDATA, SECTION_MALLOC,
+                  SECTIONKIND_RWDATA, SECTION_M32,
                   bss, globalBssSize, 0, 0, 0);
        LL_IF_DEBUG_FOR(oc->L, linker_verbose, LL_DEBUG_FOR(oc->L, "bss @ %p %" LL_FMT_WORD "\n", bss, globalBssSize));
        addProddableBlock(oc->L, &oc->proddables, bss, globalBssSize);
