@@ -275,6 +275,35 @@ rejects an archived `MachO.o` beside the included implementation. This covers
 function-level relocation behavior, not a complete object-file load or a
 non-Darwin architecture.
 
+Mach-O x86_64 relocation status
+===============================
+
+On Darwin/x86_64, `macho_x86_error_status.c` includes the current `MachO.c` and
+calls its actual section relocation loop. Positive controls check literal
+UNSIGNED, SIGNED, SIGNED_1/2/4, BRANCH, and SUBTRACTOR writes, GOT and GOT_LOAD
+through real `SymbolExtra` storage, and valid internal UNSIGNED/SIGNED section
+targets. A real far target checks nearby branch-island encoding. A second
+branch case uses a separately allocated real `SymbolExtra`; it checks the
+actual target and island distances before exercising `LL_E_RELOC_RANGE` and
+prints a skip if those placements do not cross the signed 32-bit boundary.
+Negative controls check unsupported relocation types, missing external and
+GOT symbols, unresolved section symbols, invalid local GOT symbol types,
+invalid PC-relative flags, internal displacements before the target section, a
+zero internal section index, computed targets outside the proddable blocks,
+and writes outside the object span. Failures must return zero with the expected
+owner-local status and diagnostic, leave the relocation target and canaries
+intact, and preserve the default linker's error sentinel. Owner teardown must
+release all tracked allocations and no recoverable case may use the fatal
+callback.
+
+The native driver runs this unit only when the generated platform header selects
+x86_64 on Darwin. Its link-map check requires the selected stage2 archive and
+`MachOVerify.o`, and rejects an archived `MachO.o` beside the included source.
+This covers function-level relocation status behavior under x86_64; it does not
+load a complete object. The branch-range case writes to its allocated island
+before it can reject an out-of-range island; the test checks target bytes and
+canaries, not transaction rollback of the auxiliary island storage.
+
 Mach-O load failure cleanup
 ===========================
 

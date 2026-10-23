@@ -811,6 +811,20 @@ relocateSectionAarch64(ObjectCode * oc, Section * section)
 
 #if defined(x86_64_HOST_ARCH)
 static int
+checkMachORelocationSpan(ObjectCode *oc, void *address, size_t size)
+{
+    if (!containsSpan(&oc->proddables, (uintptr_t)address,
+                       (uintptr_t)address + size)) {
+        ll_error_set(oc->L, LL_E_FORMAT,
+                     "checkProddableBlock: invalid fixup in runtime linker: %p", address);
+        LL_LOG_ERROR_FOR(oc->L,
+                     "checkProddableBlock: invalid fixup in runtime linker: %p", address);
+        return 0;
+    }
+    return 1;
+}
+
+static int
 relocateSection(ObjectCode* oc, int curSection)
 {
     Section * sect = &oc->sections[curSection];
@@ -863,6 +877,9 @@ relocateSection(ObjectCode* oc, int curSection)
         LL_IF_DEBUG_FOR(oc->L, linker_verbose, LL_DEBUG_FOR(oc->L, "               : extern    = %d\n", reloc->r_extern));
         LL_IF_DEBUG_FOR(oc->L, linker_verbose, LL_DEBUG_FOR(oc->L, "               : type      = %d\n", reloc->r_type));
 
+        if (!checkMachORelocationSpan(oc, thingPtr, (size_t)1 << reloc->r_length))
+            return 0;
+
         switch(reloc->r_length)
         {
             case 0:
@@ -884,7 +901,6 @@ relocateSection(ObjectCode* oc, int curSection)
             default:
                 LL_FATAL_FOR(oc->L, "Unknown size.");
         }
-        checkProddableBlock(oc->L, &oc->proddables,thingPtr,relocLenBytes);
 
         /*
          * With SIGNED_N the relocation is not at the end of the
@@ -936,6 +952,9 @@ relocateSection(ObjectCode* oc, int curSection)
                                         "               : addr = %p\n", nm, addr));
 
                     if (addr == NULL) {
+                            ll_error_set(oc->L, LL_E_UNRESOLVED,
+                                       "\nlookupSymbol failed in relocateSection (RELOC_GOT)\n"
+                                       "%s: unknown symbol `%s'", oc->fileName, nm);
                             LL_LOG_ERROR_FOR(oc->L, "\nlookupSymbol failed in relocateSection (RELOC_GOT)\n"
                                        "%s: unknown symbol `%s'", oc->fileName, nm);
                             return 0;
@@ -950,6 +969,8 @@ relocateSection(ObjectCode* oc, int curSection)
 
                     if ((symbol->nlist->n_type & N_TYPE) == N_SECT) {
                         if (symbol->addr == NULL) {
+                            ll_error_set(oc->L, LL_E_UNRESOLVED,
+                                         "relocateSection: address of internal symbol %s was not resolved\n", nm);
                             LL_LOG_ERROR_FOR(oc->L, "relocateSection: address of internal symbol %s was not resolved\n", nm);
                             return 0;
                         }
@@ -962,6 +983,9 @@ relocateSection(ObjectCode* oc, int curSection)
                         LL_IF_DEBUG_FOR(oc->L, linker_verbose,
                                  LL_DEBUG_FOR(oc->L, "               : addr = %p\n", addr));
                     } else {
+                        ll_error_set(oc->L, LL_E_FORMAT,
+                                   "\nrelocateSection: %s is not exported,"
+                                   " and should be defined in a section, but isn't!\n", nm);
                         LL_LOG_ERROR_FOR(oc->L, "\nrelocateSection: %s is not exported,"
                                    " and should be defined in a section, but isn't!\n", nm);
                         return 0;
@@ -987,7 +1011,13 @@ relocateSection(ObjectCode* oc, int curSection)
             LL_IF_DEBUG_FOR(oc->L, linker_verbose, LL_DEBUG_FOR(oc->L, "               : value = %p\n", (void *)symbol->nlist->n_value));
 
             if ((symbol->nlist->n_type & N_TYPE) == N_SECT) {
-                LL_CHECK_FOR(oc->L, symbol->addr != NULL);
+                if (symbol->addr == NULL) {
+                    ll_error_set(oc->L, LL_E_UNRESOLVED,
+                                 "relocateSection: address of external symbol %s was not resolved\n", nm);
+                    LL_LOG_ERROR_FOR(oc->L,
+                                 "relocateSection: address of external symbol %s was not resolved\n", nm);
+                    return 0;
+                }
                 value = (uint64_t) symbol->addr;
                 LL_IF_DEBUG_FOR(oc->L, linker_verbose,
                          LL_DEBUG_FOR(oc->L, "relocateSection, defined external symbol %s, relocated address %p\n",
@@ -997,6 +1027,9 @@ relocateSection(ObjectCode* oc, int curSection)
                 addr = lookupDependentSymbol(oc->L, nm, oc, NULL);
                 if (addr == NULL)
                 {
+                     ll_error_set(oc->L, LL_E_UNRESOLVED,
+                                "\nlookupSymbol failed in relocateSection (relocate external)\n"
+                                "%s: unknown symbol `%s'", oc->fileName, nm);
                      LL_LOG_ERROR_FOR(oc->L, "\nlookupSymbol failed in relocateSection (relocate external)\n"
                                 "%s: unknown symbol `%s'", oc->fileName, nm);
                      return 0;
@@ -1021,9 +1054,15 @@ relocateSection(ObjectCode* oc, int curSection)
              * (1) needs to be updated due to different section placement in memory.
              */
 
-            LL_CHECKM_FOR(oc->L, reloc->r_symbolnum > 0,
+            if (!(reloc->r_symbolnum > 0)) {
+                ll_error_set(oc->L, LL_E_FORMAT,
                    "relocateSection: unsupported r_symbolnum = %" PRIu32 " < 1 for internal relocation",
                    reloc->r_symbolnum);
+                LL_LOG_ERROR_FOR(oc->L,
+                   "relocateSection: unsupported r_symbolnum = %" PRIu32 " < 1 for internal relocation",
+                   reloc->r_symbolnum);
+                return 0;
+            }
 
             int targetSecNum = reloc->r_symbolnum - 1; // sec numbers start with 1
             Section * targetSec = &oc->sections[targetSecNum];
@@ -1035,9 +1074,15 @@ relocateSection(ObjectCode* oc, int curSection)
 
             switch (type) {
             case X86_64_RELOC_UNSIGNED: {
-                LL_CHECKM_FOR(oc->L, thing >= targetMacho->addr,
+                if (!(thing >= targetMacho->addr)) {
+                    ll_error_set(oc->L, LL_E_FORMAT,
                        "relocateSection: unsigned displacement %" PRIx64 "before target section start address %" PRIx64 "\n",
                        thing, (uint64_t) targetMacho->addr);
+                    LL_LOG_ERROR_FOR(oc->L,
+                       "relocateSection: unsigned displacement %" PRIx64 "before target section start address %" PRIx64 "\n",
+                       thing, (uint64_t) targetMacho->addr);
+                    return 0;
+                }
 
                 uint64_t thingRelativeOffset = thing - targetMacho->addr;
                 LL_IF_DEBUG_FOR(oc->L, linker_verbose,
@@ -1063,9 +1108,15 @@ relocateSection(ObjectCode* oc, int curSection)
                 uint32_t baseValueOffset = reloc->r_address + relocLenBytes + nextInstrAdj;
                 uint64_t imThingLoc = msect->addr + baseValueOffset + (int64_t) thing;
 
-                LL_CHECKM_FOR(oc->L, imThingLoc >= targetMacho->addr,
+                if (!(imThingLoc >= targetMacho->addr)) {
+                    ll_error_set(oc->L, LL_E_FORMAT,
                        "relocateSection: target location %p in image before target section start address %p\n",
                        (void *) imThingLoc, (void *) targetMacho->addr);
+                    LL_LOG_ERROR_FOR(oc->L,
+                       "relocateSection: target location %p in image before target section start address %p\n",
+                       (void *) imThingLoc, (void *) targetMacho->addr);
+                    return 0;
+                }
 
                 int64_t thingRelativeOffset = imThingLoc - targetMacho->addr;
                 LL_IF_DEBUG_FOR(oc->L, linker_verbose,
@@ -1083,7 +1134,9 @@ relocateSection(ObjectCode* oc, int curSection)
                 break;
             }
             default:
-                LL_FATAL_FOR(oc->L, "relocateSection: unexpected internal relocation type %d\n", type);
+                ll_error_set(oc->L, LL_E_UNSUPPORTED,
+                             "relocateSection: unexpected internal relocation type %d\n", type);
+                LL_LOG_ERROR_FOR(oc->L, "relocateSection: unexpected internal relocation type %d\n", type);
                 return 0;
             }
         }
@@ -1098,29 +1151,47 @@ relocateSection(ObjectCode* oc, int curSection)
                 value = (uint64_t) &makeSymbolExtra(oc, reloc->r_symbolnum, value)
                                         -> jumpIsland;
             }
-            LL_CHECK_FOR(oc->L, (int32_t)(value - baseValue) == (int64_t)(value - baseValue));
+            if (!((int32_t)(value - baseValue) == (int64_t)(value - baseValue))) {
+                ll_error_set(oc->L, LL_E_RELOC_RANGE, "Mach-O branch island is out of range");
+                LL_LOG_ERROR_FOR(oc->L, "Mach-O branch island is out of range");
+                return 0;
+            }
             type = X86_64_RELOC_SIGNED;
         }
 
         switch(type)
         {
             case X86_64_RELOC_UNSIGNED:
-                LL_CHECK_FOR(oc->L, !reloc->r_pcrel);
+                if (reloc->r_pcrel) {
+                    ll_error_set(oc->L, LL_E_FORMAT, "Mach-O UNSIGNED relocation is PC-relative");
+                    LL_LOG_ERROR_FOR(oc->L, "Mach-O UNSIGNED relocation is PC-relative");
+                    return 0;
+                }
                 thing += value;
                 break;
             case X86_64_RELOC_SIGNED:
             case X86_64_RELOC_SIGNED_1:
             case X86_64_RELOC_SIGNED_2:
             case X86_64_RELOC_SIGNED_4:
-                LL_CHECK_FOR(oc->L, reloc->r_pcrel);
+                if (!reloc->r_pcrel) {
+                    ll_error_set(oc->L, LL_E_FORMAT, "Mach-O SIGNED relocation is not PC-relative");
+                    LL_LOG_ERROR_FOR(oc->L, "Mach-O SIGNED relocation is not PC-relative");
+                    return 0;
+                }
                 thing += value - baseValue;
                 break;
             case X86_64_RELOC_SUBTRACTOR:
-                LL_CHECK_FOR(oc->L, !reloc->r_pcrel);
+                if (reloc->r_pcrel) {
+                    ll_error_set(oc->L, LL_E_FORMAT, "Mach-O SUBTRACTOR relocation is PC-relative");
+                    LL_LOG_ERROR_FOR(oc->L, "Mach-O SUBTRACTOR relocation is PC-relative");
+                    return 0;
+                }
                 thing -= value;
                 break;
             default:
-                LL_FATAL_FOR(oc->L, "unknown relocation");
+                ll_error_set(oc->L, LL_E_UNSUPPORTED, "unknown relocation");
+                LL_LOG_ERROR_FOR(oc->L, "unknown relocation");
+                return 0;
         }
 
         LL_IF_DEBUG_FOR(oc->L, linker_verbose, LL_DEBUG_FOR(oc->L, "relocateSection: thing = %p\n", (void *) thing));
@@ -1130,9 +1201,11 @@ relocateSection(ObjectCode* oc, int curSection)
          */
         if (0 == reloc->r_extern) {
             if (reloc->r_pcrel) {
-                checkProddableBlock(oc->L, &oc->proddables, (void *)((char *)thing + baseValue), 1);
+                if (!checkMachORelocationSpan(oc, (void *)((char *)thing + baseValue), 1))
+                    return 0;
             } else {
-                checkProddableBlock(oc->L, &oc->proddables, (void *)thing, 1);
+                if (!checkMachORelocationSpan(oc, (void *)thing, 1))
+                    return 0;
             }
         }
 

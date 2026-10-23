@@ -518,6 +518,36 @@ def main() -> int:
             else:
                 print("[macho_error_status] SKIP: generated target is not AArch64")
 
+            if re.search(r"^#define\s+x86_64_HOST_ARCH\s+1\s*$",
+                         platform_header, flags=re.MULTILINE):
+                macho_x86_status_test = output / "macho_x86_error_status"
+                macho_x86_status_map = output / "macho_x86_error_status.map"
+                macho_x86_status_trace = run(
+                    cc
+                    + [
+                        str(ROOT / "liblink/tests/unit/macho_x86_error_status.c"),
+                        f"-L{archive.parent}",
+                        "-llink",
+                        *core_link_flags(host),
+                        "-Wl,-t",
+                        linker_map_flag(macho_x86_status_map),
+                        "-o",
+                        str(macho_x86_status_test),
+                    ],
+                    label="compile and link macho_x86_error_status",
+                )
+                verify_macho_link_map(
+                    macho_x86_status_map,
+                    archive,
+                    macho_x86_status_trace,
+                    included_source="MachO.c",
+                    forbidden_members=("MachO",),
+                    required_members=("MachOVerify",),
+                )
+                run([str(macho_x86_status_test)], label="run macho_x86_error_status")
+            else:
+                print("[macho_x86_error_status] SKIP: generated target is not x86_64")
+
             macho_load_errors_test = output / "macho_load_errors"
             macho_load_errors_map = output / "macho_load_errors.map"
             macho_load_errors_trace = run(
