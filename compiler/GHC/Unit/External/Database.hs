@@ -105,10 +105,15 @@ data UnitDatabase unit = UnitDatabase
   -- ^ Units read from the database located at 'unitDatabasePath'.
   --
   -- These units have the @$pkgroot@ variable already resolved.
+  , unitDatabasePartial :: Bool
+  -- ^ 'True' when 'unitDatabaseUnits' holds only the units that were reached
+  -- on demand (see 'unitDbConfigDemandRoots'), not a complete listing of the
+  -- database. A partial database must not be reused where a complete one is
+  -- expected.
   }
 
 instance (Outputable u) => Outputable (UnitDatabase u) where
-  ppr (UnitDatabase fp _u) = text "DB:" <+> ppr fp
+  ppr (UnitDatabase fp _u partial) = text (if partial then "DB(partial):" else "DB:") <+> ppr fp
 
 normalisedUnitDatabaseKey :: UnitDatabase unit -> NormalisedUnitDbLoc
 normalisedUnitDatabaseKey unit_db = normalisedUnitDatabaseKeyOsPath $ unitDatabasePath unit_db
@@ -151,7 +156,7 @@ mergeDatabases :: Logger -> [UnitDatabase UnitId]
                -> IO (UnitInfoMap, UnitPrecedenceMap)
 mergeDatabases logger = foldM merge (emptyUniqMap, emptyUniqMap) . zip [1..]
   where
-    merge (pkg_map, prec_map) (i, UnitDatabase db_path db) = do
+    merge (pkg_map, prec_map) (i, UnitDatabase db_path db _partial) = do
       debugTraceMsg logger 2 $
           text "loading package database" <+> ppr db_path
       when (logVerbAtLeast logger 2) $
@@ -221,6 +226,15 @@ data UnitDbConfig = UnitDbConfig
   , unitDbConfigPlatformArchOS :: ArchOS
   , unitDbConfigGlobalDB :: FilePath
   , unitDbConfigGHCDir :: FilePath
+  , unitDbConfigDemandRoots :: Maybe [UnitId]
+  -- ^ 'Just' the unit ids named on the command line when unit stores may be
+  -- read on demand instead of enumerated: the stores are probed for these
+  -- units and for everything they reference (dependencies, reexport origins,
+  -- instantiations), and nothing else. 'Nothing' means read everything.
+  -- Package databases are always read in full.
+  --
+  -- Set by 'GHC.Unit.State.initUnitDbConfig' in @-hide-all-packages@ mode when
+  -- every exposure flag names a unit by id.
   }
 
 getUnitDbRefs :: UnitDbConfig -> IO [PkgDbRef]
@@ -324,7 +338,7 @@ readUnitDatabase logger cfg conf_file = do
       pkg_configs1 = map (mungeUnitInfo top_dir pkgroot . mapUnitInfo (\(UnitKey x) -> UnitId x) . mkUnitKeyInfo)
                          proto_pkg_configs
   --
-  return $ UnitDatabase conf_file pkg_configs1
+  return $ UnitDatabase conf_file pkg_configs1 False
   where
     readDirStyleUnitInfo :: OsPath -> IO [DbUnitInfo]
     readDirStyleUnitInfo conf_dir = do

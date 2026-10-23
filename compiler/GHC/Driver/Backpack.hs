@@ -438,6 +438,7 @@ addInMemoryDatabase dflags u = do
     let newdb = UnitDatabase
           { unitDatabasePath  = unsafeEncodeUtf $ "(in memory " ++ showSDoc dflags (ppr (unitId u)) ++ ")"
           , unitDatabaseUnits = [u]
+          , unitDatabasePartial = False
           }
     let uic = hscUIC hsc_env
     liftIO $ cacheExternalUnitDatabase uic newdb

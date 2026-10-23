@@ -11,4 +11,7 @@ description:
   ``-unit-store ⟨dir⟩`` adds such a directory to the package database stack,
   and environment files accept a ``unit-store ⟨dir⟩`` directive. Units in a
   store are exposed and untrusted; visibility and trust are controlled by the
-  usual flags. Nothing changes for users who do not pass the flag.
+  usual flags. With ``-hide-all-packages`` and unit ids on every exposure
+  flag, the store is not enumerated: only the units named and their
+  dependencies are looked up. Nothing changes for users who do not pass the
+  flag.

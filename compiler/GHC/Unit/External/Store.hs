@@ -20,6 +20,9 @@
 -- See @docs/unit-artifact-model.md@ for the design and the rationale.
 module GHC.Unit.External.Store
   ( readUnitStore
+  , probeUnitStore
+  , unitReferencedUnitIds
+  , unitInfoReferencedUnits
   , unitMetaFileName
     -- * The manifest
   , UnitMeta (..)
@@ -69,24 +72,63 @@ readUnitStore logger root = do
     throwGhcExceptionIO $ InstallationError $
       "can't find a unit store at " ++ show root
   entries <- OsPath.getDirectoryContents root
-  units <- fmap catMaybes $ forM (sort entries) $ \entry -> do
-    let dir       = root OsPath.</> entry
-        meta_path = dir OsPath.</> unitMetaFileName
-    has_meta <- OsPath.doesFileExist meta_path
-    if not has_meta
-      then pure Nothing
-      else do
-        txt <- readFile' (OsPath.unsafeDecodeUtf meta_path)
-        meta <- case parseUnitMeta txt of
-          Left err -> throwGhcExceptionIO $ InstallationError $
-                        "malformed " ++ show meta_path ++ ": " ++ err
-          Right m  -> pure m
-        has_include <- OsPath.doesDirectoryExist (dir OsPath.</> libDirName OsPath.</> includeDirName)
-        let uid = UnitId (mkFastString (OsPath.unsafeDecodeUtf entry))
-        pure (Just (storeUnitInfo root uid meta txt has_include))
+  units <- fmap catMaybes $ forM (sort entries) $ \entry ->
+    readStoreUnit root (UnitId (mkFastString (OsPath.unsafeDecodeUtf entry)))
   debugTraceMsg logger 2 $
     text "Read unit store" <+> ppr root <> colon <+> int (length units) <+> text "units"
-  pure (UnitDatabase root units)
+  pure (UnitDatabase root units False)
+
+-- | Look up one unit in the store rooted at the given directory, by its id,
+-- without enumerating the store: a few file-system calls under
+-- @<root>/<uid>/@ and one read of @unit.meta@ if it is there.
+--
+-- This is what makes a unit store different from a package database: the
+-- compiler can ask for the units it needs instead of reading everything
+-- that is installed. See 'GHC.Unit.External.Database.unitDbConfigDemandRoots'.
+probeUnitStore :: Logger -> OsPath -> UnitId -> IO (Maybe UnitInfo)
+probeUnitStore logger root uid = do
+  r <- readStoreUnit root uid
+  debugTraceMsg logger 3 $
+    text "Probed unit store" <+> ppr root <+> text "for" <+> ppr uid <> colon
+      <+> text (maybe "absent" (const "found") r)
+  pure r
+
+-- | Read @<root>/<uid>/unit.meta@ if it exists.
+readStoreUnit :: OsPath -> UnitId -> IO (Maybe UnitInfo)
+readStoreUnit root uid = do
+  let dir       = root OsPath.</> OsPath.unsafeEncodeUtf (unpackFS (unitIdFS uid))
+      meta_path = dir OsPath.</> unitMetaFileName
+  has_meta <- OsPath.doesFileExist meta_path
+  if not has_meta
+    then pure Nothing
+    else do
+      txt <- readFile' (OsPath.unsafeDecodeUtf meta_path)
+      meta <- case parseUnitMeta txt of
+        Left err -> throwGhcExceptionIO $ InstallationError $
+                      "malformed " ++ show meta_path ++ ": " ++ err
+        Right m  -> pure m
+      has_include <- OsPath.doesDirectoryExist (dir OsPath.</> libDirName OsPath.</> includeDirName)
+      pure (Just (storeUnitInfo root uid meta txt has_include))
+
+-- | The unit ids a 'Unit' is made of: itself for a definite unit, and for an
+-- instantiated unit the indefinite unit plus the units of its instantiation,
+-- recursively. These are the units that must be available for the 'Unit'
+-- to be usable.
+unitReferencedUnitIds :: Unit -> [UnitId]
+unitReferencedUnitIds u = case u of
+  HoleUnit                 -> []
+  RealUnit (Definite uid)  -> [uid]
+  VirtUnit i               -> instUnitInstanceOf i
+                            : concatMap (unitReferencedUnitIds . moduleUnit . snd) (instUnitInsts i)
+
+-- | Every unit a 'UnitInfo' refers to and that therefore has to be present
+-- for the unit to be usable: its dependencies, the origins of its reexported
+-- modules, and the units in its instantiation.
+unitInfoReferencedUnits :: UnitInfo -> [UnitId]
+unitInfoReferencedUnits ui =
+  unitDepends ui
+  ++ concat [ unitReferencedUnitIds (moduleUnit m) | (_, Just m) <- unitExposedModules ui ]
+  ++ concatMap (unitReferencedUnitIds . moduleUnit . snd) (unitInstantiations ui)
 
 libDirName, includeDirName :: OsPath
 libDirName     = OsPath.unsafeEncodeUtf "lib"

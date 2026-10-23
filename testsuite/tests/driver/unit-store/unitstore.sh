@@ -216,6 +216,33 @@ case $scenario in
     client MainBackpack.hs "-package-id q-0.1 -package-id ind+q"
     ;;
 
+  demand)
+    # Demand-driven reading: with -hide-all-packages and -package-id flags the
+    # store is probed for the units needed and never enumerated. A unit with a
+    # malformed manifest sits in the store; the client builds anyway, and only
+    # an eager read (no -hide-all-packages) trips over it.
+    unit q-0.1 src "" Q
+    both q-0.1 q 0.1 "Q" "" "$BASE_ID"
+    $PKG recache --package-db pkgdb
+    unit p-0.1 src "-package-db pkgdb -package-id q-0.1" P
+    both p-0.1 p 0.1 "P" "P.Internal" "$BASE_ID q-0.1"
+    $PKG recache --package-db pkgdb
+    mkdir -p store/broken-0.1
+    printf 'this is not a manifest\n' > store/broken-0.1/unit.meta
+    # every exposure flag must be by unit id for probing to apply, base included
+    HC_OPTS="$TEST_HC_OPTS -v0 -hide-all-packages -package-id $BASE_ID"
+    client MainMulti.hs "-package-id p-0.1"
+    # shellcheck disable=SC2086
+    if "$HC" $TEST_HC_OPTS -v0 -fforce-recomp -unit-store store -outputdir out-eager -o out-eager/main MainMulti.hs 2> out-eager.err; then
+      echo "eager read: unexpected success"; exit 1
+    fi
+    if grep -q 'malformed' out-eager.err; then
+      echo "eager read fails on the malformed manifest"
+    else
+      cat out-eager.err; exit 1
+    fi
+    ;;
+
   *)
     echo "unknown scenario: $scenario" >&2
     exit 2

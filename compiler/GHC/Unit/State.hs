@@ -96,6 +96,7 @@ import GHC.Unit.Ppr
 
 import GHC.Unit.External.Database
 import GHC.Unit.External.Index
+import GHC.Unit.External.Store (unitReferencedUnitIds)
 import GHC.Unit.External.ModuleOrigin
 import GHC.Unit.External.Providers
 import GHC.Unit.External.Query
@@ -1096,7 +1097,28 @@ initUnitDbConfig uc = UnitDbConfig
   , unitDbConfigPlatformArchOS = unitConfigPlatformArchOS uc
   , unitDbConfigGlobalDB = unitConfigGlobalDB uc
   , unitDbConfigGHCDir = unitConfigGHCDir uc
+  , unitDbConfigDemandRoots = demandRoots uc
   }
+
+-- | The unit ids that unit stores may be read on demand for, if any.
+--
+-- With @-hide-all-packages@, the only units that can become visible are the
+-- ones named by @-package-id@ and @-plugin-package-id@ flags (plus whatever
+-- they reference), so a unit store need not be enumerated: it can be probed
+-- for exactly those. A @-package name@ flag names a unit by package name,
+-- which cannot be probed for, so its presence turns the optimisation off.
+-- Package databases are unaffected and always read in full, which is where
+-- the wired-in units come from.
+demandRoots :: UnitConfig -> Maybe [UnitId]
+demandRoots uc
+  | unitConfigHideAll uc
+  = concat <$> mapM flagRoots (unitConfigFlagsExposed uc ++ unitConfigFlagsPlugins uc)
+  | otherwise
+  = Nothing
+  where
+    flagRoots (HidePackage _)                       = Just []
+    flagRoots (ExposePackage _ (UnitIdArg u) _)     = Just (unitReferencedUnitIds u)
+    flagRoots (ExposePackage _ (PackageArg _) _)    = Nothing
 
 -- -----------------------------------------------------------------------------
 -- Package Utils

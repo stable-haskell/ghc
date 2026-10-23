@@ -261,9 +261,9 @@ outputs byte for byte.
 | envfile | `unit-store ../store` directive, relative to the environment file | identical |
 | backpack | indefinite `ind` with signature `H`, hand-instantiated as `ind+q` with `H=q-0.1:Q`, no Cabal | identical |
 
-All eight pass under the testsuite driver
-(`hadrian/build test --only="unitstore_…"`, 8 expected passes, 0
-unexpected failures).
+All eight, plus the `demand` scenario described below, pass under the
+testsuite driver (`hadrian/build test --only="unitstore_…"`, 9 expected
+passes, 0 unexpected failures).
 
 Two things learnt from writing the scenarios rather than from the
 prototype: a `Safe` module is trusted whatever its unit's trust, so a
@@ -293,6 +293,65 @@ a parallel read would likely reverse it.
 Pointing `-unit-store` at a real `cabal-install` store with 2423
 entries and no `unit.meta` files reads it as an empty store, as
 designed, in 24 ms over the plain run (332 ms vs 309 ms, 5 runs).
+
+### Demand-driven reading
+
+The second stage of the prototype stops enumerating stores when the
+compiler can know which units it needs. A package database is one
+`package.cache` file and has to be read whole; a store is addressable,
+and `⟨root⟩/⟨uid⟩/unit.meta` is one `open`. That is the same property
+Rust's crate locator relies on.
+
+Under `-hide-all-packages`, the only units that can become visible are
+those named by `-package-id` and `-plugin-package-id` flags and whatever
+they reference. So `readUnitDatabases` (`GHC.Unit.External.Index`):
+
+1. reads the package databases in full, as before, which is where the
+   wired-in units come from;
+2. takes the flagged unit ids as roots (for an instantiated id, the
+   indefinite unit plus the units of its instantiation);
+3. probes every store on the stack for each root and follows
+   `depends`, the origins of reexported modules and `instantiated-with`
+   until nothing new is reached, through `probeUnitStore` and
+   `unitInfoReferencedUnits` in `GHC.Unit.External.Store`;
+4. returns one `UnitDatabase` per store holding only the units reached,
+   marked partial.
+
+A `-package ⟨name⟩` flag names a unit by package name, which cannot be
+probed for, so its presence turns the optimisation off and the stores are
+enumerated as before. Cabal and environment files always use ids.
+`UnitDatabase` gained a `unitDatabasePartial` flag so that a store read
+on demand is extended rather than reused by a later `initUnits` (GHCi's
+`:set -package-id`) and is never mistaken for a complete listing by an
+eager read. Nothing downstream of `readUnitDatabases` changed; the
+`UnitState` still sees a list of databases, just shorter ones.
+
+The `demand` scenario puts a unit with a malformed manifest in the store.
+With `-hide-all-packages -package-id p-0.1` the client compiles, links and
+runs: the bad manifest is never opened. Without `-hide-all-packages` the
+same compilation fails on it. Same 1000-unit store as above, `hyperfine`,
+10 runs:
+
+| Configuration | Mean |
+|---|---|
+| no extra database, `-package-id ⟨base⟩` | 221 ms ± 18 |
+| `-package-db` with `package.cache` | 294 ms ± 34 |
+| `-unit-store`, `-package base` (by name, enumerated) | 409 ms ± 35 |
+| `-unit-store`, `-package-id ⟨base⟩` (probed) | 235 ms ± 24 |
+
+Against the real 2423-entry cabal store with `-package-id ⟨base⟩`, the
+probed read is indistinguishable from not passing the flag at all
+(252 ms vs 264 ms, 5 runs). The one probe that happens is for base's id,
+which is not in the store.
+
+Two limits of the prototype. The by-name fallback is coarse: `-package
+base` is common in hand-written command lines and defeats probing even
+though base is in the global database; a name index per store, or a rule
+that names are resolved against the eagerly read databases first, would
+remove that. And `-trust ⟨name⟩` for a unit that is in the store but not
+reached by any flag now reports an unknown package, where an eager read
+accepted it silently; that is arguably the better behaviour, since the
+unit could not have been imported either.
 
 ### What the prototype did not have to touch
 
