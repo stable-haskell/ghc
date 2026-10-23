@@ -28,6 +28,7 @@
 
 #include "ll_fs.h"
 #include <link.h>
+#include <errno.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
@@ -1319,9 +1320,11 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
        }
 
        int reloc_type = ELF_R_TYPE(info);
+#if defined(i386_HOST_ARCH) || LL_DEBUG_CODE
        LL_IF_DEBUG_FOR(oc->L, linker_verbose,
                 LL_DEBUG_FOR(oc->L, "Reloc: P = %p   S = %p   A = %p   type=%d\n",
                            (void*)P, (void*)S, (void*)A, reloc_type ));
+#endif
 #if LL_DEBUG_CODE
        checkProddableBlock(oc->L, &oc->proddables, pP, sizeof(Elf_Word) );
 #else

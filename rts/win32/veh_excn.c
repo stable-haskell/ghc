@@ -325,7 +325,7 @@ void generateStack (EXCEPTION_POINTERS* pExceptionPointers)
         fprintf (stderr, " * 0x%" PRIxPTR "\t%ls\n",
                  (uintptr_t)stackFrame.AddrFrame.Offset,
                  resolveSymbolAddr ((wchar_t*)&buffer, 1024,
-                                   (SymbolAddr*)(intptr_t)stackFrame.AddrPC.Offset,
+                                   (ll_symbol_addr*)(intptr_t)stackFrame.AddrPC.Offset,
                                    &topSp));
         if (lastBp >= stackFrame.AddrFrame.Offset)
         {
