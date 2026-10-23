@@ -488,6 +488,14 @@ options:
     :ghc-flag:`-hide-all-packages`, :ghc-flag:`-package-id ⟨unit-id⟩`,
     :ghc-flag:`-trust ⟨pkg⟩` or an environment file to say otherwise.
 
+    With :ghc-flag:`-hide-all-packages`, and when every
+    :ghc-flag:`-package-id ⟨unit-id⟩` and
+    :ghc-flag:`-plugin-package-id ⟨unit-id⟩` flag names a unit by id,
+    the store is not enumerated: GHC looks up only the units named and
+    the units they depend on, by path. A :ghc-flag:`-package ⟨pkg⟩` flag
+    names a unit by package name and makes GHC read the whole store
+    instead. Package databases are always read in full.
+
 .. ghc-flag:: -no-global-package-db
     :shortdesc: Remove the global package db from the stack.
     :type: dynamic

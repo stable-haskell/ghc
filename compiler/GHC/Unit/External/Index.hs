@@ -87,23 +87,25 @@ import GHC.Prelude
 
 import GHC.Data.OsPath
 import GHC.Data.ShortText qualified as ST
+import GHC.Data.Maybe (expectJust)
 import GHC.Types.Unique.Map
+import GHC.Types.Unique.Set
 import GHC.Unit.Database
 import GHC.Unit.External.Database
-import GHC.Unit.External.Store (readUnitStore)
+import GHC.Unit.External.Store (readUnitStore, probeUnitStore, unitInfoReferencedUnits)
 import GHC.Unit.External.Visibility
 import GHC.Unit.External.Wired
 import GHC.Unit.Info
 import GHC.Unit.Types
 import GHC.Utils.Logger
 
-import Control.Monad (liftM)
+import Control.Monad (liftM, forM, foldM)
 import Data.Either
 import Data.IORef (IORef)
 import Data.IORef qualified as IORef
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
-import Data.Maybe (catMaybes)
+import Data.Maybe (catMaybes, maybeToList)
 
 -- ----------------------------------------------------------------------------
 -- UnitIndex
@@ -428,18 +430,80 @@ readUnitDatabases :: Logger -> UnitIndexCache -> UnitDbConfig -> IO [UnitDatabas
 readUnitDatabases logger db_cache cfg = do
   conf_refs <- getUnitDbRefs cfg
   locs      <- liftM catMaybes $ mapM (resolveUnitDatabase cfg) conf_refs
-  mapM (readOrGetUnitDatabase logger db_cache cfg) locs
+  case unitDbConfigDemandRoots cfg of
+    Nothing    -> mapM (readOrGetUnitDatabase logger db_cache cfg) locs
+    Just roots -> readUnitDatabasesOnDemand logger db_cache cfg roots locs
 
 -- | Get the cached 'UnitDatabase' or read the 'UnitDatabase' at the given
 -- location, which is either a package database or a unit store.
+--
+-- A cached database that was only partially read on demand is not good
+-- enough here and is read again in full.
 readOrGetUnitDatabase :: Logger -> UnitIndexCache -> UnitDbConfig -> UnitDbLocation -> IO (UnitDatabase UnitId)
 readOrGetUnitDatabase logger db_cache cfg (UnitDbLocation kind path) =
   readExternalUnitDatabase db_cache path >>= \ case
-    Nothing -> do
+    Just db | not (unitDatabasePartial db) ->
+      pure db
+    _ -> do
       new_db <- case kind of
         PackageDbKind -> readUnitDatabase logger cfg path
         UnitStoreKind -> readUnitStore logger path
       cacheExternalUnitDatabase db_cache new_db
       pure new_db
-    Just db ->
-      pure db
+
+-- | Read the package databases in full and the unit stores on demand.
+--
+-- Starting from the given root unit ids, every store on the stack is probed
+-- for each unit, and the units found (in stores or in the databases) are
+-- followed through 'unitInfoReferencedUnits' until nothing new is reached.
+-- No store is ever enumerated. The result has one 'UnitDatabase' per
+-- location in stack order; those of stores are marked partial and hold only
+-- the units reached.
+--
+-- Partial store databases already in the cache are extended rather than
+-- rebuilt, so that a later 'initUnits' with more flags (GHCi's @:set@)
+-- only probes for what is new. A store whose database was already read in
+-- full is used as is, with no probing.
+readUnitDatabasesOnDemand
+  :: Logger -> UnitIndexCache -> UnitDbConfig -> [UnitId] -> [UnitDbLocation]
+  -> IO [UnitDatabase UnitId]
+readUnitDatabasesOnDemand logger db_cache cfg roots locs = do
+  -- 1. Package databases, eagerly, as always.
+  dbs <- forM locs $ \ loc@(UnitDbLocation kind path) -> case kind of
+    PackageDbKind -> Left <$> readOrGetUnitDatabase logger db_cache cfg loc
+    UnitStoreKind -> Right . (\ cached -> (path, cached)) <$> readExternalUnitDatabase db_cache path
+
+  let db_units :: UniqMap UnitId UnitInfo
+      db_units = listToUniqMap [ (unitId ui, ui) | Left db <- dbs, ui <- unitDatabaseUnits db ]
+
+      -- Per store: what we already know, and whether that is everything.
+      initial_store (path, cached) = case cached of
+        Just db -> (path, listToUniqMap [ (unitId ui, ui) | ui <- unitDatabaseUnits db ], not (unitDatabasePartial db))
+        Nothing -> (path, emptyUniqMap, False)
+      stores0 = [ initial_store st | Right st <- dbs ]
+
+  -- 2. Close the roots over everything they reference, probing the stores.
+  let go seen stores [] = pure (seen, stores)
+      go seen stores (uid : todo)
+        | uid `elementOfUniqSet` seen = go seen stores todo
+        | otherwise = do
+            (stores', found) <- foldM (probe uid) ([], []) stores
+            let found_db = maybeToList (lookupUniqMap db_units uid)
+                refs     = concatMap unitInfoReferencedUnits (found ++ found_db)
+            go (addOneToUniqSet seen uid) (reverse stores') (refs ++ todo)
+
+      probe uid (acc, found) st@(path, known, complete)
+        | Just ui <- lookupUniqMap known uid = pure (st : acc, ui : found)
+        | complete = pure (st : acc, found)
+        | otherwise = probeUnitStore logger path uid >>= \ case
+            Nothing -> pure (st : acc, found)
+            Just ui -> pure ((path, addToUniqMap known uid ui, False) : acc, ui : found)
+
+  (_, stores) <- go emptyUniqSet stores0 roots
+
+  -- 3. Cache the (extended) partial store databases and assemble the stack.
+  store_dbs <- forM stores $ \ (path, known, complete) -> do
+    let db = UnitDatabase path (nonDetEltsUniqMap known) (not complete)
+    cacheExternalUnitDatabase db_cache db
+    pure (path, db)
+  pure [ either id (\ (path, _) -> expectJust (lookup path store_dbs)) e | e <- dbs ]
