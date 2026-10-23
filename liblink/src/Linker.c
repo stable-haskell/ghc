@@ -17,6 +17,7 @@
 #include "linker/CacheFlush.h"
 #include "linker/SymbolExtras.h"
 #include "linker/MMap.h"
+#include "linker/M32Reservations.h"
 #include "ll_path.h"
 
 // get protos for is*()
@@ -507,6 +508,11 @@ ll_exit_linker(ll_linker *L) {
            L->services.host.exit_unload_check(L->services.host.ctx);
        }
    }
+#if defined(mingw32_HOST_OS) && defined(NEED_M32)
+   /* Exit is not proof that ObjectCode owners were disposed. Only drain the
+    * free pool and retain live/failed reservations for a later retry. */
+   (void)ll_m32_shutdown_for(L);
+#endif
    ll_mutex_close_for(&L->services, &L->linker_mutex);
 }
 

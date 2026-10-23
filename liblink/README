@@ -58,3 +58,24 @@ including objects whose recursive symbol lookup failed before registration.
 A failed load can therefore leave a quarantined object registered for
 unloading. Freshly loaded instances start without the marker. Previously
 returned raw pointers cannot be revoked by the linker.
+
+Windows M32 reservation ownership
+---------------------------------
+
+Windows M32 mappings keep reservation records outside page payloads. Pool
+transfers preserve page ownership. Discarding pages uses MEM_DECOMMIT on
+the page range, and releases their logical ownership even if decommit
+fails. Only an ownerless reservation can use MEM_RELEASE, with its original
+base and a zero size. A failed base release keeps its record for retry.
+Allocation-granularity padding is recorded separately from usable pages.
+
+Shutdown drains the free-page pool and releases eligible reservations. It
+preserves reservations still owned by live object allocators; the existing
+compatibility shutdown does not destroy those allocators. Their disposal
+must precede terminal reservation cleanup. Cleanup preserves an existing
+primary error, and a failed attempt to make a page writable cannot write a
+free-list header into that page. Page payload offsets, the pool limit,
+32-page batching, and address placement policy remain unchanged.
+
+Native Windows execution in CI is required to validate these OS paths.
+Darwin source compilation does not qualify their Windows behavior.

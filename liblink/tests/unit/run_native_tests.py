@@ -8,6 +8,7 @@ import os
 import platform
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -56,6 +57,11 @@ def parse_args() -> argparse.Namespace:
         "--protection-gap-probes",
         action="store_true",
         help="run Darwin quarantine, recovery, and allocator retry regressions",
+    )
+    parser.add_argument(
+        "--windows-m32-only",
+        action="store_true",
+        help="run only the native Windows M32 reservation ownership unit",
     )
     return parser.parse_args()
 
@@ -138,6 +144,8 @@ def linker_map_flag(path: Path) -> str:
         return f"-Wl,-map,{path}"
     if host == "Linux":
         return f"-Wl,-Map,{path}"
+    if host == "Windows" or host.startswith(("MSYS_NT", "MINGW")):
+        return f"-Wl,-Map,{path}"
     raise RuntimeError(
         "core and archive status fixtures currently require POSIX mmap/fd APIs; "
         "run --foundation-only on this host or add platform-specific fixtures"
@@ -152,6 +160,46 @@ def core_link_flags(host: str) -> list[str]:
     return []
 
 
+def normalize_windows_path(path: str) -> str:
+    return path.replace("\\", "/").casefold()
+
+
+def windows_path_forms(path: Path) -> list[str]:
+    forms = [str(path), path.as_posix()]
+    cygpath = shutil.which("cygpath")
+    if cygpath is not None:
+        try:
+            result = subprocess.run(
+                [cygpath, "-m", str(path)],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            result = None
+        if result is not None and result.returncode == 0:
+            converted = result.stdout.strip()
+            if converted:
+                forms.append(converted)
+    return list(dict.fromkeys(normalize_windows_path(form) for form in forms))
+
+
+def windows_path_matches(forms: list[str], text: str) -> bool:
+    normalized = normalize_windows_path(text)
+    return any(normalize_windows_path(form) in normalized for form in forms)
+
+
+def archive_member_pattern(archive_form: str, member: str) -> re.Pattern[str]:
+    return re.compile(
+        rf"{re.escape(archive_form)}"
+        rf"\([^)]*{re.escape(member)}(?:\.c)?\.(?:o|obj)\)",
+        flags=re.IGNORECASE,
+    )
+
+
 def verify_link_map(
     map_path: Path,
     archive: Path,
@@ -159,16 +207,30 @@ def verify_link_map(
     *,
     included_source: str,
     forbidden_member: str,
+    windows_paths: bool = False,
 ) -> None:
     if not map_path.is_file():
         raise RuntimeError(f"linker did not create map file: {map_path}")
     text = map_path.read_text(errors="replace")
-    if str(archive) not in text + link_trace:
-        raise RuntimeError(f"link did not use expected stage2 archive: {archive}")
-    duplicate_source = re.compile(
-        rf"liblink\.a\([^)]*{re.escape(forbidden_member)}[^)]*\.o\)"
-    )
-    if any(duplicate_source.search(line) for line in text.splitlines()):
+    if windows_paths:
+        forms = windows_path_forms(archive)
+        if not windows_path_matches(forms, text):
+            raise RuntimeError(f"link map omitted expected stage2 archive: {archive}")
+        if not windows_path_matches(forms, link_trace):
+            raise RuntimeError(f"link trace omitted expected stage2 archive: {archive}")
+        normalized_text = normalize_windows_path(text)
+        duplicate = any(
+            archive_member_pattern(form, forbidden_member).search(normalized_text)
+            for form in forms
+        )
+    else:
+        if str(archive) not in text + link_trace:
+            raise RuntimeError(f"link did not use expected stage2 archive: {archive}")
+        duplicate_source = re.compile(
+            rf"liblink\.a\([^)]*{re.escape(forbidden_member)}[^)]*\.o\)"
+        )
+        duplicate = any(duplicate_source.search(line) for line in text.splitlines())
+    if duplicate:
         raise RuntimeError(
             f"link map selected archive {forbidden_member}.o beside included {included_source}"
         )
@@ -248,6 +310,10 @@ def run_macho_load_errors(cc: list[str], archive: Path, output: Path,
 
 def main() -> int:
     args = parse_args()
+    selected_modes = sum((args.foundation_only, args.protection_only,
+                          args.protection_gap_probes, args.windows_m32_only))
+    if selected_modes > 1:
+        raise RuntimeError("native unit modes are mutually exclusive")
     system = platform.system()
     host = (
         "Windows"
@@ -256,15 +322,13 @@ def main() -> int:
         or system.startswith(("MSYS_NT", "MINGW"))
         else system
     )
-    if host == "Windows" and not args.foundation_only:
+    if args.windows_m32_only and host != "Windows":
+        raise RuntimeError("--windows-m32-only requires a native Windows host")
+    if host == "Windows" and not (args.foundation_only or args.windows_m32_only):
         raise RuntimeError(
             "core_error_status.c is POSIX-only: the Windows linker path uses "
-            "stdio rather than mmap and needs a platform-specific fixture"
+            "stdio rather than mmap; use --windows-m32-only for the M32 fixture"
         )
-    selected_modes = sum((args.foundation_only, args.protection_only,
-                          args.protection_gap_probes))
-    if selected_modes > 1:
-        raise RuntimeError("foundation and protection modes are mutually exclusive")
     if (args.protection_only or args.protection_gap_probes) and host != "Darwin":
         raise RuntimeError("protection modes require a native Darwin Mach-O build")
     if host not in ("Linux", "Darwin", "Windows"):
@@ -305,6 +369,37 @@ def main() -> int:
 
     with tempfile.TemporaryDirectory(prefix="liblink-native-units-") as temporary:
         output = Path(temporary)
+        if args.windows_m32_only:
+            m32_test = output / "m32_windows_reservations.exe"
+            m32_map = output / "m32_windows_reservations.map"
+            m32_trace = run(
+                cc
+                + [
+                    str(ROOT / "liblink/tests/unit/m32_windows_reservations.c"),
+                    f"-L{archive.parent}",
+                    "-llink",
+                    "-Wl,-t",
+                    linker_map_flag(m32_map),
+                    "-o",
+                    str(m32_test),
+                ],
+                label="compile and link m32_windows_reservations",
+            )
+            for member in ("M32Alloc", "M32Reservations", "MMap"):
+                verify_link_map(
+                    m32_map,
+                    archive,
+                    m32_trace,
+                    included_source=(
+                        "M32Alloc.c, M32Reservations.c, and MMap.c"
+                    ),
+                    forbidden_member=member,
+                    windows_paths=True,
+                )
+            run([str(m32_test)], label="run m32_windows_reservations")
+            print("liblink native unit tests: PASS (Windows M32 only)")
+            return 0
+
         error_state = output / "error_state"
         if not args.protection_only and not args.protection_gap_probes:
             run(

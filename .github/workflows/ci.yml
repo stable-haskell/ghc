@@ -336,6 +336,13 @@ jobs:
         export PATH="/c/ghcup/bin:$PATH"
         python3 liblink/tests/unit/run_native_tests.py --foundation-only --cc clang 2>&1 | tee _build/logs/windows-liblink-foundation.log
 
+    - name: Run Windows M32 reservation C unit
+      timeout-minutes: 5
+      run: |
+        set -eo pipefail
+        export PATH="/c/ghcup/bin:$PATH"
+        python3 liblink/tests/unit/run_native_tests.py --windows-m32-only --cc clang 2>&1 | tee _build/logs/windows-liblink-m32.log
+
     - name: Upload Windows build and unit logs on failure
       if: failure()
       uses: actions/upload-artifact@v4

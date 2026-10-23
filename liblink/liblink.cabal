@@ -42,6 +42,8 @@ extra-source-files:
     src/linker/LoadNativeObjPosix.h
     src/linker/M32Alloc.c
     src/linker/M32Alloc.h
+    src/linker/M32Reservations.c
+    src/linker/M32Reservations.h
     src/linker/MMap.c
     src/linker/MMap.h
     src/linker/MachO.c
@@ -119,6 +121,7 @@ extra-source-files:
     tests/unit/macho_x86_error_status.c
     tests/unit/macho_stub_errors.c
     tests/unit/m32_map_status.c
+    tests/unit/m32_windows_reservations.c
     tests/fixtures/macho-input/common_only.c
     tests/fixtures/macho-input/ordinary.c
     tests/fixtures/macho-input/zero_size.c

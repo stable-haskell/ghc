@@ -395,3 +395,36 @@ The native driver runs this unit on Darwin and requires the selected stage2
 archive while rejecting an archived `M32Alloc.o` beside the included source.
 The check is native to the configured Darwin architecture; it does not qualify
 other hosts or the full object-loading path.
+
+Windows M32 reservation ownership
+=================================
+
+`m32_windows_reservations.c` is gated to a generated native Windows
+configuration with `NEED_M32`. It includes the actual M32 reservation,
+mapping-protection, and allocator implementations. Real `VirtualAlloc`,
+`VirtualQuery`, and successful `VirtualFree` calls provide OS ownership
+evidence; wrappers inject only bounded `MEM_DECOMMIT`, `MEM_RELEASE`, and
+read/write protection failures.
+
+The cases check base and interior page decommit while preserving sibling
+commitments, reject duplicate and out-of-range discards before calling
+`VirtualFree`, cover a pooled prefix with a decommitted large-allocation tail,
+and retain records after failed decommit or base release for one successful
+retry. They also check shutdown behavior with live allocator pages. The fixture
+snapshots an executable page header before injected RW-protection and
+decommit failures and checks that the rejected page was not linked into the
+free pool or modified. The failed-protection path is composed with the
+quarantine handling here; native Windows execution remains required.
+Additional injected query and mapper failures exercise both small and large
+allocation callers: query failures retain `LL_E_IO`, mapping failures replace
+stale status with `LL_E_NOMEM`, and captured Win32 error/`errno` values survive
+the host allocator's bookkeeping free. The large query case also checks that a
+failed cleanup release preserves the primary diagnostic and retries once at
+shutdown.
+Use `python3 liblink/tests/unit/run_native_tests.py --windows-m32-only` on a
+native Windows build to run only this unit. This checkout has no Windows
+compiler or runner, so its OS behavior remains unqualified until that native
+run occurs. The Windows-only archive check normalizes slash direction and case
+and adds `cygpath -m` spelling when available, while still requiring the
+selected archive in both the link map and trace and rejecting duplicate
+included implementation members.

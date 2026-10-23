@@ -33,6 +33,7 @@ struct _OpenedDLL;
 
 struct m32_page_t;
 struct ll_failure_scope;
+struct ll_m32_reservation;
 
 struct ll_linker {
     ll_compat_services services;
@@ -65,6 +66,7 @@ struct ll_linker {
 #if defined(mingw32_HOST_OS)
     void *base_addr;
     void *last_alloca;
+    struct ll_m32_reservation *m32_reservations;
 #elif RTS_LINKER_USE_MMAP
     struct MemoryRegion mmap_region;
 #endif

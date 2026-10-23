@@ -7,6 +7,7 @@ src/linker/InitFini.c
 src/linker/LoadArchive.c
 src/linker/LoadNativeObjPosix.c
 src/linker/M32Alloc.c
+src/linker/M32Reservations.c
 src/linker/MMap.c
 src/linker/MachO.c
 src/linker/MachOVerify.c
