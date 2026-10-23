@@ -338,3 +338,22 @@ and releases its storage with `freeProddableBlocks`. This prepares a valid write
 target before allocation failure is injected at `makeStub`. The unit provides
 native Darwin/AArch64 function-level coverage; it does not load a full Mach-O
 object or qualify other architectures.
+
+M32 mapping failure status
+==========================
+
+On Darwin, `m32_map_status.c` includes the actual `M32Alloc.c` and interposes
+its anonymous mapping and unmapping calls with real OS mappings plus an
+owner-local mapping ledger. It checks small-batch and large-allocation mapping
+failure and out-of-range results, including `LL_E_NOMEM`, release of rejected
+mappings, and no writes into a rejected small-page pool. Positive cases cover
+small-pool reuse and large allocations. The fixture drains any retained small
+page pool using the configured system page size before checking that every
+mapped page was released. It also checks allocation ownership, logging and
+memory-failure callbacks, fatal-callback exclusion, and default-linker error
+isolation.
+
+The native driver runs this unit on Darwin and requires the selected stage2
+archive while rejecting an archived `M32Alloc.o` beside the included source.
+The check is native to the configured Darwin architecture; it does not qualify
+other hosts or the full object-loading path.

@@ -318,6 +318,42 @@ def main() -> int:
         run([str(archive_test)], label="run archive_error_status")
 
         if host == "Darwin":
+            m32_map_test = output / "m32_map_status"
+            m32_map_file = output / "m32_map_status.map"
+            m32_map_trace = run(
+                cc
+                + [
+                    str(ROOT / "liblink/tests/unit/m32_map_status.c"),
+                    f"-L{archive.parent}",
+                    "-llink",
+                    *core_link_flags(host),
+                    "-Wl,-t",
+                    "-Wl,-why_load",
+                    linker_map_flag(m32_map_file),
+                    "-o",
+                    str(m32_map_test),
+                ],
+                label="compile and link m32_map_status",
+            )
+            verify_macho_link_map(
+                m32_map_file,
+                archive,
+                m32_map_trace,
+                included_source="M32Alloc.c",
+                forbidden_members=("M32Alloc",),
+            )
+            why_load = "\n".join(
+                line for line in m32_map_trace.splitlines()
+                if " caused load of " in line
+            )
+            if str(archive) not in why_load:
+                raise RuntimeError("M32 link trace did not show archive member selection")
+            if re.search(
+                rf"{re.escape(str(archive))}\[\d+\]\(M32Alloc\.o\)", why_load
+            ):
+                raise RuntimeError("link trace selected archive M32Alloc.o beside included source")
+            run([str(m32_map_test)], label="run m32_map_status")
+
             macho_import_test = output / "macho_import_status"
             macho_import_map = output / "macho_import_status.map"
             macho_import_trace = run(

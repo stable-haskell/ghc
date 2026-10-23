@@ -334,9 +334,18 @@ m32_alloc_page(ll_linker *L)
     const size_t pgsz = ll_page_size_for(L);
     const size_t map_sz = pgsz * M32_MAP_PAGES;
     uint8_t *chunk = ll_mmap_anon_for_linker(L, map_sz);
+    if (chunk == NULL) {
+      ll_error_set(L, LL_E_NOMEM, "m32_alloc_page: failed to map pages");
+      return NULL;
+    }
     if (! is_okay_address(L, chunk + map_sz)) {
+      ll_error_set(L, LL_E_NOMEM,
+                   "m32_alloc_page: failed to allocate pages within 4GB of program text (got %p)",
+                   (void *)chunk);
+      ll_munmap_for_linker(L, chunk, map_sz, "m32_alloc_page");
       ll_report_mem_failure_for(L);
-      LL_FATAL_FOR(L, "m32_alloc_page: failed to allocate pages within 4GB of program text (got %p)", chunk);
+      LL_LOG_ERROR_FOR(L, "m32_alloc_page: failed to allocate pages within 4GB of program text (got %p)", (void *)chunk);
+      return NULL;
     }
     LL_IF_DEBUG_FOR(L, sanity, memset(chunk, 0xaa, map_sz));
 
@@ -502,12 +511,19 @@ m32_alloc_for(ll_linker *L, struct m32_allocator_t *alloc, size_t size, size_t a
       // remainder to free pool.
       struct m32_page_t *page = ll_mmap_anon_for_linker(L, alsize+size);
       if (page == NULL) {
-          LL_LOG_SYSERROR_FOR(L, "m32_alloc: Failed to map pages for %zd bytes", size);
+          ll_error_set(L, LL_E_NOMEM,
+                       "m32_alloc: Failed to map pages for %zu bytes", size);
+          LL_LOG_SYSERROR_FOR(L, "m32_alloc: Failed to map pages for %zu bytes", size);
           return NULL;
       } else if (! is_okay_address(L, page)) {
+          ll_error_set(L, LL_E_NOMEM,
+                       "m32_alloc: Allocation of %zu bytes resulted in pages above 4GB (%p)",
+                       size, (void *)page);
+          ll_munmap_for_linker(L, page, alsize + size, "m32_alloc");
           ll_report_mem_failure_for(L);
-          LL_FATAL_FOR(L, "m32_alloc: warning: Allocation of %zd bytes resulted in pages above 4GB (%p)",
-               size, page);
+          LL_LOG_ERROR_FOR(L, "m32_alloc: Allocation of %zu bytes resulted in pages above 4GB (%p)",
+               size, (void *)page);
+          return NULL;
       }
       SET_PAGE_TYPE(page, FILLED_PAGE);
       page->filled_page.size = alsize + size;
