@@ -113,9 +113,12 @@ The driver locates the generated `liblink` configuration headers, installed
 error-state, core status/negative-input, and archive status tests with
 assertions. The core and archive fixtures include their implementation source
 and link dependencies from the real archive using `-llink`; linker maps check
-that the corresponding archive object is not also selected. On Darwin, it also
-runs the Mach-O preflight, indirect-import, and segment-alignment units. The
-driver also runs the AArch64 Mach-O stub lifecycle unit on Darwin/AArch64. It
+that the corresponding archive object is not also selected. Before any C
+compilation, the driver runs `test_link_trace_checks.py` to check the MinGW LLD
+verbose-selection/COFF-map format and both Darwin `-why_load` output forms. On
+Darwin, it also runs the Mach-O preflight, indirect-import, and segment-alignment
+units. The driver also runs the AArch64 Mach-O stub lifecycle unit on
+Darwin/AArch64. It
 accepts `--build-root` and `--store-root` when the stage2 build uses
 non-default directories, and `--cc` to select a C compiler command.
 

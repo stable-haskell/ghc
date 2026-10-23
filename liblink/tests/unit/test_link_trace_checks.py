@@ -1,0 +1,249 @@
+#!/usr/bin/env python3
+"""Unit tests for the native linker trace and map parsers."""
+
+from __future__ import annotations
+
+import tempfile
+import unittest
+from pathlib import Path, PurePosixPath
+
+import link_trace_checks as checks
+import run_native_tests as driver
+
+
+MAP_HEADER = "Address  Size     Align Out     In      Symbol\n"
+
+
+def map_row(member: str) -> str:
+    return f"00003000 00000004 4         {member}:(.data)\n"
+
+
+class MinGWLLDMapTests(unittest.TestCase):
+    archive = Path("C:/Build Artifacts/liblink.a")
+
+    def trace(self, loaded: tuple[str, ...] = ("symbols-strong.o",)) -> str:
+        lines = [
+            "lld: Reading C:/Build Artifacts/liblink.a",
+            "lld: Reading liblink.a(symbols-strong.o)",
+        ]
+        lines.extend(
+            f"lld: Loaded liblink.a({member}) for fixture_symbol"
+            for member in loaded
+        )
+        return "\n".join(lines) + "\n"
+
+    def verify(self, map_text: str, trace: str | None = None) -> None:
+        checks.verify_lld_mingw_archive_map(
+            map_text,
+            self.archive,
+            self.trace() if trace is None else trace,
+            included_source="M32Alloc.c",
+            forbidden_members=("M32Alloc",),
+        )
+
+    def test_accepts_archive_read_loaded_selection_and_map_record(self) -> None:
+        self.verify(MAP_HEADER + map_row("symbols-strong.o"))
+
+    def test_normalizes_windows_case_and_separators_with_spaces(self) -> None:
+        archive = Path(r"c:\build artifacts\LIBLINK.A")
+        trace = (
+            "lld: Reading C:/BUILD ARTIFACTS/liblink.a\n"
+            "lld: Loaded LIBLINK.A(SYMBOLS-STRONG.O) for fixture_symbol\n"
+        )
+        checks.verify_lld_mingw_archive_map(
+            MAP_HEADER + map_row(r"obj\SYMBOLS-STRONG.O"),
+            archive,
+            trace,
+            included_source="M32Alloc.c",
+            forbidden_members=("M32Alloc",),
+        )
+
+    def test_rejects_wrong_archive(self) -> None:
+        trace = (
+            "lld: Reading D:/Other/liblink.a\n"
+            "lld: Loaded liblink.a(symbols-strong.o) for fixture_symbol\n"
+        )
+        with self.assertRaisesRegex(RuntimeError, "did not read expected archive"):
+            self.verify(MAP_HEADER + map_row("symbols-strong.o"), trace)
+
+    def test_rejects_same_basename_archive_ambiguity(self) -> None:
+        trace = self.trace() + "lld: Reading D:/Other/liblink.a\n"
+        with self.assertRaisesRegex(RuntimeError, "ambiguous archive basename"):
+            self.verify(MAP_HEADER + map_row("symbols-strong.o"), trace)
+
+    def test_rejects_missing_archive_read(self) -> None:
+        trace = "lld: Loaded liblink.a(symbols-strong.o) for fixture_symbol\n"
+        with self.assertRaisesRegex(RuntimeError, "did not read expected archive"):
+            self.verify(MAP_HEADER + map_row("symbols-strong.o"), trace)
+
+    def test_rejects_command_line_echo_without_read_or_selection(self) -> None:
+        trace = (
+            "lld-link /libpath:C:/Build Artifacts C:/Build Artifacts/liblink.a\n"
+        )
+        with self.assertRaisesRegex(RuntimeError, "did not read expected archive"):
+            self.verify(MAP_HEADER + map_row("symbols-strong.o"), trace)
+
+    def test_rejects_archive_listing_without_selected_member(self) -> None:
+        trace = (
+            "lld: Reading C:/Build Artifacts/liblink.a\n"
+            "lld: Reading liblink.a(symbols-strong.o)\n"
+        )
+        with self.assertRaisesRegex(RuntimeError, "did not show selected member"):
+            self.verify(MAP_HEADER + map_row("symbols-strong.o"), trace)
+
+    def test_rejects_forbidden_member_in_selected_trace(self) -> None:
+        trace = self.trace(("symbols-strong.o", "M32Alloc.o"))
+        with self.assertRaisesRegex(RuntimeError, "trace selected archive member"):
+            self.verify(MAP_HEADER + map_row("symbols-strong.o"), trace)
+
+    def test_rejects_flattened_forbidden_member_names(self) -> None:
+        for member in (
+            "linker_M32Alloc.o",
+            r"objects\linker_M32Alloc.c.o",
+            "linker-M32Alloc.o",
+            "prefixM32Alloc.obj",
+        ):
+            with self.subTest(member=member):
+                trace = self.trace(("symbols-strong.o", member))
+                with self.assertRaisesRegex(RuntimeError, "trace selected archive member"):
+                    self.verify(MAP_HEADER + map_row("symbols-strong.o"), trace)
+
+    def test_does_not_match_forbidden_name_prefix(self) -> None:
+        self.verify(MAP_HEADER + map_row("symbols-strong.o") +
+                    map_row("M32AllocHelper.o"))
+
+    def test_rejects_forbidden_member_in_map_inputs(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "map selected archive member"):
+            self.verify(MAP_HEADER + map_row("symbols-strong.o") +
+                        map_row(r"objects\M32Alloc.c.o"))
+
+    def test_rejects_flattened_forbidden_member_in_map(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "map selected archive member"):
+            self.verify(MAP_HEADER + map_row("symbols-strong.o") +
+                        map_row("linker_M32Alloc.obj"))
+
+    def test_rejects_explicit_loaded_archive_at_wrong_path(self) -> None:
+        trace = (
+            "lld: Reading C:/Build Artifacts/liblink.a\n"
+            "lld: Loaded D:/Other/liblink.a(ll_error.o) for fixture_symbol\n"
+        )
+        with self.assertRaisesRegex(RuntimeError, "different path"):
+            self.verify(MAP_HEADER + map_row("ll_error.o"), trace)
+
+    def test_rejects_forbidden_loaded_member_from_other_archive(self) -> None:
+        trace = self.trace() + (
+            "lld: Loaded D:/Other/extra.a(linker_M32Alloc.o) for another_symbol\n"
+        )
+        with self.assertRaisesRegex(RuntimeError, "trace selected archive member"):
+            self.verify(MAP_HEADER + map_row("symbols-strong.o"), trace)
+
+    def test_rejects_selected_member_without_map_input_record(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "no input record matching"):
+            self.verify(MAP_HEADER + map_row("unrelated.o"))
+
+    def test_member_map_binding_keeps_object_suffix(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "no input record matching"):
+            self.verify(MAP_HEADER + map_row("ll_error.obj"), self.trace(("ll_error.o",)))
+
+
+class DarwinWhyLoadTests(unittest.TestCase):
+    archive = PurePosixPath("/Build With Spaces/liblink.a")
+
+    def verify(self, trace: str) -> None:
+        checks.verify_macho_archive_selection(
+            self.archive,
+            trace,
+            included_source="M32Alloc.c",
+            forbidden_members=("M32Alloc",),
+        )
+
+    def test_accepts_local_caused_load_with_archive_index(self) -> None:
+        self.verify(
+            "symbol _ll_error_set caused load of "
+            "/Build With Spaces/liblink.a[12](ll_error.o)\n"
+        )
+
+    def test_accepts_ci_forced_load_without_archive_index(self) -> None:
+        self.verify(
+            "_ll_error_set forced load of "
+            "/Build With Spaces/liblink.a(ll_error.o)\n"
+        )
+
+    def test_accepts_both_linker_dialects_together(self) -> None:
+        self.verify(
+            "symbol _one caused load of /Build With Spaces/liblink.a[4](ll_error.o)\n"
+            "_two forced load of /Build With Spaces/liblink.a(MMap.o)\n"
+        )
+
+    def test_rejects_wrong_archive_selection(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "did not show archive member"):
+            self.verify("_ll_error_set forced load of /Other/liblink.a(ll_error.o)\n")
+
+    def test_darwin_archive_path_case_is_significant(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "did not show archive member"):
+            self.verify(
+                "_ll_error_set forced load of "
+                "/build with spaces/liblink.a(ll_error.o)\n"
+            )
+
+    def test_rejects_m32alloc_from_indexed_caused_load(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "selected archive member"):
+            self.verify(
+                "symbol _m32_alloc caused load of "
+                "/Build With Spaces/liblink.a[17](linker/M32Alloc.c.o)\n"
+            )
+
+    def test_rejects_m32alloc_from_unindexed_forced_load(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "selected archive member"):
+            self.verify(
+                "_m32_alloc forced load of /Build With Spaces/liblink.a(M32Alloc.o)\n"
+            )
+
+    def test_does_not_treat_t_archive_listing_as_selection(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "did not show archive member"):
+            self.verify("/Build With Spaces/liblink.a(MMap.o)\n")
+
+
+class NativeDriverMapDispatchTests(unittest.TestCase):
+    def test_lld_trace_accepts_basename_only_map_input(self) -> None:
+        archive = Path("C:/Build Artifacts/liblink.a")
+        trace = (
+            "lld: Reading C:/Build Artifacts/liblink.a\n"
+            "lld: Loaded liblink.a(symbols-strong.o) for fixture_symbol\n"
+        )
+        map_text = MAP_HEADER + map_row("symbols-strong.o")
+        with tempfile.TemporaryDirectory() as temporary:
+            map_path = Path(temporary) / "probe.map"
+            map_path.write_text(map_text)
+            driver.verify_link_map(
+                map_path,
+                archive,
+                trace,
+                included_source="M32Alloc.c",
+                forbidden_member="M32Alloc",
+                windows_paths=True,
+            )
+
+    def test_legacy_full_path_map_still_rejects_duplicate_member(self) -> None:
+        archive = Path("C:/Build Artifacts/liblink.a")
+        trace = "C:/Build Artifacts/liblink.a(other.o)\n"
+        with tempfile.TemporaryDirectory() as temporary:
+            map_path = Path(temporary) / "probe.map"
+            map_path.write_text(
+                MAP_HEADER
+                + "00003000 00000004 4         "
+                + "C:/Build Artifacts/liblink.a(M32Alloc.o):(.text)\n"
+            )
+            with self.assertRaisesRegex(RuntimeError, "selected archive M32Alloc.o"):
+                driver.verify_link_map(
+                    map_path,
+                    archive,
+                    trace,
+                    included_source="M32Alloc.c",
+                    forbidden_member="M32Alloc",
+                    windows_paths=True,
+                )
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

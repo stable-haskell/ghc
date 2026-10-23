@@ -125,6 +125,8 @@ extra-source-files:
     tests/unit/m32_map_status.c
     tests/unit/m32_windows_reservations.c
     tests/unit/pei386_common_ownership.c
+    tests/unit/link_trace_checks.py
+    tests/unit/test_link_trace_checks.py
     tests/fixtures/macho-input/common_only.c
     tests/fixtures/macho-input/ordinary.c
     tests/fixtures/macho-input/table_alignment_data.c

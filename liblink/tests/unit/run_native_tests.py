@@ -14,6 +14,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+import link_trace_checks
+
 
 ROOT = Path(__file__).resolve().parents[3]
 TIMEOUT_SECONDS = 90
@@ -225,6 +227,19 @@ def verify_link_map(
     text = map_path.read_text(errors="replace")
     if windows_paths:
         forms = windows_path_forms(archive)
+        if link_trace_checks.is_lld_mingw_verbose_trace(link_trace):
+            link_trace_checks.verify_lld_mingw_archive_map(
+                text,
+                archive,
+                link_trace,
+                included_source=included_source,
+                forbidden_members=(forbidden_member,),
+            )
+            print(
+                f"[{included_source}] LLD trace selects a member represented in the map "
+                f"without archive {forbidden_member}.o"
+            )
+            return
         if not windows_path_matches(forms, text):
             raise RuntimeError(f"link map omitted expected stage2 archive: {archive}")
         if not windows_path_matches(forms, link_trace):
@@ -280,7 +295,8 @@ def run_pei386_common_ownership(cc: list[str], archive: Path,
             f"-L{archive.parent}",
             "-llink",
             *PE_SUPPORT_LIBS,
-            "-Wl,-t",
+            # MinGW LLD rejects GNU ld's -t; --verbose prints resolved inputs.
+            "-Wl,--verbose",
             linker_map_flag(test_map),
             "-o",
             str(test_binary),
@@ -343,7 +359,7 @@ def run_pei386_common_ownership(cc: list[str], archive: Path,
             f"-L{archive.parent}",
             "-llink",
             *PE_SUPPORT_LIBS,
-            "-Wl,-t",
+            "-Wl,--verbose",
             linker_map_flag(mutant_map),
             "-o",
             str(mutant_binary),
@@ -521,6 +537,11 @@ def main() -> int:
     if host not in ("Linux", "Darwin", "Windows"):
         raise RuntimeError(f"unsupported host platform for liblink C units: {host}")
 
+    run(
+        [sys.executable, str(ROOT / "liblink/tests/unit/test_link_trace_checks.py")],
+        label="linker trace parser tests",
+    )
+
     compiler = shlex.split(args.cc)
     if not compiler:
         raise RuntimeError("empty C compiler command")
@@ -571,7 +592,8 @@ def main() -> int:
                     str(ROOT / "liblink/tests/unit/m32_windows_reservations.c"),
                     f"-L{archive.parent}",
                     "-llink",
-                    "-Wl,-t",
+                    # MinGW LLD rejects GNU ld's -t; --verbose prints resolved inputs.
+                    "-Wl,--verbose",
                     linker_map_flag(m32_map),
                     "-o",
                     str(m32_test),
@@ -701,16 +723,12 @@ def main() -> int:
                 included_source="M32Alloc.c",
                 forbidden_members=("M32Alloc",),
             )
-            why_load = "\n".join(
-                line for line in m32_map_trace.splitlines()
-                if " caused load of " in line
+            link_trace_checks.verify_macho_archive_selection(
+                archive,
+                m32_map_trace,
+                included_source="M32Alloc.c",
+                forbidden_members=("M32Alloc",),
             )
-            if str(archive) not in why_load:
-                raise RuntimeError("M32 link trace did not show archive member selection")
-            if re.search(
-                rf"{re.escape(str(archive))}\[\d+\]\(M32Alloc\.o\)", why_load
-            ):
-                raise RuntimeError("link trace selected archive M32Alloc.o beside included source")
             run([str(m32_map_test)], label="run m32_map_status")
 
             macho_import_test = output / "macho_import_status"
