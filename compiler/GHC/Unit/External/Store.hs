@@ -10,10 +10,11 @@
 -- > <root>/<uid>/lib/include/      C headers (optional)
 --
 -- This is the layout @cabal-install@'s store already uses; the only addition
--- is @unit.meta@. Everything that a package database entry says about
--- /where/ things are is derived from the layout. What it says about /policy/
--- is fixed instead: every unit is exposed and untrusted, and the command line
--- and environment files override that. The manifest carries only what cannot
+-- is @unit.meta@. What a package database entry says about /where/ the unit's
+-- own files are is derived from the layout; paths outside the unit's tree have
+-- no equivalent. What it says about /policy/ is fixed instead: every unit is
+-- exposed and untrusted, and the command line and environment files override
+-- that. The manifest carries only what cannot
 -- be derived: the module lists, the dependencies, the Backpack instantiation,
 -- the human-readable label, and the C-side link configuration.
 --
@@ -21,8 +22,6 @@
 module GHC.Unit.External.Store
   ( readUnitStore
   , probeUnitStore
-  , unitReferencedUnitIds
-  , unitInfoReferencedUnits
   , unitMetaFileName
     -- * The manifest
   , UnitMeta (..)
@@ -37,7 +36,6 @@ import GHC.Data.OsPath (OsPath)
 import GHC.Data.OsPath qualified as OsPath
 import GHC.Data.ShortText qualified as ST
 import GHC.Fingerprint (fingerprintString)
-import GHC.Unit.Database (GenericUnitInfo (..))
 import GHC.Unit.External.Database (UnitDatabase (..))
 import GHC.Unit.Info
 import GHC.Unit.Parser
@@ -52,7 +50,7 @@ import Control.Monad
 import Data.Char (isSpace)
 import Data.List (sort)
 import Data.Maybe
-import Data.Version (Version, makeVersion, parseVersion, showVersion)
+import Data.Version (makeVersion, parseVersion, showVersion)
 import System.IO (readFile')
 import Text.ParserCombinators.ReadP (ReadP)
 import Text.ParserCombinators.ReadP qualified as P
@@ -110,25 +108,6 @@ readStoreUnit root uid = do
       has_include <- OsPath.doesDirectoryExist (dir OsPath.</> libDirName OsPath.</> includeDirName)
       pure (Just (storeUnitInfo root uid meta txt has_include))
 
--- | The unit ids a 'Unit' is made of: itself for a definite unit, and for an
--- instantiated unit the indefinite unit plus the units of its instantiation,
--- recursively. These are the units that must be available for the 'Unit'
--- to be usable.
-unitReferencedUnitIds :: Unit -> [UnitId]
-unitReferencedUnitIds u = case u of
-  HoleUnit                 -> []
-  RealUnit (Definite uid)  -> [uid]
-  VirtUnit i               -> instUnitInstanceOf i
-                            : concatMap (unitReferencedUnitIds . moduleUnit . snd) (instUnitInsts i)
-
--- | Every unit a 'UnitInfo' refers to and that therefore has to be present
--- for the unit to be usable: its dependencies, the origins of its reexported
--- modules, and the units in its instantiation.
-unitInfoReferencedUnits :: UnitInfo -> [UnitId]
-unitInfoReferencedUnits ui =
-  unitDepends ui
-  ++ concat [ unitReferencedUnitIds (moduleUnit m) | (_, Just m) <- unitExposedModules ui ]
-  ++ concatMap (unitReferencedUnitIds . moduleUnit . snd) (unitInstantiations ui)
 
 libDirName, includeDirName :: OsPath
 libDirName     = OsPath.unsafeEncodeUtf "lib"

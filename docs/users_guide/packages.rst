@@ -207,6 +207,19 @@ The GHC command line options that control packages are:
     dependencies is a Good Thing. Cabal always passes the
     ``-hide-all-packages`` flag to GHC, for exactly this reason.
 
+    When, in addition, every package flag names a unit by id
+    (:ghc-flag:`-package-id ⟨unit-id⟩`, :ghc-flag:`-plugin-package-id ⟨unit-id⟩`,
+    :ghc-flag:`-trust-id ⟨unit-id⟩`, :ghc-flag:`-distrust-id ⟨unit-id⟩`), which
+    is what Cabal and environment files do, only the units named and the
+    units they depend on exist for the compilation: nothing else is read
+    from a unit store, nothing else is validated, and ``--show-packages``
+    lists only those units. A module that an installed but unnamed unit
+    would provide is then reported as not found, rather than as a member of
+    a hidden package. A single :ghc-flag:`-package ⟨pkg⟩`,
+    :ghc-flag:`-hide-package ⟨pkg⟩`, :ghc-flag:`-ignore-package ⟨pkg⟩`,
+    :ghc-flag:`-trust ⟨pkg⟩` or :ghc-flag:`-distrust ⟨pkg⟩` flag names a unit
+    by package name and makes GHC consider everything installed again.
+
 .. ghc-flag:: -hide-package ⟨pkg⟩
     :shortdesc: Hide package ⟨pkg⟩
     :type: dynamic
@@ -296,6 +309,28 @@ The GHC command line options that control packages are:
     :ghc-flag:`-package ⟨pkg⟩` command but in addition sets the selected
     packages to be distrusted by GHC, regardless of the contents of the package
     database. (see :ref:`safe-haskell`).
+
+.. ghc-flag:: -trust-id ⟨unit-id⟩
+    :shortdesc: Expose the unit ⟨unit-id⟩ and set it to be trusted
+    :type: dynamic
+    :category:
+    :noindex:
+
+    :since: 10.2.1
+
+    Like :ghc-flag:`-trust ⟨pkg⟩`, but the unit is named by its unit id, as
+    with :ghc-flag:`-package-id ⟨unit-id⟩`.
+
+.. ghc-flag:: -distrust-id ⟨unit-id⟩
+    :shortdesc: Expose the unit ⟨unit-id⟩ and set it to be distrusted
+    :type: dynamic
+    :category:
+    :noindex:
+
+    :since: 10.2.1
+
+    Like :ghc-flag:`-distrust ⟨pkg⟩`, but the unit is named by its unit id,
+    as with :ghc-flag:`-package-id ⟨unit-id⟩`.
 
 .. ghc-flag:: -distrust-all-packages
     :shortdesc: Distrust all packages by default
@@ -486,15 +521,15 @@ options:
     particular all paths and the ``hs-libraries`` name, is derived from the
     layout. Units in a store are exposed and not trusted; use
     :ghc-flag:`-hide-all-packages`, :ghc-flag:`-package-id ⟨unit-id⟩`,
-    :ghc-flag:`-trust ⟨pkg⟩` or an environment file to say otherwise.
+    :ghc-flag:`-trust-id ⟨unit-id⟩` or an environment file to say otherwise.
 
-    With :ghc-flag:`-hide-all-packages`, and when every
-    :ghc-flag:`-package-id ⟨unit-id⟩` and
-    :ghc-flag:`-plugin-package-id ⟨unit-id⟩` flag names a unit by id,
-    the store is not enumerated: GHC looks up only the units named and
-    the units they depend on, by path. A :ghc-flag:`-package ⟨pkg⟩` flag
-    names a unit by package name and makes GHC read the whole store
-    instead. Package databases are always read in full.
+    With :ghc-flag:`-hide-all-packages`, and when every package flag names
+    a unit by id, the store is not enumerated: GHC looks up only the units
+    named and the units they depend on, by path, and nothing else exists
+    for the compilation (see :ghc-flag:`-hide-all-packages`). A
+    :ghc-flag:`-package ⟨pkg⟩` flag names a unit by package name and makes
+    GHC read the whole store instead. Package databases are always read in
+    full.
 
 .. ghc-flag:: -no-global-package-db
     :shortdesc: Remove the global package db from the stack.

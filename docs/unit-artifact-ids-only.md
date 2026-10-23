@@ -1,9 +1,10 @@
 # Unit artifact spike, stage 3 sketch: an ids-only driver
 
-Status: design sketch, October 2026, not implemented. Third document of
+Status: design sketch, October 2026; stages 1 and 2 of the path at the
+end are implemented (see the two sections after it). Third document of
 the unit store spike, after `unit-artifact-field-analysis.md` and
 `unit-artifact-model.md`. Code references are to master `0c17201cd3`
-plus the two prototype commits of this spike.
+plus the commits of this spike.
 
 ## Premise
 
@@ -159,12 +160,12 @@ Each stage is independently useful and leaves the tree working.
    function that looks at the eagerly read databases only. The core then
    sees ids exclusively. This proves the core can be ids-only while every
    flag keeps working, and it moves the by-name code into one place with
-   a clear boundary.
+   a clear boundary. (Implemented, see below.)
 2. **Ids-only core.** `mkUnitState` with the six steps above, taken when
    the front end produced no name flags (always true for Cabal and
    environment files). The current path remains for the rest. The stage 2
    prototype's `demandRoots` is the switch and becomes unconditional
-   inside this path.
+   inside this path. (Implemented, see below.)
 3. **Settings-file ids for `ghc-internal`, `rts`, `ghci`.** Hadrian
    writes them next to `base unit-id`; the three `lookupPackageName
    "ghci"` calls read the setting; `wiredInUnitIds` becomes empty and
@@ -208,6 +209,83 @@ What it did not do: the by-name code still exists, in one module, and
 `demandRoots` still falls back to enumerating stores when a name flag is
 present, because resolution happens after the databases are read. Stage 2
 is where the resolved ids feed the demand-driven read directly.
+
+### Stage 2, implemented
+
+Done on 2026-10-23 (commit `feat(driver): build the unit state from the
+closure of the unit ids on the command line`). `mkUnitState` is now a
+switch between two functions, documented in `Note [The ids-only unit
+state]` in `GHC.Unit.State`:
+
+- `idsOnlyRoots` (the former `demandRoots`) decides. It returns the roots
+  when `-hide-all-packages` is set and every flag carries a unit id:
+  `-package-id`, `-plugin-package-id` (an instantiated id contributes the
+  units it is made of), the implicitly linked units (`base` from the
+  settings file, the wired-in ids), and for a Backpack home unit the
+  indefinite unit of `-this-component-id` and the units in
+  `-instantiated-with`, which `UnitConfig` now carries (Cabal-driven
+  Backpack builds load the indefinite unit's interfaces to check the
+  instantiation, and name it nowhere else). Any `-package`,
+  `-hide-package`, `-ignore-package`, `-trust` or `-distrust` by name
+  returns `Nothing`. The same roots drive the demand-driven store read, so
+  the stage 2 prototype's switch and the core's switch are one.
+- `mkUnitStateIdsOnly` runs the six steps. Stores are probed, package
+  databases read in full, the stack merged with the usual shadowing by id,
+  and then `closeOverReferences` (in `GHC.Unit.External.Query`, next to
+  `unitInfoReferencedUnits`, which moved there from `Store.hs`) keeps only
+  the units reachable from the roots over dependencies, reexport origins
+  and instantiations. `validateDatabase` runs on that closure. Visibility
+  is a fold of `applyPackageFlag` over an empty map with same-name hiding
+  off. No default visibility, no preference ordering, no name resolution.
+- `mkUnitStateByName` is the old function, with the names resolved at the
+  stage 1 boundary. Both end in `finishUnitState`: wiring, plugin
+  visibility, the module map and the preload set, unchanged.
+- `-trust-id ⟨uid⟩` and `-distrust-id ⟨uid⟩` exist, so Safe Haskell policy
+  can be stated without a name. They are the only new flags.
+
+Two decisions taken on the way:
+
+- **Units outside the closure do not exist.** They are not validated, not
+  in `unitInfoMap`, not in `--show-packages`, and a module they provide is
+  "not found", not "a member of the hidden package". This is what the
+  model says (compilation never enumerates) and it is the behaviour the
+  store route already had; the package database route now matches it. Two
+  testsuite expectations change. `package/ImportReexport` compiles with
+  `-hide-all-packages` and no flags and listed `ghc`, `ghc-boot` and
+  `ghc-platform` as hidden providers of `GHC.Platform.ArchOS`; none is
+  reachable from `base`, so the module is now simply not found.
+  `package/T22884_interactive` does `:set -hide-all-packages` in GHCi and
+  then `import Data.Text`, and used to be told that `text` is hidden and
+  that `:set -package text` would expose it; now it is told the module is
+  in no known package. The second one is the GHCi convenience the sketch
+  discusses under "Decisions": it depends on enumerating what is
+  installed, which this path does not do, and `:set -package text` still
+  works (it switches the session to the by-name path). Keeping interactive
+  sessions on the by-name path would be a one-line change in
+  `idsOnlyRoots` if that convenience is wanted during the transition.
+  `T27013e`/`T27013f`, which expect the hint for `base`, are unaffected
+  because `base` is a root.
+- **The compiler's own units are a by-name hold-out.** `ghc-internal`,
+  `rts` and `ghci` are not reachable from the roots in general (`ghci` is
+  reachable from nothing a user names; the other two only through `base`),
+  and until stage 3 writes their ids in the settings file they can only be
+  found by name. `compilerUnitRoots` in `GHC.Unit.External.Names` adds
+  every unit carrying one of those names to the roots, so wiring and the
+  external interpreter see the same candidates as before. `ghci` is added
+  only when the external interpreter may run (`-fexternal-interpreter`, or
+  a JavaScript or Wasm target): it is the one consumer, and its
+  dependencies are two thirds of the boot libraries, which would otherwise
+  be in every closure. With the stage 1 build, `-package-id base` alone
+  gives a closure of 5 units out of the 45 installed. This is the single
+  by-name lookup left on the ids-only path, lives in the boundary module,
+  and is what stage 3 deletes. Through a pure `-unit-store` stack it finds
+  nothing, as before this stage, which is exactly the stage 3 motivation.
+
+What stage 2 does not do: `-hide-package` and `-ignore-package` have no
+by-id spelling (under `-hide-all-packages` the first is pointless and the
+second a corner case), `:set -package foo` in GHCi still switches the
+session to the by-name path on the next `initUnits`, and the by-name path
+itself is untouched.
 
 ## The simpler compiler
 

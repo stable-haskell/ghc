@@ -97,7 +97,6 @@ import GHC.Unit.Ppr
 import GHC.Unit.External.Database
 import GHC.Unit.External.Index
 import GHC.Unit.External.Names
-import GHC.Unit.External.Store (unitReferencedUnitIds)
 import GHC.Unit.External.ModuleOrigin
 import GHC.Unit.External.Providers
 import GHC.Unit.External.Query
@@ -204,6 +203,17 @@ data UnitConfig = UnitConfig
    , unitConfigFlagsTrusted :: [TrustFlag]         -- ^ Trusted units
    , unitConfigFlagsPlugins :: [PackageFlag]       -- ^ Plugins exposed units
    , unitConfigHomeUnits    :: Set.Set UnitId
+   , unitConfigHomeInstanceOf :: Maybe UnitId
+      -- ^ The indefinite unit the home unit instantiates
+      -- (@-this-component-id@), whose interfaces must be available.
+   , unitConfigHomeInstantiations :: [(ModuleName, Module)]
+      -- ^ What the home unit is instantiated with (@-instantiated-with@);
+      -- the units named there must be available.
+   , unitConfigExternalInterp :: !Bool
+      -- ^ The external interpreter may be used (@-fexternal-interpreter@, or
+      -- a target that has no other), so the @ghci@ unit must be available.
+      -- See Note [The compiler's own units are still found by name] in
+      -- GHC.Unit.External.Names.
    }
 
 initUnitConfig :: DynFlags -> Set.Set UnitId -> UnitConfig
@@ -250,7 +260,11 @@ initUnitConfig dflags home_units =
       , unitConfigFlagsTrusted = trustFlags dflags
       , unitConfigFlagsPlugins = if hasPluginPackageConfig dflags then [] else pluginPackageFlags dflags
       , unitConfigHomeUnits    = home_units
-
+      , unitConfigHomeInstanceOf = hu_instanceof
+      , unitConfigHomeInstantiations = hu_instantiations
+      , unitConfigExternalInterp =
+             gopt Opt_ExternalInterpreter dflags
+          || platformArch (targetPlatform dflags) `elem` [ArchJavaScript, ArchWasm32]
       }
 
   where
@@ -758,13 +772,117 @@ reportCycles logger sccs = when (logVerbAtLeast logger 2) $ mapM_ report sccs
 -- When all the command-line options are in, we can process our unit
 -- settings and populate the unit state.
 
+{-
+Note [The ids-only unit state]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+When every unit this compilation may use is named by id, that is whenever
+-hide-all-packages is set and no flag names a unit by package name (always
+the case for Cabal, and for environment files without hide-package), the
+unit state is built by 'mkUnitStateIdsOnly' instead of 'mkUnitStateByName':
+
+  1. Roots. The unit ids from -package-id and -plugin-package-id (for an
+     instantiated id, the units it is made of), the units linked implicitly
+     (base by its id from the settings file, if the build recorded one,
+     ghc-internal and rts by their wired-in ids) and, for a Backpack home
+     unit, the indefinite unit it
+     instantiates (-this-component-id) and the units it is instantiated
+     with. 'idsOnlyRoots' computes them and is also the switch between the
+     two paths.
+
+  2. Closure. Unit stores on the stack are probed for the roots and for
+     whatever they reference, never enumerated ('readUnitDatabasesOnDemand');
+     package databases are still read in full. After merging, where a later
+     location shadows an earlier one by id as usual, the map is restricted
+     to the closure of the roots over dependencies, reexport origins and
+     instantiations ('closeOverReferences'). A unit outside the closure does
+     not exist for this compilation: it is not validated, not in the module
+     map, not in --show-packages, and a module it provides is reported as
+     not found rather than as hidden.
+
+  3. Validation of the closure by 'validateDatabase', over the units in
+     play rather than everything installed.
+
+  4. Visibility is exactly what the flags say: no default visibility, no
+     preferred version, no hiding of a same-named unit by a later flag.
+
+  5. Wiring, the plugin visibility, the module map and the preload set are
+     shared with the by-name path ('finishUnitState').
+
+The units the compiler needs for itself (ghc-internal and rts, and ghci
+when the external interpreter may be used) are not reachable from the roots
+in general and are added to them by name; see Note [The compiler's own
+units are still found by name] in GHC.Unit.External.Names. That is the only
+place on this path where a name decides what is in the closure.
+
+The by-name path ('mkUnitStateByName') is the historical one: it runs the
+plan written at the top of it over everything installed, with the package
+names in the flags resolved to ids first (Note [Names are resolved in the
+front end] in GHC.Unit.External.Names). See docs/unit-artifact-ids-only.md
+for the design this is part of.
+-}
+
 mkUnitState
     :: Logger
     -> DynFlags
     -> UnitIndexCache
     -> UnitConfig
     -> IO UnitState
-mkUnitState logger dflags unit_index cfg = do
+mkUnitState logger dflags unit_index cfg = case idsOnlyRoots cfg of
+  Just roots -> mkUnitStateIdsOnly logger dflags unit_index cfg roots
+  Nothing    -> mkUnitStateByName  logger dflags unit_index cfg
+
+-- | The unit state when every unit is named by id.
+-- See Note [The ids-only unit state].
+mkUnitStateIdsOnly
+    :: Logger
+    -> DynFlags
+    -> UnitIndexCache
+    -> UnitConfig
+    -> [UnitId]          -- ^ the roots, from 'idsOnlyRoots'
+    -> IO UnitState
+mkUnitStateIdsOnly logger dflags unit_index cfg roots = do
+  let (other_flags, home_unit_deps) = installedUnitFlags cfg
+      plugin_flags = reverse (unitConfigFlagsPlugins cfg)
+  debugTraceMsg logger 2 $
+      text "unit roots" <+> ppr roots
+
+  -- 2. Closure: stores probed for the roots, databases read in full, then
+  -- everything outside the closure of the roots is dropped.
+  dbs <- readUnitDatabases logger unit_index (initUnitDbConfig cfg)
+  (pkg_map1, prec_map) <- mergeDatabases logger dbs
+  let closure = closeOverReferences (roots ++ compilerUnitRoots (unitConfigExternalInterp cfg) pkg_map1) pkg_map1
+  debugTraceMsg logger 2 $
+      text "unit closure:" <+> int (sizeUniqMap closure) <+> text "of"
+        <+> int (sizeUniqMap pkg_map1) <+> text "units"
+
+  -- 3. Validate the closure.
+  let (pkg_map2, unusable, sccs) = validateDatabase (unitConfigFlagsIgnored cfg) closure
+  reportCycles   logger sccs
+  reportUnusable logger unusable
+  let pkgs1 = nonDetEltsUniqMap pkg_map2
+
+  trustUnitsOverlay <- mayThrowUnitErr
+            $ foldM (applyTrustFlag prec_map unusable pkgs1)
+                 (initialTrustOverlay cfg pkgs1) (reverse (unitConfigFlagsTrusted cfg))
+
+  -- 4. Visibility: exactly the flags, starting from nothing.
+  vis_map2 <- mayThrowUnitErr
+                $ foldM (applyPackageFlag prec_map (mkUnitInfoMap pkgs1) unusable True pkgs1)
+                            emptyUniqMap other_flags
+
+  -- 5. The rest is shared.
+  finishUnitState logger dflags unit_index cfg prec_map pkgs1 unusable
+                  trustUnitsOverlay vis_map2 plugin_flags home_unit_deps
+
+-- | The unit state over everything installed, with package names resolved
+-- to ids first. See Note [The ids-only unit state] for the alternative.
+mkUnitStateByName
+    :: Logger
+    -> DynFlags
+    -> UnitIndexCache
+    -> UnitConfig
+    -> IO UnitState
+mkUnitStateByName logger dflags unit_index cfg = do
 {-
    Plan.
 
@@ -820,23 +938,9 @@ mkUnitState logger dflags unit_index cfg = do
 
   dbs <- readUnitDatabases logger unit_index (initUnitDbConfig cfg)
 
-  -- distrust all units if the flag is set
-  let distrustUnitsOfDb overlay db = foldl' (\ acc ui -> distrustUnits [unitId ui] acc) overlay (unitDatabaseUnits db)
-      distrustAllUnits = foldl' distrustUnitsOfDb emptyTrustOverlay dbs
-
-      distrustedUnitsOverlay
-        | unitConfigDistrustAll cfg = distrustAllUnits
-        | otherwise = emptyTrustOverlay
-
-  -- This, and the other reverse's that you will see, are due to the fact that
-  -- packageFlags, pluginPackageFlags, etc. are all specified in *reverse* order
-  -- than they are on the command line.
-  let raw_other_flags = reverse (unitConfigFlagsExposed cfg)
-      (hpt_flags, other_flags) = partition (selectHptFlag (unitConfigHomeUnits cfg)) raw_other_flags
+  let (other_flags, home_unit_deps) = installedUnitFlags cfg
   debugTraceMsg logger 2 $
       text "package flags" <+> ppr other_flags
-
-  let home_unit_deps = selectHomeUnits (unitConfigHomeUnits cfg) hpt_flags
 
   -- Merge databases together, without checking validity
   (pkg_map1, prec_map) <- mergeDatabases logger dbs
@@ -844,7 +948,7 @@ mkUnitState logger dflags unit_index cfg = do
   -- From here on, package names are resolved to unit ids before any flag is
   -- applied; the rest of this function and everything it calls only see ids.
   -- See Note [Names are resolved in the front end] in GHC.Unit.External.Names.
-  let ignore_flags = resolveIgnoreFlags pkg_map1 (reverse (unitConfigFlagsIgnored cfg))
+  let ignore_flags = resolveIgnoreFlags pkg_map1 (unitConfigFlagsIgnored cfg)
 
   -- Now that we've merged everything together, prune out unusable
   -- packages.
@@ -864,7 +968,7 @@ mkUnitState logger dflags unit_index cfg = do
   -- or not packages are visible or not)
   trustUnitsOverlay <- mayThrowUnitErr
             $ foldM (applyTrustFlag prec_map unusable pkgs1)
-                 distrustedUnitsOverlay trust_flags
+                 (initialTrustOverlay cfg (concatMap unitDatabaseUnits dbs)) trust_flags
 
   --
   -- Calculate the initial set of units from package databases, prior to any package flags.
@@ -923,6 +1027,47 @@ mkUnitState logger dflags unit_index cfg = do
                 $ foldM (applyPackageFlag prec_map prelim_pkg_db unusable
                         (unitConfigHideAll cfg) pkgs1)
                             vis_map1 expose_flags
+
+  finishUnitState logger dflags unit_index cfg prec_map pkgs1 unusable
+                  trustUnitsOverlay vis_map2 plugin_flags home_unit_deps
+
+-- | The package flags about installed units, in command-line order, and the
+-- home units named by the others (see 'selectHptFlag').
+--
+-- (packageFlags, pluginPackageFlags, etc. are all specified in *reverse*
+-- order than they are on the command line, hence the reverse here and
+-- elsewhere.)
+installedUnitFlags :: UnitConfig -> ([PackageFlag], Set.Set UnitId)
+installedUnitFlags cfg = (other_flags, selectHomeUnits (unitConfigHomeUnits cfg) hpt_flags)
+  where
+    (hpt_flags, other_flags) =
+      partition (selectHptFlag (unitConfigHomeUnits cfg)) (reverse (unitConfigFlagsExposed cfg))
+
+-- | The trust overlay before any @-trust@ flag: everything distrusted if
+-- @-distrust-all-packages@, nothing otherwise.
+initialTrustOverlay :: UnitConfig -> [UnitInfo] -> TrustOverlay
+initialTrustOverlay cfg pkgs
+  | unitConfigDistrustAll cfg = foldl' (\acc ui -> distrustUnits [unitId ui] acc) emptyTrustOverlay pkgs
+  | otherwise                 = emptyTrustOverlay
+
+-- | From the usable units and the visibility the flags gave them to the
+-- 'UnitState': wiring, plugin visibility, the module map, the preload set.
+-- Shared by both ways of building the unit state.
+finishUnitState
+    :: Logger
+    -> DynFlags
+    -> UnitIndexCache
+    -> UnitConfig
+    -> UnitPrecedenceMap
+    -> [UnitInfo]        -- ^ the usable units
+    -> UnusableUnits
+    -> TrustOverlay
+    -> VisibilityMap     -- ^ visibility after the @-package@ flags
+    -> [PackageFlag]     -- ^ the @-plugin-package@ flags, by id
+    -> Set.Set UnitId    -- ^ home unit dependencies
+    -> IO UnitState
+finishUnitState logger dflags unit_index cfg prec_map pkgs1 unusable trustUnitsOverlay vis_map2 plugin_flags home_unit_deps = do
+  let prelim_pkg_db = mkUnitInfoMap pkgs1
 
   --
   -- Sort out which packages are wired in. This has to be done last, since
@@ -1113,28 +1258,44 @@ initUnitDbConfig uc = UnitDbConfig
   , unitDbConfigPlatformArchOS = unitConfigPlatformArchOS uc
   , unitDbConfigGlobalDB = unitConfigGlobalDB uc
   , unitDbConfigGHCDir = unitConfigGHCDir uc
-  , unitDbConfigDemandRoots = demandRoots uc
+  , unitDbConfigDemandRoots = idsOnlyRoots uc
   }
 
--- | The unit ids that unit stores may be read on demand for, if any.
+-- | The roots of the ids-only unit state, if this compilation qualifies for
+-- it: @-hide-all-packages@ is set and every flag names units by id. They are
+-- the units named by @-package-id@ and @-plugin-package-id@ (for an
+-- instantiated unit, the units it is made of), the units linked implicitly,
+-- and for a Backpack home unit the indefinite unit it instantiates and the
+-- units it is instantiated with. Unit stores are probed for exactly these
+-- and what they reference ('unitDbConfigDemandRoots').
 --
--- With @-hide-all-packages@, the only units that can become visible are the
--- ones named by @-package-id@ and @-plugin-package-id@ flags (plus whatever
--- they reference), so a unit store need not be enumerated: it can be probed
--- for exactly those. A @-package name@ flag names a unit by package name,
--- which cannot be probed for, so its presence turns the optimisation off.
--- Package databases are unaffected and always read in full, which is where
--- the wired-in units come from.
-demandRoots :: UnitConfig -> Maybe [UnitId]
-demandRoots uc
+-- 'Nothing' when some flag names a unit by package name, which cannot be
+-- probed for and needs everything installed to be resolved. See
+-- Note [The ids-only unit state].
+idsOnlyRoots :: UnitConfig -> Maybe [UnitId]
+idsOnlyRoots uc
   | unitConfigHideAll uc
-  = concat <$> mapM flagRoots (unitConfigFlagsExposed uc ++ unitConfigFlagsPlugins uc)
+  , all trustById  (unitConfigFlagsTrusted uc)
+  , all ignoreById (unitConfigFlagsIgnored uc)
+  = do flag_roots <- concat <$> mapM exposeRoots (unitConfigFlagsExposed uc ++ unitConfigFlagsPlugins uc)
+       Just (flag_roots ++ unitConfigAutoLink uc ++ instantiation_roots)
   | otherwise
   = Nothing
   where
-    flagRoots (HidePackage _)                       = Just []
-    flagRoots (ExposePackage _ (UnitIdArg u) _)     = Just (unitReferencedUnitIds u)
-    flagRoots (ExposePackage _ (PackageArg _) _)    = Nothing
+    exposeRoots (ExposePackage _ (UnitIdArg u) _) = Just (unitReferencedUnitIds u)
+    exposeRoots (HidePackage (UnitIdArg _))       = Just []
+    exposeRoots _                                 = Nothing
+
+    trustById (TrustPackage arg)    = byId arg
+    trustById (DistrustPackage arg) = byId arg
+    ignoreById (IgnorePackage arg)  = byId arg
+
+    byId (UnitIdArg _)  = True
+    byId (PackageArg _) = False
+
+    instantiation_roots =
+      maybeToList (unitConfigHomeInstanceOf uc)
+      ++ concatMap (unitReferencedUnitIds . moduleUnit . snd) (unitConfigHomeInstantiations uc)
 
 -- -----------------------------------------------------------------------------
 -- Package Utils

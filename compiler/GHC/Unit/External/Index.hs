@@ -93,7 +93,8 @@ import GHC.Types.Unique.Map
 import GHC.Types.Unique.Set
 import GHC.Unit.Database
 import GHC.Unit.External.Database
-import GHC.Unit.External.Store (readUnitStore, probeUnitStore, unitInfoReferencedUnits)
+import GHC.Unit.External.Query (unitInfoReferencedUnits)
+import GHC.Unit.External.Store (readUnitStore, probeUnitStore)
 import GHC.Unit.External.Visibility
 import GHC.Unit.External.Wired
 import GHC.Unit.Info

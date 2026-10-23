@@ -4,9 +4,6 @@ ImportReexport.hs:2:1: error: [GHC-87110]
     Use -v to see a list of the files searched for.
 
 ImportReexport.hs:3:1: error: [GHC-87110]
-    Could not load module ‘GHC.Platform.ArchOS’.
-    It is a member of the hidden package ‘ghc-10.1’.
-    It is a member of the hidden package ‘ghc-boot-9.14.1’.
-    It is a member of the hidden package ‘ghc-platform-0.1.0.0’.
+    Could not find module ‘GHC.Platform.ArchOS’.
     Use -v to see a list of the files searched for.
 

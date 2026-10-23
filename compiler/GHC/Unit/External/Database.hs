@@ -227,14 +227,14 @@ data UnitDbConfig = UnitDbConfig
   , unitDbConfigGlobalDB :: FilePath
   , unitDbConfigGHCDir :: FilePath
   , unitDbConfigDemandRoots :: Maybe [UnitId]
-  -- ^ 'Just' the unit ids named on the command line when unit stores may be
-  -- read on demand instead of enumerated: the stores are probed for these
-  -- units and for everything they reference (dependencies, reexport origins,
-  -- instantiations), and nothing else. 'Nothing' means read everything.
-  -- Package databases are always read in full.
+  -- ^ 'Just' the roots when unit stores may be read on demand instead of
+  -- enumerated: the stores are probed for these units and for everything
+  -- they reference (dependencies, reexport origins, instantiations), and
+  -- nothing else. 'Nothing' means read everything. Package databases are
+  -- always read in full.
   --
-  -- Set by 'GHC.Unit.State.initUnitDbConfig' in @-hide-all-packages@ mode when
-  -- every exposure flag names a unit by id.
+  -- Set from 'GHC.Unit.State.idsOnlyRoots'; see Note [The ids-only unit
+  -- state] in GHC.Unit.State.
   }
 
 getUnitDbRefs :: UnitDbConfig -> IO [PkgDbRef]

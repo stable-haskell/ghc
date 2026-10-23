@@ -5,10 +5,12 @@ module GHC.Unit.External.Names
   ( resolvePackageFlags
   , resolveTrustFlags
   , resolveIgnoreFlags
+  , compilerUnitRoots
   ) where
 
 import GHC.Prelude
 
+import GHC.Data.FastString
 import GHC.Data.Maybe
 import GHC.Driver.DynFlags
 import GHC.Types.Unique.Map
@@ -61,6 +63,35 @@ The flag text as typed (the first field of 'ExposePackage', e.g.
 print, so users still see the flag they wrote.
 
 See docs/unit-artifact-ids-only.md for the design this is part of.
+
+Note [The compiler's own units are still found by name]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+The ids-only unit state (see Note [The ids-only unit state] in
+GHC.Unit.State) only knows the units reachable from the ids on the command
+line. Three units the compiler needs for its own purposes are not reached
+that way and, until the compiler knows their ids (stage 3 of
+docs/unit-artifact-ids-only.md), can only be found by package name:
+
+  * ghc-internal and rts, the wired-in units (Note [Wired-in units] in
+    GHC.Unit.Types), which 'findWiredInUnits' matches by name;
+
+  * ghci, which the external interpreter program is linked against
+    (GHC.Runtime.Interpreter.C and friends look it up by name). It is only
+    needed when that interpreter may run (-fexternal-interpreter, or a
+    JavaScript or Wasm target), and it pulls in a good part of the boot
+    libraries (ghc-boot, containers, bytestring, ...), so it is a root only
+    then.
+
+'compilerUnitRoots' adds every unit carrying one of those names to the
+roots of the closure, so the by-name lookups downstream see the same
+candidates they would in the full database. It is the only place where a
+package name decides what is in the closure.
+
+It runs after the databases have been read, so no unit store is probed for
+these units by name. The stores only see the wired-in ids among the
+auto-linked roots, which match a store entry only if the unit is installed
+under that literal id. In practice the three units must come from a
+package database.
 -}
 
 -- | Resolve the names in @-package@, @-plugin-package@ and @-hide-package@
@@ -118,3 +149,14 @@ resolveIgnoreFlags pkg_map = concatMap resolve
 
 byId :: UnitInfo -> PackageArg
 byId p = UnitIdArg (RealUnit (Definite (unitId p)))
+
+-- | The units the compiler needs for itself, found by package name in the
+-- merged map: all units named like a wired-in unit, and, if the external
+-- interpreter may be used, all units named @ghci@.
+-- See Note [The compiler's own units are still found by name].
+compilerUnitRoots :: Bool -> UnitInfoMap -> [UnitId]
+compilerUnitRoots external_interp pkg_map =
+  [ unitId p | p <- nonDetEltsUniqMap pkg_map, unitPackageName p `elem` names ]
+  where
+    names = [ PackageName (fsLit "ghci") | external_interp ]
+         ++ map (PackageName . unitIdFS) wiredInUnitIds

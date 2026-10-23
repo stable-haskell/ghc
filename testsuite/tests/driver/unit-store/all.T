@@ -6,7 +6,7 @@ def unitstore(name, extra=[]):
     test(name,
          [extra_files(['unitstore.sh', 'src/', 'MainBasic.hs', 'MainMulti.hs',
                        'MainHidden.hs', 'MainReexport.hs', 'MainSafe.hs',
-                       'MainBackpack.hs'])] + extra,
+                       'MainBackpack.hs', 'MainClosure.hs'])] + extra,
          makefile_test, [name])
 
 unitstore('unitstore_basic')
@@ -18,3 +18,4 @@ unitstore('unitstore_dynamic', [req_dynamic_hs])
 unitstore('unitstore_envfile')
 unitstore('unitstore_backpack')
 unitstore('unitstore_demand')
+unitstore('unitstore_closure')

@@ -1,0 +1,12 @@
+section: compiler
+synopsis: Build the unit state from the units named by id when ``-hide-all-packages`` is set.
+description:
+  With ``-hide-all-packages`` and unit ids on every package flag, which is
+  how Cabal and environment files drive GHC, the compiler builds its unit
+  state from the units named and their dependencies only. A unit store is
+  not enumerated; package databases are still read, but units outside that
+  closure are not validated, do not appear in ``--show-packages`` and are
+  not mentioned as hidden when a module is not found. The new
+  ``-trust-id ⟨unit-id⟩`` and ``-distrust-id ⟨unit-id⟩`` flags are the
+  by-id forms of ``-trust`` and ``-distrust``. Nothing changes for command
+  lines that name a package by name.

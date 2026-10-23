@@ -7,16 +7,21 @@
 # store/<uid>/lib with ${pkgroot}-relative paths, the store finds the same
 # directory by convention. Only the metadata route differs.
 #
+# Every unit is named by id, base included, so the compiler takes the
+# ids-only path (Note [The ids-only unit state] in GHC.Unit.State) and never
+# enumerates the store; the `closure` scenario contrasts it with the by-name
+# path.
+#
 # Usage: TEST_HC=... TEST_HC_OPTS=... GHC_PKG=... AR=... sh unitstore.sh <scenario>
 set -eu
 
 scenario=$1
 
 HC="$TEST_HC"
-HC_OPTS="$TEST_HC_OPTS -v0 -hide-all-packages -package base"
 PKG="$GHC_PKG --no-user-package-db"
 VER=$("$HC" --numeric-version)
 BASE_ID=$($PKG field base id --simple-output)
+HC_OPTS="$TEST_HC_OPTS -v0 -hide-all-packages -package-id $BASE_ID"
 
 rm -rf store pkgdb obj out-db out-store
 mkdir -p store pkgdb obj
@@ -160,13 +165,13 @@ case $scenario in
 
   safe)
     # Safe Haskell: units are untrusted by default through both routes, and
-    # -trust makes them trusted through both routes.
+    # -trust-id makes them trusted through both routes.
     # S is Trustworthy, so its trust depends on the trust of its unit.
     unit s-0.1 src "-XHaskell2010" S
     both s-0.1 s 0.1 "S" "" "$BASE_ID"
     $PKG recache --package-db pkgdb
-    client_fails MainSafe.hs "-XHaskell2010 -package-id s-0.1 -fpackage-trust -trust base"
-    client MainSafe.hs "-XHaskell2010 -package-id s-0.1 -fpackage-trust -trust base -trust s"
+    client_fails MainSafe.hs "-XHaskell2010 -package-id s-0.1 -fpackage-trust -trust-id $BASE_ID"
+    client MainSafe.hs "-XHaskell2010 -package-id s-0.1 -fpackage-trust -trust-id $BASE_ID -trust-id s-0.1"
     ;;
 
   dynamic)
@@ -229,8 +234,6 @@ case $scenario in
     $PKG recache --package-db pkgdb
     mkdir -p store/broken-0.1
     printf 'this is not a manifest\n' > store/broken-0.1/unit.meta
-    # every exposure flag must be by unit id for probing to apply, base included
-    HC_OPTS="$TEST_HC_OPTS -v0 -hide-all-packages -package-id $BASE_ID"
     client MainMulti.hs "-package-id p-0.1"
     # shellcheck disable=SC2086
     if "$HC" $TEST_HC_OPTS -v0 -fforce-recomp -unit-store store -outputdir out-eager -o out-eager/main MainMulti.hs 2> out-eager.err; then
@@ -241,6 +244,24 @@ case $scenario in
     else
       cat out-eager.err; exit 1
     fi
+    ;;
+
+  closure)
+    # The ids-only unit state (Note [The ids-only unit state] in
+    # GHC.Unit.State): only the closure of the units named by id exists.
+    # s-0.1 is installed through both routes but not reachable from q-0.1,
+    # so importing S fails as "not found" rather than "hidden", identically
+    # through both routes.
+    unit q-0.1 src "" Q
+    both q-0.1 q 0.1 "Q" "" "$BASE_ID"
+    unit s-0.1 src "-XHaskell2010" S
+    both s-0.1 s 0.1 "S" "" "$BASE_ID"
+    $PKG recache --package-db pkgdb
+    client_fails MainClosure.hs "-package-id q-0.1"
+    # A package name on the command line selects the by-name path, which
+    # sees everything installed and reports s-0.1 as hidden.
+    HC_OPTS="$TEST_HC_OPTS -v0 -hide-all-packages -package base"
+    client_fails MainClosure.hs "-package-id q-0.1"
     ;;
 
   *)
