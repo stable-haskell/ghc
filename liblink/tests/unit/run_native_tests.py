@@ -205,6 +205,22 @@ def configured_linux_x86_64_elf_backend(config_include: Path) -> bool:
     return linux is not None and x86_64 is not None
 
 
+def configured_linux_aarch64_elf_backend(config_include: Path) -> bool:
+    platform_header = config_include / "ll_platform.h"
+    text = platform_header.read_text(errors="replace")
+    linux = re.search(
+        r"^\s*#\s*define\s+linux_HOST_OS(?:\s+1)?\s*$",
+        text,
+        re.MULTILINE,
+    )
+    aarch64 = re.search(
+        r"^\s*#\s*define\s+aarch64_HOST_ARCH(?:\s+1)?\s*$",
+        text,
+        re.MULTILINE,
+    )
+    return linux is not None and aarch64 is not None
+
+
 def normalize_windows_path(path: str) -> str:
     return path.replace("\\", "/").casefold()
 
@@ -852,6 +868,37 @@ def main() -> int:
             print(
                 "[riscv64_reloc_errors] skipped: generated config is not "
                 "riscv64_HOST_ARCH + linux_HOST_OS"
+            )
+
+        if host == "Linux" and configured_linux_aarch64_elf_backend(config_include):
+            aarch64_test = output / "aarch64_reloc_errors"
+            aarch64_map = output / "aarch64_reloc_errors.map"
+            aarch64_link_trace = run(
+                cc
+                + [
+                    str(ROOT / "liblink/tests/unit/aarch64_reloc_errors.c"),
+                    f"-L{archive.parent}",
+                    "-llink",
+                    *core_link_flags(host),
+                    "-Wl,-t",
+                    linker_map_flag(aarch64_map),
+                    "-o",
+                    str(aarch64_test),
+                ],
+                label="compile and link aarch64_reloc_errors",
+            )
+            verify_link_map(
+                aarch64_map,
+                archive,
+                aarch64_link_trace,
+                included_source="linker/elf_reloc_aarch64.c",
+                forbidden_member="elf_reloc_aarch64",
+            )
+            run([str(aarch64_test)], label="run aarch64_reloc_errors")
+        else:
+            print(
+                "[aarch64_reloc_errors] skipped: generated config is not "
+                "aarch64_HOST_ARCH + linux_HOST_OS"
             )
 
         if host == "Linux" and configured_linux_x86_64_elf_backend(config_include):

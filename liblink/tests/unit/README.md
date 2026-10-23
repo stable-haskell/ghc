@@ -237,6 +237,24 @@ other hosts. The current CI matrix has no RISC-V job, so this native backend
 unit awaits qualification on genuine RISC-V hardware or QEMU; no target
 execution is claimed on other architectures.
 
+AArch64 ELF relocation errors
+=============================
+
+When run on a native Linux AArch64 ELF build, the unit driver compiles
+`aarch64_reloc_errors.c`, which includes the current relocation backend and
+links its other dependencies from the stage2 `liblink.a`. Its map check
+excludes a duplicate archived `elf_reloc_aarch64.o`. The unit covers 16-,
+32-, and 64-bit writes, signed-width and branch/page reach boundaries,
+unsupported REL forms, zero-address RelA state errors, `R_AARCH64_NONE`,
+scaled-address range failures, instruction-scale format failures, and cached
+branch-stub fallback outcomes. It checks status and unchanged target bytes on
+errors and does not execute relocated code.
+
+Darwin and other targets skip this Linux AArch64 unit. This checkout has no
+native Linux AArch64 runner, and the current AArch64 Linux CI job is disabled;
+the source test is uncompiled here and requires native or emulated AArch64
+execution for qualification.
+
 Mach-O input preflight
 ======================
 

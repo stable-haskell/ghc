@@ -6,6 +6,7 @@
 #include "elf_util.h"
 #include "elf_plt.h"
 
+#include <inttypes.h>
 #include <stdlib.h>
 
 
@@ -23,7 +24,8 @@ bool isAdrp(addr_t p);
 bool isLoadStore(addr_t p);
 bool isAddSub(addr_t p);
 bool isVectorOp(addr_t p);
-LL_NORETURN int64_t decodeAddendAarch64(Section * section, Elf_Rel * rel);
+bool decodeAddendAarch64(ll_linker *L, Section *section, Elf_Rel *rel,
+                         int64_t *addend);
 bool encodeAddendAarch64(ll_linker *L, Section * section, Elf_Rel * rel, int64_t addend);
 
 bool isBranch(addr_t p) {
@@ -51,11 +53,26 @@ bool isVectorOp(addr_t p) {
 /* instructions are 32bit */
 typedef uint32_t inst_t;
 
-int64_t
-decodeAddendAarch64(Section * section LL_UNUSED,
-                    Elf_Rel * rel LL_UNUSED)
+/* Helpers return true on success; the legacy encoder and object relocator
+ * below retain their zero-success convention. Do not read an instruction
+ * merely to report an error. */
+static bool
+checkRelocationAarch64(ll_linker *L, bool valid, ll_status status,
+                       Elf_Rel *rel, int64_t addend, const char *reason)
 {
-    abort(/* we don't support Rel locations yet. */);
+    if (valid) return true;
+    ll_error_set(L, status,
+                 "AArch64 relocation type %" PRIu64 ": %s (addend %" PRId64 ")",
+                 (uint64_t)ELF64_R_TYPE(rel->r_info), reason, addend);
+    return false;
+}
+
+bool
+decodeAddendAarch64(ll_linker *L, Section *section LL_UNUSED,
+                    Elf_Rel *rel, int64_t *addend LL_UNUSED)
+{
+    return checkRelocationAarch64(L, false, LL_E_UNSUPPORTED, rel, 0,
+                                 "relocations without explicit addends are unsupported");
 }
 
 bool
@@ -71,17 +88,29 @@ encodeAddendAarch64(ll_linker *L, Section * section, Elf_Rel * rel, int64_t adde
             *(uint64_t*)P = (uint64_t)addend;
             break;
         case COMPAT_R_AARCH64_ABS32:
-            LL_CHECK_FOR(L, isInt64(32, addend));
+            if (!checkRelocationAarch64(L, isInt64(32, addend),
+                                       LL_E_RELOC_RANGE, rel, addend,
+                                       "value is out of range"))
+                return EXIT_FAILURE;
             LL_FALLTHROUGH;
         case COMPAT_R_AARCH64_PREL32:
-            LL_CHECK_FOR(L, isInt64(32, addend));
+            if (!checkRelocationAarch64(L, isInt64(32, addend),
+                                       LL_E_RELOC_RANGE, rel, addend,
+                                       "value is out of range"))
+                return EXIT_FAILURE;
             *(uint32_t*)P = (uint32_t)addend;
             break;
         case COMPAT_R_AARCH64_ABS16:
-            LL_CHECK_FOR(L, isInt64(16, addend));
+            if (!checkRelocationAarch64(L, isInt64(16, addend),
+                                       LL_E_RELOC_RANGE, rel, addend,
+                                       "value is out of range"))
+                return EXIT_FAILURE;
             LL_FALLTHROUGH;
         case COMPAT_R_AARCH64_PREL16:
-            LL_CHECK_FOR(L, isInt64(16, addend));
+            if (!checkRelocationAarch64(L, isInt64(16, addend),
+                                       LL_E_RELOC_RANGE, rel, addend,
+                                       "value is out of range"))
+                return EXIT_FAILURE;
             *(uint16_t*)P = (uint16_t)addend;
             break;
         /* static aarch64 relocations */
@@ -97,7 +126,10 @@ encodeAddendAarch64(ll_linker *L, Section * section, Elf_Rel * rel, int64_t adde
             // imm64 = SignExtend(hi:lo:0x000,64)
             // Range is 21 bits + the 12 page relative bits
             // known to be 0. -2^32 <= X < 2^32
-            LL_CHECK_FOR(L, isInt64(21+12, addend));
+            if (!checkRelocationAarch64(L, isInt64(21+12, addend),
+                                       LL_E_RELOC_RANGE, rel, addend,
+                                       "value is out of range"))
+                return EXIT_FAILURE;
             LL_CHECK_FOR(L, (addend & 0xfff) == 0); /* page relative */
 
             *(inst_t *)P = (*(inst_t *)P & 0x9f00001f)
@@ -108,7 +140,10 @@ encodeAddendAarch64(ll_linker *L, Section * section, Elf_Rel * rel, int64_t adde
         /* - control flow relocations */
         case COMPAT_R_AARCH64_JUMP26:   /* relocate b ... */
         case COMPAT_R_AARCH64_CALL26: { /* relocate bl ... */
-            LL_CHECK_FOR(L, isInt64(26+2, addend)); /* X in range */
+            if (!checkRelocationAarch64(L, isInt64(26+2, addend),
+                                       LL_E_RELOC_RANGE, rel, addend,
+                                       "value is out of range"))
+                return EXIT_FAILURE;
             *(inst_t *)P = (*(inst_t *)P & 0xfc000000) /* keep upper 6 (32-6)
  * bits */
                          | ((uint32_t)(addend >> 2) & 0x03ffffff);
@@ -116,7 +151,10 @@ encodeAddendAarch64(ll_linker *L, Section * section, Elf_Rel * rel, int64_t adde
         }
         case COMPAT_R_AARCH64_ADR_GOT_PAGE: {
             /* range is -2^32 <= X < 2^32 */
-            LL_CHECK_FOR(L, isInt64(21+12, addend)); /* X in range */
+            if (!checkRelocationAarch64(L, isInt64(21+12, addend),
+                                       LL_E_RELOC_RANGE, rel, addend,
+                                       "value is out of range"))
+                return EXIT_FAILURE;
             LL_CHECK_FOR(L, (addend & 0xfff) == 0); /* page relative */
 
             *(inst_t *)P = (*(inst_t *)P & 0x9f00001f)
@@ -151,7 +189,10 @@ encodeAddendAarch64(ll_linker *L, Section * section, Elf_Rel * rel, int64_t adde
             LL_FALLTHROUGH;
         case COMPAT_R_AARCH64_LD64_GOT_LO12_NC: {
             if(exp_shift == -1) {
-                LL_CHECK_FOR(L, (addend & 7) == 0 );
+                if (!checkRelocationAarch64(L, (addend & 7) == 0,
+                                           LL_E_RELOC_RANGE, rel, addend,
+                                           "GOT value is not eight-byte aligned"))
+                    return EXIT_FAILURE;
                 exp_shift = 3;
             }
             LL_CHECK_FOR(L, (addend & 0xfff) == addend);
@@ -163,13 +204,18 @@ encodeAddendAarch64(ll_linker *L, Section * section, Elf_Rel * rel, int64_t adde
                     shift = 4;
                 }
             }
-            LL_CHECK_FOR(L, addend == 0 || exp_shift == shift);
+            if (!checkRelocationAarch64(L, addend == 0 || exp_shift == shift,
+                                       LL_E_FORMAT, rel, addend,
+                                       "relocation scale does not match the instruction"))
+                return EXIT_FAILURE;
             *(inst_t *)P = (*(inst_t *)P & 0xffc003ff)
                | ((inst_t)(addend >> shift << 10) & 0x003ffc00);
             break;
         }
         default:
-            abort();
+            (void)checkRelocationAarch64(L, false, LL_E_UNSUPPORTED, rel,
+                                         addend, "unsupported relocation type");
+            return EXIT_FAILURE;
     }
     return EXIT_SUCCESS;
 }
@@ -181,11 +227,12 @@ encodeAddendAarch64(ll_linker *L, Section * section, Elf_Rel * rel, int64_t adde
  * @param rel     The Relocation struct.
  * @param symbol  The target symbol.
  * @param addend  The existing addend. Either explicit or implicit.
- * @return The new computed addend.
+ * @param computed Receives the unchanged-width computed value on success.
+ * @return True on success; failure leaves computed unchanged.
  */
-static int64_t
+static bool
 computeAddend(ll_linker *L, Section * section, Elf_Rel * rel,
-              ElfSymbol * symbol, int64_t addend) {
+              ElfSymbol * symbol, int64_t addend, int64_t *computed) {
 
     /* Position where something is relocated */
     addr_t P = (addr_t)((uint8_t*)section->start + rel->r_offset);
@@ -208,21 +255,25 @@ computeAddend(ll_linker *L, Section * section, Elf_Rel * rel,
             /* type: static, class: data, op: S + A; overflow: int32 */
         case COMPAT_R_AARCH64_ABS16:
             /* type: static, class: data, op: S + A; overflow: int16 */
-            return S + A;
+            *computed = S + A;
+            return true;
         case COMPAT_R_AARCH64_PREL64:
             /* type: static, class: data, op: S + A - P; overflow: none */
         case COMPAT_R_AARCH64_PREL32:
             /* type: static, class: data, op: S + A - P; overflow: int32 */
         case COMPAT_R_AARCH64_PREL16:
             /* type: static, class: data, op: S + A - P; overflow: int16 */
-            return S + A - P;
+            *computed = S + A - P;
+            return true;
         case COMPAT_R_AARCH64_ADR_PREL_PG_HI21:
             /* type: static, class: aarch64, op: Page(S + A) - Page(P);
              * overflow: int32 */
-            return Page(S + A) - Page(P);
+            *computed = Page(S + A) - Page(P);
+            return true;
         case COMPAT_R_AARCH64_ADD_ABS_LO12_NC:
             /* type: static, class: aarch64, op: S + A */
-            return (S + A) & 0xfff;
+            *computed = (S + A) & 0xfff;
+            return true;
         case COMPAT_R_AARCH64_JUMP26:
         case COMPAT_R_AARCH64_CALL26: {
             // S+A-P
@@ -248,17 +299,42 @@ computeAddend(ll_linker *L, Section * section, Elf_Rel * rel,
 
                 LL_CHECK_FOR(L, 0 == (0xffff000000000000 & S));
                 V = S + A - P;
-                LL_CHECK_FOR(L, isInt64(26+2, V)); /* X in range */
+                if (!checkRelocationAarch64(L, isInt64(26+2, V),
+                                           LL_E_RELOC_RANGE, rel, V,
+                                           "branch remains out of range after a stub"))
+                    return false;
             }
-            return V;
+            *computed = V;
+            return true;
         }
-        case COMPAT_R_AARCH64_LDST128_ABS_LO12_NC: LL_CHECK_FOR(L, 0 == ((S+A) & 0x0f)); LL_FALLTHROUGH;
-        case COMPAT_R_AARCH64_LDST64_ABS_LO12_NC:  LL_CHECK_FOR(L, 0 == ((S+A) & 0x07)); LL_FALLTHROUGH;
-        case COMPAT_R_AARCH64_LDST32_ABS_LO12_NC:  LL_CHECK_FOR(L, 0 == ((S+A) & 0x03)); LL_FALLTHROUGH;
-        case COMPAT_R_AARCH64_LDST16_ABS_LO12_NC:  LL_CHECK_FOR(L, 0 == ((S+A) & 0x01)); LL_FALLTHROUGH;
+        case COMPAT_R_AARCH64_LDST128_ABS_LO12_NC:
+            if (!checkRelocationAarch64(L, 0 == ((S+A) & 0x0f),
+                                       LL_E_RELOC_RANGE, rel, addend,
+                                       "symbol value is not aligned for the relocation"))
+                return false;
+            LL_FALLTHROUGH;
+        case COMPAT_R_AARCH64_LDST64_ABS_LO12_NC:
+            if (!checkRelocationAarch64(L, 0 == ((S+A) & 0x07),
+                                       LL_E_RELOC_RANGE, rel, addend,
+                                       "symbol value is not aligned for the relocation"))
+                return false;
+            LL_FALLTHROUGH;
+        case COMPAT_R_AARCH64_LDST32_ABS_LO12_NC:
+            if (!checkRelocationAarch64(L, 0 == ((S+A) & 0x03),
+                                       LL_E_RELOC_RANGE, rel, addend,
+                                       "symbol value is not aligned for the relocation"))
+                return false;
+            LL_FALLTHROUGH;
+        case COMPAT_R_AARCH64_LDST16_ABS_LO12_NC:
+            if (!checkRelocationAarch64(L, 0 == ((S+A) & 0x01),
+                                       LL_E_RELOC_RANGE, rel, addend,
+                                       "symbol value is not aligned for the relocation"))
+                return false;
+            LL_FALLTHROUGH;
         case COMPAT_R_AARCH64_LDST8_ABS_LO12_NC:
             /* type: static, class: aarch64, op: S + A */
-            return (S + A) & 0xfff;
+            *computed = (S + A) & 0xfff;
+            return true;
 
         case COMPAT_R_AARCH64_ADR_GOT_PAGE: {
             // Page(G(GDAT(S+A))) - Page(P)
@@ -270,15 +346,18 @@ computeAddend(ll_linker *L, Section * section, Elf_Rel * rel,
             //       makes sense without resorting to: everyone else
             //       does it like this as well.
             LL_CHECK_FOR(L, 0x0 != GOT_S);
-            return Page(GOT_S+A) - Page(P);
+            *computed = Page(GOT_S+A) - Page(P);
+            return true;
         }
         case COMPAT_R_AARCH64_LD64_GOT_LO12_NC: {
             // G(GDAT(S+A))
             LL_CHECK_FOR(L, 0x0 != GOT_S);
-            return (GOT_S + A) & 0xfff;
+            *computed = (GOT_S + A) & 0xfff;
+            return true;
         }
         default:
-            abort(/* unhandled rel */);
+            return checkRelocationAarch64(L, false, LL_E_UNSUPPORTED, rel,
+                                          addend, "unsupported relocation type");
     }
 }
 
@@ -306,10 +385,13 @@ relocateObjectCodeAarch64(ObjectCode * oc) {
             LL_CHECK_FOR(oc->L, 0x0 != symbol);
 
             /* decode implicit addend */
-            int64_t addend = decodeAddendAarch64(targetSection, rel);
-
-            addend = computeAddend(oc->L, targetSection, rel, symbol, addend);
-            encodeAddendAarch64(oc->L, targetSection, rel, addend);
+            int64_t addend;
+            if (!decodeAddendAarch64(oc->L, targetSection, rel, &addend))
+                return EXIT_FAILURE;
+            if (!computeAddend(oc->L, targetSection, rel, symbol, addend, &addend))
+                return EXIT_FAILURE;
+            if (encodeAddendAarch64(oc->L, targetSection, rel, addend))
+                return EXIT_FAILURE;
         }
     }
     for(ElfRelocationATable *relaTab = oc->info->relaTable;
@@ -333,15 +415,23 @@ relocateObjectCodeAarch64(ObjectCode * oc) {
                                ELF64_R_SYM(rel->r_info));
 
             LL_CHECK_FOR(oc->L, 0x0 != symbol);
-            if(0x0 == symbol->addr)
-                LL_FATAL_FOR(oc->L, "0x0 address for %s + %ld of type %ld in %s for relocation %d in section %d of kind: %d\n", symbol->name, rel->r_addend, ELF64_R_TYPE((Elf64_Xword)rel->r_info), OC_INFORMATIVE_FILENAME(oc), i, relaTab->targetSectionIndex, oc->sections[relaTab->targetSectionIndex].kind);
+            if(0x0 == symbol->addr) {
+                ll_error_set(oc->L, LL_E_STATE,
+                             "AArch64 relocation type %" PRIu64
+                             " has no address for %s in %" PATH_FMT,
+                             (uint64_t)ELF64_R_TYPE(rel->r_info), symbol->name,
+                             OC_INFORMATIVE_FILENAME(oc));
+                return EXIT_FAILURE;
+            }
 
             /* take explicit addend */
             int64_t addend = rel->r_addend;
 
-            addend = computeAddend(oc->L, targetSection, (Elf_Rel*)rel,
-                                   symbol, addend);
-            encodeAddendAarch64(oc->L, targetSection, (Elf_Rel*)rel, addend);
+            if (!computeAddend(oc->L, targetSection, (Elf_Rel*)rel,
+                                symbol, addend, &addend))
+                return EXIT_FAILURE;
+            if (encodeAddendAarch64(oc->L, targetSection, (Elf_Rel*)rel, addend))
+                return EXIT_FAILURE;
         }
     }
     return EXIT_SUCCESS;
