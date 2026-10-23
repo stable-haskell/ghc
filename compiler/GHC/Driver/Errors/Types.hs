@@ -21,7 +21,7 @@ import GHC.Prelude
 import Data.Bifunctor
 import Data.Typeable
 
-import GHC.Driver.DynFlags (DynFlags, PackageArg, gopt, ReexportedModule)
+import GHC.Driver.DynFlags (DynFlags, gopt, ReexportedModule)
 import GHC.Driver.Flags (GeneralFlag (Opt_BuildingCabalPackage))
 import GHC.Types.Error
 import GHC.Unit.Module
@@ -163,7 +163,8 @@ data DriverMessage where
 
      Test cases: warnings/should_compile/UnusedPackages
   -}
-  DriverUnusedPackages :: [(UnitId, PackageName, Version, PackageArg)] -> DriverMessage
+  DriverUnusedPackages :: [(UnitId, PackageName, Version, String)] -> DriverMessage
+    -- ^ the 'String' is the flag as typed, e.g. @-package foo@
 
   {-| DriverUnnecessarySourceImports (controlled with -Wunused-imports) occurs if there
       are {-# SOURCE #-} imports which are not necessary. See 'warnUnnecessarySourceImports'

@@ -17,6 +17,9 @@ module GHC.Unit.External.Validate (
   -- * Utils
   ignoreUnits,
   pprFlag,
+  pprTrustFlag,
+  matchingStr,
+  pprPackageArgPlain,
 ) where
 
 import GHC.Prelude
@@ -182,10 +185,8 @@ findPackages prec_map pkg_map arg pkgs unusable
                             (nonDetEltsUniqMap unusable))
         else Right (sortByPreference prec_map ps)
   where
-    finder (PackageArg str) p
-      = if matchingStr str p
-          then Just p
-          else Nothing
+    finder arg@(PackageArg _) _
+      = nameReachedCore "findPackages" arg
     finder (UnitIdArg uid) p
       = case uid of
           RealUnit (Definite iuid)
@@ -213,13 +214,15 @@ selectPackages prec_map arg pkgs unusable
 ignoreUnits :: [IgnorePackageFlag] -> [UnitInfo] -> UnusableUnits
 ignoreUnits flags pkgs = listToUniqMap (concatMap doit flags)
   where
-  doit (IgnorePackage str) =
-     case partition (matchingStr str) pkgs of
-         (ps, _) -> [ (unitId p, (p, IgnoredWithFlag))
-                    | p <- ps ]
-        -- missing unit is not an error for -ignore-package,
-        -- because a common usage is to -ignore-package P as
-        -- a preventative measure just in case P exists.
+  -- Names were resolved to ids by 'GHC.Unit.External.Names.resolveIgnoreFlags';
+  -- a name that matched nothing has already been dropped there, because a
+  -- missing unit is not an error for -ignore-package (a common usage is to
+  -- -ignore-package P as a preventative measure just in case P exists).
+  doit (IgnorePackage arg) = case arg of
+     UnitIdArg (RealUnit (Definite uid))
+       -> [ (unitId p, (p, IgnoredWithFlag)) | p <- pkgs, unitId p == uid ]
+     UnitIdArg _   -> []
+     PackageArg _  -> nameReachedCore "ignoreUnits" arg
 
 -- A package named on the command line can either include the
 -- version, or just the name if it is unambiguous.
@@ -232,9 +235,16 @@ matchingId :: UnitId -> UnitInfo -> Bool
 matchingId uid p = uid == unitId p
 
 matching :: PackageArg -> UnitInfo -> Bool
-matching (PackageArg str) = matchingStr str
+matching arg@(PackageArg _) = nameReachedCore "selectPackages" arg
 matching (UnitIdArg (RealUnit (Definite uid))) = matchingId uid
 matching (UnitIdArg _)  = \_ -> False -- TODO: warn in this case
+
+-- | Package names never reach the unit core: 'GHC.Unit.External.Names'
+-- resolves them to unit ids first.
+-- See Note [Names are resolved in the front end] in GHC.Unit.External.Names.
+nameReachedCore :: String -> PackageArg -> a
+nameReachedCore who arg =
+  pprPanic who (text "package name reached the unit core:" <+> ppr arg)
 
 -- ----------------------------------------------------------------------------
 --
@@ -317,13 +327,19 @@ instance Outputable UnitErr where
 
 pprFlag :: PackageFlag -> SDoc
 pprFlag flag = case flag of
-    HidePackage p   -> text "-hide-package " <> text p
+    HidePackage p   -> text "-hide-package " <> pprPackageArgPlain p
     ExposePackage doc _ _ -> text doc
 
 pprTrustFlag :: TrustFlag -> SDoc
 pprTrustFlag flag = case flag of
-    TrustPackage p    -> text "-trust " <> text p
-    DistrustPackage p -> text "-distrust " <> text p
+    TrustPackage p    -> text "-trust " <> pprPackageArgPlain p
+    DistrustPackage p -> text "-distrust " <> pprPackageArgPlain p
+
+-- | A 'PackageArg' as the user typed it, without the @package@/@unit@
+-- prefix of its 'Outputable' instance.
+pprPackageArgPlain :: PackageArg -> SDoc
+pprPackageArgPlain (PackageArg s)  = text s
+pprPackageArgPlain (UnitIdArg u)   = ppr u
 
 -- ----------------------------------------------------------------------------
 --

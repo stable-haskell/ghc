@@ -154,11 +154,7 @@ instance Diagnostic DriverMessage where
               ppr pn <> text "-"  <> text (showVersion v)
                      <+> parens (suffix f)
 
-            suffix f = text "exposed by flag" <+> pprUnusedArg f
-
-            pprUnusedArg :: PackageArg -> SDoc
-            pprUnusedArg (PackageArg str) = text "-package" <+> text str
-            pprUnusedArg (UnitIdArg uid) = text "-package-id" <+> ppr uid
+            suffix f = text "exposed by flag" <+> text f
 
     DriverUnnecessarySourceImports mod
       -> mkSimpleDecorated (text "{-# SOURCE #-} unnecessary in import of " <+> quotes (ppr mod))
