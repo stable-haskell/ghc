@@ -2174,6 +2174,8 @@ package_flags_deps = [
       (NoArg (setGeneralFlag Opt_DistrustAllPackages))
   , make_ord_flag defFlag "trust"                 (HasArg trustPackage)
   , make_ord_flag defFlag "distrust"              (HasArg distrustPackage)
+  , make_ord_flag defFlag "trust-id"              (HasArg trustPackageId)
+  , make_ord_flag defFlag "distrust-id"           (HasArg distrustPackageId)
   , make_ord_flag defFlag "base-unit-id"          (HasArg setBaseUnitId)
   ]
   where
@@ -3203,7 +3205,8 @@ parsePackageFlag flag arg_parse str
 exposePackage, exposePackageId, hidePackage,
         exposePluginPackage, exposePluginPackageId,
         ignorePackage,
-        trustPackage, distrustPackage :: String -> DynP ()
+        trustPackage, distrustPackage,
+        trustPackageId, distrustPackageId :: String -> DynP ()
 exposePackage p = upd (exposePackage' p)
 exposePackageId p =
   upd (\s -> s{ packageFlags =
@@ -3223,6 +3226,18 @@ trustPackage p = exposePackage p >> -- both trust and distrust also expose a pac
   upd (\s -> s{ trustFlags = TrustPackage (PackageArg p) : trustFlags s })
 distrustPackage p = exposePackage p >>
   upd (\s -> s{ trustFlags = DistrustPackage (PackageArg p) : trustFlags s })
+
+trustPackageId p = exposePackageId p >>
+  upd (\s -> s{ trustFlags = TrustPackage (parseUnitIdArg "-trust-id" p) : trustFlags s })
+distrustPackageId p = exposePackageId p >>
+  upd (\s -> s{ trustFlags = DistrustPackage (parseUnitIdArg "-distrust-id" p) : trustFlags s })
+
+-- | The argument of a flag that names a unit by id and takes nothing else.
+parseUnitIdArg :: String -> String -> PackageArg
+parseUnitIdArg flag str
+  = case filter ((=="").snd) (readP_to_S parseUnitArg str) of
+      [(arg, "")] -> arg
+      _ -> throwGhcException $ CmdLineError ("Can't parse " ++ flag ++ " flag: " ++ str)
 
 exposePackage' :: String -> DynFlags -> DynFlags
 exposePackage' p dflags

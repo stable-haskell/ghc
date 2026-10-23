@@ -234,7 +234,8 @@ data UnitDbConfig = UnitDbConfig
   -- Package databases are always read in full.
   --
   -- Set by 'GHC.Unit.State.initUnitDbConfig' in @-hide-all-packages@ mode when
-  -- every exposure flag names a unit by id.
+  -- every flag names units by id; see Note [The ids-only unit state] in
+  -- GHC.Unit.State.
   }
 
 getUnitDbRefs :: UnitDbConfig -> IO [PkgDbRef]

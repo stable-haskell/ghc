@@ -11,7 +11,14 @@ description:
   ``-unit-store ⟨dir⟩`` adds such a directory to the package database stack,
   and environment files accept a ``unit-store ⟨dir⟩`` directive. Units in a
   store are exposed and untrusted; visibility and trust are controlled by the
-  usual flags. With ``-hide-all-packages`` and unit ids on every exposure
-  flag, the store is not enumerated: only the units named and their
-  dependencies are looked up. Nothing changes for users who do not pass the
-  flag.
+  usual flags.
+
+  With ``-hide-all-packages`` and unit ids on every package flag, which is
+  how Cabal and environment files drive GHC, the compiler now builds its
+  unit state from the units named and their dependencies only: a unit store
+  is not enumerated, package databases are still read but units outside
+  that closure are not validated, do not appear in ``--show-packages`` and
+  are not mentioned as hidden when a module is not found. The new
+  ``-trust-id ⟨unit-id⟩`` and ``-distrust-id ⟨unit-id⟩`` flags are the
+  by-id forms of ``-trust`` and ``-distrust``. Nothing changes for command
+  lines that name a package by name.
