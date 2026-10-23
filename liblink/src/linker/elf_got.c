@@ -4,6 +4,7 @@
 #include "linker/MMap.h"
 #include "ll_failure.h"
 
+#include <errno.h>
 #include <string.h>
 
 #if defined(OBJFORMAT_ELF)
