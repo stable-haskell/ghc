@@ -32,3 +32,29 @@ Wasm mutex backend and validation of that backend.
 
 The Wasm helper branch has focused compile and no-op checks. These checks do
 not qualify a complete GHC/WASI build or runtime.
+
+Memory protection failures
+--------------------------
+
+Final OS memory-protection failures report LL_E_IO. Allocation and
+address-space reservation failures report LL_E_NOMEM. If final protection
+fails, the compatibility linker permanently quarantines that object
+instance and its transitive dependents. The first operation preserves its
+original diagnostic; later lookup, relocation, and initialization attempts
+for affected objects fail with LL_E_STATE. Optimistic linking cannot turn
+this failure into a placeholder address. A failed M32 flush also prevents
+further allocation or flushing through that allocator.
+
+Global resolution fails while a quarantined object remains loaded. Lookup
+of an already-resolved independent object remains available. Pending
+initializers skip quarantined objects and preserve the order and host hooks
+of healthy objects. Ordinary unresolved-symbol retries keep their existing
+behavior. The reported object state remains its last normal lifecycle phase;
+the quarantine marker is private and introduces no new enum value.
+
+Unload all affected objects before reloading them. Their mappings and
+dependency identities remain owned until normal unload and GC disposal,
+including objects whose recursive symbol lookup failed before registration.
+A failed load can therefore leave a quarantined object registered for
+unloading. Freshly loaded instances start without the marker. Previously
+returned raw pointers cannot be revoked by the linker.

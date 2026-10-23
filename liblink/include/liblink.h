@@ -19,7 +19,7 @@ typedef struct ll_object ll_object;   /* loaded object / archive member / native
 
 typedef enum {
   LL_OK = 0,
-  LL_E_IO,          /* open/stat/read/mmap of input failed                   */
+  LL_E_IO,          /* input I/O or OS mapping/protection failed             */
   LL_E_FORMAT,      /* malformed or unrecognised object/archive              */
   LL_E_UNSUPPORTED, /* recognised, but format/arch/relocation unsupported    */
   LL_E_DUPSYM,      /* duplicate strong definition                           */
@@ -28,7 +28,7 @@ typedef enum {
   LL_E_NOMEM,       /* allocation / address-space reservation failed         */
   LL_E_INIT,        /* initializer failed or hook vetoed                     */
   LL_E_NOT_FOUND,   /* unknown path / handle / symbol                        */
-  LL_E_STATE        /* API misuse (wrong object state, re-entrancy)          */
+  LL_E_STATE        /* wrong state, including a quarantined object           */
 } ll_status;
 
 /* Values MUST equal SymType/SymStrength (rts/RtsSymbols.h) and OStatus

@@ -4,6 +4,8 @@
 
 #include "linker/MMap.h"
 
+#include <errno.h>
+
 #if RTS_LINKER_USE_MMAP
 #include <sys/mman.h>
 #endif
@@ -227,20 +229,27 @@ ll_munmap_for_linker(ll_linker *L, void *addr, size_t bytes, const char *caller)
  * Change the allowed access modes of a region of memory previously allocated
  * with mmapAnonForLinker.
  */
-void
+bool
 ll_mprotect_for_linker(ll_linker *L, void *start, size_t len, MemoryAccess mode)
 {
   DWORD old;
   if (len == 0) {
-    return;
+    return true;
   }
   DWORD prot = memoryAccessToProt(L, mode);
 
   if (VirtualProtect(start, len, prot, &old) == 0) {
+    const DWORD error = GetLastError();
+    ll_error_set(L, LL_E_IO,
+                 "mprotectForLinker: failed to protect %zd bytes at %p as %s (Win32 error %lu)",
+                 len, start, memoryAccessDescription(L, mode), (unsigned long)error);
+    SetLastError(error);
     LL_LOG_SYSERROR_FOR(L, "mprotectForLinker: failed to protect %zd bytes at %p as %s",
                   len, start, memoryAccessDescription(L, mode));
-    LL_ASSERT_FOR(L, false);
+    SetLastError(error);
+    return false;
   }
+  return true;
 }
 
 #elif RTS_LINKER_USE_MMAP
@@ -456,10 +465,10 @@ void ll_munmap_for_linker(ll_linker *L, void *addr, size_t bytes, const char *ca
  * Mark an portion of a mapping previously reserved by mmapForLinker
  * as executable (but not writable).
  */
-void ll_mprotect_for_linker(ll_linker *L, void *start, size_t len, MemoryAccess mode)
+bool ll_mprotect_for_linker(ll_linker *L, void *start, size_t len, MemoryAccess mode)
 {
     if (len == 0) {
-        return;
+        return true;
     }
     LL_IF_DEBUG_FOR(L, linker_verbose,
              LL_DEBUG_FOR(L, "mprotectForLinker: protecting %" LL_FMT_WORD
@@ -469,9 +478,17 @@ void ll_mprotect_for_linker(ll_linker *L, void *start, size_t len, MemoryAccess 
     int prot = memoryAccessToProt(L, mode);
 
     if (mprotect(start, len, prot) == -1) {
+        const int error = errno;
+        ll_error_set(L, LL_E_IO,
+                     "mprotectForLinker: failed to protect %zd bytes at %p as %s (errno %d)",
+                     len, start, memoryAccessDescription(L, mode), error);
+        errno = error;
         LL_LOG_SYSERROR_FOR(L, "mprotectForLinker: failed to protect %zd bytes at %p as %s",
                       len, start, memoryAccessDescription(L, mode));
+        errno = error;
+        return false;
     }
+    return true;
 }
 #endif
 
@@ -489,7 +506,13 @@ void *mmapAnon(size_t bytes)
 
 void mprotectForLinker(void *start, size_t len, MemoryAccess mode)
 {
+#if defined(mingw32_HOST_OS)
+    if (!ll_mprotect_for_linker(&ll_default_linker, start, len, mode)) {
+        LL_ASSERT_FOR(&ll_default_linker, false);
+    }
+#else
     ll_mprotect_for_linker(&ll_default_linker, start, len, mode);
+#endif
 }
 
 void munmapForLinker(void *addr, size_t bytes, const char *caller)

@@ -2,6 +2,7 @@
 #include "ll_compat.h"
 
 #include "ll_path.h"
+#include "ll_failure.h"
 #include "ll_error.h"
 
 #include "LinkerInternals.h"
@@ -493,6 +494,7 @@ ll_hs_int loadArchive_ (ll_linker *L, pathchar *path)
         return 0;
     }
 
+    if (!ll_failure_path_usable(L, path)) return 0;
     DEBUG_LOG(L, "start\n");
     DEBUG_LOG(L, "Loading archive `%" PATH_FMT "'\n", path);
 

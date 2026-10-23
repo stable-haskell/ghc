@@ -444,6 +444,7 @@
 #if defined(mingw32_HOST_OS)
 
 #include "LinkerInternals.h"
+#include "ll_failure.h"
 #include "RtsSymbolInfo.h"
 #include "linker/PEi386.h"
 #include "linker/PEi386Types.h"
@@ -1968,6 +1969,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
             previously-loaded object already allocated storage for it. */
           RtsSymbolInfo *existing = lookupStrHashTable(oc->L->symhash, sname);
           if (existing != NULL) {
+              if (!ll_failure_alias(oc, existing->owner)) return 0;
               /* COMMON symbol already allocated by a previously-loaded
                * object; reuse that address so relocations resolve to
                * the same storage. */
@@ -2179,7 +2181,7 @@ makeSymbolExtra_PEi386( ObjectCode* oc, uint64_t index LL_UNUSED, size_t s, char
     }
 }
 
-void ocProtectExtras(ObjectCode* oc LL_UNUSED) { }
+bool ocProtectExtras(ObjectCode* oc LL_UNUSED) { return true; }
 
 #endif /* x86_64_HOST_ARCH */
 
@@ -2515,6 +2517,7 @@ ll_symbol_addr *lookupSymbol_PEi386(ll_linker *L, ll_symbol_name *lbl,
     RtsSymbolInfo *pinfo;
 
     LL_ASSERT_FOR(L, dependent == NULL || dependent->L == L);
+    if (!ll_failure_usable(dependent)) return NULL;
 
     if (!ghciLookupSymbolInfo(L, lbl, &pinfo)) {
         LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "lookupSymbol: symbol '%s' not found\n", lbl));
@@ -2531,9 +2534,14 @@ ll_symbol_addr *lookupSymbol_PEi386(ll_linker *L, ll_symbol_name *lbl,
         return sym; // might be NULL if not found
     } else {
         if (type) *type = pinfo->type;
+        ll_failure_inherit(dependent, pinfo->owner);
+        if (!ll_failure_usable(dependent) || !ll_failure_usable(pinfo->owner))
+            return NULL;
 
         if (pinfo && pinfo->owner && isSymbolImport (pinfo->owner, lbl))
         {
+            if (dependent != NULL)
+                insertHashSet(dependent->dependencies, (ll_w)pinfo->owner);
             /* See Note [BFD import library].  */
             /* The helper's type describes a DLL handle, not the imported
              * function or data. Preserve the import's own type when we use
@@ -2543,6 +2551,17 @@ ll_symbol_addr *lookupSymbol_PEi386(ll_linker *L, ll_symbol_name *lbl,
             LL_ASSERT_FOR(L, dependent == NULL || dependent->L == L);
             LL_ASSERT_FOR(L, pinfo->owner == NULL || pinfo->owner->L == L);
             HINSTANCE dllInstance = (HINSTANCE)lookupDependentSymbol(L, pinfo->value, dependent, &depType);
+            RtsSymbolInfo *helper_info;
+            if (ghciLookupSymbolInfo(L, pinfo->value, &helper_info) &&
+                helper_info->owner != NULL) {
+                insertHashSet(pinfo->owner->dependencies, (ll_w)helper_info->owner);
+                ll_failure_inherit(pinfo->owner, helper_info->owner);
+            }
+            ll_failure_dependent(pinfo->owner);
+            ll_failure_inherit(dependent, pinfo->owner);
+            if (ll_failure_blocked(L) || !ll_failure_usable(dependent) ||
+                !ll_failure_usable(pinfo->owner))
+                return NULL;
             if (!dllInstance && pinfo->value) {
                 if (type) *type = depType;
                 return pinfo->value;
@@ -2570,7 +2589,11 @@ ll_symbol_addr *lookupSymbol_PEi386(ll_linker *L, ll_symbol_name *lbl,
                 }
             }
             LL_ASSERT_FOR(L, pinfo->owner == NULL || pinfo->owner->L == L);
-            return loadSymbol(L, lbl, pinfo);
+            ll_symbol_addr *result = loadSymbol(L, lbl, pinfo);
+            ll_failure_inherit(dependent, pinfo->owner);
+            if (!ll_failure_usable(dependent) || !ll_failure_usable(pinfo->owner))
+                return NULL;
+            return result;
         }
     }
 }

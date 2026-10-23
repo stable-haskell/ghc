@@ -2,6 +2,7 @@
 #include "ll_compat.h"
 #include "elf_got.h"
 #include "linker/MMap.h"
+#include "ll_failure.h"
 
 #include <string.h>
 
@@ -149,6 +150,8 @@ fillGot(ObjectCode * oc) {
                    || STB_WEAK   == ELF_ST_BIND(symbol->elf_sym->st_info)) {
                     if(0x0 == symbol->addr) {
                         symbol->addr = lookupDependentSymbol(oc->L, symbol->name, oc, NULL);
+                        if (ll_failure_blocked(oc->L) || !ll_failure_usable(oc))
+                            return EXIT_FAILURE;
                         if(0x0 == symbol->addr) {
                             if(0 == strncmp(symbol->name,"_GLOBAL_OFFSET_TABLE_",21)) {
                                 symbol->addr = oc->info->got_start;

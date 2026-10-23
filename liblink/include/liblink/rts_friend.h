@@ -358,6 +358,10 @@ struct _ObjectCode {
      * available (e.g. if dlinfo is unavailable on the current platform).
      */
     NativeCodeRange *nc_ranges;
+
+    /* Failed final protection makes this instance unusable until unloading.
+     * Keep the marker through GC disposal; a fresh object starts unmarked. */
+    bool protection_failed;
 };
 
 /* Borrowed RTS view into the default linker's state. The RTS binds this once

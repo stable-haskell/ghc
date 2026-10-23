@@ -133,9 +133,9 @@ int ocAllocateExtras(ObjectCode* oc, int count, int first, int bssSize)
 /**
  * Mark the symbol extras as non-writable.
  */
-void ocProtectExtras(ObjectCode* oc)
+bool ocProtectExtras(ObjectCode* oc)
 {
-  if (oc->n_symbol_extras == 0) return;
+  if (oc->n_symbol_extras == 0) return true;
 
   if (!RTS_LINKER_USE_MMAP) {
     /*
@@ -144,13 +144,16 @@ void ocProtectExtras(ObjectCode* oc)
      * non-executable.
      */
   } else if (USE_CONTIGUOUS_MMAP || oc->L->services.cfg.always_pic) {
-    ll_mprotect_for_linker(oc->L, oc->symbol_extras, sizeof(SymbolExtra) * oc->n_symbol_extras, MEM_READ_EXECUTE);
+    return ll_mprotect_for_linker(oc->L, oc->symbol_extras,
+                                 sizeof(SymbolExtra) * oc->n_symbol_extras,
+                                 MEM_READ_EXECUTE);
   } else {
     /*
      * The symbol extras were allocated via m32. They will be protected when
      * the m32 allocator is finalized
      */
   }
+  return true;
 }
 
 

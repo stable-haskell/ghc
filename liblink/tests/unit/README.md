@@ -122,7 +122,8 @@ non-default directories, and `--cc` to select a C compiler command.
 The core and archive fixtures use POSIX file descriptors and mmap injection.
 On Windows, `Linker.c` follows its stdio path (`RTS_LINKER_USE_MMAP=0`); run
 only the platform-neutral foundation test with `--foundation-only` until
-Windows fixtures cover those paths.
+Windows fixtures cover those paths. Use `--protection-only` to compile and run
+only the Darwin Mach-O protection cases while iterating.
 
 Archive input status
 ====================
@@ -307,15 +308,52 @@ canaries, not transaction rollback of the auxiliary island storage.
 Mach-O load failure cleanup
 ===========================
 
-`macho_load_errors.c` includes the actual `MachO.c`, `SymbolExtras.c`, and
-`Linker.c` implementations. It injects tagged host allocation failures in
-Mach-O initialization and load metadata, and mapper failures for segment and
-NEED_PLT section storage. Each failed load checks `LL_E_NOMEM`, a diagnostic,
-owner isolation, and teardown of host allocations and native mappings. Empty
-section/symbol and ordinary section loads provide success controls. The unit
-uses generated stage2 headers and links remaining dependencies from the stage2
-`liblink.a`; the driver verifies that the archive does not also select the
-included `MachO.o`, `SymbolExtras.o`, or `Linker.o`. It runs on Darwin.
+`macho_load_errors.c` includes the actual `MachO.c`, `SymbolExtras.c`,
+`Linker.c`, `M32Alloc.c`, and `MMap.c` implementations; its helper cases are in
+`macho_protection_cases.h`. It injects tagged host
+allocation failures in Mach-O initialization and load metadata, and mapper
+failures for segment and NEED_PLT section storage. Each failed load checks
+`LL_E_NOMEM`, a diagnostic, owner isolation, and teardown of host allocations
+and native mappings. Empty section/symbol and ordinary section loads provide
+success controls. The unit uses generated stage2 headers and links remaining
+dependencies from the stage2 `liblink.a`; its link-map check rejects archived
+copies of all five included implementations.
+
+On Darwin, `--protection-only` exercises a real successful `mprotect`,
+injected `EACCES` with owner-local `LL_E_IO` and errno preservation, failed
+Mach-O segment and mapped-section protection, and the M32 RX/RW flush and
+release paths. It checks that `ocTryLoad` leaves the object unresolved on late
+protection failure, that RX pages stay on exactly one owned list after partial
+failure, and that a page whose RW transition fails is unmapped before reuse.
+The x86_64 case also covers nonzero symbol-extra protection; the AArch64 target
+has zero-sized `SymbolExtra` and skips that case. The normal driver runs these
+cases after the existing load-cleanup cases.
+
+`--protection-gap-probes` checks quarantine behavior after late protection
+failure. The first operation retains its `LL_E_IO` diagnostic; later cached
+lookups (including optimistic lookup) and global resolve report `LL_E_STATE`
+without another protection attempt. A private dependency graph checks
+transitive dependents, cycles, a previously completed dependent, an independent
+completed sibling, unregistered active frames, a dependency edge added after
+failure, NULL-valued hash-set membership, and exact restoration of the primary
+diagnostic across nested frame unwinds. Independent healthy lookup still runs
+two initializer hooks in traversal order while skipping quarantined objects.
+A pre-registration Mach-O weak-definition lookup retains and quarantines both
+the dependent and its lazy provider, including the escaped dependency key.
+Normal unload removes the old quarantine and a fresh object loaded at the same
+path resolves successfully; an ordinary missing-symbol lookup also succeeds
+after its provider is loaded. The M32 retry case rejects a second flush and a
+new allocation without another protection syscall, and an RW cleanup failure
+preserves the earlier `LL_E_DUPSYM` diagnostic. These cases inspect addresses
+and state but never call a mapped symbol. The fixture writes Mach-O objects to
+temporary files for the real `loadObj_` path and copies file mappings into the
+harness's tracked mappings. The focused driver verifies its link map excludes
+every implementation included directly by the test.
+
+The weak-definition fixture models an archive member by setting the already
+loaded provider to `OBJECT_LOADED`, so symbol lookup resolves it on demand. It
+does not execute Windows PE import code; a native Windows quarantine fixture
+remains unqualified.
 
 Mach-O branch stub lifecycle
 ============================

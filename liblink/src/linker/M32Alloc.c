@@ -266,6 +266,8 @@ struct m32_allocator_t {
    struct m32_page_t *protected_list;
    // Pages in the small-allocation nursery
    struct m32_page_t *pages[M32_MAX_PAGES];
+   /* A failed flush can leave some pages RX and others RW. Never retry it. */
+   bool protection_failed;
 };
 
 /* NULL keeps its original operation-specific behavior; only nonnull retained
@@ -286,7 +288,7 @@ m32_check_owner(ll_linker *L, const m32_allocator *alloc)
 /**
  * Free a filled page or, if possible, place it in the free page pool.
  */
-static void
+static bool
 m32_release_page(ll_linker *L, struct m32_page_t *page)
 {
   // Some sanity-checking
@@ -300,7 +302,12 @@ m32_release_page(ll_linker *L, struct m32_page_t *page)
   // individual pages for the page pool
   while (sz > 0) {
     if (L->m32_free_page_pool_size < M32_MAX_FREE_PAGE_POOL_SIZE) {
-      ll_mprotect_for_linker(L, page, pgsz, MEM_READ_WRITE);
+      if (!ll_mprotect_for_linker(L, page, pgsz, MEM_READ_WRITE)) {
+        /* No writable permission was established. Do not touch the page's
+         * freelist fields; release this and the remaining pages instead. */
+        ll_munmap_for_linker(L, page, ROUND_UP(sz, pgsz), "m32_release_page");
+        return false;
+      }
       LL_IF_DEBUG_FOR(L, sanity, memset(page, 0xaa, pgsz));
       SET_PAGE_TYPE(page, FREE_PAGE);
       page->free_page.next = L->m32_free_page_pool;
@@ -317,6 +324,7 @@ m32_release_page(ll_linker *L, struct m32_page_t *page)
   if (sz > 0) {
     ll_munmap_for_linker(L, (void *) page, ROUND_UP(sz, pgsz), "m32_release_page");
   }
+  return true;
 }
 
 /**
@@ -405,6 +413,13 @@ m32_allocator_unmap_list(ll_linker *L, struct m32_page_t *head)
 void m32_allocator_free_for(ll_linker *L, m32_allocator *alloc)
 {
   m32_check_owner(L, alloc);
+  /* Cleanup must not replace the load failure that caused it. Protection
+   * failures still reach the logger through the mapping helper. */
+  const ll_status saved_status = L->error_status;
+  char saved_message[LL_ERROR_CAPACITY];
+  if (saved_status != LL_OK) {
+    memcpy(saved_message, L->error_message, sizeof(saved_message));
+  }
   /* free filled pages */
   m32_allocator_unmap_list(L, alloc->unprotected_list);
   m32_allocator_unmap_list(L, alloc->protected_list);
@@ -417,6 +432,10 @@ void m32_allocator_free_for(ll_linker *L, m32_allocator *alloc)
   }
 
   LL_FREE_FOR(L, alloc);
+  if (saved_status != LL_OK) {
+    L->error_status = saved_status;
+    memcpy(L->error_message, saved_message, sizeof(saved_message));
+  }
 }
 
 /**
@@ -443,15 +462,24 @@ m32_allocator_push_filled_list(ll_linker *L, struct m32_page_t **head, struct m3
  * This is the real implementation. There is another dummy implementation below.
  * See the note titled "Compile Time Trickery" at the top of this file.
  */
-void
+bool
 m32_allocator_flush_for(ll_linker *L, m32_allocator *alloc) {
    m32_check_owner(L, alloc);
+   if (alloc->protection_failed) {
+     ll_error_set(L, LL_E_STATE, "m32 allocator requires disposal after a protection failure");
+     return false;
+   }
    for (int i=0; i<M32_MAX_PAGES; i++) {
      if (alloc->pages[i] == NULL) {
        continue;
      } else if (alloc->pages[i]->current_size == sizeof(struct m32_page_t)) {
-       // the page is empty, free it
-       m32_release_page(L, alloc->pages[i]);
+       // the page is empty, release our reference even on an unmap fallback
+       struct m32_page_t *page = alloc->pages[i];
+       alloc->pages[i] = NULL;
+       if (!m32_release_page(L, page)) {
+         alloc->protection_failed = true;
+         return false;
+       }
      } else {
        // the page contains data, move it to the unprotected list
        SET_PAGE_TYPE(alloc->pages[i], FILLED_PAGE);
@@ -462,16 +490,21 @@ m32_allocator_flush_for(ll_linker *L, m32_allocator *alloc) {
 
    // Write-protect pages if this is an executable-page allocator.
    if (alloc->executable) {
-     struct m32_page_t *page = alloc->unprotected_list;
-     while (page != NULL) {
+     while (alloc->unprotected_list != NULL) {
+       struct m32_page_t *page = alloc->unprotected_list;
        ASSERT_PAGE_TYPE(L, page, FILLED_PAGE);
-       struct m32_page_t *next = m32_filled_page_get_next(L, page);
+       alloc->unprotected_list = m32_filled_page_get_next(L, page);
+       /* Link the page before protection makes its header read-only. Each
+        * page remains on exactly one owned list if protection fails. */
        m32_allocator_push_filled_list(L, &alloc->protected_list, page);
-       ll_mprotect_for_linker(L, page, page->filled_page.size, MEM_READ_EXECUTE);
-       page = next;
+       if (!ll_mprotect_for_linker(L, page, page->filled_page.size,
+                                   MEM_READ_EXECUTE)) {
+         alloc->protection_failed = true;
+         return false;
+       }
      }
-     alloc->unprotected_list = NULL;
    }
+   return true;
 }
 
 /**
@@ -502,6 +535,10 @@ void *
 m32_alloc_for(ll_linker *L, struct m32_allocator_t *alloc, size_t size, size_t alignment)
 {
    m32_check_owner(L, alloc);
+   if (alloc->protection_failed) {
+     ll_error_set(L, LL_E_STATE, "m32 allocator requires disposal after a protection failure");
+     return NULL;
+   }
    size_t pgsz = ll_page_size_for(L);
 
    if (m32_is_large_object(L, size,alignment)) {
@@ -603,7 +640,7 @@ void m32_allocator_free_for(ll_linker *L, m32_allocator *alloc LL_UNUSED)
     LL_FATAL_FOR(L, "%s: RTS_LINKER_USE_MMAP is %d", "m32_allocator_free", RTS_LINKER_USE_MMAP);
 }
 
-void
+bool
 m32_allocator_flush_for(ll_linker *L, m32_allocator *alloc LL_UNUSED)
 {
     LL_FATAL_FOR(L, "%s: RTS_LINKER_USE_MMAP is %d", "m32_allocator_flush", RTS_LINKER_USE_MMAP);

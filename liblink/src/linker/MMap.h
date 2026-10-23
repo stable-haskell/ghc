@@ -55,7 +55,7 @@
 void ll_init_linker_mmap(ll_linker *L);
 void *ll_mmap_anon(ll_linker *L, size_t bytes);
 void *ll_mmap_anon_for_linker(ll_linker *L, size_t bytes);
-void ll_mprotect_for_linker(ll_linker *L, void *start, size_t len,
+bool ll_mprotect_for_linker(ll_linker *L, void *start, size_t len,
                             MemoryAccess mode);
 void ll_munmap_for_linker(ll_linker *L, void *addr, size_t bytes,
                           const char *caller);

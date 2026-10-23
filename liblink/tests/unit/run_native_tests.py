@@ -33,6 +33,11 @@ def parse_args() -> argparse.Namespace:
         help="stage2 host package store (default: %(default)s)",
     )
     parser.add_argument(
+        "--native-archive",
+        type=Path,
+        help="use this freshly built native liblink archive instead of the stage2 archive",
+    )
+    parser.add_argument(
         "--cc",
         default=os.environ.get("CC", "cc"),
         help="C compiler command (default: CC or cc)",
@@ -41,6 +46,16 @@ def parse_args() -> argparse.Namespace:
         "--foundation-only",
         action="store_true",
         help="run only error_state.c; core_error_status.c currently needs POSIX mmap/fd APIs",
+    )
+    parser.add_argument(
+        "--protection-only",
+        action="store_true",
+        help="run only the focused Darwin Mach-O memory-protection cases",
+    )
+    parser.add_argument(
+        "--protection-gap-probes",
+        action="store_true",
+        help="run Darwin quarantine, recovery, and allocator retry regressions",
     )
     return parser.parse_args()
 
@@ -200,6 +215,37 @@ def verify_macho_link_map(
             raise RuntimeError(f"link did not select {member} from {archive}")
 
 
+def run_macho_load_errors(cc: list[str], archive: Path, output: Path,
+                          host: str, *, mode: str = "") -> None:
+    macho_test = output / "macho_load_errors"
+    macho_map = output / "macho_load_errors.map"
+    macho_trace = run(
+        cc
+        + [
+            str(ROOT / "liblink/tests/unit/macho_load_errors.c"),
+            f"-L{archive.parent}",
+            "-llink",
+            *core_link_flags(host),
+            "-Wl,-t",
+            linker_map_flag(macho_map),
+            "-o",
+            str(macho_test),
+        ],
+        label="compile and link macho_load_errors",
+    )
+    verify_macho_link_map(
+        macho_map,
+        archive,
+        macho_trace,
+        included_source="MachO.c, SymbolExtras.c, Linker.c, M32Alloc.c, and MMap.c",
+        forbidden_members=("MachO", "SymbolExtras", "Linker", "M32Alloc", "MMap"),
+    )
+    command = [str(macho_test)]
+    if mode:
+        command.append(mode)
+    run(command, label="run macho_load_errors")
+
+
 def main() -> int:
     args = parse_args()
     system = platform.system()
@@ -215,6 +261,12 @@ def main() -> int:
             "core_error_status.c is POSIX-only: the Windows linker path uses "
             "stdio rather than mmap and needs a platform-specific fixture"
         )
+    selected_modes = sum((args.foundation_only, args.protection_only,
+                          args.protection_gap_probes))
+    if selected_modes > 1:
+        raise RuntimeError("foundation and protection modes are mutually exclusive")
+    if (args.protection_only or args.protection_gap_probes) and host != "Darwin":
+        raise RuntimeError("protection modes require a native Darwin Mach-O build")
     if host not in ("Linux", "Darwin", "Windows"):
         raise RuntimeError(f"unsupported host platform for liblink C units: {host}")
 
@@ -224,6 +276,10 @@ def main() -> int:
     archive, config_include, fs_include = locate_artifacts(
         args.build_root.resolve(), args.store_root.resolve()
     )
+    if args.native_archive is not None:
+        archive = args.native_archive.resolve()
+        if not archive.is_file():
+            raise RuntimeError(f"native liblink archive does not exist: {archive}")
     print(f"[inputs] compiler={command_text(compiler)}")
     print(f"[inputs] generated_config={config_include}")
     print(f"[inputs] rts_fs_include={fs_include}")
@@ -250,21 +306,31 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="liblink-native-units-") as temporary:
         output = Path(temporary)
         error_state = output / "error_state"
-        run(
-            cc
-            + [
-                str(ROOT / "liblink/tests/unit/error_state.c"),
-                str(ROOT / "liblink/src/ll_error.c"),
-                str(ROOT / "liblink/src/ll_host.c"),
-                "-o",
-                str(error_state),
-            ],
-            label="compile error_state",
-        )
-        run([str(error_state)], label="run error_state")
+        if not args.protection_only and not args.protection_gap_probes:
+            run(
+                cc
+                + [
+                    str(ROOT / "liblink/tests/unit/error_state.c"),
+                    str(ROOT / "liblink/src/ll_error.c"),
+                    str(ROOT / "liblink/src/ll_host.c"),
+                    "-o",
+                    str(error_state),
+                ],
+                label="compile error_state",
+            )
+            run([str(error_state)], label="run error_state")
 
         if args.foundation_only:
             print("liblink native unit tests: PASS (foundation only)")
+            return 0
+
+        if args.protection_only or args.protection_gap_probes:
+            mode = "--protection-only" if args.protection_only \
+                else "--protection-gap-probes"
+            run_macho_load_errors(cc, archive, output, host, mode=mode)
+            outcome = "protection only" if args.protection_only \
+                else "quarantine regression cases"
+            print(f"liblink native unit tests: PASS ({outcome})")
             return 0
 
         core_test = output / "core_error_status"
@@ -584,30 +650,7 @@ def main() -> int:
             else:
                 print("[macho_x86_error_status] SKIP: generated target is not x86_64")
 
-            macho_load_errors_test = output / "macho_load_errors"
-            macho_load_errors_map = output / "macho_load_errors.map"
-            macho_load_errors_trace = run(
-                cc
-                + [
-                    str(ROOT / "liblink/tests/unit/macho_load_errors.c"),
-                    f"-L{archive.parent}",
-                    "-llink",
-                    *core_link_flags(host),
-                    "-Wl,-t",
-                    linker_map_flag(macho_load_errors_map),
-                    "-o",
-                    str(macho_load_errors_test),
-                ],
-                label="compile and link macho_load_errors",
-            )
-            verify_macho_link_map(
-                macho_load_errors_map,
-                archive,
-                macho_load_errors_trace,
-                included_source="MachO.c, SymbolExtras.c, and Linker.c",
-                forbidden_members=("MachO", "SymbolExtras", "Linker"),
-            )
-            run([str(macho_load_errors_test)], label="run macho_load_errors")
+            run_macho_load_errors(cc, archive, output, host)
 
             platform_header = (config_include / "ll_platform.h").read_text()
             if re.search(

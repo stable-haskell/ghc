@@ -32,6 +32,7 @@ struct _OpenedDLL;
 #endif
 
 struct m32_page_t;
+struct ll_failure_scope;
 
 struct ll_linker {
     ll_compat_services services;
@@ -78,6 +79,12 @@ struct ll_linker {
     struct _OpenedDLL *opened_dlls;
     bool load_dll_warn;
 #endif
+
+    /* Operation-local diagnostics and stack frames; markers live on objects. */
+    struct ll_failure_scope *failure_scopes;
+    ll_status primary_protection_error;
+    char primary_protection_message[LL_ERROR_CAPACITY];
+    bool quarantine_rejected;
 };
 
 #include "ll_begin_private.h"

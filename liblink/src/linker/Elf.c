@@ -15,6 +15,7 @@
 #include "elf_compat.h"
 
 #include "LinkerInternals.h"
+#include "ll_failure.h"
 #include "RtsSymbolInfo.h"
 #include "linker/MMap.h"
 #include "linker/Elf.h"
@@ -1042,6 +1043,7 @@ ocGetNames_ELF ( ObjectCode* oc )
                    isLocal = false;
                    RtsSymbolInfo *existing = lookupStrHashTable(oc->L->symhash, nm);
                    if (existing != NULL) {
+                       if (!ll_failure_alias(oc, existing->owner)) return 0;
                        /* COMMON symbol already allocated by a previously-loaded
                         * object; reuse that address so relocations resolve to
                         * the same storage. */
@@ -2020,7 +2022,11 @@ ocMprotect_Elf( ObjectCode *oc )
             if (section->alloc != SECTION_M32) {
                 // N.B. m32 handles protection of its allocations during
                 // flushing.
-                ll_mprotect_for_linker(oc->L, section->mapped_start, section->mapped_size, MEM_READ_EXECUTE);
+                if (!ll_mprotect_for_linker(oc->L, section->mapped_start,
+                                            section->mapped_size, MEM_READ_EXECUTE)) {
+                    ll_failure_protection(oc);
+                    return false;
+                }
             }
             break;
         default:

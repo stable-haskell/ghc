@@ -9,6 +9,7 @@
 #include <mach-o/nlist.h>
 #include <stdint.h>
 #include <stdarg.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -41,6 +42,10 @@ typedef struct {
     unsigned fail_ordinal;
     unsigned matching_callocs;
     unsigned injected_failures;
+    unsigned before_init_calls;
+    unsigned after_init_calls;
+    unsigned init_batches;
+    char init_order[HOST_CAPACITY][64];
 } Host;
 
 typedef struct {
@@ -64,6 +69,7 @@ typedef enum {
     SYMBOLS_NONE,
     SYMBOLS_ZERO,
     SYMBOLS_EXPORT,
+    SYMBOLS_WEAK_EXPORT,
     SYMBOLS_COMMON
 } SymbolMode;
 
@@ -93,6 +99,10 @@ static size_t page_size;
 static unsigned map_attempts;
 static unsigned unmap_calls;
 static MapFailure map_failure;
+static unsigned mprotect_attempts;
+static unsigned mprotect_fail_at;
+static unsigned mprotect_injected_failures;
+static bool clobber_log_errno;
 static unsigned failures;
 static bool stop_after_failed_reinit;
 static unsigned names_after_failed_reinit;
@@ -111,6 +121,7 @@ static void *test_mmap_for_linker(ll_linker *L, size_t bytes,
                                   int fd, int offset);
 static void test_munmap_for_linker(ll_linker *L, void *addr, size_t bytes,
                                    const char *caller);
+static int test_mprotect(void *start, size_t len, int prot);
 
 #define ll_mmap_anon_for_linker test_mmap_anon_for_linker
 #define ll_mmap_for_linker test_mmap_for_linker
@@ -120,9 +131,15 @@ static void test_munmap_for_linker(ll_linker *L, void *addr, size_t bytes,
 #undef ocGetNames_MachO
 #include "linker/SymbolExtras.c"
 #include "Linker.c"
+#include "linker/M32Alloc.c"
 #undef ll_mmap_anon_for_linker
 #undef ll_mmap_for_linker
 #undef ll_munmap_for_linker
+
+/* Include the actual OS protection helper, with only the syscall interposed. */
+#define mprotect test_mprotect
+#include "linker/MMap.c"
+#undef mprotect
 
 int ocGetNames_MachO(ObjectCode *oc)
 {
@@ -192,14 +209,21 @@ static void *test_mmap_for_linker(ll_linker *L, size_t bytes,
     (void)L;
     (void)access;
     (void)flags;
-    (void)fd;
-    (void)offset;
     ++map_attempts;
     if (map_failure == MAP_FAIL_SECTION) {
         map_failure = MAP_FAIL_NONE;
         return NULL;
     }
-    return map_real(bytes, true);
+    void *mapping = map_real(bytes, true);
+    if (mapping != NULL && fd >= 0) {
+        ssize_t copied = pread(fd, mapping, bytes, offset);
+        if (copied != (ssize_t)bytes) {
+            test_munmap_for_linker(L, mapping, bytes,
+                                   "test_mmap_for_linker read failure");
+            return NULL;
+        }
+    }
+    return mapping;
 }
 
 static void test_munmap_for_linker(ll_linker *L, void *addr, size_t bytes,
@@ -329,6 +353,18 @@ static void host_log(void *ctx, int kind, const char *fmt, va_list ap)
     CHECK(n >= 0 && (size_t)n < sizeof(message), "host log was truncated");
     (void)kind;
     ++host->logs;
+    if (clobber_log_errno) errno = EINTR;
+}
+
+static int test_mprotect(void *start, size_t len, int prot)
+{
+    ++mprotect_attempts;
+    if (mprotect_fail_at != 0 && mprotect_attempts == mprotect_fail_at) {
+        ++mprotect_injected_failures;
+        errno = EACCES;
+        return -1;
+    }
+    return mprotect(start, len, prot);
 }
 
 static _Noreturn void host_fatal(void *ctx, const char *fmt, va_list ap)
@@ -349,6 +385,29 @@ static size_t host_page_size(void *ctx)
 
 static void host_mem_failure(void *ctx) { (void)ctx; }
 
+static void host_before_init(void *ctx, ObjectCode *oc)
+{
+    Host *host = ctx;
+    unsigned slot = host->before_init_calls++;
+    if (slot < HOST_CAPACITY)
+        (void)snprintf(host->init_order[slot], sizeof(host->init_order[slot]),
+                       "%" PATH_FMT, OC_INFORMATIVE_FILENAME(oc));
+}
+
+static void host_after_init(void *ctx, ObjectCode *oc, bool ok)
+{
+    Host *host = ctx;
+    (void)oc;
+    (void)ok;
+    ++host->after_init_calls;
+}
+
+static void host_after_init_batch(void *ctx)
+{
+    Host *host = ctx;
+    ++host->init_batches;
+}
+
 static ll_compat_host_ops make_ops(Host *host)
 {
     ll_compat_host_ops ops = {0};
@@ -361,6 +420,9 @@ static ll_compat_host_ops make_ops(Host *host)
     ops.fatal = host_fatal;
     ops.page_size = host_page_size;
     ops.on_mem_failure = host_mem_failure;
+    ops.before_init = host_before_init;
+    ops.after_init = host_after_init;
+    ops.after_init_batch = host_after_init_batch;
     return ops;
 }
 
@@ -416,6 +478,7 @@ static unsigned char *make_image(FixtureSpec spec)
     uint32_t nsections = spec.sections == PROFILE_EMPTY ? 0
                        : spec.sections == PROFILE_CLASSES ? 3 : 1;
     uint32_t nsymbols = spec.symbols == SYMBOLS_EXPORT ||
+                        spec.symbols == SYMBOLS_WEAK_EXPORT ||
                         spec.symbols == SYMBOLS_COMMON ? 1 : 0;
     size_t segment_command_size = sizeof(*segment)
                                 + nsections * sizeof(MachOSection);
@@ -465,10 +528,13 @@ static unsigned char *make_image(FixtureSpec spec)
             symcmd->strsize = (uint32_t)sizeof("\0macho_load_symbol\0");
             MachONList *symbol = (MachONList *)(image + symcmd->symoff);
             symbol->n_un.n_strx = 1;
-            if (spec.symbols == SYMBOLS_EXPORT) {
+            if (spec.symbols == SYMBOLS_EXPORT ||
+                spec.symbols == SYMBOLS_WEAK_EXPORT) {
                 symbol->n_type = N_SECT | N_EXT;
                 symbol->n_sect = 1;
                 symbol->n_value = sections[0].addr;
+                if (spec.symbols == SYMBOLS_WEAK_EXPORT)
+                    symbol->n_desc = N_WEAK_DEF;
             } else {
                 symbol->n_type = N_UNDF | N_EXT;
                 symbol->n_value = spec.common_size != 0 ? spec.common_size : 64;
@@ -683,6 +749,8 @@ static void run_section_map_failure(void)
 #endif
 }
 
+#include "macho_protection_cases.h"
+
 static void run_segment_metadata_failures(void)
 {
     FixtureSpec one = {PROFILE_REGULAR, SYMBOLS_NONE, 0};
@@ -827,8 +895,15 @@ static void run_common_size_conflict(void)
                                 "tearing down first COMMON owner leaked state");
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
+    bool protection_only = argc == 2 && strcmp(argv[1], "--protection-only") == 0;
+    bool gap_probes = argc == 2 && strcmp(argv[1], "--protection-gap-probes") == 0;
+    if (argc > 2 || (argc == 2 && !protection_only && !gap_probes)) {
+        (void)fprintf(stderr, "usage: macho_load_errors [--protection-only | "
+                             "--protection-gap-probes]\n");
+        return 2;
+    }
     long system_page_size = sysconf(_SC_PAGESIZE);
     CHECK(system_page_size > 0, "could not read system page size");
     page_size = system_page_size > 0 ? (size_t)system_page_size : 4096u;
@@ -843,6 +918,11 @@ int main(void)
     ll_init_linker(&owner, 0);
     owner.services.cfg.always_pic = true;
 
+    if (protection_only) {
+        run_protection_status_cases();
+    } else if (gap_probes) {
+        run_protection_gap_probes();
+    } else {
     run_alloc_failure("macho-info-nomem",
                       (FixtureSpec){PROFILE_EMPTY, SYMBOLS_NONE, 0},
                       "ocInit_MachO(ObjectCodeFormatInfo)", 1, true);
@@ -873,6 +953,8 @@ int main(void)
     run_section_map_failure();
     run_zero_symbol_control();
     run_successful_regular_control();
+    run_protection_status_cases();
+    }
 
     CHECK(map_failure == MAP_FAIL_NONE, "mapper injection remained armed");
     CHECK(owner_host.fatals == 0, "owner fatal callback was called");
@@ -884,7 +966,22 @@ int main(void)
                         sizeof(default_sentinel)) == 0,
           "owner operations changed default linker error sentinel");
     ll_exit_linker(&owner);
+    if (owner_host.live != 0) {
+        for (ObjectCode *oc = owner.gc.objects; oc != NULL; oc = oc->next)
+            (void)fprintf(stderr, "  retained GC fixture: %s failed=%d\n",
+                          oc->fileName, oc->protection_failed);
+        for (size_t i = 0; i < owner_host.live; ++i)
+            (void)fprintf(stderr, "  retained allocation: %s %p\n",
+                          owner_host.what[i], owner_host.owned[i]);
+    }
     CHECK(owner_host.live == 0, "linker exit left owner allocations live");
+    if (active_mappings() != 0) {
+        for (size_t i = 0; i < MAP_CAPACITY; ++i)
+            if (mappings[i].active)
+                (void)fprintf(stderr, "  retained mapping: %p + %zu section=%d\n",
+                              mappings[i].base, mappings[i].size,
+                              mappings[i].section_map ? 1 : 0);
+    }
     CHECK(active_mappings() == 0, "linker exit left native mappings live");
     CHECK(default_host.allocs == 0 && default_host.frees == 0
               && default_host.logs == 0 && default_host.fatals == 0,
@@ -894,6 +991,12 @@ int main(void)
                         sizeof(default_sentinel)) == 0,
           "owner exit changed default linker error sentinel");
     if (failures != 0) return 1;
-    (void)puts("macho_load_errors: PASS");
+    if (protection_only) {
+        (void)puts("macho_load_errors --protection-only: PASS");
+    } else if (gap_probes) {
+        (void)puts("macho_load_errors --protection-gap-probes: PASS");
+    } else {
+        (void)puts("macho_load_errors: PASS");
+    }
     return 0;
 }

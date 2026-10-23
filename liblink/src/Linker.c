@@ -11,6 +11,7 @@
 #include "ll_compat.h"
 #include "ll_hash.h"
 #include "LinkerInternals.h"
+#include "ll_failure.h"
 #include "RtsSymbolInfo.h"
 #include "linker/M32Alloc.h"
 #include "linker/CacheFlush.h"
@@ -752,7 +753,7 @@ ll_hs_int insertSymbol(pathchar* obj_name, ll_symbol_name* key, ll_symbol_addr* 
  * symbol.
  */
 #if defined(OBJFORMAT_PEi386)
-ll_symbol_addr* lookupDependentSymbol (ll_linker *L, ll_symbol_name* lbl,
+static ll_symbol_addr* lookupDependentSymbolImpl (ll_linker *L, ll_symbol_name* lbl,
                                        ObjectCode *dependent, ll_sym_type *type)
 {
     ll_assert_lock_held_for(L, &L->linker_mutex);
@@ -762,7 +763,7 @@ ll_symbol_addr* lookupDependentSymbol (ll_linker *L, ll_symbol_name* lbl,
 
 #else
 
-ll_symbol_addr* lookupDependentSymbol (ll_linker *L, ll_symbol_name* lbl,
+static ll_symbol_addr* lookupDependentSymbolImpl (ll_linker *L, ll_symbol_name* lbl,
                                        ObjectCode *dependent, ll_sym_type *type)
 {
     ll_assert_lock_held_for(L, &L->linker_mutex);
@@ -861,10 +862,27 @@ ll_symbol_addr* lookupDependentSymbol (ll_linker *L, ll_symbol_name* lbl,
             }
         }
         LL_ASSERT_FOR(L, pinfo->owner == NULL || pinfo->owner->L == L);
-        return loadSymbol(L, lbl, pinfo);
+        ll_symbol_addr *result = loadSymbol(L, lbl, pinfo);
+        ll_failure_inherit(dependent, pinfo->owner);
+        if (!ll_failure_usable(dependent) || !ll_failure_usable(pinfo->owner))
+            return NULL;
+        return result;
     }
 }
 #endif /* OBJFORMAT_PEi386 */
+
+ll_symbol_addr* lookupDependentSymbol(ll_linker *L, ll_symbol_name *lbl,
+                                      ObjectCode *dependent, ll_sym_type *type)
+{
+    struct ll_failure_scope scope;
+    ll_failure_begin(L, &scope, dependent);
+    ll_symbol_addr *result = NULL;
+    if (ll_failure_usable(dependent))
+        result = lookupDependentSymbolImpl(L, lbl, dependent, type);
+    if (!ll_failure_usable(dependent) || ll_failure_blocked(L)) result = NULL;
+    ll_failure_end(L, &scope);
+    return result;
+}
 
 /* Note [Resolving __dso_handle]
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -900,6 +918,7 @@ ll_symbol_addr* loadSymbol(ll_linker *L, ll_symbol_name *lbl, RtsSymbolInfo *pin
                         pinfo->value,
                         pinfo->owner ? OC_INFORMATIVE_FILENAME(pinfo->owner) : WSTR("No owner, probably built-in.")));
     ObjectCode* oc = pinfo->owner;
+    if (!ll_failure_usable(oc)) return NULL;
 
     /* Symbol can be found during linking, but hasn't been relocated. Do so now.
         See Note [runtime-linker-phases] */
@@ -937,11 +956,12 @@ printLoadedObjects(ll_linker *L) {
    }
 }
 
-ll_symbol_addr* lookupSymbol_(ll_linker *L, ll_symbol_name* lbl)
+static ll_symbol_addr* lookupSymbolImpl(ll_linker *L, ll_symbol_name* lbl)
 {
     // NULL for "don't add dependent". When adding a dependency we call
     // lookupDependentSymbol directly.
     ll_symbol_addr* r = lookupDependentSymbol(L, lbl, NULL, NULL);
+    if (ll_failure_blocked(L)) return NULL;
     if (!r) {
         if (!L->services.cfg.optimistic) {
           LL_LOG_ERROR_FOR(L, "^^ Could not load '%s', dependency unresolved. "
@@ -963,6 +983,15 @@ ll_symbol_addr* lookupSymbol_(ll_linker *L, ll_symbol_name* lbl)
         LL_LOG_ERROR_FOR(L, "lookupSymbol: Failed to run initializers.");
     }
     return r;
+}
+
+ll_symbol_addr* lookupSymbol_(ll_linker *L, ll_symbol_name *lbl)
+{
+    struct ll_failure_scope scope;
+    ll_failure_begin(L, &scope, NULL);
+    ll_symbol_addr *result = lookupSymbolImpl(L, lbl);
+    ll_failure_end(L, &scope);
+    return result;
 }
 
 ll_symbol_addr* lookupSymbol(ll_symbol_name* lbl)
@@ -1094,6 +1123,22 @@ int ll_init_object(ObjectCode *oc)
 
 void ll_discard_object(ObjectCode *oc)
 {
+    if (oc->protection_failed) {
+        /* A recursive symbol lookup can export an address before loadOc
+         * completes. Retained dependents may already refer to this object;
+         * keep its image and dependency identity until normal unload/GC. */
+        ll_linker *L = oc->L;
+        const ll_status status = L->error_status;
+        char message[LL_ERROR_CAPACITY];
+        memcpy(message, L->error_message, sizeof(message));
+        if (L->services.host.object_registered != NULL)
+            L->services.host.object_registered(L->services.host.ctx, oc);
+        oc->next_loaded_object = L->gc.loaded_objects;
+        L->gc.loaded_objects = oc;
+        L->error_status = status;
+        memcpy(L->error_message, message, sizeof(message));
+        return;
+    }
     /* Only unregistered objects whose initializers have not run come here.
      * Symbols must be removed while their names still live in the image.
      * Format teardown also needs the image and section metadata to be alive. */
@@ -1169,6 +1214,10 @@ void freeObjectCode (ObjectCode *oc)
 #endif
     }
 
+#if defined(OBJFORMAT_MACHO)
+    /* Format teardown needs the image and section metadata still alive. */
+    ocDeinit_MachO(oc);
+#endif
     freePreloadObjectFile(oc);
 
     if (oc->symbols != NULL) {
@@ -1232,9 +1281,6 @@ void freeObjectCode (ObjectCode *oc)
     }
 #endif
 
-#if defined(OBJECTFORMAT_MACHO)
-    ocDeinit_MachO(oc);
-#endif
 #if defined(OBJFORMAT_ELF)
     ocDeinit_ELF(oc);
 #endif
@@ -1312,6 +1358,7 @@ mkOc( ll_linker *L, ObjectType type, pathchar *path, char *image, int imageSize,
 
    oc->misalignment      = misalignment;
    oc->initializersRan   = false;
+   oc->protection_failed = false;
    oc->cxa_finalize      = NULL;
    oc->extraInfos        = NULL;
 
@@ -1503,6 +1550,7 @@ static ll_hs_int loadObj_ (ll_linker *L, pathchar *path)
        ll_error_set(L, LL_E_STATE, "loadObj: object path is NULL");
        return 0;
    }
+   if (!ll_failure_path_usable(L, path)) return 0;
    // Check that we haven't already loaded this object.
    // Ignore requests to load multiple times
 
@@ -1522,8 +1570,8 @@ static ll_hs_int loadObj_ (ll_linker *L, pathchar *path)
    if (oc == NULL) return 0;
 
    if (! loadOc(oc)) {
-       // failed; free everything we've allocated
-       // no StablePtrs to release, they aren't created until resolveObjs()
+       // Dispose failed loads; quarantined objects retain escaped addresses
+       // until normal unload and GC. No initializers have run here.
        ll_discard_object(oc);
        return 0;
    }
@@ -1546,7 +1594,7 @@ ll_hs_int loadObj (pathchar *path)
    return r;
 }
 
-ll_hs_int loadOc (ObjectCode* oc)
+static ll_hs_int loadOcImpl (ObjectCode* oc)
 {
    int r;
 
@@ -1637,6 +1685,8 @@ ll_hs_int loadOc (ObjectCode* oc)
        return r;
    }
 
+   if (!ll_failure_usable(oc)) return 0;
+
    /* Loaded, but not resolved yet, ensure the OC is in a consistent state.
       If a target has requested the ObjectCode not to be resolved then honor
       this requests.  Usually this means the ObjectCode has not been initialized
@@ -1653,14 +1703,26 @@ ll_hs_int loadOc (ObjectCode* oc)
    return 1;
 }
 
+ll_hs_int loadOc(ObjectCode *oc)
+{
+    struct ll_failure_scope scope;
+    ll_failure_begin(oc->L, &scope, oc);
+    ll_hs_int result = ll_failure_usable(oc) ? loadOcImpl(oc) : 0;
+    if (!ll_failure_usable(oc)) result = 0;
+    ll_failure_end(oc->L, &scope);
+    return result;
+}
+
 /* -----------------------------------------------------------------------------
 * try to load and initialize an ObjectCode into memory
 *
 * Returns: 1 if ok, 0 on error.
 */
-int ocTryLoad (ObjectCode* oc) {
+static int ocTryLoadImpl(ObjectCode* oc) {
     int r;
 
+    if (oc->status == OBJECT_UNLOADED) return 1;
+    if (!ll_failure_usable(oc)) return 0;
     if (oc->status != OBJECT_NEEDED) {
         return 1;
     }
@@ -1709,16 +1771,23 @@ int ocTryLoad (ObjectCode* oc) {
         return r;
     }
 
+    if (!ll_failure_usable(oc)) return 0;
     LL_IF_DEBUG_FOR(oc->L, linker, ocDebugBelch(oc, "protecting mappings\n"));
 #if defined(NEED_SYMBOL_EXTRAS)
-    ocProtectExtras(oc);
+    if (!ocProtectExtras(oc)) {
+        ll_failure_protection(oc);
+        return 0;
+    }
 #endif
 
     // We have finished loading and relocating; flush the m32 allocators to
     // setup page protections.
 #if defined(NEED_M32)
-    m32_allocator_flush_for(oc->L, oc->rx_m32);
-    m32_allocator_flush_for(oc->L, oc->rw_m32);
+    if (!m32_allocator_flush_for(oc->L, oc->rx_m32) ||
+        !m32_allocator_flush_for(oc->L, oc->rw_m32)) {
+        ll_failure_protection(oc);
+        return 0;
+    }
 #endif
 
     LL_IF_DEBUG_FOR(oc->L, linker, ocDebugBelch(oc, "resolved\n"));
@@ -1727,9 +1796,21 @@ int ocTryLoad (ObjectCode* oc) {
     return 1;
 }
 
+int ocTryLoad(ObjectCode *oc)
+{
+    struct ll_failure_scope scope;
+    ll_failure_begin(oc->L, &scope, oc);
+    int result = ocTryLoadImpl(oc);
+    if (oc->status != OBJECT_UNLOADED && !ll_failure_usable(oc)) result = 0;
+    ll_failure_end(oc->L, &scope);
+    return result;
+}
+
 // run init/init_array/ctors/mod_init_func
 int ocRunInit(ObjectCode *oc)
 {
+    if (oc->status == OBJECT_UNLOADED) return 1;
+    if (!ll_failure_usable(oc)) return 0;
     if (oc->status != OBJECT_RESOLVED) {
         return 1;
     }
@@ -1771,6 +1852,7 @@ int ocRunInit(ObjectCode *oc)
 int runPendingInitializers (ll_linker *L)
 {
     for (ObjectCode *oc = L->gc.objects; oc; oc = oc->next) {
+        if (oc->protection_failed) continue;
         int r = ocRunInit(oc);
         if (!r) {
             LL_LOG_ERROR_FOR(L, "Could not run initializers of Object Code %" PATH_FMT ".\n", OC_INFORMATIVE_FILENAME(oc));
@@ -1793,8 +1875,9 @@ int runPendingInitializers (ll_linker *L)
  *
  * Returns: 1 if ok, 0 on error.
  */
-static ll_hs_int resolveObjs_ (ll_linker *L)
+static ll_hs_int resolveObjsImpl(ll_linker *L)
 {
+    if (ll_failure_active(L)) return 0;
     LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "resolveObjs: start\n"));
 
     for (ObjectCode *oc = L->gc.objects; oc; oc = oc->next) {
@@ -1813,6 +1896,15 @@ static ll_hs_int resolveObjs_ (ll_linker *L)
 
     LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "resolveObjs: done\n"));
     return 1;
+}
+
+static ll_hs_int resolveObjs_(ll_linker *L)
+{
+    struct ll_failure_scope scope;
+    ll_failure_begin(L, &scope, NULL);
+    ll_hs_int result = resolveObjsImpl(L);
+    ll_failure_end(L, &scope);
+    return result;
 }
 
 ll_hs_int resolveObjs (void)

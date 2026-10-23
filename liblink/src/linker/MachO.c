@@ -7,6 +7,7 @@
 
 
 #include "LinkerInternals.h"
+#include "ll_failure.h"
 #include "linker/MachO.h"
 #include "linker/CacheFlush.h"
 #include "linker/SymbolExtras.h"
@@ -1730,6 +1731,7 @@ ocGetNames_MachO(ObjectCode* oc)
 
                 RtsSymbolInfo *existing = lookupStrHashTable(oc->L->symhash, nm);
                 if (existing != NULL) {
+                    if (!ll_failure_alias(oc, existing->owner)) return 0;
                     /* COMMON symbol already allocated by a previously-loaded
                      * object; reuse that address so relocations resolve to
                      * the same storage. */
@@ -1818,7 +1820,11 @@ ocMprotect_MachO( ObjectCode *oc )
         if(segment->size == 0) continue;
 
         if(segment->prot == SEGMENT_PROT_RX) {
-            ll_mprotect_for_linker(oc->L, segment->start, segment->size, MEM_READ_EXECUTE);
+            if (!ll_mprotect_for_linker(oc->L, segment->start, segment->size,
+                                        MEM_READ_EXECUTE)) {
+                ll_failure_protection(oc);
+                return false;
+            }
         }
     }
 
@@ -1833,7 +1839,11 @@ ocMprotect_MachO( ObjectCode *oc )
         if(section->alloc == SECTION_M32) continue;
         switch (section->kind) {
         case SECTIONKIND_CODE_OR_RODATA: {
-            ll_mprotect_for_linker(oc->L, section->mapped_start, section->mapped_size, MEM_READ_EXECUTE);
+            if (!ll_mprotect_for_linker(oc->L, section->mapped_start,
+                                        section->mapped_size, MEM_READ_EXECUTE)) {
+                ll_failure_protection(oc);
+                return false;
+            }
             break;
         }
         default:
