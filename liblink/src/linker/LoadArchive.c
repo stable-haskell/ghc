@@ -731,25 +731,17 @@ ll_hs_int loadArchive_ (ll_linker *L, pathchar *path)
             pathprintf(archiveMemberName, size+1, WSTR("%" PATH_FMT "(#%d:%.*s)"),
                        path, memberIdx, (int)thisFileNameSize, fileName);
 
-            ObjectCode *oc = mkOc(L, STATIC_OBJECT, path, image, memberSize, false, archiveMemberName,
+            ObjectCode *oc = mkOc(L, STATIC_OBJECT, path, image, memberSize, imageMapped, archiveMemberName,
                                   misalignment);
             /* mkOc owns the image from here. Previously registered members
              * retain their existing ownership when a later member fails. */
             image = NULL;
             imageBase = NULL;
             imageMapped = false;
-#if defined(OBJFORMAT_MACHO)
-            LL_ASSERT_FOR(L, object_fmt == MachO32 || object_fmt == MachO64);
-            ocInit_MachO( oc );
-#endif
-#if defined(OBJFORMAT_ELF)
-            LL_ASSERT_FOR(L, object_fmt == ELF);
-            ocInit_ELF( oc );
-#endif
-
             LL_FREE_FOR(L, archiveMemberName);
 
-            if (0 == loadOc(oc)) {
+            if (!ll_init_object(oc) || !loadOc(oc)) {
+                ll_discard_object(oc);
                 goto fail;
             } else {
                 if (L->services.host.object_registered != NULL) {

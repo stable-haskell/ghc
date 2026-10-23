@@ -59,6 +59,9 @@ struct ObjectCodeFormatInfo {
     /* pointer to the global offset table */
     void                 *got_start;
     size_t                got_size;
+
+    /* Owned by this image, including while a load is being unwound. */
+    void                 *common_mem;
 };
 
 /* When loading sections of the macho

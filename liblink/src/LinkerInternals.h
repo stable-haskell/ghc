@@ -155,6 +155,10 @@ ll_hs_int isAlreadyLoaded( ll_linker *L, pathchar *path );
 OStatus getObjectLoadStatus_ (ll_linker *L, pathchar *path);
 ObjectCode *lookupObjectByPath(ll_linker *L, pathchar *path);
 ll_hs_int loadOc( ObjectCode* oc );
+/* Before registration: validate before format initialization, and unwind all
+ * state owned by an object whose load did not complete. Caller holds L's lock. */
+int ll_init_object(ObjectCode *oc);
+void ll_discard_object(ObjectCode *oc);
 ObjectCode* mkOc( ll_linker *L, ObjectType type, pathchar *path, char *image, int imageSize,
                   bool mapped, pathchar *archiveMemberName,
                   int misalignment

@@ -147,6 +147,7 @@ ocInit_MachO(ObjectCode * oc)
 void
 ocDeinit_MachO(ObjectCode * oc) {
     if (oc->info != NULL) {
+        LL_FREE_FOR(oc->L, oc->info->common_mem);
         if(oc->info->n_macho_symbols > 0) {
             LL_FREE_FOR(oc->L, oc->info->macho_symbols);
         }
@@ -154,7 +155,9 @@ ocDeinit_MachO(ObjectCode * oc) {
         freeGot(oc);
         if(oc->sections != NULL) {
             for(int i = 0; i < oc->n_sections; i++) {
-                freeStubs(oc->L, &oc->sections[i]);
+                /* Empty sections and partially built loads have no metadata. */
+                if (oc->sections[i].info != NULL)
+                    freeStubs(oc->L, &oc->sections[i]);
             }
         }
 #endif
@@ -537,7 +540,6 @@ makeGot(ObjectCode * oc) {
         oc->info->got_size =  got_slots * sizeof(void*);
         oc->info->got_start = ll_mmap_anon_for_linker(oc->L, oc->info->got_size);
         if( oc->info->got_start == NULL ) {
-            LL_FATAL_FOR(oc->L, "MAP_FAILED. errno=%d", errno );
             return EXIT_FAILURE;
         }
         /* update got_addr */
@@ -1466,14 +1468,16 @@ ocGetNames_MachO(ObjectCode* oc)
                             ll_symbol_addr* addr = oc->info->macho_symbols[i].addr;
                             // TODO: Make figure out how to determine this from the object file
                             ll_sym_type sym_type = LL_SYM_CODE;
-                            ghciInsertSymbolTable( oc->L
+                            if (!ghciInsertSymbolTable( oc->L
                                                  , oc->fileName
                                                  , nm
                                                  , addr
                                                  , LL_HS_BOOL_FALSE
                                                  , sym_type
                                                  , 0
-                                                 , oc);
+                                                 , oc)) {
+                                return 0;
+                            }
 
                             oc->symbols[curSymbol].name = nm;
                             oc->symbols[curSymbol].addr = addr;
@@ -1496,6 +1500,7 @@ ocGetNames_MachO(ObjectCode* oc)
     /* setup the common storage */
     if (commonSize > 0) {
         commonStorage = LL_CALLOC_FOR(oc->L, 1, commonSize, "ocGetNames_MachO(common symbols)");
+        oc->info->common_mem = commonStorage;
         commonCounter = (unsigned long)commonStorage;
     }
 
@@ -1537,10 +1542,12 @@ ocGetNames_MachO(ObjectCode* oc)
 
                     LL_IF_DEBUG_FOR(oc->L, linker_verbose,
                              LL_DEBUG_FOR(oc->L, "ocGetNames_MachO: inserting common symbol: %s\n", nm));
-                    ghciInsertSymbolTable(oc->L, oc->fileName, nm,
+                    if (!ghciInsertSymbolTable(oc->L, oc->fileName, nm,
                                          (void*)commonCounter, LL_HS_BOOL_FALSE,
                                          sym_type,
-                                         sz, oc);
+                                         sz, oc)) {
+                        return 0;
+                    }
                     oc->symbols[curSymbol].name = nm;
                     oc->symbols[curSymbol].addr = oc->info->macho_symbols[i].addr;
                     oc->symbols[curSymbol].type = sym_type;
@@ -1566,7 +1573,12 @@ ocGetNames_MachO(ObjectCode* oc)
      * anywhere in the addressable space. This obviously makes
      * sense.  However it took me a while to figure this out.
      */
-    makeGot(oc);
+    if (makeGot(oc)) {
+        ll_error_set(oc->L, LL_E_NOMEM,
+                     "could not allocate the global offset table for %" PATH_FMT,
+                     OC_INFORMATIVE_FILENAME(oc));
+        return 0;
+    }
 
     /* at this point, macho_symbols, should know the addresses for
      * all symbols defined by this object code.

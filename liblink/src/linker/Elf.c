@@ -217,8 +217,8 @@ ocInit_ELF(ObjectCode * oc)
             "ocInit_Elf(ObjectCodeFormatInfo)");
     // TODO: fill info
     oc->info->elfHeader = (Elf_Ehdr *)oc->image;
-    oc->info->programHeader = (Elf_Phdr *) ((uint8_t*)oc->image
-                                            + oc->info->elfHeader->e_phoff);
+    oc->info->programHeader = oc->info->elfHeader->e_phnum == 0 ? NULL :
+        (Elf_Phdr *)((uint8_t *)oc->image + oc->info->elfHeader->e_phoff);
     oc->info->sectionHeader = (Elf_Shdr *) ((uint8_t*)oc->image
                                             + oc->info->elfHeader->e_shoff);
     oc->info->sectionHeaderStrtab = (char*)((uint8_t*)oc->image +
@@ -492,8 +492,8 @@ ocVerifyImage_ELF ( ObjectCode* oc )
       LL_IF_DEBUG_FOR(oc->L, linker_verbose,LL_DEBUG_FOR(oc->L, "size=%4d  ", (int)shdr[i].sh_size ));
       LL_IF_DEBUG_FOR(oc->L, linker_verbose,LL_DEBUG_FOR(oc->L, "offs=%4d  ", (int)shdr[i].sh_offset ));
       LL_IF_DEBUG_FOR(oc->L, linker_verbose,LL_DEBUG_FOR(oc->L, "  (%p .. %p)  ",
-               ehdrC + shdr[i].sh_offset,
-                      ehdrC + shdr[i].sh_offset + shdr[i].sh_size - 1));
+               (void *)((uintptr_t)ehdrC + shdr[i].sh_offset),
+               (void *)((uintptr_t)ehdrC + shdr[i].sh_offset + shdr[i].sh_size - 1)));
 
 #define SECTION_INDEX_VALID(ndx) (ndx > SHN_UNDEF && ndx < shnum)
 
@@ -560,7 +560,7 @@ ocVerifyImage_ELF ( ObjectCode* oc )
           && i != shstrndx
           /* Ignore string tables named .stabstr, as they contain
              debugging info. */
-          && 0 != memcmp(".stabstr", sh_strtab + shdr[i].sh_name, 8)
+          && 0 != strncmp(".stabstr", sh_strtab + shdr[i].sh_name, 8)
          ) {
          LL_IF_DEBUG_FOR(oc->L, linker_verbose,LL_DEBUG_FOR(oc->L, "   section %d is a normal string table\n", i ));
          nstrtab++;
@@ -752,7 +752,7 @@ ocGetNames_ELF ( ObjectCode* oc )
       ll_word mapped_size = 0, mapped_offset = 0;
       ll_word size = shdr[i].sh_size;
       ll_word offset = shdr[i].sh_offset;
-      ll_word align = shdr[i].sh_addralign;
+      ll_word align = shdr[i].sh_addralign == 0 ? 1 : shdr[i].sh_addralign;
       const char *sh_name = oc->info->sectionHeaderStrtab + shdr[i].sh_name;
 
       /*
@@ -761,13 +761,13 @@ ocGetNames_ELF ( ObjectCode* oc )
        * See Note [Initializers and finalizers (ELF)].
        */
       if (kind == SECTIONKIND_CODE_OR_RODATA
-            && 0 == memcmp(".init", sh_name, 5)) {
+            && 0 == strncmp(".init", sh_name, 5)) {
           addInitFini(oc->L, &oc->info->init, &oc->sections[i], INITFINI_INIT, 0);
       } else if (kind == SECTIONKIND_CODE_OR_RODATA
-            && 0 == memcmp(".fini", sh_name, 5)) {
+            && 0 == strncmp(".fini", sh_name, 5)) {
           addInitFini(oc->L, &oc->info->fini, &oc->sections[i], INITFINI_FINI, 0);
       } else if (kind == SECTIONKIND_INIT_ARRAY
-            || 0 == memcmp(".init_array", sh_name, 11)) {
+            || 0 == strncmp(".init_array", sh_name, 11)) {
           uint32_t prio;
           if (sscanf(sh_name, ".init_array.%d", &prio) != 1) {
               // Sections without an explicit priority are run last
@@ -777,7 +777,7 @@ ocGetNames_ELF ( ObjectCode* oc )
           addInitFini(oc->L, &oc->info->init, &oc->sections[i], INITFINI_INIT_ARRAY, prio);
           kind = SECTIONKIND_INIT_ARRAY;
       } else if (kind == SECTIONKIND_FINI_ARRAY
-            || 0 == memcmp(".fini_array", sh_name, 11)) {
+            || 0 == strncmp(".fini_array", sh_name, 11)) {
           uint32_t prio;
           if (sscanf(sh_name, ".fini_array.%d", &prio) != 1) {
               // Sections without an explicit priority are run last
@@ -789,7 +789,7 @@ ocGetNames_ELF ( ObjectCode* oc )
 
       /* N.B. a compilation unit may have more than one .ctor section; we
        * must run them all. See #21618 for a case where this happened */
-      } else if (0 == memcmp(".ctors", sh_name, 6)) {
+      } else if (0 == strncmp(".ctors", sh_name, 6)) {
           uint32_t prio;
           if (sscanf(sh_name, ".ctors.%d", &prio) != 1) {
               // Sections without an explicit priority are run last
@@ -800,7 +800,7 @@ ocGetNames_ELF ( ObjectCode* oc )
           prio = 0xffff - prio;
           addInitFini(oc->L, &oc->info->init, &oc->sections[i], INITFINI_CTORS, prio);
           kind = SECTIONKIND_INIT_ARRAY;
-      } else if (0 == memcmp(".dtors", sh_name, 6)) {
+      } else if (0 == strncmp(".dtors", sh_name, 6)) {
           uint32_t prio;
           if (sscanf(sh_name, ".dtors.%d", &prio) != 1) {
               // Sections without an explicit priority are run last
@@ -944,7 +944,12 @@ ocGetNames_ELF ( ObjectCode* oc )
 
           addProddableBlock(oc->L, &oc->proddables, start, size);
       } else {
-          addSection(oc->L, &oc->sections[i], kind, alloc, oc->image+offset, size,
+          void *metadata = shdr[i].sh_type == SHT_NULL || shdr[i].sh_type == SHT_NOBITS
+                           ? NULL : oc->image + offset;
+          /* Empty definitions still need a non-NULL address. Their ignored
+           * file offset need not lie within the image, so use its base. */
+          if (size == 0 && metadata == NULL) metadata = oc->image;
+          addSection(oc->L, &oc->sections[i], kind, alloc, metadata, size,
                      0, 0, 0);
           oc->sections[i].info->nstubs = 0;
           oc->sections[i].info->stub_offset = NULL;
@@ -954,7 +959,11 @@ ocGetNames_ELF ( ObjectCode* oc )
       oc->sections[i].info->name          = sh_name;
       oc->sections[i].info->sectionHeader = &shdr[i];
 
-      if (shdr[i].sh_type != SHT_SYMTAB) continue;
+   }
+
+   /* All section addresses must exist before constructing any symbol address.
+    * Section tables need not place symbol tables after the sections they name. */
+   if (oc->info->symbolTables != NULL) {
 
       /* copy stuff into this module's object symbol table */
 
@@ -2184,7 +2193,8 @@ int ocAllocateExtras_ELF( ObjectCode *oc )
       int isBss = 0;
       getSectionKind_ELF(&shdr[i], &isBss);
       if (isBss && shdr[i].sh_size > 0) {
-        bssSize += ll_round_up_to_align(shdr[i].sh_size, shdr[i].sh_addralign);
+        ll_word align = shdr[i].sh_addralign == 0 ? 1 : shdr[i].sh_addralign;
+        bssSize += ll_round_up_to_align(shdr[i].sh_size, align);
       }
     }
   }

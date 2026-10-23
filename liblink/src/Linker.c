@@ -1056,13 +1056,60 @@ freePreloadObjectFile (ObjectCode *oc)
         ll_munmap_for_linker(oc->L, oc->image, oc->fileSize, "freePreloadObjectFile");
     }
     else {
-        LL_FREE_FOR(oc->L, oc->image);
+        if (oc->image != NULL)
+            LL_FREE_FOR(oc->L, oc->image - oc->misalignment);
     }
 
 #endif
 
     oc->image = NULL;
     oc->fileSize = 0;
+}
+
+int ll_init_object(ObjectCode *oc)
+{
+    int valid = 1;
+#if defined(OBJFORMAT_MACHO)
+    if (oc->image == NULL || oc->fileSize < (int)sizeof(uint32_t)) {
+        ll_error_set(oc->L, LL_E_FORMAT, "loadObj: truncated Mach-O magic");
+        return 0;
+    }
+    valid = ocVerifyImage_MachO(oc);
+#elif defined(OBJFORMAT_ELF)
+    valid = ocVerifyImage_ELF(oc);
+#endif
+    if (!valid) {
+        if (oc->L->error_status == LL_OK)
+            ll_error_set(oc->L, LL_E_FORMAT, "loadObj: invalid image in %" PATH_FMT,
+                         OC_INFORMATIVE_FILENAME(oc));
+        return 0;
+    }
+#if defined(OBJFORMAT_MACHO)
+    ocInit_MachO(oc);
+#elif defined(OBJFORMAT_ELF)
+    ocInit_ELF(oc);
+#endif
+    return 1;
+}
+
+void ll_discard_object(ObjectCode *oc)
+{
+    /* Only unregistered objects whose initializers have not run come here.
+     * Symbols must be removed while their names still live in the image.
+     * Format teardown also needs the image and section metadata to be alive. */
+    removeOcSymbols(oc);
+#if defined(OBJFORMAT_MACHO)
+    ocDeinit_MachO(oc);
+#elif defined(OBJFORMAT_ELF)
+    if (oc->info != NULL) {
+        freeInitFiniList(oc->L, oc->info->init);
+        freeInitFiniList(oc->L, oc->info->fini);
+        oc->info->init = NULL;
+        oc->info->fini = NULL;
+    }
+    ocDeinit_ELF(oc);
+#endif
+    freeObjectCode(oc);
 }
 
 /* Note [Object unloading and finalizers]
@@ -1432,17 +1479,12 @@ preloadObjectFile (ll_linker *L, pathchar *path)
 
    LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "loadObj: preloaded image at %p\n", (void *) image));
 
-   /* FIXME (AP): =mapped= parameter unconditionally set to true */
-   oc = mkOc(L, STATIC_OBJECT, path, image, fileSize, true, NULL, misalignment);
-
-#if defined(OBJFORMAT_MACHO)
-   if (ocVerifyImage_MachO( oc ))
-       ocInit_MachO( oc );
-#endif
-#if defined(OBJFORMAT_ELF)
-   if(ocVerifyImage_ELF( oc ))
-       ocInit_ELF( oc );
-#endif
+   oc = mkOc(L, STATIC_OBJECT, path, image, fileSize,
+             RTS_LINKER_USE_MMAP != 0, NULL, misalignment);
+   if (!ll_init_object(oc)) {
+       ll_discard_object(oc);
+       return NULL;
+   }
    return oc;
 }
 
@@ -1477,9 +1519,8 @@ static ll_hs_int loadObj_ (ll_linker *L, pathchar *path)
 
    if (! loadOc(oc)) {
        // failed; free everything we've allocated
-       removeOcSymbols(oc);
        // no StablePtrs to release, they aren't created until resolveObjs()
-       freeObjectCode(oc);
+       ll_discard_object(oc);
        return 0;
    }
 
