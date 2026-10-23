@@ -2,6 +2,7 @@ src/Linker.c
 src/RtsSymbolInfo.c
 src/linker/CacheFlush.c
 src/linker/Elf.c
+src/linker/ElfVerify.c
 src/linker/InitFini.c
 src/linker/LoadArchive.c
 src/linker/LoadNativeObjPosix.c

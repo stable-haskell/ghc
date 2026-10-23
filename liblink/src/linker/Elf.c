@@ -379,6 +379,7 @@ ocDeinit_ELF(ObjectCode * oc)
 int
 ocVerifyImage_ELF ( ObjectCode* oc )
 {
+   if (!ocValidateImage_ELF(oc)) return 0;
    Elf_Shdr* shdr;
    Elf_Sym*  stab;
    int j, nent, nstrtab, nsymtabs;

@@ -32,6 +32,7 @@ extra-source-files:
     src/linker/ELFRelocs/i386.def
     src/linker/ELFRelocs/x86_64.def
     src/linker/Elf.c
+    src/linker/ElfVerify.c
     src/linker/Elf.h
     src/linker/ElfTypes.h
     src/linker/InitFini.c

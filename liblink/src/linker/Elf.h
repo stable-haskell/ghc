@@ -8,6 +8,7 @@
 void ocInit_ELF          ( ObjectCode* oc );
 void ocDeinit_ELF        ( ObjectCode* oc );
 int ocVerifyImage_ELF    ( ObjectCode* oc );
+int ocValidateImage_ELF  ( ObjectCode* oc );
 int ocGetNames_ELF       ( ObjectCode* oc );
 int ocResolve_ELF        ( ObjectCode* oc );
 int ocRunInit_ELF        ( ObjectCode* oc );
