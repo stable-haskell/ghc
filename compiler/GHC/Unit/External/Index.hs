@@ -90,6 +90,7 @@ import GHC.Data.ShortText qualified as ST
 import GHC.Types.Unique.Map
 import GHC.Unit.Database
 import GHC.Unit.External.Database
+import GHC.Unit.External.Store (readUnitStore)
 import GHC.Unit.External.Visibility
 import GHC.Unit.External.Wired
 import GHC.Unit.Info
@@ -426,15 +427,18 @@ upd_wired_in wiredInMap key
 readUnitDatabases :: Logger -> UnitIndexCache -> UnitDbConfig -> IO [UnitDatabase UnitId]
 readUnitDatabases logger db_cache cfg = do
   conf_refs <- getUnitDbRefs cfg
-  confs     <- liftM catMaybes $ mapM (resolveUnitDatabase cfg) conf_refs
-  mapM (readOrGetUnitDatabase logger db_cache cfg) confs
+  locs      <- liftM catMaybes $ mapM (resolveUnitDatabase cfg) conf_refs
+  mapM (readOrGetUnitDatabase logger db_cache cfg) locs
 
--- | Get the cached 'UnitDatabase' or read the 'UnitDatabase' at the given location.
-readOrGetUnitDatabase :: Logger -> UnitIndexCache -> UnitDbConfig -> OsPath -> IO (UnitDatabase UnitId)
-readOrGetUnitDatabase logger db_cache cfg conf_file =
-  readExternalUnitDatabase db_cache conf_file >>= \ case
+-- | Get the cached 'UnitDatabase' or read the 'UnitDatabase' at the given
+-- location, which is either a package database or a unit store.
+readOrGetUnitDatabase :: Logger -> UnitIndexCache -> UnitDbConfig -> UnitDbLocation -> IO (UnitDatabase UnitId)
+readOrGetUnitDatabase logger db_cache cfg (UnitDbLocation kind path) =
+  readExternalUnitDatabase db_cache path >>= \ case
     Nothing -> do
-      new_db <- readUnitDatabase logger cfg conf_file
+      new_db <- case kind of
+        PackageDbKind -> readUnitDatabase logger cfg path
+        UnitStoreKind -> readUnitStore logger path
       cacheExternalUnitDatabase db_cache new_db
       pure new_db
     Just db ->

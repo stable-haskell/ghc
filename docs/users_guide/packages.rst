@@ -455,6 +455,39 @@ options:
 
     Add the package database ⟨file⟩ on top of the current stack.
 
+.. ghc-flag:: -unit-store ⟨dir⟩
+    :shortdesc: Add the unit store ⟨dir⟩ to the package db stack.
+    :type: dynamic
+    :category:
+
+    :since: 10.2.1
+
+    Add the *unit store* ⟨dir⟩ on top of the current stack. A unit store is
+    an experimental alternative to a package database in which installed
+    units are located by convention instead of being described by a
+    registration file. Every subdirectory of ⟨dir⟩ that contains a
+    ``unit.meta`` file is a unit, named by the directory:
+
+    .. code-block:: none
+
+        ⟨dir⟩/⟨unit-id⟩/unit.meta       the manifest
+        ⟨dir⟩/⟨unit-id⟩/lib/            interface files and libHS⟨unit-id⟩ libraries
+        ⟨dir⟩/⟨unit-id⟩/lib/include/    C headers, if any
+
+    This is the layout ``cabal-install``'s store already uses. The manifest
+    is a sequence of ``key: value`` lines (a line starting with whitespace
+    continues the previous value) with the keys ``name``, ``version``,
+    ``exposed-modules`` (``M`` or ``M from ⟨unit-id⟩:M'`` for a reexport),
+    ``hidden-modules``, ``depends``, ``indefinite``, ``instance-of``,
+    ``instantiated-with``, ``extra-libraries``, ``extra-libraries-static``,
+    ``extra-ghci-libraries``, ``frameworks``, ``framework-dirs``,
+    ``ld-options`` and ``includes``, all optional, with the same meaning as
+    the corresponding package database fields. Everything else, in
+    particular all paths and the ``hs-libraries`` name, is derived from the
+    layout. Units in a store are exposed and not trusted; use
+    :ghc-flag:`-hide-all-packages`, :ghc-flag:`-package-id ⟨unit-id⟩`,
+    :ghc-flag:`-trust ⟨pkg⟩` or an environment file to say otherwise.
+
 .. ghc-flag:: -no-global-package-db
     :shortdesc: Remove the global package db from the stack.
     :type: dynamic
@@ -593,6 +626,10 @@ because the environment specifies precisely which packages should be visible.
 
 Note that for the ``package-db`` directive, if a relative path is given it
 must be relative to the location of the package environment file.
+
+A ``unit-store ⟨dir⟩`` directive adds a unit store to the stack, like
+:ghc-flag:`-unit-store ⟨dir⟩`; a relative path is again relative to the
+environment file.
 
 .. ghc-flag:: -package-env ⟨file⟩|⟨name⟩
     :shortdesc: Use the specified package environment.

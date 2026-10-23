@@ -1022,6 +1022,9 @@ data PkgDbRef
   = GlobalPkgDb
   | UserPkgDb
   | PkgDbPath OsPath
+  | UnitStorePath OsPath
+    -- ^ A unit store: a directory of @<uid>/unit.meta@ entries located by
+    -- convention rather than a package database. See "GHC.Unit.External.Store".
   deriving (Eq, Ord)
 
 

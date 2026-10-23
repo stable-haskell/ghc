@@ -256,6 +256,7 @@ initUnitConfig dflags home_units =
   where
     offsetPackageDb :: Maybe FilePath -> PackageDBFlag -> PackageDBFlag
     offsetPackageDb (Just offset) (PackageDB (PkgDbPath p)) | OsPath.isRelative p = PackageDB (PkgDbPath (OsPath.unsafeEncodeUtf offset OsPath.</> p))
+    offsetPackageDb (Just offset) (PackageDB (UnitStorePath p)) | OsPath.isRelative p = PackageDB (UnitStorePath (OsPath.unsafeEncodeUtf offset OsPath.</> p))
     offsetPackageDb _ p = p
 
 data IsTrusted

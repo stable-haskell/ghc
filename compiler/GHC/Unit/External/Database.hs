@@ -13,6 +13,8 @@ module GHC.Unit.External.Database (
   compareByPreference,
   -- * Reading packages from disk.
   UnitDbConfig (..),
+  UnitDbLocation (..),
+  UnitDbKind (..),
   readUnitDatabase,
   getUnitDbRefs,
   resolveUnitDatabase,
@@ -255,20 +257,43 @@ getUnitDbRefs cfg = do
   isNotGlobal GlobalPkgDb = False
   isNotGlobal _ = True
 
--- | Return the path of a package database from a 'PkgDbRef'. Return 'Nothing'
--- when the user database filepath is expected but the latter doesn't exist.
+-- | What kind of on-disk structure a resolved 'PkgDbRef' points at.
+data UnitDbKind
+  = PackageDbKind
+    -- ^ A @package.conf.d@ style database written by @ghc-pkg@.
+  | UnitStoreKind
+    -- ^ A unit store, a directory of @<uid>/unit.meta@ entries.
+    -- See "GHC.Unit.External.Store".
+  deriving (Eq, Ord, Show)
+
+-- | A resolved 'PkgDbRef': an absolute or relative path together with the
+-- kind of structure found there.
+data UnitDbLocation = UnitDbLocation
+  { unitDbLocationKind :: !UnitDbKind
+  , unitDbLocationPath :: !OsPath
+  }
+  deriving (Eq, Ord)
+
+instance Outputable UnitDbLocation where
+  ppr (UnitDbLocation PackageDbKind p) = text "DB:" <+> ppr p
+  ppr (UnitDbLocation UnitStoreKind p) = text "STORE:" <+> ppr p
+
+-- | Return the location of a package database or unit store from a
+-- 'PkgDbRef'. Return 'Nothing' when the user database filepath is expected
+-- but the latter doesn't exist.
 --
 -- NB: This logic is reimplemented in Cabal, so if you change it,
 -- make sure you update Cabal. (Or, better yet, dump it in the
 -- compiler info so Cabal can use the info.)
-resolveUnitDatabase :: UnitDbConfig -> PkgDbRef -> IO (Maybe OsPath)
-resolveUnitDatabase cfg GlobalPkgDb = return $ Just $ OsPath.unsafeEncodeUtf $ unitDbConfigGlobalDB cfg
+resolveUnitDatabase :: UnitDbConfig -> PkgDbRef -> IO (Maybe UnitDbLocation)
+resolveUnitDatabase cfg GlobalPkgDb = return $ Just $ UnitDbLocation PackageDbKind $ OsPath.unsafeEncodeUtf $ unitDbConfigGlobalDB cfg
 resolveUnitDatabase cfg UserPkgDb = runMaybeT $ do
   dir <- versionedAppDir (unitDbConfigProgramName cfg) (unitDbConfigPlatformArchOS cfg)
   let pkgconf = dir </> unitDbConfigDBName cfg
   exist <- tryMaybeT $ doesDirectoryExist pkgconf
-  if exist then return (OsPath.unsafeEncodeUtf pkgconf) else mzero
-resolveUnitDatabase _ (PkgDbPath name) = return $ Just name
+  if exist then return (UnitDbLocation PackageDbKind (OsPath.unsafeEncodeUtf pkgconf)) else mzero
+resolveUnitDatabase _ (PkgDbPath name) = return $ Just $ UnitDbLocation PackageDbKind name
+resolveUnitDatabase _ (UnitStorePath root) = return $ Just $ UnitDbLocation UnitStoreKind root
 
 -- | Read the 'UnitDatabase' at the given location.
 readUnitDatabase :: Logger -> UnitDbConfig -> OsPath -> IO (UnitDatabase UnitId)
