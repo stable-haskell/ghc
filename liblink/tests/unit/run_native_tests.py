@@ -189,6 +189,22 @@ def configured_riscv64_elf_backend(config_include: Path) -> bool:
     return linux is not None and riscv64 is not None
 
 
+def configured_linux_x86_64_elf_backend(config_include: Path) -> bool:
+    platform_header = config_include / "ll_platform.h"
+    text = platform_header.read_text(errors="replace")
+    linux = re.search(
+        r"^\s*#\s*define\s+linux_HOST_OS(?:\s+1)?\s*$",
+        text,
+        re.MULTILINE,
+    )
+    x86_64 = re.search(
+        r"^\s*#\s*define\s+x86_64_HOST_ARCH(?:\s+1)?\s*$",
+        text,
+        re.MULTILINE,
+    )
+    return linux is not None and x86_64 is not None
+
+
 def normalize_windows_path(path: str) -> str:
     return path.replace("\\", "/").casefold()
 
@@ -269,7 +285,7 @@ def verify_link_map(
         if str(archive) not in text + link_trace:
             raise RuntimeError(f"link did not use expected stage2 archive: {archive}")
         duplicate_source = re.compile(
-            rf"liblink\.a\([^)]*{re.escape(forbidden_member)}[^)]*\.o\)"
+            rf"liblink\.a\([^)]*{re.escape(forbidden_member)}(?:\.c)?(?:\.o|\.obj)\)"
         )
         duplicate = any(duplicate_source.search(line) for line in text.splitlines())
     if duplicate:
@@ -836,6 +852,37 @@ def main() -> int:
             print(
                 "[riscv64_reloc_errors] skipped: generated config is not "
                 "riscv64_HOST_ARCH + linux_HOST_OS"
+            )
+
+        if host == "Linux" and configured_linux_x86_64_elf_backend(config_include):
+            elf_test = output / "elf_relocation_errors"
+            elf_map = output / "elf_relocation_errors.map"
+            elf_link_trace = run(
+                cc
+                + [
+                    str(ROOT / "liblink/tests/unit/elf_relocation_errors.c"),
+                    f"-L{archive.parent}",
+                    "-llink",
+                    *core_link_flags(host),
+                    "-Wl,-t",
+                    linker_map_flag(elf_map),
+                    "-o",
+                    str(elf_test),
+                ],
+                label="compile and link elf_relocation_errors",
+            )
+            verify_link_map(
+                elf_map,
+                archive,
+                elf_link_trace,
+                included_source="Elf.c",
+                forbidden_member="Elf",
+            )
+            run([str(elf_test)], label="run elf_relocation_errors")
+        else:
+            print(
+                "[elf_relocation_errors] skipped: generated config is not "
+                "x86_64_HOST_ARCH + linux_HOST_OS"
             )
 
         if host == "Darwin":

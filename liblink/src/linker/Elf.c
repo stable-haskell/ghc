@@ -1619,6 +1619,9 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
 #        endif // arm_HOST_ARCH
 
        default:
+           ll_error_set(oc->L, LL_E_UNSUPPORTED,
+                        "%s: unhandled ELF relocation(Rel) type %" LL_FMT_WORD "\n",
+                        oc->fileName, (ll_w)ELF_R_TYPE(info));
            LL_LOG_ERROR_FOR(oc->L, "%s: unhandled ELF relocation(Rel) type %" LL_FMT_WORD "\n",
                       oc->fileName, (ll_w)ELF_R_TYPE(info));
            return 0;
@@ -1697,6 +1700,9 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
             symbol = sym.st_name == 0 ? "(noname)" : strtab+sym.st_name;
             if (ELF_ST_BIND(sym.st_info) == STB_LOCAL
                 || sym.st_value != 0 || sym.st_name == 0) {
+                ll_error_set(oc->L, LL_E_UNSUPPORTED,
+                             "%s: unsupported internal ELF TLSGD relocation for symbol `%s'",
+                             oc->fileName, symbol);
                 LL_LOG_ERROR_FOR(oc->L, "%s: unsupported internal ELF TLSGD relocation for"
                            " symbol `%s'", oc->fileName, symbol);
                 return 0;
@@ -1704,6 +1710,9 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
 #if defined(x86_64_HOST_ARCH) && defined(freebsd_HOST_OS)
             S = lookupTlsgdSymbol(symbol, ELF_R_SYM(info), oc);
 #else
+            ll_error_set(oc->L, LL_E_UNSUPPORTED,
+                         "%s: ELF TLSGD relocation for symbol `%s' not supported on the target platform",
+                         oc->fileName, symbol);
             LL_LOG_ERROR_FOR(oc->L, "%s: ELF TLSGD relocation for symbol `%s'"
                        " not supported on the target platform",
                        oc->fileName, symbol);
@@ -1791,7 +1800,10 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
 
                if( value == 0 || delta << 6 >> 6 != delta )
                {
-                  LL_FATAL_FOR(oc->L, "Unable to make SymbolExtra for #%d",
+                  ll_error_set(oc->L, LL_E_RELOC_RANGE,
+                               "Unable to make SymbolExtra for #%d",
+                               (int)ELF_R_SYM(info));
+                  LL_LOG_ERROR_FOR(oc->L, "Unable to make SymbolExtra for #%d",
                         ELF_R_SYM(info) );
                   return 0;
                }
@@ -1836,6 +1848,9 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
                * See Note [X86_64_ELF_NONPIC_HACK and data references] */
               unsigned char symtype = ELF_ST_TYPE(stab[ELF_R_SYM(info)].st_info);
               if (symtype != STT_FUNC) {
+                  ll_error_set(oc->L, LL_E_RELOC_RANGE,
+                               "R_X86_64_PC32 overflow for non-function symbol `%s'",
+                               symbol);
                   LL_LOG_ERROR_FOR(oc->L,
                       "R_X86_64_PC32 overflow for non-function symbol `%s' "
                       "(type %d, distance 0x%" PRIx64 ").\n"
@@ -1850,6 +1865,8 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
               off = pltAddress + A - P;
           }
           if (off != (Elf64_Sword)off) {
+              ll_error_set(oc->L, LL_E_RELOC_RANGE,
+                           "R_X86_64_PC32 relocation out of range: %s", symbol);
               LL_LOG_ERROR_FOR(oc->L,
                   "R_X86_64_PC32 relocation out of range: %s = %" PRIx64
                   "\nRecompile %s with -fPIC -fexternal-dynamic-refs.",
@@ -1874,6 +1891,9 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
               /* See Note [X86_64_ELF_NONPIC_HACK and data references] */
               unsigned char symtype = ELF_ST_TYPE(stab[ELF_R_SYM(info)].st_info);
               if (symtype != STT_FUNC) {
+                  ll_error_set(oc->L, LL_E_RELOC_RANGE,
+                               "R_X86_64_32 overflow for non-function symbol `%s'",
+                               symbol);
                   LL_LOG_ERROR_FOR(oc->L,
                       "R_X86_64_32 overflow for non-function symbol `%s' "
                       "(type %d, value 0x%" PRIx64 ").\n"
@@ -1888,6 +1908,8 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
               value = pltAddress + A;
           }
           if (value != (Elf64_Word)value) {
+              ll_error_set(oc->L, LL_E_RELOC_RANGE,
+                           "R_X86_64_32 relocation out of range: %s", symbol);
               LL_LOG_ERROR_FOR(oc->L,
                   "R_X86_64_32 relocation out of range: %s = %" PRIx64
                   "\nRecompile %s with -fPIC -fexternal-dynamic-refs.",
@@ -1905,6 +1927,9 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
               /* See Note [X86_64_ELF_NONPIC_HACK and data references] */
               unsigned char symtype = ELF_ST_TYPE(stab[ELF_R_SYM(info)].st_info);
               if (symtype != STT_FUNC) {
+                  ll_error_set(oc->L, LL_E_RELOC_RANGE,
+                               "R_X86_64_32S overflow for non-function symbol `%s'",
+                               symbol);
                   LL_LOG_ERROR_FOR(oc->L,
                       "R_X86_64_32S overflow for non-function symbol `%s' "
                       "(type %d, value 0x%" PRIx64 ").\n"
@@ -1919,6 +1944,8 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
               value = pltAddress + A;
           }
           if ((ll_int64)value != (Elf64_Sword)value) {
+              ll_error_set(oc->L, LL_E_RELOC_RANGE,
+                           "R_X86_64_32S relocation out of range: %s", symbol);
               LL_LOG_ERROR_FOR(oc->L,
                   "R_X86_64_32S relocation out of range: %s = %" PRIx64
                   "\nRecompile %s with -fPIC -fexternal-dynamic-refs.",
@@ -1936,10 +1963,15 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
           ll_int64 gotAddress = (ll_int64) &makeSymbolExtra(oc, ELF_R_SYM(info), S)->addr;
           ll_int64 off = gotAddress + A - P;
           if (off != (Elf64_Sword)off) {
-              LL_FATAL_FOR(oc->L,
+              ll_error_set(oc->L, LL_E_RELOC_RANGE,
+                  "COMPAT_R_X86_64_GOTPCREL relocation out of range: "
+                  "%s = %" PRIx64 " in %s.",
+                  symbol, (uint64_t)off, oc->fileName);
+              LL_LOG_ERROR_FOR(oc->L,
                   "COMPAT_R_X86_64_GOTPCREL relocation out of range: "
                   "%s = %" PRIx64 " in %s.",
                   symbol, off, oc->fileName);
+              return 0;
           }
           Elf64_Sword payload = off;
           memcpy((void*)P, &payload, sizeof(payload));
@@ -1949,10 +1981,15 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
       {
           ll_int64 off = S + A - P;
           if (off != (Elf64_Sword)off) {
-              LL_FATAL_FOR(oc->L,
+              ll_error_set(oc->L, LL_E_RELOC_RANGE,
+                  "COMPAT_R_X86_64_TLSGD relocation out of range: "
+                  "%s = %" PRIx64 " in %s.",
+                  symbol, (uint64_t)off, oc->fileName);
+              LL_LOG_ERROR_FOR(oc->L,
                   "COMPAT_R_X86_64_TLSGD relocation out of range: "
                   "%s = %" PRIx64 " in %s.",
                   symbol, off, oc->fileName);
+              return 0;
           }
           Elf64_Sword payload = off;
           memcpy((void*)P, &payload, sizeof(payload));
@@ -1971,10 +2008,15 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
                                          (S - (Elf64_Addr)(ti.base)))->addr;
           ll_int64 off = gotEntry + A - P;
           if (off != (Elf64_Sword)off) {
-              LL_FATAL_FOR(oc->L,
+              ll_error_set(oc->L, LL_E_RELOC_RANGE,
+                  "COMPAT_R_X86_64_GOTTPOFF relocation out of range: "
+                  "%s = %" PRIx64 " in %s.",
+                  symbol, (uint64_t)off, oc->fileName);
+              LL_LOG_ERROR_FOR(oc->L,
                   "COMPAT_R_X86_64_GOTTPOFF relocation out of range: "
                   "%s = %" PRIx64 " in %s.",
                   symbol, off, oc->fileName);
+              return 0;
           }
           Elf64_SWord payload = off;
           memcpy((void*)P, &payload, sizeof(payload));
@@ -1991,10 +2033,15 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
               off = pltAddress + A - P;
           }
           if (off != (Elf64_Sword)off) {
-              LL_FATAL_FOR(oc->L,
+              ll_error_set(oc->L, LL_E_RELOC_RANGE,
+                  "R_X86_64_PLT32 relocation out of range: "
+                  "%s = %" PRIx64 " in %s.",
+                  symbol, (uint64_t)off, oc->fileName);
+              LL_LOG_ERROR_FOR(oc->L,
                   "R_X86_64_PLT32 relocation out of range: "
                   "%s = %" PRIx64 " in %s.",
                   symbol, off, oc->fileName);
+              return 0;
           }
           Elf64_Sword payload = off;
           memcpy((void*)P, &payload, sizeof(payload));
@@ -2003,7 +2050,10 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
 #endif
 
          default:
-            LL_FATAL_FOR(oc->L, "%s: unhandled ELF relocation(RelA) type %" LL_FMT_WORD "\n",
+            ll_error_set(oc->L, LL_E_UNSUPPORTED,
+                         "%s: unhandled ELF relocation(RelA) type %" LL_FMT_WORD "\n",
+                         oc->fileName, (ll_w)ELF_R_TYPE(info));
+            LL_LOG_ERROR_FOR(oc->L, "%s: unhandled ELF relocation(RelA) type %" LL_FMT_WORD "\n",
                   oc->fileName, (ll_w)ELF_R_TYPE(info));
             return 0;
       }

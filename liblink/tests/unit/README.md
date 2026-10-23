@@ -155,6 +155,43 @@ The manual link-map flag below uses Darwin syntax. On Linux, use
       -Wl,-map,archive-error-status.map -o archive-error-status
     ./archive-error-status
 
+Legacy ELF x86_64 RelA errors
+=============================
+
+`elf_relocation_errors.c` includes the actual ELF implementation to call its
+static legacy RelA relocation helper. It checks valid 64-bit and 32-bit writes,
+range errors for PC32/32/32S/GOTPCREL-family/PLT32 (including a preallocated
+symbol-extra fallback that remains out of range), unsupported relocation and
+TLSGD errors, intact failure payloads/canaries, per-owner status, and
+default-owner isolation. The driver runs it only when the host and generated
+configuration are Linux x86_64 ELF. It links other dependencies from the
+generated static archive and checks the linker map for the selected archive
+without selecting `Elf.o` beside the included implementation; `ElfVerify.o`
+remains allowed.
+
+Darwin and other targets skip this native Linux x86_64 unit. Source presence
+does not qualify its runtime behavior; native Linux x86_64 execution is
+required. After a static stage2 build on Linux x86_64, run the driver from the
+repository root with:
+
+    python3 liblink/tests/unit/run_native_tests.py
+
+For a manual link, set `LL_CONFIG_DIR`, `RTS_FS_INCLUDE`, and
+`LIBLINK_BUILD_LIB` to the generated liblink include, generated `rts-fs`
+include, and directory containing the fresh `liblink.a`:
+
+    : "${LL_CONFIG_DIR:?set the generated liblink include directory}"
+    : "${RTS_FS_INCLUDE:?set the generated rts-fs include directory}"
+    : "${LIBLINK_BUILD_LIB:?set the directory containing fresh liblink.a}"
+    CC=${CC:-cc}
+    "$CC" -std=c11 -Wall -Wextra -Werror=vla -pedantic -DLL_ASSERTS \
+      -isystem "$LL_CONFIG_DIR" -isystem "$RTS_FS_INCLUDE" \
+      -Iliblink/include -Iliblink/src \
+      liblink/tests/unit/elf_relocation_errors.c -L"$LIBLINK_BUILD_LIB" \
+      -llink -pthread -ldl -Wl,-Map,elf-relocation-errors.map \
+      -o elf-relocation-errors
+    ./elf-relocation-errors
+
 RISC-V U-type arithmetic
 ========================
 

@@ -205,6 +205,44 @@ class DarwinWhyLoadTests(unittest.TestCase):
 
 
 class NativeDriverMapDispatchTests(unittest.TestCase):
+    def test_elf_duplicate_guard_matches_exact_object_stem(self) -> None:
+        archive = Path("/build/liblink.a")
+        with tempfile.TemporaryDirectory() as temporary:
+            map_path = Path(temporary) / "probe.map"
+            for member in (
+                "ElfVerify.o",
+                "obj/ElfVerify.o",
+                "prefixElfVerify.o",
+                "ElfHelper.o",
+            ):
+                with self.subTest(allowed_member=member):
+                    map_path.write_text(f"{archive}({member})\n")
+                    driver.verify_link_map(
+                        map_path,
+                        archive,
+                        str(archive),
+                        included_source="Elf.c",
+                        forbidden_member="Elf",
+                    )
+
+            for member in (
+                "Elf.o",
+                "prefixElf.o",
+                "path/Elf.o",
+                "prefix_Elf.c.o",
+                "Elf.obj",
+            ):
+                with self.subTest(forbidden_member=member):
+                    map_path.write_text(f"{archive}({member})\n")
+                    with self.assertRaisesRegex(RuntimeError, "selected archive Elf.o"):
+                        driver.verify_link_map(
+                            map_path,
+                            archive,
+                            str(archive),
+                            included_source="Elf.c",
+                            forbidden_member="Elf",
+                        )
+
     def test_lld_trace_accepts_basename_only_map_input(self) -> None:
         archive = Path("C:/Build Artifacts/liblink.a")
         trace = (
