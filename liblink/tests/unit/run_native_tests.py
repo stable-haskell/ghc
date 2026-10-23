@@ -173,6 +173,22 @@ def core_link_flags(host: str) -> list[str]:
     return []
 
 
+def configured_riscv64_elf_backend(config_include: Path) -> bool:
+    platform_header = config_include / "ll_platform.h"
+    text = platform_header.read_text(errors="replace")
+    linux = re.search(
+        r"^\s*#\s*define\s+linux_HOST_OS(?:\s+1)?\s*$",
+        text,
+        re.MULTILINE,
+    )
+    riscv64 = re.search(
+        r"^\s*#\s*define\s+riscv64_HOST_ARCH(?:\s+1)?\s*$",
+        text,
+        re.MULTILINE,
+    )
+    return linux is not None and riscv64 is not None
+
+
 def normalize_windows_path(path: str) -> str:
     return path.replace("\\", "/").casefold()
 
@@ -790,6 +806,37 @@ def main() -> int:
             forbidden_member="elf_reloc_riscv64",
         )
         run([str(riscv_u_type_test)], label="run riscv_u_type")
+
+        if host == "Linux" and configured_riscv64_elf_backend(config_include):
+            riscv_test = output / "riscv64_reloc_errors"
+            riscv_map = output / "riscv64_reloc_errors.map"
+            riscv_link_trace = run(
+                cc
+                + [
+                    str(ROOT / "liblink/tests/unit/riscv64_reloc_errors.c"),
+                    f"-L{archive.parent}",
+                    "-llink",
+                    *core_link_flags(host),
+                    "-Wl,-t",
+                    linker_map_flag(riscv_map),
+                    "-o",
+                    str(riscv_test),
+                ],
+                label="compile and link riscv64_reloc_errors",
+            )
+            verify_link_map(
+                riscv_map,
+                archive,
+                riscv_link_trace,
+                included_source="linker/elf_reloc_riscv64.c",
+                forbidden_member="elf_reloc_riscv64",
+            )
+            run([str(riscv_test)], label="run riscv64_reloc_errors")
+        else:
+            print(
+                "[riscv64_reloc_errors] skipped: generated config is not "
+                "riscv64_HOST_ARCH + linux_HOST_OS"
+            )
 
         if host == "Darwin":
             macho_fixture_dir = ROOT / "liblink/tests/fixtures/macho-input"

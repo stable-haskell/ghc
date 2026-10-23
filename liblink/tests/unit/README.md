@@ -180,7 +180,25 @@ to `uint32_t` first makes the addition defined modulo 2^32. Second,
 checks the rounded high field as a signed 32-bit value before shifting and
 checking its 20-bit range. The test exercises the actual extracted definitions,
 not a maintained copy. It does not build or execute the RISC-V relocation
-backend on this host; full backend execution remains for RISC-V CI.
+backend on this host. The current CI matrix has no RISC-V job, so backend
+execution still requires a genuine RISC-V or QEMU qualification.
+
+RISC-V ELF relocation error propagation
+=======================================
+
+When run on a native Linux RISC-V ELF build, the unit driver compiles
+`riscv64_reloc_errors.c`, which includes the current relocation backend and
+links the remaining dependencies from the stage2 `liblink.a`. The link map
+checks that the archive does not also select `elf_reloc_riscv64.o`. The unit
+checks instruction encodings, range failures and unchanged output bytes,
+relocation-loop status propagation, unsupported relocation forms, malformed
+PC-relative pairs, and 64-bit relocation writes including the existing
+32-bit narrowing behavior. Literal instruction encodings use the LLVM
+assembler oracle recorded by the unit; this checkout did not run a RISC-V
+assembler or backend. The portable U-type helper unit above still runs on
+other hosts. The current CI matrix has no RISC-V job, so this native backend
+unit awaits qualification on genuine RISC-V hardware or QEMU; no target
+execution is claimed on other architectures.
 
 Mach-O input preflight
 ======================

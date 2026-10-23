@@ -26,7 +26,8 @@ typedef uint16_t cinst_t;
 // TODO: These instances could be static. They are not yet, because we might
 // need their debugging symbols.
 char *relocationTypeToString(Elf64_Xword type);
-int32_t decodeAddendRISCV64(ll_linker *L, Section *section, Elf_Rel *rel);
+bool decodeAddendRISCV64(ll_linker *L, Section *section, Elf_Rel *rel,
+                         int32_t *addend);
 bool encodeAddendRISCV64(ll_linker *L, Section *section, Elf_Rel *rel, int32_t addend);
 void write8le(uint8_t *p, uint8_t v);
 uint8_t read8le(const uint8_t *P);
@@ -37,16 +38,17 @@ void write32le(inst_t *p, uint32_t v);
 uint64_t read64le(const uint64_t *P);
 void write64le(uint64_t *p, uint64_t v);
 uint32_t extractBits(uint64_t v, uint32_t begin, uint32_t end);
-void setCJType(ll_linker *L, cinst_t *loc, uint32_t val);
-void setCBType(ll_linker *L, cinst_t *loc, uint32_t val);
-void setBType(ll_linker *L, inst_t *loc, uint32_t val);
+bool setCJType(ll_linker *L, cinst_t *loc, uint32_t val);
+bool setCBType(ll_linker *L, cinst_t *loc, uint32_t val);
+bool setBType(ll_linker *L, inst_t *loc, uint32_t val);
 void setSType(inst_t *loc, uint32_t val);
-int32_t computeAddend(ElfRelocationATable * relaTab, unsigned relNo, Elf_Rel *rel, ElfSymbol *symbol,
-                      int64_t addend, ObjectCode *oc);
-void setJType(ll_linker *L, inst_t *loc, uint32_t val);
+bool computeAddend(ElfRelocationATable *relaTab, unsigned relNo, Elf_Rel *rel,
+                   ElfSymbol *symbol, int64_t addend, ObjectCode *oc,
+                   int32_t *computed);
+bool setJType(ll_linker *L, inst_t *loc, uint32_t val);
 void setIType(ll_linker *L, inst_t *loc, int32_t val);
-void checkInt(ll_linker *L, inst_t *loc, int32_t v, int n);
-void setUType(ll_linker *L, inst_t *loc, int32_t val);
+bool checkInt(ll_linker *L, const void *loc, int32_t v, int n);
+bool setUType(ll_linker *L, inst_t *loc, int32_t val);
 
 
 char *relocationTypeToString(Elf64_Xword type) {
@@ -108,19 +110,24 @@ char *relocationTypeToString(Elf64_Xword type) {
   }
 }
 
-LL_NORETURN int32_t decodeAddendRISCV64(ll_linker *L, Section *section LL_UNUSED,
-                                        Elf_Rel *rel LL_UNUSED) {
-  LL_FATAL_FOR(L, "decodeAddendRISCV64: Relocations with explicit addend are not supported."
-       " Please open a ticket; providing the causing code/binary.");
+bool decodeAddendRISCV64(ll_linker *L, Section *section LL_UNUSED,
+                         Elf_Rel *rel LL_UNUSED, int32_t *addend LL_UNUSED) {
+  ll_error_set(L, LL_E_UNSUPPORTED,
+               "decodeAddendRISCV64: Relocations without an explicit addend are not supported.");
+  return false;
 }
 
 // Make sure that V can be represented as an N bit signed integer.
-void checkInt(ll_linker *L, inst_t *loc, int32_t v, int n) {
+bool checkInt(ll_linker *L, const void *loc, int32_t v, int n) {
   if (!isInt(n, v)) {
-    LL_FATAL_FOR(L, "Relocation at 0x%x is out of range. value: 0x%x (%d), "
-               "sign-extended value: 0x%x (%d), max bits 0x%x (%d)\n",
-               *loc, v, v, signExtend32(v, n), signExtend32(v, n), n, n);
+    /* Compressed relocations may have only two readable bytes at loc. */
+    ll_error_set(L, LL_E_RELOC_RANGE,
+                 "Relocation at %p is out of range. value: 0x%x (%d), "
+                 "max bits 0x%x (%d)", (void *)loc, (unsigned)v, v,
+                 (unsigned)n, n);
+    return false;
   }
+  return true;
 }
 
 // RISCV is little-endian by definition: We can rely on (implicit) casts.
@@ -153,14 +160,15 @@ uint32_t extractBits(uint64_t v, uint32_t begin, uint32_t end) {
 
 // Set immediate val in the instruction at *loc. In U-type instructions the
 // upper 20bits carry the upper 20bits of the immediate.
-void setUType(ll_linker *L, inst_t *loc, int32_t val) {
+bool setUType(ll_linker *L, inst_t *loc, int32_t val) {
   const unsigned bits = 32;
   uint32_t hi = (uint32_t)val + UINT32_C(0x800);
-  checkInt(L, loc, signExtend32(bits, hi) >> 12, 20);
+  if (!checkInt(L, loc, signExtend32(bits, hi) >> 12, 20)) return false;
   LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "setUType: hi 0x%x val 0x%x\n", hi, val));
 
   uint32_t imm = hi & 0xFFFFF000;
   write32le(loc, (read32le(loc) & 0xFFF) | imm);
+  return true;
 }
 
 // Set immediate val in the instruction at *loc. In I-type instructions the
@@ -205,8 +213,8 @@ void setSType(inst_t *loc, uint32_t val) {
 // [19:12] -> [19:12]
 //
 // N.B. bit 0 of the immediate is missing!
-void setJType(ll_linker *L, inst_t *loc, uint32_t val) {
-  checkInt(L, loc, val, 21);
+bool setJType(ll_linker *L, inst_t *loc, uint32_t val) {
+  if (!checkInt(L, loc, val, 21)) return false;
 
   uint32_t insn = read32le(loc) & 0xFFF;
   uint32_t imm20 = extractBits(val, 20, 20) << 31;
@@ -216,6 +224,7 @@ void setJType(ll_linker *L, inst_t *loc, uint32_t val) {
   insn |= imm20 | imm10_1 | imm11 | imm19_12;
 
   write32le(loc, insn);
+  return true;
 }
 
 // Set immediate val in the instruction at *loc. In B-type instructions the
@@ -227,8 +236,8 @@ void setJType(ll_linker *L, inst_t *loc, uint32_t val) {
 // 7 -> 11
 //
 // N.B. bit 0 of the immediate is missing!
-void setBType(ll_linker *L, inst_t *loc, uint32_t val) {
-  checkInt(L, loc, val, 13);
+bool setBType(ll_linker *L, inst_t *loc, uint32_t val) {
+  if (!checkInt(L, loc, val, 13)) return false;
 
   uint32_t insn = read32le(loc) & 0x1FFF07F;
   uint32_t imm12 = extractBits(val, 12, 12) << 31;
@@ -238,6 +247,7 @@ void setBType(ll_linker *L, inst_t *loc, uint32_t val) {
   insn |= imm12 | imm10_5 | imm4_1 | imm11;
 
   write32le(loc, insn);
+  return true;
 }
 
 
@@ -252,8 +262,8 @@ void setBType(ll_linker *L, inst_t *loc, uint32_t val) {
 // 2 -> 5
 //
 // N.B. bit 0 of the immediate is missing!
-void setCBType(ll_linker *L, cinst_t *loc, uint32_t val) {
-  checkInt(L, (inst_t *)loc, val, 9);
+bool setCBType(ll_linker *L, cinst_t *loc, uint32_t val) {
+  if (!checkInt(L, loc, val, 9)) return false;
   uint16_t insn = read16le(loc) & 0xE383;
   uint16_t imm8 = extractBits(val, 8, 8) << 12;
   uint16_t imm4_3 = extractBits(val, 4, 3) << 10;
@@ -263,6 +273,7 @@ void setCBType(ll_linker *L, cinst_t *loc, uint32_t val) {
   insn |= imm8 | imm4_3 | imm7_6 | imm2_1 | imm5;
 
   write16le(loc, insn);
+  return true;
 }
 
 // Set immediate val in the instruction at *loc. CJ-type instructions have a
@@ -279,8 +290,8 @@ void setCBType(ll_linker *L, cinst_t *loc, uint32_t val) {
 // 2 -> 5
 //
 // N.B. bit 0 of the immediate is missing!
-void setCJType(ll_linker *L, cinst_t *loc, uint32_t val) {
-  checkInt(L, (inst_t *)loc, val, 12);
+bool setCJType(ll_linker *L, cinst_t *loc, uint32_t val) {
+  if (!checkInt(L, loc, val, 12)) return false;
   uint16_t insn = read16le(loc) & 0xE003;
   uint16_t imm11 = extractBits(val, 11, 11) << 12;
   uint16_t imm4 = extractBits(val, 4, 4) << 11;
@@ -293,6 +304,7 @@ void setCJType(ll_linker *L, cinst_t *loc, uint32_t val) {
   insn |= imm11 | imm4 | imm9_8 | imm10 | imm6 | imm7 | imm3_1 | imm5;
 
   write16le(loc, insn);
+  return true;
 }
 
 // Encode the addend according to the relocaction into the instruction.
@@ -317,7 +329,7 @@ bool encodeAddendRISCV64(ll_linker *L, Section *section, Elf_Rel *rel, int32_t a
   case R_RISCV_GOT_HI20:
   case R_RISCV_PCREL_HI20:
   case R_RISCV_HI20: {
-    setUType(L, (inst_t *)P, addend);
+    if (!setUType(L, (inst_t *)P, addend)) return EXIT_FAILURE;
     break;
   }
   case R_RISCV_PCREL_LO12_I:
@@ -326,27 +338,27 @@ bool encodeAddendRISCV64(ll_linker *L, Section *section, Elf_Rel *rel, int32_t a
     break;
   }
   case R_RISCV_RVC_JUMP: {
-    setCJType(L, (cinst_t *)P, addend);
+    if (!setCJType(L, (cinst_t *)P, addend)) return EXIT_FAILURE;
     break;
   }
   case R_RISCV_RVC_BRANCH: {
-    setCBType(L, (cinst_t *)P, addend);
+    if (!setCBType(L, (cinst_t *)P, addend)) return EXIT_FAILURE;
     break;
   }
   case R_RISCV_BRANCH: {
-    setBType(L, (inst_t *)P, addend);
+    if (!setBType(L, (inst_t *)P, addend)) return EXIT_FAILURE;
     break;
   }
   case R_RISCV_CALL:
   case R_RISCV_CALL_PLT: {
     // We could relax more (in some cases) but right now most important is to
     // make it work.
-    setUType(L, (inst_t *)P, addend);
+    if (!setUType(L, (inst_t *)P, addend)) return EXIT_FAILURE;
     setIType(L, ((inst_t *)P) + 1, addend);
     break;
   }
   case R_RISCV_JAL: {
-    setJType(L, (inst_t *)P, addend);
+    if (!setJType(L, (inst_t *)P, addend)) return EXIT_FAILURE;
     break;
   }
   case R_RISCV_ADD8:
@@ -411,7 +423,9 @@ bool encodeAddendRISCV64(ll_linker *L, Section *section, Elf_Rel *rel, int32_t a
     // would need machinery to squeeze or extend memory at the current location.
     break;
   default:
-    LL_FATAL_FOR(L, "Missing relocation 0x%lx\n", ELF64_R_TYPE(rel->r_info));
+    ll_error_set(L, LL_E_UNSUPPORTED, "Missing relocation 0x%lx\n",
+                 ELF64_R_TYPE(rel->r_info));
+    return EXIT_FAILURE;
   }
   return EXIT_SUCCESS;
 }
@@ -422,10 +436,12 @@ bool encodeAddendRISCV64(ll_linker *L, Section *section, Elf_Rel *rel, int32_t a
  * @param rel     The Relocation struct.
  * @param symbol  The target symbol.
  * @param addend  The existing addend. Either explicit or implicit.
- * @return The new computed addend.
+ * @param computed Receives the existing 32-bit computed value on success.
+ * @return True on success; failure leaves computed unchanged.
  */
-int32_t computeAddend(ElfRelocationATable * relaTab, unsigned relNo, Elf_Rel *rel, ElfSymbol *symbol,
-                      int64_t addend, ObjectCode *oc) {
+bool computeAddend(ElfRelocationATable *relaTab, unsigned relNo, Elf_Rel *rel,
+                   ElfSymbol *symbol, int64_t addend, ObjectCode *oc,
+                   int32_t *computed) {
   Section * section = &oc->sections[relaTab->targetSectionIndex];
 
   // instruction to rewrite (P: Position of the relocation)
@@ -447,19 +463,26 @@ int32_t computeAddend(ElfRelocationATable * relaTab, unsigned relNo, Elf_Rel *re
                               symbol->name, GOT_S, A, relNo));
   switch (ELF64_R_TYPE(rel->r_info)) {
   case R_RISCV_32:
-    return S + A;
+    *computed = S + A;
+    return true;
   case R_RISCV_64:
-    return S + A;
+    *computed = S + A;
+    return true;
   case R_RISCV_HI20:
-    return S + A;
+    *computed = S + A;
+    return true;
   case R_RISCV_JUMP_SLOT:
-    return S;
+    *computed = S;
+    return true;
   case R_RISCV_JAL:
-    return S + A - P;
+    *computed = S + A - P;
+    return true;
   case R_RISCV_PCREL_HI20:
-    return S + A - P;
+    *computed = S + A - P;
+    return true;
   case R_RISCV_LO12_I:
-    return S + A;
+    *computed = S + A;
+    return true;
     // Quoting LLVM docs: For R_RISCV_PC_INDIRECT (R_RISCV_PCREL_LO12_{I,S}),
     // the symbol actually points the corresponding R_RISCV_PCREL_HI20
     // relocation, and the target VA is calculated using PCREL_HI20's symbol.
@@ -503,24 +526,33 @@ int32_t computeAddend(ElfRelocationATable * relaTab, unsigned relNo, Elf_Rel *re
                        relocationTypeToString(rel->r_info), P, S, symbol->name,
                        relocationTypeToString(rel_prime->r_info), P_prime,
                        symbol_prime->addr, symbol_prime->name, i));
-          int32_t result = computeAddend(relaTab, i, (Elf_Rel *)rel_prime,
-                                         symbol_prime, addend_prime, oc);
+          int32_t result;
+          if (!computeAddend(relaTab, i, (Elf_Rel *)rel_prime,
+                             symbol_prime, addend_prime, oc, &result))
+            return false;
           LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "Result of computeAddend: 0x%x (%d)\n",
                                       result, result));
-          return result;
+          *computed = result;
+          return true;
         }
     }
     LL_DEBUG_FOR(oc->L, "Missing HI relocation for %s: P 0x%lx S 0x%lx %s\n",
                relocationTypeToString(rel->r_info), P, S, symbol->name);
-    abort();
+    ll_error_set(oc->L, LL_E_FORMAT,
+                 "Missing HI relocation for %s: P 0x%lx S 0x%lx %s",
+                 relocationTypeToString(rel->r_info), P, S, symbol->name);
+    return false;
   }
 
   case R_RISCV_RVC_JUMP:
-    return S + A - P;
+    *computed = S + A - P;
+    return true;
   case R_RISCV_RVC_BRANCH:
-    return S + A - P;
+    *computed = S + A - P;
+    return true;
   case R_RISCV_BRANCH:
-    return S + A - P;
+    *computed = S + A - P;
+    return true;
   case R_RISCV_CALL:
   case R_RISCV_CALL_PLT: {
     addr_t GOT_Target;
@@ -546,7 +578,8 @@ int32_t computeAddend(ElfRelocationATable * relaTab, unsigned relNo, Elf_Rel *re
     LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "R_RISCV_CALL_PLT: S = 0x%lx A = 0x%lx P = "
                                 "0x%lx (S + A) - P = 0x%lx \n",
                                 S, A, P, (S + A) - P));
-    return (S + A) - P;
+    *computed = (S + A) - P;
+    return true;
   }
   case R_RISCV_ADD8:
     LL_FALLTHROUGH;
@@ -555,7 +588,8 @@ int32_t computeAddend(ElfRelocationATable * relaTab, unsigned relNo, Elf_Rel *re
   case R_RISCV_ADD32:
     LL_FALLTHROUGH;
   case R_RISCV_ADD64:
-    return S + A; // Add V when the value is set
+    *computed = S + A; // Add V when the value is set
+    return true;
   case R_RISCV_SUB6:
     LL_FALLTHROUGH;
   case R_RISCV_SUB8:
@@ -565,7 +599,8 @@ int32_t computeAddend(ElfRelocationATable * relaTab, unsigned relNo, Elf_Rel *re
   case R_RISCV_SUB32:
     LL_FALLTHROUGH;
   case R_RISCV_SUB64:
-    return S + A; // Subtract from V when value is set
+    *computed = S + A; // Subtract from V when value is set
+    return true;
   case R_RISCV_SET6:
     LL_FALLTHROUGH;
   case R_RISCV_SET8:
@@ -573,16 +608,19 @@ int32_t computeAddend(ElfRelocationATable * relaTab, unsigned relNo, Elf_Rel *re
   case R_RISCV_SET16:
     LL_FALLTHROUGH;
   case R_RISCV_SET32:
-    return S + A;
+    *computed = S + A;
+    return true;
   case R_RISCV_RELAX:
     // This "relocation" has no addend.
     LL_FALLTHROUGH;
   case R_RISCV_ALIGN:
     // I guess we don't need to implement this relaxation. Otherwise, this
     // should return the number of blank bytes to insert via NOPs.
-    return 0;
+    *computed = 0;
+    return true;
   case R_RISCV_32_PCREL:
-    return S + A - P;
+    *computed = S + A - P;
+    return true;
   case R_RISCV_GOT_HI20: {
     // TODO: Allocating extra memory for every symbol just to play this trick
     // seems to be a bit obscene. (GOT relocations hitting local symbols
@@ -595,7 +633,8 @@ int32_t computeAddend(ElfRelocationATable * relaTab, unsigned relNo, Elf_Rel *re
     // case we create a symbol extra entry and pretend it's the GOT.
     if (GOT_S != 0) {
       // 1. Public symbol with GOT entry.
-      return GOT_S + A - P;
+      *computed = GOT_S + A - P;
+      return true;
     } else {
       // 2. Fake GOT entry with symbol extra entry.
       SymbolExtra *symbolExtra = makeSymbolExtra(oc, ELF_R_SYM(rel->r_info), S);
@@ -604,14 +643,16 @@ int32_t computeAddend(ElfRelocationATable * relaTab, unsigned relNo, Elf_Rel *re
       LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "R_RISCV_GOT_HI20 w/ SymbolExtra = %p , "
                                   "entry = %p , reloc-addend = 0x%lu ",
                                   symbolExtra, FAKE_GOT_S, res));
-      return res;
+      *computed = res;
+      return true;
     }
   }
   default:
-    LL_FATAL_FOR(oc->L, "Unimplemented relocation: 0x%lx\n (%lu)",
+    ll_error_set(oc->L, LL_E_UNSUPPORTED,
+               "Unimplemented relocation: 0x%lx\n (%lu)",
                ELF64_R_TYPE(rel->r_info), ELF64_R_TYPE(rel->r_info));
+    return false;
   }
-  LL_FATAL_FOR(oc->L, "This should never happen!");
 }
 
 // Iterate over all relocations and perform them.
@@ -636,10 +677,14 @@ bool relocateObjectCodeRISCV64(ObjectCode *oc) {
       // need this case? Leaving it in to spot the potential bug when it
       // appears.
       /* decode implicit addend */
-      int64_t addend = decodeAddendRISCV64(oc->L, targetSection, rel);
-
-      addend = computeAddend((ElfRelocationATable*) relTab, i, rel, symbol, addend, oc);
-      encodeAddendRISCV64(oc->L, targetSection, rel, addend);
+      int32_t addend;
+      if (!decodeAddendRISCV64(oc->L, targetSection, rel, &addend))
+        return EXIT_FAILURE;
+      if (!computeAddend((ElfRelocationATable *)relTab, i, rel, symbol,
+                          addend, oc, &addend))
+        return EXIT_FAILURE;
+      if (encodeAddendRISCV64(oc->L, targetSection, rel, addend))
+        return EXIT_FAILURE;
     }
   }
   for (ElfRelocationATable *relaTab = oc->info->relaTable; relaTab != NULL;
@@ -660,10 +705,12 @@ bool relocateObjectCodeRISCV64(ObjectCode *oc) {
       LL_CHECK_FOR(oc->L, 0x0 != symbol);
 
       /* take explicit addend */
-      int64_t addend = rel->r_addend;
-
-      addend = computeAddend(relaTab, i, (Elf_Rel *)rel, symbol, addend, oc);
-      encodeAddendRISCV64(oc->L, targetSection, (Elf_Rel *)rel, addend);
+      int32_t addend;
+      if (!computeAddend(relaTab, i, (Elf_Rel *)rel, symbol, rel->r_addend,
+                          oc, &addend))
+        return EXIT_FAILURE;
+      if (encodeAddendRISCV64(oc->L, targetSection, (Elf_Rel *)rel, addend))
+        return EXIT_FAILURE;
     }
   }
   return EXIT_SUCCESS;

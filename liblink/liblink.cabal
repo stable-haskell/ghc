@@ -133,6 +133,7 @@ extra-source-files:
     tests/fixtures/macho-input/zero_size.c
     tests/unit/riscv_u_type.c
     tests/unit/riscv_u_type_source.py
+    tests/unit/riscv64_reloc_errors.c
     tests/unit/run_native_tests.py
 
 custom-setup
