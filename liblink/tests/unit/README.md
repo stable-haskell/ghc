@@ -253,3 +253,23 @@ The native Darwin configuration enables mmap, so the non-mmap caller branches
 in `Linker.c` and `LoadArchive.c` are compiled out here. This unit verifies the
 error-conversion helper only; those caller cleanup paths need a supported
 non-mmap configuration to execute.
+
+Mach-O AArch64 relocation status
+================================
+
+On native Darwin AArch64, `macho_error_status.c` includes the current `MachO.c`
+and tests its private addend decoder/encoder, symbol lookup, and section
+relocation loop. It checks valid little-endian writes and branch encoding, then
+checks supported SUBTRACTOR/UNSIGNED and ADDEND/PAGEOFF12 pairs, malformed pair
+shapes, conflicting implicit and explicit addends, unresolved symbols, and
+positive/negative range errors for UNSIGNED, SUBTRACTOR, BRANCH26, PAGE21,
+GOT_LOAD_PAGE21, PAGEOFF12, and GOT_LOAD_PAGEOFF12. Failure cases require the
+expected owner-local status, a diagnostic, and an unchanged write target and
+canaries. The unit also checks that owner teardown releases its allocations and
+that errors do not alter the default linker state.
+
+The native driver runs this unit only when the generated platform header selects
+AArch64 on Darwin. Its link-map check requires the selected stage2 archive and
+rejects an archived `MachO.o` beside the included implementation. This covers
+function-level relocation behavior, not a complete object-file load or a
+non-Darwin architecture.

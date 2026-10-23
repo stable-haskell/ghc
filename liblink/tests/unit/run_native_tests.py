@@ -488,6 +488,36 @@ def main() -> int:
             )
             run([str(macho_prefile_test)], label="run macho_prefile_error")
 
+            platform_header = (config_include / "ll_platform.h").read_text()
+            if re.search(r"^#define\s+aarch64_HOST_ARCH\s+1\s*$",
+                         platform_header, flags=re.MULTILINE):
+                macho_status_test = output / "macho_error_status"
+                macho_status_map = output / "macho_error_status.map"
+                macho_status_trace = run(
+                    cc
+                    + [
+                        str(ROOT / "liblink/tests/unit/macho_error_status.c"),
+                        f"-L{archive.parent}",
+                        "-llink",
+                        *core_link_flags(host),
+                        "-Wl,-t",
+                        linker_map_flag(macho_status_map),
+                        "-o",
+                        str(macho_status_test),
+                    ],
+                    label="compile and link macho_error_status",
+                )
+                verify_macho_link_map(
+                    macho_status_map,
+                    archive,
+                    macho_status_trace,
+                    included_source="MachO.c",
+                    forbidden_members=("MachO",),
+                )
+                run([str(macho_status_test)], label="run macho_error_status")
+            else:
+                print("[macho_error_status] SKIP: generated target is not AArch64")
+
     print("liblink native unit tests: PASS")
     return 0
 
