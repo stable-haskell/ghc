@@ -2124,6 +2124,8 @@ package_flags_deps = [
         ------- Packages ----------------------------------------------------
     make_ord_flag defFlag "package-db"
       (HasArg (addPkgDbRef . PkgDbPath . OsPath.unsafeEncodeUtf))
+  , make_ord_flag defFlag "unit-store"
+      (HasArg (addPkgDbRef . UnitStorePath . OsPath.unsafeEncodeUtf))
   , make_ord_flag defFlag "clear-package-db"      (NoArg clearPkgDb)
   , make_ord_flag defFlag "no-global-package-db"  (NoArg removeGlobalPkgDb)
   , make_ord_flag defFlag "no-user-package-db"    (NoArg removeUserPkgDb)
@@ -3348,6 +3350,10 @@ parseEnvFile envfile = mapM_ parseEntry . lines
         -- relative package dbs are interpreted relative to the env file
         where envdir = takeDirectory envfile
               db     = drop 11 str
+      ("unit-store": _)     -> addPkgDbRef (UnitStorePath (OsPath.unsafeEncodeUtf (envdir </> store)))
+        -- relative unit stores are interpreted relative to the env file too
+        where envdir = takeDirectory envfile
+              store  = drop (length "unit-store ") str
       ["clear-package-db"]  -> clearPkgDb
       ["hide-package", pkg]  -> hidePackage pkg
       ["global-package-db"] -> addPkgDbRef GlobalPkgDb

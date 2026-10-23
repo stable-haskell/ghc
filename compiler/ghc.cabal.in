@@ -952,6 +952,7 @@ Library
         GHC.Unit.External.ModuleOrigin
         GHC.Unit.External.Providers
         GHC.Unit.External.Query
+        GHC.Unit.External.Store
         GHC.Unit.External.Substitution
         GHC.Unit.External.Validate
         GHC.Unit.External.Visibility
