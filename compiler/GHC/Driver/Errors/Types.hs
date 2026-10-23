@@ -25,7 +25,7 @@ import GHC.Prelude
 import Data.Bifunctor
 import Data.Typeable
 
-import GHC.Driver.DynFlags (DynFlags, PackageArg, gopt, ReexportedModule)
+import GHC.Driver.DynFlags (DynFlags, gopt, ReexportedModule)
 import GHC.Driver.Flags (GeneralFlag (Opt_BuildingCabalPackage))
 import GHC.Types.Error
 import GHC.Unit.Module
@@ -164,10 +164,11 @@ data DriverMessage where
 
   {-| DriverUnusedPackages occurs when when package is requested on command line,
       but was never needed during compilation. Activated by -Wunused-packages.
+      The 'String' is the flag as typed, e.g. @-package foo@.
 
      Test cases: warnings/should_compile/UnusedPackages
   -}
-  DriverUnusedPackages :: [(UnitId, PackageName, Version, PackageArg)] -> DriverMessage
+  DriverUnusedPackages :: [(UnitId, PackageName, Version, String)] -> DriverMessage
 
   {-| DriverUnnecessarySourceImports (controlled with -Wunused-imports) occurs if there
       are {-# SOURCE #-} imports which are not necessary. See 'warnUnnecessarySourceImports'

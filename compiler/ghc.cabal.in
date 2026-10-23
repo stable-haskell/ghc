@@ -950,6 +950,7 @@ Library
         GHC.Unit.External.Database
         GHC.Unit.External.Index
         GHC.Unit.External.ModuleOrigin
+        GHC.Unit.External.Names
         GHC.Unit.External.Providers
         GHC.Unit.External.Query
         GHC.Unit.External.Store

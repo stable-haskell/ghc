@@ -178,6 +178,37 @@ Stage 1 is a few hundred lines and a day of work on top of the current
 prototype. Stage 3 touches hadrian and Cabal's settings output and is the
 one that needs agreement outside this tree.
 
+### Stage 1, implemented
+
+Done on 2026-10-23 (commit `refactor(driver): resolve package-name flags
+to unit ids at one front-end boundary`). The shape it took:
+
+- `HidePackage`, `IgnorePackage`, `TrustPackage` and `DistrustPackage`
+  carry a `PackageArg` (name or unit id) like `ExposePackage` already did,
+  and the parsers in `GHC.Driver.Session` build the name form.
+- `GHC.Unit.External.Names` is the boundary. `mkUnitState` calls
+  `resolveIgnoreFlags` on the merged map before `validateDatabase`, then
+  `resolveTrustFlags` and `resolvePackageFlags` on the validated units and
+  the unusable set, which are exactly the inputs the by-name matching used
+  to see. From there on only ids flow. `Note [Names are resolved in the
+  front end]` documents the rules, which reproduce the old behaviour:
+  `-package` picks the most preferable match, hide/trust/distrust expand
+  to one flag per match, `-ignore-package` of an unknown name stays
+  silent, and errors reuse `PackageFlagErr`/`TrustFlagErr` with the
+  original flag so the messages are byte-identical.
+- The arms of `findPackages`, `selectPackages` and `ignoreUnits` that
+  matched a name now panic through `nameReachedCore`, so a name cannot
+  leak into the core unnoticed.
+- The flag text as typed replaces `PackageArg` in `uv_explicit`,
+  `explicitUnits` and `DriverUnusedPackages`, so `-Wunused-packages`
+  still says `exposed by flag -package foo`, and the core's visibility
+  record no longer mentions `PackageArg` at all.
+
+What it did not do: the by-name code still exists, in one module, and
+`demandRoots` still falls back to enumerating stores when a name flag is
+present, because resolution happens after the databases are read. Stage 2
+is where the resolved ids feed the demand-driven read directly.
+
 ## The simpler compiler
 
 Put together with the first two stages of the spike, the driver that

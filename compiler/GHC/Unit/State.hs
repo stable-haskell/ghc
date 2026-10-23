@@ -96,6 +96,7 @@ import GHC.Unit.Ppr
 
 import GHC.Unit.External.Database
 import GHC.Unit.External.Index
+import GHC.Unit.External.Names
 import GHC.Unit.External.Store (unitReferencedUnitIds)
 import GHC.Unit.External.ModuleOrigin
 import GHC.Unit.External.Providers
@@ -413,11 +414,16 @@ data UnitState = UnitState {
   -- is always mentioned before the units it depends on.
   preloadUnits      :: [UnitId],
 
-  -- | Units which we explicitly depend on (from a command line flag).
-  -- We'll use this to generate version macros and the unused packages warning. The
-  -- original flag which was used to bring the unit into scope is recorded for the
-  -- -Wunused-packages warning.
-  explicitUnits :: [(Unit, Maybe PackageArg)],
+  -- | The units that can be used by the respective home unit. Despite the
+  -- identifier, this does not just cover units that are enabled explicitly
+  -- using flags but also units from the package database that are enabled
+  -- implicitly in case @-hide-all-packages@ is absent. The former are paired
+  -- with 'Just' the flag as typed (e.g. @-package foo@), the latter with
+  -- 'Nothing'.
+  --
+  -- This field is used for generating version macros and “unused packages”
+  -- warnings.
+  explicitUnits :: [(Unit, Maybe String)],
 
   homeUnitDepends    :: Set UnitId,
 
@@ -637,13 +643,13 @@ applyTrustFlag prec_map unusable pkgs overlay flag =
   case flag of
     -- we trust all matching packages. Maybe should only trust first one?
     -- and leave others the same or set them untrusted
-    TrustPackage str ->
-       case selectPackages prec_map (PackageArg str) pkgs unusable of
+    TrustPackage arg ->
+       case selectPackages prec_map arg pkgs unusable of
          Left ps       -> Failed (TrustFlagErr flag ps)
          Right (ps,_) -> Succeeded (trustUnits (map unitId ps) overlay)
 
-    DistrustPackage str ->
-       case selectPackages prec_map (PackageArg str) pkgs unusable of
+    DistrustPackage arg ->
+       case selectPackages prec_map arg pkgs unusable of
          Left ps       -> Failed (TrustFlagErr flag ps)
          Right (ps,_) -> Succeeded (distrustUnits (map unitId ps) overlay)
 
@@ -660,7 +666,7 @@ applyPackageFlag
 
 applyPackageFlag prec_map pkg_map unusable no_hide_others pkgs vm flag =
   case flag of
-    ExposePackage _ arg (ModRenaming b rns) ->
+    ExposePackage doc arg (ModRenaming b rns) ->
        case findPackages prec_map pkg_map arg pkgs unusable of
          Left ps     -> Failed (PackageFlagErr flag ps)
          Right (p:_) -> Succeeded vm'
@@ -693,7 +699,7 @@ applyPackageFlag prec_map pkg_map unusable no_hide_others pkgs vm flag =
                 , uv_renamings = rns
                 , uv_package_name = First (Just n)
                 , uv_requirements = reqs
-                , uv_explicit = Just arg
+                , uv_explicit = Just doc
                 }
            vm' = addToUniqMap_C mappend vm_cleared (mkUnit p) uv
            -- In the old days, if you said `ghc -package p-0.1 -package p-0.2`
@@ -724,8 +730,8 @@ applyPackageFlag prec_map pkg_map unusable no_hide_others pkgs vm flag =
                                    || First (Just n) /= uv_package_name uv) vm
          _ -> panic "applyPackageFlag"
 
-    HidePackage str ->
-       case findPackages prec_map pkg_map (PackageArg str) pkgs unusable of
+    HidePackage arg ->
+       case findPackages prec_map pkg_map arg pkgs unusable of
          Left ps  -> Failed (PackageFlagErr flag ps)
          Right ps -> Succeeded $ foldl' delFromUniqMap vm (map mkUnit ps)
 
@@ -835,20 +841,30 @@ mkUnitState logger dflags unit_index cfg = do
   -- Merge databases together, without checking validity
   (pkg_map1, prec_map) <- mergeDatabases logger dbs
 
+  -- From here on, package names are resolved to unit ids before any flag is
+  -- applied; the rest of this function and everything it calls only see ids.
+  -- See Note [Names are resolved in the front end] in GHC.Unit.External.Names.
+  let ignore_flags = resolveIgnoreFlags pkg_map1 (reverse (unitConfigFlagsIgnored cfg))
+
   -- Now that we've merged everything together, prune out unusable
   -- packages.
-  let (pkg_map2, unusable, sccs) = validateDatabase (unitConfigFlagsIgnored cfg) pkg_map1
+  let (pkg_map2, unusable, sccs) = validateDatabase ignore_flags pkg_map1
 
   reportCycles   logger sccs
   reportUnusable logger unusable
 
+  let pkgs1 = nonDetEltsUniqMap pkg_map2
+  let prelim_pkg_db = mkUnitInfoMap pkgs1
+
+  trust_flags  <- mayThrowUnitErr $ resolveTrustFlags   prec_map unusable pkgs1 (reverse (unitConfigFlagsTrusted cfg))
+  expose_flags <- mayThrowUnitErr $ resolvePackageFlags prec_map unusable pkgs1 other_flags
+  plugin_flags <- mayThrowUnitErr $ resolvePackageFlags prec_map unusable pkgs1 (reverse (unitConfigFlagsPlugins cfg))
+
   -- Compute trust flags (these flags apply regardless of whether
   -- or not packages are visible or not)
   trustUnitsOverlay <- mayThrowUnitErr
-            $ foldM (applyTrustFlag prec_map unusable (nonDetEltsUniqMap pkg_map2))
-                 distrustedUnitsOverlay (reverse (unitConfigFlagsTrusted cfg))
-  let pkgs1 = nonDetEltsUniqMap pkg_map2
-  let prelim_pkg_db = mkUnitInfoMap pkgs1
+            $ foldM (applyTrustFlag prec_map unusable pkgs1)
+                 distrustedUnitsOverlay trust_flags
 
   --
   -- Calculate the initial set of units from package databases, prior to any package flags.
@@ -906,7 +922,7 @@ mkUnitState logger dflags unit_index cfg = do
   vis_map2 <- mayThrowUnitErr
                 $ foldM (applyPackageFlag prec_map prelim_pkg_db unusable
                         (unitConfigHideAll cfg) pkgs1)
-                            vis_map1 other_flags
+                            vis_map1 expose_flags
 
   --
   -- Sort out which packages are wired in. This has to be done last, since
@@ -994,7 +1010,7 @@ mkUnitState logger dflags unit_index cfg = do
 
   let hide_plugin_pkgs = unitConfigHideAllPlugins cfg
   plugin_vis_map <-
-    case unitConfigFlagsPlugins cfg of
+    case plugin_flags of
         -- common case; try to share the old vis_map
         [] | not hide_plugin_pkgs -> return vis_map
            | otherwise -> return emptyUniqMap
@@ -1009,7 +1025,7 @@ mkUnitState logger dflags unit_index cfg = do
                         $ foldM (applyPackageFlag prec_map prelim_pkg_db unusable
                                 hide_plugin_pkgs pkgs1)
                              plugin_vis_map1
-                             (reverse (unitConfigFlagsPlugins cfg))
+                             plugin_flags
                 -- Updating based on wired in packages is mostly
                 -- good hygiene, because it won't matter: no wired in
                 -- package has a compiler plugin.

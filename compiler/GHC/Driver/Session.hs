@@ -3192,14 +3192,14 @@ clearPluginPkgDbs =
   upd (\s -> s{ pluginPackageDBFlags = ClearPackageDBs : pluginPackageDBFlags s })
 
 hidePackage p =
-  upd (\s -> s{ packageFlags = HidePackage p : packageFlags s })
+  upd (\s -> s{ packageFlags = HidePackage (PackageArg p) : packageFlags s })
 ignorePackage p =
-  upd (\s -> s{ ignorePackageFlags = IgnorePackage p : ignorePackageFlags s })
+  upd (\s -> s{ ignorePackageFlags = IgnorePackage (PackageArg p) : ignorePackageFlags s })
 
 trustPackage p = exposePackage p >> -- both trust and distrust also expose a package
-  upd (\s -> s{ trustFlags = TrustPackage p : trustFlags s })
+  upd (\s -> s{ trustFlags = TrustPackage (PackageArg p) : trustFlags s })
 distrustPackage p = exposePackage p >>
-  upd (\s -> s{ trustFlags = DistrustPackage p : trustFlags s })
+  upd (\s -> s{ trustFlags = DistrustPackage (PackageArg p) : trustFlags s })
 
 exposePackage' :: String -> DynFlags -> DynFlags
 exposePackage' p dflags

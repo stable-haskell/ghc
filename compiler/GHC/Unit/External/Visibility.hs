@@ -35,10 +35,12 @@ data UnitVisibility = UnitVisibility
     , uv_requirements :: UniqMap ModuleName (Set InstantiatedModule)
       -- ^ The signatures which are contributed to the requirements context
       -- from this unit ID.
-    , uv_explicit :: Maybe PackageArg
-      -- ^ Whether or not this unit was explicitly brought into scope,
-      -- as opposed to implicitly via the 'exposed' fields in the
-      -- package database (when @-hide-all-packages@ is not passed.)
+    , uv_explicit :: Maybe String
+      -- ^ The flag that brought this unit into scope explicitly, as typed
+      -- (e.g. @-package foo@), or 'Nothing' if the unit is in scope
+      -- implicitly through the database's @exposed@ field (when
+      -- @-hide-all-packages@ is not passed). Whether it is 'Just' decides
+      -- the preload set; the text itself is only used in messages.
     }
 
 instance Outputable UnitVisibility where
@@ -48,7 +50,7 @@ instance Outputable UnitVisibility where
         uv_package_name = First mb_pn,
         uv_requirements = reqs,
         uv_explicit = explicit
-    }) = ppr (b, rns, mb_pn, reqs, explicit)
+    }) = ppr (b, rns, mb_pn, reqs, fmap (text :: String -> SDoc) explicit)
 
 instance Semigroup UnitVisibility where
     uv1 <> uv2
