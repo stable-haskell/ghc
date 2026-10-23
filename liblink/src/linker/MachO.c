@@ -39,7 +39,6 @@
 
   I hereby formally apologize for the hackish nature of this code.
   Things that need to be done:
-  *) implement ocVerifyImage_MachO
   *) add still more sanity checks.
 */
 #if defined(aarch64_HOST_ARCH)
@@ -200,27 +199,6 @@ ocAllocateExtras_MachO(ObjectCode* oc)
 #error Unknown MachO architecture
 #endif /* HOST_ARCH */
 #endif /* NEED_SYMBOL_EXTRAS */
-
-int
-ocVerifyImage_MachO(ObjectCode * oc)
-{
-    char *image = (char*) oc->image;
-    MachOHeader *header = (MachOHeader*) image;
-
-    LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "ocVerifyImage_MachO: start\n"));
-
-    if(header->magic != MH_MAGIC_64) {
-        LL_LOG_ERROR_FOR(oc->L, "Could not load image %s: bad magic!\n"
-                   "  Expected %08x (64bit), got %08x%s\n",
-                   oc->fileName, MH_MAGIC_64, header->magic,
-                   header->magic == MH_MAGIC ? " (32bit)." : ".");
-        return 0;
-    }
-
-    // FIXME: do some more verifying here
-    LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "ocVerifyImage_MachO: done\n"));
-    return 1;
-}
 
 static int
 resolveImports(
@@ -785,16 +763,16 @@ relocateSection(ObjectCode* oc, int curSection)
     MachORelocationInfo * relocs = sect->info->relocation_info;
     MachOSymbol * symbols = oc->info->macho_symbols;
 
-    LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "relocateSection %d (%s, %s): start\n",
+    LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "relocateSection %d (%.16s, %.16s): start\n",
                                 curSection, msect->segname, msect->sectname));
 
-    if(!strcmp(msect->sectname,"__la_symbol_ptr"))
+    if(!strncmp(msect->sectname,"__la_symbol_ptr",16))
         return 1;
-    else if(!strcmp(msect->sectname,"__nl_symbol_ptr"))
+    else if(!strncmp(msect->sectname,"__nl_symbol_ptr",16))
         return 1;
-    else if(!strcmp(msect->sectname,"__la_sym_ptr2"))
+    else if(!strncmp(msect->sectname,"__la_sym_ptr2",16))
         return 1;
-    else if(!strcmp(msect->sectname,"__la_sym_ptr3"))
+    else if(!strncmp(msect->sectname,"__la_sym_ptr3",16))
         return 1;
 
     LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "relocateSection: number of relocations: %d\n", msect->nreloc));
@@ -989,7 +967,7 @@ relocateSection(ObjectCode* oc, int curSection)
             MachOSection * targetMacho = targetSec->info->macho_section;
 
             LL_IF_DEBUG_FOR(oc->L, linker_verbose,
-                     LL_DEBUG_FOR(oc->L, "relocateSection: internal relocation relative to section %d (%s, %s)\n",
+                     LL_DEBUG_FOR(oc->L, "relocateSection: internal relocation relative to section %d (%.16s, %.16s)\n",
                                 targetSecNum, targetMacho->segname, targetMacho->sectname));
 
             switch (type) {
@@ -1125,9 +1103,9 @@ getSectionKind_MachO(MachOSection *section)
         return SECTIONKIND_INIT_ARRAY;
     } else if (s_type == S_MOD_TERM_FUNC_POINTERS) {
         return SECTIONKIND_FINI_ARRAY;
-    } else if (0==strcmp(section->segname,"__TEXT")) {
+    } else if (0==strncmp(section->segname,"__TEXT",16)) {
         return SECTIONKIND_CODE_OR_RODATA;
-    } else if (0==strcmp(section->segname,"__DATA")) {
+    } else if (0==strncmp(section->segname,"__DATA",16)) {
         return SECTIONKIND_RWDATA;
     } else {
         return SECTIONKIND_OTHER;
@@ -1360,7 +1338,7 @@ ocGetNames_MachO(ObjectCode* oc)
 
             LL_IF_DEBUG_FOR(oc->L, linker,
                      LL_DEBUG_FOR(oc->L, "ocGetNames_MachO: loading section %d in segment %d "
-                                "(#%d, %s %s)\n"
+                                "(#%d, %.16s %.16s)\n"
                                 "                  skipped %zu bytes due to alignment of %zu\n",
                                 sec_n, seg_n, sec_idx, section->segname, section->sectname,
                                 (char *)secMem - (char *)curMem, alignment));
@@ -1700,26 +1678,26 @@ ocResolve_MachO(ObjectCode* oc)
         {
             const char * sectionName = oc->info->macho_sections[i].sectname;
 
-            LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "ocResolve_MachO: section %d/%d: %s\n", i, oc->n_sections, sectionName));
+            LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "ocResolve_MachO: section %d/%d: %.16s\n", i, oc->n_sections, sectionName));
 
-            if(    !strcmp(sectionName,"__la_symbol_ptr")
-                || !strcmp(sectionName,"__la_sym_ptr2")
-                || !strcmp(sectionName,"__la_sym_ptr3"))
+            if(    !strncmp(sectionName,"__la_symbol_ptr",16)
+                || !strncmp(sectionName,"__la_sym_ptr2",16)
+                || !strncmp(sectionName,"__la_sym_ptr3",16))
             {
                 if(!resolveImports(oc,&oc->info->macho_sections[i],
                                    &oc->sections[i], indirectSyms,
                                    oc->info->dsymCmd->nindirectsyms))
                     return 0;
             }
-            else if(!strcmp(sectionName,"__nl_symbol_ptr")
-                ||  !strcmp(sectionName,"__pointers"))
+            else if(!strncmp(sectionName,"__nl_symbol_ptr",16)
+                ||  !strncmp(sectionName,"__pointers",16))
             {
                 if(!resolveImports(oc,&oc->info->macho_sections[i],
                                    &oc->sections[i], indirectSyms,
                                    oc->info->dsymCmd->nindirectsyms))
                     return 0;
             }
-            else if(!strcmp(sectionName,"__jump_table"))
+            else if(!strncmp(sectionName,"__jump_table",16))
             {
                 /* This legacy alias has no established slot format. Standard
                  * S_SYMBOL_STUBS uses reserved2 byte strides, not pointers. */

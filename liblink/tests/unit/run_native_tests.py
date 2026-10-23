@@ -163,33 +163,41 @@ def verify_link_map(
     )
 
 
-def is_macho_archive_member(member: str) -> bool:
-    basename = member.replace("\\", "/").rsplit("/", 1)[-1]
-    return re.fullmatch(
-        r"(?:src_)?(?:linker_)?MachO(?:\.c)?\.(?:o|obj)",
-        basename,
-        flags=re.IGNORECASE,
-    ) is not None
-
-
-def verify_macho_link_map(map_path: Path, archive: Path, link_trace: str) -> None:
+def verify_macho_link_map(
+    map_path: Path,
+    archive: Path,
+    link_trace: str,
+    *,
+    included_source: str,
+    forbidden_members: tuple[str, ...],
+    required_members: tuple[str, ...] = (),
+) -> None:
     if not map_path.is_file():
         raise RuntimeError(f"linker did not create map file: {map_path}")
     text = map_path.read_text(errors="replace")
-    if str(archive) not in text + link_trace:
+    evidence = text + link_trace
+    if str(archive) not in text or str(archive) not in link_trace:
         raise RuntimeError(f"link did not use expected stage2 archive: {archive}")
 
-    selected = []
-    for line in text.splitlines():
-        match = re.search(r"liblink\.a\(([^)]*)\)", line)
-        if match and is_macho_archive_member(match.group(1)):
-            selected.append(line)
-    if selected:
-        raise RuntimeError(
-            "link map selected an archived MachO implementation beside included MachO.c:\n"
-            + "\n".join(selected)
+    for member in forbidden_members:
+        pattern = re.compile(
+            rf"{re.escape(str(archive))}"
+            rf"\((?:[^)]*[/_])?{re.escape(member)}(?:\.c)?\.(?:o|obj)\)",
+            flags=re.IGNORECASE,
         )
-    print("[MachO.c] link map uses stage2 archive without an archived MachO implementation")
+        if pattern.search(text):
+            raise RuntimeError(
+                f"link map selected archive {member}.o beside included {included_source}"
+            )
+
+    for member in required_members:
+        pattern = re.compile(
+            rf"{re.escape(str(archive))}"
+            rf"\((?:[^)]*[/_])?{re.escape(member)}(?:\.c)?\.(?:o|obj)\)",
+            flags=re.IGNORECASE,
+        )
+        if not pattern.search(evidence):
+            raise RuntimeError(f"link did not select {member} from {archive}")
 
 
 def main() -> int:
@@ -310,9 +318,9 @@ def main() -> int:
         run([str(archive_test)], label="run archive_error_status")
 
         if host == "Darwin":
-            macho_test = output / "macho_import_status"
-            macho_map_file = output / "macho_import_status.map"
-            macho_link_trace = run(
+            macho_import_test = output / "macho_import_status"
+            macho_import_map = output / "macho_import_status.map"
+            macho_import_trace = run(
                 cc
                 + [
                     str(ROOT / "liblink/tests/unit/macho_import_status.c"),
@@ -320,14 +328,20 @@ def main() -> int:
                     "-llink",
                     *core_link_flags(host),
                     "-Wl,-t",
-                    linker_map_flag(macho_map_file),
+                    linker_map_flag(macho_import_map),
                     "-o",
-                    str(macho_test),
+                    str(macho_import_test),
                 ],
                 label="compile and link macho_import_status",
             )
-            verify_macho_link_map(macho_map_file, archive, macho_link_trace)
-            run([str(macho_test)], label="run macho_import_status")
+            verify_macho_link_map(
+                macho_import_map,
+                archive,
+                macho_import_trace,
+                included_source="MachO.c",
+                forbidden_members=("MachO",),
+            )
+            run([str(macho_import_test)], label="run macho_import_status")
 
         riscv_u_type_test = output / "riscv_u_type"
         riscv_u_type_source = output / "riscv_u_type_generated.c"
@@ -365,6 +379,64 @@ def main() -> int:
         run([str(riscv_u_type_test)], label="run riscv_u_type")
 
         if host == "Darwin":
+            macho_fixture_dir = ROOT / "liblink/tests/fixtures/macho-input"
+            macho_objects = {
+                "ordinary": output / "macho_ordinary.o",
+                "common_only": output / "macho_common_only.o",
+                "zero_size": output / "macho_zero_size.o",
+            }
+            for fixture, source in (
+                ("ordinary", "ordinary.c"),
+                ("common_only", "common_only.c"),
+                ("zero_size", "zero_size.c"),
+            ):
+                flags = ["-fcommon"] if fixture == "common_only" else []
+                run(
+                    cc
+                    + flags
+                    + [
+                        "-c",
+                        str(macho_fixture_dir / source),
+                        "-o",
+                        str(macho_objects[fixture]),
+                    ],
+                    label=f"compile Mach-O {fixture} fixture",
+                )
+
+            macho_test = output / "macho_input"
+            macho_map_file = output / "macho_input.map"
+            macho_link_trace = run(
+                cc
+                + [
+                    str(ROOT / "liblink/tests/unit/macho_input.c"),
+                    f"-L{archive.parent}",
+                    "-llink",
+                    *core_link_flags(host),
+                    "-Wl,-t",
+                    linker_map_flag(macho_map_file),
+                    "-o",
+                    str(macho_test),
+                ],
+                label="compile and link macho_input",
+            )
+            verify_macho_link_map(
+                macho_map_file,
+                archive,
+                macho_link_trace,
+                included_source="MachOVerify selection",
+                forbidden_members=(),
+                required_members=("MachOVerify",),
+            )
+            run(
+                [
+                    str(macho_test),
+                    str(macho_objects["ordinary"]),
+                    str(macho_objects["common_only"]),
+                    str(macho_objects["zero_size"]),
+                ],
+                label="run macho_input",
+            )
+
             segment_padding_test = output / "macho_segment_padding"
             segment_padding_map = output / "macho_segment_padding.map"
             segment_padding_trace = run(
@@ -381,28 +453,13 @@ def main() -> int:
                 ],
                 label="compile and link macho_segment_padding",
             )
-            if not segment_padding_map.is_file():
-                raise RuntimeError(
-                    f"linker did not create map file: {segment_padding_map}"
-                )
-            segment_padding_map_text = segment_padding_map.read_text(errors="replace")
-            if str(archive) not in segment_padding_map_text:
-                raise RuntimeError(
-                    f"macho_segment_padding map omitted expected archive: {archive}"
-                )
-            for member in ("MachO", "Linker"):
-                included_member = re.compile(
-                    rf"{re.escape(str(archive))}"
-                    rf"\((?:[^)]*[/_])?{member}(?:\.c)?\.(?:o|obj)\)"
-                )
-                if included_member.search(segment_padding_map_text):
-                    raise RuntimeError(
-                        f"archive {member}.o was selected beside the included source"
-                    )
-            if str(archive) not in segment_padding_trace:
-                raise RuntimeError(
-                    f"macho_segment_padding trace omitted expected archive: {archive}"
-                )
+            verify_macho_link_map(
+                segment_padding_map,
+                archive,
+                segment_padding_trace,
+                included_source="MachO.c and Linker.c",
+                forbidden_members=("MachO", "Linker"),
+            )
             run([str(segment_padding_test)], label="run macho_segment_padding")
 
     print("liblink native unit tests: PASS")

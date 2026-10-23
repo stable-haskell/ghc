@@ -113,9 +113,10 @@ The driver locates the generated `liblink` configuration headers, installed
 error-state, core status/negative-input, and archive status tests with
 assertions. The core and archive fixtures include their implementation source
 and link dependencies from the real archive using `-llink`; linker maps check
-that the corresponding archive object is not also selected. It accepts
-`--build-root` and `--store-root` when the stage2 build uses non-default
-directories, and `--cc` to select a C compiler command.
+that the corresponding archive object is not also selected. On Darwin, it also
+runs the Mach-O preflight, indirect-import, and segment-alignment units. The
+driver accepts `--build-root` and `--store-root` when the stage2 build uses
+non-default directories, and `--cc` to select a C compiler command.
 
 The core and archive fixtures use POSIX file descriptors and mmap injection.
 On Windows, `Linker.c` follows its stdio path (`RTS_LINKER_USE_MMAP=0`); run
@@ -149,26 +150,6 @@ The manual link-map flag below uses Darwin syntax. On Linux, use
       -Wl,-map,archive-error-status.map -o archive-error-status
     ./archive-error-status
 
-Mach-O indirect-import status
-=============================
-
-`macho_import_status.c` is a Darwin-only function-level fixture. It includes
-the current `MachO.c` and calls its static indirect-import resolver with
-explicit Mach-O metadata, while linking the remaining linker dependencies
-from the selected stage2 `liblink.a`. The positive case checks two 64-bit
-pointer entries selected by a nonzero `reserved1`, writes to an intentionally
-unaligned loaded section, verifies the original image bytes remain untouched,
-and checks surrounding canaries. Negative cases cover invalid table spans,
-an invalid second symbol index before any writes, unresolved symbols,
-LOCAL/ABS entries, and the approved `__jump_table` policy: return
-`LL_E_UNSUPPORTED` because its slot format is not established by the legacy
-importer. This is synthetic metadata coverage; it does not establish that a
-current compiler or linker producer emits these exact import sections.
-
-The native test driver runs this unit only on Darwin. Its linker map verifies
-that the included `MachO.c` is not also selected from the archive. Run the
-driver after a static stage2 build as described above.
-
 RISC-V U-type arithmetic
 ========================
 
@@ -196,6 +177,43 @@ checking its 20-bit range. The test exercises the actual extracted definitions,
 not a maintained copy. It does not build or execute the RISC-V relocation
 backend on this host; full backend execution remains for RISC-V CI.
 
+Mach-O input preflight
+======================
+
+On Darwin, the native unit driver compiles ordinary, `-fcommon`, and type-only
+zero-size Mach-O object fixtures, links `macho_input.c` against the stage2 `liblink.a`,
+checks the link map for `MachOVerify.o`, and runs malformed-header/command,
+section, symbol, relocation, initializer, and COMMON-bound cases. Valid
+fixtures pass through `ll_init_object`; valid symbol-bearing objects also pass
+through `loadOc`, after which the test discards them and verifies owner cleanup.
+The ordinary fixture includes a 32 KiB-aligned `S_ZEROFILL` symbol; the unit
+checks that `loadOc` registers it in the owner's symbol hash at the requested
+alignment and leaves its value zero.
+The unit validates preflight/loading only: it does not resolve symbols or run
+initializers. It is native Darwin evidence and does not qualify another host or
+architecture. The separate unit below covers legacy indirect-import errors.
+Pre-file misalignment error conversion remains outside this preflight slice.
+
+Mach-O indirect-import status
+=============================
+
+`macho_import_status.c` is a Darwin-only function-level fixture. It includes
+the current `MachO.c` and calls its static indirect-import resolver with
+explicit Mach-O metadata, while linking the remaining linker dependencies
+from the selected stage2 `liblink.a`. The positive case checks two 64-bit
+pointer entries selected by a nonzero `reserved1`, writes to an intentionally
+unaligned loaded section, verifies the original image bytes remain untouched,
+and checks surrounding canaries. Negative cases cover invalid table spans,
+an invalid second symbol index before any writes, unresolved symbols,
+LOCAL/ABS entries, and the approved `__jump_table` policy: return
+`LL_E_UNSUPPORTED` because its slot format is not established by the legacy
+importer. This is synthetic metadata coverage; it does not establish that a
+current compiler or linker producer emits these exact import sections.
+
+The native test driver runs this unit only on Darwin. Its link-map check
+requires the expected stage2 archive and rejects an archived `MachO.c` object
+beside the included implementation.
+
 Mach-O segment alignment headroom
 =================================
 
@@ -213,6 +231,6 @@ The loader originally sized each class from offset zero, although the mapper
 promised only page alignment. Rounding the returned base up to a larger section
 alignment could therefore place a section beyond its segment allocation. The
 runtime now reserves the worst-case alignment headroom per class and rejects
-padding addition overflow with `LL_E_FORMAT`. This unit exercises segment
+padding-add overflow with `LL_E_FORMAT`. This unit exercises segment
 construction only; it does not copy or zero section payloads, resolve symbols,
 apply relocations, or run initializers. It is native Darwin evidence only.
