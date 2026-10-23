@@ -280,6 +280,41 @@ def main() -> int:
         )
         run([str(archive_test)], label="run archive_error_status")
 
+        riscv_u_type_test = output / "riscv_u_type"
+        riscv_u_type_source = output / "riscv_u_type_generated.c"
+        run(
+            [
+                sys.executable,
+                str(ROOT / "liblink/tests/unit/riscv_u_type_source.py"),
+                "--output",
+                str(riscv_u_type_source),
+            ],
+            label="extract current RISC-V U-type helpers",
+        )
+        riscv_u_type_map = output / "riscv_u_type.map"
+        riscv_u_type_link_trace = run(
+            cc
+            + [
+                str(riscv_u_type_source),
+                f"-L{archive.parent}",
+                "-llink",
+                *core_link_flags(host),
+                "-Wl,-t",
+                linker_map_flag(riscv_u_type_map),
+                "-o",
+                str(riscv_u_type_test),
+            ],
+            label="compile and link riscv_u_type",
+        )
+        verify_link_map(
+            riscv_u_type_map,
+            archive,
+            riscv_u_type_link_trace,
+            included_source="extracted current RISC-V U-type helpers",
+            forbidden_member="elf_reloc_riscv64",
+        )
+        run([str(riscv_u_type_test)], label="run riscv_u_type")
+
     print("liblink native unit tests: PASS")
     return 0
 

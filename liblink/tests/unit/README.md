@@ -148,3 +148,30 @@ The manual link-map flag below uses Darwin syntax. On Linux, use
       liblink/tests/unit/archive_error_status.c -L"$LIBLINK_BUILD_LIB" -llink -pthread \
       -Wl,-map,archive-error-status.map -o archive-error-status
     ./archive-error-status
+
+RISC-V U-type arithmetic
+========================
+
+`riscv_u_type.c` is a portable helper unit generated from the current
+`elf_reloc_riscv64.c` by `riscv_u_type_source.py`. The extractor accepts only
+one definition of each expected helper and checks its signature and balanced
+function body before compiling it with the native `LinkerInternals.h`,
+`linker/util.h`, generated host headers, and support from the stage2
+`liblink.a`. The unit uses twelve explicit instruction words to check signed
+minimum/maximum values, rounding boundaries around +/-2048, ordinary positive
+and negative addends, and preservation of several low-12-bit instruction
+patterns. The native test driver runs it after the archive unit. To enable
+ASan+UBSan for this unit, pass sanitizer options through the driver's existing
+`--cc` argument, for example:
+
+    python3 liblink/tests/unit/run_native_tests.py \
+      --cc 'clang -fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer'
+
+The regression covers two arithmetic defects in U-type encoding. First,
+rounding a signed `int32_t` with `val + 0x800` overflows at `INT32_MAX`; casting
+to `uint32_t` first makes the addition defined modulo 2^32. Second,
+`signExtend32` takes `(bits, value)`, so passing the operands in that order
+checks the rounded high field as a signed 32-bit value before shifting and
+checking its 20-bit range. The test exercises the actual extracted definitions,
+not a maintained copy. It does not build or execute the RISC-V relocation
+backend on this host; full backend execution remains for RISC-V CI.

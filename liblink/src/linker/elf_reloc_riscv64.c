@@ -155,8 +155,8 @@ uint32_t extractBits(uint64_t v, uint32_t begin, uint32_t end) {
 // upper 20bits carry the upper 20bits of the immediate.
 void setUType(ll_linker *L, inst_t *loc, int32_t val) {
   const unsigned bits = 32;
-  uint32_t hi = val + 0x800;
-  checkInt(L, loc, signExtend32(hi, bits) >> 12, 20);
+  uint32_t hi = (uint32_t)val + UINT32_C(0x800);
+  checkInt(L, loc, signExtend32(bits, hi) >> 12, 20);
   LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "setUType: hi 0x%x val 0x%x\n", hi, val));
 
   uint32_t imm = hi & 0xFFFFF000;
