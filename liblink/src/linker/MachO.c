@@ -740,7 +740,10 @@ relocateSectionAarch64(ObjectCode * oc, Section * section)
                     if(findStub(section, (void**)&value, 0)) {
                         /* did not find it. Crete a new stub. */
                         if(makeStub(oc->L, section, (void**)&value, 0)) {
-                            LL_FATAL_FOR(oc->L, "could not find or make stub");
+                            if (oc->L->error_status == LL_OK)
+                                ll_error_set(oc->L, LL_E_RELOC_RANGE, "could not find or make stub");
+                            LL_LOG_ERROR_FOR(oc->L, "could not find or make stub");
+                            return 0;
                         }
                     }
                 }

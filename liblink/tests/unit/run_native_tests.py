@@ -543,6 +543,37 @@ def main() -> int:
             )
             run([str(macho_load_errors_test)], label="run macho_load_errors")
 
+            platform_header = (config_include / "ll_platform.h").read_text()
+            if re.search(
+                r"^\s*#\s*define\s+aarch64_HOST_ARCH\b",
+                platform_header,
+                flags=re.MULTILINE,
+            ):
+                macho_stub_test = output / "macho_stub_errors"
+                macho_stub_map = output / "macho_stub_errors.map"
+                macho_stub_trace = run(
+                    cc
+                    + [
+                        str(ROOT / "liblink/tests/unit/macho_stub_errors.c"),
+                        f"-L{archive.parent}",
+                        "-llink",
+                        *core_link_flags(host),
+                        "-Wl,-t",
+                        linker_map_flag(macho_stub_map),
+                        "-o",
+                        str(macho_stub_test),
+                    ],
+                    label="compile and link macho_stub_errors",
+                )
+                verify_macho_link_map(
+                    macho_stub_map,
+                    archive,
+                    macho_stub_trace,
+                    included_source="MachO.c, macho/plt.c, and macho/plt_aarch64.c",
+                    forbidden_members=("MachO", "plt", "plt_aarch64"),
+                )
+                run([str(macho_stub_test)], label="run macho_stub_errors")
+
     print("liblink native unit tests: PASS")
     return 0
 

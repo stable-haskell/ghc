@@ -115,7 +115,8 @@ assertions. The core and archive fixtures include their implementation source
 and link dependencies from the real archive using `-llink`; linker maps check
 that the corresponding archive object is not also selected. On Darwin, it also
 runs the Mach-O preflight, indirect-import, and segment-alignment units. The
-driver accepts `--build-root` and `--store-root` when the stage2 build uses
+driver also runs the AArch64 Mach-O stub lifecycle unit on Darwin/AArch64. It
+accepts `--build-root` and `--store-root` when the stage2 build uses
 non-default directories, and `--cc` to select a C compiler command.
 
 The core and archive fixtures use POSIX file descriptors and mmap injection.
@@ -286,3 +287,25 @@ section/symbol and ordinary section loads provide success controls. The unit
 uses generated stage2 headers and links remaining dependencies from the stage2
 `liblink.a`; the driver verifies that the archive does not also select the
 included `MachO.o`, `SymbolExtras.o`, or `Linker.o`. It runs on Darwin.
+
+Mach-O branch stub lifecycle
+============================
+
+On Darwin/AArch64, `macho_stub_errors.c` includes the current `MachO.c`,
+`macho/plt.c`, and `macho/plt_aarch64.c`. It checks successful stub encoding
+against fixed instruction words, lookup and repeated-target reuse, two-node
+list teardown, allocation failure, backend rejection cleanup, and
+allocation-error propagation through the branch relocation caller. The failure
+cases verify that the owner status and log are preserved, no fatal callback is
+used, and rejected operations leave caller output and stub ownership unchanged.
+The backend rejection hook affects only the cleanup case; successful encoding
+uses the real backend. The unit links dependencies from the selected stage2
+archive and rejects archived `MachO.o`, `plt.o`, and `plt_aarch64.o` beside the
+included sources.
+
+The relocation-failure fixture initializes a proddable-block set, adds the
+instruction span through `addProddableBlock`, verifies it with `containsSpan`,
+and releases its storage with `freeProddableBlocks`. This prepares a valid write
+target before allocation failure is injected at `makeStub`. The unit provides
+native Darwin/AArch64 function-level coverage; it does not load a full Mach-O
+object or qualify other architectures.

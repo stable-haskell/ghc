@@ -52,14 +52,20 @@ makeStub(ll_linker *L, Section * section,
           uint8_t flags) {
 
     Stub * s = (Stub *)LL_CALLOC_FOR(L, sizeof(Stub), 1, "makeStub");
-    LL_CHECK_FOR(L, s != NULL);
+    if (s == NULL) {
+        ll_error_set(L, LL_E_NOMEM, "cannot allocate Mach-O branch stub metadata");
+        return EXIT_FAILURE;
+    }
     s->target = *addr;
     s->flags  = flags;
     s->next = NULL;
     s->addr = (uint8_t *)section->info->stub_offset + STUB_SIZE * section->info->nstubs;
 
-    if((*_makeStub)(s))
+    if((*_makeStub)(s)) {
+        LL_FREE_FOR(L, s);
+        ll_error_set(L, LL_E_RELOC_RANGE, "cannot build Mach-O branch stub");
         return EXIT_FAILURE;
+    }
 
     if(section->info->stubs == NULL) {
         LL_CHECK_FOR(L, section->info->nstubs == 0);
@@ -77,13 +83,13 @@ makeStub(ll_linker *L, Section * section,
 
 void
 freeStubs(ll_linker *L, Section * section) {
-    if(NULL == section || section->info->nstubs == 0)
+    if(NULL == section || section->info == NULL)
         return;
-    Stub * last = section->info->stubs;
-    while(last->next != NULL) {
-        Stub * t = last;
-        last = last->next;
-        LL_FREE_FOR(L, t);
+    Stub * stub = section->info->stubs;
+    while(stub != NULL) {
+        Stub * next = stub->next;
+        LL_FREE_FOR(L, stub);
+        stub = next;
     }
     section->info->stubs = NULL;
     section->info->nstubs = 0;
