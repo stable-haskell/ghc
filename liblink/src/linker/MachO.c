@@ -77,7 +77,7 @@ static void findInternalGotRefs(ObjectCode * oc);
  * Initialize some common data in the object code so we don't have to
  * continuously look up the addresses.
  */
-void
+int
 ocInit_MachO(ObjectCode * oc)
 {
     ocDeinit_MachO(oc);
@@ -85,6 +85,10 @@ ocInit_MachO(ObjectCode * oc)
     oc->info = (struct ObjectCodeFormatInfo*)LL_CALLOC_FOR(oc->L,
                 1, sizeof *oc->info,
                 "ocInit_MachO(ObjectCodeFormatInfo)");
+    if (oc->info == NULL) {
+        ll_error_set(oc->L, LL_E_NOMEM, "cannot allocate Mach-O object metadata");
+        return 0;
+    }
     oc->info->header  = (MachOHeader *) oc->image;
     oc->info->symCmd  = NULL;
     oc->info->segCmd  = NULL;
@@ -104,7 +108,9 @@ ocInit_MachO(ObjectCode * oc)
         lc = (MachOLoadCommand *) ( ((char*)lc) + lc->cmdsize );
     }
     if (NULL == oc->info->segCmd) {
-        LL_FATAL_FOR(oc->L, "ocGetNames_MachO: no segment load command");
+        ll_error_set(oc->L, LL_E_FORMAT, "ocInit_MachO: no segment load command");
+        LL_LOG_ERROR_FOR(oc->L, "ocInit_MachO: no segment load command");
+        return 0;
     }
 
     oc->info->macho_sections = (MachOSection*) (oc->info->segCmd+1);
@@ -123,12 +129,16 @@ ocInit_MachO(ObjectCode * oc)
     oc->info->n_macho_symbols = 0;
     oc->info->macho_symbols = NULL;
 
-    if(NULL != oc->info->nlist) {
+    if(NULL != oc->info->nlist && oc->info->symCmd->nsyms != 0) {
         oc->info->n_macho_symbols = oc->info->symCmd->nsyms;
         oc->info->macho_symbols = (MachOSymbol*)LL_CALLOC_FOR(oc->L,
                                     oc->info->symCmd->nsyms,
                                     sizeof(MachOSymbol),
                                     "ocInit_MachO(MachOSymbol)");
+        if (oc->info->macho_symbols == NULL) {
+            ll_error_set(oc->L, LL_E_NOMEM, "cannot allocate Mach-O symbol metadata");
+            return 0;
+        }
         for(uint32_t i = 0; i < oc->info->symCmd->nsyms; i++) {
             oc->info->macho_symbols[i].name  = oc->info->names
                                              + oc->info->nlist[i].n_un.n_strx;
@@ -141,6 +151,7 @@ ocInit_MachO(ObjectCode * oc)
             oc->info->macho_symbols[i].got_addr = NULL;
         }
     }
+    return 1;
 }
 
 void
@@ -1260,11 +1271,15 @@ ocBuildSegments_MachO(ObjectCode *oc)
     }
 
     mem = ll_mmap_anon_for_linker(oc->L, size_compound);
-    if (NULL == mem) return 0;
+    if (NULL == mem) {
+        ll_error_set(oc->L, LL_E_NOMEM, "cannot map Mach-O segments");
+        return 0;
+    }
 
     LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "ocBuildSegments: allocating %d segments\n", n_activeSegments));
     segments = (Segment*)LL_CALLOC_FOR(oc->L, n_activeSegments, sizeof(Segment),
                                         "ocBuildSegments_MachO(segments)");
+    if (segments == NULL) goto allocation_failed;
     curMem = mem;
 
     /* Allocate space for RX segment */
@@ -1275,6 +1290,7 @@ ocBuildSegments_MachO(ObjectCode *oc)
                     ll_round_up_to_page_for(oc->L, size_rxSegment),
                     SEGMENT_PROT_RX,
                     n_rxSections);
+        if (rxSegment->sections_idx == NULL) goto allocation_failed;
         LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "ocBuildSegments_MachO: init segment %d (RX) at %p size %zu\n",
                                     curSegment, rxSegment->start, rxSegment->size));
         curMem = (char *)curMem + rxSegment->size;
@@ -1289,6 +1305,7 @@ ocBuildSegments_MachO(ObjectCode *oc)
                     ll_round_up_to_page_for(oc->L, size_rwSegment),
                     SEGMENT_PROT_RWO,
                     n_rwSections);
+        if (rwSegment->sections_idx == NULL) goto allocation_failed;
         LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "ocBuildSegments_MachO: init segment %d (RWO) at %p size %zu\n",
                                     curSegment, rwSegment->start, rwSegment->size));
         curMem = (char *)curMem + rwSegment->size;
@@ -1303,6 +1320,7 @@ ocBuildSegments_MachO(ObjectCode *oc)
                     ll_round_up_to_page_for(oc->L, size_gbZerofillSegment),
                     SEGMENT_PROT_RWO,
                     n_gbZerofills);
+        if (gbZerofillSegment->sections_idx == NULL) goto allocation_failed;
         LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "ocBuildSegments_MachO: init segment %d (GB_ZEROFILL) at %p size %zu\n",
                                     curSegment, gbZerofillSegment->start, gbZerofillSegment->size));
         curMem = (char *)curMem + gbZerofillSegment->size;
@@ -1334,6 +1352,17 @@ ocBuildSegments_MachO(ObjectCode *oc)
     oc->n_segments = n_activeSegments;
 
     return 1;
+
+allocation_failed:
+    /* No segment owns the compound mapping until all descriptors are ready. */
+    if (segments != NULL) {
+        for (int i = 0; i < n_activeSegments; ++i)
+            LL_FREE_FOR(oc->L, segments[i].sections_idx);
+        LL_FREE_FOR(oc->L, segments);
+    }
+    ll_munmap_for_linker(oc->L, mem, size_compound, "ocBuildSegments_MachO");
+    ll_error_set(oc->L, LL_E_NOMEM, "cannot allocate Mach-O segment metadata");
+    return 0;
 }
 
 int
@@ -1352,13 +1381,17 @@ ocGetNames_MachO(ObjectCode* oc)
         oc->info->segCmd->nsects,
         sizeof(Section),
         "ocGetNames_MachO(sections)");
+    if (oc->info->segCmd->nsects != 0 && secArray == NULL) {
+        ll_error_set(oc->L, LL_E_NOMEM, "cannot allocate Mach-O sections");
+        return 0;
+    }
 
     oc->sections = secArray;
 
     LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "ocGetNames_MachO: will load %d sections\n",
                                 oc->n_sections));
 
-    LL_CHECKM_FOR(oc->L, ocBuildSegments_MachO(oc), "ocGetNames_MachO: failed to build segments\n");
+    if (!ocBuildSegments_MachO(oc)) return 0;
 
     for (int seg_n = 0; seg_n < oc->n_segments; seg_n++) {
         Segment *segment = &oc->segments[seg_n];
@@ -1399,6 +1432,10 @@ ocGetNames_MachO(ObjectCode* oc)
                 memset(secMem, 0, section->size);
                 addSection(oc->L, &secArray[sec_idx], kind, alloc, start, size,
                             mapped_offset, mapped_start, mapped_size);
+                if (secArray[sec_idx].info == NULL) {
+                    ll_error_set(oc->L, LL_E_NOMEM, "cannot allocate Mach-O section metadata");
+                    return 0;
+                }
                 break;
             default:
                 LL_IF_DEBUG_FOR(oc->L, linker,
@@ -1411,9 +1448,12 @@ ocGetNames_MachO(ObjectCode* oc)
 
                 void * mem = ll_mmap_for_linker(oc->L, section->size+stub_space, MEM_READ_WRITE, MAP_ANON, -1, 0);
 
-                if( mem == MAP_FAILED ) {
+                if( mem == NULL ) {
+                    ll_error_set(oc->L, LL_E_NOMEM,
+                                 "cannot map Mach-O section %d", sec_idx);
                     LL_LOG_SYSERROR_FOR(oc->L, "failed to mmap allocated memory to load section %d. "
                                   "errno = %d", sec_idx, errno);
+                    return 0;
                 }
                 /* copy only the image part over; we don't want to copy data
                 * into the stub part.
@@ -1430,6 +1470,10 @@ ocGetNames_MachO(ObjectCode* oc)
 #endif
                 addSection(oc->L, &secArray[sec_idx], kind, alloc, start, size,
                             mapped_offset, mapped_start, mapped_size);
+                if (secArray[sec_idx].info == NULL) {
+                    ll_error_set(oc->L, LL_E_NOMEM, "cannot allocate Mach-O section metadata");
+                    return 0;
+                }
             /* SECTION_NOMEM since memory is already allocated in segments */
 
 #if defined(NEED_PLT)
@@ -1462,8 +1506,11 @@ ocGetNames_MachO(ObjectCode* oc)
     for(size_t i=0; i < oc->info->n_macho_symbols; i++) {
         MachOSymbol * s = &oc->info->macho_symbols[i];
         if( N_SECT == (s->nlist->n_type & N_TYPE) ) {
-            if( NO_SECT == s->nlist->n_sect )
-                LL_FATAL_FOR(oc->L, "Symbol with N_SECT type, but no section.");
+            if( NO_SECT == s->nlist->n_sect ) {
+                ll_error_set(oc->L, LL_E_FORMAT, "Symbol with N_SECT type, but no section.");
+                LL_LOG_ERROR_FOR(oc->L, "Symbol with N_SECT type, but no section.");
+                return 0;
+            }
 
             /* section is given, and n_sect is >0 */
             uint8_t n = s->nlist->n_sect - 1;
@@ -1485,8 +1532,11 @@ ocGetNames_MachO(ObjectCode* oc)
             s->addr = (uint8_t*)oc->sections[n].start
                               - oc->info->macho_sections[n].addr
                               + s->nlist->n_value;
-            if(NULL == s->addr)
-                LL_FATAL_FOR(oc->L, "Failed to compute address for symbol %s", s->name);
+            if(NULL == s->addr) {
+                ll_error_set(oc->L, LL_E_FORMAT, "Failed to compute address for symbol %s", s->name);
+                LL_LOG_ERROR_FOR(oc->L, "Failed to compute address for symbol %s", s->name);
+                return 0;
+            }
         }
     }
 
@@ -1524,6 +1574,10 @@ ocGetNames_MachO(ObjectCode* oc)
                                 oc->n_symbols));
     oc->symbols = LL_CALLOC_FOR(oc->L, oc->n_symbols, sizeof(Symbol_t),
                                    "ocGetNames_MachO(oc->symbols)");
+    if (oc->n_symbols != 0 && oc->symbols == NULL) {
+        ll_error_set(oc->L, LL_E_NOMEM, "cannot allocate Mach-O exported symbols");
+        return 0;
+    }
 
     if (oc->info->symCmd) {
         for (size_t i = 0; i < oc->info->n_macho_symbols; i++) {
@@ -1579,6 +1633,10 @@ ocGetNames_MachO(ObjectCode* oc)
     /* setup the common storage */
     if (commonSize > 0) {
         commonStorage = LL_CALLOC_FOR(oc->L, 1, commonSize, "ocGetNames_MachO(common symbols)");
+        if (commonStorage == NULL) {
+            ll_error_set(oc->L, LL_E_NOMEM, "cannot allocate Mach-O COMMON storage");
+            return 0;
+        }
         oc->info->common_mem = commonStorage;
         commonCounter = (unsigned long)commonStorage;
     }
@@ -1600,12 +1658,19 @@ ocGetNames_MachO(ObjectCode* oc)
                      * object; reuse that address so relocations resolve to
                      * the same storage. */
                     if (sz > existing->size) {
-                        LL_FATAL_FOR(oc->L, "linker: trying to link COMMON symbols %s with"
+                        ll_error_set(oc->L, LL_E_DUPSYM, "linker: trying to link COMMON symbols %s with"
                              " incompatible sizes: previous size %llu,"
                              " new size %lu\n",
                              nm,
                              (long long unsigned int) existing->size,
                              sz);
+                        LL_LOG_ERROR_FOR(oc->L, "linker: trying to link COMMON symbols %s with"
+                             " incompatible sizes: previous size %llu,"
+                             " new size %lu\n",
+                             nm,
+                             (long long unsigned int) existing->size,
+                             sz);
+                        return 0;
                     }
                     nlist->n_value = (unsigned long)existing->value;
                     oc->info->macho_symbols[i].addr = existing->value;

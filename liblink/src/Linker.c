@@ -1085,7 +1085,7 @@ int ll_init_object(ObjectCode *oc)
         return 0;
     }
 #if defined(OBJFORMAT_MACHO)
-    ocInit_MachO(oc);
+    if (!ocInit_MachO(oc)) return 0;
 #elif defined(OBJFORMAT_ELF)
     ocInit_ELF(oc);
 #endif

@@ -8,7 +8,7 @@ struct ll_linker;
 
 #include "ll_begin_private.h"
 
-void   ocInit_MachO                 ( ObjectCode* oc );
+int    ocInit_MachO                 ( ObjectCode* oc );
 void   ocDeinit_MachO               ( ObjectCode* oc );
 int    ocVerifyImage_MachO          ( ObjectCode* oc );
 int    ocBuildSegments_MachO        ( ObjectCode* oc );

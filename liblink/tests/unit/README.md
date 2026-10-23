@@ -273,3 +273,16 @@ AArch64 on Darwin. Its link-map check requires the selected stage2 archive and
 rejects an archived `MachO.o` beside the included implementation. This covers
 function-level relocation behavior, not a complete object-file load or a
 non-Darwin architecture.
+
+Mach-O load failure cleanup
+===========================
+
+`macho_load_errors.c` includes the actual `MachO.c`, `SymbolExtras.c`, and
+`Linker.c` implementations. It injects tagged host allocation failures in
+Mach-O initialization and load metadata, and mapper failures for segment and
+NEED_PLT section storage. Each failed load checks `LL_E_NOMEM`, a diagnostic,
+owner isolation, and teardown of host allocations and native mappings. Empty
+section/symbol and ordinary section loads provide success controls. The unit
+uses generated stage2 headers and links remaining dependencies from the stage2
+`liblink.a`; the driver verifies that the archive does not also select the
+included `MachO.o`, `SymbolExtras.o`, or `Linker.o`. It runs on Darwin.

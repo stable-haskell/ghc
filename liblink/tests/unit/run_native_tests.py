@@ -518,6 +518,31 @@ def main() -> int:
             else:
                 print("[macho_error_status] SKIP: generated target is not AArch64")
 
+            macho_load_errors_test = output / "macho_load_errors"
+            macho_load_errors_map = output / "macho_load_errors.map"
+            macho_load_errors_trace = run(
+                cc
+                + [
+                    str(ROOT / "liblink/tests/unit/macho_load_errors.c"),
+                    f"-L{archive.parent}",
+                    "-llink",
+                    *core_link_flags(host),
+                    "-Wl,-t",
+                    linker_map_flag(macho_load_errors_map),
+                    "-o",
+                    str(macho_load_errors_test),
+                ],
+                label="compile and link macho_load_errors",
+            )
+            verify_macho_link_map(
+                macho_load_errors_map,
+                archive,
+                macho_load_errors_trace,
+                included_source="MachO.c, SymbolExtras.c, and Linker.c",
+                forbidden_members=("MachO", "SymbolExtras", "Linker"),
+            )
+            run([str(macho_load_errors_test)], label="run macho_load_errors")
+
     print("liblink native unit tests: PASS")
     return 0
 

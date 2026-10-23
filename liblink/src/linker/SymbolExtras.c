@@ -117,7 +117,7 @@ int ocAllocateExtras(ObjectCode* oc, int count, int first, int bssSize)
   // the ObjectCodeFormatInfo and recompute it.
   if (oc->image != oldImage) {
 #if defined(OBJFORMAT_MACHO)
-    ocInit_MachO( oc );
+    if (!ocInit_MachO(oc)) return 0;
 #endif
 #if defined(OBJFORMAT_ELF)
     ocInit_ELF( oc );
