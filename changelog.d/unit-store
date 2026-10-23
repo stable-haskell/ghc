@@ -1,0 +1,14 @@
+section: compiler
+synopsis: Add the experimental ``-unit-store ⟨dir⟩`` flag, a package database located by convention.
+description:
+  A unit store is a directory in which every installed unit is a subdirectory
+  ``⟨unit-id⟩/`` holding a small ``unit.meta`` manifest and a ``lib/`` directory
+  with the unit's interface files and ``libHS⟨unit-id⟩`` libraries, which is the
+  layout ``cabal-install``'s store already uses. All paths are derived from the
+  layout; the manifest carries only the module lists, the dependencies, the
+  Backpack instantiation, a name/version label and the C-side link options.
+
+  ``-unit-store ⟨dir⟩`` adds such a directory to the package database stack,
+  and environment files accept a ``unit-store ⟨dir⟩`` directive. Units in a
+  store are exposed and untrusted; visibility and trust are controlled by the
+  usual flags. Nothing changes for users who do not pass the flag.
