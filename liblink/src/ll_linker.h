@@ -39,6 +39,9 @@ struct ll_linker {
     ll_compat_services services;
     ll_status error_status;
     char error_message[LL_ERROR_CAPACITY];
+    /* An inherited pre-dispatch rejection remains retryable. Fresh errors
+     * and top-level entry clear this provenance along with their diagnostic. */
+    bool error_from_pre_backend;
     /* One mutex protects this owner's linker state in every RTS way. */
     ll_mutex linker_mutex;
     ll_gc_state gc;
@@ -84,8 +87,8 @@ struct ll_linker {
 
     /* Operation-local diagnostics and stack frames; markers live on objects. */
     struct ll_failure_scope *failure_scopes;
-    ll_status primary_protection_error;
-    char primary_protection_message[LL_ERROR_CAPACITY];
+    ll_status primary_resolution_error;
+    char primary_resolution_message[LL_ERROR_CAPACITY];
     bool quarantine_rejected;
 };
 

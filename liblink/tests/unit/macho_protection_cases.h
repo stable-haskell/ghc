@@ -391,133 +391,7 @@ static void run_protection_status_cases(void)
 #endif
 }
 
-static void run_failed_resolve_lookup_gap_probe(void)
-{
-    ObjectCode *oc = make_object(
-        (FixtureSpec){PROFILE_CLASSES, SYMBOLS_EXPORT, 0},
-        "protection-failure-lookup-gap");
-    if (oc == NULL) return;
-    bool optimistic = owner.services.cfg.optimistic;
-    owner.services.cfg.optimistic = true;
-    ll_error_clear(&owner);
-    CHECK(ll_init_object(oc) != 0 && loadOc(oc) != 0,
-          "lookup-gap fixture did not load");
-    RtsSymbolInfo *entry = lookupStrHashTable(owner.symhash,
-                                               "macho_load_symbol");
-    CHECK(entry != NULL && entry->owner == oc,
-          "lookup-gap fixture symbol is not registered to its object");
-    unsigned before = mprotect_attempts;
-    mprotect_fail_at = before + 1;
-    mprotect_injected_failures = 0;
-    int resolved = ocTryLoad(oc);
-    reset_mprotect_injection();
-    CHECK(resolved == 0 && oc->status == OBJECT_NEEDED,
-          "lookup-gap fixture did not stop on injected protection error");
-    CHECK(owner.error_status == LL_E_IO && owner.error_message[0] != '\0',
-          "first failed resolve lost its IO diagnostic");
-    char primary_message[LL_ERROR_CAPACITY];
-    memcpy(primary_message, owner.error_message, sizeof(primary_message));
-    unsigned after_failure = mprotect_attempts;
-    ll_error_clear(&owner);
-    ll_mutex_lock(&owner.linker_mutex);
-    ll_symbol_addr *lookup = lookupSymbol_(&owner,
-                                            (ll_symbol_name *)"macho_load_symbol");
-    ll_mutex_unlock(&owner.linker_mutex);
-    CHECK(lookup == NULL,
-          "failed NEEDED object exposed its cached symbol value to a later lookup");
-    CHECK(owner.error_status == LL_E_STATE,
-          "later lookup of a quarantined object did not report LL_E_STATE");
-    CHECK(mprotect_attempts == after_failure,
-          "cached lookup unexpectedly retried protection");
-    CHECK(owner.services.cfg.optimistic,
-          "optimistic lookup probe did not enable optimistic linking");
-    owner.services.cfg.optimistic = optimistic;
-    CHECK(primary_message[0] != '\0',
-          "first protection failure diagnostic was empty");
-    ll_error_clear(&owner);
-    ObjectCode *saved_objects = owner.gc.objects;
-    oc->next = saved_objects;
-    owner.gc.objects = oc;
-    ll_mutex_lock(&owner.linker_mutex);
-    int global_resolve = resolveObjs_(&owner);
-    ll_mutex_unlock(&owner.linker_mutex);
-    owner.gc.objects = saved_objects;
-    oc->next = NULL;
-    CHECK(global_resolve == 0,
-          "global resolve accepted an active quarantined object");
-    CHECK(owner.error_status == LL_E_STATE,
-          "global resolve of a quarantined object did not report LL_E_STATE");
-
-    ObjectCode *healthy = make_object(
-        (FixtureSpec){PROFILE_CLASSES, SYMBOLS_EXPORT, 0},
-        "protection-failure-independent-healthy");
-    ObjectCode *healthy_next = make_object(
-        (FixtureSpec){PROFILE_CLASSES, SYMBOLS_EXPORT, 0},
-        "protection-failure-independent-healthy-next");
-    if (healthy != NULL) {
-        rename_export(healthy, "healthy_symbol");
-        if (healthy_next != NULL) rename_export(healthy_next, "healthy_next");
-        ll_error_clear(&owner);
-        CHECK(ll_init_object(healthy) != 0 && loadOc(healthy) != 0 &&
-                  ocTryLoad(healthy) != 0,
-              "independent healthy fixture did not resolve");
-        if (healthy_next != NULL)
-            CHECK(ll_init_object(healthy_next) != 0 && loadOc(healthy_next) != 0 &&
-                      ocTryLoad(healthy_next) != 0,
-                  "second independent healthy fixture did not resolve");
-        healthy->next = oc;
-        if (healthy_next != NULL) {
-            healthy_next->next = healthy;
-            healthy->next = oc;
-            healthy_next->next = healthy;
-        }
-        oc->next = saved_objects;
-        owner.gc.objects = healthy_next != NULL ? healthy_next : healthy;
-        ll_error_clear(&owner);
-        unsigned before_init = owner_host.before_init_calls;
-        unsigned before_after = owner_host.after_init_calls;
-        unsigned before_batch = owner_host.init_batches;
-        ll_mutex_lock(&owner.linker_mutex);
-        ll_symbol_addr *healthy_lookup = lookupSymbol_(
-            &owner, (ll_symbol_name *)"healthy_symbol");
-        ll_mutex_unlock(&owner.linker_mutex);
-        CHECK(healthy_lookup != NULL,
-              "healthy symbol lookup failed beside a quarantined object");
-        CHECK(healthy->status == OBJECT_READY,
-              "healthy object initializer pass did not complete");
-        CHECK(oc->status == OBJECT_NEEDED,
-              "independent lookup changed quarantined object's lifecycle status");
-        unsigned expected_hooks = healthy_next != NULL ? 2u : 1u;
-        CHECK(owner_host.before_init_calls == before_init + expected_hooks &&
-                  owner_host.after_init_calls == before_after + expected_hooks,
-              "independent lookup did not preserve healthy init lifecycle hooks");
-        CHECK(owner_host.init_batches == before_batch + 1,
-              "independent lookup did not preserve the init batch hook");
-        CHECK(before_init < HOST_CAPACITY &&
-                  strcmp(owner_host.init_order[before_init],
-                         healthy_next != NULL
-                             ? "protection-failure-independent-healthy-next"
-                             : "protection-failure-independent-healthy") == 0,
-              "first healthy initializer order changed beside quarantine");
-        if (healthy_next != NULL)
-            CHECK(before_init + 1 < HOST_CAPACITY &&
-                      strcmp(owner_host.init_order[before_init + 1],
-                             "protection-failure-independent-healthy") == 0,
-                  "second healthy initializer order changed beside quarantine");
-        owner.gc.objects = saved_objects;
-        if (healthy_next != NULL) {
-            healthy_next->next = NULL;
-            dispose_test_object(healthy_next);
-        }
-        healthy->next = NULL;
-        oc->next = NULL;
-        dispose_test_object(healthy);
-    }
-    ll_discard_object(oc);
-    dispose_test_object(oc);
-}
-
-static void run_preregister_weak_failure(void)
+static void run_preregister_weak_failure(bool terminal_resolution)
 {
     char provider_path[64];
     char dependent_path[64];
@@ -553,32 +427,45 @@ static void run_preregister_weak_failure(void)
         provider->status = OBJECT_LOADED; /* archive members resolve on demand */
 
     unsigned before = mprotect_attempts;
-    mprotect_fail_at = before + 1;
-    mprotect_injected_failures = 0;
+    unsigned before_backend = resolution_backend_calls;
+    if (terminal_resolution) {
+        injected_resolution_status = LL_E_NOMEM;
+        memcpy(injected_resolution_message, "pre-registration terminal resolver error",
+               sizeof("pre-registration terminal resolver error"));
+        inject_resolution_without_error = false;
+        inject_resolution_failure = true;
+    } else {
+        mprotect_fail_at = before + 1;
+        mprotect_injected_failures = 0;
+    }
     ll_error_clear(&owner);
     ll_mutex_lock(&owner.linker_mutex);
     int dependent_loaded = loadObj_(&owner, dependent_path);
     ll_mutex_unlock(&owner.linker_mutex);
-    reset_mprotect_injection();
+    if (terminal_resolution) inject_resolution_failure = false;
+    else reset_mprotect_injection();
     CHECK(dependent_loaded == 0,
           "pre-registration weak lookup accepted provider protection failure");
-    CHECK(mprotect_injected_failures == 1,
-          "pre-registration weak lookup did not inject provider protection failure");
-    CHECK(owner.error_status == LL_E_IO && owner.error_message[0] != '\0',
-          "pre-registration unwind did not preserve the first LL_E_IO diagnostic");
+    CHECK(terminal_resolution
+              ? resolution_backend_calls == before_backend + 1
+              : mprotect_injected_failures == 1,
+          "pre-registration weak lookup did not reach its injected resolver failure");
+    CHECK(owner.error_status == (terminal_resolution ? LL_E_NOMEM : LL_E_IO) &&
+              owner.error_message[0] != '\0',
+          "pre-registration unwind did not preserve its first failure diagnostic");
 
     ObjectCode *dependent = find_loaded_path(dependent_path);
     CHECK(dependent != NULL,
           "failed pre-registration dependent was freed instead of retained");
     if (dependent != NULL) {
-        CHECK(dependent->protection_failed,
+        CHECK(dependent->resolution_failed,
               "failed pre-registration dependent was not quarantined");
         if (provider != NULL)
             CHECK(dependency_contains(dependent, provider),
                   "escaped pre-registration dependency key was not retained");
     }
     provider = find_loaded_path(provider_path);
-    CHECK(provider != NULL && provider->protection_failed,
+    CHECK(provider != NULL && provider->resolution_failed,
           "weak symbol provider was not retained in quarantine");
     dispose_test_object(dependent);
     dispose_test_object(provider);
@@ -617,13 +504,13 @@ static void run_ordinary_missing_retry_probe(void)
     CHECK(resolved != NULL,
           "ordinary missing-symbol retry did not find the new definition");
     ObjectCode *provider = find_loaded_path(path);
-    CHECK(provider != NULL && !provider->protection_failed,
+    CHECK(provider != NULL && !provider->resolution_failed,
           "ordinary retry incorrectly marked its provider quarantined");
     dispose_test_object(provider);
     (void)unlink(path);
 }
 
-static void run_unload_reload_quarantine_probe(void)
+static void run_unload_reload_quarantine_probe(bool terminal_resolution)
 {
     char path[64];
     bool written = write_fixture_file(path, sizeof(path),
@@ -644,21 +531,41 @@ static void run_unload_reload_quarantine_probe(void)
         return;
     }
     old->status = OBJECT_LOADED;
-    mprotect_fail_at = mprotect_attempts + 1;
-    mprotect_injected_failures = 0;
+    unsigned before_backend = resolution_backend_calls;
+    if (terminal_resolution) {
+        injected_resolution_status = LL_E_NOMEM;
+        memcpy(injected_resolution_message, "reload terminal resolver error",
+               sizeof("reload terminal resolver error"));
+        inject_resolution_without_error = false;
+        inject_resolution_failure = true;
+    } else {
+        mprotect_fail_at = mprotect_attempts + 1;
+        mprotect_injected_failures = 0;
+    }
     ll_error_clear(&owner);
     ll_mutex_lock(&owner.linker_mutex);
     ll_symbol_addr *failed_lookup = lookupSymbol_(
         &owner, (ll_symbol_name *)"macho_load_symbol");
     ll_mutex_unlock(&owner.linker_mutex);
-    reset_mprotect_injection();
-    CHECK(failed_lookup == NULL && old->protection_failed &&
-              owner.error_status == LL_E_IO,
+    if (terminal_resolution) inject_resolution_failure = false;
+    else reset_mprotect_injection();
+    CHECK(failed_lookup == NULL && old->resolution_failed &&
+              owner.error_status == (terminal_resolution ? LL_E_NOMEM : LL_E_IO),
           "lazy lookup did not quarantine the old loaded object");
+    CHECK(terminal_resolution
+              ? resolution_backend_calls == before_backend + 1
+              : mprotect_injected_failures == 1,
+          "lazy resolution did not reach exactly one injected failure");
 
     ObjectCode *saved_objects = owner.gc.objects;
     old->next = saved_objects;
     owner.gc.objects = old;
+    ll_error_clear(&owner);
+    ll_mutex_lock(&owner.linker_mutex);
+    int blocked_global_resolve = resolveObjs_(&owner);
+    ll_mutex_unlock(&owner.linker_mutex);
+    CHECK(blocked_global_resolve == 0 && owner.error_status == LL_E_STATE,
+          "global resolve did not remain blocked while quarantine was active");
     ll_error_clear(&owner);
     ll_mutex_lock(&owner.linker_mutex);
     int unloaded = unloadObj_(&owner, (pathchar *)path, false);
@@ -667,7 +574,7 @@ static void run_unload_reload_quarantine_probe(void)
     old->next = NULL;
     CHECK(unloaded != 0 && old->status == OBJECT_UNLOADED,
           "normal unload did not retire the quarantined object");
-    CHECK(old->protection_failed,
+    CHECK(old->resolution_failed,
           "normal unload cleared the old object's quarantine marker");
     ll_error_clear(&owner);
     ll_mutex_lock(&owner.linker_mutex);
@@ -678,7 +585,7 @@ static void run_unload_reload_quarantine_probe(void)
     ObjectCode *fresh = find_loaded_path(path);
     CHECK(fresh != NULL && fresh != old,
           "reload did not create a fresh object identity");
-    CHECK(fresh != NULL && !fresh->protection_failed,
+    CHECK(fresh != NULL && !fresh->resolution_failed,
           "freshly loaded copy inherited the old quarantine marker");
     ObjectCode *fresh_saved_objects = owner.gc.objects;
     unsigned before_fresh_resolve = mprotect_attempts;
@@ -706,7 +613,7 @@ static void run_unload_reload_quarantine_probe(void)
     ll_symbol_addr *fresh_lookup = lookupSymbol_(
         &owner, (ll_symbol_name *)"macho_load_symbol");
     ll_mutex_unlock(&owner.linker_mutex);
-    CHECK(fresh_lookup != NULL && fresh != NULL && !fresh->protection_failed,
+    CHECK(fresh_lookup != NULL && fresh != NULL && !fresh->resolution_failed,
           "freshly loaded initialized copy did not expose its symbol");
 
     if (fresh != NULL) {
@@ -740,7 +647,7 @@ static bool dependency_contains(ObjectCode *dependent, ObjectCode *provider)
     return search.found;
 }
 
-static void run_dependency_closure_frames_probe(void)
+static void run_dependency_closure_frames_probe(bool terminal_resolution)
 {
     ObjectCode *provider = make_object(
         (FixtureSpec){PROFILE_EMPTY, SYMBOLS_NONE, 0}, "closure-provider");
@@ -801,28 +708,32 @@ static void run_dependency_closure_frames_probe(void)
     ll_error_clear(&owner);
     ll_failure_begin(&owner, &outer, provider);
     ll_failure_begin(&owner, &preregistered_frame, pre_registration);
-    ll_error_set(&owner, LL_E_IO, "primary protection diagnostic survives");
+    ll_error_set(&owner, terminal_resolution ? LL_E_FORMAT : LL_E_IO,
+                 terminal_resolution
+                     ? "primary terminal resolution diagnostic survives"
+                     : "primary protection diagnostic survives");
     char primary[LL_ERROR_CAPACITY];
     memcpy(primary, owner.error_message, sizeof(primary));
-    ll_failure_protection(provider);
-    CHECK(provider->protection_failed && chain->protection_failed &&
-              cycle->protection_failed && completed->protection_failed,
-          "protection failure did not mark chain, cycle, and completed dependent");
-    CHECK(pre_registration->protection_failed,
-          "protection failure did not mark the unregistered active frame");
-    CHECK(!independent->protection_failed &&
+    if (terminal_resolution) ll_failure_resolution(provider);
+    else ll_failure_protection(provider);
+    CHECK(provider->resolution_failed && chain->resolution_failed &&
+              cycle->resolution_failed && completed->resolution_failed,
+          "failure did not mark chain, cycle, and completed dependent");
+    CHECK(pre_registration->resolution_failed,
+          "failure did not mark the unregistered active frame");
+    CHECK(!independent->resolution_failed &&
               independent->status == OBJECT_READY,
           "independent completed sibling was changed by quarantine");
     ll_error_set(&owner, LL_E_STATE, "secondary unwind diagnostic");
     ll_failure_end(&owner, &preregistered_frame);
     CHECK(memcmp(owner.error_message, primary, sizeof(primary)) == 0 &&
-              owner.error_status == LL_E_IO,
+              owner.error_status == (terminal_resolution ? LL_E_FORMAT : LL_E_IO),
           "inner frame unwind did not restore all primary diagnostic bytes");
     ll_failure_end(&owner, &outer);
     CHECK(owner.failure_scopes == NULL,
           "failure frames were not cleared after nested unwind");
     CHECK(memcmp(owner.error_message, primary, sizeof(primary)) == 0 &&
-              owner.error_status == LL_E_IO,
+              owner.error_status == (terminal_resolution ? LL_E_FORMAT : LL_E_IO),
           "outer frame unwind did not restore all primary diagnostic bytes");
 
     insertHashSet(new_dependent->dependencies,
@@ -830,7 +741,7 @@ static void run_dependency_closure_frames_probe(void)
     CHECK(dependency_contains(new_dependent, provider),
           "new dependent edge was not stored in the NULL-valued set");
     ll_failure_inherit(new_dependent, provider);
-    CHECK(new_dependent->protection_failed,
+    CHECK(new_dependent->resolution_failed,
           "new dependent of an already quarantined provider stayed usable");
     CHECK(!ll_failure_usable(new_dependent) &&
               owner.error_status == LL_E_STATE,
@@ -851,7 +762,7 @@ cleanup:
     for (size_t i = 0; i < sizeof(all) / sizeof(all[0]); ++i) {
         ObjectCode *oc = all[i];
         if (oc == NULL) continue;
-        oc->protection_failed = false;
+        oc->resolution_failed = false;
         if (oc == pre_registration && owner.gc.loaded_objects != NULL) {
             bool retained = false;
             for (ObjectCode *loaded = owner.gc.loaded_objects; loaded != NULL;
@@ -910,7 +821,7 @@ static void run_common_alias_quarantine_probe(void)
     ll_failure_begin(&owner, &scope, provider);
     ll_error_set(&owner, LL_E_IO, "COMMON provider protection failure");
     ll_failure_protection(provider);
-    CHECK(provider->protection_failed && alias->protection_failed,
+    CHECK(provider->resolution_failed && alias->resolution_failed,
           "provider protection failure did not quarantine its COMMON alias");
     ll_failure_end(&owner, &scope);
     CHECK(owner.failure_scopes == NULL,
@@ -920,7 +831,7 @@ static void run_common_alias_quarantine_probe(void)
     int late_initialized = ll_init_object(late_alias);
     int late_loaded = late_initialized ? loadOc(late_alias) : 0;
     CHECK(late_initialized != 0 && late_loaded == 0 &&
-              late_alias->protection_failed,
+              late_alias->resolution_failed,
           "new COMMON dependent reused storage from a failed owner");
     CHECK(owner.error_status == LL_E_STATE,
           "new COMMON dependent of a failed owner did not report LL_E_STATE");
@@ -935,7 +846,7 @@ cleanup:
     ObjectCode *objects[] = {provider, alias, late_alias};
     for (size_t i = 0; i < sizeof(objects) / sizeof(objects[0]); ++i) {
         if (objects[i] == NULL) continue;
-        objects[i]->protection_failed = false;
+        objects[i]->resolution_failed = false;
         ll_discard_object(objects[i]);
     }
 }
@@ -1026,17 +937,19 @@ static void run_cleanup_error_overwrite_gap_probe(void)
 #endif
 }
 
+#include "macho_terminal_resolution_cases.h"
+
 static void run_protection_gap_probes(void)
 {
     Snapshot before = snapshot();
-    run_dependency_closure_frames_probe();
+    run_dependency_closure_frames_probe(false);
     CHECK(active_mappings() == before.active_maps,
           "dependency closure frame probe left native mappings active");
     CHECK(owner.gc.objects == before.objects &&
               owner.gc.loaded_objects == before.loaded,
           "dependency closure frame probe left an active object root");
     before = snapshot();
-    run_failed_resolve_lookup_gap_probe();
+    run_failed_resolve_lookup_gap_probe(false);
     CHECK(active_mappings() == before.active_maps,
           "failed resolve quarantine probe left native mappings active");
     CHECK(owner.gc.objects == before.objects &&
@@ -1059,13 +972,13 @@ static void run_protection_gap_probes(void)
               owner.gc.loaded_objects == before.loaded,
           "ordinary missing retry probe left an active object root");
     before = snapshot();
-    run_unload_reload_quarantine_probe();
+    run_unload_reload_quarantine_probe(false);
     CHECK(active_mappings() == before.active_maps,
           "unload/reload quarantine probe left native mappings active");
     CHECK(owner.gc.loaded_objects == before.loaded,
           "unload/reload quarantine probe left an active loaded object");
     before = snapshot();
-    run_preregister_weak_failure();
+    run_preregister_weak_failure(false);
     CHECK(active_mappings() == before.active_maps,
           "pre-registration quarantine probe left native mappings active");
     CHECK(owner.gc.objects == before.objects &&

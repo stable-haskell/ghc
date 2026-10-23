@@ -19,6 +19,7 @@ void ll_error_clear(ll_linker *L)
     if (L != NULL) {
         L->error_status = LL_OK;
         L->error_message[0] = '\0';
+        L->error_from_pre_backend = false;
     }
 }
 
@@ -34,6 +35,7 @@ ll_status ll_error_set(ll_linker *L, ll_status status, const char *fmt, ...)
 
     const int saved_errno = errno;
     L->error_status = status;
+    L->error_from_pre_backend = false;
     if (fmt == NULL) {
         fmt = "linker operation failed";
     }

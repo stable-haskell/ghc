@@ -49,6 +49,7 @@ typedef struct {
     unsigned fail_query;
     unsigned fail_alloc;
     bool clobber_host_free_errors;
+    bool clobber_host_log_errors;
     DWORD injected_query_error;
     DWORD injected_alloc_error;
     DWORD host_free_last_error;
@@ -173,6 +174,13 @@ static void host_log(void *ctx, int kind, const char *format, va_list args)
     CHECK(written >= 0 && (size_t)written < sizeof(message),
           "host log formatting failed or truncated");
     ++fixture.log_calls;
+    if (fixture.clobber_host_log_errors) {
+        fixture.clobber_host_log_errors = false;
+        owner.error_status = LL_E_FORMAT;
+        (void)memcpy(owner.error_message, "test logger replacement",
+                     sizeof("test logger replacement"));
+        owner.error_from_pre_backend = false;
+    }
 }
 
 static void host_fatal(void *ctx, const char *format, va_list args)
@@ -468,6 +476,36 @@ static void test_mapper_failure_replaces_stale_error(bool large)
     finish_case(true);
 }
 
+static void test_reservation_error_restores_pre_backend_provenance(void)
+{
+    begin_case();
+    owner.error_from_pre_backend = true;
+    ll_error_set(&owner, LL_E_IO, "fresh error clears provenance");
+    CHECK(!owner.error_from_pre_backend,
+          "a fresh explicit diagnostic retained stale pre-backend provenance");
+
+    ll_error_set(&owner, LL_E_DUPSYM, "primary duplicate diagnostic");
+    owner.error_from_pre_backend = true;
+    char expected_message[LL_ERROR_CAPACITY];
+    (void)memcpy(expected_message, owner.error_message,
+                 sizeof(expected_message));
+    fixture.clobber_host_log_errors = true;
+    reservation_error(&owner, "test reservation logger", NULL, 32,
+                      ERROR_ACCESS_DENIED);
+    CHECK(fixture.log_calls == 1,
+          "reservation diagnostic did not reach the logger callback");
+    CHECK(owner.error_status == LL_E_DUPSYM &&
+              memcmp(owner.error_message, expected_message,
+                     sizeof(expected_message)) == 0 &&
+              owner.error_from_pre_backend,
+          "reservation diagnostic cleanup did not restore primary status, message, and provenance");
+
+    ll_error_clear(&owner);
+    CHECK(!owner.error_from_pre_backend,
+          "clearing a diagnostic did not clear pre-backend provenance");
+    finish_case(true);
+}
+
 static void test_shared_batch_subranges(void)
 {
     begin_case();
@@ -708,6 +746,7 @@ int main(void)
     test_failed_rw_and_decommit_preserve_header();
     test_query_failure_preserves_io(false);
     test_query_failure_preserves_io(true);
+    test_reservation_error_restores_pre_backend_provenance();
     test_mapper_failure_replaces_stale_error(false);
     test_mapper_failure_replaces_stale_error(true);
     if (failures != 0) return 1;

@@ -459,6 +459,7 @@ void m32_allocator_free_for(ll_linker *L, m32_allocator *alloc)
   /* Cleanup must not replace the load failure that caused it. Protection
    * failures still reach the logger through the mapping helper. */
   const ll_status saved_status = L->error_status;
+  const bool saved_pre_backend_error = L->error_from_pre_backend;
   char saved_message[LL_ERROR_CAPACITY];
   if (saved_status != LL_OK) {
     memcpy(saved_message, L->error_message, sizeof(saved_message));
@@ -477,6 +478,7 @@ void m32_allocator_free_for(ll_linker *L, m32_allocator *alloc)
   LL_FREE_FOR(L, alloc);
   if (saved_status != LL_OK) {
     L->error_status = saved_status;
+    L->error_from_pre_backend = saved_pre_backend_error;
     memcpy(L->error_message, saved_message, sizeof(saved_message));
   }
 }

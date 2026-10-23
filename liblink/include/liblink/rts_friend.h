@@ -359,9 +359,9 @@ struct _ObjectCode {
      */
     NativeCodeRange *nc_ranges;
 
-    /* Failed final protection makes this instance unusable until unloading.
+    /* Terminal resolution or failed final protection requires unload/reload.
      * Keep the marker through GC disposal; a fresh object starts unmarked. */
-    bool protection_failed;
+    bool resolution_failed;
 };
 
 /* Borrowed RTS view into the default linker's state. The RTS binds this once

@@ -60,6 +60,11 @@ def parse_args() -> argparse.Namespace:
         help="run Darwin quarantine, recovery, and allocator retry regressions",
     )
     parser.add_argument(
+        "--resolution-failure-only",
+        action="store_true",
+        help="run Darwin terminal backend-resolution quarantine regressions",
+    )
+    parser.add_argument(
         "--windows-m32-only",
         action="store_true",
         help="run only the native Windows M32 and PE COMMON ownership units",
@@ -488,7 +493,8 @@ def run_macho_table_alignment(cc: list[str], archive: Path, output: Path,
 def main() -> int:
     args = parse_args()
     selected_modes = sum((args.foundation_only, args.protection_only,
-                          args.protection_gap_probes, args.windows_m32_only,
+                          args.protection_gap_probes,
+                          args.resolution_failure_only, args.windows_m32_only,
                           args.macho_table_alignment_only))
     if selected_modes > 1:
         raise RuntimeError("native unit modes are mutually exclusive")
@@ -509,7 +515,8 @@ def main() -> int:
             "core_error_status.c is POSIX-only: the Windows linker path uses "
             "stdio rather than mmap; use --windows-m32-only for the M32 fixture"
         )
-    if (args.protection_only or args.protection_gap_probes) and host != "Darwin":
+    if (args.protection_only or args.protection_gap_probes or
+            args.resolution_failure_only) and host != "Darwin":
         raise RuntimeError("protection modes require a native Darwin Mach-O build")
     if host not in ("Linux", "Darwin", "Windows"):
         raise RuntimeError(f"unsupported host platform for liblink C units: {host}")
@@ -588,7 +595,8 @@ def main() -> int:
             return 0
 
         error_state = output / "error_state"
-        if not args.protection_only and not args.protection_gap_probes:
+        if not args.protection_only and not args.protection_gap_probes and \
+                not args.resolution_failure_only:
             run(
                 cc
                 + [
@@ -606,12 +614,15 @@ def main() -> int:
             print("liblink native unit tests: PASS (foundation only)")
             return 0
 
-        if args.protection_only or args.protection_gap_probes:
+        if (args.protection_only or args.protection_gap_probes or
+                args.resolution_failure_only):
             mode = "--protection-only" if args.protection_only \
-                else "--protection-gap-probes"
+                else "--protection-gap-probes" if args.protection_gap_probes \
+                else "--resolution-failure-only"
             run_macho_load_errors(cc, archive, output, host, mode=mode)
             outcome = "protection only" if args.protection_only \
-                else "quarantine regression cases"
+                else "quarantine regression cases" if args.protection_gap_probes \
+                else "terminal resolution quarantine cases"
             print(f"liblink native unit tests: PASS ({outcome})")
             return 0
 

@@ -33,12 +33,14 @@ static void reservation_error(ll_linker *L, const char *operation,
                      "M32 %s failed for %zu bytes at %p (Win32 error %lu)",
                      operation, bytes, address, (unsigned long)error);
     const ll_status status = L->error_status;
+    const bool pre_backend_error = L->error_from_pre_backend;
     char message[LL_ERROR_CAPACITY];
     memcpy(message, L->error_message, sizeof(message));
     SetLastError(error);
     LL_LOG_SYSERROR_FOR(L, "M32 %s failed for %zu bytes at %p",
                        operation, bytes, address);
     L->error_status = status;
+    L->error_from_pre_backend = pre_backend_error;
     memcpy(L->error_message, message, sizeof(message));
     errno = operation_errno;
     SetLastError(error);

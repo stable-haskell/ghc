@@ -1129,12 +1129,13 @@ int ll_init_object(ObjectCode *oc)
 
 void ll_discard_object(ObjectCode *oc)
 {
-    if (oc->protection_failed) {
+    if (oc->resolution_failed) {
         /* A recursive symbol lookup can export an address before loadOc
          * completes. Retained dependents may already refer to this object;
          * keep its image and dependency identity until normal unload/GC. */
         ll_linker *L = oc->L;
         const ll_status status = L->error_status;
+        const bool pre_backend_error = L->error_from_pre_backend;
         char message[LL_ERROR_CAPACITY];
         memcpy(message, L->error_message, sizeof(message));
         if (L->services.host.object_registered != NULL)
@@ -1142,6 +1143,7 @@ void ll_discard_object(ObjectCode *oc)
         oc->next_loaded_object = L->gc.loaded_objects;
         L->gc.loaded_objects = oc;
         L->error_status = status;
+        L->error_from_pre_backend = pre_backend_error;
         memcpy(L->error_message, message, sizeof(message));
         return;
     }
@@ -1364,7 +1366,7 @@ mkOc( ll_linker *L, ObjectType type, pathchar *path, char *image, int imageSize,
 
    oc->misalignment      = misalignment;
    oc->initializersRan   = false;
-   oc->protection_failed = false;
+   oc->resolution_failed = false;
    oc->cxa_finalize      = NULL;
    oc->extraInfos        = NULL;
 
@@ -1753,6 +1755,9 @@ static int ocTryLoadImpl(ObjectCode* oc) {
                                       symbol.addr,
                                       isSymbolWeak(oc, symbol.name),
                                       symbol.type, 0, oc)) {
+            /* A nested caller can propagate this rejection through its own
+             * backend. Keep its pre-dispatch origin until a fresh error is set. */
+            oc->L->error_from_pre_backend = true;
             return 0;
         }
     }
@@ -1773,6 +1778,9 @@ static int ocTryLoadImpl(ObjectCode* oc) {
                          "could not resolve object %" PATH_FMT,
                          OC_INFORMATIVE_FILENAME(oc));
         }
+        /* A terminal backend error may follow earlier relocation writes.
+         * Missing definitions retain the ordinary retry path. */
+        ll_failure_resolution(oc);
         LL_IF_DEBUG_FOR(oc->L, linker, ocDebugBelch(oc, "resolution failed\n"));
         return r;
     }
@@ -1858,7 +1866,7 @@ int ocRunInit(ObjectCode *oc)
 int runPendingInitializers (ll_linker *L)
 {
     for (ObjectCode *oc = L->gc.objects; oc; oc = oc->next) {
-        if (oc->protection_failed) continue;
+        if (oc->resolution_failed) continue;
         int r = ocRunInit(oc);
         if (!r) {
             LL_LOG_ERROR_FOR(L, "Could not run initializers of Object Code %" PATH_FMT ".\n", OC_INFORMATIVE_FILENAME(oc));

@@ -381,6 +381,31 @@ temporary files for the real `loadObj_` path and copies file mappings into the
 harness's tracked mappings. The focused driver verifies its link map excludes
 every implementation included directly by the test.
 
+`--resolution-failure-only` drives the actual `ocTryLoadImpl` backend-failure
+branch through a test-local Mach-O resolver wrapper. With injection disabled,
+the wrapper delegates to the real resolver. Its controlled failures cover all
+explicit statuses other than `LL_OK` and `LL_E_UNRESOLVED`; they verify the
+first status and complete diagnostic buffer, then check that repeat resolution,
+cached/optimistic lookup, global resolution, and initialization cannot reuse
+the object or re-enter the backend. The mode also applies terminal errors to
+the existing dependency-closure, pre-registration weak-lookup, and
+unload/reload fixtures. A nested early duplicate is also propagated through a
+parent resolver without marking either object; both resolve after removing the
+conflicting provider. A false resolver return with no status remains
+`LL_E_UNRESOLVED` and succeeds after an ordinary retry. An early duplicate
+symbol rejection remains outside the terminal backend-failure boundary,
+including when a parent resolver propagates it. A subsequent top-level explicit
+backend error still quarantines its object after the stale provenance clears.
+The same-operation case then has one resolver call an object that produces
+early `LL_E_DUPSYM`, followed by `ll_error_set` with a new `LL_E_FORMAT`
+diagnostic; it verifies that only the parent's new error is terminal and that
+the complete diagnostic survives scope cleanup. These terminal-resolution
+cases run in the driver's default Mach-O unit path as well as in the focused
+mode.
+`LL_E_NOMEM` is treated as terminal for the affected object: recovery requires
+unloading and loading a fresh object. The controlled wrapper tests linker
+policy, not each backend's production generation of those statuses.
+
 The weak-definition fixture models an archive member by setting the already
 loaded provider to `OBJECT_LOADED`, so symbol lookup resolves it on demand. It
 does not execute Windows PE import code; a native Windows quarantine fixture

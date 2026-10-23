@@ -106,6 +106,16 @@ static bool clobber_log_errno;
 static unsigned failures;
 static bool stop_after_failed_reinit;
 static unsigned names_after_failed_reinit;
+static bool inject_resolution_failure;
+static bool inject_resolution_without_error;
+static bool inject_nested_duplicate;
+static bool inject_nested_duplicate_then_terminal;
+static ll_status injected_resolution_status;
+static unsigned resolution_backend_calls;
+static bool resolution_wrapper_entry_from_pre_backend;
+static char injected_resolution_message[LL_ERROR_CAPACITY];
+static char nested_terminal_expected_message[LL_ERROR_CAPACITY];
+static ObjectCode *nested_duplicate_object;
 static const char default_sentinel[] = "macho-load-default-error-sentinel";
 
 #define CHECK(condition, message) do { \
@@ -127,10 +137,16 @@ static int test_mprotect(void *start, size_t len, int prot);
 #define ll_mmap_for_linker test_mmap_for_linker
 #define ll_munmap_for_linker test_munmap_for_linker
 #define ocGetNames_MachO actual_ocGetNames_MachO
+#define ocResolve_MachO actual_ocResolve_MachO
 #include "linker/MachO.c"
 #undef ocGetNames_MachO
+#undef ocResolve_MachO
 #include "linker/SymbolExtras.c"
+
+int test_ocResolve_MachO(ObjectCode *oc);
+#define ocResolve_MachO test_ocResolve_MachO
 #include "Linker.c"
+#undef ocResolve_MachO
 #include "linker/M32Alloc.c"
 #undef ll_mmap_anon_for_linker
 #undef ll_mmap_for_linker
@@ -150,6 +166,37 @@ int ocGetNames_MachO(ObjectCode *oc)
         return 0;
     }
     return actual_ocGetNames_MachO(oc);
+}
+
+int test_ocResolve_MachO(ObjectCode *oc)
+{
+    if (inject_nested_duplicate_then_terminal) {
+        ++resolution_backend_calls;
+        inject_nested_duplicate_then_terminal = false;
+        int nested_result = nested_duplicate_object != NULL
+                               ? ocTryLoad(nested_duplicate_object)
+                               : 0;
+        if (nested_result != 0) return 0;
+        ll_error_set(oc->L, injected_resolution_status, "%s",
+                     injected_resolution_message);
+        memcpy(nested_terminal_expected_message, oc->L->error_message,
+               sizeof(nested_terminal_expected_message));
+        return 0;
+    }
+    if (inject_nested_duplicate) {
+        ++resolution_backend_calls;
+        inject_nested_duplicate = false;
+        return nested_duplicate_object != NULL
+                   ? ocTryLoad(nested_duplicate_object)
+                   : 0;
+    }
+    if (!inject_resolution_failure) return actual_ocResolve_MachO(oc);
+    ++resolution_backend_calls;
+    resolution_wrapper_entry_from_pre_backend = oc->L->error_from_pre_backend;
+    if (!inject_resolution_without_error)
+        ll_error_set(oc->L, injected_resolution_status, "%s",
+                     injected_resolution_message);
+    return 0;
 }
 
 static size_t active_mappings(void)
@@ -899,9 +946,13 @@ int main(int argc, char **argv)
 {
     bool protection_only = argc == 2 && strcmp(argv[1], "--protection-only") == 0;
     bool gap_probes = argc == 2 && strcmp(argv[1], "--protection-gap-probes") == 0;
-    if (argc > 2 || (argc == 2 && !protection_only && !gap_probes)) {
+    bool resolution_only = argc == 2 &&
+                           strcmp(argv[1], "--resolution-failure-only") == 0;
+    if (argc > 2 || (argc == 2 && !protection_only && !gap_probes &&
+                     !resolution_only)) {
         (void)fprintf(stderr, "usage: macho_load_errors [--protection-only | "
-                             "--protection-gap-probes]\n");
+                             "--protection-gap-probes | "
+                             "--resolution-failure-only]\n");
         return 2;
     }
     long system_page_size = sysconf(_SC_PAGESIZE);
@@ -922,6 +973,8 @@ int main(int argc, char **argv)
         run_protection_status_cases();
     } else if (gap_probes) {
         run_protection_gap_probes();
+    } else if (resolution_only) {
+        run_terminal_resolution_probes();
     } else {
     run_alloc_failure("macho-info-nomem",
                       (FixtureSpec){PROFILE_EMPTY, SYMBOLS_NONE, 0},
@@ -954,6 +1007,7 @@ int main(int argc, char **argv)
     run_zero_symbol_control();
     run_successful_regular_control();
     run_protection_status_cases();
+    run_terminal_resolution_probes();
     }
 
     CHECK(map_failure == MAP_FAIL_NONE, "mapper injection remained armed");
@@ -969,7 +1023,7 @@ int main(int argc, char **argv)
     if (owner_host.live != 0) {
         for (ObjectCode *oc = owner.gc.objects; oc != NULL; oc = oc->next)
             (void)fprintf(stderr, "  retained GC fixture: %s failed=%d\n",
-                          oc->fileName, oc->protection_failed);
+                          oc->fileName, oc->resolution_failed);
         for (size_t i = 0; i < owner_host.live; ++i)
             (void)fprintf(stderr, "  retained allocation: %s %p\n",
                           owner_host.what[i], owner_host.owned[i]);
@@ -995,6 +1049,8 @@ int main(int argc, char **argv)
         (void)puts("macho_load_errors --protection-only: PASS");
     } else if (gap_probes) {
         (void)puts("macho_load_errors --protection-gap-probes: PASS");
+    } else if (resolution_only) {
+        (void)puts("macho_load_errors --resolution-failure-only: PASS");
     } else {
         (void)puts("macho_load_errors: PASS");
     }
