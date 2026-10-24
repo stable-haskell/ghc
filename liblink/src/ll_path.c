@@ -18,8 +18,9 @@ pathchar* pathdup(struct ll_linker *L, const pathchar *path)
 {
     pathchar *ret;
 #if defined(mingw32_HOST_OS)
-    (void)L;
-    ret = wcsdup(path);
+    size_t path_bytes = (wcslen(path) + 1) * sizeof(*ret);
+    ret = LL_MALLOC_FOR(L, path_bytes, "pathdup");
+    memcpy(ret, path, path_bytes);
 #else
     /* sigh, strdup() isn't a POSIX function, so do it the long way */
     ret = LL_MALLOC_FOR(L, strlen(path)+1, "pathdup" );

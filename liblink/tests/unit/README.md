@@ -780,3 +780,8 @@ unit suite. To isolate it on a native Windows build without changing the
 foundation-only mode, run `python3 liblink/tests/unit/run_native_tests.py
 --path-ownership-only`. A Darwin or Linux control run checks the existing
 POSIX implementation; it does not qualify the Windows path.
+
+On Windows, the copy uses the selected linker owner's allocator and includes
+the wide path's terminator. The legacy `wcsdup` allocation bypassed that
+allocator while disposal used the owner's `free_` callback. This regression
+requires acquisition and release to use the same owner.
