@@ -144,6 +144,8 @@ extra-source-files:
     tests/unit/elf_resource_errors.c
     tests/unit/mmap_address_bounds.c
     tests/unit/run_native_tests.py
+    tests/unit/run_sanitized_tests.py
+    tests/unit/test_run_sanitized_tests.py
 
 custom-setup
     setup-depends: base, Cabal >= 3.17 && < 3.18, Cabal-syntax >= 3.17 && < 3.18, directory, filepath

@@ -124,6 +124,30 @@ jobs:
       shell: devx {0}
       run: python3 liblink/tests/unit/run_native_tests.py
 
+    - name: Run sanitized liblink C units
+      if: ${{ matrix.dynamic == 0 && matrix.plat == 'x86_64-linux' }}
+      shell: devx {0}
+      timeout-minutes: 20
+      run: |
+        set -eo pipefail
+        mkdir -p _build/logs
+        python3 liblink/tests/unit/test_run_sanitized_tests.py 2>&1 | tee _build/logs/liblink-sanitized-driver.log
+        ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
+          python3 liblink/tests/unit/run_sanitized_tests.py \
+            --output-dir _build/liblink-sanitized \
+            --timeout 900 --command-timeout 300 \
+          2>&1 | tee _build/logs/liblink-sanitized.log
+
+    - name: Upload liblink sanitizer results
+      if: ${{ always() && matrix.dynamic == 0 && matrix.plat == 'x86_64-linux' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: liblink-linux-sanitizer-results
+        if-no-files-found: ignore
+        path: |
+          _build/liblink-sanitized/sanitized-run.json
+          _build/logs/liblink-sanitized*.log
+
     - name: Display build timings
       if: ${{ !cancelled() }}
       shell: devx {0}

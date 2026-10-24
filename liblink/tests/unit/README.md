@@ -130,6 +130,30 @@ archive is missing. Darwin units keep their existing link arguments because
 the Darwin backend does not reference these `rts-fs` C symbols. The
 `--foundation-only` mode remains independent of the package archive.
 
+Sanitized native C units
+========================
+
+`run_sanitized_tests.py` builds a fresh static archive from the current
+`native-sources.list` with AddressSanitizer and UndefinedBehaviorSanitizer, then
+runs the default native C unit driver against that archive. It supports native
+Linux and Darwin hosts, compiles one source at a time, and writes a JSON report
+with source/configuration hashes, commands, and the resulting archive hash.
+Choose a new or empty output directory. On Linux, enable LeakSanitizer in the
+caller environment when checking malformed-input cleanup:
+
+    ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 \
+      python3 liblink/tests/unit/run_sanitized_tests.py \
+        --build-root _build/stage2/build/host \
+        --store-root _build/stage2/store/host \
+        --output-dir /tmp/liblink-sanitized-native
+
+The default overall limit is 900 seconds and each compiler, archiver, or unit
+driver command is limited to 90 seconds. Override with `--timeout` and
+`--command-timeout` when the host needs different bounds. The runner inherits
+the caller's sanitizer environment and does not disable leak detection.
+The Linux static CI job enables leak detection and retains the JSON report and
+logs in the `liblink-linux-sanitizer-results` artifact.
+
 The core and archive fixtures use POSIX file descriptors and mmap injection.
 On Windows, `Linker.c` follows its stdio path (`RTS_LINKER_USE_MMAP=0`); run
 only the platform-neutral foundation test with `--foundation-only` until
