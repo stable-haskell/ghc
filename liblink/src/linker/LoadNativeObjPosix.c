@@ -110,7 +110,7 @@ void freeNativeCode_POSIX (ObjectCode *nc) {
 
 void * loadNativeObj_POSIX (ll_linker *L, pathchar *path, char **errmsg)
 {
-   ObjectCode* nc;
+   ObjectCode* nc = NULL;
    void *hdl, *retval;
 
    ll_assert_lock_held_for(L, &L->linker_mutex);
@@ -248,6 +248,15 @@ dlinfo_fail:
 #endif
    if (hdl) dlclose(hdl);
 dlopen_fail:
+   /* Only the final no-handle failure belongs here. The paired native-load
+    * hooks have completed, and errmsg already owns a diagnostic copy. Let
+    * the host release attached state before discarding unregistered metadata.
+    * Post-dlopen metadata failures still own a handle and are separate. */
+   if (nc != NULL && nc->dlopen_handle == NULL) {
+       if (L->services.host.on_unload != NULL)
+           L->services.host.on_unload(L->services.host.ctx, nc);
+       freeObjectCode(nc);
+   }
 success:
 
    LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "loadNativeObj_POSIX result=%p\n", retval));

@@ -1213,7 +1213,10 @@ void freeObjectCode (ObjectCode *oc)
         oc->cxa_finalize(oc->image);
     }
 
-    if (oc->type == DYNAMIC_OBJECT) {
+    /* A failed native load may dispose metadata while already holding the
+     * linker lock, after no handle was acquired. Only a live handle requires
+     * the locked native-code teardown. */
+    if (oc->type == DYNAMIC_OBJECT && oc->dlopen_handle != NULL) {
 #if defined(OBJFORMAT_ELF) || defined(darwin_HOST_OS)
         ll_mutex_lock_for(oc->L, &oc->L->linker_mutex);
         freeNativeCode_POSIX(oc);
