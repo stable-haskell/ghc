@@ -655,6 +655,22 @@ complete capture validation for baseline comparison.
 These results do not establish baseline parity; that remains unqualified until
 the Windows CI run is reviewed against the baseline.
 
+PE unwind record lifetime
+=========================
+
+`pei386_unwind_retention.c` uses the genuine Windows x86_64 host fixture
+and actual included PE cleanup functions. Resolution cleanup discards parse
+metadata while retaining the `pdata` ownership record until physical disposal
+unregisters the same table pointer. Positive, negative, and regression cases
+check repeated cleanup, the callback's live ownership record, exact unregister
+count, and eager cleanup for objects without a table. The owner ledger must be
+empty after disposal.
+
+Run `python3 liblink/tests/unit/run_native_tests.py --pe-resolution-only --cc clang`
+on configured native Windows x86_64. Native Windows compilation and execution
+are pending. This repair preserves the existing single-table bookkeeping and
+unregister-failure policy; it adds no registration-success tracking.
+
 Approved ELF resource error coverage
 ====================================
 

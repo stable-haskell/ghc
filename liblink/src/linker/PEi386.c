@@ -699,8 +699,17 @@ static void releaseOcInfo(ObjectCode* oc) {
         LL_FREE_FOR(oc->L, oc->info->ch_info);
         LL_FREE_FOR(oc->L, oc->info->symbols);
         LL_FREE_FOR(oc->L, oc->info->str_tab);
-        LL_FREE_FOR(oc->L, oc->info);
-        oc->info = NULL;
+        oc->info->init = NULL;
+        oc->info->fini = NULL;
+        oc->info->ch_info = NULL;
+        oc->info->symbols = NULL;
+        oc->info->str_tab = NULL;
+        /* Failed resolution can follow exception-table registration. Keep
+         * its record until physical disposal unregisters the live table. */
+        if (oc->info->pdata == NULL) {
+            LL_FREE_FOR(oc->L, oc->info);
+            oc->info = NULL;
+        }
     }
     for (int i = 0; i < oc->n_sections; i++){
         Section *section = &oc->sections[i];

@@ -72,6 +72,11 @@ def parse_args() -> argparse.Namespace:
         help="run only the native Windows M32 and PE COMMON ownership units",
     )
     parser.add_argument(
+        "--pe-resolution-only",
+        action="store_true",
+        help="run only native Windows x86_64 post-symbol PE resolver cases",
+    )
+    parser.add_argument(
         "--macho-table-alignment-only",
         action="store_true",
         help="run only packed Mach-O symbol/relocation table alignment cases",
@@ -543,6 +548,35 @@ def run_pei386_common_ownership(cc: list[str], archive: Path,
     )
 
 
+def run_pei386_resolution_status(cc: list[str], archive: Path,
+                                 output: Path,
+                                 link_flags: list[str]) -> None:
+    included = "PEi386.c, Linker.c, M32Alloc.c, M32Reservations.c, and MMap.c"
+    for unit in ("pei386_unwind_retention",):
+        binary = output / f"{unit}.exe"
+        map_file = output / f"{unit}.map"
+        trace = run(
+            cc + native_unit_link_arguments(
+                ROOT / f"liblink/tests/unit/{unit}.c",
+                archive,
+                binary,
+                link_flags,
+                ["-Wl,--verbose", linker_map_flag(map_file)],
+            ),
+            label=f"compile and link {unit}",
+        )
+        for member in ("PEi386", "Linker", "M32Alloc", "M32Reservations", "MMap"):
+            verify_link_map(
+                map_file,
+                archive,
+                trace,
+                included_source=included,
+                forbidden_member=member,
+                windows_paths=True,
+            )
+        run([str(binary)], label=f"run {unit}")
+
+
 def verify_macho_link_map(
     map_path: Path,
     archive: Path,
@@ -763,6 +797,7 @@ def main() -> int:
     selected_modes = sum((args.foundation_only, args.protection_only,
                           args.protection_gap_probes,
                           args.resolution_failure_only, args.windows_m32_only,
+                          args.pe_resolution_only,
                           args.macho_table_alignment_only,
                           args.macho_x86_operands_only,
                           args.elf_resources_only,
@@ -773,6 +808,8 @@ def main() -> int:
     host = native_host()
     if args.windows_m32_only and host != "Windows":
         raise RuntimeError("--windows-m32-only requires a native Windows host")
+    if args.pe_resolution_only and host != "Windows":
+        raise RuntimeError("--pe-resolution-only requires a native Windows host")
     if args.macho_table_alignment_only and host != "Darwin":
         raise RuntimeError("--macho-table-alignment-only requires a native Darwin Mach-O build")
     if args.macho_x86_operands_only and host != "Darwin":
@@ -782,11 +819,11 @@ def main() -> int:
     if args.mmap_address_bounds_only and host not in ("Linux", "Darwin"):
         raise RuntimeError("--mmap-address-bounds-only requires a POSIX host")
     if host == "Windows" and not (args.foundation_only or args.windows_m32_only
+                                   or args.pe_resolution_only
                                    or args.path_ownership_only):
         raise RuntimeError(
             "core_error_status.c is POSIX-only: the Windows linker path uses "
-            "stdio rather than mmap; use --windows-m32-only for M32 or "
-            "--path-ownership-only for the path owner unit"
+            "stdio rather than mmap; use a focused Windows unit mode"
         )
     if (args.protection_only or args.protection_gap_probes or
             args.resolution_failure_only) and host != "Darwin":
@@ -898,6 +935,22 @@ def main() -> int:
 
     with tempfile.TemporaryDirectory(prefix="liblink-native-units-") as temporary:
         output = Path(temporary)
+        if args.pe_resolution_only:
+            platform_header = (config_include / "ll_platform.h").read_text()
+            windows_x64 = (
+                re.search(r"^#define\s+mingw32_HOST_OS\s+1\s*$",
+                          platform_header, flags=re.MULTILINE)
+                and re.search(r"^#define\s+x86_64_HOST_ARCH\s+1\s*$",
+                              platform_header, flags=re.MULTILINE)
+            )
+            if not windows_x64:
+                raise RuntimeError(
+                    "PE resolution units require generated Windows x86_64 config"
+                )
+            run_pei386_resolution_status(cc, archive, output, pe_link_flags)
+            print("liblink PE resolution unit: PASS (Windows x86_64 only)")
+            return 0
+
         if args.windows_m32_only:
             m32_test = output / "m32_windows_reservations.exe"
             m32_map = output / "m32_windows_reservations.map"
