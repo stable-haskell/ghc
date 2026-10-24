@@ -1,4 +1,4 @@
-/* Private handling of terminal resolution and final-protection failures. */
+/* Private handling of terminal object failures. */
 #pragma once
 
 #include "liblink.h"
@@ -18,6 +18,8 @@ void ll_failure_begin(ll_linker *L, struct ll_failure_scope *scope,
 void ll_failure_end(ll_linker *L, struct ll_failure_scope *scope);
 /* Call only at a failed backend-resolution boundary, with its current error. */
 void ll_failure_resolution(struct _ObjectCode *object);
+/* Call only after a failed initializer backend; earlier callbacks may have run. */
+void ll_failure_initialization(struct _ObjectCode *object);
 void ll_failure_protection(struct _ObjectCode *object);
 void ll_failure_inherit(struct _ObjectCode *dependent,
                         const struct _ObjectCode *provider);

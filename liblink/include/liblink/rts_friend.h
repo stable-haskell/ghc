@@ -359,7 +359,7 @@ struct _ObjectCode {
      */
     NativeCodeRange *nc_ranges;
 
-    /* Terminal resolution or failed final protection requires unload/reload.
+    /* Terminal resolution, initialization, or protection requires unload/reload.
      * Keep the marker through GC disposal; a fresh object starts unmarked. */
     bool resolution_failed;
 };

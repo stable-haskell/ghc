@@ -376,6 +376,13 @@ jobs:
         export PATH="/c/ghcup/bin:$PATH"
         python3 liblink/tests/unit/run_native_tests.py --foundation-only --cc clang 2>&1 | tee _build/logs/windows-liblink-foundation.log
 
+    - name: Run Windows initializer error C units
+      timeout-minutes: 5
+      run: |
+        set -eo pipefail
+        export PATH="/c/ghcup/bin:$PATH"
+        python3 liblink/tests/unit/run_native_tests.py --initializer-errors-only --cc clang 2>&1 | tee _build/logs/windows-liblink-initializer-errors.log
+
     - name: Run Windows PE resolution C units
       timeout-minutes: 5
       run: |
@@ -414,6 +421,7 @@ jobs:
           _build/logs/windows-focused/**
           _build/logs/windows-liblink-path-ownership.log
           _build/logs/windows-liblink-pe-resolution.log
+          _build/logs/windows-liblink-initializer-errors.log
 
     - name: Upload Windows build and unit logs on failure
       if: failure()

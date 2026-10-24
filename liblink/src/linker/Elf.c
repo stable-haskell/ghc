@@ -341,6 +341,12 @@ ocDeinit_ELF(ObjectCode * oc)
      * ElfSymbols
      */
     if(oc->info != NULL) {
+        /* Failed or never-started initialization leaves these lists owned by
+         * the object. Successful execution already consumes and clears them. */
+        freeInitFiniList(oc->L, oc->info->init);
+        freeInitFiniList(oc->L, oc->info->fini);
+        oc->info->init = NULL;
+        oc->info->fini = NULL;
         freeGot(oc);
         if (oc->info->common_mem != NULL) {
             ll_munmap_for_linker(oc->L, oc->info->common_mem,

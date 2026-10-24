@@ -987,6 +987,7 @@ static ll_symbol_addr* lookupSymbolImpl(ll_linker *L, ll_symbol_name* lbl)
 
     if (!runPendingInitializers(L)) {
         LL_LOG_ERROR_FOR(L, "lookupSymbol: Failed to run initializers.");
+        return NULL;
     }
     return r;
 }
@@ -1855,6 +1856,7 @@ int ocRunInit(ObjectCode *oc)
                          "could not run initializers of %" PATH_FMT,
                          OC_INFORMATIVE_FILENAME(oc));
         }
+        ll_failure_initialization(oc);
         return r;
     }
     oc->initializersRan = true;

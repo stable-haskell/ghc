@@ -150,8 +150,9 @@ struct ObjectCodeFormatInfo {
     ElfRelocationTable   *relTable;
     ElfRelocationATable  *relaTable;
 
-    struct InitFiniList* init; // Freed by ocRunInit_PEi386
-    struct InitFiniList* fini; // Freed by ocRunFini_PEi386
+    /* Consumed by runInit/runFini, or freed by ocDeinit_ELF if still pending. */
+    struct InitFiniList* init;
+    struct InitFiniList* fini;
 
     /* pointer to the global offset table */
     void *                got_start;

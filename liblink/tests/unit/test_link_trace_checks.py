@@ -391,6 +391,7 @@ class NativeRtsFsLinkArgumentsTests(unittest.TestCase):
                     driver, "locate_artifacts", return_value=(archive, config, include)
                 ),
                 mock.patch.object(driver, "run", side_effect=capture_run),
+                mock.patch.object(driver, "run_initializer_errors"),
                 mock.patch("sys.argv", ["run_native_tests.py", "--cc", "cc"]),
                 self.assertRaises(StopAfterCoreLink),
             ):

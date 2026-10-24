@@ -107,6 +107,15 @@ void ll_failure_resolution(ObjectCode *object)
         record_terminal_failure(object);
 }
 
+void ll_failure_initialization(ObjectCode *object)
+{
+    ll_linker *L = object->L;
+    if (L->error_status == LL_OK)
+        ll_error_set(L, LL_E_INIT, "could not run object initializers");
+    /* Earlier constructors may have run. Re-entry must not replay them. */
+    record_terminal_failure(object);
+}
+
 void ll_failure_protection(ObjectCode *object)
 {
     ll_linker *L = object->L;

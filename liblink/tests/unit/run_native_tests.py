@@ -47,6 +47,11 @@ def parse_args() -> argparse.Namespace:
         help="C compiler command (default: CC or cc)",
     )
     parser.add_argument(
+        "--initializer-errors-only",
+        action="store_true",
+        help="run common initializer status, cleanup, and terminal-error policy units",
+    )
+    parser.add_argument(
         "--foundation-only",
         action="store_true",
         help="run only error_state.c; core_error_status.c currently needs POSIX mmap/fd APIs",
@@ -792,9 +797,34 @@ def run_pathdup_ownership(cc: list[str], archive: Path, output: Path,
         raise RuntimeError(f"link map did not select ll_path from {archive}")
     run([str(binary)], label="run pathdup_ownership")
 
+def run_initializer_errors(cc: list[str], archive: Path, output: Path,
+                           link_flags: list[str], host: str) -> None:
+    units = (
+        ("init_array_status", ("InitFini",)),
+    )
+    for unit, forbidden in units:
+        binary = output / (unit + (".exe" if host == "Windows" else ""))
+        map_file = output / f"{unit}.map"
+        trace_flags = ["-Wl,--verbose"] if host == "Windows" else ["-Wl,-t"]
+        trace = run(
+            cc + native_unit_link_arguments(
+                ROOT / f"liblink/tests/unit/{unit}.c", archive, binary,
+                link_flags, [*trace_flags, linker_map_flag(map_file)],
+            ),
+            label=f"compile and link {unit}",
+        )
+        for member in forbidden:
+            verify_link_map(
+                map_file, archive, trace,
+                included_source=f"{unit}.c included implementations",
+                forbidden_member=member, windows_paths=host == "Windows",
+            )
+        run([str(binary)], label=f"run {unit}")
+
+
 def main() -> int:
     args = parse_args()
-    selected_modes = sum((args.foundation_only, args.protection_only,
+    selected_modes = sum((args.initializer_errors_only, args.foundation_only, args.protection_only,
                           args.protection_gap_probes,
                           args.resolution_failure_only, args.windows_m32_only,
                           args.pe_resolution_only,
@@ -818,7 +848,8 @@ def main() -> int:
         raise RuntimeError("--elf-resources-only requires native Linux x86_64 ELF")
     if args.mmap_address_bounds_only and host not in ("Linux", "Darwin"):
         raise RuntimeError("--mmap-address-bounds-only requires a POSIX host")
-    if host == "Windows" and not (args.foundation_only or args.windows_m32_only
+    if host == "Windows" and not (args.initializer_errors_only or
+                                   args.foundation_only or args.windows_m32_only
                                    or args.pe_resolution_only
                                    or args.path_ownership_only):
         raise RuntimeError(
@@ -896,6 +927,15 @@ def main() -> int:
         str(ROOT / "liblink/src"),
     ]
     cc = compiler + common_flags
+
+    if args.initializer_errors_only:
+        with tempfile.TemporaryDirectory(prefix="liblink-initializer-errors-") as temporary:
+            run_initializer_errors(
+                cc, archive, Path(temporary),
+                pe_link_flags if host == "Windows" else link_flags, host,
+            )
+        print("liblink initializer error units: PASS")
+        return 0
 
     if args.path_ownership_only:
         with tempfile.TemporaryDirectory(prefix="liblink-pathdup-ownership-") as temporary:
@@ -1006,6 +1046,10 @@ def main() -> int:
         if args.foundation_only:
             print("liblink native unit tests: PASS (foundation only)")
             return 0
+
+        if not (args.protection_only or args.protection_gap_probes or
+                args.resolution_failure_only):
+            run_initializer_errors(cc, archive, output, link_flags, host)
 
         if (host in ("Linux", "Darwin") and mmap_backend and
                 not (args.protection_only or args.protection_gap_probes or

@@ -2,6 +2,7 @@
 #include "ll_compat.h"
 #include "LinkerInternals.h"
 #include "InitFini.h"
+#include "ll_error.h"
 
 /*
  * Note [Initializers and finalizers (PEi386/ELF)]
@@ -102,6 +103,7 @@ void freeInitFiniList(ll_linker *L, struct InitFiniList *slist)
 
 static bool runInitFini(ll_linker *L, struct InitFiniList **head)
 {
+    bool success = true;
     int argc = 0, envc = 0;
     char **argv = NULL, **envv = NULL;
 
@@ -156,7 +158,12 @@ static bool runInitFini(ll_linker *L, struct InitFiniList **head)
             init_t *init_start = (init_t*)init_startC;
             init_t *init_end = (init_t*)(init_startC + section->size);
             for (init_t *init = init_start; init < init_end; init++) {
-                LL_CHECK_FOR(L, 0x0 != *init);
+                if (*init == NULL) {
+                    ll_error_set(L, LL_E_INIT,
+                                 "null initializer in .init_array");
+                    success = false;
+                    goto release_environment;
+                }
                 (*init)(argc, argv, envv);
             }
             break;
@@ -178,10 +185,11 @@ static bool runInitFini(ll_linker *L, struct InitFiniList **head)
     freeInitFiniList(L, *head);
     *head = NULL;
 
+release_environment:
     if (L->services.host.free_prog_env != NULL) {
         L->services.host.free_prog_env(L->services.host.ctx, envc, envv);
     }
-    return true;
+    return success;
 }
 
 // Run the constructors/initializers of an ObjectCode.

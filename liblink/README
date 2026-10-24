@@ -59,6 +59,17 @@ A failed load can therefore leave a quarantined object registered for
 unloading. Freshly loaded instances start without the marker. Previously
 returned raw pointers cannot be revoked by the linker.
 
+Initializer failures
+--------------------
+
+A null .init_array entry returns LL_E_INIT and releases the acquired program
+environment exactly once. A failed initializer backend quarantines the object
+and its transitive dependents under the policy above. The lookup that triggered
+initialization returns NULL. Earlier constructor side effects remain; repeated
+lookup or resolve cannot replay the executed prefix. Unload all affected objects
+before reloading them. Pending initializer and finalizer metadata stays owned
+until disposal, and finalizers run only after successful initialization.
+
 Windows M32 reservation ownership
 ---------------------------------
 

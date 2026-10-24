@@ -834,3 +834,22 @@ On Windows, the copy uses the selected linker owner's allocator and includes
 the wide path's terminator. The legacy `wcsdup` allocation bypassed that
 allocator while disposal used the owner's `free_` callback. This regression
 requires acquisition and release to use the same owner.
+
+Initializer error status and quarantine
+======================================
+
+`init_array_status.c` includes the shared `InitFini.c`. Its six cases cover a
+null first, middle, or last `.init_array` entry; successful owned-environment
+and absent-argument-hook controls; and initializer priority order. Failure
+returns `LL_E_INIT`, releases the program environment exactly once, and leaves
+the pending list owned for normal disposal. Callback counters verify the
+executed prefix, and owner ledgers check list/environment cleanup and default
+owner isolation. Successful initializer and finalizer behavior is unchanged.
+
+Run `python3 liblink/tests/unit/run_native_tests.py --initializer-errors-only`
+on a configured native Linux, Darwin, or Windows build. Default native Linux
+and Darwin unit runs also include these cases. The driver requires the selected
+native archive and rejects included implementation members pulled from it.
+Windows uses the real installed rts-fs archive before its system libraries.
+Native Linux and Windows execution and integrated GHC T1–T3 qualification
+remain required.
