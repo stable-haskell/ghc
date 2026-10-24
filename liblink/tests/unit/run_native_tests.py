@@ -86,6 +86,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="run only native Linux x86_64 COMMON/GOT resource units",
     )
+    parser.add_argument(
+        "--mmap-address-bounds-only",
+        action="store_true",
+        help="run only the POSIX linker mmap address-bound unit",
+    )
     return parser.parse_args()
 
 
@@ -229,6 +234,16 @@ def configured_linux_aarch64_elf_backend(config_include: Path) -> bool:
         re.MULTILINE,
     )
     return linux is not None and aarch64 is not None
+
+
+def configured_posix_mmap_backend(config_include: Path) -> bool:
+    autoconf_header = config_include / "ll_autoconf.h"
+    text = autoconf_header.read_text(errors="replace")
+    return re.search(
+        r"^\s*#\s*define\s+RTS_LINKER_USE_MMAP\s+1\s*$",
+        text,
+        re.MULTILINE,
+    ) is not None
 
 
 def normalize_windows_path(path: str) -> str:
@@ -615,6 +630,24 @@ def run_elf_resources(cc: list[str], archive: Path, output: Path,
             raise RuntimeError(f"resource map omitted {archive}({member}.o)")
     run([str(binary), str(fixtures)], label="run elf_resource_errors")
 
+
+def run_mmap_address_bounds(cc: list[str], archive: Path, output: Path,
+                            host: str) -> None:
+    binary = output / "mmap_address_bounds"
+    map_file = output / "mmap_address_bounds.map"
+    trace = run(
+        cc + [str(ROOT / "liblink/tests/unit/mmap_address_bounds.c"),
+              f"-L{archive.parent}", "-llink", *core_link_flags(host),
+              "-Wl,-t", linker_map_flag(map_file), "-o", str(binary)],
+        label="compile and link mmap_address_bounds",
+    )
+    verify_link_map(map_file, archive, trace, included_source="MMap.c",
+                    forbidden_member="MMap")
+    map_text = map_file.read_text(errors="replace")
+    if not archive_member_pattern(str(archive), "ll_host").search(map_text):
+        raise RuntimeError(f"address map omitted {archive}(ll_host.o)")
+    run([str(binary)], label="run mmap_address_bounds")
+
 def main() -> int:
     args = parse_args()
     selected_modes = sum((args.foundation_only, args.protection_only,
@@ -622,7 +655,8 @@ def main() -> int:
                           args.resolution_failure_only, args.windows_m32_only,
                           args.macho_table_alignment_only,
                           args.macho_x86_operands_only,
-                          args.elf_resources_only))
+                          args.elf_resources_only,
+                          args.mmap_address_bounds_only))
     if selected_modes > 1:
         raise RuntimeError("native unit modes are mutually exclusive")
     system = platform.system()
@@ -641,6 +675,8 @@ def main() -> int:
         raise RuntimeError("--macho-x86-operands-only requires native x86_64 Darwin")
     if args.elf_resources_only and host != "Linux":
         raise RuntimeError("--elf-resources-only requires native Linux x86_64 ELF")
+    if args.mmap_address_bounds_only and host not in ("Linux", "Darwin"):
+        raise RuntimeError("--mmap-address-bounds-only requires a POSIX host")
     if host == "Windows" and not (args.foundation_only or args.windows_m32_only):
         raise RuntimeError(
             "core_error_status.c is POSIX-only: the Windows linker path uses "
@@ -663,6 +699,11 @@ def main() -> int:
     archive, config_include, fs_include = locate_artifacts(
         args.build_root.resolve(), args.store_root.resolve()
     )
+    mmap_backend = configured_posix_mmap_backend(config_include)
+    if args.mmap_address_bounds_only and not mmap_backend:
+        raise RuntimeError(
+            "--mmap-address-bounds-only requires RTS_LINKER_USE_MMAP=1"
+        )
     if args.native_archive is not None:
         archive = args.native_archive.resolve()
         if not archive.is_file():
@@ -706,6 +747,12 @@ def main() -> int:
         with tempfile.TemporaryDirectory(prefix="liblink-elf-resources-") as temporary:
             run_elf_resources(cc, archive, Path(temporary), host)
         print("liblink ELF resource units: PASS")
+        return 0
+
+    if args.mmap_address_bounds_only:
+        with tempfile.TemporaryDirectory(prefix="liblink-mmap-address-bounds-") as temporary:
+            run_mmap_address_bounds(cc, archive, Path(temporary), host)
+        print("liblink mmap address bounds unit: PASS")
         return 0
 
     if args.macho_table_alignment_only:
@@ -768,6 +815,11 @@ def main() -> int:
         if args.foundation_only:
             print("liblink native unit tests: PASS (foundation only)")
             return 0
+
+        if (host in ("Linux", "Darwin") and mmap_backend and
+                not (args.protection_only or args.protection_gap_probes or
+                     args.resolution_failure_only)):
+            run_mmap_address_bounds(cc, archive, output, host)
 
         if (args.protection_only or args.protection_gap_probes or
                 args.resolution_failure_only):

@@ -310,7 +310,7 @@ static struct MemoryRegion *
 nearImage(ll_linker *L) {
     if (L->mmap_region.end == NULL) {
         L->mmap_region.start = L->mmap_32bit_base;
-        L->mmap_region.end = (uint8_t *) L->mmap_region.start + 0x80000000;
+        L->mmap_region.end = (void *)((uintptr_t)L->mmap_region.start + 0x80000000);
         L->mmap_region.last = L->mmap_region.start;
     }
     return &L->mmap_region;

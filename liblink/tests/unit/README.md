@@ -663,3 +663,19 @@ Run `python3 liblink/tests/unit/run_native_tests.py
 and generated configuration. A Rosetta run provides evidence for that
 execution environment; native Intel macOS CI provides separate evidence.
 Neither is implied by adding these tests.
+
+POSIX mmap address bounds
+=========================
+
+`mmap_address_bounds.c` includes the actual `MMap.c` and checks `nearImage`
+using integer address comparisons only. A zero lower bound produces the upper
+bound `0x80000000`. These are virtual addresses, with no mapping to dereference.
+Computing the bound with `uintptr_t` avoids pointer arithmetic from `NULL`.
+The unit also covers ordinary and maximum representable bounds, cached-region
+behavior, and isolation from the default linker owner. It performs no mmap syscall and does
+not parse or load an object. Run
+`python3 liblink/tests/unit/run_native_tests.py --mmap-address-bounds-only` on
+a POSIX build with generated `RTS_LINKER_USE_MMAP=1` configuration. The default
+driver run also includes it on eligible Linux and Darwin builds. A Rosetta run
+qualifies that execution environment; native Intel macOS CI is separate
+evidence.
