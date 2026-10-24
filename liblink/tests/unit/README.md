@@ -872,3 +872,38 @@ native archive and rejects included implementation members pulled from it.
 Windows uses the real installed rts-fs archive before its system libraries.
 Native Linux execution is required for the ELF disposal controls. Windows
 execution and integrated GHC T1–T3 qualification remain required.
+
+POSIX native-load failure cleanup
+================================
+
+`native_load_errors.c` links the selected native archive and uses real
+`dlopen`, `mkOc`, and `freeObjectCode`. Owner allocation ledgers cover two
+successful owners, duplicate reuse, static-object collisions, and two repeated
+missing-library failures on one owner. Error-copy contents must survive a host
+cleanup callback that changes loader-error storage. A separate callback model
+attaches an opaque fixture-owned cookie and verifies its one-time release
+before object metadata. This does not model RTS foreign-export registrations
+backed by a library that an OS loader has already unmapped.
+
+The missing-library case also runs twice with the optional `on_unload` hook
+unset. The library must still free its own metadata with no cleanup callback
+or extra hook event; allocation cleanup does not depend on a host hook.
+
+The final no-handle failure callback sees an unregistered dynamic object whose
+internal status remains `OBJECT_READY`. Both native-load hooks have completed,
+and the diagnostic has been copied, before `on_unload` releases attached host
+state and the library frees metadata. The caller still owns the copied error.
+This unit adds no public `ll_status` classification; public native API wiring
+is a separate work package. Post-success `dlinfo` and range-discovery failures
+retain their existing native-handle handling and remain separately scoped.
+
+A second fixture contains an unused reference to a missing function. No fixture
+function is called. With native `HAVE_DLINFO`, eager loading must fail and lazy
+loading succeed without failure cleanup, preserving both hook pairs. Other
+POSIX builds exercise their existing single lazy attempt. Generated platform
+macros are used unchanged; Darwin execution does not qualify Linux retry paths.
+
+Run `python3 liblink/tests/unit/run_native_tests.py --native-load-errors-only`
+on a configured native Darwin or Linux build. The default POSIX unit suite
+also runs these cases. Native Linux execution remains required for the
+`HAVE_DLINFO` controls; synthetic host state is not a rollback guarantee.

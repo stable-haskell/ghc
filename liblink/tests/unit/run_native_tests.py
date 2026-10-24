@@ -106,6 +106,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="run only the private pathdup owner-allocation unit",
     )
+    parser.add_argument(
+        "--native-load-errors-only",
+        action="store_true",
+        help="run only POSIX native-library cleanup, ownership, and retry controls",
+    )
     return parser.parse_args()
 
 
@@ -823,6 +828,43 @@ def run_initializer_errors(cc: list[str], archive: Path, output: Path,
         run([str(binary)], label=f"run {unit}")
 
 
+def run_native_load_errors(cc: list[str], archive: Path, output: Path,
+                           link_flags: list[str], host: str) -> None:
+    source = ROOT / "liblink/tests/unit/native_load_fixture.c"
+    suffix = ".dylib" if host == "Darwin" else ".so"
+    shared = ["-dynamiclib"] if host == "Darwin" else ["-shared", "-fPIC"]
+    lazy_flags = (["-Wl,-undefined,dynamic_lookup"] if host == "Darwin" else
+                  ["-Wl,--allow-shlib-undefined"])
+    libraries = {}
+    for kind in ("ordinary", "lazy"):
+        library = output / ("libnative-load-" + kind + suffix)
+        flags = (["-DNATIVE_LOAD_LAZY_FIXTURE", *lazy_flags]
+                 if kind == "lazy" else [])
+        run(cc + [*shared, *flags, str(source), "-o", str(library)],
+            label="compile native-load " + kind + " fixture")
+        libraries[kind] = library
+    binary = output / "native_load_errors"
+    map_file = output / "native_load_errors.map"
+    trace = run(
+        cc + native_unit_link_arguments(
+            ROOT / "liblink/tests/unit/native_load_errors.c", archive,
+            binary, link_flags, ["-Wl,-t", linker_map_flag(map_file)]),
+        label="compile and link native_load_errors")
+    verify_link_map(map_file, archive, trace,
+                    included_source="native_load_errors.c",
+                    forbidden_member="native_load_errors")
+    evidence = map_file.read_text(errors="replace") + trace
+    for member in ("Linker", "LoadNativeObjPosix"):
+        if not archive_member_pattern(str(archive), member).search(evidence):
+            raise RuntimeError(f"native-load test omitted {member} from {archive}")
+    missing = output / ("does-not-exist" + suffix)
+    for case in ("positive", "collision", "missing", "missing-host-state",
+                 "lazy", "missing-no-unload-hook"):
+        path = (libraries["ordinary"] if case in ("positive", "collision") else
+                libraries["lazy"] if case == "lazy" else missing)
+        run([str(binary), case, str(path)], label="native-load " + case)
+
+
 def main() -> int:
     args = parse_args()
     selected_modes = sum((args.initializer_errors_only, args.foundation_only, args.protection_only,
@@ -833,7 +875,7 @@ def main() -> int:
                           args.macho_x86_operands_only,
                           args.elf_resources_only,
                           args.mmap_address_bounds_only,
-                          args.path_ownership_only))
+                          args.path_ownership_only, args.native_load_errors_only))
     if selected_modes > 1:
         raise RuntimeError("native unit modes are mutually exclusive")
     host = native_host()
@@ -849,6 +891,8 @@ def main() -> int:
         raise RuntimeError("--elf-resources-only requires native Linux x86_64 ELF")
     if args.mmap_address_bounds_only and host not in ("Linux", "Darwin"):
         raise RuntimeError("--mmap-address-bounds-only requires a POSIX host")
+    if args.native_load_errors_only and host not in ("Linux", "Darwin"):
+        raise RuntimeError("--native-load-errors-only requires a POSIX native host")
     if host == "Windows" and not (args.initializer_errors_only or
                                    args.foundation_only or args.windows_m32_only
                                    or args.pe_resolution_only
@@ -928,6 +972,12 @@ def main() -> int:
         str(ROOT / "liblink/src"),
     ]
     cc = compiler + common_flags
+
+    if args.native_load_errors_only:
+        with tempfile.TemporaryDirectory(prefix="liblink-native-load-errors-") as temporary:
+            run_native_load_errors(cc, archive, Path(temporary), link_flags, host)
+        print("liblink native load-error unit: PASS")
+        return 0
 
     if args.initializer_errors_only:
         with tempfile.TemporaryDirectory(prefix="liblink-initializer-errors-") as temporary:
@@ -1051,6 +1101,11 @@ def main() -> int:
         if not (args.protection_only or args.protection_gap_probes or
                 args.resolution_failure_only):
             run_initializer_errors(cc, archive, output, link_flags, host)
+
+        if (host in ("Linux", "Darwin") and
+                not (args.protection_only or args.protection_gap_probes or
+                     args.resolution_failure_only)):
+            run_native_load_errors(cc, archive, output, link_flags, host)
 
         if (host in ("Linux", "Darwin") and mmap_backend and
                 not (args.protection_only or args.protection_gap_probes or
