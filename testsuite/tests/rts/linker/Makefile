@@ -90,6 +90,13 @@ T5435_dyn_asm :
 	$(call run_T5435_dyn,asm)
 
 #--------------------------------------------------------------------
+# To observe unload timeouts, set GHC_LINKER_UNLOAD_TRACE=linker_unload.phases
+# on the usual testsuite invocation and use CLEANUP=NO to retain the run
+# directory. The path is relative to linker_unload.run; an absolute path also
+# works. Tracing is off by default, writes a separate append-only file, and
+# preserves stdout/stderr and errno even if the trace file cannot be written.
+# It records startup, the first operation of each kind in both loops, and exit.
+# Tracing changes timing; a passing trace does not explain an earlier timeout.
 .PHONY: linker_unload
 linker_unload:
 	$(RM) Test.o Test.hi
@@ -97,6 +104,16 @@ linker_unload:
 	# -rtsopts causes a warning
 	"$(TEST_HC)" LinkerUnload.hs -package ghc $(filter-out -rtsopts, $(TEST_HC_OPTS)) linker_unload.c -o linker_unload -no-hs-main -optc-Werror
 	./linker_unload "`'$(TEST_HC)' $(TEST_HC_OPTS) --print-libdir | tr -d '\r'`"
+
+# C callers hold a capability while changing linker objects. Haskell calls
+# and explicit collections run after releasing it. This regression injects
+# each load/resolve/lookup error in both loops, then requests real GC at exit.
+.PHONY: linker_unload_errors
+linker_unload_errors:
+	$(RM) Test.o Test.hi
+	"$(TEST_HC)" $(TEST_HC_OPTS) -threaded -c Test.hs -v0
+	"$(TEST_HC)" LinkerUnload.hs -package ghc $(filter-out -rtsopts, $(TEST_HC_OPTS)) -threaded linker_unload_errors.c -o linker_unload_errors -no-hs-main -optc-Werror -v0
+	"$(PYTHON)" linker_unload_errors.py ./linker_unload_errors "`'$(TEST_HC)' $(TEST_HC_OPTS) --print-libdir | tr -d '\r'`"
 
 .PHONY: linker_unload_native
 linker_unload_native:
