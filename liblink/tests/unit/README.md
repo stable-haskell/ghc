@@ -724,3 +724,22 @@ a POSIX build with generated `RTS_LINKER_USE_MMAP=1` configuration. The default
 driver run also includes it on eligible Linux and Darwin builds. A Rosetta run
 qualifies that execution environment; native Intel macOS CI is separate
 evidence.
+
+Unpacked sums timing diagnosis
+==============================
+
+For a diagnostic sample, run `.github/scripts/measure-unpack-sums.py` with an
+explicit compiler and a new output directory, for example:
+
+    python3 .github/scripts/measure-unpack-sums.py \
+      --ghc _build/dist/bin/ghc \
+      --output-dir _build/unpack-sums-timing-sample
+
+The POSIX collector compiles `unpack_sums_6.hs` with `-O`, `-rtsopts`,
+`-no-user-package-db`, and `-fforce-recomp`. It keeps compiler outputs in the
+result directory, runs one warmup and five recorded samples, and keeps raw
+stdout/stderr plus exact arguments, compiler/source hashes, and `--info` output
+in the result directory. It enables `GHC_UNPACK_SUMS_TIMINGS=1` only for direct
+program runs. Exit 1 from the unchanged timing predicate is recorded as data;
+the collector succeeds only when every run has expected stdout and two parsed
+durations. It does not compare performance or establish benchmark acceptance.
