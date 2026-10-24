@@ -156,6 +156,10 @@ struct ObjectCodeFormatInfo {
     /* pointer to the global offset table */
     void *                got_start;
     size_t                got_size;
+
+    /* Owned storage for this object's new COMMON definitions. */
+    void *                common_mem;
+    size_t                common_size;
 };
 
 typedef

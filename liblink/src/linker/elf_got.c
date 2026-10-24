@@ -110,6 +110,10 @@ makeGot(ObjectCode * oc) {
         }
     }
     if(got_slots > 0) {
+        if (got_slots > SIZE_MAX / sizeof(void *)) {
+            ll_error_set(oc->L, LL_E_UNSUPPORTED, "ELF GOT allocation is too large");
+            return EXIT_FAILURE;
+        }
         oc->info->got_size = got_slots * sizeof(void *);
         void * mem = ll_mmap_anon_for_linker(oc->L, oc->info->got_size);
         if (mem == NULL) {
@@ -239,8 +243,11 @@ verifyGot(ObjectCode * oc) {
 
 void
 freeGot(ObjectCode * oc) {
-//    munmapForLinker(oc->info->got_start, oc->info->got_size, "freeGot);
-    oc->info->got_start = 0x0;
+    if (oc->info->got_start != NULL && oc->info->got_size != 0) {
+        ll_munmap_for_linker(oc->L, oc->info->got_start, oc->info->got_size,
+                            "freeGot");
+    }
+    oc->info->got_start = NULL;
     oc->info->got_size = 0;
 }
 #endif

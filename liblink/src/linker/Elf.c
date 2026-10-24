@@ -332,13 +332,20 @@ ocInit_ELF(ObjectCode * oc)
 void
 ocDeinit_ELF(ObjectCode * oc)
 {
+    const ll_status saved_status = oc->L->error_status;
+    const bool saved_pre_backend = oc->L->error_from_pre_backend;
+    char saved_message[LL_ERROR_CAPACITY];
+    if (saved_status != LL_OK)
+        memcpy(saved_message, oc->L->error_message, sizeof(saved_message));
     /* free all ElfSymbolTables, and their associated
      * ElfSymbols
      */
     if(oc->info != NULL) {
-#if defined(NEED_GOT)
         freeGot(oc);
-#endif
+        if (oc->info->common_mem != NULL) {
+            ll_munmap_for_linker(oc->L, oc->info->common_mem,
+                                oc->info->common_size, "ocDeinit_ELF(COMMON)");
+        }
         ElfSymbolTable * last = oc->info->symbolTables;
 
         while(last != NULL) {
@@ -371,6 +378,11 @@ ocDeinit_ELF(ObjectCode * oc)
 #if defined(SHN_XINDEX)
         oc->shndx_table = SHNDX_TABLE_UNINIT(oc->L);
 #endif
+    }
+    if (saved_status != LL_OK) {
+        oc->L->error_status = saved_status;
+        oc->L->error_from_pre_backend = saved_pre_backend;
+        memcpy(oc->L->error_message, saved_message, sizeof(saved_message));
     }
 }
 
@@ -995,8 +1007,8 @@ ocGetNames_ELF ( ObjectCode* oc )
 
       unsigned curSymbol = 0;
 
-      unsigned long common_size = 0;
-      unsigned long common_used = 0;
+      size_t common_size = 0;
+      size_t common_used = 0;
       for(ElfSymbolTable *symTab = oc->info->symbolTables;
            symTab != NULL; symTab = symTab->next) {
            for (size_t j = 0; j < symTab->n_symbols; j++) {
@@ -1005,6 +1017,11 @@ ocGetNames_ELF ( ObjectCode* oc )
                    /* Skip COMMON symbols already defined by a previously-loaded
                     * object; we will reuse the existing allocation. */
                    if (!lookupStrHashTable(oc->L->symhash, symTab->symbols[j].name)) {
+                       if (symbol->elf_sym->st_size > SIZE_MAX - common_size) {
+                           ll_error_set(oc->L, LL_E_UNSUPPORTED,
+                                        "ELF COMMON allocation is too large");
+                           goto fail;
+                       }
                        common_size += symbol->elf_sym->st_size;
                    }
                }
@@ -1012,9 +1029,21 @@ ocGetNames_ELF ( ObjectCode* oc )
       }
       void * common_mem = NULL;
       if(common_size > 0) {
+          const size_t page_size = ll_page_size_for(oc->L);
+          if (common_size > SIZE_MAX - (page_size - 1)) {
+              ll_error_set(oc->L, LL_E_UNSUPPORTED,
+                           "ELF rounded COMMON allocation is too large");
+              goto fail;
+          }
+          oc->info->common_size = common_size;
           common_mem = ll_mmap_anon_for_linker(oc->L, common_size);
+          oc->info->common_mem = common_mem;
           if (common_mem == NULL) {
-            LL_FATAL_FOR(oc->L, "ocGetNames_ELF: Failed to allocate memory for SHN_COMMONs");
+              ll_error_set(oc->L, LL_E_NOMEM,
+                           "ocGetNames_ELF: Failed to allocate memory for SHN_COMMONs");
+              LL_LOG_ERROR_FOR(oc->L,
+                               "ocGetNames_ELF: Failed to allocate memory for SHN_COMMONs");
+              goto fail;
           }
       }
 
@@ -1056,15 +1085,21 @@ ocGetNames_ELF ( ObjectCode* oc )
                    isLocal = false;
                    RtsSymbolInfo *existing = lookupStrHashTable(oc->L->symhash, nm);
                    if (existing != NULL) {
-                       if (!ll_failure_alias(oc, existing->owner)) return 0;
+                       if (!ll_failure_alias(oc, existing->owner)) goto fail;
                        /* COMMON symbol already allocated by a previously-loaded
                         * object; reuse that address so relocations resolve to
                         * the same storage. */
                        if(symbol->elf_sym->st_size > existing->size) {
-                           LL_FATAL_FOR(oc->L, "linker: trying to link COMMON symbols %s with incompatible sizes: previous size %llu, new size %llu\n",
+                           ll_error_set(oc->L, LL_E_DUPSYM,
+                                   "linker: trying to link COMMON symbols %s with incompatible sizes: previous size %llu, new size %llu\n",
                                    nm,
                                    (long long unsigned int) existing->size,
                                    (long long unsigned int) symbol->elf_sym->st_size);
+                           LL_LOG_ERROR_FOR(oc->L, "linker: trying to link COMMON symbols %s with incompatible sizes: previous size %llu, new size %llu\n",
+                                   nm,
+                                   (long long unsigned int) existing->size,
+                                   (long long unsigned int) symbol->elf_sym->st_size);
+                           goto fail;
                        }
                        symbol->addr = existing->value;
                        common_already_defined = true;
@@ -1072,9 +1107,14 @@ ocGetNames_ELF ( ObjectCode* oc )
                                 LL_DEBUG_FOR(oc->L, "COMMON symbol, size %llu name %s reusing address %p\n",
                                            (long long unsigned int) symbol->elf_sym->st_size, nm, symbol->addr));
                    } else {
-                       LL_CHECK_FOR(oc->L, common_used < common_size);
-                       LL_CHECK_FOR(oc->L, common_mem);
-                       symbol->addr = (void*)((uintptr_t)common_mem + common_used);
+                       LL_CHECK_FOR(oc->L, common_used <= common_size);
+                       LL_CHECK_FOR(oc->L, common_mem != NULL ||
+                                    symbol->elf_sym->st_size == 0);
+                       /* A zero-sized COMMON-only image needs an address,
+                        * but no separate allocation. Its aliases retain this
+                        * image through the existing lifetime dependency. */
+                       symbol->addr = common_mem == NULL ? oc->image :
+                           (void *)((uintptr_t)common_mem + common_used);
                        common_used += symbol->elf_sym->st_size;
                        LL_CHECK_FOR(oc->L, common_used <= common_size);
                        LL_IF_DEBUG_FOR(oc->L, linker_verbose,
@@ -1180,11 +1220,16 @@ ocGetNames_ELF ( ObjectCode* oc )
       }
    }
 
-   if(makeGot( oc ))
+   if(makeGot( oc )) {
+       if (oc->L->error_status == LL_OK)
+           ll_error_set(oc->L, LL_E_NOMEM, "Failed to create GOT for %s",
+                        OC_INFORMATIVE_FILENAME(oc));
        LL_LOG_ERROR_FOR(oc->L, "Failed to create GOT for %s",
                   oc->archiveMemberName
                   ? oc->archiveMemberName
                   : oc->fileName);
+       goto fail;
+   }
    result = 1;
    goto end;
 
