@@ -46,12 +46,24 @@ static unsigned failures;
 
 /* Source-included implementations make the fixture use the current PE loader,
  * ObjectCode disposal, and the real Windows M32 reservation/mapping path. */
+#ifdef PEI386_TEST_M32_ALLOC
+#define m32_alloc_for PEI386_TEST_M32_ALLOC
+#endif
+#ifdef PEI386_TEST_GETPROC
+#define GetProcAddress PEI386_TEST_GETPROC
+#endif
 #ifdef PEI386_TEST_RTLDELETE
 #define RtlDeleteFunctionTable PEI386_TEST_RTLDELETE
 #endif
 #include "linker/PEi386.c"
 #ifdef PEI386_TEST_RTLDELETE
 #undef RtlDeleteFunctionTable
+#endif
+#ifdef PEI386_TEST_GETPROC
+#undef GetProcAddress
+#endif
+#ifdef PEI386_TEST_M32_ALLOC
+#undef m32_alloc_for
 #endif
 #include "Linker.c"
 #include "linker/M32Alloc.c"

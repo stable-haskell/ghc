@@ -655,6 +655,24 @@ complete capture validation for baseline comparison.
 These results do not establish baseline parity; that remains unqualified until
 the Windows CI run is reviewed against the baseline.
 
+PE post-symbol resolution
+=========================
+
+`pei386_resolution_status.c` uses the genuine Windows x86_64 host fixture
+and actual included `PEi386.c`. It checks all three symbol-extra encodings
+and exact addresses with real M32 allocators, mapping-failure status and
+output preservation, owner/default isolation, and DLL fallback termination.
+Its valid COFF relocation fixture checks post-trampoline range failures for
+ADDR32, ADDR32NB, 32S, and REL32, including an unchanged relocation slot and
+one selected trampoline allocation per case. A within-range REL32 control
+checks the normal write path without a trampoline. These checks inspect data
+and never call generated jump bytes.
+
+The focused `--pe-resolution-only` mode runs both this unit and the unwind
+lifetime unit below. DLL indirection allocation failure, error preservation,
+and post-trampoline range handling require native Windows execution for
+qualification; that compilation and execution are pending.
+
 PE unwind record lifetime
 =========================
 

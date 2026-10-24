@@ -464,12 +464,13 @@
 #include <psapi.h>
 
 #if defined(x86_64_HOST_ARCH)
-static size_t makeSymbolExtra_PEi386(
+static bool makeSymbolExtra_PEi386(
     ObjectCode* oc,
     uint64_t index,
     size_t s,
     ll_symbol_name* symbol,
-    ll_sym_type sym_type);
+    ll_sym_type sym_type,
+    size_t *result);
 #endif
 
 static void addDLLHandle(
@@ -1294,10 +1295,13 @@ lookupSymbolInDLLs ( ll_linker *L, const ll_symbol_name* lbl,
     OpenedDLL* o_dll;
     ll_symbol_addr* res;
 
-    for (o_dll = L->opened_dlls; o_dll != NULL; o_dll = o_dll->next)
-        if ((res = lookupSymbolInDLL_PEi386(L, lbl, o_dll->instance,
-                                            o_dll->name, dependent)))
-            return res;
+    for (o_dll = L->opened_dlls; o_dll != NULL; o_dll = o_dll->next) {
+        res = lookupSymbolInDLL_PEi386(L, lbl, o_dll->instance,
+                                       o_dll->name, dependent);
+        if (res != NULL) return res;
+        /* An allocation failure is not a missing definition in this DLL. */
+        if (L->error_status != LL_OK) return NULL;
+    }
     return NULL;
 }
 
@@ -1332,7 +1336,11 @@ lookupSymbolInDLL_PEi386 ( ll_linker *L, const ll_symbol_name* lbl,
         if (sym != NULL) {
             ll_symbol_addr** indirect = m32_alloc_for(L, dependent->rw_m32, sizeof(ll_symbol_addr*), 8);
             if (indirect == NULL) {
-                LL_FATAL_FOR(L, "lookupSymbolInDLLs: Failed to allocation indirection");
+                if (L->error_status == LL_OK)
+                    ll_error_set(L, LL_E_NOMEM,
+                                 "lookupSymbolInDLLs: could not allocate indirection for %s",
+                                 lbl);
+                return NULL;
             }
             *indirect = sym;
             LL_IF_DEBUG_FOR(L, linker,
@@ -2157,35 +2165,42 @@ ocGetNames_PEi386 ( ObjectCode* oc )
 
 #if defined(x86_64_HOST_ARCH)
 
-static size_t
-makeSymbolExtra_PEi386( ObjectCode* oc, uint64_t index LL_UNUSED, size_t s, char* symbol LL_UNUSED, ll_sym_type type )
+static bool
+makeSymbolExtra_PEi386( ObjectCode* oc, uint64_t index LL_UNUSED, size_t s,
+                       char* symbol LL_UNUSED, ll_sym_type type, size_t *result )
 {
-    SymbolExtra *extra;
-    switch(type & ~(LL_SYM_DUP_DISCARD | LL_SYM_HIDDEN)) {
+    ll_sym_type kind = type & ~(LL_SYM_DUP_DISCARD | LL_SYM_HIDDEN);
+    SymbolExtra *extra = m32_alloc_for(oc->L,
+        kind == LL_SYM_CODE ? oc->rx_m32 : oc->rw_m32, sizeof(SymbolExtra), 8);
+    if (extra == NULL) {
+        if (oc->L->error_status == LL_OK)
+            ll_error_set(oc->L, LL_E_NOMEM,
+                         "makeSymbolExtra: could not allocate symbol extra for %s",
+                         symbol);
+        return false;
+    }
+    switch(kind) {
         case LL_SYM_CODE: {
             // jmp *-14(%rip)
-            extra = m32_alloc_for(oc->L, oc->rx_m32, sizeof(SymbolExtra), 8);
-            LL_CHECK_FOR(oc->L, extra);
             extra->addr = (uint64_t)s;
             static uint8_t jmp[] = { 0xFF, 0x25, 0xF2, 0xFF, 0xFF, 0xFF };
             memcpy(extra->jumpIsland, jmp, 6);
             LL_IF_DEBUG_FOR(oc->L, linker_verbose, LL_DEBUG_FOR(oc->L, "makeSymbolExtra(code): %s -> %p\n", symbol, &extra->jumpIsland));
-            return (size_t)&extra->jumpIsland;
+            *result = (size_t)&extra->jumpIsland;
+            return true;
         }
         case LL_SYM_INDIRECT_DATA: {
-            extra = m32_alloc_for(oc->L, oc->rw_m32, sizeof(SymbolExtra), 8);
-            LL_CHECK_FOR(oc->L, extra);
             void *v = *(void**) s;
             extra->addr = (uint64_t)v;
             LL_IF_DEBUG_FOR(oc->L, linker_verbose, LL_DEBUG_FOR(oc->L, "makeSymbolExtra(data): %s -> %p\n", symbol, &extra->addr));
-            return (size_t)&extra->addr;
+            *result = (size_t)&extra->addr;
+            return true;
         }
         default: {
-            extra = m32_alloc_for(oc->L, oc->rw_m32, sizeof(SymbolExtra), 8);
-            LL_CHECK_FOR(oc->L, extra);
             extra->addr = (uint64_t)s;
             LL_IF_DEBUG_FOR(oc->L, linker_verbose, LL_DEBUG_FOR(oc->L, "makeSymbolExtra(indirect-data): %s -> %p\n", symbol, &extra->addr));
-            return (size_t)&extra->addr;
+            *result = (size_t)&extra->addr;
+            return true;
         }
     }
 }
@@ -2315,7 +2330,11 @@ ocResolve_PEi386 ( ObjectCode* oc )
                    if (((int64_t) v > (int64_t) INT32_MAX) || ((int64_t) v < (int64_t) INT32_MIN)) {
                        copyName (getSymShortName(oc->L, info, sym), oc,
                                  symbol, sizeof(symbol)-1);
-                       S = makeSymbolExtra_PEi386(oc, symIndex, S, (char *)symbol, sym_type);
+                       if (!makeSymbolExtra_PEi386(oc, symIndex, S,
+                                                  (char *)symbol, sym_type, &S)) {
+                           releaseOcInfo(oc);
+                           return false;
+                       }
                        /* And retry */
                        v = S + A;
 
@@ -2324,8 +2343,11 @@ ocResolve_PEi386 ( ObjectCode* oc )
                          v -= (uint64_t) GetModuleHandleW(NULL);
 
                        if (((int64_t) v > (int64_t) INT32_MAX) || ((int64_t) v < (int64_t) INT32_MIN)) {
-                           LL_FATAL_FOR(oc->L, "IMAGE_REL_AMD64_ADDR32[NB]: High bits are set in 0x%zx for %s",
-                                v, (char *)symbol);
+                           ll_error_set(oc->L, LL_E_RELOC_RANGE,
+                               "IMAGE_REL_AMD64_ADDR32[NB]: High bits are set in 0x%" PRIx64 " for %s",
+                               v, (char *)symbol);
+                           releaseOcInfo(oc);
+                           return false;
                        }
                    }
                    *(uint32_t *)pP = (uint32_t)v;
@@ -2348,12 +2370,19 @@ ocResolve_PEi386 ( ObjectCode* oc )
                        /* Make the trampoline then */
                        copyName (getSymShortName(oc->L, info, sym),
                                  oc, symbol, sizeof(symbol)-1);
-                       S = makeSymbolExtra_PEi386(oc, symIndex, S, (char *)symbol, sym_type);
+                       if (!makeSymbolExtra_PEi386(oc, symIndex, S,
+                                                  (char *)symbol, sym_type, &S)) {
+                           releaseOcInfo(oc);
+                           return false;
+                       }
                        /* And retry */
                        v = S + (int32_t)A - ((intptr_t)pP) - 4;
                        if ((v > (int64_t) INT32_MAX) || (v < (int64_t) INT32_MIN)) {
-                           LL_FATAL_FOR(oc->L, "IMAGE_REL_AMD64_REL32: High bits are set in 0x%zx for %s",
-                                v, (char *)symbol);
+                           ll_error_set(oc->L, LL_E_RELOC_RANGE,
+                               "IMAGE_REL_AMD64_REL32: High bits are set in 0x%" PRIxPTR " for %s",
+                               (uintptr_t)v, (char *)symbol);
+                           releaseOcInfo(oc);
+                           return false;
                        }
                    }
                    *(uint32_t *)pP = (uint32_t)v;
