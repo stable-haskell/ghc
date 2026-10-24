@@ -10,6 +10,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#if defined(linux_HOST_OS) && defined(HAVE_DLINFO)
+#include <link.h>
+#endif
 
 #if defined(HAVE_DLINFO)
 #define FAILED_LOAD_ATTEMPTS 2
@@ -29,12 +32,52 @@ typedef struct {
     size_t allocations, frees, before, after, registered, batches, logs;
     unsigned unloaded;
     bool inject_failed_host_state;
+    bool quiet, fail_dlinfo, fail_ranges;
+    unsigned dlinfo_calls, range_calls, close_calls, mapping_diagnostics;
+    char mapping_diagnostic[512];
     unsigned events[32];
     size_t n_events;
     ObjectCode *attempt;
 } Host;
 
 static Host *active;
+
+#if defined(linux_HOST_OS) && defined(HAVE_DLINFO)
+/* GNU ld wraps calls from the genuine native archive. The loader itself and
+ * all uninjected queries still use the platform implementation. */
+extern int __real_dlinfo(void *handle, int request, void *info);
+extern int __real_dl_iterate_phdr(
+    int (*callback)(struct dl_phdr_info *, size_t, void *), void *data);
+extern int __real_dlclose(void *handle);
+
+int __wrap_dlinfo(void *handle, int request, void *info)
+{
+    REQUIRE(active != NULL);
+    active->dlinfo_calls++;
+    if (active->fail_dlinfo) {
+        /* Leave a real loader diagnostic for the production dlerror call. */
+        REQUIRE(dlsym(handle, "ll_native_test_missing_mapping_symbol") == NULL);
+        return -1;
+    }
+    return __real_dlinfo(handle, request, info);
+}
+
+int __wrap_dl_iterate_phdr(
+    int (*callback)(struct dl_phdr_info *, size_t, void *), void *data)
+{
+    REQUIRE(active != NULL);
+    active->range_calls++;
+    if (active->fail_ranges) return 0;
+    return __real_dl_iterate_phdr(callback, data);
+}
+
+int __wrap_dlclose(void *handle)
+{
+    REQUIRE(active != NULL);
+    active->close_calls++;
+    return __real_dlclose(handle);
+}
+#endif
 
 static void remember(Host *host, void *p, const char *tag, size_t bytes)
 {
@@ -116,8 +159,14 @@ static void log_message(void *ctx, int kind, const char *fmt, va_list args)
 {
     Host *host = ctx;
     REQUIRE(host == active && fmt != NULL);
-    (void)kind; (void)args;
+    (void)kind;
     host->logs++;
+    if (strstr(fmt, "retaining library without mappings") != NULL) {
+        int written = vsnprintf(host->mapping_diagnostic,
+                                sizeof(host->mapping_diagnostic), fmt, args);
+        REQUIRE(written >= 0 && (size_t)written < sizeof(host->mapping_diagnostic));
+        host->mapping_diagnostics++;
+    }
 }
 
 static _Noreturn void fatal(void *ctx, const char *fmt, va_list args)
@@ -212,7 +261,7 @@ static void install(ll_linker *L, Host *host)
         .after_native_load = after, .object_registered = registered,
         .after_init_batch = batch, .on_unload = failed_native_unload
     };
-    ll_compat_config cfg = {.debug_mask = LL_DBG_LINKER};
+    ll_compat_config cfg = {.debug_mask = host->quiet ? 0 : LL_DBG_LINKER};
     ll_install_host_for(L, &ops, &cfg);
 }
 
@@ -243,12 +292,57 @@ int main(int argc, char **argv)
     REQUIRE(argc == 3);
     ll_linker owners[2] = {{0}};
     Host hosts[3] = {{0}};
+    hosts[0].quiet = strstr(argv[1], "-quiet") != NULL;
     for (size_t i = 0; i < 3; i++) {
         active = &hosts[i];
         install(i < 2 ? &owners[i] : &ll_default_linker, &hosts[i]);
         if (i < 2) ll_mutex_init_for(&owners[i].services, &owners[i].linker_mutex);
     }
     char *error = NULL;
+#if defined(linux_HOST_OS) && defined(HAVE_DLINFO)
+    if (strcmp(argv[1], "dlinfo") == 0 || strcmp(argv[1], "dlinfo-quiet") == 0 ||
+        strcmp(argv[1], "ranges") == 0 || strcmp(argv[1], "ranges-quiet") == 0) {
+        Host *host = &hosts[0];
+        host->fail_dlinfo = strncmp(argv[1], "dlinfo", 6) == 0;
+        host->fail_ranges = !host->fail_dlinfo;
+        void *handle = load(host, argv[2], &error);
+        REQUIRE(handle != NULL && error == NULL);
+        REQUIRE(host->attempt->status == OBJECT_READY);
+        REQUIRE(host->attempt->dlopen_handle == handle);
+        REQUIRE(!host->attempt->unloadable && host->attempt->nc_ranges == NULL);
+        REQUIRE(host->before == 1 && host->after == 1 && host->registered == 1);
+        REQUIRE(host->batches == 1 && host->unloaded == 0 && host->close_calls == 0);
+        REQUIRE(host->dlinfo_calls == 1);
+        REQUIRE(host->range_calls == (host->fail_dlinfo ? 0u : 1u));
+        const unsigned expected[] = {1, 2, 3, 4};
+        REQUIRE(host->n_events == 4 && memcmp(host->events, expected, sizeof(expected)) == 0);
+        REQUIRE(host->mapping_diagnostics == (host->quiet ? 0u : 1u));
+        if (host->quiet) {
+            REQUIRE(host->logs == 0);
+        } else {
+            REQUIRE(strstr(host->mapping_diagnostic,
+                host->fail_dlinfo ? "ll_native_test_missing_mapping_symbol" :
+                                    "dl_iterate_phdr found no ranges") != NULL);
+        }
+        size_t allocations = host->allocations;
+        REQUIRE(load(host, argv[2], &error) == handle && error == NULL);
+        REQUIRE(host->allocations == allocations && host->n_events == 4);
+        REQUIRE(host->dlinfo_calls == 1 && host->close_calls == 0);
+        REQUIRE(host->range_calls == (host->fail_dlinfo ? 0u : 1u));
+        REQUIRE(host->mapping_diagnostics == (host->quiet ? 0u : 1u));
+        int *value = dlsym(handle, "ll_owner_fixture_value");
+        REQUIRE(value != NULL && *value == 73);
+        /* Explicit fixture disposal is not a GC-retention test. The live
+         * handle must only be closed by this deliberate teardown. */
+        dispose(host);
+        REQUIRE(host->close_calls == 1);
+        REQUIRE(hosts[1].allocations == 0 && hosts[2].allocations == 0);
+        active = host;
+        ll_mutex_close_for(&owners[0].services, &owners[0].linker_mutex);
+        printf("native mapping fallback: PASS (%s)\n", argv[1]);
+        return 0;
+    }
+#endif
     if (strcmp(argv[1], "missing") == 0 ||
         strcmp(argv[1], "missing-host-state") == 0 ||
         strcmp(argv[1], "missing-no-unload-hook") == 0) {

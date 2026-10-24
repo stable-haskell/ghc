@@ -79,6 +79,13 @@ It then frees unregistered object metadata. The callback sees OBJECT_READY with
 a NULL native handle. The caller owns the copied error. Metadata cleanup also
 works when on_unload is absent.
 
+After a successful dlopen, failure to discover native mappings through dlinfo
+or dl_iterate_phdr keeps the library loaded and marks it non-unloadable. Normal
+registration and batch completion still run once. Linker debug logging reports
+the discovery failure; loading succeeds without an error allocation or retry.
+Logical unload can release host state, but GC retains the native mapping, as
+it does for the existing successful lazy-load fallback.
+
 Windows M32 reservation ownership
 ---------------------------------
 

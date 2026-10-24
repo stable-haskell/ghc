@@ -894,8 +894,7 @@ internal status remains `OBJECT_READY`. Both native-load hooks have completed,
 and the diagnostic has been copied, before `on_unload` releases attached host
 state and the library frees metadata. The caller still owns the copied error.
 This unit adds no public `ll_status` classification; public native API wiring
-is a separate work package. Post-success `dlinfo` and range-discovery failures
-retain their existing native-handle handling and remain separately scoped.
+is a separate work package.
 
 A second fixture contains an unused reference to a missing function. No fixture
 function is called. With native `HAVE_DLINFO`, eager loading must fail and lazy
@@ -907,3 +906,22 @@ Run `python3 liblink/tests/unit/run_native_tests.py --native-load-errors-only`
 on a configured native Darwin or Linux build. The default POSIX unit suite
 also runs these cases. Native Linux execution remains required for the
 `HAVE_DLINFO` controls; synthetic host state is not a rollback guarantee.
+
+Successful native loads without mapping metadata
+------------------------------------------------
+
+On Linux with native `HAVE_DLINFO`, GNU linker wrappers inject a `dlinfo`
+failure and, separately, successful iteration that supplies no ranges. Each
+case runs with linker diagnostics enabled and disabled. The selected archive
+must return a successful handle with no error allocation, retain `OBJECT_READY`
+and null ranges, and mark the object non-unloadable. Tests require one native
+load hook pair, registration and batch completion, no failure callback, no
+close, accessible exported data, and duplicate reuse without another attempt.
+Enabled diagnostics must identify the injected failure. Uninjected eager-load
+and lazy-retry controls keep their existing range and unloadability assertions.
+
+The unit deliberately frees the object after checking retention and requires
+exactly one close at that explicit teardown. This checks fixture disposal, not
+GC retention or RTS profiling/foreign-export lifetimes. Native Linux execution
+is required for these four controls; Darwin uses its genuine configuration
+and runs the six existing POSIX controls without Linux wrappers.

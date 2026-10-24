@@ -197,23 +197,25 @@ try_again:
    if (load_now) {
      struct link_map *map;
      if (dlinfo(hdl, RTLD_DI_LINKMAP, &map) == -1) {
-       /* dlinfo failed; save the message in errmsg */
-       copyErrmsg(L, errmsg, dlerror());
-       goto dlinfo_fail;
+       /* Constructors have already run. Retain their code and host state,
+        * using the same non-unloadable policy as a successful lazy load. */
+       const char *map_error = dlerror();
+       (void)map_error;
+       LL_IF_DEBUG_FOR(L, linker,
+           LL_DEBUG_FOR(L, "loadNativeObj: retaining library without mappings: dlinfo failed: %s\n",
+                        map_error ? map_error : "(unknown)"));
+     } else {
+       struct piterate_cb_info piterate_info = {
+         .nc = nc,
+         .l_addr = (void *) map->l_addr
+       };
+       dl_iterate_phdr(loadNativeObjCb_, &piterate_info);
+       if (!nc->nc_ranges) {
+         LL_IF_DEBUG_FOR(L, linker,
+             LL_DEBUG_FOR(L, "loadNativeObj: retaining library without mappings: dl_iterate_phdr found no ranges\n"));
+       }
      }
-
-     hdl = NULL; // pass handle ownership to nc
-
-     struct piterate_cb_info piterate_info = {
-       .nc = nc,
-       .l_addr = (void *) map->l_addr
-     };
-     dl_iterate_phdr(loadNativeObjCb_, &piterate_info);
-     if (!nc->nc_ranges) {
-       copyErrmsg(L, errmsg, "dl_iterate_phdr failed to find obj");
-       goto dl_iterate_phdr_fail;
-     }
-     nc->unloadable = true;
+     nc->unloadable = nc->nc_ranges != NULL;
    } else {
      nc->nc_ranges = NULL;
      nc->unloadable = false;
@@ -239,19 +241,10 @@ try_again:
 
    goto success;
 
-#if defined(HAVE_DLINFO)
-dl_iterate_phdr_fail:
-#endif
-   freeNativeCode_POSIX(nc);
-#if defined(HAVE_DLINFO)
-dlinfo_fail:
-#endif
-   if (hdl) dlclose(hdl);
 dlopen_fail:
    /* Only the final no-handle failure belongs here. The paired native-load
     * hooks have completed, and errmsg already owns a diagnostic copy. Let
-    * the host release attached state before discarding unregistered metadata.
-    * Post-dlopen metadata failures still own a handle and are separate. */
+    * the host release attached state before discarding unregistered metadata. */
    if (nc != NULL && nc->dlopen_handle == NULL) {
        if (L->services.host.on_unload != NULL)
            L->services.host.on_unload(L->services.host.ctx, nc);
