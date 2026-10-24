@@ -94,6 +94,17 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def native_host() -> str:
+    system = platform.system()
+    return (
+        "Windows"
+        if os.name == "nt"
+        or sys.platform in ("win32", "msys")
+        or system.startswith(("MSYS_NT", "MINGW"))
+        else system
+    )
+
+
 def unique_path(paths: list[Path], description: str) -> Path:
     paths = sorted(set(paths))
     if len(paths) != 1:
@@ -125,6 +136,22 @@ def locate_artifacts(build_root: Path, store_root: Path) -> tuple[Path, Path, Pa
     ]
     fs_header = unique_path(fs_headers, "installed rts-fs fs.h")
     return archive, config_include, fs_header.parent
+
+
+def locate_rts_fs_archive(
+    fs_include: Path, host: str, *, required: bool = True
+) -> Path | None:
+    if host == "Darwin" or not required:
+        return None
+    if host not in ("Linux", "Windows"):
+        raise RuntimeError(f"unsupported host for rts-fs test linking: {host}")
+    archive = fs_include.parent / "libHSrts-fs-1.0.0.0.a"
+    if not archive.is_file():
+        raise RuntimeError(
+            "native C units require the installed rts-fs static archive on "
+            f"{host}: {archive}"
+        )
+    return archive
 
 
 def command_text(argv: list[str]) -> str:
@@ -186,6 +213,42 @@ def core_link_flags(host: str) -> list[str]:
     if host == "Darwin":
         return ["-pthread"]
     return []
+
+
+def native_link_flags(
+    host: str,
+    rts_fs_archive: Path | None,
+    trailing_libraries: list[str],
+    *,
+    require_rts_fs: bool = True,
+) -> list[str]:
+    if host == "Darwin" or not require_rts_fs:
+        return list(trailing_libraries)
+    if host not in ("Linux", "Windows"):
+        raise RuntimeError(f"unsupported host for native unit links: {host}")
+    if rts_fs_archive is None or not rts_fs_archive.is_file():
+        raise RuntimeError(
+            f"native C unit links on {host} require an installed rts-fs archive"
+        )
+    return [str(rts_fs_archive), *trailing_libraries]
+
+
+def native_unit_link_arguments(
+    source: Path,
+    archive: Path,
+    output: Path,
+    link_flags: list[str],
+    linker_flags: list[str],
+) -> list[str]:
+    return [
+        str(source),
+        f"-L{archive.parent}",
+        "-llink",
+        *link_flags,
+        *linker_flags,
+        "-o",
+        str(output),
+    ]
 
 
 def configured_riscv64_elf_backend(config_include: Path) -> bool:
@@ -356,24 +419,22 @@ def verify_overlay_include_argv() -> None:
 
 
 def run_pei386_common_ownership(cc: list[str], archive: Path,
-                                output: Path) -> None:
+                                output: Path,
+                                link_flags: list[str]) -> None:
     verify_overlay_include_argv()
     test_source = ROOT / "liblink/tests/unit/pei386_common_ownership.c"
     test_binary = output / "pei386_common_ownership.exe"
     test_map = output / "pei386_common_ownership.map"
     trace = run(
         cc
-        + [
-            str(test_source),
-            f"-L{archive.parent}",
-            "-llink",
-            *PE_SUPPORT_LIBS,
+        + native_unit_link_arguments(
+            test_source,
+            archive,
+            test_binary,
+            link_flags,
             # MinGW LLD rejects GNU ld's -t; --verbose prints resolved inputs.
-            "-Wl,--verbose",
-            linker_map_flag(test_map),
-            "-o",
-            str(test_binary),
-        ],
+            ["-Wl,--verbose", linker_map_flag(test_map)],
+        ),
         label="compile and link pei386_common_ownership",
     )
     included = (
@@ -427,16 +488,13 @@ def run_pei386_common_ownership(cc: list[str], archive: Path,
     mutant_map = output / "pei386_common_ownership_old_tag.map"
     mutant_trace = run(
         mutant_cc
-        + [
-            str(test_source),
-            f"-L{archive.parent}",
-            "-llink",
-            *PE_SUPPORT_LIBS,
-            "-Wl,--verbose",
-            linker_map_flag(mutant_map),
-            "-o",
-            str(mutant_binary),
-        ],
+        + native_unit_link_arguments(
+            test_source,
+            archive,
+            mutant_binary,
+            link_flags,
+            ["-Wl,--verbose", linker_map_flag(mutant_map)],
+        ),
         label="compile old-tag ownership regression mutant",
     )
     for member in ("PEi386", "Linker", "M32Alloc", "M32Reservations", "MMap"):
@@ -518,7 +576,7 @@ def verify_macho_link_map(
 
 
 def run_macho_load_errors(cc: list[str], archive: Path, output: Path,
-                          host: str, *, mode: str = "") -> None:
+                          link_flags: list[str], *, mode: str = "") -> None:
     macho_test = output / "macho_load_errors"
     macho_map = output / "macho_load_errors.map"
     macho_trace = run(
@@ -527,7 +585,7 @@ def run_macho_load_errors(cc: list[str], archive: Path, output: Path,
             str(ROOT / "liblink/tests/unit/macho_load_errors.c"),
             f"-L{archive.parent}",
             "-llink",
-            *core_link_flags(host),
+            *link_flags,
             "-Wl,-t",
             linker_map_flag(macho_map),
             "-o",
@@ -549,7 +607,8 @@ def run_macho_load_errors(cc: list[str], archive: Path, output: Path,
 
 
 def run_macho_table_alignment(cc: list[str], archive: Path, output: Path,
-                              host: str) -> None:
+                              host: str,
+                              link_flags: list[str]) -> None:
     if host != "Darwin":
         raise RuntimeError("--macho-table-alignment-only requires Darwin")
     fixture_dir = ROOT / "liblink/tests/fixtures/macho-input"
@@ -564,7 +623,7 @@ def run_macho_table_alignment(cc: list[str], archive: Path, output: Path,
     map_file = output / "macho_table_alignment.map"
     trace = run(
         cc + [str(ROOT / "liblink/tests/unit/macho_table_alignment.c"),
-              f"-L{archive.parent}", "-llink", *core_link_flags(host), "-Wl,-t",
+              f"-L{archive.parent}", "-llink", *link_flags, "-Wl,-t",
               linker_map_flag(map_file), "-o", str(test)],
         label="compile and link macho_table_alignment",
     )
@@ -580,7 +639,7 @@ def run_macho_table_alignment(cc: list[str], archive: Path, output: Path,
 
 
 def run_macho_x86_operands(cc: list[str], archive: Path, output: Path,
-                           host: str) -> None:
+                           link_flags: list[str]) -> None:
     fixture = output / "macho_x86_operand_ordinary.o"
     run(cc + ["-O1", "-fno-stack-protector", "-fno-asynchronous-unwind-tables",
               "-c", str(ROOT / "liblink/tests/fixtures/macho-input/ordinary.c"),
@@ -593,7 +652,7 @@ def run_macho_x86_operands(cc: list[str], archive: Path, output: Path,
         map_file = output / (name + ".map")
         trace = run(
             cc + [str(ROOT / "liblink/tests/unit" / (name + ".c")),
-                  f"-L{archive.parent}", "-llink", *core_link_flags(host),
+                  f"-L{archive.parent}", "-llink", *link_flags,
                   "-Wl,-t", "-Wl,-why_load", linker_map_flag(map_file),
                   "-o", str(binary)], label="compile and link " + name)
         verify_macho_link_map(map_file, archive, trace, included_source=name,
@@ -607,7 +666,7 @@ def run_macho_x86_operands(cc: list[str], archive: Path, output: Path,
 
 
 def run_elf_resources(cc: list[str], archive: Path, output: Path,
-                      host: str) -> None:
+                      link_flags: list[str]) -> None:
     fixtures = output / "elf-resource-fixtures"
     run([sys.executable, str(ROOT / "liblink/tests/unit/elf_resource_fixtures.py"),
          str(fixtures)], label="generate ELF resource fixtures")
@@ -615,7 +674,7 @@ def run_elf_resources(cc: list[str], archive: Path, output: Path,
     map_file = output / "elf_resource_errors.map"
     trace = run(
         cc + [str(ROOT / "liblink/tests/unit/elf_resource_errors.c"),
-              f"-L{archive.parent}", "-llink", *core_link_flags(host),
+              f"-L{archive.parent}", "-llink", *link_flags,
               "-Wl,--wrap=ll_mmap_anon_for_linker",
               "-Wl,--wrap=ll_mmap_for_linker",
               "-Wl,--wrap=ll_munmap_for_linker",
@@ -632,12 +691,12 @@ def run_elf_resources(cc: list[str], archive: Path, output: Path,
 
 
 def run_mmap_address_bounds(cc: list[str], archive: Path, output: Path,
-                            host: str) -> None:
+                            link_flags: list[str]) -> None:
     binary = output / "mmap_address_bounds"
     map_file = output / "mmap_address_bounds.map"
     trace = run(
         cc + [str(ROOT / "liblink/tests/unit/mmap_address_bounds.c"),
-              f"-L{archive.parent}", "-llink", *core_link_flags(host),
+              f"-L{archive.parent}", "-llink", *link_flags,
               "-Wl,-t", linker_map_flag(map_file), "-o", str(binary)],
         label="compile and link mmap_address_bounds",
     )
@@ -659,14 +718,7 @@ def main() -> int:
                           args.mmap_address_bounds_only))
     if selected_modes > 1:
         raise RuntimeError("native unit modes are mutually exclusive")
-    system = platform.system()
-    host = (
-        "Windows"
-        if os.name == "nt"
-        or sys.platform in ("win32", "msys")
-        or system.startswith(("MSYS_NT", "MINGW"))
-        else system
-    )
+    host = native_host()
     if args.windows_m32_only and host != "Windows":
         raise RuntimeError("--windows-m32-only requires a native Windows host")
     if args.macho_table_alignment_only and host != "Darwin":
@@ -699,6 +751,9 @@ def main() -> int:
     archive, config_include, fs_include = locate_artifacts(
         args.build_root.resolve(), args.store_root.resolve()
     )
+    rts_fs_archive = locate_rts_fs_archive(
+        fs_include, host, required=not args.foundation_only
+    )
     mmap_backend = configured_posix_mmap_backend(config_include)
     if args.mmap_address_bounds_only and not mmap_backend:
         raise RuntimeError(
@@ -708,9 +763,29 @@ def main() -> int:
         archive = args.native_archive.resolve()
         if not archive.is_file():
             raise RuntimeError(f"native liblink archive does not exist: {archive}")
+    link_flags = native_link_flags(
+        host,
+        rts_fs_archive,
+        core_link_flags(host),
+        require_rts_fs=not args.foundation_only,
+    )
+    rts_fs_link_flags = native_link_flags(
+        host, rts_fs_archive, [], require_rts_fs=not args.foundation_only
+    )
+    pe_link_flags = (
+        native_link_flags(
+            host,
+            rts_fs_archive,
+            PE_SUPPORT_LIBS,
+            require_rts_fs=not args.foundation_only,
+        )
+        if host == "Windows" else []
+    )
     print(f"[inputs] compiler={command_text(compiler)}")
     print(f"[inputs] generated_config={config_include}")
     print(f"[inputs] rts_fs_include={fs_include}")
+    if rts_fs_archive is not None:
+        print(f"[inputs] rts_fs_archive={rts_fs_archive}")
     print(f"[inputs] native_archive={archive}")
 
     common_flags = [
@@ -737,7 +812,7 @@ def main() -> int:
                          platform_header, flags=re.MULTILINE):
             raise RuntimeError("operand units require generated x86_64 Darwin config")
         with tempfile.TemporaryDirectory(prefix="liblink-macho-x86-operands-") as temporary:
-            run_macho_x86_operands(cc, archive, Path(temporary), host)
+            run_macho_x86_operands(cc, archive, Path(temporary), link_flags)
         print("liblink Mach-O x86 operand units: PASS")
         return 0
 
@@ -745,19 +820,19 @@ def main() -> int:
         if not configured_linux_x86_64_elf_backend(config_include):
             raise RuntimeError("resource units require generated Linux x86_64 config")
         with tempfile.TemporaryDirectory(prefix="liblink-elf-resources-") as temporary:
-            run_elf_resources(cc, archive, Path(temporary), host)
+            run_elf_resources(cc, archive, Path(temporary), link_flags)
         print("liblink ELF resource units: PASS")
         return 0
 
     if args.mmap_address_bounds_only:
         with tempfile.TemporaryDirectory(prefix="liblink-mmap-address-bounds-") as temporary:
-            run_mmap_address_bounds(cc, archive, Path(temporary), host)
+            run_mmap_address_bounds(cc, archive, Path(temporary), link_flags)
         print("liblink mmap address bounds unit: PASS")
         return 0
 
     if args.macho_table_alignment_only:
         with tempfile.TemporaryDirectory(prefix="liblink-macho-table-alignment-") as temporary:
-            run_macho_table_alignment(cc, archive, Path(temporary), host)
+            run_macho_table_alignment(cc, archive, Path(temporary), host, link_flags)
         print("liblink Mach-O table alignment unit: PASS")
         return 0
 
@@ -769,14 +844,17 @@ def main() -> int:
             m32_trace = run(
                 cc
                 + [
-                    str(ROOT / "liblink/tests/unit/m32_windows_reservations.c"),
-                    f"-L{archive.parent}",
-                    "-llink",
-                    # MinGW LLD rejects GNU ld's -t; --verbose prints resolved inputs.
-                    "-Wl,--verbose",
-                    linker_map_flag(m32_map),
-                    "-o",
-                    str(m32_test),
+                    *native_unit_link_arguments(
+                        ROOT / "liblink/tests/unit/m32_windows_reservations.c",
+                        archive,
+                        m32_test,
+                        rts_fs_link_flags,
+                        [
+                            # MinGW LLD rejects GNU ld's -t; --verbose prints resolved inputs.
+                            "-Wl,--verbose",
+                            linker_map_flag(m32_map),
+                        ],
+                    ),
                 ],
                 label="compile and link m32_windows_reservations",
             )
@@ -792,7 +870,7 @@ def main() -> int:
                     windows_paths=True,
                 )
             run([str(m32_test)], label="run m32_windows_reservations")
-            run_pei386_common_ownership(cc, archive, output)
+            run_pei386_common_ownership(cc, archive, output, pe_link_flags)
             print("liblink native unit tests: PASS (Windows M32/PE ownership only)")
             return 0
 
@@ -819,14 +897,14 @@ def main() -> int:
         if (host in ("Linux", "Darwin") and mmap_backend and
                 not (args.protection_only or args.protection_gap_probes or
                      args.resolution_failure_only)):
-            run_mmap_address_bounds(cc, archive, output, host)
+            run_mmap_address_bounds(cc, archive, output, link_flags)
 
         if (args.protection_only or args.protection_gap_probes or
                 args.resolution_failure_only):
             mode = "--protection-only" if args.protection_only \
                 else "--protection-gap-probes" if args.protection_gap_probes \
                 else "--resolution-failure-only"
-            run_macho_load_errors(cc, archive, output, host, mode=mode)
+            run_macho_load_errors(cc, archive, output, link_flags, mode=mode)
             outcome = "protection only" if args.protection_only \
                 else "quarantine regression cases" if args.protection_gap_probes \
                 else "terminal resolution quarantine cases"
@@ -837,16 +915,13 @@ def main() -> int:
         map_file = output / "core_error_status.map"
         link_trace = run(
             cc
-            + [
-                str(ROOT / "liblink/tests/unit/core_error_status.c"),
-                f"-L{archive.parent}",
-                "-llink",
-                *core_link_flags(host),
-                "-Wl,-t",
-                linker_map_flag(map_file),
-                "-o",
-                str(core_test),
-            ],
+            + native_unit_link_arguments(
+                ROOT / "liblink/tests/unit/core_error_status.c",
+                archive,
+                core_test,
+                link_flags,
+                ["-Wl,-t", linker_map_flag(map_file)],
+            ),
             label="compile and link core_error_status",
         )
         verify_link_map(
@@ -862,16 +937,13 @@ def main() -> int:
         archive_map_file = output / "archive_error_status.map"
         archive_link_trace = run(
             cc
-            + [
-                str(ROOT / "liblink/tests/unit/archive_error_status.c"),
-                f"-L{archive.parent}",
-                "-llink",
-                *core_link_flags(host),
-                "-Wl,-t",
-                linker_map_flag(archive_map_file),
-                "-o",
-                str(archive_test),
-            ],
+            + native_unit_link_arguments(
+                ROOT / "liblink/tests/unit/archive_error_status.c",
+                archive,
+                archive_test,
+                link_flags,
+                ["-Wl,-t", linker_map_flag(archive_map_file)],
+            ),
             label="compile and link archive_error_status",
         )
         verify_link_map(
@@ -892,7 +964,7 @@ def main() -> int:
                     str(ROOT / "liblink/tests/unit/m32_map_status.c"),
                     f"-L{archive.parent}",
                     "-llink",
-                    *core_link_flags(host),
+                    *link_flags,
                     "-Wl,-t",
                     "-Wl,-why_load",
                     linker_map_flag(m32_map_file),
@@ -924,7 +996,7 @@ def main() -> int:
                     str(ROOT / "liblink/tests/unit/macho_import_status.c"),
                     f"-L{archive.parent}",
                     "-llink",
-                    *core_link_flags(host),
+                    *link_flags,
                     "-Wl,-t",
                     linker_map_flag(macho_import_map),
                     "-o",
@@ -959,7 +1031,7 @@ def main() -> int:
                 str(riscv_u_type_source),
                 f"-L{archive.parent}",
                 "-llink",
-                *core_link_flags(host),
+                *link_flags,
                 "-Wl,-t",
                 linker_map_flag(riscv_u_type_map),
                 "-o",
@@ -985,7 +1057,7 @@ def main() -> int:
                     str(ROOT / "liblink/tests/unit/riscv64_reloc_errors.c"),
                     f"-L{archive.parent}",
                     "-llink",
-                    *core_link_flags(host),
+                    *link_flags,
                     "-Wl,-t",
                     linker_map_flag(riscv_map),
                     "-o",
@@ -1016,7 +1088,7 @@ def main() -> int:
                     str(ROOT / "liblink/tests/unit/aarch64_reloc_errors.c"),
                     f"-L{archive.parent}",
                     "-llink",
-                    *core_link_flags(host),
+                    *link_flags,
                     "-Wl,-t",
                     linker_map_flag(aarch64_map),
                     "-o",
@@ -1047,7 +1119,7 @@ def main() -> int:
                     str(ROOT / "liblink/tests/unit/elf_relocation_errors.c"),
                     f"-L{archive.parent}",
                     "-llink",
-                    *core_link_flags(host),
+                    *link_flags,
                     "-Wl,-t",
                     linker_map_flag(elf_map),
                     "-o",
@@ -1072,7 +1144,7 @@ def main() -> int:
                     str(ROOT / "liblink/tests/unit/elf_section_errors.c"),
                     f"-L{archive.parent}",
                     "-llink",
-                    *core_link_flags(host),
+                    *link_flags,
                     "-Wl,--wrap=ll_mmap_anon_for_linker",
                     "-Wl,--wrap=ll_mmap_for_linker",
                     "-Wl,--wrap=ll_munmap_for_linker",
@@ -1098,7 +1170,7 @@ def main() -> int:
                         f"section link map omitted {archive}({member}.o)"
                     )
             run([str(section_test)], label="run elf_section_errors")
-            run_elf_resources(cc, archive, output, host)
+            run_elf_resources(cc, archive, output, link_flags)
         else:
             print(
                 "[elf_relocation_errors] skipped: generated config is not "
@@ -1139,7 +1211,7 @@ def main() -> int:
                     str(ROOT / "liblink/tests/unit/macho_input.c"),
                     f"-L{archive.parent}",
                     "-llink",
-                    *core_link_flags(host),
+                    *link_flags,
                     "-Wl,-t",
                     linker_map_flag(macho_map_file),
                     "-o",
@@ -1165,7 +1237,7 @@ def main() -> int:
                 label="run macho_input",
             )
 
-            run_macho_table_alignment(cc, archive, output, host)
+            run_macho_table_alignment(cc, archive, output, host, link_flags)
 
             segment_padding_test = output / "macho_segment_padding"
             segment_padding_map = output / "macho_segment_padding.map"
@@ -1175,7 +1247,7 @@ def main() -> int:
                     str(ROOT / "liblink/tests/unit/macho_segment_padding.c"),
                     f"-L{archive.parent}",
                     "-llink",
-                    *core_link_flags(host),
+                    *link_flags,
                     "-Wl,-t",
                     linker_map_flag(segment_padding_map),
                     "-o",
@@ -1200,7 +1272,7 @@ def main() -> int:
                     str(ROOT / "liblink/tests/unit/macho_prefile_error.c"),
                     f"-L{archive.parent}",
                     "-llink",
-                    *core_link_flags(host),
+                    *link_flags,
                     "-Wl,-t",
                     linker_map_flag(macho_prefile_map),
                     "-o",
@@ -1229,7 +1301,7 @@ def main() -> int:
                         str(ROOT / "liblink/tests/unit/macho_error_status.c"),
                         f"-L{archive.parent}",
                         "-llink",
-                        *core_link_flags(host),
+                        *link_flags,
                         "-Wl,-t",
                         linker_map_flag(macho_status_map),
                         "-o",
@@ -1258,7 +1330,7 @@ def main() -> int:
                         str(ROOT / "liblink/tests/unit/macho_x86_error_status.c"),
                         f"-L{archive.parent}",
                         "-llink",
-                        *core_link_flags(host),
+                        *link_flags,
                         "-Wl,-t",
                         linker_map_flag(macho_x86_status_map),
                         "-o",
@@ -1275,11 +1347,11 @@ def main() -> int:
                     required_members=("MachOVerify",),
                 )
                 run([str(macho_x86_status_test)], label="run macho_x86_error_status")
-                run_macho_x86_operands(cc, archive, output, host)
+                run_macho_x86_operands(cc, archive, output, link_flags)
             else:
                 print("[macho_x86_error_status] SKIP: generated target is not x86_64")
 
-            run_macho_load_errors(cc, archive, output, host)
+            run_macho_load_errors(cc, archive, output, link_flags)
 
             platform_header = (config_include / "ll_platform.h").read_text()
             if re.search(
@@ -1295,7 +1367,7 @@ def main() -> int:
                         str(ROOT / "liblink/tests/unit/macho_stub_errors.c"),
                         f"-L{archive.parent}",
                         "-llink",
-                        *core_link_flags(host),
+                        *link_flags,
                         "-Wl,-t",
                         linker_map_flag(macho_stub_map),
                         "-o",

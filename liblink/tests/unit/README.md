@@ -122,6 +122,14 @@ Darwin/AArch64. It
 accepts `--build-root` and `--store-root` when the stage2 build uses
 non-default directories, and `--cc` to select a C compiler command.
 
+On Linux and Windows, standalone units also link the installed
+`rts-fs-1.0.0.0/libHSrts-fs-1.0.0.0.a` immediately after `-llink`, before
+platform libraries. This provides the filesystem symbols referenced by the
+ELF and PE backends. The driver fails before compiling native C units when that
+archive is missing. Darwin units keep their existing link arguments because
+the Darwin backend does not reference these `rts-fs` C symbols. The
+`--foundation-only` mode remains independent of the package archive.
+
 The core and archive fixtures use POSIX file descriptors and mmap injection.
 On Windows, `Linker.c` follows its stdio path (`RTS_LINKER_USE_MMAP=0`); run
 only the platform-neutral foundation test with `--foundation-only` until

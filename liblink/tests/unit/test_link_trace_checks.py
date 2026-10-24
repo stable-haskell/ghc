@@ -6,6 +6,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path, PurePosixPath
+from unittest import mock
 
 import link_trace_checks as checks
 import run_native_tests as driver
@@ -281,6 +282,177 @@ class NativeDriverMapDispatchTests(unittest.TestCase):
                     forbidden_member="M32Alloc",
                     windows_paths=True,
                 )
+
+
+class NativeRtsFsLinkArgumentsTests(unittest.TestCase):
+    def artifacts(self, root: Path) -> tuple[Path, Path, Path, Path]:
+        archive_dir = root / "build" / "native-linker"
+        package_dir = root / "store" / "rts-fs-1.0.0.0"
+        archive_dir.mkdir(parents=True)
+        package_dir.mkdir(parents=True)
+        liblink = archive_dir / "liblink.a"
+        rts_fs = package_dir / "libHSrts-fs-1.0.0.0.a"
+        source = root / "core_error_status.c"
+        output = root / "core_error_status"
+        liblink.touch()
+        rts_fs.touch()
+        source.touch()
+        return liblink, rts_fs, source, output
+
+    def test_darwin_command_keeps_existing_link_order_without_rts_fs(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            liblink, _rts_fs, source, output = self.artifacts(Path(temporary))
+            flags = driver.native_link_flags(
+                "Darwin", None, driver.core_link_flags("Darwin")
+            )
+            command = driver.native_unit_link_arguments(
+                source, liblink, output, flags, ["-Wl,-map,core.map"]
+            )
+            self.assertEqual(
+                command,
+                [
+                    str(source),
+                    f"-L{liblink.parent}",
+                    "-llink",
+                    "-pthread",
+                    "-Wl,-map,core.map",
+                    "-o",
+                    str(output),
+                ],
+            )
+
+    def test_linux_main_core_link_command_contains_provider_in_order(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            archive = root / "build" / "native-linker" / "liblink.a"
+            archive.parent.mkdir(parents=True)
+            archive.touch()
+            config = root / "config"
+            config.mkdir()
+            (config / "ll_autoconf.h").write_text("/* mmap disabled */\n")
+            package = root / "rts-fs-1.0.0.0"
+            include = package / "include"
+            include.mkdir(parents=True)
+            provider = package / "libHSrts-fs-1.0.0.0.a"
+            provider.touch()
+
+            class StopAfterCoreLink(Exception):
+                pass
+
+            captured: list[str] = []
+
+            def capture_run(argv: list[str], *, label: str) -> str:
+                if label == "compile and link core_error_status":
+                    captured.extend(argv)
+                    raise StopAfterCoreLink
+                return ""
+
+            with (
+                mock.patch.object(driver, "native_host", return_value="Linux"),
+                mock.patch.object(
+                    driver, "locate_artifacts", return_value=(archive, config, include)
+                ),
+                mock.patch.object(driver, "run", side_effect=capture_run),
+                mock.patch("sys.argv", ["run_native_tests.py", "--cc", "cc"]),
+                self.assertRaises(StopAfterCoreLink),
+            ):
+                driver.main()
+
+            self.assertIn("-llink", captured)
+            self.assertLess(captured.index("-llink"), captured.index(str(provider)))
+            self.assertLess(captured.index(str(provider)), captured.index("-pthread"))
+            self.assertLess(captured.index("-pthread"), captured.index("-ldl"))
+            self.assertEqual(captured[0], "cc")
+            self.assertEqual(captured[-2], "-o")
+
+    def test_windows_common_helper_command_contains_provider_before_support_libs(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            archive = root / "liblink.a"
+            archive.touch()
+            provider = root / "libHSrts-fs-1.0.0.0.a"
+            provider.touch()
+
+            class StopAfterLink(Exception):
+                pass
+
+            captured: list[str] = []
+
+            def capture_run(argv: list[str], *, label: str) -> str:
+                self.assertEqual(label, "compile and link pei386_common_ownership")
+                captured.extend(argv)
+                raise StopAfterLink
+
+            with mock.patch.object(driver, "run", side_effect=capture_run):
+                with self.assertRaises(StopAfterLink):
+                    driver.run_pei386_common_ownership(
+                        ["cc"], archive, root, [str(provider), *driver.PE_SUPPORT_LIBS]
+                    )
+
+            self.assertIn("-llink", captured)
+            self.assertLess(captured.index("-llink"), captured.index(str(provider)))
+            self.assertLess(captured.index(str(provider)), captured.index("-ldbghelp"))
+            self.assertLess(captured.index("-ldbghelp"), captured.index("-lpsapi"))
+
+    def test_windows_foundation_main_runs_without_missing_rts_fs_archive(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            archive = root / "build" / "native-linker" / "liblink.a"
+            archive.parent.mkdir(parents=True)
+            archive.touch()
+            config = root / "config"
+            config.mkdir()
+            (config / "ll_autoconf.h").write_text("/* mmap disabled */\n")
+            include = root / "rts-fs-1.0.0.0" / "include"
+            include.mkdir(parents=True)
+            calls: list[tuple[str, list[str]]] = []
+
+            def capture_run(argv: list[str], *, label: str) -> str:
+                calls.append((label, argv))
+                return ""
+
+            with (
+                mock.patch.object(driver, "native_host", return_value="Windows"),
+                mock.patch.object(
+                    driver, "locate_artifacts", return_value=(archive, config, include)
+                ),
+                mock.patch.object(driver, "run", side_effect=capture_run),
+                mock.patch("sys.argv", ["run_native_tests.py", "--foundation-only"]),
+            ):
+                self.assertEqual(driver.main(), 0)
+
+            c_calls = [(label, argv) for label, argv in calls if label.startswith(("compile", "run error_state"))]
+            self.assertEqual([label for label, _argv in c_calls], ["compile error_state", "run error_state"])
+
+    def test_missing_required_archive_fails_before_c_compile_in_main(self) -> None:
+        for host, mode in (("Linux", []), ("Windows", ["--windows-m32-only"])):
+            with self.subTest(host=host), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                archive = root / "build" / "native-linker" / "liblink.a"
+                archive.parent.mkdir(parents=True)
+                archive.touch()
+                config = root / "config"
+                config.mkdir()
+                (config / "ll_autoconf.h").write_text("/* mmap disabled */\n")
+                include = root / "rts-fs-1.0.0.0" / "include"
+                include.mkdir(parents=True)
+                labels: list[str] = []
+
+                def capture_run(_argv: list[str], *, label: str) -> str:
+                    labels.append(label)
+                    return ""
+
+                with (
+                    mock.patch.object(driver, "native_host", return_value=host),
+                    mock.patch.object(
+                        driver, "locate_artifacts", return_value=(archive, config, include)
+                    ),
+                    mock.patch.object(driver, "run", side_effect=capture_run),
+                    mock.patch("sys.argv", ["run_native_tests.py", *mode]),
+                    self.assertRaisesRegex(RuntimeError, "require the installed rts-fs static archive"),
+                ):
+                    driver.main()
+                self.assertEqual(labels, ["linker trace parser tests"])
 
 
 if __name__ == "__main__":
