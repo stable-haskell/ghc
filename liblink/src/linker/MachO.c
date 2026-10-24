@@ -908,16 +908,22 @@ relocateSection(ObjectCode* oc, int curSection)
                 thing = *(uint8_t*)thingPtr;
                 relocLenBytes = 1;
                 break;
-            case 1:
-                thing = *(uint16_t*)thingPtr;
+            case 1: {
+                uint16_t operand;
+                memcpy(&operand, thingPtr, sizeof(operand));
+                thing = operand;
                 relocLenBytes = 2;
                 break;
-            case 2:
-                thing = *(uint32_t*)thingPtr;
+            }
+            case 2: {
+                uint32_t operand;
+                memcpy(&operand, thingPtr, sizeof(operand));
+                thing = operand;
                 relocLenBytes = 4;
                 break;
+            }
             case 3:
-                thing = *(uint64_t*)thingPtr;
+                memcpy(&thing, thingPtr, sizeof(thing));
                 relocLenBytes = 8;
                 break;
             default:
@@ -1236,14 +1242,18 @@ relocateSection(ObjectCode* oc, int curSection)
             case 0:
                 *(uint8_t*)thingPtr = thing;
                 break;
-            case 1:
-                *(uint16_t*)thingPtr = thing;
+            case 1: {
+                uint16_t operand = (uint16_t)thing;
+                memcpy(thingPtr, &operand, sizeof(operand));
                 break;
-            case 2:
-                *(uint32_t*)thingPtr = thing;
+            }
+            case 2: {
+                uint32_t operand = (uint32_t)thing;
+                memcpy(thingPtr, &operand, sizeof(operand));
                 break;
+            }
             case 3:
-                *(uint64_t*)thingPtr = thing;
+                memcpy(thingPtr, &thing, sizeof(thing));
                 break;
         }
     }
