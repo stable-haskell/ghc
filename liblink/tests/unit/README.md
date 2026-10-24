@@ -169,6 +169,22 @@ generated static archive and checks the linker map for the selected archive
 without selecting `Elf.o` beside the included implementation; `ElfVerify.o`
 remains allowed.
 
+ELF data-only resource fixtures
+===============================
+
+`elf_resource_fixtures.py` writes eight deterministic ELF64 x86_64 object
+files for pending resource tests. The fixtures cover COMMON symbols with
+matching, smaller, conflicting, zero, and overflow sizes, plus an ordinary
+`.data` symbol and identical provider/alias bytes. Generate them into a private
+directory with:
+
+    python3 liblink/tests/unit/elf_resource_fixtures.py /tmp/elf-resource-fixtures
+
+The files contain no code, relocations, or initializers. LLVM 21 independently
+verified their ELF metadata, symbol sizes and section identities, and exact
+data bytes. This generator does not run the liblink backend or qualify native
+runtime behavior.
+
 `elf_section_errors.c` tests `ocGetNames_ELF` from the current native archive.
 Its ordinary storage fixtures have file-backed data and zero-fill BSS, with
 both section orders. Linker wrappers inject reopen, file mapping, BSS mapping,
