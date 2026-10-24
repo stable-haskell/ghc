@@ -801,6 +801,7 @@ def run_initializer_errors(cc: list[str], archive: Path, output: Path,
                            link_flags: list[str], host: str) -> None:
     units = (
         ("init_array_status", ("InitFini",)),
+        ("init_array_policy", ("Linker", "InitFini", "ll_failure")),
     )
     for unit, forbidden in units:
         binary = output / (unit + (".exe" if host == "Windows" else ""))

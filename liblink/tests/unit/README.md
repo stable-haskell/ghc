@@ -846,10 +846,29 @@ the pending list owned for normal disposal. Callback counters verify the
 executed prefix, and owner ledgers check list/environment cleanup and default
 owner isolation. Successful initializer and finalizer behavior is unchanged.
 
+`init_array_policy.c` includes `Linker.c`, `InitFini.c`, and `ll_failure.c`.
+A controlled native initializer backend calls the actual shared helper. The
+unit checks that the lookup triggering initialization returns NULL on failure,
+preserves the first error and hook result, and quarantines the affected object
+and its transitive dependents. It checks rejection of repeated initialization,
+cached lookup and global resolve, and continued use of an independent object.
+It exercises logical unload through `unloadObj_` and initialization of a fresh
+same-name modeled object. Stack objects model already-resolved objects; this
+part does not parse or reload a file. On ELF, a separate heap-owned object
+control calls normal `freeObjectCode` after a partial initializer failure and
+requires all retained init/fini metadata to be freed without calling finalizers.
+Successful initialization and never-started controls verify the finalizer gate
+and cleanup. The archive supplies the real ELF teardown. These synthetic
+objects do not exercise GC reachability or file parsing; ordinary file loading
+and unload behavior also require native GHC T1–T3 qualification.
+Earlier constructor side effects cannot be rolled back. The failure policy
+prevents replay until unload/reload and retains `initializersRan == false`.
+Existing finalizer handling remains unchanged.
+
 Run `python3 liblink/tests/unit/run_native_tests.py --initializer-errors-only`
 on a configured native Linux, Darwin, or Windows build. Default native Linux
 and Darwin unit runs also include these cases. The driver requires the selected
 native archive and rejects included implementation members pulled from it.
 Windows uses the real installed rts-fs archive before its system libraries.
-Native Linux and Windows execution and integrated GHC T1–T3 qualification
-remain required.
+Native Linux execution is required for the ELF disposal controls. Windows
+execution and integrated GHC T1–T3 qualification remain required.

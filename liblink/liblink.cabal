@@ -111,6 +111,7 @@ extra-source-files:
     tests/unit/error_state.c
     tests/unit/hash_destroy_owner.c
     tests/unit/init_array_status.c
+    tests/unit/init_array_policy.c
     tests/unit/macho_input.c
     tests/unit/macho_table_alignment.c
     tests/unit/macho_import_status.c
