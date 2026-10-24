@@ -618,6 +618,15 @@ checks normalize slash direction and case and add `cygpath -m` spelling when
 available, while requiring the selected archive in both link map and trace and
 rejecting duplicate included implementation members.
 
+The Windows CI job runs the focused GHC testsuite after stage2 with
+`bash .github/scripts/run-windows-focused-tests.sh`. It makes nine selections:
+the two T1 roots, the three T2 roots in normal and external-interpreter ways,
+and the five registered T3 unload test names with all registered available
+ways. Logs, JUnit, summaries, and metrics are uploaded under the
+`windows-focused-testsuite-results` artifact from `_build/logs/windows-focused/`.
+These results do not establish baseline parity; that remains unqualified until
+the Windows CI run is reviewed against the baseline.
+
 Approved ELF resource error coverage
 ====================================
 

@@ -281,7 +281,7 @@ jobs:
   windows-native-foundation:
     name: Windows native liblink foundation unit
     runs-on: windows-latest
-    timeout-minutes: 240
+    timeout-minutes: 360
     env:
       CABAL_DIR: "C:\\Users\\runneradmin\\AppData\\Roaming\\cabal"
       GHCUP_INSTALL_BASE_PREFIX: "C:\\"
@@ -342,6 +342,21 @@ jobs:
         set -eo pipefail
         export PATH="/c/ghcup/bin:$PATH"
         python3 liblink/tests/unit/run_native_tests.py --windows-m32-only --cc clang 2>&1 | tee _build/logs/windows-liblink-m32.log
+
+    - name: Run Windows focused linker testsuite
+      timeout-minutes: 180
+      run: |
+        set -eo pipefail
+        export PATH="/c/ghcup/bin:$PATH"
+        bash .github/scripts/run-windows-focused-tests.sh
+
+    - name: Upload Windows focused testsuite results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: windows-focused-testsuite-results
+        if-no-files-found: ignore
+        path: _build/logs/windows-focused/**
 
     - name: Upload Windows build and unit logs on failure
       if: failure()
