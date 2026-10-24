@@ -137,6 +137,7 @@ extra-source-files:
     tests/unit/aarch64_reloc_errors.c
     tests/unit/elf_relocation_errors.c
     tests/unit/elf_relocation_errors_helpers.h
+    tests/unit/elf_section_errors.c
     tests/unit/run_native_tests.py
 
 custom-setup

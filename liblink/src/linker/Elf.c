@@ -741,6 +741,8 @@ ocGetNames_ELF ( ObjectCode* oc )
        fd = open(oc->fileName, O_RDONLY);
 #endif
        if (fd == -1) {
+           ll_error_set(oc->L, LL_E_IO,
+                        "loadObj: can't open %" PATH_FMT, oc->fileName);
            LL_LOG_ERROR_FOR(oc->L, "loadObj: can't open %" PATH_FMT, oc->fileName);
            return 0;
        }
@@ -837,8 +839,13 @@ ocGetNames_ELF ( ObjectCode* oc )
               alloc = SECTION_MMAP;
               start = ll_mmap_anon_for_linker(oc->L, size);
               if (start == NULL) {
-                LL_FATAL_FOR(oc->L, "failed to mmap memory for bss. "
-                     "errno = %d", errno);
+                  const int saved_errno = errno;
+                  ll_error_set(oc->L, LL_E_NOMEM,
+                               "failed to mmap memory for bss. errno = %d",
+                               saved_errno);
+                  LL_LOG_ERROR_FOR(oc->L, "failed to mmap memory for bss. "
+                                   "errno = %d", saved_errno);
+                  goto fail;
               }
               mapped_start = start;
               mapped_offset = 0;
@@ -891,7 +898,7 @@ ocGetNames_ELF ( ObjectCode* oc )
           // Correctly align the section. This is particularly important for
           // the alignment of .rodata.cstNN sections.
           start = m32_alloc_for(oc->L, allocator, full_size, align);
-          if (start == NULL) goto fail;
+          if (start == NULL) goto section_no_memory;
           alloc = SECTION_M32;
 
           /* copy only the image part over; we don't want to copy data
@@ -918,14 +925,19 @@ ocGetNames_ELF ( ObjectCode* oc )
               // .rodata.cst16. Also we may encounter .rodata.cst32 sections
               // in objects using AVX instructions (see #23066).
               start = m32_alloc_for(oc->L, allocator, size, align);
-              if (start == NULL) goto fail;
+              if (start == NULL) goto section_no_memory;
               memcpy(start, oc->image + offset, size);
               alloc = SECTION_M32;
           } else {
               start = mapObjectFileSection(oc->L, fd, offset, size,
                                            &mapped_start, &mapped_size,
                                            &mapped_offset);
-              if (start == NULL) goto fail;
+              if (start == NULL) {
+                  ll_error_set(oc->L, LL_E_IO,
+                               "loadObj: could not map a section of %" PATH_FMT,
+                               OC_INFORMATIVE_FILENAME(oc));
+                  goto fail;
+              }
               alloc = SECTION_MMAP;
           }
 #endif
@@ -1176,6 +1188,13 @@ ocGetNames_ELF ( ObjectCode* oc )
    result = 1;
    goto end;
 
+section_no_memory:
+   /* M32 may already have recorded a more specific allocation/state error. */
+   if (oc->L->error_status == LL_OK) {
+       ll_error_set(oc->L, LL_E_NOMEM,
+                    "loadObj: could not allocate section storage for %" PATH_FMT,
+                    OC_INFORMATIVE_FILENAME(oc));
+   }
 fail:
    result = 0;
    goto end;

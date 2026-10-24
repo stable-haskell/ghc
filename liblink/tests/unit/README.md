@@ -169,6 +169,24 @@ generated static archive and checks the linker map for the selected archive
 without selecting `Elf.o` beside the included implementation; `ElfVerify.o`
 remains allowed.
 
+`elf_section_errors.c` tests `ocGetNames_ELF` from the current native archive.
+Its ordinary storage fixtures have file-backed data and zero-fill BSS, with
+both section orders. Linker wrappers inject reopen, file mapping, BSS mapping,
+and M32 allocation failures. The checks cover IO/NOMEM status, preservation of
+a specific M32 error, owner isolation, saved allocation errno, descriptor
+closure, and normal `ll_discard_object` cleanup after earlier sections have
+already acquired storage. Successful controls check every data/BSS byte and
+run again after each failure. No relocated code is executed. COMMON/GOT,
+archive-member placement, public load/resolve, and RTS GC are outside this unit.
+The driver requires genuine Linux x86_64 generated configuration and links
+with literal `-llink`, checking that the map selects Elf, Linker, MMap and
+M32Alloc from the expected archive. It does not include replacement backend
+source. GNU-compatible `--wrap` support is required.
+
+The section unit has not been compiled or run on native Linux during Darwin
+authoring. Its source and Python driver checks do not qualify ELF runtime
+behavior. Run the normal driver after a Linux x86_64 static stage2 build.
+
 Darwin and other targets skip this native Linux x86_64 unit. Source presence
 does not qualify its runtime behavior; native Linux x86_64 execution is
 required. After a static stage2 build on Linux x86_64, run the driver from the

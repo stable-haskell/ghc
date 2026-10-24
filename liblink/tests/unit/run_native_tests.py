@@ -926,11 +926,47 @@ def main() -> int:
                 forbidden_member="Elf",
             )
             run([str(elf_test)], label="run elf_relocation_errors")
+
+            section_test = output / "elf_section_errors"
+            section_map = output / "elf_section_errors.map"
+            section_trace = run(
+                cc
+                + [
+                    str(ROOT / "liblink/tests/unit/elf_section_errors.c"),
+                    f"-L{archive.parent}",
+                    "-llink",
+                    *core_link_flags(host),
+                    "-Wl,--wrap=ll_mmap_anon_for_linker",
+                    "-Wl,--wrap=ll_mmap_for_linker",
+                    "-Wl,--wrap=ll_munmap_for_linker",
+                    "-Wl,--wrap=m32_alloc_for",
+                    "-Wl,--wrap=open",
+                    "-Wl,--wrap=close",
+                    "-Wl,-t",
+                    linker_map_flag(section_map),
+                    "-o",
+                    str(section_test),
+                ],
+                label="compile and link elf_section_errors",
+            )
+            section_map_text = section_map.read_text(errors="replace")
+            if str(archive) not in section_trace:
+                raise RuntimeError(
+                    f"section link trace omitted expected archive: {archive}"
+                )
+            for member in ("Elf", "Linker", "MMap", "M32Alloc"):
+                pattern = archive_member_pattern(str(archive), member)
+                if not pattern.search(section_map_text):
+                    raise RuntimeError(
+                        f"section link map omitted {archive}({member}.o)"
+                    )
+            run([str(section_test)], label="run elf_section_errors")
         else:
             print(
                 "[elf_relocation_errors] skipped: generated config is not "
                 "x86_64_HOST_ARCH + linux_HOST_OS"
             )
+            print("[elf_section_errors] skipped: requires generated Linux x86_64 ELF config")
 
         if host == "Darwin":
             macho_fixture_dir = ROOT / "liblink/tests/fixtures/macho-input"
