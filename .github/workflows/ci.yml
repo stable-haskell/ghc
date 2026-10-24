@@ -371,6 +371,13 @@ jobs:
         export PATH="/c/ghcup/bin:$PATH"
         python3 liblink/tests/unit/run_native_tests.py --foundation-only --cc clang 2>&1 | tee _build/logs/windows-liblink-foundation.log
 
+    - name: Run Windows path ownership C unit
+      timeout-minutes: 5
+      run: |
+        set -eo pipefail
+        export PATH="/c/ghcup/bin:$PATH"
+        python3 liblink/tests/unit/run_native_tests.py --path-ownership-only --cc clang 2>&1 | tee _build/logs/windows-liblink-path-ownership.log
+
     - name: Run Windows M32 reservation C unit
       timeout-minutes: 5
       run: |
@@ -391,7 +398,9 @@ jobs:
       with:
         name: windows-focused-testsuite-results
         if-no-files-found: ignore
-        path: _build/logs/windows-focused/**
+        path: |
+          _build/logs/windows-focused/**
+          _build/logs/windows-liblink-path-ownership.log
 
     - name: Upload Windows build and unit logs on failure
       if: failure()

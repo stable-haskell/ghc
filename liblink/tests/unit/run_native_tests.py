@@ -91,6 +91,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="run only the POSIX linker mmap address-bound unit",
     )
+    parser.add_argument(
+        "--path-ownership-only",
+        action="store_true",
+        help="run only the private pathdup owner-allocation unit",
+    )
     return parser.parse_args()
 
 
@@ -707,6 +712,52 @@ def run_mmap_address_bounds(cc: list[str], archive: Path, output: Path,
         raise RuntimeError(f"address map omitted {archive}(ll_host.o)")
     run([str(binary)], label="run mmap_address_bounds")
 
+
+def run_pathdup_ownership(cc: list[str], archive: Path, output: Path,
+                          link_flags: list[str], host: str) -> None:
+    binary = output / "pathdup_ownership"
+    map_file = output / "pathdup_ownership.map"
+    trace_flags = ["-Wl,--verbose"] if host == "Windows" else ["-Wl,-t"]
+    trace = run(
+        cc + native_unit_link_arguments(
+            ROOT / "liblink/tests/unit/pathdup_ownership.c",
+            archive,
+            binary,
+            link_flags,
+            [*trace_flags, linker_map_flag(map_file)],
+        ),
+        label="compile and link pathdup_ownership",
+    )
+    verify_link_map(
+        map_file,
+        archive,
+        trace,
+        included_source="pathdup_ownership.c",
+        forbidden_member="pathdup_ownership",
+        windows_paths=host == "Windows",
+    )
+    if host == "Windows" and link_trace_checks.is_lld_mingw_verbose_trace(trace):
+        link_trace_checks.verify_lld_mingw_archive_map(
+            map_file.read_text(errors="replace"),
+            archive,
+            trace,
+            included_source="pathdup_ownership.c",
+            forbidden_members=("pathdup_ownership",),
+            required_members=("ll_path",),
+        )
+        run([str(binary)], label="run pathdup_ownership")
+        return
+    map_text = map_file.read_text(errors="replace")
+    if host == "Windows":
+        map_text = normalize_windows_path(map_text)
+        archive_forms = [normalize_windows_path(form) for form in windows_path_forms(archive)]
+    else:
+        archive_forms = [str(archive)]
+    if not any(archive_member_pattern(form, "ll_path").search(map_text)
+               for form in archive_forms):
+        raise RuntimeError(f"link map did not select ll_path from {archive}")
+    run([str(binary)], label="run pathdup_ownership")
+
 def main() -> int:
     args = parse_args()
     selected_modes = sum((args.foundation_only, args.protection_only,
@@ -715,7 +766,8 @@ def main() -> int:
                           args.macho_table_alignment_only,
                           args.macho_x86_operands_only,
                           args.elf_resources_only,
-                          args.mmap_address_bounds_only))
+                          args.mmap_address_bounds_only,
+                          args.path_ownership_only))
     if selected_modes > 1:
         raise RuntimeError("native unit modes are mutually exclusive")
     host = native_host()
@@ -729,10 +781,12 @@ def main() -> int:
         raise RuntimeError("--elf-resources-only requires native Linux x86_64 ELF")
     if args.mmap_address_bounds_only and host not in ("Linux", "Darwin"):
         raise RuntimeError("--mmap-address-bounds-only requires a POSIX host")
-    if host == "Windows" and not (args.foundation_only or args.windows_m32_only):
+    if host == "Windows" and not (args.foundation_only or args.windows_m32_only
+                                   or args.path_ownership_only):
         raise RuntimeError(
             "core_error_status.c is POSIX-only: the Windows linker path uses "
-            "stdio rather than mmap; use --windows-m32-only for the M32 fixture"
+            "stdio rather than mmap; use --windows-m32-only for M32 or "
+            "--path-ownership-only for the path owner unit"
         )
     if (args.protection_only or args.protection_gap_probes or
             args.resolution_failure_only) and host != "Darwin":
@@ -805,6 +859,12 @@ def main() -> int:
         str(ROOT / "liblink/src"),
     ]
     cc = compiler + common_flags
+
+    if args.path_ownership_only:
+        with tempfile.TemporaryDirectory(prefix="liblink-pathdup-ownership-") as temporary:
+            run_pathdup_ownership(cc, archive, Path(temporary), link_flags, host)
+        print("liblink native unit tests: PASS (pathdup ownership only)")
+        return 0
 
     if args.macho_x86_operands_only:
         platform_header = (config_include / "ll_platform.h").read_text()
@@ -954,6 +1014,8 @@ def main() -> int:
             forbidden_member="LoadArchive",
         )
         run([str(archive_test)], label="run archive_error_status")
+
+        run_pathdup_ownership(cc, archive, output, link_flags, host)
 
         if host == "Darwin":
             m32_map_test = output / "m32_map_status"

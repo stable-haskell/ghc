@@ -118,6 +118,7 @@ extra-source-files:
     tests/unit/macho_protection_cases.h
     tests/unit/macho_terminal_resolution_cases.h
     tests/unit/owner_services.c
+    tests/unit/pathdup_ownership.c
     tests/unit/macho_segment_padding.c
     tests/unit/macho_error_status.c
     tests/unit/macho_x86_error_status.c

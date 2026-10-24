@@ -33,13 +33,15 @@ class MinGWLLDMapTests(unittest.TestCase):
         )
         return "\n".join(lines) + "\n"
 
-    def verify(self, map_text: str, trace: str | None = None) -> None:
+    def verify(self, map_text: str, trace: str | None = None,
+               required_members: tuple[str, ...] = ()) -> None:
         checks.verify_lld_mingw_archive_map(
             map_text,
             self.archive,
             self.trace() if trace is None else trace,
             included_source="M32Alloc.c",
             forbidden_members=("M32Alloc",),
+            required_members=required_members,
         )
 
     def test_accepts_archive_read_loaded_selection_and_map_record(self) -> None:
@@ -145,6 +147,42 @@ class MinGWLLDMapTests(unittest.TestCase):
     def test_member_map_binding_keeps_object_suffix(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "no input record matching"):
             self.verify(MAP_HEADER + map_row("ll_error.obj"), self.trace(("ll_error.o",)))
+
+    def test_accepts_required_member_with_basename_only_map_record(self) -> None:
+        self.verify(
+            MAP_HEADER + map_row("ll_path.o"),
+            self.trace(("ll_path.o",)),
+            required_members=("ll_path",),
+        )
+
+    def test_rejects_wrong_required_archive_member(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "did not select required archive member"):
+            self.verify(
+                MAP_HEADER + map_row("symbols-strong.o"),
+                self.trace(("symbols-strong.o",)),
+                required_members=("ll_path",),
+            )
+
+    def test_rejects_required_member_from_wrong_archive(self) -> None:
+        trace = (
+            "lld: Reading C:/Build Artifacts/liblink.a\n"
+            "lld: Loaded D:/Other/liblink.a(ll_path.o) for fixture_symbol\n"
+        )
+        with self.assertRaisesRegex(RuntimeError, "different path"):
+            self.verify(
+                MAP_HEADER + map_row("ll_path.o"), trace,
+                required_members=("ll_path",),
+            )
+
+    def test_rejects_required_member_missing_from_map(self) -> None:
+        with self.assertRaisesRegex(
+            RuntimeError, "link map omitted required archive member ll_path"
+        ):
+            self.verify(
+                MAP_HEADER + map_row("ll_host.o"),
+                self.trace(("ll_host.o", "ll_path.o")),
+                required_members=("ll_path",),
+            )
 
 
 class DarwinWhyLoadTests(unittest.TestCase):

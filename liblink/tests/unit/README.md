@@ -763,3 +763,14 @@ the Darwin, Windows, or ordinary testsuite jobs, dispatch:
 This focused native qualification does not replace full T1–T4 or platform
 acceptance. The default manual, push, and pull-request workflow retains the
 full existing matrix and jobs.
+
+Private path duplication ownership
+==================================
+
+`pathdup_ownership.c` links the installed native archive and checks that empty,
+ASCII, and non-ASCII path copies are allocated and released by their linker
+owner, with an independent default-host sentinel. It runs with the full native
+unit suite. To isolate it on a native Windows build without changing the
+foundation-only mode, run `python3 liblink/tests/unit/run_native_tests.py
+--path-ownership-only`. A Darwin or Linux control run checks the existing
+POSIX implementation; it does not qualify the Windows path.

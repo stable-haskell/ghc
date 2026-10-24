@@ -81,6 +81,7 @@ def verify_lld_mingw_archive_map(
     *,
     included_source: str,
     forbidden_members: tuple[str, ...],
+    required_members: tuple[str, ...] = (),
 ) -> None:
     """Validate LLD's basename-only COFF map against verbose archive selection."""
     expected_path = _path_key(str(archive))
@@ -113,6 +114,12 @@ def verify_lld_mingw_archive_map(
                 f"link trace selected same-basename archive at a different path: {loaded_archive}"
             )
     loaded = [member for _, member in same_name_loaded]
+    for required in required_members:
+        required_key = _member_key(required)
+        if not any(_member_key(member) == required_key for member in loaded):
+            raise RuntimeError(
+                f"link trace did not select required archive member {required}"
+            )
 
     map_members = _map_input_members(map_text)
     if not map_members:
@@ -129,6 +136,12 @@ def verify_lld_mingw_archive_map(
         raise RuntimeError(
             "link map has no input record matching a member selected from the expected archive"
         )
+    for required in required_members:
+        required_key = _member_key(required)
+        if not any(_member_key(member) == required_key for member in map_members):
+            raise RuntimeError(
+                f"link map omitted required archive member {required}"
+            )
 
 
 def _macho_selected_members(trace: str, archive: Path) -> list[str]:
