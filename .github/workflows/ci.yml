@@ -175,7 +175,7 @@ jobs:
         export CABAL_DIR="$GITHUB_WORKSPACE/_build/cabal-dir"
         export TMPDIR="$GITHUB_WORKSPACE/_build/tmp"
         mkdir -p "$TMPDIR"
-        make test QUIET=1 DYNAMIC=${{ matrix.dynamic }} USE_SYSTEM_CABAL=1
+        make test QUIET=1 DYNAMIC=${{ matrix.dynamic }} USE_SYSTEM_CABAL=1 VERBOSE=3 2>&1 | tee _build/test-run.log
 
     - name: Stop metrics collection
       if: ${{ !cancelled() }}
@@ -292,6 +292,7 @@ jobs:
           _build/test-perf.csv
           _build/test-summary.txt
           _build/test-junit.xml
+          _build/test-run.log
           _build/timing/
 
     - name: Upload metrics

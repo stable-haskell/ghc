@@ -116,6 +116,7 @@ def main():
             assert actual_labels == LABELS, (case_name, actual_labels)
             normalized_workspace = case_workspace.resolve()
             for record in records:
+                assert "VERBOSE=3" in record["args"], record["args"]
                 assert Path(record["cwd"]) == normalized_workspace, record["cwd"]
                 assert Path(record["compiler"]) == normalized_workspace / "_build/dist/bin/ghc"
                 assert not record["compiler_opts"], record["compiler_opts"]

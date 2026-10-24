@@ -19,7 +19,7 @@ run_testsuite() {
     local tests="$4"
     local speed="$5"
     local output_dir="$output_root/$label"
-    local make_args=(test)
+    local make_args=(test VERBOSE=3)
 
     mkdir -p "$output_dir"
     if [[ -n "$way" ]]; then

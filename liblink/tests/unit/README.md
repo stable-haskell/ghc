@@ -648,6 +648,10 @@ the two T1 roots, the three T2 roots in normal and external-interpreter ways,
 and the five registered T3 unload test names with all registered available
 ways. Logs, JUnit, summaries, and metrics are uploaded under the
 `windows-focused-testsuite-results` artifact from `_build/logs/windows-focused/`.
+Both focused and top-level CI testsuite invocations use `VERBOSE=3` so run logs
+include named test/way starts and fragile outcome records. JUnit omits expected
+failures and fragile passes, so the raw log, JUnit, and summary together allow
+complete capture validation for baseline comparison.
 These results do not establish baseline parity; that remains unqualified until
 the Windows CI run is reviewed against the baseline.
 
