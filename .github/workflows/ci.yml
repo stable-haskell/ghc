@@ -6,6 +6,12 @@ on:
   push:
     branches: [stable-ghc-9.14, stable-ghc-9.14-rebased, stable-master]
   workflow_dispatch:
+    inputs:
+      linux_native_only:
+        description: Run only the static Linux build and native linker qualification
+        required: false
+        type: boolean
+        default: false
 
 env:
   CABAL_CACHE_PATH: _build/cabal/bin
@@ -15,34 +21,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - plat: x86_64-linux
-            runner: ubuntu-24.04
-            ghc: '98'
-            dynamic: 0
-          - plat: x86_64-linux
-            runner: ubuntu-24.04
-            ghc: '98'
-            dynamic: 1
-          # - plat: aarch64-linux  # disabled: waiting for devx images to be fixed
-          #   runner: ubuntu-24.04-arm
-          #   ghc: '98'
-          #   dynamic: 0
-          # - plat: aarch64-linux
-          #   runner: ubuntu-24.04-arm
-          #   ghc: '98'
-          #   dynamic: 1
-          - plat: aarch64-darwin
-            runner: macos-latest
-            ghc: '98'
-            dynamic: 0
-          - plat: aarch64-darwin
-            runner: macos-latest
-            ghc: '98'
-            dynamic: 1
+        plat: ${{ fromJSON(inputs.linux_native_only && '["x86_64-linux"]' || '["x86_64-linux","aarch64-darwin"]') }}
+        dynamic: ${{ fromJSON(inputs.linux_native_only && '[0]' || '[0,1]') }}
+        ghc: ['98']
+        # aarch64-linux remains disabled while its devx image is unavailable.
 
     name: "${{ matrix.plat }} / ghc ${{ matrix.ghc }} / dynamic=${{ matrix.dynamic }}"
-    runs-on: ${{ matrix.runner }}
+    runs-on: ${{ matrix.plat == 'x86_64-linux' && 'ubuntu-24.04' || 'macos-latest' }}
 
     steps:
     - uses: actions/checkout@v4
@@ -170,6 +155,7 @@ jobs:
           _build/timing/
 
     - name: Run the testsuite (dynamic=${{ matrix.dynamic }})
+      if: ${{ !inputs.linux_native_only }}
       shell: devx {0}
       run: |
         set -eo pipefail
@@ -327,6 +313,7 @@ jobs:
           _build/metrics/
 
   windows-native-foundation:
+    if: ${{ !inputs.linux_native_only }}
     name: Windows native liblink foundation unit
     runs-on: windows-latest
     timeout-minutes: 360

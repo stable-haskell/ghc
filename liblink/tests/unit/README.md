@@ -751,3 +751,15 @@ second to reap the direct child after a command times out.
 Darwin CI runs this collector after the ordinary testsuite with each stage2
 compiler and uploads a separate timing artifact, including incomplete results.
 The ordinary test keeps its original expected stdout and timing predicate.
+
+Linux-only native qualification
+===============================
+
+To run the static Linux build and native linker qualification without queuing
+the Darwin, Windows, or ordinary testsuite jobs, dispatch:
+
+    gh workflow run ci.yml --repo stable-haskell/ghc --ref <branch> -f linux_native_only=true
+
+This focused native qualification does not replace full T1–T4 or platform
+acceptance. The default manual, push, and pull-request workflow retains the
+full existing matrix and jobs.
