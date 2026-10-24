@@ -132,6 +132,7 @@ extra-source-files:
     tests/unit/m32_map_status.c
     tests/unit/m32_windows_reservations.c
     tests/unit/pei386_common_ownership.c
+    tests/unit/pei386_load_resources.c
     tests/unit/pei386_resolution_status.c
     tests/unit/pei386_unwind_retention.c
     tests/unit/link_trace_checks.py

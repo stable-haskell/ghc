@@ -1814,8 +1814,12 @@ ocGetNames_PEi386 ( ObjectCode* oc )
           start = m32_alloc_for(oc->L, oc->rx_m32, sz, alignment);
       }
       if (!start) {
-        LL_FATAL_FOR(oc->L, "Could not allocate any heap memory from private heap (requested %" LL_FMT_SIZE_T " bytes).",
-             sz);
+        if (oc->L->error_status == LL_OK)
+            ll_error_set(oc->L, LL_E_NOMEM,
+                         "Could not allocate section memory (requested %" LL_FMT_SIZE_T " bytes).",
+                         sz);
+        releaseOcInfo(oc);
+        return false;
       }
 
       if (do_copy) {
@@ -1856,7 +1860,11 @@ ocGetNames_PEi386 ( ObjectCode* oc )
    if (globalBssSize > 0) {
        bss = m32_alloc_for(oc->L, oc->rw_m32, globalBssSize, 16);
        if (bss == NULL) {
-           LL_FATAL_FOR(oc->L, "ocGetNames_PEi386: Failed to allocate global bss section");
+           if (oc->L->error_status == LL_OK)
+               ll_error_set(oc->L, LL_E_NOMEM,
+                            "ocGetNames_PEi386: Failed to allocate global bss section");
+           releaseOcInfo(oc);
+           return false;
        }
        addSection(oc->L, &oc->sections[oc->n_sections-1],
                   SECTIONKIND_RWDATA, SECTION_M32,

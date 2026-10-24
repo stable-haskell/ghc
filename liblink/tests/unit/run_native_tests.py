@@ -82,6 +82,11 @@ def parse_args() -> argparse.Namespace:
         help="run only native Windows x86_64 post-symbol PE resolver cases",
     )
     parser.add_argument(
+        "--pe-load-resources-only",
+        action="store_true",
+        help="run only native Windows x86_64 PE load-resource failure cases",
+    )
+    parser.add_argument(
         "--macho-table-alignment-only",
         action="store_true",
         help="run only packed Mach-O symbol/relocation table alignment cases",
@@ -587,6 +592,35 @@ def run_pei386_resolution_status(cc: list[str], archive: Path,
         run([str(binary)], label=f"run {unit}")
 
 
+def run_pei386_load_resources(cc: list[str], archive: Path,
+                              output: Path,
+                              link_flags: list[str]) -> None:
+    unit = "pei386_load_resources"
+    binary = output / f"{unit}.exe"
+    map_file = output / f"{unit}.map"
+    trace = run(
+        cc + native_unit_link_arguments(
+            ROOT / f"liblink/tests/unit/{unit}.c",
+            archive,
+            binary,
+            link_flags,
+            ["-Wl,--verbose", linker_map_flag(map_file)],
+        ),
+        label=f"compile and link {unit}",
+    )
+    included = "PEi386.c, Linker.c, M32Alloc.c, M32Reservations.c, and MMap.c"
+    for member in ("PEi386", "Linker", "M32Alloc", "M32Reservations", "MMap"):
+        verify_link_map(
+            map_file,
+            archive,
+            trace,
+            included_source=included,
+            forbidden_member=member,
+            windows_paths=True,
+        )
+    run([str(binary)], label=f"run {unit}")
+
+
 def verify_macho_link_map(
     map_path: Path,
     archive: Path,
@@ -882,7 +916,7 @@ def main() -> int:
     selected_modes = sum((args.initializer_errors_only, args.foundation_only, args.protection_only,
                           args.protection_gap_probes,
                           args.resolution_failure_only, args.windows_m32_only,
-                          args.pe_resolution_only,
+                          args.pe_resolution_only, args.pe_load_resources_only,
                           args.macho_table_alignment_only,
                           args.macho_x86_operands_only,
                           args.elf_resources_only,
@@ -895,6 +929,8 @@ def main() -> int:
         raise RuntimeError("--windows-m32-only requires a native Windows host")
     if args.pe_resolution_only and host != "Windows":
         raise RuntimeError("--pe-resolution-only requires a native Windows host")
+    if args.pe_load_resources_only and host != "Windows":
+        raise RuntimeError("--pe-load-resources-only requires a native Windows host")
     if args.macho_table_alignment_only and host != "Darwin":
         raise RuntimeError("--macho-table-alignment-only requires a native Darwin Mach-O build")
     if args.macho_x86_operands_only and host != "Darwin":
@@ -908,6 +944,7 @@ def main() -> int:
     if host == "Windows" and not (args.initializer_errors_only or
                                    args.foundation_only or args.windows_m32_only
                                    or args.pe_resolution_only
+                                   or args.pe_load_resources_only
                                    or args.path_ownership_only):
         raise RuntimeError(
             "core_error_status.c is POSIX-only: the Windows linker path uses "
@@ -1053,6 +1090,22 @@ def main() -> int:
                 )
             run_pei386_resolution_status(cc, archive, output, pe_link_flags)
             print("liblink PE resolution unit: PASS (Windows x86_64 only)")
+            return 0
+
+        if args.pe_load_resources_only:
+            platform_header = (config_include / "ll_platform.h").read_text()
+            windows_x64 = (
+                re.search(r"^#define\s+mingw32_HOST_OS\s+1\s*$",
+                          platform_header, flags=re.MULTILINE)
+                and re.search(r"^#define\s+x86_64_HOST_ARCH\s+1\s*$",
+                              platform_header, flags=re.MULTILINE)
+            )
+            if not windows_x64:
+                raise RuntimeError(
+                    "PE load-resource unit requires generated Windows x86_64 config"
+                )
+            run_pei386_load_resources(cc, archive, output, pe_link_flags)
+            print("liblink PE load-resource unit: PASS (Windows x86_64 only)")
             return 0
 
         if args.windows_m32_only:

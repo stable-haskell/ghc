@@ -688,6 +688,28 @@ lifetime unit below. Native Windows compilation and execution of the DLL
 indirection allocation failure, error preservation, and post-trampoline range
 cases passed in run 40077134443, as recorded above.
 
+PE load-resource failure cleanup
+=================================
+
+`pei386_load_resources.c` uses valid AMD64 COFF objects and the real Windows
+x86_64 linker fixture. It injects only private M32 allocation failures: the
+first section allocation, and global COMMON BSS after a section allocation
+succeeds. It checks `LL_E_NOMEM` and preservation of a specific owner error,
+no fatal callback, failed-object/symbol/list/host-ledger cleanup, default
+linker isolation, and a successful retry of the same failed fixture file and
+symbol while a distinct resolved COMMON provider remains live. A normal
+load/resolve/dispose path remains the control. Each failed `loadObj_` must
+return the host allocation ledger to its
+pre-load baseline. After the two successful control objects are disposed, the
+fixture separately counts the existing normal-disposal residue of two copied
+COFF string tables, two section names, and two relocation copies, then releases
+those known allocations as harness cleanup. This is a narrow ownership check,
+not general native leak qualification. Run `python3
+liblink/tests/unit/run_native_tests.py
+--pe-load-resources-only --cc clang` on native Windows x86_64. Compilation and
+native execution are pending; this fixture does not inject NULL host allocator
+callbacks.
+
 PE unwind record lifetime
 =========================
 

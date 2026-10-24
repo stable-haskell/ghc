@@ -206,7 +206,7 @@ static void install_owner(void)
 }
 
 static bool write_object_file(pathchar *path, uint32_t common_size,
-                              bool with_common)
+                              bool with_common, const char *common_name)
 {
     enum {
         FILE_HEADER_OFFSET = 0,
@@ -221,6 +221,9 @@ static bool write_object_file(pathchar *path, uint32_t common_size,
         EMPTY_OBJECT_SIZE = sizeof(IMAGE_FILE_HEADER) + sizeof(uint32_t)
     };
     size_t image_size = with_common ? COMMON_OBJECT_SIZE : EMPTY_OBJECT_SIZE;
+    if (common_name == NULL ||
+        strlen(common_name) > sizeof(((IMAGE_SYMBOL *)0)->N.ShortName))
+        return false;
     uint8_t *image = calloc(1, image_size);
     if (image == NULL) return false;
 
@@ -253,7 +256,7 @@ static bool write_object_file(pathchar *path, uint32_t common_size,
         memcpy(image + RELOCATION_OFFSET, &relocation, sizeof(relocation));
 
         IMAGE_SYMBOL symbol = {0};
-        memcpy(symbol.N.ShortName, "common1", 7);
+        memcpy(symbol.N.ShortName, common_name, strlen(common_name));
         symbol.Value = common_size;
         symbol.SectionNumber = IMAGE_SYM_UNDEFINED;
         symbol.Type = 0;
@@ -299,7 +302,7 @@ static bool load_and_resolve(pathchar *path, uint32_t size, bool with_common)
         CHECK(false, "could not create temporary COFF path");
         return false;
     }
-    if (!write_object_file(path, size, with_common)) {
+    if (!write_object_file(path, size, with_common, "common1")) {
         CHECK(false, "could not write temporary COFF object");
         (void)DeleteFileW(path);
         return false;

@@ -390,6 +390,13 @@ jobs:
         export PATH="/c/ghcup/bin:$PATH"
         python3 liblink/tests/unit/run_native_tests.py --pe-resolution-only --cc clang 2>&1 | tee _build/logs/windows-liblink-pe-resolution.log
 
+    - name: Run Windows PE load-resource C unit
+      timeout-minutes: 5
+      run: |
+        set -eo pipefail
+        export PATH="/c/ghcup/bin:$PATH"
+        python3 liblink/tests/unit/run_native_tests.py --pe-load-resources-only --cc clang 2>&1 | tee _build/logs/windows-liblink-pe-load-resources.log
+
     - name: Run Windows path ownership C unit
       timeout-minutes: 5
       run: |
@@ -422,6 +429,7 @@ jobs:
           _build/logs/windows-liblink-path-ownership.log
           _build/logs/windows-liblink-pe-resolution.log
           _build/logs/windows-liblink-initializer-errors.log
+          _build/logs/windows-liblink-pe-load-resources.log
 
     - name: Upload Windows build and unit logs on failure
       if: failure()
