@@ -76,6 +76,16 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="run only packed Mach-O symbol/relocation table alignment cases",
     )
+    parser.add_argument(
+        "--macho-x86-operands-only",
+        action="store_true",
+        help="run only native x86_64 Darwin operand-width and compiler-fixture units",
+    )
+    parser.add_argument(
+        "--elf-resources-only",
+        action="store_true",
+        help="run only native Linux x86_64 COMMON/GOT resource units",
+    )
     return parser.parse_args()
 
 
@@ -554,12 +564,65 @@ def run_macho_table_alignment(cc: list[str], archive: Path, output: Path,
     run([str(test), str(fixture)], label="run macho_table_alignment")
 
 
+def run_macho_x86_operands(cc: list[str], archive: Path, output: Path,
+                           host: str) -> None:
+    fixture = output / "macho_x86_operand_ordinary.o"
+    run(cc + ["-O1", "-fno-stack-protector", "-fno-asynchronous-unwind-tables",
+              "-c", str(ROOT / "liblink/tests/fixtures/macho-input/ordinary.c"),
+              "-o", str(fixture)], label="compile x86 operand compiler fixture")
+    for name, forbidden, required in (
+        ("macho_x86_operand_widths", ("MachO",), ("ll_host",)),
+        ("macho_x86_operand_fixture", (), ("MachO",)),
+    ):
+        binary = output / name
+        map_file = output / (name + ".map")
+        trace = run(
+            cc + [str(ROOT / "liblink/tests/unit" / (name + ".c")),
+                  f"-L{archive.parent}", "-llink", *core_link_flags(host),
+                  "-Wl,-t", "-Wl,-why_load", linker_map_flag(map_file),
+                  "-o", str(binary)], label="compile and link " + name)
+        verify_macho_link_map(map_file, archive, trace, included_source=name,
+                              forbidden_members=forbidden, required_members=required)
+        link_trace_checks.verify_macho_archive_selection(
+            archive, trace, included_source=name, forbidden_members=forbidden)
+        command = [str(binary)]
+        if name == "macho_x86_operand_fixture":
+            command.append(str(fixture))
+        run(command, label="run " + name)
+
+
+def run_elf_resources(cc: list[str], archive: Path, output: Path,
+                      host: str) -> None:
+    fixtures = output / "elf-resource-fixtures"
+    run([sys.executable, str(ROOT / "liblink/tests/unit/elf_resource_fixtures.py"),
+         str(fixtures)], label="generate ELF resource fixtures")
+    binary = output / "elf_resource_errors"
+    map_file = output / "elf_resource_errors.map"
+    trace = run(
+        cc + [str(ROOT / "liblink/tests/unit/elf_resource_errors.c"),
+              f"-L{archive.parent}", "-llink", *core_link_flags(host),
+              "-Wl,--wrap=ll_mmap_anon_for_linker",
+              "-Wl,--wrap=ll_mmap_for_linker",
+              "-Wl,--wrap=ll_munmap_for_linker",
+              "-Wl,--wrap=m32_alloc_for", "-Wl,--wrap=open", "-Wl,--wrap=close",
+              "-Wl,-t", linker_map_flag(map_file), "-o", str(binary)],
+        label="compile and link elf_resource_errors")
+    verify_link_map(map_file, archive, trace, included_source="Linker.c",
+                    forbidden_member="Linker")
+    map_text = map_file.read_text(errors="replace")
+    for member in ("Elf", "MMap", "M32Alloc"):
+        if not archive_member_pattern(str(archive), member).search(map_text):
+            raise RuntimeError(f"resource map omitted {archive}({member}.o)")
+    run([str(binary), str(fixtures)], label="run elf_resource_errors")
+
 def main() -> int:
     args = parse_args()
     selected_modes = sum((args.foundation_only, args.protection_only,
                           args.protection_gap_probes,
                           args.resolution_failure_only, args.windows_m32_only,
-                          args.macho_table_alignment_only))
+                          args.macho_table_alignment_only,
+                          args.macho_x86_operands_only,
+                          args.elf_resources_only))
     if selected_modes > 1:
         raise RuntimeError("native unit modes are mutually exclusive")
     system = platform.system()
@@ -574,6 +637,10 @@ def main() -> int:
         raise RuntimeError("--windows-m32-only requires a native Windows host")
     if args.macho_table_alignment_only and host != "Darwin":
         raise RuntimeError("--macho-table-alignment-only requires a native Darwin Mach-O build")
+    if args.macho_x86_operands_only and host != "Darwin":
+        raise RuntimeError("--macho-x86-operands-only requires native x86_64 Darwin")
+    if args.elf_resources_only and host != "Linux":
+        raise RuntimeError("--elf-resources-only requires native Linux x86_64 ELF")
     if host == "Windows" and not (args.foundation_only or args.windows_m32_only):
         raise RuntimeError(
             "core_error_status.c is POSIX-only: the Windows linker path uses "
@@ -622,6 +689,24 @@ def main() -> int:
         str(ROOT / "liblink/src"),
     ]
     cc = compiler + common_flags
+
+    if args.macho_x86_operands_only:
+        platform_header = (config_include / "ll_platform.h").read_text()
+        if not re.search(r"^#define\s+x86_64_HOST_ARCH\s+1\s*$",
+                         platform_header, flags=re.MULTILINE):
+            raise RuntimeError("operand units require generated x86_64 Darwin config")
+        with tempfile.TemporaryDirectory(prefix="liblink-macho-x86-operands-") as temporary:
+            run_macho_x86_operands(cc, archive, Path(temporary), host)
+        print("liblink Mach-O x86 operand units: PASS")
+        return 0
+
+    if args.elf_resources_only:
+        if not configured_linux_x86_64_elf_backend(config_include):
+            raise RuntimeError("resource units require generated Linux x86_64 config")
+        with tempfile.TemporaryDirectory(prefix="liblink-elf-resources-") as temporary:
+            run_elf_resources(cc, archive, Path(temporary), host)
+        print("liblink ELF resource units: PASS")
+        return 0
 
     if args.macho_table_alignment_only:
         with tempfile.TemporaryDirectory(prefix="liblink-macho-table-alignment-") as temporary:
@@ -961,6 +1046,7 @@ def main() -> int:
                         f"section link map omitted {archive}({member}.o)"
                     )
             run([str(section_test)], label="run elf_section_errors")
+            run_elf_resources(cc, archive, output, host)
         else:
             print(
                 "[elf_relocation_errors] skipped: generated config is not "
@@ -1137,6 +1223,7 @@ def main() -> int:
                     required_members=("MachOVerify",),
                 )
                 run([str(macho_x86_status_test)], label="run macho_x86_error_status")
+                run_macho_x86_operands(cc, archive, output, host)
             else:
                 print("[macho_x86_error_status] SKIP: generated target is not x86_64")
 

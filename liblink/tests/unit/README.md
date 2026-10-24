@@ -173,7 +173,7 @@ ELF data-only resource fixtures
 ===============================
 
 `elf_resource_fixtures.py` writes eight deterministic ELF64 x86_64 object
-files for pending resource tests. The fixtures cover COMMON symbols with
+files for resource tests. The fixtures cover COMMON symbols with
 matching, smaller, conflicting, zero, and overflow sizes, plus an ordinary
 `.data` symbol and identical provider/alias bytes. Generate them into a private
 directory with:
@@ -609,3 +609,57 @@ remains unqualified until that native command runs. The Windows-only archive
 checks normalize slash direction and case and add `cygpath -m` spelling when
 available, while requiring the selected archive in both link map and trace and
 rejecting duplicate included implementation members.
+
+Approved ELF resource error coverage
+====================================
+
+`elf_resource_errors.c` covers the approved ELF COMMON/GOT resource behavior.
+It reuses the section unit's owner and mapping ledgers, includes current
+`Linker.c`, and links the actual ELF backend from the native archive. Data-only
+fixtures cover COMMON/GOT successes and exact allocation failures, same or
+smaller COMMON aliases, larger duplicate rollback, zero-sized COMMON
+anchoring, COMMON sum/page overflow, primary-error preservation under a
+format-metadata cleanup callback, and descriptor closure on quarantined COMMON
+alias rejection. Existing quarantine retention is asserted, followed by
+explicit logical unload and modeled disposal after all aliases unload. It does
+not exercise actual RTS GC marking or scheduling.
+
+New COMMON/GOT mappings remain owned until actual object disposal, and aliases
+retain their provider's lifetime. Allocation failure returns `LL_E_NOMEM`, a
+larger COMMON conflict returns `LL_E_DUPSYM`, and representational overflow
+returns `LL_E_UNSUPPORTED`.
+
+The fixture generator writes ordinary ELF64 x86_64 data and symbol containers
+without code, relocations, or initialization arrays. The unit uses contiguous
+images, so M32 page caching is outside its COMMON/GOT mapping ledger; normal
+M32 pooling is unchanged. Native Linux x86_64 and genuine generated config are
+required. The driver supports `--elf-resources-only` and the default native
+run, literal `-llink`, GNU wrappers, and archive member selection.
+
+The GOT byte-count overflow guard has no runtime coverage in the 64-bit unit.
+Backend execution and sanitizer behavior require running this unit on native
+Linux x86_64 with the approved implementation.
+
+Approved x86_64 Mach-O operand-width coverage
+============================================
+
+`macho_x86_operand_widths.c` reuses the current x86 status-unit host helpers
+and includes the actual Mach-O backend. Its 56 cases cover byte offsets 0–7,
+all four operand widths, literal high-bit, carry, and narrowing results,
+16/32-bit zero-extension controls using internal target spans, and first or
+only invalid operand spans with unchanged source and target sentinels. The
+compiler-fixture unit reuses `macho_input.c`, supplies the fixture's external
+data definition, resolves its entry, and verifies relocated data pointers
+without calling loaded functions or initializers. It uses Darwin's usual PIC
+mapping mode, matching the RTS default and existing native fixtures. Both
+units require generated x86_64 Darwin configuration. The driver links literal `-llink`, checks archive
+selection, and supports `--macho-x86-operands-only` plus the default native
+run. The repair uses `memcpy` for 16, 32, and 64-bit operands, allowing
+unaligned locations while preserving zero extension, narrowing, arithmetic,
+and byte order.
+
+Run `python3 liblink/tests/unit/run_native_tests.py
+--macho-x86-operands-only` on a Darwin x86_64 build with the approved backend
+and generated configuration. A Rosetta run provides evidence for that
+execution environment; native Intel macOS CI provides separate evidence.
+Neither is implied by adding these tests.
