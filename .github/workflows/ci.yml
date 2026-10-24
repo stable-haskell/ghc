@@ -7,22 +7,27 @@ on:
     branches: [stable-ghc-9.14, stable-ghc-9.14-rebased, stable-master]
   workflow_dispatch:
     inputs:
-      linux_native_only:
-        description: Run only the static Linux build and native linker qualification
-        required: false
-        type: boolean
-        default: false
+      qualification:
+        description: Select the full workflow or one focused native platform qualification
+        required: true
+        type: choice
+        options:
+          - full
+          - linux-native
+          - windows-native
+        default: full
 
 env:
   CABAL_CACHE_PATH: _build/cabal/bin
 
 jobs:
   cabal:
+    if: ${{ inputs.qualification != 'windows-native' }}
     strategy:
       fail-fast: false
       matrix:
-        plat: ${{ fromJSON(inputs.linux_native_only && '["x86_64-linux"]' || '["x86_64-linux","aarch64-darwin"]') }}
-        dynamic: ${{ fromJSON(inputs.linux_native_only && '[0]' || '[0,1]') }}
+        plat: ${{ fromJSON(inputs.qualification == 'linux-native' && '["x86_64-linux"]' || '["x86_64-linux","aarch64-darwin"]') }}
+        dynamic: ${{ fromJSON(inputs.qualification == 'linux-native' && '[0]' || '[0,1]') }}
         ghc: ['98']
         # aarch64-linux remains disabled while its devx image is unavailable.
 
@@ -155,7 +160,7 @@ jobs:
           _build/timing/
 
     - name: Run the testsuite (dynamic=${{ matrix.dynamic }})
-      if: ${{ !inputs.linux_native_only }}
+      if: ${{ inputs.qualification != 'linux-native' && inputs.qualification != 'windows-native' }}
       shell: devx {0}
       run: |
         set -eo pipefail
@@ -313,7 +318,7 @@ jobs:
           _build/metrics/
 
   windows-native-foundation:
-    if: ${{ !inputs.linux_native_only }}
+    if: ${{ inputs.qualification != 'linux-native' }}
     name: Windows native liblink foundation unit
     runs-on: windows-latest
     timeout-minutes: 360

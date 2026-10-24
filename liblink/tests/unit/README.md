@@ -752,13 +752,19 @@ Darwin CI runs this collector after the ordinary testsuite with each stage2
 compiler and uploads a separate timing artifact, including incomplete results.
 The ordinary test keeps its original expected stdout and timing predicate.
 
-Linux-only native qualification
-===============================
+Focused native qualification
+=============================
 
-To run the static Linux build and native linker qualification without queuing
-the Darwin, Windows, or ordinary testsuite jobs, dispatch:
+The manual workflow accepts `qualification=full` (the default),
+`qualification=linux-native`, or `qualification=windows-native`. For example,
+run only the static Linux build and native linker qualification with:
 
-    gh workflow run ci.yml --repo stable-haskell/ghc --ref <branch> -f linux_native_only=true
+    gh workflow run ci.yml --repo stable-haskell/ghc --ref <branch> -f qualification=linux-native
+
+To run the existing Windows build and native linker qualification without
+queuing the Unix matrix, use:
+
+    gh workflow run ci.yml --repo stable-haskell/ghc --ref <branch> -f qualification=windows-native
 
 This focused native qualification does not replace full T1–T4 or platform
 acceptance. The default manual, push, and pull-request workflow retains the
