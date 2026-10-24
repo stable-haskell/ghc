@@ -110,6 +110,7 @@ jobs:
         rm -rf "${CABAL_DIR:-$GITHUB_WORKSPACE/_build/cabal-dir}/packages/" 2>/dev/null || true
 
     - name: Build stage2 (dynamic=${{ matrix.dynamic }})
+      id: stage2_build
       shell: devx {0}
       timeout-minutes: 90
       run: |
@@ -176,6 +177,28 @@ jobs:
         export TMPDIR="$GITHUB_WORKSPACE/_build/tmp"
         mkdir -p "$TMPDIR"
         make test QUIET=1 DYNAMIC=${{ matrix.dynamic }} USE_SYSTEM_CABAL=1 VERBOSE=3 2>&1 | tee _build/test-run.log
+
+    - name: Collect unpacked sums phase timings
+      if: ${{ !cancelled() && matrix.plat == 'aarch64-darwin' && steps.stage2_build.outcome == 'success' }}
+      shell: devx {0}
+      timeout-minutes: 20
+      run: |
+        set -eo pipefail
+        mkdir -p _build/logs
+        python3 .github/scripts/measure-unpack-sums.py \
+          --ghc "$GITHUB_WORKSPACE/_build/dist/bin/ghc" \
+          --output-dir "$GITHUB_WORKSPACE/_build/unpack-sums-timings" \
+          2>&1 | tee _build/logs/unpack-sums-timings.log
+
+    - name: Upload unpacked sums timing diagnostics
+      if: ${{ !cancelled() && matrix.plat == 'aarch64-darwin' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.plat }}-dynamic${{ matrix.dynamic }}-unpack-sums-timings
+        if-no-files-found: ignore
+        path: |
+          _build/unpack-sums-timings/
+          _build/logs/unpack-sums-timings.log
 
     - name: Stop metrics collection
       if: ${{ !cancelled() }}

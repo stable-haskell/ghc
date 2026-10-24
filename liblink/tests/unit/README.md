@@ -743,3 +743,7 @@ in the result directory. It enables `GHC_UNPACK_SUMS_TIMINGS=1` only for direct
 program runs. Exit 1 from the unchanged timing predicate is recorded as data;
 the collector succeeds only when every run has expected stdout and two parsed
 durations. It does not compare performance or establish benchmark acceptance.
+
+Darwin CI runs this collector after the ordinary testsuite with each stage2
+compiler and uploads a separate timing artifact, including incomplete results.
+The ordinary test keeps its original expected stdout and timing predicate.
