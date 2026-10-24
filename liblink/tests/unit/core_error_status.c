@@ -165,7 +165,7 @@ static size_t host_page_size(void *ctx)
 static void host_mem_failure(void *ctx) { (void)ctx; }
 
 static void on_init(void *ctx) { ++((Host *)ctx)->init_calls; }
-static void on_exit(void *ctx) { ++((Host *)ctx)->exit_calls; }
+static void host_exit_unload_check(void *ctx) { ++((Host *)ctx)->exit_calls; }
 
 static ll_compat_host_ops make_ops(Host *host)
 {
@@ -180,7 +180,7 @@ static ll_compat_host_ops make_ops(Host *host)
     ops.page_size = host_page_size;
     ops.on_mem_failure = host_mem_failure;
     ops.init_unload_check = on_init;
-    ops.exit_unload_check = on_exit;
+    ops.exit_unload_check = host_exit_unload_check;
     return ops;
 }
 
