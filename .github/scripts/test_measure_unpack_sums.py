@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """Exercise the unpack-sums collector with a fake compiler and executable."""
 
+import contextlib
+import importlib.util
+import io
 import json
 import os
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
+from unittest import mock
 
 
 REPO = Path(__file__).resolve().parents[2]
@@ -14,6 +18,112 @@ COLLECTOR = REPO / ".github/scripts/measure-unpack-sums.py"
 SOURCE = REPO / "testsuite/tests/unboxedsums/unpack_sums_6.hs"
 EXPECTED_STDOUT = SOURCE.with_suffix(".stdout").read_bytes()
 STATUSES = [0, 1, 0, 1, 1, 0]
+SPEC = importlib.util.spec_from_file_location("measure_unpack_sums", COLLECTOR)
+COLLECTOR_MODULE = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(COLLECTOR_MODULE)
+
+
+class FlushTrackingStringIO(io.StringIO):
+    def __init__(self):
+        super().__init__()
+        self.flush_count = 0
+
+    def flush(self):
+        self.flush_count += 1
+        super().flush()
+
+
+class MockPipe:
+    def __init__(self):
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+
+
+class MockProcess:
+    pid = 424242
+
+    def __init__(self, cleanup_incomplete):
+        self.cleanup_incomplete = cleanup_incomplete
+        self.returncode = None
+        self.stdout = MockPipe()
+        self.stderr = MockPipe()
+        self.communicate_timeouts = []
+        self.wait_timeouts = []
+        self.killed = False
+
+    def communicate(self, timeout):
+        self.communicate_timeouts.append(timeout)
+        if len(self.communicate_timeouts) == 1:
+            raise subprocess.TimeoutExpired("fake-command", timeout, b"first-out", b"first-err")
+        if self.cleanup_incomplete:
+            raise subprocess.TimeoutExpired("fake-command", timeout, b"partial-out", b"partial-err")
+        self.returncode = -9
+        return b"complete-out", b"complete-err"
+
+    def poll(self):
+        return self.returncode
+
+    def kill(self):
+        self.killed = True
+        self.returncode = -9
+
+    def wait(self, timeout):
+        self.wait_timeouts.append(timeout)
+        return self.returncode
+
+
+def test_bounded_cleanup():
+    for incomplete in (False, True):
+        process = MockProcess(incomplete)
+        with mock.patch.object(COLLECTOR_MODULE.subprocess, "Popen", return_value=process), \
+             mock.patch.object(COLLECTOR_MODULE.os, "killpg") as killpg:
+            result = COLLECTOR_MODULE.run_command(
+                ["fake-command"], Path("."), os.environ.copy(), 0.1
+            )
+        killpg.assert_called_once_with(process.pid, COLLECTOR_MODULE.signal.SIGKILL)
+        assert process.communicate_timeouts == [0.1, COLLECTOR_MODULE.CLEANUP_TIMEOUT]
+        assert result["timed_out"]
+        if incomplete:
+            assert result["cleanup_incomplete"]
+            assert result["stdout"] == b"partial-out"
+            assert result["stderr"] == b"partial-err"
+            assert result["cleanup_error"]
+            assert process.killed and process.wait_timeouts == [
+                COLLECTOR_MODULE.DIRECT_CHILD_WAIT_TIMEOUT
+            ]
+            assert process.stdout.closed and process.stderr.closed
+        else:
+            assert not result["cleanup_incomplete"]
+            assert result["stdout"] == b"complete-out"
+            assert result["stderr"] == b"complete-err"
+            assert not process.killed and not process.wait_timeouts
+
+
+def test_phase_markers():
+    output = FlushTrackingStringIO()
+    successful = {"timed_out": False, "cleanup_incomplete": False, "returncode": 0}
+    with contextlib.redirect_stderr(output), mock.patch.object(
+        COLLECTOR_MODULE, "run_command", return_value=successful
+    ):
+        result = COLLECTOR_MODULE.run_phase("sample", [], Path("."), {}, 1)
+    assert result is successful
+    assert output.getvalue().splitlines() == ["phase-start sample", "phase-end sample exit=0"]
+    assert output.flush_count == 2
+
+    output = FlushTrackingStringIO()
+    with contextlib.redirect_stderr(output), mock.patch.object(
+        COLLECTOR_MODULE, "run_command", side_effect=RuntimeError("injected")
+    ):
+        try:
+            COLLECTOR_MODULE.run_phase("failed", [], Path("."), {}, 1)
+        except RuntimeError as error:
+            assert str(error) == "injected"
+        else:
+            raise AssertionError("run_phase swallowed its error")
+    assert output.getvalue().splitlines() == ["phase-start failed", "phase-end failed error"]
+    assert output.flush_count == 2
 
 
 def fake_compiler(path):
@@ -111,6 +221,8 @@ def run_case(base, name, *, extra_env=None, extra_args=None, precreate=False, ex
 
 
 def main():
+    test_bounded_cleanup()
+    test_phase_markers()
     with tempfile.TemporaryDirectory(prefix="unpack-sums-collector-") as temp:
         base = Path(temp)
 

@@ -22,6 +22,8 @@ DEFAULT_PROBE_TIMEOUT = 60
 DEFAULT_COMPILE_TIMEOUT = 180
 DEFAULT_RUN_TIMEOUT = 120
 DEFAULT_TOTAL_TIMEOUT = 900
+CLEANUP_TIMEOUT = 2
+DIRECT_CHILD_WAIT_TIMEOUT = 1
 REPEATS = 5
 TIMING_PREFIX = "GHC_UNPACK_SUMS_TIMINGS "
 TIMING_RE = re.compile(
@@ -50,16 +52,14 @@ def process_group_options():
     return {"start_new_session": True}
 
 
-def stop_owned_process(proc):
+def kill_owned_group(proc):
     try:
         os.killpg(proc.pid, signal.SIGKILL)
     except ProcessLookupError:
-        pass
-    try:
-        proc.wait(timeout=3)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait()
+        return None
+    except OSError as error:
+        return str(error)
+    return None
 
 
 def run_command(argv, cwd, env, timeout):
@@ -73,12 +73,36 @@ def run_command(argv, cwd, env, timeout):
         **process_group_options(),
     )
     timed_out = False
+    cleanup_incomplete = False
+    cleanup_error = None
     try:
         stdout, stderr = proc.communicate(timeout=timeout)
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as first_timeout:
         timed_out = True
-        stop_owned_process(proc)
-        stdout, stderr = proc.communicate()
+        cleanup_error = kill_owned_group(proc)
+        try:
+            stdout, stderr = proc.communicate(timeout=CLEANUP_TIMEOUT)
+        except subprocess.TimeoutExpired as cleanup_timeout:
+            cleanup_incomplete = True
+            stdout = cleanup_timeout.output
+            stderr = cleanup_timeout.stderr
+            if stdout is None:
+                stdout = first_timeout.output or b""
+            if stderr is None:
+                stderr = first_timeout.stderr or b""
+            try:
+                if proc.poll() is None:
+                    proc.kill()
+                    proc.wait(timeout=DIRECT_CHILD_WAIT_TIMEOUT)
+            except (OSError, subprocess.TimeoutExpired) as error:
+                cleanup_error = "; ".join(filter(None, [cleanup_error, str(error)]))
+            finally:
+                for stream in (proc.stdout, proc.stderr):
+                    if stream is not None:
+                        stream.close()
+            cleanup_error = "; ".join(filter(
+                None, [cleanup_error, "pipes remained open after group kill"]
+            ))
     return {
         "argv": [str(arg) for arg in argv],
         "pid": proc.pid,
@@ -89,9 +113,26 @@ def run_command(argv, cwd, env, timeout):
         "elapsed_seconds": time.monotonic() - start,
         "returncode": proc.returncode,
         "timed_out": timed_out,
+        "cleanup_incomplete": cleanup_incomplete,
+        "cleanup_error": cleanup_error,
         "stdout": stdout,
         "stderr": stderr,
     }
+
+
+def run_phase(name, argv, cwd, env, timeout):
+    print(f"phase-start {name}", file=sys.stderr, flush=True)
+    outcome = "error"
+    try:
+        result = run_command(argv, cwd, env, timeout)
+        outcome = (
+            f"timed-out cleanup-incomplete={result['cleanup_incomplete']}"
+            if result["timed_out"]
+            else f"exit={result['returncode']}"
+        )
+        return result
+    finally:
+        print(f"phase-end {name} {outcome}", file=sys.stderr, flush=True)
 
 
 def remaining_timeout(deadline, phase_timeout):
@@ -113,6 +154,10 @@ def record_command(manifest, output_dir, name, result):
     result["stdout_base64"] = base64.b64encode(stdout).decode("ascii")
     result["stderr_base64"] = base64.b64encode(stderr).decode("ascii")
     manifest.setdefault("commands", {})[name] = result
+    if result["cleanup_incomplete"]:
+        manifest["errors"].append(
+            f"{name} cleanup incomplete: {result['cleanup_error']}"
+        )
     write_json(output_dir / "results.json", manifest)
     return result
 
@@ -184,7 +229,7 @@ def collect(args, output_dir, manifest):
     except CollectionError as error:
         manifest["errors"].append(str(error))
         return manifest
-    info = run_command([str(compiler), "--info"], output_dir, child_env, info_timeout)
+    info = run_phase("ghc-info", [str(compiler), "--info"], output_dir, child_env, info_timeout)
     info = record_command(manifest, output_dir, "ghc-info", info)
     manifest["compiler_info"] = info
     write_json(output_dir / "results.json", manifest)
@@ -201,7 +246,7 @@ def collect(args, output_dir, manifest):
     except CollectionError as error:
         manifest["errors"].append(str(error))
         return manifest
-    compile_result = run_command(compile_argv, output_dir, child_env, compile_timeout)
+    compile_result = run_phase("compile", compile_argv, output_dir, child_env, compile_timeout)
     compile_result = record_command(manifest, output_dir, "compile", compile_result)
     if not check_command(compile_result, "compile", manifest):
         return manifest
@@ -219,7 +264,7 @@ def collect(args, output_dir, manifest):
         except CollectionError as error:
             manifest["errors"].append(str(error))
             break
-        result = run_command([str(executable)], output_dir, run_env, timeout)
+        result = run_phase(name, [str(executable)], output_dir, run_env, timeout)
         result = record_command(manifest, output_dir, name, result)
         measurement = {
             "name": name,
