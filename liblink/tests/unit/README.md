@@ -636,11 +636,13 @@ relocation copies. It releases those allocations only after recording the
 observation as fixture-owned harness cleanup. This is not a claim about
 CRT-allocated duplicated symbol names or whole-process leak freedom.
 
-This checkout has no Windows compiler or runner, so the Windows behavior
-remains unqualified until that native command runs. The Windows-only archive
-checks normalize slash direction and case and add `cygpath -m` spelling when
-available, while requiring the selected archive in both link map and trace and
-rejecting duplicate included implementation members.
+The Windows-only archive checks normalize slash direction and case and add
+`cygpath -m` spelling when available, while requiring the selected archive in
+both link map and trace and rejecting duplicate included implementation members.
+Native Windows CI passed the reservation and COMMON ownership units in both
+qualification runs recorded below. The known normal-disposal metadata residue
+remains explicitly counted and released by the harness; these runs do not
+establish general leak freedom.
 
 The Windows CI job runs the focused GHC testsuite after stage2 with
 `bash .github/scripts/run-windows-focused-tests.sh`. It makes nine selections:
@@ -652,8 +654,21 @@ Both focused and top-level CI testsuite invocations use `VERBOSE=3` so run logs
 include named test/way starts and fragile outcome records. JUnit omits expected
 failures and fragile passes, so the raw log, JUnit, and summary together allow
 complete capture validation for baseline comparison.
-These results do not establish baseline parity; that remains unqualified until
-the Windows CI run is reviewed against the baseline.
+The reviewed Windows x86_64 qualification runs are:
+
+- [Path ownership, run 40077036858](https://github.com/stable-haskell/ghc/actions/runs/40077036858),
+  commit `fe5f0785fbae6c6a7955d6b86bfd5a85fdf6ae96`: stage1, stage2,
+  path ownership, M32 reservations, COMMON ownership, and focused T1–T3 passed.
+- [PE resolution and unwind, run 40077134443](https://github.com/stable-haskell/ghc/actions/runs/40077134443),
+  commit `656b4fa6a038a0fa6b2034bb54794ab20ea9ad23`: the same checks plus
+  `pei386_resolution_status` and `pei386_unwind_retention` passed.
+
+Complete named captures contain 1,273 selection executions per run, with
+identical test/way outcomes between these two commits. Selections overlap, so
+this count is not a count of unique tests. No frozen Windows baseline is
+available, and neither run used Windows sanitizers. These results therefore
+establish focused native qualification, without a baseline-parity or general
+leak-freedom claim. Later source changes need their own affected checks.
 
 PE post-symbol resolution
 =========================
@@ -669,9 +684,9 @@ checks the normal write path without a trampoline. These checks inspect data
 and never call generated jump bytes.
 
 The focused `--pe-resolution-only` mode runs both this unit and the unwind
-lifetime unit below. DLL indirection allocation failure, error preservation,
-and post-trampoline range handling require native Windows execution for
-qualification; that compilation and execution are pending.
+lifetime unit below. Native Windows compilation and execution of the DLL
+indirection allocation failure, error preservation, and post-trampoline range
+cases passed in run 40077134443, as recorded above.
 
 PE unwind record lifetime
 =========================
@@ -685,9 +700,9 @@ count, and eager cleanup for objects without a table. The owner ledger must be
 empty after disposal.
 
 Run `python3 liblink/tests/unit/run_native_tests.py --pe-resolution-only --cc clang`
-on configured native Windows x86_64. Native Windows compilation and execution
-are pending. This repair preserves the existing single-table bookkeeping and
-unregister-failure policy; it adds no registration-success tracking.
+on configured native Windows x86_64. Native compilation and execution passed
+in run 40077134443. This repair preserves the existing single-table bookkeeping
+and unregister-failure policy; it adds no registration-success tracking.
 
 Approved ELF resource error coverage
 ====================================
