@@ -222,14 +222,14 @@ static void register_symbol(ll_linker *L, ObjectCode *object, Symbol_t *symbol)
           "could not register modeled object symbol");
 }
 
-#if defined(OBJFORMAT_ELF)
+#if defined(OBJFORMAT_ELF) || defined(OBJFORMAT_PEi386)
 static unsigned disposal_init_calls;
 static unsigned disposal_fini_calls;
 
 static void disposal_init(int argc, char **argv, char **envp)
 {
     CHECK(argc == 0 && argv == NULL && envp == NULL,
-          "ELF disposal initializer arguments differ");
+          "native disposal initializer arguments differ");
     ++disposal_init_calls;
 }
 
@@ -239,19 +239,19 @@ static void disposal_fini(void)
 }
 
 /* Use normal physical disposal, not ll_discard_object or manual list cleanup.
- * The native archive supplies the real ELF deinitializer and finalizer path.
+ * The native archive supplies the real native deinitializer and finalizer path.
  * Synthetic resolved objects isolate metadata ownership from file parsing. */
-static void check_elf_disposal(ll_linker *owner)
+static void check_native_disposal(ll_linker *owner)
 {
     for (unsigned mode = 0; mode < 3; ++mode) {
         const size_t before = host_a.live;
         const unsigned init_before = disposal_init_calls;
         const unsigned fini_before = disposal_fini_calls;
-        ObjectCode *object = mkOc(owner, STATIC_OBJECT, WSTR("elf-init-disposal.o"),
+        ObjectCode *object = mkOc(owner, STATIC_OBJECT, WSTR("init-disposal.o"),
                                   NULL, 0, false, NULL, 0);
         object->status = OBJECT_RESOLVED;
         object->info = LL_CALLOC_FOR(owner, 1, sizeof(*object->info),
-                                     "ELF initializer disposal metadata");
+                                     "native initializer disposal metadata");
         init_t entries[2] = {disposal_init, mode == 0 ? NULL : disposal_init};
         fini_t finalizer = disposal_fini;
         Section init_section = {0};
@@ -267,31 +267,31 @@ static void check_elf_disposal(ll_linker *owner)
         ll_error_clear(owner);
         if (mode != 2) {
             const bool ok = runInit(owner, &object->info->init);
-            CHECK(ok == (mode == 1), "ELF disposal initializer result differs");
+            CHECK(ok == (mode == 1), "native disposal initializer result differs");
             object->initializersRan = ok;
             object->resolution_failed = !ok;
             if (ok) {
                 object->status = OBJECT_READY;
                 CHECK(object->info->init == NULL,
-                      "successful ELF initialization retained its list");
+                      "successful native initialization retained its list");
             } else {
                 CHECK(owner->error_status == LL_E_INIT && object->info->init != NULL,
-                      "failed ELF initialization lost its error or pending list");
+                      "failed native initialization lost its error or pending list");
             }
         }
         CHECK(disposal_init_calls == init_before + (mode == 0 ? 1 : mode == 1 ? 2 : 0),
-              "ELF disposal initializer prefix differs");
+              "native disposal initializer prefix differs");
         freeObjectCode(object);
         CHECK(disposal_fini_calls == fini_before + (mode == 1 ? 1 : 0),
-              "ELF disposal ran finalizers without completed initialization");
+              "native disposal ran finalizers without completed initialization");
         CHECK(host_a.live == before,
-              "normal ELF disposal leaked retained initializer/finalizer metadata");
+              "normal native disposal leaked retained initializer/finalizer metadata");
         if (mode == 0)
             CHECK(owner->error_status == LL_E_INIT,
-                  "normal ELF disposal lost the original initializer error");
+                  "normal native disposal lost the original initializer error");
     }
     ll_error_clear(owner);
-    (void)puts("init_array_policy: ELF physical disposal controls complete");
+    (void)puts("init_array_policy: native physical disposal controls complete");
 }
 #endif
 
@@ -307,8 +307,8 @@ int main(void)
     ll_install_host_for(&owner, &ops, NULL);
     ll_init_linker(&owner, 0);
     ll_mutex_lock_for(&owner, &owner.linker_mutex);
-#if defined(OBJFORMAT_ELF)
-    check_elf_disposal(&owner);
+#if defined(OBJFORMAT_ELF) || defined(OBJFORMAT_PEi386)
+    check_native_disposal(&owner);
 #endif
     ObjectCode objects[5] = {{0}, {0}, {0}, {0}, {0}};
     pathchar *paths[5] = {WSTR("failed-init.o"), WSTR("init-child.o"),

@@ -876,11 +876,11 @@ and its transitive dependents. It checks rejection of repeated initialization,
 cached lookup and global resolve, and continued use of an independent object.
 It exercises logical unload through `unloadObj_` and initialization of a fresh
 same-name modeled object. Stack objects model already-resolved objects; this
-part does not parse or reload a file. On ELF, a separate heap-owned object
+part does not parse or reload a file. On ELF and PE, a separate heap-owned object
 control calls normal `freeObjectCode` after a partial initializer failure and
 requires all retained init/fini metadata to be freed without calling finalizers.
 Successful initialization and never-started controls verify the finalizer gate
-and cleanup. The archive supplies the real ELF teardown. These synthetic
+and cleanup. The archive supplies the real native format teardown. These synthetic
 objects do not exercise GC reachability or file parsing; ordinary file loading
 and unload behavior also require native GHC T1–T3 qualification.
 Earlier constructor side effects cannot be rolled back. The failure policy
@@ -892,7 +892,7 @@ on a configured native Linux, Darwin, or Windows build. Default native Linux
 and Darwin unit runs also include these cases. The driver requires the selected
 native archive and rejects included implementation members pulled from it.
 Windows uses the real installed rts-fs archive before its system libraries.
-Native Linux execution is required for the ELF disposal controls. Windows
+Native Linux and Windows execution are required for their disposal controls. Windows
 execution and integrated GHC T1–T3 qualification remain required.
 
 POSIX native-load failure cleanup

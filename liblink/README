@@ -68,7 +68,9 @@ and its transitive dependents under the policy above. The lookup that triggered
 initialization returns NULL. Earlier constructor side effects remain; repeated
 lookup or resolve cannot replay the executed prefix. Unload all affected objects
 before reloading them. Pending initializer and finalizer metadata stays owned
-until disposal, and finalizers run only after successful initialization.
+until disposal, and finalizers run only after successful initialization. ELF and
+PE physical disposal release retained initializer and finalizer lists even when
+initialization failed or never started.
 
 Native load failure cleanup
 ----------------------------

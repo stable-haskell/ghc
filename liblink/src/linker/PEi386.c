@@ -682,6 +682,12 @@ void freePreloadObjectFile_PEi386(ObjectCode *oc)
             oc->info->pdata = NULL;
         }
 
+        /* Failed or never-started initialization still owns pending lists.
+         * Successful init/fini execution has already cleared its list. */
+        freeInitFiniList(oc->L, oc->info->init);
+        freeInitFiniList(oc->L, oc->info->fini);
+        oc->info->init = NULL;
+        oc->info->fini = NULL;
         if (oc->info->ch_info) {
            LL_FREE_FOR(oc->L, oc->info->ch_info);
         }
