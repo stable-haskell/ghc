@@ -1,5 +1,7 @@
 #define _GNU_SOURCE 1
 #define LL_INTERNAL_SOURCE 1
+/* Define COMPAT_R_* before LinkerInternals.h reaches the system <elf.h>. */
+#include "linker/elf_compat.h"
 #include "LinkerInternals.h"
 
 #if !defined(linux_HOST_OS) || !defined(x86_64_HOST_ARCH) \
