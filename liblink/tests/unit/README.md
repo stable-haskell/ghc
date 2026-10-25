@@ -725,8 +725,8 @@ PE COMMON size conflicts
 real Windows loader, resolver, dependency tracking, and object disposal.
 For short, exactly eight-character inline, and string-table symbol names,
 equal and smaller declarations reuse a resolved 64-byte COMMON provider.
-Six larger declarations must return `LL_E_DUPSYM` with the existing precise
-diagnostic, without calling the fatal callback. The provider's address, size,
+Six larger declarations in each allocation mode must return `LL_E_DUPSYM`
+with the existing precise diagnostic, without calling the fatal callback. The provider's address, size,
 bytes, registration, and usable state must remain unchanged. Half of those
 failures follow publication of an independent prefix COMMON symbol; cleanup
 must remove that symbol while retaining the provider. Each rejected load
@@ -752,13 +752,24 @@ default-linker-isolation assertion failed. Both sets of nine focused GHC
 captures passed, with the same 1,274 named selection outcomes as the previous
 successful `9eeb993` Windows run.
 
-Source review confirms that M32 can return uncleared storage and the global
-COMMON allocation path does not clear its new range. The original GHC paths
-have the same omission. The failure logs did not record the exact origin of
-the nonzero bytes. A separate zero-initialization repair and deterministic
-tests await approval. The initial-zero assertions remain intact, and this
-unit remains unqualified until that correction passes native Windows CI.
-An uncorrected size-conflict baseline run has not been performed.
+Source review confirms that M32 can return uncleared storage and the original
+GHC PE and M32 paths have the same omission. The earlier failure logs did
+not record the exact origin of each nonzero byte.
+
+The separate zero-initialization repair clears only newly allocated global
+COMMON storage after a successful M32 allocation and before publication.
+M32 recycles pages without clearing their payload. Existing provider symbols
+are excluded from this allocation, so their sentinel bytes must survive.
+The unit retains every original assertion and runs both the native allocator
+and a deterministic nonzero-storage control. The latter calls the real M32
+allocator, patterns only the fixture's new COMMON requests, and checks the
+intercepted count, size, and provider address. Entire new providers and prefix
+COMMON ranges must be zero, while compatible aliases must allocate no
+replacement COMMON storage. The six providers cover all three name forms in
+each mode; twelve conflicts and twelve same-path retries retain the rollback
+and provider-preservation controls. Native diagnostics record pre-clear bytes
+and whether a provider address was reused; the original failure log did not
+record those details. Windows qualification of this follow-up is pending.
 
 PE load-resource failure cleanup
 =================================
