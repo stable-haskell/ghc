@@ -2283,17 +2283,17 @@ ocResolve_PEi386 ( ObjectCode* oc )
 
          if (getSymStorageClass(oc->L, info, sym) == IMAGE_SYM_CLASS_STATIC) {
             uint32_t sect_n = getSymSectionNumber(oc->L, info, sym);
-            switch (sect_n) {
-                case PE_SECTION_UNDEFINED:
-                case PE_SECTION_ABSOLUTE:
-                case PE_SECTION_DEBUG:
-                    LL_LOG_ERROR_FOR(oc->L, " | %" PATH_FMT ": symbol `%s' has invalid section number %02x",
-                               oc->fileName, symbol, sect_n);
-                    return false;
-                default:
-                    break;
+            if (sect_n == PE_SECTION_UNDEFINED ||
+                sect_n == PE_SECTION_ABSOLUTE ||
+                sect_n == PE_SECTION_DEBUG ||
+                sect_n >= (uint32_t)oc->n_sections) {
+                ll_error_set(oc->L, LL_E_FORMAT,
+                    "%" PATH_FMT ": static relocation symbol %" PRIu64
+                    " has invalid section 0x%08" PRIx32,
+                    oc->fileName, symIndex, sect_n);
+                releaseOcInfo(oc);
+                return false;
             }
-            LL_CHECK_FOR(oc->L, sect_n < (uint32_t) oc->n_sections);
             Section section = oc->sections[sect_n - 1];
             S = ((size_t)(section.start))
               + ((size_t)(getSymValue(oc->L, info, sym)));
@@ -2324,7 +2324,13 @@ ocResolve_PEi386 ( ObjectCode* oc )
            case 11: /* IMAGE_REL_AMD64_SECREL (PE constant 11) */
               {
                   uint64_t offset = S - (uint64_t) section.start;
-                  LL_CHECK_FOR(oc->L, (uint32_t) offset == offset);
+                  if ((uint32_t)offset != offset) {
+                      ll_error_set(oc->L, LL_E_RELOC_RANGE,
+                          "IMAGE_REL_AMD64_SECREL: offset 0x%" PRIx64
+                          " does not fit in 32 bits", offset);
+                      releaseOcInfo(oc);
+                      return false;
+                  }
                    *(uint32_t *)pP = offset + A;
                   break;
               }
@@ -2410,15 +2416,17 @@ ocResolve_PEi386 ( ObjectCode* oc )
                     uint64_t v;
                     v = S + A;
 
-                    LL_DEBUG_FOR(oc->L, "%" PATH_FMT ": Catch ARM64 PEi386 relocation type %d, %llx\n",
-                        oc->fileName, reloc->Type, v);
+                    ll_error_set(oc->L, LL_E_UNSUPPORTED,
+                        "%" PATH_FMT ": unsupported ARM64 PE relocation %u (0x%" PRIx64 ")",
+                        oc->fileName, (unsigned)reloc->Type, v);
                     releaseOcInfo (oc);
                     return false;
                }
 #endif
             default:
-               LL_DEBUG_FOR(oc->L, "%" PATH_FMT ": unhandled PEi386 relocation type %d\n",
-                     oc->fileName, reloc->Type);
+               ll_error_set(oc->L, LL_E_UNSUPPORTED,
+                   "%" PATH_FMT ": unhandled PE relocation type %u",
+                   oc->fileName, (unsigned)reloc->Type);
                releaseOcInfo (oc);
                return false;
          }
@@ -2437,10 +2445,12 @@ ocResolve_PEi386 ( ObjectCode* oc )
           /* Now register the exception handler for the range and point it
              to the unwind data.  */
           if (!RtlAddFunctionTable (section.start, numEntries, (uintptr_t) GetModuleHandleW(NULL))) {
-            LL_LOG_SYSERROR_FOR(oc->L, "Unable to register Exception handler for %p for "
-                          "section %s in %" PATH_FMT " (Win32 error %lu)",
-                          section.start, section.info->name, oc->fileName,
-                          GetLastError());
+            const DWORD win_error = GetLastError();
+            ll_error_set(oc->L, LL_E_IO,
+                         "Unable to register Exception handler for %p for "
+                         "section %s in %" PATH_FMT " (Win32 error %lu)",
+                         section.start, section.info->name, oc->fileName,
+                         (unsigned long)win_error);
             releaseOcInfo (oc);
             return false;
           }
