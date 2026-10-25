@@ -684,21 +684,37 @@ checks the normal write path without a trampoline. These checks inspect data
 and never call generated jump bytes.
 
 The focused `--pe-resolution-only` mode runs this unit, the unwind lifetime
-unit below, and the terminal classification unit. Native Windows compilation
-and execution of the DLL
+unit below, and the terminal classification/quarantine units. Native Windows
+compilation and execution of the DLL
 indirection allocation failure, error preservation, and post-trampoline range
 cases passed in run 40077134443, as recorded above.
 
 PE terminal classification controls
 ==================================
 
-`pei386_resolver_classification.c` covers the reserved static section indices
-and the existing upper boundary, SECREL success at `UINT32_MAX` and failure
-at `UINT32_MAX + 1`, unsupported relocations, failed exception registration,
-unchanged failed slots, owner isolation, and a valid REL32 control. It uses
-the existing native Windows fixture and source-local API interception.
-Native Windows compilation/execution remains pending. The ARM64-specific
-unsupported-relocation branch is outside this x86_64 fixture's scope.
+`pei386_resolver_classification.c` retains the direct backend checks for
+reserved static section indices and the existing upper boundary, SECREL
+success at `UINT32_MAX` and failure at `UINT32_MAX + 1`, unsupported
+relocations, failed exception registration, unchanged failed slots, and valid
+REL32.
+`pei386_resolver_quarantine.c` drives the actual core `ocTryLoad` wrapper
+with unsupported-relocation and exception-registration failures. It requires
+the first specific status and diagnostic, then `LL_E_STATE` on a later call,
+exactly one backend dispatch, owner isolation, and normal `freeObjectCode`
+disposal returning the failure cases' host allocation ledger to its baseline.
+A resolved REL32 object remains usable without another backend dispatch. The
+healthy control explicitly releases its fixture-owned relocation array after
+those assertions: the existing successful PE disposal path leaves copied
+relocation arrays behind. Its ledger still must return to baseline after
+fixture cleanup and normal disposal; this does not claim general successful
+PE metadata leak freedom.
+
+The retry control counts an erroneous backend dispatch without entering
+already released metadata. An uncorrected baseline that remains retryable
+fails its quarantine assertion without attempting that retry. These are
+native Windows x86_64 draft controls: compilation, execution, and their
+baseline failure behavior remain unverified. They do not qualify the ARM64
+unsupported-relocation branch or the held pre-symbol table-validation work.
 
 PE load-resource failure cleanup
 =================================

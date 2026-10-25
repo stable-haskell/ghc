@@ -71,7 +71,13 @@ static unsigned failures;
 #ifdef PEI386_TEST_M32_ALLOC
 #undef m32_alloc_for
 #endif
+#ifdef PEI386_TEST_RESOLVE
+#define ocResolve_PEi386 PEI386_TEST_RESOLVE
+#endif
 #include "Linker.c"
+#ifdef PEI386_TEST_RESOLVE
+#undef ocResolve_PEi386
+#endif
 #include "linker/M32Alloc.c"
 #include "linker/M32Reservations.c"
 #include "linker/MMap.c"
