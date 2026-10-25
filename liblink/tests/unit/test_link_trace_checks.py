@@ -495,5 +495,46 @@ class NativeRtsFsLinkArgumentsTests(unittest.TestCase):
                 self.assertEqual(labels, ["linker trace parser tests"])
 
 
+class InitializerFailureDiagnosticsTests(unittest.TestCase):
+    def test_success_does_not_start_a_debugger(self) -> None:
+        with (mock.patch.object(driver, "run") as run,
+              mock.patch.object(driver.shutil, "which") as which):
+            driver.run_initializer_binary(Path("unit.exe"), "Windows", label="unit")
+        run.assert_called_once_with(["unit.exe"], label="unit")
+        which.assert_not_called()
+
+    def test_debugger_result_cannot_replace_the_original_failure(self) -> None:
+        for diagnostic in (
+            "completed", RuntimeError("debugger failed"),
+            OSError("debugger could not start"),
+            UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid diagnostic output"),
+        ):
+            with self.subTest(diagnostic=diagnostic):
+                original = RuntimeError("unit failed")
+                with (mock.patch.object(driver, "run",
+                                        side_effect=[original, diagnostic]) as run,
+                      mock.patch.object(driver.shutil, "which", return_value="gdb"),
+                      self.assertRaises(RuntimeError) as caught):
+                    driver.run_initializer_binary(Path("unit.exe"), "Windows",
+                                                  label="unit")
+                self.assertIs(caught.exception, original)
+                self.assertEqual(run.call_count, 2)
+                command = run.call_args_list[1].args[0]
+                self.assertEqual(command[-2:], ["--args", "unit.exe"])
+                self.assertIn("-nx", command)
+                self.assertIn("thread apply all bt full", command)
+
+    def test_no_debugger_and_posix_preserve_the_original_failure(self) -> None:
+        for host in ("Windows", "Linux", "Darwin"):
+            with self.subTest(host=host):
+                original = RuntimeError("unit failed")
+                with (mock.patch.object(driver, "run", side_effect=original) as run,
+                      mock.patch.object(driver.shutil, "which", return_value=None),
+                      self.assertRaises(RuntimeError) as caught):
+                    driver.run_initializer_binary(Path("unit"), host, label="unit")
+                self.assertIs(caught.exception, original)
+                run.assert_called_once_with(["unit"], label="unit")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

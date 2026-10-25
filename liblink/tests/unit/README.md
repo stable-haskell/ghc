@@ -895,6 +895,22 @@ Windows uses the real installed rts-fs archive before its system libraries.
 Native Linux and Windows execution are required for their disposal controls. Windows
 execution and integrated GHC T1–T3 qualification remain required.
 
+The fixture installs and checks a real OS page-size service. Windows M32
+shutdown queries that service even when its free-page pool is empty.
+The Windows fixture explicitly frees its process-DLL bookkeeping after
+`ll_exit_linker`, matching the existing PE ownership fixture. Its final
+allocation assertion remains zero. This auxiliary cleanup does not unregister
+DLLs or change library teardown.
+
+Set `LIBLINK_INIT_POLICY_TRACE=1` for flushed stderr phase markers around
+initialization, physical disposal, lookup, unload, and fixture teardown.
+Windows CI enables these markers and compiles the initializer fixtures with
+debug information. If an initializer binary fails and GDB is available, the
+driver reruns that binary under GDB for a stack trace before temporary files
+are removed. The first failure remains the result even if the diagnostic run
+succeeds or the debugger fails. Independent Windows checks continue after a
+unit failure, and every failed step still fails the job.
+
 POSIX native-load failure cleanup
 ================================
 

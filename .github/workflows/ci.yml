@@ -342,7 +342,7 @@ jobs:
 
     - name: Install MSYS2 CLANG64 dependencies
       run: |
-        pacman --noconfirm -S --needed --overwrite '*' git vim winpty git tar bsdtar unzip binutils autoconf make xz curl libtool automake p7zip patch ca-certificates python3 zip mingw-w64-clang-x86_64-toolchain mingw-w64-clang-x86_64-python-sphinx mingw-w64-clang-x86_64-python-requests mingw-w64-clang-x86_64-tools-git mingw-w64-clang-x86_64-ghostscript tar gzip
+        pacman --noconfirm -S --needed --overwrite '*' git vim winpty git tar bsdtar unzip binutils autoconf make xz curl libtool automake p7zip patch ca-certificates python3 zip mingw-w64-clang-x86_64-toolchain mingw-w64-clang-x86_64-gdb mingw-w64-clang-x86_64-python-sphinx mingw-w64-clang-x86_64-python-requests mingw-w64-clang-x86_64-tools-git mingw-w64-clang-x86_64-ghostscript tar gzip
 
     - name: Install GHCup
       uses: haskell/ghcup-setup@v1
@@ -363,6 +363,7 @@ jobs:
         make QUIET=1 DYNAMIC=0 CABAL_ARGS="-j2" stage1 2>&1 | tee _build/logs/windows-stage1.log
 
     - name: Build stage2
+      id: windows_stage2_build
       timeout-minutes: 120
       run: |
         set -eo pipefail
@@ -371,19 +372,22 @@ jobs:
         make QUIET=1 DYNAMIC=0 CABAL_ARGS="-j2" USE_SYSTEM_CABAL=1 stage2 2>&1 | tee _build/logs/windows-stage2.log
 
     - name: Run Windows foundation-only C unit
+      if: ${{ !cancelled() && steps.windows_stage2_build.outcome == 'success' }}
       run: |
         set -eo pipefail
         export PATH="/c/ghcup/bin:$PATH"
         python3 liblink/tests/unit/run_native_tests.py --foundation-only --cc clang 2>&1 | tee _build/logs/windows-liblink-foundation.log
 
     - name: Run Windows initializer error C units
+      if: ${{ !cancelled() && steps.windows_stage2_build.outcome == 'success' }}
       timeout-minutes: 5
       run: |
         set -eo pipefail
         export PATH="/c/ghcup/bin:$PATH"
-        python3 liblink/tests/unit/run_native_tests.py --initializer-errors-only --cc clang 2>&1 | tee _build/logs/windows-liblink-initializer-errors.log
+        LIBLINK_INIT_POLICY_TRACE=1 python3 liblink/tests/unit/run_native_tests.py --initializer-errors-only --cc 'clang -O0 -g' 2>&1 | tee _build/logs/windows-liblink-initializer-errors.log
 
     - name: Run Windows PE resolution C units
+      if: ${{ !cancelled() && steps.windows_stage2_build.outcome == 'success' }}
       timeout-minutes: 5
       run: |
         set -eo pipefail
@@ -391,6 +395,7 @@ jobs:
         python3 liblink/tests/unit/run_native_tests.py --pe-resolution-only --cc clang 2>&1 | tee _build/logs/windows-liblink-pe-resolution.log
 
     - name: Run Windows PE load-resource C unit
+      if: ${{ !cancelled() && steps.windows_stage2_build.outcome == 'success' }}
       timeout-minutes: 5
       run: |
         set -eo pipefail
@@ -398,6 +403,7 @@ jobs:
         python3 liblink/tests/unit/run_native_tests.py --pe-load-resources-only --cc clang 2>&1 | tee _build/logs/windows-liblink-pe-load-resources.log
 
     - name: Run Windows path ownership C unit
+      if: ${{ !cancelled() && steps.windows_stage2_build.outcome == 'success' }}
       timeout-minutes: 5
       run: |
         set -eo pipefail
@@ -405,6 +411,7 @@ jobs:
         python3 liblink/tests/unit/run_native_tests.py --path-ownership-only --cc clang 2>&1 | tee _build/logs/windows-liblink-path-ownership.log
 
     - name: Run Windows M32 reservation C unit
+      if: ${{ !cancelled() && steps.windows_stage2_build.outcome == 'success' }}
       timeout-minutes: 5
       run: |
         set -eo pipefail
@@ -412,6 +419,7 @@ jobs:
         python3 liblink/tests/unit/run_native_tests.py --windows-m32-only --cc clang 2>&1 | tee _build/logs/windows-liblink-m32.log
 
     - name: Run Windows focused linker testsuite
+      if: ${{ !cancelled() && steps.windows_stage2_build.outcome == 'success' }}
       timeout-minutes: 180
       run: |
         set -eo pipefail

@@ -836,6 +836,27 @@ def run_pathdup_ownership(cc: list[str], archive: Path, output: Path,
         raise RuntimeError(f"link map did not select ll_path from {archive}")
     run([str(binary)], label="run pathdup_ownership")
 
+def run_initializer_binary(binary: Path, host: str, *, label: str) -> None:
+    try:
+        run([str(binary)], label=label)
+    except RuntimeError:
+        debugger = shutil.which("gdb") if host == "Windows" else None
+        if debugger is not None:
+            # Diagnose a fresh process while its executable still exists.
+            # The first failure remains authoritative, even if this run passes.
+            try:
+                run(
+                    [debugger, "-nx", "-q", "-batch", "-return-child-result",
+                     "-ex", "set pagination off", "-ex", "run",
+                     "-ex", "thread apply all bt full", "--args", str(binary)],
+                    label=f"diagnose {label}",
+                )
+            except (RuntimeError, OSError, UnicodeError) as error:
+                print(f"[{label}] debugger result: {error}", file=sys.stderr,
+                      flush=True)
+        raise
+
+
 def run_initializer_errors(cc: list[str], archive: Path, output: Path,
                            link_flags: list[str], host: str) -> None:
     units = (
@@ -859,7 +880,7 @@ def run_initializer_errors(cc: list[str], archive: Path, output: Path,
                 included_source=f"{unit}.c included implementations",
                 forbidden_member=member, windows_paths=host == "Windows",
             )
-        run([str(binary)], label=f"run {unit}")
+        run_initializer_binary(binary, host, label=f"run {unit}")
 
 
 def run_native_load_errors(cc: list[str], archive: Path, output: Path,

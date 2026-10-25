@@ -27,6 +27,11 @@ int initializer_policy_backend(ObjectCode *object);
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#if defined(OBJFORMAT_PEi386)
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
 
 typedef struct {
     void *owned[256];
@@ -45,6 +50,16 @@ static unsigned failures;
         ++failures; \
     } \
 } while (0)
+
+static void trace_phase(const char *phase, unsigned detail)
+{
+    const char *enabled = getenv("LIBLINK_INIT_POLICY_TRACE");
+    if (enabled != NULL && strcmp(enabled, "1") == 0) {
+        (void)fprintf(stderr, "init_array_policy phase=%s detail=%u\n",
+                      phase, detail);
+        (void)fflush(stderr);
+    }
+}
 
 static void remember(Host *host, void *pointer)
 {
@@ -117,6 +132,20 @@ static _Noreturn void host_fatal(void *ctx, const char *format, va_list args)
     _Exit(98);
 }
 
+static size_t host_page_size(void *ctx)
+{
+    CHECK(ctx == &host_a || ctx == &host_default,
+          "page-size callback used an unknown owner");
+#if defined(OBJFORMAT_PEi386)
+    SYSTEM_INFO info = {0};
+    GetSystemInfo(&info);
+    return (size_t)info.dwPageSize;
+#else
+    const long size = sysconf(_SC_PAGESIZE);
+    return size > 0 ? (size_t)size : 0;
+#endif
+}
+
 static ll_compat_host_ops make_ops(Host *host)
 {
     ll_compat_host_ops ops = {0};
@@ -127,6 +156,7 @@ static ll_compat_host_ops make_ops(Host *host)
     ops.free_ = host_free;
     ops.log = host_log;
     ops.fatal = host_fatal;
+    ops.page_size = host_page_size;
     return ops;
 }
 
@@ -244,6 +274,7 @@ static void disposal_fini(void)
 static void check_native_disposal(ll_linker *owner)
 {
     for (unsigned mode = 0; mode < 3; ++mode) {
+        trace_phase("disposal.begin", mode);
         const size_t before = host_a.live;
         const unsigned init_before = disposal_init_calls;
         const unsigned fini_before = disposal_fini_calls;
@@ -266,7 +297,9 @@ static void check_native_disposal(ll_linker *owner)
                     INITFINI_FINI, 10);
         ll_error_clear(owner);
         if (mode != 2) {
+            trace_phase("disposal.init.before", mode);
             const bool ok = runInit(owner, &object->info->init);
+            trace_phase("disposal.init.after", mode);
             CHECK(ok == (mode == 1), "native disposal initializer result differs");
             object->initializersRan = ok;
             object->resolution_failed = !ok;
@@ -281,7 +314,9 @@ static void check_native_disposal(ll_linker *owner)
         }
         CHECK(disposal_init_calls == init_before + (mode == 0 ? 1 : mode == 1 ? 2 : 0),
               "native disposal initializer prefix differs");
+        trace_phase("disposal.free.before", mode);
         freeObjectCode(object);
+        trace_phase("disposal.free.after", mode);
         CHECK(disposal_fini_calls == fini_before + (mode == 1 ? 1 : 0),
               "native disposal ran finalizers without completed initialization");
         CHECK(host_a.live == before,
@@ -295,6 +330,22 @@ static void check_native_disposal(ll_linker *owner)
 }
 #endif
 
+#if defined(OBJFORMAT_PEi386)
+/* Match the auxiliary fixture teardown in pei386_common_ownership.c.
+ * ll_exit_linker leaves process-DLL bookkeeping allocations intact. */
+static void release_pe_fixture_state(ll_linker *owner)
+{
+    freeHashTable(owner->loaded_dll_cache.hash, NULL);
+    owner->loaded_dll_cache.hash = NULL;
+    while (owner->opened_dlls != NULL) {
+        OpenedDLL *opened = owner->opened_dlls;
+        owner->opened_dlls = opened->next;
+        LL_FREE_FOR(owner, opened->name);
+        LL_FREE_FOR(owner, opened);
+    }
+}
+#endif
+
 int main(void)
 {
     ll_linker owner = {0};
@@ -305,7 +356,14 @@ int main(void)
     ll_install_host_for(&ll_default_linker, &defaults, NULL);
     ll_error_set(&ll_default_linker, LL_E_NOT_FOUND, "default init policy sentinel");
     ll_install_host_for(&owner, &ops, NULL);
+    CHECK(owner.services.host.page_size != NULL,
+          "fixture omitted the native page-size service");
+    if (owner.services.host.page_size != NULL)
+        CHECK(owner.services.host.page_size(owner.services.host.ctx) > 0,
+              "fixture page-size service returned zero");
+    trace_phase("linker.init.before", 0);
     ll_init_linker(&owner, 0);
+    trace_phase("linker.init.after", 0);
     ll_mutex_lock_for(&owner, &owner.linker_mutex);
 #if defined(OBJFORMAT_ELF) || defined(OBJFORMAT_PEi386)
     check_native_disposal(&owner);
@@ -343,9 +401,11 @@ int main(void)
     prepare_case(&cases[2], &objects[4], false);
     struct ll_failure_scope scope;
     ll_failure_begin(&owner, &scope, NULL);
+    trace_phase("policy.failed_lookup.before", 0);
     CHECK(lookupSymbol_(&owner, (ll_symbol_name *)"_failed_init_symbol") == NULL &&
               owner.error_status == LL_E_INIT,
           "first initialization-triggering lookup exposed an address or lost INIT");
+    trace_phase("policy.failed_lookup.after", 0);
     char first_error[LL_ERROR_CAPACITY];
     memcpy(first_error, owner.error_message, sizeof(first_error));
     ll_failure_end(&owner, &scope);
@@ -370,8 +430,10 @@ int main(void)
     CHECK(lookupSymbol_(&owner, (ll_symbol_name *)"_failed_init_symbol") == NULL &&
               owner.error_status == LL_E_STATE,
           "quarantined cached symbol remained visible");
+    trace_phase("policy.healthy_lookup.before", 0);
     CHECK(lookupSymbol_(&owner, (ll_symbol_name *)"_healthy_init_symbol") == &values[1],
           "independent resolved symbol became unusable");
+    trace_phase("policy.healthy_lookup.after", 0);
     CHECK(resolveObjs_(&owner) == 0 && owner.error_status == LL_E_STATE,
           "global resolve accepted an active initialization quarantine");
     ll_error_clear(&owner);
@@ -379,9 +441,12 @@ int main(void)
               objects[3].initializersRan && cases[1].prefix == 1 &&
               cases[1].tail == 1 && cases[1].last_ok,
           "independent healthy initialization did not succeed");
-    for (size_t i = 0; i < 3; ++i)
+    for (size_t i = 0; i < 3; ++i) {
+        trace_phase("policy.unload.before", (unsigned)i);
         CHECK(unloadObj_(&owner, paths[i], false) != 0,
               "logical unload rejected an affected object");
+        trace_phase("policy.unload.after", (unsigned)i);
+    }
     CHECK(resolveObjs_(&owner) != 0,
           "global resolve remained blocked after all affected objects unloaded");
     objects[4].next = owner.gc.objects;
@@ -406,7 +471,14 @@ int main(void)
     owner.gc.loaded_objects = NULL;
     owner.gc.n_unloaded_objects = 0;
     ll_mutex_unlock_for(&owner, &owner.linker_mutex);
+    trace_phase("linker.exit.before", 0);
     ll_exit_linker(&owner);
+    trace_phase("linker.exit.after", 0);
+#if defined(OBJFORMAT_PEi386)
+    trace_phase("fixture.pe_cleanup.before", 0);
+    release_pe_fixture_state(&owner);
+    trace_phase("fixture.pe_cleanup.after", 0);
+#endif
     CHECK(host_a.live == 0 && host_a.fatal_calls == 0,
           "policy fixture leaked owner storage or used fatal callback");
     CHECK(host_default.live == 0 && host_default.fatal_calls == 0 &&
