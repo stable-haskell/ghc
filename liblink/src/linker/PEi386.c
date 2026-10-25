@@ -1240,8 +1240,11 @@ copyName ( uint8_t* name, ObjectCode* oc, uint8_t* dst, int dstSize )
 }
 
 
-char*
-get_sym_name ( ll_linker *L, uint8_t* name, ObjectCode* oc )
+/* A caller-owned buffer avoids a temporary allocation for eight-byte
+ * inline names. Other names remain borrowed from the object's metadata. */
+static char*
+get_sym_name_with_buffer ( ll_linker *L, uint8_t* name, ObjectCode* oc,
+                          char *short_name )
 {
    char* newstr;
    /* If the string is longer than 8 bytes, look in the
@@ -1255,14 +1258,22 @@ get_sym_name ( ll_linker *L, uint8_t* name, ObjectCode* oc )
       which by defn is correctly terminated.
    */
    if (name[7]==0) return (char*)name;
-   /* The annoying case: 8 bytes.  Copy into a temporary
-      (XXX which is never freed ...)
-   */
-   newstr = LL_MALLOC_FOR(L, 9, "get_sym_name");
-   LL_ASSERT_FOR(L, newstr);
-   strncpy (newstr, (char*)name,8);
+   /* Exactly eight inline bytes have no terminator. Existing callers
+    * retain their allocation behavior when no buffer is supplied. */
+   newstr = short_name;
+   if (newstr == NULL) {
+       newstr = LL_MALLOC_FOR(L, 9, "get_sym_name");
+       LL_ASSERT_FOR(L, newstr);
+   }
+   memcpy (newstr, name, 8);
    newstr[8] = 0;
    return newstr;
+}
+
+char*
+get_sym_name ( ll_linker *L, uint8_t* name, ObjectCode* oc )
+{
+   return get_sym_name_with_buffer(L, name, oc, NULL);
 }
 
 /* Getting the name of a section is mildly tricky, so we make a
@@ -1853,7 +1864,9 @@ ocGetNames_PEi386 ( ObjectCode* oc )
            && getSymStorageClass(oc->L, info, sym) != IMAGE_SYM_CLASS_SECTION) {
            /* Only count COMMON symbols not already defined by a
             * previously-loaded object; we will reuse their allocation. */
-           ll_symbol_name *nm = get_sym_name (oc->L, getSymShortName(oc->L, info, sym), oc);
+           char short_name[9];
+           ll_symbol_name *nm = get_sym_name_with_buffer(
+               oc->L, getSymShortName(oc->L, info, sym), oc, short_name);
            if (!lookupStrHashTable(oc->L->symhash, nm)) {
                globalBssSize += getSymValue(oc->L, info, sym);
            }
@@ -1896,9 +1909,11 @@ ocGetNames_PEi386 ( ObjectCode* oc )
       bool isWeak = false;
       bool common_already_defined = false;
       unsigned long symSize = 0;
-      ll_symbol_name *sname = get_sym_name (oc->L, getSymShortName(oc->L, info, sym), oc);
-
       uint32_t secNumber = getSymSectionNumber(oc->L, info, sym);
+      char short_name[9];
+      ll_symbol_name *sname = get_sym_name_with_buffer(
+          oc->L, getSymShortName(oc->L, info, sym), oc,
+          secNumber == IMAGE_SYM_UNDEFINED && symValue > 0 ? short_name : NULL);
       Section *section;
       switch (secNumber) {
         case PE_SECTION_UNDEFINED:
@@ -2005,12 +2020,15 @@ ocGetNames_PEi386 ( ObjectCode* oc )
                * object; reuse that address so relocations resolve to
                * the same storage. */
               if (symValue > existing->size) {
-                  LL_FATAL_FOR(oc->L, "linker: trying to link COMMON symbols %s with"
+                  ll_error_set(oc->L, LL_E_DUPSYM,
+                       "linker: trying to link COMMON symbols %s with"
                        " incompatible sizes: previous size %llu,"
                        " new size %u\n",
                        sname,
                        (long long unsigned int) existing->size,
                        symValue);
+                  releaseOcInfo(oc);
+                  return false;
               }
               addr = existing->value;
               common_already_defined = true;
