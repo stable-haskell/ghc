@@ -1,9 +1,64 @@
 /* Ordinary duplicate COMMON declarations exercise load failure and reuse. */
+#define LL_INTERNAL_SOURCE 1
+#include <windows.h>
+#include "LinkerInternals.h"
+#include "linker/M32Alloc.h"
+
+static void *common_m32_alloc_for(ll_linker *, m32_allocator *, size_t, size_t);
+
+#define PEI386_TEST_M32_ALLOC common_m32_alloc_for
 #define main pei386_common_ownership_main
 #include "pei386_common_ownership.c"
 #undef main
+#undef PEI386_TEST_M32_ALLOC
 
 enum { PROVIDER_SIZE = 64, PREFIX_SIZE = 16 };
+
+static bool pattern_common_storage;
+static unsigned common_storage_allocations;
+static unsigned patterned_common_allocations;
+static void *last_common_address;
+static size_t last_common_size;
+static size_t last_common_pre_nonzero;
+static unsigned last_common_pre_first;
+static uintptr_t previous_provider_address;
+
+/* The fixture's .data alignment is eight; only its new COMMON allocation asks
+ * for alignment 16. Keep the real allocator and its page reuse, then optionally
+ * supply nonzero storage so zero-initialization cannot depend on a fresh map. */
+static void *common_m32_alloc_for(ll_linker *linker, m32_allocator *allocator,
+                                  size_t size, size_t alignment)
+{
+    void *storage = m32_alloc_for(linker, allocator, size, alignment);
+    if (storage != NULL && alignment == 16) {
+        ++common_storage_allocations;
+        last_common_address = storage;
+        last_common_size = size;
+        last_common_pre_nonzero = 0;
+        last_common_pre_first = size > 0 ? ((const uint8_t *)storage)[0] : 0;
+        for (size_t i = 0; i < size; ++i)
+            if (((const uint8_t *)storage)[i] != 0) ++last_common_pre_nonzero;
+        if (pattern_common_storage) {
+            memset(storage, 0x5d, size);
+            ++patterned_common_allocations;
+        }
+    }
+    return storage;
+}
+
+static void check_common_allocations(unsigned before, unsigned patterned_before,
+                                      size_t expected_size)
+{
+    unsigned expected_count = expected_size > 0 ? 1 : 0;
+    CHECK(common_storage_allocations == before + expected_count,
+          "COMMON load allocated an unexpected number of new storage ranges");
+    CHECK(patterned_common_allocations == patterned_before +
+              (pattern_common_storage ? expected_count : 0),
+          "COMMON zero-fill control did not intercept the intended allocation");
+    if (expected_size > 0)
+        CHECK(last_common_size == expected_size,
+              "COMMON allocation size did not match the newly defined symbols");
+}
 
 static ll_status saved_default_status;
 static char saved_default_message[sizeof(ll_default_linker.error_message)];
@@ -95,13 +150,16 @@ static RtsSymbolInfo *find_symbol(const char *name)
     return lookupStrHashTable(owner.symhash, (ll_symbol_name *)name);
 }
 
-static ObjectCode *load_existing_fixture(pathchar *path)
+static ObjectCode *load_existing_fixture(pathchar *path, size_t new_common_size)
 {
+    unsigned before = common_storage_allocations;
+    unsigned patterned_before = patterned_common_allocations;
     ll_error_clear(&owner);
     if (loadObj_(&owner, path) == 0) {
         CHECK(false, "compatible COMMON fixture did not load");
         return NULL;
     }
+    check_common_allocations(before, patterned_before, new_common_size);
     CHECK(owner.error_status == LL_OK, "successful COMMON load retained an error");
     ll_error_clear(&owner);
     CHECK(resolveObjs_(&owner) != 0, "compatible COMMON fixture did not resolve");
@@ -191,6 +249,10 @@ static void check_consumer(ObjectCode *consumer, ObjectCode *provider,
         CHECK(prefix != NULL && prefix->owner == consumer &&
                   prefix->size == PREFIX_SIZE && prefix->value == bss->start,
               "successful retry did not publish its independent prefix COMMON");
+        if (bss->start != NULL && bss->size >= PREFIX_SIZE)
+            for (size_t i = 0; i < PREFIX_SIZE; ++i)
+                CHECK(((const uint8_t *)bss->start)[i] == 0,
+                      "new prefix COMMON storage was not initially zero-filled");
     }
 }
 
@@ -215,7 +277,7 @@ static void test_reuse(const char *name, ObjectCode *provider, void *address,
         return;
     }
     const size_t baseline = fixture.allocation_count;
-    ObjectCode *consumer = load_existing_fixture(path);
+    ObjectCode *consumer = load_existing_fixture(path, 0);
     check_consumer(consumer, provider, address, false);
     check_provider(name, provider, address);
     if (consumer != NULL) dispose_success(path);
@@ -249,7 +311,11 @@ static void test_conflict_and_retry(const char *name, ObjectCode *provider,
     CHECK(written >= 0 && (size_t)written < sizeof(expected),
           "conflict diagnostic expectation truncated");
     ll_error_clear(&owner);
+    unsigned before = common_storage_allocations;
+    unsigned patterned_before = patterned_common_allocations;
     int loaded = loadObj_(&owner, path);
+    check_common_allocations(before, patterned_before,
+                             with_prefix ? PREFIX_SIZE : 0);
     CHECK(loaded == 0, "larger COMMON declaration unexpectedly loaded");
     CHECK(owner.error_status == LL_E_DUPSYM,
           "larger COMMON declaration did not report LL_E_DUPSYM");
@@ -273,7 +339,8 @@ static void test_conflict_and_retry(const char *name, ObjectCode *provider,
 
     CHECK(write_common_fixture(path, name, PROVIDER_SIZE / 2, with_prefix),
           "could not replace rejected file with a compatible COMMON declaration");
-    ObjectCode *consumer = load_existing_fixture(path);
+    ObjectCode *consumer = load_existing_fixture(
+        path, with_prefix ? PREFIX_SIZE : 0);
     check_consumer(consumer, provider, address, with_prefix);
     check_provider(name, provider, address);
     if (consumer != NULL) dispose_success(path);
@@ -298,7 +365,7 @@ static void test_name_form(const char *name)
         (void)DeleteFileW(path);
         return;
     }
-    ObjectCode *provider = load_existing_fixture(path);
+    ObjectCode *provider = load_existing_fixture(path, PROVIDER_SIZE);
     RtsSymbolInfo *symbol = find_symbol(name);
     CHECK(provider != NULL && symbol != NULL && symbol->owner == provider &&
               symbol->value != NULL && symbol->size == PROVIDER_SIZE,
@@ -309,6 +376,15 @@ static void test_name_form(const char *name)
         return;
     }
     void *address = symbol->value;
+    CHECK(last_common_address == address,
+          "provider did not use the intercepted COMMON allocation");
+    (void)fprintf(stderr,
+        "COMMON provider: mode=%s name=%s address=%p size=%zu "
+        "pre_nonzero=%zu pre_first=%u reused_previous=%u\n",
+        pattern_common_storage ? "patterned" : "native", name, address,
+        last_common_size, last_common_pre_nonzero, last_common_pre_first,
+        previous_provider_address != 0 &&
+            previous_provider_address == (uintptr_t)address ? 1u : 0u);
     fixture.common_bss = address;
     for (size_t i = 0; i < PROVIDER_SIZE; ++i)
         CHECK(((const uint8_t *)address)[i] == 0,
@@ -318,6 +394,7 @@ static void test_name_form(const char *name)
     test_reuse(name, provider, address, PROVIDER_SIZE / 2);
     test_conflict_and_retry(name, provider, address, false);
     test_conflict_and_retry(name, provider, address, true);
+    previous_provider_address = (uintptr_t)address;
     dispose_success(path);
     fixture.common_bss = NULL;
     CHECK(find_symbol(name) == NULL, "disposed provider retained its COMMON symbol");
@@ -336,9 +413,12 @@ int main(void)
     CHECK(written >= 0 && (size_t)written < sizeof(ll_default_linker.error_message),
           "default COMMON sentinel truncated");
 
-    test_name_form("common1");
-    test_name_form("common08");
-    test_name_form("common_conflict_long");
+    for (unsigned mode = 0; mode < 2; ++mode) {
+        pattern_common_storage = mode != 0;
+        test_name_form("common1");
+        test_name_form("common08");
+        test_name_form("common_conflict_long");
+    }
     CHECK(fixture.fatal_calls == 0, "COMMON controls invoked the fatal callback");
     CHECK(fixture.common_bss_host_frees == 0,
           "COMMON storage reached host_free during conflict/reuse/disposal");
@@ -355,6 +435,7 @@ int main(void)
     memcpy(ll_default_linker.error_message, saved_default_message,
            sizeof(saved_default_message));
     if (failures != 0) return 1;
-    (void)puts("pei386_common_conflict: PASS (3 name forms, 6 conflicts, 6 retries)");
+    (void)puts("pei386_common_conflict: PASS "
+               "(2 allocation modes, 6 providers, 12 conflicts, 12 retries)");
     return 0;
 }

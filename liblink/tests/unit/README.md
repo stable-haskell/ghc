@@ -725,8 +725,8 @@ PE COMMON size conflicts
 real Windows loader, resolver, dependency tracking, and object disposal.
 For short, exactly eight-character inline, and string-table symbol names,
 equal and smaller declarations reuse a resolved 64-byte COMMON provider.
-Six larger declarations must return `LL_E_DUPSYM` with the existing precise
-diagnostic, without calling the fatal callback. The provider's address, size,
+Six larger declarations in each allocation mode must return `LL_E_DUPSYM`
+with the existing precise diagnostic, without calling the fatal callback. The provider's address, size,
 bytes, registration, and usable state must remain unchanged. Half of those
 failures follow publication of an independent prefix COMMON symbol; cleanup
 must remove that symbol while retaining the provider. Each rejected load
@@ -744,8 +744,27 @@ residues. Failed-load assertions receive no harness cleanup. The ledger does
 not track CRT-allocated duplicated symbol names, so this is not a general
 leak-freedom claim. Run `python3 liblink/tests/unit/run_native_tests.py
 --pe-resolution-only --cc clang` on configured native Windows x86_64.
-Native compilation/execution and an uncorrected-baseline run are pending;
-portable driver checks do not establish native behavior.
+Windows runs `40191109539` at `939cfd1` and `40195430466` at `07ab2de`
+compiled all five PE units and passed the four preceding units. The COMMON unit failed only its initial-zero
+assertion (128 byte checks); no conflict, reuse, cleanup, or retry assertion
+failed. All nine focused GHC captures passed with the same 1,274 named outcomes
+as the previous successful `9eeb993` Windows run. These results do not qualify
+the failing unit, and an uncorrected size-conflict baseline run remains pending.
+
+The separate zero-initialization repair clears only newly allocated global
+COMMON storage after a successful M32 allocation and before publication.
+M32 recycles pages without clearing their payload. Existing provider symbols
+are excluded from this allocation, so their sentinel bytes must survive.
+The unit retains every original assertion and runs both the native allocator
+and a deterministic nonzero-storage control. The latter calls the real M32
+allocator, patterns only the fixture's new COMMON requests, and checks the
+intercepted count, size, and provider address. Entire new providers and prefix
+COMMON ranges must be zero, while compatible aliases must allocate no
+replacement COMMON storage. The six providers cover all three name forms in
+each mode; twelve conflicts and twelve same-path retries retain the rollback
+and provider-preservation controls. Native diagnostics record pre-clear bytes
+and whether a provider address was reused; the original failure log did not
+record those details. Windows qualification of this follow-up is pending.
 
 PE load-resource failure cleanup
 =================================
