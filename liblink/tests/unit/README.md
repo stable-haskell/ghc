@@ -711,10 +711,11 @@ PE metadata leak freedom.
 
 The retry control counts an erroneous backend dispatch without entering
 already released metadata. An uncorrected baseline that remains retryable
-fails its quarantine assertion without attempting that retry. These are
-native Windows x86_64 draft controls: compilation, execution, and their
-baseline failure behavior remain unverified. They do not qualify the ARM64
-unsupported-relocation branch or the held pre-symbol table-validation work.
+fails its quarantine assertion without attempting that retry. These
+native Windows x86_64 controls compiled and passed at `9eeb993c` in CI run
+`40178749130`. Their failure behavior on the uncorrected baseline remains
+unverified. They do not qualify the ARM64 unsupported-relocation branch or
+the held pre-symbol table-validation work.
 
 PE load-resource failure cleanup
 =================================
