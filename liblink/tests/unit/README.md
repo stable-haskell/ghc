@@ -744,8 +744,21 @@ residues. Failed-load assertions receive no harness cleanup. The ledger does
 not track CRT-allocated duplicated symbol names, so this is not a general
 leak-freedom claim. Run `python3 liblink/tests/unit/run_native_tests.py
 --pe-resolution-only --cc clang` on configured native Windows x86_64.
-Native compilation/execution and an uncorrected-baseline run are pending;
-portable driver checks do not establish native behavior.
+Windows x86_64 runs `40191109539` at `939cfd1` and `40195430466` at
+`07ab2de` compiled and executed this unit. Both passed the four preceding
+PE units. The COMMON unit completed with 128 initial-zero byte assertion
+failures in each run; no conflict, reuse, cleanup, retry, ownership, or
+default-linker-isolation assertion failed. Both sets of nine focused GHC
+captures passed, with the same 1,274 named selection outcomes as the previous
+successful `9eeb993` Windows run.
+
+Source review confirms that M32 can return uncleared storage and the global
+COMMON allocation path does not clear its new range. The original GHC paths
+have the same omission. The failure logs did not record the exact origin of
+the nonzero bytes. A separate zero-initialization repair and deterministic
+tests await approval. The initial-zero assertions remain intact, and this
+unit remains unqualified until that correction passes native Windows CI.
+An uncorrected size-conflict baseline run has not been performed.
 
 PE load-resource failure cleanup
 =================================
