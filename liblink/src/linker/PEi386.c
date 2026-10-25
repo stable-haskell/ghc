@@ -1885,6 +1885,8 @@ ocGetNames_PEi386 ( ObjectCode* oc )
            releaseOcInfo(oc);
            return false;
        }
+       /* M32 can return recycled storage. New COMMON must start zeroed. */
+       memset(bss, 0, globalBssSize);
        addSection(oc->L, &oc->sections[oc->n_sections-1],
                   SECTIONKIND_RWDATA, SECTION_M32,
                   bss, globalBssSize, 0, 0, 0);
