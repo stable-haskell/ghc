@@ -684,7 +684,8 @@ checks the normal write path without a trampoline. These checks inspect data
 and never call generated jump bytes.
 
 The focused `--pe-resolution-only` mode runs this unit, the unwind lifetime
-unit below, and the terminal classification/quarantine units. Native Windows
+unit below, the terminal classification/quarantine units, and the COMMON
+size-conflict controls. Native Windows
 compilation and execution of the DLL
 indirection allocation failure, error preservation, and post-trampoline range
 cases passed in run 40077134443, as recorded above.
@@ -716,6 +717,35 @@ native Windows x86_64 controls compiled and passed at `9eeb993c` in CI run
 `40178749130`. Their failure behavior on the uncorrected baseline remains
 unverified. They do not qualify the ARM64 unsupported-relocation branch or
 the held pre-symbol table-validation work.
+
+PE COMMON size conflicts
+=======================
+
+`pei386_common_conflict.c` uses ordinary valid AMD64 COFF objects and the
+real Windows loader, resolver, dependency tracking, and object disposal.
+For short, exactly eight-character inline, and string-table symbol names,
+equal and smaller declarations reuse a resolved 64-byte COMMON provider.
+Six larger declarations must return `LL_E_DUPSYM` with the existing precise
+diagnostic, without calling the fatal callback. The provider's address, size,
+bytes, registration, and usable state must remain unchanged. Half of those
+failures follow publication of an independent prefix COMMON symbol; cleanup
+must remove that symbol while retaining the provider. Each rejected load
+must restore its host allocation ledger and leave no object/list entry.
+Replacing each rejected file with a compatible declaration must then succeed
+at the same path, resolve its ADDR64 relocation to the original storage, and
+retain the provider dependency. The default linker's error remains isolated.
+
+The repair preserves the existing size-acceptance rule. Caller-owned name
+buffers cover the two temporary COMMON-name lookups, including eight-byte
+inline names; persistent symbol names are still copied. Other name callers
+retain their existing ownership behavior. Successful control disposal
+separately verifies and releases only the fixture's three known PE metadata
+residues. Failed-load assertions receive no harness cleanup. The ledger does
+not track CRT-allocated duplicated symbol names, so this is not a general
+leak-freedom claim. Run `python3 liblink/tests/unit/run_native_tests.py
+--pe-resolution-only --cc clang` on configured native Windows x86_64.
+Native compilation/execution and an uncorrected-baseline run are pending;
+portable driver checks do not establish native behavior.
 
 PE load-resource failure cleanup
 =================================

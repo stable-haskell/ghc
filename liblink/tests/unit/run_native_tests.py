@@ -79,7 +79,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--pe-resolution-only",
         action="store_true",
-        help="run only native Windows x86_64 post-symbol PE resolver cases",
+        help="run native Windows x86_64 PE resolution and COMMON reuse/conflict cases",
     )
     parser.add_argument(
         "--pe-load-resources-only",
@@ -568,7 +568,8 @@ def run_pei386_resolution_status(cc: list[str], archive: Path,
                                  link_flags: list[str]) -> None:
     included = "PEi386.c, Linker.c, M32Alloc.c, M32Reservations.c, and MMap.c"
     for unit in ("pei386_resolution_status", "pei386_unwind_retention",
-                 "pei386_resolver_classification", "pei386_resolver_quarantine"):
+                 "pei386_resolver_classification", "pei386_resolver_quarantine",
+                 "pei386_common_conflict"):
         binary = output / f"{unit}.exe"
         map_file = output / f"{unit}.map"
         trace = run(
