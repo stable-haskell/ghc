@@ -769,7 +769,23 @@ replacement COMMON storage. The six providers cover all three name forms in
 each mode; twelve conflicts and twelve same-path retries retain the rollback
 and provider-preservation controls. Native diagnostics record pre-clear bytes
 and whether a provider address was reused; the original failure log did not
-record those details. Windows qualification of this follow-up is pending.
+record those details.
+
+At `59e9b809`, Windows x86_64
+[CI run 40238497625](https://github.com/stable-haskell/ghc/actions/runs/40238497625)
+passed both compiler builds and all six native C-test steps, including all
+five PE resolution units. This unit passed both allocation modes, six
+providers, twelve conflicts, and twelve same-path retries. In native mode,
+the second and third providers reused the previous provider address with
+64 nonzero bytes before clearing; the first byte was `0xa6`. All subsequent
+provider/prefix zero-fill and existing-provider preservation assertions
+passed. This records reuse in the corrected run; the older failure logs did
+not record byte provenance. All nine focused GHC captures also completed,
+with no unexpected results and the same 1,274 named selection outcomes as
+previous Windows CI runs at `07ab2de` and `9eeb993`. Together with the native
+C controls, this qualifies the repaired COMMON path on Windows x86_64.
+An uncorrected size-conflict baseline run has not been performed; these
+comparisons use previous Windows CI results.
 
 PE load-resource failure cleanup
 =================================
