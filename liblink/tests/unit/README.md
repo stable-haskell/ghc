@@ -736,8 +736,10 @@ those known allocations as harness cleanup. This is a narrow ownership check,
 not general native leak qualification. Run `python3
 liblink/tests/unit/run_native_tests.py
 --pe-load-resources-only --cc clang` on native Windows x86_64. Compilation and
-native execution are pending; this fixture does not inject NULL host allocator
-callbacks.
+native execution passed at `17f5961a` in
+[CI run 40175526890](https://github.com/stable-haskell/ghc/actions/runs/40175526890).
+This fixture does not inject NULL host allocator callbacks or establish general
+Windows sanitizer/leak qualification.
 
 PE unwind record lifetime
 =========================
