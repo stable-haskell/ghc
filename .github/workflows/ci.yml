@@ -418,6 +418,14 @@ jobs:
         export PATH="/c/ghcup/bin:$PATH"
         python3 liblink/tests/unit/run_native_tests.py --windows-m32-only --cc clang 2>&1 | tee _build/logs/windows-liblink-m32.log
 
+    - name: Upload Windows C unit logs
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: windows-native-c-unit-logs
+        if-no-files-found: ignore
+        path: _build/logs/windows-liblink-*.log
+
     - name: Run Windows focused linker testsuite
       if: ${{ !cancelled() && steps.windows_stage2_build.outcome == 'success' }}
       timeout-minutes: 180
