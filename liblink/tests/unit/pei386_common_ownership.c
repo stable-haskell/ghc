@@ -52,12 +52,18 @@ static unsigned failures;
 #ifdef PEI386_TEST_GETPROC
 #define GetProcAddress PEI386_TEST_GETPROC
 #endif
+#ifdef PEI386_TEST_RTLADD
+#define RtlAddFunctionTable PEI386_TEST_RTLADD
+#endif
 #ifdef PEI386_TEST_RTLDELETE
 #define RtlDeleteFunctionTable PEI386_TEST_RTLDELETE
 #endif
 #include "linker/PEi386.c"
 #ifdef PEI386_TEST_RTLDELETE
 #undef RtlDeleteFunctionTable
+#endif
+#ifdef PEI386_TEST_RTLADD
+#undef RtlAddFunctionTable
 #endif
 #ifdef PEI386_TEST_GETPROC
 #undef GetProcAddress

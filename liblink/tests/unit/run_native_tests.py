@@ -567,7 +567,8 @@ def run_pei386_resolution_status(cc: list[str], archive: Path,
                                  output: Path,
                                  link_flags: list[str]) -> None:
     included = "PEi386.c, Linker.c, M32Alloc.c, M32Reservations.c, and MMap.c"
-    for unit in ("pei386_resolution_status", "pei386_unwind_retention"):
+    for unit in ("pei386_resolution_status", "pei386_unwind_retention",
+                 "pei386_resolver_classification"):
         binary = output / f"{unit}.exe"
         map_file = output / f"{unit}.map"
         trace = run(

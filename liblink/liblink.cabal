@@ -134,6 +134,7 @@ extra-source-files:
     tests/unit/pei386_common_ownership.c
     tests/unit/pei386_load_resources.c
     tests/unit/pei386_resolution_status.c
+    tests/unit/pei386_resolver_classification.c
     tests/unit/pei386_unwind_retention.c
     tests/unit/link_trace_checks.py
     tests/unit/test_link_trace_checks.py

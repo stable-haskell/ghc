@@ -683,10 +683,22 @@ one selected trampoline allocation per case. A within-range REL32 control
 checks the normal write path without a trampoline. These checks inspect data
 and never call generated jump bytes.
 
-The focused `--pe-resolution-only` mode runs both this unit and the unwind
-lifetime unit below. Native Windows compilation and execution of the DLL
+The focused `--pe-resolution-only` mode runs this unit, the unwind lifetime
+unit below, and the terminal classification unit. Native Windows compilation
+and execution of the DLL
 indirection allocation failure, error preservation, and post-trampoline range
 cases passed in run 40077134443, as recorded above.
+
+PE terminal classification controls
+==================================
+
+`pei386_resolver_classification.c` covers the reserved static section indices
+and the existing upper boundary, SECREL success at `UINT32_MAX` and failure
+at `UINT32_MAX + 1`, unsupported relocations, failed exception registration,
+unchanged failed slots, owner isolation, and a valid REL32 control. It uses
+the existing native Windows fixture and source-local API interception.
+Native Windows compilation/execution remains pending. The ARM64-specific
+unsupported-relocation branch is outside this x86_64 fixture's scope.
 
 PE load-resource failure cleanup
 =================================
