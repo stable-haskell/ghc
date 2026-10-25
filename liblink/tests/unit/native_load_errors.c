@@ -287,11 +287,58 @@ static void dispose(Host *host)
     for (size_t i = 0; i < 128; i++) REQUIRE(host->live[i] == NULL);
 }
 
+#if defined(linux_HOST_OS)
+static int close_binding_control(void *handle)
+{
+#if defined(HAVE_DLINFO)
+    return __real_dlclose(handle);
+#else
+    return dlclose(handle);
+#endif
+}
+
+/* Check the input library directly, before involving liblink or host hooks.
+ * No unresolved fixture function is called. Ambient defaults are observations;
+ * the controlled lazy fixture must reject NOW and accept LAZY. */
+static int binding_control(const char *path, bool controlled)
+{
+    (void)dlerror();
+    void *eager = dlopen(path, RTLD_NOW | RTLD_LOCAL);
+    const char *eager_error = eager == NULL ? dlerror() : NULL;
+    fprintf(stderr, "native binding controlled=%d NOW=%s error=%s\n",
+            controlled, eager == NULL ? "rejected" : "accepted",
+            eager_error != NULL ? eager_error : "(none)");
+    if (eager != NULL) REQUIRE(close_binding_control(eager) == 0);
+    REQUIRE(eager == NULL && eager_error != NULL &&
+            strstr(eager_error, "ll_native_test_missing_symbol") != NULL);
+
+    (void)dlerror();
+    void *lazy = dlopen(path, RTLD_LAZY | RTLD_LOCAL);
+    const char *lazy_error = lazy == NULL ? dlerror() : NULL;
+    fprintf(stderr, "native binding controlled=%d LAZY=%s error=%s\n",
+            controlled, lazy == NULL ? "rejected" : "accepted",
+            lazy_error != NULL ? lazy_error : "(none)");
+    if (controlled) REQUIRE(lazy != NULL);
+    if (lazy != NULL) {
+        int *value = dlsym(lazy, "ll_owner_fixture_value");
+        REQUIRE(value != NULL && *value == 73);
+        REQUIRE(close_binding_control(lazy) == 0);
+    }
+    return 0;
+}
+#endif
+
 int main(int argc, char **argv)
 {
     REQUIRE(argc == 3);
-    ll_linker owners[2] = {{0}};
-    Host hosts[3] = {{0}};
+#if defined(linux_HOST_OS)
+    if (strcmp(argv[1], "loader-defaults") == 0 ||
+        strcmp(argv[1], "loader-controlled") == 0)
+        return binding_control(argv[2],
+                               strcmp(argv[1], "loader-controlled") == 0);
+#endif
+    ll_linker owners[2] = {0};
+    Host hosts[3] = {0};
     hosts[0].quiet = strstr(argv[1], "-quiet") != NULL;
     for (size_t i = 0; i < 3; i++) {
         active = &hosts[i];
@@ -400,6 +447,9 @@ int main(int argc, char **argv)
     }
     if (strcmp(argv[1], "lazy") == 0) {
         void *handle = load(&hosts[0], argv[2], &error);
+        if (handle == NULL)
+            fprintf(stderr, "native lazy load failed after %zu attempts: %s\n",
+                    hosts[0].before, error != NULL ? error : "(no diagnostic)");
         REQUIRE(handle != NULL && error == NULL && hosts[0].unloaded == 0);
 #if defined(HAVE_DLINFO)
         REQUIRE(hosts[0].before == 2 && hosts[0].after == 2);

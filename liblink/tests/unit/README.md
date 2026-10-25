@@ -940,6 +940,17 @@ loading succeed without failure cleanup, preserving both hook pairs. Other
 POSIX builds exercise their existing single lazy attempt. Generated platform
 macros are used unchanged; Darwin execution does not qualify Linux retry paths.
 
+The Linux lazy fixture explicitly uses `-fplt` and `-Wl,-z,lazy` so it has
+the binding behavior required by this control. These options apply only to
+that fixture. An additional library retains the original compiler defaults;
+the driver records ELF dynamic tags and relocations when `readelf` is present.
+Two direct-loader controls report the ambient library's NOW/LAZY results and
+require the controlled library to reject NOW and accept LAZY before liblink
+is exercised. The original liblink lazy-retry assertions remain unchanged.
+The original Linux CI failure is not attributed to compiler hardening without
+this native evidence. [GCC documents why lazy binding requires PLT calls](https://gcc.gnu.org/onlinedocs/gcc-14.3.0/gcc/Code-Gen-Options.html),
+and [GNU ld documents lazy binding](https://sourceware.org/binutils/docs/ld/Options.html).
+
 Run `python3 liblink/tests/unit/run_native_tests.py --native-load-errors-only`
 on a configured native Darwin or Linux build. The default POSIX unit suite
 also runs these cases. Native Linux execution remains required for the

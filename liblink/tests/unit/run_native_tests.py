@@ -897,15 +897,32 @@ def run_native_load_errors(cc: list[str], archive: Path, output: Path,
     suffix = ".dylib" if host == "Darwin" else ".so"
     shared = ["-dynamiclib"] if host == "Darwin" else ["-shared", "-fPIC"]
     lazy_flags = (["-Wl,-undefined,dynamic_lookup"] if host == "Darwin" else
-                  ["-Wl,--allow-shlib-undefined"])
+                  ["-fplt", "-Wl,-z,lazy", "-Wl,--allow-shlib-undefined"])
     libraries = {}
-    for kind in ("ordinary", "lazy"):
+    kinds = ("ordinary", "lazy", "lazy-defaults") if host == "Linux" else (
+        "ordinary", "lazy"
+    )
+    for kind in kinds:
         library = output / ("libnative-load-" + kind + suffix)
         flags = (["-DNATIVE_LOAD_LAZY_FIXTURE", *lazy_flags]
                  if kind == "lazy" else [])
+        if kind == "lazy-defaults":
+            # Preserve the original fixture command to measure ambient binding.
+            flags = ["-DNATIVE_LOAD_LAZY_FIXTURE", "-Wl,--allow-shlib-undefined"]
         run(cc + [*shared, *flags, str(source), "-o", str(library)],
             label="compile native-load " + kind + " fixture")
         libraries[kind] = library
+    if host == "Linux":
+        print(f"[native-load binding] LD_BIND_NOW={os.environ.get('LD_BIND_NOW')!r}",
+              flush=True)
+        reader = shutil.which("readelf")
+        if reader is not None:
+            for kind in ("lazy-defaults", "lazy"):
+                run([reader, "-d", "-r", str(libraries[kind])],
+                    label="inspect native-load " + kind + " binding")
+        else:
+            print("[native-load binding] readelf unavailable; no ELF tag evidence",
+                  flush=True)
     binary = output / "native_load_errors"
     map_file = output / "native_load_errors.map"
     trace = run(
@@ -920,6 +937,11 @@ def run_native_load_errors(cc: list[str], archive: Path, output: Path,
     for member in ("Linker", "LoadNativeObjPosix"):
         if not archive_member_pattern(str(archive), member).search(evidence):
             raise RuntimeError(f"native-load test omitted {member} from {archive}")
+    if host == "Linux":
+        for case, kind in (("loader-defaults", "lazy-defaults"),
+                           ("loader-controlled", "lazy")):
+            run([str(binary), case, str(libraries[kind])],
+                label="native-load " + case)
     missing = output / ("does-not-exist" + suffix)
     for case in ("positive", "collision", "missing", "missing-host-state",
                  "lazy", "missing-no-unload-hook"):

@@ -495,6 +495,48 @@ class NativeRtsFsLinkArgumentsTests(unittest.TestCase):
                 self.assertEqual(labels, ["linker trace parser tests"])
 
 
+class NativeLoadFixtureArgumentsTests(unittest.TestCase):
+    def test_lazy_controls_are_scoped_to_the_linux_lazy_fixture(self) -> None:
+        for host in ("Linux", "Darwin"):
+            with self.subTest(host=host), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                (root / "ll_autoconf.h").write_text("/* no mapping controls */\n")
+                commands: dict[str, list[str]] = {}
+
+                class StopAfterFixtures(Exception):
+                    pass
+
+                def capture(argv: list[str], *, label: str) -> str:
+                    if label == "compile and link native_load_errors":
+                        raise StopAfterFixtures
+                    commands[label] = argv
+                    return ""
+
+                with (mock.patch.object(driver, "run", side_effect=capture),
+                      mock.patch.object(driver.shutil, "which", return_value=None),
+                      self.assertRaises(StopAfterFixtures)):
+                    driver.run_native_load_errors(["cc"], root / "liblink.a",
+                                                  root, [], host, root)
+                ordinary = commands["compile native-load ordinary fixture"]
+                lazy = commands["compile native-load lazy fixture"]
+                self.assertNotIn("-fplt", ordinary)
+                self.assertNotIn("-Wl,-z,lazy", ordinary)
+                if host == "Linux":
+                    self.assertIn("-fplt", lazy)
+                    self.assertIn("-Wl,-z,lazy", lazy)
+                    defaults = commands["compile native-load lazy-defaults fixture"]
+                    self.assertIn("-DNATIVE_LOAD_LAZY_FIXTURE", defaults)
+                    self.assertIn("-Wl,--allow-shlib-undefined", defaults)
+                    self.assertNotIn("-fplt", defaults)
+                    self.assertNotIn("-Wl,-z,lazy", defaults)
+                else:
+                    self.assertIn("-Wl,-undefined,dynamic_lookup", lazy)
+                    self.assertNotIn("-fplt", lazy)
+                    self.assertNotIn("-Wl,-z,lazy", lazy)
+                    self.assertNotIn("compile native-load lazy-defaults fixture",
+                                     commands)
+
+
 class InitializerFailureDiagnosticsTests(unittest.TestCase):
     def test_success_does_not_start_a_debugger(self) -> None:
         with (mock.patch.object(driver, "run") as run,
