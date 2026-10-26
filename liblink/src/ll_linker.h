@@ -57,7 +57,7 @@ struct ll_linker {
 
 #if defined(OBJFORMAT_ELF)
     void *rts_dynamic;
-#if defined(SHN_XINDEX)
+#if LL_ELF_HAS_SHN_XINDEX
     ll_elf_word shndx_table_uninit_label;
 #endif
 #endif

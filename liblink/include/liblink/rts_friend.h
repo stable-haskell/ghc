@@ -60,15 +60,11 @@ struct ll_coff_section_info;
 #define SectionFormatInfo ll_coff_section_info
 #endif
 
-#if defined(OBJFORMAT_ELF)
-#include <elf.h>
-/* Match the word type selected by the private ELF backend. */
-#if defined(__LP64__) || defined(_LP64)
-typedef Elf64_Word ll_elf_word;
-#else
-typedef Elf32_Word ll_elf_word;
-#endif
-#endif
+#include "liblink/elf.h"
+#include "linker/ElfHost.h"
+/* ELF Word is 32 bits in both file classes; keep the shared view independent
+ * of a translation unit's selected target and of SDK type spellings. */
+typedef ll_elf32_word ll_elf_word;
 
 /* Hold extended information about a symbol in case we need to resolve it at a
    late stage.  */
@@ -372,7 +368,7 @@ struct _ObjectCode {
     m32_allocator *rw_m32, *rx_m32;
 #endif
 
-#if defined(OBJFORMAT_ELF) && defined(SHN_XINDEX)
+#if defined(OBJFORMAT_ELF) && LL_ELF_HAS_SHN_XINDEX
     /* Cached address of ELF's shndx table, or SHNDX_TABLE_UNINIT if not
      * initialized yet. It would be better to put it info ELF-specific
      * ObjectCodeFormatInfo, but unfortunately shndx table is needed in

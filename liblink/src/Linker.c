@@ -1347,7 +1347,7 @@ mkOc( ll_linker *L, ObjectType type, pathchar *path, char *image, int imageSize,
    oc->rx_m32 = m32_allocator_new_for(L, true);
 #endif
 
-#if defined(OBJFORMAT_ELF) && defined(SHN_XINDEX)
+#if defined(OBJFORMAT_ELF) && LL_ELF_HAS_SHN_XINDEX
    oc->shndx_table = SHNDX_TABLE_UNINIT(L);
 #endif
 
