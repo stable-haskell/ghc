@@ -35,6 +35,7 @@
 #  define OBJFORMAT_WASM32
 #endif
 
+struct ll_format_ops;
 typedef struct _ObjectCode ObjectCode;
 typedef struct _Section Section;
 
@@ -223,7 +224,7 @@ struct _ObjectCode {
     ll_compat_ostatus    status;
     ll_compat_pathchar  *fileName;
     int        fileSize;     /* also mapped image size when using mmap() */
-    char*      formatName;   /* e.g. "ELF32", "DLL", "COFF", etc. */
+    const char *formatName;   /* e.g. "ELF32", "DLL", "COFF", etc. */
     ObjectType type;         /* who loaded this object? */
 
     /* If this object is a member of an archive, archiveMemberName is
@@ -362,6 +363,10 @@ struct _ObjectCode {
     /* Terminal resolution, initialization, or protection requires unload/reload.
      * Keep the marker through GC disposal; a fresh object starts unmarked. */
     bool resolution_failed;
+
+    /* Selected before format initialization; retained even if get_names
+     * releases the original image (PE import objects). Native DLLs use NULL. */
+    const struct ll_format_ops *format_ops;
 };
 
 /* Borrowed RTS view into the default linker's state. The RTS binds this once

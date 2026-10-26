@@ -26,6 +26,7 @@ static ObjectCode *make_core_fixture(ResolverCase which, uint32_t *slot)
     ObjectCode *object = mkOc(&owner, STATIC_OBJECT,
                               (pathchar *)L"resolver-quarantine",
                               NULL, 0, false, NULL, 0);
+    object->format_ops = ll_format_native();
     object->n_sections = 2; /* final slot is synthetic global data */
     object->sections = LL_CALLOC_FOR(&owner, 2, sizeof(*object->sections),
                                      "quarantine fixture sections");

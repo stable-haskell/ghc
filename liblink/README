@@ -15,6 +15,23 @@ unsupported stubs: ll_new returns NULL, and functions returning ll_status
 return LL_E_UNSUPPORTED. RTS clients continue to use the compatibility
 interface.
 
+Object format dispatch
+----------------------
+
+Relocatable objects select a private format vtable from their input bytes before
+backend initialization. The selection stays with the object through resolution,
+initialization, and disposal, even when the backend releases the input image.
+Verification still belongs to the selected backend. Recognized ELF, Mach-O,
+COFF, and Wasm input without an available backend returns LL_E_UNSUPPORTED;
+unrecognized input returns LL_E_FORMAT. This stage builds only the native
+ELF, Mach-O, or PE backend. It does not add cross-format execution or a Wasm
+backend. Archive traversal retains its existing member prefilter; members that
+it loads use the same selection and initialization path as standalone objects.
+
+Native shared libraries retain their OS loader path and have no static format
+vtable. Static finalizers still run only after successful initialization, then
+__cxa_finalize runs before format metadata, image, and section storage are freed.
+
 Locking
 -------
 

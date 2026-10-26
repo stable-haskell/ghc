@@ -12,6 +12,7 @@
 #include "ll_hash.h"
 #include "LinkerInternals.h"
 #include "ll_failure.h"
+#include "ll_format.h"
 #include "RtsSymbolInfo.h"
 #include "linker/M32Alloc.h"
 #include "linker/CacheFlush.h"
@@ -1084,19 +1085,14 @@ static void removeOcSymbols (ObjectCode *oc)
 static void
 freePreloadObjectFile (ObjectCode *oc)
 {
-#if defined(mingw32_HOST_OS)
-    freePreloadObjectFile_PEi386(oc);
-#else
-
-    if (RTS_LINKER_USE_MMAP && oc->imageMapped) {
-        ll_munmap_for_linker(oc->L, oc->image, oc->fileSize, "freePreloadObjectFile");
-    }
-    else {
-        if (oc->image != NULL)
+    if (oc->image != NULL) {
+        if (RTS_LINKER_USE_MMAP && oc->imageMapped) {
+            ll_munmap_for_linker(oc->L, oc->image, oc->fileSize,
+                                 "freePreloadObjectFile");
+        } else {
             LL_FREE_FOR(oc->L, oc->image - oc->misalignment);
+        }
     }
-
-#endif
 
     oc->image = NULL;
     oc->fileSize = 0;
@@ -1104,27 +1100,17 @@ freePreloadObjectFile (ObjectCode *oc)
 
 int ll_init_object(ObjectCode *oc)
 {
-    int valid = 1;
-#if defined(OBJFORMAT_MACHO)
-    if (oc->image == NULL || oc->fileSize < (int)sizeof(uint32_t)) {
-        ll_error_set(oc->L, LL_E_FORMAT, "loadObj: truncated Mach-O magic");
-        return 0;
-    }
-    valid = ocVerifyImage_MachO(oc);
-#elif defined(OBJFORMAT_ELF)
-    valid = ocVerifyImage_ELF(oc);
-#endif
-    if (!valid) {
+    /* Native shared-library objects have no relocatable image. */
+    if (oc->type == DYNAMIC_OBJECT) return 1;
+    oc->format_ops = ll_format_select(oc);
+    if (oc->format_ops == NULL) return 0;
+    oc->formatName = oc->format_ops->name;
+    if (!oc->format_ops->init(oc)) {
         if (oc->L->error_status == LL_OK)
             ll_error_set(oc->L, LL_E_FORMAT, "loadObj: invalid image in %" PATH_FMT,
                          OC_INFORMATIVE_FILENAME(oc));
         return 0;
     }
-#if defined(OBJFORMAT_MACHO)
-    if (!ocInit_MachO(oc)) return 0;
-#elif defined(OBJFORMAT_ELF)
-    ocInit_ELF(oc);
-#endif
     return 1;
 }
 
@@ -1152,17 +1138,6 @@ void ll_discard_object(ObjectCode *oc)
      * Symbols must be removed while their names still live in the image.
      * Format teardown also needs the image and section metadata to be alive. */
     removeOcSymbols(oc);
-#if defined(OBJFORMAT_MACHO)
-    ocDeinit_MachO(oc);
-#elif defined(OBJFORMAT_ELF)
-    if (oc->info != NULL) {
-        freeInitFiniList(oc->L, oc->info->init);
-        freeInitFiniList(oc->L, oc->info->fini);
-        oc->info->init = NULL;
-        oc->info->fini = NULL;
-    }
-    ocDeinit_ELF(oc);
-#endif
     freeObjectCode(oc);
 }
 
@@ -1199,13 +1174,7 @@ void freeObjectCode (ObjectCode *oc)
     // Run finalizers only if initializers have been run.
     // See Note [Object unloading and finalizers].
     if (oc->type == STATIC_OBJECT && oc->initializersRan) {
-#if defined(OBJFORMAT_ELF)
-        ocRunFini_ELF(oc);
-#elif defined(OBJFORMAT_PEi386)
-        ocRunFini_PEi386(oc);
-#elif defined(OBJFORMAT_MACHO)
-        ocRunFini_MachO(oc);
-#endif
+        if (oc->format_ops != NULL) oc->format_ops->run_fini(oc);
     }
 
     // See Note [Resolving __dso_handle]
@@ -1226,10 +1195,10 @@ void freeObjectCode (ObjectCode *oc)
 #endif
     }
 
-#if defined(OBJFORMAT_MACHO)
-    /* Format teardown needs the image and section metadata still alive. */
-    ocDeinit_MachO(oc);
-#endif
+    /* Teardown needs the image and section metadata alive. This is the single
+     * format cleanup point, including partial initialization and PE image and
+     * unwind ownership. Finalizers and __cxa_finalize have already run. */
+    if (oc->format_ops != NULL) oc->format_ops->deinit(oc);
     freePreloadObjectFile(oc);
 
     if (oc->symbols != NULL) {
@@ -1293,10 +1262,6 @@ void freeObjectCode (ObjectCode *oc)
     }
 #endif
 
-#if defined(OBJFORMAT_ELF)
-    ocDeinit_ELF(oc);
-#endif
-
 #if defined(NEED_M32)
     m32_allocator_free_for(oc->L, oc->rx_m32);
     m32_allocator_free_for(oc->L, oc->rw_m32);
@@ -1324,16 +1289,9 @@ mkOc( ll_linker *L, ObjectType type, pathchar *path, char *image, int imageSize,
    oc->info = NULL;
    oc->type = type;
 
-#  if defined(OBJFORMAT_ELF)
-   oc->formatName = "ELF";
-#  elif defined(OBJFORMAT_PEi386)
-   oc->formatName = "PEi386";
-#  elif defined(OBJFORMAT_MACHO)
-   oc->formatName = "Mach-O";
-#  else
-   LL_FREE_FOR(L, oc);
-   LL_FATAL_FOR(L, "loadObj: not implemented on this platform");
-#  endif
+   const struct ll_format_ops *native = ll_format_native();
+   oc->formatName = native != NULL ? native->name : "unknown";
+   oc->format_ops = NULL;
 
    oc->image = image;
    oc->fileName = pathdup(L, path);
@@ -1613,15 +1571,8 @@ static ll_hs_int loadOcImpl (ObjectCode* oc)
    LL_IF_DEBUG_FOR(oc->L, linker, ocDebugBelch(oc, "start\n"));
 
    /* verify the in-memory image */
-#  if defined(OBJFORMAT_ELF)
-   r = ocVerifyImage_ELF ( oc );
-#  elif defined(OBJFORMAT_PEi386)
-   r = ocVerifyImage_PEi386 ( oc );
-#  elif defined(OBJFORMAT_MACHO)
-   r = ocVerifyImage_MachO ( oc );
-#  else
-   LL_FATAL_FOR(oc->L, "loadObj: no verify method");
-#  endif
+   if (!ll_format_require(oc)) return 0;
+   r = oc->format_ops->verify(oc);
    if (!r) {
        if (oc->L->error_status == LL_OK) {
            ll_error_set(oc->L, LL_E_FORMAT,
@@ -1649,9 +1600,7 @@ static ll_hs_int loadOcImpl (ObjectCode* oc)
       happens in `ocGetNames_PEi386` simply set the correct pointers.
       */
 
-#if defined(NEED_SYMBOL_EXTRAS)
-#  if defined(OBJFORMAT_MACHO)
-   r = ocAllocateExtras_MachO ( oc );
+   r = oc->format_ops->alloc_extras(oc);
    if (!r) {
        if (oc->L->error_status == LL_OK) {
            ll_error_set(oc->L, LL_E_NOMEM,
@@ -1659,34 +1608,12 @@ static ll_hs_int loadOcImpl (ObjectCode* oc)
                         OC_INFORMATIVE_FILENAME(oc));
        }
        LL_IF_DEBUG_FOR(oc->L, linker,
-                ocDebugBelch(oc, "ocAllocateExtras_MachO failed\n"));
+                      ocDebugBelch(oc, "alloc_extras failed\n"));
        return r;
    }
-#  elif defined(OBJFORMAT_ELF)
-   r = ocAllocateExtras_ELF ( oc );
-   if (!r) {
-       if (oc->L->error_status == LL_OK) {
-           ll_error_set(oc->L, LL_E_NOMEM,
-                        "loadObj: could not allocate symbol extras in %" PATH_FMT,
-                        OC_INFORMATIVE_FILENAME(oc));
-       }
-       LL_IF_DEBUG_FOR(oc->L, linker,
-                ocDebugBelch(oc, "ocAllocateExtras_ELF failed\n"));
-       return r;
-   }
-#  endif
-#endif
 
    /* build the symbol list for this image */
-#  if defined(OBJFORMAT_ELF)
-   r = ocGetNames_ELF ( oc );
-#  elif defined(OBJFORMAT_PEi386)
-   r = ocGetNames_PEi386 ( oc );
-#  elif defined(OBJFORMAT_MACHO)
-   r = ocGetNames_MachO ( oc );
-#  else
-   LL_FATAL_FOR(oc->L, "loadObj: no getNames method");
-#  endif
+   r = oc->format_ops->get_names(oc);
    if (!r) {
        if (oc->L->error_status == LL_OK) {
            ll_error_set(oc->L, LL_E_FORMAT,
@@ -1767,15 +1694,8 @@ static int ocTryLoadImpl(ObjectCode* oc) {
     }
 
     LL_IF_DEBUG_FOR(oc->L, linker, ocDebugBelch(oc, "resolving\n"));
-#   if defined(OBJFORMAT_ELF)
-    r = ocResolve_ELF ( oc );
-#   elif defined(OBJFORMAT_PEi386)
-    r = ocResolve_PEi386 ( oc );
-#   elif defined(OBJFORMAT_MACHO)
-    r = ocResolve_MachO ( oc );
-#   else
-    LL_FATAL_FOR(oc->L, "ocTryLoad: not implemented on this platform");
-#   endif
+    if (!ll_format_require(oc)) return 0;
+    r = oc->format_ops->resolve(oc);
     if (!r) {
         if (oc->L->error_status == LL_OK) {
             ll_error_set(oc->L, LL_E_UNRESOLVED,
@@ -1835,20 +1755,13 @@ int ocRunInit(ObjectCode *oc)
 
     LL_IF_DEBUG_FOR(oc->L, linker, ocDebugBelch(oc, "running initializers\n"));
 
+    if (!ll_format_require(oc)) return 0;
+
     // See Note [Tracking foreign exports] in ForeignExports.c
     if (oc->L->services.host.before_init != NULL) {
         oc->L->services.host.before_init(oc->L->services.host.ctx, oc);
     }
-    int r;
-#if defined(OBJFORMAT_ELF)
-    r = ocRunInit_ELF ( oc );
-#elif defined(OBJFORMAT_PEi386)
-    r = ocRunInit_PEi386 ( oc );
-#elif defined(OBJFORMAT_MACHO)
-    r = ocRunInit_MachO ( oc );
-#else
-    LL_FATAL_FOR(oc->L, "ocTryLoad: initializers not implemented on this platform");
-#endif
+    int r = oc->format_ops->run_init(oc);
     if (oc->L->services.host.after_init != NULL) {
         oc->L->services.host.after_init(oc->L->services.host.ctx, oc, r != 0);
     }

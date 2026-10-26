@@ -378,6 +378,14 @@ jobs:
         export PATH="/c/ghcup/bin:$PATH"
         python3 liblink/tests/unit/run_native_tests.py --foundation-only --cc clang 2>&1 | tee _build/logs/windows-liblink-foundation.log
 
+    - name: Run Windows format dispatch C unit
+      if: ${{ !cancelled() && steps.windows_stage2_build.outcome == 'success' }}
+      timeout-minutes: 5
+      run: |
+        set -eo pipefail
+        export PATH="/c/ghcup/bin:$PATH"
+        python3 liblink/tests/unit/run_native_tests.py --format-dispatch-only --cc clang 2>&1 | tee _build/logs/windows-liblink-format-dispatch.log
+
     - name: Run Windows initializer error C units
       if: ${{ !cancelled() && steps.windows_stage2_build.outcome == 'success' }}
       timeout-minutes: 5

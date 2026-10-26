@@ -74,6 +74,7 @@ static unsigned failures;
 #ifdef PEI386_TEST_RESOLVE
 #define ocResolve_PEi386 PEI386_TEST_RESOLVE
 #endif
+#include "ll_format.c"
 #include "Linker.c"
 #ifdef PEI386_TEST_RESOLVE
 #undef ocResolve_PEi386

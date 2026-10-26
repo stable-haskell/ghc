@@ -15,6 +15,7 @@ int initializer_policy_backend(ObjectCode *object);
 #else
 #error "init_array_policy requires a configured native ELF/PE/Mach-O host"
 #endif
+#include "ll_format.c"
 #include "Linker.c"
 #undef ocRunInit_ELF
 #undef ocRunInit_PEi386
@@ -280,6 +281,7 @@ static void check_native_disposal(ll_linker *owner)
         const unsigned fini_before = disposal_fini_calls;
         ObjectCode *object = mkOc(owner, STATIC_OBJECT, WSTR("init-disposal.o"),
                                   NULL, 0, false, NULL, 0);
+        object->format_ops = ll_format_native();
         object->status = OBJECT_RESOLVED;
         object->info = LL_CALLOC_FOR(owner, 1, sizeof(*object->info),
                                      "native initializer disposal metadata");
@@ -373,6 +375,7 @@ int main(void)
                          WSTR("init-grandchild.o"), WSTR("healthy-init.o"),
                          WSTR("failed-init.o")};
     for (size_t i = 0; i < 5; ++i) {
+        objects[i].format_ops = ll_format_native();
         objects[i].L = &owner;
         objects[i].fileName = paths[i];
         objects[i].status = OBJECT_RESOLVED;

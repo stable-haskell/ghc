@@ -145,6 +145,7 @@ static int test_mprotect(void *start, size_t len, int prot);
 
 int test_ocResolve_MachO(ObjectCode *oc);
 #define ocResolve_MachO test_ocResolve_MachO
+#include "ll_format.c"
 #include "Linker.c"
 #undef ocResolve_MachO
 #include "linker/M32Alloc.c"

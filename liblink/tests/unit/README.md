@@ -1075,3 +1075,21 @@ exactly one close at that explicit teardown. This checks fixture disposal, not
 GC retention or RTS profiling/foreign-export lifetimes. Native Linux execution
 is required for these four controls; Darwin uses its genuine configuration
 and runs the six existing POSIX controls without Linux wrappers.
+
+Runtime format dispatch
+-----------------------
+
+`run_native_tests.py --format-dispatch-only` checks the private format selector
+and core lifecycle dispatch with the current native archive. Signature-only
+controls cover ELF, all four Mach-O byte orders/widths, ordinary/anonymous COFF,
+and Wasm, including short, unaligned, unavailable, and unknown inputs. They do
+not enter backend parsers. Two distinct operation tables check standalone and
+modeled lazy-member dispatch, extras-before-names ordering, image release during
+name acquisition, initializer hook ordering, finalizer gating, partial-init
+cleanup, and the NULL-image native-library path. Actual archive parsing remains
+covered by the existing archive and T1 tests.
+
+Source-included backend-interposition fixtures include `ll_format.c` under the
+same overrides as `Linker.c`. Synthetic objects that bypass input initialization
+must explicitly install their intended operations; production objects acquire
+them through `ll_init_object`.

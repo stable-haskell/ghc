@@ -52,6 +52,11 @@ def parse_args() -> argparse.Namespace:
         help="run common initializer status, cleanup, and terminal-error policy units",
     )
     parser.add_argument(
+        "--format-dispatch-only",
+        action="store_true",
+        help="run runtime format selection and per-object lifecycle dispatch controls",
+    )
+    parser.add_argument(
         "--foundation-only",
         action="store_true",
         help="run only error_state.c; core_error_status.c currently needs POSIX mmap/fd APIs",
@@ -966,7 +971,8 @@ def main() -> int:
                           args.macho_x86_operands_only,
                           args.elf_resources_only,
                           args.mmap_address_bounds_only,
-                          args.path_ownership_only, args.native_load_errors_only))
+                          args.path_ownership_only, args.native_load_errors_only,
+                          args.format_dispatch_only))
     if selected_modes > 1:
         raise RuntimeError("native unit modes are mutually exclusive")
     host = native_host()
@@ -990,7 +996,7 @@ def main() -> int:
                                    args.foundation_only or args.windows_m32_only
                                    or args.pe_resolution_only
                                    or args.pe_load_resources_only
-                                   or args.path_ownership_only):
+                                   or args.path_ownership_only or args.format_dispatch_only):
         raise RuntimeError(
             "core_error_status.c is POSIX-only: the Windows linker path uses "
             "stdio rather than mmap; use a focused Windows unit mode"
@@ -1066,6 +1072,17 @@ def main() -> int:
         str(ROOT / "liblink/src"),
     ]
     cc = compiler + common_flags
+
+    if args.format_dispatch_only or selected_modes == 0:
+        with tempfile.TemporaryDirectory(prefix="liblink-format-dispatch-") as temporary:
+            binary = Path(temporary) / ("format_dispatch.exe" if host == "Windows" else "format_dispatch")
+            run(cc + native_unit_link_arguments(
+                ROOT / "liblink/tests/unit/format_dispatch.c", archive, binary,
+                pe_link_flags if host == "Windows" else link_flags, []),
+                label="compile and link format_dispatch")
+            run([str(binary)], label="run format_dispatch")
+        if args.format_dispatch_only:
+            return 0
 
     if args.native_load_errors_only:
         with tempfile.TemporaryDirectory(prefix="liblink-native-load-errors-") as temporary:
