@@ -263,6 +263,75 @@ static void check_format_got(ll_linker *owner)
     freeObjectCode(object);
 }
 
+/* Heap storage has no declared payload type. Padded strides distinguish target
+ * slots from native SymbolExtra indexing, including its zero-width ARM64 alias. */
+static void check_target_emitters(ll_linker *owner)
+{
+    enum { SLOT_STRIDE = 32, BUFFER_SIZE = 96 };
+    unsigned char *bytes = malloc(BUFFER_SIZE);
+    CHECK(bytes != NULL, "typed emitter control allocation failed");
+    if (bytes == NULL) return;
+    ObjectCode object = {0};
+    object.L = owner;
+    object.symbol_extras = (SymbolExtra *)(void *)bytes;
+    object.first_symbol_extra = 7;
+    object.n_symbol_extras = 3;
+    object.symbol_extra_stride = SLOT_STRIDE;
+    const uint64_t target = UINT64_C(0xfedcba9876543210);
+    const unsigned char jump[] = {0xff, 0x25, 0xf2, 0xff, 0xff, 0xff, 0, 0};
+    for (unsigned kind = 0; kind < 4; ++kind) {
+        memset(bytes, 0xa5, BUFFER_SIZE);
+        size_t written = 0;
+        void *slot = NULL;
+        if (kind == 0) {
+            ll_symbol_extra_x86_64 *extra =
+                ll_make_symbol_extra_x86_64(&object, 8, target);
+            slot = extra;
+            written = sizeof(*extra);
+            CHECK(extra->addr == target, "x64 emitter truncated target address");
+            CHECK(memcmp(extra->jumpIsland, jump, sizeof(jump)) == 0,
+                  "x64 emitter changed native jump bytes");
+        } else if (kind == 1) {
+            ll_symbol_extra_riscv64 *extra =
+                ll_make_symbol_extra_riscv64(&object, 8, target);
+            slot = extra;
+            written = sizeof(*extra);
+            CHECK(extra->addr == target, "RISC-V emitter truncated target address");
+        } else if (kind == 2) {
+            ll_symbol_extra_powerpc *extra =
+                ll_make_symbol_extra_powerpc(&object, 8, UINT32_C(0xfedcba98));
+            slot = extra;
+            written = sizeof(*extra);
+            CHECK((uint16_t)extra->jumpIsland.lis_r12 == 0x3d80 &&
+                  (uint16_t)extra->jumpIsland.hi_addr == 0xfedc &&
+                  (uint16_t)extra->jumpIsland.ori_r12_r12 == 0x618c &&
+                  (uint16_t)extra->jumpIsland.lo_addr == 0xba98 &&
+                  extra->jumpIsland.mtctr_r12 == 0x7d8903a6 &&
+                  extra->jumpIsland.bctr == 0x4e800420,
+                  "PowerPC emitter changed native field stores");
+        } else {
+            slot = ll_symbol_extra_arm_slot(&object, 8);
+        }
+        CHECK(slot == bytes + SLOT_STRIDE,
+              "target emitter ignored recorded stride or first symbol index");
+        for (size_t i = 0; i < BUFFER_SIZE; ++i) {
+            if (i < SLOT_STRIDE || i >= SLOT_STRIDE + written)
+                CHECK(bytes[i] == 0xa5, "target emitter wrote outside its payload");
+        }
+    }
+#if defined(x86_64_HOST_ARCH) && !defined(mingw32_HOST_OS)
+    memset(bytes, 0xa5, BUFFER_SIZE);
+    SymbolExtra *native = makeSymbolExtra(&object, 7, (unsigned long)target);
+    ll_symbol_extra_x86_64 *typed =
+        ll_make_symbol_extra_x86_64(&object, 9, target);
+    CHECK((void *)native == bytes && (void *)typed == bytes + 2 * SLOT_STRIDE,
+          "native wrapper or target emitter selected the wrong boundary slot");
+    CHECK(memcmp(native, typed, sizeof(*typed)) == 0,
+          "native compatibility emitter changed payload bytes");
+#endif
+    free(bytes);
+}
+
 int main(void)
 {
     ll_linker owner = {0};
@@ -272,6 +341,7 @@ int main(void)
     ll_init_linker(&owner, 0);
     ll_init_linker_mmap(&owner);
     ll_mutex_lock_for(&owner, &owner.linker_mutex);
+    check_target_emitters(&owner);
     check_shared_origin(&owner);
     check_format_got(&owner);
     const size_t strides[] = {0, 8, 16};

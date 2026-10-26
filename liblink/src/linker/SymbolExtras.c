@@ -152,21 +152,45 @@ bool ocProtectExtras(ObjectCode* oc)
 }
 
 
-#if defined(NEED_SYMBOL_EXTRAS)
-#if !defined(x86_64_HOST_ARCH) || !defined(mingw32_HOST_OS)
-#if defined(powerpc_HOST_ARCH) || defined(x86_64_HOST_ARCH) || defined(riscv64_HOST_ARCH)
-SymbolExtra* makeSymbolExtra( ObjectCode const* oc,
-                              unsigned long symbolNumber,
-                              unsigned long target )
+/* The allocation records its target stride. The native compatibility pointer
+ * is only an address here: indexing it as SymbolExtra[] would use host size. */
+static void *symbolExtraSlot(ObjectCode const *oc, unsigned long symbolNumber)
 {
-    SymbolExtra *extra;
-
     LL_ASSERT_FOR(oc->L, symbolNumber >= oc->first_symbol_extra
             && symbolNumber - oc->first_symbol_extra < oc->n_symbol_extras);
+    return (unsigned char *)(void *)oc->symbol_extras +
+        (symbolNumber - oc->first_symbol_extra) * oc->symbol_extra_stride;
+}
 
-    extra = &oc->symbol_extras[symbolNumber - oc->first_symbol_extra];
+ll_symbol_extra_x86_64 *ll_make_symbol_extra_x86_64(
+    ObjectCode const *oc, unsigned long symbolNumber, uint64_t target)
+{
+    ll_symbol_extra_x86_64 *extra = symbolExtraSlot(oc, symbolNumber);
+    // jmp *-14(%rip)
+    // 0xFF 25 is opcode + ModRM of near absolute indirect jump
+    // Two bytes trailing padding, needed for TLSGD GOT entries
+    // See Note [TLSGD relocation] in elf_tlsgd.c
+    static uint8_t jmp[] = { 0xFF, 0x25, 0xF2, 0xFF, 0xFF, 0xFF, 0x00, 0x00 };
+    extra->addr = target;
+    memcpy(extra->jumpIsland, jmp, 8);
+    return extra;
+}
 
-#if defined(powerpc_HOST_ARCH)
+ll_symbol_extra_riscv64 *ll_make_symbol_extra_riscv64(
+    ObjectCode const *oc, unsigned long symbolNumber, uint64_t target)
+{
+    ll_symbol_extra_riscv64 *extra = symbolExtraSlot(oc, symbolNumber);
+    // Fake GOT entry (used like GOT, but located in symbol extras)
+    extra->addr = target;
+    return extra;
+}
+
+ll_symbol_extra_powerpc *ll_make_symbol_extra_powerpc(
+    ObjectCode const *oc, unsigned long symbolNumber, uint32_t target)
+{
+    ll_symbol_extra_powerpc *extra = symbolExtraSlot(oc, symbolNumber);
+    /* Preserve native field stores. Foreign instruction byte order is a
+     * separate target execution/relocation policy, not supplied here. */
     // lis r12, hi16(target)
     extra->jumpIsland.lis_r12     = 0x3d80;
     extra->jumpIsland.hi_addr     = target >> 16;
@@ -180,22 +204,34 @@ SymbolExtra* makeSymbolExtra( ObjectCode const* oc,
 
     // bctr
     extra->jumpIsland.bctr        = 0x4e800420;
-#endif /* powerpc_HOST_ARCH */
-#if defined(x86_64_HOST_ARCH)
-    // jmp *-14(%rip)
-    // 0xFF 25 is opcode + ModRM of near absolute indirect jump
-    // Two bytes trailing padding, needed for TLSGD GOT entries
-    // See Note [TLSGD relocation] in elf_tlsgd.c
-    static uint8_t jmp[] = { 0xFF, 0x25, 0xF2, 0xFF, 0xFF, 0xFF, 0x00, 0x00 };
-    extra->addr = target;
-    memcpy(extra->jumpIsland, jmp, 8);
-#endif /* x86_64_HOST_ARCH */
-#if defined(riscv64_HOST_ARCH)
-    // Fake GOT entry (used like GOT, but located in symbol extras)
-    extra->addr = target;
-#endif
     return extra;
 }
+
+ll_symbol_extra_arm *ll_symbol_extra_arm_slot(
+    ObjectCode const *oc, unsigned long symbolNumber)
+{
+    /* ARM instructions are emitted by the existing section-PLT implementation.
+     * There is no current standalone makeArmSymbolExtra implementation to move. */
+    return symbolExtraSlot(oc, symbolNumber);
+}
+
+/* Retain the old native entry point for existing private clients. Backends use
+ * the explicit target functions above, including on a different compiler host. */
+#if defined(NEED_SYMBOL_EXTRAS)
+#if !defined(x86_64_HOST_ARCH) || !defined(mingw32_HOST_OS)
+#if defined(powerpc_HOST_ARCH) || defined(x86_64_HOST_ARCH) || defined(riscv64_HOST_ARCH)
+SymbolExtra *makeSymbolExtra(ObjectCode const *oc,
+                             unsigned long symbolNumber,
+                             unsigned long target)
+{
+#if defined(powerpc_HOST_ARCH)
+    return ll_make_symbol_extra_powerpc(oc, symbolNumber, target);
+#elif defined(x86_64_HOST_ARCH)
+    return ll_make_symbol_extra_x86_64(oc, symbolNumber, target);
+#else
+    return ll_make_symbol_extra_riscv64(oc, symbolNumber, target);
+#endif
+}
 #endif /* powerpc_HOST_ARCH || x86_64_HOST_ARCH || riscv64_HOST_ARCH */
-#endif /* !x86_64_HOST_ARCH) || !mingw32_HOST_OS */
-#endif // NEED_SYMBOL_EXTRAS
+#endif /* !x86_64_HOST_ARCH || !mingw32_HOST_OS */
+#endif /* NEED_SYMBOL_EXTRAS */

@@ -1852,7 +1852,7 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
 
             if( delta << 6 >> 6 != delta )
             {
-               value = (ll_elf_target_addr)(&makeSymbolExtra( oc, LL_ELF_R_SYM(info), value )
+               value = (ll_elf_target_addr)(&ll_make_symbol_extra_powerpc( oc, LL_ELF_R_SYM(info), value )
                                         ->jumpIsland);
                delta = value - P;
 
@@ -1918,7 +1918,7 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
                   return 0;
               }
               ll_int64 pltAddress =
-                  (ll_int64) &makeSymbolExtra(oc, LL_ELF_R_SYM(info), S)
+                  (ll_int64) &ll_make_symbol_extra_x86_64(oc, LL_ELF_R_SYM(info), S)
                                             -> jumpIsland;
               off = pltAddress + A - P;
           }
@@ -1961,7 +1961,7 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
                   return 0;
               }
               ll_int64 pltAddress =
-                  (ll_int64) &makeSymbolExtra(oc, LL_ELF_R_SYM(info), S)
+                  (ll_int64) &ll_make_symbol_extra_x86_64(oc, LL_ELF_R_SYM(info), S)
                                             -> jumpIsland;
               value = pltAddress + A;
           }
@@ -1997,7 +1997,7 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
                   return 0;
               }
               ll_int64 pltAddress =
-                  (ll_int64) &makeSymbolExtra(oc, LL_ELF_R_SYM(info), S)
+                  (ll_int64) &ll_make_symbol_extra_x86_64(oc, LL_ELF_R_SYM(info), S)
                                             -> jumpIsland;
               value = pltAddress + A;
           }
@@ -2018,7 +2018,7 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
       case COMPAT_R_X86_64_GOTPCRELX:
       case COMPAT_R_X86_64_GOTPCREL:
       {
-          ll_int64 gotAddress = (ll_int64) &makeSymbolExtra(oc, LL_ELF_R_SYM(info), S)->addr;
+          ll_int64 gotAddress = (ll_int64) &ll_make_symbol_extra_x86_64(oc, LL_ELF_R_SYM(info), S)->addr;
           ll_int64 off = gotAddress + A - P;
           if (off != (ll_elf64_sword)off) {
               ll_error_set(oc->L, LL_E_RELOC_RANGE,
@@ -2062,7 +2062,7 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
           struct tls_info ti;
           get_tls_area(0, &ti, sizeof(ti));
           /* make entry in GOT that contains said offset */
-          ll_int64 gotEntry = (ll_int64) &makeSymbolExtra(oc, LL_ELF_R_SYM(info),
+          ll_int64 gotEntry = (ll_int64) &ll_make_symbol_extra_x86_64(oc, LL_ELF_R_SYM(info),
                                          (S - (ll_elf64_addr)(ti.base)))->addr;
           ll_int64 off = gotEntry + A - P;
           if (off != (ll_elf64_sword)off) {
@@ -2086,7 +2086,7 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
       {
           ll_int64 off = value - P;
           if (off != (ll_elf64_sword)off) {
-              ll_int64 pltAddress = (ll_int64) &makeSymbolExtra(oc, LL_ELF_R_SYM(info), S)
+              ll_int64 pltAddress = (ll_int64) &ll_make_symbol_extra_x86_64(oc, LL_ELF_R_SYM(info), S)
                                                     -> jumpIsland;
               off = pltAddress + A - P;
           }

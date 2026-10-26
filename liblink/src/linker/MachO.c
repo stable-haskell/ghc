@@ -1014,7 +1014,7 @@ relocateSection(ObjectCode* oc, int curSection)
 
             // creates a jump island for every relocation entry for a symbol
             // TODO (AP): use got_addr to store the loc. of a jump island to reuse later
-            value = (uint64_t) &makeSymbolExtra(oc, reloc->r_symbolnum, (unsigned long)addr)->addr;
+            value = (uint64_t) &ll_make_symbol_extra_x86_64(oc, reloc->r_symbolnum, (uint64_t)addr)->addr;
 
             type = LL_MACHO_X86_64_RELOC_SIGNED;
         }
@@ -1168,7 +1168,7 @@ relocateSection(ObjectCode* oc, int curSection)
             if((int32_t)(value - baseValue) != (int64_t)(value - baseValue))
             {
                 LL_CHECK_FOR(oc->L, reloc->r_extern);
-                value = (uint64_t) &makeSymbolExtra(oc, reloc->r_symbolnum, value)
+                value = (uint64_t) &ll_make_symbol_extra_x86_64(oc, reloc->r_symbolnum, value)
                                         -> jumpIsland;
             }
             if (!((int32_t)(value - baseValue) == (int64_t)(value - baseValue))) {

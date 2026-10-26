@@ -217,8 +217,8 @@ find_tls_sym(dlpi *info, size_t sz LL_UNUSED, void *data)
         if (strcmp(symname, wanted->tls_sym_name) == 0) {
             unsigned long target = sym->st_value - OFFSUB;
             /* Store the module id as GOT[0] in a new GOT entry */
-            SymbolExtra *extra =
-                makeSymbolExtra(wanted->tls_sym_object,
+            ll_symbol_extra_x86_64 *extra =
+                ll_make_symbol_extra_x86_64(wanted->tls_sym_object,
                                 wanted->tls_sym_indx,
                                 info->dlpi_tls_modid);
             /* Copy the target address to GOT[1] (a.k.a. jumpIsland) */

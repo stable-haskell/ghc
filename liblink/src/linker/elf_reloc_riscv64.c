@@ -562,7 +562,7 @@ bool computeAddend(ElfRelocationATable *relaTab, unsigned relNo, ll_elf_target_r
       GOT_Target = GOT_S;
     } else {
       // 2. Fake GOT entry with symbol extra entry.
-      SymbolExtra *symbolExtra = makeSymbolExtra(oc, LL_ELF_R_SYM(rel->r_info), S);
+      ll_symbol_extra_riscv64 *symbolExtra = ll_make_symbol_extra_riscv64(oc, LL_ELF_R_SYM(rel->r_info), S);
       addr_t* FAKE_GOT_S = &symbolExtra->addr;
       LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "R_RISCV_CALL_PLT w/ SymbolExtra = %p , "
                                   "entry = %p\n",
@@ -638,7 +638,7 @@ bool computeAddend(ElfRelocationATable *relaTab, unsigned relNo, ll_elf_target_r
       return true;
     } else {
       // 2. Fake GOT entry with symbol extra entry.
-      SymbolExtra *symbolExtra = makeSymbolExtra(oc, LL_ELF_R_SYM(rel->r_info), S);
+      ll_symbol_extra_riscv64 *symbolExtra = ll_make_symbol_extra_riscv64(oc, LL_ELF_R_SYM(rel->r_info), S);
       addr_t* FAKE_GOT_S = &symbolExtra->addr;
       addr_t res = (addr_t) FAKE_GOT_S + A - P;
       LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "R_RISCV_GOT_HI20 w/ SymbolExtra = %p , "

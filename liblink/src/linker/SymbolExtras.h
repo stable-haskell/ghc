@@ -12,6 +12,18 @@ int ocAllocateExtras(ObjectCode *oc, int count, int first, int bssSize,
                      size_t extra_stride, ll_extra_refresh_fn refresh);
 bool ocProtectExtras(ObjectCode* oc);
 
+/* Slots must have the selected payload's size/alignment; their spacing is the
+ * recorded per-object stride. These writers retain native-endian field stores.
+ * ARM only exposes storage: its existing section PLT owns instruction emission. */
+ll_symbol_extra_x86_64 *ll_make_symbol_extra_x86_64(
+    ObjectCode const *oc, unsigned long symbolNumber, uint64_t target);
+ll_symbol_extra_riscv64 *ll_make_symbol_extra_riscv64(
+    ObjectCode const *oc, unsigned long symbolNumber, uint64_t target);
+ll_symbol_extra_powerpc *ll_make_symbol_extra_powerpc(
+    ObjectCode const *oc, unsigned long symbolNumber, uint32_t target);
+ll_symbol_extra_arm *ll_symbol_extra_arm_slot(
+    ObjectCode const *oc, unsigned long symbolNumber);
+
 #if defined(NEED_SYMBOL_EXTRAS)
 #if defined(arm_HOST_ARCH)
 SymbolExtra* makeArmSymbolExtra( ObjectCode const* oc,

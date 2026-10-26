@@ -111,6 +111,15 @@ injected mapping failures retain the original image bytes, allocation owner,
 and diagnostic until normal disposal. Every case balances owner allocations.
 The original `format_archive` ownership assertion remains unchanged.
 
+The same storage unit also checks all named target emitters using heap storage,
+nonzero symbol indices, and a padded recorded stride. It checks full-width x64
+and RISC-V addresses, exact x64 jump bytes, unchanged PowerPC field stores,
+untouched adjacent bytes, the ARM slot accessor's lack of writes, and native
+x64 wrapper equivalence. ARM instruction emission remains in the section PLT;
+there was no standalone ARM emitter implementation to migrate. These data-only
+checks do not execute foreign instructions or establish foreign byte-order
+policy. PowerPC foreign byte-order handling remains a WP2.8 concern.
+
 `symbol_extras_storage.c` tests the shared allocation primitive with target
 strides 0, 8, and 16 independently of native payload selection. It checks
 mapping/BSS lengths, zeroing, unchanged input bytes, refresh timing and failure
