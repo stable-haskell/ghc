@@ -17,6 +17,7 @@
 #include "linker/MMap.h"
 #include "linker/BackendMemory.h"
 #include "linker/Elf.h"
+#include "linker/elf_reloc_x86_64.h"
 #include "linker/InitFini.h"
 #include "ll_format.h"
 
@@ -118,7 +119,6 @@
  * (STT_OBJECT, STT_NOTYPE — which includes GHC's _con_info symbols) trigger
  * a clear error message directing the user to recompile with -fPIC.
  */
-#define X86_64_ELF_NONPIC_HACK(L) (!(L)->services.cfg.always_pic)
 
 #include "elf_got.h"
 
@@ -1728,7 +1728,7 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
       ll_elf_target_addr  P      = targ + offset;
       ll_elf_target_addr  A      = rtab[j].r_addend;
 #endif
-#if LL_TARGET_POWERPC || LL_TARGET_X86_64
+#if LL_TARGET_POWERPC
       ll_elf_target_addr  value;
 #endif
       ll_elf_target_addr  info   = rtab[j].r_info;
@@ -1816,10 +1816,25 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
       checkProddableBlock(oc->L, &oc->proddables, (void*)P, sizeof(ll_elf_target_word));
 #endif
 
-#if LL_TARGET_POWERPC || LL_TARGET_X86_64
+#if LL_TARGET_POWERPC
       value = S + A;
 #endif
 
+#if LL_TARGET_X86_64
+      const ll_reloc_context context = {
+          .symbol_index = LL_ELF_R_SYM(info),
+          .symbol_name = symbol,
+          .format_symbol_type = info != 0
+              ? LL_ELF_ST_TYPE(stab[LL_ELF_R_SYM(info)].st_info) : 0
+      };
+      const ll_site site = {.work = (uint8_t *)P, .exec = (uintptr_t)P};
+      /* Existing ELF resolution does not request a normalized provider type.
+       * Raw referencing-file type retains the original eligibility checks. */
+      if (!ll_elf_x86_64_reloc_ops.apply(oc, &oc->sections[target_shndx],
+              LL_ELF_R_TYPE(info), site, S, rtab[j].r_addend, (ll_sym_type)0,
+              &context))
+          return 0;
+#else
       switch (LL_ELF_R_TYPE(info)) {
 #        if LL_TARGET_POWERPC
          case LL_ELF_R_PPC_ADDR16_LO:
@@ -1882,229 +1897,6 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
             break;
 #        endif
 
-#if LL_TARGET_X86_64
-      case COMPAT_R_X86_64_NONE:
-          break;
-
-      case COMPAT_R_X86_64_64:
-      {
-          ll_elf64_xword payload = value;
-          memcpy((void*)P, &payload, sizeof(payload));
-          break;
-      }
-
-      case COMPAT_R_X86_64_PC32:
-      {
-          ll_int64 off = value - P;
-          if (off != (ll_elf64_sword)off && X86_64_ELF_NONPIC_HACK(oc->L)) {
-              /* Check symbol type: jump islands only work for code (functions).
-               * For data references (STT_OBJECT, STT_NOTYPE), the jump island
-               * address would be used as a data pointer (e.g., info table pointer),
-               * causing GC crashes ("strange closure type").
-               * See Note [X86_64_ELF_NONPIC_HACK and data references] */
-              unsigned char symtype = LL_ELF_ST_TYPE(stab[LL_ELF_R_SYM(info)].st_info);
-              if (symtype != LL_ELF_STT_FUNC) {
-                  ll_error_set(oc->L, LL_E_RELOC_RANGE,
-                               "R_X86_64_PC32 overflow for non-function symbol `%s'",
-                               symbol);
-                  LL_LOG_ERROR_FOR(oc->L,
-                      "R_X86_64_PC32 overflow for non-function symbol `%s' "
-                      "(type %d, distance 0x%" PRIx64 ").\n"
-                      "    Jump islands only work for code, not data references.\n"
-                      "    Recompile %s with -fPIC -fexternal-dynamic-refs.",
-                      symbol, symtype, (uint64_t)(value - P), oc->fileName);
-                  return 0;
-              }
-              ll_int64 pltAddress =
-                  (ll_int64) &ll_make_symbol_extra_x86_64(oc, LL_ELF_R_SYM(info), S)
-                                            -> jumpIsland;
-              off = pltAddress + A - P;
-          }
-          if (off != (ll_elf64_sword)off) {
-              ll_error_set(oc->L, LL_E_RELOC_RANGE,
-                           "R_X86_64_PC32 relocation out of range: %s", symbol);
-              LL_LOG_ERROR_FOR(oc->L,
-                  "R_X86_64_PC32 relocation out of range: %s = %" PRIx64
-                  "\nRecompile %s with -fPIC -fexternal-dynamic-refs.",
-                  symbol, off, oc->fileName);
-              return 0;
-          }
-          ll_elf64_sword payload = off;
-          memcpy((void*)P, &payload, sizeof(payload));
-          break;
-      }
-
-      case COMPAT_R_X86_64_PC64:
-      {
-          ll_elf64_sxword payload = value - P;
-          memcpy((void*)P, &payload, sizeof(payload));
-          break;
-      }
-
-      case COMPAT_R_X86_64_32:
-      {
-          if (value != (ll_elf64_word)value && X86_64_ELF_NONPIC_HACK(oc->L)) {
-              /* See Note [X86_64_ELF_NONPIC_HACK and data references] */
-              unsigned char symtype = LL_ELF_ST_TYPE(stab[LL_ELF_R_SYM(info)].st_info);
-              if (symtype != LL_ELF_STT_FUNC) {
-                  ll_error_set(oc->L, LL_E_RELOC_RANGE,
-                               "R_X86_64_32 overflow for non-function symbol `%s'",
-                               symbol);
-                  LL_LOG_ERROR_FOR(oc->L,
-                      "R_X86_64_32 overflow for non-function symbol `%s' "
-                      "(type %d, value 0x%" PRIx64 ").\n"
-                      "    Jump islands only work for code, not data references.\n"
-                      "    Recompile %s with -fPIC -fexternal-dynamic-refs.",
-                      symbol, symtype, (uint64_t)value, oc->fileName);
-                  return 0;
-              }
-              ll_int64 pltAddress =
-                  (ll_int64) &ll_make_symbol_extra_x86_64(oc, LL_ELF_R_SYM(info), S)
-                                            -> jumpIsland;
-              value = pltAddress + A;
-          }
-          if (value != (ll_elf64_word)value) {
-              ll_error_set(oc->L, LL_E_RELOC_RANGE,
-                           "R_X86_64_32 relocation out of range: %s", symbol);
-              LL_LOG_ERROR_FOR(oc->L,
-                  "R_X86_64_32 relocation out of range: %s = %" PRIx64
-                  "\nRecompile %s with -fPIC -fexternal-dynamic-refs.",
-                  symbol, value, oc->fileName);
-              return 0;
-          }
-          ll_elf64_word payload = value;
-          memcpy((void*)P, &payload, sizeof(payload));
-          break;
-      }
-
-      case COMPAT_R_X86_64_32S:
-      {
-          if ((ll_int64)value != (ll_elf64_sword)value && X86_64_ELF_NONPIC_HACK(oc->L)) {
-              /* See Note [X86_64_ELF_NONPIC_HACK and data references] */
-              unsigned char symtype = LL_ELF_ST_TYPE(stab[LL_ELF_R_SYM(info)].st_info);
-              if (symtype != LL_ELF_STT_FUNC) {
-                  ll_error_set(oc->L, LL_E_RELOC_RANGE,
-                               "R_X86_64_32S overflow for non-function symbol `%s'",
-                               symbol);
-                  LL_LOG_ERROR_FOR(oc->L,
-                      "R_X86_64_32S overflow for non-function symbol `%s' "
-                      "(type %d, value 0x%" PRIx64 ").\n"
-                      "    Jump islands only work for code, not data references.\n"
-                      "    Recompile %s with -fPIC -fexternal-dynamic-refs.",
-                      symbol, symtype, (uint64_t)value, oc->fileName);
-                  return 0;
-              }
-              ll_int64 pltAddress =
-                  (ll_int64) &ll_make_symbol_extra_x86_64(oc, LL_ELF_R_SYM(info), S)
-                                            -> jumpIsland;
-              value = pltAddress + A;
-          }
-          if ((ll_int64)value != (ll_elf64_sword)value) {
-              ll_error_set(oc->L, LL_E_RELOC_RANGE,
-                           "R_X86_64_32S relocation out of range: %s", symbol);
-              LL_LOG_ERROR_FOR(oc->L,
-                  "R_X86_64_32S relocation out of range: %s = %" PRIx64
-                  "\nRecompile %s with -fPIC -fexternal-dynamic-refs.",
-                  symbol, value, oc->fileName);
-              return 0;
-          }
-          ll_elf64_sword payload = value;
-          memcpy((void*)P, &payload, sizeof(payload));
-          break;
-      }
-      case COMPAT_R_X86_64_REX_GOTPCRELX:
-      case COMPAT_R_X86_64_GOTPCRELX:
-      case COMPAT_R_X86_64_GOTPCREL:
-      {
-          ll_int64 gotAddress = (ll_int64) &ll_make_symbol_extra_x86_64(oc, LL_ELF_R_SYM(info), S)->addr;
-          ll_int64 off = gotAddress + A - P;
-          if (off != (ll_elf64_sword)off) {
-              ll_error_set(oc->L, LL_E_RELOC_RANGE,
-                  "COMPAT_R_X86_64_GOTPCREL relocation out of range: "
-                  "%s = %" PRIx64 " in %s.",
-                  symbol, (uint64_t)off, oc->fileName);
-              LL_LOG_ERROR_FOR(oc->L,
-                  "COMPAT_R_X86_64_GOTPCREL relocation out of range: "
-                  "%s = %" PRIx64 " in %s.",
-                  symbol, off, oc->fileName);
-              return 0;
-          }
-          ll_elf64_sword payload = off;
-          memcpy((void*)P, &payload, sizeof(payload));
-          break;
-      }
-      case COMPAT_R_X86_64_TLSGD:
-      {
-          ll_int64 off = S + A - P;
-          if (off != (ll_elf64_sword)off) {
-              ll_error_set(oc->L, LL_E_RELOC_RANGE,
-                  "COMPAT_R_X86_64_TLSGD relocation out of range: "
-                  "%s = %" PRIx64 " in %s.",
-                  symbol, (uint64_t)off, oc->fileName);
-              LL_LOG_ERROR_FOR(oc->L,
-                  "COMPAT_R_X86_64_TLSGD relocation out of range: "
-                  "%s = %" PRIx64 " in %s.",
-                  symbol, off, oc->fileName);
-              return 0;
-          }
-          ll_elf64_sword payload = off;
-          memcpy((void*)P, &payload, sizeof(payload));
-          break;
-      }
-#if defined(dragonfly_HOST_OS)
-      case COMPAT_R_X86_64_GOTTPOFF:
-      {
-        /* determine the offset of S to the current thread's tls
-           area
-           XXX: Move this to the beginning of function */
-          struct tls_info ti;
-          get_tls_area(0, &ti, sizeof(ti));
-          /* make entry in GOT that contains said offset */
-          ll_int64 gotEntry = (ll_int64) &ll_make_symbol_extra_x86_64(oc, LL_ELF_R_SYM(info),
-                                         (S - (ll_elf64_addr)(ti.base)))->addr;
-          ll_int64 off = gotEntry + A - P;
-          if (off != (ll_elf64_sword)off) {
-              ll_error_set(oc->L, LL_E_RELOC_RANGE,
-                  "COMPAT_R_X86_64_GOTTPOFF relocation out of range: "
-                  "%s = %" PRIx64 " in %s.",
-                  symbol, (uint64_t)off, oc->fileName);
-              LL_LOG_ERROR_FOR(oc->L,
-                  "COMPAT_R_X86_64_GOTTPOFF relocation out of range: "
-                  "%s = %" PRIx64 " in %s.",
-                  symbol, off, oc->fileName);
-              return 0;
-          }
-          Elf64_SWord payload = off;
-          memcpy((void*)P, &payload, sizeof(payload));
-          break;
-      }
-#endif
-
-      case COMPAT_R_X86_64_PLT32:
-      {
-          ll_int64 off = value - P;
-          if (off != (ll_elf64_sword)off) {
-              ll_int64 pltAddress = (ll_int64) &ll_make_symbol_extra_x86_64(oc, LL_ELF_R_SYM(info), S)
-                                                    -> jumpIsland;
-              off = pltAddress + A - P;
-          }
-          if (off != (ll_elf64_sword)off) {
-              ll_error_set(oc->L, LL_E_RELOC_RANGE,
-                  "R_X86_64_PLT32 relocation out of range: "
-                  "%s = %" PRIx64 " in %s.",
-                  symbol, (uint64_t)off, oc->fileName);
-              LL_LOG_ERROR_FOR(oc->L,
-                  "R_X86_64_PLT32 relocation out of range: "
-                  "%s = %" PRIx64 " in %s.",
-                  symbol, off, oc->fileName);
-              return 0;
-          }
-          ll_elf64_sword payload = off;
-          memcpy((void*)P, &payload, sizeof(payload));
-          break;
-      }
-#endif
-
          default:
             ll_error_set(oc->L, LL_E_UNSUPPORTED,
                          "%s: unhandled ELF relocation(RelA) type %" LL_FMT_WORD "\n",
@@ -2113,6 +1905,8 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
                   oc->fileName, (ll_w)LL_ELF_R_TYPE(info));
             return 0;
       }
+
+#endif /* LL_TARGET_X86_64 */
 
    }
    return 1;

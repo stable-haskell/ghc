@@ -8,10 +8,21 @@ typedef struct _Section Section;
 
 typedef struct { uint8_t *work; uintptr_t exec; } ll_site;
 
+/* Borrowed, immutable input for one synchronous apply call; never retain it.
+ * The index and raw type describe the referencing file's symbol entry, not
+ * the resolved provider. The name is its existing diagnostic string (possibly
+ * NULL where the original relocation has no name). */
+typedef struct {
+    size_t symbol_index;
+    const char *symbol_name;
+    uint32_t format_symbol_type;
+} ll_reloc_context;
+
 struct ll_reloc_ops {
     uint16_t machine;
     int (*apply)(ObjectCode *oc, Section *s, uint32_t type, ll_site P,
-                 uintptr_t S, int64_t A, ll_sym_type st);
+                 uintptr_t S, int64_t A, ll_sym_type st,
+                 const ll_reloc_context *context);
     size_t extra_bytes_per_symbol;
 };
 
