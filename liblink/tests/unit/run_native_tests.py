@@ -1319,6 +1319,13 @@ def main() -> int:
             label="compile and link format_archive")
         run([str(registry_test), str(member)], label="run format_archive")
 
+        extras_image_test = output / "symbol_extras_image"
+        run(cc + native_unit_link_arguments(
+            ROOT / "liblink/tests/unit/symbol_extras_image.c", archive,
+            extras_image_test, link_flags, []),
+            label="compile and link symbol_extras_image")
+        run([str(extras_image_test), str(member)], label="run symbol_extras_image")
+
         run_pathdup_ownership(cc, archive, output, link_flags, host)
 
         if host == "Darwin":

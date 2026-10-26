@@ -34,6 +34,11 @@ Native shared libraries retain their OS loader path and have no static format
 vtable. Static finalizers still run only after successful initialization, then
 __cxa_finalize runs before format metadata, image, and section storage are freed.
 
+When symbol extras replace an image with a contiguous mapping, the old image
+storage is released after copying: mapped images are unmapped; heap images
+release their original allocation base, accounting for stored misalignment.
+A failed replacement leaves the original image and its ownership intact.
+
 Locking
 -------
 

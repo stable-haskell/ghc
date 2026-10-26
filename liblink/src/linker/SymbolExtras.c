@@ -54,7 +54,7 @@
 
 int ocAllocateExtras(ObjectCode* oc, int count, int first, int bssSize)
 {
-  void* oldImage = oc->image;
+  const uintptr_t old_image_address = (uintptr_t)oc->image;
   const size_t extras_size = sizeof(SymbolExtra) * count;
 
   if (count > 0 || bssSize > 0) {
@@ -88,6 +88,8 @@ int ocAllocateExtras(ObjectCode* oc, int count, int first, int bssSize)
           memcpy(new, oc->image, oc->fileSize);
           if (oc->imageMapped) {
               ll_munmap_for_linker(oc->L, oc->image, n, "ocAllocateExtras");
+          } else {
+              LL_FREE_FOR(oc->L, oc->image - oc->misalignment);
           }
           oc->image = new;
           oc->imageMapped = true;
@@ -115,7 +117,7 @@ int ocAllocateExtras(ObjectCode* oc, int count, int first, int bssSize)
   // ObjectCodeFormatInfo contains computed addresses based on offset to
   // image, if the address of image changes, we need to invalidate
   // the ObjectCodeFormatInfo and recompute it.
-  if (oc->image != oldImage) {
+  if ((uintptr_t)oc->image != old_image_address) {
 #if defined(OBJFORMAT_MACHO)
     if (!ocInit_MachO(oc)) return 0;
 #endif

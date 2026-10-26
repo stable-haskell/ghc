@@ -111,6 +111,7 @@ extra-source-files:
     tests/unit/archive_error_status.c
     tests/unit/format_archive.c
     tests/unit/format_archive_member.c
+    tests/unit/symbol_extras_image.c
     tests/unit/core_error_status.c
     tests/unit/error_state.c
     tests/unit/format_dispatch.c

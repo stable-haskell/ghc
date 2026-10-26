@@ -103,6 +103,14 @@ Darwin linker syntax.
 Stage2 native C unit driver
 ===========================
 
+`symbol_extras_image.c` uses a valid compiler-produced native object to check
+heap-to-mapping image replacement. It includes the real shared allocator with
+only mapping calls intercepted. Positive controls cover heap images at offsets
+0 and 8; the mapped-image regression requires one old mapping release. Three
+injected mapping failures retain the original image bytes, allocation owner,
+and diagnostic until normal disposal. Every case balances owner allocations.
+The original `format_archive` ownership assertion remains unchanged.
+
 After a successful top-level `make stage2`, run the focused units from the
 repository root with:
 
