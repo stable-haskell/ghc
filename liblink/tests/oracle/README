@@ -51,3 +51,11 @@ The Apple SDK's mach-o/arm64/reloc.h provides further object-file examples.
 No backend implementation is imported. Other formats, local relocation
 forms, and post-NO_EXEC coverage are later extensions; unsupported oracle
 inputs fail explicitly.
+
+Unsupported relocation captures use the compatibility linker's status-returning
+failure path. Their expected exit and complete diagnostic remain strict; the
+literal `{object}` in a diagnostic expands only to that fixture's exact input
+path. This keeps the expected text portable across checkouts. The former abort
+expectation predates the approved error-model conversion. The unchanged
+WP2.5 base and format-dispatch candidate both return exit 5 for POINTER_TO_GOT.
+Numeric relocation goldens and the independent arithmetic checks are unchanged.

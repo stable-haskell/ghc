@@ -90,7 +90,7 @@ class OracleTests(unittest.TestCase):
                          saved['expected_relocations'])
         result = subprocess.run([self.runner, str(path)], capture_output=True, text=True, timeout=30)
         self.assertEqual((result.returncode, result.stdout, result.stderr),
-                         (saved['exit'], '', saved['diagnostic']))
+                         (saved['exit'], '', saved['diagnostic'].replace('{object}', str(path))))
 
     def test_wrong_field_even_with_consistent_section_snapshot(self):
         def mutate(capture):

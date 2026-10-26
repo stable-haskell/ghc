@@ -1,6 +1,6 @@
 {
-  "diagnostic": "Relocation of type: 7 not (yet) supported!\n\n",
-  "exit": -6,
+  "diagnostic": "Relocation of type: 7 not (yet) supported!\nCould not load Object Code {object}.\nll_compat_resolveObjs failed before relocation capture (ok=0, captured=0)\n",
+  "exit": 5,
   "expected_relocations": [
     "ARM64_RELOC_POINTER_TO_GOT"
   ],
