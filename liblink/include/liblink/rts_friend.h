@@ -39,6 +39,26 @@ struct ll_format_ops;
 typedef struct _ObjectCode ObjectCode;
 typedef struct _Section Section;
 
+/* Each format owns its metadata. The native names remain temporary aliases
+ * for RTS clients and fixtures while this shared interface is retired. */
+struct ll_elf_object_info;
+struct ll_elf_section_info;
+struct ll_macho_object_info;
+struct ll_macho_section_info;
+struct ll_coff_object_info;
+struct ll_coff_section_info;
+
+#if defined(OBJFORMAT_ELF)
+#define ObjectCodeFormatInfo ll_elf_object_info
+#define SectionFormatInfo ll_elf_section_info
+#elif defined(OBJFORMAT_MACHO)
+#define ObjectCodeFormatInfo ll_macho_object_info
+#define SectionFormatInfo ll_macho_section_info
+#elif defined(OBJFORMAT_PEi386)
+#define ObjectCodeFormatInfo ll_coff_object_info
+#define SectionFormatInfo ll_coff_section_info
+#endif
+
 #if defined(OBJFORMAT_ELF)
 #include <elf.h>
 /* Match the word type selected by the private ELF backend. */
@@ -153,11 +173,21 @@ struct _Section {
   void* mapped_start;         /* start of mmap() block */
   ll_word mapped_size;        /* size of mmap() block */
 
-  /* A customizable type to augment the Section type.
-   * See Note [No typedefs for customizable types]
-   */
-  struct SectionFormatInfo* info;
+  /* These views alias one allocation, owned by the selected format. All
+   * members are pointers to structs, with identical representation/alignment. */
+  union {
+    struct SectionFormatInfo *info;
+    struct ll_elf_section_info *elf_info;
+    struct ll_macho_section_info *macho_info;
+    struct ll_coff_section_info *coff_info;
+  };
 };
+
+_Static_assert(sizeof(Section) - offsetof(Section, info) ==
+               sizeof(struct SectionFormatInfo *),
+               "section metadata views must occupy one native pointer");
+_Static_assert(_Alignof(Section) == _Alignof(struct SectionFormatInfo *),
+               "section metadata views must preserve native alignment");
 
 typedef struct _Segment {
     void *start;                /* page aligned start address of a segment */
@@ -242,10 +272,13 @@ struct _ObjectCode {
     /* ptr to mem containing the object file image */
     char*      image;
 
-    /* A customizable type, that formats can use to augment ObjectCode
-     * See Note [No typedefs for customizable types]
-     */
-    struct ObjectCodeFormatInfo* info;
+    /* One format-owned allocation, with typed views for each backend. */
+    union {
+        struct ObjectCodeFormatInfo *info;
+        struct ll_elf_object_info *elf_info;
+        struct ll_macho_object_info *macho_info;
+        struct ll_coff_object_info *coff_info;
+    };
 
     /* non-zero if the object file was mmap'd, otherwise malloc'd */
     int        imageMapped;
@@ -368,6 +401,10 @@ struct _ObjectCode {
      * releases the original image (PE import objects). Native DLLs use NULL. */
     const struct ll_format_ops *format_ops;
 };
+
+_Static_assert(offsetof(ObjectCode, imageMapped) ==
+               offsetof(ObjectCode, info) + sizeof(struct ObjectCodeFormatInfo *),
+               "object metadata views must occupy one native pointer");
 
 /* Borrowed RTS view into the default linker's state. The RTS binds this once
  * before adjustor initialization and accesses the fields directly during GC.

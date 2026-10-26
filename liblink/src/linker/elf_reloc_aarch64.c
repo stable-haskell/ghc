@@ -363,7 +363,7 @@ computeAddend(ll_linker *L, Section * section, Elf_Rel * rel,
 
 bool
 relocateObjectCodeAarch64(ObjectCode * oc) {
-    for(ElfRelocationTable *relTab = oc->info->relTable;
+    for(ElfRelocationTable *relTab = oc->elf_info->relTable;
         relTab != NULL; relTab = relTab->next) {
         /* only relocate interesting sections */
         if (SECTIONKIND_OTHER == oc->sections[relTab->targetSectionIndex].kind)
@@ -394,7 +394,7 @@ relocateObjectCodeAarch64(ObjectCode * oc) {
                 return EXIT_FAILURE;
         }
     }
-    for(ElfRelocationATable *relaTab = oc->info->relaTable;
+    for(ElfRelocationATable *relaTab = oc->elf_info->relaTable;
         relaTab != NULL; relaTab = relaTab->next) {
         /* only relocate interesting sections */
         if (SECTIONKIND_OTHER == oc->sections[relaTab->targetSectionIndex].kind)

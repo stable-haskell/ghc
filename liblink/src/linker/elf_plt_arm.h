@@ -7,6 +7,6 @@
 extern const size_t stubSizeArm;
 bool needStubForRelArm(Elf_Rel * rel);
 bool needStubForRelaArm(Elf_Rela * rel);
-bool makeStubArm(Stub * s);
+bool makeStubArm(ElfStub * s);
 
 #endif

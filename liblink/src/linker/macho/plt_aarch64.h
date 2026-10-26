@@ -17,7 +17,7 @@
 
 extern const size_t stubSizeAarch64;
 bool needStubForRelAarch64(MachORelocationInfo * rel);
-bool makeStubAarch64(Stub * s);
+bool makeStubAarch64(MachOStub * s);
 
 #endif
 

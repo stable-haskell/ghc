@@ -140,7 +140,7 @@ typedef struct _ElfRelocationATable {
  * Header provides Information about the sections.
  *
  */
-struct ObjectCodeFormatInfo {
+struct ll_elf_object_info {
     Elf_Ehdr             *elfHeader;
     Elf_Phdr             *programHeader;
     Elf_Shdr             *sectionHeader;
@@ -164,7 +164,7 @@ struct ObjectCodeFormatInfo {
 };
 
 typedef
-struct _Stub {
+struct _ElfStub {
     void * addr;
     void * target;
     void* got_addr;
@@ -173,17 +173,20 @@ struct _Stub {
      * different flags are considered unequal.
     */
     uint8_t flags;
-    struct _Stub * next;
-} Stub;
+    struct _ElfStub * next;
+} ElfStub;
 
-struct SectionFormatInfo {
+/* Temporary native alias for existing RTS clients and fixtures. */
+typedef ElfStub Stub;
+
+struct ll_elf_section_info {
     /*
      * The following fields are relevant for stubs next to sections only.
      */
     void * stub_offset;
     size_t stub_size;
     size_t nstubs;
-    Stub * stubs;
+    ElfStub * stubs;
 
     const char * name;
 

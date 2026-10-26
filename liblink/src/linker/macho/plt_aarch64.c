@@ -29,7 +29,7 @@ bool needStubForRelAarch64(MachORelocationInfo * rel) {
 
 /* see the elf_plt_aarch64.c for the discussion on this */
 bool
-makeStubAarch64(Stub * s) {
+makeStubAarch64(MachOStub * s) {
     uint32_t mov__hw0_x16 = 0xd2800000 | 16;
     uint32_t movk_hw0_x16 = mov__hw0_x16 | (1 << 29);
 

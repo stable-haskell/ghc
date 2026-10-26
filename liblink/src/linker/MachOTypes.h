@@ -34,7 +34,7 @@ typedef struct _MachOSymbol {
     bool needs_got;     /* See Note [Symbols in need of GOT entries] */
 } MachOSymbol;
 
-struct ObjectCodeFormatInfo {
+struct ll_macho_object_info {
     // while we have the image
     // we can store some pointers
     // into it, so we don't have
@@ -107,7 +107,7 @@ struct ObjectCodeFormatInfo {
  * TODO: Merge SymbolExtras and Stubs.
  */
 typedef
-struct _Stub {
+struct _MachOStub {
     void * addr;
     void * target;
     /* flags can hold architecture specific information they are used during
@@ -115,18 +115,21 @@ struct _Stub {
      * different flags are considered unequal.
     */
     uint8_t flags;
-    struct _Stub * next;
+    struct _MachOStub * next;
 }
-Stub;
+MachOStub;
 
-struct SectionFormatInfo {
+/* Temporary native alias for existing RTS clients and fixtures. */
+typedef MachOStub Stub;
+
+struct ll_macho_section_info {
     /*
      * The following fields are relevant for stubs next to sections only.
      */
     void * stub_offset;
     size_t stub_size;
     size_t nstubs;
-    Stub * stubs;
+    MachOStub * stubs;
 
     /*
      * The following fields make working with mach-o objects much easier.

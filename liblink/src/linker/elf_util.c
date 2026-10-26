@@ -6,7 +6,7 @@
 
 ElfSymbolTable *
 findSymbolTable(ObjectCode * oc, unsigned symbolTableIndex) {
-    for(ElfSymbolTable * t=oc->info->symbolTables; t != NULL; t = t->next)
+    for(ElfSymbolTable * t=oc->elf_info->symbolTables; t != NULL; t = t->next)
         if(t->index == symbolTableIndex)
             return t;
     return NULL;

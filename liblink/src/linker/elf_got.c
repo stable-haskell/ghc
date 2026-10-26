@@ -25,7 +25,7 @@ symbolHasNonNoneRelocation(ObjectCode *oc, unsigned symTabIndex,
                            size_t symIdx)
 {
     /* Scan REL relocation tables */
-    for (ElfRelocationTable *relTab = oc->info->relTable;
+    for (ElfRelocationTable *relTab = oc->elf_info->relTable;
          relTab != NULL; relTab = relTab->next) {
         if (relTab->sectionHeader->sh_link == symTabIndex) {
             for (size_t i = 0; i < relTab->n_relocations; i++) {
@@ -38,7 +38,7 @@ symbolHasNonNoneRelocation(ObjectCode *oc, unsigned symTabIndex,
         }
     }
     /* Scan RELA relocation tables */
-    for (ElfRelocationATable *relaTab = oc->info->relaTable;
+    for (ElfRelocationATable *relaTab = oc->elf_info->relaTable;
          relaTab != NULL; relaTab = relaTab->next) {
         if (relaTab->sectionHeader->sh_link == symTabIndex) {
             for (size_t i = 0; i < relaTab->n_relocations; i++) {
@@ -93,14 +93,14 @@ makeGot(ObjectCode * oc) {
      * and need to iterate over all symbols, to check how many
      * got slots we need at most
      */
-    LL_ASSERT_FOR(oc->L, oc->info != NULL );
-    LL_ASSERT_FOR(oc->L, oc->info->sectionHeader != NULL );
+    LL_ASSERT_FOR(oc->L, oc->elf_info != NULL );
+    LL_ASSERT_FOR(oc->L, oc->elf_info->sectionHeader != NULL );
     for(int i=0; i < oc->n_sections; i++) {
-        if(SHT_SYMTAB == oc->info->sectionHeader[i].sh_type) {
+        if(SHT_SYMTAB == oc->elf_info->sectionHeader[i].sh_type) {
             Elf_Sym *symTab =
-                (Elf_Sym*)((uint8_t*)oc->info->elfHeader
-                                   + oc->info->sectionHeader[i].sh_offset);
-            size_t n_symbols = oc->info->sectionHeader[i].sh_size
+                (Elf_Sym*)((uint8_t*)oc->elf_info->elfHeader
+                                   + oc->elf_info->sectionHeader[i].sh_offset);
+            size_t n_symbols = oc->elf_info->sectionHeader[i].sh_size
                                / sizeof(Elf_Sym);
             for(size_t j=0; j < n_symbols; j++) {
                 if(needGotSlot(&symTab[j])) {
@@ -114,23 +114,23 @@ makeGot(ObjectCode * oc) {
             ll_error_set(oc->L, LL_E_UNSUPPORTED, "ELF GOT allocation is too large");
             return EXIT_FAILURE;
         }
-        oc->info->got_size = got_slots * sizeof(void *);
-        void * mem = ll_mmap_anon_for_linker(oc->L, oc->info->got_size);
+        oc->elf_info->got_size = got_slots * sizeof(void *);
+        void * mem = ll_mmap_anon_for_linker(oc->L, oc->elf_info->got_size);
         if (mem == NULL) {
             LL_LOG_ERROR_FOR(oc->L, "MAP_FAILED. errno=%d", errno);
             return EXIT_FAILURE;
         }
 
-        oc->info->got_start = (void*)mem;
+        oc->elf_info->got_start = (void*)mem;
         /* update got_addr */
         size_t slot = 0;
-        for(ElfSymbolTable *symTab = oc->info->symbolTables;
+        for(ElfSymbolTable *symTab = oc->elf_info->symbolTables;
             symTab != NULL; symTab = symTab->next) {
 
             for(size_t i=0; i < symTab->n_symbols; i++)
                 if(needGotSlot(symTab->symbols[i].elf_sym))
                     symTab->symbols[i].got_addr
-                            = (uint8_t *)oc->info->got_start
+                            = (uint8_t *)oc->elf_info->got_start
                               + (slot++ * sizeof(void*));
         }
     }
@@ -140,7 +140,7 @@ makeGot(ObjectCode * oc) {
 bool
 fillGot(ObjectCode * oc) {
     /* fill the GOT table */
-    for(ElfSymbolTable *symTab = oc->info->symbolTables;
+    for(ElfSymbolTable *symTab = oc->elf_info->symbolTables;
         symTab != NULL; symTab = symTab->next) {
 
         for(size_t i=0; i < symTab->n_symbols; i++) {
@@ -159,7 +159,7 @@ fillGot(ObjectCode * oc) {
                             return EXIT_FAILURE;
                         if(0x0 == symbol->addr) {
                             if(0 == strncmp(symbol->name,"_GLOBAL_OFFSET_TABLE_",21)) {
-                                symbol->addr = oc->info->got_start;
+                                symbol->addr = oc->elf_info->got_start;
                             } else if (!symbolHasNonNoneRelocation(oc, symTab->index, i)) {
                                 /* Symbol is only referenced by R_*_NONE
                                  * (type 0) relocations, which are no-ops.
@@ -219,7 +219,7 @@ fillGot(ObjectCode * oc) {
     }
 
     // We are done initializing the GOT; freeze it.
-    if(mprotect(oc->info->got_start, oc->info->got_size, PROT_READ) != 0) {
+    if(mprotect(oc->elf_info->got_start, oc->elf_info->got_size, PROT_READ) != 0) {
         LL_LOG_SYSERROR_FOR(oc->L, "unable to protect memory");
     }
     return EXIT_SUCCESS;
@@ -227,7 +227,7 @@ fillGot(ObjectCode * oc) {
 
 bool
 verifyGot(ObjectCode * oc) {
-    for(ElfSymbolTable *symTab = oc->info->symbolTables;
+    for(ElfSymbolTable *symTab = oc->elf_info->symbolTables;
         symTab != NULL; symTab = symTab->next) {
         for(size_t i=0; i < symTab->n_symbols; i++) {
             ElfSymbol * symbol = &symTab->symbols[i];
@@ -243,11 +243,11 @@ verifyGot(ObjectCode * oc) {
 
 void
 freeGot(ObjectCode * oc) {
-    if (oc->info->got_start != NULL && oc->info->got_size != 0) {
-        ll_munmap_for_linker(oc->L, oc->info->got_start, oc->info->got_size,
+    if (oc->elf_info->got_start != NULL && oc->elf_info->got_size != 0) {
+        ll_munmap_for_linker(oc->L, oc->elf_info->got_start, oc->elf_info->got_size,
                             "freeGot");
     }
-    oc->info->got_start = NULL;
-    oc->info->got_size = 0;
+    oc->elf_info->got_start = NULL;
+    oc->elf_info->got_size = 0;
 }
 #endif

@@ -23,7 +23,7 @@ unsigned
 numberOfStubsForSection( ObjectCode *oc, unsigned sectionIndex) {
     unsigned n = 0;
 
-    MachOSection *section = &oc->info->macho_sections[sectionIndex];
+    MachOSection *section = &oc->macho_info->macho_sections[sectionIndex];
     const char *relocations = oc->image + section->reloff;
     if(section->size > 0) {
         for(size_t i = 0; i < section->nreloc; i++) {
@@ -42,7 +42,7 @@ bool
 findStub(Section * section,
           void* * addr,
           uint8_t flags) {
-    for(Stub * s = section->info->stubs; s != NULL; s = s->next) {
+    for(MachOStub * s = section->macho_info->stubs; s != NULL; s = s->next) {
         if(   s->target == *addr
            && s->flags  == flags) {
             *addr = s->addr;
@@ -57,7 +57,7 @@ makeStub(ll_linker *L, Section * section,
           void* * addr,
           uint8_t flags) {
 
-    Stub * s = (Stub *)LL_CALLOC_FOR(L, sizeof(Stub), 1, "makeStub");
+    MachOStub * s = (MachOStub *)LL_CALLOC_FOR(L, sizeof(MachOStub), 1, "makeStub");
     if (s == NULL) {
         ll_error_set(L, LL_E_NOMEM, "cannot allocate Mach-O branch stub metadata");
         return EXIT_FAILURE;
@@ -65,7 +65,7 @@ makeStub(ll_linker *L, Section * section,
     s->target = *addr;
     s->flags  = flags;
     s->next = NULL;
-    s->addr = (uint8_t *)section->info->stub_offset + STUB_SIZE * section->info->nstubs;
+    s->addr = (uint8_t *)section->macho_info->stub_offset + STUB_SIZE * section->macho_info->nstubs;
 
     if((*_makeStub)(s)) {
         LL_FREE_FOR(L, s);
@@ -73,32 +73,32 @@ makeStub(ll_linker *L, Section * section,
         return EXIT_FAILURE;
     }
 
-    if(section->info->stubs == NULL) {
-        LL_CHECK_FOR(L, section->info->nstubs == 0);
+    if(section->macho_info->stubs == NULL) {
+        LL_CHECK_FOR(L, section->macho_info->nstubs == 0);
         /* no stubs yet, let's just create this one */
-        section->info->stubs = s;
+        section->macho_info->stubs = s;
     } else {
-        Stub * tail = section->info->stubs;
+        MachOStub * tail = section->macho_info->stubs;
         while(tail->next != NULL) tail = tail->next;
         tail->next = s;
     }
-    section->info->nstubs += 1;
+    section->macho_info->nstubs += 1;
     *addr = s->addr;
     return EXIT_SUCCESS;
 }
 
 void
 freeStubs(ll_linker *L, Section * section) {
-    if(NULL == section || section->info == NULL)
+    if(NULL == section || section->macho_info == NULL)
         return;
-    Stub * stub = section->info->stubs;
+    MachOStub * stub = section->macho_info->stubs;
     while(stub != NULL) {
-        Stub * next = stub->next;
+        MachOStub * next = stub->next;
         LL_FREE_FOR(L, stub);
         stub = next;
     }
-    section->info->stubs = NULL;
-    section->info->nstubs = 0;
+    section->macho_info->stubs = NULL;
+    section->macho_info->nstubs = 0;
 }
 
 #endif // OBJECTFORMAT_MACHO

@@ -93,9 +93,10 @@ typedef struct _RtsSymbolInfo {
 
 ll_symbol_addr* loadSymbol(ll_linker *L, ll_symbol_name *lbl, RtsSymbolInfo *pinfo);
 
+/* The selected backend supplies its metadata size; existing metadata is kept. */
 void addSection (ll_linker *L, Section *s, SectionKind kind, SectionAlloc alloc,
                  void* start, ll_word size, ll_word mapped_offset,
-                 void* mapped_start, ll_word mapped_size);
+                 void* mapped_start, ll_word mapped_size, size_t format_info_size);
 
 ll_hs_bool ghciLookupSymbolInfo(ll_linker *L,
                             const ll_symbol_name* key, RtsSymbolInfo **result);

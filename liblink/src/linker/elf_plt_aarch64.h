@@ -7,6 +7,6 @@
 extern const size_t stubSizeAarch64;
 bool needStubForRelAarch64(Elf_Rel * rel);
 bool needStubForRelaAarch64(Elf_Rela * rel);
-bool makeStubAarch64(Stub * s);
+bool makeStubAarch64(ElfStub * s);
 
 #endif

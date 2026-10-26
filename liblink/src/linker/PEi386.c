@@ -673,28 +673,28 @@ void freePreloadObjectFile_PEi386(ObjectCode *oc)
         oc->image = NULL;
     }
 
-    if (oc->info) {
+    if (oc->coff_info) {
         /* Release the unwinder information.
            See Note [Exception Unwinding].  */
-        if (oc->info->pdata) {
-            if (!RtlDeleteFunctionTable (oc->info->pdata->start))
+        if (oc->coff_info->pdata) {
+            if (!RtlDeleteFunctionTable (oc->coff_info->pdata->start))
               LL_DEBUG_FOR(oc->L, "Unable to remove Exception handlers for %" PATH_FMT "\n",
                           oc->fileName);
-            oc->info->xdata = NULL;
-            oc->info->pdata = NULL;
+            oc->coff_info->xdata = NULL;
+            oc->coff_info->pdata = NULL;
         }
 
         /* Failed or never-started initialization still owns pending lists.
          * Successful init/fini execution has already cleared its list. */
-        freeInitFiniList(oc->L, oc->info->init);
-        freeInitFiniList(oc->L, oc->info->fini);
-        oc->info->init = NULL;
-        oc->info->fini = NULL;
-        if (oc->info->ch_info) {
-           LL_FREE_FOR(oc->L, oc->info->ch_info);
+        freeInitFiniList(oc->L, oc->coff_info->init);
+        freeInitFiniList(oc->L, oc->coff_info->fini);
+        oc->coff_info->init = NULL;
+        oc->coff_info->fini = NULL;
+        if (oc->coff_info->ch_info) {
+           LL_FREE_FOR(oc->L, oc->coff_info->ch_info);
         }
-        LL_FREE_FOR(oc->L, oc->info);
-        oc->info = NULL;
+        LL_FREE_FOR(oc->L, oc->coff_info);
+        oc->coff_info = NULL;
     }
 }
 
@@ -702,34 +702,34 @@ void freePreloadObjectFile_PEi386(ObjectCode *oc)
 static void releaseOcInfo(ObjectCode* oc) {
     if (!oc) return;
 
-    if (oc->info) {
-        freeInitFiniList(oc->L, oc->info->init);
-        freeInitFiniList(oc->L, oc->info->fini);
-        LL_FREE_FOR(oc->L, oc->info->ch_info);
-        LL_FREE_FOR(oc->L, oc->info->symbols);
-        LL_FREE_FOR(oc->L, oc->info->str_tab);
-        oc->info->init = NULL;
-        oc->info->fini = NULL;
-        oc->info->ch_info = NULL;
-        oc->info->symbols = NULL;
-        oc->info->str_tab = NULL;
+    if (oc->coff_info) {
+        freeInitFiniList(oc->L, oc->coff_info->init);
+        freeInitFiniList(oc->L, oc->coff_info->fini);
+        LL_FREE_FOR(oc->L, oc->coff_info->ch_info);
+        LL_FREE_FOR(oc->L, oc->coff_info->symbols);
+        LL_FREE_FOR(oc->L, oc->coff_info->str_tab);
+        oc->coff_info->init = NULL;
+        oc->coff_info->fini = NULL;
+        oc->coff_info->ch_info = NULL;
+        oc->coff_info->symbols = NULL;
+        oc->coff_info->str_tab = NULL;
         /* Failed resolution can follow exception-table registration. Keep
          * its record until physical disposal unregisters the live table. */
-        if (oc->info->pdata == NULL) {
-            LL_FREE_FOR(oc->L, oc->info);
-            oc->info = NULL;
+        if (oc->coff_info->pdata == NULL) {
+            LL_FREE_FOR(oc->L, oc->coff_info);
+            oc->coff_info = NULL;
         }
     }
     for (int i = 0; i < oc->n_sections; i++){
         Section *section = &oc->sections[i];
-        if (section->info) {
-            LL_FREE_FOR(oc->L, section->info->name);
-            if (section->info->relocs) {
-                LL_FREE_FOR(oc->L, section->info->relocs);
-                section->info->relocs = NULL;
+        if (section->coff_info) {
+            LL_FREE_FOR(oc->L, section->coff_info->name);
+            if (section->coff_info->relocs) {
+                LL_FREE_FOR(oc->L, section->coff_info->relocs);
+                section->coff_info->relocs = NULL;
             }
-            LL_FREE_FOR(oc->L, section->info);
-            section->info = NULL;
+            LL_FREE_FOR(oc->L, section->coff_info);
+            section->coff_info = NULL;
         }
     }
 }
@@ -1080,7 +1080,7 @@ bool removeLibrarySearchPath_PEi386(ll_linker *L, ll_hs_ptr dll_path_index)
  */
 static uint32_t getSectionAlignment(
         Section section) {
-   uint32_t c = section.info->props;
+   uint32_t c = section.coff_info->props;
    for(int i = 0; i < pe_alignments_cnt; i++)
    {
        if ((c & 0xF00000) == pe_alignments[i].mask)
@@ -1209,7 +1209,7 @@ printName ( uint8_t* name, ObjectCode* oc )
    if (name[0]==0 && name[1]==0 && name[2]==0 && name[3]==0) {
       uint32_t strtab_offset = * (uint32_t*)(name + 4);
       LL_DEBUG_FOR(oc->L, "%s",
-                 oc->info->str_tab + strtab_offset - PEi386_STRTAB_OFFSET);
+                 oc->coff_info->str_tab + strtab_offset - PEi386_STRTAB_OFFSET);
    } else {
       int i;
       for (i = 0; i < 8; i++) {
@@ -1226,7 +1226,7 @@ copyName ( uint8_t* name, ObjectCode* oc, uint8_t* dst, int dstSize )
    if (name[0]==0 && name[1]==0 && name[2]==0 && name[3]==0) {
       uint32_t strtab_offset = * (uint32_t*)(name + 4);
       strncpy ((char*)dst,
-               oc->info->str_tab + strtab_offset - PEi386_STRTAB_OFFSET,
+               oc->coff_info->str_tab + strtab_offset - PEi386_STRTAB_OFFSET,
                dstSize);
       dst[dstSize-1] = 0;
    } else {
@@ -1254,7 +1254,7 @@ get_sym_name_with_buffer ( ll_linker *L, uint8_t* name, ObjectCode* oc,
    */
    if (name[0]==0 && name[1]==0 && name[2]==0 && name[3]==0) {
       uint32_t strtab_offset = * (uint32_t*)(name + 4);
-      return oc->info->str_tab + strtab_offset - PEi386_STRTAB_OFFSET;
+      return oc->coff_info->str_tab + strtab_offset - PEi386_STRTAB_OFFSET;
    }
    /* Otherwise, if shorter than 8 bytes, return the original,
       which by defn is correctly terminated.
@@ -1290,7 +1290,7 @@ get_name_string (ll_linker *L, uint8_t* name, ObjectCode* oc)
 
     if (name[0]=='/') {
         int strtab_offset = strtol((char*)name+1,NULL,10)-PEi386_STRTAB_OFFSET;
-        char* str = oc->info->str_tab + strtab_offset;
+        char* str = oc->coff_info->str_tab + strtab_offset;
         int len   = strlen(str);
 
         newstr = LL_MALLOC_FOR(L, len + 1, "cstring_from_section_symbol_name");
@@ -1449,11 +1449,11 @@ ocVerifyImage_PEi386 ( ObjectCode* oc )
        "ocVerifyImage_PEi386(sections)");
    oc->sections = sections;
    oc->n_sections = info->numberOfSections + 1;
-   oc->info       = LL_CALLOC_FOR(oc->L, sizeof(struct ObjectCodeFormatInfo), 1,
+   oc->coff_info       = LL_CALLOC_FOR(oc->L, sizeof(struct ll_coff_object_info), 1,
                                     "ocVerifyImage_PEi386(info)");
-   oc->info->init          = NULL;
-   oc->info->fini          = NULL;
-   oc->info->ch_info       = info;
+   oc->coff_info->init          = NULL;
+   oc->coff_info->fini          = NULL;
+   oc->coff_info->ch_info       = info;
 
    /* Copy the tables over from object-file. Copying these allows us to
       simplify the indexing and to release the object file immediately after
@@ -1465,15 +1465,15 @@ ocVerifyImage_PEi386 ( ObjectCode* oc )
       indexing later on.  */
    uint32_t s_symbols = info->numberOfSymbols * sizeof(COFF_symbol);
    uint32_t sym_size  = getSymbolSize(oc->L, info);
-   oc->info->symbols
+   oc->coff_info->symbols
      = LL_MALLOC_FOR(oc->L, s_symbols, "ocVerifyImage_PEi386(oc->info->symbols)");
    for (i = 0; i < info->numberOfSymbols; i++)
-     memcpy (oc->info->symbols+i, (char*)symtab + sym_size * i, sym_size);
+     memcpy (oc->coff_info->symbols+i, (char*)symtab + sym_size * i, sym_size);
 
    uint32_t n_strtab = (*(uint32_t*)strtab) - PEi386_STRTAB_OFFSET;
-   oc->info->str_tab
+   oc->coff_info->str_tab
      = LL_MALLOC_FOR(oc->L, n_strtab, "ocVerifyImage_PEi386(oc->info->str_tab)");
-   memcpy (oc->info->str_tab, strtab + PEi386_STRTAB_OFFSET, n_strtab);
+   memcpy (oc->coff_info->str_tab, strtab + PEi386_STRTAB_OFFSET, n_strtab);
 
    /* Initialize the Sections */
    for (i = 0; i < info->numberOfSections; i++) {
@@ -1486,18 +1486,18 @@ ocVerifyImage_PEi386 ( ObjectCode* oc )
       /* Calculate the start of the section data.  */
       section->start = oc->image + sectab_i->PointerToRawData;
       section->size  = sectab_i->SizeOfRawData;
-      section->info  = LL_CALLOC_FOR(oc->L, sizeof(struct SectionFormatInfo), 1,
+      section->coff_info  = LL_CALLOC_FOR(oc->L, sizeof(struct ll_coff_section_info), 1,
                                        "ocVerifyImage_PEi386(section.info)");
-      section->info->name        = get_name_string (oc->L, sectab_i->Name, oc);
-      section->info->alignment   = getSectionAlignment (*section);
-      section->info->props       = sectab_i->Characteristics;
-      section->info->virtualSize = sectab_i->Misc.VirtualSize;
-      section->info->virtualAddr = sectab_i->VirtualAddress;
+      section->coff_info->name        = get_name_string (oc->L, sectab_i->Name, oc);
+      section->coff_info->alignment   = getSectionAlignment (*section);
+      section->coff_info->props       = sectab_i->Characteristics;
+      section->coff_info->virtualSize = sectab_i->Misc.VirtualSize;
+      section->coff_info->virtualAddr = sectab_i->VirtualAddress;
 
       COFF_reloc* reltab
         = (COFF_reloc*) (oc->image + sectab_i->PointerToRelocations);
 
-      if (section->info->props & IMAGE_SCN_LNK_NRELOC_OVFL ) {
+      if (section->coff_info->props & IMAGE_SCN_LNK_NRELOC_OVFL ) {
         /* If the relocation field (a short) has overflowed, the
          * real count can be found in the first reloc entry.
          *
@@ -1512,13 +1512,13 @@ ocVerifyImage_PEi386 ( ObjectCode* oc )
         relocs_offset = 0;
       }
 
-      section->info->noRelocs = noRelocs;
-      section->info->relocs   = NULL;
+      section->coff_info->noRelocs = noRelocs;
+      section->coff_info->relocs   = NULL;
       if (noRelocs > 0) {
-        section->info->relocs
+        section->coff_info->relocs
             = LL_MALLOC_FOR(oc->L, noRelocs * sizeof (COFF_reloc),
                             "ocVerifyImage_PEi386(section->info->relocs)");
-        memcpy (section->info->relocs, reltab + relocs_offset,
+        memcpy (section->coff_info->relocs, reltab + relocs_offset,
                 noRelocs * sizeof (COFF_reloc));
       }
    }
@@ -1526,8 +1526,8 @@ ocVerifyImage_PEi386 ( ObjectCode* oc )
    /* Initialize the last section's info field which contains the .bss
       section, the .info of which will be initialized by ocGetNames. Discard the
       .info that we computed above. */
-  LL_FREE_FOR(oc->L, sections[info->numberOfSections].info);
-  sections[info->numberOfSections].info = NULL;
+  LL_FREE_FOR(oc->L, sections[info->numberOfSections].coff_info);
+  sections[info->numberOfSections].coff_info = NULL;
 
    /* No further verification after this point; only debug printing.  */
    i = 0;
@@ -1622,14 +1622,14 @@ ocVerifyImage_PEi386 ( ObjectCode* oc )
                 getAlignedValue (section.size, section)
               );
 
-      noRelocs = section.info->noRelocs;
+      noRelocs = section.coff_info->noRelocs;
       for (uint32_t j = 0; j < noRelocs; j++) {
-         COFF_reloc rel = section.info->relocs[j];
+         COFF_reloc rel = section.coff_info->relocs[j];
          LL_DEBUG_FOR(oc->L,
                    "        type 0x%-4x   vaddr 0x%-8lx   name `",
                    rel.Type,
                    rel.VirtualAddress );
-         COFF_symbol sym = oc->info->symbols[rel.SymbolTableIndex];
+         COFF_symbol sym = oc->coff_info->symbols[rel.SymbolTableIndex];
          printName (getSymShortName(oc->L, info, &sym), oc);
          LL_DEBUG_FOR(oc->L, "'\n" );
       }
@@ -1649,7 +1649,7 @@ ocVerifyImage_PEi386 ( ObjectCode* oc )
    LL_DEBUG_FOR(oc->L, "\n" );
 
    for (i = 0; i < info->numberOfSymbols; i++) {
-      COFF_symbol* symtab_i = &oc->info->symbols[i];
+      COFF_symbol* symtab_i = &oc->coff_info->symbols[i];
       LL_DEBUG_FOR(oc->L,
                 "symbol %d\n"
                 "     name `",
@@ -1680,7 +1680,7 @@ bool
 ocGetNames_PEi386 ( ObjectCode* oc )
 {
    bool has_code_section = false;
-   COFF_HEADER_INFO *info = oc->info->ch_info;
+   COFF_HEADER_INFO *info = oc->coff_info->ch_info;
 
    /* Copy section information into the ObjectCode. */
 
@@ -1697,92 +1697,92 @@ ocGetNames_PEi386 ( ObjectCode* oc )
       bool do_copy = true;
       bool do_zero = false;
 
-      LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "section name = %s (%x)\n", section->info->name, section->info->props ));
+      LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "section name = %s (%x)\n", section->coff_info->name, section->coff_info->props ));
 
       /* The PE file section flag indicates whether the section
          contains code or data. */
-      if (section->info->props & IMAGE_SCN_CNT_CODE) {
+      if (section->coff_info->props & IMAGE_SCN_CNT_CODE) {
           has_code_section = has_code_section || section->size > 0;
           kind = SECTIONKIND_CODE_OR_RODATA;
        }
 
-      if (section->info->props & IMAGE_SCN_MEM_WRITE) {
+      if (section->coff_info->props & IMAGE_SCN_MEM_WRITE) {
           kind = SECTIONKIND_RWDATA;
       }
 
       /* Check next if it contains any uninitialized data */
-      if (section->info->props & IMAGE_SCN_CNT_UNINITIALIZED_DATA) {
+      if (section->coff_info->props & IMAGE_SCN_CNT_UNINITIALIZED_DATA) {
           kind = SECTIONKIND_RWDATA;
           do_copy = false;
       }
 
       /* Finally check if it can be discarded.
          This will also ignore .debug sections */
-      if (   section->info->props & IMAGE_SCN_MEM_DISCARDABLE
-          || section->info->props & IMAGE_SCN_LNK_REMOVE) {
+      if (   section->coff_info->props & IMAGE_SCN_MEM_DISCARDABLE
+          || section->coff_info->props & IMAGE_SCN_LNK_REMOVE) {
           kind = SECTIONKIND_OTHER;
       }
 
-      if (0==strncmp(".ctors", section->info->name, 6)) {
+      if (0==strncmp(".ctors", section->coff_info->name, 6)) {
           /* N.B. a compilation unit may have more than one .ctor section; we
            * must run them all. See #21618 for a case where this happened */
           uint32_t prio;
-          if (sscanf(section->info->name, ".ctors.%d", &prio) != 1) {
+          if (sscanf(section->coff_info->name, ".ctors.%d", &prio) != 1) {
               // Sections without an explicit priority are run last
               prio = 0;
           }
           // .ctors/.dtors are executed in reverse order: higher numbers are
           // executed first
           prio = 0xffff - prio;
-          addInitFini(oc->L, &oc->info->init, &oc->sections[i], INITFINI_CTORS, prio);
+          addInitFini(oc->L, &oc->coff_info->init, &oc->sections[i], INITFINI_CTORS, prio);
           kind = SECTIONKIND_INIT_ARRAY;
       }
 
-      if (0==strncmp(".dtors", section->info->name, 6)) {
+      if (0==strncmp(".dtors", section->coff_info->name, 6)) {
           uint32_t prio;
-          if (sscanf(section->info->name, ".dtors.%d", &prio) != 1) {
+          if (sscanf(section->coff_info->name, ".dtors.%d", &prio) != 1) {
               // Sections without an explicit priority are run last
               prio = 0;
           }
           // .ctors/.dtors are executed in reverse order: higher numbers are
           // executed first
           prio = 0xffff - prio;
-          addInitFini(oc->L, &oc->info->fini, &oc->sections[i], INITFINI_DTORS, prio);
+          addInitFini(oc->L, &oc->coff_info->fini, &oc->sections[i], INITFINI_DTORS, prio);
           kind = SECTIONKIND_FINI_ARRAY;
       }
 
-      if (   0 == strncmp(".stab"     , section->info->name, 5 )
-          || 0 == strncmp(".stabstr"  , section->info->name, 8 )
-          || 0 == strncmp(".debug"    , section->info->name, 6 )
-          || 0 == strncmp(".rdata$zzz", section->info->name, 10))
+      if (   0 == strncmp(".stab"     , section->coff_info->name, 5 )
+          || 0 == strncmp(".stabstr"  , section->coff_info->name, 8 )
+          || 0 == strncmp(".debug"    , section->coff_info->name, 6 )
+          || 0 == strncmp(".rdata$zzz", section->coff_info->name, 10))
           kind = SECTIONKIND_DEBUG;
 
       /* Exception Unwind information. See Note [Exception Unwinding].  */
-      if (0 == strncmp(".xdata"    , section->info->name, 6 )) {
+      if (0 == strncmp(".xdata"    , section->coff_info->name, 6 )) {
           kind = SECTIONKIND_EXCEPTION_UNWIND;
       }
 
       /* Exception handler tables, See Note [Exception Unwinding].  */
-      if (0 == strncmp(".pdata"    , section->info->name, 6 )) {
+      if (0 == strncmp(".pdata"    , section->coff_info->name, 6 )) {
           kind = SECTIONKIND_EXCEPTION_TABLE;
       }
 
-      if (0==strncmp(".idata", section->info->name, 6)) {
+      if (0==strncmp(".idata", section->coff_info->name, 6)) {
           kind = SECTIONKIND_IMPORT;
       }
 
 
       /* See Note [BFD import library].  */
-      if (0==strncmp(".idata$7", section->info->name, 8)) {
+      if (0==strncmp(".idata$7", section->coff_info->name, 8)) {
           kind = SECTIONKIND_BFD_IMPORT_LIBRARY_HEAD;
       }
 
-      if (0==strncmp(".idata$6", section->info->name, 8)) {
+      if (0==strncmp(".idata$6", section->coff_info->name, 8)) {
           kind = SECTIONKIND_BFD_IMPORT_LIBRARY;
       }
 
       /* Allocate space for any (local, anonymous) .bss sections. */
-      if (0==strncmp(".bss", section->info->name, 4)) {
+      if (0==strncmp(".bss", section->coff_info->name, 4)) {
         /* sof 10/05: the PE spec text isn't too clear regarding what
          * the SizeOfRawData field is supposed to hold for object
          * file sections containing just uninitialized data -- for executables,
@@ -1802,7 +1802,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
          *
          * TODO: check if this comment is still relevant.
          */
-        if (section->info->virtualSize == 0 && section->size == 0) {
+        if (section->coff_info->virtualSize == 0 && section->size == 0) {
           LL_IF_DEBUG_FOR(oc->L, linker_verbose, LL_DEBUG_FOR(oc->L, "skipping empty .bss section\n"));
           continue;
         }
@@ -1815,9 +1815,9 @@ ocGetNames_PEi386 ( ObjectCode* oc )
         LL_IF_DEBUG_FOR(oc->L, linker_verbose, LL_DEBUG_FOR(oc->L, "BSS anon section\n"));
       }
 
-      LL_CHECK_FOR(oc->L, section->size == 0 || section->info->virtualSize == 0);
-      if (sz < section->info->virtualSize) {
-          sz = section->info->virtualSize;
+      LL_CHECK_FOR(oc->L, section->size == 0 || section->coff_info->virtualSize == 0);
+      if (sz < section->coff_info->virtualSize) {
+          sz = section->coff_info->virtualSize;
       }
 
       // Ignore these section types
@@ -1827,7 +1827,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
 
       // Allocate memory for the section.
       uint8_t *start;
-      if (section->info->props & IMAGE_SCN_MEM_WRITE) {
+      if (section->coff_info->props & IMAGE_SCN_MEM_WRITE) {
           start = m32_alloc_for(oc->L, oc->rw_m32, sz, alignment);
       } else {
           start = m32_alloc_for(oc->L, oc->rx_m32, sz, alignment);
@@ -1847,7 +1847,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
         memset(start, 0, sz);
       }
 
-      addSection(oc->L, section, kind, SECTION_NOMEM, start, sz, 0, 0, 0);
+      addSection(oc->L, section, kind, SECTION_NOMEM, start, sz, 0, 0, 0, sizeof(struct ll_coff_section_info));
       addProddableBlock(oc->L, &oc->proddables, oc->sections[i].start, sz);
    }
 
@@ -1860,7 +1860,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
    /* Work out the size of the global BSS section */
    ll_word globalBssSize = 0;
    for (unsigned int i=0; i < info->numberOfSymbols; i++) {
-      COFF_symbol* sym = &oc->info->symbols[i];
+      COFF_symbol* sym = &oc->coff_info->symbols[i];
       if (getSymSectionNumber(oc->L, info, sym) == PE_SECTION_UNDEFINED
            && getSymValue(oc->L, info, sym) > 0
            && getSymStorageClass(oc->L, info, sym) != IMAGE_SYM_CLASS_SECTION) {
@@ -1891,12 +1891,12 @@ ocGetNames_PEi386 ( ObjectCode* oc )
        memset(bss, 0, globalBssSize);
        addSection(oc->L, &oc->sections[oc->n_sections-1],
                   SECTIONKIND_RWDATA, SECTION_M32,
-                  bss, globalBssSize, 0, 0, 0);
+                  bss, globalBssSize, 0, 0, 0, sizeof(struct ll_coff_section_info));
        LL_IF_DEBUG_FOR(oc->L, linker_verbose, LL_DEBUG_FOR(oc->L, "bss @ %p %" LL_FMT_WORD "\n", bss, globalBssSize));
        addProddableBlock(oc->L, &oc->proddables, bss, globalBssSize);
    } else {
        addSection(oc->L, &oc->sections[oc->n_sections-1],
-                  SECTIONKIND_OTHER, SECTION_NOMEM, NULL, 0, 0, 0, 0);
+                  SECTIONKIND_OTHER, SECTION_NOMEM, NULL, 0, 0, 0, 0, sizeof(struct ll_coff_section_info));
    }
 
    /* At this point we're done with oc->image and all relevant memory have
@@ -1905,7 +1905,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
    oc->image = NULL;
 
    for (unsigned int i = 0; i < (uint32_t)oc->n_symbols; i++) {
-      COFF_symbol* sym = &oc->info->symbols[i];
+      COFF_symbol* sym = &oc->coff_info->symbols[i];
 
       uint32_t symValue = getSymValue(oc->L, info, sym);
       uint8_t symStorageClass = getSymStorageClass(oc->L, info, sym);
@@ -1938,12 +1938,12 @@ ocGetNames_PEi386 ( ObjectCode* oc )
       }
 
       ll_sym_type type;
-      switch (getSymType(oc->L, oc->info->ch_info, sym)) {
+      switch (getSymType(oc->L, oc->coff_info->ch_info, sym)) {
       case 0x00: type = LL_SYM_DATA; break;
       case 0x20: type = LL_SYM_CODE; break;
       default:
           LL_DEBUG_FOR(oc->L, "Symbol %s has invalid type 0x%x\n",
-                     sname, getSymType(oc->L, oc->info->ch_info, sym));
+                     sname, getSymType(oc->L, oc->coff_info->ch_info, sym));
           return 1;
       }
 
@@ -1962,10 +1962,10 @@ ocGetNames_PEi386 ( ObjectCode* oc )
          */
          if (symStorageClass == IMAGE_SYM_CLASS_EXTERNAL
             || (   symStorageClass == IMAGE_SYM_CLASS_STATIC
-                && section->info->props & IMAGE_SCN_LNK_COMDAT)
+                && section->coff_info->props & IMAGE_SCN_LNK_COMDAT)
             ) {
                 addr   = (ll_symbol_addr*)((size_t)section->start + symValue);
-                isWeak = section->info->props & IMAGE_SCN_LNK_COMDAT;
+                isWeak = section->coff_info->props & IMAGE_SCN_LNK_COMDAT;
          }
       }
       else if (symStorageClass == IMAGE_SYM_CLASS_WEAK_EXTERNAL) {
@@ -1973,7 +1973,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
           LL_CHECK_FOR(oc->L, getSymNumberOfAuxSymbols(oc->L, info, sym) == 1);
           LL_CHECK_FOR(oc->L, symValue == 0);
           COFF_symbol_aux_weak_external *aux = (COFF_symbol_aux_weak_external *) (sym+1);
-          COFF_symbol* targetSym = &oc->info->symbols[aux->TagIndex];
+          COFF_symbol* targetSym = &oc->coff_info->symbols[aux->TagIndex];
 
           uint32_t targetSecNumber = getSymSectionNumber(oc->L, info, targetSym);
           Section *targetSection;
@@ -2057,7 +2057,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
              for the total range of 16 bits which is the function export limit
              of DLLs.  See note [GHC Linking model and import libraries].  */
           sname = (ll_symbol_name*)section->start+2;
-          COFF_symbol* sym = &oc->info->symbols[info->numberOfSymbols-1];
+          COFF_symbol* sym = &oc->coff_info->symbols[info->numberOfSymbols-1];
           addr = get_sym_name( oc->L, getSymShortName(oc->L, info, sym), oc);
 
           LL_IF_DEBUG_FOR(oc->L, linker,
@@ -2106,7 +2106,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
           ll_hs_ptr token       = addLibrarySearchPath_PEi386(oc->L, dirName);
           LL_FREE_FOR(oc->L, dirName);
 
-          sym   = &oc->info->symbols[oc->n_symbols-1];
+          sym   = &oc->coff_info->symbols[oc->n_symbols-1];
           sname = get_sym_name (oc->L, getSymShortName(oc->L, info, sym), oc);
 
           LL_IF_DEBUG_FOR(oc->L, linker_verbose,
@@ -2264,7 +2264,7 @@ ocResolve_PEi386 ( ObjectCode* oc )
    if (oc->status == OBJECT_DONT_RESOLVE)
      return 1;
 
-   COFF_HEADER_INFO *info = oc->info->ch_info;
+   COFF_HEADER_INFO *info = oc->coff_info->ch_info;
    uint32_t numberOfSections = info->numberOfSections;
 
    for (i = 0; i < numberOfSections; i++) {
@@ -2274,22 +2274,22 @@ ocResolve_PEi386 ( ObjectCode* oc )
       if (section.kind == SECTIONKIND_DEBUG)
          continue;
 
-      noRelocs = section.info->noRelocs;
+      noRelocs = section.coff_info->noRelocs;
       for (j = 0; j < noRelocs; j++) {
          COFF_symbol* sym;
-         COFF_reloc* reloc = &section.info->relocs[j];
+         COFF_reloc* reloc = &section.coff_info->relocs[j];
 
          /* the location to patch */
          pP = (ll_symbol_addr*)(
                    (uintptr_t)section.start
                  + (uintptr_t)reloc->VirtualAddress
-                 - (uintptr_t)section.info->virtualAddr
+                 - (uintptr_t)section.coff_info->virtualAddr
               );
          /* the existing contents of pP */
          A = *(uint32_t*)pP;
          /* the symbol to connect to */
          uint64_t symIndex = reloc->SymbolTableIndex;
-         sym = &oc->info->symbols[symIndex];
+         sym = &oc->coff_info->symbols[symIndex];
 
          ll_sym_type sym_type;
 
@@ -2458,7 +2458,7 @@ ocResolve_PEi386 ( ObjectCode* oc )
       /* Register the exceptions inside this OC.
          See Note [Exception Unwinding].  */
       if (section.kind == SECTIONKIND_EXCEPTION_TABLE) {
-          oc->info->pdata = &oc->sections[i];
+          oc->coff_info->pdata = &oc->sections[i];
 #if defined(x86_64_HOST_ARCH)
           unsigned numEntries = section.size / sizeof(RUNTIME_FUNCTION);
           if (numEntries == 0)
@@ -2471,22 +2471,22 @@ ocResolve_PEi386 ( ObjectCode* oc )
             ll_error_set(oc->L, LL_E_IO,
                          "Unable to register Exception handler for %p for "
                          "section %s in %" PATH_FMT " (Win32 error %lu)",
-                         section.start, section.info->name, oc->fileName,
+                         section.start, section.coff_info->name, oc->fileName,
                          (unsigned long)win_error);
             releaseOcInfo (oc);
             return false;
           }
 #endif /* x86_64_HOST_ARCH.  */
       } else if (section.kind == SECTIONKIND_EXCEPTION_UNWIND) {
-          oc->info->xdata = &oc->sections[i];
+          oc->coff_info->xdata = &oc->sections[i];
       }
    }
 
    // We now have no more need of info->ch_info and info->symbols.
-   LL_FREE_FOR(oc->L, oc->info->ch_info);
-   oc->info->ch_info = NULL;
-   LL_FREE_FOR(oc->L, oc->info->symbols);
-   oc->info->symbols = NULL;
+   LL_FREE_FOR(oc->L, oc->coff_info->ch_info);
+   oc->coff_info->ch_info = NULL;
+   LL_FREE_FOR(oc->L, oc->coff_info->symbols);
+   oc->coff_info->symbols = NULL;
 
    LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "completed %" PATH_FMT "\n", oc->fileName));
    return true;
@@ -2581,16 +2581,16 @@ ocResolve_PEi386 ( ObjectCode* oc )
 bool
 ocRunInit_PEi386 ( ObjectCode *oc )
 {
-    if (oc && oc->info && oc->info->init) {
-        return runInit(oc->L, &oc->info->init);
+    if (oc && oc->coff_info && oc->coff_info->init) {
+        return runInit(oc->L, &oc->coff_info->init);
     }
     return true;
 }
 
 bool ocRunFini_PEi386( ObjectCode *oc )
 {
-    if (oc && oc->info && oc->info->fini) {
-        return runFini(oc->L, &oc->info->fini);
+    if (oc && oc->coff_info && oc->coff_info->fini) {
+        return runFini(oc->L, &oc->coff_info->fini);
     }
     return true;
 }

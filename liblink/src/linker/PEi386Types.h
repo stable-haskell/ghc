@@ -8,7 +8,7 @@
 #include <stdint.h>
 #include <stdio.h>
 
-struct SectionFormatInfo {
+struct ll_coff_section_info {
     char* name;
     size_t alignment;
     COFF_reloc* relocs;
@@ -18,7 +18,7 @@ struct SectionFormatInfo {
     uint64_t virtualAddr;
  };
 
-struct ObjectCodeFormatInfo {
+struct ll_coff_object_info {
     struct InitFiniList* init; // Freed by ocRunInit_PEi386
     struct InitFiniList* fini; // Freed by ocRunFini_PEi386
     Section* pdata;

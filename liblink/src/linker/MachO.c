@@ -85,88 +85,88 @@ ocInit_MachO(ObjectCode * oc)
 {
     ocDeinit_MachO(oc);
 
-    oc->info = (struct ObjectCodeFormatInfo*)LL_CALLOC_FOR(oc->L,
-                1, sizeof *oc->info,
+    oc->macho_info = (struct ll_macho_object_info*)LL_CALLOC_FOR(oc->L,
+                1, sizeof *oc->macho_info,
                 "ocInit_MachO(ObjectCodeFormatInfo)");
-    if (oc->info == NULL) {
+    if (oc->macho_info == NULL) {
         ll_error_set(oc->L, LL_E_NOMEM, "cannot allocate Mach-O object metadata");
         return 0;
     }
-    oc->info->header  = (MachOHeader *) oc->image;
-    oc->info->symCmd  = NULL;
-    oc->info->segCmd  = NULL;
-    oc->info->dsymCmd = NULL;
+    oc->macho_info->header  = (MachOHeader *) oc->image;
+    oc->macho_info->symCmd  = NULL;
+    oc->macho_info->segCmd  = NULL;
+    oc->macho_info->dsymCmd = NULL;
 
     MachOLoadCommand *lc = (MachOLoadCommand*)(oc->image + sizeof(MachOHeader));
-    for(size_t i = 0; i < oc->info->header->ncmds; i++) {
+    for(size_t i = 0; i < oc->macho_info->header->ncmds; i++) {
         if (lc->cmd == LC_SEGMENT || lc->cmd == LC_SEGMENT_64) {
-            oc->info->segCmd = (MachOSegmentCommand*) lc;
+            oc->macho_info->segCmd = (MachOSegmentCommand*) lc;
         }
         else if (lc->cmd == LC_SYMTAB) {
-            oc->info->symCmd = (MachOSymtabCommand*) lc;
+            oc->macho_info->symCmd = (MachOSymtabCommand*) lc;
         }
         else if (lc->cmd == LC_DYSYMTAB) {
-            oc->info->dsymCmd = (MachODsymtabCommand*) lc;
+            oc->macho_info->dsymCmd = (MachODsymtabCommand*) lc;
         }
         lc = (MachOLoadCommand *) ( ((char*)lc) + lc->cmdsize );
     }
-    if (NULL == oc->info->segCmd) {
+    if (NULL == oc->macho_info->segCmd) {
         ll_error_set(oc->L, LL_E_FORMAT, "ocInit_MachO: no segment load command");
         LL_LOG_ERROR_FOR(oc->L, "ocInit_MachO: no segment load command");
         return 0;
     }
 
-    oc->info->macho_sections = (MachOSection*) (oc->info->segCmd+1);
-    oc->n_sections = oc->info->segCmd->nsects;
+    oc->macho_info->macho_sections = (MachOSection*) (oc->macho_info->segCmd+1);
+    oc->n_sections = oc->macho_info->segCmd->nsects;
 
-    if (oc->info->symCmd != NULL && oc->info->symCmd->nsyms != 0) {
-        const char *table = oc->image + oc->info->symCmd->symoff;
+    if (oc->macho_info->symCmd != NULL && oc->macho_info->symCmd->nsyms != 0) {
+        const char *table = oc->image + oc->macho_info->symCmd->symoff;
         if ((uintptr_t)table % _Alignof(MachONList) == 0) {
-            oc->info->nlist = (MachONList *)table;
+            oc->macho_info->nlist = (MachONList *)table;
         } else {
             /* Merged objects can pack tables without native C alignment. */
-            size_t bytes = (size_t)oc->info->symCmd->nsyms * sizeof(MachONList);
-            oc->info->owned_nlist = LL_MALLOC_FOR(oc->L, bytes,
+            size_t bytes = (size_t)oc->macho_info->symCmd->nsyms * sizeof(MachONList);
+            oc->macho_info->owned_nlist = LL_MALLOC_FOR(oc->L, bytes,
                                                  "ocInit_MachO(nlist)");
-            if (oc->info->owned_nlist == NULL) {
+            if (oc->macho_info->owned_nlist == NULL) {
                 ll_error_set(oc->L, LL_E_NOMEM,
                              "cannot allocate aligned Mach-O symbol table");
                 return 0;
             }
-            memcpy(oc->info->owned_nlist, table, bytes);
-            oc->info->nlist = oc->info->owned_nlist;
+            memcpy(oc->macho_info->owned_nlist, table, bytes);
+            oc->macho_info->nlist = oc->macho_info->owned_nlist;
         }
     }
-    oc->info->names = oc->info->symCmd == NULL
+    oc->macho_info->names = oc->macho_info->symCmd == NULL
               ? NULL
-              : (oc->image + oc->info->symCmd->stroff);
+              : (oc->image + oc->macho_info->symCmd->stroff);
 
     /* If we have symbols, allocate and fill the macho_symbols
      * This will make relocation easier.
      */
-    oc->info->n_macho_symbols = 0;
-    oc->info->macho_symbols = NULL;
+    oc->macho_info->n_macho_symbols = 0;
+    oc->macho_info->macho_symbols = NULL;
 
-    if(NULL != oc->info->nlist && oc->info->symCmd->nsyms != 0) {
-        oc->info->n_macho_symbols = oc->info->symCmd->nsyms;
-        oc->info->macho_symbols = (MachOSymbol*)LL_CALLOC_FOR(oc->L,
-                                    oc->info->symCmd->nsyms,
+    if(NULL != oc->macho_info->nlist && oc->macho_info->symCmd->nsyms != 0) {
+        oc->macho_info->n_macho_symbols = oc->macho_info->symCmd->nsyms;
+        oc->macho_info->macho_symbols = (MachOSymbol*)LL_CALLOC_FOR(oc->L,
+                                    oc->macho_info->symCmd->nsyms,
                                     sizeof(MachOSymbol),
                                     "ocInit_MachO(MachOSymbol)");
-        if (oc->info->macho_symbols == NULL) {
+        if (oc->macho_info->macho_symbols == NULL) {
             ll_error_set(oc->L, LL_E_NOMEM, "cannot allocate Mach-O symbol metadata");
             return 0;
         }
-        for(uint32_t i = 0; i < oc->info->symCmd->nsyms; i++) {
-            oc->info->macho_symbols[i].name  = oc->info->names
-                                             + oc->info->nlist[i].n_un.n_strx;
-            oc->info->macho_symbols[i].nlist = &oc->info->nlist[i];
+        for(uint32_t i = 0; i < oc->macho_info->symCmd->nsyms; i++) {
+            oc->macho_info->macho_symbols[i].name  = oc->macho_info->names
+                                             + oc->macho_info->nlist[i].n_un.n_strx;
+            oc->macho_info->macho_symbols[i].nlist = &oc->macho_info->nlist[i];
              /* We don't have an address for this symbol yet; this
               * will be populated during ocGetNames_MachO. Hence init
               * with NULL
               */
-            oc->info->macho_symbols[i].addr  = NULL;
-            oc->info->macho_symbols[i].got_addr = NULL;
+            oc->macho_info->macho_symbols[i].addr  = NULL;
+            oc->macho_info->macho_symbols[i].got_addr = NULL;
         }
     }
     return 1;
@@ -174,10 +174,10 @@ ocInit_MachO(ObjectCode * oc)
 
 void
 ocDeinit_MachO(ObjectCode * oc) {
-    if (oc->info != NULL) {
-        LL_FREE_FOR(oc->L, oc->info->common_mem);
-        if(oc->info->n_macho_symbols > 0) {
-            LL_FREE_FOR(oc->L, oc->info->macho_symbols);
+    if (oc->macho_info != NULL) {
+        LL_FREE_FOR(oc->L, oc->macho_info->common_mem);
+        if(oc->macho_info->n_macho_symbols > 0) {
+            LL_FREE_FOR(oc->L, oc->macho_info->macho_symbols);
         }
 #if defined(aarch64_HOST_ARCH)
         freeGot(oc);
@@ -185,18 +185,18 @@ ocDeinit_MachO(ObjectCode * oc) {
         if(oc->sections != NULL) {
             for(int i = 0; i < oc->n_sections; i++) {
                 /* Empty sections and partially built loads have no metadata. */
-                if (oc->sections[i].info != NULL) {
+                if (oc->sections[i].macho_info != NULL) {
 #if defined(aarch64_HOST_ARCH)
                     freeStubs(oc->L, &oc->sections[i]);
 #endif
-                    LL_FREE_FOR(oc->L, oc->sections[i].info->owned_relocations);
-                    oc->sections[i].info->owned_relocations = NULL;
+                    LL_FREE_FOR(oc->L, oc->sections[i].macho_info->owned_relocations);
+                    oc->sections[i].macho_info->owned_relocations = NULL;
                 }
             }
         }
-        LL_FREE_FOR(oc->L, oc->info->owned_nlist);
-        LL_FREE_FOR(oc->L, oc->info);
-        oc->info = NULL;
+        LL_FREE_FOR(oc->L, oc->macho_info->owned_nlist);
+        LL_FREE_FOR(oc->L, oc->macho_info);
+        oc->macho_info = NULL;
     }
 }
 
@@ -216,12 +216,12 @@ ocAllocateExtras_MachO(ObjectCode* oc)
 {
     LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "ocAllocateExtras_MachO: start\n"));
 
-    if (NULL != oc->info->symCmd) {
+    if (NULL != oc->macho_info->symCmd) {
         LL_IF_DEBUG_FOR(oc->L, linker,
             LL_DEBUG_FOR(oc->L, "ocAllocateExtras_MachO: allocate %d symbols\n",
-                oc->info->symCmd->nsyms));
+                oc->macho_info->symCmd->nsyms));
         LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "ocAllocateExtras_MachO: done\n"));
-        return ocAllocateExtras(oc, oc->info->symCmd->nsyms, 0, 0);
+        return ocAllocateExtras(oc, oc->macho_info->symCmd->nsyms, 0, 0);
     }
 
     LL_IF_DEBUG_FOR(oc->L, linker,
@@ -270,7 +270,7 @@ resolveImports(
                          "Mach-O local indirect pointer entries are unsupported");
             return 0;
         }
-        if (indirectSymbolIndex >= oc->info->n_macho_symbols) {
+        if (indirectSymbolIndex >= oc->macho_info->n_macho_symbols) {
             ll_error_set(oc->L, LL_E_FORMAT, "Mach-O indirect symbol index is invalid");
             LL_LOG_ERROR_FOR(oc->L, "Mach-O indirect symbol index is invalid");
             return 0;
@@ -279,7 +279,7 @@ resolveImports(
     for (size_t i = 0; i < slots; i++)
     {
         uint32_t indirectSymbolIndex = indirectSyms[sect->reserved1+i];
-        MachOSymbol *symbol = &oc->info->macho_symbols[indirectSymbolIndex];
+        MachOSymbol *symbol = &oc->macho_info->macho_symbols[indirectSymbolIndex];
         ll_symbol_addr* addr = NULL;
 
         LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "resolveImports: resolving %s\n", symbol->name));
@@ -560,14 +560,14 @@ findInternalGotRefs(ObjectCode * oc)
 {
     for (int curSection = 0; curSection < oc->n_sections; curSection++) {
         Section * sect = &oc->sections[curSection];
-        if (sect->info == NULL)
+        if (sect->macho_info == NULL)
             continue;
-        MachOSection * msect = sect->info->macho_section; // for access convenience
-        MachORelocationInfo * relocs = sect->info->relocation_info;
+        MachOSection * msect = sect->macho_info->macho_section; // for access convenience
+        MachORelocationInfo * relocs = sect->macho_info->relocation_info;
         for(uint32_t i = 0; i < msect->nreloc; i++) {
             MachORelocationInfo *ri = &relocs[i];
             if (isGotLoad(ri)) {
-                MachOSymbol* symbol = &oc->info->macho_symbols[ri->r_symbolnum];
+                MachOSymbol* symbol = &oc->macho_info->macho_symbols[ri->r_symbolnum];
                 symbol->needs_got = true;
             }
         }
@@ -601,22 +601,22 @@ static bool
 makeGot(ObjectCode * oc) {
     size_t got_slots = 0;
 
-    for(size_t i=0; i < oc->info->n_macho_symbols; i++)
-        if(needGotSlot(&oc->info->macho_symbols[i]))
+    for(size_t i=0; i < oc->macho_info->n_macho_symbols; i++)
+        if(needGotSlot(&oc->macho_info->macho_symbols[i]))
             got_slots += 1;
 
     if(got_slots > 0) {
-        oc->info->got_size =  got_slots * sizeof(void*);
-        oc->info->got_start = ll_mmap_anon_for_linker(oc->L, oc->info->got_size);
-        if( oc->info->got_start == NULL ) {
+        oc->macho_info->got_size =  got_slots * sizeof(void*);
+        oc->macho_info->got_start = ll_mmap_anon_for_linker(oc->L, oc->macho_info->got_size);
+        if( oc->macho_info->got_start == NULL ) {
             return EXIT_FAILURE;
         }
         /* update got_addr */
         size_t slot = 0;
-        for(size_t i=0; i < oc->info->n_macho_symbols; i++)
-            if(needGotSlot(&oc->info->macho_symbols[i]))
-                oc->info->macho_symbols[i].got_addr
-                    = ((uint8_t*)oc->info->got_start)
+        for(size_t i=0; i < oc->macho_info->n_macho_symbols; i++)
+            if(needGotSlot(&oc->macho_info->macho_symbols[i]))
+                oc->macho_info->macho_symbols[i].got_addr
+                    = ((uint8_t*)oc->macho_info->got_start)
                     + (slot++ * sizeof(void *));
     }
     return EXIT_SUCCESS;
@@ -625,11 +625,11 @@ makeGot(ObjectCode * oc) {
 static void
 freeGot(ObjectCode * oc) {
     /* sanity check */
-    if(NULL != oc->info->got_start && oc->info->got_size > 0) {
-        ll_munmap_for_linker(oc->L, oc->info->got_start, oc->info->got_size, "freeGot");
+    if(NULL != oc->macho_info->got_start && oc->macho_info->got_size > 0) {
+        ll_munmap_for_linker(oc->L, oc->macho_info->got_start, oc->macho_info->got_size, "freeGot");
     }
-    oc->info->got_start = NULL;
-    oc->info->got_size = 0;
+    oc->macho_info->got_start = NULL;
+    oc->macho_info->got_size = 0;
 }
 
 // Retrieve symbol value
@@ -674,13 +674,13 @@ relocateSectionAarch64(ObjectCode * oc, Section * section)
 
     /* we need to care about the explicit addend */
     int64_t explicit_addend = 0;
-    size_t  nreloc = section->info->macho_section->nreloc;
+    size_t  nreloc = section->macho_info->macho_section->nreloc;
 
     for(size_t i = 0; i < nreloc; i++) {
-        MachORelocationInfo * ri = &section->info->relocation_info[i];
+        MachORelocationInfo * ri = &section->macho_info->relocation_info[i];
         switch (ri->r_type) {
             case ARM64_RELOC_UNSIGNED: {
-                MachOSymbol* symbol = &oc->info->macho_symbols[ri->r_symbolnum];
+                MachOSymbol* symbol = &oc->macho_info->macho_symbols[ri->r_symbolnum];
                 int64_t addend;
                 if (!decodeAddend(oc, section, ri, &addend)) return 0;
                 uint64_t value;
@@ -698,7 +698,7 @@ relocateSectionAarch64(ObjectCode * oc, Section * section)
                 // check that the following relocation exists and has the
                 // expected ARM64_RELOC_UNSIGNED type
                 if(!(i+1 < nreloc)
-                   || !(section->info->relocation_info[i+1].r_type
+                   || !(section->macho_info->relocation_info[i+1].r_type
                           == ARM64_RELOC_UNSIGNED)) {
                     ll_error_set(oc->L, LL_E_FORMAT, "SUBTRACTOR relocation *must* be followed by UNSIGNED relocation.");
                     LL_LOG_ERROR_FOR(oc->L, "SUBTRACTOR relocation *must* be followed by UNSIGNED relocation.");
@@ -712,13 +712,13 @@ relocateSectionAarch64(ObjectCode * oc, Section * section)
                 // result which may not fit in the target bits).
 
                 // sub part (ARM64_RELOC_SUBTRACTOR)
-                MachOSymbol* symbol1 = &oc->info->macho_symbols[ri->r_symbolnum];
+                MachOSymbol* symbol1 = &oc->macho_info->macho_symbols[ri->r_symbolnum];
                 uint64_t sub_value;
                 if (!symbol_value(oc, symbol1, &sub_value)) return 0;
 
                 // add part (ARM64_RELOC_UNSIGNED)
-                MachORelocationInfo * ri2 = &section->info->relocation_info[i+1];
-                MachOSymbol* symbol2 = &oc->info->macho_symbols[ri2->r_symbolnum];
+                MachORelocationInfo * ri2 = &section->macho_info->relocation_info[i+1];
+                MachOSymbol* symbol2 = &oc->macho_info->macho_symbols[ri2->r_symbolnum];
                 uint64_t add_value;
                 if (!symbol_value(oc, symbol2, &add_value)) return 0;
 
@@ -732,7 +732,7 @@ relocateSectionAarch64(ObjectCode * oc, Section * section)
                 break;
             }
             case ARM64_RELOC_BRANCH26: {
-                MachOSymbol* symbol = &oc->info->macho_symbols[ri->r_symbolnum];
+                MachOSymbol* symbol = &oc->macho_info->macho_symbols[ri->r_symbolnum];
 
                 // pre-existing addend
                 int64_t addend;
@@ -778,7 +778,7 @@ relocateSectionAarch64(ObjectCode * oc, Section * section)
             }
             case ARM64_RELOC_PAGE21:
             case ARM64_RELOC_GOT_LOAD_PAGE21: {
-                MachOSymbol* symbol = &oc->info->macho_symbols[ri->r_symbolnum];
+                MachOSymbol* symbol = &oc->macho_info->macho_symbols[ri->r_symbolnum];
                 int64_t addend;
                 if (!decodeAddend(oc, section, ri, &addend)) return 0;
                 if(!(explicit_addend == 0 || addend == 0)) {
@@ -797,7 +797,7 @@ relocateSectionAarch64(ObjectCode * oc, Section * section)
             }
             case ARM64_RELOC_PAGEOFF12:
             case ARM64_RELOC_GOT_LOAD_PAGEOFF12: {
-                MachOSymbol* symbol = &oc->info->macho_symbols[ri->r_symbolnum];
+                MachOSymbol* symbol = &oc->macho_info->macho_symbols[ri->r_symbolnum];
                 int64_t addend;
                 if (!decodeAddend(oc, section, ri, &addend)) return 0;
                 if(!(explicit_addend == 0 || addend == 0)) {
@@ -816,8 +816,8 @@ relocateSectionAarch64(ObjectCode * oc, Section * section)
             case ARM64_RELOC_ADDEND: {
                 explicit_addend = signExtend(ri->r_symbolnum, 24);
                 if(!(i+1 < nreloc)
-                   || !(section->info->relocation_info[i+1].r_type == ARM64_RELOC_PAGE21
-                        || section->info->relocation_info[i+1].r_type == ARM64_RELOC_PAGEOFF12)) {
+                   || !(section->macho_info->relocation_info[i+1].r_type == ARM64_RELOC_PAGE21
+                        || section->macho_info->relocation_info[i+1].r_type == ARM64_RELOC_PAGEOFF12)) {
                     ll_error_set(oc->L, LL_E_FORMAT, "ADDEND relocation *must* be followed by PAGE or PAGEOFF relocation");
                     LL_LOG_ERROR_FOR(oc->L, "ADDEND relocation *must* be followed by PAGE or PAGEOFF relocation");
                     return 0;
@@ -855,16 +855,16 @@ relocateSection(ObjectCode* oc, int curSection)
 {
     Section * sect = &oc->sections[curSection];
 
-    LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "relocateSection %d, info: %p\n", curSection, (void*)sect->info));
+    LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "relocateSection %d, info: %p\n", curSection, (void*)sect->macho_info));
 
     // empty sections (without segments), won't have their info filled.
     // there is no relocation to be done for them.
-    if(sect->info == NULL)
+    if(sect->macho_info == NULL)
         return 1;
 
-    MachOSection * msect = sect->info->macho_section; // for access convenience
-    MachORelocationInfo * relocs = sect->info->relocation_info;
-    MachOSymbol * symbols = oc->info->macho_symbols;
+    MachOSection * msect = sect->macho_info->macho_section; // for access convenience
+    MachORelocationInfo * relocs = sect->macho_info->relocation_info;
+    MachOSymbol * symbols = oc->macho_info->macho_symbols;
 
     LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "relocateSection %d (%.16s, %.16s): start\n",
                                 curSection, msect->segname, msect->sectname));
@@ -1098,7 +1098,7 @@ relocateSection(ObjectCode* oc, int curSection)
 
             int targetSecNum = reloc->r_symbolnum - 1; // sec numbers start with 1
             Section * targetSec = &oc->sections[targetSecNum];
-            MachOSection * targetMacho = targetSec->info->macho_section;
+            MachOSection * targetMacho = targetSec->macho_info->macho_section;
 
             LL_IF_DEBUG_FOR(oc->L, linker_verbose,
                      LL_DEBUG_FOR(oc->L, "relocateSection: internal relocation relative to section %d (%.16s, %.16s)\n",
@@ -1320,7 +1320,7 @@ ocBuildSegments_MachO(ObjectCode *oc)
     void *mem = NULL, *curMem = NULL;
 
     for (int i = 0; i < oc->n_sections; i++) {
-        MachOSection *macho = &oc->info->macho_sections[i];
+        MachOSection *macho = &oc->macho_info->macho_sections[i];
         if (0 == macho->size) {
             LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "ocBuildSegments_MachO: found a zero length section, skipping\n"));
             continue;
@@ -1444,7 +1444,7 @@ ocBuildSegments_MachO(ObjectCode *oc)
          i < oc->n_sections;
          i++)
     {
-        MachOSection *macho = &oc->info->macho_sections[i];
+        MachOSection *macho = &oc->macho_info->macho_sections[i];
         // Skip zero size sections here as well since there was no place
         // allocated for them in Segment's sections_idx array
         if (0 == macho->size) {
@@ -1490,10 +1490,10 @@ ocGetNames_MachO(ObjectCode* oc)
 
     Section *secArray;
     secArray = (Section*)LL_CALLOC_FOR(oc->L,
-        oc->info->segCmd->nsects,
+        oc->macho_info->segCmd->nsects,
         sizeof(Section),
         "ocGetNames_MachO(sections)");
-    if (oc->info->segCmd->nsects != 0 && secArray == NULL) {
+    if (oc->macho_info->segCmd->nsects != 0 && secArray == NULL) {
         ll_error_set(oc->L, LL_E_NOMEM, "cannot allocate Mach-O sections");
         return 0;
     }
@@ -1517,7 +1517,7 @@ ocGetNames_MachO(ObjectCode* oc)
 
         for (int sec_n = 0; sec_n < segment->n_sections; sec_n++) {
             int sec_idx = segment->sections_idx[sec_n];
-            MachOSection *section = &oc->info->macho_sections[sec_idx];
+            MachOSection *section = &oc->macho_info->macho_sections[sec_idx];
 
             size_t alignment = 1 << section->align;
             SectionKind kind = getSectionKind_MachO(section);
@@ -1543,8 +1543,8 @@ ocGetNames_MachO(ObjectCode* oc)
                 LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "ocGetNames_MachO: memset to 0 a ZEROFILL section\n"));
                 memset(secMem, 0, section->size);
                 addSection(oc->L, &secArray[sec_idx], kind, alloc, start, size,
-                            mapped_offset, mapped_start, mapped_size);
-                if (secArray[sec_idx].info == NULL) {
+                            mapped_offset, mapped_start, mapped_size, sizeof(struct ll_macho_section_info));
+                if (secArray[sec_idx].macho_info == NULL) {
                     ll_error_set(oc->L, LL_E_NOMEM, "cannot allocate Mach-O section metadata");
                     return 0;
                 }
@@ -1581,34 +1581,34 @@ ocGetNames_MachO(ObjectCode* oc)
                 memcpy(secMem, oc->image + section->offset, section->size);
 #endif
                 addSection(oc->L, &secArray[sec_idx], kind, alloc, start, size,
-                            mapped_offset, mapped_start, mapped_size);
-                if (secArray[sec_idx].info == NULL) {
+                            mapped_offset, mapped_start, mapped_size, sizeof(struct ll_macho_section_info));
+                if (secArray[sec_idx].macho_info == NULL) {
                     ll_error_set(oc->L, LL_E_NOMEM, "cannot allocate Mach-O section metadata");
                     return 0;
                 }
             /* SECTION_NOMEM since memory is already allocated in segments */
 
 #if defined(NEED_PLT)
-                secArray[sec_idx].info->nstubs = 0;
-                secArray[sec_idx].info->stub_offset = (uint8_t*)mem + size;
-                secArray[sec_idx].info->stub_size = stub_space;
-                secArray[sec_idx].info->stubs = NULL;
+                secArray[sec_idx].macho_info->nstubs = 0;
+                secArray[sec_idx].macho_info->stub_offset = (uint8_t*)mem + size;
+                secArray[sec_idx].macho_info->stub_size = stub_space;
+                secArray[sec_idx].macho_info->stubs = NULL;
 #else
-                secArray[sec_idx].info->nstubs = 0;
-                secArray[sec_idx].info->stub_offset = NULL;
-                secArray[sec_idx].info->stub_size = 0;
-                secArray[sec_idx].info->stubs = NULL;
+                secArray[sec_idx].macho_info->nstubs = 0;
+                secArray[sec_idx].macho_info->stub_offset = NULL;
+                secArray[sec_idx].macho_info->stub_size = 0;
+                secArray[sec_idx].macho_info->stubs = NULL;
 #endif
                 addProddableBlock(oc->L, &oc->proddables, start, section->size);
             }
 
             curMem = (char*) secMem + section->size;
 
-            secArray[sec_idx].info->macho_section = section;
+            secArray[sec_idx].macho_info->macho_section = section;
             if (section->nreloc != 0) {
                 const char *table = oc->image + section->reloff;
                 if ((uintptr_t)table % _Alignof(MachORelocationInfo) == 0) {
-                    secArray[sec_idx].info->relocation_info
+                    secArray[sec_idx].macho_info->relocation_info
                         = (MachORelocationInfo *)table;
                 } else {
                     size_t bytes = (size_t)section->nreloc
@@ -1621,8 +1621,8 @@ ocGetNames_MachO(ObjectCode* oc)
                         return 0;
                     }
                     memcpy(copy, table, bytes);
-                    secArray[sec_idx].info->owned_relocations = copy;
-                    secArray[sec_idx].info->relocation_info = copy;
+                    secArray[sec_idx].macho_info->owned_relocations = copy;
+                    secArray[sec_idx].macho_info->relocation_info = copy;
                 }
             }
 
@@ -1633,8 +1633,8 @@ ocGetNames_MachO(ObjectCode* oc)
     /* now, as all sections have been loaded, we can resolve the absolute
      * address of symbols defined in those sections.
      */
-    for(size_t i=0; i < oc->info->n_macho_symbols; i++) {
-        MachOSymbol * s = &oc->info->macho_symbols[i];
+    for(size_t i=0; i < oc->macho_info->n_macho_symbols; i++) {
+        MachOSymbol * s = &oc->macho_info->macho_symbols[i];
         if( N_SECT == (s->nlist->n_type & N_TYPE) ) {
             if( NO_SECT == s->nlist->n_sect ) {
                 ll_error_set(oc->L, LL_E_FORMAT, "Symbol with N_SECT type, but no section.");
@@ -1644,7 +1644,7 @@ ocGetNames_MachO(ObjectCode* oc)
 
             /* section is given, and n_sect is >0 */
             uint8_t n = s->nlist->n_sect - 1;
-            if(0 == oc->info->macho_sections[n].size) {
+            if(0 == oc->macho_info->macho_sections[n].size) {
                 continue;
             }
 
@@ -1660,7 +1660,7 @@ ocGetNames_MachO(ObjectCode* oc)
              * a single segment of MH_OBJECT object file.
              */
             s->addr = (uint8_t*)oc->sections[n].start
-                              - oc->info->macho_sections[n].addr
+                              - oc->macho_info->macho_sections[n].addr
                               + s->nlist->n_value;
             if(NULL == s->addr) {
                 ll_error_set(oc->L, LL_E_FORMAT, "Failed to compute address for symbol %s", s->name);
@@ -1672,25 +1672,25 @@ ocGetNames_MachO(ObjectCode* oc)
 
     // count external symbols defined here
     oc->n_symbols = 0;
-    if (oc->info->symCmd) {
-        for (size_t i = 0; i < oc->info->n_macho_symbols; i++) {
-            if (oc->info->nlist[i].n_type & N_STAB) {
+    if (oc->macho_info->symCmd) {
+        for (size_t i = 0; i < oc->macho_info->n_macho_symbols; i++) {
+            if (oc->macho_info->nlist[i].n_type & N_STAB) {
                 ;
             }
-            else if(oc->info->nlist[i].n_type & N_EXT)
+            else if(oc->macho_info->nlist[i].n_type & N_EXT)
             {
-                if((oc->info->nlist[i].n_type & N_TYPE) == N_UNDF
-                    && (oc->info->nlist[i].n_value != 0))
+                if((oc->macho_info->nlist[i].n_type & N_TYPE) == N_UNDF
+                    && (oc->macho_info->nlist[i].n_value != 0))
                 {
                     oc->n_symbols++;
                     /* Only allocate space for COMMON symbols not already
                      * defined by a previously-loaded object. */
-                    ll_symbol_name *nm_c = oc->info->macho_symbols[i].name;
+                    ll_symbol_name *nm_c = oc->macho_info->macho_symbols[i].name;
                     if (!lookupStrHashTable(oc->L->symhash, nm_c)) {
-                        commonSize += oc->info->nlist[i].n_value;
+                        commonSize += oc->macho_info->nlist[i].n_value;
                     }
                 }
-                else if((oc->info->nlist[i].n_type & N_TYPE) == N_SECT)
+                else if((oc->macho_info->nlist[i].n_type & N_TYPE) == N_SECT)
                     oc->n_symbols++;
             }
         }
@@ -1709,18 +1709,18 @@ ocGetNames_MachO(ObjectCode* oc)
         return 0;
     }
 
-    if (oc->info->symCmd) {
-        for (size_t i = 0; i < oc->info->n_macho_symbols; i++) {
-            ll_symbol_name* nm = oc->info->macho_symbols[i].name;
-            if (oc->info->nlist[i].n_type & N_STAB)
+    if (oc->macho_info->symCmd) {
+        for (size_t i = 0; i < oc->macho_info->n_macho_symbols; i++) {
+            ll_symbol_name* nm = oc->macho_info->macho_symbols[i].name;
+            if (oc->macho_info->nlist[i].n_type & N_STAB)
             {
                 LL_IF_DEBUG_FOR(oc->L, linker_verbose, LL_DEBUG_FOR(oc->L, "ocGetNames_MachO: Skip STAB: %s\n", nm));
             }
-            else if ((oc->info->nlist[i].n_type & N_TYPE) == N_SECT)
+            else if ((oc->macho_info->nlist[i].n_type & N_TYPE) == N_SECT)
             {
-                if (oc->info->nlist[i].n_type & N_EXT)
+                if (oc->macho_info->nlist[i].n_type & N_EXT)
                 {
-                    if (   (oc->info->nlist[i].n_desc & N_WEAK_DEF)
+                    if (   (oc->macho_info->nlist[i].n_desc & N_WEAK_DEF)
                         && lookupDependentSymbol(oc->L, nm, oc, NULL)) {
                         // weak definition, and we already have a definition
                         LL_IF_DEBUG_FOR(oc->L, linker_verbose, LL_DEBUG_FOR(oc->L, "    weak: %s\n", nm));
@@ -1728,7 +1728,7 @@ ocGetNames_MachO(ObjectCode* oc)
                     else
                     {
                             LL_IF_DEBUG_FOR(oc->L, linker_verbose, LL_DEBUG_FOR(oc->L, "ocGetNames_MachO: inserting %s\n", nm));
-                            ll_symbol_addr* addr = oc->info->macho_symbols[i].addr;
+                            ll_symbol_addr* addr = oc->macho_info->macho_symbols[i].addr;
                             // TODO: Make figure out how to determine this from the object file
                             ll_sym_type sym_type = LL_SYM_CODE;
                             if (!ghciInsertSymbolTable( oc->L
@@ -1767,14 +1767,14 @@ ocGetNames_MachO(ObjectCode* oc)
             ll_error_set(oc->L, LL_E_NOMEM, "cannot allocate Mach-O COMMON storage");
             return 0;
         }
-        oc->info->common_mem = commonStorage;
+        oc->macho_info->common_mem = commonStorage;
         commonCounter = (unsigned long)commonStorage;
     }
 
-    if (oc->info->symCmd) {
-        for (size_t i = 0; i < oc->info->n_macho_symbols; i++) {
-            ll_symbol_name* nm = oc->info->macho_symbols[i].name;
-            MachONList *nlist = &oc->info->nlist[i];
+    if (oc->macho_info->symCmd) {
+        for (size_t i = 0; i < oc->macho_info->n_macho_symbols; i++) {
+            ll_symbol_name* nm = oc->macho_info->macho_symbols[i].name;
+            MachONList *nlist = &oc->macho_info->nlist[i];
             if((nlist->n_type & N_TYPE) == N_UNDF
              && (nlist->n_type & N_EXT)
              && (nlist->n_value != 0)) {
@@ -1804,7 +1804,7 @@ ocGetNames_MachO(ObjectCode* oc)
                         return 0;
                     }
                     nlist->n_value = (unsigned long)existing->value;
-                    oc->info->macho_symbols[i].addr = existing->value;
+                    oc->macho_info->macho_symbols[i].addr = existing->value;
                     LL_IF_DEBUG_FOR(oc->L, linker_verbose,
                              LL_DEBUG_FOR(oc->L, "ocGetNames_MachO: COMMON symbol %s"
                                         " reusing address %p\n",
@@ -1813,7 +1813,7 @@ ocGetNames_MachO(ObjectCode* oc)
                 } else {
                     nlist->n_value = commonCounter;
                     /* also set the final address to the macho_symbol */
-                    oc->info->macho_symbols[i].addr = (void*)commonCounter;
+                    oc->macho_info->macho_symbols[i].addr = (void*)commonCounter;
 
                     LL_IF_DEBUG_FOR(oc->L, linker_verbose,
                              LL_DEBUG_FOR(oc->L, "ocGetNames_MachO: inserting common symbol: %s\n", nm));
@@ -1824,7 +1824,7 @@ ocGetNames_MachO(ObjectCode* oc)
                         return 0;
                     }
                     oc->symbols[curSymbol].name = nm;
-                    oc->symbols[curSymbol].addr = oc->info->macho_symbols[i].addr;
+                    oc->symbols[curSymbol].addr = oc->macho_info->macho_symbols[i].addr;
                     oc->symbols[curSymbol].type = sym_type;
                     curSymbol++;
 
@@ -1912,10 +1912,10 @@ ocResolve_MachO(ObjectCode* oc)
 {
     LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "ocResolve_MachO: %s start\n", OC_INFORMATIVE_FILENAME(oc)));
 
-    if(NULL != oc->info->dsymCmd)
+    if(NULL != oc->macho_info->dsymCmd)
     {
-        uint32_t offset = oc->info->dsymCmd->indirectsymoff;
-        uint32_t count = oc->info->dsymCmd->nindirectsyms;
+        uint32_t offset = oc->macho_info->dsymCmd->indirectsymoff;
+        uint32_t count = oc->macho_info->dsymCmd->nindirectsyms;
         if (oc->fileSize < 0 || offset > (size_t)oc->fileSize ||
             count > ((size_t)oc->fileSize - offset) / sizeof(uint32_t) ||
             (count != 0 && (uintptr_t)(oc->image + offset) % _Alignof(uint32_t) != 0)) {
@@ -1929,7 +1929,7 @@ ocResolve_MachO(ObjectCode* oc)
         LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "ocResolve_MachO: resolving dsymLC\n"));
         for (int i = 0; i < oc->n_sections; i++)
         {
-            const char * sectionName = oc->info->macho_sections[i].sectname;
+            const char * sectionName = oc->macho_info->macho_sections[i].sectname;
 
             LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "ocResolve_MachO: section %d/%d: %.16s\n", i, oc->n_sections, sectionName));
 
@@ -1937,17 +1937,17 @@ ocResolve_MachO(ObjectCode* oc)
                 || !strncmp(sectionName,"__la_sym_ptr2",16)
                 || !strncmp(sectionName,"__la_sym_ptr3",16))
             {
-                if(!resolveImports(oc,&oc->info->macho_sections[i],
+                if(!resolveImports(oc,&oc->macho_info->macho_sections[i],
                                    &oc->sections[i], indirectSyms,
-                                   oc->info->dsymCmd->nindirectsyms))
+                                   oc->macho_info->dsymCmd->nindirectsyms))
                     return 0;
             }
             else if(!strncmp(sectionName,"__nl_symbol_ptr",16)
                 ||  !strncmp(sectionName,"__pointers",16))
             {
-                if(!resolveImports(oc,&oc->info->macho_sections[i],
+                if(!resolveImports(oc,&oc->macho_info->macho_sections[i],
                                    &oc->sections[i], indirectSyms,
-                                   oc->info->dsymCmd->nindirectsyms))
+                                   oc->macho_info->dsymCmd->nindirectsyms))
                     return 0;
             }
             else if(!strncmp(sectionName,"__jump_table",16))
@@ -1968,8 +1968,8 @@ ocResolve_MachO(ObjectCode* oc)
     }
 #if defined(aarch64_HOST_ARCH)
     /* fill the GOT table */
-    for(size_t i = 0; i < oc->info->n_macho_symbols; i++) {
-        MachOSymbol * symbol = &oc->info->macho_symbols[i];
+    for(size_t i = 0; i < oc->macho_info->n_macho_symbols; i++) {
+        MachOSymbol * symbol = &oc->macho_info->macho_symbols[i];
         if(needGotSlot(symbol)) {
             if(N_UNDF == (symbol->nlist->n_type & N_TYPE)) {
                 /* an undefined symbol. So we need to ensure we
@@ -2022,7 +2022,7 @@ ocResolve_MachO(ObjectCode* oc)
 int
 ocRunInit_MachO ( ObjectCode *oc )
 {
-    if (NULL == oc->info->segCmd) {
+    if (NULL == oc->macho_info->segCmd) {
         LL_FATAL_FOR(oc->L, "ocRunInit_MachO: no segment load command");
     }
 
@@ -2042,7 +2042,7 @@ ocRunInit_MachO ( ObjectCode *oc )
             void *init_startC = oc->sections[i].start;
             init_t *init = (init_t*)init_startC;
             init_t *init_end = (init_t*)((uint8_t*)init_startC
-                             + oc->sections[i].info->macho_section->size);
+                             + oc->sections[i].macho_info->macho_section->size);
 
             for (int pn = 0; init < init_end; init++, pn++) {
                 LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "ocRunInit_MachO:     function pointer %d at %p to %p\n",
@@ -2061,7 +2061,7 @@ ocRunInit_MachO ( ObjectCode *oc )
 int
 ocRunFini_MachO ( ObjectCode *oc )
 {
-    if (NULL == oc->info->segCmd) {
+    if (NULL == oc->macho_info->segCmd) {
         LL_FATAL_FOR(oc->L, "ocRunInit_MachO: no segment load command");
     }
 
@@ -2074,7 +2074,7 @@ ocRunFini_MachO ( ObjectCode *oc )
             void *fini_startC = oc->sections[i].start;
             fini_t *fini = (fini_t*)fini_startC;
             fini_t *fini_end = (fini_t*)((uint8_t*)fini_startC
-                             + oc->sections[i].info->macho_section->size);
+                             + oc->sections[i].macho_info->macho_section->size);
 
             for (int pn = 0; fini < fini_end; fini++, pn++) {
                 LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "ocRunFini_MachO:     function pointer %d at %p to %p\n",

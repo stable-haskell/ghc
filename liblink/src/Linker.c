@@ -1949,7 +1949,8 @@ OStatus getObjectLoadStatus (pathchar *path)
 void
 addSection (ll_linker *L, Section *s, SectionKind kind, SectionAlloc alloc,
             void* start, ll_word size,
-            ll_word mapped_offset, void* mapped_start, ll_word mapped_size)
+            ll_word mapped_offset, void* mapped_start, ll_word mapped_size,
+            size_t format_info_size)
 {
    s->start        = start;     /* actual start of section in memory */
    s->size         = size;      /* actual size of section in memory */
@@ -1962,7 +1963,7 @@ addSection (ll_linker *L, Section *s, SectionKind kind, SectionAlloc alloc,
 
    if (!s->info)
      s->info
-       = (struct SectionFormatInfo*)LL_CALLOC_FOR(L, 1, sizeof *s->info,
+       = (struct SectionFormatInfo*)LL_CALLOC_FOR(L, 1, format_info_size,
                                             "addSection(SectionFormatInfo)");
 
    LL_IF_DEBUG_FOR(L, linker,

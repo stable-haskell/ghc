@@ -54,8 +54,8 @@ bool needStubForRelaArm(Elf_Rela * rela) {
     }
 }
 
-bool makeStubArmArm(Stub * s);
-bool makeStubArmThm(Stub * s);
+bool makeStubArmArm(ElfStub * s);
+bool makeStubArmThm(ElfStub * s);
 /*
   Note [The ARM/Thumb Story]
   ~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -84,7 +84,7 @@ bool makeStubArmThm(Stub * s);
 */
 
 bool
-makeStubArmArm(Stub * s) {
+makeStubArmArm(ElfStub * s) {
 
     // We (the linker) may corrupt r12 (ip) according to the "ELF for the ARM
     // Architecture" reference.
@@ -129,7 +129,7 @@ makeStubArmArm(Stub * s) {
 }
 
 bool
-makeStubArmThm(Stub * s) {
+makeStubArmThm(ElfStub * s) {
 
     // movw<c> <Rd>, #<imm16> (Encoding T3) looks like:
     // 31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16
@@ -173,7 +173,7 @@ makeStubArmThm(Stub * s) {
 }
 
 bool
-makeStubArm(Stub * s) {
+makeStubArm(ElfStub * s) {
     if((s->flags & 1) == 0)
         return makeStubArmArm(s);
     else

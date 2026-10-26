@@ -657,7 +657,7 @@ bool computeAddend(ElfRelocationATable *relaTab, unsigned relNo, Elf_Rel *rel,
 
 // Iterate over all relocations and perform them.
 bool relocateObjectCodeRISCV64(ObjectCode *oc) {
-  for (ElfRelocationTable *relTab = oc->info->relTable; relTab != NULL;
+  for (ElfRelocationTable *relTab = oc->elf_info->relTable; relTab != NULL;
        relTab = relTab->next) {
     /* only relocate interesting sections */
     if (SECTIONKIND_OTHER == oc->sections[relTab->targetSectionIndex].kind)
@@ -687,7 +687,7 @@ bool relocateObjectCodeRISCV64(ObjectCode *oc) {
         return EXIT_FAILURE;
     }
   }
-  for (ElfRelocationATable *relaTab = oc->info->relaTable; relaTab != NULL;
+  for (ElfRelocationATable *relaTab = oc->elf_info->relaTable; relaTab != NULL;
        relaTab = relaTab->next) {
     /* only relocate interesting sections */
     if (SECTIONKIND_OTHER == oc->sections[relaTab->targetSectionIndex].kind)

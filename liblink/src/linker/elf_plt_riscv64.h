@@ -7,6 +7,6 @@
 extern const size_t stubSizeRISCV64;
 bool needStubForRelRISCV64(Elf_Rel * rel);
 bool needStubForRelaRISCV64(Elf_Rela * rel);
-bool makeStubRISCV64(ll_linker *L, Stub * s);
+bool makeStubRISCV64(ll_linker *L, ElfStub * s);
 
 #endif

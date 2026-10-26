@@ -45,7 +45,7 @@ bool needStubForRelaAarch64(Elf_Rela * rela) {
 
 
 bool
-makeStubAarch64(Stub * s) {
+makeStubAarch64(ElfStub * s) {
     // We (the linker) may corrupt registers x16 (IP0) and x17 (IP1) [AAPCS64]
     // and the condition flags, according to the "ELF for the ARM 64-bit
     // Architecture (AArch64)".

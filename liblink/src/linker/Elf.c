@@ -216,19 +216,19 @@ ocInit_ELF(ObjectCode * oc)
 {
     ocDeinit_ELF(oc);
 
-    oc->info = (struct ObjectCodeFormatInfo*)LL_CALLOC_FOR(oc->L,
-            1, sizeof *oc->info,
+    oc->elf_info = (struct ll_elf_object_info*)LL_CALLOC_FOR(oc->L,
+            1, sizeof *oc->elf_info,
             "ocInit_Elf(ObjectCodeFormatInfo)");
     // TODO: fill info
-    oc->info->elfHeader = (Elf_Ehdr *)oc->image;
-    oc->info->programHeader = oc->info->elfHeader->e_phnum == 0 ? NULL :
-        (Elf_Phdr *)((uint8_t *)oc->image + oc->info->elfHeader->e_phoff);
-    oc->info->sectionHeader = (Elf_Shdr *) ((uint8_t*)oc->image
-                                            + oc->info->elfHeader->e_shoff);
-    oc->info->sectionHeaderStrtab = (char*)((uint8_t*)oc->image +
-            oc->info->sectionHeader[elf_shstrndx(oc->info->elfHeader)].sh_offset);
+    oc->elf_info->elfHeader = (Elf_Ehdr *)oc->image;
+    oc->elf_info->programHeader = oc->elf_info->elfHeader->e_phnum == 0 ? NULL :
+        (Elf_Phdr *)((uint8_t *)oc->image + oc->elf_info->elfHeader->e_phoff);
+    oc->elf_info->sectionHeader = (Elf_Shdr *) ((uint8_t*)oc->image
+                                            + oc->elf_info->elfHeader->e_shoff);
+    oc->elf_info->sectionHeaderStrtab = (char*)((uint8_t*)oc->image +
+            oc->elf_info->sectionHeader[elf_shstrndx(oc->elf_info->elfHeader)].sh_offset);
 
-    oc->n_sections = elf_shnum(oc->info->elfHeader);
+    oc->n_sections = elf_shnum(oc->elf_info->elfHeader);
 
     ElfRelocationTable *relTableLast = NULL;
     ElfRelocationATable *relaTableLast = NULL;
@@ -236,53 +236,53 @@ ocInit_ELF(ObjectCode * oc)
 
     /* get the symbol table(s) */
     for(int i=0; i < oc->n_sections; i++) {
-        if(SHT_REL  == oc->info->sectionHeader[i].sh_type) {
+        if(SHT_REL  == oc->elf_info->sectionHeader[i].sh_type) {
             ElfRelocationTable *relTab = (ElfRelocationTable *)LL_CALLOC_FOR(oc->L,
                     1, sizeof(ElfRelocationTable),
                     "ocInit_Elf(ElfRelocationTable");
             relTab->index = i;
 
             relTab->relocations =
-                (Elf_Rel*) ((uint8_t*)oc->info->elfHeader
-                                    + oc->info->sectionHeader[i].sh_offset);
-            relTab->n_relocations = oc->info->sectionHeader[i].sh_size
+                (Elf_Rel*) ((uint8_t*)oc->elf_info->elfHeader
+                                    + oc->elf_info->sectionHeader[i].sh_offset);
+            relTab->n_relocations = oc->elf_info->sectionHeader[i].sh_size
                                     / sizeof(Elf_Rel);
-            relTab->targetSectionIndex = oc->info->sectionHeader[i].sh_info;
+            relTab->targetSectionIndex = oc->elf_info->sectionHeader[i].sh_info;
 
-            relTab->sectionHeader      = &oc->info->sectionHeader[i];
+            relTab->sectionHeader      = &oc->elf_info->sectionHeader[i];
 
             if(relTableLast == NULL) {
-                oc->info->relTable = relTab;
+                oc->elf_info->relTable = relTab;
                 relTableLast = relTab;
             } else {
                 relTableLast->next = relTab;
                 relTableLast = relTab;
             }
 
-        } else if(SHT_RELA == oc->info->sectionHeader[i].sh_type) {
+        } else if(SHT_RELA == oc->elf_info->sectionHeader[i].sh_type) {
             ElfRelocationATable *relTab = (ElfRelocationATable *)LL_CALLOC_FOR(oc->L,
                     1, sizeof(ElfRelocationATable),
                     "ocInit_Elf(ElfRelocationTable");
             relTab->index = i;
 
             relTab->relocations =
-                (Elf_Rela*) ((uint8_t*)oc->info->elfHeader
-                                     + oc->info->sectionHeader[i].sh_offset);
-            relTab->n_relocations = oc->info->sectionHeader[i].sh_size
+                (Elf_Rela*) ((uint8_t*)oc->elf_info->elfHeader
+                                     + oc->elf_info->sectionHeader[i].sh_offset);
+            relTab->n_relocations = oc->elf_info->sectionHeader[i].sh_size
                                     / sizeof(Elf_Rela);
-            relTab->targetSectionIndex = oc->info->sectionHeader[i].sh_info;
+            relTab->targetSectionIndex = oc->elf_info->sectionHeader[i].sh_info;
 
-            relTab->sectionHeader      = &oc->info->sectionHeader[i];
+            relTab->sectionHeader      = &oc->elf_info->sectionHeader[i];
 
             if(relaTableLast == NULL) {
-                oc->info->relaTable = relTab;
+                oc->elf_info->relaTable = relTab;
                 relaTableLast = relTab;
             } else {
                 relaTableLast->next = relTab;
                 relaTableLast = relTab;
             }
 
-        } else if(SHT_SYMTAB == oc->info->sectionHeader[i].sh_type) {
+        } else if(SHT_SYMTAB == oc->elf_info->sectionHeader[i].sh_type) {
 
             ElfSymbolTable *symTab = (ElfSymbolTable *)LL_CALLOC_FOR(oc->L,
                     1, sizeof(ElfSymbolTable),
@@ -292,18 +292,18 @@ ocInit_ELF(ObjectCode * oc)
                                 * find or assert that we are dealing with the
                                 * correct symbol table */
 
-            Elf_Sym *stab = (Elf_Sym*)((uint8_t*)oc->info->elfHeader
-                                       + oc->info->sectionHeader[i].sh_offset);
-            symTab->n_symbols = oc->info->sectionHeader[i].sh_size
+            Elf_Sym *stab = (Elf_Sym*)((uint8_t*)oc->elf_info->elfHeader
+                                       + oc->elf_info->sectionHeader[i].sh_offset);
+            symTab->n_symbols = oc->elf_info->sectionHeader[i].sh_size
                                 / sizeof(Elf_Sym);
             symTab->symbols = (ElfSymbol *)LL_CALLOC_FOR(oc->L,
                     symTab->n_symbols, sizeof(ElfSymbol),
                     "ocInit_Elf(ElfSymbol)");
 
             /* get the strings table */
-            size_t lnkIdx = oc->info->sectionHeader[i].sh_link;
-            symTab->names = (char*)(uint8_t*)oc->info->elfHeader
-                            + oc->info->sectionHeader[lnkIdx].sh_offset;
+            size_t lnkIdx = oc->elf_info->sectionHeader[i].sh_link;
+            symTab->names = (char*)(uint8_t*)oc->elf_info->elfHeader
+                            + oc->elf_info->sectionHeader[lnkIdx].sh_offset;
 
             /* build the ElfSymbols from the symbols */
             for(size_t j=0; j < symTab->n_symbols; j++) {
@@ -321,7 +321,7 @@ ocInit_ELF(ObjectCode * oc)
 
             /* append the ElfSymbolTable */
             if(symbolTablesLast == NULL) {
-                oc->info->symbolTables = symTab;
+                oc->elf_info->symbolTables = symTab;
                 symbolTablesLast = symTab;
             } else {
                 symbolTablesLast->next = symTab;
@@ -342,19 +342,19 @@ ocDeinit_ELF(ObjectCode * oc)
     /* free all ElfSymbolTables, and their associated
      * ElfSymbols
      */
-    if(oc->info != NULL) {
+    if(oc->elf_info != NULL) {
         /* Failed or never-started initialization leaves these lists owned by
          * the object. Successful execution already consumes and clears them. */
-        freeInitFiniList(oc->L, oc->info->init);
-        freeInitFiniList(oc->L, oc->info->fini);
-        oc->info->init = NULL;
-        oc->info->fini = NULL;
+        freeInitFiniList(oc->L, oc->elf_info->init);
+        freeInitFiniList(oc->L, oc->elf_info->fini);
+        oc->elf_info->init = NULL;
+        oc->elf_info->fini = NULL;
         freeGot(oc);
-        if (oc->info->common_mem != NULL) {
-            ll_munmap_for_linker(oc->L, oc->info->common_mem,
-                                oc->info->common_size, "ocDeinit_ELF(COMMON)");
+        if (oc->elf_info->common_mem != NULL) {
+            ll_munmap_for_linker(oc->L, oc->elf_info->common_mem,
+                                oc->elf_info->common_size, "ocDeinit_ELF(COMMON)");
         }
-        ElfSymbolTable * last = oc->info->symbolTables;
+        ElfSymbolTable * last = oc->elf_info->symbolTables;
 
         while(last != NULL) {
             ElfSymbolTable * t = last;
@@ -364,7 +364,7 @@ ocDeinit_ELF(ObjectCode * oc)
         }
 
         {
-            ElfRelocationTable *last = oc->info->relTable;
+            ElfRelocationTable *last = oc->elf_info->relTable;
             while (last != NULL) {
                 ElfRelocationTable *t = last;
                 last = last->next;
@@ -373,7 +373,7 @@ ocDeinit_ELF(ObjectCode * oc)
         }
 
         {
-            ElfRelocationATable *last = oc->info->relaTable;
+            ElfRelocationATable *last = oc->elf_info->relaTable;
             while (last != NULL) {
                 ElfRelocationATable *t = last;
                 last = last->next;
@@ -381,8 +381,8 @@ ocDeinit_ELF(ObjectCode * oc)
             }
         }
 
-        LL_FREE_FOR(oc->L, oc->info);
-        oc->info = NULL;
+        LL_FREE_FOR(oc->L, oc->elf_info);
+        oc->elf_info = NULL;
 #if defined(SHN_XINDEX)
         oc->shndx_table = SHNDX_TABLE_UNINIT(oc->L);
 #endif
@@ -777,7 +777,7 @@ ocGetNames_ELF ( ObjectCode* oc )
       ll_word size = shdr[i].sh_size;
       ll_word offset = shdr[i].sh_offset;
       ll_word align = shdr[i].sh_addralign == 0 ? 1 : shdr[i].sh_addralign;
-      const char *sh_name = oc->info->sectionHeaderStrtab + shdr[i].sh_name;
+      const char *sh_name = oc->elf_info->sectionHeaderStrtab + shdr[i].sh_name;
 
       /*
        * Identify initializer and finalizer lists
@@ -786,10 +786,10 @@ ocGetNames_ELF ( ObjectCode* oc )
        */
       if (kind == SECTIONKIND_CODE_OR_RODATA
             && 0 == strncmp(".init", sh_name, 5)) {
-          addInitFini(oc->L, &oc->info->init, &oc->sections[i], INITFINI_INIT, 0);
+          addInitFini(oc->L, &oc->elf_info->init, &oc->sections[i], INITFINI_INIT, 0);
       } else if (kind == SECTIONKIND_CODE_OR_RODATA
             && 0 == strncmp(".fini", sh_name, 5)) {
-          addInitFini(oc->L, &oc->info->fini, &oc->sections[i], INITFINI_FINI, 0);
+          addInitFini(oc->L, &oc->elf_info->fini, &oc->sections[i], INITFINI_FINI, 0);
       } else if (kind == SECTIONKIND_INIT_ARRAY
             || 0 == strncmp(".init_array", sh_name, 11)) {
           uint32_t prio;
@@ -798,7 +798,7 @@ ocGetNames_ELF ( ObjectCode* oc )
               prio = 0;
           }
           prio += 0x10000; // .init_arrays run after .ctors
-          addInitFini(oc->L, &oc->info->init, &oc->sections[i], INITFINI_INIT_ARRAY, prio);
+          addInitFini(oc->L, &oc->elf_info->init, &oc->sections[i], INITFINI_INIT_ARRAY, prio);
           kind = SECTIONKIND_INIT_ARRAY;
       } else if (kind == SECTIONKIND_FINI_ARRAY
             || 0 == strncmp(".fini_array", sh_name, 11)) {
@@ -808,7 +808,7 @@ ocGetNames_ELF ( ObjectCode* oc )
               prio = 0;
           }
           prio += 0x10000; // .fini_arrays run before .dtors
-          addInitFini(oc->L, &oc->info->fini, &oc->sections[i], INITFINI_FINI_ARRAY, prio);
+          addInitFini(oc->L, &oc->elf_info->fini, &oc->sections[i], INITFINI_FINI_ARRAY, prio);
           kind = SECTIONKIND_FINI_ARRAY;
 
       /* N.B. a compilation unit may have more than one .ctor section; we
@@ -822,7 +822,7 @@ ocGetNames_ELF ( ObjectCode* oc )
           // .ctors/.dtors are executed in reverse order: higher numbers are
           // executed first
           prio = 0xffff - prio;
-          addInitFini(oc->L, &oc->info->init, &oc->sections[i], INITFINI_CTORS, prio);
+          addInitFini(oc->L, &oc->elf_info->init, &oc->sections[i], INITFINI_CTORS, prio);
           kind = SECTIONKIND_INIT_ARRAY;
       } else if (0 == strncmp(".dtors", sh_name, 6)) {
           uint32_t prio;
@@ -833,7 +833,7 @@ ocGetNames_ELF ( ObjectCode* oc )
           // .ctors/.dtors are executed in reverse order: higher numbers are
           // executed first
           prio = 0xffff - prio;
-          addInitFini(oc->L, &oc->info->fini, &oc->sections[i], INITFINI_DTORS, prio);
+          addInitFini(oc->L, &oc->elf_info->fini, &oc->sections[i], INITFINI_DTORS, prio);
           kind = SECTIONKIND_FINI_ARRAY;
       }
 
@@ -882,12 +882,12 @@ ocGetNames_ELF ( ObjectCode* oc )
                          zspace, shdr[i].sh_size);
          */
           addSection(oc->L, &sections[i], kind, alloc, start, size,
-                     mapped_offset, mapped_start, mapped_size);
+                     mapped_offset, mapped_start, mapped_size, sizeof(struct ll_elf_section_info));
 
-          oc->sections[i].info->nstubs = 0;
-          oc->sections[i].info->stub_offset = NULL;
-          oc->sections[i].info->stub_size = 0;
-          oc->sections[i].info->stubs = NULL;
+          oc->sections[i].elf_info->nstubs = 0;
+          oc->sections[i].elf_info->stub_offset = NULL;
+          oc->sections[i].elf_info->stub_size = 0;
+          oc->sections[i].elf_info->stubs = NULL;
       } else if (kind != SECTIONKIND_OTHER && size > 0) {
 
 #if defined(NEED_PLT)
@@ -962,18 +962,18 @@ ocGetNames_ELF ( ObjectCode* oc )
           }
 #endif
           addSection(oc->L, &sections[i], kind, alloc, start, size,
-                     mapped_offset, mapped_start, mapped_size);
+                     mapped_offset, mapped_start, mapped_size, sizeof(struct ll_elf_section_info));
 
 #if defined(NEED_PLT)
-          oc->sections[i].info->nstubs = 0;
-          oc->sections[i].info->stub_offset = (uint8_t*)start + size;
-          oc->sections[i].info->stub_size = stub_space;
-          oc->sections[i].info->stubs = NULL;
+          oc->sections[i].elf_info->nstubs = 0;
+          oc->sections[i].elf_info->stub_offset = (uint8_t*)start + size;
+          oc->sections[i].elf_info->stub_size = stub_space;
+          oc->sections[i].elf_info->stubs = NULL;
 #else
-          oc->sections[i].info->nstubs = 0;
-          oc->sections[i].info->stub_offset = NULL;
-          oc->sections[i].info->stub_size = 0;
-          oc->sections[i].info->stubs = NULL;
+          oc->sections[i].elf_info->nstubs = 0;
+          oc->sections[i].elf_info->stub_offset = NULL;
+          oc->sections[i].elf_info->stub_size = 0;
+          oc->sections[i].elf_info->stubs = NULL;
 #endif
 
           addProddableBlock(oc->L, &oc->proddables, start, size);
@@ -984,25 +984,25 @@ ocGetNames_ELF ( ObjectCode* oc )
            * file offset need not lie within the image, so use its base. */
           if (size == 0 && metadata == NULL) metadata = oc->image;
           addSection(oc->L, &oc->sections[i], kind, alloc, metadata, size,
-                     0, 0, 0);
-          oc->sections[i].info->nstubs = 0;
-          oc->sections[i].info->stub_offset = NULL;
-          oc->sections[i].info->stub_size = 0;
-          oc->sections[i].info->stubs = NULL;
+                     0, 0, 0, sizeof(struct ll_elf_section_info));
+          oc->sections[i].elf_info->nstubs = 0;
+          oc->sections[i].elf_info->stub_offset = NULL;
+          oc->sections[i].elf_info->stub_size = 0;
+          oc->sections[i].elf_info->stubs = NULL;
       }
-      oc->sections[i].info->name          = sh_name;
-      oc->sections[i].info->sectionHeader = &shdr[i];
+      oc->sections[i].elf_info->name          = sh_name;
+      oc->sections[i].elf_info->sectionHeader = &shdr[i];
 
    }
 
    /* All section addresses must exist before constructing any symbol address.
     * Section tables need not place symbol tables after the sections they name. */
-   if (oc->info->symbolTables != NULL) {
+   if (oc->elf_info->symbolTables != NULL) {
 
       /* copy stuff into this module's object symbol table */
 
       oc->n_symbols = 0;
-      for(ElfSymbolTable *symTab = oc->info->symbolTables;
+      for(ElfSymbolTable *symTab = oc->elf_info->symbolTables;
           symTab != NULL; symTab = symTab->next) {
           oc->n_symbols += symTab->n_symbols;
       }
@@ -1017,7 +1017,7 @@ ocGetNames_ELF ( ObjectCode* oc )
 
       size_t common_size = 0;
       size_t common_used = 0;
-      for(ElfSymbolTable *symTab = oc->info->symbolTables;
+      for(ElfSymbolTable *symTab = oc->elf_info->symbolTables;
            symTab != NULL; symTab = symTab->next) {
            for (size_t j = 0; j < symTab->n_symbols; j++) {
                ElfSymbol *symbol = &symTab->symbols[j];
@@ -1043,9 +1043,9 @@ ocGetNames_ELF ( ObjectCode* oc )
                            "ELF rounded COMMON allocation is too large");
               goto fail;
           }
-          oc->info->common_size = common_size;
+          oc->elf_info->common_size = common_size;
           common_mem = ll_mmap_anon_for_linker(oc->L, common_size);
-          oc->info->common_mem = common_mem;
+          oc->elf_info->common_mem = common_mem;
           if (common_mem == NULL) {
               ll_error_set(oc->L, LL_E_NOMEM,
                            "ocGetNames_ELF: Failed to allocate memory for SHN_COMMONs");
@@ -1058,7 +1058,7 @@ ocGetNames_ELF ( ObjectCode* oc )
       //TODO: we ignore local symbols anyway right? So we can use the
       //      shdr[i].sh_info to get the index of the first non-local symbol
       // ie we should use j = shdr[i].sh_info
-       for(ElfSymbolTable *symTab = oc->info->symbolTables;
+       for(ElfSymbolTable *symTab = oc->elf_info->symbolTables;
            symTab != NULL; symTab = symTab->next) {
            for (size_t j = 0; j < symTab->n_symbols; j++) {
 
@@ -1278,7 +1278,7 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
    int symtab_shndx = shdr[shnum].sh_link;
 
    ElfSymbolTable *stab = NULL;
-   for(ElfSymbolTable * st = oc->info->symbolTables;
+   for(ElfSymbolTable * st = oc->elf_info->symbolTables;
        st != NULL; st = st->next) {
        if((int)st->index == symtab_shndx) {
            stab = st;
@@ -1413,14 +1413,14 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
        case COMPAT_R_386_32:   *pP = value;     break;
        case COMPAT_R_386_PC32: *pP = value - P; break;
        case COMPAT_R_386_PLT32: *pP = value - P; break;
-       case COMPAT_R_386_GOTOFF: *pP = value - (Elf_Addr)oc->info->got_start; break;
-       case COMPAT_R_386_GOTPC:  *pP = (Elf_Addr)oc->info->got_start + A - P; break;
+       case COMPAT_R_386_GOTOFF: *pP = value - (Elf_Addr)oc->elf_info->got_start; break;
+       case COMPAT_R_386_GOTPC:  *pP = (Elf_Addr)oc->elf_info->got_start + A - P; break;
        case COMPAT_R_386_GOT32:
        case COMPAT_R_386_GOT32X:
            LL_CHECK_FOR(oc->L, symbol);
            LL_CHECK_FOR(oc->L, symbol->got_addr);
            *pP = (Elf_Addr)symbol->got_addr
-               - (Elf_Addr)oc->info->got_start + A;
+               - (Elf_Addr)oc->elf_info->got_start + A;
            break;
 #        endif
 
@@ -1450,7 +1450,7 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
        {
            int32_t A = *pP;
            void* GOT_S = symbol->got_addr;
-           *(uint32_t *)P = (uint32_t) GOT_S + A - (uint32_t) oc->info->got_start;
+           *(uint32_t *)P = (uint32_t) GOT_S + A - (uint32_t) oc->elf_info->got_start;
            break;
        }
 
@@ -2181,7 +2181,7 @@ ocResolve_ELF ( ObjectCode* oc )
      * We need to resolve (assign addresses) to them, to be able to use them
      * during relocation.
      */
-    for(ElfSymbolTable *symTab = oc->info->symbolTables;
+    for(ElfSymbolTable *symTab = oc->elf_info->symbolTables;
         symTab != NULL; symTab = symTab->next) {
         for (size_t i = 0; i < symTab->n_symbols; i++) {
             ElfSymbol *symbol = &symTab->symbols[i];
@@ -2286,8 +2286,8 @@ ocResolve_ELF ( ObjectCode* oc )
 // See Note [Initializers and finalizers (ELF)].
 int ocRunInit_ELF( ObjectCode *oc )
 {
-    if (oc && oc->info && oc->info->init) {
-        return runInit(oc->L, &oc->info->init);
+    if (oc && oc->elf_info && oc->elf_info->init) {
+        return runInit(oc->L, &oc->elf_info->init);
     }
     return true;
 }
@@ -2297,8 +2297,8 @@ int ocRunInit_ELF( ObjectCode *oc )
 // See Note [Initializers and finalizers (ELF)].
 int ocRunFini_ELF( ObjectCode *oc )
 {
-    if (oc && oc->info && oc->info->fini) {
-        return runFini(oc->L, &oc->info->fini);
+    if (oc && oc->elf_info && oc->elf_info->fini) {
+        return runFini(oc->L, &oc->elf_info->fini);
     }
     return true;
 }
