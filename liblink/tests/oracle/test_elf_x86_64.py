@@ -73,6 +73,13 @@ class ElfOracle(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'saved reference differs: fields'):
             compare_golden(report, golden, original)
 
+    def test_rejects_changed_candidate_semantics(self):
+        original, golden = reference()
+        report = verify(original, golden['reference_capture'])
+        report['semantic']['relocations'][0]['extra_symbol_index'] += 1
+        with self.assertRaisesRegex(ValueError, 'golden differs: semantic'):
+            compare_golden(report, golden, original)
+
     @unittest.skipUnless(os.environ.get('LIBLINK_ELF_CAPTURE'), 'set LIBLINK_ELF_CAPTURE for live captures')
     def test_live_native_captures(self):
         for kind in KINDS:

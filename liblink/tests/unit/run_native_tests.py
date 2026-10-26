@@ -193,7 +193,8 @@ def command_text(argv: list[str]) -> str:
     return shlex.join(str(arg) for arg in argv)
 
 
-def run(argv: list[str], *, label: str) -> str:
+def run(argv: list[str], *, label: str,
+        env: dict[str, str] | None = None) -> str:
     print(f"[{label}] + {command_text(argv)}", flush=True)
     try:
         result = subprocess.run(
@@ -205,6 +206,7 @@ def run(argv: list[str], *, label: str) -> str:
             text=True,
             timeout=TIMEOUT_SECONDS,
             check=False,
+            env=env,
         )
     except subprocess.TimeoutExpired as error:
         stdout = error.stdout or ""
@@ -342,6 +344,44 @@ def configured_posix_mmap_backend(config_include: Path) -> bool:
         text,
         re.MULTILINE,
     ) is not None
+
+
+def run_elf_x86_64_sites(cc: list[str], archive: Path, output: Path,
+                        link_flags: list[str], config_include: Path,
+                        host: str, all_backends: bool) -> None:
+    platform_header = (config_include / "ll_platform.h").read_text()
+    x64_host = re.search(r"^\s*#\s*define\s+x86_64_HOST_ARCH(?:\s+1)?\s*$",
+                         platform_header, re.MULTILINE) is not None
+    arm64_host = re.search(r"^\s*#\s*define\s+(?:aarch64|arm64)_HOST_ARCH(?:\s+1)?\s*$",
+                           platform_header, re.MULTILINE) is not None
+    if not (x64_host or arm64_host) or host not in ("Linux", "Darwin"):
+        print("[elf_x86_64_sites] data-only unit currently requires a POSIX x64/ARM64 host")
+        return
+    binary = output / "elf_x86_64_sites"
+    native_elf_x64 = x64_host and (host == "Linux" or all_backends)
+    # An ARM64 or native-only Darwin library has no x64 ELF apply member.
+    # Compile that one actual TU for its data-only tests; shared storage and
+    # host services still come from the real native archive.
+    target_flags = [] if native_elf_x64 else [
+        "-DLL_ALL_BACKENDS", "-DLL_TARGET_ARCH=LL_ARCH_X86_64",
+        str(ROOT / "liblink/src/linker/elf_reloc_x86_64.c")]
+    run(cc + target_flags + native_unit_link_arguments(
+        ROOT / "liblink/tests/unit/elf_x86_64_sites.c", archive, binary,
+        link_flags, []), label="compile and link elf_x86_64_sites")
+    run([str(binary)], label="run elf_x86_64_sites")
+    command = [sys.executable, "-m", "unittest", "discover", "-s",
+               "liblink/tests/oracle", "-p", "test_elf_x86_64.py", "-v"]
+    if not native_elf_x64:
+        run(command, label="replay ELF x64 reference and corruption controls")
+        return
+    capture = output / "elf_capture"
+    run(cc + native_unit_link_arguments(
+        ROOT / "liblink/tests/runner/elf_capture.c", archive, capture,
+        link_flags, []), label="compile and link ELF native capture")
+    # The test's optional live capture mode is selected through its documented
+    # environment variable without mutating the driver's process environment.
+    run(command, env=dict(os.environ, LIBLINK_ELF_CAPTURE=str(capture)),
+        label="check live ELF x64 fields and unchanged native goldens")
 
 
 def normalize_windows_path(path: str) -> str:
@@ -1159,6 +1199,11 @@ def main() -> int:
             run([str(memory_binary)], label="run backend_memory")
         if args.format_dispatch_only:
             return 0
+
+    if selected_modes == 0:
+        with tempfile.TemporaryDirectory(prefix="liblink-elf-x64-sites-") as temporary:
+            run_elf_x86_64_sites(cc, archive, Path(temporary), link_flags,
+                                config_include, host, args.all_backends)
 
     if args.native_load_errors_only:
         with tempfile.TemporaryDirectory(prefix="liblink-native-load-errors-") as temporary:

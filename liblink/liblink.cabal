@@ -85,6 +85,8 @@ extra-source-files:
     src/linker/elf_reloc_aarch64.h
     src/linker/elf_reloc_riscv64.c
     src/linker/elf_reloc_riscv64.h
+    src/linker/elf_reloc_x86_64.c
+    src/linker/elf_reloc_x86_64.h
     src/linker/elf_tlsgd.c
     src/linker/elf_util.c
     src/linker/elf_util.h
@@ -181,6 +183,7 @@ extra-source-files:
     tests/unit/aarch64_reloc_errors.c
     tests/unit/elf_relocation_errors.c
     tests/unit/elf_relocation_errors_helpers.h
+    tests/unit/elf_x86_64_sites.c
     tests/unit/elf_resource_fixtures.py
     tests/unit/elf_section_errors.c
     tests/unit/elf_resource_errors.c

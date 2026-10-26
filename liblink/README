@@ -75,6 +75,21 @@ foreign ELF and Mach-O remain unqualified for foreign runtime execution. Compili
 a foreign backend does not establish that foreign code can safely execute with
 the running process's ABI or that its process services are available.
 
+The first ELF x86_64 relocation slice now uses the private ll_reloc_ops.apply
+table. Site stores use ll_site.work; PC-relative arithmetic uses ll_site.exec.
+The synchronous call borrows an immutable ll_reloc_context containing the
+referencing file's original symbol index, existing diagnostic name and raw
+symbol type. This explicitly approved amendment to the initial internal
+contract preserves extra-slot identity, STT_FUNC fallback eligibility and
+exact diagnostics; it does not change installed headers or the RTS ABI.
+
+Normal ELF sites still have identical work and execution addresses. Native
+extras addresses and payloads, symbol lookup, range policy and diagnostics are
+preserved. The unit separately checks distinct work/exec addresses, but the
+library does not yet implement LL_CFG_NO_EXEC. Synthetic section, symbol and
+extras layout, the other backend conversions and execution qualification
+remain later parts of WP2.8.
+
 
 Locking
 -------

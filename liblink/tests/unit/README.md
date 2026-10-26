@@ -103,6 +103,22 @@ Darwin linker syntax.
 Stage2 native C unit driver
 ===========================
 
+`elf_x86_64_sites.c` calls the actual typed ELF apply operation with separate
+misaligned work storage and execution addresses. It checks ordinary fields,
+range and unsupported errors, exact diagnostics, raw referencing symbol types,
+original nonzero symbol indices, repeated and distinct extra slots, native
+island payloads and untouched adjacent bytes. A normalized symbol type must
+not replace the original ELF STT_FUNC eligibility test. The context is borrowed
+only for the synchronous call and never retained.
+
+The complete driver runs this data-only unit on POSIX x64 and ARM64, compiling
+the actual x64 TU explicitly when the native archive has no such member. On
+Linux x64 and Darwin x64 +all-backends it also links the native ELF capture
+from the real archive and checks nine original normal-mode goldens plus a
+forced PLT32 island through the independent oracle. Saved-reference and
+capture-corruption controls run on either architecture. Neither helper calls
+loaded foreign code or establishes NO_EXEC support.
+
 `symbol_extras_image.c` uses a valid compiler-produced native object to check
 heap-to-mapping image replacement. It includes the real shared allocator with
 only mapping calls intercepted. Positive controls cover heap images at offsets
