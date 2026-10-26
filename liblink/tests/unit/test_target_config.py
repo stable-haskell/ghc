@@ -81,7 +81,19 @@ def main() -> None:
         rejected = run(cc + ["-DLL_TARGET_ARCH=999", "-c", str(source),
                              "-o", str(directory / "invalid.o")], success=False)
         assert "unsupported LL_TARGET_ARCH" in rejected, rejected
-    print("target_config: PASS (native/all-backends, seven explicit targets, host preservation, invalid target)")
+        # Compile the real backend too: header-only checks cannot detect an
+        # accidental dependency on the RTS way's SEQ_CST_FENCE macro.
+        backend = ROOT / "liblink/src/linker/elf_reloc_riscv64.c"
+        for threaded in (False, True):
+            mode = "threaded" if threaded else "plain"
+            flags = ["-UTHREADED_RTS", "-DLL_ALL_BACKENDS",
+                     "-DLL_TARGET_ARCH=LL_ARCH_RISCV64",
+                     "-Werror=implicit-function-declaration"]
+            if threaded:
+                flags.append("-DTHREADED_RTS")
+            run(cc + flags + ["-c", str(backend),
+                             "-o", str(directory / ("riscv-" + mode + ".o"))])
+    print("target_config: PASS (native/all-backends, seven explicit targets, host preservation, invalid target, RISC-V backend)")
 
 
 if __name__ == "__main__":

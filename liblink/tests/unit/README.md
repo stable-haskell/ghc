@@ -1333,3 +1333,12 @@ disposal and absent afterward. This distinguishes object lifetime from the
 direct unmap control. No loaded object code or protected writes run.
 The existing Mach-O allocation spy forwards the new host adapter to the same
 mapping call with the original arguments; its assertions are unchanged.
+
+RISC-V fence compilation
+------------------------
+
+The target-selection script also compiles the actual RISC-V relocation C
+module with a real host configuration, both with and without THREADED_RTS.
+This detects an accidental dependency on the RTS-only fence macro that the
+header layout matrix cannot see. These controls compile foreign target data
+handling; they do not execute RISC-V code or qualify its cache behavior.

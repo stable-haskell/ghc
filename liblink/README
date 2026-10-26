@@ -207,3 +207,12 @@ Windows compatibility loader supplies heap images instead of mapped files.
 The GOT protection adapter returns the OS result without setting a linker
 error. Its caller retains the legacy log-and-continue behavior on protection
 failure. Changing that policy requires a separate reviewed behavior change.
+
+RISC-V cache completion
+-----------------------
+
+The standalone RISC-V cache-flush helper uses a C11 sequentially consistent
+fence after its existing flush calls, independent of the consuming RTS way.
+This retains the original threaded fence and adds that ordering for consumers
+whose non-threaded RTS macro was empty. Cache ranges and relocation arithmetic
+are unchanged. Compiler controls do not replace native RISC-V qualification.

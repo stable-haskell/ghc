@@ -16,6 +16,8 @@
 
 #if LL_BUILD_ELF
 
+#include <stdatomic.h>
+
 typedef uint64_t addr_t;
 
 /* regular instructions are 32bit */
@@ -733,7 +735,7 @@ void flushInstructionCacheRISCV64(ObjectCode *oc) {
                               oc->symbol_extra_stride * oc->n_symbol_extras);
 
   // Memory barrier to ensure nothing circumvents the fence.i / cache flushes.
-  SEQ_CST_FENCE();
+  atomic_thread_fence(memory_order_seq_cst);
 }
 
 #endif /* OBJECTFORMAT_ELF */
