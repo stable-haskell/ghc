@@ -27,7 +27,6 @@ bool isAddSub(addr_t p);
 bool isVectorOp(addr_t p);
 bool decodeAddendAarch64(ll_linker *L, Section *section, ll_elf_target_rel *rel,
                          int64_t *addend);
-bool encodeAddendAarch64(ll_linker *L, Section * section, ll_elf_target_rel * rel, int64_t addend);
 
 bool isBranch(addr_t p) {
     return (*(addr_t*)p & 0xFC000000) == 0x14000000;
@@ -77,9 +76,11 @@ decodeAddendAarch64(ll_linker *L, Section *section LL_UNUSED,
 }
 
 bool
-encodeAddendAarch64(ll_linker *L, Section * section, ll_elf_target_rel * rel, int64_t addend) {
-    /* instructions are 32bit! */
-    addr_t P = (addr_t)((uint8_t*)section->start + rel->r_offset);
+encodeAddendAarch64Site(ll_linker *L, ll_site site, ll_elf_target_rel *rel,
+                        int64_t addend) {
+    /* Encoding uses storage only; execution addresses enter the computation
+     * of the supplied addend before this operation. */
+    addr_t P = (addr_t)site.work;
     int exp_shift = -1;
     switch(LL_ELF64_R_TYPE(rel->r_info)) {
         /* static misc relocations */
@@ -221,6 +222,16 @@ encodeAddendAarch64(ll_linker *L, Section * section, ll_elf_target_rel * rel, in
     return EXIT_SUCCESS;
 }
 
+
+/* Preserve the existing section/relocation entry point for native callers. */
+bool
+encodeAddendAarch64(ll_linker *L, Section *section, ll_elf_target_rel *rel,
+                    int64_t addend)
+{
+    uint8_t *work = (uint8_t *)section->start + rel->r_offset;
+    const ll_site site = {.work = work, .exec = (uintptr_t)work};
+    return encodeAddendAarch64Site(L, site, rel, addend);
+}
 
 /**
  * Compute the *new* addend for a relocation, given a pre-existing addend.

@@ -103,6 +103,17 @@ Darwin linker syntax.
 Stage2 native C unit driver
 ===========================
 
+`elf_aarch64_encoder_sites.c` calls the actual site-taking AArch64 encoder
+and its retained section/relocation wrapper. Thirty cases cover data fields,
+page/branch immediates, low-bit scaled fields, range and scale errors, exact
+statuses/diagnostics, unchanged failure output, and adjacent-byte preservation.
+Each runs with two inaccessible execution values: encoding must only access
+work storage. Fresh heap storage is aligned and readable for the unchanged
+64-bit instruction classifiers. Native wrapper results must match byte for byte.
+The driver compiles this data-only unit for an explicit AArch64 target on the
+real host configuration. It does not test relocation computation, enable
+AArch64 NO_EXEC, change classifier widths, or wire an apply table.
+
 `elf_aarch64_stub_sites.c` includes the actual generic ELF stub helpers and
 AArch64 emitter. It checks native and separate work/exec addresses, unchanged
 outputs on lookup misses, target/flag identity, repeated lookup, creation order,
