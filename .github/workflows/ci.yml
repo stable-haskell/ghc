@@ -129,6 +129,19 @@ jobs:
             --timeout 900 --command-timeout 300 \
           2>&1 | tee _build/logs/liblink-sanitized.log
 
+    - name: Run all-backend sanitized liblink C units
+      if: ${{ matrix.dynamic == 0 && matrix.plat == 'x86_64-linux' }}
+      shell: devx {0}
+      timeout-minutes: 20
+      run: |
+        set -eo pipefail
+        mkdir -p _build/logs
+        ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
+          python3 liblink/tests/unit/run_sanitized_tests.py \
+            --all-backends --output-dir _build/liblink-all-backends-sanitized \
+            --timeout 900 --command-timeout 300 \
+          2>&1 | tee _build/logs/liblink-sanitized-all-backends.log
+
     - name: Upload liblink sanitizer results
       if: ${{ always() && matrix.dynamic == 0 && matrix.plat == 'x86_64-linux' }}
       uses: actions/upload-artifact@v4
@@ -137,6 +150,7 @@ jobs:
         if-no-files-found: ignore
         path: |
           _build/liblink-sanitized/sanitized-run.json
+          _build/liblink-all-backends-sanitized/sanitized-run.json
           _build/logs/liblink-sanitized*.log
 
     - name: Display build timings
@@ -170,7 +184,7 @@ jobs:
         make test QUIET=1 DYNAMIC=${{ matrix.dynamic }} USE_SYSTEM_CABAL=1 VERBOSE=3 2>&1 | tee _build/test-run.log
 
     - name: Collect unpacked sums phase timings
-      if: ${{ !cancelled() && matrix.plat == 'aarch64-darwin' && steps.stage2_build.outcome == 'success' }}
+      if: ${{ !cancelled() && steps.stage2_build.outcome == 'success' }}
       shell: devx {0}
       timeout-minutes: 20
       run: |
@@ -182,7 +196,7 @@ jobs:
           2>&1 | tee _build/logs/unpack-sums-timings.log
 
     - name: Upload unpacked sums timing diagnostics
-      if: ${{ !cancelled() && matrix.plat == 'aarch64-darwin' }}
+      if: ${{ !cancelled() }}
       uses: actions/upload-artifact@v4
       with:
         name: ${{ matrix.plat }}-dynamic${{ matrix.dynamic }}-unpack-sums-timings

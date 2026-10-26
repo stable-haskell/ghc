@@ -69,9 +69,9 @@ allocator from PE's separate M32 storage; only shared extras use the common
 protector. ELF-only GOT lookup uses the object's recorded format identity,
 which remains valid when tests copy an operation table.
 
-All-backends qualification is pending. The current complete compile/link check
-targets x86_64 Linux. Mach-O requires x86_64 or AArch64; Windows foreign ELF and
-Mach-O remain unqualified for foreign runtime execution. Compiling
+All-backends qualification is pending. Current complete compile/link checks
+target x86_64 Linux and Windows. Mach-O requires x86_64 or AArch64. Windows
+foreign ELF and Mach-O remain unqualified for foreign runtime execution. Compiling
 a foreign backend does not establish that foreign code can safely execute with
 the running process's ABI or that its process services are available.
 

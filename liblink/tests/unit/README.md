@@ -1314,6 +1314,8 @@ with all backend bodies and passes the same inclusion mode to the unit driver.
 Its report records that mode. This is a qualification command, not a claim
 that every host/target combination or foreign-code execution is supported;
 see the current limits in `liblink/README`.
+The Linux static CI job runs this mode in addition to the native sanitizer
+batch and uploads both source-bound reports and complete command logs.
 
 Backend host memory controls
 ----------------------------
