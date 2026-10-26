@@ -164,3 +164,10 @@ only a native Mach-O build exposes the temporary `Stub` compatibility alias.
 Mapping/protection and instruction-cache work remain in the existing host-service
 helpers. This declaration split does not enable foreign backend execution or
 change supported file byte order. See tests/unit/README.md for layout controls.
+
+COFF object records/constants live in installed `liblink/coff.h`, with the
+Windows two-byte symbol/relocation packing preserved. `PEi386Types.h` holds
+SDK-free format metadata; `PEi386Host.h` declares the existing Windows process
+services using real SDK handles and calling conventions. Native DLL/unwind
+behavior is unchanged. This declaration split does not enable a foreign PE
+backend; Windows runtime qualification remains required for an integrated build.

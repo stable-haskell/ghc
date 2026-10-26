@@ -451,6 +451,7 @@
 #include "ll_format.h"
 
 #include "linker/PEi386Types.h"
+#include "linker/InitFini.h"
 #include "linker/SymbolExtras.h"
 
 #include <windows.h>
@@ -484,7 +485,7 @@ static void addDLLHandle(
 static bool verifyCOFFHeader(
     ll_linker *L,
     uint16_t machine,
-    IMAGE_FILE_HEADER *hdr,
+    ll_coff_file_header *hdr,
     pathchar *fileName);
 
 static bool checkIfDllLoaded(
@@ -505,20 +506,20 @@ static ll_symbol_addr *lookupSymbolInDLLs ( ll_linker *L, const ll_symbol_name* 
                                             ObjectCode *dependent );
 
 const Alignments pe_alignments[] = {
-  { IMAGE_SCN_ALIGN_1BYTES   , 1   },
-  { IMAGE_SCN_ALIGN_2BYTES   , 2   },
-  { IMAGE_SCN_ALIGN_4BYTES   , 4   },
-  { IMAGE_SCN_ALIGN_8BYTES   , 8   },
-  { IMAGE_SCN_ALIGN_16BYTES  , 16  },
-  { IMAGE_SCN_ALIGN_32BYTES  , 32  },
-  { IMAGE_SCN_ALIGN_64BYTES  , 64  },
-  { IMAGE_SCN_ALIGN_128BYTES , 128 },
-  { IMAGE_SCN_ALIGN_256BYTES , 256 },
-  { IMAGE_SCN_ALIGN_512BYTES , 512 },
-  { IMAGE_SCN_ALIGN_1024BYTES, 1024},
-  { IMAGE_SCN_ALIGN_2048BYTES, 2048},
-  { IMAGE_SCN_ALIGN_4096BYTES, 4096},
-  { IMAGE_SCN_ALIGN_8192BYTES, 8192},
+  { LL_COFF_IMAGE_SCN_ALIGN_1BYTES   , 1   },
+  { LL_COFF_IMAGE_SCN_ALIGN_2BYTES   , 2   },
+  { LL_COFF_IMAGE_SCN_ALIGN_4BYTES   , 4   },
+  { LL_COFF_IMAGE_SCN_ALIGN_8BYTES   , 8   },
+  { LL_COFF_IMAGE_SCN_ALIGN_16BYTES  , 16  },
+  { LL_COFF_IMAGE_SCN_ALIGN_32BYTES  , 32  },
+  { LL_COFF_IMAGE_SCN_ALIGN_64BYTES  , 64  },
+  { LL_COFF_IMAGE_SCN_ALIGN_128BYTES , 128 },
+  { LL_COFF_IMAGE_SCN_ALIGN_256BYTES , 256 },
+  { LL_COFF_IMAGE_SCN_ALIGN_512BYTES , 512 },
+  { LL_COFF_IMAGE_SCN_ALIGN_1024BYTES, 1024},
+  { LL_COFF_IMAGE_SCN_ALIGN_2048BYTES, 2048},
+  { LL_COFF_IMAGE_SCN_ALIGN_4096BYTES, 4096},
+  { LL_COFF_IMAGE_SCN_ALIGN_8192BYTES, 8192},
  };
 
 const int pe_alignments_cnt = sizeof (pe_alignments) / sizeof (Alignments);
@@ -752,12 +753,12 @@ COFF_OBJ_TYPE getObjectType ( ll_linker *L, char* image, pathchar* fileName )
       0xFA, 0xF6, 0x6A, 0xA4, 0xDC, 0xB8
     };
 
-    WORD machine;
+    uint16_t machine;
     COFF_OBJ_TYPE ret = COFF_UNKNOWN;
     /* First check if we have an ANON_OBJECT_HEADER signature.  */
-    ANON_OBJECT_HEADER* anon = (ANON_OBJECT_HEADER*)image;
-    if (   anon->Sig1 == IMAGE_FILE_MACHINE_UNKNOWN
-        && anon->Sig2 == IMPORT_OBJECT_HDR_SIG2)
+    ll_coff_anon_header* anon = (ll_coff_anon_header*)image;
+    if (   anon->Sig1 == LL_COFF_IMAGE_FILE_MACHINE_UNKNOWN
+        && anon->Sig2 == LL_COFF_IMPORT_OBJECT_HDR_SIG2)
     {
         machine = anon->Machine;
         if (verifyCOFFHeader (L, machine, NULL, fileName))
@@ -780,7 +781,7 @@ COFF_OBJ_TYPE getObjectType ( ll_linker *L, char* image, pathchar* fileName )
         }
     } else {
         /* If it's not an ANON_OBJECT then try an image file.  */
-        IMAGE_FILE_HEADER* img = (IMAGE_FILE_HEADER*)image;
+        ll_coff_file_header* img = (ll_coff_file_header*)image;
         machine = img->Machine;
         if (verifyCOFFHeader (L, machine, img, fileName))
             ret = COFF_IMAGE;
@@ -803,8 +804,8 @@ COFF_HEADER_INFO* getHeaderInfo ( ObjectCode* oc )
    {
        case COFF_IMAGE:
         {
-         IMAGE_FILE_HEADER* hdr = (IMAGE_FILE_HEADER*)oc->image;
-         info->sizeOfHeader         = sizeof(IMAGE_FILE_HEADER);
+         ll_coff_file_header* hdr = (ll_coff_file_header*)oc->image;
+         info->sizeOfHeader         = sizeof(ll_coff_file_header);
          info->sizeOfOptionalHeader = hdr->SizeOfOptionalHeader;
          info->pointerToSymbolTable = hdr->PointerToSymbolTable;
          info->numberOfSymbols      = hdr->NumberOfSymbols;
@@ -813,8 +814,8 @@ COFF_HEADER_INFO* getHeaderInfo ( ObjectCode* oc )
         break;
        case COFF_ANON_BIG_OBJ:
         {
-         ANON_OBJECT_HEADER_BIGOBJ* hdr = (ANON_OBJECT_HEADER_BIGOBJ*)oc->image;
-         info->sizeOfHeader         = sizeof(ANON_OBJECT_HEADER_BIGOBJ);
+         ll_coff_bigobj_header* hdr = (ll_coff_bigobj_header*)oc->image;
+         info->sizeOfHeader         = sizeof(ll_coff_bigobj_header);
          info->sizeOfOptionalHeader = 0;
          info->pointerToSymbolTable = hdr->PointerToSymbolTable;
          info->numberOfSymbols      = hdr->NumberOfSymbols;
@@ -869,9 +870,9 @@ uint32_t getSymSectionNumber ( ll_linker *L LL_UNUSED, COFF_HEADER_INFO *info, C
         default:
             // Take care to catch reserved values; see #22941.
             switch (sym->og.SectionNumber) {
-                case IMAGE_SYM_UNDEFINED: return PE_SECTION_UNDEFINED;
-                case IMAGE_SYM_ABSOLUTE : return PE_SECTION_ABSOLUTE;
-                case IMAGE_SYM_DEBUG: return PE_SECTION_DEBUG;
+                case LL_COFF_IMAGE_SYM_UNDEFINED: return PE_SECTION_UNDEFINED;
+                case LL_COFF_IMAGE_SYM_ABSOLUTE : return PE_SECTION_ABSOLUTE;
+                case LL_COFF_IMAGE_SYM_DEBUG: return PE_SECTION_DEBUG;
                 default:
                   // Ensure that we catch if SectionNumber is made wider in the future
                   LL_ASSERT_FOR(L, sizeof(sym->og.SectionNumber) == 2);
@@ -1129,15 +1130,15 @@ bool checkAndLoadImportLibrary( ll_linker *L, pathchar* arch_name, char* member_
         return false;
     }
 
-    if (   hdr.Sig1 != IMAGE_FILE_MACHINE_UNKNOWN
-        || hdr.Sig2 != IMPORT_OBJECT_HDR_SIG2
+    if (   hdr.Sig1 != LL_COFF_IMAGE_FILE_MACHINE_UNKNOWN
+        || hdr.Sig2 != LL_COFF_IMPORT_OBJECT_HDR_SIG2
         || getObjectType (L, (char*)&hdr, arch_name) != COFF_IMPORT_LIB) {
         fseek(f, -(long int)sizeof_COFF_import_Header, SEEK_CUR);
         LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "loadArchive: Object `%s` is not an import lib. Skipping...\n", member_name));
         return false;
     }
 
-    LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "loadArchive: reading %lu bytes at %ld\n", hdr.SizeOfData, ftell(f)));
+    LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "loadArchive: reading %lu bytes at %ld\n", (unsigned long)hdr.SizeOfData, ftell(f)));
 
     image = LL_MALLOC_FOR(L, hdr.SizeOfData, "checkAndLoadImportLibrary(image)");
     n = fread(image, 1, hdr.SizeOfData, f);
@@ -1196,7 +1197,7 @@ bool checkAndLoadImportLibrary( ll_linker *L, pathchar* arch_name, char* member_
     // stronger reference wants to add a duplicate we should discard this
     // one to preserve link order.
     ll_sym_type symType = LL_SYM_DUP_DISCARD | LL_SYM_HIDDEN;
-    symType |= hdr.Type == IMPORT_OBJECT_CODE ? LL_SYM_CODE : LL_SYM_DATA;
+    symType |= hdr.Type == LL_COFF_IMPORT_OBJECT_CODE ? LL_SYM_CODE : LL_SYM_DATA;
 
     if (!ghciInsertSymbolTable(L, dll, symbol, sym, false, symType, 0, NULL))
       return false;
@@ -1374,16 +1375,16 @@ lookupSymbolInDLL_PEi386 ( ll_linker *L, const ll_symbol_name* lbl,
 }
 
 static bool
-verifyCOFFHeader ( ll_linker *L, uint16_t machine, IMAGE_FILE_HEADER *hdr,
+verifyCOFFHeader ( ll_linker *L, uint16_t machine, ll_coff_file_header *hdr,
                    pathchar *fileName )
 {
 #if LL_TARGET_X86_64
-   if (machine != IMAGE_FILE_MACHINE_AMD64) {
+   if (machine != LL_COFF_IMAGE_FILE_MACHINE_AMD64) {
       LL_LOG_ERROR_FOR(L, "%" PATH_FMT ": Not a x86_64 PE+ file.", fileName);
       return false;
    }
 #elif LL_TARGET_AARCH64
-   if (machine != IMAGE_FILE_MACHINE_ARM64) {
+   if (machine != LL_COFF_IMAGE_FILE_MACHINE_ARM64) {
       LL_LOG_ERROR_FOR(L, "%" PATH_FMT ": Not a ARM64 PE+ file.", fileName);
       return false;
    }
@@ -1400,13 +1401,13 @@ verifyCOFFHeader ( ll_linker *L, uint16_t machine, IMAGE_FILE_HEADER *hdr,
                  fileName);
       return 0;
    }
-   if ( (hdr->Characteristics & IMAGE_FILE_EXECUTABLE_IMAGE) ||
-        (hdr->Characteristics & IMAGE_FILE_DLL             ) ||
-        (hdr->Characteristics & IMAGE_FILE_SYSTEM          ) ) {
+   if ( (hdr->Characteristics & LL_COFF_IMAGE_FILE_EXECUTABLE_IMAGE) ||
+        (hdr->Characteristics & LL_COFF_IMAGE_FILE_DLL             ) ||
+        (hdr->Characteristics & LL_COFF_IMAGE_FILE_SYSTEM          ) ) {
       LL_LOG_ERROR_FOR(L, "%" PATH_FMT ": Not a PE/PE+ object file", fileName);
       return false;
    }
-   if ( (hdr->Characteristics & IMAGE_FILE_BYTES_REVERSED_HI)) {
+   if ( (hdr->Characteristics & LL_COFF_IMAGE_FILE_BYTES_REVERSED_HI)) {
       LL_LOG_ERROR_FOR(L, "%" PATH_FMT ": Invalid PE/PE+ word size or endianness: %d",
                  fileName,
                  (int)(hdr->Characteristics));
@@ -1498,7 +1499,7 @@ ocVerifyImage_PEi386 ( ObjectCode* oc )
       COFF_reloc* reltab
         = (COFF_reloc*) (oc->image + sectab_i->PointerToRelocations);
 
-      if (section->coff_info->props & IMAGE_SCN_LNK_NRELOC_OVFL ) {
+      if (section->coff_info->props & LL_COFF_IMAGE_SCN_LNK_NRELOC_OVFL ) {
         /* If the relocation field (a short) has overflowed, the
          * real count can be found in the first reloc entry.
          *
@@ -1545,7 +1546,7 @@ ocVerifyImage_PEi386 ( ObjectCode* oc )
    LL_DEBUG_FOR(oc->L, "\n" );
    if (info->type == COFF_IMAGE)
     {
-      IMAGE_FILE_HEADER* hdr = (IMAGE_FILE_HEADER*)oc->image;
+      ll_coff_file_header* hdr = (ll_coff_file_header*)oc->image;
       LL_DEBUG_FOR(oc->L,  "COFF Type:         IMAGE_FILE_HEADER\n");
       LL_DEBUG_FOR(oc->L,  "Machine:           0x%x\n",
                   (uint32_t)(hdr->Machine) );
@@ -1564,7 +1565,7 @@ ocVerifyImage_PEi386 ( ObjectCode* oc )
     }
    else if (info->type == COFF_ANON_BIG_OBJ)
     {
-      ANON_OBJECT_HEADER_BIGOBJ* hdr = (ANON_OBJECT_HEADER_BIGOBJ*)oc->image;
+      ll_coff_bigobj_header* hdr = (ll_coff_bigobj_header*)oc->image;
       LL_DEBUG_FOR(oc->L,  "COFF Type:         ANON_OBJECT_HEADER_BIGOBJ\n");
       LL_DEBUG_FOR(oc->L,  "Machine:           0x%x\n",
                   (uint32_t)(hdr->Machine) );
@@ -1612,13 +1613,13 @@ ocVerifyImage_PEi386 ( ObjectCode* oc )
                 "  ptr raw 0x%lx\n"
                 "    align %u\n"
                 " data adj %zu\n",
-                sectab_i->Misc.VirtualSize,
-                sectab_i->VirtualAddress,
-                sectab_i->SizeOfRawData,
+                (unsigned long)sectab_i->Misc.VirtualSize,
+                (unsigned long)sectab_i->VirtualAddress,
+                (unsigned long)sectab_i->SizeOfRawData,
                 section.start,
                 sectab_i->NumberOfRelocations,
-                sectab_i->PointerToRelocations,
-                sectab_i->PointerToRawData,
+                (unsigned long)sectab_i->PointerToRelocations,
+                (unsigned long)sectab_i->PointerToRawData,
                 getSectionAlignment (section),
                 getAlignedValue (section.size, section)
               );
@@ -1629,7 +1630,7 @@ ocVerifyImage_PEi386 ( ObjectCode* oc )
          LL_DEBUG_FOR(oc->L,
                    "        type 0x%-4x   vaddr 0x%-8lx   name `",
                    rel.Type,
-                   rel.VirtualAddress );
+                   (unsigned long)rel.VirtualAddress );
          COFF_symbol sym = oc->coff_info->symbols[rel.SymbolTableIndex];
          printName (getSymShortName(oc->L, info, &sym), oc);
          LL_DEBUG_FOR(oc->L, "'\n" );
@@ -1702,25 +1703,25 @@ ocGetNames_PEi386 ( ObjectCode* oc )
 
       /* The PE file section flag indicates whether the section
          contains code or data. */
-      if (section->coff_info->props & IMAGE_SCN_CNT_CODE) {
+      if (section->coff_info->props & LL_COFF_IMAGE_SCN_CNT_CODE) {
           has_code_section = has_code_section || section->size > 0;
           kind = SECTIONKIND_CODE_OR_RODATA;
        }
 
-      if (section->coff_info->props & IMAGE_SCN_MEM_WRITE) {
+      if (section->coff_info->props & LL_COFF_IMAGE_SCN_MEM_WRITE) {
           kind = SECTIONKIND_RWDATA;
       }
 
       /* Check next if it contains any uninitialized data */
-      if (section->coff_info->props & IMAGE_SCN_CNT_UNINITIALIZED_DATA) {
+      if (section->coff_info->props & LL_COFF_IMAGE_SCN_CNT_UNINITIALIZED_DATA) {
           kind = SECTIONKIND_RWDATA;
           do_copy = false;
       }
 
       /* Finally check if it can be discarded.
          This will also ignore .debug sections */
-      if (   section->coff_info->props & IMAGE_SCN_MEM_DISCARDABLE
-          || section->coff_info->props & IMAGE_SCN_LNK_REMOVE) {
+      if (   section->coff_info->props & LL_COFF_IMAGE_SCN_MEM_DISCARDABLE
+          || section->coff_info->props & LL_COFF_IMAGE_SCN_LNK_REMOVE) {
           kind = SECTIONKIND_OTHER;
       }
 
@@ -1828,7 +1829,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
 
       // Allocate memory for the section.
       uint8_t *start;
-      if (section->coff_info->props & IMAGE_SCN_MEM_WRITE) {
+      if (section->coff_info->props & LL_COFF_IMAGE_SCN_MEM_WRITE) {
           start = m32_alloc_for(oc->L, oc->rw_m32, sz, alignment);
       } else {
           start = m32_alloc_for(oc->L, oc->rx_m32, sz, alignment);
@@ -1864,7 +1865,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
       COFF_symbol* sym = &oc->coff_info->symbols[i];
       if (getSymSectionNumber(oc->L, info, sym) == PE_SECTION_UNDEFINED
            && getSymValue(oc->L, info, sym) > 0
-           && getSymStorageClass(oc->L, info, sym) != IMAGE_SYM_CLASS_SECTION) {
+           && getSymStorageClass(oc->L, info, sym) != LL_COFF_IMAGE_SYM_CLASS_SECTION) {
            /* Only count COMMON symbols not already defined by a
             * previously-loaded object; we will reuse their allocation. */
            char short_name[9];
@@ -1918,7 +1919,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
       char short_name[9];
       ll_symbol_name *sname = get_sym_name_with_buffer(
           oc->L, getSymShortName(oc->L, info, sym), oc,
-          secNumber == IMAGE_SYM_UNDEFINED && symValue > 0 ? short_name : NULL);
+          secNumber == LL_COFF_IMAGE_SYM_UNDEFINED && symValue > 0 ? short_name : NULL);
       Section *section;
       switch (secNumber) {
         case PE_SECTION_UNDEFINED:
@@ -1948,7 +1949,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
           return 1;
       }
 
-      if (   secNumber != IMAGE_SYM_UNDEFINED
+      if (   secNumber != LL_COFF_IMAGE_SYM_UNDEFINED
           && secNumber > 0
           && section
           /* Skip all BFD import sections.  */
@@ -1961,15 +1962,15 @@ ocGetNames_PEi386 ( ObjectCode* oc )
             the address of the symbol is:
                 address of relevant section + offset in section
          */
-         if (symStorageClass == IMAGE_SYM_CLASS_EXTERNAL
-            || (   symStorageClass == IMAGE_SYM_CLASS_STATIC
-                && section->coff_info->props & IMAGE_SCN_LNK_COMDAT)
+         if (symStorageClass == LL_COFF_IMAGE_SYM_CLASS_EXTERNAL
+            || (   symStorageClass == LL_COFF_IMAGE_SYM_CLASS_STATIC
+                && section->coff_info->props & LL_COFF_IMAGE_SCN_LNK_COMDAT)
             ) {
                 addr   = (ll_symbol_addr*)((size_t)section->start + symValue);
-                isWeak = section->coff_info->props & IMAGE_SCN_LNK_COMDAT;
+                isWeak = section->coff_info->props & LL_COFF_IMAGE_SCN_LNK_COMDAT;
          }
       }
-      else if (symStorageClass == IMAGE_SYM_CLASS_WEAK_EXTERNAL) {
+      else if (symStorageClass == LL_COFF_IMAGE_SYM_CLASS_WEAK_EXTERNAL) {
           isWeak = true;
           LL_CHECK_FOR(oc->L, getSymNumberOfAuxSymbols(oc->L, info, sym) == 1);
           LL_CHECK_FOR(oc->L, symValue == 0);
@@ -2014,7 +2015,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
                                             sname, target_sname, addr));
             }
       }
-      else if (  secNumber == IMAGE_SYM_UNDEFINED && symValue > 0) {
+      else if (  secNumber == LL_COFF_IMAGE_SYM_UNDEFINED && symValue > 0) {
          /* This symbol isn't in any section at all, ie, global bss.
             Allocate zeroed space for it from the BSS section, unless a
             previously-loaded object already allocated storage for it. */
@@ -2155,7 +2156,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
           sname[size-start]='\0';
           LL_FREE_FOR(oc->L, tmp);
           sname = strdup (sname);
-          if(secNumber == IMAGE_SYM_UNDEFINED)
+          if(secNumber == LL_COFF_IMAGE_SYM_UNDEFINED)
             type |= LL_SYM_HIDDEN;
 
           if (!ghciInsertSymbolTable(oc->L, oc->fileName, sname,
@@ -2173,7 +2174,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
          && (!section || (section && section->kind != SECTIONKIND_IMPORT))) {
          /* debugBelch("addSymbol %p `%s' Weak:%lld \n", addr, sname, isWeak); */
          sname = strdup (sname);
-         if(secNumber == IMAGE_SYM_UNDEFINED)
+         if(secNumber == LL_COFF_IMAGE_SYM_UNDEFINED)
            type |= LL_SYM_HIDDEN;
          LL_IF_DEBUG_FOR(oc->L, linker_verbose, LL_DEBUG_FOR(oc->L, "addSymbol %p `%s'\n", addr, sname));
          LL_ASSERT_FOR(oc->L, i < (uint32_t)oc->n_symbols);
@@ -2301,11 +2302,11 @@ ocResolve_PEi386 ( ObjectCode* oc )
                             "vaddr 0x%-8lx   name `",
                             i, j, pP,
                             reloc->Type,
-                            reloc->VirtualAddress );
+                            (unsigned long)reloc->VirtualAddress );
                             printName (getSymShortName(oc->L, info, sym), oc);
                   LL_DEBUG_FOR(oc->L, "'\n" ));
 
-         if (getSymStorageClass(oc->L, info, sym) == IMAGE_SYM_CLASS_STATIC) {
+         if (getSymStorageClass(oc->L, info, sym) == LL_COFF_IMAGE_SYM_CLASS_STATIC) {
             uint32_t sect_n = getSymSectionNumber(oc->L, info, sym);
             if (sect_n == PE_SECTION_UNDEFINED ||
                 sect_n == PE_SECTION_ABSOLUTE ||

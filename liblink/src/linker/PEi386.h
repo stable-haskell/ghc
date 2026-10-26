@@ -4,7 +4,10 @@
 
 #include <stdio.h>
 #include "ll_path.h"
-#include <windows.h>
+#include "PEi386Types.h"
+#if defined(mingw32_HOST_OS)
+#include "PEi386Host.h"
+#endif
 #include <stdint.h>
 #include <stdbool.h>
 #include <inttypes.h>
@@ -20,40 +23,12 @@
 #define PEi386_STRTAB_OFFSET 4
 
 /********************************************
- * COFF/PE types
- ********************************************/
-
-typedef enum _COFF_OBJ_TYPE {
-    COFF_IMAGE,
-    COFF_ANON_OBJ,
-    COFF_IMPORT_LIB,
-    COFF_ANON_BIG_OBJ,
-    COFF_UNKNOWN
-} COFF_OBJ_TYPE;
-
-typedef struct _COFF_HEADER_INFO {
-   COFF_OBJ_TYPE type;
-   uint16_t sizeOfOptionalHeader;
-   uint16_t sizeOfHeader;
-   uint32_t pointerToSymbolTable;
-   uint32_t numberOfSymbols;
-   uint32_t numberOfSections;
-} COFF_HEADER_INFO;
-
-/********************************************
  * COFF/PE prototypes
  ********************************************/
 
-void initLinker_PEi386( ll_linker *L );
-void exitLinker_PEi386( void );
-const char * addDLL_PEi386( ll_linker *L, const pathchar *dll_name, HINSTANCE *instance  );
 void freePreloadObjectFile_PEi386( ObjectCode *oc );
 
 bool checkAndLoadImportLibrary( ll_linker *L, pathchar* arch_name, char* member_name, FILE* f);
-
-pathchar* findSystemLibrary_PEi386( ll_linker *L, pathchar* dll_name );
-ll_hs_ptr addLibrarySearchPath_PEi386( ll_linker *L, pathchar* dll_path );
-bool removeLibrarySearchPath_PEi386( ll_linker *L, ll_hs_ptr dll_path_index );
 
 bool ocResolve_PEi386     ( ObjectCode* oc );
 bool ocRunInit_PEi386     ( ObjectCode *oc );
@@ -62,10 +37,6 @@ bool ocGetNames_PEi386    ( ObjectCode* oc );
 bool ocVerifyImage_PEi386 ( ObjectCode* oc );
 ll_symbol_addr *lookupSymbol_PEi386(ll_linker *L, ll_symbol_name *lbl,
                                     ObjectCode *dependent, ll_sym_type *type);
-ll_symbol_addr *lookupSymbolInDLL_PEi386 (ll_linker *L, const ll_symbol_name* lbl,
-                                          HINSTANCE instance, pathchar* dll_name,
-                                          ObjectCode *dependent);
-
 /* We use myindex to calculate array addresses, rather than
    simply doing the normal subscript thing.  That's because
    some of the above structs have sizes which are not
@@ -80,9 +51,6 @@ myindex ( int scale, void* base, int index )
     return
         ((unsigned char*)base) + scale * index;
 }
-pathchar* resolveSymbolAddr_PEi386 ( ll_linker *L, pathchar* buffer, int size,
-                                     ll_symbol_addr* symbol, uintptr_t* top );
-
 char *get_name_string(
     ll_linker *L,
     unsigned char* name,
@@ -92,58 +60,6 @@ char* get_sym_name(
     ll_linker *L,
     uint8_t* name,
     ObjectCode* oc);
-
-/********************************************
- * COFF/PE headers
- ********************************************/
-/* Section 7.1 PE Specification */
-typedef IMPORT_OBJECT_HEADER COFF_import_header;
-#define sizeof_COFF_import_Header sizeof(COFF_import_header)
-
-typedef IMAGE_SECTION_HEADER COFF_section;
-#define sizeof_COFF_section sizeof(COFF_section)
-
-
-typedef IMAGE_SYMBOL COFF_symbol_og;
-#define sizeof_COFF_symbol_og sizeof(COFF_symbol_og)
-
-typedef IMAGE_SYMBOL_EX COFF_symbol_ex;
-#define sizeof_COFF_symbol_ex sizeof(COFF_symbol_ex)
-
-typedef IMAGE_RELOCATION COFF_reloc;
-#define sizeof_COFF_reloc sizeof(COFF_reloc)
-
-// MingW-w64 is missing these from the implementation. So we have to look them up
-typedef DLL_DIRECTORY_COOKIE(WINAPI *LPAddDLLDirectory)(PCWSTR NewDirectory);
-typedef WINBOOL(WINAPI *LPRemoveDLLDirectory)(DLL_DIRECTORY_COOKIE Cookie);
-
-/* Combine union of possible symbol types.  */
-typedef
-union _COFF_symbol {
-    COFF_symbol_og og;
-    COFF_symbol_ex ex;
-} COFF_symbol;
-
-typedef
-struct {
-    uint32_t TagIndex;
-    uint32_t Characteristics;
-} COFF_symbol_aux_weak_external;
-
-/* A record for storing handles into DLLs. */
-typedef
-struct _OpenedDLL {
-    pathchar*          name;
-    struct _OpenedDLL* next;
-    HINSTANCE instance;
-} OpenedDLL;
-
-/* Some alignment information.  */
-typedef
-struct _Alignments {
-    uint32_t mask;
-    uint32_t value;
-} Alignments;
 
 /* Util symbol handling functions.  */
 COFF_OBJ_TYPE getObjectType ( ll_linker *L, char* image, pathchar* fileName );

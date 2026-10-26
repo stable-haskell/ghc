@@ -1073,6 +1073,21 @@ def main() -> int:
     ]
     cc = compiler + common_flags
 
+    if selected_modes == 0 or args.pe_resolution_only:
+        with tempfile.TemporaryDirectory(prefix="liblink-coff-layout-") as temporary:
+            binary = Path(temporary) / "coff_layout"
+            source = ROOT / "liblink/tests/unit/coff_layout.c"
+            run(cc + [str(source), "-o", str(binary)],
+                label="compile SDK-independent COFF layout unit")
+            if sys.byteorder == "little":
+                run([str(binary)], label="check COFF packed arrays and wire layout")
+            else:
+                print("[coff_layout] wire-byte runtime check requires a little-endian host; layout compiled")
+            if host == "Windows":
+                run(cc + ["-DLL_COFF_COMPARE_SDK", str(source), "-o", str(binary)],
+                    label="compile real Windows SDK layout comparison")
+                run([str(binary)], label="check Windows SDK COFF layout equivalence")
+
     if selected_modes == 0:
         with tempfile.TemporaryDirectory(prefix="liblink-macho-layout-") as temporary:
             binary = Path(temporary) / "macho_layout"

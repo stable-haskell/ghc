@@ -1174,3 +1174,36 @@ The same source can be compiled with `aarch64-unknown-linux-gnu` and
 execution. The backend still supports its existing native-endian x86_64/AArch64
 records; this change does not add byte swapping, enable all-backends, or supply
 foreign OS services.
+
+COFF declaration controls
+-------------------------
+
+`coff_layout.c` checks all record sizes, alignment, and non-bitfield offsets,
+including 18-byte symbols, 20-byte extended symbols, and 10-byte relocations.
+It verifies that the installed header scopes/restores packing, exercises packed
+array fields without unaligned scalar pointer casts, copies odd-offset wire
+bytes into aligned records, and checks each import-header bit independently.
+The metadata header also compiles without a Windows SDK or generated host config.
+These controls do not assert that unrelated existing parser scalar accesses
+accept arbitrarily aligned images; existing loader preconditions are unchanged.
+
+The default native driver and `--pe-resolution-only` run the layout control.
+On actual Windows, `LL_COFF_COMPARE_SDK` additionally compares the toolchain's
+real Windows headers: sizes, alignments, every declared constant and record
+field, plus import-header bitfield bytes. Existing PE fixture producers keep
+using their explicit Windows SDK declarations and their assertions are unchanged.
+
+A genuine foreign-ABI declaration check needs no host configuration:
+
+```
+clang --target=x86_64-pc-windows-msvc -ffreestanding -std=c11 \
+  -Wall -Wextra -Werror -Werror=vla -pedantic \
+  -Iliblink/include -Iliblink/src -c liblink/tests/unit/coff_layout.c \
+  -o /tmp/coff-layout-windows.o
+```
+
+With real MinGW-w64 headers, use the corresponding Windows GNU target and
+`-isystem /path/to/mingw/include -DLL_COFF_COMPARE_SDK` instead of
+`-ffreestanding`. Such cross-compiles compare declarations; they do not execute
+Windows code or qualify DLL loading, unwind registration, or foreign PE linking.
+The byte controls run on little-endian hosts; other hosts compile layout only.
