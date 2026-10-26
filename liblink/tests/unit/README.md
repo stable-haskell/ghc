@@ -103,6 +103,27 @@ Darwin linker syntax.
 Stage2 native C unit driver
 ===========================
 
+`noexec_tail.c` tests the private payload-plus-tail heap reservation helper:
+alignment, checked padding/extents, zero fill, unchanged outputs/address state
+on failure, zero-tail equivalence, and independence from host page size. The
+native driver schedules this standalone unit alongside NO_EXEC storage checks.
+
+`elf_aarch64_tail.c` includes the actual ELF section builder and NO_EXEC
+allocator, linking the remaining support from an AArch64-target archive. It
+checks odd-length payload copying, zeroed BSS/padding/tail, existing branch
+counting and eligibility, paired aligned veneer addresses, allocation failure,
+and the retained section owner base. Both 4 KiB and 16 KiB host-page callbacks
+are exercised. Compile with the genuine host config plus `LL_ALL_BACKENDS` and
+`LL_TARGET_ARCH=LL_ARCH_AARCH64`, link against the matching AArch64-target
+archive with the usual platform libraries, and run the resulting data-only
+binary. This special-target archive check is separate from the native driver.
+
+These low-level controls call the builder directly with partial metadata. They
+do not enable or qualify AArch64 NO_EXEC object admission, relocation apply
+wiring, or the pending verifier repair. Fixture stub nodes are freed manually;
+that does not qualify the pending list-disposal repair. Native allocation is
+unchanged, and zero-tail sections retain the original allocator call.
+
 `elf_aarch64_encoder_sites.c` calls the actual site-taking AArch64 encoder
 and its retained section/relocation wrapper. Thirty cases cover data fields,
 page/branch immediates, low-bit scaled fields, range and scale errors, exact

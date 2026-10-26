@@ -189,6 +189,8 @@ extra-source-files:
     tests/unit/elf_aarch64_stub_sites.c
     tests/unit/elf_aarch64_encoder_sites.c
     tests/unit/noexec_storage.c
+    tests/unit/noexec_tail.c
+    tests/unit/elf_aarch64_tail.c
     tests/unit/noexec_core.c
     tests/unit/elf_resource_fixtures.py
     tests/unit/elf_section_errors.c

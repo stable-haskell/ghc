@@ -387,6 +387,11 @@ def run_elf_x86_64_sites(cc: list[str], archive: Path, output: Path,
               str(ROOT / "liblink/src/ll_error.c"), "-o", str(storage)],
         label="compile NO_EXEC storage controls")
     run([str(storage)], label="run NO_EXEC storage controls")
+    tail = output / "noexec_tail"
+    run(cc + [str(ROOT / "liblink/tests/unit/noexec_tail.c"),
+              str(ROOT / "liblink/src/ll_error.c"), "-o", str(tail)],
+        label="compile NO_EXEC tail reservation controls")
+    run([str(tail)], label="run NO_EXEC tail reservation controls")
     command = [sys.executable, "-m", "unittest", "discover", "-s",
                "liblink/tests/oracle", "-p", "test_elf_x86_64.py", "-v"]
     run([sys.executable, "-m", "unittest", "discover", "-s", "liblink/tests/oracle",

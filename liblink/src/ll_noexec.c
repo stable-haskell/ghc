@@ -52,3 +52,38 @@ exhausted:
     ll_error_set(L, LL_E_NOMEM, "NO_EXEC storage or execution address space exhausted");
     return 0;
 }
+
+int ll_noexec_allocate_tail(ll_linker *L, size_t payload_size, size_t alignment,
+                            size_t tail_size, size_t tail_alignment,
+                            ll_noexec_block *out, size_t *tail_offset)
+{
+    if (L == NULL || out == NULL || tail_offset == NULL) {
+        ll_error_set(L, LL_E_STATE, "NO_EXEC tail owner and outputs must be non-NULL");
+        return 0;
+    }
+    if (alignment == 0 || (alignment & (alignment - 1)) != 0) {
+        ll_error_set(L, LL_E_FORMAT, "NO_EXEC block alignment is not a power of two");
+        return 0;
+    }
+    size_t offset = payload_size;
+    size_t extent = payload_size;
+    if (tail_size != 0) {
+        if (tail_alignment == 0 || (tail_alignment & (tail_alignment - 1)) != 0) {
+            ll_error_set(L, LL_E_FORMAT, "NO_EXEC tail alignment is not a power of two");
+            return 0;
+        }
+        if (payload_size > SIZE_MAX - (tail_alignment - 1)) goto exhausted;
+        offset = (payload_size + tail_alignment - 1) & ~(tail_alignment - 1);
+        if (tail_size > SIZE_MAX - offset) goto exhausted;
+        extent = offset + tail_size;
+        if (alignment < tail_alignment) alignment = tail_alignment;
+    }
+    ll_noexec_block block;
+    if (!ll_noexec_allocate(L, extent, alignment, &block)) return 0;
+    *out = block;
+    *tail_offset = offset;
+    return 1;
+exhausted:
+    ll_error_set(L, LL_E_NOMEM, "NO_EXEC storage or execution address space exhausted");
+    return 0;
+}

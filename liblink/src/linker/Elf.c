@@ -725,12 +725,30 @@ mapObjectFileSection (ll_linker *L, int fd, ll_elf_target_word offset, ll_elf_ta
  * including metadata sections, retains its original bytes. Execution addresses
  * are assigned before any symbol is published, independently of heap layout. */
 static int noexec_section_ELF(ObjectCode *oc, ll_elf_target_word index,
-                              SectionKind kind)
+                              SectionKind kind, bool is_bss)
 {
     const ll_elf_target_shdr *header = &oc->elf_info->sectionHeader[index];
     ll_noexec_block block;
     const size_t alignment = header->sh_addralign != 0 ? header->sh_addralign : 1;
-    if (!ll_noexec_allocate(oc->L, header->sh_size, alignment, &block)) return 0;
+    size_t tail_size = 0, tail_offset = header->sh_size;
+#if LL_TARGET_AARCH64
+    if (kind != SECTIONKIND_OTHER && header->sh_size != 0 && !is_bss) {
+        const size_t count = elf_numberOfStubsForSection(oc, index);
+        if (count > SIZE_MAX / elf_stubSizeAarch64) {
+            ll_error_set(oc->L, LL_E_NOMEM, "NO_EXEC ELF stub capacity is too large");
+            return 0;
+        }
+        tail_size = count * elf_stubSizeAarch64;
+    }
+#else
+    (void)is_bss;
+#endif
+    if (tail_size != 0) {
+        if (!ll_noexec_allocate_tail(oc->L, header->sh_size, alignment,
+                                     tail_size, 4, &block, &tail_offset)) return 0;
+    } else if (!ll_noexec_allocate(oc->L, header->sh_size, alignment, &block)) {
+        return 0;
+    }
     if (header->sh_size != 0 && header->sh_type != LL_ELF_SHT_NOBITS)
         memcpy(block.site.work, oc->image + header->sh_offset, header->sh_size);
     Section *section = &oc->sections[index];
@@ -738,6 +756,10 @@ static int noexec_section_ELF(ObjectCode *oc, ll_elf_target_word index,
                header->sh_size, 0, block.allocation, 0,
                sizeof(struct ll_elf_section_info));
     section->exec_start = block.site.exec;
+    if (tail_size != 0) {
+        section->elf_info->stub_offset = block.site.work + tail_offset;
+        section->elf_info->stub_size = tail_size;
+    }
     if (kind != SECTIONKIND_OTHER && header->sh_size != 0)
         addProddableBlock(oc->L, &oc->proddables, section->start, section->size);
     return 1;
@@ -847,7 +869,7 @@ ocGetNames_ELF ( ObjectCode* oc )
 
 
       if (ll_noexec_enabled(oc->L) && shdr[i].sh_type != LL_ELF_SHT_NULL) {
-          if (!noexec_section_ELF(oc, i, kind)) goto fail;
+          if (!noexec_section_ELF(oc, i, kind, is_bss)) goto fail;
       } else if (is_bss && size > 0) {
          /* This is a non-empty .bss section.  Allocate zeroed space for
             it, and set its .sh_offset field such that
