@@ -221,13 +221,15 @@ ocAllocateExtras_MachO(ObjectCode* oc)
             LL_DEBUG_FOR(oc->L, "ocAllocateExtras_MachO: allocate %d symbols\n",
                 oc->macho_info->symCmd->nsyms));
         LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "ocAllocateExtras_MachO: done\n"));
-        return ocAllocateExtras(oc, oc->macho_info->symCmd->nsyms, 0, 0);
+        return ocAllocateExtras(oc, oc->macho_info->symCmd->nsyms, 0, 0,
+                                LL_TARGET_SYMBOL_EXTRA_SIZE, ocInit_MachO);
     }
 
     LL_IF_DEBUG_FOR(oc->L, linker,
         LL_DEBUG_FOR(oc->L, "ocAllocateExtras_MachO: allocated no symbols\n"));
     LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "ocAllocateExtras_MachO: done\n"));
-    return ocAllocateExtras(oc, 0, 0, 0);
+    return ocAllocateExtras(oc, 0, 0, 0, LL_TARGET_SYMBOL_EXTRA_SIZE,
+                            ocInit_MachO);
 }
 
 #else

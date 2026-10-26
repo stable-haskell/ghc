@@ -1329,6 +1329,13 @@ def main() -> int:
             label="compile and link symbol_extras_image")
         run([str(extras_image_test), str(member)], label="run symbol_extras_image")
 
+        extras_storage_test = output / "symbol_extras_storage"
+        run(cc + native_unit_link_arguments(
+            ROOT / "liblink/tests/unit/symbol_extras_storage.c", archive,
+            extras_storage_test, link_flags, []),
+            label="compile and link symbol_extras_storage")
+        run([str(extras_storage_test)], label="run symbol_extras_storage")
+
         run_pathdup_ownership(cc, archive, output, link_flags, host)
 
         if host == "Darwin":

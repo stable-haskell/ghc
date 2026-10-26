@@ -21,12 +21,6 @@
 #include "linker/SymbolExtras.h"
 #include "linker/M32Alloc.h"
 
-#if defined(OBJFORMAT_ELF)
-#  include "linker/Elf.h"
-#elif defined(OBJFORMAT_MACHO)
-#  include "linker/MachO.h"
-#endif
-
 #include <string.h>
 #if RTS_LINKER_USE_MMAP
 #include <sys/mman.h>
@@ -52,10 +46,11 @@
   filled in by makeSymbolExtra below.
 */
 
-int ocAllocateExtras(ObjectCode* oc, int count, int first, int bssSize)
+int ocAllocateExtras(ObjectCode *oc, int count, int first, int bssSize,
+                     size_t extra_stride, ll_extra_refresh_fn refresh)
 {
   const uintptr_t old_image_address = (uintptr_t)oc->image;
-  const size_t extras_size = sizeof(SymbolExtra) * count;
+  const size_t extras_size = extra_stride * count;
 
   if (count > 0 || bssSize > 0) {
     if (!RTS_LINKER_USE_MMAP) {
@@ -117,15 +112,11 @@ int ocAllocateExtras(ObjectCode* oc, int count, int first, int bssSize)
   // ObjectCodeFormatInfo contains computed addresses based on offset to
   // image, if the address of image changes, we need to invalidate
   // the ObjectCodeFormatInfo and recompute it.
-  if ((uintptr_t)oc->image != old_image_address) {
-#if defined(OBJFORMAT_MACHO)
-    if (!ocInit_MachO(oc)) return 0;
-#endif
-#if defined(OBJFORMAT_ELF)
-    ocInit_ELF( oc );
-#endif
+  if ((uintptr_t)oc->image != old_image_address && refresh != NULL) {
+    if (!refresh(oc)) return 0;
   }
 
+  oc->symbol_extra_stride = extra_stride;
   oc->first_symbol_extra = first;
   oc->n_symbol_extras = count;
 
@@ -147,7 +138,7 @@ bool ocProtectExtras(ObjectCode* oc)
      */
   } else if (USE_CONTIGUOUS_MMAP || oc->L->services.cfg.always_pic) {
     return ll_mprotect_for_linker(oc->L, oc->symbol_extras,
-                                 sizeof(SymbolExtra) * oc->n_symbol_extras,
+                                 oc->symbol_extra_stride * oc->n_symbol_extras,
                                  MEM_READ_EXECUTE);
   } else {
     /*

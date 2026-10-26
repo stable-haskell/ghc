@@ -1321,6 +1321,7 @@ mkOc( ll_linker *L, ObjectType type, pathchar *path, char *image, int imageSize,
    oc->foreign_exports   = NULL;
 #if defined(NEED_SYMBOL_EXTRAS)
    oc->symbol_extras     = NULL;
+   oc->symbol_extra_stride = 0;
 #endif
    oc->bssBegin          = NULL;
    oc->bssEnd            = NULL;

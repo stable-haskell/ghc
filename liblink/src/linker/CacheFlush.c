@@ -41,7 +41,7 @@ ocFlushInstructionCache( ObjectCode *oc )
     ocFlushInstructionCacheFrom(oc->image + oc->misalignment, oc->fileSize);
 
     /* Jump Islands */
-    ocFlushInstructionCacheFrom(oc->symbol_extras, sizeof(SymbolExtra) * oc->n_symbol_extras);
+    ocFlushInstructionCacheFrom(oc->symbol_extras, oc->symbol_extra_stride * oc->n_symbol_extras);
 }
 
 #else

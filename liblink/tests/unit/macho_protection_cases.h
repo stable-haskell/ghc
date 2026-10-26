@@ -181,6 +181,7 @@ static void run_oc_try_load_extras_protection_failure(void)
     }
     oc->symbol_extras = memory;
     oc->n_symbol_extras = 1;
+    oc->symbol_extra_stride = sizeof(SymbolExtra);
 
     unsigned before_attempts = mprotect_attempts;
     mprotect_fail_at = before_attempts + 1;

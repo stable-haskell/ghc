@@ -350,6 +350,8 @@ struct _ObjectCode {
     SymbolExtra    *symbol_extras;
     unsigned long   first_symbol_extra;
     unsigned long   n_symbol_extras;
+    /* The selected backend supplies the target payload width, including zero. */
+    size_t          symbol_extra_stride;
 #endif
     /* Additional memory that is preallocated and contiguous with image
        which can be used to relocate bss sections. */

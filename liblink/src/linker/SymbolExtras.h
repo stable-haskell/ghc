@@ -6,7 +6,12 @@
 
 #if defined(NEED_SYMBOL_EXTRAS)
 
-int ocAllocateExtras(ObjectCode* oc, int count, int first, int bssSize);
+/* Refresh is called only when image replacement changes its address, before
+ * count/first/stride are published. Formats with image-relative metadata supply
+ * their original initializer, not the format vtable's verify+init wrapper. */
+typedef int (*ll_extra_refresh_fn)(ObjectCode *oc);
+int ocAllocateExtras(ObjectCode *oc, int count, int first, int bssSize,
+                     size_t extra_stride, ll_extra_refresh_fn refresh);
 bool ocProtectExtras(ObjectCode* oc);
 
 #if defined(arm_HOST_ARCH)

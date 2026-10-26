@@ -39,6 +39,11 @@ storage is released after copying: mapped images are unmapped; heap images
 release their original allocation base, accounting for stored misalignment.
 A failed replacement leaves the original image and its ownership intact.
 
+The shared extras allocator takes its payload stride and image-metadata refresh
+callback from the backend. It records the stride with the object for protection
+and cache lengths. A zero payload width retains its symbol count and allocation
+path; refreshing moved image metadata still precedes publishing those fields.
+
 Target architecture selection
 -----------------------------
 

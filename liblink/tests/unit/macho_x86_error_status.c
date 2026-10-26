@@ -266,6 +266,7 @@ static void run_case(const RelocationCase *test)
         }
         oc.first_symbol_extra = 0;
         oc.n_symbol_extras = 1;
+        oc.symbol_extra_stride = sizeof(SymbolExtra);
     }
     initProddableBlockSet(&oc.proddables);
     if (test->include_target_span)

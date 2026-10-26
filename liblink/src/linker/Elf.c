@@ -2308,6 +2308,12 @@ int ocRunFini_ELF( ObjectCode *oc )
 
 #if LL_ELF_NEED_SYMBOL_EXTRAS
 
+static int refreshExtras_ELF(ObjectCode *oc)
+{
+  ocInit_ELF(oc);
+  return 1;
+}
+
 int ocAllocateExtras_ELF( ObjectCode *oc )
 {
   Elf_Ehdr *ehdr = (Elf_Ehdr *) oc->image;
@@ -2350,7 +2356,8 @@ int ocAllocateExtras_ELF( ObjectCode *oc )
     return 0;
   }
 
-  return ocAllocateExtras(oc, symtab->sh_size / sizeof( Elf_Sym ), 0, bssSize);
+  return ocAllocateExtras(oc, symtab->sh_size / sizeof( Elf_Sym ), 0, bssSize,
+                          LL_TARGET_SYMBOL_EXTRA_SIZE, refreshExtras_ELF);
 }
 
 #endif /* NEED_SYMBOL_EXTRAS */

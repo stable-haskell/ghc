@@ -111,6 +111,16 @@ injected mapping failures retain the original image bytes, allocation owner,
 and diagnostic until normal disposal. Every case balances owner allocations.
 The original `format_archive` ownership assertion remains unchanged.
 
+`symbol_extras_storage.c` tests the shared allocation primitive with target
+strides 0, 8, and 16 independently of native payload selection. It checks
+mapping/BSS lengths, zeroing, unchanged input bytes, refresh timing and failure
+propagation, and protection lengths. Zero counts, nonzero counts with zero
+stride, optional refresh, and separate M32 storage retain their existing paths.
+The fixture contains storage bytes only; it does not parse or execute them.
+M32 requests use a bounded allocation spy to check owner, RX allocator,
+alignment, byte length, and untouched trailing bytes independently of OS
+placement. Existing M32 tests retain real mapping and ownership coverage.
+
 After a successful top-level `make stage2`, run the focused units from the
 repository root with:
 

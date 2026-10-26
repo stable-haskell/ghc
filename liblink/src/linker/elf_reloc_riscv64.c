@@ -729,7 +729,8 @@ void flushInstructionCacheRISCV64(ObjectCode *oc) {
 
   /* Jump Islands */
   __builtin___clear_cache((void *)oc->symbol_extras,
-                          (void *)(oc->symbol_extras + oc->n_symbol_extras));
+                          (char *)oc->symbol_extras +
+                              oc->symbol_extra_stride * oc->n_symbol_extras);
 
   // Memory barrier to ensure nothing circumvents the fence.i / cache flushes.
   SEQ_CST_FENCE();
