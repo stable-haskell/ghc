@@ -238,8 +238,10 @@ buildNative verbosity pkg lbi = do
     let shared = outDir FP.</> sharedLibraryName (hostPlatform lbi)
     fsUnit <- rtsFsUnitId pkg lbi
     let dbArgs = packageDbArgsDb (interpretPackageDBStack (mbWorkDirLBI lbi) (withPackageDB lbi))
+        -- This C library needs only the explicit rts-fs dependency. Hiding
+        -- packages does not disable GHC's automatic runtime dependencies.
         linkFlags =
-          ["-shared", "-dynamic", "-no-rts", "-hide-all-packages"]
+          ["-shared", "-dynamic", "-no-rts", "-hide-all-packages", "-no-auto-link-packages"]
             ++ dbArgs
             ++ ["-package-id", prettyShow fsUnit, "-o", shared]
             ++ concatMap (\d -> ["-L" ++ d]) nativeLibDirs

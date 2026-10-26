@@ -1,3 +1,22 @@
+Native shared-library package boundary
+======================================
+
+`native_shared_link.py` replays the custom native shared link from a verbose
+(`-v2`) dynamic Cabal build log. Run it from the same worktree while its private
+compiler, package databases, and native objects remain available:
+
+    python3 liblink/tests/unit/native_shared_link.py \
+      --build-log /path/to/dynamic-build.log --out /tmp/native-shared-link
+
+The output directory must be new. The configured link must succeed, create its
+library, and pass only the declared `rts-fs` Haskell library to the actual system
+linker. A second link enables GHC's automatic package dependencies and requires
+the boundary check to reject their unexpected Haskell library inputs. This
+control does not depend on those libraries being missing or on a linker error.
+Both commands, actual linker traces, input object hashes, and results are saved.
+The replay uses the POSIX command quoting in Cabal/GHC verbose logs; Windows
+command-log replay has not been qualified.
+
 Owner-scoped host services
 ==========================
 
