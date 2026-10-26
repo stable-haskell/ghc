@@ -376,6 +376,9 @@ def run_elf_x86_64_sites(cc: list[str], archive: Path, output: Path,
     run([str(storage)], label="run NO_EXEC storage controls")
     command = [sys.executable, "-m", "unittest", "discover", "-s",
                "liblink/tests/oracle", "-p", "test_elf_x86_64.py", "-v"]
+    run([sys.executable, "-m", "unittest", "discover", "-s", "liblink/tests/oracle",
+         "-p", "test_elf_aarch64.py", "-v"],
+        label="replay ELF AArch64 reference and corruption controls")
     if not native_elf_x64:
         run(command, label="replay ELF x64 reference and corruption controls")
         return

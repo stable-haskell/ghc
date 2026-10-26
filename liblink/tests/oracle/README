@@ -98,3 +98,36 @@ altered saved image hashes as well as native relocation errors. TLS and other
 architectures remain outside this oracle's supported inputs. See ../runner/README
 for capture scope and build flags. These local checks do not establish two-host
 golden stability or foreign execution qualification.
+
+ELF AArch64 normal-address baselines
+-----------------------------------
+
+elf_aarch64_check.py uses the shared bounded elf64_metadata.py parser for
+original little-endian ELF64 records. Relocation formulas follow Arm AAELF64
+2025Q4 sections5.7.5–5.7.7:
+
+https://github.com/ARM-software/abi-aa/blob/main/aaelf64/aaelf64.rst
+
+The oracle checks every nonempty original section, all GOT payloads and all
+reserved stub bytes. It derives S from original symbols and explicit resolver
+inputs, P from layout, and A from original RELA records. GOT slot identity
+uses the original table/index even when two symbols have equal values. Far
+branches must reach the independently encoded veneer; stub target, reuse,
+order and untouched capacity remain checked. The veneer encoder also matches
+llvm-mc for four full-width addresses.
+
+    LIBLINK_ELF_AARCH64_CAPTURE=/absolute/path/to/aarch64-target-elf-capture \
+      LLVM_MC=/absolute/path/to/llvm-mc \
+      python3 -m unittest discover -s liblink/tests/oracle -p test_elf_aarch64.py -v
+
+Twenty saved layouts cover27 fields from the thirteen ordinary fixtures plus
+negative PREL32/ADRP, near/far branch reuse and equal-valued GOT aliases.
+Mutation controls reject incomplete captures, wrong fields/GOT/veneer bytes,
+changed stub identity/order, altered resolver inputs, work/exec mismatch and
+corrupt saved numeric references. Native ASLR changes layout but must preserve
+the semantic signature after numerical verification. The initial captures use
+the unchanged542259edba9 object backend on an x64 host with an AArch64 target.
+
+Scope is one symbol table, ordinary supported RELA forms, zero GOT addends,
+and zero branch addends when a veneer is needed. Other inputs fail explicitly.
+This oracle does not yet cover AArch64 NO_EXEC or establish execution safety.

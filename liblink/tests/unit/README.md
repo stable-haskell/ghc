@@ -127,6 +127,11 @@ NO_EXEC goldens twice, and forced PLT32 islands through the independent oracle.
 Saved-reference and capture-corruption controls run on either architecture.
 These helpers never call loaded foreign code.
 
+The same entry point replays the AArch64 ELF normal-address references and
+corruption controls on either host architecture. A separately built AArch64
+target capture enables its live checks; see ../oracle/README. The native x64
+archive does not acquire AArch64 relocation support from these replay checks.
+
 `noexec_storage.c` checks the actual heap/synthetic-address allocator, including
 zero extents, alignment, full-width addresses, exhaustion, injected heap
 failure, and unchanged next address/output after a failed reservation.

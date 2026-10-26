@@ -198,8 +198,16 @@ extra-source-files:
     tests/runner/elf_capture.c
     tests/oracle/elf_x86_64_check.py
     tests/oracle/test_elf_x86_64.py
+    tests/oracle/elf64_metadata.py
+    tests/oracle/elf_aarch64_check.py
+    tests/oracle/test_elf_aarch64.py
     tests/golden/elf-x86_64/*.json
     tests/golden/elf-x86_64-noexec/*.json
+    tests/golden/elf-aarch64/*.json
+    tests/fixtures/elf-aarch64-sites/branch_reuse.s
+    tests/fixtures/elf-aarch64-sites/branch_reuse.o
+    tests/fixtures/elf-aarch64-sites/got_alias.s
+    tests/fixtures/elf-aarch64-sites/got_alias.o
     tests/fixtures/elf-noexec/symbols.s
     tests/fixtures/elf-noexec/symbols.o
     tests/fixtures/elf-noexec/gottpoff.s

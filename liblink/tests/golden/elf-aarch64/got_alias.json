@@ -1,0 +1,190 @@
+{
+  "fields": [
+    {
+      "A": 0,
+      "GOT_S": "0x10d0af010",
+      "P": "0x10ed41018",
+      "S": "0x10ed42018",
+      "after": "200840f9",
+      "before": "200040f9",
+      "expected": "200840f9",
+      "offset": 0,
+      "section": 2,
+      "type": "R_AARCH64_LD64_GOT_LO12_NC",
+      "value": 16
+    },
+    {
+      "A": 0,
+      "GOT_S": "0x10d0af018",
+      "P": "0x10ed41020",
+      "S": "0x10ed42018",
+      "after": "620c40f9",
+      "before": "620040f9",
+      "expected": "620c40f9",
+      "offset": 8,
+      "section": 2,
+      "type": "R_AARCH64_LD64_GOT_LO12_NC",
+      "value": 24
+    }
+  ],
+  "format": "ELF AArch64",
+  "object_sha256": "0dd9843fa9e27123635c1d44db9a6485cc094607bc742b75caab54c46ddde0f4",
+  "reference_capture": {
+    "error": "",
+    "extras": {
+      "address": "0x10d0af000",
+      "after": "",
+      "before": "",
+      "count": 5,
+      "exec_address": "0x10d0af000",
+      "first": 0,
+      "jump_offset": 8,
+      "stride": 0
+    },
+    "got": {
+      "address": "0x10d0af000",
+      "after": "1810d40e010000001810d40e010000001820d40e010000001820d40e01000000",
+      "exec_address": "0x10d0af000",
+      "size": 32
+    },
+    "host_symbols": {
+      "external_data": "0x10ed430f0",
+      "external_function": "0x10ed42018",
+      "external_function_alias": "0x10ed42018",
+      "external_second_function": "0x10ed43018"
+    },
+    "initializers_ran": false,
+    "noexec": false,
+    "resolved": true,
+    "schema": "liblink-elf-native-address-v1",
+    "sections": [
+      {
+        "address": "0x10d0ae0f8",
+        "after": "002478002e72656c612e7465787400666978747572655f616172636836345f676f745f616c6961730065787465726e616c5f66756e6374696f6e5f616c6961730065787465726e616c5f66756e6374696f6e002e6e6f74652e474e552d737461636b002e737472746162002e73796d74616200",
+        "before": "002478002e72656c612e7465787400666978747572655f616172636836345f676f745f616c6961730065787465726e616c5f66756e6374696f6e5f616c6961730065787465726e616c5f66756e6374696f6e002e6e6f74652e474e552d737461636b002e737472746162002e73796d74616200",
+        "exec_address": "0x10d0ae0f8",
+        "index": 1,
+        "size": 115,
+        "stubs": {
+          "address": "0x0",
+          "after": "",
+          "before": "",
+          "entries": [],
+          "size": 0
+        }
+      },
+      {
+        "address": "0x10ed41018",
+        "after": "200840f91f2003d5620c40f9",
+        "before": "200040f91f2003d5620040f9",
+        "exec_address": "0x10ed41018",
+        "index": 2,
+        "size": 12,
+        "stubs": {
+          "address": "0x10ed41024",
+          "after": "",
+          "before": "",
+          "entries": [],
+          "size": 0
+        }
+      },
+      {
+        "address": "0x10d0ae0c8",
+        "after": "000000000000000038010000030000000000000000000000080000000000000038010000040000000000000000000000",
+        "before": "000000000000000038010000030000000000000000000000080000000000000038010000040000000000000000000000",
+        "exec_address": "0x10d0ae0c8",
+        "index": 3,
+        "size": 48,
+        "stubs": {
+          "address": "0x0",
+          "after": "",
+          "before": "",
+          "entries": [],
+          "size": 0
+        }
+      },
+      {
+        "address": "0x10d0ae050",
+        "after": "0000000000000000000000000000000000000000000000000100000000000200000000000000000000000000000000000f0000001000020000000000000000000000000000000000410000001000000000000000000000000000000000000000290000001000000000000000000000000000000000000000",
+        "before": "0000000000000000000000000000000000000000000000000100000000000200000000000000000000000000000000000f0000001000020000000000000000000000000000000000410000001000000000000000000000000000000000000000290000001000000000000000000000000000000000000000",
+        "exec_address": "0x10d0ae050",
+        "index": 5,
+        "size": 120,
+        "stubs": {
+          "address": "0x0",
+          "after": "",
+          "before": "",
+          "entries": [],
+          "size": 0
+        }
+      }
+    ],
+    "status": 0
+  },
+  "schema": 1,
+  "semantic": {
+    "extras": {
+      "count": 5,
+      "first": 0,
+      "stride": 0
+    },
+    "relocations": [
+      {
+        "A": 0,
+        "S_origin": {
+          "kind": "host-symbol",
+          "name": "external_function"
+        },
+        "got_slot": 2,
+        "offset": 0,
+        "raw_symbol_type": 0,
+        "section": 2,
+        "stub_ordinal": null,
+        "symbol": "external_function",
+        "symbol_index": 3,
+        "symbol_table": 5,
+        "type": "R_AARCH64_LD64_GOT_LO12_NC",
+        "width": 4
+      },
+      {
+        "A": 0,
+        "S_origin": {
+          "kind": "host-symbol",
+          "name": "external_function_alias"
+        },
+        "got_slot": 3,
+        "offset": 8,
+        "raw_symbol_type": 0,
+        "section": 2,
+        "stub_ordinal": null,
+        "symbol": "external_function_alias",
+        "symbol_index": 4,
+        "symbol_table": 5,
+        "type": "R_AARCH64_LD64_GOT_LO12_NC",
+        "width": 4
+      }
+    ],
+    "sections": [
+      {
+        "index": 1,
+        "name": ".strtab",
+        "size": 115
+      },
+      {
+        "index": 2,
+        "name": ".text",
+        "size": 12
+      },
+      {
+        "index": 3,
+        "name": ".rela.text",
+        "size": 48
+      },
+      {
+        "index": 5,
+        "name": ".symtab",
+        "size": 120
+      }
+    ]
+  }
+}

@@ -1,0 +1,166 @@
+{
+  "fields": [
+    {
+      "A": 0,
+      "GOT_S": null,
+      "P": "0x10c000018",
+      "S": "0x700000000000",
+      "after": "01000014",
+      "before": "00000014",
+      "expected": "01000014",
+      "offset": 0,
+      "section": 2,
+      "type": "R_AARCH64_JUMP26",
+      "value": 4
+    }
+  ],
+  "format": "ELF AArch64",
+  "object_sha256": "ff0c43d0ed0181e52e7f8fc10326c3191c3b2425003602b2ddd43c94f7b55229",
+  "reference_capture": {
+    "error": "",
+    "extras": {
+      "address": "0x109769000",
+      "after": "",
+      "before": "",
+      "count": 4,
+      "exec_address": "0x109769000",
+      "first": 0,
+      "jump_offset": 8,
+      "stride": 0
+    },
+    "got": {
+      "address": "0x109769000",
+      "after": "1800000c010000001800000c010000000000000000700000",
+      "exec_address": "0x109769000",
+      "size": 24
+    },
+    "host_symbols": {
+      "external_data": "0x10c0020f0",
+      "external_function": "0x700000000000",
+      "external_function_alias": "0x700000000000",
+      "external_second_function": "0x700000001000"
+    },
+    "initializers_ran": false,
+    "noexec": false,
+    "resolved": true,
+    "schema": "liblink-elf-native-address-v1",
+    "sections": [
+      {
+        "address": "0x1097680c0",
+        "after": "002478002e72656c612e746578740065787465726e616c5f66756e6374696f6e002e737472746162002e73796d74616200666978747572655f616172636836345f6a756d70323600",
+        "before": "002478002e72656c612e746578740065787465726e616c5f66756e6374696f6e002e737472746162002e73796d74616200666978747572655f616172636836345f6a756d70323600",
+        "exec_address": "0x1097680c0",
+        "index": 1,
+        "size": 72,
+        "stubs": {
+          "address": "0x0",
+          "after": "",
+          "before": "",
+          "entries": [],
+          "size": 0
+        }
+      },
+      {
+        "address": "0x10c000018",
+        "after": "01000014",
+        "before": "00000014",
+        "exec_address": "0x10c000018",
+        "index": 2,
+        "size": 4,
+        "stubs": {
+          "address": "0x10c00001c",
+          "after": "1000e0d21000cef21000a0f2100080f200021fd6",
+          "before": "0000000000000000000000000000000000000000",
+          "entries": [
+            {
+              "address": "0x10c00001c",
+              "flags": 0,
+              "target": "0x700000000000"
+            }
+          ],
+          "size": 20
+        }
+      },
+      {
+        "address": "0x1097680a8",
+        "after": "00000000000000001a010000030000000000000000000000",
+        "before": "00000000000000001a010000030000000000000000000000",
+        "exec_address": "0x1097680a8",
+        "index": 3,
+        "size": 24,
+        "stubs": {
+          "address": "0x0",
+          "after": "",
+          "before": "",
+          "entries": [],
+          "size": 0
+        }
+      },
+      {
+        "address": "0x109768048",
+        "after": "0000000000000000000000000000000000000000000000000100000000000200000000000000000000000000000000003100000010000200000000000000000000000000000000000f0000001000000000000000000000000000000000000000",
+        "before": "0000000000000000000000000000000000000000000000000100000000000200000000000000000000000000000000003100000010000200000000000000000000000000000000000f0000001000000000000000000000000000000000000000",
+        "exec_address": "0x109768048",
+        "index": 4,
+        "size": 96,
+        "stubs": {
+          "address": "0x0",
+          "after": "",
+          "before": "",
+          "entries": [],
+          "size": 0
+        }
+      }
+    ],
+    "status": 0
+  },
+  "schema": 1,
+  "semantic": {
+    "extras": {
+      "count": 4,
+      "first": 0,
+      "stride": 0
+    },
+    "relocations": [
+      {
+        "A": 0,
+        "S_origin": {
+          "kind": "host-symbol",
+          "name": "external_function"
+        },
+        "got_slot": null,
+        "offset": 0,
+        "raw_symbol_type": 0,
+        "section": 2,
+        "stub_ordinal": 0,
+        "symbol": "external_function",
+        "symbol_index": 3,
+        "symbol_table": 4,
+        "type": "R_AARCH64_JUMP26",
+        "width": 4
+      }
+    ],
+    "sections": [
+      {
+        "index": 1,
+        "name": ".strtab",
+        "size": 72
+      },
+      {
+        "index": 2,
+        "name": ".text",
+        "size": 4
+      },
+      {
+        "index": 3,
+        "name": ".rela.text",
+        "size": 24
+      },
+      {
+        "index": 4,
+        "name": ".symtab",
+        "size": 96
+      }
+    ]
+  }
+}

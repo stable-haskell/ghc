@@ -130,6 +130,13 @@ currently stops in the unchanged ELF verifier's native zero-width extras bound;
 that separate recorded repair is pending. Other backend conversions, two-host
 golden qualification and execution qualification remain WP2.8 work.
 
+The next AArch64 ELF conversion has normal-address baselines before any
+relocation code changes: 20 layouts and 27 fields cover the thirteen ordinary
+forms, negative displacements, direct/far branches, veneer identity/reuse,
+and equal-valued symbols with distinct GOT slots. These data-only captures
+use an x64 host with the AArch64 target compiled in; they do not qualify
+AArch64 execution or enable AArch64 NO_EXEC admission.
+
 
 Locking
 -------

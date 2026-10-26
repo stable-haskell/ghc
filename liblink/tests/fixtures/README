@@ -106,3 +106,10 @@ Rebuild the committed objects with an LLVM x64 ELF assembler driver:
 
     clang --target=x86_64-linux-gnu -c liblink/tests/fixtures/elf-noexec/symbols.s -o liblink/tests/fixtures/elf-noexec/symbols.o
     clang --target=x86_64-linux-gnu -c liblink/tests/fixtures/elf-noexec/gottpoff.s -o liblink/tests/fixtures/elf-noexec/gottpoff.o
+
+The elf-aarch64-sites inputs add branch identity/reuse and equal-valued symbols
+with distinct GOT slots. They are valid assembler outputs used only as data.
+Rebuild their committed objects with:
+
+    clang --target=aarch64-linux-gnu -c liblink/tests/fixtures/elf-aarch64-sites/branch_reuse.s -o liblink/tests/fixtures/elf-aarch64-sites/branch_reuse.o
+    clang --target=aarch64-linux-gnu -c liblink/tests/fixtures/elf-aarch64-sites/got_alias.s -o liblink/tests/fixtures/elf-aarch64-sites/got_alias.o

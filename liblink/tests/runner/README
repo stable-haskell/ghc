@@ -47,17 +47,28 @@ This slice exercises native arm64 Darwin Mach-O only. Unsupported relocations
 terminate through the host fatal callback and must run in separate processes.
 The runner does not claim ELF, COFF, or other host-backend coverage.
 
-ELF x86_64 capture
------------------
+ELF x86_64 and AArch64 captures
+------------------------------
 
 elf_capture.c is a separate private client for a 64-bit POSIX host with the
-x86_64 ELF target/backend compiled in. It captures
+x86_64 or AArch64 ELF target/backend compiled in. It captures
 an unregistered object's section and extras bytes immediately before and
 after the actual backend resolve operation. It never enters the initializer
 pass or calls loaded code. Without --noexec it checks native addresses on an
 x86_64 host. With --noexec it configures private NO_EXEC|ALL_FORMATS at the
 explicit base0x10000000 and captures heap work/synthetic execution addresses.
 This capture does not exercise the full core lifecycle; noexec_core.c does.
+
+For AArch64 normal-address baselines, build both the library and this client
+with -DLL_TARGET_ARCH=LL_ARCH_AARCH64 and -DLL_ALL_BACKENDS. The current data-only
+baseline runs on an x64 POSIX host; the separate ARM64 native extras-verifier
+repair remains pending. AArch64 captures include section-adjacent stub storage
+before/after resolution and the final stub identity/order/targets. --far-function
+forces branch veneers. --negative-data puts the independent resolver input in
+the preceding page for PREL32/ADRP negative controls. Ordinary AArch64 resolver
+inputs derive from the chosen section layout and retain a nonzero aligned low
+offset, so narrow and scaled fields have useful in-range values. No instruction
+is executed, and AArch64 NO_EXEC remains unsupported by the library.
 
     "$CC" -std=c11 -Wall -Wextra -Werror=vla -pedantic -DLL_ASSERTS \
       -DLL_ALL_BACKENDS -isystem "$LIBLINK_CONFIG_INCLUDE" \
