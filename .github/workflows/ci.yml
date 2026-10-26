@@ -107,8 +107,24 @@ jobs:
         set -eo pipefail
         export CABAL_DIR="$GITHUB_WORKSPACE/_build/cabal-dir"
         export TMPDIR="$GITHUB_WORKSPACE/_build/tmp"
-        mkdir -p "$TMPDIR"
-        make QUIET=1 DYNAMIC=${{ matrix.dynamic }} CABAL_ARGS="-j2" USE_SYSTEM_CABAL=1 stage2
+        mkdir -p "$TMPDIR" _build/logs
+        stage2_cabal_args="-j2"
+        if [ "${{ matrix.dynamic }}" = "1" ]; then
+          stage2_cabal_args="$stage2_cabal_args -v2"
+        fi
+        make QUIET=1 DYNAMIC=${{ matrix.dynamic }} CABAL_ARGS="$stage2_cabal_args" USE_SYSTEM_CABAL=1 stage2 \
+          2>&1 | tee _build/logs/stage2-build.log
+
+    - name: Check liblink native shared-link dependencies
+      if: ${{ matrix.dynamic == 1 }}
+      shell: devx {0}
+      timeout-minutes: 5
+      run: |
+        set -eo pipefail
+        python3 liblink/tests/unit/native_shared_link.py \
+          --build-log _build/logs/stage2-build.log \
+          --out _build/logs/native-shared-link \
+          2>&1 | tee _build/logs/liblink-native-shared-link.log
 
     - name: Run liblink native C units
       if: ${{ matrix.dynamic == 0 }}
