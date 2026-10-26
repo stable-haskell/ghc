@@ -1,16 +1,15 @@
 #define LL_INTERNAL_SOURCE 1
 #include "LinkerInternals.h"
 
-static bool quarantine_resolve(ObjectCode *object);
-#define PEI386_TEST_RESOLVE quarantine_resolve
+static int quarantine_resolve(ObjectCode *object);
 #define PEI386_CLASSIFICATION_ENTRY pei386_resolver_classification_main
 #include "pei386_resolver_classification.c"
 #undef PEI386_CLASSIFICATION_ENTRY
-#undef PEI386_TEST_RESOLVE
 
 static unsigned backend_calls;
+static struct ll_format_ops quarantine_ops;
 
-static bool quarantine_resolve(ObjectCode *object)
+static int quarantine_resolve(ObjectCode *object)
 {
     ++backend_calls;
     /* Count an erroneous dispatch without entering released metadata. */
@@ -26,7 +25,9 @@ static ObjectCode *make_core_fixture(ResolverCase which, uint32_t *slot)
     ObjectCode *object = mkOc(&owner, STATIC_OBJECT,
                               (pathchar *)L"resolver-quarantine",
                               NULL, 0, false, NULL, 0);
-    object->format_ops = ll_format_native();
+    quarantine_ops = *ll_format_native();
+    quarantine_ops.resolve = quarantine_resolve;
+    object->format_ops = &quarantine_ops;
     object->n_sections = 2; /* final slot is synthetic global data */
     object->sections = LL_CALLOC_FOR(&owner, 2, sizeof(*object->sections),
                                      "quarantine fixture sections");

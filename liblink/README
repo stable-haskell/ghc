@@ -19,7 +19,9 @@ Object format dispatch
 ----------------------
 
 Relocatable objects select a private format vtable from their input bytes before
-backend initialization. The selection stays with the object through resolution,
+backend initialization. ELF, Mach-O, and PE each own a typed immutable operation
+table; selection uses an immutable registry of compiled implementations. The
+selection stays with the object through resolution,
 initialization, and disposal, even when the backend releases the input image.
 Verification still belongs to the selected backend. Recognized ELF, Mach-O,
 COFF, and Wasm input without an available backend returns LL_E_UNSUPPORTED;

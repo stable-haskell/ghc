@@ -1,17 +1,16 @@
-/* Native compatibility adapters for the frozen format interface. Runtime
- * selection is independent of host byte order and never interprets structures.
- * Backend portability and a multi-backend registry follow in WP2.6/2.7. */
+/* Immutable object-format registry and portable bounded signature recognition.
+ * Backend implementations own their typed operation tables. */
 #define LL_INTERNAL_SOURCE 1
 #include "LinkerInternals.h"
 #include "ll_format.h"
 
-static bool ll_sniff_elf(const uint8_t *img, size_t len)
+bool ll_format_sniff_elf(const uint8_t *img, size_t len)
 {
     return img != NULL && len >= 4 && img[0] == 0x7f &&
            img[1] == 'E' && img[2] == 'L' && img[3] == 'F';
 }
 
-static bool ll_sniff_macho(const uint8_t *img, size_t len)
+bool ll_format_sniff_macho(const uint8_t *img, size_t len)
 {
     if (img == NULL || len < 4) return false;
     /* MH_MAGIC[_64] and MH_CIGAM[_64], read as bytes on either host. */
@@ -21,7 +20,7 @@ static bool ll_sniff_macho(const uint8_t *img, size_t len)
             img[2] == 0xed && img[3] == 0xfe);
 }
 
-static bool ll_sniff_coff(const uint8_t *img, size_t len)
+bool ll_format_sniff_coff(const uint8_t *img, size_t len)
 {
     if (img == NULL || len < 4) return false;
     /* Anonymous COFF (including bigobj and short import objects). */
@@ -45,100 +44,46 @@ static bool ll_sniff_coff(const uint8_t *img, size_t len)
     }
 }
 
-static bool ll_sniff_wasm(const uint8_t *img, size_t len)
+bool ll_format_sniff_wasm(const uint8_t *img, size_t len)
 {
     return img != NULL && len >= 4 && img[0] == 0 &&
            img[1] == 'a' && img[2] == 's' && img[3] == 'm';
 }
 
+/* Only compiled backends enter this immutable registry. Portable recognition
+ * below still identifies known formats whose backend is unavailable. */
+static const struct ll_format_ops *const ll_formats[] = {
 #if defined(OBJFORMAT_ELF)
-#include "linker/Elf.h"
-static int ll_native_init(ObjectCode *oc)
-{
-    /* Preserve the existing pre-init verification and the loadOc recheck. */
-    if (!ocVerifyImage_ELF(oc)) return 0;
-    ocInit_ELF(oc);
-    return 1;
-}
-static int ll_native_extras(ObjectCode *oc)
-{
-#if defined(NEED_SYMBOL_EXTRAS)
-    return ocAllocateExtras_ELF(oc);
-#else
-    (void)oc;
-    return 1;
+    &ll_format_elf,
 #endif
-}
-static const struct ll_format_ops ll_native_ops = {
-    .name = "ELF", .sniff = ll_sniff_elf,
-    .verify = ocVerifyImage_ELF, .init = ll_native_init,
-    .alloc_extras = ll_native_extras, .get_names = ocGetNames_ELF,
-    .resolve = ocResolve_ELF, .run_init = ocRunInit_ELF,
-    .run_fini = ocRunFini_ELF, .deinit = ocDeinit_ELF
-};
-#elif defined(OBJFORMAT_MACHO)
-#include "linker/MachO.h"
-static int ll_native_init(ObjectCode *oc)
-{
-    if (!ocVerifyImage_MachO(oc)) return 0;
-    return ocInit_MachO(oc);
-}
-static int ll_native_extras(ObjectCode *oc)
-{
-#if defined(NEED_SYMBOL_EXTRAS)
-    return ocAllocateExtras_MachO(oc);
-#else
-    (void)oc;
-    return 1;
+#if defined(OBJFORMAT_MACHO)
+    &ll_format_macho,
 #endif
-}
-static const struct ll_format_ops ll_native_ops = {
-    .name = "Mach-O", .sniff = ll_sniff_macho,
-    .verify = ocVerifyImage_MachO, .init = ll_native_init,
-    .alloc_extras = ll_native_extras, .get_names = ocGetNames_MachO,
-    .resolve = ocResolve_MachO, .run_init = ocRunInit_MachO,
-    .run_fini = ocRunFini_MachO, .deinit = ocDeinit_MachO
-};
-#elif defined(OBJFORMAT_PEi386)
-#include "linker/PEi386.h"
-/* PE verification allocates metadata. Do not introduce an extra verification
- * at initialization. Its extras are acquired by get_names as before. Use typed
- * wrappers: the backend returns bool, while the frozen slots return int. */
-static int ll_native_noop(ObjectCode *oc) { (void)oc; return 1; }
-static int ll_native_verify(ObjectCode *oc) { return ocVerifyImage_PEi386(oc); }
-static int ll_native_names(ObjectCode *oc) { return ocGetNames_PEi386(oc); }
-static int ll_native_resolve(ObjectCode *oc) { return ocResolve_PEi386(oc); }
-static int ll_native_run_init(ObjectCode *oc) { return ocRunInit_PEi386(oc); }
-static int ll_native_run_fini(ObjectCode *oc) { return ocRunFini_PEi386(oc); }
-static const struct ll_format_ops ll_native_ops = {
-    .name = "PEi386", .sniff = ll_sniff_coff,
-    .verify = ll_native_verify, .init = ll_native_noop,
-    .alloc_extras = ll_native_noop, .get_names = ll_native_names,
-    .resolve = ll_native_resolve, .run_init = ll_native_run_init,
-    .run_fini = ll_native_run_fini, .deinit = freePreloadObjectFile_PEi386
-};
+#if defined(OBJFORMAT_PEi386)
+    &ll_format_pei386,
 #endif
+    NULL
+};
 
 const struct ll_format_ops *ll_format_native(void)
 {
-#if defined(OBJFORMAT_ELF) || defined(OBJFORMAT_MACHO) || defined(OBJFORMAT_PEi386)
-    return &ll_native_ops;
-#else
-    return NULL;
-#endif
+    /* Current builds contain one native implementation; Wasm contains none. */
+    return ll_formats[0];
 }
 
 const struct ll_format_ops *ll_format_select(ObjectCode *oc)
 {
     const uint8_t *img = (const uint8_t *)oc->image;
     const size_t len = oc->fileSize > 0 ? (size_t)oc->fileSize : 0;
-    const struct ll_format_ops *native = ll_format_native();
-    if (native != NULL && native->sniff(img, len)) return native;
+    for (size_t i = 0; ll_formats[i] != NULL; ++i) {
+        const struct ll_format_ops *ops = ll_formats[i];
+        if (ops->sniff(img, len)) return ops;
+    }
 
-    const char *name = ll_sniff_elf(img, len) ? "ELF" :
-                       ll_sniff_macho(img, len) ? "Mach-O" :
-                       ll_sniff_coff(img, len) ? "COFF" :
-                       ll_sniff_wasm(img, len) ? "Wasm" : NULL;
+    const char *name = ll_format_sniff_elf(img, len) ? "ELF" :
+                       ll_format_sniff_macho(img, len) ? "Mach-O" :
+                       ll_format_sniff_coff(img, len) ? "COFF" :
+                       ll_format_sniff_wasm(img, len) ? "Wasm" : NULL;
     if (name != NULL)
         ll_error_set(oc->L, LL_E_UNSUPPORTED,
                      "loadObj: %s backend is unavailable for %" PATH_FMT,

@@ -1309,6 +1309,16 @@ def main() -> int:
         )
         run([str(archive_test)], label="run archive_error_status")
 
+        member = output / "format_archive_member.o"
+        run(cc + ["-c", str(ROOT / "liblink/tests/unit/format_archive_member.c"),
+                  "-o", str(member)], label="compile native archive registry member")
+        registry_test = output / "format_archive"
+        run(cc + native_unit_link_arguments(
+            ROOT / "liblink/tests/unit/format_archive.c", archive,
+            registry_test, link_flags, []),
+            label="compile and link format_archive")
+        run([str(registry_test), str(member)], label="run format_archive")
+
         run_pathdup_ownership(cc, archive, output, link_flags, host)
 
         if host == "Darwin":

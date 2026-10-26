@@ -3,23 +3,11 @@
 #define LL_INTERNAL_SOURCE 1
 #include "LinkerInternals.h"
 
-#if defined(OBJFORMAT_ELF)
-#define ocRunInit_ELF initializer_policy_backend
-int initializer_policy_backend(ObjectCode *object);
-#elif defined(OBJFORMAT_PEi386)
-#define ocRunInit_PEi386 initializer_policy_backend
-bool initializer_policy_backend(ObjectCode *object);
-#elif defined(OBJFORMAT_MACHO)
-#define ocRunInit_MachO initializer_policy_backend
-int initializer_policy_backend(ObjectCode *object);
-#else
+#if !defined(OBJFORMAT_ELF) && !defined(OBJFORMAT_PEi386) && !defined(OBJFORMAT_MACHO)
 #error "init_array_policy requires a configured native ELF/PE/Mach-O host"
 #endif
 #include "ll_format.c"
 #include "Linker.c"
-#undef ocRunInit_ELF
-#undef ocRunInit_PEi386
-#undef ocRunInit_MachO
 #include "linker/InitFini.c"
 #include "ll_failure.c"
 
@@ -44,6 +32,7 @@ typedef struct {
 static Host host_a;
 static Host host_default;
 static unsigned failures;
+static struct ll_format_ops policy_ops;
 
 #define CHECK(condition, message) do { \
     if (!(condition)) { \
@@ -217,11 +206,7 @@ static void policy_after(void *ctx, ObjectCode *object, bool ok)
     if (test != NULL) { ++test->after; test->last_ok = ok; }
 }
 
-#if defined(OBJFORMAT_PEi386)
-bool initializer_policy_backend(ObjectCode *object)
-#else
-int initializer_policy_backend(ObjectCode *object)
-#endif
+static int initializer_policy_backend(ObjectCode *object)
 {
     InitCase *test = case_for(object);
     if (test == NULL) return false;
@@ -350,6 +335,8 @@ static void release_pe_fixture_state(ll_linker *owner)
 
 int main(void)
 {
+    policy_ops = *ll_format_native();
+    policy_ops.run_init = initializer_policy_backend;
     ll_linker owner = {0};
     ll_compat_host_ops ops = make_ops(&host_a);
     ll_compat_host_ops defaults = make_ops(&host_default);
@@ -375,7 +362,7 @@ int main(void)
                          WSTR("init-grandchild.o"), WSTR("healthy-init.o"),
                          WSTR("failed-init.o")};
     for (size_t i = 0; i < 5; ++i) {
-        objects[i].format_ops = ll_format_native();
+        objects[i].format_ops = &policy_ops;
         objects[i].L = &owner;
         objects[i].fileName = paths[i];
         objects[i].status = OBJECT_RESOLVED;

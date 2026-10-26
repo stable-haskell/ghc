@@ -447,6 +447,8 @@
 #include "ll_failure.h"
 #include "RtsSymbolInfo.h"
 #include "linker/PEi386.h"
+#include "ll_format.h"
+
 #include "linker/PEi386Types.h"
 #include "linker/SymbolExtras.h"
 
@@ -2872,4 +2874,22 @@ resolveSymbolAddr_PEi386 (ll_linker *L, pathchar* buffer, int size,
 
     return buffer;
 }
+
+/* PE verification allocates metadata. Do not introduce an extra verification
+ * at initialization. Its extras are acquired by get_names as before. Use typed
+ * wrappers: the backend returns bool, while the frozen slots return int. */
+static int ll_pei386_noop(ObjectCode *oc) { (void)oc; return 1; }
+static int ll_pei386_verify(ObjectCode *oc) { return ocVerifyImage_PEi386(oc); }
+static int ll_pei386_names(ObjectCode *oc) { return ocGetNames_PEi386(oc); }
+static int ll_pei386_resolve(ObjectCode *oc) { return ocResolve_PEi386(oc); }
+static int ll_pei386_run_init(ObjectCode *oc) { return ocRunInit_PEi386(oc); }
+static int ll_pei386_run_fini(ObjectCode *oc) { return ocRunFini_PEi386(oc); }
+const struct ll_format_ops ll_format_pei386 = {
+    .name = "PEi386", .sniff = ll_format_sniff_coff,
+    .verify = ll_pei386_verify, .init = ll_pei386_noop,
+    .alloc_extras = ll_pei386_noop, .get_names = ll_pei386_names,
+    .resolve = ll_pei386_resolve, .run_init = ll_pei386_run_init,
+    .run_fini = ll_pei386_run_fini, .deinit = freePreloadObjectFile_PEi386
+};
+
 #endif /* mingw32_HOST_OS */

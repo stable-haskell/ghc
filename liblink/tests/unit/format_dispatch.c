@@ -217,6 +217,19 @@ static void check_detection(ll_linker *owner)
     ObjectCode oc = {.L = owner, .fileName = WSTR("signature-only.o")};
     const struct ll_format_ops *native = ll_format_native();
     CHECK(native != NULL, "native test host has no backend");
+    if (native == NULL) return;
+#if defined(OBJFORMAT_ELF)
+    CHECK(native == &ll_format_elf, "registry lost the ELF-owned table");
+#elif defined(OBJFORMAT_MACHO)
+    CHECK(native == &ll_format_macho, "registry lost the Mach-O-owned table");
+#elif defined(OBJFORMAT_PEi386)
+    CHECK(native == &ll_format_pei386, "registry lost the PE-owned table");
+#endif
+    CHECK(native->sniff != NULL && native->verify != NULL &&
+          native->init != NULL && native->alloc_extras != NULL &&
+          native->get_names != NULL && native->resolve != NULL &&
+          native->run_init != NULL && native->run_fini != NULL &&
+          native->deinit != NULL, "backend table has an unbound callback");
     for (size_t i = 0; i < sizeof(signatures) / sizeof(signatures[0]); ++i) {
         /* Include an unaligned start; no typed header reads are permitted. */
         uint8_t storage[21] = {0};

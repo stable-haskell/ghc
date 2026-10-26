@@ -19,6 +19,8 @@
 #include "RtsSymbolInfo.h"
 #include "linker/MMap.h"
 #include "linker/Elf.h"
+#include "ll_format.h"
+
 #include "linker/CacheFlush.h"
 #include "linker/M32Alloc.h"
 #include "linker/SymbolExtras.h"
@@ -2426,5 +2428,28 @@ void * loadNativeObjFromLinkerScript_ELF(ll_linker *L, char **errmsg)
    return r;
 }
 
+static int ll_elf_init(ObjectCode *oc)
+{
+    /* Preserve the existing pre-init verification and the loadOc recheck. */
+    if (!ocVerifyImage_ELF(oc)) return 0;
+    ocInit_ELF(oc);
+    return 1;
+}
+static int ll_elf_extras(ObjectCode *oc)
+{
+#if defined(NEED_SYMBOL_EXTRAS)
+    return ocAllocateExtras_ELF(oc);
+#else
+    (void)oc;
+    return 1;
+#endif
+}
+const struct ll_format_ops ll_format_elf = {
+    .name = "ELF", .sniff = ll_format_sniff_elf,
+    .verify = ocVerifyImage_ELF, .init = ll_elf_init,
+    .alloc_extras = ll_elf_extras, .get_names = ocGetNames_ELF,
+    .resolve = ocResolve_ELF, .run_init = ocRunInit_ELF,
+    .run_fini = ocRunFini_ELF, .deinit = ocDeinit_ELF
+};
 
 #endif /* elf */

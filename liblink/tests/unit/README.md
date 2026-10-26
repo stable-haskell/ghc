@@ -1089,10 +1089,21 @@ name acquisition, initializer hook ordering, finalizer gating, partial-init
 cleanup, and the NULL-image native-library path. Actual archive parsing remains
 covered by the existing archive and T1 tests.
 
-Source-included backend-interposition fixtures include `ll_format.c` under the
-same overrides as `Linker.c`. Synthetic objects that bypass input initialization
-must explicitly install their intended operations; production objects acquire
+The native table must be the backend-owned table, with every frozen callback
+bound. Source-included backend-interposition fixtures copy that table and replace
+only their intended test callbacks. Synthetic objects that bypass input
+initialization explicitly install their operations; production objects acquire
 them through `ll_init_object`.
+
+On POSIX hosts, `format_archive.c` also loads an ordinary compiler-produced
+object standalone and as an archive member. It requires the same backend table
+and lazy member state. Index and non-object members remain skipped. A later
+short object member reports its format error while retaining the first member,
+its table, and registration. The primary diagnostic is checked before the next
+operation; a fresh unused-member query clears it and retains lazy state.
+Explicit disposal and linker exit balance the owner allocation
+ledger. These checks run with the default native suite and do not execute the
+member's code or constructors.
 
 Mach-O ARM64 PAGE21 encoding
 ---------------------------

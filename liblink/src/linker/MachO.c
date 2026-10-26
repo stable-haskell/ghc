@@ -9,6 +9,8 @@
 #include "LinkerInternals.h"
 #include "ll_failure.h"
 #include "linker/MachO.h"
+#include "ll_format.h"
+
 #include "linker/CacheFlush.h"
 #include "linker/SymbolExtras.h"
 #include "linker/MMap.h"
@@ -2125,5 +2127,27 @@ machoGetMisalignment( ll_linker *L, FILE * f )
     LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "mach-o misalignment %d\n", misalignment));
     return misalignment ? (16 - misalignment) : 0;
 }
+
+static int ll_macho_init(ObjectCode *oc)
+{
+    if (!ocVerifyImage_MachO(oc)) return 0;
+    return ocInit_MachO(oc);
+}
+static int ll_macho_extras(ObjectCode *oc)
+{
+#if defined(NEED_SYMBOL_EXTRAS)
+    return ocAllocateExtras_MachO(oc);
+#else
+    (void)oc;
+    return 1;
+#endif
+}
+const struct ll_format_ops ll_format_macho = {
+    .name = "Mach-O", .sniff = ll_format_sniff_macho,
+    .verify = ocVerifyImage_MachO, .init = ll_macho_init,
+    .alloc_extras = ll_macho_extras, .get_names = ocGetNames_MachO,
+    .resolve = ocResolve_MachO, .run_init = ocRunInit_MachO,
+    .run_fini = ocRunFini_MachO, .deinit = ocDeinit_MachO
+};
 
 #endif /* darwin_HOST_OS || ios_HOST_OS */

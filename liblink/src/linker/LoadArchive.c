@@ -744,6 +744,8 @@ ll_hs_int loadArchive_ (ll_linker *L, pathchar *path)
             imageMapped = false;
             LL_FREE_FOR(L, archiveMemberName);
 
+            /* Bind each admitted member through the same immutable registry as
+             * standalone objects. Archive classification above stays separate. */
             if (!ll_init_object(oc) || !loadOc(oc)) {
                 ll_discard_object(oc);
                 goto fail;

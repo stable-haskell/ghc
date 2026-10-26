@@ -144,10 +144,11 @@ static int test_mprotect(void *start, size_t len, int prot);
 #include "linker/SymbolExtras.c"
 
 int test_ocResolve_MachO(ObjectCode *oc);
-#define ocResolve_MachO test_ocResolve_MachO
+static const struct ll_format_ops *fixture_format_select(ObjectCode *oc);
 #include "ll_format.c"
+#define ll_format_select fixture_format_select
 #include "Linker.c"
-#undef ocResolve_MachO
+#undef ll_format_select
 #include "linker/M32Alloc.c"
 #undef ll_mmap_anon_for_linker
 #undef ll_mmap_for_linker
@@ -157,6 +158,24 @@ int test_ocResolve_MachO(ObjectCode *oc);
 #define mprotect test_mprotect
 #include "linker/MMap.c"
 #undef mprotect
+
+int ocGetNames_MachO(ObjectCode *oc);
+
+static const struct ll_format_ops *fixture_format_select(ObjectCode *oc)
+{
+    const struct ll_format_ops *native = ll_format_select(oc);
+    static struct ll_format_ops fixture_ops;
+    static bool initialized;
+    if (native == NULL) return NULL;
+    CHECK(native == &ll_format_macho, "fixture selected another backend");
+    if (!initialized) {
+        fixture_ops = *native;
+        fixture_ops.get_names = ocGetNames_MachO;
+        fixture_ops.resolve = test_ocResolve_MachO;
+        initialized = true;
+    }
+    return &fixture_ops;
+}
 
 int ocGetNames_MachO(ObjectCode *oc)
 {
