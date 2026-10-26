@@ -118,7 +118,8 @@ repository root with:
 
 The default run also checks target configuration without executing target
 instructions. `test_target_config.py` compiles the native default and seven
-explicit architectures, checks target word classes and format capabilities,
+explicit architectures, checks target word classes, symbol payload sizes and
+format capabilities,
 compares host macro definitions before and after each override, and requires
 an invalid target selector to fail. It can run independently with
 `--cc <compiler command> --config-dir <generated include directory>`.

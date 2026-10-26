@@ -15,6 +15,7 @@
 #include "linker/M32Alloc.h"
 #include "linker/ProddableBlocks.h"
 #include "ll_visibility.h"
+#include "liblink/symbol_extras.h"
 
 #if RTS_LINKER_USE_MMAP
 #include <sys/mman.h>
@@ -215,24 +216,21 @@ typedef struct _Segment {
  * relocations on the PowerPC, x86_64 and ARM. On RISCV64 we use symbolextras
  * like a GOT for locals where SymbolExtra represents one entry.
  */
-typedef struct {
 #if defined(powerpc_HOST_ARCH)
-    struct {
-        short lis_r12, hi_addr;
-        short ori_r12_r12, lo_addr;
-        long mtctr_r12;
-        long bctr;
-    } jumpIsland;
+_Static_assert(sizeof(short) == 2 && sizeof(long) == 4,
+               "native PowerPC symbol extras require the existing 32-bit ABI");
+typedef ll_symbol_extra_powerpc SymbolExtra;
 #elif defined(x86_64_HOST_ARCH)
-    uint64_t    addr;
-    // See Note [TLSGD relocation] in elf_tlsgd.c
-    uint8_t     jumpIsland[8];
+typedef ll_symbol_extra_x86_64 SymbolExtra;
 #elif defined(arm_HOST_ARCH)
-    uint8_t     jumpIsland[16];
+typedef ll_symbol_extra_arm SymbolExtra;
 #elif defined(riscv64_HOST_ARCH)
-    uint64_t    addr;
+typedef ll_symbol_extra_riscv64 SymbolExtra;
+#else
+/* Preserve the legacy zero-sized native representation until storage/count
+ * handling is separated. AArch64 uses section stubs rather than this payload. */
+typedef struct { } SymbolExtra;
 #endif
-} SymbolExtra;
 
 typedef enum {
     /* Objects that were loaded by this linker */

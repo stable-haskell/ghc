@@ -38,16 +38,17 @@ def main() -> None:
     cc = shlex.split(args.cc) + [
         "-std=c11", "-Wall", "-Wextra", "-Werror=vla", "-pedantic",
         "-isystem", str(args.config_dir), "-I", str(ROOT / "liblink/src"),
+        "-I", str(ROOT / "liblink/include"),
     ]
     # Expected widths and capabilities are independent of the compiler host.
     targets = {
-        "I386": (4, 0, 0, 0),
-        "X86_64": (8, 0, 1, 0),
-        "ARM": (4, 1, 1, 0),
-        "AARCH64": (8, 1, 1, 1),
-        "RISCV64": (8, 1, 1, 0),
-        "POWERPC": (4, 0, 1, 0),
-        "SPARC": (4, 0, 0, 0),
+        "I386": (4, 0, 0, 0, 0),
+        "X86_64": (8, 0, 1, 0, 16),
+        "ARM": (4, 1, 1, 0, 16),
+        "AARCH64": (8, 1, 1, 1, 0),
+        "RISCV64": (8, 1, 1, 0, 8),
+        "POWERPC": (4, 0, 1, 0, 16),
+        "SPARC": (4, 0, 0, 0, 0),
     }
     with tempfile.TemporaryDirectory(prefix="liblink-target-config-") as temporary:
         directory = Path(temporary)
@@ -59,13 +60,14 @@ def main() -> None:
         ))
         assert original, "configured host definitions are missing"
         run(cc + ["-c", str(source), "-o", str(directory / "native.o")])
-        for arch, (width, plt, extras, macho_plt) in targets.items():
+        for arch, (width, plt, extras, macho_plt, extra_size) in targets.items():
             flags = [
                 f"-DLL_TARGET_ARCH=LL_ARCH_{arch}",
                 f"-DLL_EXPECT_TARGET=LL_ARCH_{arch}",
                 f"-DLL_EXPECT_WORD_SIZE={width}", f"-DLL_EXPECT_ELF_PLT={plt}",
                 f"-DLL_EXPECT_ELF_EXTRAS={extras}",
                 f"-DLL_EXPECT_MACHO_PLT={macho_plt}",
+                f"-DLL_EXPECT_EXTRA_SIZE={extra_size}",
             ]
             run(cc + flags + ["-c", str(source), "-o", str(directory / (arch + ".o"))])
             current = host_definitions(run(

@@ -49,6 +49,12 @@ configured host architecture. Generated ll_platform.h always describes the
 running host. OS loading, mapping, and native TLS services retain host guards.
 Native format identity is independent of the compiled registry's order.
 
+Symbol-extra records have named fixed-width x86_64, ARM, RISC-V, and PowerPC
+layouts. Native compatibility clients retain their existing SymbolExtra alias;
+PE's x86_64 helper explicitly uses its target layout. AArch64's legacy native
+zero-sized representation and allocation/count behavior are retained while
+the remaining shared storage and allocator interfaces are separated.
+
 These target controls prepare multi-backend builds. The current build still
 compiles the native backend; all-backends qualification is pending.
 

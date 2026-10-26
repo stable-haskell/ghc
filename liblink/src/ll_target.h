@@ -4,6 +4,7 @@
 #pragma once
 
 #include "ll_platform.h"
+#include "liblink/symbol_extras.h"
 
 #define LL_ARCH_NATIVE_OTHER 0
 #define LL_ARCH_I386 1
@@ -67,3 +68,17 @@
 #define LL_ELF_NEED_GOT LL_ELF_NEED_PLT
 #define LL_MACHO_NEED_SYMBOL_EXTRAS (LL_TARGET_X86_64 || LL_TARGET_AARCH64)
 #define LL_MACHO_NEED_PLT LL_TARGET_AARCH64
+
+/* No new empty C struct is needed for targets without a symbol payload. The
+ * allocator's legacy native representation remains separate during the split. */
+#if LL_TARGET_X86_64
+#define LL_TARGET_SYMBOL_EXTRA_SIZE sizeof(ll_symbol_extra_x86_64)
+#elif LL_TARGET_ARM
+#define LL_TARGET_SYMBOL_EXTRA_SIZE sizeof(ll_symbol_extra_arm)
+#elif LL_TARGET_RISCV64
+#define LL_TARGET_SYMBOL_EXTRA_SIZE sizeof(ll_symbol_extra_riscv64)
+#elif LL_TARGET_POWERPC
+#define LL_TARGET_SYMBOL_EXTRA_SIZE sizeof(ll_symbol_extra_powerpc)
+#else
+#define LL_TARGET_SYMBOL_EXTRA_SIZE 0
+#endif

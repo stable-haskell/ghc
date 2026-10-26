@@ -2207,8 +2207,9 @@ makeSymbolExtra_PEi386( ObjectCode* oc, uint64_t index LL_UNUSED, size_t s,
                        char* symbol LL_UNUSED, ll_sym_type type, size_t *result )
 {
     ll_sym_type kind = type & ~(LL_SYM_DUP_DISCARD | LL_SYM_HIDDEN);
-    SymbolExtra *extra = m32_alloc_for(oc->L,
-        kind == LL_SYM_CODE ? oc->rx_m32 : oc->rw_m32, sizeof(SymbolExtra), 8);
+    ll_symbol_extra_x86_64 *extra = m32_alloc_for(oc->L,
+        kind == LL_SYM_CODE ? oc->rx_m32 : oc->rw_m32,
+        sizeof(ll_symbol_extra_x86_64), 8);
     if (extra == NULL) {
         if (oc->L->error_status == LL_OK)
             ll_error_set(oc->L, LL_E_NOMEM,

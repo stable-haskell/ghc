@@ -16,6 +16,7 @@ extra-source-files:
     include/liblink.h
     include/liblink/compat.h
     include/liblink/rts_friend.h
+    include/liblink/symbol_extras.h
     include/ll_autoconf.h.in
     include/ll_platform.h.in
     liblink.buildinfo.in
@@ -203,6 +204,7 @@ library
         linker/ProddableBlocks.h
         liblink/compat.h
         liblink/rts_friend.h
+        liblink/symbol_extras.h
     cc-options: -std=c11 -fvisibility=hidden
     if flag(asserts)
         cc-options: -DLL_ASSERTS
