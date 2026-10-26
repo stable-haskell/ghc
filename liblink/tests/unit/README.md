@@ -1149,3 +1149,28 @@ range guards, error classification, addend calculation, and numeric goldens
 remain unchanged. Backend range rejection and native relocation behavior still
 require the existing native units and golden captures; the portable unit alone
 does not qualify them.
+
+Mach-O declaration controls
+---------------------------
+
+`macho_layout.c` includes the SDK-independent installed `liblink/macho.h`.
+It checks every record size and non-bitfield offset, and checks each relocation
+bit against independent little-endian wire bytes. The default native driver compiles it on every host and runs the wire-byte
+control on little-endian hosts. On Darwin it also compares every declared constant, record
+size/alignment/offset, and relocation bitfield byte against the real Apple SDK.
+The SDK remains an explicit dependency of native Mach-O fixture producers, not
+of backend file-format declarations.
+
+For compile-only controls with an actual foreign Clang data ABI, use:
+
+```
+clang --target=x86_64-unknown-linux-gnu -ffreestanding -std=c11 \
+  -Wall -Wextra -Werror -Werror=vla -pedantic -Iliblink/include \
+  -c liblink/tests/unit/macho_layout.c -o /tmp/macho-layout-linux.o
+```
+
+The same source can be compiled with `aarch64-unknown-linux-gnu` and
+`x86_64-pc-windows-msvc`. These are declaration controls, not foreign backend
+execution. The backend still supports its existing native-endian x86_64/AArch64
+records; this change does not add byte swapping, enable all-backends, or supply
+foreign OS services.

@@ -1,10 +1,16 @@
 #define LL_INTERNAL_SOURCE 1
 #include "LinkerInternals.h"
+#if defined(OBJFORMAT_MACHO)
+#include <mach-o/loader.h>
+#include <mach-o/nlist.h>
+#include <mach-o/reloc.h>
+#include <mach-o/arm64/reloc.h>
+#include <mach-o/x86_64/reloc.h>
+#endif
 #include "linker/MachO.h"
 #include "linker/ProddableBlocks.h"
 #include "linker/macho/plt.h"
 
-#include <mach-o/loader.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>

@@ -157,3 +157,10 @@ free-list header into that page. Page payload offsets, the pool limit,
 
 Native Windows execution in CI is required to validate these OS paths.
 Darwin source compilation does not qualify their Windows behavior.
+
+Mach-O file records and constants are declared in installed `liblink/macho.h`,
+without Apple SDK includes. Private metadata uses those declarations explicitly;
+only a native Mach-O build exposes the temporary `Stub` compatibility alias.
+Mapping/protection and instruction-cache work remain in the existing host-service
+helpers. This declaration split does not enable foreign backend execution or
+change supported file byte order. See tests/unit/README.md for layout controls.

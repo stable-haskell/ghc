@@ -18,10 +18,10 @@ def main() -> None:
     args = parser.parse_args()
     source = args.source.read_text()
     start = source.index('static bool\nencodeAddend(')
-    start = source.index('        case ARM64_RELOC_PAGE21:', start)
-    end = source.index('        case ARM64_RELOC_PAGEOFF12:', start)
+    start = source.index('        case LL_MACHO_ARM64_RELOC_PAGE21:', start)
+    end = source.index('        case LL_MACHO_ARM64_RELOC_PAGEOFF12:', start)
     case = source[start:end]
-    if case.count('case ARM64_RELOC_GOT_LOAD_PAGE21:') != 1:
+    if case.count('case LL_MACHO_ARM64_RELOC_GOT_LOAD_PAGE21:') != 1:
         raise RuntimeError('PAGE21 and GOT_LOAD_PAGE21 no longer share this writer')
     marker = '            const uint64_t addend_bits = (uint64_t)addend;'
     if case.count(marker) != 1 or case.count('*p = (*p & 0x9F00001F)') != 1:

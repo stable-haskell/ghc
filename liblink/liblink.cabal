@@ -17,6 +17,7 @@ extra-source-files:
     include/liblink/compat.h
     include/liblink/rts_friend.h
     include/liblink/symbol_extras.h
+    include/liblink/macho.h
     include/ll_autoconf.h.in
     include/ll_platform.h.in
     liblink.buildinfo.in
@@ -123,6 +124,7 @@ extra-source-files:
     tests/unit/hash_destroy_owner.c
     tests/unit/init_array_status.c
     tests/unit/init_array_policy.c
+    tests/unit/macho_layout.c
     tests/unit/macho_input.c
     tests/unit/macho_page21_encoding.c
     tests/unit/macho_page21_source.py
@@ -206,6 +208,7 @@ library
         liblink/compat.h
         liblink/rts_friend.h
         liblink/symbol_extras.h
+        liblink/macho.h
     cc-options: -std=c11 -fvisibility=hidden
     if flag(asserts)
         cc-options: -DLL_ASSERTS

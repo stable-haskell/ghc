@@ -10,14 +10,7 @@
 #include "ll_error.h"
 
 #include <limits.h>
-#include <mach-o/nlist.h>
-#include <mach-o/reloc.h>
 #include <string.h>
-#if LL_TARGET_AARCH64
-#include <mach-o/arm64/reloc.h>
-#elif LL_TARGET_X86_64
-#include <mach-o/x86_64/reloc.h>
-#endif
 
 static int invalidMachO(ObjectCode *oc, const char *reason)
 {
@@ -92,20 +85,20 @@ static bool machoRelocSymbol(const MachORelocationInfo *reloc)
 #if LL_TARGET_AARCH64
     /* ADDEND carries an immediate in r_symbolnum, not a symbol index. */
     switch (reloc->r_type) {
-    case ARM64_RELOC_UNSIGNED:
-    case ARM64_RELOC_SUBTRACTOR:
-    case ARM64_RELOC_BRANCH26:
-    case ARM64_RELOC_PAGE21:
-    case ARM64_RELOC_PAGEOFF12:
-    case ARM64_RELOC_GOT_LOAD_PAGE21:
-    case ARM64_RELOC_GOT_LOAD_PAGEOFF12:
+    case LL_MACHO_ARM64_RELOC_UNSIGNED:
+    case LL_MACHO_ARM64_RELOC_SUBTRACTOR:
+    case LL_MACHO_ARM64_RELOC_BRANCH26:
+    case LL_MACHO_ARM64_RELOC_PAGE21:
+    case LL_MACHO_ARM64_RELOC_PAGEOFF12:
+    case LL_MACHO_ARM64_RELOC_GOT_LOAD_PAGE21:
+    case LL_MACHO_ARM64_RELOC_GOT_LOAD_PAGEOFF12:
         return true;
     default:
         return false;
     }
 #elif LL_TARGET_X86_64
-    return reloc->r_extern || reloc->r_type == X86_64_RELOC_GOT ||
-           reloc->r_type == X86_64_RELOC_GOT_LOAD;
+    return reloc->r_extern || reloc->r_type == LL_MACHO_X86_64_RELOC_GOT ||
+           reloc->r_type == LL_MACHO_X86_64_RELOC_GOT_LOAD;
 #else
     (void)reloc;
     return false;
@@ -120,7 +113,7 @@ int ocVerifyImage_MachO(ObjectCode *oc)
     size_t size = (size_t)oc->fileSize;
     MachOHeader header;
     memcpy(&header, image, sizeof(header));
-    if (header.magic != MH_MAGIC_64)
+    if (header.magic != LL_MACHO_MH_MAGIC_64)
         return invalidMachO(oc, "invalid Mach-O magic");
     /* The loader may bias the image for section alignment. Require only the
      * native structure alignment, never an unconditional 16-byte image base. */
@@ -144,18 +137,18 @@ int ocVerifyImage_MachO(ObjectCode *oc)
             return invalidMachO(oc, "invalid Mach-O load-command size");
         /* Preserve the initializer's last-command-wins selection and its
          * existing treatment of LC_SEGMENT using the native segment shape. */
-        if (command.cmd == LC_SEGMENT || command.cmd == LC_SEGMENT_64) {
+        if (command.cmd == LL_MACHO_LC_SEGMENT || command.cmd == LL_MACHO_LC_SEGMENT_64) {
             if (command.cmdsize < sizeof(*segment))
                 return invalidMachO(oc, "truncated Mach-O segment command");
             segment = (const MachOSegmentCommand *)(image + commandOffset);
             if (segment->nsects > (command.cmdsize - sizeof(*segment)) /
                                      sizeof(MachOSection))
                 return invalidMachO(oc, "truncated Mach-O section records");
-        } else if (command.cmd == LC_SYMTAB) {
+        } else if (command.cmd == LL_MACHO_LC_SYMTAB) {
             if (command.cmdsize < sizeof(*symbols))
                 return invalidMachO(oc, "truncated Mach-O symbol command");
             symbols = (const MachOSymtabCommand *)(image + commandOffset);
-        } else if (command.cmd == LC_DYSYMTAB) {
+        } else if (command.cmd == LL_MACHO_LC_DYSYMTAB) {
             if (command.cmdsize < sizeof(*dynamic))
                 return invalidMachO(oc, "truncated Mach-O dynamic symbol command");
             dynamic = (const MachODsymtabCommand *)(image + commandOffset);
@@ -184,14 +177,14 @@ int ocVerifyImage_MachO(ObjectCode *oc)
     size_t max_alignment[3] = {1, 1, 1};
     for (uint32_t i = 0; i < segment->nsects; ++i) {
         const MachOSection *section = &sections[i];
-        unsigned type = section->flags & SECTION_TYPE;
-        if (type != S_ZEROFILL && type != S_GB_ZEROFILL &&
+        unsigned type = section->flags & LL_MACHO_SECTION_TYPE;
+        if (type != LL_MACHO_S_ZEROFILL && type != LL_MACHO_S_GB_ZEROFILL &&
             !machoSpan(size, section->offset, section->size))
             return invalidMachO(oc, "Mach-O section extends past the image");
         if (!machoTable(image, size, section->reloff, section->nreloc,
                          sizeof(MachORelocationInfo), 1))
             return invalidMachO(oc, "invalid Mach-O relocation table");
-        if ((type == S_MOD_INIT_FUNC_POINTERS || type == S_MOD_TERM_FUNC_POINTERS) &&
+        if ((type == LL_MACHO_S_MOD_INIT_FUNC_POINTERS || type == LL_MACHO_S_MOD_TERM_FUNC_POINTERS) &&
             section->size % sizeof(init_t) != 0)
             return invalidMachO(oc, "invalid Mach-O initializer or finalizer array");
         /* The consumer uses an int shift. Empty sections never shift. */
@@ -199,8 +192,8 @@ int ocVerifyImage_MachO(ObjectCode *oc)
             if (section->align >= sizeof(int) * CHAR_BIT - 1)
                 return invalidMachO(oc, "invalid Mach-O section alignment");
             size_t alignment = (size_t)1 << section->align;
-            unsigned kind = type == S_GB_ZEROFILL ? 2 :
-                type != S_MOD_INIT_FUNC_POINTERS && type != S_MOD_TERM_FUNC_POINTERS &&
+            unsigned kind = type == LL_MACHO_S_GB_ZEROFILL ? 2 :
+                type != LL_MACHO_S_MOD_INIT_FUNC_POINTERS && type != LL_MACHO_S_MOD_TERM_FUNC_POINTERS &&
                 strncmp(section->segname, "__TEXT", sizeof(section->segname)) == 0
                     ? 0 : 1;
             if (alignment > max_alignment[kind]) max_alignment[kind] = alignment;
@@ -213,7 +206,7 @@ int ocVerifyImage_MachO(ObjectCode *oc)
             memcpy(&record, relocs + (size_t)j * sizeof(record), sizeof(record));
             const MachORelocationInfo *reloc = &record;
 #if LL_TARGET_AARCH64
-            if (reloc->r_type == ARM64_RELOC_ADDEND) continue;
+            if (reloc->r_type == LL_MACHO_ARM64_RELOC_ADDEND) continue;
 #endif
             if (reloc->r_address < 0 ||
                 !machoSpan((size_t)section->size, (uint32_t)reloc->r_address,
@@ -221,8 +214,8 @@ int ocVerifyImage_MachO(ObjectCode *oc)
                 return invalidMachO(oc, "Mach-O relocation operand is outside its section");
 #if LL_TARGET_AARCH64
             /* Instruction relocations read uint32_t irrespective of r_length. */
-            if (reloc->r_type != ARM64_RELOC_UNSIGNED &&
-                reloc->r_type != ARM64_RELOC_SUBTRACTOR &&
+            if (reloc->r_type != LL_MACHO_ARM64_RELOC_UNSIGNED &&
+                reloc->r_type != LL_MACHO_ARM64_RELOC_SUBTRACTOR &&
                 !machoSpan((size_t)section->size, (uint32_t)reloc->r_address, 4))
                 return invalidMachO(oc, "truncated Mach-O instruction relocation");
 #endif
@@ -268,11 +261,11 @@ int ocVerifyImage_MachO(ObjectCode *oc)
         uint32_t name = symbol->n_un.n_strx;
         if (name >= terminatedSize)
             return invalidMachO(oc, "invalid Mach-O symbol name");
-        if ((symbol->n_type & N_TYPE) == N_SECT &&
-            (symbol->n_sect == NO_SECT || symbol->n_sect > segment->nsects))
+        if ((symbol->n_type & LL_MACHO_N_TYPE) == LL_MACHO_N_SECT &&
+            (symbol->n_sect == LL_MACHO_NO_SECT || symbol->n_sect > segment->nsects))
             return invalidMachO(oc, "invalid Mach-O symbol section index");
-        if (!(symbol->n_type & N_STAB) && (symbol->n_type & N_EXT) &&
-            (symbol->n_type & N_TYPE) == N_UNDF && symbol->n_value != 0 &&
+        if (!(symbol->n_type & LL_MACHO_N_STAB) && (symbol->n_type & LL_MACHO_N_EXT) &&
+            (symbol->n_type & LL_MACHO_N_TYPE) == LL_MACHO_N_UNDF && symbol->n_value != 0 &&
             (oc->L->symhash == NULL ||
              !lookupStrHashTable(oc->L->symhash, image + symbols->stroff + name))) {
             if (symbol->n_value > (size_t)PTRDIFF_MAX - common)

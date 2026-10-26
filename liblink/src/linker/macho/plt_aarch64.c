@@ -9,11 +9,6 @@
 
 #if defined(OBJFORMAT_MACHO)
 
-#include <mach/machine.h>
-#include <mach-o/fat.h>
-#include <mach-o/loader.h>
-#include <mach-o/nlist.h>
-#include <mach-o/reloc.h>
 
 /* five 4 byte instructions */
 const size_t instSizeAarch64 = 4;
@@ -21,7 +16,7 @@ const size_t stubSizeAarch64 = 5 * 4;
 
 bool needStubForRelAarch64(MachORelocationInfo * rel) {
     switch(rel->r_type) {
-        case ARM64_RELOC_BRANCH26:
+        case LL_MACHO_ARM64_RELOC_BRANCH26:
             return true;
         default:
             return false;

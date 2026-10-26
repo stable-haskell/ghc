@@ -1,24 +1,17 @@
 #pragma once
 
-#if defined(OBJFORMAT_MACHO)
+#include "ll_compat.h"
+#include "liblink/macho.h"
 
-#include "ll_target.h"
-
-#include <mach-o/loader.h>
-
-#if LL_TARGET_X86_64 || LL_TARGET_AARCH64
-typedef struct mach_header_64     MachOHeader;
-typedef struct segment_command_64 MachOSegmentCommand;
-typedef struct section_64         MachOSection;
-typedef struct nlist_64           MachONList;
-#else
-#error Unknown Darwin architecture
-#endif
-typedef struct load_command     MachOLoadCommand;
-typedef struct symtab_command   MachOSymtabCommand;
-typedef struct dysymtab_command MachODsymtabCommand;
-typedef struct relocation_info  MachORelocationInfo;
-typedef struct scattered_relocation_info MachOScatteredRelocationInfo;
+typedef ll_macho_header_64 MachOHeader;
+typedef ll_macho_segment_command_64 MachOSegmentCommand;
+typedef ll_macho_section_64 MachOSection;
+typedef ll_macho_nlist_64 MachONList;
+typedef ll_macho_load_command MachOLoadCommand;
+typedef ll_macho_symtab_command MachOSymtabCommand;
+typedef ll_macho_dysymtab_command MachODsymtabCommand;
+typedef ll_macho_relocation_info MachORelocationInfo;
+typedef ll_macho_scattered_relocation_info MachOScatteredRelocationInfo;
 
 /* Dealing with nlist symbol entries can become
  * painful.  We'll have our own Symbol struct that
@@ -119,7 +112,9 @@ struct _MachOStub {
 MachOStub;
 
 /* Temporary native alias for existing RTS clients and fixtures. */
+#if defined(OBJFORMAT_MACHO)
 typedef MachOStub Stub;
+#endif
 
 struct ll_macho_section_info {
     /*
@@ -138,5 +133,3 @@ struct ll_macho_section_info {
     /* Aligned copy only when the image's relocation table is unaligned. */
     MachORelocationInfo * owned_relocations;
 };
-
-#endif /* OBJECTFORMAT_MACHO */

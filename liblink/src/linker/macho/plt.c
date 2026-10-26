@@ -8,11 +8,6 @@
 
 #if defined(OBJFORMAT_MACHO)
 
-#include <mach/machine.h>
-#include <mach-o/fat.h>
-#include <mach-o/loader.h>
-#include <mach-o/nlist.h>
-#include <mach-o/reloc.h>
 
 #define STRINGIFY(x) #x
 #define TOSTRING(x) STRINGIFY(x)

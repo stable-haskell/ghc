@@ -1074,6 +1074,19 @@ def main() -> int:
     cc = compiler + common_flags
 
     if selected_modes == 0:
+        with tempfile.TemporaryDirectory(prefix="liblink-macho-layout-") as temporary:
+            binary = Path(temporary) / "macho_layout"
+            source = ROOT / "liblink/tests/unit/macho_layout.c"
+            run(cc + [str(source), "-o", str(binary)],
+                label="compile SDK-independent Mach-O layout unit")
+            if sys.byteorder == "little":
+                run([str(binary)], label="check Mach-O wire layout")
+            else:
+                print("[macho_layout] wire-byte runtime check requires a little-endian host; layout compiled")
+            if host == "Darwin":
+                run(cc + ["-DLL_MACHO_COMPARE_SDK", str(source), "-o", str(binary)],
+                    label="compile real Apple SDK layout comparison")
+                run([str(binary)], label="check Apple SDK Mach-O layout equivalence")
         run([sys.executable, str(ROOT / "liblink/tests/unit/test_target_config.py"),
              "--cc", command_text(compiler), "--config-dir", str(config_include)],
             label="check target selection and host definitions")

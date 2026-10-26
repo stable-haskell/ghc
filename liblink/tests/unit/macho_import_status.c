@@ -1,6 +1,13 @@
 #define _DARWIN_C_SOURCE 1
 #define LL_INTERNAL_SOURCE 1
 #include "LinkerInternals.h"
+#if defined(OBJFORMAT_MACHO)
+#include <mach-o/loader.h>
+#include <mach-o/nlist.h>
+#include <mach-o/reloc.h>
+#include <mach-o/arm64/reloc.h>
+#include <mach-o/x86_64/reloc.h>
+#endif
 
 #if !defined(darwin_HOST_OS) && !defined(ios_HOST_OS)
 #include <stdio.h>

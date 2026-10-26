@@ -4,8 +4,13 @@
 
 #if defined(darwin_HOST_OS) || defined(ios_HOST_OS)
 
-/* for roundUpToPage */
+/* File records remain available to other backends; only this implementation
+ * requires a supported Mach-O target. */
+#if !(LL_TARGET_X86_64 || LL_TARGET_AARCH64)
+#error Unknown Darwin architecture
+#endif
 
+/* for roundUpToPage */
 
 #include "LinkerInternals.h"
 #include "ll_failure.h"
@@ -18,24 +23,6 @@
 
 #include <string.h>
 #include <errno.h>
-#include <regex.h>
-#include <mach/machine.h>
-#include <mach-o/fat.h>
-#include <mach-o/loader.h>
-#include <mach-o/nlist.h>
-#include <mach-o/reloc.h>
-
-#if defined(HAVE_SYS_MMAN_H) && RTS_LINKER_USE_MMAP
-#  include <sys/mman.h>
-#endif
-
-#if LL_TARGET_X86_64
-#  include <mach-o/x86_64/reloc.h>
-#endif
-
-#if LL_TARGET_AARCH64
-#  include <mach-o/arm64/reloc.h>
-#endif
 
 /*
   Support for MachO linking on Darwin/MacOS X
@@ -99,13 +86,13 @@ ocInit_MachO(ObjectCode * oc)
 
     MachOLoadCommand *lc = (MachOLoadCommand*)(oc->image + sizeof(MachOHeader));
     for(size_t i = 0; i < oc->macho_info->header->ncmds; i++) {
-        if (lc->cmd == LC_SEGMENT || lc->cmd == LC_SEGMENT_64) {
+        if (lc->cmd == LL_MACHO_LC_SEGMENT || lc->cmd == LL_MACHO_LC_SEGMENT_64) {
             oc->macho_info->segCmd = (MachOSegmentCommand*) lc;
         }
-        else if (lc->cmd == LC_SYMTAB) {
+        else if (lc->cmd == LL_MACHO_LC_SYMTAB) {
             oc->macho_info->symCmd = (MachOSymtabCommand*) lc;
         }
-        else if (lc->cmd == LC_DYSYMTAB) {
+        else if (lc->cmd == LL_MACHO_LC_DYSYMTAB) {
             oc->macho_info->dsymCmd = (MachODsymtabCommand*) lc;
         }
         lc = (MachOLoadCommand *) ( ((char*)lc) + lc->cmdsize );
@@ -265,7 +252,7 @@ resolveImports(
         /* LOCAL/ABS entries need local or absolute resolution, which this
          * legacy importer does not implement. They are not symbol indexes.
          */
-        if (indirectSymbolIndex & (INDIRECT_SYMBOL_LOCAL | INDIRECT_SYMBOL_ABS)) {
+        if (indirectSymbolIndex & (LL_MACHO_INDIRECT_SYMBOL_LOCAL | LL_MACHO_INDIRECT_SYMBOL_ABS)) {
             ll_error_set(oc->L, LL_E_UNSUPPORTED,
                          "Mach-O local indirect pointer entries are unsupported");
             LL_LOG_ERROR_FOR(oc->L,
@@ -286,8 +273,8 @@ resolveImports(
 
         LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "resolveImports: resolving %s\n", symbol->name));
 
-        if ((symbol->nlist->n_type & N_TYPE) == N_UNDF
-            && (symbol->nlist->n_type & N_EXT) && (symbol->nlist->n_value != 0)) {
+        if ((symbol->nlist->n_type & LL_MACHO_N_TYPE) == LL_MACHO_N_UNDF
+            && (symbol->nlist->n_type & LL_MACHO_N_EXT) && (symbol->nlist->n_value != 0)) {
             addr = (ll_symbol_addr*) (symbol->nlist->n_value);
             LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "resolveImports: undefined external %s has value %p\n", symbol->name, addr));
         } else {
@@ -343,7 +330,7 @@ decodeAddend(ObjectCode * oc, Section * section, MachORelocationInfo * ri,
     checkProddableBlock(oc->L, &oc->proddables, (void*)p, 1 << ri->r_length);
 
     switch(ri->r_type) {
-        case ARM64_RELOC_UNSIGNED: {
+        case LL_MACHO_ARM64_RELOC_UNSIGNED: {
             switch (ri->r_length) {
                 case 0: *addend = signExtend(*(uint8_t*)p,  8 << ri->r_length); return true;
                 case 1: *addend = signExtend(*(uint16_t*)p, 8 << ri->r_length); return true;
@@ -354,7 +341,7 @@ decodeAddend(ObjectCode * oc, Section * section, MachORelocationInfo * ri,
                          ri->r_length);
             }
         }
-        case ARM64_RELOC_SUBTRACTOR: {
+        case LL_MACHO_ARM64_RELOC_SUBTRACTOR: {
             switch (ri->r_length) {
                 case 0: *addend = signExtend(*(uint8_t*)p,  8 << ri->r_length); return true;
                 case 1: *addend = signExtend(*(uint16_t*)p, 8 << ri->r_length); return true;
@@ -365,14 +352,14 @@ decodeAddend(ObjectCode * oc, Section * section, MachORelocationInfo * ri,
                          ri->r_length);
             }
         }
-        case ARM64_RELOC_BRANCH26:
+        case LL_MACHO_ARM64_RELOC_BRANCH26:
             /* take the lower 26 bits and shift them by 2. The last two are
              * implicitly 0 (as the instructions must be aligned!) and sign
              * extend to 64 bits.
              */
             *addend = signExtend( (*p & 0x03FFFFFF) << 2, 28 ); return true;
-        case ARM64_RELOC_PAGE21:
-        case ARM64_RELOC_GOT_LOAD_PAGE21:
+        case LL_MACHO_ARM64_RELOC_PAGE21:
+        case LL_MACHO_ARM64_RELOC_GOT_LOAD_PAGE21:
             /* take the instruction bits masked with 0x6 (0110), and push them
              * down. into the last two bits, and mask in the
              *
@@ -384,8 +371,8 @@ decodeAddend(ObjectCode * oc, Section * section, MachORelocationInfo * ri,
              */
             *addend = signExtend(   (*p & 0x60000000) >> 29
                                | ((*p & 0x01FFFFE0) >> 3) << 12, 33); return true;
-        case ARM64_RELOC_PAGEOFF12:
-        case ARM64_RELOC_GOT_LOAD_PAGEOFF12: {
+        case LL_MACHO_ARM64_RELOC_PAGEOFF12:
+        case LL_MACHO_ARM64_RELOC_GOT_LOAD_PAGEOFF12: {
             /* the 12 bits for the page offset are encoded from bit 11 onwards
              *
              * ---- ---- --** **** **** **-- ---- ----
@@ -425,7 +412,7 @@ encodeAddend(ObjectCode * oc, Section * section,
     const char *file_name = oc->fileName ? (char*)oc->fileName : "<unknown>";
 
     switch (ri->r_type) {
-        case ARM64_RELOC_UNSIGNED: {
+        case LL_MACHO_ARM64_RELOC_UNSIGNED: {
             if(!fitsBits(oc->L, 8 << ri->r_length, addend)) {
                 const char *library_info = OC_INFORMATIVE_FILENAME(oc);
                 ll_error_set(oc->L, LL_E_RELOC_RANGE, "Relocation out of range for UNSIGNED in %s: symbol '%s', addend 0x%llx, address 0x%llx, library: %s",
@@ -445,7 +432,7 @@ encodeAddend(ObjectCode * oc, Section * section,
             }
             return true;
         }
-        case ARM64_RELOC_SUBTRACTOR: {
+        case LL_MACHO_ARM64_RELOC_SUBTRACTOR: {
             if(!fitsBits(oc->L, 8 << ri->r_length, addend)) {
                 const char *library_info = OC_INFORMATIVE_FILENAME(oc);
                 ll_error_set(oc->L, LL_E_RELOC_RANGE, "Relocation out of range for SUBTRACTOR in %s: symbol '%s', addend 0x%llx, address 0x%llx, library: %s",
@@ -465,7 +452,7 @@ encodeAddend(ObjectCode * oc, Section * section,
             }
             return true;
         }
-        case ARM64_RELOC_BRANCH26: {
+        case LL_MACHO_ARM64_RELOC_BRANCH26: {
             /* We can only store 26 bits in the instruction, due to alignment we
              * do not need the last two bits of the value. If the value >> 2
              * still exceeds 26bits, we won't be able to reach it.
@@ -481,15 +468,15 @@ encodeAddend(ObjectCode * oc, Section * section,
             *p = (*p & 0xFC000000) | ((uint32_t)(addend >> 2) & 0x03FFFFFF);
             return true;
         }
-        case ARM64_RELOC_PAGE21:
-        case ARM64_RELOC_GOT_LOAD_PAGE21: {
+        case LL_MACHO_ARM64_RELOC_PAGE21:
+        case LL_MACHO_ARM64_RELOC_GOT_LOAD_PAGE21: {
             /* We store 21bits, in bits 6 to 24, and bits 30 and 31.
              * The encoded value describes a multiple of 4k pages, and together
              * with the PAGEOFF12 relocation allows to address a relative range
              * of +-4GB.
              */
             if(!fitsBits(oc->L, 21, addend >> 12)) {
-                const char *reloc_type = (ri->r_type == ARM64_RELOC_PAGE21) ? "PAGE21" : "GOT_LOAD_PAGE21";
+                const char *reloc_type = (ri->r_type == LL_MACHO_ARM64_RELOC_PAGE21) ? "PAGE21" : "GOT_LOAD_PAGE21";
                 const char *library_info = OC_INFORMATIVE_FILENAME(oc);
                 ll_error_set(oc->L, LL_E_RELOC_RANGE, "Relocation target for %s out of range in %s: symbol '%s', addend 0x%llx (0x%llx >> 12), address 0x%llx, library: %s",
                      reloc_type, file_name, symbol_name, (long long)addend, (long long)(addend >> 12), (long long)ri->r_address, library_info ? (char*)library_info : "<unknown>");
@@ -503,8 +490,8 @@ encodeAddend(ObjectCode * oc, Section * section,
                                    | (uint32_t)((addend_bits >> 9)  & 0x00FFFFE0);
             return true;
         }
-        case ARM64_RELOC_PAGEOFF12:
-        case ARM64_RELOC_GOT_LOAD_PAGEOFF12: {
+        case LL_MACHO_ARM64_RELOC_PAGEOFF12:
+        case LL_MACHO_ARM64_RELOC_GOT_LOAD_PAGEOFF12: {
             /* Store an offset into a page (4k). Depending on the instruction
              * the bits are stored at slightly different positions.
              */
@@ -577,9 +564,9 @@ findInternalGotRefs(ObjectCode * oc)
 }
 
 static bool
-isGotLoad(struct relocation_info * ri) {
-    return ri->r_type == ARM64_RELOC_GOT_LOAD_PAGE21
-    ||  ri->r_type == ARM64_RELOC_GOT_LOAD_PAGEOFF12;
+isGotLoad(MachORelocationInfo * ri) {
+    return ri->r_type == LL_MACHO_ARM64_RELOC_GOT_LOAD_PAGE21
+    ||  ri->r_type == LL_MACHO_ARM64_RELOC_GOT_LOAD_PAGEOFF12;
 }
 
 /*
@@ -593,9 +580,9 @@ needGotSlot(MachOSymbol * symbol) {
         return true;
     }
 
-    return (symbol->nlist->n_type & N_EXT)             /* is an external symbol    */
-        && (N_UNDF == (symbol->nlist->n_type & N_TYPE) /* and is undefined         */
-            || NO_SECT != symbol->nlist->n_sect);      /*     or is defined in a
+    return (symbol->nlist->n_type & LL_MACHO_N_EXT)             /* is an external symbol    */
+        && (LL_MACHO_N_UNDF == (symbol->nlist->n_type & LL_MACHO_N_TYPE) /* and is undefined         */
+            || LL_MACHO_NO_SECT != symbol->nlist->n_sect);      /*     or is defined in a
                                                         *        different section */
 }
 
@@ -637,7 +624,7 @@ freeGot(ObjectCode * oc) {
 // Retrieve symbol value
 static bool symbol_value(ObjectCode* oc, MachOSymbol* symbol, uint64_t *result) {
   uint64_t value = 0;
-  if(symbol->nlist->n_type & N_EXT) {
+  if(symbol->nlist->n_type & LL_MACHO_N_EXT) {
       /* external symbols should be able to be
        * looked up via the lookupDependentSymbol function.
        * Either through the global symbol hashmap
@@ -681,7 +668,7 @@ relocateSectionAarch64(ObjectCode * oc, Section * section)
     for(size_t i = 0; i < nreloc; i++) {
         MachORelocationInfo * ri = &section->macho_info->relocation_info[i];
         switch (ri->r_type) {
-            case ARM64_RELOC_UNSIGNED: {
+            case LL_MACHO_ARM64_RELOC_UNSIGNED: {
                 MachOSymbol* symbol = &oc->macho_info->macho_symbols[ri->r_symbolnum];
                 int64_t addend;
                 if (!decodeAddend(oc, section, ri, &addend)) return 0;
@@ -690,7 +677,7 @@ relocateSectionAarch64(ObjectCode * oc, Section * section)
                 if (!encodeAddend(oc, section, ri, value + addend, symbol)) return 0;
                 break;
             }
-            case ARM64_RELOC_SUBTRACTOR:
+            case LL_MACHO_ARM64_RELOC_SUBTRACTOR:
             {
                 // subtractor and unsigned are called in tandem:
                 // first  pc <- pc - symbol address (SUBTRACTOR)
@@ -701,7 +688,7 @@ relocateSectionAarch64(ObjectCode * oc, Section * section)
                 // expected ARM64_RELOC_UNSIGNED type
                 if(!(i+1 < nreloc)
                    || !(section->macho_info->relocation_info[i+1].r_type
-                          == ARM64_RELOC_UNSIGNED)) {
+                          == LL_MACHO_ARM64_RELOC_UNSIGNED)) {
                     ll_error_set(oc->L, LL_E_FORMAT, "SUBTRACTOR relocation *must* be followed by UNSIGNED relocation.");
                     LL_LOG_ERROR_FOR(oc->L, "SUBTRACTOR relocation *must* be followed by UNSIGNED relocation.");
                     return 0;
@@ -733,7 +720,7 @@ relocateSectionAarch64(ObjectCode * oc, Section * section)
                 i += 1;
                 break;
             }
-            case ARM64_RELOC_BRANCH26: {
+            case LL_MACHO_ARM64_RELOC_BRANCH26: {
                 MachOSymbol* symbol = &oc->macho_info->macho_symbols[ri->r_symbolnum];
 
                 // pre-existing addend
@@ -742,7 +729,7 @@ relocateSectionAarch64(ObjectCode * oc, Section * section)
                 // address of the branch (b/bl) instruction.
                 uint64_t pc = (uint64_t)section->start + ri->r_address;
                 uint64_t value = 0;
-                if(symbol->nlist->n_type & N_EXT) {
+                if(symbol->nlist->n_type & LL_MACHO_N_EXT) {
                     value = (uint64_t)lookupDependentSymbol(oc->L, (char*)symbol->name, oc, NULL);
                     if(!value) {
                         ll_error_set(oc->L, LL_E_UNRESOLVED, "Could not lookup symbol: %s!", symbol->name);
@@ -778,8 +765,8 @@ relocateSectionAarch64(ObjectCode * oc, Section * section)
                 if (!encodeAddend(oc, section, ri, value - pc + addend, symbol)) return 0;
                 break;
             }
-            case ARM64_RELOC_PAGE21:
-            case ARM64_RELOC_GOT_LOAD_PAGE21: {
+            case LL_MACHO_ARM64_RELOC_PAGE21:
+            case LL_MACHO_ARM64_RELOC_GOT_LOAD_PAGE21: {
                 MachOSymbol* symbol = &oc->macho_info->macho_symbols[ri->r_symbolnum];
                 int64_t addend;
                 if (!decodeAddend(oc, section, ri, &addend)) return 0;
@@ -797,8 +784,8 @@ relocateSectionAarch64(ObjectCode * oc, Section * section)
                 explicit_addend = 0;
                 break;
             }
-            case ARM64_RELOC_PAGEOFF12:
-            case ARM64_RELOC_GOT_LOAD_PAGEOFF12: {
+            case LL_MACHO_ARM64_RELOC_PAGEOFF12:
+            case LL_MACHO_ARM64_RELOC_GOT_LOAD_PAGEOFF12: {
                 MachOSymbol* symbol = &oc->macho_info->macho_symbols[ri->r_symbolnum];
                 int64_t addend;
                 if (!decodeAddend(oc, section, ri, &addend)) return 0;
@@ -815,11 +802,11 @@ relocateSectionAarch64(ObjectCode * oc, Section * section)
                 explicit_addend = 0;
                 break;
             }
-            case ARM64_RELOC_ADDEND: {
+            case LL_MACHO_ARM64_RELOC_ADDEND: {
                 explicit_addend = signExtend(ri->r_symbolnum, 24);
                 if(!(i+1 < nreloc)
-                   || !(section->macho_info->relocation_info[i+1].r_type == ARM64_RELOC_PAGE21
-                        || section->macho_info->relocation_info[i+1].r_type == ARM64_RELOC_PAGEOFF12)) {
+                   || !(section->macho_info->relocation_info[i+1].r_type == LL_MACHO_ARM64_RELOC_PAGE21
+                        || section->macho_info->relocation_info[i+1].r_type == LL_MACHO_ARM64_RELOC_PAGEOFF12)) {
                     ll_error_set(oc->L, LL_E_FORMAT, "ADDEND relocation *must* be followed by PAGE or PAGEOFF relocation");
                     LL_LOG_ERROR_FOR(oc->L, "ADDEND relocation *must* be followed by PAGE or PAGEOFF relocation");
                     return 0;
@@ -941,26 +928,25 @@ relocateSection(ObjectCode* oc, int curSection)
          * instruction and baseValue needs to be adjusted accordingly.
          */
         switch (type) {
-            case X86_64_RELOC_SIGNED_1:
+            case LL_MACHO_X86_64_RELOC_SIGNED_1:
                 nextInstrAdj = 1;
                 break;
-            case X86_64_RELOC_SIGNED_2:
+            case LL_MACHO_X86_64_RELOC_SIGNED_2:
                 nextInstrAdj = 2;
                 break;
-            case X86_64_RELOC_SIGNED_4:
+            case LL_MACHO_X86_64_RELOC_SIGNED_4:
                 nextInstrAdj = 4;
                 break;
         }
         baseValue = (uint64_t)thingPtr + relocLenBytes + nextInstrAdj;
 
 
-
         LL_IF_DEBUG_FOR(oc->L, linker_verbose,
                  LL_DEBUG_FOR(oc->L, "relocateSection: length = %d, thing = %" PRId64 ", baseValue = %p\n",
                             reloc->r_length, thing, (char *)baseValue));
 
-        if (type == X86_64_RELOC_GOT
-         || type == X86_64_RELOC_GOT_LOAD)
+        if (type == LL_MACHO_X86_64_RELOC_GOT
+         || type == LL_MACHO_X86_64_RELOC_GOT_LOAD)
         {
             MachOSymbol *symbol = &symbols[reloc->r_symbolnum];
             ll_symbol_name* nm = symbol->name;
@@ -973,7 +959,7 @@ relocateSection(ObjectCode* oc, int curSection)
                     LL_LOG_ERROR_FOR(oc->L, "\nrelocateSection: global offset table relocation for symbol with r_extern == 0\n");
             }
 
-            if (symbol->nlist->n_type & N_EXT) {
+            if (symbol->nlist->n_type & LL_MACHO_N_EXT) {
                     // The external bit is set, meaning the symbol is exported,
                     // and therefore can be looked up in this object module's
                     // symtab, or it is undefined, meaning dlsym must be used
@@ -1001,7 +987,7 @@ relocateSection(ObjectCode* oc, int curSection)
                     // at the location given by the section index and
                     // symbol address (symbol->n_value)
 
-                    if ((symbol->nlist->n_type & N_TYPE) == N_SECT) {
+                    if ((symbol->nlist->n_type & LL_MACHO_N_TYPE) == LL_MACHO_N_SECT) {
                         if (symbol->addr == NULL) {
                             ll_error_set(oc->L, LL_E_UNRESOLVED,
                                          "relocateSection: address of internal symbol %s was not resolved\n", nm);
@@ -1030,7 +1016,7 @@ relocateSection(ObjectCode* oc, int curSection)
             // TODO (AP): use got_addr to store the loc. of a jump island to reuse later
             value = (uint64_t) &makeSymbolExtra(oc, reloc->r_symbolnum, (unsigned long)addr)->addr;
 
-            type = X86_64_RELOC_SIGNED;
+            type = LL_MACHO_X86_64_RELOC_SIGNED;
         }
         else if (reloc->r_extern)
         {
@@ -1044,7 +1030,7 @@ relocateSection(ObjectCode* oc, int curSection)
             LL_IF_DEBUG_FOR(oc->L, linker_verbose, LL_DEBUG_FOR(oc->L, "               : desc  = %d\n", symbol->nlist->n_desc));
             LL_IF_DEBUG_FOR(oc->L, linker_verbose, LL_DEBUG_FOR(oc->L, "               : value = %p\n", (void *)symbol->nlist->n_value));
 
-            if ((symbol->nlist->n_type & N_TYPE) == N_SECT) {
+            if ((symbol->nlist->n_type & LL_MACHO_N_TYPE) == LL_MACHO_N_SECT) {
                 if (symbol->addr == NULL) {
                     ll_error_set(oc->L, LL_E_UNRESOLVED,
                                  "relocateSection: address of external symbol %s was not resolved\n", nm);
@@ -1107,7 +1093,7 @@ relocateSection(ObjectCode* oc, int curSection)
                                 targetSecNum, targetMacho->segname, targetMacho->sectname));
 
             switch (type) {
-            case X86_64_RELOC_UNSIGNED: {
+            case LL_MACHO_X86_64_RELOC_UNSIGNED: {
                 if (!(thing >= targetMacho->addr)) {
                     ll_error_set(oc->L, LL_E_FORMAT,
                        "relocateSection: unsigned displacement %" PRIx64 "before target section start address %" PRIx64 "\n",
@@ -1135,10 +1121,10 @@ relocateSection(ObjectCode* oc, int curSection)
                 value = 0;
                 break;
             }
-            case X86_64_RELOC_SIGNED:
-            case X86_64_RELOC_SIGNED_1:
-            case X86_64_RELOC_SIGNED_2:
-            case X86_64_RELOC_SIGNED_4: {
+            case LL_MACHO_X86_64_RELOC_SIGNED:
+            case LL_MACHO_X86_64_RELOC_SIGNED_1:
+            case LL_MACHO_X86_64_RELOC_SIGNED_2:
+            case LL_MACHO_X86_64_RELOC_SIGNED_4: {
                 uint32_t baseValueOffset = reloc->r_address + relocLenBytes + nextInstrAdj;
                 uint64_t imThingLoc = msect->addr + baseValueOffset + (int64_t) thing;
 
@@ -1177,7 +1163,7 @@ relocateSection(ObjectCode* oc, int curSection)
 
         LL_IF_DEBUG_FOR(oc->L, linker_verbose, LL_DEBUG_FOR(oc->L, "relocateSection: value = %p\n", (void *) value));
 
-        if (type == X86_64_RELOC_BRANCH)
+        if (type == LL_MACHO_X86_64_RELOC_BRANCH)
         {
             if((int32_t)(value - baseValue) != (int64_t)(value - baseValue))
             {
@@ -1190,12 +1176,12 @@ relocateSection(ObjectCode* oc, int curSection)
                 LL_LOG_ERROR_FOR(oc->L, "Mach-O branch island is out of range");
                 return 0;
             }
-            type = X86_64_RELOC_SIGNED;
+            type = LL_MACHO_X86_64_RELOC_SIGNED;
         }
 
         switch(type)
         {
-            case X86_64_RELOC_UNSIGNED:
+            case LL_MACHO_X86_64_RELOC_UNSIGNED:
                 if (reloc->r_pcrel) {
                     ll_error_set(oc->L, LL_E_FORMAT, "Mach-O UNSIGNED relocation is PC-relative");
                     LL_LOG_ERROR_FOR(oc->L, "Mach-O UNSIGNED relocation is PC-relative");
@@ -1203,10 +1189,10 @@ relocateSection(ObjectCode* oc, int curSection)
                 }
                 thing += value;
                 break;
-            case X86_64_RELOC_SIGNED:
-            case X86_64_RELOC_SIGNED_1:
-            case X86_64_RELOC_SIGNED_2:
-            case X86_64_RELOC_SIGNED_4:
+            case LL_MACHO_X86_64_RELOC_SIGNED:
+            case LL_MACHO_X86_64_RELOC_SIGNED_1:
+            case LL_MACHO_X86_64_RELOC_SIGNED_2:
+            case LL_MACHO_X86_64_RELOC_SIGNED_4:
                 if (!reloc->r_pcrel) {
                     ll_error_set(oc->L, LL_E_FORMAT, "Mach-O SIGNED relocation is not PC-relative");
                     LL_LOG_ERROR_FOR(oc->L, "Mach-O SIGNED relocation is not PC-relative");
@@ -1214,7 +1200,7 @@ relocateSection(ObjectCode* oc, int curSection)
                 }
                 thing += value - baseValue;
                 break;
-            case X86_64_RELOC_SUBTRACTOR:
+            case LL_MACHO_X86_64_RELOC_SUBTRACTOR:
                 if (reloc->r_pcrel) {
                     ll_error_set(oc->L, LL_E_FORMAT, "Mach-O SUBTRACTOR relocation is PC-relative");
                     LL_LOG_ERROR_FOR(oc->L, "Mach-O SUBTRACTOR relocation is PC-relative");
@@ -1272,10 +1258,10 @@ relocateSection(ObjectCode* oc, int curSection)
 SectionKind
 getSectionKind_MachO(MachOSection *section)
 {
-    uint8_t s_type = section->flags & SECTION_TYPE;
-    if (s_type == S_MOD_INIT_FUNC_POINTERS) {
+    uint8_t s_type = section->flags & LL_MACHO_SECTION_TYPE;
+    if (s_type == LL_MACHO_S_MOD_INIT_FUNC_POINTERS) {
         return SECTIONKIND_INIT_ARRAY;
-    } else if (s_type == S_MOD_TERM_FUNC_POINTERS) {
+    } else if (s_type == LL_MACHO_S_MOD_TERM_FUNC_POINTERS) {
         return SECTIONKIND_FINI_ARRAY;
     } else if (0==strncmp(section->segname,"__TEXT",16)) {
         return SECTIONKIND_CODE_OR_RODATA;
@@ -1330,7 +1316,7 @@ ocBuildSegments_MachO(ObjectCode *oc)
 
         size_t alignment = 1 << macho->align;
 
-        if (S_GB_ZEROFILL == (macho->flags & SECTION_TYPE)) {
+        if (LL_MACHO_S_GB_ZEROFILL == (macho->flags & LL_MACHO_SECTION_TYPE)) {
             size_gbZerofillSegment = ll_round_up_to_align(size_gbZerofillSegment, alignment);
             size_gbZerofillSegment += macho->size;
             if (alignment > max_alignment[2]) max_alignment[2] = alignment;
@@ -1453,7 +1439,7 @@ ocBuildSegments_MachO(ObjectCode *oc)
             continue;
         }
 
-        if (S_GB_ZEROFILL == (macho->flags & SECTION_TYPE)) {
+        if (LL_MACHO_S_GB_ZEROFILL == (macho->flags & LL_MACHO_SECTION_TYPE)) {
             gbZerofillSegment->sections_idx[gb++] = i;
         } else if (getSectionKind_MachO(macho) == SECTIONKIND_CODE_OR_RODATA) {
             rxSegment->sections_idx[rx++] = i;
@@ -1539,9 +1525,9 @@ ocGetNames_MachO(ObjectCode* oc)
                                 sec_n, seg_n, sec_idx, section->segname, section->sectname,
                                 (char *)secMem - (char *)curMem, alignment));
 
-            switch (section->flags & SECTION_TYPE) {
-            case S_ZEROFILL:
-            case S_GB_ZEROFILL:
+            switch (section->flags & LL_MACHO_SECTION_TYPE) {
+            case LL_MACHO_S_ZEROFILL:
+            case LL_MACHO_S_GB_ZEROFILL:
                 LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "ocGetNames_MachO: memset to 0 a ZEROFILL section\n"));
                 memset(secMem, 0, section->size);
                 addSection(oc->L, &secArray[sec_idx], kind, alloc, start, size,
@@ -1637,8 +1623,8 @@ ocGetNames_MachO(ObjectCode* oc)
      */
     for(size_t i=0; i < oc->macho_info->n_macho_symbols; i++) {
         MachOSymbol * s = &oc->macho_info->macho_symbols[i];
-        if( N_SECT == (s->nlist->n_type & N_TYPE) ) {
-            if( NO_SECT == s->nlist->n_sect ) {
+        if( LL_MACHO_N_SECT == (s->nlist->n_type & LL_MACHO_N_TYPE) ) {
+            if( LL_MACHO_NO_SECT == s->nlist->n_sect ) {
                 ll_error_set(oc->L, LL_E_FORMAT, "Symbol with N_SECT type, but no section.");
                 LL_LOG_ERROR_FOR(oc->L, "Symbol with N_SECT type, but no section.");
                 return 0;
@@ -1676,12 +1662,12 @@ ocGetNames_MachO(ObjectCode* oc)
     oc->n_symbols = 0;
     if (oc->macho_info->symCmd) {
         for (size_t i = 0; i < oc->macho_info->n_macho_symbols; i++) {
-            if (oc->macho_info->nlist[i].n_type & N_STAB) {
+            if (oc->macho_info->nlist[i].n_type & LL_MACHO_N_STAB) {
                 ;
             }
-            else if(oc->macho_info->nlist[i].n_type & N_EXT)
+            else if(oc->macho_info->nlist[i].n_type & LL_MACHO_N_EXT)
             {
-                if((oc->macho_info->nlist[i].n_type & N_TYPE) == N_UNDF
+                if((oc->macho_info->nlist[i].n_type & LL_MACHO_N_TYPE) == LL_MACHO_N_UNDF
                     && (oc->macho_info->nlist[i].n_value != 0))
                 {
                     oc->n_symbols++;
@@ -1692,7 +1678,7 @@ ocGetNames_MachO(ObjectCode* oc)
                         commonSize += oc->macho_info->nlist[i].n_value;
                     }
                 }
-                else if((oc->macho_info->nlist[i].n_type & N_TYPE) == N_SECT)
+                else if((oc->macho_info->nlist[i].n_type & LL_MACHO_N_TYPE) == LL_MACHO_N_SECT)
                     oc->n_symbols++;
             }
         }
@@ -1714,15 +1700,15 @@ ocGetNames_MachO(ObjectCode* oc)
     if (oc->macho_info->symCmd) {
         for (size_t i = 0; i < oc->macho_info->n_macho_symbols; i++) {
             ll_symbol_name* nm = oc->macho_info->macho_symbols[i].name;
-            if (oc->macho_info->nlist[i].n_type & N_STAB)
+            if (oc->macho_info->nlist[i].n_type & LL_MACHO_N_STAB)
             {
                 LL_IF_DEBUG_FOR(oc->L, linker_verbose, LL_DEBUG_FOR(oc->L, "ocGetNames_MachO: Skip STAB: %s\n", nm));
             }
-            else if ((oc->macho_info->nlist[i].n_type & N_TYPE) == N_SECT)
+            else if ((oc->macho_info->nlist[i].n_type & LL_MACHO_N_TYPE) == LL_MACHO_N_SECT)
             {
-                if (oc->macho_info->nlist[i].n_type & N_EXT)
+                if (oc->macho_info->nlist[i].n_type & LL_MACHO_N_EXT)
                 {
-                    if (   (oc->macho_info->nlist[i].n_desc & N_WEAK_DEF)
+                    if (   (oc->macho_info->nlist[i].n_desc & LL_MACHO_N_WEAK_DEF)
                         && lookupDependentSymbol(oc->L, nm, oc, NULL)) {
                         // weak definition, and we already have a definition
                         LL_IF_DEBUG_FOR(oc->L, linker_verbose, LL_DEBUG_FOR(oc->L, "    weak: %s\n", nm));
@@ -1777,8 +1763,8 @@ ocGetNames_MachO(ObjectCode* oc)
         for (size_t i = 0; i < oc->macho_info->n_macho_symbols; i++) {
             ll_symbol_name* nm = oc->macho_info->macho_symbols[i].name;
             MachONList *nlist = &oc->macho_info->nlist[i];
-            if((nlist->n_type & N_TYPE) == N_UNDF
-             && (nlist->n_type & N_EXT)
+            if((nlist->n_type & LL_MACHO_N_TYPE) == LL_MACHO_N_UNDF
+             && (nlist->n_type & LL_MACHO_N_EXT)
              && (nlist->n_value != 0)) {
                 unsigned long sz = nlist->n_value;
                 /* TODO: Figure out how to determine this from object */
@@ -1973,7 +1959,7 @@ ocResolve_MachO(ObjectCode* oc)
     for(size_t i = 0; i < oc->macho_info->n_macho_symbols; i++) {
         MachOSymbol * symbol = &oc->macho_info->macho_symbols[i];
         if(needGotSlot(symbol)) {
-            if(N_UNDF == (symbol->nlist->n_type & N_TYPE)) {
+            if(LL_MACHO_N_UNDF == (symbol->nlist->n_type & LL_MACHO_N_TYPE)) {
                 /* an undefined symbol. So we need to ensure we
                  * have the address.
                  */
@@ -2115,11 +2101,11 @@ machoGetMisalignment( ll_linker *L, FILE * f )
         return -1;
     }
 
-    if(header.magic != MH_MAGIC_64) {
+    if(header.magic != LL_MACHO_MH_MAGIC_64) {
         ll_error_set(L, LL_E_FORMAT, "Bad magic. Expected: %08x, got: %08x.",
-             MH_MAGIC_64, header.magic);
+             LL_MACHO_MH_MAGIC_64, header.magic);
         LL_LOG_ERROR_FOR(L, "Bad magic. Expected: %08x, got: %08x.",
-             MH_MAGIC_64, header.magic);
+             LL_MACHO_MH_MAGIC_64, header.magic);
         return -1;
     }
 
