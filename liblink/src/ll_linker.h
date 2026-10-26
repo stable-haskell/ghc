@@ -57,10 +57,8 @@ struct ll_linker {
 
 #if defined(OBJFORMAT_ELF)
     void *rts_dynamic;
-#if LL_ELF_HAS_SHN_XINDEX
+#endif
     ll_elf_word shndx_table_uninit_label;
-#endif
-#endif
 #if !defined(OBJFORMAT_PEi386)
     void *rts_no_fini;
 #endif

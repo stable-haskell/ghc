@@ -1266,3 +1266,22 @@ registration return LL_E_UNSUPPORTED on a non-Windows host. Sentinel outputs
 and pdata ownership remain unchanged. Native Windows fixtures include both
 PEi386.c and PEi386Host.c under their existing service spies; linker-map checks
 reject either matching archive member, preserving real-source binding.
+
+Shared backend storage controls
+-------------------------------
+
+`test_shared_layout.py --config-dir <generated include> --cc <compiler>`
+compiles an ordinary installed-header client and links it against seven
+separately compiled producers using `LL_ALL_BACKENDS` and each object target.
+`shared_layout.c` compares 25 layout values and exchanges an actual ObjectCode
+through the differently configured translation units. Private flags do not
+control shared field presence. Rebuild the RTS and library together after this
+shared-header ABI change; mixing older binaries is not supported by this check.
+
+The existing `symbol_extras_storage` controls additionally check initialized
+storage/provenance, untouched extras, copied operation tables, and ELF-only GOT
+lookup. Existing allocation/refresh/protection failure and zero-count/zero-width
+controls retain their assertions. `format_dispatch` checks persistent format
+identity through copied tables using its existing parser-free callbacks.
+M32 allocation, flush, disposal and host cache services retain host capability
+gates and their existing order. These controls do not enable foreign execution.

@@ -228,6 +228,20 @@ typedef ll_symbol_extra_riscv64 SymbolExtra;
 typedef struct { } SymbolExtra;
 #endif
 
+/* Shared storage is independent of private backend build/target flags. */
+typedef enum {
+    LL_OBJECT_FORMAT_UNKNOWN,
+    LL_OBJECT_FORMAT_ELF,
+    LL_OBJECT_FORMAT_MACHO,
+    LL_OBJECT_FORMAT_COFF,
+    LL_OBJECT_FORMAT_WASM
+} ll_object_format;
+
+typedef enum {
+    LL_EXTRAS_NONE,
+    LL_EXTRAS_SHARED
+} ll_extras_origin;
+
 typedef enum {
     /* Objects that were loaded by this linker */
     STATIC_OBJECT,
@@ -249,6 +263,7 @@ struct _ObjectCode {
     ll_compat_pathchar  *fileName;
     int        fileSize;     /* also mapped image size when using mmap() */
     const char *formatName;   /* e.g. "ELF32", "DLL", "COFF", etc. */
+    ll_object_format format_kind; /* Stable even when operation tables are copied. */
     ObjectType type;         /* who loaded this object? */
 
     /* If this object is a member of an archive, archiveMemberName is
@@ -342,13 +357,14 @@ struct _ObjectCode {
        outside one of these is an error in the linker. */
     ProddableBlockSet proddables;
 
-#if defined(NEED_SYMBOL_EXTRAS)
-    SymbolExtra    *symbol_extras;
+    /* Native pointer view; storage size is the per-object target stride.
+     * Field presence never depends on private backend or target flags. */
+    SymbolExtra *symbol_extras;
     unsigned long   first_symbol_extra;
     unsigned long   n_symbol_extras;
     /* The selected backend supplies the target payload width, including zero. */
     size_t          symbol_extra_stride;
-#endif
+    ll_extras_origin symbol_extras_origin;
     /* Additional memory that is preallocated and contiguous with image
        which can be used to relocate bss sections. */
     char* bssBegin;
@@ -361,21 +377,17 @@ struct _ObjectCode {
        require extra information.*/
     StrHashTable *extraInfos;
 
-#if defined(NEED_M32)
     /* The m32 allocators used for allocating small sections and symbol extras
      * during loading. We have two: one for (writeable) data and one for
      * (read-only/executable) code. */
     m32_allocator *rw_m32, *rx_m32;
-#endif
 
-#if defined(OBJFORMAT_ELF) && LL_ELF_HAS_SHN_XINDEX
     /* Cached address of ELF's shndx table, or SHNDX_TABLE_UNINIT if not
      * initialized yet. It would be better to put it info ELF-specific
      * ObjectCodeFormatInfo, but unfortunately shndx table is needed in
      * ocVerifyImage_ELF which runs before ObjectCodeFormatInfo is
      * initialized by ocInit_ELF. */
     ll_elf_word *shndx_table;
-#endif
 
     /*
      * The following are only valid if .type == DYNAMIC_OBJECT

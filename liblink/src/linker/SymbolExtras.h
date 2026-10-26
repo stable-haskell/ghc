@@ -4,8 +4,6 @@
 
 #include "ll_begin_private.h"
 
-#if defined(NEED_SYMBOL_EXTRAS)
-
 /* Refresh is called only when image replacement changes its address, before
  * count/first/stride are published. Formats with image-relative metadata supply
  * their original initializer, not the format vtable's verify+init wrapper. */
@@ -14,6 +12,7 @@ int ocAllocateExtras(ObjectCode *oc, int count, int first, int bssSize,
                      size_t extra_stride, ll_extra_refresh_fn refresh);
 bool ocProtectExtras(ObjectCode* oc);
 
+#if defined(NEED_SYMBOL_EXTRAS)
 #if defined(arm_HOST_ARCH)
 SymbolExtra* makeArmSymbolExtra( ObjectCode const* oc,
                                  unsigned long symbolNumber,

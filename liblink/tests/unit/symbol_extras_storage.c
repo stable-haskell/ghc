@@ -108,6 +108,8 @@ static void check_storage(ll_linker *owner, size_t stride, int count, int bss,
                               sizeof(bytes), false, NULL, 0);
     CHECK(object->symbol_extra_stride == 0,
           "new object did not initialize its stride");
+    CHECK(object->symbol_extras_origin == LL_EXTRAS_NONE,
+          "new object already claims shared storage");
     /* These sentinels detect publication before the original refresh point. */
     object->first_symbol_extra = 19;
     object->n_symbol_extras = 17;
@@ -127,6 +129,8 @@ static void check_storage(ll_linker *owner, size_t stride, int count, int bss,
 
     int result = ocAllocateExtras(object, count, 5, bss, stride,
         mode == STORAGE_NO_REFRESH ? NULL : storage_refresh);
+    CHECK(object->symbol_extras_origin == LL_EXTRAS_SHARED,
+          "allocation failure or refresh lost shared provenance");
     const bool allocate = count > 0 || bss > 0;
     const bool moved = allocate && contiguous && mode != STORAGE_MAP_FAILURE;
     CHECK(storage_maps == (unsigned)(allocate && contiguous),
@@ -202,6 +206,63 @@ static void check_storage(ll_linker *owner, size_t stride, int count, int bss,
         stride, count, bss, contiguous, mode);
 }
 
+static void check_shared_origin(ll_linker *owner)
+{
+    const size_t before = host_a.live;
+    ObjectCode *object = mkOc(owner, STATIC_OBJECT, WSTR("storage-origin"),
+                              NULL, 0, false, NULL, 0);
+    CHECK(object->symbol_extras == NULL &&
+          object->symbol_extras_origin == LL_EXTRAS_NONE &&
+          object->first_symbol_extra == 0 && object->n_symbol_extras == 0 &&
+          object->symbol_extra_stride == 0 &&
+          object->format_kind == LL_OBJECT_FORMAT_UNKNOWN &&
+          object->shndx_table == SHNDX_TABLE_UNINIT(owner),
+          "factory left shared storage or identity uninitialized");
+    struct ll_format_ops copy = *ll_format_native();
+    object->format_ops = &copy;
+    object->symbol_extras = (SymbolExtra *)(void *)storage_m32_payload;
+    object->n_symbol_extras = 2;
+    object->symbol_extra_stride = 8;
+    storage_protections = 0;
+    storage_fail_protect = false;
+    CHECK(ocProtectExtras(object) && storage_protections == 0,
+          "untouched backend extras entered shared protection");
+    object->symbol_extras_origin = LL_EXTRAS_SHARED;
+    CHECK(ocProtectExtras(object) && storage_protections == 1 &&
+          storage_protect_bytes == 16,
+          "copied format operations changed shared protection");
+    object->format_ops = NULL;
+    object->symbol_extras = NULL;
+    freeObjectCode(object);
+    CHECK(host_a.live == before, "origin control leaked factory resources");
+}
+
+static void check_format_got(ll_linker *owner)
+{
+    static unsigned char ordinary_symbol;
+    static unsigned char elf_got;
+    CHECK(ghciInsertSymbolTable(owner, WSTR("format-got"),
+          "_GLOBAL_OFFSET_TABLE_", &ordinary_symbol, LL_STRENGTH_NORMAL,
+          LL_SYM_DATA, 1, NULL), "could not register ordinary GOT-name symbol");
+    ObjectCode *object = mkOc(owner, STATIC_OBJECT, WSTR("format-got"),
+                              NULL, 0, false, NULL, 0);
+    struct ll_elf_object_info info = {.got_start = &elf_got};
+    object->elf_info = &info;
+    struct ll_format_ops copy = *ll_format_native();
+    object->format_ops = &copy;
+    object->format_kind = LL_OBJECT_FORMAT_ELF;
+    CHECK(lookupDependentSymbol(owner, "_GLOBAL_OFFSET_TABLE_", object, NULL)
+              == &elf_got,
+          "ELF identity did not select its own GOT with a copied table");
+    object->format_kind = LL_OBJECT_FORMAT_COFF;
+    CHECK(lookupDependentSymbol(owner, "_GLOBAL_OFFSET_TABLE_", object, NULL)
+              == &ordinary_symbol,
+          "non-ELF lookup interpreted another format's metadata as ELF");
+    object->format_ops = NULL;
+    object->info = NULL;
+    freeObjectCode(object);
+}
+
 int main(void)
 {
     ll_linker owner = {0};
@@ -211,6 +272,8 @@ int main(void)
     ll_init_linker(&owner, 0);
     ll_init_linker_mmap(&owner);
     ll_mutex_lock_for(&owner, &owner.linker_mutex);
+    check_shared_origin(&owner);
+    check_format_got(&owner);
     const size_t strides[] = {0, 8, 16};
     for (size_t i = 0; i < sizeof(strides) / sizeof(strides[0]); ++i) {
         for (StorageCase mode = STORAGE_SUCCESS;

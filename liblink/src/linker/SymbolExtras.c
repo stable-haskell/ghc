@@ -15,8 +15,6 @@
 #include "ll_host.h"
 #include "linker/MMap.h"
 
-#if defined(NEED_SYMBOL_EXTRAS)
-#if !defined(x86_64_HOST_ARCH) || !defined(mingw32_HOST_OS)
 
 #include "linker/SymbolExtras.h"
 #include "linker/M32Alloc.h"
@@ -49,6 +47,9 @@
 int ocAllocateExtras(ObjectCode *oc, int count, int first, int bssSize,
                      size_t extra_stride, ll_extra_refresh_fn refresh)
 {
+  /* Record the storage path before any allocation or refresh can fail. PE's
+   * independently allocated M32 extras never enter this shared path. */
+  oc->symbol_extras_origin = LL_EXTRAS_SHARED;
   const uintptr_t old_image_address = (uintptr_t)oc->image;
   const size_t extras_size = extra_stride * count;
 
@@ -128,6 +129,7 @@ int ocAllocateExtras(ObjectCode *oc, int count, int first, int bssSize,
  */
 bool ocProtectExtras(ObjectCode* oc)
 {
+  if (oc->symbol_extras_origin != LL_EXTRAS_SHARED) return true;
   if (oc->n_symbol_extras == 0) return true;
 
   if (!RTS_LINKER_USE_MMAP) {
@@ -150,6 +152,8 @@ bool ocProtectExtras(ObjectCode* oc)
 }
 
 
+#if defined(NEED_SYMBOL_EXTRAS)
+#if !defined(x86_64_HOST_ARCH) || !defined(mingw32_HOST_OS)
 #if defined(powerpc_HOST_ARCH) || defined(x86_64_HOST_ARCH) || defined(riscv64_HOST_ARCH)
 SymbolExtra* makeSymbolExtra( ObjectCode const* oc,
                               unsigned long symbolNumber,

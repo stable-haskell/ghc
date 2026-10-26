@@ -17,6 +17,7 @@
 #include "linker/M32Alloc.h"
 #include "linker/CacheFlush.h"
 #include "linker/SymbolExtras.h"
+#include "linker/ElfTypes.h"
 #include "linker/MMap.h"
 #include "linker/M32Reservations.h"
 #include "ll_path.h"
@@ -798,12 +799,6 @@ static ll_symbol_addr* lookupDependentSymbolImpl (ll_linker *L, ll_symbol_name* 
                 NULL);
     }
 
-#if defined(OBJFORMAT_ELF)
-    // Resolve references to the GOT if we know the origin object
-    if (dependent && strncmp(lbl, "_GLOBAL_OFFSET_TABLE_", 21) == 0) {
-        return dependent->info->got_start;
-    }
-#endif
 
     if (!ghciLookupSymbolInfo(L, lbl, &pinfo)) {
         LL_IF_DEBUG_FOR(L, linker_verbose, LL_DEBUG_FOR(L, "lookupSymbol: symbol '%s' not found, trying dlsym\n", lbl));
@@ -884,8 +879,18 @@ ll_symbol_addr* lookupDependentSymbol(ll_linker *L, ll_symbol_name *lbl,
     struct ll_failure_scope scope;
     ll_failure_begin(L, &scope, dependent);
     ll_symbol_addr *result = NULL;
-    if (ll_failure_usable(dependent))
-        result = lookupDependentSymbolImpl(L, lbl, dependent, type);
+    if (ll_failure_usable(dependent)) {
+        /* ELF metadata alone owns this special symbol, even when the host
+         * process or another loaded object uses a different format. */
+        if (dependent && dependent->format_kind == LL_OBJECT_FORMAT_ELF &&
+            strncmp(lbl, "_GLOBAL_OFFSET_TABLE_", 21) == 0) {
+            ll_assert_lock_held_for(L, &L->linker_mutex);
+            LL_ASSERT_FOR(L, dependent->L == L);
+            result = dependent->elf_info->got_start;
+        } else {
+            result = lookupDependentSymbolImpl(L, lbl, dependent, type);
+        }
+    }
     if (!ll_failure_usable(dependent) || ll_failure_blocked(L)) result = NULL;
     ll_failure_end(L, &scope);
     return result;
@@ -1105,6 +1110,15 @@ int ll_init_object(ObjectCode *oc)
     oc->format_ops = ll_format_select(oc);
     if (oc->format_ops == NULL) return 0;
     oc->formatName = oc->format_ops->name;
+    /* Retain format identity independently of table addresses or later copies.
+     * Selection already checked these bounded, disjoint signatures. */
+    const uint8_t *image = (const uint8_t *)oc->image;
+    const size_t size = oc->fileSize > 0 ? (size_t)oc->fileSize : 0;
+    oc->format_kind = ll_format_sniff_elf(image, size) ? LL_OBJECT_FORMAT_ELF :
+        ll_format_sniff_macho(image, size) ? LL_OBJECT_FORMAT_MACHO :
+        ll_format_sniff_coff(image, size) ? LL_OBJECT_FORMAT_COFF :
+        ll_format_sniff_wasm(image, size) ? LL_OBJECT_FORMAT_WASM :
+        LL_OBJECT_FORMAT_UNKNOWN;
     if (!oc->format_ops->init(oc)) {
         if (oc->L->error_status == LL_OK)
             ll_error_set(oc->L, LL_E_FORMAT, "loadObj: invalid image in %" PATH_FMT,
@@ -1247,20 +1261,15 @@ void freeObjectCode (ObjectCode *oc)
     freeProddableBlocks(oc->L, &oc->proddables);
     freeSegments(oc);
 
-    /* Free symbol_extras.  On x86_64 Windows, symbol_extras are allocated
-     * alongside the image, so we don't need to free. */
-#if defined(NEED_SYMBOL_EXTRAS) && (!defined(x86_64_HOST_ARCH) \
-                                    || !defined(mingw32_HOST_OS))
-    if (RTS_LINKER_USE_MMAP) {
-      if (!USE_CONTIGUOUS_MMAP && !oc->L->services.cfg.always_pic &&
-          oc->symbol_extras != NULL) {
-        // Freed by m32_allocator_free
-      }
+    /* Only the shared extras allocator participates here. PE extras remain
+     * owned by the M32 allocators, with their original disposal order. */
+    if (oc->symbol_extras_origin == LL_EXTRAS_SHARED) {
+        if (RTS_LINKER_USE_MMAP) {
+            /* Contiguous extras belong to the image; other extras to M32. */
+        } else {
+            LL_FREE_FOR(oc->L, oc->symbol_extras);
+        }
     }
-    else {
-        LL_FREE_FOR(oc->L, oc->symbol_extras);
-    }
-#endif
 
 #if defined(NEED_M32)
     m32_allocator_free_for(oc->L, oc->rx_m32);
@@ -1292,6 +1301,7 @@ mkOc( ll_linker *L, ObjectType type, pathchar *path, char *image, int imageSize,
    const struct ll_format_ops *native = ll_format_native();
    oc->formatName = native != NULL ? native->name : "unknown";
    oc->format_ops = NULL;
+   oc->format_kind = LL_OBJECT_FORMAT_UNKNOWN;
 
    oc->image = image;
    oc->fileName = pathdup(L, path);
@@ -1319,10 +1329,11 @@ mkOc( ll_linker *L, ObjectType type, pathchar *path, char *image, int imageSize,
    oc->segments          = NULL;
    initProddableBlockSet(&oc->proddables);
    oc->foreign_exports   = NULL;
-#if defined(NEED_SYMBOL_EXTRAS)
-   oc->symbol_extras     = NULL;
+   oc->symbol_extras = NULL;
+   oc->first_symbol_extra = 0;
+   oc->n_symbol_extras = 0;
    oc->symbol_extra_stride = 0;
-#endif
+   oc->symbol_extras_origin = LL_EXTRAS_NONE;
    oc->bssBegin          = NULL;
    oc->bssEnd            = NULL;
    oc->imageMapped       = mapped;
@@ -1342,14 +1353,14 @@ mkOc( ll_linker *L, ObjectType type, pathchar *path, char *image, int imageSize,
    oc->unloadable        = true;
    oc->dependencies      = allocHashSet(L);
 
+   oc->rw_m32 = NULL;
+   oc->rx_m32 = NULL;
 #if defined(NEED_M32)
    oc->rw_m32 = m32_allocator_new_for(L, false);
    oc->rx_m32 = m32_allocator_new_for(L, true);
 #endif
 
-#if defined(OBJFORMAT_ELF) && LL_ELF_HAS_SHN_XINDEX
    oc->shndx_table = SHNDX_TABLE_UNINIT(L);
-#endif
 
    oc->nc_ranges = NULL;
    oc->dlopen_handle = NULL;
@@ -1712,12 +1723,10 @@ static int ocTryLoadImpl(ObjectCode* oc) {
 
     if (!ll_failure_usable(oc)) return 0;
     LL_IF_DEBUG_FOR(oc->L, linker, ocDebugBelch(oc, "protecting mappings\n"));
-#if defined(NEED_SYMBOL_EXTRAS)
     if (!ocProtectExtras(oc)) {
         ll_failure_protection(oc);
         return 0;
     }
-#endif
 
     // We have finished loading and relocating; flush the m32 allocators to
     // setup page protections.

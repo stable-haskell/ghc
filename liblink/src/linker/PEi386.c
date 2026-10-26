@@ -1764,7 +1764,6 @@ makeSymbolExtra_PEi386( ObjectCode* oc, uint64_t index LL_UNUSED, size_t s,
 }
 
 #if defined(mingw32_HOST_OS)
-bool ocProtectExtras(ObjectCode* oc LL_UNUSED) { return true; }
 #endif
 
 #endif /* x86_64_HOST_ARCH */

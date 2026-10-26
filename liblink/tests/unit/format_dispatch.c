@@ -203,6 +203,36 @@ static void check_interleaved_objects(ll_linker *owner)
           "interleaved disposal ran finalizers or leaked allocations");
 }
 
+static void check_format_identity(ll_linker *owner)
+{
+    /* Only the binding layer runs: fixture callbacks never parse these bytes. */
+    const unsigned char signatures[][4] = {
+        {0x7f, 'E', 'L', 'F'}, {0xcf, 0xfa, 0xed, 0xfe},
+        {0, 0, 0xff, 0xff}, {0, 'a', 's', 'm'}
+    };
+    const ll_object_format kinds[] = {LL_OBJECT_FORMAT_ELF,
+        LL_OBJECT_FORMAT_MACHO, LL_OBJECT_FORMAT_COFF, LL_OBJECT_FORMAT_WASM};
+    for (size_t i = 0; i < sizeof(kinds) / sizeof(kinds[0]); ++i) {
+        const size_t before = live;
+        event_count = 0; events[0] = '\0';
+        release_image = false;
+        struct ll_format_ops copied = first;
+        selected = &copied;
+        ObjectCode *oc = object(owner, false);
+        CHECK(oc->format_kind == LL_OBJECT_FORMAT_UNKNOWN,
+              "new object has stale format identity");
+        memcpy(oc->image, signatures[i], sizeof(signatures[i]));
+        CHECK(ll_init_object(oc) && oc->format_kind == kinds[i],
+              "binding did not retain format identity independently of table");
+        struct ll_format_ops recopied = copied;
+        selected = &recopied;
+        oc->format_ops = selected;
+        CHECK(oc->format_kind == kinds[i], "table copy changed format identity");
+        freeObjectCode(oc);
+        CHECK(live == before, "format identity control leaked allocations");
+    }
+}
+
 static void check_detection(ll_linker *owner)
 {
     const uint8_t signatures[][20] = {
@@ -274,6 +304,7 @@ int main(void)
     check_lifecycle(&owner, false);
     check_lifecycle(&owner, true);
     check_interleaved_objects(&owner);
+    check_format_identity(&owner);
 
     event_count = 0; events[0] = '\0';
     release_image = false; fail_init = true; selected = &first;
