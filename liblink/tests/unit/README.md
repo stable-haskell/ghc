@@ -1314,3 +1314,20 @@ with all backend bodies and passes the same inclusion mode to the unit driver.
 Its report records that mode. This is a qualification command, not a claim
 that every host/target combination or foreign-code execution is supported;
 see the current limits in `liblink/README`.
+
+Backend host memory controls
+----------------------------
+
+`backend_memory.c` runs with the format-dispatch selection and the complete
+native suite. It uses real host allocation, read-only protection, file opening,
+and disposal. Its Windows filename contains a non-ASCII character. It checks
+binary file contents, missing-file and mapping errors, unavailable file-backed
+mapping, and preservation of the caller's existing diagnostic.
+
+A separate allocation passes through `mkOc` and `freeObjectCode` with a
+SECTION_MMAP section. VirtualQuery on Windows, a Mach region query on Darwin,
+or mincore on other POSIX hosts confirms that the mapping is present before
+disposal and absent afterward. This distinguishes object lifetime from the
+direct unmap control. No loaded object code or protected writes run.
+The existing Mach-O allocation spy forwards the new host adapter to the same
+mapping call with the original arguments; its assertions are unchanged.

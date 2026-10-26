@@ -1150,6 +1150,13 @@ def main() -> int:
                 pe_link_flags if host == "Windows" else link_flags, []),
                 label="compile and link format_dispatch")
             run([str(binary)], label="run format_dispatch")
+            memory_binary = Path(temporary) / (
+                "backend_memory.exe" if host == "Windows" else "backend_memory")
+            run(cc + native_unit_link_arguments(
+                ROOT / "liblink/tests/unit/backend_memory.c", archive, memory_binary,
+                pe_link_flags if host == "Windows" else link_flags, []),
+                label="compile and link backend_memory")
+            run([str(memory_binary)], label="run backend_memory")
         if args.format_dispatch_only:
             return 0
 

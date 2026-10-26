@@ -1,6 +1,7 @@
 src/Linker.c
 src/RtsSymbolInfo.c
 src/linker/CacheFlush.c
+src/linker/BackendMemory.c
 src/linker/Elf.c
 src/linker/ElfVerify.c
 src/linker/InitFini.c

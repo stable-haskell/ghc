@@ -134,12 +134,17 @@ static void *test_mmap_anon_for_linker(ll_linker *L, size_t bytes);
 static void *test_mmap_for_linker(ll_linker *L, size_t bytes,
                                   MemoryAccess access, uint32_t flags,
                                   int fd, int offset);
+static void *test_backend_map_anon_write(ll_linker *L, size_t bytes)
+{
+    return test_mmap_for_linker(L, bytes, MEM_READ_WRITE, MAP_ANON, -1, 0);
+}
 static void test_munmap_for_linker(ll_linker *L, void *addr, size_t bytes,
                                    const char *caller);
 static int test_mprotect(void *start, size_t len, int prot);
 
 #define ll_mmap_anon_for_linker test_mmap_anon_for_linker
 #define ll_mmap_for_linker test_mmap_for_linker
+#define ll_backend_map_anon_write test_backend_map_anon_write
 #define ll_munmap_for_linker test_munmap_for_linker
 #define ocGetNames_MachO actual_ocGetNames_MachO
 #define ocResolve_MachO actual_ocResolve_MachO
@@ -157,6 +162,7 @@ static const struct ll_format_ops *fixture_format_select(ObjectCode *oc);
 #include "linker/M32Alloc.c"
 #undef ll_mmap_anon_for_linker
 #undef ll_mmap_for_linker
+#undef ll_backend_map_anon_write
 #undef ll_munmap_for_linker
 
 /* Include the actual OS protection helper, with only the syscall interposed. */

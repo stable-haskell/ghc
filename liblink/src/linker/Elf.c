@@ -15,6 +15,7 @@
 #include "ll_failure.h"
 #include "RtsSymbolInfo.h"
 #include "linker/MMap.h"
+#include "linker/BackendMemory.h"
 #include "linker/Elf.h"
 #include "linker/InitFini.h"
 #include "ll_format.h"
@@ -701,14 +702,14 @@ static SectionKind getSectionKind_ELF( ll_elf_target_shdr *hdr, int *is_bss )
 static void *
 mapObjectFileSection (ll_linker *L, int fd, ll_elf_target_word offset, ll_elf_target_word size,
                       void **mapped_start, ll_word *mapped_size,
-                      ll_word *mapped_offset)
+                      ll_word *mapped_offset, ll_status *failure_status)
 {
     void *p;
     size_t pageOffset, pageSize;
 
     pageOffset = ll_round_down_to_page_for(L, offset);
     pageSize = ll_round_up_to_page_for(L, offset-pageOffset+size);
-    p = ll_mmap_for_linker(L, pageSize, MEM_READ_WRITE, 0, fd, pageOffset);
+    p = ll_backend_map_file_write(L, fd, pageSize, pageOffset, failure_status);
     if (p == NULL) return NULL;
     *mapped_size = pageSize;
     *mapped_offset = pageOffset;
@@ -741,11 +742,7 @@ ocGetNames_ELF ( ObjectCode* oc )
    oc->n_sections = shnum;
 
    if (oc->imageMapped) {
-#if defined(openbsd_HOST_OS)
-       fd = open(oc->fileName, O_RDONLY, S_IRUSR);
-#else
-       fd = open(oc->fileName, O_RDONLY);
-#endif
+       fd = ll_backend_open_readonly(oc->fileName);
        if (fd == -1) {
            ll_error_set(oc->L, LL_E_IO,
                         "loadObj: can't open %" PATH_FMT, oc->fileName);
@@ -935,11 +932,12 @@ ocGetNames_ELF ( ObjectCode* oc )
               memcpy(start, oc->image + offset, size);
               alloc = SECTION_M32;
           } else {
+              ll_status mapping_status;
               start = mapObjectFileSection(oc->L, fd, offset, size,
                                            &mapped_start, &mapped_size,
-                                           &mapped_offset);
+                                           &mapped_offset, &mapping_status);
               if (start == NULL) {
-                  ll_error_set(oc->L, LL_E_IO,
+                  ll_error_set(oc->L, mapping_status,
                                "loadObj: could not map a section of %" PATH_FMT,
                                OC_INFORMATIVE_FILENAME(oc));
                   goto fail;
@@ -1239,7 +1237,7 @@ fail:
    goto end;
 
 end:
-   if (fd >= 0) close(fd);
+   if (fd >= 0) ll_backend_close_file(fd);
    return result;
 }
 

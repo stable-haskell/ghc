@@ -1230,7 +1230,7 @@ void freeObjectCode (ObjectCode *oc)
         for (i=0; i < oc->n_sections; i++) {
             if (oc->sections[i].start != NULL) {
                 switch(oc->sections[i].alloc){
-#if RTS_LINKER_USE_MMAP
+#if RTS_LINKER_USE_MMAP || defined(mingw32_HOST_OS)
                 case SECTION_MMAP:
                     ll_munmap_for_linker(oc->L,
                         oc->sections[i].mapped_start,

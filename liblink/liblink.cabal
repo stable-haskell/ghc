@@ -30,6 +30,8 @@ extra-source-files:
     src/RtsSymbolInfo.h
     src/linker/CacheFlush.c
     src/linker/CacheFlush.h
+    src/linker/BackendMemory.c
+    src/linker/BackendMemory.h
     src/linker/ELFRelocs/AArch64.def
     src/linker/ELFRelocs/ARM.def
     src/linker/ELFRelocs/LICENSE-LLVM.TXT
@@ -126,6 +128,7 @@ extra-source-files:
     tests/unit/core_error_status.c
     tests/unit/error_state.c
     tests/unit/format_dispatch.c
+    tests/unit/backend_memory.c
     tests/unit/target_config.c
     tests/unit/test_target_config.py
     tests/unit/shared_layout.c

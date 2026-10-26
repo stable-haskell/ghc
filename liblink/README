@@ -71,7 +71,7 @@ which remains valid when tests copy an operation table.
 
 All-backends qualification is pending. The current complete compile/link check
 targets x86_64 Linux. Mach-O requires x86_64 or AArch64; Windows foreign ELF and
-Mach-O still need their host mapping/protection boundaries completed. Compiling
+Mach-O remain unqualified for foreign runtime execution. Compiling
 a foreign backend does not establish that foreign code can safely execute with
 the running process's ABI or that its process services are available.
 
@@ -192,3 +192,18 @@ runtime qualification remains required. The retained direct COFF string-table
 count load assumes four-byte alignment. A normal one-data-symbol MinGW GCC
 object violates that assumption; the separate repair remains unapplied pending
 approval. Portable data controls use an explicitly aligned compiler fixture.
+
+Backend host memory services
+----------------------------
+
+Portable backend code uses private host adapters for file opening, anonymous
+section allocation and read-only GOT protection. POSIX calls retain their
+existing flags, access modes, error messages and cleanup order. Windows paths
+use the existing wide-path rts-fs service. Anonymous sections use the existing
+VirtualAlloc host service and SECTION_MMAP disposal releases that reservation.
+File-backed section mapping returns LL_E_UNSUPPORTED on Windows; the normal
+Windows compatibility loader supplies heap images instead of mapped files.
+
+The GOT protection adapter returns the OS result without setting a linker
+error. Its caller retains the legacy log-and-continue behavior on protection
+failure. Changing that policy requires a separate reviewed behavior change.

@@ -20,6 +20,7 @@
 #include "linker/CacheFlush.h"
 #include "linker/SymbolExtras.h"
 #include "linker/MMap.h"
+#include "linker/BackendMemory.h"
 
 #include <string.h>
 #include <errno.h>
@@ -1546,7 +1547,7 @@ ocGetNames_MachO(ObjectCode* oc)
                 unsigned nstubs = macho_numberOfStubsForSection(oc, sec_idx);
                 unsigned stub_space = STUB_SIZE * nstubs;
 
-                void * mem = ll_mmap_for_linker(oc->L, section->size+stub_space, MEM_READ_WRITE, MAP_ANON, -1, 0);
+                void * mem = ll_backend_map_anon_write(oc->L, section->size+stub_space);
 
                 if( mem == NULL ) {
                     ll_error_set(oc->L, LL_E_NOMEM,

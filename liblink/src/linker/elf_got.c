@@ -3,6 +3,7 @@
 #include "ll_target.h"
 #include "elf_got.h"
 #include "linker/MMap.h"
+#include "linker/BackendMemory.h"
 #include "ll_failure.h"
 
 #include <errno.h>
@@ -220,7 +221,7 @@ fillGot(ObjectCode * oc) {
     }
 
     // We are done initializing the GOT; freeze it.
-    if(mprotect(oc->elf_info->got_start, oc->elf_info->got_size, PROT_READ) != 0) {
+    if(!ll_backend_protect_readonly(oc->elf_info->got_start, oc->elf_info->got_size)) {
         LL_LOG_SYSERROR_FOR(oc->L, "unable to protect memory");
     }
     return EXIT_SUCCESS;
