@@ -159,6 +159,7 @@ typedef enum {
 
 struct _Section {
   void*    start;              /* actual start of section in memory */
+  uintptr_t exec_start;        /* relocation execution address; native=start */
   ll_word  size;               /* actual size of section in memory */
   SectionKind kind;
   SectionAlloc alloc;
@@ -360,6 +361,7 @@ struct _ObjectCode {
     /* Native pointer view; storage size is the per-object target stride.
      * Field presence never depends on private backend or target flags. */
     SymbolExtra *symbol_extras;
+    uintptr_t       symbol_extras_exec; /* execution base, separate from storage */
     unsigned long   first_symbol_extra;
     unsigned long   n_symbol_extras;
     /* The selected backend supplies the target payload width, including zero. */

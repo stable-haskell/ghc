@@ -31,8 +31,8 @@ static int apply_x86_64(ObjectCode *oc, Section *section, uint32_t type,
     ll_elf64_addr A = addend;
     ll_elf64_addr value = S + A;
     const char *symbol = context->symbol_name;
-    /* Extras still have native storage/execution addresses. This first slice
-     * separates the relocation site only; NO_EXEC extras mapping comes later. */
+    /* Slot identity is the referencing symbol index. Emit through work and
+     * use the separately recorded execution address for every GOT/island. */
     switch (type) {
       case COMPAT_R_X86_64_NONE:
           break;
@@ -67,8 +67,8 @@ static int apply_x86_64(ObjectCode *oc, Section *section, uint32_t type,
                   return 0;
               }
               ll_int64 pltAddress =
-                  (ll_int64) &ll_make_symbol_extra_x86_64(oc, context->symbol_index, S)
-                                            -> jumpIsland;
+                  (ll_int64)(ll_make_symbol_extra_x86_64_site(oc, context->symbol_index, S).exec
+                              + offsetof(ll_symbol_extra_x86_64, jumpIsland));
               off = pltAddress + A - P;
           }
           if (off != (ll_elf64_sword)off) {
@@ -110,8 +110,8 @@ static int apply_x86_64(ObjectCode *oc, Section *section, uint32_t type,
                   return 0;
               }
               ll_int64 pltAddress =
-                  (ll_int64) &ll_make_symbol_extra_x86_64(oc, context->symbol_index, S)
-                                            -> jumpIsland;
+                  (ll_int64)(ll_make_symbol_extra_x86_64_site(oc, context->symbol_index, S).exec
+                              + offsetof(ll_symbol_extra_x86_64, jumpIsland));
               value = pltAddress + A;
           }
           if (value != (ll_elf64_word)value) {
@@ -146,8 +146,8 @@ static int apply_x86_64(ObjectCode *oc, Section *section, uint32_t type,
                   return 0;
               }
               ll_int64 pltAddress =
-                  (ll_int64) &ll_make_symbol_extra_x86_64(oc, context->symbol_index, S)
-                                            -> jumpIsland;
+                  (ll_int64)(ll_make_symbol_extra_x86_64_site(oc, context->symbol_index, S).exec
+                              + offsetof(ll_symbol_extra_x86_64, jumpIsland));
               value = pltAddress + A;
           }
           if ((ll_int64)value != (ll_elf64_sword)value) {
@@ -167,7 +167,7 @@ static int apply_x86_64(ObjectCode *oc, Section *section, uint32_t type,
       case COMPAT_R_X86_64_GOTPCRELX:
       case COMPAT_R_X86_64_GOTPCREL:
       {
-          ll_int64 gotAddress = (ll_int64) &ll_make_symbol_extra_x86_64(oc, context->symbol_index, S)->addr;
+          ll_int64 gotAddress = (ll_int64)ll_make_symbol_extra_x86_64_site(oc, context->symbol_index, S).exec;
           ll_int64 off = gotAddress + A - P;
           if (off != (ll_elf64_sword)off) {
               ll_error_set(oc->L, LL_E_RELOC_RANGE,
@@ -211,8 +211,8 @@ static int apply_x86_64(ObjectCode *oc, Section *section, uint32_t type,
           struct tls_info ti;
           get_tls_area(0, &ti, sizeof(ti));
           /* make entry in GOT that contains said offset */
-          ll_int64 gotEntry = (ll_int64) &ll_make_symbol_extra_x86_64(oc, context->symbol_index,
-                                         (S - (ll_elf64_addr)(ti.base)))->addr;
+          ll_int64 gotEntry = (ll_int64)ll_make_symbol_extra_x86_64_site(oc, context->symbol_index,
+                                         (S - (ll_elf64_addr)(ti.base))).exec;
           ll_int64 off = gotEntry + A - P;
           if (off != (ll_elf64_sword)off) {
               ll_error_set(oc->L, LL_E_RELOC_RANGE,
@@ -235,8 +235,8 @@ static int apply_x86_64(ObjectCode *oc, Section *section, uint32_t type,
       {
           ll_int64 off = value - P;
           if (off != (ll_elf64_sword)off) {
-              ll_int64 pltAddress = (ll_int64) &ll_make_symbol_extra_x86_64(oc, context->symbol_index, S)
-                                                    -> jumpIsland;
+              ll_int64 pltAddress = (ll_int64)(ll_make_symbol_extra_x86_64_site(oc, context->symbol_index, S).exec
+                              + offsetof(ll_symbol_extra_x86_64, jumpIsland));
               off = pltAddress + A - P;
           }
           if (off != (ll_elf64_sword)off) {

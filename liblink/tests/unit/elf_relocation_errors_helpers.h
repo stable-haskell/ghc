@@ -214,11 +214,13 @@ static int run_relocation(Owner *owner, RelaImage *image, unsigned char *target,
     object.shndx_table = NULL;
 #endif
     object.symbol_extras = extras;
+    object.symbol_extras_exec = (uintptr_t)extras;
     object.first_symbol_extra = 1;
     object.n_symbol_extras = extras == NULL ? 0 : 1;
     object.symbol_extra_stride = sizeof(SymbolExtra);
     initProddableBlockSet(&object.proddables);
     sections[1].start = target;
+    sections[1].exec_start = (uintptr_t)target;
     sections[1].size = GUARDED_BYTES;
     sections[1].kind = SECTIONKIND_CODE_OR_RODATA;
     addProddableBlock(&owner->linker, &object.proddables, target,

@@ -174,6 +174,7 @@ static void check_extras(ObjectCode *object)
     if (slots == NULL) return;
     memset(slots, 0xa5, STRIDE * COUNT);
     object->symbol_extras = (SymbolExtra *)(void *)slots;
+    object->symbol_extras_exec = UINT32_C(0x20000000);
     object->symbol_extra_stride = STRIDE;
     object->first_symbol_extra = 31;
     object->n_symbol_extras = COUNT;
@@ -187,8 +188,9 @@ static void check_extras(ObjectCode *object)
             const size_t slot = i % COUNT;
             const ll_reloc_context context = {31 + slot, "site_symbol", LL_ELF_STT_OBJECT};
             unsigned char bytes[4];
+            memset(bytes, 0xa5, sizeof(bytes));
             reset(object->L);
-            CHECK(apply(object, forms[f], bytes, (uintptr_t)slots - 256,
+            CHECK(apply(object, forms[f], bytes, object->symbol_extras_exec - 256,
                         symbol, -4, LL_SYM_DATA, &context), "GOT relocation failed");
             int32_t value;
             memcpy(&value, bytes, sizeof(value));
@@ -212,17 +214,46 @@ static void check_extras(ObjectCode *object)
     object->L->services.cfg.always_pic = false;
     for (size_t i = 0; i < sizeof(branches) / sizeof(branches[0]); ++i) {
         unsigned char bytes[4];
+        memset(bytes, 0xa5, sizeof(bytes));
         const ll_reloc_context context = {31, "site_symbol", LL_ELF_STT_FUNC};
-        const uintptr_t exec = (uintptr_t)slots + 8 - 64;
+        const uintptr_t exec = object->symbol_extras_exec + 8 - 64;
         reset(object->L);
         CHECK(apply(object, branches[i], bytes, exec, exec + UINT64_C(0x100000000),
                     -4, LL_SYM_DATA, &context), "function island relocation failed");
         int32_t value;
         memcpy(&value, bytes, sizeof(value));
-        CHECK(value == 60, "function island did not use native extra exec address");
+        CHECK(value == 60, "function island did not use separate extra exec address");
+    }
+    const uint32_t absolute_branches[] = {COMPAT_R_X86_64_32, COMPAT_R_X86_64_32S};
+    for (size_t i = 0; i < sizeof(absolute_branches) / sizeof(absolute_branches[0]); ++i) {
+        unsigned char bytes[4];
+        memset(bytes, 0xa5, sizeof(bytes));
+        const ll_reloc_context context = {31, "site_symbol", LL_ELF_STT_FUNC};
+        reset(object->L);
+        CHECK(apply(object, absolute_branches[i], bytes, 0,
+                    UINT64_C(0x200000000), -4, LL_SYM_DATA, &context),
+              "absolute function island relocation failed");
+        uint32_t value;
+        memcpy(&value, bytes, sizeof(value));
+        CHECK(value == object->symbol_extras_exec + 4,
+              "absolute island did not use separate extra exec address");
+    }
+    object->symbol_extras_exec = UINT64_C(0x700000000000);
+    for (size_t i = 0; i < sizeof(forms) / sizeof(forms[0]); ++i) {
+        unsigned char bytes[4];
+        memset(bytes, 0xa5, sizeof(bytes));
+        const ll_reloc_context context = {31, "site_symbol", LL_ELF_STT_OBJECT};
+        reset(object->L);
+        CHECK(!apply(object, forms[i], bytes, UINT32_C(0x20000000), symbol,
+                     -4, LL_SYM_DATA, &context), "distant GOT slot unexpectedly fit");
+        CHECK(object->L->error_status == LL_E_RELOC_RANGE,
+              "distant extra exec address lost its range error");
+        for (size_t b = 0; b < sizeof(bytes); ++b)
+            CHECK(bytes[b] == 0xa5, "rejected distant GOT relocation wrote its site");
     }
     free(slots);
     object->symbol_extras = NULL;
+    object->symbol_extras_exec = 0;
 }
 
 int main(void)

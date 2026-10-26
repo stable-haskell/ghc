@@ -1330,6 +1330,7 @@ mkOc( ll_linker *L, ObjectType type, pathchar *path, char *image, int imageSize,
    initProddableBlockSet(&oc->proddables);
    oc->foreign_exports   = NULL;
    oc->symbol_extras = NULL;
+   oc->symbol_extras_exec = 0;
    oc->first_symbol_extra = 0;
    oc->n_symbol_extras = 0;
    oc->symbol_extra_stride = 0;
@@ -1963,6 +1964,7 @@ addSection (ll_linker *L, Section *s, SectionKind kind, SectionAlloc alloc,
             size_t format_info_size)
 {
    s->start        = start;     /* actual start of section in memory */
+   s->exec_start   = (uintptr_t)start;
    s->size         = size;      /* actual size of section in memory */
    s->kind         = kind;
    s->alloc        = alloc;

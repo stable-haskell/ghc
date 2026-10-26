@@ -1827,7 +1827,8 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
           .format_symbol_type = info != 0
               ? LL_ELF_ST_TYPE(stab[LL_ELF_R_SYM(info)].st_info) : 0
       };
-      const ll_site site = {.work = (uint8_t *)P, .exec = (uintptr_t)P};
+      const ll_site site = {.work = (uint8_t *)P,
+          .exec = oc->sections[target_shndx].exec_start + offset};
       /* Existing ELF resolution does not request a normalized provider type.
        * Raw referencing-file type retains the original eligibility checks. */
       if (!ll_elf_x86_64_reloc_ops.apply(oc, &oc->sections[target_shndx],

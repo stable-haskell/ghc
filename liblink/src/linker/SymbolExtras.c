@@ -118,6 +118,7 @@ int ocAllocateExtras(ObjectCode *oc, int count, int first, int bssSize,
   }
 
   oc->symbol_extra_stride = extra_stride;
+  oc->symbol_extras_exec = (uintptr_t)oc->symbol_extras;
   oc->first_symbol_extra = first;
   oc->n_symbol_extras = count;
 
@@ -174,6 +175,17 @@ ll_symbol_extra_x86_64 *ll_make_symbol_extra_x86_64(
     extra->addr = target;
     memcpy(extra->jumpIsland, jmp, 8);
     return extra;
+}
+
+ll_site ll_make_symbol_extra_x86_64_site(
+    ObjectCode const *oc, unsigned long symbolNumber, uint64_t target)
+{
+    ll_symbol_extra_x86_64 *extra =
+        ll_make_symbol_extra_x86_64(oc, symbolNumber, target);
+    const uintptr_t offset = (symbolNumber - oc->first_symbol_extra) *
+                             oc->symbol_extra_stride;
+    return (ll_site){.work = (uint8_t *)(void *)extra,
+                     .exec = oc->symbol_extras_exec + offset};
 }
 
 ll_symbol_extra_riscv64 *ll_make_symbol_extra_riscv64(

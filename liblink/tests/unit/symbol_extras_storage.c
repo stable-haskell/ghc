@@ -77,7 +77,7 @@ static int storage_refresh(ObjectCode *object)
 {
     ++storage_refreshes;
     CHECK(object->first_symbol_extra == 19 && object->n_symbol_extras == 17 &&
-          object->symbol_extra_stride == 23,
+          object->symbol_extra_stride == 23 && object->symbol_extras_exec == 29,
           "allocator published counts or stride before metadata refresh");
     if (storage_fail_refresh) {
         ll_error_set(object->L, LL_E_FORMAT, "injected storage refresh failure");
@@ -106,14 +106,15 @@ static void check_storage(ll_linker *owner, size_t stride, int count, int bss,
     const uintptr_t original_address = (uintptr_t)image;
     ObjectCode *object = mkOc(owner, STATIC_OBJECT, WSTR("storage-only"), image,
                               sizeof(bytes), false, NULL, 0);
-    CHECK(object->symbol_extra_stride == 0,
-          "new object did not initialize its stride");
+    CHECK(object->symbol_extra_stride == 0 && object->symbol_extras_exec == 0,
+          "new object did not initialize its stride/execution address");
     CHECK(object->symbol_extras_origin == LL_EXTRAS_NONE,
           "new object already claims shared storage");
     /* These sentinels detect publication before the original refresh point. */
     object->first_symbol_extra = 19;
     object->n_symbol_extras = 17;
     object->symbol_extra_stride = 23;
+    object->symbol_extras_exec = 29;
     storage_maps = storage_refreshes = storage_protections = 0;
     storage_m32_calls = 0;
     storage_m32_bytes = 0;
@@ -174,12 +175,13 @@ static void check_storage(ll_linker *owner, size_t stride, int count, int bss,
         CHECK(result == 0 && owner->error_status == expected,
               "storage failure lost its result or diagnostic");
         CHECK(object->first_symbol_extra == 19 && object->n_symbol_extras == 17 &&
-              object->symbol_extra_stride == 23,
+              object->symbol_extra_stride == 23 && object->symbol_extras_exec == 29,
               "storage failure published unfinished metadata");
     } else {
         CHECK(result && object->first_symbol_extra == 5 &&
               object->n_symbol_extras == (unsigned long)count &&
-              object->symbol_extra_stride == stride,
+              object->symbol_extra_stride == stride &&
+              object->symbol_extras_exec == (uintptr_t)object->symbol_extras,
               "storage allocator did not publish selected target metadata");
         bool protected = ocProtectExtras(object);
         CHECK(protected == !storage_fail_protect,
@@ -212,6 +214,7 @@ static void check_shared_origin(ll_linker *owner)
     ObjectCode *object = mkOc(owner, STATIC_OBJECT, WSTR("storage-origin"),
                               NULL, 0, false, NULL, 0);
     CHECK(object->symbol_extras == NULL &&
+          object->symbol_extras_exec == 0 &&
           object->symbol_extras_origin == LL_EXTRAS_NONE &&
           object->first_symbol_extra == 0 && object->n_symbol_extras == 0 &&
           object->symbol_extra_stride == 0 &&

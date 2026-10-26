@@ -1,6 +1,7 @@
 #pragma once
 
 #include "LinkerInternals.h"
+#include "ll_backend.h"
 
 #include "ll_begin_private.h"
 
@@ -16,6 +17,10 @@ bool ocProtectExtras(ObjectCode* oc);
  * recorded per-object stride. These writers retain native-endian field stores.
  * ARM only exposes storage: its existing section PLT owns instruction emission. */
 ll_symbol_extra_x86_64 *ll_make_symbol_extra_x86_64(
+    ObjectCode const *oc, unsigned long symbolNumber, uint64_t target);
+/* Writes the same x64 payload through work; returns its recorded exec address
+ * for GOT and island arithmetic. Native pointer writers remain compatible. */
+ll_site ll_make_symbol_extra_x86_64_site(
     ObjectCode const *oc, unsigned long symbolNumber, uint64_t target);
 ll_symbol_extra_riscv64 *ll_make_symbol_extra_riscv64(
     ObjectCode const *oc, unsigned long symbolNumber, uint64_t target);

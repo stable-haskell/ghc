@@ -81,14 +81,22 @@ The synchronous call borrows an immutable ll_reloc_context containing the
 referencing file's original symbol index, existing diagnostic name and raw
 symbol type. This explicitly approved amendment to the initial internal
 contract preserves extra-slot identity, STT_FUNC fallback eligibility and
-exact diagnostics; it does not change installed headers or the RTS ABI.
+exact diagnostics. The context lives in a private header and leaves the public
+handle API unchanged.
 
-Normal ELF sites still have identical work and execution addresses. Native
-extras addresses and payloads, symbol lookup, range policy and diagnostics are
-preserved. The unit separately checks distinct work/exec addresses, but the
-library does not yet implement LL_CFG_NO_EXEC. Synthetic section, symbol and
-extras layout, the other backend conversions and execution qualification
-remain later parts of WP2.8.
+Section.exec_start and ObjectCode.symbol_extras_exec record execution addresses
+separately from storage. addSection and shared extras allocation initialize
+them to their native work addresses. The paired x64 extras emitter writes the
+original payload through work and returns exec for GOT/island arithmetic;
+native pointer emitters retain
+their existing behavior. All these fields are unconditional in the RTS friend
+layout, so the RTS and library must be rebuilt together.
+
+Normal ELF work and execution addresses still coincide. Payloads, symbol
+lookup, range policy and diagnostics are preserved. Units check separate site
+and extras addresses, but the library does not yet implement LL_CFG_NO_EXEC.
+Synthetic allocation and symbol layout, lifecycle guards, other backend
+conversions and execution qualification remain later parts of WP2.8.
 
 
 Locking

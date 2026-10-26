@@ -111,6 +111,14 @@ island payloads and untouched adjacent bytes. A normalized symbol type must
 not replace the original ELF STT_FUNC eligibility test. The context is borrowed
 only for the synchronous call and never retained.
 
+Its extras fixture uses heap work storage with an independent low execution
+base. GOT displacements and PC32/PLT32/32/32S fallback destinations must use
+that execution base, while the complete target and jump bytes reach work.
+Distant synthetic GOT slots fail without writing the relocation site. Shared
+storage tests retain the old execution base until refresh succeeds, and the
+producer/client layout exchange checks both new work/exec fields across all
+seven target profiles.
+
 The complete driver runs this data-only unit on POSIX x64 and ARM64, compiling
 the actual x64 TU explicitly when the native archive has no such member. On
 Linux x64 and Darwin x64 +all-backends it also links the native ELF capture
