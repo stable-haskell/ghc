@@ -59,3 +59,32 @@ path. This keeps the expected text portable across checkouts. The former abort
 expectation predates the approved error-model conversion. The unchanged
 WP2.5 base and format-dispatch candidate both return exit 5 for POINTER_TO_GOT.
 Numeric relocation goldens and the independent arithmetic checks are unchanged.
+
+ELF x86_64 native-address checks
+--------------------------------
+
+elf_x86_64_check.py reads original ELF64 little-endian section, symbol and RELA
+records using Python's struct module. It computes S from defined symbols or
+separately recorded resolver inputs, P from section layout, and A from the
+original signed RELA addend. The formulas follow AMD64 psABI table4.9:
+
+https://gitlab.com/x86-psABIs/x86-64-ABI/-/jobs/artifacts/master/raw/x86-64-ABI/abi.pdf?job=build
+
+All nine supported ordinary fixtures are checked, including all three GOTPCREL
+forms. The oracle verifies whole resulting sections and extras, including
+untouched bytes and the native x64 GOT/jump-island payload. It does not import
+the linker or derive an expected S from a relocated field. Saved references
+are replayed numerically before comparing ASLR-independent semantic signatures.
+The initial goldens were captured with the unchanged WP2.7 linker at102bd9.
+
+    python3 liblink/tests/oracle/elf_x86_64_check.py \
+      --object liblink/tests/fixtures/generated/elf-x86_64/x86_64-linux-gnu/R_X86_64_64.o \
+      --capture capture.json --golden liblink/tests/golden/elf-x86_64/R_X86_64_64.json
+
+    python3 -m unittest discover -s liblink/tests/oracle -p test_elf_x86_64.py -v
+
+Set LIBLINK_ELF_CAPTURE to the absolute elf_capture executable to check fresh
+captures too, including a forced PLT32 island with an out-of-range resolver
+input. Corruption controls alter capture JSON, not object-file inputs. TLS,
+other architectures, synthetic extras addresses and NO_EXEC remain outside
+this slice. See ../runner/README for capture scope and build flags.

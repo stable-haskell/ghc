@@ -46,3 +46,33 @@ that read. Finalizers run only after JSON emission.
 This slice exercises native arm64 Darwin Mach-O only. Unsupported relocations
 terminate through the host fatal callback and must run in separate processes.
 The runner does not claim ELF, COFF, or other host-backend coverage.
+
+ELF x86_64 capture
+-----------------
+
+elf_capture.c is a separate private client for a POSIX x86_64 host with the
+ELF backend compiled in (native Linux or Darwin +all-backends). It captures
+an unregistered object's section and extras bytes immediately before and
+after the actual backend resolve operation. It never enters the initializer
+pass or calls loaded code. This is normal native-address relocation coverage,
+not the full public lifecycle or LL_CFG_NO_EXEC.
+
+    "$CC" -std=c11 -Wall -Wextra -Werror=vla -pedantic -DLL_ASSERTS \
+      -DLL_ALL_BACKENDS -isystem "$LIBLINK_CONFIG_INCLUDE" \
+      -isystem "$RTS_FS_INCLUDE" -I liblink/include -I liblink/src \
+      liblink/tests/runner/elf_capture.c -L"$LIBLINK_LIBRARY_DIR" \
+      -llink $RTS_FS_LINK_FLAGS -pthread -o elf_capture
+    ./elf_capture liblink/tests/fixtures/generated/elf-x86_64/x86_64-linux-gnu/R_X86_64_64.o
+
+RTS_FS_LINK_FLAGS supplies the installed rts-fs archive on Linux and is empty
+on Darwin. Add the same sanitizer flags as the library when it is instrumented.
+The capture uses always_pic, as native Darwin does. A non-PIC fixture requesting
+addresses below4GiB collides with a normal Darwin executable's __PAGEZERO;
+this capture does not change the linker's placement policy.
+
+external_data is the fixed representable resolver input0x12345000. Ordinary
+external_function inputs are chosen after placement, within range of the
+loaded image. --far-function instead supplies0x700000000000 to force the PLT32
+island. Both inputs are recorded separately from relocated bytes; they are
+never called or dereferenced. The independent ELF oracle checks the formulas,
+payloads and every untouched byte. No foreign Windows execution is claimed.

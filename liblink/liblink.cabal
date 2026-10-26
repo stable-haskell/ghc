@@ -188,6 +188,13 @@ extra-source-files:
     tests/unit/run_native_tests.py
     tests/unit/run_sanitized_tests.py
     tests/unit/test_run_sanitized_tests.py
+    tests/runner/elf_capture.c
+    tests/oracle/elf_x86_64_check.py
+    tests/oracle/test_elf_x86_64.py
+    tests/golden/elf-x86_64/*.json
+    tests/fixtures/elf-x86_64.json
+    tests/fixtures/src/elf-x86_64/*.s
+    tests/fixtures/generated/elf-x86_64/x86_64-linux-gnu/*.o
 
 custom-setup
     setup-depends: base, Cabal >= 3.17 && < 3.18, Cabal-syntax >= 3.17 && < 3.18, directory, filepath
