@@ -369,6 +369,12 @@ def run_elf_x86_64_sites(cc: list[str], archive: Path, output: Path,
         ROOT / "liblink/tests/unit/elf_x86_64_sites.c", archive, binary,
         link_flags, []), label="compile and link elf_x86_64_sites")
     run([str(binary)], label="run elf_x86_64_sites")
+    stubs = output / "elf_aarch64_stub_sites"
+    run(cc + ["-DLL_ALL_BACKENDS", "-ULL_TARGET_ARCH",
+              "-DLL_TARGET_ARCH=LL_ARCH_AARCH64",
+              str(ROOT / "liblink/tests/unit/elf_aarch64_stub_sites.c"),
+              "-o", str(stubs)], label="compile paired ELF AArch64 stub controls")
+    run([str(stubs)], label="run paired ELF AArch64 stub controls")
     storage = output / "noexec_storage"
     run(cc + [str(ROOT / "liblink/tests/unit/noexec_storage.c"),
               str(ROOT / "liblink/src/ll_error.c"), "-o", str(storage)],

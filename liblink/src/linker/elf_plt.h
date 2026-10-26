@@ -1,6 +1,7 @@
 #pragma once
 
 #include <LinkerInternals.h>
+#include "ll_backend.h"
 
 #include "elf_plt_arm.h"
 #include "elf_plt_aarch64.h"
@@ -30,6 +31,15 @@ unsigned  elf_numberOfStubsForSection( ObjectCode *oc, unsigned sectionIndex);
 
 bool elf_findStub(Section * section, void* * addr, uint8_t flags);
 bool elf_makeStub(ll_linker *L, Section * section, void* * addr, void* got_addr, uint8_t flags);
+
+/* Like the legacy helpers, zero means success. Target/flags retain the same
+ * identity; output is written only on success. Storage stays section-owned.
+ * The caller supplies non-NULL output and a section whose work and execution
+ * extents correspond, including its reserved stub capacity. */
+bool elf_findStubSite(Section *section, void *target, uint8_t flags,
+                      ll_site *site);
+bool elf_makeStubSite(ll_linker *L, Section *section, void *target,
+                      void *got_addr, uint8_t flags, ll_site *site);
 
 void elf_freeStubs(ll_linker *L, Section * section);
 

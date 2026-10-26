@@ -103,6 +103,20 @@ Darwin linker syntax.
 Stage2 native C unit driver
 ===========================
 
+`elf_aarch64_stub_sites.c` includes the actual generic ELF stub helpers and
+AArch64 emitter. It checks native and separate work/exec addresses, unchanged
+outputs on lookup misses, target/flag identity, repeated lookup, creation order,
+veneer instruction fields and targets, legacy wrapper equivalence, and untouched
+adjacent storage. Both APIs retain zero-success/one-failure results. The native
+C driver compiles this data-only unit with the real host configuration and an
+explicit AArch64 target; it does not execute emitted instructions. Fixture-owned
+stub nodes are freed directly, so this is not a whole-list disposal test.
+
+The private `elf_findStubSite` and `elf_makeStubSite` adapters derive execution
+addresses from the section execution base and the existing stub storage offset.
+They leave native helpers, emitter bytes and shared layouts unchanged. This seam
+does not enable AArch64 NO_EXEC or wire a relocation apply table.
+
 `elf_x86_64_sites.c` calls the actual typed ELF apply operation with separate
 misaligned work storage and execution addresses. It checks ordinary fields,
 range and unsupported errors, exact diagnostics, raw referencing symbol types,

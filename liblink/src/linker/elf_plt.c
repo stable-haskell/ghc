@@ -83,6 +83,34 @@ elf_makeStub(ll_linker *L, Section * section,
     return EXIT_SUCCESS;
 }
 
+/* Keep the original emitter and list operations above as the single native
+ * implementation. Only the returned address gains a separate execution view. */
+static ll_site
+stubSite(const Section *section, void *work)
+{
+    const uintptr_t offset = (uintptr_t)work - (uintptr_t)section->start;
+    return (ll_site){.work = work, .exec = section->exec_start + offset};
+}
+
+bool
+elf_findStubSite(Section *section, void *target, uint8_t flags, ll_site *site)
+{
+    void *work = target;
+    if (elf_findStub(section, &work, flags)) return EXIT_FAILURE;
+    *site = stubSite(section, work);
+    return EXIT_SUCCESS;
+}
+
+bool
+elf_makeStubSite(ll_linker *L, Section *section, void *target, void *got_addr,
+                 uint8_t flags, ll_site *site)
+{
+    void *work = target;
+    if (elf_makeStub(L, section, &work, got_addr, flags)) return EXIT_FAILURE;
+    *site = stubSite(section, work);
+    return EXIT_SUCCESS;
+}
+
 void
 elf_freeStubs(ll_linker *L, Section * section) {
     if(section->elf_info->nstubs == 0)
