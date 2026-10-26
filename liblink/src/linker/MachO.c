@@ -493,8 +493,10 @@ encodeAddend(ObjectCode * oc, Section * section,
                      reloc_type, file_name, symbol_name, (long long)addend, (long long)(addend >> 12), (long long)ri->r_address, library_info ? (char*)library_info : "<unknown>");
                 return false;
             }
-            *p = (*p & 0x9F00001F) | (uint32_t)((addend << 17) & 0x60000000)
-                                   | (uint32_t)((addend >> 9)  & 0x00FFFFE0);
+            /* Extract fields as unsigned bits, including negative deltas. */
+            const uint64_t addend_bits = (uint64_t)addend;
+            *p = (*p & 0x9F00001F) | (uint32_t)((addend_bits << 17) & 0x60000000)
+                                   | (uint32_t)((addend_bits >> 9)  & 0x00FFFFE0);
             return true;
         }
         case ARM64_RELOC_PAGEOFF12:
