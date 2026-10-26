@@ -30,9 +30,9 @@ symbolHasNonNoneRelocation(ObjectCode *oc, unsigned symTabIndex,
          relTab != NULL; relTab = relTab->next) {
         if (relTab->sectionHeader->sh_link == symTabIndex) {
             for (size_t i = 0; i < relTab->n_relocations; i++) {
-                Elf_Rel *rel = &relTab->relocations[i];
-                if (ELF_R_SYM(rel->r_info) == symIdx
-                    && ELF_R_TYPE(rel->r_info) != 0) {
+                ll_elf_target_rel *rel = &relTab->relocations[i];
+                if (LL_ELF_R_SYM(rel->r_info) == symIdx
+                    && LL_ELF_R_TYPE(rel->r_info) != 0) {
                     return true;
                 }
             }
@@ -43,9 +43,9 @@ symbolHasNonNoneRelocation(ObjectCode *oc, unsigned symTabIndex,
          relaTab != NULL; relaTab = relaTab->next) {
         if (relaTab->sectionHeader->sh_link == symTabIndex) {
             for (size_t i = 0; i < relaTab->n_relocations; i++) {
-                Elf_Rela *rel = &relaTab->relocations[i];
-                if (ELF_R_SYM(rel->r_info) == symIdx
-                    && ELF_R_TYPE(rel->r_info) != 0) {
+                ll_elf_target_rela *rel = &relaTab->relocations[i];
+                if (LL_ELF_R_SYM(rel->r_info) == symIdx
+                    && LL_ELF_R_TYPE(rel->r_info) != 0) {
                     return true;
                 }
             }
@@ -59,30 +59,30 @@ symbolHasNonNoneRelocation(ObjectCode *oc, unsigned symTabIndex,
  * given symbol
  */
 bool
-needGotSlot(Elf_Sym * symbol) {
+needGotSlot(ll_elf_target_sym * symbol) {
     /* Local definitions can be referenced through the GOT too (for example,
      * Android NDK libm objects use ADR_GOT_PAGE for local data). Include the
      * named local definitions whose addresses ocGetNames_ELF can populate.
      * In particular, do not select unrelated TLS or absolute symbols: fillGot
      * would then require an address even if no GOT relocation uses them.
      */
-    unsigned type = ELF_ST_TYPE(symbol->st_info);
-    bool local_definition = ELF_ST_BIND(symbol->st_info) == STB_LOCAL
+    unsigned type = LL_ELF_ST_TYPE(symbol->st_info);
+    bool local_definition = LL_ELF_ST_BIND(symbol->st_info) == LL_ELF_STB_LOCAL
         && symbol->st_name != 0
-        && symbol->st_shndx != SHN_UNDEF
-        && (symbol->st_shndx < SHN_LORESERVE
-#if defined(SHN_XINDEX)
-            || symbol->st_shndx == SHN_XINDEX
+        && symbol->st_shndx != LL_ELF_SHN_UNDEF
+        && (symbol->st_shndx < LL_ELF_SHN_LORESERVE
+#if LL_ELF_HAS_SHN_XINDEX
+            || symbol->st_shndx == LL_ELF_SHN_XINDEX
 #endif
            )
-        && (type == STT_OBJECT || type == STT_FUNC || type == STT_NOTYPE);
+        && (type == LL_ELF_STT_OBJECT || type == LL_ELF_STT_FUNC || type == LL_ELF_STT_NOTYPE);
 
-    return ELF_ST_BIND(symbol->st_info) == STB_GLOBAL
-        || ELF_ST_BIND(symbol->st_info) == STB_WEAK
+    return LL_ELF_ST_BIND(symbol->st_info) == LL_ELF_STB_GLOBAL
+        || LL_ELF_ST_BIND(symbol->st_info) == LL_ELF_STB_WEAK
         || local_definition
         // Section symbols exist primarily for relocation
         // and as such may need a GOT slot.
-        || ELF_ST_TYPE(symbol->st_info) == STT_SECTION;
+        || LL_ELF_ST_TYPE(symbol->st_info) == LL_ELF_STT_SECTION;
 
 }
 
@@ -97,12 +97,12 @@ makeGot(ObjectCode * oc) {
     LL_ASSERT_FOR(oc->L, oc->elf_info != NULL );
     LL_ASSERT_FOR(oc->L, oc->elf_info->sectionHeader != NULL );
     for(int i=0; i < oc->n_sections; i++) {
-        if(SHT_SYMTAB == oc->elf_info->sectionHeader[i].sh_type) {
-            Elf_Sym *symTab =
-                (Elf_Sym*)((uint8_t*)oc->elf_info->elfHeader
+        if(LL_ELF_SHT_SYMTAB == oc->elf_info->sectionHeader[i].sh_type) {
+            ll_elf_target_sym *symTab =
+                (ll_elf_target_sym*)((uint8_t*)oc->elf_info->elfHeader
                                    + oc->elf_info->sectionHeader[i].sh_offset);
             size_t n_symbols = oc->elf_info->sectionHeader[i].sh_size
-                               / sizeof(Elf_Sym);
+                               / sizeof(ll_elf_target_sym);
             for(size_t j=0; j < n_symbols; j++) {
                 if(needGotSlot(&symTab[j])) {
                     got_slots += 1;
@@ -152,8 +152,8 @@ fillGot(ObjectCode * oc) {
                 /* no type are undefined symbols */
                 // Note STT_SECTION symbols should have their address
                 // set prior to the fillGot call in ocResolve_ELF.
-                if(   STT_NOTYPE == ELF_ST_TYPE(symbol->elf_sym->st_info)
-                   || STB_WEAK   == ELF_ST_BIND(symbol->elf_sym->st_info)) {
+                if(   LL_ELF_STT_NOTYPE == LL_ELF_ST_TYPE(symbol->elf_sym->st_info)
+                   || LL_ELF_STB_WEAK   == LL_ELF_ST_BIND(symbol->elf_sym->st_info)) {
                     if(0x0 == symbol->addr) {
                         symbol->addr = lookupDependentSymbol(oc->L, symbol->name, oc, NULL);
                         if (ll_failure_blocked(oc->L) || !ll_failure_usable(oc))

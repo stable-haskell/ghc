@@ -19,6 +19,7 @@ extra-source-files:
     include/liblink/symbol_extras.h
     include/liblink/macho.h
     include/liblink/coff.h
+    include/liblink/elf.h
     include/ll_autoconf.h.in
     include/ll_platform.h.in
     liblink.buildinfo.in
@@ -57,6 +58,7 @@ extra-source-files:
     src/linker/PEi386.h
     src/linker/PEi386Types.h
     src/linker/PEi386Host.h
+    src/linker/ElfHost.h
     src/linker/ProddableBlocks.c
     src/linker/ProddableBlocks.h
     src/linker/SymbolExtras.c
@@ -127,6 +129,7 @@ extra-source-files:
     tests/unit/init_array_status.c
     tests/unit/init_array_policy.c
     tests/unit/coff_layout.c
+    tests/unit/elf_layout.c
     tests/unit/macho_layout.c
     tests/unit/macho_input.c
     tests/unit/macho_page21_encoding.c
@@ -213,6 +216,8 @@ library
         liblink/symbol_extras.h
         liblink/macho.h
         liblink/coff.h
+        liblink/elf.h
+        linker/ElfHost.h
     cc-options: -std=c11 -fvisibility=hidden
     if flag(asserts)
         cc-options: -DLL_ASSERTS

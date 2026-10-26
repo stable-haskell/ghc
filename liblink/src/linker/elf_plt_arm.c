@@ -28,8 +28,8 @@ const size_t stubSizeArm = 12;
  * section, and the risk of the stubs being out of reach for the instruction to
  * be relocated is minimal.
  */
-bool needStubForRelArm(Elf_Rel * rel) {
-    switch(ELF32_R_TYPE(rel->r_info)) {
+bool needStubForRelArm(ll_elf_target_rel * rel) {
+    switch(LL_ELF32_R_TYPE(rel->r_info)) {
         case COMPAT_R_ARM_PC24:
         case COMPAT_R_ARM_CALL:
         case COMPAT_R_ARM_JUMP24:
@@ -41,8 +41,8 @@ bool needStubForRelArm(Elf_Rel * rel) {
             return false;
     }
 }
-bool needStubForRelaArm(Elf_Rela * rela) {
-    switch(ELF32_R_TYPE(rela->r_info)) {
+bool needStubForRelaArm(ll_elf_target_rela * rela) {
+    switch(LL_ELF32_R_TYPE(rela->r_info)) {
         case COMPAT_R_ARM_PC24:
         case COMPAT_R_ARM_CALL:
         case COMPAT_R_ARM_JUMP24:

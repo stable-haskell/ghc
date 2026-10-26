@@ -25,8 +25,8 @@ const size_t stubSizeAarch64 = 5 * 4;
  * section, and the risk of the stubs being out of reach for the instruction to
  * be relocated is minimal.
  */
-bool needStubForRelAarch64(Elf_Rel * rel) {
-    switch(ELF64_R_TYPE(rel->r_info)) {
+bool needStubForRelAarch64(ll_elf_target_rel * rel) {
+    switch(LL_ELF64_R_TYPE(rel->r_info)) {
         case COMPAT_R_AARCH64_CALL26:
         case COMPAT_R_AARCH64_JUMP26:
             return true;
@@ -34,8 +34,8 @@ bool needStubForRelAarch64(Elf_Rel * rel) {
             return false;
     }
 }
-bool needStubForRelaAarch64(Elf_Rela * rela) {
-    switch(ELF64_R_TYPE(rela->r_info)) {
+bool needStubForRelaAarch64(ll_elf_target_rela * rela) {
+    switch(LL_ELF64_R_TYPE(rela->r_info)) {
         case COMPAT_R_AARCH64_CALL26:
         case COMPAT_R_AARCH64_JUMP26:
             return true;

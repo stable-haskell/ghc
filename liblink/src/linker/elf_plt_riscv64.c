@@ -15,20 +15,20 @@
 const size_t instSizeRISCV64 = 4;
 const size_t stubSizeRISCV64 = 3 * instSizeRISCV64;
 
-bool needStubForRelRISCV64(Elf_Rel *rel) {
-  switch (ELF64_R_TYPE(rel->r_info)) {
-  case R_RISCV_CALL:
-  case R_RISCV_CALL_PLT:
+bool needStubForRelRISCV64(ll_elf_target_rel *rel) {
+  switch (LL_ELF64_R_TYPE(rel->r_info)) {
+  case LL_ELF_R_RISCV_CALL:
+  case LL_ELF_R_RISCV_CALL_PLT:
     return true;
   default:
     return false;
   }
 }
 
-bool needStubForRelaRISCV64(Elf_Rela *rela) {
-  switch (ELF64_R_TYPE(rela->r_info)) {
-  case R_RISCV_CALL:
-  case R_RISCV_CALL_PLT:
+bool needStubForRelaRISCV64(ll_elf_target_rela *rela) {
+  switch (LL_ELF64_R_TYPE(rela->r_info)) {
+  case LL_ELF_R_RISCV_CALL:
+  case LL_ELF_R_RISCV_CALL_PLT:
     return true;
   default:
     return false;

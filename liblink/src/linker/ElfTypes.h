@@ -1,93 +1,54 @@
 #if !defined(ElfTypes_h)
 #define ElfTypes_h
 
-#if defined(OBJFORMAT_ELF)
-
 #include "ll_target.h"
+#include "liblink/elf.h"
+#include "linker/ElfHost.h"
 
-#include <elf.h>
-#include "linker/InitFini.h"
+struct InitFiniList;
 
-/*
- * Define a set of types which can be used for both ELF32 and ELF64
- */
-
-#  define ELF_TARGET_AMD64 /* Used inside <elf.h> on Solaris 11 */
-
-/* Object records follow the selected target, not the compiler word size. */
+/* Selected file records follow the target, not the compiler word size. */
 #if LL_TARGET_WORD_SIZE == 8
-#  define ELF_64BIT
+#define LL_ELF_CLASS LL_ELF_ELFCLASS64
+typedef ll_elf64_addr ll_elf_target_addr;
+typedef ll_elf64_word ll_elf_target_word;
+typedef ll_elf64_sword ll_elf_target_sword;
+typedef ll_elf64_half ll_elf_target_half;
+typedef ll_elf64_ehdr ll_elf_target_ehdr;
+typedef ll_elf64_phdr ll_elf_target_phdr;
+typedef ll_elf64_shdr ll_elf_target_shdr;
+typedef ll_elf64_sym ll_elf_target_sym;
+typedef ll_elf64_rel ll_elf_target_rel;
+typedef ll_elf64_rela ll_elf_target_rela;
+#define LL_ELF_ST_VISIBILITY LL_ELF64_ST_VISIBILITY
+#define LL_ELF_ST_TYPE LL_ELF64_ST_TYPE
+#define LL_ELF_ST_BIND LL_ELF64_ST_BIND
+#define LL_ELF_R_TYPE LL_ELF64_R_TYPE
+#define LL_ELF_R_SYM LL_ELF64_R_SYM
 #else
-#  define ELF_32BIT
+#define LL_ELF_CLASS LL_ELF_ELFCLASS32
+typedef ll_elf32_addr ll_elf_target_addr;
+typedef ll_elf32_word ll_elf_target_word;
+typedef ll_elf32_sword ll_elf_target_sword;
+typedef ll_elf32_half ll_elf_target_half;
+typedef ll_elf32_ehdr ll_elf_target_ehdr;
+typedef ll_elf32_phdr ll_elf_target_phdr;
+typedef ll_elf32_shdr ll_elf_target_shdr;
+typedef ll_elf32_sym ll_elf_target_sym;
+typedef ll_elf32_rel ll_elf_target_rel;
+typedef ll_elf32_rela ll_elf_target_rela;
+#define LL_ELF_ST_VISIBILITY LL_ELF32_ST_VISIBILITY
+#define LL_ELF_ST_TYPE LL_ELF32_ST_TYPE
+#define LL_ELF_ST_BIND LL_ELF32_ST_BIND
+#define LL_ELF_R_TYPE LL_ELF32_R_TYPE
+#define LL_ELF_R_SYM LL_ELF32_R_SYM
 #endif
-
-#if defined(ELF_64BIT)
-#define ELFCLASS    ELFCLASS64
-#define Elf_Addr    Elf64_Addr
-#define Elf_Word    Elf64_Word
-#define Elf_Sword   Elf64_Sword
-#define Elf_Half    Elf64_Half
-#define Elf_Ehdr    Elf64_Ehdr
-#define Elf_Phdr    Elf64_Phdr
-#define Elf_Shdr    Elf64_Shdr
-#define Elf_Sym     Elf64_Sym
-#define Elf_Rel     Elf64_Rel
-#define Elf_Rela    Elf64_Rela
-#if !defined(ELF64_ST_VISIBILITY)
-#define ELF64_ST_VISIBILITY(o) ((o)&0x3)
-#endif
-#if !defined(ELF_ST_VISIBILITY)
-#define ELF_ST_VISIBILITY ELF64_ST_VISIBILITY
-#endif
-#if !defined(ELF_ST_TYPE)
-#define ELF_ST_TYPE ELF64_ST_TYPE
-#endif
-#if !defined(ELF_ST_BIND)
-#define ELF_ST_BIND ELF64_ST_BIND
-#endif
-#if !defined(ELF_R_TYPE)
-#define ELF_R_TYPE  ELF64_R_TYPE
-#endif
-#if !defined(ELF_R_SYM)
-#define ELF_R_SYM   ELF64_R_SYM
-#endif
-#else
-#define ELFCLASS    ELFCLASS32
-#define Elf_Addr    Elf32_Addr
-#define Elf_Word    Elf32_Word
-#define Elf_Sword   Elf32_Sword
-#define Elf_Half    Elf32_Half
-#define Elf_Ehdr    Elf32_Ehdr
-#define Elf_Phdr    Elf32_Phdr
-#define Elf_Shdr    Elf32_Shdr
-#define Elf_Sym     Elf32_Sym
-#define Elf_Rel     Elf32_Rel
-#define Elf_Rela    Elf32_Rela
-#if !defined(ELF32_ST_VISIBILITY)
-#define ELF32_ST_VISIBILITY(o) ((o)&0x3)
-#endif
-#if !defined(ELF_ST_VISIBILITY)
-#define ELF_ST_VISIBILITY ELF32_ST_VISIBILITY
-#endif /* ELF_ST_VISIBILITY */
-#if !defined(ELF_ST_TYPE)
-#define ELF_ST_TYPE ELF32_ST_TYPE
-#endif /* ELF_ST_TYPE */
-#if !defined(ELF_ST_BIND)
-#define ELF_ST_BIND ELF32_ST_BIND
-#endif /* ELF_ST_BIND */
-#if !defined(ELF_R_TYPE)
-#define ELF_R_TYPE  ELF32_R_TYPE
-#endif /* ELF_R_TYPE */
-#if !defined(ELF_R_SYM)
-#define ELF_R_SYM   ELF32_R_SYM
-#endif /* ELF_R_SYM */
-#endif /* ELF_64BIT */
 
 typedef struct _ElfSymbol {
     ll_symbol_name * name;  /* the name of the symbol. */
     ll_symbol_addr * addr;  /* the final resting place of the symbol */
     void * got_addr;    /* address of the got slot for this symbol, if any */
-    Elf_Sym * elf_sym;  /* the elf symbol entry */
+    ll_elf_target_sym * elf_sym;  /* the elf symbol entry */
 } ElfSymbol;
 
 typedef struct _ElfSymbolTable {
@@ -101,8 +62,8 @@ typedef struct _ElfSymbolTable {
 typedef struct _ElfRelocationTable {
     unsigned index;
     unsigned targetSectionIndex;
-    Elf_Shdr *sectionHeader;
-    Elf_Rel  *relocations;
+    ll_elf_target_shdr *sectionHeader;
+    ll_elf_target_rel  *relocations;
     size_t n_relocations;
     struct _ElfRelocationTable *next;
 } ElfRelocationTable;
@@ -110,8 +71,8 @@ typedef struct _ElfRelocationTable {
 typedef struct _ElfRelocationATable {
     unsigned index;
     unsigned targetSectionIndex;
-    Elf_Shdr *sectionHeader;
-    Elf_Rela  *relocations;
+    ll_elf_target_shdr *sectionHeader;
+    ll_elf_target_rela  *relocations;
     size_t n_relocations;
     struct _ElfRelocationATable *next;
 } ElfRelocationATable;
@@ -141,9 +102,9 @@ typedef struct _ElfRelocationATable {
  *
  */
 struct ll_elf_object_info {
-    Elf_Ehdr             *elfHeader;
-    Elf_Phdr             *programHeader;
-    Elf_Shdr             *sectionHeader;
+    ll_elf_target_ehdr             *elfHeader;
+    ll_elf_target_phdr             *programHeader;
+    ll_elf_target_shdr             *sectionHeader;
     char                 *sectionHeaderStrtab;
 
     ElfSymbolTable       *symbolTables;
@@ -177,7 +138,9 @@ struct _ElfStub {
 } ElfStub;
 
 /* Temporary native alias for existing RTS clients and fixtures. */
+#if defined(OBJFORMAT_ELF)
 typedef ElfStub Stub;
+#endif
 
 struct ll_elf_section_info {
     /*
@@ -190,7 +153,6 @@ struct ll_elf_section_info {
 
     const char * name;
 
-    Elf_Shdr *sectionHeader;
+    ll_elf_target_shdr *sectionHeader;
 };
-#endif /* OBJECTFORMAT_ELF */
 #endif /* ElfTypes_h */

@@ -165,17 +165,17 @@ static int
 find_tls_sym(dlpi *info, size_t sz LL_UNUSED, void *data)
 {
     tls_sym *wanted = (tls_sym *)data;
-    const Elf_Addr base = info->dlpi_addr;
-    const Elf_Dyn *dyn = NULL;
-    const Elf_Sym *dynsym = NULL;
-    const Elf_Word *dynhash = 0;
+    const Elf64_Addr base = info->dlpi_addr;
+    const Elf64_Dyn *dyn = NULL;
+    const Elf64_Sym *dynsym = NULL;
+    const Elf64_Word *dynhash = 0;
     const char *dynstr = NULL;
 
     for (size_t i = 0; i < info->dlpi_phnum; i++) {
-        const Elf_Phdr *phdr = &info->dlpi_phdr[i];
+        const Elf64_Phdr *phdr = &info->dlpi_phdr[i];
 
         if (phdr->p_type == PT_DYNAMIC) {
-            dyn = (const Elf_Dyn *)(base + phdr->p_vaddr);
+            dyn = (const Elf64_Dyn *)(base + phdr->p_vaddr);
             break;
         }
     }
@@ -185,13 +185,13 @@ find_tls_sym(dlpi *info, size_t sz LL_UNUSED, void *data)
     for (size_t i = 0; dyn[i].d_tag != DT_NULL; ++i)
         switch (dyn[i].d_tag) {
         case DT_SYMTAB:
-            dynsym = (const Elf_Sym *)(base + dyn[i].d_un.d_val);
+            dynsym = (const Elf64_Sym *)(base + dyn[i].d_un.d_val);
             break;
         case DT_STRTAB:
             dynstr = (const char *)(base + dyn[i].d_un.d_val);
             break;
         case DT_HASH:
-            dynhash = (const Elf_Word *)(base + dyn[i].d_un.d_val);
+            dynhash = (const Elf64_Word *)(base + dyn[i].d_un.d_val);
             break;
         default:
             break;
@@ -202,16 +202,16 @@ find_tls_sym(dlpi *info, size_t sz LL_UNUSED, void *data)
 
     unsigned long nbucket = (unsigned long)dynhash[0];
     // unsigned long nchain = (unsigned long)dynhash[1];
-    const Elf_Word *bucket = &dynhash[2];
-    const Elf_Word *chain = &dynhash[2+nbucket];
+    const Elf64_Word *bucket = &dynhash[2];
+    const Elf64_Word *chain = &dynhash[2+nbucket];
     unsigned long h = wanted->tls_sym_hash % nbucket;
 
     for (unsigned long i = bucket[h]; i != STN_UNDEF; i = chain[i]) {
-        const Elf_Sym *sym = dynsym+i;
+        const Elf64_Sym *sym = dynsym+i;
         const char *symname = dynstr + sym->st_name;
 
         /* Ignore undefined or non-TLS symbols */
-        if (sym->st_value == 0 || ELF_ST_TYPE(sym->st_info) != STT_TLS)
+        if (sym->st_value == 0 || ELF64_ST_TYPE(sym->st_info) != STT_TLS)
             continue;
 
         if (strcmp(symname, wanted->tls_sym_name) == 0) {

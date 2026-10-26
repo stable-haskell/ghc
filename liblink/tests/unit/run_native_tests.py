@@ -1089,6 +1089,22 @@ def main() -> int:
                 run([str(binary)], label="check Windows SDK COFF layout equivalence")
 
     if selected_modes == 0:
+        with tempfile.TemporaryDirectory(prefix="liblink-elf-layout-") as temporary:
+            binary = Path(temporary) / "elf_layout"
+            source = ROOT / "liblink/tests/unit/elf_layout.c"
+            run(cc + [str(source), "-o", str(binary)],
+                label="compile SDK-independent ELF layout unit")
+            if sys.byteorder == "little":
+                run([str(binary)], label="check ELF32/ELF64 wire layout")
+            else:
+                print("[elf_layout] wire-byte runtime check requires a little-endian host; layout compiled")
+            if host in ("Linux", "FreeBSD", "OpenBSD", "NetBSD", "DragonFly", "SunOS"):
+                run(cc + ["-DLL_ELF_COMPARE_SDK", str(source), "-o", str(binary)],
+                    label="compile real ELF SDK layout comparison")
+                if sys.byteorder == "little":
+                    run([str(binary)], label="check native SDK ELF layout equivalence")
+
+    if selected_modes == 0:
         with tempfile.TemporaryDirectory(prefix="liblink-macho-layout-") as temporary:
             binary = Path(temporary) / "macho_layout"
             source = ROOT / "liblink/tests/unit/macho_layout.c"

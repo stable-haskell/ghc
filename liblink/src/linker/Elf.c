@@ -20,6 +20,7 @@
 #include "RtsSymbolInfo.h"
 #include "linker/MMap.h"
 #include "linker/Elf.h"
+#include "linker/InitFini.h"
 #include "ll_format.h"
 
 #include "linker/CacheFlush.h"
@@ -118,20 +119,6 @@
  */
 #define X86_64_ELF_NONPIC_HACK(L) (!(L)->services.cfg.always_pic)
 
-#if LL_TARGET_I386
-#  define ELF_TARGET_386    /* Used inside <elf.h> */
-#elif LL_TARGET_X86_64
-#  define ELF_TARGET_X64_64
-#  define ELF_TARGET_AMD64 /* Used inside <elf.h> on Solaris 11 */
-#endif
-
-#if !defined(openbsd_HOST_OS)
-#  include <elf.h>
-#else
-/* openbsd elf has things in different places, with diff names */
-#  include <elf_abi.h>
-#endif
-
 #include "elf_got.h"
 
 #if LL_ELF_NEED_PLT
@@ -162,19 +149,19 @@
 
 */
 
-static Elf_Word elf_shnum(Elf_Ehdr* ehdr)
+static ll_elf_target_word elf_shnum(ll_elf_target_ehdr* ehdr)
 {
-   Elf_Shdr* shdr = (Elf_Shdr*) ((char*)ehdr + ehdr->e_shoff);
-   Elf_Half shnum = ehdr->e_shnum;
-   return shnum != SHN_UNDEF ? shnum : shdr[0].sh_size;
+   ll_elf_target_shdr* shdr = (ll_elf_target_shdr*) ((char*)ehdr + ehdr->e_shoff);
+   ll_elf_target_half shnum = ehdr->e_shnum;
+   return shnum != LL_ELF_SHN_UNDEF ? shnum : shdr[0].sh_size;
 }
 
-static Elf_Word elf_shstrndx(Elf_Ehdr* ehdr)
+static ll_elf_target_word elf_shstrndx(ll_elf_target_ehdr* ehdr)
 {
-   Elf_Half shstrndx = ehdr->e_shstrndx;
-#if defined(SHN_XINDEX)
-   Elf_Shdr* shdr = (Elf_Shdr*) ((char*)ehdr + ehdr->e_shoff);
-   return shstrndx != SHN_XINDEX ? shstrndx : shdr[0].sh_link;
+   ll_elf_target_half shstrndx = ehdr->e_shstrndx;
+#if LL_ELF_HAS_SHN_XINDEX
+   ll_elf_target_shdr* shdr = (ll_elf_target_shdr*) ((char*)ehdr + ehdr->e_shoff);
+   return shstrndx != LL_ELF_SHN_XINDEX ? shstrndx : shdr[0].sh_link;
 #else
    // some OSes do not support SHN_XINDEX yet, let's revert to
    // old way
@@ -182,23 +169,23 @@ static Elf_Word elf_shstrndx(Elf_Ehdr* ehdr)
 #endif
 }
 
-#if defined(SHN_XINDEX)
-static Elf_Word*
+#if LL_ELF_HAS_SHN_XINDEX
+static ll_elf_target_word*
 get_shndx_table(ObjectCode* oc)
 {
    if (LL_LIKELY(oc->shndx_table != SHNDX_TABLE_UNINIT(oc->L))) {
       return oc->shndx_table;
    }
 
-   Elf_Word  i;
+   ll_elf_target_word  i;
    char*     ehdrC    = oc->image;
-   Elf_Ehdr* ehdr     = (Elf_Ehdr*)ehdrC;
-   Elf_Shdr* shdr     = (Elf_Shdr*) (ehdrC + ehdr->e_shoff);
-   const Elf_Word shnum = elf_shnum(ehdr);
+   ll_elf_target_ehdr* ehdr     = (ll_elf_target_ehdr*)ehdrC;
+   ll_elf_target_shdr* shdr     = (ll_elf_target_shdr*) (ehdrC + ehdr->e_shoff);
+   const ll_elf_target_word shnum = elf_shnum(ehdr);
 
    for (i = 0; i < shnum; i++) {
-     if (shdr[i].sh_type == SHT_SYMTAB_SHNDX) {
-       oc->shndx_table = (Elf32_Word*)(ehdrC + shdr[i].sh_offset);
+     if (shdr[i].sh_type == LL_ELF_SHT_SYMTAB_SHNDX) {
+       oc->shndx_table = (ll_elf32_word*)(ehdrC + shdr[i].sh_offset);
        return oc->shndx_table;
      }
    }
@@ -219,10 +206,10 @@ ocInit_ELF(ObjectCode * oc)
             1, sizeof *oc->elf_info,
             "ocInit_Elf(ObjectCodeFormatInfo)");
     // TODO: fill info
-    oc->elf_info->elfHeader = (Elf_Ehdr *)oc->image;
+    oc->elf_info->elfHeader = (ll_elf_target_ehdr *)oc->image;
     oc->elf_info->programHeader = oc->elf_info->elfHeader->e_phnum == 0 ? NULL :
-        (Elf_Phdr *)((uint8_t *)oc->image + oc->elf_info->elfHeader->e_phoff);
-    oc->elf_info->sectionHeader = (Elf_Shdr *) ((uint8_t*)oc->image
+        (ll_elf_target_phdr *)((uint8_t *)oc->image + oc->elf_info->elfHeader->e_phoff);
+    oc->elf_info->sectionHeader = (ll_elf_target_shdr *) ((uint8_t*)oc->image
                                             + oc->elf_info->elfHeader->e_shoff);
     oc->elf_info->sectionHeaderStrtab = (char*)((uint8_t*)oc->image +
             oc->elf_info->sectionHeader[elf_shstrndx(oc->elf_info->elfHeader)].sh_offset);
@@ -235,17 +222,17 @@ ocInit_ELF(ObjectCode * oc)
 
     /* get the symbol table(s) */
     for(int i=0; i < oc->n_sections; i++) {
-        if(SHT_REL  == oc->elf_info->sectionHeader[i].sh_type) {
+        if(LL_ELF_SHT_REL  == oc->elf_info->sectionHeader[i].sh_type) {
             ElfRelocationTable *relTab = (ElfRelocationTable *)LL_CALLOC_FOR(oc->L,
                     1, sizeof(ElfRelocationTable),
                     "ocInit_Elf(ElfRelocationTable");
             relTab->index = i;
 
             relTab->relocations =
-                (Elf_Rel*) ((uint8_t*)oc->elf_info->elfHeader
+                (ll_elf_target_rel*) ((uint8_t*)oc->elf_info->elfHeader
                                     + oc->elf_info->sectionHeader[i].sh_offset);
             relTab->n_relocations = oc->elf_info->sectionHeader[i].sh_size
-                                    / sizeof(Elf_Rel);
+                                    / sizeof(ll_elf_target_rel);
             relTab->targetSectionIndex = oc->elf_info->sectionHeader[i].sh_info;
 
             relTab->sectionHeader      = &oc->elf_info->sectionHeader[i];
@@ -258,17 +245,17 @@ ocInit_ELF(ObjectCode * oc)
                 relTableLast = relTab;
             }
 
-        } else if(SHT_RELA == oc->elf_info->sectionHeader[i].sh_type) {
+        } else if(LL_ELF_SHT_RELA == oc->elf_info->sectionHeader[i].sh_type) {
             ElfRelocationATable *relTab = (ElfRelocationATable *)LL_CALLOC_FOR(oc->L,
                     1, sizeof(ElfRelocationATable),
                     "ocInit_Elf(ElfRelocationTable");
             relTab->index = i;
 
             relTab->relocations =
-                (Elf_Rela*) ((uint8_t*)oc->elf_info->elfHeader
+                (ll_elf_target_rela*) ((uint8_t*)oc->elf_info->elfHeader
                                      + oc->elf_info->sectionHeader[i].sh_offset);
             relTab->n_relocations = oc->elf_info->sectionHeader[i].sh_size
-                                    / sizeof(Elf_Rela);
+                                    / sizeof(ll_elf_target_rela);
             relTab->targetSectionIndex = oc->elf_info->sectionHeader[i].sh_info;
 
             relTab->sectionHeader      = &oc->elf_info->sectionHeader[i];
@@ -281,7 +268,7 @@ ocInit_ELF(ObjectCode * oc)
                 relaTableLast = relTab;
             }
 
-        } else if(SHT_SYMTAB == oc->elf_info->sectionHeader[i].sh_type) {
+        } else if(LL_ELF_SHT_SYMTAB == oc->elf_info->sectionHeader[i].sh_type) {
 
             ElfSymbolTable *symTab = (ElfSymbolTable *)LL_CALLOC_FOR(oc->L,
                     1, sizeof(ElfSymbolTable),
@@ -291,10 +278,10 @@ ocInit_ELF(ObjectCode * oc)
                                 * find or assert that we are dealing with the
                                 * correct symbol table */
 
-            Elf_Sym *stab = (Elf_Sym*)((uint8_t*)oc->elf_info->elfHeader
+            ll_elf_target_sym *stab = (ll_elf_target_sym*)((uint8_t*)oc->elf_info->elfHeader
                                        + oc->elf_info->sectionHeader[i].sh_offset);
             symTab->n_symbols = oc->elf_info->sectionHeader[i].sh_size
-                                / sizeof(Elf_Sym);
+                                / sizeof(ll_elf_target_sym);
             symTab->symbols = (ElfSymbol *)LL_CALLOC_FOR(oc->L,
                     symTab->n_symbols, sizeof(ElfSymbol),
                     "ocInit_Elf(ElfSymbol)");
@@ -382,7 +369,7 @@ ocDeinit_ELF(ObjectCode * oc)
 
         LL_FREE_FOR(oc->L, oc->elf_info);
         oc->elf_info = NULL;
-#if defined(SHN_XINDEX)
+#if LL_ELF_HAS_SHN_XINDEX
         oc->shndx_table = SHNDX_TABLE_UNINIT(oc->L);
 #endif
     }
@@ -401,39 +388,39 @@ int
 ocVerifyImage_ELF ( ObjectCode* oc )
 {
    if (!ocValidateImage_ELF(oc)) return 0;
-   Elf_Shdr* shdr;
-   Elf_Sym*  stab;
+   ll_elf_target_shdr* shdr;
+   ll_elf_target_sym*  stab;
    int j, nent, nstrtab, nsymtabs;
-   Elf_Word i, shnum, shstrndx;
+   ll_elf_target_word i, shnum, shstrndx;
    char* sh_strtab;
 
    char*     ehdrC = (char*)(oc->image);
-   Elf_Ehdr* ehdr  = (Elf_Ehdr*)ehdrC;
+   ll_elf_target_ehdr* ehdr  = (ll_elf_target_ehdr*)ehdrC;
 
-   if (ehdr->e_ident[EI_MAG0] != ELFMAG0 ||
-       ehdr->e_ident[EI_MAG1] != ELFMAG1 ||
-       ehdr->e_ident[EI_MAG2] != ELFMAG2 ||
-       ehdr->e_ident[EI_MAG3] != ELFMAG3) {
+   if (ehdr->e_ident[LL_ELF_EI_MAG0] != LL_ELF_ELFMAG0 ||
+       ehdr->e_ident[LL_ELF_EI_MAG1] != LL_ELF_ELFMAG1 ||
+       ehdr->e_ident[LL_ELF_EI_MAG2] != LL_ELF_ELFMAG2 ||
+       ehdr->e_ident[LL_ELF_EI_MAG3] != LL_ELF_ELFMAG3) {
       LL_LOG_ERROR_FOR(oc->L, "%s: not an ELF object", oc->fileName);
       return 0;
    }
 
-   if (ehdr->e_ident[EI_CLASS] != ELFCLASS) {
+   if (ehdr->e_ident[LL_ELF_EI_CLASS] != LL_ELF_CLASS) {
       LL_LOG_ERROR_FOR(oc->L, "%s: unsupported ELF format", oc->fileName);
       return 0;
    }
 
-   if (ehdr->e_ident[EI_DATA] == ELFDATA2LSB) {
+   if (ehdr->e_ident[LL_ELF_EI_DATA] == LL_ELF_ELFDATA2LSB) {
        LL_IF_DEBUG_FOR(oc->L, linker,LL_DEBUG_FOR(oc->L, "Is little-endian\n" ));
    } else
-   if (ehdr->e_ident[EI_DATA] == ELFDATA2MSB) {
+   if (ehdr->e_ident[LL_ELF_EI_DATA] == LL_ELF_ELFDATA2MSB) {
        LL_IF_DEBUG_FOR(oc->L, linker,LL_DEBUG_FOR(oc->L, "Is big-endian\n" ));
    } else {
        LL_LOG_ERROR_FOR(oc->L, "%s: unknown endianness", oc->fileName);
        return 0;
    }
 
-   if (ehdr->e_type != ET_REL) {
+   if (ehdr->e_type != LL_ELF_ET_REL) {
       LL_LOG_ERROR_FOR(oc->L, "%s: not a relocatable object (.o) file", oc->fileName);
       return 0;
    }
@@ -441,43 +428,43 @@ ocVerifyImage_ELF ( ObjectCode* oc )
 
    LL_IF_DEBUG_FOR(oc->L, linker,LL_DEBUG_FOR(oc->L, "Architecture is " ));
    switch (ehdr->e_machine) {
-#if defined(EM_ARM)
-      case EM_ARM:   LL_IF_DEBUG_FOR(oc->L, linker,LL_DEBUG_FOR(oc->L, "arm" )); break;
+#if LL_ELF_HAS_EM_ARM
+      case LL_ELF_EM_ARM:   LL_IF_DEBUG_FOR(oc->L, linker,LL_DEBUG_FOR(oc->L, "arm" )); break;
 #endif
-      case EM_386:   LL_IF_DEBUG_FOR(oc->L, linker,LL_DEBUG_FOR(oc->L, "x86" )); break;
-#if defined(EM_SPARC32PLUS)
-      case EM_SPARC32PLUS:
+      case LL_ELF_EM_386:   LL_IF_DEBUG_FOR(oc->L, linker,LL_DEBUG_FOR(oc->L, "x86" )); break;
+#if LL_ELF_HAS_EM_SPARC32PLUS
+      case LL_ELF_EM_SPARC32PLUS:
 #endif
-      case EM_SPARC: LL_IF_DEBUG_FOR(oc->L, linker,LL_DEBUG_FOR(oc->L, "sparc" )); break;
-#if defined(EM_IA_64)
-      case EM_IA_64: LL_IF_DEBUG_FOR(oc->L, linker,LL_DEBUG_FOR(oc->L, "ia64" )); break;
+      case LL_ELF_EM_SPARC: LL_IF_DEBUG_FOR(oc->L, linker,LL_DEBUG_FOR(oc->L, "sparc" )); break;
+#if LL_ELF_HAS_EM_IA_64
+      case LL_ELF_EM_IA_64: LL_IF_DEBUG_FOR(oc->L, linker,LL_DEBUG_FOR(oc->L, "ia64" )); break;
 #endif
-      case EM_PPC:   LL_IF_DEBUG_FOR(oc->L, linker,LL_DEBUG_FOR(oc->L, "powerpc32" )); break;
-#if defined(EM_PPC64)
-      case EM_PPC64: LL_IF_DEBUG_FOR(oc->L, linker,LL_DEBUG_FOR(oc->L, "powerpc64" ));
+      case LL_ELF_EM_PPC:   LL_IF_DEBUG_FOR(oc->L, linker,LL_DEBUG_FOR(oc->L, "powerpc32" )); break;
+#if LL_ELF_HAS_EM_PPC64
+      case LL_ELF_EM_PPC64: LL_IF_DEBUG_FOR(oc->L, linker,LL_DEBUG_FOR(oc->L, "powerpc64" ));
           LL_LOG_ERROR_FOR(oc->L, "%s: RTS linker not implemented on PowerPC 64-bit",
                      oc->fileName);
           return 0;
 #endif
-#if defined(EM_S390)
-      case EM_S390:  LL_IF_DEBUG_FOR(oc->L, linker,LL_DEBUG_FOR(oc->L, "s390" ));
+#if LL_ELF_HAS_EM_S390
+      case LL_ELF_EM_S390:  LL_IF_DEBUG_FOR(oc->L, linker,LL_DEBUG_FOR(oc->L, "s390" ));
           LL_LOG_ERROR_FOR(oc->L, "%s: RTS linker not implemented on s390",
                      oc->fileName);
           return 0;
 #endif
-#if defined(EM_X86_64)
-      case EM_X86_64: LL_IF_DEBUG_FOR(oc->L, linker,LL_DEBUG_FOR(oc->L, "x86_64" )); break;
-#elif defined(EM_AMD64)
-      case EM_AMD64: LL_IF_DEBUG_FOR(oc->L, linker,LL_DEBUG_FOR(oc->L, "amd64" )); break;
+#if LL_ELF_HAS_EM_X86_64
+      case LL_ELF_EM_X86_64: LL_IF_DEBUG_FOR(oc->L, linker,LL_DEBUG_FOR(oc->L, "x86_64" )); break;
+#elif LL_ELF_HAS_EM_AMD64
+      case LL_ELF_EM_AMD64: LL_IF_DEBUG_FOR(oc->L, linker,LL_DEBUG_FOR(oc->L, "amd64" )); break;
 #endif
-#if defined(EM_AARCH64)
-      case EM_AARCH64: LL_IF_DEBUG_FOR(oc->L, linker,LL_DEBUG_FOR(oc->L, "aarch64" )); break;
+#if LL_ELF_HAS_EM_AARCH64
+      case LL_ELF_EM_AARCH64: LL_IF_DEBUG_FOR(oc->L, linker,LL_DEBUG_FOR(oc->L, "aarch64" )); break;
 #endif
-#if defined(EM_RISCV)
-      case EM_RISCV:  LL_IF_DEBUG_FOR(oc->L, linker,LL_DEBUG_FOR(oc->L, "riscv" )); break;
+#if LL_ELF_HAS_EM_RISCV
+      case LL_ELF_EM_RISCV:  LL_IF_DEBUG_FOR(oc->L, linker,LL_DEBUG_FOR(oc->L, "riscv" )); break;
 #endif
-#if defined(EM_LOONGARCH)
-      case EM_LOONGARCH:  LL_IF_DEBUG_FOR(oc->L, linker,LL_DEBUG_FOR(oc->L, "loongarch64" ));
+#if LL_ELF_HAS_EM_LOONGARCH
+      case LL_ELF_EM_LOONGARCH:  LL_IF_DEBUG_FOR(oc->L, linker,LL_DEBUG_FOR(oc->L, "loongarch64" ));
           LL_LOG_ERROR_FOR(oc->L, "%s: RTS linker not implemented on loongarch64",
                      oc->fileName);
           return 0;
@@ -493,12 +480,12 @@ ocVerifyImage_ELF ( ObjectCode* oc )
              "\nSection header table: start %ld, n_entries %d, ent_size %d\n",
              (long)ehdr->e_shoff, shnum, ehdr->e_shentsize  ));
 
-   LL_CHECK_FOR(oc->L, ehdr->e_shentsize == sizeof(Elf_Shdr));
+   LL_CHECK_FOR(oc->L, ehdr->e_shentsize == sizeof(ll_elf_target_shdr));
 
-   shdr = (Elf_Shdr*) (ehdrC + ehdr->e_shoff);
+   shdr = (ll_elf_target_shdr*) (ehdrC + ehdr->e_shoff);
 
    shstrndx = elf_shstrndx(ehdr);
-   if (shstrndx == SHN_UNDEF) {
+   if (shstrndx == LL_ELF_SHN_UNDEF) {
       LL_LOG_ERROR_FOR(oc->L, "%s: no section header string table", oc->fileName);
       return 0;
    } else {
@@ -516,16 +503,16 @@ ocVerifyImage_ELF ( ObjectCode* oc )
                (void *)((uintptr_t)ehdrC + shdr[i].sh_offset),
                (void *)((uintptr_t)ehdrC + shdr[i].sh_offset + shdr[i].sh_size - 1)));
 
-#define SECTION_INDEX_VALID(ndx) (ndx > SHN_UNDEF && ndx < shnum)
+#define SECTION_INDEX_VALID(ndx) (ndx > LL_ELF_SHN_UNDEF && ndx < shnum)
 
       switch (shdr[i].sh_type) {
 
-        case SHT_REL:
-        case SHT_RELA:
-          LL_IF_DEBUG_FOR(oc->L, linker_verbose,LL_DEBUG_FOR(oc->L, shdr[i].sh_type == SHT_REL ? "Rel  " : "RelA "));
+        case LL_ELF_SHT_REL:
+        case LL_ELF_SHT_RELA:
+          LL_IF_DEBUG_FOR(oc->L, linker_verbose,LL_DEBUG_FOR(oc->L, shdr[i].sh_type == LL_ELF_SHT_REL ? "Rel  " : "RelA "));
 
           if (!SECTION_INDEX_VALID(shdr[i].sh_link)) {
-            if (shdr[i].sh_link == SHN_UNDEF)
+            if (shdr[i].sh_link == LL_ELF_SHN_UNDEF)
               LL_LOG_ERROR_FOR(oc->L, "\n%s: relocation section #%d has no symbol table\n"
                          "This object file has probably been fully stripped. "
                          "Such files cannot be linked.\n",
@@ -536,7 +523,7 @@ ocVerifyImage_ELF ( ObjectCode* oc )
                          i, shdr[i].sh_link);
             return 0;
           }
-          if (shdr[shdr[i].sh_link].sh_type != SHT_SYMTAB) {
+          if (shdr[shdr[i].sh_link].sh_type != LL_ELF_SHT_SYMTAB) {
             LL_LOG_ERROR_FOR(oc->L, "\n%s: relocation section #%d does not link to a symbol table\n",
                        oc->archiveMemberName ? oc->archiveMemberName : oc->fileName, i);
             return 0;
@@ -549,7 +536,7 @@ ocVerifyImage_ELF ( ObjectCode* oc )
           }
 
           break;
-        case SHT_SYMTAB:
+        case LL_ELF_SHT_SYMTAB:
           LL_IF_DEBUG_FOR(oc->L, linker_verbose,LL_DEBUG_FOR(oc->L, "Sym  "));
 
           if (!SECTION_INDEX_VALID(shdr[i].sh_link)) {
@@ -558,14 +545,14 @@ ocVerifyImage_ELF ( ObjectCode* oc )
                        i, shdr[i].sh_link);
             return 0;
           }
-          if (shdr[shdr[i].sh_link].sh_type != SHT_STRTAB) {
+          if (shdr[shdr[i].sh_link].sh_type != LL_ELF_SHT_STRTAB) {
             LL_LOG_ERROR_FOR(oc->L, "\n%s: symbol table section #%d does not link to a string table\n",
                        oc->archiveMemberName ? oc->archiveMemberName : oc->fileName, i);
 
             return 0;
           }
           break;
-        case SHT_STRTAB: LL_IF_DEBUG_FOR(oc->L, linker_verbose,LL_DEBUG_FOR(oc->L, "Str  ")); break;
+        case LL_ELF_SHT_STRTAB: LL_IF_DEBUG_FOR(oc->L, linker_verbose,LL_DEBUG_FOR(oc->L, "Str  ")); break;
         default:         LL_IF_DEBUG_FOR(oc->L, linker_verbose,LL_DEBUG_FOR(oc->L, "     ")); break;
       }
       if (sh_strtab) {
@@ -576,7 +563,7 @@ ocVerifyImage_ELF ( ObjectCode* oc )
    LL_IF_DEBUG_FOR(oc->L, linker_verbose,LL_DEBUG_FOR(oc->L, "\nString tables\n" ));
    nstrtab = 0;
    for (i = 0; i < shnum; i++) {
-      if (shdr[i].sh_type == SHT_STRTAB
+      if (shdr[i].sh_type == LL_ELF_SHT_STRTAB
           /* Ignore the section header's string table. */
           && i != shstrndx
           /* Ignore string tables named .stabstr, as they contain
@@ -590,30 +577,30 @@ ocVerifyImage_ELF ( ObjectCode* oc )
    if (nstrtab == 0) {
       LL_IF_DEBUG_FOR(oc->L, linker_verbose,LL_DEBUG_FOR(oc->L, "   no normal string tables (potentially, but not necessarily a problem)\n"));
    }
-#if defined(SHN_XINDEX)
-   Elf_Word* shndxTable = get_shndx_table(oc);
+#if LL_ELF_HAS_SHN_XINDEX
+   ll_elf_target_word* shndxTable = get_shndx_table(oc);
 #endif
    nsymtabs = 0;
    LL_IF_DEBUG_FOR(oc->L, linker_verbose,LL_DEBUG_FOR(oc->L, "Symbol tables\n" ));
    for (i = 0; i < shnum; i++) {
-      if (shdr[i].sh_type != SHT_SYMTAB) continue;
+      if (shdr[i].sh_type != LL_ELF_SHT_SYMTAB) continue;
       LL_IF_DEBUG_FOR(oc->L, linker_verbose,LL_DEBUG_FOR(oc->L, "section %d is a symbol table\n", i ));
       nsymtabs++;
-      stab = (Elf_Sym*) (ehdrC + shdr[i].sh_offset);
-      nent = shdr[i].sh_size / sizeof(Elf_Sym);
+      stab = (ll_elf_target_sym*) (ehdrC + shdr[i].sh_offset);
+      nent = shdr[i].sh_size / sizeof(ll_elf_target_sym);
       LL_IF_DEBUG_FOR(oc->L, linker_verbose,LL_DEBUG_FOR(oc->L, "   number of entries is apparently %d (%ld rem)\n",
                nent,
-               (long)shdr[i].sh_size % sizeof(Elf_Sym)
+               (long)shdr[i].sh_size % sizeof(ll_elf_target_sym)
              ));
-      if (0 != shdr[i].sh_size % sizeof(Elf_Sym)) {
+      if (0 != shdr[i].sh_size % sizeof(ll_elf_target_sym)) {
          LL_LOG_ERROR_FOR(oc->L, "%s: non-integral number of symbol table entries", oc->fileName);
          return 0;
       }
       for (j = 0; j < nent; j++) {
-         Elf_Word secno = stab[j].st_shndx;
-#if defined(SHN_XINDEX)
+         ll_elf_target_word secno = stab[j].st_shndx;
+#if LL_ELF_HAS_SHN_XINDEX
          /* See Note [Many ELF Sections] */
-         if (secno == SHN_XINDEX) {
+         if (secno == LL_ELF_SHN_XINDEX) {
             LL_CHECK_FOR(oc->L, shndxTable);
             secno = shndxTable[j];
          }
@@ -625,21 +612,21 @@ ocVerifyImage_ELF ( ObjectCode* oc )
                              (char*)stab[j].st_value ));
 
          LL_IF_DEBUG_FOR(oc->L, linker_verbose,LL_DEBUG_FOR(oc->L, "type=" ));
-         switch (ELF_ST_TYPE(stab[j].st_info)) {
-            case STT_NOTYPE:  LL_IF_DEBUG_FOR(oc->L, linker_verbose,LL_DEBUG_FOR(oc->L, "notype " )); break;
-            case STT_OBJECT:  LL_IF_DEBUG_FOR(oc->L, linker_verbose,LL_DEBUG_FOR(oc->L, "object " )); break;
-            case STT_FUNC  :  LL_IF_DEBUG_FOR(oc->L, linker_verbose,LL_DEBUG_FOR(oc->L, "func   " )); break;
-            case STT_SECTION: LL_IF_DEBUG_FOR(oc->L, linker_verbose,LL_DEBUG_FOR(oc->L, "section" )); break;
-            case STT_FILE:    LL_IF_DEBUG_FOR(oc->L, linker_verbose,LL_DEBUG_FOR(oc->L, "file   " )); break;
+         switch (LL_ELF_ST_TYPE(stab[j].st_info)) {
+            case LL_ELF_STT_NOTYPE:  LL_IF_DEBUG_FOR(oc->L, linker_verbose,LL_DEBUG_FOR(oc->L, "notype " )); break;
+            case LL_ELF_STT_OBJECT:  LL_IF_DEBUG_FOR(oc->L, linker_verbose,LL_DEBUG_FOR(oc->L, "object " )); break;
+            case LL_ELF_STT_FUNC  :  LL_IF_DEBUG_FOR(oc->L, linker_verbose,LL_DEBUG_FOR(oc->L, "func   " )); break;
+            case LL_ELF_STT_SECTION: LL_IF_DEBUG_FOR(oc->L, linker_verbose,LL_DEBUG_FOR(oc->L, "section" )); break;
+            case LL_ELF_STT_FILE:    LL_IF_DEBUG_FOR(oc->L, linker_verbose,LL_DEBUG_FOR(oc->L, "file   " )); break;
             default:          LL_IF_DEBUG_FOR(oc->L, linker_verbose,LL_DEBUG_FOR(oc->L, "?      " )); break;
          }
          LL_IF_DEBUG_FOR(oc->L, linker_verbose,LL_DEBUG_FOR(oc->L, "  " ));
 
          LL_IF_DEBUG_FOR(oc->L, linker_verbose,LL_DEBUG_FOR(oc->L, "bind=" ));
-         switch (ELF_ST_BIND(stab[j].st_info)) {
-            case STB_LOCAL :  LL_IF_DEBUG_FOR(oc->L, linker_verbose,LL_DEBUG_FOR(oc->L, "local " )); break;
-            case STB_GLOBAL:  LL_IF_DEBUG_FOR(oc->L, linker_verbose,LL_DEBUG_FOR(oc->L, "global" )); break;
-            case STB_WEAK  :  LL_IF_DEBUG_FOR(oc->L, linker_verbose,LL_DEBUG_FOR(oc->L, "weak  " )); break;
+         switch (LL_ELF_ST_BIND(stab[j].st_info)) {
+            case LL_ELF_STB_LOCAL :  LL_IF_DEBUG_FOR(oc->L, linker_verbose,LL_DEBUG_FOR(oc->L, "local " )); break;
+            case LL_ELF_STB_GLOBAL:  LL_IF_DEBUG_FOR(oc->L, linker_verbose,LL_DEBUG_FOR(oc->L, "global" )); break;
+            case LL_ELF_STB_WEAK  :  LL_IF_DEBUG_FOR(oc->L, linker_verbose,LL_DEBUG_FOR(oc->L, "weak  " )); break;
             default:          LL_IF_DEBUG_FOR(oc->L, linker_verbose,LL_DEBUG_FOR(oc->L, "?     " )); break;
          }
          LL_IF_DEBUG_FOR(oc->L, linker_verbose,LL_DEBUG_FOR(oc->L, "  " ));
@@ -664,43 +651,43 @@ ocVerifyImage_ELF ( ObjectCode* oc )
 /* Figure out what kind of section it is.  Logic derived from
    Figure 1.14 ("Special Sections") of the ELF document
    ("Portable Formats Specification, Version 1.1"). */
-static SectionKind getSectionKind_ELF( Elf_Shdr *hdr, int *is_bss )
+static SectionKind getSectionKind_ELF( ll_elf_target_shdr *hdr, int *is_bss )
 {
     *is_bss = false;
 
-    if (hdr->sh_type == SHT_PROGBITS
-        && (hdr->sh_flags & SHF_ALLOC) && (hdr->sh_flags & SHF_EXECINSTR)) {
+    if (hdr->sh_type == LL_ELF_SHT_PROGBITS
+        && (hdr->sh_flags & LL_ELF_SHF_ALLOC) && (hdr->sh_flags & LL_ELF_SHF_EXECINSTR)) {
         /* .text-style section */
         return SECTIONKIND_CODE_OR_RODATA;
     }
 
-    if (hdr->sh_type == SHT_PROGBITS
-            && (hdr->sh_flags & SHF_ALLOC) && (hdr->sh_flags & SHF_WRITE)) {
+    if (hdr->sh_type == LL_ELF_SHT_PROGBITS
+            && (hdr->sh_flags & LL_ELF_SHF_ALLOC) && (hdr->sh_flags & LL_ELF_SHF_WRITE)) {
             /* .data-style section */
             return SECTIONKIND_RWDATA;
     }
 
-    if (hdr->sh_type == SHT_PROGBITS
-        && (hdr->sh_flags & SHF_ALLOC) && !(hdr->sh_flags & SHF_WRITE)) {
+    if (hdr->sh_type == LL_ELF_SHT_PROGBITS
+        && (hdr->sh_flags & LL_ELF_SHF_ALLOC) && !(hdr->sh_flags & LL_ELF_SHF_WRITE)) {
         /* .rodata-style section */
         return SECTIONKIND_CODE_OR_RODATA;
     }
-#if defined(SHT_INIT_ARRAY)
-    if (hdr->sh_type == SHT_INIT_ARRAY
-        && (hdr->sh_flags & SHF_ALLOC) && (hdr->sh_flags & SHF_WRITE)) {
+#if LL_ELF_HAS_SHT_INIT_ARRAY
+    if (hdr->sh_type == LL_ELF_SHT_INIT_ARRAY
+        && (hdr->sh_flags & LL_ELF_SHF_ALLOC) && (hdr->sh_flags & LL_ELF_SHF_WRITE)) {
        /* .init_array section */
         return SECTIONKIND_INIT_ARRAY;
     }
 #endif /* not SHT_INIT_ARRAY */
-#if defined(SHT_FINI_ARRAY)
-    if (hdr->sh_type == SHT_FINI_ARRAY
-        && (hdr->sh_flags & SHF_ALLOC) && (hdr->sh_flags & SHF_WRITE)) {
+#if LL_ELF_HAS_SHT_FINI_ARRAY
+    if (hdr->sh_type == LL_ELF_SHT_FINI_ARRAY
+        && (hdr->sh_flags & LL_ELF_SHF_ALLOC) && (hdr->sh_flags & LL_ELF_SHF_WRITE)) {
        /* .fini_array section */
         return SECTIONKIND_FINI_ARRAY;
     }
 #endif /* not SHT_INIT_ARRAY */
-    if (hdr->sh_type == SHT_NOBITS
-        && (hdr->sh_flags & SHF_ALLOC) && (hdr->sh_flags & SHF_WRITE)) {
+    if (hdr->sh_type == LL_ELF_SHT_NOBITS
+        && (hdr->sh_flags & LL_ELF_SHF_ALLOC) && (hdr->sh_flags & LL_ELF_SHF_WRITE)) {
         /* .bss-style section */
         *is_bss = true;
         return SECTIONKIND_RWDATA;
@@ -712,7 +699,7 @@ static SectionKind getSectionKind_ELF( Elf_Shdr *hdr, int *is_bss )
 #if !LL_ELF_NEED_PLT
 
 static void *
-mapObjectFileSection (ll_linker *L, int fd, Elf_Word offset, Elf_Word size,
+mapObjectFileSection (ll_linker *L, int fd, ll_elf_target_word offset, ll_elf_target_word size,
                       void **mapped_start, ll_word *mapped_size,
                       ll_word *mapped_offset)
 {
@@ -733,18 +720,18 @@ mapObjectFileSection (ll_linker *L, int fd, Elf_Word offset, Elf_Word size,
 int
 ocGetNames_ELF ( ObjectCode* oc )
 {
-   Elf_Word i;
+   ll_elf_target_word i;
    int result, fd = -1;
 
    char*     ehdrC    = (char*)(oc->image);
-   Elf_Ehdr* ehdr     = (Elf_Ehdr*)ehdrC;
+   ll_elf_target_ehdr* ehdr     = (ll_elf_target_ehdr*)ehdrC;
 
-   Elf_Shdr* shdr     = (Elf_Shdr*) (ehdrC + ehdr->e_shoff);
+   ll_elf_target_shdr* shdr     = (ll_elf_target_shdr*) (ehdrC + ehdr->e_shoff);
    Section * sections;
-#if defined(SHN_XINDEX)
-   Elf_Word* shndxTable = get_shndx_table(oc);
+#if LL_ELF_HAS_SHN_XINDEX
+   ll_elf_target_word* shndxTable = get_shndx_table(oc);
 #endif
-   const Elf_Word shnum = elf_shnum(ehdr);
+   const ll_elf_target_word shnum = elf_shnum(ehdr);
 
    LL_ASSERT_FOR(oc->L, oc->L->symhash != NULL);
 
@@ -977,7 +964,7 @@ ocGetNames_ELF ( ObjectCode* oc )
 
           addProddableBlock(oc->L, &oc->proddables, start, size);
       } else {
-          void *metadata = shdr[i].sh_type == SHT_NULL || shdr[i].sh_type == SHT_NOBITS
+          void *metadata = shdr[i].sh_type == LL_ELF_SHT_NULL || shdr[i].sh_type == LL_ELF_SHT_NOBITS
                            ? NULL : oc->image + offset;
           /* Empty definitions still need a non-NULL address. Their ignored
            * file offset need not lie within the image, so use its base. */
@@ -1020,7 +1007,7 @@ ocGetNames_ELF ( ObjectCode* oc )
            symTab != NULL; symTab = symTab->next) {
            for (size_t j = 0; j < symTab->n_symbols; j++) {
                ElfSymbol *symbol = &symTab->symbols[j];
-               if (SHN_COMMON == symTab->symbols[j].elf_sym->st_shndx) {
+               if (LL_ELF_SHN_COMMON == symTab->symbols[j].elf_sym->st_shndx) {
                    /* Skip COMMON symbols already defined by a previously-loaded
                     * object; we will reuse the existing allocation. */
                    if (!lookupStrHashTable(oc->L->symhash, symTab->symbols[j].name)) {
@@ -1068,7 +1055,7 @@ ocGetNames_ELF ( ObjectCode* oc )
 
                ElfSymbol *symbol = &symTab->symbols[j];
 
-               Elf_Word secno;
+               ll_elf_target_word secno;
 
 
                /* See Note [Many ELF Sections] */
@@ -1078,8 +1065,8 @@ ocGetNames_ELF ( ObjectCode* oc )
                 * will have shndx SHN_XINDEX and a secno with one of the
                 * reserved values. */
                secno = shndx;
-#if defined(SHN_XINDEX)
-               if (shndx == SHN_XINDEX) {
+#if LL_ELF_HAS_SHN_XINDEX
+               if (shndx == LL_ELF_SHN_XINDEX) {
                   LL_CHECK_FOR(oc->L, shndxTable);
                   secno = shndxTable[j];
                }
@@ -1088,7 +1075,7 @@ ocGetNames_ELF ( ObjectCode* oc )
                   address.  Otherwise leave ad == NULL. */
 
                bool common_already_defined = false;
-               if (shndx == SHN_COMMON) {
+               if (shndx == LL_ELF_SHN_COMMON) {
                    isLocal = false;
                    RtsSymbolInfo *existing = lookupStrHashTable(oc->L->symhash, nm);
                    if (existing != NULL) {
@@ -1131,24 +1118,24 @@ ocGetNames_ELF ( ObjectCode* oc )
 
                    /* Pointless to do addProddableBlock() for this area,
                       since the linker should never poke around in it. */
-               } else if ((ELF_ST_BIND(symbol->elf_sym->st_info) == STB_GLOBAL
-                           || ELF_ST_BIND(symbol->elf_sym->st_info) == STB_LOCAL
-                           || ELF_ST_BIND(symbol->elf_sym->st_info) == STB_WEAK
+               } else if ((LL_ELF_ST_BIND(symbol->elf_sym->st_info) == LL_ELF_STB_GLOBAL
+                           || LL_ELF_ST_BIND(symbol->elf_sym->st_info) == LL_ELF_STB_LOCAL
+                           || LL_ELF_ST_BIND(symbol->elf_sym->st_info) == LL_ELF_STB_WEAK
                                                                   )
                           /* and not an undefined symbol */
-                          && shndx != SHN_UNDEF
+                          && shndx != LL_ELF_SHN_UNDEF
                           /* and not in a "special section" */
-                          && (shndx < SHN_LORESERVE
-#if defined(SHN_XINDEX)
-                                  || shndx == SHN_XINDEX
+                          && (shndx < LL_ELF_SHN_LORESERVE
+#if LL_ELF_HAS_SHN_XINDEX
+                                  || shndx == LL_ELF_SHN_XINDEX
 #endif
                           )
                           &&
                           /* and it's a not a section or string table or
                            * anything silly */
-                          (ELF_ST_TYPE(symbol->elf_sym->st_info) == STT_FUNC
-                          || ELF_ST_TYPE(symbol->elf_sym->st_info) == STT_OBJECT
-                          || ELF_ST_TYPE(symbol->elf_sym->st_info) == STT_NOTYPE
+                          (LL_ELF_ST_TYPE(symbol->elf_sym->st_info) == LL_ELF_STT_FUNC
+                          || LL_ELF_ST_TYPE(symbol->elf_sym->st_info) == LL_ELF_STT_OBJECT
+                          || LL_ELF_ST_TYPE(symbol->elf_sym->st_info) == LL_ELF_STT_NOTYPE
                           )
                        ) {
                    /* Section 0 is the undefined section, hence > and not >=. */
@@ -1163,7 +1150,7 @@ ocGetNames_ELF ( ObjectCode* oc )
                            (intptr_t) oc->sections[secno].start +
                            (intptr_t) symbol->elf_sym->st_value);
                    LL_CHECK_FOR(oc->L, symbol->addr != 0x0);
-                   if (ELF_ST_BIND(symbol->elf_sym->st_info) == STB_LOCAL) {
+                   if (LL_ELF_ST_BIND(symbol->elf_sym->st_info) == LL_ELF_STB_LOCAL) {
                        isLocal = true;
                        isWeak = false;
                    } else { /* STB_GLOBAL or STB_WEAK */
@@ -1171,18 +1158,18 @@ ocGetNames_ELF ( ObjectCode* oc )
                                 LL_DEBUG_FOR(oc->L, "addOTabName(GLOB): %10p  %s %s\n",
                                            symbol->addr, oc->fileName, nm));
                        isLocal = false;
-                       isWeak = ELF_ST_BIND(symbol->elf_sym->st_info)
-                                == STB_WEAK;
+                       isWeak = LL_ELF_ST_BIND(symbol->elf_sym->st_info)
+                                == LL_ELF_STB_WEAK;
                    }
                }
 
                ll_sym_type sym_type;
-               if (ELF_ST_TYPE(symbol->elf_sym->st_info) == STT_FUNC) {
+               if (LL_ELF_ST_TYPE(symbol->elf_sym->st_info) == LL_ELF_STT_FUNC) {
                    sym_type = LL_SYM_CODE;
                } else {
                    sym_type = LL_SYM_DATA;
                }
-               if(ELF_ST_VISIBILITY(symbol->elf_sym->st_other) == STV_HIDDEN) {
+               if(LL_ELF_ST_VISIBILITY(symbol->elf_sym->st_other) == LL_ELF_STV_HIDDEN) {
                    sym_type |= LL_SYM_HIDDEN;
                }
 
@@ -1265,14 +1252,14 @@ end:
    and arm-linux relocations appear to be of this form. */
 static int
 do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
-                         Elf_Shdr* shdr, int shnum )
+                         ll_elf_target_shdr* shdr, int shnum )
 {
    int j;
 
-   Elf_Word* targ;
-   Elf_Rel*  rtab = (Elf_Rel*) (ehdrC + shdr[shnum].sh_offset);
+   ll_elf_target_word* targ;
+   ll_elf_target_rel*  rtab = (ll_elf_target_rel*) (ehdrC + shdr[shnum].sh_offset);
 
-   int         nent = shdr[shnum].sh_size / sizeof(Elf_Rel);
+   int         nent = shdr[shnum].sh_size / sizeof(ll_elf_target_rel);
    int target_shndx = shdr[shnum].sh_info;
    int symtab_shndx = shdr[shnum].sh_link;
 
@@ -1286,7 +1273,7 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
    }
    LL_CHECK_FOR(oc->L, stab != NULL);
 
-   targ  = (Elf_Word*)oc->sections[target_shndx].start;
+   targ  = (ll_elf_target_word*)oc->sections[target_shndx].start;
    LL_IF_DEBUG_FOR(oc->L, linker_verbose,LL_DEBUG_FOR(oc->L,
                 "relocations for section %d using symtab %d\n",
                 target_shndx, symtab_shndx));
@@ -1314,18 +1301,18 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
     */
 
    for (j = 0; j < nent; j++) {
-       Elf_Addr offset = rtab[j].r_offset;
-       Elf_Addr info   = rtab[j].r_info;
+       ll_elf_target_addr offset = rtab[j].r_offset;
+       ll_elf_target_addr info   = rtab[j].r_info;
 
-       Elf_Addr  P  = ((Elf_Addr)targ) + offset;
-       Elf_Word* pP = (Elf_Word*)P;
+       ll_elf_target_addr  P  = ((ll_elf_target_addr)targ) + offset;
+       ll_elf_target_word* pP = (ll_elf_target_word*)P;
 #if LL_TARGET_I386 || LL_DEBUG_CODE
-       Elf_Addr  A  = *pP;
+       ll_elf_target_addr  A  = *pP;
 #endif
-       Elf_Addr  S;
+       ll_elf_target_addr  S;
        void*     S_tmp;
 #if LL_TARGET_I386
-       Elf_Addr  value;
+       ll_elf_target_addr  value;
 #endif
 #if LL_TARGET_ARM
        int is_target_thm=0, T=0;
@@ -1339,13 +1326,13 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
            LL_IF_DEBUG_FOR(oc->L, linker_verbose,LL_DEBUG_FOR(oc->L, " ZERO" ));
            S = 0;
        } else {
-           symbol = &stab->symbols[ELF_R_SYM(info)];
+           symbol = &stab->symbols[LL_ELF_R_SYM(info)];
            /* First see if it is a local symbol. */
-           if (ELF_ST_BIND(symbol->elf_sym->st_info) == STB_LOCAL || strncmp(symbol->name, "_GLOBAL_OFFSET_TABLE_", 21) == 0) {
-               S = (Elf_Addr)symbol->addr;
+           if (LL_ELF_ST_BIND(symbol->elf_sym->st_info) == LL_ELF_STB_LOCAL || strncmp(symbol->name, "_GLOBAL_OFFSET_TABLE_", 21) == 0) {
+               S = (ll_elf_target_addr)symbol->addr;
            } else {
                S_tmp = lookupDependentSymbol( oc->L, symbol->name, oc, NULL );
-               S = (Elf_Addr)S_tmp;
+               S = (ll_elf_target_addr)S_tmp;
            }
            if (!S) {
                LL_LOG_ERROR_FOR(oc->L, "%s: unknown symbol `%s'",
@@ -1382,7 +1369,7 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
             *          ARM IHI 0044F, current through ABI release 2.10
             *          24th November 2015)
             */
-           if(ELF_ST_TYPE(symbol->elf_sym->st_info) == STT_FUNC) {
+           if(LL_ELF_ST_TYPE(symbol->elf_sym->st_info) == LL_ELF_STT_FUNC) {
                is_target_thm = S & 0x1;
                T = is_target_thm;
                S &= ~1;
@@ -1390,14 +1377,14 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
 #endif
        }
 
-       int reloc_type = ELF_R_TYPE(info);
+       int reloc_type = LL_ELF_R_TYPE(info);
 #if LL_TARGET_I386 || LL_DEBUG_CODE
        LL_IF_DEBUG_FOR(oc->L, linker_verbose,
                 LL_DEBUG_FOR(oc->L, "Reloc: P = %p   S = %p   A = %p   type=%d\n",
                            (void*)P, (void*)S, (void*)A, reloc_type ));
 #endif
 #if LL_DEBUG_CODE
-       checkProddableBlock(oc->L, &oc->proddables, pP, sizeof(Elf_Word) );
+       checkProddableBlock(oc->L, &oc->proddables, pP, sizeof(ll_elf_target_word) );
 #else
        (void) pP; /* suppress unused varialbe warning in non-debug build */
 #endif
@@ -1412,14 +1399,14 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
        case COMPAT_R_386_32:   *pP = value;     break;
        case COMPAT_R_386_PC32: *pP = value - P; break;
        case COMPAT_R_386_PLT32: *pP = value - P; break;
-       case COMPAT_R_386_GOTOFF: *pP = value - (Elf_Addr)oc->elf_info->got_start; break;
-       case COMPAT_R_386_GOTPC:  *pP = (Elf_Addr)oc->elf_info->got_start + A - P; break;
+       case COMPAT_R_386_GOTOFF: *pP = value - (ll_elf_target_addr)oc->elf_info->got_start; break;
+       case COMPAT_R_386_GOTPC:  *pP = (ll_elf_target_addr)oc->elf_info->got_start + A - P; break;
        case COMPAT_R_386_GOT32:
        case COMPAT_R_386_GOT32X:
            LL_CHECK_FOR(oc->L, symbol);
            LL_CHECK_FOR(oc->L, symbol->got_addr);
-           *pP = (Elf_Addr)symbol->got_addr
-               - (Elf_Addr)oc->elf_info->got_start + A;
+           *pP = (ll_elf_target_addr)symbol->got_addr
+               - (ll_elf_target_addr)oc->elf_info->got_start + A;
            break;
 #        endif
 
@@ -1427,14 +1414,14 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
        case COMPAT_R_ARM_ABS32:     /* (S + A) | T */
            // Specified by Linux ARM ABI to be equivalent to ABS32
        case COMPAT_R_ARM_TARGET1:
-           *(Elf32_Word *)P += S;
-           *(Elf32_Word *)P |= T;
+           *(ll_elf32_word *)P += S;
+           *(ll_elf32_word *)P |= T;
            break;
 
        case COMPAT_R_ARM_REL32:     /* ((S + A) | T) – P */
-           *(Elf32_Word *)P += S;
-           *(Elf32_Word *)P |= T;
-           *(Elf32_Word *)P -= P;
+           *(ll_elf32_word *)P += S;
+           *(ll_elf32_word *)P |= T;
+           *(ll_elf32_word *)P -= P;
            break;
 
        case COMPAT_R_ARM_BASE_PREL: /* B(S) + A – P */
@@ -1477,7 +1464,7 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
            const ll_stg_bool overflow = !isInt(26, (ll_int32) result);
            // Handle overflow and Thumb interworking
            const ll_stg_bool needs_veneer =
-               (is_target_thm && ELF_R_TYPE(info) == COMPAT_R_ARM_JUMP24)
+               (is_target_thm && LL_ELF_R_TYPE(info) == COMPAT_R_ARM_JUMP24)
                || overflow;
 
            if(needs_veneer) { /* overflow or thum interworking */
@@ -1577,7 +1564,7 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
            overflow = offset <= (ll_word32)0xff000000
                    || offset >= (ll_word32)0x01000000;
 
-           if ((!is_target_thm && ELF_R_TYPE(info) == COMPAT_R_ARM_THM_JUMP24)
+           if ((!is_target_thm && LL_ELF_R_TYPE(info) == COMPAT_R_ARM_THM_JUMP24)
                || overflow) {
                // Generate veneer
 
@@ -1602,7 +1589,7 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
                sign = offset >> 31;
                to_thm = 1;
            } else if (!is_target_thm
-                      && ELF_R_TYPE(info) == COMPAT_R_ARM_THM_CALL) {
+                      && LL_ELF_R_TYPE(info) == COMPAT_R_ARM_THM_CALL) {
                offset &= ~0x3;
                to_thm = 0;
            }
@@ -1633,9 +1620,9 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
 
            offset = (offset ^ 0x8000) - 0x8000; // Sign extend
            offset += S;
-           if (ELF_R_TYPE(info) == COMPAT_R_ARM_THM_MOVW_ABS_NC)
+           if (LL_ELF_R_TYPE(info) == COMPAT_R_ARM_THM_MOVW_ABS_NC)
                offset |= T;
-           else if (ELF_R_TYPE(info) == COMPAT_R_ARM_THM_MOVT_ABS)
+           else if (LL_ELF_R_TYPE(info) == COMPAT_R_ARM_THM_MOVT_ABS)
                offset >>= 16;
 
            *upper = ( (*upper & 0xfbf0)
@@ -1692,9 +1679,9 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
        default:
            ll_error_set(oc->L, LL_E_UNSUPPORTED,
                         "%s: unhandled ELF relocation(Rel) type %" LL_FMT_WORD "\n",
-                        oc->fileName, (ll_w)ELF_R_TYPE(info));
+                        oc->fileName, (ll_w)LL_ELF_R_TYPE(info));
            LL_LOG_ERROR_FOR(oc->L, "%s: unhandled ELF relocation(Rel) type %" LL_FMT_WORD "\n",
-                      oc->fileName, (ll_w)ELF_R_TYPE(info));
+                      oc->fileName, (ll_w)LL_ELF_R_TYPE(info));
            return 0;
        }
 
@@ -1705,26 +1692,26 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
 /* Do ELF relocations for which explicit addends are supplied. */
 static int
 do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
-                          Elf_Shdr* shdr, int shnum )
+                          ll_elf_target_shdr* shdr, int shnum )
 {
    int j;
    ll_symbol_name* symbol = NULL;
-   Elf_Rela* rtab = (Elf_Rela*) (ehdrC + shdr[shnum].sh_offset);
-   Elf_Sym*  stab;
+   ll_elf_target_rela* rtab = (ll_elf_target_rela*) (ehdrC + shdr[shnum].sh_offset);
+   ll_elf_target_sym*  stab;
    char*     strtab;
-   int         nent = shdr[shnum].sh_size / sizeof(Elf_Rela);
+   int         nent = shdr[shnum].sh_size / sizeof(ll_elf_target_rela);
    int symtab_shndx = shdr[shnum].sh_link;
    int strtab_shndx = shdr[symtab_shndx].sh_link;
    int target_shndx = shdr[shnum].sh_info;
-#if defined(SHN_XINDEX)
-   Elf_Word* shndx_table = get_shndx_table(oc);
+#if LL_ELF_HAS_SHN_XINDEX
+   ll_elf_target_word* shndx_table = get_shndx_table(oc);
 #endif
 #if LL_DEBUG_CODE || LL_TARGET_POWERPC || LL_TARGET_X86_64
    /* This #if def only serves to avoid unused-var warnings. */
-   Elf_Addr targ = (Elf_Addr) oc->sections[target_shndx].start;
+   ll_elf_target_addr targ = (ll_elf_target_addr) oc->sections[target_shndx].start;
 #endif
 
-   stab  = (Elf_Sym*) (ehdrC + shdr[ symtab_shndx ].sh_offset);
+   stab  = (ll_elf_target_sym*) (ehdrC + shdr[ symtab_shndx ].sh_offset);
    strtab= (char*)    (ehdrC + shdr[ strtab_shndx ].sh_offset);
 
    LL_IF_DEBUG_FOR(oc->L, linker_verbose,LL_DEBUG_FOR(oc->L, "relocations for section %d using symtab %d\n",
@@ -1739,18 +1726,18 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
    for (j = 0; j < nent; j++) {
 #if LL_DEBUG_CODE || LL_TARGET_POWERPC || LL_TARGET_X86_64
       /* This #if def only serves to avoid unused-var warnings. */
-      Elf_Addr  offset = rtab[j].r_offset;
-      Elf_Addr  P      = targ + offset;
-      Elf_Addr  A      = rtab[j].r_addend;
+      ll_elf_target_addr  offset = rtab[j].r_offset;
+      ll_elf_target_addr  P      = targ + offset;
+      ll_elf_target_addr  A      = rtab[j].r_addend;
 #endif
 #if LL_TARGET_POWERPC || LL_TARGET_X86_64
-      Elf_Addr  value;
+      ll_elf_target_addr  value;
 #endif
-      Elf_Addr  info   = rtab[j].r_info;
-      Elf_Addr  S;
+      ll_elf_target_addr  info   = rtab[j].r_info;
+      ll_elf_target_addr  S;
       void*     S_tmp;
 #     if LL_TARGET_POWERPC
-      Elf_Sword delta;
+      ll_elf_target_sword delta;
 #     endif
 
       LL_IF_DEBUG_FOR(oc->L, linker_verbose,LL_DEBUG_FOR(oc->L, "Rel entry %3d is raw(%6p %6p %6p)   ",
@@ -1760,8 +1747,8 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
          LL_IF_DEBUG_FOR(oc->L, linker_verbose,LL_DEBUG_FOR(oc->L, " ZERO" ));
          S = 0;
       } else {
-         Elf_Sym sym = stab[ELF_R_SYM(info)];
-         if (ELF_R_TYPE(info) == COMPAT_R_X86_64_TLSGD) {
+         ll_elf_target_sym sym = stab[LL_ELF_R_SYM(info)];
+         if (LL_ELF_R_TYPE(info) == COMPAT_R_X86_64_TLSGD) {
             /*
              * No support for TLSGD variables *defined* by the object,
              * only references to *external* TLS variables in already
@@ -1769,7 +1756,7 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
              * supported.  See Note [TLSGD relocation] in elf_tlsgd.c.
              */
             symbol = sym.st_name == 0 ? "(noname)" : strtab+sym.st_name;
-            if (ELF_ST_BIND(sym.st_info) == STB_LOCAL
+            if (LL_ELF_ST_BIND(sym.st_info) == LL_ELF_STB_LOCAL
                 || sym.st_value != 0 || sym.st_name == 0) {
                 ll_error_set(oc->L, LL_E_UNSUPPORTED,
                              "%s: unsupported internal ELF TLSGD relocation for symbol `%s'",
@@ -1779,7 +1766,7 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
                 return 0;
             }
 #if LL_TARGET_X86_64 && defined(x86_64_HOST_ARCH) && defined(freebsd_HOST_OS)
-            S = lookupTlsgdSymbol(symbol, ELF_R_SYM(info), oc);
+            S = lookupTlsgdSymbol(symbol, LL_ELF_R_SYM(info), oc);
 #else
             ll_error_set(oc->L, LL_E_UNSUPPORTED,
                          "%s: ELF TLSGD relocation for symbol `%s' not supported on the target platform",
@@ -1789,7 +1776,7 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
                        oc->fileName, symbol);
             return 0;
 #endif
-         } else if (ELF_ST_BIND(sym.st_info) == STB_LOCAL) {
+         } else if (LL_ELF_ST_BIND(sym.st_info) == LL_ELF_STB_LOCAL) {
             /*
              * For local symbols, we can get the address directly from the ELF
              * symbol table.
@@ -1804,19 +1791,19 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
              */
             symbol = sym.st_name==0 ? "(noname)" : strtab+sym.st_name;
             /* See Note [Many ELF Sections] */
-            Elf_Word secno = sym.st_shndx;
-#if defined(SHN_XINDEX)
-            if (secno == SHN_XINDEX) {
-              secno = shndx_table[ELF_R_SYM(info)];
+            ll_elf_target_word secno = sym.st_shndx;
+#if LL_ELF_HAS_SHN_XINDEX
+            if (secno == LL_ELF_SHN_XINDEX) {
+              secno = shndx_table[LL_ELF_R_SYM(info)];
             }
 #endif
-            S = (Elf_Addr)oc->sections[secno].start
-                + stab[ELF_R_SYM(info)].st_value;
+            S = (ll_elf_target_addr)oc->sections[secno].start
+                + stab[LL_ELF_R_SYM(info)].st_value;
          } else {
             /* If not local, look up the name in our global table. */
             symbol = strtab + sym.st_name;
             S_tmp = lookupDependentSymbol( oc->L, symbol, oc, NULL );
-            S = (Elf_Addr)S_tmp;
+            S = (ll_elf_target_addr)S_tmp;
          }
          if (!S) {
            LL_LOG_ERROR_FOR(oc->L, "%s: unknown symbol `%s'", oc->fileName, symbol);
@@ -1828,44 +1815,44 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
 #if LL_DEBUG_CODE
       LL_IF_DEBUG_FOR(oc->L, linker_verbose,LL_DEBUG_FOR(oc->L, "Reloc: P = %p   S = %p   A = %p\n",
                                          (void*)P, (void*)S, (void*)A ));
-      checkProddableBlock(oc->L, &oc->proddables, (void*)P, sizeof(Elf_Word));
+      checkProddableBlock(oc->L, &oc->proddables, (void*)P, sizeof(ll_elf_target_word));
 #endif
 
 #if LL_TARGET_POWERPC || LL_TARGET_X86_64
       value = S + A;
 #endif
 
-      switch (ELF_R_TYPE(info)) {
+      switch (LL_ELF_R_TYPE(info)) {
 #        if LL_TARGET_POWERPC
-         case R_PPC_ADDR16_LO:
-            *(Elf32_Half*) P = value;
+         case LL_ELF_R_PPC_ADDR16_LO:
+            *(ll_elf32_half*) P = value;
             break;
 
-         case R_PPC_ADDR16_HI:
-            *(Elf32_Half*) P = value >> 16;
+         case LL_ELF_R_PPC_ADDR16_HI:
+            *(ll_elf32_half*) P = value >> 16;
             break;
 
-         case R_PPC_ADDR16_HA:
-            *(Elf32_Half*) P = (value + 0x8000) >> 16;
+         case LL_ELF_R_PPC_ADDR16_HA:
+            *(ll_elf32_half*) P = (value + 0x8000) >> 16;
             break;
 
-         case R_PPC_ADDR32:
-            *(Elf32_Word *) P = value;
+         case LL_ELF_R_PPC_ADDR32:
+            *(ll_elf32_word *) P = value;
             break;
 
-         case R_PPC_REL32:
-            *(Elf32_Word *) P = value - P;
+         case LL_ELF_R_PPC_REL32:
+            *(ll_elf32_word *) P = value - P;
             break;
 
-         case R_PPC_PLTREL24:
+         case LL_ELF_R_PPC_PLTREL24:
             value -= 0x8000; /* See Note [.LCTOC1 in PPC PIC code] */
             LL_FALLTHROUGH;
-         case R_PPC_REL24:
+         case LL_ELF_R_PPC_REL24:
             delta = value - P;
 
             if( delta << 6 >> 6 != delta )
             {
-               value = (Elf_Addr)(&makeSymbolExtra( oc, ELF_R_SYM(info), value )
+               value = (ll_elf_target_addr)(&makeSymbolExtra( oc, LL_ELF_R_SYM(info), value )
                                         ->jumpIsland);
                delta = value - P;
 
@@ -1873,27 +1860,27 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
                {
                   ll_error_set(oc->L, LL_E_RELOC_RANGE,
                                "Unable to make SymbolExtra for #%d",
-                               (int)ELF_R_SYM(info));
+                               (int)LL_ELF_R_SYM(info));
                   LL_LOG_ERROR_FOR(oc->L, "Unable to make SymbolExtra for #%d",
-                        ELF_R_SYM(info) );
+                        LL_ELF_R_SYM(info) );
                   return 0;
                }
             }
 
-            *(Elf_Word *) P = (*(Elf_Word *) P & 0xfc000003)
+            *(ll_elf_target_word *) P = (*(ll_elf_target_word *) P & 0xfc000003)
                                           | (delta & 0x3fffffc);
             break;
 
-         case R_PPC_REL16_LO:
-            *(Elf32_Half*) P = value - P;
+         case LL_ELF_R_PPC_REL16_LO:
+            *(ll_elf32_half*) P = value - P;
             break;
 
-         case R_PPC_REL16_HI:
-            *(Elf32_Half*) P = (value - P) >> 16;
+         case LL_ELF_R_PPC_REL16_HI:
+            *(ll_elf32_half*) P = (value - P) >> 16;
             break;
 
-         case R_PPC_REL16_HA:
-            *(Elf32_Half*) P = (value + 0x8000 - P) >> 16;
+         case LL_ELF_R_PPC_REL16_HA:
+            *(ll_elf32_half*) P = (value + 0x8000 - P) >> 16;
             break;
 #        endif
 
@@ -1903,7 +1890,7 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
 
       case COMPAT_R_X86_64_64:
       {
-          Elf64_Xword payload = value;
+          ll_elf64_xword payload = value;
           memcpy((void*)P, &payload, sizeof(payload));
           break;
       }
@@ -1911,14 +1898,14 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
       case COMPAT_R_X86_64_PC32:
       {
           ll_int64 off = value - P;
-          if (off != (Elf64_Sword)off && X86_64_ELF_NONPIC_HACK(oc->L)) {
+          if (off != (ll_elf64_sword)off && X86_64_ELF_NONPIC_HACK(oc->L)) {
               /* Check symbol type: jump islands only work for code (functions).
                * For data references (STT_OBJECT, STT_NOTYPE), the jump island
                * address would be used as a data pointer (e.g., info table pointer),
                * causing GC crashes ("strange closure type").
                * See Note [X86_64_ELF_NONPIC_HACK and data references] */
-              unsigned char symtype = ELF_ST_TYPE(stab[ELF_R_SYM(info)].st_info);
-              if (symtype != STT_FUNC) {
+              unsigned char symtype = LL_ELF_ST_TYPE(stab[LL_ELF_R_SYM(info)].st_info);
+              if (symtype != LL_ELF_STT_FUNC) {
                   ll_error_set(oc->L, LL_E_RELOC_RANGE,
                                "R_X86_64_PC32 overflow for non-function symbol `%s'",
                                symbol);
@@ -1931,11 +1918,11 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
                   return 0;
               }
               ll_int64 pltAddress =
-                  (ll_int64) &makeSymbolExtra(oc, ELF_R_SYM(info), S)
+                  (ll_int64) &makeSymbolExtra(oc, LL_ELF_R_SYM(info), S)
                                             -> jumpIsland;
               off = pltAddress + A - P;
           }
-          if (off != (Elf64_Sword)off) {
+          if (off != (ll_elf64_sword)off) {
               ll_error_set(oc->L, LL_E_RELOC_RANGE,
                            "R_X86_64_PC32 relocation out of range: %s", symbol);
               LL_LOG_ERROR_FOR(oc->L,
@@ -1944,24 +1931,24 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
                   symbol, off, oc->fileName);
               return 0;
           }
-          Elf64_Sword payload = off;
+          ll_elf64_sword payload = off;
           memcpy((void*)P, &payload, sizeof(payload));
           break;
       }
 
       case COMPAT_R_X86_64_PC64:
       {
-          Elf64_Sxword payload = value - P;
+          ll_elf64_sxword payload = value - P;
           memcpy((void*)P, &payload, sizeof(payload));
           break;
       }
 
       case COMPAT_R_X86_64_32:
       {
-          if (value != (Elf64_Word)value && X86_64_ELF_NONPIC_HACK(oc->L)) {
+          if (value != (ll_elf64_word)value && X86_64_ELF_NONPIC_HACK(oc->L)) {
               /* See Note [X86_64_ELF_NONPIC_HACK and data references] */
-              unsigned char symtype = ELF_ST_TYPE(stab[ELF_R_SYM(info)].st_info);
-              if (symtype != STT_FUNC) {
+              unsigned char symtype = LL_ELF_ST_TYPE(stab[LL_ELF_R_SYM(info)].st_info);
+              if (symtype != LL_ELF_STT_FUNC) {
                   ll_error_set(oc->L, LL_E_RELOC_RANGE,
                                "R_X86_64_32 overflow for non-function symbol `%s'",
                                symbol);
@@ -1974,11 +1961,11 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
                   return 0;
               }
               ll_int64 pltAddress =
-                  (ll_int64) &makeSymbolExtra(oc, ELF_R_SYM(info), S)
+                  (ll_int64) &makeSymbolExtra(oc, LL_ELF_R_SYM(info), S)
                                             -> jumpIsland;
               value = pltAddress + A;
           }
-          if (value != (Elf64_Word)value) {
+          if (value != (ll_elf64_word)value) {
               ll_error_set(oc->L, LL_E_RELOC_RANGE,
                            "R_X86_64_32 relocation out of range: %s", symbol);
               LL_LOG_ERROR_FOR(oc->L,
@@ -1987,17 +1974,17 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
                   symbol, value, oc->fileName);
               return 0;
           }
-          Elf64_Word payload = value;
+          ll_elf64_word payload = value;
           memcpy((void*)P, &payload, sizeof(payload));
           break;
       }
 
       case COMPAT_R_X86_64_32S:
       {
-          if ((ll_int64)value != (Elf64_Sword)value && X86_64_ELF_NONPIC_HACK(oc->L)) {
+          if ((ll_int64)value != (ll_elf64_sword)value && X86_64_ELF_NONPIC_HACK(oc->L)) {
               /* See Note [X86_64_ELF_NONPIC_HACK and data references] */
-              unsigned char symtype = ELF_ST_TYPE(stab[ELF_R_SYM(info)].st_info);
-              if (symtype != STT_FUNC) {
+              unsigned char symtype = LL_ELF_ST_TYPE(stab[LL_ELF_R_SYM(info)].st_info);
+              if (symtype != LL_ELF_STT_FUNC) {
                   ll_error_set(oc->L, LL_E_RELOC_RANGE,
                                "R_X86_64_32S overflow for non-function symbol `%s'",
                                symbol);
@@ -2010,11 +1997,11 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
                   return 0;
               }
               ll_int64 pltAddress =
-                  (ll_int64) &makeSymbolExtra(oc, ELF_R_SYM(info), S)
+                  (ll_int64) &makeSymbolExtra(oc, LL_ELF_R_SYM(info), S)
                                             -> jumpIsland;
               value = pltAddress + A;
           }
-          if ((ll_int64)value != (Elf64_Sword)value) {
+          if ((ll_int64)value != (ll_elf64_sword)value) {
               ll_error_set(oc->L, LL_E_RELOC_RANGE,
                            "R_X86_64_32S relocation out of range: %s", symbol);
               LL_LOG_ERROR_FOR(oc->L,
@@ -2023,7 +2010,7 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
                   symbol, value, oc->fileName);
               return 0;
           }
-          Elf64_Sword payload = value;
+          ll_elf64_sword payload = value;
           memcpy((void*)P, &payload, sizeof(payload));
           break;
       }
@@ -2031,9 +2018,9 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
       case COMPAT_R_X86_64_GOTPCRELX:
       case COMPAT_R_X86_64_GOTPCREL:
       {
-          ll_int64 gotAddress = (ll_int64) &makeSymbolExtra(oc, ELF_R_SYM(info), S)->addr;
+          ll_int64 gotAddress = (ll_int64) &makeSymbolExtra(oc, LL_ELF_R_SYM(info), S)->addr;
           ll_int64 off = gotAddress + A - P;
-          if (off != (Elf64_Sword)off) {
+          if (off != (ll_elf64_sword)off) {
               ll_error_set(oc->L, LL_E_RELOC_RANGE,
                   "COMPAT_R_X86_64_GOTPCREL relocation out of range: "
                   "%s = %" PRIx64 " in %s.",
@@ -2044,14 +2031,14 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
                   symbol, off, oc->fileName);
               return 0;
           }
-          Elf64_Sword payload = off;
+          ll_elf64_sword payload = off;
           memcpy((void*)P, &payload, sizeof(payload));
           break;
       }
       case COMPAT_R_X86_64_TLSGD:
       {
           ll_int64 off = S + A - P;
-          if (off != (Elf64_Sword)off) {
+          if (off != (ll_elf64_sword)off) {
               ll_error_set(oc->L, LL_E_RELOC_RANGE,
                   "COMPAT_R_X86_64_TLSGD relocation out of range: "
                   "%s = %" PRIx64 " in %s.",
@@ -2062,7 +2049,7 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
                   symbol, off, oc->fileName);
               return 0;
           }
-          Elf64_Sword payload = off;
+          ll_elf64_sword payload = off;
           memcpy((void*)P, &payload, sizeof(payload));
           break;
       }
@@ -2075,10 +2062,10 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
           struct tls_info ti;
           get_tls_area(0, &ti, sizeof(ti));
           /* make entry in GOT that contains said offset */
-          ll_int64 gotEntry = (ll_int64) &makeSymbolExtra(oc, ELF_R_SYM(info),
-                                         (S - (Elf64_Addr)(ti.base)))->addr;
+          ll_int64 gotEntry = (ll_int64) &makeSymbolExtra(oc, LL_ELF_R_SYM(info),
+                                         (S - (ll_elf64_addr)(ti.base)))->addr;
           ll_int64 off = gotEntry + A - P;
-          if (off != (Elf64_Sword)off) {
+          if (off != (ll_elf64_sword)off) {
               ll_error_set(oc->L, LL_E_RELOC_RANGE,
                   "COMPAT_R_X86_64_GOTTPOFF relocation out of range: "
                   "%s = %" PRIx64 " in %s.",
@@ -2098,12 +2085,12 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
       case COMPAT_R_X86_64_PLT32:
       {
           ll_int64 off = value - P;
-          if (off != (Elf64_Sword)off) {
-              ll_int64 pltAddress = (ll_int64) &makeSymbolExtra(oc, ELF_R_SYM(info), S)
+          if (off != (ll_elf64_sword)off) {
+              ll_int64 pltAddress = (ll_int64) &makeSymbolExtra(oc, LL_ELF_R_SYM(info), S)
                                                     -> jumpIsland;
               off = pltAddress + A - P;
           }
-          if (off != (Elf64_Sword)off) {
+          if (off != (ll_elf64_sword)off) {
               ll_error_set(oc->L, LL_E_RELOC_RANGE,
                   "R_X86_64_PLT32 relocation out of range: "
                   "%s = %" PRIx64 " in %s.",
@@ -2114,7 +2101,7 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
                   symbol, off, oc->fileName);
               return 0;
           }
-          Elf64_Sword payload = off;
+          ll_elf64_sword payload = off;
           memcpy((void*)P, &payload, sizeof(payload));
           break;
       }
@@ -2123,9 +2110,9 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
          default:
             ll_error_set(oc->L, LL_E_UNSUPPORTED,
                          "%s: unhandled ELF relocation(RelA) type %" LL_FMT_WORD "\n",
-                         oc->fileName, (ll_w)ELF_R_TYPE(info));
+                         oc->fileName, (ll_w)LL_ELF_R_TYPE(info));
             LL_LOG_ERROR_FOR(oc->L, "%s: unhandled ELF relocation(RelA) type %" LL_FMT_WORD "\n",
-                  oc->fileName, (ll_w)ELF_R_TYPE(info));
+                  oc->fileName, (ll_w)LL_ELF_R_TYPE(info));
             return 0;
       }
 
@@ -2165,12 +2152,12 @@ int
 ocResolve_ELF ( ObjectCode* oc )
 {
    char*     ehdrC = (char*)(oc->image);
-   Elf_Ehdr* ehdr  = (Elf_Ehdr*) ehdrC;
-   Elf_Shdr* shdr  = (Elf_Shdr*) (ehdrC + ehdr->e_shoff);
-   const Elf_Word shnum = elf_shnum(ehdr);
+   ll_elf_target_ehdr* ehdr  = (ll_elf_target_ehdr*) ehdrC;
+   ll_elf_target_shdr* shdr  = (ll_elf_target_shdr*) (ehdrC + ehdr->e_shoff);
+   const ll_elf_target_word shnum = elf_shnum(ehdr);
 
-#if defined(SHN_XINDEX)
-    Elf_Word* shndxTable = get_shndx_table(oc);
+#if LL_ELF_HAS_SHN_XINDEX
+    ll_elf_target_word* shndxTable = get_shndx_table(oc);
 #endif
 
     /* resolve section symbols
@@ -2184,7 +2171,7 @@ ocResolve_ELF ( ObjectCode* oc )
         symTab != NULL; symTab = symTab->next) {
         for (size_t i = 0; i < symTab->n_symbols; i++) {
             ElfSymbol *symbol = &symTab->symbols[i];
-            if(STT_SECTION == ELF_ST_TYPE(symbol->elf_sym->st_info)) {
+            if(LL_ELF_STT_SECTION == LL_ELF_ST_TYPE(symbol->elf_sym->st_info)) {
                 /* NOTE: We assume that oc->sections corresponds to the
                  *       sections in the object file.  This is currently true,
                  *       and will stay true, unless we start to compress
@@ -2200,9 +2187,9 @@ ocResolve_ELF ( ObjectCode* oc )
                  * range will have shndx SHN_XINDEX and a secno with one of the
                  * reserved values.
                  */
-                Elf_Word secno = symbol->elf_sym->st_shndx;
-#if defined(SHN_XINDEX)
-                if (secno == SHN_XINDEX) {
+                ll_elf_target_word secno = symbol->elf_sym->st_shndx;
+#if LL_ELF_HAS_SHN_XINDEX
+                if (secno == LL_ELF_SHN_XINDEX) {
                     LL_CHECK_FOR(oc->L, shndxTable);
                     secno = shndxTable[i];
                 }
@@ -2227,14 +2214,14 @@ ocResolve_ELF ( ObjectCode* oc )
         return 0;
 #else
     /* Process the relocation sections. */
-    for (Elf_Word i = 0; i < shnum; i++) {
-        if (shdr[i].sh_type == SHT_REL) {
+    for (ll_elf_target_word i = 0; i < shnum; i++) {
+        if (shdr[i].sh_type == LL_ELF_SHT_REL) {
           bool ok = do_Elf_Rel_relocations ( oc, ehdrC, shdr, i );
           if (!ok)
               return ok;
         }
         else
-        if (shdr[i].sh_type == SHT_RELA) {
+        if (shdr[i].sh_type == LL_ELF_SHT_RELA) {
           bool ok = do_Elf_Rela_relocations ( oc, ehdrC, shdr, i );
           if (!ok)
               return ok;
@@ -2316,14 +2303,14 @@ static int refreshExtras_ELF(ObjectCode *oc)
 
 int ocAllocateExtras_ELF( ObjectCode *oc )
 {
-  Elf_Ehdr *ehdr = (Elf_Ehdr *) oc->image;
-  Elf_Shdr* shdr = (Elf_Shdr *) ( ((char *)oc->image) + ehdr->e_shoff );
-  Elf_Shdr* symtab = NULL;
-  Elf_Word shnum = elf_shnum(ehdr);
+  ll_elf_target_ehdr *ehdr = (ll_elf_target_ehdr *) oc->image;
+  ll_elf_target_shdr* shdr = (ll_elf_target_shdr *) ( ((char *)oc->image) + ehdr->e_shoff );
+  ll_elf_target_shdr* symtab = NULL;
+  ll_elf_target_word shnum = elf_shnum(ehdr);
   int bssSize = 0;
 
-  for (Elf_Word i = 0; i < shnum; ++i) {
-    if(shdr[i].sh_type == SHT_SYMTAB) {
+  for (ll_elf_target_word i = 0; i < shnum; ++i) {
+    if(shdr[i].sh_type == LL_ELF_SHT_SYMTAB) {
       symtab = &shdr[i];
     } else {
       int isBss = 0;
@@ -2345,18 +2332,18 @@ int ocAllocateExtras_ELF( ObjectCode *oc )
     return 1;
   }
 
-  if( symtab->sh_entsize != sizeof( Elf_Sym ) )
+  if( symtab->sh_entsize != sizeof( ll_elf_target_sym ) )
   {
     ll_error_set(oc->L, LL_E_FORMAT,
       "The entry size (%d) of the symtab isn't %d\n",
-      (int) symtab->sh_entsize, (int) sizeof( Elf_Sym ) );
+      (int) symtab->sh_entsize, (int) sizeof( ll_elf_target_sym ) );
     LL_LOG_ERROR_FOR(oc->L, "The entry size (%d) of the symtab isn't %d\n",
-      (int) symtab->sh_entsize, (int) sizeof( Elf_Sym ) );
+      (int) symtab->sh_entsize, (int) sizeof( ll_elf_target_sym ) );
 
     return 0;
   }
 
-  return ocAllocateExtras(oc, symtab->sh_size / sizeof( Elf_Sym ), 0, bssSize,
+  return ocAllocateExtras(oc, symtab->sh_size / sizeof( ll_elf_target_sym ), 0, bssSize,
                           LL_TARGET_SYMBOL_EXTRA_SIZE, refreshExtras_ELF);
 }
 

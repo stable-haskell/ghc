@@ -5,8 +5,8 @@
 #if defined(OBJFORMAT_ELF)
 
 extern const size_t stubSizeAarch64;
-bool needStubForRelAarch64(Elf_Rel * rel);
-bool needStubForRelaAarch64(Elf_Rela * rel);
+bool needStubForRelAarch64(ll_elf_target_rel * rel);
+bool needStubForRelaAarch64(ll_elf_target_rela * rel);
 bool makeStubAarch64(ElfStub * s);
 
 #endif

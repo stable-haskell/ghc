@@ -26,10 +26,10 @@ typedef uint16_t cinst_t;
 
 // TODO: These instances could be static. They are not yet, because we might
 // need their debugging symbols.
-char *relocationTypeToString(Elf64_Xword type);
-bool decodeAddendRISCV64(ll_linker *L, Section *section, Elf_Rel *rel,
+char *relocationTypeToString(ll_elf64_xword type);
+bool decodeAddendRISCV64(ll_linker *L, Section *section, ll_elf_target_rel *rel,
                          int32_t *addend);
-bool encodeAddendRISCV64(ll_linker *L, Section *section, Elf_Rel *rel, int32_t addend);
+bool encodeAddendRISCV64(ll_linker *L, Section *section, ll_elf_target_rel *rel, int32_t addend);
 void write8le(uint8_t *p, uint8_t v);
 uint8_t read8le(const uint8_t *P);
 void write16le(cinst_t *p, uint16_t v);
@@ -43,7 +43,7 @@ bool setCJType(ll_linker *L, cinst_t *loc, uint32_t val);
 bool setCBType(ll_linker *L, cinst_t *loc, uint32_t val);
 bool setBType(ll_linker *L, inst_t *loc, uint32_t val);
 void setSType(inst_t *loc, uint32_t val);
-bool computeAddend(ElfRelocationATable *relaTab, unsigned relNo, Elf_Rel *rel,
+bool computeAddend(ElfRelocationATable *relaTab, unsigned relNo, ll_elf_target_rel *rel,
                    ElfSymbol *symbol, int64_t addend, ObjectCode *oc,
                    int32_t *computed);
 bool setJType(ll_linker *L, inst_t *loc, uint32_t val);
@@ -52,59 +52,59 @@ bool checkInt(ll_linker *L, const void *loc, int32_t v, int n);
 bool setUType(ll_linker *L, inst_t *loc, int32_t val);
 
 
-char *relocationTypeToString(Elf64_Xword type) {
-  switch (ELF64_R_TYPE(type)) {
-  case R_RISCV_NONE:
+char *relocationTypeToString(ll_elf64_xword type) {
+  switch (LL_ELF64_R_TYPE(type)) {
+  case LL_ELF_R_RISCV_NONE:
     return "R_RISCV_NONE";
-  case R_RISCV_32:
+  case LL_ELF_R_RISCV_32:
     return "R_RISCV_32";
-  case R_RISCV_64:
+  case LL_ELF_R_RISCV_64:
     return "R_RISCV_64";
-  case R_RISCV_RELATIVE:
+  case LL_ELF_R_RISCV_RELATIVE:
     return "R_RISCV_RELATIVE";
-  case R_RISCV_COPY:
+  case LL_ELF_R_RISCV_COPY:
     return "R_RISCV_COPY";
-  case R_RISCV_JUMP_SLOT:
+  case LL_ELF_R_RISCV_JUMP_SLOT:
     return "R_RISCV_JUMP_SLOT";
-  case R_RISCV_TLS_DTPMOD32:
+  case LL_ELF_R_RISCV_TLS_DTPMOD32:
     return "R_RISCV_TLS_DTPMOD32";
-  case R_RISCV_TLS_DTPMOD64:
+  case LL_ELF_R_RISCV_TLS_DTPMOD64:
     return "R_RISCV_TLS_DTPMOD64";
-  case R_RISCV_TLS_DTPREL32:
+  case LL_ELF_R_RISCV_TLS_DTPREL32:
     return "R_RISCV_TLS_DTPREL32";
-  case R_RISCV_TLS_DTPREL64:
+  case LL_ELF_R_RISCV_TLS_DTPREL64:
     return "R_RISCV_TLS_DTPREL64";
-  case R_RISCV_TLS_TPREL32:
+  case LL_ELF_R_RISCV_TLS_TPREL32:
     return "R_RISCV_TLS_TPREL32";
-  case R_RISCV_TLS_TPREL64:
+  case LL_ELF_R_RISCV_TLS_TPREL64:
     return "R_RISCV_TLS_TPREL64";
-  case R_RISCV_BRANCH:
+  case LL_ELF_R_RISCV_BRANCH:
     return "R_RISCV_BRANCH";
-  case R_RISCV_JAL:
+  case LL_ELF_R_RISCV_JAL:
     return "R_RISCV_JAL";
-  case R_RISCV_CALL:
+  case LL_ELF_R_RISCV_CALL:
     return "R_RISCV_CALL";
-  case R_RISCV_CALL_PLT:
+  case LL_ELF_R_RISCV_CALL_PLT:
     return "R_RISCV_CALL_PLT";
-  case R_RISCV_GOT_HI20:
+  case LL_ELF_R_RISCV_GOT_HI20:
     return "R_RISCV_GOT_HI20";
-  case R_RISCV_PCREL_HI20:
+  case LL_ELF_R_RISCV_PCREL_HI20:
     return "R_RISCV_PCREL_HI20";
-  case R_RISCV_LO12_I:
+  case LL_ELF_R_RISCV_LO12_I:
     return "R_RISCV_LO12_I";
-  case R_RISCV_PCREL_LO12_I:
+  case LL_ELF_R_RISCV_PCREL_LO12_I:
     return "R_RISCV_PCREL_LO12_I";
-  case R_RISCV_HI20:
+  case LL_ELF_R_RISCV_HI20:
     return "R_RISCV_HI20";
-  case R_RISCV_LO12_S:
+  case LL_ELF_R_RISCV_LO12_S:
     return "R_RISCV_LO12_S";
-  case R_RISCV_PCREL_LO12_S:
+  case LL_ELF_R_RISCV_PCREL_LO12_S:
     return "R_RISCV_PCREL_LO12_S";
-  case R_RISCV_RELAX:
+  case LL_ELF_R_RISCV_RELAX:
     return "R_RISCV_RELAX";
-  case R_RISCV_RVC_BRANCH:
+  case LL_ELF_R_RISCV_RVC_BRANCH:
     return "R_RISCV_RVC_BRANCH";
-  case R_RISCV_RVC_JUMP:
+  case LL_ELF_R_RISCV_RVC_JUMP:
     return "R_RISCV_RVC_JUMP";
   default:
     return "Unknown relocation type";
@@ -112,7 +112,7 @@ char *relocationTypeToString(Elf64_Xword type) {
 }
 
 bool decodeAddendRISCV64(ll_linker *L, Section *section LL_UNUSED,
-                         Elf_Rel *rel LL_UNUSED, int32_t *addend LL_UNUSED) {
+                         ll_elf_target_rel *rel LL_UNUSED, int32_t *addend LL_UNUSED) {
   ll_error_set(L, LL_E_UNSUPPORTED,
                "decodeAddendRISCV64: Relocations without an explicit addend are not supported.");
   return false;
@@ -309,114 +309,114 @@ bool setCJType(ll_linker *L, cinst_t *loc, uint32_t val) {
 }
 
 // Encode the addend according to the relocaction into the instruction.
-bool encodeAddendRISCV64(ll_linker *L, Section *section, Elf_Rel *rel, int32_t addend) {
+bool encodeAddendRISCV64(ll_linker *L, Section *section, ll_elf_target_rel *rel, int32_t addend) {
   // instruction to rewrite (P: Position of the relocation)
   addr_t P = (addr_t)((uint8_t *)section->start + rel->r_offset);
   LL_IF_DEBUG_FOR(L, linker,
            LL_DEBUG_FOR(L,
                "Relocation type %s 0x%lx (%lu) symbol 0x%lx addend 0x%x (%u / "
                "%d) P 0x%lx\n",
-               relocationTypeToString(rel->r_info), ELF64_R_TYPE(rel->r_info),
-               ELF64_R_TYPE(rel->r_info), ELF64_R_SYM(rel->r_info), addend,
+               relocationTypeToString(rel->r_info), LL_ELF64_R_TYPE(rel->r_info),
+               LL_ELF64_R_TYPE(rel->r_info), LL_ELF64_R_SYM(rel->r_info), addend,
                addend, addend, P));
-  switch (ELF64_R_TYPE(rel->r_info)) {
-  case R_RISCV_32_PCREL:
-  case R_RISCV_32:
+  switch (LL_ELF64_R_TYPE(rel->r_info)) {
+  case LL_ELF_R_RISCV_32_PCREL:
+  case LL_ELF_R_RISCV_32:
     write32le((inst_t *)P, addend);
     break;
-  case R_RISCV_64:
+  case LL_ELF_R_RISCV_64:
     write64le((uint64_t *)P, addend);
     break;
-  case R_RISCV_GOT_HI20:
-  case R_RISCV_PCREL_HI20:
-  case R_RISCV_HI20: {
+  case LL_ELF_R_RISCV_GOT_HI20:
+  case LL_ELF_R_RISCV_PCREL_HI20:
+  case LL_ELF_R_RISCV_HI20: {
     if (!setUType(L, (inst_t *)P, addend)) return EXIT_FAILURE;
     break;
   }
-  case R_RISCV_PCREL_LO12_I:
-  case R_RISCV_LO12_I: {
+  case LL_ELF_R_RISCV_PCREL_LO12_I:
+  case LL_ELF_R_RISCV_LO12_I: {
     setIType(L, (inst_t *)P, addend);
     break;
   }
-  case R_RISCV_RVC_JUMP: {
+  case LL_ELF_R_RISCV_RVC_JUMP: {
     if (!setCJType(L, (cinst_t *)P, addend)) return EXIT_FAILURE;
     break;
   }
-  case R_RISCV_RVC_BRANCH: {
+  case LL_ELF_R_RISCV_RVC_BRANCH: {
     if (!setCBType(L, (cinst_t *)P, addend)) return EXIT_FAILURE;
     break;
   }
-  case R_RISCV_BRANCH: {
+  case LL_ELF_R_RISCV_BRANCH: {
     if (!setBType(L, (inst_t *)P, addend)) return EXIT_FAILURE;
     break;
   }
-  case R_RISCV_CALL:
-  case R_RISCV_CALL_PLT: {
+  case LL_ELF_R_RISCV_CALL:
+  case LL_ELF_R_RISCV_CALL_PLT: {
     // We could relax more (in some cases) but right now most important is to
     // make it work.
     if (!setUType(L, (inst_t *)P, addend)) return EXIT_FAILURE;
     setIType(L, ((inst_t *)P) + 1, addend);
     break;
   }
-  case R_RISCV_JAL: {
+  case LL_ELF_R_RISCV_JAL: {
     if (!setJType(L, (inst_t *)P, addend)) return EXIT_FAILURE;
     break;
   }
-  case R_RISCV_ADD8:
+  case LL_ELF_R_RISCV_ADD8:
     write8le((uint8_t *)P, read8le((uint8_t *)P) + addend);
     break;
-  case R_RISCV_ADD16:
+  case LL_ELF_R_RISCV_ADD16:
     write16le((cinst_t *)P, read16le((cinst_t *)P) + addend);
     break;
-  case R_RISCV_ADD32:
+  case LL_ELF_R_RISCV_ADD32:
     write32le((inst_t *)P, read32le((inst_t *)P) + addend);
     break;
-  case R_RISCV_ADD64:
+  case LL_ELF_R_RISCV_ADD64:
     write64le((uint64_t *)P, read64le((uint64_t *)P) + addend);
     break;
-  case R_RISCV_SUB6: {
+  case LL_ELF_R_RISCV_SUB6: {
     uint8_t keep = *((uint8_t *)P) & 0xc0;
     uint8_t imm = (((*(uint8_t *)P) & 0x3f) - addend) & 0x3f;
 
     write8le((uint8_t *)P, keep | imm);
     break;
   }
-  case R_RISCV_SUB8:
+  case LL_ELF_R_RISCV_SUB8:
     write8le((uint8_t *)P, read8le((uint8_t *)P) - addend);
     break;
-  case R_RISCV_SUB16:
+  case LL_ELF_R_RISCV_SUB16:
     write16le((cinst_t *)P, read16le((cinst_t *)P) - addend);
     break;
-  case R_RISCV_SUB32:
+  case LL_ELF_R_RISCV_SUB32:
     write32le((inst_t *)P, read32le((inst_t *)P) - addend);
     break;
-  case R_RISCV_SUB64:
+  case LL_ELF_R_RISCV_SUB64:
     write64le((uint64_t *)P, read64le((uint64_t *)P) - addend);
     break;
-  case R_RISCV_SET6: {
+  case LL_ELF_R_RISCV_SET6: {
     uint8_t keep = *((uint8_t *)P) & 0xc0;
     uint8_t imm = (addend & 0x3f) & 0x3f;
 
     write8le((uint8_t *)P, keep | imm);
     break;
   }
-  case R_RISCV_SET8:
+  case LL_ELF_R_RISCV_SET8:
     write8le((uint8_t *)P, addend);
     break;
-  case R_RISCV_SET16:
+  case LL_ELF_R_RISCV_SET16:
     write16le((cinst_t *)P, addend);
     break;
-  case R_RISCV_SET32:
+  case LL_ELF_R_RISCV_SET32:
     write32le((inst_t *)P, addend);
     break;
-  case R_RISCV_PCREL_LO12_S:
-  case R_RISCV_TPREL_LO12_S:
-  case R_RISCV_LO12_S: {
+  case LL_ELF_R_RISCV_PCREL_LO12_S:
+  case LL_ELF_R_RISCV_TPREL_LO12_S:
+  case LL_ELF_R_RISCV_LO12_S: {
     setSType((inst_t *)P, addend);
     break;
   }
-  case R_RISCV_RELAX:
-  case R_RISCV_ALIGN:
+  case LL_ELF_R_RISCV_RELAX:
+  case LL_ELF_R_RISCV_ALIGN:
     // Implementing relaxations (rewriting instructions to more efficient ones)
     // could be implemented in future. As the code already is aligned and we do
     // not change the instruction sizes, we should get away with not aligning
@@ -425,7 +425,7 @@ bool encodeAddendRISCV64(ll_linker *L, Section *section, Elf_Rel *rel, int32_t a
     break;
   default:
     ll_error_set(L, LL_E_UNSUPPORTED, "Missing relocation 0x%lx\n",
-                 ELF64_R_TYPE(rel->r_info));
+                 LL_ELF64_R_TYPE(rel->r_info));
     return EXIT_FAILURE;
   }
   return EXIT_SUCCESS;
@@ -440,7 +440,7 @@ bool encodeAddendRISCV64(ll_linker *L, Section *section, Elf_Rel *rel, int32_t a
  * @param computed Receives the existing 32-bit computed value on success.
  * @return True on success; failure leaves computed unchanged.
  */
-bool computeAddend(ElfRelocationATable *relaTab, unsigned relNo, Elf_Rel *rel,
+bool computeAddend(ElfRelocationATable *relaTab, unsigned relNo, ll_elf_target_rel *rel,
                    ElfSymbol *symbol, int64_t addend, ObjectCode *oc,
                    int32_t *computed) {
   Section * section = &oc->sections[relaTab->targetSectionIndex];
@@ -462,40 +462,40 @@ bool computeAddend(ElfRelocationATable *relaTab, unsigned relNo, Elf_Rel *rel,
   LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "%s: P 0x%lx S 0x%lx %s GOT_S 0x%lx A 0x%lx relNo %u\n",
                               relocationTypeToString(rel->r_info), P, S,
                               symbol->name, GOT_S, A, relNo));
-  switch (ELF64_R_TYPE(rel->r_info)) {
-  case R_RISCV_32:
+  switch (LL_ELF64_R_TYPE(rel->r_info)) {
+  case LL_ELF_R_RISCV_32:
     *computed = S + A;
     return true;
-  case R_RISCV_64:
+  case LL_ELF_R_RISCV_64:
     *computed = S + A;
     return true;
-  case R_RISCV_HI20:
+  case LL_ELF_R_RISCV_HI20:
     *computed = S + A;
     return true;
-  case R_RISCV_JUMP_SLOT:
+  case LL_ELF_R_RISCV_JUMP_SLOT:
     *computed = S;
     return true;
-  case R_RISCV_JAL:
+  case LL_ELF_R_RISCV_JAL:
     *computed = S + A - P;
     return true;
-  case R_RISCV_PCREL_HI20:
+  case LL_ELF_R_RISCV_PCREL_HI20:
     *computed = S + A - P;
     return true;
-  case R_RISCV_LO12_I:
+  case LL_ELF_R_RISCV_LO12_I:
     *computed = S + A;
     return true;
     // Quoting LLVM docs: For R_RISCV_PC_INDIRECT (R_RISCV_PCREL_LO12_{I,S}),
     // the symbol actually points the corresponding R_RISCV_PCREL_HI20
     // relocation, and the target VA is calculated using PCREL_HI20's symbol.
-  case R_RISCV_PCREL_LO12_S:
+  case LL_ELF_R_RISCV_PCREL_LO12_S:
     LL_FALLTHROUGH;
-  case R_RISCV_PCREL_LO12_I: {
+  case LL_ELF_R_RISCV_PCREL_LO12_I: {
     // Lookup related HI20 relocation and use that value. I'm still confused why
     // relocations aren't self-contained, but this is how LLVM does it. And,
     // calculating the lower 12 bit without any relationship to the GOT entry's
     // address makes no sense either.
       for (int64_t i = relNo; i >= 0 ; i--) {
-        Elf_Rela *rel_prime = &relaTab->relocations[i];
+        ll_elf_target_rela *rel_prime = &relaTab->relocations[i];
 
         addr_t P_prime =
             (addr_t)((uint8_t *)section->start + rel_prime->r_offset);
@@ -507,19 +507,19 @@ bool computeAddend(ElfRelocationATable *relaTab, unsigned relNo, Elf_Rel *rel,
 
         ElfSymbol *symbol_prime =
             findSymbol(oc, relaTab->sectionHeader->sh_link,
-                       ELF64_R_SYM((Elf64_Xword)rel_prime->r_info));
+                       LL_ELF64_R_SYM((ll_elf64_xword)rel_prime->r_info));
 
         LL_CHECK_FOR(oc->L, 0x0 != symbol_prime);
 
         /* take explicit addend */
         int64_t addend_prime = rel_prime->r_addend;
 
-        uint64_t type_prime = ELF64_R_TYPE(rel_prime->r_info);
+        uint64_t type_prime = LL_ELF64_R_TYPE(rel_prime->r_info);
 
-        if (type_prime == R_RISCV_PCREL_HI20 ||
-            type_prime == R_RISCV_GOT_HI20 ||
-            type_prime == R_RISCV_TLS_GD_HI20 ||
-            type_prime == R_RISCV_TLS_GOT_HI20) {
+        if (type_prime == LL_ELF_R_RISCV_PCREL_HI20 ||
+            type_prime == LL_ELF_R_RISCV_GOT_HI20 ||
+            type_prime == LL_ELF_R_RISCV_TLS_GD_HI20 ||
+            type_prime == LL_ELF_R_RISCV_TLS_GOT_HI20) {
           LL_IF_DEBUG_FOR(oc->L, linker,
                    LL_DEBUG_FOR(oc->L,
                        "Found matching relocation: %s (P: 0x%lx, S: 0x%lx, "
@@ -528,7 +528,7 @@ bool computeAddend(ElfRelocationATable *relaTab, unsigned relNo, Elf_Rel *rel,
                        relocationTypeToString(rel_prime->r_info), P_prime,
                        symbol_prime->addr, symbol_prime->name, i));
           int32_t result;
-          if (!computeAddend(relaTab, i, (Elf_Rel *)rel_prime,
+          if (!computeAddend(relaTab, i, (ll_elf_target_rel *)rel_prime,
                              symbol_prime, addend_prime, oc, &result))
             return false;
           LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "Result of computeAddend: 0x%x (%d)\n",
@@ -545,24 +545,24 @@ bool computeAddend(ElfRelocationATable *relaTab, unsigned relNo, Elf_Rel *rel,
     return false;
   }
 
-  case R_RISCV_RVC_JUMP:
+  case LL_ELF_R_RISCV_RVC_JUMP:
     *computed = S + A - P;
     return true;
-  case R_RISCV_RVC_BRANCH:
+  case LL_ELF_R_RISCV_RVC_BRANCH:
     *computed = S + A - P;
     return true;
-  case R_RISCV_BRANCH:
+  case LL_ELF_R_RISCV_BRANCH:
     *computed = S + A - P;
     return true;
-  case R_RISCV_CALL:
-  case R_RISCV_CALL_PLT: {
+  case LL_ELF_R_RISCV_CALL:
+  case LL_ELF_R_RISCV_CALL_PLT: {
     addr_t GOT_Target;
     if (GOT_S != 0) {
       // 1. Public symbol with GOT entry.
       GOT_Target = GOT_S;
     } else {
       // 2. Fake GOT entry with symbol extra entry.
-      SymbolExtra *symbolExtra = makeSymbolExtra(oc, ELF_R_SYM(rel->r_info), S);
+      SymbolExtra *symbolExtra = makeSymbolExtra(oc, LL_ELF_R_SYM(rel->r_info), S);
       addr_t* FAKE_GOT_S = &symbolExtra->addr;
       LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "R_RISCV_CALL_PLT w/ SymbolExtra = %p , "
                                   "entry = %p\n",
@@ -582,47 +582,47 @@ bool computeAddend(ElfRelocationATable *relaTab, unsigned relNo, Elf_Rel *rel,
     *computed = (S + A) - P;
     return true;
   }
-  case R_RISCV_ADD8:
+  case LL_ELF_R_RISCV_ADD8:
     LL_FALLTHROUGH;
-  case R_RISCV_ADD16:
+  case LL_ELF_R_RISCV_ADD16:
     LL_FALLTHROUGH;
-  case R_RISCV_ADD32:
+  case LL_ELF_R_RISCV_ADD32:
     LL_FALLTHROUGH;
-  case R_RISCV_ADD64:
+  case LL_ELF_R_RISCV_ADD64:
     *computed = S + A; // Add V when the value is set
     return true;
-  case R_RISCV_SUB6:
+  case LL_ELF_R_RISCV_SUB6:
     LL_FALLTHROUGH;
-  case R_RISCV_SUB8:
+  case LL_ELF_R_RISCV_SUB8:
     LL_FALLTHROUGH;
-  case R_RISCV_SUB16:
+  case LL_ELF_R_RISCV_SUB16:
     LL_FALLTHROUGH;
-  case R_RISCV_SUB32:
+  case LL_ELF_R_RISCV_SUB32:
     LL_FALLTHROUGH;
-  case R_RISCV_SUB64:
+  case LL_ELF_R_RISCV_SUB64:
     *computed = S + A; // Subtract from V when value is set
     return true;
-  case R_RISCV_SET6:
+  case LL_ELF_R_RISCV_SET6:
     LL_FALLTHROUGH;
-  case R_RISCV_SET8:
+  case LL_ELF_R_RISCV_SET8:
     LL_FALLTHROUGH;
-  case R_RISCV_SET16:
+  case LL_ELF_R_RISCV_SET16:
     LL_FALLTHROUGH;
-  case R_RISCV_SET32:
+  case LL_ELF_R_RISCV_SET32:
     *computed = S + A;
     return true;
-  case R_RISCV_RELAX:
+  case LL_ELF_R_RISCV_RELAX:
     // This "relocation" has no addend.
     LL_FALLTHROUGH;
-  case R_RISCV_ALIGN:
+  case LL_ELF_R_RISCV_ALIGN:
     // I guess we don't need to implement this relaxation. Otherwise, this
     // should return the number of blank bytes to insert via NOPs.
     *computed = 0;
     return true;
-  case R_RISCV_32_PCREL:
+  case LL_ELF_R_RISCV_32_PCREL:
     *computed = S + A - P;
     return true;
-  case R_RISCV_GOT_HI20: {
+  case LL_ELF_R_RISCV_GOT_HI20: {
     // TODO: Allocating extra memory for every symbol just to play this trick
     // seems to be a bit obscene. (GOT relocations hitting local symbols
     // happens, but not very often.) It would be better to allocate only what we
@@ -638,7 +638,7 @@ bool computeAddend(ElfRelocationATable *relaTab, unsigned relNo, Elf_Rel *rel,
       return true;
     } else {
       // 2. Fake GOT entry with symbol extra entry.
-      SymbolExtra *symbolExtra = makeSymbolExtra(oc, ELF_R_SYM(rel->r_info), S);
+      SymbolExtra *symbolExtra = makeSymbolExtra(oc, LL_ELF_R_SYM(rel->r_info), S);
       addr_t* FAKE_GOT_S = &symbolExtra->addr;
       addr_t res = (addr_t) FAKE_GOT_S + A - P;
       LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "R_RISCV_GOT_HI20 w/ SymbolExtra = %p , "
@@ -651,7 +651,7 @@ bool computeAddend(ElfRelocationATable *relaTab, unsigned relNo, Elf_Rel *rel,
   default:
     ll_error_set(oc->L, LL_E_UNSUPPORTED,
                "Unimplemented relocation: 0x%lx\n (%lu)",
-               ELF64_R_TYPE(rel->r_info), ELF64_R_TYPE(rel->r_info));
+               LL_ELF64_R_TYPE(rel->r_info), LL_ELF64_R_TYPE(rel->r_info));
     return false;
   }
 }
@@ -667,10 +667,10 @@ bool relocateObjectCodeRISCV64(ObjectCode *oc) {
     Section *targetSection = &oc->sections[relTab->targetSectionIndex];
 
     for (unsigned i = 0; i < relTab->n_relocations; i++) {
-      Elf_Rel *rel = &relTab->relocations[i];
+      ll_elf_target_rel *rel = &relTab->relocations[i];
 
       ElfSymbol *symbol = findSymbol(oc, relTab->sectionHeader->sh_link,
-                                     ELF64_R_SYM((Elf64_Xword)rel->r_info));
+                                     LL_ELF64_R_SYM((ll_elf64_xword)rel->r_info));
 
       LL_CHECK_FOR(oc->L, 0x0 != symbol);
 
@@ -698,19 +698,19 @@ bool relocateObjectCodeRISCV64(ObjectCode *oc) {
 
     for (unsigned i = 0; i < relaTab->n_relocations; i++) {
 
-      Elf_Rela *rel = &relaTab->relocations[i];
+      ll_elf_target_rela *rel = &relaTab->relocations[i];
 
       ElfSymbol *symbol = findSymbol(oc, relaTab->sectionHeader->sh_link,
-                                     ELF64_R_SYM((Elf64_Xword)rel->r_info));
+                                     LL_ELF64_R_SYM((ll_elf64_xword)rel->r_info));
 
       LL_CHECK_FOR(oc->L, 0x0 != symbol);
 
       /* take explicit addend */
       int32_t addend;
-      if (!computeAddend(relaTab, i, (Elf_Rel *)rel, symbol, rel->r_addend,
+      if (!computeAddend(relaTab, i, (ll_elf_target_rel *)rel, symbol, rel->r_addend,
                           oc, &addend))
         return EXIT_FAILURE;
-      if (encodeAddendRISCV64(oc->L, targetSection, (Elf_Rel *)rel, addend))
+      if (encodeAddendRISCV64(oc->L, targetSection, (ll_elf_target_rel *)rel, addend))
         return EXIT_FAILURE;
     }
   }

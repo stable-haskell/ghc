@@ -25,9 +25,9 @@ bool isAdrp(addr_t p);
 bool isLoadStore(addr_t p);
 bool isAddSub(addr_t p);
 bool isVectorOp(addr_t p);
-bool decodeAddendAarch64(ll_linker *L, Section *section, Elf_Rel *rel,
+bool decodeAddendAarch64(ll_linker *L, Section *section, ll_elf_target_rel *rel,
                          int64_t *addend);
-bool encodeAddendAarch64(ll_linker *L, Section * section, Elf_Rel * rel, int64_t addend);
+bool encodeAddendAarch64(ll_linker *L, Section * section, ll_elf_target_rel * rel, int64_t addend);
 
 bool isBranch(addr_t p) {
     return (*(addr_t*)p & 0xFC000000) == 0x14000000;
@@ -59,29 +59,29 @@ typedef uint32_t inst_t;
  * merely to report an error. */
 static bool
 checkRelocationAarch64(ll_linker *L, bool valid, ll_status status,
-                       Elf_Rel *rel, int64_t addend, const char *reason)
+                       ll_elf_target_rel *rel, int64_t addend, const char *reason)
 {
     if (valid) return true;
     ll_error_set(L, status,
                  "AArch64 relocation type %" PRIu64 ": %s (addend %" PRId64 ")",
-                 (uint64_t)ELF64_R_TYPE(rel->r_info), reason, addend);
+                 (uint64_t)LL_ELF64_R_TYPE(rel->r_info), reason, addend);
     return false;
 }
 
 bool
 decodeAddendAarch64(ll_linker *L, Section *section LL_UNUSED,
-                    Elf_Rel *rel, int64_t *addend LL_UNUSED)
+                    ll_elf_target_rel *rel, int64_t *addend LL_UNUSED)
 {
     return checkRelocationAarch64(L, false, LL_E_UNSUPPORTED, rel, 0,
                                  "relocations without explicit addends are unsupported");
 }
 
 bool
-encodeAddendAarch64(ll_linker *L, Section * section, Elf_Rel * rel, int64_t addend) {
+encodeAddendAarch64(ll_linker *L, Section * section, ll_elf_target_rel * rel, int64_t addend) {
     /* instructions are 32bit! */
     addr_t P = (addr_t)((uint8_t*)section->start + rel->r_offset);
     int exp_shift = -1;
-    switch(ELF64_R_TYPE(rel->r_info)) {
+    switch(LL_ELF64_R_TYPE(rel->r_info)) {
         /* static misc relocations */
         /* static data relocations */
         case COMPAT_R_AARCH64_ABS64:
@@ -232,7 +232,7 @@ encodeAddendAarch64(ll_linker *L, Section * section, Elf_Rel * rel, int64_t adde
  * @return True on success; failure leaves computed unchanged.
  */
 static bool
-computeAddend(ll_linker *L, Section * section, Elf_Rel * rel,
+computeAddend(ll_linker *L, Section * section, ll_elf_target_rel * rel,
               ElfSymbol * symbol, int64_t addend, int64_t *computed) {
 
     /* Position where something is relocated */
@@ -249,7 +249,7 @@ computeAddend(ll_linker *L, Section * section, Elf_Rel * rel,
 
     int64_t A = addend;
 
-    switch(ELF64_R_TYPE(rel->r_info)) {
+    switch(LL_ELF64_R_TYPE(rel->r_info)) {
         case COMPAT_R_AARCH64_ABS64:
             /* type: static, class: data, op: S + A; overflow: none */
         case COMPAT_R_AARCH64_ABS32:
@@ -373,15 +373,15 @@ relocateObjectCodeAarch64(ObjectCode * oc) {
         Section *targetSection = &oc->sections[relTab->targetSectionIndex];
 
         for (unsigned i = 0; i < relTab->n_relocations; i++) {
-            Elf_Rel *rel = &relTab->relocations[i];
+            ll_elf_target_rel *rel = &relTab->relocations[i];
 
-            if(ELF64_R_TYPE(rel->r_info) == COMPAT_R_AARCH64_NONE)
+            if(LL_ELF64_R_TYPE(rel->r_info) == COMPAT_R_AARCH64_NONE)
               continue;
 
             ElfSymbol *symbol =
                     findSymbol(oc,
                                relTab->sectionHeader->sh_link,
-                               ELF64_R_SYM(rel->r_info));
+                               LL_ELF64_R_SYM(rel->r_info));
 
             LL_CHECK_FOR(oc->L, 0x0 != symbol);
 
@@ -405,22 +405,22 @@ relocateObjectCodeAarch64(ObjectCode * oc) {
 
         for(unsigned i=0; i < relaTab->n_relocations; i++) {
 
-            Elf_Rela *rel = &relaTab->relocations[i];
+            ll_elf_target_rela *rel = &relaTab->relocations[i];
 
-            if(ELF64_R_TYPE(rel->r_info) == COMPAT_R_AARCH64_NONE)
+            if(LL_ELF64_R_TYPE(rel->r_info) == COMPAT_R_AARCH64_NONE)
               continue;
 
             ElfSymbol *symbol =
                     findSymbol(oc,
                                relaTab->sectionHeader->sh_link,
-                               ELF64_R_SYM(rel->r_info));
+                               LL_ELF64_R_SYM(rel->r_info));
 
             LL_CHECK_FOR(oc->L, 0x0 != symbol);
             if(0x0 == symbol->addr) {
                 ll_error_set(oc->L, LL_E_STATE,
                              "AArch64 relocation type %" PRIu64
                              " has no address for %s in %" PATH_FMT,
-                             (uint64_t)ELF64_R_TYPE(rel->r_info), symbol->name,
+                             (uint64_t)LL_ELF64_R_TYPE(rel->r_info), symbol->name,
                              OC_INFORMATIVE_FILENAME(oc));
                 return EXIT_FAILURE;
             }
@@ -428,10 +428,10 @@ relocateObjectCodeAarch64(ObjectCode * oc) {
             /* take explicit addend */
             int64_t addend = rel->r_addend;
 
-            if (!computeAddend(oc->L, targetSection, (Elf_Rel*)rel,
+            if (!computeAddend(oc->L, targetSection, (ll_elf_target_rel*)rel,
                                 symbol, addend, &addend))
                 return EXIT_FAILURE;
-            if (encodeAddendAarch64(oc->L, targetSection, (Elf_Rel*)rel, addend))
+            if (encodeAddendAarch64(oc->L, targetSection, (ll_elf_target_rel*)rel, addend))
                 return EXIT_FAILURE;
         }
     }

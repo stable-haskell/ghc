@@ -5,10 +5,10 @@ enum { SECTION_COUNT = 5, OWNER_COUNT = 2, SLOT_OFFSET = 128,
        EXTRA_OFFSET = 512, GUARDED_BYTES = 16 };
 
 typedef struct {
-    Elf_Shdr sections[SECTION_COUNT];
-    Elf_Sym symbols[2];
+    ll_elf_target_shdr sections[SECTION_COUNT];
+    ll_elf_target_sym symbols[2];
     char strings[8];
-    Elf_Rela relocation;
+    ll_elf_target_rela relocation;
 } RelaImage;
 
 typedef struct {
@@ -170,13 +170,13 @@ static void init_image(RelaImage *image, unsigned type, uint64_t symbol_value,
                        bool external_symbol, int64_t addend)
 {
     memset(image, 0, sizeof(*image));
-    image->sections[1].sh_type = SHT_PROGBITS;
-    image->sections[2].sh_type = SHT_SYMTAB;
+    image->sections[1].sh_type = LL_ELF_SHT_PROGBITS;
+    image->sections[2].sh_type = LL_ELF_SHT_SYMTAB;
     image->sections[2].sh_link = 3;
     image->sections[2].sh_offset = offsetof(RelaImage, symbols);
-    image->sections[3].sh_type = SHT_STRTAB;
+    image->sections[3].sh_type = LL_ELF_SHT_STRTAB;
     image->sections[3].sh_offset = offsetof(RelaImage, strings);
-    image->sections[4].sh_type = SHT_RELA;
+    image->sections[4].sh_type = LL_ELF_SHT_RELA;
     image->sections[4].sh_link = 2;
     image->sections[4].sh_info = 1;
     image->sections[4].sh_offset = offsetof(RelaImage, relocation);
@@ -185,7 +185,7 @@ static void init_image(RelaImage *image, unsigned type, uint64_t symbol_value,
     image->strings[2] = '\0';
     image->symbols[1].st_name = 1;
     image->symbols[1].st_info = ELF64_ST_INFO(
-        external_symbol ? STB_GLOBAL : STB_LOCAL, STT_OBJECT);
+        external_symbol ? LL_ELF_STB_GLOBAL : LL_ELF_STB_LOCAL, LL_ELF_STT_OBJECT);
     image->symbols[1].st_shndx = 1;
     image->symbols[1].st_value = symbol_value;
     image->relocation.r_info = ELF64_R_INFO(1, type);
@@ -210,7 +210,7 @@ static int run_relocation(Owner *owner, RelaImage *image, unsigned char *target,
     object.image = (char *)image;
     object.n_sections = 2;
     object.sections = sections;
-#if defined(SHN_XINDEX)
+#if LL_ELF_HAS_SHN_XINDEX
     object.shndx_table = NULL;
 #endif
     object.symbol_extras = extras;
@@ -348,14 +348,14 @@ static void run_valid_extra(unsigned type, bool use_jump_island,
     CHECK(owners[0].linker.error_status == LL_OK,
           "valid symbol-extra relocation set an error");
     if (type == COMPAT_R_X86_64_GOTPCREL) {
-        Elf64_Sword observed = 0;
-        Elf64_Sword expected = (Elf64_Sword)((uintptr_t)&extras[0].addr
+        ll_elf64_sword observed = 0;
+        ll_elf64_sword expected = (ll_elf64_sword)((uintptr_t)&extras[0].addr
                                                - (uintptr_t)slot);
         memcpy(&observed, slot, sizeof(observed));
         CHECK(observed == expected, "GOTPCREL payload was incorrect");
     } else if (use_jump_island) {
-        Elf64_Sword observed = 0;
-        Elf64_Sword expected = (Elf64_Sword)((uintptr_t)&extras[0].jumpIsland
+        ll_elf64_sword observed = 0;
+        ll_elf64_sword expected = (ll_elf64_sword)((uintptr_t)&extras[0].jumpIsland
                                                - (uintptr_t)slot);
         memcpy(&observed, slot, sizeof(observed));
         CHECK(observed == expected, "PLT32 fallback payload was incorrect");

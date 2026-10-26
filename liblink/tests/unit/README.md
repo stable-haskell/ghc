@@ -1207,3 +1207,34 @@ With real MinGW-w64 headers, use the corresponding Windows GNU target and
 `-ffreestanding`. Such cross-compiles compare declarations; they do not execute
 Windows code or qualify DLL loading, unwind registration, or foreign PE linking.
 The byte controls run on little-endian hosts; other hosts compile layout only.
+
+ELF declaration controls
+------------------------
+
+`elf_layout.c` checks the SDK-independent `liblink/elf.h` ELF32 and ELF64
+records against fixed wire sizes and offsets. Aligned copies of deliberately
+unaligned symbol bytes exercise the distinct 32-bit and 64-bit field order.
+It checks symbol-byte and relocation-info encoding/extraction independently.
+The default native driver also compares record size, alignment, field offsets,
+and available constants against the real ELF SDK on ELF hosts. Little-endian
+hosts run the byte checks; other hosts compile the layout comparisons only.
+
+The private `linker/ElfHost.h` snapshots native SDK optional features separately
+from portable declarations, preserving native `SHN_XINDEX`, symbol-index table,
+initializer-array and optional machine-code gates. The backend uses explicit
+`ll_elf_target_*` aliases; actual FreeBSD loader callbacks retain SDK `Elf64_*`
+types. Both the portable header and private host-policy header are installed.
+This declaration slice does not enable foreign backends or qualify native Linux
+execution. FreeBSD/Solaris/OpenBSD SDK and runtime checks remain platform work.
+
+A compiler supporting the requested actual target can check the portable ABI
+without any ELF SDK or generated platform configuration:
+
+```sh
+clang --target=aarch64-unknown-linux-gnu -ffreestanding -std=c11 \
+  -Wall -Wextra -Werror -Werror=vla -pedantic -Iliblink/include \
+  -c liblink/tests/unit/elf_layout.c -o /tmp/elf-layout.o
+```
+
+With a matching genuine ELF sysroot, add `-DLL_ELF_COMPARE_SDK` and its system
+include path. No host OS macros or generated configuration are fabricated.

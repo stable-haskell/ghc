@@ -271,36 +271,36 @@ static ObjectCode *make_object(const char *path, size_t data_size, bool bss_firs
     size_t bytes = page + data_size;
     unsigned char *image = calloc(1, bytes);
     if (image == NULL) _Exit(98);
-    Elf_Ehdr *header = (Elf_Ehdr *)image;
-    memcpy(header->e_ident, ELFMAG, SELFMAG);
-    header->e_ident[EI_CLASS] = ELFCLASS64;
-    header->e_ident[EI_DATA] = ELFDATA2LSB;
-    header->e_ident[EI_VERSION] = EV_CURRENT;
-    header->e_type = ET_REL;
-    header->e_machine = EM_X86_64;
-    header->e_version = EV_CURRENT;
+    ll_elf_target_ehdr *header = (ll_elf_target_ehdr *)image;
+    memcpy(header->e_ident, LL_ELF_ELFMAG, LL_ELF_SELFMAG);
+    header->e_ident[LL_ELF_EI_CLASS] = LL_ELF_ELFCLASS64;
+    header->e_ident[LL_ELF_EI_DATA] = LL_ELF_ELFDATA2LSB;
+    header->e_ident[LL_ELF_EI_VERSION] = LL_ELF_EV_CURRENT;
+    header->e_type = LL_ELF_ET_REL;
+    header->e_machine = LL_ELF_EM_X86_64;
+    header->e_version = LL_ELF_EV_CURRENT;
     header->e_ehsize = sizeof(*header);
     header->e_shoff = sizeof(*header);
-    header->e_shentsize = sizeof(Elf_Shdr);
+    header->e_shentsize = sizeof(ll_elf_target_shdr);
     header->e_shnum = SECTION_COUNT;
     header->e_shstrndx = 3;
-    Elf_Shdr *sh = (Elf_Shdr *)(image + header->e_shoff);
+    ll_elf_target_shdr *sh = (ll_elf_target_shdr *)(image + header->e_shoff);
     static const char names[] = "\0.data\0.bss\0.shstrtab\0";
     size_t names_offset = sizeof(*header) + SECTION_COUNT * sizeof(*sh);
     if (names_offset + sizeof(names) >= page) _Exit(98);
     memcpy(image + names_offset, names, sizeof(names));
     size_t data_index = bss_first ? 2 : 1;
     size_t bss_index = bss_first ? 1 : 2;
-    sh[data_index] = (Elf_Shdr){
-        .sh_name = 1, .sh_type = SHT_PROGBITS, .sh_flags = SHF_ALLOC | SHF_WRITE,
+    sh[data_index] = (ll_elf_target_shdr){
+        .sh_name = 1, .sh_type = LL_ELF_SHT_PROGBITS, .sh_flags = LL_ELF_SHF_ALLOC | LL_ELF_SHF_WRITE,
         .sh_offset = page, .sh_size = data_size, .sh_addralign = 8
     };
-    sh[bss_index] = (Elf_Shdr){
-        .sh_name = 7, .sh_type = SHT_NOBITS, .sh_flags = SHF_ALLOC | SHF_WRITE,
+    sh[bss_index] = (ll_elf_target_shdr){
+        .sh_name = 7, .sh_type = LL_ELF_SHT_NOBITS, .sh_flags = LL_ELF_SHF_ALLOC | LL_ELF_SHF_WRITE,
         .sh_size = BSS_BYTES, .sh_addralign = 8
     };
-    sh[3] = (Elf_Shdr){
-        .sh_name = 12, .sh_type = SHT_STRTAB, .sh_offset = names_offset,
+    sh[3] = (ll_elf_target_shdr){
+        .sh_name = 12, .sh_type = LL_ELF_SHT_STRTAB, .sh_offset = names_offset,
         .sh_size = sizeof(names), .sh_addralign = 1
     };
     for (size_t i = 0; i < data_size; ++i) image[page + i] = payload_byte(i);

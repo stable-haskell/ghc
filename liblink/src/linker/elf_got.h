@@ -6,7 +6,7 @@
 #include <linker/ElfTypes.h>
 
 #if defined(OBJFORMAT_ELF)
-bool needGotSlot(Elf_Sym * symbol);
+bool needGotSlot(ll_elf_target_sym * symbol);
 bool makeGot(ObjectCode * oc);
 bool fillGot(ObjectCode * oc);
 bool verifyGot(ObjectCode * oc);

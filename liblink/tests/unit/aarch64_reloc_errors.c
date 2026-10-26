@@ -96,8 +96,8 @@ static void setup_object(ObjectCode *oc,
 
 static void setup_rela(struct ObjectCodeFormatInfo *info,
                        ElfRelocationATable *table,
-                       Elf_Shdr *header,
-                       Elf_Rela *relocations,
+                       ll_elf_target_shdr *header,
+                       ll_elf_target_rela *relocations,
                        size_t count)
 {
     memset(table, 0, sizeof(*table));
@@ -114,7 +114,7 @@ static void test_scalar_encodings(void)
 {
     union Backing backing;
     Section section = {0};
-    Elf_Rel rel = {0};
+    ll_elf_target_rel rel = {0};
     memset(&backing, 0, sizeof(backing));
 
     section.start = &backing.u64[1];
@@ -204,7 +204,7 @@ static void test_branch_and_adrp_boundaries(void)
 {
     union Backing backing;
     Section section = {0};
-    Elf_Rel rel = {0};
+    ll_elf_target_rel rel = {0};
     const uint64_t before_canary = UINT64_C(0x1122334455667788);
     const uint64_t after_canary = UINT64_C(0x8877665544332211);
 
@@ -293,7 +293,7 @@ static void test_scaled_instruction_encoding(void)
 {
     union Backing backing;
     Section section = {0};
-    Elf_Rel rel = {0};
+    ll_elf_target_rel rel = {0};
     section.start = &backing.u64[1];
     section.size = sizeof(backing.u64[1]);
 
@@ -336,8 +336,8 @@ static void test_relocation_loop_statuses(void)
     Section section;
     ElfSymbolTable symbol_table;
     ElfSymbol symbols[2];
-    Elf_Shdr header = {0};
-    Elf_Rela relocation = {0};
+    ll_elf_target_shdr header = {0};
+    ll_elf_target_rela relocation = {0};
     ElfRelocationATable table;
 
     setup_object(&oc, &info, &section, &section_info, &symbol_table,
@@ -372,7 +372,7 @@ static void test_relocation_loop_statuses(void)
               && backing.u64[0] == UINT64_C(0x0123456789abcdef),
           "R_AARCH64_NONE did not skip without symbol lookup or writes");
 
-    Elf_Rel implicit = {0};
+    ll_elf_target_rel implicit = {0};
     ElfRelocationTable rel_table = {0};
     implicit.r_info = ELF64_R_INFO(1, COMPAT_R_AARCH64_ABS64);
     rel_table.targetSectionIndex = 0;
@@ -399,8 +399,8 @@ static void test_full_loop_scalar64(void)
     Section section;
     ElfSymbolTable symbol_table;
     ElfSymbol symbols[2];
-    Elf_Shdr header = {0};
-    Elf_Rela relocation = {0};
+    ll_elf_target_shdr header = {0};
+    ll_elf_target_rela relocation = {0};
     ElfRelocationATable table;
     const uint64_t neighbor = UINT64_C(0xa1b2c3d4e5f60718);
 
@@ -443,8 +443,8 @@ static void test_scaled_address_failures(void)
     Section section;
     ElfSymbolTable symbol_table;
     ElfSymbol symbols[2];
-    Elf_Shdr header = {0};
-    Elf_Rela relocation = {0};
+    ll_elf_target_shdr header = {0};
+    ll_elf_target_rela relocation = {0};
     ElfRelocationATable table;
     uint64_t source_value = 0;
     uint8_t *misaligned = (uint8_t *)(void *)&source_value + 1;
@@ -495,8 +495,8 @@ static void test_branch_stub_fallback(void)
     Section section;
     ElfSymbolTable symbol_table;
     ElfSymbol symbols[2];
-    Elf_Shdr header = {0};
-    Elf_Rela relocation = {0};
+    ll_elf_target_shdr header = {0};
+    ll_elf_target_rela relocation = {0};
     ElfRelocationATable table;
     Stub stub = {0};
     uintptr_t place_bits = 0;
