@@ -468,9 +468,9 @@ def run_pei386_common_ownership(cc: list[str], archive: Path,
         label="compile and link pei386_common_ownership",
     )
     included = (
-        "PEi386.c, Linker.c, M32Alloc.c, M32Reservations.c, and MMap.c"
+        "PEi386.c, PEi386Host.c, Linker.c, M32Alloc.c, M32Reservations.c, and MMap.c"
     )
-    for member in ("PEi386", "Linker", "M32Alloc", "M32Reservations", "MMap"):
+    for member in ("PEi386", "PEi386Host", "Linker", "M32Alloc", "M32Reservations", "MMap"):
         verify_link_map(
             test_map,
             archive,
@@ -486,7 +486,7 @@ def run_pei386_common_ownership(cc: list[str], archive: Path,
     source_text = (ROOT / "liblink/src/linker/PEi386.c").read_text()
     old_line = (
         "SECTIONKIND_RWDATA, SECTION_M32,\n"
-        "                  bss, globalBssSize, 0, 0, 0);"
+        "                  bss, globalBssSize, 0, 0, 0, sizeof(struct ll_coff_section_info));"
     )
     if source_text.count(old_line) != 1:
         raise RuntimeError("could not uniquely locate the approved PE COMMON tag")
@@ -527,7 +527,7 @@ def run_pei386_common_ownership(cc: list[str], archive: Path,
         ),
         label="compile old-tag ownership regression mutant",
     )
-    for member in ("PEi386", "Linker", "M32Alloc", "M32Reservations", "MMap"):
+    for member in ("PEi386", "PEi386Host", "Linker", "M32Alloc", "M32Reservations", "MMap"):
         verify_link_map(
             mutant_map,
             archive,
@@ -571,7 +571,7 @@ def run_pei386_common_ownership(cc: list[str], archive: Path,
 def run_pei386_resolution_status(cc: list[str], archive: Path,
                                  output: Path,
                                  link_flags: list[str]) -> None:
-    included = "PEi386.c, Linker.c, M32Alloc.c, M32Reservations.c, and MMap.c"
+    included = "PEi386.c, PEi386Host.c, Linker.c, M32Alloc.c, M32Reservations.c, and MMap.c"
     for unit in ("pei386_resolution_status", "pei386_unwind_retention",
                  "pei386_resolver_classification", "pei386_resolver_quarantine",
                  "pei386_common_conflict"):
@@ -587,7 +587,7 @@ def run_pei386_resolution_status(cc: list[str], archive: Path,
             ),
             label=f"compile and link {unit}",
         )
-        for member in ("PEi386", "Linker", "M32Alloc", "M32Reservations", "MMap"):
+        for member in ("PEi386", "PEi386Host", "Linker", "M32Alloc", "M32Reservations", "MMap"):
             verify_link_map(
                 map_file,
                 archive,
@@ -615,8 +615,8 @@ def run_pei386_load_resources(cc: list[str], archive: Path,
         ),
         label=f"compile and link {unit}",
     )
-    included = "PEi386.c, Linker.c, M32Alloc.c, M32Reservations.c, and MMap.c"
-    for member in ("PEi386", "Linker", "M32Alloc", "M32Reservations", "MMap"):
+    included = "PEi386.c, PEi386Host.c, Linker.c, M32Alloc.c, M32Reservations.c, and MMap.c"
+    for member in ("PEi386", "PEi386Host", "Linker", "M32Alloc", "M32Reservations", "MMap"):
         verify_link_map(
             map_file,
             archive,

@@ -233,7 +233,7 @@ static void run_dll_fallback_stops_on_resource_error(void)
     owner.error_message[0] = '\0';
     first_module_lookups = 0;
     second_module_lookups = 0;
-    CHECK(lookupSymbolInDLLs(&owner, symbol, &dependent) == NULL,
+    CHECK(ll_pe_host_lookup_dlls(&owner, symbol, &dependent) == NULL,
           "DLL indirection mapping failure unexpectedly resolved");
     CHECK(owner.error_status == LL_E_NOMEM,
           "DLL indirection failure did not report owner NOMEM");
@@ -246,7 +246,7 @@ static void run_dll_fallback_stops_on_resource_error(void)
     second_module_lookups = 0;
     owner.error_status = LL_E_UNSUPPORTED;
     set_owner_message("preexisting DLL error");
-    CHECK(lookupSymbolInDLLs(&owner, symbol, &dependent) == NULL,
+    CHECK(ll_pe_host_lookup_dlls(&owner, symbol, &dependent) == NULL,
           "DLL indirection mapping failure unexpectedly resolved");
     fail_m32_mapping = false;
     mock_proc_addresses = false;

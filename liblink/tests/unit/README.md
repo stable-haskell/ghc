@@ -1238,3 +1238,31 @@ clang --target=aarch64-unknown-linux-gnu -ffreestanding -std=c11 \
 
 With a matching genuine ELF sysroot, add `-DLL_ELF_COMPARE_SDK` and its system
 include path. No host OS macros or generated configuration are fabricated.
+
+Portable PE object/process split
+-------------------------------
+
+`run_pei386_portable.py` compiles a real x86_64 Windows COFF data fixture using
+`--coff-cc`, then runs the actual PE table's verify, get_names, and resolve slots
+on the real Darwin/Linux host. It does not execute or initialize fixture code.
+Pass `--native-archive`, `--config-include`, and `--fs-include` for the matching
+fresh host build, plus `--rts-fs-archive` on Linux. `--cc` accepts the native
+compiler command and optional sanitizer flags. These controls call the table
+explicitly; integrated registry/admission tests remain separate.
+
+The positive fixture has two data symbols, preserving the old verifier's
+string-table alignment assumption with current MinGW GCC. A genuine one-symbol
+GCC object places that count at offset 426 (modulo four is two); the unchanged
+direct uint32_t load fails UBSan. That distinct bug remains recorded and open,
+and the positive fixture is not evidence that arbitrary valid COFF alignments
+are supported. An aligned Clang variant reaches the real verify/names/resolve slots but leaves
+one additional owner allocation after the known metadata cleanup. Its exact
+cause remains unqualified; this extraction does not repair metadata leaks.
+The unit explicitly releases the same separately allocated metadata payloads
+as the existing native PE ownership fixture before checking its owner ledger.
+
+Required image-base discovery, DLL lookup, import resolution/loading, and unwind
+registration return LL_E_UNSUPPORTED on a non-Windows host. Sentinel outputs
+and pdata ownership remain unchanged. Native Windows fixtures include both
+PEi386.c and PEi386Host.c under their existing service spies; linker-map checks
+reject either matching archive member, preserving real-source binding.

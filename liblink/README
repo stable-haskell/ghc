@@ -167,7 +167,16 @@ change supported file byte order. See tests/unit/README.md for layout controls.
 
 COFF object records/constants live in installed `liblink/coff.h`, with the
 Windows two-byte symbol/relocation packing preserved. `PEi386Types.h` holds
-SDK-free format metadata; `PEi386Host.h` declares the existing Windows process
-services using real SDK handles and calling conventions. Native DLL/unwind
-behavior is unchanged. This declaration split does not enable a foreign PE
-backend; Windows runtime qualification remains required for an integrated build.
+SDK-free format metadata. `PEi386Host.c` owns DLL loading/caches, Windows symbol
+lookup, loaded-module inspection, and native unwind registration. SDK handles,
+calling conventions, and runtime-function records stay in that host layer.
+`PEi386Services.h` gives the object backend typed private process-service calls;
+a non-Windows host returns LL_E_UNSUPPORTED when those services are required.
+
+The real PE object code can compile with LL_ALL_BACKENDS on another host.
+Registry admission and execution policy remain separate integration work.
+Native DLL/unwind call order and ownership are preserved; native Windows
+runtime qualification remains required. The retained direct COFF string-table
+count load assumes four-byte alignment. A normal one-data-symbol MinGW GCC
+object violates that assumption; the separate repair remains unapplied pending
+approval. Portable data controls use an explicitly aligned compiler fixture.

@@ -59,6 +59,8 @@ extra-source-files:
     src/linker/PEi386Types.h
     src/linker/PEi386Host.h
     src/linker/ElfHost.h
+    src/linker/PEi386Host.c
+    src/linker/PEi386Services.h
     src/linker/ProddableBlocks.c
     src/linker/ProddableBlocks.h
     src/linker/SymbolExtras.c
@@ -153,6 +155,8 @@ extra-source-files:
     tests/unit/m32_map_status.c
     tests/unit/m32_windows_reservations.c
     tests/unit/pei386_common_ownership.c
+    tests/unit/pei386_portable_data.c
+    tests/unit/run_pei386_portable.py
     tests/unit/pei386_common_conflict.c
     tests/unit/pei386_load_resources.c
     tests/unit/pei386_resolution_status.c

@@ -59,6 +59,7 @@ static unsigned failures;
 #define RtlDeleteFunctionTable PEI386_TEST_RTLDELETE
 #endif
 #include "linker/PEi386.c"
+#include "linker/PEi386Host.c"
 #ifdef PEI386_TEST_RTLDELETE
 #undef RtlDeleteFunctionTable
 #endif
