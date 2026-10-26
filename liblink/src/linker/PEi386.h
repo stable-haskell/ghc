@@ -11,7 +11,7 @@
 
 #include "ll_begin_private.h"
 
-#if defined(x86_64_HOST_ARCH)
+#if LL_TARGET_X86_64
 #define PEi386_IMAGE_OFFSET 4
 #else
 #define PEi386_IMAGE_OFFSET 0

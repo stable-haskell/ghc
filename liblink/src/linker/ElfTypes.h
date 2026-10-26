@@ -3,7 +3,7 @@
 
 #if defined(OBJFORMAT_ELF)
 
-#include "ll_platform.h"
+#include "ll_target.h"
 
 #include <elf.h>
 #include "linker/InitFini.h"
@@ -14,8 +14,8 @@
 
 #  define ELF_TARGET_AMD64 /* Used inside <elf.h> on Solaris 11 */
 
-/* __LP64__ is a rough proxy if a platform is ELFCLASS64 */
-#if defined(__LP64__) || defined(_LP64)
+/* Object records follow the selected target, not the compiler word size. */
+#if LL_TARGET_WORD_SIZE == 8
 #  define ELF_64BIT
 #else
 #  define ELF_32BIT

@@ -4,16 +4,14 @@
 
 #include "plt_aarch64.h"
 
-#if defined(aarch64_HOST_ARCH)
+#if LL_TARGET_AARCH64
 
 #if defined(OBJFORMAT_MACHO)
 
-#if defined(__x86_64__)
-#define __suffix__ X86_64
-#elif defined(__aarch64__) || defined(__arm64__)
+#if LL_TARGET_AARCH64
 #define __suffix__ Aarch64
 #else
-#error "unknown architecture"
+#error "unknown Mach-O PLT target"
 #endif
 
 #define PASTE(x,y) x ## y

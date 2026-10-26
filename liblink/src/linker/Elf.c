@@ -1,5 +1,6 @@
 #define LL_INTERNAL_SOURCE 1
 #include "ll_compat.h"
+#include "ll_target.h"
 
 #if defined(linux_HOST_OS) || defined(solaris2_HOST_OS) \
 || defined(linux_android_HOST_OS) \
@@ -117,9 +118,9 @@
  */
 #define X86_64_ELF_NONPIC_HACK(L) (!(L)->services.cfg.always_pic)
 
-#if defined(i386_HOST_ARCH)
+#if LL_TARGET_I386
 #  define ELF_TARGET_386    /* Used inside <elf.h> */
-#elif defined(x86_64_HOST_ARCH)
+#elif LL_TARGET_X86_64
 #  define ELF_TARGET_X64_64
 #  define ELF_TARGET_AMD64 /* Used inside <elf.h> on Solaris 11 */
 #endif
@@ -133,9 +134,7 @@
 
 #include "elf_got.h"
 
-#if defined(arm_HOST_ARCH) || defined(aarch64_HOST_ARCH) || defined (riscv64_HOST_ARCH)
-#  define NEED_GOT
-#  define NEED_PLT
+#if LL_ELF_NEED_PLT
 #  include "elf_plt.h"
 #  include "elf_reloc.h"
 #endif
@@ -710,7 +709,7 @@ static SectionKind getSectionKind_ELF( Elf_Shdr *hdr, int *is_bss )
     return SECTIONKIND_OTHER;
 }
 
-#if !defined(NEED_PLT)
+#if !LL_ELF_NEED_PLT
 
 static void *
 mapObjectFileSection (ll_linker *L, int fd, Elf_Word offset, Elf_Word size,
@@ -890,7 +889,7 @@ ocGetNames_ELF ( ObjectCode* oc )
           oc->sections[i].elf_info->stubs = NULL;
       } else if (kind != SECTIONKIND_OTHER && size > 0) {
 
-#if defined(NEED_PLT)
+#if LL_ELF_NEED_PLT
           /* To support stubs next to sections, we will use the following
            * layout:
            *
@@ -964,7 +963,7 @@ ocGetNames_ELF ( ObjectCode* oc )
           addSection(oc->L, &sections[i], kind, alloc, start, size,
                      mapped_offset, mapped_start, mapped_size, sizeof(struct ll_elf_section_info));
 
-#if defined(NEED_PLT)
+#if LL_ELF_NEED_PLT
           oc->sections[i].elf_info->nstubs = 0;
           oc->sections[i].elf_info->stub_offset = (uint8_t*)start + size;
           oc->sections[i].elf_info->stub_size = stub_space;
@@ -1260,7 +1259,7 @@ end:
 // the aarch64 and riscv64 linkers use relocateObjectCodeAarch64() and
 // relocateObjectCodeRISCV64() (respectively), see elf_reloc_aarch64.{h,c} and
 // elf_reloc_riscv64.{h,c}
-#if !defined(aarch64_HOST_ARCH) && !defined(riscv64_HOST_ARCH)
+#if !LL_TARGET_AARCH64 && !LL_TARGET_RISCV64
 
 /* Do ELF relocations which lack an explicit addend.  All x86-linux
    and arm-linux relocations appear to be of this form. */
@@ -1320,15 +1319,15 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
 
        Elf_Addr  P  = ((Elf_Addr)targ) + offset;
        Elf_Word* pP = (Elf_Word*)P;
-#if defined(i386_HOST_ARCH) || LL_DEBUG_CODE
+#if LL_TARGET_I386 || LL_DEBUG_CODE
        Elf_Addr  A  = *pP;
 #endif
        Elf_Addr  S;
        void*     S_tmp;
-#if defined(i386_HOST_ARCH)
+#if LL_TARGET_I386
        Elf_Addr  value;
 #endif
-#if defined(arm_HOST_ARCH)
+#if LL_TARGET_ARM
        int is_target_thm=0, T=0;
 #endif
 
@@ -1356,7 +1355,7 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
            LL_IF_DEBUG_FOR(oc->L, linker_verbose,LL_DEBUG_FOR(oc->L, "`%s' resolves to %p\n", symbol->name,
                                        (void*)S ));
 
-#if defined(arm_HOST_ARCH)
+#if LL_TARGET_ARM
            /*
             * 4.5.3 Symbol Values
             *
@@ -1392,7 +1391,7 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
        }
 
        int reloc_type = ELF_R_TYPE(info);
-#if defined(i386_HOST_ARCH) || LL_DEBUG_CODE
+#if LL_TARGET_I386 || LL_DEBUG_CODE
        LL_IF_DEBUG_FOR(oc->L, linker_verbose,
                 LL_DEBUG_FOR(oc->L, "Reloc: P = %p   S = %p   A = %p   type=%d\n",
                            (void*)P, (void*)S, (void*)A, reloc_type ));
@@ -1403,12 +1402,12 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
        (void) pP; /* suppress unused varialbe warning in non-debug build */
 #endif
 
-#if defined(i386_HOST_ARCH)
+#if LL_TARGET_I386
        value = S + A;
 #endif
 
        switch (reloc_type) {
-#        if defined(i386_HOST_ARCH)
+#        if LL_TARGET_I386
        case COMPAT_R_386_NONE:                  break;
        case COMPAT_R_386_32:   *pP = value;     break;
        case COMPAT_R_386_PC32: *pP = value - P; break;
@@ -1424,7 +1423,7 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
            break;
 #        endif
 
-#        if defined(arm_HOST_ARCH)
+#        if LL_TARGET_ARM
        case COMPAT_R_ARM_ABS32:     /* (S + A) | T */
            // Specified by Linux ARM ABI to be equivalent to ABS32
        case COMPAT_R_ARM_TARGET1:
@@ -1720,7 +1719,7 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
 #if defined(SHN_XINDEX)
    Elf_Word* shndx_table = get_shndx_table(oc);
 #endif
-#if LL_DEBUG_CODE || defined(powerpc_HOST_ARCH) || defined(x86_64_HOST_ARCH)
+#if LL_DEBUG_CODE || LL_TARGET_POWERPC || LL_TARGET_X86_64
    /* This #if def only serves to avoid unused-var warnings. */
    Elf_Addr targ = (Elf_Addr) oc->sections[target_shndx].start;
 #endif
@@ -1738,19 +1737,19 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
    }
 
    for (j = 0; j < nent; j++) {
-#if LL_DEBUG_CODE || defined(powerpc_HOST_ARCH) || defined(x86_64_HOST_ARCH)
+#if LL_DEBUG_CODE || LL_TARGET_POWERPC || LL_TARGET_X86_64
       /* This #if def only serves to avoid unused-var warnings. */
       Elf_Addr  offset = rtab[j].r_offset;
       Elf_Addr  P      = targ + offset;
       Elf_Addr  A      = rtab[j].r_addend;
 #endif
-#if defined(powerpc_HOST_ARCH) || defined(x86_64_HOST_ARCH)
+#if LL_TARGET_POWERPC || LL_TARGET_X86_64
       Elf_Addr  value;
 #endif
       Elf_Addr  info   = rtab[j].r_info;
       Elf_Addr  S;
       void*     S_tmp;
-#     if defined(powerpc_HOST_ARCH)
+#     if LL_TARGET_POWERPC
       Elf_Sword delta;
 #     endif
 
@@ -1779,7 +1778,7 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
                            " symbol `%s'", oc->fileName, symbol);
                 return 0;
             }
-#if defined(x86_64_HOST_ARCH) && defined(freebsd_HOST_OS)
+#if LL_TARGET_X86_64 && defined(x86_64_HOST_ARCH) && defined(freebsd_HOST_OS)
             S = lookupTlsgdSymbol(symbol, ELF_R_SYM(info), oc);
 #else
             ll_error_set(oc->L, LL_E_UNSUPPORTED,
@@ -1832,12 +1831,12 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
       checkProddableBlock(oc->L, &oc->proddables, (void*)P, sizeof(Elf_Word));
 #endif
 
-#if defined(powerpc_HOST_ARCH) || defined(x86_64_HOST_ARCH)
+#if LL_TARGET_POWERPC || LL_TARGET_X86_64
       value = S + A;
 #endif
 
       switch (ELF_R_TYPE(info)) {
-#        if defined(powerpc_HOST_ARCH)
+#        if LL_TARGET_POWERPC
          case R_PPC_ADDR16_LO:
             *(Elf32_Half*) P = value;
             break;
@@ -1898,7 +1897,7 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
             break;
 #        endif
 
-#if defined(x86_64_HOST_ARCH)
+#if LL_TARGET_X86_64
       case COMPAT_R_X86_64_NONE:
           break;
 
@@ -2222,7 +2221,7 @@ ocResolve_ELF ( ObjectCode* oc )
     (void) shnum;
     (void) shdr;
 
-#if defined(aarch64_HOST_ARCH) || defined(riscv64_HOST_ARCH)
+#if LL_TARGET_AARCH64 || LL_TARGET_RISCV64
     /* use new relocation design */
     if(relocateObjectCode( oc ))
         return 0;
@@ -2243,9 +2242,9 @@ ocResolve_ELF ( ObjectCode* oc )
     }
 #endif
 
-#if defined(powerpc_HOST_ARCH)
+#if LL_TARGET_POWERPC
     ocFlushInstructionCache( oc );
-#elif defined(riscv64_HOST_ARCH)
+#elif LL_TARGET_RISCV64
     /* New-style pseudo-polymorph (by architecture) call */
     flushInstructionCache( oc );
 #endif
@@ -2307,7 +2306,7 @@ int ocRunFini_ELF( ObjectCode *oc )
  * PowerPC & X86_64 ELF specifics
  */
 
-#if defined(NEED_SYMBOL_EXTRAS)
+#if LL_ELF_NEED_SYMBOL_EXTRAS
 
 int ocAllocateExtras_ELF( ObjectCode *oc )
 {
@@ -2437,7 +2436,7 @@ static int ll_elf_init(ObjectCode *oc)
 }
 static int ll_elf_extras(ObjectCode *oc)
 {
-#if defined(NEED_SYMBOL_EXTRAS)
+#if LL_ELF_NEED_SYMBOL_EXTRAS
     return ocAllocateExtras_ELF(oc);
 #else
     (void)oc;

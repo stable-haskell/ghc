@@ -116,6 +116,13 @@ repository root with:
 
     python3 liblink/tests/unit/run_native_tests.py
 
+The default run also checks target configuration without executing target
+instructions. `test_target_config.py` compiles the native default and seven
+explicit architectures, checks target word classes and format capabilities,
+compares host macro definitions before and after each override, and requires
+an invalid target selector to fail. It can run independently with
+`--cc <compiler command> --config-dir <generated include directory>`.
+
 The driver locates the generated `liblink` configuration headers, installed
 `rts-fs` headers, and stage2 `native-linker/liblink.a`. It compiles the private
 error-state, core status/negative-input, and archive status tests with

@@ -1,9 +1,10 @@
 #define LL_INTERNAL_SOURCE 1
 #include "ll_compat.h"
+#include "ll_target.h"
 #include "plt.h"
 #include <string.h>
 
-#if defined(aarch64_HOST_ARCH)
+#if LL_TARGET_AARCH64
 
 #if defined(OBJFORMAT_MACHO)
 

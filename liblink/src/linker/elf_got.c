@@ -1,5 +1,6 @@
 #define LL_INTERNAL_SOURCE 1
 #include "ll_compat.h"
+#include "ll_target.h"
 #include "elf_got.h"
 #include "linker/MMap.h"
 #include "ll_failure.h"

@@ -1,11 +1,12 @@
 #define LL_INTERNAL_SOURCE 1
 #include "ll_compat.h"
+#include "ll_target.h"
 #include "elf_compat.h"
 #include "elf_plt_aarch64.h"
 
 #include <stdlib.h>
 
-#if defined(aarch64_HOST_ARCH)
+#if LL_TARGET_AARCH64
 
 #if defined(OBJFORMAT_ELF)
 

@@ -1074,6 +1074,9 @@ def main() -> int:
     cc = compiler + common_flags
 
     if selected_modes == 0:
+        run([sys.executable, str(ROOT / "liblink/tests/unit/test_target_config.py"),
+             "--cc", command_text(compiler), "--config-dir", str(config_include)],
+            label="check target selection and host definitions")
         with tempfile.TemporaryDirectory(prefix="liblink-page21-encoding-") as temporary:
             directory = Path(temporary)
             header = directory / "macho_page21_generated.h"

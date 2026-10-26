@@ -440,6 +440,7 @@
 
 
 #include "ll_compat.h"
+#include "ll_target.h"
 
 #if defined(mingw32_HOST_OS)
 
@@ -465,7 +466,7 @@
 #include <string.h>
 #include <psapi.h>
 
-#if defined(x86_64_HOST_ARCH)
+#if LL_TARGET_X86_64
 static bool makeSymbolExtra_PEi386(
     ObjectCode* oc,
     uint64_t index,
@@ -1376,12 +1377,12 @@ static bool
 verifyCOFFHeader ( ll_linker *L, uint16_t machine, IMAGE_FILE_HEADER *hdr,
                    pathchar *fileName )
 {
-#if defined(x86_64_HOST_ARCH)
+#if LL_TARGET_X86_64
    if (machine != IMAGE_FILE_MACHINE_AMD64) {
       LL_LOG_ERROR_FOR(L, "%" PATH_FMT ": Not a x86_64 PE+ file.", fileName);
       return false;
    }
-#elif defined(aarch64_HOST_ARCH)
+#elif LL_TARGET_AARCH64
    if (machine != IMAGE_FILE_MACHINE_ARM64) {
       LL_LOG_ERROR_FOR(L, "%" PATH_FMT ": Not a ARM64 PE+ file.", fileName);
       return false;
@@ -2199,7 +2200,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
    return true;
 }
 
-#if defined(x86_64_HOST_ARCH)
+#if LL_TARGET_X86_64
 
 static bool
 makeSymbolExtra_PEi386( ObjectCode* oc, uint64_t index LL_UNUSED, size_t s,
@@ -2334,7 +2335,7 @@ ocResolve_PEi386 ( ObjectCode* oc )
          /* All supported relocations write at least 4 bytes */
          checkProddableBlock(oc->L, &oc->proddables, pP, 4);
          switch (reloc->Type) {
-#if defined(x86_64_HOST_ARCH)
+#if LL_TARGET_X86_64
             case 1: /* R_X86_64_64 (ELF constant 1) - IMAGE_REL_AMD64_ADDR64 (PE constant 1) */
                {
                    uint64_t A;
@@ -2430,7 +2431,7 @@ ocResolve_PEi386 ( ObjectCode* oc )
                    *(uint32_t *)pP = (uint32_t)v;
                    break;
                }
-#elif defined(aarch64_HOST_ARCH)
+#elif LL_TARGET_AARCH64
             case 1: // IMAGE_REL_ARM64_ADDR32, see https://llvm.org/doxygen/namespacellvm_1_1COFF.html, https://learn.microsoft.com/en-us/windows/win32/debug/pe-format#arm64-processors
                {
                     // We have to put this stub due of errors like:
@@ -2458,8 +2459,17 @@ ocResolve_PEi386 ( ObjectCode* oc )
       /* Register the exceptions inside this OC.
          See Note [Exception Unwinding].  */
       if (section.kind == SECTIONKIND_EXCEPTION_TABLE) {
+#if (LL_TARGET_X86_64 && !defined(x86_64_HOST_ARCH)) || \
+    (LL_TARGET_AARCH64 && !defined(aarch64_HOST_ARCH))
+          /* SDK unwind records and the registration service describe the host.
+           * Reject before recording pdata ownership or invoking that service. */
+          ll_error_set(oc->L, LL_E_UNSUPPORTED,
+                       "PE unwind registration requires matching host and target architectures");
+          releaseOcInfo(oc);
+          return false;
+#endif
           oc->coff_info->pdata = &oc->sections[i];
-#if defined(x86_64_HOST_ARCH)
+#if LL_TARGET_X86_64 && defined(x86_64_HOST_ARCH)
           unsigned numEntries = section.size / sizeof(RUNTIME_FUNCTION);
           if (numEntries == 0)
             continue;

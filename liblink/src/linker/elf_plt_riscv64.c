@@ -1,5 +1,6 @@
 #define LL_INTERNAL_SOURCE 1
 #include "ll_compat.h"
+#include "ll_target.h"
 #include "elf_compat.h"
 #include "elf_plt_riscv64.h"
 #include "linker/ElfTypes.h"
@@ -7,7 +8,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-#if defined(riscv64_HOST_ARCH)
+#if LL_TARGET_RISCV64
 
 #if defined(OBJFORMAT_ELF)
 

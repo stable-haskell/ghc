@@ -6,26 +6,18 @@
 #include "elf_plt_aarch64.h"
 #include "elf_plt_riscv64.h"
 
-#if defined(arm_HOST_ARCH) || defined(aarch64_HOST_ARCH) || defined (riscv64_HOST_ARCH)
+#if LL_TARGET_ARM || LL_TARGET_AARCH64 || LL_TARGET_RISCV64
 
 #if defined(OBJFORMAT_ELF)
 
-#if defined(__x86_64__)
-#define __suffix__ X86_64
-#elif defined(__aarch64__)
+#if LL_TARGET_AARCH64
 #define __suffix__ Aarch64
-#elif defined(__mips64__)
-#define __suffix__ Mips64
-#elif defined(__i386__)
-#define __suffix__ X86
-#elif defined(__arm__)
+#elif LL_TARGET_ARM
 #define __suffix__ Arm
-#elif defined(__mips__)
-#define __suffix__ Mips
-#elif defined(__riscv)
+#elif LL_TARGET_RISCV64
 #define __suffix__ RISCV64
 #else
-#error "unknown architecture"
+#error "unknown ELF PLT target"
 #endif
 
 #define PASTE(x,y) x ## y

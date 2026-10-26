@@ -1,12 +1,13 @@
 #define LL_INTERNAL_SOURCE 1
 #include "ll_compat.h"
+#include "ll_target.h"
 #include "elf_compat.h"
 
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
 
-#if defined(arm_HOST_ARCH)
+#if LL_TARGET_ARM
 
 #include "Elf.h"
 #include "elf_plt.h"

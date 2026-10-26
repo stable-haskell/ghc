@@ -1,5 +1,6 @@
 #define LL_INTERNAL_SOURCE 1
 #include "ll_compat.h"
+#include "ll_target.h"
 
 #if defined(darwin_HOST_OS) || defined(ios_HOST_OS)
 
@@ -28,11 +29,11 @@
 #  include <sys/mman.h>
 #endif
 
-#if defined(x86_64_HOST_ARCH)
+#if LL_TARGET_X86_64
 #  include <mach-o/x86_64/reloc.h>
 #endif
 
-#if defined(aarch64_HOST_ARCH)
+#if LL_TARGET_AARCH64
 #  include <mach-o/arm64/reloc.h>
 #endif
 
@@ -44,8 +45,7 @@
   Things that need to be done:
   *) add still more sanity checks.
 */
-#if defined(aarch64_HOST_ARCH)
-#  define  NEED_PLT
+#if LL_TARGET_AARCH64
 #  include "macho/plt.h"
 
 /* aarch64 linker by moritz angermann <moritz@lichtzwerge.de> */
@@ -179,14 +179,14 @@ ocDeinit_MachO(ObjectCode * oc) {
         if(oc->macho_info->n_macho_symbols > 0) {
             LL_FREE_FOR(oc->L, oc->macho_info->macho_symbols);
         }
-#if defined(aarch64_HOST_ARCH)
+#if LL_TARGET_AARCH64
         freeGot(oc);
 #endif
         if(oc->sections != NULL) {
             for(int i = 0; i < oc->n_sections; i++) {
                 /* Empty sections and partially built loads have no metadata. */
                 if (oc->sections[i].macho_info != NULL) {
-#if defined(aarch64_HOST_ARCH)
+#if LL_TARGET_AARCH64
                     freeStubs(oc->L, &oc->sections[i]);
 #endif
                     LL_FREE_FOR(oc->L, oc->sections[i].macho_info->owned_relocations);
@@ -208,8 +208,8 @@ resolveImports(
     const uint32_t *indirectSyms,
     uint32_t nIndirectSyms);
 
-#if NEED_SYMBOL_EXTRAS
-#if defined(x86_64_HOST_ARCH) || defined(aarch64_HOST_ARCH)
+#if LL_MACHO_NEED_SYMBOL_EXTRAS
+#if LL_TARGET_X86_64 || LL_TARGET_AARCH64
 
 int
 ocAllocateExtras_MachO(ObjectCode* oc)
@@ -313,7 +313,7 @@ resolveImports(
     return 1;
 }
 
-#if defined(aarch64_HOST_ARCH)
+#if LL_TARGET_AARCH64
 /* aarch64 linker by moritz angermann <moritz@lichtzwerge.de> */
 
 static int64_t
@@ -835,7 +835,7 @@ relocateSectionAarch64(ObjectCode * oc, Section * section)
 }
 #endif /* aarch64_HOST_ARCH */
 
-#if defined(x86_64_HOST_ARCH)
+#if LL_TARGET_X86_64
 static int
 checkMachORelocationSpan(ObjectCode *oc, void *address, size_t size)
 {
@@ -1554,7 +1554,7 @@ ocGetNames_MachO(ObjectCode* oc)
                          LL_DEBUG_FOR(oc->L, "ocGetNames_MachO: copying from %p to %p"
                                     " a block of %" PRIu64 " bytes\n",
                                     (void *) (oc->image + section->offset), secMem, section->size));
-#if defined(NEED_PLT)
+#if LL_MACHO_NEED_PLT
                 unsigned nstubs = numberOfStubsForSection(oc, sec_idx);
                 unsigned stub_space = STUB_SIZE * nstubs;
 
@@ -1588,7 +1588,7 @@ ocGetNames_MachO(ObjectCode* oc)
                 }
             /* SECTION_NOMEM since memory is already allocated in segments */
 
-#if defined(NEED_PLT)
+#if LL_MACHO_NEED_PLT
                 secArray[sec_idx].macho_info->nstubs = 0;
                 secArray[sec_idx].macho_info->stub_offset = (uint8_t*)mem + size;
                 secArray[sec_idx].macho_info->stub_size = stub_space;
@@ -1833,7 +1833,7 @@ ocGetNames_MachO(ObjectCode* oc)
             }
         }
     }
-#if defined(aarch64_HOST_ARCH)
+#if LL_TARGET_AARCH64
     findInternalGotRefs(oc);
 
     /* Setup the global offset table
@@ -1966,7 +1966,7 @@ ocResolve_MachO(ObjectCode* oc)
             }
         }
     }
-#if defined(aarch64_HOST_ARCH)
+#if LL_TARGET_AARCH64
     /* fill the GOT table */
     for(size_t i = 0; i < oc->macho_info->n_macho_symbols; i++) {
         MachOSymbol * symbol = &oc->macho_info->macho_symbols[i];
@@ -2005,7 +2005,7 @@ ocResolve_MachO(ObjectCode* oc)
     {
         LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "ocResolve_MachO: relocating section %d/%d\n", i, oc->n_sections));
 
-#if defined(aarch64_HOST_ARCH)
+#if LL_TARGET_AARCH64
         if (!relocateSectionAarch64(oc, &oc->sections[i]))
             return 0;
 #else
@@ -2135,7 +2135,7 @@ static int ll_macho_init(ObjectCode *oc)
 }
 static int ll_macho_extras(ObjectCode *oc)
 {
-#if defined(NEED_SYMBOL_EXTRAS)
+#if LL_MACHO_NEED_SYMBOL_EXTRAS
     return ocAllocateExtras_MachO(oc);
 #else
     (void)oc;

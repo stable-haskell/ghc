@@ -1,6 +1,7 @@
 /* Bounds required before the native ELF backend follows image pointers. */
 #define LL_INTERNAL_SOURCE 1
 #include "ll_compat.h"
+#include "ll_target.h"
 #include "LinkerInternals.h"
 
 #if defined(OBJFORMAT_ELF)
@@ -33,23 +34,23 @@ static bool elfTable(size_t size, uintmax_t offset, uintmax_t count,
 
 static bool nativeElfMachine(Elf_Half machine)
 {
-#if defined(x86_64_HOST_ARCH)
+#if LL_TARGET_X86_64
 #if defined(EM_X86_64)
     return machine == EM_X86_64;
 #else
     return machine == EM_AMD64;
 #endif
-#elif defined(i386_HOST_ARCH)
+#elif LL_TARGET_I386
     return machine == EM_386;
-#elif defined(aarch64_HOST_ARCH)
+#elif LL_TARGET_AARCH64
     return machine == EM_AARCH64;
-#elif defined(arm_HOST_ARCH)
+#elif LL_TARGET_ARM
     return machine == EM_ARM;
-#elif defined(riscv64_HOST_ARCH)
+#elif LL_TARGET_RISCV64
     return machine == EM_RISCV;
-#elif defined(powerpc_HOST_ARCH)
+#elif LL_TARGET_POWERPC
     return machine == EM_PPC;
-#elif defined(sparc_HOST_ARCH)
+#elif LL_TARGET_SPARC
     return machine == EM_SPARC
 #if defined(EM_SPARC32PLUS)
         || machine == EM_SPARC32PLUS
@@ -78,7 +79,7 @@ static bool elfInitArrayName(const char *name)
            strncmp(name, ".fini_array", 11) == 0;
 }
 
-#if defined(NEED_SYMBOL_EXTRAS)
+#if LL_ELF_NEED_SYMBOL_EXTRAS
 static bool elfExtrasFit(ObjectCode *oc, size_t imageSize, uintmax_t bssSize,
                          uintmax_t symbolCount)
 {
@@ -266,7 +267,7 @@ int ocValidateImage_ELF(ObjectCode *oc)
                 if (index < SHN_LORESERVE && index >= count)
                     return invalidElf(oc, LL_E_FORMAT, "invalid ELF symbol section index");
                 uintmax_t value = table[j].st_value;
-#if defined(arm_HOST_ARCH)
+#if LL_TARGET_ARM
                 /* The low bit encodes Thumb mode, not a byte in the section. */
                 if (ELF_ST_TYPE(table[j].st_info) == STT_FUNC)
                     value &= ~UINTMAX_C(1);
@@ -307,7 +308,7 @@ int ocValidateImage_ELF(ObjectCode *oc)
             }
         }
     }
-#if defined(NEED_SYMBOL_EXTRAS)
+#if LL_ELF_NEED_SYMBOL_EXTRAS
     if (!elfExtrasFit(oc, size, bssSize, symbolCount))
         return invalidElf(oc, LL_E_UNSUPPORTED, "ELF combined allocation is too large");
 #endif

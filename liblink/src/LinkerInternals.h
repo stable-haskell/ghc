@@ -10,6 +10,7 @@
 
 #include "liblink/rts_friend.h"
 #include "ll_linker.h"
+#include "ll_target.h"
 
 void printLoadedObjects(ll_linker *L);
 

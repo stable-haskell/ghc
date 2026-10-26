@@ -1,12 +1,13 @@
 #define LL_INTERNAL_SOURCE 1
 #include "ll_compat.h"
+#include "ll_target.h"
 #include "elf_plt.h"
 
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
 
-#if defined(arm_HOST_ARCH) || defined(aarch64_HOST_ARCH) || defined(riscv64_HOST_ARCH)
+#if LL_TARGET_ARM || LL_TARGET_AARCH64 || LL_TARGET_RISCV64
 #if defined(OBJFORMAT_ELF)
 
 #define STRINGIFY(x) #x
@@ -61,7 +62,7 @@ makeStub(ll_linker *L, Section * section,
     s->next = NULL;
     s->addr = (uint8_t *)section->elf_info->stub_offset + STUB_SIZE * section->elf_info->nstubs;
 
-#if defined(riscv64_HOST_ARCH)
+#if LL_TARGET_RISCV64
     if((*_makeStub)(L, s))
 #else
     if((*_makeStub)(s))

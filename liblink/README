@@ -39,6 +39,20 @@ storage is released after copying: mapped images are unmapped; heap images
 release their original allocation base, accounting for stored misalignment.
 A failed replacement leaves the original image and its ownership intact.
 
+Target architecture selection
+-----------------------------
+
+Private backend code uses ll_target.h for object architecture, word class,
+and format-specific GOT/PLT and symbol-extra capabilities. A translation unit
+may set LL_TARGET_ARCH to an LL_ARCH_* constant; otherwise it uses the
+configured host architecture. Generated ll_platform.h always describes the
+running host. OS loading, mapping, and native TLS services retain host guards.
+Native format identity is independent of the compiled registry's order.
+
+These target controls prepare multi-backend builds. The current build still
+compiles the native backend; all-backends qualification is pending.
+
+
 Locking
 -------
 

@@ -67,8 +67,16 @@ static const struct ll_format_ops *const ll_formats[] = {
 
 const struct ll_format_ops *ll_format_native(void)
 {
-    /* Current builds contain one native implementation; Wasm contains none. */
-    return ll_formats[0];
+    /* Native identity is independent of registry order and foreign entries. */
+#if defined(OBJFORMAT_ELF)
+    return &ll_format_elf;
+#elif defined(OBJFORMAT_MACHO)
+    return &ll_format_macho;
+#elif defined(OBJFORMAT_PEi386)
+    return &ll_format_pei386;
+#else
+    return NULL;
+#endif
 }
 
 const struct ll_format_ops *ll_format_select(ObjectCode *oc)

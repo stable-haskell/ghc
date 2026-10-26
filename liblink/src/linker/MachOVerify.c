@@ -1,6 +1,7 @@
 /* Establish image bounds before the native Mach-O backend follows pointers. */
 #define LL_INTERNAL_SOURCE 1
 #include "ll_compat.h"
+#include "ll_target.h"
 #include "LinkerInternals.h"
 
 #if defined(OBJFORMAT_MACHO)
@@ -12,9 +13,9 @@
 #include <mach-o/nlist.h>
 #include <mach-o/reloc.h>
 #include <string.h>
-#if defined(aarch64_HOST_ARCH)
+#if LL_TARGET_AARCH64
 #include <mach-o/arm64/reloc.h>
-#elif defined(x86_64_HOST_ARCH)
+#elif LL_TARGET_X86_64
 #include <mach-o/x86_64/reloc.h>
 #endif
 
@@ -59,7 +60,7 @@ static bool machoAllocationFits(uintmax_t count, size_t width, size_t limit)
 
 static bool machoExtrasFit(ObjectCode *oc, uint32_t count)
 {
-#if NEED_SYMBOL_EXTRAS
+#if LL_MACHO_NEED_SYMBOL_EXTRAS
     if (count > INT_MAX ||
         !machoAllocationFits(count, sizeof(SymbolExtra), INT_MAX))
         return false;
@@ -88,7 +89,7 @@ static bool machoExtrasFit(ObjectCode *oc, uint32_t count)
 
 static bool machoRelocSymbol(const MachORelocationInfo *reloc)
 {
-#if defined(aarch64_HOST_ARCH)
+#if LL_TARGET_AARCH64
     /* ADDEND carries an immediate in r_symbolnum, not a symbol index. */
     switch (reloc->r_type) {
     case ARM64_RELOC_UNSIGNED:
@@ -102,7 +103,7 @@ static bool machoRelocSymbol(const MachORelocationInfo *reloc)
     default:
         return false;
     }
-#elif defined(x86_64_HOST_ARCH)
+#elif LL_TARGET_X86_64
     return reloc->r_extern || reloc->r_type == X86_64_RELOC_GOT ||
            reloc->r_type == X86_64_RELOC_GOT_LOAD;
 #else
@@ -211,14 +212,14 @@ int ocVerifyImage_MachO(ObjectCode *oc)
             MachORelocationInfo record;
             memcpy(&record, relocs + (size_t)j * sizeof(record), sizeof(record));
             const MachORelocationInfo *reloc = &record;
-#if defined(aarch64_HOST_ARCH)
+#if LL_TARGET_AARCH64
             if (reloc->r_type == ARM64_RELOC_ADDEND) continue;
 #endif
             if (reloc->r_address < 0 ||
                 !machoSpan((size_t)section->size, (uint32_t)reloc->r_address,
                             (size_t)1 << reloc->r_length))
                 return invalidMachO(oc, "Mach-O relocation operand is outside its section");
-#if defined(aarch64_HOST_ARCH)
+#if LL_TARGET_AARCH64
             /* Instruction relocations read uint32_t irrespective of r_length. */
             if (reloc->r_type != ARM64_RELOC_UNSIGNED &&
                 reloc->r_type != ARM64_RELOC_SUBTRACTOR &&
@@ -228,7 +229,7 @@ int ocVerifyImage_MachO(ObjectCode *oc)
             if (machoRelocSymbol(reloc)) {
                 if (reloc->r_symbolnum >= symbolCount)
                     return invalidMachO(oc, "invalid Mach-O relocation symbol index");
-#if defined(x86_64_HOST_ARCH)
+#if LL_TARGET_X86_64
             } else if (reloc->r_symbolnum == 0 ||
                        reloc->r_symbolnum > segment->nsects ||
                        sections[reloc->r_symbolnum - 1].size == 0) {

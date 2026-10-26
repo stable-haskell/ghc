@@ -2,12 +2,11 @@
 
 #if defined(OBJFORMAT_MACHO)
 
-#include "ll_platform.h"
+#include "ll_target.h"
 
 #include <mach-o/loader.h>
 
-#if defined(x86_64_HOST_ARCH) \
- || defined(aarch64_HOST_ARCH) || defined(arm64_HOST_ARCH)
+#if LL_TARGET_X86_64 || LL_TARGET_AARCH64
 typedef struct mach_header_64     MachOHeader;
 typedef struct segment_command_64 MachOSegmentCommand;
 typedef struct section_64         MachOSection;
