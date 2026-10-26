@@ -1073,6 +1073,18 @@ def main() -> int:
     ]
     cc = compiler + common_flags
 
+    if selected_modes == 0:
+        with tempfile.TemporaryDirectory(prefix="liblink-page21-encoding-") as temporary:
+            directory = Path(temporary)
+            header = directory / "macho_page21_generated.h"
+            binary = directory / "macho_page21_encoding"
+            run([sys.executable, str(ROOT / "liblink/tests/unit/macho_page21_source.py"),
+                 "--output", str(header)], label="extract current Mach-O PAGE21 writer")
+            run(cc + ["-I", str(directory),
+                      str(ROOT / "liblink/tests/unit/macho_page21_encoding.c"),
+                      "-o", str(binary)], label="compile portable PAGE21 encoding unit")
+            run([str(binary)], label="run portable PAGE21 encoding unit")
+
     if args.format_dispatch_only or selected_modes == 0:
         with tempfile.TemporaryDirectory(prefix="liblink-format-dispatch-") as temporary:
             binary = Path(temporary) / ("format_dispatch.exe" if host == "Windows" else "format_dispatch")

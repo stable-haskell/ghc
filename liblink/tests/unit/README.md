@@ -1093,3 +1093,22 @@ Source-included backend-interposition fixtures include `ll_format.c` under the
 same overrides as `Linker.c`. Synthetic objects that bypass input initialization
 must explicitly install their intended operations; production objects acquire
 them through `ll_init_object`.
+
+Mach-O ARM64 PAGE21 encoding
+---------------------------
+
+The default native unit suite extracts the current shared PAGE21 and
+GOT_LOAD_PAGE21 field writer into a portable integer test. It checks fixed
+positive, negative, and endpoint encodings; every signed 21-bit page delta;
+preservation of surrounding opcode/register bits; and ignored low-byte bits.
+Two deliberately wrong outputs check that the independent decoder rejects
+changed immediate or register bits. The unit executes no generated instructions.
+
+The writer converts the signed byte displacement to uint64_t before extracting
+instruction fields. This avoids the undefined signed left shift exposed by a
+backward reference in the ordinary PAGE21 golden fixture. It also avoids
+implementation-defined signed right shift in this field extraction. Existing
+range guards, error classification, addend calculation, and numeric goldens
+remain unchanged. Backend range rejection and native relocation behavior still
+require the existing native units and golden captures; the portable unit alone
+does not qualify them.

@@ -116,6 +116,8 @@ extra-source-files:
     tests/unit/init_array_status.c
     tests/unit/init_array_policy.c
     tests/unit/macho_input.c
+    tests/unit/macho_page21_encoding.c
+    tests/unit/macho_page21_source.py
     tests/unit/macho_table_alignment.c
     tests/unit/macho_import_status.c
     tests/unit/macho_prefile_error.c
