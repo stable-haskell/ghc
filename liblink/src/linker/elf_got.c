@@ -5,8 +5,10 @@
 #include "linker/MMap.h"
 #include "linker/BackendMemory.h"
 #include "ll_failure.h"
+#include "ll_noexec.h"
 
 #include <errno.h>
+#include <stdlib.h>
 #include <string.h>
 
 #if LL_BUILD_ELF
@@ -117,7 +119,18 @@ makeGot(ObjectCode * oc) {
             return EXIT_FAILURE;
         }
         oc->elf_info->got_size = got_slots * sizeof(void *);
-        void * mem = ll_mmap_anon_for_linker(oc->L, oc->elf_info->got_size);
+        void *mem;
+        if (ll_noexec_enabled(oc->L)) {
+            ll_noexec_block block;
+            if (!ll_noexec_allocate(oc->L, oc->elf_info->got_size,
+                                    _Alignof(void *), &block)) return EXIT_FAILURE;
+            mem = block.site.work;
+            oc->elf_info->got_exec = block.site.exec;
+            oc->elf_info->got_allocation = block.allocation;
+        } else {
+            mem = ll_mmap_anon_for_linker(oc->L, oc->elf_info->got_size);
+            oc->elf_info->got_exec = (uintptr_t)mem;
+        }
         if (mem == NULL) {
             LL_LOG_ERROR_FOR(oc->L, "MAP_FAILED. errno=%d", errno);
             return EXIT_FAILURE;
@@ -161,7 +174,7 @@ fillGot(ObjectCode * oc) {
                             return EXIT_FAILURE;
                         if(0x0 == symbol->addr) {
                             if(0 == strncmp(symbol->name,"_GLOBAL_OFFSET_TABLE_",21)) {
-                                symbol->addr = oc->elf_info->got_start;
+                                symbol->addr = (void *)oc->elf_info->got_exec;
                             } else if (!symbolHasNonNoneRelocation(oc, symTab->index, i)) {
                                 /* Symbol is only referenced by R_*_NONE
                                  * (type 0) relocations, which are no-ops.
@@ -221,7 +234,8 @@ fillGot(ObjectCode * oc) {
     }
 
     // We are done initializing the GOT; freeze it.
-    if(!ll_backend_protect_readonly(oc->elf_info->got_start, oc->elf_info->got_size)) {
+    if(!ll_noexec_enabled(oc->L) &&
+       !ll_backend_protect_readonly(oc->elf_info->got_start, oc->elf_info->got_size)) {
         LL_LOG_SYSERROR_FOR(oc->L, "unable to protect memory");
     }
     return EXIT_SUCCESS;
@@ -237,7 +251,8 @@ verifyGot(ObjectCode * oc) {
                 LL_CHECK_FOR(oc->L, (void*)(*(void**)symbol->got_addr)
                       == (void*)symbol->addr);
             }
-            LL_CHECK_FOR(oc->L, 0 == ((uintptr_t)symbol->addr & 0xffff000000000000));
+            LL_CHECK_FOR(oc->L, ll_noexec_enabled(oc->L) ||
+                         0 == ((uintptr_t)symbol->addr & 0xffff000000000000));
         }
     }
     return EXIT_SUCCESS;
@@ -245,11 +260,15 @@ verifyGot(ObjectCode * oc) {
 
 void
 freeGot(ObjectCode * oc) {
-    if (oc->elf_info->got_start != NULL && oc->elf_info->got_size != 0) {
+    if (oc->elf_info->got_allocation != NULL) {
+        free(oc->elf_info->got_allocation);
+    } else if (oc->elf_info->got_start != NULL && oc->elf_info->got_size != 0) {
         ll_munmap_for_linker(oc->L, oc->elf_info->got_start, oc->elf_info->got_size,
                             "freeGot");
     }
     oc->elf_info->got_start = NULL;
     oc->elf_info->got_size = 0;
+    oc->elf_info->got_exec = 0;
+    oc->elf_info->got_allocation = NULL;
 }
 #endif

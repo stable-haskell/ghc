@@ -122,7 +122,8 @@ typedef
    enum { SECTION_NOMEM,
           SECTION_M32,
           SECTION_MMAP,
-          SECTION_MALLOC
+          SECTION_MALLOC,
+          SECTION_NOEXEC     /* aligned plain heap; mapped_start owns its base */
         }
    SectionAlloc;
 
@@ -240,7 +241,8 @@ typedef enum {
 
 typedef enum {
     LL_EXTRAS_NONE,
-    LL_EXTRAS_SHARED
+    LL_EXTRAS_SHARED,
+    LL_EXTRAS_NOEXEC
 } ll_extras_origin;
 
 typedef enum {
@@ -362,6 +364,7 @@ struct _ObjectCode {
      * Field presence never depends on private backend or target flags. */
     SymbolExtra *symbol_extras;
     uintptr_t       symbol_extras_exec; /* execution base, separate from storage */
+    void *          symbol_extras_allocation; /* separate NO_EXEC heap owner */
     unsigned long   first_symbol_extra;
     unsigned long   n_symbol_extras;
     /* The selected backend supplies the target payload width, including zero. */

@@ -116,6 +116,8 @@ extra-source-files:
     src/ll_linker.h
     src/ll_mutex.c
     src/ll_mutex.h
+    src/ll_noexec.c
+    src/ll_noexec.h
     src/ll_path.c
     src/ll_path.h
     src/ll_target.h
@@ -184,6 +186,8 @@ extra-source-files:
     tests/unit/elf_relocation_errors.c
     tests/unit/elf_relocation_errors_helpers.h
     tests/unit/elf_x86_64_sites.c
+    tests/unit/noexec_storage.c
+    tests/unit/noexec_core.c
     tests/unit/elf_resource_fixtures.py
     tests/unit/elf_section_errors.c
     tests/unit/elf_resource_errors.c
@@ -195,6 +199,12 @@ extra-source-files:
     tests/oracle/elf_x86_64_check.py
     tests/oracle/test_elf_x86_64.py
     tests/golden/elf-x86_64/*.json
+    tests/golden/elf-x86_64-noexec/*.json
+    tests/fixtures/elf-noexec/symbols.s
+    tests/fixtures/elf-noexec/symbols.o
+    tests/fixtures/elf-noexec/gottpoff.s
+    tests/fixtures/elf-noexec/gottpoff.o
+    tests/fixtures/generated/elf-x86_64/x86_64-linux-gnu/libelf-longname-gnu.a
     tests/fixtures/elf-x86_64.json
     tests/fixtures/src/elf-x86_64/*.s
     tests/fixtures/generated/elf-x86_64/x86_64-linux-gnu/*.o

@@ -97,3 +97,12 @@ x86_64 ELF TLSGD is FreeBSD-only. RISC-V RELAX and ALIGN are accepted no-ops.
 Branch `layout_cases` prepare later near/far veneer and island checks.
 Symbol selection, initializer order, branch execution, and rejection status
 require linker runner tests; object generation alone does not prove them.
+
+The elf-noexec fixtures are valid ELF64 little-endian data-only inputs for the
+private x64 NO_EXEC controls. symbols.s covers local/global/BSS/COMMON symbols
+and an offset crossing the signed address boundary; gottpoff.s covers an
+unavailable host TLS relocation. Their instruction bytes are never executed.
+Rebuild the committed objects with an LLVM x64 ELF assembler driver:
+
+    clang --target=x86_64-linux-gnu -c liblink/tests/fixtures/elf-noexec/symbols.s -o liblink/tests/fixtures/elf-noexec/symbols.o
+    clang --target=x86_64-linux-gnu -c liblink/tests/fixtures/elf-noexec/gottpoff.s -o liblink/tests/fixtures/elf-noexec/gottpoff.o

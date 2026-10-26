@@ -60,8 +60,8 @@ expectation predates the approved error-model conversion. The unchanged
 WP2.5 base and format-dispatch candidate both return exit 5 for POINTER_TO_GOT.
 Numeric relocation goldens and the independent arithmetic checks are unchanged.
 
-ELF x86_64 native-address checks
---------------------------------
+ELF x86_64 address checks
+-------------------------
 
 elf_x86_64_check.py reads original ELF64 little-endian section, symbol and RELA
 records using Python's struct module. It computes S from defined symbols or
@@ -84,7 +84,17 @@ The initial goldens were captured with the unchanged WP2.7 linker at102bd9.
     python3 -m unittest discover -s liblink/tests/oracle -p test_elf_x86_64.py -v
 
 Set LIBLINK_ELF_CAPTURE to the absolute elf_capture executable to check fresh
-captures too, including a forced PLT32 island with an out-of-range resolver
-input. Corruption controls alter capture JSON, not object-file inputs. TLS,
-other architectures, synthetic extras addresses and NO_EXEC remain outside
-this slice. See ../runner/README for capture scope and build flags.
+normal and NO_EXEC captures, including a forced PLT32 island with an
+out-of-range resolver input. Each NO_EXEC fixture runs twice against its
+reference in ../golden/elf-x86_64-noexec. Those references add exact synthetic
+execution addresses and SHA-256 hashes for relocated sections, extras and the
+global GOT. The numerical check derives global GOT payloads from original
+symbols/resolver inputs, and verifies work/exec separation and fixed x64 page
+alignment. Heap addresses are sampled layout inputs, not deterministic output.
+
+Corruption controls alter capture JSON, not object-file inputs. They reject
+wrong GOT payloads, work/exec aliases, misaligned synthetic addresses and
+altered saved image hashes as well as native relocation errors. TLS and other
+architectures remain outside this oracle's supported inputs. See ../runner/README
+for capture scope and build flags. These local checks do not establish two-host
+golden stability or foreign execution qualification.

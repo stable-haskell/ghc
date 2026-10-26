@@ -118,10 +118,14 @@ struct ll_elf_object_info {
     /* pointer to the global offset table */
     void *                got_start;
     size_t                got_size;
+    uintptr_t             got_exec;
+    void *                got_allocation; /* non-NULL for separate NO_EXEC heap */
 
     /* Owned storage for this object's new COMMON definitions. */
     void *                common_mem;
     size_t                common_size;
+    uintptr_t             common_exec;
+    void *                common_allocation;
 };
 
 typedef

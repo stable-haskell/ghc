@@ -13,6 +13,7 @@ from elf_x86_64_check import compare_golden, verify
 LIBLINK = Path(__file__).resolve().parents[2]
 FIXTURES = LIBLINK / 'tests/fixtures/generated/elf-x86_64/x86_64-linux-gnu'
 GOLDENS = LIBLINK / 'tests/golden/elf-x86_64'
+NOEXEC_GOLDENS = LIBLINK / 'tests/golden/elf-x86_64-noexec'
 KINDS = ('64', 'PC32', 'PLT32', 'GOTPCREL', 'GOTPCRELX', 'REX_GOTPCRELX',
          '32', '32S', 'PC64')
 
@@ -31,6 +32,43 @@ def flip(sample, key, offset):
 
 
 class ElfOracle(unittest.TestCase):
+    def test_rejects_corrupt_noexec_observations(self):
+        original, _ = reference()
+        golden = json.loads((NOEXEC_GOLDENS / 'R_X86_64_GOTPCREL.json').read_text())
+        mutations = {
+            'global GOT payload': lambda c: flip(c['got'], 'after', 0),
+            'section aliases work': lambda c: c['sections'][0].update(
+                exec_address=c['sections'][0]['address']),
+            'extras alias work': lambda c: c['extras'].update(
+                exec_address=c['extras']['address']),
+            'global GOT aliases work': lambda c: c['got'].update(
+                exec_address=c['got']['address']),
+            'global GOT alignment': lambda c: c['got'].update(
+                exec_address=hex(int(c['got']['exec_address'], 0) + 1)),
+        }
+        for name, mutate in mutations.items():
+            with self.subTest(mutation=name):
+                capture = copy.deepcopy(golden['reference_capture'])
+                mutate(capture)
+                with self.assertRaises(ValueError):
+                    verify(original, capture)
+
+    def test_rejects_corrupt_noexec_image_reference(self):
+        original, _ = reference()
+        golden = json.loads((NOEXEC_GOLDENS / 'R_X86_64_GOTPCREL.json').read_text())
+        report = verify(original, golden['reference_capture'])
+        golden['noexec_image']['got']['sha256'] = '0' * 64
+        with self.assertRaisesRegex(ValueError, 'saved NO_EXEC image differs'):
+            compare_golden(report, golden, original)
+
+    def test_noexec_references(self):
+        for kind in KINDS:
+            with self.subTest(kind=kind):
+                original, _ = reference(kind)
+                golden = json.loads((NOEXEC_GOLDENS / ('R_X86_64_' + kind + '.json')).read_text())
+                report = verify(original, golden['reference_capture'])
+                compare_golden(report, golden, original)
+
     def test_all_original_native_references(self):
         for kind in KINDS:
             with self.subTest(kind=kind):
@@ -95,6 +133,28 @@ class ElfOracle(unittest.TestCase):
         # rather than comparing it to the ordinary direct-branch signature.
         original, _ = reference('PLT32')
         run = subprocess.run([os.environ['LIBLINK_ELF_CAPTURE'], '--far-function',
+                              str(FIXTURES / 'R_X86_64_PLT32.o')],
+                             capture_output=True, text=True, timeout=90)
+        self.assertEqual(run.returncode, 0, run.stderr + run.stdout)
+        report = verify(original, json.loads(run.stdout))
+        self.assertIsNotNone(report['semantic']['relocations'][0]['extra_symbol_index'])
+
+    @unittest.skipUnless(os.environ.get('LIBLINK_ELF_CAPTURE'), 'set LIBLINK_ELF_CAPTURE for live captures')
+    def test_live_noexec_captures(self):
+        for kind in KINDS:
+            with self.subTest(kind=kind):
+                original, _ = reference(kind)
+                golden = json.loads((NOEXEC_GOLDENS / ('R_X86_64_' + kind + '.json')).read_text())
+                for _ in range(2):
+                    run = subprocess.run([os.environ['LIBLINK_ELF_CAPTURE'], '--noexec',
+                                          str(FIXTURES / ('R_X86_64_' + kind + '.o'))],
+                                         capture_output=True, text=True, timeout=90)
+                    self.assertEqual(run.returncode, 0, run.stderr + run.stdout)
+                    capture = json.loads(run.stdout)
+                    self.assertIs(capture['noexec'], True)
+                    compare_golden(verify(original, capture), golden, original)
+        original, _ = reference('PLT32')
+        run = subprocess.run([os.environ['LIBLINK_ELF_CAPTURE'], '--noexec', '--far-function',
                               str(FIXTURES / 'R_X86_64_PLT32.o')],
                              capture_output=True, text=True, timeout=90)
         self.assertEqual(run.returncode, 0, run.stderr + run.stdout)

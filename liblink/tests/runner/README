@@ -50,12 +50,14 @@ The runner does not claim ELF, COFF, or other host-backend coverage.
 ELF x86_64 capture
 -----------------
 
-elf_capture.c is a separate private client for a POSIX x86_64 host with the
-ELF backend compiled in (native Linux or Darwin +all-backends). It captures
+elf_capture.c is a separate private client for a 64-bit POSIX host with the
+x86_64 ELF target/backend compiled in. It captures
 an unregistered object's section and extras bytes immediately before and
 after the actual backend resolve operation. It never enters the initializer
-pass or calls loaded code. This is normal native-address relocation coverage,
-not the full public lifecycle or LL_CFG_NO_EXEC.
+pass or calls loaded code. Without --noexec it checks native addresses on an
+x86_64 host. With --noexec it configures private NO_EXEC|ALL_FORMATS at the
+explicit base0x10000000 and captures heap work/synthetic execution addresses.
+This capture does not exercise the full core lifecycle; noexec_core.c does.
 
     "$CC" -std=c11 -Wall -Wextra -Werror=vla -pedantic -DLL_ASSERTS \
       -DLL_ALL_BACKENDS -isystem "$LIBLINK_CONFIG_INCLUDE" \
@@ -63,6 +65,7 @@ not the full public lifecycle or LL_CFG_NO_EXEC.
       liblink/tests/runner/elf_capture.c -L"$LIBLINK_LIBRARY_DIR" \
       -llink $RTS_FS_LINK_FLAGS -pthread -o elf_capture
     ./elf_capture liblink/tests/fixtures/generated/elf-x86_64/x86_64-linux-gnu/R_X86_64_64.o
+    ./elf_capture --noexec liblink/tests/fixtures/generated/elf-x86_64/x86_64-linux-gnu/R_X86_64_64.o
 
 RTS_FS_LINK_FLAGS supplies the installed rts-fs archive on Linux and is empty
 on Darwin. Add the same sanitizer flags as the library when it is instrumented.

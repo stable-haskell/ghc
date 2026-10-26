@@ -6,6 +6,7 @@
 #include "linker/MMap.h"
 #include "ll_format.h"
 #include "ll_path.h"
+#include "ll_noexec.h"
 
 #include <inttypes.h>
 #include <limits.h>
@@ -14,8 +15,8 @@
 #include <string.h>
 #include <unistd.h>
 
-#if !defined(x86_64_HOST_ARCH) || defined(mingw32_HOST_OS)
-#error "elf_capture currently requires a POSIX x86_64 host configuration"
+#if !LL_BUILD_ELF || !LL_TARGET_X86_64 || defined(mingw32_HOST_OS) || SIZEOF_VOID_P != 8
+#error "elf_capture requires the ELF x64 backend on a 64-bit POSIX host"
 #endif
 
 #define CAPTURE_LIMIT ((size_t)64 * 1024 * 1024)
@@ -112,10 +113,11 @@ static void emit_capture(const ObjectCode *object, const CaptureHost *host,
                  object->initializersRan ? "true" : "false",
                  object->L->error_status);
     json_string(object->L->error_message);
-    (void)printf(",\"host_symbols\":{\"external_data\":\"0x12345000\","
+    (void)printf(",\"noexec\":%s,\"host_symbols\":{\"external_data\":\"0x12345000\","
                  "\"external_function\":\"0x%" PRIxPTR "\","
                  "\"external_function_alias\":\"0x%" PRIxPTR "\"},"
-                 "\"sections\":[", host->function_address, host->function_address);
+                 "\"sections\":[", ll_noexec_enabled(object->L) ? "true" : "false",
+                 host->function_address, host->function_address);
     bool comma = false;
     for (int i = 0; i < object->n_sections; ++i) {
         const Section *section = &object->sections[i];
@@ -123,33 +125,48 @@ static void emit_capture(const ObjectCode *object, const CaptureHost *host,
         if (comma) (void)putchar(',');
         comma = true;
         (void)printf("{\"index\":%d,\"address\":\"0x%" PRIxPTR
+                     "\",\"exec_address\":\"0x%" PRIxPTR
                      "\",\"size\":%zu,\"before\":", i,
-                     (uintptr_t)section->start, (size_t)section->size);
+                     (uintptr_t)section->start, section->exec_start, (size_t)section->size);
         json_bytes(before[i], (size_t)section->size);
         (void)fputs(",\"after\":", stdout);
         json_bytes(section->start, (size_t)section->size);
         (void)putchar('}');
     }
     (void)printf("],\"extras\":{\"address\":\"0x%" PRIxPTR
+                 "\",\"exec_address\":\"0x%" PRIxPTR
                  "\",\"first\":%lu,\"count\":%lu,\"stride\":%zu,"
                  "\"jump_offset\":%zu,\"before\":",
-                 (uintptr_t)object->symbol_extras, object->first_symbol_extra,
+                 (uintptr_t)object->symbol_extras, object->symbol_extras_exec,
+                 object->first_symbol_extra,
                  object->n_symbol_extras, object->symbol_extra_stride,
                  offsetof(ll_symbol_extra_x86_64, jumpIsland));
     json_bytes(extras_before, extras_size);
     (void)fputs(",\"after\":", stdout);
     json_bytes(object->symbol_extras, extras_size);
+    (void)printf("},\"got\":{\"address\":\"0x%" PRIxPTR
+                 "\",\"exec_address\":\"0x%" PRIxPTR "\",\"size\":%zu,\"after\":",
+                 (uintptr_t)object->elf_info->got_start, object->elf_info->got_exec,
+                 object->elf_info->got_size);
+    json_bytes(object->elf_info->got_start, object->elf_info->got_size);
     (void)puts("}}");
 }
 
 int main(int argc, char **argv)
 {
-    const bool far_function = argc == 3 && strcmp(argv[1], "--far-function") == 0;
-    if ((!far_function && argc != 2) || (argc == 3 && !far_function)) {
-        (void)fputs("usage: elf_capture [--far-function] OBJECT\n", stderr);
+    bool far_function = false, noexec = false;
+    int next = 1;
+    while (next < argc && argv[next][0] == '-') {
+        if (strcmp(argv[next], "--far-function") == 0) far_function = true;
+        else if (strcmp(argv[next], "--noexec") == 0) noexec = true;
+        else break;
+        ++next;
+    }
+    if (next != argc - 1) {
+        (void)fputs("usage: elf_capture [--noexec] [--far-function] OBJECT\n", stderr);
         return 2;
     }
-    const char *path = argv[far_function ? 2 : 1];
+    const char *path = argv[next];
     int image_size = 0;
     char *image = read_image(path, &image_size);
     if (image == NULL) {
@@ -161,7 +178,9 @@ int main(int argc, char **argv)
     ll_linker owner = {0};
     ll_compat_host_ops host = {.ctx = &state, .page_size = page_size,
         .on_mem_failure = memory_failure, .populate_builtins = populate_builtins};
-    ll_compat_config config = {.always_pic = true};
+    ll_compat_config config = {.always_pic = true,
+        .flags = noexec ? LL_CFG_NO_EXEC | LL_CFG_ALL_FORMATS : 0,
+        .noexec_base = UINT32_C(0x10000000)};
     ll_install_host_for(&owner, &host, &config);
     ll_init_linker(&owner, 0);
     ll_init_linker_mmap(&owner);
@@ -171,6 +190,9 @@ int main(int argc, char **argv)
     void *extras_before = NULL;
     int result = 2;
     ll_mutex_lock_for(&owner, &owner.linker_mutex);
+    if (noexec && !ghciInsertSymbolTable(&owner, WSTR("elf_capture"), "external_data",
+            (void *)(uintptr_t)UINT32_C(0x12345000), LL_STRENGTH_STRONG,
+            LL_SYM_DATA, 0, NULL)) goto done;
     if (!ll_init_object(object) || object->format_ops != &ll_format_elf ||
         !loadOc(object)) goto done;
     if (object->n_sections < 0) goto done;
@@ -201,7 +223,7 @@ int main(int argc, char **argv)
     if (!far_function) {
         for (int i = 0; i < object->n_sections; ++i) {
             if (object->sections[i].start != NULL && object->sections[i].size != 0) {
-                state.function_address = (uintptr_t)object->sections[i].start + 0x1000;
+                state.function_address = object->sections[i].exec_start + 0x1000;
                 break;
             }
         }

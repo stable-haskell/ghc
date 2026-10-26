@@ -106,6 +106,7 @@ void ll_install_host_for(ll_linker *L, const ll_compat_host_ops *host,
     }
     L->services.host = installed;
     L->services.cfg = cfg != NULL ? *cfg : (ll_compat_config){0};
+    L->noexec_next = L->services.cfg.noexec_base;
 }
 
 void ll_install_host(const ll_compat_host_ops *host, const ll_compat_config *cfg)

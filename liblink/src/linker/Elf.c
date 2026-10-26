@@ -20,6 +20,7 @@
 #include "linker/elf_reloc_x86_64.h"
 #include "linker/InitFini.h"
 #include "ll_format.h"
+#include "ll_noexec.h"
 
 #include "linker/CacheFlush.h"
 #include "linker/M32Alloc.h"
@@ -337,7 +338,9 @@ ocDeinit_ELF(ObjectCode * oc)
         oc->elf_info->init = NULL;
         oc->elf_info->fini = NULL;
         freeGot(oc);
-        if (oc->elf_info->common_mem != NULL) {
+        if (oc->elf_info->common_allocation != NULL) {
+            free(oc->elf_info->common_allocation);
+        } else if (oc->elf_info->common_mem != NULL) {
             ll_munmap_for_linker(oc->L, oc->elf_info->common_mem,
                                 oc->elf_info->common_size, "ocDeinit_ELF(COMMON)");
         }
@@ -718,6 +721,28 @@ mapObjectFileSection (ll_linker *L, int fd, ll_elf_target_word offset, ll_elf_ta
 }
 #endif
 
+/* Sections are independently owned RW heap blocks in NO_EXEC. All file data,
+ * including metadata sections, retains its original bytes. Execution addresses
+ * are assigned before any symbol is published, independently of heap layout. */
+static int noexec_section_ELF(ObjectCode *oc, ll_elf_target_word index,
+                              SectionKind kind)
+{
+    const ll_elf_target_shdr *header = &oc->elf_info->sectionHeader[index];
+    ll_noexec_block block;
+    const size_t alignment = header->sh_addralign != 0 ? header->sh_addralign : 1;
+    if (!ll_noexec_allocate(oc->L, header->sh_size, alignment, &block)) return 0;
+    if (header->sh_size != 0 && header->sh_type != LL_ELF_SHT_NOBITS)
+        memcpy(block.site.work, oc->image + header->sh_offset, header->sh_size);
+    Section *section = &oc->sections[index];
+    addSection(oc->L, section, kind, SECTION_NOEXEC, block.site.work,
+               header->sh_size, 0, block.allocation, 0,
+               sizeof(struct ll_elf_section_info));
+    section->exec_start = block.site.exec;
+    if (kind != SECTIONKIND_OTHER && header->sh_size != 0)
+        addProddableBlock(oc->L, &oc->proddables, section->start, section->size);
+    return 1;
+}
+
 int
 ocGetNames_ELF ( ObjectCode* oc )
 {
@@ -741,7 +766,7 @@ ocGetNames_ELF ( ObjectCode* oc )
    oc->sections = sections;
    oc->n_sections = shnum;
 
-   if (oc->imageMapped) {
+   if (oc->imageMapped && !ll_noexec_enabled(oc->L)) {
        fd = ll_backend_open_readonly(oc->fileName);
        if (fd == -1) {
            ll_error_set(oc->L, LL_E_IO,
@@ -821,7 +846,9 @@ ocGetNames_ELF ( ObjectCode* oc )
       }
 
 
-      if (is_bss && size > 0) {
+      if (ll_noexec_enabled(oc->L) && shdr[i].sh_type != LL_ELF_SHT_NULL) {
+          if (!noexec_section_ELF(oc, i, kind)) goto fail;
+      } else if (is_bss && size > 0) {
          /* This is a non-empty .bss section.  Allocate zeroed space for
             it, and set its .sh_offset field such that
             ehdrC + .sh_offset == addr_of_zeroed_space.  */
@@ -976,6 +1003,8 @@ ocGetNames_ELF ( ObjectCode* oc )
       }
       oc->sections[i].elf_info->name          = sh_name;
       oc->sections[i].elf_info->sectionHeader = &shdr[i];
+      if (ll_noexec_enabled(oc->L) && shdr[i].sh_type == LL_ELF_SHT_NULL)
+          oc->sections[i].exec_start = 0;
 
    }
 
@@ -1001,6 +1030,7 @@ ocGetNames_ELF ( ObjectCode* oc )
 
       size_t common_size = 0;
       size_t common_used = 0;
+      bool new_common = false;
       for(ElfSymbolTable *symTab = oc->elf_info->symbolTables;
            symTab != NULL; symTab = symTab->next) {
            for (size_t j = 0; j < symTab->n_symbols; j++) {
@@ -1009,6 +1039,7 @@ ocGetNames_ELF ( ObjectCode* oc )
                    /* Skip COMMON symbols already defined by a previously-loaded
                     * object; we will reuse the existing allocation. */
                    if (!lookupStrHashTable(oc->L->symhash, symTab->symbols[j].name)) {
+                       new_common = true;
                        if (symbol->elf_sym->st_size > SIZE_MAX - common_size) {
                            ll_error_set(oc->L, LL_E_UNSUPPORTED,
                                         "ELF COMMON allocation is too large");
@@ -1020,7 +1051,15 @@ ocGetNames_ELF ( ObjectCode* oc )
            }
       }
       void * common_mem = NULL;
-      if(common_size > 0) {
+      if (ll_noexec_enabled(oc->L) && new_common) {
+          ll_noexec_block block;
+          if (!ll_noexec_allocate(oc->L, common_size, 8, &block)) goto fail;
+          common_mem = block.site.work;
+          oc->elf_info->common_mem = common_mem;
+          oc->elf_info->common_size = common_size;
+          oc->elf_info->common_exec = block.site.exec;
+          oc->elf_info->common_allocation = block.allocation;
+      } else if(common_size > 0) {
           const size_t page_size = ll_page_size_for(oc->L);
           if (common_size > SIZE_MAX - (page_size - 1)) {
               ll_error_set(oc->L, LL_E_UNSUPPORTED,
@@ -1105,8 +1144,11 @@ ocGetNames_ELF ( ObjectCode* oc )
                        /* A zero-sized COMMON-only image needs an address,
                         * but no separate allocation. Its aliases retain this
                         * image through the existing lifetime dependency. */
-                       symbol->addr = common_mem == NULL ? oc->image :
-                           (void *)((uintptr_t)common_mem + common_used);
+                       if (ll_noexec_enabled(oc->L))
+                           symbol->addr = (void *)(oc->elf_info->common_exec + common_used);
+                       else
+                           symbol->addr = common_mem == NULL ? oc->image :
+                               (void *)((uintptr_t)common_mem + common_used);
                        common_used += symbol->elf_sym->st_size;
                        LL_CHECK_FOR(oc->L, common_used <= common_size);
                        LL_IF_DEBUG_FOR(oc->L, linker_verbose,
@@ -1144,9 +1186,13 @@ ocGetNames_ELF ( ObjectCode* oc )
                                       stab[j].st_size, stab[j].st_value, nm);
                    }
                    */
-                   symbol->addr = (ll_symbol_addr*)(
-                           (intptr_t) oc->sections[secno].start +
-                           (intptr_t) symbol->elf_sym->st_value);
+                   if (ll_noexec_enabled(oc->L))
+                       symbol->addr = (void *)(oc->sections[secno].exec_start +
+                                               symbol->elf_sym->st_value);
+                   else
+                       symbol->addr = (ll_symbol_addr*)(
+                               (intptr_t) oc->sections[secno].exec_start +
+                               (intptr_t) symbol->elf_sym->st_value);
                    LL_CHECK_FOR(oc->L, symbol->addr != 0x0);
                    if (LL_ELF_ST_BIND(symbol->elf_sym->st_info) == LL_ELF_STB_LOCAL) {
                        isLocal = true;
@@ -1746,7 +1792,17 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
          S = 0;
       } else {
          ll_elf_target_sym sym = stab[LL_ELF_R_SYM(info)];
-         if (LL_ELF_R_TYPE(info) == COMPAT_R_X86_64_TLSGD) {
+         const uint32_t reloc_type = LL_ELF_R_TYPE(info);
+         if (ll_noexec_enabled(oc->L) &&
+             (reloc_type == COMPAT_R_X86_64_TLSGD ||
+              reloc_type == COMPAT_R_X86_64_GOTTPOFF)) {
+                ll_error_set(oc->L, LL_E_UNSUPPORTED,
+                    reloc_type == COMPAT_R_X86_64_TLSGD
+                    ? "ELF TLSGD is unavailable in NO_EXEC mode"
+                    : "ELF GOTTPOFF is unavailable in NO_EXEC mode");
+                return 0;
+         }
+         if (reloc_type == COMPAT_R_X86_64_TLSGD) {
             /*
              * No support for TLSGD variables *defined* by the object,
              * only references to *external* TLS variables in already
@@ -1795,7 +1851,7 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
               secno = shndx_table[LL_ELF_R_SYM(info)];
             }
 #endif
-            S = (ll_elf_target_addr)oc->sections[secno].start
+            S = (ll_elf_target_addr)oc->sections[secno].exec_start
                 + stab[LL_ELF_R_SYM(info)].st_value;
          } else {
             /* If not local, look up the name in our global table. */
@@ -1918,6 +1974,7 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
 static bool
 ocMprotect_Elf( ObjectCode *oc )
 {
+    if (ll_noexec_enabled(oc->L)) return true;
     for(int i=0; i < oc->n_sections; i++) {
         Section *section = &oc->sections[i];
         if(section->size == 0) continue;
@@ -1944,6 +2001,25 @@ ocMprotect_Elf( ObjectCode *oc )
 int
 ocResolve_ELF ( ObjectCode* oc )
 {
+#if LL_TARGET_X86_64
+    /* A supplied integer cannot describe the running process's TLS state.
+     * Reject host-dependent forms before fillGot can attempt symbol lookup. */
+    if (ll_noexec_enabled(oc->L)) {
+        for (ElfRelocationATable *table = oc->elf_info->relaTable;
+             table != NULL; table = table->next) {
+            for (size_t i = 0; i < table->n_relocations; ++i) {
+                const uint32_t type = LL_ELF_R_TYPE(table->relocations[i].r_info);
+                if (type == COMPAT_R_X86_64_TLSGD || type == COMPAT_R_X86_64_GOTTPOFF) {
+                    ll_error_set(oc->L, LL_E_UNSUPPORTED,
+                        type == COMPAT_R_X86_64_TLSGD
+                        ? "ELF TLSGD is unavailable in NO_EXEC mode"
+                        : "ELF GOTTPOFF is unavailable in NO_EXEC mode");
+                    return 0;
+                }
+            }
+        }
+    }
+#endif
    char*     ehdrC = (char*)(oc->image);
    ll_elf_target_ehdr* ehdr  = (ll_elf_target_ehdr*) ehdrC;
    ll_elf_target_shdr* shdr  = (ll_elf_target_shdr*) (ehdrC + ehdr->e_shoff);
@@ -1990,7 +2066,7 @@ ocResolve_ELF ( ObjectCode* oc )
                 LL_CHECK_FOR(oc->L, symbol->elf_sym->st_name == 0);
                 LL_CHECK_FOR(oc->L, symbol->elf_sym->st_value == 0);
                 LL_CHECK_FOR(oc->L, 0x0 != oc->sections[ secno ].start);
-                symbol->addr = oc->sections[ secno ].start;
+                symbol->addr = (void *)oc->sections[secno].exec_start;
             }
         }
     }
@@ -2021,6 +2097,8 @@ ocResolve_ELF ( ObjectCode* oc )
         }
     }
 #endif
+
+    if (ll_noexec_enabled(oc->L)) return 1;
 
 #if LL_TARGET_POWERPC
     ocFlushInstructionCache( oc );
@@ -2065,7 +2143,7 @@ ocResolve_ELF ( ObjectCode* oc )
 // See Note [Initializers and finalizers (ELF)].
 int ocRunInit_ELF( ObjectCode *oc )
 {
-    if (oc && oc->elf_info && oc->elf_info->init) {
+    if (oc && oc->elf_info && oc->elf_info->init && !ll_noexec_enabled(oc->L)) {
         return runInit(oc->L, &oc->elf_info->init);
     }
     return true;
@@ -2076,7 +2154,7 @@ int ocRunInit_ELF( ObjectCode *oc )
 // See Note [Initializers and finalizers (ELF)].
 int ocRunFini_ELF( ObjectCode *oc )
 {
-    if (oc && oc->elf_info && oc->elf_info->fini) {
+    if (oc && oc->elf_info && oc->elf_info->fini && !ll_noexec_enabled(oc->L)) {
         return runFini(oc->L, &oc->elf_info->fini);
     }
     return true;
@@ -2108,7 +2186,7 @@ int ocAllocateExtras_ELF( ObjectCode *oc )
     } else {
       int isBss = 0;
       getSectionKind_ELF(&shdr[i], &isBss);
-      if (isBss && shdr[i].sh_size > 0) {
+      if (!ll_noexec_enabled(oc->L) && isBss && shdr[i].sh_size > 0) {
         ll_word align = shdr[i].sh_addralign == 0 ? 1 : shdr[i].sh_addralign;
         bssSize += ll_round_up_to_align(shdr[i].sh_size, align);
       }

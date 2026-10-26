@@ -4,6 +4,7 @@
 #include "ll_path.h"
 #include "ll_failure.h"
 #include "ll_error.h"
+#include "ll_noexec.h"
 
 #include "LinkerInternals.h"
 #include "linker/M32Alloc.h"
@@ -687,7 +688,9 @@ ll_hs_int loadArchive_ (ll_linker *L, pathchar *path)
             imageSize = memberSize;
 
 #if defined(darwin_HOST_OS) || defined(ios_HOST_OS)
-            if (RTS_LINKER_USE_MMAP) {
+            if (ll_noexec_enabled(L)) {
+                image = LL_MALLOC_FOR(L, memberSize, "loadArchive(NO_EXEC image)");
+            } else if (RTS_LINKER_USE_MMAP) {
                 image = ll_mmap_anon_for_linker(L, memberSize);
                 imageMapped = true;
             }
@@ -764,7 +767,10 @@ while reading filename from `%" PATH_FMT "'", path);
             }
             DEBUG_LOG(L, "Found GNU-variant file index\n");
 #if RTS_LINKER_USE_MMAP
-            gnuFileIndex = ll_mmap_anon_for_linker(L, memberSize + 1);
+            if (ll_noexec_enabled(L))
+                gnuFileIndex = LL_MALLOC_FOR(L, memberSize + 1, "loadArchive(NO_EXEC index)");
+            else
+                gnuFileIndex = ll_mmap_anon_for_linker(L, memberSize + 1);
 #else
             gnuFileIndex = LL_MALLOC_FOR(L, memberSize + 1, "loadArchive(image)");
 #endif
@@ -827,7 +833,10 @@ fail:
         LL_FREE_FOR(L, fileName);
     if (gnuFileIndex != NULL) {
 #if RTS_LINKER_USE_MMAP
-        ll_munmap_for_linker(L, gnuFileIndex, gnuFileIndexSize + 1, "loadArchive_");
+        if (ll_noexec_enabled(L))
+            LL_FREE_FOR(L, gnuFileIndex);
+        else
+            ll_munmap_for_linker(L, gnuFileIndex, gnuFileIndexSize + 1, "loadArchive_");
 #else
         LL_FREE_FOR(L, gnuFileIndex);
 #endif

@@ -1,6 +1,7 @@
 #define LL_INTERNAL_SOURCE 1
 #include "ll_compat.h"
 #include "LinkerInternals.h"
+#include "ll_noexec.h"
 
 #if defined(OBJFORMAT_ELF) || defined(OBJFORMAT_MACHO)
 
@@ -114,6 +115,10 @@ void * loadNativeObj_POSIX (ll_linker *L, pathchar *path, char **errmsg)
    void *hdl, *retval;
 
    ll_assert_lock_held_for(L, &L->linker_mutex);
+   if (ll_noexec_enabled(L)) {
+       ll_noexec_native_error(L, errmsg);
+       return NULL;
+   }
 
    LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "loadNativeObj_POSIX %" PATH_FMT "\n", path));
 

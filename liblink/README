@@ -28,7 +28,7 @@ COFF, and Wasm input without an available backend returns LL_E_UNSUPPORTED;
 unrecognized input returns LL_E_FORMAT. By default the registry contains the
 native ELF, Mach-O, or PE backend. Cabal's +all-backends flag includes all three
 implementations in the registry without changing native format identity or OS
-services. This does not add a Wasm backend or the later NO_EXEC interface.
+services. This does not add a Wasm backend or implement the public handle API.
 Archive traversal retains its existing member prefilter; members that
 it loads use the same selection and initialization path as standalone objects.
 
@@ -93,10 +93,42 @@ their existing behavior. All these fields are unconditional in the RTS friend
 layout, so the RTS and library must be rebuilt together.
 
 Normal ELF work and execution addresses still coincide. Payloads, symbol
-lookup, range policy and diagnostics are preserved. Units check separate site
-and extras addresses, but the library does not yet implement LL_CFG_NO_EXEC.
-Synthetic allocation and symbol layout, lifecycle guards, other backend
-conversions and execution qualification remain later parts of WP2.8.
+lookup, range policy and diagnostics are preserved.
+
+Private x64 ELF NO_EXEC mode
+----------------------------
+
+The private compatibility configuration accepts LL_CFG_NO_EXEC, an explicit
+nonzero noexec_base, and LL_CFG_ALL_FORMATS when loading a non-native format.
+This currently supports x86_64 ELF on a 64-bit host with that target/backend
+compiled in. Other targets/formats return LL_E_UNSUPPORTED in this mode.
+The installed handle API remains unsupported until WP2.9; these private
+configuration fields are immutable after host installation.
+
+Sections, BSS, COMMON, the GOT and symbol extras use separate zeroed heap
+allocations with recorded allocation bases. Execution ranges advance from
+noexec_base using a fixed 4096-byte x64 page size, independent of the host's
+page size. Requested larger alignments are honored. Zero-sized blocks reserve
+one byte and a distinct synthetic page. Addresses are monotonic and are not
+recycled on unload. A failed individual allocation leaves its output and the
+next address unchanged; a failed multi-block load can consume earlier successful
+ranges. Storage and address-space exhaustion return LL_E_NOMEM.
+
+Defined/local/COMMON symbols and GOT/island destinations use execution
+addresses; payload stores use heap work addresses. Only explicit owned symbol
+definitions participate in fallback lookup. NO_EXEC skips built-in population,
+process/native lookup, native loading, executable mappings, memory protection,
+cache flushing, and initializer/finalizer hooks and calls. Successful resolution
+reaches OBJECT_READY without setting initializersRan. TLSGD and GOTTPOFF require
+host TLS services and return LL_E_UNSUPPORTED before lookup in this mode.
+
+The unit driver checks the actual core path, partial allocation cleanup and
+native-service guards. Independent NO_EXEC goldens check deterministic
+relocated section/extras/GOT bytes and execution addresses at base0x10000000;
+normal-mode goldens remain unchanged. The ARM64-host/x64-target runtime check
+currently stops in the unchanged ELF verifier's native zero-width extras bound;
+that separate recorded repair is pending. Other backend conversions, two-host
+golden qualification and execution qualification remain WP2.8 work.
 
 
 Locking

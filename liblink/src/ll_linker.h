@@ -47,6 +47,7 @@ struct ll_linker {
     ll_gc_state gc;
     StrHashTable *symhash;
     int linker_init_done;
+    uintptr_t noexec_next; /* monotonically assigned synthetic execution space */
     ll_hs_bool missing_update_warn;
 
 #if defined(OBJFORMAT_ELF) || defined(OBJFORMAT_MACHO)

@@ -122,10 +122,24 @@ seven target profiles.
 The complete driver runs this data-only unit on POSIX x64 and ARM64, compiling
 the actual x64 TU explicitly when the native archive has no such member. On
 Linux x64 and Darwin x64 +all-backends it also links the native ELF capture
-from the real archive and checks nine original normal-mode goldens plus a
-forced PLT32 island through the independent oracle. Saved-reference and
-capture-corruption controls run on either architecture. Neither helper calls
-loaded foreign code or establishes NO_EXEC support.
+from the real archive and checks nine original normal-mode goldens, nine
+NO_EXEC goldens twice, and forced PLT32 islands through the independent oracle.
+Saved-reference and capture-corruption controls run on either architecture.
+These helpers never call loaded foreign code.
+
+`noexec_storage.c` checks the actual heap/synthetic-address allocator, including
+zero extents, alignment, full-width addresses, exhaustion, injected heap
+failure, and unchanged next address/output after a failed reservation.
+
+`noexec_core.c` includes the actual core, ELF, GOT, archive and native-loader
+bodies. Native memory, loader and lifecycle spies must remain unused. Separate
+heap/bookkeeping ledgers check allocator pairing and every observed initial
+heap failure point. Valid fixtures exercise defined/local/BSS/COMMON symbols,
+crossing INT64_MAX, initializer/finalizer metadata disposal, lazy and GNU
+long-name archives, both host page sizes, TLSGD/GOTTPOFF rejection before GOT
+lookup, and ordinary unresolved-symbol retry. Repeated resolution must preserve
+layout and reach READY without running initializers. See ../../README for the
+private configuration boundary and remaining WP2.8 qualification.
 
 `symbol_extras_image.c` uses a valid compiler-produced native object to check
 heap-to-mapping image replacement. It includes the real shared allocator with

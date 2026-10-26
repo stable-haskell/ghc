@@ -13,6 +13,7 @@
 #include "ll_compat.h"
 #include "LinkerInternals.h"
 #include "ll_host.h"
+#include "ll_noexec.h"
 #include "linker/MMap.h"
 
 
@@ -47,6 +48,26 @@
 int ocAllocateExtras(ObjectCode *oc, int count, int first, int bssSize,
                      size_t extra_stride, ll_extra_refresh_fn refresh)
 {
+  if (ll_noexec_enabled(oc->L)) {
+      if (count < 0 || first < 0 ||
+          (count != 0 && extra_stride > SIZE_MAX / (size_t)count)) {
+          ll_error_set(oc->L, LL_E_UNSUPPORTED, "NO_EXEC extras extent is too large");
+          return 0;
+      }
+      const size_t bytes = extra_stride * (size_t)count;
+      if (bytes != 0) {
+          ll_noexec_block block;
+          if (!ll_noexec_allocate(oc->L, bytes, 8, &block)) return 0;
+          oc->symbol_extras = (SymbolExtra *)(void *)block.site.work;
+          oc->symbol_extras_exec = block.site.exec;
+          oc->symbol_extras_allocation = block.allocation;
+      }
+      oc->symbol_extras_origin = LL_EXTRAS_NOEXEC;
+      oc->symbol_extra_stride = extra_stride;
+      oc->first_symbol_extra = first;
+      oc->n_symbol_extras = count;
+      return 1;
+  }
   /* Record the storage path before any allocation or refresh can fail. PE's
    * independently allocated M32 extras never enter this shared path. */
   oc->symbol_extras_origin = LL_EXTRAS_SHARED;

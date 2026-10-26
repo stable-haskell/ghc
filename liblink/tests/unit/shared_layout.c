@@ -16,6 +16,7 @@ static const size_t layout[] = {
     OFFSET(ObjectCode, sections), OFFSET(ObjectCode, proddables),
     OFFSET(ObjectCode, symbol_extras),
     OFFSET(ObjectCode, symbol_extras_exec),
+    OFFSET(ObjectCode, symbol_extras_allocation),
     OFFSET(ObjectCode, first_symbol_extra), OFFSET(ObjectCode, n_symbol_extras),
     OFFSET(ObjectCode, symbol_extra_stride), OFFSET(ObjectCode, symbol_extras_origin),
     OFFSET(ObjectCode, bssBegin), OFFSET(ObjectCode, foreign_exports),
@@ -40,6 +41,7 @@ void shared_layout_write(ObjectCode *object, Section *section, void *payload,
 {
     object->symbol_extras = payload;
     object->symbol_extras_exec = UINT32_C(0x10001000);
+    object->symbol_extras_allocation = payload;
     section->start = payload;
     section->exec_start = UINT32_C(0x10002000);
     object->symbol_extras_origin = LL_EXTRAS_SHARED;
@@ -72,10 +74,11 @@ int main(void)
         object.first_symbol_extra != 7 || object.n_symbol_extras != 11 ||
         object.symbol_extra_stride != 16 ||
         object.symbol_extras_exec != UINT32_C(0x10001000) ||
+        object.symbol_extras_allocation != payload ||
         section.start != payload || section.exec_start != UINT32_C(0x10002000) ||
         object.format_kind != LL_OBJECT_FORMAT_ELF ||
         object.shndx_table != &sentinel) return 3;
-    (void)puts("shared_layout: PASS (27 layout values, cross-TU work/exec exchange)");
+    (void)puts("shared_layout: PASS (28 layout values, cross-TU work/exec exchange)");
     return 0;
 }
 #endif

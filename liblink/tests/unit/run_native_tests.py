@@ -369,6 +369,11 @@ def run_elf_x86_64_sites(cc: list[str], archive: Path, output: Path,
         ROOT / "liblink/tests/unit/elf_x86_64_sites.c", archive, binary,
         link_flags, []), label="compile and link elf_x86_64_sites")
     run([str(binary)], label="run elf_x86_64_sites")
+    storage = output / "noexec_storage"
+    run(cc + [str(ROOT / "liblink/tests/unit/noexec_storage.c"),
+              str(ROOT / "liblink/src/ll_error.c"), "-o", str(storage)],
+        label="compile NO_EXEC storage controls")
+    run([str(storage)], label="run NO_EXEC storage controls")
     command = [sys.executable, "-m", "unittest", "discover", "-s",
                "liblink/tests/oracle", "-p", "test_elf_x86_64.py", "-v"]
     if not native_elf_x64:
@@ -382,6 +387,24 @@ def run_elf_x86_64_sites(cc: list[str], archive: Path, output: Path,
     # environment variable without mutating the driver's process environment.
     run(command, env=dict(os.environ, LIBLINK_ELF_CAPTURE=str(capture)),
         label="check live ELF x64 fields and unchanged native goldens")
+    core = output / "noexec_core"
+    map_file = output / "noexec_core.map"
+    trace = run(cc + native_unit_link_arguments(
+        ROOT / "liblink/tests/unit/noexec_core.c", archive, core, link_flags,
+        ["-Wl,-t", linker_map_flag(map_file)]), label="compile NO_EXEC core controls")
+    for member in ("Linker", "Elf", "elf_got", "LoadArchive", "LoadNativeObjPosix", "ll_noexec"):
+        verify_link_map(map_file, archive, trace, included_source="noexec_core.c",
+                        forbidden_member=member)
+    fixture = ROOT / "liblink/tests/fixtures/elf-noexec/symbols.o"
+    fixture_archive = output / "noexec_symbols.a"
+    run(shlex.split(os.environ.get("AR", "ar")) +
+        ["rcs", str(fixture_archive), str(fixture)], label="archive NO_EXEC symbols fixture")
+    generated = ROOT / "liblink/tests/fixtures/generated/elf-x86_64/x86_64-linux-gnu"
+    run([str(core), str(fixture), str(generated / "init_fini.o"), str(fixture_archive),
+         str(generated / "libelf-longname-gnu.a"), str(generated / "R_X86_64_TLSGD.o"),
+         str(generated / "R_X86_64_64.o"),
+         str(ROOT / "liblink/tests/fixtures/elf-noexec/gottpoff.o")],
+        label="run NO_EXEC core controls")
 
 
 def normalize_windows_path(path: str) -> str:

@@ -5,7 +5,8 @@ Arithmetic: AMD64 psABI 1.0, table 4.9 and section 4.4.1:
 https://gitlab.com/x86-psABIs/x86-64-ABI/-/jobs/artifacts/master/raw/x86-64-ABI/abi.pdf?job=build
 The native GHC extras layout is checked separately: one 8-byte target followed
 by `jmp *-14(%rip)` and two zero pad bytes. No backend code is imported.
-This oracle covers the nine supported ordinary fixtures, not TLS or NO_EXEC.
+This oracle covers the nine supported ordinary fixtures, in native-address
+or NO_EXEC mode. It does not cover TLS.
 """
 
 import argparse
@@ -93,7 +94,11 @@ def verify(original, capture):
         before, after = bytes.fromhex(sample['before']), bytes.fromhex(sample['after'])
         require(sample['size'] == section['size'] == len(before) == len(after) and
                 before == section['bytes'], 'pre-relocation section differs from original')
-        loaded[index] = (int(sample['address'], 0), after)
+        address = int(sample.get('exec_address', sample['address']), 0)
+        if capture.get('noexec', False):
+            require(address != int(sample['address'], 0) and address % 4096 == 0,
+                    'NO_EXEC section did not separate work and execution layout')
+        loaded[index] = (address, after)
         expected[index] = bytearray(before)
         section_signature.append(dict(index=index, name=section['name'], size=len(before)))
 
@@ -105,7 +110,10 @@ def verify(original, capture):
             len(extra_before) == len(extra_after) == extras['count'] * 16 and
             not any(extra_before), 'extras initial state or captured extent changed')
     extra_expected = bytearray(extra_before)
-    extras_address = int(extras['address'], 0)
+    extras_address = int(extras.get('exec_address', extras['address']), 0)
+    if capture.get('noexec', False) and extra_before:
+        require(extras_address != int(extras['address'], 0) and extras_address % 4096 == 0,
+                'NO_EXEC extras did not separate work and execution layout')
     semantic, fields = [], []
 
     def symbol(symtab_index, symbol_index):
@@ -188,10 +196,46 @@ def verify(original, capture):
         require(data == loaded[index][1],
                 f'relocated or untouched bytes differ in section {index}')
     require(extra_expected == extra_after, 'GOT/jump-island or untouched extras bytes differ')
-    return dict(schema=1, format='ELF x86_64', object_sha256=hashlib.sha256(original).hexdigest(),
+    if 'got' in capture:
+        # The retained global table also contains ordinary defined/global and
+        # section symbols. Check its values from the original symbols, apart
+        # from the per-symbol extras used by x64 GOTPCREL instructions.
+        values = []
+        for table_index, table in enumerate(sections):
+            if table['type'] != 2:
+                continue
+            require(table['entry_size'] == 24 and table['size'] % 24 == 0,
+                    'unsupported GOT source symbol table')
+            for index in range(table['size'] // 24):
+                name, info, _, shndx, _, _ = unpack('<IBBHQQ', table['bytes'], index * 24)
+                kind, binding = info & 15, info >> 4
+                local_definition = (binding == 0 and name != 0 and
+                                    0 < shndx < 0xff00 and kind in (0, 1, 2))
+                if binding in (1, 2) or local_definition or kind == 3:
+                    values.append(symbol(table_index, index)[2])
+        expected_got = b''.join(struct.pack('<Q', value) for value in values)
+        require(capture['got']['size'] == len(expected_got) and
+                bytes.fromhex(capture['got']['after']) == expected_got,
+                'global GOT values differ from original symbols/resolver inputs')
+    report = dict(schema=1, format='ELF x86_64', object_sha256=hashlib.sha256(original).hexdigest(),
                 semantic=dict(sections=section_signature, relocations=semantic,
                               extras={key: extras[key] for key in ('first', 'count', 'stride')}),
                 fields=fields, reference_capture=capture)
+    if capture.get('noexec', False):
+        require('got' in capture, 'NO_EXEC capture omitted its global GOT')
+        got = capture['got']
+        got_exec = int(got['exec_address'], 0)
+        require(got_exec != int(got['address'], 0) and got_exec % 4096 == 0,
+                'NO_EXEC global GOT did not separate work and execution layout')
+        report['noexec_image'] = dict(
+            sections=[dict(index=i, exec_address=hex(address),
+                           sha256=hashlib.sha256(after).hexdigest())
+                      for i, (address, after) in loaded.items()],
+            extras=dict(exec_address=hex(extras_address),
+                        sha256=hashlib.sha256(extra_after).hexdigest()),
+            got=dict(exec_address=hex(got_exec),
+                     sha256=hashlib.sha256(bytes.fromhex(got['after'])).hexdigest()))
+    return report
 
 
 def compare_golden(report, golden, original):
@@ -200,8 +244,12 @@ def compare_golden(report, golden, original):
     replay = verify(original, golden['reference_capture'])
     for key in ('schema', 'format', 'object_sha256', 'semantic', 'fields'):
         require(replay[key] == golden[key], 'saved reference differs: ' + key)
+    require(replay.get('noexec_image') == golden.get('noexec_image'),
+            'saved NO_EXEC image differs')
     for key in ('schema', 'format', 'object_sha256', 'semantic'):
         require(report[key] == golden[key], 'golden differs: ' + key)
+    require(report.get('noexec_image') == golden.get('noexec_image'),
+            'golden differs: NO_EXEC image')
 
 
 def main():

@@ -13,6 +13,8 @@
 #include "LinkerInternals.h"
 #include "ll_failure.h"
 #include "ll_format.h"
+#include "ll_noexec.h"
+#include "ll_build.h"
 #include "RtsSymbolInfo.h"
 #include "linker/M32Alloc.h"
 #include "linker/CacheFlush.h"
@@ -463,6 +465,10 @@ ll_init_linker (ll_linker *L, int retain_cafs)
 
     L->symhash = allocStrHashTable(L);
 
+    /* The owner retains its normal bookkeeping and lock, without consulting
+     * the process loader or supplying native platform symbols. */
+    if (ll_noexec_enabled(L)) return;
+
     if (L->services.host.populate_builtins != NULL) {
         L->services.host.populate_builtins(L->services.host.ctx, retain_cafs, insertBuiltin, L);
     }
@@ -499,7 +505,7 @@ ll_init_linker (ll_linker *L, int retain_cafs)
 void
 ll_exit_linker(ll_linker *L) {
 #if defined(OBJFORMAT_ELF) || defined(OBJFORMAT_MACHO)
-   if (L->linker_init_done == 1) {
+   if (L->linker_init_done == 1 && !ll_noexec_enabled(L)) {
       regfree(&L->re_invalid);
       regfree(&L->re_realso);
    }
@@ -513,7 +519,7 @@ ll_exit_linker(ll_linker *L) {
 #if defined(mingw32_HOST_OS) && defined(NEED_M32)
    /* Exit is not proof that ObjectCode owners were disposed. Only drain the
     * free pool and retain live/failed reservations for a later retry. */
-   (void)ll_m32_shutdown_for(L);
+   if (!ll_noexec_enabled(L)) (void)ll_m32_shutdown_for(L);
 #endif
    ll_mutex_close_for(&L->services, &L->linker_mutex);
 }
@@ -572,6 +578,7 @@ exitLinker(void)
 
 static void *
 internal_dlsym(ll_linker *L, const char *symbol) {
+    if (ll_noexec_enabled(L)) return NULL;
     void *v;
 
     // concurrent dl* calls may alter dlerror
@@ -640,6 +647,12 @@ internal_dlsym(ll_linker *L, const char *symbol) {
 void *lookupSymbolInNativeObj(void *handle, const char *symbol_name)
 {
     ll_mutex_lock(&ll_default_linker.linker_mutex);
+    if (ll_noexec_enabled(&ll_default_linker)) {
+        ll_error_set(&ll_default_linker, LL_E_UNSUPPORTED,
+                     "native lookup is unavailable in NO_EXEC mode");
+        ll_mutex_unlock(&ll_default_linker.linker_mutex);
+        return NULL;
+    }
 
 #if defined(OBJFORMAT_MACHO)
     // The Mach-O standard says ccall symbols representing a function are prefixed with _
@@ -873,6 +886,24 @@ static ll_symbol_addr* lookupDependentSymbolImpl (ll_linker *L, ll_symbol_name* 
 }
 #endif /* OBJFORMAT_PEi386 */
 
+/* Explicit definitions retain the ordinary lazy-load and dependency rules,
+ * without native special symbols or a process-loader fallback. */
+static ll_symbol_addr *lookupNoExecSymbol(ll_linker *L, ll_symbol_name *lbl,
+                                         ObjectCode *dependent, ll_sym_type *type)
+{
+    ll_assert_lock_held_for(L, &L->linker_mutex);
+    RtsSymbolInfo *info;
+    if (!ghciLookupSymbolInfo(L, lbl, &info)) return NULL;
+    if (type != NULL) *type = info->type;
+    if (dependent != NULL && info->owner != NULL)
+        insertHashSet(dependent->dependencies, (ll_w)info->owner);
+    LL_ASSERT_FOR(L, info->owner == NULL || info->owner->L == L);
+    ll_symbol_addr *result = loadSymbol(L, lbl, info);
+    ll_failure_inherit(dependent, info->owner);
+    return ll_failure_usable(dependent) && ll_failure_usable(info->owner)
+         ? result : NULL;
+}
+
 ll_symbol_addr* lookupDependentSymbol(ll_linker *L, ll_symbol_name *lbl,
                                       ObjectCode *dependent, ll_sym_type *type)
 {
@@ -886,7 +917,10 @@ ll_symbol_addr* lookupDependentSymbol(ll_linker *L, ll_symbol_name *lbl,
             strncmp(lbl, "_GLOBAL_OFFSET_TABLE_", 21) == 0) {
             ll_assert_lock_held_for(L, &L->linker_mutex);
             LL_ASSERT_FOR(L, dependent->L == L);
-            result = dependent->elf_info->got_start;
+            result = ll_noexec_enabled(L) ? (void *)dependent->elf_info->got_exec
+                                         : dependent->elf_info->got_start;
+        } else if (ll_noexec_enabled(L)) {
+            result = lookupNoExecSymbol(L, lbl, dependent, type);
         } else {
             result = lookupDependentSymbolImpl(L, lbl, dependent, type);
         }
@@ -1109,6 +1143,20 @@ int ll_init_object(ObjectCode *oc)
     if (oc->type == DYNAMIC_OBJECT) return 1;
     oc->format_ops = ll_format_select(oc);
     if (oc->format_ops == NULL) return 0;
+    if (ll_noexec_enabled(oc->L)) {
+        bool supported = false;
+#if LL_BUILD_ELF && LL_TARGET_X86_64 && SIZEOF_VOID_P == 8
+        supported = oc->format_ops == &ll_format_elf;
+#endif
+        if (!supported ||
+            (!(oc->L->services.cfg.flags & LL_CFG_ALL_FORMATS) &&
+              oc->format_ops != ll_format_native())) {
+            oc->format_ops = NULL;
+            ll_error_set(oc->L, LL_E_UNSUPPORTED,
+                         "NO_EXEC is currently available for the x64 ELF backend only");
+            return 0;
+        }
+    }
     oc->formatName = oc->format_ops->name;
     /* Retain format identity independently of table addresses or later copies.
      * Selection already checked these bounded, disjoint signatures. */
@@ -1187,12 +1235,12 @@ void freeObjectCode (ObjectCode *oc)
 
     // Run finalizers only if initializers have been run.
     // See Note [Object unloading and finalizers].
-    if (oc->type == STATIC_OBJECT && oc->initializersRan) {
+    if (!ll_noexec_enabled(oc->L) && oc->type == STATIC_OBJECT && oc->initializersRan) {
         if (oc->format_ops != NULL) oc->format_ops->run_fini(oc);
     }
 
     // See Note [Resolving __dso_handle]
-    if (oc->cxa_finalize) {
+    if (!ll_noexec_enabled(oc->L) && oc->cxa_finalize) {
         oc->cxa_finalize(oc->image);
     }
 
@@ -1230,6 +1278,9 @@ void freeObjectCode (ObjectCode *oc)
         for (i=0; i < oc->n_sections; i++) {
             if (oc->sections[i].start != NULL) {
                 switch(oc->sections[i].alloc){
+                case SECTION_NOEXEC:
+                    free(oc->sections[i].mapped_start);
+                    break;
 #if RTS_LINKER_USE_MMAP || defined(mingw32_HOST_OS)
                 case SECTION_MMAP:
                     ll_munmap_for_linker(oc->L,
@@ -1263,7 +1314,9 @@ void freeObjectCode (ObjectCode *oc)
 
     /* Only the shared extras allocator participates here. PE extras remain
      * owned by the M32 allocators, with their original disposal order. */
-    if (oc->symbol_extras_origin == LL_EXTRAS_SHARED) {
+    if (oc->symbol_extras_origin == LL_EXTRAS_NOEXEC) {
+        free(oc->symbol_extras_allocation);
+    } else if (oc->symbol_extras_origin == LL_EXTRAS_SHARED) {
         if (RTS_LINKER_USE_MMAP) {
             /* Contiguous extras belong to the image; other extras to M32. */
         } else {
@@ -1272,8 +1325,10 @@ void freeObjectCode (ObjectCode *oc)
     }
 
 #if defined(NEED_M32)
-    m32_allocator_free_for(oc->L, oc->rx_m32);
-    m32_allocator_free_for(oc->L, oc->rw_m32);
+    if (!ll_noexec_enabled(oc->L)) {
+        m32_allocator_free_for(oc->L, oc->rx_m32);
+        m32_allocator_free_for(oc->L, oc->rw_m32);
+    }
 #endif
 
     LL_FREE_FOR(oc->L, oc->fileName);
@@ -1331,6 +1386,7 @@ mkOc( ll_linker *L, ObjectType type, pathchar *path, char *image, int imageSize,
    oc->foreign_exports   = NULL;
    oc->symbol_extras = NULL;
    oc->symbol_extras_exec = 0;
+   oc->symbol_extras_allocation = NULL;
    oc->first_symbol_extra = 0;
    oc->n_symbol_extras = 0;
    oc->symbol_extra_stride = 0;
@@ -1357,8 +1413,10 @@ mkOc( ll_linker *L, ObjectType type, pathchar *path, char *image, int imageSize,
    oc->rw_m32 = NULL;
    oc->rx_m32 = NULL;
 #if defined(NEED_M32)
-   oc->rw_m32 = m32_allocator_new_for(L, false);
-   oc->rx_m32 = m32_allocator_new_for(L, true);
+   if (!ll_noexec_enabled(L)) {
+       oc->rw_m32 = m32_allocator_new_for(L, false);
+       oc->rx_m32 = m32_allocator_new_for(L, true);
+   }
 #endif
 
    oc->shndx_table = SHNDX_TABLE_UNINIT(L);
@@ -1420,6 +1478,31 @@ preloadObjectFile (ll_linker *L, pathchar *path)
        return NULL;
    }
    fileSize = st.st_size;
+
+   if (ll_noexec_enabled(L)) {
+       /* The immutable input image is bookkeeping storage. Loaded sections
+        * and extras receive their own fallible plain-heap allocations. */
+       FILE *file = pathopen(path, WSTR("rb"));
+       if (file == NULL) {
+           ll_error_set(L, LL_E_IO, "loadObj: can't preload `%" PATH_FMT "'", path);
+           return NULL;
+       }
+       image = LL_MALLOC_FOR(L, fileSize, "loadObj(NO_EXEC image)");
+       const size_t count = fread(image, 1, fileSize, file);
+       const bool complete = count == (size_t)fileSize && !ferror(file);
+       const int closed = fclose(file);
+       if (!complete || closed != 0) {
+           LL_FREE_FOR(L, image);
+           ll_error_set(L, LL_E_IO, "loadObj: error whilst reading `%" PATH_FMT "'", path);
+           return NULL;
+       }
+       oc = mkOc(L, STATIC_OBJECT, path, image, fileSize, false, NULL, 0);
+       if (!ll_init_object(oc)) {
+           ll_discard_object(oc);
+           return NULL;
+       }
+       return oc;
+   }
 
 #if RTS_LINKER_USE_MMAP
    int fd;
@@ -1723,6 +1806,10 @@ static int ocTryLoadImpl(ObjectCode* oc) {
     }
 
     if (!ll_failure_usable(oc)) return 0;
+    if (ll_noexec_enabled(oc->L)) {
+        oc->status = OBJECT_RESOLVED;
+        return 1;
+    }
     LL_IF_DEBUG_FOR(oc->L, linker, ocDebugBelch(oc, "protecting mappings\n"));
     if (!ocProtectExtras(oc)) {
         ll_failure_protection(oc);
@@ -1761,6 +1848,10 @@ int ocRunInit(ObjectCode *oc)
     if (oc->status == OBJECT_UNLOADED) return 1;
     if (!ll_failure_usable(oc)) return 0;
     if (oc->status != OBJECT_RESOLVED) {
+        return 1;
+    }
+    if (ll_noexec_enabled(oc->L)) {
+        oc->status = OBJECT_READY;
         return 1;
     }
 
@@ -1805,7 +1896,7 @@ int runPendingInitializers (ll_linker *L)
         }
     }
 
-    if (L->services.host.after_init_batch != NULL) {
+    if (!ll_noexec_enabled(L) && L->services.host.after_init_batch != NULL) {
         // collect any new cost centres & CCSs that were defined during runInit
         L->services.host.after_init_batch(L->services.host.ctx);
     }
@@ -1988,6 +2079,12 @@ void * loadNativeObj (pathchar *path, char **errmsg)
 {
    LL_IF_DEBUG(linker, LL_DEBUG("loadNativeObj: path = '%" PATH_FMT "'\n", path));
    ll_mutex_lock(&ll_default_linker.linker_mutex);
+
+   if (ll_noexec_enabled(&ll_default_linker)) {
+       ll_noexec_native_error(&ll_default_linker, errmsg);
+       ll_mutex_unlock(&ll_default_linker.linker_mutex);
+       return NULL;
+   }
 
 #if defined(OBJFORMAT_ELF) || defined(OBJFORMAT_MACHO)
    void *r = loadNativeObj_POSIX(&ll_default_linker, path, errmsg);

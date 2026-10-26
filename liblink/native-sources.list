@@ -35,5 +35,6 @@ src/ll_failure.c
 src/ll_format.c
 src/ll_host.c
 src/ll_mutex.c
+src/ll_noexec.c
 src/ll_path.c
 src/ll_api.c

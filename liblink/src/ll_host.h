@@ -62,6 +62,10 @@ typedef struct ll_compat_config {
     bool always_pic;
     bool optimistic;
     unsigned debug_mask;
+    /* Private bridge until the public handle API is wired. Immutable after
+     * installation, before this owner's first allocation or initialization. */
+    unsigned flags;
+    uintptr_t noexec_base;
 } ll_compat_config;
 
 typedef struct {

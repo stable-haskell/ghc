@@ -9,6 +9,7 @@
 #include "linker/elf_reloc_x86_64.h"
 #include "linker/SymbolExtras.h"
 #include "liblink/elf.h"
+#include "ll_noexec.h"
 #include <string.h>
 #if defined(dragonfly_HOST_OS)
 #include <sys/tls.h>
@@ -205,6 +206,11 @@ static int apply_x86_64(ObjectCode *oc, Section *section, uint32_t type,
 #if defined(dragonfly_HOST_OS)
       case COMPAT_R_X86_64_GOTTPOFF:
       {
+          if (ll_noexec_enabled(oc->L)) {
+              ll_error_set(oc->L, LL_E_UNSUPPORTED,
+                           "ELF GOTTPOFF is unavailable in NO_EXEC mode");
+              return 0;
+          }
         /* determine the offset of S to the current thread's tls
            area
            XXX: Move this to the beginning of function */

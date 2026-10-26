@@ -1,0 +1,159 @@
+{
+  "fields": [
+    {
+      "A": 0,
+      "P": "0x10003000",
+      "S": "0x12345000",
+      "after": "0050341200000000",
+      "before": "0000000000000000",
+      "expected": "0050341200000000",
+      "offset": 0,
+      "section": 3,
+      "type": "R_X86_64_64"
+    }
+  ],
+  "format": "ELF x86_64",
+  "noexec_image": {
+    "extras": {
+      "exec_address": "0x10000000",
+      "sha256": "17b0761f87b081d5cf10757ccc89f12be355c70e2e29df288b65b30710dcbcd1"
+    },
+    "got": {
+      "exec_address": "0x10006000",
+      "sha256": "94f2ea95cf283b3dbe24db1dd19d9fefc5ee4ba099868542414cc35c9e197234"
+    },
+    "sections": [
+      {
+        "exec_address": "0x10001000",
+        "index": 1,
+        "sha256": "95e2975709929f131847c33969222f25d73d9bc76836ca6af1eb335e36918612"
+      },
+      {
+        "exec_address": "0x10003000",
+        "index": 3,
+        "sha256": "6707742677cabdd7eba9074a6a9f879a4f709db2782d3aca6d380e379e0fcd82"
+      },
+      {
+        "exec_address": "0x10004000",
+        "index": 4,
+        "sha256": "22ace4600b414c9c0f320e1146b170feb0caddb1d9c032283a75e8f2fd3f9fdb"
+      },
+      {
+        "exec_address": "0x10005000",
+        "index": 5,
+        "sha256": "bca611b2228a609730a43f5995e98a2a7c9621a8fe0c2ce9c7ba3859e9c34f29"
+      }
+    ]
+  },
+  "object_sha256": "0d35a38980ae1bd68ad92c80d79f9aea34355aea67562cc1b9e23baca934e543",
+  "reference_capture": {
+    "error": "",
+    "extras": {
+      "address": "0x6060000002c0",
+      "after": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "before": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "count": 3,
+      "exec_address": "0x10000000",
+      "first": 0,
+      "jump_offset": 8,
+      "stride": 16
+    },
+    "got": {
+      "address": "0x603000001bd0",
+      "after": "00300010000000000050341200000000",
+      "exec_address": "0x10006000",
+      "size": 16
+    },
+    "host_symbols": {
+      "external_data": "0x12345000",
+      "external_function": "0x10002000",
+      "external_function_alias": "0x10002000"
+    },
+    "initializers_ran": false,
+    "noexec": true,
+    "resolved": true,
+    "schema": "liblink-elf-native-address-v1",
+    "sections": [
+      {
+        "address": "0x607000000090",
+        "after": "002e74657874002e737472746162002e73796d7461620065787465726e616c5f64617461002e72656c612e6461746100666978747572655f7838365f36345f363400",
+        "before": "002e74657874002e737472746162002e73796d7461620065787465726e616c5f64617461002e72656c612e6461746100666978747572655f7838365f36345f363400",
+        "exec_address": "0x10001000",
+        "index": 1,
+        "size": 66
+      },
+      {
+        "address": "0x602000000110",
+        "after": "0050341200000000",
+        "before": "0000000000000000",
+        "exec_address": "0x10003000",
+        "index": 3,
+        "size": 8
+      },
+      {
+        "address": "0x603000001b70",
+        "after": "000000000000000001000000020000000000000000000000",
+        "before": "000000000000000001000000020000000000000000000000",
+        "exec_address": "0x10004000",
+        "index": 4,
+        "size": 24
+      },
+      {
+        "address": "0x607000000100",
+        "after": "000000000000000000000000000000000000000000000000300000001000030000000000000000000000000000000000170000001000000000000000000000000000000000000000",
+        "before": "000000000000000000000000000000000000000000000000300000001000030000000000000000000000000000000000170000001000000000000000000000000000000000000000",
+        "exec_address": "0x10005000",
+        "index": 5,
+        "size": 72
+      }
+    ],
+    "status": 0
+  },
+  "schema": 1,
+  "semantic": {
+    "extras": {
+      "count": 3,
+      "first": 0,
+      "stride": 16
+    },
+    "relocations": [
+      {
+        "A": 0,
+        "S_origin": {
+          "kind": "host-symbol",
+          "name": "external_data"
+        },
+        "extra_symbol_index": null,
+        "offset": 0,
+        "raw_symbol_type": 0,
+        "section": 3,
+        "symbol": "external_data",
+        "symbol_index": 2,
+        "type": "R_X86_64_64",
+        "width": 8
+      }
+    ],
+    "sections": [
+      {
+        "index": 1,
+        "name": ".strtab",
+        "size": 66
+      },
+      {
+        "index": 3,
+        "name": ".data",
+        "size": 8
+      },
+      {
+        "index": 4,
+        "name": ".rela.data",
+        "size": 24
+      },
+      {
+        "index": 5,
+        "name": ".symtab",
+        "size": 72
+      }
+    ]
+  }
+}
