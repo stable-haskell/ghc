@@ -6,7 +6,7 @@
 
 #if LL_TARGET_AARCH64
 
-#if defined(OBJFORMAT_MACHO)
+#if LL_BUILD_MACHO
 
 #if LL_TARGET_AARCH64
 #define __suffix__ Aarch64
@@ -18,14 +18,14 @@
 #define EVAL(x,y) PASTE(x,y)
 #define ADD_SUFFIX(x) EVAL(PASTE(x,),__suffix__)
 
-unsigned numberOfStubsForSection( ObjectCode *oc, unsigned sectionIndex);
+unsigned macho_numberOfStubsForSection( ObjectCode *oc, unsigned sectionIndex);
 
-#define STUB_SIZE          ADD_SUFFIX(stubSize)
+#define STUB_SIZE          ADD_SUFFIX(macho_stubSize)
 
-bool findStub(Section * section, void* * addr, uint8_t flags);
-bool makeStub(ll_linker *L, Section * section, void* * addr, uint8_t flags);
+bool macho_findStub(Section * section, void* * addr, uint8_t flags);
+bool macho_makeStub(ll_linker *L, Section * section, void* * addr, uint8_t flags);
 
-void freeStubs(ll_linker *L, Section * section);
+void macho_freeStubs(ll_linker *L, Section * section);
 
 #endif // OBJECTFORMAT_MACHO
 

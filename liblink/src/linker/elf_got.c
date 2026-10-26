@@ -8,7 +8,7 @@
 #include <errno.h>
 #include <string.h>
 
-#if defined(OBJFORMAT_ELF)
+#if LL_BUILD_ELF
 
 /*
  * Check whether a symbol (identified by its symbol table section index and

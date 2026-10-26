@@ -53,13 +53,13 @@ bool ll_format_sniff_wasm(const uint8_t *img, size_t len)
 /* Only compiled backends enter this immutable registry. Portable recognition
  * below still identifies known formats whose backend is unavailable. */
 static const struct ll_format_ops *const ll_formats[] = {
-#if defined(OBJFORMAT_ELF)
+#if LL_BUILD_ELF
     &ll_format_elf,
 #endif
-#if defined(OBJFORMAT_MACHO)
+#if LL_BUILD_MACHO
     &ll_format_macho,
 #endif
-#if defined(OBJFORMAT_PEi386)
+#if LL_BUILD_COFF
     &ll_format_pei386,
 #endif
     NULL

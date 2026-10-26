@@ -6,17 +6,17 @@
 
 #if LL_TARGET_AARCH64
 
-#if defined(OBJFORMAT_MACHO)
+#if LL_BUILD_MACHO
 
 
 #define STRINGIFY(x) #x
 #define TOSTRING(x) STRINGIFY(x)
 
-#define _makeStub       ADD_SUFFIX(makeStub)
-#define needStubForRel  ADD_SUFFIX(needStubForRel)
+#define _makeStub       ADD_SUFFIX(macho_makeStub)
+#define macho_needStubForRel  ADD_SUFFIX(macho_needStubForRel)
 
 unsigned
-numberOfStubsForSection( ObjectCode *oc, unsigned sectionIndex) {
+macho_numberOfStubsForSection( ObjectCode *oc, unsigned sectionIndex) {
     unsigned n = 0;
 
     MachOSection *section = &oc->macho_info->macho_sections[sectionIndex];
@@ -26,7 +26,7 @@ numberOfStubsForSection( ObjectCode *oc, unsigned sectionIndex) {
             MachORelocationInfo relocation;
             memcpy(&relocation, relocations + i * sizeof(relocation),
                    sizeof(relocation));
-            if(needStubForRel(&relocation))
+            if(macho_needStubForRel(&relocation))
                 n += 1;
         }
     }
@@ -35,7 +35,7 @@ numberOfStubsForSection( ObjectCode *oc, unsigned sectionIndex) {
 }
 
 bool
-findStub(Section * section,
+macho_findStub(Section * section,
           void* * addr,
           uint8_t flags) {
     for(MachOStub * s = section->macho_info->stubs; s != NULL; s = s->next) {
@@ -49,7 +49,7 @@ findStub(Section * section,
 }
 
 bool
-makeStub(ll_linker *L, Section * section,
+macho_makeStub(ll_linker *L, Section * section,
           void* * addr,
           uint8_t flags) {
 
@@ -84,7 +84,7 @@ makeStub(ll_linker *L, Section * section,
 }
 
 void
-freeStubs(ll_linker *L, Section * section) {
+macho_freeStubs(ll_linker *L, Section * section) {
     if(NULL == section || section->macho_info == NULL)
         return;
     MachOStub * stub = section->macho_info->stubs;

@@ -268,8 +268,18 @@ static void check_detection(ll_linker *owner)
         oc.fileSize = 20;
         ll_error_clear(owner);
         const struct ll_format_ops *ops = ll_format_select(&oc);
-        const bool available = native != NULL && strcmp(native->name, formats[i]) == 0;
-        CHECK(available ? ops == native : ops == NULL && owner->error_status == LL_E_UNSUPPORTED,
+        const struct ll_format_ops *expected = NULL;
+#if LL_BUILD_ELF
+        if (strcmp(formats[i], "ELF") == 0) expected = &ll_format_elf;
+#endif
+#if LL_BUILD_MACHO
+        if (strcmp(formats[i], "Mach-O") == 0) expected = &ll_format_macho;
+#endif
+#if LL_BUILD_COFF
+        if (strcmp(formats[i], "PEi386") == 0) expected = &ll_format_pei386;
+#endif
+        CHECK(expected != NULL ? ops == expected && owner->error_status == LL_OK
+                               : ops == NULL && owner->error_status == LL_E_UNSUPPORTED,
               "recognized format selected wrong backend or status");
         for (int n = 0; n < 4; ++n) {
             uint8_t *prefix = malloc(n == 0 ? 1 : (size_t)n);

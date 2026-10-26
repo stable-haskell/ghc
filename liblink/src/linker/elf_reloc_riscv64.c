@@ -14,7 +14,7 @@
 
 #if LL_TARGET_RISCV64
 
-#if defined(OBJFORMAT_ELF)
+#if LL_BUILD_ELF
 
 typedef uint64_t addr_t;
 
@@ -570,9 +570,9 @@ bool computeAddend(ElfRelocationATable *relaTab, unsigned relNo, ll_elf_target_r
       GOT_Target = (addr_t) FAKE_GOT_S;
     }
 
-    if (findStub(section, (void **)&S, 0)) {
+    if (elf_findStub(section, (void **)&S, 0)) {
       /* did not find it. Crete a new stub. */
-      if (makeStub(oc->L, section, (void **)&S, (void *)GOT_Target, 0)) {
+      if (elf_makeStub(oc->L, section, (void **)&S, (void *)GOT_Target, 0)) {
         abort(/* could not find or make stub */);
       }
     }

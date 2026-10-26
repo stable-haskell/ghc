@@ -8,11 +8,11 @@
 
 #if LL_TARGET_AARCH64
 
-#if defined(OBJFORMAT_ELF)
+#if LL_BUILD_ELF
 
 /* five 4 byte instructions */
-const size_t instSizeAarch64 = 4;
-const size_t stubSizeAarch64 = 5 * 4;
+const size_t elf_instSizeAarch64 = 4;
+const size_t elf_stubSizeAarch64 = 5 * 4;
 
 /*
  * Compute the number of stub (PLT entries) for a given section by iterating
@@ -25,7 +25,7 @@ const size_t stubSizeAarch64 = 5 * 4;
  * section, and the risk of the stubs being out of reach for the instruction to
  * be relocated is minimal.
  */
-bool needStubForRelAarch64(ll_elf_target_rel * rel) {
+bool elf_needStubForRelAarch64(ll_elf_target_rel * rel) {
     switch(LL_ELF64_R_TYPE(rel->r_info)) {
         case COMPAT_R_AARCH64_CALL26:
         case COMPAT_R_AARCH64_JUMP26:
@@ -34,7 +34,7 @@ bool needStubForRelAarch64(ll_elf_target_rel * rel) {
             return false;
     }
 }
-bool needStubForRelaAarch64(ll_elf_target_rela * rela) {
+bool elf_needStubForRelaAarch64(ll_elf_target_rela * rela) {
     switch(LL_ELF64_R_TYPE(rela->r_info)) {
         case COMPAT_R_AARCH64_CALL26:
         case COMPAT_R_AARCH64_JUMP26:
@@ -46,7 +46,7 @@ bool needStubForRelaAarch64(ll_elf_target_rela * rela) {
 
 
 bool
-makeStubAarch64(ElfStub * s) {
+elf_makeStubAarch64(ElfStub * s) {
     // We (the linker) may corrupt registers x16 (IP0) and x17 (IP1) [AAPCS64]
     // and the condition flags, according to the "ELF for the ARM 64-bit
     // Architecture (AArch64)".

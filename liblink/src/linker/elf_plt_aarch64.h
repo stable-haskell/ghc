@@ -1,12 +1,13 @@
 #pragma once
 
 #include "LinkerInternals.h"
+#include "linker/ElfTypes.h"
 
-#if defined(OBJFORMAT_ELF)
+#if LL_BUILD_ELF
 
-extern const size_t stubSizeAarch64;
-bool needStubForRelAarch64(ll_elf_target_rel * rel);
-bool needStubForRelaAarch64(ll_elf_target_rela * rel);
-bool makeStubAarch64(ElfStub * s);
+extern const size_t elf_stubSizeAarch64;
+bool elf_needStubForRelAarch64(ll_elf_target_rel * rel);
+bool elf_needStubForRelaAarch64(ll_elf_target_rela * rel);
+bool elf_makeStubAarch64(ElfStub * s);
 
 #endif

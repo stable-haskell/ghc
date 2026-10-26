@@ -7,14 +7,14 @@
 
 #if LL_TARGET_AARCH64
 
-#if defined(OBJFORMAT_MACHO)
+#if LL_BUILD_MACHO
 
 
 /* five 4 byte instructions */
-const size_t instSizeAarch64 = 4;
-const size_t stubSizeAarch64 = 5 * 4;
+const size_t macho_instSizeAarch64 = 4;
+const size_t macho_stubSizeAarch64 = 5 * 4;
 
-bool needStubForRelAarch64(MachORelocationInfo * rel) {
+bool macho_needStubForRelAarch64(MachORelocationInfo * rel) {
     switch(rel->r_type) {
         case LL_MACHO_ARM64_RELOC_BRANCH26:
             return true;
@@ -25,7 +25,7 @@ bool needStubForRelAarch64(MachORelocationInfo * rel) {
 
 /* see the elf_plt_aarch64.c for the discussion on this */
 bool
-makeStubAarch64(MachOStub * s) {
+macho_makeStubAarch64(MachOStub * s) {
     uint32_t mov__hw0_x16 = 0xd2800000 | 16;
     uint32_t movk_hw0_x16 = mov__hw0_x16 | (1 << 29);
 

@@ -442,7 +442,7 @@
 #include "ll_compat.h"
 #include "ll_target.h"
 
-#if defined(mingw32_HOST_OS) || defined(LL_ALL_BACKENDS)
+#if LL_BUILD_COFF
 
 #include "LinkerInternals.h"
 #include "ll_failure.h"

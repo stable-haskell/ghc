@@ -12,10 +12,10 @@
 #include "Elf.h"
 #include "elf_plt.h"
 
-#if defined(OBJFORMAT_ELF)
+#if LL_BUILD_ELF
 
 /* three 4 byte instructions */
-const size_t stubSizeArm = 12;
+const size_t elf_stubSizeArm = 12;
 
 /*
  * Compute the number of stub (PLT entries) for a given section by iterating
@@ -28,7 +28,7 @@ const size_t stubSizeArm = 12;
  * section, and the risk of the stubs being out of reach for the instruction to
  * be relocated is minimal.
  */
-bool needStubForRelArm(ll_elf_target_rel * rel) {
+bool elf_needStubForRelArm(ll_elf_target_rel * rel) {
     switch(LL_ELF32_R_TYPE(rel->r_info)) {
         case COMPAT_R_ARM_PC24:
         case COMPAT_R_ARM_CALL:
@@ -41,7 +41,7 @@ bool needStubForRelArm(ll_elf_target_rel * rel) {
             return false;
     }
 }
-bool needStubForRelaArm(ll_elf_target_rela * rela) {
+bool elf_needStubForRelaArm(ll_elf_target_rela * rela) {
     switch(LL_ELF32_R_TYPE(rela->r_info)) {
         case COMPAT_R_ARM_PC24:
         case COMPAT_R_ARM_CALL:
@@ -55,8 +55,8 @@ bool needStubForRelaArm(ll_elf_target_rela * rela) {
     }
 }
 
-bool makeStubArmArm(ElfStub * s);
-bool makeStubArmThm(ElfStub * s);
+bool elf_makeStubArmArm(ElfStub * s);
+bool elf_makeStubArmThm(ElfStub * s);
 /*
   Note [The ARM/Thumb Story]
   ~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -85,7 +85,7 @@ bool makeStubArmThm(ElfStub * s);
 */
 
 bool
-makeStubArmArm(ElfStub * s) {
+elf_makeStubArmArm(ElfStub * s) {
 
     // We (the linker) may corrupt r12 (ip) according to the "ELF for the ARM
     // Architecture" reference.
@@ -130,7 +130,7 @@ makeStubArmArm(ElfStub * s) {
 }
 
 bool
-makeStubArmThm(ElfStub * s) {
+elf_makeStubArmThm(ElfStub * s) {
 
     // movw<c> <Rd>, #<imm16> (Encoding T3) looks like:
     // 31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16
@@ -174,11 +174,11 @@ makeStubArmThm(ElfStub * s) {
 }
 
 bool
-makeStubArm(ElfStub * s) {
+elf_makeStubArm(ElfStub * s) {
     if((s->flags & 1) == 0)
-        return makeStubArmArm(s);
+        return elf_makeStubArmArm(s);
     else
-        return makeStubArmThm(s);
+        return elf_makeStubArmThm(s);
 }
 
 #endif // OBJECTFORMAT_ELF

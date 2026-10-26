@@ -4,7 +4,7 @@
 #include "ll_target.h"
 #include "LinkerInternals.h"
 
-#if defined(OBJFORMAT_ELF)
+#if LL_BUILD_ELF
 #include "linker/Elf.h"
 #include "ll_error.h"
 

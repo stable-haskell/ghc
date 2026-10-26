@@ -47,6 +47,11 @@ def parse_args() -> argparse.Namespace:
         help="C compiler command (default: CC or cc)",
     )
     parser.add_argument(
+        "--all-backends",
+        action="store_true",
+        help="check a library built with Cabal +all-backends",
+    )
+    parser.add_argument(
         "--initializer-errors-only",
         action="store_true",
         help="run common initializer status, cleanup, and terminal-error policy units",
@@ -1015,6 +1020,8 @@ def main() -> int:
     compiler = shlex.split(args.cc)
     if not compiler:
         raise RuntimeError("empty C compiler command")
+    if args.all_backends:
+        compiler.append("-DLL_ALL_BACKENDS")
     archive, config_include, fs_include = locate_artifacts(
         args.build_root.resolve(), args.store_root.resolve()
     )
@@ -1121,6 +1128,9 @@ def main() -> int:
         run([sys.executable, str(ROOT / "liblink/tests/unit/test_target_config.py"),
              "--cc", command_text(compiler), "--config-dir", str(config_include)],
             label="check target selection and host definitions")
+        run([sys.executable, str(ROOT / "liblink/tests/unit/test_shared_layout.py"),
+             "--cc", command_text(compiler), "--config-dir", str(config_include)],
+            label="check private producer and native client shared layouts")
         with tempfile.TemporaryDirectory(prefix="liblink-page21-encoding-") as temporary:
             directory = Path(temporary)
             header = directory / "macho_page21_generated.h"

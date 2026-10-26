@@ -8,34 +8,34 @@
 #include <stdlib.h>
 
 #if LL_TARGET_ARM || LL_TARGET_AARCH64 || LL_TARGET_RISCV64
-#if defined(OBJFORMAT_ELF)
+#if LL_BUILD_ELF
 
 #define STRINGIFY(x) #x
 #define TOSTRING(x) STRINGIFY(x)
 
-#define _makeStub       ADD_SUFFIX(makeStub)
-#define needStubForRel  ADD_SUFFIX(needStubForRel)
-#define needStubForRela ADD_SUFFIX(needStubForRela)
+#define _makeStub       ADD_SUFFIX(elf_makeStub)
+#define elf_needStubForRel  ADD_SUFFIX(elf_needStubForRel)
+#define elf_needStubForRela ADD_SUFFIX(elf_needStubForRela)
 
 unsigned
-numberOfStubsForSection( ObjectCode *oc, unsigned sectionIndex) {
+elf_numberOfStubsForSection( ObjectCode *oc, unsigned sectionIndex) {
     unsigned n = 0;
     for(ElfRelocationTable *t = oc->elf_info->relTable; t != NULL; t = t->next)
         if(t->targetSectionIndex == sectionIndex)
             for(size_t i=0; i < t->n_relocations; i++)
-                if(needStubForRel(&t->relocations[i]))
+                if(elf_needStubForRel(&t->relocations[i]))
                     n += 1;
 
     for(ElfRelocationATable *t = oc->elf_info->relaTable; t != NULL; t = t->next)
         if(t->targetSectionIndex == sectionIndex)
             for(size_t i=0; i < t->n_relocations; i++)
-                if(needStubForRela(&t->relocations[i]))
+                if(elf_needStubForRela(&t->relocations[i]))
                     n += 1;
     return n;
 }
 
 bool
-findStub(Section * section,
+elf_findStub(Section * section,
           void* * addr,
           uint8_t flags) {
     for(ElfStub * s = section->elf_info->stubs; s != NULL; s = s->next) {
@@ -49,7 +49,7 @@ findStub(Section * section,
 }
 
 bool
-makeStub(ll_linker *L, Section * section,
+elf_makeStub(ll_linker *L, Section * section,
           void* * addr,
           void* got_addr,
           uint8_t flags) {
@@ -84,7 +84,7 @@ makeStub(ll_linker *L, Section * section,
 }
 
 void
-freeStubs(ll_linker *L, Section * section) {
+elf_freeStubs(ll_linker *L, Section * section) {
     if(section->elf_info->nstubs == 0)
         return;
     ElfStub * last = section->elf_info->stubs;

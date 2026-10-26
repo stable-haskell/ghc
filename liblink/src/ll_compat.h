@@ -10,6 +10,7 @@
 
 #include "ll_autoconf.h"
 #include "ll_platform.h"
+#include "ll_build.h"
 #include "ll_host.h"
 
 #include <inttypes.h>

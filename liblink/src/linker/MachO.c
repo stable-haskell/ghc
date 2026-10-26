@@ -2,7 +2,7 @@
 #include "ll_compat.h"
 #include "ll_target.h"
 
-#if defined(darwin_HOST_OS) || defined(ios_HOST_OS)
+#if LL_BUILD_MACHO
 
 /* File records remain available to other backends; only this implementation
  * requires a supported Mach-O target. */
@@ -174,7 +174,7 @@ ocDeinit_MachO(ObjectCode * oc) {
                 /* Empty sections and partially built loads have no metadata. */
                 if (oc->sections[i].macho_info != NULL) {
 #if LL_TARGET_AARCH64
-                    freeStubs(oc->L, &oc->sections[i]);
+                    macho_freeStubs(oc->L, &oc->sections[i]);
 #endif
                     LL_FREE_FOR(oc->L, oc->sections[i].macho_info->owned_relocations);
                     oc->sections[i].macho_info->owned_relocations = NULL;
@@ -752,9 +752,9 @@ relocateSectionAarch64(ObjectCode * oc, Section * section)
                 if((value - pc + addend) >> (2 + 26 - 1)) {
                     /* we need a stub */
                     /* check if we already have that stub */
-                    if(findStub(section, (void**)&value, 0)) {
+                    if(macho_findStub(section, (void**)&value, 0)) {
                         /* did not find it. Crete a new stub. */
-                        if(makeStub(oc->L, section, (void**)&value, 0)) {
+                        if(macho_makeStub(oc->L, section, (void**)&value, 0)) {
                             if (oc->L->error_status == LL_OK)
                                 ll_error_set(oc->L, LL_E_RELOC_RANGE, "could not find or make stub");
                             LL_LOG_ERROR_FOR(oc->L, "could not find or make stub");
@@ -1543,7 +1543,7 @@ ocGetNames_MachO(ObjectCode* oc)
                                     " a block of %" PRIu64 " bytes\n",
                                     (void *) (oc->image + section->offset), secMem, section->size));
 #if LL_MACHO_NEED_PLT
-                unsigned nstubs = numberOfStubsForSection(oc, sec_idx);
+                unsigned nstubs = macho_numberOfStubsForSection(oc, sec_idx);
                 unsigned stub_space = STUB_SIZE * nstubs;
 
                 void * mem = ll_mmap_for_linker(oc->L, section->size+stub_space, MEM_READ_WRITE, MAP_ANON, -1, 0);

@@ -64,6 +64,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="static archive tool command (default: AR or ar)",
     )
     parser.add_argument(
+        "--all-backends",
+        action="store_true",
+        help="build and check every file-format backend",
+    )
+    parser.add_argument(
         "--output-dir",
         type=Path,
         required=True,
@@ -209,6 +214,7 @@ def execute(args: argparse.Namespace) -> tuple[dict[str, object], int]:
     report: dict[str, object] = {
         "host": host,
         "machine": platform.machine(),
+        "all_backends": args.all_backends,
         "outcome": "failed",
         "commands": [],
     }
@@ -258,6 +264,7 @@ def execute(args: argparse.Namespace) -> tuple[dict[str, object], int]:
             argv = [
                 *compiler,
                 *STRICT_FLAGS,
+                *(["-DLL_ALL_BACKENDS"] if args.all_backends else []),
                 "-isystem",
                 str(config_include),
                 "-isystem",
@@ -296,6 +303,8 @@ def execute(args: argparse.Namespace) -> tuple[dict[str, object], int]:
             "--cc",
             test_cc,
         ]
+        if args.all_backends:
+            unit_argv.append("--all-backends")
         commands.run(unit_argv, label="run native C units with sanitizers")
         after = hash_inputs(inputs)
         report["inputs_after_sha256"] = after

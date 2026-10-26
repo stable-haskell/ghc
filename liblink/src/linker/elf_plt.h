@@ -8,7 +8,7 @@
 
 #if LL_TARGET_ARM || LL_TARGET_AARCH64 || LL_TARGET_RISCV64
 
-#if defined(OBJFORMAT_ELF)
+#if LL_BUILD_ELF
 
 #if LL_TARGET_AARCH64
 #define __suffix__ Aarch64
@@ -24,14 +24,14 @@
 #define EVAL(x,y) PASTE(x,y)
 #define ADD_SUFFIX(x) EVAL(PASTE(x,),__suffix__)
 
-unsigned  numberOfStubsForSection( ObjectCode *oc, unsigned sectionIndex);
+unsigned  elf_numberOfStubsForSection( ObjectCode *oc, unsigned sectionIndex);
 
-#define STUB_SIZE          ADD_SUFFIX(stubSize)
+#define STUB_SIZE          ADD_SUFFIX(elf_stubSize)
 
-bool findStub(Section * section, void* * addr, uint8_t flags);
-bool makeStub(ll_linker *L, Section * section, void* * addr, void* got_addr, uint8_t flags);
+bool elf_findStub(Section * section, void* * addr, uint8_t flags);
+bool elf_makeStub(ll_linker *L, Section * section, void* * addr, void* got_addr, uint8_t flags);
 
-void freeStubs(ll_linker *L, Section * section);
+void elf_freeStubs(ll_linker *L, Section * section);
 
 #endif // OBJECTFORMAT_ELF
 

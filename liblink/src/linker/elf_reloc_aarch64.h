@@ -2,7 +2,7 @@
 
 #include "LinkerInternals.h"
 
-#if defined(OBJFORMAT_ELF)
+#if LL_BUILD_ELF
 
 bool
 relocateObjectCodeAarch64(ObjectCode * oc);

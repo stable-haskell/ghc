@@ -2,6 +2,10 @@
  * Neither private target selection nor all-backends may change shared layout. */
 #include "liblink/rts_friend.h"
 #include "ll_target.h"
+
+#if !defined(LL_LAYOUT_PRODUCER) && defined(LL_ALL_BACKENDS)
+#error "shared-layout client must not inherit private backend flags"
+#endif
 #include <stddef.h>
 #include <stdio.h>
 

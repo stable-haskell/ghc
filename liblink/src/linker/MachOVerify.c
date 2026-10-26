@@ -4,7 +4,7 @@
 #include "ll_target.h"
 #include "LinkerInternals.h"
 
-#if defined(OBJFORMAT_MACHO)
+#if LL_BUILD_MACHO
 #include "linker/MachO.h"
 #include "linker/MMap.h"
 #include "ll_error.h"

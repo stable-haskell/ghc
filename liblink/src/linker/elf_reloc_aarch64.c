@@ -13,7 +13,7 @@
 
 #if LL_TARGET_AARCH64
 
-#if defined(OBJFORMAT_ELF)
+#if LL_BUILD_ELF
 
 #define Page(x) ((x) & ~0xFFF)
 
@@ -291,9 +291,9 @@ computeAddend(ll_linker *L, Section * section, ll_elf_target_rel * rel,
 
                 /* need a stub */
                 /* check if we already have that stub */
-                if(findStub(section, (void**)&S, 0)) {
+                if(elf_findStub(section, (void**)&S, 0)) {
                     /* did not find it. Crete a new stub. */
-                    if(makeStub(L, section, (void**)&S, NULL, 0)) {
+                    if(elf_makeStub(L, section, (void**)&S, NULL, 0)) {
                         abort(/* could not find or make stub */);
                     }
                 }

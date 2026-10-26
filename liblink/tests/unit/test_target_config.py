@@ -60,6 +60,8 @@ def main() -> None:
         ))
         assert original, "configured host definitions are missing"
         run(cc + ["-c", str(source), "-o", str(directory / "native.o")])
+        run(cc + ["-DLL_ALL_BACKENDS", "-c", str(source),
+                  "-o", str(directory / "all-backends.o")])
         for arch, (width, plt, extras, macho_plt, extra_size) in targets.items():
             flags = [
                 f"-DLL_TARGET_ARCH=LL_ARCH_{arch}",
@@ -70,6 +72,8 @@ def main() -> None:
                 f"-DLL_EXPECT_EXTRA_SIZE={extra_size}",
             ]
             run(cc + flags + ["-c", str(source), "-o", str(directory / (arch + ".o"))])
+            run(cc + flags + ["-DLL_ALL_BACKENDS", "-c", str(source),
+                              "-o", str(directory / (arch + "-all.o"))])
             current = host_definitions(run(
                 cc + flags + ["-E", "-dM", "-include", "ll_target.h", str(empty)]
             ))
@@ -77,7 +81,7 @@ def main() -> None:
         rejected = run(cc + ["-DLL_TARGET_ARCH=999", "-c", str(source),
                              "-o", str(directory / "invalid.o")], success=False)
         assert "unsupported LL_TARGET_ARCH" in rejected, rejected
-    print("target_config: PASS (native, seven explicit targets, host preservation, invalid target)")
+    print("target_config: PASS (native/all-backends, seven explicit targets, host preservation, invalid target)")
 
 
 if __name__ == "__main__":

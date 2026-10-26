@@ -24,6 +24,9 @@ def main() -> None:
         "-std=c11", "-Wall", "-Wextra", "-Werror=vla", "-pedantic",
         "-isystem", str(args.config_dir), "-I", str(ROOT / "liblink/include"),
         "-I", str(ROOT / "liblink/src"),
+        # The client must remain ordinary even when the outer driver checks an
+        # all-backends build or receives an explicit backend target in --cc.
+        "-ULL_ALL_BACKENDS", "-ULL_TARGET_ARCH",
     ]
     source = str(ROOT / "liblink/tests/unit/shared_layout.c")
     with tempfile.TemporaryDirectory(prefix="liblink-shared-layout-") as temporary:

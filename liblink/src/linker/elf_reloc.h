@@ -2,7 +2,7 @@
 
 #include "LinkerInternals.h"
 
-#if defined(OBJFORMAT_ELF)
+#if LL_BUILD_ELF
 
 #include "elf_reloc_aarch64.h"
 #include "elf_reloc_riscv64.h"

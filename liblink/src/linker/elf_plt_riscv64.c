@@ -10,12 +10,12 @@
 
 #if LL_TARGET_RISCV64
 
-#if defined(OBJFORMAT_ELF)
+#if LL_BUILD_ELF
 
-const size_t instSizeRISCV64 = 4;
-const size_t stubSizeRISCV64 = 3 * instSizeRISCV64;
+const size_t elf_instSizeRISCV64 = 4;
+const size_t elf_stubSizeRISCV64 = 3 * elf_instSizeRISCV64;
 
-bool needStubForRelRISCV64(ll_elf_target_rel *rel) {
+bool elf_needStubForRelRISCV64(ll_elf_target_rel *rel) {
   switch (LL_ELF64_R_TYPE(rel->r_info)) {
   case LL_ELF_R_RISCV_CALL:
   case LL_ELF_R_RISCV_CALL_PLT:
@@ -25,7 +25,7 @@ bool needStubForRelRISCV64(ll_elf_target_rel *rel) {
   }
 }
 
-bool needStubForRelaRISCV64(ll_elf_target_rela *rela) {
+bool elf_needStubForRelaRISCV64(ll_elf_target_rela *rela) {
   switch (LL_ELF64_R_TYPE(rela->r_info)) {
   case LL_ELF_R_RISCV_CALL:
   case LL_ELF_R_RISCV_CALL_PLT:
@@ -50,7 +50,7 @@ bool needStubForRelaRISCV64(ll_elf_target_rela *rela) {
 // So far, PC-relative addressing seems to be good enough. If it ever turns out
 // to be not, one could (additionally for out-of-range cases?) encode absolute
 // addressing here.
-bool makeStubRISCV64(ll_linker *L, ElfStub *s) {
+bool elf_makeStubRISCV64(ll_linker *L, ElfStub *s) {
   uint32_t *P = (uint32_t *)s->addr;
   int32_t addr = (uint64_t)s->got_addr - (uint64_t)P;
 

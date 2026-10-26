@@ -153,11 +153,11 @@ static ll_compat_host_ops host_ops(TestHost *host)
 
 /* Keep the real architecture backend on successful calls and permit a
  * deterministic rejection to exercise makeStub's post-allocation cleanup. */
-#define makeStubAarch64 real_makeStubAarch64
+#define macho_makeStubAarch64 real_makeStubAarch64
 #include "linker/macho/plt_aarch64.c"
-#undef makeStubAarch64
+#undef macho_makeStubAarch64
 
-bool makeStubAarch64(Stub *stub)
+bool macho_makeStubAarch64(Stub *stub)
 {
     return reject_backend ? EXIT_FAILURE : real_makeStubAarch64(stub);
 }
@@ -192,9 +192,9 @@ static void test_stub_success_and_reuse(void)
     section.info = &section_info;
 
     clear_owner_error();
-    CHECK(findStub(&section, &first_target, 0),
+    CHECK(macho_findStub(&section, &first_target, 0),
           "findStub did not signal a missing target");
-    CHECK(makeStub(&owner, &section, &first_target, 0) == EXIT_SUCCESS,
+    CHECK(macho_makeStub(&owner, &section, &first_target, 0) == EXIT_SUCCESS,
           "valid makeStub call failed");
     CHECK(owner.error_status == LL_OK, "successful makeStub set an error");
     CHECK(section_info.nstubs == 1 && section_info.stubs != NULL,
@@ -208,15 +208,15 @@ static void test_stub_success_and_reuse(void)
           "real AArch64 backend emitted unexpected stub words");
 
     lookup = (void *)first_target_bits;
-    if (findStub(&section, &lookup, 0)) {
-        CHECK(makeStub(&owner, &section, &lookup, 0) == EXIT_SUCCESS,
+    if (macho_findStub(&section, &lookup, 0)) {
+        CHECK(macho_makeStub(&owner, &section, &lookup, 0) == EXIT_SUCCESS,
               "missing-target path failed while checking reuse");
     }
     CHECK(section_info.nstubs == 1,
           "repeated target was not reused through findStub");
     CHECK(lookup == &stub_words[0], "findStub did not return the first stub address");
 
-    CHECK(makeStub(&owner, &section, &second_target, 0) == EXIT_SUCCESS,
+    CHECK(macho_makeStub(&owner, &section, &second_target, 0) == EXIT_SUCCESS,
           "second valid makeStub call failed");
     CHECK(section_info.nstubs == 2 && section_info.stubs != NULL
               && section_info.stubs->next != NULL,
@@ -227,7 +227,7 @@ static void test_stub_success_and_reuse(void)
 
     size_t live_before_free = owner_host.live;
     unsigned frees_before = owner_host.frees;
-    freeStubs(&owner, &section);
+    macho_freeStubs(&owner, &section);
     CHECK(section_info.stubs == NULL && section_info.nstubs == 0,
           "freeStubs did not clear the list and count");
     CHECK(owner_host.live + 2 == live_before_free,
@@ -252,7 +252,7 @@ static void test_failure_cleanup(void)
     clear_owner_error();
     size_t live_before = owner_host.live;
     unsigned frees_before = owner_host.frees;
-    CHECK(makeStub(&owner, &section, &target, 0) == EXIT_FAILURE,
+    CHECK(macho_makeStub(&owner, &section, &target, 0) == EXIT_FAILURE,
           "backend rejection did not fail makeStub");
     CHECK(owner.error_status == LL_E_RELOC_RANGE,
           "backend rejection did not report LL_E_RELOC_RANGE");
@@ -269,7 +269,7 @@ static void test_failure_cleanup(void)
     clear_owner_error();
     live_before = owner_host.live;
     frees_before = owner_host.frees;
-    CHECK(makeStub(&owner, &section, &target, 0) == EXIT_FAILURE,
+    CHECK(macho_makeStub(&owner, &section, &target, 0) == EXIT_FAILURE,
           "allocation failure did not fail makeStub");
     CHECK(owner.error_status == LL_E_NOMEM,
           "allocation failure did not report LL_E_NOMEM");
@@ -357,8 +357,8 @@ static void test_relocation_failure_propagation(void)
 static void test_free_stubs_null_inputs(void)
 {
     Section section = {0};
-    freeStubs(&owner, NULL);
-    freeStubs(&owner, &section);
+    macho_freeStubs(&owner, NULL);
+    macho_freeStubs(&owner, &section);
     CHECK(section.info == NULL, "freeStubs changed a NULL section info pointer");
 }
 

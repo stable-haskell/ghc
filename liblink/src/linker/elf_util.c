@@ -3,7 +3,7 @@
 #include "ll_target.h"
 #include "linker/elf_util.h"
 
-#if defined(OBJFORMAT_ELF)
+#if LL_BUILD_ELF
 
 ElfSymbolTable *
 findSymbolTable(ObjectCode * oc, unsigned symbolTableIndex) {

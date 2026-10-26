@@ -2,11 +2,7 @@
 #include "ll_compat.h"
 #include "ll_target.h"
 
-#if defined(linux_HOST_OS) || defined(solaris2_HOST_OS) \
-|| defined(linux_android_HOST_OS) \
-|| defined(freebsd_HOST_OS) || defined(kfreebsdgnu_HOST_OS) \
-|| defined(dragonfly_HOST_OS) || defined(netbsd_HOST_OS) \
-|| defined(openbsd_HOST_OS) || defined(gnu_HOST_OS)
+#if LL_BUILD_ELF
 
 // It is essential that this is included before any <elf.h> is included. <elf.h>
 // defines R_XXX relocations, which would interfere with the COMPAT_R_XXX
@@ -31,13 +27,17 @@
 #include "linker/LoadNativeObjPosix.h"
 
 #include "ll_fs.h"
+#if defined(freebsd_HOST_OS)
 #include <link.h>
+#endif
 #include <errno.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
+#if LL_NATIVE_ELF
 #include <regex.h>    // regex is already used by dlopen() so this is OK
                       // to use here without requiring an additional lib
+#endif
 #if defined(HAVE_DLFCN_H)
 #include <dlfcn.h>
 #endif
@@ -892,7 +892,7 @@ ocGetNames_ELF ( ObjectCode* oc )
            * break up the section itself.
            */
 
-          unsigned nstubs = numberOfStubsForSection(oc, i);
+          unsigned nstubs = elf_numberOfStubsForSection(oc, i);
           unsigned stub_space = STUB_SIZE * nstubs;
           unsigned full_size = size+stub_space;
 
@@ -1483,9 +1483,9 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
 
                S += bias;
                /* try to locate an existing stub for this target */
-               if(findStub(&oc->sections[target_shndx], (void**)&S, 0)) {
+               if(elf_findStub(&oc->sections[target_shndx], (void**)&S, 0)) {
                    /* didn't find any. Need to create one */
-                   if(makeStub(oc->L, &oc->sections[target_shndx], (void**)&S, NULL, 0)) {
+                   if(elf_makeStub(oc->L, &oc->sections[target_shndx], (void**)&S, NULL, 0)) {
                        LL_LOG_ERROR_FOR(oc->L, "Unable to create veneer for ARM_CALL\n");
                        return 0;
                    }
@@ -1575,9 +1575,9 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
                // carry the correct thumb indicator.
                S |= T;
                /* try to locate an existing stub for this target */
-               if(findStub(&oc->sections[target_shndx], (void**)&S, 1)) {
+               if(elf_findStub(&oc->sections[target_shndx], (void**)&S, 1)) {
                    /* didn't find any. Need to create one */
-                   if(makeStub(oc->L, &oc->sections[target_shndx], (void**)&S, NULL, 1)) {
+                   if(elf_makeStub(oc->L, &oc->sections[target_shndx], (void**)&S, NULL, 1)) {
                        LL_LOG_ERROR_FOR(oc->L, "Unable to create veneer for ARM_THM_CALL\n");
                        return 0;
                    }
@@ -2358,6 +2358,7 @@ int ocAllocateExtras_ELF( ObjectCode *oc )
 // Returns the handle to the loaded object first mentioned in the linker script.
 // If this process fails at any point, the function returns NULL and outputs a
 // new error message.
+#if LL_NATIVE_ELF
 void * loadNativeObjFromLinkerScript_ELF(ll_linker *L, char **errmsg)
 {
    // GHC #2615
@@ -2420,6 +2421,8 @@ void * loadNativeObjFromLinkerScript_ELF(ll_linker *L, char **errmsg)
 
    return r;
 }
+
+#endif /* LL_NATIVE_ELF */
 
 static int ll_elf_init(ObjectCode *oc)
 {

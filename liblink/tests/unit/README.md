@@ -1285,3 +1285,23 @@ controls retain their assertions. `format_dispatch` checks persistent format
 identity through copied tables using its existing parser-free callbacks.
 M32 allocation, flush, disposal and host cache services retain host capability
 gates and their existing order. These controls do not enable foreign execution.
+
+Backend inclusion controls
+--------------------------
+
+`test_target_config.py` checks each explicit target with native and
+`LL_ALL_BACKENDS` inclusion, preserving actual host definitions. The full native
+unit driver also runs the producer/client shared-layout matrix. Its client
+explicitly clears private target/build flags inherited through `--cc`.
+
+For a library built with Cabal `+all-backends`, pass `--all-backends` to
+`run_native_tests.py`. The format-dispatch unit then checks every compiled
+format's actual immutable table, while retaining the native-table identity
+check and unavailable-Wasm/prefix controls. ELF and Mach-O PLT helpers have
+separate internal names so both implementations can link in one library.
+
+`run_sanitized_tests.py --all-backends --output-dir PATH` builds a fresh archive
+with all backend bodies and passes the same inclusion mode to the unit driver.
+Its report records that mode. This is a qualification command, not a claim
+that every host/target combination or foreign-code execution is supported;
+see the current limits in `liblink/README`.

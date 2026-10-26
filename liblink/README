@@ -25,9 +25,11 @@ selection stays with the object through resolution,
 initialization, and disposal, even when the backend releases the input image.
 Verification still belongs to the selected backend. Recognized ELF, Mach-O,
 COFF, and Wasm input without an available backend returns LL_E_UNSUPPORTED;
-unrecognized input returns LL_E_FORMAT. This stage builds only the native
-ELF, Mach-O, or PE backend. It does not add cross-format execution or a Wasm
-backend. Archive traversal retains its existing member prefilter; members that
+unrecognized input returns LL_E_FORMAT. By default the registry contains the
+native ELF, Mach-O, or PE backend. Cabal's +all-backends flag includes all three
+implementations in the registry without changing native format identity or OS
+services. This does not add a Wasm backend or the later NO_EXEC interface.
+Archive traversal retains its existing member prefilter; members that
 it loads use the same selection and initialization path as standalone objects.
 
 Native shared libraries retain their OS loader path and have no static format
@@ -60,8 +62,18 @@ PE's x86_64 helper explicitly uses its target layout. AArch64's legacy native
 zero-sized representation and allocation/count behavior are retained while
 the remaining shared storage and allocator interfaces are separated.
 
-These target controls prepare multi-backend builds. The current build still
-compiles the native backend; all-backends qualification is pending.
+The private ll_build.h inclusion flags are separate from target selection and
+native format identity. Shared ObjectCode storage and its ELF sentinel do not
+depend on these private flags. Symbol-extra provenance distinguishes the shared
+allocator from PE's separate M32 storage; only shared extras use the common
+protector. ELF-only GOT lookup uses the object's recorded format identity,
+which remains valid when tests copy an operation table.
+
+All-backends qualification is pending. The current complete compile/link check
+targets x86_64 Linux. Mach-O requires x86_64 or AArch64; Windows foreign ELF and
+Mach-O still need their host mapping/protection boundaries completed. Compiling
+a foreign backend does not establish that foreign code can safely execute with
+the running process's ABI or that its process services are available.
 
 
 Locking
