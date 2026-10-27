@@ -156,19 +156,24 @@ elf_makeStubArmThm(ElfStub * s) {
 
     uint32_t movw_r12 = 0xf2400c00;
     uint32_t movt_r12 = 0xf2c00c00;
-    uint32_t bx_r12   = 0x47600000;
-
-    *((uint32_t*)s->addr+0) = movw_r12
+    uint32_t movw = movw_r12
                               | (((uint32_t )s->target & 0xf000) << 4)
-                              | (((uint32_t )s->target & 0x0800) << 16)
+                              | (((uint32_t )s->target & 0x0800) << 15)
                               | (((uint32_t )s->target & 0x0700) << 4)
                               |  ((uint32_t )s->target & 0x00ff);
-    *((uint32_t*)s->addr+1) = movt_r12
+    uint32_t movt = movt_r12
                               | ((((uint32_t )s->target >> 16) & 0xf000) << 4)
                               | ((((uint32_t )s->target >> 16) & 0x0800) << 16)
                               | ((((uint32_t )s->target >> 16) & 0x0700) << 4)
                               |  (((uint32_t )s->target >> 16) & 0x00ff);
-    *((uint32_t*)s->addr+2) = bx_r12;
+    /* Thumb-2 instructions are two successive halfwords, high half first. */
+    uint16_t *insn = (uint16_t *)s->addr;
+    insn[0] = (uint16_t)(movw >> 16);
+    insn[1] = (uint16_t)movw;
+    insn[2] = (uint16_t)(movt >> 16);
+    insn[3] = (uint16_t)movt;
+    insn[4] = UINT16_C(0xbf00); /* nop padding */
+    insn[5] = UINT16_C(0x4760); /* bx ip */
 
     return EXIT_SUCCESS;
 }

@@ -381,6 +381,12 @@ def run_elf_x86_64_sites(cc: list[str], archive: Path, output: Path,
               str(ROOT / "liblink/tests/unit/elf_arm_veneer.c"),
               "-o", str(arm_veneer)], label="compile ARM veneer pointer-width control")
     run([str(arm_veneer)], label="run ARM veneer pointer-width control")
+    arm_stub = output / "elf_arm_thumb_stub"
+    run(cc + ["-DLL_ALL_BACKENDS", "-ULL_TARGET_ARCH",
+              "-DLL_TARGET_ARCH=LL_ARCH_ARM",
+              str(ROOT / "liblink/tests/unit/elf_arm_thumb_stub.c"),
+              "-o", str(arm_stub)], label="compile ARM Thumb stub control")
+    run([str(arm_stub)], label="run ARM Thumb stub control")
     encoder = output / "elf_aarch64_encoder_sites"
     run(cc + ["-DLL_ALL_BACKENDS", "-ULL_TARGET_ARCH",
               "-DLL_TARGET_ARCH=LL_ARCH_AARCH64",

@@ -144,15 +144,17 @@ normal-mode Thumb call with a near target and a far target requiring a veneer.
 Pass `--capture` with the ARM capture command (including a QEMU runner when
 needed) and `--fixture` with the `R_ARM_THM_CALL.o` fixture path.
 
-WP2.8d suspect: a test of the authorized Thumb veneer halfword-order repair
-found a second encoding discrepancy when immediate bit 11 is set. For
-`movw ip, #0xabcd`, the existing immediate calculation produces instruction
-word `0xfa4a3ccd` (stream bytes `4afacd3c` in architectural halfword order);
-GNU ARM assembler produces `4af6cd3c`. The existing expression shifts bit 11
-to bit 27 rather than bit 26. The in-progress `elf_arm_thumb_stub.c` test
-rejects those bytes under both ASan/UBSan and `qemu-arm`; its execution check
-has not yet been reached. The separate immediate-field suspect requires
-escalation under the WP2.8d stop conditions.
+`elf_arm_thumb_stub.c` checks the real Thumb veneer emitter against GNU ARM
+assembler bytes for `movw ip, #0xabcd; movt ip, #0x1234; nop; bx ip`,
+including adjacent-byte guards. On Linux ARM it also executes the emitted
+veneer to a Thumb function. The `movw` bit 11 field and instruction halfword
+order were corrected in the authorized veneer repair.
+
+WP2.8d suspect: the separate `movt` immediate calculation still shifts its
+bit 11 to bit 27 rather than bit 26. For `movt ip, #0xabcd`, it produces
+`0xfaca3ccd` (stream bytes `cafacd3c`); GNU ARM assembler emits `caf6cd3c`.
+The execution test's target did not exercise this upper-half bit. This suspect
+requires escalation under the WP2.8d stop conditions.
 
 `noexec_tail.c` tests the private payload-plus-tail heap reservation helper:
 alignment, checked padding/extents, zero fill, unchanged outputs/address state
