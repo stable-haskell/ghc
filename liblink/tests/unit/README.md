@@ -1668,3 +1668,14 @@ module with a real host configuration, both with and without THREADED_RTS.
 This detects an accidental dependency on the RTS-only fence macro that the
 header layout matrix cannot see. These controls compile foreign target data
 handling; they do not execute RISC-V code or qualify its cache behavior.
+
+The first Apple Clang ASan/UBSan-instrumented COFF NO_EXEC capture stopped in
+`ocVerifyImage_PEi386` before relocation on the committed
+`IMAGE_REL_AMD64_ADDR64.o` fixture. UBSan reported a misaligned `uint32_t`
+load at the COFF string-table size read (`PEi386.c`, `*(uint32_t *)strtab`):
+the observed string table address ended in `0x16e`, which is not four-byte
+aligned. The same typed load is present in the pre-NO_EXEC conversion commit
+`0fcd57eec4`; this finding has not been repaired. The instrumented capture used
+`/usr/bin/clang -fsanitize=address,undefined -fno-sanitize-recover=undefined`
+with `ASAN_OPTIONS=detect_leaks=0`. Section 13 requires escalation for a new
+sanitizer finding; NO_EXEC relocation qualification remains incomplete.
