@@ -172,6 +172,7 @@ static void setup_object(ObjectCode *oc, struct ObjectCodeFormatInfo *info,
   oc->sections = section;
   oc->n_sections = 1;
   section->start = bytes;
+  section->exec_start = (uintptr_t)bytes;
   section->size = (ll_word)byte_count;
   section->kind = SECTIONKIND_CODE_OR_RODATA;
   info->symbolTables = symtab;
@@ -201,7 +202,7 @@ static void test_full_loop_failures(void)
   /* The same relocation succeeds at +4094, then propagates both out-of-range
    * endpoints from encodeAddend through the real relocation loop. */
   ll_elf_target_rela branch = {0};
-  branch.r_info = ELF64_R_INFO(1, LL_ELF_R_RISCV_BRANCH);
+  branch.r_info = LL_ELF64_R_INFO(1, LL_ELF_R_RISCV_BRANCH);
   ElfRelocationATable branch_table = {0};
   branch_table.sectionHeader = &rel_shdr;
   branch_table.targetSectionIndex = 0;
@@ -233,7 +234,7 @@ static void test_full_loop_failures(void)
         "negative branch range failure status or diagnostic missing");
 
   ll_elf_target_rela unknown = {0};
-  unknown.r_info = ELF64_R_INFO(1, UINT64_C(0x7fff));
+  unknown.r_info = LL_ELF64_R_INFO(1, UINT64_C(0x7fff));
   ElfRelocationATable unknown_table = {0};
   rel_shdr.sh_link = 1;
   unknown_table.sectionHeader = &rel_shdr;
@@ -248,7 +249,7 @@ static void test_full_loop_failures(void)
         "unknown relocation lost unsupported status or diagnostic");
 
   ll_elf_target_rel implicit = {0};
-  implicit.r_info = ELF64_R_INFO(1, LL_ELF_R_RISCV_32);
+  implicit.r_info = LL_ELF64_R_INFO(1, LL_ELF_R_RISCV_32);
   ElfRelocationTable rel_table = {0};
   rel_table.sectionHeader = &rel_shdr;
   rel_table.targetSectionIndex = 0;
@@ -263,7 +264,7 @@ static void test_full_loop_failures(void)
         "SHT_REL lost unsupported status or diagnostic");
 
   ll_elf_target_rela missing_lo = {0};
-  missing_lo.r_info = ELF64_R_INFO(1, LL_ELF_R_RISCV_PCREL_LO12_I);
+  missing_lo.r_info = LL_ELF64_R_INFO(1, LL_ELF_R_RISCV_PCREL_LO12_I);
   symbols[1].addr = &bytes[1];
   ElfRelocationATable missing_table = {0};
   missing_table.sectionHeader = &rel_shdr;
@@ -307,10 +308,10 @@ static void test_paired_u_type_and_riscv64_width(void)
   rel_shdr.sh_link = 1;
   ll_elf_target_rela pair[2] = {{0}};
   pair[0].r_offset = 0;
-  pair[0].r_info = ELF64_R_INFO(1, LL_ELF_R_RISCV_PCREL_HI20);
+  pair[0].r_info = LL_ELF64_R_INFO(1, LL_ELF_R_RISCV_PCREL_HI20);
   pair[0].r_addend = 0;
   pair[1].r_offset = 4;
-  pair[1].r_info = ELF64_R_INFO(2, LL_ELF_R_RISCV_PCREL_LO12_I);
+  pair[1].r_info = LL_ELF64_R_INFO(2, LL_ELF_R_RISCV_PCREL_LO12_I);
   pair[1].r_addend = 0;
   ElfRelocationATable pair_table = {0};
   pair_table.sectionHeader = &rel_shdr;
@@ -329,9 +330,10 @@ static void test_paired_u_type_and_riscv64_width(void)
 
   uint64_t data[2] = {UINT64_MAX, UINT64_C(0xfeedfacecafebeef)};
   section.start = data;
+  section.exec_start = (uintptr_t)data;
   section.size = sizeof(data);
   ll_elf_target_rela rel64 = {0};
-  rel64.r_info = ELF64_R_INFO(1, LL_ELF_R_RISCV_64);
+  rel64.r_info = LL_ELF64_R_INFO(1, LL_ELF_R_RISCV_64);
   ElfRelocationATable width_table = {0};
   width_table.sectionHeader = &rel_shdr;
   width_table.targetSectionIndex = 0;
