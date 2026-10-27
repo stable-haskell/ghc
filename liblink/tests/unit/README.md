@@ -1531,6 +1531,34 @@ include path. No host OS macros or generated configuration are fabricated.
 Portable PE object/process split
 -------------------------------
 
+`coff_capture.c` captures normal-mode x64 PE relocations from the committed
+COFF fixtures on a POSIX host. It invokes the real verifier, section builder,
+and resolver without executing object code. The external target is fixed for
+ADDR64 and derived from the section address for the other fixtures. A test
+image-base callback supplies ADDR32NB with an explicit base. This data-only
+callback does not test Windows image-base discovery.
+
+The independent `coff_x86_64_check.py` reads the original COFF records and
+checks the relocation field and every byte of the affected section. Saved
+references cover ADDR64, ADDR32NB, REL32, and SECREL. Run
+`python3 liblink/tests/oracle/test_coff_x86_64.py` to replay them and reject
+corrupted fields and resolver inputs. Normal captures use the real section
+addresses and do not qualify Windows execution or NO_EXEC.
+
+For a live capture, compile `PEi386.c` separately with `LL_ALL_BACKENDS`,
+`LL_TARGET_ARCH=LL_ARCH_X86_64`, and
+`-Dll_pe_host_image_base=capture_pe_image_base`. Link that object before a
+fresh all-backends native archive and compile `coff_capture.c` with the same
+target flags, generated host headers, and platform libraries. The capture
+defines the replacement callback; link-map inspection should show the separate
+PE object rather than an archive PE member. For each fixture:
+
+    ./coff_capture liblink/tests/fixtures/generated/coff-x86_64/IMAGE_REL_AMD64_REL32.o > /tmp/coff-capture.json
+    python3 liblink/tests/oracle/coff_x86_64_check.py \
+      --object liblink/tests/fixtures/generated/coff-x86_64/IMAGE_REL_AMD64_REL32.o \
+      --capture /tmp/coff-capture.json \
+      --golden liblink/tests/golden/coff-x86_64/IMAGE_REL_AMD64_REL32.json
+
 Open relocation suspect: in `ocResolve_PEi386`, the static-symbol branch
 sets `S` but does not initialize `sym_type`. An out-of-range ADDR32,
 ADDR32NB, 32S, or REL32 relocation can pass that value to
