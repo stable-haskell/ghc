@@ -145,16 +145,10 @@ Pass `--capture` with the ARM capture command (including a QEMU runner when
 needed) and `--fixture` with the `R_ARM_THM_CALL.o` fixture path.
 
 `elf_arm_thumb_stub.c` checks the real Thumb veneer emitter against GNU ARM
-assembler bytes for `movw ip, #0xabcd; movt ip, #0x1234; nop; bx ip`,
-including adjacent-byte guards. On Linux ARM it also executes the emitted
-veneer to a Thumb function. The `movw` bit 11 field and instruction halfword
-order were corrected in the authorized veneer repair.
-
-WP2.8d suspect: the separate `movt` immediate calculation still shifts its
-bit 11 to bit 27 rather than bit 26. For `movt ip, #0xabcd`, it produces
-`0xfaca3ccd` (stream bytes `cafacd3c`); GNU ARM assembler emits `caf6cd3c`.
-The execution test's target did not exercise this upper-half bit. This suspect
-requires escalation under the WP2.8d stop conditions.
+assembler bytes for two target values with bit 11 set in either the low or
+high halfword, including adjacent-byte guards. On Linux ARM it also executes
+the emitted veneer to a Thumb function. The `movw` and `movt` bit 11 fields
+and instruction halfword order were corrected in authorized repairs.
 
 `noexec_tail.c` tests the private payload-plus-tail heap reservation helper:
 alignment, checked padding/extents, zero fill, unchanged outputs/address state

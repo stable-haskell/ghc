@@ -37,6 +37,16 @@ int main(void)
         (void)fputs("Thumb veneer bytes differ from assembler\n", stderr);
         return 1;
     }
+    static const uint8_t expected_high_bit[12] = {
+        0x41, 0xf2, 0x34, 0x2c, 0xca, 0xf6, 0xcd, 0x3c,
+        0x00, 0xbf, 0x60, 0x47
+    };
+    stub.target = (void *)(uintptr_t)UINT32_C(0xabcd1234);
+    if (elf_makeStubArm(&stub) || memcmp(&storage[1], expected_high_bit, sizeof(expected_high_bit)) ||
+        storage[0] != UINT16_C(0xa5a5) || storage[7] != UINT16_C(0xa5a5)) {
+        (void)fputs("Thumb movt immediate differs from assembler\n", stderr);
+        return 1;
+    }
 #if defined(__arm__) && defined(__linux__)
     void *code = mmap(NULL, 4096, PROT_READ | PROT_WRITE | PROT_EXEC,
                       MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);

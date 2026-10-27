@@ -163,7 +163,7 @@ elf_makeStubArmThm(ElfStub * s) {
                               |  ((uint32_t )s->target & 0x00ff);
     uint32_t movt = movt_r12
                               | ((((uint32_t )s->target >> 16) & 0xf000) << 4)
-                              | ((((uint32_t )s->target >> 16) & 0x0800) << 16)
+                              | ((((uint32_t )s->target >> 16) & 0x0800) << 15)
                               | ((((uint32_t )s->target >> 16) & 0x0700) << 4)
                               |  (((uint32_t )s->target >> 16) & 0x00ff);
     /* Thumb-2 instructions are two successive halfwords, high half first. */
