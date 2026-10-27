@@ -215,10 +215,13 @@ extra-source-files:
     tests/oracle/elf64_metadata.py
     tests/oracle/elf_aarch64_check.py
     tests/oracle/test_elf_aarch64.py
+    tests/oracle/elf_riscv64_check.py
+    tests/oracle/test_elf_riscv64.py
     tests/golden/elf-x86_64/*.json
     tests/golden/elf-x86_64-noexec/*.json
     tests/golden/elf-aarch64/*.json
     tests/golden/elf-aarch64-noexec/*.json
+    tests/golden/elf-riscv64/*.json
     tests/fixtures/elf-aarch64-sites/branch_reuse.s
     tests/fixtures/elf-aarch64-sites/branch_reuse.o
     tests/fixtures/elf-aarch64-sites/got_alias.s

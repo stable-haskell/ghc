@@ -15,8 +15,8 @@
 #include <string.h>
 #include <unistd.h>
 
-#if !LL_BUILD_ELF || !(LL_TARGET_X86_64 || LL_TARGET_AARCH64 || LL_TARGET_I386 || LL_TARGET_ARM) || defined(mingw32_HOST_OS)
-#error "elf_capture requires an x86 or ARM ELF backend on a POSIX host"
+#if !LL_BUILD_ELF || !(LL_TARGET_X86_64 || LL_TARGET_AARCH64 || LL_TARGET_I386 || LL_TARGET_ARM || LL_TARGET_RISCV64) || defined(mingw32_HOST_OS)
+#error "elf_capture requires an ELF backend on a POSIX host"
 #endif
 
 #define CAPTURE_LIMIT ((size_t)64 * 1024 * 1024)
@@ -178,7 +178,7 @@ static void emit_capture(const ObjectCode *object, const CaptureHost *host,
         json_bytes(before[i], (size_t)section->size);
         (void)fputs(",\"after\":", stdout);
         json_bytes(section->start, (size_t)section->size);
-#if LL_TARGET_AARCH64 || LL_TARGET_ARM
+#if LL_TARGET_AARCH64 || LL_TARGET_ARM || LL_TARGET_RISCV64
         const struct ll_elf_section_info *info = section->elf_info;
         (void)printf(",\"stubs\":{\"address\":\"0x%" PRIxPTR
                      "\",\"size\":%zu,\"before\":", (uintptr_t)info->stub_offset,
@@ -192,8 +192,12 @@ static void emit_capture(const ObjectCode *object, const CaptureHost *host,
             if (!first_stub) (void)putchar(',');
             first_stub = false;
             (void)printf("{\"address\":\"0x%" PRIxPTR "\",\"target\":\"0x%" PRIxPTR
-                         "\",\"flags\":%u}", (uintptr_t)stub->addr,
+                         "\",\"flags\":%u", (uintptr_t)stub->addr,
                          (uintptr_t)stub->target, (unsigned)stub->flags);
+#if LL_TARGET_RISCV64
+            (void)printf(",\"got_address\":\"0x%" PRIxPTR "\"", (uintptr_t)stub->got_addr);
+#endif
+            (void)putchar('}');
         }
         (void)fputs("]}", stdout);
 #else
@@ -294,7 +298,7 @@ int main(int argc, char **argv)
         before[i] = malloc((size_t)section->size);
         if (before[i] == NULL) goto done;
         memcpy(before[i], section->start, (size_t)section->size);
-#if LL_TARGET_AARCH64 || LL_TARGET_ARM
+#if LL_TARGET_AARCH64 || LL_TARGET_ARM || LL_TARGET_RISCV64
         const size_t size = section->elf_info->stub_size;
         if (size > CAPTURE_LIMIT) goto done;
         if (size != 0) {
@@ -321,14 +325,18 @@ int main(int argc, char **argv)
     for (int i = 0; i < object->n_sections; ++i) {
         const Section *section = &object->sections[i];
         if (section->start == NULL || section->size == 0) continue;
-#if LL_TARGET_AARCH64
+#if LL_TARGET_AARCH64 || LL_TARGET_RISCV64
         if (section->kind == SECTIONKIND_OTHER) continue;
 #endif
         anchor = section->exec_start;
         break;
     }
     if (anchor == 0) goto done;
+#if LL_TARGET_RISCV64
+    if (!far_function) state.function_address = anchor + 0x40;
+#else
     if (!far_function) state.function_address = anchor + 0x1000;
+#endif
 #if LL_TARGET_AARCH64
     const uintptr_t data_page = anchor & ~(uintptr_t)0xfff;
     if (negative_data && data_page < 0x1000) goto done;

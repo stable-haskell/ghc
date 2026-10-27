@@ -47,11 +47,11 @@ This slice exercises native arm64 Darwin Mach-O only. Unsupported relocations
 terminate through the host fatal callback and must run in separate processes.
 The runner does not claim ELF, COFF, or other host-backend coverage.
 
-ELF x86_64 and AArch64 captures
-------------------------------
+ELF x86_64, AArch64, and RISC-V captures
+----------------------------------------
 
 elf_capture.c is a separate private client for a 64-bit POSIX host with the
-x86_64 or AArch64 ELF target/backend compiled in. It captures
+x86_64, AArch64, or RISC-V ELF target/backend compiled in. It captures
 an unregistered object's section and extras bytes immediately before and
 after the actual backend resolve operation. It never enters the initializer
 pass or calls loaded code. Without --noexec it checks native addresses on an
@@ -90,3 +90,8 @@ loaded image. --far-function instead supplies0x700000000000 to force the PLT32
 island. Both inputs are recorded separately from relocated bytes; they are
 never called or dereferenced. The independent ELF oracle checks the formulas,
 payloads and every untouched byte. No foreign Windows execution is claimed.
+
+RISC-V normal-mode baseline captures use the ELF target with a nearby external
+function so compressed branches remain in range. The initial reference captures
+were data-only on Darwin with RISC-V ELF code and host-target Mach-O units; they
+do not execute RISC-V instructions or qualify all backends.
