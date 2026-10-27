@@ -186,7 +186,9 @@ range and unsupported errors, exact diagnostics, raw referencing symbol types,
 original nonzero symbol indices, repeated and distinct extra slots, native
 island payloads and untouched adjacent bytes. A normalized symbol type must
 not replace the original ELF STT_FUNC eligibility test. The context is borrowed
-only for the synchronous call and never retained.
+only for the synchronous call and never retained. The same success, rejection
+and extra-slot cases run with both zero and an unrelated nonzero `got_exec`;
+x64 must retain its original index-based extras, bytes and exact errors.
 
 Its extras fixture uses heap work storage with an independent low execution
 base. GOT displacements and PC32/PLT32/32/32S fallback destinations must use

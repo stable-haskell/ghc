@@ -78,9 +78,13 @@ the running process's ABI or that its process services are available.
 The first ELF x86_64 relocation slice now uses the private ll_reloc_ops.apply
 table. Site stores use ll_site.work; PC-relative arithmetic uses ll_site.exec.
 The synchronous call borrows an immutable ll_reloc_context containing the
-referencing file's original symbol index, existing diagnostic name and raw
-symbol type. This explicitly approved amendment to the initial internal
-contract preserves extra-slot identity, STT_FUNC fallback eligibility and
+referencing file's original symbol index, existing diagnostic name, raw
+symbol type and the selected symbol's GOT execution address (zero when absent).
+The selected slot address preserves identity when equal symbol values have
+different GOT entries. Existing x64 operations retain their indexed extras;
+AArch64 consumption is part of the remaining apply-table wiring. This approved
+amendment to the initial internal contract preserves extra-slot identity,
+STT_FUNC fallback eligibility and
 exact diagnostics. The context lives in a private header and leaves the public
 handle API unchanged.
 

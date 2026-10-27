@@ -47,7 +47,7 @@ static int apply(ObjectCode *object, uint32_t type, unsigned char *work,
                                        addend, normalized, context);
 }
 
-static void check_simple(ObjectCode *object)
+static void check_simple(ObjectCode *object, uintptr_t got_exec)
 {
     static const struct {
         uint32_t type;
@@ -73,8 +73,10 @@ static void check_simple(ObjectCode *object)
         {COMPAT_R_X86_64_TLSGD, 0x1100, -4, 0x1000, 0xfc, 4},
         {COMPAT_R_X86_64_PLT32, 0x1100, -4, 0x1000, 0xfc, 4}
     };
-    const ll_reloc_context named = {31, "site_symbol", LL_ELF_STT_OBJECT};
-    const ll_reloc_context unnamed = {0, NULL, 0};
+    const ll_reloc_context named = {
+        .symbol_index = 31, .symbol_name = "site_symbol",
+        .format_symbol_type = LL_ELF_STT_OBJECT, .got_exec = got_exec};
+    const ll_reloc_context unnamed = {.got_exec = got_exec};
     object->L->services.cfg.always_pic = true;
     for (size_t n = 0; n < sizeof(cases) / sizeof(cases[0]); ++n) {
         unsigned char bytes[24];
@@ -100,7 +102,7 @@ static void check_simple(ObjectCode *object)
     }
 }
 
-static void check_rejections(ObjectCode *object)
+static void check_rejections(ObjectCode *object, uintptr_t got_exec)
 {
     static const struct { uint32_t type; const char *name; } forms[] = {
         {COMPAT_R_X86_64_PC32, "R_X86_64_PC32"},
@@ -113,7 +115,9 @@ static void check_rejections(ObjectCode *object)
         for (size_t t = 0; t < sizeof(raw_types) / sizeof(raw_types[0]); ++t) {
             unsigned char bytes[8];
             memset(bytes, 0xa5, sizeof(bytes));
-            const ll_reloc_context context = {31, "site_symbol", raw_types[t]};
+            const ll_reloc_context context = {
+                .symbol_index = 31, .symbol_name = "site_symbol",
+                .format_symbol_type = raw_types[t], .got_exec = got_exec};
             reset(object->L);
             CHECK(!apply(object, forms[f].type, bytes, 0,
                          UINT64_C(0x100000000), 0, LL_SYM_CODE, &context),
@@ -140,7 +144,9 @@ static void check_rejections(ObjectCode *object)
     }
     object->L->services.cfg.always_pic = true;
     unsigned char bytes[8];
-    const ll_reloc_context context = {31, "site_symbol", LL_ELF_STT_FUNC};
+    const ll_reloc_context context = {
+        .symbol_index = 31, .symbol_name = "site_symbol",
+        .format_symbol_type = LL_ELF_STT_FUNC, .got_exec = got_exec};
     for (size_t f = 0; f < sizeof(forms) / sizeof(forms[0]); ++f) {
         memset(bytes, 0xa5, sizeof(bytes));
         reset(object->L);
@@ -166,7 +172,7 @@ static void check_rejections(ObjectCode *object)
           "unsupported relocation diagnostics changed");
 }
 
-static void check_extras(ObjectCode *object)
+static void check_extras(ObjectCode *object, uintptr_t got_exec)
 {
     enum { STRIDE = 32, COUNT = 2 };
     unsigned char *slots = malloc(STRIDE * COUNT);
@@ -186,7 +192,9 @@ static void check_extras(ObjectCode *object)
         for (size_t i = 0; i < 3; ++i) {
             /* A repeated index reuses its slot; equal S must not merge indices. */
             const size_t slot = i % COUNT;
-            const ll_reloc_context context = {31 + slot, "site_symbol", LL_ELF_STT_OBJECT};
+            const ll_reloc_context context = {
+                .symbol_index = 31 + slot, .symbol_name = "site_symbol",
+                .format_symbol_type = LL_ELF_STT_OBJECT, .got_exec = got_exec};
             unsigned char bytes[4];
             memset(bytes, 0xa5, sizeof(bytes));
             reset(object->L);
@@ -215,7 +223,9 @@ static void check_extras(ObjectCode *object)
     for (size_t i = 0; i < sizeof(branches) / sizeof(branches[0]); ++i) {
         unsigned char bytes[4];
         memset(bytes, 0xa5, sizeof(bytes));
-        const ll_reloc_context context = {31, "site_symbol", LL_ELF_STT_FUNC};
+        const ll_reloc_context context = {
+            .symbol_index = 31, .symbol_name = "site_symbol",
+            .format_symbol_type = LL_ELF_STT_FUNC, .got_exec = got_exec};
         const uintptr_t exec = object->symbol_extras_exec + 8 - 64;
         reset(object->L);
         CHECK(apply(object, branches[i], bytes, exec, exec + UINT64_C(0x100000000),
@@ -228,7 +238,9 @@ static void check_extras(ObjectCode *object)
     for (size_t i = 0; i < sizeof(absolute_branches) / sizeof(absolute_branches[0]); ++i) {
         unsigned char bytes[4];
         memset(bytes, 0xa5, sizeof(bytes));
-        const ll_reloc_context context = {31, "site_symbol", LL_ELF_STT_FUNC};
+        const ll_reloc_context context = {
+            .symbol_index = 31, .symbol_name = "site_symbol",
+            .format_symbol_type = LL_ELF_STT_FUNC, .got_exec = got_exec};
         reset(object->L);
         CHECK(apply(object, absolute_branches[i], bytes, 0,
                     UINT64_C(0x200000000), -4, LL_SYM_DATA, &context),
@@ -242,7 +254,9 @@ static void check_extras(ObjectCode *object)
     for (size_t i = 0; i < sizeof(forms) / sizeof(forms[0]); ++i) {
         unsigned char bytes[4];
         memset(bytes, 0xa5, sizeof(bytes));
-        const ll_reloc_context context = {31, "site_symbol", LL_ELF_STT_OBJECT};
+        const ll_reloc_context context = {
+            .symbol_index = 31, .symbol_name = "site_symbol",
+            .format_symbol_type = LL_ELF_STT_OBJECT, .got_exec = got_exec};
         reset(object->L);
         CHECK(!apply(object, forms[i], bytes, UINT32_C(0x20000000), symbol,
                      -4, LL_SYM_DATA, &context), "distant GOT slot unexpectedly fit");
@@ -267,10 +281,17 @@ int main(void)
     CHECK(ll_elf_x86_64_reloc_ops.machine == LL_ELF_EM_X86_64 &&
           ll_elf_x86_64_reloc_ops.extra_bytes_per_symbol == sizeof(ll_symbol_extra_x86_64),
           "x64 relocation table identity or payload size changed");
-    check_simple(&object);
-    check_rejections(&object);
-    check_extras(&object);
+    /* The selected ELF GOT slot is supplied for backends that consume it.
+     * x64 retains its own indexed extras. Neither zero nor an unrelated
+     * selected-slot address may change its bytes, errors or slot identity. */
+    const uintptr_t got_addresses[] = {0, UINT64_C(0xfedcba9876543210)};
+    for (size_t i = 0; i < sizeof(got_addresses) / sizeof(got_addresses[0]); ++i) {
+        check_simple(&object, got_addresses[i]);
+        check_rejections(&object, got_addresses[i]);
+        check_extras(&object, got_addresses[i]);
+    }
     if (failures != 0) return 1;
-    (void)puts("elf_x86_64_sites: PASS (work/exec, diagnostics, raw types, extra indices)");
+    (void)puts("elf_x86_64_sites: PASS "
+               "(work/exec, diagnostics, raw types, extra indices, GOT context)");
     return 0;
 }

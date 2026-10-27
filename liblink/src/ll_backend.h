@@ -16,6 +16,7 @@ typedef struct {
     size_t symbol_index;
     const char *symbol_name;
     uint32_t format_symbol_type;
+    uintptr_t got_exec; /* selected symbol's GOT slot exec address, or zero */
 } ll_reloc_context;
 
 struct ll_reloc_ops {
