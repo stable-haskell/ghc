@@ -570,6 +570,15 @@ image offset, the separate symbol-extras range, and an empty image. The unit
 does not execute the cache-flush primitive or prove native RISC-V behavior on
 other hosts. The driver excludes a duplicate backend object using the link map.
 
+RISC-V paired stub sites
+========================
+
+On native Linux RISC-V, `elf_riscv64_stub_sites.c` includes the actual generic
+and RISC-V stub bodies. It checks synthetic separate work and execution
+addresses, GOT-relative veneer words, unchanged adjacent bytes, lookup reuse,
+flag mismatch, native creation, and cleanup. The data-only unit does not run
+the generated instructions; the current CI matrix has no native RISC-V job.
+
 AArch64 ELF relocation errors
 =============================
 

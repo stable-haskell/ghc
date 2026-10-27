@@ -1690,6 +1690,20 @@ def main() -> int:
                 forbidden_member="elf_reloc_riscv64",
             )
             run([str(cache_test)], label="run riscv_cache_range")
+
+            stub_test = output / "elf_riscv64_stub_sites"
+            stub_map = output / "elf_riscv64_stub_sites.map"
+            stub_trace = run(
+                cc + [str(ROOT / "liblink/tests/unit/elf_riscv64_stub_sites.c"),
+                      f"-L{archive.parent}", "-llink", *link_flags, "-Wl,-t",
+                      linker_map_flag(stub_map), "-o", str(stub_test)],
+                label="compile and link elf_riscv64_stub_sites",
+            )
+            for member in ("elf_plt", "elf_plt_riscv64"):
+                verify_link_map(stub_map, archive, stub_trace,
+                                included_source="RISC-V ELF stub bodies",
+                                forbidden_member=member)
+            run([str(stub_test)], label="run elf_riscv64_stub_sites")
         else:
             print(
                 "[riscv64_reloc_errors] skipped: generated config is not "

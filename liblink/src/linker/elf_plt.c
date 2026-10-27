@@ -48,11 +48,9 @@ elf_findStub(Section * section,
     return EXIT_FAILURE;
 }
 
-bool
-elf_makeStub(ll_linker *L, Section * section,
-          void* * addr,
-          void* got_addr,
-          uint8_t flags) {
+static bool
+makeStub(ll_linker *L, Section * section,
+          void* * addr, void* got_addr, uint8_t flags, bool use_exec) {
 
     ElfStub * s = LL_CALLOC_FOR(L, 1, sizeof(ElfStub), "makeStub");
     LL_ASSERT_FOR(L, s != NULL);
@@ -63,13 +61,16 @@ elf_makeStub(ll_linker *L, Section * section,
     s->addr = (uint8_t *)section->elf_info->stub_offset + STUB_SIZE * section->elf_info->nstubs;
 
 #if LL_TARGET_RISCV64
-    if((*_makeStub)(L, s))
+    uintptr_t exec = use_exec ? section->exec_start +
+        ((uintptr_t)s->addr - (uintptr_t)section->start) : (uintptr_t)s->addr;
+    if (elf_makeStubRISCV64Site(L, s, exec))
 #elif LL_TARGET_ARM
     ll_site site = {.work = s->addr,
                     .exec = section->exec_start +
                         ((uintptr_t)s->addr - (uintptr_t)section->start)};
     if (elf_makeStubArmSite(s, site))
 #else
+    (void)use_exec;
     if((*_makeStub)(s))
 #endif
         return EXIT_FAILURE;
@@ -88,8 +89,15 @@ elf_makeStub(ll_linker *L, Section * section,
     return EXIT_SUCCESS;
 }
 
-/* Keep the original emitter and list operations above as the single native
- * implementation. Only the returned address gains a separate execution view. */
+bool
+elf_makeStub(ll_linker *L, Section *section, void **addr, void *got_addr,
+             uint8_t flags)
+{
+    return makeStub(L, section, addr, got_addr, flags, false);
+}
+
+/* Storage and identity remain section-owned. RISC-V emission also uses the
+ * execution address when encoding its GOT-relative displacement. */
 static ll_site
 stubSite(const Section *section, void *work)
 {
@@ -111,7 +119,7 @@ elf_makeStubSite(ll_linker *L, Section *section, void *target, void *got_addr,
                  uint8_t flags, ll_site *site)
 {
     void *work = target;
-    if (elf_makeStub(L, section, &work, got_addr, flags)) return EXIT_FAILURE;
+    if (makeStub(L, section, &work, got_addr, flags, true)) return EXIT_FAILURE;
     *site = stubSite(section, work);
     return EXIT_SUCCESS;
 }
