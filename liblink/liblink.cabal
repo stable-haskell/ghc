@@ -3,15 +3,13 @@ name: liblink
 version: 0.1.0.0
 synopsis: GHC runtime linker library package
 description: Native runtime linker library for GHC.
+category: Development, System
 license: BSD-3-Clause
 license-file: LICENSE
 maintainer: glasgow-haskell-users@haskell.org
 build-type: Custom
 
 extra-source-files:
-    build-aux/config.guess
-    build-aux/config.sub
-    configure
     configure.ac
     include/liblink.h
     include/liblink/compat.h
@@ -20,7 +18,6 @@ extra-source-files:
     include/liblink/macho.h
     include/liblink/coff.h
     include/liblink/elf.h
-    include/ll_autoconf.h.in
     include/ll_platform.h.in
     liblink.buildinfo.in
     native-sources.list
@@ -243,7 +240,12 @@ extra-source-files:
     tests/fixtures/generated/elf-x86_64/x86_64-linux-gnu/*.o
 
 custom-setup
-    setup-depends: base, Cabal >= 3.17 && < 3.18, Cabal-syntax >= 3.17 && < 3.18, directory, filepath
+    setup-depends:
+        base >= 4.14 && < 5,
+        Cabal >= 3.17 && < 3.18,
+        Cabal-syntax >= 3.17 && < 3.18,
+        directory >= 1.3 && < 1.4,
+        filepath >= 1.4 && < 1.6
 
 flag asserts
     description: Enable linker assertions.
@@ -256,7 +258,7 @@ flag all-backends
     manual: True
 
 library
-    build-depends: rts-fs
+    build-depends: rts-fs >= 0.1 && < 2
     extra-libraries: link
     c-sources: src/ll_version.c
     include-dirs: src include
