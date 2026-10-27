@@ -280,6 +280,7 @@ static void check_target_emitters(ll_linker *owner)
     object.first_symbol_extra = 7;
     object.n_symbol_extras = 3;
     object.symbol_extra_stride = SLOT_STRIDE;
+    object.symbol_extras_exec = UINT32_C(0x20000000);
     const uint64_t target = UINT64_C(0xfedcba9876543210);
     const unsigned char jump[] = {0xff, 0x25, 0xf2, 0xff, 0xff, 0xff, 0, 0};
     for (unsigned kind = 0; kind < 4; ++kind) {
@@ -300,6 +301,11 @@ static void check_target_emitters(ll_linker *owner)
             slot = extra;
             written = sizeof(*extra);
             CHECK(extra->addr == target, "RISC-V emitter truncated target address");
+            ll_site site = ll_make_symbol_extra_riscv64_site(&object, 8, target);
+            CHECK(site.work == (uint8_t *)(void *)extra &&
+                  site.exec == UINT32_C(0x20000000) + SLOT_STRIDE,
+                  "RISC-V site did not retain distinct work and exec addresses");
+            CHECK(extra->addr == target, "RISC-V site changed the fake GOT value");
         } else if (kind == 2) {
             ll_symbol_extra_powerpc *extra =
                 ll_make_symbol_extra_powerpc(&object, 8, UINT32_C(0xfedcba98));

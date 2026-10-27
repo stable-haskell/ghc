@@ -324,7 +324,9 @@ untouched adjacent bytes, the ARM slot accessor's lack of writes, and native
 x64 wrapper equivalence. ARM instruction emission remains in the section PLT;
 there was no standalone ARM emitter implementation to migrate. These data-only
 checks do not execute foreign instructions or establish foreign byte-order
-policy. PowerPC foreign byte-order handling remains a WP2.8 concern.
+policy. The RISC-V fake-GOT site check uses distinct work and execution bases
+and verifies the recorded slot stride. PowerPC foreign byte-order handling
+remains a WP2.8 concern.
 
 `symbol_extras_storage.c` tests the shared allocation primitive with target
 strides 0, 8, and 16 independently of native payload selection. It checks

@@ -24,6 +24,9 @@ ll_site ll_make_symbol_extra_x86_64_site(
     ObjectCode const *oc, unsigned long symbolNumber, uint64_t target);
 ll_symbol_extra_riscv64 *ll_make_symbol_extra_riscv64(
     ObjectCode const *oc, unsigned long symbolNumber, uint64_t target);
+/* Stores the fake GOT value in work memory and returns its execution site. */
+ll_site ll_make_symbol_extra_riscv64_site(
+    ObjectCode const *oc, unsigned long symbolNumber, uint64_t target);
 ll_symbol_extra_powerpc *ll_make_symbol_extra_powerpc(
     ObjectCode const *oc, unsigned long symbolNumber, uint32_t target);
 ll_symbol_extra_arm *ll_symbol_extra_arm_slot(

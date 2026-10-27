@@ -218,6 +218,17 @@ ll_symbol_extra_riscv64 *ll_make_symbol_extra_riscv64(
     return extra;
 }
 
+ll_site ll_make_symbol_extra_riscv64_site(
+    ObjectCode const *oc, unsigned long symbolNumber, uint64_t target)
+{
+    ll_symbol_extra_riscv64 *extra =
+        ll_make_symbol_extra_riscv64(oc, symbolNumber, target);
+    const uintptr_t offset = (symbolNumber - oc->first_symbol_extra) *
+                             oc->symbol_extra_stride;
+    return (ll_site){.work = (uint8_t *)(void *)extra,
+                     .exec = oc->symbol_extras_exec + offset};
+}
+
 ll_symbol_extra_powerpc *ll_make_symbol_extra_powerpc(
     ObjectCode const *oc, unsigned long symbolNumber, uint32_t target)
 {
