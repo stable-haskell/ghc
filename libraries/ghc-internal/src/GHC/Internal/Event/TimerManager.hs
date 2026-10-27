@@ -315,13 +315,56 @@ editTimeouts mgr g = do
 -- evaluates it straight away. A registering thread that reads that thunk
 -- evaluates it (or waits for the manager to) before publishing its own fully
 -- evaluated queue, so thunks still cannot pile up.
+--
+-- See Note [CAS tickets for timeout queues].
 modifyTimeouts :: IORef TimeoutQueue -> (TimeoutQueue -> (TimeoutQueue, b)) -> IO b
 modifyTimeouts (IORef (STRef ref)) f = IO modLoop
   where
     modLoop s0 = case readMutVar# ref s0 of
-      (# s1, oldVar #) -> case f oldVar of
-        (newVar, r) -> newVar `seq` case casMutVar# ref oldVar newVar s1 of
-          (# s2, 0#, _ #) -> (# s2, r #)
-          (# s2, _, _ #) -> modLoop s2
+      (# s1, oldVar #) ->
+        -- Freeze the pointer before 'f' inspects the queue. See the Note.
+        case mkTimeoutTicket oldVar of
+          ticket -> case f oldVar of
+            (newVar, r) -> newVar `seq`
+              case casTimeoutQueue ref ticket newVar s1 of
+                (# s2, 0#, _ #) -> (# s2, r #)
+                -- Yield so a failed CAS cannot pin the capability. Without
+                -- this, rts_pause and the timer manager can starve on -N1
+                -- (see pause_resume_via_safe_ffi_concurrent).
+                (# s2, _, _ #) -> case yield# s2 of
+                  s3 -> modLoop s3
+
+-- | Opaque pointer-identity wrapper for 'casMutVar#'.
+--
+-- Note [CAS tickets for timeout queues]
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+-- 'casMutVar#' compares heap pointers. If we pass the value we just
+-- inspected with 'Q.minView' / 'Q.unsafeInsertNew' as the expected
+-- pointer, GHC may case-split the 'IntPSQ' and reconstruct a 'Tip' or
+-- 'Bin' with a *new* address. The compare-and-swap then never succeeds
+-- and the registering thread spins. That livelock showed up as
+-- 'pause_resume_via_safe_ffi_concurrent' timing out: 'threadDelay'
+-- never finished registering, so 'rts_pause' waited for those threads
+-- until 'System.Timeout.timeout' fired.
+--
+-- The ticket is allocated by a NOINLINE wrapper *before* the queue is
+-- inspected, and the CAS lives in another NOINLINE wrapper. GHC cannot
+-- reconstruct the expected pointer across those boundaries. 'Any' /
+-- 'unsafeCoerce#' would also work, but would make this Trustworthy
+-- module import an Unsafe one.
+data TimeoutTicket = TimeoutTicket TimeoutQueue
+
+{-# NOINLINE mkTimeoutTicket #-}
+mkTimeoutTicket :: TimeoutQueue -> TimeoutTicket
+mkTimeoutTicket = TimeoutTicket
+
+{-# NOINLINE casTimeoutQueue #-}
+casTimeoutQueue
+  :: MutVar# RealWorld TimeoutQueue
+  -> TimeoutTicket
+  -> TimeoutQueue
+  -> State# RealWorld
+  -> (# State# RealWorld, Int#, TimeoutQueue #)
+casTimeoutQueue ref (TimeoutTicket old) new s = casMutVar# ref old new s
 
 #endif
