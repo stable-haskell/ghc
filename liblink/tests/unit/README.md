@@ -641,6 +641,23 @@ non-Darwin architecture.
 Mach-O x86_64 relocation status
 ===============================
 
+The normal-mode x86_64 references in `../golden/macho-x86_64` were captured
+on macOS 26.5.2 under Rosetta with the unchanged backend and Apple Clang
+ASan/UBSan. They cover eight relocation fixtures. `SIGNED_1`, `_2`, and `_4`
+retain the observed displacement arithmetic for trailing instruction bytes;
+their original fields are `ffffffff`, `feffffff`, and `fcffffff`. The
+independent checker binds LLVM's metadata to the object bytes, checks the
+fields, untouched section bytes, and extra-slot payloads, and replays each
+saved reference before comparing a fresh capture:
+
+    LLVM_READOBJ=/path/to/llvm-readobj \
+      LIBLINK_MACHO_X86_CAPTURE=/path/to/x86_64-runner \
+      python3 -m unittest discover -s liblink/tests/oracle -p test_macho_x86_64.py -v
+
+Run the x86_64 capture on Darwin, natively or with Rosetta. The capture does
+not execute fixture instructions. ARM64 references use the existing oracle
+described in `../oracle/README`.
+
 On Darwin/x86_64, `macho_x86_error_status.c` includes the current `MachO.c` and
 calls its actual section relocation loop. Positive controls check literal
 UNSIGNED, SIGNED, SIGNED_1/2/4, BRANCH, and SUBTRACTOR writes, GOT and GOT_LOAD

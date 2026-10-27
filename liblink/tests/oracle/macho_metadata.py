@@ -45,8 +45,8 @@ def fixed_name(value):
     return value.rsplit(" (", 1)[0]
 
 
-def parse_reader(text):
-    require("Format: Mach-O arm64\n" in text, "oracle requires Mach-O arm64")
+def parse_reader(text, arch='arm64'):
+    require(f"Format: Mach-O {arch}\n" in text, "oracle requires Mach-O " + arch)
     sections = []
     for block in blocks(group(text, "Sections"), "Section"):
         f = fields(block)
@@ -90,11 +90,13 @@ def bounded(data, offset, size):
     return data[offset:offset + size]
 
 
-def bind_original(metadata, data):
+def bind_original(metadata, data, arch='arm64'):
     """Cross-check LLVM's interpretation; retain payloads from the original file."""
     require(len(data) >= 32, "short Mach-O header")
     magic, cpu, subtype, kind, count, command_size, flags, reserved = struct.unpack_from('<8I', data)
-    require(magic == 0xfeedfacf and cpu == 0x100000c and kind == 1, "wrong Mach-O object header")
+    cpus = {'arm64': 0x100000c, '64-bit x86-64': 0x1000007}
+    require(arch in cpus and magic == 0xfeedfacf and cpu == cpus[arch] and kind == 1,
+            "wrong Mach-O object header")
     offset, raw_sections, symtab = 32, [], None
     for unused in range(count):
         command, size = struct.unpack('<2I', bounded(data, offset, 8))
@@ -137,12 +139,12 @@ def bind_original(metadata, data):
     return metadata
 
 
-def read_object(path, readobj):
+def read_object(path, readobj, arch='arm64'):
     version = subprocess.run([str(readobj), '--version'], capture_output=True, text=True, timeout=30)
     match = re.search(r'LLVM version ([0-9]+)', version.stdout)
     require(version.returncode == 0 and match and int(match[1]) >= 17, "LLVM >= 17 is required")
     argv = [str(readobj), '--file-headers', '--sections', '--symbols', '--relocations', '--expand-relocs', str(path)]
     result = subprocess.run(argv, capture_output=True, text=True, timeout=30)
     require(result.returncode == 0 and not result.stderr, "LLVM object inspection failed: " + result.stderr)
-    return bind_original(parse_reader(result.stdout), Path(path).read_bytes()), dict(
+    return bind_original(parse_reader(result.stdout, arch), Path(path).read_bytes(), arch), dict(
         argv=argv, exit=result.returncode, stdout=result.stdout, stderr=result.stderr, version=version.stdout)

@@ -55,6 +55,20 @@ static void json_pointer(const void *pointer)
 
 static const char *relocation_name(unsigned type)
 {
+#if defined(__x86_64__)
+    switch (type) {
+    case 0: return "X86_64_RELOC_UNSIGNED";
+    case 1: return "X86_64_RELOC_SIGNED";
+    case 2: return "X86_64_RELOC_BRANCH";
+    case 3: return "X86_64_RELOC_GOT_LOAD";
+    case 4: return "X86_64_RELOC_GOT";
+    case 5: return "X86_64_RELOC_SUBTRACTOR";
+    case 6: return "X86_64_RELOC_SIGNED_1";
+    case 7: return "X86_64_RELOC_SIGNED_2";
+    case 8: return "X86_64_RELOC_SIGNED_4";
+    default: return "X86_64_RELOC_UNKNOWN";
+    }
+#else
     switch (type) {
     case ARM64_RELOC_UNSIGNED: return "ARM64_RELOC_UNSIGNED";
     case ARM64_RELOC_SUBTRACTOR: return "ARM64_RELOC_SUBTRACTOR";
@@ -67,6 +81,7 @@ static const char *relocation_name(unsigned type)
     case ARM64_RELOC_ADDEND: return "ARM64_RELOC_ADDEND";
     default: return "ARM64_RELOC_UNKNOWN";
     }
+#endif
 }
 
 static size_t bounded_name_length(const char *name, size_t limit)
@@ -90,9 +105,19 @@ static void json_fixed_name(const char *name, size_t size)
     json_string(buffer);
 }
 
+static bool is_addend_record(const MachORelocationInfo *relocation)
+{
+#if defined(__x86_64__)
+    (void)relocation;
+    return false;
+#else
+    return relocation->r_type == ARM64_RELOC_ADDEND;
+#endif
+}
+
 static int relocation_width(const MachORelocationInfo *relocation)
 {
-    if (relocation->r_type == ARM64_RELOC_ADDEND) {
+    if (is_addend_record(relocation)) {
         return 0;
     }
     if (relocation->r_length > 3) {
@@ -128,7 +153,7 @@ static void emit_relocation(RunnerState *state, ObjectCode *object, size_t secti
     relocation = &capture->section->info->relocation_info[relocation_index];
     width = relocation_width(relocation);
     address = relocation->r_address;
-    addend_record = relocation->r_type == ARM64_RELOC_ADDEND;
+    addend_record = is_addend_record(relocation);
     if (width < 0 || address < 0
         || (uint64_t)(uint32_t)address + (uint64_t)width > capture->section->size) {
         fprintf(stderr, "invalid relocation field bounds at section %zu record %zu\n",
@@ -159,8 +184,7 @@ static void emit_relocation(RunnerState *state, ObjectCode *object, size_t secti
             fputs(",\"paired_relocation_index\":null", stdout);
         }
     } else if (relocation_index > 0
-               && capture->section->info->relocation_info[relocation_index - 1].r_type
-                    == ARM64_RELOC_ADDEND) {
+               && is_addend_record(&capture->section->info->relocation_info[relocation_index - 1])) {
         printf(",\"explicit_addend\":%" PRId64 ",\"from_record_index\":%zu",
                sign_extend_addend(capture->section->info->relocation_info[relocation_index - 1].r_symbolnum),
                relocation_index - 1);
@@ -319,7 +343,11 @@ static void emit_sections(RunnerState *state, ObjectCode *object)
 int runner_json_emit(RunnerState *state)
 {
     size_t i;
+#if defined(__x86_64__)
+    fputs("{\"format\":\"Mach-O\",\"host\":\"x86_64-apple-darwin\",\"input\":", stdout);
+#else
     fputs("{\"format\":\"Mach-O\",\"host\":\"arm64-apple-darwin\",\"input\":", stdout);
+#endif
     json_string(state->input_path);
     printf(",\"input_size\":%zu,\"object_bytes\":", state->input_size);
     json_hex_bytes(state->input_bytes, state->input_size);
@@ -339,6 +367,15 @@ int runner_json_emit(RunnerState *state)
     emit_got(state);
     fputs(",\"stubs\":", stdout);
     emit_stubs(state);
+#if defined(__x86_64__)
+    fputs(",\"extras\":{\"address\":", stdout);
+    json_pointer(state->object->symbol_extras);
+    printf(",\"count\":%lu,\"stride\":%zu,\"bytes\":",
+           state->object->n_symbol_extras, state->object->symbol_extra_stride);
+    json_hex_bytes((const uint8_t *)state->object->symbol_extras,
+                   state->object->n_symbol_extras * state->object->symbol_extra_stride);
+    putchar('}');
+#endif
     fputs(",\"events_after_resolve\":[", stdout);
     for (i = 0; i < state->event_count; ++i) {
         if (i != 0) putchar(',');
