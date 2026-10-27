@@ -9,19 +9,20 @@ import shlex
 import subprocess
 
 
-def native_command(log):
-    for line in reversed(log.read_text(errors="replace").splitlines()):
-        if not line.startswith("Running: "):
-            continue
-        args = shlex.split(line[len("Running: "):])
-        if "-shared" not in args or "-dynamic" not in args or "-o" not in args:
-            continue
-        output = Path(args[args.index("-o") + 1])
-        if output.parent.name == "native-linker" and output.name in (
-            "liblink.dylib", "liblink.so", "link.dll"
-        ):
-            return args, output.suffix
-    raise AssertionError("no native shared link in verbose Cabal log")
+def native_command(logs):
+    for log in logs:
+        for line in reversed(log.read_text(errors="replace").splitlines()):
+            if not line.startswith("Running: "):
+                continue
+            args = shlex.split(line[len("Running: "):])
+            if "-shared" not in args or "-dynamic" not in args or "-o" not in args:
+                continue
+            output = Path(args[args.index("-o") + 1])
+            if output.parent.name == "native-linker" and output.name in (
+                "liblink.dylib", "liblink.so", "link.dll"
+            ):
+                return args, output.suffix, log
+    raise AssertionError("no native shared link in verbose Cabal logs: " + ", ".join(map(str, logs)))
 
 
 def haskell_libraries(stderr):
@@ -48,9 +49,16 @@ def hashes(paths):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--build-log", required=True, type=Path)
+    parser.add_argument("--package-log-root", type=Path,
+                        help="Cabal stage2 logs directory; also search its host liblink log")
     parser.add_argument("--out", required=True, type=Path)
     options = parser.parse_args()
-    args, suffix = native_command(options.build_log)
+    logs = [options.build_log]
+    if options.package_log_root is not None:
+        package_logs = sorted(options.package_log_root.glob("host/*/liblink-0.1.0.0"))
+        assert len(package_logs) <= 1, "ambiguous liblink package logs: " + repr(package_logs)
+        logs.extend(package_logs)
+    args, suffix, source_log = native_command(logs)
     units = [args[i + 1] for i, arg in enumerate(args) if arg == "-package-id"]
     assert len(units) == 1 and units[0].startswith("rts-fs-"), units
     objects = [Path(arg) for arg in args if arg.endswith(".o")]
@@ -58,7 +66,7 @@ def main():
     before = hashes(objects)
     out = options.out.resolve()
     out.mkdir(parents=True, exist_ok=False)
-    report = {"build_log": str(options.build_log.resolve()), "objects": before, "cases": []}
+    report = {"build_log": str(source_log.resolve()), "objects": before, "cases": []}
     for name in ("configured", "automatic-packages"):
         command = args.copy()
         output = out / (name + suffix)

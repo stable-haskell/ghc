@@ -17,9 +17,11 @@ Both commands, actual linker traces, input object hashes, and results are saved.
 The replay uses the POSIX command quoting in Cabal/GHC verbose logs; Windows
 command-log replay has not been qualified.
 
-The Linux and Darwin dynamic CI jobs run this check after Stage2. They capture
-verbose Cabal commands in `_build/logs/stage2-build.log`; the check's transcript,
-link commands, and object hashes are retained by the existing build-log artifact.
+The Linux and Darwin dynamic CI jobs run this check after Stage2. They search
+the top-level build log and, when available, Cabal's per-package liblink log
+under `_build/stage2/logs/host/`. The build-log artifact retains both logs and
+the check's transcript, link commands, and object hashes. If neither log contains
+the actual command, the check fails; availability in Linux CI is not yet verified.
 
 Owner-scoped host services
 ==========================

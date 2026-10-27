@@ -121,8 +121,10 @@ jobs:
       timeout-minutes: 5
       run: |
         set -eo pipefail
+        python3 liblink/tests/unit/test_native_shared_link_logs.py
         python3 liblink/tests/unit/native_shared_link.py \
           --build-log _build/logs/stage2-build.log \
+          --package-log-root _build/stage2/logs \
           --out _build/logs/native-shared-link \
           2>&1 | tee _build/logs/liblink-native-shared-link.log
 
@@ -187,6 +189,7 @@ jobs:
         name: ${{ matrix.plat }}-dynamic${{ matrix.dynamic }}-build-logs
         path: |
           _build/logs/
+          _build/stage2/logs/host/*/liblink-0.1.0.0
           _build/timing/
 
     - name: Run the testsuite (dynamic=${{ matrix.dynamic }})

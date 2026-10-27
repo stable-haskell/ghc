@@ -176,6 +176,7 @@ extra-source-files:
     tests/unit/link_trace_checks.py
     tests/unit/test_link_trace_checks.py
     tests/unit/native_shared_link.py
+    tests/unit/test_native_shared_link_logs.py
     tests/fixtures/macho-input/common_only.c
     tests/fixtures/macho-input/ordinary.c
     tests/fixtures/macho-input/table_alignment_data.c
