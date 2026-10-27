@@ -114,8 +114,8 @@ Private NO_EXEC mode
 
 The private compatibility configuration accepts LL_CFG_NO_EXEC, an explicit
 nonzero noexec_base, and LL_CFG_ALL_FORMATS when loading a non-native format.
-This supports x86_64 and AArch64 ELF and Mach-O on a 64-bit host with the
-selected target/backend compiled in. Other targets/formats return
+This supports x86_64, AArch64, i386, and ARM ELF, Mach-O, and COFF on a
+64-bit host with the selected target/backend compiled in. Other targets/formats return
 LL_E_UNSUPPORTED.
 The installed handle API remains unsupported until WP2.9; these private
 configuration fields are immutable after host installation.
@@ -152,6 +152,15 @@ complete relocated bytes against synthetic-address calculations, including
 ARM64 stubs and x86_64 islands. A separate saved-layout test compares the
 NO_EXEC bytes literally with the normal references. Native ARM64 and Rosetta x86_64 have been
 checked locally; the full sanitizer matrix remains a CI milestone.
+
+COFF sections, COMMON storage, and fallback symbol extras also use private
+heap storage and synthetic execution addresses. ADDR32NB uses noexec_base as
+the synthetic image base. Owned indirect-data slots are read through their
+host storage; indirect synthetic addresses without owned storage are rejected.
+NO_EXEC does not load import-library DLLs or register Windows unwind tables.
+COFF ADDR64, ADDR32NB, REL32 and SECREL data-only captures match checked
+normal-mode references twice on Darwin ARM64 and Linux ARM64. Windows-native
+qualification remains a separate milestone.
 
 AArch64 ELF references cover 20 layouts and 27 fields, including negative
 displacements, direct/far branches, veneer identity/reuse, and equal-valued

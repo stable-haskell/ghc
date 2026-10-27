@@ -1575,8 +1575,10 @@ COMMON symbol addresses, zero-filled BSS, and cleanup. The static-extra unit
 checks heap-backed code/data islands and an owned indirect-data slot. Indirect
 NO_EXEC addresses without owned host storage are rejected; PE import-library
 DLL loading and native unwind registration are unavailable in NO_EXEC. These
-checks run object processing only; Windows-native CI and a second host remain
-separate qualification steps.
+checks run object processing only. The golden driver passed twice per fixture
+on Darwin ARM64 with Apple Clang ASan/UBSan and in a Linux ARM64 GCC 14
+container with an all-backends ASan/UBSan archive built from configured source.
+Windows-native CI remains a separate qualification step.
 
 `pei386_static_extra.c` exercises the static-symbol out-of-range REL32 path
 through the actual PE resolver with controlled extra storage. Static COFF data
