@@ -1531,6 +1531,14 @@ include path. No host OS macros or generated configuration are fabricated.
 Portable PE object/process split
 -------------------------------
 
+Open relocation suspect: in `ocResolve_PEi386`, the static-symbol branch
+sets `S` but does not initialize `sym_type`. An out-of-range ADDR32,
+ADDR32NB, 32S, or REL32 relocation can pass that value to
+`makeSymbolExtra_PEi386`, where it selects the extra allocation and payload.
+This is a source-path observation; a triggering object and its runtime impact
+have not been qualified. Do not change the behavior as part of site conversion
+without separate review and authorization.
+
 `run_pei386_portable.py` compiles a real x86_64 Windows COFF data fixture using
 `--coff-cc`, then runs the actual PE table's verify, get_names, and resolve slots
 on the real Darwin/Linux host. It does not execute or initialize fixture code.
