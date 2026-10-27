@@ -1903,8 +1903,9 @@ ocResolve_PEi386 ( ObjectCode* oc )
          /* Host writes and target execution addresses need not coincide. */
          uintptr_t offset = (uintptr_t)reloc->VirtualAddress
                           - (uintptr_t)section.coff_info->virtualAddr;
+         uintptr_t exec_start = section.exec_start ? section.exec_start : (uintptr_t)section.start;
          ll_site site = { .work = (uint8_t *)section.start + offset,
-                          .exec = section.exec_start + offset };
+                          .exec = exec_start + offset };
          pP = (ll_symbol_addr *)site.work;
          uint32_t addend32;
          memcpy(&addend32, site.work, sizeof(addend32));
@@ -1939,7 +1940,8 @@ ocResolve_PEi386 ( ObjectCode* oc )
                 return false;
             }
             Section section = oc->sections[sect_n - 1];
-            S = ((size_t)(section.exec_start))
+            uintptr_t target_exec_start = section.exec_start ? section.exec_start : (uintptr_t)section.start;
+            S = ((size_t)target_exec_start)
               + ((size_t)(getSymValue(oc->L, info, sym)));
             /* Static symbols bypass lookupDependentSymbol, which normally
              * supplies the type used when an extra slot is needed. */
@@ -1972,7 +1974,8 @@ ocResolve_PEi386 ( ObjectCode* oc )
                }
            case 11: /* IMAGE_REL_AMD64_SECREL (PE constant 11) */
               {
-                  uint64_t offset = S - (uint64_t) section.exec_start;
+                  uintptr_t target_sec_exec = section.exec_start ? section.exec_start : (uintptr_t)section.start;
+                  uint64_t offset = S - (uint64_t) target_sec_exec;
                   if ((uint32_t)offset != offset) {
                       ll_error_set(oc->L, LL_E_RELOC_RANGE,
                           "IMAGE_REL_AMD64_SECREL: offset 0x%" PRIx64

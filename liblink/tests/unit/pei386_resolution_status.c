@@ -299,8 +299,11 @@ static void run_relocation_case(uint16_t type, uint32_t addend,
     symbols[0].og.SectionNumber = IMAGE_SYM_UNDEFINED;
     memcpy(symbols[0].og.N.ShortName, "target", sizeof("target"));
     sections[0].start = &range_storage.slot;
+    sections[0].exec_start = (uintptr_t)&range_storage.slot;
     sections[0].kind = SECTIONKIND_RWDATA;
     sections[0].info = reloc_info;
+    sections[1].start = (void *)target_address;
+    sections[1].exec_start = target_address;
     reloc_info->relocs = relocs;
     reloc_info->noRelocs = 1;
     relocs[0].VirtualAddress = 0;

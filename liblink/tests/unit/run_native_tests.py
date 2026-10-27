@@ -633,8 +633,8 @@ def run_pei386_common_ownership(cc: list[str], archive: Path,
     # the M32 address at host_free and deliberately declines to call free().
     source_text = (ROOT / "liblink/src/linker/PEi386.c").read_text()
     old_line = (
-        "SECTIONKIND_RWDATA, SECTION_M32,\n"
-        "                  bss, globalBssSize, 0, 0, 0, sizeof(struct ll_coff_section_info));"
+        "SECTIONKIND_RWDATA, ll_noexec_enabled(oc->L) ? SECTION_NOEXEC : SECTION_M32,\n"
+        "                  bss, globalBssSize, 0, block.allocation, 0, sizeof(struct ll_coff_section_info));"
     )
     if source_text.count(old_line) != 1:
         raise RuntimeError("could not uniquely locate the approved PE COMMON tag")
