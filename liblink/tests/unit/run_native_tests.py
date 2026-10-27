@@ -1691,6 +1691,19 @@ def main() -> int:
             )
             run([str(cache_test)], label="run riscv_cache_range")
 
+            encoder_test = output / "elf_riscv64_encoder_sites"
+            encoder_map = output / "elf_riscv64_encoder_sites.map"
+            encoder_trace = run(
+                cc + [str(ROOT / "liblink/tests/unit/elf_riscv64_encoder_sites.c"),
+                      f"-L{archive.parent}", "-llink", *link_flags, "-Wl,-t",
+                      linker_map_flag(encoder_map), "-o", str(encoder_test)],
+                label="compile and link elf_riscv64_encoder_sites",
+            )
+            verify_link_map(encoder_map, archive, encoder_trace,
+                            included_source="linker/elf_reloc_riscv64.c",
+                            forbidden_member="elf_reloc_riscv64")
+            run([str(encoder_test)], label="run elf_riscv64_encoder_sites")
+
             stub_test = output / "elf_riscv64_stub_sites"
             stub_map = output / "elf_riscv64_stub_sites.map"
             stub_trace = run(

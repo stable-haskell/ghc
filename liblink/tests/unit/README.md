@@ -579,6 +579,15 @@ addresses, GOT-relative veneer words, unchanged adjacent bytes, lookup reuse,
 flag mismatch, native creation, and cleanup. The data-only unit does not run
 the generated instructions; the current CI matrix has no native RISC-V job.
 
+RISC-V paired encoder sites
+===========================
+
+On native Linux RISC-V, `elf_riscv64_encoder_sites.c` checks the actual
+encoder with separate work and inaccessible execution addresses. It compares
+the native wrapper, checks adjacent bytes and an out-of-range branch, and
+exercises several instruction and data widths. This data-only unit does not
+execute RISC-V instructions; the current CI matrix has no native RISC-V job.
+
 AArch64 ELF relocation errors
 =============================
 

@@ -311,9 +311,10 @@ bool setCJType(ll_linker *L, cinst_t *loc, uint32_t val) {
 }
 
 // Encode the addend according to the relocaction into the instruction.
-bool encodeAddendRISCV64(ll_linker *L, Section *section, ll_elf_target_rel *rel, int32_t addend) {
-  // instruction to rewrite (P: Position of the relocation)
-  addr_t P = (addr_t)((uint8_t *)section->start + rel->r_offset);
+static bool encodeAddendRISCV64Site(ll_linker *L, ll_site site,
+                                    ll_elf_target_rel *rel, int32_t addend) {
+  // Encoding writes through work; address arithmetic is performed by the caller.
+  addr_t P = (addr_t)site.work;
   LL_IF_DEBUG_FOR(L, linker,
            LL_DEBUG_FOR(L,
                "Relocation type %s 0x%lx (%lu) symbol 0x%lx addend 0x%x (%u / "
@@ -431,6 +432,13 @@ bool encodeAddendRISCV64(ll_linker *L, Section *section, ll_elf_target_rel *rel,
     return EXIT_FAILURE;
   }
   return EXIT_SUCCESS;
+}
+
+bool encodeAddendRISCV64(ll_linker *L, Section *section,
+                         ll_elf_target_rel *rel, int32_t addend) {
+  uint8_t *work = (uint8_t *)section->start + rel->r_offset;
+  const ll_site site = {.work = work, .exec = (uintptr_t)work};
+  return encodeAddendRISCV64Site(L, site, rel, addend);
 }
 
 /**

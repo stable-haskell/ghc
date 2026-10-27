@@ -195,6 +195,7 @@ extra-source-files:
     tests/unit/elf_x86_64_sites.c
     tests/unit/elf_aarch64_stub_sites.c
     tests/unit/elf_riscv64_stub_sites.c
+    tests/unit/elf_riscv64_encoder_sites.c
     tests/unit/elf_aarch64_encoder_sites.c
     tests/unit/elf_aarch64_sites.c
     tests/unit/elf_aarch64_classifier.c
