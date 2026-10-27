@@ -190,6 +190,7 @@ extra-source-files:
     tests/unit/elf_aarch64_stub_sites.c
     tests/unit/elf_aarch64_encoder_sites.c
     tests/unit/elf_aarch64_sites.c
+    tests/unit/elf_aarch64_classifier.c
     tests/unit/noexec_storage.c
     tests/unit/elf_extras_bounds.c
     tests/unit/noexec_tail.c

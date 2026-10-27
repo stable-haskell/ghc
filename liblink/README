@@ -95,6 +95,11 @@ native pointer emitters retain
 their existing behavior. All these fields are unconditional in the RTS friend
 layout, so the RTS and library must be rebuilt together.
 
+AArch64 instruction classifiers read exactly one 32-bit instruction through
+`memcpy`, avoiding an out-of-bounds wider load on short sections. The native
+little-endian controls retain the previous masks; big-endian execution is not
+qualified by those controls.
+
 The AArch64 ELF apply table uses execution addresses for symbol, PC, GOT and
 veneer operands and encodes through work storage. The object loop
 carries the already selected ElfSymbol's GOT slot across the private boundary,

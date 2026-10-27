@@ -9,6 +9,7 @@
 
 #include <inttypes.h>
 #include <stdlib.h>
+#include <string.h>
 
 
 #if LL_TARGET_AARCH64
@@ -28,26 +29,35 @@ bool isVectorOp(addr_t p);
 bool decodeAddendAarch64(ll_linker *L, Section *section, ll_elf_target_rel *rel,
                          int64_t *addend);
 
+/* AArch64 instruction words are four bytes. Reading a wider word can cross
+ * the end of a valid section, especially in separately allocated NO_EXEC data. */
+static uint32_t instructionWord(addr_t p)
+{
+    uint32_t word;
+    memcpy(&word, (const void *)(uintptr_t)p, sizeof(word));
+    return word;
+}
+
 bool isBranch(addr_t p) {
-    return (*(addr_t*)p & 0xFC000000) == 0x14000000;
+    return (instructionWord(p) & 0xFC000000) == 0x14000000;
 }
 
 bool isBranchLink(addr_t p) {
-    return (*(addr_t*)p & 0xFC000000) == 0x94000000;
+    return (instructionWord(p) & 0xFC000000) == 0x94000000;
 }
 
 bool isAdrp(addr_t p) {
-    return (*(addr_t*)p & 0x9F000000) == 0x90000000;
+    return (instructionWord(p) & 0x9F000000) == 0x90000000;
 }
 
 bool isLoadStore(addr_t p) {
-    return (*(addr_t*)p & 0x3B000000) == 0x39000000;
+    return (instructionWord(p) & 0x3B000000) == 0x39000000;
 }
 bool isAddSub(addr_t p) {
-    return (*(addr_t*)p & 0x11C00000) == 0x11000000;
+    return (instructionWord(p) & 0x11C00000) == 0x11000000;
 }
 bool isVectorOp(addr_t p) {
-    return (*(addr_t*)p & 0x04800000) == 0x04800000;
+    return (instructionWord(p) & 0x04800000) == 0x04800000;
 }
 
 /* instructions are 32bit */

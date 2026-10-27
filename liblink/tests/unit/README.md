@@ -180,6 +180,10 @@ addresses from the section execution base and the existing stub storage offset.
 They leave native helpers, emitter bytes and shared layouts unchanged. This seam
 does not enable AArch64 NO_EXEC or wire a relocation apply table.
 
+`elf_aarch64_classifier.c` calls each real AArch64 instruction classifier on
+exactly four allocated bytes. ASan catches a wider read at the allocation end;
+positive and negative opcodes also check each classifier's masks.
+
 `elf_aarch64_sites.c` calls the actual AArch64 apply table and object loop.
 It checks execution-address arithmetic for every supported form, both selected
 GOT forms, near/far branches, veneer reuse and distinct targets, unchanged

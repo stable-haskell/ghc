@@ -382,6 +382,13 @@ def run_elf_x86_64_sites(cc: list[str], archive: Path, output: Path,
               str(ROOT / "liblink/src/ll_error.c"), "-o", str(encoder)],
         label="compile ELF AArch64 site encoder controls")
     run([str(encoder)], label="run ELF AArch64 site encoder controls")
+    classifier = output / "elf_aarch64_classifier"
+    run(cc + ["-DLL_ALL_BACKENDS", "-ULL_TARGET_ARCH",
+              "-DLL_TARGET_ARCH=LL_ARCH_AARCH64",
+              str(ROOT / "liblink/tests/unit/elf_aarch64_classifier.c"),
+              str(ROOT / "liblink/src/ll_error.c"), "-o", str(classifier)],
+        label="compile ELF AArch64 instruction classifier controls")
+    run([str(classifier)], label="run ELF AArch64 instruction classifier controls")
     aarch64_sites = output / "elf_aarch64_sites"
     run(cc + ["-DLL_ALL_BACKENDS", "-ULL_TARGET_ARCH",
               "-DLL_TARGET_ARCH=LL_ARCH_AARCH64",
