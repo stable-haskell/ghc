@@ -1585,14 +1585,12 @@ fresh host build, plus `--rts-fs-archive` on Linux. `--cc` accepts the native
 compiler command and optional sanitizer flags. These controls call the table
 explicitly; integrated registry/admission tests remain separate.
 
-The positive fixture has two data symbols, preserving the old verifier's
-string-table alignment assumption with current MinGW GCC. A genuine one-symbol
-GCC object places that count at offset 426 (modulo four is two); the unchanged
-direct uint32_t load fails UBSan. That distinct bug remains recorded and open,
-and the positive fixture is not evidence that arbitrary valid COFF alignments
-are supported. An aligned Clang variant reaches the real verify/names/resolve slots but leaves
-one additional owner allocation after the known metadata cleanup. Its exact
-cause remains unqualified; this extraction does not repair metadata leaks.
+The one-symbol MinGW GCC fixture puts the string-table length at an unaligned
+file offset; the driver checks this precondition. `ocVerifyImage_PEi386` reads
+the length with `memcpy`, and Apple Clang ASan/UBSan verifies the real
+verify/names/resolve path. An aligned Clang variant previously left an extra
+owner allocation after the known metadata cleanup; its cause remains
+unqualified.
 The unit explicitly releases the same separately allocated metadata payloads
 as the existing native PE ownership fixture before checking its owner ledger.
 
@@ -1674,8 +1672,8 @@ The first Apple Clang ASan/UBSan-instrumented COFF NO_EXEC capture stopped in
 `IMAGE_REL_AMD64_ADDR64.o` fixture. UBSan reported a misaligned `uint32_t`
 load at the COFF string-table size read (`PEi386.c`, `*(uint32_t *)strtab`):
 the observed string table address ended in `0x16e`, which is not four-byte
-aligned. The same typed load is present in the pre-NO_EXEC conversion commit
-`0fcd57eec4`; this finding has not been repaired. The instrumented capture used
+aligned. The typed load was present in commit `0fcd57eec4`; the authorized
+repair uses `memcpy` and the one-symbol portable regression above. The capture used
 `/usr/bin/clang -fsanitize=address,undefined -fno-sanitize-recover=undefined`
-with `ASAN_OPTIONS=detect_leaks=0`. Section 13 requires escalation for a new
-sanitizer finding; NO_EXEC relocation qualification remains incomplete.
+with `ASAN_OPTIONS=detect_leaks=0`. NO_EXEC relocation qualification remains
+in progress.

@@ -1020,7 +1020,9 @@ ocVerifyImage_PEi386 ( ObjectCode* oc )
    for (i = 0; i < info->numberOfSymbols; i++)
      memcpy (oc->coff_info->symbols+i, (char*)symtab + sym_size * i, sym_size);
 
-   uint32_t n_strtab = (*(uint32_t*)strtab) - PEi386_STRTAB_OFFSET;
+   uint32_t strtab_size;
+   memcpy(&strtab_size, strtab, sizeof(strtab_size));
+   uint32_t n_strtab = strtab_size - PEi386_STRTAB_OFFSET;
    oc->coff_info->str_tab
      = LL_MALLOC_FOR(oc->L, n_strtab, "ocVerifyImage_PEi386(oc->info->str_tab)");
    memcpy (oc->coff_info->str_tab, strtab + PEi386_STRTAB_OFFSET, n_strtab);

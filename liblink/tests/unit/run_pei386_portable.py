@@ -47,13 +47,16 @@ def main() -> None:
     with tempfile.TemporaryDirectory(prefix="liblink-pe-portable-") as directory:
         output = Path(directory)
         fixture = output / "data.c"
-        # Two ordinary data symbols keep this positive fixture within the old
-        # verifier's table-alignment assumptions with current MinGW GCC.
-        # The one-symbol GCC regression is retained as an explicit open hold.
-        fixture.write_text("int ll_pe_portable_data = 0x13579bdf;\n"
-                           "int ll_pe_portable_spare = 3;\n")
+        # One symbol produces an unaligned string table with MinGW GCC.
+        fixture.write_text("int ll_pe_portable_data = 0x13579bdf;\n")
         coff = output / "data.obj"
         run(shlex.split(args.coff_cc) + ["-c", str(fixture), "-o", str(coff)])
+        data = coff.read_bytes()
+        symtab = int.from_bytes(data[8:12], "little")
+        symbols = int.from_bytes(data[12:16], "little")
+        strtab = symtab + 18 * symbols
+        if strtab % 4 == 0:
+            raise RuntimeError("fixture did not produce an unaligned COFF string table")
         backend = output / "PEi386.o"
         run(cc + flags + ["-DLL_ALL_BACKENDS", "-DLL_TARGET_ARCH=2", "-c",
                          str(ROOT / "liblink/src/linker/PEi386.c"), "-o", str(backend)])
