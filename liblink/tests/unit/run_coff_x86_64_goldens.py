@@ -47,8 +47,8 @@ def main():
             real_base = ['-DLL_CAPTURE_REAL_IMAGE_BASE'] if mode == 'noexec' else []
             run(cc + flags + real_base + ['liblink/tests/runner/coff_capture.c', str(pe), str(host), str(allocator),
                 str(args.native_archive), *libraries, '-o', str(executable)])
-            for name in ('ADDR64', 'ADDR32NB', 'REL32', 'SECREL'):
-                stem = 'IMAGE_REL_AMD64_' + name
+            for stem in ('IMAGE_REL_AMD64_ADDR64', 'IMAGE_REL_AMD64_ADDR32NB',
+                         'IMAGE_REL_AMD64_REL32', 'IMAGE_REL_AMD64_SECREL', 'import-thunk'):
                 obj = ROOT / 'liblink/tests/fixtures/generated/coff-x86_64' / (stem + '.o')
                 golden = ROOT / 'liblink/tests/golden/coff-x86_64' / (stem + '.json')
                 for iteration in range(2):

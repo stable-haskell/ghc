@@ -1061,8 +1061,8 @@ ocVerifyImage_PEi386 ( ObjectCode* oc )
       section->coff_info->virtualSize = sectab_i->Misc.VirtualSize;
       section->coff_info->virtualAddr = sectab_i->VirtualAddress;
 
-      COFF_reloc* reltab
-        = (COFF_reloc*) (oc->image + sectab_i->PointerToRelocations);
+      const uint8_t *reltab = (const uint8_t *)oc->image
+                            + sectab_i->PointerToRelocations;
 
       if (section->coff_info->props & LL_COFF_IMAGE_SCN_LNK_NRELOC_OVFL ) {
         /* If the relocation field (a short) has overflowed, the
@@ -1070,9 +1070,9 @@ ocVerifyImage_PEi386 ( ObjectCode* oc )
          *
          * See Section 4.1 (last para) of the PE spec (rev6.0).
          */
-        COFF_reloc* rel = (COFF_reloc*)
-                           myindex ( sizeof_COFF_reloc, reltab, 0 );
-        noRelocs = rel->VirtualAddress - 1;
+        COFF_reloc rel;
+        memcpy(&rel, reltab, sizeof(rel));
+        noRelocs = rel.VirtualAddress - 1;
         relocs_offset = 1;
       } else {
         noRelocs = sectab_i->NumberOfRelocations;
@@ -1085,7 +1085,8 @@ ocVerifyImage_PEi386 ( ObjectCode* oc )
         section->coff_info->relocs
             = LL_MALLOC_FOR(oc->L, noRelocs * sizeof (COFF_reloc),
                             "ocVerifyImage_PEi386(section->info->relocs)");
-        memcpy (section->coff_info->relocs, reltab + relocs_offset,
+        memcpy (section->coff_info->relocs,
+                reltab + (size_t)relocs_offset * sizeof(COFF_reloc),
                 noRelocs * sizeof (COFF_reloc));
       }
    }

@@ -158,7 +158,7 @@ heap storage and synthetic execution addresses. ADDR32NB uses noexec_base as
 the synthetic image base. Owned indirect-data slots are read through their
 host storage; indirect synthetic addresses without owned storage are rejected.
 NO_EXEC does not load import-library DLLs or register Windows unwind tables.
-COFF ADDR64, ADDR32NB, REL32 and SECREL data-only captures match checked
+COFF ADDR64, ADDR32NB, REL32, SECREL and import-thunk captures match checked
 normal-mode references twice on Darwin ARM64 and Linux ARM64. Windows-native
 qualification remains a separate milestone.
 

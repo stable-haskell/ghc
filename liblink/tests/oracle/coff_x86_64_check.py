@@ -39,8 +39,10 @@ def verify(data, capture):
     if len(found) != 1:
         raise ValueError('expected one relocated section')
     name, vaddr, size, raw, virtual, kind, symbol_name = found[0]
-    if symbol_name != b'll_fixture_target':
+    if symbol_name not in (b'll_fixture_target', b'__imp_ll_fixture_import'):
         raise ValueError('unexpected relocation target')
+    if symbol_name == b'__imp_ll_fixture_import' and kind != 4:
+        raise ValueError('unexpected import-thunk relocation')
     if kind not in (1, 3, 4, 11) or capture['type'] != kind:
         raise ValueError('unexpected relocation kind')
     offset = virtual - vaddr

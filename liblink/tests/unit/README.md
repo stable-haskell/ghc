@@ -1540,7 +1540,7 @@ callback does not test Windows image-base discovery.
 
 The independent `coff_x86_64_check.py` reads the original COFF records and
 checks the relocation field and every byte of the affected section. Saved
-references cover ADDR64, ADDR32NB, REL32, and SECREL. Run
+references cover ADDR64, ADDR32NB, REL32, SECREL, and an import thunk. Run
 `python3 liblink/tests/oracle/test_coff_x86_64.py` to replay them and reject
 corrupted fields and resolver inputs. Normal captures use the real section
 addresses and do not qualify Windows execution.
@@ -1561,7 +1561,7 @@ PE object rather than an archive PE member. For each fixture:
 
 `run_coff_x86_64_goldens.py` builds the PE backend, host service, private heap
 allocator, and capture runner separately, then checks both modes twice for
-all four fixtures. Pass `--native-archive`, `--config-include`, and
+all five fixtures. Pass `--native-archive`, `--config-include`, and
 `--fs-include` as for the portable driver; Linux also needs
 `--rts-fs-archive`. `--cc` accepts the compiler and sanitizer flags. In
 NO_EXEC the configured base is `0x0fffff00`; the first page-aligned section
@@ -1712,6 +1712,7 @@ ASan/UBSan run of the current backend, `import-thunk.o` stopped before apply:
 `PEi386.c:1088:45: runtime error: load of misaligned address` for
 `COFF_reloc *`, which requires two-byte alignment, at the relocation-table copy.
 The same `reltab + relocs_offset` expression is present in baseline commit
-`28f3969bfc9`. The cause and any repair are unqualified. Spec section 13
-requires escalation for this new sanitizer finding; the import-thunk capture
-and test changes remain uncommitted.
+`28f3969bfc9`. The authorized repair performs byte-offset arithmetic and copies
+the overflow record into an aligned local before reading it. The oracle checks
+that the fixture relocation table is at an odd offset; the normal and NO_EXEC
+golden driver exercises the complete verify and apply path under sanitizers.

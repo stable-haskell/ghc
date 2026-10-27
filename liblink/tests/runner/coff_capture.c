@@ -81,8 +81,11 @@ int main(int argc, char **argv)
     uintptr_t section_address = site_section->exec_start;
     uintptr_t target = record.Type == 1 ? UINT64_C(0x123456789abcdef0) : section_address + 0x100;
     capture_image_base = target - 0x200;
-    if (!ghciInsertSymbolTable(&owner, (pathchar *)"COFF capture", "ll_fixture_target",
-                               (void *)target, false, LL_SYM_DATA, 0, NULL)) return 1;
+    const char *name = strstr(path, "import-thunk.o") != NULL
+                     ? "__imp_ll_fixture_import" : "ll_fixture_target";
+    ll_sym_type type = name[0] == '_' ? LL_SYM_INDIRECT_DATA : LL_SYM_DATA;
+    if (!ghciInsertSymbolTable(&owner, (pathchar *)"COFF capture", name,
+                               (void *)target, false, type, 0, NULL)) return 1;
     bool resolved = object->format_ops->resolve(object);
     if (!resolved) {
         (void)fprintf(stderr, "COFF resolution failed: %d %s\n", owner.error_status, owner.error_message);
@@ -96,7 +99,7 @@ int main(int argc, char **argv)
     (void)printf("\",\"after\":\"");
     print_bytes(site_section->start, site_section->size);
     (void)puts("\"}");
-    ghciRemoveSymbolTable(&owner, "ll_fixture_target", NULL);
+    ghciRemoveSymbolTable(&owner, name, NULL);
     removeOcSymbols(object);
     ll_mutex_unlock_for(&owner, &owner.linker_mutex);
     freeObjectCode(object);
