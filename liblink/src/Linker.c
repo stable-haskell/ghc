@@ -1148,12 +1148,15 @@ int ll_init_object(ObjectCode *oc)
 #if LL_BUILD_ELF && (LL_TARGET_X86_64 || LL_TARGET_AARCH64) && SIZEOF_VOID_P == 8
         supported = oc->format_ops == &ll_format_elf;
 #endif
+#if LL_BUILD_MACHO && (LL_TARGET_X86_64 || LL_TARGET_AARCH64) && SIZEOF_VOID_P == 8
+        supported = supported || oc->format_ops == &ll_format_macho;
+#endif
         if (!supported ||
             (!(oc->L->services.cfg.flags & LL_CFG_ALL_FORMATS) &&
               oc->format_ops != ll_format_native())) {
             oc->format_ops = NULL;
             ll_error_set(oc->L, LL_E_UNSUPPORTED,
-                         "NO_EXEC is currently available for the x64 and AArch64 ELF backends only");
+                         "NO_EXEC is currently available for the x64 and AArch64 ELF and Mach-O backends only");
             return 0;
         }
     }

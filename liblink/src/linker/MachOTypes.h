@@ -22,6 +22,7 @@ typedef struct _MachOSymbol {
     ll_symbol_name * name;  /* the name of the symbol. */
     ll_symbol_addr * addr;  /* the final resting place of the symbol */
     void * got_addr;    /* address of the got slot for this symbol, if any */
+    uintptr_t got_exec; /* execution address of the got slot */
     MachONList * nlist; /* the nlist symbol entry */
     bool needs_got;     /* See Note [Symbols in need of GOT entries] */
 } MachOSymbol;
@@ -51,9 +52,12 @@ struct ll_macho_object_info {
     /* pointer to the global offset table */
     void                 *got_start;
     size_t                got_size;
+    uintptr_t             got_exec;
+    void                 *got_allocation;
 
     /* Owned by this image, including while a load is being unwound. */
     void                 *common_mem;
+    void                 *common_allocation;
 
     /* Owned aligned symbol-table copy, or NULL when the image table is borrowed. */
     MachONList           *owned_nlist;

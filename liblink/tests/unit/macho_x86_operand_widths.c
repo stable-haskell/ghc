@@ -9,6 +9,61 @@
 
 static unsigned operand_cases;
 
+static void separate_site_cases(void)
+{
+    _Alignas(16) unsigned char source[16] = {0};
+    _Alignas(16) unsigned char target[16] = {0};
+    SymbolExtra extra = {0};
+    MachORelocationInfo relocation = {0};
+    MachOSection macho[2] = {{0}, {0}};
+    struct SectionFormatInfo info[2] = {{0}, {0}};
+    struct ObjectCodeFormatInfo format = {0};
+    MachONList nlist = {0};
+    MachOSymbol symbol = {0};
+    Section sections[2] = {{0}, {0}};
+    ObjectCode oc = {0};
+    uint32_t word;
+    uint64_t wide;
+
+    sections[0].start = source; sections[0].exec_start = 0x10000000;
+    sections[0].size = sizeof(source); sections[0].info = &info[0];
+    sections[1].start = target; sections[1].exec_start = 0x10001000;
+    sections[1].size = sizeof(target); sections[1].info = &info[1];
+    info[0].macho_section = &macho[0]; info[0].relocation_info = &relocation;
+    info[1].macho_section = &macho[1]; macho[0].nreloc = 1;
+    nlist.n_type = N_SECT; symbol.nlist = &nlist;
+    symbol.name = (ll_symbol_name *)"_separate_site";
+    symbol.addr = (ll_symbol_addr *)(uintptr_t)0x10003000;
+    format.macho_symbols = &symbol; format.n_macho_symbols = 1;
+    oc.L = &owner; oc.fileName = (pathchar *)"separate-site.o";
+    oc.info = &format; oc.sections = sections; oc.n_sections = 2;
+    oc.symbol_extras = &extra; oc.symbol_extras_exec = 0x10002000;
+    oc.n_symbol_extras = 1; oc.symbol_extra_stride = sizeof(extra);
+    initProddableBlockSet(&oc.proddables);
+    addProddableBlock(&owner, &oc.proddables, source, sizeof(source));
+    addProddableBlock(&owner, &oc.proddables, target, sizeof(target));
+
+    relocation.r_length = 2; relocation.r_extern = 1; relocation.r_pcrel = 1;
+    relocation.r_type = X86_64_RELOC_SIGNED;
+    CHECK(relocateSection(&oc, 0), "separate site SIGNED failed");
+    memcpy(&word, source, sizeof(word));
+    CHECK(word == 0x2ffc, "SIGNED used work address as place");
+    memset(source, 0, sizeof(source));
+    relocation.r_type = X86_64_RELOC_GOT;
+    CHECK(relocateSection(&oc, 0), "separate site GOT failed");
+    memcpy(&word, source, sizeof(word));
+    CHECK(word == 0x1ffc && extra.addr == 0x10003000,
+          "GOT used work address or wrote the wrong target");
+    memset(source, 0, sizeof(source));
+    source[0] = 4; relocation.r_length = 3; relocation.r_extern = 0;
+    relocation.r_pcrel = 0; relocation.r_symbolnum = 2;
+    relocation.r_type = X86_64_RELOC_UNSIGNED;
+    CHECK(relocateSection(&oc, 0), "separate site internal target failed");
+    memcpy(&wide, source, sizeof(wide));
+    CHECK(wide == 0x10001004, "internal target used work address");
+    freeProddableBlocks(&owner, &oc.proddables);
+}
+
 static void little_endian_bytes(unsigned char *out, uint64_t value, size_t width)
 {
     for (size_t i = 0; i < width; ++i)
@@ -76,9 +131,11 @@ static void operand_case(unsigned length, unsigned offset, bool internal,
     info[0].relocation_info = &relocation;
     info[1].macho_section = &macho[1];
     sections[0].start = start;
+    sections[0].exec_start = (uintptr_t)start;
     sections[0].size = span;
     sections[0].info = &info[0];
     sections[1].start = target;
+    sections[1].exec_start = (uintptr_t)target;
     sections[1].size = sizeof(target);
     sections[1].info = &info[1];
     nlist.n_type = N_SECT;
@@ -120,6 +177,7 @@ int main(void)
     ll_install_host_for(&owner, &owner_ops, NULL);
     ll_error_set(&ll_default_linker, LL_E_NOT_FOUND, "%s", default_message);
     ll_init_linker(&owner, 0);
+    separate_site_cases();
 
     for (unsigned length = 0; length < 4; ++length) {
         for (unsigned offset = 0; offset < 8; ++offset)

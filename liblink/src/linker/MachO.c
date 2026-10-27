@@ -16,6 +16,8 @@
 #include "ll_failure.h"
 #include "linker/MachO.h"
 #include "ll_format.h"
+#include "ll_backend.h"
+#include "ll_noexec.h"
 
 #include "linker/CacheFlush.h"
 #include "linker/SymbolExtras.h"
@@ -24,6 +26,7 @@
 
 #include <string.h>
 #include <errno.h>
+#include <stdlib.h>
 
 /*
   Support for MachO linking on Darwin/MacOS X
@@ -51,9 +54,9 @@ static bool isLoadStore(uint32_t *p);
  * as encoding is needed.
  */
 static bool fitsBits(ll_linker *L, size_t bits, int64_t value);
-static bool decodeAddend(ObjectCode * oc, Section * section,
+static bool decodeAddend(ObjectCode * oc, ll_site site,
                          MachORelocationInfo * ri, int64_t *addend);
-static bool encodeAddend(ObjectCode * oc, Section * section,
+static bool encodeAddend(ObjectCode * oc, ll_site site,
                   MachORelocationInfo * ri, int64_t addend, MachOSymbol * symbol);
 
 /* Global Offset Table logic */
@@ -163,7 +166,10 @@ ocInit_MachO(ObjectCode * oc)
 void
 ocDeinit_MachO(ObjectCode * oc) {
     if (oc->macho_info != NULL) {
-        LL_FREE_FOR(oc->L, oc->macho_info->common_mem);
+        if (oc->macho_info->common_allocation != NULL)
+            free(oc->macho_info->common_allocation);
+        else
+            LL_FREE_FOR(oc->L, oc->macho_info->common_mem);
         if(oc->macho_info->n_macho_symbols > 0) {
             LL_FREE_FOR(oc->L, oc->macho_info->macho_symbols);
         }
@@ -322,11 +328,11 @@ isLoadStore(uint32_t *p) {
 }
 
 static bool
-decodeAddend(ObjectCode * oc, Section * section, MachORelocationInfo * ri,
+decodeAddend(ObjectCode * oc, ll_site site, MachORelocationInfo * ri,
              int64_t *addend) {
 
     /* the instruction. It is 32bit wide */
-    uint32_t * p = (uint32_t*)((uint8_t*)section->start + ri->r_address);
+    uint32_t * p = (uint32_t*)site.work;
 
     checkProddableBlock(oc->L, &oc->proddables, (void*)p, 1 << ri->r_length);
 
@@ -403,9 +409,9 @@ fitsBits(ll_linker *L, size_t bits, int64_t value) {
 }
 
 static bool
-encodeAddend(ObjectCode * oc, Section * section,
+encodeAddend(ObjectCode * oc, ll_site site,
              MachORelocationInfo * ri, int64_t addend, MachOSymbol * symbol) {
-    uint32_t * p = (uint32_t*)((uint8_t*)section->start + ri->r_address);
+    uint32_t * p = (uint32_t*)site.work;
 
     checkProddableBlock(oc->L, &oc->proddables, (void*)p, 1 << ri->r_length);
 
@@ -597,17 +603,30 @@ makeGot(ObjectCode * oc) {
 
     if(got_slots > 0) {
         oc->macho_info->got_size =  got_slots * sizeof(void*);
-        oc->macho_info->got_start = ll_mmap_anon_for_linker(oc->L, oc->macho_info->got_size);
+        if (ll_noexec_enabled(oc->L)) {
+            ll_noexec_block block;
+            if (!ll_noexec_allocate(oc->L, oc->macho_info->got_size, sizeof(void *), &block))
+                return EXIT_FAILURE;
+            oc->macho_info->got_start = block.site.work;
+            oc->macho_info->got_exec = block.site.exec;
+            oc->macho_info->got_allocation = block.allocation;
+        } else {
+            oc->macho_info->got_start = ll_mmap_anon_for_linker(oc->L, oc->macho_info->got_size);
+            oc->macho_info->got_exec = (uintptr_t)oc->macho_info->got_start;
+        }
         if( oc->macho_info->got_start == NULL ) {
             return EXIT_FAILURE;
         }
         /* update got_addr */
         size_t slot = 0;
         for(size_t i=0; i < oc->macho_info->n_macho_symbols; i++)
-            if(needGotSlot(&oc->macho_info->macho_symbols[i]))
+            if(needGotSlot(&oc->macho_info->macho_symbols[i])) {
                 oc->macho_info->macho_symbols[i].got_addr
                     = ((uint8_t*)oc->macho_info->got_start)
-                    + (slot++ * sizeof(void *));
+                    + (slot * sizeof(void *));
+                oc->macho_info->macho_symbols[i].got_exec =
+                    oc->macho_info->got_exec + slot++ * sizeof(void *);
+            }
     }
     return EXIT_SUCCESS;
 }
@@ -616,7 +635,10 @@ static void
 freeGot(ObjectCode * oc) {
     /* sanity check */
     if(NULL != oc->macho_info->got_start && oc->macho_info->got_size > 0) {
-        ll_munmap_for_linker(oc->L, oc->macho_info->got_start, oc->macho_info->got_size, "freeGot");
+        if (oc->macho_info->got_allocation != NULL)
+            free(oc->macho_info->got_allocation);
+        else
+            ll_munmap_for_linker(oc->L, oc->macho_info->got_start, oc->macho_info->got_size, "freeGot");
     }
     oc->macho_info->got_start = NULL;
     oc->macho_info->got_size = 0;
@@ -668,14 +690,16 @@ relocateSectionAarch64(ObjectCode * oc, Section * section)
 
     for(size_t i = 0; i < nreloc; i++) {
         MachORelocationInfo * ri = &section->macho_info->relocation_info[i];
+        const ll_site site = {.work = (uint8_t *)section->start + ri->r_address,
+                              .exec = section->exec_start + ri->r_address};
         switch (ri->r_type) {
             case LL_MACHO_ARM64_RELOC_UNSIGNED: {
                 MachOSymbol* symbol = &oc->macho_info->macho_symbols[ri->r_symbolnum];
                 int64_t addend;
-                if (!decodeAddend(oc, section, ri, &addend)) return 0;
+                if (!decodeAddend(oc, site, ri, &addend)) return 0;
                 uint64_t value;
                 if (!symbol_value(oc, symbol, &value)) return 0;
-                if (!encodeAddend(oc, section, ri, value + addend, symbol)) return 0;
+                if (!encodeAddend(oc, site, ri, value + addend, symbol)) return 0;
                 break;
             }
             case LL_MACHO_ARM64_RELOC_SUBTRACTOR:
@@ -714,8 +738,8 @@ relocateSectionAarch64(ObjectCode * oc, Section * section)
 
                 // combine with addend and store
                 int64_t addend;
-                if (!decodeAddend(oc, section, ri, &addend)) return 0;
-                if (!encodeAddend(oc, section, ri, addend - sub_value + add_value, symbol1)) return 0;
+                if (!decodeAddend(oc, site, ri, &addend)) return 0;
+                if (!encodeAddend(oc, site, ri, addend - sub_value + add_value, symbol1)) return 0;
 
                 // skip next relocation: we've already handled it
                 i += 1;
@@ -726,9 +750,9 @@ relocateSectionAarch64(ObjectCode * oc, Section * section)
 
                 // pre-existing addend
                 int64_t addend;
-                if (!decodeAddend(oc, section, ri, &addend)) return 0;
+                if (!decodeAddend(oc, site, ri, &addend)) return 0;
                 // address of the branch (b/bl) instruction.
-                uint64_t pc = (uint64_t)section->start + ri->r_address;
+                uint64_t pc = site.exec;
                 uint64_t value = 0;
                 if(symbol->nlist->n_type & LL_MACHO_N_EXT) {
                     value = (uint64_t)lookupDependentSymbol(oc->L, (char*)symbol->name, oc, NULL);
@@ -751,35 +775,37 @@ relocateSectionAarch64(ObjectCode * oc, Section * section)
                 // sign bit, we can encode a range of +/- 27bits.
                 //
                 if((value - pc + addend) >> (2 + 26 - 1)) {
+                    ll_site stub;
                     /* we need a stub */
                     /* check if we already have that stub */
-                    if(macho_findStub(section, (void**)&value, 0)) {
+                    if(macho_findStubSite(section, (void *)(uintptr_t)value, 0, &stub)) {
                         /* did not find it. Crete a new stub. */
-                        if(macho_makeStub(oc->L, section, (void**)&value, 0)) {
+                        if(macho_makeStubSite(oc->L, section, (void *)(uintptr_t)value, 0, &stub)) {
                             if (oc->L->error_status == LL_OK)
                                 ll_error_set(oc->L, LL_E_RELOC_RANGE, "could not find or make stub");
                             LL_LOG_ERROR_FOR(oc->L, "could not find or make stub");
                             return 0;
                         }
                     }
+                    value = stub.exec;
                 }
-                if (!encodeAddend(oc, section, ri, value - pc + addend, symbol)) return 0;
+                if (!encodeAddend(oc, site, ri, value - pc + addend, symbol)) return 0;
                 break;
             }
             case LL_MACHO_ARM64_RELOC_PAGE21:
             case LL_MACHO_ARM64_RELOC_GOT_LOAD_PAGE21: {
                 MachOSymbol* symbol = &oc->macho_info->macho_symbols[ri->r_symbolnum];
                 int64_t addend;
-                if (!decodeAddend(oc, section, ri, &addend)) return 0;
+                if (!decodeAddend(oc, site, ri, &addend)) return 0;
                 if(!(explicit_addend == 0 || addend == 0)) {
                     ll_error_set(oc->L, LL_E_FORMAT, "explicit_addend and addend can't be set at the same time.");
                     LL_LOG_ERROR_FOR(oc->L, "explicit_addend and addend can't be set at the same time.");
                     return 0;
                 }
-                uint64_t pc = (uint64_t)section->start + ri->r_address;
-                uint64_t value = (uint64_t)(isGotLoad(ri) ? symbol->got_addr : symbol->addr);
+                uint64_t pc = site.exec;
+                uint64_t value = isGotLoad(ri) ? symbol->got_exec : (uintptr_t)symbol->addr;
                 LL_ASSERT_FOR(oc->L, !isGotLoad(ri) || (symbol->got_addr != 0));
-                if (!encodeAddend(oc, section, ri, ((value + addend + explicit_addend) & (-4096)) - (pc & (-4096)), symbol)) return 0;
+                if (!encodeAddend(oc, site, ri, ((value + addend + explicit_addend) & (-4096)) - (pc & (-4096)), symbol)) return 0;
 
                 // reset, just in case.
                 explicit_addend = 0;
@@ -789,15 +815,15 @@ relocateSectionAarch64(ObjectCode * oc, Section * section)
             case LL_MACHO_ARM64_RELOC_GOT_LOAD_PAGEOFF12: {
                 MachOSymbol* symbol = &oc->macho_info->macho_symbols[ri->r_symbolnum];
                 int64_t addend;
-                if (!decodeAddend(oc, section, ri, &addend)) return 0;
+                if (!decodeAddend(oc, site, ri, &addend)) return 0;
                 if(!(explicit_addend == 0 || addend == 0)) {
                     ll_error_set(oc->L, LL_E_FORMAT, "explicit_addend and addend can't be set at the same time.");
                     LL_LOG_ERROR_FOR(oc->L, "explicit_addend and addend can't be set at the same time.");
                     return 0;
                 }
-                uint64_t value = (uint64_t)(isGotLoad(ri) ? symbol->got_addr : symbol->addr);
+                uint64_t value = isGotLoad(ri) ? symbol->got_exec : (uintptr_t)symbol->addr;
                 LL_ASSERT_FOR(oc->L, !isGotLoad(ri) || (symbol->got_addr != 0));
-                if (!encodeAddend(oc, section, ri, 0xFFF & (value + addend + explicit_addend), symbol)) return 0;
+                if (!encodeAddend(oc, site, ri, 0xFFF & (value + addend + explicit_addend), symbol)) return 0;
 
                 // reset, just in case.
                 explicit_addend = 0;
@@ -874,12 +900,17 @@ relocateSection(ObjectCode* oc, int curSection)
     {
         MachORelocationInfo *reloc = &relocs[i];
 
-        char    *thingPtr = (char *) sect->start + reloc->r_address;
+        const ll_site site = {
+            .work = (uint8_t *)sect->start + reloc->r_address,
+            .exec = sect->exec_start + reloc->r_address
+        };
+        char *thingPtr = (char *)site.work;
         uint64_t thing;
         /* We shouldn't need to initialise this, but gcc on OS X 64 bit
            complains that it may be used uninitialized if we don't */
         uint64_t value = 0;
         uint64_t baseValue;
+        Section *target_section = NULL;
         int type = reloc->r_type;
         int relocLenBytes;
         int nextInstrAdj = 0;
@@ -939,7 +970,7 @@ relocateSection(ObjectCode* oc, int curSection)
                 nextInstrAdj = 4;
                 break;
         }
-        baseValue = (uint64_t)thingPtr + relocLenBytes + nextInstrAdj;
+        baseValue = site.exec + relocLenBytes + nextInstrAdj;
 
 
         LL_IF_DEBUG_FOR(oc->L, linker_verbose,
@@ -1015,7 +1046,8 @@ relocateSection(ObjectCode* oc, int curSection)
 
             // creates a jump island for every relocation entry for a symbol
             // TODO (AP): use got_addr to store the loc. of a jump island to reuse later
-            value = (uint64_t) &ll_make_symbol_extra_x86_64(oc, reloc->r_symbolnum, (uint64_t)addr)->addr;
+            value = ll_make_symbol_extra_x86_64_site(oc, reloc->r_symbolnum,
+                                                      (uint64_t)addr).exec;
 
             type = LL_MACHO_X86_64_RELOC_SIGNED;
         }
@@ -1087,6 +1119,7 @@ relocateSection(ObjectCode* oc, int curSection)
 
             int targetSecNum = reloc->r_symbolnum - 1; // sec numbers start with 1
             Section * targetSec = &oc->sections[targetSecNum];
+            target_section = targetSec;
             MachOSection * targetMacho = targetSec->macho_info->macho_section;
 
             LL_IF_DEBUG_FOR(oc->L, linker_verbose,
@@ -1111,7 +1144,7 @@ relocateSection(ObjectCode* oc, int curSection)
                                     "unsigned displacement %" PRIx64 " with section relative offset %" PRIx64 "\n",
                                             thing, thingRelativeOffset));
 
-                thing = (uint64_t) targetSec->start + thingRelativeOffset;
+                thing = targetSec->exec_start + thingRelativeOffset;
                 LL_IF_DEBUG_FOR(oc->L, linker_verbose,
                          LL_DEBUG_FOR(oc->L, "                 "
                                     "relocated address is %p\n", (void *) thing));
@@ -1145,8 +1178,8 @@ relocateSection(ObjectCode* oc, int curSection)
                                 "original displacement %" PRId64 " to %p with section relative offset %" PRIu64 "\n",
                                 thing, (void *) imThingLoc, thingRelativeOffset));
 
-                thing = (int64_t) ((uint64_t) targetSec->start + thingRelativeOffset)
-                                - ((uint64_t) sect->start + baseValueOffset);
+                thing = (int64_t) (targetSec->exec_start + thingRelativeOffset)
+                                - (sect->exec_start + baseValueOffset);
                 value = baseValue; // so that it further cancels out with baseValue
                 LL_IF_DEBUG_FOR(oc->L, linker_verbose,
                          LL_DEBUG_FOR(oc->L, "                 "
@@ -1169,8 +1202,9 @@ relocateSection(ObjectCode* oc, int curSection)
             if((int32_t)(value - baseValue) != (int64_t)(value - baseValue))
             {
                 LL_CHECK_FOR(oc->L, reloc->r_extern);
-                value = (uint64_t) &ll_make_symbol_extra_x86_64(oc, reloc->r_symbolnum, value)
-                                        -> jumpIsland;
+                value = ll_make_symbol_extra_x86_64_site(oc, reloc->r_symbolnum,
+                                                          value).exec
+                      + offsetof(ll_symbol_extra_x86_64, jumpIsland);
             }
             if (!((int32_t)(value - baseValue) == (int64_t)(value - baseValue))) {
                 ll_error_set(oc->L, LL_E_RELOC_RANGE, "Mach-O branch island is out of range");
@@ -1221,11 +1255,16 @@ relocateSection(ObjectCode* oc, int curSection)
          * probe the first byte to sanity check internal relocations.
          */
         if (0 == reloc->r_extern) {
+            uintptr_t target = reloc->r_pcrel ? thing + baseValue : thing;
+            if (target_section->exec_start != (uintptr_t)target_section->start) {
+                target = (uintptr_t)target_section->start +
+                         (target - target_section->exec_start);
+            }
             if (reloc->r_pcrel) {
-                if (!checkMachORelocationSpan(oc, (void *)((char *)thing + baseValue), 1))
+                if (!checkMachORelocationSpan(oc, (void *)target, 1))
                     return 0;
             } else {
-                if (!checkMachORelocationSpan(oc, (void *)thing, 1))
+                if (!checkMachORelocationSpan(oc, (void *)target, 1))
                     return 0;
             }
         }
@@ -1466,6 +1505,72 @@ allocation_failed:
     return 0;
 }
 
+/* Heap-owned sections carry a separate synthetic execution address. */
+static int
+noexecSections_MachO(ObjectCode *oc)
+{
+    for (int i = 0; i < oc->n_sections; ++i) {
+        MachOSection *header = &oc->macho_info->macho_sections[i];
+        if (header->size == 0) continue;
+        const size_t alignment = (size_t)1 << header->align;
+        const unsigned type = header->flags & LL_MACHO_SECTION_TYPE;
+        const bool zerofill = type == LL_MACHO_S_ZEROFILL ||
+                              type == LL_MACHO_S_GB_ZEROFILL;
+        size_t tail = 0, tail_offset = header->size;
+#if LL_MACHO_NEED_PLT
+        if (!zerofill) {
+            const size_t count = macho_numberOfStubsForSection(oc, i);
+            if (count > SIZE_MAX / STUB_SIZE) {
+                ll_error_set(oc->L, LL_E_NOMEM, "NO_EXEC Mach-O stub capacity is too large");
+                return 0;
+            }
+            tail = count * STUB_SIZE;
+        }
+#endif
+        ll_noexec_block block;
+        if (tail != 0) {
+            if (!ll_noexec_allocate_tail(oc->L, header->size, alignment,
+                                         tail, 4, &block, &tail_offset)) return 0;
+        } else if (!ll_noexec_allocate(oc->L, header->size, alignment, &block)) {
+            return 0;
+        }
+        if (!zerofill) memcpy(block.site.work, oc->image + header->offset, header->size);
+        Section *section = &oc->sections[i];
+        addSection(oc->L, section, getSectionKind_MachO(header), SECTION_NOEXEC,
+                   block.site.work, header->size, 0, block.allocation, 0,
+                   sizeof(struct ll_macho_section_info));
+        section->exec_start = block.site.exec;
+        if (section->macho_info == NULL) {
+            ll_error_set(oc->L, LL_E_NOMEM, "cannot allocate Mach-O section metadata");
+            return 0;
+        }
+        section->macho_info->macho_section = header;
+        if (tail != 0) {
+            section->macho_info->stub_offset = block.site.work + tail_offset;
+            section->macho_info->stub_size = tail;
+        }
+        if (!zerofill) addProddableBlock(oc->L, &oc->proddables, section->start, section->size);
+        if (header->nreloc != 0) {
+            const char *table = oc->image + header->reloff;
+            if ((uintptr_t)table % _Alignof(MachORelocationInfo) == 0) {
+                section->macho_info->relocation_info = (MachORelocationInfo *)table;
+            } else {
+                size_t bytes = (size_t)header->nreloc * sizeof(MachORelocationInfo);
+                MachORelocationInfo *copy = LL_MALLOC_FOR(oc->L, bytes,
+                                                "ocGetNames_MachO(relocations)");
+                if (copy == NULL) {
+                    ll_error_set(oc->L, LL_E_NOMEM, "cannot allocate aligned Mach-O relocations");
+                    return 0;
+                }
+                memcpy(copy, table, bytes);
+                section->macho_info->owned_relocations = copy;
+                section->macho_info->relocation_info = copy;
+            }
+        }
+    }
+    return 1;
+}
+
 int
 ocGetNames_MachO(ObjectCode* oc)
 {
@@ -1492,7 +1597,9 @@ ocGetNames_MachO(ObjectCode* oc)
     LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "ocGetNames_MachO: will load %d sections\n",
                                 oc->n_sections));
 
-    if (!ocBuildSegments_MachO(oc)) return 0;
+    if (ll_noexec_enabled(oc->L)) {
+        if (!noexecSections_MachO(oc)) return 0;
+    } else if (!ocBuildSegments_MachO(oc)) return 0;
 
     for (int seg_n = 0; seg_n < oc->n_segments; seg_n++) {
         Segment *segment = &oc->segments[seg_n];
@@ -1648,9 +1755,9 @@ ocGetNames_MachO(ObjectCode* oc)
              * Rather they are (virtual) aligned addresses within
              * a single segment of MH_OBJECT object file.
              */
-            s->addr = (uint8_t*)oc->sections[n].start
+            s->addr = (void *)(oc->sections[n].exec_start
                               - oc->macho_info->macho_sections[n].addr
-                              + s->nlist->n_value;
+                              + s->nlist->n_value);
             if(NULL == s->addr) {
                 ll_error_set(oc->L, LL_E_FORMAT, "Failed to compute address for symbol %s", s->name);
                 LL_LOG_ERROR_FOR(oc->L, "Failed to compute address for symbol %s", s->name);
@@ -1751,13 +1858,21 @@ ocGetNames_MachO(ObjectCode* oc)
 
     /* setup the common storage */
     if (commonSize > 0) {
-        commonStorage = LL_CALLOC_FOR(oc->L, 1, commonSize, "ocGetNames_MachO(common symbols)");
+        if (ll_noexec_enabled(oc->L)) {
+            ll_noexec_block block;
+            if (!ll_noexec_allocate(oc->L, commonSize, 8, &block)) return 0;
+            commonStorage = block.site.work;
+            oc->macho_info->common_allocation = block.allocation;
+            commonCounter = block.site.exec;
+        } else {
+            commonStorage = LL_CALLOC_FOR(oc->L, 1, commonSize, "ocGetNames_MachO(common symbols)");
+            commonCounter = (unsigned long)commonStorage;
+        }
         if (commonStorage == NULL) {
             ll_error_set(oc->L, LL_E_NOMEM, "cannot allocate Mach-O COMMON storage");
             return 0;
         }
         oc->macho_info->common_mem = commonStorage;
-        commonCounter = (unsigned long)commonStorage;
     }
 
     if (oc->macho_info->symCmd) {
@@ -2002,7 +2117,7 @@ ocResolve_MachO(ObjectCode* oc)
             return 0;
 #endif
     }
-    if(!ocMprotect_MachO ( oc ))
+    if(!ll_noexec_enabled(oc->L) && !ocMprotect_MachO ( oc ))
         return 0;
 
     return 1;

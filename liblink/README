@@ -109,13 +109,14 @@ diagnostics and unsupported implicit-REL handling remain unchanged.
 Normal ELF work and execution addresses still coincide. Payloads, symbol
 lookup, range policy and diagnostics are preserved.
 
-Private ELF NO_EXEC mode
-------------------------
+Private NO_EXEC mode
+--------------------
 
 The private compatibility configuration accepts LL_CFG_NO_EXEC, an explicit
 nonzero noexec_base, and LL_CFG_ALL_FORMATS when loading a non-native format.
-This supports x86_64 and AArch64 ELF on a 64-bit host with the selected
-target/backend compiled in. Other targets/formats return LL_E_UNSUPPORTED.
+This supports x86_64 and AArch64 ELF and Mach-O on a 64-bit host with the
+selected target/backend compiled in. Other targets/formats return
+LL_E_UNSUPPORTED.
 The installed handle API remains unsupported until WP2.9; these private
 configuration fields are immutable after host installation.
 
@@ -145,6 +146,12 @@ count division. This separately approved repair removes the native ARM64
 zero-width division and keeps nonzero native widths unchanged. Other backend
 conversions, two-host golden qualification and execution qualification remain
 WP2.8 work.
+
+Mach-O data-only checks replay the checked normal references and validate
+complete relocated bytes against synthetic-address calculations, including
+ARM64 stubs and x86_64 islands. A separate saved-layout test compares the
+NO_EXEC bytes literally with the normal references. Native ARM64 and Rosetta x86_64 have been
+checked locally; the full sanitizer matrix remains a CI milestone.
 
 AArch64 ELF references cover 20 layouts and 27 fields, including negative
 displacements, direct/far branches, veneer identity/reuse, and equal-valued

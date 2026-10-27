@@ -1944,6 +1944,26 @@ def main() -> int:
                 )
                 run([str(macho_stub_test)], label="run macho_stub_errors")
 
+            # Live relocation replay needs LLVM and the generated Mach-O fixtures;
+            # opt in when those external test inputs are available.
+            if os.environ.get("LIBLINK_MACHO_NOEXEC_ORACLE") == "1":
+                if re.search(r"^#define\s+aarch64_HOST_ARCH\s+1\s*$",
+                             platform_header, flags=re.MULTILINE):
+                    variable = "LIBLINK_MACHO_ARM_NOEXEC"
+                elif re.search(r"^#define\s+x86_64_HOST_ARCH\s+1\s*$",
+                               platform_header, flags=re.MULTILINE):
+                    variable = "LIBLINK_MACHO_X86_NOEXEC"
+                else:
+                    raise RuntimeError("Mach-O NO_EXEC oracle requires ARM64 or x86_64")
+                capture = output / "macho_noexec_capture"
+                run(cc + native_unit_link_arguments(
+                    ROOT / "liblink/tests/runner/macho_noexec_capture.c", archive,
+                    capture, link_flags, []), label="compile Mach-O NO_EXEC capture")
+                env = dict(os.environ, **{variable: str(capture)})
+                run([sys.executable, "-m", "unittest", "discover", "-s",
+                     "liblink/tests/oracle", "-p", "test_macho_noexec.py", "-v"],
+                    env=env, label="check Mach-O NO_EXEC normal and synthetic layouts")
+
     print("liblink native unit tests: PASS")
     return 0
 

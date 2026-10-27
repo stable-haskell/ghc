@@ -312,6 +312,11 @@ the Darwin backend does not reference these `rts-fs` C symbols. The
 Sanitized native C units
 ========================
 
+The Mach-O relocation status fixture initializes its manually constructed
+section's execution address to its work address for normal-mode branch cases.
+Stub creation also rejects absent or exhausted reserved stub storage with an
+owner-local error; `macho_stub_errors.c` exercises those guards.
+
 On macOS 26.5.2 ARM64, a baseline run using the Nix Clang 21.1.2 ASan
 runtime timed out before the COFF layout unit completed. A separately linked
 Mach-O capture also stalled before `main`; a process sample showed ASan
@@ -637,6 +642,48 @@ AArch64 on Darwin. Its link-map check requires the selected stage2 archive and
 rejects an archived `MachO.o` beside the included implementation. This covers
 function-level relocation behavior, not a complete object-file load or a
 non-Darwin architecture.
+
+Mach-O private heap relocation checks
+====================================
+
+`macho_noexec_capture.c` loads and resolves the original fixture objects into
+private heap storage with synthetic execution addresses. `test_macho_noexec.py`
+replays the checked normal-mode references, binds their relocation identities
+to the original object metadata, and independently calculates the complete
+relocated section, GOT and extra-slot bytes for the synthetic layout. It runs
+each unmodified-layout capture twice and checks distant branches through ARM64
+stubs and x86_64 islands. A separate test assigns the saved normal execution
+layout to the NO_EXEC fixture and compares complete section, GOT, stub and
+extra-slot bytes literally with the normal references. The checks do not
+execute fixture instructions.
+
+Build the capture against a fresh sanitizer-instrumented liblink archive and
+matching generated platform headers. For each target, set `ARCH` to `arm64` or
+`x86_64`, `CONFIG` to its generated include directory, `ARCHIVE` to its fresh
+archive, `RTS_FS_INCLUDE` to the installed rts-fs headers, and `CAPTURE`
+to the output path; then run:
+
+    SDK=/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk
+    DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer /usr/bin/clang \
+      -arch "$ARCH" -isysroot "$SDK" -fsanitize=address,undefined \
+      -fno-sanitize-recover=undefined -fno-omit-frame-pointer \
+      -I liblink/include -I liblink/src -I "$CONFIG" -I "$RTS_FS_INCLUDE" \
+      liblink/tests/runner/macho_noexec_capture.c "$ARCHIVE" -o "$CAPTURE"
+
+With the capture binaries built for both targets, run:
+
+    LLVM_READOBJ=/path/to/llvm-readobj \
+      LIBLINK_MACHO_ARM_NOEXEC=/path/to/arm64-capture \
+      LIBLINK_MACHO_X86_NOEXEC=/path/to/x86_64-capture \
+      UBSAN_OPTIONS=halt_on_error=1 \
+      python3 -m unittest discover -s liblink/tests/oracle -p test_macho_noexec.py -v
+
+The x86_64 binary runs through Rosetta (`arch -x86_64`). Each architecture can
+also be checked separately by setting its capture variable; the other test is
+skipped. With generated fixtures and `LLVM_READOBJ` available, set
+`LIBLINK_MACHO_NOEXEC_ORACLE=1` when running the native or sanitized unit driver
+to build the capture against that driver's archive and check its host target.
+This is local qualification; the full sanitizer matrix remains a CI milestone.
 
 Mach-O x86_64 relocation status
 ===============================

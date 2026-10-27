@@ -1,6 +1,7 @@
 #pragma once
 
 #include <LinkerInternals.h>
+#include "ll_backend.h"
 
 #include "plt_aarch64.h"
 
@@ -24,6 +25,9 @@ unsigned macho_numberOfStubsForSection( ObjectCode *oc, unsigned sectionIndex);
 
 bool macho_findStub(Section * section, void* * addr, uint8_t flags);
 bool macho_makeStub(ll_linker *L, Section * section, void* * addr, uint8_t flags);
+bool macho_findStubSite(Section *section, void *target, uint8_t flags, ll_site *site);
+bool macho_makeStubSite(ll_linker *L, Section *section, void *target,
+                        uint8_t flags, ll_site *site);
 
 void macho_freeStubs(ll_linker *L, Section * section);
 

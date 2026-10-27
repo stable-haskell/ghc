@@ -168,7 +168,7 @@ static void test_decode_encode(ll_linker *owner)
     relocation.r_type = ARM64_RELOC_UNSIGNED;
     relocation.r_length = 3;
     clear_owner_error(owner);
-    CHECK(decodeAddend(&oc, &section, &relocation, &decoded),
+    CHECK(decodeAddend(&oc, (ll_site){.work = section.start, .exec = (uintptr_t)section.start}, &relocation, &decoded),
           "valid UNSIGNED addend did not decode");
     CHECK(decoded == (int64_t)UINT64_C(0xAABBCCDDEEFF0000),
           "UNSIGNED addend decoded to the wrong value");
@@ -177,7 +177,7 @@ static void test_decode_encode(ll_linker *owner)
     relocation.r_type = (uint8_t)15;
     decoded = 123;
     clear_owner_error(owner);
-    CHECK(!decodeAddend(&oc, &section, &relocation, &decoded),
+    CHECK(!decodeAddend(&oc, (ll_site){.work = section.start, .exec = (uintptr_t)section.start}, &relocation, &decoded),
           "unknown relocation type decoded successfully");
     check_status(owner, LL_E_UNSUPPORTED, "unknown decode status was not UNSUPPORTED");
     CHECK(decoded == 123, "failed decode changed the caller's output");
@@ -186,7 +186,7 @@ static void test_decode_encode(ll_linker *owner)
     relocation.r_length = 2;
     storage = UINT64_C(0x1122334400000000);
     clear_owner_error(owner);
-    CHECK(encodeAddend(&oc, &section, &relocation, INT64_C(0x12345678), NULL),
+    CHECK(encodeAddend(&oc, (ll_site){.work = section.start, .exec = (uintptr_t)section.start}, &relocation, INT64_C(0x12345678), NULL),
           "valid UNSIGNED addend did not encode");
     const unsigned char expected32[4] = {0x78, 0x56, 0x34, 0x12};
     CHECK(memcmp(&storage, expected32, sizeof(expected32)) == 0,
@@ -199,24 +199,24 @@ static void test_decode_encode(ll_linker *owner)
     addProddableBlock(owner, &oc.proddables, &byte, sizeof(byte));
     relocation.r_length = 0;
     clear_owner_error(owner);
-    CHECK(encodeAddend(&oc, &section, &relocation, 127, NULL),
+    CHECK(encodeAddend(&oc, (ll_site){.work = section.start, .exec = (uintptr_t)section.start}, &relocation, 127, NULL),
           "valid positive byte addend did not encode");
     CHECK(byte == 0x7F, "positive byte addend had the wrong literal encoding");
     byte = 0xA5;
     clear_owner_error(owner);
-    CHECK(encodeAddend(&oc, &section, &relocation, -128, NULL),
+    CHECK(encodeAddend(&oc, (ll_site){.work = section.start, .exec = (uintptr_t)section.start}, &relocation, -128, NULL),
           "valid negative byte addend did not encode");
     CHECK(byte == 0x80, "negative byte addend had the wrong literal encoding");
     byte = 0xA5;
     clear_owner_error(owner);
-    CHECK(!encodeAddend(&oc, &section, &relocation, 256, NULL),
+    CHECK(!encodeAddend(&oc, (ll_site){.work = section.start, .exec = (uintptr_t)section.start}, &relocation, 256, NULL),
           "out-of-range byte relocation encoded successfully");
     check_status(owner, LL_E_RELOC_RANGE, "encode range error was not RELOC_RANGE");
     CHECK(byte == 0xA5, "rejected encode modified its target byte");
 
     relocation.r_type = (uint8_t)15;
     clear_owner_error(owner);
-    CHECK(!encodeAddend(&oc, &section, &relocation, 1, NULL),
+    CHECK(!encodeAddend(&oc, (ll_site){.work = section.start, .exec = (uintptr_t)section.start}, &relocation, 1, NULL),
           "unknown relocation type encoded successfully");
     check_status(owner, LL_E_UNSUPPORTED, "unknown encode status was not UNSUPPORTED");
     CHECK(byte == 0xA5, "unsupported encode modified its target byte");
@@ -269,7 +269,7 @@ static void test_encode_range_matrix(ll_linker *owner)
             clear_owner_error(owner);
             int64_t value = polarity == 0 ? test->positive_overflow
                                           : test->negative_overflow;
-            CHECK(!encodeAddend(&oc, &section, &relocation, value, NULL),
+            CHECK(!encodeAddend(&oc, (ll_site){.work = section.start, .exec = (uintptr_t)section.start}, &relocation, value, NULL),
                   "out-of-range addend was accepted by encoder");
             check_status(owner, LL_E_RELOC_RANGE, test->name);
             for (size_t byte_index = 0; byte_index < sizeof(aligned_storage);
@@ -355,6 +355,7 @@ static void run_relocation_case(ll_linker *owner, uint8_t type, uint8_t length,
     object_info.macho_symbols = symbols;
     object_info.n_macho_symbols = symbol_count;
     section.start = word;
+    section.exec_start = (uintptr_t)word;
     section.size = sizeof(*word);
     section.info = &section_info;
     oc.L = owner;
@@ -417,6 +418,7 @@ static void run_valid_subtractor_pair(ll_linker *owner)
     object_info.macho_symbols = symbols;
     object_info.n_macho_symbols = 2;
     section.start = &word;
+    section.exec_start = (uintptr_t)&word;
     section.size = sizeof(word);
     section.info = &section_info;
     oc.L = owner;

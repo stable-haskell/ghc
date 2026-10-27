@@ -53,6 +53,12 @@ macho_makeStub(ll_linker *L, Section * section,
           void* * addr,
           uint8_t flags) {
 
+    if (section == NULL || section->macho_info == NULL ||
+        section->macho_info->stub_offset == NULL ||
+        section->macho_info->nstubs >= section->macho_info->stub_size / STUB_SIZE) {
+        ll_error_set(L, LL_E_RELOC_RANGE, "Mach-O branch stub space is unavailable");
+        return EXIT_FAILURE;
+    }
     MachOStub * s = (MachOStub *)LL_CALLOC_FOR(L, sizeof(MachOStub), 1, "makeStub");
     if (s == NULL) {
         ll_error_set(L, LL_E_NOMEM, "cannot allocate Mach-O branch stub metadata");
@@ -80,6 +86,32 @@ macho_makeStub(ll_linker *L, Section * section,
     }
     section->macho_info->nstubs += 1;
     *addr = s->addr;
+    return EXIT_SUCCESS;
+}
+
+static ll_site
+macho_stubSite(const Section *section, void *work)
+{
+    const uintptr_t offset = (uintptr_t)work - (uintptr_t)section->start;
+    return (ll_site){.work = work, .exec = section->exec_start + offset};
+}
+
+bool
+macho_findStubSite(Section *section, void *target, uint8_t flags, ll_site *site)
+{
+    void *work = target;
+    if (macho_findStub(section, &work, flags)) return EXIT_FAILURE;
+    *site = macho_stubSite(section, work);
+    return EXIT_SUCCESS;
+}
+
+bool
+macho_makeStubSite(ll_linker *L, Section *section, void *target,
+                   uint8_t flags, ll_site *site)
+{
+    void *work = target;
+    if (macho_makeStub(L, section, &work, flags)) return EXIT_FAILURE;
+    *site = macho_stubSite(section, work);
     return EXIT_SUCCESS;
 }
 

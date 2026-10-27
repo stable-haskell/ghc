@@ -228,10 +228,12 @@ static void run_case(const RelocationCase *test)
     section_info[0].relocation_info = &relocation;
     section_info[1].macho_section = &macho_sections[1];
     sections[0].start = backing + 8;
+    sections[0].exec_start = (uintptr_t)sections[0].start;
     sections[0].size = sizeof(test->initial_word);
     sections[0].info = &section_info[0];
     target_start = test->separate_target ? target_backing + 8 : backing + 16;
     sections[1].start = target_start;
+    sections[1].exec_start = (uintptr_t)target_start;
     sections[1].size = 8;
     sections[1].info = &section_info[1];
 
@@ -273,6 +275,7 @@ static void run_case(const RelocationCase *test)
         }
         oc.first_symbol_extra = 0;
         oc.n_symbol_extras = 1;
+        oc.symbol_extras_exec = (uintptr_t)oc.symbol_extras;
         oc.symbol_extra_stride = sizeof(SymbolExtra);
     }
     initProddableBlockSet(&oc.proddables);

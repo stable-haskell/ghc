@@ -248,6 +248,35 @@ static void test_failure_cleanup(void)
     info.stub_size = sizeof(stub_bytes);
     section.info = &info;
 
+    clear_owner_error();
+    size_t live_before_guard = owner_host.live;
+    section.info = NULL;
+    CHECK(macho_makeStub(&owner, &section, &target, 0) == EXIT_FAILURE &&
+              owner.error_status == LL_E_RELOC_RANGE,
+          "missing stub metadata was not rejected");
+    section.info = &info;
+    info.stub_offset = NULL;
+    clear_owner_error();
+    CHECK(macho_makeStub(&owner, &section, &target, 0) == EXIT_FAILURE &&
+              owner.error_status == LL_E_RELOC_RANGE,
+          "missing stub storage was not rejected");
+    info.stub_offset = stub_bytes;
+    info.stub_size = STUB_SIZE - 1;
+    clear_owner_error();
+    CHECK(macho_makeStub(&owner, &section, &target, 0) == EXIT_FAILURE &&
+              owner.error_status == LL_E_RELOC_RANGE,
+          "short stub storage was not rejected");
+    info.stub_size = STUB_SIZE;
+    info.nstubs = 1;
+    clear_owner_error();
+    CHECK(macho_makeStub(&owner, &section, &target, 0) == EXIT_FAILURE &&
+              owner.error_status == LL_E_RELOC_RANGE,
+          "exhausted stub storage was not rejected");
+    CHECK(target == (void *)target_bits && owner_host.live == live_before_guard &&
+              info.stubs == NULL, "stub guard changed caller state or allocated");
+    info.nstubs = 0;
+    info.stub_size = sizeof(stub_bytes);
+
     reject_backend = true;
     clear_owner_error();
     size_t live_before = owner_host.live;
