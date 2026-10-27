@@ -337,6 +337,14 @@ ocDeinit_ELF(ObjectCode * oc)
         freeInitFiniList(oc->L, oc->elf_info->fini);
         oc->elf_info->init = NULL;
         oc->elf_info->fini = NULL;
+#if LL_ELF_NEED_PLT
+        if (oc->sections != NULL) {
+            for (int i = 0; i < oc->n_sections; ++i) {
+                if (oc->sections[i].elf_info != NULL)
+                    elf_freeStubs(oc->L, &oc->sections[i]);
+            }
+        }
+#endif
         freeGot(oc);
         if (oc->elf_info->common_allocation != NULL) {
             free(oc->elf_info->common_allocation);

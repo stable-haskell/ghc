@@ -29,7 +29,41 @@
 typedef struct {
     uintptr_t function_address;
     uintptr_t data_address;
+    uintptr_t stub_addresses[64];
+    bool stub_live[64];
+    size_t stub_count;
+    size_t stub_releases;
 } CaptureHost;
+
+/* Track only metadata allocated by the real ELF stub creator. */
+static void *probe_calloc(void *ctx, size_t count, size_t size, const char *what)
+{
+    CaptureHost *host = ctx;
+    void *p = calloc(count, size);
+    if (p == NULL) abort();
+    if (what != NULL && strcmp(what, "makeStub") == 0) {
+        if (host->stub_count >= 64) abort();
+        host->stub_addresses[host->stub_count] = (uintptr_t)p;
+        host->stub_live[host->stub_count++] = true;
+    }
+    return p;
+}
+
+static void probe_free(void *ctx, void *p)
+{
+    CaptureHost *host = ctx;
+    if (p != NULL) {
+        const uintptr_t address = (uintptr_t)p;
+        for (size_t i = 0; i < host->stub_count; ++i) {
+            if (host->stub_live[i] && host->stub_addresses[i] == address) {
+                host->stub_live[i] = false;
+                ++host->stub_releases;
+                break;
+            }
+        }
+    }
+    free(p);
+}
 
 static size_t page_size(void *ctx)
 {
@@ -219,7 +253,8 @@ int main(int argc, char **argv)
         ? (uintptr_t)UINT64_C(0x700000000000) : 0,
         .data_address = CAPTURE_DATA_ADDRESS};
     ll_linker owner = {0};
-    ll_compat_host_ops host = {.ctx = &state, .page_size = page_size,
+    ll_compat_host_ops host = {.ctx = &state, .calloc_ = probe_calloc,
+        .free_ = probe_free, .page_size = page_size,
         .on_mem_failure = memory_failure, .populate_builtins = populate_builtins};
     ll_compat_config config = {.always_pic = true,
         .flags = noexec ? LL_CFG_NO_EXEC | LL_CFG_ALL_FORMATS : 0,
@@ -322,8 +357,24 @@ done:
     free(stubs_before);
     free(before);
     free(extras_before);
+    const ll_status prior_status = owner.error_status;
+    const bool prior_pre_backend = owner.error_from_pre_backend;
+    char prior_message[LL_ERROR_CAPACITY];
+    memcpy(prior_message, owner.error_message, sizeof(prior_message));
     ll_discard_object(object);
+    const bool error_preserved = owner.error_status == prior_status &&
+        owner.error_from_pre_backend == prior_pre_backend &&
+        memcmp(owner.error_message, prior_message, sizeof(prior_message)) == 0;
     ll_mutex_unlock_for(&owner, &owner.linker_mutex);
     ll_exit_linker(&owner);
+    if (!error_preserved) {
+        (void)fputs("elf_capture: object cleanup changed the primary error\n", stderr);
+        return 2;
+    }
+    if (state.stub_count != state.stub_releases) {
+        (void)fprintf(stderr, "elf_capture: %zu stub metadata records retained\n",
+                      state.stub_count - state.stub_releases);
+        return 2;
+    }
     return result;
 }

@@ -121,6 +121,7 @@ elf_freeStubs(ll_linker *L, Section * section) {
         last = last->next;
         LL_FREE_FOR(L, t);
     }
+    LL_FREE_FOR(L, last);
     section->elf_info->stubs = NULL;
     section->elf_info->nstubs = 0;
 }

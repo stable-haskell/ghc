@@ -85,6 +85,15 @@ static void check_mode(bool separate)
     CHECK(site.work == bytes + PREFIX && site.exec == section.exec_start + PREFIX &&
           info.nstubs == 1 && allocations == 1, "paired creation lost address or count");
     check_veneer(site.work, (uintptr_t)target);
+    elf_freeStubs(&owner, &section);
+    CHECK(allocations == 0 && info.nstubs == 0 && info.stubs == NULL,
+          "single-node cleanup retained metadata");
+    elf_freeStubs(&owner, &section);
+    CHECK(allocations == 0 && info.nstubs == 0 && info.stubs == NULL,
+          "repeated empty cleanup changed ownership");
+    CHECK(elf_makeStubSite(&owner, &section, target, NULL, 0, &site) == EXIT_SUCCESS &&
+          allocations == 1 && info.nstubs == 1 && site.work == bytes + PREFIX,
+          "section did not restart at its original slot after cleanup");
     ll_site found = {.work = bytes, .exec = 19};
     CHECK(elf_findStubSite(&section, target, 0, &found) == EXIT_SUCCESS &&
           found.work == site.work && found.exec == site.exec && allocations == 1,
@@ -118,14 +127,13 @@ static void check_mode(bool separate)
     for (size_t i = 0; i < PREFIX; ++i) CHECK(bytes[i] == 0xa5, "section prefix changed");
     for (size_t i = PREFIX + CAPACITY; i < sizeof(backing); ++i)
         CHECK(bytes[i] == 0xa5, "section suffix changed");
-    /* Fixture-owned nodes are released explicitly. This test does not qualify
-     * the independent legacy whole-list disposal path. */
-    while (info.stubs != NULL) {
-        ElfStub *node = info.stubs;
-        info.stubs = node->next;
-        release(&allocations, node);
-    }
-    CHECK(allocations == 0, "fixture nodes leaked");
+    elf_freeStubs(&owner, &section);
+    CHECK(allocations == 0 && info.nstubs == 0 && info.stubs == NULL,
+          "multi-node cleanup retained metadata");
+    elf_freeStubs(&owner, &section);
+    CHECK(allocations == 0 && info.nstubs == 0 && info.stubs == NULL,
+          "repeated multi-node cleanup changed ownership");
+
 }
 
 int main(void)

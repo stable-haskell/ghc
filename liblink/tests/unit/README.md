@@ -164,8 +164,16 @@ outputs on lookup misses, target/flag identity, repeated lookup, creation order,
 veneer instruction fields and targets, legacy wrapper equivalence, and untouched
 adjacent storage. Both APIs retain zero-success/one-failure results. The native
 C driver compiles this data-only unit with the real host configuration and an
-explicit AArch64 target; it does not execute emitted instructions. Fixture-owned
-stub nodes are freed directly, so this is not a whole-list disposal test.
+explicit AArch64 target; it does not execute emitted instructions. The actual
+cleanup helper must release empty, single-node and multi-node lists, remain
+safe on repeated cleanup, and allow reuse of section-owned veneer storage.
+The capture host also requires balanced actual makeStub allocations after
+object teardown and preservation of its primary error, diagnostic and origin.
+The optional-live AArch64 oracle also constructs a late unsupported relocation
+after three branches have created and reused one veneer. It requires the
+original error and successfully emitted prefix, while capture teardown checks
+that metadata is released. Set LIBLINK_ELF_AARCH64_CAPTURE to a capture binary
+linked with an AArch64-target library; replay alone skips this live case.
 
 The private `elf_findStubSite` and `elf_makeStubSite` adapters derive execution
 addresses from the section execution base and the existing stub storage offset.

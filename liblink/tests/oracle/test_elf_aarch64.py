@@ -7,9 +7,11 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import tempfile
 import unittest
 
 from elf_aarch64_check import compare_golden, veneer, verify
+from elf64_metadata import parse
 
 
 LIBLINK = Path(__file__).resolve().parents[2]
@@ -134,6 +136,40 @@ class Aarch64ElfOracle(unittest.TestCase):
                 actual = bytes(int(value.strip(), 0) for encoding in encodings
                                for value in encoding.split(','))
                 self.assertEqual(actual, veneer(target))
+
+    @unittest.skipUnless(os.environ.get('LIBLINK_ELF_AARCH64_CAPTURE'),
+                         'set LIBLINK_ELF_AARCH64_CAPTURE for live captures')
+    def test_live_failure_releases_stub_metadata(self):
+        original = (FIXTURES / 'elf-aarch64-sites/branch_reuse.o').read_bytes()
+        tables = [section for section in parse(original, 183) if section['type'] == 4]
+        self.assertEqual(len(tables), 1)
+        table = tables[0]
+        self.assertEqual((table['entry_size'], table['size']), (24, 4 * 24))
+        changed = bytearray(original)
+        position = table['offset'] + 3 * 24 + 8
+        info = int.from_bytes(changed[position:position + 8], 'little')
+        changed[position:position + 8] = ((info & ~0xffffffff) | 0x7fffffff).to_bytes(8, 'little')
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / 'late-unsupported.o'
+            path.write_bytes(changed)
+            run = subprocess.run([os.environ['LIBLINK_ELF_AARCH64_CAPTURE'],
+                                  '--far-function', str(path)], capture_output=True,
+                                 text=True, timeout=90)
+        self.assertEqual(run.returncode, 1, run.stderr + run.stdout)
+        capture = json.loads(run.stdout)
+        self.assertFalse(capture['resolved'])
+        self.assertFalse(capture['initializers_ran'])
+        self.assertEqual(capture['status'], 3)  # LL_E_UNSUPPORTED
+        self.assertEqual(capture['error'],
+                         'AArch64 relocation type 2147483647: unsupported relocation type (addend 0)')
+        section = next(section for section in capture['sections'] if section['index'] == table['info'])
+        self.assertEqual(section['after'], '04000094030000940200009400000094')
+        self.assertEqual(len(section['stubs']['entries']), 1)
+        target = int(capture['host_symbols']['external_function'], 0)
+        self.assertEqual(int(section['stubs']['entries'][0]['target'], 0), target)
+        self.assertEqual(bytes.fromhex(section['stubs']['after'])[:20], veneer(target))
+        self.assertNotIn('stub metadata records retained', run.stderr)
+        self.assertNotIn('cleanup changed the primary error', run.stderr)
 
     @unittest.skipUnless(os.environ.get('LIBLINK_ELF_AARCH64_CAPTURE'),
                          'set LIBLINK_ELF_AARCH64_CAPTURE for live captures')
