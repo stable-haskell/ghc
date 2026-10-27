@@ -57,6 +57,26 @@ def main():
                         run([str(executable), *(['--noexec'] if mode == 'noexec' else []), str(obj)], stdout=output)
                     run(['python3', 'liblink/tests/oracle/coff_x86_64_check.py', '--object', str(obj),
                          '--capture', str(capture), '--golden', str(golden)])
+            if mode == 'noexec':
+                for stem in ('IMAGE_REL_AMD64_ADDR64', 'IMAGE_REL_AMD64_REL32',
+                             'IMAGE_REL_AMD64_SECREL', 'import-thunk'):
+                    obj = ROOT / 'liblink/tests/fixtures/generated/coff-x86_64' / (stem + '.o')
+                    golden = ROOT / 'liblink/tests/golden/coff-x86_64' / (stem + '.json')
+                    for iteration in range(2):
+                        capture = temp / (stem + '-base100-' + str(iteration) + '.json')
+                        with capture.open('w') as output:
+                            run([str(executable), '--noexec', '--base100', str(obj)], stdout=output)
+                        run(['python3', 'liblink/tests/oracle/coff_x86_64_check.py', '--object', str(obj),
+                             '--capture', str(capture), '--golden', str(golden)])
+            obj = ROOT / 'liblink/tests/fixtures/generated/coff-x86_64/IMAGE_REL_AMD64_ADDR32NB.o'
+            golden = ROOT / 'liblink/tests/golden/coff-x86_64/IMAGE_REL_AMD64_ADDR32NB-base100.json'
+            for iteration in range(2):
+                capture = temp / (mode + '-base100-' + str(iteration) + '.json')
+                with capture.open('w') as output:
+                    run([str(executable), *(['--noexec'] if mode == 'noexec' else []),
+                         '--base100', str(obj)], stdout=output)
+                run(['python3', 'liblink/tests/oracle/coff_x86_64_check.py', '--object', str(obj),
+                     '--capture', str(capture), '--golden', str(golden)])
             for variant in range(1, 6):
                 obj = ROOT / 'liblink/tests/fixtures/generated/coff-x86_64' / (
                     'IMAGE_REL_AMD64_REL32_' + str(variant) + '.o')

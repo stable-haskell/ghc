@@ -10,14 +10,16 @@ import coff_x86_64_check as oracle
 
 ROOT = Path(__file__).resolve().parents[3]
 NAMES = ('IMAGE_REL_AMD64_ADDR64', 'IMAGE_REL_AMD64_ADDR32NB',
-         'IMAGE_REL_AMD64_REL32', 'IMAGE_REL_AMD64_SECREL', 'import-thunk')
+         'IMAGE_REL_AMD64_REL32', 'IMAGE_REL_AMD64_SECREL', 'import-thunk',
+         'IMAGE_REL_AMD64_ADDR32NB-base100')
 
 
 class CoffReferenceTests(unittest.TestCase):
     def test_references_and_corruption(self):
         for name in NAMES:
             with self.subTest(name=name):
-                obj = (ROOT / 'liblink/tests/fixtures/generated/coff-x86_64' / (name + '.o')).read_bytes()
+                fixture = name.removesuffix('-base100')
+                obj = (ROOT / 'liblink/tests/fixtures/generated/coff-x86_64' / (fixture + '.o')).read_bytes()
                 if name == 'import-thunk':
                     count = struct.unpack_from('<H', obj, 2)[0]
                     offsets = [struct.unpack_from('<I', obj, 20 + i * 40 + 24)[0]

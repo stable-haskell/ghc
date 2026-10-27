@@ -58,7 +58,10 @@ def verify(data, capture):
     base = int(capture['image_base'], 0)
     if target != (0x123456789abcdef0 if kind == 1 else section + 0x100):
         raise ValueError('unexpected resolver input')
-    if base != target - 0x200:
+    if capture.get('base100') and capture.get('noexec'):
+        if base != 0x10000000:
+            raise ValueError('unexpected NO_EXEC image base')
+    elif base != target - 0x200 and not (kind == 3 and base == section):
         raise ValueError('unexpected image-base input')
     addend = int.from_bytes(before[offset:offset + width], 'little')
     if kind == 4 and addend & (1 << 31):

@@ -1564,11 +1564,14 @@ allocator, and capture runner separately, then checks both modes twice for
 all five fixtures. Pass `--native-archive`, `--config-include`, and
 `--fs-include` as for the portable driver; Linux also needs
 `--rts-fs-archive`. `--cc` accepts the compiler and sanitizer flags. In
-NO_EXEC the configured base is `0x0fffff00`; the first page-aligned section
-starts at `0x10000000`, making the ADDR32NB reference match the normal
-capture's explicit base. The NO_EXEC run uses the actual image-base service,
-section write pointers differ from their execution addresses, and the oracle
-compares the complete relocated section against each normal-mode golden. The
+NO_EXEC the original comparisons use `0x0fffff00`, placing the first section
+at `0x10000000` and matching the normal capture's explicit ADDR32NB base. A
+second set uses the specified `noexec_base=0x10000000` for every fixture;
+its ADDR32NB reference was captured separately from the pre-conversion backend
+with the image base at the section start. The NO_EXEC run uses the actual
+image-base service, section write pointers differ from their execution
+addresses, and the oracle compares each complete section against its
+normal-mode golden. The
 REL32_1 through REL32_5 fixtures retain their documented unsupported outcome;
 the driver verifies rejection and unchanged section bytes in both modes.
 
@@ -1727,4 +1730,6 @@ Allocation tracing identified the prior remaining allocations as `setSymbolInfo`
 values: object teardown discarded the hash table without freeing its owned
 values, while repeated updates inserted the same value again. The repair inserts
 only new values and frees each owned value during object teardown. The portable
-COMDAT test passes under Apple Clang ASan/UBSan with the owner ledger enabled.
+COMDAT test passes under Apple Clang and Linux GCC ASan/UBSan with the owner
+ledger enabled. The Linux ASan/UBSan `noexec_core` ELF ownership and lifecycle
+unit also passes against the same fresh all-backends archive.

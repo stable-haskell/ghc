@@ -25,16 +25,17 @@ static void print_bytes(const uint8_t *bytes, size_t size)
 
 int main(int argc, char **argv)
 {
-    bool noexec = false, expect_unsupported = false;
+    bool noexec = false, expect_unsupported = false, base100 = false;
     int arg = 1;
     while (arg < argc - 1) {
         if (strcmp(argv[arg], "--noexec") == 0) noexec = true;
         else if (strcmp(argv[arg], "--expect-unsupported") == 0) expect_unsupported = true;
+        else if (strcmp(argv[arg], "--base100") == 0) base100 = true;
         else break;
         ++arg;
     }
     if (arg != argc - 1) {
-        (void)fprintf(stderr, "usage: coff_capture [--noexec] [--expect-unsupported] object\n");
+        (void)fprintf(stderr, "usage: coff_capture [--noexec] [--base100] [--expect-unsupported] object\n");
         return 2;
     }
     const char *path = argv[arg];
@@ -47,7 +48,8 @@ int main(int argc, char **argv)
     ll_compat_host_ops ops = make_ops(&host_a);
     ll_compat_config config = {.always_pic = true,
         .flags = noexec ? LL_CFG_NO_EXEC | LL_CFG_ALL_FORMATS : 0,
-        .noexec_base = noexec ? UINT64_C(0x0fffff00) : 0};
+        .noexec_base = noexec ? (base100 ? UINT64_C(0x10000000)
+                                        : UINT64_C(0x0fffff00)) : 0};
     ll_install_host_for(&owner, &ops, &config);
     ll_init_linker(&owner, 0);
     ll_init_linker_mmap(&owner);
@@ -87,7 +89,8 @@ int main(int argc, char **argv)
     memcpy(before, site_section->start, site_section->size);
     uintptr_t section_address = site_section->exec_start;
     uintptr_t target = record.Type == 1 ? UINT64_C(0x123456789abcdef0) : section_address + 0x100;
-    capture_image_base = target - 0x200;
+    capture_image_base = noexec && base100 ? config.noexec_base
+                       : base100 && record.Type == 3 ? section_address : target - 0x200;
     const char *name = strstr(path, "import-thunk.o") != NULL
                      ? "__imp_ll_fixture_import" : "ll_fixture_target";
     ll_sym_type type = name[0] == '_' ? LL_SYM_INDIRECT_DATA : LL_SYM_DATA;
@@ -111,9 +114,10 @@ int main(int argc, char **argv)
         (void)fprintf(stderr, "COFF resolution failed: %d %s\n", owner.error_status, owner.error_message);
         return 1;
     }
-    (void)printf("{\"schema\":1,\"type\":%u,\"section_address\":\"0x%" PRIxPTR
+    (void)printf("{\"schema\":1,\"noexec\":%s,\"base100\":%s,\"type\":%u,\"section_address\":\"0x%" PRIxPTR
                  "\",\"target\":\"0x%" PRIxPTR "\",\"image_base\":\"0x%" PRIxPTR
-                 "\",\"offset\":%zu,\"before\":\"", (unsigned)record.Type,
+                 "\",\"offset\":%zu,\"before\":\"", noexec ? "true" : "false",
+                 base100 ? "true" : "false", (unsigned)record.Type,
                  section_address, target, capture_image_base, offset);
     print_bytes(before, site_section->size);
     (void)printf("\",\"after\":\"");
