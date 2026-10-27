@@ -24,6 +24,45 @@ class NativeCommandTests(unittest.TestCase):
             self.assertEqual(suffix, ".so")
             self.assertEqual(args[-1], "/tmp/input.o")
 
+    def test_cabal_response_file_logged_args(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            main = root / "build.log"
+            package = root / "package.log"
+            main.write_text("completed liblink\n")
+            package.write_text(
+                "Linking DynWay library...\n"
+                "GHC response file arguments: -package-env=- -shared -dynamic "
+                "-package-id rts-fs-1.0.0.0 /tmp/input.dyn_o "
+                "-o /tmp/build/libHSliblink-0.1.0.0-ghc9.14.so\n"
+                "Running: /usr/bin/ghc @/tmp/ghc123.rsp\n"
+            )
+            args, suffix, source = native_command([main, package])
+            self.assertEqual(source, package)
+            self.assertEqual(suffix, ".so")
+            self.assertEqual(args[0], "/usr/bin/ghc")
+            self.assertIn("-shared", args)
+            self.assertIn("-dynamic", args)
+            self.assertIn("/tmp/input.dyn_o", args)
+            self.assertEqual(args[args.index("-o") + 1], "/tmp/build/libHSliblink-0.1.0.0-ghc9.14.so")
+
+    def test_cabal_response_file_on_disk(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            rsp = root / "ghc123.rsp"
+            rsp.write_text(
+                "-shared -dynamic -package-id rts-fs-1.0.0.0 "
+                "/tmp/input.dyn_o -o /tmp/build/libHSliblink-0.1.0.0-ghc9.14.dylib\n"
+            )
+            package = root / "package.log"
+            package.write_text(f"Running: /usr/bin/ghc @{rsp}\n")
+            args, suffix, source = native_command([package])
+            self.assertEqual(source, package)
+            self.assertEqual(suffix, ".dylib")
+            self.assertEqual(args[0], "/usr/bin/ghc")
+            self.assertIn("-shared", args)
+            self.assertIn("/tmp/input.dyn_o", args)
+
     def test_missing_command_is_rejected(self):
         with TemporaryDirectory() as directory:
             log = Path(directory) / "build.log"

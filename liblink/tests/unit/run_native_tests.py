@@ -158,11 +158,56 @@ def locate_artifacts(build_root: Path, store_root: Path) -> tuple[Path, Path, Pa
         and path.parent.parent.name == "build"
         and "liblink-0.1.0.0" in path.parts
     ]
-    archive = unique_path(archives, "stage2 native liblink.a")
-    config_include = archive.parent.parent / "include"
-    for header in ("ll_autoconf.h", "ll_platform.h"):
-        if not (config_include / header).is_file():
-            raise RuntimeError(f"missing generated liblink header: {config_include / header}")
+    if not archives:
+        archives = [
+            path
+            for path in store_root.rglob("libHSliblink*.a")
+            if "liblink-0.1.0.0" in path.parts
+        ]
+    if not archives:
+        archives = [
+            path
+            for path in build_root.rglob("libHSliblink*.a")
+            if "liblink-0.1.0.0" in path.parts
+            and "objs-" not in path.parts
+        ]
+    if not archives:
+        archives = [
+            path
+            for path in list(build_root.rglob("liblink.a")) + list(store_root.rglob("liblink.a"))
+            if "liblink-0.1.0.0" in path.parts
+        ]
+    archive = unique_path(archives, "stage2 native liblink archive")
+
+    if archive.name != "liblink.a":
+        liblink_alias = archive.parent / "liblink.a"
+        if not liblink_alias.exists():
+            try:
+                liblink_alias.symlink_to(archive.name)
+            except OSError:
+                import shutil
+                shutil.copy2(archive, liblink_alias)
+        archive = liblink_alias
+
+    candidates = [
+        archive.parent / "include",
+        archive.parent.parent / "include",
+        ROOT / "liblink/include",
+    ]
+    config_include = None
+    for candidate in candidates:
+        if (candidate / "ll_autoconf.h").is_file() and (candidate / "ll_platform.h").is_file():
+            config_include = candidate
+            break
+    if config_include is None:
+        for h in list(store_root.rglob("ll_platform.h")) + list(build_root.rglob("ll_platform.h")):
+            if (h.parent / "ll_autoconf.h").is_file():
+                config_include = h.parent
+                break
+    if config_include is None:
+        raise RuntimeError(
+            f"missing generated liblink headers (ll_autoconf.h, ll_platform.h) under {archive.parent}"
+        )
 
     fs_headers = [
         path
@@ -1180,6 +1225,15 @@ def main() -> int:
         archive = args.native_archive.resolve()
         if not archive.is_file():
             raise RuntimeError(f"native liblink archive does not exist: {archive}")
+        if archive.name != "liblink.a":
+            liblink_alias = archive.parent / "liblink.a"
+            if not liblink_alias.exists():
+                try:
+                    liblink_alias.symlink_to(archive.name)
+                except OSError:
+                    import shutil
+                    shutil.copy2(archive, liblink_alias)
+            archive = liblink_alias
     link_flags = native_link_flags(
         host,
         rts_fs_archive,

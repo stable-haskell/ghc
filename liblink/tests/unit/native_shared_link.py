@@ -11,16 +11,38 @@ import subprocess
 
 def native_command(logs):
     for log in logs:
-        for line in reversed(log.read_text(errors="replace").splitlines()):
+        if not log.is_file():
+            continue
+        lines = log.read_text(errors="replace").splitlines()
+        for i in reversed(range(len(lines))):
+            line = lines[i]
             if not line.startswith("Running: "):
                 continue
-            args = shlex.split(line[len("Running: "):])
+            cmd_args = shlex.split(line[len("Running: "):])
+            if not cmd_args:
+                continue
+            args = None
+            if len(cmd_args) == 2 and cmd_args[1].startswith("@"):
+                rsp_path = Path(cmd_args[1][1:])
+                if rsp_path.is_file():
+                    args = [cmd_args[0]] + shlex.split(rsp_path.read_text(errors="replace"))
+                else:
+                    for j in range(i - 1, max(-1, i - 15), -1):
+                        if lines[j].startswith("GHC response file arguments: "):
+                            args = [cmd_args[0]] + shlex.split(lines[j][len("GHC response file arguments: "):])
+                            break
+            if args is None:
+                args = cmd_args
+
             if "-shared" not in args or "-dynamic" not in args or "-o" not in args:
                 continue
             output = Path(args[args.index("-o") + 1])
-            if output.parent.name == "native-linker" and output.name in (
-                "liblink.dylib", "liblink.so", "link.dll"
-            ):
+            is_liblink = (
+                (output.parent.name == "native-linker" and output.name in ("liblink.dylib", "liblink.so", "link.dll"))
+                or (output.name.startswith("libHSliblink") and any(output.name.endswith(ext) for ext in (".so", ".dylib", ".dll")))
+                or output.name in ("liblink.dylib", "liblink.so", "link.dll")
+            )
+            if is_liblink:
                 return args, output.suffix, log
     raise AssertionError("no native shared link in verbose Cabal logs: " + ", ".join(map(str, logs)))
 
@@ -61,7 +83,11 @@ def main():
     args, suffix, source_log = native_command(logs)
     units = [args[i + 1] for i, arg in enumerate(args) if arg == "-package-id"]
     assert len(units) == 1 and units[0].startswith("rts-fs-"), units
-    objects = [Path(arg) for arg in args if arg.endswith(".o")]
+    objects = [
+        Path(arg)
+        for arg in args
+        if arg.endswith((".o", ".dyn_o", ".obj", ".dyn_obj"))
+    ]
     assert objects and all(path.is_absolute() for path in objects), "missing native objects"
     before = hashes(objects)
     out = options.out.resolve()
