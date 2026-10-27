@@ -135,13 +135,14 @@ legacy API's 32-bit target result while avoiding a host-pointer-sized access
 to a 32-bit variable. Normal-mode 32-bit ELF baselines and NO_EXEC qualification
 remain separate work.
 
-WP2.8d suspect: the existing Thumb CALL/JUMP24 overflow condition in
-`linker/Elf.c` compares a 32-bit offset with `<= 0xff000000 || >= 0x01000000`.
-Those unsigned ranges cover all 32-bit values. A normal-mode `qemu-arm`
-capture of `R_ARM_THM_CALL` used target `0x40805080` and site `0x4098b00c`
-and nevertheless created a veneer at `0x4098b010`. This is an observation,
-not a completed independent relocation check or a change to the condition.
-The suspect requires escalation under the WP2.8d stop conditions.
+The same unit checks the Thumb CALL/JUMP24 signed 25-bit displacement range,
+including both endpoints and adjacent out-of-range values. Previously the
+unsigned comparisons covered all offsets, so a near call created a veneer.
+The relocation loop now also derives the encoded sign from the final offset.
+`elf_arm_thumb_capture.py` checks the decoded destination of an actual
+normal-mode Thumb call with a near target and a far target requiring a veneer.
+Pass `--capture` with the ARM capture command (including a QEMU runner when
+needed) and `--fixture` with the `R_ARM_THM_CALL.o` fixture path.
 
 `noexec_tail.c` tests the private payload-plus-tail heap reservation helper:
 alignment, checked padding/extents, zero fill, unchanged outputs/address state

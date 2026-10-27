@@ -1632,8 +1632,8 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
            S = S + A; A = 0;
 
            offset = ((S + A) | T) - P;
-           overflow = offset <= (ll_word32)0xff000000
-                   || offset >= (ll_word32)0x01000000;
+           overflow = elf_arm_thumb_branch_overflow(offset);
+           sign = offset >> 31;
 
            if ((!is_target_thm && LL_ELF_R_TYPE(info) == COMPAT_R_ARM_THM_JUMP24)
                || overflow) {

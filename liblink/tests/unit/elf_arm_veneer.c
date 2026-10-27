@@ -42,6 +42,18 @@ bool elf_makeStub(ll_linker *L, Section *section, void **addr,
 
 int main(void)
 {
+    static const struct { uint32_t offset; bool overflow; } ranges[] = {
+        {UINT32_C(0xfeffffff), true}, {UINT32_C(0xff000000), false},
+        {UINT32_C(0xffffffff), false}, {0, false},
+        {UINT32_C(0x00ffffff), false}, {UINT32_C(0x01000000), true},
+        {UINT32_C(0x7fffffff), true}, {UINT32_C(0x80000000), true}
+    };
+    for (size_t i = 0; i < sizeof(ranges) / sizeof(ranges[0]); ++i) {
+        if (elf_arm_thumb_branch_overflow(ranges[i].offset) != ranges[i].overflow) {
+            (void)fprintf(stderr, "ARM Thumb range failed: 0x%08x\n", ranges[i].offset);
+            return 1;
+        }
+    }
     struct { uint32_t before, target, after; } guarded;
     for (unsigned flags = 0; flags < 2; ++flags) {
         for (unsigned mode = 0; mode < 3; ++mode) {
