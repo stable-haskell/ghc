@@ -128,6 +128,17 @@ Darwin linker syntax.
 Stage2 native C unit driver
 ===========================
 
+`test_elf32.py` replays 15 independently checked normal-mode i386 and ARM
+ELF references, including near and far ARM/Thumb branches. It checks original
+REL records, symbol-derived GOT payloads, whole sections and veneer storage,
+and rejects corrupt observations. The captures used the real 32-bit backends
+under `qemu-i386` and `qemu-arm` after the authorized Thumb repairs. Set
+`LIBLINK_ELF32_I386_CAPTURE` or `LIBLINK_ELF32_ARM_CAPTURE` to a capture
+command, including any QEMU runner, to compare fresh captures. The standalone
+replay is `python3 -m unittest discover -s liblink/tests/oracle -p
+'test_elf32*.py' -v`. These are normal-mode references; NO_EXEC qualification
+is separate.
+
 `elf_arm_veneer.c` checks the ARM veneer adapter's pointer-width storage on
 64-bit hosts. It covers ARM and Thumb flags, stub lookup, creation and failure,
 target conversion and unchanged adjacent words. The adapter preserves the

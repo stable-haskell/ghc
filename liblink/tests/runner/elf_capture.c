@@ -15,8 +15,8 @@
 #include <string.h>
 #include <unistd.h>
 
-#if !LL_BUILD_ELF || !(LL_TARGET_X86_64 || LL_TARGET_AARCH64) || defined(mingw32_HOST_OS) || SIZEOF_VOID_P != 8
-#error "elf_capture requires the ELF x64/AArch64 backend on a 64-bit POSIX host"
+#if !LL_BUILD_ELF || !(LL_TARGET_X86_64 || LL_TARGET_AARCH64 || LL_TARGET_I386 || LL_TARGET_ARM) || defined(mingw32_HOST_OS)
+#error "elf_capture requires an x86 or ARM ELF backend on a POSIX host"
 #endif
 
 #define CAPTURE_LIMIT ((size_t)64 * 1024 * 1024)
@@ -178,7 +178,7 @@ static void emit_capture(const ObjectCode *object, const CaptureHost *host,
         json_bytes(before[i], (size_t)section->size);
         (void)fputs(",\"after\":", stdout);
         json_bytes(section->start, (size_t)section->size);
-#if LL_TARGET_AARCH64
+#if LL_TARGET_AARCH64 || LL_TARGET_ARM
         const struct ll_elf_section_info *info = section->elf_info;
         (void)printf(",\"stubs\":{\"address\":\"0x%" PRIxPTR
                      "\",\"size\":%zu,\"before\":", (uintptr_t)info->stub_offset,
@@ -250,7 +250,11 @@ int main(int argc, char **argv)
     }
 
     CaptureHost state = {.function_address = far_function
+#if LL_TARGET_I386 || LL_TARGET_ARM
+        ? (uintptr_t)UINT32_C(0x70000000) : 0,
+#else
         ? (uintptr_t)UINT64_C(0x700000000000) : 0,
+#endif
         .data_address = CAPTURE_DATA_ADDRESS};
     ll_linker owner = {0};
     ll_compat_host_ops host = {.ctx = &state, .calloc_ = probe_calloc,
@@ -290,7 +294,7 @@ int main(int argc, char **argv)
         before[i] = malloc((size_t)section->size);
         if (before[i] == NULL) goto done;
         memcpy(before[i], section->start, (size_t)section->size);
-#if LL_TARGET_AARCH64
+#if LL_TARGET_AARCH64 || LL_TARGET_ARM
         const size_t size = section->elf_info->stub_size;
         if (size > CAPTURE_LIMIT) goto done;
         if (size != 0) {

@@ -1,0 +1,84 @@
+{
+  "field": {
+    "P": "0x425326",
+    "S": "0x12345000",
+    "after": "04000000",
+    "before": "00000000"
+  },
+  "machine": 3,
+  "object_sha256": "916d87628dccda90cae9c0de10525f3fbd07780a1f72d2c699575fcb1aef49cd",
+  "reference_capture": {
+    "error": "",
+    "extras": {
+      "address": "0x0",
+      "after": "",
+      "before": "",
+      "count": 0,
+      "exec_address": "0x0",
+      "first": 0,
+      "jump_offset": 8,
+      "stride": 0
+    },
+    "got": {
+      "address": "0x4083d000",
+      "after": "2453420000503412",
+      "exec_address": "0x4083d000",
+      "size": 8
+    },
+    "host_symbols": {
+      "external_data": "0x12345000",
+      "external_function": "0x426364",
+      "external_function_alias": "0x426364",
+      "external_second_function": "0x427364"
+    },
+    "initializers_ran": false,
+    "noexec": false,
+    "resolved": true,
+    "schema": "liblink-elf-native-address-v1",
+    "sections": [
+      {
+        "address": "0x425364",
+        "after": "00666978747572655f693338365f676f74333278002e72656c2e74657874002e737472746162002e73796d7461620065787465726e616c5f6461746100",
+        "before": "00666978747572655f693338365f676f74333278002e72656c2e74657874002e737472746162002e73796d7461620065787465726e616c5f6461746100",
+        "exec_address": "0x425364",
+        "index": 1,
+        "size": 61
+      },
+      {
+        "address": "0x425324",
+        "after": "8b8304000000",
+        "before": "8b8300000000",
+        "exec_address": "0x425324",
+        "index": 2,
+        "size": 6
+      },
+      {
+        "address": "0x42535c",
+        "after": "020000002b020000",
+        "before": "020000002b020000",
+        "exec_address": "0x42535c",
+        "index": 3,
+        "size": 8
+      },
+      {
+        "address": "0x42532c",
+        "after": "00000000000000000000000000000000010000000000000000000000100002002f000000000000000000000010000000",
+        "before": "00000000000000000000000000000000010000000000000000000000100002002f000000000000000000000010000000",
+        "exec_address": "0x42532c",
+        "index": 4,
+        "size": 48
+      }
+    ],
+    "status": 0
+  },
+  "schema": 1,
+  "semantic": {
+    "addend": 0,
+    "got_slot": 1,
+    "offset": 2,
+    "section": 2,
+    "symbol": "external_data",
+    "type": "GOT32X",
+    "veneer": false
+  }
+}
