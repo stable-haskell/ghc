@@ -1677,3 +1677,13 @@ repair uses `memcpy` and the one-symbol portable regression above. The capture u
 `/usr/bin/clang -fsanitize=address,undefined -fno-sanitize-recover=undefined`
 with `ASAN_OPTIONS=detect_leaks=0`. NO_EXEC relocation qualification remains
 in progress.
+
+The in-progress NO_EXEC COMMON-symbol portable case reaches zero-filled BSS
+and publishes a synthetic symbol, but its owner ledger reports an allocation
+remaining after the fixture's existing metadata cleanup. The normal and
+NO_EXEC initialized-data cases pass the same ledger check. The failure is
+reproducible with `run_pei386_portable.py` using MinGW GCC `-fcommon` and
+Apple Clang ASan/UBSan; no sanitizer diagnostic preceded the ledger failure.
+The allocation's owner and whether this is existing PE metadata or new
+NO_EXEC ownership have not been established. This suspect is recorded for
+section 13 escalation; the COMMON case and NO_EXEC changes remain uncommitted.
