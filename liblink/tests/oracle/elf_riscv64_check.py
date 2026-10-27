@@ -23,12 +23,12 @@ def insert(word, value, fields):
     return word
 
 
-def verify(original, capture):
+def verify(original, capture, *, noexec=False):
     sections = parse(original, 243)
     require(capture['schema'] == 'liblink-elf-native-address-v1', 'wrong capture schema')
     require(capture['resolved'] and capture['status'] == 0 and not capture['error']
             and not capture['initializers_ran'], 'capture did not resolve cleanly')
-    require(not capture.get('noexec', False), 'baseline oracle requires normal mode')
+    require(capture.get('noexec', False) == noexec, 'unexpected execution mode')
     loaded, expected, stubs = {}, {}, {}
     for sample in capture['sections']:
         index = sample['index']
@@ -37,8 +37,9 @@ def verify(original, capture):
         require(sample['size'] == sections[index]['size'] == len(before) == len(after) and
                 before == sections[index]['bytes'],
                 'captured source section differs')
-        require(int(sample['address'], 0) == int(sample['exec_address'], 0),
-                'normal section work and execution addresses differ')
+        work, execution = int(sample['address'], 0), int(sample['exec_address'], 0)
+        require((work != execution) if noexec else (work == execution),
+                'section work and execution addresses do not match the mode')
         loaded[index] = sample
         expected[index] = bytearray(before)
         stubs[index] = bytearray.fromhex(sample['stubs']['before'])
@@ -73,8 +74,11 @@ def verify(original, capture):
             slots[table, index] = len(values)
             values.append(symbol(table, index)[2])
     got = capture['got']
-    require(int(got['address'], 0) == int(got['exec_address'], 0),
-            'normal GOT work and execution addresses differ')
+    work, execution = int(got['address'], 0), int(got['exec_address'], 0)
+    if not noexec:
+        require(work == execution, 'normal GOT work and execution addresses differ')
+    elif got['size']:
+        require(work != execution, 'NO_EXEC GOT work and execution addresses coincide')
     require(got['size'] == 8 * len(values) and
             bytes.fromhex(got['after']) == b''.join(struct.pack('<Q', v) for v in values),
             'GOT values differ')
@@ -135,7 +139,9 @@ def verify(original, capture):
                 if matches:
                     stub = matches[0]
                 else:
-                    work = int(loaded[target]['address'], 0) + sections[target]['size'] + 12 * len(entries)
+                    size = sections[target]['size']
+                    tail_offset = (size + 3) & ~3 if noexec else size
+                    work = int(loaded[target]['address'], 0) + tail_offset + 12 * len(entries)
                     stub = dict(address=hex(work), target=hex(S), flags=0, got_address=hex(G))
                     entries.append(stub)
                 work = int(loaded[target]['address'], 0)
@@ -196,8 +202,10 @@ def verify(original, capture):
         require(sample['stubs']['size'] == stub_capacity[index] * 12,
                 f'stub capacity {index} differs')
         if stub_capacity[index]:
+            size = sample['size']
+            tail_offset = (size + 3) & ~3 if noexec else size
             require(int(sample['stubs']['address'], 0) ==
-                    int(sample['address'], 0) + sample['size'], 'stub placement differs')
+                    int(sample['address'], 0) + tail_offset, 'stub placement differs')
         require(sample['stubs']['entries'] == expected_entries[index],
                 f'stub list {index} differs')
         require(stubs[index] == bytes.fromhex(sample['stubs']['after']), f'stub {index} differs')

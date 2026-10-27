@@ -1146,7 +1146,7 @@ int ll_init_object(ObjectCode *oc)
     if (ll_noexec_enabled(oc->L)) {
         bool supported = false;
 #if LL_BUILD_ELF && (LL_TARGET_I386 || LL_TARGET_ARM || \
-    ((LL_TARGET_X86_64 || LL_TARGET_AARCH64) && SIZEOF_VOID_P == 8))
+    ((LL_TARGET_X86_64 || LL_TARGET_AARCH64 || LL_TARGET_RISCV64) && SIZEOF_VOID_P == 8))
         supported = oc->format_ops == &ll_format_elf;
 #endif
 #if LL_BUILD_MACHO && (LL_TARGET_X86_64 || LL_TARGET_AARCH64) && SIZEOF_VOID_P == 8

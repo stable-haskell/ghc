@@ -122,7 +122,7 @@ forces branch veneers. --negative-data puts the independent resolver input in
 the preceding page for PREL32/ADRP negative controls. Ordinary AArch64 resolver
 inputs derive from the chosen section layout and retain a nonzero aligned low
 offset, so narrow and scaled fields have useful in-range values. No instruction
-is executed, and AArch64 NO_EXEC remains unsupported by the library.
+is executed by this capture.
 
     "$CC" -std=c11 -Wall -Wextra -Werror=vla -pedantic -DLL_ASSERTS \
       -DLL_ALL_BACKENDS -isystem "$LIBLINK_CONFIG_INCLUDE" \

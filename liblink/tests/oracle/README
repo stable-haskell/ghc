@@ -136,19 +136,21 @@ must be separate. Each live reference runs twice when the AArch64 capture is
 available. The classifier reads one instruction word so short sections remain
 within bounds. Two-host and AArch64 execution qualification remain open.
 
-ELF RISC-V normal-mode checks
+ELF RISC-V relocation checks
 ----------------------------
 
 elf_riscv64_check.py parses the original ELF records and independently checks
 23 reference fixtures, including branch encodings, paired PC-relative HI/LO
 relocations, GOT entries, call veneers, unchanged bytes and the backend's
-existing 32-bit operand narrowing. The baseline does not assert NO_EXEC or
-native RISC-V execution. To replay saved captures and corruption controls:
+existing 32-bit operand narrowing. To replay saved captures and corruption controls:
 
     python3 -m unittest discover -s liblink/tests/oracle -p test_elf_riscv64.py -v
 
-Set LIBLINK_ELF_RISCV64_CAPTURE to a compatible capture executable to repeat the
-checks against live data-only captures. The initial mixed-target Darwin build
-uses host-target Mach-O units and does not qualify native RISC-V execution.
+Set LIBLINK_ELF_RISCV64_CAPTURE to a compatible capture executable to check live
+normal captures and two NO_EXEC captures per fixture. NO_EXEC references retain
+synthetic execution layout and bytes, while excluding heap addresses; the oracle
+independently checks the encodings and rejects corrupted section bytes. The
+mixed-target Darwin build is data-only. Two-host NO_EXEC stability and native
+RISC-V or QEMU execution remain unqualified.
 The RISC-V ELF psABI specifies relocation and instruction field encodings:
 https://github.com/riscv-non-isa/riscv-elf-psabi-doc/blob/master/riscv-elf.adoc

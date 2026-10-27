@@ -588,6 +588,15 @@ the native wrapper, checks adjacent bytes and an out-of-range branch, and
 exercises several instruction and data widths. This data-only unit does not
 execute RISC-V instructions; the current CI matrix has no native RISC-V job.
 
+RISC-V typed relocation sites
+============================
+
+On native Linux RISC-V, `elf_riscv64_sites.c` includes the actual relocation
+backend and checks separate work/execution addresses, selected GOT slots,
+fake-extra identity, paired HI values including zero, missing and unsupported
+pairs, range failures, and unchanged adjacent bytes. The data-only unit does
+not execute RISC-V instructions; the current CI matrix has no native RISC-V job.
+
 AArch64 ELF relocation errors
 =============================
 

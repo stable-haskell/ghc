@@ -741,7 +741,7 @@ static int noexec_section_ELF(ObjectCode *oc, ll_elf_target_word index,
     ll_noexec_block block;
     const size_t alignment = header->sh_addralign != 0 ? header->sh_addralign : 1;
     size_t tail_size = 0, tail_offset = header->sh_size;
-#if LL_TARGET_AARCH64 || LL_TARGET_ARM
+#if LL_TARGET_AARCH64 || LL_TARGET_ARM || LL_TARGET_RISCV64
     if (kind != SECTIONKIND_OTHER && header->sh_size != 0 && !is_bss) {
         const size_t count = elf_numberOfStubsForSection(oc, index);
         if (count > SIZE_MAX / STUB_SIZE) {

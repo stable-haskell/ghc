@@ -1717,6 +1717,23 @@ def main() -> int:
                                 included_source="RISC-V ELF stub bodies",
                                 forbidden_member=member)
             run([str(stub_test)], label="run elf_riscv64_stub_sites")
+
+            reloc_sites = output / "elf_riscv64_sites"
+            reloc_sites_map = output / "elf_riscv64_sites.map"
+            reloc_sites_trace = run(
+                cc + [str(ROOT / "liblink/tests/unit/elf_riscv64_sites.c"),
+                      f"-L{archive.parent}", "-llink", *link_flags, "-Wl,-t",
+                      linker_map_flag(reloc_sites_map), "-o", str(reloc_sites)],
+                label="compile and link elf_riscv64_sites",
+            )
+            verify_link_map(reloc_sites_map, archive, reloc_sites_trace,
+                            included_source="linker/elf_reloc_riscv64.c",
+                            forbidden_member="elf_reloc_riscv64")
+            for member in ("elf_plt", "elf_plt_riscv64"):
+                verify_link_map(reloc_sites_map, archive, reloc_sites_trace,
+                                included_source="RISC-V ELF apply dependencies",
+                                forbidden_member=member)
+            run([str(reloc_sites)], label="run elf_riscv64_sites")
         else:
             print(
                 "[riscv64_reloc_errors] skipped: generated config is not "

@@ -17,6 +17,10 @@ typedef struct {
     const char *symbol_name;
     uint32_t format_symbol_type;
     uintptr_t got_exec; /* selected symbol's GOT slot exec address, or zero */
+    /* Optional RISC-V paired HI result, resolved within the same RELA table.
+     * Zero is a valid operand and therefore has a separate presence flag. */
+    bool paired_hi_valid;
+    int32_t paired_hi_value;
 } ll_reloc_context;
 
 struct ll_reloc_ops {

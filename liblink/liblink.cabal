@@ -196,6 +196,7 @@ extra-source-files:
     tests/unit/elf_aarch64_stub_sites.c
     tests/unit/elf_riscv64_stub_sites.c
     tests/unit/elf_riscv64_encoder_sites.c
+    tests/unit/elf_riscv64_sites.c
     tests/unit/elf_aarch64_encoder_sites.c
     tests/unit/elf_aarch64_sites.c
     tests/unit/elf_aarch64_classifier.c
@@ -222,6 +223,7 @@ extra-source-files:
     tests/oracle/test_elf_aarch64.py
     tests/oracle/elf_riscv64_check.py
     tests/oracle/test_elf_riscv64.py
+    tests/golden/elf-riscv64-noexec.json
     tests/golden/elf-x86_64/*.json
     tests/golden/elf-x86_64-noexec/*.json
     tests/golden/elf-aarch64/*.json

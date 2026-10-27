@@ -45,9 +45,6 @@ bool setCJType(ll_linker *L, cinst_t *loc, uint32_t val);
 bool setCBType(ll_linker *L, cinst_t *loc, uint32_t val);
 bool setBType(ll_linker *L, inst_t *loc, uint32_t val);
 void setSType(inst_t *loc, uint32_t val);
-bool computeAddend(ElfRelocationATable *relaTab, unsigned relNo, ll_elf_target_rel *rel,
-                   ElfSymbol *symbol, int64_t addend, ObjectCode *oc,
-                   int32_t *computed);
 bool setJType(ll_linker *L, inst_t *loc, uint32_t val);
 void setIType(ll_linker *L, inst_t *loc, int32_t val);
 bool checkInt(ll_linker *L, const void *loc, int32_t v, int n);
@@ -443,35 +440,23 @@ bool encodeAddendRISCV64(ll_linker *L, Section *section,
 
 /**
  * Compute the *new* addend for a relocation, given a pre-existing addend.
- * @param section The section the relocation is in.
- * @param rel     The Relocation struct.
- * @param symbol  The target symbol.
- * @param addend  The existing addend. Either explicit or implicit.
- * @param computed Receives the existing 32-bit computed value on success.
- * @return True on success; failure leaves computed unchanged.
+ * Compute using the execution address, retaining the existing 32-bit result.
  */
-bool computeAddend(ElfRelocationATable *relaTab, unsigned relNo, ll_elf_target_rel *rel,
-                   ElfSymbol *symbol, int64_t addend, ObjectCode *oc,
-                   int32_t *computed) {
-  Section * section = &oc->sections[relaTab->targetSectionIndex];
-
-  // instruction to rewrite (P: Position of the relocation)
-  addr_t P = (addr_t)((uint8_t *)section->start + rel->r_offset);
-
-  LL_CHECK_FOR(oc->L, 0x0 != P);
-  LL_CHECK_FOR(oc->L, (uint64_t)section->start <= P);
-  LL_CHECK_FOR(oc->L, P <= (uint64_t)section->start + section->size);
-  // S: Value of the symbol in the symbol table
-  addr_t S = (addr_t)symbol->addr;
-  /* GOT slot for the symbol (G + GOT) */
-  addr_t GOT_S = (addr_t)symbol->got_addr;
+static bool computeAddendSite(ObjectCode *oc, Section *section,
+                              ll_elf_target_rel *rel, ll_site site,
+                              addr_t S, int64_t addend,
+                              const ll_reloc_context *context,
+                              int32_t *computed) {
+  const addr_t work = (addr_t)site.work;
+  const addr_t P = site.exec;
+  const addr_t GOT_S = context->got_exec;
+  LL_CHECK_FOR(oc->L, work != 0);
+  LL_CHECK_FOR(oc->L, (uint64_t)section->start <= work);
+  LL_CHECK_FOR(oc->L, work <= (uint64_t)section->start + section->size);
 
   // A: Addend field in the relocation entry associated with the symbol
   int64_t A = addend;
 
-  LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "%s: P 0x%lx S 0x%lx %s GOT_S 0x%lx A 0x%lx relNo %u\n",
-                              relocationTypeToString(rel->r_info), P, S,
-                              symbol->name, GOT_S, A, relNo));
   switch (LL_ELF64_R_TYPE(rel->r_info)) {
   case LL_ELF_R_RISCV_32:
     *computed = S + A;
@@ -498,62 +483,17 @@ bool computeAddend(ElfRelocationATable *relaTab, unsigned relNo, ll_elf_target_r
     // the symbol actually points the corresponding R_RISCV_PCREL_HI20
     // relocation, and the target VA is calculated using PCREL_HI20's symbol.
   case LL_ELF_R_RISCV_PCREL_LO12_S:
-    LL_FALLTHROUGH;
-  case LL_ELF_R_RISCV_PCREL_LO12_I: {
-    // Lookup related HI20 relocation and use that value. I'm still confused why
-    // relocations aren't self-contained, but this is how LLVM does it. And,
-    // calculating the lower 12 bit without any relationship to the GOT entry's
-    // address makes no sense either.
-      for (int64_t i = relNo; i >= 0 ; i--) {
-        ll_elf_target_rela *rel_prime = &relaTab->relocations[i];
-
-        addr_t P_prime =
-            (addr_t)((uint8_t *)section->start + rel_prime->r_offset);
-
-        if (P_prime != S) {
-          // S points to the P of the corresponding *_HI20 relocation.
-          continue;
-        }
-
-        ElfSymbol *symbol_prime =
-            findSymbol(oc, relaTab->sectionHeader->sh_link,
-                       LL_ELF64_R_SYM((ll_elf64_xword)rel_prime->r_info));
-
-        LL_CHECK_FOR(oc->L, 0x0 != symbol_prime);
-
-        /* take explicit addend */
-        int64_t addend_prime = rel_prime->r_addend;
-
-        uint64_t type_prime = LL_ELF64_R_TYPE(rel_prime->r_info);
-
-        if (type_prime == LL_ELF_R_RISCV_PCREL_HI20 ||
-            type_prime == LL_ELF_R_RISCV_GOT_HI20 ||
-            type_prime == LL_ELF_R_RISCV_TLS_GD_HI20 ||
-            type_prime == LL_ELF_R_RISCV_TLS_GOT_HI20) {
-          LL_IF_DEBUG_FOR(oc->L, linker,
-                   LL_DEBUG_FOR(oc->L,
-                       "Found matching relocation: %s (P: 0x%lx, S: 0x%lx, "
-                       "sym-name: %s) -> %s (P: 0x%lx, S: %p, sym-name: %s, relNo: %ld)",
-                       relocationTypeToString(rel->r_info), P, S, symbol->name,
-                       relocationTypeToString(rel_prime->r_info), P_prime,
-                       symbol_prime->addr, symbol_prime->name, i));
-          int32_t result;
-          if (!computeAddend(relaTab, i, (ll_elf_target_rel *)rel_prime,
-                             symbol_prime, addend_prime, oc, &result))
-            return false;
-          LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "Result of computeAddend: 0x%x (%d)\n",
-                                      result, result));
-          *computed = result;
-          return true;
-        }
+  case LL_ELF_R_RISCV_PCREL_LO12_I:
+    if (!context->paired_hi_valid) {
+      LL_DEBUG_FOR(oc->L, "Missing HI relocation for %s: P 0x%lx S 0x%lx %s\n",
+                   relocationTypeToString(rel->r_info), P, S, context->symbol_name);
+      ll_error_set(oc->L, LL_E_FORMAT,
+                   "Missing HI relocation for %s: P 0x%lx S 0x%lx %s",
+                   relocationTypeToString(rel->r_info), P, S, context->symbol_name);
+      return false;
     }
-    LL_DEBUG_FOR(oc->L, "Missing HI relocation for %s: P 0x%lx S 0x%lx %s\n",
-               relocationTypeToString(rel->r_info), P, S, symbol->name);
-    ll_error_set(oc->L, LL_E_FORMAT,
-                 "Missing HI relocation for %s: P 0x%lx S 0x%lx %s",
-                 relocationTypeToString(rel->r_info), P, S, symbol->name);
-    return false;
-  }
+    *computed = context->paired_hi_value;
+    return true;
 
   case LL_ELF_R_RISCV_RVC_JUMP:
     *computed = S + A - P;
@@ -572,20 +512,18 @@ bool computeAddend(ElfRelocationATable *relaTab, unsigned relNo, ll_elf_target_r
       GOT_Target = GOT_S;
     } else {
       // 2. Fake GOT entry with symbol extra entry.
-      ll_symbol_extra_riscv64 *symbolExtra = ll_make_symbol_extra_riscv64(oc, LL_ELF_R_SYM(rel->r_info), S);
-      addr_t* FAKE_GOT_S = &symbolExtra->addr;
-      LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "R_RISCV_CALL_PLT w/ SymbolExtra = %p , "
-                                  "entry = %p\n",
-                                  symbolExtra, FAKE_GOT_S));
-      GOT_Target = (addr_t) FAKE_GOT_S;
+      ll_site extra = ll_make_symbol_extra_riscv64_site(oc, context->symbol_index, S);
+      GOT_Target = extra.exec;
     }
 
-    if (elf_findStub(section, (void **)&S, 0)) {
-      /* did not find it. Crete a new stub. */
-      if (elf_makeStub(oc->L, section, (void **)&S, (void *)GOT_Target, 0)) {
+    ll_site stub;
+    if (elf_findStubSite(section, (void *)(uintptr_t)S, 0, &stub)) {
+      if (elf_makeStubSite(oc->L, section, (void *)(uintptr_t)S,
+                           (void *)(uintptr_t)GOT_Target, 0, &stub)) {
         abort(/* could not find or make stub */);
       }
     }
+    S = stub.exec;
     LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "R_RISCV_CALL_PLT: S = 0x%lx A = 0x%lx P = "
                                 "0x%lx (S + A) - P = 0x%lx \n",
                                 S, A, P, (S + A) - P));
@@ -648,12 +586,8 @@ bool computeAddend(ElfRelocationATable *relaTab, unsigned relNo, ll_elf_target_r
       return true;
     } else {
       // 2. Fake GOT entry with symbol extra entry.
-      ll_symbol_extra_riscv64 *symbolExtra = ll_make_symbol_extra_riscv64(oc, LL_ELF_R_SYM(rel->r_info), S);
-      addr_t* FAKE_GOT_S = &symbolExtra->addr;
-      addr_t res = (addr_t) FAKE_GOT_S + A - P;
-      LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "R_RISCV_GOT_HI20 w/ SymbolExtra = %p , "
-                                  "entry = %p , reloc-addend = 0x%lu ",
-                                  symbolExtra, FAKE_GOT_S, res));
+      ll_site extra = ll_make_symbol_extra_riscv64_site(oc, context->symbol_index, S);
+      addr_t res = extra.exec + A - P;
       *computed = res;
       return true;
     }
@@ -664,6 +598,113 @@ bool computeAddend(ElfRelocationATable *relaTab, unsigned relNo, ll_elf_target_r
                LL_ELF64_R_TYPE(rel->r_info), LL_ELF64_R_TYPE(rel->r_info));
     return false;
   }
+}
+
+static int applyRISCV64(ObjectCode *oc, Section *section, uint32_t type,
+                        ll_site site, uintptr_t S, int64_t A, ll_sym_type st,
+                        const ll_reloc_context *context)
+{
+  (void)st;
+  ll_elf_target_rel rel = {
+    .r_info = LL_ELF64_R_INFO(context->symbol_index, type)
+  };
+  int32_t value;
+  if (!computeAddendSite(oc, section, &rel, site, S, A, context, &value))
+    return 0;
+  return encodeAddendRISCV64Site(oc->L, site, &rel, value) == EXIT_SUCCESS;
+}
+
+const struct ll_reloc_ops ll_elf_riscv64_reloc_ops = {
+  .machine = LL_ELF_EM_RISCV,
+  .apply = applyRISCV64,
+  .extra_bytes_per_symbol = sizeof(ll_symbol_extra_riscv64)
+};
+
+/* Preserve the selected table's GOT slot even when symbols share a value. */
+static ll_reloc_context contextForSymbol(ObjectCode *oc,
+                                         ll_elf_target_rel *rel,
+                                         const ElfSymbol *symbol)
+{
+  uintptr_t got_exec = 0;
+  if (symbol->got_addr != NULL) {
+    const uintptr_t work = (uintptr_t)symbol->got_addr;
+    const uintptr_t start = (uintptr_t)oc->elf_info->got_start;
+    LL_CHECK_FOR(oc->L, work >= start);
+    const uintptr_t offset = work - start;
+    LL_CHECK_FOR(oc->L, offset <= oc->elf_info->got_size &&
+                 sizeof(void *) <= oc->elf_info->got_size - offset);
+    LL_CHECK_FOR(oc->L, offset <= UINTPTR_MAX - oc->elf_info->got_exec);
+    got_exec = oc->elf_info->got_exec + offset;
+  }
+  const ll_reloc_context context = {
+    .symbol_index = LL_ELF_R_SYM(rel->r_info),
+    .symbol_name = symbol->name,
+    .format_symbol_type = LL_ELF_ST_TYPE(symbol->elf_sym->st_info),
+    .got_exec = got_exec
+  };
+  return context;
+}
+
+static void traceAddend(ObjectCode *oc, ll_elf_target_rel *rel, ll_site site,
+                        addr_t S, int64_t addend,
+                        const ll_reloc_context *context, unsigned relNo)
+{
+  LL_IF_DEBUG_FOR(oc->L, linker,
+      LL_DEBUG_FOR(oc->L, "%s: P 0x%lx S 0x%lx %s GOT_S 0x%lx A 0x%lx relNo %u\n",
+                   relocationTypeToString(rel->r_info), (addr_t)site.exec, S,
+                   context->symbol_name, (addr_t)context->got_exec, addend, relNo));
+}
+
+/* A low relocation refers to a preceding HI in this same RELA table. */
+static bool pairedHiValue(ObjectCode *oc, Section *section,
+                          ElfRelocationATable *table, unsigned relNo,
+                          addr_t target, bool *found, int32_t *value)
+{
+  *found = false;
+  for (int64_t i = relNo; i >= 0; --i) {
+    ll_elf_target_rela *hi = &table->relocations[i];
+    if (section->exec_start + hi->r_offset != target) continue;
+    ElfSymbol *symbol = findSymbol(oc, table->sectionHeader->sh_link,
+                                  LL_ELF64_R_SYM((ll_elf64_xword)hi->r_info));
+    LL_CHECK_FOR(oc->L, symbol != NULL);
+    uint64_t type = LL_ELF64_R_TYPE(hi->r_info);
+    if (type == LL_ELF_R_RISCV_PCREL_HI20 ||
+        type == LL_ELF_R_RISCV_GOT_HI20 ||
+        type == LL_ELF_R_RISCV_TLS_GD_HI20 ||
+        type == LL_ELF_R_RISCV_TLS_GOT_HI20) {
+      ll_elf_target_rel *rel = (ll_elf_target_rel *)hi;
+      const ll_reloc_context context = contextForSymbol(oc, rel, symbol);
+      const ll_site site = {.work = (uint8_t *)section->start + hi->r_offset,
+                            .exec = section->exec_start + hi->r_offset};
+      traceAddend(oc, rel, site, (addr_t)symbol->addr, hi->r_addend,
+                  &context, (unsigned)i);
+      *found = true;
+      return computeAddendSite(oc, section, rel, site, (addr_t)symbol->addr,
+                               hi->r_addend, &context, value);
+    }
+  }
+  return true;
+}
+
+static int applySymbolRISCV64(ObjectCode *oc, Section *section,
+                              ElfRelocationATable *table, unsigned relNo,
+                              ll_elf_target_rel *rel, const ElfSymbol *symbol,
+                              int64_t addend)
+{
+  ll_reloc_context context = contextForSymbol(oc, rel, symbol);
+  const ll_site site = {.work = (uint8_t *)section->start + rel->r_offset,
+                        .exec = section->exec_start + rel->r_offset};
+  const uint32_t type = LL_ELF64_R_TYPE(rel->r_info);
+  traceAddend(oc, rel, site, (addr_t)symbol->addr, addend, &context, relNo);
+  if (type == LL_ELF_R_RISCV_PCREL_LO12_I ||
+      type == LL_ELF_R_RISCV_PCREL_LO12_S) {
+    if (!pairedHiValue(oc, section, table, relNo, (addr_t)symbol->addr,
+                       &context.paired_hi_valid, &context.paired_hi_value))
+      return 0;
+  }
+  return ll_elf_riscv64_reloc_ops.apply(oc, section, type, site,
+                                        (uintptr_t)symbol->addr, addend,
+                                        (ll_sym_type)0, &context);
 }
 
 // Iterate over all relocations and perform them.
@@ -691,10 +732,8 @@ bool relocateObjectCodeRISCV64(ObjectCode *oc) {
       int32_t addend;
       if (!decodeAddendRISCV64(oc->L, targetSection, rel, &addend))
         return EXIT_FAILURE;
-      if (!computeAddend((ElfRelocationATable *)relTab, i, rel, symbol,
-                          addend, oc, &addend))
-        return EXIT_FAILURE;
-      if (encodeAddendRISCV64(oc->L, targetSection, rel, addend))
+      if (!applySymbolRISCV64(oc, targetSection, (ElfRelocationATable *)relTab,
+                              i, rel, symbol, addend))
         return EXIT_FAILURE;
     }
   }
@@ -716,11 +755,8 @@ bool relocateObjectCodeRISCV64(ObjectCode *oc) {
       LL_CHECK_FOR(oc->L, 0x0 != symbol);
 
       /* take explicit addend */
-      int32_t addend;
-      if (!computeAddend(relaTab, i, (ll_elf_target_rel *)rel, symbol, rel->r_addend,
-                          oc, &addend))
-        return EXIT_FAILURE;
-      if (encodeAddendRISCV64(oc->L, targetSection, (ll_elf_target_rel *)rel, addend))
+      if (!applySymbolRISCV64(oc, targetSection, relaTab, i,
+                              (ll_elf_target_rel *)rel, symbol, rel->r_addend))
         return EXIT_FAILURE;
     }
   }
