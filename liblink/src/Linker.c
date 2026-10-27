@@ -1145,7 +1145,8 @@ int ll_init_object(ObjectCode *oc)
     if (oc->format_ops == NULL) return 0;
     if (ll_noexec_enabled(oc->L)) {
         bool supported = false;
-#if LL_BUILD_ELF && (LL_TARGET_X86_64 || LL_TARGET_AARCH64) && SIZEOF_VOID_P == 8
+#if LL_BUILD_ELF && (LL_TARGET_I386 || LL_TARGET_ARM || \
+    ((LL_TARGET_X86_64 || LL_TARGET_AARCH64) && SIZEOF_VOID_P == 8))
         supported = oc->format_ops == &ll_format_elf;
 #endif
 #if LL_BUILD_MACHO && (LL_TARGET_X86_64 || LL_TARGET_AARCH64) && SIZEOF_VOID_P == 8
@@ -1156,7 +1157,7 @@ int ll_init_object(ObjectCode *oc)
               oc->format_ops != ll_format_native())) {
             oc->format_ops = NULL;
             ll_error_set(oc->L, LL_E_UNSUPPORTED,
-                         "NO_EXEC is currently available for the x64 and AArch64 ELF and Mach-O backends only");
+                         "NO_EXEC is currently available for the x64, AArch64, i386 and ARM ELF and Mach-O backends only");
             return 0;
         }
     }

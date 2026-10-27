@@ -15,5 +15,6 @@ extern const size_t elf_stubSizeArm;
 bool elf_needStubForRelArm(ll_elf_target_rel * rel);
 bool elf_needStubForRelaArm(ll_elf_target_rela * rel);
 bool elf_makeStubArm(ElfStub * s);
+bool elf_makeStubArmSite(ElfStub *s, ll_site site);
 
 #endif

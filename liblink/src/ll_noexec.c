@@ -1,5 +1,6 @@
 #define LL_INTERNAL_SOURCE 1
 #include "ll_noexec.h"
+#include "ll_target.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -33,6 +34,9 @@ int ll_noexec_allocate(ll_linker *L, size_t size, size_t alignment,
         L->noexec_next > UINTPTR_MAX - (exec_alignment - 1)) goto exhausted;
     const uintptr_t exec = (L->noexec_next + exec_alignment - 1) &
                            ~(uintptr_t)(exec_alignment - 1);
+#if LL_TARGET_I386 || LL_TARGET_ARM
+    if (exec > UINT32_MAX || extent - 1 > UINT32_MAX - exec) goto exhausted;
+#endif
     if (extent > UINTPTR_MAX - exec) goto exhausted;
     const uintptr_t end = exec + extent;
     if (end > UINTPTR_MAX - (LL_NOEXEC_PAGE_SIZE - 1)) goto exhausted;

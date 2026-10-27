@@ -19,6 +19,7 @@
 #include "linker/Elf.h"
 #include "linker/elf_reloc_x86_64.h"
 #include "linker/elf_reloc_i386.h"
+#include "linker/elf_reloc_arm.h"
 #include "linker/InitFini.h"
 #include "ll_format.h"
 #include "ll_noexec.h"
@@ -740,14 +741,14 @@ static int noexec_section_ELF(ObjectCode *oc, ll_elf_target_word index,
     ll_noexec_block block;
     const size_t alignment = header->sh_addralign != 0 ? header->sh_addralign : 1;
     size_t tail_size = 0, tail_offset = header->sh_size;
-#if LL_TARGET_AARCH64
+#if LL_TARGET_AARCH64 || LL_TARGET_ARM
     if (kind != SECTIONKIND_OTHER && header->sh_size != 0 && !is_bss) {
         const size_t count = elf_numberOfStubsForSection(oc, index);
-        if (count > SIZE_MAX / elf_stubSizeAarch64) {
+        if (count > SIZE_MAX / STUB_SIZE) {
             ll_error_set(oc->L, LL_E_NOMEM, "NO_EXEC ELF stub capacity is too large");
             return 0;
         }
-        tail_size = count * elf_stubSizeAarch64;
+        tail_size = count * STUB_SIZE;
     }
 #else
     (void)is_bss;
@@ -1381,9 +1382,9 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
 
        ll_site site = {.work = (uint8_t *)targ + offset,
                        .exec = oc->sections[target_shndx].exec_start + offset};
-#if LL_TARGET_I386
+#if LL_TARGET_I386 || LL_TARGET_ARM
        ll_elf_target_addr P = (ll_elf_target_addr)site.exec;
-       ll_elf_target_word *pP = (ll_elf_target_word *)(void *)site.work;
+       uint8_t *pP = site.work;
 #else
        ll_elf_target_addr P = ((ll_elf_target_addr)targ) + offset;
        ll_elf_target_word *pP = (ll_elf_target_word *)P;
@@ -1391,7 +1392,13 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
 #endif
 #if LL_TARGET_I386 || LL_DEBUG_CODE
        ll_elf_target_addr A;
-#if LL_TARGET_I386
+#if LL_TARGET_ARM
+       const size_t debug_width = (LL_ELF_R_TYPE(info) == COMPAT_R_ARM_THM_JUMP8 ||
+                                   LL_ELF_R_TYPE(info) == COMPAT_R_ARM_THM_JUMP11)
+                                ? 2 : sizeof(A);
+       A = 0;
+       memcpy(&A, site.work, debug_width);
+#elif LL_TARGET_I386
        memcpy(&A, site.work, sizeof(A));
 #else
        A = *pP;
@@ -1469,291 +1476,38 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
                            (void*)P, (void*)S, (void*)A, reloc_type ));
 #endif
 #if LL_DEBUG_CODE
+#if LL_TARGET_ARM
+       checkProddableBlock(oc->L, &oc->proddables, pP, debug_width);
+#else
        checkProddableBlock(oc->L, &oc->proddables, pP, sizeof(ll_elf_target_word) );
+#endif
 #else
        (void) pP; /* suppress unused varialbe warning in non-debug build */
 #endif
 
-#if LL_TARGET_I386
+#if LL_TARGET_I386 || LL_TARGET_ARM
        uintptr_t got_slot = 0;
        if (symbol != NULL && symbol->got_addr != NULL)
            got_slot = oc->elf_info->got_exec +
                ((uintptr_t)symbol->got_addr - (uintptr_t)oc->elf_info->got_start);
        const ll_reloc_context context = {.symbol_index = LL_ELF_R_SYM(info),
-           .symbol_name = symbol != NULL ? symbol->name : NULL, .got_exec = got_slot};
+           .symbol_name = symbol != NULL ? symbol->name : NULL,
+           .format_symbol_type = symbol != NULL ? LL_ELF_ST_TYPE(symbol->elf_sym->st_info) : 0,
+           .got_exec = got_slot};
+#if LL_TARGET_I386
        if (!ll_elf_i386_reloc_ops.apply(oc, &oc->sections[target_shndx],
                                         reloc_type, site, S, A, LL_SYM_DATA, &context)) return 0;
 #else
-       switch (reloc_type) {
-
-#        if LL_TARGET_ARM
-       case COMPAT_R_ARM_ABS32:     /* (S + A) | T */
-           // Specified by Linux ARM ABI to be equivalent to ABS32
-       case COMPAT_R_ARM_TARGET1:
-           *(ll_elf32_word *)P += S;
-           *(ll_elf32_word *)P |= T;
-           break;
-
-       case COMPAT_R_ARM_REL32:     /* ((S + A) | T) – P */
-           *(ll_elf32_word *)P += S;
-           *(ll_elf32_word *)P |= T;
-           *(ll_elf32_word *)P -= P;
-           break;
-
-       case COMPAT_R_ARM_BASE_PREL: /* B(S) + A – P */
-       {
-           int32_t A = *pP;
-           // bfd used to encode sb (B(S)) as 0.
-           *(uint32_t *)P += 0 + A - P;
-           break;
-       }
-
-       case COMPAT_R_ARM_GOT_BREL: /* GOT(S) + A – GOT_ORG */
-       {
-           int32_t A = *pP;
-           void* GOT_S = symbol->got_addr;
-           *(uint32_t *)P = (uint32_t) GOT_S + A - (uint32_t) oc->elf_info->got_start;
-           break;
-       }
-
-       case COMPAT_R_ARM_CALL:
-       case COMPAT_R_ARM_JUMP24:
-       {
-           // N.B. LLVM's LLD linker's relocation implementation is a fantastic
-           // resource
-           ll_word32 *word = (ll_word32 *)P;
-           ll_int32 imm = (*word & ((1<<24)-1)) << 2;
-
-           const ll_stg_bool is_blx = (*word & 0xf0000000) == 0xf0000000;
-           const ll_word32 hBit = is_blx ? ((*word >> 24) & 1) : 0;
-           imm |= hBit << 1;
-
-           // Sign extend to 32 bits
-           // I would have thought this would be 24 bits but LLD uses 26 here.
-           // Hmm.
-           int32_t A = signExtend32(26, imm);
-
-           S = S + A; A = 0;
-
-           ll_word32 result = ((S + A) | T) - P;
-
-           const ll_stg_bool overflow = !isInt(26, (ll_int32) result);
-           // Handle overflow and Thumb interworking
-           const ll_stg_bool needs_veneer =
-               (is_target_thm && LL_ELF_R_TYPE(info) == COMPAT_R_ARM_JUMP24)
-               || overflow;
-
-           if(needs_veneer) { /* overflow or thum interworking */
-               // Note [PC bias]
-               // ~~~~~~~~~~~~~~
-               // From the ELF for the ARM Architecture documentation:
-               // > 4.6.1.1 Addends and PC-bias compensation
-               // > A binary file may use REL or RELA relocations or a mixture
-               // > of the two (but multiple relocations for the same address
-               // > must use only one type).
-               // > If the relocation is pc-relative then compensation for the
-               // > PC bias (the PC value is 8 bytes ahead of the executing
-               // > instruction in ARM state and 4 bytes in Thumb state) must
-               // > be encoded in the relocation by the object producer.
-               int32_t bias = 8;
-
-               S += bias;
-               /* try to locate an existing stub for this target */
-               if(elf_arm_veneer(oc->L, &oc->sections[target_shndx], &S, 0)) {
-                   LL_LOG_ERROR_FOR(oc->L, "Unable to create veneer for ARM_CALL\n");
-                   return 0;
-               }
-               S -= bias;
-
-               result = ((S + A) | T) - P;
-               result &= ~1; // Clear thumb indicator bit
-
-               LL_CHECK_FOR(oc->L, isInt(26, result)); /* X in range */
-           }
-
-           // Update the branch target
-           const ll_word32 imm24 = (result & 0x03fffffc) >> 2;
-           *word = (*word & ~0x00ffffff)
-                 | (imm24 & 0x00ffffff);
-
-           // Change the relocated branch into a BLX if necessary
-           const ll_stg_bool switch_mode =
-               is_target_thm && (reloc_type == COMPAT_R_ARM_CALL);
-           if (!needs_veneer && switch_mode) {
-               const ll_word32 hBit = (result & 0x2) >> 1;
-               // Change instruction to BLX
-               *word = (*word & ~0xFF000000) | ((0xfa | hBit) << 24);
-               LL_IF_DEBUG_FOR(oc->L, linker_verbose, LL_DEBUG_FOR(oc->L, "Changed BL to BLX at %p\n", word));
-           }
-           break;
-       }
-
-       case COMPAT_R_ARM_MOVT_ABS:
-       case COMPAT_R_ARM_MOVW_ABS_NC:
-       {
-           ll_word32 *word = (ll_word32 *)P;
-           ll_word32 imm12 = *word & 0xfff;
-           ll_word32 imm4 = (*word >> 16) & 0xf;
-           ll_int32 offset = imm4 << 12 | imm12;
-           ll_word32 result = (S + offset) | T;
-
-           if (reloc_type == COMPAT_R_ARM_MOVT_ABS)
-               result = (result & 0xffff0000) >> 16;
-
-           ll_word32 result12 = result & 0xfff;
-           ll_word32 result4 = (result >> 12) & 0xf;
-           *word = (*word & ~0xf0fff) | (result4 << 16) | result12;
-           break;
-       }
-
-       case COMPAT_R_ARM_THM_CALL:
-       case COMPAT_R_ARM_THM_JUMP24:
-       {
-           ll_word16 *upper = (ll_word16 *)P;
-           ll_word16 *lower = (ll_word16 *)(P + 2);
-
-           int overflow;
-           int to_thm = (*lower >> 12) & 1;
-           int sign = (*upper >> 10) & 1;
-           int j1, j2, i1, i2;
-
-           // Decode immediate value
-           j1 = (*lower >> 13) & 1; i1 = ~(j1 ^ sign) & 1;
-           j2 = (*lower >> 11) & 1; i2 = ~(j2 ^ sign) & 1;
-
-           ll_int32 A = (sign << 24)
-                        | (i1 << 23)
-                        | (i2 << 22)
-                        | ((*upper & 0x03ff) << 12)
-                        | ((*lower & 0x07ff) << 1);
-
-            // Sign extend 25 to 32 bits
-           if (A & 0x01000000)
-               A -= 0x02000000;
-
-           S = S + A; A = 0;
-
-           offset = ((S + A) | T) - P;
-           overflow = elf_arm_thumb_branch_overflow(offset);
-           sign = offset >> 31;
-
-           if ((!is_target_thm && LL_ELF_R_TYPE(info) == COMPAT_R_ARM_THM_JUMP24)
-               || overflow) {
-               // Generate veneer
-
-               // see [PC bias] above.
-               int32_t bias = 4;
-               S += bias;
-               // set the Thumb indicator to S, the final address should
-               // carry the correct thumb indicator.
-               S |= T;
-               /* try to locate an existing stub for this target */
-               if(elf_arm_veneer(oc->L, &oc->sections[target_shndx], &S, 1)) {
-                   LL_LOG_ERROR_FOR(oc->L, "Unable to create veneer for ARM_THM_CALL\n");
-                   return 0;
-               }
-               S -= bias;
-
-               offset = ((S + A) | T) - P;
-
-               sign = offset >> 31;
-               to_thm = 1;
-           } else if (!is_target_thm
-                      && LL_ELF_R_TYPE(info) == COMPAT_R_ARM_THM_CALL) {
-               offset &= ~0x3;
-               to_thm = 0;
-           }
-
-           // Reencode instruction
-           i1 = ~(offset >> 23) & 1; j1 = sign ^ i1;
-           i2 = ~(offset >> 22) & 1; j2 = sign ^ i2;
-           *upper = ( (*upper & 0xf800)
-                  | (sign << 10)
-                  | ((offset >> 12) & 0x03ff) );
-           *lower = ( (*lower & 0xd000)
-                  | (j1 << 13)
-                  | (to_thm << 12)
-                  | (j2 << 11)
-                  | ((offset >> 1) & 0x07ff) );
-           break;
-       }
-
-       case COMPAT_R_ARM_THM_MOVT_ABS:
-       case COMPAT_R_ARM_THM_MOVW_ABS_NC:
-       {
-           ll_word16 *upper = (ll_word16 *)P;
-           ll_word16 *lower = (ll_word16 *)(P + 2);
-           ll_int32 offset = ((*upper & 0x000f) << 12)
-                           | ((*upper & 0x0400) << 1)
-                           | ((*lower & 0x7000) >> 4)
-                           | (*lower & 0x00ff);
-
-           offset = (offset ^ 0x8000) - 0x8000; // Sign extend
-           offset += S;
-           if (LL_ELF_R_TYPE(info) == COMPAT_R_ARM_THM_MOVW_ABS_NC)
-               offset |= T;
-           else if (LL_ELF_R_TYPE(info) == COMPAT_R_ARM_THM_MOVT_ABS)
-               offset >>= 16;
-
-           *upper = ( (*upper & 0xfbf0)
-                  | ((offset & 0xf000) >> 12)
-                  | ((offset & 0x0800) >> 1) );
-           *lower = ( (*lower & 0x8f00)
-                  | ((offset & 0x0700) << 4)
-                  | (offset & 0x00ff) );
-           break;
-       }
-
-       case COMPAT_R_ARM_THM_JUMP8:
-       {
-           ll_word16 *word = (ll_word16 *)P;
-           ll_word offset = *word & 0x01fe;
-           offset += S - P;
-           if (!is_target_thm) {
-               LL_LOG_ERROR_FOR(oc->L, "%s: Thumb to ARM transition with JUMP8 relocation "
-                          "not supported\n",
-                          oc->fileName);
-               return 0;
-           }
-
-           *word = (*word & ~0x01fe)
-                 | (offset & 0x01fe);
-           break;
-       }
-
-       case COMPAT_R_ARM_THM_JUMP11:
-       {
-           ll_word16 *word = (ll_word16 *)P;
-           ll_word offset = *word & 0x0ffe;
-           offset += S - P;
-           if (!is_target_thm) {
-               LL_LOG_ERROR_FOR(oc->L, "%s: Thumb to ARM transition with JUMP11 relocation "
-                          "not supported\n",
-                          oc->fileName);
-               return 0;
-           }
-
-           *word = (*word & ~0x0ffe)
-                 | (offset & 0x0ffe);
-           break;
-       }
-       case COMPAT_R_ARM_GOT_PREL: {
-              int32_t A = *pP;
-              void* GOT_S = symbol->got_addr;
-              LL_CHECK_FOR(oc->L, GOT_S);
-              *(uint32_t *)P = (uint32_t) GOT_S + A - P;
-              break;
-       }
-#        endif // arm_HOST_ARCH
-
-       default:
-           ll_error_set(oc->L, LL_E_UNSUPPORTED,
-                        "%s: unhandled ELF relocation(Rel) type %" LL_FMT_WORD "\n",
-                        oc->fileName, (ll_w)LL_ELF_R_TYPE(info));
-           LL_LOG_ERROR_FOR(oc->L, "%s: unhandled ELF relocation(Rel) type %" LL_FMT_WORD "\n",
-                      oc->fileName, (ll_w)LL_ELF_R_TYPE(info));
-           return 0;
-       }
+       if (!ll_elf_arm_reloc_ops.apply(oc, &oc->sections[target_shndx],
+                                       reloc_type, site, S | T, 0, LL_SYM_DATA, &context)) return 0;
+#endif
+#else
+       ll_error_set(oc->L, LL_E_UNSUPPORTED,
+                    "%s: unhandled ELF relocation(Rel) type %" LL_FMT_WORD "\n",
+                    oc->fileName, (ll_w)reloc_type);
+       LL_LOG_ERROR_FOR(oc->L, "%s: unhandled ELF relocation(Rel) type %" LL_FMT_WORD "\n",
+                        oc->fileName, (ll_w)reloc_type);
+       return 0;
 #endif
 
    }

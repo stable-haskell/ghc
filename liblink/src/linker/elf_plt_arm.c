@@ -6,6 +6,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 #if LL_TARGET_ARM
 
@@ -55,8 +56,8 @@ bool elf_needStubForRelaArm(ll_elf_target_rela * rela) {
     }
 }
 
-bool elf_makeStubArmArm(ElfStub * s);
-bool elf_makeStubArmThm(ElfStub * s);
+static bool elf_makeStubArmArm(ElfStub *s, ll_site site);
+static bool elf_makeStubArmThm(ElfStub *s, ll_site site);
 /*
   Note [The ARM/Thumb Story]
   ~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -84,8 +85,8 @@ bool elf_makeStubArmThm(ElfStub * s);
   need for makeArmSymbolExtra.
 */
 
-bool
-elf_makeStubArmArm(ElfStub * s) {
+static bool
+elf_makeStubArmArm(ElfStub *s, ll_site site) {
 
     // We (the linker) may corrupt r12 (ip) according to the "ELF for the ARM
     // Architecture" reference.
@@ -118,19 +119,19 @@ elf_makeStubArmArm(ElfStub * s) {
     uint32_t movt_r12 = 0xe340c000;
     uint32_t bx_r12   = 0xe12fff1c;
 
-    *((uint32_t*)s->addr+0) = movw_r12
-                              | (((uint32_t )s->target & 0xf000) << 4)
-                              |  ((uint32_t )s->target & 0x0fff);
-    *((uint32_t*)s->addr+1) = movt_r12
-                              | ((((uint32_t )s->target >> 16) & 0xf000) << 4)
-                              |  (((uint32_t )s->target >> 16) & 0x0fff);
-    *((uint32_t*)s->addr+2) = bx_r12;
+    uint32_t target = (uint32_t)(uintptr_t)s->target;
+    const uint32_t insn[] = {
+        movw_r12 | ((target & 0xf000) << 4) | (target & 0x0fff),
+        movt_r12 | (((target >> 16) & 0xf000) << 4) | ((target >> 16) & 0x0fff),
+        bx_r12
+    };
+    memcpy(site.work, insn, sizeof(insn));
 
     return EXIT_SUCCESS;
 }
 
-bool
-elf_makeStubArmThm(ElfStub * s) {
+static bool
+elf_makeStubArmThm(ElfStub *s, ll_site site) {
 
     // movw<c> <Rd>, #<imm16> (Encoding T3) looks like:
     // 31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16
@@ -156,34 +157,38 @@ elf_makeStubArmThm(ElfStub * s) {
 
     uint32_t movw_r12 = 0xf2400c00;
     uint32_t movt_r12 = 0xf2c00c00;
+    uint32_t target = (uint32_t)(uintptr_t)s->target;
     uint32_t movw = movw_r12
-                              | (((uint32_t )s->target & 0xf000) << 4)
-                              | (((uint32_t )s->target & 0x0800) << 15)
-                              | (((uint32_t )s->target & 0x0700) << 4)
-                              |  ((uint32_t )s->target & 0x00ff);
+                              | ((target & 0xf000) << 4)
+                              | ((target & 0x0800) << 15)
+                              | ((target & 0x0700) << 4)
+                              |  (target & 0x00ff);
     uint32_t movt = movt_r12
-                              | ((((uint32_t )s->target >> 16) & 0xf000) << 4)
-                              | ((((uint32_t )s->target >> 16) & 0x0800) << 15)
-                              | ((((uint32_t )s->target >> 16) & 0x0700) << 4)
-                              |  (((uint32_t )s->target >> 16) & 0x00ff);
+                              | (((target >> 16) & 0xf000) << 4)
+                              | (((target >> 16) & 0x0800) << 15)
+                              | (((target >> 16) & 0x0700) << 4)
+                              |  ((target >> 16) & 0x00ff);
     /* Thumb-2 instructions are two successive halfwords, high half first. */
-    uint16_t *insn = (uint16_t *)s->addr;
-    insn[0] = (uint16_t)(movw >> 16);
-    insn[1] = (uint16_t)movw;
-    insn[2] = (uint16_t)(movt >> 16);
-    insn[3] = (uint16_t)movt;
-    insn[4] = UINT16_C(0xbf00); /* nop padding */
-    insn[5] = UINT16_C(0x4760); /* bx ip */
+    const uint16_t insn[] = {(uint16_t)(movw >> 16), (uint16_t)movw,
+                             (uint16_t)(movt >> 16), (uint16_t)movt,
+                             UINT16_C(0xbf00), UINT16_C(0x4760)};
+    memcpy(site.work, insn, sizeof(insn));
 
     return EXIT_SUCCESS;
 }
 
 bool
-elf_makeStubArm(ElfStub * s) {
+elf_makeStubArmSite(ElfStub *s, ll_site site) {
     if((s->flags & 1) == 0)
-        return elf_makeStubArmArm(s);
+        return elf_makeStubArmArm(s, site);
     else
-        return elf_makeStubArmThm(s);
+        return elf_makeStubArmThm(s, site);
+}
+
+bool
+elf_makeStubArm(ElfStub *s) {
+    ll_site site = {.work = s->addr, .exec = (uintptr_t)s->addr};
+    return elf_makeStubArmSite(s, site);
 }
 
 #endif // OBJECTFORMAT_ELF

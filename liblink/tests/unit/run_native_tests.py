@@ -420,6 +420,13 @@ def run_elf_x86_64_sites(cc: list[str], archive: Path, output: Path,
               str(ROOT / "liblink/src/ll_error.c"), "-o", str(storage)],
         label="compile NO_EXEC storage controls")
     run([str(storage)], label="run NO_EXEC storage controls")
+    for target in ("I386", "ARM"):
+        storage32 = output / ("noexec_storage_" + target.lower())
+        run(cc + ["-ULL_TARGET_ARCH", "-DLL_TARGET_ARCH=LL_ARCH_" + target,
+                  str(ROOT / "liblink/tests/unit/noexec_storage.c"),
+                  str(ROOT / "liblink/src/ll_error.c"), "-o", str(storage32)],
+            label="compile ELF32 NO_EXEC range controls")
+        run([str(storage32)], label="run ELF32 NO_EXEC range controls")
     tail = output / "noexec_tail"
     run(cc + [str(ROOT / "liblink/tests/unit/noexec_tail.c"),
               str(ROOT / "liblink/src/ll_error.c"), "-o", str(tail)],

@@ -4,10 +4,12 @@ import json
 import os
 from pathlib import Path
 import shlex
+import struct
 import subprocess
 import unittest
 
 from elf32_check import compare_golden, verify
+from elf32_metadata import parse
 
 ROOT = Path(__file__).resolve().parents[1]
 CASES = {
@@ -30,6 +32,38 @@ def golden(machine, name):
 
 
 class Elf32Oracle(unittest.TestCase):
+    def test_optional_apply_replay(self):
+        """Replay every normal golden at its original P/S/GOT in separate storage."""
+        if not (os.environ.get('LIBLINK_ELF32_I386_APPLY') or
+                os.environ.get('LIBLINK_ELF32_ARM_APPLY')):
+            self.skipTest('set LIBLINK_ELF32_I386_APPLY or LIBLINK_ELF32_ARM_APPLY')
+        for machine, (_, _, cases) in CASES.items():
+            command = os.environ.get('LIBLINK_ELF32_ARM_APPLY' if machine == 40
+                                     else 'LIBLINK_ELF32_I386_APPLY')
+            if not command:
+                continue
+            for name in cases:
+                with self.subTest(name=name):
+                    obj, saved = original(machine, name), golden(machine, name)
+                    sections = parse(obj, machine)
+                    rel = next(s for s in sections if s['type'] == 9)
+                    offset, info = struct.unpack('<II', rel['bytes'])
+                    symtab = sections[rel['link']]['bytes']
+                    sym_info = symtab[(info >> 8) * 16 + 12] & 15
+                    capture, field = saved['reference_capture'], saved['field']
+                    sample = next(s for s in capture['sections'] if s['index'] == rel['info'])
+                    stubs = sample.get('stubs', {'address': '0', 'before': '', 'after': ''})
+                    stub_offset = (int(stubs['address'], 0) - int(sample['address'], 0)
+                                   if stubs['before'] else 0)
+                    got = int(capture['got']['exec_address'], 0)
+                    slot = saved['semantic']['got_slot']
+                    args = [str(info & 255), field['P'], field['S'], hex(got),
+                            hex(got + slot * 4 if slot is not None else 0), str(sym_info),
+                            str(offset), sample['before'], str(stub_offset), stubs['before']]
+                    result = subprocess.run(shlex.split(command) + args, check=True,
+                                            capture_output=True, text=True, timeout=30)
+                    self.assertEqual(result.stdout.splitlines(), [sample['after'], stubs['after']])
+
     def test_replay(self):
         for machine, (directory, _, cases) in CASES.items():
             self.assertEqual({p.stem for p in (ROOT / 'golden' / directory).glob('*.json')}, set(cases))

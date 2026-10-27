@@ -64,6 +64,11 @@ elf_makeStub(ll_linker *L, Section * section,
 
 #if LL_TARGET_RISCV64
     if((*_makeStub)(L, s))
+#elif LL_TARGET_ARM
+    ll_site site = {.work = s->addr,
+                    .exec = section->exec_start +
+                        ((uintptr_t)s->addr - (uintptr_t)section->start)};
+    if (elf_makeStubArmSite(s, site))
 #else
     if((*_makeStub)(s))
 #endif

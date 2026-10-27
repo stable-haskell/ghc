@@ -137,7 +137,27 @@ under `qemu-i386` and `qemu-arm` after the authorized Thumb repairs. Set
 command, including any QEMU runner, to compare fresh captures. The standalone
 replay is `python3 -m unittest discover -s liblink/tests/oracle -p
 'test_elf32*.py' -v`. These are normal-mode references; NO_EXEC qualification
-is separate.
+uses the same references and independent relocation calculations.
+
+`run_elf32_noexec.py` builds both ELF32 backends on a 64-bit Linux host with
+ASan and UBSan, runs the private heap NO_EXEC captures, and checks all 15 cases
+against the independent oracle. It also replays each normal golden at its
+recorded execution addresses in separate work storage and compares every
+relocated section and veneer byte literally. The allocator controls cover the
+last valid ELF32 execution page and reject reservations beyond it. For example,
+with native generated configuration headers and the rts-fs sources:
+
+```
+python3 liblink/tests/unit/run_elf32_noexec.py \
+  --config-dir "$LL_CONFIG_DIR" --rts-fs-dir "$RTS_FS_DIR" --cc gcc --ar ar
+```
+
+The ARM REL apply table uses execution addresses for PC-relative arithmetic,
+GOT slots and veneers, while instructions are read and written in work storage.
+`elf_arm_sites.c` checks unaligned two-byte Thumb branch sites at the end of a
+heap allocation under the sanitizer driver.
+The 32-bit NO_EXEC GOT uses four-byte target slots on 64-bit hosts; synthetic
+reservations and GOT symbol values must fit the target address space.
 
 The former i386 REL loop read the implicit addend through
 `ll_elf_target_word *`. The normal-mode `R_386_GOT32.o` fixture places that
@@ -152,8 +172,8 @@ work and execution addresses, unaligned storage, and surrounding guard bytes.
 64-bit hosts. It covers ARM and Thumb flags, stub lookup, creation and failure,
 target conversion and unchanged adjacent words. The adapter preserves the
 legacy API's 32-bit target result while avoiding a host-pointer-sized access
-to a 32-bit variable. Normal-mode 32-bit ELF baselines and NO_EXEC qualification
-remain separate work.
+to a 32-bit variable. The ARM apply table now uses the site-aware stub API to
+obtain the execution address separately from the veneer work storage.
 
 The same unit checks the Thumb CALL/JUMP24 signed 25-bit displacement range,
 including both endpoints and adjacent out-of-range values. Previously the

@@ -92,6 +92,8 @@ needGotSlot(ll_elf_target_sym * symbol) {
 bool
 makeGot(ObjectCode * oc) {
     size_t got_slots = 0;
+    const size_t slot_size = ll_noexec_enabled(oc->L)
+                           ? LL_TARGET_WORD_SIZE : sizeof(void *);
 
     /* we need to find all symbol tables (elf can have multiple)
      * and need to iterate over all symbols, to check how many
@@ -114,16 +116,16 @@ makeGot(ObjectCode * oc) {
         }
     }
     if(got_slots > 0) {
-        if (got_slots > SIZE_MAX / sizeof(void *)) {
+        if (got_slots > SIZE_MAX / slot_size) {
             ll_error_set(oc->L, LL_E_UNSUPPORTED, "ELF GOT allocation is too large");
             return EXIT_FAILURE;
         }
-        oc->elf_info->got_size = got_slots * sizeof(void *);
+        oc->elf_info->got_size = got_slots * slot_size;
         void *mem;
         if (ll_noexec_enabled(oc->L)) {
             ll_noexec_block block;
             if (!ll_noexec_allocate(oc->L, oc->elf_info->got_size,
-                                    _Alignof(void *), &block)) return EXIT_FAILURE;
+                                    slot_size, &block)) return EXIT_FAILURE;
             mem = block.site.work;
             oc->elf_info->got_exec = block.site.exec;
             oc->elf_info->got_allocation = block.allocation;
@@ -146,7 +148,7 @@ makeGot(ObjectCode * oc) {
                 if(needGotSlot(symTab->symbols[i].elf_sym))
                     symTab->symbols[i].got_addr
                             = (uint8_t *)oc->elf_info->got_start
-                              + (slot++ * sizeof(void*));
+                              + (slot++ * slot_size);
         }
     }
     return EXIT_SUCCESS;
@@ -228,7 +230,18 @@ fillGot(ObjectCode * oc) {
                     return EXIT_FAILURE;
                 }
 
-                *(void**)symbol->got_addr = symbol->addr;
+                if (ll_noexec_enabled(oc->L) && LL_TARGET_WORD_SIZE == 4) {
+                    uintptr_t address = (uintptr_t)symbol->addr;
+                    if (address > UINT32_MAX) {
+                        ll_error_set(oc->L, LL_E_UNSUPPORTED,
+                                     "ELF32 GOT symbol address exceeds target width");
+                        return EXIT_FAILURE;
+                    }
+                    uint32_t value = (uint32_t)address;
+                    memcpy(symbol->got_addr, &value, sizeof(value));
+                } else {
+                    *(void**)symbol->got_addr = symbol->addr;
+                }
             }
         }
     }
@@ -248,8 +261,14 @@ verifyGot(ObjectCode * oc) {
         for(size_t i=0; i < symTab->n_symbols; i++) {
             ElfSymbol * symbol = &symTab->symbols[i];
             if(symbol->got_addr) {
-                LL_CHECK_FOR(oc->L, (void*)(*(void**)symbol->got_addr)
-                      == (void*)symbol->addr);
+                if (ll_noexec_enabled(oc->L) && LL_TARGET_WORD_SIZE == 4) {
+                    uint32_t value;
+                    memcpy(&value, symbol->got_addr, sizeof(value));
+                    LL_CHECK_FOR(oc->L, (uintptr_t)value == (uintptr_t)symbol->addr);
+                } else {
+                    LL_CHECK_FOR(oc->L, (void*)(*(void**)symbol->got_addr)
+                          == (void*)symbol->addr);
+                }
             }
             LL_CHECK_FOR(oc->L, ll_noexec_enabled(oc->L) ||
                          0 == ((uintptr_t)symbol->addr & 0xffff000000000000));
