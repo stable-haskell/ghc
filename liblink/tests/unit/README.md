@@ -312,6 +312,16 @@ the Darwin backend does not reference these `rts-fs` C symbols. The
 Sanitized native C units
 ========================
 
+On macOS 26.5.2 ARM64, a baseline run using the Nix Clang 21.1.2 ASan
+runtime timed out before the COFF layout unit completed. A separately linked
+Mach-O capture also stalled before `main`; a process sample showed ASan
+initialization re-entering its own lock through the macOS allocator during
+`MemoryRangeIsAvailable`. This is a known host runtime issue, not evidence of
+a liblink relocation failure. Use Apple Clang for Darwin sanitizer runs. The
+source-bound failure report and capture sample from this observation were
+saved locally under `/tmp/liblink-macho-sites-baseline-sanitized/` and
+`/tmp/liblink-macho-runner.sample` respectively.
+
 `run_sanitized_tests.py` builds a fresh static archive from the current
 `native-sources.list` with AddressSanitizer and UndefinedBehaviorSanitizer, then
 runs the default native C unit driver against that archive. It supports native
