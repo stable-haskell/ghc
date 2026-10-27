@@ -47,6 +47,60 @@ This slice exercises native arm64 Darwin Mach-O only. Unsupported relocations
 terminate through the host fatal callback and must run in separate processes.
 The runner does not claim ELF, COFF, or other host-backend coverage.
 
+Compat execution smoke
+======================
+
+`compat_exec_smoke.c` exercises the real compatibility linker path and calls
+one function from a loaded object. The host callback returns its argument plus
+one; the fixture entry calls that callback, and the driver checks that passing
+41 returns 42. The object-registration hook adds loaded objects to the root
+list that `ll_compat_resolveObjs()` resolves. `--missing-entry` is a negative
+control: it loads and resolves the fixture, then requires lookup of an absent
+symbol to fail. This is a process-lifetime smoke: it calls `exitLinker()` but
+does not unload the object or check unload and leak cleanup.
+
+On native arm64 Darwin, build and run it against the configured liblink archive:
+
+    export CC=/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang
+    export LIBLINK_CONFIG_INCLUDE=/absolute/path/to/liblink/build/include
+    export LIBLINK_LIBRARY_DIR=/absolute/path/to/liblink/archive
+    export OUT=/tmp/liblink-compat-exec-smoke
+    mkdir -p "$OUT"
+    "$CC" -arch arm64 -target arm64-apple-macos11 -c \
+      liblink/tests/runner/compat_exec_smoke_macho_arm64.s -o "$OUT/fixture.o"
+    "$CC" -arch arm64 -std=c11 -Wall -Wextra -Werror=vla -pedantic \
+      -DLL_ASSERTS -isystem "$LIBLINK_CONFIG_INCLUDE" \
+      -I liblink/include -I liblink/src \
+      -c liblink/tests/runner/compat_exec_smoke.c -o "$OUT/driver.o"
+    "$CC" -arch arm64 "$OUT/driver.o" -L"$LIBLINK_LIBRARY_DIR" \
+      -llink -pthread -o "$OUT/compat-exec-smoke"
+    "$OUT/compat-exec-smoke" "$OUT/fixture.o"
+    "$OUT/compat-exec-smoke" --missing-entry "$OUT/fixture.o"
+
+For a sanitized archive, add `-fsanitize=address,undefined
+-fno-sanitize-recover=undefined -fno-omit-frame-pointer` to the C driver
+compile command and the final link command; the assembly compile needs none.
+Set `ASAN_OPTIONS=detect_leaks=0` for the two runs because the smoke intentionally
+keeps the loaded object until process exit.
+
+    export ASAN_OPTIONS=detect_leaks=0
+
+`rts_friend.h` currently emits one pedantic warning for its empty `SymbolExtra`
+on arm64; the smoke driver still uses `-Werror=vla` and C11 checks.
+
+The RISC-V source uses only `R_RISCV_CALL_PLT`, with no paired PC-relative
+HI/LO relocation. It preserves `ra` around the callback call. Compile the
+object with:
+
+    "$CC" --target=riscv64-linux-gnu -c \
+      liblink/tests/runner/compat_exec_smoke_riscv64.s -o "$OUT/fixture-riscv64.o"
+
+To exercise it under qemu-user, the driver and liblink archive must both be
+built for Linux/RISC-V, then run the RISC-V executable with
+`qemu-riscv64 -L <sysroot>`. The Darwin run above tests the compat load,
+resolution, lookup, and call flow on ARM64; it does not test RISC-V execution
+or count as qemu coverage.
+
 ELF x86_64, AArch64, and RISC-V captures
 ----------------------------------------
 

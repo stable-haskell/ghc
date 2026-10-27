@@ -211,6 +211,9 @@ extra-source-files:
     tests/unit/run_native_tests.py
     tests/unit/run_sanitized_tests.py
     tests/unit/test_run_sanitized_tests.py
+    tests/runner/compat_exec_smoke.c
+    tests/runner/compat_exec_smoke_macho_arm64.s
+    tests/runner/compat_exec_smoke_riscv64.s
     tests/runner/elf_capture.c
     tests/oracle/elf_x86_64_check.py
     tests/oracle/test_elf_x86_64.py
