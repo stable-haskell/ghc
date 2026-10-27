@@ -72,6 +72,13 @@ def main() -> None:
                           str(backend), str(args.native_archive), *libraries,
                           "-o", str(binary)])
         run([str(binary), str(coff)])
+        names_source = output / "common_names.c"
+        names_source.write_text("int ll_pe_portable_data = 0x13579bdf;\n"
+                                "int commonxx;\n")
+        names_object = output / "common_names.obj"
+        run(shlex.split(args.coff_cc) + ["-fcommon", "-c", str(names_source),
+                                        "-o", str(names_object)])
+        run([str(binary), str(names_object)])
 
 
 if __name__ == "__main__":

@@ -1469,7 +1469,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
       char short_name[9];
       ll_symbol_name *sname = get_sym_name_with_buffer(
           oc->L, getSymShortName(oc->L, info, sym), oc,
-          secNumber == LL_COFF_IMAGE_SYM_UNDEFINED && symValue > 0 ? short_name : NULL);
+          short_name);
       Section *section;
       switch (secNumber) {
         case PE_SECTION_UNDEFINED:
