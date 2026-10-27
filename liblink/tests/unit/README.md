@@ -1705,3 +1705,13 @@ exactly eight-byte skipped symbol. The PE symbol loop now supplies a caller-owne
 name buffer, including for skipped symbols. A normal-mode MinGW `-fcommon`
 fixture with an eight-byte name and the NO_EXEC COMMON fixture both pass the
 owner ledger under Apple Clang ASan/UBSan.
+
+The import-thunk normal-mode capture against the pre-site-conversion PE backend
+was independently checked and saved locally. In the subsequent Apple Clang
+ASan/UBSan run of the current backend, `import-thunk.o` stopped before apply:
+`PEi386.c:1088:45: runtime error: load of misaligned address` for
+`COFF_reloc *`, which requires two-byte alignment, at the relocation-table copy.
+The same `reltab + relocs_offset` expression is present in baseline commit
+`28f3969bfc9`. The cause and any repair are unqualified. Spec section 13
+requires escalation for this new sanitizer finding; the import-thunk capture
+and test changes remain uncommitted.
