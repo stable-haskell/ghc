@@ -7,10 +7,16 @@ category: Development, System
 license: BSD-3-Clause
 license-file: LICENSE
 maintainer: glasgow-haskell-users@haskell.org
-build-type: Custom
+build-type: Configure
 
 extra-source-files:
+    configure
     configure.ac
+    build-aux/config.guess
+    build-aux/config.sub
+    include/ll_autoconf.h.in
+    include/ll_platform.h.in
+    liblink.buildinfo.in
     include/liblink.h
     include/liblink/compat.h
     include/liblink/rts_friend.h
@@ -18,108 +24,63 @@ extra-source-files:
     include/liblink/macho.h
     include/liblink/coff.h
     include/liblink/elf.h
-    include/ll_platform.h.in
-    liblink.buildinfo.in
-    native-sources.list
-    src/Linker.c
     src/LinkerInternals.h
-    src/RtsSymbolInfo.c
     src/RtsSymbolInfo.h
-    src/linker/CacheFlush.c
     src/linker/CacheFlush.h
-    src/linker/BackendMemory.c
     src/linker/BackendMemory.h
     src/linker/ELFRelocs/AArch64.def
     src/linker/ELFRelocs/ARM.def
     src/linker/ELFRelocs/LICENSE-LLVM.TXT
     src/linker/ELFRelocs/i386.def
     src/linker/ELFRelocs/x86_64.def
-    src/linker/Elf.c
-    src/linker/ElfVerify.c
     src/linker/Elf.h
+    src/linker/ElfHost.h
     src/linker/ElfTypes.h
-    src/linker/InitFini.c
     src/linker/InitFini.h
-    src/linker/LoadArchive.c
-    src/linker/LoadNativeObjPosix.c
     src/linker/LoadNativeObjPosix.h
-    src/linker/M32Alloc.c
     src/linker/M32Alloc.h
-    src/linker/M32Reservations.c
     src/linker/M32Reservations.h
-    src/linker/MMap.c
     src/linker/MMap.h
-    src/linker/MachO.c
-    src/linker/MachOVerify.c
     src/linker/MachO.h
     src/linker/MachOTypes.h
-    src/linker/PEi386.c
     src/linker/PEi386.h
     src/linker/PEi386Types.h
     src/linker/PEi386Host.h
-    src/linker/ElfHost.h
-    src/linker/PEi386Host.c
     src/linker/PEi386Services.h
-    src/linker/ProddableBlocks.c
     src/linker/ProddableBlocks.h
-    src/linker/SymbolExtras.c
     src/linker/SymbolExtras.h
     src/linker/Wasm32Types.h
     src/linker/elf_compat.h
-    src/linker/elf_got.c
     src/linker/elf_got.h
-    src/linker/elf_plt.c
     src/linker/elf_plt.h
-    src/linker/elf_plt_aarch64.c
     src/linker/elf_plt_aarch64.h
-    src/linker/elf_plt_arm.c
     src/linker/elf_plt_arm.h
-    src/linker/elf_plt_riscv64.c
     src/linker/elf_plt_riscv64.h
-    src/linker/elf_reloc.c
     src/linker/elf_reloc.h
-    src/linker/elf_reloc_aarch64.c
     src/linker/elf_reloc_aarch64.h
-    src/linker/elf_reloc_i386.c
     src/linker/elf_reloc_i386.h
-    src/linker/elf_reloc_arm.c
     src/linker/elf_reloc_arm.h
-    src/linker/elf_reloc_riscv64.c
     src/linker/elf_reloc_riscv64.h
-    src/linker/elf_reloc_x86_64.c
     src/linker/elf_reloc_x86_64.h
-    src/linker/elf_tlsgd.c
-    src/linker/elf_util.c
     src/linker/elf_util.h
-    src/linker/macho/plt.c
     src/linker/macho/plt.h
-    src/linker/macho/plt_aarch64.c
     src/linker/macho/plt_aarch64.h
     src/linker/util.h
-    src/ll_api.c
     src/ll_backend.h
     src/ll_build.h
     src/ll_begin_private.h
     src/ll_compat.h
     src/ll_compat_aliases.h
     src/ll_end_private.h
-    src/ll_error.c
     src/ll_error.h
-    src/ll_failure.c
     src/ll_failure.h
-    src/ll_format.c
     src/ll_format.h
     src/ll_fs.h
-    src/ll_hash.c
     src/ll_hash.h
-    src/ll_host.c
     src/ll_host.h
     src/ll_linker.h
-    src/ll_mutex.c
     src/ll_mutex.h
-    src/ll_noexec.c
     src/ll_noexec.h
-    src/ll_path.c
     src/ll_path.h
     src/ll_target.h
     src/ll_visibility.h
@@ -174,6 +135,8 @@ extra-source-files:
     tests/unit/pei386_resolver_classification.c
     tests/unit/pei386_resolver_quarantine.c
     tests/unit/pei386_unwind_retention.c
+    tests/unit/pei386_comdat.c
+    tests/unit/pei386_static_extra.c
     tests/unit/link_trace_checks.py
     tests/unit/test_link_trace_checks.py
     tests/unit/native_shared_link.py
@@ -197,6 +160,11 @@ extra-source-files:
     tests/unit/elf_aarch64_encoder_sites.c
     tests/unit/elf_aarch64_sites.c
     tests/unit/elf_aarch64_classifier.c
+    tests/unit/elf_arm_sites.c
+    tests/unit/elf_arm_thumb_capture.py
+    tests/unit/elf_arm_thumb_stub.c
+    tests/unit/elf_arm_veneer.c
+    tests/unit/elf_i386_sites.c
     tests/unit/noexec_storage.c
     tests/unit/elf_extras_bounds.c
     tests/unit/noexec_tail.c
@@ -206,6 +174,8 @@ extra-source-files:
     tests/unit/elf_section_errors.c
     tests/unit/elf_resource_errors.c
     tests/unit/mmap_address_bounds.c
+    tests/unit/run_coff_x86_64_goldens.py
+    tests/unit/run_elf32_noexec.py
     tests/unit/run_native_tests.py
     tests/unit/run_sanitized_tests.py
     tests/unit/test_run_sanitized_tests.py
@@ -239,14 +209,6 @@ extra-source-files:
     tests/fixtures/src/elf-x86_64/*.s
     tests/fixtures/generated/elf-x86_64/x86_64-linux-gnu/*.o
 
-custom-setup
-    setup-depends:
-        base >= 4.14 && < 5,
-        Cabal >= 3.17 && < 3.18,
-        Cabal-syntax >= 3.17 && < 3.18,
-        directory >= 1.3 && < 1.4,
-        filepath >= 1.4 && < 1.6
-
 flag asserts
     description: Enable linker assertions.
     default: False
@@ -259,8 +221,50 @@ flag all-backends
 
 library
     build-depends: rts-fs >= 0.1 && < 2
-    extra-libraries: link
-    c-sources: src/ll_version.c
+    c-sources:
+        src/ll_version.c
+        src/Linker.c
+        src/RtsSymbolInfo.c
+        src/linker/CacheFlush.c
+        src/linker/BackendMemory.c
+        src/linker/Elf.c
+        src/linker/ElfVerify.c
+        src/linker/InitFini.c
+        src/linker/LoadArchive.c
+        src/linker/LoadNativeObjPosix.c
+        src/linker/M32Alloc.c
+        src/linker/M32Reservations.c
+        src/linker/MMap.c
+        src/linker/MachO.c
+        src/linker/MachOVerify.c
+        src/linker/PEi386.c
+        src/linker/PEi386Host.c
+        src/linker/ProddableBlocks.c
+        src/linker/SymbolExtras.c
+        src/linker/elf_got.c
+        src/linker/elf_plt.c
+        src/linker/elf_plt_aarch64.c
+        src/linker/elf_plt_arm.c
+        src/linker/elf_plt_riscv64.c
+        src/linker/elf_reloc.c
+        src/linker/elf_reloc_aarch64.c
+        src/linker/elf_reloc_i386.c
+        src/linker/elf_reloc_arm.c
+        src/linker/elf_reloc_riscv64.c
+        src/linker/elf_reloc_x86_64.c
+        src/linker/elf_tlsgd.c
+        src/linker/elf_util.c
+        src/linker/macho/plt.c
+        src/linker/macho/plt_aarch64.c
+        src/ll_hash.c
+        src/ll_error.c
+        src/ll_failure.c
+        src/ll_format.c
+        src/ll_host.c
+        src/ll_mutex.c
+        src/ll_noexec.c
+        src/ll_path.c
+        src/ll_api.c
     include-dirs: src include
     autogen-includes: ll_autoconf.h ll_platform.h
     install-includes:
