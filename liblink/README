@@ -125,10 +125,12 @@ host TLS services and return LL_E_UNSUPPORTED before lookup in this mode.
 The unit driver checks the actual core path, partial allocation cleanup and
 native-service guards. Independent NO_EXEC goldens check deterministic
 relocated section/extras/GOT bytes and execution addresses at base0x10000000;
-normal-mode goldens remain unchanged. The ARM64-host/x64-target runtime check
-currently stops in the unchanged ELF verifier's native zero-width extras bound;
-that separate recorded repair is pending. Other backend conversions, two-host
-golden qualification and execution qualification remain WP2.8 work.
+normal-mode goldens remain unchanged. The ELF verifier bounds extras using
+that same target payload width, with zero-width storage handled without
+count division. This separately approved repair removes the native ARM64
+zero-width division and keeps nonzero native widths unchanged. Other backend
+conversions, two-host golden qualification and execution qualification remain
+WP2.8 work.
 
 The next AArch64 ELF conversion has normal-address baselines before any
 relocation code changes: 20 layouts and 27 fields cover the thirteen ordinary

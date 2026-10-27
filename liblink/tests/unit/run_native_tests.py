@@ -400,6 +400,19 @@ def run_elf_x86_64_sites(cc: list[str], archive: Path, output: Path,
     if not native_elf_x64:
         run(command, label="replay ELF x64 reference and corruption controls")
         return
+    # Scalar bounds use the target payload width, including no payload.
+    for target, width in (("X86_64", 16), ("AARCH64", 0), ("RISCV64", 8)):
+        bounds = output / ("elf_extras_bounds_" + target.lower())
+        map_file = output / (bounds.name + ".map")
+        trace = run(cc + native_unit_link_arguments(
+            ROOT / "liblink/tests/unit/elf_extras_bounds.c", archive, bounds,
+            link_flags, ["-DLL_TARGET_ARCH=LL_ARCH_" + target,
+                         "-DEXPECTED_EXTRA_STRIDE=" + str(width),
+                         "-Wl,-t", linker_map_flag(map_file)]),
+            label="compile ELF extras bounds for " + target)
+        verify_link_map(map_file, archive, trace,
+                        included_source="elf_extras_bounds.c", forbidden_member="ElfVerify")
+        run([str(bounds)], label="run ELF extras bounds for " + target)
     capture = output / "elf_capture"
     run(cc + native_unit_link_arguments(
         ROOT / "liblink/tests/runner/elf_capture.c", archive, capture,

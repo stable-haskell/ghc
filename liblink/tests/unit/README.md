@@ -215,6 +215,13 @@ lookup, and ordinary unresolved-symbol retry. Repeated resolution must preserve
 layout and reach READY without running initializers. See ../../README for the
 private configuration boundary and remaining WP2.8 qualification.
 
+`elf_extras_bounds.c` includes the actual verifier and checks scalar storage
+bounds for the independently specified target widths 0, 8 and 16. Exact
+separate/combined boundaries pass; boundary-plus-one and multiplication
+overflow fail. Zero payloads consume no symbol storage. The full driver runs
+these controls when its native x64 ELF backend is available. These scalar
+controls do not establish whole-object acceptance for the other targets.
+
 `symbol_extras_image.c` uses a valid compiler-produced native object to check
 heap-to-mapping image replacement. It includes the real shared allocator with
 only mapping calls intercepted. Positive controls cover heap images at offsets

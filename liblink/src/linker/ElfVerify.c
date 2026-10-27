@@ -86,8 +86,9 @@ static bool elfExtrasFit(ObjectCode *oc, size_t imageSize, uintmax_t bssSize,
     const uintmax_t limit = INT_MAX;
     /* The backend allocates extras for its last symbol table. Bounding all
      * tables also covers that selection without narrowing the symbol count. */
-    if (symbolCount > limit / sizeof(SymbolExtra)) return false;
-    uintmax_t extrasSize = symbolCount * sizeof(SymbolExtra);
+    const uintmax_t extraStride = LL_TARGET_SYMBOL_EXTRA_SIZE;
+    if (extraStride != 0 && symbolCount > limit / extraStride) return false;
+    uintmax_t extrasSize = symbolCount * extraStride;
     if (symbolCount == 0 && bssSize == 0) return true;
     if (!RTS_LINKER_USE_MMAP) {
         /* ocAllocateExtras first rounds the signed file size to four bytes. */
