@@ -82,10 +82,9 @@ referencing file's original symbol index, existing diagnostic name, raw
 symbol type and the selected symbol's GOT execution address (zero when absent).
 The selected slot address preserves identity when equal symbol values have
 different GOT entries. Existing x64 operations retain their indexed extras;
-AArch64 consumption is part of the remaining apply-table wiring. This approved
-amendment to the initial internal contract preserves extra-slot identity,
-STT_FUNC fallback eligibility and
-exact diagnostics. The context lives in a private header and leaves the public
+AArch64 now consumes that selected slot directly through its apply table.
+This approved amendment to the initial internal contract preserves extra-slot
+identity, STT_FUNC fallback eligibility and exact diagnostics. The context lives in a private header and leaves the public
 handle API unchanged.
 
 Section.exec_start and ObjectCode.symbol_extras_exec record execution addresses
@@ -95,6 +94,13 @@ original payload through work and returns exec for GOT/island arithmetic;
 native pointer emitters retain
 their existing behavior. All these fields are unconditional in the RTS friend
 layout, so the RTS and library must be rebuilt together.
+
+The AArch64 ELF apply table uses execution addresses for symbol, PC, GOT and
+veneer operands and encodes through work storage. The object loop
+carries the already selected ElfSymbol's GOT slot across the private boundary,
+including its original table identity. Normal-mode relocation rules, addends,
+diagnostics and unsupported implicit-REL handling remain unchanged. AArch64
+NO_EXEC object admission remains disabled until end-to-end qualification.
 
 Normal ELF work and execution addresses still coincide. Payloads, symbol
 lookup, range policy and diagnostics are preserved.

@@ -6,6 +6,8 @@
 
 #if LL_BUILD_ELF
 
+extern const struct ll_reloc_ops ll_elf_aarch64_reloc_ops;
+
 bool
 relocateObjectCodeAarch64(ObjectCode * oc);
 

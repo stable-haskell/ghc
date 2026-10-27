@@ -180,6 +180,15 @@ addresses from the section execution base and the existing stub storage offset.
 They leave native helpers, emitter bytes and shared layouts unchanged. This seam
 does not enable AArch64 NO_EXEC or wire a relocation apply table.
 
+`elf_aarch64_sites.c` calls the actual AArch64 apply table and object loop.
+It checks execution-address arithmetic for every supported form, both selected
+GOT forms, near/far branches, veneer reuse and distinct targets, unchanged
+failure bytes and exact diagnostics. Equal S and index in two symbol tables
+must keep different selected GOT pages/low bits. NONE skips absent symbols;
+implicit REL and missing symbol addresses retain their existing errors.
+Aligned heap storage preserves the unchanged encoder/classifier read widths.
+These data-only controls do not enable AArch64 NO_EXEC object admission.
+
 `elf_x86_64_sites.c` calls the actual typed ELF apply operation with separate
 misaligned work storage and execution addresses. It checks ordinary fields,
 range and unsupported errors, exact diagnostics, raw referencing symbol types,

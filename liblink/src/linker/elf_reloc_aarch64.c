@@ -237,26 +237,24 @@ encodeAddendAarch64(ll_linker *L, Section *section, ll_elf_target_rel *rel,
  * Compute the *new* addend for a relocation, given a pre-existing addend.
  * @param section The section the relocation is in.
  * @param rel     The Relocation struct.
- * @param symbol  The target symbol.
+ * @param site    Work storage and execution address of the relocation.
+ * @param S       Execution address of the target symbol.
+ * @param GOT_S   Execution address of its selected GOT slot, or zero.
  * @param addend  The existing addend. Either explicit or implicit.
  * @param computed Receives the unchanged-width computed value on success.
  * @return True on success; failure leaves computed unchanged.
  */
 static bool
-computeAddend(ll_linker *L, Section * section, ll_elf_target_rel * rel,
-              ElfSymbol * symbol, int64_t addend, int64_t *computed) {
-
-    /* Position where something is relocated */
-    addr_t P = (addr_t)((uint8_t*)section->start + rel->r_offset);
-
-    LL_CHECK_FOR(L, 0x0 != P);
-    LL_CHECK_FOR(L, (uint64_t)section->start <= P);
-    LL_CHECK_FOR(L, P <= (uint64_t)section->start + section->size);
-    /* Address of the symbol */
-    addr_t S = (addr_t) symbol->addr;
+computeAddend(ll_linker *L, Section *section, ll_elf_target_rel *rel,
+              ll_site site, addr_t S, addr_t GOT_S, int64_t addend,
+              int64_t *computed) {
+    /* Storage bounds apply to work; all target arithmetic uses exec. */
+    const addr_t work = (addr_t)site.work;
+    const addr_t P = site.exec;
+    LL_CHECK_FOR(L, 0x0 != work);
+    LL_CHECK_FOR(L, (uint64_t)section->start <= work);
+    LL_CHECK_FOR(L, work <= (uint64_t)section->start + section->size);
     LL_CHECK_FOR(L, 0x0 != S);
-    /* GOT slot for the symbol */
-    addr_t GOT_S = (addr_t) symbol->got_addr;
 
     int64_t A = addend;
 
@@ -302,12 +300,14 @@ computeAddend(ll_linker *L, Section * section, ll_elf_target_rel * rel,
 
                 /* need a stub */
                 /* check if we already have that stub */
-                if(elf_findStub(section, (void**)&S, 0)) {
-                    /* did not find it. Crete a new stub. */
-                    if(elf_makeStub(L, section, (void**)&S, NULL, 0)) {
+                ll_site stub;
+                if (elf_findStubSite(section, (void *)(uintptr_t)S, 0, &stub)) {
+                    if (elf_makeStubSite(L, section, (void *)(uintptr_t)S,
+                                         NULL, 0, &stub)) {
                         abort(/* could not find or make stub */);
                     }
                 }
+                S = stub.exec;
 
                 LL_CHECK_FOR(L, 0 == (0xffff000000000000 & S));
                 V = S + A - P;
@@ -373,6 +373,59 @@ computeAddend(ll_linker *L, Section * section, ll_elf_target_rel * rel,
     }
 }
 
+/* Adapt the legacy computation/encoder conventions at the typed boundary. */
+static int
+applyAarch64(ObjectCode *oc, Section *section, uint32_t type, ll_site site,
+             uintptr_t S, int64_t A, ll_sym_type st,
+             const ll_reloc_context *context)
+{
+    (void)st;
+    if (type == COMPAT_R_AARCH64_NONE) return 1;
+    ll_elf_target_rel rel = {.r_info = LL_ELF64_R_INFO(0, type)};
+    int64_t computed;
+    if (!computeAddend(oc->L, section, &rel, site, S, context->got_exec,
+                       A, &computed)) return 0;
+    return encodeAddendAarch64Site(oc->L, site, &rel, computed) == EXIT_SUCCESS;
+}
+
+const struct ll_reloc_ops ll_elf_aarch64_reloc_ops = {
+    .machine = LL_ELF_EM_AARCH64,
+    .apply = applyAarch64,
+    .extra_bytes_per_symbol = 0
+};
+
+/* The symbol was selected using this relocation table's sh_link. Its GOT
+ * slot identity must survive even when another table/index has the same S. */
+static int
+applySymbolAarch64(ObjectCode *oc, Section *section, ll_elf_target_rel *rel,
+                   const ElfSymbol *symbol, int64_t addend)
+{
+    uintptr_t got_exec = 0;
+    if (symbol->got_addr != NULL) {
+        const uintptr_t work = (uintptr_t)symbol->got_addr;
+        const uintptr_t start = (uintptr_t)oc->elf_info->got_start;
+        LL_CHECK_FOR(oc->L, work >= start);
+        const uintptr_t offset = work - start;
+        LL_CHECK_FOR(oc->L, offset <= oc->elf_info->got_size &&
+            sizeof(void *) <= oc->elf_info->got_size - offset);
+        LL_CHECK_FOR(oc->L, offset <= UINTPTR_MAX - oc->elf_info->got_exec);
+        got_exec = oc->elf_info->got_exec + offset;
+    }
+    const ll_reloc_context context = {
+        .symbol_index = LL_ELF64_R_SYM(rel->r_info),
+        .symbol_name = symbol->name,
+        .format_symbol_type = LL_ELF_ST_TYPE(symbol->elf_sym->st_info),
+        .got_exec = got_exec
+    };
+    const ll_site site = {
+        .work = (uint8_t *)section->start + rel->r_offset,
+        .exec = section->exec_start + rel->r_offset
+    };
+    return ll_elf_aarch64_reloc_ops.apply(oc, section,
+        LL_ELF64_R_TYPE(rel->r_info), site, (uintptr_t)symbol->addr, addend,
+        (ll_sym_type)0, &context);
+}
+
 bool
 relocateObjectCodeAarch64(ObjectCode * oc) {
     for(ElfRelocationTable *relTab = oc->elf_info->relTable;
@@ -400,9 +453,7 @@ relocateObjectCodeAarch64(ObjectCode * oc) {
             int64_t addend;
             if (!decodeAddendAarch64(oc->L, targetSection, rel, &addend))
                 return EXIT_FAILURE;
-            if (!computeAddend(oc->L, targetSection, rel, symbol, addend, &addend))
-                return EXIT_FAILURE;
-            if (encodeAddendAarch64(oc->L, targetSection, rel, addend))
+            if (!applySymbolAarch64(oc, targetSection, rel, symbol, addend))
                 return EXIT_FAILURE;
         }
     }
@@ -439,10 +490,8 @@ relocateObjectCodeAarch64(ObjectCode * oc) {
             /* take explicit addend */
             int64_t addend = rel->r_addend;
 
-            if (!computeAddend(oc->L, targetSection, (ll_elf_target_rel*)rel,
-                                symbol, addend, &addend))
-                return EXIT_FAILURE;
-            if (encodeAddendAarch64(oc->L, targetSection, (ll_elf_target_rel*)rel, addend))
+            if (!applySymbolAarch64(oc, targetSection,
+                                    (ll_elf_target_rel *)rel, symbol, addend))
                 return EXIT_FAILURE;
         }
     }
