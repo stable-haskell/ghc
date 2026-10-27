@@ -1718,3 +1718,12 @@ The same `reltab + relocs_offset` expression is present in baseline commit
 the overflow record into an aligned local before reading it. The oracle checks
 that the fixture relocation table is at an odd offset; the normal and NO_EXEC
 golden driver exercises the complete verify and apply path under sanitizers.
+
+A new portable COMDAT duplicate test loaded the committed `COMDAT.o` and
+`COMDAT-duplicate.o` fixtures in normal and NO_EXEC modes under Apple Clang
+ASan/UBSan. Its selected-owner, content, and synthetic-address checks did not
+report failures, but its host ownership ledger was nonempty after teardown in
+both iterations. No sanitizer diagnostic preceded the ledger failures. The
+remaining allocation and whether it belongs to the fixture cleanup or the
+linker are unqualified. This suspect requires section 13 escalation; the new
+COMDAT test and driver change remain uncommitted.
