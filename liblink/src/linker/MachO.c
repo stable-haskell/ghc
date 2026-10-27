@@ -988,7 +988,10 @@ relocateSection(ObjectCode* oc, int curSection)
                                         nm, reloc->r_extern));
 
             if (reloc->r_extern == 0) {
-                    LL_LOG_ERROR_FOR(oc->L, "\nrelocateSection: global offset table relocation for symbol with r_extern == 0\n");
+                ll_error_set(oc->L, LL_E_FORMAT,
+                             "global offset table relocation for symbol with r_extern == 0");
+                LL_LOG_ERROR_FOR(oc->L, "\nrelocateSection: global offset table relocation for symbol with r_extern == 0\n");
+                return 0;
             }
 
             if (symbol->nlist->n_type & LL_MACHO_N_EXT) {

@@ -6,6 +6,7 @@
 
 #if LL_BUILD_ELF
 #include "linker/Elf.h"
+#include "linker/elf_compat.h"
 #include "ll_error.h"
 
 #include <limits.h>
@@ -114,6 +115,97 @@ static bool elfExtrasFit(ObjectCode *oc, size_t imageSize, uintmax_t bssSize,
     return true;
 }
 #endif
+
+static size_t elfRelocationWidth(uint32_t type)
+{
+#if LL_TARGET_X86_64
+    switch (type) {
+    case COMPAT_R_X86_64_NONE:
+        return 0;
+    case COMPAT_R_X86_64_64:
+    case COMPAT_R_X86_64_PC64:
+        return 8;
+    case COMPAT_R_X86_64_16:
+    case COMPAT_R_X86_64_PC16:
+        return 2;
+    case COMPAT_R_X86_64_8:
+    case COMPAT_R_X86_64_PC8:
+        return 1;
+    default:
+        return 4;
+    }
+#elif LL_TARGET_AARCH64
+    switch (type) {
+    case COMPAT_R_AARCH64_NONE:
+        return 0;
+    case COMPAT_R_AARCH64_ABS64:
+    case COMPAT_R_AARCH64_PREL64:
+        return 8;
+    case COMPAT_R_AARCH64_ABS16:
+    case COMPAT_R_AARCH64_PREL16:
+        return 2;
+    default:
+        return 4;
+    }
+#elif LL_TARGET_RISCV64
+    switch (type) {
+    case LL_ELF_R_RISCV_NONE:
+    case LL_ELF_R_RISCV_RELAX:
+    case LL_ELF_R_RISCV_ALIGN:
+        return 0;
+    case LL_ELF_R_RISCV_CALL:
+    case LL_ELF_R_RISCV_CALL_PLT:
+    case LL_ELF_R_RISCV_64:
+    case LL_ELF_R_RISCV_ADD64:
+    case LL_ELF_R_RISCV_SUB64:
+    case LL_ELF_R_RISCV_TLS_DTPMOD64:
+    case LL_ELF_R_RISCV_TLS_DTPREL64:
+    case LL_ELF_R_RISCV_TLS_TPREL64:
+        return 8;
+    case LL_ELF_R_RISCV_ADD16:
+    case LL_ELF_R_RISCV_SUB16:
+    case LL_ELF_R_RISCV_SET16:
+    case LL_ELF_R_RISCV_RVC_BRANCH:
+    case LL_ELF_R_RISCV_RVC_JUMP:
+        return 2;
+    case LL_ELF_R_RISCV_ADD8:
+    case LL_ELF_R_RISCV_SUB8:
+    case LL_ELF_R_RISCV_SET8:
+    case LL_ELF_R_RISCV_SUB6:
+    case LL_ELF_R_RISCV_SET6:
+        return 1;
+    default:
+        return 4;
+    }
+#elif LL_TARGET_ARM
+    switch (type) {
+    case COMPAT_R_ARM_NONE:
+    case COMPAT_R_ARM_V4BX:
+        return 0;
+    case COMPAT_R_ARM_THM_JUMP8:
+    case COMPAT_R_ARM_THM_JUMP11:
+        return 2;
+    default:
+        return 4;
+    }
+#elif LL_TARGET_I386
+    switch (type) {
+    case COMPAT_R_386_NONE:
+        return 0;
+    case COMPAT_R_386_16:
+    case COMPAT_R_386_PC16:
+        return 2;
+    case COMPAT_R_386_8:
+    case COMPAT_R_386_PC8:
+        return 1;
+    default:
+        return 4;
+    }
+#else
+    (void)type;
+    return sizeof(ll_elf_target_word);
+#endif
+}
 
 int ocValidateImage_ELF(ObjectCode *oc)
 {
@@ -302,9 +394,12 @@ int ocValidateImage_ELF(ObjectCode *oc)
                     relocation.r_info = rel.r_info;
                     relocation.r_offset = rel.r_offset;
                 }
+                uint32_t reloc_type = LL_ELF_R_TYPE(relocation.r_info);
+                size_t width = elfRelocationWidth(reloc_type);
                 if (LL_ELF_R_SYM(relocation.r_info) >= symbols ||
-                    (LL_ELF_R_TYPE(relocation.r_info) != 0 &&
-                     relocation.r_offset >= sections[section->sh_info].sh_size))
+                    (reloc_type != 0 &&
+                     (relocation.r_offset > sections[section->sh_info].sh_size ||
+                      width > sections[section->sh_info].sh_size - (size_t)relocation.r_offset)))
                     return invalidElf(oc, LL_E_FORMAT, "invalid ELF relocation reference");
             }
         }

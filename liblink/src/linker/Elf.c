@@ -1632,8 +1632,16 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
               secno = shndx_table[LL_ELF_R_SYM(info)];
             }
 #endif
-            S = (ll_elf_target_addr)oc->sections[secno].exec_start
-                + stab[LL_ELF_R_SYM(info)].st_value;
+            if (secno == LL_ELF_SHN_ABS) {
+                S = (ll_elf_target_addr)stab[LL_ELF_R_SYM(info)].st_value;
+            } else if (secno < (ll_elf_target_word)oc->n_sections) {
+                S = (ll_elf_target_addr)oc->sections[secno].exec_start
+                    + stab[LL_ELF_R_SYM(info)].st_value;
+            } else {
+                LL_LOG_ERROR_FOR(oc->L, "%s: invalid section index %u for symbol `%s'",
+                                 oc->fileName, (unsigned)secno, symbol);
+                return 0;
+            }
          } else {
             /* If not local, look up the name in our global table. */
             symbol = strtab + sym.st_name;

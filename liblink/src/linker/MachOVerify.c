@@ -218,6 +218,11 @@ int ocVerifyImage_MachO(ObjectCode *oc)
                 reloc->r_type != LL_MACHO_ARM64_RELOC_SUBTRACTOR &&
                 !machoSpan((size_t)section->size, (uint32_t)reloc->r_address, 4))
                 return invalidMachO(oc, "truncated Mach-O instruction relocation");
+#elif LL_TARGET_X86_64
+            if (!reloc->r_extern &&
+                (reloc->r_type == LL_MACHO_X86_64_RELOC_GOT ||
+                 reloc->r_type == LL_MACHO_X86_64_RELOC_GOT_LOAD))
+                return invalidMachO(oc, "Mach-O GOT relocation requires r_extern");
 #endif
             if (machoRelocSymbol(reloc)) {
                 if (reloc->r_symbolnum >= symbolCount)

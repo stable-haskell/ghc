@@ -13,6 +13,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+#if defined(_WIN32)
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
+
 static _Noreturn void allocation_failed(const char *what)
 {
     fprintf(stderr, "liblink: allocation failed: %s\n",
@@ -75,9 +81,45 @@ static void default_fatal(void *ctx, const char *fmt, va_list ap)
     abort();
 }
 
+static size_t default_page_size(void *ctx)
+{
+    (void)ctx;
+#if defined(_WIN32)
+    SYSTEM_INFO si;
+    GetSystemInfo(&si);
+    return si.dwPageSize > 0 ? (size_t)si.dwPageSize : 4096;
+#elif defined(_SC_PAGESIZE)
+    long sz = sysconf(_SC_PAGESIZE);
+    return sz > 0 ? (size_t)sz : 4096;
+#else
+    return 4096;
+#endif
+}
+
+static void default_on_mem_failure(void *ctx)
+{
+    (void)ctx;
+    fprintf(stderr, "liblink: memory allocation failure\n");
+    abort();
+}
+
+static void default_flush_icache(void *ctx, void *p, size_t len)
+{
+    (void)ctx;
+#if defined(__GNUC__) || defined(__clang__)
+    __builtin___clear_cache((char *)p, (char *)p + len);
+#else
+    (void)p;
+    (void)len;
+#endif
+}
+
 #define DEFAULT_HOST { .malloc_ = default_malloc, .calloc_ = default_calloc, \
     .realloc_ = default_realloc, .free_ = default_free, \
-    .log = default_log, .fatal = default_fatal }
+    .log = default_log, .fatal = default_fatal, \
+    .on_mem_failure = default_on_mem_failure, \
+    .page_size = default_page_size, \
+    .flush_icache = default_flush_icache }
 
 ll_linker ll_default_linker = {
     .services = { .host = DEFAULT_HOST },
@@ -103,6 +145,9 @@ void ll_install_host_for(ll_linker *L, const ll_compat_host_ops *host,
         if (installed.free_ == NULL) installed.free_ = default_free;
         if (installed.log == NULL) installed.log = default_log;
         if (installed.fatal == NULL) installed.fatal = default_fatal;
+        if (installed.on_mem_failure == NULL) installed.on_mem_failure = default_on_mem_failure;
+        if (installed.page_size == NULL) installed.page_size = default_page_size;
+        if (installed.flush_icache == NULL) installed.flush_icache = default_flush_icache;
     }
     L->services.host = installed;
     L->services.cfg = cfg != NULL ? *cfg : (ll_compat_config){0};

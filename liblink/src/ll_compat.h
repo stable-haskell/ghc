@@ -290,13 +290,26 @@ static inline void ll_compat_free_for(const ll_compat_services *services,
 static inline size_t
 ll_compat_page_size_for(const ll_compat_services *services)
 {
-    return services->host.page_size(services->host.ctx);
+    if (services != NULL && services->host.page_size != NULL) {
+        return services->host.page_size(services->host.ctx);
+    }
+    return 4096;
 }
 
 static inline void
 ll_compat_report_mem_failure_for(const ll_compat_services *services)
 {
-    services->host.on_mem_failure(services->host.ctx);
+    if (services != NULL && services->host.on_mem_failure != NULL) {
+        services->host.on_mem_failure(services->host.ctx);
+    }
+}
+
+static inline void
+ll_compat_flush_icache_for(const ll_compat_services *services, void *p, size_t len)
+{
+    if (services != NULL && services->host.flush_icache != NULL) {
+        services->host.flush_icache(services->host.ctx, p, len);
+    }
 }
 
 static inline size_t

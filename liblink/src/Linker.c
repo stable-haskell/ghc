@@ -894,6 +894,12 @@ static ll_symbol_addr *lookupNoExecSymbol(ll_linker *L, ll_symbol_name *lbl,
     ll_assert_lock_held_for(L, &L->linker_mutex);
     RtsSymbolInfo *info;
     if (!ghciLookupSymbolInfo(L, lbl, &info)) return NULL;
+    if (info->owner != NULL && isSymbolImport(info->owner, lbl)) {
+        ll_error_set(L, LL_E_UNSUPPORTED,
+                     "import library symbol `%s' is unavailable in NO_EXEC mode",
+                     (const char *)lbl);
+        return NULL;
+    }
     if (type != NULL) *type = info->type;
     if (dependent != NULL && info->owner != NULL)
         insertHashSet(dependent->dependencies, (ll_w)info->owner);
@@ -1161,6 +1167,13 @@ int ll_init_object(ObjectCode *oc)
             oc->format_ops = NULL;
             ll_error_set(oc->L, LL_E_UNSUPPORTED,
                          "NO_EXEC is available for ELF, Mach-O and COFF backends");
+            return 0;
+        }
+    } else {
+        if (oc->format_ops != ll_format_native()) {
+            oc->format_ops = NULL;
+            ll_error_set(oc->L, LL_E_UNSUPPORTED,
+                         "foreign object formats require NO_EXEC mode");
             return 0;
         }
     }
