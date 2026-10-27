@@ -128,14 +128,12 @@ Darwin linker syntax.
 Stage2 native C unit driver
 ===========================
 
-WP2.8d investigation: the existing i386 and ARM REL relocation loop is in
-`linker/Elf.c`. In the ARM veneer paths, the 32-bit `ll_elf_target_addr S`
-is passed to `elf_findStub` and `elf_makeStub` as `(void **)&S`. On a host
-where pointers are wider than 32 bits, those helpers read or write a pointer
-through that address, potentially accessing beyond `S`. This is a suspect in
-the existing implementation, not a sanitizer result or a completed fix; it
-requires escalation under the requested WP2.8d stop conditions. Normal-mode
-32-bit ELF baselines and NO_EXEC qualification have not been captured here.
+`elf_arm_veneer.c` checks the ARM veneer adapter's pointer-width storage on
+64-bit hosts. It covers ARM and Thumb flags, stub lookup, creation and failure,
+target conversion and unchanged adjacent words. The adapter preserves the
+legacy API's 32-bit target result while avoiding a host-pointer-sized access
+to a 32-bit variable. Normal-mode 32-bit ELF baselines and NO_EXEC qualification
+remain separate work.
 
 `noexec_tail.c` tests the private payload-plus-tail heap reservation helper:
 alignment, checked padding/extents, zero fill, unchanged outputs/address state

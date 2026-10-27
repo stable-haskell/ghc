@@ -375,6 +375,12 @@ def run_elf_x86_64_sites(cc: list[str], archive: Path, output: Path,
               str(ROOT / "liblink/tests/unit/elf_aarch64_stub_sites.c"),
               "-o", str(stubs)], label="compile paired ELF AArch64 stub controls")
     run([str(stubs)], label="run paired ELF AArch64 stub controls")
+    arm_veneer = output / "elf_arm_veneer"
+    run(cc + ["-DLL_ALL_BACKENDS", "-ULL_TARGET_ARCH",
+              "-DLL_TARGET_ARCH=LL_ARCH_ARM",
+              str(ROOT / "liblink/tests/unit/elf_arm_veneer.c"),
+              "-o", str(arm_veneer)], label="compile ARM veneer pointer-width control")
+    run([str(arm_veneer)], label="run ARM veneer pointer-width control")
     encoder = output / "elf_aarch64_encoder_sites"
     run(cc + ["-DLL_ALL_BACKENDS", "-ULL_TARGET_ARCH",
               "-DLL_TARGET_ARCH=LL_ARCH_AARCH64",

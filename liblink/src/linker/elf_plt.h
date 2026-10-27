@@ -32,6 +32,20 @@ unsigned  elf_numberOfStubsForSection( ObjectCode *oc, unsigned sectionIndex);
 bool elf_findStub(Section * section, void* * addr, uint8_t flags);
 bool elf_makeStub(ll_linker *L, Section * section, void* * addr, void* got_addr, uint8_t flags);
 
+#if LL_TARGET_ARM
+/* The legacy stub API writes a host pointer, even for a 32-bit target. */
+static inline bool
+elf_arm_veneer(ll_linker *L, Section *section, ll_elf_target_addr *target,
+               uint8_t flags)
+{
+    void *addr = (void *)(uintptr_t)*target;
+    if (elf_findStub(section, &addr, flags) &&
+        elf_makeStub(L, section, &addr, NULL, flags)) return true;
+    *target = (ll_elf_target_addr)(uintptr_t)addr;
+    return false;
+}
+#endif
+
 /* Like the legacy helpers, zero means success. Target/flags retain the same
  * identity; output is written only on success. Storage stays section-owned.
  * The caller supplies non-NULL output and a section whose work and execution

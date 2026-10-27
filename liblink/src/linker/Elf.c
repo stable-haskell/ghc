@@ -1557,12 +1557,9 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
 
                S += bias;
                /* try to locate an existing stub for this target */
-               if(elf_findStub(&oc->sections[target_shndx], (void**)&S, 0)) {
-                   /* didn't find any. Need to create one */
-                   if(elf_makeStub(oc->L, &oc->sections[target_shndx], (void**)&S, NULL, 0)) {
-                       LL_LOG_ERROR_FOR(oc->L, "Unable to create veneer for ARM_CALL\n");
-                       return 0;
-                   }
+               if(elf_arm_veneer(oc->L, &oc->sections[target_shndx], &S, 0)) {
+                   LL_LOG_ERROR_FOR(oc->L, "Unable to create veneer for ARM_CALL\n");
+                   return 0;
                }
                S -= bias;
 
@@ -1649,12 +1646,9 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
                // carry the correct thumb indicator.
                S |= T;
                /* try to locate an existing stub for this target */
-               if(elf_findStub(&oc->sections[target_shndx], (void**)&S, 1)) {
-                   /* didn't find any. Need to create one */
-                   if(elf_makeStub(oc->L, &oc->sections[target_shndx], (void**)&S, NULL, 1)) {
-                       LL_LOG_ERROR_FOR(oc->L, "Unable to create veneer for ARM_THM_CALL\n");
-                       return 0;
-                   }
+               if(elf_arm_veneer(oc->L, &oc->sections[target_shndx], &S, 1)) {
+                   LL_LOG_ERROR_FOR(oc->L, "Unable to create veneer for ARM_THM_CALL\n");
+                   return 0;
                }
                S -= bias;
 
