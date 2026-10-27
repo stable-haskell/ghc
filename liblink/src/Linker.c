@@ -1276,7 +1276,7 @@ void freeObjectCode (ObjectCode *oc)
     }
 
     if (oc->extraInfos != NULL) {
-        freeStrHashTable(oc->extraInfos, NULL);
+        ll_hash_free_owned_table((HashTable *)oc->extraInfos);
         oc->extraInfos = NULL;
     }
 

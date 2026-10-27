@@ -1719,11 +1719,12 @@ the overflow record into an aligned local before reading it. The oracle checks
 that the fixture relocation table is at an odd offset; the normal and NO_EXEC
 golden driver exercises the complete verify and apply path under sanitizers.
 
-A new portable COMDAT duplicate test loaded the committed `COMDAT.o` and
-`COMDAT-duplicate.o` fixtures in normal and NO_EXEC modes under Apple Clang
-ASan/UBSan. Its selected-owner, content, and synthetic-address checks did not
-report failures, but its host ownership ledger was nonempty after teardown in
-both iterations. No sanitizer diagnostic preceded the ledger failures. The
-remaining allocation and whether it belongs to the fixture cleanup or the
-linker are unqualified. This suspect requires section 13 escalation; the new
-COMDAT test and driver change remain uncommitted.
+`pei386_comdat.c` loads the committed `COMDAT.o` and `COMDAT-duplicate.o`
+fixtures in normal and NO_EXEC modes, checks selected owner and contents, and
+checks that NO_EXEC publishes a synthetic address. It also repeats weak/import
+metadata updates and requires the owner ledger to be empty after teardown.
+Allocation tracing identified the prior remaining allocations as `setSymbolInfo`
+values: object teardown discarded the hash table without freeing its owned
+values, while repeated updates inserted the same value again. The repair inserts
+only new values and frees each owned value during object teardown. The portable
+COMDAT test passes under Apple Clang ASan/UBSan with the owner ledger enabled.

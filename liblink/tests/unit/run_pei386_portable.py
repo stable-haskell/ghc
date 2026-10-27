@@ -60,6 +60,9 @@ def main() -> None:
         noexec = output / "noexec.o"
         run(cc + flags + ["-DLL_ALL_BACKENDS", "-DLL_TARGET_ARCH=2", "-c",
                          str(ROOT / "liblink/src/ll_noexec.c"), "-o", str(noexec)])
+        symbol_info = output / "RtsSymbolInfo.o"
+        run(cc + flags + ["-DLL_ALL_BACKENDS", "-DLL_TARGET_ARCH=2", "-c",
+                         str(ROOT / "liblink/src/RtsSymbolInfo.c"), "-o", str(symbol_info)])
         backend = output / "PEi386.o"
         run(cc + flags + ["-DLL_ALL_BACKENDS", "-DLL_TARGET_ARCH=2", "-c",
                          str(ROOT / "liblink/src/linker/PEi386.c"), "-o", str(backend)])
@@ -69,11 +72,11 @@ def main() -> None:
         static_extra = output / "pei386_static_extra"
         run(cc + flags + ["-DLL_ALL_BACKENDS", "-DLL_TARGET_ARCH=2",
                           str(ROOT / "liblink/tests/unit/pei386_static_extra.c"),
-                          str(noexec), str(args.native_archive), *libraries, "-o", str(static_extra)])
+                          str(noexec), str(symbol_info), str(args.native_archive), *libraries, "-o", str(static_extra)])
         run([str(static_extra)])
         run(cc + flags + ["-DLL_ALL_BACKENDS", "-DLL_TARGET_ARCH=2",
                           str(ROOT / "liblink/tests/unit/pei386_portable_data.c"),
-                          str(backend), str(noexec), str(args.native_archive), *libraries,
+                          str(backend), str(noexec), str(symbol_info), str(args.native_archive), *libraries,
                           "-o", str(binary)])
         run([str(binary), str(coff)])
         names_source = output / "common_names.c"
@@ -90,6 +93,14 @@ def main() -> None:
         run(shlex.split(args.coff_cc) + ["-fcommon", "-c", str(common_source),
                                         "-o", str(common_object)])
         run([str(binary), "--noexec", "--common", str(common_object)])
+        comdat = output / "pei386_comdat"
+        run(cc + flags + ["-DLL_ALL_BACKENDS", "-DLL_TARGET_ARCH=2",
+                          str(ROOT / "liblink/tests/unit/pei386_comdat.c"),
+                          str(backend), str(noexec), str(symbol_info), str(args.native_archive), *libraries,
+                          "-o", str(comdat)])
+        fixtures = ROOT / "liblink/tests/fixtures/generated/coff-x86_64"
+        run([str(comdat), str(fixtures / "COMDAT.o"),
+             str(fixtures / "COMDAT-duplicate.o")])
 
 
 if __name__ == "__main__":

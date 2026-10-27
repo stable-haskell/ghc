@@ -30,10 +30,10 @@ void setSymbolInfo(ObjectCode *owner, const void *label, symbolUpdater updater)
         {
             info = LL_MALLOC_FOR(owner->L, sizeof(SymbolInfo), "setSymbolInfo");
             info->kind = 0;
+            insertStrHashTable(owner->extraInfos, label, info);
         }
 
         updater(info);
-        insertStrHashTable(owner->extraInfos, label, info);
     }
 }
 
