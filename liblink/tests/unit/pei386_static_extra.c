@@ -87,6 +87,83 @@ static void run_static_case(ll_linker *owner, uint16_t symbol_type,
     releaseOcInfo(&object);
 }
 
+static void run_noexec_extra(ll_linker *owner, ll_sym_type type)
+{
+    ObjectCode object = {0};
+    struct ll_coff_object_info info = {0};
+    object.L = owner;
+    object.coff_info = &info;
+    const uintptr_t target = UINT64_C(0x123456789abcdef0);
+    size_t result = 0;
+    owner->services.cfg.flags |= LL_CFG_NO_EXEC;
+    owner->noexec_next = UINT64_C(0x10001000);
+    selected_allocator = NULL;
+    CHECK(makeSymbolExtra_PEi386(&object, 0, target, "test", type, &result),
+          "NO_EXEC extra allocation failed");
+    CHECK(selected_allocator == NULL, "NO_EXEC extra used m32");
+    struct ll_coff_extra_allocation *item = info.noexec_extras;
+    CHECK(item != NULL, "NO_EXEC extra ownership missing");
+    if (item != NULL) {
+        ll_symbol_extra_x86_64 *extra = item->work;
+        CHECK(item->exec == UINT64_C(0x10001000), "extra execution address changed");
+        CHECK(extra->addr == target, "NO_EXEC extra target changed");
+        if (type == LL_SYM_CODE) {
+            const uint8_t jump[] = {0xff, 0x25, 0xf2, 0xff, 0xff, 0xff};
+            CHECK(memcmp(extra->jumpIsland, jump, sizeof(jump)) == 0,
+                  "NO_EXEC code extra has wrong bytes");
+            CHECK(result == item->exec + offsetof(ll_symbol_extra_x86_64, jumpIsland),
+                  "NO_EXEC code extra returned host address");
+        } else {
+            CHECK(result == item->exec + offsetof(ll_symbol_extra_x86_64, addr),
+                  "NO_EXEC data extra returned host address");
+        }
+        freeNoExecExtras(&object);
+        CHECK(info.noexec_extras == NULL, "NO_EXEC extra ownership not cleared");
+    }
+    owner->services.cfg.flags &= ~LL_CFG_NO_EXEC;
+}
+
+static void run_noexec_indirect(ll_linker *owner)
+{
+    ObjectCode object = {0}, provider = {0};
+    struct ll_coff_object_info info = {0};
+    uint8_t bytes[16] = {0};
+    const uintptr_t target = UINT64_C(0x123456789abcdef0);
+    memcpy(bytes + 1, &target, sizeof(target));
+    Section section = {.start = bytes, .exec_start = UINT64_C(0x20000000),
+                       .size = sizeof(bytes), .alloc = SECTION_NOEXEC};
+    object.L = owner;
+    object.coff_info = &info;
+    provider.L = owner;
+    provider.sections = &section;
+    provider.n_sections = 1;
+    owner->services.cfg.flags |= LL_CFG_NO_EXEC;
+    owner->noexec_next = UINT64_C(0x10001000);
+    CHECK(ghciInsertSymbolTable(owner, (pathchar *)"test", "indirect",
+          (void *)(section.exec_start + 1), false, LL_SYM_INDIRECT_DATA, 0,
+          &provider), "could not register synthetic indirect slot");
+    size_t result = 0;
+    CHECK(makeSymbolExtra_PEi386(&object, 0, section.exec_start + 1,
+                                 "indirect", LL_SYM_INDIRECT_DATA, &result),
+          "NO_EXEC indirect extra failed");
+    if (info.noexec_extras != NULL) {
+        ll_symbol_extra_x86_64 *extra = info.noexec_extras->work;
+        CHECK(extra->addr == target, "NO_EXEC indirect extra did not read host slot");
+        CHECK(result == info.noexec_extras->exec, "NO_EXEC indirect result is not synthetic");
+    }
+    freeNoExecExtras(&object);
+    const uintptr_t next = owner->noexec_next;
+    ll_error_clear(owner);
+    CHECK(!makeSymbolExtra_PEi386(&object, 0, section.exec_start + sizeof(bytes) - 2,
+                                  "indirect", LL_SYM_INDIRECT_DATA, &result),
+          "NO_EXEC indirect slot outside owned storage was accepted");
+    CHECK(owner->error_status == LL_E_UNSUPPORTED && info.noexec_extras == NULL &&
+          owner->noexec_next == next, "failed indirect lookup allocated storage");
+    ll_error_clear(owner);
+    ghciRemoveSymbolTable(owner, "indirect", &provider);
+    owner->services.cfg.flags &= ~LL_CFG_NO_EXEC;
+}
+
 int main(void)
 {
     ll_linker owner = {0};
@@ -97,6 +174,9 @@ int main(void)
     ll_mutex_lock_for(&owner, &owner.linker_mutex);
     run_static_case(&owner, 0, (m32_allocator *)(uintptr_t)1);
     run_static_case(&owner, 0x20, (m32_allocator *)(uintptr_t)2);
+    run_noexec_extra(&owner, LL_SYM_DATA);
+    run_noexec_extra(&owner, LL_SYM_CODE);
+    run_noexec_indirect(&owner);
     ll_mutex_unlock_for(&owner, &owner.linker_mutex);
     ll_exit_linker(&owner);
     CHECK(host_a.live == 0, "static extra fixture leaked ownership");

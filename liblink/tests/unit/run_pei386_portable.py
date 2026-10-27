@@ -57,6 +57,9 @@ def main() -> None:
         strtab = symtab + 18 * symbols
         if strtab % 4 == 0:
             raise RuntimeError("fixture did not produce an unaligned COFF string table")
+        noexec = output / "noexec.o"
+        run(cc + flags + ["-DLL_ALL_BACKENDS", "-DLL_TARGET_ARCH=2", "-c",
+                         str(ROOT / "liblink/src/ll_noexec.c"), "-o", str(noexec)])
         backend = output / "PEi386.o"
         run(cc + flags + ["-DLL_ALL_BACKENDS", "-DLL_TARGET_ARCH=2", "-c",
                          str(ROOT / "liblink/src/linker/PEi386.c"), "-o", str(backend)])
@@ -66,10 +69,11 @@ def main() -> None:
         static_extra = output / "pei386_static_extra"
         run(cc + flags + ["-DLL_ALL_BACKENDS", "-DLL_TARGET_ARCH=2",
                           str(ROOT / "liblink/tests/unit/pei386_static_extra.c"),
-                          str(args.native_archive), *libraries, "-o", str(static_extra)])
+                          str(noexec), str(args.native_archive), *libraries, "-o", str(static_extra)])
         run([str(static_extra)])
-        run(cc + flags + [str(ROOT / "liblink/tests/unit/pei386_portable_data.c"),
-                          str(backend), str(args.native_archive), *libraries,
+        run(cc + flags + ["-DLL_ALL_BACKENDS", "-DLL_TARGET_ARCH=2",
+                          str(ROOT / "liblink/tests/unit/pei386_portable_data.c"),
+                          str(backend), str(noexec), str(args.native_archive), *libraries,
                           "-o", str(binary)])
         run([str(binary), str(coff)])
         names_source = output / "common_names.c"
@@ -79,6 +83,13 @@ def main() -> None:
         run(shlex.split(args.coff_cc) + ["-fcommon", "-c", str(names_source),
                                         "-o", str(names_object)])
         run([str(binary), str(names_object)])
+        run([str(binary), "--noexec", str(coff)])
+        common_source = output / "common.c"
+        common_source.write_text("int ll_pe_portable_data;\n")
+        common_object = output / "common.obj"
+        run(shlex.split(args.coff_cc) + ["-fcommon", "-c", str(common_source),
+                                        "-o", str(common_object)])
+        run([str(binary), "--noexec", "--common", str(common_object)])
 
 
 if __name__ == "__main__":

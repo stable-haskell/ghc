@@ -451,6 +451,7 @@
 #include "linker/PEi386Services.h"
 #include "ll_format.h"
 #include "ll_backend.h"
+#include "ll_noexec.h"
 
 #include "linker/PEi386Types.h"
 #include "linker/InitFini.h"
@@ -511,6 +512,18 @@ const Alignments pe_alignments[] = {
 const int pe_alignments_cnt = sizeof (pe_alignments) / sizeof (Alignments);
 const int default_alignment = 8;
 
+static void freeNoExecExtras(ObjectCode *oc)
+{
+    struct ll_coff_extra_allocation *item = oc->coff_info->noexec_extras;
+    while (item != NULL) {
+        struct ll_coff_extra_allocation *next = item->next;
+        free(item->allocation);
+        LL_FREE_FOR(oc->L, item);
+        item = next;
+    }
+    oc->coff_info->noexec_extras = NULL;
+}
+
 void freePreloadObjectFile_PEi386(ObjectCode *oc)
 {
     if (oc->image) {
@@ -519,6 +532,7 @@ void freePreloadObjectFile_PEi386(ObjectCode *oc)
     }
 
     if (oc->coff_info) {
+        freeNoExecExtras(oc);
         /* Release the unwinder information.
            See Note [Exception Unwinding].  */
         if (oc->coff_info->pdata) {
@@ -546,6 +560,7 @@ static void releaseOcInfo(ObjectCode* oc) {
     if (!oc) return;
 
     if (oc->coff_info) {
+        freeNoExecExtras(oc);
         freeInitFiniList(oc->L, oc->coff_info->init);
         freeInitFiniList(oc->L, oc->coff_info->fini);
         LL_FREE_FOR(oc->L, oc->coff_info->ch_info);
@@ -1379,7 +1394,14 @@ ocGetNames_PEi386 ( ObjectCode* oc )
 
       // Allocate memory for the section.
       uint8_t *start;
-      if (section->coff_info->props & LL_COFF_IMAGE_SCN_MEM_WRITE) {
+      ll_noexec_block block = {0};
+      if (ll_noexec_enabled(oc->L)) {
+          if (!ll_noexec_allocate(oc->L, sz, alignment, &block)) {
+              releaseOcInfo(oc);
+              return false;
+          }
+          start = block.site.work;
+      } else if (section->coff_info->props & LL_COFF_IMAGE_SCN_MEM_WRITE) {
           start = m32_alloc_for(oc->L, oc->rw_m32, sz, alignment);
       } else {
           start = m32_alloc_for(oc->L, oc->rx_m32, sz, alignment);
@@ -1399,7 +1421,9 @@ ocGetNames_PEi386 ( ObjectCode* oc )
         memset(start, 0, sz);
       }
 
-      addSection(oc->L, section, kind, SECTION_NOMEM, start, sz, 0, 0, 0, sizeof(struct ll_coff_section_info));
+      addSection(oc->L, section, kind, ll_noexec_enabled(oc->L) ? SECTION_NOEXEC : SECTION_NOMEM,
+                 start, sz, 0, block.allocation, 0, sizeof(struct ll_coff_section_info));
+      if (ll_noexec_enabled(oc->L)) section->exec_start = block.site.exec;
       addProddableBlock(oc->L, &oc->proddables, oc->sections[i].start, sz);
    }
 
@@ -1431,7 +1455,16 @@ ocGetNames_PEi386 ( ObjectCode* oc )
    /* Allocate BSS space */
    ll_symbol_addr* bss = NULL;
    if (globalBssSize > 0) {
-       bss = m32_alloc_for(oc->L, oc->rw_m32, globalBssSize, 16);
+       ll_noexec_block block = {0};
+       if (ll_noexec_enabled(oc->L)) {
+           if (!ll_noexec_allocate(oc->L, globalBssSize, 16, &block)) {
+               releaseOcInfo(oc);
+               return false;
+           }
+           bss = block.site.work;
+       } else {
+           bss = m32_alloc_for(oc->L, oc->rw_m32, globalBssSize, 16);
+       }
        if (bss == NULL) {
            if (oc->L->error_status == LL_OK)
                ll_error_set(oc->L, LL_E_NOMEM,
@@ -1442,8 +1475,11 @@ ocGetNames_PEi386 ( ObjectCode* oc )
        /* M32 can return recycled storage. New COMMON must start zeroed. */
        memset(bss, 0, globalBssSize);
        addSection(oc->L, &oc->sections[oc->n_sections-1],
-                  SECTIONKIND_RWDATA, SECTION_M32,
-                  bss, globalBssSize, 0, 0, 0, sizeof(struct ll_coff_section_info));
+                  SECTIONKIND_RWDATA, ll_noexec_enabled(oc->L) ? SECTION_NOEXEC : SECTION_M32,
+                  bss, globalBssSize, 0, block.allocation, 0, sizeof(struct ll_coff_section_info));
+       if (ll_noexec_enabled(oc->L)) {
+           oc->sections[oc->n_sections-1].exec_start = block.site.exec;
+       }
        LL_IF_DEBUG_FOR(oc->L, linker_verbose, LL_DEBUG_FOR(oc->L, "bss @ %p %" LL_FMT_WORD "\n", bss, globalBssSize));
        addProddableBlock(oc->L, &oc->proddables, bss, globalBssSize);
    } else {
@@ -1455,6 +1491,9 @@ ocGetNames_PEi386 ( ObjectCode* oc )
       been copied. Release it to free up the memory.  */
    LL_FREE_FOR(oc->L, oc->image);
    oc->image = NULL;
+
+   if (ll_noexec_enabled(oc->L) && bss != NULL)
+       bss = (ll_symbol_addr *)oc->sections[oc->n_sections-1].exec_start;
 
    for (unsigned int i = 0; i < (uint32_t)oc->n_symbols; i++) {
       COFF_symbol* sym = &oc->coff_info->symbols[i];
@@ -1516,7 +1555,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
             || (   symStorageClass == LL_COFF_IMAGE_SYM_CLASS_STATIC
                 && section->coff_info->props & LL_COFF_IMAGE_SCN_LNK_COMDAT)
             ) {
-                addr   = (ll_symbol_addr*)((size_t)section->start + symValue);
+                addr   = (ll_symbol_addr*)(section->exec_start + symValue);
                 isWeak = section->coff_info->props & LL_COFF_IMAGE_SCN_LNK_COMDAT;
          }
       }
@@ -1542,7 +1581,7 @@ ocGetNames_PEi386 ( ObjectCode* oc )
               targetSection = targetSecNumber > 0 ? &oc->sections[targetSecNumber-1] : NULL;
           }
           if(NULL != targetSection)
-              addr = (ll_symbol_addr*) ((size_t) targetSection->start + getSymValue(oc->L, info, targetSym));
+              addr = (ll_symbol_addr*) (targetSection->exec_start + getSymValue(oc->L, info, targetSym));
           else
             {
                 // Do the symbol lookup based on name, this follows Microsoft's weak external's
@@ -1559,7 +1598,9 @@ ocGetNames_PEi386 ( ObjectCode* oc )
                 // https://learn.microsoft.com/en-us/windows/win32/debug/pe-format#auxiliary-format-3-weak-externals
                 ll_symbol_name *target_sname = get_sym_name (oc->L, getSymShortName(oc->L, info, targetSym), oc);
                 if (target_sname)
-                  addr = lookupSymbol_PEi386 (oc->L, target_sname, oc, &type);
+                  addr = ll_noexec_enabled(oc->L)
+                       ? lookupDependentSymbol(oc->L, target_sname, oc, &type)
+                       : lookupSymbol_PEi386(oc->L, target_sname, oc, &type);
 
                 LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "weak external symbol @ %s => %s resolved to %p\n", \
                                             sname, target_sname, addr));
@@ -1652,6 +1693,11 @@ ocGetNames_PEi386 ( ObjectCode* oc )
           if (strlen(dllName) == 0 || dllName[0] == 0 || has_code_section)
               continue;
 
+          if (ll_noexec_enabled(oc->L)) {
+              ll_error_set(oc->L, LL_E_UNSUPPORTED,
+                           "NO_EXEC cannot load a PE import library DLL");
+              return false;
+          }
           if (!ll_pe_host_load_bfd_head(oc, dllName, &sname, &addr))
               return false;
 
@@ -1725,14 +1771,58 @@ ocGetNames_PEi386 ( ObjectCode* oc )
 
 #if LL_TARGET_X86_64
 
+/* Resolve an owned synthetic indirect slot to its host storage. Externally
+ * supplied execution addresses are opaque and must never be dereferenced. */
+static bool
+noexecIndirectValue(ObjectCode *oc, const char *symbol, uintptr_t address,
+                    uintptr_t *value)
+{
+    RtsSymbolInfo *info = NULL;
+    if (ghciLookupSymbolInfo(oc->L, symbol, &info) && info->owner != NULL) {
+        ObjectCode *owner = info->owner;
+        for (int i = 0; i < owner->n_sections; ++i) {
+            const Section *section = &owner->sections[i];
+            if (section->alloc != SECTION_NOEXEC || address < section->exec_start)
+                continue;
+            uintptr_t offset = address - section->exec_start;
+            if (offset <= section->size && sizeof(*value) <= section->size - offset) {
+                memcpy(value, (const uint8_t *)section->start + offset, sizeof(*value));
+                return true;
+            }
+        }
+    }
+    ll_error_set(oc->L, LL_E_UNSUPPORTED,
+                 "NO_EXEC indirect PE symbol %s has no owned storage", symbol);
+    return false;
+}
+
 static bool
 makeSymbolExtra_PEi386( ObjectCode* oc, uint64_t index LL_UNUSED, size_t s,
                        char* symbol LL_UNUSED, ll_sym_type type, size_t *result )
 {
     ll_sym_type kind = type & ~(LL_SYM_DUP_DISCARD | LL_SYM_HIDDEN);
-    ll_symbol_extra_x86_64 *extra = m32_alloc_for(oc->L,
-        kind == LL_SYM_CODE ? oc->rx_m32 : oc->rw_m32,
-        sizeof(ll_symbol_extra_x86_64), 8);
+    ll_symbol_extra_x86_64 *extra;
+    uintptr_t extra_exec;
+    uintptr_t indirect_value = 0;
+    if (ll_noexec_enabled(oc->L)) {
+        if (kind == LL_SYM_INDIRECT_DATA &&
+            !noexecIndirectValue(oc, symbol, s, &indirect_value)) return false;
+        ll_noexec_block block;
+        if (!ll_noexec_allocate(oc->L, sizeof(*extra), 8, &block)) return false;
+        struct ll_coff_extra_allocation *item = LL_MALLOC_FOR(oc->L, sizeof(*item), "COFF NO_EXEC extra");
+        item->allocation = block.allocation;
+        item->work = block.site.work;
+        item->exec = block.site.exec;
+        item->next = oc->coff_info->noexec_extras;
+        oc->coff_info->noexec_extras = item;
+        extra = (ll_symbol_extra_x86_64 *)block.site.work;
+        extra_exec = block.site.exec;
+    } else {
+        extra = m32_alloc_for(oc->L,
+            kind == LL_SYM_CODE ? oc->rx_m32 : oc->rw_m32,
+            sizeof(ll_symbol_extra_x86_64), 8);
+        extra_exec = (uintptr_t)extra;
+    }
     if (extra == NULL) {
         if (oc->L->error_status == LL_OK)
             ll_error_set(oc->L, LL_E_NOMEM,
@@ -1747,20 +1837,24 @@ makeSymbolExtra_PEi386( ObjectCode* oc, uint64_t index LL_UNUSED, size_t s,
             static uint8_t jmp[] = { 0xFF, 0x25, 0xF2, 0xFF, 0xFF, 0xFF };
             memcpy(extra->jumpIsland, jmp, 6);
             LL_IF_DEBUG_FOR(oc->L, linker_verbose, LL_DEBUG_FOR(oc->L, "makeSymbolExtra(code): %s -> %p\n", symbol, &extra->jumpIsland));
-            *result = (size_t)&extra->jumpIsland;
+            *result = extra_exec + offsetof(ll_symbol_extra_x86_64, jumpIsland);
             return true;
         }
         case LL_SYM_INDIRECT_DATA: {
-            void *v = *(void**) s;
-            extra->addr = (uint64_t)v;
+            if (ll_noexec_enabled(oc->L)) {
+                extra->addr = indirect_value;
+            } else {
+                void *v = *(void**) s;
+                extra->addr = (uint64_t)v;
+            }
             LL_IF_DEBUG_FOR(oc->L, linker_verbose, LL_DEBUG_FOR(oc->L, "makeSymbolExtra(data): %s -> %p\n", symbol, &extra->addr));
-            *result = (size_t)&extra->addr;
+            *result = extra_exec + offsetof(ll_symbol_extra_x86_64, addr);
             return true;
         }
         default: {
             extra->addr = (uint64_t)s;
             LL_IF_DEBUG_FOR(oc->L, linker_verbose, LL_DEBUG_FOR(oc->L, "makeSymbolExtra(indirect-data): %s -> %p\n", symbol, &extra->addr));
-            *result = (size_t)&extra->addr;
+            *result = extra_exec + offsetof(ll_symbol_extra_x86_64, addr);
             return true;
         }
     }
@@ -2005,7 +2099,7 @@ ocResolve_PEi386 ( ObjectCode* oc )
 
       /* Register the exceptions inside this OC.
          See Note [Exception Unwinding].  */
-      if (section.kind == SECTIONKIND_EXCEPTION_TABLE) {
+      if (section.kind == SECTIONKIND_EXCEPTION_TABLE && !ll_noexec_enabled(oc->L)) {
           bool empty_table;
           if (!ll_pe_host_register_unwind(oc, LL_TARGET_ARCH, i, &empty_table)) {
               releaseOcInfo(oc);

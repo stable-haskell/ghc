@@ -1543,7 +1543,7 @@ checks the relocation field and every byte of the affected section. Saved
 references cover ADDR64, ADDR32NB, REL32, and SECREL. Run
 `python3 liblink/tests/oracle/test_coff_x86_64.py` to replay them and reject
 corrupted fields and resolver inputs. Normal captures use the real section
-addresses and do not qualify Windows execution or NO_EXEC.
+addresses and do not qualify Windows execution.
 
 For a live capture, compile `PEi386.c` separately with `LL_ALL_BACKENDS`,
 `LL_TARGET_ARCH=LL_ARCH_X86_64`, and
@@ -1558,6 +1558,25 @@ PE object rather than an archive PE member. For each fixture:
       --object liblink/tests/fixtures/generated/coff-x86_64/IMAGE_REL_AMD64_REL32.o \
       --capture /tmp/coff-capture.json \
       --golden liblink/tests/golden/coff-x86_64/IMAGE_REL_AMD64_REL32.json
+
+`run_coff_x86_64_goldens.py` builds the PE backend, host service, private heap
+allocator, and capture runner separately, then checks both modes twice for
+all four fixtures. Pass `--native-archive`, `--config-include`, and
+`--fs-include` as for the portable driver; Linux also needs
+`--rts-fs-archive`. `--cc` accepts the compiler and sanitizer flags. In
+NO_EXEC the configured base is `0x0fffff00`; the first page-aligned section
+starts at `0x10000000`, making the ADDR32NB reference match the normal
+capture's explicit base. The NO_EXEC run uses the actual image-base service,
+section write pointers differ from their execution addresses, and the oracle
+compares the complete relocated section against each normal-mode golden.
+
+The portable data driver also checks NO_EXEC admission, synthetic data and
+COMMON symbol addresses, zero-filled BSS, and cleanup. The static-extra unit
+checks heap-backed code/data islands and an owned indirect-data slot. Indirect
+NO_EXEC addresses without owned host storage are rejected; PE import-library
+DLL loading and native unwind registration are unavailable in NO_EXEC. These
+checks run object processing only; Windows-native CI and a second host remain
+separate qualification steps.
 
 `pei386_static_extra.c` exercises the static-symbol out-of-range REL32 path
 through the actual PE resolver with controlled extra storage. Static COFF data
@@ -1675,8 +1694,8 @@ the observed string table address ended in `0x16e`, which is not four-byte
 aligned. The typed load was present in commit `0fcd57eec4`; the authorized
 repair uses `memcpy` and the one-symbol portable regression above. The capture used
 `/usr/bin/clang -fsanitize=address,undefined -fno-sanitize-recover=undefined`
-with `ASAN_OPTIONS=detect_leaks=0`. NO_EXEC relocation qualification remains
-in progress.
+with `ASAN_OPTIONS=detect_leaks=0`. Local NO_EXEC golden captures and the
+portable data and extra units subsequently pass under ASan/UBSan.
 
 The NO_EXEC COMMON-symbol portable case exposed one remaining owner allocation.
 Allocation tracing identified a temporary `get_sym_name` buffer for an

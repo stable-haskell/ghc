@@ -65,7 +65,15 @@ struct ll_coff_section_info {
     uint64_t virtualAddr;
  };
 
+struct ll_coff_extra_allocation {
+    void *allocation;
+    void *work;
+    uintptr_t exec;
+    struct ll_coff_extra_allocation *next;
+};
+
 struct ll_coff_object_info {
+    struct ll_coff_extra_allocation *noexec_extras;
     struct InitFiniList* init; // Freed by ocRunInit_PEi386
     struct InitFiniList* fini; // Freed by ocRunFini_PEi386
     struct _Section* pdata;

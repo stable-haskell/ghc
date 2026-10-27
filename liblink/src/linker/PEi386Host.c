@@ -7,6 +7,7 @@
 #include "linker/PEi386.h"
 #include "linker/PEi386Services.h"
 #include "ll_failure.h"
+#include "ll_noexec.h"
 #include "RtsSymbolInfo.h"
 
 #if defined(mingw32_HOST_OS)
@@ -553,9 +554,10 @@ void ll_pe_host_unregister_unwind(ObjectCode *oc)
                   oc->fileName);
 }
 
-bool ll_pe_host_image_base(ll_linker *L LL_UNUSED, uintptr_t *base)
+bool ll_pe_host_image_base(ll_linker *L, uintptr_t *base)
 {
-    *base = (uintptr_t)GetModuleHandleW(NULL);
+    *base = ll_noexec_enabled(L) ? L->services.cfg.noexec_base
+                                 : (uintptr_t)GetModuleHandleW(NULL);
     return true;
 }
 
@@ -768,8 +770,12 @@ static bool pe_host_unsupported(ll_linker *L, const char *service)
     return false;
 }
 
-bool ll_pe_host_image_base(ll_linker *L, uintptr_t *base LL_UNUSED)
+bool ll_pe_host_image_base(ll_linker *L, uintptr_t *base)
 {
+    if (ll_noexec_enabled(L)) {
+        *base = L->services.cfg.noexec_base;
+        return true;
+    }
     return pe_host_unsupported(L, "image-base discovery");
 }
 

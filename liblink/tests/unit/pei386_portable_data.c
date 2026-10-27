@@ -56,12 +56,15 @@ static void test_required_services(ll_linker *owner)
  * native Windows ownership fixture; this extraction does not repair them. */
 int main(int argc, char **argv)
 {
-    if (argc != 2) {
-        (void)fprintf(stderr, "usage: pei386_portable_data compiler-coff-object\n");
+    bool noexec = argc >= 3 && strcmp(argv[1], "--noexec") == 0;
+    bool common = noexec && argc == 4 && strcmp(argv[2], "--common") == 0;
+    if (!(argc == 2 || (noexec && (argc == 3 || common)))) {
+        (void)fprintf(stderr, "usage: pei386_portable_data [--noexec [--common]] compiler-coff-object\n");
         return 2;
     }
+    const char *path = argv[argc - 1];
     unsigned char bytes[32768];
-    FILE *input = fopen(argv[1], "rb");
+    FILE *input = fopen(path, "rb");
     CHECK(input != NULL, "could not open compiler COFF object");
     if (input == NULL) return 1;
     size_t size = fread(bytes, 1, sizeof(bytes), input);
@@ -72,18 +75,27 @@ int main(int argc, char **argv)
 
     ll_linker owner = {0};
     ll_compat_host_ops ops = make_ops(&host_a);
-    ll_compat_config config = {.always_pic = true};
+    ll_compat_config config = {.always_pic = true,
+        .flags = noexec ? LL_CFG_NO_EXEC | LL_CFG_ALL_FORMATS : 0,
+        .noexec_base = noexec ? UINT64_C(0x10000000) : 0};
     ll_install_host_for(&owner, &ops, &config);
     ll_init_linker(&owner, 0);
     ll_init_linker_mmap(&owner);
-    test_required_services(&owner);
+    if (!noexec) test_required_services(&owner);
 
     char *image = LL_MALLOC_FOR(&owner, size, "portable COFF compiler image");
     memcpy(image, bytes, size);
-    ObjectCode *object = mkOc(&owner, STATIC_OBJECT, (pathchar *)argv[1], image,
+    ObjectCode *object = mkOc(&owner, STATIC_OBJECT, (pathchar *)path, image,
                               (int)size, false, NULL, 0);
-    object->format_ops = &ll_format_pei386;
-    object->formatName = ll_format_pei386.name;
+    if (noexec) {
+        if (!ll_init_object(object)) {
+            (void)fprintf(stderr, "NO_EXEC COFF admission failed: %s\n", owner.error_message);
+            return 1;
+        }
+    } else {
+        object->format_ops = &ll_format_pei386;
+        object->formatName = ll_format_pei386.name;
+    }
     CHECK(object->format_ops->sniff(bytes, size), "real COFF table rejected fixture signature");
     if (!object->format_ops->verify(object) || !object->format_ops->get_names(object)) {
         (void)fprintf(stderr, "real COFF data processing failed: %d %s\n",
@@ -95,8 +107,24 @@ int main(int argc, char **argv)
           "real COFF names did not publish compiler-defined data");
     if (definition != NULL) {
         uint32_t value = 0;
-        memcpy(&value, definition->value, sizeof(value));
-        CHECK(value == UINT32_C(0x13579bdf) && definition->owner == object,
+        void *work = definition->value;
+        if (noexec) {
+            work = NULL;
+            uintptr_t address = (uintptr_t)definition->value;
+            for (int i = 0; i < object->n_sections; ++i) {
+                Section *section = &object->sections[i];
+                if (section->alloc == SECTION_NOEXEC && address >= section->exec_start &&
+                    address - section->exec_start <= section->size &&
+                    sizeof(value) <= section->size - (address - section->exec_start)) {
+                    work = (uint8_t *)section->start + (address - section->exec_start);
+                    CHECK((uintptr_t)work != address, "NO_EXEC symbol retained work address");
+                    break;
+                }
+            }
+        }
+        CHECK(work != NULL, "data symbol did not map to owned section");
+        if (work != NULL) memcpy(&value, work, sizeof(value));
+        CHECK(value == (common ? 0 : UINT32_C(0x13579bdf)) && definition->owner == object,
               "real COFF data bytes or symbol owner changed");
     }
 
@@ -111,6 +139,8 @@ int main(int argc, char **argv)
         }
     }
     int section_count = object->n_sections;
+    if (noexec) CHECK(object->rw_m32 == NULL && object->rx_m32 == NULL,
+                      "NO_EXEC allocated native m32 storage");
     CHECK(object->format_ops->resolve(object), "ordinary COFF data required a native process service");
     CHECK(owner.error_status == LL_OK, "ordinary COFF data left a process-service error");
     removeOcSymbols(object);
