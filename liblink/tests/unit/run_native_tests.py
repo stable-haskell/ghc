@@ -1662,6 +1662,31 @@ def main() -> int:
                 forbidden_member="elf_reloc_riscv64",
             )
             run([str(riscv_test)], label="run riscv64_reloc_errors")
+
+            cache_test = output / "riscv_cache_range"
+            cache_map = output / "riscv_cache_range.map"
+            cache_link_trace = run(
+                cc
+                + [
+                    str(ROOT / "liblink/tests/unit/riscv_cache_range.c"),
+                    f"-L{archive.parent}",
+                    "-llink",
+                    *link_flags,
+                    "-Wl,-t",
+                    linker_map_flag(cache_map),
+                    "-o",
+                    str(cache_test),
+                ],
+                label="compile and link riscv_cache_range",
+            )
+            verify_link_map(
+                cache_map,
+                archive,
+                cache_link_trace,
+                included_source="linker/elf_reloc_riscv64.c",
+                forbidden_member="elf_reloc_riscv64",
+            )
+            run([str(cache_test)], label="run riscv_cache_range")
         else:
             print(
                 "[riscv64_reloc_errors] skipped: generated config is not "

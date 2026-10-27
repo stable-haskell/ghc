@@ -559,6 +559,15 @@ other hosts. The current CI matrix has no RISC-V job, so this native backend
 unit awaits qualification on genuine RISC-V hardware or QEMU; no target
 execution is claimed on other architectures.
 
+RISC-V instruction-cache bounds
+===============================
+
+On native Linux RISC-V, `riscv_cache_range.c` includes the actual backend and
+intercepts the cache-flush calls. It checks byte-sized image bounds, a nonzero
+image offset, the separate symbol-extras range, and an empty image. The unit
+does not execute the cache-flush primitive or prove native RISC-V behavior on
+other hosts. The driver excludes a duplicate backend object using the link map.
+
 AArch64 ELF relocation errors
 =============================
 
