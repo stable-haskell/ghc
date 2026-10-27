@@ -63,6 +63,10 @@ struct ll_coff_section_info {
     uint32_t props;
     uint64_t virtualSize;
     uint64_t virtualAddr;
+    uint8_t *arm64_stubs;
+    uintptr_t arm64_stubs_exec;
+    size_t arm64_stub_count;
+    size_t arm64_stub_used;
  };
 
 struct ll_coff_extra_allocation {

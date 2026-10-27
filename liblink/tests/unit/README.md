@@ -1771,3 +1771,32 @@ only new values and frees each owned value during object teardown. The portable
 COMDAT test passes under Apple Clang and Linux GCC ASan/UBSan with the owner
 ledger enabled. The Linux ASan/UBSan `noexec_core` ELF ownership and lifecycle
 unit also passes against the same fresh all-backends archive.
+
+ARM64 PE relocations
+--------------------
+
+`run_pei386_arm64_portable.py` compiles a real ARM64 Windows COFF fixture and
+runs the PE verifier, section loader and relocation resolver with synthetic
+execution addresses and `LL_CFG_NO_EXEC`. The unit also checks relocation
+encodings, signed range boundaries, unaligned fields, section-relative forms,
+and a distant branch island. `REL32` uses `S + A - (P + 4)`. No generated
+instructions are executed. Compile the backend with `LL_TARGET_ARCH=4`; format
+selection alone does not change its configured target architecture.
+
+For a stage2 build, pass the generated configuration and rts-fs include
+directories, a matching native support archive, a host compiler and an ARM64
+Windows-targeting C compiler, for example:
+
+```
+python3 liblink/tests/unit/run_pei386_arm64_portable.py \
+  --cc 'clang -fsanitize=address,undefined -fno-sanitize-recover=undefined' \
+  --coff-cc 'clang --target=aarch64-w64-windows-gnu' \
+  --native-archive /path/to/liblink.a \
+  --config-include /path/to/liblink/build/include \
+  --fs-include /path/to/rts-fs/include
+```
+
+Linux also requires `--rts-fs-archive /path/to/librts-fs.a`. On Darwin ARM64,
+Apple Clang ASan/UBSan runs the portable test with `ASAN_OPTIONS=detect_leaks=0`;
+the unit checks its host allocation ledger. Native Windows ARM64 execution,
+including unwind registration, remains to be qualified on Windows.

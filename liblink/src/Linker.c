@@ -1158,7 +1158,7 @@ int ll_init_object(ObjectCode *oc)
 #if LL_BUILD_MACHO && (LL_TARGET_X86_64 || LL_TARGET_AARCH64) && SIZEOF_VOID_P == 8
         supported = supported || oc->format_ops == &ll_format_macho;
 #endif
-#if LL_BUILD_COFF && LL_TARGET_X86_64 && SIZEOF_VOID_P == 8
+#if LL_BUILD_COFF && (LL_TARGET_X86_64 || LL_TARGET_AARCH64) && SIZEOF_VOID_P == 8
         supported = supported || oc->format_ops == &ll_format_pei386;
 #endif
         if (!supported ||

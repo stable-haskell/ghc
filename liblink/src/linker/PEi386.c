@@ -951,7 +951,6 @@ verifyCOFFHeader ( ll_linker *L, uint16_t machine, ll_coff_file_header *hdr,
       LL_LOG_ERROR_FOR(L, "%" PATH_FMT ": Not a ARM64 PE+ file.", fileName);
       return false;
    }
-   LL_LOG_ERROR_FOR(L, "PE/PE+ not supported on ARM64.");
 #else
    LL_LOG_ERROR_FOR(L, "PE/PE+ not supported on this arch.");
 #endif
@@ -1396,16 +1395,34 @@ ocGetNames_PEi386 ( ObjectCode* oc )
       // Allocate memory for the section.
       uint8_t *start;
       ll_noexec_block block = {0};
+      size_t allocation_size = sz;
+#if LL_TARGET_AARCH64
+      /* Keep branch islands within range of the section that refers to them. */
+      size_t stub_count = 0;
+      for (uint32_t r = 0; r < section->coff_info->noRelocs; ++r) {
+          if (section->coff_info->relocs[r].Type == LL_COFF_IMAGE_REL_ARM64_BRANCH26)
+              ++stub_count;
+      }
+      if (stub_count > (SIZE_MAX - 7) / 16 || sz > SIZE_MAX - 7 ||
+          stub_count * 16 > SIZE_MAX - ((sz + 7) & ~(size_t)7)) {
+          ll_error_set(oc->L, LL_E_NOMEM, "ARM64 COFF section and islands are too large");
+          releaseOcInfo(oc);
+          return false;
+      }
+      size_t stub_offset = (sz + 7) & ~(size_t)7;
+      allocation_size = stub_count ? stub_offset + stub_count * 16 : sz;
+      if (stub_count != 0 && alignment < 8) alignment = 8;
+#endif
       if (ll_noexec_enabled(oc->L)) {
-          if (!ll_noexec_allocate(oc->L, sz, alignment, &block)) {
+          if (!ll_noexec_allocate(oc->L, allocation_size, alignment, &block)) {
               releaseOcInfo(oc);
               return false;
           }
           start = block.site.work;
       } else if (section->coff_info->props & LL_COFF_IMAGE_SCN_MEM_WRITE) {
-          start = m32_alloc_for(oc->L, oc->rw_m32, sz, alignment);
+          start = m32_alloc_for(oc->L, oc->rw_m32, allocation_size, alignment);
       } else {
-          start = m32_alloc_for(oc->L, oc->rx_m32, sz, alignment);
+          start = m32_alloc_for(oc->L, oc->rx_m32, allocation_size, alignment);
       }
       if (!start) {
         if (oc->L->error_status == LL_OK)
@@ -1425,7 +1442,14 @@ ocGetNames_PEi386 ( ObjectCode* oc )
       addSection(oc->L, section, kind, ll_noexec_enabled(oc->L) ? SECTION_NOEXEC : SECTION_NOMEM,
                  start, sz, 0, block.allocation, 0, sizeof(struct ll_coff_section_info));
       if (ll_noexec_enabled(oc->L)) section->exec_start = block.site.exec;
-      addProddableBlock(oc->L, &oc->proddables, oc->sections[i].start, sz);
+#if LL_TARGET_AARCH64
+      if (stub_count != 0) {
+          section->coff_info->arm64_stubs = start + stub_offset;
+          section->coff_info->arm64_stubs_exec = section->exec_start + stub_offset;
+          section->coff_info->arm64_stub_count = stub_count;
+      }
+#endif
+      addProddableBlock(oc->L, &oc->proddables, oc->sections[i].start, allocation_size);
    }
 
    /* Copy exported symbols into the ObjectCode. */
@@ -1866,6 +1890,182 @@ makeSymbolExtra_PEi386( ObjectCode* oc, uint64_t index LL_UNUSED, size_t s,
 
 #endif /* x86_64_HOST_ARCH */
 
+#if LL_TARGET_AARCH64
+/* Signed-width arithmetic is represented modulo 2^64 to avoid signed overflow. */
+static uint64_t pe_arm64_sign_extend(uint64_t value, unsigned bits)
+{
+    const uint64_t mask = (UINT64_C(1) << bits) - 1;
+    value &= mask;
+    return value & (UINT64_C(1) << (bits - 1)) ? value | ~mask : value;
+}
+
+static bool pe_arm64_fits(uint64_t value, unsigned bits)
+{
+    return value == pe_arm64_sign_extend(value, bits);
+}
+
+static bool pe_arm64_target_section(ObjectCode *oc, COFF_symbol *sym,
+                                    const char *name, uintptr_t address,
+                                    uintptr_t *base, uint16_t *number)
+{
+    uint32_t index = getSymSectionNumber(oc->L, oc->coff_info->ch_info, sym);
+    ObjectCode *owner = oc;
+    if (index == PE_SECTION_UNDEFINED || index >= (uint32_t)oc->n_sections) {
+        RtsSymbolInfo *info = NULL;
+        if (!ghciLookupSymbolInfo(oc->L, name, &info) || !info->owner) return false;
+        owner = info->owner;
+        index = 0;
+        for (int i = 0; i < owner->n_sections; ++i) {
+            const Section *candidate = &owner->sections[i];
+            uintptr_t start = candidate->exec_start ? candidate->exec_start : (uintptr_t)candidate->start;
+            if (candidate->start && address >= start && address - start < candidate->size) {
+                index = (uint32_t)i + 1;
+                break;
+            }
+        }
+    }
+    if (index == 0 || index >= (uint32_t)owner->n_sections || index > UINT16_MAX)
+        return false;
+    Section *target = &owner->sections[index - 1];
+    *base = target->exec_start ? target->exec_start : (uintptr_t)target->start;
+    *number = (uint16_t)index;
+    return true;
+}
+
+static bool pe_arm64_reloc(ObjectCode *oc, Section *section, COFF_symbol *sym,
+                           const char *name, uint16_t type, ll_site site, uintptr_t S)
+{
+    uint32_t instruction = 0;
+    uint64_t result, target = S;
+    uintptr_t section_base = 0;
+    uint16_t section_number = 0;
+    if (type == LL_COFF_IMAGE_REL_ARM64_SECTION || type == LL_COFF_IMAGE_REL_ARM64_SECREL ||
+        type == LL_COFF_IMAGE_REL_ARM64_SECREL_LOW12A || type == LL_COFF_IMAGE_REL_ARM64_SECREL_HIGH12A ||
+        type == LL_COFF_IMAGE_REL_ARM64_SECREL_LOW12L) {
+        if (!pe_arm64_target_section(oc, sym, name, S, &section_base, &section_number)) {
+            ll_error_set(oc->L, LL_E_UNSUPPORTED, "ARM64 COFF relocation needs an owned target section");
+            return false;
+        }
+    }
+    if (type == LL_COFF_IMAGE_REL_ARM64_SECTION) {
+        uint16_t addend, value;
+        memcpy(&addend, site.work, sizeof(addend));
+        if ((uint32_t)section_number + addend > UINT16_MAX) goto range;
+        value = (uint16_t)(section_number + addend);
+        memcpy(site.work, &value, sizeof(value));
+        return true;
+    }
+    if (type == LL_COFF_IMAGE_REL_ARM64_ADDR64) {
+        uint64_t addend;
+        memcpy(&addend, site.work, sizeof(addend));
+        result = S + addend;
+        memcpy(site.work, &result, sizeof(result));
+        return true;
+    }
+    memcpy(&instruction, site.work, sizeof(instruction));
+    switch (type) {
+    case LL_COFF_IMAGE_REL_ARM64_ADDR32:
+    case LL_COFF_IMAGE_REL_ARM64_ADDR32NB:
+    case LL_COFF_IMAGE_REL_ARM64_SECREL: {
+        if ((uint64_t)S > UINT64_MAX - instruction) goto range;
+        result = (uint64_t)S + instruction;
+        if (type == LL_COFF_IMAGE_REL_ARM64_ADDR32NB) {
+            uintptr_t image_base;
+            if (!ll_pe_host_image_base(oc->L, &image_base)) return false;
+            if (result < image_base) goto range;
+            result -= image_base;
+        } else if (type == LL_COFF_IMAGE_REL_ARM64_SECREL) {
+            if (result < section_base) goto range;
+            result -= section_base;
+        }
+        if (result > UINT32_MAX) goto range;
+        instruction = (uint32_t)result;
+        break;
+    }
+    case LL_COFF_IMAGE_REL_ARM64_REL32:
+        result = S + pe_arm64_sign_extend(instruction, 32) - site.exec - 4;
+        if (!pe_arm64_fits(result, 32)) goto range;
+        instruction = (uint32_t)result;
+        break;
+    case LL_COFF_IMAGE_REL_ARM64_BRANCH26:
+    case LL_COFF_IMAGE_REL_ARM64_BRANCH19:
+    case LL_COFF_IMAGE_REL_ARM64_BRANCH14: {
+        unsigned bits = type == LL_COFF_IMAGE_REL_ARM64_BRANCH26 ? 26 :
+                        type == LL_COFF_IMAGE_REL_ARM64_BRANCH19 ? 19 : 14;
+        unsigned shift = bits == 26 ? 0 : 5;
+        uint32_t mask = ((UINT32_C(1) << bits) - 1) << shift;
+        uint64_t addend = pe_arm64_sign_extend((instruction & mask) >> shift, bits) << 2;
+        target = S + addend;
+        result = target - site.exec;
+        if ((result & 3) != 0) goto range;
+        if (!pe_arm64_fits(result, bits + 2)) {
+            if (bits != 26 || section->coff_info->arm64_stub_used >= section->coff_info->arm64_stub_count)
+                goto range;
+            size_t slot = section->coff_info->arm64_stub_used * 16;
+            uint8_t *work = section->coff_info->arm64_stubs + slot;
+            uintptr_t exec = section->coff_info->arm64_stubs_exec + slot;
+            /* ldr x16, #8; br x16; followed by the absolute destination. */
+            const uint32_t code[2] = { UINT32_C(0x58000050), UINT32_C(0xd61f0200) };
+            result = (uint64_t)exec - site.exec;
+            if ((result & 3) != 0 || !pe_arm64_fits(result, 28)) goto range;
+            ++section->coff_info->arm64_stub_used;
+            memcpy(work, code, sizeof(code));
+            memcpy(work + sizeof(code), &target, sizeof(target));
+        }
+        instruction = (instruction & ~mask) | ((uint32_t)(result >> 2) << shift & mask);
+        break;
+    }
+    case LL_COFF_IMAGE_REL_ARM64_PAGEBASE_REL21:
+    case LL_COFF_IMAGE_REL_ARM64_REL21: {
+        uint32_t encoded = ((instruction >> 29) & 3) | ((instruction >> 3) & 0x1ffffc);
+        target = S + pe_arm64_sign_extend(encoded, 21);
+        unsigned shift = type == LL_COFF_IMAGE_REL_ARM64_PAGEBASE_REL21 ? 12 : 0;
+        result = (target >> shift) - (site.exec >> shift);
+        if (!pe_arm64_fits(result, 21)) goto range;
+        instruction = (instruction & UINT32_C(0x9f00001f)) |
+                      ((uint32_t)(result & 3) << 29) | ((uint32_t)(result & 0x1ffffc) << 3);
+        break;
+    }
+    case LL_COFF_IMAGE_REL_ARM64_PAGEOFFSET_12A:
+    case LL_COFF_IMAGE_REL_ARM64_PAGEOFFSET_12L:
+    case LL_COFF_IMAGE_REL_ARM64_SECREL_LOW12A:
+    case LL_COFF_IMAGE_REL_ARM64_SECREL_HIGH12A:
+    case LL_COFF_IMAGE_REL_ARM64_SECREL_LOW12L: {
+        bool relative = type == LL_COFF_IMAGE_REL_ARM64_SECREL_LOW12A ||
+                        type == LL_COFF_IMAGE_REL_ARM64_SECREL_HIGH12A ||
+                        type == LL_COFF_IMAGE_REL_ARM64_SECREL_LOW12L;
+        bool load = type == LL_COFF_IMAGE_REL_ARM64_PAGEOFFSET_12L ||
+                    type == LL_COFF_IMAGE_REL_ARM64_SECREL_LOW12L;
+        uint64_t offset = relative ? (uint64_t)S - section_base : S;
+        unsigned scale = 0;
+        if (load) {
+            scale = instruction >> 30;
+            if ((instruction & UINT32_C(0x04800000)) == UINT32_C(0x04800000)) scale += 4;
+            if (scale > 4 || (offset & ((UINT64_C(1) << scale) - 1))) goto range;
+        }
+        uint64_t addend = (instruction >> 10) & 0xfff;
+        if (type == LL_COFF_IMAGE_REL_ARM64_SECREL_HIGH12A) {
+            result = (offset + addend) >> 12;
+            if (result > 0xfff) goto range;
+        } else {
+            result = ((offset & 0xfff) >> scale) + addend;
+            result &= 0xfff >> scale;
+        }
+        instruction = (instruction & ~UINT32_C(0x003ffc00)) | (uint32_t)(result << 10);
+        break;
+    }
+    default:
+        ll_error_set(oc->L, LL_E_UNSUPPORTED, "unsupported ARM64 COFF relocation %u", (unsigned)type);
+        return false;
+    }
+    memcpy(site.work, &instruction, sizeof(instruction));
+    return true;
+range:
+    ll_error_set(oc->L, LL_E_RELOC_RANGE, "ARM64 COFF relocation %u out of range or misaligned", (unsigned)type);
+    return false;
+}
+#endif
+
 bool
 ocResolve_PEi386 ( ObjectCode* oc )
 {
@@ -1900,6 +2100,9 @@ ocResolve_PEi386 ( ObjectCode* oc )
          COFF_symbol* sym;
          COFF_reloc* reloc = &section.coff_info->relocs[j];
 
+#if LL_TARGET_AARCH64
+         if (reloc->Type == LL_COFF_IMAGE_REL_ARM64_ABSOLUTE) continue;
+#endif
          /* Host writes and target execution addresses need not coincide. */
          uintptr_t offset = (uintptr_t)reloc->VirtualAddress
                           - (uintptr_t)section.coff_info->virtualAddr;
@@ -1907,9 +2110,16 @@ ocResolve_PEi386 ( ObjectCode* oc )
          ll_site site = { .work = (uint8_t *)section.start + offset,
                           .exec = exec_start + offset };
          pP = (ll_symbol_addr *)site.work;
+#if LL_TARGET_AARCH64
+         size_t width = reloc->Type == LL_COFF_IMAGE_REL_ARM64_SECTION ? 2 :
+                        reloc->Type == LL_COFF_IMAGE_REL_ARM64_ADDR64 ? 8 : 4;
+         checkProddableBlock(oc->L, &oc->proddables, pP, width);
+         A = 0;
+#else
          uint32_t addend32;
          memcpy(&addend32, site.work, sizeof(addend32));
          A = addend32;
+#endif
          /* the symbol to connect to */
          uint64_t symIndex = reloc->SymbolTableIndex;
          sym = &oc->coff_info->symbols[symIndex];
@@ -1959,8 +2169,10 @@ ocResolve_PEi386 ( ObjectCode* oc )
          }
          LL_IF_DEBUG_FOR(oc->L, linker_verbose, LL_DEBUG_FOR(oc->L, "S=%zx\n", S));
 
-         /* All supported relocations write at least 4 bytes */
+#if !LL_TARGET_AARCH64
+         /* Other supported relocations write at least 4 bytes. */
          checkProddableBlock(oc->L, &oc->proddables, pP, 4);
+#endif
          switch (reloc->Type) {
 #if LL_TARGET_X86_64
             case 1: /* R_X86_64_64 (ELF constant 1) - IMAGE_REL_AMD64_ADDR64 (PE constant 1) */
@@ -2077,26 +2289,23 @@ ocResolve_PEi386 ( ObjectCode* oc )
                    break;
                }
 #elif LL_TARGET_AARCH64
-            case 1: // IMAGE_REL_ARM64_ADDR32, see https://llvm.org/doxygen/namespacellvm_1_1COFF.html, https://learn.microsoft.com/en-us/windows/win32/debug/pe-format#arm64-processors
-               {
-                    // We have to put this stub due of errors like:
-                    // warning: variable 'A' set but not used.
-                    uint64_t v;
-                    v = S + A;
-
-                    ll_error_set(oc->L, LL_E_UNSUPPORTED,
-                        "%" PATH_FMT ": unsupported ARM64 PE relocation %u (0x%" PRIx64 ")",
-                        oc->fileName, (unsigned)reloc->Type, v);
-                    releaseOcInfo (oc);
-                    return false;
+            default:
+               (void)A;
+               if (!pe_arm64_reloc(oc, &section, sym, (const char *)symbol,
+                                   reloc->Type, site, S)) {
+                   releaseOcInfo(oc);
+                   return false;
                }
+               break;
 #endif
+#if !LL_TARGET_AARCH64
             default:
                ll_error_set(oc->L, LL_E_UNSUPPORTED,
                    "%" PATH_FMT ": unhandled PE relocation type %u",
                    oc->fileName, (unsigned)reloc->Type);
                releaseOcInfo (oc);
                return false;
+#endif
          }
 
       }

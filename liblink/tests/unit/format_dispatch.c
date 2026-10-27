@@ -5,9 +5,12 @@
 #include "LinkerInternals.h"
 #include "ll_format.h"
 static const struct ll_format_ops *fixture_select(ObjectCode *oc);
+static const struct ll_format_ops *fixture_native(void);
 #define ll_format_select fixture_select
+#define ll_format_native fixture_native
 #include "Linker.c"
 #undef ll_format_select
+#undef ll_format_native
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -25,6 +28,8 @@ static size_t event_count;
 static bool fail_init;
 static bool release_image;
 static const struct ll_format_ops *selected;
+
+static const struct ll_format_ops *fixture_native(void) { return selected; }
 
 #define CHECK(c, message) do { if (!(c)) { \
     (void)fprintf(stderr, "format_dispatch:%d: %s\n", __LINE__, message); \

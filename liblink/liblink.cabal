@@ -137,6 +137,9 @@ extra-source-files:
     tests/unit/pei386_unwind_retention.c
     tests/unit/pei386_comdat.c
     tests/unit/pei386_static_extra.c
+    tests/unit/pei386_arm64_reloc.c
+    tests/unit/run_pei386_arm64_portable.py
+    tests/fixtures/coff-aarch64/relocations.c
     tests/unit/link_trace_checks.py
     tests/unit/test_link_trace_checks.py
     tests/unit/native_shared_link.py

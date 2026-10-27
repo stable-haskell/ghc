@@ -520,7 +520,7 @@ bool ll_pe_host_register_unwind(ObjectCode *oc, unsigned target_arch,
         return false;
     }
     oc->coff_info->pdata = &oc->sections[section_index];
-#if defined(x86_64_HOST_ARCH)
+#if defined(x86_64_HOST_ARCH) || defined(aarch64_HOST_ARCH)
     unsigned numEntries = section.size / sizeof(RUNTIME_FUNCTION);
     if (numEntries == 0) {
         *empty_table = true;
@@ -539,9 +539,7 @@ bool ll_pe_host_register_unwind(ObjectCode *oc, unsigned target_arch,
         return false;
     }
 #else
-    /* Preserve the existing native ARM64 path. It records pdata but does
-     * not register an x86_64 RUNTIME_FUNCTION array. ARM64 PE relocation
-     * support remains subject to the backend's existing rejection. */
+    /* Other host architectures have no supported PE unwind table. */
     (void)section;
 #endif
     return true;
