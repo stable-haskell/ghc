@@ -16,7 +16,9 @@
 
 // generate COMPAT_R_<ARCH>_<REL> relocations to
 // prevent clashes with definitions in <elf.h>.
-#define ELF_RELOC(name, value)   PASTE(COMPAT_,name) = value,
+// Direct token pasting prevents macro argument expansion of 'name'
+// if <elf.h> has already been included.
+#define ELF_RELOC(name, value)   COMPAT_ ## name = value,
 
 enum RelocAarch64 {
 #include "ELFRelocs/AArch64.def"
@@ -30,3 +32,6 @@ enum Reloci386 {
 enum RelocX86_64 {
 #include "ELFRelocs/x86_64.def"
 };
+
+#undef ELF_RELOC
+

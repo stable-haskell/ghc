@@ -2,11 +2,15 @@
 #define LL_INTERNAL_SOURCE 1
 #include "ll_compat.h"
 #include "ll_target.h"
+
+#if LL_BUILD_ELF
+#include "linker/elf_compat.h"
+#endif
+
 #include "LinkerInternals.h"
 
 #if LL_BUILD_ELF
 #include "linker/Elf.h"
-#include "linker/elf_compat.h"
 #include "ll_error.h"
 
 #include <limits.h>
