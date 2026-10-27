@@ -1559,13 +1559,23 @@ PE object rather than an archive PE member. For each fixture:
       --capture /tmp/coff-capture.json \
       --golden liblink/tests/golden/coff-x86_64/IMAGE_REL_AMD64_REL32.json
 
-Open relocation suspect: in `ocResolve_PEi386`, the static-symbol branch
-sets `S` but does not initialize `sym_type`. An out-of-range ADDR32,
-ADDR32NB, 32S, or REL32 relocation can pass that value to
-`makeSymbolExtra_PEi386`, where it selects the extra allocation and payload.
-This is a source-path observation; a triggering object and its runtime impact
-have not been qualified. Do not change the behavior as part of site conversion
-without separate review and authorization.
+`pei386_static_extra.c` exercises the static-symbol out-of-range REL32 path
+through the actual PE resolver with controlled extra storage. Static COFF data
+and code types must select their respective allocators, preserve the target,
+and relocate to the data slot or jump island. Both cases failed before the
+static-symbol type initialization. The portable PE driver compiles and runs
+this unit with an explicit x64 target, and its allocator ledger checks cleanup.
+The focused Apple Clang ASan/UBSan run instruments the included PE and core
+sources; its support archive is not instrumented. Apple ASan does not support
+leak detection on this host, so that run disables it and uses the ledger.
+
+On Darwin ARM64, the focused static-extra regression built with the Nix Clang
+21.1.2 ASan/UBSan runtime stalled before `main` on macOS 26.5.2. A process
+sample showed ASan shadow-memory initialization in
+`MemoryMappingLayout::Next` / `get_dyld_hdr`; the test process was stopped.
+This observation does not qualify the static-extra repair or identify a
+linker failure. The all-backends sanitizer driver also reached its 90-second
+native-unit subprocess limit, without establishing that the same cause applied.
 
 `run_pei386_portable.py` compiles a real x86_64 Windows COFF data fixture using
 `--coff-cc`, then runs the actual PE table's verify, get_names, and resolve slots

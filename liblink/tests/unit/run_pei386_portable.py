@@ -60,6 +60,11 @@ def main() -> None:
         binary = output / "pei386_portable_data"
         libraries = ([str(args.rts_fs_archive)] if args.rts_fs_archive else [])
         libraries += ["-pthread"] + (["-ldl"] if host == "Linux" else [])
+        static_extra = output / "pei386_static_extra"
+        run(cc + flags + ["-DLL_ALL_BACKENDS", "-DLL_TARGET_ARCH=2",
+                          str(ROOT / "liblink/tests/unit/pei386_static_extra.c"),
+                          str(args.native_archive), *libraries, "-o", str(static_extra)])
+        run([str(static_extra)])
         run(cc + flags + [str(ROOT / "liblink/tests/unit/pei386_portable_data.c"),
                           str(backend), str(args.native_archive), *libraries,
                           "-o", str(binary)])

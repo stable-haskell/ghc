@@ -1842,6 +1842,10 @@ ocResolve_PEi386 ( ObjectCode* oc )
             Section section = oc->sections[sect_n - 1];
             S = ((size_t)(section.start))
               + ((size_t)(getSymValue(oc->L, info, sym)));
+            /* Static symbols bypass lookupDependentSymbol, which normally
+             * supplies the type used when an extra slot is needed. */
+            sym_type = getSymType(oc->L, info, sym) == 0x20
+                     ? LL_SYM_CODE : LL_SYM_DATA;
          } else {
             copyName ( getSymShortName(oc->L, info, sym), oc, symbol,
                        sizeof(symbol)-1 );
