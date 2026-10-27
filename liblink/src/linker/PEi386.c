@@ -450,6 +450,7 @@
 #include "linker/PEi386.h"
 #include "linker/PEi386Services.h"
 #include "ll_format.h"
+#include "ll_backend.h"
 
 #include "linker/PEi386Types.h"
 #include "linker/InitFini.h"
@@ -1802,14 +1803,15 @@ ocResolve_PEi386 ( ObjectCode* oc )
          COFF_symbol* sym;
          COFF_reloc* reloc = &section.coff_info->relocs[j];
 
-         /* the location to patch */
-         pP = (ll_symbol_addr*)(
-                   (uintptr_t)section.start
-                 + (uintptr_t)reloc->VirtualAddress
-                 - (uintptr_t)section.coff_info->virtualAddr
-              );
-         /* the existing contents of pP */
-         A = *(uint32_t*)pP;
+         /* Host writes and target execution addresses need not coincide. */
+         uintptr_t offset = (uintptr_t)reloc->VirtualAddress
+                          - (uintptr_t)section.coff_info->virtualAddr;
+         ll_site site = { .work = (uint8_t *)section.start + offset,
+                          .exec = section.exec_start + offset };
+         pP = (ll_symbol_addr *)site.work;
+         uint32_t addend32;
+         memcpy(&addend32, site.work, sizeof(addend32));
+         A = addend32;
          /* the symbol to connect to */
          uint64_t symIndex = reloc->SymbolTableIndex;
          sym = &oc->coff_info->symbols[symIndex];
@@ -1840,7 +1842,7 @@ ocResolve_PEi386 ( ObjectCode* oc )
                 return false;
             }
             Section section = oc->sections[sect_n - 1];
-            S = ((size_t)(section.start))
+            S = ((size_t)(section.exec_start))
               + ((size_t)(getSymValue(oc->L, info, sym)));
             /* Static symbols bypass lookupDependentSymbol, which normally
              * supplies the type used when an extra slot is needed. */
@@ -1866,13 +1868,14 @@ ocResolve_PEi386 ( ObjectCode* oc )
                {
                    uint64_t A;
                    checkProddableBlock(oc->L, &oc->proddables, pP, 8);
-                   A = *(uint64_t*)pP;
-                   *(uint64_t *)pP = S + A;
+                   memcpy(&A, site.work, sizeof(A));
+                   uint64_t value = S + A;
+                   memcpy(site.work, &value, sizeof(value));
                    break;
                }
            case 11: /* IMAGE_REL_AMD64_SECREL (PE constant 11) */
               {
-                  uint64_t offset = S - (uint64_t) section.start;
+                  uint64_t offset = S - (uint64_t) section.exec_start;
                   if ((uint32_t)offset != offset) {
                       ll_error_set(oc->L, LL_E_RELOC_RANGE,
                           "IMAGE_REL_AMD64_SECREL: offset 0x%" PRIx64
@@ -1880,7 +1883,8 @@ ocResolve_PEi386 ( ObjectCode* oc )
                       releaseOcInfo(oc);
                       return false;
                   }
-                   *(uint32_t *)pP = offset + A;
+                   uint32_t value = (uint32_t)(offset + A);
+                   memcpy(site.work, &value, sizeof(value));
                   break;
               }
             case 2: /* R_X86_64_32 (ELF constant 10) - IMAGE_REL_AMD64_ADDR32 (PE constant 2) */
@@ -1931,7 +1935,8 @@ ocResolve_PEi386 ( ObjectCode* oc )
                            return false;
                        }
                    }
-                   *(uint32_t *)pP = (uint32_t)v;
+                   uint32_t value = (uint32_t)v;
+                   memcpy(site.work, &value, sizeof(value));
                    break;
                }
             case 14: /* R_X86_64_PC64 (ELF constant 24) - IMAGE_REL_AMD64_SREL32 (PE constant 14) */
@@ -1939,14 +1944,15 @@ ocResolve_PEi386 ( ObjectCode* oc )
                    /* mingw will emit this for a pc-rel 64 relocation */
                    uint64_t A;
                    checkProddableBlock(oc->L, &oc->proddables, pP, 8);
-                   A = *(uint64_t*)pP;
-                   *(uint64_t *)pP = S + A - (intptr_t)pP;
+                   memcpy(&A, site.work, sizeof(A));
+                   uint64_t value = S + A - site.exec;
+                   memcpy(site.work, &value, sizeof(value));
                    break;
                }
             case 4: /* R_X86_64_PC32 (ELF constant 2) - IMAGE_REL_AMD64_REL32 (PE constant 4) */
                {
                    intptr_t v;
-                   v = S + (int32_t)A - ((intptr_t)pP) - 4;
+                   v = S + (int32_t)A - site.exec - 4;
                    if ((v > (int64_t) INT32_MAX) || (v < (int64_t) INT32_MIN)) {
                        /* Make the trampoline then */
                        copyName (getSymShortName(oc->L, info, sym),
@@ -1957,7 +1963,7 @@ ocResolve_PEi386 ( ObjectCode* oc )
                            return false;
                        }
                        /* And retry */
-                       v = S + (int32_t)A - ((intptr_t)pP) - 4;
+                       v = S + (int32_t)A - site.exec - 4;
                        if ((v > (int64_t) INT32_MAX) || (v < (int64_t) INT32_MIN)) {
                            ll_error_set(oc->L, LL_E_RELOC_RANGE,
                                "IMAGE_REL_AMD64_REL32: High bits are set in 0x%" PRIxPTR " for %s",
@@ -1966,7 +1972,8 @@ ocResolve_PEi386 ( ObjectCode* oc )
                            return false;
                        }
                    }
-                   *(uint32_t *)pP = (uint32_t)v;
+                   uint32_t value = (uint32_t)v;
+                   memcpy(site.work, &value, sizeof(value));
                    break;
                }
 #elif LL_TARGET_AARCH64

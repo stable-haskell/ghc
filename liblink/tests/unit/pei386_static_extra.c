@@ -56,6 +56,7 @@ static void run_static_case(ll_linker *owner, uint16_t symbol_type,
     symbol->og.Type = symbol_type;
     memcpy(symbol->og.N.ShortName, "static", sizeof("static"));
     sections[0].start = &storage.field;
+    sections[0].exec_start = (uintptr_t)&storage.field;
     sections[0].kind = SECTIONKIND_RWDATA;
     sections[0].coff_info = section_info;
     section_info->relocs = reloc;
@@ -63,6 +64,7 @@ static void run_static_case(ll_linker *owner, uint16_t symbol_type,
     reloc->Type = 4;
     uintptr_t target = (uintptr_t)&storage.field + UINT64_C(0x200000000);
     sections[1].start = (void *)target;
+    sections[1].exec_start = target;
     initProddableBlockSet(&object.proddables);
     addProddableBlock(owner, &object.proddables, &storage.field, sizeof(storage.field));
     ll_error_clear(owner);
