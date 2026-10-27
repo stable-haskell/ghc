@@ -18,6 +18,7 @@
 #include "linker/BackendMemory.h"
 #include "linker/Elf.h"
 #include "linker/elf_reloc_x86_64.h"
+#include "linker/elf_reloc_i386.h"
 #include "linker/InitFini.h"
 #include "ll_format.h"
 #include "ll_noexec.h"
@@ -1378,16 +1379,26 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
        ll_elf_target_addr offset = rtab[j].r_offset;
        ll_elf_target_addr info   = rtab[j].r_info;
 
-       ll_elf_target_addr  P  = ((ll_elf_target_addr)targ) + offset;
-       ll_elf_target_word* pP = (ll_elf_target_word*)P;
+       ll_site site = {.work = (uint8_t *)targ + offset,
+                       .exec = oc->sections[target_shndx].exec_start + offset};
+#if LL_TARGET_I386
+       ll_elf_target_addr P = (ll_elf_target_addr)site.exec;
+       ll_elf_target_word *pP = (ll_elf_target_word *)(void *)site.work;
+#else
+       ll_elf_target_addr P = ((ll_elf_target_addr)targ) + offset;
+       ll_elf_target_word *pP = (ll_elf_target_word *)P;
+       (void)site;
+#endif
 #if LL_TARGET_I386 || LL_DEBUG_CODE
-       ll_elf_target_addr  A  = *pP;
+       ll_elf_target_addr A;
+#if LL_TARGET_I386
+       memcpy(&A, site.work, sizeof(A));
+#else
+       A = *pP;
+#endif
 #endif
        ll_elf_target_addr  S;
        void*     S_tmp;
-#if LL_TARGET_I386
-       ll_elf_target_addr  value;
-#endif
 #if LL_TARGET_ARM
        int is_target_thm=0, T=0;
 #endif
@@ -1464,25 +1475,16 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
 #endif
 
 #if LL_TARGET_I386
-       value = S + A;
-#endif
-
+       uintptr_t got_slot = 0;
+       if (symbol != NULL && symbol->got_addr != NULL)
+           got_slot = oc->elf_info->got_exec +
+               ((uintptr_t)symbol->got_addr - (uintptr_t)oc->elf_info->got_start);
+       const ll_reloc_context context = {.symbol_index = LL_ELF_R_SYM(info),
+           .symbol_name = symbol != NULL ? symbol->name : NULL, .got_exec = got_slot};
+       if (!ll_elf_i386_reloc_ops.apply(oc, &oc->sections[target_shndx],
+                                        reloc_type, site, S, A, LL_SYM_DATA, &context)) return 0;
+#else
        switch (reloc_type) {
-#        if LL_TARGET_I386
-       case COMPAT_R_386_NONE:                  break;
-       case COMPAT_R_386_32:   *pP = value;     break;
-       case COMPAT_R_386_PC32: *pP = value - P; break;
-       case COMPAT_R_386_PLT32: *pP = value - P; break;
-       case COMPAT_R_386_GOTOFF: *pP = value - (ll_elf_target_addr)oc->elf_info->got_start; break;
-       case COMPAT_R_386_GOTPC:  *pP = (ll_elf_target_addr)oc->elf_info->got_start + A - P; break;
-       case COMPAT_R_386_GOT32:
-       case COMPAT_R_386_GOT32X:
-           LL_CHECK_FOR(oc->L, symbol);
-           LL_CHECK_FOR(oc->L, symbol->got_addr);
-           *pP = (ll_elf_target_addr)symbol->got_addr
-               - (ll_elf_target_addr)oc->elf_info->got_start + A;
-           break;
-#        endif
 
 #        if LL_TARGET_ARM
        case COMPAT_R_ARM_ABS32:     /* (S + A) | T */
@@ -1752,6 +1754,7 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
                       oc->fileName, (ll_w)LL_ELF_R_TYPE(info));
            return 0;
        }
+#endif
 
    }
    return 1;

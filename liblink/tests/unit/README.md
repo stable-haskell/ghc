@@ -139,13 +139,14 @@ replay is `python3 -m unittest discover -s liblink/tests/oracle -p
 'test_elf32*.py' -v`. These are normal-mode references; NO_EXEC qualification
 is separate.
 
-WP2.8d suspect: the existing i386 REL loop reads the implicit addend through
+The former i386 REL loop read the implicit addend through
 `ll_elf_target_word *`. The normal-mode `R_386_GOT32.o` fixture places that
 field at offset 2. With the actual `Elf.c` compiled using UBSan and run under
 `qemu-i386`, resolution stops at `Elf.c:1384:28` with `runtime error: load of
 misaligned address ... for type 'll_elf_target_word', which requires 4 byte
-alignment`. This existing sanitizer finding requires escalation under the
-WP2.8d stop conditions; the relocation loop has not yet been changed.
+alignment`. The authorized site conversion now uses unaligned-safe loads and
+stores. `elf_i386_sites.c` exercises each supported relocation with distinct
+work and execution addresses, unaligned storage, and surrounding guard bytes.
 
 `elf_arm_veneer.c` checks the ARM veneer adapter's pointer-width storage on
 64-bit hosts. It covers ARM and Thumb flags, stub lookup, creation and failure,

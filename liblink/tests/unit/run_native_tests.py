@@ -387,6 +387,13 @@ def run_elf_x86_64_sites(cc: list[str], archive: Path, output: Path,
               str(ROOT / "liblink/tests/unit/elf_arm_thumb_stub.c"),
               "-o", str(arm_stub)], label="compile ARM Thumb stub control")
     run([str(arm_stub)], label="run ARM Thumb stub control")
+    i386_sites = output / "elf_i386_sites"
+    run(cc + ["-DLL_ALL_BACKENDS", "-ULL_TARGET_ARCH",
+              "-DLL_TARGET_ARCH=LL_ARCH_I386",
+              str(ROOT / "liblink/tests/unit/elf_i386_sites.c"),
+              str(ROOT / "liblink/src/ll_error.c"), "-o", str(i386_sites)],
+        label="compile ELF i386 site controls")
+    run([str(i386_sites)], label="run ELF i386 site controls")
     encoder = output / "elf_aarch64_encoder_sites"
     run(cc + ["-DLL_ALL_BACKENDS", "-ULL_TARGET_ARCH",
               "-DLL_TARGET_ARCH=LL_ARCH_AARCH64",

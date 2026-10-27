@@ -23,6 +23,7 @@ src/linker/elf_plt_arm.c
 src/linker/elf_plt_riscv64.c
 src/linker/elf_reloc.c
 src/linker/elf_reloc_aarch64.c
+src/linker/elf_reloc_i386.c
 src/linker/elf_reloc_riscv64.c
 src/linker/elf_reloc_x86_64.c
 src/linker/elf_tlsgd.c

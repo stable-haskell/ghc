@@ -83,6 +83,8 @@ extra-source-files:
     src/linker/elf_reloc.h
     src/linker/elf_reloc_aarch64.c
     src/linker/elf_reloc_aarch64.h
+    src/linker/elf_reloc_i386.c
+    src/linker/elf_reloc_i386.h
     src/linker/elf_reloc_riscv64.c
     src/linker/elf_reloc_riscv64.h
     src/linker/elf_reloc_x86_64.c
