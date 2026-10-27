@@ -18,6 +18,7 @@ LIBLINK = Path(__file__).resolve().parents[2]
 FIXTURES = LIBLINK / 'tests/fixtures'
 GENERATED = FIXTURES / 'generated/elf-aarch64/aarch64-linux-gnu'
 GOLDENS = LIBLINK / 'tests/golden/elf-aarch64'
+NOEXEC_GOLDENS = LIBLINK / 'tests/golden/elf-aarch64-noexec'
 MANIFEST = json.loads((FIXTURES / 'elf-aarch64.json').read_text())
 CASES = [(item['id'], [], GENERATED / item['object'].split('/')[-1])
          for item in MANIFEST['sources'] if item['expected_outcome'] == 'supported']
@@ -54,6 +55,39 @@ class Aarch64ElfOracle(unittest.TestCase):
                 compare_golden(report, golden, original)
                 fields += len(report['fields'])
         self.assertEqual((len(CASES), fields), (20, 27))
+
+    def test_noexec_references_and_corruption(self):
+        self.assertEqual({path.stem for path in NOEXEC_GOLDENS.glob('*.json')},
+                         {name for name, _, _ in CASES})
+        for name, _, path in CASES:
+            with self.subTest(case=name):
+                original = path.read_bytes()
+                golden = json.loads((NOEXEC_GOLDENS / (name + '.json')).read_text())
+                report = verify(original, golden['reference_capture'])
+                compare_golden(report, golden, original)
+        name = 'branch_reuse-far'
+        path = next(path for case, _, path in CASES if case == name)
+        original = path.read_bytes()
+        golden = json.loads((NOEXEC_GOLDENS / (name + '.json')).read_text())
+        for mutation in ('section-alias', 'got-alias', 'stub-target', 'stub-bytes'):
+            with self.subTest(mutation=mutation):
+                capture = copy.deepcopy(golden['reference_capture'])
+                section = next(s for s in capture['sections'] if s['stubs']['entries'])
+                if mutation == 'section-alias':
+                    section['exec_address'] = section['address']
+                elif mutation == 'got-alias':
+                    capture['got']['exec_address'] = capture['got']['address']
+                elif mutation == 'stub-target':
+                    section['stubs']['entries'][0]['target'] = '0x1234'
+                else:
+                    flip(section['stubs'], 'after', 0)
+                with self.assertRaises(ValueError):
+                    verify(original, capture)
+        corrupt = copy.deepcopy(golden)
+        report = verify(original, corrupt['reference_capture'])
+        corrupt['noexec_image']['got']['sha256'] = '0' * 64
+        with self.assertRaisesRegex(ValueError, 'saved NO_EXEC image differs'):
+            compare_golden(report, corrupt, original)
 
     def test_rejects_corrupt_observations(self):
         original, golden = reference()
@@ -173,6 +207,36 @@ class Aarch64ElfOracle(unittest.TestCase):
 
     @unittest.skipUnless(os.environ.get('LIBLINK_ELF_AARCH64_CAPTURE'),
                          'set LIBLINK_ELF_AARCH64_CAPTURE for live captures')
+    def test_live_noexec_failure_releases_stub_metadata(self):
+        original = (FIXTURES / 'elf-aarch64-sites/branch_reuse.o').read_bytes()
+        table = next(section for section in parse(original, 183) if section['type'] == 4)
+        self.assertEqual((table['entry_size'], table['size']), (24, 4 * 24))
+        changed = bytearray(original)
+        position = table['offset'] + 3 * 24 + 8
+        info = int.from_bytes(changed[position:position + 8], 'little')
+        changed[position:position + 8] = ((info & ~0xffffffff) | 0x7fffffff).to_bytes(8, 'little')
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / 'late-unsupported.o'
+            path.write_bytes(changed)
+            run = subprocess.run([os.environ['LIBLINK_ELF_AARCH64_CAPTURE'],
+                                  '--noexec', '--far-function', str(path)],
+                                 capture_output=True, text=True, timeout=90)
+        self.assertEqual(run.returncode, 1, run.stderr + run.stdout)
+        capture = json.loads(run.stdout)
+        self.assertTrue(capture['noexec'])
+        self.assertFalse(capture['resolved'])
+        self.assertFalse(capture['initializers_ran'])
+        self.assertEqual(capture['status'], 3)  # LL_E_UNSUPPORTED
+        self.assertEqual(capture['error'],
+                         'AArch64 relocation type 2147483647: unsupported relocation type (addend 0)')
+        section = next(section for section in capture['sections'] if section['index'] == table['info'])
+        self.assertEqual(section['after'], '04000094030000940200009400000094')
+        self.assertEqual(len(section['stubs']['entries']), 1)
+        self.assertNotIn('stub metadata records retained', run.stderr)
+        self.assertNotIn('cleanup changed the primary error', run.stderr)
+
+    @unittest.skipUnless(os.environ.get('LIBLINK_ELF_AARCH64_CAPTURE'),
+                         'set LIBLINK_ELF_AARCH64_CAPTURE for live captures')
     def test_live_captures(self):
         for name, flags, path in CASES:
             with self.subTest(case=name):
@@ -181,6 +245,20 @@ class Aarch64ElfOracle(unittest.TestCase):
                                      capture_output=True, text=True, timeout=90)
                 self.assertEqual(run.returncode, 0, run.stderr + run.stdout)
                 compare_golden(verify(original, json.loads(run.stdout)), golden, original)
+
+    @unittest.skipUnless(os.environ.get('LIBLINK_ELF_AARCH64_CAPTURE'),
+                         'set LIBLINK_ELF_AARCH64_CAPTURE for live captures')
+    def test_live_noexec_captures(self):
+        for name, flags, path in CASES:
+            with self.subTest(case=name):
+                original = path.read_bytes()
+                golden = json.loads((NOEXEC_GOLDENS / (name + '.json')).read_text())
+                for _ in range(2):
+                    run = subprocess.run([os.environ['LIBLINK_ELF_AARCH64_CAPTURE'],
+                                          '--noexec', *flags, str(path)],
+                                         capture_output=True, text=True, timeout=90)
+                    self.assertEqual(run.returncode, 0, run.stderr + run.stdout)
+                    compare_golden(verify(original, json.loads(run.stdout)), golden, original)
 
 
 if __name__ == '__main__':

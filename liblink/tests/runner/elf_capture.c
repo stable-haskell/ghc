@@ -269,9 +269,11 @@ int main(int argc, char **argv)
     void *extras_before = NULL;
     int result = 2;
     ll_mutex_lock_for(&owner, &owner.linker_mutex);
+#if !LL_TARGET_AARCH64
     if (noexec && !ghciInsertSymbolTable(&owner, WSTR("elf_capture"), "external_data",
             (void *)(uintptr_t)CAPTURE_DATA_ADDRESS, LL_STRENGTH_STRONG,
             LL_SYM_DATA, 0, NULL)) goto done;
+#endif
     if (!ll_init_object(object) || object->format_ops != &ll_format_elf ||
         !loadOc(object)) goto done;
     if (object->n_sections < 0) goto done;

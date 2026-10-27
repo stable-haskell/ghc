@@ -54,8 +54,7 @@ def verify(original, capture):
     require(capture['resolved'] is True and capture['status'] == 0 and
             capture['error'] == '' and capture['initializers_ran'] is False,
             'capture did not resolve successfully without initializers')
-    require(capture.get('noexec', False) is False,
-            'AArch64 NO_EXEC is not covered by this baseline oracle')
+    noexec = capture.get('noexec', False)
     loaded, expected, stub_expected, stub_entries = {}, {}, {}, {}
     section_signature = []
     for sample in capture['sections']:
@@ -66,9 +65,13 @@ def verify(original, capture):
         before, after = bytes.fromhex(sample['before']), bytes.fromhex(sample['after'])
         require(sample['size'] == section['size'] == len(before) == len(after) and
                 before == section['bytes'], 'pre-relocation section differs from original')
-        address = int(sample['address'], 0)
-        require(int(sample['exec_address'], 0) == address,
-                'normal-mode section work and execution addresses differ')
+        work = int(sample['address'], 0)
+        address = int(sample['exec_address'], 0)
+        if noexec:
+            require(address != work and address % 4096 == 0,
+                    'NO_EXEC section did not separate work and execution layout')
+        else:
+            require(address == work, 'normal-mode section work and execution addresses differ')
         loaded[index] = (address, after, sample['stubs'])
         expected[index] = bytearray(before)
         stubs = sample['stubs']
@@ -76,8 +79,9 @@ def verify(original, capture):
         require(stubs['size'] == len(stub_before) == len(stub_after),
                 'stub storage extent differs')
         if stubs['size']:
-            require(int(stubs['address'], 0) == address + section['size'],
-                    'stub storage is not adjacent to its section')
+            tail_offset = ((section['size'] + 3) & ~3) if noexec else section['size']
+            require(int(stubs['address'], 0) == work + tail_offset,
+                    'stub storage is not at the expected section offset')
         stub_expected[index] = bytearray(stub_before)
         stub_entries[index] = []
         section_signature.append(dict(index=index, name=section['name'], size=len(before)))
@@ -111,8 +115,13 @@ def verify(original, capture):
 
     got = capture['got']
     got_address = int(got['exec_address'], 0)
-    require(got_address == int(got['address'], 0) and got_address % 8 == 0,
-            'normal GOT layout differs')
+    got_work = int(got['address'], 0)
+    if noexec:
+        require(got_address != got_work and got_address % 4096 == 0,
+                'NO_EXEC GOT did not separate work and execution layout')
+    else:
+        require(got_address == got_work and got_address % 8 == 0,
+                'normal GOT layout differs')
     got_slots, got_values = {}, []
     table_index = tables[0]
     table = sections[table_index]
@@ -167,9 +176,12 @@ def verify(original, capture):
                     entries = stub_entries[target]
                     stub_ordinal = next((i for i, entry in enumerate(entries)
                                          if entry['target'] == hex(S)), len(entries))
-                    address = int(loaded[target][2]['address'], 0) + stub_ordinal * 20
+                    stub_work = int(loaded[target][2]['address'], 0) + stub_ordinal * 20
+                    section_work = next(int(sample['address'], 0) for sample in capture['sections']
+                                        if sample['index'] == target)
+                    address = loaded[target][0] + stub_work - section_work
                     if stub_ordinal == len(entries):
-                        entries.append(dict(address=hex(address), target=hex(S), flags=0))
+                        entries.append(dict(address=hex(stub_work), target=hex(S), flags=0))
                         payload = veneer(S)
                         bounded(stub_expected[target], stub_ordinal * 20, len(payload))
                         stub_expected[target][stub_ordinal * 20:(stub_ordinal + 1) * 20] = payload
@@ -222,18 +234,30 @@ def verify(original, capture):
         require(stub_expected[index] == bytes.fromhex(stubs['after']),
                 'veneer or untouched stub bytes differ')
         require(stub_entries[index] == stubs['entries'], 'stub identity/order/target differs')
-    return dict(schema=1, format='ELF AArch64', object_sha256=hashlib.sha256(original).hexdigest(),
-                semantic=dict(sections=section_signature, relocations=semantic,
-                              extras={key: extras[key] for key in ('first', 'count', 'stride')}),
-                fields=fields, reference_capture=capture)
+    report = dict(schema=1, format='ELF AArch64', object_sha256=hashlib.sha256(original).hexdigest(),
+                  semantic=dict(sections=section_signature, relocations=semantic,
+                                extras={key: extras[key] for key in ('first', 'count', 'stride')}),
+                  fields=fields, reference_capture=capture)
+    if noexec:
+        report['noexec_image'] = dict(
+            sections=[dict(index=i, exec_address=hex(address),
+                           sha256=hashlib.sha256(after).hexdigest(),
+                           stubs_sha256=hashlib.sha256(bytes.fromhex(stubs['after'])).hexdigest())
+                      for i, (address, after, stubs) in loaded.items()],
+            got=dict(exec_address=hex(got_address), sha256=hashlib.sha256(got_bytes).hexdigest()))
+    return report
 
 
 def compare_golden(report, golden, original):
     replay = verify(original, golden['reference_capture'])
     for key in ('schema', 'format', 'object_sha256', 'semantic', 'fields'):
         require(replay[key] == golden[key], 'saved reference differs: ' + key)
+    require(replay.get('noexec_image') == golden.get('noexec_image'),
+            'saved NO_EXEC image differs')
     for key in ('schema', 'format', 'object_sha256', 'semantic'):
         require(report[key] == golden[key], 'golden differs: ' + key)
+    require(report.get('noexec_image') == golden.get('noexec_image'),
+            'golden differs: NO_EXEC image')
 
 
 def main():

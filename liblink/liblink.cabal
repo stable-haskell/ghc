@@ -212,6 +212,7 @@ extra-source-files:
     tests/golden/elf-x86_64/*.json
     tests/golden/elf-x86_64-noexec/*.json
     tests/golden/elf-aarch64/*.json
+    tests/golden/elf-aarch64-noexec/*.json
     tests/fixtures/elf-aarch64-sites/branch_reuse.s
     tests/fixtures/elf-aarch64-sites/branch_reuse.o
     tests/fixtures/elf-aarch64-sites/got_alias.s

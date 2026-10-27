@@ -130,4 +130,8 @@ the unchanged542259edba9 object backend on an x64 host with an AArch64 target.
 
 Scope is one symbol table, ordinary supported RELA forms, zero GOT addends,
 and zero branch addends when a veneer is needed. Other inputs fail explicitly.
-This oracle does not yet cover AArch64 NO_EXEC or establish execution safety.
+The NO_EXEC references additionally record deterministic execution addresses,
+section and veneer hashes, and global GOT contents. Work and execution layouts
+must be separate. Each live reference runs twice when the AArch64 capture is
+available. The classifier reads one instruction word so short sections remain
+within bounds. Two-host and AArch64 execution qualification remain open.

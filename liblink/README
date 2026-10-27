@@ -84,8 +84,8 @@ The selected slot address preserves identity when equal symbol values have
 different GOT entries. Existing x64 operations retain their indexed extras;
 AArch64 now consumes that selected slot directly through its apply table.
 This approved amendment to the initial internal contract preserves extra-slot
-identity, STT_FUNC fallback eligibility and exact diagnostics. The context lives in a private header and leaves the public
-handle API unchanged.
+identity, STT_FUNC fallback eligibility and exact diagnostics. The context
+lives in a private header and leaves the public handle API unchanged.
 
 Section.exec_start and ObjectCode.symbol_extras_exec record execution addresses
 separately from storage. addSection and shared extras allocation initialize
@@ -104,25 +104,24 @@ The AArch64 ELF apply table uses execution addresses for symbol, PC, GOT and
 veneer operands and encodes through work storage. The object loop
 carries the already selected ElfSymbol's GOT slot across the private boundary,
 including its original table identity. Normal-mode relocation rules, addends,
-diagnostics and unsupported implicit-REL handling remain unchanged. AArch64
-NO_EXEC object admission remains disabled until end-to-end qualification.
+diagnostics and unsupported implicit-REL handling remain unchanged.
 
 Normal ELF work and execution addresses still coincide. Payloads, symbol
 lookup, range policy and diagnostics are preserved.
 
-Private x64 ELF NO_EXEC mode
-----------------------------
+Private ELF NO_EXEC mode
+------------------------
 
 The private compatibility configuration accepts LL_CFG_NO_EXEC, an explicit
 nonzero noexec_base, and LL_CFG_ALL_FORMATS when loading a non-native format.
-This currently supports x86_64 ELF on a 64-bit host with that target/backend
-compiled in. Other targets/formats return LL_E_UNSUPPORTED in this mode.
+This supports x86_64 and AArch64 ELF on a 64-bit host with the selected
+target/backend compiled in. Other targets/formats return LL_E_UNSUPPORTED.
 The installed handle API remains unsupported until WP2.9; these private
 configuration fields are immutable after host installation.
 
 Sections, BSS, COMMON, the GOT and symbol extras use separate zeroed heap
 allocations with recorded allocation bases. Execution ranges advance from
-noexec_base using a fixed 4096-byte x64 page size, independent of the host's
+noexec_base using a fixed 4096-byte synthetic page size, independent of the host's
 page size. Requested larger alignments are honored. Zero-sized blocks reserve
 one byte and a distinct synthetic page. Addresses are monotonic and are not
 recycled on unload. A failed individual allocation leaves its output and the
@@ -147,12 +146,12 @@ zero-width division and keeps nonzero native widths unchanged. Other backend
 conversions, two-host golden qualification and execution qualification remain
 WP2.8 work.
 
-The next AArch64 ELF conversion has normal-address baselines before any
-relocation code changes: 20 layouts and 27 fields cover the thirteen ordinary
-forms, negative displacements, direct/far branches, veneer identity/reuse,
-and equal-valued symbols with distinct GOT slots. These data-only captures
-use an x64 host with the AArch64 target compiled in; they do not qualify
-AArch64 execution or enable AArch64 NO_EXEC admission.
+AArch64 ELF references cover 20 layouts and 27 fields, including negative
+displacements, direct/far branches, veneer identity/reuse, and equal-valued
+symbols with distinct GOT slots. The NO_EXEC references record deterministic
+synthetic addresses and section, veneer and GOT hashes. These data-only checks
+have run on two architectures of one Darwin host; two-host stability and
+AArch64 execution remain unqualified.
 
 
 Locking
