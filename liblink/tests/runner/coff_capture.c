@@ -25,12 +25,19 @@ static void print_bytes(const uint8_t *bytes, size_t size)
 
 int main(int argc, char **argv)
 {
-    bool noexec = argc == 3 && strcmp(argv[1], "--noexec") == 0;
-    if (argc != 2 && !noexec) {
-        (void)fprintf(stderr, "usage: coff_capture [--noexec] object\n");
+    bool noexec = false, expect_unsupported = false;
+    int arg = 1;
+    while (arg < argc - 1) {
+        if (strcmp(argv[arg], "--noexec") == 0) noexec = true;
+        else if (strcmp(argv[arg], "--expect-unsupported") == 0) expect_unsupported = true;
+        else break;
+        ++arg;
+    }
+    if (arg != argc - 1) {
+        (void)fprintf(stderr, "usage: coff_capture [--noexec] [--expect-unsupported] object\n");
         return 2;
     }
-    const char *path = argv[noexec ? 2 : 1];
+    const char *path = argv[arg];
     FILE *input = fopen(path, "rb");
     if (input == NULL || fseek(input, 0, SEEK_END) != 0) return 1;
     long length = ftell(input);
@@ -87,6 +94,19 @@ int main(int argc, char **argv)
     if (!ghciInsertSymbolTable(&owner, (pathchar *)"COFF capture", name,
                                (void *)target, false, type, 0, NULL)) return 1;
     bool resolved = object->format_ops->resolve(object);
+    if (expect_unsupported) {
+        bool expected = record.Type >= 5 && record.Type <= 9 && !resolved &&
+                        owner.error_status == LL_E_UNSUPPORTED &&
+                        memcmp(before, site_section->start, site_section->size) == 0;
+        ghciRemoveSymbolTable(&owner, name, NULL);
+        removeOcSymbols(object);
+        ll_mutex_unlock_for(&owner, &owner.linker_mutex);
+        freeObjectCode(object);
+        ll_exit_linker(&owner);
+        if (!expected || failures != 0) return 1;
+        (void)puts("COFF unsupported relocation: PASS");
+        return 0;
+    }
     if (!resolved) {
         (void)fprintf(stderr, "COFF resolution failed: %d %s\n", owner.error_status, owner.error_message);
         return 1;

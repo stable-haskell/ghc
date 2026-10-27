@@ -1568,7 +1568,9 @@ NO_EXEC the configured base is `0x0fffff00`; the first page-aligned section
 starts at `0x10000000`, making the ADDR32NB reference match the normal
 capture's explicit base. The NO_EXEC run uses the actual image-base service,
 section write pointers differ from their execution addresses, and the oracle
-compares the complete relocated section against each normal-mode golden.
+compares the complete relocated section against each normal-mode golden. The
+REL32_1 through REL32_5 fixtures retain their documented unsupported outcome;
+the driver verifies rejection and unchanged section bytes in both modes.
 
 The portable data driver also checks NO_EXEC admission, synthetic data and
 COMMON symbol addresses, zero-filled BSS, and cleanup. The static-extra unit

@@ -57,6 +57,11 @@ def main():
                         run([str(executable), *(['--noexec'] if mode == 'noexec' else []), str(obj)], stdout=output)
                     run(['python3', 'liblink/tests/oracle/coff_x86_64_check.py', '--object', str(obj),
                          '--capture', str(capture), '--golden', str(golden)])
+            for variant in range(1, 6):
+                obj = ROOT / 'liblink/tests/fixtures/generated/coff-x86_64' / (
+                    'IMAGE_REL_AMD64_REL32_' + str(variant) + '.o')
+                run([str(executable), *(['--noexec'] if mode == 'noexec' else []),
+                     '--expect-unsupported', str(obj)])
 
 
 if __name__ == '__main__':
