@@ -1,0 +1,349 @@
+{
+  "fields": [
+    {
+      "A": 0,
+      "P": "0x10302400c",
+      "S": "0x102ff71dc",
+      "after": "01000014",
+      "before": "00000014",
+      "expected": "01000014",
+      "offset": 12,
+      "section": 0,
+      "symbol": "_fixture_record_event",
+      "type": "ARM64_RELOC_BRANCH26"
+    },
+    {
+      "A": 0,
+      "P": "0x103024004",
+      "S": "0x102ff71dc",
+      "after": "03000014",
+      "before": "00000014",
+      "expected": "03000014",
+      "offset": 4,
+      "section": 0,
+      "symbol": "_fixture_record_event",
+      "type": "ARM64_RELOC_BRANCH26"
+    },
+    {
+      "A": 0,
+      "P": "0x103034014",
+      "S": "0x102ff7a58",
+      "after": "01000014",
+      "before": "00000014",
+      "expected": "01000014",
+      "offset": 20,
+      "section": 1,
+      "symbol": "___cxa_atexit",
+      "type": "ARM64_RELOC_BRANCH26"
+    },
+    {
+      "A": 0,
+      "P": "0x10303400c",
+      "S": "0x103028000",
+      "after": "42000091",
+      "before": "42000091",
+      "expected": "42000091",
+      "offset": 12,
+      "section": 1,
+      "symbol": "___dso_handle",
+      "type": "ARM64_RELOC_PAGEOFF12"
+    },
+    {
+      "A": 0,
+      "P": "0x103034008",
+      "S": "0x103028000",
+      "after": "a2ffff90",
+      "before": "02000090",
+      "expected": "a2ffff90",
+      "offset": 8,
+      "section": 1,
+      "symbol": "___dso_handle",
+      "type": "ARM64_RELOC_PAGE21"
+    },
+    {
+      "A": 0,
+      "P": "0x103034004",
+      "S": "0x103024008",
+      "after": "00200091",
+      "before": "00000091",
+      "expected": "00200091",
+      "offset": 4,
+      "section": 1,
+      "symbol": "_ll_fixture_fini",
+      "type": "ARM64_RELOC_PAGEOFF12"
+    },
+    {
+      "A": 0,
+      "P": "0x103034000",
+      "S": "0x103024008",
+      "after": "80ffff90",
+      "before": "00000090",
+      "expected": "80ffff90",
+      "offset": 0,
+      "section": 1,
+      "symbol": "_ll_fixture_fini",
+      "type": "ARM64_RELOC_PAGE21"
+    },
+    {
+      "A": 0,
+      "P": "0x103038008",
+      "S": "0x103034000",
+      "after": "0040030301000000",
+      "before": "0000000000000000",
+      "expected": "0040030301000000",
+      "offset": 8,
+      "section": 2,
+      "symbol": "___GLOBAL_init_65535",
+      "type": "ARM64_RELOC_UNSIGNED"
+    },
+    {
+      "A": 0,
+      "P": "0x103038000",
+      "S": "0x103024000",
+      "after": "0040020301000000",
+      "before": "0000000000000000",
+      "expected": "0040020301000000",
+      "offset": 0,
+      "section": 2,
+      "symbol": "_ll_fixture_init",
+      "type": "ARM64_RELOC_UNSIGNED"
+    }
+  ],
+  "format": "Mach-O arm64",
+  "got_slots": {
+    "___cxa_atexit": "0x10303c000",
+    "___dso_handle": "0x10303c008",
+    "_fixture_record_event": "0x10303c010"
+  },
+  "object_sha256": "f650fae8b5ddac701cd7918ac7e83e5b7937c83749ae5e92ef0b33f562257311",
+  "reference_layout": {
+    "got": {
+      "address": "0x10303c000",
+      "bytes": "587aff02010000000080020301000000dc71ff0201000000",
+      "capture_phase": "after-resolve-before-init",
+      "size": 24
+    },
+    "host_symbols": {
+      "___cxa_atexit": "0x102ff7a58",
+      "___cxa_finalize": "0x102ff7adc",
+      "_fixture_record_event": "0x102ff71dc",
+      "_ll_fixture_target": "0x102ff71c8"
+    },
+    "image_base": "0x103028000",
+    "sections": [
+      {
+        "address": "0x103024000",
+        "index": 0,
+        "relocated_bytes": "20008052030000144000805201000014",
+        "size": 16
+      },
+      {
+        "address": "0x103034000",
+        "index": 1,
+        "relocated_bytes": "80ffff9000200091a2ffff9042000091010080d201000014",
+        "size": 24
+      },
+      {
+        "address": "0x103038000",
+        "index": 2,
+        "relocated_bytes": "00400203010000000040030301000000",
+        "size": 16
+      }
+    ],
+    "stubs": [
+      {
+        "capture_phase": "after-resolve-before-init",
+        "count": 1,
+        "entries": [
+          {
+            "address": "0x103024010",
+            "flags": 0,
+            "target": "0x102ff71dc"
+          }
+        ],
+        "reserved_bytes": "1000e0d23000c0f2f05fa0f2903b8ef200021fd60000000000000000000000000000000000000000",
+        "reserved_size": 40,
+        "reserved_start": "0x103024010",
+        "section_index": 0
+      },
+      {
+        "capture_phase": "after-resolve-before-init",
+        "count": 1,
+        "entries": [
+          {
+            "address": "0x103034018",
+            "flags": 0,
+            "target": "0x102ff7a58"
+          }
+        ],
+        "reserved_bytes": "1000e0d23000c0f2f05fa0f2104b8ff200021fd6",
+        "reserved_size": 20,
+        "reserved_start": "0x103034018",
+        "section_index": 1
+      },
+      {
+        "capture_phase": "after-resolve-before-init",
+        "count": 0,
+        "entries": [],
+        "reserved_bytes": "",
+        "reserved_size": 0,
+        "reserved_start": "0x103038010",
+        "section_index": 2
+      }
+    ]
+  },
+  "schema": 1,
+  "semantic": [
+    {
+      "A": 0,
+      "S": {
+        "kind": "host-symbol",
+        "name": "_fixture_record_event"
+      },
+      "before": "00000014",
+      "destination": {
+        "kind": "stub",
+        "offset": 16,
+        "section": 0
+      },
+      "offset": 12,
+      "section": 0,
+      "symbol": "_fixture_record_event",
+      "type": "ARM64_RELOC_BRANCH26"
+    },
+    {
+      "A": 0,
+      "S": {
+        "kind": "host-symbol",
+        "name": "_fixture_record_event"
+      },
+      "before": "00000014",
+      "destination": {
+        "kind": "stub",
+        "offset": 16,
+        "section": 0
+      },
+      "offset": 4,
+      "section": 0,
+      "symbol": "_fixture_record_event",
+      "type": "ARM64_RELOC_BRANCH26"
+    },
+    {
+      "A": 0,
+      "S": {
+        "kind": "host-symbol",
+        "name": "___cxa_atexit"
+      },
+      "before": "00000014",
+      "destination": {
+        "kind": "stub",
+        "offset": 24,
+        "section": 1
+      },
+      "offset": 20,
+      "section": 1,
+      "symbol": "___cxa_atexit",
+      "type": "ARM64_RELOC_BRANCH26"
+    },
+    {
+      "A": 0,
+      "S": {
+        "kind": "object-image-base"
+      },
+      "before": "42000091",
+      "destination": {
+        "kind": "object-image-base"
+      },
+      "offset": 12,
+      "section": 1,
+      "symbol": "___dso_handle",
+      "type": "ARM64_RELOC_PAGEOFF12"
+    },
+    {
+      "A": 0,
+      "S": {
+        "kind": "object-image-base"
+      },
+      "before": "02000090",
+      "destination": {
+        "kind": "object-image-base"
+      },
+      "offset": 8,
+      "section": 1,
+      "symbol": "___dso_handle",
+      "type": "ARM64_RELOC_PAGE21"
+    },
+    {
+      "A": 0,
+      "S": {
+        "index": 0,
+        "kind": "section",
+        "offset": 8
+      },
+      "before": "00000091",
+      "destination": {
+        "index": 0,
+        "kind": "section",
+        "offset": 8
+      },
+      "offset": 4,
+      "section": 1,
+      "symbol": "_ll_fixture_fini",
+      "type": "ARM64_RELOC_PAGEOFF12"
+    },
+    {
+      "A": 0,
+      "S": {
+        "index": 0,
+        "kind": "section",
+        "offset": 8
+      },
+      "before": "00000090",
+      "destination": {
+        "index": 0,
+        "kind": "section",
+        "offset": 8
+      },
+      "offset": 0,
+      "section": 1,
+      "symbol": "_ll_fixture_fini",
+      "type": "ARM64_RELOC_PAGE21"
+    },
+    {
+      "A": 0,
+      "S": {
+        "index": 1,
+        "kind": "section",
+        "offset": 0
+      },
+      "before": "0000000000000000",
+      "destination": {
+        "index": 1,
+        "kind": "section",
+        "offset": 0
+      },
+      "offset": 8,
+      "section": 2,
+      "symbol": "___GLOBAL_init_65535",
+      "type": "ARM64_RELOC_UNSIGNED"
+    },
+    {
+      "A": 0,
+      "S": {
+        "index": 0,
+        "kind": "section",
+        "offset": 0
+      },
+      "before": "0000000000000000",
+      "destination": {
+        "index": 0,
+        "kind": "section",
+        "offset": 0
+      },
+      "offset": 0,
+      "section": 2,
+      "symbol": "_ll_fixture_init",
+      "type": "ARM64_RELOC_UNSIGNED"
+    }
+  ]
+}

@@ -1,0 +1,311 @@
+liblink
+-------
+
+liblink contains the runtime object linker used by GHC. The Cabal package is
+named liblink; the native library is named link. Native clients link with
+-llink (liblink.a or the platform's shared-library equivalent).
+
+The current extraction preserves the RTS linker interface through forwarding
+functions in rts/LinkerCompat.c. The headers under include/liblink provide the
+compatibility and RTS friend interfaces; they are internal interfaces, not a
+stable public embedding API. Unload checking and the GC remain in the RTS.
+
+The installed liblink.h declares the handle API. Its current entry points are
+unsupported stubs: ll_new returns NULL, and functions returning ll_status
+return LL_E_UNSUPPORTED. RTS clients continue to use the compatibility
+interface.
+
+Object format dispatch
+----------------------
+
+Relocatable objects select a private format vtable from their input bytes before
+backend initialization. ELF, Mach-O, and PE each own a typed immutable operation
+table; selection uses an immutable registry of compiled implementations. The
+selection stays with the object through resolution,
+initialization, and disposal, even when the backend releases the input image.
+Verification still belongs to the selected backend. Recognized ELF, Mach-O,
+COFF, and Wasm input without an available backend returns LL_E_UNSUPPORTED;
+unrecognized input returns LL_E_FORMAT. By default the registry contains the
+native ELF, Mach-O, or PE backend. Cabal's +all-backends flag includes all three
+implementations in the registry without changing native format identity or OS
+services. This does not add a Wasm backend or implement the public handle API.
+Archive traversal retains its existing member prefilter; members that
+it loads use the same selection and initialization path as standalone objects.
+
+Native shared libraries retain their OS loader path and have no static format
+vtable. Static finalizers still run only after successful initialization, then
+__cxa_finalize runs before format metadata, image, and section storage are freed.
+
+When symbol extras replace an image with a contiguous mapping, the old image
+storage is released after copying: mapped images are unmapped; heap images
+release their original allocation base, accounting for stored misalignment.
+A failed replacement leaves the original image and its ownership intact.
+
+The shared extras allocator takes its payload stride and image-metadata refresh
+callback from the backend. It records the stride with the object for protection
+and cache lengths. A zero payload width retains its symbol count and allocation
+path; refreshing moved image metadata still precedes publishing those fields.
+
+Target architecture selection
+-----------------------------
+
+Private backend code uses ll_target.h for object architecture, word class,
+and format-specific GOT/PLT and symbol-extra capabilities. A translation unit
+may set LL_TARGET_ARCH to an LL_ARCH_* constant; otherwise it uses the
+configured host architecture. Generated ll_platform.h always describes the
+running host. OS loading, mapping, and native TLS services retain host guards.
+Native format identity is independent of the compiled registry's order.
+
+Symbol-extra records have named fixed-width x86_64, ARM, RISC-V, and PowerPC
+layouts. Native compatibility clients retain their existing SymbolExtra alias;
+PE's x86_64 helper explicitly uses its target layout. AArch64's legacy native
+zero-sized representation and allocation/count behavior are retained while
+the remaining shared storage and allocator interfaces are separated.
+
+The private ll_build.h inclusion flags are separate from target selection and
+native format identity. Shared ObjectCode storage and its ELF sentinel do not
+depend on these private flags. Symbol-extra provenance distinguishes the shared
+allocator from PE's separate M32 storage; only shared extras use the common
+protector. ELF-only GOT lookup uses the object's recorded format identity,
+which remains valid when tests copy an operation table.
+
+All-backends qualification is pending. Current complete compile/link checks
+target x86_64 Linux and Windows. Mach-O requires x86_64 or AArch64. Windows
+foreign ELF and Mach-O remain unqualified for foreign runtime execution. Compiling
+a foreign backend does not establish that foreign code can safely execute with
+the running process's ABI or that its process services are available.
+
+The first ELF x86_64 relocation slice now uses the private ll_reloc_ops.apply
+table. Site stores use ll_site.work; PC-relative arithmetic uses ll_site.exec.
+The synchronous call borrows an immutable ll_reloc_context containing the
+referencing file's original symbol index, existing diagnostic name, raw
+symbol type and the selected symbol's GOT execution address (zero when absent).
+The selected slot address preserves identity when equal symbol values have
+different GOT entries. Existing x64 operations retain their indexed extras;
+AArch64 now consumes that selected slot directly through its apply table.
+This approved amendment to the initial internal contract preserves extra-slot
+identity, STT_FUNC fallback eligibility and exact diagnostics. The context
+lives in a private header and leaves the public handle API unchanged.
+
+Section.exec_start and ObjectCode.symbol_extras_exec record execution addresses
+separately from storage. addSection and shared extras allocation initialize
+them to their native work addresses. The paired x64 extras emitter writes the
+original payload through work and returns exec for GOT/island arithmetic;
+native pointer emitters retain
+their existing behavior. All these fields are unconditional in the RTS friend
+layout, so the RTS and library must be rebuilt together.
+
+AArch64 instruction classifiers read exactly one 32-bit instruction through
+`memcpy`, avoiding an out-of-bounds wider load on short sections. The native
+little-endian controls retain the previous masks; big-endian execution is not
+qualified by those controls.
+
+The AArch64 ELF apply table uses execution addresses for symbol, PC, GOT and
+veneer operands and encodes through work storage. The object loop
+carries the already selected ElfSymbol's GOT slot across the private boundary,
+including its original table identity. Normal-mode relocation rules, addends,
+diagnostics and unsupported implicit-REL handling remain unchanged.
+
+Normal ELF work and execution addresses still coincide. Payloads, symbol
+lookup, range policy and diagnostics are preserved.
+
+Private NO_EXEC mode
+--------------------
+
+The private compatibility configuration accepts LL_CFG_NO_EXEC, an explicit
+nonzero noexec_base, and LL_CFG_ALL_FORMATS when loading a non-native format.
+This supports x86_64, AArch64, i386, and ARM ELF, Mach-O, and COFF on a
+64-bit host with the selected target/backend compiled in. Other targets/formats return
+LL_E_UNSUPPORTED.
+The installed handle API remains unsupported until WP2.9; these private
+configuration fields are immutable after host installation.
+
+Sections, BSS, COMMON, the GOT and symbol extras use separate zeroed heap
+allocations with recorded allocation bases. Execution ranges advance from
+noexec_base using a fixed 4096-byte synthetic page size, independent of the host's
+page size. Requested larger alignments are honored. Zero-sized blocks reserve
+one byte and a distinct synthetic page. Addresses are monotonic and are not
+recycled on unload. A failed individual allocation leaves its output and the
+next address unchanged; a failed multi-block load can consume earlier successful
+ranges. Storage and address-space exhaustion return LL_E_NOMEM.
+
+Defined/local/COMMON symbols and GOT/island destinations use execution
+addresses; payload stores use heap work addresses. Only explicit owned symbol
+definitions participate in fallback lookup. NO_EXEC skips built-in population,
+process/native lookup, native loading, executable mappings, memory protection,
+cache flushing, and initializer/finalizer hooks and calls. Successful resolution
+reaches OBJECT_READY without setting initializersRan. TLSGD and GOTTPOFF require
+host TLS services and return LL_E_UNSUPPORTED before lookup in this mode.
+
+The unit driver checks the actual core path, partial allocation cleanup and
+native-service guards. Independent NO_EXEC goldens check deterministic
+relocated section/extras/GOT bytes and execution addresses at base0x10000000;
+normal-mode goldens remain unchanged. The ELF verifier bounds extras using
+that same target payload width, with zero-width storage handled without
+count division. This separately approved repair removes the native ARM64
+zero-width division and keeps nonzero native widths unchanged. Other backend
+conversions, two-host golden qualification and execution qualification remain
+WP2.8 work.
+
+Mach-O data-only checks replay the checked normal references and validate
+complete relocated bytes against synthetic-address calculations, including
+ARM64 stubs and x86_64 islands. A separate saved-layout test compares the
+NO_EXEC bytes literally with the normal references. Native ARM64 and Rosetta x86_64 have been
+checked locally; the full sanitizer matrix remains a CI milestone.
+
+COFF sections, COMMON storage, and fallback symbol extras also use private
+heap storage and synthetic execution addresses. ADDR32NB uses noexec_base as
+the synthetic image base. Owned indirect-data slots are read through their
+host storage; indirect synthetic addresses without owned storage are rejected.
+NO_EXEC does not load import-library DLLs or register Windows unwind tables.
+COFF ADDR64, ADDR32NB, REL32, SECREL and import-thunk captures match checked
+normal-mode references twice on Darwin ARM64 and Linux ARM64. Windows-native
+qualification remains a separate milestone.
+
+AArch64 ELF references cover 20 layouts and 27 fields, including negative
+displacements, direct/far branches, veneer identity/reuse, and equal-valued
+symbols with distinct GOT slots. The NO_EXEC references record deterministic
+synthetic addresses and section, veneer and GOT hashes. These data-only checks
+have run on two architectures of one Darwin host; two-host stability and
+AArch64 execution remain unqualified.
+
+
+Locking
+-------
+
+On native platforms, linker locks use pthread mutexes or Windows SRW locks in
+both threaded and non-threaded RTS builds. Assertion-enabled pthread builds
+use error-checking mutexes. Initialization and shutdown require exclusive
+access; the mutex helpers do not implement one-time initialization.
+
+Wasm deliberately preserves the existing single-threaded RTS behavior:
+initialization, shutdown, lock, unlock, and held-lock assertions are no-ops
+when wasm32_HOST_ARCH is defined. This is an explicit exception to the native
+always-on locking rule. It provides no synchronization and does not establish
+support for concurrent Wasm linker calls. Supporting those calls requires a
+Wasm mutex backend and validation of that backend.
+
+The Wasm helper branch has focused compile and no-op checks. These checks do
+not qualify a complete GHC/WASI build or runtime.
+
+Memory protection failures
+--------------------------
+
+Final OS memory-protection failures report LL_E_IO. Allocation and
+address-space reservation failures report LL_E_NOMEM. If final protection
+fails, the compatibility linker permanently quarantines that object
+instance and its transitive dependents. The first operation preserves its
+original diagnostic; later lookup, relocation, and initialization attempts
+for affected objects fail with LL_E_STATE. Optimistic linking cannot turn
+this failure into a placeholder address. A failed M32 flush also prevents
+further allocation or flushing through that allocator.
+
+Global resolution fails while a quarantined object remains loaded. Lookup
+of an already-resolved independent object remains available. Pending
+initializers skip quarantined objects and preserve the order and host hooks
+of healthy objects. Ordinary unresolved-symbol retries keep their existing
+behavior. The reported object state remains its last normal lifecycle phase;
+the quarantine marker is private and introduces no new enum value.
+
+Unload all affected objects before reloading them. Their mappings and
+dependency identities remain owned until normal unload and GC disposal,
+including objects whose recursive symbol lookup failed before registration.
+A failed load can therefore leave a quarantined object registered for
+unloading. Freshly loaded instances start without the marker. Previously
+returned raw pointers cannot be revoked by the linker.
+
+Initializer failures
+--------------------
+
+A null .init_array entry returns LL_E_INIT and releases the acquired program
+environment exactly once. A failed initializer backend quarantines the object
+and its transitive dependents under the policy above. The lookup that triggered
+initialization returns NULL. Earlier constructor side effects remain; repeated
+lookup or resolve cannot replay the executed prefix. Unload all affected objects
+before reloading them. Pending initializer and finalizer metadata stays owned
+until disposal, and finalizers run only after successful initialization. ELF and
+PE physical disposal release retained initializer and finalizer lists even when
+initialization failed or never started.
+
+Native load failure cleanup
+----------------------------
+
+After a final failed dlopen, the POSIX compatibility loader completes its load
+hooks and copies the error before invoking the optional on_unload callback.
+It then frees unregistered object metadata. The callback sees OBJECT_READY with
+a NULL native handle. The caller owns the copied error. Metadata cleanup also
+works when on_unload is absent.
+
+After a successful dlopen, failure to discover native mappings through dlinfo
+or dl_iterate_phdr keeps the library loaded and marks it non-unloadable. Normal
+registration and batch completion still run once. Linker debug logging reports
+the discovery failure; loading succeeds without an error allocation or retry.
+Logical unload can release host state, but GC retains the native mapping, as
+it does for the existing successful lazy-load fallback.
+
+Windows M32 reservation ownership
+---------------------------------
+
+Windows M32 mappings keep reservation records outside page payloads. Pool
+transfers preserve page ownership. Discarding pages uses MEM_DECOMMIT on
+the page range, and releases their logical ownership even if decommit
+fails. Only an ownerless reservation can use MEM_RELEASE, with its original
+base and a zero size. A failed base release keeps its record for retry.
+Allocation-granularity padding is recorded separately from usable pages.
+
+Shutdown drains the free-page pool and releases eligible reservations. It
+preserves reservations still owned by live object allocators; the existing
+compatibility shutdown does not destroy those allocators. Their disposal
+must precede terminal reservation cleanup. Cleanup preserves an existing
+primary error, and a failed attempt to make a page writable cannot write a
+free-list header into that page. Page payload offsets, the pool limit,
+32-page batching, and address placement policy remain unchanged.
+
+Native Windows execution in CI is required to validate these OS paths.
+Darwin source compilation does not qualify their Windows behavior.
+
+Mach-O file records and constants are declared in installed `liblink/macho.h`,
+without Apple SDK includes. Private metadata uses those declarations explicitly;
+only a native Mach-O build exposes the temporary `Stub` compatibility alias.
+Mapping/protection and instruction-cache work remain in the existing host-service
+helpers. This declaration split does not enable foreign backend execution or
+change supported file byte order. See tests/unit/README.md for layout controls.
+
+COFF object records/constants live in installed `liblink/coff.h`, with the
+Windows two-byte symbol/relocation packing preserved. `PEi386Types.h` holds
+SDK-free format metadata. `PEi386Host.c` owns DLL loading/caches, Windows symbol
+lookup, loaded-module inspection, and native unwind registration. SDK handles,
+calling conventions, and runtime-function records stay in that host layer.
+`PEi386Services.h` gives the object backend typed private process-service calls;
+a non-Windows host returns LL_E_UNSUPPORTED when those services are required.
+
+The real PE object code can compile with LL_ALL_BACKENDS on another host.
+Registry admission and execution policy remain separate integration work.
+Native DLL/unwind call order and ownership are preserved; native Windows
+runtime qualification remains required. COFF string-table size loads use memcpy
+to safely support unaligned string tables produced by MinGW GCC compilers. Portable
+data controls verify both aligned and unaligned layouts.
+
+Backend host memory services
+----------------------------
+
+Portable backend code uses private host adapters for file opening, anonymous
+section allocation and read-only GOT protection. POSIX calls retain their
+existing flags, access modes, error messages and cleanup order. Windows paths
+use the existing wide-path rts-fs service. Anonymous sections use the existing
+VirtualAlloc host service and SECTION_MMAP disposal releases that reservation.
+File-backed section mapping returns LL_E_UNSUPPORTED on Windows; the normal
+Windows compatibility loader supplies heap images instead of mapped files.
+
+The GOT protection adapter returns the OS result without setting a linker
+error. Its caller retains the legacy log-and-continue behavior on protection
+failure. Changing that policy requires a separate reviewed behavior change.
+
+RISC-V cache completion
+-----------------------
+
+The standalone RISC-V cache-flush helper uses a C11 sequentially consistent
+fence after its existing flush calls, independent of the consuming RTS way.
+This retains the original threaded fence and adds that ordering for consumers
+whose non-threaded RTS macro was empty. Cache ranges and relocation arithmetic
+are unchanged. Compiler controls do not replace native RISC-V qualification.

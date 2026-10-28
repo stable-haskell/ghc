@@ -1,0 +1,162 @@
+{
+  "archive_formats": [
+    "gnu"
+  ],
+  "artifacts": {
+    "armv7-linux-gnueabihf/R_ARM_ABS32.o": {
+      "sha256": "ffb3786e12815aa9f687cf4bac7239674b666ee1897cc800e8072cdd214238f6",
+      "size": 420
+    },
+    "armv7-linux-gnueabihf/R_ARM_CALL.o": {
+      "sha256": "386e00a901347da95810544cd685e5a113db1c31f6fb4193b5f9a183a1df5d60",
+      "size": 396
+    },
+    "armv7-linux-gnueabihf/R_ARM_JUMP24.o": {
+      "sha256": "064172f2fbcd656d7ca16d197a955dd4e0b88ee2e1158e5960a9887bc55b4867",
+      "size": 396
+    },
+    "armv7-linux-gnueabihf/R_ARM_MOVT_ABS.o": {
+      "sha256": "cbbe94b6a8fa7525e9819173370a0cc131bf414d82a10a9bfb05058ee8df30c4",
+      "size": 392
+    },
+    "armv7-linux-gnueabihf/R_ARM_MOVW_ABS_NC.o": {
+      "sha256": "9fdbaf64ebf0e8ffcc2cbb4aa9ebf32efc0a62b8ab565bfa65eec034ea949d6e",
+      "size": 392
+    },
+    "armv7-linux-gnueabihf/R_ARM_REL32.o": {
+      "sha256": "b8d798ab469a1004c9c81345c7ee7d9f7e16ae758852fa33b0b90e27eb583027",
+      "size": 372
+    },
+    "armv7-linux-gnueabihf/R_ARM_THM_CALL.o": {
+      "sha256": "0d5718a018178238c0a83f1847c8e5d57e0980c9ed13311512af51e5e80e2bdb",
+      "size": 400
+    },
+    "armv7-linux-gnueabihf/a_very_long_archive_member_filename_that_is_not_o.object": {
+      "sha256": "35c582dc6dfd0928c441ea225fbed3dda6668ad86b5cb0da1d87d50690720c70",
+      "size": 320
+    },
+    "armv7-linux-gnueabihf/common.o": {
+      "sha256": "98be9a9a96a9a9a7bce573dd9012024dff24730cfb38343bd7edc2101740f5f5",
+      "size": 540
+    },
+    "armv7-linux-gnueabihf/common_strong.o": {
+      "sha256": "f7ed3e207692181cf840bd1ec390659f2e07a5be0da5f66ee12649c5c55cf07f",
+      "size": 596
+    },
+    "armv7-linux-gnueabihf/hidden.o": {
+      "sha256": "d77d9a9f7de1974c8d99f0fe1719de9afcdbb2c512c81ec0a90af4aedb62b24c",
+      "size": 692
+    },
+    "armv7-linux-gnueabihf/init_fini.o": {
+      "sha256": "6ed19f345fff078b30907d4895ed1a17827992955486fcc58090c3ea3f7d5881",
+      "size": 1284
+    },
+    "armv7-linux-gnueabihf/legacy_ctors.o": {
+      "sha256": "64e130beb9544f7997101e57a670b25817f1418ccf6211fe1e73d43e09c16c7d",
+      "size": 940
+    },
+    "armv7-linux-gnueabihf/libelf-fixtures.a": {
+      "sha256": "d8646eb60e22dfd002e268a188812cbcd02296d8a49cf00669c1959af9fea86b",
+      "size": 10896
+    },
+    "armv7-linux-gnueabihf/strong.o": {
+      "sha256": "505fdcdf3800924b76774b7a9db8af2455b6f67f0ef7e1c134f55632f6d4044a",
+      "size": 696
+    },
+    "armv7-linux-gnueabihf/tls.o": {
+      "sha256": "b0976a341b53b662726a0fbe62cd2525560e0c2121b36c9cb5b024ade5b2addb",
+      "size": 820
+    },
+    "armv7-linux-gnueabihf/weak.o": {
+      "sha256": "7b841554bde354c3d489bf85e1fd1eb46ec2615a04894ea2a6570535ab18b2c9",
+      "size": 692
+    }
+  },
+  "catalog_sha256": "92b1f3fe32e3b4a6f2ea8d0e8cd1899f1a5ab2cc6427bf0bf11246fbcb2c3cac",
+  "generator_sha256": "1d27932f1734f1b2f8a97760d242a2563ee33686f934a80cf00f876c8dcc0efa",
+  "recipe_sha256": "a85e8995a015c363e0217f852af73ed739dfc06bac7a1f5162569da90bae0142",
+  "schema": 1,
+  "sources": {
+    "src/elf-arm/R_ARM_ABS32.s": {
+      "sha256": "db256138901b3daf87e67afb983cbb9282cd616ace7474225ca4507f50b97351",
+      "size": 72
+    },
+    "src/elf-arm/R_ARM_CALL.s": {
+      "sha256": "5d2a94a884e747f2750fe60c1c8f23932892885518fad082583eb5ad34865ae7",
+      "size": 92
+    },
+    "src/elf-arm/R_ARM_JUMP24.s": {
+      "sha256": "af161266c172327dbb2e07d04dec2c4c06a7a959a7087c806fb32cc5cd48ca9f",
+      "size": 95
+    },
+    "src/elf-arm/R_ARM_MOVT_ABS.s": {
+      "sha256": "6e1357d4890896c3c34dfa98276fb6b2997f3dd51aef9727a715738fc11f3e3c",
+      "size": 104
+    },
+    "src/elf-arm/R_ARM_MOVW_ABS_NC.s": {
+      "sha256": "77f7b9048c1c8848d905bd0eef99c9d364be7601eaf1c14685296368106fe20d",
+      "size": 104
+    },
+    "src/elf-arm/R_ARM_REL32.s": {
+      "sha256": "6017fc67aa567fad5ba6abcd604e514edb297bbc8868f220361ad8f172d8c07d",
+      "size": 76
+    },
+    "src/elf-arm/R_ARM_THM_CALL.s": {
+      "sha256": "88b847c06a493da0b95ffd15bf5d936bc4c691b434fb9f66894e661bebdf58b2",
+      "size": 114
+    },
+    "src/elf-arm/common.c": {
+      "sha256": "cfa8032334da7c8c3f2549fe31bc125e042533306231cdabe2608f617fcfe1b7",
+      "size": 44
+    },
+    "src/elf-arm/common_strong.c": {
+      "sha256": "3b4fa4dd13b56104b19d1cf2988b6952c98bb1b8ea543da71e6718adc64f6277",
+      "size": 25
+    },
+    "src/elf-arm/hidden.c": {
+      "sha256": "45fe764e7bb98eeb326663b5b8e4b04184c66e7e55b6e6f4ab1b2673d8d628e5",
+      "size": 82
+    },
+    "src/elf-arm/init_fini.c": {
+      "sha256": "c4af4812ff9665b0e884d4bdaf03e722143bc38bd143ea705a203d8adfa965a5",
+      "size": 485
+    },
+    "src/elf-arm/legacy_ctors.c": {
+      "sha256": "ded1392580ddd94b3f41ce1c309a2faec0d92858e047c862b272a74bfb0dd552",
+      "size": 220
+    },
+    "src/elf-arm/long_archive_member.s": {
+      "sha256": "dc00eb82521025ca35bbafda79fc61fc24b8991f03e5fffeb3159fbc440ff01a",
+      "size": 78
+    },
+    "src/elf-arm/strong.c": {
+      "sha256": "1c8aa480363f00a98e76c4e742cffa31d9a4cc12d9d95bbaefab565dc4895986",
+      "size": 45
+    },
+    "src/elf-arm/tls.c": {
+      "sha256": "05f9c5af90af7946a92e22cb03d262d3cdd216f05e316cd6872b52169836f26d",
+      "size": 157
+    },
+    "src/elf-arm/weak.c": {
+      "sha256": "3fe69f7a4e2fd4ab6e0cf2368f7078634c62afa233d97acb2db7dd6b9a81b941",
+      "size": 96
+    }
+  },
+  "targets": [
+    "armv7-linux-gnueabihf"
+  ],
+  "tools": {
+    "clang": {
+      "major": "21",
+      "version": "clang version 21.1.2"
+    },
+    "llvm-ar": {
+      "major": "21",
+      "version": "LLVM version 21.1.2"
+    },
+    "llvm-mc": {
+      "major": "21",
+      "version": "LLVM version 21.1.2"
+    }
+  }
+}

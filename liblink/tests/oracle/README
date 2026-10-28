@@ -1,0 +1,156 @@
+Independent native relocation oracle
+====================================
+
+The initial oracle checks arm64 Mach-O captures from the native runner. Build
+that runner as described in ../runner/README. Use LLVM 17 or later; the tools
+are mandatory and a missing tool fails the check.
+
+Check a capture and its committed semantic reference:
+
+    python3 liblink/tests/oracle/reloc_check.py \
+      --object liblink/tests/fixtures/generated/macho-arm64/ARM64_RELOC_UNSIGNED.o \
+      --capture capture.json --readobj "$LLVM_READOBJ" \
+      --golden liblink/tests/golden/arm64/ARM64_RELOC_UNSIGNED.json \
+      --evidence-dir check-results
+
+Run the native suite with a built runner:
+
+    LIBLINK_TEST_RUNNER=/absolute/path/to/liblink-runner \
+      LLVM_READOBJ=/absolute/path/to/llvm-readobj \
+      LLVM_MC=/absolute/path/to/llvm-mc \
+      python3 -m unittest discover -s liblink/tests/oracle -p 'test_oracle.py' -v
+
+The suite checks all supported native fixtures, the expected unsupported
+POINTER_TO_GOT case, and mutations that corrupt fields, claimed symbols,
+addends, GOT slots, stub code, metadata, or bytes outside relocation fields.
+An additional page-carry case checks the oracle against llvm-mc encodings.
+
+macho_metadata.py parses LLVM's expanded Mach-O sections, symbols, and
+relocations, then binds them to the original file. macho_arm64.py calculates
+S from those symbols and independently supplied host addresses, P from layout,
+and A from original field bytes and ADDEND records. It checks every relocated
+field and every byte of the resulting sections. GOT and stub addresses are
+layout inputs; their contents and targets must also pass independent checks.
+Backend-observed S, P, A, and relocated bytes are never expected values.
+
+A golden stores the checked numeric fields, the sampled layout, and a semantic
+signature. golden_reference.py replays the saved observations through the
+oracle before comparing the current signature. The signature uses symbol
+names and section/stub offsets, allowing different ASLR addresses. Each fresh
+capture must first pass the numerical checks. Initial numeric samples remain
+reviewable in the reference files. --write-golden creates a new file only;
+replacement is explicit outside this command and needs review.
+
+Sources for the arithmetic are Apple's Mach-O arm64 relocation definitions
+and the Arm AArch64 relocation field definitions:
+
+https://github.com/apple-oss-distributions/xnu/blob/main/EXTERNAL_HEADERS/mach-o/arm64/reloc.h
+https://github.com/ARM-software/abi-aa/blob/main/aaelf64/aaelf64.rst
+
+The Apple SDK's mach-o/arm64/reloc.h provides further object-file examples.
+No backend implementation is imported. Other formats, local relocation
+forms, and post-NO_EXEC coverage are later extensions; unsupported oracle
+inputs fail explicitly.
+
+Unsupported relocation captures use the compatibility linker's status-returning
+failure path. Their expected exit and complete diagnostic remain strict; the
+literal `{object}` in a diagnostic expands only to that fixture's exact input
+path. This keeps the expected text portable across checkouts. The former abort
+expectation predates the approved error-model conversion. The unchanged
+WP2.5 base and format-dispatch candidate both return exit 5 for POINTER_TO_GOT.
+Numeric relocation goldens and the independent arithmetic checks are unchanged.
+
+ELF x86_64 address checks
+-------------------------
+
+elf_x86_64_check.py reads original ELF64 little-endian section, symbol and RELA
+records using Python's struct module. It computes S from defined symbols or
+separately recorded resolver inputs, P from section layout, and A from the
+original signed RELA addend. The formulas follow AMD64 psABI table4.9:
+
+https://gitlab.com/x86-psABIs/x86-64-ABI/-/jobs/artifacts/master/raw/x86-64-ABI/abi.pdf?job=build
+
+All nine supported ordinary fixtures are checked, including all three GOTPCREL
+forms. The oracle verifies whole resulting sections and extras, including
+untouched bytes and the native x64 GOT/jump-island payload. It does not import
+the linker or derive an expected S from a relocated field. Saved references
+are replayed numerically before comparing ASLR-independent semantic signatures.
+The initial goldens were captured with the unchanged WP2.7 linker at102bd9.
+
+    python3 liblink/tests/oracle/elf_x86_64_check.py \
+      --object liblink/tests/fixtures/generated/elf-x86_64/x86_64-linux-gnu/R_X86_64_64.o \
+      --capture capture.json --golden liblink/tests/golden/elf-x86_64/R_X86_64_64.json
+
+    python3 -m unittest discover -s liblink/tests/oracle -p test_elf_x86_64.py -v
+
+Set LIBLINK_ELF_CAPTURE to the absolute elf_capture executable to check fresh
+normal and NO_EXEC captures, including a forced PLT32 island with an
+out-of-range resolver input. Each NO_EXEC fixture runs twice against its
+reference in ../golden/elf-x86_64-noexec. Those references add exact synthetic
+execution addresses and SHA-256 hashes for relocated sections, extras and the
+global GOT. The numerical check derives global GOT payloads from original
+symbols/resolver inputs, and verifies work/exec separation and fixed x64 page
+alignment. Heap addresses are sampled layout inputs, not deterministic output.
+
+Corruption controls alter capture JSON, not object-file inputs. They reject
+wrong GOT payloads, work/exec aliases, misaligned synthetic addresses and
+altered saved image hashes as well as native relocation errors. TLS and other
+architectures remain outside this oracle's supported inputs. See ../runner/README
+for capture scope and build flags. These local checks do not establish two-host
+golden stability or foreign execution qualification.
+
+ELF AArch64 normal-address baselines
+-----------------------------------
+
+elf_aarch64_check.py uses the shared bounded elf64_metadata.py parser for
+original little-endian ELF64 records. Relocation formulas follow Arm AAELF64
+2025Q4 sections5.7.5–5.7.7:
+
+https://github.com/ARM-software/abi-aa/blob/main/aaelf64/aaelf64.rst
+
+The oracle checks every nonempty original section, all GOT payloads and all
+reserved stub bytes. It derives S from original symbols and explicit resolver
+inputs, P from layout, and A from original RELA records. GOT slot identity
+uses the original table/index even when two symbols have equal values. Far
+branches must reach the independently encoded veneer; stub target, reuse,
+order and untouched capacity remain checked. The veneer encoder also matches
+llvm-mc for four full-width addresses.
+
+    LIBLINK_ELF_AARCH64_CAPTURE=/absolute/path/to/aarch64-target-elf-capture \
+      LLVM_MC=/absolute/path/to/llvm-mc \
+      python3 -m unittest discover -s liblink/tests/oracle -p test_elf_aarch64.py -v
+
+Twenty saved layouts cover27 fields from the thirteen ordinary fixtures plus
+negative PREL32/ADRP, near/far branch reuse and equal-valued GOT aliases.
+Mutation controls reject incomplete captures, wrong fields/GOT/veneer bytes,
+changed stub identity/order, altered resolver inputs, work/exec mismatch and
+corrupt saved numeric references. Native ASLR changes layout but must preserve
+the semantic signature after numerical verification. The initial captures use
+the unchanged542259edba9 object backend on an x64 host with an AArch64 target.
+
+Scope is one symbol table, ordinary supported RELA forms, zero GOT addends,
+and zero branch addends when a veneer is needed. Other inputs fail explicitly.
+The NO_EXEC references additionally record deterministic execution addresses,
+section and veneer hashes, and global GOT contents. Work and execution layouts
+must be separate. Each live reference runs twice when the AArch64 capture is
+available. The classifier reads one instruction word so short sections remain
+within bounds. Two-host and AArch64 execution qualification remain open.
+
+ELF RISC-V relocation checks
+----------------------------
+
+elf_riscv64_check.py parses the original ELF records and independently checks
+23 reference fixtures, including branch encodings, paired PC-relative HI/LO
+relocations, GOT entries, call veneers, unchanged bytes and the backend's
+existing 32-bit operand narrowing. To replay saved captures and corruption controls:
+
+    python3 -m unittest discover -s liblink/tests/oracle -p test_elf_riscv64.py -v
+
+Set LIBLINK_ELF_RISCV64_CAPTURE to a compatible capture executable to check live
+normal captures and two NO_EXEC captures per fixture. NO_EXEC references retain
+synthetic execution layout and bytes, while excluding heap addresses; the oracle
+independently checks the encodings and rejects corrupted section bytes. The
+mixed-target Darwin build is data-only. Two-host NO_EXEC stability and native
+RISC-V or QEMU execution remain unqualified.
+The RISC-V ELF psABI specifies relocation and instruction field encodings:
+https://github.com/riscv-non-isa/riscv-elf-psabi-doc/blob/master/riscv-elf.adoc

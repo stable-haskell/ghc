@@ -1,0 +1,373 @@
+{
+  "archives": [
+    {
+      "features": [
+        "long-name",
+        "non-o-member"
+      ],
+      "format": "gnu",
+      "members": [
+        "R_ARM_ABS32",
+        "R_ARM_REL32",
+        "R_ARM_CALL",
+        "R_ARM_JUMP24",
+        "R_ARM_THM_CALL",
+        "R_ARM_MOVW_ABS_NC",
+        "R_ARM_MOVT_ABS",
+        "tls",
+        "common",
+        "common_strong",
+        "weak",
+        "strong",
+        "hidden",
+        "init_fini",
+        "legacy_ctors",
+        "long_archive_member"
+      ],
+      "path": "armv7-linux-gnueabihf/libelf-fixtures.a"
+    }
+  ],
+  "schema": 1,
+  "sources": [
+    {
+      "expected_outcome": "supported",
+      "expected_relocations": [
+        "R_ARM_ABS32"
+      ],
+      "id": "R_ARM_ABS32",
+      "language": "asm",
+      "object": "armv7-linux-gnueabihf/R_ARM_ABS32.o",
+      "path": "src/elf-arm/R_ARM_ABS32.s",
+      "triple": "armv7-linux-gnueabihf"
+    },
+    {
+      "expected_outcome": "supported",
+      "expected_relocations": [
+        "R_ARM_REL32"
+      ],
+      "id": "R_ARM_REL32",
+      "language": "asm",
+      "object": "armv7-linux-gnueabihf/R_ARM_REL32.o",
+      "path": "src/elf-arm/R_ARM_REL32.s",
+      "triple": "armv7-linux-gnueabihf"
+    },
+    {
+      "expected_outcome": "supported",
+      "expected_relocations": [
+        "R_ARM_CALL"
+      ],
+      "id": "R_ARM_CALL",
+      "language": "asm",
+      "layout_cases": [
+        "near",
+        "far"
+      ],
+      "object": "armv7-linux-gnueabihf/R_ARM_CALL.o",
+      "path": "src/elf-arm/R_ARM_CALL.s",
+      "triple": "armv7-linux-gnueabihf"
+    },
+    {
+      "expected_outcome": "supported",
+      "expected_relocations": [
+        "R_ARM_JUMP24"
+      ],
+      "id": "R_ARM_JUMP24",
+      "language": "asm",
+      "layout_cases": [
+        "near",
+        "far"
+      ],
+      "object": "armv7-linux-gnueabihf/R_ARM_JUMP24.o",
+      "path": "src/elf-arm/R_ARM_JUMP24.s",
+      "triple": "armv7-linux-gnueabihf"
+    },
+    {
+      "expected_outcome": "supported",
+      "expected_relocations": [
+        "R_ARM_THM_CALL"
+      ],
+      "id": "R_ARM_THM_CALL",
+      "language": "asm",
+      "object": "armv7-linux-gnueabihf/R_ARM_THM_CALL.o",
+      "path": "src/elf-arm/R_ARM_THM_CALL.s",
+      "triple": "armv7-linux-gnueabihf"
+    },
+    {
+      "expected_outcome": "supported",
+      "expected_relocations": [
+        "R_ARM_MOVW_ABS_NC"
+      ],
+      "id": "R_ARM_MOVW_ABS_NC",
+      "language": "asm",
+      "object": "armv7-linux-gnueabihf/R_ARM_MOVW_ABS_NC.o",
+      "path": "src/elf-arm/R_ARM_MOVW_ABS_NC.s",
+      "triple": "armv7-linux-gnueabihf"
+    },
+    {
+      "expected_outcome": "supported",
+      "expected_relocations": [
+        "R_ARM_MOVT_ABS"
+      ],
+      "id": "R_ARM_MOVT_ABS",
+      "language": "asm",
+      "object": "armv7-linux-gnueabihf/R_ARM_MOVT_ABS.o",
+      "path": "src/elf-arm/R_ARM_MOVT_ABS.s",
+      "triple": "armv7-linux-gnueabihf"
+    },
+    {
+      "expected_outcome": "metadata",
+      "expected_relocations": [
+        "R_ARM_PREL31",
+        "R_ARM_TLS_IE32"
+      ],
+      "expected_sections": [
+        ".ARM.attributes",
+        ".ARM.exidx",
+        ".llvm_addrsig",
+        ".note.GNU-stack",
+        ".rel.ARM.exidx",
+        ".rel.text",
+        ".strtab",
+        ".symtab",
+        ".text"
+      ],
+      "expected_symbol": "fixture_external_tls",
+      "expected_symbol_binding": "Global",
+      "expected_symbol_section": "Undefined",
+      "expected_symbol_type": "TLS",
+      "expected_undefined_symbols": [
+        "fixture_external_tls"
+      ],
+      "features": [
+        "TLS"
+      ],
+      "id": "tls",
+      "language": "c",
+      "object": "armv7-linux-gnueabihf/tls.o",
+      "path": "src/elf-arm/tls.c",
+      "triple": "armv7-linux-gnueabihf"
+    },
+    {
+      "expected_outcome": "metadata",
+      "expected_relocations": [],
+      "expected_sections": [
+        ".ARM.attributes",
+        ".llvm_addrsig",
+        ".note.GNU-stack",
+        ".strtab",
+        ".symtab",
+        ".text"
+      ],
+      "expected_symbol": "fixture_common",
+      "expected_symbol_binding": "Global",
+      "expected_symbol_section": "Common",
+      "expected_symbol_size": 4,
+      "expected_symbol_type": "Object",
+      "features": [
+        "COMMON"
+      ],
+      "id": "common",
+      "language": "c",
+      "object": "armv7-linux-gnueabihf/common.o",
+      "path": "src/elf-arm/common.c",
+      "triple": "armv7-linux-gnueabihf"
+    },
+    {
+      "expected_outcome": "metadata",
+      "expected_relocations": [
+        "R_ARM_PREL31"
+      ],
+      "expected_sections": [
+        ".ARM.attributes",
+        ".ARM.exidx",
+        ".llvm_addrsig",
+        ".note.GNU-stack",
+        ".rel.ARM.exidx",
+        ".strtab",
+        ".symtab",
+        ".text"
+      ],
+      "expected_symbol": "fixture_override",
+      "expected_symbol_binding": "Weak",
+      "expected_symbol_section": ".text",
+      "expected_symbol_type": "Function",
+      "features": [
+        "weak-strong"
+      ],
+      "id": "weak",
+      "language": "c",
+      "object": "armv7-linux-gnueabihf/weak.o",
+      "path": "src/elf-arm/weak.c",
+      "triple": "armv7-linux-gnueabihf"
+    },
+    {
+      "expected_outcome": "metadata",
+      "expected_relocations": [
+        "R_ARM_PREL31"
+      ],
+      "expected_sections": [
+        ".ARM.attributes",
+        ".ARM.exidx",
+        ".llvm_addrsig",
+        ".note.GNU-stack",
+        ".rel.ARM.exidx",
+        ".strtab",
+        ".symtab",
+        ".text"
+      ],
+      "expected_symbol": "fixture_override",
+      "expected_symbol_binding": "Global",
+      "expected_symbol_section": ".text",
+      "expected_symbol_type": "Function",
+      "features": [
+        "weak-strong"
+      ],
+      "id": "strong",
+      "language": "c",
+      "object": "armv7-linux-gnueabihf/strong.o",
+      "path": "src/elf-arm/strong.c",
+      "triple": "armv7-linux-gnueabihf"
+    },
+    {
+      "expected_outcome": "metadata",
+      "expected_relocations": [
+        "R_ARM_PREL31"
+      ],
+      "expected_sections": [
+        ".ARM.attributes",
+        ".ARM.exidx",
+        ".llvm_addrsig",
+        ".note.GNU-stack",
+        ".rel.ARM.exidx",
+        ".strtab",
+        ".symtab",
+        ".text"
+      ],
+      "expected_symbol": "fixture_hidden",
+      "expected_symbol_binding": "Global",
+      "expected_symbol_section": ".text",
+      "expected_symbol_type": "Function",
+      "expected_visibility": "STV_HIDDEN",
+      "features": [
+        "hidden"
+      ],
+      "id": "hidden",
+      "language": "c",
+      "object": "armv7-linux-gnueabihf/hidden.o",
+      "path": "src/elf-arm/hidden.c",
+      "triple": "armv7-linux-gnueabihf"
+    },
+    {
+      "expected_outcome": "metadata",
+      "expected_relocations": [
+        "R_ARM_CALL",
+        "R_ARM_GOT_PREL",
+        "R_ARM_JUMP24",
+        "R_ARM_PREL31",
+        "R_ARM_TARGET1"
+      ],
+      "expected_sections": [
+        ".ARM.attributes",
+        ".ARM.exidx",
+        ".fini_array",
+        ".init_array",
+        ".llvm_addrsig",
+        ".note.GNU-stack",
+        ".rel.ARM.exidx",
+        ".rel.fini_array",
+        ".rel.init_array",
+        ".rel.text",
+        ".strtab",
+        ".symtab",
+        ".text"
+      ],
+      "expected_undefined_symbols": [
+        "__cxa_atexit",
+        "__dso_handle",
+        "fixture_record_event"
+      ],
+      "features": [
+        "init_array",
+        "fini_array",
+        "__cxa_atexit",
+        "__dso_handle"
+      ],
+      "id": "init_fini",
+      "language": "c",
+      "object": "armv7-linux-gnueabihf/init_fini.o",
+      "path": "src/elf-arm/init_fini.c",
+      "triple": "armv7-linux-gnueabihf"
+    },
+    {
+      "expected_outcome": "metadata",
+      "expected_relocations": [
+        "R_ARM_ABS32",
+        "R_ARM_JUMP24",
+        "R_ARM_PREL31"
+      ],
+      "expected_sections": [
+        ".ARM.attributes",
+        ".ARM.exidx",
+        ".ctors",
+        ".llvm_addrsig",
+        ".note.GNU-stack",
+        ".rel.ARM.exidx",
+        ".rel.ctors",
+        ".rel.text",
+        ".strtab",
+        ".symtab",
+        ".text"
+      ],
+      "expected_undefined_symbols": [
+        "fixture_record_event"
+      ],
+      "features": [
+        "legacy-ctors"
+      ],
+      "id": "legacy_ctors",
+      "language": "c",
+      "object": "armv7-linux-gnueabihf/legacy_ctors.o",
+      "path": "src/elf-arm/legacy_ctors.c",
+      "triple": "armv7-linux-gnueabihf"
+    },
+    {
+      "expected_outcome": "archive-only",
+      "expected_relocations": [],
+      "features": [
+        "archive-long-name",
+        "non-o-member"
+      ],
+      "id": "long_archive_member",
+      "language": "asm",
+      "object": "armv7-linux-gnueabihf/a_very_long_archive_member_filename_that_is_not_o.object",
+      "path": "src/elf-arm/long_archive_member.s",
+      "triple": "armv7-linux-gnueabihf"
+    },
+    {
+      "expected_outcome": "metadata",
+      "expected_relocations": [],
+      "expected_sections": [
+        ".ARM.attributes",
+        ".data",
+        ".llvm_addrsig",
+        ".note.GNU-stack",
+        ".strtab",
+        ".symtab",
+        ".text"
+      ],
+      "expected_symbol": "fixture_common",
+      "expected_symbol_binding": "Global",
+      "expected_symbol_section": ".data",
+      "expected_symbol_size": 4,
+      "expected_symbol_type": "Object",
+      "features": [
+        "COMMON-strong"
+      ],
+      "id": "common_strong",
+      "language": "c",
+      "object": "armv7-linux-gnueabihf/common_strong.o",
+      "path": "src/elf-arm/common_strong.c",
+      "triple": "armv7-linux-gnueabihf"
+    }
+  ]
+}

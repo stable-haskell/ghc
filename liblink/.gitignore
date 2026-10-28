@@ -1,0 +1,11 @@
+/aclocal.m4
+/autom4te.cache/
+/build-aux/config.guess
+/build-aux/config.sub
+/config.log
+/config.status
+/configure
+/include/ll_autoconf.h
+/include/ll_autoconf.h.in
+/include/ll_platform.h
+/liblink.buildinfo

@@ -1,0 +1,107 @@
+{
+  "object_sha256": "e774184bf034b34c5f57235ef2ef9a2c1cb17e66487768e236493f93abaa51a6",
+  "fields": [
+    {
+      "section": 2,
+      "offset": 0,
+      "type": 27,
+      "symbol": "external_data",
+      "before": "13050500",
+      "expected": "13050500"
+    }
+  ],
+  "id": "R_RISCV_LO12_I",
+  "object": "riscv64-linux-gnu/R_RISCV_LO12_I.o",
+  "capture": {
+    "schema": "liblink-elf-native-address-v1",
+    "resolved": true,
+    "initializers_ran": false,
+    "status": 0,
+    "error": "",
+    "noexec": false,
+    "host_symbols": {
+      "external_data": "0x12345000",
+      "external_function": "0x102c7c058",
+      "external_function_alias": "0x102c7c058",
+      "external_second_function": "0x102c7d058"
+    },
+    "sections": [
+      {
+        "index": 1,
+        "address": "0x1028000c0",
+        "exec_address": "0x1028000c0",
+        "size": 66,
+        "before": "002478002e72656c612e7465787400666978747572655f72697363765f6c6f31325f69002e737472746162002e73796d7461620065787465726e616c5f6461746100",
+        "after": "002478002e72656c612e7465787400666978747572655f72697363765f6c6f31325f69002e737472746162002e73796d7461620065787465726e616c5f6461746100",
+        "stubs": {
+          "address": "0x0",
+          "size": 0,
+          "before": "",
+          "after": "",
+          "entries": []
+        }
+      },
+      {
+        "index": 2,
+        "address": "0x102c7c018",
+        "exec_address": "0x102c7c018",
+        "size": 4,
+        "before": "13050500",
+        "after": "13050500",
+        "stubs": {
+          "address": "0x102c7c01c",
+          "size": 0,
+          "before": "",
+          "after": "",
+          "entries": []
+        }
+      },
+      {
+        "index": 3,
+        "address": "0x1028000a8",
+        "exec_address": "0x1028000a8",
+        "size": 24,
+        "before": "00000000000000001b000000030000000000000000000000",
+        "after": "00000000000000001b000000030000000000000000000000",
+        "stubs": {
+          "address": "0x0",
+          "size": 0,
+          "before": "",
+          "after": "",
+          "entries": []
+        }
+      },
+      {
+        "index": 4,
+        "address": "0x102800048",
+        "exec_address": "0x102800048",
+        "size": 96,
+        "before": "0000000000000000000000000000000000000000000000000100000000000200000000000000000000000000000000000f0000001000020000000000000000000000000000000000340000001000000000000000000000000000000000000000",
+        "after": "0000000000000000000000000000000000000000000000000100000000000200000000000000000000000000000000000f0000001000020000000000000000000000000000000000340000001000000000000000000000000000000000000000",
+        "stubs": {
+          "address": "0x0",
+          "size": 0,
+          "before": "",
+          "after": "",
+          "entries": []
+        }
+      }
+    ],
+    "extras": {
+      "address": "0x102804000",
+      "exec_address": "0x102804000",
+      "first": 0,
+      "count": 4,
+      "stride": 8,
+      "jump_offset": 8,
+      "before": "0000000000000000000000000000000000000000000000000000000000000000",
+      "after": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "got": {
+      "address": "0x102808000",
+      "exec_address": "0x102808000",
+      "size": 24,
+      "after": "18c0c7020100000018c0c702010000000050341200000000"
+    }
+  }
+}

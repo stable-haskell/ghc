@@ -127,10 +127,18 @@ test('T5435_dyn_gcc',
 
 ######################################
 test('linker_unload',
-     [extra_files(['LinkerUnload.hs', 'Test.hs']),
+     [extra_files(['LinkerUnload.hs', 'Test.hs', 'linker_unload_trace.h']),
       when(opsys('freebsd'), expect_broken(25491)),
       req_rts_linker],
      makefile_test, ['linker_unload'])
+
+test('linker_unload_errors',
+     [extra_files(['LinkerUnload.hs', 'Test.hs', 'linker_unload.c',
+                   'linker_unload_trace.h']),
+      only_ways(['normal']),
+      when(not config.ghc_with_threaded_rts, skip),
+      req_rts_linker],
+     makefile_test, ['linker_unload_errors'])
 
 test('linker_unload_native',
      [extra_files(['LinkerUnload.hs', 'Test.hs']),

@@ -1,0 +1,95 @@
+#define LL_INTERNAL_SOURCE 1
+#include "ll_compat.h"
+#include "ll_target.h"
+#include "elf_compat.h"
+#include "elf_plt_riscv64.h"
+#include "linker/ElfTypes.h"
+
+#include <stdint.h>
+#include <stdlib.h>
+
+#if LL_TARGET_RISCV64
+
+#if LL_BUILD_ELF
+
+const size_t elf_instSizeRISCV64 = 4;
+const size_t elf_stubSizeRISCV64 = 3 * elf_instSizeRISCV64;
+
+bool elf_needStubForRelRISCV64(ll_elf_target_rel *rel) {
+  switch (LL_ELF64_R_TYPE(rel->r_info)) {
+  case LL_ELF_R_RISCV_CALL:
+  case LL_ELF_R_RISCV_CALL_PLT:
+    return true;
+  default:
+    return false;
+  }
+}
+
+bool elf_needStubForRelaRISCV64(ll_elf_target_rela *rela) {
+  switch (LL_ELF64_R_TYPE(rela->r_info)) {
+  case LL_ELF_R_RISCV_CALL:
+  case LL_ELF_R_RISCV_CALL_PLT:
+    return true;
+  default:
+    return false;
+  }
+}
+
+// After the global offset table (GOT) has been set up, we can use these three
+// instructions to jump to the target address / function:
+//
+//  1. AUIPC ip, %pcrel_hi(addr)
+//  2. LD ip, %pcrel_lo(addr)(ip)
+//  3. JARL x0, ip, 0
+//
+// We could use the absolute address of the target (because we know it), but
+// that would require loading a 64-bit constant which is a nightmare to do in
+// riscv64 assembly. (See
+// https://github.com/riscv-non-isa/riscv-elf-psabi-doc/blob/5ffe5b5aeedb37b1c1c0c3d94641267d9ad4795a/riscv-elf.adoc#procedure-linkage-table)
+//
+// So far, PC-relative addressing seems to be good enough. If it ever turns out
+// to be not, one could (additionally for out-of-range cases?) encode absolute
+// addressing here.
+bool elf_makeStubRISCV64Site(ll_linker *L, ElfStub *s, uintptr_t exec) {
+  uint32_t *P = (uint32_t *)s->addr;
+  int32_t addr = (uint64_t)s->got_addr - exec;
+
+  uint64_t hi = (addr + 0x800) >> 12;
+  uint64_t lo = addr - (hi << 12);
+
+  LL_IF_DEBUG_FOR(L,
+      linker,
+      LL_DEBUG_FOR(L,
+          "makeStubRISCV64: P = %p, got_addr = %p, target = %p, addr = 0x%x "
+          ", hi = 0x%lx, lo = 0x%lx\n",
+          P, s->got_addr, s->target, addr, hi, lo));
+
+  // AUIPC ip, %pcrel_hi(addr)
+  uint32_t auipcInst = 0b0010111; // opcode
+  auipcInst |= 0x1f << 7;         // rd = ip (x31)
+  auipcInst |= hi << 12;          // imm[31:12]
+
+  // LD ip, %pcrel_lo(addr)(ip)
+  uint32_t ldInst = 0b0000011; // opcode
+  ldInst |= 0x1f << 7;         // rd = ip (x31)
+  ldInst |= 0x1f << 15;        // rs = ip (x31)
+  ldInst |= 0b11 << 12;        // funct3 = 0x3 (LD)
+  ldInst |= lo << 20;          // imm[11:0]
+
+  // JARL x0, ip, 0
+  uint32_t jalrInst = 0b1100111; // opcode
+  jalrInst |= 0x1f << 15;        // rs = ip (x31)
+
+  P[0] = auipcInst;
+  P[1] = ldInst;
+  P[2] = jalrInst;
+
+  return EXIT_SUCCESS;
+}
+
+bool elf_makeStubRISCV64(ll_linker *L, ElfStub *s) {
+  return elf_makeStubRISCV64Site(L, s, (uintptr_t)s->addr);
+}
+
+#endif
+#endif

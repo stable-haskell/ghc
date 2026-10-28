@@ -1,0 +1,290 @@
+{
+  "archive_formats": [
+    "gnu"
+  ],
+  "artifacts": {
+    "riscv64-linux-gnu/R_RISCV_64.o": {
+      "sha256": "20241c01cdef73e6c80e97ef5ca7f74ceee295faf33529b6fd98accc72b5f037",
+      "size": 648
+    },
+    "riscv64-linux-gnu/R_RISCV_ADD16.o": {
+      "sha256": "3ba43eeac4070318b6a5714dfa407cd263ddd4b5ff05600ac76db530174facbf",
+      "size": 648
+    },
+    "riscv64-linux-gnu/R_RISCV_ADD32.o": {
+      "sha256": "baabfbae113672dcf68a0314998167d3bd7b0f585c4c086b3427802c3cf60bff",
+      "size": 648
+    },
+    "riscv64-linux-gnu/R_RISCV_ADD64.o": {
+      "sha256": "098f85f4a5a3c61583a439dd271c44d82b2bf98edc6c6a56a0af2532e605b7fd",
+      "size": 648
+    },
+    "riscv64-linux-gnu/R_RISCV_ADD8.o": {
+      "sha256": "b7f772e6476aac4d022a5aea5b44daa134cf413bf0b400427e729942260d92d4",
+      "size": 648
+    },
+    "riscv64-linux-gnu/R_RISCV_ALIGN.o": {
+      "sha256": "8d0e9c7bc1376231d337b524749955dfb4518ad174f70b0d2eea04133a4412be",
+      "size": 560
+    },
+    "riscv64-linux-gnu/R_RISCV_BRANCH.o": {
+      "sha256": "1421fa7666fd84dddd1ada4348267c1345c4e019783d113a0b6801144788d0d5",
+      "size": 592
+    },
+    "riscv64-linux-gnu/R_RISCV_CALL_PLT.o": {
+      "sha256": "4f133ea3519f42415397a8996bcb2a7cac69ab113d3d4f277de200b710d671f2",
+      "size": 584
+    },
+    "riscv64-linux-gnu/R_RISCV_GOT_HI20.o": {
+      "sha256": "5ee90c2d779f6f35bb5dcd53d97b4b804a3edda264676d5b32fb7992f0ff8189",
+      "size": 584
+    },
+    "riscv64-linux-gnu/R_RISCV_HI20.o": {
+      "sha256": "a05c1ab03d36f4b58bfb8d1fae762a9bac468d1bd35c3a5d48454b7cb1388c4f",
+      "size": 576
+    },
+    "riscv64-linux-gnu/R_RISCV_JAL.o": {
+      "sha256": "11cf7662e89090c2a77728c5c49b4d9b833ba112c8a65faaecddaeed5239e409",
+      "size": 584
+    },
+    "riscv64-linux-gnu/R_RISCV_LO12_I.o": {
+      "sha256": "e774184bf034b34c5f57235ef2ef9a2c1cb17e66487768e236493f93abaa51a6",
+      "size": 584
+    },
+    "riscv64-linux-gnu/R_RISCV_PCREL_HI20.o": {
+      "sha256": "96ff24320fe5c47c0d2d983a01920c89e13a515672c18058633b7e83d01a4402",
+      "size": 584
+    },
+    "riscv64-linux-gnu/R_RISCV_PCREL_LO12_I.o": {
+      "sha256": "a2bb46dbb9ad79ba7652ad203e14eb68876d0a32e24159dd4848c5e27d927898",
+      "size": 648
+    },
+    "riscv64-linux-gnu/R_RISCV_PCREL_LO12_S.o": {
+      "sha256": "57ed19d46a1e85871a23464132dda40045303d0faec69b76017bded37fadc301",
+      "size": 648
+    },
+    "riscv64-linux-gnu/R_RISCV_RELAX.o": {
+      "sha256": "b6da6295814042e2174be16e609359baaa58371e86320604664c3b7cf3b72da0",
+      "size": 608
+    },
+    "riscv64-linux-gnu/R_RISCV_RVC_BRANCH.o": {
+      "sha256": "61cb5a018b03cad52d4e76313a8ef84f68585f060fa1e517091365a22b64876f",
+      "size": 592
+    },
+    "riscv64-linux-gnu/R_RISCV_RVC_JUMP.o": {
+      "sha256": "59007debf255fa8db840deb67f34a7e23ee173b7c753521154a8af21011e7faa",
+      "size": 584
+    },
+    "riscv64-linux-gnu/R_RISCV_SUB16.o": {
+      "sha256": "a1c69be1319cd7100b0c8365f652d78d1e7583517f4e05b210920f2c80be444d",
+      "size": 648
+    },
+    "riscv64-linux-gnu/R_RISCV_SUB32.o": {
+      "sha256": "c8ffcc54f12ce493b58dd62765077197231db9849556d22a7353091fd49b36a8",
+      "size": 648
+    },
+    "riscv64-linux-gnu/R_RISCV_SUB6.o": {
+      "sha256": "8df6dad88f7139c1f97f69c8fd62ad4474ed57e376e3f57903e0ee6abeab748c",
+      "size": 648
+    },
+    "riscv64-linux-gnu/R_RISCV_SUB64.o": {
+      "sha256": "6647429ceb8e3cc2b1d2d6e7204b00e26c52a1b57980d382b1ec53f387441eb9",
+      "size": 648
+    },
+    "riscv64-linux-gnu/R_RISCV_SUB8.o": {
+      "sha256": "49429c71e5f2e2f799ca131b59889d2057ece3cda5f78c78e622a278737f1acf",
+      "size": 648
+    },
+    "riscv64-linux-gnu/a_very_long_archive_member_filename_that_is_not_o.object": {
+      "sha256": "4dc13e96181fa7b498aa24269653f1ffe4b4d5004ceee11169d4b2e98a881cb1",
+      "size": 456
+    },
+    "riscv64-linux-gnu/common.o": {
+      "sha256": "74b9c1f5ab26586298f63876c0dadc62cccca92ff354512467e431a26593c20d",
+      "size": 816
+    },
+    "riscv64-linux-gnu/common_strong.o": {
+      "sha256": "16dafac93d0171f92003334aa6eec1ec438736ea2a123e22f8a216e265be8ac3",
+      "size": 920
+    },
+    "riscv64-linux-gnu/hidden.o": {
+      "sha256": "90c03f59cd3516f4ae878b1b0a649bdc49043a36c141b7fe0a1a1e44bf277d7b",
+      "size": 848
+    },
+    "riscv64-linux-gnu/init_fini.o": {
+      "sha256": "0fb5a762a3d9445094ecaa4c25d923216d0a750c484e6f1de8d742abf8b5cabb",
+      "size": 2016
+    },
+    "riscv64-linux-gnu/legacy_ctors.o": {
+      "sha256": "02615e7ea4c4462356ff6537a52df596e5b74f4d7af2ad63e3f58ed4fd2877af",
+      "size": 1280
+    },
+    "riscv64-linux-gnu/libelf-fixtures.a": {
+      "sha256": "97b8afac598713de6369c421d686749356e61eec28ed0a6292d04a3b4ff1df65",
+      "size": 26382
+    },
+    "riscv64-linux-gnu/strong.o": {
+      "sha256": "45f2e2fc473d04fb4800f22b772a6002327638bcc06d8d3a46003d417e590f74",
+      "size": 848
+    },
+    "riscv64-linux-gnu/tls.o": {
+      "sha256": "a3ca896e4a6242c01f19485735c5da4a6ca9d7cb08658618c9e8eb976c695a92",
+      "size": 1080
+    },
+    "riscv64-linux-gnu/weak.o": {
+      "sha256": "1e62b7c190343b26853c88243387ecbd080f05bfec0933d152dddfe01107c66b",
+      "size": 848
+    }
+  },
+  "catalog_sha256": "a8b12149035620b59e92595f29c6bfafe62b7ab524facefd42860c206290b9ae",
+  "generator_sha256": "1d27932f1734f1b2f8a97760d242a2563ee33686f934a80cf00f876c8dcc0efa",
+  "recipe_sha256": "a85e8995a015c363e0217f852af73ed739dfc06bac7a1f5162569da90bae0142",
+  "schema": 1,
+  "sources": {
+    "src/elf-riscv64/R_RISCV_64.s": {
+      "sha256": "4f766f1ea13eb758666819822975537cd619e607fec0d14e4c0bb17da9a0fc60",
+      "size": 71
+    },
+    "src/elf-riscv64/R_RISCV_ADD16.s": {
+      "sha256": "ac02abe90ed2a93aa2971de251e526414a6106009526f55f3ffb6d709035c3c2",
+      "size": 122
+    },
+    "src/elf-riscv64/R_RISCV_ADD32.s": {
+      "sha256": "d647bed98721a944a98ab06c825bd6a723cca1c0e6c649d7da63ed4e51a3f286",
+      "size": 121
+    },
+    "src/elf-riscv64/R_RISCV_ADD64.s": {
+      "sha256": "29b89a9a6e2094d5cb727fba89c0d7280bbd054aa2d8fc96e0539e60a79e9f43",
+      "size": 122
+    },
+    "src/elf-riscv64/R_RISCV_ADD8.s": {
+      "sha256": "b3d5cdc3a3976f8ed9d8339143d3c4414eab2c7f15c5c61019f51532293e23ae",
+      "size": 117
+    },
+    "src/elf-riscv64/R_RISCV_ALIGN.s": {
+      "sha256": "6f91a9fc94f42812c2adefe1b4157a7c7945c94b046f10830d5bedd5ee18de48",
+      "size": 93
+    },
+    "src/elf-riscv64/R_RISCV_BRANCH.s": {
+      "sha256": "d5c924b6f63fddf80243805dd2ac2330a3d261b3a0fecc8de4bd61db970f4a1c",
+      "size": 178
+    },
+    "src/elf-riscv64/R_RISCV_CALL_PLT.s": {
+      "sha256": "b60b73f9b07e356d49817933be5a1d73fdb16150ee95019598e0cd03e5650e99",
+      "size": 101
+    },
+    "src/elf-riscv64/R_RISCV_GOT_HI20.s": {
+      "sha256": "92580f09f4036eb01598a68c23deb37c3ad8ae6b3c7027bf94c566fac63a957d",
+      "size": 101
+    },
+    "src/elf-riscv64/R_RISCV_HI20.s": {
+      "sha256": "70d29c89ea66b197c82d8bcd1e3d7bbf147d9d7784d63c357934b2076d231927",
+      "size": 81
+    },
+    "src/elf-riscv64/R_RISCV_JAL.s": {
+      "sha256": "e61b962352917d5a5e376ff3ce214b26269391340cc339138264a91cf38ed43a",
+      "size": 78
+    },
+    "src/elf-riscv64/R_RISCV_LO12_I.s": {
+      "sha256": "5f1abb89b758b5e87a1aae09995ce3785e3e805ae357a8aaf5c3af687fcb4f09",
+      "size": 90
+    },
+    "src/elf-riscv64/R_RISCV_PCREL_HI20.s": {
+      "sha256": "6e0b6e5bfb532c12ee3b4a606a02f06e279d5efea341ee49adfd705f635021fb",
+      "size": 115
+    },
+    "src/elf-riscv64/R_RISCV_PCREL_LO12_I.s": {
+      "sha256": "ec94643946c425b1984451082bd73512533e73adfd75754dc4f44a433b51034d",
+      "size": 164
+    },
+    "src/elf-riscv64/R_RISCV_PCREL_LO12_S.s": {
+      "sha256": "49870585599f4c06252cb9671bb16c73d35ce4c68795607b2b1c13bd03a41a6b",
+      "size": 162
+    },
+    "src/elf-riscv64/R_RISCV_RELAX.s": {
+      "sha256": "fbf74ce075f5e01be8c606e63778ab427fdec3b0c0ef7bac5a8de72aac3ebeb4",
+      "size": 93
+    },
+    "src/elf-riscv64/R_RISCV_RVC_BRANCH.s": {
+      "sha256": "747b9281b15ec5afe560a7d881ac986311450dd26bd13d5ab5f9542ff195385c",
+      "size": 209
+    },
+    "src/elf-riscv64/R_RISCV_RVC_JUMP.s": {
+      "sha256": "914a0102603a8f832a31b03f59b7202c0a6dbacadacc880cf89e9387c4773f8a",
+      "size": 190
+    },
+    "src/elf-riscv64/R_RISCV_SUB16.s": {
+      "sha256": "06c289171cddaaef73d18c6709b72966362f26acba10ea0a7bcb894f48af7ccd",
+      "size": 127
+    },
+    "src/elf-riscv64/R_RISCV_SUB32.s": {
+      "sha256": "d016d799d103213b5c89b924dd3e24c40a18f34866a28ba49cc6345aaeaf4d59",
+      "size": 130
+    },
+    "src/elf-riscv64/R_RISCV_SUB6.s": {
+      "sha256": "157acece598d7d024210ab267a33b7752e366834e5d09e8b3d3d1a8ab6e17686",
+      "size": 120
+    },
+    "src/elf-riscv64/R_RISCV_SUB64.s": {
+      "sha256": "c06217ac5da1de9a4069173c6c926a9aeae4826088896e3b0afdf1d7c1ed9f7f",
+      "size": 139
+    },
+    "src/elf-riscv64/R_RISCV_SUB8.s": {
+      "sha256": "3a74da5e3a8886f28dc50b85fc988f1909c591ad24f23aff01e6f3f656f441a2",
+      "size": 120
+    },
+    "src/elf-riscv64/common.c": {
+      "sha256": "cfa8032334da7c8c3f2549fe31bc125e042533306231cdabe2608f617fcfe1b7",
+      "size": 44
+    },
+    "src/elf-riscv64/common_strong.c": {
+      "sha256": "3b4fa4dd13b56104b19d1cf2988b6952c98bb1b8ea543da71e6718adc64f6277",
+      "size": 25
+    },
+    "src/elf-riscv64/hidden.c": {
+      "sha256": "45fe764e7bb98eeb326663b5b8e4b04184c66e7e55b6e6f4ab1b2673d8d628e5",
+      "size": 82
+    },
+    "src/elf-riscv64/init_fini.c": {
+      "sha256": "c4af4812ff9665b0e884d4bdaf03e722143bc38bd143ea705a203d8adfa965a5",
+      "size": 485
+    },
+    "src/elf-riscv64/legacy_ctors.c": {
+      "sha256": "ded1392580ddd94b3f41ce1c309a2faec0d92858e047c862b272a74bfb0dd552",
+      "size": 220
+    },
+    "src/elf-riscv64/long_archive_member.s": {
+      "sha256": "14861d1d6aab475923f633c3f4f7794985cd32fa13ed9305027ac750f122fa61",
+      "size": 76
+    },
+    "src/elf-riscv64/strong.c": {
+      "sha256": "1c8aa480363f00a98e76c4e742cffa31d9a4cc12d9d95bbaefab565dc4895986",
+      "size": 45
+    },
+    "src/elf-riscv64/tls.c": {
+      "sha256": "05f9c5af90af7946a92e22cb03d262d3cdd216f05e316cd6872b52169836f26d",
+      "size": 157
+    },
+    "src/elf-riscv64/weak.c": {
+      "sha256": "3fe69f7a4e2fd4ab6e0cf2368f7078634c62afa233d97acb2db7dd6b9a81b941",
+      "size": 96
+    }
+  },
+  "targets": [
+    "riscv64-linux-gnu"
+  ],
+  "tools": {
+    "clang": {
+      "major": "21",
+      "version": "clang version 21.1.2"
+    },
+    "llvm-ar": {
+      "major": "21",
+      "version": "LLVM version 21.1.2"
+    },
+    "llvm-mc": {
+      "major": "21",
+      "version": "LLVM version 21.1.2"
+    }
+  }
+}

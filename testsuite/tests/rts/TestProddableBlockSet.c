@@ -11,16 +11,20 @@ typedef struct {
     struct _ProddableBlock *data;
 } ProddableBlockSet;
 
+struct ll_linker;
+extern struct ll_linker ll_default_linker;
+
 void initProddableBlockSet ( ProddableBlockSet* set );
-void addProddableBlock ( ProddableBlockSet* set, void* start, size_t size );
+void addProddableBlock ( struct ll_linker *L, ProddableBlockSet* set,
+                        void* start, size_t size );
 bool containsSpan ( const ProddableBlockSet *set, uintptr_t start, uintptr_t end );
 
 int main () {
   ProddableBlockSet set;
   initProddableBlockSet(&set);
-  addProddableBlock(&set, (void*) 0x20, 0x10);
-  addProddableBlock(&set, (void*) 0x30, 0x10);
-  addProddableBlock(&set, (void*) 0x100, 0x10);
+  addProddableBlock(&ll_default_linker, &set, (void*) 0x20, 0x10);
+  addProddableBlock(&ll_default_linker, &set, (void*) 0x30, 0x10);
+  addProddableBlock(&ll_default_linker, &set, (void*) 0x100, 0x10);
 
   assert( containsSpan(&set, 0x20, 0x30));
   assert( containsSpan(&set, 0x30, 0x29));

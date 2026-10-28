@@ -1,0 +1,288 @@
+{
+  "schema": 1,
+  "description": "coff-x86_64 relocation and symbol fixtures; target runtime checks are separate.",
+  "sources": [
+    {
+      "id": "IMAGE_REL_AMD64_ADDR64",
+      "path": "src/coff-x86_64/IMAGE_REL_AMD64_ADDR64.s",
+      "language": "asm",
+      "triple": "x86_64-w64-windows-gnu",
+      "object": "IMAGE_REL_AMD64_ADDR64.o",
+      "expected_relocations": [
+        "IMAGE_REL_AMD64_ADDR64"
+      ],
+      "expected_outcome": "supported"
+    },
+    {
+      "id": "IMAGE_REL_AMD64_ADDR32NB",
+      "path": "src/coff-x86_64/IMAGE_REL_AMD64_ADDR32NB.s",
+      "language": "asm",
+      "triple": "x86_64-w64-windows-gnu",
+      "object": "IMAGE_REL_AMD64_ADDR32NB.o",
+      "expected_relocations": [
+        "IMAGE_REL_AMD64_ADDR32NB"
+      ],
+      "expected_outcome": "supported"
+    },
+    {
+      "id": "IMAGE_REL_AMD64_REL32",
+      "path": "src/coff-x86_64/IMAGE_REL_AMD64_REL32.s",
+      "language": "asm",
+      "triple": "x86_64-w64-windows-gnu",
+      "object": "IMAGE_REL_AMD64_REL32.o",
+      "expected_relocations": [
+        "IMAGE_REL_AMD64_REL32"
+      ],
+      "expected_outcome": "supported"
+    },
+    {
+      "id": "IMAGE_REL_AMD64_SECREL",
+      "path": "src/coff-x86_64/IMAGE_REL_AMD64_SECREL.s",
+      "language": "asm",
+      "triple": "x86_64-w64-windows-gnu",
+      "object": "IMAGE_REL_AMD64_SECREL.o",
+      "expected_relocations": [
+        "IMAGE_REL_AMD64_SECREL"
+      ],
+      "expected_outcome": "supported"
+    },
+    {
+      "id": "import-thunk",
+      "path": "src/coff-x86_64/import-thunk.s",
+      "language": "asm",
+      "triple": "x86_64-w64-windows-gnu",
+      "object": "import-thunk.o",
+      "expected_relocations": [
+        "IMAGE_REL_AMD64_REL32"
+      ],
+      "features": [
+        "import-thunk",
+        "indirect-data-symbol"
+      ],
+      "expected_outcome": "supported"
+    },
+    {
+      "id": "COMDAT",
+      "path": "src/coff-x86_64/COMDAT.s",
+      "language": "asm",
+      "triple": "x86_64-w64-windows-gnu",
+      "object": "COMDAT.o",
+      "expected_relocations": [],
+      "features": [
+        "comdat-any",
+        "duplicate-key",
+        "external-symbol"
+      ],
+      "expected_outcome": "supported"
+    },
+    {
+      "id": "COMDAT-duplicate",
+      "path": "src/coff-x86_64/COMDAT-duplicate.s",
+      "language": "asm",
+      "triple": "x86_64-w64-windows-gnu",
+      "object": "COMDAT-duplicate.o",
+      "expected_relocations": [],
+      "features": [
+        "comdat-any",
+        "duplicate-key",
+        "external-symbol"
+      ],
+      "expected_outcome": "supported"
+    },
+    {
+      "id": "COMDAT-static",
+      "path": "src/coff-x86_64/COMDAT-static.s",
+      "language": "asm",
+      "triple": "x86_64-w64-windows-gnu",
+      "object": "COMDAT-static.o",
+      "expected_relocations": [],
+      "features": [
+        "comdat-any",
+        "duplicate-key",
+        "static-symbol"
+      ],
+      "expected_outcome": "supported"
+    },
+    {
+      "id": "init-fini",
+      "path": "src/coff-x86_64/init-fini.c",
+      "language": "c",
+      "triple": "x86_64-w64-windows-gnu",
+      "object": "init-fini.o",
+      "expected_relocations": [
+        "IMAGE_REL_AMD64_REL32",
+        "IMAGE_REL_AMD64_REL32",
+        "IMAGE_REL_AMD64_ADDR64",
+        "IMAGE_REL_AMD64_ADDR64"
+      ],
+      "features": [
+        "ctors",
+        "dtors"
+      ],
+      "expected_outcome": "supported",
+      "events": {
+        "constructor": 1,
+        "destructor": 2
+      }
+    },
+    {
+      "id": "symbols-strong",
+      "path": "src/coff-x86_64/symbols-strong.c",
+      "language": "c",
+      "triple": "x86_64-w64-windows-gnu",
+      "object": "symbols-strong.o",
+      "expected_relocations": [],
+      "features": [
+        "strong"
+      ],
+      "expected_outcome": "supported"
+    },
+    {
+      "id": "symbols-weak",
+      "path": "src/coff-x86_64/symbols-weak.c",
+      "language": "c",
+      "triple": "x86_64-w64-windows-gnu",
+      "object": "symbols-weak.o",
+      "expected_relocations": [],
+      "features": [
+        "weak"
+      ],
+      "expected_outcome": "supported"
+    },
+    {
+      "id": "symbols-common",
+      "path": "src/coff-x86_64/symbols-common.c",
+      "language": "c",
+      "triple": "x86_64-w64-windows-gnu",
+      "object": "symbols-common.o",
+      "expected_relocations": [],
+      "features": [
+        "common"
+      ],
+      "expected_outcome": "supported"
+    },
+    {
+      "id": "IMAGE_REL_AMD64_REL32_1",
+      "path": "src/coff-x86_64/IMAGE_REL_AMD64_REL32_1.s",
+      "language": "asm",
+      "triple": "x86_64-w64-windows-gnu",
+      "object": "IMAGE_REL_AMD64_REL32_1.o",
+      "coff_rel32_variant": 1,
+      "expected_relocations": [
+        "IMAGE_REL_AMD64_REL32_1"
+      ],
+      "reason": "PEi386.c ocResolve_PEi386 handles type 4 but not REL32_1 through REL32_5.",
+      "transform_note": "LLVM 21 emits REL32; select type 4+N and add N to the inline addend, preserving the source expression.",
+      "expected_outcome": "unsupported"
+    },
+    {
+      "id": "IMAGE_REL_AMD64_REL32_2",
+      "path": "src/coff-x86_64/IMAGE_REL_AMD64_REL32_2.s",
+      "language": "asm",
+      "triple": "x86_64-w64-windows-gnu",
+      "object": "IMAGE_REL_AMD64_REL32_2.o",
+      "coff_rel32_variant": 2,
+      "expected_relocations": [
+        "IMAGE_REL_AMD64_REL32_2"
+      ],
+      "reason": "PEi386.c ocResolve_PEi386 handles type 4 but not REL32_1 through REL32_5.",
+      "transform_note": "LLVM 21 emits REL32; select type 4+N and add N to the inline addend, preserving the source expression.",
+      "expected_outcome": "unsupported"
+    },
+    {
+      "id": "IMAGE_REL_AMD64_REL32_3",
+      "path": "src/coff-x86_64/IMAGE_REL_AMD64_REL32_3.s",
+      "language": "asm",
+      "triple": "x86_64-w64-windows-gnu",
+      "object": "IMAGE_REL_AMD64_REL32_3.o",
+      "coff_rel32_variant": 3,
+      "expected_relocations": [
+        "IMAGE_REL_AMD64_REL32_3"
+      ],
+      "reason": "PEi386.c ocResolve_PEi386 handles type 4 but not REL32_1 through REL32_5.",
+      "transform_note": "LLVM 21 emits REL32; select type 4+N and add N to the inline addend, preserving the source expression.",
+      "expected_outcome": "unsupported"
+    },
+    {
+      "id": "IMAGE_REL_AMD64_REL32_4",
+      "path": "src/coff-x86_64/IMAGE_REL_AMD64_REL32_4.s",
+      "language": "asm",
+      "triple": "x86_64-w64-windows-gnu",
+      "object": "IMAGE_REL_AMD64_REL32_4.o",
+      "coff_rel32_variant": 4,
+      "expected_relocations": [
+        "IMAGE_REL_AMD64_REL32_4"
+      ],
+      "reason": "PEi386.c ocResolve_PEi386 handles type 4 but not REL32_1 through REL32_5.",
+      "transform_note": "LLVM 21 emits REL32; select type 4+N and add N to the inline addend, preserving the source expression.",
+      "expected_outcome": "unsupported"
+    },
+    {
+      "id": "IMAGE_REL_AMD64_REL32_5",
+      "path": "src/coff-x86_64/IMAGE_REL_AMD64_REL32_5.s",
+      "language": "asm",
+      "triple": "x86_64-w64-windows-gnu",
+      "object": "IMAGE_REL_AMD64_REL32_5.o",
+      "coff_rel32_variant": 5,
+      "expected_relocations": [
+        "IMAGE_REL_AMD64_REL32_5"
+      ],
+      "reason": "PEi386.c ocResolve_PEi386 handles type 4 but not REL32_1 through REL32_5.",
+      "transform_note": "LLVM 21 emits REL32; select type 4+N and add N to the inline addend, preserving the source expression.",
+      "expected_outcome": "unsupported"
+    },
+    {
+      "id": "symbols-common-strong",
+      "path": "src/coff-x86_64/symbols-common-strong.c",
+      "language": "c",
+      "triple": "x86_64-w64-windows-gnu",
+      "object": "symbols-common-strong.o",
+      "expected_relocations": [],
+      "expected_outcome": "supported",
+      "features": [
+        "strong-overrides-common"
+      ]
+    },
+    {
+      "id": "COMDAT-static-duplicate",
+      "path": "src/coff-x86_64/COMDAT-static-duplicate.s",
+      "language": "asm",
+      "triple": "x86_64-w64-windows-gnu",
+      "object": "COMDAT-static-duplicate.o",
+      "expected_relocations": [],
+      "expected_outcome": "supported",
+      "features": [
+        "comdat-any",
+        "duplicate-key",
+        "static-symbol"
+      ]
+    }
+  ],
+  "archives": [
+    {
+      "path": "fixtures.a",
+      "format": "gnu",
+      "members": [
+        "IMAGE_REL_AMD64_ADDR64",
+        "IMAGE_REL_AMD64_ADDR32NB",
+        "IMAGE_REL_AMD64_REL32",
+        "IMAGE_REL_AMD64_SECREL",
+        "import-thunk",
+        "COMDAT",
+        "COMDAT-duplicate",
+        "COMDAT-static",
+        "init-fini",
+        "symbols-strong",
+        "symbols-weak",
+        "symbols-common",
+        "IMAGE_REL_AMD64_REL32_1",
+        "IMAGE_REL_AMD64_REL32_2",
+        "IMAGE_REL_AMD64_REL32_3",
+        "IMAGE_REL_AMD64_REL32_4",
+        "IMAGE_REL_AMD64_REL32_5",
+        "symbols-common-strong",
+        "COMDAT-static-duplicate"
+      ]
+    }
+  ]
+}

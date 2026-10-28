@@ -1,0 +1,32 @@
+{
+  "fields": [],
+  "format": "Mach-O arm64",
+  "got_slots": {},
+  "object_sha256": "d0099336fc05219a064595155b10474253249659fc1f27846694671b7837b6e9",
+  "reference_layout": {
+    "got": {
+      "address": "0x104fa4000",
+      "bytes": "a01b790501000000",
+      "capture_phase": "after-resolve-before-init",
+      "size": 8
+    },
+    "host_symbols": {
+      "___cxa_atexit": "0x104f77a58",
+      "___cxa_finalize": "0x104f77adc",
+      "_fixture_record_event": "0x104f771dc",
+      "_ll_fixture_target": "0x104f771c8"
+    },
+    "image_base": "0x104fa8000",
+    "sections": [
+      {
+        "address": null,
+        "index": 0,
+        "relocated_bytes": "",
+        "size": 0
+      }
+    ],
+    "stubs": []
+  },
+  "schema": 1,
+  "semantic": []
+}

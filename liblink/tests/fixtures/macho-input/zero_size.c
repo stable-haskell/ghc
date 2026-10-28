@@ -1,0 +1,1 @@
+typedef unsigned char wp24_macho_zero_size_type;

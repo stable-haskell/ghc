@@ -1,0 +1,107 @@
+{
+  "object_sha256": "6647429ceb8e3cc2b1d2d6e7204b00e26c52a1b57980d382b1ec53f387441eb9",
+  "fields": [
+    {
+      "section": 3,
+      "offset": 0,
+      "type": 40,
+      "symbol": "external_data",
+      "before": "ffffffffffffffff",
+      "expected": "ffafcbedffffffff"
+    }
+  ],
+  "id": "R_RISCV_SUB64",
+  "object": "riscv64-linux-gnu/R_RISCV_SUB64.o",
+  "capture": {
+    "schema": "liblink-elf-native-address-v1",
+    "resolved": true,
+    "initializers_ran": false,
+    "status": 0,
+    "error": "",
+    "noexec": false,
+    "host_symbols": {
+      "external_data": "0x12345000",
+      "external_function": "0x102c38058",
+      "external_function_alias": "0x102c38058",
+      "external_second_function": "0x102c39058"
+    },
+    "sections": [
+      {
+        "index": 1,
+        "address": "0x1025ac0c0",
+        "exec_address": "0x1025ac0c0",
+        "size": 71,
+        "before": "002e74657874002464002e737472746162002e73796d7461620065787465726e616c5f64617461002e72656c612e6461746100666978747572655f72697363765f737562363400",
+        "after": "002e74657874002464002e737472746162002e73796d7461620065787465726e616c5f64617461002e72656c612e6461746100666978747572655f72697363765f737562363400",
+        "stubs": {
+          "address": "0x0",
+          "size": 0,
+          "before": "",
+          "after": "",
+          "entries": []
+        }
+      },
+      {
+        "index": 3,
+        "address": "0x102c38018",
+        "exec_address": "0x102c38018",
+        "size": 8,
+        "before": "ffffffffffffffff",
+        "after": "ffafcbedffffffff",
+        "stubs": {
+          "address": "0x102c38020",
+          "size": 0,
+          "before": "",
+          "after": "",
+          "entries": []
+        }
+      },
+      {
+        "index": 4,
+        "address": "0x1025ac0a8",
+        "exec_address": "0x1025ac0a8",
+        "size": 24,
+        "before": "000000000000000028000000030000000000000000000000",
+        "after": "000000000000000028000000030000000000000000000000",
+        "stubs": {
+          "address": "0x0",
+          "size": 0,
+          "before": "",
+          "after": "",
+          "entries": []
+        }
+      },
+      {
+        "index": 5,
+        "address": "0x1025ac048",
+        "exec_address": "0x1025ac048",
+        "size": 96,
+        "before": "0000000000000000000000000000000000000000000000000700000000000300000000000000000000000000000000003300000010000300000000000000000000000000000000001a0000001000000000000000000000000000000000000000",
+        "after": "0000000000000000000000000000000000000000000000000700000000000300000000000000000000000000000000003300000010000300000000000000000000000000000000001a0000001000000000000000000000000000000000000000",
+        "stubs": {
+          "address": "0x0",
+          "size": 0,
+          "before": "",
+          "after": "",
+          "entries": []
+        }
+      }
+    ],
+    "extras": {
+      "address": "0x1025b0000",
+      "exec_address": "0x1025b0000",
+      "first": 0,
+      "count": 4,
+      "stride": 8,
+      "jump_offset": 8,
+      "before": "0000000000000000000000000000000000000000000000000000000000000000",
+      "after": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "got": {
+      "address": "0x1025b4000",
+      "exec_address": "0x1025b4000",
+      "size": 24,
+      "after": "1880c302010000001880c302010000000050341200000000"
+    }
+  }
+}

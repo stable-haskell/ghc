@@ -1,0 +1,1443 @@
+{
+  "R_RISCV_64": {
+    "extras": "0000000000000000000000000000000000000000000000000000000000000000",
+    "extras_exec": "0x10000000",
+    "fields": [
+      {
+        "before": "0000000000000000",
+        "expected": "0050341200000000",
+        "offset": 0,
+        "section": 3,
+        "symbol": "external_data",
+        "type": 2
+      }
+    ],
+    "got": "003000100000000000300010000000000050341200000000",
+    "got_exec": "0x10006000",
+    "host_symbols": {
+      "external_data": "0x12345000",
+      "external_function": "0x10003040",
+      "external_function_alias": "0x10003040",
+      "external_second_function": "0x10004040"
+    },
+    "object_sha256": "20241c01cdef73e6c80e97ef5ca7f74ceee295faf33529b6fd98accc72b5f037",
+    "sections": [
+      {
+        "after": "002e74657874002464002e737472746162002e73796d7461620065787465726e616c5f64617461002e72656c612e6461746100666978747572655f72697363765f363400",
+        "entries": [],
+        "exec_address": "0x10001000",
+        "index": 1,
+        "size": 68,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "0050341200000000",
+        "entries": [],
+        "exec_address": "0x10003000",
+        "index": 3,
+        "size": 8,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "000000000000000002000000030000000000000000000000",
+        "entries": [],
+        "exec_address": "0x10004000",
+        "index": 4,
+        "size": 24,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "0000000000000000000000000000000000000000000000000700000000000300000000000000000000000000000000003300000010000300000000000000000000000000000000001a0000001000000000000000000000000000000000000000",
+        "entries": [],
+        "exec_address": "0x10005000",
+        "index": 5,
+        "size": 96,
+        "stub_bytes": "",
+        "stub_offset": null
+      }
+    ]
+  },
+  "R_RISCV_ADD16": {
+    "extras": "0000000000000000000000000000000000000000000000000000000000000000",
+    "extras_exec": "0x10000000",
+    "fields": [
+      {
+        "before": "0000",
+        "expected": "0050",
+        "offset": 0,
+        "section": 3,
+        "symbol": "external_data",
+        "type": 34
+      }
+    ],
+    "got": "003000100000000000300010000000000050341200000000",
+    "got_exec": "0x10006000",
+    "host_symbols": {
+      "external_data": "0x12345000",
+      "external_function": "0x10003040",
+      "external_function_alias": "0x10003040",
+      "external_second_function": "0x10004040"
+    },
+    "object_sha256": "3ba43eeac4070318b6a5714dfa407cd263ddd4b5ff05600ac76db530174facbf",
+    "sections": [
+      {
+        "after": "002e74657874002464002e737472746162002e73796d7461620065787465726e616c5f64617461002e72656c612e6461746100666978747572655f72697363765f616464313600",
+        "entries": [],
+        "exec_address": "0x10001000",
+        "index": 1,
+        "size": 71,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "0050",
+        "entries": [],
+        "exec_address": "0x10003000",
+        "index": 3,
+        "size": 2,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "000000000000000022000000030000000000000000000000",
+        "entries": [],
+        "exec_address": "0x10004000",
+        "index": 4,
+        "size": 24,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "0000000000000000000000000000000000000000000000000700000000000300000000000000000000000000000000003300000010000300000000000000000000000000000000001a0000001000000000000000000000000000000000000000",
+        "entries": [],
+        "exec_address": "0x10005000",
+        "index": 5,
+        "size": 96,
+        "stub_bytes": "",
+        "stub_offset": null
+      }
+    ]
+  },
+  "R_RISCV_ADD32": {
+    "extras": "0000000000000000000000000000000000000000000000000000000000000000",
+    "extras_exec": "0x10000000",
+    "fields": [
+      {
+        "before": "00000000",
+        "expected": "00503412",
+        "offset": 0,
+        "section": 3,
+        "symbol": "external_data",
+        "type": 35
+      }
+    ],
+    "got": "003000100000000000300010000000000050341200000000",
+    "got_exec": "0x10006000",
+    "host_symbols": {
+      "external_data": "0x12345000",
+      "external_function": "0x10003040",
+      "external_function_alias": "0x10003040",
+      "external_second_function": "0x10004040"
+    },
+    "object_sha256": "baabfbae113672dcf68a0314998167d3bd7b0f585c4c086b3427802c3cf60bff",
+    "sections": [
+      {
+        "after": "002e74657874002464002e737472746162002e73796d7461620065787465726e616c5f64617461002e72656c612e6461746100666978747572655f72697363765f616464333200",
+        "entries": [],
+        "exec_address": "0x10001000",
+        "index": 1,
+        "size": 71,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "00503412",
+        "entries": [],
+        "exec_address": "0x10003000",
+        "index": 3,
+        "size": 4,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "000000000000000023000000030000000000000000000000",
+        "entries": [],
+        "exec_address": "0x10004000",
+        "index": 4,
+        "size": 24,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "0000000000000000000000000000000000000000000000000700000000000300000000000000000000000000000000003300000010000300000000000000000000000000000000001a0000001000000000000000000000000000000000000000",
+        "entries": [],
+        "exec_address": "0x10005000",
+        "index": 5,
+        "size": 96,
+        "stub_bytes": "",
+        "stub_offset": null
+      }
+    ]
+  },
+  "R_RISCV_ADD64": {
+    "extras": "0000000000000000000000000000000000000000000000000000000000000000",
+    "extras_exec": "0x10000000",
+    "fields": [
+      {
+        "before": "0000000000000000",
+        "expected": "0050341200000000",
+        "offset": 0,
+        "section": 3,
+        "symbol": "external_data",
+        "type": 36
+      }
+    ],
+    "got": "003000100000000000300010000000000050341200000000",
+    "got_exec": "0x10006000",
+    "host_symbols": {
+      "external_data": "0x12345000",
+      "external_function": "0x10003040",
+      "external_function_alias": "0x10003040",
+      "external_second_function": "0x10004040"
+    },
+    "object_sha256": "098f85f4a5a3c61583a439dd271c44d82b2bf98edc6c6a56a0af2532e605b7fd",
+    "sections": [
+      {
+        "after": "002e74657874002464002e737472746162002e73796d7461620065787465726e616c5f64617461002e72656c612e6461746100666978747572655f72697363765f616464363400",
+        "entries": [],
+        "exec_address": "0x10001000",
+        "index": 1,
+        "size": 71,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "0050341200000000",
+        "entries": [],
+        "exec_address": "0x10003000",
+        "index": 3,
+        "size": 8,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "000000000000000024000000030000000000000000000000",
+        "entries": [],
+        "exec_address": "0x10004000",
+        "index": 4,
+        "size": 24,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "0000000000000000000000000000000000000000000000000700000000000300000000000000000000000000000000003300000010000300000000000000000000000000000000001a0000001000000000000000000000000000000000000000",
+        "entries": [],
+        "exec_address": "0x10005000",
+        "index": 5,
+        "size": 96,
+        "stub_bytes": "",
+        "stub_offset": null
+      }
+    ]
+  },
+  "R_RISCV_ADD8": {
+    "extras": "0000000000000000000000000000000000000000000000000000000000000000",
+    "extras_exec": "0x10000000",
+    "fields": [
+      {
+        "before": "00",
+        "expected": "00",
+        "offset": 0,
+        "section": 3,
+        "symbol": "external_data",
+        "type": 33
+      }
+    ],
+    "got": "003000100000000000300010000000000050341200000000",
+    "got_exec": "0x10006000",
+    "host_symbols": {
+      "external_data": "0x12345000",
+      "external_function": "0x10003040",
+      "external_function_alias": "0x10003040",
+      "external_second_function": "0x10004040"
+    },
+    "object_sha256": "b7f772e6476aac4d022a5aea5b44daa134cf413bf0b400427e729942260d92d4",
+    "sections": [
+      {
+        "after": "002e74657874002464002e737472746162002e73796d7461620065787465726e616c5f64617461002e72656c612e6461746100666978747572655f72697363765f6164643800",
+        "entries": [],
+        "exec_address": "0x10001000",
+        "index": 1,
+        "size": 70,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "00",
+        "entries": [],
+        "exec_address": "0x10003000",
+        "index": 3,
+        "size": 1,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "000000000000000021000000030000000000000000000000",
+        "entries": [],
+        "exec_address": "0x10004000",
+        "index": 4,
+        "size": 24,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "0000000000000000000000000000000000000000000000000700000000000300000000000000000000000000000000003300000010000300000000000000000000000000000000001a0000001000000000000000000000000000000000000000",
+        "entries": [],
+        "exec_address": "0x10005000",
+        "index": 5,
+        "size": 96,
+        "stub_bytes": "",
+        "stub_offset": null
+      }
+    ]
+  },
+  "R_RISCV_ALIGN": {
+    "extras": "000000000000000000000000000000000000000000000000",
+    "extras_exec": "0x10000000",
+    "fields": [
+      {
+        "before": "",
+        "expected": "",
+        "offset": 4,
+        "section": 2,
+        "symbol": null,
+        "type": 43
+      }
+    ],
+    "got": "00200010000000000020001000000000",
+    "got_exec": "0x10005000",
+    "host_symbols": {
+      "external_data": "0x12345000",
+      "external_function": "0x10002040",
+      "external_function_alias": "0x10002040",
+      "external_second_function": "0x10003040"
+    },
+    "object_sha256": "8d0e9c7bc1376231d337b524749955dfb4518ad174f70b0d2eea04133a4412be",
+    "sections": [
+      {
+        "after": "002478002e72656c612e7465787400666978747572655f72697363765f616c69676e002e737472746162002e73796d74616200",
+        "entries": [],
+        "exec_address": "0x10001000",
+        "index": 1,
+        "size": 51,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "1300000013000000130000001300000013000000",
+        "entries": [],
+        "exec_address": "0x10002000",
+        "index": 2,
+        "size": 20,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "04000000000000002b000000000000000c00000000000000",
+        "entries": [],
+        "exec_address": "0x10003000",
+        "index": 3,
+        "size": 24,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "0000000000000000000000000000000000000000000000000100000000000200000000000000000000000000000000000f0000001000020000000000000000000000000000000000",
+        "entries": [],
+        "exec_address": "0x10004000",
+        "index": 4,
+        "size": 72,
+        "stub_bytes": "",
+        "stub_offset": null
+      }
+    ]
+  },
+  "R_RISCV_BRANCH": {
+    "extras": "0000000000000000000000000000000000000000000000000000000000000000",
+    "extras_exec": "0x10000000",
+    "fields": [
+      {
+        "before": "6304b500",
+        "expected": "6300b504",
+        "offset": 0,
+        "section": 2,
+        "symbol": "external_function",
+        "type": 16
+      }
+    ],
+    "got": "002000100000000000200010000000004020001000000000",
+    "got_exec": "0x10005000",
+    "host_symbols": {
+      "external_data": "0x12345000",
+      "external_function": "0x10002040",
+      "external_function_alias": "0x10002040",
+      "external_second_function": "0x10003040"
+    },
+    "object_sha256": "1421fa7666fd84dddd1ada4348267c1345c4e019783d113a0b6801144788d0d5",
+    "sections": [
+      {
+        "after": "002478002e72656c612e746578740065787465726e616c5f66756e6374696f6e00666978747572655f72697363765f6272616e6368002e737472746162002e73796d74616200",
+        "entries": [],
+        "exec_address": "0x10001000",
+        "index": 1,
+        "size": 70,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "6300b5041300000013000000",
+        "entries": [],
+        "exec_address": "0x10002000",
+        "index": 2,
+        "size": 12,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "000000000000000010000000030000000000000000000000",
+        "entries": [],
+        "exec_address": "0x10003000",
+        "index": 3,
+        "size": 24,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "0000000000000000000000000000000000000000000000000100000000000200000000000000000000000000000000002100000010000200000000000000000000000000000000000f0000001000000000000000000000000000000000000000",
+        "entries": [],
+        "exec_address": "0x10004000",
+        "index": 4,
+        "size": 96,
+        "stub_bytes": "",
+        "stub_offset": null
+      }
+    ]
+  },
+  "R_RISCV_CALL_PLT": {
+    "extras": "0000000000000000000000000000000000000000000000000000000000000000",
+    "extras_exec": "0x10000000",
+    "fields": [
+      {
+        "before": "97000000e7800000",
+        "expected": "97000000e7808000",
+        "offset": 0,
+        "section": 2,
+        "symbol": "external_function",
+        "type": 19
+      }
+    ],
+    "got": "002000100000000000200010000000004020001000000000",
+    "got_exec": "0x10005000",
+    "host_symbols": {
+      "external_data": "0x12345000",
+      "external_function": "0x10002040",
+      "external_function_alias": "0x10002040",
+      "external_second_function": "0x10003040"
+    },
+    "object_sha256": "4f133ea3519f42415397a8996bcb2a7cac69ab113d3d4f277de200b710d671f2",
+    "sections": [
+      {
+        "after": "002478002e72656c612e7465787400666978747572655f72697363765f63616c6c5f706c740065787465726e616c5f66756e6374696f6e002e737472746162002e73796d74616200",
+        "entries": [],
+        "exec_address": "0x10001000",
+        "index": 1,
+        "size": 72,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "97000000e7808000",
+        "entries": [
+          {
+            "flags": 0,
+            "got_address": "0x10005010",
+            "offset": 8,
+            "target": "0x10002040"
+          }
+        ],
+        "exec_address": "0x10002000",
+        "index": 2,
+        "size": 8,
+        "stub_bytes": "973f000083bf8f0067800f00",
+        "stub_offset": 8
+      },
+      {
+        "after": "000000000000000013000000030000000000000000000000",
+        "entries": [],
+        "exec_address": "0x10003000",
+        "index": 3,
+        "size": 24,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "0000000000000000000000000000000000000000000000000100000000000200000000000000000000000000000000000f0000001000020000000000000000000000000000000000260000001000000000000000000000000000000000000000",
+        "entries": [],
+        "exec_address": "0x10004000",
+        "index": 4,
+        "size": 96,
+        "stub_bytes": "",
+        "stub_offset": null
+      }
+    ]
+  },
+  "R_RISCV_GOT_HI20": {
+    "extras": "0000000000000000000000000000000000000000000000000000000000000000",
+    "extras_exec": "0x10000000",
+    "fields": [
+      {
+        "before": "17050000",
+        "expected": "17350000",
+        "offset": 0,
+        "section": 2,
+        "symbol": "external_data",
+        "type": 20
+      }
+    ],
+    "got": "002000100000000000200010000000000050341200000000",
+    "got_exec": "0x10005000",
+    "host_symbols": {
+      "external_data": "0x12345000",
+      "external_function": "0x10002040",
+      "external_function_alias": "0x10002040",
+      "external_second_function": "0x10003040"
+    },
+    "object_sha256": "5ee90c2d779f6f35bb5dcd53d97b4b804a3edda264676d5b32fb7992f0ff8189",
+    "sections": [
+      {
+        "after": "002478002e72656c612e74657874002e737472746162002e73796d7461620065787465726e616c5f6461746100666978747572655f72697363765f676f745f6869323000",
+        "entries": [],
+        "exec_address": "0x10001000",
+        "index": 1,
+        "size": 68,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "17350000",
+        "entries": [],
+        "exec_address": "0x10002000",
+        "index": 2,
+        "size": 4,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "000000000000000014000000030000000000000000000000",
+        "entries": [],
+        "exec_address": "0x10003000",
+        "index": 3,
+        "size": 24,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "0000000000000000000000000000000000000000000000000100000000000200000000000000000000000000000000002d00000010000200000000000000000000000000000000001f0000001000000000000000000000000000000000000000",
+        "entries": [],
+        "exec_address": "0x10004000",
+        "index": 4,
+        "size": 96,
+        "stub_bytes": "",
+        "stub_offset": null
+      }
+    ]
+  },
+  "R_RISCV_HI20": {
+    "extras": "0000000000000000000000000000000000000000000000000000000000000000",
+    "extras_exec": "0x10000000",
+    "fields": [
+      {
+        "before": "37050000",
+        "expected": "37553412",
+        "offset": 0,
+        "section": 2,
+        "symbol": "external_data",
+        "type": 26
+      }
+    ],
+    "got": "002000100000000000200010000000000050341200000000",
+    "got_exec": "0x10005000",
+    "host_symbols": {
+      "external_data": "0x12345000",
+      "external_function": "0x10002040",
+      "external_function_alias": "0x10002040",
+      "external_second_function": "0x10003040"
+    },
+    "object_sha256": "a05c1ab03d36f4b58bfb8d1fae762a9bac468d1bd35c3a5d48454b7cb1388c4f",
+    "sections": [
+      {
+        "after": "002478002e72656c612e74657874002e737472746162002e73796d7461620065787465726e616c5f6461746100666978747572655f72697363765f6869323000",
+        "entries": [],
+        "exec_address": "0x10001000",
+        "index": 1,
+        "size": 64,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "37553412",
+        "entries": [],
+        "exec_address": "0x10002000",
+        "index": 2,
+        "size": 4,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "00000000000000001a000000030000000000000000000000",
+        "entries": [],
+        "exec_address": "0x10003000",
+        "index": 3,
+        "size": 24,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "0000000000000000000000000000000000000000000000000100000000000200000000000000000000000000000000002d00000010000200000000000000000000000000000000001f0000001000000000000000000000000000000000000000",
+        "entries": [],
+        "exec_address": "0x10004000",
+        "index": 4,
+        "size": 96,
+        "stub_bytes": "",
+        "stub_offset": null
+      }
+    ]
+  },
+  "R_RISCV_JAL": {
+    "extras": "0000000000000000000000000000000000000000000000000000000000000000",
+    "extras_exec": "0x10000000",
+    "fields": [
+      {
+        "before": "ef000000",
+        "expected": "ef000004",
+        "offset": 0,
+        "section": 2,
+        "symbol": "external_function",
+        "type": 17
+      }
+    ],
+    "got": "002000100000000000200010000000004020001000000000",
+    "got_exec": "0x10005000",
+    "host_symbols": {
+      "external_data": "0x12345000",
+      "external_function": "0x10002040",
+      "external_function_alias": "0x10002040",
+      "external_second_function": "0x10003040"
+    },
+    "object_sha256": "11cf7662e89090c2a77728c5c49b4d9b833ba112c8a65faaecddaeed5239e409",
+    "sections": [
+      {
+        "after": "002478002e72656c612e746578740065787465726e616c5f66756e6374696f6e00666978747572655f72697363765f6a616c002e737472746162002e73796d74616200",
+        "entries": [],
+        "exec_address": "0x10001000",
+        "index": 1,
+        "size": 67,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "ef000004",
+        "entries": [],
+        "exec_address": "0x10002000",
+        "index": 2,
+        "size": 4,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "000000000000000011000000030000000000000000000000",
+        "entries": [],
+        "exec_address": "0x10003000",
+        "index": 3,
+        "size": 24,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "0000000000000000000000000000000000000000000000000100000000000200000000000000000000000000000000002100000010000200000000000000000000000000000000000f0000001000000000000000000000000000000000000000",
+        "entries": [],
+        "exec_address": "0x10004000",
+        "index": 4,
+        "size": 96,
+        "stub_bytes": "",
+        "stub_offset": null
+      }
+    ]
+  },
+  "R_RISCV_LO12_I": {
+    "extras": "0000000000000000000000000000000000000000000000000000000000000000",
+    "extras_exec": "0x10000000",
+    "fields": [
+      {
+        "before": "13050500",
+        "expected": "13050500",
+        "offset": 0,
+        "section": 2,
+        "symbol": "external_data",
+        "type": 27
+      }
+    ],
+    "got": "002000100000000000200010000000000050341200000000",
+    "got_exec": "0x10005000",
+    "host_symbols": {
+      "external_data": "0x12345000",
+      "external_function": "0x10002040",
+      "external_function_alias": "0x10002040",
+      "external_second_function": "0x10003040"
+    },
+    "object_sha256": "e774184bf034b34c5f57235ef2ef9a2c1cb17e66487768e236493f93abaa51a6",
+    "sections": [
+      {
+        "after": "002478002e72656c612e7465787400666978747572655f72697363765f6c6f31325f69002e737472746162002e73796d7461620065787465726e616c5f6461746100",
+        "entries": [],
+        "exec_address": "0x10001000",
+        "index": 1,
+        "size": 66,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "13050500",
+        "entries": [],
+        "exec_address": "0x10002000",
+        "index": 2,
+        "size": 4,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "00000000000000001b000000030000000000000000000000",
+        "entries": [],
+        "exec_address": "0x10003000",
+        "index": 3,
+        "size": 24,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "0000000000000000000000000000000000000000000000000100000000000200000000000000000000000000000000000f0000001000020000000000000000000000000000000000340000001000000000000000000000000000000000000000",
+        "entries": [],
+        "exec_address": "0x10004000",
+        "index": 4,
+        "size": 96,
+        "stub_bytes": "",
+        "stub_offset": null
+      }
+    ]
+  },
+  "R_RISCV_PCREL_HI20": {
+    "extras": "0000000000000000000000000000000000000000000000000000000000000000",
+    "extras_exec": "0x10000000",
+    "fields": [
+      {
+        "before": "17050000",
+        "expected": "17353402",
+        "offset": 0,
+        "section": 2,
+        "symbol": "external_data",
+        "type": 23
+      }
+    ],
+    "got": "002000100000000000200010000000000050341200000000",
+    "got_exec": "0x10005000",
+    "host_symbols": {
+      "external_data": "0x12345000",
+      "external_function": "0x10002040",
+      "external_function_alias": "0x10002040",
+      "external_second_function": "0x10003040"
+    },
+    "object_sha256": "96ff24320fe5c47c0d2d983a01920c89e13a515672c18058633b7e83d01a4402",
+    "sections": [
+      {
+        "after": "002478002e72656c612e74657874002e737472746162002e73796d7461620065787465726e616c5f6461746100666978747572655f72697363765f706372656c5f6869323000",
+        "entries": [],
+        "exec_address": "0x10001000",
+        "index": 1,
+        "size": 70,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "17353402",
+        "entries": [],
+        "exec_address": "0x10002000",
+        "index": 2,
+        "size": 4,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "000000000000000017000000030000000000000000000000",
+        "entries": [],
+        "exec_address": "0x10003000",
+        "index": 3,
+        "size": 24,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "0000000000000000000000000000000000000000000000000100000000000200000000000000000000000000000000002d00000010000200000000000000000000000000000000001f0000001000000000000000000000000000000000000000",
+        "entries": [],
+        "exec_address": "0x10004000",
+        "index": 4,
+        "size": 96,
+        "stub_bytes": "",
+        "stub_offset": null
+      }
+    ]
+  },
+  "R_RISCV_PCREL_LO12_I": {
+    "extras": "00000000000000000000000000000000000000000000000000000000000000000000000000000000",
+    "extras_exec": "0x10000000",
+    "fields": [
+      {
+        "before": "17050000",
+        "expected": "17353402",
+        "offset": 0,
+        "section": 2,
+        "symbol": "external_data",
+        "type": 23
+      },
+      {
+        "before": "13050500",
+        "expected": "13050500",
+        "offset": 4,
+        "section": 2,
+        "symbol": ".Lpcrel_lo_i_hi",
+        "type": 24
+      }
+    ],
+    "got": "0020001000000000002000100000000000200010000000000050341200000000",
+    "got_exec": "0x10005000",
+    "host_symbols": {
+      "external_data": "0x12345000",
+      "external_function": "0x10002040",
+      "external_function_alias": "0x10002040",
+      "external_second_function": "0x10003040"
+    },
+    "object_sha256": "a2bb46dbb9ad79ba7652ad203e14eb68876d0a32e24159dd4848c5e27d927898",
+    "sections": [
+      {
+        "after": "002478002e72656c612e74657874002e4c706372656c5f6c6f5f695f686900666978747572655f72697363765f706372656c5f6c6f31325f69002e737472746162002e73796d7461620065787465726e616c5f6461746100",
+        "entries": [],
+        "exec_address": "0x10001000",
+        "index": 1,
+        "size": 88,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "1735340213050500",
+        "entries": [],
+        "exec_address": "0x10002000",
+        "index": 2,
+        "size": 8,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "000000000000000017000000040000000000000000000000040000000000000018000000010000000000000000000000",
+        "entries": [],
+        "exec_address": "0x10003000",
+        "index": 3,
+        "size": 48,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "0000000000000000000000000000000000000000000000000f00000000000200000000000000000000000000000000000100000000000200000000000000000000000000000000001f00000010000200000000000000000000000000000000004a0000001000000000000000000000000000000000000000",
+        "entries": [],
+        "exec_address": "0x10004000",
+        "index": 4,
+        "size": 120,
+        "stub_bytes": "",
+        "stub_offset": null
+      }
+    ]
+  },
+  "R_RISCV_PCREL_LO12_S": {
+    "extras": "00000000000000000000000000000000000000000000000000000000000000000000000000000000",
+    "extras_exec": "0x10000000",
+    "fields": [
+      {
+        "before": "17050000",
+        "expected": "17353402",
+        "offset": 0,
+        "section": 2,
+        "symbol": "external_data",
+        "type": 23
+      },
+      {
+        "before": "2320b500",
+        "expected": "2320b500",
+        "offset": 4,
+        "section": 2,
+        "symbol": ".Lpcrel_lo_s_hi",
+        "type": 25
+      }
+    ],
+    "got": "0020001000000000002000100000000000200010000000000050341200000000",
+    "got_exec": "0x10005000",
+    "host_symbols": {
+      "external_data": "0x12345000",
+      "external_function": "0x10002040",
+      "external_function_alias": "0x10002040",
+      "external_second_function": "0x10003040"
+    },
+    "object_sha256": "57ed19d46a1e85871a23464132dda40045303d0faec69b76017bded37fadc301",
+    "sections": [
+      {
+        "after": "002478002e72656c612e7465787400666978747572655f72697363765f706372656c5f6c6f31325f73002e4c706372656c5f6c6f5f735f6869002e737472746162002e73796d7461620065787465726e616c5f6461746100",
+        "entries": [],
+        "exec_address": "0x10001000",
+        "index": 1,
+        "size": 88,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "173534022320b500",
+        "entries": [],
+        "exec_address": "0x10002000",
+        "index": 2,
+        "size": 8,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "000000000000000017000000040000000000000000000000040000000000000019000000010000000000000000000000",
+        "entries": [],
+        "exec_address": "0x10003000",
+        "index": 3,
+        "size": 48,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "0000000000000000000000000000000000000000000000002a00000000000200000000000000000000000000000000000100000000000200000000000000000000000000000000000f00000010000200000000000000000000000000000000004a0000001000000000000000000000000000000000000000",
+        "entries": [],
+        "exec_address": "0x10004000",
+        "index": 4,
+        "size": 120,
+        "stub_bytes": "",
+        "stub_offset": null
+      }
+    ]
+  },
+  "R_RISCV_RELAX": {
+    "extras": "0000000000000000000000000000000000000000000000000000000000000000",
+    "extras_exec": "0x10000000",
+    "fields": [
+      {
+        "before": "97000000e7800000",
+        "expected": "97000000e7808000",
+        "offset": 0,
+        "section": 2,
+        "symbol": "external_function",
+        "type": 19
+      },
+      {
+        "before": "",
+        "expected": "",
+        "offset": 0,
+        "section": 2,
+        "symbol": null,
+        "type": 51
+      }
+    ],
+    "got": "002000100000000000200010000000004020001000000000",
+    "got_exec": "0x10005000",
+    "host_symbols": {
+      "external_data": "0x12345000",
+      "external_function": "0x10002040",
+      "external_function_alias": "0x10002040",
+      "external_second_function": "0x10003040"
+    },
+    "object_sha256": "b6da6295814042e2174be16e609359baaa58371e86320604664c3b7cf3b72da0",
+    "sections": [
+      {
+        "after": "00666978747572655f72697363765f72656c6178002478002e72656c612e746578740065787465726e616c5f66756e6374696f6e002e737472746162002e73796d74616200",
+        "entries": [],
+        "exec_address": "0x10001000",
+        "index": 1,
+        "size": 69,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "97000000e7808000",
+        "entries": [
+          {
+            "flags": 0,
+            "got_address": "0x10005010",
+            "offset": 8,
+            "target": "0x10002040"
+          }
+        ],
+        "exec_address": "0x10002000",
+        "index": 2,
+        "size": 8,
+        "stub_bytes": "973f000083bf8f0067800f00",
+        "stub_offset": 8
+      },
+      {
+        "after": "000000000000000013000000030000000000000000000000000000000000000033000000000000000000000000000000",
+        "entries": [],
+        "exec_address": "0x10003000",
+        "index": 3,
+        "size": 48,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "000000000000000000000000000000000000000000000000150000000000020000000000000000000000000000000000010000001000020000000000000000000000000000000000230000001000000000000000000000000000000000000000",
+        "entries": [],
+        "exec_address": "0x10004000",
+        "index": 4,
+        "size": 96,
+        "stub_bytes": "",
+        "stub_offset": null
+      }
+    ]
+  },
+  "R_RISCV_RVC_BRANCH": {
+    "extras": "0000000000000000000000000000000000000000000000000000000000000000",
+    "extras_exec": "0x10000000",
+    "fields": [
+      {
+        "before": "09c1",
+        "expected": "21c1",
+        "offset": 0,
+        "section": 2,
+        "symbol": "external_function",
+        "type": 44
+      }
+    ],
+    "got": "002000100000000000200010000000004020001000000000",
+    "got_exec": "0x10005000",
+    "host_symbols": {
+      "external_data": "0x12345000",
+      "external_function": "0x10002040",
+      "external_function_alias": "0x10002040",
+      "external_second_function": "0x10003040"
+    },
+    "object_sha256": "61cb5a018b03cad52d4e76313a8ef84f68585f060fa1e517091365a22b64876f",
+    "sections": [
+      {
+        "after": "002478002e72656c612e746578740065787465726e616c5f66756e6374696f6e00666978747572655f72697363765f7276635f6272616e6368002e737472746162002e73796d74616200",
+        "entries": [],
+        "exec_address": "0x10001000",
+        "index": 1,
+        "size": 74,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "21c10100",
+        "entries": [],
+        "exec_address": "0x10002000",
+        "index": 2,
+        "size": 4,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "00000000000000002c000000030000000000000000000000",
+        "entries": [],
+        "exec_address": "0x10003000",
+        "index": 3,
+        "size": 24,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "0000000000000000000000000000000000000000000000000100000000000200000000000000000000000000000000002100000010000200000000000000000000000000000000000f0000001000000000000000000000000000000000000000",
+        "entries": [],
+        "exec_address": "0x10004000",
+        "index": 4,
+        "size": 96,
+        "stub_bytes": "",
+        "stub_offset": null
+      }
+    ]
+  },
+  "R_RISCV_RVC_JUMP": {
+    "extras": "0000000000000000000000000000000000000000000000000000000000000000",
+    "extras_exec": "0x10000000",
+    "fields": [
+      {
+        "before": "09a0",
+        "expected": "81a0",
+        "offset": 0,
+        "section": 2,
+        "symbol": "external_function",
+        "type": 45
+      }
+    ],
+    "got": "002000100000000000200010000000004020001000000000",
+    "got_exec": "0x10005000",
+    "host_symbols": {
+      "external_data": "0x12345000",
+      "external_function": "0x10002040",
+      "external_function_alias": "0x10002040",
+      "external_second_function": "0x10003040"
+    },
+    "object_sha256": "59007debf255fa8db840deb67f34a7e23ee173b7c753521154a8af21011e7faa",
+    "sections": [
+      {
+        "after": "002478002e72656c612e7465787400666978747572655f72697363765f7276635f6a756d700065787465726e616c5f66756e6374696f6e002e737472746162002e73796d74616200",
+        "entries": [],
+        "exec_address": "0x10001000",
+        "index": 1,
+        "size": 72,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "81a00100",
+        "entries": [],
+        "exec_address": "0x10002000",
+        "index": 2,
+        "size": 4,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "00000000000000002d000000030000000000000000000000",
+        "entries": [],
+        "exec_address": "0x10003000",
+        "index": 3,
+        "size": 24,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "0000000000000000000000000000000000000000000000000100000000000200000000000000000000000000000000000f0000001000020000000000000000000000000000000000260000001000000000000000000000000000000000000000",
+        "entries": [],
+        "exec_address": "0x10004000",
+        "index": 4,
+        "size": 96,
+        "stub_bytes": "",
+        "stub_offset": null
+      }
+    ]
+  },
+  "R_RISCV_SUB16": {
+    "extras": "0000000000000000000000000000000000000000000000000000000000000000",
+    "extras_exec": "0x10000000",
+    "fields": [
+      {
+        "before": "ffff",
+        "expected": "ffaf",
+        "offset": 0,
+        "section": 3,
+        "symbol": "external_data",
+        "type": 38
+      }
+    ],
+    "got": "003000100000000000300010000000000050341200000000",
+    "got_exec": "0x10006000",
+    "host_symbols": {
+      "external_data": "0x12345000",
+      "external_function": "0x10003040",
+      "external_function_alias": "0x10003040",
+      "external_second_function": "0x10004040"
+    },
+    "object_sha256": "a1c69be1319cd7100b0c8365f652d78d1e7583517f4e05b210920f2c80be444d",
+    "sections": [
+      {
+        "after": "002e74657874002464002e737472746162002e73796d7461620065787465726e616c5f64617461002e72656c612e6461746100666978747572655f72697363765f737562313600",
+        "entries": [],
+        "exec_address": "0x10001000",
+        "index": 1,
+        "size": 71,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "ffaf",
+        "entries": [],
+        "exec_address": "0x10003000",
+        "index": 3,
+        "size": 2,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "000000000000000026000000030000000000000000000000",
+        "entries": [],
+        "exec_address": "0x10004000",
+        "index": 4,
+        "size": 24,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "0000000000000000000000000000000000000000000000000700000000000300000000000000000000000000000000003300000010000300000000000000000000000000000000001a0000001000000000000000000000000000000000000000",
+        "entries": [],
+        "exec_address": "0x10005000",
+        "index": 5,
+        "size": 96,
+        "stub_bytes": "",
+        "stub_offset": null
+      }
+    ]
+  },
+  "R_RISCV_SUB32": {
+    "extras": "0000000000000000000000000000000000000000000000000000000000000000",
+    "extras_exec": "0x10000000",
+    "fields": [
+      {
+        "before": "ffffffff",
+        "expected": "ffafcbed",
+        "offset": 0,
+        "section": 3,
+        "symbol": "external_data",
+        "type": 39
+      }
+    ],
+    "got": "003000100000000000300010000000000050341200000000",
+    "got_exec": "0x10006000",
+    "host_symbols": {
+      "external_data": "0x12345000",
+      "external_function": "0x10003040",
+      "external_function_alias": "0x10003040",
+      "external_second_function": "0x10004040"
+    },
+    "object_sha256": "c8ffcc54f12ce493b58dd62765077197231db9849556d22a7353091fd49b36a8",
+    "sections": [
+      {
+        "after": "002e74657874002464002e737472746162002e73796d7461620065787465726e616c5f64617461002e72656c612e6461746100666978747572655f72697363765f737562333200",
+        "entries": [],
+        "exec_address": "0x10001000",
+        "index": 1,
+        "size": 71,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "ffafcbed",
+        "entries": [],
+        "exec_address": "0x10003000",
+        "index": 3,
+        "size": 4,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "000000000000000027000000030000000000000000000000",
+        "entries": [],
+        "exec_address": "0x10004000",
+        "index": 4,
+        "size": 24,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "0000000000000000000000000000000000000000000000000700000000000300000000000000000000000000000000003300000010000300000000000000000000000000000000001a0000001000000000000000000000000000000000000000",
+        "entries": [],
+        "exec_address": "0x10005000",
+        "index": 5,
+        "size": 96,
+        "stub_bytes": "",
+        "stub_offset": null
+      }
+    ]
+  },
+  "R_RISCV_SUB6": {
+    "extras": "0000000000000000000000000000000000000000000000000000000000000000",
+    "extras_exec": "0x10000000",
+    "fields": [
+      {
+        "before": "3f",
+        "expected": "3f",
+        "offset": 0,
+        "section": 3,
+        "symbol": "external_data",
+        "type": 52
+      }
+    ],
+    "got": "003000100000000000300010000000000050341200000000",
+    "got_exec": "0x10006000",
+    "host_symbols": {
+      "external_data": "0x12345000",
+      "external_function": "0x10003040",
+      "external_function_alias": "0x10003040",
+      "external_second_function": "0x10004040"
+    },
+    "object_sha256": "8df6dad88f7139c1f97f69c8fd62ad4474ed57e376e3f57903e0ee6abeab748c",
+    "sections": [
+      {
+        "after": "002e74657874002464002e737472746162002e73796d7461620065787465726e616c5f64617461002e72656c612e6461746100666978747572655f72697363765f7375623600",
+        "entries": [],
+        "exec_address": "0x10001000",
+        "index": 1,
+        "size": 70,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "3f",
+        "entries": [],
+        "exec_address": "0x10003000",
+        "index": 3,
+        "size": 1,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "000000000000000034000000030000000000000000000000",
+        "entries": [],
+        "exec_address": "0x10004000",
+        "index": 4,
+        "size": 24,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "0000000000000000000000000000000000000000000000000700000000000300000000000000000000000000000000003300000010000300000000000000000000000000000000001a0000001000000000000000000000000000000000000000",
+        "entries": [],
+        "exec_address": "0x10005000",
+        "index": 5,
+        "size": 96,
+        "stub_bytes": "",
+        "stub_offset": null
+      }
+    ]
+  },
+  "R_RISCV_SUB64": {
+    "extras": "0000000000000000000000000000000000000000000000000000000000000000",
+    "extras_exec": "0x10000000",
+    "fields": [
+      {
+        "before": "ffffffffffffffff",
+        "expected": "ffafcbedffffffff",
+        "offset": 0,
+        "section": 3,
+        "symbol": "external_data",
+        "type": 40
+      }
+    ],
+    "got": "003000100000000000300010000000000050341200000000",
+    "got_exec": "0x10006000",
+    "host_symbols": {
+      "external_data": "0x12345000",
+      "external_function": "0x10003040",
+      "external_function_alias": "0x10003040",
+      "external_second_function": "0x10004040"
+    },
+    "object_sha256": "6647429ceb8e3cc2b1d2d6e7204b00e26c52a1b57980d382b1ec53f387441eb9",
+    "sections": [
+      {
+        "after": "002e74657874002464002e737472746162002e73796d7461620065787465726e616c5f64617461002e72656c612e6461746100666978747572655f72697363765f737562363400",
+        "entries": [],
+        "exec_address": "0x10001000",
+        "index": 1,
+        "size": 71,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "ffafcbedffffffff",
+        "entries": [],
+        "exec_address": "0x10003000",
+        "index": 3,
+        "size": 8,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "000000000000000028000000030000000000000000000000",
+        "entries": [],
+        "exec_address": "0x10004000",
+        "index": 4,
+        "size": 24,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "0000000000000000000000000000000000000000000000000700000000000300000000000000000000000000000000003300000010000300000000000000000000000000000000001a0000001000000000000000000000000000000000000000",
+        "entries": [],
+        "exec_address": "0x10005000",
+        "index": 5,
+        "size": 96,
+        "stub_bytes": "",
+        "stub_offset": null
+      }
+    ]
+  },
+  "R_RISCV_SUB8": {
+    "extras": "0000000000000000000000000000000000000000000000000000000000000000",
+    "extras_exec": "0x10000000",
+    "fields": [
+      {
+        "before": "ff",
+        "expected": "ff",
+        "offset": 0,
+        "section": 3,
+        "symbol": "external_data",
+        "type": 37
+      }
+    ],
+    "got": "003000100000000000300010000000000050341200000000",
+    "got_exec": "0x10006000",
+    "host_symbols": {
+      "external_data": "0x12345000",
+      "external_function": "0x10003040",
+      "external_function_alias": "0x10003040",
+      "external_second_function": "0x10004040"
+    },
+    "object_sha256": "49429c71e5f2e2f799ca131b59889d2057ece3cda5f78c78e622a278737f1acf",
+    "sections": [
+      {
+        "after": "002e74657874002464002e737472746162002e73796d7461620065787465726e616c5f64617461002e72656c612e6461746100666978747572655f72697363765f7375623800",
+        "entries": [],
+        "exec_address": "0x10001000",
+        "index": 1,
+        "size": 70,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "ff",
+        "entries": [],
+        "exec_address": "0x10003000",
+        "index": 3,
+        "size": 1,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "000000000000000025000000030000000000000000000000",
+        "entries": [],
+        "exec_address": "0x10004000",
+        "index": 4,
+        "size": 24,
+        "stub_bytes": "",
+        "stub_offset": null
+      },
+      {
+        "after": "0000000000000000000000000000000000000000000000000700000000000300000000000000000000000000000000003300000010000300000000000000000000000000000000001a0000001000000000000000000000000000000000000000",
+        "entries": [],
+        "exec_address": "0x10005000",
+        "index": 5,
+        "size": 96,
+        "stub_bytes": "",
+        "stub_offset": null
+      }
+    ]
+  }
+}

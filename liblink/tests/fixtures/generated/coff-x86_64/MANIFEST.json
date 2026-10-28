@@ -1,0 +1,186 @@
+{
+  "archive_formats": [
+    "gnu"
+  ],
+  "artifacts": {
+    "COMDAT-duplicate.o": {
+      "sha256": "a08e17010475310ede1437775c858e8f3cd81f5104b4f01da4651926c695cfd7",
+      "size": 375
+    },
+    "COMDAT-static-duplicate.o": {
+      "sha256": "07c8678dae76f14a31fa712231c5d157efaa696985e5c405820f0dc8159fa71a",
+      "size": 382
+    },
+    "COMDAT-static.o": {
+      "sha256": "9bc89632719a809d93f654fdeac57e273752590f28ac80195aec462c1be0112d",
+      "size": 382
+    },
+    "COMDAT.o": {
+      "sha256": "de10cd7a20b23e7a1349655798968d70a49c4c82ac9ce039c3734299c1cdde9e",
+      "size": 375
+    },
+    "IMAGE_REL_AMD64_ADDR32NB.o": {
+      "sha256": "07234fed8e46c7ebf6878ea5995dab464430bfd877f5064d6bd4c3fb197c778f",
+      "size": 340
+    },
+    "IMAGE_REL_AMD64_ADDR64.o": {
+      "sha256": "a76911d9f1bb807f78cc2b52c7f906c726fbb7e69b58fed58d7d80199aeeb65a",
+      "size": 342
+    },
+    "IMAGE_REL_AMD64_REL32.o": {
+      "sha256": "32b2dfd6ce2003265d8f490c9b2f21f02262078d97ae67ffc7c8053f251acecb",
+      "size": 357
+    },
+    "IMAGE_REL_AMD64_REL32_1.o": {
+      "sha256": "3928285156ad80feab6f4802a344180d96a63bea8cc0cfeeb7b336a8540a2add",
+      "size": 343
+    },
+    "IMAGE_REL_AMD64_REL32_2.o": {
+      "sha256": "9d572478a54a239191e74b291aa92d4550e913f4389d7b69627eefbdfbd86704",
+      "size": 345
+    },
+    "IMAGE_REL_AMD64_REL32_3.o": {
+      "sha256": "64b2d90ce8091d192f41fd5e1b90fec598a1d47446708a656473a637111f2217",
+      "size": 342
+    },
+    "IMAGE_REL_AMD64_REL32_4.o": {
+      "sha256": "2c1751f2284b15470b2e6035a43e6c0db4a8fb0d00a0fd4667988f2b9396cbe2",
+      "size": 346
+    },
+    "IMAGE_REL_AMD64_REL32_5.o": {
+      "sha256": "99bfd8b64273a4290a39fc504c0023995fba09a0f9557ff4894c005558b13813",
+      "size": 344
+    },
+    "IMAGE_REL_AMD64_SECREL.o": {
+      "sha256": "ba7979e5be77eb2c3e096cbe6cea97dbefa628400d55dba23353f9c0abc1cbfb",
+      "size": 338
+    },
+    "fixtures.a": {
+      "sha256": "d9a1479633c845c5c077232716008334753dc2612121643845d9b6692b61f0dd",
+      "size": 10322
+    },
+    "import-thunk.o": {
+      "sha256": "36bf373570a3d0cba02d51abf2fb291cbe19a7067ff5897292e5f9aac42c9493",
+      "size": 353
+    },
+    "init-fini.o": {
+      "sha256": "b1e345a610c8687bf4135ee2ddea94ab6d9c969e656276f3b3647fc44f7bbd57",
+      "size": 867
+    },
+    "symbols-common-strong.o": {
+      "sha256": "d2bf6cf184eb8aafbca147c86d36e0745a3c62d6c79f768d5502143d4da70552",
+      "size": 582
+    },
+    "symbols-common.o": {
+      "sha256": "fed7adea11e4e72864ab84ed5349a83147dbd1f9c5358fe360bcc9e4ace11a22",
+      "size": 669
+    },
+    "symbols-strong.o": {
+      "sha256": "74f4281693d5078120f7dfbe7ddc5b2a9f4211519a93ca011edfc6c58a1abb20",
+      "size": 564
+    },
+    "symbols-weak.o": {
+      "sha256": "bb3ade5e404e9a4738cc0e163c078e5fc9697bef93a2898e6b6dbc6af1e715a3",
+      "size": 632
+    }
+  },
+  "catalog_sha256": "ad012a3561755a5219cd177c7572774210e60dce2c8222b1b9c3c7262f171fbd",
+  "generator_sha256": "1d27932f1734f1b2f8a97760d242a2563ee33686f934a80cf00f876c8dcc0efa",
+  "recipe_sha256": "a85e8995a015c363e0217f852af73ed739dfc06bac7a1f5162569da90bae0142",
+  "schema": 1,
+  "sources": {
+    "src/coff-x86_64/COMDAT-duplicate.s": {
+      "sha256": "dfe8d78c7a22b5ee0ad83736b2ebb7b115f5f6a13a66bcc09dc549ec4c0dac9f",
+      "size": 193
+    },
+    "src/coff-x86_64/COMDAT-static-duplicate.s": {
+      "sha256": "0a22e77a13d3e3a67e7d15aef1da163b71393f7f40315fcbb7986996cbc31561",
+      "size": 244
+    },
+    "src/coff-x86_64/COMDAT-static.s": {
+      "sha256": "96a2dd5eae6013cd478be888889ad98da9301cd5f7ecc70d68c281ca6b7189b5",
+      "size": 244
+    },
+    "src/coff-x86_64/COMDAT.s": {
+      "sha256": "d39d884e633bb6797cf80e310ceb4549f794397d7556770c10ab9ea7a652b975",
+      "size": 193
+    },
+    "src/coff-x86_64/IMAGE_REL_AMD64_ADDR32NB.s": {
+      "sha256": "3290baaea5220cb2be28bcd87504d4a2cc1dbec92d1ebf6ec80e6d7915cae54e",
+      "size": 159
+    },
+    "src/coff-x86_64/IMAGE_REL_AMD64_ADDR64.s": {
+      "sha256": "f7bf171f930c204d95edd17ee8bfc69f8c65e8ee4974c390f417155370e406ae",
+      "size": 156
+    },
+    "src/coff-x86_64/IMAGE_REL_AMD64_REL32.s": {
+      "sha256": "278b09fbceb371e46dc312f58eca8ddd0ea7b992afe8c3dd7813bde952ef313b",
+      "size": 205
+    },
+    "src/coff-x86_64/IMAGE_REL_AMD64_REL32_1.s": {
+      "sha256": "d170274ab4ebdeb0a18295725f24268c31219251916de3977a6ef6cd08be934e",
+      "size": 167
+    },
+    "src/coff-x86_64/IMAGE_REL_AMD64_REL32_2.s": {
+      "sha256": "cf9935e57caf6dc3c96cdb4538cf43b8e7a47ce4251f059b5c0e1ce82e108d37",
+      "size": 172
+    },
+    "src/coff-x86_64/IMAGE_REL_AMD64_REL32_3.s": {
+      "sha256": "3e898358ce5a85da5040d94cc3412228184f8d00c58006bde63c5a6f295214cc",
+      "size": 247
+    },
+    "src/coff-x86_64/IMAGE_REL_AMD64_REL32_4.s": {
+      "sha256": "0b0f2bf2133044a45fb4857eff2e8103d7bf49eece9b5b14f0e75cb8a9911887",
+      "size": 176
+    },
+    "src/coff-x86_64/IMAGE_REL_AMD64_REL32_5.s": {
+      "sha256": "af03c7467edf405cfad6888a50a5b72be7f650f73e8b2b8b8a146be244e3bcf9",
+      "size": 247
+    },
+    "src/coff-x86_64/IMAGE_REL_AMD64_SECREL.s": {
+      "sha256": "f4728fc06b80509860780267f8583de4f4eaa4610de5e41c381f8b7f56e75a8a",
+      "size": 160
+    },
+    "src/coff-x86_64/import-thunk.s": {
+      "sha256": "dc78588280c7206e24bbb94bde8e42ced32ab4262880f2b3fa0b7a2fa08ff719",
+      "size": 187
+    },
+    "src/coff-x86_64/init-fini.c": {
+      "sha256": "a34b91739e8f34d628c973e4f703335822ca2a8625da2a72701057bc45b4d34b",
+      "size": 243
+    },
+    "src/coff-x86_64/symbols-common-strong.c": {
+      "sha256": "b07e8d68c844a846412feffdab528a63c87c364654df23d43556147acd719e45",
+      "size": 28
+    },
+    "src/coff-x86_64/symbols-common.c": {
+      "sha256": "e03116f0edce010ceb375d5069af66fa62d89a30fa152c2b685edea31495d14b",
+      "size": 47
+    },
+    "src/coff-x86_64/symbols-strong.c": {
+      "sha256": "87693b7a9a94c2472170707d831b53f5cfd5bfe34051807a9300a13e37b7c20e",
+      "size": 28
+    },
+    "src/coff-x86_64/symbols-weak.c": {
+      "sha256": "6f335c194414460486a5d3af0245e66d210b45790a116a24cc558674bc2bb0c7",
+      "size": 50
+    }
+  },
+  "targets": [
+    "x86_64-w64-windows-gnu"
+  ],
+  "tools": {
+    "clang": {
+      "major": "21",
+      "version": "clang version 21.1.2"
+    },
+    "llvm-ar": {
+      "major": "21",
+      "version": "LLVM version 21.1.2"
+    },
+    "llvm-mc": {
+      "major": "21",
+      "version": "LLVM version 21.1.2"
+    }
+  }
+}

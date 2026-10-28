@@ -1,0 +1,115 @@
+# Reproducible object and archive fixtures
+
+`generate.py` consumes a JSON catalog. The catalog names versioned source files,
+source language, target triple, generated object path, and explicit archive
+recipes. It compiles those inputs; it does not synthesize product fixture
+sources. A later fixture expansion can add relocation inputs by extending the
+catalog without changing the generator.
+
+Supported triples are `x86_64-linux-gnu`, `i386-linux-gnu`,
+`aarch64-linux-gnu`, `armv7-linux-gnueabihf`, `riscv64-linux-gnu`,
+`powerpc64le-linux-gnu`, `x86_64-apple-macos11`, `arm64-apple-macos11`, and
+`x86_64-w64-windows-gnu`. Object generation does not claim target runtime or
+relocation-handler qualification.
+
+The catalog schema is intentionally small. `sources` is an array of entries
+with `id`, `path`, `language` (`c` or `asm`), `triple`, and `object`. `archives`
+is an array with output `path`, `format` (`gnu`, `bsd`, or `thin`), and member
+source IDs. Source paths are relative to the catalog directory. Object paths
+must share a directory with their archive members so thin archives keep
+portable relative references.
+
+Use LLVM 17 or newer. Pass paths explicitly when the environment has compiler
+wrappers that add target-inappropriate flags:
+
+```sh
+python3 generate.py regen --catalog /path/to/catalog.json \
+  --output-dir /path/to/generated --clang /path/to/unwrapped/clang \
+  --llvm-mc /path/to/llvm-mc --llvm-ar /path/to/llvm-ar
+python3 generate.py check --catalog /path/to/catalog.json \
+  --output-dir /path/to/generated --clang /path/to/unwrapped/clang \
+  --llvm-mc /path/to/llvm-mc --llvm-ar /path/to/llvm-ar
+```
+
+Keep generated output in a directory separate from the catalog and its source
+tree. The output directory must be empty or a tree previously created by this
+generator. Regeneration builds into a temporary tree before replacing managed
+files, so a tool failure leaves existing fixtures intact. `check` never writes
+to expected data. It fails on missing or unknown output files, changed catalog
+sources, or different artifact bytes. A tool-major mismatch emits a warning;
+source or byte differences still fail. The manifest records only relative paths,
+SHA-256 hashes, sizes, and tool versions.
+
+Run the tests with:
+
+```sh
+python3 -m unittest discover -s liblink/tests/fixtures -p 'test_*.py'
+```
+
+The test inputs live only in temporary directories. Tool locations can be set
+with `LL_FIXTURE_CLANG`, `LL_FIXTURE_LLVM_MC`, and `LL_FIXTURE_LLVM_AR`.
+
+Two opt-in recipes cover additional fixture encodings. They run inside the
+temporary generation tree and never patch product binaries. The helper
+`fixture_recipes.py` is SHA-256-bound as `recipe_sha256` in every manifest
+and compared strictly by `check`.
+
+- A source entry may set `coff_rel32_variant` to an integer 1 through 5, only
+  for `asm` with target `x86_64-w64-windows-gnu`. LLVM 21.1.2's
+  `llvm/lib/Target/X86/MCTargetDesc/X86WinCOFFObjectWriter.cpp` emits plain
+  `IMAGE_REL_AMD64_REL32`. The recipe requires exactly one such relocation
+  in an ordinary AMD64 COFF object, changes its type to `REL32_N`, and adds
+  N to its signed inline addend. Thus `S + A - (P + 4)` equals
+  `S + (A + N) - (P + 4 + N)`. Versioned assembly must supply at least N
+  bytes after the four-byte relocation field. Other bytes remain unchanged;
+  bounds, symbol indices, overlapping regions and addend overflow are checked.
+- A GNU archive entry may set `symbol_table_bits` to `64`. The generator
+  invokes deterministic `llvm-ar` with a per-command `SYM64_THRESHOLD=0`
+  environment and requires a leading `/SYM64/` index. LLVM's
+  `llvm/lib/Object/ArchiveWriter.cpp` exposes this test knob to generate
+  small 64-bit-index archives without multi-gigabyte inputs. There is no
+  custom archive-byte rewriting. Other archive recipes explicitly use the
+  default threshold of 2^32, overriding any ambient value. Tests verify
+  widened big-endian counts/offsets, preserved member bytes and symbol names,
+  plus independent `llvm-ar`/`llvm-nm` reader results.
+
+Malformed or unsupported recipe inputs fail before output promotion. These
+recipes supply format fixtures, including expected-unsupported relocations;
+LLVM reader acceptance does not establish liblink backend support.
+
+The versioned catalogs are `<format>-<arch>.json` beside this file. Sources
+live under `src/<format>-<arch>/`, and reference objects, archives, and their
+manifest live under `generated/<format>-<arch>/`. For example, from the
+repository root:
+
+```sh
+python3 liblink/tests/fixtures/generate.py check \
+  --catalog liblink/tests/fixtures/macho-arm64.json \
+  --output-dir liblink/tests/fixtures/generated/macho-arm64 \
+  --clang /path/to/unwrapped/clang \
+  --llvm-mc /path/to/llvm-mc --llvm-ar /path/to/llvm-ar
+```
+
+Use `regen` in place of `check` to update one target's reference tree. Each
+catalog records emitted relocations and the expected backend outcome.
+Unsupported entries remain fixtures. PPC64LE covers architecture rejection;
+x86_64 ELF TLSGD is FreeBSD-only. RISC-V RELAX and ALIGN are accepted no-ops.
+Branch `layout_cases` prepare later near/far veneer and island checks.
+Symbol selection, initializer order, branch execution, and rejection status
+require linker runner tests; object generation alone does not prove them.
+
+The elf-noexec fixtures are valid ELF64 little-endian data-only inputs for the
+private x64 NO_EXEC controls. symbols.s covers local/global/BSS/COMMON symbols
+and an offset crossing the signed address boundary; gottpoff.s covers an
+unavailable host TLS relocation. Their instruction bytes are never executed.
+Rebuild the committed objects with an LLVM x64 ELF assembler driver:
+
+    clang --target=x86_64-linux-gnu -c liblink/tests/fixtures/elf-noexec/symbols.s -o liblink/tests/fixtures/elf-noexec/symbols.o
+    clang --target=x86_64-linux-gnu -c liblink/tests/fixtures/elf-noexec/gottpoff.s -o liblink/tests/fixtures/elf-noexec/gottpoff.o
+
+The elf-aarch64-sites inputs add branch identity/reuse and equal-valued symbols
+with distinct GOT slots. They are valid assembler outputs used only as data.
+Rebuild their committed objects with:
+
+    clang --target=aarch64-linux-gnu -c liblink/tests/fixtures/elf-aarch64-sites/branch_reuse.s -o liblink/tests/fixtures/elf-aarch64-sites/branch_reuse.o
+    clang --target=aarch64-linux-gnu -c liblink/tests/fixtures/elf-aarch64-sites/got_alias.s -o liblink/tests/fixtures/elf-aarch64-sites/got_alias.o
