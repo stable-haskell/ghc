@@ -87,4 +87,5 @@ struct ll_coff_object_info {
     COFF_HEADER_INFO* ch_info; // Freed by ocResolve_PEi386
     COFF_symbol* symbols;      // Freed by ocResolve_PEi386
     char* str_tab;
+    size_t str_tab_size;
  };

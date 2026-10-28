@@ -942,15 +942,25 @@ get_name_string (ll_linker *L, uint8_t* name, ObjectCode* oc)
 
     if (name[0]=='/') {
         if (oc->coff_info == NULL || oc->coff_info->str_tab == NULL) return NULL;
-        long raw_offset = strtol((char*)name+1, NULL, 10);
+        char buf[8] = {0};
+        memcpy(buf, (char*)name + 1, 7);
+        char *endptr = NULL;
+        long raw_offset = strtol(buf, &endptr, 10);
         if (raw_offset < PEi386_STRTAB_OFFSET) return NULL;
         size_t strtab_offset = (size_t)(raw_offset - PEi386_STRTAB_OFFSET);
+        if (strtab_offset >= oc->coff_info->str_tab_size) return NULL;
         char* str = oc->coff_info->str_tab + strtab_offset;
-        size_t len   = strlen(str);
+        size_t max_len = oc->coff_info->str_tab_size - strtab_offset;
+        size_t len = 0;
+        while (len < max_len && str[len] != '\0') {
+            len++;
+        }
+        if (len >= max_len) return NULL;
 
         newstr = LL_MALLOC_FOR(L, len + 1, "cstring_from_section_symbol_name");
         if (newstr) {
-            strncpy(newstr, str, len + 1);
+            memcpy(newstr, str, len);
+            newstr[len] = '\0';
         }
         return newstr;
     }
@@ -1065,10 +1075,10 @@ ocVerifyImage_PEi386 ( ObjectCode* oc )
    /* Pre-validate all section raw data and relocation table bounds before allocating. */
    for (uint32_t s = 0; s < info->numberOfSections; s++) {
      COFF_section* sectab_s = (COFF_section*)myindex(sizeof_COFF_section, sectab, s);
-     if (sectab_s->SizeOfRawData > 0 &&
-         sectab_s->PointerToRawData > 0 &&
-         !(sectab_s->Characteristics & LL_COFF_IMAGE_SCN_CNT_UNINITIALIZED_DATA)) {
-       if (sectab_s->PointerToRawData > oc->fileSize ||
+     bool is_uninitialized = (sectab_s->Characteristics & LL_COFF_IMAGE_SCN_CNT_UNINITIALIZED_DATA) != 0;
+     if (!is_uninitialized && sectab_s->SizeOfRawData > 0) {
+       if (sectab_s->PointerToRawData == 0 ||
+           sectab_s->PointerToRawData > oc->fileSize ||
            (size_t)sectab_s->SizeOfRawData > oc->fileSize - sectab_s->PointerToRawData) {
          ll_error_set(oc->L, LL_E_FORMAT, "COFF section %u raw data extends past file size", s);
          return false;
@@ -1139,6 +1149,7 @@ ocVerifyImage_PEi386 ( ObjectCode* oc )
    oc->coff_info->str_tab
      = LL_MALLOC_FOR(oc->L, n_strtab, "ocVerifyImage_PEi386(oc->info->str_tab)");
    memcpy (oc->coff_info->str_tab, strtab + PEi386_STRTAB_OFFSET, n_strtab);
+   oc->coff_info->str_tab_size = n_strtab;
 
    /* Initialize the Sections */
    for (i = 0; i < info->numberOfSections; i++) {
@@ -1154,6 +1165,11 @@ ocVerifyImage_PEi386 ( ObjectCode* oc )
       section->coff_info  = LL_CALLOC_FOR(oc->L, sizeof(struct ll_coff_section_info), 1,
                                        "ocVerifyImage_PEi386(section.info)");
       section->coff_info->name        = get_name_string (oc->L, sectab_i->Name, oc);
+      if (section->coff_info->name == NULL) {
+        ll_error_set(oc->L, LL_E_FORMAT, "invalid or malformed COFF section name in section %u", i);
+        releaseOcInfo(oc);
+        return false;
+      }
       section->coff_info->alignment   = getSectionAlignment (*section);
       section->coff_info->props       = sectab_i->Characteristics;
       section->coff_info->virtualSize = sectab_i->Misc.VirtualSize;

@@ -248,7 +248,7 @@ int ghciInsertSymbolTable(
    ll_symbol_addr* data,
    ll_strength strength,
    ll_sym_type type,
-   unsigned long size,
+   size_t size,
    ObjectCode *owner)
 {
    RtsSymbolInfo *pinfo = lookupStrHashTable(L->symhash, key);
