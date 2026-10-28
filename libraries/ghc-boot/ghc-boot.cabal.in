@@ -45,9 +45,19 @@ Flag bootstrap
         Manual: True
 
 Library
-    default-language: GHC2024
+    -- GHC2021 plus the extensions GHC2024 adds; spelled out so ghc < 9.10 (no GHC2024) can build it.
+    default-language: GHC2021
     other-extensions: DeriveGeneric, RankNTypes, ScopedTypeVariables
     default-extensions: NoImplicitPrelude
+                        -- GHC2024 = GHC2021 +
+                        DataKinds
+                        DerivingStrategies
+                        DisambiguateRecordFields
+                        ExplicitNamespaces
+                        GADTs
+                        MonoLocalBinds
+                        LambdaCase
+                        RoleAnnotations
 
     exposed-modules:
             GHC.BaseDir

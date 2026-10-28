@@ -28,7 +28,9 @@ Flag threaded
     Manual: True
 
 Executable ghc
-    Default-Language: GHC2024
+    -- GHC2021 plus the extensions GHC2024 adds; spelled out so ghc < 9.10 (no GHC2024) can build it
+    -- (see Default-Extensions below).
+    Default-Language: GHC2021
 
     Main-Is: Main.hs
     Other-Modules:
@@ -93,3 +95,12 @@ Executable ghc
     -- GHCi can be used to load it all at once.
     Default-Extensions:
         NoImplicitPrelude
+        -- GHC2024 = GHC2021 +
+        DataKinds
+        DerivingStrategies
+        DisambiguateRecordFields
+        ExplicitNamespaces
+        GADTs
+        MonoLocalBinds
+        LambdaCase
+        RoleAnnotations
