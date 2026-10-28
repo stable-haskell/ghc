@@ -55,15 +55,14 @@ import GHC.Internal.Data.Foldable (sequence_)
 import GHC.Internal.Data.IORef (IORef, atomicModifyIORef', mkWeakIORef, newIORef, readIORef,
                    writeIORef)
 import GHC.Internal.Base
-import GHC.Internal.IORef (IORef(..))
-import GHC.Internal.Prim (casMutVar#, readMutVar#)
-import GHC.Internal.STRef (STRef(..))
 import GHC.Internal.Clock (getMonotonicTimeNSec)
 import GHC.Internal.Conc.Signal (runHandlers)
 import GHC.Internal.Enum (maxBound)
+import GHC.Internal.IORef (IORef (..))
 import GHC.Internal.Num (Num(..))
 import GHC.Internal.Real (quot, fromIntegral)
 import GHC.Internal.Show (Show(..))
+import GHC.Internal.STRef (STRef (..))
 import GHC.Internal.Event.Control
 import GHC.Internal.Event.Internal (Backend, Event, evtRead, Timeout(..))
 import GHC.Internal.Event.Unique (UniqueSource, newSource, newUnique)
@@ -317,12 +316,12 @@ editTimeouts mgr g = do
 -- evaluates it (or waits for the manager to) before publishing its own fully
 -- evaluated queue, so thunks still cannot pile up.
 modifyTimeouts :: IORef TimeoutQueue -> (TimeoutQueue -> (TimeoutQueue, b)) -> IO b
-modifyTimeouts (IORef (STRef ref)) f = IO loop
+modifyTimeouts (IORef (STRef ref)) f = IO modLoop
   where
-    loop s0 = case readMutVar# ref s0 of
-      (# s1, old #) -> case f old of
-        (new, r) -> new `seq` case casMutVar# ref old new s1 of
+    modLoop s0 = case readMutVar# ref s0 of
+      (# s1, oldVar #) -> case f oldVar of
+        (newVar, r) -> newVar `seq` case casMutVar# ref oldVar newVar s1 of
           (# s2, 0#, _ #) -> (# s2, r #)
-          (# s2, _, _ #) -> loop s2
+          (# s2, _, _ #) -> modLoop s2
 
 #endif
