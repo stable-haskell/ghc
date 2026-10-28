@@ -472,13 +472,11 @@ static void check_and_release_known_metadata_residue(void)
         else
             ++relocation_copies;
     }
-    /* Known PE teardown gap: each object leaks its copied COFF string table;
-     * each nonempty fixture additionally leaks the section name and relocation
-     * copy. Observe these exact allocations after normal disposal, then release
-     * them as harness-owned residue so the ledger can still detect surprises. */
-    CHECK(str_tabs == 3, "unexpected copied COFF string-table residue count");
-    CHECK(section_names == 2, "unexpected PE section-name residue count");
-    CHECK(relocation_copies == 2, "unexpected PE relocation-copy residue count");
+    /* PE metadata is cleanly deallocated on disposal without leaking string
+     * tables, section names, or relocations (DEF-44 / Astra F12). Verify zero residue. */
+    CHECK(str_tabs == 0, "unexpected copied COFF string-table residue count");
+    CHECK(section_names == 0, "unexpected PE section-name residue count");
+    CHECK(relocation_copies == 0, "unexpected PE relocation-copy residue count");
     (void)fprintf(stderr,
                   "known PE metadata residue after normal disposal: str_tab=%zu section_name=%zu relocs=%zu (harness cleanup follows)\n",
                   str_tabs, section_names, relocation_copies);

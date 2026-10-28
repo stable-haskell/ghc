@@ -242,7 +242,7 @@ static void check_known_metadata_residue(void)
         else
             CHECK(false, "unexpected host allocation remained after PE resource tests");
     }
-    CHECK(string_tables == 2 && section_names == 2 && relocations == 2,
+    CHECK(string_tables == 0 && section_names == 0 && relocations == 0,
           "resource tests left unexpected known PE metadata residue counts");
     while (fixture.allocation_count != 0) {
         size_t i = --fixture.allocation_count;

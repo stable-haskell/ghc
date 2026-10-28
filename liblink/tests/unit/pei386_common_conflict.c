@@ -197,8 +197,7 @@ static void dispose_success(pathchar *path)
     CHECK(take_object_for_free(path), "successful COMMON fixture disposal failed");
     for (size_t i = 0; i < sizeof(residue) / sizeof(residue[0]); ++i) {
         bool owned = allocation_has_tag(residue[i], tags[i]);
-        CHECK(owned, "successful disposal left a different PE metadata residue");
-        if (owned) host_free(&owner, residue[i]);
+        CHECK(!owned, "successful disposal leaked PE metadata residue");
     }
     (void)DeleteFileW(path);
 }
