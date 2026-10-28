@@ -1562,6 +1562,9 @@ do_Elf_Rela_relocations ( ObjectCode* oc, char* ehdrC,
       ll_elf_target_addr  value;
 #endif
       ll_elf_target_addr  info   = rtab[j].r_info;
+      if (LL_ELF_R_TYPE(info) == 0) {
+         continue;
+      }
       ll_elf_target_addr  S;
       void*     S_tmp;
 #     if LL_TARGET_POWERPC

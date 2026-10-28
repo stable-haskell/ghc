@@ -169,7 +169,7 @@ void setIType(ll_linker *L, inst_t *loc, int32_t val) {
 
   LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "setIType: hi 0x%lx lo 0x%lx\n", hi, lo));
   LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "setIType: loc %p  *loc 0x%x  val 0x%x\n", loc,
-                              *loc, val));
+                              read32le(loc), val));
 
   uint32_t imm = lo & 0xfff;
   uint32_t instr = (read32le(loc) & 0xfffff) | (imm << 20);
@@ -177,7 +177,7 @@ void setIType(ll_linker *L, inst_t *loc, int32_t val) {
   LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "setIType: insn 0x%x\n", instr));
   write32le(loc, instr);
   LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "setIType: loc %p  *loc' 0x%x  val 0x%x\n", loc,
-                              *loc, val));
+                              read32le(loc), val));
 }
 
 // Set immediate val in the instruction at *loc. In S-type instructions the

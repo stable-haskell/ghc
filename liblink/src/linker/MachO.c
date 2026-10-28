@@ -435,10 +435,10 @@ encodeAddend(ObjectCode * oc, ll_site site,
                 return false;
             }
             switch (ri->r_length) {
-                case 0: *(uint8_t*)p  = (uint8_t)addend; break;
-                case 1: *(uint16_t*)p = (uint16_t)addend; break;
-                case 2: *(uint32_t*)p = (uint32_t)addend; break;
-                case 3: *(uint64_t*)p = (uint64_t)addend; break;
+                case 0: { uint8_t v = (uint8_t)addend; memcpy(p, &v, sizeof(v)); break; }
+                case 1: { uint16_t v = (uint16_t)addend; memcpy(p, &v, sizeof(v)); break; }
+                case 2: { uint32_t v = (uint32_t)addend; memcpy(p, &v, sizeof(v)); break; }
+                case 3: { uint64_t v = (uint64_t)addend; memcpy(p, &v, sizeof(v)); break; }
                 default:
                     LL_FATAL_FOR(oc->L, "Unsupported r_length (%d) for UNSIGNED relocation",
                          ri->r_length);
@@ -455,10 +455,10 @@ encodeAddend(ObjectCode * oc, ll_site site,
                 return false;
             }
             switch (ri->r_length) {
-                case 0: *(uint8_t*)p  = (uint8_t)addend; break;
-                case 1: *(uint16_t*)p = (uint16_t)addend; break;
-                case 2: *(uint32_t*)p = (uint32_t)addend; break;
-                case 3: *(uint64_t*)p = (uint64_t)addend; break;
+                case 0: { uint8_t v = (uint8_t)addend; memcpy(p, &v, sizeof(v)); break; }
+                case 1: { uint16_t v = (uint16_t)addend; memcpy(p, &v, sizeof(v)); break; }
+                case 2: { uint32_t v = (uint32_t)addend; memcpy(p, &v, sizeof(v)); break; }
+                case 3: { uint64_t v = (uint64_t)addend; memcpy(p, &v, sizeof(v)); break; }
                 default:
                     LL_FATAL_FOR(oc->L, "Unsupported r_length (%d) for SUBTRACTOR relocation",
                          ri->r_length);
@@ -1891,7 +1891,7 @@ ocGetNames_MachO(ObjectCode* oc)
             if((nlist->n_type & LL_MACHO_N_TYPE) == LL_MACHO_N_UNDF
              && (nlist->n_type & LL_MACHO_N_EXT)
              && (nlist->n_value != 0)) {
-                unsigned long sz = nlist->n_value;
+                uint64_t sz = (uint64_t)nlist->n_value;
                 /* TODO: Figure out how to determine this from object */
                 ll_sym_type sym_type = LL_SYM_CODE;
 
@@ -1904,16 +1904,16 @@ ocGetNames_MachO(ObjectCode* oc)
                     if (sz > existing->size) {
                         ll_error_set(oc->L, LL_E_DUPSYM, "linker: trying to link COMMON symbols %s with"
                              " incompatible sizes: previous size %llu,"
-                             " new size %lu\n",
+                             " new size %llu\n",
                              nm,
                              (long long unsigned int) existing->size,
-                             sz);
+                             (unsigned long long) sz);
                         LL_LOG_ERROR_FOR(oc->L, "linker: trying to link COMMON symbols %s with"
                              " incompatible sizes: previous size %llu,"
-                             " new size %lu\n",
+                             " new size %llu\n",
                              nm,
                              (long long unsigned int) existing->size,
-                             sz);
+                             (unsigned long long) sz);
                         return 0;
                     }
                     nlist->n_value = (uintptr_t)existing->value;
