@@ -82,6 +82,8 @@ struct ll_coff_object_info {
     struct InitFiniList* fini; // Freed by ocRunFini_PEi386
     struct _Section* pdata;
     struct _Section* xdata;
+    struct _Section** registered_pdata;
+    size_t n_registered_pdata;
     COFF_HEADER_INFO* ch_info; // Freed by ocResolve_PEi386
     COFF_symbol* symbols;      // Freed by ocResolve_PEi386
     char* str_tab;

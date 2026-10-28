@@ -11,6 +11,7 @@
 
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 #if LL_TARGET_RISCV64
 
@@ -130,29 +131,18 @@ bool checkInt(ll_linker *L, const void *loc, int32_t v, int n) {
   return true;
 }
 
-// RISCV is little-endian by definition: We can rely on (implicit) casts.
+// RISCV helpers: use memcpy for alignment-safe access.
+uint8_t read8le(const uint8_t *p) { return *p; }
 void write8le(uint8_t *p, uint8_t v) { *p = v; }
 
-// RISCV is little-endian by definition: We can rely on (implicit) casts.
-uint8_t read8le(const uint8_t *p) { return *p; }
+void write16le(cinst_t *p, uint16_t v) { memcpy(p, &v, sizeof(v)); }
+uint16_t read16le(const cinst_t *p) { uint16_t v; memcpy(&v, p, sizeof(v)); return v; }
 
-// RISCV is little-endian by definition: We can rely on (implicit) casts.
-void write16le(cinst_t *p, uint16_t v) { *p = v; }
+uint32_t read32le(const inst_t *p) { uint32_t v; memcpy(&v, p, sizeof(v)); return v; }
+void write32le(inst_t *p, uint32_t v) { memcpy(p, &v, sizeof(v)); }
 
-// RISCV is little-endian by definition: We can rely on (implicit) casts.
-uint16_t read16le(const cinst_t *p) { return *p; }
-
-// RISCV is little-endian by definition: We can rely on (implicit) casts.
-uint32_t read32le(const inst_t *p) { return *p; }
-
-// RISCV is little-endian by definition: We can rely on (implicit) casts.
-void write32le(inst_t *p, uint32_t v) { *p = v; }
-
-// RISCV is little-endian by definition: We can rely on (implicit) casts.
-uint64_t read64le(const uint64_t *p) { return *p; }
-
-// RISCV is little-endian by definition: We can rely on (implicit) casts.
-void write64le(uint64_t *p, uint64_t v) { *p = v; }
+uint64_t read64le(const uint64_t *p) { uint64_t v; memcpy(&v, p, sizeof(v)); return v; }
+void write64le(uint64_t *p, uint64_t v) { memcpy(p, &v, sizeof(v)); }
 
 uint32_t extractBits(uint64_t v, uint32_t begin, uint32_t end) {
   return (v & ((1ULL << (begin + 1)) - 1)) >> end;
@@ -309,16 +299,16 @@ bool setCJType(ll_linker *L, cinst_t *loc, uint32_t val) {
 
 // Encode the addend according to the relocaction into the instruction.
 static bool encodeAddendRISCV64Site(ll_linker *L, ll_site site,
-                                    ll_elf_target_rel *rel, int32_t addend) {
+                                    ll_elf_target_rel *rel, int64_t addend) {
   // Encoding writes through work; address arithmetic is performed by the caller.
   addr_t P = (addr_t)site.work;
   LL_IF_DEBUG_FOR(L, linker,
            LL_DEBUG_FOR(L,
-               "Relocation type %s 0x%lx (%lu) symbol 0x%lx addend 0x%x (%u / "
-               "%d) P 0x%lx\n",
+               "Relocation type %s 0x%lx (%lu) symbol 0x%lx addend 0x%llx "
+               "P 0x%lx\n",
                relocationTypeToString(rel->r_info), LL_ELF64_R_TYPE(rel->r_info),
-               LL_ELF64_R_TYPE(rel->r_info), LL_ELF64_R_SYM(rel->r_info), addend,
-               addend, addend, P));
+               LL_ELF64_R_TYPE(rel->r_info), LL_ELF64_R_SYM(rel->r_info),
+               (unsigned long long)addend, P));
   switch (LL_ELF64_R_TYPE(rel->r_info)) {
   case LL_ELF_R_RISCV_32_PCREL:
   case LL_ELF_R_RISCV_32:
@@ -446,7 +436,7 @@ static bool computeAddendSite(ObjectCode *oc, Section *section,
                               ll_elf_target_rel *rel, ll_site site,
                               addr_t S, int64_t addend,
                               const ll_reloc_context *context,
-                              int32_t *computed) {
+                              int64_t *computed) {
   const addr_t work = (addr_t)site.work;
   const addr_t P = site.exec;
   const addr_t GOT_S = context->got_exec;
@@ -509,25 +499,26 @@ static bool computeAddendSite(ObjectCode *oc, Section *section,
     addr_t GOT_Target;
     if (GOT_S != 0) {
       // 1. Public symbol with GOT entry.
-      GOT_Target = GOT_S;
+      GOT_Target = GOT_S + A;
     } else {
       // 2. Fake GOT entry with symbol extra entry.
-      ll_site extra = ll_make_symbol_extra_riscv64_site(oc, context->symbol_index, S);
+      ll_site extra = ll_make_symbol_extra_riscv64_site(oc, context->symbol_index, S + A);
       GOT_Target = extra.exec;
     }
 
     ll_site stub;
-    if (elf_findStubSite(section, (void *)(uintptr_t)S, 0, &stub)) {
-      if (elf_makeStubSite(oc->L, section, (void *)(uintptr_t)S,
+    void *stub_target = (void *)(uintptr_t)(S + A);
+    if (elf_findStubSite(section, stub_target, 0, &stub)) {
+      if (elf_makeStubSite(oc->L, section, stub_target,
                            (void *)(uintptr_t)GOT_Target, 0, &stub)) {
         abort(/* could not find or make stub */);
       }
     }
     S = stub.exec;
     LL_IF_DEBUG_FOR(oc->L, linker, LL_DEBUG_FOR(oc->L, "R_RISCV_CALL_PLT: S = 0x%lx A = 0x%lx P = "
-                                "0x%lx (S + A) - P = 0x%lx \n",
-                                S, A, P, (S + A) - P));
-    *computed = (S + A) - P;
+                                "0x%lx S - P = 0x%lx \n",
+                                S, A, P, S - P));
+    *computed = S - P;
     return true;
   }
   case LL_ELF_R_RISCV_ADD8:
@@ -608,7 +599,7 @@ static int applyRISCV64(ObjectCode *oc, Section *section, uint32_t type,
   ll_elf_target_rel rel = {
     .r_info = LL_ELF64_R_INFO(context->symbol_index, type)
   };
-  int32_t value;
+  int64_t value;
   if (!computeAddendSite(oc, section, &rel, site, S, A, context, &value))
     return 0;
   return encodeAddendRISCV64Site(oc->L, site, &rel, value) == EXIT_SUCCESS;
@@ -678,9 +669,14 @@ static bool pairedHiValue(ObjectCode *oc, Section *section,
                             .exec = section->exec_start + hi->r_offset};
       traceAddend(oc, rel, site, (addr_t)symbol->addr, hi->r_addend,
                   &context, (unsigned)i);
+      int64_t computed = 0;
+      if (!computeAddendSite(oc, section, rel, site, (addr_t)symbol->addr,
+                             hi->r_addend, &context, &computed)) {
+        return false;
+      }
+      *value = (int32_t)computed;
       *found = true;
-      return computeAddendSite(oc, section, rel, site, (addr_t)symbol->addr,
-                               hi->r_addend, &context, value);
+      return true;
     }
   }
   return true;

@@ -282,10 +282,9 @@ a non-Windows host returns LL_E_UNSUPPORTED when those services are required.
 The real PE object code can compile with LL_ALL_BACKENDS on another host.
 Registry admission and execution policy remain separate integration work.
 Native DLL/unwind call order and ownership are preserved; native Windows
-runtime qualification remains required. The retained direct COFF string-table
-count load assumes four-byte alignment. A normal one-data-symbol MinGW GCC
-object violates that assumption; the separate repair remains unapplied pending
-approval. Portable data controls use an explicitly aligned compiler fixture.
+runtime qualification remains required. COFF string-table size loads use memcpy
+to safely support unaligned string tables produced by MinGW GCC compilers. Portable
+data controls verify both aligned and unaligned layouts.
 
 Backend host memory services
 ----------------------------

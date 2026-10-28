@@ -33,7 +33,7 @@ def native_command(logs):
                             raw_text = "\n".join(lines[j:i])
                             raw_text = raw_text[len("GHC response file arguments: "):]
                             cleaned = re.sub(
-                                r"(?:(?:/(?:nix/store/[^/\s]+|usr(?:/local)?|msys64/[^/\s]+|opt/[^/\s]+))?/bin/[a-zA-Z0-9_.-]*ar(?:\.exe)?|(?:\s|^)[a-zA-Z0-9_.-]*ar(?:\.exe)?):\s*(?:warning|note):[^\n]*\n?",
+                                r"(?:(?:/(?:nix/store/[^/\s]+|usr(?:/local)?|msys64/[^/\s]+|opt/[^/\s]+))?/bin/[a-zA-Z0-9_.-]*ar(?:\.exe)?|(?<!\S)[a-zA-Z0-9_.-]*ar(?:\.exe)?):\s*(?:warning|note):[^\n]*\n?",
                                 "",
                                 raw_text,
                             )

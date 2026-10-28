@@ -36,6 +36,9 @@ apply_arm(ObjectCode *oc, Section *section, uint32_t reloc_type, ll_site site,
         T = is_target_thm;
         S &= ~UINT32_C(1);
     }
+    if (reloc_type == 0) {
+        return true;
+    }
     size_t width = (reloc_type == COMPAT_R_ARM_THM_JUMP8 ||
                     reloc_type == COMPAT_R_ARM_THM_JUMP11) ? 2 : 4;
     union { uint32_t word; uint16_t halves[2]; } storage = {0};

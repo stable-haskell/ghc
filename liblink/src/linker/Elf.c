@@ -1379,6 +1379,9 @@ do_Elf_Rel_relocations ( ObjectCode* oc, char* ehdrC,
    for (j = 0; j < nent; j++) {
        ll_elf_target_addr offset = rtab[j].r_offset;
        ll_elf_target_addr info   = rtab[j].r_info;
+       if (LL_ELF_R_TYPE(info) == 0) {
+           continue;
+       }
 
        ll_site site = {.work = (uint8_t *)targ + offset,
                        .exec = oc->sections[target_shndx].exec_start + offset};
@@ -1852,9 +1855,12 @@ ocResolve_ELF ( ObjectCode* oc )
                     secno = shndxTable[i];
                 }
 #endif
+                if (secno >= (ll_elf_target_word)oc->n_sections || oc->sections[secno].start == NULL) {
+                    ll_error_set(oc->L, LL_E_FORMAT, "invalid section index %lu for section symbol", (unsigned long)secno);
+                    return 0;
+                }
                 LL_CHECK_FOR(oc->L, symbol->elf_sym->st_name == 0);
                 LL_CHECK_FOR(oc->L, symbol->elf_sym->st_value == 0);
-                LL_CHECK_FOR(oc->L, 0x0 != oc->sections[ secno ].start);
                 symbol->addr = (void *)oc->sections[secno].exec_start;
             }
         }

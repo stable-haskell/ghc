@@ -59,16 +59,12 @@ static void test_object(ll_linker *owner, const char *path)
         return;
     }
     CHECK(object->format_kind == LL_OBJECT_FORMAT_COFF, "ARM64 format identity differs");
-    void *strings = object->coff_info->str_tab;
-    void *names[128] = {0}, *relocs[128] = {0};
     int count = object->n_sections;
     CHECK(count < 128, "too many ARM64 fixture sections");
     Section *text_section = NULL;
     for (int i = 0; i < count && i < 128; ++i) {
         Section *section = &object->sections[i];
         if (!section->coff_info) continue;
-        names[i] = section->coff_info->name;
-        relocs[i] = section->coff_info->relocs;
         if (section->kind != SECTIONKIND_DEBUG && section->kind != SECTIONKIND_OTHER &&
             !(section->coff_info->props & (LL_COFF_IMAGE_SCN_MEM_DISCARDABLE | LL_COFF_IMAGE_SCN_LNK_REMOVE)) &&
             section->start && section->size) {
@@ -97,11 +93,6 @@ static void test_object(ll_linker *owner, const char *path)
     ghciRemoveSymbolTable(owner, "arm64_data", NULL);
     removeOcSymbols(object);
     freeObjectCode(object);
-    LL_FREE_FOR(owner, strings);
-    for (int i = 0; i < count && i < 128; ++i) {
-        LL_FREE_FOR(owner, names[i]);
-        LL_FREE_FOR(owner, relocs[i]);
-    }
 }
 
 int main(int argc, char **argv)

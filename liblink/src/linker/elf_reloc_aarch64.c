@@ -96,35 +96,41 @@ encodeAddendAarch64Site(ll_linker *L, ll_site site, ll_elf_target_rel *rel,
         /* static misc relocations */
         /* static data relocations */
         case COMPAT_R_AARCH64_ABS64:
-        case COMPAT_R_AARCH64_PREL64:
-            *(uint64_t*)P = (uint64_t)addend;
+        case COMPAT_R_AARCH64_PREL64: {
+            uint64_t v = (uint64_t)addend;
+            memcpy(site.work, &v, sizeof(v));
             break;
+        }
         case COMPAT_R_AARCH64_ABS32:
             if (!checkRelocationAarch64(L, isInt64(32, addend),
                                        LL_E_RELOC_RANGE, rel, addend,
                                        "value is out of range"))
                 return EXIT_FAILURE;
             LL_FALLTHROUGH;
-        case COMPAT_R_AARCH64_PREL32:
+        case COMPAT_R_AARCH64_PREL32: {
             if (!checkRelocationAarch64(L, isInt64(32, addend),
                                        LL_E_RELOC_RANGE, rel, addend,
                                        "value is out of range"))
                 return EXIT_FAILURE;
-            *(uint32_t*)P = (uint32_t)addend;
+            uint32_t v = (uint32_t)addend;
+            memcpy(site.work, &v, sizeof(v));
             break;
+        }
         case COMPAT_R_AARCH64_ABS16:
             if (!checkRelocationAarch64(L, isInt64(16, addend),
                                        LL_E_RELOC_RANGE, rel, addend,
                                        "value is out of range"))
                 return EXIT_FAILURE;
             LL_FALLTHROUGH;
-        case COMPAT_R_AARCH64_PREL16:
+        case COMPAT_R_AARCH64_PREL16: {
             if (!checkRelocationAarch64(L, isInt64(16, addend),
                                        LL_E_RELOC_RANGE, rel, addend,
                                        "value is out of range"))
                 return EXIT_FAILURE;
-            *(uint16_t*)P = (uint16_t)addend;
+            uint16_t v = (uint16_t)addend;
+            memcpy(site.work, &v, sizeof(v));
             break;
+        }
         /* static aarch64 relocations */
         /* - pc relative relocations */
         case COMPAT_R_AARCH64_ADR_PREL_PG_HI21: {

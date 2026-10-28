@@ -178,8 +178,12 @@ bool ocProtectExtras(ObjectCode* oc)
  * is only an address here: indexing it as SymbolExtra[] would use host size. */
 static void *symbolExtraSlot(ObjectCode const *oc, unsigned long symbolNumber)
 {
-    LL_ASSERT_FOR(oc->L, symbolNumber >= oc->first_symbol_extra
-            && symbolNumber - oc->first_symbol_extra < oc->n_symbol_extras);
+    if (oc->symbol_extras == NULL ||
+        symbolNumber < oc->first_symbol_extra ||
+        symbolNumber - oc->first_symbol_extra >= oc->n_symbol_extras) {
+        LL_ASSERT_FOR(oc->L, false);
+        return NULL;
+    }
     return (unsigned char *)(void *)oc->symbol_extras +
         (symbolNumber - oc->first_symbol_extra) * oc->symbol_extra_stride;
 }
@@ -188,6 +192,7 @@ ll_symbol_extra_x86_64 *ll_make_symbol_extra_x86_64(
     ObjectCode const *oc, unsigned long symbolNumber, uint64_t target)
 {
     ll_symbol_extra_x86_64 *extra = symbolExtraSlot(oc, symbolNumber);
+    if (extra == NULL) return NULL;
     // jmp *-14(%rip)
     // 0xFF 25 is opcode + ModRM of near absolute indirect jump
     // Two bytes trailing padding, needed for TLSGD GOT entries
@@ -203,6 +208,7 @@ ll_site ll_make_symbol_extra_x86_64_site(
 {
     ll_symbol_extra_x86_64 *extra =
         ll_make_symbol_extra_x86_64(oc, symbolNumber, target);
+    if (extra == NULL) return (ll_site){0};
     const uintptr_t offset = (symbolNumber - oc->first_symbol_extra) *
                              oc->symbol_extra_stride;
     return (ll_site){.work = (uint8_t *)(void *)extra,
@@ -213,6 +219,7 @@ ll_symbol_extra_riscv64 *ll_make_symbol_extra_riscv64(
     ObjectCode const *oc, unsigned long symbolNumber, uint64_t target)
 {
     ll_symbol_extra_riscv64 *extra = symbolExtraSlot(oc, symbolNumber);
+    if (extra == NULL) return NULL;
     // Fake GOT entry (used like GOT, but located in symbol extras)
     extra->addr = target;
     return extra;
@@ -223,6 +230,7 @@ ll_site ll_make_symbol_extra_riscv64_site(
 {
     ll_symbol_extra_riscv64 *extra =
         ll_make_symbol_extra_riscv64(oc, symbolNumber, target);
+    if (extra == NULL) return (ll_site){0};
     const uintptr_t offset = (symbolNumber - oc->first_symbol_extra) *
                              oc->symbol_extra_stride;
     return (ll_site){.work = (uint8_t *)(void *)extra,
@@ -233,6 +241,7 @@ ll_symbol_extra_powerpc *ll_make_symbol_extra_powerpc(
     ObjectCode const *oc, unsigned long symbolNumber, uint32_t target)
 {
     ll_symbol_extra_powerpc *extra = symbolExtraSlot(oc, symbolNumber);
+    if (extra == NULL) return NULL;
     /* Preserve native field stores. Foreign instruction byte order is a
      * separate target execution/relocation policy, not supplied here. */
     // lis r12, hi16(target)

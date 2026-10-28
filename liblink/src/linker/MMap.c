@@ -249,6 +249,9 @@ ll_mprotect_for_linker(ll_linker *L, void *start, size_t len, MemoryAccess mode)
     SetLastError(error);
     return false;
   }
+  if (mode == MEM_READ_EXECUTE || mode == MEM_READ_WRITE_EXECUTE) {
+    ll_compat_flush_icache_for(&L->services, start, len);
+  }
   return true;
 }
 
@@ -487,6 +490,9 @@ bool ll_mprotect_for_linker(ll_linker *L, void *start, size_t len, MemoryAccess 
                       len, start, memoryAccessDescription(L, mode));
         errno = error;
         return false;
+    }
+    if (mode == MEM_READ_EXECUTE || mode == MEM_READ_WRITE_EXECUTE) {
+        ll_compat_flush_icache_for(&L->services, start, len);
     }
     return true;
 }

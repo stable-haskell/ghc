@@ -338,6 +338,10 @@ bool checkAndLoadImportLibrary( ll_linker *L, pathchar* arch_name, char* member_
     }
 
     char* symbol  = strtok(image, "\0");
+    if (!symbol) {
+        LL_FREE_FOR(L, image);
+        return false;
+    }
     int symLen    = strlen(symbol) + 1;
     int nameLen   = n - symLen;
     char* dllName = LL_MALLOC_FOR(L, sizeof(char) * nameLen,
@@ -348,49 +352,57 @@ bool checkAndLoadImportLibrary( ll_linker *L, pathchar* arch_name, char* member_
     mbstowcs(dll, dllName, nameLen);
     LL_FREE_FOR(L, dllName);
 
-    LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "loadArchive: read symbol %s from lib `%" PATH_FMT "'\n", symbol, dll));
+    char *symbol_copy = LL_MALLOC_FOR(L, symLen, "checkAndLoadImportLibrary(symbol)");
+    memcpy(symbol_copy, symbol, symLen);
+
+    LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "loadArchive: read symbol %s from lib `%" PATH_FMT "'\n", symbol_copy, dll));
     // We must call `addDLL_PEi386` directly rather than `addDLL` because `addDLL`
     // is now a wrapper around `loadNativeObj` which acquires a lock which we
     // already have here.
     HINSTANCE instance;
     const char* result = addDLL_PEi386(L, dll, &instance);
 
-    LL_FREE_FOR(L, image);
-
     if (result != NULL) {
         LL_LOG_ERROR_FOR(L, "Could not load `%" PATH_FMT "'. Reason: %s\n", dll, result);
         L->load_dll_warn = true;
 
+        LL_FREE_FOR(L, symbol_copy);
         LL_FREE_FOR(L, dll);
+        LL_FREE_FOR(L, image);
         fseek(f, -(n + sizeof_COFF_import_Header), SEEK_CUR);
         return false;
     }
-
-    LL_FREE_FOR(L, dll);
 
     // See Note [Windows API Set]
     // We must immediately tie the symbol to the shared library.  The easiest
     // way is to load the symbol immediately. We already have all the
     // information so might as well
-    ll_symbol_addr* sym = lookupSymbolInDLL_PEi386 (L, symbol,
+    ll_symbol_addr* sym = lookupSymbolInDLL_PEi386 (L, symbol_copy,
                                                     instance, dll, NULL);
 
     // Could be an import descriptor etc, skip if no symbol.
-    if (!sym)
-      return true;
+    if (!sym) {
+        LL_FREE_FOR(L, symbol_copy);
+        LL_FREE_FOR(L, dll);
+        LL_FREE_FOR(L, image);
+        return true;
+    }
 
     // The symbol must have been found, and we can add it to the RTS symbol table
-    LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "checkAndLoadImportLibrary: resolved symbol %s to %p\n", symbol, sym));
+    LL_IF_DEBUG_FOR(L, linker, LL_DEBUG_FOR(L, "checkAndLoadImportLibrary: resolved symbol %s to %p\n", symbol_copy, sym));
     // Because the symbol has been loaded before we actually need it, if a
     // stronger reference wants to add a duplicate we should discard this
     // one to preserve link order.
     ll_sym_type symType = LL_SYM_DUP_DISCARD | LL_SYM_HIDDEN;
     symType |= hdr.Type == LL_COFF_IMPORT_OBJECT_CODE ? LL_SYM_CODE : LL_SYM_DATA;
 
-    if (!ghciInsertSymbolTable(L, dll, symbol, sym, false, symType, 0, NULL))
-      return false;
-
-    return true;
+    bool inserted = ghciInsertSymbolTable(L, dll, symbol_copy, sym, false, symType, 0, NULL);
+    if (!inserted) {
+        LL_FREE_FOR(L, symbol_copy);
+    }
+    LL_FREE_FOR(L, dll);
+    LL_FREE_FOR(L, image);
+    return inserted;
 }
 
 ll_symbol_addr*
@@ -538,6 +550,21 @@ bool ll_pe_host_register_unwind(ObjectCode *oc, unsigned target_arch,
                      (unsigned long)win_error);
         return false;
     }
+    size_t count = oc->coff_info->n_registered_pdata;
+    struct _Section **arr = (struct _Section **)LL_REALLOC_FOR(
+        oc->L, oc->coff_info->registered_pdata,
+        (count + 1) * sizeof(struct _Section *),
+        "ll_pe_host_register_unwind"
+    );
+    if (arr == NULL) {
+        RtlDeleteFunctionTable(section.start);
+        ll_error_set(oc->L, LL_E_NOMEM, "out of memory allocating unwind table registration list");
+        return false;
+    }
+    arr[count] = &oc->sections[section_index];
+    oc->coff_info->registered_pdata = arr;
+    oc->coff_info->n_registered_pdata = count + 1;
+    oc->coff_info->pdata = &oc->sections[section_index];
 #else
     /* Other host architectures have no supported PE unwind table. */
     (void)section;
@@ -547,9 +574,27 @@ bool ll_pe_host_register_unwind(ObjectCode *oc, unsigned target_arch,
 
 void ll_pe_host_unregister_unwind(ObjectCode *oc)
 {
-    if (!RtlDeleteFunctionTable (oc->coff_info->pdata->start))
-      LL_DEBUG_FOR(oc->L, "Unable to remove Exception handlers for %" PATH_FMT "\n",
-                  oc->fileName);
+    if (oc == NULL || oc->coff_info == NULL) return;
+#if defined(x86_64_HOST_ARCH) || defined(aarch64_HOST_ARCH)
+    for (size_t i = 0; i < oc->coff_info->n_registered_pdata; i++) {
+        Section *sec = oc->coff_info->registered_pdata[i];
+        if (sec && sec->start) {
+            if (!RtlDeleteFunctionTable(sec->start)) {
+                LL_DEBUG_FOR(oc->L, "Unable to remove Exception handlers for %" PATH_FMT "\n",
+                             oc->fileName);
+            }
+        }
+    }
+    if (oc->coff_info->registered_pdata) {
+        LL_FREE_FOR(oc->L, oc->coff_info->registered_pdata);
+        oc->coff_info->registered_pdata = NULL;
+        oc->coff_info->n_registered_pdata = 0;
+    }
+    if (oc->coff_info->pdata && oc->coff_info->pdata->start) {
+        RtlDeleteFunctionTable(oc->coff_info->pdata->start);
+    }
+#endif
+    oc->coff_info->pdata = NULL;
 }
 
 bool ll_pe_host_image_base(ll_linker *L, uintptr_t *base)

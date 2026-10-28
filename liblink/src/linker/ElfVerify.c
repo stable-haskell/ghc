@@ -279,6 +279,7 @@ int ocValidateImage_ELF(ObjectCode *oc)
     size_t extendedCount = 0;
     uintmax_t bssSize = 0;
     uintmax_t symbolCount = 0;
+    size_t symtabCount = 0;
     for (size_t i = 0; i < count; i++) {
         const ll_elf_target_shdr *section = &sections[i];
         if (section->sh_type != LL_ELF_SHT_NOBITS && section->sh_type != LL_ELF_SHT_NULL &&
@@ -301,6 +302,9 @@ int ocValidateImage_ELF(ObjectCode *oc)
             bssSize += section->sh_size + padding;
         }
         if (section->sh_type == LL_ELF_SHT_SYMTAB) {
+            if (symtabCount > 0)
+                return invalidElf(oc, LL_E_UNSUPPORTED, "multiple ELF symbol tables are not supported");
+            symtabCount++;
             uintmax_t symbols = section->sh_size / sizeof(ll_elf_target_sym);
             if (symbols > (uintmax_t)INT_MAX - symbolCount)
                 return invalidElf(oc, LL_E_UNSUPPORTED, "too many ELF symbols");
@@ -363,6 +367,10 @@ int ocValidateImage_ELF(ObjectCode *oc)
 #endif
                 if (index < LL_ELF_SHN_LORESERVE && index >= count)
                     return invalidElf(oc, LL_E_FORMAT, "invalid ELF symbol section index");
+                if (LL_ELF_ST_TYPE(table[j].st_info) == LL_ELF_STT_SECTION &&
+                    (index == LL_ELF_SHN_UNDEF || index >= count ||
+                     table[j].st_shndx == LL_ELF_SHN_ABS || table[j].st_shndx == LL_ELF_SHN_COMMON))
+                    return invalidElf(oc, LL_E_FORMAT, "invalid ELF section symbol section index");
                 uintmax_t value = table[j].st_value;
 #if LL_TARGET_ARM
                 /* The low bit encodes Thumb mode, not a byte in the section. */

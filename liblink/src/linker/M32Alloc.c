@@ -549,6 +549,7 @@ m32_allocator_flush_for(ll_linker *L, m32_allocator *alloc) {
          alloc->protection_failed = true;
          return false;
        }
+       ll_compat_flush_icache_for(&L->services, page, page->filled_page.size);
      }
    }
    return true;
@@ -560,7 +561,15 @@ m32_allocator_flush_for(ll_linker *L, m32_allocator *alloc) {
 static bool
 m32_is_large_object(ll_linker *L, size_t size, size_t alignment)
 {
-   return size >= ll_page_size_for(L) - ROUND_UP(sizeof(struct m32_page_t), alignment);
+   size_t pgsz = ll_page_size_for(L);
+   if (alignment >= pgsz) {
+      return true;
+   }
+   size_t hdr = ROUND_UP(sizeof(struct m32_page_t), alignment);
+   if (hdr >= pgsz) {
+      return true;
+   }
+   return size >= pgsz - hdr;
 }
 
 static void
@@ -592,12 +601,18 @@ m32_alloc_for(ll_linker *L, struct m32_allocator_t *alloc, size_t size, size_t a
    }
    size_t pgsz = ll_page_size_for(L);
 
-   if (m32_is_large_object(L, size,alignment)) {
+   if (m32_is_large_object(L, size, alignment)) {
       // large object
-      size_t alsize = ROUND_UP(sizeof(struct m32_page_t), alignment);
+      size_t map_size;
+      if (alignment > pgsz) {
+         map_size = ROUND_UP(sizeof(struct m32_page_t) + alignment + size, pgsz);
+      } else {
+         size_t alsize = ROUND_UP(sizeof(struct m32_page_t), alignment);
+         map_size = alsize + size;
+      }
       // TODO: lower-bound allocation size to allocation granularity and return
       // remainder to free pool.
-      struct m32_page_t *page = m32_map(L, alsize+size);
+      struct m32_page_t *page = m32_map(L, map_size);
       if (page == NULL) {
 #if !defined(mingw32_HOST_OS)
           ll_error_set(L, LL_E_NOMEM,
@@ -609,16 +624,17 @@ m32_alloc_for(ll_linker *L, struct m32_allocator_t *alloc, size_t size, size_t a
           ll_error_set(L, LL_E_NOMEM,
                        "m32_alloc: Allocation of %zu bytes resulted in pages above 4GB (%p)",
                        size, (void *)page);
-          m32_unmap(L, page, alsize + size, "m32_alloc");
+          m32_unmap(L, page, map_size, "m32_alloc");
           ll_report_mem_failure_for(L);
           LL_LOG_ERROR_FOR(L, "m32_alloc: Allocation of %zu bytes resulted in pages above 4GB (%p)",
                size, (void *)page);
           return NULL;
       }
       SET_PAGE_TYPE(page, FILLED_PAGE);
-      page->filled_page.size = alsize + size;
+      page->filled_page.size = map_size;
       m32_allocator_push_filled_list(L, &alloc->unprotected_list, (struct m32_page_t *) page);
-      uint8_t *res = (uint8_t *) page + alsize;
+      uintptr_t payload = ROUND_UP((uintptr_t)page + sizeof(struct m32_page_t), alignment);
+      uint8_t *res = (uint8_t *)payload;
       m32_report_allocation(L, alloc, res, size);
       return res;
    }

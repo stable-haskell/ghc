@@ -106,7 +106,9 @@ static void default_on_mem_failure(void *ctx)
 static void default_flush_icache(void *ctx, void *p, size_t len)
 {
     (void)ctx;
-#if defined(__GNUC__) || defined(__clang__)
+#if defined(_WIN32)
+    FlushInstructionCache(GetCurrentProcess(), p, len);
+#elif defined(__GNUC__) || defined(__clang__)
     __builtin___clear_cache((char *)p, (char *)p + len);
 #else
     (void)p;

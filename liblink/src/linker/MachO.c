@@ -327,6 +327,12 @@ isLoadStore(uint32_t *p) {
     return (*p & 0x3B000000) == 0x39000000;
 }
 
+static inline uint64_t read_unaligned_u(const void *p, unsigned bytes) {
+    uint64_t v = 0;
+    memcpy(&v, p, bytes);
+    return v;
+}
+
 static bool
 decodeAddend(ObjectCode * oc, ll_site site, MachORelocationInfo * ri,
              int64_t *addend) {
@@ -339,10 +345,10 @@ decodeAddend(ObjectCode * oc, ll_site site, MachORelocationInfo * ri,
     switch(ri->r_type) {
         case LL_MACHO_ARM64_RELOC_UNSIGNED: {
             switch (ri->r_length) {
-                case 0: *addend = signExtend(*(uint8_t*)p,  8 << ri->r_length); return true;
-                case 1: *addend = signExtend(*(uint16_t*)p, 8 << ri->r_length); return true;
-                case 2: *addend = signExtend(*(uint32_t*)p, 8 << ri->r_length); return true;
-                case 3: *addend = signExtend(*(uint64_t*)p, 8 << ri->r_length); return true;
+                case 0: *addend = signExtend(read_unaligned_u(p, 1), 8 << ri->r_length); return true;
+                case 1: *addend = signExtend(read_unaligned_u(p, 2), 8 << ri->r_length); return true;
+                case 2: *addend = signExtend(read_unaligned_u(p, 4), 8 << ri->r_length); return true;
+                case 3: *addend = signExtend(read_unaligned_u(p, 8), 8 << ri->r_length); return true;
                 default:
                     LL_FATAL_FOR(oc->L, "Unsupported r_length (%d) for UNSIGNED relocation",
                          ri->r_length);
@@ -350,10 +356,10 @@ decodeAddend(ObjectCode * oc, ll_site site, MachORelocationInfo * ri,
         }
         case LL_MACHO_ARM64_RELOC_SUBTRACTOR: {
             switch (ri->r_length) {
-                case 0: *addend = signExtend(*(uint8_t*)p,  8 << ri->r_length); return true;
-                case 1: *addend = signExtend(*(uint16_t*)p, 8 << ri->r_length); return true;
-                case 2: *addend = signExtend(*(uint32_t*)p, 8 << ri->r_length); return true;
-                case 3: *addend = signExtend(*(uint64_t*)p, 8 << ri->r_length); return true;
+                case 0: *addend = signExtend(read_unaligned_u(p, 1), 8 << ri->r_length); return true;
+                case 1: *addend = signExtend(read_unaligned_u(p, 2), 8 << ri->r_length); return true;
+                case 2: *addend = signExtend(read_unaligned_u(p, 4), 8 << ri->r_length); return true;
+                case 3: *addend = signExtend(read_unaligned_u(p, 8), 8 << ri->r_length); return true;
                 default:
                     LL_FATAL_FOR(oc->L, "Unsupported r_length (%d) for SUBTRACTOR relocation",
                          ri->r_length);
@@ -1579,9 +1585,9 @@ ocGetNames_MachO(ObjectCode* oc)
 {
     unsigned curSymbol = 0;
 
-    unsigned long commonSize = 0;
+    size_t commonSize = 0;
     ll_symbol_addr* commonStorage = NULL;
-    unsigned long commonCounter;
+    uintptr_t commonCounter = 0;
 
     LL_IF_DEBUG_FOR(oc->L, linker,LL_DEBUG_FOR(oc->L, "ocGetNames_MachO: %s start\n",  OC_INFORMATIVE_FILENAME(oc)));
 
@@ -1869,7 +1875,7 @@ ocGetNames_MachO(ObjectCode* oc)
             commonCounter = block.site.exec;
         } else {
             commonStorage = LL_CALLOC_FOR(oc->L, 1, commonSize, "ocGetNames_MachO(common symbols)");
-            commonCounter = (unsigned long)commonStorage;
+            commonCounter = (uintptr_t)commonStorage;
         }
         if (commonStorage == NULL) {
             ll_error_set(oc->L, LL_E_NOMEM, "cannot allocate Mach-O COMMON storage");
@@ -1910,7 +1916,7 @@ ocGetNames_MachO(ObjectCode* oc)
                              sz);
                         return 0;
                     }
-                    nlist->n_value = (unsigned long)existing->value;
+                    nlist->n_value = (uintptr_t)existing->value;
                     oc->macho_info->macho_symbols[i].addr = existing->value;
                     LL_IF_DEBUG_FOR(oc->L, linker_verbose,
                              LL_DEBUG_FOR(oc->L, "ocGetNames_MachO: COMMON symbol %s"

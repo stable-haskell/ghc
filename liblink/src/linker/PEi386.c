@@ -535,7 +535,7 @@ void freePreloadObjectFile_PEi386(ObjectCode *oc)
         freeNoExecExtras(oc);
         /* Release the unwinder information.
            See Note [Exception Unwinding].  */
-        if (oc->coff_info->pdata) {
+        if (oc->coff_info->pdata || oc->coff_info->registered_pdata) {
             ll_pe_host_unregister_unwind(oc);
             oc->coff_info->xdata = NULL;
             oc->coff_info->pdata = NULL;
@@ -549,9 +549,31 @@ void freePreloadObjectFile_PEi386(ObjectCode *oc)
         oc->coff_info->fini = NULL;
         if (oc->coff_info->ch_info) {
            LL_FREE_FOR(oc->L, oc->coff_info->ch_info);
+           oc->coff_info->ch_info = NULL;
+        }
+        if (oc->coff_info->symbols) {
+           LL_FREE_FOR(oc->L, oc->coff_info->symbols);
+           oc->coff_info->symbols = NULL;
+        }
+        if (oc->coff_info->str_tab) {
+           LL_FREE_FOR(oc->L, oc->coff_info->str_tab);
+           oc->coff_info->str_tab = NULL;
         }
         LL_FREE_FOR(oc->L, oc->coff_info);
         oc->coff_info = NULL;
+    }
+
+    for (int i = 0; i < oc->n_sections; i++){
+        Section *section = &oc->sections[i];
+        if (section->coff_info) {
+            LL_FREE_FOR(oc->L, section->coff_info->name);
+            if (section->coff_info->relocs) {
+                LL_FREE_FOR(oc->L, section->coff_info->relocs);
+                section->coff_info->relocs = NULL;
+            }
+            LL_FREE_FOR(oc->L, section->coff_info);
+            section->coff_info = NULL;
+        }
     }
 }
 
@@ -988,21 +1010,94 @@ ocVerifyImage_PEi386 ( ObjectCode* oc )
    if (!info)
      return false;
 
+   /* Bound and validate the section table span. */
+   size_t sectab_offset = (size_t)info->sizeOfHeader + info->sizeOfOptionalHeader;
+   if (sectab_offset > oc->fileSize) {
+     ll_error_set(oc->L, LL_E_FORMAT, "invalid COFF section table offset");
+     return false;
+   }
+   if ((size_t)info->numberOfSections > (oc->fileSize - sectab_offset) / sizeof_COFF_section) {
+     ll_error_set(oc->L, LL_E_FORMAT, "COFF section table extends past file size");
+     return false;
+   }
+
+   /* Bound and validate the symbol table span and multiplication. */
+   uint32_t sym_size = getSymbolSize(oc->L, info);
+   if (sym_size == 0) {
+     ll_error_set(oc->L, LL_E_FORMAT, "invalid COFF symbol size");
+     return false;
+   }
+   if (info->numberOfSymbols > 0) {
+     if (info->pointerToSymbolTable > oc->fileSize) {
+       ll_error_set(oc->L, LL_E_FORMAT, "invalid COFF symbol table offset");
+       return false;
+     }
+     if ((size_t)info->numberOfSymbols > (oc->fileSize - info->pointerToSymbolTable) / sym_size) {
+       ll_error_set(oc->L, LL_E_FORMAT, "COFF symbol table extends past file size");
+       return false;
+     }
+     if ((size_t)info->numberOfSymbols > SIZE_MAX / sizeof(COFF_symbol)) {
+       ll_error_set(oc->L, LL_E_FORMAT, "COFF symbol count causes integer overflow");
+       return false;
+     }
+   }
+
+   /* Bound and validate the string table span. */
+   size_t strtab_offset = (size_t)info->pointerToSymbolTable + (size_t)info->numberOfSymbols * sym_size;
+   if (strtab_offset + sizeof(uint32_t) > oc->fileSize) {
+     ll_error_set(oc->L, LL_E_FORMAT, "COFF string table header extends past file size");
+     return false;
+   }
+   uint32_t strtab_size;
+   memcpy(&strtab_size, (uint8_t *)oc->image + strtab_offset, sizeof(strtab_size));
+   if (strtab_size < PEi386_STRTAB_OFFSET || (size_t)strtab_size > oc->fileSize - strtab_offset) {
+     ll_error_set(oc->L, LL_E_FORMAT, "invalid COFF string table size %u", strtab_size);
+     return false;
+   }
+
+   COFF_section* sectab = (COFF_section*) (((uint8_t*)(oc->image)) + sectab_offset);
+
+   /* Pre-validate all section raw data and relocation table bounds before allocating. */
+   for (uint32_t s = 0; s < info->numberOfSections; s++) {
+     COFF_section* sectab_s = (COFF_section*)myindex(sizeof_COFF_section, sectab, s);
+     if (sectab_s->SizeOfRawData > 0) {
+       if (sectab_s->PointerToRawData > oc->fileSize ||
+           (size_t)sectab_s->SizeOfRawData > oc->fileSize - sectab_s->PointerToRawData) {
+         ll_error_set(oc->L, LL_E_FORMAT, "COFF section %u raw data extends past file size", s);
+         return false;
+       }
+     }
+     if (sectab_s->NumberOfRelocations > 0 || (sectab_s->Characteristics & LL_COFF_IMAGE_SCN_LNK_NRELOC_OVFL)) {
+       if (sectab_s->PointerToRelocations > oc->fileSize) {
+         ll_error_set(oc->L, LL_E_FORMAT, "COFF section %u invalid relocation offset", s);
+         return false;
+       }
+       uint32_t n_relocs = sectab_s->NumberOfRelocations;
+       size_t r_offset = 0;
+       if (sectab_s->Characteristics & LL_COFF_IMAGE_SCN_LNK_NRELOC_OVFL) {
+         if (sizeof(COFF_reloc) > oc->fileSize - sectab_s->PointerToRelocations) {
+           ll_error_set(oc->L, LL_E_FORMAT, "COFF section %u overflow relocation entry extends past file size", s);
+           return false;
+         }
+         COFF_reloc first_rel;
+         memcpy(&first_rel, (uint8_t *)oc->image + sectab_s->PointerToRelocations, sizeof(first_rel));
+         n_relocs = first_rel.VirtualAddress - 1;
+         r_offset = 1;
+       }
+       if ((size_t)n_relocs > SIZE_MAX / sizeof(COFF_reloc) ||
+           (size_t)(n_relocs + r_offset) > (oc->fileSize - sectab_s->PointerToRelocations) / sizeof(COFF_reloc)) {
+         ll_error_set(oc->L, LL_E_FORMAT, "COFF section %u relocations extend past file size", s);
+         return false;
+       }
+     }
+   }
+
    uint32_t i, noRelocs;
-   COFF_section* sectab;
    COFF_symbol*  symtab;
    uint8_t*      strtab;
 
-   sectab = (COFF_section*) (
-               ((uint8_t*)(oc->image))
-               + info->sizeOfHeader + info->sizeOfOptionalHeader
-            );
-   symtab = (COFF_symbol*) (
-               ((uint8_t*)(oc->image))
-               + info->pointerToSymbolTable
-            );
-   strtab = ((uint8_t*)symtab)
-            + info->numberOfSymbols * getSymbolSize(oc->L, info);
+   symtab = (COFF_symbol*) (((uint8_t*)(oc->image)) + info->pointerToSymbolTable);
+   strtab = ((uint8_t*)(oc->image)) + strtab_offset;
 
    /* .BSS Section is initialized in ocGetNames_PEi386
       but we need the Sections array initialized here already. */
@@ -1027,16 +1122,13 @@ ocVerifyImage_PEi386 ( ObjectCode* oc )
       COFF_symbol is a union type, so we have to "adjust" the array to be able
       to access it using normal subscript notation. This eliminates the complex
       indexing later on.  */
-   uint32_t s_symbols = info->numberOfSymbols * sizeof(COFF_symbol);
-   uint32_t sym_size  = getSymbolSize(oc->L, info);
+   size_t s_symbols = (size_t)info->numberOfSymbols * sizeof(COFF_symbol);
    oc->coff_info->symbols
      = LL_MALLOC_FOR(oc->L, s_symbols, "ocVerifyImage_PEi386(oc->info->symbols)");
    for (i = 0; i < info->numberOfSymbols; i++)
-     memcpy (oc->coff_info->symbols+i, (char*)symtab + sym_size * i, sym_size);
+     memcpy (oc->coff_info->symbols+i, (char*)symtab + (size_t)sym_size * i, sym_size);
 
-   uint32_t strtab_size;
-   memcpy(&strtab_size, strtab, sizeof(strtab_size));
-   uint32_t n_strtab = strtab_size - PEi386_STRTAB_OFFSET;
+   size_t n_strtab = (size_t)strtab_size - PEi386_STRTAB_OFFSET;
    oc->coff_info->str_tab
      = LL_MALLOC_FOR(oc->L, n_strtab, "ocVerifyImage_PEi386(oc->info->str_tab)");
    memcpy (oc->coff_info->str_tab, strtab + PEi386_STRTAB_OFFSET, n_strtab);
@@ -1908,13 +2000,18 @@ static bool pe_arm64_target_section(ObjectCode *oc, COFF_symbol *sym,
                                     const char *name, uintptr_t address,
                                     uintptr_t *base, uint16_t *number)
 {
-    uint32_t index = getSymSectionNumber(oc->L, oc->coff_info->ch_info, sym);
     ObjectCode *owner = oc;
-    if (index == PE_SECTION_UNDEFINED || index >= (uint32_t)oc->n_sections) {
+    uint32_t index = 0;
+
+    if (name && name[0] != '\0') {
         RtsSymbolInfo *info = NULL;
-        if (!ghciLookupSymbolInfo(oc->L, name, &info) || !info->owner) return false;
-        owner = info->owner;
-        index = 0;
+        if (ghciLookupSymbolInfo(oc->L, name, &info) && info && info->owner) {
+            owner = info->owner;
+        }
+    }
+
+    if (owner != oc) {
+        /* Winner is in another object (e.g. COMDAT deduplication). Locate section in owner. */
         for (int i = 0; i < owner->n_sections; ++i) {
             const Section *candidate = &owner->sections[i];
             uintptr_t start = candidate->exec_start ? candidate->exec_start : (uintptr_t)candidate->start;
@@ -1923,7 +2020,20 @@ static bool pe_arm64_target_section(ObjectCode *oc, COFF_symbol *sym,
                 break;
             }
         }
+    } else {
+        index = getSymSectionNumber(oc->L, oc->coff_info->ch_info, sym);
+        if (index == PE_SECTION_UNDEFINED || index >= (uint32_t)oc->n_sections) {
+            for (int i = 0; i < oc->n_sections; ++i) {
+                const Section *candidate = &oc->sections[i];
+                uintptr_t start = candidate->exec_start ? candidate->exec_start : (uintptr_t)candidate->start;
+                if (candidate->start && address >= start && address - start < candidate->size) {
+                    index = (uint32_t)i + 1;
+                    break;
+                }
+            }
+        }
     }
+
     if (index == 0 || index >= (uint32_t)owner->n_sections || index > UINT16_MAX)
         return false;
     Section *target = &owner->sections[index - 1];
@@ -2163,7 +2273,6 @@ ocResolve_PEi386 ( ObjectCode* oc )
             S = (size_t) lookupDependentSymbol( oc->L, (char*)symbol, oc, &sym_type );
             if ((void*)S == NULL) {
                 LL_LOG_ERROR_FOR(oc->L, " | %" PATH_FMT ": unknown symbol `%s'", oc->fileName, symbol);
-                releaseOcInfo (oc);
                 return false;
             }
          }
