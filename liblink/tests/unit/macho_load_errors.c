@@ -155,10 +155,13 @@ static int test_mprotect(void *start, size_t len, int prot);
 
 int test_ocResolve_MachO(ObjectCode *oc);
 static const struct ll_format_ops *fixture_format_select(ObjectCode *oc);
+static const struct ll_format_ops *fixture_format_native(void);
 #include "ll_format.c"
 #define ll_format_select fixture_format_select
+#define ll_format_native fixture_format_native
 #include "Linker.c"
 #undef ll_format_select
+#undef ll_format_native
 #include "linker/M32Alloc.c"
 #undef ll_mmap_anon_for_linker
 #undef ll_mmap_for_linker
@@ -174,7 +177,7 @@ int ocGetNames_MachO(ObjectCode *oc);
 
 static const struct ll_format_ops *fixture_format_select(ObjectCode *oc)
 {
-    const struct ll_format_ops *native = ll_format_select(oc);
+    const struct ll_format_ops *native = oc != NULL ? ll_format_select(oc) : ll_format_native();
     static struct ll_format_ops fixture_ops;
     static bool initialized;
     if (native == NULL) return NULL;
@@ -186,6 +189,11 @@ static const struct ll_format_ops *fixture_format_select(ObjectCode *oc)
         initialized = true;
     }
     return &fixture_ops;
+}
+
+static const struct ll_format_ops *fixture_format_native(void)
+{
+    return fixture_format_select(NULL);
 }
 
 int ocGetNames_MachO(ObjectCode *oc)

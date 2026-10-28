@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+import re
 import shlex
 import subprocess
 
@@ -29,7 +30,15 @@ def native_command(logs):
                 else:
                     for j in range(i - 1, max(-1, i - 15), -1):
                         if lines[j].startswith("GHC response file arguments: "):
-                            args = [cmd_args[0]] + shlex.split(lines[j][len("GHC response file arguments: "):])
+                            raw_text = "\n".join(lines[j:i])
+                            raw_text = raw_text[len("GHC response file arguments: "):]
+                            cleaned = re.sub(
+                                r"(?:(?:/(?:nix/store/[^/\s]+|usr(?:/local)?|msys64/[^/\s]+|opt/[^/\s]+))?/bin/[a-zA-Z0-9_.-]*ar(?:\.exe)?|(?:\s|^)[a-zA-Z0-9_.-]*ar(?:\.exe)?):\s*(?:warning|note):[^\n]*\n?",
+                                "",
+                                raw_text,
+                            )
+                            cleaned = cleaned.replace("\n", "")
+                            args = [cmd_args[0]] + shlex.split(cleaned)
                             break
             if args is None:
                 args = cmd_args

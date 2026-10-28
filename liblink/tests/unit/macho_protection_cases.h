@@ -220,14 +220,16 @@ static void run_oc_try_load_m32_failure(bool executable, const char *label)
     CHECK(loadOc(oc) != 0, "m32 protection fixture did not reach loaded state");
 
     if (executable) {
-        CHECK(m32_alloc_for(&owner, oc->rx_m32, page_size, 8) != NULL,
+        CHECK(oc->rx_m32 != NULL &&
+              m32_alloc_for(&owner, oc->rx_m32, page_size, 8) != NULL,
               "could not create pending RX m32 mapping");
     } else {
-        CHECK(m32_alloc_for(&owner, oc->rw_m32, 8, 8) != NULL,
+        CHECK(oc->rw_m32 != NULL &&
+              m32_alloc_for(&owner, oc->rw_m32, 8, 8) != NULL,
               "could not create pending RW m32 nursery page");
-        CHECK(oc->rw_m32->pages[0] != NULL,
+        CHECK(oc->rw_m32 != NULL && oc->rw_m32->pages[0] != NULL,
               "RW m32 fixture has no nursery page");
-        if (oc->rw_m32->pages[0] != NULL)
+        if (oc->rw_m32 != NULL && oc->rw_m32->pages[0] != NULL)
             oc->rw_m32->pages[0]->current_size = sizeof(struct m32_page_t);
     }
 

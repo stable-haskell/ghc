@@ -455,6 +455,7 @@ m32_allocator_unmap_list(ll_linker *L, struct m32_page_t *head)
  */
 void m32_allocator_free_for(ll_linker *L, m32_allocator *alloc)
 {
+  if (alloc == NULL) return;
   m32_check_owner(L, alloc);
   /* Cleanup must not replace the load failure that caused it. Protection
    * failures still reach the logger through the mapping helper. */
@@ -509,6 +510,7 @@ m32_allocator_push_filled_list(ll_linker *L, struct m32_page_t **head, struct m3
  */
 bool
 m32_allocator_flush_for(ll_linker *L, m32_allocator *alloc) {
+   if (alloc == NULL) return true;
    m32_check_owner(L, alloc);
    if (alloc->protection_failed) {
      ll_error_set(L, LL_E_STATE, "m32 allocator requires disposal after a protection failure");
@@ -579,6 +581,10 @@ m32_report_allocation(ll_linker *L, struct m32_allocator_t *alloc LL_UNUSED, voi
 void *
 m32_alloc_for(ll_linker *L, struct m32_allocator_t *alloc, size_t size, size_t alignment)
 {
+   if (alloc == NULL) {
+      ll_error_set(L, LL_E_STATE, "m32 allocator is NULL");
+      return NULL;
+   }
    m32_check_owner(L, alloc);
    if (alloc->protection_failed) {
      ll_error_set(L, LL_E_STATE, "m32 allocator requires disposal after a protection failure");

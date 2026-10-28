@@ -1143,6 +1143,14 @@ freePreloadObjectFile (ObjectCode *oc)
     oc->fileSize = 0;
 }
 
+static inline bool ll_format_matches(const struct ll_format_ops *ops,
+                                     const struct ll_format_ops *standard)
+{
+    if (ops == standard) return true;
+    if (ops == NULL || standard == NULL) return false;
+    return ops->sniff == standard->sniff;
+}
+
 int ll_init_object(ObjectCode *oc)
 {
     /* Native shared-library objects have no relocatable image. */
@@ -1153,24 +1161,24 @@ int ll_init_object(ObjectCode *oc)
         bool supported = false;
 #if LL_BUILD_ELF && (LL_TARGET_I386 || LL_TARGET_ARM || \
     ((LL_TARGET_X86_64 || LL_TARGET_AARCH64 || LL_TARGET_RISCV64) && SIZEOF_VOID_P == 8))
-        supported = oc->format_ops == &ll_format_elf;
+        supported = ll_format_matches(oc->format_ops, &ll_format_elf);
 #endif
 #if LL_BUILD_MACHO && (LL_TARGET_X86_64 || LL_TARGET_AARCH64) && SIZEOF_VOID_P == 8
-        supported = supported || oc->format_ops == &ll_format_macho;
+        supported = supported || ll_format_matches(oc->format_ops, &ll_format_macho);
 #endif
 #if LL_BUILD_COFF && (LL_TARGET_X86_64 || LL_TARGET_AARCH64) && SIZEOF_VOID_P == 8
-        supported = supported || oc->format_ops == &ll_format_pei386;
+        supported = supported || ll_format_matches(oc->format_ops, &ll_format_pei386);
 #endif
         if (!supported ||
             (!(oc->L->services.cfg.flags & LL_CFG_ALL_FORMATS) &&
-              oc->format_ops != ll_format_native())) {
+              !ll_format_matches(oc->format_ops, ll_format_native()))) {
             oc->format_ops = NULL;
             ll_error_set(oc->L, LL_E_UNSUPPORTED,
                          "NO_EXEC is available for ELF, Mach-O and COFF backends");
             return 0;
         }
     } else {
-        if (oc->format_ops != ll_format_native()) {
+        if (!ll_format_matches(oc->format_ops, ll_format_native())) {
             oc->format_ops = NULL;
             ll_error_set(oc->L, LL_E_UNSUPPORTED,
                          "foreign object formats require NO_EXEC mode");

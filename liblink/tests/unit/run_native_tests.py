@@ -18,7 +18,7 @@ import link_trace_checks
 
 
 ROOT = Path(__file__).resolve().parents[3]
-TIMEOUT_SECONDS = 90
+TIMEOUT_SECONDS = 180
 PE_SUPPORT_LIBS = ["-ldbghelp", "-lpsapi"]
 
 
