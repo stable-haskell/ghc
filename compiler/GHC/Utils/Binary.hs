@@ -171,11 +171,14 @@ import GHC.Real                 ( Ratio(..) )
 import GHC.Float
 import Data.IntMap (IntMap)
 import qualified Data.IntMap as IntMap
-import GHC.ByteOrder
 import GHC.ForeignPtr           ( unsafeWithForeignPtr )
-import GHC.Exts
 import GHC.IO
+#if __GLASGOW_HASKELL__ >= 910
+-- only for the unaligned Word16/32/64 get/put fast path below
+import GHC.ByteOrder
+import GHC.Exts
 import GHC.Word
+#endif
 
 import Unsafe.Coerce (unsafeCoerce)
 
@@ -658,6 +661,7 @@ putWord8 h !w = putPrim h 1 (\op -> poke op w)
 getWord8 :: ReadBinHandle -> IO Word8
 getWord8 h = getPrim h 1 peek
 
+#if __GLASGOW_HASKELL__ >= 910
 putWord16 :: WriteBinHandle -> Word16 -> IO ()
 putWord16 h w = putPrim h 2 $ \(Ptr p#) ->
   IO $ \s -> (# writeWord8OffAddrAsWord16# p# 0# x# s, () #)
@@ -705,6 +709,78 @@ getWord64 h = getPrim h 8 $ \(Ptr p#) ->
       BigEndian -> (# s', W64# w64# #)
       LittleEndian -> case byteSwap64 $ W64# w64# of
         !w64 -> (# s', w64 #)
+#else
+-- Fallback for boot compilers without the unaligned
+-- {read,write}Word8OffAddrAsWord{16,32,64}# primops (added in ghc 9.10):
+-- the byte-wise big-endian encoding used before 66a0c4f7e9d. The on-disk
+-- format is identical.
+putWord16 :: WriteBinHandle -> Word16 -> IO ()
+putWord16 h w = putPrim h 2 (\op -> do
+  pokeElemOff op 0 (fromIntegral (w `shiftR` 8))
+  pokeElemOff op 1 (fromIntegral (w .&. 0xFF))
+  )
+
+getWord16 :: ReadBinHandle -> IO Word16
+getWord16 h = getPrim h 2 (\op -> do
+  w0 <- fromIntegral <$> peekElemOff op 0
+  w1 <- fromIntegral <$> peekElemOff op 1
+  return $! w0 `shiftL` 8 .|. w1
+  )
+
+putWord32 :: WriteBinHandle -> Word32 -> IO ()
+putWord32 h w = putPrim h 4 (\op -> do
+  pokeElemOff op 0 (fromIntegral (w `shiftR` 24))
+  pokeElemOff op 1 (fromIntegral ((w `shiftR` 16) .&. 0xFF))
+  pokeElemOff op 2 (fromIntegral ((w `shiftR` 8) .&. 0xFF))
+  pokeElemOff op 3 (fromIntegral (w .&. 0xFF))
+  )
+
+getWord32 :: ReadBinHandle -> IO Word32
+getWord32 h = getPrim h 4 (\op -> do
+  w0 <- fromIntegral <$> peekElemOff op 0
+  w1 <- fromIntegral <$> peekElemOff op 1
+  w2 <- fromIntegral <$> peekElemOff op 2
+  w3 <- fromIntegral <$> peekElemOff op 3
+
+  return $! (w0 `shiftL` 24) .|.
+            (w1 `shiftL` 16) .|.
+            (w2 `shiftL` 8)  .|.
+            w3
+  )
+
+putWord64 :: WriteBinHandle -> Word64 -> IO ()
+putWord64 h w = putPrim h 8 (\op -> do
+  pokeElemOff op 0 (fromIntegral (w `shiftR` 56))
+  pokeElemOff op 1 (fromIntegral ((w `shiftR` 48) .&. 0xFF))
+  pokeElemOff op 2 (fromIntegral ((w `shiftR` 40) .&. 0xFF))
+  pokeElemOff op 3 (fromIntegral ((w `shiftR` 32) .&. 0xFF))
+  pokeElemOff op 4 (fromIntegral ((w `shiftR` 24) .&. 0xFF))
+  pokeElemOff op 5 (fromIntegral ((w `shiftR` 16) .&. 0xFF))
+  pokeElemOff op 6 (fromIntegral ((w `shiftR` 8) .&. 0xFF))
+  pokeElemOff op 7 (fromIntegral (w .&. 0xFF))
+  )
+
+getWord64 :: ReadBinHandle -> IO Word64
+getWord64 h = getPrim h 8 (\op -> do
+  w0 <- fromIntegral <$> peekElemOff op 0
+  w1 <- fromIntegral <$> peekElemOff op 1
+  w2 <- fromIntegral <$> peekElemOff op 2
+  w3 <- fromIntegral <$> peekElemOff op 3
+  w4 <- fromIntegral <$> peekElemOff op 4
+  w5 <- fromIntegral <$> peekElemOff op 5
+  w6 <- fromIntegral <$> peekElemOff op 6
+  w7 <- fromIntegral <$> peekElemOff op 7
+
+  return $! (w0 `shiftL` 56) .|.
+            (w1 `shiftL` 48) .|.
+            (w2 `shiftL` 40) .|.
+            (w3 `shiftL` 32) .|.
+            (w4 `shiftL` 24) .|.
+            (w5 `shiftL` 16) .|.
+            (w6 `shiftL` 8)  .|.
+            w7
+  )
+#endif
 
 putByte :: WriteBinHandle -> Word8 -> IO ()
 putByte bh !w = putWord8 bh w

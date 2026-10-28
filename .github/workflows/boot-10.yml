@@ -1,0 +1,150 @@
+name: Boot 10.0
+
+# Checks that this (vanilla upstream, Hadrian-built) GHC 10.0 tree
+# bootstraps with the boot compilers we care about:
+#
+#   * ghc-9.8 (devx ghc98-minimal-ghc): stage1 compiler, then a full
+#     binary-dist-dir, installed and used to compile and run hello world.
+#   * ghc-9.10 (devx ghc910-minimal-ghc): stage1 compiler only, to show
+#     the 9.8 support patches leave >= 9.10 bootstrapping intact.
+#
+# The upstream tree has no other workflows, so PRs against stable-ghc-10.0
+# get CI only from this file. Nothing here publishes anything.
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+  push:
+    branches: [stable-ghc-10.0]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: boot-10-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/heads/stable-') }}
+
+jobs:
+  boot:
+    name: "Boot / ${{ matrix.plat }} / ghc${{ matrix.ghc }}"
+    runs-on: ${{ fromJSON(matrix.runner) }}
+    timeout-minutes: ${{ matrix.bindist && 330 || 150 }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { plat: x86_64-linux,   ghc: '98',  bindist: true,  runner: '"ubuntu-latest"' }
+          - { plat: x86_64-linux,   ghc: '910', bindist: false, runner: '"ubuntu-latest"' }
+          - { plat: aarch64-darwin, ghc: '98',  bindist: true,  runner: '["self-hosted", "nix"]' }
+          - { plat: aarch64-darwin, ghc: '910', bindist: false, runner: '["self-hosted", "nix"]' }
+
+    env:
+      HADRIAN_FLAVOUR: quick
+
+    steps:
+    # Same workspace preparation as nix-ci.yml: the self-hosted macOS VMs
+    # have little space on the system disk, so keep cabal state and
+    # temporary files on the workspace volume.
+    - name: Clean workspace
+      run: |
+        echo "$HOME/.nix-profile/bin" >> "$GITHUB_PATH"
+        echo "/nix/var/nix/profiles/default/bin" >> "$GITHUB_PATH"
+        echo "/usr/local/bin" >> "$GITHUB_PATH"
+        echo "CABAL_DIR=$GITHUB_WORKSPACE/_build/cabal-dir" >> "$GITHUB_ENV"
+        rm -rf "$GITHUB_WORKSPACE"/* "$GITHUB_WORKSPACE"/.??* || true
+        sudo rm -f /usr/local/bin/devx 2>/dev/null || true
+        export PATH="/nix/var/nix/profiles/default/bin:$PATH"
+        nix-collect-garbage -d 2>/dev/null || true
+        df -h / || true
+
+    - name: Free disk space (Linux)
+      if: runner.os == 'Linux'
+      run: |
+        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL || true
+        df -h /
+
+    - uses: actions/checkout@v5
+      with:
+        submodules: "recursive"
+        fetch-depth: 1
+
+    - name: Ensure devx prerequisites
+      run: |
+        export PATH="$HOME/.nix-profile/bin:/nix/var/nix/profiles/default/bin:$PATH"
+        command -v zstd || nix-env -iA nixpkgs.zstd
+        sudo mkdir -p /usr/local/bin
+
+    - uses: input-output-hk/actions/devx@latest
+      with:
+        platform: ${{ matrix.plat }}
+        compiler-nix-name: 'ghc${{ matrix.ghc }}'
+        minimal: true
+        ghc: true
+
+    - name: Configure
+      shell: devx {0}
+      run: |
+        set -eo pipefail
+        export CABAL_DIR="$GITHUB_WORKSPACE/_build/cabal-dir"
+        mkdir -p "$CABAL_DIR" _build/logs
+        ghc --version
+        cabal update
+        ./boot
+        # HADRIAN_CONFIGURE_FLAGS (gmp paths) is provided by the devx shell.
+        eval "./configure ${HADRIAN_CONFIGURE_FLAGS:-} GHC=$(command -v ghc)" 2>&1 | tee _build/logs/configure.log
+
+    # The stage1 compiler, i.e. everything built by the boot compiler
+    # (Hadrian's Stage0 context): compiler +bootstrap, ghc-bin, ghc-boot,
+    # ghc-boot-th-next, ghci, ghc-platform, ghc-toolchain, ghc-pkg, hsc2hs,
+    # unlit, genprimopcode, deriveConstants, in-tree Cabal, ...
+    # In Hadrian 10.0 it is installed as _build/stage0/bin/ghc
+    # (_build/stage1/bin/ghc is the compiler built *by* it).
+    - name: Build stage1 compiler
+      shell: devx {0}
+      run: |
+        set -eo pipefail
+        export CABAL_DIR="$GITHUB_WORKSPACE/_build/cabal-dir"
+        export TMPDIR="$GITHUB_WORKSPACE/_build/tmp"
+        mkdir -p "$TMPDIR"
+        hadrian/build --flavour=$HADRIAN_FLAVOUR -j --no-progress _build/stage0/bin/ghc _build/stage0/bin/ghc-pkg 2>&1 | tee _build/logs/stage1.log
+        _build/stage0/bin/ghc --info | grep -E 'Project version|Booter version|"Stage"'
+
+    - name: Build binary distribution
+      if: matrix.bindist
+      shell: devx {0}
+      run: |
+        set -eo pipefail
+        export CABAL_DIR="$GITHUB_WORKSPACE/_build/cabal-dir"
+        export TMPDIR="$GITHUB_WORKSPACE/_build/tmp"
+        hadrian/build --flavour=$HADRIAN_FLAVOUR -j --no-progress --docs=none binary-dist-dir 2>&1 | tee _build/logs/bindist.log
+
+    - name: Install bindist and run hello world
+      if: matrix.bindist
+      shell: devx {0}
+      run: |
+        set -eo pipefail
+        prefix="$GITHUB_WORKSPACE/_build/inst"
+        cd _build/bindist/ghc-*/
+        ./configure --prefix="$prefix"
+        make install
+        cd "$GITHUB_WORKSPACE"
+        mkdir -p _build/hello && cd _build/hello
+        printf 'main :: IO ()\nmain = putStrLn "Hello from GHC 10.0"\n' > Hello.hs
+        "$prefix/bin/ghc" --info | grep -E 'Project version|Booter version|"Stage"'
+        "$prefix/bin/ghc" -O Hello.hs -o hello
+        test "$(./hello)" = "Hello from GHC 10.0"
+
+    - name: Upload logs
+      if: ${{ !cancelled() }}
+      uses: actions/upload-artifact@v5
+      with:
+        name: boot-10-${{ matrix.plat }}-ghc${{ matrix.ghc }}-logs
+        retention-days: 7
+        path: |
+          _build/logs/
+          config.log

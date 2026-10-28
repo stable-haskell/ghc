@@ -85,7 +85,6 @@ library
         rts,
         array            == 0.5.*,
         base             >= 4.8 && < 4.24,
-        ghc-internal     >= 9.1001.0 && <=@ProjectVersionForLib@.0,
         ghc-prim         >= 0.5.0 && < 0.15,
         binary           == 0.8.*,
         bytestring       >= 0.10 && < 0.13,
@@ -93,7 +92,6 @@ library
         deepseq          >= 1.4 && < 1.6,
         filepath         >= 1.4 && < 1.6,
         ghc-boot         == @ProjectVersionMunged@,
-        ghc-heap         >= 9.10.1 && <=@ProjectVersionMunged@,
         transformers     >= 0.5 && < 0.7
 
     if flag(bootstrap)
@@ -102,6 +100,21 @@ library
     else
       build-depends:
             ghc-boot-th       == @ProjectVersionMunged@
+
+    -- ghc-internal and ghc-heap >= 9.10.1 come from the compiler building this
+    -- package.  A ghc < 9.10 boot compiler (only possible with +bootstrap, i.e.
+    -- when building the stage1 compiler) ships no ghc-internal and an older,
+    -- incompatible ghc-heap.  In that case build without them: BOOTSTRAPPING
+    -- removes the heap-inspection parts of the interpreter protocol
+    -- (GetClosure), which the stage1 compiler does not need.  The
+    -- internal-interpreter modules are never built in that configuration.
+    -- Boot compilers >= 9.10 keep both dependencies.
+    if flag(bootstrap) && impl(ghc < 9.10)
+      cpp-options: -DBOOTSTRAPPING
+    else
+      build-depends:
+            ghc-internal      >= 9.1001.0 && <=@ProjectVersionForLib@.0,
+            ghc-heap          >= 9.10.1 && <=@ProjectVersionMunged@
 
     if !os(windows)
         Build-Depends: unix >= 2.7 && < 2.9

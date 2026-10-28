@@ -2,6 +2,11 @@
 
 {-# LANGUAGE CPP #-}
 
+#if defined(BOOTSTRAPPING)
+-- Most of the term reconstruction machinery is unused without ghc-heap.
+{-# OPTIONS_GHC -Wno-unused-top-binds -Wno-unused-imports -Wno-unused-matches #-}
+#endif
+
 #if __GLASGOW_HASKELL__ > 912
 {-# OPTIONS_GHC -Wwarn=incomplete-record-selectors #-}
 -- This module has a bunch of uses of incomplete record selectors
@@ -73,7 +78,9 @@ import GHC.Driver.Ppr
 import GHC.Utils.Outputable as Ppr
 import GHC.Utils.Panic
 import GHC.Char
+#if !defined(BOOTSTRAPPING)
 import GHC.Exts.Heap
+#endif
 import GHC.Runtime.Heap.Layout (ByteOff)
 import GHC.IO (throwIO)
 
@@ -92,6 +99,13 @@ import GHC.InfoProv
 import GHC.StgToCmm.Closure ( NonVoid(NonVoid))
 import GHC.StgToCmm.Layout (mkVirtHeapOffsets, ClosureHeader(..))
 import Data.Array (Array, (!), array)
+
+#if defined(BOOTSTRAPPING)
+-- Built by a ghc < 9.10 without ghc-heap (see ghc.cabal): placeholders for
+-- the ghc-heap types that appear in this module's interface.
+data ClosureType
+data GenClosure a
+#endif
 
 ---------------------------------------------
 -- * A representation of semi evaluated Terms
@@ -148,6 +162,7 @@ instance Outputable (Term) where
 -- Runtime Closure information functions
 ----------------------------------------
 
+#if !defined(BOOTSTRAPPING)
 isThunk :: GenClosure a -> Bool
 isThunk ThunkClosure{} = True
 isThunk APClosure{} = True
@@ -162,6 +177,14 @@ constrClosToName hsc_env ConstrClosure{pkg=pkg,modl=mod,name=occ} = do
    Right `fmap` lookupNameCache (hsc_NC hsc_env) modName occName
 constrClosToName _hsc_env clos =
    return (Left ("conClosToName: Expected ConstrClosure, got " ++ show (fmap (const ()) clos)))
+#else
+constrClosToName :: HscEnv -> GenClosure a -> IO (Either String Name)
+constrClosToName _ _ = return (Left ("constrClosToName: " ++ heapInspectionUnavailable))
+
+heapInspectionUnavailable :: String
+heapInspectionUnavailable =
+  "runtime heap inspection is not available in a compiler built by ghc < 9.10"
+#endif
 
 -----------------------------------
 -- * Traversals for Terms
@@ -733,6 +756,7 @@ addConstraint actual expected = do
 -- reconstruction. See `cvReconstructType` for an overview of how type
 -- reconstruction works.
 --
+#if !defined(BOOTSTRAPPING)
 cvObtainTerm
     :: HscEnv
     -> Int      -- ^ How many times to recurse for subterms
@@ -1155,6 +1179,18 @@ findPtrTyss i tys = foldM step (i, []) tys
           (i, extras) <- findPtrTys i elem_ty
           return (i, discovered ++ extras)
 
+
+#else
+-- BOOTSTRAPPING: built by a ghc < 9.10 without ghc-heap (see ghc.cabal).
+-- Heap inspection needs ghc-heap's closure representation, so the runtime
+-- term and type reconstruction used by the GHCi debugger is unavailable.
+cvObtainTerm :: HscEnv -> Int -> Bool -> RttiType -> ForeignHValue -> IO Term
+cvObtainTerm _ _ _ _ _ = throwGhcExceptionIO $ ProgramError $
+  "cvObtainTerm: " ++ heapInspectionUnavailable
+
+cvReconstructType :: HscEnv -> Int -> GhciType -> ForeignHValue -> IO (Maybe Type)
+cvReconstructType _ _ _ _ = return Nothing  -- same as a failed reconstruction
+#endif
 
 -- Compute the difference between a base type and the type found by RTTI
 -- improveType <base_type> <rtti_type>

@@ -106,8 +106,13 @@ ghcAutogen verbosity lbi@LocalBuildInfo{pkgDescrFile,withPrograms,componentNameM
                          _ -> error "Couldn't find unique cabal library when building ghc"
 
   let cGhcInternalUnitId = case lookupPackageName installedPkgs (mkPackageName "ghc-internal")  of
-          -- We assume there is exactly one copy of `ghc-internal` in our dependency closure
+        -- We assume there is exactly one copy of `ghc-internal` in our dependency closure
+        -- when the building compiler ships ghc-internal (ghc >= 9.10).
         [(_,[packageInfo])] -> unUnitId $ installedUnitId packageInfo
+        -- A ghc < 9.10 boot compiler has no ghc-internal.  This only affects the
+        -- stage1 compiler; the stage2 compiler is built by stage1 against the
+        -- in-tree ghc-internal and gets its real unit id.
+        [] -> "<unavailable>"
         _ -> error "Couldn't find unique ghc-internal library when building ghc"
 
   -- Write GHC.Settings.Config

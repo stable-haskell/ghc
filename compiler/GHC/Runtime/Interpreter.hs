@@ -23,7 +23,9 @@ module GHC.Runtime.Interpreter
   , storeBreakpoint
   , breakpointStatus
   , getBreakpointVar
+#if !defined(BOOTSTRAPPING)
   , getClosure
+#endif
   , whereFrom
   , getModBreaks
   , readIModBreaks
@@ -108,7 +110,10 @@ import Control.Monad.Catch as MC (mask)
 import Data.Binary
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Short as SBS
+-- BOOTSTRAPPING: built by a ghc < 9.10 without ghc-heap (see ghc.cabal)
+#if !defined(BOOTSTRAPPING)
 import qualified GHC.Exts.Heap as Heap
+#endif
 import GHC.Stack.CCS (CostCentre,CostCentreStack)
 import System.Directory
 import System.Process
@@ -397,11 +402,13 @@ getBreakpointVar interp ref ix =
     mb <- interpCmd interp (GetBreakpointVar apStack ix)
     mapM (mkFinalizedHValue interp) mb
 
+#if !defined(BOOTSTRAPPING)
 getClosure :: Interp -> ForeignHValue -> IO (Heap.GenClosure ForeignHValue)
 getClosure interp ref =
   withForeignRef ref $ \hval -> do
     mb <- interpCmd interp (GetClosure hval)
     mapM (mkFinalizedHValue interp) mb
+#endif
 
 whereFrom :: Interp -> ForeignHValue -> IO (Maybe InfoProv.InfoProv)
 whereFrom interp ref =
