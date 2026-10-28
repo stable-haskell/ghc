@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP                   #-}
 {-# LANGUAGE MagicHash             #-}
 {-# LANGUAGE OverloadedStrings     #-}
 {-# LANGUAGE RecordWildCards       #-}
@@ -50,7 +51,10 @@ import Data.Array.IO.Internals
 import Data.Functor
 import Foreign.Ptr
 import GHC.Exts
+-- BOOTSTRAPPING: built by a ghc < 9.10 without ghc-heap (see ghc.cabal)
+#if !defined(BOOTSTRAPPING)
 import qualified GHC.Exts.Heap as Heap
+#endif
 
 {- |
   Linking interpretables into something we can run
@@ -158,7 +162,11 @@ lookupStaticPtr interp addr_of_label_string = do
     Nothing  -> linkFail "GHC.ByteCode.Linker: can't find label"
                   (ppr addr_of_label_string)
 
+#if !defined(BOOTSTRAPPING)
 lookupIE :: Interp -> PkgsLoaded -> BytecodeLoaderState -> Name -> IO (RemotePtr Heap.StgInfoTable)
+#else
+lookupIE :: Interp -> PkgsLoaded -> BytecodeLoaderState -> Name -> IO (RemotePtr ())
+#endif
 lookupIE interp pkgs_loaded bytecode_state con_nm =
   case lookupInfoTableBytecodeState bytecode_state con_nm of
     Just (_, ItblPtr a) -> return a

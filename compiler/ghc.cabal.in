@@ -136,7 +136,6 @@ Library
                    rts,
                    ghc-toolchain,
                    ghc-boot   == @ProjectVersionMunged@,
-                   ghc-heap   >=9.10.1 && <=@ProjectVersionMunged@,
                    ghci == @ProjectVersionMunged@
 
     if flag(bootstrap)
@@ -146,6 +145,17 @@ Library
       Build-Depends:
         ghc-boot-th          == @ProjectVersionMunged@,
         ghc-internal         == @ProjectVersionForLib@.0,
+
+    -- ghc-heap >= 9.10.1 comes from the compiler building this package.  A
+    -- ghc < 9.10 boot compiler (only possible with +bootstrap, i.e. for the
+    -- stage1 compiler) ships an older, incompatible ghc-heap; build without it.
+    -- BOOTSTRAPPING then stubs out runtime heap inspection (GHCi :print and
+    -- friends, GHC.Runtime.Heap.Inspect).  Must match ghci.cabal.
+    if flag(bootstrap) && impl(ghc < 9.10)
+      CPP-Options: -DBOOTSTRAPPING
+    else
+      Build-Depends:
+        ghc-heap             >= 9.10.1 && <=@ProjectVersionMunged@
 
     if os(windows)
         Build-Depends: Win32  >= 2.3 && < 2.15

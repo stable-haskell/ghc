@@ -32,7 +32,9 @@ import GHC.Generics
 
 import GHC.Exts
 import Data.Array.Base (UArray(..))
+#if !defined(BOOTSTRAPPING)
 import qualified GHC.Exts.Heap as Heap
+#endif
 
 #include "MachDeps.h"
 
@@ -63,7 +65,12 @@ data ResolvedBCO
    -- See Note [Static constructors in Bytecode]
    | ResolvedStaticCon {
         resolvedBCOIsLE          :: !Bool,
+#if !defined(BOOTSTRAPPING)
         resolvedStaticConInfoPtr :: !(RemotePtr Heap.StgInfoTable),
+#else
+        -- No ghc-heap when built by a ghc < 9.10 (see ghci.cabal)
+        resolvedStaticConInfoPtr :: !(RemotePtr ()),
+#endif
         resolvedStaticConArity   :: {-# UNPACK #-} !Word,
         -- ^ how many words are used for the payload of the static constructor
         -- (size of ptrs and (packed) non-ptrs combined)
