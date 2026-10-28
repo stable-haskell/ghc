@@ -470,6 +470,8 @@ test('T22272', normal, multimod_compile, ['T22272', '-O -fexpose-all-unfoldings 
 # go should become a join point
 test('T22428', [grep_errmsg(r'jump go') ], compile, ['-O -ddump-simpl -dsuppress-uniques -dno-typeable-binds -dsuppress-unfoldings'])
 
+test('T26642', [unless(have_profiling(), skip)], compile, ['-O -prof -fprof-auto-calls'])
+
 test('T22459', normal, compile, [''])
 test('T22623', normal, multimod_compile, ['T22623', '-O -v0'])
 test('T22662', normal, compile, [''])
@@ -567,6 +569,8 @@ test('T26709', [grep_errmsg(r'case')],
        ['T26709', '-O -ddump-simpl -dsuppress-uniques -dno-typeable-binds'])
 test('T26682',  normal, multimod_compile, ['T26682', '-O -v0'])
 
+test('T26903', [grep_errmsg(r'reverse')], compile, ['-O -dno-typeable-binds -ddump-simpl -dsuppress-uniques -dsuppress-all'])
+
 # T26615: we expect NO calls to overloaded functions in T26615.hs
 # In the bug report #26615, the overloaded calls were signalled by a dictionary
 #    argument like fEqList_xxxx, so we grep for that. Not a very robust test
@@ -577,4 +581,4 @@ test('T26722', [grep_errmsg(r'SPEC')], compile, ['-O -dno-typeable-binds'])
 
 test('T26805', [grep_errmsg(r'fromInteger')], compile, ['-O -dno-typeable-binds -ddump-simpl -dsuppress-uniques'])
 test('T26826', normal, compile, ['-O'])
-test('T26903', [grep_errmsg(r'reverse')], compile, ['-O -dno-typeable-binds -ddump-simpl -dsuppress-uniques -dsuppress-all'])
+test('T27261', [extra_files(['T27261_aux.hs'])], multimod_compile, ['T27261', '-v0 -O'])
