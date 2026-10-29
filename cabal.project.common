@@ -3,6 +3,13 @@ allow-boot-library-installs: True
 benchmarks: False
 tests: False
 
+-- Install the tree's own packages into the store instead of building them in
+-- place, so that each stage's result is one library tree and one package
+-- database under store/<stage>/<platform> that the bindist rules copy
+-- wholesale. Upstream cabal keeps project packages in the build directory
+-- and only puts dependencies in the store.
+inplace-builds: False
+
 
 --
 -- Package level configuration

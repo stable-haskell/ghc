@@ -51,5 +51,8 @@ expectedCabalOnlyExtensions = ["Generics",
                                "Unsafe",
                                "Trustworthy",
                                "MonadFailDesugaring",
-                               "MonoPatBinds"
+                               "MonoPatBinds",
+                               -- Known to Cabal-syntax 3.19, not yet to GHC 9.14.
+                               "QualifiedStrings",
+                               "Modifiers"
                               ]
