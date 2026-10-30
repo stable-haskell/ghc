@@ -178,7 +178,10 @@ wayOptc platform WayThreaded = case platformOS platform of
                                OSNetBSD  -> ["-pthread"]
                                _         -> []
 wayOptc _ WayDebug      = []
-wayOptc _ WayDyn        = []
+-- The rts tests DYNAMIC to tell its shared build from its static one
+-- (`rts_isDynamic`, the linker's symbol tables).  Hadrian passes it per way;
+-- a Cabal-built rts has no per-way options, so the way supplies it here.
+wayOptc _ WayDyn        = ["-DDYNAMIC"]
 wayOptc _ WayProf       = ["-DPROFILING"]
 
 wayOptcxx :: Platform -> Way -> [String]
@@ -204,7 +207,7 @@ wayOptP :: Platform -> Way -> [String]
 wayOptP _ (WayCustom {}) = []
 wayOptP _ WayThreaded = []
 wayOptP _ WayDebug    = []
-wayOptP _ WayDyn      = []
+wayOptP _ WayDyn      = ["-DDYNAMIC"]
 wayOptP _ WayProf     = ["-DPROFILING"]
 
 
