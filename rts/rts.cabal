@@ -187,6 +187,7 @@ extra-source-files:
     RtsSymbols.h
     RtsUtils.h
     Schedule.h
+    Signpost.h
     sm/BlockAlloc.h
     sm/CNF.h
     sm/Compact.h
@@ -344,25 +345,12 @@ common rts-cmm-sources-base
       cmm-sources:
         AutoApply.cmm
         AutoApply_V16.cmm
-
-      -- Both x86 widths need the ISA flags; hadrian gates the same four
-      -- files on `archOS_arch tgt `elem` [ArchX86, ArchX86_64]` (see
-      -- `rtsPackageArgs` in hadrian/src/Settings/Packages.hs).  Without them
-      -- a 32-bit x86 target stops at
-      --   ghc: sorry! ... 256-bit wide vectors require -mavx2
-      -- on Jumps_V32.cmm.  Non-x86 targets take the flagless branch below.
-      if arch(x86_64) || arch(i386)
-        cmm-sources:
-          Jumps_V32.cmm (-mavx2)
-          Jumps_V64.cmm (-mavx512f)
-          AutoApply_V32.cmm (-mavx2)
-          AutoApply_V64.cmm (-mavx512f)
-      else
-        cmm-sources:
-          Jumps_V32.cmm
-          Jumps_V64.cmm
-          AutoApply_V32.cmm
-          AutoApply_V64.cmm
+        AutoApply_V32.cmm
+        AutoApply_V64.cmm
+        Jumps_V32.cmm
+        Jumps_V64.cmm
+      -- Vector procedures declare their CPU requirements in the Cmm source.
+      -- Keep the component-wide flags at the baseline required by scalar/V16.
 
     -- this is required so we don't have ghc inject ghc-internal (which depends on the rts)
     -- during the build phase of this library.
@@ -402,7 +390,7 @@ common rts-c-sources-base
       if !arch(x86_64) && !arch(i386)
         c-sources: adjustor/LibffiAdjustor.c
 
-    if arch(ppc) || arch(ppc64) || arch(s390x) || arch(riscv64) || arch(loongarch64)
+    if arch(ppc) || arch(ppc64) || arch(s390x) || arch(riscv64) || arch(loongarch64) || arch(aarch64)
       asm-sources: StgCRunAsm.S
 
     if arch(wasm32)
@@ -462,6 +450,7 @@ common rts-c-sources-base
                RtsUtils.c
                STM.c
                Schedule.c
+               Signpost.c
                Sparks.c
                SpinLock.c
                StableName.c

@@ -345,12 +345,10 @@ def req_th( name, opts ):
 
 def req_plugins( name, opts ):
     """
-    Mark a test as requiring GHC plugins. In additional to having
-    interpreter support, currently we don't run the test for cross
-    GHCs, since plugin support for cross GHC (!7377) is unfinished
-    work (#14335) and completely untested in CI, and we don't enable
-    the internal-interpreter flag for the ghc library for cross GHC
-    anyway.
+    Mark a test as requiring GHC plugins. These fixtures build plugins with
+    the compiler under test, so they require a native compiler. Cross tests
+    must build their plugin with a native host compiler and provide its
+    installation separately; see tests/plugins/test-host-cross.py.
     """
     req_interp(name, opts)
 
@@ -3074,7 +3072,11 @@ def normalise_errmsg(s: str) -> str:
     # Emscripten displays cache info and old emcc doesn't support EMCC_LOGGING=0
     s = re.sub('cache:INFO: .*\n', '', s)
     # Old emcc warns when we export HEAP8 but new one requires it (see #26290)
-    s = s.replace('warning: invalid item in EXPORTED_RUNTIME_METHODS: HEAP8\nwarning: invalid item in EXPORTED_RUNTIME_METHODS: HEAPU8\nemcc: warning: warnings in JS library compilation [-Wjs-compiler]\n','')
+    s = s.replace(
+        'warning: invalid item in EXPORTED_RUNTIME_METHODS: HEAP8\n'
+        'warning: invalid item in EXPORTED_RUNTIME_METHODS: HEAPU8\n'
+        'emcc: warning: warnings in JS library compilation [-Wjs-compiler]\n',
+        '')
 
     return s
 

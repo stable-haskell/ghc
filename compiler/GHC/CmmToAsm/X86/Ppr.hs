@@ -73,7 +73,7 @@ pprNatCmmDecl :: IsDoc doc => NCGConfig -> NatCmmDecl (Alignment, RawCmmStatics)
 pprNatCmmDecl config (CmmData section dats) =
   pprSectionAlign config section $$ pprDatas config dats
 
-pprNatCmmDecl config proc@(CmmProc top_info entry_lbl _ (ListGraph blocks)) =
+pprNatCmmDecl config proc@(CmmProc (RawCmmProcInfo { raw_info_tbls = top_info }) entry_lbl _ (ListGraph blocks)) =
   let platform = ncgPlatform config
       top_info_table = topInfoTable proc
       -- we need a label to delimit the proc code (e.g. in debug builds). When

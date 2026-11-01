@@ -50,7 +50,7 @@ pprNatCmmDecl config (CmmData section dats) =
   pprSectionAlign config section
   $$ pprDatas (ncgPlatform config) dats
 
-pprNatCmmDecl config proc@(CmmProc top_info lbl _ (ListGraph blocks)) =
+pprNatCmmDecl config proc@(CmmProc (RawCmmProcInfo { raw_info_tbls = top_info }) lbl _ (ListGraph blocks)) =
   let platform = ncgPlatform config in
   case topInfoTable proc of
     Nothing ->

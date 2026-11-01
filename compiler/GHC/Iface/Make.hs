@@ -248,6 +248,7 @@ mkIfaceTc hsc_env safe_mode mod_details mod_summary mb_program mb_modBreaks
           let deps = mkDependencies home_unit
                                     (tcg_mod tc_result)
                                     (tcg_imports tc_result)
+                                    (hasPluginPackageConfig (hsc_dflags hsc_env))
                                     (map mi_module pluginModules)
 
           usage <- mkRecompUsageInfo hsc_env tc_result

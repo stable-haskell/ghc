@@ -220,23 +220,9 @@ unitHsLibs namever ways0 p = map (mkDynName . addSuffix . ST.unpack) (unitLibrar
 
         tag     = waysTag (fullWays ways1)
 
-        -- The way suffix that survives the rts sub-library split.
-        --
-        -- Before that split the rts carried its ways in the archive name
-        -- (libHSrts_thr_debug.a), which is why this used to special-case
-        -- HSrts and suffix it with the *unfiltered* way tag.  Ways are
-        -- sub-libraries now (rts:threaded-debug), so no library name needs
-        -- the RTS-only ways any more and that special case is gone for good.
-        --
-        -- `tag` is a different thing and is still needed.  `fullWays` keeps
-        -- exactly the ways that change generated code (see `wayRTSOnly`) --
-        -- for a static link, profiling.  A profiled build of *any* package,
-        -- rts sub-libraries included, is installed as libHSfoo_p.a beside the
-        -- vanilla libHSfoo.a, so dropping the suffix does not fall back to
-        -- something sensible: a `-prof` link quietly picks the vanilla
-        -- archives and then fails on the profiling symbols they do not have
-        -- (pushCostCentre, enterFunCCS, registerCcList, CCS_DONT_CARE, and
-        -- every `_HPC_cc` cost centre it inlined from another package).
+        -- RTS-only ways now select RTS sub-libraries instead of suffixes.
+        -- Full ways still need suffixes: in particular, profiling must select
+        -- libHSfoo_p.a rather than the vanilla archive, for every package.
         addSuffix lib
          | null tag  = lib
          | otherwise = lib ++ '_' : tag

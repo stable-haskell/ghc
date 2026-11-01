@@ -48,6 +48,7 @@ module GHC.Driver.DynFlags (
         ReexportedModule(..),
 
         -- ** Manipulating DynFlags
+        hasPluginPackageConfig,
         defaultDynFlags,                -- Settings -> DynFlags
         initDynFlags,                   -- DynFlags -> IO DynFlags
         defaultFatalMessager,
@@ -363,6 +364,13 @@ data DynFlags = DynFlags {
   pluginPackageFlags    :: [PackageFlag],
         -- ^ The @-plugin-package-id@ flags from command line.
         -- In *reverse* order that they're specified on the command line.
+  pluginLibDir          :: Maybe FilePath,
+        -- ^ Native compiler installation used to load host plugins.
+  pluginPackageDBFlags  :: [PackageDBFlag],
+        -- ^ The @-plugin-package-db@ flags from command line.
+        -- When non-empty, a separate 'UnitState' is built from these
+        -- databases for plugin loading (host packages for cross-compilation).
+        -- In *reverse* order that they're specified on the command line.
   trustFlags            :: [TrustFlag],
         -- ^ The @-trust@ and @-distrust@ flags.
         -- In *reverse* order that they're specified on the command line.
@@ -552,6 +560,11 @@ class ContainsDynFlags t where
 
 -----------------------------------------------------------------------------
 
+-- | A separate host package namespace was requested for plugins.
+hasPluginPackageConfig :: DynFlags -> Bool
+hasPluginPackageConfig dflags =
+  not (null (pluginPackageDBFlags dflags)) || isJust (pluginLibDir dflags)
+
 -- | Used by 'GHC.runGhc' to partially initialize a new 'DynFlags' value
 initDynFlags :: DynFlags -> IO DynFlags
 initDynFlags dflags = do
@@ -687,6 +700,8 @@ defaultDynFlags mySettings =
         packageDBFlags          = [],
         packageFlags            = [],
         pluginPackageFlags      = [],
+        pluginPackageDBFlags    = [],
+        pluginLibDir            = Nothing,
         ignorePackageFlags      = [],
         trustFlags              = [],
         packageEnv              = Nothing,
@@ -941,6 +956,8 @@ packageFlagsChanged idflags1 idflags0 =
   packageFlags idflags1 /= packageFlags idflags0 ||
   ignorePackageFlags idflags1 /= ignorePackageFlags idflags0 ||
   pluginPackageFlags idflags1 /= pluginPackageFlags idflags0 ||
+  pluginPackageDBFlags idflags1 /= pluginPackageDBFlags idflags0 ||
+  pluginLibDir idflags1 /= pluginLibDir idflags0 ||
   trustFlags idflags1 /= trustFlags idflags0 ||
   packageDBFlags idflags1 /= packageDBFlags idflags0 ||
   packageGFlags idflags1 /= packageGFlags idflags0

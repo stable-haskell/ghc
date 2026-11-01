@@ -932,7 +932,7 @@ StgRun(StgFunPtr f, StgRegTable *basereg) {
 }
 #endif
 
-#if defined(aarch64_HOST_ARCH)
+#if defined(aarch64_HOST_ARCH) && !defined(linux_HOST_OS) && !defined(darwin_HOST_OS)
 
 StgRegTable *
 StgRun(StgFunPtr f, StgRegTable *basereg) {

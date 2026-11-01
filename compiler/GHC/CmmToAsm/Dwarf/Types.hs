@@ -110,7 +110,8 @@ pprAbbrevDecls platform haveDebugLine =
            , (dW_AT_frame_base, dW_FORM_block1)
            ]
   in dwarfAbbrevSection platform $$
-     line (dwarfAbbrevLabel <> colon) $$
+     dwarfSectionAnchor platform "abbrev" $$
+     line (dwarfAbbrevLabel platform <> colon) $$
      mkAbbrev DwAbbrCompileUnit dW_TAG_compile_unit dW_CHILDREN_yes
        ([(dW_AT_name,     dW_FORM_string)
        , (dW_AT_producer, dW_FORM_string)
@@ -184,7 +185,7 @@ pprDwarfInfoOpen platform haveSrc (DwarfCompileUnit _ name producer compDir lowL
   $$ pprWord platform (pprAsmLabel platform lowLabel <> text "-1")
   $$ pprWord platform (pprAsmLabel platform highLabel)
   $$ if haveSrc
-     then sectionOffset platform dwarfLineLabel dwarfLineLabel
+     then sectionOffset platform (dwarfLineLabel platform) (dwarfLineLabel platform)
      else empty
 pprDwarfInfoOpen platform _ (DwarfSubprogram _ name label parent) =
   line (pprAsmLabel platform (mkAsmTempDieLabel label) <> colon)
@@ -202,7 +203,7 @@ pprDwarfInfoOpen platform _ (DwarfSubprogram _ name label parent) =
     abbrev = case parent of Nothing -> DwAbbrSubprogram
                             Just _  -> DwAbbrSubprogramWithParent
     parentValue = maybe empty pprParentDie parent
-    pprParentDie sym = sectionOffset platform (pprAsmLabel platform sym) dwarfInfoLabel
+    pprParentDie sym = sectionOffset platform (pprAsmLabel platform sym) (dwarfInfoLabel platform)
 pprDwarfInfoOpen platform _ (DwarfBlock _ label Nothing) =
   line (pprAsmLabel platform (mkAsmTempDieLabel label) <> colon)
   $$ pprAbbrev DwAbbrBlockWithoutCode
@@ -248,7 +249,7 @@ pprDwarfARanges platform arngs unitU =
       initialLength = 8 + paddingSize + (1 + length arngs) * 2 * wordSize
   in pprDwWord (int initialLength)
      $$ pprHalf 2
-     $$ sectionOffset platform (pprAsmLabel platform $ mkAsmTempLabel $ unitU) dwarfInfoLabel
+     $$ sectionOffset platform (pprAsmLabel platform $ mkAsmTempLabel $ unitU) (dwarfInfoLabel platform)
      $$ pprByte (fromIntegral wordSize)
      $$ pprByte 0
      $$ pad paddingSize
@@ -318,9 +319,10 @@ pprDwarfFrame platform DwarfFrame{dwCieLabel=cieLabel,dwCieInit=cieInit,dwCiePro
         -- Preserve C stack pointer: This necessary to override that default
         -- unwinding behavior of setting $sp = CFA.
         preserveSp = case platformArch platform of
-          ArchX86    -> pprByte dW_CFA_same_value $$ pprLEBWord 4
-          ArchX86_64 -> pprByte dW_CFA_same_value $$ pprLEBWord 7
-          _          -> empty
+          ArchX86     -> pprByte dW_CFA_same_value $$ pprLEBWord 4   -- esp
+          ArchX86_64  -> pprByte dW_CFA_same_value $$ pprLEBWord 7   -- rsp
+          ArchAArch64 -> pprByte dW_CFA_same_value $$ pprLEBWord 31  -- sp (x31)
+          _           -> empty
     in vcat [ line (pprAsmLabel platform cieLabel <> colon)
             , pprData4' length -- Length of CIE
             , line (pprAsmLabel platform cieStartLabel <> colon)
@@ -370,7 +372,7 @@ pprFrameProc platform frameLbl initUw (DwarfFrameProc procLbl hasInfo blocks)
     in vcat [ whenPprDebug $ line $ text "# Unwinding for" <+> pprAsmLabel platform procLbl <> colon
             , pprData4' (pprAsmLabel platform fdeEndLabel <> char '-' <> pprAsmLabel platform fdeLabel)
             , line (pprAsmLabel platform fdeLabel <> colon)
-            , pprData4' (pprAsmLabel platform frameLbl <> char '-' <> dwarfFrameLabel)    -- Reference to CIE
+            , pprData4' (pprAsmLabel platform frameLbl <> char '-' <> dwarfFrameLabel platform)    -- Reference to CIE
             , pprWord platform (pprAsmLabel platform procLbl <> ifInfo "-1") -- Code pointer
             , pprWord platform (pprAsmLabel platform procEnd <> char '-' <>
                                  pprAsmLabel platform procLbl <> ifInfo "+1") -- Block byte length
@@ -465,28 +467,36 @@ pprSetUnwind :: IsDoc doc => Platform
              -> doc
 pprSetUnwind plat g  (_, Nothing)
   = pprUndefUnwind plat g
-pprSetUnwind _    Sp (Just (UwReg s _), Just (UwReg s' o')) | s == s'
-  = if o' >= 0
-    then pprByte dW_CFA_def_cfa_offset $$ pprLEBWord (fromIntegral o')
-    else pprByte dW_CFA_def_cfa_offset_sf $$ pprLEBInt o'
+pprSetUnwind plat Sp (Just (UwReg s _), Just (UwReg s' o'))
+  | s == s', o' >= 0
+  = pprByte dW_CFA_def_cfa_offset $$ pprLEBWord (fromIntegral o')
+  | s == s', o' `mod` wordSize == 0
+  = pprByte dW_CFA_def_cfa_offset_sf $$ pprLEBInt (o' `div` negate wordSize)
+  where wordSize = platformWordSizeInBytes plat
 pprSetUnwind plat Sp (_, Just (UwReg (GlobalRegUse s' _) o'))
-  = if o' >= 0
-    then pprByte dW_CFA_def_cfa $$
-         pprLEBRegNo plat s' $$
-         pprLEBWord (fromIntegral o')
-    else pprByte dW_CFA_def_cfa_sf $$
-         pprLEBRegNo plat s' $$
-         pprLEBInt o'
+  | o' >= 0
+  = pprByte dW_CFA_def_cfa $$ pprLEBRegNo plat s' $$
+    pprLEBWord (fromIntegral o')
+  | o' `mod` wordSize == 0
+  = pprByte dW_CFA_def_cfa_sf $$ pprLEBRegNo plat s' $$
+    pprLEBInt (o' `div` negate wordSize)
+  where wordSize = platformWordSizeInBytes plat
 pprSetUnwind plat Sp (_, Just uw)
   = pprByte dW_CFA_def_cfa_expression $$ pprUnwindExpr plat False uw
 pprSetUnwind plat g  (_, Just (UwDeref (UwReg (GlobalRegUse Sp _) o)))
   | o < 0 && ((-o) `mod` platformWordSizeInBytes plat) == 0 -- expected case
-  = pprByte (dW_CFA_offset + dwarfGlobalRegNo plat g) $$
+  = (if reg < 64
+       then pprByte (dW_CFA_offset + reg)
+       else pprByte dW_CFA_offset_extended $$ pprLEBRegNo plat g) $$
     pprLEBWord (fromIntegral ((-o) `div` platformWordSizeInBytes plat))
-  | otherwise
+  | o `mod` platformWordSizeInBytes plat == 0
   = pprByte dW_CFA_offset_extended_sf $$
     pprLEBRegNo plat g $$
-    pprLEBInt o
+    pprLEBInt (o `div` negate (platformWordSizeInBytes plat))
+  | otherwise
+  = pprByte dW_CFA_expression $$ pprLEBRegNo plat g $$
+    pprUnwindExpr plat True (UwPlus (UwReg (GlobalRegUse Sp (bWord plat)) 0) (UwConst o))
+  where reg = dwarfGlobalRegNo plat g
 pprSetUnwind plat g  (_, Just (UwDeref uw))
   = pprByte dW_CFA_expression $$
     pprLEBRegNo plat g $$
@@ -519,8 +529,11 @@ pprUnwindExpr platform spIsCFA expr
                                 then pprByte dW_OP_call_frame_cfa
                                 else pprE (UwPlus (UwReg r 0) (UwConst i))
         pprE (UwReg (GlobalRegUse g _) i)
-                              = pprByte (dW_OP_breg0+dwarfGlobalRegNo platform g) $$
+                              = (if reg < 32
+                                   then pprByte (dW_OP_breg0 + reg)
+                                   else pprByte dW_OP_bregx $$ pprLEBRegNo platform g) $$
                                 pprLEBInt i
+          where reg = dwarfGlobalRegNo platform g
         pprE (UwDeref u)      = pprE u $$ pprByte dW_OP_deref
         pprE (UwLabel l)      = pprByte dW_OP_addr $$ pprWord platform (pprAsmLabel platform l)
         pprE (UwPlus u1 u2)   = pprE u1 $$ pprE u2 $$ pprByte dW_OP_plus

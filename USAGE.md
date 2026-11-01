@@ -156,6 +156,43 @@ Make sure you're inside `nix-shell` which provides all necessary tools.
 
 The shell.nix uses LLVM 18. If you need a different version, edit shell.nix.
 
+## Host Plugins During Cross-Compilation
+
+Build and install the plugin with the native GHC from the same compiler build.
+Pass that compiler's library directory and the host plugin database to the
+cross-compiler:
+
+```bash
+host_libdir=$(_build/dist/bin/ghc --print-libdir)
+_build/dist/bin/wasm32-unknown-wasi-ghc \
+  -plugin-libdir "$host_libdir" \
+  -plugin-package-db /path/to/host/plugin-db \
+  -plugin-package my-plugin -fplugin My.Plugin Main.hs
+```
+
+`-plugin-libdir` supplies the native platform, linker tools and default host
+package databases. Host plugins run inside GHC; Template Haskell keeps using the
+Wasm interpreter and target packages. Host and target interfaces use separate
+caches. The host libraries must match the running compiler's ABI and library
+ways. The compiler must have internal interpreter support.
+
+On a native compiler, separate plugin databases also require
+`-fexternal-interpreter` for target code. `-clear-plugin-package-dbs` clears the
+host database stack; add the host global database again when starting a custom
+stack. Plugin database flags never change the target package stack.
+
+The cross regression builds a host plugin and checks the architecture and OS
+reported by the running TH splice. It rejects two native compilers passed by
+mistake:
+
+```bash
+python3 testsuite/tests/plugins/test-host-cross.py \
+  --host-ghc _build/dist/bin/ghc \
+  --host-ghc-pkg _build/dist/bin/ghc-pkg \
+  --cross-ghc _build/dist/bin/wasm32-unknown-wasi-ghc \
+  --expected-th-platform wasm32-wasi
+```
+
 ## Interactive Development
 
 For development work:

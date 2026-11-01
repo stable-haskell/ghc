@@ -57,21 +57,26 @@ symbolHasNonNoneRelocation(ObjectCode *oc, unsigned symTabIndex,
  */
 bool
 needGotSlot(Elf_Sym * symbol) {
-    /* Any symbol that might be referenced via a GOT relocation needs a slot.
-     * STB_LOCAL symbols can have GOT-relative relocations in some toolchains
-     * (e.g. Android NDK's libm.a has local data symbols like approx_tab
-     * referenced via R_AARCH64_ADR_GOT_PAGE).
+    /* Local definitions can be referenced through the GOT too (for example,
+     * Android NDK libm objects use ADR_GOT_PAGE for local data). Include the
+     * named local definitions whose addresses ocGetNames_ELF can populate.
+     * In particular, do not select unrelated TLS or absolute symbols: fillGot
+     * would then require an address even if no GOT relocation uses them.
      */
-    /* Include named local object/func symbols — some toolchains
-     * (e.g. Android NDK) generate GOT-relative relocations for local
-     * data symbols like approx_tab in libm.a. Exclude unnamed symbols,
-     * STT_FILE symbols (source filenames), and STT_NOTYPE symbols. */
+    unsigned type = ELF_ST_TYPE(symbol->st_info);
+    bool local_definition = ELF_ST_BIND(symbol->st_info) == STB_LOCAL
+        && symbol->st_name != 0
+        && symbol->st_shndx != SHN_UNDEF
+        && (symbol->st_shndx < SHN_LORESERVE
+#if defined(SHN_XINDEX)
+            || symbol->st_shndx == SHN_XINDEX
+#endif
+           )
+        && (type == STT_OBJECT || type == STT_FUNC || type == STT_NOTYPE);
+
     return ELF_ST_BIND(symbol->st_info) == STB_GLOBAL
         || ELF_ST_BIND(symbol->st_info) == STB_WEAK
-        || (ELF_ST_BIND(symbol->st_info) == STB_LOCAL
-            && symbol->st_name != 0
-            && ELF_ST_TYPE(symbol->st_info) != STT_FILE
-            && ELF_ST_TYPE(symbol->st_info) != STT_NOTYPE)
+        || local_definition
         // Section symbols exist primarily for relocation
         // and as such may need a GOT slot.
         || ELF_ST_TYPE(symbol->st_info) == STT_SECTION;

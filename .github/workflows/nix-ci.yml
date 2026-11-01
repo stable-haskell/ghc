@@ -708,8 +708,8 @@ jobs:
             done
             ;;
         esac
-        curl -fsSL https://gitlab.haskell.org/ghc/ghc-wasm-meta/-/raw/master/bootstrap.sh | \
-          FLAVOUR=9.12 PREFIX=$HOME/.ghc-wasm sh
+        FLAVOUR=9.12 PREFIX="$HOME/.ghc-wasm" \
+          bash .github/scripts/install-ghc-wasm-meta.sh
 
     # Install emscripten (JS-target C toolchain). EMSDK_VERSION is set in
     # the workflow env.

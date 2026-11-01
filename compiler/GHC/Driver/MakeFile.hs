@@ -237,13 +237,17 @@ processDeps dflags hsc_env excl_mods root hdl (AcyclicSCC (ModuleNode _ (ModuleN
               obj_file  = msObjFilePath node
               obj_files = insertSuffixes obj_file extra_suffixes
 
-              do_imp loc is_boot pkg_qual imp_mod
-                = do { mb_hi <- findDependency hsc_env loc pkg_qual imp_mod
-                                               is_boot include_pkg_deps
+              do_imp loc kind imp_mod
+                = do { mb_hi <- findDependency hsc_env loc imp_mod kind include_pkg_deps
                      ; case mb_hi of {
                            Nothing      -> return () ;
                            Just hi_file -> do
-                     { let hi_files = insertSuffixes hi_file extra_suffixes
+                     { let hi_files = case kind of
+                             -- Host plugin interfaces do not acquire target
+                             -- profiling/dynamic suffixes.
+                             PluginDependency | hasPluginPackageConfig (hsc_dflags hsc_env)
+                               -> repeat hi_file
+                             _ -> insertSuffixes hi_file extra_suffixes
                            write_dep (obj,hi) = writeDependency root hdl [obj] hi
 
                         -- Add one dependency for each suffix;
@@ -281,26 +285,39 @@ processDeps dflags hsc_env excl_mods root hdl (AcyclicSCC (ModuleNode _ (ModuleN
                 -- Emit a dependency for each import
 
         ; let do_imps is_boot idecls = sequence_
-                    [ do_imp loc is_boot mb_pkg mod
+                    [ do_imp loc (SourceDependency mb_pkg is_boot) mod
                     | (_lvl, mb_pkg, L loc mod) <- idecls,
                       mod `notElem` excl_mods ]
 
         ; do_imps IsBoot (map ((,,) NormalLevel NoPkgQual) (ms_srcimps node))
-        ; do_imps NotBoot (ms_imps node)
+        ; do_imps NotBoot (ms_textual_imps node)
+        ; sequence_ [ do_imp loc PluginDependency mod
+                    | (_, _, L loc mod) <- ms_plugin_imps node
+                    , mod `notElem` excl_mods ]
         }
 
 
+data DependencyKind
+  = SourceDependency PkgQual IsBootInterface
+  | PluginDependency
+
 findDependency  :: HscEnv
                 -> SrcSpan
-                -> PkgQual              -- package qualifier, if any
-                -> ModuleName           -- Imported module
-                -> IsBootInterface      -- Source import
+                -> ModuleName
+                -> DependencyKind
                 -> Bool                 -- Record dependency on package modules
                 -> IO (Maybe FilePath)  -- Interface file
-findDependency hsc_env srcloc pkg imp is_boot include_pkg_deps = do
-  -- Find the module; this will be fast because
-  -- we've done it once during downsweep
-  r <- findImportedModuleWithIsBoot hsc_env imp is_boot pkg
+findDependency hsc_env srcloc imp kind include_pkg_deps = do
+  -- Plugin packages belong to the host namespace, even though the output
+  -- dependency rule describes a target object.
+  (find_env, r, is_boot) <- case kind of
+    SourceDependency pkg is_boot -> do
+      r <- findImportedModuleWithIsBoot hsc_env imp is_boot pkg
+      pure (hsc_env, r, is_boot)
+    PluginDependency -> do
+      host_env <- hscPluginEnv hsc_env
+      r <- findPluginModule hsc_env imp
+      pure (host_env, r, NotBoot)
   case r of
     Found loc _
         -- Home package: just depend on the .hi or hi-boot file
@@ -315,7 +332,7 @@ findDependency hsc_env srcloc pkg imp is_boot include_pkg_deps = do
         throwOneError $
           mkPlainErrorMsgEnvelope srcloc $
           GhcDriverMessage $ DriverInterfaceError $
-             (Can'tFindInterface (cannotFindModule hsc_env imp fail) (LookingForModule imp is_boot))
+             (Can'tFindInterface (cannotFindModule find_env imp fail) (LookingForModule imp is_boot))
 
 -----------------------------
 writeDependency :: FilePath -> Handle -> [FilePath] -> FilePath -> IO ()

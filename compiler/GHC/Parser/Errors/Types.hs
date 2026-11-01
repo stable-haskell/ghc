@@ -625,6 +625,9 @@ data CmmParserError
    | CmmUnknownCConv        !String     -- ^ Unknown calling convention
    | CmmUnrecognisedSafety  !String     -- ^ Unrecognised safety
    | CmmUnrecognisedHint    !String     -- ^ Unrecognised hint
+   | CmmUnknownAttribute    !FastString -- ^ Unknown @__attribute__@
+   | CmmUnknownTargetFeature !String ![String]
+       -- ^ Unknown @target(..)@ CPU feature, and the valid ones
 
 data TransLayoutReason
    = TransLayout_Where -- ^ "`where' clause at the same depth as implicit layout block"

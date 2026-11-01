@@ -2154,6 +2154,10 @@ package_flags_deps = [
       (NoArg (setGeneralFlag Opt_HideAllPackages))
   , make_ord_flag defFlag "hide-all-plugin-packages"
       (NoArg (setGeneralFlag Opt_HideAllPluginPackages))
+  , make_ord_flag defFlag "plugin-libdir"
+      (HasArg (\path -> upd (\s -> s { pluginLibDir = Just path })))
+  , make_ord_flag defFlag "plugin-package-db"     (HasArg addPluginPkgDb)
+  , make_ord_flag defFlag "clear-plugin-package-dbs" (NoArg clearPluginPkgDbs)
   , make_ord_flag defFlag "package-env"           (HasArg setPackageEnv)
   , make_ord_flag defFlag "ignore-package"        (HasArg ignorePackage)
   , make_dep_flag defFlag "syslib" (HasArg exposePackage) "Use -package instead"
@@ -3175,6 +3179,16 @@ exposePluginPackage p =
 exposePluginPackageId p =
   upd (\s -> s{ pluginPackageFlags =
     parsePackageFlag "-plugin-package-id" parseUnitArg p : pluginPackageFlags s })
+
+addPluginPkgDb :: String -> DynP ()
+addPluginPkgDb path =
+  upd (\s -> s{ pluginPackageDBFlags =
+    PackageDB (PkgDbPath (OsPath.unsafeEncodeUtf path)) : pluginPackageDBFlags s })
+
+clearPluginPkgDbs :: DynP ()
+clearPluginPkgDbs =
+  upd (\s -> s{ pluginPackageDBFlags = ClearPackageDBs : pluginPackageDBFlags s })
+
 hidePackage p =
   upd (\s -> s{ packageFlags = HidePackage p : packageFlags s })
 ignorePackage p =

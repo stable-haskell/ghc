@@ -175,6 +175,11 @@ instance Diagnostic PsMessage where
     PsErrCmmParser cmm_err -> mkSimpleDecorated $ case cmm_err of
       CmmUnknownPrimitive name     -> text "unknown primitive" <+> ftext name
       CmmUnknownMacro fun          -> text "unknown macro" <+> ftext fun
+      CmmUnknownAttribute attr     -> text "unknown attribute" <+> ftext attr
+      CmmUnknownTargetFeature feat valid ->
+        text "unknown target feature" <+> text feat
+        $$ text "Valid features are:"
+             <+> hcat (punctuate comma (map text valid))
       CmmUnknownCConv cconv        -> text "unknown calling convention:" <+> text cconv
       CmmUnrecognisedSafety safety -> text "unrecognised safety" <+> text safety
       CmmUnrecognisedHint hint     -> text "unrecognised hint:" <+> text hint

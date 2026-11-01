@@ -21,6 +21,7 @@ module GHC.StgToCmm.Monad (
 
         emit, emitDecl,
         emitProcWithConvention, emitProcWithStackFrame,
+        emitProcWithStackFrameAttrs,
         emitOutOfLine, emitAssign, emitStore, emitStore',
         emitComment, emitTick, emitUnwind,
 
@@ -760,19 +761,33 @@ emitProcWithStackFrame
    -> CmmAGraphScoped                   -- code
    -> Bool                              -- do stack layout?
    -> FCode ()
+emitProcWithStackFrame = emitProcWithStackFrameAttrs emptyCmmProcAttrs
 
-emitProcWithStackFrame _conv mb_info lbl _stk_args [] blocks False
+-- | As 'emitProcWithStackFrame', but for a procedure carrying attributes.
+-- Only hand-written Cmm can do this; see Note [Cmm target attributes] in GHC.Cmm.
+emitProcWithStackFrameAttrs
+   :: CmmProcAttrs                      -- procedure attributes
+   -> Convention                        -- entry convention
+   -> Maybe CmmInfoTable                -- info table?
+   -> CLabel                            -- label for the proc
+   -> [CmmFormal]                       -- stack frame
+   -> [CmmFormal]                       -- arguments
+   -> CmmAGraphScoped                   -- code
+   -> Bool                              -- do stack layout?
+   -> FCode ()
+
+emitProcWithStackFrameAttrs attrs _conv mb_info lbl _stk_args [] blocks False
   = do  { platform <- getPlatform
-        ; emitProc mb_info lbl [] blocks (widthInBytes (wordWidth platform)) False
+        ; emitProcAttrs attrs mb_info lbl [] blocks (widthInBytes (wordWidth platform)) False
         }
-emitProcWithStackFrame conv mb_info lbl stk_args args (graph, tscope) True
+emitProcWithStackFrameAttrs attrs conv mb_info lbl stk_args args (graph, tscope) True
         -- do layout
   = do  { profile <- getProfile
         ; let (offset, live, entry) = mkCallEntry profile conv args stk_args
               graph' = entry CmmGraph.<*> graph
-        ; emitProc mb_info lbl live (graph', tscope) offset True
+        ; emitProcAttrs attrs mb_info lbl live (graph', tscope) offset True
         }
-emitProcWithStackFrame _ _ _ _ _ _ _ = panic "emitProcWithStackFrame"
+emitProcWithStackFrameAttrs _ _ _ _ _ _ _ _ = panic "emitProcWithStackFrameAttrs"
 
 emitProcWithConvention :: Convention -> Maybe CmmInfoTable -> CLabel
                        -> [CmmFormal]
@@ -781,9 +796,10 @@ emitProcWithConvention :: Convention -> Maybe CmmInfoTable -> CLabel
 emitProcWithConvention conv mb_info lbl args blocks
   = emitProcWithStackFrame conv mb_info lbl [] args blocks True
 
-emitProc :: Maybe CmmInfoTable -> CLabel -> [GlobalRegUse] -> CmmAGraphScoped
-         -> Int -> Bool -> FCode ()
-emitProc mb_info lbl live blocks offset do_layout
+-- | Emit a procedure.  See Note [Cmm target attributes] in GHC.Cmm.
+emitProcAttrs :: CmmProcAttrs -> Maybe CmmInfoTable -> CLabel -> [GlobalRegUse]
+              -> CmmAGraphScoped -> Int -> Bool -> FCode ()
+emitProcAttrs attrs mb_info lbl live blocks offset do_layout
   = do  { l <- newBlockId
         ; let
               blks :: DCmmGraph
@@ -796,7 +812,8 @@ emitProc mb_info lbl live blocks offset do_layout
                                 , do_layout = do_layout }
 
               tinfo = TopInfo { info_tbls = DWrap infos
-                              , stack_info=sinfo}
+                              , stack_info=sinfo
+                              , proc_attrs = attrs }
 
               -- we must be careful to:
               -- 1. not emit a proc label twice (#22792)

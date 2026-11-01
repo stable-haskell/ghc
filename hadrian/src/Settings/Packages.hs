@@ -301,8 +301,6 @@ rtsPackageArgs = package rts ? do
     libzstdIncludeDir <- getSetting LibZstdIncludeDir
     libzstdLibraryDir <- getSetting LibZstdLibDir
 
-    x86 <- queryTarget (\ tgt -> archOS_arch (tgtArchOs tgt) `elem` [ ArchX86, ArchX86_64 ])
-
     -- Arguments passed to GHC when compiling C and .cmm sources.
     let ghcArgs = mconcat
           [ arg "-Irts"
@@ -313,15 +311,12 @@ rtsPackageArgs = package rts ? do
           , Threaded  `wayUnit` way          ? arg "-DTHREADED_RTS"
           , notM targetSupportsSMP           ? arg "-optc-DNOSMP"
 
-            -- See Note [AutoApply.cmm for vectors] in genapply/Main.hs
-            --
-            -- In particular, we **do not** pass -mavx when compiling
-            -- AutoApply_V16.cmm, as that would lock out targets with SSE2 but not AVX.
-          , inputs ["**/AutoApply_V32.cmm"] ? pure [ "-mavx2"    | x86 ]
-          , inputs ["**/AutoApply_V64.cmm"] ? pure [ "-mavx512f" | x86 ]
-
-          , inputs ["**/Jumps_V32.cmm"] ? pure [ "-mavx2"    | x86 ]
-          , inputs ["**/Jumps_V64.cmm"] ? pure [ "-mavx512f" | x86 ]
+            -- NB: the vector .cmm files used to need -mavx2/-mavx512f here,
+            -- per file, matched on filename.  They now carry a per-procedure
+            -- target attribute, guarded by the same REG_YMM1/REG_ZMM1 test
+            -- that decides whether the procedure uses those registers at all.
+            -- See Note [Cmm target attributes] in GHC.Cmm, rts/Jumps.h, and
+            -- Note [AutoApply.cmm for vectors] in genapply/Main.hs.
           ]
 
     let cArgs = mconcat
@@ -364,13 +359,6 @@ rtsPackageArgs = package rts ? do
           , input "**/Hash.c" ? pure [ "-O3" ]
 
           , inputs ["**/Evac.c", "**/Evac_thr.c"] ? arg "-funroll-loops"
-
-            -- See Note [AutoApply.cmm for vectors] in genapply/Main.hs
-          , inputs ["**/AutoApply_V32.c"] ? pure [ "-mavx2"    | x86 ]
-          , inputs ["**/AutoApply_V64.c"] ? pure [ "-mavx512f" | x86 ]
-
-          , inputs ["**/Jumps_V32.c"] ? pure [ "-mavx2"    | x86 ]
-          , inputs ["**/Jumps_V64.c"] ? pure [ "-mavx512f" | x86 ]
 
           -- inlining warnings happen in Compact
           , inputs ["**/Compact.c"] ? arg "-Wno-inline"

@@ -215,6 +215,7 @@ package libffi-clib
 
 package ghc
   -- -build-tool-depends: use PATH genprimopcode/deriveConstants (see packages note)
+  -- The Makefile supplies native Alex/Happy from cabal.project.stage3-tools.
   flags: -build-tool-depends +internal-interpreter
 
 package ghc-bin

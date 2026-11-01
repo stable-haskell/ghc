@@ -1,3 +1,10 @@
+import shutil
+
+test('android_target_os',
+     [extra_files(['android_target_os.py']),
+      unless(shutil.which('autoconf'), skip)],
+     makefile_test, [])
+
 test('driver011', [extra_files(['A011.hs'])], makefile_test, ['test011'])
 
 test('driver012', [extra_files(['A012.hs'])], makefile_test, ['test012'])
@@ -290,6 +297,7 @@ test('inline-check', [omit_ways(['hpc', 'profasm'])]
 test('T14452', js_broken(22261), makefile_test, [])
 test('T14923', normal, makefile_test, [])
 test('T15396', normal, compile_and_run, ['-package ghc'])
+test('WasmArchivePadding', normal, compile_and_run, ['-package ghc'])
 
 test('T17143', exit_code(1), run_command, ['{compiler} T17143.hs -S -fno-code'])
 test('T17786', unless(opsys('mingw32'), skip), makefile_test, [])

@@ -321,4 +321,7 @@ backend is liable to compile code using e.g. the ZMM1 STG register to uses of
 X86 machine registers xmm1, xmm2, xmm3, xmm4, instead of just zmm1. This would
 mean that LLVM produces ABI-incompatible code that would result in segfaults in
 the RTS.
+
+A procedure can state this requirement itself with a target attribute, e.g.
+__attribute__((target("avx512f"))); see Note [Cmm target attributes] in GHC.Cmm.
 -}

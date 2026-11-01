@@ -199,6 +199,7 @@ CABAL      ?= $(BUILD_DIR)/cabal/bin/cabal$(EXE_EXT)
 
 STAGE1_PATH := $(let STAGE,stage1,$(STORE_DIR)/host/$(HOST_PLATFORM))
 STAGE2_PATH := $(let STAGE,stage2,$(STORE_DIR)/host/$(HOST_PLATFORM))
+STAGE3_TOOLS_PATH := $(BUILD_DIR)/stage3-tools/store/host/$(HOST_PLATFORM)
 
 GHC1        := $(STAGE1_PATH)/bin/ghc$(EXE_EXT)
 GHC2        := $(STAGE2_PATH)/bin/ghc$(EXE_EXT)
@@ -216,7 +217,9 @@ THREADS ?= $(shell echo $$(( $(CPUS) + 1 )))
 # Build macros
 #
 
-ifeq ($(MAKE_HOST),x86_64-pc-msys)
+# Windows CI may provide MSYS2, Cygwin, or mingw/clang64 make. All three
+# need Windows tool paths and executable suffixes.
+ifneq (,$(filter x86_64-pc-msys x86_64-pc-cygwin x86_64-w64-mingw32,$(MAKE_HOST)))
 # Windows executables require .exe extension for native programs to find them
 EXE_EXT := .exe
 
@@ -713,7 +716,7 @@ STAGE2_LIBRARIES = \
 	transformers \
 	xhtml
 
-ifeq ($(MAKE_HOST),x86_64-pc-msys)
+ifneq (,$(filter x86_64-pc-msys x86_64-pc-cygwin x86_64-w64-mingw32,$(MAKE_HOST)))
 STAGE2_LIBRARIES += Win32
 else
 STAGE2_LIBRARIES += terminfo unix
@@ -967,11 +970,20 @@ STAGE3_wasm32-unknown-wasi_GHC_TOOLCHAIN_ARGS = $(GHC_TOOLCHAIN_ARGS) \
 
 TARGET_DIR = $(DIST_DIR)/lib/targets/$(TARGET_PLATFORM)
 
-# NOTE: do NOT pass --happy-options=--template=... here.
-# Cross CI's nix env has happy-2.1.7 on PATH while dist ships happy-lib-2.1.5
-# templates; forcing those templates yields GHC-44432 (happyDoParse unbound)
-# in GHC.Parser (and previously genprimopcode). Let happy use its own
-# packaged templates (nix 2.1.7 or cabal-built 2.1.5 — either is consistent).
+# Stage3 disables the compiler's build-tool-depends to reuse the internal
+# generators from stage1 or the bindist. Alex and Happy still need native
+# executables: listing their packages in the cross project does not put them
+# on PATH. Build them separately with the bootstrap compiler, including in
+# DIST_BUILD mode, and let Happy use its own matching installed templates.
+.PHONY: stage3-tools
+stage3-tools: STAGE=stage3-tools
+stage3-tools: cabal.project.stage3-tools
+ifndef DIST_BUILD
+stage3-tools: | stable-cabal
+endif
+stage3-tools:
+	$(call LOG,Building native Alex and Happy for stage3)
+	$(CABAL_BUILD) --with-compiler="$(GHC0)" --with-build-compiler="$(GHC0)" exe:alex exe:happy
 
 # NOTE: disable-library-for-ghci is repeated here but it should be sufficient
 # to put it in cabal.project.stage3
@@ -990,6 +1002,8 @@ STAGE3_$(1)_CABAL_BUILD = \
 	--with-build-compiler=$$(call NORMALIZE_FP,$$(CURDIR)/$$(DIST_DIR)/bin/ghc) \
 	--ghc-options "-ghcversion-file=$$(call NORMALIZE_FP,$$(CURDIR)/rts/include/ghcversion.h)" \
 	--with-hsc2hs=$$(call NORMALIZE_FP,$$(CURDIR)/$$(DIST_DIR)/bin/$(1)-hsc2hs) \
+	--with-alex="$$(call NORMALIZE_FP,$$(CURDIR)/$$(STAGE3_TOOLS_PATH)/bin/alex$$(EXE_EXT))" \
+	--with-happy="$$(call NORMALIZE_FP,$$(CURDIR)/$$(STAGE3_TOOLS_PATH)/bin/happy$$(EXE_EXT))" \
 	--hsc2hs-options='-x' \
 	--with-gcc $$(STAGE3_$(1)_CC) \
 	$$(foreach dir,$$(STAGE3_$(1)_EXTRA_LIB_DIRS),--extra-lib-dirs=$$(dir)) \
@@ -1006,7 +1020,7 @@ endif
 .PHONY: stage3-$(1)
 stage3-$(1): STAGE=stage3
 stage3-$(1): TARGET_PLATFORM=$(1)
-stage3-$(1): $$(STAGE3_$(1)_PREREQS)
+stage3-$(1): $$(STAGE3_$(1)_PREREQS) | stage3-tools
 	$$(call PHASE_START,stage3-$(1))
 	$$(call LOG,Linking executables)
 	$$(foreach exe,$$(STAGE3_EXECUTABLES),$(LN_SF) $$(exe) $(DIST_DIR)/bin/$(1)-$$(exe);)
@@ -1273,10 +1287,18 @@ $(DIST_DIR)/ghc-multi-target.tar.gz: | stage3-wasm32-unknown-wasi stage3-javascr
 		relocate.sh configure Makefile
 	@echo "::endgroup::"
 
-$(DIST_DIR)/tests.tar.gz:
+TESTSUITE_SOURCE_INPUTS = \
+	m4/ghc_convert_os.m4 \
+	rts/linker/ElfTypes.h \
+	rts/linker/InitFini.h
+
+$(DIST_DIR)/tests.tar.gz: $(TESTSUITE_SOURCE_INPUTS)
 	@echo "::group::Creating tests.tar.gz..."
+	# Source-level portability probes need these authoritative inputs even
+	# when the testsuite runs against an installed compiler.
 	@tar czf $@ \
-		testsuite
+		testsuite \
+		$(TESTSUITE_SOURCE_INPUTS)
 	@echo "::endgroup::"
 
 #  _   _            _
@@ -1293,6 +1315,72 @@ hackage: $(BUILD_DIR)/packages/hackage.haskell.org/01-index.tar.gz
 $(BUILD_DIR)/packages/hackage.haskell.org/01-index.tar.gz: | stable-cabal
 	$(CABAL) --remote-repo-cache $(call NORMALIZE_FP,$(CURDIR)/$(BUILD_DIR)/packages) update
 endif # DIST_BUILD (hackage)
+
+#  ____             _    ____
+# | __ ) _   _  ___| | _|___ \
+# |  _ \| | | |/ __| |/ / __) |
+# | |_) | |_| | (__|   < / __/
+# |____/ \__,_|\___|_|\_\_____|
+
+# Experimental: generate Buck2 build files for stage1 with `cabal buck2`
+# (https://github.com/simonmar/cabal, branch buck2) and build with buck2.
+# See README.md, "Building with Buck2". Needs a checkout of haskell-buck2
+# at ./buck2 (branch cabal-buck2-ghc of stable-haskell/haskell-buck2 until
+# its changes are upstream).
+#
+#   make buck2-stage1 CABAL_BUCK2=/path/to/cabal-with-buck2
+#   buck2 build //...
+#
+# --enable-shared: buck2's default (dev) mode links dynamically, so the
+# store dependencies need shared libraries (cabal.project.stage1 says
+# shared: False).
+CABAL_BUCK2 ?= cabal
+
+.PHONY: buck2-stage1
+buck2-stage1: STAGE=stage1
+buck2-stage1: $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) libraries/ghc-boot-th-next
+	@test -d buck2 || { echo "buck2-stage1: ./buck2 is missing; run: git clone -b cabal-buck2-ghc https://github.com/stable-haskell/haskell-buck2.git buck2"; exit 1; }
+	$(CABAL_BUCK2) buck2 \
+		--project-file cabal.project.stage1 \
+		--with-compiler=$(GHC0) \
+		--enable-shared \
+		--ghc-options "-ghcversion-file=$(call NORMALIZE_FP,$(CURDIR)/rts/include/ghcversion.h)"
+
+# Stage 2 with buck2: generate BUCK.stage2.cabal.bzl files (targets
+# suffixed -stage2, built in the stage2 platform by the stage-1 compiler
+# that buck2 built, through the wrappers of buck2-ghc/BUCK), then
+#
+#   buck2 build //buck2-ghc:stage2-libdir -m opt --show-output
+#
+# gives the installation (bin/ghc with a libdir where every stage-2
+# library is registered, bin/ghc-pkg, hsc2hs, haddock, ...). The targets
+# are the local packages plus the executables of the two
+# source-repository packages (hsc2hs, hpc), as STAGE2_EXECUTABLES. Needs
+# `buck2` on $PATH and a stage-1 build (make buck2-stage1 && buck2 build
+# //...).
+.PHONY: buck2-stage2
+buck2-stage2: STAGE=stage2
+buck2-stage2: $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) libraries/ghc-boot-th-next cabal.project.stage2.buck2 cabal.project.stage2.common
+	@# The configure scripts of rts and ghc-internal run while cabal buck2
+	@# configures the packages; they need the stage-1 tools, as in
+	@# STAGE2_CABAL_BUILD.
+	@set -eu; \
+	derive_constants=$$(buck2 build //utils/deriveConstants:deriveConstants --show-simple-output); \
+	genapply=$$(buck2 build //utils/genapply:genapply --show-simple-output); \
+	compiler=$$(buck2 build //buck2-ghc:ghc --show-simple-output); \
+	packager=$$(buck2 build //buck2-ghc:ghc-pkg --show-simple-output); \
+	env \
+	DERIVE_CONSTANTS="$(CURDIR)/$$derive_constants" \
+	GENAPPLY="$(CURDIR)/$$genapply" \
+	NM=$(NM) \
+	OBJDUMP=$(OBJDUMP) \
+	$(CABAL_BUCK2) buck2 \
+		--variant stage2 \
+		--project-file cabal.project.stage2.buck2 \
+		--with-compiler="$(CURDIR)/$$compiler" \
+		--with-hc-pkg="$(CURDIR)/$$packager" \
+		--ghc-options "-ghcversion-file=$(call NORMALIZE_FP,$(CURDIR)/rts/include/ghcversion.h)" \
+		all exe:hsc2hs exe:hpc
 
 #   ____             __ _
 #  / ___|___  _ __  / _(_) __ _ _   _ _ __ ___

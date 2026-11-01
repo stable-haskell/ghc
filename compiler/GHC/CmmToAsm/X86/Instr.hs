@@ -1540,31 +1540,18 @@ shortcutStatic _ other_static
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 A PIC jump table holds offsets `target_lbl - base_lbl`, where base_lbl is the
 block containing the jump (see Note [Jump tables] in GHC.CmmToAsm.X86.CodeGen).
-Neither label is in the table's own section, so the assembler can only compute
-the difference if both are in the SAME section.  Blocks of one proc always are,
-but shortcutting may retarget an entry at a label outside the proc: a block
-that just does `jmp foo_info` (a tail call) is a `DestImm` shortcut to foo.
-Without -split-sections every proc is in .text and that happens to work; with
-it foo has its own section and assembly fails:
+Both labels must be in the same section for the assembler to resolve their
+difference.  Shortcutting a tail-call trampoline (`jmp foo_info`) to foo can
+violate this with -split-sections, because foo is in another proc's section.
 
-    Error: can't resolve .text..LreDh_info - .Lcvha
+Relative table entries therefore follow only local block shortcuts, stopping
+at the trampoline, both in 'shortcutLocalLabel' and in 'shortcutJump'.  Absolute
+tables have no such constraint and shortcut fully.
 
-(prettyprinter's Prettyprinter.Internal at -O2).  So for relative tables only
-follow shortcuts that stay within the proc, both in the table contents
-('shortcutLocalLabel') and in the JMP_TBL's own targets ('shortcutJump').  The
-entry then points at the trampoline block; that costs one extra jump.
-Absolute tables (non-PIC) have no such constraint and shortcut fully.
-
-That only works if the trampoline block still exists.  'build_mapping' in
-GHC.CmmToAsm normally drops every block it can shortcut, which left the entry
-naming a label that is never defined, with or without -split-sections:
-
-    Error: can't resolve .LcvAS - .Lcvwv
-
-So for x86 PIC code it keeps the blocks whose shortcut leaves the proc.  Other
-jumps to such a block are still shortcut to foo directly; the block is then
-only reached through relative jump tables (or not at all, a few dead bytes).
-It also stays a node of the CFG, which must match the block list.
+'build_mapping' in GHC.CmmToAsm must also retain these trampolines and their
+CFG nodes for x86 PIC code; otherwise the table names an undefined label even
+without -split-sections.  Other jumps still shortcut past the trampoline.
+Keeping all such trampolines can leave a few dead bytes in procs without tables.
 -}
 
 -- | Like 'shortcutLabel', but only follows shortcuts to other blocks of the

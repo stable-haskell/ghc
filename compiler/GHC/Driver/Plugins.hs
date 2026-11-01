@@ -74,6 +74,7 @@ module GHC.Driver.Plugins (
 import GHC.Prelude
 
 import GHC.Driver.Env
+import GHC.Driver.DynFlags (DynFlags)
 import GHC.Driver.Monad
 import GHC.Driver.Phases
 import GHC.Driver.Plugins.External
@@ -344,6 +345,10 @@ data Plugins = Plugins
       -- The purpose of this field is to cache the plugins so they
       -- don't have to be loaded each time they are needed.  See
       -- 'GHC.Runtime.Loader.initializePlugins'.
+  , loadedPluginConfig :: Maybe DynFlags
+  -- ^ Package selection used when loading the dynamic plugins. A change must
+  -- invalidate the values cached by initializePlugins.
+
   , loadedPluginDeps :: !([Linkable], PkgsLoaded)
   -- ^ The object files required by the loaded plugins
   -- See Note [Plugin dependencies]
@@ -354,6 +359,7 @@ emptyPlugins = Plugins
   { staticPlugins    = []
   , externalPlugins  = []
   , loadedPlugins    = []
+  , loadedPluginConfig = Nothing
   , loadedPluginDeps = ([], emptyUDFM)
   }
 

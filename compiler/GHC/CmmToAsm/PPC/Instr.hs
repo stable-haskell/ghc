@@ -108,7 +108,7 @@ allocMoreStack
 allocMoreStack _ _ top@(CmmData _ _) = return (top,[])
 allocMoreStack platform slots (CmmProc info lbl live (ListGraph code)) = do
     let
-        infos   = mapKeys info
+        infos   = mapKeys (raw_info_tbls info)
         entries = case code of
                     [] -> infos
                     BasicBlock entry _ : _ -- first block is the entry point

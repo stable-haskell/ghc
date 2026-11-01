@@ -113,56 +113,51 @@ getBSDArchEntries = do
         when (odd st_size) $
           void (getByteString 1)
 
-        -- Archives rewritten by Apple's ranlib (cctools; the default
-        -- `ranlib` on darwin, which cabal runs after `ar` on macOS build
-        -- hosts) pad each member's data to an 8-byte boundary with '\n'
-        -- bytes and include that padding in the header's size field,
-        -- relying on the member's object format being self-describing.
-        -- Mach-O readers tolerate the trailing bytes, but WebAssembly
-        -- consumers do not: the JS backend extracts C-bits wasm objects
-        -- from package archives and hands them to emscripten, where
-        -- wasm-ld fails with "section too large" on the padding.  Recover
-        -- a wasm member's true length from its section table and drop the
-        -- padding.
+        -- Apple ranlib includes newline padding in BSD archive member sizes.
+        -- Unlike Mach-O, wasm objects cannot be passed to the linker with
+        -- these extra bytes (see trimWasmPadding).
         let file' = trimWasmPadding file
 
         rest    <- getBSDArchEntries
         return $ (ArchiveEntry name time own grp mode (B.length file') file') : rest
 
--- | If the payload is a WebAssembly module followed by trailing '\n'
--- padding (Apple ranlib's 8-byte member alignment, counted into the
--- header's size field), return just the module bytes; otherwise return
--- the payload unchanged.  The true length is recovered by walking the
--- module's sections (a 1-byte id plus a ULEB128 length each).
+-- | Remove Apple ranlib's alignment padding from a wasm archive member.
+-- Section lengths let us distinguish trailing padding from newlines inside
+-- section payloads. Leave other object formats and malformed lengths alone.
 trimWasmPadding :: B.ByteString -> B.ByteString
 trimWasmPadding bs
-  | B.take 4 bs == "\0asm"
-  , end < len
-  , B.all (== 0x0a) (B.drop end bs)
+  | B.take 8 bs == "\0asm\1\0\0\0"
+  , Just end <- walk 8
   = B.take end bs
   | otherwise = bs
   where
     len = B.length bs
-    -- 4 bytes magic + 4 bytes version, then sections.
-    end = walk 8
-    -- Walk sections from @off@, returning the offset where the
-    -- well-formed prefix of sections ends.
-    walk off = case sectionEnd off of
-      Just off' | off' <= len -> walk off'
-      _                       -> off
-    sectionEnd off
-      | off >= len = Nothing
-      | otherwise  = do
-          (sz, off') <- uleb (off + 1) (0 :: Int) 0
-          return (off' + sz)
+    walk off
+      | off == len = Just off
+      -- ranlib aligns members to eight bytes, so padding is at most seven.
+      | len - off <= 7, B.all (== 0x0a) (B.drop off bs) = Just off
+      | otherwise = sectionEnd off >>= walk
+
+    sectionEnd off = do
+      (sz, off') <- uleb (off + 1) 0 0
+      -- Check before converting to Int or adding offsets, including on
+      -- 32-bit hosts. Integer accumulation below cannot wrap on bad input.
+      guard (sz <= toInteger (len - off'))
+      return (off' + fromInteger sz)
+
+    -- Wasm section lengths are unsigned 32-bit LEB128 values. The fifth
+    -- byte has only four payload bits and cannot request another byte.
+    uleb :: Int -> Int -> Integer -> Maybe (Integer, Int)
     uleb off sh acc
-      | off >= len || sh > 63 = Nothing
+      | off >= len = Nothing
       | otherwise =
-          let b    = B.index bs off
-              acc' = acc + fromIntegral (b .&. 0x7f) * (2 ^ sh)
-          in if b .&. 0x80 /= 0
-               then uleb (off + 1) (sh + 7) acc'
-               else Just (acc', off + 1)
+          let b = B.index bs off
+              acc' = acc + toInteger (b .&. 0x7f) * (2 ^ sh)
+          in if sh == 28 && b .&. 0xf0 /= 0
+               then Nothing
+               else if b .&. 0x80 /= 0
+                 then uleb (off + 1) (sh + 7) acc'
+                 else Just (acc', off + 1)
 
 -- | GNU Archives feature a special '//' entry that contains the
 -- extended names. Those are referred to as /<num>, where num is the

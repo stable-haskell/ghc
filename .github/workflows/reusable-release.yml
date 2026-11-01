@@ -234,13 +234,16 @@ jobs:
           key: cabal-${{ vars.CACHE_VERSION || 'v1' }}-${{ matrix.platform.ARTIFACT }}-${{ hashFiles('cabal.project.stage0') }}
 
       # debian 11 ships with make 4.3, but we need 4.4
+      # Archive retired security updates, but keep main and bullseye-updates
+      # on the primary mirror: their pool is still available there.
       - if: matrix.platform.ARTIFACT == 'aarch64-linux-deb11'
         uses: docker://arm64v8/debian:11
         name: Run build (aarch64 linux)
         with:
           args: |
             sh -c "
-              apt-get update &&
+              find /etc/apt -type f \( -name sources.list -o -name '*.list' -o -name '*.sources' \) -exec sed -i -e 's|://deb[.]debian[.]org/debian-security|://archive.debian.org/debian-security|g' -e 's|://security[.]debian[.]org/debian-security|://archive.debian.org/debian-security|g' {} + &&
+              apt-get --error-on=any update &&
               apt-get install -y curl bash git ${{ needs.tool-output.outputs.apt_tools_build }} &&
               curl -O -L https://ftp.gnu.org/gnu/make/make-${{ env.MAKE_VERSION }}.tar.gz &&
               tar xf make-${{ env.MAKE_VERSION }}.tar.gz &&
@@ -349,7 +352,8 @@ jobs:
 
   build-mac-aarch64:
     name: Build binary (Mac aarch64)
-    runs-on: macos-latest
+    # Keep the release SDK compatible with the GHC 9.8 bootstrap toolchain.
+    runs-on: macos-15
     env:
       ARTIFACT: "aarch64-apple-darwin"
       HOMEBREW_CHANGE_ARCH_TO_ARM: 1
@@ -384,7 +388,8 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ${{ env.CABAL_CACHE_PATH }}
-          key: cabal-${{ vars.CACHE_VERSION || 'v1' }}-${{ env.ARTIFACT }}-${{ hashFiles('cabal.project.stage0') }}
+          # Keep native executables separate across macOS and bootstrap GHC baselines.
+          key: cabal-${{ vars.CACHE_VERSION || 'v1' }}-macos-15-ghc-${{ env.GHC_VERSION }}-${{ env.ARTIFACT }}-${{ hashFiles('cabal.project.stage0') }}
 
       - name: Run build
         run: *build
@@ -499,7 +504,7 @@ jobs:
             gtar \
             ftp/curl \
             lang/python3 \
-            py311-sphinx \
+            textproc/py-sphinx \
             math/gmp \
             lang/ghc \
             devel/hs-alex \
@@ -560,7 +565,7 @@ jobs:
       matrix:
         branch: ${{ fromJSON(inputs.branches) }}
         platform: [ { image: "debian:11"
-                    , installCmd: "apt-get update && apt-get install -y"
+                    , installCmd: "find /etc/apt -type f \\( -name sources.list -o -name '*.list' -o -name '*.sources' \\) -exec sed -i -e 's|://deb[.]debian[.]org/debian-security|://archive.debian.org/debian-security|g' -e 's|://security[.]debian[.]org/debian-security|://archive.debian.org/debian-security|g' {} + && apt-get --error-on=any update && apt-get install -y"
                     , toolRequirements: "${{ needs.tool-output.outputs.apt_tools_test }}"
                     , ARTIFACT: "x86_64-linux-glibc"
                     },
@@ -716,7 +721,7 @@ jobs:
         uses: docker://arm64v8/debian:11
         name: Run build (aarch64 linux)
         with:
-          args: sh -c "apt-get update && apt-get install -y curl bash git ${{ needs.tool-output.outputs.apt_tools_test }} && git config --system --add safe.directory $GITHUB_WORKSPACE && rm -rf .git && cd _build/dist && for file in *.tar.gz; do tar xzf $file; done && cd testsuite && PATH=$GITHUB_WORKSPACE/_build/dist/bin:$PATH make"
+          args: sh -c "find /etc/apt -type f \( -name sources.list -o -name '*.list' -o -name '*.sources' \) -exec sed -i -e 's|://deb[.]debian[.]org/debian-security|://archive.debian.org/debian-security|g' -e 's|://security[.]debian[.]org/debian-security|://archive.debian.org/debian-security|g' {} + && apt-get --error-on=any update && apt-get install -y curl bash git ${{ needs.tool-output.outputs.apt_tools_test }} && git config --system --add safe.directory $GITHUB_WORKSPACE && rm -rf .git && cd _build/dist && for file in *.tar.gz; do tar xzf $file; done && cd testsuite && PATH=$GITHUB_WORKSPACE/_build/dist/bin:$PATH make"
 
       - if: matrix.platform.ARTIFACT == 'aarch64-linux-unknown'
         uses: docker://arm64v8/alpine:3.20
@@ -752,7 +757,7 @@ jobs:
 
   test-mac-aarch64:
     name: Test binary (Mac aarch64)
-    runs-on: macos-latest
+    runs-on: macos-15
     needs: ["build-mac-aarch64"]
     if: ${{ inputs.test }}
     env:
