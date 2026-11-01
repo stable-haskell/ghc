@@ -1,7 +1,7 @@
 cabal-version: 2.0
 name: system-cxx-std-lib
 version: 1.0
-license: BSD-3-Clause
+license: BSD3
 synopsis:             A placeholder for the system's C++ standard library implementation.
 description:          Building against C++ libraries requires that the C++ standard
                       library be included when linking. Typically when compiling a C++
