@@ -1403,13 +1403,14 @@ buck2-stage1: $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) libraries/ghc-boot-th-nex
 	@# ghc-pkg is not in cabal.project.stage1. Its Buck2 targets are a
 	@# variant of cabal.project.stage1-ghc-pkg so they keep the bootstrap
 	@# Cabal closure and do not replace the compiler plan's ghc-boot.
-	@# The variant's platform and the select arm live in the pinned
-	@# haskell-buck2 checkout. haskell.bzl adds @third-party-haskell//:base
-	@# and :rts on every non-stage2 target. The variant also depends on
-	@# those same bootstrap libraries through its own cell, and buck2
-	@# rejects the duplicated soname. The ghc-pkg-boot stage value skips
-	@# the automatic packages. stage2.bzl matches only the stage2 value,
-	@# so the toolchain stays the boot compiler.
+	@# haskell.bzl adds @third-party-haskell//:base and :rts unless the
+	@# stage2 constraint is selected. stage1-libdir depends on ghc-pkg on
+	@# the default platform, so the ghc-pkg-boot select arm is not that
+	@# configuration. The variant cell still has its own copy of base,
+	@# rts, ghc-prim, and ghc-bignum (base's bootstrap deps). Those are
+	@# the same .so, which buck2 rejects. The alias step below forwards
+	@# the main cell's providers. stage2.bzl matches only stage2, so the
+	@# toolchain stays the boot compiler.
 	@test -f buck2/haskell.bzl
 	@if ! grep -q 'name = "ghc-pkg-boot"' buck2/constraints/BUCK; then \
 	  printf '%s\n' \
@@ -1431,7 +1432,7 @@ buck2-stage1: $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) libraries/ghc-boot-th-nex
 	  printf '%s\n' \
 	    '' \
 	    '# Stage1 ghc-pkg (`cabal buck2 --variant ghc-pkg-boot`).' \
-	    '# Boot compiler; the constraint only skips automatic base and rts.' \
+	    '# Boot compiler. Does not select the stage-2 toolchain.' \
 	    'platform(' \
 	    '    name = "ghc-pkg-boot",' \
 	    '    constraint_values = ["root//buck2/constraints:ghc-pkg-boot"],' \
@@ -1454,6 +1455,9 @@ buck2-stage1: $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) libraries/ghc-boot-th-nex
 		--with-compiler=$(GHC0) \
 		--enable-shared \
 		--ghc-options "-ghcversion-file=$(call NORMALIZE_FP,$(CURDIR)/rts/include/ghcversion.h)"
+	@# The variant command rewrites this file. Alias the boot RTS closure
+	@# afterwards so a later run does not keep the duplicated sonames.
+	$(PYTHON) ./mk/buck2-ghc-pkg-boot-aliases.py third-party/haskell-ghc-pkg-boot/BUCK
 
 # Stage 2 with buck2: generate BUCK.stage2.cabal.bzl files (targets
 # suffixed -stage2, built in the stage2 platform by the stage-1 compiler
