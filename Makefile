@@ -615,7 +615,18 @@ $(STAGE1_STAMP): $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) cabal.project.stage1 c
 
 	$(call PHASE_START,stage1.executables)
 	$(call LOG,Building executables $(STAGE1_EXECUTABLES))
-	$(STAGE1_CABAL_BUILD) $(addprefix exe:,$(STAGE1_EXECUTABLES))
+	@mkdir -p $(TIMING_DIR)
+	@# Process substitution, not a pipe: bash -o pipefail would otherwise
+	@# report the stamper's status. Cabal's own status still fails the recipe.
+	$(STAGE1_CABAL_BUILD) $(addprefix exe:,$(STAGE1_EXECUTABLES)) \
+		> >($(PYTHON) ./mk/stage1-build-graph.py stamp $(TIMING_DIR)/stage1-cabal.log) 2>&1
+	$(PYTHON) ./mk/stage1-build-graph.py render \
+		--plan $(BUILD_DIR)/stage1/cache/plan.json \
+		--log $(TIMING_DIR)/stage1-cabal.log \
+		$(foreach exe,$(STAGE1_EXECUTABLES),--root $(exe)) \
+		--html $(TIMING_DIR)/stage1-packages.html \
+		--json $(TIMING_DIR)/stage1-packages.json \
+		--markdown $(TIMING_DIR)/stage1-packages.md
 	$(call PHASE_END_OK,stage1.executables)
 
 	$(call LOG,Creating $(STORE_DIR)/host/$(HOST_PLATFORM)/lib/settings)
@@ -640,6 +651,19 @@ endif
 
 .PHONY: stage1
 stage1: $(STAGE1_STAMP)
+
+# Redraw the package timeline from the stage1 plan. Passes --log when a
+# stamped cabal log is present; otherwise the chart is dependency depth.
+.PHONY: stage1-build-graph
+stage1-build-graph:
+	@mkdir -p $(TIMING_DIR)
+	$(PYTHON) ./mk/stage1-build-graph.py render \
+		--plan $(BUILD_DIR)/stage1/cache/plan.json \
+		$(if $(wildcard $(TIMING_DIR)/stage1-cabal.log),--log $(TIMING_DIR)/stage1-cabal.log,) \
+		$(foreach exe,$(STAGE1_EXECUTABLES),--root $(exe)) \
+		--html $(TIMING_DIR)/stage1-packages.html \
+		--json $(TIMING_DIR)/stage1-packages.json \
+		--markdown $(TIMING_DIR)/stage1-packages.md
 
 $(addprefix $(STAGE1_PATH)/bin/,$(STAGE1_EXECUTABLES)) : $(STAGE1_STAMP)
 endif # DIST_BUILD (stage1)
