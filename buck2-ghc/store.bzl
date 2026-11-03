@@ -29,10 +29,13 @@ def ghc_store(name, ghc, ghc_pkg, tools, package_db = None, hsc2hs = None, hsc2h
         # which is the stage-1 ghc-pkg and therefore bootstrap Cabal. The
         # ghc-pkg installed in this store decodes that cache with its own
         # Cabal. Rewrite it here, with that binary, so the two halves match.
+        # $(location) is the target-platform program (stage-1 compiler).
+        # $(exe) would build it for the execution platform, whose compiler
+        # is bootstrap GHC and does not accept the stage-2 -no-rts options.
         db_cmd = " && ".join([
             "cp -r $(location " + package_db + ")/. $OUT/lib/package.conf.d",
             "rm -f $OUT/lib/package.conf.d/package.cache $OUT/lib/package.conf.d/package.cache.lock",
-            "$(exe " + ghc_pkg + ") --package-db $OUT/lib/package.conf.d recache",
+            "`realpath $(location " + ghc_pkg + ")` --package-db $OUT/lib/package.conf.d recache",
         ])
     else:
         db_cmd = "$(exe //utils/ghc-pkg:ghc-pkg) init $OUT/lib/package.conf.d"
