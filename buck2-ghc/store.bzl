@@ -25,7 +25,15 @@ def ghc_store(name, ghc, ghc_pkg, tools, package_db = None, hsc2hs = None, hsc2h
     `haddock` gets this GHC libdir and the auxiliary files copied from the
     haddock-api data-files target (`haddock_data`) to lib/haddock."""
     if package_db:
-        db_cmd = "cp -r $(location " + package_db + ")/. $OUT/lib/package.conf.d"
+        # haskell_package_db recaches with the stage-2 toolchain's packager,
+        # which is the stage-1 ghc-pkg and therefore bootstrap Cabal. The
+        # ghc-pkg installed in this store decodes that cache with its own
+        # Cabal. Rewrite it here, with that binary, so the two halves match.
+        db_cmd = " && ".join([
+            "cp -r $(location " + package_db + ")/. $OUT/lib/package.conf.d",
+            "rm -f $OUT/lib/package.conf.d/package.cache $OUT/lib/package.conf.d/package.cache.lock",
+            "$(exe " + ghc_pkg + ") --package-db $OUT/lib/package.conf.d recache",
+        ])
     else:
         db_cmd = "$(exe //utils/ghc-pkg:ghc-pkg) init $OUT/lib/package.conf.d"
     hsc2hs_cmds = [
