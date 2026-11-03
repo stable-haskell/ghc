@@ -12,10 +12,12 @@ records each package component and the dependency it waited on.
 
     mk/stage1-build-graph.py self-test
 
-Without a log the bars are a plan: every built component lasts one unit of
-dependency depth. That axis is not wall-clock time. With a stamped log the
-second chart uses the timestamps, and components the log never mentions stay
-off that axis.
+Without a log the chart is a plan: every built component lasts one unit of
+dependency depth. Start and end are those units, not wall-clock seconds.
+With a stamped log the second chart uses seconds from the first stamped
+line. Each chart draws the package from its start to its end, and an edge
+to every built dependency it waits on. A thick edge is the dependency that
+finishes last. Components the log never mentions stay off the seconds axis.
 """
 
 from __future__ import annotations
@@ -23,6 +25,7 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import os
 import re
 import sys
 import time
@@ -394,6 +397,13 @@ def bar_rows(nodes: list[Node], start: dict[str, float], finish: dict[str, float
         if not node.built or node.key not in start:
             continue
         blocking, others = waits(node, by_key, start, finish)
+        blocking_set = set(blocking)
+        preds = [p for p in node.preds if by_key[p].built and p in finish]
+        preds.sort(key=lambda p: (-finish[p], by_key[p].short()))
+        depends = [
+            {"key": p, "label": by_key[p].short(), "blocking": p in blocking_set}
+            for p in preds
+        ]
         rows.append(
             {
                 "key": node.key,
@@ -407,39 +417,153 @@ def bar_rows(nodes: list[Node], start: dict[str, float], finish: dict[str, float
                 "critical": node.key in crit,
                 "waits_on": [by_key[p].short() for p in blocking],
                 "also_needs": [by_key[p].short() for p in others],
+                "depends": depends,
             }
         )
     rows.sort(key=lambda row: (row["start"], row["stage"], row["label"]))
     return rows
 
 
-def render_html(title: str, note: str, rows: list[dict], preexisting: list[str], absent: list[str], meta: dict) -> str:
+def fmt_time(t: float, precise: bool) -> str:
+    if precise:
+        text = f"{t:.3f}".rstrip("0").rstrip(".")
+        return text or "0"
+    if abs(t - round(t)) < 1e-6:
+        return str(int(round(t)))
+    return f"{t:.3f}".rstrip("0").rstrip(".")
+
+
+def time_pairs(rows: list[dict], wall: bool) -> list[tuple[str, str]]:
+    """Start and end as displayed text. Wall-clock rows are seconds from the first stamp."""
     if not rows:
+        return []
+    origin = min(row["start"] for row in rows) if wall else 0.0
+    return [
+        (fmt_time(row["start"] - origin, wall), fmt_time(row["end"] - origin, wall))
+        for row in rows
+    ]
+
+
+def wait_labels(row: dict) -> list[tuple[str, bool]]:
+    deps = row.get("depends") or []
+    if deps:
+        return [(dep["label"], bool(dep["blocking"])) for dep in deps]
+    labels = [(label, True) for label in row.get("waits_on") or []]
+    labels.extend((label, False) for label in row.get("also_needs") or [])
+    return labels
+
+
+def mermaid_label(text: str) -> str:
+    return (
+        text.replace(":", " ")
+        .replace("[", "(")
+        .replace("]", ")")
+        .replace('"', "'")
+        .replace("#", "")
+    )
+
+
+def render_svg(rows: list[dict], times: list[tuple[str, str]], wall: bool) -> str:
+    """Bars from start to end, with an edge to every built dependency."""
+    if not rows:
+        return "<p>No built packages.</p>"
+    origin = min(row["start"] for row in rows) if wall else 0.0
+    span = max(row["end"] for row in rows) - origin
+    if span <= 0:
         span = 1.0
-        t0 = 0.0
-    else:
-        t0 = min(row["start"] for row in rows)
-        span = max(row["end"] for row in rows) - t0
-        if span <= 0:
-            span = 1.0
-    axis = "dependency depth (one unit per built component, not seconds)" if "not wall-clock" in note else "seconds from the first stamped cabal line"
-    body = []
-    for row in rows:
-        left = (row["start"] - t0) / span * 100
-        width = max((row["end"] - row["start"]) / span * 100, 0.6)
+    label_w = 400
+    chart_w = 560
+    row_h = 22
+    pad_t = 36
+    width = label_w + chart_w + 24
+    height = pad_t + row_h * len(rows) + 12
+    index = {row["key"]: i for i, row in enumerate(rows)}
+
+    def x_of(t: float) -> float:
+        return label_w + (t - origin) / span * chart_w
+
+    def y_of(i: int) -> float:
+        return pad_t + i * row_h + row_h / 2
+
+    edges: list[str] = []
+    for i, row in enumerate(rows):
+        for dep in row.get("depends") or []:
+            j = index.get(dep["key"])
+            if j is None:
+                continue
+            x1 = x_of(rows[j]["end"])
+            y1 = y_of(j)
+            x2 = x_of(row["start"])
+            y2 = y_of(i)
+            mx = (x1 + x2) / 2
+            kind = "block" if dep["blocking"] else "need"
+            edges.append(
+                f'<path class="{kind}" d="M{x1:.1f} {y1:.1f} C {mx:.1f} {y1:.1f}, {mx:.1f} {y2:.1f}, {x2:.1f} {y2:.1f}"/>'
+            )
+    # Non-blocking edges first, so the dependency that finishes last stays visible.
+    edges.sort(key=lambda edge: edge.startswith('<path class="block"'))
+
+    ticks: list[str] = []
+    tick_count = min(int(span) + 1, 13) if not wall else 6
+    if tick_count < 2:
+        tick_count = 2
+    for step in range(tick_count):
+        frac = step / (tick_count - 1)
+        t = origin + span * frac
+        shown = fmt_time(t - origin if wall else t, wall)
+        x = x_of(t)
+        ticks.append(f'<line class="grid" x1="{x:.1f}" y1="{pad_t - 6}" x2="{x:.1f}" y2="{height - 8}"/>')
+        ticks.append(f'<text class="tick" x="{x:.1f}" y="16" text-anchor="middle">{html.escape(shown)}</text>')
+
+    bars: list[str] = []
+    for i, row in enumerate(rows):
         kind = "crit" if row["critical"] else row["stage"]
-        wait = ", ".join(row["waits_on"]) if row["waits_on"] else "nothing built (installed packages only)"
-        also = ""
-        if row["also_needs"]:
-            also = " Also needs " + ", ".join(row["also_needs"]) + "."
-        tip = f"{row['label']}. Waits on {wait}.{also}"
-        body.append(
-            "<div class='row'>"
-            f"<div class='name' title='{html.escape(tip)}'>{html.escape(row['label'])}</div>"
-            "<div class='track'>"
-            f"<div class='bar {html.escape(kind)}' style='left:{left:.4f}%;width:{width:.4f}%' "
-            f"title='{html.escape(tip)}'></div></div>"
-            f"<div class='wait'>{html.escape(wait)}</div></div>"
+        x = x_of(row["start"])
+        w = max(x_of(row["end"]) - x, 3.0)
+        y = pad_t + i * row_h + 5
+        start_s, end_s = times[i]
+        waited = ", ".join(label for label, _blocking in wait_labels(row)) or "installed packages only"
+        tip = f"{row['label']}. start {start_s}, end {end_s}. Waits on {waited}."
+        bars.append(
+            f'<text class="lab" x="{label_w - 8}" y="{y_of(i) + 4:.1f}" text-anchor="end">'
+            f'{html.escape(row["label"])}</text>'
+        )
+        bars.append(
+            f'<rect class="bar {kind}" x="{x:.1f}" y="{y:.1f}" width="{w:.1f}" height="12" rx="2">'
+            f'<title>{html.escape(tip)}</title></rect>'
+        )
+    return (
+        f'<svg class="graph" viewBox="0 0 {width} {height}" role="img">'
+        + "".join(ticks)
+        + "".join(edges)
+        + "".join(bars)
+        + "</svg>"
+    )
+
+
+def render_html(title: str, note: str, rows: list[dict], preexisting: list[str], absent: list[str], meta: dict) -> str:
+    wall = "not wall-clock" not in note
+    axis = (
+        "seconds from the first stamped cabal line"
+        if wall
+        else "dependency depth (one unit per built component, not seconds)"
+    )
+    times = time_pairs(rows, wall)
+    table = []
+    for row, (start_s, end_s) in zip(rows, times):
+        waited_parts = []
+        for label, blocking in wait_labels(row):
+            shown = html.escape(label)
+            waited_parts.append(f"<strong>{shown}</strong>" if blocking else shown)
+        waited = ", ".join(waited_parts) if waited_parts else "installed packages only"
+        mark = " crit-name" if row["critical"] else ""
+        table.append(
+            "<tr>"
+            f'<td class="num">{html.escape(start_s)}</td>'
+            f'<td class="num">{html.escape(end_s)}</td>'
+            f'<td class="name{mark}">{html.escape(row["label"])}</td>'
+            f"<td>{waited}</td>"
+            "</tr>"
         )
     pre = ", ".join(preexisting) if preexisting else "(none)"
     missing = ""
@@ -447,12 +571,13 @@ def render_html(title: str, note: str, rows: list[dict], preexisting: list[str],
         missing = (
             "<h2>In the plan, absent from the log</h2>"
             "<p>These components are configured, but this log never built them. "
-            "They are not drawn on the wall-clock chart.</p><p class='pre'>"
+            "They are not drawn on the seconds chart.</p><p class='pre'>"
             + html.escape(", ".join(absent))
             + "</p>"
         )
     compiler = html.escape(str(meta.get("compiler-id") or ""))
     platform = html.escape(f"{meta.get('arch') or ''}-{meta.get('os') or ''}")
+    graph = render_svg(rows, times, wall)
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -467,26 +592,44 @@ def render_html(title: str, note: str, rows: list[dict], preexisting: list[str],
   .host {{ background: #1d4ed8; }}
   .build {{ background: #0f766e; }}
   .crit {{ background: #b45309; }}
-  .row {{ display: grid; grid-template-columns: 22rem 1fr 18rem; gap: 8px; align-items: center; margin: 3px 0; }}
-  .name {{ overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, monospace; font-size: 12px; }}
-  .track {{ position: relative; height: 16px; background: #f5f5f4; }}
-  .bar {{ position: absolute; top: 2px; bottom: 2px; border-radius: 2px; }}
-  .wait {{ font-size: 12px; color: #44403c; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+  .edge {{ background: #b45309; height: 3px; width: 18px; vertical-align: middle; }}
+  .edge.thin {{ background: #a8a29e; height: 1px; }}
+  svg.graph {{ width: 100%; max-width: 1100px; height: auto; background: #fafaf9; border: 1px solid #e7e5e4; }}
+  svg.graph .lab {{ font: 11px ui-monospace, monospace; fill: #1c1917; }}
+  svg.graph .tick {{ font: 11px ui-sans-serif, system-ui, sans-serif; fill: #78716c; }}
+  svg.graph .grid {{ stroke: #e7e5e4; stroke-width: 1; }}
+  svg.graph .bar.host {{ fill: #1d4ed8; }}
+  svg.graph .bar.build {{ fill: #0f766e; }}
+  svg.graph .bar.crit {{ fill: #b45309; }}
+  svg.graph path.need {{ fill: none; stroke: #a8a29e; stroke-width: 1; }}
+  svg.graph path.block {{ fill: none; stroke: #b45309; stroke-width: 2; }}
+  table {{ border-collapse: collapse; margin-top: 18px; font-size: 12px; }}
+  th, td {{ border-bottom: 1px solid #e7e5e4; padding: 3px 8px; vertical-align: top; text-align: left; }}
+  th {{ color: #78716c; font-weight: 600; }}
+  td.num {{ font-family: ui-monospace, monospace; text-align: right; white-space: nowrap; }}
+  td.name {{ font-family: ui-monospace, monospace; white-space: nowrap; }}
+  td.crit-name {{ font-weight: 700; }}
   h2 {{ font-size: 16px; margin-top: 28px; }}
   .pre {{ font-family: ui-monospace, monospace; font-size: 12px; }}
-  .head {{ display: grid; grid-template-columns: 22rem 1fr 18rem; gap: 8px; font-size: 12px; color: #78716c; margin-top: 16px; }}
 </style>
 </head>
 <body>
 <h1>{html.escape(title)}</h1>
-<p class="note">{html.escape(note)} Compiler {compiler}, platform {platform}. Axis: {html.escape(axis)}.</p>
+<p class="note">{html.escape(note)} Compiler {compiler}, platform {platform}. Axis: {html.escape(axis)}. A bar runs from start to end. An edge points at a built dependency. The thick edge is the dependency that finishes last.</p>
 <p class="legend">
   <span><i class="swatch host"></i>host</span>
   <span><i class="swatch build"></i>build</span>
   <span><i class="swatch crit"></i>critical path</span>
+  <span><i class="swatch edge"></i>finishes last</span>
+  <span><i class="swatch edge thin"></i>other dependency</span>
 </p>
-<div class="head"><div>package</div><div>when it is built</div><div>waiting on</div></div>
-{''.join(body)}
+{graph}
+<table>
+<thead><tr><th>start</th><th>end</th><th>package</th><th>waiting on</th></tr></thead>
+<tbody>
+{''.join(table)}
+</tbody>
+</table>
 <h2>Already installed, not compiled</h2>
 <p class="pre">{html.escape(pre)}</p>
 {missing}
@@ -496,12 +639,18 @@ def render_html(title: str, note: str, rows: list[dict], preexisting: list[str],
 
 
 def render_markdown(title: str, note: str, rows: list[dict], preexisting: list[str], meta: dict) -> str:
+    wall = "not wall-clock" not in note
+    times = time_pairs(rows, wall)
     lines = [f"### {title}", "", note, ""]
     compiler = meta.get("compiler-id") or "unknown compiler"
+    unit = "seconds from the first stamped line" if wall else "one unit of dependency depth, not seconds"
     lines.append(
         f"Plan for {compiler} on {meta.get('arch') or '?'}-{meta.get('os') or '?'}. "
-        "Each built component is one unit wide. Packages on the same row run together. "
-        "The package in **waiting on** is the predecessor that finishes last."
+        f"Each bar runs from start to end ({unit}). "
+        "Packages with the same start can run together. "
+        "The flowchart edges are the built dependencies a package waits on. "
+        "A thick edge is the dependency that finishes last. "
+        "In the table, that dependency is **bold**."
     )
     lines.append("")
     lines.append("```mermaid")
@@ -509,46 +658,59 @@ def render_markdown(title: str, note: str, rows: list[dict], preexisting: list[s
     lines.append(f"    title {title}")
     lines.append("    dateFormat X")
     lines.append("    axisFormat %s")
-    grouped: dict[float, list[dict]] = defaultdict(list)
-    for row in rows:
-        grouped[row["start"]].append(row)
+    grouped: dict[float, list[int]] = defaultdict(list)
+    for i, row in enumerate(rows):
+        grouped[row["start"]].append(i)
     seq = 0
     for depth in sorted(grouped):
-        lines.append(f"    section t={depth:g}")
-        for row in grouped[depth]:
+        lines.append(f"    section t={fmt_time(depth if not wall else depth - min(r['start'] for r in rows), wall)}")
+        for i in grouped[depth]:
             seq += 1
+            row = rows[i]
+            start_s, end_s = times[i]
             tag = "crit, " if row["critical"] else ""
-            # Mermaid treats ':' as field syntax and '[]' as node syntax.
-            label = (
-                row["label"]
-                .replace(":", " ")
-                .replace("[", "(")
-                .replace("]", ")")
-            )
-            lines.append(f"    {label} :{tag}p{seq}, {row['start']:g}, {row['end']:g}")
+            label = mermaid_label(f"{row['label']} {start_s} to {end_s}")
+            # Gantt numbers stay on the plan's own axis. Wall-clock bars use
+            # seconds from the first stamp, matching the table.
+            origin = min(item["start"] for item in rows) if wall else 0.0
+            g0 = row["start"] - origin
+            g1 = row["end"] - origin
+            lines.append(f"    {label} :{tag}p{seq}, {g0:g}, {g1:g}")
     lines.append("```")
     lines.append("")
-    lines.append("| when | package | waiting on |")
-    lines.append("| --- | --- | --- |")
+    lines.append("```mermaid")
+    lines.append("flowchart TB")
+    key_to_i = {row["key"]: i for i, row in enumerate(rows)}
+    section_i = 0
     for depth in sorted(grouped):
-        for row in grouped[depth]:
-            wait = ", ".join(row["waits_on"]) if row["waits_on"] else "installed packages only"
-            mark = " **critical**" if row["critical"] else ""
-            lines.append(f"| {depth:g} | {row['label']}{mark} | {wait} |")
+        start_s = times[grouped[depth][0]][0]
+        lines.append(f'    subgraph s{section_i}["t={start_s}"]')
+        for i in grouped[depth]:
+            start_s, end_s = times[i]
+            label = mermaid_label(f"{rows[i]['label']} {start_s} to {end_s}")
+            lines.append(f'        n{i}["{label}"]')
+        lines.append("    end")
+        section_i += 1
+    for i, row in enumerate(rows):
+        for dep in row.get("depends") or []:
+            j = key_to_i.get(dep["key"])
+            if j is None:
+                continue
+            arrow = "==>" if dep["blocking"] else "-->"
+            lines.append(f"    n{j} {arrow} n{i}")
+    lines.append("```")
     lines.append("")
-    crit_rows = [row for row in rows if row["critical"]]
-    if crit_rows:
-        lines.append("Critical path, in build order:")
-        lines.append("")
-        lines.append("```mermaid")
-        lines.append("flowchart LR")
-        for i, row in enumerate(crit_rows):
-            label = row["label"].replace('"', "'").replace("[", "(").replace("]", ")")
-            lines.append(f'    n{i}["{label}"]')
-            if i:
-                lines.append(f"    n{i-1} --> n{i}")
-        lines.append("```")
-        lines.append("")
+    lines.append("| start | end | package | waiting on |")
+    lines.append("| --- | --- | --- | --- |")
+    for i, row in enumerate(rows):
+        start_s, end_s = times[i]
+        parts = []
+        for label, blocking in wait_labels(row):
+            parts.append(f"**{label}**" if blocking else label)
+        wait = ", ".join(parts) if parts else "installed packages only"
+        mark = " **critical**" if row["critical"] else ""
+        lines.append(f"| {start_s} | {end_s} | {row['label']}{mark} | {wait} |")
+    lines.append("")
     lines.append("Already installed, not compiled: " + (", ".join(preexisting) if preexisting else "(none)"))
     lines.append("")
     return "\n".join(lines)
@@ -600,7 +762,9 @@ def build_view(doc: dict, nodes: list[Node], log_path: str | None) -> dict:
 
 def write_outputs(view: dict, html_path: str | None, json_path: str | None, markdown_path: str | None) -> None:
     meta = view["meta"]
-    sections = []
+    for path in (html_path, json_path, markdown_path):
+        if path:
+            os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     if html_path:
         parts = [
             render_html(
@@ -754,7 +918,13 @@ def self_test() -> int:
         assert "Win32" not in text.split("Already installed", 1)[0]
         md = md_path.read_text(encoding="utf-8")
         assert "```mermaid" in md
-        assert "waiting on" in md
+        assert "flowchart TB" in md
+        assert "| start | end | package | waiting on |" in md
+        assert "| 1 | 2 | directory-1.3 lib [host]" in md
+        # The library waits on its Setup, which is the edge that finishes last.
+        assert "==>" in md
+        assert 'class="num"' in text
+        assert "path class=\"block\"" in text
         # Incomplete log leaves the bar open and does not invent the other packages on that axis.
         partial = root / "partial"
         partial.write_text("10.0\tStarting     directory-1.3 (lib)\n", encoding="utf-8")
