@@ -578,7 +578,7 @@ endif
 
 # These are configuration variables for stage one
 
-# TODO we should not need genprimops code here, it is needed by compiler/Setup.hs
+# TODO we should not need genprimops code here, it is needed by compiler/configure
 # but it is also listed as a build-tool-depends in compiler/ghc.cabal so cabal-install
 # will build it automatically. The effect of listing genprimops here is that it
 # will be included as a host target rather as a build target. So we end up compiling it

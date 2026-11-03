@@ -1,0 +1,110 @@
+#!/bin/sh
+# Cabal runs `sh <this script>` with cwd set to the package build directory
+# (dist/build) before component unit ids exist. Host.hs is written under
+# $PWD/global-autogen and stays an autogen-module. Hadrian writes its own
+# copy earlier on the source path; that copy is the one GHC compiles.
+#
+# The host triple is Cabal's --host= (pretty arch, then vendor-os). A direct
+# run falls back to `$GHC --print-target-platform`. Constructors are emitted
+# directly so this library does not depend on Cabal-syntax.
+set -eu
+
+root=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
+
+host_triple=
+for arg in "$@"; do
+  case $arg in
+    --host=*) host_triple=${arg#--host=} ;;
+  esac
+done
+
+if [ -z "$host_triple" ]; then
+  ghc_cmd=${GHC:-ghc}
+  host_triple=$("$ghc_cmd" --print-target-platform | tr -d '[:space:]')
+fi
+if [ -z "$host_triple" ]; then
+  echo "ghc-boot configure: no host platform" >&2
+  exit 1
+fi
+
+arch=${host_triple%%-*}
+rest=${host_triple#*-}
+osrest=${rest#*-}
+
+case $arch in
+  i386|i686)           arch_hs='ArchX86' ;;
+  x86_64|amd64)       arch_hs='ArchX86_64' ;;
+  ppc|powerpc)        arch_hs='ArchPPC' ;;
+  ppc64|powerpc64)    arch_hs='ArchPPC_64 ELF_V1' ;;
+  ppc64le|powerpc64le) arch_hs='ArchPPC_64 ELF_V2' ;;
+  arm|armv5|armv6|armv7|armel|armeb) arch_hs='ArchARM ARMv7 [] SOFT' ;;
+  aarch64|arm64)      arch_hs='ArchAArch64' ;;
+  alpha)              arch_hs='ArchAlpha' ;;
+  riscv64)            arch_hs='ArchRISCV64' ;;
+  loongarch64)        arch_hs='ArchLoongArch64' ;;
+  javascript)         arch_hs='ArchJavaScript' ;;
+  wasm32)             arch_hs='ArchWasm32' ;;
+  *)                  arch_hs='ArchUnknown' ;;
+esac
+
+# Match the old Setup.hs toOS table. Android stays OSUnknown. A libc
+# suffix such as linux-gnu is still Linux. Check the android form first.
+case $osrest in
+  linux-android*|android*) os_hs='OSUnknown' ;;
+  linux*)                  os_hs='OSLinux' ;;
+  darwin*)                 os_hs='OSDarwin' ;;
+  mingw32*|windows*)       os_hs='OSMinGW32' ;;
+  freebsd*)                os_hs='OSFreeBSD' ;;
+  openbsd*)                os_hs='OSOpenBSD' ;;
+  netbsd*)                 os_hs='OSNetBSD' ;;
+  dragonfly*)              os_hs='OSDragonFly' ;;
+  solaris*)                os_hs='OSSolaris2' ;;
+  aix*)                    os_hs='OSAIX' ;;
+  gnu|gnu-*|hurd*)         os_hs='OSHurd' ;;
+  ghcjs*)                  os_hs='OSGhcjs' ;;
+  wasi*)                   os_hs='OSWasi' ;;
+  haiku*)                  os_hs='OSHaiku' ;;
+  *)                       os_hs='OSUnknown' ;;
+esac
+
+if [ -n "${GIT_COMMIT_ID:-}" ]; then
+  commit=$(printf '%s' "$GIT_COMMIT_ID" | tr -d '[:space:]')
+else
+  commit=$(git -C "$root" rev-parse HEAD 2>/dev/null | tr -d '[:space:]' || true)
+fi
+if [ -z "$commit" ]; then
+  echo "ghc-boot configure: GIT_COMMIT_ID is unset and git rev-parse failed" >&2
+  exit 1
+fi
+case $commit in
+  *[!A-Za-z0-9_]*)
+    echo "ghc-boot configure: GIT_COMMIT_ID is not a cpp token: $commit" >&2
+    exit 1
+    ;;
+esac
+
+autogen=$PWD/global-autogen/GHC/Platform
+mkdir -p "$autogen"
+tmp=$autogen/Host.hs.tmp
+cat > "$tmp" <<EOF
+module GHC.Platform.Host where
+
+import GHC.Platform.ArchOS
+
+hostPlatformArch :: Arch
+hostPlatformArch = $arch_hs
+
+hostPlatformOS   :: OS
+hostPlatformOS   = $os_hs
+
+hostPlatformArchOS :: ArchOS
+hostPlatformArchOS = ArchOS hostPlatformArch hostPlatformOS
+EOF
+mv "$tmp" "$autogen/Host.hs"
+
+# Cabal reads the single *.buildinfo in the build dir after this script.
+# -DGIT_COMMIT_ID=<hash> is the same unquoted flag Setup.hs passed. The
+# string in GHC.Version is quoted, so cpp does not substitute it.
+cat > "$PWD/ghc-boot.buildinfo" <<EOF
+cpp-options: -DGIT_COMMIT_ID=$commit
+EOF

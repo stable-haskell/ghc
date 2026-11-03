@@ -1,0 +1,169 @@
+#!/bin/sh
+# Cabal runs `sh <this script>` with cwd set to the package build directory.
+# Primop includes are written in that directory, which is on the cpp include
+# path. Constants.hs and Config.hs go in $PWD/global-autogen.
+#
+# cProjectUnitId is CURRENT_PACKAGE_KEY from cabal_macros.h. cGhcInternalUnitId
+# is the unit id ghc-internal exports from GHC.Internal.ThisUnitId, except
+# while the compiler is built with -DBOOTSTRAPPING (stage1). That build does
+# not depend on ghc-internal, and the old Setup wrote "<unavailable>".
+#
+# Hadrian generates the same three outputs itself and searches the build
+# directory before global-autogen. If genprimopcode or deriveConstants is not
+# on PATH, those two steps are skipped so Hadrian's configure still succeeds.
+set -eu
+
+root=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
+ghc_cmd=${GHC:-ghc}
+cc_cmd=${CC:-cc}
+
+die() {
+  echo "compiler configure: $*" >&2
+  exit 1
+}
+
+info=$("$ghc_cmd" --info | tr -d '\n') || die "ghc --info failed"
+
+# ("key","value") with an optional space after the comma. The values this
+# script reads do not contain quotes.
+get_info() {
+  key=$1
+  printf '%s\n' "$info" | awk -v key="$key" '
+    BEGIN { RS=")" }
+    {
+      pat = "(\"" key "\",\""
+      pat2 = "(\"" key "\", \""
+      i = index($0, pat)
+      n = length(pat)
+      if (i == 0) {
+        i = index($0, pat2)
+        n = length(pat2)
+      }
+      if (i > 0) {
+        rest = substr($0, i + n)
+        q = index(rest, "\"")
+        if (q > 0) {
+          print substr(rest, 1, q - 1)
+          exit
+        }
+      }
+    }
+  '
+}
+
+require_info() {
+  key=$1
+  val=$(get_info "$key")
+  if [ -z "$val" ]; then
+    die "missing --info field: $key"
+  fi
+  printf '%s\n' "$val"
+}
+
+hs_show() {
+  printf '"%s"' "$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g')"
+}
+
+autogen=$PWD/global-autogen
+mkdir -p "$autogen/GHC/Settings" "$autogen/GHC/Platform"
+
+if command -v genprimopcode >/dev/null 2>&1 && command -v deriveConstants >/dev/null 2>&1; then
+  hs_cpp=$(require_info "Haskell CPP flags")
+  target_os=$(require_info "target os")
+  cpp_out=$(mktemp)
+  const_tmp=$(mktemp)
+  trap 'rm -f "$cpp_out" "$const_tmp"' EXIT
+  # Flags from this compiler are separate words with no quotes or globs.
+  set -f
+  # shellcheck disable=SC2086
+  "$cc_cmd" $hs_cpp -P -x c -I "$root" "$root/GHC/Builtin/primops.txt.pp" > "$cpp_out"
+  set +f
+
+  gen_incl() {
+    genprimopcode "$2" < "$cpp_out" > "$PWD/$1.tmp"
+    mv "$PWD/$1.tmp" "$PWD/$1"
+  }
+  gen_incl primop-data-decl.hs-incl          --data-decl
+  gen_incl primop-tag.hs-incl                --primop-tag
+  gen_incl primop-list.hs-incl               --primop-list
+  gen_incl primop-effects.hs-incl            --primop-effects
+  gen_incl primop-out-of-line.hs-incl        --out-of-line
+  gen_incl primop-commutable.hs-incl         --commutable
+  gen_incl primop-code-size.hs-incl          --code-size
+  gen_incl primop-strictness.hs-incl         --strictness
+  gen_incl primop-is-work-free.hs-incl       --is-work-free
+  gen_incl primop-is-cheap.hs-incl           --is-cheap
+  gen_incl primop-fixity.hs-incl             --fixity
+  gen_incl primop-primop-info.hs-incl        --primop-primop-info
+  gen_incl primop-vector-uniques.hs-incl     --primop-vector-uniques
+  gen_incl primop-vector-tys.hs-incl         --primop-vector-tys
+  gen_incl primop-vector-tys-exports.hs-incl --primop-vector-tys-exports
+  gen_incl primop-vector-tycons.hs-incl      --primop-vector-tycons
+  gen_incl primop-docs.hs-incl               --wired-in-docs
+  gen_incl primop-deprecations.hs-incl       --wired-in-deprecations
+  gen_incl primop-prim-module.hs-incl        --prim-module
+  gen_incl primop-wrappers-module.hs-incl    --wrappers-module
+
+  deriveConstants --gen-haskell-type -o "$const_tmp" --target-os "$target_os"
+  mv "$const_tmp" "$autogen/GHC/Platform/Constants.hs"
+  const_tmp=
+  trap 'rm -f "$cpp_out"' EXIT
+  rm -f "$cpp_out"
+  cpp_out=
+  trap - EXIT
+else
+  echo "compiler configure: genprimopcode or deriveConstants is not on PATH; skipping primops and Constants.hs" >&2
+fi
+
+build_platform=$(require_info "Host platform")
+host_platform=$(require_info "Target platform")
+project_name=$(require_info "Project name")
+booter_version=$(require_info "Project version")
+
+config_tmp=$autogen/GHC/Settings/Config.hs.tmp
+{
+  echo '{-# LANGUAGE CPP #-}'
+  echo 'module GHC.Settings.Config'
+  echo '  ( module GHC.Version'
+  echo '  , cBuildPlatformString'
+  echo '  , cHostPlatformString'
+  echo '  , cProjectName'
+  echo '  , cBooterVersion'
+  echo '  , cStage'
+  echo '  , cProjectUnitId'
+  echo '  , cGhcInternalUnitId'
+  echo '  ) where'
+  echo
+  echo 'import GHC.Prelude.Basic'
+  echo
+  echo 'import GHC.Version'
+  echo '#ifndef BOOTSTRAPPING'
+  echo 'import GHC.Internal.ThisUnitId (unitId)'
+  echo '#endif'
+  echo
+  echo 'cBuildPlatformString :: String'
+  printf 'cBuildPlatformString = %s\n' "$(hs_show "$build_platform")"
+  echo
+  echo 'cHostPlatformString :: String'
+  printf 'cHostPlatformString = %s\n' "$(hs_show "$host_platform")"
+  echo
+  echo 'cProjectName          :: String'
+  printf 'cProjectName          = %s\n' "$(hs_show "$project_name")"
+  echo
+  echo 'cBooterVersion        :: String'
+  printf 'cBooterVersion        = %s\n' "$(hs_show "$booter_version")"
+  echo
+  echo 'cStage                :: String'
+  echo 'cStage                = show (2 :: Int)'
+  echo
+  echo 'cProjectUnitId :: String'
+  echo 'cProjectUnitId = CURRENT_PACKAGE_KEY'
+  echo
+  echo 'cGhcInternalUnitId :: String'
+  echo '#ifdef BOOTSTRAPPING'
+  echo 'cGhcInternalUnitId = "<unavailable>"'
+  echo '#else'
+  echo 'cGhcInternalUnitId = unitId'
+  echo '#endif'
+} > "$config_tmp"
+mv "$config_tmp" "$autogen/GHC/Settings/Config.hs"

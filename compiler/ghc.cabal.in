@@ -26,15 +26,13 @@ Description:
     This package directly exposes GHC internals, which can and do change with
     every release.
 Category: Development
-Build-Type: Custom
+Build-Type: Configure
 
 extra-source-files:
     GHC/Builtin/primops.txt.pp
     Unique.h
     CodeGen.Platform.h
-
-custom-setup
-    setup-depends: base >= 3 && < 5, Cabal >= 1.6 && <3.18, directory, process, filepath, containers
+    configure
 
 Flag internal-interpreter
     Description: Build with internal interpreter support.
