@@ -1,8 +1,14 @@
-# ghc-pkg is not in cabal.project.stage1. `cabal buck2 --variant ghc-pkg-boot`
-# appends the load of :BUCK.ghc-pkg-boot.cabal.bzl (bootstrap Cabal closure).
-# The unsuffixed name stays what $(exe //utils/ghc-pkg:ghc-pkg) asks for.
-# There is no :BUCK.cabal.bzl: the compiler plan must not build this package.
+# ghc-pkg is not in cabal.project.stage1. Its boot-compiler target is the
+# ghc-pkg-boot variant (bootstrap Cabal). Load that file here and call it.
+# `cabal buck2 --variant` appends the call only when the BUCK text does not
+# already contain the variant filename, so a comment that names the file
+# suppresses the append and leaves the alias pointing at nothing. The base
+# `cabal buck2` writes a stub for a missing load; the variant command
+# replaces the stub. There is no :BUCK.cabal.bzl: the compiler plan must
+# not build this package. The unsuffixed name stays what
+# $(exe //utils/ghc-pkg:ghc-pkg) asks for.
 load(":BUCK.stage2.cabal.bzl", generated_targets_stage2 = "generated_targets")
+load(":BUCK.ghc-pkg-boot.cabal.bzl", generated_targets_ghc_pkg_boot = "generated_targets")
 
 alias(
     name = "ghc-pkg",
@@ -13,4 +19,5 @@ alias(
     visibility = ["PUBLIC"],
 )
 
+generated_targets_ghc_pkg_boot()
 generated_targets_stage2()
