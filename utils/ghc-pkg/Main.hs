@@ -38,6 +38,9 @@ import qualified Data.Graph as Graph
 import qualified Distribution.ModuleName as ModuleName
 import Distribution.ModuleName (ModuleName)
 import Distribution.InstalledPackageInfo as Cabal
+#if MIN_VERSION_Cabal_syntax(3,19,0)
+import qualified Data.Text as T
+#endif
 import qualified Distribution.Parsec as Cabal
 import Distribution.Package hiding (installedUnitId)
 import Distribution.Text
@@ -1451,6 +1454,17 @@ fromPackageCacheFormat = GhcPkg.mapGenericUnitInfo
        OpenModule uid n -> DbModule (mkInstUnitId' uid) (mkModuleName' n)
        OpenModuleVar n  -> DbModuleVar  (mkModuleName' n)
 
+-- | The string fields of 'InstalledPackageInfo' that ghc-pkg reads. Cabal-syntax
+-- 3.19 made them 'T.Text'; earlier versions, which stage 1 may be built
+-- against, have 'String'.
+#if MIN_VERSION_Cabal_syntax(3,19,0)
+ipiString :: T.Text -> String
+ipiString = T.unpack
+#else
+ipiString :: String -> String
+ipiString = id
+#endif
+
 convertPackageInfoToCacheFormat :: InstalledPackageInfo -> PackageCacheFormat
 convertPackageInfoToCacheFormat pkg =
     GhcPkg.GenericUnitInfo {
@@ -1466,18 +1480,18 @@ convertPackageInfoToCacheFormat pkg =
        GhcPkg.unitAbiDepends     = map (\(AbiDependency k v) -> (k,ST.pack $ unAbiHash v)) (abiDepends pkg),
        GhcPkg.unitAbiHash        = ST.pack $ unAbiHash (abiHash pkg),
        GhcPkg.unitImportDirs     = map ST.pack $ importDirs pkg,
-       GhcPkg.unitLibraries      = map ST.pack $ hsLibraries pkg,
-       GhcPkg.unitExtDepLibsSys  = map ST.pack $ extraLibraries pkg,
-       GhcPkg.unitExtDepLibsStaticSys = map ST.pack $ extraLibrariesStatic pkg,
-       GhcPkg.unitExtDepLibsGhc  = map ST.pack $ extraGHCiLibraries pkg,
+       GhcPkg.unitLibraries      = map (ST.pack . ipiString) $ hsLibraries pkg,
+       GhcPkg.unitExtDepLibsSys  = map (ST.pack . ipiString) $ extraLibraries pkg,
+       GhcPkg.unitExtDepLibsStaticSys = map (ST.pack . ipiString) $ extraLibrariesStatic pkg,
+       GhcPkg.unitExtDepLibsGhc  = map (ST.pack . ipiString) $ extraGHCiLibraries pkg,
        GhcPkg.unitLibraryDirs    = map ST.pack $ libraryDirs pkg,
        GhcPkg.unitLibraryDirsStatic = map ST.pack $ libraryDirsStatic pkg,
        GhcPkg.unitLibraryDynDirs = map ST.pack $ libraryDynDirs pkg,
-       GhcPkg.unitExtDepFrameworks = map ST.pack $ frameworks pkg,
+       GhcPkg.unitExtDepFrameworks = map (ST.pack . ipiString) $ frameworks pkg,
        GhcPkg.unitExtDepFrameworkDirs = map ST.pack $ frameworkDirs pkg,
-       GhcPkg.unitLinkerOptions  = map ST.pack $ ldOptions pkg,
-       GhcPkg.unitCcOptions      = map ST.pack $ ccOptions pkg,
-       GhcPkg.unitIncludes       = map ST.pack $ includes pkg,
+       GhcPkg.unitLinkerOptions  = map (ST.pack . ipiString) $ ldOptions pkg,
+       GhcPkg.unitCcOptions      = map (ST.pack . ipiString) $ ccOptions pkg,
+       GhcPkg.unitIncludes       = map (ST.pack . ipiString) $ includes pkg,
        GhcPkg.unitIncludeDirs    = map ST.pack $ includeDirs pkg,
        GhcPkg.unitHaddockInterfaces = map ST.pack $ haddockInterfaces pkg,
        GhcPkg.unitHaddockHTMLs   = map ST.pack $ haddockHTMLs pkg,
@@ -1991,7 +2005,7 @@ checkPackageConfig pkg verbosity db_stack
   checkExposedModules db_stack pkg
   checkOtherModules pkg
   let has_code = Set.null (openModuleSubstFreeHoles (Map.fromList (instantiatedWith pkg)))
-  when has_code $ mapM_ (checkHSLib verbosity (libraryDirs pkg ++ libraryDynDirs pkg)) (hsLibraries pkg)
+  when has_code $ mapM_ (checkHSLib verbosity (libraryDirs pkg ++ libraryDynDirs pkg)) (map ipiString (hsLibraries pkg))
   -- ToDo: check these somehow?
   --    extra_libraries :: [String],
   --    c_includes      :: [String],
@@ -2012,7 +2026,7 @@ checkUnitId :: InstalledPackageInfo -> PackageDBStack -> Bool
 checkUnitId ipi db_stack update = do
   let uid = installedUnitId ipi
   when (null (display uid)) $ verror CannotForce "missing id field"
-  when (display uid /= compatPackageKey ipi) $
+  when (display uid /= ipiString (compatPackageKey ipi)) $
     verror CannotForce $ "installed package info from too old version of Cabal "
                       ++ "(key field does not match id field)"
   let dups = [ p | p <- allPackagesInStack db_stack,
