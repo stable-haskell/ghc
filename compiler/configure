@@ -12,6 +12,11 @@
 # directory before global-autogen. If genprimopcode or deriveConstants is not
 # on PATH, those two steps are skipped so Hadrian's configure still succeeds.
 #
+# GENPRIMOPCODE and DERIVE_CONSTANTS, when set, are absolute paths to the
+# in-tree tools. The bootstrap compiler's genprimopcode is often earlier on
+# PATH and rejects the current primop grammar. An empty value falls back to
+# PATH.
+#
 # Stock Cabal passes the selected compiler as --with-compiler= and CC= on the
 # command line and does not export GHC or CC. The stage1 Cabal pin does export
 # them. An explicit argument wins, then the environment, then PATH.
@@ -172,7 +177,15 @@ hs_show() {
 autogen=$PWD/global-autogen
 mkdir -p "$autogen/GHC/Settings" "$autogen/GHC/Platform"
 
-if command -v genprimopcode >/dev/null 2>&1 && command -v deriveConstants >/dev/null 2>&1; then
+genprimopcode_cmd=${GENPRIMOPCODE:-}
+derive_constants_cmd=${DERIVE_CONSTANTS:-}
+if [ -z "$genprimopcode_cmd" ]; then
+  genprimopcode_cmd=$(command -v genprimopcode || true)
+fi
+if [ -z "$derive_constants_cmd" ]; then
+  derive_constants_cmd=$(command -v deriveConstants || true)
+fi
+if [ -n "$genprimopcode_cmd" ] && [ -n "$derive_constants_cmd" ]; then
   target_os=$(require_info "target os")
   cpp_out=$(mktemp)
   const_tmp=$(mktemp)
@@ -196,7 +209,7 @@ if command -v genprimopcode >/dev/null 2>&1 && command -v deriveConstants >/dev/
   "$cc_cmd" "$@" -P -x c -I "$root" "$root/GHC/Builtin/primops.txt.pp" > "$cpp_out"
 
   gen_incl() {
-    genprimopcode "$2" < "$cpp_out" > "$PWD/$1.tmp"
+    "$genprimopcode_cmd" "$2" < "$cpp_out" > "$PWD/$1.tmp"
     mv "$PWD/$1.tmp" "$PWD/$1"
   }
   gen_incl primop-data-decl.hs-incl          --data-decl
@@ -220,7 +233,7 @@ if command -v genprimopcode >/dev/null 2>&1 && command -v deriveConstants >/dev/
   gen_incl primop-prim-module.hs-incl        --prim-module
   gen_incl primop-wrappers-module.hs-incl    --wrappers-module
 
-  deriveConstants --gen-haskell-type -o "$const_tmp" --target-os "$target_os"
+  "$derive_constants_cmd" --gen-haskell-type -o "$const_tmp" --target-os "$target_os"
   mv "$const_tmp" "$autogen/GHC/Platform/Constants.hs"
   rm -f "$cpp_out" "$cpp_args"
   cpp_out=

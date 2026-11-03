@@ -5,6 +5,8 @@
   third-party-haskell = third-party/haskell
   # the stage-2 variant's prebuilt packages (cabal buck2 --variant stage2)
   third-party-haskell-stage2 = third-party/haskell-stage2
+  # stage1 ghc-pkg (cabal buck2 --variant ghc-pkg-boot)
+  third-party-haskell-ghc-pkg-boot = third-party/haskell-ghc-pkg-boot
   none = none
   # exclude this from buck2 build //...
   example = buck2/example
@@ -21,7 +23,8 @@
     target:prelude//...->prelude//platforms:default \
     target:toolchains//...->prelude//platforms:default \
     target:third-party-haskell//...->prelude//platforms:default \
-    target:third-party-haskell-stage2//...->prelude//platforms:default
+    target:third-party-haskell-stage2//...->prelude//platforms:default \
+    target:third-party-haskell-ghc-pkg-boot//...->prelude//platforms:default
 
 [build]
   execution_platforms = root//buck2/platforms:exec
