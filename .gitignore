@@ -117,6 +117,7 @@ _darcs/
 /compiler/GHC/CmmToLlvm/Version/Bounds.hs
 /compiler/ghc.cabal
 /compiler/ghc.cabal.old
+/distrib/configure
 /distrib/configure.ac
 /distrib/ghc.iss
 /docs/index.html

@@ -5,21 +5,32 @@
 # copy earlier on the source path; that copy is the one GHC compiles.
 #
 # The host triple is Cabal's --host= (pretty arch, then vendor-os). A direct
-# run falls back to `$GHC --print-target-platform`. Constructors are emitted
-# directly so this library does not depend on Cabal-syntax.
+# run falls back to the compiler from --with-compiler= or $GHC. Constructors
+# are emitted directly so this library does not depend on Cabal-syntax.
+#
+# The commit id is $GIT_COMMIT_ID, else `git rev-parse` when this tree has a
+# .git, else the GIT_COMMIT_ID file a source distribution ships at the tree
+# root. Hadrian runs this script; that file is what a tarball has instead of
+# .git. Same order as m4/fp_setup_project_version.m4.
 set -eu
 
 root=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
+top=$(CDPATH= cd -- "$root/../.." && pwd)
 
 host_triple=
+ghc_cmd=${GHC:-}
 for arg in "$@"; do
   case $arg in
     --host=*) host_triple=${arg#--host=} ;;
+    --with-compiler=*)
+      v=${arg#--with-compiler=}
+      [ -n "$v" ] && ghc_cmd=$v
+      ;;
   esac
 done
+: "${ghc_cmd:=ghc}"
 
 if [ -z "$host_triple" ]; then
-  ghc_cmd=${GHC:-ghc}
   host_triple=$("$ghc_cmd" --print-target-platform | tr -d '[:space:]')
 fi
 if [ -z "$host_triple" ]; then
@@ -69,12 +80,17 @@ esac
 
 if [ -n "${GIT_COMMIT_ID:-}" ]; then
   commit=$(printf '%s' "$GIT_COMMIT_ID" | tr -d '[:space:]')
+elif [ -e "$top/.git" ]; then
+  commit=$(git -C "$top" rev-parse HEAD 2>/dev/null | tr -d '[:space:]' || true)
+  if [ -z "$commit" ]; then
+    echo "ghc-boot configure: git rev-parse failed" >&2
+    exit 1
+  fi
+elif [ -f "$top/GIT_COMMIT_ID" ]; then
+  commit=$(tr -d '[:space:]' < "$top/GIT_COMMIT_ID")
 else
-  commit=$(git -C "$root" rev-parse HEAD 2>/dev/null | tr -d '[:space:]' || true)
-fi
-if [ -z "$commit" ]; then
-  echo "ghc-boot configure: GIT_COMMIT_ID is unset and git rev-parse failed" >&2
-  exit 1
+  echo "ghc-boot configure: no .git and no GIT_COMMIT_ID file; using zeros" >&2
+  commit=0000000000000000000000000000000000000000
 fi
 case $commit in
   *[!A-Za-z0-9_]*)

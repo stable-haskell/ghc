@@ -46,6 +46,9 @@ ARCHS = {
 # after that special case, so linux-android does not become Linux.
 if os_.startswith("linux-android") or os_.startswith("android"):
     os_hs = "OSUnknown"
+elif os_.startswith("dragonfly"):
+    # Cabal's triple is unknown-dragonflybsd. The table key is the GNU name.
+    os_hs = "OSDragonFly"
 else:
     os_base = os_.split("-")[0]
     os_hs = {
