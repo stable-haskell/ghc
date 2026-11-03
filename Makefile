@@ -114,7 +114,17 @@ GHC0   ?= ghc-9.8.4
 AR     ?= ar
 CC     ?= cc
 LD     ?= ld
-PYTHON ?= python3
+# Rocky Linux 8's /usr/bin/python3 is 3.6. The chart renderer needs
+# dataclasses (3.7). Prefer a newer interpreter when one is on PATH.
+# The stamper itself runs on 3.6, and the chart is skipped otherwise.
+PYTHON ?= $(shell \
+	picked=python3; \
+	for c in python3.12 python3.11 python3.10 python3.9 python3; do \
+		if command -v "$$c" >/dev/null 2>&1 && "$$c" -c 'import sys; raise SystemExit(sys.version_info < (3, 7))' >/dev/null 2>&1; then \
+			picked=$$c; break; \
+		fi; \
+	done; \
+	printf '%s\n' "$$picked")
 SED    ?= sed
 LN     ?= ln
 LN_S   ?= $(LN) -s
@@ -649,14 +659,21 @@ $(STAGE1_STAMP): $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) cabal.project.stage1 c
 	    DERIVE_CONSTANTS=$(call NORMALIZE_FP,$(CURDIR)/$(STAGE1_PATH)/bin/deriveConstants$(EXE_EXT)) \
 	    PATH="$(call NORMALIZE_FP,$(CURDIR)/$(STAGE1_PATH)/bin):$$PATH" \
 	    $(STAGE1_CABAL_BUILD) $(addprefix exe:,$(STAGE1_EXECUTABLES)); \
-	} > >($(PYTHON) ./mk/stage1-build-graph.py stamp $(TIMING_DIR)/stage1-cabal.log) 2>&1
-	$(PYTHON) ./mk/stage1-build-graph.py render \
-		--plan $(BUILD_DIR)/stage1/cache/plan.json \
-		--log $(TIMING_DIR)/stage1-cabal.log \
-		$(foreach exe,$(STAGE1_EXECUTABLES),--root $(exe)) \
-		--html $(TIMING_DIR)/stage1-packages.html \
-		--json $(TIMING_DIR)/stage1-packages.json \
-		--markdown $(TIMING_DIR)/stage1-packages.md
+	} > >($(PYTHON) ./mk/stage1-stamp.py $(TIMING_DIR)/stage1-cabal.log) 2>&1
+	@# stage1-build-graph.py imports dataclasses. Python 3.6, which is
+	@# /usr/bin/python3 on Rocky Linux 8, cannot load it. The stamper
+	@# above still records the log.
+	if $(PYTHON) -c 'import sys; raise SystemExit(sys.version_info < (3, 7))'; then \
+		$(PYTHON) ./mk/stage1-build-graph.py render \
+			--plan $(BUILD_DIR)/stage1/cache/plan.json \
+			--log $(TIMING_DIR)/stage1-cabal.log \
+			$(foreach exe,$(STAGE1_EXECUTABLES),--root $(exe)) \
+			--html $(TIMING_DIR)/stage1-packages.html \
+			--json $(TIMING_DIR)/stage1-packages.json \
+			--markdown $(TIMING_DIR)/stage1-packages.md; \
+	else \
+		echo "stage1-build-graph: skipped the package chart; $(PYTHON) is older than 3.7"; \
+	fi
 	$(call PHASE_END_OK,stage1.executables)
 
 	$(call LOG,Installing ghc-pkg into the stage1 store)
@@ -691,13 +708,17 @@ stage1: $(STAGE1_STAMP)
 .PHONY: stage1-build-graph
 stage1-build-graph:
 	@mkdir -p $(TIMING_DIR)
-	$(PYTHON) ./mk/stage1-build-graph.py render \
-		--plan $(BUILD_DIR)/stage1/cache/plan.json \
-		$(if $(wildcard $(TIMING_DIR)/stage1-cabal.log),--log $(TIMING_DIR)/stage1-cabal.log,) \
-		$(foreach exe,$(STAGE1_EXECUTABLES),--root $(exe)) \
-		--html $(TIMING_DIR)/stage1-packages.html \
-		--json $(TIMING_DIR)/stage1-packages.json \
-		--markdown $(TIMING_DIR)/stage1-packages.md
+	if $(PYTHON) -c 'import sys; raise SystemExit(sys.version_info < (3, 7))'; then \
+		$(PYTHON) ./mk/stage1-build-graph.py render \
+			--plan $(BUILD_DIR)/stage1/cache/plan.json \
+			$(if $(wildcard $(TIMING_DIR)/stage1-cabal.log),--log $(TIMING_DIR)/stage1-cabal.log,) \
+			$(foreach exe,$(STAGE1_EXECUTABLES),--root $(exe)) \
+			--html $(TIMING_DIR)/stage1-packages.html \
+			--json $(TIMING_DIR)/stage1-packages.json \
+			--markdown $(TIMING_DIR)/stage1-packages.md; \
+	else \
+		echo "stage1-build-graph: skipped the package chart; $(PYTHON) is older than 3.7"; \
+	fi
 
 $(addprefix $(STAGE1_PATH)/bin/,$(STAGE1_EXECUTABLES)) : $(STAGE1_STAMP)
 endif # DIST_BUILD (stage1)
