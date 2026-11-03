@@ -218,7 +218,6 @@ Library
                    array      >= 0.1 && < 0.6,
                    filepath   >= 1.5 && < 1.6,
                    os-string  >= 2.0.1 && < 2.1,
-                   hpc        >= 0.6 && < 0.8,
                    transformers >= 0.5 && < 0.7,
                    exceptions == 0.10.*,
                    semaphore-compat,
@@ -226,6 +225,11 @@ Library
                    rts,
                    rts-headers,
                    ghc-boot   == @ProjectVersionMunged@
+
+    -- Only the .mix writer needs the hpc library. The tick pass keeps a
+    -- local BoxLabel when HAVE_HPC is off (GHC.HsToCore.Ticks).
+    if flag(hpc)
+      Build-Depends: hpc >= 0.6 && < 0.8
 
     if flag(interpreter)
       Build-Depends: ghci == @ProjectVersionMunged@
