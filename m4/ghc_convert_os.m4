@@ -49,7 +49,7 @@ AC_DEFUN([GHC_CONVERT_OS],[
       nto-qnx*)
         $3="nto-qnx"
         ;;
-      wasi)
+      wasi|wasip1)
         $3="wasi"
         ;;
       ghcjs*)

@@ -79,6 +79,7 @@ parseOs os =
       "aix" -> pure OSAIX
       "gnu" -> pure OSHurd
       "wasi" -> pure OSWasi
+      "wasip1" -> pure OSWasi
       "ghcjs" -> pure OSGhcjs
       _ -> throwE $ "Unknown operating system " ++ os
 
