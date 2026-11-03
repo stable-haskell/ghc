@@ -1403,15 +1403,38 @@ buck2-stage1: $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) libraries/ghc-boot-th-nex
 	@# ghc-pkg is not in cabal.project.stage1. Its Buck2 targets are a
 	@# variant of cabal.project.stage1-ghc-pkg so they keep the bootstrap
 	@# Cabal closure and do not replace the compiler plan's ghc-boot.
-	@# The variant's platform lives in the pinned haskell-buck2 checkout.
+	@# The variant's platform and the select arm live in the pinned
+	@# haskell-buck2 checkout. haskell.bzl adds @third-party-haskell//:base
+	@# and :rts on every non-stage2 target. The variant also depends on
+	@# those same bootstrap libraries through its own cell, and buck2
+	@# rejects the duplicated soname. The ghc-pkg-boot stage value skips
+	@# the automatic packages. stage2.bzl matches only the stage2 value,
+	@# so the toolchain stays the boot compiler.
+	@test -f buck2/haskell.bzl
+	@if ! grep -q 'name = "ghc-pkg-boot"' buck2/constraints/BUCK; then \
+	  printf '%s\n' \
+	    '' \
+	    '# Stage1 ghc-pkg. Same setting as stage2, so a target is one or' \
+	    '# the other. Does not select the stage-2 toolchain.' \
+	    'constraint_value(' \
+	    '    name = "ghc-pkg-boot",' \
+	    '    constraint_setting = ":stage",' \
+	    '    visibility = ["PUBLIC"],' \
+	    ')' >> buck2/constraints/BUCK; \
+	fi
+	@if ! grep -q 'constraints:ghc-pkg-boot' buck2/haskell.bzl; then \
+	  awk '/"root\/\/buck2\/constraints:stage2": \[\],/ && !done { print; print "        \"root//buck2/constraints:ghc-pkg-boot\": [],"; done = 1; next } { print }' \
+	    buck2/haskell.bzl > buck2/haskell.bzl.new && \
+	  mv buck2/haskell.bzl.new buck2/haskell.bzl; \
+	fi
 	@if ! grep -q 'name = "ghc-pkg-boot"' buck2/platforms/BUCK; then \
 	  printf '%s\n' \
 	    '' \
 	    '# Stage1 ghc-pkg (`cabal buck2 --variant ghc-pkg-boot`).' \
-	    '# No stage2 constraint: the toolchain stays the boot compiler.' \
+	    '# Boot compiler; the constraint only skips automatic base and rts.' \
 	    'platform(' \
 	    '    name = "ghc-pkg-boot",' \
-	    '    constraint_values = [],' \
+	    '    constraint_values = ["root//buck2/constraints:ghc-pkg-boot"],' \
 	    '    deps = ["prelude//platforms:default"],' \
 	    '    visibility = ["PUBLIC"],' \
 	    ')' >> buck2/platforms/BUCK; \
