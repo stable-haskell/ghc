@@ -583,12 +583,13 @@ endif
 # will build it automatically. The effect of listing genprimops here is that it
 # will be included as a host target rather as a build target. So we end up compiling it
 # twice for no reason.
+# ghc-pkg is built from cabal.project.stage1-ghc-pkg, then copied into this
+# store. Keeping it in this list would make the compiler plan build Cabal.
 STAGE1_EXECUTABLES = \
 	deriveConstants \
 	genapply \
 	genprimopcode \
 	ghc \
-	ghc-pkg \
 	ghc-toolchain-bin \
 	hsc2hs \
 	unlit
@@ -609,9 +610,27 @@ ifndef DIST_BUILD
 # prerequisite (e.g. stage2 -> $(GHC1) -> $(STAGE1_STAMP)).  The PHONY
 # alias below lets users run `make stage1` as before.
 $(STAGE1_STAMP): STAGE=stage1
-$(STAGE1_STAMP): $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) cabal.project.stage1 cabal.project.common | stable-cabal libraries/ghc-boot-th-next hackage
+$(STAGE1_STAMP): $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) cabal.project.stage1 cabal.project.stage1-ghc-pkg cabal.project.common | stable-cabal libraries/ghc-boot-th-next hackage
 	$(call PHASE_START,stage1)
 	$(call LOG,Starting build of $(STAGE))
+
+	$(call PHASE_START,stage1.ghc-pkg)
+	$(call LOG,Building ghc-pkg against the bootstrap Cabal)
+	@# Local executables install under <builddir>/store. --store-dir does
+	@# not move them. This ghc-boot-9.14 and the compiler plan's ghc-boot-9.14
+	@# share an unhashed unit id and different dependencies, so the plans
+	@# keep separate stores. The executable is copied below.
+	$(CABAL) \
+		--remote-repo-cache $(call NORMALIZE_FP,$(CURDIR)/$(BUILD_DIR)/packages) \
+		--store-dir $(call NORMALIZE_FP,$(CURDIR)/$(BUILD_DIR)/stage1-ghc-pkg/store) \
+		--logs-dir $(call NORMALIZE_FP,$(CURDIR)/$(BUILD_DIR)/stage1-ghc-pkg/logs) \
+		build \
+		--project-file cabal.project.stage1-ghc-pkg \
+		--builddir $(call NORMALIZE_FP,$(CURDIR)/$(BUILD_DIR)/stage1-ghc-pkg) \
+		--with-compiler=$(GHC0) \
+		--with-build-compiler=$(GHC0) \
+		exe:ghc-pkg
+	$(call PHASE_END_OK,stage1.ghc-pkg)
 
 	$(call PHASE_START,stage1.executables)
 	$(call LOG,Building executables $(STAGE1_EXECUTABLES))
@@ -628,6 +647,10 @@ $(STAGE1_STAMP): $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) cabal.project.stage1 c
 		--json $(TIMING_DIR)/stage1-packages.json \
 		--markdown $(TIMING_DIR)/stage1-packages.md
 	$(call PHASE_END_OK,stage1.executables)
+
+	$(call LOG,Installing ghc-pkg into the stage1 store)
+	@mkdir -p $(STORE_DIR)/host/$(HOST_PLATFORM)/bin
+	@cp -f $(BUILD_DIR)/stage1-ghc-pkg/store/host/$(HOST_PLATFORM)/bin/ghc-pkg$(EXE_EXT) $(STORE_DIR)/host/$(HOST_PLATFORM)/bin/ghc-pkg$(EXE_EXT)
 
 	$(call LOG,Creating $(STORE_DIR)/host/$(HOST_PLATFORM)/lib/settings)
 	@$(STORE_DIR)/host/$(HOST_PLATFORM)/bin/ghc-toolchain-bin $(GHC_TOOLCHAIN_ARGS) --triple $(HOST_PLATFORM) --cc $(CC) --cxx $(CXX) --cc-link-opt "$(CC_LINK_OPT)" --output-settings -o $(STORE_DIR)/host/$(HOST_PLATFORM)/lib/settings
