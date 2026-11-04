@@ -13,10 +13,11 @@ prefix onto the variant cell, whose ``cabal-store`` and ``inplace``
 symlinks point at the binaries, and copy the two assignments into the
 base ``tools.bzl``.
 
-genprimopcode's ``build-tool-depends`` edge names unsuffixed ``:alex`` and
-``:happy``. The variant targets are ``:alex-stage1-tools`` and
-``:happy-stage1-tools``. Add the unsuffixed alias beside each generated
-target.
+``cabal buck2`` does not emit a local rule for a Hackage executable.
+It writes ``export_file(name = 'alex-exe')`` into the variant cell, and
+genprimopcode's ``build_tool_depends`` names
+``third-party-haskell-stage1-tools//:alex-exe``. This script checks
+that those exports exist. It does not invent a ``:alex`` alias.
 
     mk/buck2-stage1-tools.py
     mk/buck2-stage1-tools.py --self-test
@@ -29,9 +30,7 @@ import sys
 
 BASE_PREFIX = "third-party/haskell/"
 VARIANT_PREFIX = "third-party/haskell-stage1-tools/"
-PLATFORM = "root//buck2/platforms:stage1-tools"
 TOOLS = ("alex", "happy")
-SKIP_DIRS = {".git", "buck-out"}
 
 
 def assignment(text: str, name: str) -> str | None:
@@ -78,29 +77,16 @@ def patch_base(text: str, alex: str, happy: str) -> str:
     return "\n".join(lines) + suffix
 
 
-def alias_block(name: str) -> str:
-    return (
-        "\nalias(\n"
-        f'    name = "{name}",\n'
-        f'    actual = ":{name}-stage1-tools",\n'
-        f'    default_target_platform = "{PLATFORM}",\n'
-        '    visibility = ["PUBLIC"],\n'
-        ")\n"
-    )
+def has_export(text: str, name: str) -> bool:
+    """True when the variant cell exports ``<name>-exe``.
+
+    Cabal's Starlark renderer quotes with single quotes. A hand-written
+    file may use double quotes, so both count.
+    """
+    return f"name = '{name}-exe'" in text or f'name = "{name}-exe"' in text
 
 
-def ensure_alias(text: str, name: str) -> str:
-    if f'name = "{name}"' in text or f"name = '{name}'" in text:
-        return text
-    suffix = "" if text.endswith("\n") else "\n"
-    return text + suffix + alias_block(name)
-
-
-def bzl_defines(text: str, name: str) -> bool:
-    return f'name = "{name}-stage1-tools"' in text or f"name = '{name}-stage1-tools'" in text
-
-
-def patch_tree(root: str) -> list[str]:
+def patch_tree(root: str) -> None:
     variant_tools = os.path.join(root, "third-party", "haskell-stage1-tools", "tools.bzl")
     base_tools = os.path.join(root, "third-party", "haskell", "tools.bzl")
     with open(variant_tools, encoding="utf-8") as handle:
@@ -113,32 +99,15 @@ def patch_tree(root: str) -> list[str]:
     if patched != base_text:
         with open(base_tools, "w", encoding="utf-8") as handle:
             handle.write(patched)
-    written: list[str] = []
-    found = {name: False for name in TOOLS}
-    for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [name for name in dirnames if name not in SKIP_DIRS]
-        bzl_name = "BUCK.stage1-tools.cabal.bzl"
-        if bzl_name not in filenames or "BUCK" not in filenames:
-            continue
-        bzl_path = os.path.join(dirpath, bzl_name)
-        with open(bzl_path, encoding="utf-8") as handle:
-            bzl_text = handle.read()
-        buck_path = os.path.join(dirpath, "BUCK")
-        with open(buck_path, encoding="utf-8") as handle:
-            buck_text = handle.read()
-        updated = buck_text
-        for name in TOOLS:
-            if bzl_defines(bzl_text, name):
-                found[name] = True
-                updated = ensure_alias(updated, name)
-        if updated != buck_text:
-            with open(buck_path, "w", encoding="utf-8") as handle:
-                handle.write(updated)
-            written.append(buck_path)
-    missing = [name for name in TOOLS if not found[name]]
+    variant_buck = os.path.join(root, "third-party", "haskell-stage1-tools", "BUCK")
+    with open(variant_buck, encoding="utf-8") as handle:
+        buck_text = handle.read()
+    missing = [name for name in TOOLS if not has_export(buck_text, name)]
     if missing:
-        raise ValueError("no stage1-tools target for " + ", ".join(missing))
-    return written
+        raise ValueError(
+            "third-party/haskell-stage1-tools/BUCK has no export for "
+            + ", ".join(name + "-exe" for name in missing)
+        )
 
 
 def self_test() -> None:
@@ -160,16 +129,12 @@ def self_test() -> None:
         sys.exit("self-test: base tools.bzl was not patched")
     if patch_base(patched, alex, happy) != patched:
         sys.exit("self-test: patching twice changed the file")
-    buck = 'load(":BUCK.stage1-tools.cabal.bzl", "generated_targets")\n\ngenerated_targets()\n'
-    aliased = ensure_alias(buck, "alex")
-    if 'name = "alex"' not in aliased or 'actual = ":alex-stage1-tools"' not in aliased:
-        sys.exit("self-test: alias was not added")
-    if ensure_alias(aliased, "alex") != aliased:
-        sys.exit("self-test: alias was added twice")
-    if not bzl_defines('haskell_binary(name = "alex-stage1-tools")\n', "alex"):
-        sys.exit("self-test: generated target was not recognised")
-    if bzl_defines('haskell_binary(name = "alex")\n', "alex"):
-        sys.exit("self-test: an unsuffixed target looked like the variant")
+    if not has_export("export_file(\n    name = 'alex-exe',\n", "alex"):
+        sys.exit("self-test: single-quoted alex-exe was not recognised")
+    if not has_export('export_file(\n    name = "happy-exe",\n', "happy"):
+        sys.exit("self-test: double-quoted happy-exe was not recognised")
+    if has_export("name = 'alex'\n", "alex"):
+        sys.exit("self-test: an unsuffixed name looked like the export")
 
 
 def main(argv: list[str]) -> None:

@@ -1557,8 +1557,8 @@ buck2-stage1: $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) libraries/ghc-boot-th-nex
 	@# The compiler plan sets -build-tool-depends, so its tools.bzl records
 	@# no alex or happy. haskell.bzl still preprocesses .x and .y with the
 	@# paths in that file. Point them at the binaries the tools variant
-	@# installed, and alias the unsuffixed alex and happy names the
-	@# genprimopcode rule executes.
+	@# installed. genprimopcode's build_tool_depends already names
+	@# third-party-haskell-stage1-tools//:alex-exe and :happy-exe.
 	$(PYTHON) ./mk/buck2-stage1-tools.py
 
 # Stage 2 with buck2: generate BUCK.stage2.cabal.bzl files (targets
