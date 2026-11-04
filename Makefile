@@ -1563,6 +1563,8 @@ buck2-stage1: $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) libraries/ghc-boot-th-nex
 	@# paths in that file. Point them at the binaries the tools variant
 	@# installed. genprimopcode's build_tool_depends already names
 	@# third-party-haskell-stage1-tools//:alex-exe and :happy-exe.
+	@# Stage2 configure reads the base third-party/haskell/BUCK for those
+	@# same exports (Cabal readBaseTools). Copy them there too.
 	$(PYTHON) ./mk/buck2-stage1-tools.py
 
 # Stage 2 with buck2: generate BUCK.stage2.cabal.bzl files (targets
