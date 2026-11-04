@@ -11,11 +11,12 @@ described by configuration) has to carry.
 `ghc-pkg` writes an `InstalledPackageInfo` record per unit. The compiler
 reads it back as `GenericUnitInfo` (`libraries/ghc-boot/GHC/Unit/Database.hs`)
 and specialises it to `UnitInfo` (`compiler/GHC/Unit/Info.hs`). The record
-has 33 fields. For each field this document asks:
+has 32 fields. For each field this document asks:
 
 1. **Who consumes it** inside `compiler/` and `ghc/`? (Grep over `*.hs`
    for the record selector, excluding its definition sites. Counted on
-   master at `0c17201cd3`, 2026-10-23.)
+   master at `0c17201cd3`, 2026-10-23; the last section lists how
+   `stable-ghc-9.14` differs.)
 2. **Is it needed before any interface file is opened?** The compiler
    must find, for a given `import M`, which unit provides `M`, and then
    locate `M.hi`. Anything needed to answer that cannot live inside an
@@ -37,7 +38,7 @@ listed once here and omitted from the per-field consumer lists below.
 | Field | Consumers (excluding Backpack.hs) | Pre-`.hi`? | Class |
 |---|---|---|---|
 | `unitId` | everywhere | yes | intrinsic (the directory name) |
-| `unitInstanceOf` | Unit/State, External/Index | yes | intrinsic (Backpack); derivable from the id string by ghc-pkg's own rule |
+| `unitInstanceOf` | Unit/State, External/Index | yes | intrinsic (Backpack); `ghc-pkg` takes it from `component-id`, falling back to the whole unit id |
 | `unitInstantiations` | External/Substitution, External/Providers | yes | intrinsic (Backpack) |
 | `unitPackageId` | Unit/State, Types/Name/Ppr | no | label |
 | `unitPackageName` | Unit/State, External/Wired, Driver/Make, Iface/Errors/Ppr, GHCi/UI/Exception | yes | label |
@@ -52,7 +53,7 @@ listed once here and omitted from the per-field consumer lists below.
 | `unitIsExposed` | Unit/State | yes | policy |
 | `unitIsTrusted` | Unit/State | no | policy |
 | `unitImportDirs` | Unit/Finder | yes | convention |
-| `unitLibraryDirs` | External/Database (default for the two below) | no | convention |
+| `unitLibraryDirs` | External/Database (default for the three below) | no | convention |
 | `unitLibraryDirsStatic` | Linker/Unit, StgToJS/Linker/Utils | no | convention |
 | `unitLibraryDynDirs` | Runtime/Interpreter/Wasm | no | convention |
 | `unitLibraryBytecodeDirs` | Linker/Loader | no | convention |
@@ -64,14 +65,14 @@ listed once here and omitted from the per-field consumer lists below.
 | `unitExtDepFrameworkDirs` | Linker/Loader | no | intrinsic (C side, Darwin) |
 | `unitLinkerOptions` | Linker/Unit, Linker/Loader | no | intrinsic (C side) |
 | `unitCcOptions` | none | no | provenance |
-| `unitIncludeDirs` | Unit/State, Linker/Executable | yes (rts only) | convention (`include/`) |
+| `unitIncludeDirs` | Unit/State, Linker/Executable | yes (rts only) | convention (`lib/include/`) |
 | `unitIncludes` | Driver/CodeOutput | no (rts only) | intrinsic (rts only) |
 | `unitHaddockInterfaces` | none | no | provenance |
 | `unitHaddockHTMLs` | none | no | provenance |
 
 Totals: 11 convention or provenance fields with no compiler consumer
 that a fixed layout would not satisfy, 2 policy fields, 3 label fields,
-2 redundant hash fields, and 15 intrinsic fields of which 7 are C-side
+2 redundant hash fields, and 14 intrinsic fields of which 7 are C-side
 link configuration that only the `rts` unit populates in any depth.
 
 ## Field by field
@@ -90,8 +91,9 @@ be linked. For an instantiated unit it needs the component id it was
 instantiated from and the instantiation, because the `Unit` of every
 module inside it is a `VirtUnit` built from those two. The IPI text
 format has no `instance-of` field: `ghc-pkg` derives it from the
-`installedComponentId` (`utils/ghc-pkg/Main.hs:1450`), which for a
-definite unit is the unit id itself. The same information is also in
+`installedComponentId` (`utils/ghc-pkg/Main.hs:1450`): the `component-id`
+field, or the whole unit id when that is absent. It does not parse the
+id. The same information is also in
 every interface file of the unit (`mi_module` is a `Module` whose unit
 carries `instUnitInstanceOf` and `instUnitInsts`), but the compiler
 needs it to build the module-to-unit map before it opens any interface,
@@ -105,10 +107,12 @@ names. Consumers:
 - `GHC/Unit/State.hs:481` and `:927`: `-package name` resolution and the
   name-to-instance map used by `-package name` with Backpack.
 - `GHC/Unit/External/Wired.hs:88`: wired-in detection compares the
-  *package name* with `base`, `ghc-prim` and friends.
+  *package name* with `ghc-internal` and `rts`, the only entries of
+  `wiredInUnitIds`.
 - `GHC/SysTools/Cpp.hs:249`: the `MIN_VERSION_<pkg>` and
   `VERSION_<pkg>` CPP macros.
-- `GHC/Driver/Make.hs:480`: `:show packages` style listing.
+- `GHC/Driver/Make.hs:480`: `warnUnusedPackages`, for the
+  `-Wunused-packages` message.
 - `GHC/Unit/External/Database.hs`: `compareByPreference` prefers the
   highest version when several exposed units share a name.
 - `Iface/Errors/Ppr.hs`, `GHCi/UI/Exception.hs`, `Types/Name/Ppr.hs`:
@@ -120,7 +124,8 @@ convention, but the compiler treats `UnitId` as opaque and nothing in
 `compiler/` parses it. Keep this as a one-line label in the per-unit
 manifest rather than teaching the compiler to parse ids.
 
-**`unitComponentName`.** No consumers outside Backpack.hs. Provenance.
+**`unitComponentName`.** No consumers outside Backpack.hs on master.
+Provenance there, but not on `stable-ghc-9.14` (see the last section).
 
 ### Hashes
 
@@ -143,9 +148,12 @@ cache-key use.
 **`unitAbiDepends`.** `Validate.hs:377` uses it to mark a unit broken
 when a dependency's ABI differs from the one it was built against,
 which only matters when a *mutable* database has a dependency
-re-registered under the same id. `Downsweep.hs:1100` notes that in
-practice the field never contains anything other than the empty list.
-In an immutable store keyed by a content-derived id the situation it
+re-registered under the same id. `Downsweep.hs:1100` notes that the
+field never contained anything other than the empty list during GHC test
+runs. The same holds outside the testsuite: none of the 415 entries of a
+real `cabal-install` store for GHC 9.14.1 has `abi-depends`, nor does any
+entry of the global databases of GHC 9.4.8, 9.8.4, 9.10.3, 9.12.2 and
+9.14.1. In an immutable store keyed by a content-derived id the situation it
 guards against cannot arise.
 
 ### Dependencies and modules
@@ -175,8 +183,8 @@ origin cannot be recovered from the file system. Irreducible.
 exposed modules import them. Providers.hs uses the list so that
 `import Hidden` from outside the unit gives a "hidden module" error
 rather than "not found". In a store this could be a directory split
-(`interfaces/exposed/` vs `interfaces/hidden/`) or a manifest list.
-The manifest list is simpler and costs one line.
+(exposed and hidden interfaces in separate directories) or a manifest
+list. The manifest list is simpler and costs one line.
 
 ### Policy
 
@@ -196,30 +204,31 @@ reasons.
 
 ### Paths
 
-**`unitImportDirs`.** `Unit/Finder.hs` searches these for `M.hi`. In
-Cabal output there is exactly one, `<libdir>/<uid>`. Convention:
-`<root>/<uid>/interfaces/`.
+**`unitImportDirs`.** `Unit/Finder.hs` searches these for `M.hi`. In the
+entries of a `cabal-install` store there is one, `<store>/<uid>/lib`.
+Convention: `<root>/<uid>/lib/`.
 
 **`unitLibraryDirs`, `unitLibraryDirsStatic`, `unitLibraryDynDirs`,
 `unitLibraryBytecodeDirs`.** Where `libHS<uid>.a`,
 `libHS<uid>-ghc<ver>.so` and bytecode archives live.
 `External/Database.hs` already defaults the last three to the first when
-they are empty, which is what every Cabal-written entry relies on.
-Convention: `<root>/<uid>/lib/`.
+they are empty. Convention: `<root>/<uid>/lib/`. A few Cabal-written
+entries also list system directories here; see "Counterexamples and
+limits" in `unit-artifact-model.md`.
 
 **`unitLibraries`.** The `hs-libraries` field. Cabal always writes
 `HS<uid>`; the compiler appends the way suffix and the GHC version
-itself (`unitHsLibs` in `Linker/Unit.hs`). Convention.
+itself (`unitHsLibs` in `Unit/Info.hs`). Convention.
 
 **`unitIncludeDirs`.** Two consumers, both specific to the `rts` unit:
 `State.hs:570` reads `DerivedConstants.h` from the rts include dir to
 load platform constants, and `Linker/Executable.hs:358` passes the rts
 include dir when compiling the generated `main` stub. Convention:
-`<root>/<uid>/include/` when it exists.
+`<root>/<uid>/lib/include/` when it exists.
 
-**`unitHaddockInterfaces`, `unitHaddockHTMLs`.** No consumers in the
-compiler. Haddock reads them through the GHC API's `UnitInfo`, but it
-could equally follow a convention (`<root>/<uid>/doc/`). Provenance.
+**`unitHaddockInterfaces`, `unitHaddockHTMLs`.** No consumers in
+`compiler/`, `ghc/` or `utils/haddock/`. In a `cabal-install` store they
+point under `<store>/<uid>/share/doc/html`. Provenance.
 
 ### C side
 
@@ -274,3 +283,21 @@ unit nodes in the module graph, and `External/Index.hs` uses
 `unitAbiHash` as a cache key. Neither changes a classification; the
 cache-key use is the reason `unitAbiHash` is listed as redundant rather
 than provenance.
+
+## Differences on `stable-ghc-9.14`
+
+The consumer lists and line numbers above are from master and were not
+recounted for this branch. The record has 32 fields here too, with one
+swapped and one reclassified:
+
+- **`unitLibraryBytecodeDirs` does not exist**, so `External/Database.hs`
+  defaults two fields to `unitLibraryDirs`, not three.
+- **`unitDataDir` (`data-dir`) exists**, and points to
+  `<store>/<uid>/share` in the entries of a `cabal-install` store.
+  `Linker/Executable.hs` reads the rts unit's to find
+  `wasm/WasmGlobalRegs.S`, with a fallback relative to the library
+  directory. Store units leave it empty.
+- **`unitComponentName` has a consumer.** `External/Wired.hs` matches the
+  RTS way sub-libraries (`rts:<way>`) on it, so it is intrinsic here rather
+  than provenance. Store units leave it empty, which is one reason those
+  sub-libraries cannot come from a store on this branch.

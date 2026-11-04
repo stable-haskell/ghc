@@ -1,10 +1,12 @@
-# Unit artifact spike, stage 3 sketch: an ids-only driver
+# Unit artifact spike: an ids-only driver
 
-Status: design sketch, October 2026; stages 1 and 2 of the path at the
-end are implemented (see the two sections after it). Third document of
-the unit store spike, after `unit-artifact-field-analysis.md` and
-`unit-artifact-model.md`. Code references are to master `0c17201cd3`
-plus the commits of this spike.
+Status: design sketch, October 2026. "Stage" always means a step of the
+path at the end: stages 1 and 2 are implemented on this branch, and stage 3
+only on the master version of this series (see the three sections after
+it). Third document of the unit store spike, after
+`unit-artifact-field-analysis.md` and `unit-artifact-model.md`. Code
+references are to master `0c17201cd3` plus the commits of this spike; this
+branch, based on `stable-ghc-9.14`, differs where noted.
 
 ## Premise
 
@@ -17,7 +19,7 @@ so. This sketch asks what the driver looks like when names are labels
 and never lookup keys, because that is where the simpler compiler is
 hiding.
 
-## Where names are lookup keys today
+## Where names were lookup keys before stage 1
 
 | Place | Code | What it resolves |
 |---|---|---|
@@ -30,7 +32,7 @@ hiding.
 | Wired-in units | `Wired.hs` `findWiredInUnits`: `unitPackageName pc == PackageName (unitIdFS pid)` for `ghc-internal` and `rts`; then `WireMap`/`UnwireMap` rewrite ids in every `UnitInfo` and module | name to the unit the compiler will call by its fixed id |
 | The `ghci` unit | `Runtime/Interpreter/{C,JS,Wasm}.hs` call `lookupPackageName` for `"ghci"` | name |
 | PackageImports | `renameRawPkgQual` → `lookupPackageName` over `packageNameMap` | `import "containers" M` to a unit |
-| Backpack by name | `Backpack.hs:685` `lookupPackageName`; `pkgname_map` in `mkUnitState` | `-package p` shorthand for instantiation |
+| Backpack by name | `Backpack.hs` `lookupPackageName`; `pkgname_map` in `mkUnitState` | `-package p` shorthand for instantiation |
 
 Two things in the current tree already point the other way. `base` is
 not wired in by name any more: its id comes from the settings file
@@ -38,6 +40,12 @@ not wired in by name any more: its id comes from the settings file
 is down to `ghc-internal` and `rts`. And `Note [GHC's Unit Id]` records
 that the `ghc` library's unit id now matches its unit key, so it needs no
 rewriting at all. The ids-only mode finishes what those two started.
+
+`stable-ghc-9.14` has one more wired-in id: `finishUnitState` adds
+`rtsWayUnitId dflags`, an `rts:⟨way⟩` sub-library that `findWiredInUnits`
+matches by package and component name. Its Makefile build also leaves
+`base unit-id` empty, since only hadrian writes it, so there `base` is a root
+only when a flag names it.
 
 ## The model
 
@@ -52,10 +60,11 @@ The compiler takes:
 | `-this-unit-id ⟨uid⟩`, `-this-component-id`, `-instantiated-with` | the home unit, unchanged | |
 | `-no-auto-link-packages` | do not add the implicit units below | `-nostdlib` |
 
-And it knows, from the settings file rather than from any database, the
-ids of the units it has to find on its own: `base`, `ghc-internal`, `rts`
-and `ghci`. They are linked implicitly unless `-no-auto-link-packages`,
-exactly as `cc` links libc.
+And it knows, without consulting any database, the ids of the units it has
+to find on its own: `base` and `ghci` from the settings file, `ghc-internal`
+and `rts` because their ids are fixed. `base`, `ghc-internal` and `rts` are
+linked implicitly unless `-no-auto-link-packages`, exactly as `cc` links
+libc; `ghci` is only needed for the external interpreter.
 
 Nothing is visible unless named. Two units with the same package name
 may both be visible; a module provided by both is ambiguous at the
@@ -69,15 +78,15 @@ if two visible units carry the name.
 
 ## What the unit state computation becomes
 
-Today `mkUnitState` runs the four-phase plan written at the top of the
+`mkUnitStateByName` runs the four-phase plan written at the top of the
 function: merge all databases, prune, compute default visibility and
 apply flags, wire, build the module map. Ids-only is shorter:
 
 1. **Roots.** The unit ids from `-package-id`, `-plugin-package-id`,
-   the settings-file ids, and the home unit's instantiation.
+   the compiler's own ids, and the home unit's instantiation.
 2. **Closure.** Probe the stack for each root; follow `depends`,
-   reexport origins and `instantiated-with`. This is the stage 2
-   prototype's `readUnitDatabasesOnDemand`, now the only path. Later
+   reexport origins and `instantiated-with`. This is
+   `readUnitDatabasesOnDemand`, now the only path. Later
    locations on the stack shadow earlier ones by id, as today.
 3. **Validate the closure.** Missing dependency or cycle: error naming
    the root that pulled it in. `validateDatabase` on a set of a few
@@ -90,7 +99,8 @@ apply flags, wire, build the module map. Ids-only is shorter:
    `closeUnitDeps`, unchanged.
 
 There is no wiring step: the id GHC uses for `ghc-internal` *is* the id
-it was installed under, because the settings file says so.
+it was installed under, because it is registered under the id it is
+compiled with.
 
 ### What disappears
 
@@ -99,15 +109,15 @@ Rough line counts, from the current files; estimates, not measurements.
 | Removed | Where | Lines |
 |---|---|---|
 | By-name finders and the precedence/preference ordering | `Validate.hs` `findPackages` name arm, `selectPackages`, `matchingStr`, `ignoreUnits`; `Database.hs` `compareByPreference`, `sortByPreference`, `UnitPrecedenceMap` | ~120 |
-| Default visibility and same-name hiding | `State.hs` `mkUnitState` steps 2a–b, `applyPackageFlag`'s `vm_cleared` and `no_hide_others` | ~100 |
+| Default visibility and same-name hiding | `State.hs` `mkUnitStateByName` steps 2a–b, `applyPackageFlag`'s `vm_cleared` and `no_hide_others` | ~100 |
 | Wiring | `Wired.hs` entirely; `Index.hs` `setupWiredInUnits`, `updateWiredInUnitIndex`, `updateWiredInUnits`, `unwireUnit`, `upd_wired_in*`; `updateVisibilityMap`; `extendForWireMap` | ~250 |
 | Name flags | `Session.hs` parsers for `-package`, `-plugin-package`, `-hide-package`, `-ignore-package`, `-trust`, `-distrust`; `PackageArg` constructor; `IgnorePackageFlag` | ~80 |
 | `exposed` and `trusted` as installed state | `GenericUnitInfo` fields, `TrustOverlay` by name, `distrustAllUnits` | ~60 |
 | Name map | `packageNameMap`, `lookupPackageName`, `pkgname_map` | ~30 |
 
-Against about 2,400 lines in `State.hs` plus `External/` (excluding
-`Store.hs`), roughly a quarter goes, and what remains is the part that
-does real work: reading manifests, closing dependencies, validating,
+That is about 640 lines against 3,123 in `State.hs` plus `External/` on
+master (3,712 on this branch, excluding `Store.hs`), so about a fifth goes,
+and what remains is the part that does real work: reading manifests, closing dependencies, validating,
 building the module map, computing the link set.
 
 ### What stays and why
@@ -123,13 +133,13 @@ building the module map, computing the link set.
 
 ## Decisions the sketch forces
 
-**Fixed ids for the compiler's own units.** The settings-file route
-already used for `base` extends to `ghc-internal`, `rts` and `ghci`:
-hadrian and Cabal know the ids they installed and write them down. The
-wired-in machinery then has no job. `Note [Wired-in units]` explains the
-original motive, not baking versions into GHC; the settings file
-achieves that too, since the compiler reads the id at startup. The
-tension is with reinstallable `base`: several bases in one store is
+**Fixed ids for the compiler's own units.** `ghc-internal` and `rts` are
+compiled with fixed ids, and the known-key names are built from them, so
+the build registers them under those ids. `ghci` comes from the settings
+file, as `base` does. The wired-in machinery then has no job. `Note
+[Wired-in units]` explains the original motive, not baking versions into
+GHC; ids without a version achieve that too. The tension is with
+reinstallable `base`: several bases in one store is
 fine, several bases in one *compilation* is not, and the settings file
 picks one. That is the same restriction wiring imposes today.
 
@@ -162,22 +172,24 @@ Each stage is independently useful and leaves the tree working.
    flag keeps working, and it moves the by-name code into one place with
    a clear boundary. (Implemented, see below.)
 2. **Ids-only core.** `mkUnitState` with the six steps above, taken when
-   the front end produced no name flags (always true for Cabal and
-   environment files). The current path remains for the rest. The stage 2
-   prototype's `demandRoots` is the switch and becomes unconditional
-   inside this path. (Implemented, see below.)
-3. **Settings-file ids for `ghc-internal`, `rts`, `ghci`.** Hadrian
-   writes them next to `base unit-id`; the three `lookupPackageName
-   "ghci"` calls read the setting; `wiredInUnitIds` becomes empty and
-   `Wired.hs` goes.
+   the front end produced no name flags (always true for Cabal, and for
+   environment files without `hide-package`). The current path remains for
+   the rest. The demand-driven read's `demandRoots` is the switch and
+   becomes unconditional inside this path. (Implemented, see below.)
+3. **Fixed ids for `ghc-internal` and `rts`, a settings-file id for
+   `ghci`.** The build registers the first two under the ids they are
+   compiled with. Hadrian writes `ghci unit-id` next to `base unit-id`, and
+   the three `lookupPackageName "ghci"` calls read the setting. `Wired.hs`
+   goes. (Implemented on master only, see below.)
 4. **Default to ids-only.** `-hide-all-packages` becomes the only
    behaviour; name flags warn, then go, with `ghci`'s `:set -package`
    routed through the stage 1 resolver as the last holdout.
 5. **Delete** the by-name code listed above.
 
 Stage 1 is a few hundred lines and a day of work on top of the current
-prototype. Stage 3 touches hadrian and Cabal's settings output and is the
-one that needs agreement outside this tree.
+prototype. Stage 3 changes how the build tool registers those units and is
+the one that needs agreement outside this tree: on `stable-ghc-9.14` that
+means the cabal fork.
 
 ### Stage 1, implemented
 
@@ -228,7 +240,7 @@ state]` in `GHC.Unit.State`:
   instantiation, and name it nowhere else). Any `-package`,
   `-hide-package`, `-ignore-package`, `-trust` or `-distrust` by name
   returns `Nothing`. The same roots drive the demand-driven store read, so
-  the stage 2 prototype's switch and the core's switch are one.
+  that read and the core have one switch.
 - `mkUnitStateIdsOnly` runs the six steps. Stores are probed, package
   databases read in full, the stack merged with the usual shadowing by id,
   and then `closeOverReferences` (in `GHC.Unit.External.Query`, next to
@@ -253,7 +265,9 @@ Two decisions taken on the way:
   testsuite expectations change. `package/ImportReexport` compiles with
   `-hide-all-packages` and no flags and listed `ghc`, `ghc-boot` and
   `ghc-platform` as hidden providers of `GHC.Platform.ArchOS`; none is
-  reachable from `base`, so the module is now simply not found.
+  reachable from `base`, so the module is now simply not found. On a
+  Makefile build of `stable-ghc-9.14`, where `base` is not a root, the same
+  goes for `GHC.Types` in `ghc-prim`, and the expected output says so.
   `package/T22884_interactive` does `:set -hide-all-packages` in GHCi and
   then `import Data.Text`, and used to be told that `text` is hidden and
   that `:set -package text` would expose it; now it is told the module is
@@ -263,23 +277,26 @@ Two decisions taken on the way:
   works (it switches the session to the by-name path). Keeping interactive
   sessions on the by-name path would be a one-line change in
   `idsOnlyRoots` if that convenience is wanted during the transition.
-  `T27013e`/`T27013f`, which expect the hint for `base`, are unaffected
-  because `base` is a root.
+  On master, `T27013e`/`T27013f`, which expect the hint for `base`, are
+  unaffected because `base` is a root; those tests do not exist on
+  `stable-ghc-9.14`.
 - **The compiler's own units are a by-name hold-out.** `ghc-internal`,
   `rts` and `ghci` are not reachable from the roots in general (`ghci` is
   reachable from nothing a user names; the other two only through `base`),
-  and until stage 3 writes their ids in the settings file they can only be
-  found by name. `compilerUnitRoots` in `GHC.Unit.External.Names` adds
+  and until stage 3 gives the compiler their ids they can only be found by
+  name. `compilerUnitRoots` in `GHC.Unit.External.Names` adds
   every unit carrying one of those names to the roots, so wiring and the
   external interpreter see the same candidates as before. `ghci` is added
   only when the external interpreter may run (`-fexternal-interpreter`, or
   a JavaScript or Wasm target): it is the one consumer, and its
   dependencies are two thirds of the boot libraries, which would otherwise
   be in every closure. With the stage 1 build, `-package-id base` alone
-  gives a closure of 5 units out of the 45 installed. This is the single
-  by-name lookup left on the ids-only path, lives in the boundary module,
-  and is what stage 3 deletes. Through a pure `-unit-store` stack it finds
-  nothing, as before this stage, which is exactly the stage 3 motivation.
+  gives a closure of 5 units out of the 45 installed. This is the only place
+  on the ids-only path where a name decides what is in the closure, and it
+  lives in the boundary module; wiring still matches these units by name in
+  `findWiredInUnits`. Stage 3 removes both. Through a pure `-unit-store`
+  stack it finds only what probing has already reached, which is the stage
+  3 motivation.
 
 What stage 2 does not do: `-hide-package` and `-ignore-package` have no
 by-id spelling (under `-hide-all-packages` the first is pointless and the
@@ -287,16 +304,75 @@ second a corner case), `:set -package foo` in GHCi still switches the
 session to the by-name path on the next `initUnits`, and the by-name path
 itself is untouched.
 
+### Stage 3, implemented on master only
+
+Done on 2026-10-23 on the master version of this series (commit
+`feat(driver): fixed ids for the compiler's own units, no wiring`). None of
+it is on this branch, for the reason given at the end of this section. An
+earlier version of this sketch proposed settings-file ids for `ghc-internal`,
+`rts` and `ghci`; the tree said something more precise, and the
+implementation follows the tree:
+
+- **`ghc-internal` and `rts` already have fixed ids.** Their cabal files
+  compile them with `-this-unit-id ghc-internal` and `-this-unit-id rts`,
+  so every symbol (`ghczminternal_...`), every interface file and the RTS's
+  C references to Haskell closures already use the unversioned ids that
+  the compiler's constants name. Hadrian merely *registered* them under
+  versioned installed ids (`ghc-internal-10.100.0-inplace`, `rts-1.0.3`),
+  and the whole wiring machinery existed to map the registered id back to
+  the compiled one. A settings-file id for them would not have worked
+  anyway: the known-key names are compile-time constants built from
+  `ghcInternalUnitId`. So stage 3 does for them what Note [GHC's Unit Id]
+  did for the `ghc` library: hadrian's `pkgUnitId` returns `ghc-internal`
+  and `rts` for those two packages, the installed id equals the compiled
+  id, and the compiler uses the installed unit as it is.
+- **The wiring is gone.** `GHC.Unit.External.Wired` is deleted, together
+  with the `WireMap`/`UnwireMap` in the unit index, `setupWiredInUnits`,
+  `updateWiredInUnitIndex`, `unwireUnit` (two uses in the Backpack
+  driver), `updateVisibilityMap`, `extendForWireMap`, and the rewriting of
+  the home unit's instantiations. What stays of that code is the sharing
+  of `UnitInfo`s across home units (`shareUnitInfos`), which never had
+  anything to do with wiring. `Note [Wired-in units]` now describes fixed
+  ids, not rewriting.
+- **`ghci` comes from the settings file.** Hadrian writes `ghci unit-id`
+  next to `base unit-id` (and the bindist `configure`/`Makefile` carry it
+  like the others), `GHC.Settings` reads it, `-ghci-unit-id` overrides it
+  like `-base-unit-id`, and the three interpreter back ends use
+  `ghciUnitId dflags` instead of looking the name up.
+- **No by-name lookup is left on the ids-only path.** `compilerUnitRoots`
+  is deleted; `idsOnlyRoots` adds `wiredInUnitIds` and, when the external
+  interpreter may run, the settings-file `ghci` id. Through a pure
+  `-unit-store` stack the compiler's own units are now probed by id like
+  everything else, which stage 2 could not do.
+
+Name and version stay what they were: `ghc-internal` is still version
+10.100.0 in its manifest, messages still say `ghc-internal-10.100.0` where
+they print a package id, and the testsuite expectations that mention it
+all normalise the version already. Two incidental changes were needed:
+hadrian's `parsePkgId` (the parser of `libHS<id>` and `stamp-<id>` file
+names) accepted only `name-version[-hash]` and now also accepts a bare
+name, and the in-tree Haddock dropped its "unwire" step, which is the
+identity now. Rebuilding an existing build root needs the old
+`ghc-internal-<version>-inplace.conf` and `rts-<version>.conf` removed from
+the stage package database by hand, since hadrian does not delete the confs
+of ids it no longer produces.
+
+This does not carry over to `stable-ghc-9.14`. Its cabal-based build
+registers `ghc-internal` and the `rts:⟨way⟩` sub-libraries under ids computed
+by cabal and relies on wiring to map them, and in `rts.cabal` only the main
+library is compiled with `-this-unit-id`. The cabal fork would have to
+register fixed ids first.
+
 ## The simpler compiler
 
-Put together with the first two stages of the spike, the driver that
-emerges is this. Inputs are source files. `-unit-store` directories are
+Put together with the unit store and its demand-driven read, the driver
+that emerges is this. Inputs are source files. `-unit-store` directories are
 where compiled units live, laid out by convention. `-package-id` names
 the units this compilation may import from; their dependencies are found
 by following manifests, one file per unit, never by listing a directory.
 Interfaces are found at `⟨root⟩/⟨uid⟩/lib/A/B.hi`, libraries at
-`⟨root⟩/⟨uid⟩/lib/libHS⟨uid⟩`. The compiler's own units have ids it reads
-from its settings. There is no registration, no database, no preferred
+`⟨root⟩/⟨uid⟩/lib/libHS⟨uid⟩`. The compiler's own units have ids it knows,
+fixed or from its settings. There is no registration, no database, no preferred
 version, no wiring, and no notion of "installed and exposed". That is
 the shape of rustc with `--extern` and `-L`, and it is already present in
 the current driver under `-hide-all-packages` with `-package-id` flags,

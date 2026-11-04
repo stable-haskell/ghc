@@ -2,9 +2,11 @@
 
 Status: research spike, October 2026. Companion to
 `unit-artifact-field-analysis.md`, which is the evidence for the
-classification used here. The prototype described in the last sections
-lives behind the `-unit-store ⟨dir⟩` flag and changes nothing for users
-who do not pass it.
+classification used here. A store is only read when `-unit-store ⟨dir⟩`
+is passed, but the ids-only unit state built on top of it
+(`unit-artifact-ids-only.md`) applies without the flag, to every command
+line with `-hide-all-packages` and all units named by id. That includes
+every Cabal build.
 
 ## Goal
 
@@ -14,15 +16,17 @@ GHC can locate an installed unit the way a C or Rust compiler locates a
 library: the build tool names the inputs, and everything else is found
 on a search path by a fixed naming scheme.
 
-The observation that motivates this: every package database entry Cabal
-has ever written has the same shape. In a `cabal-install` store
+The observation that motivates this: nearly every package database entry
+Cabal writes has the same shape. In a `cabal-install` store
 (`~/.local/state/cabal/store/ghc-⟨ver⟩/`) the unit
 `acid-state-0.16.1.4-ec2ce8…` is described by a 60-line `.conf` whose
 path fields all point into `⟨store⟩/acid-state-0.16.1.4-ec2ce8…/lib/`,
 whose `hs-libraries` field is `HS` followed by the unit id, and whose
 only non-derivable content is the module list, the dependency list and
 the name/version label. The store directory itself already *is* a unit
-store; `package.db/` next to it is a redundant index of it.
+store; `package.db/` next to it is a redundant index of it. The exceptions
+are entries that name system directories, covered under "Counterexamples
+and limits".
 
 ## Layout
 
@@ -42,10 +46,11 @@ A unit store is a directory. Each immediate subdirectory that contains a
     share/               data files and documentation (not read by GHC)
 ```
 
-This is byte-for-byte the layout `cabal-install` produces today; the
-spike adds only the `unit.meta` file. Subdirectories without a
-`unit.meta` are ignored, so a real cabal store with its `package.db/`,
-`incoming/` and `cabal-hash.txt` entries is a valid unit store.
+This is the layout `cabal-install` produces today, which also puts a
+`cabal-hash.txt` in each unit directory; the spike adds only the
+`unit.meta` file. Subdirectories without a `unit.meta` are ignored, so a
+real cabal store with its `package.db/` and `incoming/` entries is a valid
+unit store.
 
 Mapping to the fields the compiler reads (names as in
 `GenericUnitInfo`):
@@ -54,13 +59,13 @@ Mapping to the fields the compiler reads (names as in
 |---|---|
 | `unitId` | the directory name |
 | `unitImportDirs` | `⟨root⟩/⟨uid⟩/lib` |
-| `unitLibraryDirs`, `unitLibraryDirsStatic`, `unitLibraryDynDirs`, `unitLibraryBytecodeDirs` | `⟨root⟩/⟨uid⟩/lib` |
+| `unitLibraryDirs`, `unitLibraryDirsStatic`, `unitLibraryDynDirs` | `⟨root⟩/⟨uid⟩/lib` |
 | `unitLibraries` | `HS⟨uid⟩` (the compiler adds way tags and the `-ghc⟨ver⟩` suffix itself, see `unitHsLibs`) |
 | `unitIncludeDirs` | `⟨root⟩/⟨uid⟩/lib/include` when that directory exists |
 | `unitIsExposed` | true: visibility is decided by the environment layer |
-| `unitIsTrusted` | false: trust is decided by `-trust` |
-| `unitAbiHash` | a fingerprint of `unit.meta` (used only as a cache key by `GHC.Unit.External.Index`) |
-| `unitAbiDepends`, `unitHaddockInterfaces`, `unitHaddockHTMLs`, `unitCcOptions`, `unitComponentName` | empty |
+| `unitIsTrusted` | false: trust is decided by `-trust` and `-trust-id` |
+| `unitAbiHash` | a fingerprint of `unit.meta`: a cache key in `GHC.Unit.External.Index`, and what other units' `abi-depends` are checked against (see the limits below) |
+| `unitAbiDepends`, `unitHaddockInterfaces`, `unitHaddockHTMLs`, `unitCcOptions`, `unitComponentName`, `unitDataDir` | empty |
 
 Everything else comes from the manifest.
 
@@ -88,7 +93,7 @@ Keys, all optional:
 | `hidden-modules` | modules present in `lib/` but not importable from outside | none |
 | `depends` | unit ids this unit was built against; defines the link closure | none |
 | `indefinite` | `True` for a Backpack unit with unfilled holes | `False` |
-| `instance-of` | the component id an instantiated unit was built from | the unit id up to the first `+`, as `ghc-pkg` does |
+| `instance-of` | the component id an instantiated unit was built from | the unit id up to the first `+` (`ghc-pkg` instead falls back to the whole unit id) |
 | `instantiated-with` | `⟨Hole⟩=⟨unit⟩:⟨Module⟩` pairs, or `⟨Hole⟩=<⟨Hole⟩>` for an unfilled hole | none |
 | `extra-libraries`, `extra-libraries-static`, `extra-ghci-libraries`, `frameworks`, `framework-dirs`, `ld-options`, `includes` | C-side link and header configuration, same meaning as in the package database | empty |
 
@@ -105,11 +110,13 @@ them empty, and the `rts` unit is the main user.
 
 Given `-unit-store ⟨root⟩`:
 
-1. **Enumerate.** List `⟨root⟩`. For each subdirectory `⟨uid⟩` with a
-   `unit.meta`, parse it and build a `UnitInfo` from the table above.
-   The result is a `UnitDatabase` exactly as `readUnitDatabase` would
-   return for a package database, so `mkUnitState`, visibility, wiring,
-   validation and linking are untouched.
+1. **Read the units.** With `-hide-all-packages` and every unit named by
+   id, probe `⟨root⟩/⟨uid⟩/unit.meta` for the units the compilation needs
+   ("Demand-driven reading" below). Otherwise list `⟨root⟩` and read every
+   subdirectory with a `unit.meta`. Either way each manifest becomes a
+   `UnitInfo` by the table above, and the result is a `UnitDatabase` like
+   the one `readUnitDatabase` returns for a package database. From there
+   on, store units are treated like any other.
 2. **Find a module.** Unchanged: the module-to-unit map is built from
    `exposed-modules` and `hidden-modules`, and `GHC.Unit.Finder`
    searches `unitImportDirs` for `A/B.hi`.
@@ -131,12 +138,14 @@ has a layer for that: `-package`, `-package-id`, `-hide-all-packages`,
 environment files:
 
 ```
-unit-store ../store      -- relative to the environment file
+-- the path is relative to the environment file
+unit-store ../store
 package-id foo-1.2.0-ab12
 package-id bar-0.3-9f2a
 ```
 
-which is the Rust shape exactly: a searched directory (`-L dependency=`)
+Only a whole line can be a comment: anything after `unit-store` is taken as
+the path. This is the Rust shape exactly: a searched directory (`-L dependency=`)
 plus explicit direct dependencies (`--extern`). Environment files already
 imply `-hide-all-packages`, so nothing in a large store is visible
 unless named.
@@ -169,16 +178,20 @@ in the reexporting unit. Rust's model is the one being copied.
   `ld-options`, `includes` and `include-dirs` carry substantial content,
   and `GHC.Unit.State` reads `DerivedConstants.h` from its include
   directory at startup. Its manifest is therefore the longest; it is
-  still only a dozen lines.
+  still only a dozen lines. On `stable-ghc-9.14` the RTS way sub-libraries
+  (`rts:⟨way⟩`) are wired in by matching `unitComponentName`, which store
+  units leave empty, so they have to come from a package database.
 - **Relocation.** All paths are derived from `⟨root⟩`, so moving the
   store moves everything. This is what `${pkgroot}` achieves in the
   database today, with the difference that no rewriting happens.
-- **Non-Cabal registrations.** Anything that registered a unit by hand
-  with unconventional paths (`import-dirs` outside the unit's own tree,
-  several `library-dirs`, `hs-libraries` not of the form `HS⟨uid⟩`) has
-  no equivalent. Those entries exist, but they are the exception the
-  package database was designed for, and the database stays available
-  for them.
+- **Paths outside the unit's tree.** The manifest has no key for them, and
+  Cabal writes them: 5 of the 415 entries in a store for GHC 9.14.1, such
+  as `zlib` with `/usr/lib64` in `library-dirs` and `/usr/include` in
+  `include-dirs`. Those two are on the default search paths, but the same
+  library installed elsewhere would not be found through a store. Hand
+  registrations can go further (`import-dirs` elsewhere, `hs-libraries` not
+  of the form `HS⟨uid⟩`). The package database stays available for all of
+  these.
 - **The `C`-prefixed library convention.** `unitHsLibs` understands
   `hs-libraries: Cfoo` as a non-Haskell library linked as `-lCfoo`
   statically and `-lfoo` dynamically. The store assumes `HS⟨uid⟩`; a
@@ -192,6 +205,10 @@ in the reexporting unit. Rust's model is the one being copied.
   and `mi_usages` are the real check; the database fields only detect
   a dependency re-registered under the same id in a mutable database,
   which an immutable store keyed by a content-derived id cannot have.
+  Mixing the two has one catch: a package database entry whose
+  `abi-depends` records a store unit's real ABI hash fails validation,
+  because that unit's `unitAbiHash` is a fingerprint of its manifest. No
+  real entry we checked has `abi-depends` at all (see the field analysis).
 
 ## What is left in the manifest, and whether it could go too
 
@@ -218,28 +235,34 @@ Flag `-unit-store ⟨dir⟩` and environment-file directive `unit-store`.
 Implementation:
 
 - `GHC.Driver.DynFlags`: `PkgDbRef` gains `UnitStorePath OsPath`.
-- `GHC.Driver.Session`: the flag and the directive; relative paths are
-  offset against `-working-dir` and the environment file's directory as
-  `-package-db` paths are.
+- `GHC.Driver.Session`: the flag and the directive, whose relative path is
+  taken against the environment file's directory as for `package-db`.
+- `GHC.Unit.State`: `-unit-store` paths are offset against `-working-dir`
+  as `-package-db` paths are.
 - `GHC.Unit.External.Database`: `resolveUnitDatabase` returns the kind
-  of location along with the path; `readUnitDatabase` dispatches on it.
-- `GHC.Unit.External.Store` (new): enumerate, parse `unit.meta`, build
-  `UnitInfo`.
-- Nothing downstream of `readUnitDatabases` changes.
+  of location along with the path.
+- `GHC.Unit.External.Index`: `readOrGetUnitDatabase` dispatches on that
+  kind, and `readUnitDatabasesOnDemand` does the probing.
+- `GHC.Unit.External.Store` (new): enumerate or probe, parse `unit.meta`,
+  build `UnitInfo`.
 
 Tests in `testsuite/tests/driver/unit-store/` build the same artifacts
 once, then compile and run a client against them twice, through a
 `ghc-pkg` database and through a store, and require identical output.
 Scenarios: a single unit, a chain with transitive linking, a hidden
 module, a reexport, Safe Haskell trust, dynamic linking, an environment
-file, and a Backpack indefinite unit instantiated by hand.
+file, and a Backpack indefinite unit instantiated by hand. Two more,
+`demand` and `closure`, check what gets read and which units exist.
 
 Results are recorded in the section below as they are obtained.
 
 ## Results
 
 Obtained 2026-10-23 with a `--flavour=quick` build of master `0c17201cd3`
-plus the prototype (GHC 10.1.20261023, x86_64 Linux, 16 cores).
+plus the prototype (GHC 10.1.20261023, x86_64 Linux, 16 cores). The
+benchmarks have not been rerun on `stable-ghc-9.14`. The tests have, on a
+static `make stage2` build: all pass except `unitstore_dynamic`, which is
+skipped because that build has no dynamic libraries.
 
 ### Scenarios
 
@@ -256,14 +279,16 @@ outputs byte for byte.
 | multi | `p` depends on `q`; `q` linked through the closure, never named | identical |
 | hidden | importing a hidden module | identical error text, same error code |
 | reexport | `r` exposes `Q from q-0.1:Q`; client sees `Q` through `r` only | identical |
-| safe | Safe Haskell: `-fpackage-trust` without and with `-trust s` | identical failure, then identical success |
+| safe | Safe Haskell: `-fpackage-trust` without and with `-trust-id s-0.1` | identical failure, then identical success |
 | dynamic | `.dyn_hi` and `libHS⟨uid⟩-ghc⟨ver⟩.so` in `lib/`, client `-dynamic` | identical |
 | envfile | `unit-store ../store` directive, relative to the environment file | identical |
 | backpack | indefinite `ind` with signature `H`, hand-instantiated as `ind+q` with `H=q-0.1:Q`, no Cabal | identical |
 
 All eight, plus the `demand` scenario described below, pass under the
 testsuite driver (`hadrian/build test --only="unitstore_…"`, 9 expected
-passes, 0 unexpected failures).
+passes, 0 unexpected failures). The tenth test, `unitstore_closure`, came
+later with the ids-only unit state and is not in that count; it contrasts
+the ids-only path with the by-name one.
 
 Two things learnt from writing the scenarios rather than from the
 prototype: a `Safe` module is trusted whatever its unit's trust, so a
@@ -296,8 +321,8 @@ designed, in 24 ms over the plain run (332 ms vs 309 ms, 5 runs).
 
 ### Demand-driven reading
 
-The second stage of the prototype stops enumerating stores when the
-compiler can know which units it needs. A package database is one
+The demand-driven read stops enumerating stores when the compiler can know
+which units it needs. A package database is one
 `package.cache` file and has to be read whole; a store is addressable,
 and `⟨root⟩/⟨uid⟩/unit.meta` is one `open`. That is the same property
 Rust's crate locator relies on.
@@ -306,25 +331,28 @@ Under `-hide-all-packages`, the only units that can become visible are
 those named by `-package-id` and `-plugin-package-id` flags and whatever
 they reference. So `readUnitDatabases` (`GHC.Unit.External.Index`):
 
-1. reads the package databases in full, as before, which is where the
-   wired-in units come from;
-2. takes the flagged unit ids as roots (for an instantiated id, the
-   indefinite unit plus the units of its instantiation);
+1. reads the package databases in full, as before, which on this branch is
+   where the wired-in units come from (on the master version of this
+   series, stage 3 of the ids-only work probes the compiler's own units by
+   id like any other, so a stack of stores alone is enough);
+2. takes the unit ids from `idsOnlyRoots` as roots (for an instantiated id,
+   the indefinite unit plus the units of its instantiation);
 3. probes every store on the stack for each root and follows
    `depends`, the origins of reexported modules and `instantiated-with`
-   until nothing new is reached, through `probeUnitStore` and
-   `unitInfoReferencedUnits` in `GHC.Unit.External.Store`;
+   until nothing new is reached, through `probeUnitStore` in
+   `GHC.Unit.External.Store` and `unitInfoReferencedUnits` in
+   `GHC.Unit.External.Query`;
 4. returns one `UnitDatabase` per store holding only the units reached,
    marked partial.
 
-A `-package ⟨name⟩` flag names a unit by package name, which cannot be
-probed for, so its presence turns the optimisation off and the stores are
-enumerated as before. Cabal and environment files always use ids.
-`UnitDatabase` gained a `unitDatabasePartial` flag so that a store read
+A flag that names a unit by package name cannot be probed for, so its
+presence turns the optimisation off and the stores are enumerated as
+before. Cabal always uses ids, and so do environment files unless they
+contain `hide-package`, which takes a name. `UnitDatabase` gained a `unitDatabasePartial` flag so that a store read
 on demand is extended rather than reused by a later `initUnits` (GHCi's
 `:set -package-id`) and is never mistaken for a complete listing by an
-eager read. Nothing downstream of `readUnitDatabases` changed; the
-`UnitState` still sees a list of databases, just shorter ones.
+eager read. The `UnitState` is still built from a list of databases, just
+shorter ones.
 
 The `demand` scenario puts a unit with a malformed manifest in the store.
 With `-hide-all-packages -package-id p-0.1` the client compiles, links and
@@ -344,19 +372,18 @@ probed read is indistinguishable from not passing the flag at all
 (252 ms vs 264 ms, 5 runs). The one probe that happens is for base's id,
 which is not in the store.
 
-Two limits of the prototype. The by-name fallback is coarse: `-package
-base` is common in hand-written command lines and defeats probing even
-though base is in the global database; a name index per store, or a rule
-that names are resolved against the eagerly read databases first, would
-remove that. And `-trust ⟨name⟩` for a unit that is in the store but not
-reached by any flag now reports an unknown package, where an eager read
-accepted it silently; that is arguably the better behaviour, since the
-unit could not have been imported either.
+The by-name fallback is coarse: `-package base` is common in hand-written
+command lines and defeats probing even though base is in the global
+database; a name index per store, or a rule that names are resolved against
+the eagerly read databases first, would remove that. `-trust ⟨name⟩` counts
+as a by-name flag too and enumerates the stores; `-trust-id ⟨uid⟩` does not.
 
-### What the prototype did not have to touch
+### What the store reader did not have to touch
 
-`mkUnitState`, visibility, wiring, validation, the finder, the module
-graph and all three linkers are unchanged. The prototype is 5 modified
-files (a constructor, a flag, an environment-file directive, a
-`UnitDbLocation` type, a two-way dispatch) and one new module of about
-280 lines, two thirds of which parse the manifest.
+The store reader on its own left `mkUnitState`, visibility, wiring,
+validation, the finder, the module graph and all three linkers unchanged.
+Its first version was 5 modified files (a constructor, a flag, an
+environment-file directive, a `UnitDbLocation` type, a two-way dispatch)
+and one new module of about 280 lines, two thirds of which parse the
+manifest. The ids-only unit state, added later, does change `mkUnitState`
+and visibility; see `unit-artifact-ids-only.md`.
