@@ -70,7 +70,7 @@ unit() {
   mkdir -p "store/$uid/lib" "obj/$uid"
   # shellcheck disable=SC2086
   "$HC" $HC_OPTS $flags -this-unit-id "$uid" -i"$src" -odir "obj/$uid" -hidir "store/$uid/lib" --make -no-link "$@"
-  "$AR" qcS "store/$uid/lib/libHS$uid.a" $(find "obj/$uid" -name '*.o' | sort)
+  "$AR" qcs "store/$uid/lib/libHS$uid.a" $(find "obj/$uid" -name '*.o' | sort)
 }
 
 # dynunit <uid> <srcdir> <ghc flags> <modules...>: compile the dynamic way and link a shared library

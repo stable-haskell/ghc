@@ -1,5 +1,5 @@
 MainHidden.hs:1:1: error: [GHC-87110]
     Could not load module ‘P.Internal’.
-    It is a hidden module in the package ‘p-0.1’
+    it is a hidden module in the package ‘p-0.1’
     Use -v to see a list of the files searched for.
 
