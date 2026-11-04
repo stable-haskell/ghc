@@ -589,21 +589,25 @@ endif
 
 # These are configuration variables for stage one
 
-# TODO we should not need genprimops code here, it is needed by compiler/configure
-# but it is also listed as a build-tool-depends in compiler/ghc.cabal so cabal-install
-# will build it automatically. The effect of listing genprimops here is that it
-# will be included as a host target rather as a build target. So we end up compiling it
-# twice for no reason.
 # ghc-pkg is built from cabal.project.stage1-ghc-pkg, then copied into this
 # store. Keeping it in this list would make the compiler plan build Cabal.
-STAGE1_EXECUTABLES = \
+# The other tools are built from cabal.project.stage1-tools against the
+# bootstrap packages, then copied the same way. The compiler plan builds
+# only ghc. It still finds the copied alex, happy, genprimopcode, and
+# deriveConstants (see the recipe below).
+STAGE1_TOOL_EXECUTABLES = \
+	alex \
+	happy \
 	deriveConstants \
 	genapply \
 	genprimopcode \
-	ghc \
 	ghc-toolchain-bin \
 	hsc2hs \
 	unlit
+
+STAGE1_EXECUTABLES = \
+	ghc \
+	$(STAGE1_TOOL_EXECUTABLES)
 
 STAGE1_LIBRARIES =
 
@@ -621,7 +625,7 @@ ifndef DIST_BUILD
 # prerequisite (e.g. stage2 -> $(GHC1) -> $(STAGE1_STAMP)).  The PHONY
 # alias below lets users run `make stage1` as before.
 $(STAGE1_STAMP): STAGE=stage1
-$(STAGE1_STAMP): $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) cabal.project.stage1 cabal.project.stage1-ghc-pkg cabal.project.common | stable-cabal libraries/ghc-boot-th-next hackage
+$(STAGE1_STAMP): $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) cabal.project.stage1 cabal.project.stage1-ghc-pkg cabal.project.stage1-tools cabal.project.common | stable-cabal libraries/ghc-boot-th-next hackage
 	$(call PHASE_START,stage1)
 	$(call LOG,Starting build of $(STAGE))
 
@@ -643,22 +647,48 @@ $(STAGE1_STAMP): $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) cabal.project.stage1 c
 		exe:ghc-pkg
 	$(call PHASE_END_OK,stage1.ghc-pkg)
 
+	$(call PHASE_START,stage1.tools)
+	$(call LOG,Building stage1 tools against the bootstrap packages)
+	@# Same store split as ghc-pkg. These binaries link the bootstrap
+	@# directory and process. The compiler plan's directory is a different
+	@# unit, so the plans do not share a store. --store-dir does not move
+	@# the local executables; they install under <builddir>/store.
+	$(CABAL) \
+		--remote-repo-cache $(call NORMALIZE_FP,$(CURDIR)/$(BUILD_DIR)/packages) \
+		--store-dir $(call NORMALIZE_FP,$(CURDIR)/$(BUILD_DIR)/stage1-tools/store) \
+		--logs-dir $(call NORMALIZE_FP,$(CURDIR)/$(BUILD_DIR)/stage1-tools/logs) \
+		build \
+		--project-file cabal.project.stage1-tools \
+		--builddir $(call NORMALIZE_FP,$(CURDIR)/$(BUILD_DIR)/stage1-tools) \
+		--with-compiler=$(GHC0) \
+		--with-build-compiler=$(GHC0) \
+		$(addprefix exe:,$(STAGE1_TOOL_EXECUTABLES))
+	$(call PHASE_END_OK,stage1.tools)
+
+	$(call LOG,Installing stage1 tools into the stage1 store)
+	@mkdir -p $(STORE_DIR)/host/$(HOST_PLATFORM)/bin
+	@for exe in $(STAGE1_TOOL_EXECUTABLES); do \
+		cp -f $(BUILD_DIR)/stage1-tools/store/host/$(HOST_PLATFORM)/bin/$$exe$(EXE_EXT) \
+			$(STORE_DIR)/host/$(HOST_PLATFORM)/bin/$$exe$(EXE_EXT); \
+	done
+
 	$(call PHASE_START,stage1.executables)
-	$(call LOG,Building executables $(STAGE1_EXECUTABLES))
+	$(call LOG,Building executables ghc)
 	@mkdir -p $(TIMING_DIR)
-	@# compiler/configure runs while lib:ghc is configured, which is before
-	@# a single cabal invocation has put the in-tree tools on PATH ahead of
-	@# the bootstrap ones. Build the two tools, then pin them. One stamper
-	@# for both streams: a second process substitution truncates the log.
-	@# Process substitution, not a pipe: bash -o pipefail would otherwise
-	@# report the stamper's status. Cabal's own status still fails the recipe.
+	@# compiler/configure runs while lib:ghc is configured. The tools
+	@# above are already copied into this store. -build-tool-depends is
+	@# off, so Cabal preprocesses Parser.y and Lexer.x with the alex and
+	@# happy named here, as stage3 does. Process substitution, not a
+	@# pipe: bash -o pipefail would otherwise report the stamper's status.
 	{ \
-	  $(STAGE1_CABAL_BUILD) exe:genprimopcode exe:deriveConstants && \
 	  env \
 	    GENPRIMOPCODE=$(call NORMALIZE_FP,$(CURDIR)/$(STAGE1_PATH)/bin/genprimopcode$(EXE_EXT)) \
 	    DERIVE_CONSTANTS=$(call NORMALIZE_FP,$(CURDIR)/$(STAGE1_PATH)/bin/deriveConstants$(EXE_EXT)) \
 	    PATH="$(call NORMALIZE_FP,$(CURDIR)/$(STAGE1_PATH)/bin):$$PATH" \
-	    $(STAGE1_CABAL_BUILD) $(addprefix exe:,$(STAGE1_EXECUTABLES)); \
+	    $(STAGE1_CABAL_BUILD) \
+	      --with-alex=$(call NORMALIZE_FP,$(CURDIR)/$(STAGE1_PATH)/bin/alex$(EXE_EXT)) \
+	      --with-happy=$(call NORMALIZE_FP,$(CURDIR)/$(STAGE1_PATH)/bin/happy$(EXE_EXT)) \
+	      exe:ghc; \
 	} > >($(PYTHON) ./mk/stage1-stamp.py $(TIMING_DIR)/stage1-cabal.log) 2>&1
 	@# stage1-build-graph.py imports dataclasses. Python 3.6, which is
 	@# /usr/bin/python3 on Rocky Linux 8, cannot load it. The stamper
@@ -679,6 +709,12 @@ $(STAGE1_STAMP): $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) cabal.project.stage1 c
 	$(call LOG,Installing ghc-pkg into the stage1 store)
 	@mkdir -p $(STORE_DIR)/host/$(HOST_PLATFORM)/bin
 	@cp -f $(BUILD_DIR)/stage1-ghc-pkg/store/host/$(HOST_PLATFORM)/bin/ghc-pkg$(EXE_EXT) $(STORE_DIR)/host/$(HOST_PLATFORM)/bin/ghc-pkg$(EXE_EXT)
+	@# The compiler build installs exe:ghc into this directory. Copy the
+	@# tools again so a replaced binary does not drop one stage2 still runs.
+	@for exe in $(STAGE1_TOOL_EXECUTABLES); do \
+		cp -f $(BUILD_DIR)/stage1-tools/store/host/$(HOST_PLATFORM)/bin/$$exe$(EXE_EXT) \
+			$(STORE_DIR)/host/$(HOST_PLATFORM)/bin/$$exe$(EXE_EXT); \
+	done
 
 	$(call LOG,Creating $(STORE_DIR)/host/$(HOST_PLATFORM)/lib/settings)
 	@$(STORE_DIR)/host/$(HOST_PLATFORM)/bin/ghc-toolchain-bin $(GHC_TOOLCHAIN_ARGS) --triple $(HOST_PLATFORM) --cc $(CC) --cxx $(CXX) --cc-link-opt "$(CC_LINK_OPT)" --output-settings -o $(STORE_DIR)/host/$(HOST_PLATFORM)/lib/settings
@@ -1464,9 +1500,47 @@ buck2-stage1: $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) libraries/ghc-boot-th-nex
 	@# The cell root has to exist before buck2 starts. The variant command
 	@# fills it; the compiler project must still run first so packages that
 	@# have no BUCK yet get a base wrapper for the variant to append to.
-	@mkdir -p third-party/haskell-ghc-pkg-boot
+	@mkdir -p third-party/haskell-ghc-pkg-boot third-party/haskell-stage1-tools
+	@# stage1-tools is the boot-compiler platform for the packages that
+	@# left cabal.project.stage1 (genprimopcode, deriveConstants, alex,
+	@# happy, and the other host tools). Its prebuilt cell is separate, so
+	@# this does not replace the compiler plan's directory or filepath.
+	@if ! grep -q 'name = "stage1-tools"' buck2/constraints/BUCK; then \
+	  printf '%s\n' \
+	    '' \
+	    '# Stage1 host tools (`cabal buck2 --variant stage1-tools`).' \
+	    '# Boot compiler. Does not select the stage-2 toolchain.' \
+	    'constraint_value(' \
+	    '    name = "stage1-tools",' \
+	    '    constraint_setting = ":stage",' \
+	    '    visibility = ["PUBLIC"],' \
+	    ')' >> buck2/constraints/BUCK; \
+	fi
+	@if ! grep -q 'constraints:stage1-tools' buck2/haskell.bzl; then \
+	  awk '/"root\/\/buck2\/constraints:stage2": \[\],/ && !done { print; print "        \"root//buck2/constraints:stage1-tools\": [],"; done = 1; next } { print }' \
+	    buck2/haskell.bzl > buck2/haskell.bzl.new && \
+	  mv buck2/haskell.bzl.new buck2/haskell.bzl; \
+	fi
+	@if ! grep -q 'name = "stage1-tools"' buck2/platforms/BUCK; then \
+	  printf '%s\n' \
+	    '' \
+	    '# Stage1 host tools (`cabal buck2 --variant stage1-tools`).' \
+	    '# Boot compiler. Does not select the stage-2 toolchain.' \
+	    'platform(' \
+	    '    name = "stage1-tools",' \
+	    '    constraint_values = ["root//buck2/constraints:stage1-tools"],' \
+	    '    deps = ["prelude//platforms:default"],' \
+	    '    visibility = ["PUBLIC"],' \
+	    ')' >> buck2/platforms/BUCK; \
+	fi
 	$(CABAL_BUCK2) buck2 \
 		--project-file cabal.project.stage1 \
+		--with-compiler=$(GHC0) \
+		--enable-shared \
+		--ghc-options "-ghcversion-file=$(call NORMALIZE_FP,$(CURDIR)/rts/include/ghcversion.h)"
+	$(CABAL_BUCK2) buck2 \
+		--variant stage1-tools \
+		--project-file cabal.project.stage1-tools \
 		--with-compiler=$(GHC0) \
 		--enable-shared \
 		--ghc-options "-ghcversion-file=$(call NORMALIZE_FP,$(CURDIR)/rts/include/ghcversion.h)"
@@ -1476,9 +1550,16 @@ buck2-stage1: $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) libraries/ghc-boot-th-nex
 		--with-compiler=$(GHC0) \
 		--enable-shared \
 		--ghc-options "-ghcversion-file=$(call NORMALIZE_FP,$(CURDIR)/rts/include/ghcversion.h)"
-	@# The variant command rewrites this file. Alias the boot RTS closure
+	@# The variant commands rewrite these files. Alias the boot RTS closure
 	@# afterwards so a later run does not keep the duplicated sonames.
 	$(PYTHON) ./mk/buck2-ghc-pkg-boot-aliases.py third-party/haskell-ghc-pkg-boot/BUCK
+	$(PYTHON) ./mk/buck2-ghc-pkg-boot-aliases.py third-party/haskell-stage1-tools/BUCK
+	@# The compiler plan sets -build-tool-depends, so its tools.bzl records
+	@# no alex or happy. haskell.bzl still preprocesses .x and .y with the
+	@# paths in that file. Point them at the binaries the tools variant
+	@# installed, and alias the unsuffixed alex and happy names the
+	@# genprimopcode rule executes.
+	$(PYTHON) ./mk/buck2-stage1-tools.py
 
 # Stage 2 with buck2: generate BUCK.stage2.cabal.bzl files (targets
 # suffixed -stage2, built in the stage2 platform by the stage-1 compiler
@@ -1578,7 +1659,7 @@ clean: clean-stage1 clean-stage2 clean-stage3
 
 clean-stage1:
 	@echo "::group::Cleaning stage1 build artifacts..."
-	rm -rf $(BUILD_DIR)/stage1
+	rm -rf $(BUILD_DIR)/stage1 $(BUILD_DIR)/stage1-ghc-pkg $(BUILD_DIR)/stage1-tools
 	rm -f $(STAGE1_STAMP)
 	@echo "::endgroup::"
 
