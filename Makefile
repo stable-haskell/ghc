@@ -594,7 +594,10 @@ endif
 # The other tools are built from cabal.project.stage1-tools against the
 # bootstrap packages, then copied the same way. The compiler plan builds
 # only ghc. It still finds the copied alex, happy, genprimopcode, and
-# deriveConstants (see the recipe below).
+# deriveConstants (see the recipe below). ghc-pkg and the tools do not
+# depend on each other. The compiler build does depend on those four
+# tools, so it starts when the tools copy finishes. ghc-pkg keeps running
+# alongside it and is copied in afterwards.
 STAGE1_TOOL_EXECUTABLES = \
 	alex \
 	happy \
@@ -630,56 +633,85 @@ $(STAGE1_STAMP): $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) cabal.project.stage1 c
 	$(call LOG,Starting build of $(STAGE))
 
 	$(call PHASE_START,stage1.ghc-pkg)
-	$(call LOG,Building ghc-pkg against the bootstrap Cabal)
-	@# Local executables install under <builddir>/store. --store-dir does
-	@# not move them. This ghc-boot-9.14 and the compiler plan's ghc-boot-9.14
-	@# share an unhashed unit id and different dependencies, so the plans
-	@# keep separate stores. The executable is copied below.
-	$(CABAL) \
-		--remote-repo-cache $(call NORMALIZE_FP,$(CURDIR)/$(BUILD_DIR)/packages) \
-		--store-dir $(call NORMALIZE_FP,$(CURDIR)/$(BUILD_DIR)/stage1-ghc-pkg/store) \
-		--logs-dir $(call NORMALIZE_FP,$(CURDIR)/$(BUILD_DIR)/stage1-ghc-pkg/logs) \
-		build \
-		--project-file cabal.project.stage1-ghc-pkg \
-		--builddir $(call NORMALIZE_FP,$(CURDIR)/$(BUILD_DIR)/stage1-ghc-pkg) \
-		--with-compiler=$(GHC0) \
-		--with-build-compiler=$(GHC0) \
-		exe:ghc-pkg
-	$(call PHASE_END_OK,stage1.ghc-pkg)
-
 	$(call PHASE_START,stage1.tools)
-	$(call LOG,Building stage1 tools against the bootstrap packages)
-	@# Same store split as ghc-pkg. These binaries link the bootstrap
-	@# directory and process. The compiler plan's directory is a different
-	@# unit, so the plans do not share a store. --store-dir does not move
-	@# the local executables; they install under <builddir>/store.
-	$(CABAL) \
-		--remote-repo-cache $(call NORMALIZE_FP,$(CURDIR)/$(BUILD_DIR)/packages) \
-		--store-dir $(call NORMALIZE_FP,$(CURDIR)/$(BUILD_DIR)/stage1-tools/store) \
-		--logs-dir $(call NORMALIZE_FP,$(CURDIR)/$(BUILD_DIR)/stage1-tools/logs) \
-		build \
-		--project-file cabal.project.stage1-tools \
-		--builddir $(call NORMALIZE_FP,$(CURDIR)/$(BUILD_DIR)/stage1-tools) \
-		--with-compiler=$(GHC0) \
-		--with-build-compiler=$(GHC0) \
-		$(addprefix exe:,$(STAGE1_TOOL_EXECUTABLES))
-	$(call PHASE_END_OK,stage1.tools)
-
-	$(call LOG,Installing stage1 tools into the stage1 store)
-	@mkdir -p $(STORE_DIR)/host/$(HOST_PLATFORM)/bin
-	@for exe in $(STAGE1_TOOL_EXECUTABLES); do \
+	$(call LOG,Building ghc-pkg and stage1 tools in parallel)
+	@mkdir -p $(TIMING_DIR) $(STORE_DIR)/host/$(HOST_PLATFORM)/bin
+	@# Separate projects and stores. ghc-boot-9.14 is an unhashed unit id,
+	@# and the two plans give it different dependencies, so they cannot
+	@# share a store. --store-dir does not move a local executable; cabal
+	@# installs it under <builddir>/store. Each plan's log is teed. The
+	@# child records its own phase end, so a ghc-pkg that finishes during
+	@# the compiler build is not timed as if it ran that long. The
+	@# compiler command is not a pipe: bash -o pipefail would otherwise
+	@# report the stamper's status.
+	@set -eu; \
+	set -m; \
+	pkg_log=$(TIMING_DIR)/stage1-ghc-pkg.log; \
+	tools_log=$(TIMING_DIR)/stage1-tools.log; \
+	( \
+		set +e; \
+		$(CABAL) \
+			--remote-repo-cache $(call NORMALIZE_FP,$(CURDIR)/$(BUILD_DIR)/packages) \
+			--store-dir $(call NORMALIZE_FP,$(CURDIR)/$(BUILD_DIR)/stage1-ghc-pkg/store) \
+			--logs-dir $(call NORMALIZE_FP,$(CURDIR)/$(BUILD_DIR)/stage1-ghc-pkg/logs) \
+			build \
+			--project-file cabal.project.stage1-ghc-pkg \
+			--builddir $(call NORMALIZE_FP,$(CURDIR)/$(BUILD_DIR)/stage1-ghc-pkg) \
+			--with-compiler=$(GHC0) \
+			--with-build-compiler=$(GHC0) \
+			exe:ghc-pkg > >(tee $$pkg_log) 2>&1; \
+		status=$$?; \
+		date +%s > $(TIMING_DIR)/stage1.ghc-pkg.end; \
+		echo $$status > $(TIMING_DIR)/stage1.ghc-pkg.status; \
+		exit $$status; \
+	) & \
+	pkg_pid=$$!; \
+	( \
+		set +e; \
+		$(CABAL) \
+			--remote-repo-cache $(call NORMALIZE_FP,$(CURDIR)/$(BUILD_DIR)/packages) \
+			--store-dir $(call NORMALIZE_FP,$(CURDIR)/$(BUILD_DIR)/stage1-tools/store) \
+			--logs-dir $(call NORMALIZE_FP,$(CURDIR)/$(BUILD_DIR)/stage1-tools/logs) \
+			build \
+			--project-file cabal.project.stage1-tools \
+			--builddir $(call NORMALIZE_FP,$(CURDIR)/$(BUILD_DIR)/stage1-tools) \
+			--with-compiler=$(GHC0) \
+			--with-build-compiler=$(GHC0) \
+			$(addprefix exe:,$(STAGE1_TOOL_EXECUTABLES)) > >(tee $$tools_log) 2>&1; \
+		status=$$?; \
+		date +%s > $(TIMING_DIR)/stage1.tools.end; \
+		echo $$status > $(TIMING_DIR)/stage1.tools.status; \
+		exit $$status; \
+	) & \
+	tools_pid=$$!; \
+	tools_status=0; \
+	wait $$tools_pid || tools_status=$$?; \
+	if [ $$tools_status -ne 0 ]; then \
+		kill -TERM -$$pkg_pid 2>/dev/null || true; \
+		wait $$pkg_pid 2>/dev/null || true; \
+		if [ ! -f $(TIMING_DIR)/stage1.ghc-pkg.end ]; then \
+			date +%s > $(TIMING_DIR)/stage1.ghc-pkg.end; \
+			echo 1 > $(TIMING_DIR)/stage1.ghc-pkg.status; \
+		fi; \
+		echo "stage1.tools failed (exit $$tools_status). Log: $$tools_log" >&2; \
+		exit $$tools_status; \
+	fi; \
+	pkg_status=0; \
+	if [ -f $(TIMING_DIR)/stage1.ghc-pkg.status ]; then \
+		wait $$pkg_pid || pkg_status=$$?; \
+		if [ $$pkg_status -ne 0 ]; then \
+			echo "stage1.ghc-pkg failed (exit $$pkg_status). Log: $$pkg_log" >&2; \
+			exit $$pkg_status; \
+		fi; \
+		pkg_pid=; \
+	fi; \
+	for exe in $(STAGE1_TOOL_EXECUTABLES); do \
 		cp -f $(BUILD_DIR)/stage1-tools/store/host/$(HOST_PLATFORM)/bin/$$exe$(EXE_EXT) \
 			$(STORE_DIR)/host/$(HOST_PLATFORM)/bin/$$exe$(EXE_EXT); \
-	done
-
-	$(call PHASE_START,stage1.executables)
-	$(call LOG,Building executables ghc)
-	@mkdir -p $(TIMING_DIR)
-	@# compiler/configure runs while lib:ghc is configured. The tools
-	@# above are already copied into this store. -build-tool-depends is
-	@# off, so Cabal preprocesses Parser.y and Lexer.x with the alex and
-	@# happy named here, as stage3 does. Process substitution, not a
-	@# pipe: bash -o pipefail would otherwise report the stamper's status.
+	done; \
+	date +%s > $(TIMING_DIR)/stage1.executables.start; \
+	rm -f $(TIMING_DIR)/stage1.executables.end $(TIMING_DIR)/stage1.executables.status; \
+	set +e; \
 	{ \
 	  env \
 	    GENPRIMOPCODE=$(call NORMALIZE_FP,$(CURDIR)/$(STAGE1_PATH)/bin/genprimopcode$(EXE_EXT)) \
@@ -689,7 +721,22 @@ $(STAGE1_STAMP): $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) cabal.project.stage1 c
 	      --with-alex=$(call NORMALIZE_FP,$(CURDIR)/$(STAGE1_PATH)/bin/alex$(EXE_EXT)) \
 	      --with-happy=$(call NORMALIZE_FP,$(CURDIR)/$(STAGE1_PATH)/bin/happy$(EXE_EXT)) \
 	      exe:ghc; \
-	} > >($(PYTHON) ./mk/stage1-stamp.py $(TIMING_DIR)/stage1-cabal.log) 2>&1
+	} > >($(PYTHON) ./mk/stage1-stamp.py $(TIMING_DIR)/stage1-cabal.log) 2>&1; \
+	exe_status=$$?; \
+	set -e; \
+	date +%s > $(TIMING_DIR)/stage1.executables.end; \
+	echo $$exe_status > $(TIMING_DIR)/stage1.executables.status; \
+	if [ -n "$${pkg_pid:-}" ]; then \
+		wait $$pkg_pid || pkg_status=$$?; \
+	fi; \
+	if [ $$exe_status -ne 0 ]; then \
+		echo "stage1.executables failed (exit $$exe_status)" >&2; \
+		exit $$exe_status; \
+	fi; \
+	if [ $$pkg_status -ne 0 ]; then \
+		echo "stage1.ghc-pkg failed (exit $$pkg_status). Log: $$pkg_log" >&2; \
+		exit $$pkg_status; \
+	fi
 	@# stage1-build-graph.py imports dataclasses. Python 3.6, which is
 	@# /usr/bin/python3 on Rocky Linux 8, cannot load it. The stamper
 	@# above still records the log.
@@ -704,7 +751,6 @@ $(STAGE1_STAMP): $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) cabal.project.stage1 c
 	else \
 		echo "stage1-build-graph: skipped the package chart; $(PYTHON) is older than 3.7"; \
 	fi
-	$(call PHASE_END_OK,stage1.executables)
 
 	$(call LOG,Installing ghc-pkg into the stage1 store)
 	@mkdir -p $(STORE_DIR)/host/$(HOST_PLATFORM)/bin
