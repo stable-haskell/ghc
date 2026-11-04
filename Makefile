@@ -1505,6 +1505,10 @@ buck2-stage1: $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) libraries/ghc-boot-th-nex
 	@# left cabal.project.stage1 (genprimopcode, deriveConstants, alex,
 	@# happy, and the other host tools). Its prebuilt cell is separate, so
 	@# this does not replace the compiler plan's directory or filepath.
+	@# rts-fs is a C library built as haskell_library, and unlit links it
+	@# with g++. GHC's automatic base link does not pull libHSrts, so this
+	@# platform still adds the boot rts. base stays off the arm: the variant
+	@# cell already depends on it, and the alias step forwards that target.
 	@if ! grep -q 'name = "stage1-tools"' buck2/constraints/BUCK; then \
 	  printf '%s\n' \
 	    '' \
@@ -1517,7 +1521,7 @@ buck2-stage1: $(CONFIGURE_SCRIPTS) $(CONFIGURED_FILES) libraries/ghc-boot-th-nex
 	    ')' >> buck2/constraints/BUCK; \
 	fi
 	@if ! grep -q 'constraints:stage1-tools' buck2/haskell.bzl; then \
-	  awk '/"root\/\/buck2\/constraints:stage2": \[\],/ && !done { print; print "        \"root//buck2/constraints:stage1-tools\": [],"; done = 1; next } { print }' \
+	  awk '/"root\/\/buck2\/constraints:stage2": \[\],/ && !done { print; print "        \"root//buck2/constraints:stage1-tools\": [\"@third-party-haskell//:rts\"],"; done = 1; next } { print }' \
 	    buck2/haskell.bzl > buck2/haskell.bzl.new && \
 	  mv buck2/haskell.bzl.new buck2/haskell.bzl; \
 	fi
