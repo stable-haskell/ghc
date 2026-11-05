@@ -922,19 +922,26 @@ instance Outputable ModRenaming where
     ppr (ModRenaming b rns) = ppr b <+> parens (ppr rns)
 
 -- | Flags for manipulating the set of non-broken packages.
-newtype IgnorePackageFlag = IgnorePackage String -- ^ @-ignore-package@
+--
+-- The argument is a package name as typed by the user until
+-- 'GHC.Unit.External.Names' resolves it to a unit id; the unit core only
+-- ever sees the 'UnitIdArg' form.
+-- See Note [Names are resolved in the front end] in GHC.Unit.External.Names.
+newtype IgnorePackageFlag = IgnorePackage PackageArg -- ^ @-ignore-package@
   deriving (Eq)
 
 -- | Flags for manipulating package trust.
+--
+-- Same convention as 'IgnorePackageFlag': names until resolved, ids after.
 data TrustFlag
-  = TrustPackage    String -- ^ @-trust@
-  | DistrustPackage String -- ^ @-distrust@
+  = TrustPackage    PackageArg -- ^ @-trust@
+  | DistrustPackage PackageArg -- ^ @-distrust@
   deriving (Eq)
 
 -- | Flags for manipulating packages visibility.
 data PackageFlag
   = ExposePackage   String PackageArg ModRenaming -- ^ @-package@, @-package-id@
-  | HidePackage     String -- ^ @-hide-package@
+  | HidePackage     PackageArg -- ^ @-hide-package@
   deriving (Eq, Ord) -- NB: equality instance is used by packageFlagsChanged
 
 data PackageDBFlag
@@ -971,7 +978,7 @@ packageFlagsChanged idflags1 idflags0 =
 
 instance Outputable PackageFlag where
     ppr (ExposePackage n arg rn) = text n <> braces (ppr arg <+> ppr rn)
-    ppr (HidePackage str) = text "-hide-package" <+> text str
+    ppr (HidePackage arg) = text "-hide-package" <+> ppr arg
 
 data DynLibLoader
   = Deployable
@@ -1035,6 +1042,9 @@ data PkgDbRef
   = GlobalPkgDb
   | UserPkgDb
   | PkgDbPath OsPath
+  | UnitStorePath OsPath
+    -- ^ A unit store: a directory of @<uid>/unit.meta@ entries located by
+    -- convention rather than a package database. See "GHC.Unit.External.Store".
   deriving (Eq, Ord)
 
 

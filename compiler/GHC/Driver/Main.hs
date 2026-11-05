@@ -366,7 +366,7 @@ newHscEnv top_dir dflags = do
   where
     home_unit_graph hpt = HUG.unitEnv_singleton
                         (homeUnitId_ dflags)
-                        (HUG.mkHomeUnitEnv emptyUnitState Nothing dflags hpt Nothing)
+                        (HUG.mkHomeUnitEnv emptyUnitState dflags hpt Nothing)
 
 newHscEnvWithHUG :: FilePath -> DynFlags -> UnitId -> HomeUnitGraph -> IO HscEnv
 newHscEnvWithHUG top_dir top_dynflags cur_unit home_unit_graph = do
@@ -1838,7 +1838,7 @@ hscCheckSafe' m l = do
             Sf_Safe | not trust_own_pkg         -> True
             Sf_SafeInferred | not trust_own_pkg -> True
             _ | isHomeModule home_unit mod      -> True
-            _ -> unitIsTrusted $ unsafeLookupUnit unit_state (moduleUnit m)
+            _ -> isUnitTrusted unit_state (moduleUnit m)
 
     lookup' :: Module -> Hsc (Maybe ModIface)
     lookup' m = do
@@ -1859,7 +1859,7 @@ checkPkgTrust pkgs = do
     let errors = S.foldr go emptyBag pkgs
         state  = hsc_units hsc_env
         go pkg acc
-            | unitIsTrusted $ unsafeLookupUnitId state pkg
+            | isUnitIdTrusted state pkg
             = acc
             | otherwise
             = (`consBag` acc)
