@@ -58,6 +58,7 @@ import GHC.Internal.Clock (getMonotonicTimeNSec)
 import GHC.Internal.Conc.Signal (runHandlers)
 import GHC.Internal.Enum (maxBound)
 import GHC.Internal.IORef (IORef (..))
+import GHC.Internal.Prim (casMutVar#, readMutVar#)
 import GHC.Internal.Num (Num(..))
 import GHC.Internal.Real (quot, fromIntegral)
 import GHC.Internal.Show (Show(..))
@@ -188,6 +189,11 @@ step mgr = do
 
   -- Call all expired timer callbacks and return the time to the
   -- next timeout.
+  --
+  -- This function uses atomicModifyIORef' whereas we use casMutVar# below
+  -- in modifyTimeouts. We deliberately avoid modifyTimeouts here
+  -- because this update is long, and with a CAS it would rarely win
+  -- against a stream of registrations, starving the manager. See #9809.
   mkTimeout :: IO Timeout
   mkTimeout = do
       now <- getMonotonicTimeNSec
@@ -276,34 +282,27 @@ editTimeouts mgr g = do
                       t0 /= t1
                     _ -> True
 
--- | Atomically replace the timeout queue with the first component of
--- @f old@ and return the second component.
+-- The issue in #9809 was that for the threaded runtime (where each process
+-- has its own timer manager), timer events added to the shared list of
+-- events were potentially added unevaluated. When many threads (eg 100,000)
+-- add entries at the same time, the program can slow down considerably and
+-- use significant amounts of memory. The crux of the matter was that each
+-- thread updated the shared list lazily. In this case it's easy to build a
+-- massive list of unevaluated thunks.
 --
--- Unlike 'atomicModifyIORef'', the new queue is evaluated /before/ it is
--- published, using a compare-and-swap loop. 'atomicModifyIORef'' installs
--- the new contents as a thunk and only evaluates it afterwards, so when many
--- threads register timeouts at once (#9809) each one builds its insert on
--- top of the previous thread's unevaluated insert, giving long thunk chains,
--- threads blocking on each other's half evaluated updates and lots of extra
--- GC work. Since 'Q.IntPSQ' is spine strict, WHNF means fully evaluated, and
--- other threads only ever see a fully evaluated queue.
---
--- The cost is that a thread whose compare-and-swap loses a race has to redo
--- its O(log n) update. The update runs in constant stack (see #7653).
---
--- Only the short edits made by registering threads use this. The timer
--- manager's own update in 'mkTimeout' (removing every expired timeout) can
--- take much longer, and under a stream of registrations from other
--- capabilities its compare-and-swap would almost never succeed, starving it
--- so that expired timeouts don't fire. It therefore keeps using
--- 'atomicModifyIORef'', which never retries: it publishes a single thunk and
--- evaluates it straight away. A registering thread that reads that thunk
--- evaluates it (or waits for the manager to) before publishing its own fully
--- evaluated queue, so thunks still cannot pile up.
---
--- 'casMutVar#' compares pointers, so the expected value must be exactly the
--- pointer read from the 'MutVar#'. See Note [Pointer equality in
--- modifyTimeouts] for why this function is OPAQUE.
+-- The solution is for each thread that wants to update the shared list to
+-- apply its edit to a copy of the list and fully evaluate the result before
+-- replacing the shared list. Updating the list is an O(log n) process and it
+-- runs in constant stack space, see #7653. The old list is replaced by the
+-- new list using a compare-and-swap (CAS) operation (which compares machine
+-- level pointers). If the CAS fails (ie the list has been updated by another
+-- thread) it starts again with the new list created by the other thread.
+
+-- NOINLINE could have been used here but OPAQUE has stronger guarantees
+-- (ie worker/wrapper optimisation is prevented). If this function were
+-- inlined above (possible without either pragma), the CAS operation may end up
+-- comparing with a different pointer to the one it read (eg if GHC replaces a
+-- thunk or indirection with the evaluated value).
 {-# OPAQUE modifyTimeouts #-}
 modifyTimeouts :: IORef TimeoutQueue -> (TimeoutQueue -> (TimeoutQueue, b)) -> IO b
 modifyTimeouts (IORef (STRef ref)) f = IO modLoop
@@ -313,38 +312,5 @@ modifyTimeouts (IORef (STRef ref)) f = IO modLoop
         (newVar, r) -> newVar `seq` case casMutVar# ref oldVar newVar s1 of
           (# s2, 0#, _ #) -> (# s2, r #)
           (# s2, _, _ #) -> modLoop s2
-
-{- Note [Pointer equality in modifyTimeouts]
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-'casMutVar#' succeeds only if the expected value is the very pointer stored
-in the 'MutVar#', so all the difficulties of 'reallyUnsafePtrEquality#'
-apply to it. In 'modifyTimeouts' the expected value is @oldVar@, exactly as
-'readMutVar#' returned it, and that must survive optimisation.
-
-The danger is the optimiser seeing a @case@ on @oldVar@ in the same function
-as the 'casMutVar#'. That would happen if 'modifyTimeouts' were inlined or
-specialised at a call site, bringing in the body of @f@ (in 'editTimeouts',
-@f@ inspects the queue to decide whether to wake the manager). The binder
-swap (Note [Binder swap] in GHC.Core.Opt.OccurAnal) may then replace @oldVar@
-by the case binder, which is the /evaluated/ queue. That is a different
-pointer whenever the 'MutVar#' holds a thunk or an indirection, for example
-the selector thunk that 'atomicModifyIORef'' in 'mkTimeout' leaves behind.
-Case-of-known-constructor can likewise replace it by a freshly built
-constructor. Either way the compare-and-swap would keep failing and the
-registering thread would spin.
-
-The OPAQUE pragma keeps @f@ an unknown function inside 'modifyTimeouts', so
-there is never a @case@ on @oldVar@ to rewrite. OPAQUE rather than NOINLINE:
-both stop inlining and specialisation, but NOINLINE still allows the
-worker/wrapper transformation. Today that is harmless (the worker only
-unboxes the 'IORef' and still takes @f@ as an argument), but OPAQUE states
-the requirement directly: the body must be compiled as written and every call
-must go to it. It also costs nothing, since 'editTimeouts' passes a closure
-anyway.
-
-An alternative is to hide the expected pointer in a box built by a NOINLINE
-function before @f@ runs (like the @Ticket@ type of the atomic-primops
-package), but that allocates on every attempt.
--}
 
 #endif
