@@ -10,7 +10,7 @@ mod_name() { echo "Mod$1"; }
 
 mk_unit_file() {
     local p=$1
-    echo "-clear-package-db -global-package-db -no-user-package-db -working-dir $(unit_dir "$p") -this-unit-id $(unit_dir "$p") $(mod_name "$p") ${deps[*]}" \
+    echo "-clear-package-db -global-package-db -no-user-package-db -working-dir $(unit_dir "$p") -this-unit-id $(unit_dir "$p") $(mod_name "$p")" \
         > "$(unit_fname "$p")"
 }
 
