@@ -85,7 +85,7 @@ source-repository-package
   type: git
   location: https://github.com/stable-haskell/Cabal.git
   -- See cabal.project.stage0 for why this SHA (post-split host:*/build:*).
-  tag: f2e0a89e15cf6604cec9d93e26a4b3caf459b076
+  tag: f3366c19618cccba28a6043d487d4f6551ed2f77
   subdir: Cabal
           Cabal-syntax
 

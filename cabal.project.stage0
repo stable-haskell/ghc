@@ -5,7 +5,9 @@ source-repository-package
   -- `package host:*` / `package build:*` needed by cabal.project.stage2.dynamic
   -- so DYNAMIC=1 does not build BUILD-stage tools shared against bootstrap GHC.
   -- Re-pin to stable-haskell/master once #378 lands there (cabal#384).
-  tag: f2e0a89e15cf6604cec9d93e26a4b3caf459b076
+  -- On top of that: fix/copyfile-cloexec-etxtbsy, for the intermittent Cabal-1008
+  -- on alex.
+  tag: f3366c19618cccba28a6043d487d4f6551ed2f77
   subdir: Cabal
           Cabal-syntax
           cabal-install
