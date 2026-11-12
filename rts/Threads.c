@@ -380,6 +380,33 @@ migrateThread (Capability *from, StgTSO *tso, Capability *to)
    {set,unset}ThreadFlag
 
    sets or unsets a flag in a given TSO
+
+   Note [TSO flag messages]
+   ~~~~~~~~~~~~~~~~~~~~~~~~
+   Under the threaded RTS the caller often does not own the target TSO.
+   updThreadFlag therefore allocates a MSG_SET_TSO_FLAG / MSG_UNSET_TSO_FLAG
+   and sendMessage's it to tso->cap. sendMessage returns as soon as the
+   message is linked onto that capability's inbox. It does not wait for
+   executeMessage.
+
+   The inbox is drained by scheduleFindWork, before that capability next
+   chooses a thread to run. Two consequences:
+
+   * A thread already running on the owning capability, including the
+     target itself, will not observe the new flag until it next returns
+     to the scheduler. The interpreter and an unsafe FFI call both read
+     tso->flags directly; neither drains the inbox.
+   * The inbox is a stack. A MSG_TRY_WAKEUP queued after the flag message
+     is executed first, but executeMessage only enqueues the TSO. The
+     flag message in the same batch is still applied before the scheduler
+     enters Haskell. The stale read happens when the target samples the
+     flag inside a timeslice that began before the message was drained
+     (T27131, threaded1, Alpine musl).
+
+   Callers that need the update to be visible must return the target to
+   the scheduler after the message has been queued and before they sample
+   tso->flags. rts_enableStopNextBreakpoint is called via unsafe FFI, so
+   this wait cannot yield the caller's capability.
    ------------------------------------------------------------------------- */
 
 #if defined(THREADED_RTS)
