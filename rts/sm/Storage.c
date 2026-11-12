@@ -49,7 +49,6 @@
 #endif
 
 #if RTS_LINKER_USE_MMAP
-#include "LinkerInternals.h"
 #endif
 
 #include <string.h>

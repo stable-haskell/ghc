@@ -1,0 +1,561 @@
+{
+  "archives": [
+    {
+      "features": [
+        "long-name",
+        "non-o-member"
+      ],
+      "format": "gnu",
+      "members": [
+        "R_RISCV_64",
+        "R_RISCV_ADD16",
+        "R_RISCV_ADD32",
+        "R_RISCV_ADD64",
+        "R_RISCV_ADD8",
+        "R_RISCV_ALIGN",
+        "R_RISCV_BRANCH",
+        "R_RISCV_CALL_PLT",
+        "R_RISCV_GOT_HI20",
+        "R_RISCV_HI20",
+        "R_RISCV_JAL",
+        "R_RISCV_LO12_I",
+        "R_RISCV_PCREL_HI20",
+        "R_RISCV_PCREL_LO12_I",
+        "R_RISCV_PCREL_LO12_S",
+        "R_RISCV_RELAX",
+        "R_RISCV_RVC_BRANCH",
+        "R_RISCV_RVC_JUMP",
+        "R_RISCV_SUB16",
+        "R_RISCV_SUB32",
+        "R_RISCV_SUB6",
+        "R_RISCV_SUB64",
+        "R_RISCV_SUB8",
+        "tls",
+        "common",
+        "common_strong",
+        "weak",
+        "strong",
+        "hidden",
+        "init_fini",
+        "legacy_ctors",
+        "long_archive_member"
+      ],
+      "path": "riscv64-linux-gnu/libelf-fixtures.a"
+    }
+  ],
+  "schema": 1,
+  "sources": [
+    {
+      "expected_outcome": "supported",
+      "expected_relocations": [
+        "R_RISCV_64"
+      ],
+      "id": "R_RISCV_64",
+      "language": "asm",
+      "object": "riscv64-linux-gnu/R_RISCV_64.o",
+      "path": "src/elf-riscv64/R_RISCV_64.s",
+      "triple": "riscv64-linux-gnu"
+    },
+    {
+      "expected_outcome": "supported",
+      "expected_relocations": [
+        "R_RISCV_ADD16"
+      ],
+      "id": "R_RISCV_ADD16",
+      "language": "asm",
+      "object": "riscv64-linux-gnu/R_RISCV_ADD16.o",
+      "path": "src/elf-riscv64/R_RISCV_ADD16.s",
+      "triple": "riscv64-linux-gnu"
+    },
+    {
+      "expected_outcome": "supported",
+      "expected_relocations": [
+        "R_RISCV_ADD32"
+      ],
+      "id": "R_RISCV_ADD32",
+      "language": "asm",
+      "object": "riscv64-linux-gnu/R_RISCV_ADD32.o",
+      "path": "src/elf-riscv64/R_RISCV_ADD32.s",
+      "triple": "riscv64-linux-gnu"
+    },
+    {
+      "expected_outcome": "supported",
+      "expected_relocations": [
+        "R_RISCV_ADD64"
+      ],
+      "id": "R_RISCV_ADD64",
+      "language": "asm",
+      "object": "riscv64-linux-gnu/R_RISCV_ADD64.o",
+      "path": "src/elf-riscv64/R_RISCV_ADD64.s",
+      "triple": "riscv64-linux-gnu"
+    },
+    {
+      "expected_outcome": "supported",
+      "expected_relocations": [
+        "R_RISCV_ADD8"
+      ],
+      "id": "R_RISCV_ADD8",
+      "language": "asm",
+      "object": "riscv64-linux-gnu/R_RISCV_ADD8.o",
+      "path": "src/elf-riscv64/R_RISCV_ADD8.s",
+      "triple": "riscv64-linux-gnu"
+    },
+    {
+      "expected_outcome": "supported",
+      "expected_relocations": [
+        "R_RISCV_ALIGN"
+      ],
+      "id": "R_RISCV_ALIGN",
+      "language": "asm",
+      "object": "riscv64-linux-gnu/R_RISCV_ALIGN.o",
+      "path": "src/elf-riscv64/R_RISCV_ALIGN.s",
+      "reason": "Accepted as a no-op; the current backend does not insert or remove alignment bytes.",
+      "triple": "riscv64-linux-gnu"
+    },
+    {
+      "expected_outcome": "supported",
+      "expected_relocations": [
+        "R_RISCV_BRANCH"
+      ],
+      "id": "R_RISCV_BRANCH",
+      "language": "asm",
+      "object": "riscv64-linux-gnu/R_RISCV_BRANCH.o",
+      "path": "src/elf-riscv64/R_RISCV_BRANCH.s",
+      "triple": "riscv64-linux-gnu"
+    },
+    {
+      "expected_outcome": "supported",
+      "expected_relocations": [
+        "R_RISCV_CALL_PLT"
+      ],
+      "features": [
+        "CALL_PLT"
+      ],
+      "id": "R_RISCV_CALL_PLT",
+      "language": "asm",
+      "object": "riscv64-linux-gnu/R_RISCV_CALL_PLT.o",
+      "path": "src/elf-riscv64/R_RISCV_CALL_PLT.s",
+      "triple": "riscv64-linux-gnu"
+    },
+    {
+      "expected_outcome": "supported",
+      "expected_relocations": [
+        "R_RISCV_GOT_HI20"
+      ],
+      "id": "R_RISCV_GOT_HI20",
+      "language": "asm",
+      "object": "riscv64-linux-gnu/R_RISCV_GOT_HI20.o",
+      "path": "src/elf-riscv64/R_RISCV_GOT_HI20.s",
+      "triple": "riscv64-linux-gnu"
+    },
+    {
+      "expected_outcome": "supported",
+      "expected_relocations": [
+        "R_RISCV_HI20"
+      ],
+      "id": "R_RISCV_HI20",
+      "language": "asm",
+      "object": "riscv64-linux-gnu/R_RISCV_HI20.o",
+      "path": "src/elf-riscv64/R_RISCV_HI20.s",
+      "triple": "riscv64-linux-gnu"
+    },
+    {
+      "expected_outcome": "supported",
+      "expected_relocations": [
+        "R_RISCV_JAL"
+      ],
+      "id": "R_RISCV_JAL",
+      "language": "asm",
+      "object": "riscv64-linux-gnu/R_RISCV_JAL.o",
+      "path": "src/elf-riscv64/R_RISCV_JAL.s",
+      "triple": "riscv64-linux-gnu"
+    },
+    {
+      "expected_outcome": "supported",
+      "expected_relocations": [
+        "R_RISCV_LO12_I"
+      ],
+      "id": "R_RISCV_LO12_I",
+      "language": "asm",
+      "object": "riscv64-linux-gnu/R_RISCV_LO12_I.o",
+      "path": "src/elf-riscv64/R_RISCV_LO12_I.s",
+      "triple": "riscv64-linux-gnu"
+    },
+    {
+      "expected_outcome": "supported",
+      "expected_relocations": [
+        "R_RISCV_PCREL_HI20"
+      ],
+      "id": "R_RISCV_PCREL_HI20",
+      "language": "asm",
+      "object": "riscv64-linux-gnu/R_RISCV_PCREL_HI20.o",
+      "path": "src/elf-riscv64/R_RISCV_PCREL_HI20.s",
+      "triple": "riscv64-linux-gnu"
+    },
+    {
+      "expected_outcome": "supported",
+      "expected_relocation_symbols": {
+        "R_RISCV_PCREL_LO12_I": ".Lpcrel_lo_i_hi"
+      },
+      "expected_relocations": [
+        "R_RISCV_PCREL_HI20",
+        "R_RISCV_PCREL_LO12_I"
+      ],
+      "id": "R_RISCV_PCREL_LO12_I",
+      "language": "asm",
+      "object": "riscv64-linux-gnu/R_RISCV_PCREL_LO12_I.o",
+      "path": "src/elf-riscv64/R_RISCV_PCREL_LO12_I.s",
+      "relocation_symbol_rule": "LO12 relocation symbol names the local anchor paired with the preceding PCREL_HI20.",
+      "triple": "riscv64-linux-gnu"
+    },
+    {
+      "expected_outcome": "supported",
+      "expected_relocation_symbols": {
+        "R_RISCV_PCREL_LO12_S": ".Lpcrel_lo_s_hi"
+      },
+      "expected_relocations": [
+        "R_RISCV_PCREL_HI20",
+        "R_RISCV_PCREL_LO12_S"
+      ],
+      "id": "R_RISCV_PCREL_LO12_S",
+      "language": "asm",
+      "object": "riscv64-linux-gnu/R_RISCV_PCREL_LO12_S.o",
+      "path": "src/elf-riscv64/R_RISCV_PCREL_LO12_S.s",
+      "relocation_symbol_rule": "LO12 relocation symbol names the local anchor paired with the preceding PCREL_HI20.",
+      "triple": "riscv64-linux-gnu"
+    },
+    {
+      "expected_outcome": "supported",
+      "expected_relocations": [
+        "R_RISCV_CALL_PLT",
+        "R_RISCV_RELAX"
+      ],
+      "features": [
+        "CALL_PLT",
+        "RELAX"
+      ],
+      "id": "R_RISCV_RELAX",
+      "language": "asm",
+      "object": "riscv64-linux-gnu/R_RISCV_RELAX.o",
+      "path": "src/elf-riscv64/R_RISCV_RELAX.s",
+      "reason": "Accepted as a no-op; the current backend does not relax instruction sequences.",
+      "triple": "riscv64-linux-gnu"
+    },
+    {
+      "expected_outcome": "supported",
+      "expected_relocations": [
+        "R_RISCV_RVC_BRANCH"
+      ],
+      "id": "R_RISCV_RVC_BRANCH",
+      "language": "asm",
+      "object": "riscv64-linux-gnu/R_RISCV_RVC_BRANCH.o",
+      "path": "src/elf-riscv64/R_RISCV_RVC_BRANCH.s",
+      "triple": "riscv64-linux-gnu"
+    },
+    {
+      "expected_outcome": "supported",
+      "expected_relocations": [
+        "R_RISCV_RVC_JUMP"
+      ],
+      "id": "R_RISCV_RVC_JUMP",
+      "language": "asm",
+      "object": "riscv64-linux-gnu/R_RISCV_RVC_JUMP.o",
+      "path": "src/elf-riscv64/R_RISCV_RVC_JUMP.s",
+      "triple": "riscv64-linux-gnu"
+    },
+    {
+      "expected_outcome": "supported",
+      "expected_relocations": [
+        "R_RISCV_SUB16"
+      ],
+      "id": "R_RISCV_SUB16",
+      "language": "asm",
+      "object": "riscv64-linux-gnu/R_RISCV_SUB16.o",
+      "path": "src/elf-riscv64/R_RISCV_SUB16.s",
+      "triple": "riscv64-linux-gnu"
+    },
+    {
+      "expected_outcome": "supported",
+      "expected_relocations": [
+        "R_RISCV_SUB32"
+      ],
+      "id": "R_RISCV_SUB32",
+      "language": "asm",
+      "object": "riscv64-linux-gnu/R_RISCV_SUB32.o",
+      "path": "src/elf-riscv64/R_RISCV_SUB32.s",
+      "triple": "riscv64-linux-gnu"
+    },
+    {
+      "expected_outcome": "supported",
+      "expected_relocations": [
+        "R_RISCV_SUB6"
+      ],
+      "id": "R_RISCV_SUB6",
+      "language": "asm",
+      "object": "riscv64-linux-gnu/R_RISCV_SUB6.o",
+      "path": "src/elf-riscv64/R_RISCV_SUB6.s",
+      "triple": "riscv64-linux-gnu"
+    },
+    {
+      "expected_outcome": "supported",
+      "expected_relocations": [
+        "R_RISCV_SUB64"
+      ],
+      "id": "R_RISCV_SUB64",
+      "language": "asm",
+      "object": "riscv64-linux-gnu/R_RISCV_SUB64.o",
+      "path": "src/elf-riscv64/R_RISCV_SUB64.s",
+      "triple": "riscv64-linux-gnu"
+    },
+    {
+      "expected_outcome": "supported",
+      "expected_relocations": [
+        "R_RISCV_SUB8"
+      ],
+      "id": "R_RISCV_SUB8",
+      "language": "asm",
+      "object": "riscv64-linux-gnu/R_RISCV_SUB8.o",
+      "path": "src/elf-riscv64/R_RISCV_SUB8.s",
+      "triple": "riscv64-linux-gnu"
+    },
+    {
+      "expected_outcome": "metadata",
+      "expected_relocations": [
+        "R_RISCV_PCREL_LO12_I",
+        "R_RISCV_RELAX",
+        "R_RISCV_TLS_GOT_HI20"
+      ],
+      "expected_sections": [
+        ".llvm_addrsig",
+        ".note.GNU-stack",
+        ".rela.text",
+        ".riscv.attributes",
+        ".strtab",
+        ".symtab",
+        ".text"
+      ],
+      "expected_symbol": "fixture_external_tls",
+      "expected_symbol_binding": "Global",
+      "expected_symbol_section": "Undefined",
+      "expected_symbol_type": "TLS",
+      "expected_undefined_symbols": [
+        "fixture_external_tls"
+      ],
+      "features": [
+        "TLS"
+      ],
+      "id": "tls",
+      "language": "c",
+      "object": "riscv64-linux-gnu/tls.o",
+      "path": "src/elf-riscv64/tls.c",
+      "triple": "riscv64-linux-gnu"
+    },
+    {
+      "expected_outcome": "metadata",
+      "expected_relocations": [],
+      "expected_sections": [
+        ".llvm_addrsig",
+        ".note.GNU-stack",
+        ".riscv.attributes",
+        ".strtab",
+        ".symtab",
+        ".text"
+      ],
+      "expected_symbol": "fixture_common",
+      "expected_symbol_binding": "Global",
+      "expected_symbol_section": "Common",
+      "expected_symbol_size": 4,
+      "expected_symbol_type": "Object",
+      "features": [
+        "COMMON"
+      ],
+      "id": "common",
+      "language": "c",
+      "object": "riscv64-linux-gnu/common.o",
+      "path": "src/elf-riscv64/common.c",
+      "triple": "riscv64-linux-gnu"
+    },
+    {
+      "expected_outcome": "metadata",
+      "expected_relocations": [],
+      "expected_sections": [
+        ".data",
+        ".llvm_addrsig",
+        ".note.GNU-stack",
+        ".riscv.attributes",
+        ".strtab",
+        ".symtab",
+        ".text"
+      ],
+      "expected_symbol": "fixture_common",
+      "expected_symbol_binding": "Global",
+      "expected_symbol_section": ".data",
+      "expected_symbol_size": 4,
+      "expected_symbol_type": "Object",
+      "features": [
+        "COMMON-strong"
+      ],
+      "id": "common_strong",
+      "language": "c",
+      "object": "riscv64-linux-gnu/common_strong.o",
+      "path": "src/elf-riscv64/common_strong.c",
+      "triple": "riscv64-linux-gnu"
+    },
+    {
+      "expected_outcome": "metadata",
+      "expected_relocations": [],
+      "expected_sections": [
+        ".llvm_addrsig",
+        ".note.GNU-stack",
+        ".riscv.attributes",
+        ".strtab",
+        ".symtab",
+        ".text"
+      ],
+      "expected_symbol": "fixture_override",
+      "expected_symbol_binding": "Weak",
+      "expected_symbol_section": ".text",
+      "expected_symbol_type": "Function",
+      "features": [
+        "weak-strong"
+      ],
+      "id": "weak",
+      "language": "c",
+      "object": "riscv64-linux-gnu/weak.o",
+      "path": "src/elf-riscv64/weak.c",
+      "triple": "riscv64-linux-gnu"
+    },
+    {
+      "expected_outcome": "metadata",
+      "expected_relocations": [],
+      "expected_sections": [
+        ".llvm_addrsig",
+        ".note.GNU-stack",
+        ".riscv.attributes",
+        ".strtab",
+        ".symtab",
+        ".text"
+      ],
+      "expected_symbol": "fixture_override",
+      "expected_symbol_binding": "Global",
+      "expected_symbol_section": ".text",
+      "expected_symbol_type": "Function",
+      "features": [
+        "weak-strong"
+      ],
+      "id": "strong",
+      "language": "c",
+      "object": "riscv64-linux-gnu/strong.o",
+      "path": "src/elf-riscv64/strong.c",
+      "triple": "riscv64-linux-gnu"
+    },
+    {
+      "expected_outcome": "metadata",
+      "expected_relocations": [],
+      "expected_sections": [
+        ".llvm_addrsig",
+        ".note.GNU-stack",
+        ".riscv.attributes",
+        ".strtab",
+        ".symtab",
+        ".text"
+      ],
+      "expected_symbol": "fixture_hidden",
+      "expected_symbol_binding": "Global",
+      "expected_symbol_section": ".text",
+      "expected_symbol_type": "Function",
+      "expected_visibility": "STV_HIDDEN",
+      "features": [
+        "hidden"
+      ],
+      "id": "hidden",
+      "language": "c",
+      "object": "riscv64-linux-gnu/hidden.o",
+      "path": "src/elf-riscv64/hidden.c",
+      "triple": "riscv64-linux-gnu"
+    },
+    {
+      "expected_outcome": "metadata",
+      "expected_relocations": [
+        "R_RISCV_64",
+        "R_RISCV_CALL_PLT",
+        "R_RISCV_GOT_HI20",
+        "R_RISCV_PCREL_HI20",
+        "R_RISCV_PCREL_LO12_I",
+        "R_RISCV_RELAX"
+      ],
+      "expected_sections": [
+        ".fini_array",
+        ".init_array",
+        ".llvm_addrsig",
+        ".note.GNU-stack",
+        ".rela.fini_array",
+        ".rela.init_array",
+        ".rela.text",
+        ".riscv.attributes",
+        ".strtab",
+        ".symtab",
+        ".text"
+      ],
+      "expected_undefined_symbols": [
+        "__cxa_atexit",
+        "__dso_handle",
+        "fixture_record_event"
+      ],
+      "features": [
+        "init_array",
+        "fini_array",
+        "__cxa_atexit",
+        "__dso_handle"
+      ],
+      "id": "init_fini",
+      "language": "c",
+      "object": "riscv64-linux-gnu/init_fini.o",
+      "path": "src/elf-riscv64/init_fini.c",
+      "triple": "riscv64-linux-gnu"
+    },
+    {
+      "expected_outcome": "metadata",
+      "expected_relocations": [
+        "R_RISCV_64",
+        "R_RISCV_CALL_PLT",
+        "R_RISCV_RELAX"
+      ],
+      "expected_sections": [
+        ".ctors",
+        ".llvm_addrsig",
+        ".note.GNU-stack",
+        ".rela.ctors",
+        ".rela.text",
+        ".riscv.attributes",
+        ".strtab",
+        ".symtab",
+        ".text"
+      ],
+      "expected_undefined_symbols": [
+        "fixture_record_event"
+      ],
+      "features": [
+        "legacy-ctors"
+      ],
+      "id": "legacy_ctors",
+      "language": "c",
+      "object": "riscv64-linux-gnu/legacy_ctors.o",
+      "path": "src/elf-riscv64/legacy_ctors.c",
+      "triple": "riscv64-linux-gnu"
+    },
+    {
+      "expected_outcome": "archive-only",
+      "expected_relocations": [],
+      "features": [
+        "archive-long-name",
+        "non-o-member"
+      ],
+      "id": "long_archive_member",
+      "language": "asm",
+      "object": "riscv64-linux-gnu/a_very_long_archive_member_filename_that_is_not_o.object",
+      "path": "src/elf-riscv64/long_archive_member.s",
+      "triple": "riscv64-linux-gnu"
+    }
+  ]
+}

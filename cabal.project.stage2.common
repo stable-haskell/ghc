@@ -8,6 +8,7 @@ packages:
   -- RTS
   rts-headers
   rts-fs
+  liblink
   rts
 
   -- Compiler
@@ -138,7 +139,7 @@ if !os(windows)
 
 constraints:
   -- we do not want to use the rts-headers from stage1
-  rts-headers source, rts-fs source
+  rts-headers source, rts-fs source, liblink source
   -- The `build:any.ghc-internal installed` constraint is in
   -- cabal.project.stage2.static and .dynamic, not here:
   -- cabal.project.stage2.buck2 imports this file with an upstream cabal
@@ -204,6 +205,9 @@ package rts-headers
   ghc-options: -no-rts
 
 package rts-fs
+  ghc-options: -no-rts
+
+package liblink
   ghc-options: -no-rts
 
 -- hsc2hs with batch cross-compilation support

@@ -1,0 +1,159 @@
+{
+  "fields": [
+    {
+      "A": 0,
+      "P": "0x10002000",
+      "S": "0x12345000",
+      "after": "20e0ffff",
+      "before": "00000000",
+      "expected": "20e0ffff",
+      "offset": 0,
+      "section": 2,
+      "type": "R_X86_64_GOTPCREL"
+    }
+  ],
+  "format": "ELF x86_64",
+  "noexec_image": {
+    "extras": {
+      "exec_address": "0x10000000",
+      "sha256": "9629a1e1eb57351e0ec5c64a1e29ac1cf3c5ff796afdd57acd919bebc79804f0"
+    },
+    "got": {
+      "exec_address": "0x10005000",
+      "sha256": "8cc30e91e2c718c00e1e7f6731f31c5b498d38fdb09fc3e351decc7ba0e3021b"
+    },
+    "sections": [
+      {
+        "exec_address": "0x10001000",
+        "index": 1,
+        "sha256": "3a8829738da199680451bb48a8607f37188cd940dbbd052f8e0caabf956126ce"
+      },
+      {
+        "exec_address": "0x10002000",
+        "index": 2,
+        "sha256": "69f55904c754f537e49ec1daa7dd588c7e33843aa415059feb8357af27c29175"
+      },
+      {
+        "exec_address": "0x10003000",
+        "index": 3,
+        "sha256": "322b7a9d0418ee99b4ef70d6ca32d021579a2ae68e4f26d666e41a29dd82bca5"
+      },
+      {
+        "exec_address": "0x10004000",
+        "index": 4,
+        "sha256": "77e2a7d05e04c38aa003c31e20eb4bb4ef7dc277669a794fae865beb8610fa9b"
+      }
+    ]
+  },
+  "object_sha256": "74957e122a094b625ccd8da2daaba655b2eb70fc9bcd885af1741ba40fe0ce02",
+  "reference_capture": {
+    "error": "",
+    "extras": {
+      "address": "0x6060000002c0",
+      "after": "00000000000000000000000000000000000000000000000000000000000000000050341200000000ff25f2ffffff0000",
+      "before": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "count": 3,
+      "exec_address": "0x10000000",
+      "first": 0,
+      "jump_offset": 8,
+      "stride": 16
+    },
+    "got": {
+      "address": "0x603000001bd0",
+      "after": "00200010000000000050341200000000",
+      "exec_address": "0x10005000",
+      "size": 16
+    },
+    "host_symbols": {
+      "external_data": "0x12345000",
+      "external_function": "0x10002000",
+      "external_function_alias": "0x10002000"
+    },
+    "initializers_ran": false,
+    "noexec": true,
+    "resolved": true,
+    "schema": "liblink-elf-native-address-v1",
+    "sections": [
+      {
+        "address": "0x607000000090",
+        "after": "002e72656c612e7465787400666978747572655f7838365f36345f676f74706372656c002e737472746162002e73796d7461620065787465726e616c5f6461746100",
+        "before": "002e72656c612e7465787400666978747572655f7838365f36345f676f74706372656c002e737472746162002e73796d7461620065787465726e616c5f6461746100",
+        "exec_address": "0x10001000",
+        "index": 1,
+        "size": 66
+      },
+      {
+        "address": "0x6020000000f0",
+        "after": "20e0ffff",
+        "before": "00000000",
+        "exec_address": "0x10002000",
+        "index": 2,
+        "size": 4
+      },
+      {
+        "address": "0x603000001b70",
+        "after": "000000000000000009000000020000000000000000000000",
+        "before": "000000000000000009000000020000000000000000000000",
+        "exec_address": "0x10003000",
+        "index": 3,
+        "size": 24
+      },
+      {
+        "address": "0x607000000100",
+        "after": "0000000000000000000000000000000000000000000000000c0000001000020000000000000000000000000000000000340000001000000000000000000000000000000000000000",
+        "before": "0000000000000000000000000000000000000000000000000c0000001000020000000000000000000000000000000000340000001000000000000000000000000000000000000000",
+        "exec_address": "0x10004000",
+        "index": 4,
+        "size": 72
+      }
+    ],
+    "status": 0
+  },
+  "schema": 1,
+  "semantic": {
+    "extras": {
+      "count": 3,
+      "first": 0,
+      "stride": 16
+    },
+    "relocations": [
+      {
+        "A": 0,
+        "S_origin": {
+          "kind": "host-symbol",
+          "name": "external_data"
+        },
+        "extra_symbol_index": 2,
+        "offset": 0,
+        "raw_symbol_type": 0,
+        "section": 2,
+        "symbol": "external_data",
+        "symbol_index": 2,
+        "type": "R_X86_64_GOTPCREL",
+        "width": 4
+      }
+    ],
+    "sections": [
+      {
+        "index": 1,
+        "name": ".strtab",
+        "size": 66
+      },
+      {
+        "index": 2,
+        "name": ".text",
+        "size": 4
+      },
+      {
+        "index": 3,
+        "name": ".rela.text",
+        "size": 24
+      },
+      {
+        "index": 4,
+        "name": ".symtab",
+        "size": 72
+      }
+    ]
+  }
+}

@@ -19,6 +19,8 @@ packages:
   --       dependency.
   rts-headers
   rts-fs
+  liblink
+
 
   -- Compiler
   ghc

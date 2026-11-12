@@ -1,0 +1,293 @@
+#define LL_INTERNAL_SOURCE 1
+#include "ll_compat.h"
+#include "ll_target.h"
+#include "elf_got.h"
+#include "linker/MMap.h"
+#include "linker/BackendMemory.h"
+#include "ll_failure.h"
+#include "ll_noexec.h"
+
+#include <errno.h>
+#include <stdlib.h>
+#include <string.h>
+
+#if LL_BUILD_ELF
+
+/*
+ * Check whether a symbol (identified by its symbol table section index and
+ * its index within that table) is referenced by any relocation whose type
+ * is not R_*_NONE (type 0).  R_*_NONE is a no-op relocation for every ELF
+ * architecture, so symbols referenced exclusively by NONE relocations need
+ * not be resolved.
+ *
+ * This is used by fillGot() to avoid hard failures on undefined symbols that
+ * the assembler emitted NONE relocations for (e.g. zero-length arrays
+ * optimised away by the compiler but still present in the symbol table).
+ */
+static bool
+symbolHasNonNoneRelocation(ObjectCode *oc, unsigned symTabIndex,
+                           size_t symIdx)
+{
+    /* Scan REL relocation tables */
+    for (ElfRelocationTable *relTab = oc->elf_info->relTable;
+         relTab != NULL; relTab = relTab->next) {
+        if (relTab->sectionHeader->sh_link == symTabIndex) {
+            for (size_t i = 0; i < relTab->n_relocations; i++) {
+                ll_elf_target_rel *rel = &relTab->relocations[i];
+                if (LL_ELF_R_SYM(rel->r_info) == symIdx
+                    && LL_ELF_R_TYPE(rel->r_info) != 0) {
+                    return true;
+                }
+            }
+        }
+    }
+    /* Scan RELA relocation tables */
+    for (ElfRelocationATable *relaTab = oc->elf_info->relaTable;
+         relaTab != NULL; relaTab = relaTab->next) {
+        if (relaTab->sectionHeader->sh_link == symTabIndex) {
+            for (size_t i = 0; i < relaTab->n_relocations; i++) {
+                ll_elf_target_rela *rel = &relaTab->relocations[i];
+                if (LL_ELF_R_SYM(rel->r_info) == symIdx
+                    && LL_ELF_R_TYPE(rel->r_info) != 0) {
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
+/*
+ * Check if we need a global offset table slot for a
+ * given symbol
+ */
+bool
+needGotSlot(ll_elf_target_sym * symbol) {
+    /* Local definitions can be referenced through the GOT too (for example,
+     * Android NDK libm objects use ADR_GOT_PAGE for local data). Include the
+     * named local definitions whose addresses ocGetNames_ELF can populate.
+     * In particular, do not select unrelated TLS or absolute symbols: fillGot
+     * would then require an address even if no GOT relocation uses them.
+     */
+    unsigned type = LL_ELF_ST_TYPE(symbol->st_info);
+    bool local_definition = LL_ELF_ST_BIND(symbol->st_info) == LL_ELF_STB_LOCAL
+        && symbol->st_name != 0
+        && symbol->st_shndx != LL_ELF_SHN_UNDEF
+        && (symbol->st_shndx < LL_ELF_SHN_LORESERVE
+#if LL_ELF_HAS_SHN_XINDEX
+            || symbol->st_shndx == LL_ELF_SHN_XINDEX
+#endif
+           )
+        && (type == LL_ELF_STT_OBJECT || type == LL_ELF_STT_FUNC || type == LL_ELF_STT_NOTYPE);
+
+    return LL_ELF_ST_BIND(symbol->st_info) == LL_ELF_STB_GLOBAL
+        || LL_ELF_ST_BIND(symbol->st_info) == LL_ELF_STB_WEAK
+        || local_definition
+        // Section symbols exist primarily for relocation
+        // and as such may need a GOT slot.
+        || LL_ELF_ST_TYPE(symbol->st_info) == LL_ELF_STT_SECTION;
+
+}
+
+bool
+makeGot(ObjectCode * oc) {
+    size_t got_slots = 0;
+    const size_t slot_size = ll_noexec_enabled(oc->L)
+                           ? LL_TARGET_WORD_SIZE : sizeof(void *);
+
+    /* we need to find all symbol tables (elf can have multiple)
+     * and need to iterate over all symbols, to check how many
+     * got slots we need at most
+     */
+    LL_ASSERT_FOR(oc->L, oc->elf_info != NULL );
+    LL_ASSERT_FOR(oc->L, oc->elf_info->sectionHeader != NULL );
+    for(int i=0; i < oc->n_sections; i++) {
+        if(LL_ELF_SHT_SYMTAB == oc->elf_info->sectionHeader[i].sh_type) {
+            ll_elf_target_sym *symTab =
+                (ll_elf_target_sym*)((uint8_t*)oc->elf_info->elfHeader
+                                   + oc->elf_info->sectionHeader[i].sh_offset);
+            size_t n_symbols = oc->elf_info->sectionHeader[i].sh_size
+                               / sizeof(ll_elf_target_sym);
+            for(size_t j=0; j < n_symbols; j++) {
+                if(needGotSlot(&symTab[j])) {
+                    got_slots += 1;
+                }
+            }
+        }
+    }
+    if(got_slots > 0) {
+        if (got_slots > SIZE_MAX / slot_size) {
+            ll_error_set(oc->L, LL_E_UNSUPPORTED, "ELF GOT allocation is too large");
+            return EXIT_FAILURE;
+        }
+        oc->elf_info->got_size = got_slots * slot_size;
+        void *mem;
+        if (ll_noexec_enabled(oc->L)) {
+            ll_noexec_block block;
+            if (!ll_noexec_allocate(oc->L, oc->elf_info->got_size,
+                                    slot_size, &block)) return EXIT_FAILURE;
+            mem = block.site.work;
+            oc->elf_info->got_exec = block.site.exec;
+            oc->elf_info->got_allocation = block.allocation;
+        } else {
+            mem = ll_mmap_anon_for_linker(oc->L, oc->elf_info->got_size);
+            oc->elf_info->got_exec = (uintptr_t)mem;
+        }
+        if (mem == NULL) {
+            LL_LOG_ERROR_FOR(oc->L, "MAP_FAILED. errno=%d", errno);
+            return EXIT_FAILURE;
+        }
+
+        oc->elf_info->got_start = (void*)mem;
+        /* update got_addr */
+        size_t slot = 0;
+        for(ElfSymbolTable *symTab = oc->elf_info->symbolTables;
+            symTab != NULL; symTab = symTab->next) {
+
+            for(size_t i=0; i < symTab->n_symbols; i++)
+                if(needGotSlot(symTab->symbols[i].elf_sym))
+                    symTab->symbols[i].got_addr
+                            = (uint8_t *)oc->elf_info->got_start
+                              + (slot++ * slot_size);
+        }
+    }
+    return EXIT_SUCCESS;
+}
+
+bool
+fillGot(ObjectCode * oc) {
+    /* fill the GOT table */
+    for(ElfSymbolTable *symTab = oc->elf_info->symbolTables;
+        symTab != NULL; symTab = symTab->next) {
+
+        for(size_t i=0; i < symTab->n_symbols; i++) {
+            ElfSymbol * symbol = &symTab->symbols[i];
+
+            if(needGotSlot(symbol->elf_sym)) {
+
+                /* no type are undefined symbols */
+                // Note STT_SECTION symbols should have their address
+                // set prior to the fillGot call in ocResolve_ELF.
+                if(   LL_ELF_STT_NOTYPE == LL_ELF_ST_TYPE(symbol->elf_sym->st_info)
+                   || LL_ELF_STB_WEAK   == LL_ELF_ST_BIND(symbol->elf_sym->st_info)) {
+                    if(0x0 == symbol->addr) {
+                        symbol->addr = lookupDependentSymbol(oc->L, symbol->name, oc, NULL);
+                        if (ll_failure_blocked(oc->L) || !ll_failure_usable(oc))
+                            return EXIT_FAILURE;
+                        if(0x0 == symbol->addr) {
+                            if(0 == strncmp(symbol->name,"_GLOBAL_OFFSET_TABLE_",21)) {
+                                symbol->addr = (void *)oc->elf_info->got_exec;
+                            } else if (!symbolHasNonNoneRelocation(oc, symTab->index, i)) {
+                                /* Symbol is only referenced by R_*_NONE
+                                 * (type 0) relocations, which are no-ops.
+                                 * This can happen when e.g. a zero-length
+                                 * array is optimised away by the compiler
+                                 * but the assembler still emits NONE relocs
+                                 * against the (now undefined) symbol.
+                                 * Assign a dummy address so the GOT slot is
+                                 * filled; it will never be dereferenced. */
+                                LL_IF_DEBUG_FOR(oc->L, linker,
+                                    LL_DEBUG_FOR(oc->L, "Skipping unresolvable symbol"
+                                              " '%s' (only referenced by"
+                                              " NONE relocations)\n",
+                                              symbol->name));
+                                symbol->addr = (void*)0xDEAD0000;
+                            } else {
+                                LL_LOG_ERROR_FOR(oc->L, "Failed to lookup symbol: %s,"
+                                           " you might consider using --optimistic-linking\n",
+                                           symbol->name);
+
+                                // if --optimistic-linking is passed into the
+                                // RTS we allow the linker to optimistically
+                                // continue
+                                if (oc->L->services.cfg.optimistic) {
+                                    LL_LOG_ERROR_FOR(oc->L, "Failed to lookup symbol: %s,"
+                                               " optimistically continuing.\n",
+                                               symbol->name);
+                                    symbol->addr = (void*) 0xDEADBEEF;
+                                } else {
+                                    return EXIT_FAILURE;
+                                }
+
+                            }
+                        }
+                    } else {
+                        // we already have the address.
+                    }
+                } /* else it was defined somewhere in the same object, and
+                  * we should have the address already.
+                  */
+
+                if(0x0 == symbol->addr) {
+                    LL_LOG_ERROR_FOR(oc->L,
+                        "Something went wrong! Symbol %s has null address.\n",
+                            symbol->name);
+                    return EXIT_FAILURE;
+                }
+
+                if(0x0 == symbol->got_addr) {
+                    LL_LOG_ERROR_FOR(oc->L, "Not good either!");
+                    return EXIT_FAILURE;
+                }
+
+                if (ll_noexec_enabled(oc->L) && LL_TARGET_WORD_SIZE == 4) {
+                    uintptr_t address = (uintptr_t)symbol->addr;
+                    if (address > UINT32_MAX) {
+                        ll_error_set(oc->L, LL_E_UNSUPPORTED,
+                                     "ELF32 GOT symbol address exceeds target width");
+                        return EXIT_FAILURE;
+                    }
+                    uint32_t value = (uint32_t)address;
+                    memcpy(symbol->got_addr, &value, sizeof(value));
+                } else {
+                    *(void**)symbol->got_addr = symbol->addr;
+                }
+            }
+        }
+    }
+
+    // We are done initializing the GOT; freeze it.
+    if(!ll_noexec_enabled(oc->L) &&
+       !ll_backend_protect_readonly(oc->elf_info->got_start, oc->elf_info->got_size)) {
+        LL_LOG_SYSERROR_FOR(oc->L, "unable to protect memory");
+    }
+    return EXIT_SUCCESS;
+}
+
+bool
+verifyGot(ObjectCode * oc) {
+    for(ElfSymbolTable *symTab = oc->elf_info->symbolTables;
+        symTab != NULL; symTab = symTab->next) {
+        for(size_t i=0; i < symTab->n_symbols; i++) {
+            ElfSymbol * symbol = &symTab->symbols[i];
+            if(symbol->got_addr) {
+                if (ll_noexec_enabled(oc->L) && LL_TARGET_WORD_SIZE == 4) {
+                    uint32_t value;
+                    memcpy(&value, symbol->got_addr, sizeof(value));
+                    LL_CHECK_FOR(oc->L, (uintptr_t)value == (uintptr_t)symbol->addr);
+                } else {
+                    LL_CHECK_FOR(oc->L, (void*)(*(void**)symbol->got_addr)
+                          == (void*)symbol->addr);
+                }
+            }
+            LL_CHECK_FOR(oc->L, ll_noexec_enabled(oc->L) ||
+                         0 == ((uintptr_t)symbol->addr & 0xffff000000000000));
+        }
+    }
+    return EXIT_SUCCESS;
+}
+
+void
+freeGot(ObjectCode * oc) {
+    if (oc->elf_info->got_allocation != NULL) {
+        free(oc->elf_info->got_allocation);
+    } else if (oc->elf_info->got_start != NULL && oc->elf_info->got_size != 0) {
+        ll_munmap_for_linker(oc->L, oc->elf_info->got_start, oc->elf_info->got_size,
+                            "freeGot");
+    }
+    oc->elf_info->got_start = NULL;
+    oc->elf_info->got_size = 0;
+    oc->elf_info->got_exec = 0;
+    oc->elf_info->got_allocation = NULL;
+}
+#endif

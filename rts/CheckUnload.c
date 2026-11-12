@@ -13,7 +13,7 @@
 
 #include "RtsUtils.h"
 #include "Hash.h"
-#include "LinkerInternals.h"
+#include "liblink/rts_friend.h"
 #include "CheckUnload.h"
 #include "sm/Storage.h"
 #include "sm/GCThread.h"
@@ -109,8 +109,6 @@
 //   object and we don't delete existing dependencies.
 //
 
-uint8_t object_code_mark_bit = 0;
-
 typedef struct {
     W_ start;
     W_ end;
@@ -127,38 +125,12 @@ typedef struct {
     OCSectionIndex *indices;
 } OCSectionIndices;
 
-// List of currently live objects. Moved to `old_objects` before unload check.
-// Marked objects moved back to this list in `markObjectLive`. Remaining objects
-// are freed at the end of `checkUnload`.
-//
-// Double-linked list to be able to remove marked objects. List formed with
-// `next` and `prev` fields of `ObjectCode`.
-//
-// Not static: used in Linker.c.
-ObjectCode *objects = NULL;
-
 // `objects` list is moved here before unload check. Marked objects are moved
 // back to `objects`. Remaining objects are freed.
 static ObjectCode *old_objects = NULL;
 
-// Number of objects that we want to unload. When this value is 0 we skip static
-// object marking during GC and `checkUnload`.
-//
-// Not static: we use this value to skip static object marking in evacuate when
-// this is 0.
-//
-// Incremented in `unloadObj_`, decremented as we unload objects in
-// `checkUnload`.
-int n_unloaded_objects = 0;
-
-// List of objects that we don't want to unload (i.e. we haven't called
-// unloadObj on these yet). Used as root set for unload check in checkUnload.
-// Objects are added with loadObj_ and removed with unloadObj_.
-//
-// List formed with `next_loaded_object` field of `ObjectCode`.
-//
-// Not static: used in Linker.c.
-ObjectCode *loaded_objects;
+/* Borrowed from the compatibility linker before adjustor initialization. */
+static ll_gc_state *linker_gc;
 
 // Section index table for currently loaded objects. New indices are added by
 // `loadObj_`, indices of unloaded objects are removed in `checkUnload`. Used to
@@ -197,6 +169,11 @@ static void freeOCSectionIndices(OCSectionIndices *s_indices)
 {
     stgFree(s_indices->indices);
     stgFree(s_indices);
+}
+
+void setUnloadLinkerState(ll_gc_state *state)
+{
+    linker_gc = state;
 }
 
 void initUnloadCheck(void)
@@ -292,11 +269,11 @@ void insertOCSectionIndices(ObjectCode *oc)
     }
 
     // Add object to 'objects' list
-    if (objects != NULL) {
-        objects->prev = oc;
+    if (linker_gc->objects != NULL) {
+        linker_gc->objects->prev = oc;
     }
-    oc->next = objects;
-    objects = oc;
+    oc->next = linker_gc->objects;
+    linker_gc->objects = oc;
 }
 
 static int findSectionIdx(OCSectionIndices *s_indices, const void *addr);
@@ -399,11 +376,11 @@ static bool markObjectLive(void *data STG_UNUSED, StgWord key, const void *value
     // thread-safe. To avoid taking the linker_mutex in the fast path
     // (when the object is already marked) we do an atomic exchange here and
     // only take the lock in the case that the object is unmarked.
-    if (xchg(&oc->mark, object_code_mark_bit) == object_code_mark_bit) {
+    if (xchg(&oc->mark, linker_gc->object_code_mark_bit) == linker_gc->object_code_mark_bit) {
         return true; // for hash table iteration
     }
 
-    ACQUIRE_LOCK(&linker_mutex);
+    ll_mutex_lock(linker_gc->mutex);
     // Remove from 'old_objects' list
     if (oc->prev != NULL) {
         // TODO(osa): Maybe 'prev' should be a pointer to the referencing
@@ -418,15 +395,15 @@ static bool markObjectLive(void *data STG_UNUSED, StgWord key, const void *value
 
     // Add it to 'objects' list
     oc->prev = NULL;
-    oc->next = objects;
-    if (objects != NULL) {
-        objects->prev = oc;
+    oc->next = linker_gc->objects;
+    if (linker_gc->objects != NULL) {
+        linker_gc->objects->prev = oc;
     }
-    objects = oc;
-    RELEASE_LOCK(&linker_mutex);
+    linker_gc->objects = oc;
+    ll_mutex_unlock(linker_gc->mutex);
 
     // Mark its dependencies
-    iterHashTable(oc->dependencies, NULL, markObjectLive);
+    ll_hash_iter(oc->dependencies, NULL, markObjectLive);
 
     return true; // for hash table iteration
 }
@@ -460,9 +437,9 @@ bool prepareUnloadCheck(void)
 
     ASSERT(old_objects == NULL);
 
-    object_code_mark_bit = ~object_code_mark_bit;
-    old_objects = objects;
-    objects = NULL;
+    linker_gc->object_code_mark_bit = ~linker_gc->object_code_mark_bit;
+    old_objects = linker_gc->objects;
+    linker_gc->objects = NULL;
     return true;
 }
 
@@ -478,7 +455,7 @@ void checkUnload(void)
         ASSERT(s_indices->sorted);
 
         // Mark roots
-        for (ObjectCode *oc = loaded_objects; oc != NULL; oc = oc->next_loaded_object) {
+        for (ObjectCode *oc = linker_gc->loaded_objects; oc != NULL; oc = oc->next_loaded_object) {
             markObjectLive(NULL, (W_)oc, NULL);
         }
 
@@ -486,7 +463,7 @@ void checkUnload(void)
         ObjectCode *next = NULL;
         for (ObjectCode *oc = old_objects; oc != NULL; oc = next) {
             next = oc->next;
-            ASSERT(oc->status == OBJECT_UNLOADED);
+            ASSERT(oc->status == LL_COMPAT_OBJECT_UNLOADED);
 
             // Symbols should be removed by unloadObj_.
             // NB (osa): If this assertion doesn't hold then freeObjectCode below
@@ -498,13 +475,13 @@ void checkUnload(void)
             if (oc->unloadable) {
                 removeOCSectionIndices(s_indices, oc);
                 freeObjectCode(oc);
-                n_unloaded_objects -= 1;
+                linker_gc->n_unloaded_objects -= 1;
             } else {
                 // If we don't have enough information to
                 // accurately determine the reachability of
                 // the object then hold onto it.
-                oc->next = objects;
-                objects = oc;
+                oc->next = linker_gc->objects;
+                linker_gc->objects = oc;
             }
         }
     }

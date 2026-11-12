@@ -1,0 +1,237 @@
+{
+  "schema": 1,
+  "description": "macho-arm64 relocation and symbol fixtures; target runtime checks are separate.",
+  "sources": [
+    {
+      "id": "ARM64_RELOC_UNSIGNED",
+      "path": "src/macho-arm64/ARM64_RELOC_UNSIGNED.s",
+      "language": "asm",
+      "triple": "arm64-apple-macos11",
+      "object": "ARM64_RELOC_UNSIGNED.o",
+      "expected_relocations": [
+        "ARM64_RELOC_UNSIGNED"
+      ],
+      "expected_outcome": "supported"
+    },
+    {
+      "id": "ARM64_RELOC_BRANCH26",
+      "path": "src/macho-arm64/ARM64_RELOC_BRANCH26.s",
+      "language": "asm",
+      "triple": "arm64-apple-macos11",
+      "object": "ARM64_RELOC_BRANCH26.o",
+      "expected_relocations": [
+        "ARM64_RELOC_BRANCH26"
+      ],
+      "expected_outcome": "supported"
+    },
+    {
+      "id": "ARM64_RELOC_PAGE21",
+      "path": "src/macho-arm64/ARM64_RELOC_PAGE21.s",
+      "language": "asm",
+      "triple": "arm64-apple-macos11",
+      "object": "ARM64_RELOC_PAGE21.o",
+      "expected_relocations": [
+        "ARM64_RELOC_PAGE21"
+      ],
+      "expected_outcome": "supported"
+    },
+    {
+      "id": "ARM64_RELOC_PAGEOFF12",
+      "path": "src/macho-arm64/ARM64_RELOC_PAGEOFF12.s",
+      "language": "asm",
+      "triple": "arm64-apple-macos11",
+      "object": "ARM64_RELOC_PAGEOFF12.o",
+      "expected_relocations": [
+        "ARM64_RELOC_PAGEOFF12"
+      ],
+      "expected_outcome": "supported"
+    },
+    {
+      "id": "ARM64_RELOC_GOT_LOAD_PAGE21",
+      "path": "src/macho-arm64/ARM64_RELOC_GOT_LOAD_PAGE21.s",
+      "language": "asm",
+      "triple": "arm64-apple-macos11",
+      "object": "ARM64_RELOC_GOT_LOAD_PAGE21.o",
+      "expected_relocations": [
+        "ARM64_RELOC_GOT_LOAD_PAGE21"
+      ],
+      "expected_outcome": "supported"
+    },
+    {
+      "id": "ARM64_RELOC_GOT_LOAD_PAGEOFF12",
+      "path": "src/macho-arm64/ARM64_RELOC_GOT_LOAD_PAGEOFF12.s",
+      "language": "asm",
+      "triple": "arm64-apple-macos11",
+      "object": "ARM64_RELOC_GOT_LOAD_PAGEOFF12.o",
+      "expected_relocations": [
+        "ARM64_RELOC_GOT_LOAD_PAGEOFF12"
+      ],
+      "expected_outcome": "supported"
+    },
+    {
+      "id": "ARM64_RELOC_POINTER_TO_GOT",
+      "path": "src/macho-arm64/ARM64_RELOC_POINTER_TO_GOT.s",
+      "language": "asm",
+      "triple": "arm64-apple-macos11",
+      "object": "ARM64_RELOC_POINTER_TO_GOT.o",
+      "expected_relocations": [
+        "ARM64_RELOC_POINTER_TO_GOT"
+      ],
+      "reason": "MachO.c aarch64 relocateSection has no POINTER_TO_GOT handler.",
+      "expected_outcome": "unsupported"
+    },
+    {
+      "id": "ARM64_RELOC_ADDEND",
+      "path": "src/macho-arm64/ARM64_RELOC_ADDEND.s",
+      "language": "asm",
+      "triple": "arm64-apple-macos11",
+      "object": "ARM64_RELOC_ADDEND.o",
+      "expected_relocations": [
+        "ARM64_RELOC_ADDEND",
+        "ARM64_RELOC_PAGEOFF12",
+        "ARM64_RELOC_ADDEND",
+        "ARM64_RELOC_PAGE21"
+      ],
+      "features": [
+        "paired-addend",
+        "addend-8"
+      ],
+      "expected_outcome": "supported"
+    },
+    {
+      "id": "init-fini",
+      "path": "src/macho-arm64/init-fini.c",
+      "language": "c",
+      "triple": "arm64-apple-macos11",
+      "object": "init-fini.o",
+      "expected_relocations": [
+        "ARM64_RELOC_BRANCH26",
+        "ARM64_RELOC_BRANCH26",
+        "ARM64_RELOC_BRANCH26",
+        "ARM64_RELOC_PAGEOFF12",
+        "ARM64_RELOC_PAGE21",
+        "ARM64_RELOC_PAGEOFF12",
+        "ARM64_RELOC_PAGE21",
+        "ARM64_RELOC_UNSIGNED",
+        "ARM64_RELOC_UNSIGNED"
+      ],
+      "features": [
+        "init",
+        "fini",
+        "cxa-atexit",
+        "dso-handle",
+        "mod-init-array"
+      ],
+      "expected_outcome": "supported",
+      "events": {
+        "constructor": 1,
+        "destructor": 2
+      }
+    },
+    {
+      "id": "symbols-strong",
+      "path": "src/macho-arm64/symbols-strong.c",
+      "language": "c",
+      "triple": "arm64-apple-macos11",
+      "object": "symbols-strong.o",
+      "expected_relocations": [],
+      "features": [
+        "strong"
+      ],
+      "expected_outcome": "supported"
+    },
+    {
+      "id": "symbols-weak",
+      "path": "src/macho-arm64/symbols-weak.c",
+      "language": "c",
+      "triple": "arm64-apple-macos11",
+      "object": "symbols-weak.o",
+      "expected_relocations": [],
+      "features": [
+        "weak"
+      ],
+      "expected_outcome": "supported"
+    },
+    {
+      "id": "symbols-common",
+      "path": "src/macho-arm64/symbols-common.c",
+      "language": "c",
+      "triple": "arm64-apple-macos11",
+      "object": "symbols-common.o",
+      "expected_relocations": [],
+      "features": [
+        "common"
+      ],
+      "expected_outcome": "supported"
+    },
+    {
+      "id": "symbols-hidden",
+      "path": "src/macho-arm64/symbols-hidden.c",
+      "language": "c",
+      "triple": "arm64-apple-macos11",
+      "object": "symbols-hidden.o",
+      "expected_relocations": [],
+      "features": [
+        "hidden"
+      ],
+      "expected_outcome": "supported"
+    },
+    {
+      "id": "init-fini-arrays",
+      "path": "src/macho-arm64/init-fini-arrays.c",
+      "language": "c",
+      "triple": "arm64-apple-macos11",
+      "object": "init-fini-arrays.o",
+      "expected_relocations": [
+        "ARM64_RELOC_BRANCH26",
+        "ARM64_RELOC_BRANCH26",
+        "ARM64_RELOC_UNSIGNED",
+        "ARM64_RELOC_UNSIGNED"
+      ],
+      "features": [
+        "mod-init-array",
+        "mod-term-array"
+      ],
+      "expected_outcome": "supported",
+      "events": {
+        "mod_init": 3,
+        "mod_term": 4
+      }
+    },
+    {
+      "id": "symbols-common-strong",
+      "path": "src/macho-arm64/symbols-common-strong.c",
+      "language": "c",
+      "triple": "arm64-apple-macos11",
+      "object": "symbols-common-strong.o",
+      "expected_relocations": [],
+      "expected_outcome": "supported",
+      "features": [
+        "strong-overrides-common"
+      ]
+    }
+  ],
+  "archives": [
+    {
+      "path": "fixtures.a",
+      "format": "bsd",
+      "members": [
+        "ARM64_RELOC_UNSIGNED",
+        "ARM64_RELOC_BRANCH26",
+        "ARM64_RELOC_PAGE21",
+        "ARM64_RELOC_PAGEOFF12",
+        "ARM64_RELOC_GOT_LOAD_PAGE21",
+        "ARM64_RELOC_GOT_LOAD_PAGEOFF12",
+        "ARM64_RELOC_POINTER_TO_GOT",
+        "ARM64_RELOC_ADDEND",
+        "init-fini",
+        "symbols-strong",
+        "symbols-weak",
+        "symbols-common",
+        "symbols-hidden",
+        "init-fini-arrays",
+        "symbols-common-strong"
+      ]
+    }
+  ]
+}

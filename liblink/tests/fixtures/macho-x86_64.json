@@ -1,0 +1,227 @@
+{
+  "schema": 1,
+  "description": "macho-x86_64 relocation and symbol fixtures; target runtime checks are separate.",
+  "sources": [
+    {
+      "id": "X86_64_RELOC_UNSIGNED",
+      "path": "src/macho-x86_64/X86_64_RELOC_UNSIGNED.s",
+      "language": "asm",
+      "triple": "x86_64-apple-macos11",
+      "object": "X86_64_RELOC_UNSIGNED.o",
+      "expected_relocations": [
+        "X86_64_RELOC_UNSIGNED"
+      ],
+      "expected_outcome": "supported"
+    },
+    {
+      "id": "X86_64_RELOC_SIGNED",
+      "path": "src/macho-x86_64/X86_64_RELOC_SIGNED.s",
+      "language": "asm",
+      "triple": "x86_64-apple-macos11",
+      "object": "X86_64_RELOC_SIGNED.o",
+      "expected_relocations": [
+        "X86_64_RELOC_SIGNED"
+      ],
+      "expected_outcome": "supported"
+    },
+    {
+      "id": "X86_64_RELOC_SIGNED_1",
+      "path": "src/macho-x86_64/X86_64_RELOC_SIGNED_1.s",
+      "language": "asm",
+      "triple": "x86_64-apple-macos11",
+      "object": "X86_64_RELOC_SIGNED_1.o",
+      "expected_relocations": [
+        "X86_64_RELOC_SIGNED_1"
+      ],
+      "expected_outcome": "supported"
+    },
+    {
+      "id": "X86_64_RELOC_SIGNED_2",
+      "path": "src/macho-x86_64/X86_64_RELOC_SIGNED_2.s",
+      "language": "asm",
+      "triple": "x86_64-apple-macos11",
+      "object": "X86_64_RELOC_SIGNED_2.o",
+      "expected_relocations": [
+        "X86_64_RELOC_SIGNED_2"
+      ],
+      "expected_outcome": "supported"
+    },
+    {
+      "id": "X86_64_RELOC_SIGNED_4",
+      "path": "src/macho-x86_64/X86_64_RELOC_SIGNED_4.s",
+      "language": "asm",
+      "triple": "x86_64-apple-macos11",
+      "object": "X86_64_RELOC_SIGNED_4.o",
+      "expected_relocations": [
+        "X86_64_RELOC_SIGNED_4"
+      ],
+      "expected_outcome": "supported"
+    },
+    {
+      "id": "X86_64_RELOC_BRANCH",
+      "path": "src/macho-x86_64/X86_64_RELOC_BRANCH.s",
+      "language": "asm",
+      "triple": "x86_64-apple-macos11",
+      "object": "X86_64_RELOC_BRANCH.o",
+      "expected_relocations": [
+        "X86_64_RELOC_BRANCH"
+      ],
+      "expected_outcome": "supported"
+    },
+    {
+      "id": "X86_64_RELOC_GOT_LOAD",
+      "path": "src/macho-x86_64/X86_64_RELOC_GOT_LOAD.s",
+      "language": "asm",
+      "triple": "x86_64-apple-macos11",
+      "object": "X86_64_RELOC_GOT_LOAD.o",
+      "expected_relocations": [
+        "X86_64_RELOC_GOT_LOAD"
+      ],
+      "expected_outcome": "supported"
+    },
+    {
+      "id": "X86_64_RELOC_GOT",
+      "path": "src/macho-x86_64/X86_64_RELOC_GOT.s",
+      "language": "asm",
+      "triple": "x86_64-apple-macos11",
+      "object": "X86_64_RELOC_GOT.o",
+      "expected_relocations": [
+        "X86_64_RELOC_GOT"
+      ],
+      "expected_outcome": "supported"
+    },
+    {
+      "id": "init-fini",
+      "path": "src/macho-x86_64/init-fini.c",
+      "language": "c",
+      "triple": "x86_64-apple-macos11",
+      "object": "init-fini.o",
+      "expected_relocations": [
+        "X86_64_RELOC_BRANCH",
+        "X86_64_RELOC_BRANCH",
+        "X86_64_RELOC_BRANCH",
+        "X86_64_RELOC_SIGNED",
+        "X86_64_RELOC_SIGNED",
+        "X86_64_RELOC_UNSIGNED",
+        "X86_64_RELOC_UNSIGNED"
+      ],
+      "features": [
+        "init",
+        "fini",
+        "cxa-atexit",
+        "dso-handle",
+        "mod-init-array"
+      ],
+      "expected_outcome": "supported",
+      "events": {
+        "constructor": 1,
+        "destructor": 2
+      }
+    },
+    {
+      "id": "symbols-strong",
+      "path": "src/macho-x86_64/symbols-strong.c",
+      "language": "c",
+      "triple": "x86_64-apple-macos11",
+      "object": "symbols-strong.o",
+      "expected_relocations": [],
+      "features": [
+        "strong"
+      ],
+      "expected_outcome": "supported"
+    },
+    {
+      "id": "symbols-weak",
+      "path": "src/macho-x86_64/symbols-weak.c",
+      "language": "c",
+      "triple": "x86_64-apple-macos11",
+      "object": "symbols-weak.o",
+      "expected_relocations": [],
+      "features": [
+        "weak"
+      ],
+      "expected_outcome": "supported"
+    },
+    {
+      "id": "symbols-common",
+      "path": "src/macho-x86_64/symbols-common.c",
+      "language": "c",
+      "triple": "x86_64-apple-macos11",
+      "object": "symbols-common.o",
+      "expected_relocations": [],
+      "features": [
+        "common"
+      ],
+      "expected_outcome": "supported"
+    },
+    {
+      "id": "symbols-hidden",
+      "path": "src/macho-x86_64/symbols-hidden.c",
+      "language": "c",
+      "triple": "x86_64-apple-macos11",
+      "object": "symbols-hidden.o",
+      "expected_relocations": [],
+      "features": [
+        "hidden"
+      ],
+      "expected_outcome": "supported"
+    },
+    {
+      "id": "init-fini-arrays",
+      "path": "src/macho-x86_64/init-fini-arrays.c",
+      "language": "c",
+      "triple": "x86_64-apple-macos11",
+      "object": "init-fini-arrays.o",
+      "expected_relocations": [
+        "X86_64_RELOC_BRANCH",
+        "X86_64_RELOC_BRANCH",
+        "X86_64_RELOC_UNSIGNED",
+        "X86_64_RELOC_UNSIGNED"
+      ],
+      "features": [
+        "mod-init-array",
+        "mod-term-array"
+      ],
+      "expected_outcome": "supported",
+      "events": {
+        "mod_init": 3,
+        "mod_term": 4
+      }
+    },
+    {
+      "id": "symbols-common-strong",
+      "path": "src/macho-x86_64/symbols-common-strong.c",
+      "language": "c",
+      "triple": "x86_64-apple-macos11",
+      "object": "symbols-common-strong.o",
+      "expected_relocations": [],
+      "expected_outcome": "supported",
+      "features": [
+        "strong-overrides-common"
+      ]
+    }
+  ],
+  "archives": [
+    {
+      "path": "fixtures.a",
+      "format": "bsd",
+      "members": [
+        "X86_64_RELOC_UNSIGNED",
+        "X86_64_RELOC_SIGNED",
+        "X86_64_RELOC_SIGNED_1",
+        "X86_64_RELOC_SIGNED_2",
+        "X86_64_RELOC_SIGNED_4",
+        "X86_64_RELOC_BRANCH",
+        "X86_64_RELOC_GOT_LOAD",
+        "X86_64_RELOC_GOT",
+        "init-fini",
+        "symbols-strong",
+        "symbols-weak",
+        "symbols-common",
+        "symbols-hidden",
+        "init-fini-arrays",
+        "symbols-common-strong"
+      ]
+    }
+  ]
+}

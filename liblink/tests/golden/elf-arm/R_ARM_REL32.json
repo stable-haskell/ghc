@@ -1,0 +1,112 @@
+{
+  "field": {
+    "P": "0x4098b00c",
+    "S": "0x12345000",
+    "after": "f49f9bd1",
+    "before": "00000000"
+  },
+  "machine": 40,
+  "object_sha256": "b8d798ab469a1004c9c81345c7ee7d9f7e16ae758852fa33b0b90e27eb583027",
+  "reference_capture": {
+    "error": "",
+    "extras": {
+      "address": "0x40805000",
+      "after": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "before": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "count": 3,
+      "exec_address": "0x40805000",
+      "first": 0,
+      "jump_offset": 8,
+      "stride": 16
+    },
+    "got": {
+      "address": "0x40806000",
+      "after": "0cb0984000503412",
+      "exec_address": "0x40806000",
+      "size": 8
+    },
+    "host_symbols": {
+      "external_data": "0x12345000",
+      "external_function": "0x40805070",
+      "external_function_alias": "0x40805070",
+      "external_second_function": "0x40806070"
+    },
+    "initializers_ran": false,
+    "noexec": false,
+    "resolved": true,
+    "schema": "liblink-elf-native-address-v1",
+    "sections": [
+      {
+        "address": "0x40804070",
+        "after": "002e72656c2e74657874002e737472746162002e73796d7461620065787465726e616c5f6461746100666978747572655f61726d5f72656c333200",
+        "before": "002e72656c2e74657874002e737472746162002e73796d7461620065787465726e616c5f6461746100666978747572655f61726d5f72656c333200",
+        "exec_address": "0x40804070",
+        "index": 1,
+        "size": 59,
+        "stubs": {
+          "address": "0x0",
+          "after": "",
+          "before": "",
+          "entries": [],
+          "size": 0
+        }
+      },
+      {
+        "address": "0x4098b00c",
+        "after": "f49f9bd1",
+        "before": "00000000",
+        "exec_address": "0x4098b00c",
+        "index": 2,
+        "size": 4,
+        "stubs": {
+          "address": "0x4098b010",
+          "after": "",
+          "before": "",
+          "entries": [],
+          "size": 0
+        }
+      },
+      {
+        "address": "0x40804068",
+        "after": "0000000003020000",
+        "before": "0000000003020000",
+        "exec_address": "0x40804068",
+        "index": 3,
+        "size": 8,
+        "stubs": {
+          "address": "0x0",
+          "after": "",
+          "before": "",
+          "entries": [],
+          "size": 0
+        }
+      },
+      {
+        "address": "0x40804038",
+        "after": "00000000000000000000000000000000290000000000000000000000100002001b000000000000000000000010000000",
+        "before": "00000000000000000000000000000000290000000000000000000000100002001b000000000000000000000010000000",
+        "exec_address": "0x40804038",
+        "index": 4,
+        "size": 48,
+        "stubs": {
+          "address": "0x0",
+          "after": "",
+          "before": "",
+          "entries": [],
+          "size": 0
+        }
+      }
+    ],
+    "status": 0
+  },
+  "schema": 1,
+  "semantic": {
+    "addend": 0,
+    "got_slot": null,
+    "offset": 0,
+    "section": 2,
+    "symbol": "external_data",
+    "type": "REL32",
+    "veneer": false
+  }
+}

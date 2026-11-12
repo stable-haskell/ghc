@@ -1,0 +1,159 @@
+{
+  "fields": [
+    {
+      "A": -4,
+      "P": "0x10002001",
+      "S": "0x10002000",
+      "after": "fbffffff",
+      "before": "00000000",
+      "expected": "fbffffff",
+      "offset": 1,
+      "section": 2,
+      "type": "R_X86_64_PLT32"
+    }
+  ],
+  "format": "ELF x86_64",
+  "noexec_image": {
+    "extras": {
+      "exec_address": "0x10000000",
+      "sha256": "17b0761f87b081d5cf10757ccc89f12be355c70e2e29df288b65b30710dcbcd1"
+    },
+    "got": {
+      "exec_address": "0x10005000",
+      "sha256": "76f1b64d5096bf8f68b11e63a4a91c440b0799626bf9de73c63bf110b2e6b8fb"
+    },
+    "sections": [
+      {
+        "exec_address": "0x10001000",
+        "index": 1,
+        "sha256": "ace8de898aa3da9c8bf572ab057b47bfa04ae735c50511081a5379c297761ed9"
+      },
+      {
+        "exec_address": "0x10002000",
+        "index": 2,
+        "sha256": "b9ac058bee2c73fdfc3bf5149071cfcd2385db2abdf9c052ab7089cda068f5b8"
+      },
+      {
+        "exec_address": "0x10003000",
+        "index": 3,
+        "sha256": "47021431d15684e6c9384e6dd50744af4887d8fdfccccbc1bb2dd8d24307c2ef"
+      },
+      {
+        "exec_address": "0x10004000",
+        "index": 4,
+        "sha256": "fdc2639bf62e1e29ecd4445ba243d4cc0a90505031f0d1c3d15107dc0ab2634b"
+      }
+    ]
+  },
+  "object_sha256": "1b40e4da9c43c364c15699a03f60e830777c8b1c59d6e3cb389828fc8425609c",
+  "reference_capture": {
+    "error": "",
+    "extras": {
+      "address": "0x6060000002c0",
+      "after": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "before": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "count": 3,
+      "exec_address": "0x10000000",
+      "first": 0,
+      "jump_offset": 8,
+      "stride": 16
+    },
+    "got": {
+      "address": "0x603000001bd0",
+      "after": "00200010000000000020001000000000",
+      "exec_address": "0x10005000",
+      "size": 16
+    },
+    "host_symbols": {
+      "external_data": "0x12345000",
+      "external_function": "0x10002000",
+      "external_function_alias": "0x10002000"
+    },
+    "initializers_ran": false,
+    "noexec": true,
+    "resolved": true,
+    "schema": "liblink-elf-native-address-v1",
+    "sections": [
+      {
+        "address": "0x607000000090",
+        "after": "002e72656c612e746578740065787465726e616c5f66756e6374696f6e002e737472746162002e73796d74616200666978747572655f7838365f36345f706c74333200",
+        "before": "002e72656c612e746578740065787465726e616c5f66756e6374696f6e002e737472746162002e73796d74616200666978747572655f7838365f36345f706c74333200",
+        "exec_address": "0x10001000",
+        "index": 1,
+        "size": 67
+      },
+      {
+        "address": "0x6020000000f0",
+        "after": "e8fbffffff",
+        "before": "e800000000",
+        "exec_address": "0x10002000",
+        "index": 2,
+        "size": 5
+      },
+      {
+        "address": "0x603000001b70",
+        "after": "01000000000000000400000002000000fcffffffffffffff",
+        "before": "01000000000000000400000002000000fcffffffffffffff",
+        "exec_address": "0x10003000",
+        "index": 3,
+        "size": 24
+      },
+      {
+        "address": "0x607000000100",
+        "after": "0000000000000000000000000000000000000000000000002e00000010000200000000000000000000000000000000000c0000001000000000000000000000000000000000000000",
+        "before": "0000000000000000000000000000000000000000000000002e00000010000200000000000000000000000000000000000c0000001000000000000000000000000000000000000000",
+        "exec_address": "0x10004000",
+        "index": 4,
+        "size": 72
+      }
+    ],
+    "status": 0
+  },
+  "schema": 1,
+  "semantic": {
+    "extras": {
+      "count": 3,
+      "first": 0,
+      "stride": 16
+    },
+    "relocations": [
+      {
+        "A": -4,
+        "S_origin": {
+          "kind": "host-symbol",
+          "name": "external_function"
+        },
+        "extra_symbol_index": null,
+        "offset": 1,
+        "raw_symbol_type": 0,
+        "section": 2,
+        "symbol": "external_function",
+        "symbol_index": 2,
+        "type": "R_X86_64_PLT32",
+        "width": 4
+      }
+    ],
+    "sections": [
+      {
+        "index": 1,
+        "name": ".strtab",
+        "size": 67
+      },
+      {
+        "index": 2,
+        "name": ".text",
+        "size": 5
+      },
+      {
+        "index": 3,
+        "name": ".rela.text",
+        "size": 24
+      },
+      {
+        "index": 4,
+        "name": ".symtab",
+        "size": 72
+      }
+    ]
+  }
+}

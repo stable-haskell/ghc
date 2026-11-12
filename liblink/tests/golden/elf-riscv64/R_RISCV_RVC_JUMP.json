@@ -1,0 +1,107 @@
+{
+  "object_sha256": "59007debf255fa8db840deb67f34a7e23ee173b7c753521154a8af21011e7faa",
+  "fields": [
+    {
+      "section": 2,
+      "offset": 0,
+      "type": 45,
+      "symbol": "external_function",
+      "before": "09a0",
+      "expected": "81a0"
+    }
+  ],
+  "id": "R_RISCV_RVC_JUMP",
+  "object": "riscv64-linux-gnu/R_RISCV_RVC_JUMP.o",
+  "capture": {
+    "schema": "liblink-elf-native-address-v1",
+    "resolved": true,
+    "initializers_ran": false,
+    "status": 0,
+    "error": "",
+    "noexec": false,
+    "host_symbols": {
+      "external_data": "0x12345000",
+      "external_function": "0x100e00058",
+      "external_function_alias": "0x100e00058",
+      "external_second_function": "0x100e01058"
+    },
+    "sections": [
+      {
+        "index": 1,
+        "address": "0x100cc80c0",
+        "exec_address": "0x100cc80c0",
+        "size": 72,
+        "before": "002478002e72656c612e7465787400666978747572655f72697363765f7276635f6a756d700065787465726e616c5f66756e6374696f6e002e737472746162002e73796d74616200",
+        "after": "002478002e72656c612e7465787400666978747572655f72697363765f7276635f6a756d700065787465726e616c5f66756e6374696f6e002e737472746162002e73796d74616200",
+        "stubs": {
+          "address": "0x0",
+          "size": 0,
+          "before": "",
+          "after": "",
+          "entries": []
+        }
+      },
+      {
+        "index": 2,
+        "address": "0x100e00018",
+        "exec_address": "0x100e00018",
+        "size": 4,
+        "before": "09a00100",
+        "after": "81a00100",
+        "stubs": {
+          "address": "0x100e0001c",
+          "size": 0,
+          "before": "",
+          "after": "",
+          "entries": []
+        }
+      },
+      {
+        "index": 3,
+        "address": "0x100cc80a8",
+        "exec_address": "0x100cc80a8",
+        "size": 24,
+        "before": "00000000000000002d000000030000000000000000000000",
+        "after": "00000000000000002d000000030000000000000000000000",
+        "stubs": {
+          "address": "0x0",
+          "size": 0,
+          "before": "",
+          "after": "",
+          "entries": []
+        }
+      },
+      {
+        "index": 4,
+        "address": "0x100cc8048",
+        "exec_address": "0x100cc8048",
+        "size": 96,
+        "before": "0000000000000000000000000000000000000000000000000100000000000200000000000000000000000000000000000f0000001000020000000000000000000000000000000000260000001000000000000000000000000000000000000000",
+        "after": "0000000000000000000000000000000000000000000000000100000000000200000000000000000000000000000000000f0000001000020000000000000000000000000000000000260000001000000000000000000000000000000000000000",
+        "stubs": {
+          "address": "0x0",
+          "size": 0,
+          "before": "",
+          "after": "",
+          "entries": []
+        }
+      }
+    ],
+    "extras": {
+      "address": "0x100ccc000",
+      "exec_address": "0x100ccc000",
+      "first": 0,
+      "count": 4,
+      "stride": 8,
+      "jump_offset": 8,
+      "before": "0000000000000000000000000000000000000000000000000000000000000000",
+      "after": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "got": {
+      "address": "0x100cd0000",
+      "exec_address": "0x100cd0000",
+      "size": 24,
+      "after": "1800e000010000001800e000010000005800e00001000000"
+    }
+  }
+}

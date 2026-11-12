@@ -1,0 +1,151 @@
+Native-host relocation capture
+=============================
+
+The runner is a one-object-per-process capture client for the native linker.
+It is currently built for the arm64 Darwin host and Mach-O fixtures. The
+input snapshot and command-line handling live in `runner.c`; host callbacks
+and phase snapshots live in `runner_host.c`; the JSON writer is in
+`runner_json.c`; and `runner_internal.h` shares their capture state. The
+runner links through installed `liblink` headers and the native archive with
+the literal `-llink` name. It contains no expected relocation formulas.
+
+Compile and link with the configured host C compiler, installed liblink
+headers, the source tree needed for the private Mach-O metadata structure, and
+the directory containing `liblink.a`:
+
+    for source in runner runner_host runner_json; do
+      "$CC" -std=c11 -Wall -Wextra -Werror=vla -pedantic \
+        -isystem "$LIBLINK_INCLUDE" -I liblink/src \
+        -c "liblink/tests/runner/$source.c" -o "$source.o"
+    done
+    "$CC" -std=c11 -Wall -Wextra -Werror=vla -pedantic \
+      runner.o runner_host.o runner_json.o \
+      -L"$LIBLINK_LIBRARY_DIR" -llink -o liblink-runner
+
+Run one object per process:
+
+    ./liblink-runner liblink/tests/fixtures/generated/macho-arm64/ARM64_RELOC_UNSIGNED.o
+
+The JSON contains the original object bytes, section addresses and raw
+relocation records, pre-resolution section bytes, implicit field bytes,
+explicit ADDEND records and their pairing, observed external symbol addresses,
+GOT and stub layout, and bytes captured after relocation but before
+initialization. It also records the host-provided symbol map and object-image
+base. Each external relocation keeps the backend's observed `S` apart from a
+host-map or image-base input when one exists. Symbols supplied by the object
+are left for the independent oracle to derive from the retained object bytes.
+
+The `A` value preserves its object-file representation; an independent oracle
+must decode the mathematical addend. `pre_resolve_bytes` are copied in the
+object registration callback. Relocated section, GOT, and stub bytes are copied
+by the before-initialization hook. `post_init_live_bytes` are read after
+resolution returns, so a fixture can show how an initializer changed already
+relocated memory. `events_after_resolve` records initializer callbacks before
+that read. Finalizers run only after JSON emission.
+
+This slice exercises native arm64 Darwin Mach-O only. Unsupported relocations
+terminate through the host fatal callback and must run in separate processes.
+The runner does not claim ELF, COFF, or other host-backend coverage.
+
+Compat execution smoke
+======================
+
+`compat_exec_smoke.c` exercises the real compatibility linker path and calls
+one function from a loaded object. The host callback returns its argument plus
+one; the fixture entry calls that callback, and the driver checks that passing
+41 returns 42. The object-registration hook adds loaded objects to the root
+list that `ll_compat_resolveObjs()` resolves. `--missing-entry` is a negative
+control: it loads and resolves the fixture, then requires lookup of an absent
+symbol to fail. This is a process-lifetime smoke: it calls `exitLinker()` but
+does not unload the object or check unload and leak cleanup.
+
+On native arm64 Darwin, build and run it against the configured liblink archive:
+
+    export CC=/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang
+    export LIBLINK_CONFIG_INCLUDE=/absolute/path/to/liblink/build/include
+    export LIBLINK_LIBRARY_DIR=/absolute/path/to/liblink/archive
+    export OUT=/tmp/liblink-compat-exec-smoke
+    mkdir -p "$OUT"
+    "$CC" -arch arm64 -target arm64-apple-macos11 -c \
+      liblink/tests/runner/compat_exec_smoke_macho_arm64.s -o "$OUT/fixture.o"
+    "$CC" -arch arm64 -std=c11 -Wall -Wextra -Werror=vla -pedantic \
+      -DLL_ASSERTS -isystem "$LIBLINK_CONFIG_INCLUDE" \
+      -I liblink/include -I liblink/src \
+      -c liblink/tests/runner/compat_exec_smoke.c -o "$OUT/driver.o"
+    "$CC" -arch arm64 "$OUT/driver.o" -L"$LIBLINK_LIBRARY_DIR" \
+      -llink -pthread -o "$OUT/compat-exec-smoke"
+    "$OUT/compat-exec-smoke" "$OUT/fixture.o"
+    "$OUT/compat-exec-smoke" --missing-entry "$OUT/fixture.o"
+
+For a sanitized archive, add `-fsanitize=address,undefined
+-fno-sanitize-recover=undefined -fno-omit-frame-pointer` to the C driver
+compile command and the final link command; the assembly compile needs none.
+Set `ASAN_OPTIONS=detect_leaks=0` for the two runs because the smoke intentionally
+keeps the loaded object until process exit.
+
+    export ASAN_OPTIONS=detect_leaks=0
+
+`rts_friend.h` currently emits one pedantic warning for its empty `SymbolExtra`
+on arm64; the smoke driver still uses `-Werror=vla` and C11 checks.
+
+The RISC-V source uses only `R_RISCV_CALL_PLT`, with no paired PC-relative
+HI/LO relocation. It preserves `ra` around the callback call. Compile the
+object with:
+
+    "$CC" --target=riscv64-linux-gnu -c \
+      liblink/tests/runner/compat_exec_smoke_riscv64.s -o "$OUT/fixture-riscv64.o"
+
+To exercise it under qemu-user, the driver and liblink archive must both be
+built for Linux/RISC-V, then run the RISC-V executable with
+`qemu-riscv64 -L <sysroot>`. The Darwin run above tests the compat load,
+resolution, lookup, and call flow on ARM64; it does not test RISC-V execution
+or count as qemu coverage.
+
+ELF x86_64, AArch64, and RISC-V captures
+----------------------------------------
+
+elf_capture.c is a separate private client for a 64-bit POSIX host with the
+x86_64, AArch64, or RISC-V ELF target/backend compiled in. It captures
+an unregistered object's section and extras bytes immediately before and
+after the actual backend resolve operation. It never enters the initializer
+pass or calls loaded code. Without --noexec it checks native addresses on an
+x86_64 host. With --noexec it configures private NO_EXEC|ALL_FORMATS at the
+explicit base0x10000000 and captures heap work/synthetic execution addresses.
+This capture does not exercise the full core lifecycle; noexec_core.c does.
+
+For AArch64 normal-address baselines, build both the library and this client
+with -DLL_TARGET_ARCH=LL_ARCH_AARCH64 and -DLL_ALL_BACKENDS. The current data-only
+baseline runs on an x64 POSIX host; the separate ARM64 native extras-verifier
+repair remains pending. AArch64 captures include section-adjacent stub storage
+before/after resolution and the final stub identity/order/targets. --far-function
+forces branch veneers. --negative-data puts the independent resolver input in
+the preceding page for PREL32/ADRP negative controls. Ordinary AArch64 resolver
+inputs derive from the chosen section layout and retain a nonzero aligned low
+offset, so narrow and scaled fields have useful in-range values. No instruction
+is executed by this capture.
+
+    "$CC" -std=c11 -Wall -Wextra -Werror=vla -pedantic -DLL_ASSERTS \
+      -DLL_ALL_BACKENDS -isystem "$LIBLINK_CONFIG_INCLUDE" \
+      -isystem "$RTS_FS_INCLUDE" -I liblink/include -I liblink/src \
+      liblink/tests/runner/elf_capture.c -L"$LIBLINK_LIBRARY_DIR" \
+      -llink $RTS_FS_LINK_FLAGS -pthread -o elf_capture
+    ./elf_capture liblink/tests/fixtures/generated/elf-x86_64/x86_64-linux-gnu/R_X86_64_64.o
+    ./elf_capture --noexec liblink/tests/fixtures/generated/elf-x86_64/x86_64-linux-gnu/R_X86_64_64.o
+
+RTS_FS_LINK_FLAGS supplies the installed rts-fs archive on Linux and is empty
+on Darwin. Add the same sanitizer flags as the library when it is instrumented.
+The capture uses always_pic, as native Darwin does. A non-PIC fixture requesting
+addresses below4GiB collides with a normal Darwin executable's __PAGEZERO;
+this capture does not change the linker's placement policy.
+
+external_data is the fixed representable resolver input0x12345000. Ordinary
+external_function inputs are chosen after placement, within range of the
+loaded image. --far-function instead supplies0x700000000000 to force the PLT32
+island. Both inputs are recorded separately from relocated bytes; they are
+never called or dereferenced. The independent ELF oracle checks the formulas,
+payloads and every untouched byte. No foreign Windows execution is claimed.
+
+RISC-V normal-mode baseline captures use the ELF target with a nearby external
+function so compressed branches remain in range. The initial reference captures
+were data-only on Darwin with RISC-V ELF code and host-target Mach-O units; they
+do not execute RISC-V instructions or qualify all backends.

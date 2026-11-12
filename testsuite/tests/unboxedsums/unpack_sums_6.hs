@@ -7,7 +7,9 @@
 import Data.Time.Clock
 
 import Data.Int
+import System.Environment (lookupEnv)
 import System.Exit
+import System.IO (hPutStrLn, stderr)
 
 data A = ANothing | AJust {-# UNPACK #-} !Int64
 data B = BNothing | BJust {-# UNPACK #-} !A
@@ -42,6 +44,9 @@ sumLayered = go 0
 
 main :: IO ()
 main = do
+  -- Keep environment lookup outside the timed phases. Diagnostics are opt-in
+  -- and are written only after both phases, preserving the original predicate.
+  reportTimings <- lookupEnv "GHC_UNPACK_SUMS_TIMINGS"
   let magnitude = 10000000
       unlayeredInts = makeUnlayered magnitude
       layeredInts = makeLayered magnitude
@@ -50,6 +55,13 @@ main = do
   unlayeredTime <- getCurrentTime
   print $ sumLayered layeredInts
   layeredTime <- getCurrentTime
+  case reportTimings of
+    Just "1" -> hPutStrLn stderr $
+      "GHC_UNPACK_SUMS_TIMINGS unlayered="
+        ++ show (unlayeredTime `diffUTCTime` now)
+        ++ " layered="
+        ++ show (layeredTime `diffUTCTime` unlayeredTime)
+    _ -> pure ()
   case (unlayeredTime `diffUTCTime` now) < (layeredTime `diffUTCTime` unlayeredTime) of
     True -> exitSuccess
     False -> exitFailure

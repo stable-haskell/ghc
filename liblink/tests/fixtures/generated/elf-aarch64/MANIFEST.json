@@ -1,0 +1,210 @@
+{
+  "archive_formats": [
+    "gnu"
+  ],
+  "artifacts": {
+    "aarch64-linux-gnu/R_AARCH64_ABS64.o": {
+      "sha256": "7caf448101e27be6077c2b7cb627dd0da2f495f7f60d22fbd1163206dc9c8460",
+      "size": 656
+    },
+    "aarch64-linux-gnu/R_AARCH64_ADD_ABS_LO12_NC.o": {
+      "sha256": "37e5b4e66894630fafe3a6aca1308b564bdff8d14f6c0883f915f0f5235a63ba",
+      "size": 584
+    },
+    "aarch64-linux-gnu/R_AARCH64_ADR_GOT_PAGE.o": {
+      "sha256": "f8f7c1b4286ad50145623aa3340c3dc498dc346258959783fccd903a1ecb44eb",
+      "size": 592
+    },
+    "aarch64-linux-gnu/R_AARCH64_ADR_PREL_PG_HI21.o": {
+      "sha256": "93410dea9d8e8214bb815fb3e08b6f80c82f5db3041fbdc4ef2d7ec3b6a4f70c",
+      "size": 584
+    },
+    "aarch64-linux-gnu/R_AARCH64_CALL26.o": {
+      "sha256": "a9673754dc69038a9edf5ddfaac1179b39be411b90f8777e21f0dace4e809b98",
+      "size": 584
+    },
+    "aarch64-linux-gnu/R_AARCH64_JUMP26.o": {
+      "sha256": "ff0c43d0ed0181e52e7f8fc10326c3191c3b2425003602b2ddd43c94f7b55229",
+      "size": 584
+    },
+    "aarch64-linux-gnu/R_AARCH64_LD64_GOT_LO12_NC.o": {
+      "sha256": "6f86e9e3ea6e3633171539081bb7cdceaf0e018e511cd87aa98d8a976977024a",
+      "size": 592
+    },
+    "aarch64-linux-gnu/R_AARCH64_LDST128_ABS_LO12_NC.o": {
+      "sha256": "1919ccb777d5f4af866fba769c17d1c8892993851dbef91efdfdb8204de5b92d",
+      "size": 584
+    },
+    "aarch64-linux-gnu/R_AARCH64_LDST16_ABS_LO12_NC.o": {
+      "sha256": "9d21d3ad3f6511ae5b01a126d8b6dab58b972817ce1d03d8bcaadaa1ffc7f801",
+      "size": 584
+    },
+    "aarch64-linux-gnu/R_AARCH64_LDST32_ABS_LO12_NC.o": {
+      "sha256": "e152e8a6e380c6dda94f98d5b6b193c017053468f0c43ec89190bf89ea9db7ea",
+      "size": 584
+    },
+    "aarch64-linux-gnu/R_AARCH64_LDST64_ABS_LO12_NC.o": {
+      "sha256": "ba024b40bfc6bdf720ab5b4ab8d95a3df3ed156c2a0b23f260e8bd8a37bdadde",
+      "size": 584
+    },
+    "aarch64-linux-gnu/R_AARCH64_LDST8_ABS_LO12_NC.o": {
+      "sha256": "5360fb9073300dbf3330c604d0712ca56cac2ce409237b28ce3614431fd54c4b",
+      "size": 584
+    },
+    "aarch64-linux-gnu/R_AARCH64_PREL32.o": {
+      "sha256": "884c9c4e98d0259abd3a4be069fa1f0411ca5d3c72822c32fbc17087d9da24ac",
+      "size": 584
+    },
+    "aarch64-linux-gnu/a_very_long_archive_member_filename_that_is_not_o.object": {
+      "sha256": "612ca5c7f7cc744ea91fbe3cda443b57caf3b5529ca94d1232c4baba71e48ef8",
+      "size": 456
+    },
+    "aarch64-linux-gnu/common.o": {
+      "sha256": "241ca2fa990ace4c2a2527ea117a6a5abedbb88100866aed7f73338bc111aca7",
+      "size": 600
+    },
+    "aarch64-linux-gnu/common_strong.o": {
+      "sha256": "759f4ad963a9c89be50cf26c796bb88464a473a198f394a72214d458daff2180",
+      "size": 712
+    },
+    "aarch64-linux-gnu/hidden.o": {
+      "sha256": "9c9838c7ffcc0547a3a2bc3635824353097837f54e662248b2fe1e4442688df7",
+      "size": 632
+    },
+    "aarch64-linux-gnu/init_fini.o": {
+      "sha256": "48101bcc1f5bf45a10593d21ae8b69cd9d90708b032fd4e19910ca457d513566",
+      "size": 1592
+    },
+    "aarch64-linux-gnu/legacy_ctors.o": {
+      "sha256": "b839a94f7a97b712c343400d68bd0b1de7d43c71c1bd002a5bf234ba29417f7e",
+      "size": 1056
+    },
+    "aarch64-linux-gnu/libelf-fixtures.a": {
+      "sha256": "8c58d415f62db7303c27941056348e4f402780026f3e4344fca1e52e5afadbb4",
+      "size": 17228
+    },
+    "aarch64-linux-gnu/strong.o": {
+      "sha256": "cabf9c54ce835b19cedbc07f9b9221e32d8c316417b1c2e2e196bf99e373d3c3",
+      "size": 640
+    },
+    "aarch64-linux-gnu/tls.o": {
+      "sha256": "59b199ec6ad3c7fe02132209fc5411301822a273dec6695973318ab3c58843d7",
+      "size": 816
+    },
+    "aarch64-linux-gnu/weak.o": {
+      "sha256": "391e1709ec0d6178431c4c8bc0a35d1a0bd3d9f6466b3f838afa2ce53759c404",
+      "size": 632
+    }
+  },
+  "catalog_sha256": "f54101c83b5a5dedb09249992663e768bad153dca7a8d380eeaa333a9668f2c3",
+  "generator_sha256": "1d27932f1734f1b2f8a97760d242a2563ee33686f934a80cf00f876c8dcc0efa",
+  "recipe_sha256": "a85e8995a015c363e0217f852af73ed739dfc06bac7a1f5162569da90bae0142",
+  "schema": 1,
+  "sources": {
+    "src/elf-aarch64/R_AARCH64_ABS64.s": {
+      "sha256": "e18a4f35acf4d94fb12a15d26abc15586b51c6c8dadd38905ee5a3560e6f0fed",
+      "size": 81
+    },
+    "src/elf-aarch64/R_AARCH64_ADD_ABS_LO12_NC.s": {
+      "sha256": "075592075510b02e9745c4576e6aa92cb882ed6b40401eb4ed5444d7a00a77ff",
+      "size": 98
+    },
+    "src/elf-aarch64/R_AARCH64_ADR_GOT_PAGE.s": {
+      "sha256": "3340badb053469249eead66b6483e520796b9573477f87ae250ee2550ea7c93c",
+      "size": 102
+    },
+    "src/elf-aarch64/R_AARCH64_ADR_PREL_PG_HI21.s": {
+      "sha256": "5dce941e0bbb475603db3cae9665ddb771aaafca0a2beddb07c5d1f40c730e68",
+      "size": 81
+    },
+    "src/elf-aarch64/R_AARCH64_CALL26.s": {
+      "sha256": "351bab52ed439e3117c538f6bbd828f50150757a13b5ded081360284425e8605",
+      "size": 83
+    },
+    "src/elf-aarch64/R_AARCH64_JUMP26.s": {
+      "sha256": "c8d58459a9d06487ebc1af0be8b784ddaf12248630fc159a0d2eb74aadc2a03a",
+      "size": 82
+    },
+    "src/elf-aarch64/R_AARCH64_LD64_GOT_LO12_NC.s": {
+      "sha256": "6d2ab03102c11ec25d222b0596623dbce9c3ea3471a08327304ce7cd3cfbdbcb",
+      "size": 114
+    },
+    "src/elf-aarch64/R_AARCH64_LDST128_ABS_LO12_NC.s": {
+      "sha256": "80f4da5e4da642db128831edfecd66a8a2f3bc0811f7010299cb28914986c160",
+      "size": 98
+    },
+    "src/elf-aarch64/R_AARCH64_LDST16_ABS_LO12_NC.s": {
+      "sha256": "be908a811797a1305d786937cefd832c9cf7ac9818c7b5755d16a00ca26941f0",
+      "size": 97
+    },
+    "src/elf-aarch64/R_AARCH64_LDST32_ABS_LO12_NC.s": {
+      "sha256": "6a29a9d9dbc0ade7175829b7cf1a246ede56711f1926e7a23a2cec9207a403f7",
+      "size": 96
+    },
+    "src/elf-aarch64/R_AARCH64_LDST64_ABS_LO12_NC.s": {
+      "sha256": "b281d8a64fb6563036ce3397bd515994cc0e9cb4dd01f02618c117a8514e2185",
+      "size": 96
+    },
+    "src/elf-aarch64/R_AARCH64_LDST8_ABS_LO12_NC.s": {
+      "sha256": "3c15f771951fafda531847ef12472ab6218ee710c8fa7356f67b29a4c6478cc5",
+      "size": 95
+    },
+    "src/elf-aarch64/R_AARCH64_PREL32.s": {
+      "sha256": "75e750b12c151614322508c02b2e3d78616ad954bdd93218177486b097ac6ff1",
+      "size": 86
+    },
+    "src/elf-aarch64/common.c": {
+      "sha256": "cfa8032334da7c8c3f2549fe31bc125e042533306231cdabe2608f617fcfe1b7",
+      "size": 44
+    },
+    "src/elf-aarch64/common_strong.c": {
+      "sha256": "3b4fa4dd13b56104b19d1cf2988b6952c98bb1b8ea543da71e6718adc64f6277",
+      "size": 25
+    },
+    "src/elf-aarch64/hidden.c": {
+      "sha256": "45fe764e7bb98eeb326663b5b8e4b04184c66e7e55b6e6f4ab1b2673d8d628e5",
+      "size": 82
+    },
+    "src/elf-aarch64/init_fini.c": {
+      "sha256": "c4af4812ff9665b0e884d4bdaf03e722143bc38bd143ea705a203d8adfa965a5",
+      "size": 485
+    },
+    "src/elf-aarch64/legacy_ctors.c": {
+      "sha256": "ded1392580ddd94b3f41ce1c309a2faec0d92858e047c862b272a74bfb0dd552",
+      "size": 220
+    },
+    "src/elf-aarch64/long_archive_member.s": {
+      "sha256": "14861d1d6aab475923f633c3f4f7794985cd32fa13ed9305027ac750f122fa61",
+      "size": 76
+    },
+    "src/elf-aarch64/strong.c": {
+      "sha256": "1c8aa480363f00a98e76c4e742cffa31d9a4cc12d9d95bbaefab565dc4895986",
+      "size": 45
+    },
+    "src/elf-aarch64/tls.c": {
+      "sha256": "05f9c5af90af7946a92e22cb03d262d3cdd216f05e316cd6872b52169836f26d",
+      "size": 157
+    },
+    "src/elf-aarch64/weak.c": {
+      "sha256": "3fe69f7a4e2fd4ab6e0cf2368f7078634c62afa233d97acb2db7dd6b9a81b941",
+      "size": 96
+    }
+  },
+  "targets": [
+    "aarch64-linux-gnu"
+  ],
+  "tools": {
+    "clang": {
+      "major": "21",
+      "version": "clang version 21.1.2"
+    },
+    "llvm-ar": {
+      "major": "21",
+      "version": "LLVM version 21.1.2"
+    },
+    "llvm-mc": {
+      "major": "21",
+      "version": "LLVM version 21.1.2"
+    }
+  }
+}

@@ -1,0 +1,118 @@
+{
+  "field": {
+    "P": "0x4098b00c",
+    "S": "0x70000000",
+    "after": "00f000f8",
+    "before": "fff7feff"
+  },
+  "machine": 40,
+  "object_sha256": "0d5718a018178238c0a83f1847c8e5d57e0980c9ed13311512af51e5e80e2bdb",
+  "reference_capture": {
+    "error": "",
+    "extras": {
+      "address": "0x40805000",
+      "after": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "before": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "count": 4,
+      "exec_address": "0x40805000",
+      "first": 0,
+      "jump_offset": 8,
+      "stride": 16
+    },
+    "got": {
+      "address": "0x40806000",
+      "after": "0cb098400db0984000000070",
+      "exec_address": "0x40806000",
+      "size": 12
+    },
+    "host_symbols": {
+      "external_data": "0x12345000",
+      "external_function": "0x70000000",
+      "external_function_alias": "0x70000000",
+      "external_second_function": "0x70001000"
+    },
+    "initializers_ran": false,
+    "noexec": false,
+    "resolved": true,
+    "schema": "liblink-elf-native-address-v1",
+    "sections": [
+      {
+        "address": "0x40804080",
+        "after": "002e72656c2e746578740024740065787465726e616c5f66756e6374696f6e00666978747572655f61726d5f74686d5f63616c6c002e737472746162002e73796d74616200",
+        "before": "002e72656c2e746578740024740065787465726e616c5f66756e6374696f6e00666978747572655f61726d5f74686d5f63616c6c002e737472746162002e73796d74616200",
+        "exec_address": "0x40804080",
+        "index": 1,
+        "size": 69,
+        "stubs": {
+          "address": "0x0",
+          "after": "",
+          "before": "",
+          "entries": [],
+          "size": 0
+        }
+      },
+      {
+        "address": "0x4098b00c",
+        "after": "00f000f8",
+        "before": "fff7feff",
+        "exec_address": "0x4098b00c",
+        "index": 2,
+        "size": 4,
+        "stubs": {
+          "address": "0x4098b010",
+          "after": "40f2000cc7f2000c00bf6047",
+          "before": "000000000000000000000000",
+          "entries": [
+            {
+              "address": "0x4098b010",
+              "flags": 1,
+              "target": "0x70000000"
+            }
+          ],
+          "size": 12
+        }
+      },
+      {
+        "address": "0x40804078",
+        "after": "000000000a030000",
+        "before": "000000000a030000",
+        "exec_address": "0x40804078",
+        "index": 3,
+        "size": 8,
+        "stubs": {
+          "address": "0x0",
+          "after": "",
+          "before": "",
+          "entries": [],
+          "size": 0
+        }
+      },
+      {
+        "address": "0x40804038",
+        "after": "000000000000000000000000000000000b000000000000000000000000000200200000000100000000000000120002000e000000000000000000000010000000",
+        "before": "000000000000000000000000000000000b000000000000000000000000000200200000000100000000000000120002000e000000000000000000000010000000",
+        "exec_address": "0x40804038",
+        "index": 4,
+        "size": 64,
+        "stubs": {
+          "address": "0x0",
+          "after": "",
+          "before": "",
+          "entries": [],
+          "size": 0
+        }
+      }
+    ],
+    "status": 0
+  },
+  "schema": 1,
+  "semantic": {
+    "addend": -4,
+    "got_slot": null,
+    "offset": 0,
+    "section": 2,
+    "symbol": "external_function",
+    "type": "THM_CALL",
+    "veneer": true
+  }
+}

@@ -216,6 +216,46 @@ static enum FdState fdPollWriteState (int fd)
  * not write handles.
  *
  */
+/* Block delivery across the pending-handler check. pselect atomically restores
+ * the caller's mask while waiting, closing the signal-before-select window.
+ * This scope must not use the global savedSignals used by startSignalHandlers.
+ */
+static int
+selectWithUserSignals(int nfds, fd_set *readfds, fd_set *writefds,
+                      struct timeval *timeout)
+{
+#if defined(RTS_USER_SIGNALS) && !defined(THREADED_RTS)
+    if (RtsFlags.MiscFlags.install_signal_handlers) {
+        sigset_t saved_mask;
+        struct timespec ts;
+        struct timespec *pts = NULL;
+        int result, wait_errno;
+
+        if (blockUserSignalsWithSavedMask(&saved_mask) != 0) {
+            return -1;
+        }
+        if (signals_pending()) {
+            result = -1;
+            wait_errno = EINTR;
+        } else {
+            if (timeout != NULL) {
+                ts.tv_sec = timeout->tv_sec;
+                ts.tv_nsec = timeout->tv_usec * 1000;
+                pts = &ts;
+            }
+            result = pselect(nfds, readfds, writefds, NULL, pts, &saved_mask);
+            wait_errno = errno;
+        }
+        if (sigprocmask(SIG_SETMASK, &saved_mask, NULL) != 0) {
+            return -1;
+        }
+        errno = wait_errno;
+        return result;
+    }
+#endif
+    return select(nfds, readfds, writefds, NULL, timeout);
+}
+
 void
 awaitCompletedTimeoutsOrIOSelect(Capability *cap, bool wait)
 {
@@ -337,7 +377,7 @@ awaitCompletedTimeoutsOrIOSelect(Capability *cap, bool wait)
 
       /* Check for any interesting events */
 
-      while ((numFound = select(maxfd+1, &rfd, &wfd, NULL, ptv)) < 0) {
+      while ((numFound = selectWithUserSignals(maxfd+1, &rfd, &wfd, ptv)) < 0) {
           if (errno != EINTR) {
             if ( errno == EBADF ) {
                 seen_bad_fd = true;
@@ -376,6 +416,15 @@ awaitCompletedTimeoutsOrIOSelect(Capability *cap, bool wait)
           if (!emptyRunQueue(cap)) {
               return; /* still hold the lock */
           }
+#if defined(RTS_USER_SIGNALS) && !defined(THREADED_RTS)
+          if (RtsFlags.MiscFlags.install_signal_handlers) {
+              /* Rebuild fd sets and recompute the absolute sleeping deadline.
+               * pselect does not update its timeout; fd sets after EINTR are
+               * not used as the next call's input.
+               */
+              goto retry_wait;
+          }
+#endif
       }
 
       /* Step through the waiting queue, unblocking every thread that now has
@@ -459,6 +508,10 @@ awaitCompletedTimeoutsOrIOSelect(Capability *cap, bool wait)
           }
       }
 
+#if defined(RTS_USER_SIGNALS) && !defined(THREADED_RTS)
+    retry_wait:
+        ;
+#endif
     } while (wait && getSchedState() == SCHED_RUNNING
                   && emptyRunQueue(cap));
 }

@@ -1,0 +1,24 @@
+{
+  "archives": [
+    {
+      "format": "gnu",
+      "members": [
+        "unsupported_backend"
+      ],
+      "path": "powerpc64le-linux-gnu/libelf-fixtures.a"
+    }
+  ],
+  "schema": 1,
+  "sources": [
+    {
+      "expected_outcome": "unsupported",
+      "expected_relocations": [],
+      "id": "unsupported_backend",
+      "language": "asm",
+      "object": "powerpc64le-linux-gnu/unsupported_backend.o",
+      "path": "src/elf-ppc64le/unsupported_backend.s",
+      "reason": "The ELF linker has no PowerPC64 backend.",
+      "triple": "powerpc64le-linux-gnu"
+    }
+  ]
+}

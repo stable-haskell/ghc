@@ -1,0 +1,20 @@
+{
+  "after": "488d05f9000000c3",
+  "before": "488d0500000000c3",
+  "format": "COFF AMD64",
+  "object_sha256": "32b2dfd6ce2003265d8f490c9b2f21f02262078d97ae67ffc7c8053f251acecb",
+  "offset": 3,
+  "reference_capture": {
+    "after": "488d05f9000000c3",
+    "before": "488d0500000000c3",
+    "image_base": "0x106b5bf18",
+    "offset": 3,
+    "schema": 1,
+    "section_address": "0x106b5c018",
+    "target": "0x106b5c118",
+    "type": 4
+  },
+  "schema": 1,
+  "section": ".text",
+  "type": 4
+}

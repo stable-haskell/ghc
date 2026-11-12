@@ -1,0 +1,139 @@
+#pragma once
+
+#include "ll_compat.h"
+#include "liblink/macho.h"
+
+typedef ll_macho_header_64 MachOHeader;
+typedef ll_macho_segment_command_64 MachOSegmentCommand;
+typedef ll_macho_section_64 MachOSection;
+typedef ll_macho_nlist_64 MachONList;
+typedef ll_macho_load_command MachOLoadCommand;
+typedef ll_macho_symtab_command MachOSymtabCommand;
+typedef ll_macho_dysymtab_command MachODsymtabCommand;
+typedef ll_macho_relocation_info MachORelocationInfo;
+typedef ll_macho_scattered_relocation_info MachOScatteredRelocationInfo;
+
+/* Dealing with nlist symbol entries can become
+ * painful.  We'll have our own Symbol struct that
+ * mirrors the symbol from the nlist and can carry
+ * some more information (like addr).
+ */
+typedef struct _MachOSymbol {
+    ll_symbol_name * name;  /* the name of the symbol. */
+    ll_symbol_addr * addr;  /* the final resting place of the symbol */
+    void * got_addr;    /* address of the got slot for this symbol, if any */
+    uintptr_t got_exec; /* execution address of the got slot */
+    MachONList * nlist; /* the nlist symbol entry */
+    bool needs_got;     /* See Note [Symbols in need of GOT entries] */
+} MachOSymbol;
+
+struct ll_macho_object_info {
+    // while we have the image
+    // we can store some pointers
+    // into it, so we don't have
+    // recompute them each time.
+    /* the object header */
+    MachOHeader          *header;
+    MachOSymtabCommand   *symCmd;
+    MachOSegmentCommand  *segCmd;
+    MachODsymtabCommand  *dsymCmd;
+    /* Borrowed from the image when aligned; otherwise points to the owned aligned copy. */
+    MachONList           *nlist;
+    /* points to the names offset in the image */
+    char                 *names;
+
+    /* points to the start of the sections */
+    MachOSection         *macho_sections;
+
+    /* A richer nlist type */
+    MachOSymbol          *macho_symbols;
+    size_t               n_macho_symbols;
+
+    /* pointer to the global offset table */
+    void                 *got_start;
+    size_t                got_size;
+    uintptr_t             got_exec;
+    void                 *got_allocation;
+
+    /* Owned by this image, including while a load is being unwound. */
+    void                 *common_mem;
+    void                 *common_allocation;
+
+    /* Owned aligned symbol-table copy, or NULL when the image table is borrowed. */
+    MachONList           *owned_nlist;
+};
+
+/* When loading sections of the macho
+ * into different pages, such that the
+ * pages can be marked r+x for text and
+ * r+w for data, relocation may need
+ * to be done indirectly, as the symbol
+ * is not within reach of the of the
+ * call site. E.g. B/BL instructions on
+ * aarch64 have +-128mb relative
+ * range.  When pages are mmap'd they
+ * may end up at random positions.
+ *
+ * Hence we reserve space for the stub
+ * slots right after the text section
+ *
+ *  .----------. - page start
+ *  |          |
+ *  |  __TEXT  |
+ *  |          |
+ *  |----------|
+ *  |  Stubs   |
+ *  '----------'
+ *
+ * Therefore, unless the __TEXT section
+ * grows beyond 128mb-|Stubs|, we can
+ * always reach the corresponding stub
+ * for a symbol.
+ *
+ * Stubs will be rendered as
+ * - 8 bytes: target address
+ * - 4 bytes: relative load at -8bytes
+ instruction
+ * - 4 bytes: branch instruction
+ *
+ * These are very similar to the SymbolExtras
+ * below.  However the SymbolExtras are allocated
+ * per ObjectCode and not per Section.
+ *
+ * TODO: Merge SymbolExtras and Stubs.
+ */
+typedef
+struct _MachOStub {
+    void * addr;
+    void * target;
+    /* flags can hold architecture specific information they are used during
+     * lookup of stubs as well. Thus two stubs for the same target with
+     * different flags are considered unequal.
+    */
+    uint8_t flags;
+    struct _MachOStub * next;
+}
+MachOStub;
+
+/* Temporary native alias for existing RTS clients and fixtures. */
+#if defined(OBJFORMAT_MACHO)
+typedef MachOStub Stub;
+#endif
+
+struct ll_macho_section_info {
+    /*
+     * The following fields are relevant for stubs next to sections only.
+     */
+    void * stub_offset;
+    size_t stub_size;
+    size_t nstubs;
+    MachOStub * stubs;
+
+    /*
+     * The following fields make working with mach-o objects much easier.
+     */
+    MachOSection * macho_section;
+    MachORelocationInfo * relocation_info;
+    /* Aligned copy only when the image's relocation table is unaligned. */
+    MachORelocationInfo * owned_relocations;
+};

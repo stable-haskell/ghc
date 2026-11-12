@@ -1,0 +1,20 @@
+{
+  "after": "00010000",
+  "before": "00000000",
+  "format": "COFF AMD64",
+  "object_sha256": "ba7979e5be77eb2c3e096cbe6cea97dbefa628400d55dba23353f9c0abc1cbfb",
+  "offset": 0,
+  "reference_capture": {
+    "after": "00010000",
+    "before": "00000000",
+    "image_base": "0x104f93f18",
+    "offset": 0,
+    "schema": 1,
+    "section_address": "0x104f94018",
+    "target": "0x104f94118",
+    "type": 11
+  },
+  "schema": 1,
+  "section": ".data",
+  "type": 11
+}

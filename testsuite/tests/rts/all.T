@@ -699,9 +699,18 @@ test('StgRunUnwindAArch64',
 test('SignpostMock',
      [c_src, unless(opsys('darwin') and in_tree_compiler(), skip),
       only_ways(['normal']),
-      extra_files(['../../../rts/Signpost.c', '../../../rts/Signpost.h', 'SignpostMock'])],
-     compile_and_run, ['-ISignpostMock -optc-std=c11'])
+      extra_files(['../../../rts/Signpost.c', '../../../rts/Signpost.h', 'SignpostMock-src'])],
+     compile_and_run, ['-ISignpostMock-src -optc-std=c11'])
 test('SignpostDisabled',
      [c_src, unless(in_tree_compiler(), skip), only_ways(['normal']),
-      extra_files(['../../../rts/Signpost.h', 'SignpostDisabled'])],
-     compile_and_run, ['-ISignpostDisabled -optc-std=c11'])
+      extra_files(['../../../rts/Signpost.h', 'SignpostDisabled-src'])],
+     compile_and_run, ['-ISignpostDisabled-src -optc-std=c11'])
+
+# Exercise the production POSIX wait helper with deterministic signal delivery.
+test('SelectSignalWait',
+     [c_src, unless(in_tree_compiler(), skip), js_skip,
+      when(opsys('mingw32') or arch('wasm32'), skip),
+      only_ways(['normal']),
+      extra_files(['../../../rts/posix/Select.c']),
+      pre_cmd('"$PYTHON" SelectSignalWait.py Select.c')],
+     compile_and_run, ['-optc-std=c11'])

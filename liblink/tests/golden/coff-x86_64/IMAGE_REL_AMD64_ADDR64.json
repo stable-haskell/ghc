@@ -1,0 +1,20 @@
+{
+  "after": "f0debc9a78563412",
+  "before": "0000000000000000",
+  "format": "COFF AMD64",
+  "object_sha256": "a76911d9f1bb807f78cc2b52c7f906c726fbb7e69b58fed58d7d80199aeeb65a",
+  "offset": 0,
+  "reference_capture": {
+    "after": "f0debc9a78563412",
+    "before": "0000000000000000",
+    "image_base": "0x123456789abcdcf0",
+    "offset": 0,
+    "schema": 1,
+    "section_address": "0x1044d4018",
+    "target": "0x123456789abcdef0",
+    "type": 1
+  },
+  "schema": 1,
+  "section": ".data",
+  "type": 1
+}
