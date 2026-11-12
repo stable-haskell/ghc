@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {- ------------------------------------------------------------------------
 
 (c) The GHC Team, 1992-2012
@@ -36,8 +37,29 @@ import System.Environment (getArgs)
 import System.Exit (ExitCode(ExitSuccess), exitFailure)
 import System.FilePath ((</>),(<.>))
 import System.IO (stderr, hPutStrLn)
+#if defined(__MHS__)
+-- MicroHs's System.Process exports system and readProcess, not
+-- showCommandForUser or rawSystem.  Both are only used by execute.
+import System.Process (readProcess, system)
+showCommandForUser :: String -> [String] -> String
+showCommandForUser prog args = unwords (prog : args)
+rawSystem :: String -> [String] -> IO ExitCode
+rawSystem prog args = system (unwords (prog : args))
+#else
 import System.Process (showCommandForUser, readProcess, rawSystem)
+#endif
+#if defined(__MHS__)
+-- MicroHs's System.Directory has copyFile and removeFile, not renameFile.
+import Foreign.C.String (CString, withCString)
+foreign import ccall "rename" c_rename :: CString -> CString -> IO Int
+renameFile :: String -> String -> IO ()
+renameFile src dst = do
+  r <- withCString src $ \s -> withCString dst $ \d -> c_rename s d
+  when (r /= 0) $
+    die ("renameFile " ++ src ++ " -> " ++ dst ++ " failed")
+#else
 import System.Directory (renameFile)
+#endif
 
 main :: IO ()
 main = do opts <- parseArgs
@@ -891,6 +913,7 @@ getWanted verbose os tmpdir gccProgram gccFlags nmProgram mobjdumpProgram
           -- "_derivedConstantMAX_Vanilla_REG C 000000b" (MinGW)
           -- "derivedConstantMAX_Vanilla_REG D        1        b" (Solaris)
           -- and returns ("MAX_Vanilla_REG", 11)
+          parseNmLine :: String -> Maybe (String, Integer)
           parseNmLine line
               = case words line of
                 ('_' : n) : "C" : s : _ -> mkP n s
@@ -899,7 +922,8 @@ getWanted verbose os tmpdir gccProgram gccFlags nmProgram mobjdumpProgram
                 [n, "D", _, s]          -> mkP n s
                 [s, "O", "*COM*", _, n] -> mkP n s
                 _ -> Nothing
-              where mkP r s = case (stripPrefix prefix r, readHex s) of
+              where mkP :: String -> String -> Maybe (String, Integer)
+                    mkP r s = case (stripPrefix prefix r, readHex s) of
                         (Just name, [(size, "")]) -> Just (name, size)
                         _ -> Nothing
 

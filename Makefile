@@ -569,7 +569,7 @@ all: stage2
 # TODO: Building cabal-install from source as part of the Makefile is a
 # temporary workaround. We should eventually require cabal to be provided
 # externally (e.g. via ghcup) and drop this target entirely.
-.PHONY: stable-cabal
+.PHONY: stable-cabal mhs-cabal stage1-mhs
 stable-cabal: STAGE=stage0
 stable-cabal:
 ifeq (,$(USE_SYSTEM_CABAL))
@@ -579,6 +579,15 @@ ifeq (,$(USE_SYSTEM_CABAL))
 	$(call PHASE_END_OK,cabal)
 	@touch $(STAGE0_STAMP)
 endif
+
+# MicroHs bootstrap.  mhs-cabal builds cabal-install with MicroHs
+# (stable-haskell/cabal PR 533).  stage1-mhs compiles the minimal stage1
+# tools, ghc-boot, and then the compiler library with that mhs.
+mhs-cabal:
+	bootstrap/mhs/build-cabal-mhs.sh all
+
+stage1-mhs:
+	bootstrap/mhs/build-stage1-mhs.sh all
 
 #  ____  _                     _
 # / ___|| |_ __ _  __ _  ___  / |

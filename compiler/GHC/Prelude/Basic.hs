@@ -146,7 +146,9 @@ See #25706 for why it is important to use a strict, specialised version.
 
 -}
 strictGenericLength :: Num a => [x] -> a
-strictGenericLength = fromIntegral . length
+-- Data.List.length, not Foldable.length.  MicroHs treats those as two
+-- different values, so the unqualified name is ambiguous.
+strictGenericLength = fromIntegral . List.length
 
 -- This is `Data.Functor.unzip`. Unfortunately, that function lacks the RULES for specialization.
 unzip :: Functor f => f (a, b) -> (f a, f b)

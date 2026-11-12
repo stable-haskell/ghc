@@ -24,7 +24,7 @@ import Data.List (stripPrefix)
 import Data.Maybe (listToMaybe)
 import System.FilePath
 
-#if !defined(openbsd_HOST_OS)
+#if !defined(openbsd_HOST_OS) && !defined(__MHS__)
 import System.Environment (executablePath)
 #else
 import System.Environment (getExecutablePath)
@@ -45,10 +45,11 @@ expandPathVar var value str
 expandPathVar var value (x:xs) = x : expandPathVar var value xs
 expandPathVar _ _ [] = []
 
-#if defined(openbsd_HOST_OS)
+#if defined(openbsd_HOST_OS) || defined(__MHS__)
 -- Polyfill for base-4.17 executablePath and OpenBSD which doesn't
--- have executablePath. The best it can do is use argv[0] which is
--- good enough for most uses of getBaseDir.
+-- have executablePath. MicroHs base also lacks executablePath.
+-- The best it can do is use argv[0] which is good enough for most
+-- uses of getBaseDir.
 executablePath :: Maybe (IO (Maybe FilePath))
 executablePath = Just (Just <$> getExecutablePath)
 #endif

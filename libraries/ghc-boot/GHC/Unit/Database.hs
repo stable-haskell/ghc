@@ -1,7 +1,6 @@
 {-# OPTIONS_GHC -fno-warn-name-shadowing #-}
 
 {-# LANGUAGE CPP #-}
-{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE GADTs #-}
@@ -50,12 +49,13 @@
 --
 module GHC.Unit.Database
    ( GenericUnitInfo(..)
-   , type DbUnitInfo
+   , DbUnitInfo
    , DbModule (..)
    , DbInstUnitId (..)
    , mapGenericUnitInfo
    -- * Read and write
-   , DbMode(..)
+   , DbReadOnly(..)
+   , DbReadWrite(..)
    , DbOpenMode(..)
    , isDbOpenReadMode
    , readPackageDbForGhc
@@ -87,17 +87,26 @@ import Data.List (intersperse)
 import Control.Exception as Exception
 import Control.Monad (when)
 import System.FilePath as FilePath
-#if !defined(mingw32_HOST_OS)
+#if !defined(mingw32_HOST_OS) && !defined(__MHS__)
 import Data.Bits ((.|.))
 import System.Posix.Files
 import System.Posix.Types (FileMode)
 #endif
 import System.IO
 import System.IO.Error
+#if !defined(__MHS__)
 import GHC.IO.Exception (IOErrorType(InappropriateType))
+#endif
 import qualified GHC.Data.ShortText as ST
+#if !defined(__MHS__)
 import GHC.IO.Handle.Lock
+#else
+import Control.Exception (Exception)
+#endif
 import System.Directory
+#if defined(__MHS__)
+import Foreign.C.String (CString, withCString)
+#endif
 
 -- | @ghc-boot@'s UnitInfo, serialized to the database.
 type DbUnitInfo      = GenericUnitInfo BS.ByteString BS.ByteString BS.ByteString BS.ByteString DbModule
@@ -317,6 +326,22 @@ data DbInstUnitId
 newtype PackageDbLock = PackageDbLock Handle
 
 -- | Acquire an exclusive lock related to package DB under given location.
+#if defined(__MHS__)
+-- MicroHs has no flock(2) binding in base.  Package-db updates are
+-- single-threaded during the bootstrap, which is the case GHC already
+-- accepts when FileLockingNotSupported is caught.
+data LockMode = SharedLock | ExclusiveLock
+data FileLockingNotSupported = FileLockingNotSupported
+  deriving (Show)
+instance Exception FileLockingNotSupported
+
+hLock :: Handle -> LockMode -> IO ()
+hLock _ _ = return ()
+
+hUnlock :: Handle -> IO ()
+hUnlock _ = return ()
+#endif
+
 lockPackageDb :: FilePath -> IO PackageDbLock
 
 -- | Release the lock related to package DB.
@@ -370,18 +395,28 @@ unlockPackageDb (PackageDbLock hnd) = do
     hClose hnd
 
 -- | Mode to open a package db in.
-data DbMode = DbReadOnly | DbReadWrite
+--
+-- These are ordinary types, not promoted 'DataKinds' constructors.  MicroHs
+-- has no DataKinds, and a phantom argument of a distinct empty type gives
+-- GHC the same "read-only stack vs read-write handle" separation.
+data DbReadOnly = DbReadOnly
+data DbReadWrite = DbReadWrite
 
 -- | 'DbOpenMode' holds a value of type @t@ but only in 'DbReadWrite' mode.  So
 -- it is like 'Maybe' but with a type argument for the mode to enforce that the
 -- mode is used consistently.
-data DbOpenMode (mode :: DbMode) t where
-  DbOpenReadOnly  ::      DbOpenMode 'DbReadOnly t
-  DbOpenReadWrite :: t -> DbOpenMode 'DbReadWrite t
+data DbOpenMode mode t where
+  DbOpenReadOnly  ::      DbOpenMode DbReadOnly t
+  DbOpenReadWrite :: t -> DbOpenMode DbReadWrite t
 
+#if !defined(__MHS__)
+-- MicroHs rejects derived Functor for a GADT whose constructors refine
+-- the mode parameter (expected a, actual b).  Nothing in this package
+-- folds or traverses a DbOpenMode; ghc-pkg matches the constructors.
 deriving instance Functor (DbOpenMode mode)
 deriving instance F.Foldable (DbOpenMode mode)
 deriving instance F.Traversable (DbOpenMode mode)
+#endif
 
 isDbOpenReadMode :: DbOpenMode mode t -> Bool
 isDbOpenReadMode = \case
@@ -431,7 +466,7 @@ readPackageDbForGhcPkg file mode =
 writePackageDb :: Binary pkgs => FilePath -> [DbUnitInfo] -> pkgs -> IO ()
 writePackageDb file ghcPkgs ghcPkgPart = do
   writeFileAtomic file (runPut putDbForGhcPkg)
-#if !defined(mingw32_HOST_OS)
+#if !defined(mingw32_HOST_OS) && !defined(__MHS__)
   addFileMode file 0o444
   --  ^ In case the current umask is too restrictive force all read bits to
   --  allow access.
@@ -448,7 +483,7 @@ writePackageDb file ghcPkgs ghcPkgPart = do
         ghcPartLen = fromIntegral (BS.Lazy.length ghcPart)
         ghcPart    = encode ghcPkgs
 
-#if !defined(mingw32_HOST_OS)
+#if !defined(mingw32_HOST_OS) && !defined(__MHS__)
 addFileMode :: FilePath -> FileMode -> IO ()
 addFileMode file m = do
   o <- fileMode <$> getFileStatus file
@@ -520,6 +555,12 @@ decodeFromFile file mode decoder = case mode of
     bracketOnError (lockPackageDb file) unlockPackageDb $ \lock -> do
       (, DbOpenReadWrite lock) <$> decodeFileContents
   where
+#if defined(__MHS__)
+    -- binary-mhs has runGet, not the incremental Decoder (Partial/Done/Fail).
+    decodeFileContents = do
+      bs <- BS.readFile file
+      return (Bin.runGet decoder (BS.Lazy.fromStrict bs))
+#else
     decodeFileContents = withBinaryFile file ReadMode $ \hnd ->
       feed hnd (runGetIncremental decoder)
 
@@ -533,6 +574,22 @@ decodeFromFile file mode decoder = case mode of
         err = mkIOError InappropriateType loc Nothing (Just file)
               `ioeSetErrorString` msg
         loc = "GHC.Unit.Database.readPackageDb"
+#endif
+
+#if defined(__MHS__)
+-- MicroHs has openBinaryTempFile, not the permissions variant.
+openBinaryTempFileWithDefaultPermissions :: FilePath -> String -> IO (FilePath, Handle)
+openBinaryTempFileWithDefaultPermissions = openBinaryTempFile
+
+foreign import ccall "rename" c_rename :: CString -> CString -> IO Int
+
+-- System.Directory in MicroHs has no renameFile.
+renameFile :: FilePath -> FilePath -> IO ()
+renameFile src dst = do
+  r <- withCString src $ \s -> withCString dst $ \d -> c_rename s d
+  when (r /= 0) $
+    ioError (userError ("renameFile " ++ src ++ " -> " ++ dst ++ " failed"))
+#endif
 
 -- Copied from Cabal's Distribution.Simple.Utils.
 writeFileAtomic :: FilePath -> BS.Lazy.ByteString -> IO ()
@@ -545,6 +602,17 @@ writeFileAtomic targetPath content = do
         BS.Lazy.hPut handle content
         hClose handle
         renameFile tmpPath targetPath)
+
+#if defined(__MHS__)
+-- binary-mhs does not ship a Binary Version.  The fields are the branch
+-- numbers, then the tags, which is what GHC's binary instance writes.
+instance Binary Version where
+  put (Version branch tags) = put branch >> put tags
+  get = do
+    branch <- get
+    tags <- get
+    return (Version branch tags)
+#endif
 
 instance Binary DbUnitInfo where
   put (GenericUnitInfo

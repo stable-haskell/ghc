@@ -4,14 +4,21 @@ module GHC.Data.List.NonEmpty (module Data.List.NonEmpty, module GHC.Data.List.N
 
 import Prelude (Bool, (.))
 import Control.Applicative
-import qualified Control.Monad as List (zipWithM)
 import Data.Foldable (Foldable (toList))
 import Data.List.NonEmpty hiding (toList, unzip)
+import qualified Data.List as DL
 import qualified Data.List as List
 import qualified GHC.Data.List as List
 
+-- sequenceA (zipWith ...) rather than Control.Monad.zipWithM.  GHC's
+-- zipWithM is Applicative; MicroHs 0.16 still gives it a Monad constraint,
+-- so the Applicative signature below does not type-check there.
 zipWithM :: Applicative f => (a -> b -> f c) -> NonEmpty a -> NonEmpty b -> f (NonEmpty c)
-zipWithM f (a:|as) (b:|bs) = liftA2 (:|) (f a b) (List.zipWithM f as bs)
+zipWithM f (a:|as) (b:|bs) = liftA2 (:|) (f a b) (sequenceList (DL.zipWith f as bs))
+  where
+    -- MicroHs's Control.Applicative has no sequenceA.
+    sequenceList []     = pure []
+    sequenceList (x:xs) = liftA2 (:) x (sequenceList xs)
 -- Inline to enable fusion of `List.zipWithM`
 -- See Note [Fusion for zipN/zipWithN] in List.hs
 {-# INLINE zipWithM #-}

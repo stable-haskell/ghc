@@ -1,4 +1,4 @@
-{-# LANGUAGE BangPatterns, MagicHash, UnboxedTuples, GeneralizedNewtypeDeriving, DerivingStrategies #-}
+{-# LANGUAGE BangPatterns, CPP, MagicHash, UnboxedTuples, GeneralizedNewtypeDeriving, DerivingStrategies #-}
 {-# OPTIONS_GHC -O2 -funbox-strict-fields #-}
 -- gross hack: we maneuvered ourselves into a position where we can't boot GHC with a LLVM based GHC anymore.
 -- LLVM based GHC's fail to compile memcmp ffi calls.  These end up as memcmp$def in the llvm ir, however we
@@ -46,18 +46,33 @@ import Control.DeepSeq as DeepSeq
 import Data.Binary
 import qualified Data.ByteString.Char8 as B8
 import qualified Data.ByteString.Short.Internal as SBS
+#if defined(__MHS__)
+import Data.String (IsString(..))
+#else
 import GHC.Exts
 import GHC.IO
+#endif
 import GHC.Utils.Encoding
 import System.FilePath (isPathSeparator)
 
 {-| A 'ShortText' is a modified UTF-8 encoded string meant for short strings like
 file paths, module descriptions, etc.
 -}
+#if defined(__MHS__)
+newtype ShortText = ShortText { contents :: SBS.ShortByteString }
+  deriving stock (Show)
+  deriving newtype (Eq, Ord, Semigroup, Monoid, NFData)
+
+-- binary-mhs has Binary ByteString, not Binary ShortByteString.
+instance Binary ShortText where
+  put (ShortText bs) = put (SBS.fromShort bs)
+  get = fmap (ShortText . SBS.toShort) get
+#else
 newtype ShortText = ShortText { contents :: SBS.ShortByteString
                               }
                               deriving stock (Show)
                               deriving newtype (Eq, Ord, Binary, Semigroup, Monoid, NFData)
+#endif
 
 -- We don't want to derive this one from ShortByteString since that one won't handle
 -- UTF-8 characters correctly.
@@ -112,6 +127,9 @@ head st
 -- | /O(n)/ The 'stripPrefix' function takes two 'ShortText's and returns 'Just' the remainder of
 -- the second iff the first is its prefix, and otherwise Nothing.
 stripPrefix :: ShortText -> ShortText -> Maybe ShortText
+#if defined(__MHS__)
+stripPrefix prefix st = fmap ShortText (SBS.stripPrefix (contents prefix) (contents st))
+#else
 stripPrefix prefix st = do
   let !(SBS.SBS prefixBA) = contents prefix
   let !(SBS.SBS stBA)     = contents st
@@ -132,3 +150,4 @@ stripPrefix prefix st = do
           !(# s3, fba #) = unsafeFreezeByteArray# ba s2
       in  (# s3, SBS.SBS fba #)
     return . Just . ShortText $ newSBS
+#endif
