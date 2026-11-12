@@ -824,10 +824,14 @@ endif
 	$(call LOG,Copying cabal to $(DIST_DIR)/bin)
 	@cp -fp $(CABAL) $(DIST_DIR)/bin/cabal
 
-	# Copy happy-lib templates (needed for cross-compilation from dist)
+	# Copy happy-lib templates (needed for cross-compilation from dist). With
+	# inplace-builds: False the package is unpacked and built in a temporary
+	# directory, so take the templates from happy-lib's installed data
+	# directory in the build-stage store (the *[0-9] glob skips the sublibrary
+	# directories, which carry copies of the same files).
 	$(call LOG,Copying happy-lib templates to $(DIST_DIR)/share)
 	@mkdir -p $(DIST_DIR)/share/happy-lib/data
-	@cp -rfp _build/stage2/src/happy-lib-*/data/* $(DIST_DIR)/share/happy-lib/data/
+	@cp -rfp $(STORE_DIR)/build/$(HOST_PLATFORM)/lib/happy-lib-*[0-9]/share/* $(DIST_DIR)/share/happy-lib/data/
 
 	$(call LOG,Finished building $(STAGE) in $(DIST_DIR))
 	$(call PHASE_END_OK,stage2.dist)

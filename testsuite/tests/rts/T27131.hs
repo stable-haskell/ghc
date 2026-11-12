@@ -58,6 +58,15 @@ checkFlag label enable disable isMyThreadFlagSet = do
   ThreadId tid# <- forkOn 1 $ do
     replicateM_ 2 $ do
       replyVar <- takeMVar targetCheckVar
+      -- The setter has already queued MSG_{SET,UNSET}_TSO_FLAG on this
+      -- capability (enable/disable runs before the putMVar that woke us).
+      -- The owning capability applies that message in scheduleFindWork,
+      -- which runs before it next enters Haskell. Reading the flag in this
+      -- timeslice observes the pre-message value: the wakeup and the flag
+      -- update are both inbox messages, and a thread that is already
+      -- running does not drain the inbox until it returns to the scheduler.
+      -- One yield is that return. See Note [TSO flag messages] in rts/Threads.c.
+      yield
       isSet <- (/= 0) <$> isMyThreadFlagSet
       putMVar replyVar isSet
 
