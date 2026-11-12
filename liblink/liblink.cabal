@@ -50,6 +50,7 @@ extra-source-files:
     src/linker/ProddableBlocks.h
     src/linker/SymbolExtras.h
     src/linker/Wasm32Types.h
+    src/linker/JsTypes.h
     src/linker/elf_compat.h
     src/linker/elf_got.h
     src/linker/elf_plt.h

@@ -108,7 +108,9 @@ static void default_flush_icache(void *ctx, void *p, size_t len)
     (void)ctx;
 #if defined(_WIN32)
     FlushInstructionCache(GetCurrentProcess(), p, len);
-#elif defined(__GNUC__) || defined(__clang__)
+#elif (defined(__GNUC__) || defined(__clang__)) \
+    && !defined(__wasm__) && !defined(__wasm32__) && !defined(__EMSCRIPTEN__)
+    /* wasm32 and emscripten reject llvm.clear_cache. There is no icache. */
     __builtin___clear_cache((char *)p, (char *)p + len);
 #else
     (void)p;

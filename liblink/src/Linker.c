@@ -855,7 +855,7 @@ static ll_symbol_addr* lookupDependentSymbolImpl (ll_linker *L, ll_symbol_name* 
         }
         return internal_dlsym(L, lbl + 1);
 
-#       elif defined(OBJFORMAT_WASM32)
+#       elif defined(OBJFORMAT_WASM32) || defined(OBJFORMAT_JS)
         return NULL;
 #       else
 #       error No OBJFORMAT_* macro set

@@ -1296,8 +1296,8 @@ $(DIST_DIR)/ghc-multi-target.tar.gz: | stage3-wasm32-unknown-wasi stage3-javascr
 
 TESTSUITE_SOURCE_INPUTS = \
 	m4/ghc_convert_os.m4 \
-	rts/linker/ElfTypes.h \
-	rts/linker/InitFini.h
+	liblink/src/linker/ElfTypes.h \
+	liblink/src/linker/InitFini.h
 
 $(DIST_DIR)/tests.tar.gz: $(TESTSUITE_SOURCE_INPUTS)
 	@echo "::group::Creating tests.tar.gz..."
@@ -1400,6 +1400,8 @@ $(CONFIGURE_SCRIPTS) : % : %.ac
 	@echo ">>> Running autoreconf $(@D)"
 	@if [ "$(@D)" = liblink ]; then \
 		autoreconf --install $(@D); \
+		mkdir -p liblink/build-aux; \
+		cp -f install-sh config.guess config.sub liblink/build-aux/; \
 	else \
 		autoreconf $(@D); \
 	fi

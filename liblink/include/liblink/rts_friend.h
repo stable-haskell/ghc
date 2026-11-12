@@ -34,6 +34,9 @@
 #  define OBJFORMAT_MACHO
 #elif defined(wasm32_HOST_ARCH)
 #  define OBJFORMAT_WASM32
+#elif defined(javascript_HOST_ARCH) || defined(ghcjs_HOST_OS)
+/* The JS backend has no native object file. The RTS still links this library. */
+#  define OBJFORMAT_JS
 #endif
 
 struct ll_format_ops;

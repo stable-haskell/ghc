@@ -37,6 +37,8 @@ void printLoadedObjects(ll_linker *L);
 #  include "linker/MachOTypes.h"
 #elif defined(OBJFORMAT_WASM32)
 #  include "linker/Wasm32Types.h"
+#elif defined(OBJFORMAT_JS)
+#  include "linker/JsTypes.h"
 #else
 #  error "Unknown OBJECT_FORMAT for HOST_OS"
 #endif
