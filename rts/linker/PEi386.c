@@ -1030,18 +1030,46 @@ pathchar* findSystemLibrary_PEi386( pathchar* dll_name )
 
 HsPtr addLibrarySearchPath_PEi386(pathchar* dll_path)
 {
-    // Make sure the path is an absolute path in UNC-style to ensure that we
-    // aren't subject to the MAX_PATH restriction. See #21059.
-    wchar_t *abs_path = __rts_create_device_name(dll_path);
+    const DWORD capacity = 32768;
 
-    HsPtr result = AddDllDirectory(abs_path);
-    if (!result) {
-        sysErrorBelch("addLibrarySearchPath: %" PATH_FMT " (Win32 error %lu)", abs_path, GetLastError());
-        stgFree(abs_path);
+    if (dll_path == NULL || dll_path[0] == L'\0') {
+        sysErrorBelch("addLibrarySearchPath: empty DLL search path (Win32 error %lu)",
+                      (unsigned long)ERROR_INVALID_PARAMETER);
+        SetLastError(ERROR_INVALID_PARAMETER);
         return NULL;
     }
 
+    // AddDllDirectory accepts an absolute DOS or UNC path. Resolve it once:
+    // querying and filling separately could observe different current dirs.
+    // Allocate for an extended-length Windows path, including NUL.
+    wchar_t *abs_path = stgMallocBytes(sizeof(wchar_t) * capacity,
+                                     "addLibrarySearchPath_PEi386");
+    DWORD length = GetFullPathNameW(dll_path, capacity, abs_path, NULL);
+    if (length == 0 || length >= capacity) {
+        DWORD error = length == 0 ? GetLastError() : ERROR_INSUFFICIENT_BUFFER;
+        sysErrorBelch("addLibrarySearchPath: %" PATH_FMT " (Win32 error %lu)",
+                      dll_path, error);
+        stgFree(abs_path);
+        SetLastError(error);
+        return NULL;
+    }
+
+    // Preserve the established namespace conversion when it succeeds (#21059).
+    // Its failure must never pass NULL into AddDllDirectory: the resolved
+    // absolute path is already suitable for that API.
+    wchar_t *device_path = __rts_create_device_name(abs_path);
+    const wchar_t *search_path = device_path != NULL ? device_path : abs_path;
+    HsPtr result = AddDllDirectory(search_path);
+    DWORD error = GetLastError();
+    if (!result) {
+        sysErrorBelch("addLibrarySearchPath: %" PATH_FMT " (Win32 error %lu)",
+                      search_path, error);
+    }
+    if (device_path != NULL) {
+        stgFree(device_path);
+    }
     stgFree(abs_path);
+    SetLastError(error);
     return result;
 }
 
