@@ -59,6 +59,7 @@ module GHC.Data.StringBuffer
 
 #if defined(__MHS__)
 import GHC.Prelude.Basic
+import GHC.Utils.Fingerprint (Fingerprint(..), fingerprintData)
 #else
 import GHC.Prelude
 #endif
@@ -98,9 +99,6 @@ unsafeWithForeignPtr = withForeignPtr
 
 inlinePerformIO :: IO a -> a
 inlinePerformIO = unsafePerformIO
-
--- Not GHC's MD5 Fingerprint.  Stage1 only needs a stable buffer hash.
-data Fingerprint = Fingerprint !Word64 !Word64
 #else
 import GHC.ForeignPtr (unsafeWithForeignPtr)
 #endif
@@ -406,21 +404,10 @@ atEnd (StringBuffer _ l c) = l == c
 
 -- | Computes a hash of the contents of a 'StringBuffer'.
 fingerprintStringBuffer :: StringBuffer -> Fingerprint
-#if defined(__MHS__)
-fingerprintStringBuffer (StringBuffer buf len cur) =
-  unsafePerformIO $
-    withForeignPtr buf $ \ptr -> do
-      ws <- peekArray len (ptr `plusPtr` cur :: Ptr Word8)
-      let go h [] = h
-          go h (w:rest) = go ((h * 0x100000001B3) `xor` fromIntegral w) rest
-      return (Fingerprint (go 0xCBF29CE484222325 ws)
-                          (go 0x84222325CBF29CE4 ws))
-#else
 fingerprintStringBuffer (StringBuffer buf len cur) =
   unsafePerformIO $
     withForeignPtr buf $ \ptr ->
       fingerprintData (ptr `plusPtr` cur) len
-#endif
 
 -- | Computes a 'StringBuffer' which points to the first character of the
 -- wanted line. Lines begin at 1.

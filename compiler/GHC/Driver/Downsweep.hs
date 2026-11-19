@@ -126,21 +126,6 @@ rights :: [Either a b] -> [b]
 rights es = [ b | Right b <- es ]
 lefts :: [Either a b] -> [a]
 lefts es = [ a | Left a <- es ]
-
--- Neither `GHC.Fingerprint.fingerprintData` nor `GHC.Data.StringBuffer`'s
--- local buffer `Fingerprint` is usable here under MicroHs (the former is
--- hidden behind base's re-export stub, the latter is a different,
--- unexported type): hash the buffer bytes here with FNV-1a and construct
--- `GHC.Utils.Fingerprint`'s `Fingerprint` (whose type and constructor are
--- visible) directly. Same deterministic stable-hash role the stage1 buffer
--- hash in `GHC.Data.StringBuffer` plays.
-bufFingerprint :: StringBuffer -> Fingerprint
-bufFingerprint buf = Fingerprint (fnv buf 0xCBF29CE484222325)
-                                (fnv buf 0x84222325CBF29CE4)
-  where
-    fnv b h | atEnd b   = h
-            | otherwise = fnv b' (h * 0x100000001B3 + fromIntegral (fromEnum c))
-      where (c, b') = nextChar b
 #endif
 
 {-
@@ -1246,11 +1231,7 @@ summariseFile hsc_env' home_unit old_summaries src_fn mb_phase maybe_buf
     -- src_fn does not necessarily exist on the filesystem, so we need to
     -- check what kind of target we are dealing with
     get_src_hash = case maybe_buf of
-#if defined(__MHS__)
-                      Just (buf,_) -> return $ bufFingerprint buf
-#else
                       Just (buf,_) -> return $ fingerprintStringBuffer buf
-#endif
                       Nothing -> liftIO $ getFileHash src_fn
 
     new_summary src_fn src_hash = runExceptT $ do
@@ -1452,11 +1433,7 @@ summariseModuleWithSource home_unit old_summary_map is_boot maybe_buf hsc_env lo
          -- file has changed then need to resummarise.
         case maybe_buf of
            Just (buf,_) ->
-#if defined(__MHS__)
-               checkSummaryHash hsc_env (new_summary loc mod src_fn) old_summary loc (bufFingerprint buf)
-#else
                checkSummaryHash hsc_env (new_summary loc mod src_fn) old_summary loc (fingerprintStringBuffer buf)
-#endif
            Nothing    ->
                checkSummaryHash hsc_env (new_summary loc mod src_fn) old_summary loc h
       | otherwise = new_summary loc mod src_fn h
