@@ -1,0 +1,666 @@
+# MicroHs -> Stage 1 -> Stage 2 GHC (demo)
+#
+# End-to-end demo: super-charge upstream MicroHs from atomic issue-linked
+# patches, build all eight Stage 1 tools natively with MicroHs (zero bootstrap
+# GHC0 / happy / alex), build cabal-install and Stage 1 GHC concurrently with
+# MicroHs, build a static Stage 2 GHC with cabal-mhs + the mhs-built Stage 1
+# GHC, package a relocatable Stage 2 bindist with full per-phase timings, and
+# hand off to mhs-stage2-demo-app.yml to compile and run a Haskell application.
+name: MicroHs -> Stage 1 -> Stage 2 GHC
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_stage2:
+        description: 'Build Stage 2 GHC (false = stop after Stage 1)'
+        type: boolean
+        default: true
+      microhs_ref:
+        description: 'augustss/MicroHs upstream base commit'
+        type: string
+        default: '9e1cd08'
+      cabal_base_ref:
+        description: 'stable-haskell/cabal dual-compiler base commit'
+        type: string
+        default: '73d3ffda3e'
+      cabal_mhs_ref:
+        description: 'sh/microhs-cabal-install super-charge head'
+        type: string
+        default: 'b04f60210bff6fb149ea5a14e1329ab06e947d'
+  pull_request:
+    paths:
+      - 'bootstrap/mhs/**'
+      - '.github/workflows/mhs-stage2-demo*.yml'
+      - 'cabal.project.stage2.mhs'
+
+env:
+  MHS_VERSION: '0.16.12.0'
+  HAPPY_REPO_URL: 'https://github.com/stable-haskell/happy.git'
+  HAPPY_COMMIT: '6d2b06467694aeebc7b36e8f4960b6b688748dd2'
+  ALEX_REPO_URL: 'https://github.com/stable-haskell/alex.git'
+  ALEX_COMMIT: 'd8b3768f64fe293fea3472c9bc5cccd462f53ac1'
+  HSC2HS_REPO: 'https://github.com/stable-haskell/hsc2hs.git'
+  HSC2HS_COMMIT: '0c7f2940b790bba73274e7bfddffdd6cd916956e'
+
+jobs:
+  # ------------------------------------------------------------------
+  # Job 1 (Phases 1-3): checkout MicroHs, super-charge with semantic
+  # patches, and build all eight Stage 1 tools natively with MicroHs.
+  # ------------------------------------------------------------------
+  mhs-and-tools:
+    name: 'Phases 1-3 MicroHs + Stage 1 tools / ${{ matrix.plat }}'
+    runs-on: ${{ matrix.runs-on }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { plat: x86_64-linux, runs-on: ubuntu-24.04 }
+          - { plat: aarch64-darwin, runs-on: macos-latest }
+
+    steps:
+      - name: Checkout GHC tree
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: System dependencies
+        run: |
+          set -euo pipefail
+          if [ "$(uname -s)" = "Darwin" ]; then
+            brew install autoconf automake gmp || true
+          else
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends \
+              build-essential autoconf automake git curl xz-utils \
+              libgmp-dev zlib1g-dev libffi-dev libncurses-dev \
+              pkg-config patchelf python3
+          fi
+
+      - name: Assert zero preinstalled GHC / Happy / Alex
+        run: |
+          set -euo pipefail
+          # Strip any preinstalled ghcup/ghc paths (e.g. macos-latest images)
+          # so the build provably starts with zero GHC0, Happy, or Alex.
+          for d in "$HOME/.ghcup/bin" "$HOME/.cabal/bin" /opt/ghc/bin /usr/local/bin; do
+            if [ -x "$d/ghc" ] || [ -x "$d/happy" ] || [ -x "$d/alex" ]; then
+              PATH="$(printf '%s' "$PATH" | tr ':' '\n' | grep -vx "$d" | paste -sd: -)"
+            fi
+          done
+          echo "PATH=$PATH" >> "$GITHUB_ENV"
+          rm -rf "$HOME/.ghcup" 2>/dev/null || true
+          ! command -v ghc && ! command -v happy && ! command -v alex
+          echo "OK: no ghc / happy / alex on PATH"
+
+      # --- Phase 1: upstream MicroHs checkout -----------------------
+      - name: Phase 1 — Checkout upstream MicroHs
+        run: |
+          set -euo pipefail
+          mkdir -p _build
+          : > _build/timing-phase1-3.tsv
+          MHS_REF="${{ inputs.microhs_ref || '9e1cd08' }}"
+          bootstrap/mhs/ci-time.sh run _build/timing-phase1-3.tsv \
+            phase1 "Phase 1 — Checkout upstream augustss/MicroHs ($MHS_REF)" -- \
+            bash -c "set -euo pipefail
+              rm -rf _build/mhs-src
+              git clone https://github.com/augustss/MicroHs.git _build/mhs-src
+              git -C _build/mhs-src checkout '$MHS_REF'"
+          echo "MicroHs upstream base: \`$(git -C _build/mhs-src rev-parse HEAD)\`" >> "$GITHUB_STEP_SUMMARY"
+
+      # --- Phase 2: super-charge MicroHs ----------------------------
+      - name: Phase 2 — Super-charge MicroHs
+        run: |
+          set -euo pipefail
+          ROOT="$GITHUB_WORKSPACE"
+          OUT="$HOME/.mcabal"
+          TIME_SH="$ROOT/bootstrap/mhs/ci-time.sh"
+          TIMING="$ROOT/_build/timing-phase1-3.tsv"
+          PATCH_DIR="$ROOT/bootstrap/mhs/patches/microhs"
+
+          {
+            echo ""
+            echo "## Phase 2 — MicroHs super-charge patch series"
+            echo ""
+            echo "| Patch | Upstream issue(s) | Summary |"
+            echo "|-------|-------------------|---------|"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          "$TIME_SH" run "$TIMING" \
+            phase2-patch "Phase 2a — Apply semantic MicroHs patches" -- \
+            bash -c "set -euo pipefail
+              cd '$ROOT/_build/mhs-src'
+              for p in '$PATCH_DIR'/*.patch; do
+                base=\"\$(basename \"\$p\")\"
+                title=\"\$(grep -m1 '^Subject:' \"\$p\" | sed 's/^Subject: *//')\"
+                issues=\"\$(awk -F'\\t' -v f=\"\$base\" '\$1==f {print \$2}' '$PATCH_DIR/MANIFEST.tsv' 2>/dev/null || true)\"
+                summary=\"\$(awk -F'\\t' -v f=\"\$base\" '\$1==f {print \$3}' '$PATCH_DIR/MANIFEST.tsv' 2>/dev/null || echo \"\$title\")\"
+                echo \"Applying \$base: \$summary (\$issues)\"
+                echo \"| \\\`\$base\\\` | \${issues:--} | \$summary |\" >> '$GITHUB_STEP_SUMMARY'
+                git apply --check \"\$p\"
+                git -c user.name='CI Bot' -c user.email='ci@stable-haskell.org' am \"\$p\"
+              done"
+
+          # 2b. Build stage-0 mhs, cpphs, mcabal, runtime, and base from C sources.
+          "$TIME_SH" run "$TIMING" \
+            phase2-stage0 "Phase 2b — Build stage-0 MicroHs from C" -- \
+            make -C "$ROOT/_build/mhs-src" MCABAL="$OUT" install
+
+          # 2c. Self-compile super-charged MicroHs.Main and link with 512 MB stack.
+          case "$(uname -s)" in
+            Darwin) STACK_FLAGS="-Wl,-stack_size,0x20000000" ;;
+            Linux)  STACK_FLAGS="-Wl,-z,stack-size=536870912" ;;
+          esac
+          "$TIME_SH" run "$TIMING" \
+            phase2-self "Phase 2c — Self-compile super-charged MicroHs.Main" -- \
+            bash -c "set -euo pipefail
+              cd '$ROOT/_build/mhs-src'
+              MHSDIR=. ./bin/mhs -z -i -imhs -isrc -ilib MicroHs.Main -ogenerated/mhs-patched.c
+              cc -O3 $STACK_FLAGS -DHEAP_CELLS=350000000 -DSTACK_SIZE=32000000 \
+                -Isrc/runtime -Isrc/runtime/unix \
+                src/runtime/main.c src/runtime/eval.c generated/mhs-patched.c \
+                -lm -o '$OUT/bin/mhs'"
+
+          # 2d. Rebuild base package + install standard pure-Haskell mcabal deps.
+          "$TIME_SH" run "$TIMING" \
+            phase2-deps "Phase 2d — Rebuild base pkg + mcabal deps" -- \
+            bash -c "set -euo pipefail
+              export PATH='$OUT/bin':\"\$PATH\"
+              (cd '$ROOT/_build/mhs-src/lib' && CABALDIR='$OUT' '$OUT/bin/mcabal' install)
+              mkdir -p '$ROOT/_build/mcabal-work'
+              (cd '$ROOT/_build/mcabal-work' && \
+                CABALDIR='$OUT' '$OUT/bin/mcabal' update && \
+                for pkg in containers parsec filepath time async random; do \
+                  CABALDIR='$OUT' '$OUT/bin/mcabal' -r install \"\$pkg\"; \
+                done)
+              touch '$OUT/mhs-$MHS_VERSION/packages/.cabal-mhs-toolchain-v2.stamp'"
+
+          # Wire _build/mhs-stage1/toolchain so build-stage1-mhs.sh reuses the
+          # super-charged mhs directly without re-cloning MicroHs.
+          TC="$ROOT/_build/mhs-stage1/toolchain"
+          mkdir -p "$TC/bin" "$TC/mhs-$MHS_VERSION/src"
+          cp -fp "$OUT/bin/mhs" "$TC/bin/mhs"
+          ln -sfn "$OUT/bin/cpphs" "$TC/bin/cpphs"
+          for entry in "$OUT/mhs-$MHS_VERSION"/*; do
+            [ "$(basename "$entry")" = "src" ] && continue
+            ln -sfn "$entry" "$TC/mhs-$MHS_VERSION/$(basename "$entry")"
+          done
+          cp -R "$ROOT/_build/mhs-src/src/runtime" "$TC/mhs-$MHS_VERSION/src/runtime"
+          rm -f "$TC/mhs-$MHS_VERSION/packages"
+          mkdir -p "$TC/mhs-$MHS_VERSION/packages"
+          for entry in "$OUT/mhs-$MHS_VERSION"/packages/*; do
+            [ "$(basename "$entry")" = "MicroHs-$MHS_VERSION" ] && continue
+            ln -sfn "$entry" "$TC/mhs-$MHS_VERSION/packages/$(basename "$entry")"
+          done
+          mkdir -p "$TC/mhs-$MHS_VERSION/packages/MicroHs-$MHS_VERSION/data/src"
+          ln -sfn "$OUT/mhs-$MHS_VERSION/packages/MicroHs-$MHS_VERSION/data/mhs.conf" \
+            "$TC/mhs-$MHS_VERSION/packages/MicroHs-$MHS_VERSION/data/mhs.conf"
+          cp -R "$ROOT/_build/mhs-src/src/runtime" \
+            "$TC/mhs-$MHS_VERSION/packages/MicroHs-$MHS_VERSION/data/src/runtime"
+          touch "$TC/.mhs-stage1-toolchain-v1.stamp"
+          "$TC/bin/mhs" --version
+
+      # --- Phase 3: Stage 1 tooling, natively with MicroHs ------------
+      - name: Phase 3 — Build all 8 Stage 1 tools natively with MicroHs
+        run: |
+          set -euo pipefail
+          bootstrap/mhs/ci-time.sh run _build/timing-phase1-3.tsv \
+            phase3 "Phase 3 — Stage 1 tools (unlit, happy, alex, genapply, deriveConstants, genprimopcode, ghc-pkg, hsc2hs)" -- \
+            env MHS_HEAP=700M bootstrap/mhs/build-stage1-mhs.sh tools
+          for t in unlit happy alex genapply deriveConstants genprimopcode ghc-pkg hsc2hs; do
+            test -x "_build/mhs-stage1/bin/$t"
+          done
+          bootstrap/mhs/ci-time.sh summary "Phases 1-3 timings (${{ matrix.plat }})" \
+            _build/timing-phase1-3.tsv | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Package toolchain + tools
+        run: |
+          set -euo pipefail
+          tar -czf "mhs-mcabal-${{ matrix.plat }}.tar.gz" -C "$HOME" .mcabal
+          tar -czf "mhs-stage1-tools-${{ matrix.plat }}.tar.gz" \
+            -C "$GITHUB_WORKSPACE" \
+            _build/mhs-stage1/toolchain \
+            _build/mhs-stage1/bin \
+            _build/mhs-stage1/share \
+            _build/mhs-stage1/autogen \
+            _build/timing-phase1-3.tsv
+          ls -lh "mhs-mcabal-${{ matrix.plat }}.tar.gz" "mhs-stage1-tools-${{ matrix.plat }}.tar.gz"
+
+      - name: Upload toolchain + tools
+        uses: actions/upload-artifact@v5
+        with:
+          name: mhs-toolchain-and-tools-${{ matrix.plat }}
+          path: |
+            mhs-mcabal-${{ matrix.plat }}.tar.gz
+            mhs-stage1-tools-${{ matrix.plat }}.tar.gz
+          retention-days: 14
+
+  # ------------------------------------------------------------------
+  # Job 2a (Phases 4-5): cabal-install built with MicroHs.
+  # Runs CONCURRENTLY with stage1-mhs.
+  # ------------------------------------------------------------------
+  cabal-mhs:
+    name: 'Phases 4-5 cabal-mhs / ${{ matrix.plat }}'
+    needs: [mhs-and-tools]
+    runs-on: ${{ matrix.runs-on }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { plat: x86_64-linux, runs-on: ubuntu-24.04 }
+          - { plat: aarch64-darwin, runs-on: macos-latest }
+
+    steps:
+      - name: Checkout GHC tree
+        uses: actions/checkout@v5
+        with:
+          submodules: false
+
+      - name: System dependencies & zero-GHC assertion
+        run: |
+          set -euo pipefail
+          if [ "$(uname -s)" = "Darwin" ]; then
+            brew install gmp || true
+          else
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends \
+              build-essential git curl xz-utils libgmp-dev zlib1g-dev \
+              libffi-dev libncurses-dev pkg-config
+          fi
+          for d in "$HOME/.ghcup/bin" "$HOME/.cabal/bin" /opt/ghc/bin /usr/local/bin; do
+            if [ -x "$d/ghc" ] || [ -x "$d/happy" ] || [ -x "$d/alex" ]; then
+              PATH="$(printf '%s' "$PATH" | tr ':' '\n' | grep -vx "$d" | paste -sd: -)"
+            fi
+          done
+          echo "PATH=$PATH" >> "$GITHUB_ENV"
+          rm -rf "$HOME/.ghcup" 2>/dev/null || true
+          ! command -v ghc && ! command -v happy && ! command -v alex
+
+      - name: Download toolchain + tools
+        uses: actions/download-artifact@v5
+        with:
+          name: mhs-toolchain-and-tools-${{ matrix.plat }}
+          path: _build/inputs
+
+      - name: Unpack toolchain
+        run: |
+          set -euo pipefail
+          tar -xzf "_build/inputs/mhs-mcabal-${{ matrix.plat }}.tar.gz" -C "$HOME"
+          export PATH="$HOME/.mcabal/bin:$PATH"
+          mhs --version
+
+      # --- Phase 4: dual-compiler cabal + MicroHs super-charge --------
+      - name: Phase 4 — Checkout + super-charge stable-haskell/cabal
+        run: |
+          set -euo pipefail
+          mkdir -p _build
+          : > _build/timing-phase4-5.tsv
+          BASE="${{ inputs.cabal_base_ref || '73d3ffda3e' }}"
+          MHS_HEAD="${{ inputs.cabal_mhs_ref || 'b04f60210bff6fb149ea5a14e1329ab06e947d' }}"
+          bootstrap/mhs/ci-time.sh run _build/timing-phase4-5.tsv \
+            phase4 "Phase 4 — Checkout cabal ($BASE) + apply MicroHs super-charge patches" -- \
+            bash -c "set -euo pipefail
+              rm -rf _build/cabal-src /tmp/cabal-mhs-patches
+              git clone https://github.com/stable-haskell/cabal.git _build/cabal-src
+              git -C _build/cabal-src checkout '$BASE'
+              git -C _build/cabal-src fetch origin '$MHS_HEAD'
+              git -C _build/cabal-src format-patch '$BASE..$MHS_HEAD' -o /tmp/cabal-mhs-patches
+              git -C _build/cabal-src -c user.name='CI Bot' -c user.email='ci@stable-haskell.org' \
+                am /tmp/cabal-mhs-patches/*.patch"
+          {
+            echo "## Phase 4 — cabal-install MicroHs super-charge series (\`$BASE..$MHS_HEAD\`)"
+            echo ""
+            echo '```'
+            git -C _build/cabal-src log --oneline "$BASE..HEAD"
+            echo ""
+            git -C _build/cabal-src diff --stat "$BASE..HEAD" | tail -n 10
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # --- Phase 5: build cabal-install with MicroHs ------------------
+      - name: Phase 5 — Build cabal-install with MicroHs
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.mcabal/bin:$PATH"
+          export MHS_PREFIX="$HOME/.mcabal"
+          bootstrap/mhs/ci-time.sh run _build/timing-phase4-5.tsv \
+            phase5-shims "Phase 5a — Build mhs-compat-shims pkg" -- \
+            bash _build/cabal-src/bootstrap/mhs/build-cabal-mhs.sh toolchain
+          bootstrap/mhs/ci-time.sh run _build/timing-phase4-5.tsv \
+            phase5-build "Phase 5b — Build cabal-install (exe:cabal) with MicroHs" -- \
+            bash _build/cabal-src/bootstrap/mhs/build-cabal-mhs.sh build
+          bootstrap/mhs/ci-time.sh run _build/timing-phase4-5.tsv \
+            phase5-test "Phase 5c — cabal-mhs smoke tests" -- \
+            bash _build/cabal-src/bootstrap/mhs/build-cabal-mhs.sh test
+          mkdir -p _build/cabal-out
+          cp -fp _build/cabal-src/_build/artifacts/cabal _build/cabal-out/cabal
+          _build/cabal-out/cabal --version
+          bootstrap/mhs/ci-time.sh summary "Phases 4-5 timings (${{ matrix.plat }})" \
+            _build/timing-phase4-5.tsv | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload cabal-mhs
+        uses: actions/upload-artifact@v5
+        with:
+          name: cabal-mhs-${{ matrix.plat }}
+          path: |
+            _build/cabal-out/cabal
+            _build/timing-phase4-5.tsv
+          retention-days: 14
+          if-no-files-found: error
+
+  # ------------------------------------------------------------------
+  # Job 2b (Phase 6): Stage 1 GHC built with MicroHs.
+  # Runs CONCURRENTLY with cabal-mhs.
+  # ------------------------------------------------------------------
+  stage1-mhs:
+    name: 'Phase 6 Stage 1 GHC / ${{ matrix.plat }}'
+    needs: [mhs-and-tools]
+    runs-on: ${{ matrix.runs-on }}
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { plat: x86_64-linux, runs-on: ubuntu-24.04 }
+          - { plat: aarch64-darwin, runs-on: macos-latest }
+
+    steps:
+      - name: Checkout GHC tree
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: System dependencies & zero-GHC assertion
+        run: |
+          set -euo pipefail
+          if [ "$(uname -s)" = "Darwin" ]; then
+            brew install gmp || true
+          else
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends \
+              build-essential git curl xz-utils libgmp-dev zlib1g-dev \
+              libffi-dev libncurses-dev pkg-config
+          fi
+          for d in "$HOME/.ghcup/bin" "$HOME/.cabal/bin" /opt/ghc/bin /usr/local/bin; do
+            if [ -x "$d/ghc" ] || [ -x "$d/happy" ] || [ -x "$d/alex" ]; then
+              PATH="$(printf '%s' "$PATH" | tr ':' '\n' | grep -vx "$d" | paste -sd: -)"
+            fi
+          done
+          echo "PATH=$PATH" >> "$GITHUB_ENV"
+          rm -rf "$HOME/.ghcup" 2>/dev/null || true
+          ! command -v ghc && ! command -v happy && ! command -v alex
+
+      - name: Download toolchain + tools
+        uses: actions/download-artifact@v5
+        with:
+          name: mhs-toolchain-and-tools-${{ matrix.plat }}
+          path: _build/inputs
+
+      - name: Unpack toolchain + tools
+        run: |
+          set -euo pipefail
+          tar -xzf "_build/inputs/mhs-mcabal-${{ matrix.plat }}.tar.gz" -C "$HOME"
+          tar -xzf "_build/inputs/mhs-stage1-tools-${{ matrix.plat }}.tar.gz" -C "$GITHUB_WORKSPACE"
+          _build/mhs-stage1/toolchain/bin/mhs --version
+          _build/mhs-stage1/bin/happy --version | head -n 1
+          _build/mhs-stage1/bin/alex --version | head -n 1
+
+      # --- Phase 6: Stage 1 GHC, timed per checkpoint -----------------
+      - name: Phase 6 — Build Stage 1 GHC with MicroHs
+        run: |
+          set -euo pipefail
+          : > _build/timing-phase6.tsv
+          T() { bootstrap/mhs/ci-time.sh run _build/timing-phase6.tsv "$@"; }
+          T phase6-ghc-boot "Phase 6 — ghc-boot" -- \
+            env MHS_HEAP=700M bootstrap/mhs/build-stage1-mhs.sh ghc-boot
+          for st in 02a 02 03 04 05 06 07 08; do
+            T "phase6-$st" "Phase 6 — stage-$st" -- \
+              env MHS_HEAP=700M bootstrap/mhs/build-stage1-mhs.sh "stage-$st"
+          done
+          T phase6-ghc "Phase 6 — link Stage 1 ghc + lib/" -- \
+            env MHS_HEAP=700M bootstrap/mhs/build-stage1-mhs.sh ghc
+          T phase6-test "Phase 6 — Stage 1 native codegen smoke test" -- \
+            bootstrap/mhs/build-stage1-mhs.sh test
+
+      - name: Install relocatable Stage 1 ghc wrapper & verify
+        run: |
+          set -euo pipefail
+          S1="$GITHUB_WORKSPACE/_build/mhs-stage1"
+          mv "$S1/bin/ghc" "$S1/bin/ghc.bin"
+          cat > "$S1/bin/ghc" <<'EOF'
+          #!/usr/bin/env sh
+          DIR="$(cd "$(dirname "$0")/.." && pwd)"
+          exec "$DIR/bin/ghc.bin" -B"$DIR/lib" "$@"
+          EOF
+          chmod +x "$S1/bin/ghc"
+          "$S1/bin/ghc" --version
+          "$S1/bin/ghc" --info | head -n 15
+          bootstrap/mhs/ci-time.sh summary "Phase 6 timings (${{ matrix.plat }})" \
+            _build/timing-phase6.tsv | tee -a "$GITHUB_STEP_SUMMARY"
+          tar -czf "ghc-stage1-mhs-${{ matrix.plat }}.tar.gz" \
+            -C "$GITHUB_WORKSPACE" \
+            _build/mhs-stage1/bin \
+            _build/mhs-stage1/lib \
+            _build/mhs-stage1/share \
+            _build/timing-phase6.tsv
+          ls -lh "ghc-stage1-mhs-${{ matrix.plat }}.tar.gz"
+
+      - name: Upload Stage 1 GHC
+        uses: actions/upload-artifact@v5
+        with:
+          name: ghc-stage1-mhs-${{ matrix.plat }}
+          path: ghc-stage1-mhs-${{ matrix.plat }}.tar.gz
+          retention-days: 14
+
+  # ------------------------------------------------------------------
+  # Job 3 (Phases 7-8): Stage 2 GHC via cabal-mhs + mhs-built Stage 1.
+  # ------------------------------------------------------------------
+  stage2-and-package:
+    name: 'Phases 7-8 Stage 2 GHC + bindist / ${{ matrix.plat }}'
+    needs: [mhs-and-tools, cabal-mhs, stage1-mhs]
+    if: ${{ inputs.run_stage2 != false }}
+    runs-on: ${{ matrix.runs-on }}
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { plat: x86_64-linux, runs-on: ubuntu-24.04 }
+          - { plat: aarch64-darwin, runs-on: macos-latest }
+
+    steps:
+      - name: Checkout GHC tree
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: System dependencies & zero-GHC assertion
+        run: |
+          set -euo pipefail
+          if [ "$(uname -s)" = "Darwin" ]; then
+            brew install autoconf automake gmp || true
+          else
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends \
+              build-essential autoconf automake git curl xz-utils \
+              libgmp-dev zlib1g-dev libffi-dev libncurses-dev \
+              pkg-config patchelf python3
+          fi
+          for d in "$HOME/.ghcup/bin" "$HOME/.cabal/bin" /opt/ghc/bin /usr/local/bin; do
+            if [ -x "$d/ghc" ] || [ -x "$d/happy" ] || [ -x "$d/alex" ]; then
+              PATH="$(printf '%s' "$PATH" | tr ':' '\n' | grep -vx "$d" | paste -sd: -)"
+            fi
+          done
+          echo "PATH=$PATH" >> "$GITHUB_ENV"
+          rm -rf "$HOME/.ghcup" 2>/dev/null || true
+          ! command -v ghc && ! command -v happy && ! command -v alex
+
+      - name: Download toolchain + tools (timings)
+        uses: actions/download-artifact@v5
+        with:
+          name: mhs-toolchain-and-tools-${{ matrix.plat }}
+          path: _build/inputs/tools
+
+      - name: Download cabal-mhs
+        uses: actions/download-artifact@v5
+        with:
+          name: cabal-mhs-${{ matrix.plat }}
+          path: _build/inputs/cabal-mhs
+
+      - name: Download Stage 1 GHC
+        uses: actions/download-artifact@v5
+        with:
+          name: ghc-stage1-mhs-${{ matrix.plat }}
+          path: _build/inputs/stage1
+
+      - name: Unpack Stage 1 GHC + cabal-mhs
+        run: |
+          set -euo pipefail
+          tar -xzf "_build/inputs/tools/mhs-stage1-tools-${{ matrix.plat }}.tar.gz" \
+            -C "$GITHUB_WORKSPACE" _build/timing-phase1-3.tsv
+          tar -xzf "_build/inputs/stage1/ghc-stage1-mhs-${{ matrix.plat }}.tar.gz" \
+            -C "$GITHUB_WORKSPACE"
+          cp -fp _build/inputs/cabal-mhs/cabal _build/cabal-mhs
+          cp -fp _build/inputs/cabal-mhs/timing-phase4-5.tsv _build/timing-phase4-5.tsv
+          chmod +x _build/cabal-mhs
+          echo "$GITHUB_WORKSPACE/_build/mhs-stage1/bin" >> "$GITHUB_PATH"
+          export PATH="$GITHUB_WORKSPACE/_build/mhs-stage1/bin:$PATH"
+          test "$(command -v ghc)" = "$GITHUB_WORKSPACE/_build/mhs-stage1/bin/ghc"
+          test "$(command -v happy)" = "$GITHUB_WORKSPACE/_build/mhs-stage1/bin/happy"
+          test "$(command -v alex)" = "$GITHUB_WORKSPACE/_build/mhs-stage1/bin/alex"
+          _build/cabal-mhs --version
+          _build/mhs-stage1/bin/ghc --version
+
+      # --- Phase 7: Stage 2 via cabal-mhs + mhs-built Stage 1 GHC ------
+      - name: Phase 7 — Build Stage 2 GHC
+        run: |
+          set -euo pipefail
+          export PATH="$GITHUB_WORKSPACE/_build/mhs-stage1/bin:$PATH"
+          S1="$GITHUB_WORKSPACE/_build/mhs-stage1"
+          CABAL="$GITHUB_WORKSPACE/_build/cabal-mhs"
+          STORE="$GITHUB_WORKSPACE/_build/stage2-store"
+          BDIR="$GITHUB_WORKSPACE/_build/stage2"
+          LDIR="$GITHUB_WORKSPACE/_build/stage2-logs"
+          mkdir -p "$STORE" "$BDIR" "$LDIR"
+          : > _build/timing-phase7-8.tsv
+          T() { bootstrap/mhs/ci-time.sh run _build/timing-phase7-8.tsv "$@"; }
+
+          T phase7-boot "Phase 7a — ./boot + ./configure" -- \
+            bash -c "set -euo pipefail
+              ./boot
+              ./configure GHC='$S1/bin/ghc' HAPPY='$S1/bin/happy' ALEX='$S1/bin/alex'"
+
+          CABAL_STAGE2=(
+            env
+            GENPRIMOPCODE="$S1/bin/genprimopcode"
+            DERIVE_CONSTANTS="$S1/bin/deriveConstants"
+            GENAPPLY="$S1/bin/genapply"
+            "$CABAL"
+            --store-dir "$STORE"
+            --logs-dir "$LDIR"
+            build
+            --project-file cabal.project.stage2.mhs
+            --builddir "$BDIR"
+            --with-compiler="$S1/bin/ghc"
+            --with-hc-pkg="$S1/bin/ghc-pkg"
+            --with-happy="$S1/bin/happy"
+            --with-alex="$S1/bin/alex"
+            --with-hsc2hs="$S1/bin/hsc2hs"
+            --ghc-options "-ghcversion-file=$GITHUB_WORKSPACE/rts/include/ghcversion.h"
+          )
+
+          T phase7-rts "Phase 7b — Stage 2 rts" -- \
+            "${CABAL_STAGE2[@]}" rts
+          T phase7-exes "Phase 7c — Stage 2 executables" -- \
+            "${CABAL_STAGE2[@]}" \
+              exe:ghc exe:ghc-pkg exe:hsc2hs exe:unlit exe:runghc \
+              exe:hp2ps exe:ghc-iserv exe:haddock exe:hpc
+          T phase7-libs "Phase 7d — Stage 2 core libraries" -- \
+            "${CABAL_STAGE2[@]}" \
+              lib:base lib:containers lib:bytestring lib:text \
+              lib:ghc-internal lib:ghc-prim lib:template-haskell
+
+      # --- Phase 8: relocatable bindist + full timing summary ---------
+      - name: Phase 8 — Package Stage 2 bindist
+        run: |
+          set -euo pipefail
+          S1="$GITHUB_WORKSPACE/_build/mhs-stage1"
+          STORE="$GITHUB_WORKSPACE/_build/stage2-store"
+          HOST_PLAT="$("$S1/bin/ghc" --print-host-platform)"
+          S2_STORE="$STORE/host/$HOST_PLAT"
+          DIST="$GITHUB_WORKSPACE/_build/dist-stage2"
+          bootstrap/mhs/ci-time.sh run _build/timing-phase7-8.tsv \
+            phase8 "Phase 8 — Package relocatable Stage 2 bindist" -- \
+            bash -c "set -euo pipefail
+              rm -rf '$DIST'
+              mkdir -p '$DIST/bin' '$DIST/lib/$HOST_PLAT' '$DIST/lib/package.conf.d'
+              for e in ghc ghc-pkg hsc2hs unlit runghc hp2ps ghc-iserv haddock hpc; do
+                if [ -x '$S2_STORE/bin/'\"\$e\" ]; then
+                  cp -a '$S2_STORE/bin/'\"\$e\" '$DIST/bin/'
+                else
+                  b=\$(find '$GITHUB_WORKSPACE/_build/stage2' -type f -name \"\$e\" -perm -111 | head -1 || true)
+                  test -n \"\$b\" && cp -fp \"\$b\" '$DIST/bin/'
+                fi
+              done
+              if [ -d '$S2_STORE/lib' ]; then
+                cp -a '$S2_STORE/lib/.' '$DIST/lib/$HOST_PLAT/'
+              fi
+              if [ -d '$S2_STORE/package.conf.d' ]; then
+                cp -a '$S2_STORE/package.conf.d/'*.conf '$DIST/lib/package.conf.d/'
+                for cf in '$DIST/lib/package.conf.d/'*.conf; do
+                  sed -e 's|$S2_STORE/lib|\${pkgroot}/../lib/$HOST_PLAT|g' \"\$cf\" > \"\$cf.tmp\"
+                  mv \"\$cf.tmp\" \"\$cf\"
+                done
+              fi
+              cp -fp driver/ghc-usage.txt driver/ghci-usage.txt '$DIST/lib/'
+              cp -fp '$S1/lib/settings' '$DIST/lib/settings'
+              cp -fp '$S1/share/hsc2hs/template-hsc.h' '$DIST/lib/template-hsc.h'
+              if [ \"\$(uname -s)\" = Linux ]; then
+                for binary in '$DIST'/bin/*; do
+                  patchelf --force-rpath --set-rpath '\$ORIGIN/../lib/$HOST_PLAT' \"\$binary\" || true
+                done
+              else
+                ./mk/clean-darwin-macho.sh '$DIST' || true
+              fi
+              '$DIST/bin/ghc-pkg' recache --package-db='$DIST/lib/package.conf.d'
+              '$DIST/bin/ghc-pkg' check --package-db='$DIST/lib/package.conf.d'"
+          tar -czf "ghc-stage2-mhs-${{ matrix.plat }}.tar.gz" -C "$DIST" .
+          shasum -a 256 "ghc-stage2-mhs-${{ matrix.plat }}.tar.gz" | tee "ghc-stage2-mhs-${{ matrix.plat }}.sha256"
+
+      - name: Full Phase 1-8 timing summary
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          bootstrap/mhs/ci-time.sh summary "MicroHs -> Stage 1 -> Stage 2 timings (${{ matrix.plat }})" \
+            _build/timing-phase1-3.tsv _build/timing-phase4-5.tsv \
+            _build/timing-phase6.tsv _build/timing-phase7-8.tsv \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Stage 2 bindist
+        uses: actions/upload-artifact@v5
+        with:
+          name: ghc-stage2-mhs-${{ matrix.plat }}
+          path: |
+            ghc-stage2-mhs-${{ matrix.plat }}.tar.gz
+            ghc-stage2-mhs-${{ matrix.plat }}.sha256
+          retention-days: 14
+
+  # ------------------------------------------------------------------
+  # Job 4: second dependent workflow — downloads Stage 2 bindist and
+  # compiles + runs a Haskell application on a clean runner.
+  # ------------------------------------------------------------------
+  demo-app:
+    name: 'Demo app / ${{ matrix.plat }}'
+    needs: [stage2-and-package]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { plat: x86_64-linux, runs-on: ubuntu-24.04 }
+          - { plat: aarch64-darwin, runs-on: macos-latest }
+    uses: ./.github/workflows/mhs-stage2-demo-app.yml
+    with:
+      platform: ${{ matrix.plat }}
+      runs_on: ${{ matrix.runs-on }}
+      artifact_name: ghc-stage2-mhs-${{ matrix.plat }}
+      cabal_artifact_name: cabal-mhs-${{ matrix.plat }}

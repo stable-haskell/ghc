@@ -1,0 +1,61 @@
+From 2b1dd1723581fd7208dc56395888f00ce5e93519 Mon Sep 17 00:00:00 2001
+From: Moritz Angermann <moritz@zw3rk.com>
+Date: Thu, 19 Nov 2026 21:37:07 +0900
+Subject: [PATCH] runtime: disable Int/Int64 overflow traps (WANT_OVERFLOW=0)
+ and raise stack limits
+
+Configure two's-complement wrapping semantics for Int/Int64 matching GHC and
+support 512 MB runtime stack sizing needed by GHC Stage 1 and Cabal builds.
+---
+ src/runtime/eval.c        | 12 +++++++++++-
+ src/runtime/unix/config.h |  4 +++-
+ 2 files changed, 14 insertions(+), 2 deletions(-)
+
+diff --git a/src/runtime/eval.c b/src/runtime/eval.c
+index 79453ab8..f1494c04 100644
+--- a/src/runtime/eval.c
++++ b/src/runtime/eval.c
+@@ -6774,6 +6774,12 @@ evali(NODEPTR an)
+       int a = (int)GETVALUE(n);   /* function number */
+       //printf("  %s\n", FFI_IX(a).ffi_name);
+       int arity = FFI_IX(a).ffi_arity;
++      if (arity > 0 && HASNARGS(arity + 2) && ARG(TOP(0)) == combWorld && ARG(TOP(1)) == combK) {
++        /* Precompiled base-0.16.12.0.pkg desugared polymorphic `foreign import`
++         * (`EForall _ _ (... -> IO r)`) as `IO.performIO ^f`, pushing `combWorld`
++         * and `combK` ahead of the real FFI arguments. Drop those two nodes. */
++        POP(2);
++      }
+       CHECK(arity);
+       funptr_t f = FFI_IX(a).ffi_fun;
+       PUSH(mkPtr(0));             /* placeholder for result, protected from GC */
+@@ -7473,7 +7479,11 @@ evali(NODEPTR an)
+     unint64:
+       switch (GETTAG(p)) {
+       case T_IND:        p = GETINDIR(p); goto unint64;
+-      case T_NEG64:      if ((int64_t)x64u == INT64_MIN) raise_rts(exn_overflow); r64u = -x64u; break;
++      case T_NEG64:
++#if WANT_OVERFLOW
++                         if ((int64_t)x64u == INT64_MIN) raise_rts(exn_overflow);
++#endif
++                         r64u = -x64u; break;
+       case T_UNEG64:     r64u = -x64u; break;
+       case T_INV64:      r64u = ~x64u; break;
+       case T_POPCOUNT64: ru = POPCOUNT64(x64u); SETINT(n, (value_t)ru); goto ret;
+diff --git a/src/runtime/unix/config.h b/src/runtime/unix/config.h
+index 125415a6..7a5eba8b 100644
+--- a/src/runtime/unix/config.h
++++ b/src/runtime/unix/config.h
+@@ -82,7 +82,9 @@
+ /*
+  * overflow detection in arithmetic
+  */
+-#define WANT_OVERFLOW 1
++#if !defined(WANT_OVERFLOW)
++#define WANT_OVERFLOW 0
++#endif
+ 
+ /*
+  * Enable non-blocking IO polling.
+-- 
+2.54.0
+

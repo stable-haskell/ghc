@@ -1,0 +1,43 @@
+-- cabal.project.stage2.mhs — Stage 2 overlay for the MicroHs-compiled GHC demo.
+--
+-- Imports cabal.project.stage2.common DIRECTLY (not
+-- cabal.project.stage2.static) so we never inherit static's
+-- `constraints: build:any.ghc-internal installed` line.
+--
+-- Why: that constraint only makes sense for a GHC0-driven build, where a
+-- *build* compiler (GHC0, distinct from the *host* Stage 1 compiler)
+-- pre-installs ghc-internal and cabal-install must reuse it verbatim.
+-- In this demo there is NO GHC0 at all: every Stage 1 build tool
+-- (happy, alex, hsc2hs, genprimopcode, deriveConstants, genapply, unlit)
+-- is built natively by MicroHs into _build/mhs-stage1/bin and passed
+-- explicitly via --with-happy / --with-alex / --with-hsc2hs /
+-- GENPRIMOPCODE= / DERIVE_CONSTANTS= / GENAPPLY=, with
+-- --with-compiler=<stage1>/bin/ghc as the sole host compiler.
+-- Keeping the `build:any.ghc-internal installed` constraint here would
+-- force cabal-mhs to demand a build-plan unit it can never have, so we
+-- deliberately leave it out. (cabal.project.stage2.common documents the
+-- same split: the buck2 build imports .common precisely because upstream
+-- cabal does not know the `build:` qualifier.)
+--
+-- Static libraries, mirroring cabal.project.stage2.static / Makefile
+-- default (DYNAMIC not set to 1):
+import: cabal.project.stage2.common
+
+package *
+  shared: False
+  executable-dynamic: False
+
+-- Use prebuilt MicroHs Stage 1 build tools from PATH / --with-PROG instead
+-- of building them with the (nonexistent) GHC0 build compiler.
+--
+-- `build-tool-depends` (default True in cabal.project.stage2.common via
+-- `package ghc / flags: +build-tool-depends`) tells the ghc package to
+-- build happy/alex/hsc2hs as build dependencies with GHC0. Setting
+-- -build-tool-depends here flips ghc back to resolving those executables
+-- from PATH / --with-PROG flags — i.e. our mhs-built Stage 1 tools —
+-- which removes the last edge that required a bootstrap GHC0.
+--
+-- `+internal-interpreter` is kept: the Stage 2 ghc still needs its
+-- internal interpreter support (same as the static project default).
+package ghc
+  flags: -build-tool-depends +internal-interpreter

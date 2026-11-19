@@ -1,0 +1,919 @@
+From fa0ad67f407ceb35904e00fdd3ebeaba1d2bcadd Mon Sep 17 00:00:00 2001
+From: Moritz Angermann <moritz@zw3rk.com>
+Date: Thu, 19 Nov 2026 21:37:09 +0900
+Subject: [PATCH] parser: support TypeFamilies, DataKinds, TupleSections,
+ PatSyn {}, and pragmas
+
+Refs: https://github.com/augustss/MicroHs/issues/367
+Refs: https://github.com/augustss/MicroHs/issues/446
+Refs: https://github.com/augustss/MicroHs/issues/226
+Refs: https://github.com/augustss/MicroHs/issues/294
+Refs: https://github.com/augustss/MicroHs/issues/18
+Refs: https://github.com/augustss/MicroHs/issues/365
+
+Extend the lexer, AST, and parser to accept open/closed/associated/injective
+type and data family syntax, promoted DataKinds constructors and
+StandaloneKindSignatures, multi-comma TupleSections, pattern synonym record
+syntax, and LANGUAGE NoImplicitPrelude pragmas.
+---
+ src/MicroHs/Expr.hs  |  27 ++-
+ src/MicroHs/Ident.hs |   4 +-
+ src/MicroHs/Lex.hs   |  70 ++++++-
+ src/MicroHs/Parse.hs | 453 ++++++++++++++++++++++++++++++++++++++-----
+ 4 files changed, 494 insertions(+), 60 deletions(-)
+
+diff --git a/src/MicroHs/Expr.hs b/src/MicroHs/Expr.hs
+index 03e6cc52..a38b9ec3 100644
+--- a/src/MicroHs/Expr.hs
++++ b/src/MicroHs/Expr.hs
+@@ -5,7 +5,7 @@ module MicroHs.Expr(
+   ImportSpec(..),
+   ImportItem(..),
+   ImpType(..),
+-  EDef(..), showEDefs,
++  EDef(..), TypeEqn, showEDefs,
+   Deriving(..), DerStrategy(..), doNotDerive,
+   Expr(..), eLam, eLamWithSLoc, eEqn, oneAlt, eEqns, showExpr, eqExpr,
+   XTCState,
+@@ -103,8 +103,14 @@ data EDef
+   -- because then we cannot bootstrap with Hugs.
+   -- So instead we use dummy placeholder type and then use unsafeCoerce for the values.
+   | SetTCState XTCState
++  | TypeFam LHS (Maybe EKind) [Bool] (Maybe [TypeEqn])
++  | TypeInst [IdKind] Ident [EType] EType
++  | DataFam LHS (Maybe EKind)
++  | DataInst Bool [IdKind] Ident [EType] [Constr] [Deriving]
+   deriving (Show)
+ 
++type TypeEqn = ([IdKind], [EType], EType)
++
+ instance NFData EDef where
+   rnf (Data a b c) = rnf a `seq` rnf b `seq` rnf c
+   rnf (Newtype a b c) = rnf a `seq` rnf b `seq` rnf c
+@@ -124,6 +130,10 @@ instance NFData EDef where
+   rnf (StandDeriving a b c) = rnf a `seq` rnf b `seq` rnf c
+   rnf (DfltSign a b) = rnf a `seq` rnf b
+   rnf (SetTCState a) = seq a ()
++  rnf (TypeFam a b c d) = rnf a `seq` rnf b `seq` rnf c `seq` rnf d
++  rnf (TypeInst a b c d) = rnf a `seq` rnf b `seq` rnf c `seq` rnf d
++  rnf (DataFam a b) = rnf a `seq` rnf b
++  rnf (DataInst a b c d e f) = rnf a `seq` rnf b `seq` rnf c `seq` rnf d `seq` rnf e `seq` rnf f
+ 
+ data XTCState
+ instance Eq XTCState where _ == _  =  True
+@@ -329,6 +339,7 @@ conArity (ConSyn _ n _) = n
+ conFields :: Con -> [FieldName]
+ conFields (ConData _ _ fs) = fs
+ conFields (ConNew _ fs) = fs
++conFields (ConSyn _ _ (ETuple (_ : es), _)) = [ f | EVar f <- es ]
+ conFields ConSyn{} = []
+ 
+ instance Eq Con where
+@@ -583,6 +594,10 @@ instance HasLoc EDef where
+   getSLoc (Infix _ is) = getSLoc is
+   getSLoc (Instance t _ _) = getSLoc t
+   getSLoc (StandDeriving _ _ t) = getSLoc t
++  getSLoc (TypeFam (i, _) _ _ _) = getSLoc i
++  getSLoc (TypeInst _ i _ _) = getSLoc i
++  getSLoc (DataFam (i, _) _) = getSLoc i
++  getSLoc (DataInst _ _ i _ _ _) = getSLoc i
+   getSLoc _ = error "HasLoc EDef: unimplemented"
+ 
+ -- Approximate location; only identifiers and literals carry a location
+@@ -738,6 +753,10 @@ allVarsBind' abind =
+     Sign is _ -> (is ++)
+     DfltSign i _ -> (i:)
+     Infix _ _ -> id
++    TypeFam{} -> id
++    TypeInst{} -> id
++    DataFam{} -> id
++    DataInst{} -> id
+     _ -> impossible
+ 
+ allVarsEqns :: HasCallStack => [Eqn] -> [Ident]
+@@ -915,6 +934,10 @@ instance Pretty EDef where
+     StandDeriving _s _narg ct -> text "deriving instance" <+> pPrint0 l ct
+     DfltSign i t -> text "default" <+> pPrint0 l i <+> text "::" <+> pPrint0 l t
+     SetTCState _ -> text "SetTCState ..."
++    TypeFam lhs mk _ _ -> text "type family" <+> ppLHS l lhs <+> maybe empty (\k -> text "::" <+> pPrint0 l k) mk
++    TypeInst _ i ts t -> text "type instance" <+> pPrint0 l (eApps (EVar i) ts) <+> text "=" <+> pPrint0 l t
++    DataFam lhs mk -> text "data family" <+> ppLHS l lhs <+> maybe empty (\k -> text "::" <+> pPrint0 l k) mk
++    DataInst isNew _ i ts _ ds -> text (if isNew then "newtype instance" else "data instance") <+> pPrint0 l (eApps (EVar i) ts) <+> ppDerivings l ds
+ 
+ ppDerivings :: PrettyLevel -> [Deriving] -> Doc
+ ppDerivings l = sep . map (ppDeriving l)
+@@ -1241,7 +1264,7 @@ freeTyVars = foldr (go []) []
+     go _bound (EQLit _ _ _) acc = acc
+     go bound (EOper e ies) acc = go bound e (goList bound (map snd ies) acc)
+     go bound (ESign e _) acc = go bound e acc
+-    go bound (EListish (LList [e])) acc = go bound e acc
++    go bound (EListish (LList es)) acc = goList bound es acc
+     go bound (ETuple es) acc = goList bound es acc
+     go bound (EParen e) acc = go bound e acc
+     go bound (EQVar e _) acc = go bound e acc
+diff --git a/src/MicroHs/Ident.hs b/src/MicroHs/Ident.hs
+index 2147587f..89145340 100644
+--- a/src/MicroHs/Ident.hs
++++ b/src/MicroHs/Ident.hs
+@@ -155,7 +155,9 @@ headIdent (Ident _ i) = head i
+ isConIdent :: Ident -> Bool
+ isConIdent i@(Ident _ t) =
+   let c = headIdent i
+-  in  isUpperX c || c == ':' || c == ',' || t == pack "[]"  || t == pack "()" || t == pack "->" || t == pack "\x2192"
++  in  isUpperX c || c == ':' || c == ',' || t == pack "[]"  || t == pack "()" || t == pack "->" || t == pack "\x2192" ||
++      -- A DataKinds promotion tick: 'Con, 'M.Con, ':, etc.
++      headIdent (unQualIdent i) == '\''
+ 
+ isOperChar :: Char -> Bool
+ isOperChar '@' = True
+diff --git a/src/MicroHs/Lex.hs b/src/MicroHs/Lex.hs
+index 390208c8..583a8859 100644
+--- a/src/MicroHs/Lex.hs
++++ b/src/MicroHs/Lex.hs
+@@ -164,7 +164,15 @@ lex loc (d:cs) | isSpec d =
+   TSpec loc d : lex (addCol loc 1) cs
+ lex loc ('"':'"':'"':cs) = lexLitStr (lexStringCont loc) loc (addCol loc 3) isTrip   multiLine (\ _ _ -> Nothing) cs
+ lex loc ('"':cs)         = lexLitStr (lexStringCont loc) loc (addCol loc 1) isDQuote id        (\ _ _ -> Nothing) cs
+-lex loc ('\'':cs)        = lexLitStr lexCharCont         loc (addCol loc 1) isSQuote id        (\ _ _ -> Nothing) cs
++-- A leading '\'' is a Char literal when it has one of the two standard shapes:
++--   '\'' : '\\' : _          an escape (handled by lexLitStr, e.g. '\n', '\x41', '\\', '\'')
++--   c : '\'' : _             a simple literal (e.g. 'A', ':', '[', '(', ' '), trailing '#'s skipped
++-- Otherwise it is a DataKinds promotion tick ('Con, 'M.Con, ':, '++, '[, '(), ...).
++lex loc ('\'':cs)
++  | ('\\':_) <- cs = lexLitStr lexCharCont loc (addCol loc 1) isSQuote id (\ _ _ -> Nothing) cs
++  | (c:'\'':rs) <- cs, c /= '\'' && c /= '\\' && c /= '\n' && c /= '\r' =
++      TChar loc c : lexSkipHash (addCol loc 3) rs
++  | otherwise = lexTick loc cs
+   where isSQuote ('\'':_) = Just 1
+         isSQuote _ = Nothing
+         lexCharCont _ [c] loc' cs' = TChar loc c : lexSkipHash loc' cs'
+@@ -173,6 +181,32 @@ lex loc ('\'':cs)        = lexLitStr lexCharCont         loc (addCol loc 1) isSQ
+ lex loc (d:_) = [TError loc $ "Unrecognized input: " ++ show d]
+ lex loc [] = [TEnd loc]
+ 
++-- Lex the remainder of a DataKinds promotion tick; loc is the '\'' position.
++lexTick :: SLoc -> String -> [Token]
++lexTick loc cs@(d:_)
++  | isUpper d    = tickUpper (addCol loc 1) loc [] cs   -- 'Con, 'M.N.Con (with trailing '#'s)
++  | isOperChar d = let (ops, rs) = span isOperChar cs  -- ':, ':|, '++, ...
++                   in  TIdent loc [] ('\'' : ops) : lex (addCol loc (1 + length ops)) rs
++  | otherwise    = TSpec loc '\'' : lex (addCol loc 1) cs   -- '[, '(, or a stray '\''
++lexTick loc []   = TSpec loc '\'' : lex (addCol loc 1) []
++
++-- Scan 'M1.M2.Con after the tick, mirroring upperIdent but keeping the tick
++-- on the final name: 'Con -> "'Con", 'M.Con -> M."'Con".
++tickUpper :: SLoc -> SLoc -> [String] -> String -> [Token]
++tickUpper loc sloc qs acs =
++  case span isIdentChar acs of
++   (ds, rs) ->
++    case rs of
++      '.':cs@(d:_) | isUpper d    -> tickUpper (addCol loc $ 1 + length ds) sloc (ds:qs) cs
++                   | isLower_ d   -> let (xs, ys) = spanIdent cs
++                                     in  TIdent sloc (reverse (ds:qs)) ('\'' : xs) : lex (addCol loc $ 1 + length ds + length xs) ys
++                   | isOperChar d -> let (xs, ys) = span isOperChar cs
++                                     in  TIdent sloc (reverse (ds:qs)) ('\'' : xs) : lex (addCol loc $ 1 + length ds + length xs) ys
++                   | otherwise    -> mk ds rs
++      '#':_ -> mk (ds ++ hs) rs' where (hs, rs') = span (== '#') rs
++      _ -> mk ds rs
++  where mk ds rs = TIdent sloc (reverse qs) ('\'' : ds) : lex (addCol loc $ length ds) rs
++
+ lexStringCont :: SLoc -> [[Token]] -> String -> SLoc -> String -> [Token]
+ lexStringCont loc _ s loc' ('#':cs) = TBStr   loc (pack s) : lex (addCol loc' 1) cs
+ lexStringCont loc _ s loc'      cs  = TString loc s        : lex loc' cs
+@@ -453,9 +487,12 @@ tIdent loc qs kw ats | elem kw ["let", "where", "do", "of", "mdo"]
+                                  = ti : tBrace ats
+                      | otherwise = ti : ats
+   where
+-    isBar (TSpec _ '|' : _) = True
+-    isBar (TIndent _ : TSpec _ '|' : _) = True
+-    isBar _ = False
++    isBar ts = case dropWhile isSkipped ts of
++                 TSpec _ '|' : _ -> True
++                 _              -> False
++    isSkipped (TIndent _) = True
++    isSkipped (TPragma _ _) = True
++    isSkipped _ = False
+ 
+     ti = TIdent loc qs kw
+ 
+@@ -490,7 +527,7 @@ pragma loc cs =
+   let skip = skipNest loc 1 ('#':cs)
+       (p, rest) = break isSpace (dropWhile isSpace cs)
+   in  case map toUpper p of
+-        "SOURCE" -> TPragma loc p : skip
++        "SOURCE" -> TPragma loc "SOURCE" : skip
+         -- hsc2hs generates LINE pragmas
+         "LINE" | Just loc' <- lineDirective loc rest -> skipNest loc' 1 ('#':cs)
+         _ -> skip
+@@ -534,6 +571,9 @@ newtype LexState = LS (Cmd -> (Token, LexState))
+ 
+ data Cmd = Next | Raw | Pop
+ 
++-- Negative entries (-n) on the layout stack represent MultiWayIf ('if |')
++-- layout blocks opened at column n: per GHC's IfLayout rule, a synthetic ';'
++-- at column n is only inserted before '|', never before ',' or '->'.
+ layoutLS ::                [Token] ->    [Int] -> Cmd      -> (Token,                    LexState)
+ layoutLS                        ts           ms  Raw        = (TRaw ts,                  LS $ layoutLS  ts     ms )
+ layoutLS                        ts          mms  Pop        =
+@@ -541,12 +581,19 @@ layoutLS                        ts          mms  Pop        =
+                                                      (m:ms,_:_) | m/=0 -> (TEnd (tokensLoc ts),  LS $ layoutLS  ts     ms )
+                                                      _ ->     (TError l "syntax error",  LS $ layoutLS  []     [] ) where l = tokensLoc ts
+ -- The rest are the Next commands
+-layoutLS tts@(TIndent x       : ts) mms@(m : ms) _ | n == m = (TSpec (tokensLoc ts) ';', LS $ layoutLS  ts    mms )
+-                                                   | n <  m = (TSpec (tokensLoc ts) '>', LS $ layoutLS tts     ms ) where {n = getCol x}
++layoutLS tts@(TIndent x       : ts) mms@(m : ms) _ | n < am = (TSpec (tokensLoc ts) '>', LS $ layoutLS tts     ms )
++                                                   | n == am && (m > 0 || isBarTok ts)
++                                                            = (TSpec (tokensLoc ts) ';', LS $ layoutLS  ts    mms ) where {n = getCol x; am = abs m}
+ layoutLS     (TIndent _       : ts)          ms  _          =                                 layoutLS  ts     ms  Next
+ layoutLS     (t@(TIdent _ _ "do") :  -- for NondecreasingIndentation
+-              TBrace x        : ts) mms@(m :  _) _ | n >= m = (t                       , LS $ layoutLS  (TSpec (tokensLoc ts) '<' : ts) (n:mms)) where {n = getCol x}
+-layoutLS     (TBrace x        : ts) mms@(m :  _) _ | n > m  = (TSpec (tokensLoc ts) '<', LS $ layoutLS  ts (n:mms)) where {n = getCol x}
++              TBrace x        : ts) mms@(m :  _) _ | n >= abs m = (t                   , LS $ layoutLS  (TSpec (tokensLoc ts) '<' : ts) (n:mms)) where {n = getCol x}
++layoutLS     (t@(TIdent _ [] "if") : -- for MultiWayIf
++              TBrace x        : ts) mms@(m :  _) _ | n > abs m  = (t                   , LS $ layoutLS  (TSpec (tokensLoc ts) '<' : ts) ((-n):mms)) where {n = getCol x}
++layoutLS     (t@(TIdent _ [] "if") :
++              TBrace x        : ts)          []  _ | n > 0      = (t                   , LS $ layoutLS  (TSpec (tokensLoc ts) '<' : ts) [-n]) where {n = getCol x}
++layoutLS     (t@(TIdent _ [] "if") :
++              TBrace x        : ts)          ms  _              = (t                   , LS $ layoutLS  (TSpec (tokensLoc ts) '<' : TSpec (tokensLoc ts) '>' : TIndent x : ts) ms)
++layoutLS     (TBrace x        : ts) mms@(m :  _) _ | n > abs m  = (TSpec (tokensLoc ts) '<', LS $ layoutLS  ts (n:mms)) where {n = getCol x}
+ layoutLS     (TBrace x        : ts)          []  _ | n > 0  = (TSpec (tokensLoc ts) '<', LS $ layoutLS  ts     [n]) where {n = getCol x}
+ layoutLS     (TBrace x        : ts)          ms  _          = (TSpec (tokensLoc ts) '<', LS $ layoutLS  (TSpec (tokensLoc ts) '>' : TIndent x : ts) ms)
+ layoutLS     (t@(TSpec _ '}') : ts)     (0 : ms) _          = (                       t, LS $ layoutLS  ts     ms )
+@@ -557,6 +604,11 @@ layoutLS     ts@(TEnd l       :  _)     (_ : ms) _          = (TSpec l '>'
+ layoutLS     (t               : ts)          ms  _          = (                       t, LS $ layoutLS  ts     ms )
+ layoutLS     []                               _  _          = error "layoutLS"
+ 
++isBarTok :: [Token] -> Bool
++isBarTok (TPragma _ _ : rs) = isBarTok rs
++isBarTok (TSpec _ '|' : _)  = True
++isBarTok _                  = False
++
+ instance TokenMachine LexState Token where
+   tmNextToken (LS f) = f Next
+   tmRawTokens (LS f) =
+diff --git a/src/MicroHs/Parse.hs b/src/MicroHs/Parse.hs
+index 81630770..33823ae0 100644
+--- a/src/MicroHs/Parse.hs
++++ b/src/MicroHs/Parse.hs
+@@ -114,13 +114,20 @@ pQIdent = do
+   satisfyM "QIdent" is
+ 
+ -- Upper case, unqualified, alphanumeric identifier
++-- (also accepts a DataKinds promotion tick, e.g. 'Con)
+ pUIdentA :: P Ident
+ pUIdentA = do
+   let
+     is (TIdent loc [] s) | isUpper (head s) = Just (mkIdentSLoc loc s)
++                         | isTickCon s      = Just (mkIdentSLoc loc s)
+     is _ = Nothing
+   satisfyM "UIdent" is
+ 
++-- Is s a promoted data constructor, i.e. '\'' followed by an uppercase name?
++isTickCon :: String -> Bool
++isTickCon ('\'':c:_) = isUpper c
++isTickCon _          = False
++
+ -- Upper case, unqualified identifier
+ pUIdent :: P Ident
+ pUIdent =
+@@ -141,10 +148,12 @@ pUIdentSpecial = do
+     <|> (mk "[]" <$ (lbra *> rbra))  -- Allow [] as a constructor name
+ 
+ -- Upper case, possibly qualified, alphanumeric identifier
++-- (also accepts a DataKinds promotion tick, e.g. 'Con, 'M.Con)
+ pUQIdentA :: P Ident
+ pUQIdentA = do
+   let
+     is (TIdent loc qs s) | isUpper (head s) = Just (qualName loc qs s)
++                         | isTickCon s      = Just (qualName loc qs s)
+     is _ = Nothing
+   satisfyM "UQIdent" is
+ 
+@@ -252,8 +261,13 @@ pSymOper = do
+ pUQSymOper :: P Ident
+ pUQSymOper = guardM pQSymOper isUOper
+ 
++-- A constructor operator starts with ':' (or is a promoted operator like "':").
+ isUOper :: Ident -> Bool
+-isUOper = (== ':') . headIdent . unQualIdent
++isUOper i =
++  case unIdent (unQualIdent i) of
++    ':':_  -> True
++    '\'':_ -> True
++    _      -> False
+ 
+ pUSymOper :: P Ident
+ pUSymOper = guardM pSymOper isUOper
+@@ -363,7 +377,7 @@ pExportItem =
+   <|> ExpTypeSome <$> pUQIdentSym <*> pure []
+   <|> ExpValue    <$> pLQIdentSym
+   <|> ExpValue    <$> (pKeyword "pattern" *> pUQIdentSym)
+-  <|> ExpTypeSome <$> (pKeyword "type" *> pLQIdentSymbol) <*> (pParens pConList <|> pure [])
++  <|> ExpTypeSome <$> (pKeyword "type" *> (pUQIdentSym <|> pLQIdentSymbol)) <*> (pParens pConList <|> pure [])
+   <|> ExpDefault  <$> (pKeyword "default" *> (pUQIdentSym <|> pLQIdentSymbol))
+ 
+ pKeyword :: String -> P ()
+@@ -408,8 +422,13 @@ pBlock p = pBraces body
+ pDef :: P EDef
+ pDef =
+       pBind        -- Fcn, Sign, PatBind, Infix
++  <|> pTypeFamily
++  <|> pTypeInstance
++  <|> pDataFamily
++  <|> pDataInstance
++  <|> pNewtypeInstance
+   <|> uncurry Data <$> (pKeyword "data"     *> pData) <*> pDerivings
+-  <|> Newtype      <$> (pKeyword "newtype"  *> pLHS) <*> (equal *> (Constr [] [] <$> pUIdentSym <*> pure False <*> pField)) <*> pDerivings
++  <|> Newtype      <$> (pKeyword "newtype"  *> pLHS) <*> (equal *> pField) <*> pDerivings
+   <|> Type         <$> (pKeyword "type"     *> pLHS) <*> (equal *> pType)
+   <|> Import       <$> (pKeyword "import"   *> pImportSpec)
+   <|> ForImp       <$> (pKeyword "foreign"  *> pKeyword "import" *> pCallConv)
+@@ -427,8 +446,6 @@ pDef =
+                                                some (pKeyword "nominal" <|> pKeyword "phantom" <|> pKeyword "representational"))
+   where
+     pFunDeps = (bar *> sepSEBy1 pFunDep comma) <|> pure []
+-    pFunDep = (,) <$> some pLIdent <*> (pSRArrow *> some pLIdent)
+-    pField = guardM pFields ((== 1) . either length length)
+ 
+     clsSym = do s <- pUIdentSym <|> pLIdentSymbol; guard (unIdent s /= "()"); return s
+ 
+@@ -444,9 +461,152 @@ pDef =
+ pCallConv :: P CallConv
+ pCallConv = (Cccall <$ pKeyword "ccall") <|> (Ccapi <$ pKeyword "capi") <|> (Cjavascript <$ pKeyword "javascript")
+ 
++-- Type families, associated types, and data families.
++-- These come before the regular data/newtype/type alternatives in pDef.
++
++-- 'type family F a ...' with optional result kind/injectivity and equations.
++pTypeFamily :: P EDef
++pTypeFamily = do
++  pKeyword "type"
++  pKeyword "family"
++  lhs <- pLHS
++  (mk, injVars) <- pResultKindInj
++  let inj = lhsInjFlags lhs injVars
++  (TypeFam lhs mk inj . Just <$> (pKeyword "where" *> pBlock pTypeFamEqn))
++    <|> pure (TypeFam lhs mk inj Nothing)
++
++-- 'type instance F t1 t2 = rhs'
++pTypeInstance :: P EDef
++pTypeInstance = do
++  pKeyword "type"
++  pKeyword "instance"
++  vks <- pForall
++  (fn, args) <- pFamHead
++  rhs <- equal *> pType
++  pure (TypeInst vks fn args rhs)
++
++-- 'data family D a ...' with optional result kind.
++pDataFamily :: P EDef
++pDataFamily = do
++  pKeyword "data"
++  pKeyword "family"
++  lhs <- pLHS
++  mk <- pResultKindAnn
++  pure (DataFam lhs mk)
++
++-- 'data instance D t1 t2 ...' with constructors, GADT constructors, or none.
++pDataInstance :: P EDef
++pDataInstance = do
++  pKeyword "data"
++  pKeyword "instance"
++  vks <- pForall
++  (fn, args) <- pFamHead
++  (cs, ds) <- pDataInstRest vks fn args
++  pure (DataInst False vks fn args cs ds)
++
++-- 'newtype instance N t1 t2 = Con ...' (always a single constructor).
++pNewtypeInstance :: P EDef
++pNewtypeInstance = do
++  pKeyword "newtype"
++  pKeyword "instance"
++  vks <- pForall
++  (fn, args) <- pFamHead
++  c <- equal *> pField
++  ds <- pDerivings
++  pure (DataInst True vks fn args [c] ds)
++
++-- The body of a 'data instance' after its head:
++-- '= constrs', 'where' GADT constructors, or nothing, then derivations.
++pDataInstRest :: [IdKind] -> Ident -> [EType] -> P ([Constr], [Deriving])
++pDataInstRest vks fn args = do
++  cs <- (equal *> sepBy1 (addVks <$> pConstr) bar)
++    <|> (concatMap (dsGADTInst vks fn args) <$> (pKeyword "where" *> pBlock pGADTconstr))
++    <|> pure []
++  ds <- pDerivings
++  pure (cs, ds)
++  where addVks (Constr evks ctx c inf ets) = Constr (vks ++ evks) ctx c inf ets
++
++-- One closed type family equation: '[forall ... .] F pat ... = rhs'.
++pTypeFamEqn :: P TypeEqn
++pTypeFamEqn = do
++  vks <- pForall
++  (_, args) <- pFamHead
++  rhs <- equal *> pType
++  pure (vks, args, rhs)
++
++-- Optional result kind and injectivity annotation on a family head:
++--   ':: kind'                       a result kind
++--   '= (r :: kind) | r -> deps'      injectivity with kind
++--   '= r | r -> deps'               injectivity without kind
++--   nothing                         neither
++pResultKindInj :: P (Maybe EKind, [Ident])
++pResultKindInj =
++        ((\ k -> (Just k, [])) <$> (dcolon *> pKind))
++    <|> (do
++          equal
++          (rVar, mk) <- pParens ((,) <$> pLIdentSym <*> (Just <$> (dcolon *> pKind)))
++                    <|> ((\ r -> (r, Nothing)) <$> pLIdentSym)
++          fds <- (bar *> sepSEBy1 pFunDep comma) <|> pure []
++          let injVars = [ dep | ([lhsVar], rhsVars) <- fds, unIdent lhsVar == unIdent rVar, dep <- rhsVars ]
++          pure (mk, injVars))
++    <|> pure (Nothing, [])
++
++pResultKindAnn :: P (Maybe EKind)
++pResultKindAnn = fst <$> pResultKindInj
++
++-- Injective argument flags: True at 0-based argument positions determined
++-- by the result variable alone, or [] when no injectivity is declared.
++lhsInjFlags :: LHS -> [Ident] -> [Bool]
++lhsInjFlags (_, vks) injVars
++  | null injVars = []
++  | otherwise    = [ any (\ v -> unIdent v == unIdent (idKindIdent vk)) injVars | vk <- vks ]
++
++-- Parse a family equation/instance head (prefix, parenthesized, or infix)
++-- into the family name and its argument types.
++pFamHead :: P (Ident, [EType])
++pFamHead = do
++  t <- pType
++  case splitFamHead t of
++    Just r  -> pure r
++    Nothing -> errorMessage (E.getSLoc t) $ "bad family head " ++ prettyShow t
++
++-- Decompose a head type into the family name and argument types.
++splitFamHead :: EType -> Maybe (Ident, [EType])
++splitFamHead = go []
++  where
++    go args (EApp f a) = go (a : args) f
++    go args (EParen e) = go args e
++    go args (ESign e _) = go args e
++    go args (EForall _ _ e) = go args e
++    go args (EOper e1 [(op, e2)]) = Just (op, e1 : e2 : args)
++    go args (EVar i) = Just (i, args)
++    go _ _ = Nothing
++
++-- Transform a GADT-style data instance constructor against the instance head.
++-- When the result type matches the head, the argument equalities become
++-- constraints; otherwise the constructor is kept as is (still parses).
++dsGADTInst :: [IdKind] -> Ident -> [EType] -> ([Ident], [IdKind], [EConstraint], Either [SType] [ConstrField], EType) -> [Constr]
++dsGADTInst vks fn args (cnms, es, ctx, ets, rty) = map mk cnms
++  where
++    mk cnm =
++      case splitFamHead rty of
++        Just (fn', rargs) | fn' == fn, length rargs == length args ->
++          Constr (vks ++ es ++ extraKinds) (zipWith mkEq args rargs ++ ctx) cnm False ets
++        _ -> Constr (vks ++ es) ctx cnm False ets
++    extraKinds = map (\ i -> IdKind i (EVar dummyIdent)) (freeTyVars (rty : etsTypes ets) \\ map idKindIdent (vks ++ es))
++    mkEq t1 t2 = EApp (EApp (EVar (mkIdent "~")) t1) t2
++
++-- The argument types of a constructor, positional or named.
++etsTypes :: Either [SType] [ConstrField] -> [EType]
++etsTypes = either (map snd) (map (snd . snd))
++
++-- A single functional dependency: 'xs -> ys'.
++pFunDep :: P FunDep
++pFunDep = (,) <$> some pLIdent <*> (pSRArrow *> some pLIdent)
++
+ pPatSyn :: P (LHS, EPat, Maybe [Eqn])
+ pPatSyn = do
+-  lhs@(i, vs) <- pLHS
++  lhs@(i, vs) <- pRecLHS <|> pLHS
+   ( do equal;
+        p <- pPat
+        guard (isExp p)
+@@ -458,27 +618,73 @@ pPatSyn = do
+        meqns <- optional (pKeyword "where" *> pBraces (pEqnsU i))
+        pure (lhs, p, fmap snd meqns)
+    )
++  where
++    -- A record pattern synonym head: 'Con { f1, f2, ... }'.
++    -- Tag the field kinds with '$recpat' so TypeCheck generates record
++    -- selectors and ConSyn field metadata while keeping AST compatibility.
++    pRecLHS = do
++      i <- pUIdentSym
++      fs <- pSpec '{' *> sepSEBy pLIdentSym comma <* pSpec '}'
++      pure (i, [IdKind f (EVar (mkIdent "$recpat")) | f <- fs])
+ 
+ dcolon :: P ()
+ dcolon = pSymbol "::" <|> pSymbol "\x2237"
+ 
+ -- Is a pattern also an expression?
++-- (Used to recognize unidirectional pattern synonyms; be generous so that
++-- valid right-hand sides like 'C (x :| [])' are accepted.)
+ isExp :: Expr -> Bool
+ isExp (EVar _) = True
+ isExp (EListish (LList es)) = all isExp es
++isExp (EListish _) = True
+ isExp (ETuple es) = all isExp es
+ isExp (EApp e1 e2) = isExp e1 && isExp e2
++isExp (EOper e1 ies) = isExp e1 && all (isExp . snd) ies
++isExp (EUpdate e fs) = isExp e && all isExpField fs
++  where isExpField (EField _ fe) = isExp fe
++        isExpField _             = True
+ isExp (ELit _ _) = True
++isExp (EQLit _ _ _) = True
+ isExp (EParen e) = isExp e
++isExp (ESign e _) = isExp e
++isExp (ENegApp e) = isExp e
++isExp (ETypeArg _) = True
++isExp (ESelect _) = True
++isExp (ELam _ _) = True
++isExp (ECase _ _) = True
++isExp (EDo _ _) = True
++isExp (ESectL e _) = isExp e
++isExp (ESectR _ e) = isExp e
++isExp (EIf e1 e2 e3) = isExp e1 && isExp e2 && isExp e3
++isExp (EMultiIf _) = True
+ isExp _ = False
+ 
+ pData :: P (LHS, [Constr])
+ pData = do
+-  lhs <- pLHS
+-  let pConstrs = equal *> sepBy1 pConstr bar
++  (tnm, vks) <- pLHS
++  mk <- optional (dcolon *> pKind)
++  let lhs = case mk of
++              Nothing -> (tnm, vks)
++              Just k  ->
++                let (_, k') = unForall k
++                    aks = splitKindArrows k'
++                    kvks = [ IdKind (mkIdentSLoc (slocIdent tnm) ("$gk" ++ show i)) ak
++                           | (i, ak) <- zip [0 :: Int ..] aks ]
++                in  (tnm, vks ++ kvks)
++      pConstrs = equal *> sepBy1 pConstr bar
+   ((,) lhs <$> pConstrs)
+    <|> pGADT lhs
+    <|> pure (lhs, [])
++  where
++    splitKindArrows (EOper e0 ops) = init (go e0 [] ops)
++      where
++        mkSeg a [] = a
++        mkSeg a r  = EOper a (reverse r)
++        go cur acc [] = [mkSeg cur acc]
++        go cur acc ((op, e) : rest)
++          | unIdent op == "->" || unIdent op == "\x2192" = mkSeg cur acc : go e [] rest
++          | otherwise = go cur ((op, e) : acc) rest
++    splitKindArrows t = fst (getArrows t)
+ 
+ pGADT :: LHS -> P (LHS, [Constr])
+ pGADT (n, vks) = do
+@@ -486,39 +692,48 @@ pGADT (n, vks) = do
+       lhs = (n, map f vks)
+   pKeyword "where"
+   gs <- pBlock pGADTconstr
+-  pure (lhs, map (dsGADT lhs) gs)
++  pure (lhs, concatMap (dsGADT lhs) gs)
+ 
+-pGADTconstr :: P (Ident, [IdKind], [EConstraint], [SType], EType)
++-- A GADT constructor, possibly with several comma-separated names, and
++-- either positional argument types or a record declaration:
++--   C1, C2 :: forall ... . ctx => t1 -> t2 -> Res
++--   C :: forall ... . ctx => { f1, f2 :: !T1, f3 :: T2 } -> Res
++pGADTconstr :: P ([Ident], [IdKind], [EConstraint], Either [SType] [ConstrField], EType)
+ pGADTconstr = do
+-  cn <- pUIdentSym
++  cns <- sepEndBy1 pUIdentSym comma
+   dcolon
+   es <- pForall
+   ctx <- pContext
+   let pGType = pStrictP $ pOperators pOper pTypeArg
+-  args <- many (pGType <* pSRArrow)
++  flds <- (Right <$> (pRecFields <* pSRArrow))
++      <|> (Left <$> many (pGType <* pSRArrow))
+   res <- pType
+-  pure (cn, es, ctx, args, res)
+-
+-dsGADT :: LHS -> (Ident, [IdKind], [EConstraint], [SType], EType) -> Constr
+-dsGADT (tnm, vks) (cnm, es, ctx, stys, rty) =
+-  case getAppM rty of
+-    Just (tnm', ts) | tnm == tnm' && length vks == length ts ->
+-        -- Check if we can use a regular constructor
+-        case zipWithM mtch vks ts of
+-          -- Result type is just type variables, so use it as is
+-          Just sub | not (anySame (map fst sub))
+-            -> Constr es'' ctx'' cnm False (Left stys')
+-                        where stys' = map (second $ subst sub) stys
+-                              ctx'' = map (subst sub) ctx
+-                              es'' = if null es then kind (freeTyVars (map snd stys) \\ map fst sub) else es
+-          _ -> Constr es'  ctx' cnm False (Left stys)
+-      where es' = if null es then kind (freeTyVars (rty : map snd stys)) else es
+-            ctx' = zipWith (\ (IdKind i _) t -> eq (EVar i) t) vks ts ++ ctx
+-            eq t1 t2 = EApp (EApp (EVar (mkIdentSLoc (E.getSLoc t1) "~")) t1) t2
+-            mtch (IdKind i _) (EVar i') | not (isConIdent i') = Just (i', EVar i)
+-            mtch _ _ = Nothing
+-            kind = map (\ i -> IdKind i (EVar dummyIdent))
+-    _ -> errorMessage (E.getSLoc rty) $ "Bad GADT result type " ++ prettyShow (rty, tnm, vks)
++  pure (cns, es, ctx, flds, res)
++
++dsGADT :: LHS -> ([Ident], [IdKind], [EConstraint], Either [SType] [ConstrField], EType) -> [Constr]
++dsGADT (tnm, vks) (cnms, es, ctx, ets, rty) = map mk cnms
++  where
++    mk cnm =
++      case getAppM rty of
++        Just (tnm', ts) | tnm == tnm' && length vks == length ts ->
++            -- Check if we can use a regular constructor
++            case zipWithM mtch vks ts of
++              -- Result type is just type variables, so use it as is
++              Just sub | not (anySame (map fst sub))
++                -> Constr es'' ctx'' cnm False ets'
++                            where ets' = case ets of
++                                           Left  stys -> Left (map (second $ subst sub) stys)
++                                           Right fs   -> Right [(f, (s, subst sub t)) | (f, (s, t)) <- fs]
++                                  ctx'' = map (subst sub) ctx
++                                  es'' = if null es then kind (freeTyVars (etsTypes ets) \\ map fst sub) else es
++              _ -> Constr es'  ctx' cnm False ets
++          where es' = if null es then kind (freeTyVars (rty : etsTypes ets)) else es
++                ctx' = zipWith (\ (IdKind i _) t -> eq (EVar i) t) vks ts ++ ctx
++                eq t1 t2 = EApp (EApp (EVar (mkIdentSLoc (E.getSLoc t1) "~")) t1) t2
++                mtch (IdKind i _) (EVar i') | not (isConIdent i') = Just (i', EVar i)
++                mtch _ _ = Nothing
++                kind = map (\ i -> IdKind i (EVar dummyIdent))
++        _ -> errorMessage (E.getSLoc rty) $ "Bad GADT result type " ++ prettyShow (rty, tnm, vks)
+ 
+ pDerivings :: P [Deriving]
+ pDerivings = many pDeriving
+@@ -556,8 +771,12 @@ pConstr = ((\ vs ct t1 c t2 -> Constr vs ct c True (Left [t1, t2])) <$> pForall
+ 
+ 
+ pFields :: P (Either [SType] [(Ident, SType)])
+-pFields = Right <$> (pSpec '{' *> (concatMap flat <$> sepSEBy ((,) <$> (sepEndBy1 pLIdentSym comma <* dcolon) <*> pSType) comma <* pSpec '}'))
++pFields = Right <$> pRecFields
+       <|> Left  <$> many pSAType
++
++-- Record fields: '{ f1, f2 :: !T1, f3 :: T2 }'.
++pRecFields :: P [(Ident, SType)]
++pRecFields = pSpec '{' *> (concatMap flat <$> sepSEBy ((,) <$> (sepEndBy1 pLIdentSym comma <* dcolon) <*> pSType) comma <* pSpec '}')
+   where flat (is, t) = [ (i, t) | i <- is ]
+ 
+ -- XXX This is a mess.
+@@ -599,7 +818,7 @@ pImportItem =
+   <|> ImpTypeSome <$> pUQIdentSym <*> pure []
+   <|> ImpValue    <$> pLQIdentSym
+   <|> ImpValue    <$> (pKeyword "pattern" *> pUQIdentSym)
+-  <|> impType     <$> (pKeyword "type" *> pLQIdentSymbol) <*> (pParens pConList <|> pure [])
++  <|> impType     <$> (pKeyword "type" *> (pUQIdentSym <|> pLQIdentSymbol)) <*> (pParens pConList <|> pure [])
+   where impType i [d] | d == dotDotIdent = ImpTypeAll  i
+         impType i is                     = ImpTypeSome i is
+ 
+@@ -666,8 +885,31 @@ pAType =
+   <|> (uTupleTAp <$> (pSpec 'L' *> sepBy  pType comma <* pSpec 'R'))
+   <|> (uSumTAp <$> (pSpec 'L' *> sepBy1 pType bar <* pSpec 'R'))
+   <|> (uSumT <$> getSLoc <*> (succ . length <$> (pSpec 'L' *> many bar <* pSpec 'R')))
++  <|> pPromoted
+   <|> (flip EApp <$> (lpar *> pTypeApp) <*> (EVar <$> (pTypeOper <* rpar)))
+ 
++-- A DataKinds promoted list/tuple type: '[], '[t1, t2], '(), '(t1, t2), '(,,).
++-- In MicroHs (Type :: Type) promoted tuples are just tuples, while promoted
++-- constructors ('Con, ':, ...) parse as ordinary identifiers elsewhere.
++pPromoted :: P EType
++pPromoted = do
++  loc <- getSLoc
++  pSpec '\''
++  (do lbra
++      ts <- sepBy pType comma
++      rbra
++      pure (foldr (\ x acc -> eApp2 (EVar (mkIdentSLoc loc "':")) x acc)
++                  (EVar (mkIdentSLoc loc "'[]")) ts))
++   <|> (do lpar
++           (do rpar
++               pure (EVar (mkIdentSLoc loc "'()")))
++            <|> (do cs <- some comma
++                    rpar
++                    pure (EVar (mkIdentSLoc loc (map (const ',') cs))))
++            <|> (do ts <- sepBy pType comma
++                    rpar
++                    pure (eTuple ts)))
++
+ -------------
+ -- Patterns
+ 
+@@ -682,7 +924,7 @@ pAPat =
+          i <- pLIdentSym
+          (pSpec '@' *> (EAt i <$> pAPat)) <|> pure (EVar i)
+       )
+-  <|> (evar <$> pUQIdentSym <*> optional pUpdate)
++  <|> (evar <$> pUQIdentSym <*> optional pPatUpdate)
+   <|> pLit
+   <|> (lpar *> (eTuple <$> sepBy pPatV comma <* rpar))
+   <|> (lbra *> (EListish . LList <$> sepBy1 pPat comma <* rbra))
+@@ -694,7 +936,9 @@ pAPat =
+   <|> pUSummand pPat
+   where evar v Nothing = EVar v
+         evar v (Just upd) = EUpdate (EVar v) upd
+-        pPatV = (EViewPat <$> pExpr <*> (pSRArrow *> pPat)) <|> pPat
++
++pPatV :: P EPat
++pPatV = (EViewPat <$> pExpr <*> (pSRArrow *> pPat)) <|> pPat
+ 
+ pUSummand :: P Expr -> P Expr
+ pUSummand p = do
+@@ -795,11 +1039,13 @@ pWhere pb =
+ 
+ pStmt :: P EStmt
+ pStmt =
+-      (SBind <$> (pPat <* pSLArrow) <*> pExpr)
+-  <|> (sLet  <$> (pKeyword "let" *> pBlock pBind)) <*> optional (pKeyword "in" *> pExpr)
+-  <|> (SRec  <$> (pKeyword "rec" *> pBlock pStmt))
++      (SRec  <$> (pKeyword "rec" *> (pBlock pStmt <|> ((:[]) <$> pRecSingle))))
++  <|> pRecSingle
+   <|> (SThen <$> pExpr)
+-  where sLet b Nothing  = SLet b
++  where pRecSingle =
++              (SBind <$> (pPat <* pSLArrow) <*> pExpr)
++          <|> (sLet  <$> (pKeyword "let" *> pBlock pBind)) <*> optional (pKeyword "in" *> pExpr)
++        sLet b Nothing  = SLet b
+         sLet b (Just i) = SThen (ELet b i)
+ 
+ -------------
+@@ -857,7 +1103,7 @@ pIf :: P Expr
+ pIf = EIf <$> (pKeyword "if" *> pExpr) <*>
+               (optional semi *> pKeyword "then" *> pExpr) <*>
+               (optional semi *> pKeyword "else" *> pExpr)
+-  <|> EMultiIf <$> (EAlts <$> (pKeyword "if" *> pBlock (pAlt pSRArrow)) <*> pure [])
++  <|> EMultiIf <$> (EAlts <$> (pKeyword "if" *> (concat <$> pBlock (some (pAlt pSRArrow)))) <*> pure [])
+ 
+ pQualDo :: P Ident
+ pQualDo = do
+@@ -888,11 +1134,17 @@ pAExpr = do
+   pure $ post ee ps
+ 
+ pUpdate :: P [EField]
+-pUpdate = pSpec '{' *> sepSEBy pEField comma <* pSpec '}'
++pUpdate = pUpdateWith pExpr
++
++pPatUpdate :: P [EField]
++pPatUpdate = pUpdateWith pPatV
++
++pUpdateWith :: P Expr -> P [EField]
++pUpdateWith pe = pSpec '{' *> sepSEBy pEField comma <* pSpec '}'
+   where
+     pEField = do
+       fs <- (:) . unQualIdent <$> pLQIdentSym <*> many pSelect
+-      EField fs <$> (equal *> pExpr) <|> pure (EFieldPun fs)
++      EField fs <$> (equal *> pe) <|> pure (EFieldPun fs)
+      <|>
+       (EFieldWild <$ pSymbol "..")
+ 
+@@ -904,7 +1156,7 @@ pAExpr' =
+       (EVar   <$> pLQIdentSym)
+   <|> (EVar   <$> pUQIdentSym)
+   <|> pLit
+-  <|> (lpar *> (eTuple <$> sepBy pExpr comma) <* rpar)
++  <|> pParenOrTuple
+   <|> (lbra *> (EListish <$> pListish) <* rbra)
+   <|> (lpar *> (ESectL <$> pExprOp) <*> (pOperComma <* rpar))
+   <|> (lpar *> (ESectR <$> pOperCommaNoMinus) <*> (pExprOp <* rpar))
+@@ -916,6 +1168,35 @@ pAExpr' =
+   -- This weirdly slows down parsing
+   -- <?> "aexpr"
+ 
++pParenOrTuple :: P Expr
++pParenOrTuple = do
++  loc <- getSLoc
++  lpar
++  m1 <- optional pExpr
++  case m1 of
++    Nothing ->
++      (rpar *> pure (eTuple []))
++      <|> (mkTupleSection loc . (Nothing :) <$> (some (comma *> optional pExpr) <* rpar))
++    Just e1 ->
++      (rpar *> pure (eTuple [e1]))
++      <|> (mkTupleOrSection loc . (Just e1 :) <$> (some (comma *> optional pExpr) <* rpar))
++
++mkTupleOrSection :: SLoc -> [Maybe Expr] -> Expr
++mkTupleOrSection loc ms
++  | all isJust ms = eTuple [ e | Just e <- ms ]
++  | otherwise     = mkTupleSection loc ms
++
++mkTupleSection :: SLoc -> [Maybe Expr] -> Expr
++mkTupleSection loc ms =
++  let (vs, es) = fill (0 :: Int) ms
++      fill _ [] = ([], [])
++      fill k (Just e  : rest) = let (vs', es') = fill k rest in (vs', e : es')
++      fill k (Nothing : rest) =
++        let v = mkIdentSLoc loc ("$ts" ++ show k)
++            (vs', es') = fill (k + 1) rest
++        in  (EVar v : vs', EVar v : es')
++  in  eLamWithSLoc loc vs (eTuple es)
++
+ pListish :: P Listish
+ pListish = do
+   e1 <- pExpr
+@@ -927,13 +1208,48 @@ pListish = do
+        <|> (LFromThen e1 e2 <$ pSymbol "..")
+        <|> pure (LList [e1,e2])
+   (comma *> pMore)
+-   <|> (LCompr e1 <$> (bar *> sepSEBy1 pStmt comma))
++   <|> (mkParCompr e1 <$> some (bar *> sepSEBy1 pStmt comma))
+    <|> (LFromTo e1 <$> (pSymbol ".." *> pExpr))
+    <|> (LFrom e1 <$ pSymbol "..")
+    <|> pure (LList [e1])
+  <|>  -- List with initial comma
+    (comma *> (LList <$> sepEndBy1 pExpr comma))
+ 
++-- Build a (possibly parallel) list comprehension.
++-- A single branch '[e | qs]' is the ordinary comprehension.
++-- Multiple branches '[e | qsA | qsB | ...]' zip the branch lists together.
++-- The desugaring only uses core syntax (ELet, EVar, ETuple, EListish) plus
++-- the always-available list constructors ':' and '[]', so it also works
++-- when the Prelude is not imported.
++mkParCompr :: Expr -> [[EStmt]] -> Listish
++mkParCompr e [qs] = LCompr e qs
++mkParCompr e qss = LCompr e [SBind pat (ELet [Fcn zipId zipEqns] zipped)]
++  where
++    vss = map (nub . concatMap getStmtBound) qss
++    lists = zipWith mkList vss qss
++    mkList vs qs = EListish (LCompr (tupOf vs) qs)
++    zipped = foldl1 (\ a b -> eApp2 (EVar zipId) a b) lists
++    pat = foldl1 (\ a b -> ETuple [a, b]) (map tupOf vss)
++    -- A branch's bound variables as one tuple pattern/expression:
++    -- no variables becomes (), one variable stays bare.
++    tupOf []  = ETuple []
++    tupOf [v] = EVar v
++    tupOf vs  = ETuple (map EVar vs)
++    -- A tiny local zip; '$' cannot appear in user code, so no clashes.
++    zipId = mkIdent "$parZip"
++    x  = mkIdent "$px";  xs = mkIdent "$pxs"
++    y  = mkIdent "$py";  ys = mkIdent "$pys"
++    cons = mkIdent ":"
++    pCons a as = EApp (EApp (EVar cons) (EVar a)) (EVar as)
++    zipEqns =
++      [ Eqn [pCons x xs, pCons y ys]
++            (oneAlt (EApp (EApp (EVar cons)
++                               (ETuple [EVar x, EVar y]))
++                          (eApp2 (EVar zipId) (EVar xs) (EVar ys))))
++      , Eqn [EVar dummyIdent, EVar dummyIdent]
++            (oneAlt (EListish (LList [])))
++      ]
++
+ pExprOp :: P Expr
+ pExprOp = pOperators pOper pExprArgNeg
+ 
+@@ -985,12 +1301,53 @@ pClsBind :: P EBind
+ pClsBind =
+       pBind'
+   <|> DfltSign    <$> (pKeyword "default" *> pLIdentSym <* dcolon) <*> pType
++  <|> DataFam     <$> (pKeyword "data" *> optional (pKeyword "family") *> pLHS) <*> pResultKindAnn
++  <|> mkTI        <$> (pKeyword "type" *> optional (pKeyword "instance") *> pForall) <*> pFamHead <*> (equal *> pType)
++  <|> mkTD        <$> (pKeyword "type" *> optional (pKeyword "family") *> pLHS) <*> pResultKindInj <*> pure Nothing
++  where
++    mkTI vks (fn, args) rhs = TypeInst vks fn args rhs
++    mkTD lhs (mk, injVars) _ = TypeFam lhs mk (lhsInjFlags lhs injVars) Nothing
+ 
+ -- Bindings allowed in an instance definition
+ pInstBind :: P EBind
+ pInstBind =
+-      uncurry Fcn <$> pEqns
++      uncurry Fcn <$> pEqns' (unQualIdent <$> pLQIdentSym) pInstOper (\_ _ -> True)
+   <|> Sign        <$> (sepEndBy1 pLIdentSym comma <* dcolon) <*> pType
++  <|> pInstType
++  <|> pInstData
++  <|> pInstNewtype
++  where
++    -- Method names may be qualified ('M.method'); the qualifier is dropped.
++    pInstOper = guardM pOper (not . isConIdent)
++    -- An associated type instance: 'type [instance] F t1 t2 = rhs'.
++    pInstType = do
++      pKeyword "type"
++      optional (pKeyword "instance")
++      vks <- pForall
++      (fn, args) <- pFamHead
++      rhs <- equal *> pType
++      pure (TypeInst vks fn args rhs)
++    -- An associated data instance.
++    pInstData = do
++      pKeyword "data"
++      optional (pKeyword "instance")
++      vks <- pForall
++      (fn, args) <- pFamHead
++      (cs, ds) <- pDataInstRest vks fn args
++      pure (DataInst False vks fn args cs ds)
++    -- An associated newtype instance.
++    pInstNewtype = do
++      pKeyword "newtype"
++      optional (pKeyword "instance")
++      vks <- pForall
++      (fn, args) <- pFamHead
++      c <- equal *> pField
++      ds <- pDerivings
++      pure (DataInst True vks fn args [c] ds)
++
++-- A single-constructor newtype field (exactly one positional or record field).
++pField :: P Constr
++pField = Constr [] [] <$> pUIdentSym <*> pure False <*> guardM pFields ((== 1) . either length length)
+ 
+ -------------
+ 
+-- 
+2.54.0
+

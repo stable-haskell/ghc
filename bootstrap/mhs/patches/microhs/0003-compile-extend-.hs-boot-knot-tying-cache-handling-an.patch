@@ -1,0 +1,621 @@
+From 10530f20a2846ab7ba1cd09a3a5492a84036a7e0 Mon Sep 17 00:00:00 2001
+From: Moritz Angermann <moritz@zw3rk.com>
+Date: Thu, 19 Nov 2026 21:37:08 +0900
+Subject: [PATCH] compile: extend .hs-boot knot-tying, cache handling, and
+ record-selector aliases
+
+Refs: https://github.com/augustss/MicroHs/issues/278
+
+Extend mutual .hs-boot compilation, cache invalidation/reloading,
+abstraction, and desugaring (including .hs-boot record-selector link aliases)
+so GHC's 450+ module mutually recursive .hs-boot graph compiles cleanly.
+---
+ src/MicroHs/Abstract.hs     | 229 +++++++++++++++++++++---------------
+ src/MicroHs/Compile.hs      |  95 +++++++++++++--
+ src/MicroHs/CompileCache.hs |   7 +-
+ src/MicroHs/Desugar.hs      |  66 +++++++++--
+ 4 files changed, 286 insertions(+), 111 deletions(-)
+
+diff --git a/src/MicroHs/Abstract.hs b/src/MicroHs/Abstract.hs
+index 28c7d7dd..79ccba64 100644
+--- a/src/MicroHs/Abstract.hs
++++ b/src/MicroHs/Abstract.hs
+@@ -3,9 +3,11 @@ module MicroHs.Abstract(
+   -- reduce,
+   ) where
+ import qualified Prelude(); import MHSPrelude
++import Data.Maybe(isNothing)
+ import MicroHs.Ident
+ import MicroHs.Exp
+ import MicroHs.Expr(Lit(..))
++import qualified MicroHs.IdentMap as M
+ 
+ --
+ -- Used combinators
+@@ -99,72 +101,115 @@ cC = Lit (LPrim "C")
+ --------------------
+ 
+ compileOpt :: Exp -> Exp
+-compileOpt = improveT . compileExp
++compileOpt = improveT . toExp . compileExpA
+ 
+-compileExp :: Exp -> Exp
+-compileExp ae =
++-- Annotated expression with free variables at every node,
++-- so abstraction can prune dead subtrees in O(1) per node.
++data AExp
++  = AAtom Exp
++  | AApp (M.Map ()) AExp AExp
++
++fvsA :: AExp -> M.Map ()
++fvsA ae =
++  case ae of
++    AAtom (Var y) -> M.singleton y ()
++    AAtom _ -> M.empty
++    AApp m _ _ -> m
++
++aAppA :: AExp -> AExp -> AExp
++aAppA f a = AApp (M.merge (fvsA f) (fvsA a)) f a
++
++aApp2A :: Exp -> AExp -> AExp -> AExp
++aApp2A c x y = aAppA (aAppA (AAtom c) x) y
++
++aApp3A :: Exp -> AExp -> AExp -> AExp -> AExp
++aApp3A c x y z = aAppA (aApp2A c x y) z
++
++toExp :: AExp -> Exp
++toExp ae =
++  case ae of
++    AAtom e -> e
++    AApp _ f a -> App (toExp f) (toExp a)
++
++compileExpA :: Exp -> AExp
++compileExpA ae =
+   case ae of
+-    App f a -> App (compileExp f) (compileExp a)
+-    Lam x a -> abstract x a
+-    _       -> ae
++    App f a -> aAppA (compileExpA f) (compileExpA a)
++    Lam x a -> abstractA x (compileExpA a)
++    _       -> AAtom ae
+ 
+-abstract :: Ident -> Exp -> Exp
+-abstract x ae =
++abstractA :: Ident -> AExp -> AExp
++abstractA x ae =
+   case ae of
+-    Var y  -> if x == y then cI else aK (Var y)
+-    App f a -> aS (abstract x f) (abstract x a)
+-    Lam y e -> abstract x $ abstract y e
+-    Lit _ -> aK ae
++    AAtom (Var y) -> if x == y then AAtom cI else aKA ae
++    AAtom _       -> aKA ae
++    AApp m f a
++      | isNothing (M.lookup x m) -> aKA ae
++      | otherwise                -> aSA (abstractA x f) (abstractA x a)
++
++aKA :: AExp -> AExp
++aKA e = aAppA (AAtom cK) e
+ 
+-aK :: Exp -> Exp
+-aK e  = App cK e
++data MaybeAppA = NotAppA | IsAppA AExp AExp
++
++getAppA :: AExp -> MaybeAppA
++getAppA ae =
++  case ae of
++    AApp _ f a -> IsAppA f a
++    _          -> NotAppA
++
++isPrimA :: String -> AExp -> Bool
++isPrimA s ae =
++  case ae of
++    AAtom e -> isPrim s e
++    _       -> False
+ 
+-aS :: Exp -> Exp -> Exp
+-aS a1 a2 =
+- if isK a1 then cI else
++aSA :: AExp -> AExp -> AExp
++aSA a1 a2 =
++ if isPrimA "K" a1 then AAtom cI else
+   let
+-    r = aS2 a1 a2
++    r = aS2A a1 a2
+   in
+-    case getApp a1 of
+-      NotApp -> r
+-      IsApp k1 e1 ->
+-        if isK k1 then
+-          case getApp a2 of
+-            IsApp k2 e2 ->
+-              if isK k2 then
+-                aK (App e1 e2)
++    case getAppA a1 of
++      NotAppA -> r
++      IsAppA k1 e1 ->
++        if isPrimA "K" k1 then
++          case getAppA a2 of
++            IsAppA k2 e2 ->
++              if isPrimA "K" k2 then
++                aKA (aAppA e1 e2)
+               else
+-                aB e1 a2
+-            NotApp ->
+-              if isI a2 then
++                aBA e1 a2
++            NotAppA ->
++              if isPrimA "I" a2 then
+                 e1
+               else
+-                aB e1 a2
++                aBA e1 a2
+         else
+           r
+-aS2 :: Exp -> Exp -> Exp
+-aS2 a1 a2 =
+-  case getApp a2 of
+-    NotApp -> aS3 a1 a2
+-    IsApp k2 e2 ->
+-      if isK k2 then
+-        aC a1 e2
++aS2A :: AExp -> AExp -> AExp
++aS2A a1 a2 =
++  case getAppA a2 of
++    NotAppA -> aS3A a1 a2
++    IsAppA k2 e2 ->
++      if isPrimA "K" k2 then
++        aCA a1 e2
+       else
+-        aS3 a1 a2
++        aS3A a1 a2
+ 
+-aS3 :: Exp -> Exp -> Exp
+-aS3 a1 a2 =
++aS3A :: AExp -> AExp -> AExp
++aS3A a1 a2 =
+   let
+-    r = app2 cS a1 a2
++    r = aApp2A cS a1 a2
+   in
+-    case getApp a1 of
+-      NotApp -> r
+-      IsApp be1 e2 ->
+-        case getApp be1 of
+-          NotApp -> r
+-          IsApp b1 e1 ->
+-            if isB b1 then
+-              aS' e1 e2 a2
++    case getAppA a1 of
++      NotAppA -> r
++      IsAppA be1 e2 ->
++        case getAppA be1 of
++          NotAppA -> r
++          IsAppA b1 e1 ->
++            if isPrimA "B" b1 then
++              aS'A e1 e2 a2
+             else
+               r
+ 
+@@ -179,28 +224,28 @@ aS (App (App CB e1) e2) e3     = aS' e1 e2 e3      -- S (B e1 e2) e3  = S' e1 e2
+ aS e1 e2                       = App2 CS e1 e2
+ -}
+ 
+-aC :: Exp -> Exp -> Exp
+-aC a1 e3 =
++aCA :: AExp -> AExp -> AExp
++aCA a1 e3 =
+   let
+-    r = aC2 a1 e3
++    r = aC2A a1 e3
+   in
+-    case getApp a1 of
+-      NotApp -> r
+-      IsApp x1 e2 ->
+-        case getApp x1 of
+-          NotApp -> r
+-          IsApp bc e1 ->
+-            if isB bc then
+-              aC' e1 e2 e3
+-            else if isC bc && isI e1 then
+-              app2 cP e2 e3
++    case getAppA a1 of
++      NotAppA -> r
++      IsAppA x1 e2 ->
++        case getAppA x1 of
++          NotAppA -> r
++          IsAppA bc e1 ->
++            if isPrimA "B" bc then
++              aC'A e1 e2 e3
++            else if isPrimA "C" bc && isPrimA "I" e1 then
++              aApp2A cP e2 e3
+ --            else if isC bc && isC e1 then
+ --              app2 cR e2 e3
+             else
+               r
+ 
+-aC2 :: Exp -> Exp -> Exp
+-aC2 a1 a2 = app2 cC a1 a2
++aC2A :: AExp -> AExp -> AExp
++aC2A a1 a2 = aApp2A cC a1 a2
+ 
+ {-
+ aC (App (App CB e1) e2) e3          = aC' e1 e2 e3      -- C (B e1 e2) e3  = C' e1 e2 e3
+@@ -210,45 +255,45 @@ aC (App (App C' C') e2) e3          = app2 CR e2 e3
+ aC e1                   e2          = app2 C' e1 e2
+ -}
+ 
+-aB :: Exp -> Exp -> Exp
+-aB a1 a2 =
++aBA :: AExp -> AExp -> AExp
++aBA a1 a2 =
+   let
+-    r = aB2 a1 a2
++    r = aB2A a1 a2
+   in
+-    case getApp a1 of
+-      NotApp -> r
+-      IsApp cb ck ->
+-        if isB cb && isK ck && isP a2 then
+-          Lit (LPrim "O")
++    case getAppA a1 of
++      NotAppA -> r
++      IsAppA cb ck ->
++        if isPrimA "B" cb && isPrimA "K" ck && isPrimA "P" a2 then
++          AAtom (Lit (LPrim "O"))
+         else
+           r
+ 
+-aB2 :: Exp -> Exp -> Exp
+-aB2 a1 a2 =
++aB2A :: AExp -> AExp -> AExp
++aB2A a1 a2 =
+   let
+-    r = aB3 a1 a2
++    r = aB3A a1 a2
+   in
+-    case getApp a2 of
+-      IsApp x1 x2 ->
+-        case getApp x1 of
+-          IsApp cb ck ->
+-            if isY a1 && isB cb && isK ck then
++    case getAppA a2 of
++      IsAppA x1 x2 ->
++        case getAppA x1 of
++          IsAppA cb ck ->
++            if isPrimA "Y" a1 && isPrimA "B" cb && isPrimA "K" ck then
+               x2
+             else
+               r
+-          NotApp ->
+-            if isC a1 && isC x1 && isI x2 then
+-              cP
++          NotAppA ->
++            if isPrimA "C" a1 && isPrimA "C" x1 && isPrimA "I" x2 then
++              AAtom cP
+             else
+               r
+-      NotApp -> r
++      NotAppA -> r
+ 
+-aB3 :: Exp -> Exp -> Exp
+-aB3 a1 a2 =
+-  if isI a1 then
++aB3A :: AExp -> AExp -> AExp
++aB3A a1 a2 =
++  if isPrimA "I" a1 then
+     a2
+   else
+-    app2 (Lit (LPrim "B")) a1 a2
++    aApp2A (Lit (LPrim "B")) a1 a2
+ 
+ {-
+ aB (App CB CK) CP             = CO -- Cons
+@@ -258,11 +303,11 @@ aB CI          e              = e  -- B I e = e
+ aB e1          e2             = app2 CB e1 e2
+ -}
+ 
+-aS' :: Exp -> Exp -> Exp -> Exp
+-aS' e1 e2 e3 = app3 (Lit (LPrim "S'")) e1 e2 e3
++aS'A :: AExp -> AExp -> AExp -> AExp
++aS'A e1 e2 e3 = aApp3A (Lit (LPrim "S'")) e1 e2 e3
+ 
+-aC' :: Exp -> Exp -> Exp -> Exp
+-aC' e1 e2 e3 = app3 (Lit (LPrim "C'")) e1 e2 e3
++aC'A :: AExp -> AExp -> AExp -> AExp
++aC'A e1 e2 e3 = aApp3A (Lit (LPrim "C'")) e1 e2 e3
+ 
+ improveT :: Exp -> Exp
+ improveT ae =
+diff --git a/src/MicroHs/Compile.hs b/src/MicroHs/Compile.hs
+index 4c693f7e..c7f5a1b0 100644
+--- a/src/MicroHs/Compile.hs
++++ b/src/MicroHs/Compile.hs
+@@ -16,6 +16,7 @@ module MicroHs.Compile(
+   getPaths,
+   loadPkg,
+   addPreludeImport,
++  headerPreludeSetting,
+   loadEmbedded,
+   ) where
+ import qualified Prelude(); import MHSPrelude
+@@ -74,7 +75,9 @@ compileMany :: Flags -> [IdentModule] -> Cache -> IO Cache
+ compileMany flags mns ach = do
+   execStateIO (do mapM_ (loadPkg flags) (preload flags)
+                   mapM_ (loadEmbedPkg flags) Embed.packages
+-                  mapM_ (compileModuleCached flags ImpNormal) mns)
++                  mapM_ (compileModuleCached flags ImpNormal) mns
++                  loadBoots flags
++                  loadDependencies flags)
+               ach
+ 
+ loadEmbedded :: Flags -> Cache -> IO Cache
+@@ -216,7 +219,8 @@ compileModule flags impt mn pathfn file = do
+     liftIO $ putStrLn $ "parsed:\n" ++ prettyShow pmdl
+   when (isNothing (getFileName mn) && mn /= mnn) $
+     mhsErrorLoc (getSLoc mnn) $ "module name does not agree with file name: " ++ showIdent mn ++ " " ++ showIdent mnn
+-  ((dmdl, syms, imported, tTCDesug, tImp), _) <- compileModuleP flags impt (addPreludeImport pmdl)
++  let noImpPrel = fromMaybe (noImplicitPrelude flags) (headerPreludeSetting file)
++  ((dmdl, syms, imported, tTCDesug, tImp), _) <- compileModuleP flags impt (addPreludeImport noImpPrel pmdl)
+ 
+   t4 <- liftIO getTimeMilli
+   cmdl <- liftIO $ evaluate $ compileToCombinators dmdl
+@@ -235,7 +239,13 @@ compileModule flags impt mn pathfn file = do
+     liftIO $ putStrLn $ "loaded " ++ showIdent mn ++ " (" ++ pathfn ++ ")"
+ 
+   case impt of
+-    ImpNormal -> modify $ workToDone (cmdl, map snd imported, chksum)
++    ImpNormal -> do
++      hadBoots <- not . null <$> gets getBoots
++      modify $ workToDone (cmdl, map snd imported, chksum)
++      c' <- get
++      when (writeCache flags && null (getBoots c') &&
++            (hadBoots || length (cachedNonPkgModuleNames c') `rem` 120 == 0)) $
++        liftIO $ saveCache (cacheName flags) (clearWorking c')
+     ImpBoot   -> return ()
+   return (cmdl, syms, tThis + tImp)
+ 
+@@ -275,8 +285,9 @@ compileToCombinators dmdl =
+ -- No implicitr imports are added when
+ --   import qualified Prelude()
+ -- is present.
+-addPreludeImport :: EModule -> EModule
+-addPreludeImport (EModule mn es ds) =
++-- When the first argument is True (NoImplicitPrelude) only B@ is added.
++addPreludeImport :: Bool -> EModule -> EModule
++addPreludeImport noImpPrel (EModule mn es ds) =
+   EModule mn es ds'
+   where ds' = ps' ++ nps
+         (ps, nps) = partition isImportPrelude ds
+@@ -286,11 +297,81 @@ addPreludeImport (EModule mn es ds) =
+         iblt = Import $ ImportSpec ImpNormal True builtinMdlQ (Just builtinMdl) Nothing
+         ps' =
+           case ps of
+-            [] -> [Import $ ImportSpec ImpNormal False idPrelude Nothing Nothing,      -- no Prelude imports, so add 'import Prelude'
+-                   iblt]                                                               -- and 'import Mhs.Builtin as B@'
++            [] | noImpPrel -> [iblt]                                                   -- NoImplicitPrelude: only 'import Mhs.Builtin as B@'
++               | otherwise -> [Import $ ImportSpec ImpNormal False idPrelude Nothing Nothing,  -- no Prelude imports, so add 'import Prelude'
++                               iblt]                                                   -- and 'import Mhs.Builtin as B@'
+             [Import (ImportSpec ImpNormal True _ Nothing (Just (False, [])))] -> []    -- exactly 'import qualified Prelude()', so import nothing
+             _ -> iblt : ps                                                             -- keep the given Prelude imports, add Builtin
+ 
++-- Scan the file header for {-# LANGUAGE ... #-} pragmas appearing before
++-- the 'module' keyword (or the first top-level declaration).
++-- Skips '--' line comments and nested '{- ... -}' comments (as well as
++-- '#...'-style CPP output lines like '#line ...').
++-- Returns Just True if the last NoImplicitPrelude/ImplicitPrelude mention
++-- disables the implicit Prelude import, Just False if it re-enables it,
++-- and Nothing if neither appears.
++headerPreludeSetting :: String -> Maybe Bool
++headerPreludeSetting file = scanHeader Nothing (dropShebang file)
++  where
++    dropShebang ('#':'!':cs) = dropWhile (/= '\n') cs
++    dropShebang cs = cs
++
++    scanHeader :: Maybe Bool -> String -> Maybe Bool
++    scanHeader cur [] = cur
++    scanHeader cur s@(c:_)
++      | isSpace c = scanHeader cur (tail s)
++      | "--" `isPrefixOf` s = scanHeader cur (dropLine s)
++      | "{-#" `isPrefixOf` s =
++          case readPragma (drop 3 s) of
++            Nothing -> cur                      -- unterminated pragma, give up
++            Just (content, rest) -> scanHeader (applyLang content cur) rest
++      | "{-" `isPrefixOf` s = scanHeader cur (dropNested 1 (drop 2 s))
++      | "#" `isPrefixOf` s = scanHeader cur (dropLine s)   -- e.g. '#line 1 "file.hs"'
++      | isModuleKw s = cur                      -- the header ends at 'module'
++      | otherwise = cur                         -- first top-level declaration
++
++    isModuleKw s = "module" `isPrefixOf` s && notIdentChar (drop 6 s)
++    notIdentChar [] = True
++    notIdentChar (c:_) = not (isAlphaNum c || c == '_' || c == '\'')
++
++    dropLine s = case dropWhile (/= '\n') s of [] -> []; (_:cs) -> cs
++
++    dropNested :: Int -> String -> String
++    dropNested 0 rest = rest
++    dropNested _ [] = []
++    dropNested n ('{':'-':cs) = dropNested (n+1) cs
++    dropNested n ('-':'}':cs) = dropNested (n-1) cs
++    dropNested n (_:cs) = dropNested n cs
++
++    -- Split off the contents of a '{-# ... #-}' pragma (after the '{-#').
++    readPragma :: String -> Maybe (String, String)
++    readPragma = loop (1 :: Int) []
++      where
++        loop _ _ [] = Nothing
++        loop n acc ('{':'-':cs) = loop (n+1) ('-':'{':acc) cs
++        loop n acc ('-':'}':cs)
++          | n <= 1    = Just (reverse acc, cs)
++          | otherwise = loop (n-1) ('}':'-':acc) cs
++        loop n acc (c:cs) = loop n (c:acc) cs
++
++    -- Update the setting from a LANGUAGE pragma; other pragmas are ignored.
++    applyLang :: String -> Maybe Bool -> Maybe Bool
++    applyLang content cur =
++      case words content of
++        ("LANGUAGE":rest) -> foldl applyExt cur (splitComma (unwords rest))
++        _                 -> cur
++      where
++        applyExt _ e | e == "NoImplicitPrelude" = Just True
++        applyExt c e | e == "ImplicitPrelude"   = Just False
++                     | otherwise                = c
++
++    splitComma :: String -> [String]
++    splitComma s =
++      case break (== ',') s of
++        (a, ',':b) -> trim a : splitComma b
++        (a, _)     -> [trim a]
++    trim = reverse . dropWhile isSpace . reverse . dropWhile isSpace
++
+ -------------------------------------------
+ 
+ validateCache :: Flags -> Cache -> IO Cache
+diff --git a/src/MicroHs/CompileCache.hs b/src/MicroHs/CompileCache.hs
+index ed6ad284..1cee4227 100644
+--- a/src/MicroHs/CompileCache.hs
++++ b/src/MicroHs/CompileCache.hs
+@@ -1,6 +1,6 @@
+ module MicroHs.CompileCache(
+   CModule,
+-  Cache, addWorking, getWorking, emptyCache, deleteFromCache, workToDone, addBoot, getBoots,
++  Cache, addWorking, clearWorking, getWorking, emptyCache, deleteFromCache, workToDone, addBoot, getBoots,
+   cachedModules, cachedModuleNames, cachedNonPkgModuleNames,
+   lookupCache, lookupCacheChksum, getImportDeps,
+   addPackage, getCompMdls, getPathPkgs, getPkgs, getEmbedPkgs,
+@@ -79,6 +79,9 @@ getBoots = boots
+ getWorking :: Cache -> [IdentModule]
+ getWorking = working
+ 
++clearWorking :: Cache -> Cache
++clearWorking c = c{ working = [] }
++
+ addWorking :: IdentModule -> Cache -> Cache
+ addWorking mn c =
+   let ws = working c
+@@ -134,7 +137,7 @@ addPackage mf p c = c{
+   where ins t = M.insert (tModuleName t) (PkgMdl t)
+ 
+ saveCache :: FilePath -> Cache -> IO ()
+-saveCache fn cash = writeSerializedCompressed fn (forceCache cash)
++saveCache fn cash = writeSerialized fn (forceCache cash)
+ 
+ loadCached :: FilePath -> IO (Maybe Cache)
+ loadCached fn = do
+diff --git a/src/MicroHs/Desugar.hs b/src/MicroHs/Desugar.hs
+index f5a045ba..b63098d9 100644
+--- a/src/MicroHs/Desugar.hs
++++ b/src/MicroHs/Desugar.hs
+@@ -21,6 +21,7 @@ import MicroHs.Exp
+ import MicroHs.Flags
+ import MicroHs.Graph
+ import MicroHs.Ident
++import qualified MicroHs.IdentMap as M
+ import MicroHs.List
+ import MicroHs.Names
+ import MicroHs.State as S
+@@ -73,7 +74,7 @@ dsDef flags mn ffiNo adef =
+ -- If the function is impure then wrap a performIO around the call.
+ ccall :: EType -> Exp -> Exp
+ ccall t f =
+-  case getArrows t of
++  case getArrows (dropForall t) of
+     (_, EApp (EVar io) _) | io == identIO ->
+       f
+     (as, _) ->
+@@ -84,6 +85,10 @@ ccall t f =
+           call = App perf $ apps f (map Var xs)
+       in  foldr Lam call xs
+ 
++dropForall :: EType -> EType
++dropForall (EForall _ _ u) = dropForall u
++dropForall u = u
++
+ wrapTick :: Bool -> Ident -> Exp -> Exp
+ wrapTick False _ ee = ee
+ wrapTick True  i ee = wrap ee
+@@ -411,11 +416,28 @@ dsMatrix dflt iis@(i:is) aarms@(aarm : _) =
+     EVar _ -> do
+       -- Find all variables, substitute with i, and proceed
+       let (vars, nvars) = span (isPVar . leftMost) aarms
+-          vars' = map (sub . unAt i) vars
+           sub (EVar x : ps, sb, rhs) = (ps, substAlpha x i . sb, rhs)
+           sub _ = impossible
+-      letBind (dsMatrix dflt iis nvars) $ \ drest ->
+-        dsMatrix drest is vars'
++          single = do
++            let vars' = map (sub . unAt i) vars
++            letBind (dsMatrix dflt iis nvars) $ \ drest ->
++              dsMatrix drest is vars'
++      if null nvars then do
++        -- Every arm starts with a variable: substitute a batch of leading
++        -- all-variable columns at once instead of one column at a time.
++        let maxK = length iis
++            colIsVar j = all (\(ps, _, _) -> case drop j ps of (EVar _:_) -> True; _ -> False) aarms
++            k = length (takeWhile colIsVar [0 .. maxK - 1])
++        if k >= 2 then do
++          let (isPref, isRest) = splitAt k iis
++              varsBatch = map (\(ps, sb, rhs) ->
++                let (pPref, psRest) = splitAt k ps
++                    mp = M.fromList [ (x, ex) | (EVar x, ex) <- zip pPref isPref, not (isDummyIdent x) ]
++                in  (psRest, (if M.null mp then id else substExpMany mp) . sb, rhs)) aarms
++          letBind (dsMatrix dflt iis []) $ \ drest ->
++            dsMatrix drest isRest varsBatch
++        else single
++      else single
+     -- Collect identical transformations, do the transformation and proceed.
+     EViewPat e _ -> do
+       let e' = case unAt i aarm of (_, sub, _) -> sub (dsExpr e)
+@@ -522,6 +544,30 @@ substAlpha x y e =
+   else
+     substExp x y e
+ 
++-- Capture-avoiding simultaneous substitution of many variables.
++-- Traverses the expression once instead of once per variable.
++substExpMany :: M.Map Exp -> Exp -> Exp
++substExpMany mp ae
++  | M.null mp = ae
++  | otherwise = go mp ae
++  where
++    rngVars = M.fromList [ (v, ()) | e <- M.elems mp, v <- freeVars e ]
++    go m e =
++      case e of
++        Var i -> fromMaybe e (M.lookup i m)
++        App f a -> App (go m f) (go m a)
++        Lit _ -> e
++        Lam i b ->
++          let m' = M.delete i m
++          in  if M.null m' then e
++              else if isJust (M.lookup i rngVars) then
++                let j = head [ v | n <- enumFrom (0::Int),
++                                   let { v = mkIdent ("a" ++ show n) },
++                                   v `notElem` allVarsExp b, v `notElem` M.keys m', v `notElem` M.keys rngVars ]
++                in  Lam j (go m' (substExp i (Var j) b))
++              else
++                Lam i (go m' b)
++
+ pConOf :: HasCallStack =>
+           EPat -> Con
+ pConOf apat =
+@@ -532,12 +578,12 @@ pConOf apat =
+     _ -> impossiblePP apat
+ 
+ pArgs :: EPat -> [EPat]
+-pArgs apat =
+-  case apat of
+-    ECon _ -> []
+-    EApp f a -> pArgs f ++ [a]
+-    ELit _ _ -> []
+-    _ -> impossible
++pArgs = go []
++  where
++    go acc (ECon _)   = acc
++    go acc (EApp f a) = go (a : acc) f
++    go acc (ELit _ _) = acc
++    go _   _          = impossible
+ 
+ getDups :: (Ord a) => [a] -> [[a]]
+ getDups = filter ((> 1) . length) . groupSort
+-- 
+2.54.0
+

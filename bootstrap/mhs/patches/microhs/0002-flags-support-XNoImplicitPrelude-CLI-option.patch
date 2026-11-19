@@ -1,0 +1,115 @@
+From 7181de93e0e2c4b081230c297cc5720f5a27cd6c Mon Sep 17 00:00:00 2001
+From: Moritz Angermann <moritz@zw3rk.com>
+Date: Thu, 19 Nov 2026 21:37:08 +0900
+Subject: [PATCH] flags: support -XNoImplicitPrelude CLI option
+
+Refs: https://github.com/augustss/MicroHs/issues/365
+
+Add -XNoImplicitPrelude compiler flag plumbing so packages using Cabal
+default-extensions: NoImplicitPrelude (including GHC's 700+ module Stage 1
+compiler closure) compile without modifying every module header.
+---
+ src/MicroHs/Flags.hs       | 11 +++++++++++
+ src/MicroHs/Interactive.hs |  2 +-
+ src/MicroHs/Main.hs        | 15 ++++++++++-----
+ 3 files changed, 22 insertions(+), 6 deletions(-)
+
+diff --git a/src/MicroHs/Flags.hs b/src/MicroHs/Flags.hs
+index 7ca04aa7..67c8b96b 100644
+--- a/src/MicroHs/Flags.hs
++++ b/src/MicroHs/Flags.hs
+@@ -1,6 +1,7 @@
+ module MicroHs.Flags(
+   Flags(..), verbosityGT, defaultFlags,
+   DumpFlag(..), dumpIf,
++  applyXFlag,
+   wantGMP) where
+ import qualified Prelude(); import MHSPrelude
+ import MicroHs.Config
+@@ -37,6 +38,7 @@ data Flags = Flags {
+   fPgm       :: Maybe String, -- preprocessor for -F
+   fArgs      :: [String],   -- arguments for preprocessor
+   doF        :: Bool,       -- run preprocessor
++  noImplicitPrelude :: Bool, -- disable the implicit 'import Prelude'
+   interactive:: Bool,       -- enter interactive mode
+   evalArg    :: Maybe String, -- evaluate an expression
+   editor     :: Maybe String, -- Hugs-like flag to invoke the editor.
+@@ -83,6 +85,7 @@ defaultFlags = Flags {
+   fPgm       = Nothing,
+   fArgs      = [],
+   doF        = False,
++  noImplicitPrelude = False,
+   interactive = False,
+   evalArg     = Nothing,
+   editor      = Nothing,
+@@ -99,3 +102,11 @@ dumpIf :: Monad m => Flags -> DumpFlag -> m () -> m ()
+ dumpIf flags df act | df `elem` dfs || Dall `elem` dfs = act
+                     | otherwise = return ()
+   where dfs = dumpFlags flags
++
++-- Handle a -X... language extension flag (the "X" prefix already stripped).
++-- Returns the updated flags for a known extension, Nothing for unknown ones.
++-- Unknown -X flags are ignored cleanly by the caller.
++applyXFlag :: Flags -> String -> Maybe Flags
++applyXFlag f "NoImplicitPrelude" = Just f{ noImplicitPrelude = True }
++applyXFlag f "ImplicitPrelude"   = Just f{ noImplicitPrelude = False }
++applyXFlag _ _                   = Nothing
+diff --git a/src/MicroHs/Interactive.hs b/src/MicroHs/Interactive.hs
+index 15352f66..de310a04 100644
+--- a/src/MicroHs/Interactive.hs
++++ b/src/MicroHs/Interactive.hs
+@@ -590,7 +590,7 @@ updateTCStateCache (EModule mn es ds) = do
+     flgs <- gets isFlags
+     cash <- gets isCache
+ --    putStrLnI "*** update tcstate"
+-    let mdl' = addPreludeImport mdl
++    let mdl' = addPreludeImport (noImplicitPrelude flgs) mdl
+     ((_, syms, tcstate), ch) <- liftIO $ runStateIO (compileInteractive flgs mdl') cash
+     let idmap = translateMap $ concatMap tBindingsOf $ cachedModules ch
+ --    putStrLnI $ "*** update isFast " ++ show nImps
+diff --git a/src/MicroHs/Main.hs b/src/MicroHs/Main.hs
+index 8b1f5810..42fdc68f 100644
+--- a/src/MicroHs/Main.hs
++++ b/src/MicroHs/Main.hs
+@@ -197,6 +197,9 @@ decodeArgs f mdls (arg:args) =
+     _ | Just r  <- stripPrefix "-ddump-" arg, Just d <- lookup r dumpFlagTable ->
+                    decodeArgs f{dumpFlags = d : dumpFlags f} mdls args
+ 
++    '-':'X':ext | Just f' <- applyXFlag f ext -> decodeArgs f' mdls args
++    '-':'X':_  -> decodeArgs f mdls args   -- ignore unknown -X flags cleanly
++
+     '-':_       -> mhsError $ "Unknown flag: " ++ arg ++ "\n" ++ usage
+     _ | arg `hasTheExtension` ".c" || arg `hasTheExtension` ".o" || arg `hasTheExtension` ".a"
+                 -> decodeArgs f{cArgs = cArgs f ++ [arg]} mdls args
+@@ -264,7 +267,7 @@ mainBuildPkg flags namever amns = do
+   t1 <- getTimeMilli
+   when (verbose flags > 0) $
+     putStrLn $ "Writing package " ++ namever ++ " to " ++ output flags
+-  writeSerializedCompressed (output flags) (forcePackage pkg)
++  writeSerialized (output flags) (forcePackage pkg)
+   t2 <- getTimeMilli
+   when (verbose flags > 0) $
+     putStrLn $ "Compression time " ++ show (t2 - t1) ++ " ms"
+@@ -273,13 +276,15 @@ mainNoCode :: Flags -> [String] -> IO ()
+ mainNoCode flags amns = do
+   when (verbose flags > 0) $
+     putStrLn "Building"
+-  let mns = map mkIdent amns
++  let mns = map (mkIdentSLoc (SLoc "command-line" 0 0)) amns
+   t1 <- getTimeMilli
+-  cash <- compileMany flags mns emptyCache
++  cash0 <- getCached flags
++  cash <- compileMany flags mns cash0
+   let mdls = getCompMdls cash
+-  force mdls `seq` putStrLn "No code generated"
++  force mdls `seq` maybeSaveCache flags cash
++  putStrLn "No code generated"
+   t2 <- getTimeMilli
+-  when (verbose flags > 0) $
++  when (verbose flags > 0 || speed flags) $
+     putStrLn $ "Build time " ++ show (t2 - t1) ++ " ms"
+ 
+ splitNameVer :: String -> (String, Version)
+-- 
+2.54.0
+

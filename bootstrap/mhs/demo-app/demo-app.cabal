@@ -1,0 +1,29 @@
+cabal-version: 3.0
+name: demo-app
+version: 0.1.0.0
+synopsis: Smoke-test app for the MicroHs-built Stage 2 GHC
+build-type: Simple
+
+-- Depends ONLY on boot libraries shipped with every Stage 2 bindist
+-- (base, containers, bytestring, text): no Hackage fetch, works offline
+-- with `cabal-mhs build --offline`.
+
+library
+  hs-source-dirs: src
+  exposed-modules: Demo.Report
+  build-depends:
+    base >= 4.14 && < 5,
+    containers >= 0.6,
+    bytestring >= 0.10,
+    text >= 1.2,
+  default-language: Haskell2010
+  ghc-options: -Wall -O2
+
+executable demo-app
+  hs-source-dirs: app
+  main-is: Main.hs
+  build-depends:
+    base >= 4.14 && < 5,
+    demo-app,
+  default-language: Haskell2010
+  ghc-options: -Wall -O2
