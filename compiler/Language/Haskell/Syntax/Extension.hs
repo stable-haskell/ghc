@@ -20,7 +20,11 @@ module Language.Haskell.Syntax.Extension where
 -- This module captures the type families to precisely identify the extension
 -- points for GHC.Hs syntax
 
+#if defined(__MHS__)
+-- MicroHs has (~) built in; its Data.Type.Equality does not export it.
+#else
 import Data.Type.Equality (type (~))
+#endif
 
 import Data.Data hiding ( Fixity )
 import Data.Kind (Type)

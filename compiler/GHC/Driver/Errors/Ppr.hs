@@ -55,6 +55,10 @@ instance HasDefaultDiagnosticOpts GhcMessageOpts where
 
 instance Diagnostic GhcMessage where
   type DiagnosticOpts GhcMessage = GhcMessageOpts
+#if defined(__MHS__)
+  -- mhs does not apply the default `type DiagnosticHint a = GhcHint`.
+  type DiagnosticHint GhcMessage = GhcHint
+#endif
   diagnosticMessage opts = \case
     GhcPsMessage m
       -> diagnosticMessage (psMessageOpts opts) m
@@ -112,6 +116,10 @@ pprSemaphoreError = \case
 
 instance Diagnostic DriverMessage where
   type DiagnosticOpts DriverMessage = DriverMessageOpts
+#if defined(__MHS__)
+  -- mhs does not apply the default `type DiagnosticHint a = GhcHint`.
+  type DiagnosticHint DriverMessage = GhcHint
+#endif
   diagnosticMessage opts = \case
     DriverUnknownMessage (UnknownDiagnostic f _ m)
       -> diagnosticMessage (f opts) m
@@ -449,13 +457,23 @@ instance Diagnostic DriverMessage where
     DriverNoConfiguredLLVMToolchain
       -> noHints
     DriverSemaphoreOpenFailure buildingCabal (SemaphoreIncompatibleVersion received supported)
+#if defined(__MHS__)
+      -- The stage-00 System.Semaphore shim provides no Ord instance;
+      -- compare the projected version numbers instead (same semantics).
+      | getSemaphoreProtocolVersion received < getSemaphoreProtocolVersion supported
+#else
       | received < supported
+#endif
       -> let required = getSemaphoreProtocolVersion supported
              target = case buildingCabal of
                YesBuildingCabalPackage -> UpgradeCabalInstall
                NoBuildingCabalPackage  -> UpgradeJobserver
          in [SuggestUpgradeForSemaphoreVersionMismatch target required]
+#if defined(__MHS__)
+      | getSemaphoreProtocolVersion received > getSemaphoreProtocolVersion supported
+#else
       | received > supported
+#endif
       -> [SuggestUpgradeForSemaphoreVersionMismatch
             UpgradeGHC (getSemaphoreProtocolVersion received)]
       | otherwise

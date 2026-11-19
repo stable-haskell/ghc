@@ -1932,7 +1932,12 @@ forAllCycleBreakerBindings_ :: Monad m
                             => CycleBreakerVarStack
                             -> (TcTyVar -> TcType -> m ()) -> m ()
 forAllCycleBreakerBindings_ (top_env :| _rest_envs) action
+#if defined(__MHS__)
+  -- mhs base Control.Monad.forM_ is list-only; Bag's Foldable is unavailable.
+  = forM_ (bagToList top_env) (uncurry action)
+#else
   = forM_ top_env (uncurry action)
+#endif
 {-# INLINABLE forAllCycleBreakerBindings_ #-}  -- to allow SPECIALISE later
 
 

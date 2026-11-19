@@ -539,7 +539,12 @@ hscParse' mod_summary
  | otherwise = do
     dflags <- getDynFlags
     logger <- getLogger
+#if defined(__MHS__)
+    -- SCC is profiling-only; an SCC pragma in a do-block mistypes under MHS.
+    withTiming logger
+#else
     {-# SCC "Parser" #-} withTiming logger
+#endif
                 (text "Parser"<+>brackets (ppr $ ms_mod mod_summary))
                 (const ()) $ do
     let src_filename  = ms_hspp_file mod_summary
@@ -1082,7 +1087,12 @@ iface_core_bindings iface wcb_mod_location =
       wcb_modBreaks
     }
   where
+#if defined(__MHS__)
+    -- MicroHs pattern synonyms are positional-only (no `Pat { field }`).
+    ModIface _ mi_module _ _ _ _ _ _ _ _ _ _ mi_simplified_core _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ = iface
+#else
     ModIface {mi_module, mi_simplified_core} = iface
+#endif
 
 -- | Return an 'IO' that hydrates Core bindings and compiles them to bytecode if
 -- the interface contains any, using the supplied type env for typechecking.
@@ -1956,8 +1966,13 @@ hscSimplify' plugins ds_result = do
         else liftIO $ initializePlugins
                     $ hscUpdateFlags (\dflags -> foldr addPluginModuleName dflags plugins)
                       hsc_env
+#if defined(__MHS__)
+    -- SCC is profiling-only; an SCC pragma in a do-block mistypes under MHS.
+    liftIO $ core2core hsc_env_with_plugins ds_result
+#else
     {-# SCC "Core2Core" #-}
       liftIO $ core2core hsc_env_with_plugins ds_result
+#endif
 
 --------------------------------------------------------------
 -- Interface generators

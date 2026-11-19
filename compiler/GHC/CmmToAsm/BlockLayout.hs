@@ -570,8 +570,21 @@ buildChains edges blocks
           (alreadyPlaced to)
         , Just predChain <- mapLookup from chainEnds
         , Just succChain <- mapLookup to chainStarts
+#if defined(__MHS__)
+          -- MHS has no `Eq (STRef s a)` / `sameSTRef`: compare the chains by
+          -- value instead. Singletons are only ever built for unplaced
+          -- blocks, so each placed block lives in exactly one chain and
+          -- distinct live refs always hold unequal values; this matches the
+          -- reference-identity check below.
+          = do predV <- readSTRef predChain
+               succV <- readSTRef succChain
+               if predV /= succV
+                 then fuseChain predChain succChain
+                 else buildNext placed chainStarts chainEnds todo linked
+#else
         , predChain /= succChain -- Otherwise we try to create a cycle.
           = fuseChain predChain succChain
+#endif
 
         | (alreadyPlaced from) &&
           (alreadyPlaced to)

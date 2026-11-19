@@ -1,6 +1,9 @@
 {-# OPTIONS_GHC -fno-warn-name-shadowing #-}
 
 {-# LANGUAGE CPP #-}
+#if !defined(__MHS__)
+{-# LANGUAGE DataKinds #-}
+#endif
 {-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE GADTs #-}
@@ -49,13 +52,21 @@
 --
 module GHC.Unit.Database
    ( GenericUnitInfo(..)
+#if defined(__MHS__)
    , DbUnitInfo
+#else
+   , type DbUnitInfo
+#endif
    , DbModule (..)
    , DbInstUnitId (..)
    , mapGenericUnitInfo
    -- * Read and write
+#if defined(__MHS__)
    , DbReadOnly(..)
    , DbReadWrite(..)
+#else
+   , DbMode(..)
+#endif
    , DbOpenMode(..)
    , isDbOpenReadMode
    , readPackageDbForGhc
@@ -395,10 +406,7 @@ unlockPackageDb (PackageDbLock hnd) = do
     hClose hnd
 
 -- | Mode to open a package db in.
---
--- These are ordinary types, not promoted 'DataKinds' constructors.  MicroHs
--- has no DataKinds, and a phantom argument of a distinct empty type gives
--- GHC the same "read-only stack vs read-write handle" separation.
+#if defined(__MHS__)
 data DbReadOnly = DbReadOnly
 data DbReadWrite = DbReadWrite
 
@@ -408,6 +416,16 @@ data DbReadWrite = DbReadWrite
 data DbOpenMode mode t where
   DbOpenReadOnly  ::      DbOpenMode DbReadOnly t
   DbOpenReadWrite :: t -> DbOpenMode DbReadWrite t
+#else
+data DbMode = DbReadOnly | DbReadWrite
+
+-- | 'DbOpenMode' holds a value of type @t@ but only in 'DbReadWrite' mode.  So
+-- it is like 'Maybe' but with a type argument for the mode to enforce that the
+-- mode is used consistently.
+data DbOpenMode (mode :: DbMode) t where
+  DbOpenReadOnly  ::      DbOpenMode 'DbReadOnly t
+  DbOpenReadWrite :: t -> DbOpenMode 'DbReadWrite t
+#endif
 
 #if !defined(__MHS__)
 -- MicroHs rejects derived Functor for a GADT whose constructors refine

@@ -1,4 +1,5 @@
 
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE DataKinds           #-}
 {-# LANGUAGE FlexibleContexts    #-}
 {-# LANGUAGE GADTs               #-}
@@ -771,6 +772,11 @@ tcInferOverLit lit@(OverLit { ol_val = val
        -- See Note [Source locations for implicit function calls] in GHC.Iface.Ext.Ast
        ; let lit_expr = L (l2l loc) $ mkHsWrapCo co $
                         HsLit noExtField hs_lit
+#if defined(__MHS__)
+             lit_expr  :: LHsExpr GhcTc
+             from_expr :: HsExpr GhcTc
+             witness   :: HsExpr GhcTc
+#endif
              from_expr = mkHsWrap (wrap2 <.> wrap1) $
                          mkHsVar (L loc from_id)
              witness = HsApp noExtField (L (l2l loc) from_expr) lit_expr

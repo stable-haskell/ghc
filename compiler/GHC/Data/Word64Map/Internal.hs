@@ -305,8 +305,10 @@ import GHC.Utils.Containers.Internal.StrictPair
 import Data.Coerce
 import Data.Data (Data(..), Constr, mkConstr, constrIndex, Fixity(Prefix),
                   DataType, mkDataType, gcast1)
+#if !defined(__MHS__)
 import GHC.Exts (build)
 import qualified GHC.Exts as GHCExts
+#endif
 import Text.Read
 import qualified Control.Category as Category
 import Data.Word
@@ -3084,11 +3086,13 @@ fromSet f (Word64Set.Tip kx bm) = buildTree f kx bm (Word64Set.suffixBitMask + 1
   Lists
 --------------------------------------------------------------------}
 
+#if !defined(__MHS__)
 -- | @since 0.5.6.2
 instance GHCExts.IsList (Word64Map a) where
   type Item (Word64Map a) = (Key,a)
   fromList = fromList
   toList   = toList
+#endif
 
 -- | \(O(n)\). Convert the map to a list of key\/value pairs. Subject to list
 -- fusion.

@@ -42,6 +42,10 @@ import GHC.Parser.Annotation (noAnn)
 
 instance Diagnostic PsMessage where
   type DiagnosticOpts PsMessage = NoDiagnosticOpts
+#if defined(__MHS__)
+  -- mhs does not apply the default `type DiagnosticHint a = GhcHint`.
+  type DiagnosticHint PsMessage = GhcHint
+#endif
   diagnosticMessage opts = \case
     PsUnknownMessage (UnknownDiagnostic f _ m)
       -> diagnosticMessage (f opts) m

@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE RankNTypes     #-}
 {-# LANGUAGE TypeFamilies   #-}
 {-# LANGUAGE BlockArguments #-}
@@ -360,6 +361,10 @@ tcCmdMatchLambda env ctxt arity
     match_ctxt = ArrowMatchCtxt ctxt
     pg_ctxt    = PatGuard match_ctxt
 
+#if defined(__MHS__)
+    tc_grhss :: GRHSs GhcRn (LHsCmd GhcRn) -> TcType -> ExpType -> TcM (GRHSs GhcTc (LHsCmd GhcTc))
+    tc_grhs :: TcType -> ExpType -> GRHS GhcRn (LHsCmd GhcRn) -> TcM (GRHS GhcTc (LHsCmd GhcTc))
+#endif
     tc_grhss (GRHSs x grhss binds) stk_ty res_ty
         = do { (binds',grhss') <- tcLocalBinds binds $
                                   mapM (wrapLocMA (tc_grhs stk_ty res_ty)) grhss

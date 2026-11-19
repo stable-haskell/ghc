@@ -1,4 +1,5 @@
 
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MonadComprehensions #-}
 {-# LANGUAGE OverloadedLists #-}
@@ -25,7 +26,11 @@ where
 import GHC.Prelude
 import GHC.Platform
 
+#if defined(__MHS__)
+import {-# SOURCE #-} GHC.HsToCore.Expr (dsExpr)
+#else
 import {-#SOURCE#-} GHC.HsToCore.Expr (dsExpr)
+#endif
 
 import GHC.Types.Basic
 
@@ -258,7 +263,12 @@ match (v:vs) ty eqns    -- Eqns can be empty, but each equation is nonempty
 matchEmpty :: MatchId -> Type -> DsM (NonEmpty (MatchResult CoreExpr))
 -- See Note [Empty case alternatives]
 matchEmpty var res_ty
+#if defined(__MHS__)
+  -- MHS lacks OverloadedLists; (:|) is the same singleton NonEmpty.
+  = return (MR_Fallible mk_seq :| [])
+#else
   = return [MR_Fallible mk_seq]
+#endif
   where
     mk_seq fail = return $ mkWildCase (Var var) (idScaledType var) res_ty
                                       [Alt DEFAULT [] fail]
@@ -529,7 +539,12 @@ tidy1 _ _ (OrPat ty lpats)
     hs_var :: Var -> LHsExpr GhcTc
     hs_var v = noLocA $ mkHsVar (noLocA v)
     single_grhs :: LHsExpr GhcTc -> GRHSs GhcTc (LHsExpr GhcTc)
+#if defined(__MHS__)
+    -- MHS lacks OverloadedLists; (:|) is the same singleton NonEmpty.
+    single_grhs e = GRHSs emptyComments ((noLocA $ GRHS noAnn [] e) :| []) (EmptyLocalBinds noExtField)
+#else
     single_grhs e = GRHSs emptyComments [noLocA $ GRHS noAnn [] e] (EmptyLocalBinds noExtField)
+#endif
 
 -- Everything else goes through unchanged...
 tidy1 _ _ non_interesting_pat
@@ -1052,7 +1067,11 @@ groupEquations :: Platform -> [EquationInfoNE] -> [NonEmpty (PatGroup, EquationI
 -- (b) none of the gi are empty
 -- The ordering of equations is unchanged
 groupEquations platform eqns
+#if defined(__MHS__)
+  = NE.groupBy same_gp $ fmap (\eqn -> (patGroup platform (firstPat eqn), eqn)) eqns
+#else
   = NE.groupBy same_gp $ [(patGroup platform (firstPat eqn), eqn) | eqn <- eqns]
+#endif
   -- comprehension on NonEmpty
   where
     same_gp :: (PatGroup,EquationInfo) -> (PatGroup,EquationInfo) -> Bool
@@ -1076,7 +1095,12 @@ subGroup elems empty lookup insert group
     accumulate pg_map (pg, eqn)
       = case lookup pg pg_map of
           Just eqns -> insert pg (NE.cons eqn eqns) pg_map
+#if defined(__MHS__)
+          -- MHS lacks OverloadedLists; (:|) is the same singleton NonEmpty.
+          Nothing   -> insert pg (eqn :| []) pg_map
+#else
           Nothing   -> insert pg [eqn] pg_map
+#endif
     -- pg_map :: Map a [EquationInfo]
     -- Equations seen so far in reverse order of appearance
 

@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE TypeFamilies #-}
 
@@ -874,6 +875,11 @@ mkOneRecordSelector all_cons idDetails fl has_sel
   = (sel_id, L (noAnnSrcSpan loc) sel_bind)
   where
     loc      = getSrcSpan sel_name
+#if defined(__MHS__)
+    loc'     :: SrcSpanAnnA
+    locn     :: SrcSpanAnnN
+    locc     :: SrcSpanAnnA
+#endif
     loc'     = noAnnSrcSpan loc
     locn     = noAnnSrcSpan loc
     locc     = noAnnSrcSpan loc
@@ -942,10 +948,18 @@ mkOneRecordSelector all_cons idDetails fl has_sel
              | otherwise =  map mk_match cons_w_field ++ deflt
     mk_match con = mkSimpleMatch match_ctxt
                                  (L (l2l loc') [L loc' (mk_sel_pat con)])
+#if defined(__MHS__)
+                                 (L loc' (mkHsVar (L locn field_var)) :: LHsExpr GhcRn)
+#else
                                  (L loc' (mkHsVar (L locn field_var)))
+#endif
     mk_sel_pat con =
       let con_lname = L locn (noUserRdr (getName con))
       in ConPat NoExtField con_lname (RecCon rec_fields)
+#if defined(__MHS__)
+    rec_fields :: HsRecFields GhcRn (LPat GhcRn)
+    rec_field  :: LHsRecField GhcRn (LPat GhcRn)
+#endif
     rec_fields = HsRecFields { rec_ext = noExtField, rec_flds = [rec_field], rec_dotdot = Nothing }
     rec_field  = noLocA (HsFieldBind
                         { hfbAnn = noAnn

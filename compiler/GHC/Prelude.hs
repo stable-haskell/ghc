@@ -15,6 +15,12 @@
 module GHC.Prelude
   (module GHC.Prelude
   ,module GHC.Utils.Trace
+#if defined(__MHS__)
+  ,default Num
+  ,default IsString
+  ,default Foldable
+  ,default Traversable
+#endif
   ) where
 
 

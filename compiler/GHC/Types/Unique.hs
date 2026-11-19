@@ -57,10 +57,16 @@ import GHC.Data.FastString
 import GHC.Utils.Outputable
 import GHC.Utils.Word64 (intToWord64, word64ToInt)
 
+#if !defined(__MHS__)
 -- just for implementing a fast [0,61) -> Char function
 import GHC.Exts (indexCharOffAddr#, Char(..), Int(..))
+#endif
 
+#if defined(__MHS__)
+import Data.Word        ( Word64 )
+#else
 import GHC.Word         ( Word64 )
+#endif
 import Data.Char        ( chr, ord )
 
 import Language.Haskell.Syntax.Module.Name
@@ -351,6 +357,13 @@ w64ToBase62 n_ = go n_ ""
                                   !c = chooseChar62 (word64ToInt r)
 
     chooseChar62 :: Int -> Char
+#if defined(__MHS__)
+    chooseChar62 n
+      | n < 10    = chr (ord '0' + n)
+      | n < 36    = chr (ord 'a' + (n - 10))
+      | otherwise = chr (ord 'A' + (n - 36))
+#else
     {-# INLINE chooseChar62 #-}
     chooseChar62 (I# n) = C# (indexCharOffAddr# chars62 n)
     chars62 = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"#
+#endif

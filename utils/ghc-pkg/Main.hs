@@ -544,7 +544,11 @@ readPackageArg AsDefault str = Id <$> readGlobPkgId str
 -- Some commands operate  on multiple databases, with overlapping semantics:
 --      list, describe, field
 
+#if defined(__MHS__)
 data PackageDB mode
+#else
+data PackageDB (mode :: GhcPkg.DbMode)
+#endif
   = PackageDB {
       location, locationAbsolute :: !FilePath,
       -- We need both possibly-relative and definitely-absolute package
@@ -560,7 +564,11 @@ data PackageDB mode
       packages :: [InstalledPackageInfo]
     }
 
+#if defined(__MHS__)
 type PackageDBStack = [PackageDB GhcPkg.DbReadOnly]
+#else
+type PackageDBStack = [PackageDB 'GhcPkg.DbReadOnly]
+#endif
         -- A stack of package databases.  Convention: head is the topmost
         -- in the stack.
 
@@ -873,7 +881,11 @@ getPkgDatabases verbosity mode use_user use_cache expand_vars my_flags = do
           ++ db_path ++ " for modification: " ++ show e
 
         -- Parse package db in read-only mode.
+#if defined(__MHS__)
         readDatabase :: FilePath -> IO (PackageDB GhcPkg.DbReadOnly)
+#else
+        readDatabase :: FilePath -> IO (PackageDB 'GhcPkg.DbReadOnly)
+#endif
         readDatabase db_path = do
           db <- readParseDatabase verbosity mb_user_conf
                                   GhcPkg.DbOpenReadOnly use_cache db_path
@@ -1269,7 +1281,11 @@ data DBOp = RemovePackage InstalledPackageInfo
 
 changeDB :: Verbosity
          -> [DBOp]
+#if defined(__MHS__)
          -> PackageDB GhcPkg.DbReadWrite
+#else
+         -> PackageDB 'GhcPkg.DbReadWrite
+#endif
          -> PackageDBStack
          -> IO ()
 changeDB verbosity cmds db db_stack = do
@@ -1278,8 +1294,13 @@ changeDB verbosity cmds db db_stack = do
   createDirectoryIfMissing True (location db'')
   changeDBDir verbosity cmds db'' db_stack
 
+#if defined(__MHS__)
 updateInternalDB :: PackageDB GhcPkg.DbReadWrite
                  -> [DBOp] -> PackageDB GhcPkg.DbReadWrite
+#else
+updateInternalDB :: PackageDB 'GhcPkg.DbReadWrite
+                 -> [DBOp] -> PackageDB 'GhcPkg.DbReadWrite
+#endif
 updateInternalDB db cmds = db{ packages = foldl do_cmd (packages db) cmds }
  where
   do_cmd pkgs (RemovePackage p) =
@@ -1291,7 +1312,11 @@ updateInternalDB db cmds = db{ packages = foldl do_cmd (packages db) cmds }
 
 changeDBDir :: Verbosity
             -> [DBOp]
+#if defined(__MHS__)
             -> PackageDB GhcPkg.DbReadWrite
+#else
+            -> PackageDB 'GhcPkg.DbReadWrite
+#endif
             -> PackageDBStack
             -> IO ()
 changeDBDir verbosity cmds db db_stack = do
@@ -1310,7 +1335,11 @@ changeDBDir verbosity cmds db db_stack = do
     do_cmd (AddPackage p)
 
 updateDBCache :: Verbosity
+#if defined(__MHS__)
               -> PackageDB GhcPkg.DbReadWrite
+#else
+              -> PackageDB 'GhcPkg.DbReadWrite
+#endif
               -> PackageDBStack
               -> IO ()
 updateDBCache verbosity db db_stack = do
@@ -1767,7 +1796,11 @@ findPackage :: PackageArg -> [InstalledPackageInfo] -> [InstalledPackageInfo]
 findPackage pkgarg pkgs = filter (pkgarg `matchesPkg`) pkgs
 
 findPackagesByDB :: PackageDBStack -> PackageArg
+#if defined(__MHS__)
                  -> IO [(PackageDB GhcPkg.DbReadOnly, [InstalledPackageInfo])]
+#else
+                 -> IO [(PackageDB 'GhcPkg.DbReadOnly, [InstalledPackageInfo])]
+#endif
 findPackagesByDB db_stack pkgarg
   = case [ (db, matched)
          | db <- db_stack,

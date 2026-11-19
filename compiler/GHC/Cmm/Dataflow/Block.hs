@@ -1,6 +1,10 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE GADTs #-}
+#if defined(__MHS__)
+{-# LANGUAGE KindSignatures #-}
+#endif
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -40,6 +44,9 @@ module GHC.Cmm.Dataflow.Block
     ) where
 
 import GHC.Prelude
+#if defined(__MHS__)
+import qualified Data.Kind
+#endif
 
 -- -----------------------------------------------------------------------------
 -- Shapes: Open and Closed
@@ -58,7 +65,14 @@ type O = 'Open
 type C = 'Closed
 
 -- | Either type indexed by closed/open using type families
+#if defined(__MHS__)
+-- MicroHs does not instantiate the poly-kinded family result (k) to Type at
+-- use sites (kind mismatch on IndexedCO e a b); all stage-1 uses are at
+-- Type (SDoc, a/b/c :: Type), so specialise the family to Type. Same meaning.
+type family IndexedCO (ex :: Extensibility) (a :: Data.Kind.Type) (b :: Data.Kind.Type) :: Data.Kind.Type
+#else
 type family IndexedCO (ex :: Extensibility) (a :: k) (b :: k) :: k
+#endif
 type instance IndexedCO C a _b = a
 type instance IndexedCO O _a b = b
 
@@ -277,6 +291,35 @@ mapBlock3' (f, m, l) b = go b
 
 -- | Fold a function over every node in a block, forward or backward.
 -- The fold function must be polymorphic in the shape of the nodes.
+#if defined(__MHS__)
+-- MicroHs does not unify the poly-kinded result of the IndexedCO family
+-- with Type when used as a function argument; pin a/b/c to Type (and
+-- e/x to Extensibility) so IndexedCO e a b :: Type. Same meaning.
+foldBlockNodesF3 :: forall (n :: Extensibility -> Extensibility -> Data.Kind.Type)
+                            (a :: Data.Kind.Type)
+                            (b :: Data.Kind.Type)
+                            (c :: Data.Kind.Type) .
+                   ( n C O       -> a -> b
+                   , n O O       -> b -> b
+                   , n O C       -> b -> c)
+                 -> (forall (e :: Extensibility) (x :: Extensibility) . Block n e x -> IndexedCO e a b -> IndexedCO x c b)
+foldBlockNodesF  :: forall (n :: Extensibility -> Extensibility -> Data.Kind.Type)
+                            (a :: Data.Kind.Type) .
+                    (forall (e :: Extensibility) (x :: Extensibility) . n e x -> a -> a)
+                 -> (forall (e :: Extensibility) (x :: Extensibility) . Block n e x -> IndexedCO e a a -> IndexedCO x a a)
+foldBlockNodesB3 :: forall (n :: Extensibility -> Extensibility -> Data.Kind.Type)
+                            (a :: Data.Kind.Type)
+                            (b :: Data.Kind.Type)
+                            (c :: Data.Kind.Type) .
+                   ( n C O       -> b -> c
+                   , n O O       -> b -> b
+                   , n O C       -> a -> b)
+                 -> (forall (e :: Extensibility) (x :: Extensibility) . Block n e x -> IndexedCO x a b -> IndexedCO e c b)
+foldBlockNodesB  :: forall (n :: Extensibility -> Extensibility -> Data.Kind.Type)
+                            (a :: Data.Kind.Type) .
+                    (forall (e :: Extensibility) (x :: Extensibility) . n e x -> a -> a)
+                 -> (forall (e :: Extensibility) (x :: Extensibility) . Block n e x -> IndexedCO x a a -> IndexedCO e a a)
+#else
 foldBlockNodesF3 :: forall n a b c .
                    ( n C O       -> a -> b
                    , n O O       -> b -> b
@@ -293,9 +336,14 @@ foldBlockNodesB3 :: forall n a b c .
 foldBlockNodesB  :: forall n a .
                     (forall e x . n e x       -> a -> a)
                  -> (forall e x . Block n e x -> IndexedCO x a a -> IndexedCO e a a)
+#endif
 
 foldBlockNodesF3 (ff, fm, fl) = block
+#if defined(__MHS__)
+  where block :: forall (e :: Extensibility) (x :: Extensibility) . Block n e x -> IndexedCO e a b -> IndexedCO x c b
+#else
   where block :: forall e x . Block n e x -> IndexedCO e a b -> IndexedCO x c b
+#endif
         block (BlockCO f b  )   = ff f `cat` block b
         block (BlockCC f b l)   = ff f `cat` block b `cat` fl l
         block (BlockOC   b l)   =            block b `cat` fl l
@@ -310,7 +358,11 @@ foldBlockNodesF3 (ff, fm, fl) = block
 foldBlockNodesF f = foldBlockNodesF3 (f, f, f)
 
 foldBlockNodesB3 (ff, fm, fl) = block
+#if defined(__MHS__)
+  where block :: forall (e :: Extensibility) (x :: Extensibility) . Block n e x -> IndexedCO x a b -> IndexedCO e c b
+#else
   where block :: forall e x . Block n e x -> IndexedCO x a b -> IndexedCO e c b
+#endif
         block (BlockCO f b  )   = ff f `cat` block b
         block (BlockCC f b l)   = ff f `cat` block b `cat` fl l
         block (BlockOC   b l)   =            block b `cat` fl l

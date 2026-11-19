@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE UnboxedTuples #-}
 {-# LANGUAGE PatternSynonyms #-}
 
@@ -18,7 +19,13 @@ module GHC.Utils.Monad.State.Strict
 
 import GHC.Prelude
 
+#if defined(__MHS__)
+-- ghc-compat's GHC.Exts has no oneShot.  It is only an inlining hint.
+oneShot :: a -> a
+oneShot x = x
+#else
 import GHC.Exts (oneShot)
+#endif
 
 {- Note [Strict State monad]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~

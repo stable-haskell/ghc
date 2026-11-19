@@ -880,7 +880,14 @@ parseDynamicFilePragma :: MonadIO m => Logger -> DynFlags -> [Located String]
 parseDynamicFilePragma = parseDynamicFlagsFull flagsDynamic False
 
 newtype CmdLineP s a = CmdLineP (forall m. (Monad m) => StateT s m a)
+#if !defined(__MHS__)
   deriving (Functor)
+#endif
+
+#if defined(__MHS__)
+instance Functor (CmdLineP s) where
+  fmap f (CmdLineP k) = CmdLineP (fmap f k)
+#endif
 
 instance Monad (CmdLineP s) where
     CmdLineP k >>= f = CmdLineP (k >>= \x -> case f x of CmdLineP g -> g)
@@ -3957,8 +3964,17 @@ decodeSize str
         n      = readRational m
         pred c = isDigit c || c == '.'
 
+#if defined(__MHS__)
+-- MicroHs stage1 links no RTS with heap-size/timing-stats hooks. These are
+-- best-effort driver hints, so plain no-ops preserve behaviour.
+setHeapSize :: Int -> IO ()
+setHeapSize _ = return ()
+enableTimingStats :: IO ()
+enableTimingStats = return ()
+#else
 foreign import ccall unsafe "setHeapSize"       setHeapSize       :: Int -> IO ()
 foreign import ccall unsafe "enableTimingStats" enableTimingStats :: IO ()
+#endif
 
 outputFile :: DynFlags -> Maybe String
 outputFile dflags

@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE DataKinds           #-}
 {-# LANGUAGE FlexibleContexts    #-}
 {-# LANGUAGE MonadComprehensions #-}
@@ -830,6 +831,9 @@ tcFamTyPats fam_tc hs_pats
   where
     fam_name  = tyConName fam_tc
     fam_arity = tyConArity fam_tc
+#if defined(__MHS__)
+    lhs_fun   :: LHsType GhcRn
+#endif
     lhs_fun   = noLocA (HsTyVar noAnn NotPromoted (noLocA $ noUserRdr fam_name))
 
 {- Note [tcFamTyPats: zonking the result kind]

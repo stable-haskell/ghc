@@ -51,7 +51,11 @@ import GHC.Driver.Env
 import GHC.Driver.Plugins
 import GHC.Driver.DynFlags
 import GHC.Driver.Config.Diagnostic
+#if defined(__MHS__)
+import System.IO.Unsafe ( unsafeInterleaveIO )
+#else
 import GHC.IO.Unsafe ( unsafeInterleaveIO )
+#endif
 
 import GHC.Tc.Errors.Hole.Plugin ( HoleFitPluginR (..) )
 import GHC.Tc.Errors.Types
@@ -287,7 +291,15 @@ tcRnModuleTcRnM hsc_env mod_sum
                                                      ++ import_decls))
         ; let { mkImport mod_name = noLocA
                 $ (simpleImportDecl mod_name)
-                  { ideclImportList = Just (Exactly, noLocA [])}}
+                  { ideclImportList = Just (Exactly, importList) }
+#if defined(__MHS__)
+              -- Pin the empty import list for MicroHs: the bare `noLocA []`
+              -- leaves both the element and annotation types ambiguous and
+              -- MicroHs will not unify them through the record field by
+              -- inference alone.
+              ; importList :: XRec GhcPs [LIE GhcPs]
+#endif
+              ; importList = noLocA [] }
         ; let { withReason t imps = map (,text t) imps }
         ; let { all_imports = withReason "is implicitly imported" prel_imports
                   ++ withReason "is directly imported" import_decls

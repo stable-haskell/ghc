@@ -34,7 +34,11 @@ import Control.Monad
 import Control.Monad.Fix
 import Control.Monad.IO.Class
 import Control.Monad.Trans.State.Strict (StateT (..))
+#if defined(__MHS__)
+import Data.Foldable (fold, sequenceA_, foldlM, foldrM)
+#else
 import Data.Foldable (sequenceA_, foldlM, foldrM)
+#endif
 import Data.List (unzip4, unzip5, zipWith4)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Monoid (Ap (Ap, getAp))
@@ -190,7 +194,13 @@ mapAccumLM_NonEmpty
  -> acc -> NonEmpty x -> m (acc, NonEmpty y)
 {-# INLINE mapAccumLM_NonEmpty #-}
 mapAccumLM_NonEmpty f s (x:|xs) =
+#if defined(__MHS__)
+  do (s1, x')  <- f s x
+     (s2, xs') <- mapAccumLM_List f s1 xs
+     return (s2, x' :| xs')
+#else
   [(s2, x':|xs') | (s1, x') <- f s x, (s2, xs') <- mapAccumLM_List f s1 xs]
+#endif
 
 -- | Monadic version of mapSnd
 mapSndM :: (Applicative m, Traversable f) => (b -> m c) -> f (a,b) -> m (f (a,c))
@@ -198,7 +208,11 @@ mapSndM = traverse . traverse
 
 -- | Monadic version of concatMap
 concatMapM :: (Monad m, Traversable f) => (a -> m [b]) -> f a -> m [b]
+#if defined(__MHS__)
+concatMapM f xs = liftM fold (traverse f xs)
+#else
 concatMapM f xs = liftM concat (mapM f xs)
+#endif
 {-# INLINE concatMapM #-}
 -- It's better to inline to inline this than to specialise
 --     concatMapM :: (Monad m) => (a -> m [b]) -> [a] -> m [b]
@@ -227,7 +241,11 @@ andM m1 m2 = m1 >>= \x -> if x then m2 else return False
 
 -- | Monadic version of foldl that discards its result
 foldlM_ :: (Monad m, Foldable t) => (a -> b -> m a) -> a -> t b -> m ()
+#if defined(__MHS__)
+foldlM_ f z xs = void (foldlM f z xs)
+#else
 foldlM_ = foldM_
+#endif
 
 -- | Monadic version of 'foldMap'
 foldMapM :: (Applicative m, Foldable t, Monoid b) => (a -> m b) -> t a -> m b

@@ -847,6 +847,9 @@ tcPatSynMatcher (L loc ps_name) lpat prag_fn
                     MG{ mg_alts = L (l2l $ getLoc lpat) cases
                       , mg_ext = MatchGroupTc [unrestricted pat_ty] res_ty gen
                       }
+#if defined(__MHS__)
+             body' :: LHsExpr GhcTc
+#endif
              body' = noLocA $
                      HsLam noAnn LamSingle $
                      MG{ mg_alts = noLocA [mkSimpleMatch (LamAlt LamSingle)

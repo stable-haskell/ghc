@@ -64,6 +64,9 @@ import GHC.Iface.Ext.Utils
 
 import GHC.Unit.Module            ( ml_hs_file )
 import GHC.Unit.Module.ModSummary
+#if defined(__MHS__)
+import Unsafe.Coerce              ( unsafeCoerce )
+#endif
 
 import qualified Data.Array as A
 import qualified Data.ByteString as BS
@@ -798,6 +801,39 @@ data HiePassEv p where
   HieRn :: HiePassEv 'Renamed
   HieTc :: HiePassEv 'Typechecked
 
+#if defined(__MHS__)
+-- MicroHs does not know tuple types this large: nest the superclass
+-- context so no single tuple exceeds six constraints. Drops the
+-- self-referential HiePass (NoGhcTcPass p) superclass (a cycle for
+-- instance HiePass 'Renamed); otherwise same constraints as GHC.
+class (( NoGhcTcPass p ~ 'Renamed
+       , ModifyState (IdGhcP p)
+       , Data (GRHS  (GhcPass p) (LocatedA (HsExpr (GhcPass p))))
+       , Data (Match (GhcPass p) (LocatedA (HsExpr (GhcPass p))))
+       , Data (Match (GhcPass p) (LocatedA (HsCmd  (GhcPass p))))
+       )
+      ,( Data (Stmt  (GhcPass p) (LocatedA (HsExpr (GhcPass p))))
+       , Data (Stmt  (GhcPass p) (LocatedA (HsCmd  (GhcPass p))))
+       , Data (HsExpr (GhcPass p))
+       , Data (HsCmd  (GhcPass p))
+       , Data (HsCmdTop (GhcPass p))
+       , Data (GRHS (GhcPass p) (LocatedA (HsCmd (GhcPass p))))
+       )
+      ,( Data (HsUntypedSplice (GhcPass p))
+       , Data (HsTypedSplice (GhcPass p))
+       , Data (HsLocalBinds (GhcPass p))
+       , Data (FieldOcc (GhcPass p))
+       , Data (HsTupArg (GhcPass p))
+       , Data (IPBind (GhcPass p))
+       )
+      ,( ToHie (Context (Located (IdGhcP p)))
+       , ToHie (Context (Located (IdOccGhcP p)))
+       , Anno (IdGhcP p) ~ SrcSpanAnnN
+       , Anno (IdOccGhcP p) ~ SrcSpanAnnN
+       , Typeable p
+       , IsPass p
+       ))
+#else
 class ( HiePass (NoGhcTcPass p)
       , NoGhcTcPass p ~ 'Renamed
       , ModifyState (IdGhcP p)
@@ -823,6 +859,7 @@ class ( HiePass (NoGhcTcPass p)
       , Typeable p
       , IsPass p
       )
+#endif
       => HiePass p where
   hiePass :: HiePassEv p
 
@@ -899,7 +936,15 @@ instance ( HiePass p
         , toHie alts
         ]
     where origin = case hiePass @p of
+#if defined(__MHS__)
+             -- MicroHs cannot reduce the open family `XMG` for generic `p`
+             -- (no GADT refinement of `hiePass @p`): the `HieRn` extension
+             -- already holds an `Origin` value (`XMG GhcRn x = Origin`
+             -- definitionally), so coerce it directly. Same value GHC uses.
+             HieRn -> unsafeCoerce (mg_ext mg)
+#else
              HieRn -> mg_ext mg
+#endif
              HieTc -> mg_origin $ mg_ext mg
 
 setOrigin :: Origin -> NodeOrigin -> NodeOrigin
@@ -1437,7 +1482,11 @@ instance HiePass p => ToHie (RScoped (HsLocalBinds (GhcPass p))) where
                       valBinds
         ]
 
+#if defined(__MHS__)
+scopeHsLocaLBinds :: forall p. HsLocalBinds (GhcPass p) -> Scope
+#else
 scopeHsLocaLBinds :: HsLocalBinds (GhcPass p) -> Scope
+#endif
 scopeHsLocaLBinds (HsValBinds _ (ValBinds _ bs sigs))
   = foldr combineScopes NoScope (bsScope ++ sigsScope)
   where
@@ -1449,7 +1498,11 @@ scopeHsLocaLBinds (HsValBinds _ (XValBindsLR (NValBinds bs sigs)))
   = foldr combineScopes NoScope (bsScope ++ sigsScope)
   where
     bsScope :: [Scope]
+#if defined(__MHS__)
+    bsScope = map (mkScope . getLoc) (concatMap snd bs :: [LHsBind (GhcPass p)])
+#else
     bsScope = map (mkScope . getLoc) $ concatMap snd bs
+#endif
     sigsScope :: [Scope]
     sigsScope = map (mkScope . getLocA) sigs
 

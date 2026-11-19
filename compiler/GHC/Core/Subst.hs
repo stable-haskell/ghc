@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-
 (c) The University of Glasgow 2006
 (c) The GRASP/AQUA Project, Glasgow University, 1992-1998
@@ -64,7 +65,13 @@ import GHC.Utils.Outputable
 import GHC.Utils.Panic
 
 import Data.Functor.Identity (Identity (..))
+#if defined(__MHS__)
+-- MHS's Data.List.mapAccumL is list-only; modern base generalises it over
+-- Traversable (same entity as Data.Traversable.mapAccumL, which MHS has).
+import Data.Traversable (mapAccumL)
+#else
 import Data.List (mapAccumL)
+#endif
 
 {-
 ************************************************************************

@@ -5,6 +5,7 @@
 -}
 
 
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE TypeFamilies #-}
 
 {-# OPTIONS_GHC -Wno-incomplete-record-updates #-}
@@ -265,8 +266,13 @@ tcDefMeth clas tyvars this_dict binds_in hs_sig_fn prag_fn
 
        ; diagnosticTc (not (null spec_prags)) dia
 
-       ; let hs_ty = hs_sig_fn sel_name
-                     `orElse` pprPanic "tc_dm" (ppr sel_name)
+       ; let
+#if defined(__MHS__)
+            lm_bind :: HsBind GhcRn
+#endif
+            hs_ty = hs_sig_fn sel_name
+                    `orElse` pprPanic "tc_dm" (ppr sel_name)
+#if !defined(__MHS__)
              -- We need the HsType so that we can bring the right
              -- type variables into scope
              --
@@ -276,21 +282,42 @@ tcDefMeth clas tyvars this_dict binds_in hs_sig_fn prag_fn
              --          generic gen_op :: D a => a -> a
              -- The "local_dm_ty" is precisely the type in the above
              -- type signatures, ie with no "forall a. C a =>" prefix
+#endif
 
+#if defined(__MHS__)
+            local_dm_ty = instantiateMethod clas global_dm_id (mkTyVarTys tyvars)
+#else
              local_dm_ty = instantiateMethod clas global_dm_id (mkTyVarTys tyvars)
+#endif
 
+#if defined(__MHS__)
+            lm_bind     = dm_bind { fun_id = L (l2l bind_loc) local_dm_name }
+#else
              lm_bind     = dm_bind { fun_id = L (l2l bind_loc) local_dm_name }
+#endif
+#if !defined(__MHS__)
                              -- Substitute the local_meth_name for the binder
                              -- NB: the binding is always a FunBind
+#endif
 
+#if defined(__MHS__)
+            warn_redundant = case dm_spec of
+#else
              warn_redundant = case dm_spec of
+#endif
                                 GenericDM {} -> lhsSigTypeContextSpan hs_ty
                                 VanillaDM    -> NoRRC
+#if !defined(__MHS__)
                 -- For GenericDM, warn if the user specifies a signature
                 -- with redundant constraints; but not for VanillaDM, where
                 -- the default method may well be 'error' or something
+#endif
 
+#if defined(__MHS__)
+            ctxt = FunSigCtxt sel_name warn_redundant
+#else
              ctxt = FunSigCtxt sel_name warn_redundant
+#endif
 
        ; let local_dm_id = mkLocalId local_dm_name ManyTy local_dm_ty
              local_dm_sig = CSig { sig_bndr = local_dm_id
@@ -379,6 +406,14 @@ mkHsSigFun sigs = lookupNameEnv env
     get_classop_sig  _                               = Nothing
 
 ---------------------------
+#if defined(__MHS__)
+mhsLocA :: LHsBind GhcRn -> SrcSpan
+mhsLocA b@(L _ (FunBind { fun_id = L bl _ })) = getLocA b
+mhsLocA _ = noSrcSpan
+mhsLocB :: LHsBind GhcRn -> SrcSpan
+mhsLocB b@(L _ (FunBind { fun_id = L bl _ })) = locA bl
+mhsLocB _ = noSrcSpan
+#endif
 findMethodBind  :: Name                 -- Selector
                 -> LHsBinds GhcRn       -- A group of bindings
                 -> TcPragEnv
@@ -393,7 +428,11 @@ findMethodBind sel_name binds prag_fn
 
     f bind@(L _ (FunBind { fun_id = L bndr_loc op_name }))
       | op_name == sel_name
+#if defined(__MHS__)
+             = Just (bind, mhsLocB bind, prags)
+#else
              = Just (bind, locA bndr_loc, prags)
+#endif
     f _other = Nothing
 
 ---------------------------

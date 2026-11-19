@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {- Union-find data structure compiled from Distribution.Utils.UnionFind -}
 module GHC.Data.UnionFind where
 
@@ -5,11 +6,25 @@ import GHC.Prelude
 import Data.STRef
 import Control.Monad.ST
 import Control.Monad
+#if defined(__MHS__)
+import Unsafe.Coerce (unsafeCoerce)
+import Data.IORef (IORef)
+#endif
 
 -- | A variable which can be unified; alternately, this can be thought
 -- of as an equivalence class with a distinguished representative.
+#if defined(__MHS__)
+-- MicroHs provides Eq for IORef but not for STRef; STRef and IORef share
+-- representation (verified: coercion preserves identity, (True,False) for
+-- same/different refs), so compare Points via their coerced IORefs.
+-- Same identity semantics as GHC's Eq (STRef s a) instance.
+newtype Point s a = Point (STRef s (Link s a))
+instance Eq (Point s a) where
+  Point r1 == Point r2 = (unsafeCoerce r1 :: IORef (Link s a)) == unsafeCoerce r2
+#else
 newtype Point s a = Point (STRef s (Link s a))
     deriving (Eq)
+#endif
 
 -- | Mutable write to a 'Point'
 writePoint :: Point s a -> Link s a -> ST s ()

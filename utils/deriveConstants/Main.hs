@@ -913,7 +913,9 @@ getWanted verbose os tmpdir gccProgram gccFlags nmProgram mobjdumpProgram
           -- "_derivedConstantMAX_Vanilla_REG C 000000b" (MinGW)
           -- "derivedConstantMAX_Vanilla_REG D        1        b" (Solaris)
           -- and returns ("MAX_Vanilla_REG", 11)
+#if defined(__MHS__)
           parseNmLine :: String -> Maybe (String, Integer)
+#endif
           parseNmLine line
               = case words line of
                 ('_' : n) : "C" : s : _ -> mkP n s
@@ -922,8 +924,12 @@ getWanted verbose os tmpdir gccProgram gccFlags nmProgram mobjdumpProgram
                 [n, "D", _, s]          -> mkP n s
                 [s, "O", "*COM*", _, n] -> mkP n s
                 _ -> Nothing
+#if defined(__MHS__)
               where mkP :: String -> String -> Maybe (String, Integer)
                     mkP r s = case (stripPrefix prefix r, readHex s) of
+#else
+              where mkP r s = case (stripPrefix prefix r, readHex s) of
+#endif
                         (Just name, [(size, "")]) -> Just (name, size)
                         _ -> Nothing
 

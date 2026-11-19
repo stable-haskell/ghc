@@ -150,6 +150,11 @@ import GHC.Data.FastString
 
 import Control.Monad.Trans.State.Strict
 import Data.List (intercalate)
+#if defined(__MHS__)
+import Data.Bits (xor)
+import Data.Char (ord)
+import Data.Word (Word64)
+#endif
 import GHC.Fingerprint
 
 data StaticPtrOpts = StaticPtrOpts
@@ -235,6 +240,18 @@ sptCreateStaticBinds opts this_mod binds = do
         , moduleNameString $ moduleName this_mod
         , show n
         ]
+
+#if defined(__MHS__)
+-- MicroHs ghc-compat GHC.Fingerprint provides no fingerprintString.
+-- Deterministic FNV-1a substitute (GHC uses MD5 here). Only determinism
+-- within a stage1 run matters: these keys never leave the build.
+fingerprintString :: String -> Fingerprint
+fingerprintString s = Fingerprint (fnv 0xcbf29ce484222325) (fnv 0x811c9dc5fb100215)
+  where
+    fnv :: Word64 -> Word64
+    fnv seed = foldl step seed (map (fromIntegral . ord) s)
+    step h b = (h `xor` b) * 0x100000001b3
+#endif
 
 -- | @sptModuleInitCode module fps@ is a C stub to insert the static entries
 -- of @module@ into the static pointer table.

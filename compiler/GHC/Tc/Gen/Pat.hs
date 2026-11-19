@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE RankNTypes #-}
@@ -798,6 +799,10 @@ Another example is #26331.
         -- This is a pretty odd place to make the switch, but
         -- it was easy to do.
         ; let
+#if defined(__MHS__)
+              unmangled_result :: Pat GhcTc
+              possibly_mangled_result :: Pat GhcTc
+#endif
               unmangled_result = TuplePat con_arg_tys pats' boxity
                                  -- pat_ty /= pat_ty iff coi /= IdCo
               possibly_mangled_result

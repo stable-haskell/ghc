@@ -91,6 +91,7 @@ be ill-typed in Core.  But it must still be well-kinded!
 
 -}
 
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE ScopedTypeVariables, FlexibleContexts, TypeFamilies,
   DeriveFunctor #-}
 
@@ -514,12 +515,23 @@ checkL False msg = addErrL msg
 checkPostUnariseBndr :: Id -> LintM ()
 checkPostUnariseBndr bndr = do
     lf <- getLintFlags
+#if defined(__MHS__)
+    when (lf_unarised lf) $
+      case checkPostUnariseId bndr of
+        Nothing         -> return ()
+        Just unexpected ->
+          addErrL $
+            text "After unarisation, binder " <>
+            ppr bndr <> text " has " <> text unexpected <> text " type " <>
+            ppr (idType bndr)
+#else
     when (lf_unarised lf) $
       forM_ (checkPostUnariseId bndr) $ \unexpected ->
         addErrL $
           text "After unarisation, binder " <>
           ppr bndr <> text " has " <> text unexpected <> text " type " <>
           ppr (idType bndr)
+#endif
 
 -- Post-unarisation args and case alt binders should not have unboxed tuple,
 -- unboxed sum, or void types. Return what the binder is if it is one of these.

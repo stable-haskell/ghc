@@ -14,6 +14,9 @@ module GHC.LanguageExtensions ( module GHC.LanguageExtensions.Type ) where
 
 import Data.Binary
 import GHC.LanguageExtensions.Type
+#if defined(__MHS__)
+import Prelude
+#endif
 
 #if defined(__MHS__)
 -- binary-mhs has no Generic defaults.  Constructor order is Enum order.

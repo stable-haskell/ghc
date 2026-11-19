@@ -109,6 +109,10 @@ import Foreign.C.String
 
 -- | Start NodeJS interactively with "ghc-interp.js" script loaded in
 startTHRunnerProcess :: FilePath -> NodeJsSettings -> IO (Handle,InterpProcess)
+#if defined(__MHS__)
+startTHRunnerProcess _ _ =
+  ioError (userError "startTHRunnerProcess: external interpreters are not supported in the MicroHs stage1 build")
+#else
 startTHRunnerProcess interp_js settings = do
   interp_in <- newIORef undefined
 
@@ -139,6 +143,7 @@ startTHRunnerProcess interp_js settings = do
               , interpLock   = lock
               }
   pure (std_in, proc)
+#endif
 
 -- | Spawn a JS interpreter
 --

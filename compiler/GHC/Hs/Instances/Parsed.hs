@@ -4,6 +4,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE CPP #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
 -- This module contains Data instances for GhcPs (parsed) phase that have
@@ -58,7 +59,18 @@ deriving instance Data (FixitySig GhcPs)
 -- ---------------------------------------------------------------------
 
 deriving instance Data (FieldLabelStrings GhcPs)
+#if defined(__MHS__)
+-- MicroHs cannot derive Data through a data-family instance; the GhcPs
+-- instance is empty (no constructors), so gfoldl has no children to fold
+-- and this instance is extensionally identical to the derived one.
+instance Data (HsRecUpdParent GhcPs) where
+  gfoldl _ z x = z x
+  gunfold _ _ = error "gunfold HsRecUpdParent"
+  toConstr _ = error "toConstr HsRecUpdParent"
+  dataTypeOf _ = mkDataType "HsRecUpdParent" []
+#else
 deriving instance Data (HsRecUpdParent GhcPs)
+#endif
 deriving instance Data (DotFieldOcc GhcPs)
 deriving instance Data (HsPragE GhcPs)
 

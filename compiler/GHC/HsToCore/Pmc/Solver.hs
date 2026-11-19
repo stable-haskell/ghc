@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE LambdaCase          #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE ViewPatterns        #-}
@@ -1964,15 +1965,27 @@ generateInhabitingPatterns mode (x:xs) n nabla = do
               -- No COMPLETE sets ==> inhabited
               generateInhabitingPatterns mode xs n newty_nabla
             Just clss -> do
+#if defined(__MHS__)
+              -- MHS's forM is list-only; traversing the NonEmpty's toList
+              -- visits the same elements in the same order.
+              nablass' <- forM (toList clss) (instantiate_cons y rep_ty xs n newty_nabla)
+#else
               -- Try each COMPLETE set.
               nablass' <- forM clss (instantiate_cons y rep_ty xs n newty_nabla)
+#endif
               if any null nablass' && vi_bot vi /= IsNotBot
               then generateInhabitingPatterns mode xs n newty_nabla -- bot is still possible. Display a wildcard!
               else do
                 -- Pick the residual COMPLETE set with the smallest cost (see 'completeSetCost').
                 -- See Note [Prefer in-scope COMPLETE matches].
                 DsGblEnv { ds_gbl_rdr_env = rdr_env } <- getGblEnv
+#if defined(__MHS__)
+                -- MHS's Prelude minimumBy needs Foldable1; minWith is the
+                -- same first-minimal-element selection on lists.
+                let bestSet = map snd $ minWith (completeSetCost rdr_env) nablass'
+#else
                 let bestSet = map snd $ minimumBy (comparing $ completeSetCost rdr_env) nablass'
+#endif
                 pure bestSet
 
     -- Instantiates a chain of newtypes, beginning at @x@.

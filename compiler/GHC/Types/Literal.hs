@@ -4,6 +4,7 @@
 
 -}
 
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE DeriveDataTypeable, ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE MagicHash #-}
@@ -82,7 +83,9 @@ import Data.Int
 import Data.Word
 import Data.Char
 import Data.Data ( Data )
+#if !defined(__MHS__)
 import GHC.Exts( isTrue#, dataToTag#, (<#) )
+#endif
 import Numeric ( fromRat )
 import Control.DeepSeq
 
@@ -897,9 +900,23 @@ cmpLit (LitNumber nt1 a)    (LitNumber nt2  b)
   = (nt1 `compare` nt2) `mappend` (a `compare` b)
 cmpLit (LitRubbish tc1 b1)  (LitRubbish tc2 b2)  = (tc1 `compare` tc2) `mappend`
                                                    (b1 `nonDetCmpType` b2)
+#if defined(__MHS__)
+cmpLit lit1 lit2 = compare (litTag lit1) (litTag lit2)
+  where
+    litTag :: Literal -> Int
+    litTag (LitChar {})    = 0
+    litTag (LitNumber {})  = 1
+    litTag (LitString {})  = 2
+    litTag LitNullAddr     = 3
+    litTag (LitRubbish {}) = 4
+    litTag (LitFloat {})   = 5
+    litTag (LitDouble {})  = 6
+    litTag (LitLabel {})   = 7
+#else
 cmpLit lit1 lit2
   | isTrue# (dataToTag# lit1 <# dataToTag# lit2) = LT
   | otherwise                                    = GT
+#endif
 
 {-
         Printing

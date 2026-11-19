@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE TupleSections #-}
@@ -1231,7 +1232,16 @@ replaceLeavesMatch _res_ty leaves
                         (L loc
                           match@(Match { m_grhss = GRHSs x grhss binds }))
   = let
+#if defined(__MHS__)
+        -- MHS's mapAccumL is list-only; round-trip through toList.
+        -- mapAccumL preserves length, so the result is non-empty.
+        (leaves', grhss_list) = mapAccumL replaceLeavesGRHS leaves (toList grhss)
+        grhss' = case nonEmpty grhss_list of
+                   Just ne -> ne
+                   Nothing -> panic "replaceLeavesMatch: empty GRHS list"
+#else
         (leaves', grhss') = mapAccumL replaceLeavesGRHS leaves grhss
+#endif
     in
     (leaves', L loc (match { m_ext = noExtField, m_grhss = GRHSs x grhss' binds }))
 

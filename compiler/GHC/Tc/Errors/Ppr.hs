@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MonadComprehensions #-}
@@ -76,6 +77,9 @@ import GHC.Driver.Backend
 import GHC.Hs hiding (HoleError)
 
 import GHC.Tc.Errors.Types
+#if defined(__MHS__)
+import qualified GHC.Tc.Errors.Types as TcErrorsTypes
+#endif
 import GHC.Tc.Errors.Hole.FitTypes
 import GHC.Tc.Types.BasicTypes
 import GHC.Tc.Types.Constraint
@@ -150,6 +154,10 @@ instance HasDefaultDiagnosticOpts TcRnMessageOpts where
 
 instance Diagnostic TcRnMessage where
   type DiagnosticOpts TcRnMessage = TcRnMessageOpts
+#if defined(__MHS__)
+  -- mhs does not apply the default `type DiagnosticHint a = GhcHint`.
+  type DiagnosticHint TcRnMessage = GhcHint
+#endif
   diagnosticMessage opts = \case
     TcRnUnknownMessage (UnknownDiagnostic f _ m)
       -> diagnosticMessage (f opts) m
@@ -3670,6 +3678,9 @@ dodgy_msg kind tc ie
 dodgy_msg_insert :: GlobalRdrElt -> IE GhcRn
 dodgy_msg_insert tc_gre = IEThingAll (Nothing, noAnn) ii Nothing
   where
+#if defined(__MHS__)
+    ii :: LIEWrappedName GhcRn
+#endif
     ii = noLocA (IEName noExtField $ noLocA $ greName tc_gre)
 
 pprTypeDoesNotHaveFixedRuntimeRep :: Type -> FixedRuntimeRepProvenance -> SDoc
@@ -4547,8 +4558,15 @@ pprMismatchMsg ctxt
 
     count_args ty = count isVisiblePiTyBinder $ fst $ splitPiTys ty
 
+#if defined(__MHS__)
+    -- mhs splits `;`-separated equations of one binding into two bindings
+    -- ("Multiply defined"); newline-separate them instead (same semantics).
+    ppr_torc TypeLike       = text "type"
+    ppr_torc ConstraintLike = text "constraint"
+#else
     ppr_torc TypeLike       = text "type";
     ppr_torc ConstraintLike = text "constraint"
+#endif
 
     describe_rep :: RuntimeRepType -> Maybe SDoc
     -- describe_rep IntRep            = Just "an IntRep"
@@ -5003,7 +5021,13 @@ pprHoleError _ (Hole { hole_ty, hole_occ = rdr }) OutOfScopeHole
       | boring_type = hang herald 2 (ppr rdr)
       | otherwise   = hang herald 2 (pp_rdr_with_type rdr hole_ty)
     boring_type = isTyVarTy hole_ty
+#if defined(__MHS__)
+-- mhs cannot disambiguate the HoleError constructor by expected type
+-- (GHC.Tc.Errors.Types vs GHC.Hs.Expr); qualify it (same semantics).
+pprHoleError ctxt (Hole { hole_ty, hole_occ}) (TcErrorsTypes.HoleError sort other_tvs hole_skol_info) =
+#else
 pprHoleError ctxt (Hole { hole_ty, hole_occ}) (HoleError sort other_tvs hole_skol_info) =
+#endif
   vcat [ hole_msg
        , tyvars_msg
        , case sort of { ExprHole {} -> expr_hole_hint; _ -> type_hole_hint } ]
@@ -5151,8 +5175,12 @@ tcSolverReportMsgHints ctxt = \case
 
 mismatchMsgHints :: SolverReportErrCtxt -> MismatchMsg -> [GhcHint]
 mismatchMsgHints ctxt msg =
+#if defined(__MHS__)
+  maybeToList (do { (exp, act) <- mismatchMsg_ExpectedActuals msg; hint <- suggestAddSig ctxt exp act; return hint })
+#else
   maybeToList [ hint | (exp,act) <- mismatchMsg_ExpectedActuals msg
                      , hint <- suggestAddSig ctxt exp act ]
+#endif
 
 mismatchMsg_ExpectedActuals :: MismatchMsg -> Maybe (Type, Type)
 mismatchMsg_ExpectedActuals = \case
@@ -7473,6 +7501,17 @@ pprErrCtxtMsg = \case
     , isComprehensionContext ctxt
     -> hang (text "In the expression:") 2 (ppr e)
     | otherwise
+#if defined(__MHS__)
+    -- mhs drops existential class constraints in where-bindings when the
+    -- constructor also carries a type-family equality; inline the helper
+    -- as a case in the RHS instead (same semantics).
+    -> hang (text "In a stmt of" <+> pprAStmtContext ctxt <> colon)
+       2 (case stmt of
+            -- For Group and Transform Stmts, don't print the nested stmts!
+            TransStmt { trS_by = by, trS_using = using
+                      , trS_form = form } -> pprTransStmt by using form
+            _ -> pprStmt stmt)
+#else
     -> hang (text "In a stmt of" <+> pprAStmtContext ctxt <> colon)
        2 (ppr_stmt stmt)
     where
@@ -7480,6 +7519,7 @@ pprErrCtxtMsg = \case
       ppr_stmt (TransStmt { trS_by = by, trS_using = using
                           , trS_form = form }) = pprTransStmt by using form
       ppr_stmt stmt = pprStmt stmt
+#endif
 
   DerivInstCtxt pred ->
     text "When deriving the instance for" <+> parens (ppr pred)

@@ -13,6 +13,23 @@ module GHC.SysTools.Process
   , runSomethingResponseFile
   , runSomethingFiltered
   , runSomethingWith
+#if defined(__MHS__)
+  -- * MicroHs stand-ins for the System.Process API
+  -- MicroHs ships only shell-style spawning, so the full process-handle
+  -- API is unavailable. These keep the stage1 closure compiling; every
+  -- runner fails loudly if executed (the stage1 build only typechecks).
+  , CreateProcess(..)
+  , CmdSpec(..)
+  , StdStream(..)
+  , ProcessHandle(..)
+  , proc
+  , createProcess
+  , createProcess_
+  , runInteractiveProcess
+  , waitForProcess
+  , getProcessExitCode
+  , terminateProcess
+#endif
   ) where
 
 import GHC.Prelude
@@ -29,7 +46,9 @@ import GHC.Utils.CliOption
 import GHC.Types.SrcLoc ( SrcLoc, mkSrcLoc, mkSrcSpan )
 import GHC.Data.FastString
 
+#if !defined(__MHS__)
 import GHC.IO.Encoding
+#endif
 
 #if defined(__IO_MANAGER_WINIO__)
 import GHC.IO.SubSystem ((<!>))
@@ -45,7 +64,122 @@ import System.Environment
 import System.FilePath
 import System.IO
 import System.IO.Error as IO
+#if defined(__MHS__)
+import System.Directory (getTemporaryDirectory, removeFile)
+import qualified System.Process as MhsProc (system)
+-- mhs does not propagate the `module CE` re-export of GHC.Utils.Exception
+-- (a qualified-alias re-export), so import finally directly (same semantics).
+import Control.Exception as CE (finally)
+
+getLocaleEncoding :: IO TextEncoding
+getLocaleEncoding = return localeEncoding
+
+-- MicroHs System.Process is shell-only (system/readProcess): no handles
+-- or OS pipes. Stand-ins mirror the subset of the API used across the
+-- stage1 closure, while readCreateProcessWithExitCode' and builderMainLoop
+-- execute external tools (cc, as, ld, ar, unlit, cpp) via MhsProc.system
+-- with POSIX single-quote escaping and temporary output files.
+data CmdSpec = ShellCommand String | RawCommand FilePath [String]
+  deriving (Eq, Show)
+
+data StdStream = Inherit | UseHandle Handle | CreatePipe | NoStream
+  deriving (Eq, Show)
+
+data CreateProcess = CreateProcess
+  { cmdspec          :: CmdSpec
+  , cwd              :: Maybe FilePath
+  , env              :: Maybe [(String, String)]
+  , std_in           :: StdStream
+  , std_out          :: StdStream
+  , std_err          :: StdStream
+  , close_fds        :: Bool
+  , create_group     :: Bool
+  , delegate_ctlc    :: Bool
+  , detach_console   :: Bool
+  , create_new_console :: Bool
+  , new_session      :: Bool
+  , use_process_jobs :: Bool
+  }
+
+data ProcessHandle = MhsProcessHandle
+  deriving (Eq, Show)
+
+proc :: FilePath -> [String] -> CreateProcess
+proc cmd args = CreateProcess
+  { cmdspec = RawCommand cmd args
+  , cwd = Nothing
+  , env = Nothing
+  , std_in = Inherit
+  , std_out = Inherit
+  , std_err = Inherit
+  , close_fds = False
+  , create_group = False
+  , delegate_ctlc = False
+  , detach_console = False
+  , create_new_console = False
+  , new_session = False
+  , use_process_jobs = False
+  }
+
+showCommandForUser :: FilePath -> [String] -> String
+showCommandForUser cmd args = unwords (map quote (cmd : args))
+  where
+    quote a | any (`elem` a) " \t\"'" = show a
+            | otherwise = a
+
+mhsQuoteShell :: String -> String
+mhsQuoteShell s = "'" ++ concatMap (\c -> if c == '\'' then "'\\''" else [c]) s ++ "'"
+
+mhsValidEnvName :: String -> Bool
+mhsValidEnvName [] = False
+mhsValidEnvName (c:cs) =
+  (isAsciiUpper c || isAsciiLower c || c == '_') &&
+  all (\x -> isAsciiUpper x || isAsciiLower x || isDigit x || x == '_') cs
+
+mhsBuildShellCmd :: CmdSpec -> Maybe FilePath -> Maybe [(String, String)] -> String -> String
+mhsBuildShellCmd spec mb_cwd mb_env redir =
+  "( " ++ cwdPrefix ++ envPrefix ++ coreCmd ++ " " ++ redir ++ " )"
+  where
+    cwdPrefix = case mb_cwd of
+      Nothing  -> ""
+      Just dir -> "cd " ++ mhsQuoteShell dir ++ " && "
+    envPrefix = case mb_env of
+      Nothing  -> ""
+      Just kvs -> concat
+        [ "export " ++ k ++ "=" ++ mhsQuoteShell v ++ "; "
+        | (k, v) <- kvs
+        , mhsValidEnvName k
+        , all (/= '\0') v
+        ]
+    coreCmd = case spec of
+      ShellCommand s      -> s
+      RawCommand pgm args -> unwords (map mhsQuoteShell (pgm : args))
+
+noSpawn :: String -> IO a
+noSpawn what =
+  ioError (userError (what ++ ": process handle pipes are not supported in the MicroHs stage1 build"))
+
+createProcess :: CreateProcess -> IO (Maybe Handle, Maybe Handle, Maybe Handle, ProcessHandle)
+createProcess _ = noSpawn "createProcess"
+
+createProcess_ :: String -> CreateProcess -> IO (Maybe Handle, Maybe Handle, Maybe Handle, ProcessHandle)
+createProcess_ _ _ = noSpawn "createProcess_"
+
+runInteractiveProcess :: FilePath -> [String] -> Maybe FilePath -> Maybe [(String, String)]
+                      -> IO (Handle, Handle, Handle, ProcessHandle)
+runInteractiveProcess _ _ _ _ = noSpawn "runInteractiveProcess"
+
+waitForProcess :: ProcessHandle -> IO ExitCode
+waitForProcess _ = noSpawn "waitForProcess"
+
+getProcessExitCode :: ProcessHandle -> IO (Maybe ExitCode)
+getProcessExitCode _ = noSpawn "getProcessExitCode"
+
+terminateProcess :: ProcessHandle -> IO ()
+terminateProcess _ = noSpawn "terminateProcess"
+#else
 import System.Process
+#endif
 
 
 -- | Enable process jobs support on Windows if it can be expected to work (e.g.
@@ -59,6 +193,18 @@ enableProcessJobs opts = opts { use_process_jobs = True }
 readCreateProcessWithExitCode'
     :: CreateProcess
     -> IO (ExitCode, String)    -- ^ stdout
+#if defined(__MHS__)
+readCreateProcessWithExitCode' cp = do
+    tmpDir <- getTemporaryDirectory
+    (fout, hout) <- openTempFile tmpDir "ghc_read.out"
+    hClose hout
+    let run = do
+          let fullCmd = mhsBuildShellCmd (cmdspec cp) (cwd cp) (env cp) ("> " ++ mhsQuoteShell fout)
+          ex <- MhsProc.system fullCmd
+          output <- readFile fout
+          length output `seq` return (ex, output)
+    CE.finally run (removeFile fout `catchIO` \_ -> return ())
+#else
 readCreateProcessWithExitCode' proc = do
     (_, Just outh, _, pid) <-
         createProcess $ enableProcessJobs $ proc{ std_out = CreatePipe }
@@ -82,6 +228,7 @@ readCreateProcessWithExitCode' proc = do
     ex <- waitForProcess pid
 
     return (ex, output)
+#endif
 
 -- If the -B<dir> option is set, add <dir> to PATH.  This works around
 -- a bug in gcc on Windows Vista where it can't find its auxiliary
@@ -220,13 +367,42 @@ handleProc pgm phase_name proc = do
         InstallationError (phase_name ++ ": could not execute: `" ++ pgm ++ "'")
 
 withPipe :: ((Handle, Handle) -> IO a) -> IO a
+#if defined(__MHS__)
+withPipe _ = noSpawn "withPipe"
+#else
 withPipe = bracket createPipe $ \ (readEnd, writeEnd) -> do
   hClose readEnd
   hClose writeEnd
+#endif
 
 builderMainLoop :: Logger -> ([String] -> [String]) -> FilePath
                 -> [String] -> Maybe FilePath -> Maybe [(String, String)]
                 -> IO ExitCode
+#if defined(__MHS__)
+builderMainLoop logger filter_fn pgm real_args mb_cwd mb_env = do
+    tmpDir <- getTemporaryDirectory
+    (fout, hout) <- openTempFile tmpDir "ghc_proc.out"
+    hClose hout
+    let run = do
+          let redir = "< /dev/null > " ++ mhsQuoteShell fout ++ " 2>&1"
+              fullCmd = mhsBuildShellCmd (RawCommand pgm real_args) mb_cwd mb_env redir
+          rc <- MhsProc.system fullCmd
+          out <- readFile fout
+          length out `seq` do
+            let messages = parseBuildMessages (filter_fn (lines out))
+            mapM_ processBuildMessage messages
+            return rc
+    CE.finally run (removeFile fout `catchIO` \_ -> return ())
+  where
+    processBuildMessage :: BuildMessage -> IO ()
+    processBuildMessage msg =
+      case msg of
+        BuildMsg m ->
+          logInfo logger $ withPprStyle defaultUserStyle m
+        BuildError loc m ->
+          logMsg logger errorDiagnostic (mkSrcSpan loc loc)
+              $ withPprStyle defaultUserStyle m
+#else
 builderMainLoop logger filter_fn pgm real_args mb_cwd mb_env = withPipe $ \ (readEnd, writeEnd) -> do
 
 #if defined(__IO_MANAGER_WINIO__)
@@ -288,6 +464,7 @@ builderMainLoop logger filter_fn pgm real_args mb_cwd mb_env = withPipe $ \ (rea
         BuildError loc msg -> do
           logMsg logger errorDiagnostic (mkSrcSpan loc loc)
               $ withPprStyle defaultUserStyle msg
+#endif
 
 parseBuildMessages :: [String] -> [BuildMessage]
 parseBuildMessages str = loop str Nothing

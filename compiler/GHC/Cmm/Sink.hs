@@ -24,7 +24,12 @@ import GHC.Types.Unique.FM
 import Data.List (partition)
 import Data.Maybe
 
+#if defined(__MHS__)
+inline :: a -> a
+inline x = x
+#else
 import GHC.Exts (inline)
+#endif
 
 --------------------------------------------------------------------------------
 {- Note [Sinking and inlining]

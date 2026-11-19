@@ -86,7 +86,14 @@ import GHC.Unit.Module.ModSummary
 import GHC.Parser.Errors.Types (PsWarning, PsError)
 
 import qualified GHC.Tc.Types
+#if defined(__MHS__)
+-- MicroHs desugars record updates on >32-field records via `case` matching the
+-- unqualified data constructor `TcGblEnv` (`dsUpdateCase`), so bring `TcGblEnv`
+-- into scope explicitly alongside `tcg_rn_decls`/`tcg_rn_exports`.
+import GHC.Tc.Types ( TcGblEnv(TcGblEnv), IfM, TcM, tcg_rn_decls, tcg_rn_exports )
+#else
 import GHC.Tc.Types ( TcGblEnv, IfM, TcM, tcg_rn_decls, tcg_rn_exports  )
+#endif
 import GHC.Tc.Errors.Hole.Plugin ( HoleFitPluginR )
 
 import GHC.Core.Opt.Monad ( CoreM )

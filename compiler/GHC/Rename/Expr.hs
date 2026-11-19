@@ -523,6 +523,12 @@ rnExpr (ExplicitTuple _ tup_args boxity)
        ; (tup_args', fvs) <- mapAndUnzipM rnTupArg tup_args
        ; return (ExplicitTuple noExtField tup_args' boxity, plusFVs fvs) }
   where
+#if defined(__MHS__)
+    -- Pin the pass of the local helper: MicroHs otherwise infers it
+    -- result-first (`HsTupArg GhcRn` on both sides) and then rejects the
+    -- parsed `tup_args` at the `mapAndUnzipM` call.
+    rnTupArg :: HsTupArg GhcPs -> RnM (HsTupArg GhcRn, FreeVars)
+#endif
     rnTupArg (Present x e) = do { (e',fvs) <- rnLExpr e
                                 ; return (Present x e', fvs) }
     rnTupArg (Missing _) = return (Missing noExtField, emptyFVs)
@@ -1862,9 +1868,17 @@ segsToStmts empty_rec_stmt ((defs, uses, fwds, ss) : segs) fvs_later
     (later_stmts, later_uses) = segsToStmts empty_rec_stmt segs fvs_later
     new_stmt | non_rec   = head ss
              | otherwise = L (getLoc (head ss)) rec_stmt
-    rec_stmt = empty_rec_stmt { recS_stmts     = noLocA (toList ss)
+    rec_stmt = empty_rec_stmt { recS_stmts     = stmts_list
                               , recS_later_ids = nameSetElemsStable used_later
                               , recS_rec_ids   = nameSetElemsStable fwds }
+#if defined(__MHS__)
+          -- Pin the statement-list annotation for MicroHs: the bare
+          -- `noLocA (toList ss)` leaves it ambiguous and MicroHs will not
+          -- unify it through the `recS_stmts` field's `XRec` wrapper by
+          -- inference alone (same shape as `do_stmts` in GHC.HsToCore.Expr).
+    stmts_list :: XRec GhcRn [LStmt GhcRn (LocatedA (body GhcRn))]
+#endif
+    stmts_list = noLocA (toList ss)
           -- See Note [Deterministic ApplicativeDo and RecursiveDo desugaring]
     non_rec    = NE.isSingleton ss && isEmptyNameSet fwds
     used_later = defs `intersectNameSet` later_uses
@@ -2156,8 +2170,19 @@ mkStmtTreeOptimal stmts =
                -> ((left,left_cost), (StmtTreeOne (stmt_arr ! hi), 1))
                | left_cost > right_cost
                -> ((StmtTreeOne (stmt_arr ! lo), 1), (right,right_cost))
-               | otherwise -> minimumBy (comparing cost)
+               | otherwise ->
+#if defined(__MHS__)
+                 -- MicroHs's `minimumBy` needs `Foldable1`, which has no `[]`
+                 -- instance: fold a first-minimal pick over the (non-empty)
+                 -- candidate list instead. Same result as `minimumBy`.
+                 let { cands = map (\k -> (arr ! (lo,k), arr ! (k+1,hi))) (toList ks)
+                     ; pick x y = if cost y < cost x then y else x }
+                 in case cands of { c:cs -> foldl pick c cs
+                                  ; [] -> panic "mkStmtTree" }
+#else
+                 minimumBy (comparing cost)
                  [ (arr ! (lo,k), arr ! (k+1,hi)) | k <- ks ]
+#endif
            where
              (left, left_cost) = arr ! (lo,hi-1)
              (right, right_cost) = arr ! (lo+1,hi)
@@ -2267,7 +2292,14 @@ stmtTreeToStmts monad_names ctxt (StmtTreeApplicative trees) tail tail_fvs = do
              -- Need 'pureAName' and not 'returnMName' here, so that it requires
              -- 'Applicative' and not 'Monad' whenever possible (until #20540 is fixed).
              (pure_name, _) <- lookupQualifiedDoName (HsDoStmt ctxt) pureAName
-             let expr = HsApp noExtField (noLocA (genHsVar pure_name)) tup
+             let expr = HsApp noExtField pure_app tup
+#if defined(__MHS__)
+                 -- Pin the function position for MicroHs: the bare
+                 -- `noLocA (genHsVar pure_name)` leaves the annotation
+                 -- ambiguous (same shape as `mfix_arg` in GHC.HsToCore.Expr).
+                 pure_app :: LHsExpr GhcRn
+#endif
+                 pure_app = noLocA (genHsVar pure_name)
              return (expr, emptyFVs)
      return ( ApplicativeArgMany
               { xarg_app_arg_many = noExtField

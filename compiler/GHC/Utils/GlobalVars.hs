@@ -24,7 +24,15 @@ where
 
 import GHC.Prelude.Basic
 
+#if defined(__MHS__)
+-- ghc-compat's GHC.Conc.Sync has no sharedCAF.  A single static binary
+-- is already shared, so there is nothing to look up.
+-- (Same general type as GHC.Conc.Sync.sharedCAF in non-__MHS__ builds.)
+sharedCAF :: a -> (Ptr a -> IO (Ptr a)) -> IO a
+sharedCAF x _ = return x
+#else
 import GHC.Conc.Sync ( sharedCAF )
+#endif
 
 import System.IO.Unsafe
 import Data.IORef
@@ -41,6 +49,14 @@ name :: IORef (ty);                 \
 name = globalM (value);
 
 
+#if defined(__MHS__)
+-- No shared libraries in this bootstrap: a plain global is already shared.
+-- (Also avoids foreign imports of RTS symbols MicroHs cannot link.)
+#define SHARED_GLOBAL_VAR(name,accessor,saccessor,value,ty) \
+  GLOBAL_VAR(name,value,ty)
+#define SHARED_GLOBAL_VAR_M(name,accessor,saccessor,value,ty) \
+  GLOBAL_VAR_M(name,value,ty)
+#else
 #define SHARED_GLOBAL_VAR(name,accessor,saccessor,value,ty) \
 {-# NOINLINE name #-};                                      \
 name :: IORef (ty);                                         \
@@ -54,6 +70,7 @@ name :: IORef (ty);                                            \
 name = sharedGlobalM (value) (accessor);                       \
 foreign import ccall unsafe saccessor                          \
   accessor :: Ptr (IORef a) -> IO (Ptr (IORef a));
+#endif
 
 
 

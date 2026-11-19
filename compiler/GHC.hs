@@ -776,6 +776,26 @@ setProgramDynFlags_ invalidate_needed dflags = do
         -- additionally, set checked dflags so we don't lose fixes
         old_unit_env <- ue_setFlags dflags0 . hsc_unit_env <$> getSession
 
+#if defined(__MHS__)
+        -- MicroHs's forM/traverse are list-only; use the Map-backed
+        -- traversal (as elsewhere in this module). Same meaning.
+        home_unit_graph <- HUG.unitEnv_traverseWithKey (\_ homeUnitEnv -> do
+          let cached_unit_dbs = homeUnitEnv_unit_dbs homeUnitEnv
+              dflags = homeUnitEnv_dflags homeUnitEnv
+              old_hpt = homeUnitEnv_hpt homeUnitEnv
+              home_units = HUG.allUnits (ue_home_unit_graph old_unit_env)
+
+          (dbs,unit_state,home_unit,mconstants) <- liftIO $ initUnits logger dflags cached_unit_dbs home_units
+
+          updated_dflags <- liftIO $ updatePlatformConstants dflags0 mconstants
+          pure HomeUnitEnv
+            { homeUnitEnv_units = unit_state
+            , homeUnitEnv_unit_dbs = Just dbs
+            , homeUnitEnv_dflags = updated_dflags
+            , homeUnitEnv_hpt = old_hpt
+            , homeUnitEnv_home_unit = Just home_unit
+            }) (ue_home_unit_graph old_unit_env)
+#else
         home_unit_graph <- forM (ue_home_unit_graph old_unit_env) $ \homeUnitEnv -> do
           let cached_unit_dbs = homeUnitEnv_unit_dbs homeUnitEnv
               dflags = homeUnitEnv_dflags homeUnitEnv
@@ -792,6 +812,7 @@ setProgramDynFlags_ invalidate_needed dflags = do
             , homeUnitEnv_hpt = old_hpt
             , homeUnitEnv_home_unit = Just home_unit
             }
+#endif
 
         let dflags1 = homeUnitEnv_dflags $ HUG.unitEnv_lookup (ue_currentUnit old_unit_env) home_unit_graph
         let unit_env = UnitEnv
@@ -2051,7 +2072,12 @@ mkApiErr :: DynFlags -> SDoc -> GhcApiError
 mkApiErr dflags msg = GhcApiError (showSDoc dflags msg)
 
 
-#if !defined(javascript_HOST_ARCH)
+#if defined(__MHS__)
+-- MicroHs stage1 links no RTS keepCAFs support. The single-image stage1
+-- binary keeps all CAFs by construction, so report success.
+c_keepCAFsForGHCi :: IO Bool
+c_keepCAFsForGHCi = return True
+#elif !defined(javascript_HOST_ARCH)
 foreign import ccall unsafe "keepCAFsForGHCi"
     c_keepCAFsForGHCi   :: IO Bool
 #endif

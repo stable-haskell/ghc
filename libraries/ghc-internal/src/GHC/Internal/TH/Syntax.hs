@@ -28,6 +28,26 @@ module GHC.Internal.TH.Syntax
     ) where
 
 #ifdef BOOTSTRAP_TH
+#if defined(__MHS__)
+-- MicroHs has no GHC.IO.Unsafe, GHC.Ptr, or the TYPE/RuntimeRep kind.
+import Prelude
+import Data.Data hiding (Fixity(..))
+import Data.IORef
+import System.IO.Unsafe ( unsafePerformIO, unsafeInterleaveIO )
+import Control.Monad.IO.Class (MonadIO (..))
+import Control.Monad.Fix (MonadFix (..))
+import Control.Concurrent.MVar (newEmptyMVar, readMVar, putMVar)
+import System.IO        ( hPutStrLn, stderr )
+import Data.Char        ( isAlpha, isAlphaNum, isUpper )
+import Data.List.NonEmpty ( NonEmpty(..) )
+import Data.Word
+import qualified Data.Kind as Kind (Type)
+import Foreign.ForeignPtr
+import Foreign.C.String
+import Foreign.C.Types
+import Foreign.Ptr      ( Ptr, plusPtr )
+import GHC.Generics     ( Generic )
+#else
 import Prelude
 import Data.Data hiding (Fixity(..))
 import Data.IORef
@@ -49,6 +69,7 @@ import GHC.IO.Unsafe    ( unsafeDupableInterleaveIO )
 import GHC.Ptr          ( Ptr, plusPtr )
 import GHC.Generics     ( Generic )
 import GHC.Types        (TYPE, RuntimeRep(..))
+#endif
 #else
 import GHC.Internal.Base hiding (NonEmpty(..),Type, Module, sequence)
 import GHC.Internal.Data.Data hiding (Fixity(..))
@@ -283,6 +304,15 @@ instance Monoid a => Monoid (Q a) where
 --
 -- @since 2.17.0.0
 instance MonadFix Q where
+#if defined(__MHS__)
+  -- MicroHs has neither unsafeDupableInterleaveIO nor FixIOException.
+  mfix k = do
+    m <- runIO newEmptyMVar
+    ans <- runIO (unsafeInterleaveIO (readMVar m))
+    result <- k ans
+    runIO (putMVar m result)
+    return result
+#else
   -- We use the same blackholing approach as in fixIO.
   -- See Note [Blackholing in fixIO] in System.IO in base.
   mfix k = do
@@ -293,6 +323,7 @@ instance MonadFix Q where
     result <- k ans
     runIO (putMVar m result)
     return result
+#endif
 
 
 -----------------------------------------------------
@@ -362,7 +393,11 @@ instance Quote Q where
 --
 -----------------------------------------------------
 
+#if defined(__MHS__)
+-- MicroHs has no TYPE and rejects a qualified kind in this signature.
+#else
 type TExp :: TYPE r -> Kind.Type
+#endif
 type role TExp nominal   -- See Note [Role of TExp]
 newtype TExp a = TExp
   { unType :: Exp -- ^ Underlying untyped Template Haskell expression
@@ -377,7 +412,11 @@ newtype TExp a = TExp
 -- expression
 --
 -- Representation-polymorphic since /template-haskell-2.16.0.0/.
+#if defined(__MHS__)
+unTypeQ :: forall a m . Quote m => m (TExp a) -> m Exp
+#else
 unTypeQ :: forall (r :: RuntimeRep) (a :: TYPE r) m . Quote m => m (TExp a) -> m Exp
+#endif
 unTypeQ m = do { TExp e <- m
                ; return e }
 
@@ -387,8 +426,13 @@ unTypeQ m = do { TExp e <- m
 -- really does have the type you claim it has.
 --
 -- Representation-polymorphic since /template-haskell-2.16.0.0/.
+#if defined(__MHS__)
+unsafeTExpCoerce :: forall a m .
+                      Quote m => m Exp -> m (TExp a)
+#else
 unsafeTExpCoerce :: forall (r :: RuntimeRep) (a :: TYPE r) m .
                       Quote m => m Exp -> m (TExp a)
+#endif
 unsafeTExpCoerce m = do { e <- m
                         ; return (TExp e) }
 
@@ -406,7 +450,9 @@ The splice will evaluate to (MkAge 3) and you can't add that to
 4::Int. So you can't coerce a (Code Q Age) to a (Code Q Int). -}
 
 -- Code constructor
-#if __GLASGOW_HASKELL__ >= 909
+#if defined(__MHS__)
+-- MicroHs has no TYPE and rejects a qualified kind in this signature.
+#elif __GLASGOW_HASKELL__ >= 909
 type Code :: (Kind.Type -> Kind.Type) -> forall r. TYPE r -> Kind.Type
   -- See Note [Foralls to the right in Code]
 #else
@@ -470,18 +516,32 @@ then the example above would become ill-typed.  (See #23592 for some discussion.
 
 -- | Unsafely convert an untyped code representation into a typed code
 -- representation.
+#if defined(__MHS__)
+unsafeCodeCoerce :: forall a m .
+                      Quote m => m Exp -> Code m a
+#else
 unsafeCodeCoerce :: forall (r :: RuntimeRep) (a :: TYPE r) m .
                       Quote m => m Exp -> Code m a
+#endif
 unsafeCodeCoerce m = Code (unsafeTExpCoerce m)
 
 -- | Lift a monadic action producing code into the typed 'Code'
 -- representation
+#if defined(__MHS__)
+liftCode :: forall a m . m (TExp a) -> Code m a
+#else
 liftCode :: forall (r :: RuntimeRep) (a :: TYPE r) m . m (TExp a) -> Code m a
+#endif
 liftCode = Code
 
 -- | Extract the untyped representation from the typed representation
+#if defined(__MHS__)
+unTypeCode :: forall a m . Quote m
+           => Code m a -> m Exp
+#else
 unTypeCode :: forall (r :: RuntimeRep) (a :: TYPE r) m . Quote m
            => Code m a -> m Exp
+#endif
 unTypeCode = unTypeQ . examineCode
 
 -- | Modify the ambient monad used during code generation. For example, you
@@ -490,21 +550,36 @@ unTypeCode = unTypeQ . examineCode
 --  handleState :: Code (StateT Int Q) a -> Code Q a
 --  handleState = hoistCode (flip runState 0)
 -- @
+#if defined(__MHS__)
+hoistCode :: forall m n a . Monad m
+          => (forall x . m x -> n x) -> Code m a -> Code n a
+#else
 hoistCode :: forall m n (r :: RuntimeRep) (a :: TYPE r) . Monad m
           => (forall x . m x -> n x) -> Code m a -> Code n a
+#endif
 hoistCode f (Code a) = Code (f a)
 
 
 -- | Variant of '(>>=)' which allows effectful computations to be injected
 -- into code generation.
+#if defined(__MHS__)
+bindCode :: forall m a b . Monad m
+         => m a -> (a -> Code m b) -> Code m b
+#else
 bindCode :: forall m a (r :: RuntimeRep) (b :: TYPE r) . Monad m
          => m a -> (a -> Code m b) -> Code m b
+#endif
 bindCode q k = liftCode (q >>= examineCode . k)
 
 -- | Variant of '(>>)' which allows effectful computations to be injected
 -- into code generation.
+#if defined(__MHS__)
+bindCode_ :: forall m a b . Monad m
+          => m a -> Code m b -> Code m b
+#else
 bindCode_ :: forall m a (r :: RuntimeRep) (b :: TYPE r) . Monad m
           => m a -> Code m b -> Code m b
+#endif
 bindCode_ q c = liftCode ( q >> examineCode c)
 
 -- | A useful combinator for embedding monadic actions into 'Code'
@@ -514,8 +589,13 @@ bindCode_ q c = liftCode ( q >> examineCode c)
 --   x <- someSideEffect
 --   return (makeCodeWith x)
 -- @
+#if defined(__MHS__)
+joinCode :: forall m a . Monad m
+         => m (Code m a) -> Code m a
+#else
 joinCode :: forall m (r :: RuntimeRep) (a :: TYPE r) . Monad m
          => m (Code m a) -> Code m a
+#endif
 joinCode = flip bindCode id
 
 ----------------------------------------------------

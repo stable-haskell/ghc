@@ -26,6 +26,11 @@ import GHC.HsToCore.Pmc.Ppr
 
 instance Diagnostic DsMessage where
   type DiagnosticOpts DsMessage = NoDiagnosticOpts
+#if defined(__MHS__)
+  -- mhs does not apply the default `type DiagnosticHint a = GhcHint`;
+  -- state it explicitly so [GhcHint] hints (e.g. noHints) typecheck.
+  type DiagnosticHint DsMessage = GhcHint
+#endif
   diagnosticMessage opts = \case
     DsUnknownMessage (UnknownDiagnostic f _ m)
       -> diagnosticMessage (f opts) m

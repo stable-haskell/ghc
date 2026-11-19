@@ -1,4 +1,7 @@
+{-# LANGUAGE CPP #-}
+#if !defined(__MHS__)
 {-# LANGUAGE MagicHash #-}
+#endif
 
 -----------------------------------------------------------------------------
 -- |
@@ -120,9 +123,17 @@ import GHC.Utils.Panic.Plain
 import System.IO
 import Numeric (showHex)
 
+#if defined(__MHS__)
+import Data.Word (Word8)
+import Foreign.Marshal.Alloc (mallocBytes)
+import Foreign.Ptr (Ptr)
+import Foreign.Storable (pokeElemOff)
+import System.IO.Unsafe (unsafeDupablePerformIO)
+#else
 --for a RULES
 import GHC.Base ( unpackCString#, unpackNBytes#, Int(..) )
 import GHC.Ptr  ( Ptr(..) )
+#endif
 
 -- ---------------------------------------------------------------------------
 -- The Doc calculus
@@ -303,18 +314,22 @@ text s = textBeside_ (Str s) (length s) Empty
 
 -- RULE that turns (text "abc") into (ptext (A# "abc"#)) to avoid the
 -- intermediate packing/unpacking of the string.
+#if !defined(__MHS__)
 {-# RULES "text/str"
     forall a. text (unpackCString# a)  = ptext (mkPtrString# a)
   #-}
 {-# RULES "text/unpackNBytes#"
     forall p n. text (unpackNBytes# p n) = ptext (PtrString (Ptr p) (I# n))
   #-}
+#endif
 
 -- Empty strings are desugared into [] (not "unpackCString#..."), hence they are
 -- not matched by the text/str rule above.
+#if !defined(__MHS__)
 {-# RULES "text/[]"
     text [] = emptyText
   #-}
+#endif
 
 ftext :: FastString -> Doc
 ftext s = textBeside_ (PStr s) (lengthFS s) Empty
@@ -1126,6 +1141,16 @@ printDoc_ mode pprCols hdl doc
       = putSpaces n >> next
       | otherwise
       = hPutStr hdl (replicate n c) >> next
+#if defined(__MHS__)
+    putSpaces n
+      | hasAsciiSpace mode
+      , n <= 100
+      = hPutBuf hdl spacesPtr n
+      | hasAsciiSpace mode
+      , n > 100
+      = hPutBuf hdl spacesPtr 100 >> putSpaces (n-100)
+      | otherwise = hPutStr hdl (replicate n ' ')
+#else
     putSpaces n
       -- If we use ascii spaces we are allowed to use hPutBuf
       -- See Note [putSpaces optimizations]
@@ -1137,10 +1162,21 @@ printDoc_ mode pprCols hdl doc
       = hPutBuf hdl (Ptr spaces') 100 >> putSpaces (n-100)
 
       | otherwise = hPutStr hdl (replicate n ' ')
+#endif
 
     done = return () -- hPutChar hdl '\n'
     -- 100 spaces, so we avoid the allocation of replicate n ' '
+#if defined(__MHS__)
+    -- No Addr# literals.  One pinned buffer of ASCII spaces.
+    spacesPtr = unsafeDupablePerformIO $ do
+      p <- mallocBytes 100
+      let fill i
+            | i >= 100  = return p
+            | otherwise = pokeElemOff p i (32 :: Word8) >> fill (i + 1)
+      fill 0
+#else
     spaces' = "                                                                                                    "#
+#endif
 
 
   -- some versions of hPutBuf will barf if the length is zero

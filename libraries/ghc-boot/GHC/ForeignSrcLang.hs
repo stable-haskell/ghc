@@ -9,6 +9,9 @@ module GHC.ForeignSrcLang
 
 import Data.Binary
 import GHC.ForeignSrcLang.Type
+#if defined(__MHS__)
+import Prelude
+#endif
 
 #if defined(__MHS__)
 -- binary-mhs has no Generic defaults.

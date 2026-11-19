@@ -5,6 +5,7 @@
 -}
 
 
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE TypeFamilies #-}
 
 module GHC.Tc.Gen.Sig(
@@ -258,6 +259,9 @@ lhsSigWcTypeContextSpan (HsWC { hswc_body = sigType }) = lhsSigTypeContextSpan s
 lhsSigTypeContextSpan :: LHsSigType GhcRn -> ReportRedundantConstraints
 lhsSigTypeContextSpan (L _ HsSig { sig_body = sig_ty }) = go sig_ty
   where
+#if defined(__MHS__)
+    go :: LHsType GhcRn -> ReportRedundantConstraints
+#endif
     go (L _ (HsQualTy { hst_ctxt = L span _ })) = WantRRC $ locA span -- Found it!
     go (L _ (HsForAllTy { hst_body = hs_ty })) = go hs_ty  -- Look under foralls
     go (L _ (HsParTy _ hs_ty)) = go hs_ty  -- Look under parens

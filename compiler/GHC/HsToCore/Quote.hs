@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP                    #-}
 {-# LANGUAGE AllowAmbiguousTypes    #-}
 
 {-# LANGUAGE DataKinds              #-}
@@ -84,7 +85,9 @@ import GHC.Types.TyThing
 import GHC.Types.Name hiding( varName, tcName )
 import GHC.Types.Name.Env
 
+#if !defined(__MHS__)
 import GHC.TypeLits
+#endif
 import Data.Kind (Constraint)
 
 import qualified GHC.LanguageExtensions as LangExt
@@ -2400,9 +2403,14 @@ newtype Core a = MkC CoreExpr
 unC :: Core a -> CoreExpr
 unC (MkC x) = x
 
+#if defined(__MHS__)
+class NotM a
+instance NotM a
+#else
 type family NotM a where
   NotM (M _) = TypeError ('Text ("rep2_nw must not produce something of overloaded type"))
   NotM _other = (() :: Constraint)
+#endif
 
 rep2M :: Name -> [CoreExpr] -> MetaM (Core (M a))
 rep2 :: Name -> [CoreExpr] -> MetaM (Core (M a))

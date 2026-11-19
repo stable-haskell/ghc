@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE ConstrainedClassMethods #-}
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE MultiWayIf #-}
@@ -955,12 +956,21 @@ cvtPragmaD (AnnP target exp)
   = do { exp' <- cvtl exp
        ; target' <- case target of
          ModuleAnnotation  -> return ModuleAnnProvenance
+#if defined(__MHS__)
+         TypeAnnotation n  -> do
+           n' <- tconName n
+           wrapParLA (TypeAnnProvenance :: LIdP GhcPs -> AnnProvenance GhcPs) n'
+         ValueAnnotation n -> do
+           n' <- vcName n
+           wrapParLA (ValueAnnProvenance :: LIdP GhcPs -> AnnProvenance GhcPs) n'
+#else
          TypeAnnotation n  -> do
            n' <- tconName n
            wrapParLA TypeAnnProvenance n'
          ValueAnnotation n -> do
            n' <- vcName n
            wrapParLA ValueAnnProvenance n'
+#endif
        ; returnJustLA $ Hs.AnnD noExtField
                      $ HsAnnotation (noAnn, (SourceText $ fsLit "{-# ANN")) target' exp'
        }
@@ -1923,6 +1933,9 @@ mk_apps head_ty type_args = do
 
   go type_args
    where
+#if defined(__MHS__)
+    add_parens :: LHsType GhcPs -> CvtM (LHsType GhcPs)
+#endif
     -- See Note [Adding parens for splices]
     add_parens lt@(L _ t)
       | hsTypeNeedsParens appPrec t = returnLA (HsParTy noAnn lt)
@@ -2029,16 +2042,27 @@ cvtPatSynSigTy :: TH.Type -> CvtM (LHsSigType GhcPs)
 -- see Note [Pattern synonym type signatures and Template Haskell]
 cvtPatSynSigTy (ForallT univs reqs (ForallT exis provs ty))
   | null exis, null provs = cvtSigType (ForallT univs reqs ty)
+#if defined(__MHS__)
+  | null univs, null reqs = do { ty' <- cvtType (ForallT exis provs ty)
+                               ; ctxt' <- returnLA ([] :: [LHsType GhcPs])
+#else
   | null univs, null reqs = do { ty' <- cvtType (ForallT exis provs ty)
                                ; ctxt' <- returnLA []
+#endif
                                ; cxtTy <- wrapParLA mkHsImplicitSigType $
                                           HsQualTy { hst_ctxt = ctxt'
                                                    , hst_xqual = noExtField
                                                    , hst_body = ty' }
                                ; returnLA cxtTy }
+#if defined(__MHS__)
+  | null reqs             = do { univs' <- cvtTvs univs
+                               ; ty'    <- cvtType (ForallT exis provs ty)
+                               ; ctxt'  <- (returnLA [] :: CvtM (LHsContext GhcPs))
+#else
   | null reqs             = do { univs' <- cvtTvs univs
                                ; ty'    <- cvtType (ForallT exis provs ty)
                                ; ctxt'  <- returnLA []
+#endif
                                ; let cxtTy = HsQualTy { hst_ctxt = ctxt'
                                                       , hst_xqual = noExtField
                                                       , hst_body = ty' }

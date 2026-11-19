@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 -- | Carries interesting info for debugging / profiling of the
 --   graph coloring register allocator.
 module GHC.CmmToAsm.Reg.Graph.Stats (
@@ -110,7 +111,26 @@ data RegAllocStats statics instr
           -- | Target platform
         , raPlatform    :: !Platform
         }
+#if !defined(__MHS__)
         deriving (Functor)
+#endif
+
+#if defined(__MHS__)
+-- MHS rejects `deriving (Functor)` here: the derived context mentions the
+-- partially-applied synonyms `LiveCmmDecl statics` / `NatCmmDecl statics`
+-- ("bad synonym use"). Spell out the identical instance instead.
+instance Functor (RegAllocStats statics) where
+  fmap f (RegAllocStatsStart live graph costs plat)
+    = RegAllocStatsStart (map (mapLiveCmmDecl f) live) graph costs plat
+  fmap f (RegAllocStatsSpill code graph co spill costs spilled plat)
+    = RegAllocStatsSpill (map (mapLiveCmmDecl f) code) graph co spill costs
+                         (map (mapLiveCmmDecl f) spilled) plat
+  fmap f (RegAllocStatsColored code graph gcol co ccode pat sclean final srms plat)
+    = RegAllocStatsColored (map (mapLiveCmmDecl f) code) graph gcol co
+                           (map (mapLiveCmmDecl f) ccode) (map (mapLiveCmmDecl f) pat)
+                           (map (mapLiveCmmDecl f) sclean) (map (fmap (fmap f)) final)
+                           srms plat
+#endif
 
 
 instance (OutputableP Platform statics, OutputableP Platform instr)

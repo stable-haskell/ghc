@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE LambdaCase, RecordWildCards, MagicHash, UnboxedTuples, PatternSynonyms, ExplicitNamespaces #-}
 module GHC.Cmm.UniqueRenamer
   ( detRenameCmmGroup
@@ -14,7 +15,13 @@ module GHC.Cmm.UniqueRenamer
 import GHC.Prelude
 import GHC.Utils.Monad.State.Strict
 import Data.Tuple (swap)
+#if defined(__MHS__)
+-- MicroHs (ghc-compat) GHC.Word only provides unboxed-word pattern
+-- synonyms, not the sized Word64 type used here, which lives in Data.Word.
+import Data.Word (Word64)
+#else
 import GHC.Word
+#endif
 import GHC.Cmm
 import GHC.Cmm.CLabel
 import GHC.Cmm.Dataflow.Block
@@ -134,6 +141,12 @@ detRenameCmmGroup dufm group = swap (runState (mapM detRenameCmmDecl group) dufm
     detRenameCmmGraph (CmmGraph entry bs)
       = CmmGraph <$> detRenameLabel entry <*> detRenameGraph bs
 
+#if defined(__MHS__)
+    -- MicroHs does not refine the GADT result for the signature-less local;
+    -- state the principal type explicitly. Deterministic (DWrap) graphs in,
+    -- LabelMap graphs out. Same meaning.
+    detRenameGraph :: Graph' DWrap Block CmmNode e x -> DetRnM (Graph CmmNode e x)
+#endif
     detRenameGraph = \case
       GNil  -> pure GNil
       GUnit block -> GUnit <$> detRenameBlock block

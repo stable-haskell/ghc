@@ -58,6 +58,9 @@ import GHC.Hs hiding (ForeignRef)
 #else
 import GHC.Hs
 #endif
+#if defined(__MHS__)
+import Language.Haskell.Syntax.Extension
+#endif
 
 import GHC.Tc.Errors.Types
 import GHC.Tc.Utils.Monad

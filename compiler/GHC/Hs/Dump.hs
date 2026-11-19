@@ -2,6 +2,7 @@
 (c) The University of Glasgow 2006
 (c) The GRASP/AQUA Project, Glasgow University, 1992-1998
 -}
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE DataKinds #-}
@@ -39,7 +40,11 @@ import GHC.Utils.Outputable
 
 import Data.Data hiding (Fixity)
 import qualified Data.ByteString as B
+#if defined(__MHS__)
+import Data.TypeLits
+#else
 import GHC.TypeLits
+#endif
 
 -- | Should source spans be removed from output.
 data BlankSrcSpan = BlankSrcSpan | BlankSrcSpanFile | NoBlankSrcSpan
@@ -136,6 +141,9 @@ showAstData bs ba a0 = blankLine $$ showAstData' a0
                                        $ text "blanked:" <+> text "[EpToken \"(\"]"
               NoBlankEpAnnotations -> list ls
 
+#if defined(__MHS__)
+            list :: Data a => [a] -> SDoc
+#endif
             list []    = brackets empty
             list [x]   = brackets (showAstData' x)
             list (x1 : x2 : xs) =  (text "[" <> showAstData' x1)

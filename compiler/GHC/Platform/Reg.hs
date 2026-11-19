@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE MagicHash #-}
 
 -- | An architecture independent description of a register.
@@ -29,7 +30,9 @@ module GHC.Platform.Reg (
 where
 
 import GHC.Prelude
+#if !defined(__MHS__)
 import GHC.Exts ( Int(I#), dataToTag# )
+#endif
 
 import GHC.Utils.Outputable
 import GHC.Utils.Panic
@@ -76,10 +79,22 @@ data VirtualReg
 -- code-generation. See Note [Unique Determinism and code generation]
 instance Ord VirtualReg where
   compare vr1 vr2 =
+#if defined(__MHS__)
+    case compare (vrTag vr1) (vrTag vr2) of
+#else
     case compare (I# (dataToTag# vr1)) (I# (dataToTag# vr2)) of
+#endif
       LT -> LT
       GT -> GT
       EQ -> nonDetCmpUnique (virtualRegUnique vr1) (virtualRegUnique vr2)
+#if defined(__MHS__)
+    where
+      vrTag :: VirtualReg -> Int
+      vrTag (VirtualRegI {})    = 0
+      vrTag (VirtualRegHi {})   = 1
+      vrTag (VirtualRegD {})    = 2
+      vrTag (VirtualRegV128 {}) = 3
+#endif
 
 instance Uniquable VirtualReg where
         getUnique = virtualRegUnique

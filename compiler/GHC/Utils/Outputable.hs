@@ -1,3 +1,7 @@
+{-# LANGUAGE CPP #-}
+#if defined(__MHS__)
+{-# LANGUAGE FunctionalDependencies #-}
+#endif
 {-# LANGUAGE EmptyCase #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE PatternSynonyms #-}
@@ -26,6 +30,9 @@ module GHC.Utils.Outputable (
         BindingSite(..),  JoinPointHood(..), isJoinPoint,
 
         IsOutput(..), IsLine(..), IsDoc(..),
+#if defined(__MHS__)
+        Line,
+#endif
         HLine, HDoc,
 
         -- * Pretty printing combinators
@@ -164,7 +171,15 @@ import Control.DeepSeq (NFData(rnf))
 import GHC.Fingerprint
 import GHC.Show         ( showMultiLineString )
 import GHC.Utils.Exception
+#if !defined(__MHS__)
 import GHC.Exts (oneShot)
+#endif
+
+#if defined(__MHS__)
+-- ghc-compat's GHC.Exts has no oneShot.  It is only an inlining hint.
+oneShot :: a -> a
+oneShot x = x
+#endif
 
 {-
 ************************************************************************
@@ -1868,8 +1883,18 @@ class IsOutput doc => IsLine doc where
 --
 -- See Note [HLine versus HDoc] and Note [The outputable class hierarchy] for
 -- more details.
+#if defined(__MHS__)
+-- MicroHs rejects associated types (see Note [The outputable class hierarchy]);
+-- use a top-level family so existing `IsDoc doc =>` and `Line doc` use sites
+-- keep working. Same meaning: Line SDoc = SDoc, Line HDoc = HLine.
+type family Line doc
+type instance Line SDoc = SDoc
+type instance Line HDoc = HLine
+#endif
 class (IsOutput doc, IsLine (Line doc)) => IsDoc doc where
+#if !defined(__MHS__)
   type Line doc = r | r -> doc
+#endif
   line :: Line doc -> doc
 
   -- | Join two @doc@s together vertically. If there is no vertical overlap it
@@ -1926,7 +1951,9 @@ instance IsLine SDoc where
   {-# INLINE CONLIKE dualLine #-}
 
 instance IsDoc SDoc where
+#if !defined(__MHS__)
   type Line SDoc = SDoc
+#endif
   line = id
   {-# INLINE line #-}
   lines_ = vcat
@@ -1978,7 +2005,9 @@ instance IsLine HLine where
   {-# INLINE CONLIKE dualLine #-}
 
 instance IsDoc HDoc where
+#if !defined(__MHS__)
   type Line HDoc = HLine
+#endif
   line (HLine f) = HDoc (\ctx h -> f ctx h *> bPutChar h '\n')
   {-# INLINE CONLIKE line #-}
   HDoc f $$ HDoc g = HDoc (\ctx h -> f ctx h *> g ctx h)

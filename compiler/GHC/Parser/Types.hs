@@ -2,6 +2,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE CPP #-}
 
 module GHC.Parser.Types
    ( SumOrTuple(..)
@@ -26,6 +27,9 @@ import GHC.Data.OrdList
 import Data.Foldable
 import GHC.Parser.Annotation
 import Language.Haskell.Syntax
+#if defined(__MHS__)
+import Language.Haskell.Syntax.Extension
+#endif
 
 data SumOrTuple b
   = Sum ConTag Arity (LocatedA b) [EpToken "|"] [EpToken "|"]

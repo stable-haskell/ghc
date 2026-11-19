@@ -121,9 +121,21 @@ module GHC.Data.FastString
 import GHC.Prelude.Basic as Prelude
 
 import GHC.Utils.Encoding
+#if defined(__MHS__)
+import Data.Array (Array, (!), bounds, listArray)
+import Data.Array.IO (IOArray)
+import qualified Data.Array.MArray as MA
+import qualified Data.Char as Char
+import Data.Word (Word)
+import System.IO.Unsafe (unsafeDupablePerformIO, unsafePerformIO)
+
+inlinePerformIO :: IO a -> a
+inlinePerformIO = unsafePerformIO
+#else
 import GHC.Utils.IO.Unsafe
 import GHC.Utils.Panic.Plain
 import GHC.Utils.Misc
+#endif
 import GHC.Data.FastMutInt
 
 import Control.Concurrent.MVar
@@ -144,10 +156,12 @@ import Data.Semigroup as Semi
 
 import Foreign
 
+#if !defined(__MHS__)
 import GHC.Conc.Sync    (sharedCAF)
 
 import GHC.Exts
 import GHC.IO
+#endif
 
 -- | Gives the Modified UTF-8 encoded bytes corresponding to a 'FastString'
 bytesFS, fastStringToByteString :: FastString -> ByteString
@@ -244,9 +258,24 @@ instance Show FastString where
 
 instance Data FastString where
   -- don't traverse?
+#if defined(__MHS__)
+  -- MicroHs Data.Data has no abstractConstr.
+  toConstr _   = fsConstr
+  gunfold _ _  = error "gunfold"
+  dataTypeOf _ = fsDataType
+#else
   toConstr _   = abstractConstr "FastString"
   gunfold _ _  = error "gunfold"
   dataTypeOf _ = mkNoRepType "FastString"
+#endif
+
+#if defined(__MHS__)
+fsConstr :: Constr
+fsConstr = mkConstrTag fsDataType "FastString" 1 [] Prefix
+
+fsDataType :: DataType
+fsDataType = mkDataType "FastString" [fsConstr]
+#endif
 
 instance NFData FastString where
   rnf fs = seq fs ()
@@ -309,6 +338,18 @@ and updates to multiple buckets with low synchronization overhead.
 
 See Note [Updating the FastString table] on how it's updated.
 -}
+#if defined(__MHS__)
+
+data FastStringTable = FastStringTable
+  !FastMutInt
+  !FastMutInt
+  !(Array Int (IORef FastStringTableSegment))
+
+data FastStringTableSegment = FastStringTableSegment
+  !(MVar ())
+  !FastMutInt
+  !(IOArray Int [FastString])
+#else
 data FastStringTable = FastStringTable
   {-# UNPACK #-} !FastMutInt
   -- ^ The unique ID counter shared with all buckets
@@ -327,6 +368,7 @@ data FastStringTableSegment = FastStringTableSegment
   {-# UNPACK #-} !(MVar ())  -- the lock for write in each segment
   {-# UNPACK #-} !FastMutInt -- the number of elements
   (MutableArray# RealWorld [FastString]) -- buckets in this segment
+#endif
 
 {-
 Following parameters are determined based on:
@@ -341,6 +383,62 @@ numSegments = 256   -- bit segmentBits
 segmentMask = 0xff  -- bit segmentBits - 1
 initialNumBuckets = 64
 
+#if defined(__MHS__)
+
+hashToSegment# :: Int -> Int
+hashToSegment# h = h .&. segmentMask
+
+-- Basic re-exports two shiftR names.  Logical shift via Word.
+logicalShiftR :: Int -> Int -> Int
+logicalShiftR x n
+  | n <= 0 = x
+  | otherwise = fromIntegral ((fromIntegral x :: Word) `quot` (2 ^ n))
+
+hashToIndex# :: IOArray Int [FastString] -> Int -> IO Int
+hashToIndex# buckets h = do
+  (lo, hi) <- MA.getBounds buckets
+  let size = hi - lo + 1
+  return ((logicalShiftR h segmentBits) `mod` size)
+
+maybeResizeSegment :: IORef FastStringTableSegment -> IO FastStringTableSegment
+maybeResizeSegment segmentRef = do
+  segment@(FastStringTableSegment lock counter old) <- readIORef segmentRef
+  (lo, hi) <- MA.getBounds old
+  let oldSize = hi - lo + 1
+      newSize = oldSize * 2
+  n <- readFastMutInt counter
+  if n < newSize
+    then return segment
+    else do
+      new <- MA.newArray (0, newSize - 1) []
+      let resized = FastStringTableSegment lock counter new
+      forM_ [lo .. hi] $ \i -> do
+        fsList <- MA.readArray old i
+        forM_ fsList $ \fs -> do
+          idx <- hashToIndex# new (hashFastString fs)
+          bucket <- MA.readArray new idx
+          MA.writeArray new idx (fs : bucket)
+      writeIORef segmentRef resized
+      return resized
+
+{-# NOINLINE stringTable #-}
+stringTable :: FastStringTable
+stringTable = unsafePerformIO $ do
+  segs <- forM [0 .. numSegments - 1] $ \_ -> do
+    lock <- newMVar ()
+    counter <- newFastMutInt 0
+    buckets <- MA.newArray (0, initialNumBuckets - 1) []
+    newIORef (FastStringTableSegment lock counter buckets)
+  -- ord '$' * 0x01000000, same initial unique as the GHC table.
+  uid <- newFastMutInt 603979776
+  n_zencs <- newFastMutInt 0
+  return (FastStringTable uid n_zencs (listArray (0, numSegments - 1) segs))
+
+-- "abc"# is a ByteString on MicroHs, not an Addr#.
+mkFastString# :: ByteString -> FastString
+{-# INLINE mkFastString# #-}
+mkFastString# = mkFastStringByteString
+#else
 hashToSegment# :: Int# -> Int#
 hashToSegment# hash# = hash# `andI#` segmentMask#
   where
@@ -447,6 +545,7 @@ mkFastString# :: Addr# -> FastString
 {-# INLINE mkFastString# #-}
 mkFastString# a# = mkFastStringBytes ptr (ptrStrLength ptr)
   where ptr = Ptr a#
+#endif
 
 {- Note [Updating the FastString table]
    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -472,6 +571,36 @@ The procedure goes like this:
    * Otherwise, insert and return the string we created.
 -}
 
+#if defined(__MHS__)
+
+mkFastStringWith
+    :: (Int -> FastMutInt -> IO FastString) -> ShortByteString -> IO FastString
+mkFastStringWith mk_fs sbs = do
+  FastStringTableSegment lock _ buckets <- readIORef segmentRef
+  idx <- hashToIndex# buckets hashVal
+  bucket <- MA.readArray buckets idx
+  case bucket_match bucket sbs of
+    Just found -> return found
+    Nothing -> do
+      n <- get_uid
+      new_fs <- mk_fs n n_zencs
+      withMVar lock $ \_ -> insert new_fs
+  where
+    FastStringTable uid n_zencs segments = stringTable
+    get_uid = atomicFetchAddFastMut uid 1
+    hashVal = hashStr sbs
+    segmentRef = segments ! hashToSegment# hashVal
+    insert fs = do
+      FastStringTableSegment _ counter buckets <- maybeResizeSegment segmentRef
+      idx <- hashToIndex# buckets hashVal
+      bucket <- MA.readArray buckets idx
+      case bucket_match bucket sbs of
+        Just found -> return found
+        Nothing -> do
+          MA.writeArray buckets idx (fs : bucket)
+          _ <- atomicFetchAddFastMut counter 1
+          return fs
+#else
 mkFastStringWith
     :: (Int -> FastMutInt-> IO FastString) -> ShortByteString -> IO FastString
 mkFastStringWith mk_fs sbs = do
@@ -507,6 +636,7 @@ mkFastStringWith mk_fs sbs = do
               s2# -> (# s2#, () #)
           _ <- atomicFetchAddFastMut counter 1
           return fs
+#endif
 
 bucket_match :: [FastString] -> ShortByteString -> Maybe FastString
 bucket_match fs sbs = go fs
@@ -527,6 +657,13 @@ mkFastStringBytes !ptr !len =
         sbs <- newSBSFromPtr ptr len
         mkFastStringWith (mkNewFastStringShortByteString sbs) sbs
 
+#if defined(__MHS__)
+
+newSBSFromPtr :: Ptr a -> Int -> IO ShortByteString
+newSBSFromPtr ptr len = do
+  xs <- peekArray len (castPtr ptr :: Ptr Word8)
+  return (SBS.toShort (BS.pack xs))
+#else
 newSBSFromPtr :: Ptr a -> Int -> IO ShortByteString
 newSBSFromPtr (Ptr src#) (I# len#) =
   IO $ \s ->
@@ -534,6 +671,7 @@ newSBSFromPtr (Ptr src#) (I# len#) =
     case copyAddrToByteArray# src# dst# 0# len# s of { s ->
     case unsafeFreezeByteArray# dst# s of { (# s, ba# #) ->
     (# s, SBS.SBS ba# #) }}}
+#endif
 
 -- | Create a 'FastString' by copying an existing 'ByteString'
 mkFastStringByteString :: ByteString -> FastString
@@ -579,6 +717,14 @@ mkNewFastStringShortByteString sbs uid n_zencs = do
       chars = utf8CountCharsShortByteString sbs
   return (FastString uid chars sbs zstr)
 
+#if defined(__MHS__)
+
+hashStr :: ShortByteString -> Int
+hashStr sbs =
+  foldl' step 0 (map fromIntegral (BS.unpack (SBS.fromShort sbs)))
+  where
+    step h c = (h * 16777619) `xor` c
+#else
 hashStr  :: ShortByteString -> Int
  -- produce a hash value between 0 & m (inclusive)
 hashStr sbs@(SBS.SBS ba#) = loop 0# 0#
@@ -596,6 +742,7 @@ hashStr sbs@(SBS.SBS ba#) = loop 0# 0#
           !h2 = (h *# 16777619#) `xorI#` c
         in
           loop h2 (n +# 1#)
+#endif
 
 -- -----------------------------------------------------------------------------
 -- Operations
@@ -645,6 +792,18 @@ nilFS = mkFastString ""
 -- -----------------------------------------------------------------------------
 -- Stats
 
+#if defined(__MHS__)
+
+getFastStringTable :: IO [[[FastString]]]
+getFastStringTable = do
+  let (lo, hi) = bounds segments
+  forM [lo .. hi] $ \i -> do
+    FastStringTableSegment _ _ buckets <- readIORef (segments ! i)
+    (bLo, bHi) <- MA.getBounds buckets
+    forM [bLo .. bHi] $ \j -> MA.readArray buckets j
+  where
+    FastStringTable _ _ segments = stringTable
+#else
 getFastStringTable :: IO [[[FastString]]]
 getFastStringTable =
   forM [0 .. numSegments - 1] $ \(I# i#) -> do
@@ -655,6 +814,7 @@ getFastStringTable =
       IO $ readArray# buckets# j#
   where
     !(FastStringTable _ _ segments#) = stringTable
+#endif
 
 getFastStringZEncCounter :: IO Int
 getFastStringZEncCounter = readFastMutInt n_zencs
@@ -678,6 +838,34 @@ hPutFS handle fs = BS.hPut handle $ bytesFS fs
 -- | A 'PtrString' is a pointer to some array of Latin-1 encoded chars.
 data PtrString = PtrString !(Ptr Word8) !Int
 
+#if defined(__MHS__)
+
+-- | Wrap a ByteString ("abc"# on MicroHs) into a 'PtrString'.
+mkPtrString# :: ByteString -> PtrString
+{-# INLINE mkPtrString# #-}
+mkPtrString# bs = unsafePerformIO $ do
+  let n = BS.length bs
+  p <- mallocBytes (n + 1)
+  pokeArray p (BS.unpack bs)
+  pokeByteOff p n (0 :: Word8)
+  return (PtrString p n)
+
+-- | Decode a 'PtrString' back into a 'String' using Latin-1 encoding.
+-- This does not free the memory associated with 'PtrString'.
+unpackPtrString :: PtrString -> String
+unpackPtrString (PtrString p n) = unpackLatin1 p n
+
+-- | @unpackPtrStringTakeN n = 'take' n . 'unpackPtrString'@
+-- but is performed in \(O(\min(n,l))\) rather than \(O(l)\),
+-- where \(l\) is the length of the 'PtrString'.
+unpackPtrStringTakeN :: Int -> PtrString -> String
+unpackPtrStringTakeN n (PtrString p len) = unpackLatin1 p (min n len)
+
+unpackLatin1 :: Ptr Word8 -> Int -> String
+unpackLatin1 p n = unsafePerformIO $ do
+  xs <- peekArray n p
+  return (map (Char.chr . fromIntegral) xs)
+#else
 -- | Wrap an unboxed address into a 'PtrString'.
 mkPtrString# :: Addr# -> PtrString
 {-# INLINE mkPtrString# #-}
@@ -695,6 +883,7 @@ unpackPtrStringTakeN :: Int -> PtrString -> String
 unpackPtrStringTakeN n (PtrString (Ptr p#) len) =
   case min n len of
     I# n# -> unpackNBytes# p# n#
+#endif
 
 -- | Return the length of a 'PtrString'
 lengthPS :: PtrString -> Int
@@ -704,13 +893,26 @@ lengthPS (PtrString _ n) = n
 -- under the carpet
 
 
+#if defined(__MHS__)
+
+ptrStrLength :: Ptr Word8 -> Int
+{-# INLINE ptrStrLength #-}
+ptrStrLength p = unsafePerformIO (go 0)
+  where
+    go n = do
+      w <- peekByteOff p n
+      if w == (0 :: Word8) then return n else go (n + 1)
+#else
 ptrStrLength :: Ptr Word8 -> Int
 {-# INLINE ptrStrLength #-}
 ptrStrLength (Ptr a) = I# (cstringLength# a)
+#endif
 
 {-# NOINLINE fsLit #-}
 fsLit :: String -> FastString
 fsLit x = mkFastString x
 
+#if !defined(__MHS__)
 {-# RULES "fslit"
     forall x . fsLit (unpackCString# x) = mkFastString# x #-}
+#endif

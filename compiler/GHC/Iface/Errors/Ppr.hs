@@ -53,6 +53,10 @@ instance HasDefaultDiagnosticOpts IfaceMessageOpts where
 
 instance Diagnostic IfaceMessage where
   type DiagnosticOpts IfaceMessage = IfaceMessageOpts
+#if defined(__MHS__)
+  -- mhs does not apply the default `type DiagnosticHint a = GhcHint`.
+  type DiagnosticHint IfaceMessage = GhcHint
+#endif
   diagnosticMessage opts reason = mkSimpleDecorated $
          interfaceErrorDiagnostic opts reason
 

@@ -164,7 +164,29 @@ logDiagnostics warns = do
 -- 'GhcT'.
 newtype Ghc a = Ghc { unGhc :: Session -> IO a }
   deriving stock (Functor)
+#if defined(__MHS__)
+  -- mhs DerivingVia cannot derive MonadMask (its higher-rank mask methods
+  -- fail subsumption); derive the rest via ReaderT and give MonadMask
+  -- manually below (the same instances GHC would derive).
+  deriving (Applicative, Monad, MonadFail, MonadFix, MonadThrow, MonadCatch, MonadIO) via (ReaderT Session IO)
+#else
   deriving (Applicative, Monad, MonadFail, MonadFix, MonadThrow, MonadCatch, MonadMask, MonadIO) via (ReaderT Session IO)
+#endif
+
+#if defined(__MHS__)
+instance MC.MonadMask Ghc where
+  mask f = Ghc $ \s -> MC.mask $ \restore ->
+    let restoreGhc (Ghc g) = Ghc (restore . g)
+    in unGhc (f restoreGhc) s
+  uninterruptibleMask f = Ghc $ \s -> MC.uninterruptibleMask $ \restore ->
+    let restoreGhc (Ghc g) = Ghc (restore . g)
+    in unGhc (f restoreGhc) s
+  generalBracket acquire release use = Ghc $ \s ->
+    MC.generalBracket
+      (unGhc acquire s)
+      (\resource exitCase -> unGhc (release resource exitCase) s)
+      (\resource -> unGhc (use resource) s)
+#endif
 
 -- | The Session is a handle to the complete state of a compilation
 -- session.  A compilation session consists of a set of modules
@@ -210,7 +232,27 @@ reifyGhc act = Ghc $ act
 -- Note that the wrapped monad must support IO and handling of exceptions.
 newtype GhcT m a = GhcT { unGhcT :: Session -> m a }
   deriving stock (Functor)
+#if defined(__MHS__)
+  -- As for Ghc above: mhs cannot derive MonadMask via ReaderT.
+  deriving (Applicative, Monad, MonadFail, MonadFix, MonadThrow, MonadCatch, MonadIO) via (ReaderT Session m)
+#else
   deriving (Applicative, Monad, MonadFail, MonadFix, MonadThrow, MonadCatch, MonadMask, MonadIO) via (ReaderT Session m)
+#endif
+
+#if defined(__MHS__)
+instance MC.MonadMask m => MC.MonadMask (GhcT m) where
+  mask f = GhcT $ \s -> MC.mask $ \restore ->
+    let restoreGhcT (GhcT g) = GhcT (restore . g)
+    in unGhcT (f restoreGhcT) s
+  uninterruptibleMask f = GhcT $ \s -> MC.uninterruptibleMask $ \restore ->
+    let restoreGhcT (GhcT g) = GhcT (restore . g)
+    in unGhcT (f restoreGhcT) s
+  generalBracket acquire release use = GhcT $ \s ->
+    MC.generalBracket
+      (unGhcT acquire s)
+      (\resource exitCase -> unGhcT (release resource exitCase) s)
+      (\resource -> unGhcT (use resource) s)
+#endif
 
 liftGhcT :: m a -> GhcT m a
 liftGhcT m = GhcT $ \_ -> m

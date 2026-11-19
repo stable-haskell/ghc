@@ -27,6 +27,9 @@ import GHC.Hs.Pat
 import GHC.Types.Name.Reader (WithUserRdr(..))
 import GHC.Data.BooleanFormula (BooleanFormula(..))
 import Language.Haskell.Syntax.Extension (Anno)
+#if defined(__MHS__)
+import qualified Data.Set as S
+#endif
 
 -- ---------------------------------------------------------------------
 -- Truly phase-independent instances
@@ -37,6 +40,25 @@ deriving instance Data HsArrowMatchContext
 
 deriving instance Data fn => Data (HsStmtContext fn)
 deriving instance Data fn => Data (HsMatchContext fn)
+
+#if defined(__MHS__)
+-- MicroHs's Data.Set ships no Data instance (upstream containers provides
+-- one); without it every derived Data instance over a Set fails. Mirror the
+-- containers fromList/toList structural instance so derived instances keep
+-- working and keep traversing. Non-__MHS__ builds use the containers
+-- instance unchanged.
+instance (Ord a, Data a) => Data (S.Set a) where
+  gfoldl k z s = z S.fromList `k` S.toList s
+  gunfold k z _c = k (z S.fromList)
+  toConstr _ = setConstr
+  dataTypeOf _ = setDataType
+
+setConstr :: Constr
+setConstr = mkConstrTag setDataType "Set" 1 [] Prefix
+
+setDataType :: DataType
+setDataType = mkDataType "Data.Set.Set" [setConstr]
+#endif
 
 -- Splice types without phase-specific content
 deriving instance Data HsImplicitLiftSplice

@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP                        #-}
 {-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE LambdaCase                 #-}
 {-# LANGUAGE OverloadedStrings          #-}
@@ -67,6 +68,9 @@ import           Control.Monad
 
 import           Data.Array
 import qualified Data.ByteString          as B
+#if defined(__MHS__)
+import qualified Data.ByteString.Char8    as BC8
+#endif
 import qualified Data.ByteString.Unsafe   as B
 import           Data.Char (isSpace)
 import           Data.Int
@@ -137,6 +141,16 @@ getObjectKindBS bs
 
 -- Header added to JS sources to discriminate them from other object files.
 -- They all have .o extension but JS sources have this header.
+#if defined(__MHS__)
+jsHeader :: B.ByteString
+jsHeader = BC8.pack "GHCJS_JS"
+
+hsHeader :: B.ByteString
+hsHeader = BC8.pack "GHCJS_HS"
+
+wasmHeader :: B.ByteString
+wasmHeader = BC8.pack "\0asm"
+#else
 jsHeader :: B.ByteString
 jsHeader = unsafePerformIO $ B.unsafePackAddressLen 8 "GHCJS_JS"#
 
@@ -145,6 +159,7 @@ hsHeader = unsafePerformIO $ B.unsafePackAddressLen 8 "GHCJS_HS"#
 
 wasmHeader :: B.ByteString
 wasmHeader = unsafePerformIO $ B.unsafePackAddressLen 4 "\0asm"#
+#endif
 
 
 

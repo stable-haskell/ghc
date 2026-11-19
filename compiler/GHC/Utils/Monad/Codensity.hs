@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE StandaloneKindSignatures #-}
 
@@ -8,7 +9,13 @@ module GHC.Utils.Monad.Codensity
 import Data.Kind ( Type )
 
 import GHC.Prelude
+#if defined(__MHS__)
+-- ghc-compat's GHC.Exts has no oneShot.  It is only an inlining hint.
+oneShot :: a -> a
+oneShot x = x
+#else
 import GHC.Exts ( oneShot )
+#endif
 
 import Control.Monad.Fix
 import Control.Monad.IO.Class
@@ -16,7 +23,23 @@ import Control.Monad.Trans.Class
 import Control.Concurrent.MVar ( newEmptyMVar, readMVar, putMVar )
 import Control.Exception
 import GHC.IO.Exception
+#if defined(__MHS__)
+-- MicroHs System.IO exports FixIOException abstractly and ghc-compat's
+-- GHC.IO.Exception omits it; provide the local exception constructor here.
+data MhsFixIOException = FixIOException
+instance Show MhsFixIOException where
+  showsPrec _ FixIOException = showString "cyclic evaluation in fixIO"
+instance Exception MhsFixIOException
+#endif
+#if defined(__MHS__)
+-- MicroHs has no GHC.IO.Unsafe and no unsafeDupableInterleaveIO;
+-- on the single-threaded MicroHs RTS unsafeInterleaveIO is exactly it.
+import System.IO.Unsafe ( unsafeInterleaveIO )
+unsafeDupableInterleaveIO :: IO a -> IO a
+unsafeDupableInterleaveIO = unsafeInterleaveIO
+#else
 import GHC.IO.Unsafe ( unsafeDupableInterleaveIO )
+#endif
 
 --------------------------------------------------------------------------------
 

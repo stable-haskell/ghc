@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MagicHash #-}
@@ -37,7 +38,11 @@ import GHC.Data.FastString
 import GHC.Types.Unique.Map
 
 import Data.List (sortOn)
+#if defined(__MHS__)
+import Data.Char (intToDigit,isAlpha,isDigit,ord)
+#else
 import Data.Char (isAlpha,isDigit,ord)
+#endif
 import qualified Data.ByteString.Short as SBS
 
 pretty :: JsRender doc => Bool -> JStat -> doc
@@ -86,8 +91,12 @@ hexDoc :: IsLine doc => Word -> doc
 hexDoc 0 = char '0'
 hexDoc v = text $ go v
   where
+#if defined(__MHS__)
+    sym = intToDigit
+#else
     sym (I# i) = C# (indexCharOffAddr# chars i)
     chars = "0123456789abcdef"#
+#endif
     go = \case
       0 -> []
       n -> sym (fromIntegral (n .&. 0x0F))

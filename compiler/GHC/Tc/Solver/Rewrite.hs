@@ -31,7 +31,13 @@ import GHC.Tc.Solver.Monad as TcS
 
 import GHC.Utils.Misc
 import GHC.Data.Maybe
+#if defined(__MHS__)
+-- MicroHs ghc-compat GHC.Exts has no oneShot; it is semantically the identity.
+oneShot :: (a -> b) -> a -> b
+oneShot f x = f x
+#else
 import GHC.Exts (oneShot)
+#endif
 import Control.Monad
 import Control.Applicative (liftA3)
 import GHC.Builtin.Types (tYPETyCon)

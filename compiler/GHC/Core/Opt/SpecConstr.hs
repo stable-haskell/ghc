@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE LambdaCase #-}
 {-
 ToDo [Oct 2013]
@@ -71,7 +72,9 @@ import GHC.Utils.Monad
 
 import GHC.Builtin.Names ( specTyConKey )
 
+#if !defined(__MHS__)
 import GHC.Exts( SpecConstrAnnotation(..) )
+#endif
 import GHC.Serialized   ( deserializeWithData )
 
 import Control.Monad
@@ -80,6 +83,20 @@ import Data.List.NonEmpty ( NonEmpty (..) )
 import Data.Maybe( mapMaybe )
 import Data.Ord( comparing )
 import Data.Tuple
+#if defined(__MHS__)
+import Data.Data ( Data )
+#endif
+
+#if defined(__MHS__)
+-- MicroHs has no GHC.Exts(SpecConstrAnnotation).  This local definition
+-- keeps the exact GHC constructor order (NoSpecConstr first) so that
+-- interface-file annotations deserialised with deserializeWithData
+-- (which uses the generic Data representation) match GHC-produced files.
+data SpecConstrAnnotation = NoSpecConstr | ForceSpecConstr
+                deriving ( Data
+                         , Eq
+                         )
+#endif
 
 {-
 -----------------------------------------------------

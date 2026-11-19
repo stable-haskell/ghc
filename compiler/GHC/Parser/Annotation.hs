@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE DeriveFunctor #-}
@@ -103,7 +104,11 @@ import Data.Function (on)
 import Data.List (sortBy)
 import Data.Semigroup
 import GHC.Data.FastString
+#if defined(__MHS__)
+import Data.TypeLits (Symbol, KnownSymbol, symbolVal)
+#else
 import GHC.TypeLits (Symbol, KnownSymbol, symbolVal)
+#endif
 import GHC.Types.Name
 import GHC.Types.SrcLoc
 import GHC.Hs.DocString

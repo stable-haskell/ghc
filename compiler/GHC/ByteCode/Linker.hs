@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP                   #-}
 {-# LANGUAGE FlexibleInstances     #-}
 {-# LANGUAGE MagicHash             #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
@@ -83,6 +84,11 @@ linkBCO interp pkgs_loaded le lb bco_ix
 lookupLiteral :: Interp -> PkgsLoaded -> LinkerEnv -> LinkedBreaks -> BCONPtr -> IO Word
 lookupLiteral interp pkgs_loaded le lb ptr = case ptr of
   BCONPtrWord lit -> return lit
+#if defined(__MHS__)
+  BCONPtrLbl  sym -> fromIntegral . ptrToWordPtr <$> lookupStaticPtr interp sym
+  BCONPtrItbl nm  -> fromIntegral . ptrToWordPtr <$> lookupIE interp pkgs_loaded (itbl_env le) nm
+  BCONPtrAddr nm  -> fromIntegral . ptrToWordPtr <$> lookupAddr interp pkgs_loaded (addr_env le) nm
+#else
   BCONPtrLbl  sym -> do
     Ptr a# <- lookupStaticPtr interp sym
     return (W# (int2Word# (addr2Int# a#)))
@@ -92,6 +98,7 @@ lookupLiteral interp pkgs_loaded le lb ptr = case ptr of
   BCONPtrAddr nm -> do
     Ptr a# <- lookupAddr interp pkgs_loaded (addr_env le) nm
     return (W# (int2Word# (addr2Int# a#)))
+#endif
   BCONPtrStr bs -> do
     RemotePtr p <- fmap head $ interpCmd interp $ MallocStrings [bs]
     pure $ fromIntegral p

@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE GADTs #-}
 
 -----------------------------------------------------------------------------
@@ -160,6 +161,12 @@ fixStgRegBlock platform block = mapBlock (fixStgRegStmt platform) block
 fixStgRegStmt :: Platform -> CmmNode e x -> CmmNode e x
 fixStgRegStmt platform stmt = fixAssign $ mapExpDeep fixExpr stmt
   where
+#if defined(__MHS__)
+    -- MHS does not generalise local case-functions over GADT indices
+    -- (it unifies the branches to `CmmNode O O`); the explicit signature
+    -- keeps `fixAssign` polymorphic like its top-level counterparts.
+    fixAssign :: CmmNode e x -> CmmNode e x
+#endif
     fixAssign stmt =
       case stmt of
         CmmAssign (CmmGlobal reg_use) src

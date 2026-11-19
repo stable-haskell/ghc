@@ -26,7 +26,9 @@ import GHC.Runtime.Interpreter.Types
 import GHCi.Message
 #endif
 
+#if !defined(__MHS__)
 import GHC.IO (catchException)
+#endif
 import GHC.Utils.Panic
 import GHC.Utils.Exception as Ex
 

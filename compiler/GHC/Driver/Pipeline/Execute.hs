@@ -20,6 +20,11 @@ import Control.Monad.Trans.Reader
 import GHC.Driver.Pipeline.Monad
 import GHC.Driver.Pipeline.Phases
 import GHC.Driver.Env hiding (Hsc)
+#if defined(__MHS__)
+-- MicroHs does not honour `hiding` for the re-exported Env.Types.Hsc,
+-- leaving Phases.Hsc ambiguous; qualify the single use below. Same meaning.
+import qualified GHC.Driver.Phases as PhaseConstructor
+#endif
 import GHC.Unit.Module.Location
 import GHC.Unit.Module.ModGuts (cg_foreign, cg_foreign_files)
 import GHC.Driver.Phases
@@ -39,6 +44,12 @@ import GHC.Tc.Types
 import GHC.Types.Error
 import GHC.Driver.Errors.Types
 import GHC.Fingerprint
+#if defined(__MHS__)
+-- Installed ghc-compat GHC.Fingerprint (shadowing the fuller shim) provides
+-- only Fingerprint(..) and fingerprint0; getFileHash lives in
+-- GHC.Utils.Fingerprint in the __MHS__ view (same file-hash semantics).
+import GHC.Utils.Fingerprint (getFileHash)
+#endif
 import GHC.Utils.Logger
 import GHC.Utils.TmpFs
 import GHC.Platform
@@ -122,7 +133,11 @@ runPhase (T_Cpp pipe_env hsc_env inp_path) = do
   out_path <- phaseOutputFilenameNew (HsPp HsSrcFile) pipe_env hsc_env Nothing
   runCppPhase hsc_env inp_path out_path
 runPhase (T_HsPp pipe_env hsc_env origin_path inp_path) = do
+#if defined(__MHS__)
+  out_path <- phaseOutputFilenameNew (PhaseConstructor.Hsc HsSrcFile) pipe_env hsc_env Nothing
+#else
   out_path <- phaseOutputFilenameNew (Hsc HsSrcFile) pipe_env hsc_env Nothing
+#endif
   runHsPpPhase hsc_env origin_path inp_path out_path
 runPhase (T_HscRecomp pipe_env hsc_env fp hsc_src) = do
   runHscPhase pipe_env hsc_env fp hsc_src

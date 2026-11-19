@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE MultiWayIf          #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE PatternSynonyms #-}
@@ -96,7 +97,9 @@ import qualified GHC.Utils.Error as Err
 import GHC.Utils.Logger
 
 import GHC.Data.Pair
+#if !defined(__MHS__)
 import GHC.Base (oneShot)
+#endif
 import GHC.Data.Unboxed
 
 import Control.Monad
@@ -105,6 +108,14 @@ import Data.List.NonEmpty ( NonEmpty(..), groupWith, nonEmpty )
 import Data.Maybe
 import Data.IntMap.Strict ( IntMap )
 import qualified Data.IntMap.Strict as IntMap ( lookup, keys, empty, fromList )
+
+#if defined(__MHS__)
+-- MicroHs has no GHC.Base.  oneShot is only an optimiser hint, so the
+-- identity function is semantically exact here.
+-- See Note [The one-shot state monad trick] in GHC.Utils.Monad.
+oneShot :: (a -> b) -> a -> b
+oneShot f = f
+#endif
 
 {-
 Note [Core Lint guarantee]
@@ -368,8 +379,15 @@ dumpPassResult :: Logger
                -> CoreProgram -> [CoreRule]
                -> IO ()
 dumpPassResult logger dump_core_sizes name_ppr_ctx mb_flag hdr extra_info binds rules
+#if defined(__MHS__)
+  -- mhs forM_ is list-only; Maybe case instead (same semantics).
+  = do { case mb_flag of
+           Just flag -> logDumpFile logger (mkDumpStyle name_ppr_ctx) flag hdr FormatCore dump_doc
+           Nothing -> return ()
+#else
   = do { forM_ mb_flag $ \flag -> do
            logDumpFile logger (mkDumpStyle name_ppr_ctx) flag hdr FormatCore dump_doc
+#endif
 
          -- Report result size
          -- This has the side effect of forcing the intermediate to be evaluated

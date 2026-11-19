@@ -6,6 +6,8 @@
 Bag: an unordered collection with duplicates
 -}
 
+{-# LANGUAGE CPP #-}
+
 {-# LANGUAGE ScopedTypeVariables, DeriveTraversable, TypeFamilies #-}
 {-# OPTIONS_GHC -Wno-unrecognised-warning-flags -Wno-x-data-list-nonempty-unzip #-}
 
@@ -28,14 +30,23 @@ module GHC.Data.Bag (
 
 import GHC.Prelude
 
+#if defined(__MHS__)
+import Data.Foldable ( toList )
+import Data.Traversable ( mapAccumL )
+#else
 import GHC.Exts ( IsList(..) )
+#endif
 import GHC.Utils.Outputable
 import GHC.Utils.Misc
 import GHC.Utils.Monad
 import Control.Monad
 import Data.Data
 import Data.Maybe( mapMaybe )
+#if defined(__MHS__)
+import Data.List ( partition )
+#else
 import Data.List ( partition, mapAccumL )
+#endif
 import Data.List.NonEmpty ( NonEmpty(..) )
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Semigroup ( (<>) )
@@ -361,10 +372,12 @@ instance Data a => Data (Bag a) where
   dataTypeOf _ = mkNoRepType "Bag"
   dataCast1 x  = gcast1 x
 
+#if !defined(__MHS__)
 instance IsList (Bag a) where
   type Item (Bag a) = a
   fromList = listToBag
   toList   = bagToList
+#endif
 
 instance Semigroup (Bag a) where
   (<>) = unionBags

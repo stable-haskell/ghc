@@ -86,7 +86,13 @@ initMulti unitArgsFiles lintDynFlagsAndSrcs = do
   let logger = hsc_logger hsc_env
   initial_dflags <- GHC.getSessionDynFlags
 
+#if defined(__MHS__)
+  -- MicroHs's forM is list-only and cannot preserve NonEmpty; rebuild it.
+  -- Same meaning.
+  dynFlagsAndSrcsList <- forM (NE.toList unitArgsFiles) $ \f -> do
+#else
   dynFlagsAndSrcs <- forM unitArgsFiles $ \f -> do
+#endif
     when (verbosity initial_dflags > 2) (liftIO $ print f)
     args <- liftIO $ expandResponse [f]
     (dflags2, fileish_args, warns) <- parseDynamicFlagsCmdLine logger initial_dflags (map (mkGeneralLocated f) (removeRTS args))
@@ -120,6 +126,9 @@ initMulti unitArgsFiles lintDynFlagsAndSrcs = do
 
     pure (dflags5, hs_srcs)
 
+#if defined(__MHS__)
+  let dynFlagsAndSrcs = NE.fromList dynFlagsAndSrcsList
+#endif
   let
     unitDflags = NE.map fst dynFlagsAndSrcs
     srcs = NE.map (\(dflags, lsrcs) -> map (uncurry (,Just $ homeUnitId_ dflags,)) lsrcs) dynFlagsAndSrcs
@@ -130,6 +139,25 @@ initMulti unitArgsFiles lintDynFlagsAndSrcs = do
   (initial_home_graph, mainUnitId) <- liftIO $ createUnitEnvFromFlags unitDflags
   let home_units = HUG.allUnits initial_home_graph
 
+#if defined(__MHS__)
+  -- MicroHs's forM/traverse are list-only; use the Map-backed traversal.
+  -- Same meaning.
+  home_unit_graph <- HUG.unitEnv_traverseWithKey (\_ homeUnitEnv -> do
+    let cached_unit_dbs = homeUnitEnv_unit_dbs homeUnitEnv
+        hue_flags = homeUnitEnv_dflags homeUnitEnv
+        dflags = homeUnitEnv_dflags homeUnitEnv
+    (dbs,unit_state,home_unit,mconstants) <- liftIO $ State.initUnits logger hue_flags cached_unit_dbs home_units
+
+    updated_dflags <- liftIO $ updatePlatformConstants dflags mconstants
+    emptyHpt <- liftIO $ emptyHomePackageTable
+    pure $ HomeUnitEnv
+      { homeUnitEnv_units = unit_state
+      , homeUnitEnv_unit_dbs = Just dbs
+      , homeUnitEnv_dflags = updated_dflags
+      , homeUnitEnv_hpt = emptyHpt
+      , homeUnitEnv_home_unit = Just home_unit
+      }) initial_home_graph
+#else
   home_unit_graph <- forM initial_home_graph $ \homeUnitEnv -> do
     let cached_unit_dbs = homeUnitEnv_unit_dbs homeUnitEnv
         hue_flags = homeUnitEnv_dflags homeUnitEnv
@@ -145,6 +173,7 @@ initMulti unitArgsFiles lintDynFlagsAndSrcs = do
       , homeUnitEnv_hpt = emptyHpt
       , homeUnitEnv_home_unit = Just home_unit
       }
+#endif
 
   checkUnitCycles initial_dflags home_unit_graph
 
@@ -201,7 +230,12 @@ checkUnitCycles dflags graph = processSCCs (HUG.hugSCCs graph)
 -- | Check that we don't have multiple units with the same UnitId.
 checkDuplicateUnits :: DynFlags -> [(FilePath, DynFlags)] -> Ghc ()
 checkDuplicateUnits dflags flags =
+#if defined(__MHS__)
+  -- MicroHs's null is list-only (no Foldable generalisation). Same meaning.
+  unless (Set.null duplicate_ids)
+#else
   unless (null duplicate_ids)
+#endif
          (throwGhcException $ CmdLineError $ showSDoc dflags multi_err)
 
   where
@@ -238,11 +272,20 @@ offsetDynFlags dflags =
 
 createUnitEnvFromFlags :: NE.NonEmpty DynFlags -> IO (HomeUnitGraph, UnitId)
 createUnitEnvFromFlags unitDflags = do
+#if defined(__MHS__)
+  -- MicroHs's forM is list-only and cannot preserve NonEmpty; rebuild it.
+  -- Same meaning.
+  unitEnvListList <- forM (NE.toList unitDflags) $ \dflags -> do
+#else
   unitEnvList <- forM unitDflags $ \dflags -> do
+#endif
     emptyHpt <- emptyHomePackageTable
     let newInternalUnitEnv =
           HUG.mkHomeUnitEnv emptyUnitState Nothing dflags emptyHpt Nothing
     return (homeUnitId_ dflags, newInternalUnitEnv)
+#if defined(__MHS__)
+  let unitEnvList = NE.fromList unitEnvListList
+#endif
   let activeUnit = fst $ NE.head unitEnvList
   return (HUG.hugFromList (NE.toList unitEnvList), activeUnit)
 

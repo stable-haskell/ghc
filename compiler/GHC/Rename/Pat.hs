@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP                      #-}
 {-# LANGUAGE TypeApplications           #-}
 {-# LANGUAGE DeriveFunctor              #-}
 {-# LANGUAGE FlexibleContexts           #-}
@@ -129,8 +130,15 @@ p1 scope over p2,p3.
 
 newtype CpsRn b = CpsRn { unCpsRn :: forall r. (b -> RnM (r, FreeVars))
                                             -> RnM (r, FreeVars) }
+#if !defined(__MHS__)
         deriving (Functor)
+#endif
         -- See Note [CpsRn monad]
+
+#if defined(__MHS__)
+instance Functor CpsRn where
+  fmap f (CpsRn m) = CpsRn (\k -> m (k . f))
+#endif
 
 instance Applicative CpsRn where
     pure x = CpsRn (\k -> k x)
@@ -650,7 +658,11 @@ rnPatAndThen mk (ListPat _ pats)
            inverse = genHsApps from_list_n_name [hs_lit]
            rn_list_pat  = ListPat noExtField pats'
            exp_expr     = genLHsVar to_list_name
+#if defined(__MHS__)
+           exp_list_pat = ViewPat (Just inverse) exp_expr (wrapGenSpan rn_list_pat :: LPat GhcRn)
+#else
            exp_list_pat = ViewPat (Just inverse) exp_expr (wrapGenSpan rn_list_pat)
+#endif
        ; return $ mkExpandedPat rn_list_pat exp_list_pat }}
 
 rnPatAndThen mk (TuplePat _ pats boxed)
@@ -743,7 +755,11 @@ rnHsRecPatsAndThen mk (L _ con)
        ; check_unused_wildcard (lHsRecFieldsImplicits flds' <$> unLoc <$> dd)
        ; return (HsRecFields { rec_ext = noExtField, rec_flds = flds', rec_dotdot = dd }) }
   where
+#if defined(__MHS__)
+    mkVarPat l n = VarPat noExtField (L (noAnnSrcSpan l :: SrcSpanAnnA) n)
+#else
     mkVarPat l n = VarPat noExtField (L (noAnnSrcSpan l) n)
+#endif
     rn_field (L l fld, n') =
       do { arg' <- rnLPatAndThen (nested_mk dd mk (RecFieldsDotDot n')) (hfbRHS fld)
          ; return (L l (fld { hfbRHS = arg' })) }

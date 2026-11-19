@@ -1,5 +1,6 @@
 -- (c) The University of Glasgow 2006
 
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE ScopedTypeVariables, PatternSynonyms, MultiWayIf #-}
 
 {-# LANGUAGE DeriveFunctor #-}
@@ -46,7 +47,9 @@ import GHC.Utils.Misc
 import GHC.Utils.Outputable
 import GHC.Types.Basic( SwapFlag(..) )
 import GHC.Types.Unique.FM
+#if !defined(__MHS__)
 import GHC.Exts( oneShot )
+#endif
 import GHC.Utils.Panic
 
 import GHC.Data.Pair
@@ -56,6 +59,14 @@ import GHC.Data.Maybe( orElse )
 import Control.Monad
 import qualified Data.Semigroup as S
 import GHC.Builtin.Types.Prim (fUNTyCon)
+
+#if defined(__MHS__)
+-- MicroHs has no GHC.Exts(oneShot).  oneShot is only an optimiser hint,
+-- so the identity function is semantically exact here.
+-- See Note [The one-shot state monad trick] in GHC.Utils.Monad.
+oneShot :: (a -> b) -> a -> b
+oneShot f = f
+#endif
 
 {- Note [The Core unifier]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~

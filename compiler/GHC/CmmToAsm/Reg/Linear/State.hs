@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE PatternSynonyms, DeriveFunctor, DerivingVia #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE UnboxedTuples #-}
@@ -50,9 +51,19 @@ import GHC.Cmm.BlockId
 import GHC.Platform
 import GHC.Types.Unique
 import GHC.Types.Unique.DSM
+#if !defined(__MHS__)
 import GHC.Exts (oneShot)
+#endif
 
 import GHC.Utils.Monad.State.Strict as Strict
+
+#if defined(__MHS__)
+-- MicroHs has no GHC.Exts(oneShot).  oneShot is only an optimiser hint,
+-- so the identity function is semantically exact here.
+-- See Note [The one-shot state monad trick] in GHC.Utils.Monad.
+oneShot :: (a -> b) -> a -> b
+oneShot f = f
+#endif
 
 type RA_Result freeRegs a = (# a, RA_State freeRegs #)
 

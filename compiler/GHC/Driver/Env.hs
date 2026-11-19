@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE LambdaCase #-}
 module GHC.Driver.Env
    ( Hsc(..)
@@ -64,7 +65,11 @@ import Control.Concurrent.MVar (modifyMVar)
 import Control.Monad.Trans.Except (runExceptT)
 import Foreign.Storable (sizeOf)
 import GHC.ByteOrder (targetByteOrder)
+#if defined(__MHS__)
+import System.Directory (getCurrentDirectory)
+#else
 import System.Directory (makeAbsolute)
+#endif
 import System.FilePath ((</>), isRelative)
 
 import GHC.Runtime.Context
@@ -186,6 +191,15 @@ hscPluginEnv hsc_env
       workingDirectory a == workingDirectory b &&
       rawSettings a == rawSettings b &&
       topDir a == topDir b
+
+#if defined(__MHS__)
+-- MicroHs's System.Directory has no makeAbsolute; resolve relative paths
+-- against getCurrentDirectory.
+makeAbsolute :: FilePath -> IO FilePath
+makeAbsolute p
+  | isRelative p = (</> p) <$> getCurrentDirectory
+  | otherwise    = return p
+#endif
 
 newPluginEnv :: HscEnv -> IO HscEnv
 newPluginEnv hsc_env = do

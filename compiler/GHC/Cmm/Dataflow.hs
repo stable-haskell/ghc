@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -409,6 +410,9 @@ mkFactBase lattice = foldl' add mapEmpty
 foldNodesBwdOO :: (node O O -> f -> f) -> Block node O O -> f -> f
 foldNodesBwdOO funOO = go
   where
+#if defined(__MHS__)
+    go :: Block node O O -> f -> f
+#endif
     go (BCat b1 b2) f = go b1 $! go b2 f
     go (BSnoc h n) f = go h $! funOO n f
     go (BCons n t) f = funOO n $! go t f
@@ -428,6 +432,9 @@ foldRewriteNodesBwdOO
     -> UniqDSM (Block node O O, f)
 foldRewriteNodesBwdOO rewriteOO initBlock initFacts = go initBlock initFacts
   where
+#if defined(__MHS__)
+    go :: Block node O O -> f -> UniqDSM (Block node O O, f)
+#endif
     go (BCons node1 block1) !fact1 = (rewriteOO node1 `comp` go block1) fact1
     go (BSnoc block1 node1) !fact1 = (go block1 `comp` rewriteOO node1) fact1
     go (BCat blockA1 blockB1) !fact1 = (go blockA1 `comp` go blockB1) fact1

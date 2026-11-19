@@ -21,7 +21,9 @@ import GHCi.Message
 import System.Directory
 import System.Environment.Blank
 import System.IO
+#if !defined(__MHS__)
 import qualified System.Posix.IO as Posix
+#endif
 import System.Process
 
 #else
@@ -32,7 +34,11 @@ import GHC.Utils.Panic
 
 spawnWasmInterp :: WasmInterpConfig -> IO (ExtInterpInstance ())
 
-#if !defined(mingw32_HOST_OS)
+#if defined(__MHS__)
+-- MicroHs has no process-spawning API: external interpreters are unsupported.
+spawnWasmInterp _ =
+  ioError (userError "spawnWasmInterp: external interpreters are not supported in the MicroHs stage1 build")
+#elif !defined(mingw32_HOST_OS)
 
 -- See Note [The Wasm Dynamic Linker] for details
 spawnWasmInterp WasmInterpConfig {..} = do

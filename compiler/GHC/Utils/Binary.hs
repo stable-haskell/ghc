@@ -135,12 +135,19 @@ import qualified GHC.Data.Strict as Strict
 import GHC.Utils.Outputable( JoinPointHood(..) )
 
 import Control.DeepSeq
+#if defined(__MHS__)
+import Control.Monad            ( when, unless, forM_, void )
+#else
 import Control.Monad            ( when, (<$!>), unless, forM_, void )
+#endif
 import Foreign hiding (bit, setBit, clearBit, shiftL, shiftR, void)
 import Data.Array
 import Data.Array.IO
 import Data.Array.Unsafe
 import Data.ByteString (ByteString, copy)
+#if defined(__MHS__)
+import qualified Data.ByteString as BS_Pub (packCStringLen)
+#endif
 import Data.Coerce
 import qualified Data.ByteString.Internal as BS
 import qualified Data.ByteString.Unsafe   as BS
@@ -338,12 +345,26 @@ withBinBuffer :: WriteBinHandle -> (ByteString -> IO a) -> IO a
 withBinBuffer (WriteBinMem _ ix_r _ arr_r) action = do
   ix <- readFastMutInt ix_r
   arr <- readIORef arr_r
+#if defined(__MHS__)
+  bs <- withForeignPtr arr $ \p -> BS_Pub.packCStringLen (castPtr p, ix)
+  action bs
+#else
   action $ BS.fromForeignPtr arr 0 ix
+#endif
 
 unsafeUnpackBinBuffer :: ByteString -> IO ReadBinHandle
+#if defined(__MHS__)
+unsafeUnpackBinBuffer bs =
+  BS.unsafeUseAsCStringLen bs $ \(ptr, len) -> do
+    arr <- mallocForeignPtrBytes len
+    unsafeWithForeignPtr arr $ \dst -> copyBytes dst (castPtr ptr) len
+    ix_r <- newFastMutInt 0
+    return (ReadBinMem noReaderUserData ix_r len arr)
+#else
 unsafeUnpackBinBuffer (BS.BS arr len) = do
   ix_r <- newFastMutInt 0
   return (ReadBinMem noReaderUserData ix_r len arr)
+#endif
 
 ---------------------------------------------------------------
 -- Bin
@@ -1814,20 +1835,38 @@ putByteString bh bs =
 -- | Get a ByteString whose length is known
 getByteString :: ReadBinHandle -> Int -> IO ByteString
 getByteString bh l =
+#if defined(__MHS__)
+  allocaBytes l $ \dest -> do
+    getPrim bh l (\src -> copyBytes dest src l)
+    BS_Pub.packCStringLen (castPtr dest, l)
+#else
   BS.create l $ \dest -> do
     getPrim bh l (\src -> copyBytes dest src l)
+#endif
 
 putSBS :: WriteBinHandle -> SBS.ShortByteString -> IO ()
-putSBS bh sbs = do
+putSBS bh sbs =
+#if defined(__MHS__)
+  putBS bh (SBS.fromShort sbs)
+#else
+  do
   let l = SBS.length sbs
   put_ bh l
   putPrim bh l (\p -> SBS.copyToPtr sbs 0 p l)
+#endif
 
 
 getSBS :: ReadBinHandle -> IO SBS.ShortByteString
-getSBS bh = do
+getSBS bh =
+#if defined(__MHS__)
+  do
+  bs <- getBS bh
+  return (SBS.toShort bs)
+#else
+  do
   l <- get bh :: IO Int
   getPrim bh l (\src -> SBS.createFromPtr src l)
+#endif
 
 putBS :: WriteBinHandle -> ByteString -> IO ()
 putBS bh bs =
@@ -1838,8 +1877,14 @@ putBS bh bs =
 getBS :: ReadBinHandle -> IO ByteString
 getBS bh = do
   l <- get bh :: IO Int
+#if defined(__MHS__)
+  allocaBytes l $ \dest -> do
+    getPrim bh l (\src -> copyBytes dest src l)
+    BS_Pub.packCStringLen (castPtr dest, l)
+#else
   BS.create l $ \dest -> do
     getPrim bh l (\src -> copyBytes dest src l)
+#endif
 
 instance Binary SBS.ShortByteString where
   put_ bh f = putSBS bh f

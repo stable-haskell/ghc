@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE ParallelListComp #-}
 
@@ -678,7 +679,11 @@ checkFRR_with check_kind frr_ctxt ty
           -> return refl
 
           -- See [Wrinkle: Typed Template Haskell] in Note [hasFixedRuntimeRep].
+#if defined(__MHS__)
+          | TypedBrack _ <- th_lvl
+#else
           | TypedBrack {} <- th_lvl
+#endif
           -> return refl
 
           -- Otherwise: ensure that the kind 'ki' of 'ty' is concrete.

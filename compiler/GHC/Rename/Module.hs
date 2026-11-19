@@ -1,4 +1,5 @@
 
+{-# LANGUAGE CPP                 #-}
 {-# LANGUAGE FlexibleContexts    #-}
 {-# LANGUAGE LambdaCase          #-}
 {-# LANGUAGE MultiWayIf          #-}
@@ -321,9 +322,18 @@ rnSrcWarnDecls bndr_set decls'
 
 rnWarningTxt :: WarningTxt GhcPs -> RnM (WarningTxt GhcRn)
 rnWarningTxt (WarningTxt mb_cat st wst) = do
+#if defined(__MHS__)
+  -- mhs forM_ is list-only; Maybe case instead (same semantics).
+  case mb_cat of
+    Just (L _ (InWarningCategory _ _ (L loc cat))) ->
+      unless (validWarningCategory cat) $
+        addErrAt (locA loc) (TcRnInvalidWarningCategory cat)
+    Nothing -> return ()
+#else
   forM_ mb_cat $ \(L _ (InWarningCategory _ _ (L loc cat))) ->
     unless (validWarningCategory cat) $
       addErrAt (locA loc) (TcRnInvalidWarningCategory cat)
+#endif
   wst' <- traverse (traverse rnHsDoc) wst
   pure (WarningTxt mb_cat st wst')
 rnWarningTxt (DeprecatedTxt st wst) = do
@@ -408,10 +418,17 @@ rnHsForeignDecl (ForeignImport { fd_name = name, fd_sig_ty = ty, fd_fi = spec })
 rnHsForeignDecl (ForeignExport { fd_name = name, fd_sig_ty = ty, fd_fe = spec })
   = do { name' <- lookupLocatedOccRn WL_TermVariable name
        ; (ty', fvs) <- rnHsSigType (ForeignDeclCtx name) TypeLevel ty
+#if defined(__MHS__)
+       ; return (ForeignExport { fd_e_ext = noExtField
+                               , fd_name = name', fd_sig_ty = ty'
+                               , fd_fe = ((\(CExport x c) -> CExport x c) :: ForeignExport GhcPs -> ForeignExport GhcRn) spec }
+                , fvs `addOneFV` unLoc name') }
+#else
        ; return (ForeignExport { fd_e_ext = noExtField
                                , fd_name = name', fd_sig_ty = ty'
                                , fd_fe = (\(CExport x c) -> CExport x c) spec }
                 , fvs `addOneFV` unLoc name') }
+#endif
         -- NB: a foreign export is an *occurrence site* for name, so
         --     we add it to the free-variable list.  It might, for example,
         --     be imported from another module
@@ -1762,6 +1779,9 @@ rnRoleAnnots tc_names role_annots
        ; mapM_ dupRoleAnnotErr dup_annots
        ; mapM (wrapLocMA rn_role_annot1) no_dups }
   where
+#if defined(__MHS__)
+    rn_role_annot1 :: RoleAnnotDecl GhcPs -> RnM (RoleAnnotDecl GhcRn)
+#endif
     rn_role_annot1 (RoleAnnotDecl _ tycon roles)
       = do {  -- the name is an *occurrence*, but look it up only in the
               -- decls defined in this group (see #10263)
@@ -2682,7 +2702,11 @@ extendPatSynEnv dup_fields_ok has_sel val_decls local_fix_env thing = do {
                                        , psb_args = RecCon as }))) <- bind
       = do
           bnd_name <- newTopSrcBinder (L (l2l bind_loc) n)
+#if defined(__MHS__)
+          let field_occs = map ((\ f -> L (noAnnSrcSpan $ getLocA (foLabel f :: LIdP GhcPs)) f) . recordPatSynField) as
+#else
           let field_occs = map ((\ f -> L (noAnnSrcSpan $ getLocA (foLabel f)) f) . recordPatSynField) as
+#endif
           flds <- mapM (newRecordFieldLabel dup_fields_ok has_sel [bnd_name]) field_occs
           let con_info = mkConInfo ConIsPatSyn (conDetailsVisArity (RecCon as)) flds
           return ((PatSynName bnd_name, con_info) : names)

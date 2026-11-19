@@ -66,8 +66,14 @@ import Control.Concurrent
 import Data.Typeable      ( cast )
 import System.IO.Unsafe
 
+#if defined(__MHS__)
+-- MicroHs has no System.Posix.Signals.  Signal handling is compiled out
+-- below (HAVE_SIGNAL_H is unset), so only the MVar element type below
+-- needs a non-Signals definition.
+#else
 #if !defined(mingw32_HOST_OS)
 import System.Posix.Signals as S
+#endif
 #endif
 
 #if defined(mingw32_HOST_OS)
@@ -226,11 +232,15 @@ tryMost action = do r <- try action
 
 -- | We use reference counting for signal handlers
 {-# NOINLINE signalHandlersRefCount #-}
+#if defined(__MHS__)
+signalHandlersRefCount :: MVar (Word, Maybe ())
+#else
 #if !defined(mingw32_HOST_OS)
 signalHandlersRefCount :: MVar (Word, Maybe (S.Handler,S.Handler
                                             ,S.Handler,S.Handler))
 #else
 signalHandlersRefCount :: MVar (Word, Maybe S.Handler)
+#endif
 #endif
 signalHandlersRefCount = unsafePerformIO $ newMVar (0,Nothing)
 

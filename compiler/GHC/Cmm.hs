@@ -226,7 +226,7 @@ Note [realArgRegsCover] in GHC.Cmm.CallConv.
 
 Per-file flags in the build system can only approximate this.  Whether a
 procedure actually touches the 256-bit registers is decided in the source, by
-#if defined(REG_YMM1), the same test that sets REGS_ALLOWED in rts/Jumps.h.
+ #if defined(REG_YMM1), the same test that sets REGS_ALLOWED in rts/Jumps.h.
 Hadrian used to match on a filename (Jumps_V32.cmm) and the target arch
 instead, which is a second copy of that condition, kept in step by hand, and
 one that can be no finer than a whole file.  The V16/V32/V64 file split exists
