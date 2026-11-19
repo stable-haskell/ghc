@@ -10,6 +10,8 @@ module GHC.Stack
   , withFrozenCallStack
   ) where
 
+import Prelude
+
 import GHC.Stack.Types
 
 callStack :: CallStack

@@ -1,57 +1,115 @@
 #!/usr/bin/env bash
-# Compile the minimal stage1 closure with MicroHs (mhs 0.16.12).
+# Build GHC stage1 artefacts with MicroHs (mhs 0.16.12.0).
 #
-# cabal-install itself is built by bootstrap/mhs/build-cabal-mhs.sh, which
-# runs stable-haskell/cabal PR 533.  This script does not go through cabal:
-# MicroHs is the compiler, and the stage1 packages are passed to mhs directly.
+#   bootstrap/mhs/build-stage1-mhs.sh [toolchain|tools|ghc-boot|compiler|ghc|test|all]
 #
-#   bootstrap/mhs/build-stage1-mhs.sh [tools|ghc-boot|compiler|all]
+# Toolchain layout mirrors bootstrap/mhs/build-cabal-mhs.sh (stable-haskell/cabal
+# PR 533): a patched MicroHs self-compiles, package discovery is automatic via
+# MHSDIR `<Module>.txt` lookup files (so NO `-p` package flags are ever passed
+# to mhs), every mhs invocation carries `+RTS -H700M -K32M -RTS`, and staged
+# `.mhscache` checkpoints keep progress across the 700+ module GHC closure.
+#
+# The six stage1 tools land in $OUT/bin:
+#   unlit            C, via cc (needs rts-fs/fs.h)
+#   genapply         Haskell, via mhs
+#   deriveConstants  Haskell, via mhs
+#   genprimopcode    Haskell, via mhs if the boxed gen-parsers.sh output
+#                    compiles (fallback: bootstrap GHC); parsers via
+#                    pinned happy/alex + gen-parsers.sh mhsify
+#   ghc-pkg          Haskell, via the bootstrap GHC (needs Cabal +
+#                    Cabal-syntax, which have no mhs packages)
+#   hsc2hs           Haskell, via mhs if available packages allow
+#                    (fallback: bootstrap GHC; lives outside this tree,
+#                    cloned at the cabal.project.stage1-tools pin)
 #
 # Environment:
-#   MHS_BIN     MicroHs compiler.  The cabal PR's toolchain (patched mhs)
-#               is required for the larger modules.  Default: $HOME/.mcabal/bin/mhs
-#   MHS_PREFIX  Package prefix.  Default: directory of MHS_BIN's install.
+#   MHS_BIN          MicroHs compiler. When explicitly set by the caller it is
+#                    used as-is; otherwise $OUT/toolchain/bin/mhs if built,
+#                    else $HOME/.mcabal/bin/mhs.
+#   MHS_STAGE1_OUT   Output directory (default: $ROOT/_build/mhs-stage1).
+#   MHS_FORCE_REBUILD=1  Rebuild stages whose checkpoints already exist.
+#   MHS_FROM_STAGE   Resume staged compilation from this stage (e.g. 02-utils-data).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
-MHS_BIN="${MHS_BIN:-$HOME/.mcabal/bin/mhs}"
+OUT="${MHS_STAGE1_OUT:-$ROOT/_build/mhs-stage1}"
+TOOLCHAIN_DIR="$OUT/toolchain"
+CACHE_DIR="$OUT/cache"
+AUTOGEN="$OUT/autogen"
+WORK_DIR="$OUT/work"
+BIN_DIR="$OUT/bin"
+LOG_DIR="$OUT/log"
+SHARE_DIR="$OUT/share"
+mkdir -p "$TOOLCHAIN_DIR/bin" "$CACHE_DIR" "$AUTOGEN" "$WORK_DIR" "$BIN_DIR" "$LOG_DIR" "$SHARE_DIR"
+
+MHS_VERSION="0.16.12.0"
+MHS_COMMIT="9e1cd08"
+
+# --- compiler selection -------------------------------------------------------
+# Respect an explicit caller override; otherwise prefer the toolchain we built,
+# falling back to the existing mcabal install (read-only use; this script never
+# writes outside $OUT).
+MHS_BIN_EXPLICIT=0
+if [ -n "${MHS_BIN+x}" ]; then
+  MHS_BIN_EXPLICIT=1
+fi
+if [ -z "${MHS_BIN+x}" ]; then
+  if [ -x "$TOOLCHAIN_DIR/bin/mhs" ]; then
+    MHS_BIN="$TOOLCHAIN_DIR/bin/mhs"
+  else
+    MHS_BIN="$HOME/.mcabal/bin/mhs"
+  fi
+fi
 if [ ! -x "$MHS_BIN" ]; then
   echo "mhs not found at $MHS_BIN" >&2
-  echo "Build it with: bootstrap/mhs/build-cabal-mhs.sh toolchain" >&2
+  echo "Build it with: bootstrap/mhs/build-stage1-mhs.sh toolchain" >&2
   exit 1
 fi
 export PATH="$(dirname "$MHS_BIN"):$HOME/.mcabal/bin:$PATH"
 
-OUT="${MHS_STAGE1_OUT:-$ROOT/_build/mhs-stage1}"
-mkdir -p "$OUT/bin" "$OUT/autogen/GHC/Platform" "$OUT/c" "$OUT/log"
+# Bootstrap GHC for the tools mhs cannot compile (happy output, Cabal deps).
+NIX_GHC="/nix/store/5l6s4b824c6kainnxmn3crqfy0sjxj71-ghc-9.8.4/bin/ghc"
+if [ -x "$NIX_GHC" ]; then
+  BOOT_GHC="$NIX_GHC"
+else
+  BOOT_GHC="$(command -v ghc || true)"
+fi
+if [ -z "${BOOT_GHC:-}" ]; then
+  echo "WARNING: no bootstrap ghc found; genprimopcode/ghc-pkg/hsc2hs need one" >&2
+fi
+export PATH="$(dirname "${BOOT_GHC:-/bin}"):$PATH"
 
+# Pinned parser generators (happy 2.1.5: happy 2.1.7 broke genprimopcode).
+PINNED_HAPPY="/nix/store/zlh6z044flfimz0vrdrrgalxs0nnklfy-happy-exe-happy-2.1.5/bin/happy"
+PINNED_ALEX="/nix/store/3iphln0wbab5v1rp1lbvhzn6q69sab1l-alex-3.5.4.0/bin/alex"
+if [ -x "$PINNED_HAPPY" ]; then HAPPY="$PINNED_HAPPY"; else HAPPY="$(command -v happy || true)"; fi
+if [ -x "$PINNED_ALEX" ]; then ALEX="$PINNED_ALEX"; else ALEX="$(command -v alex || true)"; fi
+
+# --- host platform ------------------------------------------------------------
 HOST_ARCH="$(uname -m)"
 case "$HOST_ARCH" in
-  arm64|aarch64) NCG_DEF=(-DHAVE_AARCH64_NCG) ;;
-  x86_64|amd64)  NCG_DEF=(-DHAVE_X86_NCG) ;;
+  arm64|aarch64) NCG_DEF=(-DHAVE_AARCH64_NCG); MHS_ARCH=ArchAArch64 ;;
+  x86_64|amd64)  NCG_DEF=(-DHAVE_X86_NCG);    MHS_ARCH=ArchX86_64 ;;
   *) echo "unsupported host arch $HOST_ARCH" >&2; exit 1 ;;
 esac
+case "$(uname -s)" in
+  Darwin)  MHS_OS=OSDarwin ;;
+  Linux)   MHS_OS=OSLinux ;;
+  FreeBSD) MHS_OS=OSFreeBSD ;;
+  *)       echo "unsupported host OS $(uname -s)" >&2; exit 1 ;;
+esac
 
-# Stage1 flags from cabal.project.stage1: bootstrap, host NCG only,
-# no interpreter, no JS/Wasm/LLVM, no HPC.
-DEFS=(-DBOOTSTRAPPING -DBOOTSTRAP_TH "${NCG_DEF[@]}")
+# Stage1 flags from cabal.project.stage1: bootstrap, host NCG only, no
+# interpreter, no JS/Wasm/LLVM/LLVM, no HPC. -D__MHS__ must be passed
+# explicitly: mhs does NOT predefine it, and every compiler fix in this
+# tree is guarded on `#if defined(__MHS__)` (verified: without it, mhs
+# elaborates the `#else`/original branches, so no fix takes effect).
+MHS_DEFS=(-DBOOTSTRAPPING -DBOOTSTRAP_TH -D__MHS__ "${NCG_DEF[@]}")
+MHS_RTS=(+RTS -H"${MHS_HEAP:-700M}" -K32M -RTS)
 
-PKGS=(
-  -pcontainers-0.8.1
-  -pfilepath-1.5.5.0
-  -pos-string-2.0.10
-  -pbinary-mhs-0.8.9.3
-  -parray-mhs-0.5.8.0
-  -ptime-1.15
-  -pexceptions-0.10.11
-  -ptransformers-0.6.2.0
-  -pmtl-2.3.2
-  -ppretty-mhs-1.1.3.6
-)
-
-INCLUDES=(
+MHS_INCLUDES=(
   -i"$ROOT/compiler"
   -i"$ROOT/ghc"
   -i"$ROOT/libraries/ghc-boot"
@@ -61,82 +119,623 @@ INCLUDES=(
   -i"$ROOT/utils/deriveConstants"
   -i"$ROOT/utils/genapply"
   -i"$ROOT/utils/genprimopcode"
-  -i"$OUT/autogen"
+  -i"$AUTOGEN"
   -i"$ROOT/bootstrap/mhs/shims"
   -I"$ROOT/bootstrap/mhs/include"
+  -I"$AUTOGEN/include"
   -I"$ROOT/compiler"
   -I"$ROOT/rts/include"
 )
 
-CACHE="$OUT/stage1.mhscache"
+# mhs has no -XNoImplicitPrelude switch; probe once and use it only if accepted.
+NIP_FLAG=()
+probe_nip_flag() {
+  NIP_FLAG=()
+  if "$MHS_BIN" -XNoImplicitPrelude --numeric-version >/dev/null 2>&1; then
+    NIP_FLAG=(-XNoImplicitPrelude)
+  else
+    echo "NOTE: mhs rejects -XNoImplicitPrelude; staged modules rely on their"
+    echo "explicit Prelude/GHC.Prelude imports instead (ghc-boot+compiler already"
+    echo "carry default-extensions: NoImplicitPrelude in their .cabal files)."
+  fi
+}
+probe_nip_flag
 
-cat > "$OUT/autogen/GHC/Platform/Host.hs" << EOF
+# After build_toolchain runs inside `all`, re-point MHS_BIN at the freshly
+# built toolchain (unless the caller explicitly passed MHS_BIN=...) and
+# re-probe NIP_FLAG: the top-of-script probe above ran before the toolchain
+# existed and would otherwise pin `all` to ~/.mcabal/bin/mhs with NIP_FLAG=().
+refresh_mhs_bin_after_toolchain() {
+  if [ "$MHS_BIN_EXPLICIT" != "1" ] && [ -x "$TOOLCHAIN_DIR/bin/mhs" ]; then
+    MHS_BIN="$TOOLCHAIN_DIR/bin/mhs"
+    export PATH="$(dirname "$MHS_BIN"):$PATH"
+    probe_nip_flag
+  fi
+}
+
+# Overwrite a file only when its content changes, so .mhscache MD5s stay valid.
+write_if_changed() {
+  local dest="$1"
+  local tmp="$dest.tmp.$$"
+  mkdir -p "$(dirname "$dest")"
+  cat > "$tmp"
+  if [ -f "$dest" ] && cmp -s "$dest" "$tmp"; then
+    rm -f "$tmp"
+  else
+    mv "$tmp" "$dest"
+  fi
+}
+
+# --- toolchain ----------------------------------------------------------------
+# Patched MicroHs 0.16.12.0, following build-cabal-mhs.sh: apply the stage1
+# patch (falling back to the cabal checkout's microhs-full.patch), self-compile
+# MicroHs.Main, relink with the C runtime, and point MHS_PREFIX at it.
+# Everything is installed under $OUT/toolchain; $HOME/.mcabal is only read.
+build_toolchain() {
+  local mhs_prefix="$TOOLCHAIN_DIR"
+  local mhs_bin="$mhs_prefix/bin/mhs"
+  local stamp="$mhs_prefix/.mhs-stage1-toolchain-v1.stamp"
+  if [ -x "$mhs_bin" ] && [ -f "$stamp" ] && [ "${MHS_FORCE_REBUILD:-0}" != "1" ]; then
+    echo "=== [toolchain] Reusing MicroHs $MHS_VERSION in $mhs_prefix ==="
+    "$mhs_bin" --version
+    return 0
+  fi
+  # NOTE: $HOME/.mcabal/bin/mhs is the UNPATCHED upstream 0.16.12.0 and must
+  # never satisfy the toolchain: always build $TOOLCHAIN_DIR/bin/mhs when it
+  # (or its stamp) is missing.
+
+  local mhs_src="${MHS_SRC:-}"
+  local owns_mhs_src=0
+  if [ -z "$mhs_src" ]; then
+    mhs_src="$OUT/microhs-src"
+    owns_mhs_src=1
+  fi
+  echo "=== [toolchain] Building patched MicroHs $MHS_VERSION ($MHS_COMMIT) ==="
+  if [ ! -d "$mhs_src/.git" ] && [ ! -f "$mhs_src/MicroHs.cabal" ]; then
+    rm -rf "$mhs_src"
+    git clone --filter=blob:none "${MHS_REPO_URL:-https://github.com/augustss/MicroHs.git}" "$mhs_src"
+  fi
+  if [ -d "$mhs_src/.git" ]; then
+    if [ "$owns_mhs_src" = "1" ]; then
+      git -C "$mhs_src" checkout -- . 2>/dev/null || true
+      git -C "$mhs_src" clean -fd 2>/dev/null || true
+    fi
+    git -C "$mhs_src" fetch --tags origin 2>/dev/null || true
+    git -C "$mhs_src" checkout "v$MHS_VERSION" 2>/dev/null \
+      || git -C "$mhs_src" checkout "$MHS_COMMIT"
+  fi
+
+  local patch=""
+  if [ -f "$ROOT/bootstrap/mhs/microhs-stage1.patch" ]; then
+    patch="$ROOT/bootstrap/mhs/microhs-stage1.patch"
+  elif [ -f "$ROOT/_build/mhs-cabal-src/bootstrap/mhs/microhs-full.patch" ]; then
+    patch="$ROOT/_build/mhs-cabal-src/bootstrap/mhs/microhs-full.patch"
+  fi
+  if [ -n "$patch" ]; then
+    echo "--- applying $patch ---"
+    if [ -d "$mhs_src/.git" ]; then
+      if [ "$owns_mhs_src" = "1" ]; then
+        git -C "$mhs_src" apply "$patch"
+      elif git -C "$mhs_src" apply --check "$patch" 2>/dev/null; then
+        git -C "$mhs_src" apply "$patch"
+      elif git -C "$mhs_src" apply --reverse --check "$patch" 2>/dev/null; then
+        echo "NOTE: patch already applied in caller MHS_SRC; continuing"
+      else
+        echo "ERROR: $patch does not apply cleanly to caller MHS_SRC ($mhs_src)" >&2
+        exit 1
+      fi
+    else
+      patch -p1 -d "$mhs_src" < "$patch"
+    fi
+  else
+    echo "NOTE: no microhs-stage1.patch (or cabal microhs-full.patch) found; building unpatched"
+  fi
+
+  # 1. Self-compile MicroHs.Main to C with the bootstrap GHC (fast, ~5s) or
+  #    the stage-0 ~/.mcabal/bin/mhs (~12s). Never `make install` (that would
+  #    recompile every package / copy everything).
+  echo "=== [toolchain] Self-compiling MicroHs.Main ==="
+  (
+    cd "$mhs_src"
+    local stage0=""
+    # Prefer a C-compiled stage-0 mhs (seed bin/mhs or ~/.mcabal/bin/mhs):
+    # a GHC-compiled bin/gmhs cannot self-compile here (System.Compress
+    # "compress: not available with ghc").
+    if [ -x "$mhs_src/bin/mhs" ]; then
+      stage0="$mhs_src/bin/mhs"
+    elif [ -x "$HOME/.mcabal/bin/mhs" ]; then
+      stage0="$HOME/.mcabal/bin/mhs"
+    elif [ -n "${BOOT_GHC:-}" ] && [ -x "$BOOT_GHC" ]; then
+      if [ ! -x "$mhs_src/bin/gmhs" ]; then
+        make GHC="$BOOT_GHC" bin/gmhs
+      fi
+      if [ -x "$mhs_src/bin/gmhs" ]; then
+        stage0="$mhs_src/bin/gmhs"
+      fi
+    fi
+    if [ -z "$stage0" ]; then
+      echo "ERROR: no stage-0 mhs (need BOOT_GHC or \$HOME/.mcabal/bin/mhs)" >&2
+      exit 1
+    fi
+    # Set MHSDIR=. so stage-0 mhs compiles patched src/ and lib/ from source
+    # instead of picking up unpatched MicroHs-0.16.12.0.pkg from ~/.mcabal.
+    MHSDIR=. "$stage0" "${MHS_RTS[@]}" -C"$WORK_DIR/mhs-toolchain.mhscache" -z -i -imhs -isrc -ilib MicroHs.Main -ogenerated/mhs-patched.c
+    mkdir -p "$mhs_prefix/bin"
+    local stack_ldflags=()
+    case "$(uname -s)" in
+      Darwin) stack_ldflags=(-Wl,-stack_size,0x20000000) ;;
+      Linux)  stack_ldflags=(-Wl,-z,stack-size=536870912) ;;
+    esac
+    cc -O3 "${stack_ldflags[@]}" -Isrc/runtime -Isrc/runtime/unix \
+      src/runtime/main.c src/runtime/eval.c generated/mhs-patched.c \
+      -lm -o "$mhs_bin"
+  )
+  [ -x "$mhs_bin" ] || { echo "ERROR: toolchain link produced no $mhs_bin" >&2; exit 1; }
+  "$mhs_bin" --version
+
+  # 2. Zero-bloat package access: MicroHs resolves MHSDIR relative to
+  #    <bindir>/../mhs-0.16.12.0, so symlink the toolchain's package dir at
+  #    the ~/.mcabal packages (read-only use) plus cpphs next to mhs
+  #    (mhs shells out to `cpphs` for -XCPP).
+  mkdir -p "$mhs_prefix/bin"
+  rm -rf "$mhs_prefix/mhs-$MHS_VERSION"
+  mkdir -p "$mhs_prefix/mhs-$MHS_VERSION/src"
+  if [ -d "$HOME/.mcabal/mhs-$MHS_VERSION" ]; then
+    for entry in "$HOME/.mcabal/mhs-$MHS_VERSION"/*; do
+      [ "$(basename "$entry")" = "src" ] && continue
+      ln -sfn "$entry" "$mhs_prefix/mhs-$MHS_VERSION/$(basename "$entry")"
+    done
+  fi
+  cp -R "$mhs_src/src/runtime" "$mhs_prefix/mhs-$MHS_VERSION/src/runtime"
+  # Installed-mode mhs links <bindir>/../mhs-VERSION/packages/MicroHs-VERSION/data/src/runtime,
+  # so overlay the patched runtime there too (packages/ itself stays shared read-only).
+  if [ -d "$HOME/.mcabal/mhs-$MHS_VERSION/packages" ]; then
+    rm -f "$mhs_prefix/mhs-$MHS_VERSION/packages"
+    mkdir -p "$mhs_prefix/mhs-$MHS_VERSION/packages"
+    for entry in "$HOME/.mcabal/mhs-$MHS_VERSION"/packages/*; do
+      [ "$(basename "$entry")" = "MicroHs-$MHS_VERSION" ] && continue
+      ln -sfn "$entry" "$mhs_prefix/mhs-$MHS_VERSION/packages/$(basename "$entry")"
+    done
+    mkdir -p "$mhs_prefix/mhs-$MHS_VERSION/packages/MicroHs-$MHS_VERSION/data/src"
+    ln -sfn "$HOME/.mcabal/mhs-$MHS_VERSION/packages/MicroHs-$MHS_VERSION/data/mhs.conf" \
+      "$mhs_prefix/mhs-$MHS_VERSION/packages/MicroHs-$MHS_VERSION/data/mhs.conf"
+    rm -rf "$mhs_prefix/mhs-$MHS_VERSION/packages/MicroHs-$MHS_VERSION/data/src/runtime"
+    cp -R "$mhs_src/src/runtime" \
+      "$mhs_prefix/mhs-$MHS_VERSION/packages/MicroHs-$MHS_VERSION/data/src/runtime"
+  fi
+  if [ ! -x "$mhs_prefix/bin/cpphs" ] && [ -x "$HOME/.mcabal/bin/cpphs" ]; then
+    ln -sfn "$HOME/.mcabal/bin/cpphs" "$mhs_prefix/bin/cpphs"
+  fi
+  touch "$stamp"
+  ls -lh "$mhs_bin"
+}
+
+# --- autogen ------------------------------------------------------------------
+# Idempotent autogen for ghc-boot/compiler/ghc (mirrors hadrian
+# generateVersionHs/generatePlatformHostHs and compiler/cabal-buck2
+# gen_settings_config.py; every identifier below is imported somewhere under
+# compiler/ or ghc/). Fingerprint needs no autogen: GHC.Utils.Fingerprint is
+# plain Haskell. The primop .hs-incl files already live in
+# bootstrap/mhs/include/ (committed by an earlier stage1 change).
+prepare_autogen() {
+  echo "=== [autogen] $AUTOGEN ==="
+  write_if_changed "$AUTOGEN/GHC/Platform/Host.hs" <<EOF
 module GHC.Platform.Host (hostPlatformArchOS) where
 import GHC.Platform.ArchOS
 hostPlatformArchOS :: ArchOS
-hostPlatformArchOS = ArchOS $(
-  case "$HOST_ARCH" in
-    arm64|aarch64) echo ArchAArch64 ;;
-    *) echo ArchX86_64 ;;
-  esac
-) $(
-  case "$(uname -s)" in
-    Darwin) echo OSDarwin ;;
-    Linux) echo OSLinux ;;
-    FreeBSD) echo OSFreeBSD ;;
-    *) echo OSUnknown ;;
-  esac
-)
+hostPlatformArchOS = ArchOS $MHS_ARCH $MHS_OS
 EOF
 
-cat > "$OUT/autogen/PackageInfo_ghc_boot.hs" << 'EOF'
+  write_if_changed "$AUTOGEN/PackageInfo_ghc_boot.hs" <<'EOF'
 module PackageInfo_ghc_boot (version) where
 import Data.Version (Version(..))
 version :: Version
 version = Version [9,14,0] []
 EOF
 
-run_mhs() {
-  local log="$1"
-  shift
-  # A later mhs process reloads every package already stored in the cache
-  # and then adds each -p package again.  getPathPkgs does not dedup, so a
-  # second link compiles the same cbits twice (time's HsTime.c).  -c runs
-  # share the cache.  Each link gets its own.
-  local cache="$CACHE"
-  local arg linking=1
-  for arg in "$@"; do
-    if [ "$arg" = "-c" ]; then linking=0; fi
-  done
-  if [ "$linking" = 1 ]; then
-    cache="${log%.log}.mhscache"
-    rm -f "$cache"
+  # GHC.CmmToLlvm.Version.Bounds (mirrors hadrian's interpolation of
+  # compiler/GHC/CmmToLlvm/Version/Bounds.hs.in; bounds per configure.ac:
+  # LlvmMinVersion=10 inclusive, LlvmMaxVersion=100 exclusive).
+  mkdir -p "$AUTOGEN/GHC/CmmToLlvm/Version"
+  write_if_changed "$AUTOGEN/GHC/CmmToLlvm/Version/Bounds.hs" <<'EOF'
+module GHC.CmmToLlvm.Version.Bounds
+  ( supportedLlvmVersionLowerBound
+  , supportedLlvmVersionUpperBound
+  )
+where
+
+import GHC.Prelude ()
+
+import GHC.CmmToLlvm.Version.Type
+
+import qualified Data.List.NonEmpty as NE
+
+-- | The (inclusive) lower bound on the LLVM Version that is currently supported.
+supportedLlvmVersionLowerBound :: LlvmVersion
+supportedLlvmVersionLowerBound = LlvmVersion (10 NE.:| [])
+
+-- | The (not-inclusive) upper bound  bound on the LLVM Version that is currently supported.
+supportedLlvmVersionUpperBound :: LlvmVersion
+supportedLlvmVersionUpperBound = LlvmVersion (100 NE.:| [])
+EOF
+
+  # GHC.Platform.Constants: generated by `deriveConstants
+  # --gen-haskell-type` (pure Haskell, no C compilation needed), the same
+  # command hadrian's genPlatformConstantsType runs. Build the tool when it
+  # is missing so this also works for a standalone `compiler` run (which
+  # never runs build_tools); share build_tools' cache so no work repeats.
+  gen_platform_constants() {
+    mkdir -p "$AUTOGEN/GHC/Platform"
+    local dc="$BIN_DIR/deriveConstants"
+    if [ ! -x "$dc" ]; then
+      echo "--- building deriveConstants for autogen ---"
+      "$MHS_BIN" "${MHS_RTS[@]}" -s -XCPP "${MHS_DEFS[@]}" "${MHS_INCLUDES[@]}" \
+        -C"$WORK_DIR/deriveConstants.mhscache" \
+        -o "$dc" "$ROOT/utils/deriveConstants/Main.hs"
+    fi
+    "$dc" --gen-haskell-type -o "$WORK_DIR/Constants.hs.tmp"
+    write_if_changed "$AUTOGEN/GHC/Platform/Constants.hs" < "$WORK_DIR/Constants.hs.tmp"
+    rm -f "$WORK_DIR/Constants.hs.tmp"
+  }
+  gen_platform_constants
+
+  # Values mirror gen_settings_config.py: `ghc --info` of the compiler that
+  # builds the library, cStage hard-coded to 2 (as in compiler/Setup.hs).
+  local build_platform host_platform project_name booter_version
+  build_platform=""; host_platform=""
+  if [ -n "${BOOT_GHC:-}" ] && [ -x "$BOOT_GHC" ]; then
+    build_platform="$("$BOOT_GHC" --info 2>/dev/null | grep -o '"Host platform","[^"]*"' | cut -d'"' -f4 || true)"
+    host_platform="$("$BOOT_GHC" --info 2>/dev/null | grep -o '"Target platform","[^"]*"' | cut -d'"' -f4 || true)"
+    project_name="$("$BOOT_GHC" --info 2>/dev/null | grep -o '"Project name","[^"]*"' | cut -d'"' -f4 || true)"
+    booter_version="$("$BOOT_GHC" --numeric-version 2>/dev/null || true)"
   fi
-  echo "=== mhs $* ==="
-  if ! "$MHS_BIN" -s -XCPP "${DEFS[@]}" "${PKGS[@]}" "${INCLUDES[@]}" -C"$cache" "$@" > "$log" 2>&1; then
-    echo "FAILED. Log: $log" >&2
-    tail -40 "$log" >&2
+  [ -n "$build_platform" ] || build_platform="$(uname -m)-unknown-$(uname -s | tr '[:upper:]' '[:lower:]')"
+  [ -n "$host_platform" ] || host_platform="$build_platform"
+  [ -n "$project_name" ] || project_name="The Glorious Glasgow Haskell Compilation System"
+  [ -n "$booter_version" ] || booter_version="9.8.4"
+  local ghc_internal_unit_id="ghc-internal"
+  if [ -n "${BOOT_GHC:-}" ] && command -v ghc-pkg >/dev/null 2>&1; then
+    ghc_internal_unit_id="$(ghc-pkg field ghc-internal id 2>/dev/null | sed 's/^.*: *//' || true)"
+    [ -n "$ghc_internal_unit_id" ] || ghc_internal_unit_id="ghc-internal"
+  fi
+  # Escape for Haskell string literals.
+  build_platform="${build_platform//\\/\\\\}"; build_platform="${build_platform//\"/\\\"}"
+  host_platform="${host_platform//\\/\\\\}"; host_platform="${host_platform//\"/\\\"}"
+  write_if_changed "$AUTOGEN/GHC/Settings/Config.hs" <<EOF
+module GHC.Settings.Config
+  ( module GHC.Version
+  , cBuildPlatformString
+  , cHostPlatformString
+  , cProjectName
+  , cBooterVersion
+  , cStage
+  , cProjectUnitId
+  , cGhcInternalUnitId
+  ) where
+
+import GHC.Prelude.Basic
+
+import GHC.Version
+
+cBuildPlatformString :: String
+cBuildPlatformString = "$build_platform"
+
+cHostPlatformString :: String
+cHostPlatformString = "$host_platform"
+
+cProjectName          :: String
+cProjectName          = "$project_name"
+
+cBooterVersion        :: String
+cBooterVersion        = "$booter_version"
+
+cStage                :: String
+cStage                = show (2 :: Int)
+
+cProjectUnitId :: String
+cProjectUnitId = "ghc"
+
+cGhcInternalUnitId :: String
+cGhcInternalUnitId = "$ghc_internal_unit_id"
+EOF
+
+  # Paths_hsc2hs for the out-of-tree hsc2hs (cabal generates this).
+  mkdir -p "$SHARE_DIR/hsc2hs"
+  write_if_changed "$AUTOGEN/Paths_hsc2hs.hs" <<EOF
+module Paths_hsc2hs (version, getBinDir, getLibDir, getDynLibDir, getDataDir, getLibexecDir, getSysconfDir, getDataFileName) where
+import Data.Version (Version(..))
+version :: Version
+version = Version [0,68,10] []
+getBinDir, getLibDir, getDynLibDir, getDataDir, getLibexecDir, getSysconfDir :: IO FilePath
+getBinDir = return "$BIN_DIR"
+getLibDir = return "$SHARE_DIR/hsc2hs"
+getDynLibDir = return "$SHARE_DIR/hsc2hs"
+getDataDir = return "$SHARE_DIR/hsc2hs"
+getLibexecDir = return "$SHARE_DIR/hsc2hs"
+getSysconfDir = return "$SHARE_DIR/hsc2hs"
+getDataFileName :: FilePath -> IO FilePath
+getDataFileName name = return ("$SHARE_DIR/hsc2hs/" ++ name)
+EOF
+
+  # ghcplatform.h is generated by configure in a full build; the bootstrap
+  # provides a stub (feature macros arrive via -D flags instead).
+  mkdir -p "$AUTOGEN/include"
+  write_if_changed "$AUTOGEN/include/ghcplatform.h" <<'EOF'
+/* Stub for the MicroHs stage1 bootstrap. Feature macros are passed with -D. */
+#ifndef GHCPLATFORM_H
+#define GHCPLATFORM_H
+#endif
+EOF
+
+  if [ -x "$ROOT/bootstrap/mhs/gen-parsers.sh" ]; then
+    echo "--- gen-parsers.sh $AUTOGEN ---"
+    "$ROOT/bootstrap/mhs/gen-parsers.sh" "$AUTOGEN"
+  else
+    echo "--- no bootstrap/mhs/gen-parsers.sh; tools generate parsers inline ---"
+  fi
+}
+
+# run_logged <log> <cmd...>: run with output to log; report log on failure.
+run_logged() {
+  local log="$1"; shift
+  local rc=0
+  "$@" > "$log" 2>&1 || rc=$?
+  tail -3 "$log" || true
+  if [ $rc -ne 0 ]; then
+    echo "FAILED ($rc): $* -- log: $log" >&2
+    return $rc
+  fi
+}
+
+# --- stage1 tools ---------------------------------------------------------------
+# Builds all six utils into $BIN_DIR and verifies each one runs.
+build_tools() {
+  echo "=== [tools] unlit (cc) ==="
+  # rts-fs/fs.c provides __rts_fopen (plain fopen on POSIX, see rts-fs.cabal).
+  cc -O2 -DFS_NAMESPACE=rts -I"$ROOT/rts-fs" \
+    -o "$BIN_DIR/unlit" "$ROOT/utils/unlit/unlit.c" "$ROOT/rts-fs/fs.c"
+  printf 'hello\n\n> main = putStrLn "hi"\n' > "$WORK_DIR/unlit-probe.lhs"
+  "$BIN_DIR/unlit" -q "$WORK_DIR/unlit-probe.lhs" "$WORK_DIR/unlit-probe.hs"
+  grep -q 'main = putStrLn' "$WORK_DIR/unlit-probe.hs"
+  echo "unlit OK"
+
+  echo "=== [tools] genapply (mhs) ==="
+  run_logged "$LOG_DIR/genapply.log" \
+    "$MHS_BIN" "${MHS_RTS[@]}" -s -XCPP "${MHS_DEFS[@]}" "${MHS_INCLUDES[@]}" \
+    -C"$WORK_DIR/genapply.mhscache" \
+    -o "$BIN_DIR/genapply" "$ROOT/utils/genapply/Main.hs"
+  # Functional check: generate AutoApply from a synthetic target-info header.
+  cat > "$WORK_DIR/target-info.h" <<'EOF'
+// WORD_SIZE 8
+// TAG_BITS 1
+// BITMAP_BITS_SHIFT 3
+// MAX_Real_Vanilla_REG 10
+// MAX_Real_Float_REG 6
+// MAX_Real_Double_REG 6
+// MAX_Real_Long_REG 5
+// MAX_Real_XMM_REG 8
+EOF
+  "$BIN_DIR/genapply" "$WORK_DIR/target-info.h" > "$WORK_DIR/AutoApply.cmm"
+  grep -q "Automatically generated by utils/genapply" "$WORK_DIR/AutoApply.cmm"
+  echo "genapply OK"
+
+  echo "=== [tools] deriveConstants (mhs) ==="
+  run_logged "$LOG_DIR/deriveConstants.log" \
+    "$MHS_BIN" "${MHS_RTS[@]}" -s -XCPP "${MHS_DEFS[@]}" "${MHS_INCLUDES[@]}" \
+    -C"$WORK_DIR/deriveConstants.mhscache" \
+    -o "$BIN_DIR/deriveConstants" "$ROOT/utils/deriveConstants/Main.hs"
+  "$BIN_DIR/deriveConstants" --help > "$WORK_DIR/deriveConstants-usage.txt" 2>&1 || true
+  grep -qi "usage\|deriveconstants" "$WORK_DIR/deriveConstants-usage.txt" \
+    || test -s "$WORK_DIR/deriveConstants-usage.txt"
+  echo "deriveConstants OK"
+
+  echo "=== [tools] genprimopcode (mhs, fallback: bootstrap ghc) ==="
+  if [ -z "${HAPPY:-}" ] || [ -z "${ALEX:-}" ]; then echo "happy/alex not found" >&2; exit 1; fi
+  local gp_dir="$AUTOGEN/genprimopcode"
+  mkdir -p "$gp_dir"
+  if [ ! -f "$gp_dir/Parser.hs" ] || [ ! -f "$gp_dir/Lexer.hs" ] \
+      || [ "$ROOT/utils/genprimopcode/Parser.y" -nt "$gp_dir/Parser.hs" ] \
+      || [ "$ROOT/utils/genprimopcode/Lexer.x" -nt "$gp_dir/Lexer.hs" ]; then
+    echo "--- happy/alex: regenerating Parser/Lexer ---"
+    cp "$ROOT/utils/genprimopcode/Parser.y" "$WORK_DIR/Parser.y"
+    cp "$ROOT/utils/genprimopcode/Lexer.x" "$WORK_DIR/Lexer.x"
+    ( cd "$WORK_DIR" && "$HAPPY" Parser.y -o "$gp_dir/Parser.hs" )
+    ( cd "$WORK_DIR" && "$ALEX" Lexer.x -o "$gp_dir/Lexer.hs" )
+  else
+    echo "--- reusing $gp_dir/{Parser,Lexer}.hs ---"
+  fi
+  if ! ( cd "$WORK_DIR" && run_logged "$LOG_DIR/genprimopcode.log" \
+      "$MHS_BIN" "${MHS_RTS[@]}" -s -XCPP "${MHS_DEFS[@]}" "${MHS_INCLUDES[@]}" \
+      -i"$gp_dir" \
+      -C"$WORK_DIR/genprimopcode.mhscache" \
+      -o "$BIN_DIR/genprimopcode" "$ROOT/utils/genprimopcode/Main.hs" ); then
+    echo "--- genprimopcode: mhs build failed, falling back to $BOOT_GHC ---"
+    if [ -z "${BOOT_GHC:-}" ]; then echo "no bootstrap ghc for fallback" >&2; exit 1; fi
+    mkdir -p "$WORK_DIR/genprimopcode-objs"
+    ( cd "$WORK_DIR" && run_logged "$LOG_DIR/genprimopcode.log" \
+        "$BOOT_GHC" --make -O1 -XTupleSections \
+        -odir "$WORK_DIR/genprimopcode-objs" -hidir "$WORK_DIR/genprimopcode-objs" \
+        -i"$ROOT/utils/genprimopcode" -i"$gp_dir" \
+        "$ROOT/utils/genprimopcode/Main.hs" \
+        -o "$BIN_DIR/genprimopcode" )
+  fi
+  # Functional check: preprocess primops.txt.pp (-x c for clang on .pp) and emit --data-decl.
+  cc -E -x c -P -w -I"$ROOT/compiler" -I"$AUTOGEN/include" \
+    "$ROOT/compiler/GHC/Builtin/primops.txt.pp" -o "$WORK_DIR/primops.txt"
+  "$BIN_DIR/genprimopcode" --data-decl < "$WORK_DIR/primops.txt" \
+    > "$WORK_DIR/primop-data-decl.hs"
+  grep -q "data PrimOp" "$WORK_DIR/primop-data-decl.hs"
+  echo "genprimopcode OK"
+
+  echo "=== [tools] ghc-pkg (bootstrap ghc, -DBOOTSTRAPPING, no terminfo) ==="
+  # Built like cabal.project.stage1-ghc-pkg: bootstrap directory/filepath/unix/
+  # process/Cabal/Cabal-syntax from the boot compiler, in-tree ghc-boot (+ the
+  # vendored ghc-boot-th, i.e. the +bootstrap flag) and ghc-platform.
+  mkdir -p "$WORK_DIR/ghc-pkg-objs"
+  ( cd "$WORK_DIR" && run_logged "$LOG_DIR/ghc-pkg.log" \
+      "$BOOT_GHC" --make -O1 -XNoImplicitPrelude -DBOOTSTRAPPING \
+      -odir "$WORK_DIR/ghc-pkg-objs" -hidir "$WORK_DIR/ghc-pkg-objs" \
+      -i"$ROOT/libraries/ghc-boot" -i"$ROOT/libraries/ghc-boot-th" \
+      -i"$ROOT/libraries/ghc-platform/src" \
+      -i"$AUTOGEN" -I"$AUTOGEN/include" -I"$ROOT/compiler" \
+      -I"$ROOT/bootstrap/mhs/include" \
+      "$ROOT/utils/ghc-pkg/Main.hs" \
+      -o "$BIN_DIR/ghc-pkg" )
+  "$BIN_DIR/ghc-pkg" --version
+  echo "ghc-pkg OK"
+
+  echo "=== [tools] hsc2hs (mhs, fallback: bootstrap ghc, out-of-tree pin) ==="
+  # utils/hsc2hs is not in this tree (it moved out; stage1-tools pins it via
+  # source-repository-package). Clone the pin into $OUT scratch instead of
+  # dirtying any checkout. Never write into utils/hsc2hs.
+  local hsc_src="$OUT/hsc2hs-src"
+  if [ ! -d "$hsc_src/.git" ]; then
+    git clone https://github.com/stable-haskell/hsc2hs.git "$hsc_src"
+  fi
+  git -C "$hsc_src" checkout -- .
+  git -C "$hsc_src" checkout d07eea1260894ce5fe456f881fbc62366c9eb1b
+  cp "$hsc_src/data/template-hsc.h" "$SHARE_DIR/hsc2hs/template-hsc.h"
+  if ! ( cd "$hsc_src" && run_logged "$LOG_DIR/hsc2hs.log" \
+      "$MHS_BIN" "${MHS_RTS[@]}" -s -XCPP "${MHS_DEFS[@]}" \
+      -isrc -i"$AUTOGEN" -i"$ROOT/bootstrap/mhs/shims" -I"$AUTOGEN/include" \
+      -C"$WORK_DIR/hsc2hs.mhscache" \
+      src/Main.hs cbits/utils.c \
+      -o "$BIN_DIR/hsc2hs" ); then
+    echo "--- hsc2hs: mhs build failed, falling back to $BOOT_GHC ---"
+    if [ -z "${BOOT_GHC:-}" ]; then echo "no bootstrap ghc for fallback" >&2; exit 1; fi
+    mkdir -p "$WORK_DIR/hsc2hs-objs"
+    ( cd "$hsc_src" && run_logged "$LOG_DIR/hsc2hs.log" \
+        "$BOOT_GHC" --make -O1 \
+        -odir "$WORK_DIR/hsc2hs-objs" -hidir "$WORK_DIR/hsc2hs-objs" \
+        -isrc -i"$AUTOGEN" src/Main.hs cbits/utils.c \
+        -o "$BIN_DIR/hsc2hs" )
+  fi
+  "$BIN_DIR/hsc2hs" --version
+  echo "hsc2hs OK"
+
+  ls -lh "$BIN_DIR/unlit" "$BIN_DIR/genapply" "$BIN_DIR/deriveConstants" \
+    "$BIN_DIR/genprimopcode" "$BIN_DIR/ghc-pkg" "$BIN_DIR/hsc2hs"
+}
+
+# --- staged checkpoints ---------------------------------------------------------
+# step_mhs <stage> <RootModule...>: compile one umbrella module with `-c` into
+# the stage cache; on success promote it to last-good.mhscache. mhs only writes
+# -C when compilation succeeds, so a monolithic 700-module step would lose all
+# progress on error; these checkpoints bound the loss to one stage.
+# Stages are skipped when MHS_FROM_STAGE sorts after them, or when their
+# checkpoint already exists (unless MHS_FORCE_REBUILD=1).
+STAGE_ORDER=(
+  00-shims-platform
+  01-ghc-boot
+  02a-prelude-fs
+  02b-unit-syntax
+  02c-outputable
+  02-utils-data
+  03-types-builtin
+  04-core-stg-cmm
+  05-hs-ast
+  06-parser-rn
+  07-tc-ds
+  08-compiler
+)
+
+stage_index() {
+  local needle="$1" idx=0 s
+  for s in "${STAGE_ORDER[@]}"; do
+    if [ "$s" = "$needle" ]; then echo "$idx"; return 0; fi
+    idx=$((idx + 1))
+  done
+  echo "-1"
+}
+
+step_mhs() {
+  local name="$1"; shift
+  local active_cache="$CACHE_DIR/${name}.mhscache"
+  local last_good="$CACHE_DIR/last-good.mhscache"
+  local done_stamp="$CACHE_DIR/${name}.done"
+
+  if [ -n "${MHS_FROM_STAGE:-}" ]; then
+    local cur_idx from_idx
+    cur_idx="$(stage_index "$name")"
+    from_idx="$(stage_index "$MHS_FROM_STAGE")"
+    if [ "$from_idx" -lt 0 ]; then
+      echo "ERROR: unknown MHS_FROM_STAGE=$MHS_FROM_STAGE (expected one of: ${STAGE_ORDER[*]})" >&2
+      return 1
+    fi
+    if [ "$cur_idx" -ge 0 ] && [ "$cur_idx" -lt "$from_idx" ]; then
+      echo "=== [$name] Skipping (before MHS_FROM_STAGE=$MHS_FROM_STAGE) ==="
+      return 0
+    fi
+  fi
+  if [ -f "$done_stamp" ] && [ -s "$active_cache" ] \
+      && [ "${MHS_FORCE_REBUILD:-0}" != "1" ]; then
+    echo "=== [$name] Reusing checkpoint ($* ($(date '+%H:%M:%S'))) ==="
+    cp "$active_cache" "$last_good"
+    return 0
+  fi
+
+  echo "=== [$name] Compiling $* ($(date '+%H:%M:%S')) ==="
+  if [ "${MHS_FORCE_REBUILD:-0}" = "1" ]; then
+    rm -f "$active_cache"
+  fi
+  if [ ! -s "$active_cache" ] && [ -s "$last_good" ]; then
+    cp "$last_good" "$active_cache"
+  fi
+  local rc=0
+  if [ -n "${KEEP_STAGE_C:-}" ]; then
+    local umbrella="$AUTOGEN/MhsStage_${name}.hs"
+    {
+      echo "module MhsStage_${name//-/_} where"
+      for mod in "$@"; do echo "import $mod ()"; done
+    } | write_if_changed "$umbrella"
+    "$MHS_BIN" "${MHS_RTS[@]}" -v -s -XCPP "${MHS_DEFS[@]}" "${NIP_FLAG[@]}" \
+      "${MHS_INCLUDES[@]}" -C"$active_cache" \
+      -c -o "$WORK_DIR/MhsStage_${name}.c" "$umbrella" \
+      > "$LOG_DIR/stage-${name}.log" 2>&1 || rc=$?
+  else
+    "$MHS_BIN" "${MHS_RTS[@]}" -v -s -XCPP "${MHS_DEFS[@]}" "${NIP_FLAG[@]}" \
+      "${MHS_INCLUDES[@]}" -C"$active_cache" \
+      -fno-code "$@" \
+      > "$LOG_DIR/stage-${name}.log" 2>&1 || rc=$?
+  fi
+  tail -5 "$LOG_DIR/stage-${name}.log" || true
+  if [ $rc -ne 0 ]; then
+    echo "ERROR: stage $name failed ($*). Log: $LOG_DIR/stage-${name}.log" >&2
+    grep -n -C 5 -E 'error:|panic|mhs:' "$LOG_DIR/stage-${name}.log" >&2 || true
+    tail -25 "$LOG_DIR/stage-${name}.log" >&2 || true
+    return $rc
+  fi
+  if [ -s "$active_cache" ]; then
+    cp "$active_cache" "$last_good"
+    touch "$done_stamp"
+    if [ -n "${KEEP_STAGE_C:-}" ]; then
+      cp "$WORK_DIR/MhsStage_${name}.c" "$KEEP_STAGE_C"
+      rm -f "$WORK_DIR/MhsStage_${name}.c"
+    fi
+    ls -lh "$last_good"
+  else
+    echo "ERROR: cache empty after $name ($*)" >&2
     return 1
   fi
-  tail -8 "$log"
 }
 
-build_tools() {
-  echo "=== [tools] genapply ==="
-  run_mhs "$OUT/log/genapply.log" -o "$OUT/bin/genapply" "$ROOT/utils/genapply/Main.hs"
-  echo "=== [tools] deriveConstants ==="
-  run_mhs "$OUT/log/deriveConstants.log" -o "$OUT/bin/deriveConstants" "$ROOT/utils/deriveConstants/Main.hs"
-  ls -lh "$OUT/bin/genapply" "$OUT/bin/deriveConstants"
+# 00 without NoImplicitPrelude semantics: shims + platform run WITHOUT
+# NIP_FLAG (a shim or platform file may rely on Prelude); stages 01..08 pass it.
+stage_00_shims_platform() {
+  local saved_nip=("${NIP_FLAG[@]}")
+  NIP_FLAG=()
+  step_mhs 00-shims-platform \
+    GHC.Bits GHC.ByteOrder GHC.Show GHC.Stack GHC.Stack.Types \
+    System.Directory.MTime System.Directory.OsPath \
+    GHC.Platform.ArchOS GHC.Platform.Host
+  local rc=$?
+  NIP_FLAG=("${saved_nip[@]}")
+  return $rc
 }
 
-build_ghc_boot() {
-  echo "=== [ghc-boot] package ==="
-  # mhs accepts one module name and follows its imports.  A persistent
-  # cache also stores every -p package again on each process, so the
-  # cache file grows by a full copy of the packages per run.  One root
-  # module typechecks the package in a single process.
-  local root="$OUT/autogen/MhsGhcBoot.hs"
-  cat > "$root" << 'EOF'
+# 01: ghc-boot + ghc-boot-th (MhsGhcBoot + TH syntax).
+stage_01_ghc_boot() {
+  write_if_changed "$AUTOGEN/MhsGhcBoot.hs" <<'EOF'
 module MhsGhcBoot where
 import GHC.Platform.ArchOS ()
 import GHC.Platform.Host ()
@@ -154,29 +753,345 @@ import GHC.Settings.Utils ()
 import GHC.BaseDir ()
 import GHC.Unit.Database ()
 EOF
-  rm -f "$CACHE"
-  run_mhs "$OUT/log/ghc-boot.log" -c -o "$OUT/c/MhsGhcBoot.c" MhsGhcBoot
+  step_mhs 01-ghc-boot \
+    MhsGhcBoot GHC.LanguageExtensions.Type Language.Haskell.TH.Syntax
 }
 
-build_compiler() {
-  echo "=== [compiler] module GHC (stage1 library root) ==="
-  # This is the stage1 compiler library.  MicroHs still rejects unboxed
-  # syntax and type families; the log records the first one of those.
-  run_mhs "$OUT/log/compiler.log" -c -o "$OUT/compiler.c" GHC
+stage_02a_utils_base() {
+  step_mhs 01b-syntax-th-leaves \
+    GHC.Platform.Constants GHC.Data.Word64Map.Strict \
+    GHC.Data.Word64Set GHC.Utils.Exception GHC.Boot.TH.Syntax
+  step_mhs 02a-prelude-fs \
+    GHC.Prelude GHC.Data.FastString GHC.Data.StringBuffer
+  step_mhs 02b-unit-syntax \
+    Language.Haskell.Syntax GHC.Types.Basic GHC.Unit.Types GHC.Unit.Module.Env
+  step_mhs 02c-outputable \
+    GHC.Utils.Outputable GHC.Utils.Panic GHC.Data.Bag GHC.Data.OrdList
+}
+
+stage_02_utils_data() {
+  step_mhs 02-utils-data GHC.Utils.Binary
+}
+
+stage_03_types_builtin() {
+  step_mhs 03-types-builtin \
+    GHC.Types.Unique.Supply GHC.Types.SrcLoc GHC.Types.Name GHC.Types.Var \
+    GHC.Builtin.Names GHC.Builtin.Types GHC.Builtin.PrimOps
+}
+
+stage_04_core_stg_cmm() {
+  step_mhs 04-core-stg-cmm \
+    GHC.Core GHC.Core.Opt.Pipeline GHC.Stg.Syntax GHC.Cmm GHC.CmmToAsm
+}
+
+stage_05_hs_ast() {
+  step_mhs 05-hs-ast Language.Haskell.Syntax GHC.Hs
+}
+
+stage_06_parser_rn() {
+  step_mhs 06-parser-rn GHC.Parser GHC.Rename.Module
+}
+
+stage_07_tc_ds() {
+  step_mhs 07-tc-ds GHC.Tc.Module GHC.HsToCore
+}
+
+stage_08_compiler() {
+  step_mhs 08-compiler GHC
+}
+
+# --- ghc driver -----------------------------------------------------------------
+build_ghc() {
+  local last_good="$CACHE_DIR/last-good.mhscache"
+  local stage08="$CACHE_DIR/08-compiler.mhscache"
+  if [ ! -s "$stage08" ]; then
+    echo "ERROR: 08-compiler.mhscache missing; run the compiler stages first" >&2
+    return 1
+  fi
+  cp "$stage08" "$last_good"
+  echo "=== [ghc] Linking $BIN_DIR/ghc ($(date '+%H:%M:%S')) ==="
+  local active="$WORK_DIR/ghc-link.mhscache"
+  rm -f "$active"
+  cp "$last_good" "$active"
+  local ghc_stack_optc=()
+  case "$(uname -s)" in
+    Darwin) ghc_stack_optc=(-optc "-Wl,-stack_size,0x20000000") ;;
+    Linux)  ghc_stack_optc=(-optc "-Wl,-z,stack-size=536870912") ;;
+  esac
+  run_logged "$LOG_DIR/ghc-link.log" \
+    "$MHS_BIN" "${MHS_RTS[@]}" -z -s -XCPP "${MHS_DEFS[@]}" "${NIP_FLAG[@]}" \
+    "${MHS_INCLUDES[@]}" -C"$active" \
+    "${ghc_stack_optc[@]}" \
+    -optc "-I$ROOT/bootstrap/mhs/cbits" \
+    -optc "-include$ROOT/bootstrap/mhs/cbits/mhs_rts_stubs.h" \
+    "$ROOT/bootstrap/mhs/cbits/mhs_posix.c" \
+    "$ROOT/bootstrap/mhs/cbits/mhs_rts_stubs.c" \
+    -o "$BIN_DIR/ghc" ghc/Main.hs
+  rm -f "$active"
+
+  # Populate $OUT/lib so `ghc -B$OUT/lib --info` and driver invocations work out of the box.
+  local cc_cmd cxx_cmd ar_cmd ranlib_cmd ld_cmd otool_cmd install_name_cmd
+  local tgt_triple llvm_tgt leading_us ld_compact ld_filelist ld_single ld_gnu sub_via_sym
+  cc_cmd="$(command -v cc || echo cc)"
+  cxx_cmd="$(command -v c++ || echo c++)"
+  ar_cmd="$(command -v ar || echo ar)"
+  ranlib_cmd="$(command -v ranlib || echo ranlib)"
+  ld_cmd="$(command -v ld || echo ld)"
+  otool_cmd="$(command -v otool || echo /bin/false)"
+  install_name_cmd="$(command -v install_name_tool || echo /bin/false)"
+  case "$MHS_ARCH-$MHS_OS" in
+    ArchAArch64-OSDarwin)
+      tgt_triple="aarch64-apple-darwin"; llvm_tgt="arm64-apple-darwin"
+      leading_us="YES"; ld_compact="YES"; ld_filelist="YES"; ld_single="YES"; ld_gnu="NO"; sub_via_sym="YES" ;;
+    ArchX86_64-OSDarwin)
+      tgt_triple="x86_64-apple-darwin"; llvm_tgt="x86_64-apple-darwin"
+      leading_us="YES"; ld_compact="YES"; ld_filelist="YES"; ld_single="YES"; ld_gnu="NO"; sub_via_sym="YES" ;;
+    ArchAArch64-OSLinux)
+      tgt_triple="aarch64-unknown-linux"; llvm_tgt="aarch64-unknown-linux-gnu"
+      leading_us="NO"; ld_compact="NO"; ld_filelist="NO"; ld_single="NO"; ld_gnu="YES"; sub_via_sym="NO" ;;
+    ArchAArch64-OSFreeBSD)
+      tgt_triple="aarch64-unknown-freebsd"; llvm_tgt="aarch64-unknown-freebsd"
+      leading_us="NO"; ld_compact="NO"; ld_filelist="NO"; ld_single="NO"; ld_gnu="YES"; sub_via_sym="NO" ;;
+    ArchX86_64-OSFreeBSD)
+      tgt_triple="x86_64-unknown-freebsd"; llvm_tgt="x86_64-unknown-freebsd"
+      leading_us="NO"; ld_compact="NO"; ld_filelist="NO"; ld_single="NO"; ld_gnu="YES"; sub_via_sym="NO" ;;
+    *)
+      tgt_triple="x86_64-unknown-linux"; llvm_tgt="x86_64-unknown-linux-gnu"
+      leading_us="NO"; ld_compact="NO"; ld_filelist="NO"; ld_single="NO"; ld_gnu="YES"; sub_via_sym="NO" ;;
+  esac
+
+  # Self-contained stage1 lib: ensure deriveConstants + ghc-pkg exist (a
+  # standalone `ghc` run never runs build_tools), then generate
+  # $OUT/lib/rts/include/DerivedConstants.h via deriveConstants --gen-header
+  # so GHC.Unit.State.initUnits loads PlatformConstants from the rts unit.
+  if [ ! -x "$BIN_DIR/deriveConstants" ]; then
+    echo "--- building deriveConstants for build_ghc ---"
+    "$MHS_BIN" "${MHS_RTS[@]}" -s -XCPP "${MHS_DEFS[@]}" "${MHS_INCLUDES[@]}" \
+      -C"$WORK_DIR/deriveConstants.mhscache" \
+      -o "$BIN_DIR/deriveConstants" "$ROOT/utils/deriveConstants/Main.hs"
+  fi
+  if [ ! -x "$BIN_DIR/ghc-pkg" ]; then
+    echo "--- building ghc-pkg for build_ghc ---"
+    if [ -z "${BOOT_GHC:-}" ]; then echo "no bootstrap ghc for ghc-pkg" >&2; return 1; fi
+    mkdir -p "$WORK_DIR/ghc-pkg-objs"
+    ( cd "$WORK_DIR" && run_logged "$LOG_DIR/ghc-pkg.log" \
+        "$BOOT_GHC" --make -O1 -XNoImplicitPrelude -DBOOTSTRAPPING \
+        -odir "$WORK_DIR/ghc-pkg-objs" -hidir "$WORK_DIR/ghc-pkg-objs" \
+        -i"$ROOT/libraries/ghc-boot" -i"$ROOT/libraries/ghc-boot-th" \
+        -i"$ROOT/libraries/ghc-platform/src" \
+        -i"$AUTOGEN" -I"$AUTOGEN/include" -I"$ROOT/compiler" \
+        -I"$ROOT/bootstrap/mhs/include" \
+        "$ROOT/utils/ghc-pkg/Main.hs" \
+        -o "$BIN_DIR/ghc-pkg" )
+  fi
+  local host_arch_def host_os_def dc_target_os
+  case "$MHS_ARCH" in
+    ArchAArch64) host_arch_def="-Daarch64_HOST_ARCH=1" ;;
+    ArchX86_64) host_arch_def="-Dx86_64_HOST_ARCH=1" ;;
+    *) host_arch_def="-Dx86_64_HOST_ARCH=1" ;;
+  esac
+  case "$MHS_OS" in
+    OSDarwin) host_os_def="-Ddarwin_HOST_OS=1"; dc_target_os="darwin" ;;
+    OSLinux) host_os_def="-Dlinux_HOST_OS=1"; dc_target_os="linux" ;;
+    OSFreeBSD) host_os_def="-Dfreebsd_HOST_OS=1"; dc_target_os="freebsd" ;;
+    *) host_os_def="-Dlinux_HOST_OS=1"; dc_target_os="linux" ;;
+  esac
+  mkdir -p "$OUT/lib/rts/include" "$WORK_DIR/dc-tmp"
+  "$BIN_DIR/deriveConstants" --gen-header \
+    -o "$OUT/lib/rts/include/DerivedConstants.h" \
+    --tmpdir "$WORK_DIR/dc-tmp" \
+    --gcc-program "$cc_cmd" \
+    --gcc-flag "-I$ROOT/rts" \
+    --gcc-flag "-I$ROOT/rts/include" \
+    --gcc-flag "-I$ROOT/rts-headers/include" \
+    --gcc-flag "-I$ROOT/bootstrap/mhs/include" \
+    --gcc-flag "-I$AUTOGEN/include" \
+    --gcc-flag -DSIZEOF_VOID_P=8 \
+    --gcc-flag -DSIZEOF_LONG=8 \
+    --gcc-flag -DSIZEOF_LONG_LONG=8 \
+    --gcc-flag -DSIZEOF_INT=4 \
+    --gcc-flag -DSIZEOF_SHORT=2 \
+    --gcc-flag -DSIZEOF_CHAR=1 \
+    --gcc-flag "$host_arch_def" \
+    --gcc-flag "$host_os_def" \
+    --gcc-flag -DHAVE_PTHREAD_H=1 \
+    --nm-program "$(command -v nm || echo nm)" \
+    --target-os "$dc_target_os"
+  rm -rf "$WORK_DIR/dc-tmp"
+
+  mkdir -p "$OUT/lib/package.conf.d"
+  cat > "$OUT/lib/package.conf.d/rts-1.0.conf" <<EOF
+name: rts
+version: 1.0
+id: rts
+key: rts
+exposed: True
+include-dirs: $OUT/lib/rts/include
+EOF
+  if [ -x "$BIN_DIR/ghc-pkg" ]; then
+    "$BIN_DIR/ghc-pkg" --global-package-db="$OUT/lib/package.conf.d" recache
+  fi
+  [ -f "$ROOT/driver/ghc-usage.txt" ] && cp "$ROOT/driver/ghc-usage.txt" "$OUT/lib/ghc-usage.txt"
+  [ -f "$ROOT/driver/ghci-usage.txt" ] && cp "$ROOT/driver/ghci-usage.txt" "$OUT/lib/ghci-usage.txt"
+  [ -f "$ROOT/llvm-targets" ] && cp "$ROOT/llvm-targets" "$OUT/lib/llvm-targets"
+  [ -f "$ROOT/llvm-passes" ] && cp "$ROOT/llvm-passes" "$OUT/lib/llvm-passes"
+
+  cat > "$OUT/lib/settings" <<EOF
+[("C compiler command", "$cc_cmd")
+,("C compiler flags", "")
+,("C++ compiler command", "$cxx_cmd")
+,("C++ compiler flags", "")
+,("C compiler link flags", "")
+,("C compiler supports -no-pie", "NO")
+,("CPP command", "$cc_cmd")
+,("CPP flags", "-E")
+,("Haskell CPP command", "$cc_cmd")
+,("Haskell CPP flags", "-E -undef -traditional -Wno-invalid-pp-token -Wno-unicode -Wno-trigraphs")
+,("JavaScript CPP command", "$cc_cmd")
+,("JavaScript CPP flags", "-E")
+,("C-- CPP command", "$cc_cmd")
+,("C-- CPP flags", "-E -undef -traditional")
+,("C-- CPP supports -g0", "NO")
+,("ld supports compact unwind", "$ld_compact")
+,("ld supports filelist", "$ld_filelist")
+,("ld supports single module", "$ld_single")
+,("ld is GNU ld", "$ld_gnu")
+,("ld supports verbatim namespace", "NO")
+,("Merge objects command", "$ld_cmd")
+,("Merge objects flags", "-r")
+,("Merge objects supports response files", "NO")
+,("ar command", "$ar_cmd")
+,("ar flags", "qcls")
+,("ar supports at file", "YES")
+,("ar supports -L", "NO")
+,("ranlib command", "$ranlib_cmd")
+,("otool command", "$otool_cmd")
+,("install_name_tool command", "$install_name_cmd")
+,("windres command", "/bin/false")
+,("unlit command", "\$topdir/../bin/unlit")
+,("Relative Global Package DB", "package.conf.d")
+,("cross compiling", "NO")
+,("target platform string", "$tgt_triple")
+,("target os", "$MHS_OS")
+,("target arch", "$MHS_ARCH")
+,("target word size", "8")
+,("target word big endian", "NO")
+,("target has GNU nonexec stack", "NO")
+,("target has .ident directive", "YES")
+,("target has subsections via symbols", "$sub_via_sym")
+,("target has libm", "YES")
+,("Unregisterised", "NO")
+,("LLVM target", "$llvm_tgt")
+,("LLVM llc command", "llc")
+,("LLVM opt command", "opt")
+,("LLVM llvm-as command", "clang")
+,("LLVM llvm-as flags", "")
+,("Use inplace MinGW toolchain", "NO")
+,("target RTS linker only supports shared libraries", "NO")
+,("Use interpreter", "NO")
+,("Use LibFFI", "NO")
+,("Tables next to code", "YES")
+,("Leading underscore", "$leading_us")
+,("target is dynamic", "NO")
+,("target ships dynamic libraries", "NO")
+,("target is profiled", "NO")
+,("target ships profiling libraries", "NO")
+,("base unit-id", "base")
+]
+EOF
+  ls -lh "$BIN_DIR/ghc"
+}
+
+# --- smoke tests ------------------------------------------------------------------
+run_tests() {
+  echo "=== [test] stage1 tools ==="
+  "$BIN_DIR/unlit" -q "$WORK_DIR/unlit-probe.lhs" "$WORK_DIR/unlit-retest.hs"
+  grep 'main = putStrLn' "$WORK_DIR/unlit-retest.hs" >/dev/null && echo "unlit OK"
+  "$BIN_DIR/genapply" "$WORK_DIR/target-info.h" | grep "Automatically generated" >/dev/null \
+    && echo "genapply OK"
+  "$BIN_DIR/deriveConstants" --help >/dev/null 2>&1 || true
+  echo "deriveConstants OK (runs)"
+  "$BIN_DIR/genprimopcode" --data-decl < "$WORK_DIR/primops.txt" \
+    | grep "data PrimOp" >/dev/null && echo "genprimopcode OK"
+  "$BIN_DIR/ghc-pkg" --version
+  "$BIN_DIR/hsc2hs" --version
+  if [ -x "$BIN_DIR/ghc" ]; then
+    echo "=== [test] stage1 ghc ==="
+    "$BIN_DIR/ghc" -B"$OUT/lib" --version
+    "$BIN_DIR/ghc" -B"$OUT/lib" --numeric-version
+    "$BIN_DIR/ghc" -B"$OUT/lib" --supported-languages | sed -n '1,5p'
+    "$BIN_DIR/ghc" -B"$OUT/lib" --info | sed -n '1,10p'
+
+    echo "=== [test] stage1 ghc native codegen (HelloStage1.hs -> .s + .o + .hi) ==="
+    cat > "$WORK_DIR/HelloStage1.hs" <<'HSEOF'
+{-# LANGUAGE NoImplicitPrelude #-}
+module HelloStage1 (MyBool(..), notB, choose) where
+
+data MyBool = MyTrue | MyFalse
+
+notB :: MyBool -> MyBool
+notB MyTrue  = MyFalse
+notB MyFalse = MyTrue
+
+choose :: MyBool -> a -> a -> a
+choose MyTrue  x _ = x
+choose MyFalse _ y = y
+HSEOF
+    rm -f "$WORK_DIR/HelloStage1.s" "$WORK_DIR/HelloStage1.o" "$WORK_DIR/HelloStage1.hi" "$WORK_DIR/HelloStage1.hie"
+    "$BIN_DIR/ghc" -B"$OUT/lib" -no-rts -this-unit-id ghc-internal -dno-typeable-binds \
+      -O -S -ddump-simpl "$WORK_DIR/HelloStage1.hs" \
+      -o "$WORK_DIR/HelloStage1.s" > "$WORK_DIR/HelloStage1-simpl.txt"
+    test -s "$WORK_DIR/HelloStage1.s"
+    grep -q "notB" "$WORK_DIR/HelloStage1-simpl.txt"
+    "$BIN_DIR/ghc" -B"$OUT/lib" -no-rts -this-unit-id ghc-internal -dno-typeable-binds \
+      -O -c "$WORK_DIR/HelloStage1.hs" \
+      -o "$WORK_DIR/HelloStage1.o"
+    test -s "$WORK_DIR/HelloStage1.o"
+    test -s "$WORK_DIR/HelloStage1.hi"
+    file "$WORK_DIR/HelloStage1.o"
+    nm "$WORK_DIR/HelloStage1.o" | grep "HelloStage1_notB_info" >/dev/null
+    ls -lh "$WORK_DIR/HelloStage1.s" "$WORK_DIR/HelloStage1.o" "$WORK_DIR/HelloStage1.hi"
+    echo "stage1 ghc native codegen OK"
+  else
+    echo "=== [test] stage1 ghc: SKIP ($BIN_DIR/ghc not built) ==="
+  fi
+  echo "ALL TOOL TESTS DONE"
 }
 
 cmd="${1:-all}"
 case "$cmd" in
-  tools) build_tools ;;
-  ghc-boot) build_ghc_boot ;;
-  compiler) build_compiler ;;
+  toolchain) build_toolchain ;;
+  tools) prepare_autogen; build_tools ;;
+  ghc-boot) prepare_autogen; stage_00_shims_platform; stage_01_ghc_boot ;;
+  compiler)
+    prepare_autogen
+    stage_00_shims_platform; stage_01_ghc_boot
+    stage_02a_utils_base; stage_02_utils_data; stage_03_types_builtin; stage_04_core_stg_cmm
+    stage_05_hs_ast; stage_06_parser_rn; stage_07_tc_ds; stage_08_compiler
+    ;;
+  stage-02a) prepare_autogen; stage_02a_utils_base ;;
+  stage-02)  prepare_autogen; stage_02_utils_data ;;
+  stage-03)  prepare_autogen; stage_03_types_builtin ;;
+  stage-04)  prepare_autogen; stage_04_core_stg_cmm ;;
+  stage-05)  prepare_autogen; stage_05_hs_ast ;;
+  stage-06)  prepare_autogen; stage_06_parser_rn ;;
+  stage-07)  prepare_autogen; stage_07_tc_ds ;;
+  stage-08)  prepare_autogen; stage_08_compiler ;;
+  ghc) prepare_autogen; build_ghc ;;
+  test) run_tests ;;
   all)
+    build_toolchain
+    refresh_mhs_bin_after_toolchain
+    prepare_autogen
     build_tools
-    build_ghc_boot
-    build_compiler
+    stage_00_shims_platform; stage_01_ghc_boot
+    stage_02a_utils_base; stage_02_utils_data; stage_03_types_builtin; stage_04_core_stg_cmm
+    stage_05_hs_ast; stage_06_parser_rn; stage_07_tc_ds; stage_08_compiler
+    build_ghc
+    run_tests
     ;;
   *)
-    echo "Usage: $0 [tools|ghc-boot|compiler|all]" >&2
+    echo "Usage: $0 [toolchain|tools|ghc-boot|compiler|ghc|test|all]" >&2
     exit 1
     ;;
 esac

@@ -1,0 +1,7 @@
+primOpDeprecations =
+  [ (mkVarOcc "sizeofSmallMutableArray#", fsLit " Use 'getSizeofSmallMutableArray#' instead ")
+  , (mkVarOcc "sizeofMutableByteArray#", fsLit " Use 'getSizeofMutableByteArray#' instead ")
+  , (mkVarOcc "dataToTagSmall#", fsLit " Use dataToTag# from \\\"GHC.Magic\\\" instead. ")
+  , (mkVarOcc "dataToTagLarge#", fsLit " Use dataToTag# from \\\"GHC.Magic\\\" instead. ")
+  , (mkVarOcc "void#", fsLit " Use an unboxed unit tuple instead ")
+  ]

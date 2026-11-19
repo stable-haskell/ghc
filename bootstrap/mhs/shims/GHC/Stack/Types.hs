@@ -3,9 +3,11 @@
 -- still type-checks.  The stack itself is empty.
 module GHC.Stack.Types
   ( HasCallStack
-  , CallStack
+  , CallStack(EmptyCallStack)
   , SrcLoc(..)
   ) where
+
+import Prelude
 
 class HasCallStack
 instance HasCallStack
