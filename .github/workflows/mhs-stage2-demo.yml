@@ -50,7 +50,11 @@ jobs:
   mhs-and-tools:
     name: 'Phases 1-3 MicroHs + Stage 1 tools / ${{ matrix.plat }}'
     runs-on: ${{ matrix.runs-on }}
-    timeout-minutes: 90
+    # macos-latest mhs is much slower than ubuntu-24.04. At 90 minutes
+    # the Darwin job was cancelled during the ghc-pkg compile, after
+    # happy, alex, genapply, and genprimopcode had already finished,
+    # and the failed matrix leg skipped phases 4-8.
+    timeout-minutes: 240
     strategy:
       fail-fast: false
       matrix:
