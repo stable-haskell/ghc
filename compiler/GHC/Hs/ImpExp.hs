@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# OPTIONS_GHC -Wno-orphans      #-} -- Outputable and IEWrappedName
 {-# LANGUAGE DataKinds            #-}
 {-# LANGUAGE StandaloneDeriving   #-}

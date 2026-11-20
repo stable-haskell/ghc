@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 module GHC.Tc.Solver.Rewrite(
    rewrite, rewriteForErrors, rewriteArgsNom,
    rewriteType

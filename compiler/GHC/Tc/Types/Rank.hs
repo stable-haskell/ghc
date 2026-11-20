@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 module GHC.Tc.Types.Rank (Rank(..))  where
 
 #if defined(__MHS__)

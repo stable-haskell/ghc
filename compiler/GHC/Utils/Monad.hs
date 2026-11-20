@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE MonadComprehensions #-}
 
 -- | Utilities related to Monad and Applicative classes

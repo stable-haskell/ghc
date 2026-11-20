@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE DerivingVia, NoPolyKinds #-}
 {-# OPTIONS_GHC -funbox-strict-fields #-}
 -- -----------------------------------------------------------------------------

@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE TypeFamilies, ViewPatterns, OverloadedStrings #-}
 
 -- -----------------------------------------------------------------------------
