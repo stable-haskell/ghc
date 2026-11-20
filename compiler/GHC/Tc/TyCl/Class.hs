@@ -284,27 +284,14 @@ tcDefMeth clas tyvars this_dict binds_in hs_sig_fn prag_fn
              -- type signatures, ie with no "forall a. C a =>" prefix
 #endif
 
-#if defined(__MHS__)
             local_dm_ty = instantiateMethod clas global_dm_id (mkTyVarTys tyvars)
-#else
-             local_dm_ty = instantiateMethod clas global_dm_id (mkTyVarTys tyvars)
-#endif
-
-#if defined(__MHS__)
             lm_bind     = dm_bind { fun_id = L (l2l bind_loc) local_dm_name }
-#else
-             lm_bind     = dm_bind { fun_id = L (l2l bind_loc) local_dm_name }
-#endif
 #if !defined(__MHS__)
                              -- Substitute the local_meth_name for the binder
                              -- NB: the binding is always a FunBind
 #endif
 
-#if defined(__MHS__)
             warn_redundant = case dm_spec of
-#else
-             warn_redundant = case dm_spec of
-#endif
                                 GenericDM {} -> lhsSigTypeContextSpan hs_ty
                                 VanillaDM    -> NoRRC
 #if !defined(__MHS__)
@@ -313,11 +300,7 @@ tcDefMeth clas tyvars this_dict binds_in hs_sig_fn prag_fn
                 -- the default method may well be 'error' or something
 #endif
 
-#if defined(__MHS__)
             ctxt = FunSigCtxt sel_name warn_redundant
-#else
-             ctxt = FunSigCtxt sel_name warn_redundant
-#endif
 
        ; let local_dm_id = mkLocalId local_dm_name ManyTy local_dm_ty
              local_dm_sig = CSig { sig_bndr = local_dm_id
