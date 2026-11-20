@@ -26,7 +26,7 @@ on:
       cabal_mhs_ref:
         description: 'sh/microhs-cabal-install super-charge head'
         type: string
-        default: 'b04f60210bff6fb149ea5a14e1329ab06e947d'
+        default: 'b04f60210bff6fb149ea5a14a4e1329ab06e947d'
   pull_request:
     paths:
       - 'bootstrap/mhs/**'
@@ -380,7 +380,7 @@ jobs:
           mkdir -p _build
           : > _build/timing-phase4-5.tsv
           BASE="${{ inputs.cabal_base_ref || '73d3ffda3e' }}"
-          MHS_HEAD="${{ inputs.cabal_mhs_ref || 'b04f60210bff6fb149ea5a14e1329ab06e947d' }}"
+          MHS_HEAD="${{ inputs.cabal_mhs_ref || 'b04f60210bff6fb149ea5a14a4e1329ab06e947d' }}"
           bootstrap/mhs/ci-time.sh run _build/timing-phase4-5.tsv \
             phase4 "Phase 4 — Checkout cabal ($BASE) + apply MicroHs super-charge patches" -- \
             bash -c "set -euo pipefail
