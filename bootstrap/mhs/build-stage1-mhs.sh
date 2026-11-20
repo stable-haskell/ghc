@@ -273,11 +273,17 @@ run_logged() {
   local log="$1"; shift
   local rc=0
   "$@" > "$log" 2>&1 || rc=$?
-  tail -3 "$log" || true
   if [ $rc -ne 0 ]; then
+    # mhs reports the cc invocation and then "command failed". The
+    # compiler or linker diagnostic is above that trailer, so tail -3
+    # used to hide it (ghc-pkg's missing -lcrypto showed up only as
+    # "collect2: error: ld returned 1").
+    grep -nE 'error:|undefined reference|fatal error|multiple definition|No such file' "$log" | head -40 || true
+    tail -5 "$log" || true
     echo "FAILED ($rc): $* -- log: $log" >&2
     return $rc
   fi
+  tail -3 "$log" || true
 }
 
 install_mhs_tool_wrapper() {
@@ -696,8 +702,20 @@ EOF
     -DBOOTSTRAPPED_CABAL=1 \
     -C"$WORK_DIR/ghc-pkg.mhscache" \
     -fno-code GhcPkgSeed
+  # mhs-compat-shims/cbits/mhs_sha256.c calls OpenSSL SHA256 on every
+  # OS other than macOS (CommonCrypto, in libSystem). The default mhs
+  # target only appends -lm, and GNU ld does not resolve a -l that
+  # appears before the objects. The "environment" target puts cclibs
+  # at the end of the cc command and expands $MHSCCLIBS in the shell,
+  # which is where -lcrypto has to sit. macOS must not take -lcrypto:
+  # a nix-provided libcrypto would be baked into the binary.
+  local cclibs=" -lm"
+  if [ "$MHS_OS" != OSDarwin ]; then
+    cclibs=" -lm -lcrypto"
+  fi
   run_logged "$LOG_DIR/ghc-pkg.log" \
-    "$MHS_BIN" "${MHS_RTS[@]}" -z -s -XCPP "${MHS_DEFS[@]}" "${NIP_FLAG[@]}" \
+    env CC=cc MHSCCFLAGS='-w -Wall -O3 ' MHSCCLIBS="$cclibs" MHSCONF=unix \
+    "$MHS_BIN" "${MHS_RTS[@]}" -z -s -XCPP -tenvironment "${MHS_DEFS[@]}" "${NIP_FLAG[@]}" \
     -i"$ROOT/libraries/ghc-boot" -i"$ROOT/libraries/ghc-boot-th" \
     -i"$ROOT/libraries/ghc-platform/src" \
     -i"$AUTOGEN" -i"$ROOT/bootstrap/mhs/shims" \
