@@ -86,14 +86,25 @@ jobs:
           set -euo pipefail
           # Strip any preinstalled ghcup/ghc paths (e.g. macos-latest images)
           # so the build provably starts with zero GHC0, Happy, or Alex.
-          for d in "$HOME/.ghcup/bin" "$HOME/.cabal/bin" /opt/ghc/bin /usr/local/bin; do
-            if [ -x "$d/ghc" ] || [ -x "$d/happy" ] || [ -x "$d/alex" ]; then
-              PATH="$(printf '%s' "$PATH" | tr ':' '\n' | grep -vx "$d" | paste -sd: -)"
+          # Ubuntu images keep ghcup at /usr/local/.ghcup/bin, which the old
+          # fixed directory list did not remove. Drop every PATH entry that
+          # still contains ghc, happy, or alex.
+          new_path=
+          IFS=:
+          for d in $PATH; do
+            if [ -n "$d" ] && { [ -x "$d/ghc" ] || [ -x "$d/happy" ] || [ -x "$d/alex" ]; }; then
+              continue
             fi
+            new_path="${new_path:+$new_path:}$d"
           done
+          unset IFS
+          PATH="$new_path"
           echo "PATH=$PATH" >> "$GITHUB_ENV"
           rm -rf "$HOME/.ghcup" 2>/dev/null || true
-          ! command -v ghc && ! command -v happy && ! command -v alex
+          if command -v ghc >/dev/null || command -v happy >/dev/null || command -v alex >/dev/null; then
+            echo "preinstalled bootstrap tool still on PATH: ghc=$(command -v ghc || true) happy=$(command -v happy || true) alex=$(command -v alex || true)" >&2
+            exit 1
+          fi
           echo "OK: no ghc / happy / alex on PATH"
 
       # --- Phase 1: upstream MicroHs checkout -----------------------
@@ -329,14 +340,25 @@ jobs:
               build-essential git curl xz-utils libgmp-dev zlib1g-dev \
               libffi-dev libncurses-dev pkg-config
           fi
-          for d in "$HOME/.ghcup/bin" "$HOME/.cabal/bin" /opt/ghc/bin /usr/local/bin; do
-            if [ -x "$d/ghc" ] || [ -x "$d/happy" ] || [ -x "$d/alex" ]; then
-              PATH="$(printf '%s' "$PATH" | tr ':' '\n' | grep -vx "$d" | paste -sd: -)"
+          # Ubuntu images keep ghcup at /usr/local/.ghcup/bin, which the old
+          # fixed directory list did not remove. Drop every PATH entry that
+          # still contains ghc, happy, or alex.
+          new_path=
+          IFS=:
+          for d in $PATH; do
+            if [ -n "$d" ] && { [ -x "$d/ghc" ] || [ -x "$d/happy" ] || [ -x "$d/alex" ]; }; then
+              continue
             fi
+            new_path="${new_path:+$new_path:}$d"
           done
+          unset IFS
+          PATH="$new_path"
           echo "PATH=$PATH" >> "$GITHUB_ENV"
           rm -rf "$HOME/.ghcup" 2>/dev/null || true
-          ! command -v ghc && ! command -v happy && ! command -v alex
+          if command -v ghc >/dev/null || command -v happy >/dev/null || command -v alex >/dev/null; then
+            echo "preinstalled bootstrap tool still on PATH: ghc=$(command -v ghc || true) happy=$(command -v happy || true) alex=$(command -v alex || true)" >&2
+            exit 1
+          fi
 
       - name: Download toolchain + tools
         uses: actions/download-artifact@v5
@@ -443,14 +465,25 @@ jobs:
               build-essential git curl xz-utils libgmp-dev zlib1g-dev \
               libffi-dev libncurses-dev pkg-config
           fi
-          for d in "$HOME/.ghcup/bin" "$HOME/.cabal/bin" /opt/ghc/bin /usr/local/bin; do
-            if [ -x "$d/ghc" ] || [ -x "$d/happy" ] || [ -x "$d/alex" ]; then
-              PATH="$(printf '%s' "$PATH" | tr ':' '\n' | grep -vx "$d" | paste -sd: -)"
+          # Ubuntu images keep ghcup at /usr/local/.ghcup/bin, which the old
+          # fixed directory list did not remove. Drop every PATH entry that
+          # still contains ghc, happy, or alex.
+          new_path=
+          IFS=:
+          for d in $PATH; do
+            if [ -n "$d" ] && { [ -x "$d/ghc" ] || [ -x "$d/happy" ] || [ -x "$d/alex" ]; }; then
+              continue
             fi
+            new_path="${new_path:+$new_path:}$d"
           done
+          unset IFS
+          PATH="$new_path"
           echo "PATH=$PATH" >> "$GITHUB_ENV"
           rm -rf "$HOME/.ghcup" 2>/dev/null || true
-          ! command -v ghc && ! command -v happy && ! command -v alex
+          if command -v ghc >/dev/null || command -v happy >/dev/null || command -v alex >/dev/null; then
+            echo "preinstalled bootstrap tool still on PATH: ghc=$(command -v ghc || true) happy=$(command -v happy || true) alex=$(command -v alex || true)" >&2
+            exit 1
+          fi
 
       - name: Download toolchain + tools
         uses: actions/download-artifact@v5
@@ -548,14 +581,25 @@ jobs:
               libgmp-dev zlib1g-dev libffi-dev libncurses-dev \
               pkg-config patchelf python3
           fi
-          for d in "$HOME/.ghcup/bin" "$HOME/.cabal/bin" /opt/ghc/bin /usr/local/bin; do
-            if [ -x "$d/ghc" ] || [ -x "$d/happy" ] || [ -x "$d/alex" ]; then
-              PATH="$(printf '%s' "$PATH" | tr ':' '\n' | grep -vx "$d" | paste -sd: -)"
+          # Ubuntu images keep ghcup at /usr/local/.ghcup/bin, which the old
+          # fixed directory list did not remove. Drop every PATH entry that
+          # still contains ghc, happy, or alex.
+          new_path=
+          IFS=:
+          for d in $PATH; do
+            if [ -n "$d" ] && { [ -x "$d/ghc" ] || [ -x "$d/happy" ] || [ -x "$d/alex" ]; }; then
+              continue
             fi
+            new_path="${new_path:+$new_path:}$d"
           done
+          unset IFS
+          PATH="$new_path"
           echo "PATH=$PATH" >> "$GITHUB_ENV"
           rm -rf "$HOME/.ghcup" 2>/dev/null || true
-          ! command -v ghc && ! command -v happy && ! command -v alex
+          if command -v ghc >/dev/null || command -v happy >/dev/null || command -v alex >/dev/null; then
+            echo "preinstalled bootstrap tool still on PATH: ghc=$(command -v ghc || true) happy=$(command -v happy || true) alex=$(command -v alex || true)" >&2
+            exit 1
+          fi
 
       - name: Download toolchain + tools (timings)
         uses: actions/download-artifact@v5
