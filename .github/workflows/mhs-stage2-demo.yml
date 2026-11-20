@@ -161,6 +161,14 @@ jobs:
                 -lm -o '$OUT/bin/mhs'"
 
           # 2d. Rebuild base package + install standard pure-Haskell mcabal deps.
+          # The patched mhs honors NoImplicitPrelude. Two Hackage snapshots
+          # still name Prelude entities without importing them:
+          # ghc-compat (IO and the usual classes), and os-string's
+          # Encoding.Internal under __MHS__ (Char, IO, return). Fetch each,
+          # add `import Prelude`, and install it before -r builds it.
+          # mcabal fetch leaves a .tar.gz beside the unpacked dir, so pick
+          # the directory that contains the .cabal file. -r does not refetch
+          # a package whose unpacked directory already exists.
           "$TIME_SH" run "$TIMING" \
             phase2-deps "Phase 2d — Rebuild base pkg + mcabal deps" -- \
             bash -c "set -euo pipefail
@@ -169,6 +177,36 @@ jobs:
               mkdir -p '$ROOT/_build/mcabal-work'
               (cd '$ROOT/_build/mcabal-work' && \
                 CABALDIR='$OUT' '$OUT/bin/mcabal' update && \
+                CABALDIR='$OUT' '$OUT/bin/mcabal' fetch ghc-compat && \
+                compat_dir= && \
+                for d in '$OUT'/packages/ghc-compat-*; do \
+                  if [ -f \"\$d/ghc-compat.cabal\" ]; then \
+                    if [ -n \"\$compat_dir\" ]; then \
+                      echo \"more than one ghc-compat package dir\" >&2; \
+                      exit 1; \
+                    fi; \
+                    compat_dir=\$d; \
+                  fi; \
+                done && \
+                test -n \"\$compat_dir\" && \
+                patch -d \"\$compat_dir\" -p1 \
+                  < '$ROOT/bootstrap/mhs/patches/ghc-compat/0001-import-prelude-under-noimplicitprelude.patch' && \
+                (cd \"\$compat_dir\" && CABALDIR='$OUT' '$OUT/bin/mcabal' install) && \
+                CABALDIR='$OUT' '$OUT/bin/mcabal' fetch os-string && \
+                os_dir= && \
+                for d in '$OUT'/packages/os-string-*; do \
+                  if [ -f \"\$d/os-string.cabal\" ]; then \
+                    if [ -n \"\$os_dir\" ]; then \
+                      echo \"more than one os-string package dir\" >&2; \
+                      exit 1; \
+                    fi; \
+                    os_dir=\$d; \
+                  fi; \
+                done && \
+                test -n \"\$os_dir\" && \
+                patch -d \"\$os_dir\" -p1 \
+                  < '$ROOT/bootstrap/mhs/patches/os-string/0001-import-prelude-under-mhs.patch' && \
+                CABALDIR='$OUT' '$OUT/bin/mcabal' -r install os-string && \
                 for pkg in containers parsec filepath time async random; do \
                   CABALDIR='$OUT' '$OUT/bin/mcabal' -r install \"\$pkg\"; \
                 done)
