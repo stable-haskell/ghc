@@ -558,10 +558,10 @@ discardIC hsc_env
 -- * The Legacy API, should be removed after enough deprecation cycles
 --------------------------------------------------------------------------------
 
-{-# DEPRECATED hscUpdateHPT "Updating the HPT directly is no longer a supported \
-   \ operation. Instead, the HPT is an insert-only data structure. If you want to \
-   \ overwrite an existing entry, just use 'hscInsertHPT' to insert it again (it \
-   \ will override the existing entry if there is one). See 'GHC.Unit.Home.PackageTable' for more details." #-}
+-- One physical line. A DEPRECATED message is a string, so it cannot use (++),
+-- and a string gap is spliced by traditional CPP into an illegal escape
+-- (GHC-21231).
+{-# DEPRECATED hscUpdateHPT "Updating the HPT directly is no longer a supported operation. Instead, the HPT is an insert-only data structure. If you want to overwrite an existing entry, just use 'hscInsertHPT' to insert it again (it will override the existing entry if there is one). See 'GHC.Unit.Home.PackageTable' for more details." #-}
 hscUpdateHPT :: (HomePackageTable -> HomePackageTable) -> HscEnv -> HscEnv
 hscUpdateHPT f hsc_env = hsc_env { hsc_unit_env = updateHug (HUG.unitEnv_adjust upd (ue_currentUnit $ hsc_unit_env hsc_env)) ue }
   where
