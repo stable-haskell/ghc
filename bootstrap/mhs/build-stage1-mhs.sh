@@ -117,6 +117,8 @@ MHS_INCLUDES=(
 )
 
 # mhs has no -XNoImplicitPrelude switch; probe once and use it only if accepted.
+# macOS /bin/bash is 3.2: "${NIP_FLAG[@]}" with set -u is an error when the
+# array is empty (stage 00 clears it). Test the length, or expand under set +u.
 NIP_FLAG=()
 probe_nip_flag() {
   NIP_FLAG=()
@@ -639,9 +641,10 @@ build_ghc_pkg() {
     git clone --branch "$CABAL_MHS_REF" --single-branch "$CABAL_MHS_REPO" "$cabal_mhs_src"
   fi
   if [ ! -d "$cabal_mhs_src/mhs-compat-shims/src" ]; then
-    echo "ERROR: $cabal_mhs_src has no mhs-compat-shims/src (need $CABAL_MHS_REF)" >&2
+    echo "ERROR: $cabal_mhs_src has no mhs-compat-shims/src (need ${CABAL_MHS_REF:-sh/microhs-cabal-install})" >&2
     exit 1
   fi
+  install_binary_shim_files "$cabal_mhs_src"
   # Paths_Cabal (version only; Distribution.Simple.Utils imports it).
   local ghc_pkg_autogen="$WORK_DIR/ghc-pkg-autogen"
   local cabal_version
@@ -713,6 +716,7 @@ EOF
   if [ "$MHS_OS" != OSDarwin ]; then
     cclibs=" -lm -lcrypto"
   fi
+  set +u
   run_logged "$LOG_DIR/ghc-pkg.log" \
     env CC=cc MHSCCFLAGS='-w -Wall -O3 ' MHSCCLIBS="$cclibs" MHSCONF=unix \
     "$MHS_BIN" "${MHS_RTS[@]}" -z -s -XCPP -tenvironment "${MHS_DEFS[@]}" "${NIP_FLAG[@]}" \
@@ -740,6 +744,7 @@ EOF
     "$cabal_mhs_src/mhs-compat-shims/cbits/mhs_posix.c" \
     "$cabal_mhs_src/mhs-compat-shims/cbits/mhs_handle.c" \
     "$cabal_mhs_src/mhs-compat-shims/cbits/mhs_sha256.c"
+  set -u
   install_mhs_tool_wrapper ghc-pkg 300M
   "$BIN_DIR/ghc-pkg" --version
   echo "ghc-pkg OK"
@@ -917,15 +922,20 @@ step_mhs() {
       echo "module MhsStage_${name//-/_} where"
       for mod in "$@"; do echo "import $mod ()"; done
     } | write_if_changed "$umbrella"
+    # set +u: bash 3.2 errors on an empty "${NIP_FLAG[@]}".
+    set +u
     "$MHS_BIN" "${MHS_RTS[@]}" -v -s -XCPP "${MHS_DEFS[@]}" "${NIP_FLAG[@]}" \
       "${MHS_INCLUDES[@]}" -C"$active_cache" \
       -c -o "$WORK_DIR/MhsStage_${name}.c" "$umbrella" \
       > "$LOG_DIR/stage-${name}.log" 2>&1 || rc=$?
+    set -u
   else
+    set +u
     "$MHS_BIN" "${MHS_RTS[@]}" -v -s -XCPP "${MHS_DEFS[@]}" "${NIP_FLAG[@]}" \
       "${MHS_INCLUDES[@]}" -C"$active_cache" \
       -fno-code "$@" \
       > "$LOG_DIR/stage-${name}.log" 2>&1 || rc=$?
+    set -u
   fi
   tail -5 "$LOG_DIR/stage-${name}.log" || true
   if [ $rc -ne 0 ]; then
@@ -951,19 +961,69 @@ step_mhs() {
 # 00 without NoImplicitPrelude semantics: shims + platform run WITHOUT
 # NIP_FLAG (a shim or platform file may rely on Prelude); stages 01..08 pass it.
 stage_00_shims_platform() {
-  local saved_nip=("${NIP_FLAG[@]}")
+  local saved_nip=()
+  if [ "${#NIP_FLAG[@]}" -gt 0 ]; then
+    saved_nip=("${NIP_FLAG[@]}")
+  fi
   NIP_FLAG=()
   step_mhs 00-shims-platform \
     GHC.Bits GHC.ByteOrder GHC.Show GHC.Stack GHC.Stack.Types \
     System.Directory.MTime System.Directory.OsPath \
     GHC.Platform.ArchOS GHC.Platform.Host
   local rc=$?
-  NIP_FLAG=("${saved_nip[@]}")
+  NIP_FLAG=()
+  if [ "${#saved_nip[@]}" -gt 0 ]; then
+    NIP_FLAG=("${saved_nip[@]}")
+  fi
   return $rc
+}
+
+# Data.Binary is not in this MicroHs snapshot. The byte-compatible
+# implementation is mhs-compat-shims in stable-haskell/cabal. Copy only
+# those three modules so Text.PrettyPrint and Distribution.* in that
+# tree do not shadow packages the stage-1 tools already installed.
+install_binary_shim_files() {
+  local dest="$OUT/binary-shim"
+  if [ -f "$dest/Data/Binary.hs" ] \
+      && [ -f "$dest/Data/Binary/Get.hs" ] \
+      && [ -f "$dest/Data/Binary/Put.hs" ]; then
+    return 0
+  fi
+  local cabal_mhs_src="${1:-${CABAL_MHS_SRC:-$OUT/cabal-mhs-src}}"
+  if [ ! -f "$cabal_mhs_src/mhs-compat-shims/src/Data/Binary.hs" ] \
+      && [ -d "$ROOT/_build/mhs-cabal-src/mhs-compat-shims/src" ]; then
+    cabal_mhs_src="$ROOT/_build/mhs-cabal-src"
+  fi
+  if [ ! -f "$cabal_mhs_src/mhs-compat-shims/src/Data/Binary.hs" ]; then
+    local repo="${CABAL_MHS_REPO:-https://github.com/stable-haskell/cabal.git}"
+    local ref="${CABAL_MHS_REF:-sh/microhs-cabal-install}"
+    echo "--- cloning $repo ($ref) for the Data.Binary shim ---"
+    rm -rf "$cabal_mhs_src"
+    git clone --branch "$ref" --single-branch --depth 1 "$repo" "$cabal_mhs_src"
+  fi
+  local src="$cabal_mhs_src/mhs-compat-shims/src"
+  if [ ! -f "$src/Data/Binary.hs" ]; then
+    echo "ERROR: $src has no Data/Binary.hs" >&2
+    exit 1
+  fi
+  mkdir -p "$dest/Data/Binary"
+  cp -f "$src/Data/Binary.hs" "$dest/Data/Binary.hs"
+  cp -f "$src/Data/Binary/Get.hs" "$dest/Data/Binary/Get.hs"
+  cp -f "$src/Data/Binary/Put.hs" "$dest/Data/Binary/Put.hs"
+}
+
+use_binary_shim() {
+  install_binary_shim_files
+  if [ "${BINARY_SHIM_ADDED:-0}" = 1 ]; then
+    return 0
+  fi
+  MHS_INCLUDES+=(-i"$OUT/binary-shim")
+  BINARY_SHIM_ADDED=1
 }
 
 # 01: ghc-boot + ghc-boot-th (MhsGhcBoot + TH syntax).
 stage_01_ghc_boot() {
+  use_binary_shim
   write_if_changed "$AUTOGEN/MhsGhcBoot.hs" <<'EOF'
 module MhsGhcBoot where
 import GHC.Platform.ArchOS ()
@@ -1047,6 +1107,7 @@ build_ghc() {
     Darwin) ghc_stack_optc=(-optc "-Wl,-stack_size,0x20000000") ;;
     Linux)  ghc_stack_optc=(-optc "-Wl,-z,stack-size=536870912") ;;
   esac
+  set +u
   run_logged "$LOG_DIR/ghc-link.log" \
     "$MHS_BIN" "${MHS_RTS[@]}" -z -s -XCPP "${MHS_DEFS[@]}" "${NIP_FLAG[@]}" \
     "${MHS_INCLUDES[@]}" -C"$active" \
@@ -1056,6 +1117,7 @@ build_ghc() {
     "$ROOT/bootstrap/mhs/cbits/mhs_posix.c" \
     "$ROOT/bootstrap/mhs/cbits/mhs_rts_stubs.c" \
     -o "$BIN_DIR/ghc" ghc/Main.hs
+  set -u
   rm -f "$active"
 
   # Populate $OUT/lib so `ghc -B$OUT/lib --info` and driver invocations work out of the box.

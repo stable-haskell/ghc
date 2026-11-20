@@ -295,6 +295,7 @@ jobs:
             _build/mhs-stage1/bin \
             _build/mhs-stage1/share \
             _build/mhs-stage1/autogen \
+            _build/mhs-stage1/binary-shim \
             _build/timing-phase1-3.tsv
           ls -lh "mhs-mcabal-${{ matrix.plat }}.tar.gz" "mhs-stage1-tools-${{ matrix.plat }}.tar.gz"
 
@@ -381,16 +382,21 @@ jobs:
           : > _build/timing-phase4-5.tsv
           BASE="${{ inputs.cabal_base_ref || '73d3ffda3e' }}"
           MHS_HEAD="${{ inputs.cabal_mhs_ref || 'b04f60210bff6fb149ea5a14a4e1329ab06e947d' }}"
+          # The MicroHs tip is two commits ahead of the cabal base. format-patch
+          # plus git am rejects that graft (hooks-exe CallHooksExe.hs) even
+          # though the commit's parent is the base. Check the tip out.
           bootstrap/mhs/ci-time.sh run _build/timing-phase4-5.tsv \
-            phase4 "Phase 4 — Checkout cabal ($BASE) + apply MicroHs super-charge patches" -- \
+            phase4 "Phase 4 — Checkout cabal MicroHs commit ($MHS_HEAD)" -- \
             bash -c "set -euo pipefail
-              rm -rf _build/cabal-src /tmp/cabal-mhs-patches
+              rm -rf _build/cabal-src
               git clone https://github.com/stable-haskell/cabal.git _build/cabal-src
               git -C _build/cabal-src checkout '$BASE'
               git -C _build/cabal-src fetch origin '$MHS_HEAD'
-              git -C _build/cabal-src format-patch '$BASE..$MHS_HEAD' -o /tmp/cabal-mhs-patches
-              git -C _build/cabal-src -c user.name='CI Bot' -c user.email='ci@stable-haskell.org' \
-                am /tmp/cabal-mhs-patches/*.patch"
+              if ! git -C _build/cabal-src merge-base --is-ancestor '$BASE' FETCH_HEAD; then
+                echo 'ERROR: MicroHs cabal commit is not a descendant of the base' >&2
+                exit 1
+              fi
+              git -C _build/cabal-src checkout --detach FETCH_HEAD"
           {
             echo "## Phase 4 — cabal-install MicroHs super-charge series (\`$BASE..$MHS_HEAD\`)"
             echo ""
