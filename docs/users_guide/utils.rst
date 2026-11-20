@@ -102,14 +102,35 @@ behavior:
     Proceed as normal, but do not delete any intermediate files.
 
 ``-x``, ``--cross-compile``
-    Activate cross-compilation mode (see :ref:`hsc2hs_cross`).
+    Activate cross-compilation mode (see :ref:`hsc2hs_cross`). Constants,
+    types, struct layouts, and custom macro output are extracted from a
+    single ``cc -S -O2`` assembly pass. The mode does not link or run a
+    target executable.
+
+``--no-cross-compile``
+    Deactivate cross-compilation mode, overriding any earlier ``-x`` or
+    ``--cross-compile``. Useful when Cabal passes ``-x`` for a cross
+    target whose binaries can still execute on the build host (Linux
+    ``binfmt_misc``, or macOS Rosetta 2).
+
+``--cross-runner=CMD``
+    Compile and link the probe as in normal mode, then execute it via
+    ``CMD`` (for example ``--cross-runner=wine64`` or
+    ``--cross-runner="qemu-aarch64 -L /sysroot"``). Overrides ``-x`` /
+    ``--cross-compile``.
+
+``--cross-runner-arg=ARG``
+    Pass ``ARG`` to the ``--cross-runner`` command without
+    word-splitting. May be repeated.
 
 ``--cross-safe``
-    Restrict the .hsc directives to those supported by the
-    ``--cross-compile`` mode (see :ref:`hsc2hs_cross`). This should be
-    useful if your ``.hsc`` files must be safely cross-compiled and you
-    wish to keep non-cross-compilable constructs from creeping into
-    them.
+    Process the ``.hsc`` file through the ``--cross-compile`` assembly
+    backend even on a native build, so no directive depends on executing
+    a non-constant C call while preprocessing.
+
+``--via-asm``
+    Accepted for compatibility. ``--cross-compile`` always uses one
+    assembly pass; this flag does not select a second backend.
 
 ``-?``, ``--help``
     Display a summary of the available flags and exit successfully.
@@ -267,16 +288,26 @@ Cross-compilation
 
 ``hsc2hs`` normally operates by creating, compiling, and running a C
 program. That approach doesn't work when cross-compiling — in this
-case, the C compiler's generates code for the target machine, not the
-host machine. For this situation, there's a special mode
-``hsc2hs --cross-compile`` which can generate the .hs by extracting
-information from compilations only — specifically, whether or not
-compilation fails.
+case, the C compiler generates code for the target machine, not the
+host machine. ``hsc2hs --cross-compile`` instead compiles the probe
+with ``cc -S -O2`` and reads ``template-hsc.h`` output (``hsc_printf``,
+``hsc_fputs``, ``hsc_putchar``, ``hsc_const_str``, and
+``hsc_haskellize``) back from assembly records. It defines
+``HSC2HS_ASM`` and provides ``hsc_mangle`` for C macro DSLs. It does
+not link or run a target binary.
 
-Only a subset of ``.hsc`` syntax is supported by ``--cross-compile``.
-The following are unsupported:
+Built-in directives, including ``#{const_str}`` and ``#{let}``, and
+custom ``hsc_*`` macros work in this mode when every value passed to
+``hsc_printf`` or ``hsc_const_str`` is a compile-time constant under
+``-O2`` (``sizeof``, ``offsetof``, integer and enum arithmetic, string
+literals, ``const char[]`` arrays, and conditional expressions over
+constants).
 
--  ``#{const_str}``
--  ``#{let}``
--  ``#{def}``
--  Custom constructs
+If a ``.hsc`` file calls a non-constant C function while preprocessing
+(for example ``#{const} dynamic_version_fn()``):
+
+- Use ``--cross-runner`` (and repeatable ``--cross-runner-arg``) to
+  execute the probe under an emulator such as ``qemu-aarch64``,
+  ``wine64``, or ``wasmtime``.
+- Use ``--no-cross-compile`` when the host can already run the target
+  binary (``binfmt_misc`` or Rosetta 2).
