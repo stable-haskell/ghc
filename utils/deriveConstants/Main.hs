@@ -1045,10 +1045,10 @@ getWantedJS = mapM lookupResult (wanteds (Just JS))
 writeHaskellType :: FilePath -> [What Fst] -> IO ()
 writeHaskellType fn ws = atomicWriteFile fn xs
     where xs = unlines [header, body, footer, parser]
-          header = "module GHC.Platform.Constants where\n\n\
-                   \import Prelude\n\
-                   \import Data.Char\n\n\
-                   \data PlatformConstants = PlatformConstants {"
+          header = "module GHC.Platform.Constants where\n\n"
+                   ++ "import Prelude\n"
+                   ++ "import Data.Char\n\n"
+                   ++ "data PlatformConstants = PlatformConstants {"
           footer = "  } deriving (Show, Read, Eq, Ord)\n\n"
           body = intercalate ",\n" (concatMap doWhat ws)
 
@@ -1065,25 +1065,25 @@ writeHaskellType fn ws = atomicWriteFile fn xs
 
           vs = zip ws [(0::Int)..]
           parser =
-            "parseConstantsHeader :: FilePath -> IO PlatformConstants\n\
-            \parseConstantsHeader fp = do\n\
-            \  s <- readFile fp\n\
-            \  let def = \"#define HS_CONSTANTS \\\"\"\n\
-            \      find [] xs = xs\n\
-            \      find _  [] = error $ \"GHC couldn't find the RTS constants (\"++def++\") in \" ++ fp ++ \": the RTS package you are trying to use is perhaps for another GHC version\" ++\n\
-            \                               \"(e.g. you are using the wrong package database) or the package database is broken.\\n\"\n\
-            \      find (d:ds) (x:xs)\n\
-            \        | d == x    = find ds xs\n\
-            \        | otherwise = find def xs\n\n\
-            \      readVal' :: Bool -> Integer -> String -> [Integer]\n\
-            \      readVal' n     c (x:xs) = case x of\n\
-            \        '\"' -> [if n then negate c else c]\n\
-            \        '-' -> readVal' True c xs\n\
-            \        ',' -> (if n then negate c else c) : readVal' False 0 xs\n\
-            \        _   -> readVal' n (c*10 + fromIntegral (ord x - ord '0')) xs\n\
-            \      readVal' n     c []     = [if n then negate c else c]\n\n\
-            \      readVal = readVal' False 0\n\n\
-            \  return $! case readVal (find def s) of\n"
+            "parseConstantsHeader :: FilePath -> IO PlatformConstants\n"
+                   ++ "parseConstantsHeader fp = do\n"
+                   ++ "  s <- readFile fp\n"
+                   ++ "  let def = \"#define HS_CONSTANTS \\\"\"\n"
+                   ++ "      find [] xs = xs\n"
+                   ++ "      find _  [] = error $ \"GHC couldn't find the RTS constants (\"++def++\") in \" ++ fp ++ \": the RTS package you are trying to use is perhaps for another GHC version\" ++\n"
+                   ++ "                               \"(e.g. you are using the wrong package database) or the package database is broken.\\n\"\n"
+                   ++ "      find (d:ds) (x:xs)\n"
+                   ++ "        | d == x    = find ds xs\n"
+                   ++ "        | otherwise = find def xs\n\n"
+                   ++ "      readVal' :: Bool -> Integer -> String -> [Integer]\n"
+                   ++ "      readVal' n     c (x:xs) = case x of\n"
+                   ++ "        '\"' -> [if n then negate c else c]\n"
+                   ++ "        '-' -> readVal' True c xs\n"
+                   ++ "        ',' -> (if n then negate c else c) : readVal' False 0 xs\n"
+                   ++ "        _   -> readVal' n (c*10 + fromIntegral (ord x - ord '0')) xs\n"
+                   ++ "      readVal' n     c []     = [if n then negate c else c]\n\n"
+                   ++ "      readVal = readVal' False 0\n\n"
+                   ++ "  return $! case readVal (find def s) of\n"
             ++ "    [" ++ concatMap (nicetab . snd) vs
             ++ "\n     ] -> PlatformConstants\n            { "
             ++ intercalate "\n            , " (concatMap (uncurry doParse) vs)
