@@ -36,6 +36,17 @@ bfd_imports:
 	"$(TEST_HC)" $(TEST_HC_OPTS) bfd_imports.hs -o bfd_imports -v0
 	./bfd_imports
 
+.PHONY: macho_tlv
+macho_tlv:
+	"$(TEST_CC)" $(TEST_CC_OPTS) -O0 -std=c11 -c macho_tlv_external.c -o macho_tlv_external.o
+	"$(TEST_CC)" $(TEST_CC_OPTS) -O0 -std=c11 -c macho_tlv_defined.c -o macho_tlv_defined.o
+	"$(TEST_CC)" $(TEST_CC_OPTS) -std=c11 -dynamiclib macho_tlv_provider.c -o macho_tlv_provider.dylib
+	'$(TEST_HC)' $(TEST_HC_OPTS_NO_RTSOPTS) -v0 -no-hs-main -threaded -o macho_tlv macho_tlv.c
+	./macho_tlv
+	"$(TEST_CC)" $(TEST_CC_OPTS) -O2 -std=c11 -c macho_tlv_external.c -o macho_tlv_external.o
+	"$(TEST_CC)" $(TEST_CC_OPTS) -O2 -std=c11 -c macho_tlv_defined.c -o macho_tlv_defined.o
+	./macho_tlv
+
 unsigned_reloc_macho_x64:
 	as -o unsigned_reloc_macho_x64.o unsigned_reloc_macho_x64.s
 	'$(TEST_HC)' $(TEST_HC_OPTS_NO_RTSOPTS) -v0 --make -no-rtsopts-suggestions -no-hs-main -o runner runner.c

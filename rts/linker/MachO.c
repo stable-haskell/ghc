@@ -27,6 +27,8 @@
 
 #if defined(x86_64_HOST_ARCH)
 #  include <mach-o/x86_64/reloc.h>
+#  include <pthread.h>
+#  include <stdlib.h>
 #endif
 
 #if defined(aarch64_HOST_ARCH)
@@ -73,6 +75,180 @@ static bool makeGot(ObjectCode * oc);
 static void freeGot(ObjectCode * oc);
 static void findInternalGotRefs(ObjectCode * oc);
 #endif /* aarch64_HOST_ARCH */
+
+#if defined(x86_64_HOST_ARCH)
+/* Darwin TLV descriptors are { thunk, key, offset }.  Our key is a context
+ * pointer; the context owns the relocated template until its last thread exits.
+ * Object code must not execute concurrently with its own unload. */
+typedef struct {
+    pthread_key_t key;
+    pthread_mutex_t lock;
+    size_t refs, size, alignment;
+    unsigned char *template;
+} MachOTLVContext;
+typedef struct { MachOTLVContext *context; void *data; } MachOTLVThread;
+typedef struct { void *thunk; uintptr_t key, offset; } MachOTLVDescriptor;
+
+static void releaseTLV(MachOTLVContext *ctx)
+{
+    bool last;
+    pthread_mutex_lock(&ctx->lock);
+    last = --ctx->refs == 0;
+    pthread_mutex_unlock(&ctx->lock);
+    if (last) {
+        pthread_key_delete(ctx->key);
+        pthread_mutex_destroy(&ctx->lock);
+        free(ctx->template);
+        free(ctx);
+    }
+}
+
+static void destroyTLVThread(void *p)
+{
+    MachOTLVThread *thread = p;
+    MachOTLVContext *ctx = thread->context;
+    free(thread->data);
+    free(thread);
+    releaseTLV(ctx);
+}
+
+/* Called only by the register-preserving assembly entry point below. */
+void *macho_tlv_get_addr(void *descriptor);
+void *macho_tlv_get_addr(void *descriptor)
+{
+    MachOTLVDescriptor d;
+    memcpy(&d, descriptor, sizeof(d));
+    MachOTLVContext *ctx = (MachOTLVContext *)d.key;
+    MachOTLVThread *thread = pthread_getspecific(ctx->key);
+    if (!thread) {
+        thread = malloc(sizeof(*thread));
+        if (!thread || posix_memalign(&thread->data, ctx->alignment, ctx->size))
+            barf("Mach-O TLV: cannot allocate thread storage");
+        thread->context = ctx;
+        memcpy(thread->data, ctx->template, ctx->size);
+        pthread_mutex_lock(&ctx->lock);
+        ctx->refs++;
+        pthread_mutex_unlock(&ctx->lock);
+        if (pthread_setspecific(ctx->key, thread))
+            barf("Mach-O TLV: pthread_setspecific failed");
+    }
+    return (unsigned char *)thread->data + d.offset;
+}
+
+/* Clang's x86-64 Darwin TLS call (LLVM CSR_64_TLS_Darwin, r252837) passes
+ * the descriptor in %rdi and returns the thread address in %rax. Every other
+ * GPR is preserved; XMM/YMM are not. %rdi itself is caller-saved. A normal
+ * call is miscompiled: clang keeps %rcx live across this call.
+ *
+ * Entry %rsp is 8 mod 16. Thirteen pushes (an odd count) leave it 0 mod 16,
+ * which is what a call requires. %rdi stays the descriptor and is not
+ * preserved: the compiler already moved any live value out of it.
+ */
+__asm__(
+".text\n"
+".globl _macho_tlv_thunk\n"
+".p2align 4\n"
+"_macho_tlv_thunk:\n"
+"pushq %rbp\n"
+"pushq %rbx\n"
+"pushq %rcx\n"
+"pushq %rdx\n"
+"pushq %rsi\n"
+"pushq %r8\n"
+"pushq %r9\n"
+"pushq %r10\n"
+"pushq %r11\n"
+"pushq %r12\n"
+"pushq %r13\n"
+"pushq %r14\n"
+"pushq %r15\n"
+"callq _macho_tlv_get_addr\n"
+"popq %r15\n"
+"popq %r14\n"
+"popq %r13\n"
+"popq %r12\n"
+"popq %r11\n"
+"popq %r10\n"
+"popq %r9\n"
+"popq %r8\n"
+"popq %rsi\n"
+"popq %rdx\n"
+"popq %rcx\n"
+"popq %rbx\n"
+"popq %rbp\n"
+"retq\n");
+extern void macho_tlv_thunk(void);
+
+static int initObjectTLV(ObjectCode *oc)
+{
+    size_t size = 0, alignment = sizeof(void *), count = 0;
+    for (int i = 0; i < oc->n_sections; i++) {
+        MachOSection *s = &oc->info->macho_sections[i];
+        unsigned type = s->flags & SECTION_TYPE;
+        if (type == S_THREAD_LOCAL_INIT_FUNCTION_POINTERS) {
+            errorBelch("%s: TLS initializer functions are unsupported", oc->fileName);
+            return 0;
+        }
+        if (type == S_THREAD_LOCAL_VARIABLES) count += s->size;
+        if (type != S_THREAD_LOCAL_REGULAR && type != S_THREAD_LOCAL_ZEROFILL) continue;
+        if (s->align >= sizeof(size_t) * 8 - 1) return 0;
+        size_t a = (size_t)1 << s->align;
+        if (a > alignment) alignment = a;
+        if (size > SIZE_MAX - (a - 1) || s->size > SIZE_MAX - (size + a - 1)) return 0;
+        size = roundUpToAlign(size, a) + s->size;
+    }
+    if (!count) return 1;
+    if (!size || count % sizeof(MachOTLVDescriptor)) return 0;
+    MachOTLVContext *ctx = calloc(1, sizeof(*ctx));
+    if (!ctx) return 0;
+    ctx->template = calloc(1, size);
+    if (!ctx->template) { free(ctx); return 0; }
+    if (pthread_mutex_init(&ctx->lock, NULL)) { free(ctx->template); free(ctx); return 0; }
+    if (pthread_key_create(&ctx->key, destroyTLVThread)) {
+        pthread_mutex_destroy(&ctx->lock); free(ctx->template); free(ctx); return 0;
+    }
+    ctx->refs = 1; ctx->size = size; ctx->alignment = alignment;
+    oc->info->tlv_context = ctx;
+    size_t offset = 0;
+    for (int i = 0; i < oc->n_sections; i++) {
+        MachOSection *s = &oc->info->macho_sections[i];
+        unsigned type = s->flags & SECTION_TYPE;
+        if (type != S_THREAD_LOCAL_REGULAR && type != S_THREAD_LOCAL_ZEROFILL) continue;
+        offset = roundUpToAlign(offset, (size_t)1 << s->align);
+        memcpy(ctx->template + offset, oc->sections[i].start, s->size);
+        offset += s->size;
+    }
+    for (int i = 0; i < oc->n_sections; i++) {
+        MachOSection *s = &oc->info->macho_sections[i];
+        if ((s->flags & SECTION_TYPE) != S_THREAD_LOCAL_VARIABLES) continue;
+        if (s->size % sizeof(MachOTLVDescriptor)) return 0;
+        for (size_t n = 0; n < s->size; n += sizeof(MachOTLVDescriptor)) {
+            unsigned char *p = (unsigned char *)oc->sections[i].start + n;
+            MachOTLVDescriptor d;
+            memcpy(&d, p, sizeof(d));
+            uintptr_t target = d.offset;
+            bool found = false;
+            offset = 0;
+            for (int j = 0; j < oc->n_sections; j++) {
+                MachOSection *t = &oc->info->macho_sections[j];
+                unsigned type = t->flags & SECTION_TYPE;
+                if (type != S_THREAD_LOCAL_REGULAR && type != S_THREAD_LOCAL_ZEROFILL) continue;
+                offset = roundUpToAlign(offset, (size_t)1 << t->align);
+                uintptr_t start = (uintptr_t)oc->sections[j].start;
+                if (target >= start && target - start < t->size) {
+                    d.offset = offset + target - start; found = true; break;
+                }
+                offset += t->size;
+            }
+            if (!found) { errorBelch("%s: invalid TLS template address", oc->fileName); return 0; }
+            d.thunk = (void *)&macho_tlv_thunk;
+            d.key = (uintptr_t)ctx;
+            memcpy(p, &d, sizeof(d));
+        }
+    }
+    return 1;
+}
+#endif
 
 /*
  * Initialize some common data in the object code so we don't have to
@@ -147,6 +323,9 @@ ocInit_MachO(ObjectCode * oc)
 void
 ocDeinit_MachO(ObjectCode * oc) {
     if (oc->info != NULL) {
+#if defined(x86_64_HOST_ARCH)
+        if (oc->info->tlv_context) releaseTLV(oc->info->tlv_context);
+#endif
         if(oc->info->n_macho_symbols > 0) {
             stgFree(oc->info->macho_symbols);
         }
@@ -733,6 +912,38 @@ relocateSectionAarch64(ObjectCode * oc, Section * section)
 #endif /* aarch64_HOST_ARCH */
 
 #if defined(x86_64_HOST_ARCH)
+/* Relocation diagnostics must not trust a symbol or string-table index. */
+static void
+reportRelocationError(ObjectCode *oc, MachORelocationInfo *reloc,
+                      const char *reason)
+{
+    if (reloc->r_extern) {
+        const char *name = "<invalid symbol>";
+        uint32_t index = reloc->r_symbolnum;
+        MachOSymtabCommand *symtab = oc->info->symCmd;
+        size_t image_size = oc->fileSize > 0 ? (size_t)oc->fileSize : 0;
+        if (symtab != NULL && index < oc->info->n_macho_symbols &&
+            symtab->symoff <= image_size &&
+            index < (image_size - symtab->symoff) / sizeof(MachONList) &&
+            symtab->stroff <= image_size &&
+            symtab->strsize <= image_size - symtab->stroff) {
+            MachONList *nlist = (MachONList *)(oc->image + symtab->symoff);
+            const char *names = oc->image + symtab->stroff;
+            uint32_t strx = nlist[index].n_un.n_strx;
+            uint32_t size = symtab->strsize;
+            if (strx < size && memchr(names + strx, 0, size - strx)) {
+                name = names + strx;
+            }
+        }
+        errorBelch("%s: relocation type %u for symbol %s: %s",
+                   OC_INFORMATIVE_FILENAME(oc), reloc->r_type, name, reason);
+    } else {
+        errorBelch("%s: relocation type %u for section index %u: %s",
+                   OC_INFORMATIVE_FILENAME(oc), reloc->r_type,
+                   reloc->r_symbolnum, reason);
+    }
+}
+
 static int
 relocateSection(ObjectCode* oc, int curSection)
 {
@@ -767,7 +978,7 @@ relocateSection(ObjectCode* oc, int curSection)
     {
         MachORelocationInfo *reloc = &relocs[i];
 
-        char    *thingPtr = (char *) sect->start + reloc->r_address;
+        char    *thingPtr;
         uint64_t thing;
         /* We shouldn't need to initialise this, but gcc on OS X 64 bit
            complains that it may be used uninitialized if we don't */
@@ -786,6 +997,30 @@ relocateSection(ObjectCode* oc, int curSection)
         IF_DEBUG(linker_verbose, debugBelch("               : extern    = %d\n", reloc->r_extern));
         IF_DEBUG(linker_verbose, debugBelch("               : type      = %d\n", reloc->r_type));
 
+        /* Reject unknown types before consulting either kind of target index. */
+        switch (type) {
+        case X86_64_RELOC_UNSIGNED: case X86_64_RELOC_SIGNED:
+        case X86_64_RELOC_BRANCH: case X86_64_RELOC_GOT_LOAD:
+        case X86_64_RELOC_GOT: case X86_64_RELOC_SUBTRACTOR:
+        case X86_64_RELOC_SIGNED_1: case X86_64_RELOC_SIGNED_2:
+        case X86_64_RELOC_SIGNED_4: case X86_64_RELOC_TLV:
+            break;
+        default:
+            reportRelocationError(oc, reloc, "unsupported relocation");
+            return 0;
+        }
+        if (reloc->r_extern && reloc->r_symbolnum >= oc->info->n_macho_symbols) {
+            reportRelocationError(oc, reloc, "symbol index out of bounds");
+            return 0;
+        }
+        if (type == X86_64_RELOC_TLV &&
+            (!reloc->r_extern || !reloc->r_pcrel || reloc->r_length != 2 ||
+             reloc->r_address < 0 || (uint64_t)reloc->r_address + 4 > msect->size)) {
+            reportRelocationError(oc, reloc, "invalid TLV relocation (expected external, PC-relative, 32-bit field within section)");
+            return 0;
+        }
+
+        thingPtr = (char *) sect->start + reloc->r_address;
         switch(reloc->r_length)
         {
             case 0:
@@ -832,8 +1067,9 @@ relocateSection(ObjectCode* oc, int curSection)
                  debugBelch("relocateSection: length = %d, thing = %" PRId64 ", baseValue = %p\n",
                             reloc->r_length, thing, (char *)baseValue));
 
+        bool is_tlv = type == X86_64_RELOC_TLV;
         if (type == X86_64_RELOC_GOT
-         || type == X86_64_RELOC_GOT_LOAD)
+         || type == X86_64_RELOC_GOT_LOAD || is_tlv)
         {
             MachOSymbol *symbol = &symbols[reloc->r_symbolnum];
             SymbolName* nm = symbol->name;
@@ -846,7 +1082,16 @@ relocateSection(ObjectCode* oc, int curSection)
                     errorBelch("\nrelocateSection: global offset table relocation for symbol with r_extern == 0\n");
             }
 
-            if (symbol->nlist->n_type & N_EXT) {
+            if (is_tlv && (symbol->nlist->n_type & N_TYPE) == N_SECT) {
+                addr = symbol->addr;
+                /* A later weak definition must use the descriptor that won
+                 * symbol resolution, not this object's private template. */
+                if (symbol->nlist->n_desc & N_WEAK_DEF) {
+                    SymbolAddr *canon = lookupDependentSymbol(nm, oc, NULL);
+                    if (canon) addr = canon;
+                }
+                if (!addr) return 0;
+            } else if (symbol->nlist->n_type & N_EXT) {
                     // The external bit is set, meaning the symbol is exported,
                     // and therefore can be looked up in this object module's
                     // symtab, or it is undefined, meaning dlsym must be used
@@ -895,6 +1140,18 @@ relocateSection(ObjectCode* oc, int curSection)
             // TODO (AP): use got_addr to store the loc. of a jump island to reuse later
             value = (uint64_t) &makeSymbolExtra(oc, reloc->r_symbolnum, (unsigned long)addr)->addr;
 
+            if (is_tlv) {
+                /* The field contains a signed addend; the instruction reads a
+                 * pointer from the slot, not from the descriptor itself. */
+                int64_t addend = (uint32_t)thing;
+                if (addend > INT32_MAX) addend -= INT64_C(0x100000000);
+                uint64_t displacement = value - baseValue + (uint64_t)addend;
+                if (displacement > INT32_MAX &&
+                    displacement < UINT64_MAX - INT32_MAX) {
+                    reportRelocationError(oc, reloc, "TLV pointer slot out of 32-bit range");
+                    return 0;
+                }
+            }
             type = X86_64_RELOC_SIGNED;
         }
         else if (reloc->r_extern)
@@ -917,7 +1174,13 @@ relocateSection(ObjectCode* oc, int curSection)
                                     nm, (void *)value));
             }
             else {
-                addr = lookupDependentSymbol(nm, oc, NULL);
+                /* Clang's descriptor bootstrap is replaced with our own
+                 * register-preserving thunk after all relocations. */
+                if ((msect->flags & SECTION_TYPE) == S_THREAD_LOCAL_VARIABLES &&
+                    strcmp(nm, "__tlv_bootstrap") == 0)
+                    addr = (SymbolAddr *)&macho_tlv_thunk;
+                else
+                    addr = lookupDependentSymbol(nm, oc, NULL);
                 if (addr == NULL)
                 {
                      errorBelch("\nlookupSymbol failed in relocateSection (relocate external)\n"
@@ -1006,7 +1269,7 @@ relocateSection(ObjectCode* oc, int curSection)
                 break;
             }
             default:
-                barf("relocateSection: unexpected internal relocation type %d\n", type);
+                reportRelocationError(oc, reloc, "unsupported internal relocation");
                 return 0;
             }
         }
@@ -1043,7 +1306,8 @@ relocateSection(ObjectCode* oc, int curSection)
                 thing -= value;
                 break;
             default:
-                barf("unknown relocation");
+                reportRelocationError(oc, reloc, "unsupported relocation");
+                return 0;
         }
 
         IF_DEBUG(linker_verbose, debugBelch("relocateSection: thing = %p\n", (void *) thing));
@@ -1098,6 +1362,23 @@ getSectionKind_MachO(MachOSection *section)
     }
 }
 
+/* Clang emits __thread_vars with align 2^0, while each descriptor is three
+ * pointers. Place that section at least pointer-aligned so the thunk word is
+ * a naturally aligned pointer. Symbol addresses stay section-relative.
+ */
+static size_t
+machoSectionAlign(MachOSection *macho)
+{
+    size_t alignment = (size_t)1 << macho->align;
+#if defined(x86_64_HOST_ARCH)
+    if ((macho->flags & SECTION_TYPE) == S_THREAD_LOCAL_VARIABLES &&
+        alignment < sizeof(void *)) {
+        alignment = sizeof(void *);
+    }
+#endif
+    return alignment;
+}
+
 /* Calculate the # of active segments and their sizes based on section
  * sizes and alignments. This is done in 2 passes over sections:
  * 1. Calculate how many sections is going to be in each segment and
@@ -1138,7 +1419,7 @@ ocBuildSegments_MachO(ObjectCode *oc)
             continue;
         }
 
-        size_t alignment = 1 << macho->align;
+        size_t alignment = machoSectionAlign(macho);
 
         if (S_GB_ZEROFILL == (macho->flags & SECTION_TYPE)) {
             size_gbZerofillSegment = roundUpToAlign(size_gbZerofillSegment, alignment);
@@ -1293,7 +1574,7 @@ ocGetNames_MachO(ObjectCode* oc)
             int sec_idx = segment->sections_idx[sec_n];
             MachOSection *section = &oc->info->macho_sections[sec_idx];
 
-            size_t alignment = 1 << section->align;
+            size_t alignment = machoSectionAlign(section);
             SectionKind kind = getSectionKind_MachO(section);
             SectionAlloc alloc = SECTION_NOMEM;
             void *start = NULL, *mapped_start = NULL;
@@ -1313,6 +1594,9 @@ ocGetNames_MachO(ObjectCode* oc)
 
             switch (section->flags & SECTION_TYPE) {
             case S_ZEROFILL:
+#if defined(x86_64_HOST_ARCH)
+            case S_THREAD_LOCAL_ZEROFILL:
+#endif
             case S_GB_ZEROFILL:
                 IF_DEBUG(linker, debugBelch("ocGetNames_MachO: memset to 0 a ZEROFILL section\n"));
                 memset(secMem, 0, section->size);
@@ -1703,6 +1987,9 @@ ocResolve_MachO(ObjectCode* oc)
             return 0;
 #endif
     }
+#if defined(x86_64_HOST_ARCH)
+    if (!initObjectTLV(oc)) return 0;
+#endif
     if(!ocMprotect_MachO ( oc ))
         return 0;
 

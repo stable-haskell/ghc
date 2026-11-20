@@ -20,6 +20,12 @@ test('bfd_imports',
                    'bfd_imports_check.py'])],
      makefile_test, [])
 
+test('macho_tlv',
+     [req_rts_linker, unless(opsys('darwin') and arch('x86_64'), skip),
+      extra_files(['macho_tlv.c', 'macho_tlv_external.c',
+                   'macho_tlv_provider.c', 'macho_tlv_defined.c'])],
+     makefile_test, [])
+
 test('unsigned_reloc_macho_x64',
      [
          extra_files(['runner.c', 'unsigned_reloc_macho_x64.s']),

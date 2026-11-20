@@ -56,6 +56,9 @@ struct ObjectCodeFormatInfo {
     MachOSymbol          *macho_symbols;
     size_t               n_macho_symbols;
 
+    /* Owned TLS template and thread key, if this object defines C TLS. */
+    void                 *tlv_context;
+
     /* pointer to the global offset table */
     void                 *got_start;
     size_t                got_size;
