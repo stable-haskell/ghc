@@ -140,6 +140,21 @@ jobs:
             echo "/usr/local/bin" >> $GITHUB_PATH
 
       - if: matrix.platform.image == 'rockylinux:8'
+        name: Use a UTF-8 locale
+        run: |
+          set -eux
+          # Happy reads GHC/Parser.y with the locale encoding. This image
+          # defaults to POSIX, which rejects the file's UTF-8 bytes.
+          if locale -a | grep -qiE '^C\.(utf8|UTF-8)$'; then
+            locale_name=C.UTF-8
+          else
+            dnf install -y glibc-langpack-en
+            locale_name=en_US.UTF-8
+          fi
+          echo "LANG=${locale_name}" >> "$GITHUB_ENV"
+          echo "LC_ALL=${locale_name}" >> "$GITHUB_ENV"
+
+      - if: matrix.platform.image == 'rockylinux:8'
         name: Install emscripten
         run : &emscripten |
           set -eux
