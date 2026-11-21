@@ -982,13 +982,33 @@ stage_00_shims_platform() {
 # implementation is mhs-compat-shims in stable-haskell/cabal. Copy only
 # those three modules so Text.PrettyPrint and Distribution.* in that
 # tree do not shadow packages the stage-1 tools already installed.
+# ghc-boot compiles with -XNoImplicitPrelude. The shim modules name
+# Either and the other Prelude types without importing them.
+add_binary_shim_prelude() {
+  python3 - "$@" <<'PY'
+import pathlib, sys
+for name in sys.argv[1:]:
+    path = pathlib.Path(name)
+    lines = path.read_text().splitlines(keepends=True)
+    if any(line.startswith("import Prelude") for line in lines):
+        continue
+    inserted = False
+    for i, line in enumerate(lines):
+        if line.strip() == ") where" or (line.startswith("module ") and line.rstrip().endswith(" where")):
+            lines.insert(i + 1, "\nimport Prelude\n")
+            inserted = True
+            break
+    if not inserted:
+        raise SystemExit(f"no module header in {name}")
+    path.write_text("".join(lines))
+PY
+}
+
 install_binary_shim_files() {
   local dest="$OUT/binary-shim"
-  if [ -f "$dest/Data/Binary.hs" ] \
-      && [ -f "$dest/Data/Binary/Get.hs" ] \
-      && [ -f "$dest/Data/Binary/Put.hs" ]; then
-    return 0
-  fi
+  if [ ! -f "$dest/Data/Binary.hs" ] \
+      || [ ! -f "$dest/Data/Binary/Get.hs" ] \
+      || [ ! -f "$dest/Data/Binary/Put.hs" ]; then
   local cabal_mhs_src="${1:-${CABAL_MHS_SRC:-$OUT/cabal-mhs-src}}"
   if [ ! -f "$cabal_mhs_src/mhs-compat-shims/src/Data/Binary.hs" ] \
       && [ -d "$ROOT/_build/mhs-cabal-src/mhs-compat-shims/src" ]; then
@@ -1010,6 +1030,11 @@ install_binary_shim_files() {
   cp -f "$src/Data/Binary.hs" "$dest/Data/Binary.hs"
   cp -f "$src/Data/Binary/Get.hs" "$dest/Data/Binary/Get.hs"
   cp -f "$src/Data/Binary/Put.hs" "$dest/Data/Binary/Put.hs"
+  fi
+  add_binary_shim_prelude \
+    "$dest/Data/Binary.hs" \
+    "$dest/Data/Binary/Get.hs" \
+    "$dest/Data/Binary/Put.hs"
 }
 
 use_binary_shim() {

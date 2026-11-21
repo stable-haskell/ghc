@@ -396,7 +396,8 @@ jobs:
                 echo 'ERROR: MicroHs cabal commit is not a descendant of the base' >&2
                 exit 1
               fi
-              git -C _build/cabal-src checkout --detach FETCH_HEAD"
+              git -C _build/cabal-src checkout --detach FETCH_HEAD
+              bootstrap/mhs/drop-generically-deriving.sh _build/cabal-src"
           {
             echo "## Phase 4 — cabal-install MicroHs super-charge series (\`$BASE..$MHS_HEAD\`)"
             echo ""
