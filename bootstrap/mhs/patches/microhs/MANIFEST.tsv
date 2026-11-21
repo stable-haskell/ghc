@@ -6,3 +6,4 @@
 0006-typecheck-implement-TypeFamilies-DataKinds-and-GADT-.patch	[#367](https://github.com/augustss/MicroHs/issues/367), [#446](https://github.com/augustss/MicroHs/issues/446), [#226](https://github.com/augustss/MicroHs/issues/226), [#449](https://github.com/augustss/MicroHs/issues/449), [#501](https://github.com/augustss/MicroHs/issues/501), [#502](https://github.com/augustss/MicroHs/issues/502)	Implement `TypeFamilies`/`DataFamilies`, `DataKinds`, and GADT/existential/local constraint propagation
 0007-ffi-desugar-polymorphic-foreign-imports-EForall-T_IO.patch	ffi	Desugar polymorphic `foreign import` (`EForall` / `T_IO_CCALL`) and update combinator codegen
 0008-lib-add-DeepSeq-Serialize-compatibility-helpers-and-.patch	stdlib	Add `DeepSeq`/`Serialize` helpers and register regression test
+0009-typecheck-raise-largeRecordFieldLimit-to-128.patch	cabal	Raise `largeRecordFieldLimit` to 128 so Cabal `PackageConfig` updates use SetField
