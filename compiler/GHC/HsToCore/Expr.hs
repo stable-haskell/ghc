@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE MultiWayIf #-}
@@ -1146,6 +1147,9 @@ dsDo ctx stmts res_ty
         rets         = map noLocA rec_rets
         mfix_app     = nlHsSyntaxApps mfix_op [mfix_arg]
         match_group  = MatchGroupTc [unrestricted tup_ty] body_ty (Generated OtherExpansion SkipPmc)
+#if defined(__MHS__)
+        mfix_arg     :: LHsExpr GhcTc
+#endif
         mfix_arg     = noLocA $ HsLam noAnn LamSingle
                            (MG { mg_alts = noLocA [mkSimpleMatch
                                                     (LamAlt LamSingle)
@@ -1153,9 +1157,20 @@ dsDo ctx stmts res_ty
                                , mg_ext = match_group
                                })
         mfix_pat     = noLocA $ LazyPat noExtField $ mkBigLHsPatTupId rec_tup_pats
-        body         = noLocA $ HsDo body_ty
-                                ctx (noLocA (rec_stmts ++ [ret_stmt]))
+        body         = noLocA $ HsDo body_ty ctx do_stmts
+#if defined(__MHS__)
+        -- Pin the statement-list type for MicroHs: the bare
+        -- `noLocA (rec_stmts ++ [ret_stmt])` leaves the annotation
+        -- ambiguous and MicroHs will not unify it through the `HsDo`
+        -- field's `XRec` wrapper by inference alone (same shape as the
+        -- `mfix_arg` ascription above).
+        do_stmts     :: XRec GhcTc [ExprLStmt GhcTc]
+#endif
+        do_stmts     = noLocA (rec_stmts ++ [ret_stmt])
         ret_app      = nlHsSyntaxApps return_op [mkBigLHsTupId rets]
+#if defined(__MHS__)
+        ret_stmt     :: ExprLStmt GhcTc
+#endif
         ret_stmt     = noLocA $ mkLastStmt ret_app
                      -- This LastStmt will be desugared with dsDo,
                      -- which ignores the return_op in the LastStmt,

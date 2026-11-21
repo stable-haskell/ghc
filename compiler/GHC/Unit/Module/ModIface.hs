@@ -1,4 +1,8 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE DataKinds #-}
+#if defined(__MHS__)
+{-# LANGUAGE StandaloneKindSignatures #-}
+#endif
 {-# LANGUAGE TypeFamilyDependencies #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
@@ -145,6 +149,9 @@ import GHC.Types.Unique.DSet
 import GHC.Types.Unique.FM
 
 import GHC.Data.Maybe
+#if defined(__MHS__)
+import qualified Data.Kind
+#endif
 import qualified GHC.Data.Strict as Strict
 
 import GHC.Utils.Fingerprint
@@ -223,11 +230,25 @@ data ModIfacePhase
 -- | Selects a IfaceDecl representation.
 -- For fully instantiated interfaces we also maintain
 -- a fingerprint, which is used for recompilation checks.
+#if defined(__MHS__)
+-- As in GHC.Hs.Expr (SyntaxExprGhc): MicroHs cannot kind-check binder and
+-- result annotations inside a closed injective family header
+-- (assertTCMode). The standalone kind signature plus annotation-free header
+-- below has the same meaning.
+type IfaceDeclExts :: ModIfacePhase -> Data.Kind.Type
+type family IfaceDeclExts phase = decl | decl -> phase where
+#else
 type family IfaceDeclExts (phase :: ModIfacePhase) = decl | decl -> phase where
+#endif
   IfaceDeclExts 'ModIfaceCore = IfaceDecl
   IfaceDeclExts 'ModIfaceFinal = (Fingerprint, IfaceDecl)
 
+#if defined(__MHS__)
+type IfaceAbiHashesExts :: ModIfacePhase -> Data.Kind.Type
+type family IfaceAbiHashesExts phase = bk | bk -> phase where
+#else
 type family IfaceAbiHashesExts (phase :: ModIfacePhase) = bk | bk -> phase where
+#endif
   IfaceAbiHashesExts 'ModIfaceCore = ()
   IfaceAbiHashesExts 'ModIfaceFinal = IfaceAbiHashes
 
@@ -853,9 +874,19 @@ emptyIfaceHashCache _occ = Nothing
 
 -- ModIface is completely forced since it will live in memory for a long time.
 -- If forcing it uses a lot of memory, then store less things in ModIface.
+#if defined(__MHS__)
+-- MicroHs does not support inline kind annotations `(phase :: ModIfacePhase)`
+-- inside type-level constraint expressions (`ESign` in `TCType` switches to
+-- `TCKind` and trips `assertTCMode`); `ModIface_ phase` and the standalone kind
+-- signatures on `IfaceAbiHashesExts`/`IfaceDeclExts` already fix `phase`'s kind.
+instance ( NFData (IfaceAbiHashesExts phase)
+         , NFData (IfaceDeclExts phase)
+         ) => NFData (ModIface_ phase) where
+#else
 instance ( NFData (IfaceAbiHashesExts (phase :: ModIfacePhase))
          , NFData (IfaceDeclExts (phase :: ModIfacePhase))
          ) => NFData (ModIface_ phase) where
+#endif
   rnf (PrivateModIface a1 a2 a3 a4 a5 a6 a7 a8 a9 a10)
     = (a1 :: IfaceBinHandle phase)
     `seq` rnf a2

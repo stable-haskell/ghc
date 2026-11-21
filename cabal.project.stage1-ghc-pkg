@@ -1,0 +1,36 @@
+-- Stage1 ghc-pkg, solved apart from the compiler.
+--
+-- The compiler plan builds filepath 1.5 and directory 1.3.10. GHC 9.8.4's
+-- Cabal-3.10.3.0 is wired to directory 1.3.8.5 and filepath 1.4, so one host
+-- plan cannot both rebuild directory and link that Cabal. This project lists
+-- neither those source packages nor the Cabal pin. ghc-pkg and the ghc-boot
+-- it links therefore use the bootstrap directory, filepath, unix, process,
+-- Cabal, and Cabal-syntax. None of those are compiled.
+--
+-- The compiler keeps its own ghc-boot, built from cabal.project.stage1
+-- against filepath 1.5. Stage2 compiles ghc-pkg again with that compiler.
+import: cabal.project.common
+
+active-repositories: :none
+
+packages:
+  utils/ghc-pkg
+  libraries/ghc-boot
+  libraries/ghc-boot-th-next
+  libraries/ghc-platform
+
+package *
+  shared: False
+  executable-dynamic: False
+
+if !os(windows)
+  package *
+    library-for-ghci: False
+
+-- ghc-boot-th == 9.14 is not installed with the bootstrap compiler.
+-- +bootstrap selects ghc-boot-th-next and vendors the TH sources.
+package ghc-boot
+  flags: +bootstrap
+
+package ghc-boot-th-next
+  flags: +bootstrap

@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP                 #-}
 {-# LANGUAGE DeriveFunctor       #-}
 {-# LANGUAGE GADTs               #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -1041,10 +1042,19 @@ lookup_fam_inst_env' lookup_mode (FamIE _ ie) fam match_tys
     rough_tmpl :: [RoughMatchLookupTc]
     rough_tmpl = RML_KnownTc (tyConName fam) : map typeToRoughMatchLookupTc match_tys
 
+#if defined(__MHS__)
+    rm_fun :: (Bag FamInst, [FamInst]) -> [FamInst]
+    check_fun :: FamInst -> Maybe a
+    (rm_fun, check_fun) = (case lookup_mode of
+                            WantConflicts fam_inst -> (snd, unify_fun fam_inst)
+                            WantMatches -> (bagToList . fst, match_fun))
+                            :: ((Bag FamInst, [FamInst]) -> [FamInst], FamInst -> Maybe a)
+#else
     rm_fun :: (Bag FamInst, [FamInst]) -> [FamInst]
     (rm_fun, check_fun) = case lookup_mode of
                             WantConflicts fam_inst -> (snd, unify_fun fam_inst)
                             WantMatches -> (bagToList . fst, match_fun)
+#endif
 
     -- Function used for finding unifiers
     unify_fun orig_fam_inst item@(FamInst { fi_axiom = old_axiom, fi_tys = tpl_tys, fi_tvs = tpl_tvs })

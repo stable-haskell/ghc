@@ -706,7 +706,13 @@ load' mhmi_cache how_much diag_wrapper mHscMessage mod_graph = do
     let pruneHomeUnitEnv hme = do
           emptyHPT <- liftIO emptyHomePackageTable
           pure $! hme{ homeUnitEnv_hpt = emptyHPT }
+#if defined(__MHS__)
+    -- MicroHs's traverse is list-only; use the Map-backed traversal.
+    -- Same meaning.
+    hug' <- HUG.unitEnv_traverseWithKey (const pruneHomeUnitEnv) (ue_home_unit_graph $ hsc_unit_env hsc_env)
+#else
     hug' <- traverse pruneHomeUnitEnv (ue_home_unit_graph $ hsc_unit_env hsc_env)
+#endif
     let ue' = (hsc_unit_env hsc_env){ ue_home_unit_graph = hug' }
     setSession $ discardIC hsc_env{hsc_unit_env = ue' }
     hsc_env <- getSession
@@ -954,7 +960,12 @@ these modules together.
 -- | Simple wrapper around MVar which allows a functor instance.
 data ResultVar b = forall a . ResultVar (a -> b) (MVar (Maybe a))
 
+#if defined(__MHS__)
+instance Functor ResultVar where
+  fmap g (ResultVar f v) = ResultVar (g . f) v
+#else
 deriving instance Functor ResultVar
+#endif
 
 mkResultVar :: MVar (Maybe a) -> ResultVar a
 mkResultVar = ResultVar id
@@ -1094,7 +1105,13 @@ interpretBuildPlan hug mhmi_cache old_hpt plan = do
                      hmi <- executeCompileNode mod_idx n_mods old_hmi hug rehydrate_mods ms
                      -- Write the HMI to an external cache (if one exists)
                      -- See Note [Caching HomeModInfo]
+#if defined(__MHS__)
+                     -- MicroHs's forM is list-only (no Traversable generalisation).
+                     -- Same meaning.
+                     liftIO $ forM (maybeToList mhmi_cache) $ \hmi_cache -> addHmiToCache hmi_cache hmi
+#else
                      liftIO $ forM mhmi_cache $ \hmi_cache -> addHmiToCache hmi_cache hmi
+#endif
                      -- Make sure the result is written to the HPT var
                      liftIO $ HUG.addHomeModInfoToHug hmi hug
                      return (Just hmi)
@@ -1631,7 +1648,13 @@ executeCompileNode k n !old_hmi hug mrehydrate_mods mni = do
     executeCompileNodeFixed :: HscEnv -> MakeEnv -> ModNodeKeyWithUid -> ModLocation -> IO (Maybe HomeModInfo)
     executeCompileNodeFixed hsc_env MakeEnv{diag_wrapper, env_messager} mod loc =
       wrapAction diag_wrapper hsc_env $ do
+#if defined(__MHS__)
+        -- MicroHs's forM_ is list-only (no Foldable generalisation).
+        -- Same meaning.
+        forM_ (maybeToList env_messager) $ \hscMessage -> hscMessage hsc_env (k, n) UpToDate (ModuleNode [] (ModuleNodeFixed mod loc))
+#else
         forM_ env_messager $ \hscMessage -> hscMessage hsc_env (k, n) UpToDate (ModuleNode [] (ModuleNodeFixed mod loc))
+#endif
         read_result <- readIface (hsc_hooks hsc_env) (hsc_logger hsc_env) (hsc_dflags hsc_env) (hsc_NC hsc_env) (mnkToModule mod) (ml_hi_file loc)
         case read_result of
           M.Failed interface_err ->

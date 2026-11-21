@@ -1,6 +1,9 @@
+{-# LANGUAGE CPP #-}
+#if !defined(__MHS__)
 {-# LANGUAGE MagicHash #-}
 {-# LANGUAGE UnboxedTuples #-}
 {-# LANGUAGE BlockArguments #-}
+#endif
 
 -- | Small-array
 module GHC.Data.SmallArray
@@ -25,6 +28,114 @@ module GHC.Data.SmallArray
   )
 where
 
+#if defined(__MHS__)
+import GHC.Prelude.Basic
+import Control.DeepSeq
+import Data.IORef
+import System.IO.Unsafe (unsafePerformIO)
+
+-- Phantom state.  MicroHs has no State# / SmallArray#.
+data RealWorld = RealWorld
+data State# s = State#
+
+data SmallArray a = SmallArray !Int [a]
+
+data SmallMutableArray s a = SmallMutableArray (IORef [a])
+
+type SmallMutableArrayIO a = SmallMutableArray RealWorld a
+
+newSmallArray
+  :: Int
+  -> a
+  -> State# s
+  -> (# State# s, SmallMutableArray s a #)
+newSmallArray n x s = unsafePerformIO $ do
+  r <- newIORef (replicate n x)
+  return (# s, SmallMutableArray r #)
+
+newSmallArrayIO :: Int -> a -> IO (SmallMutableArrayIO a)
+newSmallArrayIO n x = do
+  r <- newIORef (replicate n x)
+  return (SmallMutableArray r)
+
+writeSmallArray
+  :: SmallMutableArray s a
+  -> Int
+  -> a
+  -> State# s
+  -> State# s
+writeSmallArray (SmallMutableArray r) i x s = unsafePerformIO $ do
+  xs <- readIORef r
+  writeIORef r (setAt i x xs)
+  return s
+
+writeSmallArrayIO :: SmallMutableArrayIO a -> Int -> a -> IO ()
+writeSmallArrayIO a ix v =
+  writeSmallArray a ix v State# `seq` return ()
+
+freezeSmallArray
+  :: SmallMutableArray s a
+  -> Int
+  -> Int
+  -> State# s
+  -> (# State# s, SmallArray a #)
+freezeSmallArray (SmallMutableArray r) offset len s = unsafePerformIO $ do
+  xs <- readIORef r
+  return (# s, SmallArray len (take len (drop offset xs)) #)
+
+unsafeFreezeSmallArray
+  :: SmallMutableArray s a
+  -> State# s
+  -> (# State# s, SmallArray a #)
+unsafeFreezeSmallArray (SmallMutableArray r) s = unsafePerformIO $ do
+  xs <- readIORef r
+  return (# s, SmallArray (count xs) xs #)
+
+unsafeFreezeSmallArrayIO :: SmallMutableArrayIO a -> IO (SmallArray a)
+unsafeFreezeSmallArrayIO arr =
+  case unsafeFreezeSmallArray arr State# of
+    (# _, a #) -> return a
+
+sizeofSmallArray :: SmallArray a -> Int
+sizeofSmallArray (SmallArray n _) = n
+
+indexSmallArray :: SmallArray a -> Int -> a
+indexSmallArray (SmallArray _ xs) i = xs !! i
+
+mapSmallArray :: (a -> b) -> SmallArray a -> SmallArray b
+mapSmallArray f (SmallArray n xs) = SmallArray n (map f xs)
+
+foldMapSmallArray :: Monoid m => (a -> m) -> SmallArray a -> m
+foldMapSmallArray f (SmallArray _ xs) = go xs
+  where
+    go [] = mempty
+    go (y:ys) = f y `mappend` go ys
+
+rnfSmallArray :: NFData a => SmallArray a -> ()
+rnfSmallArray (SmallArray _ xs) = rnf xs
+
+listToArray :: Int -> (e -> Int) -> (e -> a) -> [e] -> SmallArray a
+listToArray n indexOf valueOf xs =
+  SmallArray n (place (replicate n uninit) xs)
+  where
+    uninit = error "SmallArray: internal error, uninitialised elements"
+    place arr [] = arr
+    place arr (e:es) = place (setAt (indexOf e) (valueOf e) arr) es
+
+setAt :: Int -> a -> [a] -> [a]
+setAt i v xs = go i xs
+  where
+    go 0 (_:ys) = v : ys
+    go k (y:ys) = y : go (k - 1) ys
+    go _ [] = []
+
+-- Data.List.length and Data.Foldable.length are both in scope.
+count :: [a] -> Int
+count = go 0
+  where
+    go n [] = n
+    go n (_:ys) = go (n + 1) ys
+#else
 import GHC.Exts
 import GHC.Prelude
 import GHC.IO
@@ -166,3 +277,4 @@ listToArray (I# size) index_of value_of xs = runST $ ST \s ->
     (# s', ma #) -> case write_elems ma xs s' of
       s'' -> case unsafeFreezeSmallArray# ma s'' of
         (# s''', a #) -> (# s''', SmallArray a #)
+#endif

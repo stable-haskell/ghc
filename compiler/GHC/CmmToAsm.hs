@@ -461,7 +461,13 @@ cmmNativeGens logger config mkNcgImpl h dbgMap = go
 
         -- force evaluation all this stuff to avoid space leaks
         let platform = ncgPlatform config
+#if defined(__MHS__)
+        -- MHS mistypes the preceding `let` when an SCC pragma directly
+        -- follows it in a do-block; SCC is profiling-only, so drop it here.
+        evaluate $ seqList (showSDocUnsafe $ vcat $ map (pprAsmLabel platform) imports) ()
+#else
         {-# SCC "seqString" #-} evaluate $ seqList (showSDocUnsafe $ vcat $ map (pprAsmLabel platform) imports) ()
+#endif
 
         let !labels' = if ncgDwarfEnabled config
                        then cmmDebugLabels is_valid_label isMetaInstr native else []
@@ -490,7 +496,13 @@ cmmNativeGens logger config mkNcgImpl h dbgMap = go
 emitNativeCode :: Logger -> NCGConfig -> BufHandle -> HDoc -> SDoc -> IO ()
 emitNativeCode logger config h hdoc sdoc = do
         let ctx = ncgAsmContext config
+#if defined(__MHS__)
+        -- As above: an SCC pragma directly following a `let` in a do-block
+        -- mistypes the `let` under MHS; SCC is profiling-only.
+        bPutHDoc h ctx hdoc
+#else
         {-# SCC "pprNativeCode" #-} bPutHDoc h ctx hdoc
+#endif
 
         -- dump native code
         putDumpFileMaybe logger

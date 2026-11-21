@@ -39,12 +39,43 @@ import Data.Set (Set)
 import qualified Data.Map as Map
 import Data.Map (Map)
 import Data.IORef
+#if defined(__MHS__)
+-- MicroHs's System.Directory provides no removeDirectory or
+-- removeDirectoryRecursive; rmdir comes from libc (as rename does in
+-- GHC.Utils.Misc), recursive removal via listDirectory/removeFile.
+import System.Directory hiding (removeDirectory, removeDirectoryRecursive)
+import Foreign.C.String (CString, withCString)
+#else
 import System.Directory
+#endif
 import System.FilePath
 import System.IO.Error
 
 #if !defined(mingw32_HOST_OS)
 import qualified System.Posix.Internals
+#endif
+
+#if defined(__MHS__)
+foreign import ccall "rmdir" c_rmdir :: CString -> IO Int
+
+removeDirectory :: FilePath -> IO ()
+removeDirectory path =
+  withCString path $ \s -> do
+    r <- c_rmdir s
+    if r /= 0
+      then ioError (userError ("removeDirectory " ++ path ++ " failed"))
+      else return ()
+
+removeDirectoryRecursive :: FilePath -> IO ()
+removeDirectoryRecursive path = do
+  entries <- listDirectory path
+  mapM_ removeEntry entries
+  removeDirectory path
+  where
+    removeEntry e = do
+      let p = path </> e
+      isDir <- doesDirectoryExist p
+      if isDir then removeDirectoryRecursive p else removeFile p
 #endif
 
 -- | Temporary file-system

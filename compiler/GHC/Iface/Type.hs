@@ -7,7 +7,7 @@ This module defines interface types and binders
 -}
 
 
-{-# LANGUAGE MultiWayIf, OverloadedRecordDot #-}
+{-# LANGUAGE CPP, MultiWayIf, OverloadedRecordDot #-}
 {-# LANGUAGE LambdaCase #-}
 module GHC.Iface.Type (
         IfExtName,
@@ -99,7 +99,9 @@ import qualified Data.Semigroup as Semi
 import Data.Word (Word8)
 import Control.Arrow (first)
 import Control.DeepSeq
+#if !defined(__MHS__)
 import Control.Monad ((<$!>))
+#endif
 import Data.List (dropWhileEnd)
 import qualified Data.List.NonEmpty as NonEmpty
 import qualified Data.Set as Set

@@ -290,7 +290,27 @@ recordBreak brkLoc = do
 
 newtype GHCi a = GHCi { unGHCi :: IORef GHCiState -> Ghc a }
     deriving (Functor)
+#if defined(__MHS__)
+    -- As in GHC.Driver.Monad: mhs cannot derive MonadMask via ReaderT.
+    deriving (MonadThrow, MonadCatch) via (ReaderT (IORef GHCiState) Ghc)
+#else
     deriving (MonadThrow, MonadCatch, MonadMask) via (ReaderT (IORef GHCiState) Ghc)
+#endif
+
+#if defined(__MHS__)
+instance MC.MonadMask GHCi where
+  mask f = GHCi $ \ref -> MC.mask $ \restore ->
+    let restoreGHCi (GHCi g) = GHCi (restore . g)
+    in unGHCi (f restoreGHCi) ref
+  uninterruptibleMask f = GHCi $ \ref -> MC.uninterruptibleMask $ \restore ->
+    let restoreGHCi (GHCi g) = GHCi (restore . g)
+    in unGHCi (f restoreGHCi) ref
+  generalBracket acquire release use = GHCi $ \ref ->
+    MC.generalBracket
+      (unGHCi acquire ref)
+      (\resource exitCase -> unGHCi (release resource exitCase) ref)
+      (\resource -> unGHCi (use resource) ref)
+#endif
 
 reflectGHCi :: (Session, IORef GHCiState) -> GHCi a -> IO a
 reflectGHCi (s, gs) m = unGhc (unGHCi m gs) s

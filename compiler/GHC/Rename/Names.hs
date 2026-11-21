@@ -4,6 +4,7 @@
 Extracting imported and top-level names in scope
 -}
 
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE NondecreasingIndentation #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE RankNTypes #-}
@@ -1284,7 +1285,11 @@ filterImports hsc_env iface decl_spec (Just (want_hiding, L l import_items))
             run_lookup def m = case m of
               Failed err -> do
                 msgs <- lookup_err_msgs err
+#if defined(__MHS__)
+                forM_ (NE.toList msgs) $ \msg -> addErr (TcRnImportLookup msg)
+#else
                 forM_ msgs $ \msg -> addErr (TcRnImportLookup msg)
+#endif
                 return def
               Succeeded a -> return a
 
@@ -2167,7 +2172,11 @@ warnUnusedImport rdr_env (L loc decl, used, unused)
                                  , name <- ieNames ie
                                  , name `elem` unused ]
   , loc1 : locs <- unused_locs
+#if defined(__MHS__)
+  , let span = foldr1 combineSrcSpans ( loc1 : locs )
+#else
   , let span = foldr1 combineSrcSpans ( loc1 NE.:| locs )
+#endif
   = addDiagnosticAt span (TcRnUnusedImport decl (UnusedImportSome sort_unused))
 
   -- Some imports are unused
@@ -2230,7 +2239,11 @@ getMinimalImports ie_decls
            ; iface <- loadSrcInterface doc mod_name is_boot pkg_qual
            ; let used_avails = gresToAvailInfo used_gres
            ; lies <- map (L l) <$> concatMapM (to_ie rdr_env iface) used_avails
+#if defined(__MHS__)
+           ; return (L l (decl { ideclImportList = Just (Exactly, L (l2l l :: SrcSpanAnnA) lies) })) }
+#else
            ; return (L l (decl { ideclImportList = Just (Exactly, L (l2l l) lies) })) }
+#endif
       where
         doc = text "Compute minimal imports for" <+> ppr decl
 

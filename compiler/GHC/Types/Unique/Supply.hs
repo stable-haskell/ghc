@@ -35,17 +35,28 @@ import GHC.Prelude
 import GHC.Types.Unique
 import GHC.Utils.Panic.Plain
 
+#if defined(__MHS__)
+import System.IO.Unsafe ( unsafeInterleaveIO )
+import Foreign.Ptr ( Ptr )
+#else
 import GHC.IO
+#endif
 
 import GHC.Utils.Monad
 import Control.Monad
 import Data.Word
+#if defined(__MHS__)
+oneShot :: a -> a
+oneShot x = x
+#else
 import GHC.Exts( Ptr(..), noDuplicate#, oneShot )
+#endif
 import Foreign.Storable
 import GHC.Utils.Monad.State.Strict as Strict
 
 #include "MachDeps.h"
 
+#if !defined(__MHS__)
 #if WORD_SIZE_IN_BITS != 64
 #define NO_FETCH_ADD
 #endif
@@ -60,6 +71,7 @@ import GHC.Exts ( Addr#, State#, Word64#, RealWorld )
 import GHC.Int ( Int(..) )
 import GHC.Word( Word64(..) )
 import GHC.Exts( plusWord64#, int2Word#, wordToWord64# )
+#endif
 
 {-
 ************************************************************************
@@ -213,6 +225,30 @@ mkSplitUniqSupply :: Char -> IO UniqSupply
 
 -- See Note [How the unique supply works]
 -- See Note [Optimising the unique supply]
+#if defined(__MHS__)
+mkSplitUniqSupply c = mk_supply
+  where
+    !tag = mkTag c
+    mk_supply :: IO UniqSupply
+    mk_supply = unsafeInterleaveIO $ do
+      u  <- genSym
+      s1 <- mk_supply
+      s2 <- mk_supply
+      return (MkSplitUniqSupply (tag .|. u) s1 s2)
+
+genSym :: IO Word64
+genSym = do
+    let !mask = (1 `unsafeShiftL` uNIQUE_BITS) - 1
+    val <- peek ghc_unique_counter64
+    inc <- fromIntegral <$> peek ghc_unique_inc
+    let !next = val + inc
+        !u    = next .&. mask
+    poke ghc_unique_counter64 next
+#if defined(DEBUG)
+    massert (u /= mask)
+#endif
+    return u
+#else
 mkSplitUniqSupply c
   = unsafeDupableInterleaveIO (IO mk_supply)
 
@@ -270,6 +306,7 @@ genSym = do
     massert (u /= mask)
 #endif
     return u
+#endif
 
 foreign import ccall unsafe "&ghc_unique_counter64" ghc_unique_counter64 :: Ptr Word64
 foreign import ccall unsafe "&ghc_unique_inc"       ghc_unique_inc       :: Ptr Int

@@ -1,0 +1,2783 @@
+From f690ce43878a33a53f2bba3fc13e4313b2401b03 Mon Sep 17 00:00:00 2001
+From: Moritz Angermann <moritz@zw3rk.com>
+Date: Thu, 19 Nov 2026 21:37:09 +0900
+Subject: [PATCH] typecheck: implement TypeFamilies, DataKinds, and GADT
+ constraint propagation
+
+Refs: https://github.com/augustss/MicroHs/issues/367
+Refs: https://github.com/augustss/MicroHs/issues/446
+Refs: https://github.com/augustss/MicroHs/issues/226
+Refs: https://github.com/augustss/MicroHs/issues/449
+Refs: https://github.com/augustss/MicroHs/issues/501
+Refs: https://github.com/augustss/MicroHs/issues/502
+
+Implement open, closed, associated, and injective type/data families,
+coincident type instance deduplication, higher-kinded associated family arity,
+cyclic b ~ F b superclass equality orientation, DataKinds promoted
+constructors and kind checking, and extended GADT/existential/local
+constraint propagation proven at scale on GHC 9.14 Stage 1 (Trees That Grow).
+---
+ src/MicroHs/TCMonad.hs   |   14 +-
+ src/MicroHs/TypeCheck.hs | 2007 +++++++++++++++++++++++++++++++++-----
+ 2 files changed, 1801 insertions(+), 220 deletions(-)
+
+diff --git a/src/MicroHs/TCMonad.hs b/src/MicroHs/TCMonad.hs
+index fbeb8719..973b06ff 100644
+--- a/src/MicroHs/TCMonad.hs
++++ b/src/MicroHs/TCMonad.hs
+@@ -177,7 +177,10 @@ data TCState = TC {
+                   ArgDicts              -- dictionary arguments
+                  ),
+   constraints :: Constraints,           -- constraints that have to be solved
+-  defaults    :: Defaults              -- current defaults
++  defaults    :: Defaults,             -- current defaults
++  famEqTable  :: [(EType, EType)],     -- given equalities with a stuck family application head
++  impEqTable  :: M.Map (TypeEqTable, [(EType, EType)]),
++  savedTypeTable :: TypeTable          -- types saved when bumping TCType -> TCKind (in-memory only, never serialized)
+   }
+   deriving (Show)
+ 
+@@ -248,6 +251,15 @@ putConstraints es = modify $ \ ts -> ts{ constraints = es }
+ putDefaults :: Defaults -> T ()
+ putDefaults ds = modify $ \ ts -> ts{ defaults = ds }
+ 
++getFamEqTable :: T [(EType, EType)]
++getFamEqTable = gets famEqTable
++
++putFamEqTable :: [(EType, EType)] -> T ()
++putFamEqTable es = modify $ \ ts -> ts{ famEqTable = es }
++
++addFamEq :: (EType, EType) -> T ()
++addFamEq e = modify $ \ ts -> ts{ famEqTable = e : famEqTable ts }
++
+ 
+ type TRef = Int
+ 
+diff --git a/src/MicroHs/TypeCheck.hs b/src/MicroHs/TypeCheck.hs
+index 8ce89f10..fceb5e4f 100644
+--- a/src/MicroHs/TypeCheck.hs
++++ b/src/MicroHs/TypeCheck.hs
+@@ -77,11 +77,262 @@ emptyGlobTables = GlobTables { gSynTable = M.empty, gDataTable = M.fromList data
+ 
+ mergeGlobTables :: GlobTables -> GlobTables -> GlobTables
+ mergeGlobTables g1 g2 =
+-  GlobTables { gSynTable = M.merge (gSynTable g1) (gSynTable g2),
++  GlobTables { gSynTable = M.mergeWith mergeSynEntry (gSynTable g1) (gSynTable g2),
+                gDataTable = M.merge (gDataTable g1) (gDataTable g2),
+                gClassTable = M.merge (gClassTable g1) (gClassTable g2),
+                gInstInfo = M.mergeWith mergeInstInfo (gInstInfo g1) (gInstInfo g2) }
+ 
++-- Merging two synonym table entries for the same family concatenates
++-- the equations of two open families; anything else keeps the left entry.
++-- Open family equations are deduplicated up to eqEType.
++mergeSynEntry :: EType -> EType -> EType
++mergeSynEntry e1 e2 =
++  case (unTFamEntry e1, unTFamEntry e2) of
++    (Just (False, ar1, inj1, eqs1), Just (False, ar2, inj2, eqs2)) | ar1 == ar2 ->
++      mkTFamEntry False ar1 (combineInj inj1 inj2) (eqs1 ++ filter keep eqs2)
++      where keep e
++              | length eqs1 > 16 = isNothing (M.lookup (famEqnKey e) keyMap)
++              | otherwise = notElemByEq e eqs1
++            keyMap = M.fromList [ (famEqnKey e, ()) | e <- eqs1 ]
++            famEqnKey (_, ps, r) = mkIdent (unwords (map showExprRaw (r : ps)))
++            notElemByEq e es = not (any (eqFamEqn e) es)
++            eqFamEqn (_, p1, r1) (_, p2, r2) = length p1 == length p2 &&
++                                               and (zipWith eqEType p1 p2) && eqEType r1 r2
++    -- Closed families and ordinary synonyms: first definition wins.
++    _ -> e1
++
++----------------------------------------
++-- Type family encoding inside synTable.
++--
++-- Ordinary type synonyms are stored as @EForall QExpl vks rhs@.
++-- Type/data families are stored as
++--   @ETuple (EVar marker : EVar arity : eqnExprs)@
++-- where @marker@ is @$TFOpen@ (open/associated family) or @$TFClosed@
++-- (closed family), @arity@ is the number of family arguments, and each
++-- equation is @EForall QImpl vks (ETuple (rhs : pats))@.
++-- This can never collide with an ordinary synonym, which is always
++-- an EForall.
++tfOpenMarker, tfClosedMarker :: String
++tfOpenMarker   = "$TFOpen"
++tfClosedMarker = "$TFClosed"
++
++-- Maximum number of rewrite steps when expanding synonyms/families.
++famFuel :: Int
++famFuel = 200
++
++mkTFamEntry :: Bool -> Int -> [Bool] -> [([Ident], [EType], EType)] -> EType
++mkTFamEntry isClosed arity inj eqns =
++  ETuple (EVar (mkIdent marker) :
++          EVar (mkIdent (show arity)) : map mkEqn eqns)
++  where marker | not (or inj) = if isClosed then tfClosedMarker else tfOpenMarker
++               | otherwise    = (if isClosed then tfClosedMarker else tfOpenMarker)
++                                ++ ":" ++ map (\ b -> if b then '1' else '0') inj
++        mkEqn (pvs, pats, rhs) = EForall QImpl (map (`IdKind` EVar dummyIdent) pvs) (ETuple (rhs : pats))
++
++unTFamEntry :: EType -> Maybe (Bool, Int, [Bool], [([Ident], [EType], EType)])
++unTFamEntry (ETuple (EVar m : EVar ar : eqnExprs)) = do
++  (isClosed, inj) <- case span (/= ':') (unIdent (unQualIdent m)) of
++                (s, "") | s == tfClosedMarker -> Just (True, [])
++                        | s == tfOpenMarker   -> Just (False, [])
++                (s, ':' : bits) | s == tfClosedMarker -> Just (True, map (== '1') bits)
++                                | s == tfOpenMarker   -> Just (False, map (== '1') bits)
++                _ -> Nothing
++  eqns <- mapM unEqn eqnExprs
++  let arity = readInt (unIdent (unQualIdent ar))
++  return (isClosed, arity, inj, eqns)
++  where unEqn (EForall QImpl vks (ETuple (rhs : pats))) = Just (map idKindIdent vks, pats, rhs)
++        unEqn _ = Nothing
++unTFamEntry _ = Nothing
++
++-- Combine injectivity flags from two entries for the same family:
++-- unknown ([]) contributes nothing, otherwise OR position-wise.
++combineInj :: [Bool] -> [Bool] -> [Bool]
++combineInj [] b = b
++combineInj a [] = a
++combineInj a b = zipWith (||) a b
++
++-- Promoted data constructors (DataKinds) are identifiers starting with '\''.
++isPromotedIdent :: Ident -> Bool
++isPromotedIdent i =
++  case unIdent (unQualIdent i) of
++    ('\'':_) -> True
++    _ -> False
++
++-- The promoted counterpart of a data constructor name.
++promIdent :: Ident -> Ident
++promIdent i = mkIdentSLoc (getSLoc i) ("'" ++ unIdent (unQualIdent i))
++
++-- Promoted lookup key preserving any module qualifier (e.g. M.Pos -> M.'Pos, Pos -> 'Pos).
++promLookupIdent :: Ident -> Ident
++promLookupIdent i =
++  let s = unIdent i
++  in case span (/= '.') (reverse s) of
++       (rc, '.' : rm) -> mkIdentSLoc (getSLoc i) (reverse rm ++ ".'" ++ reverse rc)
++       _              -> promIdent i
++
++-- Canonical promoted identifier from a value-table entry expression,
++-- so unqualified and qualified uses elaborate to the defining module's name.
++origPromIdent :: Expr -> Ident -> Ident
++origPromIdent ce fallback =
++  let q = case ce of { ECon c -> conIdent c; EVar v -> v; _ -> fallback }
++      s = unIdent q
++  in case span (/= '.') (reverse s) of
++       (rc, '.' : rm) -> mkIdentSLoc (getSLoc q) (reverse rm ++ ".'" ++ reverse rc)
++       _              -> promIdent fallback
++
++-- Kind of a promoted constructor derived from its term-level type:
++-- strip foralls and constraints, keep arrows, quantify free type
++-- variables at Type, and default leftover unification variables.
++promConKind :: EType -> EType
++promConKind t = eForall' QExpl (map (`IdKind` sKind) qvs) body
++  where body = arrowsToKind (stripForallCtx t)
++        qvs = filter (not . isPromotedIdent) (freeTyVars [body])
++        stripForallCtx (EForall _ _ t') = stripForallCtx t'
++        stripForallCtx t' | Just (_, r) <- getImplies t' = stripForallCtx r
++                          | otherwise = t'
++        arrowsToKind ty = foldr tArrow res (map cleanArg as)
++          where (as, res) = getArrows (cleanKind ty)
++        cleanArg a | Just (_, r) <- getImplies a = cleanArg r
++                   | otherwise = cleanKind a
++        cleanKind t = case t of
++          EApp f a -> EApp (cleanKind f) (cleanKind a)
++          ETuple ts -> tApps (tupleConstr (getSLoc t) (length ts)) (map cleanKind ts)
++          EListish (LList [x]) -> tApp (tList (getSLoc t)) (cleanKind x)
++          EListish (LList xs) -> foldr (\ x acc -> EApp (EApp (EVar (mkIdent "Primitives.':")) (cleanKind x)) acc) (EVar (mkIdent "Primitives.'[]")) xs
++          EParen x -> cleanKind x
++          EOper x its -> cleanKind (foldl (\ acc (op, r) -> EApp (EApp (EVar op) acc) r) x its)
++          ESign x k -> ESign (cleanKind x) (cleanKind k)
++          EForall b iks x -> EForall b (map (\ (IdKind i k) -> IdKind i (cleanKind k)) iks) (cleanKind x)
++          EUVar _ -> kType
++          _ -> t
++
++-- A pattern head that matches only identical rigid constructors.
++isRigidConHead :: SynTable -> Ident -> Bool
++isRigidConHead syns h = (isConIdent h || isPromotedIdent h) && not (isFamCon syns h)
++
++-- Is the identifier the name of a type/data family?
++isTypeFam :: Ident -> T Bool
++isTypeFam i = do
++  syns <- gets synTable
++  return (isFamCon syns i)
++
++-- Is this type a stuck family application (family head, fully applied)?
++isStuckFamApp :: SynTable -> EType -> Maybe (Ident, [EType])
++isStuckFamApp syns t =
++  case getAppM t of
++    Just (h, as@(_:_)) | isFamCon syns h -> Just (h, as)
++    _ -> Nothing
++
++data MatchResult
++  = MatchSubst [(Ident, EType)]
++  | MatchApart
++  | MatchMaybe
++  deriving (Show)
++
++-- 3-valued matching of family arguments against one equation's patterns.
++-- patVars are the equation's pattern variables; rigid constructors
++-- (including promoted constructors and literals) must match exactly;
++-- a rigid/skolem type variable in the arguments facing a constructor
++-- pattern is MatchMaybe (it could be instantiated by callers);
++-- unification variables and stuck family applications block (MatchMaybe).
++matchFamEqn :: SynTable -> [Ident] -> [EType] -> [EType] -> MatchResult
++matchFamEqn syns pvs pats args
++  | length pats /= length args = MatchApart
++  | otherwise = foldl' combine (MatchSubst []) (zipWith (matchOne syns pvs) pats args)
++  where combine MatchApart _ = MatchApart
++        combine _ MatchApart = MatchApart
++        combine MatchMaybe _ = MatchMaybe
++        combine _ MatchMaybe = MatchMaybe
++        combine (MatchSubst s1) (MatchSubst s2) = mergeSub s1 s2
++        mergeSub s1 s2 = foldl' ins (MatchSubst s1) s2
++        ins MatchApart _ = MatchApart
++        ins MatchMaybe _ = MatchMaybe
++        ins (MatchSubst acc) (v, t)
++          | Just t' <- lookup v acc =
++              if normFam t `eqEType` normFam t' then MatchSubst acc
++              else if apartTypes t t' then MatchApart
++              else MatchMaybe
++          | otherwise = MatchSubst ((v, t) : acc)
++        -- Nonlinear variables with apart instances count as apart.
++        normFam t = expandSyn' syns t
++        apartTypes a b =
++          case (getAppM (normFam a), getAppM (normFam b)) of
++            (Just (ha, _), Just (hb, _)) -> ha /= hb && isRigidConHead syns ha && isRigidConHead syns hb
++            _ -> False
++
++-- Match a single pattern against an argument.
++matchOne :: SynTable -> [Ident] -> EType -> EType -> MatchResult
++matchOne syns pvs pat arg =
++  case patN of
++    EVar v | v `elem` pvs -> MatchSubst [(v, argN)]
++           | otherwise ->
++      -- rigid type variable / nullary constructor facing argument
++      case argN of
++        EVar v' | v == v' -> MatchSubst []
++        EUVar _ -> MatchMaybe
++        EVar v' | isRigidConHead syns v && isRigidConHead syns v' -> MatchApart
++                | otherwise -> MatchMaybe
++        _ | isRigidConHead syns v ->
++              case getAppM argN of
++                Just (h, _) | h == v -> MatchSubst []
++                            | isFamCon syns h -> MatchMaybe
++                            | isRigidConHead syns h -> MatchApart
++                            | otherwise -> MatchMaybe
++                _ -> MatchMaybe
++          | otherwise -> MatchMaybe
++    EApp _ _ ->
++      case argN of
++        EUVar _ -> MatchMaybe
++        EVar _ -> MatchMaybe  -- rigid variable vs constructor application
++        EApp _ _ ->
++          case (getAppM patN, getAppM argN) of
++            (Just (ph, pas), Just (ah, aas))
++              | ph /= ah ->
++                 if isFamCon syns ph || isFamCon syns ah then MatchMaybe
++                 else if isRigidConHead syns ph && isRigidConHead syns ah then MatchApart
++                 else MatchMaybe
++              | length pas /= length aas -> MatchApart
++              | otherwise -> matchFamEqn syns pvs pas aas
++            _ -> MatchMaybe
++        _ -> MatchMaybe
++    ELit _ l ->
++      case argN of
++        ELit _ l' | l == l' -> MatchSubst []
++                  | otherwise -> MatchApart
++        _ | isBlockedArg argN -> MatchMaybe
++          | otherwise -> MatchApart
++    ETuple ps ->
++      case argN of
++        ETuple as | length ps == length as -> matchFamEqn syns pvs ps as
++        _ | isBlockedArg argN -> MatchMaybe
++          | otherwise -> MatchApart
++    EListish (LList [p]) ->
++      case argN of
++        EListish (LList [a]) -> matchFamEqn syns pvs [p] [a]
++        _ | isBlockedArg argN -> MatchMaybe
++          | otherwise -> MatchApart
++    EForall _ _ _ -> MatchMaybe
++    ESign t _ -> matchOne syns pvs t arg
++    EParen t -> matchOne syns pvs t arg
++    _ -> MatchMaybe
++  where patN = expandSyn' syns pat
++        argN = expandSyn' syns arg
++        -- An argument blocks matching when it is a unification variable,
++        -- a rigid type variable, or a stuck family application.
++        isBlockedArg a =
++          case a of
++            EUVar _ -> True
++            EVar v -> not (isConIdent v) || isFamCon syns v
++            _ -> case getAppM a of
++                   Just (h, _) -> isFamCon syns h
++                   Nothing -> True
++
++-- Is this head a stuck (unreducible) family application head?
++isFamCon :: SynTable -> Ident -> Bool
++isFamCon syns h = case M.lookup h syns of
++                    Just e | Just _ <- unTFamEntry e -> True
++                    _ -> False
++
+ type Symbols = (SymTab, SymTab)
+ 
+ data TModule a = TModule {
+@@ -122,7 +373,7 @@ typeCheck flags globs impt aimps (EModule mn exps defs) =
+            allMdls = thisMdl : impMdls
+            (texps, vexps) =
+              let tys = typeTable tcs; vals = valueTable tcs; ast = assocTable tcs in
+-             unzip $ map (getTVExps impMap tys vals ast) (gatherAssoc tys ast exps)
++             unzip $ map (getTVExps impMap tys vals ast) (gatherAssoc tys vals ast exps)
+              where impMap = M.fromListWith (++) [(i, [m]) | (i, m) <- allMdls]
+            fexps = map (tFixDefs . snd) allMdls
+            sexps = synTable tcs
+@@ -131,12 +382,51 @@ typeCheck flags globs impt aimps (EModule mn exps defs) =
+            ctbl  = classTable tcs
+            dflts = M.fromList $ filter ((`elem` ds) . fst) $ M.toList $ defaults tcs
+                  where ds = [ tyQIdent $ expLookup ti (typeTable tcs) | ExpDefault ti <- exps ]
+-         in  ( tModule mn (nubBy ((==) `on` fst) (concat fexps)) (concat texps) (concat vexps) dflts tds
++         in  ( tModule mn (nubBy ((==) `on` fst) (concat fexps)) (mergeTypeExports (concat texps)) (concat vexps) dflts tds
+              , GlobTables { gSynTable = sexps, gDataTable = dexps, gClassTable = ctbl, gInstInfo = iexps }
+              , (typeTable tcs, valueTable tcs)
+              , tcs
+              )
+ 
++mergeTypeExports :: [TypeExport] -> [TypeExport]
++mergeTypeExports tes =
++  let keyTE (TypeExport i (Entry expr _) _) = mkIdent (unIdent i ++ "\0" ++ showExprRaw expr)
++      step (m, order) te@(TypeExport _ _ ves) =
++        let k = keyTE te
++        in case M.lookup k m of
++             Nothing -> (M.insert k (te, [ves]) m, k : order)
++             Just (te0, vess) -> (M.insert k (te0, vess ++ [ves]) m, order)
++      (m, order) = foldl' step (M.empty, []) tes
++      get k = case M.lookup k m of
++                Just (TypeExport i e _, vess) -> TypeExport i e (foldl' mergeVEExport [] vess)
++                Nothing -> impossible
++  in map get (reverse order)
++
++-- IdentMap-deduplicated union of value exports, replacing O(N^2) unionBy eqVE.
++mergeVEExport :: [ValueExport] -> [ValueExport] -> [ValueExport]
++mergeVEExport xs ys = dedupVE veExportKey (xs ++ ys)
++
++-- IdentMap-deduplicated union of associated values, replacing O(N^2) unionBy eqVE.
++mergeVEAssoc :: [ValueExport] -> [ValueExport] -> [ValueExport]
++mergeVEAssoc xs ys = dedupVE veAssocKey (xs ++ ys)
++
++veExportKey :: ValueExport -> Ident
++veExportKey (ValueExport x (Entry expr _)) = mkIdent (unIdent x ++ "\0" ++ showExprRaw expr)
++
++veAssocKey :: ValueExport -> Ident
++veAssocKey (ValueExport _ (Entry expr _)) =
++  case expr of
++    EVar i -> i
++    _      -> mkIdent (showExprRaw expr)
++
++dedupVE :: (ValueExport -> Ident) -> [ValueExport] -> [ValueExport]
++dedupVE key = go M.empty
++  where go _ [] = []
++        go seen (ve:ves) =
++          let k = key ve
++          in if isJust (M.lookup k seen) then go seen ves
++             else ve : go (M.insert k () seen) ves
++
+ -- A hack to force evaluation of errors.
+ -- This should be redone to all happen in the T monad.
+ tModule :: IdentModule -> [FixDef] -> [TypeExport] -> [ValueExport] -> Defaults -> [EDef] ->
+@@ -169,11 +459,15 @@ filterImports (imp@(ImportSpec _ _ _ _ (Just (hide, is))), TModule mn fx ts vs d
+     mkTypeExport i e ves = [TypeExport (hideIdent i) e ves] -- hide the type name, keep the associated values
+     ts' =
+       if hide then
+-        let ok xs (ValueExport i _) = i `notElem` ivs && i `notElem` xs in
++        let ok xs (ValueExport i _) =
++              i `notElem` ivs && i `notElem` xs &&
++              maybe True (\ f -> f `notElem` xs && f `notElem` its) (unAssocTypeId i) in
+         [ TypeExport i e (filter (ok []) ves) | TypeExport i e ves <- ts, i `notElem` its ] ++   -- no hiding of these types, but maybe fields
+         [ r | TypeExport i e ves <- ts, ImpTypeSome i' xs <- is, i == i', r <- mkTypeExport i e (filter (ok xs) ves) ]
+       else
+-        let ok xs (ValueExport i _) = i `elem` ivs || i `elem` xs || isDefaultMethodId i in
++        let ok xs (ValueExport i _) =
++              i `elem` ivs || i `elem` xs || isDefaultMethodId i ||
++              maybe False (\ f -> f `elem` its || f `elem` xs) (unAssocTypeId i) in
+         [ TypeExport i e                 ves  | TypeExport i e ves <- ts, i `elem` aits ] ++
+         [ TypeExport i e (filter (ok xs) ves) | TypeExport i e ves <- ts, ImpTypeSome i' xs <- is, i == i' ]
+     allVs = map (\ (ValueExport i _) -> i) vs ++
+@@ -198,13 +492,16 @@ checkBad (i:_) _ =
+ -- behaves the same as
+ --   module M(T(a)) ...
+ -- So for each type export item we gather up the associated selectors and add them.
+-gatherAssoc :: TypeTable -> AssocTable -> [ExportItem] -> [ExportItem]
+-gatherAssoc tys ast exps =
++gatherAssoc :: TypeTable -> ValueTable -> AssocTable -> [ExportItem] -> [ExportItem]
++gatherAssoc tys vals ast exps =
+   let vs = [ i | ExpValue i <- exps ]
++      ts = [ ti | ExpTypeSome ti [] <- exps ]
+       gather :: ExportItem -> ExportItem
+       gather (ExpTypeSome ti is) | is /= [dotDotIdent] =
+-        let assc = [ i | ValueExport i _ <- getAssocs ast $ tyQIdent $ expLookup ti tys ]
+-            xs = (assc `intersect` vs) \\ is
++        let rawAssc = getAssocs ast $ tyQIdent $ expLookup ti tys
++            asscV = [ i | ValueExport i ve <- rawAssc, not (isAssocTypeId i), Right ve' <- [stLookup "" i vals], ve' == ve ]
++            asscT = [ f | ValueExport ai te <- rawAssc, Just f <- [unAssocTypeId ai], Right te' <- [stLookup "" f tys], te' == te ]
++            xs = ((asscV `intersect` vs) ++ (asscT `intersect` ts)) \\ is
+         in  ExpTypeSome ti (xs ++ is)
+       gather e = e
+   in  map gather exps
+@@ -221,17 +518,22 @@ getTVExps impMap _ _ _ (ExpModule m) =
+     _ -> errorMessage (getSLoc m) $ "undefined module: " ++ showIdent m
+ getTVExps _ tys vals ast (ExpTypeSome ti is) =
+   let e = expLookup ti tys
+-      assc = getAssocs ast $ tyQIdent e   -- all associated values
++      assc = getAssocs ast $ tyQIdent e   -- all associated values (and tagged associated types)
+       ves = concatMap one is
+-      one i | i == dotDotIdent = assc          -- '..' means all associated values
++      one i | i == dotDotIdent = assc          -- '..' means all associated values & types
+             | otherwise =
+-              case filter (\ (ValueExport i' _) -> i == i' || isDefaultMethodOfId i i') assc of
+-                es@(_:_) -> es                 -- Pick the assocaited value if it exists
++              case filter (\ (ValueExport i' _) -> i == i' || isDefaultMethodOfId i i' || isAssocTypeOfId i i') assc of
++                es@(_:_) -> es                 -- Pick the associated value/type if it exists
+                 [] -> [ValueExport (unQualIdent i) $ expLookup i vals]
+                                                -- otherwise, just look up a pattern synonym.
+                                                -- This might accidentally pick up a constructor from
+                                                -- another type, but it doesn't really matter.
+-  in ([TypeExport (unQualIdent ti) e ves], [])
++      assocTes =
++        [ TypeExport famId ae (getAssocs ast (tyQIdent ae))
++        | ValueExport ai ae <- ves
++        , Just famId <- [unAssocTypeId ai]
++        ]
++  in (TypeExport (unQualIdent ti) e ves : assocTes, [])
+ 
+ getTVExps _ _ vals _ (ExpValue i) = ([], [ValueExport (unQualIdent i) (expLookup i vals)])
+ getTVExps _ _ _ _ (ExpDefault _) = ([], [])
+@@ -277,11 +579,15 @@ mkTModule tds tcs =
+       where st = synTable tcs
+ 
+     -- All top level types possible to export.
++    -- Type/data families are exported like types; data-instance
++    -- constructors/selectors are attached to the family in assocTable.
+     tes =
+       [ TypeExport i (tentry i) (assoc i) | Data    (i, _) _ _ <- tds ] ++
+       [ TypeExport i (tentry i) (assoc i) | Newtype (i, _) _ _ <- tds ] ++
+       [ TypeExport i (tentry i) (assoc i) | Class _ (i, _) _ _ <- tds ] ++
+-      [ TypeExport i (tentry i) []        | Type    (i, _) _   <- tds ]
++      [ TypeExport i (tentry i) []        | Type    (i, _) _   <- tds ] ++
++      [ TypeExport i (tentry i) (assoc i) | TypeFam (i, _) _ _ _ <- tds ] ++
++      [ TypeExport i (tentry i) (assoc i) | DataFam (i, _) _   <- tds ]
+ 
+     -- All fixity declaration.
+     fes = [ (qualIdent mn i, fx) | Infix fx is <- tds, i <- is ]
+@@ -305,11 +611,11 @@ mkTCState mdlName globs mdls =
+         usyms (ImportSpec _ qual _ _ _, TModule _ _ tes ves _ _) =
+           if qual then [] else
+           [ (i, [e]) | ValueExport i e    <- ves, not (isInstId i)  ] ++
+-          [ (i, [e]) | TypeExport  _ _ cs <- tes, ValueExport i e <- cs, not (isDefaultMethodId i) ]
++          [ (i, [e]) | TypeExport  _ _ cs <- tes, ValueExport i e <- cs, not (isDefaultMethodId i), not (isAssocTypeId i) ]
+         qsyms (ImportSpec _ _ _ mas _, TModule mn _ tes ves _ _) =
+           let m = fromMaybe mn mas in
+           [ (v, [e]) | ValueExport i e    <- ves,                        let { v = qualIdent    m i } ] ++
+-          [ (v, [e]) | TypeExport  _ _ cs <- tes, ValueExport i e <- cs, let { v = qualIdentD e m i } ] ++
++          [ (v, [e]) | TypeExport  _ _ cs <- tes, ValueExport i e <- cs, not (isAssocTypeId i), let { v = qualIdentD e m i } ] ++
+           [ (v, [Entry (EVar v) t]) | (i, ClassInfo _ _ t _ _) <- M.toList (gClassTable globs), let { v = mkClassConstructor i } ]
+         -- Default methods are always entered with their qualified original name.
+         qualIdentD (Entry e _) m i | not (isDefaultMethodId i) = qualIdent m i
+@@ -322,26 +628,50 @@ mkTCState mdlName globs mdls =
+     allTypes =
+       let
+         usyms (ImportSpec _ qual _ _ _, TModule _ _ tes _ _ _) =
+-          if qual then [] else [ (i, [e]) | TypeExport i e _ <- tes, not (isHiddenIdent i) ]
++          if qual then [] else
++          [ (i, [e])  | TypeExport i e _   <- tes, not (isHiddenIdent i) ] ++
++          [ (f, [ae]) | TypeExport _ _ cs <- tes, ValueExport ai ae <- cs, Just f <- [unAssocTypeId ai] ]
+         qsyms (ImportSpec _ _ _ mas _, TModule mn _ tes _ _ _) =
+           let m = fromMaybe mn mas in
+-          [ (qualIdent m i, [e]) | TypeExport i e _ <- tes, not (isHiddenIdent i) ]
+-      in stFromList (concatMap usyms mdls) (concatMap qsyms mdls)
++          [ (qualIdent m i, [e])  | TypeExport i e _   <- tes, not (isHiddenIdent i) ] ++
++          [ (qualIdent m f, [ae]) | TypeExport _ _ cs <- tes, ValueExport ai ae <- cs, Just f <- [unAssocTypeId ai] ]
++        -- DataKinds: promoted constructors are visible as types.
++        promUsyms (ImportSpec _ qual _ _ _, TModule _ _ tes _ _ _) =
++          if qual then [] else
++          [ (p, [Entry (EVar (origPromIdent ce i)) (promConKind t)])
++          | TypeExport _ _ cs <- tes,
++            ValueExport i (Entry ce t) <- cs,
++            not (isPromotedIdent i), not (isAssocTypeId i), isConIdent i,
++            let p = promIdent i ]
++        promQsyms (ImportSpec _ _ _ mas _, TModule mn _ tes _ _ _) =
++          let m = fromMaybe mn mas in
++          [ (qualIdent m p, [Entry (EVar (origPromIdent ce i)) (promConKind t)])
++          | TypeExport _ _ cs <- tes,
++            ValueExport i (Entry ce t) <- cs,
++            not (isPromotedIdent i), not (isAssocTypeId i), isConIdent i,
++            let p = promIdent i ]
++      in stFromList (concatMap usyms mdls ++ concatMap promUsyms mdls)
++                    (concatMap qsyms mdls ++ concatMap promQsyms mdls)
+ 
+     allFixes :: FixTable
+     allFixes = M.fromList (concatMap (tFixDefs . snd) mdls)
+     allAssocs :: AssocTable
+     allAssocs =
+       let assocs (_, TModule _ _ tes _ _ _) = [ (tyQIdent e, cs) | TypeExport _ e cs <- tes ]
+-          eqVE (ValueExport _ (Entry e1 _)) (ValueExport _ (Entry e2 _)) = eqEType e1 e2
+-      in  M.fromListWith (unionBy eqVE) $ concatMap assocs mdls
++      in  M.fromListWith mergeVEAssoc $ concatMap assocs mdls
+ 
+     dflts = foldr (mergeDefaults . tDefaults . snd) M.empty mdls
+ 
++    primPromotedTypes :: [(Ident, [Entry])]
++    primPromotedTypes =
++      [ (p, [Entry (EVar p) (promConKind t)])
++      | (i, es) <- primValues, Entry _ t <- es,
++        not (isPromotedIdent i), isConIdent i,
++        let p = promIdent i ]
+   in TC { moduleName = mdlName,
+           unique = 1,
+           fixTable = addPrimFixs allFixes,
+-          typeTable = foldr (uncurry stInsertGlbA) allTypes primTypes,
++          typeTable = foldr (uncurry stInsertGlbA) allTypes (primTypes ++ primPromotedTypes),
+           synTable = gSynTable globs,
+           dataTable = gDataTable globs,
+           valueTable = foldr (uncurry stInsertGlbA) allValues primValues,
+@@ -351,7 +681,10 @@ mkTCState mdlName globs mdls =
+           classTable = gClassTable globs,
+           ctxTables = (gInstInfo globs, [], [], []),
+           constraints = [],
+-          defaults = dflts
++          defaults = dflts,
++          famEqTable = [],
++          impEqTable = M.empty,
++          savedTypeTable = stEmpty
+         }
+ 
+ mergeDefaults :: Defaults -> Defaults -> Defaults
+@@ -370,7 +703,7 @@ mergeInstInfo (InstInfo m1 l1 fds) (InstInfo m2 l2 _) =
+       | i1 == i2  = e1
+       | otherwise = errorMessage (getSLoc i1) $ "Multiple instances: " ++ showSLoc (getSLoc i2)
+     mrg e1 _e2 = e1 -- XXX improve this
+-    l = unionBy eqInstDict l1 l2
++    l = mergeInstDicts l1 l2
+   in  InstInfo m l fds
+ 
+ -- Approximate equality for dictionaries.
+@@ -378,6 +711,27 @@ mergeInstInfo (InstInfo m1 l1 fds) (InstInfo m2 l2 _) =
+ eqInstDict :: InstDict -> InstDict -> Bool
+ eqInstDict (InstDict e _) (InstDict e' _) = eqExpr e e'
+ 
++instDictKey :: InstDict -> Ident
++instDictKey (InstDict (EVar i) _) = i
++instDictKey (InstDict e _)        = mkIdent (showExprRaw e)
++
++mergeInstDicts :: [InstDict] -> [InstDict] -> [InstDict]
++mergeInstDicts [] l2 = l2
++mergeInstDicts l1 [] = l1
++mergeInstDicts [d1] l2 =
++  let k1 = instDictKey d1
++  in if any (\d2 -> instDictKey d2 == k1) l2 then l2 else d1 : l2
++mergeInstDicts l1 [d2] =
++  let k2 = instDictKey d2
++  in if any (\d1 -> instDictKey d1 == k2) l1 then l1 else l1 ++ [d2]
++mergeInstDicts l1 l2 =
++  let go _ [] = []
++      go seen (d:ds) =
++        let k = instDictKey d
++        in if isJust (M.lookup k seen) then go seen ds
++           else d : go (M.insert k () seen) ds
++  in go M.empty (l1 ++ l2)
++
+ -- Identifier should only be seen with it's qualified name.
+ isInstId :: Ident -> Bool
+ isInstId i = (instPrefix ++ uniqIdentSep) `isPrefixOf` unIdent i
+@@ -394,6 +748,9 @@ withTypeTable ta = do
+   otcm <- gets tcMode
+   vt <- gets valueTable
+   tt <- gets typeTable
++  st <- gets savedTypeTable
++  when (otcm == TCType) $
++    modify $ \ ts -> ts { savedTypeTable = vt }
+   putValueTable tt            -- use type table as value table
+   let
+     tcm = succ otcm
+@@ -403,7 +760,8 @@ withTypeTable ta = do
+   a <- ta
+   tt' <- gets valueTable
+   putValueTable vt
+-  putTypeTable tt'
++  putTypeTable (if otcm == TCExpr then tt' else tt)
++  modify $ \ ts -> ts { savedTypeTable = st }
+   putTCMode otcm
+   return a
+ 
+@@ -437,7 +795,9 @@ addInstTable ics = do
+                   in  (ctx', ts')
+   iis <- mapM mkInstInfo ics
+   it <- gets instTable
+-  putInstTable $ foldr (uncurry $ M.insertWith mergeInstInfo) it iis
++  -- Group the new instances by class first, so each class merges only once.
++  let grouped = M.fromListWith mergeInstInfo iis
++  putInstTable $ M.mergeWith mergeInstInfo grouped it
+ 
+ -- Generate a dictionary for the constraint.
+ -- Reuse old dictionaries if possible.
+@@ -459,15 +819,21 @@ newDict loc ctx = do
+ addConstraint :: Ident -> EConstraint -> T ()
+ addConstraint d ctx = do
+ --  tcTrace $ "addConstraint: " ++ showIdent d ++ " :: " ++ showEType ctx
++  eqs <- gets typeEqTable
++  feqs <- gets famEqTable
++  unless (null eqs && null feqs) $
++    modify $ \ ts -> ts { impEqTable = M.insert d (eqs, feqs) (impEqTable ts) }
+   modify $ \ ts -> ts{ constraints = (d, ctx) : constraints ts }
+ 
+ withDicts :: forall a . HasCallStack => [(Ident, EConstraint)] -> T a -> T a
+ withDicts ds ta = do
+ --  tcTrace $ "+++ withDicts enter " ++ show ds
+   ct <- gets ctxTables
++  feqs <- gets famEqTable
+   mapM_ addDict ds
+   a <- ta
+   putCtxTables ct
++  putFamEqTable feqs
+ --  tcTrace $ "--- withDicts leave " ++ show ds
+   return a
+ 
+@@ -475,15 +841,26 @@ withDict :: forall a . HasCallStack => Ident -> EConstraint -> T a -> T a
+ withDict i c ta = do
+ --  tcTrace $ "+++ withDict enter " ++ show (i, c)
+   ct <- gets ctxTables
++  feqs <- gets famEqTable
+   addDict (i, c)
+   a <- ta
+   putCtxTables ct
++  putFamEqTable feqs
+ --  tcTrace $ "--- withDict leave " ++ show (i, c)
+   return a
+ 
++normConstraint :: EConstraint -> T EConstraint
++normConstraint c = do
++  c0 <- derefUVar c
++  eqs <- gets typeEqTable
++  c1 <- expandSynSoft (normTypeEq eqs c0)
++  if null eqs then return c1 else do
++    let c1' = normTypeEq eqs c1
++    if c1' `eqEType` c1 then return c1' else normTypeEq eqs <$> expandSynSoft c1'
++
+ addDict :: HasCallStack => (Ident, EConstraint) -> T ()
+ addDict (i, c) = do
+-  c' <- derefUVar c
++  c' <- normConstraint c
+   if null (metaTvs [c']) then
+     addInstDict i c'
+    else
+@@ -498,15 +875,64 @@ addInstDict di c = do
+   let addeq [] = return []
+       addeq ((_, _, _, EApp (EApp (EVar eq) t1) t2, _):is) | eq == identTypeEq = do addEqDict t1 t2; addeq is
+       addeq (i:is) = (i :) <$> addeq is
++      normIC (e, vks, ctx, cc, fds) = do
++        ctx' <- mapM normConstraint ctx
++        cc'  <- normConstraint cc
++        return (e, vks, ctx', cc', fds)
+   ics' <- addeq ics
+-  addInstTable ics'
+-  addArgDict di c
++  ics'' <- mapM normIC ics'
++  c'' <- normConstraint c
++  addInstTable ics''
++  addArgDict di c''
+ 
+-addEqDict :: EType -> EType -> T ()
++addEqDict :: HasCallStack => EType -> EType -> T ()
+ addEqDict t1 t2 = do
+-  is <- gets typeEqTable
+---  tcTrace ("withEqDict: " ++ show (is, (t1,t2), (addTypeEq t1 t2 is)))
+-  putTypeEqTable (addTypeEq t1 t2 is)
++  syns <- gets synTable
++  a <- expandSynSoft t1
++  b <- expandSynSoft t2
++  -- Equalities with a stuck family application head cannot be recorded
++  -- in the TypeEqTable (which only handles variable-headed rules), so
++  -- they go into the famEqTable instead; expandSyn' then rewrites them.
++  -- A bare (non-constructor) type variable on the other side is still
++  -- handled by the TypeEqTable, which orients var -> rhs, UNLESS that
++  -- variable occurs inside the stuck family application (e.g. b ~ Body b p),
++  -- where var -> rhs would loop and orienting F args -> var terminates.
++  case (famSide syns a, famSide syns b) of
++    _ | a `eqEType` b -> return ()
++    (True, _) | not (isBareTyVar b) || any (eqEType b) (subTerms a) -> recordFamEq a b
++    (_, True) | not (isBareTyVar a) || any (eqEType a) (subTerms b) -> recordFamEq b a
++    _ -> do
++      is <- gets typeEqTable
++      putTypeEqTable (addTypeEq syns a b is)
++  where famSide syns t = isJust (isStuckFamApp syns t) ||
++                         case t of EVar h -> isFamCon syns h; _ -> False
++        isBareTyVar (EVar v) = not (isConIdent v)
++        isBareTyVar _ = False
++
++-- Record a given equality with a stuck family application on the left.
++-- Oriented larger/family-headed F args -> rhs; skipped when the left
++-- side occurs in the right side (to avoid rewrite cycles) or when it
++-- is already recorded.
++recordFamEq :: EType -> EType -> T ()
++recordFamEq lhs rhs = do
++  feqs <- gets famEqTable
++  let occurs = any (eqEType lhs) (subTerms rhs)
++      dup = any (\(l, r) -> l `eqEType` lhs && r `eqEType` rhs) feqs
++  unless (occurs || dup) $
++    addFamEq (lhs, rhs)
++
++-- All subterms of a type, including itself.
++subTerms :: EType -> [EType]
++subTerms t =
++  t : case t of
++        EApp f a -> subTerms f ++ subTerms a
++        ETuple ts -> concatMap subTerms ts
++        EListish (LList ts) -> concatMap subTerms ts
++        EOper t its -> subTerms t ++ concatMap (subTerms . snd) its
++        ESign t _ -> subTerms t
++        EParen t -> subTerms t
++        EForall _ _ t -> subTerms t
++        _ -> []
+ 
+ addMetaDict :: HasCallStack => Ident -> EConstraint -> T ()
+ addMetaDict i c = do
+@@ -659,22 +1085,70 @@ expandSyn :: HasCallStack =>
+              EType -> T EType
+ --expandSyn at | trace ("expandSyn: " ++ show at) False = undefined
+ expandSyn at = do
++  rt <- expandSynSoft at
+   syns <- gets synTable
+-  let
+-    rt = expandSyn' syns at
+-    -- Check that there are no unexpanded synonyms left
+-    chk (EApp f a) = do chk f; chk a
+-    chk (EVar i) =
+-      case M.lookup i syns of
+-        Nothing -> return ()
+-        _ -> tcError (getSLoc i) $ "bad synonym use: " ++ showIdent i ++ " in " ++ showEType at
+-    chk (EUVar _) = return ()
+-    chk (EForall _ _ t) = chk t
+-    chk (ELit _ _) = return ()
+-    chk _ = impossible
++  let -- Check that there are no unexpanded synonyms left.
++      -- Stuck family applications (whose head is in synTable) are fine.
++      chk (EApp f a) = do chk f; chk a
++      chk (EVar i) =
++        case M.lookup i syns of
++          Nothing -> return ()
++          Just e | Just _ <- unTFamEntry e -> return ()
++                 | otherwise -> tcError (getSLoc i) $ "bad synonym use: " ++ showIdent i ++ " in " ++ showEType at
++      chk (EUVar _) = return ()
++      chk (EForall _ _ t) = chk t
++      chk (ELit _ _) = return ()
++      chk (ETuple ts) = mapM_ chk ts
++      chk (EListish (LList ts)) = mapM_ chk ts
++      chk (EOper t its) = chk t >> mapM_ (chk . snd) its
++      chk (EParen t) = chk t
++      chk (ESign t _) = chk t
++      chk (EQVar _ t) = chk t
++      chk (ECon _) = return ()
++      chk _ = impossible
+   chk rt
+   return rt
+ 
++-- Expand synonyms, reduce type families, and rewrite with given
++-- family equalities, without the bad-synonym check.
++-- Safe to use during unification and constraint solving.
++expandSynSoft :: HasCallStack => EType -> T EType
++expandSynSoft at = do
++  syns <- gets synTable
++  feqs <- gets famEqTable
++  return (expandSynFull syns feqs at)
++
++-- Pure backbone of expandSynSoft: expand/reduce, rewrite with the
++-- given family equalities, and repeat until a fixpoint (bounded by fuel,
++-- and stopping on rewrite cycles so contradictory givens cannot loop).
++expandSynFull :: HasCallStack => SynTable -> [(EType, EType)] -> EType -> EType
++expandSynFull syns [] t = expandSyn' syns t
++expandSynFull syns feqs t = loop famFuel [] t
++  where loop 0 _ t = t
++        loop n seen t =
++          let t' = rewriteFamEq feqs (expandSyn' syns t)
++          in if t' `eqEType` t || any (eqEType t') seen then t'
++             else loop (n - 1) (t : seen) t'
++
++-- Rewrite stuck family applications using given equalities
++-- (exact match up to eqEType, bottom-up).
++rewriteFamEq :: [(EType, EType)] -> EType -> EType
++rewriteFamEq [] t = t
++rewriteFamEq feqs t = go t
++  where go t0 =
++          let t1 = case t0 of
++                     EApp f a -> EApp (go f) (go a)
++                     ETuple ts -> ETuple (map go ts)
++                     EListish (LList ts) -> EListish (LList (map go ts))
++                     EOper t its -> EOper (go t) (map (second go) its)
++                     ESign t k -> ESign (go t) k
++                     EParen t -> EParen (go t)
++                     EForall b iks t -> EForall b iks (go t)
++                     _ -> t0
++          in case [ rhs | (lhs, rhs) <- feqs, lhs `eqEType` t1 ] of
++               (rhs:_) -> rhs
++               [] -> t1
++
+ expandSynNoChk :: HasCallStack =>
+                   EType -> T EType
+ expandSynNoChk t = do
+@@ -682,36 +1156,75 @@ expandSynNoChk t = do
+   return $ expandSyn' syns t
+ 
+ -- Expand with the given synonym table.
++-- Apartness-aware type family reduction happens here:
++-- open families reduce on the first matching equation, closed families
++-- only reduce when all earlier equations are apart, and a blocked
++-- (MatchMaybe) equation leaves the application stuck.
+ expandSyn' :: HasCallStack =>
+               SynTable -> EType -> EType
+ expandSyn' syns = esyn
+   where
+-    esyn = syn []
++    esyn = syn famFuel []
+     -- Expand synonyms that have enough arguments
+-    syn ts t =
++    syn fuel ts t =
+       case t of
+-        EApp f a -> syn (esyn a : ts) f
++        EApp f a -> syn fuel (syn fuel [] a : ts) f
+         EVar i ->
+           case M.lookup i syns of
+             Nothing -> eApps t ts
++            Just entry | Just (isClosed, arity, _, eqns) <- unTFamEntry entry ->
++              if length ts < arity then
++                eApps t ts  -- under-applied: stuck
++              else
++                let (famArgs, extraArgs) = splitAt arity ts
++                in case reduceFam syns fuel i isClosed eqns famArgs of
++                     Just rhs -> syn (fuel - 1) extraArgs rhs
++                     Nothing -> eApps t ts  -- stuck
+             Just (EForall _ vks tt) ->
+-              let is = map idKindIdent vks
+-                  s = zip is ts
+-                  lis = length is
+-                  lts = length ts
+-              in  if lis > lts then
+-                    eApps t ts
+-                  else
+-                    -- Too few arguments, just leave it alone
+-                    syn (drop lis ts) (subst s tt)
++              if fuel <= 0 then eApps t ts
++              else
++                let is = map idKindIdent vks
++                    s = zip is ts
++                    lis = length is
++                    lts = length ts
++                in  if lis > lts then
++                      eApps t ts
++                    else
++                      -- Too few arguments, just leave it alone
++                      syn (fuel - 1) (drop lis ts) (subst s tt)
+             Just _ -> impossible
+         EUVar _ -> eApps t ts
+-        ESign a _ -> syn ts a   -- Throw away signatures, they don't affect unification
+-        EForall b iks tt | null ts -> EForall b iks (esyn tt)
+-        ELit _ (LStr _) -> t
+-        ELit _ (LInteger _) -> t
++        ESign a _ -> syn fuel ts a   -- Throw away signatures, they don't affect unification
++        EForall b iks tt | null ts -> EForall b iks (syn fuel [] tt)
++        ELit _ (LStr _) -> eApps t ts
++        ELit _ (LInteger _) -> eApps t ts
++        ETuple ts' | null ts -> ETuple (map (syn fuel []) ts')
++        EListish (LList [x]) | null ts -> EListish (LList [syn fuel [] x])
++        EOper t1 its | null ts -> EOper (syn fuel [] t1) (map (second (syn fuel [])) its)
++        EParen t1 | null ts -> syn fuel ts t1
++        EQVar _ _ -> eApps t ts
++        ECon _ -> eApps t ts
+         _ -> impossiblePP t
+ 
++-- Try to reduce one fully-applied family application.
++-- Returns Nothing when the application is stuck.
++reduceFam :: SynTable -> Int -> Ident -> Bool -> [([Ident], [EType], EType)] -> [EType] -> Maybe EType
++reduceFam _ fuel _ _ _ _ | fuel <= 0 = Nothing
++reduceFam syns _ _ False eqns famArgs = goOpen eqns
++  where goOpen [] = Nothing
++        goOpen ((pvs, pats, rhs) : rest) =
++          case matchFamEqn syns pvs pats famArgs of
++            MatchSubst s -> Just (subst s rhs)
++            _ -> goOpen rest
++reduceFam syns _ _ True eqns famArgs = goClosed True eqns
++  where goClosed _ [] = Nothing
++        goClosed allApart ((pvs, pats, rhs) : rest) =
++          case matchFamEqn syns pvs pats famArgs of
++            MatchSubst s | allApart -> Just (subst s rhs)
++                         | otherwise -> Nothing
++            MatchApart -> goClosed allApart rest
++            MatchMaybe -> Nothing
++
+ 
+ mapEType :: (EType -> EType) -> EType -> EType
+ mapEType fn = rec
+@@ -737,7 +1250,12 @@ derefUVar at =
+           setUVar i t'
+           return t'
+     EVar _ -> return at
+-    ESign t k -> flip ESign k <$> derefUVar t
++    ESign t k -> ESign <$> derefUVar t <*> derefUVar k
++    ETuple ts -> ETuple <$> mapM derefUVar ts
++    EListish (LList ts) -> (EListish . LList) <$> mapM derefUVar ts
++    EParen t -> EParen <$> derefUVar t
++    EOper t ies -> EOper <$> derefUVar t <*> mapM (\ (i, e) -> (,) i <$> derefUVar e) ies
++    EQVar _ _ -> return at
+     EForall b iks t -> EForall b <$> iks' <*> derefUVar t
+       where iks' = mapM (\ (IdKind i k) -> IdKind i <$> derefUVar k) iks
+     ELit _ (LStr _) -> return at
+@@ -775,23 +1293,89 @@ type Orig = (EType, EType)   -- (actual, expected) as given to unify
+ unifyR :: HasCallStack =>
+           SLoc -> Orig -> EType -> EType -> T ()
+ unifyR _   _ (EVar x1)    (EVar x2)      | x1 == x2  = return ()
+-unifyR loc o (EApp f1 a1) (EApp f2 a2)               = do { unifyR loc o f1 f2; unifyR loc o a1 a2 }
++unifyR loc o t1@(EApp _ _) t2@(EApp _ _) = do
++  syns <- gets synTable
++  -- Never structurally decompose an application whose head is a
++  -- stuck type/data family: F a ~ G b must not unify F ~ G and a ~ b,
++  -- and F a ~ Int cannot decompose EApp vs EVar.
++  if famHeaded syns t1 || famHeaded syns t2
++    then unifySlow loc o t1 t2
++    else case (t1, t2) of
++           (EApp f1 a1, EApp f2 a2) -> do { unifyR loc o f1 f2; unifyR loc o a1 a2 }
++           _ -> impossible
+ unifyR loc o t1@(EUVar r1) t2@(EUVar r2) | r1 < r2   = unifyVar loc o r2 t1   -- always make higher
+                                          | r1 > r2   = unifyVar loc o r1 t2   --   TRefs point to lower
+                                          | otherwise = return ()
+ unifyR loc o (EUVar r1)   t2                         = unifyVar loc o r1 t2
+ unifyR loc o t1           (EUVar r2)                 = unifyVar loc o r2 t1
+-unifyR loc o t1           t2                         = do
+-  tcm <- gets tcMode
+-  eqs <- gets typeEqTable
+-  case tcm of
+-    -- Defer to constraint solver, unless this is a definite mismatch
+-    -- that no given equality could resolve.
+-    -- XXX needs changing if we have kind equalities.
+-    TCExpr | not (null eqs) || not (rigidClash t1 t2) -> addEqConstraint loc t1 t2
+-    _ -> mismatchError loc o
++unifyR loc o t1           t2                         = unifySlow loc o t1 t2
++
++-- Head identifier of a type application, if it has one.
++appHeadIdent :: EType -> Maybe Ident
++appHeadIdent (EApp f _) = appHeadIdent f
++appHeadIdent (ESign t _) = appHeadIdent t
++appHeadIdent (EParen t) = appHeadIdent t
++appHeadIdent (EVar i) = Just i
++appHeadIdent _ = Nothing
++
++-- Is this type headed by a stuck type/data family application?
++famHeaded :: SynTable -> EType -> Bool
++famHeaded syns t =
++  case appHeadIdent t of
++    Just h -> isFamCon syns h
++    Nothing -> False
++
++-- Slow path: expand synonyms, reduce families, rewrite with given
++-- family equalities, and dereference unification variables first.
++-- Identical stuck family applications succeed immediately; a stuck
++-- family application against anything else is deferred as a type
++-- equality constraint so solveEq and given equalities can discharge it.
++unifySlow :: HasCallStack =>
++             SLoc -> Orig -> EType -> EType -> T ()
++unifySlow loc o t1 t2 = do
++  syns <- gets synTable
++  t1d <- derefUVar t1
++  t2d <- derefUVar t2
++  t1e <- expandSynSoft t1d
++  t2e <- expandSynSoft t2d
++  d1 <- derefUVar t1e
++  d2 <- derefUVar t2e
++  case (d1, d2) of
++    _ | d1 `eqEType` d2 -> return ()
++    (EUVar r1, _) -> unifyVar loc o r1 d2
++    (_, EUVar r2) -> unifyVar loc o r2 d1
++    (EVar x1, EVar x2) | x1 == x2 -> return ()
++    (EApp f1 a1, EApp f2 a2)
++      | not (famHeaded syns d1) && not (famHeaded syns d2) ->
++          do { unifyR loc o f1 f2; unifyR loc o a1 a2 }
++    _ -> do
++      tcm <- gets tcMode
++      eqs <- gets typeEqTable
++      feqs <- gets famEqTable
++      (n1, n2) <- if tcm == TCExpr && (not (null eqs) || not (null feqs))
++                  then do
++                    c1 <- normConstraint d1 >>= derefUVar
++                    c2 <- normConstraint d2 >>= derefUVar
++                    return (c1, c2)
++                  else return (d1, d2)
++      case (n1, n2) of
++        _ | n1 `eqEType` n2 -> return ()
++        (EUVar r1, _) -> unifyVar loc o r1 n2
++        (_, EUVar r2) -> unifyVar loc o r2 n1
++        (EVar x1, EVar x2) | x1 == x2 -> return ()
++        (EApp f1 a1, EApp f2 a2)
++          | not (famHeaded syns n1) && not (famHeaded syns n2) ->
++              do { unifyR loc o f1 f2; unifyR loc o a1 a2 }
++        _ -> do
++          let stuck = famHeaded syns n1 || famHeaded syns n2
++          case tcm of
++            TCExpr | stuck || not (null eqs) || not (rigidClash n1 n2) -> addEqConstraint loc n1 n2
++            _ | stuck -> addEqConstraint loc n1 n2
++              | otherwise -> mismatchError loc o
+ 
+ -- Two types with different rigid heads (or arities) can never unify.
++-- (Stuck type families are handled before this is consulted: they are
++-- never rigidly clashable, so this is only called on family-free types.)
+ rigidClash :: EType -> EType -> Bool
+ rigidClash t1 t2 =
+   case (getAppM t1, getAppM t2) of
+@@ -896,6 +1480,12 @@ tLookup msg i = do
+     Right (Entry e s) -> return (setSLocExpr (getSLoc i) e, s)
+     Left            e -> throw e
+ 
++-- Sort of a kind: maps Type -> Kind, (k1 -> k2) -> (sort(k1) -> sort(k2)).
++kindToSort :: EType -> EType
++kindToSort (EForall _ _ b) = kindToSort b
++kindToSort t | Just (a, b) <- getArrow t = kArrow (kindToSort a) (kindToSort b)
++kindToSort _ = sKind
++
+ tLookupV :: HasCallStack =>
+            Ident -> T (Expr, EType)
+ tLookupV i = do
+@@ -909,6 +1499,32 @@ tLookupV i = do
+     -- This allows ordinary functions/methods to have the same name as a
+     -- field, and they will be preferred.
+     STMany es | [Entry e s] <- filter (\ (Entry e' _) -> not (isGetExpr e')) es -> return (sloc e, s)
++              | [Entry e s] <- filter isFtpPoly es
++              , all (\ ent@(Entry e' _) -> isGetExpr e' || isFtpPoly ent || isFtpMono e') es -> return (sloc e, s)
++      where isFtpPoly (Entry (EVar v) _) = any (`isPrefixOf` unIdent v) ["Data.Foldable.", "Data.Traversable.", "Data.Foldable1."]
++            isFtpPoly _ = False
++            isFtpMono (EVar v) = any (`isPrefixOf` unIdent v) ["Data.List.", "Data.List_Type.", "Control.Monad."]
++            isFtpMono _ = False
++    STNone | tcm == TCType && not (isPromotedIdent i) && isConIdent i ->
++      case stLookupST (promLookupIdent i) env of
++        STOne (Entry e s) -> return (sloc e, s)
++        STMany es | [Entry e s] <- nub es -> return (sloc e, s)
++        _ -> tLookup (msgTCMode tcm) i
++    STNone | tcm == TCKind && not (isPromotedIdent i) -> do
++      st <- gets savedTypeTable
++      case stLookupST i st of
++        STOne (Entry e k) -> do
++          k' <- derefUVar k >>= expandSyn
++          return (sloc e, kindToSort k')
++        STMany es | [Entry e k] <- nub es -> do
++          k' <- derefUVar k >>= expandSyn
++          return (sloc e, kindToSort k')
++                  | otherwise -> tLookup (msgTCMode tcm) i
++        STNone | not (isConIdent i) ->
++          -- Implicit lowercase kind variable (e.g. k in (a :: k)):
++          -- treat as a fresh kind variable of sort Kind.
++          return (sloc (EVar i), sKind)
++               | otherwise -> tLookup (msgTCMode tcm) i
+     _ -> tLookup (msgTCMode tcm) i       -- generate the error normally
+ 
+ tInst :: HasCallStack => Expr -> EType -> T (Expr, EType)
+@@ -1049,12 +1665,14 @@ tcDefs flags impt ds = do
+   mapM_ tcAddInfix ds                                 -- collect fixity declarations
+   dst <- tcDefsType ds                                -- kind check type definitions
+ --  tcTrace ("tcDefs 2:\n" ++ showEDefs dst)
+-  mapM_ addTypeAndData dst                            -- add typedefinitions to the symbol table
++  addTypesAndDatas dst                            -- add typedefinitions to the symbol table
+   dste <- tcExpandClassInst flags impt dst            -- expand class&instance, do deriving
+ --  tcTrace ("tcDefs 3:\n" ++ showEDefs dste)
+   setDefault dste                                     -- set current defaults
+   dste' <- tcDefsValue dste                           -- type check all value definitions
+   mapM_ addAssocs dste'
++  fixupDataInstAssocs dste'                         -- link data instances to their families
++  addClassTypeAssocs ds                             -- link associated type/data families to their classes
+ 
+   case impt of
+     ImpNormal -> do
+@@ -1068,6 +1686,8 @@ bootExportable (Fcn _ _) = False
+ bootExportable (PatBind _ _) = False
+ bootExportable (Instance _ ms bs) = null ms && null bs
+ bootExportable StandDeriving{} = False
++bootExportable TypeFam{} = True
++bootExportable DataFam{} = True
+ bootExportable _ = True
+ 
+ setDefault :: [EDef] -> T ()
+@@ -1089,26 +1709,53 @@ tcAddInfix _ = return ()
+ -- Kind check type definitions
+ tcDefsType :: HasCallStack => [EDef] -> T [EDef]
+ tcDefsType ds = withTypeTable $ do
++  let ds0 = extractClassFams ds
++  mapM_ (addTypeKind M.empty) ds0
+   kindSigs <- getKindSigns ds
+-  mapM_ (addTypeKind kindSigs) ds              -- Add the kind of each type to the environment
+-  dst <- mapM tcDefType ds                     -- Kind check all top level type expressions
++  sequence_ [ extValQTop i k | (i, k) <- M.toList kindSigs ]
++  ds1 <- concat <$> mapM expandTopDataInst ds0 -- desugar top-level data instances
++  dst <- mapM (tcDefType ds1) ds1              -- Kind check all top level type expressions
+ --  vars <- gets uvarSubst
+ --  tcTrace $ show vars
++  mn <- gets moduleName
++  -- Refine non-GADT H98 local promoted constructors with their exact kinds.
++  -- Uses the elaborated definitions (constructor argument types already
++  -- desugared, so no EListish/ETuple reaches the kind table).
++  sequence_
++    [ extValQTop (promIdent c)
++        (promConKind (dsType (foldr tArrow (tApps (qualIdent mn ti) (map (EVar . idKindIdent) tvks))
++                                (map snd (either id (map snd) ets)))))
++    | Data (ti, tvks) cs _ <- dst
++    , Constr [] [] c _ ets <- cs
++    ]
+   vt <- gets valueTable
+-  let ent (Entry i k) = Entry i <$> zonk k
+-      zonk k = mapEType def <$> (derefUVar k >>= expandSyn)
+-        where def (EUVar _) = kType    -- default kind variables to Type
+-              def t = t
+-      derefClass (Class ctx (n, vks) ct ms) = do
+-        vks' <- mapM (\ (IdKind i k) -> IdKind i <$> zonk k) vks
+---        traceM("derefClass: " ++ show (n, vks, vks'))
+-        pure (Class ctx (n, vks') ct ms)
+-      derefClass d = pure d
++  let ent (Entry i k) = Entry i <$> zonkKindExpr k
+   vt' <- mapMSymTab ent vt
+   putValueTable vt'
+-  mapM derefClass dst    -- make class definition LHSs have correct kinds
++  mapM zonkTypeDef dst    -- make type/class definition LHSs have resolved kinds
+ --  tcTrace $ "tcDefType value table:\n" ++ show vt'
+ 
++zonkKindExpr :: EKind -> T EKind
++zonkKindExpr k = mapEType def <$> (derefUVar k >>= expandSyn)
++  where def (EUVar _) = kType    -- default kind variables to Type
++        def t = t
++
++zonkTypeDef :: EDef -> T EDef
++zonkTypeDef = go
++  where
++    zonkVks = mapM (\ (IdKind i k) -> IdKind i <$> zonkKindExpr k)
++    zonkEqn (evks, ps, r) = (\ evks' -> (evks', ps, r)) <$> zonkVks evks
++    zonkM _ Nothing  = pure Nothing
++    zonkM f (Just x) = Just <$> f x
++    go (Class ctx (n, vks) ct ms) = Class ctx <$> ((,) n <$> zonkVks vks) <*> pure ct <*> pure ms
++    go (Data (n, vks) cs ds)      = Data      <$> ((,) n <$> zonkVks vks) <*> pure cs <*> pure ds
++    go (Newtype (n, vks) c ds)    = Newtype   <$> ((,) n <$> zonkVks vks) <*> pure c  <*> pure ds
++    go (Type (n, vks) t)          = Type      <$> ((,) n <$> zonkVks vks) <*> pure t
++    go (TypeFam (n, vks) mk inj eqs)  = TypeFam <$> ((,) n <$> zonkVks vks) <*> zonkM zonkKindExpr mk <*> pure inj <*> zonkM (mapM zonkEqn) eqs
++    go (DataFam (n, vks) mk)      = DataFam   <$> ((,) n <$> zonkVks vks) <*> zonkM zonkKindExpr mk
++    go (TypeInst vks q ps r)      = TypeInst  <$> zonkVks vks <*> pure q <*> pure ps <*> pure r
++    go d = pure d
++
+ -- Get all kind signatures, and do sort checking of them.
+ getKindSigns :: HasCallStack => [EDef] -> T (M.Map EKind)
+ getKindSigns ds = do
+@@ -1131,7 +1778,7 @@ tcExpandClassInst flags impt dst = do
+       ImpNormal -> concat <$> mapM doDeriving dsf       -- Add derived instances
+   dumpIf flags Dderive $
+     tcTrace' $ "derived:\n" ++ showEDefs dsd
+-  res <- concat <$> mapM expandInst dsd                        -- Expand all instance definitions
++  res <- concat <$> mapM (expandInst dsd) dsd                 -- Expand all instance definitions
+   dumpIf flags DexpandInst $
+     tcTrace' $ "expanded:\n" ++ showEDefs res
+   return res
+@@ -1156,7 +1803,7 @@ withVks vks fun = assertTCMode (>=TCType) $ do
+       else do
+         k' <- case mk of
+                 EVar d | d == dummyIdent -> newUVar
+-                _                        -> withTypeTable $ tcExpr (Check expect) mk   -- bump to next level
++                _                        -> withTypeTable $ tcExpr (Check expect) (dsType mk)   -- bump to next level
+         withExtVal i k' $ loop (IdKind i k' : r) iks
+   loop [] vks
+ 
+@@ -1171,17 +1818,33 @@ guessIsKind t =
+ -- If there is a kind signature, use it.  If not, use a kind variable.
+ addTypeKind :: M.Map EKind -> EDef -> T ()
+ addTypeKind kdefs adef = do
++  mn <- gets moduleName
+   let
+-    addDef (i, _) = do
+-      k <- maybe newUVar return $ M.lookup i kdefs
++    addDef (i, vks) = do
++      k <- case M.lookup i kdefs of
++             Just kd -> return kd
++             Nothing -> do
++               aks <- mapM (const newUVar) vks
++               rk  <- newUVar
++               return (foldr kArrow rk aks)
+       extValQTop i k
+-
++    addPromCon ti tvks (Constr ciks _ c _ ets)
++      | not (isPromotedIdent c), isConIdent c = do
++          let arity = either length length ets
++              p = promIdent c
++          pk <- if null tvks && null ciks && arity == 0
++                then return (EVar (qualIdent mn ti))
++                else return (EForall QExpl [IdKind (mkIdent "$pk") sKind] (EVar (mkIdent "$pk")))
++          extValQTop p pk
++      | otherwise = return ()
+   case adef of
+-    Data    lhs _ _ -> addDef lhs
+-    Newtype lhs _ _ -> addDef lhs
+-    Type    lhs _   -> addDef lhs
+-    Class _ lhs _ _ -> addDef lhs
+-    _               -> return ()
++    Data    lhs@(ti, tvks) cs _ -> addDef lhs >> mapM_ (addPromCon ti tvks) cs
++    Newtype lhs@(ti, tvks) c  _ -> addDef lhs >> addPromCon ti tvks c
++    Type    lhs _               -> addDef lhs
++    Class _ lhs _ _             -> addDef lhs
++    TypeFam lhs _ _ _           -> addDef lhs
++    DataFam lhs _               -> addDef lhs
++    _                           -> return ()
+ 
+ -- Add symbols associated with a type.
+ addAssocs :: HasCallStack => EDef -> T ()
+@@ -1208,7 +1871,33 @@ addAssocs adef = do
+     Class _ (i, _) _ ms -> addAssoc i [ (x, x) | Sign ns _ <- ms, m <- ns, x <- [m, mkDefaultMethodId m] ]
+     _                   -> return ()
+ 
++-- Copy the constructors and field selectors of each data-instance
++-- representation type to its family in the association table, so that
++-- @module M (D(..))@ and @import M (D(..))@ export/import data
++-- instance constructors and record selectors.
++fixupDataInstAssocs :: [EDef] -> T ()
++fixupDataInstAssocs ds = do
++  at <- gets assocTable
++  let fams = [ (qfam, qdf) | TypeInst _ qfam _ rhs <- ds,
++                             Just (qdf, _) <- [getAppM rhs],
++                             "$DInst$" `isInfixOf` unIdent qdf ]
++      addOne table (qfam, qdf) =
++        case M.lookup qdf table of
++          Nothing -> table
++          Just ves -> M.insertWith mergeVEAssoc qfam ves table
++  modify $ \ ts -> ts { assocTable = foldl' addOne at fams }
++
+ -- Add type synonyms to the synonym table, and data/newtype to the data table.
++-- Type families and data families are registered as family entries;
++-- type instances append equations to their (open) family's entry.
++-- Two phases so instances always find their family regardless of order.
++addTypesAndDatas :: [EDef] -> T ()
++addTypesAndDatas ds = do
++  mapM_ addTypeAndData [ d | d <- ds, not (isTypeInst d) ]
++  mapM_ addTypeAndData [ d | d <- ds, isTypeInst d ]
++  where isTypeInst TypeInst{} = True
++        isTypeInst _ = False
++
+ addTypeAndData :: EDef -> T ()
+ addTypeAndData adef = do
+   mn <- gets moduleName
+@@ -1216,16 +1905,113 @@ addTypeAndData adef = do
+     Type    (i, vs) t  -> extSyn  (qualIdent mn i) vs t
+     Data    (i, _) _ _ -> extData (qualIdent mn i) adef
+     Newtype (i, _) _ _ -> extData (qualIdent mn i) adef
++    TypeFam (i, vks) _ inj meqns -> registerTypeFam mn i vks inj meqns
++    DataFam (i, vks) _ -> registerTypeFam mn i vks [] Nothing
++    TypeInst vks qfam pats rhs -> registerTypeInst vks qfam pats rhs
+     _                  -> return ()
+ 
++-- Register a type/data family declaration in the synonym table.
++registerTypeFam :: IdentModule -> Ident -> [IdKind] -> [Bool] -> Maybe [TypeEqn] -> T ()
++registerTypeFam mn i vks inj meqns = do
++  let qi = qualIdent mn i
++      arity = length vks
++      newEntry = case meqns of
++        Just es -> mkTFamEntry True arity inj [(map idKindIdent evks, ps, r) | (evks, ps, r) <- es]
++        Nothing -> mkTFamEntry False arity inj []
++  syns <- gets synTable
++  case M.lookup qi syns of
++    Nothing -> putSynTable (M.insert qi newEntry syns)
++    Just old ->
++      case unTFamEntry old of
++        Nothing -> tcError (getSLoc i) (showIdent qi ++ " is already defined as a type synonym")
++        Just (oldIsClosed, oldArity, oldInj, oldEqns)
++          | oldArity /= arity -> tcError (getSLoc i) ("type family arity mismatch for " ++ showIdent qi)
++          | otherwise ->
++              case meqns of
++                -- Re-declaring an open family (e.g. completing a boot
++                -- declaration): keep the already-registered equations,
++                -- but pick up any newly declared injectivity.
++                Nothing ->
++                  let inj' = combineInj oldInj inj
++                  in when (inj' /= oldInj) $
++                       putSynTable (M.insert qi (mkTFamEntry oldIsClosed oldArity inj' oldEqns) syns)
++                -- Overwrite when module `mn` is recompiled over a partially
++                -- invalidated cache; same-module duplicate declarations are
++                -- already rejected by `multCheck` in `addTypeKinds`.
++                Just _ -> putSynTable (M.insert qi newEntry syns)
++
++-- Append one equation to an open family's entry.
++-- Coincident equations (same LHS up to alpha-renaming of the quantified
++-- pattern variables, with an eqEType-equal RHS) register idempotently.
++registerTypeInst :: [IdKind] -> Ident -> [EType] -> EType -> T ()
++registerTypeInst vks qfam pats rhs = do
++  syns <- gets synTable
++  case M.lookup qfam syns of
++    Nothing -> tcError (getSLoc qfam) ("not a type family: " ++ showIdent qfam)
++    Just old ->
++      case unTFamEntry old of
++        Nothing -> tcError (getSLoc qfam) ("not a type family: " ++ showIdent qfam)
++        Just (True, _, _, _) -> tcError (getSLoc qfam) ("cannot add instance for closed type family " ++ showIdent qfam)
++        Just (False, arity, oldInj, eqns)
++          | length pats /= arity -> tcError (getSLoc qfam) ("wrong arity in instance for " ++ showIdent qfam)
++          | any (isCoincident syns) eqns -> return ()
++          | any (isDuplicate syns) eqns ->
++              tcError (getSLoc qfam) ("duplicate instance for " ++ showIdent qfam)
++          | otherwise ->
++              putSynTable (M.insert qfam (mkTFamEntry False arity oldInj (eqns ++ [(vs, pats, rhs)])) syns)
++  where vs = map idKindIdent vks
++        -- Canonicalize quantified pattern variables to positional $n names so
++        -- alpha-renamed equations compare equal.  EVar is used for both type
++        -- constructors and type variables, so only v `elem` qs are renamed.
++        canon qs t = subst [ (v, EVar (mkIdent ('$' : show n))) | (v, n) <- zip qs [(0 :: Int)..] ] t
++        newPats = map (canon vs) pats
++        newRhs = canon vs rhs
++        canonEq (evks, eps, erhs) = (map (canon evks) eps, canon evks erhs)
++        matchEq s (eps, _) =
++          case matchFamEqn s vs newPats eps of
++            MatchSubst _ -> True
++            _ -> False
++        isCoincident s e =
++          let ce = canonEq e
++          in matchEq s ce && newRhs `eqEType` snd ce
++        isDuplicate s e = matchEq s (canonEq e)
++
++-- Has this exact equation already been registered (used for idempotent
++-- class-default instantiation)?
++hasTypeInst :: Ident -> [EType] -> EType -> T Bool
++hasTypeInst qfam pats rhs = do
++  syns <- gets synTable
++  case M.lookup qfam syns of
++    Just old | Just (False, _, _, eqns) <- unTFamEntry old ->
++      return (any (\(_, ps, r) -> length ps == length pats &&
++                                  and (zipWith eqEType ps pats) && r `eqEType` rhs) eqns)
++    _ -> return False
++
+ -- Do kind checking of all typeish definitions.
+-tcDefType :: HasCallStack => EDef -> T EDef
+-tcDefType def = do
++-- Takes the module's definitions for resolving family arities.
++tcDefType :: HasCallStack => [EDef] -> EDef -> T EDef
++tcDefType ds def = do
+   case def of
+-    Data    lhs cs ds      -> withLHS lhs $ \ lhs' -> cm kType       <$> (Data    lhs'  <$> mapM tcConstr cs <*> mapM (tcDeriving lhs') ds)
+-    Newtype lhs c  ds      -> withLHS lhs $ \ lhs' -> cm kType       <$> (Newtype lhs'  <$> tcConstr c       <*> mapM (tcDeriving lhs') ds)
+-    Type    lhs t          -> withLHS lhs $ \ lhs' -> first              (Type    lhs') <$> tInferTypeT t
+-    Class   ctx lhs fds ms -> withLHS lhs $ \ lhs' -> cm kConstraint <$> (Class         <$> tcCtx ctx <*> return lhs' <*> mapM tcFD fds <*> mapM tcMethod ms)
++    Data    lhs cs ds      -> withLHS lhs $ \ lhs' kr0 -> do
++                                unify (getSLoc lhs) (snd (getArrows kr0)) kType
++                                cm kr0         <$> (Data    lhs'  <$> mapM tcConstr cs <*> mapM (tcDeriving lhs') ds)
++    Newtype lhs c  ds      -> withLHS lhs $ \ lhs' kr0 -> do
++                                unify (getSLoc lhs) (snd (getArrows kr0)) kType
++                                cm kr0         <$> (Newtype lhs'  <$> tcConstr c       <*> mapM (tcDeriving lhs') ds)
++    Type    lhs t          -> withLHS lhs $ \ lhs' _   -> first              (Type    lhs') <$> tInferTypeT t
++    Class   ctx lhs fds ms -> withLHS lhs $ \ lhs' _   -> cm kConstraint <$> (Class         <$> tcCtx ctx <*> return lhs' <*> mapM tcFD fds <*> mapM tcMethod ms)
++    TypeFam lhs mk inj meqns -> withLHS lhs $ \ lhs'@(_, fvks) kr0 -> do
++                                resK <- tcFamResKind kr0 mk
++                                meqns' <- case meqns of
++                                            Nothing -> return Nothing
++                                            Just eqns -> Just <$> mapM (tcClosedEqn fvks resK) eqns
++                                return (TypeFam lhs' (Just resK) inj meqns', resK)
++    TypeInst vks fam pats rhs -> do
++                                (vks', qfam, pats', rhs') <- checkTypeInst ds vks fam pats rhs
++                                return (TypeInst vks' qfam pats' rhs')
++    DataFam lhs mk         -> withLHS lhs $ \ lhs' kr0 -> do
++                                resK <- tcFamResKind kr0 mk
++                                return (DataFam lhs' (Just resK), resK)
+     Sign      is t         ->                                            Sign      is   <$> tCheckTypeTImpl QImpl kType t
+     ForImp cc ie i t       ->                                            ForImp cc ie i <$> tCheckTypeTImpl QImpl kType t
+     Instance ct m e        ->                                            Instance       <$> tCheckTypeTImpl QExpl kConstraint ct <*> return m <*> return e
+@@ -1239,6 +2025,9 @@ tcDefType def = do
+    cm = flip (,)
+    tcMethod (Sign    is t) = Sign    is <$> (tCheckTypeTImpl QImpl kType t >>= expandSyn)
+    tcMethod (DfltSign i t) = DfltSign i <$> (tCheckTypeTImpl QImpl kType t >>= expandSyn)
++   tcMethod (TypeInst vks fam pats rhs) = do
++     (vks', qfam, pats', rhs') <- checkTypeInst ds vks fam pats rhs
++     return (TypeInst vks' qfam pats' rhs')
+    tcMethod m              = return m
+    tcFD (is, os) = (,) <$> mapM tcV is <*> mapM tcV os
+      where tcV i = do { _ <- tLookup "fundep" i; return i }
+@@ -1247,6 +2036,189 @@ tcDefType def = do
+      EApp _ t' <- tCheckTypeT kConstraint (EApp (EVar c) t)
+      return t'
+ 
++-- Result kind of a type/data family declaration; inherits standalone kind
++-- signature result kind via kr0 (which zonks to Type if unconstrained).
++tcFamResKind :: HasCallStack => EKind -> Maybe EKind -> T EKind
++tcFamResKind kr0 Nothing = return kr0
++tcFamResKind kr0 (Just k) = do
++  k' <- tcKind (Check sKind) k
++  unify (getSLoc k) kr0 k'
++  return k'
++
++-- Replace wildcard '_' occurrences in type/data family pattern arguments
++-- with fresh distinct pattern type variables before implicit-variable
++-- discovery and kind checking.
++freshenTypePats :: [EType] -> T [EType]
++freshenTypePats = mapM go
++  where
++    go (EVar v) | isDummyIdent v = EVar <$> newIdent (getSLoc v) "tw"
++    go (EApp f a) = EApp <$> go f <*> go a
++    go (ETuple ts) = ETuple <$> mapM go ts
++    go (EListish (LList ts)) = (EListish . LList) <$> mapM go ts
++    go (EOper t ies) = EOper <$> go t <*> mapM (\ (i, e) -> (,) i <$> go e) ies
++    go (ESign t k) = ESign <$> go t <*> pure k
++    go (EParen t) = EParen <$> go t
++    go (EForall b iks t) = EForall b iks <$> go t
++    go t = return t
++
++-- Kind check one closed family equation. The patterns are checked
++-- against the family's parameter kinds; the rhs against the result
++-- kind. All rhs variables must occur in the patterns.
++tcClosedEqn :: HasCallStack => [IdKind] -> EKind -> TypeEqn -> T TypeEqn
++tcClosedEqn fvks resK (eqVks, pats0, rhs) = do
++  pats <- freshenTypePats pats0
++  let paramKs = [ k | IdKind _ k <- fvks ]
++  when (length pats /= length fvks) $
++    tcError (getSLoc pats) "wrong number of patterns in closed type family equation"
++  bvs <- stKeysU <$> gets valueTable
++  let explicitVs = map idKindIdent eqVks
++      implicitVks = [ IdKind v (EVar dummyIdent)
++                    | v <- nub (freeTyVars pats)
++                    , v `notElem` explicitVs
++                    , v `notElem` bvs ]
++  withVks (eqVks ++ implicitVks) $ \ eqVks' -> do
++    pats' <- zipWithM tCheckTypeT paramKs pats
++    rhs'  <- tCheckTypeT resK rhs
++    let allowed = nub (bvs ++ map idKindIdent eqVks' ++ freeTyVars pats')
++    mapM_ (\ v -> unless (v `elem` allowed) $
++             tcError (getSLoc v) ("ambiguous type variable " ++ showIdent v ++
++                                  " in closed type family equation")) (freeTyVars [rhs'])
++    return (eqVks', pats', rhs')
++
++getTypeSymTab :: T TypeTable
++getTypeSymTab = do
++  tcm <- gets tcMode
++  case tcm of
++    TCExpr -> gets typeTable
++    TCType -> gets valueTable
++    _      -> gets savedTypeTable
++
++-- Resolve a (possibly unqualified) family name to its canonical
++-- qualified identifier via the type table.
++resolveFamId :: HasCallStack => Ident -> T Ident
++resolveFamId i = do
++  tt <- getTypeSymTab
++  case stLookup "type" i tt of
++    Right (Entry (EVar qi) _) -> return qi
++    Right _ -> tcError (getSLoc i) ("not a type family: " ++ showIdent i)
++    Left e -> throw e
++
++-- Kind check a type instance equation and resolve the family name.
++-- Returns the checked equation with a canonical qualified family name.
++checkTypeInst :: HasCallStack => [EDef] -> [IdKind] -> Ident -> [EType] -> EType ->
++                 T ([IdKind], Ident, [EType], EType)
++checkTypeInst ds vks fam pats0 rhs = do
++  pats <- freshenTypePats pats0
++  mn <- gets moduleName
++  qfam <- resolveFamId fam
++  tt <- getTypeSymTab
++  famKind <- case stLookup "type" qfam tt of
++               Right (Entry _ k) -> return k
++               Left e -> throw e
++  syns <- gets synTable
++  arity <- case M.lookup qfam syns >>= unTFamEntry of
++    Just (_, n, _, _) -> return n
++    Nothing -> case famKind of
++      EUVar _ ->
++        -- Family not kind-checked yet (defined later in this module):
++        -- arity comes from its declaration.
++        case [ length vks' | TypeFam (i, vks') _ _ _ <- ds, qualIdent mn i == qfam ] ++
++             [ length vks' | DataFam (i, vks') _ <- ds, qualIdent mn i == qfam ] of
++          (n:_) -> return n
++          [] -> tcError (getSLoc fam) ("unknown type family: " ++ showIdent qfam)
++      _ -> return (length (fst (getArrows famKind)))
++  when (length pats /= arity) $
++    tcError (getSLoc fam) ("wrong number of arguments in instance for " ++ showIdent qfam)
++  (paramKs, resK) <- case famKind of
++    EUVar _ -> (,) <$> mapM (const newUVar) pats <*> newUVar
++    _ -> let (ps, r) = getArrows famKind
++         in if length ps >= arity
++              then let (famPs, extraPs) = splitAt arity ps
++                   in return (famPs, foldr kArrow r extraPs)
++              else (,) <$> mapM (const newUVar) pats <*> newUVar
++  bvs <- stKeysU <$> gets valueTable
++  let explicitVs = map idKindIdent vks
++      implicitVks = [ IdKind v (EVar dummyIdent)
++                    | v <- nub (freeTyVars pats)
++                    , v `notElem` explicitVs
++                    , v `notElem` bvs ]
++  withVks (vks ++ implicitVks) $ \ vks' -> do
++    pats' <- zipWithM tCheckTypeT paramKs pats
++    rhs'  <- tCheckTypeT resK rhs
++    let allowed = nub (bvs ++ map idKindIdent vks' ++ freeTyVars pats')
++    mapM_ (\ v -> unless (v `elem` allowed) $
++             tcError (getSLoc v) ("ambiguous type variable " ++ showIdent v ++
++                                  " in instance for " ++ showIdent qfam)) (freeTyVars [rhs'])
++    return (vks', qfam, pats', rhs')
++
++-- Extract associated type/data family declarations from class heads
++-- into top-level declarations, sharing the class's type variables.
++-- Default type instances stay in the class for instance completion.
++extractClassFams :: [EDef] -> [EDef]
++extractClassFams ds = concatMap extract ds
++  where extract (Class ctx lhs@(c, cvs) fds ms) =
++          let (fams, rest) = partition isFamDecl ms
++              isFamDecl TypeFam{} = True
++              isFamDecl DataFam{} = True
++              isFamDecl _ = False
++              cvns = map idKindIdent cvs
++              merge (TypeFam (i, vks) mk inj meqns) = TypeFam (i, mergeVks vks) mk inj meqns
++              merge (DataFam (i, vks) mk) = DataFam (i, mergeVks vks) mk
++              merge d = d
++              mergeVks vks = cvs ++ [ vk | vk <- vks, idKindIdent vk `notElem` cvns ]
++          in map merge fams ++ [Class ctx lhs fds rest]
++        extract d = [d]
++
++-- Desugar top-level data instances before kind checking.
++expandTopDataInst :: EDef -> T [EDef]
++expandTopDataInst d@DataInst{} = desugarDataInst d
++expandTopDataInst d = return [d]
++
++-- Desugar a data/newtype instance into a representation data/newtype
++-- plus a type instance mapping the family application to it.
++desugarDataInst :: EDef -> T [EDef]
++desugarDataInst (DataInst isNew vks famIdent patArgs0 constrs derivs) = do
++  patArgs <- freshenTypePats patArgs0
++  mn <- gets moduleName
++  qfam <- resolveFamId famIdent
++  idx <- newUniq
++  let loc = getSLoc famIdent
++      dfName = unIdent (unQualIdent famIdent) ++ "$DInst$" ++ show idx
++      dfIdent = mkIdentSLoc loc dfName
++      fvs = nub (freeTyVars patArgs)
++      kindOf v = case [ k | IdKind v' k <- vks, v' == v ] of (k:_) -> k; _ -> EVar dummyIdent
++      instVks = [ IdKind v (kindOf v) | v <- fvs ]
++      repTy = lhsToType (qualIdent mn dfIdent, instVks)
++      famApp = eApps (EVar famIdent) patArgs
++      famAppQ = eApps (EVar qfam) patArgs
++      rewriteTy t | t `eqEType` famApp || t `eqEType` famAppQ = repTy
++                  | otherwise =
++        case t of
++          EApp f a -> EApp (rewriteTy f) (rewriteTy a)
++          ETuple ts -> ETuple (map rewriteTy ts)
++          EListish (LList ts) -> EListish (LList (map rewriteTy ts))
++          EOper t its -> EOper (rewriteTy t) (map (second rewriteTy) its)
++          ESign t k -> ESign (rewriteTy t) k
++          EParen t -> EParen (rewriteTy t)
++          EForall b iks t -> EForall b iks (rewriteTy t)
++          _ -> t
++      rewriteConstr (Constr evks ctx c inf (Left sts)) =
++        Constr evks (map rewriteTy ctx) c inf (Left (map (second rewriteTy) sts))
++      rewriteConstr (Constr evks ctx c inf (Right fs)) =
++        Constr evks (map rewriteTy ctx) c inf (Right (map (second (second rewriteTy)) fs))
++      constrs' = map rewriteConstr constrs
++  dataDef <- if isNew then
++               case constrs' of
++                 [c] -> return (Newtype (dfIdent, instVks) c derivs)
++                 _ -> tcError loc "a newtype instance must have exactly one constructor"
++             else return (Data (dfIdent, instVks) constrs' derivs)
++  -- Seed the kind of the representation type; withLHS checks it later.
++  aks <- mapM (const newUVar) instVks
++  kRes <- newUVar
++  extValQTop dfIdent (foldr kArrow kRes aks)
++  return [dataDef, TypeInst instVks qfam patArgs repTy]
++desugarDataInst d = return [d]
++
+ -- A standalone deriving has a regular instance head.
+ -- If it has a via clause, the via type has to have the same kind
+ -- as the type in the instance head.
+@@ -1320,14 +2292,19 @@ tcDeriving (tyId, vks) (Deriving strat cs) = do
+               _        -> return strat
+   return $ Deriving strat' cs'
+ 
+-withLHS :: forall a . HasCallStack => LHS -> (LHS -> T (a, EKind)) -> T a
++withLHS :: forall a . HasCallStack => LHS -> (LHS -> EKind -> T (a, EKind)) -> T a
+ withLHS (i, vks) ta = do
+   (_, ki) <- tLookupV i
+-  withVks vks $ \ vks' -> do
+-    (a, kr) <- ta (i, vks')
+-    let kapp = foldr (kArrow . (\ (IdKind _ k) -> k)) kr vks'
+-    -- XXX polykinded definitions don't work properly
+-    _ <- subsCheckRho (getSLoc i) eCannotHappen ki kapp
++  withVks vks $ \ vks0 -> do
++    kr0 <- newUVar
++    let kapp0 = foldr (kArrow . (\ (IdKind _ k) -> k)) kr0 vks0
++    -- Pre-unify against ki so standalone kind signatures inform parameter
++    -- and result kinds inside the declaration body (e.g. closed equations).
++    _ <- subsCheckRho (getSLoc i) eCannotHappen ki kapp0
++    vks' <- mapM (\ (IdKind v k) -> IdKind v <$> derefUVar k) vks0
++    kr0' <- derefUVar kr0
++    (a, kr) <- ta (i, vks') kr0'
++    unify (getSLoc i) kr0' kr
+     return a
+ 
+ tcCtx :: HasCallStack => [EConstraint] -> T [EConstraint]
+@@ -1481,6 +2458,33 @@ isDefaultMethodOfId i di =
+ defaultSuffix :: String
+ defaultSuffix = uniqIdentSep ++ "dflt"
+ 
++assocTypeSuffix :: String
++assocTypeSuffix = uniqIdentSep ++ "atyp"
++
++mkAssocTypeId :: Ident -> Ident
++mkAssocTypeId fam = addIdentSuffix fam assocTypeSuffix
++
++isAssocTypeId :: Ident -> Bool
++isAssocTypeId i = assocTypeSuffix `isSuffixOf` unIdent i
++
++unAssocTypeId :: Ident -> Maybe Ident
++unAssocTypeId i = mkIdentSLoc (getSLoc i) <$> stripSuffix assocTypeSuffix (unIdent i)
++
++isAssocTypeOfId :: Ident -> Ident -> Bool
++isAssocTypeOfId i ai = maybe False (== unIdent i) (stripSuffix assocTypeSuffix (unIdent ai))
++
++addClassTypeAssocs :: [EDef] -> T ()
++addClassTypeAssocs origDs = do
++  mn <- gets moduleName
++  tt <- gets typeTable
++  let entries =
++        [ (qualIdent mn cls, [ValueExport (mkAssocTypeId fam) e])
++        | Class _ (cls, _) _ ms <- origDs
++        , fam <- [ i | TypeFam (i, _) _ _ _ <- ms ] ++ [ i | DataFam (i, _) _ <- ms ]
++        , Right e <- [stLookup "" (qualIdent mn fam) tt]
++        ]
++  modify $ \ ts -> ts { assocTable = foldl' (\ m (k, v) -> M.insertWith mergeVEAssoc k v m) (assocTable ts) entries }
++
+ -- Split something of the form
+ --  forall vs . ctx => t
+ -- into (vs, ctx, t)
+@@ -1506,8 +2510,13 @@ expandTup t = do
+ -- expandInst runs when all kind checking has been done, but no value checking.
+ -- So any generated type expressions must be kind correct and fully qualified,
+ -- whereas value expressions do not.
+-expandInst :: EDef -> T [EDef]
+-expandInst dinst@(Instance act bs extra) = do
++expandInst :: [EDef] -> EDef -> T [EDef]
++expandInst allDs dinst@(Instance act bs extra) = do
++  let (famBs, bsOk) = partition isFamInst bs
++      (famExtra, extraOk) = partition isFamInst extra
++      isFamInst TypeInst{} = True
++      isFamInst DataInst{} = True
++      isFamInst _ = False
+   (vks, ctx, uccs) <- splitContext <$> expandSyn act
+   ccs <- expandTup uccs
+   (instBinds, defs) <- unzip <$> forM ccs (\ cc -> do
+@@ -1525,7 +2534,7 @@ expandInst dinst@(Instance act bs extra) = do
+         Nothing -> tcError loc $ "not a class " ++ showIdent qiCls
+         Just x -> return x
+ 
+-    let lbs = filter ((0 /=) . instBind) bs
++    let lbs = filter ((0 /=) . instBind) bsOk
+         signs = [ (i, t) | Sign is t <- lbs, i <- is ]
+         addSign i e = maybe e (ESign e) $ lookup i signs
+         clsMdl = qualOf qiCls                   -- get class's module name
+@@ -1556,7 +2565,7 @@ expandInst dinst@(Instance act bs extra) = do
+     )
+ 
+   let instBindSum = foldr (\ f b x -> f x + b x) (const 0) instBinds
+-  case filter ((1 /=) . instBindSum) bs of
++  case filter ((1 /=) . instBindSum) bsOk of
+     [] -> return ()
+     b:_ -> tcError (getSLoc b) (if instBindSum b < 1
+       then "superflous instance binding"
+@@ -1569,18 +2578,79 @@ expandInst dinst@(Instance act bs extra) = do
+     return []
+    else
+ -}
+-  return (dinst : concat defs)
++  famDefs <- processInstFams allDs vks ccs (famBs ++ famExtra)
++  return (dinst : concat defs ++ famDefs)
+ 
+-expandInst d = return [d]
++expandInst _ d = return [d]
++
++-- Process associated type/data instances inside an instance body:
++-- kind-check and register explicit ones, desugar data instances
++-- (with deriving and recursive instance expansion), and instantiate
++-- class defaults for associated families the instance omits.
++processInstFams :: [EDef] -> [IdKind] -> [EType] -> [EDef] -> T [EDef]
++processInstFams allDs _ivks ccs famBinds = do
++  mn <- gets moduleName
++  let arities = [ (c, args) | cc <- ccs, let (c, args) = getApp cc ]
++  explicit <- forM famBinds $ \ b -> case b of
++    TypeInst vks fam pats rhs -> do
++      ti'@(TypeInst vks' qfam pats' rhs') <- withTypeTable $ do
++        (vks1, qfam1, pats1, rhs1) <- checkTypeInst allDs vks fam pats rhs
++        zonkTypeDef (TypeInst vks1 qfam1 pats1 rhs1)
++      registerTypeInst vks' qfam pats' rhs'
++      return (Just qfam, [ti'])
++    DataInst isNew vks fam pats constrs derivs -> do
++      (_defs, checked) <- withTypeTable $ do
++        ds' <- desugarDataInst (DataInst isNew vks fam pats constrs derivs)
++        ch0 <- mapM (tcDefType (allDs ++ ds')) ds'
++        vt <- gets valueTable
++        vt' <- mapMSymTab (\ (Entry i k) -> Entry i <$> zonkKindExpr k) vt
++        putValueTable vt'
++        ch  <- mapM zonkTypeDef ch0
++        return (ds', ch)
++      mapM_ addTypeAndData checked
++      derived <- concat <$> mapM doDeriving checked
++      expanded <- concat <$> mapM (expandInst allDs) derived
++      let qfams = [ q | TypeInst _ q _ _ <- checked ]
++      return (listToMaybe qfams, checked ++ expanded)
++    _ -> return (Nothing, [])
++  let explicitQFams = [ q | (Just q, _) <- explicit ]
++      explicitDefs = concat [ ds | (_, ds) <- explicit ]
++  -- Class defaults for omitted associated families, per instance head.
++  defInsts <- fmap concat $ forM arities $ \ (cls, args) -> do
++    case [ (cvs, ms) | Class _ (c, cvs) _ ms <- allDs, qualIdent mn c == cls ] of
++      [] -> return []  -- imported class: defaults unavailable
++      ((cvs, ms) : _) -> do
++        let defaults = [ d | d@TypeInst{} <- ms ]
++        fmap concat $ forM defaults $ \ (TypeInst dvs dfam dpats drhs) -> do
++          qdfam <- resolveFamId dfam
++          if qdfam `elem` explicitQFams then return []
++            else do
++              let sub = zip (map idKindIdent cvs) args
++                  pats' = map (subst sub) dpats
++                  rhs' = subst sub drhs
++              pats'' <- withTypeTable $ mapM expandSyn pats'
++              rhs''  <- withTypeTable $ expandSyn rhs'
++              let pvs = nub (freeTyVars pats'')
++                  vks'' = map (`IdKind` kType) pvs
++              dup <- hasTypeInst qdfam pats'' rhs''
++              if dup then return []
++                else do
++                  registerTypeInst vks'' qdfam pats'' rhs''
++                  return [TypeInst vks'' qdfam pats'' rhs'']
++  return (explicitDefs ++ defInsts)
+ 
+ ---------------------
+ 
++recPatFields :: [IdKind] -> [Ident]
++recPatFields vks = [ f | IdKind f (EVar k) <- vks, k == mkIdent "$recpat" ]
++
+ tcDefsValue :: HasCallStack => [EDef] -> T [EDef]
+ tcDefsValue adefs = do
+ --  tcTrace $ "tcDefsValue: ------------ start"
+   -- Gather up all type signatures, and put them in the environment.
+   -- Definitions with no type signature will be missing.
+-  mapM_ addValueType adefs
++  let recPatMap = M.fromList [ (ip, fs) | Pattern (ip, vks) _ _ <- adefs, let fs = recPatFields vks, not (null fs) ]
++  mapM_ (addValueType recPatMap) adefs
+   defs <- concat<$> mapM (dsPatBind <=< dsEFieldsBind) adefs
+   let sccs = fst $ sccDefs defs
+       tcSCC (AcyclicSCC d@Pattern{}) = tcPatSyn d
+@@ -1614,10 +2684,12 @@ sccDefs defs =
+               noSign (PatBind _ _) = impossible
+               noSign _ = False
+               hasNoSign i = isNothing $ M.lookup i smap
++      recFieldMap = M.fromList [ (f, i) | Pattern (i, vks) _ _ <- unsigns, f <- recPatFields vks ]
++      mapRecVars = map (\ v -> fromMaybe v (M.lookup v recFieldMap))
+       -- split the unsigned defs into strongly connected components
+       sccs = stronglyConnComp $ map node unsigns
+-        where node d@(Fcn i e)             = (d, i, allVarsEqns e)  -- XXX should really be allFreeVars
+-              node d@(Pattern (i, _) p me) = (d, i, allVarsPat p $ maybe [] allVarsEqns me)
++        where node d@(Fcn i e)               = (d, i, mapRecVars (allVarsEqns e))  -- XXX should really be allFreeVars
++              node d@(Pattern (i, vks) p me) = (d, i, mapRecVars (filter (`notElem` map idKindIdent vks) (allVarsPat p (maybe [] allVarsEqns me))))
+               node _ = undefined
+   in  (sccs, signs)
+ 
+@@ -1668,8 +2740,8 @@ getUnsolved = do
+   putConstraints []
+   return $ nubBy eqEType ctx'
+ 
+-addValueType :: EDef -> T ()
+-addValueType adef = do
++addValueType :: M.Map [Ident] -> EDef -> T ()
++addValueType recPatMap adef = do
+   mn <- gets moduleName
+   -- tcTrace ("addValueType: " ++ showEDefs [adef])
+   let addConFields _     (Constr _ _ _ _ (Left _)) = return ()
+@@ -1685,7 +2757,7 @@ addValueType adef = do
+     Sign is@(i:_) t | isConIdent i -> do
+       -- pattern signature
+       t' <- canonPatSynType t
+-      mapM_ (addPatSyn t') is
++      mapM_ (\ p -> addPatSyn (fromMaybe [] (M.lookup p recPatMap)) t' p) is
+     Sign is t ->
+       -- regular signature
+       mapM_ (\ i -> extValQTop i t) is
+@@ -1717,16 +2789,26 @@ addValueTypeClass :: EDef -> T ()
+ addValueTypeClass (Class ctx (i, vks) fds ms) = addValueClass ctx i vks fds ms
+ addValueTypeClass _ = return ()
+ 
+--- Add a pattern synonym to the symbol table.
+-addPatSyn :: EType -> Ident -> T ()
+-addPatSyn at i = do
++-- Add a pattern synonym (and any non-existential record selector types) to the symbol table.
++addPatSyn :: [Ident] -> EType -> Ident -> T ()
++addPatSyn fs at0 i = do
++  at <- expandSyn at0
+   mn <- gets moduleName
+-  let (_, _, _, _, t) = splitPatSynType at
+-      n = length $ fst $ getArrows t
++  let (vks1, ctx1, vks2, _ctx2, t) = splitPatSynType at
++      (ats, tret) = getArrows t
++      n = length ats
+       qi = qualIdent mn i
+       qip = mkPatSynMatch qi
+-      mtch = (EVar qip, mkPatSynMatchType qip at)
++      em = if null fs then EVar qip else ETuple (EVar qip : map EVar fs)
++      mtch = (em, mkPatSynMatchType qip at)
++      evs = map idKindIdent vks2
++      addSel (fld, fty)
++        | null (freeTyVars [fty] `intersect` evs) = do
++            let selTy = eForall vks1 $ etImplies ctx1 $ tret `tArrow` fty
++            extValQTop fld selTy
++        | otherwise = return ()
+   extValETop i at $ ECon $ ConSyn qi n mtch
++  zipWithM_ (curry addSel) fs ats
+ 
+ -- Add mathods to the value table.
+ addValueClass :: [EConstraint] -> Ident -> [IdKind] -> [FunDep] -> [EBind] -> T ()
+@@ -1825,7 +2907,7 @@ tcPatSyn (Pattern (ip, vks) p me) = do
+       ty4 = eForall' QImpl (sks' ++ vs) ty3      -- add the skolems tyvars
+   ty5 <- canonPatSynType ty4
+ --  traceM $ "tcPatSyn: tys " ++ show (ty0, ty1, ty2, ty3, ty4, ty5)
+-  addPatSyn ty5 ip
++  addPatSyn (recPatFields vks) ty5 ip
+ --  traceM ("tcPatSyn: after " ++ show (ip, ty5))
+   return [ Sign [ip] ty3 ]
+ tcPatSyn _ = impossible
+@@ -1868,7 +2950,7 @@ tcKindT :: HasCallStack =>
+            Expected -> EKind -> T EKind
+ tcKindT mk t =
+ --  trace ("tcKindT: " ++ show (mk, t)) $
+-  assertTCMode (==TCKind) $ tcExpr mk t
++  assertTCMode (==TCKind) $ tcExpr mk (dsType t)
+ 
+ -- Sort check a kind while in type checking mode
+ tcKind :: HasCallStack =>
+@@ -1966,7 +3048,14 @@ tcExprR mt ae =
+                Check t -> addConstraint d t
+              return (EVar d)
+ 
+-           | isDummyIdent i -> tcError loc "_ cannot be used as a variable"
++           | isDummyIdent i -> do
++             tcm <- gets tcMode
++             case tcm of
++               TCType -> do
++                 u <- newUVar
++                 k <- newUVar
++                 instSigma loc u k mt
++               _ -> tcError loc "_ cannot be used as a variable"
+            | otherwise -> do
+              -- Type checking an expression (or type)
+              (e, t) <- tLookupV i
+@@ -2067,6 +3156,7 @@ tcExprR mt ae =
+           munify loc mt ttup
+           return (ETuple ees)
+     EParen e -> tcExpr mt e
++    EDo Nothing ass | Just appDo <- dsApplicativeDo loc ass -> tcExpr mt appDo
+     EDo mmn ass -> do
+       case ass of
+         [] -> impossible
+@@ -2238,7 +3328,7 @@ needDsCase ex lbls ae =
+     -- Does the type need a case ?
+     needT :: EType -> T (Maybe [Constr])
+     needT at = do
+-      t <- expandSyn at
++      t <- derefUVar at >>= expandSyn
+       case getAppM t of
+         Nothing -> return Nothing
+         Just (i, ts) -> do
+@@ -2248,9 +3338,12 @@ needDsCase ex lbls ae =
+             Just (Newtype _ c _) -> return $ if not (null ts) ||     needC c  then Just [c] else Nothing
+             _ -> return Nothing        -- we don't know which type it is
+     -- Does a constructor need a case?
++    -- Large records (> 64 fields, see largeRecordFieldLimit in Deriving)
++    -- always use case desugaring for updates, since no SetField
++    -- instance is generated for them.
+     needC :: Constr -> Bool
+     needC (Constr _ _ _ _ (Left _)) = False
+-    needC (Constr vs _ _ _ (Right fs)) = not (null vs) || any (isForall . snd . snd) fs
++    needC (Constr vs _ _ _ (Right fs)) = not (null vs) || length fs > 64 || any (isForall . snd . snd) fs
+       where isForall (EForall _ _ _) = True
+             isForall _ = False
+     needL :: Ident -> T (Maybe [Constr])
+@@ -2263,13 +3356,21 @@ needDsCase ex lbls ae =
+ 
+ -- Do a record update using case.
+ dsUpdateCase :: [Constr] -> Expr -> [(Ident, Expr)] -> Expr
+-dsUpdateCase cs e ies = chkUsed $ ECase e $ map mkArm cs
++dsUpdateCase cs e ies = chkUsed $ ECase e arms
+   where
+     loc = getSLoc e
+-    mkArm (Constr _ _ _ _ (Left _)) = (x, oneAlt x) where x = EVar $ mkIdentSLoc loc "x"
+-    mkArm (Constr _ _ c _ (Right fs)) = (eApps (EVar c) xs, oneAlt $ eApps (EVar c) (zipWith fld xs fs))
+-      where xs = [ EVar $ mkIdentSLoc loc $ "x$" ++ show i | i <- [1..length fs] ]
++    undef = mkExn loc "record update" "recSelError"
++    hasAll fs = all ((`elem` map fst fs) . fst) ies
++    matchingArms =
++      [ (eApps (EVar c) xs, oneAlt $ eApps (EVar c) (zipWith fld xs fs))
++      | Constr _ _ c _ (Right fs) <- cs
++      , hasAll fs
++      , let xs = [ EVar $ mkIdentSLoc loc $ "x$" ++ show i | i <- [1..length fs] ]
+             fld x (i, _) = fromMaybe x $ lookup i ies
++      ]
++    arms
++      | length matchingArms == length cs = matchingArms
++      | otherwise                        = matchingArms ++ [(eDummy, oneAlt undef)]
+     chkUsed a = case map fst ies \\ [ f | Constr _ _ _ _ (Right fs) <- cs, (f, _) <- fs ] of
+                   [] -> a
+                   f:_ -> errorMessage loc $ "Unknown field " ++ show f
+@@ -2279,6 +3380,35 @@ dsSRec mmn imfix iret ss =
+   let vs = eTuple $ map EVar $ concatMap getStmtBound ss
+   in  SBind vs $ eAppI imfix $ eLam [ELazy True vs] $ EDo mmn (ss ++ [SThen $ eAppI iret vs])
+ 
++-- Desugar an ApplicativeDo-compatible 'do' block (ending in @pure body@ where
++-- none of the '<-'-bound variables appear in the statement actions or let-bindings)
++-- into @let ... in fmap (\x1 ... xn -> body) e1 <*> ... <*> en@.
++dsApplicativeDo :: SLoc -> [EStmt] -> Maybe Expr
++dsApplicativeDo loc ass
++  | length ass >= 2
++  , SThen lastExpr <- last ass
++  , Just body <- unPure lastExpr
++  , Just steps <- mapM toStep (init ass)
++  , let lets = [ bs | Left bs <- steps ]
++        binds = [ xe | Right xe <- steps ]
++        boundVars = [ x | (x, _) <- binds, not (isDummyIdent x) ]
++        rhsVars = concatMap (allVarsExpr . snd) binds ++ concatMap (concatMap allVarsBind) lets
++  , ((_, e1) : rest) <- binds
++  , all (`notElem` rhsVars) boundVars =
++      let lam = eLam [ EVar x | (x, _) <- binds ] body
++          app0 = EApp (EApp (EVar (mkBuiltin loc "fmap")) lam) e1
++          appAll = foldl (\acc (_, ei) -> EApp (EApp (EVar (mkBuiltin loc "<*>")) acc) ei) app0 rest
++      in Just (foldr ELet appAll lets)
++  | otherwise = Nothing
++  where
++    unPure (EApp (EVar p) b) | unIdent (unQualIdent p) == "pure" = Just b
++    unPure (EOper (EVar p) [(op, b)]) | unIdent (unQualIdent p) == "pure", unIdent (unQualIdent op) == "$" = Just b
++    unPure _ = Nothing
++    toStep (SBind (EVar x) e) | not (isConIdent x) = Just (Right (x, e))
++    toStep (SThen e) = Just (Right (dummyIdent, e))
++    toStep (SLet bs) = Just (Left bs)
++    toStep _ = Nothing
++
+ -- XXX Maybe allow singleton tuples
+ eTuple :: [Expr] -> Expr
+ eTuple [e] = e
+@@ -2525,6 +3655,7 @@ getAts p = ([], p)
+ 
+ dsEFieldsBind :: EBind -> T EBind
+ dsEFieldsBind (PatBind p e) = PatBind <$> dsEFields p <*> return e
++dsEFieldsBind (Pattern lhs p me) = Pattern lhs <$> dsEFields p <*> return me
+ dsEFieldsBind b = return b
+ 
+ dsEField :: [EField] -> Expr -> EField -> T [EField]
+@@ -2556,7 +3687,9 @@ dsEFields apat =
+     EViewPat e p -> EViewPat e <$> dsEFields p
+     ELazy z p -> ELazy z <$> dsEFields p
+     ECon _ -> return apat
+-    EUpdate c fs -> EUpdate c . concat <$> mapM (dsEField fs c) fs
++    EUpdate c fs -> do
++      fs' <- concat <$> mapM (dsEField fs c) fs
++      EUpdate c <$> mapM (\ f -> case f of EField is p -> EField is <$> dsEFields p; _ -> impossible) fs'
+     EParen p -> dsEFields p
+     ENegApp _ -> return apat
+     EOr ps -> EOr <$> mapM dsEFields ps
+@@ -2811,6 +3944,14 @@ tcAlt t (ss, rhs) = tcGuards ss $ \ ss' -> do
+ 
+ tcGuards :: [EStmt] -> ([EStmt] -> T EAlt) -> T EAlt
+ tcGuards [] ta = ta []
++tcGuards (SBind p e : ss) ta = do
++  ((e', tt), bs) <- solveLocalConstraints $ tInferExpr e
++  let e'' = eLetB (eBinds bs) e'
++  tCheckPatC' True tt p $ \ bsPat p' ->
++    tcGuards ss $ \ rss ->
++      let stmts = SBind p' e'' : rss
++          stmts' = if null bsPat then stmts else SLet (eBinds bsPat) : stmts
++      in ta stmts'
+ tcGuards (s:ss) ta = tcGuard s $ \ rs -> tcGuards ss $ \ rss -> ta (rs:rss)
+ 
+ tcGuard :: EStmt -> (EStmt -> T EAlt) -> T EAlt
+@@ -2869,23 +4010,48 @@ subsCheck loc exp1 sigma1 sigma2 = do -- Rule DEEP-SKOL
+     tcErrorTK loc "Subsumption check failed"
+   return exp1'
+ 
+-tCheckPatC :: forall a . EType -> EPat -> (EPat -> T a) -> T a
+-tCheckPatC t p@(EVar v) ta | not (isConIdent v) = do  -- simple special case
+-  withExtVals [(v, t)] $ ta p
+-tCheckPatC t app ta = do
++tCheckPatC' :: forall a . Bool -> EType -> EPat -> ([Solved] -> EPat -> T a) -> T a
++tCheckPatC' _ t p@(EVar v) ta | not (isConIdent v) = do  -- simple special case
++  withExtVals [(v, t)] $ ta [] p
++tCheckPatC' solvePre t app ta = do
+ --  tcTrace $ "tCheckPatC: " ++ show app ++ " :: " ++ show t
+   app' <- dsEFields app
+   let vs = patVars app'
+   multCheck vs
+   env <- mapM (\ v -> (,) v <$> newUVar) vs
+   withExtVals env $ do
++    csOuter <- gets constraints
++    putConstraints []
+     (_sks, ds, pp) <- tCheckPat t app'
+ --    tcTrace ("tCheckPatC: " ++ show pp)
+ --    xt <- derefUVar t
+ --    tcTrace ("tCheckPatC ds=" ++ show ds ++ "t=" ++ show xt)
+     -- XXX must check for leaking skolems
+-    withDicts ds $
+-      ta pp
++    bsPre <- if solvePre then solveConstraints else return []
++    patCs <- gets constraints
++    withDicts ds $ do
++      patRest <- if null ds || null patCs
++                 then return patCs
++                 else do
++                   let patUsed = allVarsExpr pp
++                       canAutoSolve (di, ct) =
++                         di `notElem` patUsed &&
++                         case getAppM ct of
++                           Just (iCls, _) -> iCls == mkIdent nameTypeEq
++                           Nothing        -> False
++                       (autoEqs, keepCs) = partition canAutoSolve patCs
++                   if null autoEqs
++                     then return patCs
++                     else do
++                       putConstraints autoEqs
++                       _ <- solveConstraints
++                       unEqs <- gets constraints
++                       return (unEqs ++ keepCs)
++      putConstraints (patRest ++ csOuter)
++      ta bsPre pp
++
++tCheckPatC :: forall a . EType -> EPat -> (EPat -> T a) -> T a
++tCheckPatC t p ta = tCheckPatC' False t p (\ _ pp -> ta pp)
+ 
+ type EPatRet = ([TyVar], [(Ident, EConstraint)], EPat)  -- skolems, dictionaries, pattern
+ 
+@@ -3022,7 +4188,8 @@ tcPatApCon mt args con xpt = do
+                      | otherwise   = return ()
+   case con of
+     -- Pattern synonym
+-    ECon (ConSyn qi n (e, t)) -> do
++    ECon (ConSyn qi n (em, t)) -> do
++      let e = case em of ETuple (e0 : _) -> e0; _ -> em
+       checkArity n
+       let (_, yes, _) = mkMatchDataTypeConstr (mkPatSynMatch qi) xpt
+           vp = EViewPat (EQVar e t) (eApps yes args)
+@@ -3132,12 +4299,21 @@ tcBindGrp' bs = do
+         return bs'
+        else do
+        -- Generalize
+-       cs <- mapM (derefUVar . snd) =<< gets constraints
++       cs0 <- gets constraints
++       impTbl <- gets impEqTable
++       cs <- mapM (derefUVar . snd) cs0
+        -- find constraints involving the local tyvars
+-       let ctx = nubBy eqEType $
++       let hasImpEq = any (\ (di, ct) -> isJust (M.lookup di impTbl) && not (null (intersect qvs' (metaTvs [ct])))) cs0
++           ctx = nubBy eqEType $
+                  filter (\ c -> not $ null $ intersect qvs' (metaTvs [c])) cs
+-       let multiParam ct = length (snd (getApp ct)) /= 1
+-       if any multiParam ctx ||       -- temporary workaround for
++       let multiParam ct =
++             case getAppM ct of
++               Just (_, as) -> length as /= 1
++               -- Unknown head (e.g. flexible class variable):
++               -- stay monomorphic rather than fail.
++               Nothing -> True
++       if hasImpEq ||
++          any multiParam ctx ||       -- temporary workaround for
+           -- Overloaded bind: fallback to monomorphic behavior
+           not (null ctx) && not (all isSynFcn bs') then
+          return bs'
+@@ -3212,6 +4388,7 @@ dsType at =
+     EVar _ -> at
+     EApp f a -> EApp (dsType f) (dsType a)
+     EOper t ies -> EOper (dsType t) [(i, dsType e) | (i, e) <- ies]
++    EListish (LList []) -> EVar (mkIdentSLoc (getSLoc at) "'[]")
+     EListish (LList [t]) -> tApp (tList (getSLoc at)) (dsType t)
+     ETuple ts -> tApps (tupleConstr (getSLoc at) (length ts)) (map dsType ts)
+     EParen t -> dsType t
+@@ -3450,8 +4627,8 @@ isEmptyCtx :: EConstraint -> Bool
+ isEmptyCtx (EVar i) = i == tupleConstr noSLoc 0
+ isEmptyCtx _ = False
+ 
+--- Expand a pattern synonym into the builder and matcher definitions.
+--- Removes that actual pattern definition
++-- Expand a pattern synonym into the builder, matcher, and any record selector definitions.
++-- Removes the actual pattern definition.
+ expandPatSyn :: EDef -> T [EDef]
+ expandPatSyn (Pattern (i, vks) p me) = do
+   (_, t) <- tLookup "type signature" i
+@@ -3462,9 +4639,20 @@ expandPatSyn (Pattern (i, vks) p me) = do
+                    , eEqn [eDummy] no]
+       match = eApps yes (map (EVar . idKindIdent) vks)
+       dname = case ddata of Data (n, _) _ _ -> n; _ -> impossible
++      fs = recPatFields vks
++      (_vks1, _ctx1, vks2, _ctx2, ty) = splitPatSynType t
++      (ats, _rt) = getArrows ty
++      evs = map idKindIdent vks2
++      n = length ats
++      selFcns =
++        [ Fcn fld [ eEqn [eApps (EVar i) [ if j == k then EVar v else eDummy | j <- [0 .. n - 1] ]] (EVar v) ]
++        | (k, (fld, fty)) <- zip [0 :: Int ..] (zip fs ats)
++        , null (freeTyVars [fty] `intersect` evs)
++        , let v = mkIdentSLoc (getSLoc fld) "$sel"
++        ]
+   kvar <- newUVar    -- We don't care about the kind
+   withTypeTable $ extValQTop dname kvar
+-  pure $ maybeToList mexp ++ [pat, ddata]
++  pure $ maybeToList mexp ++ [pat, ddata] ++ selFcns
+ expandPatSyn d = pure [d]
+ 
+ -- Add the matcher for a pattern synonym to the symbol table.
+@@ -3525,7 +4713,8 @@ isMatchDataTypeName = isSuffixOf "%T" . unIdent
+ -- The input has forall inserted, but the implicit forall
+ -- may be in the wrong place.
+ canonPatSynType :: EType -> T EType
+-canonPatSynType at = do
++canonPatSynType at0 = do
++  at <- expandSyn at0
+   let mkTyp rVks rCtx pVks pCtx ty =
+         EForall QExpl rVks $ tImplies rCtx $
+         EForall QExpl pVks $ tImplies pCtx ty
+@@ -3551,9 +4740,11 @@ canonPatSynType at = do
+       pure $ mkTyp reqVks reqCtx proVks proCtx t3
+ 
+     ty -> do
+-      -- No forall at all.  XXX doesn't work with nullary classes
+---      traceM "%%% none"
+-      pure $ mkTyp [] emptyCtx [] emptyCtx ty
++      -- No forall at all (e.g. nullary constraint like HasCallStack => A -> B).
++      let (reqCtx, t1) = getImplies' ty
++          (proVks, t2) = unForall t1
++          (proCtx, t3) = getImplies' t2
++      pure $ mkTyp [] reqCtx proVks proCtx t3
+ 
+ splitPatSynType :: EType -> ([IdKind], EConstraint, [IdKind], EConstraint, EType)
+ splitPatSynType (EForall _ vks1 t0)
+@@ -3568,10 +4759,19 @@ splitPatSynType t = impossiblePP t
+ --  * components of a tupled constraint
+ --  * superclasses of a constraint
+ expandDict :: HasCallStack => Expr -> EConstraint -> T [InstDictC]
+-expandDict edict ct = expandDict' [] [] edict ct
+-
+-expandDict' :: HasCallStack => [IdKind] -> [EConstraint] -> Expr -> EConstraint -> T [InstDictC]
+-expandDict' avks actx edict acc = do
++expandDict edict ct = expandDict' 0 [] [] edict ct
++
++-- Bound on superclass expansion depth.  Guards against infinite
++-- regress with recursive superclasses through stuck families, e.g.
++--   class IsPass (NoGhcTcPass p) => IsPass (p :: Pass)
++-- where expanding IsPass p yields IsPass (NoGhcTcPass p), whose
++-- superclass is IsPass (NoGhcTcPass (NoGhcTcPass p)), and so on.
++maxSuperDepth :: Int
++maxSuperDepth = 8
++
++expandDict' :: HasCallStack => Int -> [IdKind] -> [EConstraint] -> Expr -> EConstraint -> T [InstDictC]
++expandDict' depth avks actx edict acc0 = do
++  acc <- normConstraint acc0
+   let
+     (bvks, bctx, cc) = splitContext acc
+     (iCls, args) = getApp cc
+@@ -3579,7 +4779,7 @@ expandDict' avks actx edict acc = do
+     ctx = actx ++ bctx
+   case getTupleConstr iCls of
+     Just _ -> do
+-      concat <$> mapM (\ (i, a) -> expandDict' vks ctx (mkTupleSel i (length args) `EApp` edict) a) (zip [0..] args)
++      concat <$> mapM (\ (i, a) -> expandDict' depth vks ctx (mkTupleSel i (length args) `EApp` edict) a) (zip [0..] args)
+     Nothing -> do
+       ct <- gets classTable
+       case M.lookup iCls ct of
+@@ -3595,7 +4795,8 @@ expandDict' avks actx edict acc = do
+             vs = map idKindIdent iks
+             sub = zip vs args
+             sups' = map (subst sub) sups
+-          insts <- concat <$> mapM (\ (i, sup) -> expandDict' vks ctx (EVar (mkSuperSel iCls i) `EApp` edict) sup) (zip [1 ..] sups')
++          insts <- if depth >= maxSuperDepth then return []
++                   else concat <$> mapM (\ (i, sup) -> expandDict' (depth + 1) vks ctx (EVar (mkSuperSel iCls i) `EApp` edict) sup) (zip [1 ..] sups')
+           return $ (edict, vks, ctx, cc, fds) : insts
+ 
+ mkSuperSel :: HasCallStack =>
+@@ -3640,12 +4841,33 @@ solveAndDefault False ta = solveLocalConstraints ta
+ solveAndDefault True  ta = do
+   a <- ta
+   ds <- solveConstraints
++  dsCo <- defaultCoercibleTyVars
+   cs <- gets constraints
+   vs <- getMetaTyVars (map snd cs)    -- These are the type variables that need defaulting
+ --  tcTrace $ "solveAndDefault: meta=" ++ show vs
+   -- XXX may have to iterate this with fundeps
+   ds' <- concat <$> mapM defaultOneTyVar vs
+-  return (a, ds ++ ds')
++  return (a, ds ++ dsCo ++ ds')
++
++defaultCoercibleTyVars :: T [Solved]
++defaultCoercibleTyVars = do
++  cs <- gets constraints
++  dt <- gets dataTable
++  cs' <- mapM (\(di, ct) -> (,) di <$> derefUVar ct) cs
++  let coImps =
++        [ (isJust (unwrapTopNewtype dt (if isEUVar a then b else a)), (getSLoc di, a, b))
++        | (di, ct) <- cs'
++        , Just (c, [a, b]) <- [getAppM ct]
++        , c == mkIdent nameCoercible
++        , isEUVar a /= isEUVar b
++        ]
++  case ([ x | (True, x) <- coImps ] ++ [ x | (False, x) <- coImps ]) of
++    (l, a, b) : _ -> do
++      unify l a b
++      ds1 <- solveConstraints
++      ds2 <- defaultCoercibleTyVars
++      return (ds1 ++ ds2)
++    [] -> return []
+ 
+ defaultOneTyVar :: TRef -> T [Solved]
+ defaultOneTyVar tv = do
+@@ -3680,7 +4902,10 @@ getSuperClasses ais = do
+       loop done (i:is) | i `elem` done = loop done is
+                        | otherwise = i :
+         case M.lookup i ct of
+-          Nothing -> error $ "getSuperClasses: " ++ show i
++          -- Unknown class (e.g. a class variable from a
++          -- variable-headed constraint): it has no known
++          -- superclasses, but keep it in the result.
++          Nothing -> loop (i:done) is
+           Just (ClassInfo _ supers _ _ _) ->
+             loop (i:done) (concatMap flatten supers ++ is)
+       flatten a =
+@@ -3725,20 +4950,32 @@ solveConstraints = do
+    else do
+     addMetaDicts
+ --    tcTrace "------------------------------------------\nsolveConstraints"
+-    eqs <- gets typeEqTable
+-    cs' <- mapM (\ (i,t) -> do { t' <- derefUVar t; return (i, normTypeEq eqs t') }) cs
++    -- Normalize with given type equalities AND given family equalities
++    -- (rewriting stuck family applications), so goals like
++    -- Anno (IdGhcP p) unify once (Anno (IdGhcP p) ~ SrcSpanAnnN) is given.
++    cs' <- mapM (\ (i,t) -> (,) i <$> normConstraint t) cs
++    let isEqGoal (_, ct) = case getAppM ct of
++                             Just (iCls, _) -> iCls == mkIdent nameTypeEq
++                             Nothing        -> False
++        (eqGoals, clsGoals) = partition isEqGoal cs'
++    (unsEq, solEq, impEq) <- solveMany eqGoals [] [] []
++    if not (null impEq) then do
++      putConstraints (unsEq ++ clsGoals)
++      mapM_ (\ (l, a, b) -> unify l a b) impEq
++      (solEq ++) <$> solveConstraints
++     else do
+ --    tcTrace ("constraints:\n" ++ unlines (map showConstraint cs'))
+-    (unsolved, solved, improves) <- solveMany cs' [] [] []
+-    putConstraints unsolved
++      (unsolved, solved, improves) <- solveMany (clsGoals ++ unsEq) [] [] []
++      putConstraints unsolved
+ --    tcTrace ("solved:\n"   ++ unlines [ showIdent i ++ " = "  ++ showExpr  e | (i, e) <- solved ])
+ --    tcTrace ("unsolved:\n" ++ unlines [ showIdent i ++ " :: " ++ showEType t | (i, t) <- unsolved ])
+-    if null improves then
+-      return solved
+-     else do
+-      -- We have improving substitutions.
+-      -- Do the unifications, and try to solve more.
+-      mapM_ (\ (l, a, b) -> unify l a b) improves
+-      (++ solved) <$> solveConstraints
++      if null improves then
++        return (solEq ++ solved)
++       else do
++        -- We have improving substitutions.
++        -- Do the unifications, and try to solve more.
++        mapM_ (\ (l, a, b) -> unify l a b) improves
++        (++ (solEq ++ solved)) <$> solveConstraints
+ 
+ -- A solver get a location, class&types (i.e. (C t1 ... tn)),
+ -- and, if successful, returns a dictionary expression and new goals.
+@@ -3749,12 +4986,13 @@ type SolveOne = SLoc -> Ident -> [EType] -> T (Maybe (Expr, [Goal], [Improve]))
+ -- There must always by at least one solver that matches
+ solvers :: [(Ident -> Bool, SolveOne)]
+ solvers =
+-  [ (isJust . getTupleConstr,      solveTuple)        -- handle tuple constraints, i.e. (C1 t1, C2 t2, ...)
+-  , ((== mkIdent nameTypeEq),      solveTypeEq)       -- handle equality constraints, i.e. (t1 ~ t2)
+-  , ((== mkIdent nameKnownNat),    solveKnownNat)     -- KnownNat 123 constraints
+-  , ((== mkIdent nameKnownSymbol), solveKnownSymbol)  -- KnownSymbol "abc" constraints
+-  , ((== mkIdent nameCoercible),   solveCoercible)    -- Coercible a b constraints
+-  , (const True,                   solveInst)         -- handle constraints with instances
++  [ (isJust . getTupleConstr,            solveTuple)        -- handle tuple constraints, i.e. (C1 t1, C2 t2, ...)
++  , ((== mkIdent nameTypeEq),            solveTypeEq)       -- handle equality constraints, i.e. (t1 ~ t2)
++  , ((== mkIdent nameKnownNat),          solveKnownNat)     -- KnownNat 123 constraints
++  , ((== mkIdent nameKnownSymbol),       solveKnownSymbol)  -- KnownSymbol "abc" constraints
++  , ((== mkIdent nameCoercible),         solveCoercible)    -- Coercible a b constraints
++  , ((== identDataTypeableTypeable),     solveTypeable)     -- Typeable Symbol/Nat/promoted-con constraints
++  , (const True,                         solveInst)         -- handle constraints with instances
+   ]
+ 
+ -- Examine each goal, either solve it (possibly producing new goals) or let it remain unsolved.
+@@ -3766,21 +5004,124 @@ solveMany ((di, ct) : cnss) uns sol imp | Just (_, (dd, _)) <- find (eqEType ct
+ solveMany (cns@(di, ct) : cnss) uns sol imp = do
+ --  tcTrace ("solveMany: trying " ++ showEType ct)
+   let loc = getSLoc di
+-      (iCls, cts) = getApp ct
+-      solver = head [ s | (p, s) <- solvers, p iCls ]
+-  ads <- gets argDicts
++  impTbl <- gets impEqTable
++  ads0 <- gets argDicts
++  ads <- mapM (\ (ai, act) -> (,) ai <$> normConstraint act) ads0
++  -- Givens captured when this dictionary was created (e.g. GADT pattern
++  -- equalities in scope at the use site).  Subgoals inherit them so the
++  -- givens thread down the instance resolution chain.
++  let cap = M.lookup di impTbl
++      propagate gs =
++        case cap of
++          Nothing -> return ()
++          Just cp -> modify $ \ ts -> ts { impEqTable = foldr (\ (gi, _) m -> M.insert gi cp m) (impEqTable ts) gs }
++      -- The normal path failed: retry once with the captured givens
++      -- applied.  On failure keep the ORIGINAL goal for a later pass,
++      -- once more unification variables have been settled.
++      retryImp =
++        case cap of
++          Nothing -> solveMany cnss (cns : uns) sol imp
++          Just (capEqs, capFeqs) -> do
++            ctImp <- normWithGivens capEqs capFeqs ct
++            if ctImp `eqEType` ct then
++              solveMany cnss (cns : uns) sol imp
++             else do
++              mres <- tryImpGoal loc ctImp ads
++              case mres of
++                Nothing -> solveMany cnss (cns : uns) sol imp
++                Just (de, gs, is) -> do
++                  propagate gs
++                  gs' <- mapM (\ (gi, gt) -> (,) gi <$> normConstraint gt) gs
++                  solveMany (gs' ++ cnss) uns ((ct, (di, de)) : sol) (is ++ imp)
+   -- Check if we have an exact match among the arguments dictionaries.
+   -- This is important to find tupled dictionaries in recursive calls.
++  -- This runs before any captured-given rewriting so outer dictionaries
++  -- (e.g. an outer Show a) keep priority.
+   case [ ai | (ai, act) <- ads, ct `eqEType` act ] of
+     ai : _ -> do
+ --      tcTrace $ "solve with arg " ++ show ct
+       solveMany cnss uns ((ct, (di, EVar ai)) : sol) imp
+     [] -> do
+-      msol <- solver loc iCls cts
+---      tcTrace ("solveMany msol=" ++ show msol)
+-      case msol of
+-        Nothing           -> solveMany        cnss  (cns : uns)                  sol         imp
+-        Just (de, gs, is) -> solveMany (gs ++ cnss)        uns ((ct, (di, de)) : sol) (is ++ imp)
++      case getAppM ct of
++        -- The head of the goal is not (yet) known.  This happens with
++        -- variable-headed constraints, e.g. goal (_c (Maybe _a)) from
++        -- instantiating (c (Maybe a)).  Try to match a local given up
++        -- to substitution; if none matches, leave the goal unsolved in
++        -- hope that the head gets resolved later.  Either way, do not fail here.
++        Nothing ->
++          case matchFlexGoal loc ct ads of
++            Just (ai, is) -> solveMany cnss uns ((ct, (di, EVar ai)) : sol) (is ++ imp)
++            Nothing       -> retryImp
++        Just (iCls, cts) -> do
++          let solver = head [ s | (p, s) <- solvers, p iCls ]
++          msol <- solver loc iCls cts
++--          tcTrace ("solveMany msol=" ++ show msol)
++          case msol of
++            Nothing           -> retryImp
++            Just (de, gs, is) -> do
++              propagate gs
++              gs' <- mapM (\ (gi, gt) -> (,) gi <$> normConstraint gt) gs
++              solveMany (gs' ++ cnss) uns ((ct, (di, de)) : sol) (is ++ imp)
++
++-- Normalize a goal with captured givens: rewrite with the captured type
++-- equalities and expand synonyms/stuck families using the captured family
++-- equalities in front of the current ones.
++normWithGivens :: TypeEqTable -> [(EType, EType)] -> EType -> T EType
++normWithGivens capEqs capFeqs t = do
++  t0 <- derefUVar t
++  syns <- gets synTable
++  feqs <- gets famEqTable
++  let allFeqs = if null capFeqs then feqs else capFeqs ++ feqs
++      step x = normTypeEq capEqs (expandSynFull syns allFeqs (normTypeEq capEqs x))
++      t1 = step t0
++  return $ if t1 `eqEType` t0 then t1 else step t1
++
++-- Solve a goal rewritten with captured givens, checking the outer argument
++-- dictionaries first so they keep priority over the rewriting.
++tryImpGoal :: SLoc -> EConstraint -> [(Ident, EConstraint)] -> T (Maybe (Expr, [Goal], [Improve]))
++tryImpGoal loc ctImp ads =
++  case [ ai | (ai, act) <- ads, ctImp `eqEType` act ] of
++    ai : _ -> return (Just (EVar ai, [], []))
++    [] ->
++      case getAppM ctImp of
++        Nothing ->
++          case matchFlexGoal loc ctImp ads of
++            Just (ai, is) -> return (Just (EVar ai, [], is))
++            Nothing       -> return Nothing
++        Just (iCls, cts) -> do
++          let solver = head [ s | (p, s) <- solvers, p iCls ]
++          solver loc iCls cts
++
++-- Match a goal whose head is a unification variable (from a
++-- variable-headed constraint like (c t)) against the local givens.
++-- Succeeds when some given matches the goal up to substitution of the
++-- goal's unification variables, e.g. goal (_c (Maybe _a)) against
++-- given (C (Maybe b)) with [_c := C, _a := b].
++-- Returns the given dictionary and the improving substitution.
++-- If several givens match, the first one wins (same policy as the
++-- exact match in solveMany; duplicates typically come from
++-- superclass diamonds).
++matchFlexGoal :: SLoc -> EConstraint -> [(Ident, EConstraint)] -> Maybe (Ident, [Improve])
++matchFlexGoal loc ct ads =
++  case [ (ai, mkImp s)
++       | (ai, act) <- ads
++       , let (wh, was) = splitApp ct
++             (gh, gas) = splitApp act
++       , length was == length gas
++       , Just (s, _) <- [matchTypes loc (wh : was) (gh : gas) []]
++       ] of
++    (ai, is) : _ -> Just (ai, is)
++    _            -> Nothing
++  where mkImp s = [ (loc, EUVar i, t) | (i, t) <- s ]
++
++-- Split a type application into head and arguments, mirroring getAppM
++-- but keeping a flexible head instead of failing on it.
++splitApp :: EType -> (EType, [EType])
++splitApp = loop []
++  where loop as (EApp f a) = loop (a : as) f
++        loop as (EParen e) = loop as e
++        loop as (EOper e1 [(op, e2)]) = loop as $ EApp (EApp (EVar op) e1) e2
++        loop as t = (t, as)
+ 
+ solveInst :: SolveOne
+ solveInst loc iCls cts = do
+@@ -3813,7 +5154,18 @@ solveGen :: TRef -> Bool -> [IFunDep] -> [InstDict] -> SolveOne
+ solveGen uniq noAtoms fds insts loc iCls cts = do
+ --  tcTrace ("solveGen: " ++ show (iCls, cts))
+ --  tcTrace ("solveGen: insts=" ++ show insts)
+-  let matches = getBestMatches $ findMatches uniq noAtoms loc fds insts cts
++  eqs <- gets typeEqTable
++  feqs <- gets famEqTable
++  syns <- gets synTable
++  let isDictArgE (EVar i)   = (adictPrefix ++ uniqIdentSep) `isPrefixOf` unIdent i
++      isDictArgE (EApp f a) = isDictArgE f || isDictArgE a
++      isDictArgE _          = False
++      normLocal t = normTypeEq eqs (expandSynFull syns feqs (normTypeEq eqs t))
++      normInst d@(InstDict de ctxts)
++        | (not (null eqs) || not (null feqs)) && isDictArgE de =
++            InstDict de (\u -> let (ctx, ts) = ctxts u in (map normLocal ctx, map normLocal ts))
++        | otherwise = d
++      matches = getBestMatches $ findMatches uniq noAtoms loc fds (map normInst insts) cts
+ --  tcTrace ("solveGen: matches allMatches =" ++ showListS show (findMatches uniq noAtoms loc fds insts cts))
+ --  tcTrace ("solveGen: matches bestMatches=" ++ showListS showMatch matches)
+   case matches of
+@@ -3843,38 +5195,206 @@ solveTypeEq :: SolveOne
+ solveTypeEq loc _iCls [t1, t2] | isEUVar t1 || isEUVar t2 = return $ Just (ETuple [], [], [(loc, t1, t2)])
+                                | otherwise = do
+ --  traceM $ "solveTypeEq " ++ prettyShow [t1, t2]
+-  eqs <- gets typeEqTable
+-  --tcTrace ("solveTypeEq eqs=" ++ show eqs)
+-  case solveEq eqs t1 t2 of
+-    Nothing -> return Nothing
+-    Just tts -> do
+-      let mkEq (u1, u2) = do
+-            i <- newDictIdent loc
+-            return (i, mkEqType loc u1 u2)
+-      ncs <- mapM mkEq tts
+-      return $ Just (ETuple [], ncs, [])
++  syns <- gets synTable
++  -- Never split an equality headed by a stuck type family into subgoals:
++  -- F a ~ G b must not become F ~ G and a ~ b.  Identical stuck
++  -- applications are discharged by solveEq's normalization check and
++  -- same-headed ones split soundly below; anything else stays unsolved
++  -- so given family equalities (famEqTable) can discharge it later.
++  t1e <- normConstraint t1
++  t2e <- normConstraint t2
++  let sameHead = case (appHeadIdent t1e, appHeadIdent t2e) of
++                   (Just h1, Just h2) -> h1 == h2
++                   _                  -> False
++  if (famHeaded syns t1e || famHeaded syns t2e) && not sameHead then do
++    if t1e `eqEType` t2e
++      then return $ Just (ETuple [], [], [])
++      else do
++        mimps <- tryFamInjImprove loc syns t1e t2e
++        case mimps of
++          Nothing -> return Nothing
++          Just imps -> do
++            -- Re-verify the full equality after the improvement unifies
++            -- the meta variable(s).
++            d' <- newDictIdent loc
++            return $ Just (ETuple [], [(d', mkEqType loc t1e t2e)], imps)
++  else do
++      eqs <- gets typeEqTable
++      --tcTrace ("solveTypeEq eqs=" ++ show eqs)
++      case solveEq eqs t1e t2e of
++        Nothing -> return Nothing
++        Just tts -> do
++          let mkEq (u1, u2) = do
++                i <- newDictIdent loc
++                return (i, mkEqType loc u1 u2)
++          ncs <- mapM mkEq tts
++          return $ Just (ETuple [], ncs, [])
+ solveTypeEq _ _ _ = impossible
+ 
++-- Injectivity improvement for type families declared with
++-- @type family F a ... = r | r -> ...@: when a stuck family application
++-- @F args@ is equated with a non-family type, the result variable @r@
++-- determines the annotated arguments, so matching the other side against
++-- every equation's RHS can pin down an injective argument.
++-- Every candidate equation that is not definitely apart must agree on the
++-- improved argument; the full equality is re-checked after unification,
++-- so this is sound and terminates (a meta variable is always refined).
++tryFamInjImprove :: SLoc -> SynTable -> EType -> EType -> T (Maybe [Improve])
++tryFamInjImprove loc syns t1e t2e = do
++  imps1 <- tryPair t1e t2e
++  if not (null imps1) then return (Just imps1) else do
++    imps2 <- tryPair t2e t1e
++    return (if null imps2 then Nothing else Just imps2)
++  where tryPair famSide otherSide =
++          case getAppM famSide of
++            Nothing -> return []
++            Just (h, allArgs) ->
++              case M.lookup h syns >>= unTFamEntry of
++                Nothing -> return []
++                Just (_, arity, inj, eqns)
++                  | not (or inj) -> return []
++                  | length allArgs /= arity -> return []
++                  | null eqns -> return []
++                  | famHeaded syns otherSide -> return []
++                  | isEUVar otherSide -> return []
++                  | otherwise -> do
++                      feqs <- gets famEqTable
++                      let otherExp = expandSynFull syns feqs otherSide
++                          cands = [ (pvs, pats, sub)
++                                  | (pvs, pats, rhs) <- eqns
++                                  , length pats == arity
++                                  , let rhsExp = expandSynFull syns feqs rhs
++                                  , Just sub <- [matchInjRHS syns pvs rhsExp otherExp] ]
++                      if null cands then return [] else
++                        fmap concat $ forM (zip3 inj allArgs [0..]) $ \ (idxIsInj, famArg, k) ->
++                          if not idxIsInj || null (metaTvs [famArg]) then return [] else do
++                            let mtgts = [ if all (`elem` map fst sub) (freeTyVars [pats !! k] `intersect` pvs)
++                                          then Just (subst sub (pats !! k))
++                                          else Nothing
++                                        | (pvs, pats, sub) <- cands ]
++                            case sequence mtgts of
++                              Nothing -> return []
++                              Just [] -> return []
++                              Just (t0 : ts)
++                                | all (eqEType t0) ts
++                                , not (famArg `eqEType` t0) -> return [(loc, famArg, t0)]
++                                | otherwise -> return []
++
++-- Match an injective family's equation RHS against the other side of an
++-- equality, collecting bindings for the equation's pattern variables.
++-- Returns Nothing only when the two types are definitely apart, so a
++-- genuine reduction of the family application is never discarded:
++-- family applications and unification variables on either side block
++-- (Just []), as do non-clashing rigid variables and constructors.
++matchInjRHS :: SynTable -> [Ident] -> EType -> EType -> Maybe [(Ident, EType)]
++matchInjRHS syns pvs pat arg =
++  case (strip pat, strip arg) of
++    (EVar v, a) | v `elem` pvs -> Just [(v, a)]
++    (p, a) | famHeaded syns p -> Just []
++           | famHeaded syns a -> Just []
++           | isEUVar a -> Just []
++    (EVar c1, EVar c2) -> if c1 == c2 then Just [] else Nothing
++    (ELit _ l1, ELit _ l2) -> if l1 == l2 then Just [] else Nothing
++    (p, a) ->
++      case (getAppM p, getAppM a) of
++        (Just (c1, as1), Just (c2, as2))
++          | isRigidConHead syns c1, isRigidConHead syns c2 ->
++              if c1 /= c2 || length as1 /= length as2 then Nothing
++              else combineSubs (zipWith (matchInjRHS syns pvs) as1 as2)
++        _ ->
++          case (p, a) of
++            (EApp f1 x1, EApp f2 x2) ->
++              combineSubs [matchInjRHS syns pvs f1 f2, matchInjRHS syns pvs x1 x2]
++            _ | (isRigidCon p && isLit a) || (isLit p && isRigidCon a) -> Nothing
++              | otherwise -> Just []
++  where strip (EParen t) = strip t
++        strip (ESign t _) = strip t
++        strip t = t
++        isRigidCon t = case getAppM t of
++                         Just (c, _) -> isRigidConHead syns c
++                         Nothing -> False
++        isLit (ELit _ _) = True
++        isLit _ = False
++        combineSubs = foldr combine (Just [])
++          where combine _ Nothing = Nothing
++                combine Nothing _ = Nothing
++                combine (Just s1) (Just s2) = foldr ins (Just s1) s2
++                ins _ Nothing = Nothing
++                ins (v, t) (Just acc) =
++                  case lookup v acc of
++                    Nothing -> Just ((v, t) : acc)
++                    Just t' | t `eqEType` t' -> Just acc
++                            | otherwise -> Nothing
++
+ solveCoercible :: HasCallStack => SolveOne
+ solveCoercible loc iCls [t1, t2] = do
+ --  traceM $ "solveCoercible " ++ prettyShow [t1, t2]
+-  -- pretend newtypes are type synonyms
+-  (t1', t2') <- withNewtypeAsSyns $
+-    (,) <$> expandSynNoChk t1 <*> expandSynNoChk t2
+-  -- walk over the types in parallel,
+-  -- and generate new Coercible constraints when not equal.
+---  traceM $ "solveCoercible: " ++ showExprRaw t1' ++ " and " ++ showExprRaw t2'
+-  case genCoerce t1' t2' of
+-    Nothing -> solveInstCoercible loc iCls t1 t2  -- look for a dict argument
+-    Just [(u1, u2)] | u1 `eqEType` t1 && u2 `eqEType` t2 -> solveInstCoercible loc iCls t1 t2  -- look for a dict argument
+-    Just tts -> do
+-      let mkCo (u1, u2) = do
+-            i <- newDictIdent loc
+-            return (i, mkCoercible loc u1 u2)
+-      ncs <- mapM mkCo tts
+-      return $ Just (ETuple [], ncs, [])
++  syns <- gets synTable
++  dt <- gets dataTable
++  t1s <- normConstraint t1
++  t2s <- normConstraint t2
++  let mkGoal isEq u1 u2 = do
++        i <- newDictIdent loc
++        return (i, if isEq then mkEqType loc u1 u2 else mkCoercible loc u1 u2)
++      isNewtypeCon qi = case M.lookup qi dt of
++                          Just (Newtype _ _ _) -> True
++                          _                    -> False
++  if eqEType t1s t2s then
++    return $ Just (ETuple [], [], [])
++  else case (getAppM t1s, getAppM t2s) of
++    (Just (h1, args1), Just (h2, args2))
++      | h1 == h2, length args1 == length args2, not (isFamCon syns h1), not (null args1) ->
++        if isNewtypeCon h1 then
++          case (unwrapTopNewtype dt t1s, unwrapTopNewtype dt t2s) of
++            (Just u1, Just u2) -> do
++              nc <- mkGoal False u1 u2
++              return $ Just (ETuple [], [nc], [])
++            _ -> do
++              ncs <- sequence (zipWith (mkGoal False) args1 args2)
++              return $ Just (ETuple [], ncs, [])
++        else do
++          let base = unIdent (unQualIdent h1)
++              argRoles
++                | base == "Set"     && length args1 == 1 = [True]
++                | base == "HashSet" && length args1 == 1 = [True]
++                | base == "Map"     && length args1 == 2 = [True, False]
++                | base == "HashMap" && length args1 == 2 = [True, False]
++                | otherwise                              = replicate (length args1) False
++          ncs <- sequence (zipWith3 mkGoal argRoles args1 args2)
++          return $ Just (ETuple [], ncs, [])
++    _ | not (isEUVar t1s || isEUVar t2s)
++      , Just u1 <- unwrapTopNewtype dt t1s -> do
++          nc <- mkGoal False u1 t2s
++          return $ Just (ETuple [], [nc], [])
++      | not (isEUVar t1s || isEUVar t2s)
++      , Just u2 <- unwrapTopNewtype dt t2s -> do
++          nc <- mkGoal False t1s u2
++          return $ Just (ETuple [], [nc], [])
++      | otherwise -> do
++          -- pretend newtypes are type synonyms
++          (t1', t2') <- withNewtypeAsSyns $
++            (,) <$> expandSynNoChk t1s <*> expandSynNoChk t2s
++          case genCoerce t1' t2' of
++            Nothing -> solveInstCoercible loc iCls t1 t2  -- look for a dict argument
++            Just [(u1, u2)] | isEUVar u1 || isEUVar u2 || (u1 `eqEType` t1s && u2 `eqEType` t2s) ->
++              solveInstCoercible loc iCls t1 t2  -- look for a dict argument
++            Just tts -> do
++              ncs <- mapM (uncurry (mkGoal False)) tts
++              return $ Just (ETuple [], ncs, [])
+ solveCoercible _ _ _ = impossible
+ 
++unwrapTopNewtype :: DataTable -> EType -> Maybe EType
++unwrapTopNewtype dt t
++  | Just (qi, args) <- getAppM t
++  , Just (Newtype (_, vs) (Constr _ _ _ _ et) _) <- M.lookup qi dt
++  , let n = length vs
++  , length args >= n
++  , let rhs = either (snd . head) (snd . snd . head) et
++  , qi `notElem` allVarsExpr rhs
++  , let (args1, argsRest) = splitAt n args
++  = Just $ foldl EApp (subst (zip (map idKindIdent vs) args1) rhs) argsRest
++  | otherwise = Nothing
++
+ genCoerce :: EType -> EType -> Maybe [(EType, EType)]
+ genCoerce t1 t2 | eqEType t1 t2 = Just []
+ genCoerce t1@(EUVar _) t2 = Just [(t1, t2)]
+@@ -3938,6 +5458,44 @@ solveKnownSymbol :: SolveOne
+ solveKnownSymbol loc iCls [e@(ELit _ (LStr _))] = mkConstDict loc iCls e
+ solveKnownSymbol loc iCls ts = solveInst loc iCls ts  -- look for a dict argument
+ 
++solveTypeable :: SolveOne
++solveTypeable loc iCls ts@[t] = do
++  msol <- solveInst loc iCls ts
++  case msol of
++    Just _ -> return msol
++    Nothing -> do
++      let mkTr mdl nam =
++            Just ( EApp (EVar (mkClassConstructor iCls))
++                        (EApp (EApp (EVar (mkIdentB "Data.Typeable._mkTyCon")) mdl) nam)
++                 , [], [] )
++          litStr = ELit loc . LStr
++      case t of
++        ELit _ (LStr s)     -> return $ mkTr (litStr "Data.TypeLits") (litStr (show s))
++        ELit _ (LInteger n) -> return $ mkTr (litStr "Data.TypeLits") (litStr (show n))
++        EVar p | isPromotedIdent p -> return $ mkTr (litStr "DataKinds") (litStr (unIdent p))
++        EVar _ -> do
++          mks <- solveKnownSymbol loc (mkIdent nameKnownSymbol) [t]
++          case mks of
++            Just (ksDict, gs, imps) -> do
++              let symStr = EApp (EApp (EVar (mkIdentB "Data.TypeLits.symbolVal")) ksDict)
++                                (ELit loc (LInt 0))
++              return $ Just ( EApp (EVar (mkClassConstructor iCls))
++                                   (EApp (EApp (EVar (mkIdentB "Data.Typeable._mkTyCon")) (litStr "Data.TypeLits")) symStr)
++                            , gs, imps )
++            Nothing -> do
++              mkn <- solveKnownNat loc (mkIdent nameKnownNat) [t]
++              case mkn of
++                Just (knDict, gs, imps) -> do
++                  let natValExpr = EApp (EApp (EVar (mkIdentB "Data.TypeLits.natVal")) knDict)
++                                        (ELit loc (LInt 0))
++                      natStr = EApp (EVar (mkIdentB "Data.Integer.Internal.showInteger")) natValExpr
++                  return $ Just ( EApp (EVar (mkClassConstructor iCls))
++                                       (EApp (EApp (EVar (mkIdentB "Data.Typeable._mkTyCon")) (litStr "Data.TypeLits")) natStr)
++                                , gs, imps )
++                Nothing -> return Nothing
++        _ -> return Nothing
++solveTypeable loc iCls ts = solveInst loc iCls ts
++
+ mkConstDict :: SLoc -> Ident -> Expr -> T (Maybe (Expr, [Goal], [Improve]))
+ mkConstDict loc iCls e = do
+   let res = EApp (EVar $ mkClassConstructor iCls) fcn
+@@ -4049,7 +5607,7 @@ checkConstraints :: HasCallStack => T ()
+ checkConstraints = do
+   cs <- gets constraints
+   case cs of
+-    [] -> return ()
++    [] -> modify $ \ ts -> ts { impEqTable = M.empty }
+     (i, t) : _ -> do
+       t' <- derefUVar t
+       case t' of
+@@ -4097,8 +5655,8 @@ solveEq eqs t1 t2 | normTypeEq eqs t1 `eqEType` normTypeEq eqs t2 = Just []
+ -- of the equalities.
+ -- Note: there should be no meta variables in t1 and t2.
+ -- XXX This guaranteed by how it's called, but I'm not sure it always works properly.
+-addTypeEq :: EType -> EType -> TypeEqTable -> TypeEqTable
+-addTypeEq t1 t2 aeqs =
++addTypeEq :: SynTable -> EType -> EType -> TypeEqTable -> TypeEqTable
++addTypeEq syns t1 t2 aeqs =
+   let deref (EVar i) | Just t <- lookup i aeqs = t
+       deref (ESign t _) = t
+       deref t = t
+@@ -4106,6 +5664,14 @@ addTypeEq t1 t2 aeqs =
+       t2' = deref t2
+       isVar = not . isConIdent
+       addEq i t its = (i, t) : map (second $ subst [(i, t)]) its
++      -- Heads of a stuck family application must never be split apart:
++      -- F a ~ G b (or F a ~ Maybe b) cannot be decomposed, and the
++      -- variable-headed TypeEqTable cannot represent it either, so the
++      -- equation is left unrecorded here (addEqDict records top-level
++      -- stuck applications in the famEqTable instead).
++      stuckHeads = case (appHeadIdent t1', appHeadIdent t2') of
++                     (Just h1, Just h2) | h1 /= h2 -> isFamCon syns h1 || isFamCon syns h2
++                     _ -> False
+ {-
+       chkTypeEqs :: TypeEqTable -> TypeEqTable
+       chkTypeEqs xeqs =
+@@ -4120,10 +5686,13 @@ addTypeEq t1 t2 aeqs =
+                if i1 < i2 then addEq i2 t1' aeqs  -- always point smaller to bigger
+           else if i1 > i2 then addEq i1 t2' aeqs
+           else                             aeqs
+-        (EVar i1, _) | isVar i1 -> addEq i1 t2' aeqs
+-        (_, EVar i2) | isVar i2 -> addEq i2 t1' aeqs
+-        (EApp f1 a1, EApp f2 a2) -> addTypeEq f1 f2 (addTypeEq a1 a2 aeqs)
++        (EVar i1, _) | isVar i1, i1 `notElem` allVarsExpr t2' -> addEq i1 t2' aeqs
++        (_, EVar i2) | isVar i2, i2 `notElem` allVarsExpr t1' -> addEq i2 t1' aeqs
++        (EVar i1, _) | isVar i1 -> aeqs
++        (_, EVar i2) | isVar i2 -> aeqs
++        (EApp f1 a1, EApp f2 a2) | not stuckHeads -> addTypeEq syns f1 f2 (addTypeEq syns a1 a2 aeqs)
+         _ | t1' `eqEType` t2 -> aeqs
++        _ | stuckHeads -> aeqs  -- stuck family application: cannot split or represent; keep silent
+         _ -> errorMessage (getSLoc t1) $ "inconsistent type equality " ++ showEType t1' ++ " ~ " ++ showEType t2'
+ 
+ -- Normalize a type with the known type equalties.
+-- 
+2.54.0
+

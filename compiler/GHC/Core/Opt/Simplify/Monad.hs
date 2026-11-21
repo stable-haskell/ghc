@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-
 (c) The AQUA Project, Glasgow University, 1993-1998
@@ -41,7 +42,17 @@ import GHC.Utils.Panic     (throwGhcExceptionIO, GhcException (..))
 import GHC.Types.Basic     ( IntWithInf, treatZeroAsInf, mkIntWithInf )
 import Control.Monad       ( ap )
 import GHC.Core.Multiplicity        ( pattern ManyTy )
+#if !defined(__MHS__)
 import GHC.Exts( oneShot )
+#endif
+
+#if defined(__MHS__)
+-- MicroHs has no GHC.Exts(oneShot).  oneShot is only an optimiser hint,
+-- so the identity function is semantically exact here.
+-- See Note [The one-shot state monad trick] in GHC.Utils.Monad.
+oneShot :: (a -> b) -> a -> b
+oneShot f = f
+#endif
 
 {-
 ************************************************************************

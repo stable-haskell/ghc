@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE ViewPatterns    #-}
 
 {-
@@ -79,11 +80,27 @@ import GHC.Unit.Module.Warnings
 import System.Exit      ( ExitCode(..), exitWith )
 import Data.List        ( sortBy )
 import Data.Function
+#if defined(__MHS__)
+-- MicroHs's Debug.Trace provides no eventlog hook; progress events are
+-- diagnostics-only under __MHS__ (no-op preserves all observable behaviour).
+import Debug.Trace hiding (traceEventIO, traceMarkerIO)
+traceEventIO :: String -> IO ()
+traceEventIO _ = return ()
+traceMarkerIO :: String -> IO ()
+traceMarkerIO _ = return ()
+#else
 import Debug.Trace
+#endif
 import Control.Monad
 import Control.Monad.IO.Class
 import Control.Monad.Catch as MC (handle)
+#if defined(__MHS__)
+-- ghc-compat's GHC.Conc has no allocation counter.  Timings then report
+-- zero allocation, which is honest: MicroHs exposes no such counter.
+import Data.Int (Int64)
+#else
 import GHC.Conc         ( getAllocationCounter )
+#endif
 import System.CPUTime
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
@@ -380,6 +397,11 @@ withTiming :: MonadIO m
                            -- (often either @const ()@ or 'rnf')
            -> m a          -- ^ The body of the phase to be timed
            -> m a
+#if defined(__MHS__)
+getAllocationCounter :: IO Int64
+getAllocationCounter = return 0
+#endif
+
 withTiming logger what force action =
   withTiming' logger what force PrintTimings action
 

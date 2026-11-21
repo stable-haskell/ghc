@@ -1,4 +1,5 @@
 
+{-# LANGUAGE CPP #-}
 -- | Ways
 --
 -- The central concept of a "way" is that all objects in a given
@@ -208,6 +209,24 @@ wayOptP _ WayDyn      = []
 wayOptP _ WayProf     = ["-DPROFILING"]
 
 
+#if defined(__MHS__)
+-- MicroHs has no RTS to consult: the bootstrap host runs every way the
+-- same static way.  These describe the host that runs stage1.
+hostIsProfiled :: Bool
+hostIsProfiled = False
+
+hostIsDynamic :: Bool
+hostIsDynamic = False
+
+hostIsThreaded :: Bool
+hostIsThreaded = False
+
+hostIsDebugged :: Bool
+hostIsDebugged = False
+
+hostIsTracing :: Bool
+hostIsTracing = False
+#else
 -- | Consult the RTS to find whether it has been built with profiling enabled.
 hostIsProfiled :: Bool
 hostIsProfiled = rtsIsProfiled_ /= 0
@@ -241,6 +260,7 @@ hostIsTracing :: Bool
 hostIsTracing = rtsIsTracing_ /= 0
 
 foreign import ccall unsafe "rts_isTracing" rtsIsTracing_ :: Int
+#endif
 
 
 

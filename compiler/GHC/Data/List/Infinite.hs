@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE RankNTypes #-}
@@ -24,7 +25,9 @@ import Control.Category (Category (..))
 import Control.Monad (guard)
 import qualified Data.Foldable as F
 import Data.List.NonEmpty (NonEmpty (..))
+#if !defined(__MHS__)
 import qualified GHC.Base as List (build)
+#endif
 
 infixr 5 `Inf`
 
@@ -163,7 +166,12 @@ allListsOf as = concatMap (\ bs -> [a:bs | a <- as]) ([] `Inf` allListsOf as)
 
 -- See Note [Fusion for `Infinite` lists].
 toList :: Infinite a -> [a]
+#if defined(__MHS__)
+-- MicroHs has no GHC.Base.build; Infinite.foldr has no nil argument.
+toList = foldr (:)
+#else
 toList = \ as -> List.build (\ c _ -> foldr c as)
+#endif
 {-# INLINE toList #-}
 
 repeat :: a -> Infinite a

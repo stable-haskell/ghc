@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE UnboxedTuples, PatternSynonyms, DerivingVia #-}
 module GHC.Types.Unique.DSM
   (
@@ -36,9 +37,20 @@ module GHC.Types.Unique.DSM
   )
   where
 
+#if defined(__MHS__)
+-- ghc-compat's GHC.Exts has no oneShot.  It is only an inlining hint.
+oneShot :: a -> a
+oneShot x = x
+#else
 import GHC.Exts (oneShot)
+#endif
 import GHC.Prelude
+#if defined(__MHS__)
+-- ghc-compat's GHC.Word does not export Word64; Data.Word does.
+import Data.Word (Word64)
+#else
 import GHC.Word
+#endif
 import Control.Monad.Fix
 import GHC.Types.Unique
 import qualified GHC.Utils.Monad.State.Strict as Strict
@@ -165,7 +177,13 @@ instance MonadGetUnique USM.UniqSM where
 -- uniq supply over a Monad. Specifically, it is used in the `Stream` of Cmm
 -- decls.
 newtype UniqDSMT m result = UDSMT' (DUniqSupply -> m (result, DUniqSupply))
+#if defined(__MHS__)
+-- MHS cannot derive Functor here (needs Functor m through the arrow).
+instance Functor m => Functor (UniqDSMT m) where
+  fmap f (UDSMT' g) = UDSMT' $ \s -> fmap (\(a, s') -> (f a, s')) (g s)
+#else
   deriving (Functor)
+#endif
 
 -- Similar to GHC.Utils.Monad.State.Strict, using Note [The one-shot state monad trick]
 -- Using the one-shot trick is necessary for performance.

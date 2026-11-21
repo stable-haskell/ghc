@@ -38,7 +38,13 @@ import GHC.Prelude
 
 import Data.Bits ((.&.))
 import Data.List (mapAccumL, isPrefixOf)
+#if defined(__MHS__)
+-- MicroHs's Data.Monoid does not export (<>); take it from Data.Semigroup.
+-- Same meaning.
+import Data.Semigroup ((<>))
+#else
 import Data.Monoid ((<>))
+#endif
 import Data.Binary.Get
 import Data.Binary.Put
 import Control.Monad
@@ -46,7 +52,7 @@ import Control.Applicative
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8 as C
 import qualified Data.ByteString.Lazy as L
-#if !defined(mingw32_HOST_OS)
+#if !defined(mingw32_HOST_OS) && !defined(__MHS__)
 import qualified System.Posix.Files as POSIX
 #endif
 import System.FilePath (takeFileName)
@@ -294,8 +300,8 @@ loadObj fp = do
 
 -- | Take a filePath and return (mod time, own, grp, mode in decimal)
 fileInfo :: FilePath -> IO ( Int, Int, Int, Int) -- ^ mod time, own, grp, mode (in decimal)
-#if defined(mingw32_HOST_OS)
--- on windows mod time, owner group and mode are zero.
+#if defined(mingw32_HOST_OS) || defined(__MHS__)
+-- on windows (and MicroHs bootstrap, which has no unix package) mod time, owner, group and mode are zero.
 fileInfo _ = pure (0,0,0,0)
 #else
 fileInfo fp = go <$> POSIX.getFileStatus fp

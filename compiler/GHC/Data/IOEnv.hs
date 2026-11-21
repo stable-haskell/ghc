@@ -1,4 +1,5 @@
 
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE DerivingVia #-}
 {-# LANGUAGE PatternSynonyms #-}
 --
@@ -36,7 +37,9 @@ import GHC.Prelude
 
 import GHC.Driver.DynFlags
 import {-# SOURCE #-} GHC.Driver.Hooks
+#if !defined(__MHS__)
 import GHC.IO (catchException)
+#endif
 import GHC.Utils.Exception
 import GHC.Unit.Module
 import GHC.Utils.Panic
@@ -47,11 +50,21 @@ import System.IO.Unsafe ( unsafeInterleaveIO )
 import System.IO        ( fixIO )
 import Control.Monad
 import Control.Monad.Trans.Reader
+#if defined(__MHS__)
+import Control.Monad.Catch (MonadCatch, MonadMask, MonadThrow, generalBracket)
+#else
 import Control.Monad.Catch (MonadCatch, MonadMask, MonadThrow)
+#endif
 import GHC.Utils.Monad
 import GHC.Utils.Logger
 import Control.Applicative (Alternative(..))
+#if defined(__MHS__)
+-- ghc-compat's GHC.Exts has no oneShot.  It is only an inlining hint.
+oneShot :: a -> a
+oneShot x = x
+#else
 import GHC.Exts( oneShot )
+#endif
 import Control.Concurrent.MVar (newEmptyMVar, readMVar, putMVar)
 import Control.Concurrent (forkIO, killThread)
 
@@ -61,7 +74,27 @@ import Control.Concurrent (forkIO, killThread)
 
 
 newtype IOEnv env a = IOEnv' (env -> IO a)
+#if defined(__MHS__)
+  -- As in GHC.Driver.Monad: mhs cannot derive MonadMask via ReaderT.
+  deriving (MonadThrow, MonadCatch, MonadFix) via (ReaderT env IO)
+#else
   deriving (MonadThrow, MonadCatch, MonadMask, MonadFix) via (ReaderT env IO)
+#endif
+
+#if defined(__MHS__)
+instance MonadMask (IOEnv env) where
+  mask f = IOEnv' $ \env -> mask $ \restore ->
+    let restoreIO (IOEnv' g) = IOEnv' (restore . g)
+    in unIOEnv (f restoreIO) env
+  uninterruptibleMask f = IOEnv' $ \env -> uninterruptibleMask $ \restore ->
+    let restoreIO (IOEnv' g) = IOEnv' (restore . g)
+    in unIOEnv (f restoreIO) env
+  generalBracket acquire release use = IOEnv' $ \env ->
+    generalBracket
+      (unIOEnv acquire env)
+      (\resource exitCase -> unIOEnv (release resource exitCase) env)
+      (\resource -> unIOEnv (use resource) env)
+#endif
 
 
 -- See Note [The one-shot state monad trick] in GHC.Utils.Monad
@@ -205,9 +238,17 @@ uninterruptibleMaskM_ (IOEnv m) = IOEnv (\ env -> uninterruptibleMask_ (m env))
 -- Alternative/MonadPlus
 ----------------------------------------------------------------------
 
+#if defined(__MHS__)
+-- MHS base provides no Alternative IO instance; implement empty/(<|>) here
+-- directly with base's semantics (empty throws, (<|>) tries the next action).
+instance Alternative (IOEnv env) where
+    empty   = IOEnv (\_ -> throwIO (userError "mzero"))
+    m <|> n = IOEnv (\env -> unIOEnv m env `catchException` \(_ :: SomeException) -> unIOEnv n env)
+#else
 instance Alternative (IOEnv env) where
     empty   = IOEnv (const empty)
     m <|> n = IOEnv (\env -> unIOEnv m env <|> unIOEnv n env)
+#endif
 
 instance MonadPlus (IOEnv env)
 

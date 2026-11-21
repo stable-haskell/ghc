@@ -1,4 +1,5 @@
 
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE FlexibleContexts    #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies        #-}
@@ -377,6 +378,9 @@ mkBindsRep dflags gk loc dit@(DerivInstTys{dit_rep_tc = tycon}) = (binds, sigs)
                cons       = length datacons
                max_fields = maximum $ 0 :| map dataConSourceArity datacons
 
+#if defined(__MHS__)
+           inline1 :: RdrName -> LSig GhcPs
+#endif
            inline1 f = L loc'' . InlineSig noAnn (L loc' f)
                      $ alwaysInlinePragma { inl_act = ActiveAfter 1 }
 

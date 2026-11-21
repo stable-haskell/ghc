@@ -1,4 +1,5 @@
 
+{-# LANGUAGE CPP               #-}
 {-# LANGUAGE DataKinds           #-}
 {-# LANGUAGE FlexibleContexts    #-}
 {-# LANGUAGE LambdaCase          #-}
@@ -1604,7 +1605,11 @@ checkPrecMatch op (MG { mg_alts = (L _ ms) })
     check (L _ (Match { m_pats = L _ ( (L l1 p1)
                                      : (L l2 p2)
                                      : _) }))
+#if defined(__MHS__)
+      = setSrcSpan (locA (combineSrcSpansA l1 l2 :: SrcSpanAnnA)) $
+#else
       = setSrcSpan (locA $ combineSrcSpansA l1 l2) $
+#endif
         do checkPrec op p1 False
            checkPrec op p2 True
 

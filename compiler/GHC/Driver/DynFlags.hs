@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE LambdaCase #-}
 module GHC.Driver.DynFlags (
         -- * Dynamic flags and associated configuration types
@@ -146,13 +147,53 @@ import System.IO
 import System.IO.Error (catchIOError)
 import System.Environment (lookupEnv)
 import System.FilePath (normalise, (</>))
+#if defined(__MHS__)
+-- MicroHs's System.Directory provides no XDG query functions; the two
+-- queries used by versionedAppDir are implemented via HOME/XDG_DATA_HOME
+-- lookups below. Same observable results on Unix.
+import System.Directory hiding (getAppUserDataDirectory, getXdgDirectory, XdgDirectory(..))
+#else
 import System.Directory
+#endif
+#if !defined(__MHS__)
 import GHC.Foreign (withCString, peekCString)
+#endif
 
 import qualified Data.Set as Set
 import GHC.Types.Unique.Set
 
 import qualified GHC.LanguageExtensions as LangExt
+
+#if defined(__MHS__)
+-- See the import guard above: MicroHs's System.Directory has no XDG
+-- queries. Unix results match the directory package: ~/.<app> for the
+-- legacy app dir, $XDG_DATA_HOME/<app> (or ~/.local/share/<app>) for XDG.
+data XdgDirectory = XdgData | XdgConfig | XdgCache | XdgState
+  deriving (Eq, Show)
+
+getAppUserDataDirectory :: String -> IO FilePath
+getAppUserDataDirectory app = do
+  mhome <- lookupEnv "HOME"
+  case mhome of
+    Just home -> return (home </> "." ++ app)
+    Nothing -> ioError (userError "getAppUserDataDirectory: HOME not set")
+
+getXdgDirectory :: XdgDirectory -> String -> IO FilePath
+getXdgDirectory which app = do
+  mxdg <- lookupEnv xdgVar
+  case mxdg of
+    Just d | not (null d) -> return (d </> app)
+    _ -> do mhome <- lookupEnv "HOME"
+            case mhome of
+              Just home -> return (foldl (</>) home defPath </> app)
+              Nothing -> ioError (userError ("getXdgDirectory: HOME not set"))
+  where
+    (xdgVar, defPath) = case which of
+      XdgData -> ("XDG_DATA_HOME", [".local", "share"])
+      XdgConfig -> ("XDG_CONFIG_HOME", [".config"])
+      XdgCache -> ("XDG_CACHE_HOME", [".cache"])
+      XdgState -> ("XDG_STATE_HOME", [".local", "state"])
+#endif
 
 -- -----------------------------------------------------------------------------
 -- DynFlags
@@ -571,12 +612,16 @@ initDynFlags dflags = do
  let
  -- This is not bulletproof: we test that 'localeEncoding' is Unicode-capable,
  -- but potentially 'hGetEncoding' 'stdout' might be different. Still good enough.
+#if defined(__MHS__)
+ canUseUnicode <- return True
+#else
  canUseUnicode <- do let enc = localeEncoding
                          str = "‘’"
                      (withCString enc str $ \cstr ->
                           do str' <- peekCString enc cstr
                              return (str == str'))
                          `catchIOError` \_ -> return False
+#endif
  ghcNoUnicodeEnv <- lookupEnv "GHC_NO_UNICODE"
  let useUnicode' = isNothing ghcNoUnicodeEnv && canUseUnicode
  maybeGhcColorsEnv  <- lookupEnv "GHC_COLORS"

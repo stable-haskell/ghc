@@ -127,16 +127,33 @@ import GHC.Utils.Fingerprint
 
 import Data.Data
 import qualified Data.List as List
+#if defined(__MHS__)
+import Data.List.NonEmpty  ( NonEmpty(..), nonEmpty )
+import qualified Data.List.NonEmpty as NEL
+import qualified Data.Foldable1 as F1
+#else
 import Data.List.NonEmpty  ( NonEmpty(..), last, nonEmpty )
+#endif
 
+#if defined(__MHS__)
+-- ghc-internal GHC.Exts is unboxed.  ghc-compat's copy has no sortWith.
+#else
 import GHC.Exts hiding (toList)
+#endif
 import GHC.Stack (HasCallStack)
 import GHC.Data.List
 
 import Control.Monad    ( guard )
 import Control.Monad.IO.Class ( MonadIO, liftIO )
 import System.IO.Error as IO ( isDoesNotExistError )
+#if defined(__MHS__)
+-- MicroHs's System.Directory has no renameFile or getModificationTime.
+import System.Directory ( doesDirectoryExist )
+import System.Directory.MTime ( getModificationTime )
+import Foreign.C.String (CString, withCString)
+#else
 import System.Directory ( doesDirectoryExist, getModificationTime, renameFile )
+#endif
 import qualified System.Directory.OsPath as OsPath
 import System.OsPath (OsPath)
 import System.FilePath
@@ -145,6 +162,9 @@ import Data.Bifunctor   ( first, second )
 import Data.Char        ( isUpper, isAlphaNum, isSpace, chr, ord, isDigit, toUpper
                         , isHexDigit, digitToInt )
 import Data.Foldable    ( Foldable (toList) )
+#if defined(__MHS__)
+import qualified Data.Foldable as Foldable
+#endif
 import Data.Int
 import Data.Ratio       ( (%) )
 import Data.Ord         ( comparing )
@@ -235,7 +255,11 @@ chkAppend :: [a] -> [a] -> [a]
 -- Checks for the second argument being empty
 -- Used in situations where that situation is common
 chkAppend xs ys
+#if defined(__MHS__)
+  | List.null ys   = xs
+#else
   | null ys   = xs
+#endif
   | otherwise = xs ++ ys
 
 {-
@@ -390,7 +414,11 @@ lengthIs lst n
   | n < 0
   = False
   | otherwise
+#if defined(__MHS__)
+  = atLength List.null False lst n
+#else
   = atLength null False lst n
+#endif
 
 -- | @(lengthIsNot xs n) = (length xs /= n)@
 lengthIsNot :: [a] -> Int -> Bool
@@ -404,7 +432,11 @@ lengthAtMost lst n
   | n < 0
   = False
   | otherwise
+#if defined(__MHS__)
+  = atLength List.null True lst n
+#else
   = atLength null True lst n
+#endif
 
 -- | @(lengthLessThan xs n) == (length xs < n)@
 lengthLessThan :: [a] -> Int -> Bool
@@ -453,7 +485,11 @@ isSingleton [_] = True
 isSingleton _   = False
 
 notNull :: Foldable f => f a -> Bool
+#if defined(__MHS__)
+notNull = not . Foldable.null
+#else
 notNull = not . null
+#endif
 
 -- | Utility function to go from a singleton list to it's element.
 --
@@ -564,9 +600,19 @@ isSortedBy cmp = sorted
 ************************************************************************
 -}
 
+#if defined(__MHS__)
+sortWith :: Ord b => (a -> b) -> [a] -> [a]
+sortWith f = List.sortBy (\x y -> compare (f x) (f y))
+#endif
+
 minWith :: Ord b => (a -> b) -> [a] -> a
+#if defined(__MHS__)
+minWith get_key xs = assert (not (List.null xs) )
+                     Partial.head (sortWith get_key xs)
+#else
 minWith get_key xs = assert (not (null xs) )
                      Partial.head (sortWith get_key xs)
+#endif
 
 nubSort :: Ord a => [a] -> [a]
 nubSort = Set.toAscList . Set.fromList
@@ -708,6 +754,14 @@ dropList (_:xs) (_:ys) = dropList xs ys
 
 -- | Given two lists xs and ys, return `splitAt (length xs) ys`.
 splitAtList :: [b] -> [a] -> ([a], [a])
+#if defined(__MHS__)
+-- Same split, without unboxed Int#.
+splitAtList xs ys = go 0 xs ys
+   where
+      go _  !_     []     = (ys, [])
+      go n  []     bs     = (take n ys, bs)
+      go n  (_:as) (_:bs) = go (n + 1) as bs
+#else
 splitAtList xs ys = go 0# xs ys
    where
       -- we are careful to avoid allocating when there are no leftover
@@ -718,6 +772,7 @@ splitAtList xs ys = go 0# xs ys
       go _  !_     []     = (ys, [])             -- length ys <= length xs
       go n  []     bs     = (take (I# n) ys, bs) -- = splitAt n ys
       go n  (_:as) (_:bs) = go (n +# 1#) as bs
+#endif
 
 -- | drop from the end of a list
 dropTail :: Int -> [a] -> [a]
@@ -741,7 +796,11 @@ dropTail n xs
 -- Pay attention to the short-circuit (&&)! The order of its arguments is the only
 -- difference between dropWhileEnd and dropWhileEndLE.
 dropWhileEndLE :: (a -> Bool) -> [a] -> [a]
+#if defined(__MHS__)
+dropWhileEndLE p = foldr (\x r -> if List.null r && p x then [] else x:r) []
+#else
 dropWhileEndLE p = foldr (\x r -> if null r && p x then [] else x:r) []
+#endif
 
 -- | @spanEnd p l == reverse (span p (reverse l))@. The first list
 -- returns actually comes after the second list (when you look at the
@@ -760,7 +819,11 @@ last2 = uncurry (liftA2 (,)) . List.foldl' (\(_,x2) x -> (x2, Just x)) (Nothing,
 
 lastMaybe :: [a] -> Maybe a
 lastMaybe [] = Nothing
+#if defined(__MHS__)
+lastMaybe (x:xs) = Just $ NEL.last (x:|xs)
+#else
 lastMaybe (x:xs) = Just $ last (x:|xs)
+#endif
 
 -- | @onJust x m f@ applies f to the value inside the Just or returns the default.
 onJust :: b -> Maybe a -> (a->b) -> b
@@ -1074,17 +1137,33 @@ readSignificandExponentPair__ r = do
      readExp' s       = readDec s
 
      readDec s = do
+#if defined(__MHS__)
+        (ds,r) <- nonNull isDigit s
+        -- MicroHs list comprehensions need a list, not a NonEmpty.
+        return (List.foldl1 (\n d -> n * 10 + d) [ ord d - ord '0' | d <- toList ds ],
+                r)
+#else
         (ds,r) <- nonnull isDigit s
         return (foldl1 (\n d -> n * 10 + d) [ ord d - ord '0' | d <- ds ],
                 r)
+#endif
 
+#if defined(__MHS__)
+     lexDecDigits = nonNull isDigit
+#else
      lexDecDigits = nonnull isDigit
+#endif
 
      lexDotDigits ('.':s) = return (span' isDigit s)
      lexDotDigits s       = return ("",s)
 
+#if defined(__MHS__)
+     nonNull p s = do (c:cs,t) <- return (span' p s)
+                      return (c:|cs,t)
+#else
      nonnull p s = do (c:cs,t) <- return (span' p s)
                       return (c:|cs,t)
+#endif
 
      span' _ xs@[]         =  (xs, xs)
      span' p xs@(x:xs')
@@ -1129,12 +1208,20 @@ readHexRational__ :: String -> Maybe Rational
 readHexRational__ ('0' : x : rest)
   | x == 'X' || x == 'x' =
   do let (front,rest2) = span' isHexDigit rest
+#if defined(__MHS__)
+     guard (not (List.null front))
+#else
      guard (not (null front))
+#endif
      let frontNum = steps 16 0 front
      case rest2 of
        '.' : rest3 ->
           do let (back,rest4) = span' isHexDigit rest3
+#if defined(__MHS__)
+             guard (not (List.null back))
+#else
              guard (not (null back))
+#endif
              let backNum = steps 16 frontNum back
                  exp1    = -4 * length back
              case rest4 of
@@ -1154,7 +1241,11 @@ readHexRational__ ('0' : x : rest)
   mk n e = fromInteger n * 2^^e
 
   dec cs = case span' isDigit cs of
+#if defined(__MHS__)
+             (ds,"") | not (List.null ds) -> Just (steps 10 0 ds)
+#else
              (ds,"") | not (null ds) -> Just (steps 10 0 ds)
+#endif
              _ -> Nothing
 
   steps base n ds = List.foldl' (step base) n ds
@@ -1195,12 +1286,20 @@ readHexSignificandExponentPair__ :: String -> Maybe (Integer, Integer)
 readHexSignificandExponentPair__ ('0' : x : rest)
   | x == 'X' || x == 'x' =
   do let (front,rest2) = span' isHexDigit rest
+#if defined(__MHS__)
+     guard (not (List.null front))
+#else
      guard (not (null front))
+#endif
      let frontNum = steps 16 0 front
      case rest2 of
        '.' : rest3 ->
           do let (back,rest4) = span' isHexDigit rest3
+#if defined(__MHS__)
+             guard (not (List.null back))
+#else
              guard (not (null back))
+#endif
              let backNum = steps 16 frontNum back
                  exp1    = -4 * length back
              case rest4 of
@@ -1220,7 +1319,11 @@ readHexSignificandExponentPair__ ('0' : x : rest)
   mk n e = (n, fromIntegral e)
 
   dec cs = case span' isDigit cs of
+#if defined(__MHS__)
+             (ds,"") | not (List.null ds) -> Just (steps 10 0 ds)
+#else
              (ds,"") | not (null ds) -> Just (steps 10 0 ds)
+#endif
              _ -> Nothing
 
   steps base n ds = foldl' (step base) n ds
@@ -1274,6 +1377,17 @@ fileHashIfExists f =
 -- and uses their modification time to skip work later,
 -- as otherwise a partially written file (e.g. due to crash or Ctrl+C)
 -- also results in a skip.
+
+#if defined(__MHS__)
+foreign import ccall "rename" c_rename :: CString -> CString -> IO Int
+
+renameFile :: FilePath -> FilePath -> IO ()
+renameFile src dst = do
+  r <- withCString src $ \s -> withCString dst $ \d -> c_rename s d
+  if r /= 0
+    then ioError (userError ("renameFile " ++ src ++ " -> " ++ dst ++ " failed"))
+    else return ()
+#endif
 
 withAtomicRename :: (MonadIO m) => FilePath -> (FilePath -> m a) -> m a
 withAtomicRename targetFile f = do
@@ -1440,14 +1554,24 @@ mulHi a b = fromIntegral (r `shiftR` 32)
          r = fromIntegral a * fromIntegral b
 
 -- | A call stack constraint, but only when 'isDebugOn'.
+#if defined(__MHS__)
+-- MicroHs crashes while kind-checking (() :: Constraint).
+-- HasCallStack is a solved global instance in this bootstrap.
+type HasDebugCallStack = HasCallStack
+#else
 #if defined(DEBUG)
 type HasDebugCallStack = HasCallStack
 #else
 type HasDebugCallStack = (() :: Constraint)
 #endif
+#endif
 
 mapMaybe' :: Foldable f => (a -> Maybe b) -> f a -> [b]
+#if defined(__MHS__)
+mapMaybe' f = Foldable.foldr g []
+#else
 mapMaybe' f = foldr g []
+#endif
   where
     g x rest
       | Just y <- f x = y : rest
@@ -1456,7 +1580,11 @@ mapMaybe' f = foldr g []
 foldr1WithDefault :: Foldable f => a -> (a -> a -> a) -> f a -> a
 foldr1WithDefault defaultA f xs = case nonEmpty (toList xs) of
     Nothing -> defaultA
+#if defined(__MHS__)
+    Just (xs1 :: NonEmpty a) -> F1.foldr1 f xs1
+#else
     Just (xs1 :: NonEmpty a) -> foldr1 f xs1
+#endif
 {-# SPECIALIZE foldr1WithDefault :: a -> (a -> a -> a) -> [a] -> a #-}
 
 foldl1WithDefault' :: Foldable f => a -> (a -> a -> a) -> f a -> a

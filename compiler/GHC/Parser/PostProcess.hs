@@ -1,4 +1,5 @@
 
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -1710,6 +1711,21 @@ instance DisambInfixOp RdrName where
   mkHsVarOpPV (L l v) = return $ L l v
   mkHsInfixHolePV (L l _) = addFatalError $ mkPlainErrorMsgEnvelope (getHasLoc l) $ PsErrInvalidInfixHole
 
+#if defined(__MHS__)
+-- MicroHs cannot bridge the (definitional) EpAnnCO /(EpAnn NoEpAnns) gap
+-- when discharging this equality against unguardedGRHSs/unguardedRHS (whose
+-- signatures state the EpAnn NoEpAnns form); stating it directly in the
+-- EpAnn NoEpAnns form lets MicroHs match given against wanted.
+-- EpAnnCO is a synonym for (EpAnn NoEpAnns), so this is identical for GHC.
+type AnnoBody b
+  = ( Anno (GRHS GhcPs (LocatedA (Body b GhcPs))) ~ EpAnn NoEpAnns
+    , Anno [LocatedA (Match GhcPs (LocatedA (Body b GhcPs)))] ~ SrcSpanAnnLW
+    , Anno (Match GhcPs (LocatedA (Body b GhcPs))) ~ SrcSpanAnnA
+    , Anno (StmtLR GhcPs GhcPs (LocatedA (Body (Body b GhcPs) GhcPs))) ~ SrcSpanAnnA
+    , Anno [LocatedA (StmtLR GhcPs GhcPs
+                       (LocatedA (Body (Body (Body b GhcPs) GhcPs) GhcPs)))] ~ SrcSpanAnnLW
+    )
+#else
 type AnnoBody b
   = ( Anno (GRHS GhcPs (LocatedA (Body b GhcPs))) ~ EpAnnCO
     , Anno [LocatedA (Match GhcPs (LocatedA (Body b GhcPs)))] ~ SrcSpanAnnLW
@@ -1718,6 +1734,7 @@ type AnnoBody b
     , Anno [LocatedA (StmtLR GhcPs GhcPs
                        (LocatedA (Body (Body (Body b GhcPs) GhcPs) GhcPs)))] ~ SrcSpanAnnLW
     )
+#endif
 
 -- | Disambiguate constructs that may appear when we do not know ahead of time whether we are
 -- parsing an expression, a command, or a pattern.
@@ -2306,7 +2323,13 @@ withArrowParsingMode cont = do
 
 -- Type-restricted variant of `withArrowParsingMode` to aid type inference (#25103)
 withArrowParsingMode' :: DisambECP b => (forall lhs. DisambECP lhs => ArrowParsingMode lhs b -> PV (LocatedA b)) -> PV (LocatedA b)
+#if defined(__MHS__)
+-- MicroHs cannot subsume the higher-rank alias (see #25103 variant);
+-- eta-expansion is semantically identical and checks cleanly.
+withArrowParsingMode' cont = withArrowParsingMode cont
+#else
 withArrowParsingMode' = withArrowParsingMode
+#endif
 
 -- When a forall-type occurs in term syntax, forall-bound variables should
 -- inhabit the term namespace `varName` rather than the usual `tvName`.
@@ -3088,10 +3111,20 @@ checkNewOrData span name is_type_data = curry $ \ case
       | is_type_data = map (fmap promote_constructor)
       | otherwise = id
 
+#if defined(__MHS__)
+    -- MicroHs cannot discharge Functor (XRec GhcPs) from the stuck
+    -- XRec/Anno families here; mapXRec is the pass-polymorphic mapper
+    -- (mapXRec = fmap for GhcPass) and checks cleanly with identical semantics.
+    promote_constructor (dc@ConDeclGADT { con_names = cons })
+      = dc { con_names = fmap (mapXRec promote_name) cons }
+    promote_constructor (dc@ConDeclH98 { con_name = con })
+      = dc { con_name = mapXRec promote_name con }
+#else
     promote_constructor (dc@ConDeclGADT { con_names = cons })
       = dc { con_names = fmap (fmap promote_name) cons }
     promote_constructor (dc@ConDeclH98 { con_name = con })
       = dc { con_name = fmap promote_name con }
+#endif
     promote_constructor dc = dc
 
     promote_name name = fromMaybe name (promoteRdrName name)

@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
@@ -118,7 +119,11 @@ import qualified GHC.Data.Strict as Strict
 
 import Data.IORef
 import GHC.Driver.Env.KnotVars
+#if defined(__MHS__)
+import System.IO.Unsafe (unsafeInterleaveIO)
+#else
 import GHC.IO.Unsafe (unsafeInterleaveIO)
+#endif
 
 {-
 ************************************************************************

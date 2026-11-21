@@ -1,4 +1,4 @@
-{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE CPP, LambdaCase #-}
 -- | The 'HomePackageTable' (HPT) contains information about all modules that are part
 -- of a home package. At its core, the information for each module is a
 -- 'HomeModInfo'.
@@ -78,7 +78,9 @@ import GHC.Prelude
 import GHC.Data.Maybe
 
 import Data.IORef
+#if !defined(__MHS__)
 import Control.Monad ((<$!>))
+#endif
 import qualified Data.Set as Set
 
 import GHC.Core.FamInstEnv

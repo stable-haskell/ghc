@@ -1,4 +1,5 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
@@ -27,6 +28,12 @@ module GHC.Types.Error.Codes
 
 import GHC.Prelude
 
+#if defined(__MHS__)
+import GHC.Types.Error          ( DiagnosticCode(..) )
+import Data.Kind                ( Type, Constraint )
+import Data.Map.Strict          ( Map )
+import qualified Data.Map.Strict as Map
+#else
 import GHC.Core.InstEnv         ( LookupInstanceErrReason )
 import GHC.Hs.Extension         ( GhcRn )
 import GHC.Types.Error          ( DiagnosticCode(..), UnknownDiagnostic (..)
@@ -52,6 +59,7 @@ import GHC.TypeNats ( Nat, KnownNat, natVal' )
 
 import Data.Map.Strict ( Map )
 import qualified Data.Map.Strict as Map
+#endif
 
 
 {- Note [Diagnostic codes]
@@ -147,6 +155,30 @@ This allows any tool that imports the GHC library to re-use the diagnostic
 code machinery that GHC uses.
 -}
 
+#if defined(__MHS__)
+-- MicroHs Stage 1 bootstrap: omit the GHC.Generics / TypeLits / TypeError
+-- diagnostic-code lookup machinery; returning 'Nothing' is explicitly allowed
+-- by 'GHC.Types.Error.diagnosticCode'.
+type DiagnosticCodeNameSpace :: Type -> Constraint
+class DiagnosticCodeNameSpace namespace where
+  type NameSpaceTag namespace :: Type
+  type DiagnosticCodeFor namespace (c :: k) :: Type
+  type ConRecursIntoFor namespace (c :: k) :: Maybe Type
+
+type Outdated a = a
+
+constructorCode :: forall namespace diag. diag -> Maybe DiagnosticCode
+constructorCode _ = Nothing
+
+constructorCodes :: forall namespace diag. Map DiagnosticCode String
+constructorCodes = Map.empty
+
+data GHC
+instance DiagnosticCodeNameSpace GHC
+
+type family GhcDiagnosticCode (c :: k) :: Type
+type family ConRecursInto (c :: k) :: Maybe Type
+#else
 -- | A constraint for a namespace which has its own diagnostic codes.
 --
 -- See Note [Diagnostic code namespaces].
@@ -1471,3 +1503,4 @@ type family Assert err n where
   Assert _ Dummy = Dummy
   Assert _ n     = ()
 data family Dummy :: k
+#endif

@@ -24,12 +24,21 @@ import GHC.Internal.TH.Syntax hiding (Role, InjectivityAnn)
 import qualified GHC.Internal.TH.Syntax as TH
 
 #ifdef BOOTSTRAP_TH
+#if defined(__MHS__)
+-- MicroHs has no GHC.Exts.TYPE.  Applicative comes from Control.Applicative.
+import Control.Applicative(liftA, liftA2, Applicative(..))
+import Data.Word( Word8 )
+import Data.List.NonEmpty ( NonEmpty(..) )
+import Data.Traversable (traverse, sequenceA)
+import Prelude hiding (Applicative(..))
+#else
 import Control.Applicative(liftA, Applicative(..))
 import qualified Data.Kind as Kind (Type)
 import Data.Word( Word8 )
 import Data.List.NonEmpty ( NonEmpty(..) )
 import GHC.Exts (TYPE)
 import Prelude hiding (Applicative(..))
+#endif
 #else
 import GHC.Internal.Base hiding (NonEmpty (..), Type, Module, inline)
 import GHC.Internal.Data.Foldable
@@ -50,10 +59,17 @@ import qualified GHC.Internal.Types as Kind (Type)
 ----------------------------------------------------------
 
 -- | Representation-polymorphic since /template-haskell-2.17.0.0/.
+#if defined(__MHS__)
+-- MicroHs has no TYPE and rejects a qualified kind in this signature.
+#else
 type TExpQ :: TYPE r -> Kind.Type
+#endif
 type TExpQ a = Q (TExp a)
 
+#if defined(__MHS__)
+#else
 type CodeQ :: TYPE r -> Kind.Type
+#endif
 type CodeQ = Code Q
 
 type InfoQ               = Q Info

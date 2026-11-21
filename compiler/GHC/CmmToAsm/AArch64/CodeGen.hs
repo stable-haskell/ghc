@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# language GADTs, LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 
@@ -19,6 +20,9 @@ import GHC.Platform.Regs
 import GHC.CmmToAsm.AArch64.Instr
 import GHC.CmmToAsm.AArch64.Regs
 import GHC.CmmToAsm.AArch64.Cond (Cond(..), invertCond)
+#if defined(__MHS__)
+import qualified GHC.CmmToAsm.AArch64.Cond as Cond
+#endif
 
 import GHC.CmmToAsm.CPrim
 import GHC.Cmm.DebugBlock
@@ -1314,7 +1318,11 @@ getRegister' config plat expr
 
         -- N.B. We needn't sign-extend sub-word size (in)equality comparisons
         -- since we don't care about ordering.
+#if defined(__MHS__)
+        MO_Eq w     -> bitOpImm w (\d x y -> toOL [ CMP x y, CSET d Cond.EQ ]) getArithImm
+#else
         MO_Eq w     -> bitOpImm w (\d x y -> toOL [ CMP x y, CSET d EQ ]) getArithImm
+#endif
         MO_Ne w     -> bitOpImm w (\d x y -> toOL [ CMP x y, CSET d NE ]) getArithImm
 
         -- Signed multiply/divide
@@ -1358,7 +1366,11 @@ getRegister' config plat expr
         MO_F_Max w   -> floatOp w (\d x y -> unitOL $ FMAX d x y)
 
         -- Floating point comparison
+#if defined(__MHS__)
+        MO_F_Eq w    -> floatCond w (\d x y -> toOL [ CMP x y, CSET d Cond.EQ ])
+#else
         MO_F_Eq w    -> floatCond w (\d x y -> toOL [ CMP x y, CSET d EQ ])
+#endif
         MO_F_Ne w    -> floatCond w (\d x y -> toOL [ CMP x y, CSET d NE ])
 
         -- careful with the floating point operations.
@@ -1786,7 +1798,11 @@ genCondJump bid expr = do
               return $ code_fx `appOL` code_fy `snocOL` CMP (OpReg w reg_fx) (OpReg w reg_fy) `snocOL` (annExpr expr (BCOND cmp (TBlock bid)))
 
         case mop of
+#if defined(__MHS__)
+          MO_F_Eq w -> fbcond w Cond.EQ
+#else
           MO_F_Eq w -> fbcond w EQ
+#endif
           MO_F_Ne w -> fbcond w NE
 
           MO_F_Gt w -> fbcond w OGT
@@ -1794,7 +1810,11 @@ genCondJump bid expr = do
           MO_F_Lt w -> fbcond w OLT
           MO_F_Le w -> fbcond w OLE
 
+#if defined(__MHS__)
+          MO_Eq w   -> sbcond w Cond.EQ
+#else
           MO_Eq w   -> sbcond w EQ
+#endif
           MO_Ne w   -> sbcond w NE
 
           MO_S_Gt w -> sbcond w SGT
@@ -2071,7 +2091,11 @@ genCCall target dest_regs arg_regs = do
                   -- CMN really is under the hood.
                   CMN   (OpReg w' hi) (OpRegShift w' lo SLSR (widthInBits w - 1)) `snocOL`
                   -- Set dst_needed to 1 if hi and lo' were (negatively) equal
+#if defined(__MHS__)
+                  CSET  (OpReg w' nd) Cond.EQ `appOL`
+#else
                   CSET  (OpReg w' nd) EQ `appOL`
+#endif
                   -- Finally truncate hi to drop any extraneous sign bits.
                   truncateReg w' w hi
           -- Can't handle > 64 bit operands
@@ -2849,10 +2873,17 @@ makeFarBranches {- only used when debugging -} _platform statics basic_blocks = 
               NotInRange far_target -> do
                 jmp_code <- genCondFarJump cond far_target
                 pure (pos+long_bc_jump_size, fromOL jmp_code)
+#if defined(__MHS__)
+        CBZ op t -> long_zero_jump op t Cond.EQ
+        CBNZ op t -> long_zero_jump op t NE
+        -- TBZ/TBNZ have 14-bit range (±32KB), same expansion strategy as CBZ/CBNZ
+        TBZ op bit t -> long_tbz_jump op bit t Cond.EQ
+#else
         CBZ op t -> long_zero_jump op t EQ
         CBNZ op t -> long_zero_jump op t NE
         -- TBZ/TBNZ have 14-bit range (±32KB), same expansion strategy as CBZ/CBNZ
         TBZ op bit t -> long_tbz_jump op bit t EQ
+#endif
         TBNZ op bit t -> long_tbz_jump op bit t NE
         instr
           | isMetaInstr instr -> pure (pos,[instr])

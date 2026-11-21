@@ -310,6 +310,7 @@ Library
         GHC.Internal.TH.Lib
         GHC.Internal.TH.Lift
         GHC.Internal.TH.Quote
+        GHC.Internal.ThisUnitId
         GHC.Internal.TopHandler
         GHC.Internal.TypeError
         GHC.Internal.TypeLits

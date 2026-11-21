@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# OPTIONS_GHC -Wno-orphans      #-} -- Outputable and IEWrappedName
 {-# LANGUAGE DataKinds            #-}
 {-# LANGUAGE StandaloneDeriving   #-}
@@ -155,6 +156,13 @@ instance (OutputableBndrId p
                     pp_qual qual False, ppr pkg, ppr mod', pp_qual qual True, pp_as as])
              4 (pp_spec spec)
       where
+#if defined(__MHS__)
+        -- MicroHs infers a where-bound function's type from its guard
+        -- patterns, ignoring the enclosing `case ghcPass @p of` refinement;
+        -- the signature pins the scrutinee to the family application so the
+        -- patterns check against the refined, reduced type instead.
+        pp_implicit :: XCImportDecl (GhcPass p) -> SDoc
+#endif
         pp_implicit ext =
             let implicit = case ghcPass @p of
                             GhcPs | XImportDeclPass { ideclImplicit = implicit } <- ext -> implicit
@@ -175,6 +183,10 @@ instance (OutputableBndrId p
         pp_as Nothing   = empty
         pp_as (Just a)  = text "as" <+> ppr a
 
+#if defined(__MHS__)
+        -- See the note on pp_implicit above: same guard-pattern idiom.
+        ppr_imp :: XCImportDecl (GhcPass p) -> IsBootInterface -> SDoc
+#endif
         ppr_imp ext IsBoot =
             let mSrcText = case ghcPass @p of
                                 GhcPs | XImportDeclPass { ideclSourceText = mst } <- ext -> mst

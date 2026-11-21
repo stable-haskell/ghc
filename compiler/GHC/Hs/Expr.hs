@@ -9,6 +9,9 @@
 {-# LANGUAGE MultiParamTypeClasses     #-}
 {-# LANGUAGE ScopedTypeVariables       #-}
 {-# LANGUAGE StandaloneDeriving        #-}
+#if defined(__MHS__)
+{-# LANGUAGE StandaloneKindSignatures  #-}
+#endif
 {-# LANGUAGE TypeApplications          #-}
 {-# LANGUAGE TypeFamilyDependencies    #-}
 {-# LANGUAGE UndecidableInstances #-} -- Wrinkle in Note [Trees That Grow]
@@ -112,7 +115,12 @@ type PostTcTable = [(Name, PostTcExpr)]
 -- noSyntaxExpr would be ambiguous.
 type instance SyntaxExpr (GhcPass p) = SyntaxExprGhc p
 
+#if defined(__MHS__)
+type SyntaxExprGhc :: Pass -> Data.Kind.Type
+type family SyntaxExprGhc p = r | r -> p where
+#else
 type family SyntaxExprGhc (p :: Pass) = (r :: Data.Kind.Type) | r -> p where
+#endif
   SyntaxExprGhc 'Parsed      = NoExtField
   SyntaxExprGhc 'Renamed     = SyntaxExprRn
   SyntaxExprGhc 'Typechecked = SyntaxExprTc
@@ -1253,6 +1261,9 @@ hsExprNeedsParens prec = go
 gHsPar :: forall p. IsPass p => LHsExpr (GhcPass p) -> HsExpr (GhcPass p)
 gHsPar e = HsPar x e
   where
+#if defined(__MHS__)
+    x :: XPar (GhcPass p)
+#endif
     x = case ghcPass @p of
       GhcPs -> noAnn
       GhcRn -> noExtField
@@ -2712,10 +2723,24 @@ type instance Anno [LocatedA (Pat (GhcPass p))] = EpaLocation
 type instance Anno (GRHS (GhcPass p) (LocatedA (HsExpr (GhcPass p)))) = EpAnnCO
 type instance Anno (GRHS (GhcPass p) (LocatedA (HsCmd  (GhcPass p)))) = EpAnnCO
 type instance Anno (StmtLR (GhcPass pl) (GhcPass pr) (LocatedA (body (GhcPass pr)))) = SrcSpanAnnA
+#if defined(__MHS__)
+-- MicroHs only matches type-family instances first-order, so it cannot use the
+-- higher-order instance above to discharge
+-- `Anno (StmtLR (GhcPass pl) (GhcPass pr) body) ~ SrcSpanAnnA` once `body` is
+-- concrete (e.g. `LHsExpr`/`LHsCmd` at the `HsDo`/`HsCmdDo` pretty-printer
+-- call sites). These first-order specialisations carry the same RHS, so they
+-- only guide inference and change no accepted program's meaning.
+type instance Anno (StmtLR (GhcPass pl) (GhcPass pr) (LocatedA (HsExpr (GhcPass pr)))) = SrcSpanAnnA
+type instance Anno (StmtLR (GhcPass pl) (GhcPass pr) (LocatedA (HsCmd (GhcPass pr)))) = SrcSpanAnnA
+#endif
 
 type instance Anno (HsUntypedSplice (GhcPass p)) = SrcSpanAnnA
 
 type instance Anno [LocatedA (StmtLR (GhcPass pl) (GhcPass pr) (LocatedA (body (GhcPass pr))))] = SrcSpanAnnLW
+#if defined(__MHS__)
+type instance Anno [LocatedA (StmtLR (GhcPass pl) (GhcPass pr) (LocatedA (HsExpr (GhcPass pr))))] = SrcSpanAnnLW
+type instance Anno [LocatedA (StmtLR (GhcPass pl) (GhcPass pr) (LocatedA (HsCmd (GhcPass pr))))] = SrcSpanAnnLW
+#endif
 
 type instance Anno (FieldLabelStrings (GhcPass p)) = EpAnnCO
 type instance Anno FieldLabelString                = SrcSpanAnnN

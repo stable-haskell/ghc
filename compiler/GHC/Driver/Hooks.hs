@@ -77,6 +77,9 @@ import GHC.Data.Bag
 
 import qualified Data.Kind
 import System.Process
+#if defined(__MHS__)
+import GHC.SysTools.Process (ProcessHandle, CreateProcess)
+#endif
 import GHC.Linker.Types
 
 {-

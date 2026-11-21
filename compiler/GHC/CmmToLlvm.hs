@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE TypeFamilies, ViewPatterns, OverloadedStrings #-}
 
 -- -----------------------------------------------------------------------------
@@ -61,6 +62,21 @@ llvmCodeGen logger cfg h dus cmm_stream
        let mb_ver = llvmCgLlvmVersion cfg
 
        -- warn if unsupported
+#if defined(__MHS__)
+       -- mhs forM_ is list-only; Maybe case instead (same semantics).
+       case mb_ver of
+         Just ver -> do
+           debugTraceMsg logger 2
+                (text "Using LLVM version:" <+> text (llvmVersionStr ver))
+           let doWarn = llvmCgDoWarn cfg
+           when (not (llvmVersionSupported ver) && doWarn) $ putMsg logger $
+             "You are using an unsupported version of LLVM!" $$
+             "Currently only" <+> text (llvmVersionStr supportedLlvmVersionLowerBound) <+>
+             "up to" <+> text (llvmVersionStr supportedLlvmVersionUpperBound) <+> "(non inclusive) is supported." <+>
+             "System LLVM version: " <> text (llvmVersionStr ver) $$
+             "We will try though..."
+         Nothing -> return ()
+#else
        forM_ mb_ver $ \ver -> do
          debugTraceMsg logger 2
               (text "Using LLVM version:" <+> text (llvmVersionStr ver))
@@ -71,6 +87,7 @@ llvmCodeGen logger cfg h dus cmm_stream
            "up to" <+> text (llvmVersionStr supportedLlvmVersionUpperBound) <+> "(non inclusive) is supported." <+>
            "System LLVM version: " <> text (llvmVersionStr ver) $$
            "We will try though..."
+#endif
 
        when (isNothing mb_ver) $ do
          let doWarn = llvmCgDoWarn cfg

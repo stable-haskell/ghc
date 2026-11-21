@@ -140,6 +140,21 @@ jobs:
             echo "/usr/local/bin" >> $GITHUB_PATH
 
       - if: matrix.platform.image == 'rockylinux:8'
+        name: Use a UTF-8 locale
+        run: |
+          set -eux
+          # Happy reads GHC/Parser.y with the locale encoding. This image
+          # defaults to POSIX, which rejects the file's UTF-8 bytes.
+          if locale -a | grep -qiE '^C\.(utf8|UTF-8)$'; then
+            locale_name=C.UTF-8
+          else
+            dnf install -y glibc-langpack-en
+            locale_name=en_US.UTF-8
+          fi
+          echo "LANG=${locale_name}" >> "$GITHUB_ENV"
+          echo "LC_ALL=${locale_name}" >> "$GITHUB_ENV"
+
+      - if: matrix.platform.image == 'rockylinux:8'
         name: Install emscripten
         run : &emscripten |
           set -eux
@@ -258,6 +273,9 @@ jobs:
               ghcup --no-verbose install cabal --set ${{ env.CABAL_VERSION }} &&
               cabal update &&
               if [ -x ${{ env.CABAL_CACHE_PATH }}/cabal ]; then export USE_SYSTEM_CABAL=1; fi &&
+              # Happy reads GHC/Parser.y with the locale encoding. This image
+              # defaults to POSIX, which rejects the file's UTF-8 bytes.
+              if locale -a | grep -qiE '^C\.(utf-8|utf8)$'; then export LANG=C.UTF-8 LC_ALL=C.UTF-8; else sed -i 's/^# *\(en_US.UTF-8 UTF-8\)/\1/' /etc/locale.gen && locale-gen en_US.UTF-8 && export LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8; fi &&
               make _build/dist/ghc.tar.gz _build/dist/cabal.tar.gz _build/dist/tests.tar.gz &&
               cd _build/dist &&
               mv ghc.tar.gz ghc-$(bin/ghc --numeric-version)-${{ matrix.platform.ARTIFACT }}.tar.gz &&
@@ -721,7 +739,7 @@ jobs:
         uses: docker://arm64v8/debian:11
         name: Run build (aarch64 linux)
         with:
-          args: sh -c "find /etc/apt -type f \( -name sources.list -o -name '*.list' -o -name '*.sources' \) -exec sed -i -e 's|://deb[.]debian[.]org/debian-security|://archive.debian.org/debian-security|g' -e 's|://security[.]debian[.]org/debian-security|://archive.debian.org/debian-security|g' {} + && apt-get --error-on=any update && apt-get install -y curl bash git ${{ needs.tool-output.outputs.apt_tools_test }} && git config --system --add safe.directory $GITHUB_WORKSPACE && rm -rf .git && cd _build/dist && for file in *.tar.gz; do tar xzf $file; done && cd testsuite && PATH=$GITHUB_WORKSPACE/_build/dist/bin:$PATH make"
+          args: sh -c "find /etc/apt -type f \( -name sources.list -o -name '*.list' -o -name '*.sources' \) -exec sed -i -e 's|://deb[.]debian[.]org/debian-security|://archive.debian.org/debian-security|g' -e 's|://security[.]debian[.]org/debian-security|://archive.debian.org/debian-security|g' {} + && apt-get --error-on=any update && apt-get install -y curl bash git ${{ needs.tool-output.outputs.apt_tools_test }} && if locale -a | grep -qiE '^C\.(utf-8|utf8)$'; then export LANG=C.UTF-8 LC_ALL=C.UTF-8; else sed -i 's/^# *\(en_US.UTF-8 UTF-8\)/\1/' /etc/locale.gen && locale-gen en_US.UTF-8 && export LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8; fi && git config --system --add safe.directory $GITHUB_WORKSPACE && rm -rf .git && cd _build/dist && for file in *.tar.gz; do tar xzf $file; done && cd testsuite && PATH=$GITHUB_WORKSPACE/_build/dist/bin:$PATH make"
 
       - if: matrix.platform.ARTIFACT == 'aarch64-linux-unknown'
         uses: docker://arm64v8/alpine:3.20

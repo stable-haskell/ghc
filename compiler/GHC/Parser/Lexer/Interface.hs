@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE MagicHash #-}
 
 {- |
@@ -21,7 +22,11 @@ import GHC.Prelude
 import Data.Char (GeneralCategory (..), generalCategory, ord)
 import Data.Word (Word8)
 import GHC.Data.StringBuffer (StringBuffer, atEnd, nextChar, prevChar)
+#if defined(__MHS__)
+import Data.Char (chr)
+#else
 import GHC.Exts
+#endif
 import GHC.Types.SrcLoc (PsLoc, advancePsLoc)
 
 data AlexInput = AI !PsLoc !StringBuffer deriving (Show)
@@ -52,8 +57,15 @@ alexGetChar inp = case alexGetByte inp of
                     Just (b,i) -> c `seq` Just (c,i)
                        where c = unsafeChr $ fromIntegral b
 
+#if defined(__MHS__)
+-- MicroHs ghc-compat GHC.Exts has no Char#/chr#. All inputs here are latin1
+-- bytes (see Note [Unicode in Alex]), where total chr is exact.
+unsafeChr :: Int -> Char
+unsafeChr = chr
+#else
 unsafeChr :: Int -> Char
 unsafeChr (I# c) = GHC.Exts.C# (GHC.Exts.chr# c)
+#endif
 
 {-
 Note [Unicode in Alex]

@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 module GHC.Types.Name (
     module GHC.Types.Name,
     module GHC.Types.Name.Occurrence
@@ -8,10 +9,16 @@ import {-# SOURCE #-} GHC.Types.Name.Occurrence
 import GHC.Types.Unique
 import GHC.Utils.Outputable
 import Data.Data (Data)
+#if defined(__MHS__)
+import Data.Typeable (Typeable)
+#endif
 import Control.DeepSeq (NFData)
 
 data Name
 
+#if defined(__MHS__)
+instance Typeable Name
+#endif
 instance Eq Name
 instance Data Name
 instance Uniquable Name

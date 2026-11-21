@@ -1,4 +1,5 @@
 {-# LANGUAGE ApplicativeDo              #-}
+{-# LANGUAGE CPP                        #-}
 {-# LANGUAGE DeriveFunctor              #-}
 {-# LANGUAGE DerivingVia                #-}
 {-# LANGUAGE FlexibleInstances          #-}
@@ -235,6 +236,42 @@ instance HasHaddock a => HasHaddock [a] where
 --      ) where
 --
 instance HasHaddock (Located (HsModule GhcPs)) where
+#if defined(__MHS__)
+  -- MicroHs does not apply ApplicativeDo here (it demands a Monad HdkA
+  -- instance, which must not exist by design); the explicit Applicative
+  -- chain below is semantically identical to the do-block in the #else
+  -- branch (same effect order: header, exports, imports, decls).
+  addHaddock (L l_mod mod) =
+    (\headerDocs hsmodExports' _ hsmodDecls' -> L l_mod $
+      mod { hsmodExports = hsmodExports'
+          , hsmodDecls = hsmodDecls'
+          , hsmodExt = (hsmodExt mod) { hsmodHaddockModHeader = headerDocs } })
+    <$> headerDocsM
+    <*> exportsM
+    <*> traverse_ registerHdkA (hsmodImports mod)
+    <*> declsM
+    where
+      mod_anns = anns (hsmodAnn (hsmodExt mod))
+      headerDocsM =
+        case hsmodName mod of
+          Nothing -> pure Nothing
+          Just (L l_name _) ->
+            let modspan =
+                  getEpTokenBufSpan (am_mod mod_anns) <>
+                  getEpTokenBufSpan (am_sig mod_anns) <>
+                  getBufSpan (locA l_name)
+            in HdkA modspan $ do
+              docs <-
+                inLocRange (locRangeTo (fmap bufSpanStart modspan)) $
+                takeHdkComments mkDocNext
+              dc <- selectDocString docs
+              pure $ lexLHsDocString <$> dc
+      exportsM = case hsmodExports mod of
+        Nothing -> pure Nothing
+        Just exps -> Just <$> addHaddock exps
+      layout = hsmodLayout (hsmodExt mod)
+      declsM = addHaddockInterleaveItems layout (mkDocHsDecl layout) (hsmodDecls mod)
+#else
   addHaddock (L l_mod mod) = do
     let mod_anns = anns (hsmodAnn (hsmodExt mod))
 
@@ -295,7 +332,8 @@ instance HasHaddock (Located (HsModule GhcPs)) where
     pure $ L l_mod $
       mod { hsmodExports = hsmodExports'
           , hsmodDecls = hsmodDecls'
-          , hsmodExt = (hsmodExt mod) { hsmodHaddockModHeader = headerDocs } }
+          , hsmodExt = (hsmodExt mod) { hsmodHaddockModHeader = headerDocs } }
+#endif
 
 lexHsDocString :: HsDocString -> HsDoc GhcPs
 lexHsDocString = lexHsDoc parseIdentifier
@@ -392,11 +430,21 @@ addHaddockInterleaveItems layout get_doc_item = go
   where
     go :: [a] -> HdkA [a]
     go [] = liftHdkA (takeHdkComments get_doc_item)
+#if defined(__MHS__)
+    -- MicroHs demands Monad HdkA for this do-block; the explicit
+    -- Applicative chain is semantically identical (same effect order).
+    go (item : items) =
+      (\docItems item' other_items -> docItems ++ item' : other_items)
+        <$> liftHdkA (takeHdkComments get_doc_item)
+        <*> with_layout (addHaddock item)
+        <*> go items
+#else
     go (item : items) = do
       docItems <- liftHdkA (takeHdkComments get_doc_item)
       item' <- with_layout (addHaddock item)
       other_items <- go items
       pure $ docItems ++ item':other_items
+#endif
 
     with_layout :: HdkA a -> HdkA a
     with_layout = case layout of
@@ -664,12 +712,21 @@ instance HasHaddock (LocatedC (DerivClauseTys GhcPs)) where
   addHaddock (L l_dct dct) =
     extendHdkA (locA l_dct) $
     case dct of
+#if defined(__MHS__)
+      -- MicroHs demands Monad HdkA for these do-blocks; the explicit
+      -- fmap form is semantically identical.
+      DctSingle x ty ->
+        (\ty' -> L l_dct $ DctSingle x ty') <$> addHaddock ty
+      DctMulti x tys ->
+        (\tys' -> L l_dct $ DctMulti x tys') <$> addHaddock tys
+#else
       DctSingle x ty -> do
         ty' <- addHaddock ty
         pure $ L l_dct $ DctSingle x ty'
       DctMulti x tys -> do
         tys' <- addHaddock tys
         pure $ L l_dct $ DctMulti x tys'
+#endif
 
 -- Process a single data constructor declaration, which may come in one of the
 -- following forms:
@@ -710,7 +767,24 @@ instance HasHaddock (LocatedA (ConDecl GhcPs)) where
     extendHdkA (locA l_con_decl) $
     case con_decl of
       ConDeclGADT { con_g_ext, con_names, con_outer_bndrs, con_inner_bndrs
-                  , con_mb_cxt, con_g_args, con_res_ty } -> do
+                  , con_mb_cxt, con_g_args, con_res_ty } ->
+#if defined(__MHS__)
+        -- MicroHs demands Monad HdkA for do-blocks; the explicit
+        -- Applicative chain is semantically identical (same effect order).
+        (\con_doc' con_g_args' con_res_ty' -> L l_con_decl $
+          ConDeclGADT { con_g_ext, con_names,
+                        con_outer_bndrs, con_inner_bndrs, con_mb_cxt,
+                        con_doc = lexLHsDocString <$> con_doc',
+                        con_g_args = con_g_args',
+                        con_res_ty = con_res_ty' })
+          <$> getConDoc (getLocA (NE.head con_names))
+          <*> (case con_g_args of
+                 PrefixConGADT x ts -> PrefixConGADT x <$> addHaddock ts
+                 RecConGADT arr (L l_rec flds) ->
+                   (\flds' -> RecConGADT arr (L l_rec flds')) <$> traverse addHaddock flds)
+          <*> addHaddock con_res_ty
+#else
+        do
         con_doc' <- getConDoc (getLocA (NE.head con_names))
         con_g_args' <-
           case con_g_args of
@@ -725,6 +799,7 @@ instance HasHaddock (LocatedA (ConDecl GhcPs)) where
                         con_doc = lexLHsDocString <$> con_doc',
                         con_g_args = con_g_args',
                         con_res_ty = con_res_ty' }
+#endif
       ConDeclH98 { con_ext, con_name, con_forall, con_ex_tvs, con_mb_cxt, con_args } ->
         let
           -- See Note [Leading and trailing comments on H98 constructors]
@@ -739,6 +814,32 @@ instance HasHaddock (LocatedA (ConDecl GhcPs)) where
           getMixed :: HdkA (LocatedA (ConDecl GhcPs))
           getMixed =
             case con_args of
+#if defined(__MHS__)
+              -- MicroHs demands Monad HdkA for do-blocks; the explicit
+              -- Applicative chains are semantically identical (same order).
+              PrefixCon ts ->
+                (\con_doc' ts' -> L l_con_decl $
+                  ConDeclH98 { con_ext, con_name, con_forall, con_ex_tvs, con_mb_cxt,
+                               con_doc = lexLHsDocString <$> con_doc',
+                               con_args = PrefixCon ts' })
+                  <$> getConDoc (getLocA con_name)
+                  <*> traverse addHaddock ts
+              InfixCon t1 t2 ->
+                (\t1' con_doc' t2' -> L l_con_decl $
+                  ConDeclH98 { con_ext, con_name, con_forall, con_ex_tvs, con_mb_cxt,
+                               con_doc = lexLHsDocString <$> con_doc',
+                               con_args = InfixCon t1' t2' })
+                  <$> addHaddock t1
+                  <*> getConDoc (getLocA con_name)
+                  <*> addHaddock t2
+              RecCon (L l_rec flds) ->
+                (\con_doc' flds' -> L l_con_decl $
+                  ConDeclH98 { con_ext, con_name, con_forall, con_ex_tvs, con_mb_cxt,
+                               con_doc = lexLHsDocString <$> con_doc',
+                               con_args = RecCon (L l_rec flds') })
+                  <$> getConDoc (getLocA con_name)
+                  <*> traverse addHaddock flds
+#else
               PrefixCon ts -> do
                 con_doc' <- getConDoc (getLocA con_name)
                 ts' <- traverse addHaddock ts
@@ -761,6 +862,7 @@ instance HasHaddock (LocatedA (ConDecl GhcPs)) where
                   ConDeclH98 { con_ext, con_name, con_forall, con_ex_tvs, con_mb_cxt,
                                con_doc = lexLHsDocString <$> con_doc',
                                con_args = RecCon (L l_rec flds') }
+#endif
         in
           hoistHdkA
             (\m -> do { a <- onlyTrailingOrLeading (locA l_con_decl)
@@ -899,16 +1001,37 @@ We implement this in two steps:
 -}
 
 instance HasHaddock (HsConDeclField GhcPs) where
+#if defined(__MHS__)
+  -- MicroHs demands Monad HdkA for do-blocks (and does not desugar
+  -- `return` applicatively); the explicit fmap form is identical.
+  addHaddock cfs =
+    (\cdf_ty -> case cdf_ty of
+      L _ (HsDocTy _ ty doc) -> cfs { cdf_type = ty, cdf_doc = Just doc }
+      _ -> cfs { cdf_type = cdf_ty }) <$> addHaddock (cdf_type cfs)
+#else
   addHaddock cfs = do
     cdf_type <- addHaddock (cdf_type cfs)
     return $ case cdf_type of
       L _ (HsDocTy _ ty doc) -> cfs { cdf_type = ty, cdf_doc = Just doc }
       _ -> cfs { cdf_type }
+#endif
 
 instance HasHaddock a => HasHaddock (HsWildCardBndrs GhcPs a) where
   addHaddock (HsWC _ t) = HsWC noExtField <$> addHaddock t
 
 instance HasHaddock (LocatedA (HsSigType GhcPs)) where
+#if defined(__MHS__)
+  -- MicroHs demands Monad HdkA for do-blocks; the explicit
+  -- Applicative chain is semantically identical (same effect order).
+  addHaddock (L l (HsSig{sig_bndrs = outer_bndrs, sig_body = body})) =
+    extendHdkA (locA l) $
+      (\_ body' -> L l $ HsSig noExtField outer_bndrs body')
+        <$> (case outer_bndrs of
+               HsOuterImplicit{} -> pure ()
+               HsOuterExplicit{hso_bndrs = bndrs} ->
+                 registerLocHdkA (getLHsTyVarBndrsLoc bndrs))
+        <*> addHaddock body
+#else
   addHaddock (L l (HsSig{sig_bndrs = outer_bndrs, sig_body = body})) =
     extendHdkA (locA l) $ do
       case outer_bndrs of
@@ -917,6 +1040,7 @@ instance HasHaddock (LocatedA (HsSigType GhcPs)) where
           registerLocHdkA (getLHsTyVarBndrsLoc bndrs)
       body' <- addHaddock body
       pure $ L l $ HsSig noExtField outer_bndrs body'
+#endif
 
 -- Process a type, adding documentation comments to function arguments
 -- and the result. Many formatting styles are supported.
@@ -951,6 +1075,24 @@ instance HasHaddock (LocatedA (HsType GhcPs)) where
     case t of
 
       -- forall a b c. t
+#if defined(__MHS__)
+      HsForAllTy x tele body ->
+        (\_ body' -> L l (HsForAllTy x tele body'))
+          <$> registerLocHdkA (getForAllTeleLoc tele)
+          <*> addHaddock body
+
+      -- (Eq a, Num a) => t
+      HsQualTy x lhs rhs ->
+        (\_ rhs' -> L l (HsQualTy x lhs rhs'))
+          <$> registerHdkA lhs
+          <*> addHaddock rhs
+
+      -- arg -> res
+      HsFunTy u mult lhs rhs ->
+        (\lhs' rhs' -> L l (HsFunTy u mult lhs' rhs'))
+          <$> addHaddock lhs
+          <*> addHaddock rhs
+#else
       HsForAllTy x tele body -> do
         registerLocHdkA (getForAllTeleLoc tele)
         body' <- addHaddock body
@@ -967,6 +1109,7 @@ instance HasHaddock (LocatedA (HsType GhcPs)) where
         lhs' <- addHaddock lhs
         rhs' <- addHaddock rhs
         pure $ L l (HsFunTy u mult lhs' rhs')
+#endif
 
       -- other types
       _ -> liftHdkA $ do

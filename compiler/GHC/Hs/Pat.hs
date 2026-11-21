@@ -1107,6 +1107,9 @@ conPatNeedsParens p = go
 gParPat :: forall p. IsPass p => LPat (GhcPass p) -> Pat (GhcPass p)
 gParPat pat = ParPat x pat
   where
+#if defined(__MHS__)
+    x :: XParPat (GhcPass p)
+#endif
     x = case ghcPass @p of
       GhcPs -> noAnn
       GhcRn -> noExtField

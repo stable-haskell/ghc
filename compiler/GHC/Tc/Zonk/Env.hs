@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE DerivingVia #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE NoPolyKinds #-}
@@ -46,7 +47,13 @@ import Data.Coerce               ( coerce )
 import Data.IORef                ( IORef, newIORef )
 import Data.List                 ( partition )
 
+#if defined(__MHS__)
+-- MicroHs ghc-compat GHC.Exts has no oneShot; it is semantically the identity.
+oneShot :: (a -> b) -> a -> b
+oneShot f x = f x
+#else
 import GHC.Exts                  ( oneShot )
+#endif
 
 --------------------------------------------------------------------------------
 

@@ -1,0 +1,38 @@
+From e7dff3c81c63c70609a38784e70e3829e60b15c9 Mon Sep 17 00:00:00 2001
+From: Moritz Angermann <moritz@zw3rk.com>
+Date: Sun, 22 Nov 2026 00:36:33 +0900
+Subject: [PATCH] lib: drop duplicate NFData instances for 3- and 4-tuples
+
+Control.DeepSeq.Class already declares NFData (a, b), (a, b, c), and
+(a, b, c, d). Control.DeepSeq imports that module and declared the
+3- and 4-tuple instances again. MicroHs then rejects rnf on a triple
+with "Multiple constraint solutions". GHC's IfaceIdBndr is such a
+triple. Solo and 5-tuples stay here; Class does not declare them.
+---
+ lib/Control/DeepSeq.hs | 10 +++-------
+ 1 file changed, 3 insertions(+), 7 deletions(-)
+
+diff --git a/lib/Control/DeepSeq.hs b/lib/Control/DeepSeq.hs
+index f3292f5b..764a36a5 100644
+--- a/lib/Control/DeepSeq.hs
++++ b/lib/Control/DeepSeq.hs
+@@ -476,13 +476,9 @@ instance NFData ExitCode where
+ instance NFData a => NFData (Solo a) where
+   rnf (MkSolo a) = rnf a
+ 
+-instance (NFData a1, NFData a2, NFData a3) =>
+-         NFData (a1, a2, a3) where
+-  rnf (a1, a2, a3) = rnf a1 `seq` rnf a2 `seq` rnf a3
+-
+-instance (NFData a1, NFData a2, NFData a3, NFData a4) =>
+-         NFData (a1, a2, a3, a4) where
+-  rnf (a1, a2, a3, a4) = rnf a1 `seq` rnf a2 `seq` rnf a3 `seq` rnf a4
++-- Pairs, triples, and quadruples are declared in Control.DeepSeq.Class.
++-- Repeating them here makes rnf on a triple ambiguous
++-- ("Multiple constraint solutions for: NFData (a, b, c)").
+ 
+ instance (NFData a1, NFData a2, NFData a3, NFData a4, NFData a5) =>
+          NFData (a1, a2, a3, a4, a5) where
+-- 
+2.51.2
+

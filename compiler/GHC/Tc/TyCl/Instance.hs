@@ -5,6 +5,7 @@
 -}
 
 
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -2041,7 +2042,11 @@ tcMethodBody is_vanilla_dm clas tyvars dfun_ev_vars inst_tys
                                             mkMethIds clas tyvars dfun_ev_vars
                                                       inst_tys sel_id
 
-       ; let lm_bind = meth_bind { fun_id = L (noAnnSrcSpan bndr_loc)
+       ; let
+#if defined(__MHS__)
+             lm_bind :: HsBind GhcRn
+#endif
+             lm_bind = meth_bind { fun_id = L (noAnnSrcSpan bndr_loc)
                                               (idName local_meth_id) }
                        -- Substitute the local_meth_name for the binder
                        -- NB: the binding is always a FunBind

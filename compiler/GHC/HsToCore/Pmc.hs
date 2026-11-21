@@ -1,4 +1,5 @@
 
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE FlexibleInstances  #-}
 {-# LANGUAGE GADTs              #-}
 {-# LANGUAGE LambdaCase         #-}
@@ -590,6 +591,16 @@ reportWarnings dflags report_mode (DsMatchContext kind loc) vars
       when (approx && (exists_u || exists_i)) $
         putSrcSpanDs loc (diagnosticDs (DsMaxPmCheckModelsReached (maxPmCheckModels dflags)))
 
+#if defined(__MHS__)
+      -- MHS's forM_ is list-only; fromOL exposes the same elements in order.
+      when exists_b $ forM_ (fromOL redundant_bangs) $ \(SrcInfo (L l q)) ->
+        putSrcSpanDs l (diagnosticDs (DsRedundantBangPatterns kind q))
+
+      when exists_r $ forM_ (fromOL redundant_rhss) $ \(SrcInfo (L l q)) ->
+        putSrcSpanDs l (diagnosticDs (DsOverlappingPatterns kind q))
+      when exists_i $ forM_ (fromOL inaccessible_rhss) $ \(SrcInfo (L l q)) ->
+        putSrcSpanDs l (diagnosticDs (DsInaccessibleRhs kind q))
+#else
       when exists_b $ forM_ redundant_bangs $ \(SrcInfo (L l q)) ->
         putSrcSpanDs l (diagnosticDs (DsRedundantBangPatterns kind q))
 
@@ -597,6 +608,7 @@ reportWarnings dflags report_mode (DsMatchContext kind loc) vars
         putSrcSpanDs l (diagnosticDs (DsOverlappingPatterns kind q))
       when exists_i $ forM_ inaccessible_rhss $ \(SrcInfo (L l q)) ->
         putSrcSpanDs l (diagnosticDs (DsInaccessibleRhs kind q))
+#endif
 
       when exists_u $
         putSrcSpanDs loc (diagnosticDs (DsNonExhaustivePatterns kind check_type maxPatterns vars unc_examples))

@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE RecordWildCards #-}
 
 module GHC.Unit.Finder.Types
@@ -17,6 +18,12 @@ import GHC.Data.OsPath
 import qualified Data.Map as M
 import GHC.Types.Unique.Map
 import GHC.Fingerprint
+#if defined(__MHS__)
+-- Installed ghc-compat GHC.Fingerprint (shadowing the fuller shim) provides
+-- only Fingerprint(..) and fingerprint0; getFileHash lives in
+-- GHC.Utils.Fingerprint in the __MHS__ view (same file-hash semantics).
+import GHC.Utils.Fingerprint (getFileHash)
+#endif
 import Data.IORef
 import GHC.Platform.Ways
 import GHC.Unit.Env

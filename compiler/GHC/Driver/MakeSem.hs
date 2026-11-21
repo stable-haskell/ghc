@@ -7,6 +7,10 @@
 --
 module GHC.Driver.MakeSem
   (
+#if defined(__MHS__)
+    -- * Process-local semaphore (MicroHs has no System.Semaphore)
+    SemaphoreIdentifier,
+#endif
 #if !(defined(wasm32_HOST_ARCH) || defined(javascript_HOST_ARCH))
     -- * JSem: parallelism semaphore backed
     -- by a system semaphore (Posix/Windows)
@@ -19,7 +23,33 @@ module GHC.Driver.MakeSem
   )
   where
 
-#if defined(wasm32_HOST_ARCH) || defined(javascript_HOST_ARCH)
+#if defined(__MHS__)
+
+import GHC.Prelude
+import Control.Concurrent (QSem, newQSem, waitQSem, signalQSem)
+import qualified Control.Monad.Catch as MC
+
+-- | A process-local counting semaphore. MicroHs ships no
+-- System.Semaphore package, and stage1 never coordinates with external
+-- jobservers, so a local semaphore is exact for our purposes.
+data AbstractSem = AbstractSem { acquireSem :: IO (), releaseSem :: IO () }
+
+-- | Identifier of a system semaphore (from @-jsem@). Uninterpreted under
+-- MicroHs: 'runJSemAbstractSem' substitutes a process-local semaphore.
+type SemaphoreIdentifier = String
+
+-- | Run an action while holding the semaphore.
+withAbstractSem :: AbstractSem -> IO a -> IO a
+withAbstractSem sem = MC.bracket_ (acquireSem sem) (releaseSem sem)
+
+-- | Run an action with a process-local single-token semaphore standing in
+-- for the named system semaphore.
+runJSemAbstractSem :: SemaphoreIdentifier -> (AbstractSem -> IO a) -> IO a
+runJSemAbstractSem _ action = do
+  qsem <- newQSem 1
+  action (AbstractSem (waitQSem qsem) (signalQSem qsem))
+
+#elif defined(wasm32_HOST_ARCH) || defined(javascript_HOST_ARCH)
 
 import System.Semaphore
   ( AbstractSem(..)

@@ -1,8 +1,12 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE NoPolyKinds #-}
 module GHC.Core.TyCo.Rep where
 
 import GHC.Utils.Outputable ( Outputable )
 import Data.Data  ( Data )
+#if defined(__MHS__)
+import Data.Typeable ( Typeable )
+#endif
 import {-# SOURCE #-} GHC.Types.Var( Var, VarBndr, FunTyFlag )
 import {-# SOURCE #-} GHC.Core.TyCon ( TyCon )
 import Language.Haskell.Syntax.Specificity (ForAllTyFlag)
@@ -31,6 +35,11 @@ mkForAllTy       :: VarBndr Var ForAllTyFlag -> Type -> Type
 mkNakedTyConTy   :: TyCon -> Type
 mkNakedFunTy     :: FunTyFlag -> Type -> Type -> Type
 
+
+#if defined(__MHS__)
+instance Typeable Type
+instance Typeable Scaled
+#endif
 
 -- To support Data instances in GHC.Core.Coercion.Axiom
 instance Data Type

@@ -1,4 +1,5 @@
 -- | Extract docs from the renamer output so they can be serialized.
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE ViewPatterns #-}
@@ -31,7 +32,11 @@ import qualified Data.Map as M
 import qualified Data.Set as Set
 import Data.Maybe
 import qualified Data.Semigroup as S
+#if defined(__MHS__)
+import Data.IORef (readIORef)
+#else
 import GHC.IORef (readIORef)
+#endif
 import GHC.Unit.Types
 import GHC.Hs
 import GHC.Types.Avail
@@ -359,6 +364,15 @@ getInstLoc = \case
   TyFamInstD _ (TyFamInstDecl
     { tfid_eqn = FamEqn { feqn_tycon = L l _ }}) -> locA l
 
+#if defined(__MHS__)
+-- MicroHs does not pin the `feqn_tycon` location through the `do`-block
+-- generator pattern by inference alone (the sibling `data_fams` gets away
+-- with it only because using `defn` pins the equation type). Match the
+-- whole equation against its known type so the inner location is concrete
+-- for `locA` (same shape as `mhsLocB` in `GHC.Tc.TyCl.Class`).
+mhsFamEqnLoc :: FamEqn GhcRn (LHsType GhcRn) -> SrcSpan
+mhsFamEqnLoc (FamEqn { feqn_tycon = L l _ }) = locA l
+#endif
 -- | Get all subordinate declarations inside a declaration, and their docs.
 -- A subordinate declaration is something like the associate type or data
 -- family of a type class.
@@ -374,8 +388,12 @@ subordinates env instMap decl = case decl of
                , feqn_rhs   = defn }} <- unLoc <$> cid_datafam_insts d
       [ (n, [], IM.empty) | Just n <- [lookupSrcSpan (locA l) instMap] ] ++ dataSubs defn
     ty_fams = do
-      TyFamInstDecl { tfid_eqn = FamEqn { feqn_tycon = L l _ } } <- unLoc <$> cid_tyfam_insts d
+      TyFamInstDecl { tfid_eqn = _eqn@(FamEqn { feqn_tycon = L l _ }) } <- unLoc <$> cid_tyfam_insts d
+#if defined(__MHS__)
+      [ (n, [], IM.empty) | Just n <- [lookupSrcSpan (mhsFamEqnLoc _eqn) instMap] ]
+#else
       [ (n, [], IM.empty) | Just n <- [lookupSrcSpan (locA l) instMap] ]
+#endif
     in data_fams ++ ty_fams
 
   InstD _ (DataFamInstD _ (DataFamInstDecl d))

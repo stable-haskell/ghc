@@ -1,4 +1,7 @@
+{-# LANGUAGE CPP #-}
+#if !defined(__MHS__)
 {-# LANGUAGE MagicHash #-}
+#endif
 
 -----------------------------------------------------------------------------
 --
@@ -37,9 +40,11 @@ import Foreign
 import Foreign.C.String
 import System.IO
 
+#if !defined(__MHS__)
 -- for RULES
 import GHC.Exts (unpackCString#, unpackNBytes#, Int(..))
 import GHC.Ptr (Ptr(..))
+#endif
 
 -- -----------------------------------------------------------------------------
 
@@ -68,6 +73,7 @@ bPutChar b@(BufHandle buf r hdl) !c = do
 
 -- Equivalent of the text/str, text/unpackNBytes#, text/[] rules
 -- in GHC.Utils.Ppr.
+#if !defined(__MHS__)
 {-# RULES "hdoc/str"
     forall a h. bPutStr h (unpackCString# a) = bPutPtrString h (mkPtrString# a)
   #-}
@@ -77,6 +83,7 @@ bPutChar b@(BufHandle buf r hdl) !c = do
 {-# RULES "hdoc/[]#"
     forall h. bPutStr h [] = return ()
   #-}
+#endif
 
 {-# NOINLINE [0] bPutStr #-}  -- Give the RULE a chance to fire
                               -- It must wait till after phase 1 when
@@ -129,6 +136,16 @@ bPutPtrString b@(BufHandle buf r hdl) l@(PtrString a len) = l `seq` do
         else do
                 copyBytes (buf `plusPtr` i) a len
                 writeFastMutInt r (i+len)
+
+#if defined(__MHS__)
+-- Foreign.Marshal.Utils.fillBytes is not in the MicroHs base.
+fillBytes :: Ptr Word8 -> Word8 -> Int -> IO ()
+fillBytes p byte n = go 0
+  where
+    go i
+      | i >= n    = return ()
+      | otherwise = pokeElemOff p i byte >> go (i + 1)
+#endif
 
 -- | Replicate an 8-bit character
 bPutReplicate :: BufHandle -> Int -> Char -> IO ()

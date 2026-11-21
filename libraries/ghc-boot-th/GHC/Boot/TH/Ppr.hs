@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE Trustworthy #-}
 {-# LANGUAGE LambdaCase #-}
 -- | contains a prettyprinter for the
@@ -14,7 +15,9 @@ import GHC.Boot.TH.Syntax
 import Data.Word ( Word8 )
 import Data.Char ( toLower, chr )
 import Data.List ( intersperse )
+#if !defined(__MHS__)
 import GHC.Show  ( showMultiLineString )
+#endif
 import GHC.Lexeme( isVarSymChar )
 import Data.Ratio ( numerator, denominator )
 import Data.Foldable ( toList )
@@ -355,6 +358,22 @@ pprLit i (RationalL rat)
 
 bytesToString :: [Word8] -> String
 bytesToString = map (chr . fromIntegral)
+
+#if defined(__MHS__)
+-- MicroHs base has no GHC.Show.showMultiLineString.  Split on newlines and
+-- escape quotes and backslashes the way the GHC helper does.
+showMultiLineString :: String -> [String]
+showMultiLineString str = go '"' str
+  where
+    go ch s = case break (== '\n') s of
+      (l, _ : s'@(_ : _)) -> (ch : showLit l "\\n\\") : go '\\' s'
+      (l, "\n")           -> [ch : showLit l "\\n\""]
+      (l, _)              -> [ch : showLit l "\""]
+    showLit l rest = foldr esc rest l
+    esc '"'  r = '\\' : '"'  : r
+    esc '\\' r = '\\' : '\\' : r
+    esc c    r = c : r
+#endif
 
 pprString :: String -> Doc
 -- Print newlines as newlines with Haskell string escape notation,

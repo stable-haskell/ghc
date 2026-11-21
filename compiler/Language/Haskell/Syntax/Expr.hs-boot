@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE RoleAnnotations #-}
@@ -11,6 +12,9 @@ import Data.Kind  ( Type )
 
 import Prelude (Eq)
 import Data.Data (Data)
+#if defined(__MHS__)
+import Data.Typeable (Typeable)
+#endif
 
 type role HsExpr nominal
 type role MatchGroup nominal nominal
@@ -25,5 +29,12 @@ type family SyntaxExpr (i :: Type)
 type LHsExpr a = XRec a (HsExpr a)
 
 data HsDoFlavour
+#if defined(__MHS__)
+instance Typeable HsExpr
+instance Typeable HsUntypedSplice
+instance Typeable MatchGroup
+instance Typeable GRHSs
+instance Typeable HsDoFlavour
+#endif
 instance Eq HsDoFlavour
 instance Data HsDoFlavour

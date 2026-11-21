@@ -28,7 +28,10 @@ import GHC.Driver.Errors.Types
 import GHC.Driver.Messager
 import GHC.Driver.MakeSem
 
-#if defined(wasm32_HOST_ARCH) || defined(javascript_HOST_ARCH)
+#if defined(__MHS__)
+-- SemaphoreIdentifier comes from GHC.Driver.MakeSem under MicroHs,
+-- which has no System.Semaphore package.
+#elif defined(wasm32_HOST_ARCH) || defined(javascript_HOST_ARCH)
 import System.Semaphore
   ( SemaphoreIdentifier )
 #else
@@ -56,7 +59,12 @@ import Control.Concurrent.MVar
 import Control.Monad
 import qualified Control.Monad.Catch as MC
 
-#if defined(wasm32_HOST_ARCH) || defined(javascript_HOST_ARCH)
+#if defined(__MHS__)
+-- MicroHs has no SMP capability queries; the stage1 runtime is single-threaded.
+import Control.Concurrent ( getNumCapabilities, setNumCapabilities )
+getNumProcessors :: IO Int
+getNumProcessors = return 1
+#elif defined(wasm32_HOST_ARCH) || defined(javascript_HOST_ARCH)
 import GHC.Conc ( getNumProcessors )
 #else
 import GHC.Conc ( getNumProcessors, getNumCapabilities, setNumCapabilities )
@@ -106,9 +114,14 @@ data MakeEnv = MakeEnv { hsc_env :: !HscEnv -- The basic HscEnv which will be au
 
 
 label_self :: String -> IO ()
+#if defined(__MHS__)
+-- MicroHs threads carry no labels.
+label_self _ = return ()
+#else
 label_self thread_name = do
     self_tid <- CC.myThreadId
     CC.labelThread self_tid thread_name
+#endif
 
 
 runPipelines :: WorkerLimit -> HscEnv -> (GhcMessage -> AnyGhcDiagnostic) -> Maybe Messager -> [MakeAction] -> IO ()
@@ -157,7 +170,13 @@ runWorkerLimit _logger _dflags _ action = do
 runWorkerLimit logger dflags worker_limit action = case worker_limit of
     NumProcessorsLimit n_jobs ->
       runNjobsAbstractSem n_jobs action
-    JSemLimit sem_ident -> do
+    JSemLimit sem_ident ->
+#if defined(__MHS__)
+      -- No system-semaphore support: the MicroHs runJSemAbstractSem uses a
+      -- process-local semaphore and never fails to open one.
+      runJSemAbstractSem sem_ident action
+#else
+      do
       result <- MC.try @_ @SemaphoreError $ runJSemAbstractSem sem_ident action
       case result of
         Right a -> return a
@@ -166,6 +185,7 @@ runWorkerLimit logger dflags worker_limit action = case worker_limit of
               msg  = singleMessage $ mkPlainMsgEnvelope (initDiagOpts dflags) noSrcSpan diag
           printOrThrowDiagnostics logger (initPrintConfig dflags) (initDiagOpts dflags) (GhcDriverMessage <$> msg)
           runNjobsAbstractSem 1 action
+#endif
 #endif
 
 -- | Build and run a pipeline

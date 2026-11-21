@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE TupleSections #-}
@@ -429,7 +430,12 @@ emptyNodeInfo :: NodeInfo a
 emptyNodeInfo = NodeInfo S.empty [] M.empty
 
 sourcedNodeIdents :: SourcedNodeInfo a -> NodeIdentifiers a
+#if defined(__MHS__)
+-- MicroHs's Prelude has no `(<>)`: `mappend` is the same operation.
+sourcedNodeIdents = M.unionsWith mappend . fmap nodeIdentifiers . getSourcedNodeInfo
+#else
 sourcedNodeIdents = M.unionsWith (<>) . fmap nodeIdentifiers . getSourcedNodeInfo
+#endif
 
 combineSourcedNodeInfo :: SourcedNodeInfo Type -> SourcedNodeInfo Type -> SourcedNodeInfo Type
 combineSourcedNodeInfo = coerce $ M.unionWith combineNodeInfo
@@ -439,7 +445,11 @@ combineSourcedNodeInfo = coerce $ M.unionWith combineNodeInfo
 -- Precondition and postcondition: elements in 'nodeType' are ordered.
 combineNodeInfo :: NodeInfo Type -> NodeInfo Type -> NodeInfo Type
 (NodeInfo as ai ad) `combineNodeInfo` (NodeInfo bs bi bd) =
+#if defined(__MHS__)
+  NodeInfo (S.union as bs) (mergeSorted ai bi) (M.unionWith mappend ad bd)
+#else
   NodeInfo (S.union as bs) (mergeSorted ai bi) (M.unionWith (<>) ad bd)
+#endif
   where
     mergeSorted :: [Type] -> [Type] -> [Type]
     mergeSorted la@(a:as) lb@(b:bs) = case nonDetCmpType a b of

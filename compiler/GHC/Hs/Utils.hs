@@ -125,6 +125,12 @@ import GHC.Hs.Type
 import GHC.Hs.Lit
 import Language.Haskell.Syntax.Decls
 import Language.Haskell.Syntax.Extension
+#if defined(__MHS__)
+-- MicroHs does not re-resolve the XUnannotated type family through
+-- GHC.Hs.Type's export list; import it directly for the nlHsFunTy
+-- local signature below. Non-__MHS__ builds are unaffected.
+import Language.Haskell.Syntax.Type (XUnannotated)
+#endif
 import GHC.Hs.Extension
 import GHC.Parser.Annotation
 
@@ -533,11 +539,19 @@ nlHsApps :: IsSrcSpanAnn p a
          => IdP (GhcPass p) -> [LHsExpr (GhcPass p)] -> LHsExpr (GhcPass p)
 nlHsApps f xs = foldl' nlHsApp (nlHsVar f) xs
 
+#if defined(__MHS__)
+nlHsVarApps :: forall p a. IsSrcSpanAnn p a
+            => IdP (GhcPass p) -> [IdP (GhcPass p)] -> LHsExpr (GhcPass p)
+#else
 nlHsVarApps :: IsSrcSpanAnn p a
             => IdP (GhcPass p) -> [IdP (GhcPass p)] -> LHsExpr (GhcPass p)
+#endif
 nlHsVarApps f xs = noLocA (foldl' mk (mkHsVar (noLocA f))
                                          (map (mkHsVar . noLocA) xs))
                  where
+#if defined(__MHS__)
+                   mk :: HsExpr (GhcPass p) -> HsExpr (GhcPass p) -> HsExpr (GhcPass p)
+#endif
                    mk f a = HsApp noExtField (noLocA f) (noLocA a)
 
 nlConVarPat :: RdrName -> [RdrName] -> LPat GhcPs
@@ -630,6 +644,9 @@ nlHsAppTy f t = noLocA (HsAppTy noExtField f t)
 nlHsTyVar p x = noLocA (HsTyVar noAnn p (noLocA $ noUserRdrP @p x))
 nlHsFunTy a b = noLocA (HsFunTy noExtField (HsUnannotated x) a b)
   where
+#if defined(__MHS__)
+    x :: XUnannotated (LHsType (NoGhcTc (GhcPass p))) (GhcPass p)
+#endif
     x = case ghcPass @p of
       GhcPs -> EpArrow noAnn
       GhcRn -> noExtField
@@ -674,6 +691,9 @@ nlHsAppKindTy :: forall p. IsPass p =>
   LHsType (GhcPass p) -> LHsKind (GhcPass p) -> LHsType (GhcPass p)
 nlHsAppKindTy f k = noLocA (HsAppKindTy x f k)
   where
+#if defined(__MHS__)
+    x :: XAppKindTy (GhcPass p)
+#endif
     x = case ghcPass @p of
       GhcPs -> noAnn
       GhcRn -> noExtField
@@ -899,7 +919,14 @@ spanHsLocaLBinds (HsValBinds _ (XValBindsLR (NValBinds bs sigs)))
   = foldr combineSrcSpans noSrcSpan (bsSpans ++ sigsSpans)
   where
     bsSpans :: [SrcSpan]
+#if defined(__MHS__)
+    -- MicroHs does not propagate the located-bind type through
+    -- `concatMap snd`, leaving getLocA's location variable ambiguous;
+    -- pin the intermediate list. Same meaning as the unpinned version.
+    bsSpans = map getLocA (concatMap snd bs :: [LHsBind (GhcPass p)])
+#else
     bsSpans = map getLocA $ concatMap snd bs
+#endif
     sigsSpans :: [SrcSpan]
     sigsSpans = map getLocA sigs
 spanHsLocaLBinds (HsIPBinds _ (IPBinds _ bs))

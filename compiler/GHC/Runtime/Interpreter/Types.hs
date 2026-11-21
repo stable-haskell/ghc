@@ -71,7 +71,11 @@ import GHC.Unit.Types
 import GHC.Runtime.Interpreter.Types.SymbolCache
 
 import Control.Concurrent
+#if defined(__MHS__)
+import GHC.SysTools.Process ( ProcessHandle, CreateProcess )
+#else
 import System.Process   ( ProcessHandle, CreateProcess )
+#endif
 import System.IO
 import GHC.Unit.Finder.Types (FinderCache, FinderOpts)
 

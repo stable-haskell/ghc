@@ -1,4 +1,7 @@
+{-# LANGUAGE CPP #-}
+#if !defined(__MHS__)
 {-# LANGUAGE MagicHash, UnboxedTuples #-}
+#endif
 {-# OPTIONS_GHC -O2 #-}
 -- We always optimise this, otherwise performance of a non-optimised
 -- compiler is severely affected
@@ -15,6 +18,26 @@ module GHC.Data.FastMutInt(
 
 import GHC.Prelude.Basic
 
+#if defined(__MHS__)
+import Data.IORef
+
+-- MicroHs has no MutableByteArray#.  An IORef keeps the same operations.
+newtype FastMutInt = FastMutInt (IORef Int)
+
+newFastMutInt :: Int -> IO FastMutInt
+newFastMutInt n = fmap FastMutInt (newIORef n)
+
+readFastMutInt :: FastMutInt -> IO Int
+readFastMutInt (FastMutInt r) = readIORef r
+
+writeFastMutInt :: FastMutInt -> Int -> IO ()
+writeFastMutInt (FastMutInt r) i = writeIORef r i
+
+-- Returns the value before the addition, matching fetchAddIntArray#.
+atomicFetchAddFastMut :: FastMutInt -> Int -> IO Int
+atomicFetchAddFastMut (FastMutInt r) i =
+  atomicModifyIORef' r (\n -> (n + i, n))
+#else
 import GHC.Base
 
 data FastMutInt = FastMutInt !(MutableByteArray# RealWorld)
@@ -44,3 +67,4 @@ atomicFetchAddFastMut :: FastMutInt -> Int -> IO Int
 atomicFetchAddFastMut (FastMutInt arr) (I# i) = IO $ \s ->
   case fetchAddIntArray# arr 0# i s of
     (# s, n #) -> (# s, I# n #)
+#endif

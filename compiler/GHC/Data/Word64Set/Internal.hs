@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE MagicHash #-}
 {-# LANGUAGE TypeFamilies #-}
 
@@ -1117,11 +1118,13 @@ elems
   Lists
 --------------------------------------------------------------------}
 
+#if !defined(__MHS__)
 -- | @since 0.5.6.2
 instance GHC.Exts.IsList Word64Set where
   type Item Word64Set = Key
   fromList = fromList
   toList   = toList
+#endif
 
 -- | \(O(n)\). Convert the set to a list of elements. Subject to list fusion.
 toList :: Word64Set -> [Key]

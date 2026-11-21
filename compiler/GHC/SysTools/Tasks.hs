@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 -----------------------------------------------------------------------------
@@ -65,7 +66,12 @@ import Data.List (tails, findIndex, isPrefixOf, isSuffixOf, stripPrefix)
 import Data.Maybe (fromMaybe)
 import System.FilePath (isAbsolute, takeFileName)
 import System.IO
+#if defined(__MHS__)
+-- proc/CreateProcess/waitForProcess/runInteractiveProcess come from
+-- GHC.SysTools.Process under MicroHs (no System.Process handle API).
+#else
 import System.Process
+#endif
 import GHC.Driver.Config.Diagnostic
 import GHC.Driver.Errors
 import GHC.Driver.Errors.Types (GhcMessage(..), DriverMessage (DriverNoConfiguredLLVMToolchain))
@@ -376,7 +382,13 @@ figureLlvmVersion logger dflags = traceSystoolCommand logger "llc" $ do
                   LLVM (http://llvm.org/):
                     LLVM version 14.0.6
               -}
+#if defined(__MHS__)
+              -- MicroHs System.IO has no hSetBinaryMode; on POSIX the
+              -- binary/text distinction is a no-op anyway. Same meaning.
+              return ()
+#else
               hSetBinaryMode pout False
+#endif
               line1 <- hGetLine pout
               mb_ver <- case parseLlvmVersion line1 of
                 mb_ver@(Just _) -> return mb_ver

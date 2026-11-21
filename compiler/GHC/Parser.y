@@ -41,11 +41,19 @@ where
 
 -- base
 import Control.Monad      ( unless, liftM, when, (<=<) )
+#if !defined(__MHS__)
+-- Only the GHC build uses this import (kept for GHC; MicroHs does not need it:
+-- no unboxed primops are used in this grammar's Haskell code).
 import GHC.Exts
+#endif
 import Data.Maybe         ( maybeToList )
 import Data.List.NonEmpty ( NonEmpty(..), head, init, last, tail )
 import qualified Data.List.NonEmpty as NE
 import qualified Prelude -- for happy-generated code
+#if defined(__MHS__)
+-- MicroHs does not re-export toList through GHC.Prelude under NIP.
+import Data.Foldable (toList)
+#endif
 
 import GHC.Hs
 
@@ -3063,7 +3071,13 @@ aexp    :: { ECP }
                                          $ Match { m_ext = noExtField
                                                  , m_ctxt = LamAlt LamSingle
                                                  , m_pats = L (listLocation $2) $2
-                                                 , m_grhss = unguardedGRHSs (comb2 $3 $4) $4 (EpAnn (glR $3) (GrhsAnn Nothing (Right $ epUniTok $3)) emptyComments) }])
+                                                 , m_grhss =
+#if defined(__MHS__)
+                                                     mkUnguardedGRHSs
+#else
+                                                     unguardedGRHSs
+#endif
+                                                       (comb2 $3 $4) $4 (EpAnn (glR $3) (GrhsAnn Nothing (Right $ epUniTok $3)) emptyComments) }])
                             (EpAnnLam (epTok $1) Nothing) }
         | '\\' 'lcase' altslist(pats1)
             {  ECP $ $3 >>= \ $3 ->
@@ -3401,8 +3415,13 @@ flattenedpquals :: { Located [LStmt GhcPs (LHsExpr GhcPs)] }
                     -- We just had one thing in our "parallel" list so
                     -- we simply return that thing directly
 
-                    qss -> sL1 $1 [sL1a $1 $ ParStmt noExtField [ParStmtBlock noExtField qs [] noSyntaxExpr |
+                    qss -> sL1 $1 [sL1a $1 $ ParStmt noExtField
+#if defined(__MHS__)
+                                            (fmap (\qs -> ParStmtBlock noExtField qs [] noSyntaxExpr) qss)
+#else
+                                            [ParStmtBlock noExtField qs [] noSyntaxExpr |
                                             qs <- qss]
+#endif
                                             noExpr noSyntaxExpr]
                     -- We actually found some actual parallel lists so
                     -- we wrap them into as a ParStmt
@@ -3530,7 +3549,13 @@ alt_rhs :: { forall b. DisambECP b => PV (Located (GRHSs GhcPs (LocatedA b))) }
 
 ralt :: { forall b. DisambECP b => PV (Located (NonEmpty (LGRHS GhcPs (LocatedA b)))) }
         : '->' exp            { unECP $2 >>= \ $2 ->
-                                acs (comb2 $1 $>) (\loc cs -> L loc (unguardedRHS (EpAnn (spanAsAnchor $ comb2 $1 $2) (GrhsAnn Nothing (Right $ epUniTok $1)) cs) (comb2 $1 $2) $2)) }
+                                acs (comb2 $1 $>) (\loc cs -> L loc (
+#if defined(__MHS__)
+                                  mkUnguardedRHS
+#else
+                                  unguardedRHS
+#endif
+                                    (EpAnn (spanAsAnchor $ comb2 $1 $2) (GrhsAnn Nothing (Right $ epUniTok $1)) cs) (comb2 $1 $2) $2)) }
         | gdpats              { $1 >>= \gdpats ->
                                 return $ sL1 gdpats (NE.reverse (unLoc gdpats)) }
 
@@ -3645,9 +3670,21 @@ stmt  :: { forall b. DisambECP b => PV (LStmt GhcPs (LocatedA b)) }
 
 qual  :: { forall b. DisambECP b => PV (LStmt GhcPs (LocatedA b)) }
     : bindpat '<-' exp                   { unECP $3 >>= \ $3 ->
-                                           amsA' (sLL $1 $> $ mkPsBindStmt (epUniTok $2) $1 $3) }
+                                           amsA' (sLL $1 $> $
+#if defined(__MHS__)
+                                                   BindStmt
+#else
+                                                   mkPsBindStmt
+#endif
+                                                     (epUniTok $2) $1 $3) }
     | exp                                { unECP $1 >>= \ $1 ->
-                                           return $ sL1a $1 $ mkBodyStmt $1 }
+                                           return $ sL1a $1 $
+#if defined(__MHS__)
+                                             BodyStmt noExtField $1 noSyntaxExpr noSyntaxExpr
+#else
+                                             mkBodyStmt $1
+#endif
+                                           }
     | 'let' binds                        { amsA' (sLL $1 $> $ mkLetStmt (epTok $1) (unLoc $2)) }
 
 -----------------------------------------------------------------------------
@@ -4376,6 +4413,32 @@ sL1a !x = sL (noAnnSrcSpan $ getHasLoc x)   -- #define sL1   sL (getLoc $1)
 {-# INLINE sL1n #-}
 sL1n :: HasLoc a => a -> b -> LocatedN b
 sL1n !x = L (noAnnSrcSpan $ getHasLoc x)   -- #define sL1   sL (getLoc $1)
+
+#if defined(__MHS__)
+-- MicroHs cannot instantiate the higher-kinded body variable of
+-- unguardedGRHSs/unguardedRHS against the rigid ECP body variable;
+-- inlining their (constructor-only) definitions keeps every unification
+-- first-order. The EpAnnCO-stated Anno constraint matches AnnoBody, and
+-- the terms are definitionally unguardedGRHSs/unguardedRHS for GHC.
+mkUnguardedGRHSs :: (b ~ Body b GhcPs, Anno (GRHS GhcPs (LocatedA b)) ~ EpAnnCO)
+                 => SrcSpan -> LocatedA b -> EpAnn GrhsAnn -> GRHSs GhcPs (LocatedA b)
+mkUnguardedGRHSs loc rhs an
+  = GRHSs emptyComments (mkUnguardedRHS an loc rhs) emptyLocalBinds
+mkUnguardedRHS :: (b ~ Body b GhcPs, Anno (GRHS GhcPs (LocatedA b)) ~ EpAnnCO)
+               => EpAnn GrhsAnn -> SrcSpan -> LocatedA b -> NonEmpty (LGRHS GhcPs (LocatedA b))
+mkUnguardedRHS an loc rhs
+  = NE.singleton (L (noAnnSrcSpan loc) (GRHS an [] rhs))
+#endif
+
+#if defined(__MHS__)
+-- MicroHs cannot solve (bodyR GhcPs ~ b) for the rigid ECP variable b
+-- (higher-order unification is not implemented); viewing the ECP body
+-- through (Body b GhcPs) — definitionally b by DisambECP's superclass —
+-- lets MicroHs discharge via its oriented cyclic-superclass equality.
+-- Definitionally identical for GHC (Body b GhcPs ~ b).
+asBody :: DisambECP b => LocatedA b -> LocatedA (Body b GhcPs)
+asBody = id
+#endif
 
 {-# INLINE sLL #-}
 sLL :: (HasLoc a, HasLoc b) => a -> b -> c -> Located c

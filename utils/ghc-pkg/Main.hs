@@ -52,8 +52,14 @@ import Distribution.Simple.Utils (toUTF8BS, writeUTF8File, readUTF8File)
 import qualified Data.Version as Version
 import System.FilePath as FilePath
 import qualified System.FilePath.Posix as FilePath.Posix
+#if defined(__MHS__)
+import System.Directory ( createDirectoryIfMissing )
+import System.Directory.MTime ( getModificationTime )
+import MhsTool.Directory ( getXdgDirectory, getAppUserDataDirectory, XdgDirectory ( XdgData ) )
+#else
 import System.Directory ( getXdgDirectory, createDirectoryIfMissing, getAppUserDataDirectory,
                           getModificationTime, XdgDirectory ( XdgData ) )
+#endif
 import Text.Printf
 
 import Prelude hiding (Foldable(..))
@@ -73,8 +79,17 @@ import System.Exit ( exitWith, ExitCode(..) )
 import System.Environment ( getArgs, getProgName, getEnv )
 import System.IO
 import System.IO.Error
+#if defined(__MHS__)
+-- MicroHs has neither GHC.IO nor GHC.IO.Exception: Control.Exception
+-- and System.IO.Error provide the same names.
+import Control.Exception (catch)
+import System.IO.Error (IOErrorType(InappropriateType))
+import qualified Data.Binary as Bin
+import qualified Data.Text as T
+#else
 import GHC.IO           ( catchException )
 import GHC.IO.Exception (IOErrorType(InappropriateType))
+#endif
 import Data.List ( group, sort, sortBy, nub, partition, find
                  , intercalate, intersperse, unfoldr
                  , isInfixOf, isSuffixOf, isPrefixOf, stripPrefix )
@@ -94,6 +109,43 @@ import System.Posix hiding (fdToHandle)
 
 #if defined(GLOB)
 import qualified System.Info(os)
+#endif
+
+#if defined(__MHS__)
+catchException :: IO a -> (IOException -> IO a) -> IO a
+catchException = catch
+
+instance Functor (GhcPkg.DbOpenMode mode) where
+  fmap _ GhcPkg.DbOpenReadOnly      = GhcPkg.DbOpenReadOnly
+  fmap f (GhcPkg.DbOpenReadWrite x) = GhcPkg.DbOpenReadWrite (f x)
+
+instance F.Foldable (GhcPkg.DbOpenMode mode) where
+  foldr _ z GhcPkg.DbOpenReadOnly      = z
+  foldr f z (GhcPkg.DbOpenReadWrite x) = f x z
+
+instance F.Traversable (GhcPkg.DbOpenMode mode) where
+  traverse _ GhcPkg.DbOpenReadOnly      = pure GhcPkg.DbOpenReadOnly
+  traverse f (GhcPkg.DbOpenReadWrite x) = GhcPkg.DbOpenReadWrite <$> f x
+
+unwrapDbReadWrite :: GhcPkg.DbOpenMode GhcPkg.DbReadWrite a -> IO a
+unwrapDbReadWrite db_open = case db_open of
+  GhcPkg.DbOpenReadWrite x -> pure x
+
+-- MicroHs does not implement GHC.Generics, so Cabal-syntax's generic
+-- Binary InstalledPackageInfo methods have no body.  Only ghc-pkg itself
+-- reads the second section of package.cache (GHC stops after [DbUnitInfo]),
+-- so store canonical UTF-8 InstalledPackageInfo records there.
+newtype MhsCachedIpis = MhsCachedIpis [InstalledPackageInfo]
+
+instance Bin.Binary MhsCachedIpis where
+  put (MhsCachedIpis ipis) =
+    Bin.put (map (toUTF8BS . showFullInstalledPackageInfo) ipis)
+  get = do
+    raws <- Bin.get
+    let decodeOne bs = case parseInstalledPackageInfo bs of
+          Right (_, ipi) -> pure ipi
+          Left errs      -> fail (unlines (F.toList errs))
+    MhsCachedIpis <$> mapM decodeOne raws
 #endif
 
 -- | Short-circuit 'any' with a \"monadic predicate\".
@@ -544,7 +596,11 @@ readPackageArg AsDefault str = Id <$> readGlobPkgId str
 -- Some commands operate  on multiple databases, with overlapping semantics:
 --      list, describe, field
 
+#if defined(__MHS__)
+data PackageDB mode
+#else
 data PackageDB (mode :: GhcPkg.DbMode)
+#endif
   = PackageDB {
       location, locationAbsolute :: !FilePath,
       -- We need both possibly-relative and definitely-absolute package
@@ -560,7 +616,11 @@ data PackageDB (mode :: GhcPkg.DbMode)
       packages :: [InstalledPackageInfo]
     }
 
+#if defined(__MHS__)
+type PackageDBStack = [PackageDB GhcPkg.DbReadOnly]
+#else
 type PackageDBStack = [PackageDB 'GhcPkg.DbReadOnly]
+#endif
         -- A stack of package databases.  Convention: head is the topmost
         -- in the stack.
 
@@ -780,8 +840,13 @@ getPkgDatabases verbosity mode use_user use_cache expand_vars my_flags = do
                then virt_global_conf
                else last db_flags
 
+#if defined(__MHS__)
+  (db_stack, db_to_operate_on) <- getDatabases mode top_dir mb_user_conf
+                                               flag_db_names final_stack top_db
+#else
   (db_stack, db_to_operate_on) <- getDatabases top_dir mb_user_conf
                                                flag_db_names final_stack top_db
+#endif
 
   let flag_db_stack = [ db | db_name <- flag_db_names,
                         db <- db_stack, location db == db_name ]
@@ -794,8 +859,17 @@ getPkgDatabases verbosity mode use_user use_cache expand_vars my_flags = do
 
   return (db_stack, db_to_operate_on, flag_db_stack)
   where
+#if defined(__MHS__)
+    getDatabases :: forall m. GhcPkg.DbOpenMode m DbModifySelector
+                 -> FilePath -> Maybe (FilePath, Bool) -> [FilePath]
+                 -> [FilePath] -> FilePath
+                 -> IO (PackageDBStack, GhcPkg.DbOpenMode m (PackageDB m))
+    getDatabases mode' top_dir mb_user_conf flag_db_names
+                 final_stack top_db = case mode' of
+#else
     getDatabases top_dir mb_user_conf flag_db_names
                  final_stack top_db = case mode of
+#endif
       -- When we open in read only mode, we simply read all of the databases/
       GhcPkg.DbOpenReadOnly -> do
         db_stack <- mapM readDatabase final_stack
@@ -803,15 +877,25 @@ getPkgDatabases verbosity mode use_user use_cache expand_vars my_flags = do
 
       -- The only package db we open in read write mode is the one on the top of
       -- the stack.
+#if defined(__MHS__)
+      GhcPkg.DbOpenReadWrite sel -> case sel of
+       TopOne -> do
+#else
       GhcPkg.DbOpenReadWrite TopOne -> do
+#endif
         (db_stack, mto_modify) <- stateSequence Nothing
           [ \case
               to_modify@(Just _) -> (, to_modify) <$> readDatabase db_path
               Nothing -> if db_path /= top_db
                 then (, Nothing) <$> readDatabase db_path
                 else do
+#if defined(__MHS__)
+                  db <- readParseDatabase verbosity mb_user_conf
+                                          mode' use_cache db_path
+#else
                   db <- readParseDatabase verbosity mb_user_conf
                                           mode use_cache db_path
+#endif
                     `catchException` couldntOpenDbForModification db_path
                   let ro_db = db { packageDbLock = GhcPkg.DbOpenReadOnly }
                   return (ro_db, Just db)
@@ -827,7 +911,11 @@ getPkgDatabases verbosity mode use_user use_cache expand_vars my_flags = do
       -- flag_db_names that contains specified package. Therefore we need to
       -- open each one in read/write mode first and decide whether it's for
       -- modification based on its contents.
+#if defined(__MHS__)
+       ContainsPkg pkgarg -> do
+#else
       GhcPkg.DbOpenReadWrite (ContainsPkg pkgarg) -> do
+#endif
         (db_stack, mto_modify) <- stateSequence Nothing
           [ \case
               to_modify@(Just _) -> (, to_modify) <$> readDatabase db_path
@@ -847,8 +935,13 @@ getPkgDatabases verbosity mode use_user use_cache expand_vars my_flags = do
                   -- to check if it's for modification first before throwing an
                   -- error, so we attempt to open it in read only mode.
                   Exception.handle openRo $ do
+#if defined(__MHS__)
+                    db <- readParseDatabase verbosity mb_user_conf
+                                            mode' use_cache db_path
+#else
                     db <- readParseDatabase verbosity mb_user_conf
                                             mode use_cache db_path
+#endif
                     let ro_db = db { packageDbLock = GhcPkg.DbOpenReadOnly }
                     if hasPkg db
                       then return (ro_db, Just db)
@@ -873,7 +966,11 @@ getPkgDatabases verbosity mode use_user use_cache expand_vars my_flags = do
           ++ db_path ++ " for modification: " ++ show e
 
         -- Parse package db in read-only mode.
+#if defined(__MHS__)
+        readDatabase :: FilePath -> IO (PackageDB GhcPkg.DbReadOnly)
+#else
         readDatabase :: FilePath -> IO (PackageDB 'GhcPkg.DbReadOnly)
+#endif
         readDatabase db_path = do
           db <- readParseDatabase verbosity mb_user_conf
                                   GhcPkg.DbOpenReadOnly use_cache db_path
@@ -957,8 +1054,13 @@ readParseDatabase verbosity mb_user_conf mode use_cache path
                       then do
                           when (verbosity > Normal) $
                              infoLn ("using cache: " ++ cache)
+#if defined(__MHS__)
+                          GhcPkg.readPackageDbForGhcPkg cache mode
+                            >>= \(MhsCachedIpis pkgs, lock) -> mkPackageDB pkgs lock
+#else
                           GhcPkg.readPackageDbForGhcPkg cache mode
                             >>= uncurry mkPackageDB
+#endif
                       else do
                           whenReportCacheErrors $ do
                               warn ("WARNING: cache is out of date: " ++ cache)
@@ -1136,6 +1238,12 @@ tryReadParseOldFileStyleDatabase verbosity mb_user_conf
 
 adjustOldFileStylePackageDB :: PackageDB mode -> IO (PackageDB mode)
 adjustOldFileStylePackageDB db = do
+#if defined(__MHS__)
+  -- On BSD/macOS fopen(3) succeeds on directories and MicroHs readFile
+  -- returns "" at EOF instead of throwing EISDIR; skip directory DBs first.
+  is_dir <- doesDirectoryExist (location db)
+  if is_dir then return db else do
+#endif
   -- assumes we have not yet established if it's an old style or not
   mcontent <- liftM Just (readFile (location db)) `catchIO` \_ -> return Nothing
   case fmap (take 2) mcontent of
@@ -1191,9 +1299,16 @@ registerPackage :: FilePath
                 -> IO ()
 registerPackage input verbosity my_flags multi_instance
                 expand_env_vars update force = do
+#if defined(__MHS__)
+  (db_stack, db_open, _flag_dbs) <-
+    getPkgDatabases verbosity (GhcPkg.DbOpenReadWrite TopOne)
+      True{-use user-} True{-use cache-} False{-expand vars-} my_flags
+  db_to_operate_on <- unwrapDbReadWrite db_open
+#else
   (db_stack, GhcPkg.DbOpenReadWrite db_to_operate_on, _flag_dbs) <-
     getPkgDatabases verbosity (GhcPkg.DbOpenReadWrite TopOne)
       True{-use user-} True{-use cache-} False{-expand vars-} my_flags
+#endif
 
   let to_modify = location db_to_operate_on
 
@@ -1269,7 +1384,11 @@ data DBOp = RemovePackage InstalledPackageInfo
 
 changeDB :: Verbosity
          -> [DBOp]
+#if defined(__MHS__)
+         -> PackageDB GhcPkg.DbReadWrite
+#else
          -> PackageDB 'GhcPkg.DbReadWrite
+#endif
          -> PackageDBStack
          -> IO ()
 changeDB verbosity cmds db db_stack = do
@@ -1278,8 +1397,13 @@ changeDB verbosity cmds db db_stack = do
   createDirectoryIfMissing True (location db'')
   changeDBDir verbosity cmds db'' db_stack
 
+#if defined(__MHS__)
+updateInternalDB :: PackageDB GhcPkg.DbReadWrite
+                 -> [DBOp] -> PackageDB GhcPkg.DbReadWrite
+#else
 updateInternalDB :: PackageDB 'GhcPkg.DbReadWrite
                  -> [DBOp] -> PackageDB 'GhcPkg.DbReadWrite
+#endif
 updateInternalDB db cmds = db{ packages = foldl do_cmd (packages db) cmds }
  where
   do_cmd pkgs (RemovePackage p) =
@@ -1291,7 +1415,11 @@ updateInternalDB db cmds = db{ packages = foldl do_cmd (packages db) cmds }
 
 changeDBDir :: Verbosity
             -> [DBOp]
+#if defined(__MHS__)
+            -> PackageDB GhcPkg.DbReadWrite
+#else
             -> PackageDB 'GhcPkg.DbReadWrite
+#endif
             -> PackageDBStack
             -> IO ()
 changeDBDir verbosity cmds db db_stack = do
@@ -1310,7 +1438,11 @@ changeDBDir verbosity cmds db db_stack = do
     do_cmd (AddPackage p)
 
 updateDBCache :: Verbosity
+#if defined(__MHS__)
+              -> PackageDB GhcPkg.DbReadWrite
+#else
               -> PackageDB 'GhcPkg.DbReadWrite
+#endif
               -> PackageDBStack
               -> IO ()
 updateDBCache verbosity db db_stack = do
@@ -1366,7 +1498,11 @@ updateDBCache verbosity db db_stack = do
       infoLn ("writing cache " ++ filename)
 
   let d = fmap (fromPackageCacheFormat . fst) pkgsGhcCacheFormat
+#if defined(__MHS__)
+  GhcPkg.writePackageDb filename d (MhsCachedIpis pkgsCabalFormat)
+#else
   GhcPkg.writePackageDb filename d pkgsCabalFormat
+#endif
     `catchIO` \e ->
       if isPermissionError e
       then die $ filename ++ ": you don't have permission to modify this file"
@@ -1466,6 +1602,20 @@ convertPackageInfoToCacheFormat pkg =
        GhcPkg.unitAbiDepends     = map (\(AbiDependency k v) -> (k,ST.pack $ unAbiHash v)) (abiDepends pkg),
        GhcPkg.unitAbiHash        = ST.pack $ unAbiHash (abiHash pkg),
        GhcPkg.unitImportDirs     = map ST.pack $ importDirs pkg,
+#if defined(__MHS__)
+       GhcPkg.unitLibraries      = map (ST.pack . T.unpack) $ hsLibraries pkg,
+       GhcPkg.unitExtDepLibsSys  = map (ST.pack . T.unpack) $ extraLibraries pkg,
+       GhcPkg.unitExtDepLibsStaticSys = map (ST.pack . T.unpack) $ extraLibrariesStatic pkg,
+       GhcPkg.unitExtDepLibsGhc  = map (ST.pack . T.unpack) $ extraGHCiLibraries pkg,
+       GhcPkg.unitLibraryDirs    = map ST.pack $ libraryDirs pkg,
+       GhcPkg.unitLibraryDirsStatic = map ST.pack $ libraryDirsStatic pkg,
+       GhcPkg.unitLibraryDynDirs = map ST.pack $ libraryDynDirs pkg,
+       GhcPkg.unitExtDepFrameworks = map (ST.pack . T.unpack) $ frameworks pkg,
+       GhcPkg.unitExtDepFrameworkDirs = map ST.pack $ frameworkDirs pkg,
+       GhcPkg.unitLinkerOptions  = map (ST.pack . T.unpack) $ ldOptions pkg,
+       GhcPkg.unitCcOptions      = map (ST.pack . T.unpack) $ ccOptions pkg,
+       GhcPkg.unitIncludes       = map (ST.pack . T.unpack) $ includes pkg,
+#else
        GhcPkg.unitLibraries      = map ST.pack $ hsLibraries pkg,
        GhcPkg.unitExtDepLibsSys  = map ST.pack $ extraLibraries pkg,
        GhcPkg.unitExtDepLibsStaticSys = map ST.pack $ extraLibrariesStatic pkg,
@@ -1478,6 +1628,7 @@ convertPackageInfoToCacheFormat pkg =
        GhcPkg.unitLinkerOptions  = map ST.pack $ ldOptions pkg,
        GhcPkg.unitCcOptions      = map ST.pack $ ccOptions pkg,
        GhcPkg.unitIncludes       = map ST.pack $ includes pkg,
+#endif
        GhcPkg.unitIncludeDirs    = map ST.pack $ includeDirs pkg,
        GhcPkg.unitHaddockInterfaces = map ST.pack $ haddockInterfaces pkg,
        GhcPkg.unitHaddockHTMLs   = map ST.pack $ haddockHTMLs pkg,
@@ -1520,9 +1671,16 @@ modifyPackage
   -> Force
   -> IO ()
 modifyPackage fn pkgarg verbosity my_flags force = do
+#if defined(__MHS__)
+  (db_stack, db_open, _flag_dbs) <-
+    getPkgDatabases verbosity (GhcPkg.DbOpenReadWrite $ ContainsPkg pkgarg)
+      True{-use user-} True{-use cache-} False{-expand vars-} my_flags
+  db <- unwrapDbReadWrite db_open
+#else
   (db_stack, GhcPkg.DbOpenReadWrite db, _flag_dbs) <-
     getPkgDatabases verbosity (GhcPkg.DbOpenReadWrite $ ContainsPkg pkgarg)
       True{-use user-} True{-use cache-} False{-expand vars-} my_flags
+#endif
 
   let db_name = location db
       pkgs    = packages db
@@ -1561,9 +1719,16 @@ modifyPackage fn pkgarg verbosity my_flags force = do
 
 recache :: Verbosity -> [Flag] -> IO ()
 recache verbosity my_flags = do
+#if defined(__MHS__)
+  (_db_stack, db_open, _flag_dbs) <-
+    getPkgDatabases verbosity (GhcPkg.DbOpenReadWrite TopOne)
+      True{-use user-} False{-no cache-} False{-expand vars-} my_flags
+  db_to_operate_on <- unwrapDbReadWrite db_open
+#else
   (_db_stack, GhcPkg.DbOpenReadWrite db_to_operate_on, _flag_dbs) <-
     getPkgDatabases verbosity (GhcPkg.DbOpenReadWrite TopOne)
       True{-use user-} False{-no cache-} False{-expand vars-} my_flags
+#endif
   changeDB verbosity [] db_to_operate_on _db_stack
 
 -- -----------------------------------------------------------------------------
@@ -1574,7 +1739,11 @@ listPackages ::  Verbosity -> [Flag] -> Maybe PackageArg
              -> IO ()
 listPackages verbosity my_flags mPackageName mModuleName = do
   let simple_output = FlagSimpleOutput `elem` my_flags
+#if defined(__MHS__)
+  (db_stack, _db_ro, flag_db_stack) <-
+#else
   (db_stack, GhcPkg.DbOpenReadOnly, flag_db_stack) <-
+#endif
     getPkgDatabases verbosity GhcPkg.DbOpenReadOnly
       False{-use user-} True{-use cache-} False{-expand vars-} my_flags
 
@@ -1668,7 +1837,11 @@ simplePackageList my_flags pkgs = do
 
 showPackageDot :: Verbosity -> [Flag] -> IO ()
 showPackageDot verbosity myflags = do
+#if defined(__MHS__)
+  (_, _db_ro, flag_db_stack) <-
+#else
   (_, GhcPkg.DbOpenReadOnly, flag_db_stack) <-
+#endif
     getPkgDatabases verbosity GhcPkg.DbOpenReadOnly
       False{-use user-} True{-use cache-} False{-expand vars-} myflags
 
@@ -1688,7 +1861,11 @@ showPackageDot verbosity myflags = do
 
 showPackageMermaid :: Verbosity -> [Flag] -> IO ()
 showPackageMermaid verbosity myflags = do
+#if defined(__MHS__)
+  (_, _db_ro, flag_db_stack) <-
+#else
   (_, GhcPkg.DbOpenReadOnly, flag_db_stack) <-
+#endif
     getPkgDatabases verbosity GhcPkg.DbOpenReadOnly
       False{-use user-} True{-use cache-} False{-expand vars-} myflags
 
@@ -1714,7 +1891,11 @@ showPackageMermaid verbosity myflags = do
 -- dependencies may be varying versions
 latestPackage ::  Verbosity -> [Flag] -> GlobPackageIdentifier -> IO ()
 latestPackage verbosity my_flags pkgid = do
+#if defined(__MHS__)
+  (_, _db_ro, flag_db_stack) <-
+#else
   (_, GhcPkg.DbOpenReadOnly, flag_db_stack) <-
+#endif
     getPkgDatabases verbosity GhcPkg.DbOpenReadOnly
       False{-use user-} True{-use cache-} False{-expand vars-} my_flags
 
@@ -1730,7 +1911,11 @@ latestPackage verbosity my_flags pkgid = do
 
 describePackage :: Verbosity -> [Flag] -> PackageArg -> Bool -> IO ()
 describePackage verbosity my_flags pkgarg expand_pkgroot = do
+#if defined(__MHS__)
+  (_, _db_ro, flag_db_stack) <-
+#else
   (_, GhcPkg.DbOpenReadOnly, flag_db_stack) <-
+#endif
     getPkgDatabases verbosity GhcPkg.DbOpenReadOnly
       False{-use user-} True{-use cache-} expand_pkgroot my_flags
   dbs <- findPackagesByDB flag_db_stack pkgarg
@@ -1739,7 +1924,11 @@ describePackage verbosity my_flags pkgarg expand_pkgroot = do
 
 dumpUnits :: Verbosity -> [Flag] -> Bool -> IO ()
 dumpUnits verbosity my_flags expand_pkgroot = do
+#if defined(__MHS__)
+  (_, _db_ro, flag_db_stack) <-
+#else
   (_, GhcPkg.DbOpenReadOnly, flag_db_stack) <-
+#endif
     getPkgDatabases verbosity GhcPkg.DbOpenReadOnly
       False{-use user-} True{-use cache-} expand_pkgroot my_flags
   doDump expand_pkgroot [ (pkg, locationAbsolute db)
@@ -1767,7 +1956,11 @@ findPackage :: PackageArg -> [InstalledPackageInfo] -> [InstalledPackageInfo]
 findPackage pkgarg pkgs = filter (pkgarg `matchesPkg`) pkgs
 
 findPackagesByDB :: PackageDBStack -> PackageArg
+#if defined(__MHS__)
+                 -> IO [(PackageDB GhcPkg.DbReadOnly, [InstalledPackageInfo])]
+#else
                  -> IO [(PackageDB 'GhcPkg.DbReadOnly, [InstalledPackageInfo])]
+#endif
 findPackagesByDB db_stack pkgarg
   = case [ (db, matched)
          | db <- db_stack,
@@ -1801,7 +1994,11 @@ matchesPkg :: PackageArg -> InstalledPackageInfo -> Bool
 
 describeField :: Verbosity -> [Flag] -> PackageArg -> [String] -> Bool -> IO ()
 describeField verbosity my_flags pkgarg fields expand_pkgroot = do
+#if defined(__MHS__)
+  (_, _db_ro, flag_db_stack) <-
+#else
   (_, GhcPkg.DbOpenReadOnly, flag_db_stack) <-
+#endif
     getPkgDatabases verbosity GhcPkg.DbOpenReadOnly
       False{-use user-} True{-use cache-} expand_pkgroot my_flags
   fns <- mapM toField fields
@@ -1821,7 +2018,11 @@ describeField verbosity my_flags pkgarg fields expand_pkgroot = do
 
 checkConsistency :: Verbosity -> [Flag] -> IO ()
 checkConsistency verbosity my_flags = do
+#if defined(__MHS__)
+  (db_stack, _db_ro, _) <-
+#else
   (db_stack, GhcPkg.DbOpenReadOnly, _) <-
+#endif
     getPkgDatabases verbosity GhcPkg.DbOpenReadOnly
       True{-use user-} True{-use cache-} True{-expand vars-} my_flags
       -- although check is not a modify command, we do need to use the user
@@ -1991,7 +2192,11 @@ checkPackageConfig pkg verbosity db_stack
   checkExposedModules db_stack pkg
   checkOtherModules pkg
   let has_code = Set.null (openModuleSubstFreeHoles (Map.fromList (instantiatedWith pkg)))
+#if defined(__MHS__)
+  when has_code $ mapM_ (checkHSLib verbosity (libraryDirs pkg ++ libraryDynDirs pkg)) (map T.unpack (hsLibraries pkg))
+#else
   when has_code $ mapM_ (checkHSLib verbosity (libraryDirs pkg ++ libraryDynDirs pkg)) (hsLibraries pkg)
+#endif
   -- ToDo: check these somehow?
   --    extra_libraries :: [String],
   --    c_includes      :: [String],
@@ -2012,7 +2217,11 @@ checkUnitId :: InstalledPackageInfo -> PackageDBStack -> Bool
 checkUnitId ipi db_stack update = do
   let uid = installedUnitId ipi
   when (null (display uid)) $ verror CannotForce "missing id field"
+#if defined(__MHS__)
+  when (display uid /= T.unpack (compatPackageKey ipi)) $
+#else
   when (display uid /= compatPackageKey ipi) $
+#endif
     verror CannotForce $ "installed package info from too old version of Cabal "
                       ++ "(key field does not match id field)"
   let dups = [ p | p <- allPackagesInStack db_stack,
@@ -2020,7 +2229,11 @@ checkUnitId ipi db_stack update = do
   when (not update && not (null dups)) $
     verror CannotForce $
         "package(s) with this id already exist: " ++
+#if defined(__MHS__)
+         unwords (map (display . installedUnitId) dups)
+#else
          unwords (map (display.installedUnitId) dups)
+#endif
 
 checkDuplicates :: PackageDBStack -> InstalledPackageInfo
                 -> Bool -> Bool-> Validate ()
@@ -2196,7 +2409,11 @@ checkModule field_name db_stack pkg
                                        display definingPkgId)
 
         | otherwise
+#if defined(__MHS__)
+        -> case find ((==definingModule) . exposedName)
+#else
         -> case find ((==definingModule).exposedName)
+#endif
                      (exposedModules definingPkg) of
             Nothing ->
               verror ForceAll (field_name ++ " refers to a module " ++
@@ -2298,8 +2515,12 @@ installSignalHandlers :: IO ()
 installSignalHandlers = do
   threadid <- myThreadId
   let
+#if defined(__MHS__)
+      interrupt = throwTo threadid (Exception.ErrorCall "interrupted")
+#else
       interrupt = Exception.throwTo threadid
                                     (Exception.ErrorCall "interrupted")
+#endif
   --
 #if !defined(mingw32_HOST_OS)
   _ <- installHandler sigQUIT (Catch interrupt) Nothing

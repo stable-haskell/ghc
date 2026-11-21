@@ -8,6 +8,8 @@
 -----------------------------------------------------------------------------
 -}
 
+{-# LANGUAGE CPP #-}
+
 module GHC.SysTools.Elf (
     readElfSectionByName,
     readElfNoteAsString,
@@ -32,6 +34,17 @@ import Data.Char (ord)
 import Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.ByteString.Lazy.Char8 as B8
+
+#if defined(__MHS__)
+getLazyByteStringNul :: Get ByteString
+getLazyByteStringNul = LBS.pack <$> go
+  where
+    go = do
+      b <- getWord8
+      if b == 0
+        then return []
+        else (b :) <$> go
+#endif
 
 {- Note [ELF specification]
    ~~~~~~~~~~~~~~~~~~~~~~~~

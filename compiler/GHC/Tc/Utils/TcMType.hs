@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE LambdaCase            #-}
 {-# LANGUAGE MultiWayIf            #-}
@@ -441,7 +442,11 @@ newInferExpTypeFRR :: InferInstFlag -> FixedRuntimeRepContext -> TcM ExpTypeFRR
 newInferExpTypeFRR iif frr_orig
   = do { th_lvl <- getThLevel
        ; let mb_frr = case th_lvl of
+#if defined(__MHS__)
+                        TypedBrack _ -> IFRR_Any
+#else
                         TypedBrack {} -> IFRR_Any
+#endif
                         _             -> IFRR_Check frr_orig
                -- mb_frr: see [Wrinkle: Typed Template Haskell]
                -- in Note [hasFixedRuntimeRep] in GHC.Tc.Utils.Concrete.
@@ -806,7 +811,11 @@ mkConcreteInfo :: ConcreteTvOrigin -> TcM MetaInfo
 mkConcreteInfo conc_origin
   = do { th_lvl <- getThLevel
        ; case th_lvl of
+#if defined(__MHS__)
+            TypedBrack _ -> return TauTv
+#else
             TypedBrack {} -> return TauTv
+#endif
             _             -> return (ConcreteTv conc_origin) }
 
 newPatTyVar :: Name -> Kind -> TcM TcTyVar

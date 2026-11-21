@@ -226,11 +226,21 @@ outputAsm logger dflags this_mod location filenm dus cmm_stream = do
   -- Update tag of uniques in Stream
   debugTraceMsg logger 4 (text "Outputing asm to" <+> text filenm)
   let ncg_config = initNCGConfig dflags this_mod
+#if defined(__MHS__)
+  -- As in GHC.CmmToAsm: an SCC pragma directly following a `let` in a
+  -- do-block mistypes the `let` under MHS; SCC is profiling-only.
+  doOutput filenm $
+    \h ->
+      fmap fst $
+      runUDSMT dus $ setTagUDSMT 'n' $
+      nativeCodeGen logger (toolSettings dflags) ncg_config location h cmm_stream
+#else
   {-# SCC "OutputAsm" #-} doOutput filenm $
     \h -> {-# SCC "NativeCodeGen" #-}
       fmap fst $
       runUDSMT dus $ setTagUDSMT 'n' $
       nativeCodeGen logger (toolSettings dflags) ncg_config location h cmm_stream
+#endif
 
 #if defined(HAVE_LLVM_BACKEND)
 {-

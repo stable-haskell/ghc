@@ -1,0 +1,82 @@
+diff --git a/pretty.cabal b/pretty.cabal
+index 7a77b62..0b010e1 100644
+--- a/pretty.cabal
++++ b/pretty.cabal
+@@ -39,9 +39,7 @@ Library
+         Text.PrettyPrint.Annotated
+         Text.PrettyPrint.Annotated.HughesPJ
+         Text.PrettyPrint.Annotated.HughesPJClass
+-    build-depends: base >= 4.5 && < 5,
+-                   deepseq >= 1.1,
+-                   ghc-prim
++    build-depends: base >= 4.5 && < 5
+     extensions: CPP, BangPatterns, DeriveGeneric
+     ghc-options: -Wall -fwarn-tabs
+ 
+diff --git a/src/Text/PrettyPrint/Annotated/HughesPJ.hs b/src/Text/PrettyPrint/Annotated/HughesPJ.hs
+index 44cce28..864ba5f 100644
+--- a/src/Text/PrettyPrint/Annotated/HughesPJ.hs
++++ b/src/Text/PrettyPrint/Annotated/HughesPJ.hs
+@@ -87,7 +87,7 @@ import Data.Function   ( on )
+ #if __GLASGOW_HASKELL__ >= 803
+ import Prelude         hiding ( (<>) )
+ #endif
+-#if __GLASGOW_HASKELL__ >= 800
++#if defined(__MHS__) || __GLASGOW_HASKELL__ >= 800
+ import qualified Data.Semigroup as Semi ( Semigroup((<>)) )
+ #elif __GLASGOW_HASKELL__ < 709
+ import Data.Monoid     ( Monoid(mempty, mappend)  )
+@@ -260,10 +260,12 @@ data TextDetails = Chr  {-# UNPACK #-} !Char -- ^ A single Char fragment
+                                --   Str constructor.
+ #if __GLASGOW_HASKELL__ >= 701
+                  deriving (Show, Eq, Generic)
++#else
++                 deriving (Show, Eq)
+ #endif
+ 
+ -- Combining @Doc@ values
+-#if __GLASGOW_HASKELL__ >= 800
++#if defined(__MHS__) || __GLASGOW_HASKELL__ >= 800
+ instance Semi.Semigroup (Doc a) where
+ #ifndef TESTING
+     (<>) = (Text.PrettyPrint.Annotated.HughesPJ.<>)
+@@ -930,6 +932,8 @@ data Style
+           }
+ #if __GLASGOW_HASKELL__ >= 701
+   deriving (Show, Eq, Generic)
++#else
++  deriving (Show, Eq)
+ #endif
+ 
+ -- | The default style (@mode=PageMode, lineLength=100, ribbonsPerLine=1.5@).
+@@ -951,6 +955,8 @@ data Mode = PageMode
+             -- (@$$@) are turned into spaces.
+ #if __GLASGOW_HASKELL__ >= 701
+           deriving (Show, Eq, Generic)
++#else
++          deriving (Show, Eq)
+ #endif
+ 
+ -- | Render the @Doc@ to a String using the default @Style@ (see 'style').
+diff --git a/src/Text/PrettyPrint/HughesPJ.hs b/src/Text/PrettyPrint/HughesPJ.hs
+index 5d06aeb..ec24f37 100644
+--- a/src/Text/PrettyPrint/HughesPJ.hs
++++ b/src/Text/PrettyPrint/HughesPJ.hs
+@@ -89,7 +89,7 @@ import Data.Function   ( on )
+ #if __GLASGOW_HASKELL__ >= 803
+ import Prelude         hiding ( (<>) )
+ #endif
+-#if __GLASGOW_HASKELL__ >= 800
++#if defined(__MHS__) || __GLASGOW_HASKELL__ >= 800
+ import qualified Data.Semigroup as Semi ( Semigroup((<>)) )
+ #elif __GLASGOW_HASKELL__ < 709
+ import Data.Monoid     ( Monoid(mempty, mappend)  )
+@@ -130,7 +130,7 @@ liftBinary f (Doc a) (Doc b) = Doc (f a b)
+ type RDoc = Doc
+ 
+ -- Combining @Doc@ values
+-#if __GLASGOW_HASKELL__ >= 800
++#if defined(__MHS__) || __GLASGOW_HASKELL__ >= 800
+ instance Semi.Semigroup Doc where
+     (<>) = (Text.PrettyPrint.HughesPJ.<>)
+ 
