@@ -233,7 +233,9 @@ data EpToken (tok :: Symbol)
   | EpTok !EpaLocation
 
 instance KnownSymbol tok => Outputable (EpToken tok) where
-  ppr _ = text (symbolVal (Proxy @tok))
+  -- Visible type application gives Proxy's argument kind Type.
+  -- tok is a Symbol, so name the proxy type instead.
+  ppr _ = text (symbolVal (Proxy :: Proxy tok))
 
 -- | With @UnicodeSyntax@, there might be multiple ways to write the same
 -- token. For example an arrow could be either @->@ or @→@. This choice must be
@@ -249,9 +251,9 @@ deriving instance KnownSymbol tok => Data (EpToken tok)
 deriving instance (KnownSymbol tok, KnownSymbol utok) => Data (EpUniToken tok utok)
 
 instance (KnownSymbol tok, KnownSymbol utok) => Outputable (EpUniToken tok utok) where
-  ppr NoEpUniTok                 = text $ symbolVal (Proxy @tok)
-  ppr (EpUniTok _ NormalSyntax)  = text $ symbolVal (Proxy @tok)
-  ppr (EpUniTok _ UnicodeSyntax) = text $ symbolVal (Proxy @utok)
+  ppr NoEpUniTok                 = text $ symbolVal (Proxy :: Proxy tok)
+  ppr (EpUniTok _ NormalSyntax)  = text $ symbolVal (Proxy :: Proxy tok)
+  ppr (EpUniTok _ UnicodeSyntax) = text $ symbolVal (Proxy :: Proxy utok)
 
 getEpTokenSrcSpan :: EpToken tok -> SrcSpan
 getEpTokenSrcSpan NoEpTok = noSrcSpan
