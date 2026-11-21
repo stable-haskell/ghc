@@ -7,3 +7,4 @@
 0007-ffi-desugar-polymorphic-foreign-imports-EForall-T_IO.patch	ffi	Desugar polymorphic `foreign import` (`EForall` / `T_IO_CCALL`) and update combinator codegen
 0008-lib-add-DeepSeq-Serialize-compatibility-helpers-and-.patch	stdlib	Add `DeepSeq`/`Serialize` helpers and register regression test
 0009-typecheck-raise-largeRecordFieldLimit-to-128.patch	cabal	Raise `largeRecordFieldLimit` to 128 so Cabal `PackageConfig` updates use SetField
+0010-lib-drop-duplicate-nfdata-tuple-instances.patch	stdlib	Drop duplicate `NFData` instances for 3- and 4-tuples
