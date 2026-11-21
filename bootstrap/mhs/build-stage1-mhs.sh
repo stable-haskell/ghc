@@ -1327,14 +1327,30 @@ EOF
 # --- smoke tests ------------------------------------------------------------------
 run_tests() {
   echo "=== [test] stage1 tools ==="
+  # Phase 6 is a fresh job. The tools artifact does not include $WORK_DIR,
+  # so the probes written while building the tools are not here.
+  mkdir -p "$WORK_DIR"
+  printf 'hello\n\n> main = putStrLn "hi"\n' > "$WORK_DIR/unlit-probe.lhs"
   "$BIN_DIR/unlit" -q "$WORK_DIR/unlit-probe.lhs" "$WORK_DIR/unlit-retest.hs"
   grep 'main = putStrLn' "$WORK_DIR/unlit-retest.hs" >/dev/null && echo "unlit OK"
   "$BIN_DIR/happy" --version | head -n 1
   "$BIN_DIR/alex" --version | head -n 1
+  cat > "$WORK_DIR/target-info.h" <<'EOF'
+// WORD_SIZE 8
+// TAG_BITS 1
+// BITMAP_BITS_SHIFT 3
+// MAX_Real_Vanilla_REG 10
+// MAX_Real_Float_REG 6
+// MAX_Real_Double_REG 6
+// MAX_Real_Long_REG 5
+// MAX_Real_XMM_REG 8
+EOF
   "$BIN_DIR/genapply" "$WORK_DIR/target-info.h" | grep "Automatically generated" >/dev/null \
     && echo "genapply OK"
   "$BIN_DIR/deriveConstants" --help >/dev/null 2>&1 || true
   echo "deriveConstants OK (runs)"
+  cc -E -x c -P -w -I"$ROOT/compiler" -I"$AUTOGEN/include" \
+    "$ROOT/compiler/GHC/Builtin/primops.txt.pp" -o "$WORK_DIR/primops.txt"
   "$BIN_DIR/genprimopcode" --data-decl < "$WORK_DIR/primops.txt" \
     | grep "data PrimOp" >/dev/null && echo "genprimopcode OK"
   "$BIN_DIR/ghc-pkg" --version
