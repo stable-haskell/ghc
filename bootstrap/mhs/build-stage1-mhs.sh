@@ -30,6 +30,15 @@
 #   MHS_FROM_STAGE   Resume staged compilation from this stage (e.g. 02-utils-data).
 set -euo pipefail
 
+# The self-hosted mhs is C. Its Haskell recursion uses the C stack.
+# Phase 2 links it with -Wl,-z,stack-size=512MB, which macOS honors and
+# Linux does not: the main thread still stops at RLIMIT_STACK (8MB on
+# the GitHub runner). Stage 02a then dies with SIGSEGV, exit 139, and
+# no RTS "stack overflow". Raise the soft limit before any mhs run.
+if [ "$(uname -s)" = Linux ]; then
+  ulimit -s unlimited 2>/dev/null || ulimit -s 1048576 || true
+fi
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
