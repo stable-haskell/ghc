@@ -885,6 +885,10 @@ stage_index() {
 }
 
 step_mhs() {
+  # CI runs each stage as its own process (`ghc-boot`, then `stage-02a`,
+  # ...). The -i added in one process does not survive into the next, and
+  # ghc-boot's ShortText plus later compiler modules import Data.Binary.
+  use_binary_shim
   local name="$1"; shift
   local active_cache="$CACHE_DIR/${name}.mhscache"
   local last_good="$CACHE_DIR/last-good.mhscache"
@@ -1116,6 +1120,9 @@ stage_08_compiler() {
 
 # --- ghc driver -----------------------------------------------------------------
 build_ghc() {
+  # Separate CI invocation from the stages. The link reloads compiler
+  # modules that import Data.Binary, so the shim has to be on the path.
+  use_binary_shim
   local last_good="$CACHE_DIR/last-good.mhscache"
   local stage08="$CACHE_DIR/08-compiler.mhscache"
   if [ ! -s "$stage08" ]; then
