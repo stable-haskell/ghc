@@ -440,14 +440,17 @@ jobs:
           if-no-files-found: error
 
   # ------------------------------------------------------------------
-  # Job 2b (Phase 6): Stage 1 GHC built with MicroHs.
-  # Runs CONCURRENTLY with cabal-mhs.
+  # Job 2b (Phase 6a): ghc-boot and stage-02a.
+  # Darwin spent the whole 180-minute job in stage-02a (Prelude /
+  # FastString) and was cancelled with mhs still running. Linux finishes
+  # that stage in about 14 minutes. This half gets the 360-minute cap on
+  # its own; phase 6b continues from the checkpoint.
   # ------------------------------------------------------------------
-  stage1-mhs:
-    name: 'Phase 6 Stage 1 GHC / ${{ matrix.plat }}'
+  stage1-mhs-front:
+    name: 'Phase 6a Stage 1 GHC / ${{ matrix.plat }}'
     needs: [mhs-and-tools]
     runs-on: ${{ matrix.runs-on }}
-    timeout-minutes: 180
+    timeout-minutes: 360
     strategy:
       fail-fast: false
       matrix:
@@ -507,15 +510,103 @@ jobs:
           _build/mhs-stage1/bin/happy --version | head -n 1
           _build/mhs-stage1/bin/alex --version | head -n 1
 
-      # --- Phase 6: Stage 1 GHC, timed per checkpoint -----------------
-      - name: Phase 6 — Build Stage 1 GHC with MicroHs
+      # --- Phase 6a: ghc-boot + the slow stage-02a checkpoint ----------
+      - name: Phase 6a — ghc-boot and stage-02a
         run: |
           set -euo pipefail
           : > _build/timing-phase6.tsv
           T() { bootstrap/mhs/ci-time.sh run _build/timing-phase6.tsv "$@"; }
           T phase6-ghc-boot "Phase 6 — ghc-boot" -- \
             env MHS_HEAP=700M bootstrap/mhs/build-stage1-mhs.sh ghc-boot
-          for st in 02a 02 03 04 05 06 07 08; do
+          T phase6-02a "Phase 6 — stage-02a" -- \
+            env MHS_HEAP=700M bootstrap/mhs/build-stage1-mhs.sh stage-02a
+          bootstrap/mhs/ci-time.sh summary "Phase 6a timings (${{ matrix.plat }})" \
+            _build/timing-phase6.tsv | tee -a "$GITHUB_STEP_SUMMARY"
+          tar -czf "ghc-stage1-mhs-ckpt-${{ matrix.plat }}.tar.gz" \
+            -C "$GITHUB_WORKSPACE" \
+            _build/mhs-stage1/cache \
+            _build/mhs-stage1/binary-shim \
+            _build/mhs-stage1/autogen \
+            _build/timing-phase6.tsv
+          ls -lh "ghc-stage1-mhs-ckpt-${{ matrix.plat }}.tar.gz"
+
+      - name: Upload Stage 1 checkpoint
+        uses: actions/upload-artifact@v5
+        with:
+          name: ghc-stage1-mhs-ckpt-${{ matrix.plat }}
+          path: ghc-stage1-mhs-ckpt-${{ matrix.plat }}.tar.gz
+          retention-days: 5
+
+  # ------------------------------------------------------------------
+  # Job 2c (Phase 6b): remaining Stage 1 checkpoints, link, smoke test.
+  # ------------------------------------------------------------------
+  stage1-mhs:
+    name: 'Phase 6b Stage 1 GHC / ${{ matrix.plat }}'
+    needs: [mhs-and-tools, stage1-mhs-front]
+    runs-on: ${{ matrix.runs-on }}
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { plat: x86_64-linux, runs-on: ubuntu-24.04 }
+          - { plat: aarch64-darwin, runs-on: macos-latest }
+
+    steps:
+      - name: Checkout GHC tree
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: System dependencies & zero-GHC assertion
+        run: |
+          set -euo pipefail
+          if [ "$(uname -s)" = "Darwin" ]; then
+            brew install gmp || true
+          else
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends \
+              build-essential git curl xz-utils libgmp-dev zlib1g-dev \
+              libffi-dev libncurses-dev pkg-config
+          fi
+          new_path=
+          IFS=:
+          for d in $PATH; do
+            if [ -n "$d" ] && { [ -x "$d/ghc" ] || [ -x "$d/happy" ] || [ -x "$d/alex" ]; }; then
+              continue
+            fi
+            new_path="${new_path:+$new_path:}$d"
+          done
+          unset IFS
+          PATH="$new_path"
+          echo "PATH=$PATH" >> "$GITHUB_ENV"
+          rm -rf "$HOME/.ghcup" 2>/dev/null || true
+          if command -v ghc >/dev/null || command -v happy >/dev/null || command -v alex >/dev/null; then
+            echo "preinstalled bootstrap tool still on PATH: ghc=$(command -v ghc || true) happy=$(command -v happy || true) alex=$(command -v alex || true)" >&2
+            exit 1
+          fi
+
+      - name: Download toolchain, tools, and checkpoint
+        uses: actions/download-artifact@v5
+        with:
+          pattern: mhs-toolchain-and-tools-${{ matrix.plat }}|ghc-stage1-mhs-ckpt-${{ matrix.plat }}
+          path: _build/inputs
+          merge-multiple: true
+
+      - name: Unpack toolchain, tools, and checkpoint
+        run: |
+          set -euo pipefail
+          tar -xzf "_build/inputs/mhs-mcabal-${{ matrix.plat }}.tar.gz" -C "$HOME"
+          tar -xzf "_build/inputs/mhs-stage1-tools-${{ matrix.plat }}.tar.gz" -C "$GITHUB_WORKSPACE"
+          tar -xzf "_build/inputs/ghc-stage1-mhs-ckpt-${{ matrix.plat }}.tar.gz" -C "$GITHUB_WORKSPACE"
+          test -s _build/mhs-stage1/cache/last-good.mhscache
+          _build/mhs-stage1/toolchain/bin/mhs --version
+
+      - name: Phase 6b — remaining stages, link, and smoke test
+        run: |
+          set -euo pipefail
+          T() { bootstrap/mhs/ci-time.sh run _build/timing-phase6.tsv "$@"; }
+          for st in 02 03 04 05 06 07 08; do
             T "phase6-$st" "Phase 6 — stage-$st" -- \
               env MHS_HEAP=700M bootstrap/mhs/build-stage1-mhs.sh "stage-$st"
           done
