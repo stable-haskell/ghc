@@ -586,12 +586,19 @@ jobs:
             exit 1
           fi
 
-      - name: Download toolchain, tools, and checkpoint
+      # download-artifact treats pattern as a glob, so a bare "|"
+      # matches neither artifact. The tarball names do not collide.
+      - name: Download toolchain and tools
         uses: actions/download-artifact@v5
         with:
-          pattern: mhs-toolchain-and-tools-${{ matrix.plat }}|ghc-stage1-mhs-ckpt-${{ matrix.plat }}
+          name: mhs-toolchain-and-tools-${{ matrix.plat }}
           path: _build/inputs
-          merge-multiple: true
+
+      - name: Download Stage 1 checkpoint
+        uses: actions/download-artifact@v5
+        with:
+          name: ghc-stage1-mhs-ckpt-${{ matrix.plat }}
+          path: _build/inputs
 
       - name: Unpack toolchain, tools, and checkpoint
         run: |
