@@ -11,6 +11,7 @@
 #include "eventlog/EventLog.h"
 #include "sm/NonMovingCensus.h"
 #include "Capability.h"
+#include "Signpost.h"
 
 #if defined(DTRACE)
 #include "RtsProbes.h"
@@ -591,6 +592,7 @@ INLINE_HEADER void traceEventCreateThread(Capability *cap STG_UNUSED,
 {
     traceSchedEvent(cap, EVENT_CREATE_THREAD, tso, tso->stackobj->stack_size);
     dtraceCreateThread((EventCapNo)cap->no, (EventThreadID)tso->id);
+    signpostThreadCreate((uint32_t)cap->no, (uint64_t)tso->id);
 }
 
 INLINE_HEADER void traceEventRunThread(Capability *cap STG_UNUSED,
@@ -598,6 +600,7 @@ INLINE_HEADER void traceEventRunThread(Capability *cap STG_UNUSED,
 {
     traceSchedEvent(cap, EVENT_RUN_THREAD, tso, tso->what_next);
     dtraceRunThread((EventCapNo)cap->no, (EventThreadID)tso->id);
+    signpostThreadRun((uint32_t)cap->no, (uint64_t)tso->id);
 }
 
 INLINE_HEADER void traceEventStopThread(Capability          *cap    STG_UNUSED,
@@ -608,6 +611,7 @@ INLINE_HEADER void traceEventStopThread(Capability          *cap    STG_UNUSED,
     traceSchedEvent2(cap, EVENT_STOP_THREAD, tso, status, info);
     dtraceStopThread((EventCapNo)cap->no, (EventThreadID)tso->id,
                      (EventThreadStatus)status, (EventThreadID)info);
+    signpostThreadStop((uint32_t)cap->no, (uint64_t)tso->id, (uint16_t)status);
 }
 
 INLINE_HEADER void traceEventMigrateThread(Capability *cap     STG_UNUSED,

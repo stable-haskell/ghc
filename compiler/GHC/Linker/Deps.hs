@@ -199,9 +199,12 @@ get_link_deps opts pls maybe_normal_osuf span mods = do
               DotO file ForeignObject -> pure (DotO file ForeignObject)
               DotA fp    -> panic ("adjust_ul DotA " ++ show fp)
               DotDLL fp  -> panic ("adjust_ul DotDLL " ++ show fp)
+#if defined(HAVE_INTERPRETER)
               BCOs {}    -> pure part
               LazyBCOs{} -> pure part
+#endif
               CoreBindings WholeCoreBindings {wcb_module} ->
+
                 pprPanic "Unhydrated core bindings" (ppr wcb_module)
 
 

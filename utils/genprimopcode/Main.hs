@@ -216,6 +216,12 @@ main = getArgs >>= \args ->
                       "--foundation-tests"
                          -> putStr (gen_foundation_tests p_o_specs)
 
+                      "--wrappers-module"
+                         -> putStr (gen_wrappers_module p_o_specs)
+
+                      "--prim-module"
+                         -> putStr (gen_hs_source_module p_o_specs)
+
                       _ -> error "Should not happen, known_args out of sync?"
                    )
 
@@ -242,12 +248,17 @@ known_args
        "--make-latex-doc",
        "--wired-in-docs",
        "--wired-in-deprecations",
-       "--foundation-tests"
+       "--foundation-tests",
+       "--wrappers-module",
+       "--prim-module"
      ]
 
 ------------------------------------------------------------------
 -- Code generators -----------------------------------------------
 ------------------------------------------------------------------
+
+gen_hs_source_module :: Info -> String
+gen_hs_source_module info = "primOpPrimModule = " ++ show (gen_hs_source info)
 
 gen_hs_source :: Info -> String
 gen_hs_source (Info defaults entries) =
@@ -475,6 +486,9 @@ In PrimopWrappers we set some crucial GHC options
   a very simple module and there is no optimisation to be done
 -}
 
+gen_wrappers_module :: Info -> String
+gen_wrappers_module info = "primOpWrappersModule = " ++ show (gen_wrappers info)
+
 gen_wrappers :: Info -> String
 gen_wrappers (Info _ entries)
    =    "-- | Users should not import this module.  It is GHC internal only.\n"
@@ -666,11 +680,30 @@ gen_switch_from_attribs attrib_name fn_name (Info defaults entries)
 -- See Note [GHC.Prim Docs] in GHC.Builtin.Utils
 gen_wired_in_docs :: Info -> String
 gen_wired_in_docs (Info _ entries)
-  = "primOpDocs =\n  [ " ++ intercalate "\n  , " (catMaybes $ map mkDoc $ concatMap desugarVectorSpec entries) ++ "\n  ]\n"
+  = "primOpDocs =\n  [ "
+    ++ intercalate "\n  , " (concatMap mkEntry desugared)
+    ++ "\n  ]\n"
     where
-      mkDoc po | Just poName <- getName po
-               , not $ null $ desc po = Just $ "(fsLit " ++ show poName ++ "," ++ show (desc po) ++ ")"
-               | otherwise = Nothing
+      desugared = concatMap desugarVectorSpec entries
+
+      mkEntry :: Entry -> [String]
+      mkEntry (Section{title = t, desc = d}) =
+        ["PrimOpSection " ++ show t ++ " " ++ show d]
+      mkEntry po
+        | Just poName <- getName po
+        = ["PrimOpDecl (fsLit " ++ show poName ++ ") " ++ show (desc po ++ extra (opts po))]
+        | otherwise = []
+
+      extra options = case canFail options of
+        [m] -> "\n\n__/Warning:/__ this " ++ m ++ "."
+        _ -> ""
+
+      canFail options
+        = [ "can fail with an unchecked exception"
+          | Just (OptionEffect eff) <- [lookup_attrib "effect" options]
+          , Just (OptionCanFailWarnFlag wflag) <- [lookup_attrib "can_fail_warning" options]
+          , wflag /= DoNotWarnCanFail
+          , wflag == YesWarnCanFail || eff == CanFail ]
 
 -- See Note [GHC.Prim Deprecations] in GHC.Builtin.Utils
 gen_wired_in_deprecations :: Info -> String

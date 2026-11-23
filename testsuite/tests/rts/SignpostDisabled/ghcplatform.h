@@ -1,0 +1,1 @@
+/* A target without Darwin signposts. */

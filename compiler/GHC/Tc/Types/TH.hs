@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE ViewPatterns #-}
 module GHC.Tc.Types.TH (
@@ -17,7 +18,7 @@ module GHC.Tc.Types.TH (
   ) where
 
 import GHC.Prelude
-import GHCi.RemoteTypes
+import GHC.Hs.Expr (ForeignRef)
 import qualified GHC.Boot.TH.Syntax as TH
 import GHC.Tc.Types.Evidence
 import GHC.Utils.Outputable

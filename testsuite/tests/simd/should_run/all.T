@@ -51,6 +51,11 @@ test('int64x2_shuffle_baseline', [], compile_and_run, [''])
 test('T25658', [], compile_and_run, ['']) # #25658 is a bug with SSE2 code generation
 test('T25659', [], compile_and_run, [''])
 
+# This test case uses SIMD instructions, even though the bug isn't in any way
+# tied to SIMD registers. It's useful to include it in this file so that
+# we re-use the logic for which architectures to run the test on.
+test('T26550', [], compile_and_run, ['-O1 -fno-worker-wrapper'])
+
 # Ensure we set the CPU features we have available.
 #
 # This is especially important with the LLVM backend, as LLVM can otherwise
@@ -84,6 +89,7 @@ test('simd012', [], compile_and_run, [''])
 test('simd013',
      [ req_c
      , unless(arch('x86_64'), skip) # because the C file uses Intel intrinsics
+     , extra_ways(["optasm"]) # #26526 demonstrated a bug in the optasm way
      ],
      compile_and_run, ['simd013C.c'])
 test('simd014',
@@ -130,11 +136,14 @@ test('T22187', [],compile,[''])
 test('T22187_run', [],compile_and_run,[''])
 test('T25062_V16', [], compile_and_run, [''])
 test('T25561', [], compile_and_run, [''])
+test('T26542', [], compile_and_run, [''])
+test('T26411', [], compile_and_run, [''])
+test('T26411b', [], compile_and_run, ['-O'])
 
 # Even if the CPU we run on doesn't support *executing* those tests we should try to
 # compile them.
 # Currently even for compilation we only support 256+ bit on x86
-only_V32_plus_compilation_support = unless(arch('x86_64'), skip)
+only_V32_plus_compilation_support = unless(arch('x86_64') or arch('i386'), skip)
 
 test('T25062_V32'
     ,   [ extra_hc_opts('-mavx2')
@@ -155,3 +164,37 @@ test('T25062_V64'
 test('T25169', [], compile_and_run, [''])
 test('T25455', [], compile_and_run, [''])
 test('T25486', [], compile_and_run, [''])
+
+test('T26410_ffi'
+    , [ only_ways(llvm_ways) # SIMD NCG TODO: support 512-bit wide vectors
+      , unless(arch('x86_64') or arch('i386'), skip)
+      , extra_hc_opts('-mavx512f -optc -mavx512f -optlc -mcpu=penryn')
+      ]
+    , compile_and_run if have_cpu_feature('avx512f') else compile
+    , ['T26410_ffi_c.c'])
+
+test('T26410_prim'
+    , [ only_ways(llvm_ways) # SIMD NCG TODO: support 512-bit wide vectors
+      , unless(arch('x86_64') or arch('i386'), skip)
+      , extra_hc_opts('-mavx512f -optlc -mcpu=penryn')
+      ]
+    , compile_and_run if have_cpu_feature('avx512f') else compile
+    , [''])
+
+test('StackAlignment32'
+    , [ only_ways(llvm_ways) # SIMD NCG TODO: support 256-bit wide vectors
+      , unless(arch('x86_64') or arch('i386'), skip)
+      , extra_hc_opts("-mavx -optc -mavx -no-hs-main")
+      ]
+    , compile_and_run if have_cpu_feature('avx') else compile
+    , ['StackAlignment32_main.c']
+    )
+
+test('StackAlignment64'
+    , [ only_ways(llvm_ways) # SIMD NCG TODO: support 512-bit wide vectors
+      , unless(arch('x86_64') or arch('i386'), skip)
+      , extra_hc_opts("-mavx512f -optc -mavx512f -no-hs-main")
+      ]
+    , compile_and_run if have_cpu_feature('avx512f') else compile
+    , ['StackAlignment64_main.c']
+    )

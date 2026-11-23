@@ -163,6 +163,7 @@ initStats0(void)
         .mutator_elapsed_ns = 0,
         .gc_cpu_ns = 0,
         .gc_elapsed_ns = 0,
+        .gc_sync_elapsed_ns = 0,
         .cpu_ns = 0,
         .elapsed_ns = 0,
         .nonmoving_gc_cpu_ns = 0,
@@ -288,6 +289,8 @@ stat_endExit(void)
     RELEASE_LOCK(&stats_mutex);
 }
 
+// This is only called in the threaded RTS. On non-threaded RTS `gc_sync_start_elapsed`
+// is conditonally set in `stat_startGC`.
 void
 stat_startGCSync (gc_thread *gct)
 {
@@ -433,6 +436,11 @@ stat_startGC (Capability *cap, gc_thread *gct)
     }
 
     gct->gc_start_elapsed = getProcessElapsedTime();
+#if !defined(THREADED_RTS)
+    // Non-threaded RTS has no sync phase. Initializing in this way makes the
+    // calculated statistics correctly read zero.
+    gct->gc_sync_start_elapsed = gct->gc_start_elapsed;
+#endif
 
     // Post EVENT_GC_START with the same timestamp as used for stats
     // (though converted from Time=StgInt64 to EventTimestamp=StgWord64).
@@ -548,6 +556,7 @@ stat_endGC (Capability *cap, gc_thread *initiating_gct, W_ live, W_ copied, W_ s
     }
     stats.gc_cpu_ns += stats.gc.cpu_ns;
     stats.gc_elapsed_ns += stats.gc.elapsed_ns;
+    stats.gc_sync_elapsed_ns += stats.gc.sync_elapsed_ns;
 
     if (gen == RtsFlags.GcFlags.generations-1) { // major GC?
         stats.major_gcs++;
@@ -915,6 +924,8 @@ static void report_summary(const RTSSummaryStats* sum)
     statsPrintf("  GC      time  %7.3fs  (%7.3fs elapsed)\n",
                 TimeToSecondsDbl(stats.gc_cpu_ns),
                 TimeToSecondsDbl(stats.gc_elapsed_ns));
+    statsPrintf("  GC SYNC time            (%7.3fs elapsed)\n",
+                TimeToSecondsDbl(stats.gc_sync_elapsed_ns));
     if (RtsFlags.GcFlags.useNonmoving) {
         statsPrintf(
                 "  CONC GC time  %7.3fs  (%7.3fs elapsed)\n",
@@ -1069,6 +1080,7 @@ static void report_machine_readable (const RTSSummaryStats * sum)
             TimeToSecondsDbl(stats.mutator_elapsed_ns));
     MR_STAT("GC_cpu_seconds", "f", TimeToSecondsDbl(stats.gc_cpu_ns));
     MR_STAT("GC_wall_seconds", "f", TimeToSecondsDbl(stats.gc_elapsed_ns));
+    MR_STAT("GC_sync_wall_seconds", "f", TimeToSecondsDbl(stats.gc_sync_elapsed_ns));
 
     // end backward compatibility
 
@@ -1278,8 +1290,6 @@ stat_exitReport (void)
             Time exit_gc_cpu     = stats.gc_cpu_ns - start_exit_gc_cpu;
             Time exit_gc_elapsed = stats.gc_elapsed_ns - start_exit_gc_elapsed;
 
-            WARN(exit_gc_elapsed > 0);
-
             sum.exit_cpu_ns     = end_exit_cpu
                                       - start_exit_cpu
                                       - exit_gc_cpu;
@@ -1287,7 +1297,35 @@ stat_exitReport (void)
                                        - start_exit_elapsed
                                        - exit_gc_elapsed;
 
-            WARN(sum.exit_elapsed_ns >= 0);
+            // Note [Clamping exit_cpu_ns and exit_elapsed_ns]
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // In rare cases, these values can become negative due to a timing
+            // accounting edge case when a GC cycle straddles the exit boundary:
+            //
+            // 1. A GC begins (stat_startGC records gc_start_elapsed/cpu)
+            // 2. stat_startExit() is called, capturing start_exit_gc_elapsed
+            //    = stats.gc_elapsed_ns (which does NOT include the in-progress GC)
+            // 3. The GC completes (stat_endGC adds the FULL GC duration to
+            //    stats.gc_elapsed_ns)
+            // 4. stat_endExit() is called
+            //
+            // When we calculate:
+            //   exit_gc_elapsed = stats.gc_elapsed_ns - start_exit_gc_elapsed
+            //
+            // This includes the ENTIRE duration of the straddling GC, even the
+            // portion that occurred BEFORE stat_startExit() was called. This can
+            // make exit_gc_elapsed > (end_exit_elapsed - start_exit_elapsed),
+            // resulting in negative sum.exit_elapsed_ns.
+            //
+            // This is more likely to manifest on systems with different scheduler
+            // behavior or timing granularity (observed on Alpine Linux / musl).
+            //
+            // We clamp to zero rather than attempting complex fixes because:
+            // - These statistics are best-effort approximations anyway
+            // - The edge case is rare (requires GC to straddle exit boundary)
+            // - This matches the existing pattern for mutator_cpu_ns below
+            if (sum.exit_cpu_ns < 0)     { sum.exit_cpu_ns = 0; }
+            if (sum.exit_elapsed_ns < 0) { sum.exit_elapsed_ns = 0; }
 
             stats.mutator_cpu_ns     = start_exit_cpu
                                  - end_init_cpu
@@ -1297,19 +1335,7 @@ stat_exitReport (void)
                                  - end_init_elapsed
                                  - (stats.gc_elapsed_ns - exit_gc_elapsed);
 
-            WARN(stats.mutator_elapsed_ns >= 0);
-
             if (stats.mutator_cpu_ns < 0) { stats.mutator_cpu_ns = 0; }
-
-            // The subdivision of runtime into INIT/EXIT/GC/MUT is just adding
-            // and subtracting, so the parts should add up to the total exactly.
-            // Note that stats->total_ns is captured a tiny bit later than
-            // end_exit_elapsed, so we don't use it here.
-            WARN(stats.init_elapsed_ns // INIT
-                   + stats.mutator_elapsed_ns // MUT
-                   + stats.gc_elapsed_ns // GC
-                   + sum.exit_elapsed_ns // EXIT
-                   == end_exit_elapsed - start_init_elapsed);
 
             // heapCensus() is called by the GC, so RP and HC time are
             // included in the GC stats.  We therefore subtract them to

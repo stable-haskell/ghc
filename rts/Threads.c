@@ -114,6 +114,8 @@ createThread(Capability *cap, W_ size)
 
     ASSIGN_Int64((W_*)&(tso->alloc_limit), 0);
 
+    tso->ctoi_tuple_spill_words = 0;
+
     tso->trec = NO_TREC;
     tso->label = NULL;
 
@@ -375,6 +377,65 @@ migrateThread (Capability *from, StgTSO *tso, Capability *to)
 }
 
 /* ----------------------------------------------------------------------------
+   {set,unset}ThreadFlag
+
+   sets or unsets a flag in a given TSO
+
+   Note [TSO flag messages]
+   ~~~~~~~~~~~~~~~~~~~~~~~~
+   Under the threaded RTS the caller often does not own the target TSO.
+   updThreadFlag therefore allocates a MSG_SET_TSO_FLAG / MSG_UNSET_TSO_FLAG
+   and sendMessage's it to tso->cap. sendMessage returns as soon as the
+   message is linked onto that capability's inbox. It does not wait for
+   executeMessage.
+
+   The inbox is drained by scheduleFindWork, before that capability next
+   chooses a thread to run. Two consequences:
+
+   * A thread already running on the owning capability, including the
+     target itself, will not observe the new flag until it next returns
+     to the scheduler. The interpreter and an unsafe FFI call both read
+     tso->flags directly; neither drains the inbox.
+   * The inbox is a stack. A MSG_TRY_WAKEUP queued after the flag message
+     is executed first, but executeMessage only enqueues the TSO. The
+     flag message in the same batch is still applied before the scheduler
+     enters Haskell. The stale read happens when the target samples the
+     flag inside a timeslice that began before the message was drained
+     (T27131, threaded1, Alpine musl).
+
+   Callers that need the update to be visible must return the target to
+   the scheduler after the message has been queued and before they sample
+   tso->flags. rts_enableStopNextBreakpoint is called via unsafe FFI, so
+   this wait cannot yield the caller's capability.
+   ------------------------------------------------------------------------- */
+
+#if defined(THREADED_RTS)
+static void
+updThreadFlag(Capability *from, StgTSO *tso, StgWord32 flag, const StgInfoTable* info);
+
+void setThreadFlag(Capability *from, StgTSO *tso, StgWord32 flag)
+{
+    updThreadFlag(from, tso, flag, &stg_MSG_SET_TSO_FLAG_info);
+}
+
+void unsetThreadFlag(Capability *from, StgTSO *tso, StgWord32 flag)
+{
+    updThreadFlag(from, tso, flag, &stg_MSG_UNSET_TSO_FLAG_info);
+}
+
+static void
+updThreadFlag(Capability *from, StgTSO *tso, StgWord32 flag, const StgInfoTable* info)
+{
+    MessageUpdTSOFlag *msg;
+    msg = (MessageUpdTSOFlag *)allocate(from,sizeofW(MessageUpdTSOFlag));
+    msg->tso  = tso;
+    msg->flag = flag;
+    SET_HDR_RELEASE(msg, info, CCS_SYSTEM);
+    sendMessage(from, tso->cap, (Message*)msg);
+}
+#endif
+
+/* ----------------------------------------------------------------------------
    awakenBlockedQueue
 
    wakes up all the threads on the specified queue.
@@ -440,7 +501,7 @@ checkBlockingQueues (Capability *cap, StgTSO *tso)
         // thing the result would be the same in almost all cases. See #20093.
         p = UNTAG_CLOSURE(bq->bh);
         const StgInfoTable *pinfo = ACQUIRE_LOAD(&p->header.info);
-        if (pinfo != &stg_BLACKHOLE_info ||
+        if (!IS_BLACKHOLE_INFO(pinfo) ||
             (RELAXED_LOAD(&((StgInd *)p)->indirectee) != (StgClosure*)bq))
         {
             wakeBlockingQueue(cap,bq);
@@ -464,10 +525,7 @@ updateThunk (Capability *cap, StgTSO *tso, StgClosure *thunk, StgClosure *val)
     const StgInfoTable *i;
 
     i = ACQUIRE_LOAD(&thunk->header.info);
-    if (i != &stg_BLACKHOLE_info &&
-        i != &stg_CAF_BLACKHOLE_info &&
-        i != &__stg_EAGER_BLACKHOLE_info &&
-        i != &stg_WHITEHOLE_info) {
+    if (!IS_BLACKHOLE_OR_WHITEHOLE_INFO(i)) {
         updateWithIndirection(cap, thunk, val);
         return;
     }
@@ -926,7 +984,7 @@ printThreadBlockage(StgTSO *tso)
   switch (ACQUIRE_LOAD(&tso->why_blocked)) {
 #if defined(mingw32_HOST_OS)
     case BlockedOnDoProc:
-    debugBelch("is blocked on proc (request: %u)", tso->block_info.async_result->reqID);
+    debugBelch("is blocked on proc (request: %" FMT_Word ")", tso->block_info.async_reqID);
     break;
 #endif
 #if !defined(THREADED_RTS)
@@ -1055,3 +1113,38 @@ printThreadQueue(StgTSO *t)
 }
 
 #endif /* DEBUG */
+
+/*
+ * restoreStackInvariants: restore stack invariants
+ *
+ * This should be called after restoring a captured stack from
+ * sp .. sp + words
+ */
+void
+restoreStackInvariants(StgTSO *tso, StgPtr sp, StgWord words)
+{
+    StgPtr end = sp + words;
+    StgPtr frame = sp;
+
+    /*
+       Restore ctoi_tuple_spill_words invariants after adding stack:
+
+         - set the saved value in the last stg_ctoi_t frame to the current
+              tso->ctoi_tuple_spill_words
+         - set tso->ctoi_tuple_spill_words to the value in the first stg_ctoi_t frame
+
+       See Note [GHCi unboxed tuples stack spills] in StgMiscClosures.cmm.
+     */
+     StgPtr first_ctoi_frame = NULL, last_ctoi_frame = NULL;
+     while (frame < end) {
+        if (*(StgWord*)frame == (StgWord)&stg_ctoi_t_info) {
+            if(first_ctoi_frame == NULL) first_ctoi_frame = frame;
+            last_ctoi_frame = frame;
+        }
+        frame += stack_frame_sizeW((StgClosure *)frame);
+    }
+    if(last_ctoi_frame != NULL) {
+        last_ctoi_frame[CTOI_OLD_TUPLE_SPILL_WORDS_OFFSET] = tso->ctoi_tuple_spill_words;
+        tso->ctoi_tuple_spill_words = first_ctoi_frame[CTOI_TUPLE_INFO_OFFSET] >> 24;
+    }
+}

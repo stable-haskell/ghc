@@ -1,0 +1,1 @@
+"target-features"="+avx,+avx2,+popcnt,+sse4.2"

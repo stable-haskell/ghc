@@ -1,0 +1,14 @@
+section: compiler
+synopsis: Cmm procedures can declare the CPU features they require
+description:
+  A hand-written Cmm procedure may now carry a target attribute,
+  ``__attribute__((target("avx2")))``, saying which CPU features it needs.
+  This is a property of the code, not a build option: ``stg_ap_v32_fast``
+  cannot be compiled correctly without AVX2, while ``stg_ap_v16_fast`` in the
+  same library must not be compiled with AVX at all. The RTS uses this in place
+  of Hadrian's per-file flags, which had to be matched on filename.
+
+  A backend that cannot honour the attribute rejects it, and an unrecognised
+  feature is a parse error. See ``Note [Cmm target attributes]`` in ``GHC.Cmm``.
+issues: #25062
+mrs: !16687

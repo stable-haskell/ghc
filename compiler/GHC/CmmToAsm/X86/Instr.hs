@@ -115,9 +115,12 @@ data Instr
 
         -- | X86 scalar move instruction.
         --
-        -- When used at a vector format, only moves the lower 64 bits of data;
-        -- the rest of the data in the destination may either be zeroed or
-        -- preserved, depending on the specific format and operands.
+        -- The format is the format the destination is written to. For an XMM
+        -- register, using a scalar format means that we don't care about the
+        -- upper bits, while using a vector format means that we care about the
+        -- upper bits, even though we are only writing to the lower bits.
+        --
+        -- See also Note [Allocated register formats] in GHC.CmmToAsm.Reg.Linear.
         | MOV Format Operand Operand
              -- N.B. Due to AT&T assembler quirks, when used with 'II64'
              -- 'Format' immediate source and memory target operand, the source
@@ -250,6 +253,7 @@ data Instr
                       [Maybe JumpDest] -- Targets of the jump table
                       Section   -- Data section jump table should be put in
                       CLabel    -- Label of jump table
+                      !(Maybe CLabel) -- Label used to compute relative offsets. Otherwise we store absolute addresses.
         -- | X86 call instruction
         | CALL        (Either Imm Reg) -- ^ Jump target
                       [RegWithFormat]  -- ^ Arguments (required for register allocation)
@@ -406,18 +410,27 @@ data FMAPermutation = FMA132 | FMA213 | FMA231
 regUsageOfInstr :: Platform -> Instr -> RegUsage
 regUsageOfInstr platform instr
  = case instr of
-    MOV fmt src dst
+
+    -- Recall that MOV is always a scalar move instruction, but when the destination
+    -- is an XMM register, we make the distinction between:
+    --
+    --  - a scalar format, meaning that from now on we no longer care about the top bits
+    --    of the register, and
+    --  - a vector format, meaning that we still care about what's in the high bits.
+    --
+    -- See Note [Allocated register formats] in GHC.CmmToAsm.Reg.Linear.
+    MOV dst_fmt src dst
       -- MOVSS/MOVSD preserve the upper half of vector registers,
       -- but only for reg-2-reg moves
-      | VecFormat _ sFmt <- fmt
+      | VecFormat _ sFmt <- dst_fmt
       , isFloatScalarFormat sFmt
       , OpReg {} <- src
       , OpReg {} <- dst
-      -> usageRM fmt src dst
+      -> usageRM dst_fmt src dst
       -- other MOV instructions zero any remaining upper part of the destination
       -- (largely to avoid partial register stalls)
       | otherwise
-      -> usageRW fmt src dst
+      -> usageRW dst_fmt src dst
     MOVD fmt1 fmt2 src dst    ->
       -- NB: MOVD and MOVQ always zero any remaining upper part of destination,
       -- so the destination is "written" not "modified".
@@ -433,7 +446,7 @@ regUsageOfInstr platform instr
     IMUL   fmt src dst    -> usageRM fmt src dst
 
     -- Result of IMULB will be in just in %ax
-    IMUL2  II8 src       -> mkRU (mk II8 eax:use_R II8 src []) [mk II8 eax]
+    IMUL2  II8 src       -> mkRU (mk II8 eax:use_R II8 src []) [mk II16 eax]
     -- Result of IMUL for wider values, will be split between %dx/%edx/%rdx and
     -- %ax/%eax/%rax.
     IMUL2  fmt src        -> mkRU (mk fmt eax:use_R fmt src []) [mk fmt eax,mk fmt edx]
@@ -476,7 +489,7 @@ regUsageOfInstr platform instr
     JXX    _ _          -> mkRU [] []
     JXX_GBL _ _         -> mkRU [] []
     JMP     op regs     -> mkRU (use_R addrFmt op regs) []
-    JMP_TBL op _ _ _    -> mkRU (use_R addrFmt op []) []
+    JMP_TBL op _ _ _ _  -> mkRU (use_R addrFmt op []) []
     CALL (Left _)  params   -> mkRU params (map mkFmt $ callClobberedRegs platform)
     CALL (Right reg) params -> mkRU (mk addrFmt reg:params) (map mkFmt $ callClobberedRegs platform)
     CLTD   fmt          -> mkRU [mk fmt eax] [mk fmt edx]
@@ -795,7 +808,7 @@ patchRegsOfInstr platform instr env
     POP  fmt op          -> patch1 (POP  fmt) op
     SETCC cond op        -> patch1 (SETCC cond) op
     JMP op regs          -> JMP (patchOp op) regs
-    JMP_TBL op ids s lbl -> JMP_TBL (patchOp op) ids s lbl
+    JMP_TBL op ids s tl jl -> JMP_TBL (patchOp op) ids s tl jl
 
     FMA3 fmt perm var x1 x2 x3 -> patch3 (FMA3 fmt perm var) x1 x2 x3
 
@@ -997,9 +1010,9 @@ isJumpishInstr instr
 canFallthroughTo :: Instr -> BlockId -> Bool
 canFallthroughTo insn bid
   = case insn of
-    JXX _ target          -> bid == target
-    JMP_TBL _ targets _ _ -> all isTargetBid targets
-    _                     -> False
+    JXX _ target            -> bid == target
+    JMP_TBL _ targets _ _ _ -> all isTargetBid targets
+    _                       -> False
   where
     isTargetBid target = case target of
       Nothing                      -> True
@@ -1012,9 +1025,9 @@ jumpDestsOfInstr
 
 jumpDestsOfInstr insn
   = case insn of
-        JXX _ id        -> [id]
-        JMP_TBL _ ids _ _ -> [id | Just (DestBlockId id) <- ids]
-        _               -> []
+        JXX _ id            -> [id]
+        JMP_TBL _ ids _ _ _ -> [id | Just (DestBlockId id) <- ids]
+        _                   -> []
 
 
 patchJumpInstr
@@ -1023,8 +1036,8 @@ patchJumpInstr
 patchJumpInstr insn patchF
   = case insn of
         JXX cc id       -> JXX cc (patchF id)
-        JMP_TBL op ids section lbl
-          -> JMP_TBL op (map (fmap (patchJumpDest patchF)) ids) section lbl
+        JMP_TBL op ids section table_lbl rel_lbl
+          -> JMP_TBL op (map (fmap (patchJumpDest patchF)) ids) section table_lbl rel_lbl
         _               -> insn
     where
         patchJumpDest f (DestBlockId id) = DestBlockId (f id)
@@ -1485,14 +1498,19 @@ shortcutJump fn insn = shortcutJump' fn (setEmpty :: LabelSet) insn
             Just (DestBlockId id') -> shortcutJump' fn seen' (JXX cc id')
             Just (DestImm imm)     -> shortcutJump' fn seen' (JXX_GBL cc imm)
         where seen' = setInsert id seen
-    shortcutJump' fn _ (JMP_TBL addr blocks section tblId) =
+    shortcutJump' fn _ (JMP_TBL addr blocks section table_lbl rel_lbl) =
         let updateBlock (Just (DestBlockId bid))  =
                 case fn bid of
                     Nothing   -> Just (DestBlockId bid )
+                    -- A table of offsets relative to a block of this proc
+                    -- may only point at blocks of this proc.  See
+                    -- Note [Shortcutting relative jump tables].
+                    Just (DestImm _) | Just _ <- rel_lbl
+                              -> Just (DestBlockId bid)
                     Just dest -> Just dest
             updateBlock dest = dest
             blocks' = map updateBlock blocks
-        in  JMP_TBL addr blocks' section tblId
+        in  JMP_TBL addr blocks' section table_lbl rel_lbl
     shortcutJump' _ _ other = other
 
 -- Here because it knows about JumpDest
@@ -1511,11 +1529,44 @@ shortcutStatic :: (BlockId -> Maybe JumpDest) -> CmmStatic -> CmmStatic
 shortcutStatic fn (CmmStaticLit (CmmLabel lab))
   = CmmStaticLit (CmmLabel (shortcutLabel fn lab))
 shortcutStatic fn (CmmStaticLit (CmmLabelDiffOff lbl1 lbl2 off w))
-  = CmmStaticLit (CmmLabelDiffOff (shortcutLabel fn lbl1) lbl2 off w)
-        -- slightly dodgy, we're ignoring the second label, but this
-        -- works with the way we use CmmLabelDiffOff for jump tables now.
+  = CmmStaticLit (CmmLabelDiffOff (shortcutLocalLabel fn lbl1) lbl2 off w)
+        -- We ignore the second label: this works with the way we use
+        -- CmmLabelDiffOff for jump tables, whose second label is a block of
+        -- the same proc.  See Note [Shortcutting relative jump tables].
 shortcutStatic _ other_static
         = other_static
+
+{- Note [Shortcutting relative jump tables]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+A PIC jump table holds offsets `target_lbl - base_lbl`, where base_lbl is the
+block containing the jump (see Note [Jump tables] in GHC.CmmToAsm.X86.CodeGen).
+Both labels must be in the same section for the assembler to resolve their
+difference.  Shortcutting a tail-call trampoline (`jmp foo_info`) to foo can
+violate this with -split-sections, because foo is in another proc's section.
+
+Relative table entries therefore follow only local block shortcuts, stopping
+at the trampoline, both in 'shortcutLocalLabel' and in 'shortcutJump'.  Absolute
+tables have no such constraint and shortcut fully.
+
+'build_mapping' in GHC.CmmToAsm must also retain these trampolines and their
+CFG nodes for x86 PIC code; otherwise the table names an undefined label even
+without -split-sections.  Other jumps still shortcut past the trampoline.
+Keeping all such trampolines can leave a few dead bytes in procs without tables.
+-}
+
+-- | Like 'shortcutLabel', but only follows shortcuts to other blocks of the
+-- same proc, never to a label outside it.
+-- See Note [Shortcutting relative jump tables].
+shortcutLocalLabel :: (BlockId -> Maybe JumpDest) -> CLabel -> CLabel
+shortcutLocalLabel fn lab
+  | Just blkId <- maybeLocalBlockLabel lab = go emptyUniqueSet blkId
+  | otherwise                              = lab
+  where
+    go seen blockid =
+      case (memberUniqueSet uq seen, fn blockid) of
+        (False, Just (DestBlockId blockid')) -> go (insertUniqueSet uq seen) blockid'
+        _                                    -> blockLbl blockid
+      where uq = getUnique blockid
 
 shortBlockId
         :: (BlockId -> Maybe JumpDest)

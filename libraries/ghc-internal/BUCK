@@ -1,0 +1,12 @@
+# Hand-maintained BUCK file for ghc-internal, stage 2 only: stage 1 uses
+# the boot compiler's ghc-internal. BUCK.autogen.bzl adds the two
+# modules the compiler prints.
+load(":BUCK.autogen.bzl", "stage2_rules")
+
+stage2_rules()
+
+# ghc-boot-th-next lists src/ in its hs-source-dirs (../ghc-internal/src).
+# buck2 cannot reference files of another package by path, so every
+# Haskell source under src/ is exported as a target named after its
+# path, e.g. //libraries/ghc-internal:src/GHC/Internal/Lexeme.hs.
+[export_file(name = f, src = f, visibility = ["PUBLIC"]) for f in glob(["src/**/*.hs"])]

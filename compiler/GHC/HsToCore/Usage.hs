@@ -73,6 +73,8 @@ data UsageConfig = UsageConfig
   { uc_safe_implicit_imps_req :: !Bool -- ^ Are all implicit imports required to be safe for this Safe Haskell mode?
   }
 
+-- | Build the list of 'Usage's that drive recompilation checking.
+-- The resulting list is deterministically sorted.
 mkUsageInfo :: UsageConfig -> Plugins -> FinderCache -> UnitEnv
             -> Module -> ImportedMods -> [ImportUserSpec] -> NameSet
             -> [FilePath] -> [(Module, Fingerprint)] -> [Linkable] -> PkgsLoaded
@@ -100,10 +102,10 @@ mkUsageInfo uc plugins fc unit_env
                                     }
                                | (mod, hash) <- merged ]
                             ++ object_usages
-    usages `seqList` return usages
-    -- seq the list of Usages returned: occasionally these
-    -- don't get evaluated for a while and we can end up hanging on to
-    -- the entire collection of Ifaces.
+    usages `seqList` return (sortBy stableUsageCmp usages)
+    -- The use of 'seqList' is important because occasionally the returned list
+    -- is not evaluated for a while, so that with too much laziness here we
+    -- could end up hanging on to the entire collection of 'Iface's.
 
 {- Note [Plugin dependencies]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -168,34 +170,42 @@ to inject the appropriate dependencies.
 -- modules and direct object files for pkg dependencies
 mkObjectUsage :: PackageIfaceTable -> Plugins -> FinderCache -> HomeUnitGraph-> [Linkable] -> PkgsLoaded -> IO [Usage]
 mkObjectUsage pit plugins fc hug th_links_needed th_pkgs_needed = do
-      let ls = ordNubOn linkableModule (th_links_needed ++ plugins_links_needed)
-          ds = concatMap loaded_pkg_hs_objs $ eltsUDFM (plusUDFM th_pkgs_needed plugin_pkgs_needed) -- TODO possibly record loaded_pkg_non_hs_objs as well
-          (plugins_links_needed, plugin_pkgs_needed) = loadedPluginDeps plugins
-      concat <$> sequence (map linkableToUsage ls ++ map librarySpecToUsage ds)
+      let (plugins_links_needed, plugin_pkgs_needed) = loadedPluginDeps plugins
+          parts = [ (linkableModule link, part)
+                  | link <- th_links_needed ++ plugins_links_needed
+                  , part <- NE.toList (linkableParts link) ]
+          -- Host and target packages (and even modules) can have the same
+          -- identity but different implementation files. Extract paths before
+          -- combining their namespaces, and deduplicate only actual files.
+          package_files = concatMap librarySpecPaths $ concatMap loaded_pkg_hs_objs
+            (eltsUDFM th_pkgs_needed ++ eltsUDFM plugin_pkgs_needed)
+          files = ordNubOn fst $
+            [ (fn, Just (msg m)) | (m, part) <- parts, Just fn <- [linkablePartPath part] ]
+            ++ [ (fn, Nothing) | fn <- package_files ]
+          iface_modules = ordNub [ m | (m, part) <- parts, isNothing (linkablePartPath part) ]
+      file_usages <- mapM (\(fn, label) -> fing label fn) files
+      iface_usages <- mapM interfaceUsage iface_modules
+      pure (file_usages ++ iface_usages)
   where
-    linkableToUsage (Linkable _ m uls) = mapM (partToUsage m) (NE.toList uls)
-
     msg m = moduleNameString (moduleName m) ++ "[TH] changed"
 
     fing mmsg fn = UsageFile (mkFastString fn) <$> lookupFileCache fc fn <*> pure mmsg
 
-    partToUsage m part =
-      case linkablePartPath part of
-        Just fn -> fing (Just (msg m)) fn
-        Nothing ->  do
-          -- This should only happen for home package things but oneshot puts
-          -- home package ifaces in the PIT.
-          miface <- lookupIfaceByModule hug pit m
-          case miface of
-            Nothing -> pprPanic "mkObjectUsage" (ppr m)
-            Just iface ->
-              return $ UsageHomeModuleInterface (moduleName m) (toUnitId $ moduleUnit m) (mi_iface_hash iface)
+    interfaceUsage m = do
+      -- This should only happen for home package things but oneshot puts
+      -- home package ifaces in the PIT. Separate host plugin environments
+      -- search installed packages only, so these interfaces belong to target.
+      miface <- lookupIfaceByModule hug pit m
+      case miface of
+        Nothing -> pprPanic "mkObjectUsage" (ppr m)
+        Just iface ->
+          return $ UsageHomeModuleInterface (moduleName m) (toUnitId $ moduleUnit m) (mi_iface_hash iface)
 
-    librarySpecToUsage :: LibrarySpec -> IO [Usage]
-    librarySpecToUsage (Objects os) = traverse (fing Nothing) os
-    librarySpecToUsage (Archive fn) = traverse (fing Nothing) [fn]
-    librarySpecToUsage (DLLPath fn) = traverse (fing Nothing) [fn]
-    librarySpecToUsage _ = return []
+    librarySpecPaths :: LibrarySpec -> [FilePath]
+    librarySpecPaths (Objects os) = os
+    librarySpecPaths (Archive fn) = [fn]
+    librarySpecPaths (DLLPath fn) = [fn]
+    librarySpecPaths _ = []
 
 mk_mod_usage_info :: UsageConfig
               -> HomeUnit

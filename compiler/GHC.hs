@@ -39,8 +39,10 @@ module GHC (
         setUnitDynFlags,
         getProgramDynFlags, setProgramDynFlags,
         setProgramHUG, setProgramHUG_,
+#if defined(HAVE_INTERPRETER)
         getInteractiveDynFlags, setInteractiveDynFlags,
         normaliseInteractiveDynFlags, initialiseInteractiveDynFlags,
+#endif
         interpretPackageEnv,
 
         -- * Logging
@@ -61,7 +63,10 @@ module GHC (
 
         -- * Loading\/compiling the program
         depanal, depanalE,
-        load, loadWithCache, LoadHowMuch(..), InteractiveImport(..),
+        load, loadWithCache, LoadHowMuch(..),
+#if defined(HAVE_INTERPRETER)
+        InteractiveImport(..),
+#endif
         SuccessFlag(..), succeeded, failed,
         defaultWarnErrLogger, WarnErrLogger,
         workingDirectoryChanged,
@@ -142,7 +147,7 @@ module GHC (
         NamePprCtx, alwaysQualify,
 
         -- * Interactive evaluation
-
+#if defined(HAVE_INTERPRETER)
         -- ** Executing statements
         execStmt, execStmt', ExecOptions(..), execOptions, ExecResult(..),
         resumeExec,
@@ -153,7 +158,9 @@ module GHC (
         -- ** Get/set the current context
         parseImportDecl,
         setContext, getContext,
+#if defined(HAVE_INTERPRETER)
         setGHCiMonad, getGHCiMonad,
+#endif
 
         -- ** Inspecting the current context
         getBindings, getInsts, getNamePprCtx,
@@ -164,7 +171,9 @@ module GHC (
         isModuleTrusted, moduleTrustReqs,
         getNamesInScope,
         getRdrNamesInScope,
+#if defined(HAVE_INTERPRETER)
         getGRE,
+#endif
         moduleIsInterpreted,
         getInfo,
         showModule,
@@ -191,8 +200,10 @@ module GHC (
         -- ** Other
         runTcInteractive,   -- Desired by some clients (#8878)
         isStmt, hasImport, isImport, isDecl,
+#endif
 
         -- ** The debugger
+#if defined(HAVE_INTERPRETER)
         SingleStep(..),
         Resume(..),
         History(historyBreakpointId, historyEnclosingDecls),
@@ -206,6 +217,7 @@ module GHC (
         GHC.Runtime.Eval.back,
         GHC.Runtime.Eval.forward,
         GHC.Runtime.Eval.setupBreakpoint,
+#endif
 
         -- * Abstract syntax elements
 
@@ -270,8 +282,10 @@ module GHC (
         Kind,
         PredType,
         ThetaType, pprForAll, pprThetaArrowTy,
+#if defined(HAVE_INTERPRETER)
         parseInstanceHead,
         getInstancesForType,
+#endif
 
         -- ** Entities
         TyThing(..),
@@ -337,7 +351,6 @@ module GHC (
 import GHC.Prelude hiding (init)
 
 import GHC.Platform
-import GHC.Platform.Ways
 
 import GHC.Driver.Phases   ( Phase(..), isHaskellSrcFilename
                            , isSourceFilename, startPhase )
@@ -351,7 +364,6 @@ import GHC.Driver.Backend
 import GHC.Driver.Config.Finder (initFinderOpts)
 import GHC.Driver.Config.Parser (initParserOpts)
 import GHC.Driver.Config.Logger (initLogFlags)
-import GHC.Driver.Config.StgToJS (initStgToJSConfig)
 import GHC.Driver.Config.Diagnostic
 import GHC.Driver.Main
 import GHC.Driver.Make
@@ -359,13 +371,17 @@ import GHC.Driver.Hooks
 import GHC.Driver.Monad
 import GHC.Driver.Ppr
 
+#if defined(HAVE_INTERPRETER)
+import GHC.Driver.Config.StgToJS (initStgToJSConfig)
 import GHC.ByteCode.Types
-import qualified GHC.Linker.Loader as Loader
 import GHC.Runtime.Loader
 import GHC.Runtime.Eval
 import GHC.Runtime.Interpreter
+import GHC.Runtime.Interpreter.Init
+import GHC.Driver.Config.Interpreter
 import GHC.Runtime.Context
 import GHCi.RemoteTypes
+#endif
 
 import qualified GHC.Parser as Parser
 import GHC.Parser.Lexer
@@ -439,10 +455,8 @@ import GHC.Unit.Module.ModSummary
 import GHC.Unit.Module.Graph
 import GHC.Unit.Home.ModInfo
 import qualified GHC.Unit.Home.Graph as HUG
-import GHC.Settings
 
 import Control.Applicative ((<|>))
-import Control.Concurrent
 import Control.Monad
 import Control.Monad.Catch as MC
 import Data.Foldable
@@ -578,7 +592,9 @@ withCleanupSession ghc = ghc `MC.finally` cleanup
           unless (gopt Opt_KeepTmpFiles dflags) $ do
             cleanTempFiles logger tmpfs
             cleanTempDirs logger tmpfs
+#if defined(HAVE_INTERPRETER)
           traverse_ stopInterp (hsc_interp hsc_env)
+#endif
           --  exceptions will be blocked while we clean the temporary files,
           -- so there shouldn't be any difficulty if we receive further
           -- signals.
@@ -712,105 +728,31 @@ setTopSessionDynFlags :: GhcMonad m => DynFlags -> m ()
 setTopSessionDynFlags dflags = do
   hsc_env <- getSession
   logger  <- getLogger
-  lookup_cache  <- liftIO $ mkInterpSymbolCache
 
-  -- see Note [Target code interpreter]
-  interp <- if
-    -- Wasm dynamic linker
-    | ArchWasm32 <- platformArch $ targetPlatform dflags
-    -> do
-        s <- liftIO $ newMVar InterpPending
-        loader <- liftIO Loader.uninitializedLoader
-        dyld <- liftIO $ makeAbsolute $ topDir dflags </> "dyld.mjs"
-#if defined(wasm32_HOST_ARCH)
-        let libdir = sorry "cannot spawn child process on wasm"
+#if defined(HAVE_INTERPRETER)
+  let platform = targetPlatform dflags
+  let unit_env = hsc_unit_env hsc_env
+  let tmpfs = hsc_tmpfs hsc_env
+  let finder_cache = hsc_FC hsc_env
+  interp_opts' <- liftIO $ initInterpOpts dflags
+  let interp_opts = interp_opts'
+                      { interpCreateProcess = createIservProcessHook (hsc_hooks hsc_env)
+                      }
+
+  interp <- liftIO $ initInterpreter tmpfs logger platform finder_cache unit_env interp_opts
 #else
-        libdir <- liftIO $ last <$> Loader.getGccSearchDirectory logger dflags "libraries"
+  -- No interpreter support (HAVE_INTERPRETER not defined)
+  let interp = Nothing
 #endif
-        let profiled = ways dflags `hasWay` WayProf
-            way_tag = if profiled then "_p" else ""
-        let cfg =
-              WasmInterpConfig
-                { wasmInterpDyLD = dyld,
-                  wasmInterpLibDir = libdir,
-                  wasmInterpOpts = getOpts dflags opt_i,
-                  wasmInterpBrowser = gopt Opt_GhciBrowser dflags,
-                  wasmInterpBrowserHost = ghciBrowserHost dflags,
-                  wasmInterpBrowserPort = ghciBrowserPort dflags,
-                  wasmInterpBrowserRedirectWasiConsole = gopt Opt_GhciBrowserRedirectWasiConsole dflags,
-                  wasmInterpBrowserPuppeteerLaunchOpts = ghciBrowserPuppeteerLaunchOpts dflags,
-                  wasmInterpBrowserPlaywrightBrowserType = ghciBrowserPlaywrightBrowserType dflags,
-                  wasmInterpBrowserPlaywrightLaunchOpts = ghciBrowserPlaywrightLaunchOpts dflags,
-                  wasmInterpTargetPlatform = targetPlatform dflags,
-                  wasmInterpProfiled = profiled,
-                  wasmInterpHsSoSuffix = way_tag ++ dynLibSuffix (ghcNameVersion dflags),
-                  wasmInterpUnitState = ue_homeUnitState $ hsc_unit_env hsc_env
-                }
-        pure $ Just $ Interp (ExternalInterp $ ExtWasm $ ExtInterpState cfg s) loader lookup_cache
-
-    -- JavaScript interpreter
-    | ArchJavaScript <- platformArch (targetPlatform dflags)
-    -> do
-         s <- liftIO $ newMVar InterpPending
-         loader <- liftIO Loader.uninitializedLoader
-         let cfg = JSInterpConfig
-              { jsInterpNodeConfig  = defaultNodeJsSettings
-              , jsInterpScript      = topDir dflags </> "ghc-interp.js"
-              , jsInterpTmpFs       = hsc_tmpfs hsc_env
-              , jsInterpTmpDir      = tmpDir dflags
-              , jsInterpLogger      = hsc_logger hsc_env
-              , jsInterpCodegenCfg  = initStgToJSConfig dflags
-              , jsInterpUnitEnv     = hsc_unit_env hsc_env
-              , jsInterpFinderOpts  = initFinderOpts dflags
-              , jsInterpFinderCache = hsc_FC hsc_env
-              }
-         return (Just (Interp (ExternalInterp (ExtJS (ExtInterpState cfg s))) loader lookup_cache))
-
-    -- external interpreter
-    | gopt Opt_ExternalInterpreter dflags
-    -> do
-         let
-           prog = pgm_i dflags ++ flavour
-           profiled = ways dflags `hasWay` WayProf
-           dynamic  = ways dflags `hasWay` WayDyn
-           flavour
-             | profiled && dynamic = "-prof-dyn"
-             | profiled  = "-prof"
-             | dynamic   = "-dyn"
-             | otherwise = ""
-           msg = text "Starting " <> text prog
-         tr <- if verbosity dflags >= 3
-                then return (logInfo logger $ withPprStyle defaultDumpStyle msg)
-                else return (pure ())
-         let
-          conf = IServConfig
-            { iservConfProgram  = prog
-            , iservConfOpts     = getOpts dflags opt_i
-            , iservConfProfiled = profiled
-            , iservConfDynamic  = dynamic
-            , iservConfHook     = createIservProcessHook (hsc_hooks hsc_env)
-            , iservConfTrace    = tr
-            }
-         s <- liftIO $ newMVar InterpPending
-         loader <- liftIO Loader.uninitializedLoader
-         return (Just (Interp (ExternalInterp (ExtIServ (ExtInterpState conf s))) loader lookup_cache))
-
-    -- Internal interpreter
-    | otherwise
-    ->
-#if defined(HAVE_INTERNAL_INTERPRETER)
-     do
-      loader <- liftIO Loader.uninitializedLoader
-      return (Just (Interp InternalInterp loader lookup_cache))
-#else
-      return Nothing
-#endif
-
 
   modifySession $ \h -> hscSetFlags dflags
+#if defined(HAVE_INTERPRETER)
                         h{ hsc_IC = (hsc_IC h){ ic_dflags = dflags }
                          , hsc_interp = hsc_interp h <|> interp
                          }
+#else
+                        h{ hsc_interp = hsc_interp h <|> interp }
+#endif
 
   invalidateModSummaryCache
 
@@ -1010,6 +952,7 @@ getProgramDynFlags = getSessionDynFlags
 -- Note: this cannot be used for changes to packages.  Use
 -- 'setSessionDynFlags', or 'setProgramDynFlags' and then copy the
 -- 'unitState' into the interactive @DynFlags@.
+#if defined(HAVE_INTERPRETER)
 setInteractiveDynFlags :: GhcMonad m => DynFlags -> m ()
 setInteractiveDynFlags dflags = do
   logger <- getLogger
@@ -1019,6 +962,7 @@ setInteractiveDynFlags dflags = do
 -- | Get the 'DynFlags' used to evaluate interactive expressions.
 getInteractiveDynFlags :: GhcMonad m => m DynFlags
 getInteractiveDynFlags = withSession $ \h -> return (ic_dflags (hsc_IC h))
+#endif
 
 
 parseDynamicFlags
@@ -1122,10 +1066,12 @@ normalise_hyp fp
 -- | Normalise the 'DynFlags' for us in an interactive context.
 --
 -- Makes sure unsupported Flags and other incosistencies are reported and removed.
+#if defined(HAVE_INTERPRETER)
 normaliseInteractiveDynFlags :: MonadIO m => Logger -> DynFlags -> m DynFlags
 normaliseInteractiveDynFlags logger dflags = do
   dflags' <- checkNewDynFlags logger dflags
   checkNewInteractiveDynFlags logger dflags'
+#endif
 
 -- | Given a set of normalised 'DynFlags' (see 'normaliseInteractiveDynFlags')
 -- for the interactive context, initialize the 'InteractiveContext'.
@@ -1136,6 +1082,7 @@ initialiseInteractiveDynFlags :: GhcMonad m => DynFlags -> HscEnv -> m HscEnv
 initialiseInteractiveDynFlags dflags hsc_env0 = do
   let ic0 = hsc_IC hsc_env0
 
+#if defined(HAVE_INTERPRETER)
   -- Initialise (load) plugins in the interactive environment with the new
   -- DynFlags
   plugin_env <- liftIO $ initializePlugins $ mkInteractiveHscEnv $
@@ -1148,6 +1095,10 @@ initialiseInteractiveDynFlags dflags hsc_env0 = do
                   , ic_dflags  = hsc_dflags  plugin_env
                   }
               }
+#else
+  -- No plugin support (HAVE_INTERPRETER not defined)
+  return hsc_env0
+#endif
 
 -- | Checks the set of new DynFlags for possibly erroneous option
 -- combinations when invoking 'setSessionDynFlags' and friends, and if
@@ -1585,8 +1536,10 @@ findGlobalAnns deserialize target = withSession $ \hsc_env -> do
     return (findAnns deserialize ann_env target)
 
 -- | get the GlobalRdrEnv for a session
+#if defined(HAVE_INTERPRETER)
 getGRE :: GhcMonad m => m GlobalRdrEnv
 getGRE = withSession $ \hsc_env-> return $ icReaderEnv (hsc_IC hsc_env)
+#endif
 
 -- | Retrieve all type and family instances in the environment, indexed
 -- by 'Name'. Each name's lists will contain every instance in which that name
@@ -1881,6 +1834,7 @@ moduleTrustReqs :: GhcMonad m => Module -> m (Bool, Set UnitId)
 moduleTrustReqs m = withSession $ \hsc_env ->
     liftIO $ hscGetSafe hsc_env m noSrcSpan
 
+#if defined(HAVE_INTERPRETER)
 -- | Set the monad GHCi lifts user statements into.
 --
 -- Checks that a type (in string form) is an instance of the
@@ -1896,7 +1850,9 @@ setGHCiMonad name = withSession $ \hsc_env -> do
 -- | Get the monad GHCi lifts user statements into.
 getGHCiMonad :: GhcMonad m => m Name
 getGHCiMonad = fmap (ic_monad . hsc_IC) getSession
+#endif
 
+#if defined(HAVE_INTERPRETER)
 getHistorySpan :: GhcMonad m => History -> m SrcSpan
 getHistorySpan h = withSession $ \hsc_env -> liftIO $ GHC.Runtime.Eval.getHistorySpan (hsc_HUG hsc_env) h
 
@@ -1911,6 +1867,7 @@ obtainTermFromId :: GhcMonad m
                  -> m Term
 obtainTermFromId bound force id = withSession $ \hsc_env ->
     liftIO $ GHC.Runtime.Eval.obtainTermFromId hsc_env bound force id
+#endif
 
 
 -- | Returns the 'TyThing' for a 'Name'.  The 'Name' may refer to any

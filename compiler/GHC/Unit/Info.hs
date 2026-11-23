@@ -25,6 +25,8 @@ module GHC.Unit.Info
    , collectLibraryDirs
    , collectFrameworks
    , collectFrameworksDirs
+   , libraryDirsForWay
+   , libraryDirsForWay'
    , unitHsLibs
    )
 where
@@ -139,9 +141,11 @@ pprUnitInfo GenericUnitInfo {..} =
       field "trusted"              (ppr unitIsTrusted),
       field "import-dirs"          (fsep (map (text . ST.unpack) unitImportDirs)),
       field "library-dirs"         (fsep (map (text . ST.unpack) unitLibraryDirs)),
+      field "library-dirs-static"  (fsep (map (text . ST.unpack) unitLibraryDirsStatic)),
       field "dynamic-library-dirs" (fsep (map (text . ST.unpack) unitLibraryDynDirs)),
       field "hs-libraries"         (fsep (map (text . ST.unpack) unitLibraries)),
       field "extra-libraries"      (fsep (map (text . ST.unpack) unitExtDepLibsSys)),
+      field "extra-libraries-static" (fsep (map (text . ST.unpack) unitExtDepLibsStaticSys)),
       field "extra-ghci-libraries" (fsep (map (text . ST.unpack) unitExtDepLibsGhc)),
       field "include-dirs"         (fsep (map (text . ST.unpack) unitIncludeDirs)),
       field "includes"             (fsep (map (text . ST.unpack) unitIncludes)),
@@ -200,9 +204,12 @@ collectFrameworksDirs ps = map ST.unpack (ordNub (filter (not . ST.null) (concat
 
 -- | Either the 'unitLibraryDirs' or 'unitLibraryDynDirs' as appropriate for the way.
 libraryDirsForWay :: Ways -> UnitInfo -> [String]
-libraryDirsForWay ws
-  | hasWay ws WayDyn = map ST.unpack . unitLibraryDynDirs
-  | otherwise        = map ST.unpack . unitLibraryDirs
+libraryDirsForWay ws = libraryDirsForWay' (hasWay ws WayDyn)
+
+libraryDirsForWay' :: Bool -> UnitInfo -> [String]
+libraryDirsForWay' is_dyn
+  | is_dyn    = map ST.unpack . unitLibraryDynDirs
+  | otherwise = map ST.unpack . unitLibraryDirsStatic
 
 unitHsLibs :: GhcNameVersion -> Ways -> UnitInfo -> [String]
 unitHsLibs namever ways0 p = map (mkDynName . addSuffix . ST.unpack) (unitLibraries p)
@@ -212,7 +219,13 @@ unitHsLibs namever ways0 p = map (mkDynName . addSuffix . ST.unpack) (unitLibrar
         -- we leave out the _dyn, because it is superfluous
 
         tag     = waysTag (fullWays ways1)
-        rts_tag = waysTag ways1
+
+        -- RTS-only ways now select RTS sub-libraries instead of suffixes.
+        -- Full ways still need suffixes: in particular, profiling must select
+        -- libHSfoo_p.a rather than the vanilla archive, for every package.
+        addSuffix lib
+         | null tag  = lib
+         | otherwise = lib ++ '_' : tag
 
         mkDynName x
          | not (ways0 `hasWay` WayDyn) = x
@@ -225,19 +238,3 @@ unitHsLibs namever ways0 p = map (mkDynName . addSuffix . ST.unpack) (unitLibrar
          | otherwise
             = panic ("Don't understand library name " ++ x)
 
-        -- Add _thr and other rts suffixes to packages named
-        -- `rts` or `rts-1.0`. Why both?  Traditionally the rts
-        -- package is called `rts` only.  However the tooling
-        -- usually expects a package name to have a version.
-        -- As such we will gradually move towards the `rts-1.0`
-        -- package name, at which point the `rts` package name
-        -- will eventually be unused.
-        --
-        -- This change elevates the need to add custom hooks
-        -- and handling specifically for the `rts` package.
-        addSuffix rts@"HSrts"       = rts       ++ (expandTag rts_tag)
-        addSuffix rts@"HSrts-1.0.3" = rts       ++ (expandTag rts_tag)
-        addSuffix other_lib         = other_lib ++ (expandTag tag)
-
-        expandTag t | null t = ""
-                    | otherwise = '_':t

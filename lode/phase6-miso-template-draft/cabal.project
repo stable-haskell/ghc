@@ -1,0 +1,35 @@
+packages: .
+
+-- Pinned for reproducibility; bump as needed.
+index-state: 2026-04-01T00:00:00Z
+
+-- Dual-compiler setup, supported by stable-haskell/cabal:
+--   with-build-compiler -> native GHC, builds Setup.hs, custom-setup, and
+--                          BUILD-tool dependencies (alex, happy, c2hs, ...).
+--   with-compiler       -> the target (wasm32-wasi-ghc) used for HOST code.
+-- Resolved against $PATH; you can also use absolute ~/.ghcup/bin paths.
+with-build-compiler: ghc
+with-compiler:       wasm32-wasi-ghc
+
+-- ghcup ships matching wrappers next to the compiler.
+with-hc-pkg:  wasm32-wasi-ghc-pkg
+with-hsc2hs:  wasm32-wasi-hsc2hs
+
+-- R7 resolution path (i): `shared: True` under `if arch(wasm32)` (NOT
+-- `package *`) relies on stable-haskell/cabal's Stage/Toolchain split —
+-- BUILD packages see arch != wasm32, so this doesn't pollute happy-lib etc.
+-- Will not work with stock cabal.
+if arch(wasm32)
+  shared: True
+
+-- miso 1.11+ has first-class wasm support but the wasm-ready cut isn't
+-- on Hackage yet; pull from upstream.
+source-repository-package
+  type:     git
+  location: https://github.com/dmjio/miso.git
+  tag:      1.11
+
+-- aeson's ordered-keymap drags in template-haskell at build time in
+-- a way that's awkward for wasm cross. Disabled defensively.
+package aeson
+  flags: -ordered-keymap

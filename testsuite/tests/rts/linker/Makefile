@@ -2,6 +2,40 @@ TOP=../../..
 include $(TOP)/mk/boilerplate.mk
 include $(TOP)/mk/test.mk
 
+.PHONY: elf_visibility
+elf_visibility:
+	$(PYTHON) elf_visibility.py "$(TOP_ABS)/../rts" "$(TEST_CC)"
+
+.PHONY: elf_local_got
+ELF_GOT_OBJCOPY ?= $(shell "$(TEST_CC)" $(TEST_CC_OPTS) -print-prog-name=objcopy)
+elf_local_got:
+	"$(TEST_CC)" $(TEST_CC_OPTS) -c elf_local_got.s -o elf_local_got_global.o
+	"$(ELF_GOT_OBJCOPY)" --localize-symbol=local_data \
+		--localize-symbol=local_function --localize-symbol=local_notype \
+		elf_local_got_global.o elf_local_got_fixture.o
+	"$(TEST_HC)" $(TEST_HC_OPTS) elf_local_got.hs -o elf_local_got -v0
+	./elf_local_got
+
+.PHONY: elf_got_symbols
+elf_got_symbols:
+	# The predicate is private to the RTS; use its static archive.
+	"$(TEST_HC)" $(filter-out -rtsopts, $(TEST_HC_OPTS)) -static -v0 -no-hs-main \
+		-optc-std=c11 -optc-Werror=vla -optc-pedantic -optc-Wall -optc-Wextra \
+		elf_got_symbols.c -o elf_got_symbols
+	./elf_got_symbols
+
+.PHONY: bfd_imports
+bfd_imports:
+	"$(TEST_CC)" $(TEST_CC_OPTS) -std=c11 -Werror=vla -pedantic -Wall -Wextra \
+		-shared bfd_imports_library.c bfd_imports.def \
+		-Wl,--image-base,0x70000000000 -Wl,--disable-dynamicbase -o bfd_imports.dll
+	# Select GNU dlltool even when an LLVM alias precedes it on PATH.
+	$(PYTHON) bfd_imports_check.py --definition bfd_imports.def libbfd_imports.a
+	"$(TEST_CC)" $(TEST_CC_OPTS) -std=c11 -Werror=vla -pedantic -Wall -Wextra \
+		-c bfd_imports_client.c -o bfd_imports_client.o
+	"$(TEST_HC)" $(TEST_HC_OPTS) bfd_imports.hs -o bfd_imports -v0
+	./bfd_imports
+
 unsigned_reloc_macho_x64:
 	as -o unsigned_reloc_macho_x64.o unsigned_reloc_macho_x64.s
 	'$(TEST_HC)' $(TEST_HC_OPTS_NO_RTSOPTS) -v0 --make -no-rtsopts-suggestions -no-hs-main -o runner runner.c
@@ -152,3 +186,10 @@ T25191:
 	"$(TEST_HC)" -c T25191_foo2.c -o foo2.o -v0
 	"$(TEST_HC)" T25191.hs -v0
 	./T25191
+
+.PHONY: T6107
+T6107:
+	"$(TEST_HC)" -c T6107_sym1.s -o T6107_sym1.o -v0
+	"$(TEST_HC)" -c T6107_sym2.s -o T6107_sym2.o -v0
+	"$(TEST_HC)" $(TEST_HC_OPTS) T6107.hs -o T6107 -v0
+	./T6107

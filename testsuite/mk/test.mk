@@ -89,8 +89,10 @@ endif
 
 ifeq "$(GhcWithNativeCodeGen)" "YES"
 RUNTEST_OPTS += -e ghc_with_native_codegen=True
+RUNTEST_OPTS += -e config.have_ncg=True
 else
 RUNTEST_OPTS += -e ghc_with_native_codegen=False
+RUNTEST_OPTS += -e config.have_ncg=False
 endif
 
 ifeq "$(GhcLeadingUnderscore)" "YES"
@@ -219,6 +221,10 @@ endif
 
 ifeq "$(SKIP_PERF_TESTS)" "YES"
 RUNTEST_OPTS += --skip-perf-tests
+endif
+
+ifeq "$(SKIP_UNIQUES_TEST)" "YES"
+RUNTEST_OPTS += --skip-uniques-test
 endif
 
 ifeq "$(ONLY_PERF_TESTS)" "YES"

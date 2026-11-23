@@ -325,7 +325,7 @@ test('T10047', only_ways(['ghci']), ghci_script, ['T10047.script'])
 test('T10019', only_ways(['ghci']), ghci_script, ['T10019.script'])
 test('T10267', [], multimod_compile_fail,
      ['T10267', '-fno-max-valid-hole-fits -dsuppress-uniques -v0 ' + config.ghc_th_way_flags])
-test('T10279', normal, compile_fail, ['-v0'])
+test('T10279', [normalise_version('ghc-internal'), extra_files(['T10279h.hs'])], multimod_compile_fail, ['T10279', '-v0'])
 test('T10306', normal, compile, ['-v0'])
 test('T10596', normal, compile, ['-v0'])
 test('T10598_TH', normal, compile, ['-v0 -dsuppress-uniques -ddump-splices'])
@@ -623,13 +623,16 @@ test('T24997', normal, compile_and_run, [''])
 test('T25256', normal, compile_and_run, [''])
 test('T24572a', normal, compile, [''])
 test('T24572b', normal, compile_fail, [''])
+test('T26098_splice', [extra_files(['T26098A_splice.hs'])], multimod_compile_fail, ['T26098_splice', '-v0 ' + config.ghc_th_way_flags])
+test('T26098_quote', [extra_files(['T26098A_quote.hs'])], multimod_compile_fail, ['T26098_quote', '-v0 ' + config.ghc_th_way_flags])
+test('T26098_local', normal, compile_fail, [''])
 test('T24572c', normal, compile_fail, [''])
+test('T26568', normal, compile_fail, [''])
 test('T24572d', normal, compile, [''])
 test('T25209', normal, compile, ['-v0 -ddump-splices -dsuppress-uniques'])
 test('TH_MultilineStrings', normal, compile_and_run, [''])
 test('T25252',
   [extra_files(['T25252B.hs', 'T25252_c.c']),
-   when(arch('i386'), expect_broken_for(25260,['ext-interp'])),
    req_th,
    req_c],
   compile_and_run, ['-fPIC T25252_c.c'])
@@ -641,3 +644,4 @@ test('QQInQuote', normal, compile, [''])
 test('QQTopError', normal, compile_fail, ['-fdiagnostics-show-caret'])
 test('GadtConSigs_th_pprint1', normal, compile, [''])
 test('GadtConSigs_th_dump1', normal, compile, ['-v0 -ddump-splices -dsuppress-uniques'])
+test('T26099', normal, compile_fail, [''])

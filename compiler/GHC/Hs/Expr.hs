@@ -25,6 +25,7 @@
 module GHC.Hs.Expr
   ( module Language.Haskell.Syntax.Expr
   , module GHC.Hs.Expr
+  , ForeignRef  -- re-export for GHC.Tc.Types.TH
   ) where
 
 import Language.Haskell.Syntax.Expr
@@ -67,7 +68,12 @@ import GHC.Builtin.Types (mkTupleStr)
 import GHC.Tc.Utils.TcType (TcType, TcTyVar)
 import {-# SOURCE #-} GHC.Tc.Types.LclEnv (TcLclEnv)
 
+#if defined(HAVE_INTERPRETER)
 import GHCi.RemoteTypes ( ForeignRef )
+#else
+-- Use centralized stub types when interpreter is not available
+import GHC.Runtime.Interpreter.Stubs ( ForeignRef(..) )
+#endif
 import qualified GHC.Boot.TH.Syntax as TH (Q)
 
 -- libraries:
@@ -80,6 +86,7 @@ import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import Data.Void (Void)
 import qualified Data.Set as S
+
 {- *********************************************************************
 *                                                                      *
                 Expressions proper
@@ -2297,6 +2304,7 @@ data HsImplicitLiftSplice =
           { implicit_lift_bind_lvl :: S.Set ThLevelIndex
           , implicit_lift_used_lvl :: ThLevelIndex
           , implicit_lift_gre :: Maybe GlobalRdrElt
+            -- ^ Nothing iff 'LevelCheckReason' is 'LevelCheckInstance'
           , implicit_lift_lid :: LIdOccP GhcRn
           }
 

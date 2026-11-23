@@ -8,6 +8,8 @@
 --  (c) The University of Glasgow 2002-2006
 --
 
+#include "rts/Bytecodes.h"
+
 -- | Bytecode assembler types
 module GHC.ByteCode.Types
   ( CompiledByteCode(..), seqCompiledByteCode
@@ -15,6 +17,7 @@ module GHC.ByteCode.Types
   , FFIInfo(..)
   , RegBitmap(..)
   , NativeCallType(..), NativeCallInfo(..), voidTupleReturnInfo, voidPrimCallInfo
+  , mAX_SMALL_TUPLE_CTOI
   , ByteOff(..), WordOff(..), HalfWord(..)
   , UnlinkedBCO(..), BCOPtr(..), BCONPtr(..)
   , ItblEnv, ItblPtr(..)
@@ -39,7 +42,7 @@ import GHC.Types.Name.Env
 import GHC.Utils.Outputable
 import GHC.Builtin.PrimOps
 import GHC.Types.SptEntry
-import GHC.HsToCore.Breakpoints
+import GHC.HsToCore.Breakpoints.Types
 import GHC.ByteCode.Breakpoints
 import GHCi.Message
 import GHCi.RemoteTypes
@@ -49,7 +52,9 @@ import GHCi.ResolvedBCO ( BCOByteArray(..), mkBCOByteArray )
 
 import Foreign
 import Data.ByteString (ByteString)
+#ifndef BOOTSTRAPPING
 import qualified GHC.Exts.Heap as Heap
+#endif
 import GHC.Cmm.Expr ( GlobalRegSet, emptyRegSet, regSetToList )
 import GHC.Unit.Module
 
@@ -161,13 +166,24 @@ voidTupleReturnInfo = NativeCallInfo NativeTupleReturn 0 emptyRegSet 0
 voidPrimCallInfo :: NativeCallInfo
 voidPrimCallInfo = NativeCallInfo NativePrimCall 0 emptyRegSet 0
 
+-- | Maximum nativeCallStackSpillSize for which we use a small
+-- stg_ctoi_tN frame (no old_spill slot, no TSO access) instead of
+-- the generic stg_ctoi_t frame.
+mAX_SMALL_TUPLE_CTOI :: WordOff
+mAX_SMALL_TUPLE_CTOI = MAX_SMALL_TUPLE_CTOI
+
 type ItblEnv = NameEnv (Name, ItblPtr)
 type AddrEnv = NameEnv (Name, AddrPtr)
         -- We need the Name in the range so we know which
         -- elements to filter out when unloading a module
 
+#ifndef BOOTSTRAPPING
 newtype ItblPtr = ItblPtr (RemotePtr Heap.StgInfoTable)
   deriving (Show, NFData)
+#else
+newtype ItblPtr = ItblPtr (RemotePtr ())
+  deriving (Show, NFData)
+#endif
 newtype AddrPtr = AddrPtr (RemotePtr ())
   deriving (NFData)
 
@@ -296,4 +312,3 @@ instance Outputable UnlinkedBCO where
       = sep [text "BCO", ppr nm, text "with",
              ppr (sizeFlatBag lits), text "lits",
              ppr (sizeFlatBag ptrs), text "ptrs" ]
-

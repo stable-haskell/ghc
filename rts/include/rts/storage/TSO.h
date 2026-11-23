@@ -37,15 +37,6 @@ typedef StgWord64 StgThreadID;
  */
 typedef unsigned int StgThreadReturnCode;
 
-#if defined(mingw32_HOST_OS)
-/* results from an async I/O request + its request ID. */
-typedef struct {
-  unsigned int reqID;
-  int          len;
-  int          errCode;
-} StgAsyncIOResult;
-#endif
-
 /* Reason for thread being blocked. See comment above struct StgTso_. */
 typedef union {
   StgClosure *closure;
@@ -55,7 +46,7 @@ typedef union {
   struct MessageWakeup_  *wakeup;
   StgInt fd;    /* StgInt instead of int, so that it's the same size as the ptrs */
 #if defined(mingw32_HOST_OS)
-  StgAsyncIOResult *async_result;
+  StgWord async_reqID;
 #endif
 #if !defined(THREADED_RTS)
   StgWord target;
@@ -183,6 +174,15 @@ typedef struct StgTSO_ {
      * hard +RTS -K<size> limit.
      */
     StgWord32  tot_stack_size;
+
+    /*
+     * The number of stack words spilled by the current stg_ctoi_t
+     * frame. This is used by stg_ctoi_t to handle tuple returns from compiled
+     * to interpreted code.
+     *
+     * See Note [GHCi unboxed tuples stack spills] in StgMiscClosures.cmm
+     */
+    StgWord    ctoi_tuple_spill_words;
 
 #if defined(TICKY_TICKY)
     /* TICKY-specific stuff would go here. */

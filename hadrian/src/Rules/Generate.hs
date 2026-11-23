@@ -18,7 +18,6 @@ import Hadrian.Haskell.Cabal.Type (PackageData(version))
 import Hadrian.Haskell.Cabal
 import Hadrian.Oracles.Cabal (readPackageData)
 import Packages
-import Rules.Libffi
 import Settings
 import Target
 import Utilities
@@ -51,14 +50,13 @@ ghcInternalDependencies :: Expr [FilePath]
 ghcInternalDependencies = do
     stage <- getStage
     path  <- expr $ buildPath (vanillaContext stage ghcInternal)
-    return [path -/- "GHC/Internal/Prim.hs", path -/- "GHC/Internal/PrimopWrappers.hs"]
+    return [path -/- "GHC/Internal/PrimopWrappers.hs"]
 
 rtsDependencies :: Expr [FilePath]
 rtsDependencies = do
     stage   <- getStage
     rtsPath <- expr (rtsBuildPath stage)
     jsTarget <- expr isJsTarget
-    useSystemFfi <- expr (flag UseSystemFfi)
 
     let -- headers common to native and JS RTS
         common_headers =
@@ -70,7 +68,6 @@ rtsDependencies = do
             [ "rts" -/- "EventTypes.h"
             , "rts" -/- "EventLogConstants.h"
             ]
-            ++ (if useSystemFfi then [] else libffiHeaderFiles)
         headers
           | jsTarget  = common_headers
           | otherwise = common_headers ++ native_headers
@@ -102,6 +99,8 @@ compilerDependencies = do
                   , "primop-vector-uniques.hs-incl"
                   , "primop-docs.hs-incl"
                   , "primop-deprecations.hs-incl"
+                  , "primop-prim-module.hs-incl"
+                  , "primop-wrappers-module.hs-incl"
                   , "GHC/Platform/Constants.hs"
                   , "GHC/Settings/Config.hs"
                   ]
@@ -145,7 +144,6 @@ generatePackageCode context@(Context stage pkg _ _) = do
             root -/- "**" -/- dir -/- "GHC/Settings/Config.hs" %> go generateConfigHs
             root -/- "**" -/- dir -/- "*.hs-incl" %> genPrimopCode context
         when (pkg == ghcInternal) $ do
-            root -/- "**" -/- dir -/- "GHC/Internal/Prim.hs" %> genPrimopCode context
             root -/- "**" -/- dir -/- "GHC/Internal/PrimopWrappers.hs" %> genPrimopCode context
         when (pkg == ghcBoot) $ do
             root -/- "**" -/- dir -/- "GHC/Version.hs" %> go generateVersionHs

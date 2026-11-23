@@ -5,22 +5,77 @@
 #include <string.h>
 
 #if defined(OBJFORMAT_ELF)
+
+/*
+ * Check whether a symbol (identified by its symbol table section index and
+ * its index within that table) is referenced by any relocation whose type
+ * is not R_*_NONE (type 0).  R_*_NONE is a no-op relocation for every ELF
+ * architecture, so symbols referenced exclusively by NONE relocations need
+ * not be resolved.
+ *
+ * This is used by fillGot() to avoid hard failures on undefined symbols that
+ * the assembler emitted NONE relocations for (e.g. zero-length arrays
+ * optimised away by the compiler but still present in the symbol table).
+ */
+static bool
+symbolHasNonNoneRelocation(ObjectCode *oc, unsigned symTabIndex,
+                           size_t symIdx)
+{
+    /* Scan REL relocation tables */
+    for (ElfRelocationTable *relTab = oc->info->relTable;
+         relTab != NULL; relTab = relTab->next) {
+        if (relTab->sectionHeader->sh_link == symTabIndex) {
+            for (size_t i = 0; i < relTab->n_relocations; i++) {
+                Elf_Rel *rel = &relTab->relocations[i];
+                if (ELF_R_SYM(rel->r_info) == symIdx
+                    && ELF_R_TYPE(rel->r_info) != 0) {
+                    return true;
+                }
+            }
+        }
+    }
+    /* Scan RELA relocation tables */
+    for (ElfRelocationATable *relaTab = oc->info->relaTable;
+         relaTab != NULL; relaTab = relaTab->next) {
+        if (relaTab->sectionHeader->sh_link == symTabIndex) {
+            for (size_t i = 0; i < relaTab->n_relocations; i++) {
+                Elf_Rela *rel = &relaTab->relocations[i];
+                if (ELF_R_SYM(rel->r_info) == symIdx
+                    && ELF_R_TYPE(rel->r_info) != 0) {
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
 /*
  * Check if we need a global offset table slot for a
  * given symbol
  */
 bool
 needGotSlot(Elf_Sym * symbol) {
-    /* using global here should give an upper bound */
-    /* I don't believe we need to relocate STB_LOCAL
-     * symbols via the GOT; however I'm unsure about
-     * STB_WEAK.
-     *
-     * Any more restrictive filter here would result
-     * in a smaller GOT, which is preferable.
+    /* Local definitions can be referenced through the GOT too (for example,
+     * Android NDK libm objects use ADR_GOT_PAGE for local data). Include the
+     * named local definitions whose addresses ocGetNames_ELF can populate.
+     * In particular, do not select unrelated TLS or absolute symbols: fillGot
+     * would then require an address even if no GOT relocation uses them.
      */
+    unsigned type = ELF_ST_TYPE(symbol->st_info);
+    bool local_definition = ELF_ST_BIND(symbol->st_info) == STB_LOCAL
+        && symbol->st_name != 0
+        && symbol->st_shndx != SHN_UNDEF
+        && (symbol->st_shndx < SHN_LORESERVE
+#if defined(SHN_XINDEX)
+            || symbol->st_shndx == SHN_XINDEX
+#endif
+           )
+        && (type == STT_OBJECT || type == STT_FUNC || type == STT_NOTYPE);
+
     return ELF_ST_BIND(symbol->st_info) == STB_GLOBAL
         || ELF_ST_BIND(symbol->st_info) == STB_WEAK
+        || local_definition
         // Section symbols exist primarily for relocation
         // and as such may need a GOT slot.
         || ELF_ST_TYPE(symbol->st_info) == STT_SECTION;
@@ -96,6 +151,21 @@ fillGot(ObjectCode * oc) {
                         if(0x0 == symbol->addr) {
                             if(0 == strncmp(symbol->name,"_GLOBAL_OFFSET_TABLE_",21)) {
                                 symbol->addr = oc->info->got_start;
+                            } else if (!symbolHasNonNoneRelocation(oc, symTab->index, i)) {
+                                /* Symbol is only referenced by R_*_NONE
+                                 * (type 0) relocations, which are no-ops.
+                                 * This can happen when e.g. a zero-length
+                                 * array is optimised away by the compiler
+                                 * but the assembler still emits NONE relocs
+                                 * against the (now undefined) symbol.
+                                 * Assign a dummy address so the GOT slot is
+                                 * filled; it will never be dereferenced. */
+                                IF_DEBUG(linker,
+                                    debugBelch("Skipping unresolvable symbol"
+                                              " '%s' (only referenced by"
+                                              " NONE relocations)\n",
+                                              symbol->name));
+                                symbol->addr = (void*)0xDEAD0000;
                             } else {
                                 errorBelch("Failed to lookup symbol: %s,"
                                            " you might consider using --optimistic-linking\n",

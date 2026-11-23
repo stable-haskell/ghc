@@ -787,7 +787,9 @@ cpeRhsE env (Tick tickish expr)
        ; return (FloatTick tickish `consFloat` floats, body) }
   | otherwise
   = do { body <- cpeBodyNF env expr
-       ; return (emptyFloats, mkTick tickish' body) }
+       ; return (emptyFloats, mkTickCpe tickish' body) }
+    -- Use mkTickCpe and not mkTick, as the latter may break ANF (#27182).
+    -- See (TickANF2) in Note [mkTick breaks ANF].
   where
     tickish' | Breakpoint ext bid fvs <- tickish
              -- See also 'substTickish'
@@ -891,6 +893,28 @@ cpeRhsE env (Case scrut bndr ty alts)
             ; rhs' <- cpeBodyNF env2 rhs
             ; return (Alt con bs' rhs') }
 
+{- Note [mkTick breaks ANF]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+mkTick does not preserve the ANF property as required by Core Prep (see
+Note [CorePrep invariants]), as seen in #27182. Given:
+
+  mkTick scc<foo> (\ (eta :: Char -> Bool) -> BindP (p :: Int) eta)
+
+mkTick will push the SCC into the constructor application, resulting in:
+
+  \ (eta :: Char -> Bool) -> BindP (p :: Int) (scc<oneM> eta)
+
+To avoid this problem (at least until 'mkTick' is more thoroughly reworked to
+avoid this infelicity, see #27141), we define a variant of 'mkTick', called
+'mkTickCpe', which does not push ticks into constructor applications (this is
+the only optimisation done by 'mkTick' that can break ANF).
+
+We prefer using a small variant of 'mkTick' rather than using the 'Tick'
+constructor, as the latter can slightly degrade profiling reports by failing to
+combine ticks (can result in spurious cost centres with 0 entries appearing in
+profiling reports).
+-}
+
 -- ---------------------------------------------------------------------------
 --              CpeBody: produces a result satisfying CpeBody
 -- ---------------------------------------------------------------------------
@@ -928,7 +952,9 @@ rhsToBody :: CorePrepEnv -> CpeRhs -> UniqSM (Floats, CpeBody)
 rhsToBody env (Tick t expr)
   | tickishScoped t == NoScope  -- only float out of non-scoped annotations
   = do { (floats, expr') <- rhsToBody env expr
-       ; return (floats, mkTick t expr') }
+       ; return (floats, mkTickCpe t expr') }
+    -- Use mkTickCpe and not mkTick, as the latter may break ANF (#27182).
+    -- See Note [mkTick breaks ANF].
 
 rhsToBody env (Cast e co)
         -- You can get things like
@@ -1074,6 +1100,9 @@ cpeApp top_env expr
             -- See Note [noinlineId magic] in GHC.Types.Id.Make
        || f `hasKey` nospecIdKey        -- Replace (nospec a) with a
             -- See Note [nospecId magic] in GHC.Types.Id.Make
+
+        -- NB: keep this in sync with GHC.HsToCore.Pmc.Solver.Types.coreExprAsPmLit,
+        -- as that also needs to see through these magic Ids.
 
         -- Consider the code:
         --
@@ -1226,7 +1255,7 @@ cpeApp top_env expr
     rebuild_app' env (a : as) fun' floats ss rt_ticks req_depth = case a of
       -- See Note [Ticks and mandatory eta expansion]
       _ | not (null rt_ticks), req_depth <= 0
-        -> let tick_fun = foldr mkTick fun' rt_ticks
+        -> let tick_fun = foldr mkTickCpe fun' rt_ticks
            in rebuild_app' env (a : as) tick_fun floats ss rt_ticks req_depth
 
       AIApp (Type arg_ty)
@@ -1942,6 +1971,20 @@ It is also similar to Note [Do not strictify a DFun's parameter dictionaries],
 where marking recursive DFuns (of undecidable *instances*) strict in dictionary
 *parameters* leads to quite the same change in termination as above.
 
+Belt and braces: do not speculate absent bindings
+
+In 'decideFloatInfo' we decline to speculate a binding whose demand is absent.
+There is no point in speculating an absent binding, since its value is
+(presumably) not needed.
+
+This used to matter more. Worker/wrapper would bind an absent dictionary to a
+rubbish literal filler, and speculation could force a superclass selection out
+of that rubbish literal, causing a segfault (#25924). Nowadays we never make a
+filler for a dictionary in the first place, so this can no longer happen and
+the guard is merely belt and braces.
+See Note [Don't make fillers for terminating types]
+in GHC.Core.Opt.WorkWrap.Utils.
+
 Note [BindInfo and FloatInfo]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 The `BindInfo` of a `Float` describes whether it will be case-bound or
@@ -2201,12 +2244,16 @@ decideFloatInfo FIA{fia_levity=lev, fia_demand=dmd, fia_is_hnf=is_hnf,
   | is_string             = (CaseBound, TopLvlFloatable)
       -- String literals are unboxed (so must be case-bound) and float to
       -- the top-level
-  | ok_for_spec           = (CaseBound, case lev of Unlifted -> LazyContextFloatable
+  | ok_for_spec
+  , not (isAbsDmd dmd)    = (CaseBound, case lev of Unlifted -> LazyContextFloatable
                                                     Lifted   -> TopLvlFloatable)
       -- See Note [Speculative evaluation]
       -- Ok-for-spec-eval things will be case-bound, lifted or not.
       -- But when it's lifted we are ok with floating it to top-level
       -- (where it is actually bound lazily).
+      --
+      -- Don't speculate an absent binding. See #25924 and
+      -- "Belt and braces" in Note [Speculative evaluation].
   | Unlifted <- lev       = (CaseBound, StrictContextFloatable)
   | isStrUsedDmd dmd      = (CaseBound, StrictContextFloatable)
       -- These will never be floated out of a lazy RHS context
@@ -2279,7 +2326,7 @@ wrapBinds floats body
     mk_bind (UnsafeEqualityCase scrut b con bs) body
       = mkSingleAltCase scrut b con bs body
     mk_bind (FloatTick tickish) body
-      = mkTick tickish body
+      = mkTickCpe tickish body
 
 -- | Put floats at top-level
 deFloatTop :: Floats -> [CoreBind]
@@ -2713,7 +2760,7 @@ newVar env ty
 wrapTicks :: Floats -> CoreExpr -> (Floats, CoreExpr)
 wrapTicks floats expr
   | (floats1, ticks1) <- fold_fun go floats
-  = (floats1, foldrOL mkTick expr ticks1)
+  = (floats1, foldrOL mkTickCpe expr ticks1)
   where fold_fun f floats =
            let (binds, ticks) = foldlOL f (nilOL,nilOL) (fs_binds floats)
            in (floats { fs_binds = binds }, ticks)
@@ -2733,8 +2780,8 @@ wrapTicks floats expr
 
         wrap t (Float bind bound info) = Float (wrapBind t bind) bound info
         wrap _ f                 = pprPanic "Unexpected FloatingBind" (ppr f)
-        wrapBind t (NonRec binder rhs) = NonRec binder (mkTick t rhs)
-        wrapBind t (Rec pairs)         = Rec (mapSnd (mkTick t) pairs)
+        wrapBind t (NonRec binder rhs) = NonRec binder (mkTickCpe t rhs)
+        wrapBind t (Rec pairs)         = Rec (mapSnd (mkTickCpe t) pairs)
 
 ------------------------------------------------------------------------------
 -- Numeric literals

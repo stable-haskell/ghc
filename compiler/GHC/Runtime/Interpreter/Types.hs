@@ -26,10 +26,12 @@ module GHC.Runtime.Interpreter.Types
    , interpretedInterpSymbol
    , interpreterProfiled
    , interpreterDynamic
+   , StgToJSConfig(..)
 
    -- * IServ
    , IServ
    , IServConfig(..)
+#if defined(HAVE_INTERPRETER)
    -- * JSInterp
    , JSInterp
    , JSInterpExtra (..)
@@ -39,26 +41,33 @@ module GHC.Runtime.Interpreter.Types
    , defaultNodeJsSettings
    , WasmInterp
    , WasmInterpConfig (..)
+#endif
    )
 where
 
 import GHC.Prelude
 import GHC.Linker.Types
 
+#if defined(HAVE_INTERPRETER)
 import GHCi.RemoteTypes
 import GHCi.Message         ( Pipe )
-
-import GHC.Platform
-#if defined(HAVE_INTERNAL_INTERPRETER)
-import GHC.Platform.Ways
+import GHC.StgToJS.Types
+import GHC.StgToJS.Linker.Types
+#else
+-- Use centralized stub types when interpreter is not available
+import GHC.Runtime.Interpreter.Stubs
+       ( HValue, ForeignRef, RemoteRef, RemotePtr, HValueRef
+       , Pipe, LinkPlan(..), StgToJSConfig(..) )
 #endif
+
+import GHC.Data.FastString.Env
+import GHC.Platform
+import GHC.Platform.Ways
 import GHC.Utils.TmpFs
 import GHC.Utils.Logger
 import GHC.Unit.Env
 import GHC.Unit.State
 import GHC.Unit.Types
-import GHC.StgToJS.Types
-import GHC.StgToJS.Linker.Types
 import GHC.Runtime.Interpreter.Types.SymbolCache
 
 import Control.Concurrent
@@ -76,6 +85,9 @@ data Interp = Interp
 
   , interpSymbolCache :: !InterpSymbolCache
       -- ^ LookupSymbol cache
+
+  , interpStringCache :: !(MVar (FastStringEnv (RemotePtr ())))
+      -- ^ MallocStrings cache
   }
 
 data InterpInstance
@@ -86,8 +98,10 @@ data InterpInstance
 
 data ExtInterp
   = ExtIServ !IServ
+#if defined(HAVE_INTERPRETER)
   | ExtJS !JSInterp
   | ExtWasm !WasmInterp
+#endif
 
 -- | External interpreter
 --
@@ -102,8 +116,10 @@ data ExtInterpState cfg details = ExtInterpState
 type ExtInterpStatusVar d = MVar (InterpStatus (ExtInterpInstance d))
 
 type IServ    = ExtInterpState IServConfig    ()
+#if defined(HAVE_INTERPRETER)
 type JSInterp = ExtInterpState JSInterpConfig JSInterpExtra
 type WasmInterp = ExtInterpState WasmInterpConfig ()
+#endif
 
 data InterpProcess = InterpProcess
   { interpPipe   :: !Pipe           -- ^ Pipe to communicate with the server
@@ -148,8 +164,10 @@ interpreterProfiled interp = case interpInstance interp of
 #endif
   ExternalInterp ext -> case ext of
     ExtIServ i -> iservConfProfiled (interpConfig i)
+#if defined(HAVE_INTERPRETER)
     ExtJS {}   -> False -- we don't support profiling yet in the JS backend
     ExtWasm i -> wasmInterpProfiled $ interpConfig i
+#endif
 
 -- | Interpreter uses Dynamic way
 interpreterDynamic :: Interp -> Bool
@@ -159,9 +177,12 @@ interpreterDynamic interp = case interpInstance interp of
 #endif
   ExternalInterp ext -> case ext of
     ExtIServ i -> iservConfDynamic (interpConfig i)
+#if defined(HAVE_INTERPRETER)
     ExtJS {}   -> False -- dynamic doesn't make sense for JS
     ExtWasm {} -> True  -- wasm dyld can only load dynamic code
+#endif
 
+#if defined(HAVE_INTERPRETER)
 ------------------------
 -- JS Stuff
 ------------------------
@@ -206,6 +227,7 @@ data JSInterpConfig = JSInterpConfig
   , jsInterpUnitEnv     :: !UnitEnv
   , jsInterpFinderOpts  :: !FinderOpts
   , jsInterpFinderCache :: !FinderCache
+  , jsInterpRtsWays     :: !Ways
   }
 
 ------------------------
@@ -231,3 +253,4 @@ data WasmInterpConfig = WasmInterpConfig
   , wasmInterpHsSoSuffix     :: !String    -- ^ Shared lib filename common suffix sans .so, e.g. p-ghc9.13.20241001
   , wasmInterpUnitState      :: !UnitState
   }
+#endif

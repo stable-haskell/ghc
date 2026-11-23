@@ -405,6 +405,7 @@ type family GhcDiagnosticCode c = n | n -> c where
   GhcDiagnosticCode "DriverModuleGraphCycle"                        = 92213
   GhcDiagnosticCode "DriverInstantiationNodeInDependencyGeneration" = 74284
   GhcDiagnosticCode "DriverNoConfiguredLLVMToolchain"               = 66599
+  GhcDiagnosticCode "DriverSemaphoreOpenFailure"                    = 19877
 
   -- Constraint solver diagnostic codes
   GhcDiagnosticCode "BadTelescope"                                  = 97739
@@ -699,6 +700,7 @@ type family GhcDiagnosticCode c = n | n -> c where
   GhcDiagnosticCode "TcRnIllegalTypeExpr"                           = 35499
   GhcDiagnosticCode "TcRnUnexpectedTypeSyntaxInTerms"               = 31244
   GhcDiagnosticCode "TcRnTypeApplicationsDisabled"                  = 23482
+  GhcDiagnosticCode "TcRnStaticFormWarning"                         = 82529
 
   -- TcRnIllegalInvisibleTypePattern
   GhcDiagnosticCode "InvisPatWithoutFlag"                           = 78249

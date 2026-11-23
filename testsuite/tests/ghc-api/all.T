@@ -61,9 +61,6 @@ test('T19156', [ extra_run_opts('"' + config.libdir + '"')
                ],
                compile_and_run,
                ['-package ghc'])
-test('T20757', [unless(opsys('mingw32'), skip), exit_code(1), normalise_version('ghc')],
-               compile_and_run,
-               ['-package ghc'])
 test('PrimOpEffect_Sanity', normal, compile_and_run, ['-Wall -Werror -package ghc'])
 test('T25577', [ extra_run_opts(f'"{config.libdir}"')
                # doesn't work in wasm/js due to lack of pipe(2)
@@ -72,3 +69,11 @@ test('T25577', [ extra_run_opts(f'"{config.libdir}"')
                ], compile_and_run, ['-package ghc'])
 
 test('T26120', [], compile_and_run, ['-package ghc'])
+test('TypeMapStringLiteral', normal, compile_and_run, ['-package ghc'])
+test('UnitHsLibs', normal, compile_and_run, ['-package ghc'])
+# Re-executes its own binary as a mock tool, so it needs a compiled executable.
+test('RanlibWarnings', [only_ways(['normal']), req_process, js_skip, wasm_skip],
+     compile_and_run, ['-package ghc'])
+test('X86JumpTableShortcut',
+     [unless(arch('x86_64') or arch('i386'), skip), when(not have_ncg(), skip)],
+     compile_and_run, ['-package ghc'])

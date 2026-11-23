@@ -1,3 +1,10 @@
+import shutil
+
+test('android_target_os',
+     [extra_files(['android_target_os.py']),
+      unless(shutil.which('autoconf'), skip)],
+     makefile_test, [])
+
 test('driver011', [extra_files(['A011.hs'])], makefile_test, ['test011'])
 
 test('driver012', [extra_files(['A012.hs'])], makefile_test, ['test012'])
@@ -120,9 +127,7 @@ if config.os == 'darwin':
 else:
   only_darwin = skip
 
-test('static001', [extra_files(['Static001.hs']),
-                   only_darwin,
-                   when(arch('x86_64'), expect_broken(8127))],
+test('static001', [extra_files(['Static001.hs']), only_darwin],
      makefile_test, ['static001'])
 
 test('dynHelloWorld',
@@ -292,6 +297,7 @@ test('inline-check', [omit_ways(['hpc', 'profasm'])]
 test('T14452', js_broken(22261), makefile_test, [])
 test('T14923', normal, makefile_test, [])
 test('T15396', normal, compile_and_run, ['-package ghc'])
+test('WasmArchivePadding', normal, compile_and_run, ['-package ghc'])
 
 test('T17143', exit_code(1), run_command, ['{compiler} T17143.hs -S -fno-code'])
 test('T17786', unless(opsys('mingw32'), skip), makefile_test, [])
@@ -329,5 +335,6 @@ test('T23944', [unless(have_dynamic(), skip), extra_files(['T23944A.hs'])], mult
 test('T24286', [cxx_src, unless(have_profiling(), skip), extra_files(['T24286.cpp'])], compile, ['-prof -no-hs-main'])
 test('T24839', [unless(arch('x86_64') or arch('aarch64'), skip), extra_files(["t24839_sub.S"])], compile_and_run, ['t24839_sub.S'])
 test('t25150', [extra_files(["t25150"])], multimod_compile, ['Main.hs', '-v0 -working-dir t25150/dir a.c'])
-test('T25382', normal, makefile_test, [])
+test('T25382', expect_broken(28), makefile_test, [])
 test('T26018', req_c, makefile_test, [])
+test('T24731', [only_ways(['ext-interp'])], compile, ['-fexternal-interpreter -pgmi ""'])

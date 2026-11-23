@@ -1,6 +1,10 @@
-
+{-# LANGUAGE CPP #-}
+{-# LANGUAGE LambdaCase #-}
 
 -- | Dynamically lookup up values from modules and loading them.
+--
+-- NOTE: This module is only compiled when flag(interpreter) is enabled
+-- (see ghc.cabal.in). No CPP guards needed.
 module GHC.Runtime.Loader (
         initializePlugins, initializeSessionPlugins,
         -- * Loading plugins
@@ -22,6 +26,10 @@ module GHC.Runtime.Loader (
 
 import GHC.Prelude
 import GHC.Data.FastString
+#if defined(HAVE_INTERNAL_INTERPRETER)
+import GHC.Data.FastString.Env (emptyFsEnv)
+import Control.Concurrent.MVar (newMVar, modifyMVar)
+#endif
 
 import GHC.Driver.DynFlags
 import GHC.Driver.Ppr
@@ -31,6 +39,11 @@ import GHC.Driver.Plugins.External
 
 import GHC.Linker.Loader       ( loadModule, loadName )
 import GHC.Runtime.Interpreter ( wormhole )
+#if defined(HAVE_INTERNAL_INTERPRETER)
+import GHC.Platform
+import GHC.Platform.Host (hostPlatformArchOS)
+import GHC.Platform.Ways (hostFullWays, fullWays)
+#endif
 import GHC.Runtime.Interpreter.Types
 
 import GHC.Rename.Names ( gresFromAvails )
@@ -68,7 +81,6 @@ import GHC.Utils.Error
 import GHC.Utils.Outputable
 import GHC.Utils.Exception
 
-import Control.Monad     ( unless )
 import Data.Maybe        ( mapMaybe )
 import Unsafe.Coerce     ( unsafeCoerce )
 import GHC.Linker.Types
@@ -115,6 +127,7 @@ initializePlugins hsc_env
   | loaded_plugins <- loadedPlugins (hsc_plugins hsc_env)
   , map lpModuleName loaded_plugins == reverse (pluginModNames dflags)
   , all same_args loaded_plugins
+  , null loaded_plugins || same_package_config
 
     -- external plugins
   , external_plugins <- externalPlugins (hsc_plugins hsc_env)
@@ -132,11 +145,16 @@ initializePlugins hsc_env
                                             , externalPlugins  = external_plugins
                                             , loadedPlugins    = loaded_plugins
                                             , loadedPluginDeps = (links, pkgs)
+                                            , loadedPluginConfig = Just dflags
                                             }
        let hsc_env' = hsc_env { hsc_plugins = plugins' }
        withPlugins (hsc_plugins hsc_env') driverPlugin hsc_env'
   where
     dflags = hsc_dflags hsc_env
+    same_package_config = case loadedPluginConfig (hsc_plugins hsc_env) of
+      Nothing -> False
+      Just old -> not (packageFlagsChanged old dflags) &&
+                  workingDirectory old == workingDirectory dflags
     -- dynamic plugins
     plugin_args = pluginModNameOpts dflags
     same_args p = paArguments (lpPlugin p) == argumentsForPlugin p plugin_args
@@ -155,8 +173,12 @@ initializePlugins hsc_env
 
 loadPlugins :: HscEnv -> IO ([LoadedPlugin], [Linkable], PkgsLoaded)
 loadPlugins hsc_env
-  = do { unless (null to_load) $
-           checkExternalInterpreter hsc_env
+  = do { -- When -fexternal-interpreter is active, create a local Interp with
+         -- InternalInterp so plugins are loaded into GHC's own process.
+         -- TH/bytecode execution still goes through the external interpreter.
+       ; hsc_env' <- if null to_load then return hsc_env
+                     else withPluginInterp hsc_env
+       ; let loadPlugin = loadPlugin' (mkVarOccFS (fsLit "plugin")) pluginTyConName hsc_env'
        ; plugins_with_deps <- mapM loadPlugin to_load
        ; let (plugins, ifaces, links, pkgs) = unzip4 plugins_with_deps
        ; return (zipWith attachOptions to_load (zip plugins ifaces), concat links, foldl' plusUDFM emptyUDFM pkgs)
@@ -170,23 +192,75 @@ loadPlugins hsc_env
       where
         options = [ option | (opt_mod_nm, option) <- pluginModNameOpts dflags
                             , opt_mod_nm == mod_nm ]
-    loadPlugin = loadPlugin' (mkVarOccFS (fsLit "plugin")) pluginTyConName hsc_env
 
 
 loadFrontendPlugin :: HscEnv -> ModuleName -> IO (FrontendPlugin, [Linkable], PkgsLoaded)
 loadFrontendPlugin hsc_env mod_name = do
-    checkExternalInterpreter hsc_env
+    hsc_env' <- withPluginInterp hsc_env
     (plugin, _iface, links, pkgs)
       <- loadPlugin' (mkVarOccFS (fsLit "frontendPlugin")) frontendPluginTyConName
-           hsc_env mod_name
+           hsc_env' mod_name
     return (plugin, links, pkgs)
 
--- #14335
-checkExternalInterpreter :: HscEnv -> IO ()
-checkExternalInterpreter hsc_env = case interpInstance <$> hsc_interp hsc_env of
-  Just (ExternalInterp {})
-    -> throwIO (InstallationError "Plugins require -fno-external-interpreter")
-  _ -> pure ()
+-- | When the external interpreter is active, provide an 'HscEnv' with a
+-- local 'Interp' that uses 'InternalInterp' for loading plugins into GHC's
+-- own process. Plugins are compiler extensions that need to run in the
+-- compiler's address space — they cannot run in iserv because plugin values
+-- (records of Haskell functions) must be directly callable from GHC.
+--
+-- This decouples plugin loading from TH\/bytecode execution: plugins use the
+-- in-process RTS linker, while TH and GHCi continue to use the external
+-- interpreter (iserv) as configured.
+--
+-- A compiler without the internal interpreter cannot run plugin closures,
+-- including plugins loaded with -fplugin-library. See #14335.
+withPluginInterp :: HscEnv -> IO HscEnv
+withPluginInterp hsc_env = case interpInstance <$> hsc_interp hsc_env of
+  Just (ExternalInterp {}) ->
+#if defined(HAVE_INTERNAL_INTERPRETER)
+    do host_env <- hscPluginEnv hsc_env
+       -- Without a separate host installation the existing namespace is only
+       -- usable when its platform and library ways match the running process.
+       let dflags = hsc_dflags hsc_env
+       if not (hasPluginPackageConfig dflags) &&
+          (platformIsCrossCompiling (targetPlatform dflags) ||
+           platformArchOS (targetPlatform dflags) /= hostPlatformArchOS ||
+           fullWays (ways dflags) /= hostFullWays)
+         then throwIO (InstallationError "Plugins for a different target platform or library way require -plugin-libdir")
+         else pure ()
+       plugin_interp <- modifyMVar (hsc_plugin_interp hsc_env) $ \case
+         Just interp -> pure (Just interp, interp)
+         Nothing -> do interp <- mkPluginInterp
+                       pure (Just interp, interp)
+       pure host_env { hsc_interp = Just plugin_interp }
+#else
+    throwIO (InstallationError $ unlines
+      [ "Plugins require the internal interpreter, which is not available"
+      , "in this compiler build."
+      , "Rebuild GHC with the internal-interpreter Cabal flag enabled."
+      ])
+#endif
+  _ | hasPluginPackageConfig (hsc_dflags hsc_env) ->
+        throwIO (InstallationError "Separate plugin packages require -fexternal-interpreter for target code")
+    | otherwise -> pure hsc_env
+
+#if defined(HAVE_INTERNAL_INTERPRETER)
+-- | Create the session's 'Interp' with 'InternalInterp' for loading plugins
+-- into GHC's own process. The plugin interpreter has its own 'Loader'
+-- state, independent of the external interpreter's, so plugin packages
+-- are loaded into GHC's address space via the in-process RTS linker.
+mkPluginInterp :: IO Interp
+mkPluginInterp = do
+  loader <- uninitializedLoader
+  symbolCache <- mkInterpSymbolCache
+  stringCache <- newMVar emptyFsEnv
+  return Interp
+    { interpInstance    = InternalInterp
+    , interpLoader     = loader
+    , interpSymbolCache = symbolCache
+    , interpStringCache = stringCache
+    }
+#endif
 
 loadPlugin' :: OccName -> Name -> HscEnv -> ModuleName -> IO (a, ModIface, [Linkable], PkgsLoaded)
 loadPlugin' occ_name plugin_name hsc_env mod_name
@@ -219,7 +293,7 @@ loadPlugin' occ_name plugin_name hsc_env mod_name
                           [ text "The value", ppr name
                           , text "with type", ppr actual_type
                           , text "did not have the type"
-                          , text "GHC.Plugins.Plugin"
+                          , ppr (mkTyConTy plugin_tycon)
                           , text "as required"])
             Right (plugin, links, pkgs) -> return (plugin, mod_iface, links, pkgs) } } } } }
 

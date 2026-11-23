@@ -35,7 +35,9 @@ void sendMessage(Capability *from_cap, Capability *to_cap, Message *msg)
             i != &stg_MSG_TRY_WAKEUP_info &&
             i != &stg_IND_info && // can happen if a MSG_BLACKHOLE is revoked
             i != &stg_WHITEHOLE_info &&
-            i != &stg_MSG_CLONE_STACK_info) {
+            i != &stg_MSG_CLONE_STACK_info &&
+            i != &stg_MSG_SET_TSO_FLAG_info &&
+            i != &stg_MSG_UNSET_TSO_FLAG_info) {
             barf("sendMessage: %p", i);
         }
     }
@@ -135,7 +137,17 @@ loop:
     }
     else if(i == &stg_MSG_CLONE_STACK_info){
         MessageCloneStack *cloneStackMessage = (MessageCloneStack*) m;
-        handleCloneStackMessage(cloneStackMessage);
+        handleCloneStackMessage(cap, cloneStackMessage);
+    }
+    else if(i == &stg_MSG_SET_TSO_FLAG_info){
+        MessageUpdTSOFlag *u = (MessageUpdTSOFlag*) m;
+        u->tso->flags |= u->flag;
+        return;
+    }
+    else if(i == &stg_MSG_UNSET_TSO_FLAG_info){
+        MessageUpdTSOFlag *u = (MessageUpdTSOFlag*) m;
+        u->tso->flags &= ~u->flag;
+        return;
     }
     else
     {
@@ -176,10 +188,7 @@ uint32_t messageBlackHole(Capability *cap, MessageBlackHole *msg)
     // BLACKHOLE has already been updated, and GC has shorted out the
     // indirection, so the pointer no longer points to a BLACKHOLE at
     // all.
-    if (bh_info != &stg_BLACKHOLE_info &&
-        bh_info != &stg_CAF_BLACKHOLE_info &&
-        bh_info != &__stg_EAGER_BLACKHOLE_info &&
-        bh_info != &stg_WHITEHOLE_info) {
+    if (!IS_BLACKHOLE_OR_WHITEHOLE_INFO(bh_info)) {
         return 0;
     }
 
@@ -338,10 +347,7 @@ StgTSO * blackHoleOwner (StgClosure *bh)
 
     info = RELAXED_LOAD(&bh->header.info);
 
-    if (info != &stg_BLACKHOLE_info &&
-        info != &stg_CAF_BLACKHOLE_info &&
-        info != &__stg_EAGER_BLACKHOLE_info &&
-        info != &stg_WHITEHOLE_info) {
+    if (!IS_BLACKHOLE_OR_WHITEHOLE_INFO(info)) {
         return NULL;
     }
 

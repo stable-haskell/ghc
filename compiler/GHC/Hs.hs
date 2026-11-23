@@ -54,6 +54,7 @@ import GHC.Hs.Pat
 import GHC.Hs.Type
 import GHC.Hs.Utils
 import GHC.Hs.Doc
+
 import GHC.Hs.Instances () -- For Data instances
 
 -- others:

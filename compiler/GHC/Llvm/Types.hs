@@ -487,6 +487,10 @@ data LlvmFuncAttr
   -- | This attribute disables prologue / epilogue emission for the function.
   -- This can have very system-specific consequences.
   | Naked
+  -- | A string function attribute, e.g. @\"target-features\"=\"+avx2\"@.
+  -- Function-level target features override the module's -mattr for that
+  -- function.  See Note [Cmm target attributes] in GHC.Cmm.
+  | TargetFeatures LMString
   deriving (Eq)
 
 instance Outputable LlvmFuncAttr where
@@ -506,6 +510,8 @@ ppLlvmFuncAttr SspReq             = text "ssqreq"
 ppLlvmFuncAttr NoRedZone          = text "noredzone"
 ppLlvmFuncAttr NoImplicitFloat    = text "noimplicitfloat"
 ppLlvmFuncAttr Naked              = text "naked"
+ppLlvmFuncAttr (TargetFeatures fs)
+  = text "\"target-features\"=\"" <> ftext fs <> text "\""
 {-# SPECIALIZE ppLlvmFuncAttr :: LlvmFuncAttr -> SDoc #-}
 {-# SPECIALIZE ppLlvmFuncAttr :: LlvmFuncAttr -> HLine #-} -- see Note [SPECIALIZE to HDoc] in GHC.Utils.Outputable
 

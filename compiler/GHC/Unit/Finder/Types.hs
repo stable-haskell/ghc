@@ -1,5 +1,8 @@
+{-# LANGUAGE RecordWildCards #-}
+
 module GHC.Unit.Finder.Types
-   ( FinderCache (..)
+   ( initFinderCache
+   , FinderCache (..)
    , FinderCacheState
    , FileCacheState
    , FindResult (..)
@@ -12,12 +15,14 @@ import GHC.Prelude
 import GHC.Unit
 import GHC.Data.OsPath
 import qualified Data.Map as M
+import GHC.Types.Unique.Map
 import GHC.Fingerprint
+import Data.IORef
 import GHC.Platform.Ways
 import GHC.Unit.Env
 
 import GHC.Data.FastString
-import qualified Data.Set as Set
+import GHC.Types.Unique.Set
 
 -- | The 'FinderCache' maps modules to the result of
 -- searching for that module. It records the results of searching for
@@ -68,7 +73,7 @@ data FindResult
       , fr_mods_hidden :: [Unit]           -- ^ Module is in these units,
                                            --   but the *module* is hidden
 
-      , fr_pkgs_hidden :: [Unit]           -- ^ Module is in these units,
+      , fr_pkgs_hidden :: [UnitInfo]       -- ^ Module is in these units,
                                            --   but the *unit* is hidden
 
         -- | Module is in these units, but it is unusable
@@ -101,8 +106,8 @@ data FinderOpts = FinderOpts
       -- that have a similar name.
   , finder_workingDirectory :: Maybe OsPath
   , finder_thisPackageName  :: Maybe FastString
-  , finder_hiddenModules    :: Set.Set ModuleName
-  , finder_reexportedModules :: M.Map ModuleName ModuleName -- Reverse mapping, if you are looking for this name then look for this module.
+  , finder_hiddenModules    :: !(UniqSet ModuleName)
+  , finder_reexportedModules :: !(UniqMap ModuleName ModuleName) -- Reverse mapping, if you are looking for this name then look for this module.
   , finder_hieDir :: Maybe OsPath
   , finder_hieSuf :: OsString
   , finder_hiDir :: Maybe OsPath
@@ -113,3 +118,54 @@ data FinderOpts = FinderOpts
   , finder_dynObjectSuf :: OsString
   , finder_stubDir :: Maybe OsPath
   }
+
+{-
+[Note: Monotonic addToFinderCache]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+addToFinderCache is only used by functions that return the cached value
+if there is one, or by functions that always write an InstalledFound value.
+Without multithreading it is then safe to always directly write the value
+without checking the previously cached value.
+
+However, with multithreading, it is possible that another function has
+written a value into cache between the lookup and the addToFinderCache call.
+in this case we should check to not overwrite an InstalledFound with an
+InstalledNotFound.
+-}
+
+initFinderCache :: IO FinderCache
+initFinderCache = do
+  mod_cache <- newIORef emptyInstalledModuleEnv
+  file_cache <- newIORef M.empty
+  let flushFinderCaches :: UnitEnv -> IO ()
+      flushFinderCaches ue = do
+        atomicModifyIORef' mod_cache $ \fm -> (filterInstalledModuleEnv is_ext fm, ())
+        atomicModifyIORef' file_cache $ \_ -> (M.empty, ())
+       where
+        is_ext mod _ = not (isUnitEnvInstalledModule ue mod)
+
+      addToFinderCache :: InstalledModule -> InstalledFindResult -> IO ()
+      addToFinderCache key val =
+        atomicModifyIORef' mod_cache $ \c ->
+          case (lookupInstalledModuleEnv c key, val) of
+            -- Don't overwrite an InstalledFound with an InstalledNotFound
+            -- See [Note Monotonic addToFinderCache]
+            (Just InstalledFound{}, InstalledNotFound{}) -> (c, ())
+            _ -> (extendInstalledModuleEnv c key val, ())
+
+      lookupFinderCache :: InstalledModule -> IO (Maybe InstalledFindResult)
+      lookupFinderCache key = do
+         c <- readIORef mod_cache
+         return $! lookupInstalledModuleEnv c key
+
+      lookupFileCache :: FilePath -> IO Fingerprint
+      lookupFileCache key = do
+         c <- readIORef file_cache
+         case M.lookup key c of
+           Nothing -> do
+             hash <- getFileHash key
+             atomicModifyIORef' file_cache $ \c -> (M.insert key hash c, ())
+             return hash
+           Just fp -> return fp
+  return FinderCache{..}

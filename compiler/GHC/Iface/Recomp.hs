@@ -635,11 +635,12 @@ checkMergedSignatures hsc_env mod_summary self_recomp = do
 checkDependencies :: HscEnv -> ModSummary -> ModIface -> IfG RecompileRequired
 checkDependencies hsc_env summary iface
  = do
-    res_normal <- classify_import (findImportedModule hsc_env)
+    res_normal <- classify_import False (findImportedModule hsc_env)
                                   ([(st, p, m) | (st, p, m) <- (ms_textual_imps summary)]
                                   ++
                                   [(NormalLevel, NoPkgQual, m) | m <- ms_srcimps summary ])
-    res_plugin <- classify_import (\mod _ -> findPluginModule hsc_env mod)
+    res_plugin <- classify_import (hasPluginPackageConfig (hsc_dflags hsc_env))
+                    (\mod _ -> findPluginModule hsc_env mod)
                     [(st, p, m) | (st, p, m) <- (ms_plugin_imps summary) ]
     case sequence (res_normal ++ res_plugin) of
       Left recomp -> return $ NeedsRecompile recomp
@@ -652,15 +653,16 @@ checkDependencies hsc_env summary iface
             in check_packages allPkgDeps prev_dep_pkgs
  where
 
-   classify_import :: (ModuleName -> t -> IO FindResult)
+   classify_import :: Bool -- Plugins in a separate namespace are always external
+                      -> (ModuleName -> t -> IO FindResult)
                       -> [(ImportLevel, t, GenLocated l ModuleName)]
                     -> IfG
                        [Either
                           CompileReason (Either (ImportLevel, UnitId, ModuleName) (FastString, (ImportLevel, UnitId)))]
-   classify_import find_import imports =
+   classify_import external find_import imports =
     liftIO $ traverse (\(st, mb_pkg, L _ mod) ->
            let reason = ModuleChanged mod
-           in classify st reason <$> find_import mod mb_pkg)
+           in classify external st reason <$> find_import mod mb_pkg)
            imports
    logger        = hsc_logger hsc_env
    all_home_units = hsc_all_home_unit_ids hsc_env
@@ -668,10 +670,10 @@ checkDependencies hsc_env summary iface
    prev_dep_pkgs = Set.toAscList (Set.union (Set.map (first tcImportLevel) (dep_direct_pkgs (mi_deps iface)))
                                             (Set.map ((SpliceLevel),) (dep_plugin_pkgs (mi_deps iface))))
 
-   classify st _ (Found _ mod)
-    | (toUnitId $ moduleUnit mod) `elem` all_home_units = Right (Left ((st, toUnitId $ moduleUnit mod, moduleName mod)))
+   classify external st _ (Found _ mod)
+    | not external, (toUnitId $ moduleUnit mod) `elem` all_home_units = Right (Left ((st, toUnitId $ moduleUnit mod, moduleName mod)))
     | otherwise = Right (Right (moduleNameFS (moduleName mod), (st, toUnitId $ moduleUnit mod)))
-   classify _ reason _ = Left (RecompBecause reason)
+   classify _ _ reason _ = Left (RecompBecause reason)
 
    check_mods :: [(ImportLevel, UnitId, ModuleName)] -> [(ImportLevel, UnitId, ModuleName)] -> IO RecompileRequired
    check_mods [] [] = return UpToDate
@@ -1208,7 +1210,7 @@ addFingerprints hsc_env iface0 = do
 
       sorted_extra_decls :: Maybe IfaceSimplifiedCore
       sorted_extra_decls = mi_simplified_core iface0 <&> \simpl_core ->
-         IfaceSimplifiedCore (sortOn binding_key (mi_sc_extra_decls simpl_core)) (mi_sc_foreign simpl_core)
+         IfaceSimplifiedCore (sortOn binding_key (mi_sc_extra_decls simpl_core)) (mi_sc_modBreaks simpl_core) (mi_sc_foreign simpl_core)
 
   -- The interface hash depends on:
   --   - the ABI hash, plus
@@ -1767,10 +1769,12 @@ declExtras fix_fn ann_fn rule_env inst_env fi_env dm_env complete_env decl
       IfaceClass{ifBody = IfConcreteClass { ifSigs=sigs, ifATs=ats }} ->
                      IfaceClassExtras (fix_fn n) insts (ann_fn (AnnOccName n)) meths defms
           where
-            insts = (map ifDFun $ (concatMap at_extras ats)
-                                    ++ lookupOccEnvL inst_env n)
-                           -- Include instances of the associated types
-                           -- as well as instances of the class (#5147)
+            insts =
+              let (atFamInsts, atClsInsts) = foldMap at_extras ats
+              in (ifFamInstAxiom <$> atFamInsts) ++ (ifDFun <$> atClsInsts)
+                 ++ (ifDFun <$> lookupOccEnvL inst_env n)
+                           -- Include instances and axioms of the associated types
+                           -- as well as instances of the class (#5147) (#26183)
             meths = [id_extras (getOccName op) | IfaceClassOp op _ _ <- sigs]
             -- Names of all the default methods (see Note [default method Name])
             defms = [ dmName
@@ -1780,14 +1784,19 @@ declExtras fix_fn ann_fn rule_env inst_env fi_env dm_env complete_env decl
       IfaceSynonym{} -> IfaceSynonymExtras (fix_fn n)
                                            (ann_fn (AnnOccName n))
       IfaceFamily{} -> IfaceFamilyExtras (fix_fn n)
-                        (map ifFamInstAxiom (lookupOccEnvL fi_env n))
+                        (map ifFamInstAxiom (lookupOccEnvL fi_env n)
+                        ++ map ifDFun (lookupOccEnvL inst_env n)
+                        )
                         (ann_fn (AnnOccName n))
       IfacePatSyn{} -> IfacePatSynExtras (fix_fn n) (lookup_complete_match n)
       _other -> IfaceOtherDeclExtras
   where
         n = getOccName decl
         id_extras occ = IdExtras (fix_fn occ) (lookupOccEnvL rule_env occ) (ann_fn (AnnOccName occ)) (lookup_complete_match occ)
-        at_extras (IfaceAT decl _) = lookupOccEnvL inst_env (getOccName decl)
+        at_extras (IfaceAT decl _) =
+          ( lookupOccEnvL fi_env (getOccName decl) -- Axioms
+          , lookupOccEnvL inst_env (getOccName decl) -- Class instances
+          )
 
         lookup_complete_match occ = lookupOccEnvL complete_env occ
 

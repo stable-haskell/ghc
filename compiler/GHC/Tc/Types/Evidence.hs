@@ -58,6 +58,7 @@ import GHC.Tc.Utils.TcType
 import GHC.Core
 import GHC.Core.Coercion.Axiom
 import GHC.Core.Coercion
+import GHC.Core.Utils( mkCast )
 import GHC.Core.Ppr ()   -- Instance OutputableBndr TyVar
 import GHC.Core.Predicate
 import GHC.Core.Type
@@ -206,9 +207,15 @@ instance Monoid HsWrapper where
 (<.>) :: HsWrapper -> HsWrapper -> HsWrapper
 WpHole    <.> c         = c
 c         <.> WpHole    = c
-WpCast c1 <.> WpCast c2 = WpCast (c1 `mkTransCo` c2)
+WpCast c1 <.> WpCast c2 = WpCast (c2 `mkTransCo` c1)
   -- If we can represent the HsWrapper as a cast, try to do so: this may avoid
   -- unnecessary eta-expansion (see 'mkWpFun').
+  --
+  -- NB: <.> behaves like function composition:
+  --
+  --   WpCast c1 <.> WpCast c2 :: coercionLKind c2 ~> coercionRKind c1
+  --
+  -- This is thus the same as WpCast (c2 ; c1) and not WpCast (c1 ; c2).
 c1        <.> c2        = c1 `WpCompose` c2
 
 -- | Smart constructor to create a 'WpFun' 'HsWrapper', which avoids introducing
@@ -560,7 +567,7 @@ evCastE ee co
   | assertPpr (coercionRole co == Representational)
               (vcat [text "Coercion of wrong role passed to evCastE:", ppr ee, ppr co]) $
     isReflCo co = ee
-  | otherwise   = Cast ee co
+  | otherwise   = mkCast ee co
 
 evDFunApp :: DFunId -> [Type] -> [EvExpr] -> EvTerm
 -- Dictionary instance application, including when the "dictionary function"

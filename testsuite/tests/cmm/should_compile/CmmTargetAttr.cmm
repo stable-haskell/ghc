@@ -1,0 +1,13 @@
+/* A procedure carrying __attribute__((target("avx2"))) is compiled with AVX2
+   enabled, without any command-line flag: 256-bit vectors require -mavx2, so
+   this file only compiles if the attribute reaches the code generator.
+   See Note [Cmm target attributes] in GHC.Cmm.  */
+
+__attribute__((target("avx2")))
+cmmTargetAttr (bits64 p)
+{
+  vec256 v;
+  v = vec256[p];
+  vec256[p + 32] = v;
+  return ();
+}

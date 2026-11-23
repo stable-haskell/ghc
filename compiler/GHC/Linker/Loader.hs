@@ -49,21 +49,32 @@ import GHC.Driver.Session
 import GHC.Driver.Ppr
 import GHC.Driver.Config.Diagnostic
 import GHC.Driver.Config.Finder
+import GHC.Driver.DynFlags (rtsWayUnitId)
 
 import GHC.Tc.Utils.Monad
 
 import GHC.Runtime.Interpreter
+import GHC.Iface.Load
+
+#if defined(HAVE_INTERPRETER)
 import GHCi.BreakArray
 import GHCi.RemoteTypes
-import GHC.Iface.Load
 import GHCi.Message (ConInfoTable(..), LoadedDLL)
-
 import GHC.ByteCode.Breakpoints
 import GHC.ByteCode.Linker
 import GHC.ByteCode.Asm
 import GHC.ByteCode.Types
+#else
+-- Use centralized stub types when interpreter is not available
+import GHC.Runtime.Interpreter.Stubs
+       ( ForeignHValue, ForeignRef, RemotePtr, HValueRef
+       , ConInfoTable(..), LoadedDLL
+       , BreakArray, InternalModBreaks(..), ModBreaks(..), BreakInfoIndex
+       , CompiledByteCode(..), UnlinkedBCO, bcoFreeNames )
+#endif
 
 import GHC.Stack.CCS
+
 import GHC.SysTools
 
 import GHC.Types.Basic
@@ -95,6 +106,8 @@ import GHC.Linker.Deps
 import GHC.Linker.MacOS
 import GHC.Linker.Dynamic
 import GHC.Linker.Types
+import GHC.Linker.Unit
+import GHC.Linker.ArchivePrelink
 
 -- Standard libraries
 import Control.Monad
@@ -175,8 +188,8 @@ getLoaderState :: Interp -> IO (Maybe LoaderState)
 getLoaderState interp = readMVar (loader_state (interpLoader interp))
 
 
-emptyLoaderState :: LoaderState
-emptyLoaderState = LoaderState
+emptyLoaderState :: UnitEnv -> DynFlags -> LoaderState
+emptyLoaderState unit_env dflags = LoaderState
    { linker_env = LinkerEnv
      { closure_env = emptyNameEnv
      , itbl_env    = emptyNameEnv
@@ -196,7 +209,16 @@ emptyLoaderState = LoaderState
   --
   -- The linker's symbol table is populated with RTS symbols using an
   -- explicit list.  See rts/Linker.c for details.
-  where init_pkgs = unitUDFM rtsUnitId (LoadedPkgInfo rtsUnitId [] [] [] emptyUniqDSet)
+  where deps = getUnitDepends unit_env rtsUnitId
+        pkg_to_dfm unit_id = (unit_id, (LoadedPkgInfo unit_id [] [] [] emptyUniqDSet))
+        init_pkgs = let addToUDFM' (k, v) m = addToUDFM m k v
+                    in foldr addToUDFM' emptyUDFM $ [
+                      pkg_to_dfm rtsUnitId,
+                      -- FIXME? Should this be the rtsWayUnitId of the current ghc, or the one
+                      --        for the target build? I think target-build seems right, but I'm
+                      --        not fully convinced.
+                      pkg_to_dfm (rtsWayUnitId dflags)
+                    ] ++ fmap pkg_to_dfm deps
 
 extendLoadedEnv :: Interp -> [(Name,ForeignHValue)] -> IO ()
 extendLoadedEnv interp new_bindings =
@@ -336,7 +358,7 @@ initLoaderState interp hsc_env = do
 reallyInitLoaderState :: Interp -> HscEnv -> IO LoaderState
 reallyInitLoaderState interp hsc_env = do
   -- Initialise the linker state
-  let pls0 = emptyLoaderState
+  let pls0 = emptyLoaderState (hsc_unit_env hsc_env) (hsc_dflags hsc_env)
 
   case platformArch (targetPlatform (hsc_dflags hsc_env)) of
     -- FIXME: we don't initialize anything with the JS interpreter.
@@ -377,7 +399,7 @@ loadCmdLineLibs' interp hsc_env pls = snd <$>
       let hsc' = hscSetActiveUnitId uid hsc_env
       -- Load potential dependencies first
       (done', pls') <- foldM (\(done', pls') uid -> load done' uid pls') (done, pls)
-                          (homeUnitDepends (hsc_units hsc'))
+                          (Set.toList (homeUnitDepends (hsc_units hsc')))
       pls'' <- loadCmdLineLibs'' interp hsc' pls'
       return $ (Set.insert uid done', pls'')
 
@@ -393,6 +415,7 @@ loadCmdLineLibs'' interp hsc_env pls =
                            , libraryPaths = lib_paths_base})
             = hsc_dflags hsc_env
       let logger = hsc_logger hsc_env
+      let ld_config = configureLd dflags
 
       -- (c) Link libraries from the command-line
       let minus_ls_1 = [ lib | Option ('-':'l':lib) <- cmdline_ld_inputs ]
@@ -408,7 +431,7 @@ loadCmdLineLibs'' interp hsc_env pls =
                        OSMinGW32 -> "pthread" : minus_ls_1
                        _         -> minus_ls_1
       -- See Note [Fork/Exec Windows]
-      gcc_paths <- getGCCPaths logger dflags os
+      gcc_paths <- getGCCPaths logger platform ld_config
 
       lib_paths_env <- addEnvPaths "LIBRARY_PATH" lib_paths_base
 
@@ -718,9 +741,14 @@ loadDecls interp hsc_env span linkable = do
                           , linked_breaks = lb2 }
           return (pls2, (nms_fhvs, links_needed, units_needed))
   where
+#if !defined(HAVE_INTERPRETER)
+    cbcs = []
+#else
     cbcs = linkableBCOs linkable
+#endif
 
     free_names = uniqDSetToList $
+
       foldl'
         (\acc cbc -> foldl' (\acc' bco -> bcoFreeNames bco `unionUniqDSets` acc') acc (bc_bcos cbc))
         emptyUniqDSet cbcs
@@ -807,11 +835,19 @@ loadObjects interp hsc_env pls objs = do
         let (objs_loaded', new_objs) = rmDupLinkables (objs_loaded pls) objs
             pls1                     = pls { objs_loaded = objs_loaded' }
             wanted_objs              = concatMap linkableFiles new_objs
+            logger                   = hsc_logger hsc_env
+            dflags                   = hsc_dflags hsc_env
+            tmpfs                    = hsc_tmpfs hsc_env
 
         if interpreterDynamic interp
             then do pls2 <- dynLoadObjs interp hsc_env pls1 wanted_objs
                     return (pls2, Succeeded)
-            else do mapM_ (loadObj interp) wanted_objs
+            else do
+                    -- Prelink large archives before loading (see Note [Archive Prelinking])
+                    objs_to_load <- mapM (prelinkIfNeeded logger tmpfs dflags) wanted_objs
+
+                    -- Load objects (prelinked or original)
+                    mapM_ (loadObj interp) objs_to_load
 
                     -- Link them all together
                     ok <- resolveObjs interp
@@ -823,6 +859,26 @@ loadObjects interp hsc_env pls objs = do
                       else do
                             pls2 <- unload_wkr interp [] pls1
                             return (pls2, Failed)
+  where
+    -- | Check if an object/archive should be prelinked, and if so, prelink it.
+    -- Returns the path to load (either prelinked object or original path).
+    -- Fallback to original path on any error.
+    prelinkIfNeeded :: Logger -> TmpFs -> DynFlags -> FilePath -> IO FilePath
+    prelinkIfNeeded logger tmpfs dflags obj_path = do
+      should_prelink <- shouldPrelinkArchive dflags obj_path
+      if should_prelink
+        then do
+          debugTraceMsg logger 3 $ text "Checking if prelinking needed:" <+> text obj_path
+          m_prelinked <- prelinkArchive logger tmpfs dflags obj_path
+          case m_prelinked of
+            Just prelinked -> do
+              debugTraceMsg logger 2 $ text "Using prelinked object:" <+> text prelinked
+              return prelinked
+            Nothing -> do
+              debugTraceMsg logger 3 $ text "Prelinking failed or skipped, using original"
+              return obj_path
+        else
+          return obj_path
 
 
 -- | Create a shared library containing the given object files and load it.
@@ -927,10 +983,15 @@ dynLinkBCOs interp pls bcos = do
             parts = concatMap (NE.toList . linkableParts) new_bcos
 
             cbcs :: [CompiledByteCode]
+#if !defined(HAVE_INTERPRETER)
+            cbcs = []
+#else
             cbcs = concatMap linkablePartAllBCOs parts
+#endif
 
 
             le1 = linker_env pls
+
             lb1 = linked_breaks pls
         ie2 <- linkITbls interp (itbl_env le1) (concatMap bc_itbls cbcs)
         ae2 <- foldlM (\env cbc -> allocateTopStrings interp (bc_strs cbc) env) (addr_env le1) cbcs
@@ -964,6 +1025,9 @@ linkSomeBCOs :: Interp
                         -- the incoming unlinked BCOs.  Each gives the
                         -- value of the corresponding unlinked BCO
 
+#if !defined(HAVE_INTERPRETER)
+linkSomeBCOs _ _ _ _ _ = return []
+#else
 linkSomeBCOs interp pkgs_loaded le lb mods = foldr fun do_link mods []
  where
   fun CompiledByteCode{..} inner accum =
@@ -977,6 +1041,7 @@ linkSomeBCOs interp pkgs_loaded le lb mods = foldr fun do_link mods []
     resolved <- sequence [ linkBCO interp pkgs_loaded le lb bco_ix bco | bco <- flat ]
     hvrefs <- createBCOs interp resolved
     return (zip names hvrefs)
+#endif
 
 -- | Useful to apply to the result of 'linkSomeBCOs'
 makeForeignNamedHValueRefs
@@ -985,11 +1050,16 @@ makeForeignNamedHValueRefs interp bindings =
   mapM (\(n, hvref) -> (n,) <$> mkFinalizedHValue interp hvref) bindings
 
 linkITbls :: Interp -> ItblEnv -> [(Name, ConInfoTable)] -> IO ItblEnv
+#if !defined(HAVE_INTERPRETER)
+linkITbls _ env _ = return env
+#else
 linkITbls interp = foldlM $ \env (nm, itbl) -> do
   r <- interpCmd interp $ MkConInfoTable itbl
   evaluate $ extendNameEnv env nm (nm, ItblPtr r)
+#endif
 
 {- **********************************************************************
+
 
                 Unload some object modules
 
@@ -1161,18 +1231,12 @@ loadPackage interp hsc_env pkg
    = do
         let dflags    = hsc_dflags hsc_env
         let logger    = hsc_logger hsc_env
+            ld_config = configureLd dflags
             platform  = targetPlatform dflags
             is_dyn    = interpreterDynamic interp
-            dirs | is_dyn    = map ST.unpack $ Packages.unitLibraryDynDirs pkg
-                 | otherwise = map ST.unpack $ Packages.unitLibraryDirs pkg
+            dirs      = libraryDirsForWay' is_dyn pkg
 
         let hs_libs   = map ST.unpack $ Packages.unitLibraries pkg
-            -- The FFI GHCi import lib isn't needed as
-            -- GHC.Linker.Loader + rts/Linker.c link the
-            -- interpreted references to FFI to the compiled FFI.
-            -- We therefore filter it out so that we don't get
-            -- duplicate symbol errors.
-            hs_libs'  =  filter ("HSffi" /=) hs_libs
 
         -- Because of slight differences between the GHC dynamic linker and
         -- the native system linker some packages have to link with a
@@ -1188,11 +1252,11 @@ loadPackage interp hsc_env pkg
             extra_libs = extdeplibs ++ linkerlibs
 
         -- See Note [Fork/Exec Windows]
-        gcc_paths <- getGCCPaths logger dflags (platformOS platform)
+        gcc_paths <- getGCCPaths logger platform ld_config
         dirs_env <- addEnvPaths "LIBRARY_PATH" dirs
 
         hs_classifieds
-           <- mapM (locateLib interp hsc_env True  dirs_env gcc_paths) hs_libs'
+           <- mapM (locateLib interp hsc_env True  dirs_env gcc_paths) hs_libs
         extra_classifieds
            <- mapM (locateLib interp hsc_env False dirs_env gcc_paths) extra_libs
         let classifieds = hs_classifieds ++ extra_classifieds
@@ -1301,27 +1365,49 @@ restriction very easily.
 -- ("/usr/lib/libfoo.so"), or unqualified ("libfoo.so").  In the latter case,
 -- loadDLL is going to search the system paths to find the library.
 load_dyn :: Interp -> HscEnv -> Bool -> FilePath -> IO (Maybe (RemotePtr LoadedDLL))
-load_dyn interp hsc_env crash_early dll = do
-  r <- loadDLL interp dll
-  case r of
-    Right loaded_dll -> pure (Just loaded_dll)
-    Left err ->
-      if crash_early
-        then cmdLineErrorIO err
-        else do
-          when (diag_wopt Opt_WarnMissedExtraSharedLib diag_opts)
-            $ logMsg logger
-                (mkMCDiagnostic diag_opts (WarningWithFlag Opt_WarnMissedExtraSharedLib) Nothing)
-                  noSrcSpan $ withPprStyle defaultUserStyle (note err)
-          pure Nothing
+load_dyn interp hsc_env crash_early dll
+  -- See Note [Skip loading libc/libm on Unix]
+  -- Skip loading fundamental system libraries that are always linked into the process.
+  -- On some systems, loading these via dlopen can load a different version than what
+  -- the interpreter is linked against, causing memory corruption.
+  | isAlwaysLinkedLib platform dll = pure Nothing
+  | otherwise = do
+      r <- loadDLL interp dll
+      case r of
+        Right loaded_dll -> pure (Just loaded_dll)
+        Left err ->
+          if crash_early
+            then cmdLineErrorIO err
+            else do
+              when (diag_wopt Opt_WarnMissedExtraSharedLib diag_opts)
+                $ logMsg logger
+                    (mkMCDiagnostic diag_opts (WarningWithFlag Opt_WarnMissedExtraSharedLib) Nothing)
+                      noSrcSpan $ withPprStyle defaultUserStyle (note err)
+              pure Nothing
   where
-    diag_opts = initDiagOpts (hsc_dflags hsc_env)
+    dflags = hsc_dflags hsc_env
+    platform = targetPlatform dflags
+    diag_opts = initDiagOpts dflags
     logger = hsc_logger hsc_env
     note err = vcat $ map text
       [ err
       , "It's OK if you don't want to use symbols from it directly."
       , "(the package DLL is loaded by the system linker"
       , " which manages dependencies by itself)." ]
+
+-- | Check if a library name refers to a fundamental system library that is
+-- always linked into any process. On Unix, libc, libm, libpthread, libdl, and
+-- librt are always available. We skip loading these to avoid loading a second
+-- copy (which can happen on systems where the dynamic linker finds a different
+-- version than what was linked).
+isAlwaysLinkedLib :: Platform -> FilePath -> Bool
+isAlwaysLinkedLib platform dll
+  | platformOS platform == OSMinGW32 = False  -- Windows handles this differently
+  | otherwise = baseName `elem` alwaysLinkedLibs
+  where
+    -- Extract base library name from paths like "libc.so", "libc.so.6", "/path/to/libc.so.6"
+    baseName = takeBaseName $ takeFileName dll
+    alwaysLinkedLibs = ["libc", "libm", "libpthread", "libdl", "librt"]
 
 loadFrameworks :: Interp -> Platform -> UnitInfo -> IO ()
 loadFrameworks interp platform pkg
@@ -1405,6 +1491,7 @@ locateLib interp hsc_env is_hs lib_dirs gcc_dirs lib0
      dflags = hsc_dflags hsc_env
      logger = hsc_logger hsc_env
      diag_opts = initDiagOpts dflags
+     ld_config = configureLd dflags
      dirs   = lib_dirs ++ gcc_dirs
      gcc    = False
      user   = True
@@ -1468,7 +1555,7 @@ locateLib interp hsc_env is_hs lib_dirs gcc_dirs lib0
      findSysDll    = fmap (fmap $ DLL . dropExtension . takeFileName) $
                         findSystemLibrary interp so_name
 #endif
-     tryGcc        = let search   = searchForLibUsingGcc logger dflags
+     tryGcc        = let search   = searchForLibUsingGcc logger ld_config
 #if defined(CAN_LOAD_DLL)
                          dllpath  = liftM (fmap DLLPath)
                          short    = dllpath $ search so_name lib_dirs
@@ -1523,11 +1610,11 @@ locateLib interp hsc_env is_hs lib_dirs gcc_dirs lib0
 #endif
      os = platformOS platform
 
-searchForLibUsingGcc :: Logger -> DynFlags -> String -> [FilePath] -> IO (Maybe FilePath)
-searchForLibUsingGcc logger dflags so dirs = do
+searchForLibUsingGcc :: Logger -> LdConfig -> String -> [FilePath] -> IO (Maybe FilePath)
+searchForLibUsingGcc logger ld_config so dirs = do
    -- GCC does not seem to extend the library search path (using -L) when using
    -- --print-file-name. So instead pass it a new base location.
-   str <- askLd logger dflags (map (FileOption "-B") dirs
+   str <- askLd logger ld_config (map (FileOption "-B") dirs
                           ++ [Option "--print-file-name", Option so])
    let file = case lines str of
                 []  -> ""
@@ -1539,10 +1626,10 @@ searchForLibUsingGcc logger dflags so dirs = do
 
 -- | Retrieve the list of search directory GCC and the System use to find
 --   libraries and components. See Note [Fork/Exec Windows].
-getGCCPaths :: Logger -> DynFlags -> OS -> IO [FilePath]
-getGCCPaths logger dflags os
-  | os == OSMinGW32 || platformArch (targetPlatform dflags) == ArchWasm32 =
-        do gcc_dirs <- getGccSearchDirectory logger dflags "libraries"
+getGCCPaths :: Logger -> Platform -> LdConfig -> IO [FilePath]
+getGCCPaths logger platform ld_config
+  | platformOS platform == OSMinGW32 || platformArch platform == ArchWasm32 =
+        do gcc_dirs <- getGccSearchDirectory logger ld_config "libraries"
            sys_dirs <- getSystemDirectories
            return $ nub $ gcc_dirs ++ sys_dirs
   | otherwise = return []
@@ -1562,13 +1649,13 @@ gccSearchDirCache = unsafePerformIO $ newIORef []
 -- which hopefully is written in an optimized manner to take advantage of
 -- caching. At the very least we remove the overhead of the fork/exec and waits
 -- which dominate a large percentage of startup time on Windows.
-getGccSearchDirectory :: Logger -> DynFlags -> String -> IO [FilePath]
-getGccSearchDirectory logger dflags key = do
+getGccSearchDirectory :: Logger -> LdConfig -> String -> IO [FilePath]
+getGccSearchDirectory logger ld_config key = do
     cache <- readIORef gccSearchDirCache
     case lookup key cache of
       Just x  -> return x
       Nothing -> do
-        str <- askLd logger dflags [Option "--print-search-dirs"]
+        str <- askLd logger ld_config [Option "--print-search-dirs"]
         let line = dropWhile isSpace str
             name = key ++ ": ="
         if null line
@@ -1653,12 +1740,16 @@ maybePutStrLn logger s = maybePutSDoc logger (text s <> text "\n")
 -- | see Note [Generating code for top-level string literal bindings]
 allocateTopStrings ::
   Interp -> [(Name, ByteString)] -> AddrEnv -> IO AddrEnv
+#if !defined(HAVE_INTERPRETER)
+allocateTopStrings _ _ env = return env
+#else
 allocateTopStrings interp topStrings prev_env = do
   let (bndrs, strings) = unzip topStrings
   ptrs <- interpCmd interp $ MallocStrings strings
   evaluate $ extendNameEnvList prev_env (zipWith mk_entry bndrs ptrs)
   where
     mk_entry nm ptr = (nm, (nm, AddrPtr ptr))
+#endif
 
 -- | Given a list of 'InternalModBreaks' collected from a list of
 -- 'CompiledByteCode', allocate the 'BreakArray' used to trigger breakpoints.
@@ -1667,6 +1758,9 @@ allocateBreakArrays ::
   ModuleEnv (ForeignRef BreakArray) ->
   [InternalModBreaks] ->
   IO (ModuleEnv (ForeignRef BreakArray))
+#if !defined(HAVE_INTERPRETER)
+allocateBreakArrays _ env _ = return env
+#else
 allocateBreakArrays interp =
   foldlM
     ( \be0 InternalModBreaks{imodBreaks_breakInfo, imodBreaks_modBreaks=ModBreaks {..}} -> do
@@ -1678,6 +1772,7 @@ allocateBreakArrays interp =
         else
           return be0
     )
+#endif
 
 -- | Given a list of 'InternalModBreaks' collected from a list
 -- of 'CompiledByteCode', allocate the 'CostCentre' arrays when profiling is
@@ -1690,6 +1785,9 @@ allocateCCS ::
   ModuleEnv (Array BreakInfoIndex (RemotePtr CostCentre)) ->
   [InternalModBreaks] ->
   IO (ModuleEnv (Array BreakInfoIndex (RemotePtr CostCentre)))
+#if !defined(HAVE_INTERPRETER)
+allocateCCS _ ce _ = return ce
+#else
 allocateCCS interp ce mbss
   | interpreterProfiled interp = do
       -- 1. Create a mapping from source BreakpointId to CostCentre ptr
@@ -1730,3 +1828,4 @@ allocateCCS interp ce mbss
         mbss
 
   | otherwise = pure ce
+#endif

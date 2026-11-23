@@ -301,7 +301,8 @@ import GHC.Types.Var
 
 import Control.Monad
 import Data.Array
-import Data.Char        ( ord )
+import Data.Char        ( ord, isSpace )
+import Data.List        ( dropWhileEnd )
 import System.Exit
 import Data.Maybe
 import qualified Data.Map as M
@@ -360,6 +361,7 @@ import qualified Data.ByteString.Char8 as BS8
         'INFO_TABLE_FUN'{ L _ (CmmT_INFO_TABLE_FUN) }
         'INFO_TABLE_CONSTR'{ L _ (CmmT_INFO_TABLE_CONSTR) }
         'INFO_TABLE_SELECTOR'{ L _ (CmmT_INFO_TABLE_SELECTOR) }
+        '__attribute__' { L _ (CmmT___attribute__) }
         'else'          { L _ (CmmT_else) }
         'export'        { L _ (CmmT_export) }
         'section'       { L _ (CmmT_section) }
@@ -489,20 +491,37 @@ lits    :: { [CmmParse CmmExpr] }
         | ',' expr lits         { $2 : $3 }
 
 cmmproc :: { CmmParse () }
-        : info maybe_conv maybe_formals maybe_body
+        : maybe_attrs info maybe_conv maybe_formals maybe_body
                 { do ((entry_ret_label, info, stk_formals, formals), agraph) <-
                        getCodeScoped $ loopDecls $ do {
-                         (entry_ret_label, info, stk_formals) <- $1;
+                         (entry_ret_label, info, stk_formals) <- $2;
                          platform <- getPlatform;
                          ctx      <- getContext;
-                         formals <- sequence (fromMaybe [] $3);
+                         formals <- sequence (fromMaybe [] $4);
                          withName (showSDocOneLine ctx (pprCLabel platform entry_ret_label))
-                           $4;
+                           $5;
                          return (entry_ret_label, info, stk_formals, formals) }
-                     let do_layout = isJust $3
-                     code (emitProcWithStackFrame $2 info
+                     let do_layout = isJust $4
+                     code (emitProcWithStackFrameAttrs $1 $3 info
                                 entry_ret_label stk_formals formals agraph
                                 do_layout ) }
+
+-- See Note [Cmm target attributes] in GHC.Cmm
+maybe_attrs :: { CmmProcAttrs }
+        : {- empty -}   { emptyCmmProcAttrs }
+        | attrs         { $1 }
+
+attrs   :: { CmmProcAttrs }
+        : attr          { $1 }
+        | attrs attr    { CmmProcAttrs (cpa_target_features $1
+                                          ++ cpa_target_features $2) }
+
+-- Errors point at the attribute's own span, via 'failAtPD': by the time this
+-- reduction runs the parser has read ahead, so 'failMsgPD' would blame the
+-- following procedure.
+attr    :: { CmmProcAttrs }
+        : '__attribute__' '(' '(' NAME '(' STRING ')' ')' ')'
+                {% mkCmmProcAttr (combineSrcSpans (getLoc $1) (getLoc $9)) $4 $6 }
 
 maybe_conv :: { Convention }
            : {- empty -}        { NativeNodeCall }
@@ -1186,9 +1205,10 @@ callishMachOps platform = listToUFM $
     , allWidths "pext" MO_Pext
     , allWidths "cmpxchg" MO_Cmpxchg
     , allWidths "xchg" MO_Xchg
-    , allWidths "load_relaxed" (\w -> MO_AtomicRead w MemOrderAcquire)
+    , allWidths "load_relaxed" (\w -> MO_AtomicRead w MemOrderRelaxed)
     , allWidths "load_acquire" (\w -> MO_AtomicRead w MemOrderAcquire)
     , allWidths "load_seqcst" (\w -> MO_AtomicRead w MemOrderSeqCst)
+    , allWidths "store_relaxed" (\w -> MO_AtomicWrite w MemOrderRelaxed)
     , allWidths "store_release" (\w -> MO_AtomicWrite w MemOrderRelease)
     , allWidths "store_seqcst" (\w -> MO_AtomicWrite w MemOrderSeqCst)
     , allWidths "fetch_add" (\w -> MO_AtomicRMW w AMO_Add)
@@ -1223,6 +1243,39 @@ callishMachOps platform = listToUFM $
         -- compile-time constant. We verify this here, passing it around
         -- in the MO_* constructor. In order to do this, however, we
         -- must intercept the arguments in primCall.
+
+-- | Build a procedure's attributes from a source attribute such as
+--
+-- >  __attribute__((target("avx2")))
+--
+-- An unrecognised attribute name or CPU feature is a parse error.  Dropping
+-- one would buy us a segfault at runtime instead.
+-- See Note [Cmm target attributes] in GHC.Cmm.
+mkCmmProcAttr :: SrcSpan -> FastString -> String -> PD CmmProcAttrs
+mkCmmProcAttr loc attr features
+  | attr /= fsLit "target"
+  = failAtPD loc (CmmUnknownAttribute attr)
+  | otherwise
+  = CmmProcAttrs <$> mapM parseOne (splitOnCommas features)
+  where
+    -- GCC allows several features in one string, e.g. target("avx2,avx512f")
+    splitOnCommas s = case break (== ',') s of
+      (f, [])     -> [trim f]
+      (f, _:rest) -> trim f : splitOnCommas rest
+    trim = dropWhileEnd isSpace . dropWhile isSpace
+    validFeatures = map cmmTargetFeatureName [minBound .. maxBound]
+    parseOne f = case parseCmmTargetFeature f of
+      Just feat -> return feat
+      Nothing   -> failAtPD loc (CmmUnknownTargetFeature f validFeatures)
+
+-- | Fail at a given span instead of the parser's current position, which by
+-- the time a reduction runs has moved past the text we want to blame.
+failAtPD :: SrcSpan -> CmmParserError -> PD a
+failAtPD (RealSrcSpan sp _) err
+  = liftP $ failLocMsgP (realSrcSpanStart sp) (realSrcSpanEnd sp) $ \s ->
+      mkPlainErrorMsgEnvelope s (PsErrCmmParser err)
+failAtPD _ err
+  = failMsgPD $ \s -> mkPlainErrorMsgEnvelope s (PsErrCmmParser err)
 
 parseSafety :: String -> PD Safety
 parseSafety "safe"   = return PlaySafe
