@@ -72,6 +72,24 @@ class Node:
         return f"{self.pkg}-{self.version} {comp} [{self.stage}]"
 
 
+def unit_stage(unit: dict) -> str:
+    """Which machine built this plan entry.
+
+    Cabal 3.17 put that in ``stage`` and prefixed unit ids with
+    ``host:`` or ``build:``. Cabal 3.19 (the stable-haskell pin) writes
+    ``machine`` and leaves the unit id unqualified, because the same id
+    can appear once per machine.
+    """
+    explicit = unit.get("stage") or unit.get("machine")
+    if explicit:
+        return str(explicit)
+    unit_id = str(unit.get("id") or "")
+    prefix, sep, _rest = unit_id.partition(":")
+    if sep and prefix in ("host", "build"):
+        return prefix
+    return "host"
+
+
 def norm_comp(component: str | None) -> str:
     if not component:
         return "lib"
@@ -112,7 +130,7 @@ def load_plan(path: str) -> tuple[dict, list[Node]]:
             unit_id=unit_id,
             pkg=unit.get("pkg-name") or unit_id,
             version=str(unit.get("pkg-version") or ""),
-            stage=unit.get("stage") or unit_id.split(":", 1)[0],
+            stage=unit_stage(unit),
             component=norm_comp(component or unit.get("component-name")),
             built=built,
             raw_deps=list(deps or []),
@@ -135,7 +153,9 @@ def load_plan(path: str) -> tuple[dict, list[Node]]:
                     continue
                 add(unit, name, info.get("depends") or [], info.get("exe-depends") or [], True)
             continue
-        built = kind == "configured"
+        # "installed" is the same component after cabal has copied it into
+        # the store. plan.json still says "configured" today; accept both.
+        built = kind in ("configured", "installed")
         component = unit.get("component-name") or ""
         add(unit, component, unit.get("depends") or [], unit.get("exe-depends") or [], built)
 
@@ -155,6 +175,9 @@ def load_plan(path: str) -> tuple[dict, list[Node]]:
         # dependencies are the build-stage units. Every other component
         # uses its own stage.
         if dep.startswith("host:") or dep.startswith("build:"):
+            unit_id = dep
+        elif dep in resolved_lib:
+            # Cabal 3.19 depends name the unit id with no machine prefix.
             unit_id = dep
         else:
             prefer = "build" if component == "setup" else stage
@@ -956,6 +979,54 @@ def self_test() -> int:
         kept = select_nodes(nodes, ["ghc"])
         assert all(n.pkg != "libffi-clib" for n in kept)
         assert any(n.pkg == "ghc" and n.component == "lib" for n in kept)
+
+        # Cabal 3.19: machine field, unqualified unit ids, exe component-name.
+        # Tools live in another plan, so only ghc has to match.
+        modern = {
+            "cabal-version": "3.19.0.0",
+            "install-plan": [
+                {
+                    "type": "pre-existing",
+                    "id": "base-4.19.1.0",
+                    "machine": "host",
+                    "pkg-name": "base",
+                    "pkg-version": "4.19.1.0",
+                    "depends": [],
+                },
+                {
+                    "type": "installed",
+                    "id": "filepath-1.5.4.0",
+                    "machine": "host",
+                    "pkg-name": "filepath",
+                    "pkg-version": "1.5.4.0",
+                    "component-name": "lib",
+                    "depends": ["base-4.19.1.0"],
+                    "exe-depends": [],
+                },
+                {
+                    "type": "configured",
+                    "id": "ghc-bin-9.14",
+                    "machine": "host",
+                    "pkg-name": "ghc-bin",
+                    "pkg-version": "9.14",
+                    "component-name": "exe:ghc",
+                    "depends": ["filepath-1.5.4.0"],
+                    "exe-depends": [],
+                },
+            ],
+        }
+        modern_path = root / "modern.json"
+        modern_path.write_text(json.dumps(modern), encoding="utf-8")
+        _doc, modern_nodes = load_plan(str(modern_path))
+        ghc_exe = next(n for n in modern_nodes if n.component == "exe:ghc")
+        assert ghc_exe.stage == "host", ghc_exe.stage
+        assert ghc_exe.built
+        filepath = next(n for n in modern_nodes if n.pkg == "filepath")
+        assert filepath.built
+        assert filepath.key in ghc_exe.preds, ghc_exe.preds
+        modern_kept = select_nodes(modern_nodes, ["ghc", "alex", "happy"])
+        assert any(n.component == "exe:ghc" for n in modern_kept)
+        assert any(n.pkg == "filepath" for n in modern_kept)
     print("self-test ok")
     return 0
 
