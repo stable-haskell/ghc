@@ -127,4 +127,4 @@ package ghc-boot-th-next
 source-repository-package
   type: git
   location: https://github.com/stable-haskell/hsc2hs.git
-  tag: a1df83604144bb43fba96e481e731ebb7b8d28fb
+  tag: d22c8f1916d01952a19a143c115ff23a4a274c42
