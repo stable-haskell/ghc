@@ -20,6 +20,10 @@
 # Stock Cabal passes the selected compiler as --with-compiler= and CC= on the
 # command line and does not export GHC or CC. The stage1 Cabal pin does export
 # them. An explicit argument wins, then the environment, then PATH.
+#
+# Cabal 3.19 passes that compiler as an 8.3 short path. A GHCup shim invoked
+# that way cannot open its .shim file, so `ghc --info` is empty.
+# mk/resolve-ghc-shim.sh recovers the real compiler.
 set -eu
 
 root=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
@@ -45,7 +49,23 @@ die() {
   exit 1
 }
 
-info=$("$ghc_cmd" --info | tr -d '\n') || die "ghc --info failed"
+# shellcheck source=../mk/resolve-ghc-shim.sh
+. "$root/../mk/resolve-ghc-shim.sh"
+
+probe_info() {
+  "$1" --info | tr -d '\n' || true
+}
+
+info=$(probe_info "$ghc_cmd")
+if [ -z "$info" ]; then
+  resolved=$(shim_target "$ghc_cmd")
+  if [ -n "$resolved" ]; then
+    echo "compiler configure: $ghc_cmd printed no --info; using $resolved" >&2
+    ghc_cmd=$resolved
+    info=$(probe_info "$ghc_cmd")
+  fi
+fi
+[ -n "$info" ] || die "ghc --info failed"
 
 # ghc --info is a Haskell list of pairs. show escapes the values, and
 # "Haskell CPP flags" is escapeArgs output inside that string. Decode the
