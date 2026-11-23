@@ -929,27 +929,43 @@ step_mhs() {
     cp "$last_good" "$active_cache"
   fi
   local rc=0
+  # set +u: bash 3.2 errors on an empty "${NIP_FLAG[@]}".
+  # Run mhs in the background and sample RSS. The Darwin runner has 7GB;
+  # a multi-hour stage with no log line is otherwise indistinguishable
+  # from a swap stall. One line per minute is enough to see which module
+  # is live and whether the process is pinned at the machine's RAM.
+  set +u
   if [ -n "${KEEP_STAGE_C:-}" ]; then
     local umbrella="$AUTOGEN/MhsStage_${name}.hs"
     {
       echo "module MhsStage_${name//-/_} where"
       for mod in "$@"; do echo "import $mod ()"; done
     } | write_if_changed "$umbrella"
-    # set +u: bash 3.2 errors on an empty "${NIP_FLAG[@]}".
-    set +u
     "$MHS_BIN" "${MHS_RTS[@]}" -v -s -XCPP "${MHS_DEFS[@]}" "${NIP_FLAG[@]}" \
       "${MHS_INCLUDES[@]}" -C"$active_cache" \
       -c -o "$WORK_DIR/MhsStage_${name}.c" "$umbrella" \
-      > "$LOG_DIR/stage-${name}.log" 2>&1 || rc=$?
-    set -u
+      > "$LOG_DIR/stage-${name}.log" 2>&1 &
   else
-    set +u
     "$MHS_BIN" "${MHS_RTS[@]}" -v -s -XCPP "${MHS_DEFS[@]}" "${NIP_FLAG[@]}" \
       "${MHS_INCLUDES[@]}" -C"$active_cache" \
       -fno-code "$@" \
-      > "$LOG_DIR/stage-${name}.log" 2>&1 || rc=$?
-    set -u
+      > "$LOG_DIR/stage-${name}.log" 2>&1 &
   fi
+  set -u
+  local mhs_pid=$!
+  while kill -0 "$mhs_pid" 2>/dev/null; do
+    local rss last tick
+    rss=$(ps -o rss= -p "$mhs_pid" 2>/dev/null | tr -d '[:space:]' || true)
+    last=$(grep -E 'importing done|compiling used boot module' \
+      "$LOG_DIR/stage-${name}.log" 2>/dev/null | tail -n 1 || true)
+    echo "mhs rss_mb=$(( ${rss:-0} / 1024 )) ${last}"
+    tick=0
+    while [ "$tick" -lt 60 ] && kill -0 "$mhs_pid" 2>/dev/null; do
+      sleep 5
+      tick=$((tick + 5))
+    done
+  done
+  wait "$mhs_pid" || rc=$?
   tail -5 "$LOG_DIR/stage-${name}.log" || true
   if [ $rc -ne 0 ]; then
     echo "ERROR: stage $name failed ($*). Log: $LOG_DIR/stage-${name}.log" >&2
@@ -1084,12 +1100,23 @@ EOF
     MhsGhcBoot GHC.LanguageExtensions.Type Language.Haskell.TH.Syntax
 }
 
-stage_02a_utils_base() {
+stage_01b_syntax_th() {
   step_mhs 01b-syntax-th-leaves \
     GHC.Platform.Constants GHC.Data.Word64Map.Strict \
     GHC.Data.Word64Set GHC.Utils.Exception GHC.Boot.TH.Syntax
+}
+
+# GHC.Prelude's closure is one mhs process. On Linux (16GB) it takes
+# about 15 minutes. On the 7GB Darwin runner it was still running after
+# 5h18m, so CI gives this step its own job.
+stage_02a_prelude() {
   step_mhs 02a-prelude-fs \
     GHC.Prelude GHC.Data.FastString GHC.Data.StringBuffer
+}
+
+stage_02a_utils_base() {
+  stage_01b_syntax_th
+  stage_02a_prelude
   step_mhs 02b-unit-syntax \
     Language.Haskell.Syntax GHC.Types.Basic GHC.Unit.Types GHC.Unit.Module.Env
   step_mhs 02c-outputable \
@@ -1409,6 +1436,8 @@ case "$cmd" in
     stage_02a_utils_base; stage_02_utils_data; stage_03_types_builtin; stage_04_core_stg_cmm
     stage_05_hs_ast; stage_06_parser_rn; stage_07_tc_ds; stage_08_compiler
     ;;
+  stage-01b) prepare_autogen; stage_01b_syntax_th ;;
+  stage-02a-prelude) prepare_autogen; stage_02a_prelude ;;
   stage-02a) prepare_autogen; stage_02a_utils_base ;;
   stage-02)  prepare_autogen; stage_02_utils_data ;;
   stage-03)  prepare_autogen; stage_03_types_builtin ;;
@@ -1431,7 +1460,7 @@ case "$cmd" in
     run_tests
     ;;
   *)
-    echo "Usage: $0 [toolchain|tools|ghc-boot|compiler|ghc|test|all]" >&2
+    echo "Usage: $0 [toolchain|tools|ghc-boot|stage-01b|stage-02a|stage-02a-prelude|compiler|ghc|test|all]" >&2
     exit 1
     ;;
 esac
