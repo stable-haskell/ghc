@@ -608,7 +608,7 @@ jobs:
           tar -xzf "_build/inputs/mhs-stage1-tools-${{ matrix.plat }}.tar.gz" -C "$GITHUB_WORKSPACE"
           tar -xzf "_build/inputs/ghc-stage1-mhs-ckpt-front-${{ matrix.plat }}.tar.gz" -C "$GITHUB_WORKSPACE"
           test -s _build/mhs-stage1/cache/last-good.mhscache
-          test -s _build/mhs-stage1/cache/01b-syntax-th-leaves.done
+          test -f _build/mhs-stage1/cache/01b-syntax-th-leaves.done
           _build/mhs-stage1/toolchain/bin/mhs --version
 
       - name: Phase 6a prelude — GHC.Prelude closure
