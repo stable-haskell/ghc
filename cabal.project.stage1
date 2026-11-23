@@ -121,9 +121,10 @@ package ghc-boot
 package ghc-boot-th-next
   flags: +bootstrap
 
--- hsc2hs with batch cross-compilation support
--- https://github.com/stable-haskell/hsc2hs/tree/feat/batch-cross-compilation
+-- hsc2hs single-pass cc -S -O2 cross mode.
+-- https://github.com/stable-haskell/hsc2hs/tree/feat/hsc2hs-cross-asm
+
 source-repository-package
   type: git
   location: https://github.com/stable-haskell/hsc2hs.git
-  tag: d07eea1260894ce5fe456f881fbc62366c9eb1b7
+  tag: d22c8f1916d01952a19a143c115ff23a4a274c42
