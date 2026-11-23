@@ -1,0 +1,5 @@
+MainSafe.hs:2:1: error: [GHC-75165]
+    S: Can't be safely imported!
+    The package (s-0.1) the module resides in isn't trusted.
+
+3

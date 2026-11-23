@@ -1,0 +1,4 @@
+signature H where
+
+data T
+f :: T -> String

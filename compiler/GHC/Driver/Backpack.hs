@@ -93,6 +93,7 @@ import GHC.Types.Error (mkUnknownDiagnostic)
 import qualified GHC.Unit.Home.Graph as HUG
 import GHC.Unit.Home.ModInfo
 import GHC.Unit.Home.PackageTable
+import GHC.Unit.External.Index (cacheExternalUnitDatabase)
 
 -- | Entry point to compile a Backpack file.
 doBackpack :: [FilePath] -> Ghc ()
@@ -172,6 +173,8 @@ withBkpSession :: UnitId
                -> BkpM a
 withBkpSession cid insts deps session_type do_this = do
     dflags <- getDynFlags
+    env <- getSession
+    unitIndex <- liftIO $ hscUnitIndex env
     let cid_fs = unitFS cid
         is_primary = False
         uid_str = unpackFS (mkInstantiatedUnitHash cid insts)
@@ -191,8 +194,8 @@ withBkpSession cid insts deps session_type do_this = do
                  | otherwise = sub_comp (key_base p)
 
         mk_temp_env hsc_env =
-          hscUpdateFlags (\dflags -> mk_temp_dflags (hsc_units hsc_env) dflags) hsc_env
-        mk_temp_dflags unit_state dflags = dflags
+          hscUpdateFlags (\dflags -> mk_temp_dflags unitIndex (hsc_units hsc_env) dflags) hsc_env
+        mk_temp_dflags unit_index unit_state dflags = dflags
             { backend = case session_type of
                             TcSession -> noBackend
                             _         -> backend dflags
@@ -239,8 +242,7 @@ withBkpSession cid insts deps session_type do_this = do
             , importPaths = []
             -- Synthesize the flags
             , packageFlags = packageFlags dflags ++ map (\(uid0, rn) ->
-              let uid = unwireUnit unit_state
-                        $ improveUnit unit_state
+              let uid = unwireUnit unit_index
                         $ renameHoleUnit unit_state (listToUFM insts) uid0
               in ExposePackage
                 (showSDoc dflags
@@ -309,19 +311,16 @@ buildUnit session cid insts lunit = do
     -- The compilation dependencies are just the appropriately filled
     -- in unit IDs which must be compiled before we can compile.
     let hsubst = listToUFM insts
-        deps0 = map (renameHoleUnit (hsc_units hsc_env) hsubst) raw_deps
+        deps = map (renameHoleUnit (hsc_units hsc_env) hsubst) raw_deps
 
     -- Build dependencies OR make sure they make sense. BUT NOTE,
     -- we can only check the ones that are fully filled; the rest
     -- we have to defer until we've typechecked our local signature.
     -- TODO: work this into GHC.Driver.Make!!
-    forM_ (zip [1..] deps0) $ \(i, dep) ->
+    forM_ (zip [1..] deps) $ \(i, dep) ->
         case session of
             TcSession -> return ()
-            _ -> compileInclude (length deps0) (i, dep)
-
-    -- IMPROVE IT
-    let deps = map (improveUnit (hsc_units hsc_env)) deps0
+            _ -> compileInclude (length deps) (i, dep)
 
     mb_old_eps <- case session of
                     TcSession -> fmap Just getEpsGhc
@@ -350,9 +349,9 @@ buildUnit session cid insts lunit = do
               | otherwise
               = [Nothing]
         linkables <- liftIO $ catMaybes <$> concatHpt takeLinkables (hsc_HPT hsc_env)
+        unit_index <- liftIO $ hscUnitIndex hsc_env
         let
             obj_files = concatMap linkableFiles linkables
-            state     = hsc_units hsc_env
 
             compat_fs = unitIdFS cid
             compat_pn = PackageName compat_fs
@@ -378,7 +377,7 @@ buildUnit session cid insts lunit = do
                         -- really used for anything, so we leave it
                         -- blank for now.
                         TcSession -> []
-                        _ -> map (toUnitId . unwireUnit state)
+                        _ -> map (toUnitId . unwireUnit unit_index)
                                 $ deps ++ [ moduleUnit mod
                                           | (_, mod) <- insts
                                           , not (isHoleModule mod) ],
@@ -429,6 +428,25 @@ compileExe lunit = do
         ok <- load' noIfaceCache LoadAllTargets mkUnknownDiagnostic (Just msg) mod_graph
         when (failed ok) (liftIO $ exitWith (ExitFailure 1))
 
+-- | Adds an in-memory database for the given 'UnitInfo'.
+--
+-- As this in-memory database can't be read from disk, we immediately cache it in the
+-- 'ExternalUnitDatabaseCache'
+addInMemoryDatabase :: GhcMonad m => DynFlags -> UnitInfo -> m DynFlags
+addInMemoryDatabase dflags u = do
+    hsc_env <- getSession
+    let newdb = UnitDatabase
+          { unitDatabasePath  = unsafeEncodeUtf $ "(in memory " ++ showSDoc dflags (ppr (unitId u)) ++ ")"
+          , unitDatabaseUnits = [u]
+          , unitDatabasePartial = False
+          }
+    let uic = hscUIC hsc_env
+    liftIO $ cacheExternalUnitDatabase uic newdb
+    -- added at the end because ordering matters
+    pure dflags
+          { packageDBFlags = packageDBFlags dflags ++ [PackageDB (PkgDbPath (unitDatabasePath newdb))]
+          }
+
 -- | Register a new virtual unit database containing a single unit
 addUnit :: GhcMonad m => UnitInfo -> m ()
 addUnit u = do
@@ -436,18 +454,14 @@ addUnit u = do
     logger <- getLogger
     let dflags0 = hsc_dflags hsc_env
     let old_unit_env = hsc_unit_env hsc_env
-    newdbs <- case ue_unit_dbs old_unit_env of
-        Nothing  -> panic "addUnit: called too early"
-        Just dbs ->
-         let newdb = UnitDatabase
-               { unitDatabasePath  = unsafeEncodeUtf $ "(in memory " ++ showSDoc dflags0 (ppr (unitId u)) ++ ")"
-               , unitDatabaseUnits = [u]
-               }
-         in return (dbs ++ [newdb]) -- added at the end because ordering matters
-    (dbs,unit_state,home_unit,mconstants) <- liftIO $ initUnits logger dflags0 (Just newdbs) (hsc_all_home_unit_ids hsc_env)
+
+    dflags1 <- addInMemoryDatabase dflags0 u
+
+    (unit_state,home_unit,mconstants) <- liftIO $ initUnits logger dflags1 (ue_uic old_unit_env) (hsc_all_home_unit_ids hsc_env)
+
 
     -- update platform constants
-    dflags <- liftIO $ updatePlatformConstants dflags0 mconstants
+    dflags <- liftIO $ updatePlatformConstants dflags1 mconstants
 
     let unit_env = UnitEnv
           { ue_platform  = targetPlatform dflags
@@ -457,9 +471,10 @@ addUnit u = do
           , ue_home_unit_graph =
                 HUG.unitEnv_singleton
                     (homeUnitId home_unit)
-                    (HUG.mkHomeUnitEnv unit_state (Just dbs) dflags (ue_hpt old_unit_env) (Just home_unit))
+                    (HUG.mkHomeUnitEnv unit_state dflags (ue_hpt old_unit_env) (Just home_unit))
           , ue_eps       = ue_eps old_unit_env
           , ue_module_graph = ue_module_graph old_unit_env
+          , ue_uic = ue_uic old_unit_env
           }
     setSession $ hscSetFlags dflags $ hsc_env { hsc_unit_env = unit_env }
 
