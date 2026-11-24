@@ -1,0 +1,107 @@
+#!/usr/bin/env python3
+"""Exercise real COFF data processing and required process-service rejection.
+
+The COFF compiler must genuinely target x86_64 Windows. The host compiler and
+configuration must describe the running non-Windows host. No fixture code runs.
+"""
+from __future__ import annotations
+
+import argparse
+import os
+from pathlib import Path
+import platform
+import shlex
+import subprocess
+import tempfile
+
+ROOT = Path(__file__).resolve().parents[3]
+
+
+def run(command: list[str]) -> None:
+    print("+ " + shlex.join(command), flush=True)
+    subprocess.run(command, cwd=ROOT, timeout=90, check=True)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--cc", default=os.environ.get("CC", "cc"))
+    parser.add_argument("--coff-cc", required=True)
+    parser.add_argument("--native-archive", type=Path, required=True)
+    parser.add_argument("--config-include", type=Path, required=True)
+    parser.add_argument("--fs-include", type=Path, required=True)
+    parser.add_argument("--rts-fs-archive", type=Path)
+    args = parser.parse_args()
+    host = platform.system()
+    if host not in ("Darwin", "Linux"):
+        parser.error("requires a real Darwin or Linux host")
+    if host == "Linux" and args.rts_fs_archive is None:
+        parser.error("Linux requires --rts-fs-archive")
+    for name in ("ll_autoconf.h", "ll_platform.h"):
+        if not (args.config_include / name).is_file():
+            parser.error(f"missing generated configuration header {name}")
+    cc = shlex.split(args.cc)
+    flags = ["-std=c11", "-Wall", "-Wextra", "-Werror=vla", "-pedantic",
+             "-DLL_ASSERTS", "-I", str(args.config_include),
+             "-I", str(args.fs_include), "-I", str(ROOT / "liblink/include"),
+             "-I", str(ROOT / "liblink/src")]
+    with tempfile.TemporaryDirectory(prefix="liblink-pe-portable-") as directory:
+        output = Path(directory)
+        fixture = output / "data.c"
+        # One symbol produces an unaligned string table with MinGW GCC.
+        fixture.write_text("int ll_pe_portable_data = 0x13579bdf;\n")
+        coff = output / "data.obj"
+        run(shlex.split(args.coff_cc) + ["-c", str(fixture), "-o", str(coff)])
+        data = coff.read_bytes()
+        symtab = int.from_bytes(data[8:12], "little")
+        symbols = int.from_bytes(data[12:16], "little")
+        strtab = symtab + 18 * symbols
+        if strtab % 4 == 0:
+            raise RuntimeError("fixture did not produce an unaligned COFF string table")
+        noexec = output / "noexec.o"
+        run(cc + flags + ["-DLL_ALL_BACKENDS", "-DLL_TARGET_ARCH=2", "-c",
+                         str(ROOT / "liblink/src/ll_noexec.c"), "-o", str(noexec)])
+        symbol_info = output / "RtsSymbolInfo.o"
+        run(cc + flags + ["-DLL_ALL_BACKENDS", "-DLL_TARGET_ARCH=2", "-c",
+                         str(ROOT / "liblink/src/RtsSymbolInfo.c"), "-o", str(symbol_info)])
+        backend = output / "PEi386.o"
+        run(cc + flags + ["-DLL_ALL_BACKENDS", "-DLL_TARGET_ARCH=2", "-c",
+                         str(ROOT / "liblink/src/linker/PEi386.c"), "-o", str(backend)])
+        binary = output / "pei386_portable_data"
+        libraries = ([str(args.rts_fs_archive)] if args.rts_fs_archive else [])
+        libraries += ["-pthread"] + (["-ldl"] if host == "Linux" else [])
+        static_extra = output / "pei386_static_extra"
+        run(cc + flags + ["-DLL_ALL_BACKENDS", "-DLL_TARGET_ARCH=2",
+                          str(ROOT / "liblink/tests/unit/pei386_static_extra.c"),
+                          str(noexec), str(symbol_info), str(args.native_archive), *libraries, "-o", str(static_extra)])
+        run([str(static_extra)])
+        run(cc + flags + ["-DLL_ALL_BACKENDS", "-DLL_TARGET_ARCH=2",
+                          str(ROOT / "liblink/tests/unit/pei386_portable_data.c"),
+                          str(backend), str(noexec), str(symbol_info), str(args.native_archive), *libraries,
+                          "-o", str(binary)])
+        run([str(binary), str(coff)])
+        names_source = output / "common_names.c"
+        names_source.write_text("int ll_pe_portable_data = 0x13579bdf;\n"
+                                "int commonxx;\n")
+        names_object = output / "common_names.obj"
+        run(shlex.split(args.coff_cc) + ["-fcommon", "-c", str(names_source),
+                                        "-o", str(names_object)])
+        run([str(binary), str(names_object)])
+        run([str(binary), "--noexec", str(coff)])
+        common_source = output / "common.c"
+        common_source.write_text("int ll_pe_portable_data;\n")
+        common_object = output / "common.obj"
+        run(shlex.split(args.coff_cc) + ["-fcommon", "-c", str(common_source),
+                                        "-o", str(common_object)])
+        run([str(binary), "--noexec", "--common", str(common_object)])
+        comdat = output / "pei386_comdat"
+        run(cc + flags + ["-DLL_ALL_BACKENDS", "-DLL_TARGET_ARCH=2",
+                          str(ROOT / "liblink/tests/unit/pei386_comdat.c"),
+                          str(backend), str(noexec), str(symbol_info), str(args.native_archive), *libraries,
+                          "-o", str(comdat)])
+        fixtures = ROOT / "liblink/tests/fixtures/generated/coff-x86_64"
+        run([str(comdat), str(fixtures / "COMDAT.o"),
+             str(fixtures / "COMDAT-duplicate.o")])
+
+
+if __name__ == "__main__":
+    main()

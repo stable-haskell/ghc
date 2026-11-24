@@ -1,0 +1,134 @@
+{
+  "fields": [
+    {
+      "A": 8,
+      "P": "0x1021f8004",
+      "after": "",
+      "before": "",
+      "expected": "",
+      "offset": 4,
+      "section": 0,
+      "type": "ARM64_RELOC_ADDEND"
+    },
+    {
+      "A": 8,
+      "P": "0x1021f8004",
+      "S": "0x1021c31c8",
+      "after": "00400791",
+      "before": "00000091",
+      "expected": "00400791",
+      "offset": 4,
+      "section": 0,
+      "symbol": "_ll_fixture_target",
+      "type": "ARM64_RELOC_PAGEOFF12"
+    },
+    {
+      "A": 8,
+      "P": "0x1021f8000",
+      "after": "",
+      "before": "",
+      "expected": "",
+      "offset": 0,
+      "section": 0,
+      "type": "ARM64_RELOC_ADDEND"
+    },
+    {
+      "A": 8,
+      "P": "0x1021f8000",
+      "S": "0x1021c31c8",
+      "after": "40fefff0",
+      "before": "00000090",
+      "expected": "40fefff0",
+      "offset": 0,
+      "section": 0,
+      "symbol": "_ll_fixture_target",
+      "type": "ARM64_RELOC_PAGE21"
+    }
+  ],
+  "format": "Mach-O arm64",
+  "got_slots": {
+    "_ll_fixture_target": "0x1021fc008"
+  },
+  "object_sha256": "040e0fdb3c95dc857006b10f3d1400682f9d28e29131a3a50f15cd1e922e9729",
+  "reference_layout": {
+    "got": {
+      "address": "0x1021fc000",
+      "bytes": "00801f0201000000c8311c0201000000",
+      "capture_phase": "after-resolve-before-init",
+      "size": 16
+    },
+    "host_symbols": {
+      "___cxa_atexit": "0x1021c3a58",
+      "___cxa_finalize": "0x1021c3adc",
+      "_fixture_record_event": "0x1021c31dc",
+      "_ll_fixture_target": "0x1021c31c8"
+    },
+    "image_base": "0x1021f4000",
+    "sections": [
+      {
+        "address": "0x1021f8000",
+        "index": 0,
+        "relocated_bytes": "40fefff000400791c0035fd6",
+        "size": 12
+      }
+    ],
+    "stubs": [
+      {
+        "capture_phase": "after-resolve-before-init",
+        "count": 0,
+        "entries": [],
+        "reserved_bytes": "",
+        "reserved_size": 0,
+        "reserved_start": "0x1021f800c",
+        "section_index": 0
+      }
+    ]
+  },
+  "schema": 1,
+  "semantic": [
+    {
+      "A": 8,
+      "offset": 4,
+      "section": 0,
+      "type": "ARM64_RELOC_ADDEND"
+    },
+    {
+      "A": 8,
+      "S": {
+        "kind": "host-symbol",
+        "name": "_ll_fixture_target"
+      },
+      "before": "00000091",
+      "destination": {
+        "kind": "host-symbol",
+        "name": "_ll_fixture_target"
+      },
+      "offset": 4,
+      "section": 0,
+      "symbol": "_ll_fixture_target",
+      "type": "ARM64_RELOC_PAGEOFF12"
+    },
+    {
+      "A": 8,
+      "offset": 0,
+      "section": 0,
+      "type": "ARM64_RELOC_ADDEND"
+    },
+    {
+      "A": 8,
+      "S": {
+        "kind": "host-symbol",
+        "name": "_ll_fixture_target"
+      },
+      "before": "00000090",
+      "destination": {
+        "kind": "host-symbol",
+        "name": "_ll_fixture_target"
+      },
+      "offset": 0,
+      "section": 0,
+      "symbol": "_ll_fixture_target",
+      "type": "ARM64_RELOC_PAGE21"
+    }
+  ]
+}

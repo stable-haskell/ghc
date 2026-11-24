@@ -17,7 +17,6 @@
 #include "HsFFI.h"
 
 #include "sm/Storage.h"
-#include "linker/MMap.h"
 #include "RtsFlags.h"
 #include "RtsUtils.h"
 #include "BuiltinClosures.h"
@@ -45,7 +44,8 @@
 #include "Timer.h"
 #include "Globals.h"
 #include "FileLock.h"
-#include "LinkerInternals.h"
+#include "liblink/rts_friend.h"
+#include "LinkerGlue.h"
 #include "LibdwPool.h"
 #include "sm/CNF.h"
 #include "TopHandler.h"
@@ -497,6 +497,9 @@ hs_init_ghc(int *argc, char **argv[], RtsConfig rts_config)
         DEBUG_LoadSymbols((*argv)[0]);
 #endif /* DEBUG */
     }
+
+    /* Install linker services before adjustors can allocate executable memory. */
+    ll_rts_install_host();
 
     /* Based on the RTS flags, decide which I/O manager to use. */
     selectIOManager();

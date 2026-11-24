@@ -1,0 +1,102 @@
+{
+  "capture": {
+    "events_after_resolve": [],
+    "extras": {
+      "address": "0x10d7a8000",
+      "bytes": "0000000000000000000000000000000000000000000000000000000000000000",
+      "count": 2,
+      "stride": 16
+    },
+    "format": "Mach-O",
+    "got": null,
+    "host": "x86_64-apple-darwin",
+    "host_symbols": {
+      "___cxa_atexit": "0x104b032d8",
+      "___cxa_finalize": "0x104b03838",
+      "_fixture_record_event": "0x104afc2b8",
+      "_ll_fixture_target": "0x104afc298"
+    },
+    "image_base": "0x10d7a7000",
+    "input": "liblink/tests/fixtures/generated/macho-x86_64/X86_64_RELOC_UNSIGNED.o",
+    "input_size": 488,
+    "object_bytes": "cffaedfe0700000103000000010000000400000068010000000000000000000019000000e8000000000000000000000000000000000000000000000000000000080000000000000088010000000000000800000000000000070000000700000002000000000000005f5f74657874000000000000000000005f5f54455854000000000000000000000000000000000000000000000000000088010000000000000000000000000000000000800000000000000000000000005f5f64617461000000000000000000005f5f444154410000000000000000000000000000000000000800000000000000880100000300000090010000010000000000000000000000000000000000000032000000180000000100000000000b00000000000000000002000000180000009801000002000000b8010000300000000b000000500000000000000000000000000000000100000001000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000e140000000f020000000000000000000001000000010000000000000000000000005f6c6c5f666978747572655f746172676574005f6c6c5f666978747572655f756e7369676e65640000000000000000",
+    "section_count": 2,
+    "sections": [
+      {
+        "alloc": 0,
+        "index": 0,
+        "kind": 0,
+        "mapped_start": null,
+        "name": null,
+        "post_init_live_bytes": "",
+        "pre_init_relocated_bytes": "",
+        "pre_resolve_bytes": "",
+        "relocation_count": 0,
+        "relocations": [],
+        "segment": null,
+        "size": 0,
+        "vmaddr": null
+      },
+      {
+        "alloc": 0,
+        "index": 1,
+        "kind": 1,
+        "mapped_start": "0x10d7a6000",
+        "name": "__data",
+        "post_init_live_bytes": "98c2af0401000000",
+        "pre_init_relocated_bytes": "98c2af0401000000",
+        "pre_resolve_bytes": "0000000000000000",
+        "relocation_count": 1,
+        "relocations": [
+          {
+            "A": {
+              "explicit_addend": null,
+              "implicit_field_bytes": "0000000000000000",
+              "implicit_field_width": 8
+            },
+            "P": "0x10d7a6000",
+            "S": {
+              "input": "0x104afc298",
+              "input_source": "host-symbol-map",
+              "observed": null
+            },
+            "after": "98c2af0401000000",
+            "before": "0000000000000000",
+            "got_slot": null,
+            "raw": {
+              "r_address": 0,
+              "r_extern": 1,
+              "r_length": 3,
+              "r_pcrel": 0,
+              "r_symbolnum": 1,
+              "r_type": 0,
+              "record_bytes": "000000000100000e"
+            },
+            "relocation_index": 0,
+            "section_index": 1,
+            "symbol": "_ll_fixture_target",
+            "type": "X86_64_RELOC_UNSIGNED",
+            "type_number": 0
+          }
+        ],
+        "segment": "__DATA",
+        "size": 8,
+        "vmaddr": "0x0"
+      }
+    ],
+    "stubs": []
+  },
+  "checked": {
+    "object_sha256": "f5f99560bf11e12a416ade0af1600d2b1705b17f56c0cebd1a2f09c80bd92080",
+    "semantic": [
+      {
+        "addend": "0x0",
+        "extra": null,
+        "offset": 0,
+        "section": 1,
+        "symbol": "_ll_fixture_target",
+        "type": "X86_64_RELOC_UNSIGNED"
+      }
+    ]
+  }
+}

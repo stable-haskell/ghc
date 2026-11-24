@@ -1,0 +1,17 @@
+/* Generated host-platform macros, matching ghcplatform.h spellings. */
+#ifndef LIBLINK_LL_PLATFORM_H
+#define LIBLINK_LL_PLATFORM_H
+
+#define @HostArch_CPP@_HOST_ARCH 1
+#define @HostOS_CPP@_HOST_OS 1
+
+/* Preserve the early platform setup from the RTS platform forwarder. */
+#if defined(mingw32_HOST_OS)
+#define __MSVCRT__ 1
+#endif
+
+#if !defined(_REENTRANT)
+#define _REENTRANT 1
+#endif
+
+#endif /* LIBLINK_LL_PLATFORM_H */

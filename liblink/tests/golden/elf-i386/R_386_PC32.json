@@ -1,0 +1,84 @@
+{
+  "field": {
+    "P": "0x425324",
+    "S": "0x426360",
+    "after": "3c100000",
+    "before": "00000000"
+  },
+  "machine": 3,
+  "object_sha256": "a091a443798c896411dc1d6b8c86e68808d3c2623c9829462657590d129d1a46",
+  "reference_capture": {
+    "error": "",
+    "extras": {
+      "address": "0x0",
+      "after": "",
+      "before": "",
+      "count": 0,
+      "exec_address": "0x0",
+      "first": 0,
+      "jump_offset": 8,
+      "stride": 0
+    },
+    "got": {
+      "address": "0x4083d000",
+      "after": "2453420060634200",
+      "exec_address": "0x4083d000",
+      "size": 8
+    },
+    "host_symbols": {
+      "external_data": "0x12345000",
+      "external_function": "0x426360",
+      "external_function_alias": "0x426360",
+      "external_second_function": "0x427360"
+    },
+    "initializers_ran": false,
+    "noexec": false,
+    "resolved": true,
+    "schema": "liblink-elf-native-address-v1",
+    "sections": [
+      {
+        "address": "0x425360",
+        "after": "002e72656c2e746578740065787465726e616c5f66756e6374696f6e002e737472746162002e73796d74616200666978747572655f693338365f7063333200",
+        "before": "002e72656c2e746578740065787465726e616c5f66756e6374696f6e002e737472746162002e73796d74616200666978747572655f693338365f7063333200",
+        "exec_address": "0x425360",
+        "index": 1,
+        "size": 63
+      },
+      {
+        "address": "0x425324",
+        "after": "3c100000",
+        "before": "00000000",
+        "exec_address": "0x425324",
+        "index": 2,
+        "size": 4
+      },
+      {
+        "address": "0x425358",
+        "after": "0000000002020000",
+        "before": "0000000002020000",
+        "exec_address": "0x425358",
+        "index": 3,
+        "size": 8
+      },
+      {
+        "address": "0x425328",
+        "after": "000000000000000000000000000000002d0000000000000000000000100002000b000000000000000000000010000000",
+        "before": "000000000000000000000000000000002d0000000000000000000000100002000b000000000000000000000010000000",
+        "exec_address": "0x425328",
+        "index": 4,
+        "size": 48
+      }
+    ],
+    "status": 0
+  },
+  "schema": 1,
+  "semantic": {
+    "addend": 0,
+    "got_slot": null,
+    "offset": 0,
+    "section": 2,
+    "symbol": "external_function",
+    "type": "PC32",
+    "veneer": false
+  }
+}

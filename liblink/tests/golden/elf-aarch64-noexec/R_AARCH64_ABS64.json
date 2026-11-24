@@ -1,0 +1,192 @@
+{
+  "fields": [
+    {
+      "A": 0,
+      "GOT_S": null,
+      "P": "0x10002000",
+      "S": "0x100040f0",
+      "after": "f040001000000000",
+      "before": "0000000000000000",
+      "expected": "f040001000000000",
+      "offset": 0,
+      "section": 3,
+      "type": "R_AARCH64_ABS64",
+      "value": 268452080
+    }
+  ],
+  "format": "ELF AArch64",
+  "noexec_image": {
+    "got": {
+      "exec_address": "0x10005000",
+      "sha256": "246eab3a05a7f5ebd2d8400a3b41885b1f354704b1f201c4c994e99d4fcdd370"
+    },
+    "sections": [
+      {
+        "exec_address": "0x10000000",
+        "index": 1,
+        "sha256": "d87e73be36b3accc5682bf22e780c76c96b9a2e23aacb771a02e2b404e8d5f17",
+        "stubs_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "exec_address": "0x10002000",
+        "index": 3,
+        "sha256": "5233515a773dd64c9253198ebabe1f3fb2cceaf648f2258dba4c4fc08d7432b6",
+        "stubs_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "exec_address": "0x10003000",
+        "index": 4,
+        "sha256": "89fc45c143a3b0eb0f1bff1514d13f9afd224e05c02c948ca401bf10c1ce069d",
+        "stubs_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "exec_address": "0x10004000",
+        "index": 5,
+        "sha256": "6a49dc12fa5165c80dab1bef01b136566b9854403c95be1768296acfd5ffc394",
+        "stubs_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    ]
+  },
+  "object_sha256": "7caf448101e27be6077c2b7cb627dd0da2f495f7f60d22fbd1163206dc9c8460",
+  "reference_capture": {
+    "error": "",
+    "extras": {
+      "address": "0x0",
+      "after": "",
+      "before": "",
+      "count": 4,
+      "exec_address": "0x0",
+      "first": 0,
+      "jump_offset": 8,
+      "stride": 0
+    },
+    "got": {
+      "address": "0x603000001c60",
+      "after": "00200010000000000020001000000000f040001000000000",
+      "exec_address": "0x10005000",
+      "size": 24
+    },
+    "host_symbols": {
+      "external_data": "0x100040f0",
+      "external_function": "0x10003000",
+      "external_function_alias": "0x10003000",
+      "external_second_function": "0x10004000"
+    },
+    "initializers_ran": false,
+    "noexec": true,
+    "resolved": true,
+    "schema": "liblink-elf-native-address-v1",
+    "sections": [
+      {
+        "address": "0x607000000090",
+        "after": "002e74657874002464002e737472746162002e73796d7461620065787465726e616c5f64617461002e72656c612e6461746100666978747572655f616172636836345f616273363400",
+        "before": "002e74657874002464002e737472746162002e73796d7461620065787465726e616c5f64617461002e72656c612e6461746100666978747572655f616172636836345f616273363400",
+        "exec_address": "0x10000000",
+        "index": 1,
+        "size": 73,
+        "stubs": {
+          "address": "0x0",
+          "after": "",
+          "before": "",
+          "entries": [],
+          "size": 0
+        }
+      },
+      {
+        "address": "0x602000000110",
+        "after": "f040001000000000",
+        "before": "0000000000000000",
+        "exec_address": "0x10002000",
+        "index": 3,
+        "size": 8,
+        "stubs": {
+          "address": "0x0",
+          "after": "",
+          "before": "",
+          "entries": [],
+          "size": 0
+        }
+      },
+      {
+        "address": "0x603000001c00",
+        "after": "000000000000000001010000030000000000000000000000",
+        "before": "000000000000000001010000030000000000000000000000",
+        "exec_address": "0x10003000",
+        "index": 4,
+        "size": 24,
+        "stubs": {
+          "address": "0x0",
+          "after": "",
+          "before": "",
+          "entries": [],
+          "size": 0
+        }
+      },
+      {
+        "address": "0x60b000000040",
+        "after": "0000000000000000000000000000000000000000000000000700000000000300000000000000000000000000000000003300000010000300000000000000000000000000000000001a0000001000000000000000000000000000000000000000",
+        "before": "0000000000000000000000000000000000000000000000000700000000000300000000000000000000000000000000003300000010000300000000000000000000000000000000001a0000001000000000000000000000000000000000000000",
+        "exec_address": "0x10004000",
+        "index": 5,
+        "size": 96,
+        "stubs": {
+          "address": "0x0",
+          "after": "",
+          "before": "",
+          "entries": [],
+          "size": 0
+        }
+      }
+    ],
+    "status": 0
+  },
+  "schema": 1,
+  "semantic": {
+    "extras": {
+      "count": 4,
+      "first": 0,
+      "stride": 0
+    },
+    "relocations": [
+      {
+        "A": 0,
+        "S_origin": {
+          "kind": "host-symbol",
+          "name": "external_data"
+        },
+        "got_slot": null,
+        "offset": 0,
+        "raw_symbol_type": 0,
+        "section": 3,
+        "stub_ordinal": null,
+        "symbol": "external_data",
+        "symbol_index": 3,
+        "symbol_table": 5,
+        "type": "R_AARCH64_ABS64",
+        "width": 8
+      }
+    ],
+    "sections": [
+      {
+        "index": 1,
+        "name": ".strtab",
+        "size": 73
+      },
+      {
+        "index": 3,
+        "name": ".data",
+        "size": 8
+      },
+      {
+        "index": 4,
+        "name": ".rela.data",
+        "size": 24
+      },
+      {
+        "index": 5,
+        "name": ".symtab",
+        "size": 96
+      }
+    ]
+  }
+}

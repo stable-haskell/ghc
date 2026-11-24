@@ -6,43 +6,33 @@ on:
   push:
     branches: [stable-ghc-9.14, stable-ghc-9.14-rebased, stable-master]
   workflow_dispatch:
+    inputs:
+      qualification:
+        description: Select the full workflow or one focused native platform qualification
+        required: true
+        type: choice
+        options:
+          - full
+          - linux-native
+          - windows-native
+        default: full
 
 env:
   CABAL_CACHE_PATH: _build/cabal/bin
 
 jobs:
   cabal:
+    if: ${{ inputs.qualification != 'windows-native' }}
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - plat: x86_64-linux
-            runner: ubuntu-24.04
-            ghc: '98'
-            dynamic: 0
-          - plat: x86_64-linux
-            runner: ubuntu-24.04
-            ghc: '98'
-            dynamic: 1
-          # - plat: aarch64-linux  # disabled: waiting for devx images to be fixed
-          #   runner: ubuntu-24.04-arm
-          #   ghc: '98'
-          #   dynamic: 0
-          # - plat: aarch64-linux
-          #   runner: ubuntu-24.04-arm
-          #   ghc: '98'
-          #   dynamic: 1
-          - plat: aarch64-darwin
-            runner: macos-latest
-            ghc: '98'
-            dynamic: 0
-          - plat: aarch64-darwin
-            runner: macos-latest
-            ghc: '98'
-            dynamic: 1
+        plat: ${{ fromJSON(inputs.qualification == 'linux-native' && '["x86_64-linux"]' || '["x86_64-linux","aarch64-darwin"]') }}
+        dynamic: ${{ fromJSON(inputs.qualification == 'linux-native' && '[0]' || '[0,1]') }}
+        ghc: ['98']
+        # aarch64-linux remains disabled while its devx image is unavailable.
 
     name: "${{ matrix.plat }} / ghc ${{ matrix.ghc }} / dynamic=${{ matrix.dynamic }}"
-    runs-on: ${{ matrix.runner }}
+    runs-on: ${{ matrix.plat == 'x86_64-linux' && 'ubuntu-24.04' || 'macos-latest' }}
 
     steps:
     - uses: actions/checkout@v4
@@ -110,14 +100,76 @@ jobs:
         rm -rf "${CABAL_DIR:-$GITHUB_WORKSPACE/_build/cabal-dir}/packages/" 2>/dev/null || true
 
     - name: Build stage2 (dynamic=${{ matrix.dynamic }})
+      id: stage2_build
       shell: devx {0}
       timeout-minutes: 90
       run: |
         set -eo pipefail
         export CABAL_DIR="$GITHUB_WORKSPACE/_build/cabal-dir"
         export TMPDIR="$GITHUB_WORKSPACE/_build/tmp"
-        mkdir -p "$TMPDIR"
-        make QUIET=1 DYNAMIC=${{ matrix.dynamic }} CABAL_ARGS="-j2" USE_SYSTEM_CABAL=1 stage2
+        mkdir -p "$TMPDIR" _build/logs
+        stage2_cabal_args="-j2"
+        if [ "${{ matrix.dynamic }}" = "1" ]; then
+          stage2_cabal_args="$stage2_cabal_args -v2"
+        fi
+        make QUIET=1 DYNAMIC=${{ matrix.dynamic }} CABAL_ARGS="$stage2_cabal_args" USE_SYSTEM_CABAL=1 stage2 \
+          2>&1 | tee _build/logs/stage2-build.log
+
+    - name: Check liblink native shared-link dependencies
+      if: ${{ matrix.dynamic == 1 }}
+      shell: devx {0}
+      timeout-minutes: 5
+      run: |
+        set -eo pipefail
+        python3 liblink/tests/unit/test_native_shared_link_logs.py
+        python3 liblink/tests/unit/native_shared_link.py \
+          --build-log _build/logs/stage2-build.log \
+          --package-log-root _build/stage2/logs \
+          --out _build/logs/native-shared-link \
+          2>&1 | tee _build/logs/liblink-native-shared-link.log
+
+    - name: Run liblink native C units
+      if: ${{ matrix.dynamic == 0 }}
+      shell: devx {0}
+      run: python3 liblink/tests/unit/run_native_tests.py
+
+    - name: Run sanitized liblink C units
+      if: ${{ matrix.dynamic == 0 && matrix.plat == 'x86_64-linux' }}
+      shell: devx {0}
+      timeout-minutes: 20
+      run: |
+        set -eo pipefail
+        mkdir -p _build/logs
+        python3 liblink/tests/unit/test_run_sanitized_tests.py 2>&1 | tee _build/logs/liblink-sanitized-driver.log
+        ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
+          python3 liblink/tests/unit/run_sanitized_tests.py \
+            --output-dir _build/liblink-sanitized \
+            --timeout 900 --command-timeout 300 \
+          2>&1 | tee _build/logs/liblink-sanitized.log
+
+    - name: Run all-backend sanitized liblink C units
+      if: ${{ matrix.dynamic == 0 && matrix.plat == 'x86_64-linux' }}
+      shell: devx {0}
+      timeout-minutes: 20
+      run: |
+        set -eo pipefail
+        mkdir -p _build/logs
+        ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
+          python3 liblink/tests/unit/run_sanitized_tests.py \
+            --all-backends --output-dir _build/liblink-all-backends-sanitized \
+            --timeout 900 --command-timeout 300 \
+          2>&1 | tee _build/logs/liblink-sanitized-all-backends.log
+
+    - name: Upload liblink sanitizer results
+      if: ${{ always() && matrix.dynamic == 0 && matrix.plat == 'x86_64-linux' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: liblink-linux-sanitizer-results
+        if-no-files-found: ignore
+        path: |
+          _build/liblink-sanitized/sanitized-run.json
+          _build/liblink-all-backends-sanitized/sanitized-run.json
+          _build/logs/liblink-sanitized*.log
 
     - name: Display build timings
       if: ${{ !cancelled() }}
@@ -137,16 +189,40 @@ jobs:
         name: ${{ matrix.plat }}-dynamic${{ matrix.dynamic }}-build-logs
         path: |
           _build/logs/
+          _build/stage2/logs/host/*/liblink-0.1.0.0
           _build/timing/
 
     - name: Run the testsuite (dynamic=${{ matrix.dynamic }})
+      if: ${{ inputs.qualification != 'linux-native' && inputs.qualification != 'windows-native' }}
       shell: devx {0}
       run: |
         set -eo pipefail
         export CABAL_DIR="$GITHUB_WORKSPACE/_build/cabal-dir"
         export TMPDIR="$GITHUB_WORKSPACE/_build/tmp"
         mkdir -p "$TMPDIR"
-        make test QUIET=1 DYNAMIC=${{ matrix.dynamic }} USE_SYSTEM_CABAL=1
+        make test QUIET=1 DYNAMIC=${{ matrix.dynamic }} USE_SYSTEM_CABAL=1 VERBOSE=3 2>&1 | tee _build/test-run.log
+
+    - name: Collect unpacked sums phase timings
+      if: ${{ !cancelled() && steps.stage2_build.outcome == 'success' }}
+      shell: devx {0}
+      timeout-minutes: 20
+      run: |
+        set -eo pipefail
+        mkdir -p _build/logs
+        python3 .github/scripts/measure-unpack-sums.py \
+          --ghc "$GITHUB_WORKSPACE/_build/dist/bin/ghc" \
+          --output-dir "$GITHUB_WORKSPACE/_build/unpack-sums-timings" \
+          2>&1 | tee _build/logs/unpack-sums-timings.log
+
+    - name: Upload unpacked sums timing diagnostics
+      if: ${{ !cancelled() }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.plat }}-dynamic${{ matrix.dynamic }}-unpack-sums-timings
+        if-no-files-found: ignore
+        path: |
+          _build/unpack-sums-timings/
+          _build/logs/unpack-sums-timings.log
 
     - name: Stop metrics collection
       if: ${{ !cancelled() }}
@@ -263,6 +339,7 @@ jobs:
           _build/test-perf.csv
           _build/test-summary.txt
           _build/test-junit.xml
+          _build/test-run.log
           _build/timing/
 
     - name: Upload metrics
@@ -272,3 +349,149 @@ jobs:
         name: ${{ matrix.plat }}-dynamic${{ matrix.dynamic }}-metrics
         path: |
           _build/metrics/
+
+  windows-native-foundation:
+    if: ${{ inputs.qualification != 'linux-native' }}
+    name: Windows native liblink foundation unit
+    runs-on: windows-latest
+    timeout-minutes: 360
+    env:
+      CABAL_DIR: "C:\\Users\\runneradmin\\AppData\\Roaming\\cabal"
+      GHCUP_INSTALL_BASE_PREFIX: "C:\\"
+      GHCUP_MSYS2: "C:/msys64"
+      GHCUP_MSYS2_ENV: CLANG64
+      MSYSTEM: CLANG64
+      CHERE_INVOKING: 1
+      GHC_VERSION: "9.8.4"
+      CABAL_VERSION: "3.14.2.0"
+      GHC_TARGETS: "install_bin install_lib update_package_db"
+    defaults:
+      run:
+        shell: 'C:/msys64/usr/bin/bash.exe --login -e {0}'
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: "recursive"
+
+    - name: Install MSYS2 CLANG64 dependencies
+      run: |
+        pacman --noconfirm -S --needed --overwrite '*' git vim winpty git tar bsdtar unzip binutils autoconf make xz curl libtool automake p7zip patch ca-certificates python3 zip mingw-w64-clang-x86_64-toolchain mingw-w64-clang-x86_64-gdb mingw-w64-clang-x86_64-python-sphinx mingw-w64-clang-x86_64-python-requests mingw-w64-clang-x86_64-tools-git mingw-w64-clang-x86_64-ghostscript tar gzip
+
+    - name: Install GHCup
+      uses: haskell/ghcup-setup@v1
+      with:
+        cabal: ${{ env.CABAL_VERSION }}
+
+    - name: Install GHC
+      shell: pwsh
+      run: ghcup --no-verbose install ghc --set --install-targets "${{ env.GHC_TARGETS }}" "${{ env.GHC_VERSION }}"
+
+    - name: Build stage1
+      timeout-minutes: 90
+      run: |
+        set -eo pipefail
+        export PATH="/c/ghcup/bin:$PATH"
+        mkdir -p _build/logs
+        cabal update 2>&1 | tee _build/logs/windows-cabal-update.log
+        make QUIET=1 DYNAMIC=0 CABAL_ARGS="-j2" stage1 2>&1 | tee _build/logs/windows-stage1.log
+
+    - name: Build stage2
+      id: windows_stage2_build
+      timeout-minutes: 120
+      run: |
+        set -eo pipefail
+        export PATH="/c/ghcup/bin:$PATH"
+        test -f _build/cabal/bin/cabal.exe
+        make QUIET=1 DYNAMIC=0 CABAL_ARGS="-j2" USE_SYSTEM_CABAL=1 stage2 2>&1 | tee _build/logs/windows-stage2.log
+
+    - name: Run Windows foundation-only C unit
+      if: ${{ !cancelled() && steps.windows_stage2_build.outcome == 'success' }}
+      run: |
+        set -eo pipefail
+        export PATH="/c/ghcup/bin:$PATH"
+        python3 liblink/tests/unit/run_native_tests.py --foundation-only --cc clang 2>&1 | tee _build/logs/windows-liblink-foundation.log
+
+    - name: Run Windows format dispatch C unit
+      if: ${{ !cancelled() && steps.windows_stage2_build.outcome == 'success' }}
+      timeout-minutes: 5
+      run: |
+        set -eo pipefail
+        export PATH="/c/ghcup/bin:$PATH"
+        python3 liblink/tests/unit/run_native_tests.py --format-dispatch-only --cc clang 2>&1 | tee _build/logs/windows-liblink-format-dispatch.log
+
+    - name: Run Windows initializer error C units
+      if: ${{ !cancelled() && steps.windows_stage2_build.outcome == 'success' }}
+      timeout-minutes: 5
+      run: |
+        set -eo pipefail
+        export PATH="/c/ghcup/bin:$PATH"
+        LIBLINK_INIT_POLICY_TRACE=1 python3 liblink/tests/unit/run_native_tests.py --initializer-errors-only --cc 'clang -O0 -g' 2>&1 | tee _build/logs/windows-liblink-initializer-errors.log
+
+    - name: Run Windows PE resolution C units
+      if: ${{ !cancelled() && steps.windows_stage2_build.outcome == 'success' }}
+      timeout-minutes: 5
+      run: |
+        set -eo pipefail
+        export PATH="/c/ghcup/bin:$PATH"
+        python3 liblink/tests/unit/run_native_tests.py --pe-resolution-only --cc clang 2>&1 | tee _build/logs/windows-liblink-pe-resolution.log
+
+    - name: Run Windows PE load-resource C unit
+      if: ${{ !cancelled() && steps.windows_stage2_build.outcome == 'success' }}
+      timeout-minutes: 5
+      run: |
+        set -eo pipefail
+        export PATH="/c/ghcup/bin:$PATH"
+        python3 liblink/tests/unit/run_native_tests.py --pe-load-resources-only --cc clang 2>&1 | tee _build/logs/windows-liblink-pe-load-resources.log
+
+    - name: Run Windows path ownership C unit
+      if: ${{ !cancelled() && steps.windows_stage2_build.outcome == 'success' }}
+      timeout-minutes: 5
+      run: |
+        set -eo pipefail
+        export PATH="/c/ghcup/bin:$PATH"
+        python3 liblink/tests/unit/run_native_tests.py --path-ownership-only --cc clang 2>&1 | tee _build/logs/windows-liblink-path-ownership.log
+
+    - name: Run Windows M32 reservation C unit
+      if: ${{ !cancelled() && steps.windows_stage2_build.outcome == 'success' }}
+      timeout-minutes: 5
+      run: |
+        set -eo pipefail
+        export PATH="/c/ghcup/bin:$PATH"
+        python3 liblink/tests/unit/run_native_tests.py --windows-m32-only --cc clang 2>&1 | tee _build/logs/windows-liblink-m32.log
+
+    - name: Upload Windows C unit logs
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: windows-native-c-unit-logs
+        if-no-files-found: ignore
+        path: _build/logs/windows-liblink-*.log
+
+    - name: Run Windows focused linker testsuite
+      if: ${{ !cancelled() && steps.windows_stage2_build.outcome == 'success' }}
+      timeout-minutes: 180
+      run: |
+        set -eo pipefail
+        export PATH="/c/ghcup/bin:$PATH"
+        bash .github/scripts/run-windows-focused-tests.sh
+
+    - name: Upload Windows focused testsuite results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: windows-focused-testsuite-results
+        if-no-files-found: ignore
+        path: |
+          _build/logs/windows-focused/**
+          _build/logs/windows-liblink-path-ownership.log
+          _build/logs/windows-liblink-pe-resolution.log
+          _build/logs/windows-liblink-initializer-errors.log
+          _build/logs/windows-liblink-pe-load-resources.log
+
+    - name: Upload Windows build and unit logs on failure
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: windows-native-foundation-logs
+        if-no-files-found: ignore
+        path: _build/logs/*.log

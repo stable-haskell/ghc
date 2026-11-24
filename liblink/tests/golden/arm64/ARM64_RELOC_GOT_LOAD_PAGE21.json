@@ -1,0 +1,74 @@
+{
+  "fields": [
+    {
+      "A": 0,
+      "P": "0x1040f8000",
+      "S": "0x1040c31c8",
+      "after": "20000090",
+      "before": "00000090",
+      "expected": "20000090",
+      "offset": 0,
+      "section": 0,
+      "symbol": "_ll_fixture_target",
+      "type": "ARM64_RELOC_GOT_LOAD_PAGE21"
+    }
+  ],
+  "format": "Mach-O arm64",
+  "got_slots": {
+    "_ll_fixture_target": "0x1040fc008"
+  },
+  "object_sha256": "27ad81a1b9218416b476fecf92fff612e20b4d724f076f01c9d45ac32a58e627",
+  "reference_layout": {
+    "got": {
+      "address": "0x1040fc000",
+      "bytes": "00800f0401000000c8310c0401000000",
+      "capture_phase": "after-resolve-before-init",
+      "size": 16
+    },
+    "host_symbols": {
+      "___cxa_atexit": "0x1040c3a58",
+      "___cxa_finalize": "0x1040c3adc",
+      "_fixture_record_event": "0x1040c31dc",
+      "_ll_fixture_target": "0x1040c31c8"
+    },
+    "image_base": "0x1040f4000",
+    "sections": [
+      {
+        "address": "0x1040f8000",
+        "index": 0,
+        "relocated_bytes": "20000090c0035fd6",
+        "size": 8
+      }
+    ],
+    "stubs": [
+      {
+        "capture_phase": "after-resolve-before-init",
+        "count": 0,
+        "entries": [],
+        "reserved_bytes": "",
+        "reserved_size": 0,
+        "reserved_start": "0x1040f8008",
+        "section_index": 0
+      }
+    ]
+  },
+  "schema": 1,
+  "semantic": [
+    {
+      "A": 0,
+      "S": {
+        "kind": "host-symbol",
+        "name": "_ll_fixture_target"
+      },
+      "before": "00000090",
+      "destination": {
+        "kind": "got",
+        "offset": 8
+      },
+      "offset": 0,
+      "section": 0,
+      "symbol": "_ll_fixture_target",
+      "type": "ARM64_RELOC_GOT_LOAD_PAGE21"
+    }
+  ]
+}

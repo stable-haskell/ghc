@@ -1,0 +1,318 @@
+{
+  "archives": [
+    {
+      "features": [
+        "long-name",
+        "non-o-member"
+      ],
+      "format": "gnu",
+      "members": [
+        "R_386_32",
+        "R_386_PC32",
+        "R_386_GOT32",
+        "R_386_GOT32X",
+        "R_386_GOTPC",
+        "tls",
+        "common",
+        "common_strong",
+        "weak",
+        "strong",
+        "hidden",
+        "init_fini",
+        "legacy_ctors",
+        "long_archive_member"
+      ],
+      "path": "i386-linux-gnu/libelf-fixtures.a"
+    }
+  ],
+  "schema": 1,
+  "sources": [
+    {
+      "expected_outcome": "supported",
+      "expected_relocations": [
+        "R_386_32"
+      ],
+      "id": "R_386_32",
+      "language": "asm",
+      "object": "i386-linux-gnu/R_386_32.o",
+      "path": "src/elf-i386/R_386_32.s",
+      "triple": "i386-linux-gnu"
+    },
+    {
+      "expected_outcome": "supported",
+      "expected_relocations": [
+        "R_386_PC32"
+      ],
+      "id": "R_386_PC32",
+      "language": "asm",
+      "object": "i386-linux-gnu/R_386_PC32.o",
+      "path": "src/elf-i386/R_386_PC32.s",
+      "triple": "i386-linux-gnu"
+    },
+    {
+      "expected_outcome": "supported",
+      "expected_relocations": [
+        "R_386_GOT32"
+      ],
+      "id": "R_386_GOT32",
+      "language": "asm",
+      "object": "i386-linux-gnu/R_386_GOT32.o",
+      "path": "src/elf-i386/R_386_GOT32.s",
+      "triple": "i386-linux-gnu"
+    },
+    {
+      "expected_outcome": "supported",
+      "expected_relocations": [
+        "R_386_GOT32X"
+      ],
+      "id": "R_386_GOT32X",
+      "language": "asm",
+      "object": "i386-linux-gnu/R_386_GOT32X.o",
+      "path": "src/elf-i386/R_386_GOT32X.s",
+      "triple": "i386-linux-gnu"
+    },
+    {
+      "expected_outcome": "supported",
+      "expected_relocations": [
+        "R_386_GOTPC"
+      ],
+      "id": "R_386_GOTPC",
+      "language": "asm",
+      "object": "i386-linux-gnu/R_386_GOTPC.o",
+      "path": "src/elf-i386/R_386_GOTPC.s",
+      "triple": "i386-linux-gnu"
+    },
+    {
+      "expected_outcome": "metadata",
+      "expected_relocations": [
+        "R_386_GOTPC",
+        "R_386_TLS_GOTIE"
+      ],
+      "expected_sections": [
+        ".llvm_addrsig",
+        ".note.GNU-stack",
+        ".rel.text",
+        ".strtab",
+        ".symtab",
+        ".text"
+      ],
+      "expected_symbol": "fixture_external_tls",
+      "expected_symbol_binding": "Global",
+      "expected_symbol_section": "Undefined",
+      "expected_symbol_type": "TLS",
+      "expected_undefined_symbols": [
+        "_GLOBAL_OFFSET_TABLE_",
+        "fixture_external_tls"
+      ],
+      "features": [
+        "TLS"
+      ],
+      "id": "tls",
+      "language": "c",
+      "object": "i386-linux-gnu/tls.o",
+      "path": "src/elf-i386/tls.c",
+      "triple": "i386-linux-gnu"
+    },
+    {
+      "expected_outcome": "metadata",
+      "expected_relocations": [],
+      "expected_sections": [
+        ".llvm_addrsig",
+        ".note.GNU-stack",
+        ".strtab",
+        ".symtab",
+        ".text"
+      ],
+      "expected_symbol": "fixture_common",
+      "expected_symbol_binding": "Global",
+      "expected_symbol_section": "Common",
+      "expected_symbol_size": 4,
+      "expected_symbol_type": "Object",
+      "features": [
+        "COMMON"
+      ],
+      "id": "common",
+      "language": "c",
+      "object": "i386-linux-gnu/common.o",
+      "path": "src/elf-i386/common.c",
+      "triple": "i386-linux-gnu"
+    },
+    {
+      "expected_outcome": "metadata",
+      "expected_relocations": [],
+      "expected_sections": [
+        ".llvm_addrsig",
+        ".note.GNU-stack",
+        ".strtab",
+        ".symtab",
+        ".text"
+      ],
+      "expected_symbol": "fixture_override",
+      "expected_symbol_binding": "Weak",
+      "expected_symbol_section": ".text",
+      "expected_symbol_type": "Function",
+      "features": [
+        "weak-strong"
+      ],
+      "id": "weak",
+      "language": "c",
+      "object": "i386-linux-gnu/weak.o",
+      "path": "src/elf-i386/weak.c",
+      "triple": "i386-linux-gnu"
+    },
+    {
+      "expected_outcome": "metadata",
+      "expected_relocations": [],
+      "expected_sections": [
+        ".llvm_addrsig",
+        ".note.GNU-stack",
+        ".strtab",
+        ".symtab",
+        ".text"
+      ],
+      "expected_symbol": "fixture_override",
+      "expected_symbol_binding": "Global",
+      "expected_symbol_section": ".text",
+      "expected_symbol_type": "Function",
+      "features": [
+        "weak-strong"
+      ],
+      "id": "strong",
+      "language": "c",
+      "object": "i386-linux-gnu/strong.o",
+      "path": "src/elf-i386/strong.c",
+      "triple": "i386-linux-gnu"
+    },
+    {
+      "expected_outcome": "metadata",
+      "expected_relocations": [],
+      "expected_sections": [
+        ".llvm_addrsig",
+        ".note.GNU-stack",
+        ".strtab",
+        ".symtab",
+        ".text"
+      ],
+      "expected_symbol": "fixture_hidden",
+      "expected_symbol_binding": "Global",
+      "expected_symbol_section": ".text",
+      "expected_symbol_type": "Function",
+      "expected_visibility": "STV_HIDDEN",
+      "features": [
+        "hidden"
+      ],
+      "id": "hidden",
+      "language": "c",
+      "object": "i386-linux-gnu/hidden.o",
+      "path": "src/elf-i386/hidden.c",
+      "triple": "i386-linux-gnu"
+    },
+    {
+      "expected_outcome": "metadata",
+      "expected_relocations": [
+        "R_386_32",
+        "R_386_GOT32X",
+        "R_386_GOTOFF",
+        "R_386_GOTPC",
+        "R_386_PLT32"
+      ],
+      "expected_sections": [
+        ".fini_array",
+        ".init_array",
+        ".llvm_addrsig",
+        ".note.GNU-stack",
+        ".rel.fini_array",
+        ".rel.init_array",
+        ".rel.text",
+        ".strtab",
+        ".symtab",
+        ".text"
+      ],
+      "expected_undefined_symbols": [
+        "_GLOBAL_OFFSET_TABLE_",
+        "__cxa_atexit",
+        "__dso_handle",
+        "fixture_record_event"
+      ],
+      "features": [
+        "init_array",
+        "fini_array",
+        "__cxa_atexit",
+        "__dso_handle"
+      ],
+      "id": "init_fini",
+      "language": "c",
+      "object": "i386-linux-gnu/init_fini.o",
+      "path": "src/elf-i386/init_fini.c",
+      "triple": "i386-linux-gnu"
+    },
+    {
+      "expected_outcome": "metadata",
+      "expected_relocations": [
+        "R_386_32",
+        "R_386_GOTPC",
+        "R_386_PLT32"
+      ],
+      "expected_sections": [
+        ".ctors",
+        ".llvm_addrsig",
+        ".note.GNU-stack",
+        ".rel.ctors",
+        ".rel.text",
+        ".strtab",
+        ".symtab",
+        ".text"
+      ],
+      "expected_undefined_symbols": [
+        "_GLOBAL_OFFSET_TABLE_",
+        "fixture_record_event"
+      ],
+      "features": [
+        "legacy-ctors"
+      ],
+      "id": "legacy_ctors",
+      "language": "c",
+      "object": "i386-linux-gnu/legacy_ctors.o",
+      "path": "src/elf-i386/legacy_ctors.c",
+      "triple": "i386-linux-gnu"
+    },
+    {
+      "expected_outcome": "archive-only",
+      "expected_relocations": [],
+      "features": [
+        "archive-long-name",
+        "non-o-member"
+      ],
+      "id": "long_archive_member",
+      "language": "asm",
+      "object": "i386-linux-gnu/a_very_long_archive_member_filename_that_is_not_o.object",
+      "path": "src/elf-i386/long_archive_member.s",
+      "triple": "i386-linux-gnu"
+    },
+    {
+      "expected_outcome": "metadata",
+      "expected_relocations": [],
+      "expected_sections": [
+        ".data",
+        ".llvm_addrsig",
+        ".note.GNU-stack",
+        ".strtab",
+        ".symtab",
+        ".text"
+      ],
+      "expected_symbol": "fixture_common",
+      "expected_symbol_binding": "Global",
+      "expected_symbol_section": ".data",
+      "expected_symbol_size": 4,
+      "expected_symbol_type": "Object",
+      "features": [
+        "COMMON-strong"
+      ],
+      "id": "common_strong",
+      "language": "c",
+      "object": "i386-linux-gnu/common_strong.o",
+      "path": "src/elf-i386/common_strong.c",
+      "triple": "i386-linux-gnu"
+    }
+  ]
+}

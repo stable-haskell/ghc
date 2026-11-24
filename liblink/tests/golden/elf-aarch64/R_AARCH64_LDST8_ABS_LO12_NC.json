@@ -1,0 +1,160 @@
+{
+  "fields": [
+    {
+      "A": 0,
+      "GOT_S": null,
+      "P": "0x10f097018",
+      "S": "0x10f0990f0",
+      "after": "20c04339",
+      "before": "20004039",
+      "expected": "20c04339",
+      "offset": 0,
+      "section": 2,
+      "type": "R_AARCH64_LDST8_ABS_LO12_NC",
+      "value": 240
+    }
+  ],
+  "format": "ELF AArch64",
+  "object_sha256": "5360fb9073300dbf3330c604d0712ca56cac2ce409237b28ce3614431fd54c4b",
+  "reference_capture": {
+    "error": "",
+    "extras": {
+      "address": "0x10d405000",
+      "after": "",
+      "before": "",
+      "count": 4,
+      "exec_address": "0x10d405000",
+      "first": 0,
+      "jump_offset": 8,
+      "stride": 0
+    },
+    "got": {
+      "address": "0x10d405000",
+      "after": "1870090f010000001870090f01000000f090090f01000000",
+      "exec_address": "0x10d405000",
+      "size": 24
+    },
+    "host_symbols": {
+      "external_data": "0x10f0990f0",
+      "external_function": "0x10f098018",
+      "external_function_alias": "0x10f098018",
+      "external_second_function": "0x10f099018"
+    },
+    "initializers_ran": false,
+    "noexec": false,
+    "resolved": true,
+    "schema": "liblink-elf-native-address-v1",
+    "sections": [
+      {
+        "address": "0x10d4040c0",
+        "after": "002478002e72656c612e74657874002e737472746162002e73796d7461620065787465726e616c5f6461746100666978747572655f616172636836345f6c6473743800",
+        "before": "002478002e72656c612e74657874002e737472746162002e73796d7461620065787465726e616c5f6461746100666978747572655f616172636836345f6c6473743800",
+        "exec_address": "0x10d4040c0",
+        "index": 1,
+        "size": 67,
+        "stubs": {
+          "address": "0x0",
+          "after": "",
+          "before": "",
+          "entries": [],
+          "size": 0
+        }
+      },
+      {
+        "address": "0x10f097018",
+        "after": "20c04339",
+        "before": "20004039",
+        "exec_address": "0x10f097018",
+        "index": 2,
+        "size": 4,
+        "stubs": {
+          "address": "0x10f09701c",
+          "after": "",
+          "before": "",
+          "entries": [],
+          "size": 0
+        }
+      },
+      {
+        "address": "0x10d4040a8",
+        "after": "000000000000000016010000030000000000000000000000",
+        "before": "000000000000000016010000030000000000000000000000",
+        "exec_address": "0x10d4040a8",
+        "index": 3,
+        "size": 24,
+        "stubs": {
+          "address": "0x0",
+          "after": "",
+          "before": "",
+          "entries": [],
+          "size": 0
+        }
+      },
+      {
+        "address": "0x10d404048",
+        "after": "0000000000000000000000000000000000000000000000000100000000000200000000000000000000000000000000002d00000010000200000000000000000000000000000000001f0000001000000000000000000000000000000000000000",
+        "before": "0000000000000000000000000000000000000000000000000100000000000200000000000000000000000000000000002d00000010000200000000000000000000000000000000001f0000001000000000000000000000000000000000000000",
+        "exec_address": "0x10d404048",
+        "index": 4,
+        "size": 96,
+        "stubs": {
+          "address": "0x0",
+          "after": "",
+          "before": "",
+          "entries": [],
+          "size": 0
+        }
+      }
+    ],
+    "status": 0
+  },
+  "schema": 1,
+  "semantic": {
+    "extras": {
+      "count": 4,
+      "first": 0,
+      "stride": 0
+    },
+    "relocations": [
+      {
+        "A": 0,
+        "S_origin": {
+          "kind": "host-symbol",
+          "name": "external_data"
+        },
+        "got_slot": null,
+        "offset": 0,
+        "raw_symbol_type": 0,
+        "section": 2,
+        "stub_ordinal": null,
+        "symbol": "external_data",
+        "symbol_index": 3,
+        "symbol_table": 4,
+        "type": "R_AARCH64_LDST8_ABS_LO12_NC",
+        "width": 4
+      }
+    ],
+    "sections": [
+      {
+        "index": 1,
+        "name": ".strtab",
+        "size": 67
+      },
+      {
+        "index": 2,
+        "name": ".text",
+        "size": 4
+      },
+      {
+        "index": 3,
+        "name": ".rela.text",
+        "size": 24
+      },
+      {
+        "index": 4,
+        "name": ".symtab",
+        "size": 96
+      }
+    ]
+  }
+}

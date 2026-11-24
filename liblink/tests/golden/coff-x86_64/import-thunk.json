@@ -1,0 +1,20 @@
+{
+  "after": "ff25fa000000c3",
+  "before": "ff2500000000c3",
+  "format": "COFF AMD64",
+  "object_sha256": "36bf373570a3d0cba02d51abf2fb291cbe19a7067ff5897292e5f9aac42c9493",
+  "offset": 2,
+  "reference_capture": {
+    "after": "ff25fa000000c3",
+    "before": "ff2500000000c3",
+    "image_base": "0x1008abf18",
+    "offset": 2,
+    "schema": 1,
+    "section_address": "0x1008ac018",
+    "target": "0x1008ac118",
+    "type": 4
+  },
+  "schema": 1,
+  "section": ".text",
+  "type": 4
+}

@@ -9,7 +9,7 @@
 #pragma once
 
 #include "Rts.h"
-#include "LinkerInternals.h"
+#include "liblink/rts_friend.h"
 
 #include "BeginPrivate.h"
 

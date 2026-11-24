@@ -1,0 +1,212 @@
+{
+  "archive_formats": [
+    "gnu",
+    "bsd",
+    "thin"
+  ],
+  "artifacts": {
+    "x86_64-linux-gnu/R_X86_64_32.o": {
+      "sha256": "ad8568b9680521a6c47d9bb73ea10fd685aad3ee44c454947e8eed1e7bf171af",
+      "size": 624
+    },
+    "x86_64-linux-gnu/R_X86_64_32S.o": {
+      "sha256": "353aa468cf793d50c1664656f6cf317340d838f06379b3f1fde22172b535e3a0",
+      "size": 552
+    },
+    "x86_64-linux-gnu/R_X86_64_64.o": {
+      "sha256": "0d35a38980ae1bd68ad92c80d79f9aea34355aea67562cc1b9e23baca934e543",
+      "size": 624
+    },
+    "x86_64-linux-gnu/R_X86_64_GOTPCREL.o": {
+      "sha256": "74957e122a094b625ccd8da2daaba655b2eb70fc9bcd885af1741ba40fe0ce02",
+      "size": 560
+    },
+    "x86_64-linux-gnu/R_X86_64_GOTPCRELX.o": {
+      "sha256": "f0cc828c087a654b67c77769ba4e52964adcc3332670aafed720772d5ca9b85d",
+      "size": 560
+    },
+    "x86_64-linux-gnu/R_X86_64_PC32.o": {
+      "sha256": "c11c874a08e7a5d0de5baa3bc62eb2eb841b59349392e915ad07aaeabb7d8942",
+      "size": 560
+    },
+    "x86_64-linux-gnu/R_X86_64_PC64.o": {
+      "sha256": "39c2d4c723f796200394cd565cd5b37f9088160d0f2647952eef4b23786ab2df",
+      "size": 624
+    },
+    "x86_64-linux-gnu/R_X86_64_PLT32.o": {
+      "sha256": "1b40e4da9c43c364c15699a03f60e830777c8b1c59d6e3cb389828fc8425609c",
+      "size": 560
+    },
+    "x86_64-linux-gnu/R_X86_64_REX_GOTPCRELX.o": {
+      "sha256": "4dd5ca4717d508c9ac641096758526db9b456bf13131c3ad4a1baa787183bd1e",
+      "size": 560
+    },
+    "x86_64-linux-gnu/R_X86_64_TLSGD.o": {
+      "sha256": "5d28809446ed7d2ae66dba0c815c79e28b07771dc1026b15f7934dc482f29ffc",
+      "size": 624
+    },
+    "x86_64-linux-gnu/R_X86_64_TPOFF32.o": {
+      "sha256": "12d07001fdc58570713235c535bcab207aa27097d0e4e8334b024f1573e2c288",
+      "size": 552
+    },
+    "x86_64-linux-gnu/a_very_long_archive_member_filename_that_is_not_o.object": {
+      "sha256": "a87b024361d1c211051b3456e45e4cf3c1e55a0591bb207d2154b06232c4a37a",
+      "size": 432
+    },
+    "x86_64-linux-gnu/common.o": {
+      "sha256": "fdea29023315e3d3eade5e2ac359939c758f7bdce7d475527da67302770a0425",
+      "size": 600
+    },
+    "x86_64-linux-gnu/common_strong.o": {
+      "sha256": "d75b6ed10223a5661838aa654ec929da37a0b342689f79f4809244b0843d08df",
+      "size": 688
+    },
+    "x86_64-linux-gnu/hidden.o": {
+      "sha256": "5628e9c5a00a4c5893e9c286707780fb6a08f454a560666aac5b2e2edad967bd",
+      "size": 608
+    },
+    "x86_64-linux-gnu/init_fini.o": {
+      "sha256": "210fd138584108745b9e93b033947de25c7bd4612cb44df23ec0d8d4a317f198",
+      "size": 1456
+    },
+    "x86_64-linux-gnu/legacy_ctors.o": {
+      "sha256": "0c33f0e635be72ee76e98ea98057b757318c28edad3832ce607fd02c780667ca",
+      "size": 1016
+    },
+    "x86_64-linux-gnu/libelf-fixtures.a": {
+      "sha256": "0705162babd3cface075712057147bc33ee7e53d50cb54a80d98753fe9c57743",
+      "size": 15168
+    },
+    "x86_64-linux-gnu/libelf-longname-bsd.a": {
+      "sha256": "ac88015bbfca604a6a74b1347b1f87f0e8f53b88904167f83e8d84c733d3b413",
+      "size": 680
+    },
+    "x86_64-linux-gnu/libelf-longname-gnu.a": {
+      "sha256": "71daed42a0a029d466bbd2d69e59faff8b45588fbe599228e2d86fc09aa81430",
+      "size": 714
+    },
+    "x86_64-linux-gnu/libelf-longname-gnu64.a": {
+      "sha256": "5a178342d40b0aa7e6f7b46f880697faff905b932f8116cb294d33ab0fdc7d66",
+      "size": 722
+    },
+    "x86_64-linux-gnu/libelf-longname-thin.a": {
+      "sha256": "2ea5b7d04b6861114f666c8dc4f92f9eda5b3d803d8f620eccf6ea3b6619de59",
+      "size": 282
+    },
+    "x86_64-linux-gnu/strong.o": {
+      "sha256": "bf87f3809a01e70e7b74d0aa13e745412383c120649e9a91d5b27caf3f82668c",
+      "size": 608
+    },
+    "x86_64-linux-gnu/tls.o": {
+      "sha256": "f5731fad0d0d703435cfcdafbf09f793abeafd78656168e0f56a57db08a9aca7",
+      "size": 768
+    },
+    "x86_64-linux-gnu/weak.o": {
+      "sha256": "45f4e1372eca39f1a39e0bfe45fb65406165f64046c4b07429dfba58aa77c841",
+      "size": 608
+    }
+  },
+  "catalog_sha256": "aabae17056fa3eb3a6ffff0c39e8b6bc1e8336703938c5c1344dd9311a0726c1",
+  "generator_sha256": "1d27932f1734f1b2f8a97760d242a2563ee33686f934a80cf00f876c8dcc0efa",
+  "recipe_sha256": "a85e8995a015c363e0217f852af73ed739dfc06bac7a1f5162569da90bae0142",
+  "schema": 1,
+  "sources": {
+    "src/elf-x86_64/R_X86_64_32.s": {
+      "sha256": "57febc7b7dfb3c6e231a914a460b1eaad83df62e37d793077d9cec907d97825f",
+      "size": 72
+    },
+    "src/elf-x86_64/R_X86_64_32S.s": {
+      "sha256": "1b5ec9c575ab24202f2c0e259055d72bd66f38c63fd4c8a66bc70c3f6a15aa8d",
+      "size": 80
+    },
+    "src/elf-x86_64/R_X86_64_64.s": {
+      "sha256": "c16dae3af1ade2cb9dab41ab6b724de9a42d2111da728fded8ca1cab9f8b0085",
+      "size": 72
+    },
+    "src/elf-x86_64/R_X86_64_GOTPCREL.s": {
+      "sha256": "63ac86114f1723b53bb5acbaa0d4a884daf93432d1d6daa9c0c60c297957826f",
+      "size": 93
+    },
+    "src/elf-x86_64/R_X86_64_GOTPCRELX.s": {
+      "sha256": "ea42020b1b72afb20a3fe37967ac9550607a3df5f05452c9f005369087e2311d",
+      "size": 106
+    },
+    "src/elf-x86_64/R_X86_64_PC32.s": {
+      "sha256": "4345a9297af40f73cf5101986426ff2914b4599d068ac5f4eaac464f3e8b1860",
+      "size": 84
+    },
+    "src/elf-x86_64/R_X86_64_PC64.s": {
+      "sha256": "1cf75614b5de91bbd9f6eb01eb3e19d5902511708222bb86e12c70aca451dae1",
+      "size": 80
+    },
+    "src/elf-x86_64/R_X86_64_PLT32.s": {
+      "sha256": "3e57ac9be002fdf270a2dfb6ee4a8dc739e6989dfc5d04d22ae36a2b00be2aa6",
+      "size": 86
+    },
+    "src/elf-x86_64/R_X86_64_REX_GOTPCRELX.s": {
+      "sha256": "8232bd4f4bba1618b1408d4c5f4e1d08f06300fe5691f13f41bc7ed7681fe23a",
+      "size": 114
+    },
+    "src/elf-x86_64/R_X86_64_TLSGD.s": {
+      "sha256": "f34edc573ad7c841567f15b007116bb34bd54727f77ad1455e71db4b3d96656e",
+      "size": 121
+    },
+    "src/elf-x86_64/R_X86_64_TPOFF32.s": {
+      "sha256": "1d9dd860f5b77c4490e123963773b47d0aeb32d71b122288935b9b2ba7cab0b9",
+      "size": 87
+    },
+    "src/elf-x86_64/common.c": {
+      "sha256": "cfa8032334da7c8c3f2549fe31bc125e042533306231cdabe2608f617fcfe1b7",
+      "size": 44
+    },
+    "src/elf-x86_64/common_strong.c": {
+      "sha256": "3b4fa4dd13b56104b19d1cf2988b6952c98bb1b8ea543da71e6718adc64f6277",
+      "size": 25
+    },
+    "src/elf-x86_64/hidden.c": {
+      "sha256": "45fe764e7bb98eeb326663b5b8e4b04184c66e7e55b6e6f4ab1b2673d8d628e5",
+      "size": 82
+    },
+    "src/elf-x86_64/init_fini.c": {
+      "sha256": "c4af4812ff9665b0e884d4bdaf03e722143bc38bd143ea705a203d8adfa965a5",
+      "size": 485
+    },
+    "src/elf-x86_64/legacy_ctors.c": {
+      "sha256": "ded1392580ddd94b3f41ce1c309a2faec0d92858e047c862b272a74bfb0dd552",
+      "size": 220
+    },
+    "src/elf-x86_64/long_archive_member.s": {
+      "sha256": "db8ef149d41eee7bd0fe65f3eae59c807da6892b077bf23d27877dd90cd7a813",
+      "size": 77
+    },
+    "src/elf-x86_64/strong.c": {
+      "sha256": "1c8aa480363f00a98e76c4e742cffa31d9a4cc12d9d95bbaefab565dc4895986",
+      "size": 45
+    },
+    "src/elf-x86_64/tls.c": {
+      "sha256": "05f9c5af90af7946a92e22cb03d262d3cdd216f05e316cd6872b52169836f26d",
+      "size": 157
+    },
+    "src/elf-x86_64/weak.c": {
+      "sha256": "3fe69f7a4e2fd4ab6e0cf2368f7078634c62afa233d97acb2db7dd6b9a81b941",
+      "size": 96
+    }
+  },
+  "targets": [
+    "x86_64-linux-gnu"
+  ],
+  "tools": {
+    "clang": {
+      "major": "21",
+      "version": "clang version 21.1.2"
+    },
+    "llvm-ar": {
+      "major": "21",
+      "version": "LLVM version 21.1.2"
+    },
+    "llvm-mc": {
+      "major": "21",
+      "version": "LLVM version 21.1.2"
+    }
+  }
+}

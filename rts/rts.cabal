@@ -20,10 +20,6 @@ extra-source-files:
     ghcautoconf.h.autoconf.in
     configure.ac
     rts.buildinfo.in
-    linker/ELFRelocs/AArch64.def
-    linker/ELFRelocs/ARM.def
-    linker/ELFRelocs/i386.def
-    linker/ELFRelocs/x86_64.def
     win32/libHSffi.def
     win32/libHSghc-internal.def
     win32/libHSghc-prim.def
@@ -135,33 +131,8 @@ extra-source-files:
     LdvProfile.h
     Libdw.h
     LibdwPool.h
-    linker/CacheFlush.h
-    linker/elf_compat.h
-    linker/elf_got.h
-    linker/Elf.h
-    linker/elf_plt_aarch64.h
-    linker/elf_plt_arm.h
-    linker/elf_plt.h
-    linker/elf_plt_riscv64.h
-    linker/elf_reloc_aarch64.h
-    linker/elf_reloc.h
-    linker/elf_reloc_riscv64.h
-    linker/ElfTypes.h
-    linker/elf_util.h
-    linker/InitFini.h
-    LinkerInternals.h
-    linker/LoadNativeObjPosix.h
-    linker/M32Alloc.h
-    linker/MachO.h
-    linker/macho/plt_aarch64.h
-    linker/macho/plt.h
-    linker/MachOTypes.h
-    linker/MMap.h
-    linker/PEi386.h
-    linker/PEi386Types.h
-    linker/SymbolExtras.h
-    linker/util.h
-    linker/Wasm32Types.h
+    LinkerGlue.h
+    LinkerCompat.c
     Messages.h
     PathUtils.h
     Pool.h
@@ -183,7 +154,6 @@ extra-source-files:
     RetainerSet.h
     RtsFlags.h
     RtsSignals.h
-    RtsSymbolInfo.h
     RtsSymbols.h
     RtsUtils.h
     Schedule.h
@@ -335,6 +305,7 @@ common rts-base-config
     build-depends:
       rts-headers,
       rts-fs,
+      liblink,
       rts
 
 common rts-cmm-sources-base
@@ -423,7 +394,8 @@ common rts-c-sources-base
                LdvProfile.c
                Libdw.c
                LibdwPool.c
-               Linker.c
+               LinkerGlue.c
+               LinkerCompat.c
                ReportMemoryMap.c
                Messages.c
                OldARMAtomic.c
@@ -444,7 +416,6 @@ common rts-c-sources-base
                RtsMain.c
                RtsMessages.c
                RtsStartup.c
-               RtsSymbolInfo.c
                RtsSymbols.c
                RtsToHsIface.c
                RtsUtils.c
@@ -481,29 +452,6 @@ common rts-c-sources-base
                hooks/OnExit.c
                hooks/OutOfHeap.c
                hooks/StackOverflow.c
-               linker/CacheFlush.c
-               linker/Elf.c
-               linker/InitFini.c
-               linker/LoadArchive.c
-               linker/LoadNativeObjPosix.c
-               linker/M32Alloc.c
-               linker/MMap.c
-               linker/MachO.c
-               linker/macho/plt.c
-               linker/macho/plt_aarch64.c
-               linker/ProddableBlocks.c
-               linker/PEi386.c
-               linker/SymbolExtras.c
-               linker/elf_got.c
-               linker/elf_plt.c
-               linker/elf_plt_aarch64.c
-               linker/elf_plt_riscv64.c
-               linker/elf_plt_arm.c
-               linker/elf_reloc.c
-               linker/elf_reloc_aarch64.c
-               linker/elf_reloc_riscv64.c
-               linker/elf_tlsgd.c
-               linker/elf_util.c
                sm/BlockAlloc.c
                sm/CNF.c
                sm/Compact.c
@@ -783,7 +731,8 @@ library
 
     build-depends:
       rts-headers,
-      rts-fs
+      rts-fs,
+      liblink
 
     if !flag(use-system-libffi) && !arch(javascript) && !arch(wasm32)
       build-depends: libffi-clib

@@ -10,17 +10,32 @@
 #include <os/log.h>
 #include <os/signpost.h>
 #include <pthread.h>
+#include <stdbool.h>
 
 /* os_log_create caches one permanent object per subsystem/category. Keep the
  * handle for process lifetime, including across RTS shutdown, so events never
  * race a log-handle teardown. pthread_once publishes it before scheduler use. */
 static os_log_t ghc_signpost_log;
 static pthread_once_t signpost_once = PTHREAD_ONCE_INIT;
+static bool signposts_disabled_after_fork;
+
+/* The inherited OS logging state is unsafe after fork. Touch only our own
+ * state here, and keep child logging disabled until exec, even if the fork
+ * interrupted createSignpostLog before pthread_once finished. */
+static void
+disableSignpostsAfterFork(void)
+{
+    ghc_signpost_log = NULL;
+    signposts_disabled_after_fork = true;
+}
 
 static void
 createSignpostLog(void)
 {
     if (__builtin_available(macOS 10.14, *)) {
+        if (pthread_atfork(NULL, NULL, disableSignpostsAfterFork) != 0) {
+            return;
+        }
         ghc_signpost_log = os_log_create("org.haskell.ghc.rts",
                                         OS_LOG_CATEGORY_POINTS_OF_INTEREST);
     }
@@ -29,7 +44,9 @@ createSignpostLog(void)
 void
 initSignposts(void)
 {
-    pthread_once(&signpost_once, createSignpostLog);
+    if (!signposts_disabled_after_fork) {
+        pthread_once(&signpost_once, createSignpostLog);
+    }
 }
 
 uint64_t

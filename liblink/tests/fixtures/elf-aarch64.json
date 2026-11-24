@@ -1,0 +1,420 @@
+{
+  "archives": [
+    {
+      "features": [
+        "long-name",
+        "non-o-member"
+      ],
+      "format": "gnu",
+      "members": [
+        "R_AARCH64_ABS64",
+        "R_AARCH64_PREL32",
+        "R_AARCH64_CALL26",
+        "R_AARCH64_JUMP26",
+        "R_AARCH64_ADR_PREL_PG_HI21",
+        "R_AARCH64_ADD_ABS_LO12_NC",
+        "R_AARCH64_LDST8_ABS_LO12_NC",
+        "R_AARCH64_LDST16_ABS_LO12_NC",
+        "R_AARCH64_LDST32_ABS_LO12_NC",
+        "R_AARCH64_LDST64_ABS_LO12_NC",
+        "R_AARCH64_LDST128_ABS_LO12_NC",
+        "R_AARCH64_ADR_GOT_PAGE",
+        "R_AARCH64_LD64_GOT_LO12_NC",
+        "tls",
+        "common",
+        "common_strong",
+        "weak",
+        "strong",
+        "hidden",
+        "init_fini",
+        "legacy_ctors",
+        "long_archive_member"
+      ],
+      "path": "aarch64-linux-gnu/libelf-fixtures.a"
+    }
+  ],
+  "schema": 1,
+  "sources": [
+    {
+      "expected_outcome": "supported",
+      "expected_relocations": [
+        "R_AARCH64_ABS64"
+      ],
+      "id": "R_AARCH64_ABS64",
+      "language": "asm",
+      "object": "aarch64-linux-gnu/R_AARCH64_ABS64.o",
+      "path": "src/elf-aarch64/R_AARCH64_ABS64.s",
+      "triple": "aarch64-linux-gnu"
+    },
+    {
+      "expected_outcome": "supported",
+      "expected_relocations": [
+        "R_AARCH64_PREL32"
+      ],
+      "id": "R_AARCH64_PREL32",
+      "language": "asm",
+      "object": "aarch64-linux-gnu/R_AARCH64_PREL32.o",
+      "path": "src/elf-aarch64/R_AARCH64_PREL32.s",
+      "triple": "aarch64-linux-gnu"
+    },
+    {
+      "expected_outcome": "supported",
+      "expected_relocations": [
+        "R_AARCH64_CALL26"
+      ],
+      "id": "R_AARCH64_CALL26",
+      "language": "asm",
+      "layout_cases": [
+        "near",
+        "far"
+      ],
+      "object": "aarch64-linux-gnu/R_AARCH64_CALL26.o",
+      "path": "src/elf-aarch64/R_AARCH64_CALL26.s",
+      "triple": "aarch64-linux-gnu"
+    },
+    {
+      "expected_outcome": "supported",
+      "expected_relocations": [
+        "R_AARCH64_JUMP26"
+      ],
+      "id": "R_AARCH64_JUMP26",
+      "language": "asm",
+      "layout_cases": [
+        "near",
+        "far"
+      ],
+      "object": "aarch64-linux-gnu/R_AARCH64_JUMP26.o",
+      "path": "src/elf-aarch64/R_AARCH64_JUMP26.s",
+      "triple": "aarch64-linux-gnu"
+    },
+    {
+      "expected_outcome": "supported",
+      "expected_relocations": [
+        "R_AARCH64_ADR_PREL_PG_HI21"
+      ],
+      "id": "R_AARCH64_ADR_PREL_PG_HI21",
+      "language": "asm",
+      "object": "aarch64-linux-gnu/R_AARCH64_ADR_PREL_PG_HI21.o",
+      "path": "src/elf-aarch64/R_AARCH64_ADR_PREL_PG_HI21.s",
+      "triple": "aarch64-linux-gnu"
+    },
+    {
+      "expected_outcome": "supported",
+      "expected_relocations": [
+        "R_AARCH64_ADD_ABS_LO12_NC"
+      ],
+      "id": "R_AARCH64_ADD_ABS_LO12_NC",
+      "language": "asm",
+      "object": "aarch64-linux-gnu/R_AARCH64_ADD_ABS_LO12_NC.o",
+      "path": "src/elf-aarch64/R_AARCH64_ADD_ABS_LO12_NC.s",
+      "triple": "aarch64-linux-gnu"
+    },
+    {
+      "expected_outcome": "supported",
+      "expected_relocations": [
+        "R_AARCH64_LDST8_ABS_LO12_NC"
+      ],
+      "id": "R_AARCH64_LDST8_ABS_LO12_NC",
+      "language": "asm",
+      "object": "aarch64-linux-gnu/R_AARCH64_LDST8_ABS_LO12_NC.o",
+      "path": "src/elf-aarch64/R_AARCH64_LDST8_ABS_LO12_NC.s",
+      "triple": "aarch64-linux-gnu"
+    },
+    {
+      "expected_outcome": "supported",
+      "expected_relocations": [
+        "R_AARCH64_LDST16_ABS_LO12_NC"
+      ],
+      "id": "R_AARCH64_LDST16_ABS_LO12_NC",
+      "language": "asm",
+      "object": "aarch64-linux-gnu/R_AARCH64_LDST16_ABS_LO12_NC.o",
+      "path": "src/elf-aarch64/R_AARCH64_LDST16_ABS_LO12_NC.s",
+      "triple": "aarch64-linux-gnu"
+    },
+    {
+      "expected_outcome": "supported",
+      "expected_relocations": [
+        "R_AARCH64_LDST32_ABS_LO12_NC"
+      ],
+      "id": "R_AARCH64_LDST32_ABS_LO12_NC",
+      "language": "asm",
+      "object": "aarch64-linux-gnu/R_AARCH64_LDST32_ABS_LO12_NC.o",
+      "path": "src/elf-aarch64/R_AARCH64_LDST32_ABS_LO12_NC.s",
+      "triple": "aarch64-linux-gnu"
+    },
+    {
+      "expected_outcome": "supported",
+      "expected_relocations": [
+        "R_AARCH64_LDST64_ABS_LO12_NC"
+      ],
+      "id": "R_AARCH64_LDST64_ABS_LO12_NC",
+      "language": "asm",
+      "object": "aarch64-linux-gnu/R_AARCH64_LDST64_ABS_LO12_NC.o",
+      "path": "src/elf-aarch64/R_AARCH64_LDST64_ABS_LO12_NC.s",
+      "triple": "aarch64-linux-gnu"
+    },
+    {
+      "expected_outcome": "supported",
+      "expected_relocations": [
+        "R_AARCH64_LDST128_ABS_LO12_NC"
+      ],
+      "id": "R_AARCH64_LDST128_ABS_LO12_NC",
+      "language": "asm",
+      "object": "aarch64-linux-gnu/R_AARCH64_LDST128_ABS_LO12_NC.o",
+      "path": "src/elf-aarch64/R_AARCH64_LDST128_ABS_LO12_NC.s",
+      "triple": "aarch64-linux-gnu"
+    },
+    {
+      "expected_outcome": "supported",
+      "expected_relocations": [
+        "R_AARCH64_ADR_GOT_PAGE"
+      ],
+      "id": "R_AARCH64_ADR_GOT_PAGE",
+      "language": "asm",
+      "object": "aarch64-linux-gnu/R_AARCH64_ADR_GOT_PAGE.o",
+      "path": "src/elf-aarch64/R_AARCH64_ADR_GOT_PAGE.s",
+      "triple": "aarch64-linux-gnu"
+    },
+    {
+      "expected_outcome": "supported",
+      "expected_relocations": [
+        "R_AARCH64_LD64_GOT_LO12_NC"
+      ],
+      "id": "R_AARCH64_LD64_GOT_LO12_NC",
+      "language": "asm",
+      "object": "aarch64-linux-gnu/R_AARCH64_LD64_GOT_LO12_NC.o",
+      "path": "src/elf-aarch64/R_AARCH64_LD64_GOT_LO12_NC.s",
+      "triple": "aarch64-linux-gnu"
+    },
+    {
+      "expected_outcome": "metadata",
+      "expected_relocations": [
+        "R_AARCH64_TLSIE_ADR_GOTTPREL_PAGE21",
+        "R_AARCH64_TLSIE_LD64_GOTTPREL_LO12_NC"
+      ],
+      "expected_sections": [
+        ".llvm_addrsig",
+        ".note.GNU-stack",
+        ".rela.text",
+        ".strtab",
+        ".symtab",
+        ".text"
+      ],
+      "expected_symbol": "fixture_external_tls",
+      "expected_symbol_binding": "Global",
+      "expected_symbol_section": "Undefined",
+      "expected_symbol_type": "TLS",
+      "expected_undefined_symbols": [
+        "fixture_external_tls"
+      ],
+      "features": [
+        "TLS"
+      ],
+      "id": "tls",
+      "language": "c",
+      "object": "aarch64-linux-gnu/tls.o",
+      "path": "src/elf-aarch64/tls.c",
+      "triple": "aarch64-linux-gnu"
+    },
+    {
+      "expected_outcome": "metadata",
+      "expected_relocations": [],
+      "expected_sections": [
+        ".llvm_addrsig",
+        ".note.GNU-stack",
+        ".strtab",
+        ".symtab",
+        ".text"
+      ],
+      "expected_symbol": "fixture_common",
+      "expected_symbol_binding": "Global",
+      "expected_symbol_section": "Common",
+      "expected_symbol_size": 4,
+      "expected_symbol_type": "Object",
+      "features": [
+        "COMMON"
+      ],
+      "id": "common",
+      "language": "c",
+      "object": "aarch64-linux-gnu/common.o",
+      "path": "src/elf-aarch64/common.c",
+      "triple": "aarch64-linux-gnu"
+    },
+    {
+      "expected_outcome": "metadata",
+      "expected_relocations": [],
+      "expected_sections": [
+        ".llvm_addrsig",
+        ".note.GNU-stack",
+        ".strtab",
+        ".symtab",
+        ".text"
+      ],
+      "expected_symbol": "fixture_override",
+      "expected_symbol_binding": "Weak",
+      "expected_symbol_section": ".text",
+      "expected_symbol_type": "Function",
+      "features": [
+        "weak-strong"
+      ],
+      "id": "weak",
+      "language": "c",
+      "object": "aarch64-linux-gnu/weak.o",
+      "path": "src/elf-aarch64/weak.c",
+      "triple": "aarch64-linux-gnu"
+    },
+    {
+      "expected_outcome": "metadata",
+      "expected_relocations": [],
+      "expected_sections": [
+        ".llvm_addrsig",
+        ".note.GNU-stack",
+        ".strtab",
+        ".symtab",
+        ".text"
+      ],
+      "expected_symbol": "fixture_override",
+      "expected_symbol_binding": "Global",
+      "expected_symbol_section": ".text",
+      "expected_symbol_type": "Function",
+      "features": [
+        "weak-strong"
+      ],
+      "id": "strong",
+      "language": "c",
+      "object": "aarch64-linux-gnu/strong.o",
+      "path": "src/elf-aarch64/strong.c",
+      "triple": "aarch64-linux-gnu"
+    },
+    {
+      "expected_outcome": "metadata",
+      "expected_relocations": [],
+      "expected_sections": [
+        ".llvm_addrsig",
+        ".note.GNU-stack",
+        ".strtab",
+        ".symtab",
+        ".text"
+      ],
+      "expected_symbol": "fixture_hidden",
+      "expected_symbol_binding": "Global",
+      "expected_symbol_section": ".text",
+      "expected_symbol_type": "Function",
+      "expected_visibility": "STV_HIDDEN",
+      "features": [
+        "hidden"
+      ],
+      "id": "hidden",
+      "language": "c",
+      "object": "aarch64-linux-gnu/hidden.o",
+      "path": "src/elf-aarch64/hidden.c",
+      "triple": "aarch64-linux-gnu"
+    },
+    {
+      "expected_outcome": "metadata",
+      "expected_relocations": [
+        "R_AARCH64_ABS64",
+        "R_AARCH64_ADD_ABS_LO12_NC",
+        "R_AARCH64_ADR_GOT_PAGE",
+        "R_AARCH64_ADR_PREL_PG_HI21",
+        "R_AARCH64_CALL26",
+        "R_AARCH64_JUMP26",
+        "R_AARCH64_LD64_GOT_LO12_NC"
+      ],
+      "expected_sections": [
+        ".fini_array",
+        ".init_array",
+        ".llvm_addrsig",
+        ".note.GNU-stack",
+        ".rela.fini_array",
+        ".rela.init_array",
+        ".rela.text",
+        ".strtab",
+        ".symtab",
+        ".text"
+      ],
+      "expected_undefined_symbols": [
+        "__cxa_atexit",
+        "__dso_handle",
+        "fixture_record_event"
+      ],
+      "features": [
+        "init_array",
+        "fini_array",
+        "__cxa_atexit",
+        "__dso_handle"
+      ],
+      "id": "init_fini",
+      "language": "c",
+      "object": "aarch64-linux-gnu/init_fini.o",
+      "path": "src/elf-aarch64/init_fini.c",
+      "triple": "aarch64-linux-gnu"
+    },
+    {
+      "expected_outcome": "metadata",
+      "expected_relocations": [
+        "R_AARCH64_ABS64",
+        "R_AARCH64_JUMP26"
+      ],
+      "expected_sections": [
+        ".ctors",
+        ".llvm_addrsig",
+        ".note.GNU-stack",
+        ".rela.ctors",
+        ".rela.text",
+        ".strtab",
+        ".symtab",
+        ".text"
+      ],
+      "expected_undefined_symbols": [
+        "fixture_record_event"
+      ],
+      "features": [
+        "legacy-ctors"
+      ],
+      "id": "legacy_ctors",
+      "language": "c",
+      "object": "aarch64-linux-gnu/legacy_ctors.o",
+      "path": "src/elf-aarch64/legacy_ctors.c",
+      "triple": "aarch64-linux-gnu"
+    },
+    {
+      "expected_outcome": "archive-only",
+      "expected_relocations": [],
+      "features": [
+        "archive-long-name",
+        "non-o-member"
+      ],
+      "id": "long_archive_member",
+      "language": "asm",
+      "object": "aarch64-linux-gnu/a_very_long_archive_member_filename_that_is_not_o.object",
+      "path": "src/elf-aarch64/long_archive_member.s",
+      "triple": "aarch64-linux-gnu"
+    },
+    {
+      "expected_outcome": "metadata",
+      "expected_relocations": [],
+      "expected_sections": [
+        ".data",
+        ".llvm_addrsig",
+        ".note.GNU-stack",
+        ".strtab",
+        ".symtab",
+        ".text"
+      ],
+      "expected_symbol": "fixture_common",
+      "expected_symbol_binding": "Global",
+      "expected_symbol_section": ".data",
+      "expected_symbol_size": 4,
+      "expected_symbol_type": "Object",
+      "features": [
+        "COMMON-strong"
+      ],
+      "id": "common_strong",
+      "language": "c",
+      "object": "aarch64-linux-gnu/common_strong.o",
+      "path": "src/elf-aarch64/common_strong.c",
+      "triple": "aarch64-linux-gnu"
+    }
+  ]
+}

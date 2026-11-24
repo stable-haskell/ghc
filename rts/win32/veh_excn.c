@@ -9,7 +9,7 @@
 #include "Rts.h"
 #include "ghcconfig.h"
 #include "veh_excn.h"
-#include "LinkerInternals.h"
+#include "liblink/rts_friend.h"
 #include <stdbool.h>
 #include <dbghelp.h>
 #include <shellapi.h>
@@ -325,7 +325,7 @@ void generateStack (EXCEPTION_POINTERS* pExceptionPointers)
         fprintf (stderr, " * 0x%" PRIxPTR "\t%ls\n",
                  (uintptr_t)stackFrame.AddrFrame.Offset,
                  resolveSymbolAddr ((wchar_t*)&buffer, 1024,
-                                   (SymbolAddr*)(intptr_t)stackFrame.AddrPC.Offset,
+                                   (ll_symbol_addr*)(intptr_t)stackFrame.AddrPC.Offset,
                                    &topSp));
         if (lastBp >= stackFrame.AddrFrame.Offset)
         {

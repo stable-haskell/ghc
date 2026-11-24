@@ -30,6 +30,7 @@ packages:
   -- RTS
   rts-headers
   rts-fs
+  liblink
   rts
 
   -- Compiler
@@ -165,6 +166,7 @@ constraints:
   rts source,
   rts-headers source,
   rts-fs source,
+  liblink source,
   stm source,
   system-cxx-std-lib source,
   template-haskell source,
@@ -240,4 +242,7 @@ package rts-headers
   ghc-options: -no-rts
 
 package rts-fs
+  ghc-options: -no-rts
+
+package liblink
   ghc-options: -no-rts

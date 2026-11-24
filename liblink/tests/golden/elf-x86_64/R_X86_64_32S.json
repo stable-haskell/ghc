@@ -1,0 +1,115 @@
+{
+  "fields": [
+    {
+      "A": 0,
+      "P": "0x10b411043",
+      "S": "0x12345000",
+      "after": "00503412",
+      "before": "00000000",
+      "expected": "00503412",
+      "offset": 3,
+      "section": 2,
+      "type": "R_X86_64_32S"
+    }
+  ],
+  "format": "ELF x86_64",
+  "object_sha256": "353aa468cf793d50c1664656f6cf317340d838f06379b3f1fde22172b535e3a0",
+  "reference_capture": {
+    "error": "",
+    "extras": {
+      "address": "0x10b412000",
+      "after": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "before": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "count": 3,
+      "first": 0,
+      "jump_offset": 8,
+      "stride": 16
+    },
+    "host_symbols": {
+      "external_data": "0x12345000",
+      "external_function": "0x10b4120a8",
+      "external_function_alias": "0x10b4120a8"
+    },
+    "initializers_ran": false,
+    "resolved": true,
+    "schema": "liblink-elf-native-address-v1",
+    "sections": [
+      {
+        "address": "0x10b4110a8",
+        "after": "002e72656c612e7465787400666978747572655f7838365f36345f333273002e737472746162002e73796d7461620065787465726e616c5f6461746100",
+        "before": "002e72656c612e7465787400666978747572655f7838365f36345f333273002e737472746162002e73796d7461620065787465726e616c5f6461746100",
+        "index": 1,
+        "size": 61
+      },
+      {
+        "address": "0x10b411040",
+        "after": "48c7c000503412",
+        "before": "48c7c000000000",
+        "index": 2,
+        "size": 7
+      },
+      {
+        "address": "0x10b411090",
+        "after": "03000000000000000b000000020000000000000000000000",
+        "before": "03000000000000000b000000020000000000000000000000",
+        "index": 3,
+        "size": 24
+      },
+      {
+        "address": "0x10b411048",
+        "after": "0000000000000000000000000000000000000000000000000c00000010000200000000000000000000000000000000002f0000001000000000000000000000000000000000000000",
+        "before": "0000000000000000000000000000000000000000000000000c00000010000200000000000000000000000000000000002f0000001000000000000000000000000000000000000000",
+        "index": 4,
+        "size": 72
+      }
+    ],
+    "status": 0
+  },
+  "schema": 1,
+  "semantic": {
+    "extras": {
+      "count": 3,
+      "first": 0,
+      "stride": 16
+    },
+    "relocations": [
+      {
+        "A": 0,
+        "S_origin": {
+          "kind": "host-symbol",
+          "name": "external_data"
+        },
+        "extra_symbol_index": null,
+        "offset": 3,
+        "raw_symbol_type": 0,
+        "section": 2,
+        "symbol": "external_data",
+        "symbol_index": 2,
+        "type": "R_X86_64_32S",
+        "width": 4
+      }
+    ],
+    "sections": [
+      {
+        "index": 1,
+        "name": ".strtab",
+        "size": 61
+      },
+      {
+        "index": 2,
+        "name": ".text",
+        "size": 7
+      },
+      {
+        "index": 3,
+        "name": ".rela.text",
+        "size": 24
+      },
+      {
+        "index": 4,
+        "name": ".symtab",
+        "size": 72
+      }
+    ]
+  }
+}
