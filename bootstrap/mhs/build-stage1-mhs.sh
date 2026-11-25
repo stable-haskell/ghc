@@ -1107,9 +1107,17 @@ stage_01b_syntax_th() {
 }
 
 # GHC.Prelude's closure is one mhs process. On Linux (16GB) it takes
-# about 15 minutes. On the 7GB Darwin runner it was still running after
-# 5h18m, so CI gives this step its own job.
+# about 15 minutes. CI gives this step its own job.
+# -H counts cells, and a cell is 16 bytes, so -H700M reserves 11.2GB.
+# macos-latest has 7GB. That reservation stays swapped and the Darwin
+# job GC-stalls (rss under 2GB for hours, stuck after GHC.Tc.Types.Origin).
+# 250M cells is 4GB. A local Darwin run of this stage with that heap
+# finished in 26 minutes and wrote the 02a cache.
 stage_02a_prelude() {
+  if [ "$(uname -s)" = Darwin ]; then
+    MHS_HEAP=250M
+    MHS_RTS=(+RTS -H"${MHS_HEAP}" -K64M -RTS)
+  fi
   step_mhs 02a-prelude-fs \
     GHC.Prelude GHC.Data.FastString GHC.Data.StringBuffer
 }
