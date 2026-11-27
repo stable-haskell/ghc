@@ -1,6 +1,7 @@
 -- (c) The University of Glasgow 2006
 -- (c) The GRASP/AQUA Project, Glasgow University, 1998
 
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE MagicHash #-}
 
@@ -42,7 +43,9 @@ import GHC.Utils.Outputable
 import GHC.Utils.Misc
 import GHC.Utils.Panic
 
+#if !defined(__MHS__)
 import GHC.Base (reallyUnsafePtrEquality#)
+#endif
 
 import qualified Data.Semigroup as S
 
@@ -368,8 +371,10 @@ inline_generic_eq_type_x syn_flag mult_flag mb_env
         gos _ _               = False
 
     in case (t1,t2) of
+#if !defined(__MHS__)
       _ | 1# <- reallyUnsafePtrEquality# t1 t2 -> True
       -- See Note [Type comparisons using object pointer comparisons]
+#endif
 
       (TyConApp tc1 tys1, TyConApp tc2 tys2)
         | tc1 == tc2, not (isForgetfulSynTyCon tc1)   -- See Note [Comparing type synonyms]
@@ -630,10 +635,12 @@ See Note [Unique Determinism] for more details.
 
 nonDetCmpType :: Type -> Type -> Ordering
 {-# INLINE nonDetCmpType #-}
+#if !defined(__MHS__)
 nonDetCmpType !t1 !t2
   -- See Note [Type comparisons using object pointer comparisons]
   | 1# <- reallyUnsafePtrEquality# t1 t2
   = EQ
+#endif
 nonDetCmpType (TyConApp tc1 []) (TyConApp tc2 []) | tc1 == tc2
   = EQ
 nonDetCmpType t1 t2

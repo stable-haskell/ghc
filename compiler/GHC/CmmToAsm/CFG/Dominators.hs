@@ -1,4 +1,8 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE Strict #-}
+#if defined(__MHS__)
+{-# LANGUAGE RankNTypes #-}
+#endif
 
 {- |
   Module      :  GHC.CmmToAsm.CFG.Dominators
@@ -547,8 +551,16 @@ renum from = (\(_,m,g)->(g,m))
 -----------------------------------------------------------------------------
 
 -- Nothing better than reinventing the state monad.
+#if defined(__MHS__)
+-- MicroHs cannot derive Functor for this rank-2 CPS newtype
+-- (type mismatch on S); the manual instance below has the same meaning.
+newtype S z s a = S {unS :: forall o. (a -> s -> ST z o) -> s -> ST z o}
+instance Functor (S z s) where
+  fmap f (S g) = S (\k s -> g (\a s' -> k (f a) s') s)
+#else
 newtype S z s a = S {unS :: forall o. (a -> s -> ST z o) -> s -> ST z o}
   deriving (Functor)
+#endif
 instance Monad (S z s) where
   return = pure
   S g >>= f = S (\k -> g (\a -> unS (f a) k))

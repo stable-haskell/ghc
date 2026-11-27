@@ -1,0 +1,149 @@
+# Stage 2 demo app — smoke-test the MicroHs-built Stage 2 GHC bindist.
+#
+# Triggered three ways:
+#   * workflow_call — downstream of mhs-stage2-demo.yml (works on any
+#     branch/PR), which passes platform / runs_on / artifact names.
+#   * workflow_run — fires when "MicroHs -> Stage 1 -> Stage 2 GHC"
+#     completes (standalone re-verification of published artifacts).
+#   * workflow_dispatch — standalone re-run for a given run_id/platform.
+name: Stage 2 demo app
+
+on:
+  workflow_call:
+    inputs:
+      platform:
+        description: 'Platform slug, e.g. x86_64-linux'
+        type: string
+        required: true
+      runs_on:
+        description: 'Runner label for the platform'
+        type: string
+        required: true
+      artifact_name:
+        description: 'Stage 2 bindist artifact, e.g. ghc-stage2-mhs-x86_64-linux'
+        type: string
+        required: true
+      cabal_artifact_name:
+        description: 'cabal-mhs artifact, e.g. cabal-mhs-x86_64-linux'
+        type: string
+        required: true
+  workflow_run:
+    workflows: ['MicroHs -> Stage 1 -> Stage 2 GHC']
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: 'Upstream run id holding the bindist artifacts'
+        type: string
+        required: false
+        default: ''
+      platform:
+        description: 'Platform slug, e.g. x86_64-linux'
+        type: string
+        required: false
+        default: 'x86_64-linux'
+
+permissions:
+  actions: read # workflow_run re-download needs artifact read access
+
+jobs:
+  demo-app:
+    name: 'demo-app / ${{ inputs.platform || ''x86_64-linux'' }}'
+    # workflow_run / workflow_dispatch resolve the platform locally;
+    # workflow_call pins the caller's runner via runs_on.
+    runs-on: ${{ inputs.runs_on || (inputs.platform == 'aarch64-darwin' && 'macos-latest' || 'ubuntu-24.04') }}
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout GHC tree (demo-app sources)
+        uses: actions/checkout@v5
+        with:
+          submodules: false
+
+      - name: Assert zero preinstalled GHC
+        run: |
+          set -euo pipefail
+          for d in "$HOME/.ghcup/bin" "$HOME/.cabal/bin" /opt/ghc/bin /usr/local/bin; do
+            if [ -x "$d/ghc" ]; then
+              PATH="$(printf '%s' "$PATH" | tr ':' '\n' | grep -vx "$d" | paste -sd: -)"
+            fi
+          done
+          echo "PATH=$PATH" >> "$GITHUB_ENV"
+          rm -rf "$HOME/.ghcup" 2>/dev/null || true
+          ! command -v ghc
+          echo "OK: no ghc on PATH before unpack"
+
+      - name: Download Stage 2 bindist
+        uses: actions/download-artifact@v5
+        with:
+          name: ${{ inputs.artifact_name || format('ghc-stage2-mhs-{0}', inputs.platform || 'x86_64-linux') }}
+          path: _build/inputs/stage2
+          run-id: ${{ inputs.run_id || github.event.workflow_run.id || github.run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Download cabal-mhs
+        uses: actions/download-artifact@v5
+        with:
+          name: ${{ inputs.cabal_artifact_name || format('cabal-mhs-{0}', inputs.platform || 'x86_64-linux') }}
+          path: _build/inputs/cabal-mhs
+          run-id: ${{ inputs.run_id || github.event.workflow_run.id || github.run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Unpack Stage 2 + verify
+        run: |
+          set -euo pipefail
+          : > _build/timing-demoapp.tsv
+          T() { bootstrap/mhs/ci-time.sh run _build/timing-demoapp.tsv "$@"; }
+          T unpack "demo-app — unpack Stage 2 bindist" -- \
+            bash -c "
+              set -euo pipefail
+              mkdir -p '$RUNNER_TEMP/ghc-stage2'
+              tar -xzf _build/inputs/stage2/*.tar.gz -C '$RUNNER_TEMP/ghc-stage2'
+              find _build/inputs/cabal-mhs -type f -name cabal -exec cp {} _build/cabal-mhs \; -quit
+              chmod +x _build/cabal-mhs
+            "
+          echo "$RUNNER_TEMP/ghc-stage2/bin" >> "$GITHUB_PATH"
+          export PATH="$RUNNER_TEMP/ghc-stage2/bin:$PATH"
+          T verify "demo-app — ghc --version / --info / ghc-pkg check" -- \
+            bash -c "
+              set -euo pipefail
+              ghc --version
+              ghc --info
+              ghc-pkg check
+            "
+
+      - name: Build + run via direct ghc -O2
+        run: |
+          set -euo pipefail
+          export PATH="$RUNNER_TEMP/ghc-stage2/bin:$PATH"
+          bootstrap/mhs/ci-time.sh run _build/timing-demoapp.tsv \
+            direct "demo-app — direct ghc -O2 build + run" -- \
+            bash -c "
+              set -euo pipefail
+              cd bootstrap/mhs/demo-app
+              ghc -O2 -isrc -iapp app/Main.hs -o /tmp/demo-app-direct
+              /tmp/demo-app-direct
+            "
+
+      - name: Build + run via cabal-mhs
+        run: |
+          set -euo pipefail
+          export PATH="$RUNNER_TEMP/ghc-stage2/bin:$PATH"
+          export CABAL_DIR="$GITHUB_WORKSPACE/_build/cabal-demo"
+          mkdir -p "$CABAL_DIR"
+          bootstrap/mhs/ci-time.sh run _build/timing-demoapp.tsv \
+            cabal "demo-app — cabal-mhs build + run (offline, no Hackage)" -- \
+            bash -c "
+              set -euo pipefail
+              cd bootstrap/mhs/demo-app
+              $GITHUB_WORKSPACE/_build/cabal-mhs update || true
+              $GITHUB_WORKSPACE/_build/cabal-mhs build --offline --with-compiler=ghc
+              $GITHUB_WORKSPACE/_build/cabal-mhs run --offline --with-compiler=ghc
+            "
+
+      - name: Timing summary
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          bootstrap/mhs/ci-time.sh summary "demo-app timings (${{ inputs.platform }})" \
+            _build/timing-demoapp.tsv | tee -a "$GITHUB_STEP_SUMMARY"

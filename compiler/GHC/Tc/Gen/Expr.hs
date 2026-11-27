@@ -1,4 +1,5 @@
 
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE DataKinds           #-}
 {-# LANGUAGE FlexibleContexts    #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -169,6 +170,9 @@ tcPolyExprCheck :: HsExpr GhcRn
 tcPolyExprCheck expr res_ty
   = outer_skolemise res_ty $ \pat_tys rho_ty ->
     let
+#if defined(__MHS__)
+      tc_body :: HsExpr GhcRn -> TcM (HsExpr GhcTc)
+#endif
       -- tc_body is a little loop that looks past parentheses
       tc_body (HsPar x (L loc e))
         = setSrcSpanA loc $
@@ -321,7 +325,11 @@ tcExpr (HsHole (HoleVar locc@(L _ occ))) res_ty
                                        -- (#18491)
        ; return (HsHole (HoleVar locc, her))
        }
+#if defined(__MHS__)
+tcExpr (HsHole GHC.Hs.HoleError) _ =
+#else
 tcExpr (HsHole HoleError) _ =
+#endif
   panic "GHC.Tc.Gen.Expr: tcExpr: HoleError: Not implemented"
 
 tcExpr e@(HsLit x lit) res_ty

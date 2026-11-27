@@ -211,7 +211,13 @@ import GHC.Data.Pair
 
 import GHC.Utils.Monad
 
+#if defined(__MHS__)
+-- MicroHs ghc-compat GHC.Exts has no oneShot; it is semantically the identity.
+oneShot :: (a -> b) -> a -> b
+oneShot f x = f x
+#else
 import GHC.Exts (oneShot)
+#endif
 import Control.Monad
 import Data.Foldable hiding ( foldr1 )
 import Data.IORef

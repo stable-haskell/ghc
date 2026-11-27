@@ -1,0 +1,63 @@
+From 53beab3fdfdf6241f521a4c698325b79c3f12374 Mon Sep 17 00:00:00 2001
+From: Moritz Angermann <moritz@zw3rk.com>
+Date: Sat, 21 Nov 2026 17:53:04 +0900
+Subject: [PATCH] typecheck: raise largeRecordFieldLimit to 128
+
+Cabal ProjectConfig.Lens imports PackageConfig without its constructor
+and then updates the record. Records above the old cutoff of 64 skip
+SetField, and the case desugaring looks the constructor up again, so
+the error is reported at the data declaration (undefined value:
+PackageConfig). PackageConfig has 66 fields, GhcOptions 72, and
+ElaboratedConfiguredPackage 78.
+
+Share one threshold. needDsCase was a second hardcoded 64, so raising
+only the deriving constant left the case path in place.
+---
+ src/MicroHs/Deriving.hs  | 4 ++--
+ src/MicroHs/TypeCheck.hs | 9 +++++----
+ 2 files changed, 7 insertions(+), 6 deletions(-)
+
+diff --git a/src/MicroHs/Deriving.hs b/src/MicroHs/Deriving.hs
+index 21019110..305c1fce 100644
+--- a/src/MicroHs/Deriving.hs
++++ b/src/MicroHs/Deriving.hs
+@@ -1,4 +1,4 @@
+-module MicroHs.Deriving(deriveStrat, expandField, mkGetName, getPrefix, etaReduce, mkTypeableInst) where
++module MicroHs.Deriving(deriveStrat, expandField, mkGetName, getPrefix, etaReduce, mkTypeableInst, largeRecordFieldLimit) where
+ import qualified Prelude(); import MHSPrelude
+ import Control.Monad
+ import Data.Char
+@@ -119,7 +119,7 @@ expandField def                                            = return [def]
+ -- Records with more fields than this skip the generated SetField
+ -- instances; record updates on them go through case desugaring instead.
+ largeRecordFieldLimit :: Int
+-largeRecordFieldLimit = 64
++largeRecordFieldLimit = 128
+ 
+ genHasFields :: LHS -> [Constr] -> T [EDef]
+ genHasFields lhs cs = do
+diff --git a/src/MicroHs/TypeCheck.hs b/src/MicroHs/TypeCheck.hs
+index fceb5e4f..34210e0f 100644
+--- a/src/MicroHs/TypeCheck.hs
++++ b/src/MicroHs/TypeCheck.hs
+@@ -3338,12 +3338,13 @@ needDsCase ex lbls ae =
+             Just (Newtype _ c _) -> return $ if not (null ts) ||     needC c  then Just [c] else Nothing
+             _ -> return Nothing        -- we don't know which type it is
+     -- Does a constructor need a case?
+-    -- Large records (> 64 fields, see largeRecordFieldLimit in Deriving)
+-    -- always use case desugaring for updates, since no SetField
+-    -- instance is generated for them.
++    -- Large records (see largeRecordFieldLimit in Deriving) always use
++    -- case desugaring for updates, since no SetField instance is
++    -- generated for them. The case path looks the constructor up again,
++    -- so the threshold has to match the deriving cutoff.
+     needC :: Constr -> Bool
+     needC (Constr _ _ _ _ (Left _)) = False
+-    needC (Constr vs _ _ _ (Right fs)) = not (null vs) || length fs > 64 || any (isForall . snd . snd) fs
++    needC (Constr vs _ _ _ (Right fs)) = not (null vs) || length fs > largeRecordFieldLimit || any (isForall . snd . snd) fs
+       where isForall (EForall _ _ _) = True
+             isForall _ = False
+     needL :: Ident -> T (Maybe [Constr])
+-- 
+2.51.2
+

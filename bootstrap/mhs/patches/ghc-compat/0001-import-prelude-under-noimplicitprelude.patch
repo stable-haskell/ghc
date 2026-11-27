@@ -1,0 +1,132 @@
+diff --git a/src/GHC/Foreign.hs b/src/GHC/Foreign.hs
+index db70a1b..b60a064 100644
+--- a/src/GHC/Foreign.hs
++++ b/src/GHC/Foreign.hs
+@@ -38,6 +38,7 @@ module GHC.Foreign (
+ 
+     charIsRepresentable,
+   ) where
++import Prelude
+ import Control.Exception(catch, bracket, IOException)
+ import Control.Monad
+ import Foreign.C.Types(CChar)
+diff --git a/src/GHC/IO/Buffer.hs b/src/GHC/IO/Buffer.hs
+index 25b48f8..605ca72 100644
+--- a/src/GHC/IO/Buffer.hs
++++ b/src/GHC/IO/Buffer.hs
+@@ -68,6 +68,7 @@ module GHC.IO.Buffer (
+     writeCharBufPtr,
+     charSize,
+  ) where
++import Prelude
+ import Control.Error
+ import Data.Word
+ import Foreign.C.Types
+diff --git a/src/GHC/IO/Encoding/Failure.hs b/src/GHC/IO/Encoding/Failure.hs
+index ec08083..2befd9e 100644
+--- a/src/GHC/IO/Encoding/Failure.hs
++++ b/src/GHC/IO/Encoding/Failure.hs
+@@ -23,6 +23,7 @@ module GHC.IO.Encoding.Failure (
+     isSurrogate,
+     recoverDecode, recoverEncode,
+   ) where
++import Prelude
+ import Data.Char
+ import Data.Word
+ import GHC.IO.Buffer
+diff --git a/src/GHC/IO/Encoding/Iconv.hs b/src/GHC/IO/Encoding/Iconv.hs
+index 1ae22c0..185727d 100644
+--- a/src/GHC/IO/Encoding/Iconv.hs
++++ b/src/GHC/IO/Encoding/Iconv.hs
+@@ -29,6 +29,7 @@ module GHC.IO.Encoding.Iconv (
+  ) where
++import Prelude
+ 
+ #include "MachDeps.h"
+ 
+ #if defined(mingw32_HOST_OS)
+ 
+diff --git a/src/GHC/IO/Encoding/Latin1.hs b/src/GHC/IO/Encoding/Latin1.hs
+index 09916f5..08b1c9b 100644
+--- a/src/GHC/IO/Encoding/Latin1.hs
++++ b/src/GHC/IO/Encoding/Latin1.hs
+@@ -35,6 +35,7 @@ module GHC.IO.Encoding.Latin1 (
+   latin1_checked_encode,
+   ascii_encode,
+   ) where
++import Prelude
+ import Data.Char
+ import GHC.IO.Buffer
+ import GHC.IO.Encoding.Failure
+diff --git a/src/GHC/IO/Encoding/Types.hs b/src/GHC/IO/Encoding/Types.hs
+index 2b6a9fe..b871336 100644
+--- a/src/GHC/IO/Encoding/Types.hs
++++ b/src/GHC/IO/Encoding/Types.hs
+@@ -28,6 +28,7 @@ module GHC.IO.Encoding.Types (
+     DecodeBuffer, EncodeBuffer,
+     DecodingBuffer, EncodingBuffer,
+   ) where
++import Prelude
+ import Data.Word
+ import GHC.IO.Buffer
+ 
+diff --git a/src/GHC/IO/Encoding/UTF16.hs b/src/GHC/IO/Encoding/UTF16.hs
+index c27ae5a..55af9e7 100644
+--- a/src/GHC/IO/Encoding/UTF16.hs
++++ b/src/GHC/IO/Encoding/UTF16.hs
+@@ -39,6 +39,7 @@ module GHC.IO.Encoding.UTF16 (
+   utf16le_encode,
+   ) where
+ 
++import Prelude
+ import GHC.IO.Buffer
+ import GHC.IO.Encoding.Failure
+ import GHC.IO.Encoding.Types
+diff --git a/src/GHC/IO/Encoding/UTF32.hs b/src/GHC/IO/Encoding/UTF32.hs
+index b7583d3..5e4b036 100644
+--- a/src/GHC/IO/Encoding/UTF32.hs
++++ b/src/GHC/IO/Encoding/UTF32.hs
+@@ -39,6 +39,7 @@ module GHC.IO.Encoding.UTF32 (
+   utf32le_encode,
+   ) where
+ 
++import Prelude
+ import GHC.IO.Buffer
+ import GHC.IO.Encoding.Failure
+ import GHC.IO.Encoding.Types
+diff --git a/src/GHC/IO/Encoding/UTF8.hs b/src/GHC/IO/Encoding/UTF8.hs
+index c7fc796..7b5c0a7 100644
+--- a/src/GHC/IO/Encoding/UTF8.hs
++++ b/src/GHC/IO/Encoding/UTF8.hs
+@@ -34,6 +34,7 @@ module GHC.IO.Encoding.UTF8 (
+   utf8_bom, mkUTF8_bom
+   ) where
+ 
++import Prelude
+ import GHC.IO.Buffer
+ import GHC.IO.Encoding.Failure
+ import GHC.IO.Encoding.Types
+diff --git a/src/GHC/IO/Encoding.hs b/src/GHC/IO/Encoding.hs
+index a42c314..c60af66 100644
+--- a/src/GHC/IO/Encoding.hs
++++ b/src/GHC/IO/Encoding.hs
+@@ -36,6 +36,7 @@ module GHC.IO.Encoding (
+         argvEncoding
+     ) where
+ 
++import Prelude
+ import GHC.IO.Buffer
+ import GHC.IO.Encoding.Failure
+ import GHC.IO.Encoding.Types
+diff --git a/src/GHC/Internal/IO/Device.hs b/src/GHC/Internal/IO/Device.hs
+index a36ee59..d8aa2d3 100644
+--- a/src/GHC/Internal/IO/Device.hs
++++ b/src/GHC/Internal/IO/Device.hs
+@@ -26,6 +26,7 @@ module GHC.Internal.IO.Device (
+         IODeviceType(..),
+         SeekMode(..)
+     ) where
++import Prelude
+ import Control.Exception(throwIO)
+ import Data.Ix
+ import Data.Word

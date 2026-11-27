@@ -1,5 +1,13 @@
-# Hand-maintained: add extra targets below, or stop calling
-# generated_targets() to fully take over this package's BUCK rules.
-load(":BUCK.cabal.bzl", "generated_targets")
+# Not in cabal.project.stage1. The boot-compiler build is the stage1-tools
+# variant. The load keeps `cabal buck2 --variant` from appending a second
+# call. The unsuffixed alias is the binary `make stage1` installs.
+load(":BUCK.stage1-tools.cabal.bzl", generated_targets_stage1_tools = "generated_targets")
 
-generated_targets()
+alias(
+    name = "ghc-toolchain-bin",
+    actual = ":ghc-toolchain-bin-stage1-tools",
+    default_target_platform = "root//buck2/platforms:stage1-tools",
+    visibility = ["PUBLIC"],
+)
+
+generated_targets_stage1_tools()

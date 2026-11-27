@@ -1,0 +1,7 @@
+primOpIsWorkFree RaiseOp = True
+primOpIsWorkFree RaiseUnderflowOp = True
+primOpIsWorkFree RaiseOverflowOp = True
+primOpIsWorkFree RaiseDivZeroOp = True
+primOpIsWorkFree RaiseIOOp = True
+primOpIsWorkFree TouchOp = False
+primOpIsWorkFree _thisOp =  primOpCodeSize _thisOp == 0 

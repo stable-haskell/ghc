@@ -1,0 +1,228 @@
+From 49ccd55e26ccb2afde7bfaa5a0950c7ce23ecd81 Mon Sep 17 00:00:00 2001
+From: Moritz Angermann <moritz@zw3rk.com>
+Date: Thu, 19 Nov 2026 21:37:08 +0900
+Subject: [PATCH] deriving: raise largeRecordFieldLimit to 64 and improve
+ class/synonym deriving
+
+Adjacent to: https://github.com/augustss/MicroHs/pull/567
+Adjacent to: https://github.com/augustss/MicroHs/pull/559
+
+Raise largeRecordFieldLimit from 32 to 64 so Cabal-syntax records
+(InstalledPackageInfo at 45 fields, BuildInfo at 49 fields) derive SetField
+for Lens record updates cleanly without unqualified constructor leaks, and
+handle deriving corners required by Cabal and GHC Stage 1.
+---
+ src/MicroHs/Deriving.hs | 100 ++++++++++++++++++++++++++++++++--------
+ 1 file changed, 82 insertions(+), 18 deletions(-)
+
+diff --git a/src/MicroHs/Deriving.hs b/src/MicroHs/Deriving.hs
+index 92b82107..21019110 100644
+--- a/src/MicroHs/Deriving.hs
++++ b/src/MicroHs/Deriving.hs
+@@ -37,7 +37,7 @@ deriveStrat mctx newt lhs cs strat (narg, acls) =  -- narg is the number of argu
+     DerStock                      -> deriveNoHdr mctx narg lhs cs  cls
+     DerNewtype | newt             -> newtypeDer  mctx narg lhs  c acls =<< getVia narg lhs c
+     DerAnyClass                   -> anyclassDer mctx narg lhs     cls
+-    DerVia via | newt             -> newtypeDer  mctx narg lhs  c acls via
++    DerVia via                    -> newtypeDer  mctx narg lhs  c acls via
+     _                             -> cannotDerive lhs cls
+   where useNewt d = unIdent (getAppCon d) `notElem`
+           ["Data.Data_Class.Data", "Data.Typeable.Typeable", "GHC.Generics.Generic", "GHC.Generics.Generic1",
+@@ -59,6 +59,8 @@ derivers =
+   ,("Data.Foldable.Foldable",          derFoldable)
+   ,("Data.Functor.Functor",            derFunctor)
+   ,("Data.Ix.Ix",                      derIx)
++  ,("Data.Monoid.Internal.Monoid",     derMonoid)
++  ,("Data.Monoid.Internal.Semigroup",  derSemigroup)
+   ,("Data.Ord.Ord",                    derOrd)
+   ,("Data.Traversable.Traversable",    derTraversable)
+   ,("Data.Typeable.Typeable",          derTypeable)
+@@ -114,6 +116,11 @@ expandField def@(Data    lhs cs ds) | not (doNotDerive ds) = (++ [def]) <$> genH
+ expandField def@(Newtype lhs  c ds) | not (doNotDerive ds) = (++ [def]) <$> genHasFields lhs [c]
+ expandField def                                            = return [def]
+ 
++-- Records with more fields than this skip the generated SetField
++-- instances; record updates on them go through case desugaring instead.
++largeRecordFieldLimit :: Int
++largeRecordFieldLimit = 64
++
+ genHasFields :: LHS -> [Constr] -> T [EDef]
+ genHasFields lhs cs = do
+   let -- filter out fields with existential variables, the selector type makes no sense for there.
+@@ -147,7 +154,7 @@ genHasField (tycon, iks) cs (fld, fldty) = do
+       conEqnGet (Constr _ _ c _ (Left ts))   = eEqn [eApps (EVar c) (map (const eDummy) ts)] undef
+       conEqnGet (Constr _ _ c _ (Right fts)) = eEqn [conApp] $ if fld `elem` fs then rhs else undef
+         where fs = map fst fts
+-              conApp = eApps (EVar c) (map EVar fs)
++              conApp = eApps (EVar c) [ if f == fld then eFld else eDummy | f <- fs ]
+               rhs = eFld
+       conEqnSet (Constr _ _ c _ (Left ts))   = eEqn [eDummy, eApps (EVar c) (map (const eDummy) ts)] undef
+       conEqnSet (Constr _ _ c _ (Right fts)) = eEqn [eDummy, conApp] $ if fld `elem` fs then rhs else undef
+@@ -160,12 +167,17 @@ genHasField (tycon, iks) cs (fld, fldty) = do
+       validType EForall{} = False
+       validType _ = True
+ 
++      -- Large records skip the SetField instance: rebuilding the whole
++      -- constructor per field is quadratic, and record updates on large
++      -- records are desugared via case (see needDsCase) instead.
++      largeRec = any (> largeRecordFieldLimit) [ length fs | Constr _ _ _ _ (Right fs) <- cs ]
++
+   pure $ [ Sign [getName] $ eForall iks $ lhsToType (qtycon, iks) `tArrow` fldty
+          , Fcn getName $ map conEqnGet cs ]
+     ++ if not (validType fldty) then [] else
+-         [ Instance hdrGet [Fcn igetField [eEqn [eDummy] $ EVar getName] ] []
+-         , Instance hdrSet [Fcn isetField $ map conEqnSet cs] []
+-         ]
++         [ Instance hdrGet [Fcn igetField [eEqn [eDummy] $ EVar getName] ] [] ]
++         ++ if largeRec then [] else
++              [ Instance hdrSet [Fcn isetField $ map conEqnSet cs] [] ]
+ 
+ -- Given a (qualified) type name and a field name,
+ -- return the name of the selector function.
+@@ -208,7 +220,18 @@ getFieldTys (Left ts) = map snd ts
+ getFieldTys (Right ts) = map (snd . snd) ts
+ 
+ conFieldTys :: Constr -> [EType]
+-conFieldTys (Constr _ _ _ _ as) = getFieldTys as
++conFieldTys (Constr evs ctx _ _ as) = map (subst gadtSub) (getFieldTys as)
++  where
++    evNames = map idKindIdent evs
++    noEv t = null (freeTyVars [t] `intersect` evNames)
++    gadtSub = [ p
++              | EApp (EApp (EVar eq) t1) t2 <- ctx
++              , unIdent (unQualIdent eq) == "~"
++              , p <- case (t1, t2) of
++                       (EVar v1, _) | v1 `elem` evNames && noEv t2 -> [(v1, t2)]
++                       (_, EVar v2) | v2 `elem` evNames && noEv t1 -> [(v2, t1)]
++                       _ -> []
++              ]
+ 
+ -- If there is no mctx we use the default strategy to derive the instance context.
+ -- The default strategy basically is to require the class constraint for every
+@@ -225,8 +248,8 @@ mkHdrWithTyVarConstraint _ lhs@(_, iks) cs cls tyVarConstraint = do
+   ty <- mkLhsTy 0 lhs
+   let ctys :: [EType]  -- All top level types used by the constructors.
+       ctys = nubBy eqEType [ tt
+-                           | Constr evs _ _ _ flds <- cs
+-                           , tt <- getFieldTys flds
++                           | c@(Constr evs _ _ _ _) <- cs
++                           , tt <- conFieldTys c
+                            , not (ty `eqEType` tt)
+                            , not $ null $ freeTyVars [tt] \\ map idKindIdent evs
+                            ]
+@@ -244,8 +267,8 @@ mkHdr1 _ lhs@(_, iks) cs cls = do
+   let tvar = idKindIdent $ last iks               -- safe, because iks is non-null when calling mkHdr1
+       ctys :: [EType]                             -- All top level types used by the constructors.
+       ctys = nubBy eqEType [ tt
+-                           | Constr evs _ _ _ flds <- cs
+-                           , t <- getFieldTys flds
++                           | c@(Constr evs _ _ _ _) <- cs
++                           , t <- conFieldTys c
+                            , tt <- mkCtx t
+                            , not (tt `eqEType` ty')
+                            , not $ null $ freeTyVars [tt] \\ map idKindIdent evs
+@@ -309,6 +332,33 @@ derEq _ _ lhs _ e = cannotDerive lhs e
+ 
+ --------------------------------------------
+ 
++derSemigroup :: Deriver
++derSemigroup mctx 0 lhs cs@[c@(Constr _ _ con _ _)] esem = do
++  hdr <- mkHdr mctx lhs cs esem
++  let loc = getSLoc esem
++      (xp, xs) = mkPat c "x$"
++      (yp, ys) = mkPat c "y$"
++      eAppend = eAppI2 (mkBuiltin loc "<>")
++      rhs = tApps con (zipWith eAppend xs ys)
++      iAppend = mkIdentSLoc loc "<>"
++      inst = Instance hdr [Fcn iAppend [eEqn [xp, yp] rhs]] []
++  return [inst]
++derSemigroup _ _ lhs _ e = cannotDerive lhs e
++
++derMonoid :: Deriver
++derMonoid mctx 0 lhs cs@[c@(Constr _ _ con _ _)] emon = do
++  hdr <- mkHdr mctx lhs cs emon
++  let loc = getSLoc emon
++      (_, xs) = mkPat c "x$"
++      eMempty = EVar (mkIdentSLoc loc "mempty")
++      rhs = tApps con (map (const eMempty) xs)
++      iMempty = mkIdentSLoc loc "mempty"
++      inst = Instance hdr [Fcn iMempty [eEqn [] rhs]] []
++  return [inst]
++derMonoid _ _ lhs _ e = cannotDerive lhs e
++
++--------------------------------------------
++
+ derOrd :: Deriver
+ derOrd mctx 0 lhs cs eord = do
+   hdr <- mkHdr mctx lhs cs eord
+@@ -581,10 +631,21 @@ derData mctx _ lhs@(utyname, vks) cs edata = do
+     toConstrDef = Fcn (mkI "toConstr") $ zipWith con cs eConDefs
+       where con c e = eEqn [fst $ mkPat c "x$"] e
+     dataTypeOfDef = Fcn (mkI "dataTypeOf") [eEqn [eDummy] $ EVar iTyDef]
+-    dataCastDef = case length vks of
+-                    1 -> mk "1"
+-                    2 -> mk "2"
+-                    _ -> []
++    hdrCtxs :: EType -> [EConstraint]
++    hdrCtxs (EForall _ _ t) = hdrCtxs t
++    hdrCtxs (EParen t)      = hdrCtxs t
++    hdrCtxs t | Just (c, t') <- getImplies t = flatCtx c ++ hdrCtxs t'
++              | otherwise = []
++    flatCtx (ETuple cs') = concatMap flatCtx cs'
++    flatCtx (EParen c')  = flatCtx c'
++    flatCtx c'           = [c']
++    hasDataVk (IdKind v _) = any (eqEType (tApp edata (EVar v))) (hdrCtxs hdr)
++    dataCastDef | all hasDataVk vks =
++                    case length vks of
++                      1 -> mk "1"
++                      2 -> mk "2"
++                      _ -> []
++                | otherwise = []
+                     where mk s = [Fcn (mkI $ "dataCast" ++ s) [eEqn [] $ EVar $ mkB $ "gcast" ++ s]]
+     iTyDef = mkI "ty$"
+     tyDef = Fcn iTyDef [ eEqn [] $ eAppI2 iMkDataType (str tyname) (eList eConDefs) ]
+@@ -614,13 +675,14 @@ derFunctor mctx 1 lhs@(_, tyvs@(_:_)) cs efunctor = do
+   let loc = getSLoc efunctor
+       var = idKindIdent (last tyvs)
+       eqns = map mkEqn cs
+-      mkEqn c@(Constr _ _ con _ flds) =
++      mkEqn c@(Constr _ _ con _ _) =
+         let (xp, xs) = mkPat c "x$"
+-            ts = getFieldTys flds
++            ts = conFieldTys c
+             rhs = eApps (EVar con) $ zipWith EApp (map (mkFmap eF) ts) xs
+         in  eEqn [EVar iF, xp] rhs
+ 
+       mkFmap :: Expr -> EType -> Expr    -- result has type a->a
++      mkFmap _ t | var `notElem` freeTyVars [t] = eId
+       mkFmap f t =
+         case getExprTuple t of
+           Just ts ->
+@@ -658,6 +720,7 @@ derFoldable mctx 1 lhs@(_, tyvs@(_:_)) cs efoldable = do
+         in  eEqn [EVar iF, EVar iZ, xp] rhs
+ 
+       mkFold :: Expr -> EType -> Expr   -- result has type a->b->b
++      mkFold _ t | var `notElem` freeTyVars [t] = eFlipConst
+       mkFold f t =
+         case getExprTuple t of
+           Just ts ->
+@@ -691,13 +754,14 @@ derTraversable mctx 1 lhs@(_, tyvs@(_:_)) cs eTraversable = do
+   let loc = getSLoc eTraversable
+       var = idKindIdent (last tyvs)
+       eqns = map mkEqn cs
+-      mkEqn c@(Constr _ _ con _ flds) =
++      mkEqn c@(Constr _ _ con _ _) =
+         let (xp, xs) = mkPat c "x$"
+-            ts = getFieldTys flds
++            ts = conFieldTys c
+             rhs = foldl eAp (EApp ePure (EVar con)) $ zipWith EApp (map (mkTrav eF) ts) xs
+         in  eEqn [EVar iF, xp] rhs
+ 
+       mkTrav :: Expr -> EType -> Expr    -- result has type a->f b
++      mkTrav _ t | var `notElem` freeTyVars [t] = ePure
+       mkTrav f t =
+         case getExprTuple t of
+           Just ts ->
+-- 
+2.54.0
+

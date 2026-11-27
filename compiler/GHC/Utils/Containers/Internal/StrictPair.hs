@@ -5,7 +5,9 @@
 module GHC.Utils.Containers.Internal.StrictPair (StrictPair(..), toPair) where
 
 -- See W1 of Note [Tracking dependencies on primitives] in GHC.Internal.Base
+#if !defined(__MHS__)
 import GHC.Base ()
+#endif
 
 default ()
 

@@ -4,6 +4,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE CPP #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
 -- This module contains Data instances for GhcRn (renamed) phase only.
@@ -91,7 +92,23 @@ deriving instance Data (RoleAnnotDecl GhcRn)
 -- ---------------------------------------------------------------------
 
 deriving instance Data (FieldLabelStrings GhcRn)
+#if defined(__MHS__)
+-- MicroHs cannot derive Data through a data-family instance; spell out the
+-- single-constructor instance. Same meaning as the derived one.
+instance Data (HsRecUpdParent GhcRn) where
+  gfoldl k z (RnRecUpdParent labs cons) = z RnRecUpdParent `k` labs `k` cons
+  gunfold k z _c = k (k (z RnRecUpdParent))
+  toConstr (RnRecUpdParent _ _) = rnRecUpdParentConstr
+  dataTypeOf _ = rnRecUpdParentDataType
+
+rnRecUpdParentConstr :: Constr
+rnRecUpdParentConstr = mkConstrTag rnRecUpdParentDataType "RnRecUpdParent" 1 [] Prefix
+
+rnRecUpdParentDataType :: DataType
+rnRecUpdParentDataType = mkDataType "HsRecUpdParent" [rnRecUpdParentConstr]
+#else
 deriving instance Data (HsRecUpdParent GhcRn)
+#endif
 deriving instance Data (LHsRecUpdFields GhcRn)
 deriving instance Data (DotFieldOcc GhcRn)
 deriving instance Data (HsPragE GhcRn)

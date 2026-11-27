@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE MagicHash #-}
 {-# LANGUAGE MultiWayIf #-}
 
@@ -39,8 +40,12 @@ import Control.Monad.ST
 import Data.Word
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
+#if defined(__MHS__)
+import Data.Char (chr)
+#else
 import GHC.Exts
 import GHC.Word
+#endif
 
 
 -- -----------------------------------------------------------------------------
@@ -116,8 +121,15 @@ pprASCII str
 
        -- we know that the Chars we create are in the ASCII range
        -- so we bypass the check in "chr"
+#if defined(__MHS__)
+       -- MicroHs has no C#, W8#, chr#, word2Int# or word8ToWord#.
+       -- All call sites pass ASCII-range bytes, so chr is exact here.
+       chr' :: Word8 -> Char
+       chr' = chr . fromIntegral
+#else
        chr' :: Word8 -> Char
        chr' (W8# w#) = C# (chr# (word2Int# (word8ToWord# w#)))
+#endif
 {-# SPECIALIZE pprASCII :: ByteString -> SDoc #-}
 {-# SPECIALIZE pprASCII :: ByteString -> HLine #-} -- see Note [SPECIALIZE to HDoc] in GHC.Utils.Outputable
 

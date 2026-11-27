@@ -3,6 +3,7 @@
 (c) The GRASP/AQUA Project, Glasgow University, 1992-1998
 -}
 
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MagicHash #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -131,7 +132,9 @@ import Control.DeepSeq
 import Data.Char
 import Data.Data
 import qualified Data.Semigroup as S
+#if !defined(__MHS__)
 import GHC.Exts( Int(I#), dataToTag# )
+#endif
 
 {-
 ************************************************************************
@@ -164,7 +167,11 @@ data NameSpace
 
 instance Ord NameSpace where
   compare ns1 ns2 =
+#if defined(__MHS__)
+    case compare (nameSpaceTag ns1) (nameSpaceTag ns2) of
+#else
     case compare (I# (dataToTag# ns1)) (I# (dataToTag# ns2)) of
+#endif
       LT -> LT
       GT -> GT
       EQ
@@ -173,6 +180,15 @@ instance Ord NameSpace where
         -> lexicalCompareFS p1 p2
         | otherwise
         -> EQ
+#if defined(__MHS__)
+    where
+      nameSpaceTag :: NameSpace -> Int
+      nameSpaceTag VarName     = 0
+      nameSpaceTag (FldName _) = 1
+      nameSpaceTag DataName    = 2
+      nameSpaceTag TvName      = 3
+      nameSpaceTag TcClsName   = 4
+#endif
 
 instance Uniquable NameSpace where
   getUnique (FldName fs) = mkFldNSUnique  fs

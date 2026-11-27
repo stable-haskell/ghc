@@ -1,4 +1,5 @@
 
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE LambdaCase #-}
 
@@ -61,6 +62,11 @@ import GHC.Data.Stream
 import GHC.Data.OrdList
 
 import Control.Monad (when,void, forM_)
+#if defined(__MHS__)
+-- MicroHs's forM_/mapM_ are list-only (no Foldable generalisation), so
+-- traverse the NonEmpty usage list via NE.toList. Same meaning.
+import qualified Data.List.NonEmpty as NE
+#endif
 import GHC.Utils.Misc
 import System.IO.Unsafe
 import qualified Data.ByteString as BS
@@ -126,7 +132,11 @@ codeGen logger tmpfs cfg (InfoTableProvMap denv _ _) tycons
 
         -- Emit special info tables for everything used in this module
         -- This will only do something if  `-fdistinct-info-tables` is turned on.
+#if defined(__MHS__)
+        ; mapM_ (\(dc, ns) -> forM_ (NE.toList ns) $ \(k, _ss) -> cg (cgDataCon (UsageSite (stgToCmmThisModule cfg) k) dc)) (eltsUDFM denv)
+#else
         ; mapM_ (\(dc, ns) -> forM_ ns $ \(k, _ss) -> cg (cgDataCon (UsageSite (stgToCmmThisModule cfg) k) dc)) (eltsUDFM denv)
+#endif
 
         ; final_state <- liftIO (readIORef cgref)
         ; let cg_id_infos = cgs_binds final_state

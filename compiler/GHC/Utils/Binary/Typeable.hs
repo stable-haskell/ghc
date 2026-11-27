@@ -11,6 +11,100 @@ module GHC.Utils.Binary.Typeable
    )
 where
 
+#if defined(__MHS__)
+
+import GHC.Prelude
+
+import GHC.Utils.Binary
+
+import qualified Data.Typeable as DT
+import System.IO.MD5 (MD5CheckSum, md5Combine)
+import Type.Reflection
+import GHC.Serialized
+import Unsafe.Coerce (unsafeCoerce)
+
+-- | Mirror of 'DT.TypeRep's runtime representation, used to rebuild
+-- type representations structurally: MicroHs 'Data.Typeable' only
+-- exports the nullary '_mkTyCon' smart constructor.
+data RepMirror = RepMirror MD5CheckSum DT.TyCon [RepMirror]
+
+toMirror :: DT.TypeRep -> RepMirror
+toMirror = unsafeCoerce
+
+fromMirror :: RepMirror -> DT.TypeRep
+fromMirror = unsafeCoerce
+
+putDTTypeRep :: WriteBinHandle -> DT.TypeRep -> IO ()
+putDTTypeRep bh tr = do
+  let (tc, args) = DT.splitTyConApp tr
+  put_ bh (DT.tyConModule tc)
+  put_ bh (DT.tyConName tc)
+  put_ bh args
+
+rebuildDTTypeRep :: String -> String -> [DT.TypeRep] -> DT.TypeRep
+rebuildDTTypeRep m n [] = DT._mkTyCon m n ()
+rebuildDTTypeRep m n args =
+  let tc = DT.typeRepTyCon (DT._mkTyCon m n ())
+  in fromMirror (RepMirror (md5Combine (DT.tyConFingerPrint tc : map DT.typeRepFingerprint args))
+                           tc (map toMirror args))
+
+getDTTypeRep :: ReadBinHandle -> IO DT.TypeRep
+getDTTypeRep bh = do
+  m <- (get bh :: IO String)
+  n <- (get bh :: IO String)
+  args <- (get bh :: IO [DT.TypeRep])
+  return (rebuildDTTypeRep m n args)
+
+instance Binary DT.TyCon where
+    put_ bh tc = do
+        put_ bh (DT.tyConPackage tc)
+        put_ bh (DT.tyConModule tc)
+        put_ bh (DT.tyConName tc)
+    get bh = do
+        _ <- (get bh :: IO String)
+        m <- (get bh :: IO String)
+        n <- (get bh :: IO String)
+        return (DT.typeRepTyCon (DT._mkTyCon m n ()))
+
+getSomeTypeRep :: ReadBinHandle -> IO SomeTypeRep
+getSomeTypeRep bh = do
+    tr <- getDTTypeRep bh
+    return (dtToSomeTypeRep tr)
+
+instance Binary SomeTypeRep where
+    put_ bh = putDTTypeRep bh . someTypeRepToDT
+    get = getSomeTypeRep
+
+putTypeRep :: WriteBinHandle -> TypeRep a -> IO ()
+putTypeRep bh = putDTTypeRep bh . unMkTypeRep
+
+instance Typeable a => Binary (TypeRep a) where
+    put_ = putTypeRep
+    get bh = do
+        SomeTypeRep rep <- get bh
+        let expected = unMkTypeRep (typeRep :: TypeRep a)
+        if unMkTypeRep rep == expected
+          then return (unsafeCoerce rep)
+          else fail (unlines
+                     [ "Binary: Type mismatch"
+                     , "    Deserialized type: " ++ show rep
+                     , "    Expected type:     " ++ show (typeRep :: TypeRep a)
+                     ])
+
+instance Binary DT.TypeRep where
+    put_ = putDTTypeRep
+    get = getDTTypeRep
+
+instance Binary Serialized where
+    put_ bh (Serialized the_type bytes) = do
+        putDTTypeRep bh the_type
+        put_ bh bytes
+    get bh = do
+        the_type <- getDTTypeRep bh
+        bytes <- get bh
+        return (Serialized the_type bytes)
+
+#else
 import GHC.Prelude
 
 import GHC.Utils.Binary
@@ -188,3 +282,4 @@ instance Binary Serialized where
         the_type <- get bh
         bytes <- get bh
         return (Serialized the_type bytes)
+#endif

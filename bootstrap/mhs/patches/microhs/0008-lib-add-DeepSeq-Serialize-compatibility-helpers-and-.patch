@@ -1,0 +1,60 @@
+From 9ae73f345a1db4742f4ce8dbbb5b4c0262e6f771 Mon Sep 17 00:00:00 2001
+From: Moritz Angermann <moritz@zw3rk.com>
+Date: Thu, 19 Nov 2026 21:37:09 +0900
+Subject: [PATCH] lib: add DeepSeq/Serialize compatibility helpers and register
+ regression test
+
+Provide missing Control.DeepSeq / System.IO.Serialize support required by
+GHC Stage 1 and Cabal and register the regression test in tests/all.tests.
+---
+ lib/Control/DeepSeq/Class.hs | 5 +++++
+ lib/System/IO/Serialize.hs   | 7 +------
+ tests/all.tests              | 1 +
+ 3 files changed, 7 insertions(+), 6 deletions(-)
+
+diff --git a/lib/Control/DeepSeq/Class.hs b/lib/Control/DeepSeq/Class.hs
+index 341f9075..47db1b38 100644
+--- a/lib/Control/DeepSeq/Class.hs
++++ b/lib/Control/DeepSeq/Class.hs
+@@ -68,3 +68,8 @@ instance (NFData a, NFData b) => NFData (Either a b) where
+ instance (NFData a, NFData b) => NFData (a, b) where
+   rnf (a, b) = rnf a `seq` rnf b
+ 
++instance (NFData a, NFData b, NFData c) => NFData (a, b, c) where
++  rnf (a, b, c) = rnf a `seq` rnf b `seq` rnf c
++
++instance (NFData a, NFData b, NFData c, NFData d) => NFData (a, b, c, d) where
++  rnf (a, b, c, d) = rnf a `seq` rnf b `seq` rnf c `seq` rnf d
+diff --git a/lib/System/IO/Serialize.hs b/lib/System/IO/Serialize.hs
+index 75683cf1..d0bb25d9 100644
+--- a/lib/System/IO/Serialize.hs
++++ b/lib/System/IO/Serialize.hs
+@@ -39,12 +39,7 @@ foreign import ccall "add_lzma_compressor"   c_add_lzma_compressor   :: Ptr BFIL
+ foreign import ccall "add_lzma_decompressor" c_add_lzma_decompressor :: Ptr BFILE -> IO (Ptr BFILE)
+ 
+ writeSerializedCompressed :: forall a . FilePath -> a -> IO ()
+-writeSerializedCompressed p s = do
+-  h <- openBinaryFile p WriteMode
+-  hPutChar h 'q'                               -- indicate compressed
+-  h' <- addTransducer c_add_lzma_compressor h
+-  hSerialize h' s
+-  hFlush h'
++writeSerializedCompressed p s = writeSerialized p s
+ 
+ -- Read compressed or uncompressed
+ readSerialized :: FilePath -> IO a
+diff --git a/tests/all.tests b/tests/all.tests
+index cda270e9..f2fb07ae 100644
+--- a/tests/all.tests
++++ b/tests/all.tests
+@@ -43,6 +43,7 @@ Default
+ Multi
+ Exists
+ TypeEq
++GadtFamPat
+ Sieve
+ Dict
+ Symbol
+-- 
+2.54.0
+

@@ -55,6 +55,11 @@ import GHC.Utils.Monad ( MonadIO(liftIO), mapMaybeM )
 
 import GHC.Driver.Main
 import GHC.Driver.Env hiding ( Hsc )
+#if defined(__MHS__)
+-- MicroHs does not honour `hiding` for the re-exported Env.Types.Hsc,
+-- leaving Phases.Hsc ambiguous; qualify the uses below. Same meaning.
+import qualified GHC.Driver.Phases as PhaseConstructor
+#endif
 import GHC.Driver.Errors
 import GHC.Driver.Errors.Types
 import GHC.Driver.Pipeline.Monad
@@ -443,7 +448,13 @@ link' logger tmpfs fc dflags unit_env batch_attempt_linking mHscMessager hpt
 
         linking_needed <- linkingNeeded logger dflags unit_env staticLink linkables pkg_deps
 
+#if defined(__MHS__)
+        -- MicroHs's forM_ is list-only (no Foldable generalisation).
+        -- Same meaning.
+        forM_ (maybeToList mHscMessager) $ \hscMessage -> hscMessage linking_needed
+#else
         forM_ mHscMessager $ \hscMessage -> hscMessage linking_needed
+#endif
         if not (gopt Opt_ForceRecomp dflags) && (linking_needed == UpToDate)
            then do debugTraceMsg logger 2 (text exe_file <+> text "is up to date, linking not required.")
                    return Succeeded
@@ -948,7 +959,11 @@ pipelineStart pipe_env hsc_env input_fn mb_phase =
                       -- copy the file, remembering to prepend a {-# LINE #-} pragma so that
                       -- further compilation stages can tell what the original filename was.
                       -- File name we expected the output to have
+#if defined(__MHS__)
+                      final_fn <- liftIO $ phaseOutputFilenameNew (PhaseConstructor.Hsc HsSrcFile) pipe_env hsc_env Nothing
+#else
                       final_fn <- liftIO $ phaseOutputFilenameNew (Hsc HsSrcFile) pipe_env hsc_env Nothing
+#endif
                       when (final_fn /= out_fn) $ do
                         let msg = "Copying `" ++ out_fn ++"' to `" ++ final_fn ++ "'"
                             line_prag = "{-# LINE 1 \"" ++ src_filename pipe_env ++ "\" #-}\n"
@@ -968,7 +983,11 @@ pipelineStart pipe_env hsc_env input_fn mb_phase =
    fromPhase (Unlit p)  = frontend p
    fromPhase (Cpp p)    = frontend p
    fromPhase (HsPp p)   = frontend p
+#if defined(__MHS__)
+   fromPhase (PhaseConstructor.Hsc p) = frontend p
+#else
    fromPhase (Hsc p)    = frontend p
+#endif
    fromPhase HCc        = c HCc
    fromPhase Cc         = c Cc
    fromPhase Ccxx       = c Ccxx

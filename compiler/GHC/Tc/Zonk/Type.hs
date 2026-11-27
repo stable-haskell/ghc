@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 
@@ -476,7 +477,11 @@ commitFlexi DefaultFlexi tv zonked_kind
   | otherwise
   = do { traceTc "Defaulting flexi tyvar to UnusedType:" (pprTyVar tv)
           -- See Note [The types Any and UnusedType] in GHC.Builtin.Types, esp wrinkle (Any6)
+#if defined(__MHS__)
+       ; newUnusedType (getName tv) zonked_kind }
+#else
        ; newUnusedType tv.varName zonked_kind }
+#endif
 
 zonkCoVarOcc :: CoVar -> ZonkTcM Coercion
 zonkCoVarOcc cv
@@ -1328,7 +1333,11 @@ zonkStmt _ (ParStmt bind_ty stmts_w_bndrs mzip_op bind_op)
          do { new_bndrs <- zonkIdOccs bndrs
             ; return (ParStmtBlock x new_stmts new_bndrs new_return) }
 
+#if defined(__MHS__)
+zonkStmt zBody (RecStmt { recS_stmts = L seg_loc segStmts, recS_later_ids = lvs
+#else
 zonkStmt zBody (RecStmt { recS_stmts = L _ segStmts, recS_later_ids = lvs
+#endif
                         , recS_rec_ids = rvs
                         , recS_ret_fn = ret_id, recS_mfix_fn = mfix_id
                         , recS_bind_fn = bind_id
@@ -1353,7 +1362,11 @@ zonkStmt zBody (RecStmt { recS_stmts = L _ segStmts, recS_later_ids = lvs
              ; new_later_rets <- noBinders $ mapM zonkExpr later_rets
              ; new_rec_rets   <- noBinders $ mapM zonkExpr rec_rets
              ; return $
+#if defined(__MHS__)
+               RecStmt { recS_stmts = L seg_loc new_segStmts
+#else
                RecStmt { recS_stmts = noLocA new_segStmts
+#endif
                        , recS_later_ids = new_lvs
                        , recS_rec_ids = new_rvs, recS_ret_fn = new_ret_id
                        , recS_mfix_fn = new_mfix_id, recS_bind_fn = new_bind_id
@@ -1465,10 +1478,19 @@ zonkStmt _zBody (XStmtLR (ApplicativeStmt body_ty args mb_join))
            ; return $ (new_op, new_arg) : new_args }
     zonk_args_rev [] = return []
 
+#if defined(__MHS__)
+    zonk_arg (ApplicativeArgOne fail_op pat expr isBody)
+      = do { new_expr <- zonkLExpr expr
+           ; new_fail <- case fail_op of
+                           Nothing -> return Nothing
+                           Just op -> Just <$> (don'tBind (zonkSyntaxExpr op))
+           ; return (ApplicativeArgOne new_fail pat new_expr isBody) }
+#else
     zonk_arg (ApplicativeArgOne fail_op pat expr isBody)
       = do { new_expr <- zonkLExpr expr
            ; new_fail <- forM fail_op $ don'tBind . zonkSyntaxExpr
            ; return (ApplicativeArgOne new_fail pat new_expr isBody) }
+#endif
     zonk_arg (ApplicativeArgMany x stmts ret pat ctxt)
       = runZonkBndrT (zonkStmts zonkLExpr stmts) $ \ new_stmts ->
         do { new_ret <- zonkExpr ret

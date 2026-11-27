@@ -4,6 +4,7 @@
 -}
 
 
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleContexts #-}
@@ -1139,8 +1140,16 @@ f_RDR = mkVarUnqual (fsLit "f")
 z_RDR = mkVarUnqual (fsLit "z")
 
 as_RDRs, bs_RDRs :: Infinite RdrName
+#if defined(__MHS__)
+as_RDRs = fmap (\i -> mkVarUnqual (mkFastString ("a"++show i))) (Inf.enumFrom (1::Int))
+#else
 as_RDRs = [ mkVarUnqual (mkFastString ("a"++show i)) | i <- Inf.enumFrom (1::Int) ]
+#endif
+#if defined(__MHS__)
+bs_RDRs = fmap (\i -> mkVarUnqual (mkFastString ("b"++show i))) (Inf.enumFrom (1::Int))
+#else
 bs_RDRs = [ mkVarUnqual (mkFastString ("b"++show i)) | i <- Inf.enumFrom (1::Int) ]
+#endif
 
 as_Vars, bs_Vars :: Infinite (LHsExpr GhcPs)
 as_Vars = fmap nlHsVar as_RDRs

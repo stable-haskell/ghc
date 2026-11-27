@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
@@ -90,10 +91,20 @@ import GHC.Data.FastString
 import GHC.Utils.Outputable
 import GHC.Utils.Panic
 import GHC.Utils.Constants (debugIsOn)
+#if !defined(__MHS__)
 import GHC.Exts (oneShot)
+#endif
 
 import Control.Monad
 import Data.List (mapAccumL)
+
+#if defined(__MHS__)
+-- MicroHs has no GHC.Exts(oneShot).  oneShot is only an optimiser hint,
+-- so the identity function is semantically exact here.
+-- See Note [The one-shot state monad trick] in GHC.Utils.Monad.
+oneShot :: (a -> b) -> a -> b
+oneShot f = f
+#endif
 
 
 --------------------------------------------------------

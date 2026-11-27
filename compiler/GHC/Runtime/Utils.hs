@@ -16,6 +16,10 @@ import GHC.IO.SubSystem ((<!>))
 import GHC.IO.Handle.Windows (handleToHANDLE)
 import GHC.Event.Windows (associateHandle')
 # endif
+#elif defined(__MHS__)
+-- MicroHs has no Posix pipes and no fdToHandle. The only callers are the
+-- external-interpreter spawners, which are stubbed out in stage1 anyway.
+import GHC.SysTools.Process (CreateProcess, ProcessHandle)
 #else
 import System.Posix as Posix
 #endif
@@ -24,7 +28,10 @@ import System.IO
 
 runWithPipes :: (CreateProcess -> IO ProcessHandle)
              -> FilePath -> [String] -> [String] -> IO (ProcessHandle, Handle, Handle)
-#if defined(mingw32_HOST_OS)
+#if defined(__MHS__)
+runWithPipes _ _ _ _ =
+  ioError (userError "runWithPipes: external interpreters are not supported in the MicroHs stage1 build")
+#elif defined(mingw32_HOST_OS)
 foreign import ccall "io.h _close"
    c__close :: CInt -> IO CInt
 

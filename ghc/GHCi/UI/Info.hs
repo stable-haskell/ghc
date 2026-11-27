@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP                 #-}
 {-# LANGUAGE LambdaCase          #-}
 {-# LANGUAGE RankNTypes          #-}
 {-# LANGUAGE OverloadedStrings   #-}
@@ -225,6 +226,16 @@ findType infos span0 string = do
     resolveType :: [SpanInfo] -> SpanInfo -> Maybe Type
     resolveType spans' si = listToMaybe $ mapMaybe spaninfoType $
                             reverse spans' `spaninfosWithin` si
+
+#if defined(__MHS__)
+-- MicroHs's System.Directory has no makeRelativeToCurrentDirectory; strip
+-- the current-directory prefix when present.
+makeRelativeToCurrentDirectory :: FilePath -> IO FilePath
+makeRelativeToCurrentDirectory fp = do
+    cwd <- getCurrentDirectory
+    let pre = cwd ++ "/"
+    return $ if take (length pre) fp == pre then drop (length pre) fp else fp
+#endif
 
 -- | Guess a module name from a file path.
 guessModule :: GhcMonad m

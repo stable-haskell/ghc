@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE FlexibleInstances, Safe #-}
 
 -- | Monadic front-end to Text.PrettyPrint
@@ -171,23 +172,47 @@ comma = return HPJ.comma
 colon = return HPJ.colon
 dcolon = return $ HPJ.text "::"
 space = return HPJ.space
+#if defined(__MHS__)
+-- pretty-mhs has no single-character document constants and no ptext/float.
+equals = return $ HPJ.char '='
+#else
 equals = return HPJ.equals
+#endif
 arrow = return $ HPJ.text "->"
+#if defined(__MHS__)
+lparen = return $ HPJ.char '('
+rparen = return $ HPJ.char ')'
+lbrack = return $ HPJ.char '['
+rbrack = return $ HPJ.char ']'
+lbrace = return $ HPJ.char '{'
+rbrace = return $ HPJ.char '}'
+#else
 lparen = return HPJ.lparen
 rparen = return HPJ.rparen
 lbrack = return HPJ.lbrack
 rbrack = return HPJ.rbrack
 lbrace = return HPJ.lbrace
 rbrace = return HPJ.rbrace
+#endif
 
 text = return . HPJ.text
+#if defined(__MHS__)
+ptext = return . HPJ.text
+#else
 ptext = return . HPJ.ptext
+#endif
 char = return . HPJ.char
 int = return . HPJ.int
 integer = return . HPJ.integer
+#if defined(__MHS__)
+float = return . HPJ.text . show
+double = return . HPJ.text . show
+rational = return . HPJ.text . show
+#else
 float = return . HPJ.float
 double = return . HPJ.double
 rational = return . HPJ.rational
+#endif
 
 
 parens = liftM HPJ.parens
@@ -209,14 +234,23 @@ vcat = liftM HPJ.vcat . sequence
 
 cat  = liftM HPJ.cat . sequence
 sep  = liftM HPJ.sep . sequence
+#if defined(__MHS__)
+-- pretty-mhs has fsep but not fcat or hang.
+fcat = liftM HPJ.cat . sequence
+#else
 fcat = liftM HPJ.fcat . sequence
+#endif
 fsep = liftM HPJ.fsep . sequence
 
 nest n = liftM (HPJ.nest n)
 
+#if defined(__MHS__)
+hang d1 n d2 = sep [d1, nest n d2]
+#else
 hang d1 n d2 = do d1' <- d1
                   d2' <- d2
                   return (HPJ.hang d1' n d2')
+#endif
 
 -- punctuate uses the same definition as Text.PrettyPrint
 punctuate _ []     = []

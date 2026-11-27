@@ -27,7 +27,11 @@ import Foreign
 
 import Control.Concurrent
 import GHC.Utils.Outputable
+#if defined(__MHS__)
+import Data.TypeLits
+#else
 import GHC.TypeLits
+#endif
 
 
 -- The symbols records the suffix which each cache deals with.

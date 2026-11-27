@@ -1,0 +1,12 @@
+diff --git a/System/OsString/Encoding/Internal.hs b/System/OsString/Encoding/Internal.hs
+index 1aadd2d..d621f89 100644
+--- a/System/OsString/Encoding/Internal.hs
++++ b/System/OsString/Encoding/Internal.hs
+@@ -38,6 +38,7 @@ import Foreign
+ import GHC.IO.Encoding (getFileSystemEncoding, getLocaleEncoding)
+ 
+ #if defined(__MHS__)
++import Prelude
+ import Data.Char(ord)
+ unsafeChr :: Int -> Char
+ unsafeChr = chr

@@ -14,6 +14,7 @@ It does not normalize the graphs. This means that g `unionUnVarGraph` g is
 equal to g, but twice as expensive and large.
 
 -}
+{-# LANGUAGE CPP #-}
 module GHC.Data.Graph.UnVar
     ( UnVarSet
     , emptyUnVarSet, mkUnVarSet, unionUnVarSet, unionUnVarSets
@@ -35,7 +36,11 @@ import GHC.Types.Unique.FM( UniqFM, ufmToSet_Directly )
 import GHC.Types.Var
 import GHC.Utils.Outputable
 import GHC.Types.Unique
+#if defined(__MHS__)
+import Data.Word ( Word64 )
+#else
 import GHC.Word
+#endif
 
 import qualified GHC.Data.Word64Set as S
 

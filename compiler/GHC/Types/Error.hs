@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE DerivingStrategies #-}
@@ -96,7 +97,11 @@ import GHC.Prelude
 import GHC.Driver.Flags
 
 import GHC.Data.Bag
+#if defined(__MHS__)
+import GHC.Utils.Exception (catchException)
+#else
 import GHC.IO (catchException)
+#endif
 import GHC.Utils.Outputable as Outputable
 import qualified GHC.Utils.Ppr.Colour as Col
 import GHC.Types.SrcLoc as SrcLoc

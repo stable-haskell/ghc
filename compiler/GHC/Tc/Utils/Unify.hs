@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP               #-}
 {-# LANGUAGE DataKinds           #-}
 {-# LANGUAGE DeriveTraversable   #-}
 {-# LANGUAGE DerivingStrategies  #-}
@@ -4165,6 +4166,9 @@ checkFamApp flags fam_app tc tys =
                }
   where
     fam_flags = tef_fam_app flags
+#if defined(__MHS__)
+    do_not_recurse :: CheckTyEqProblem -> m (PuResult a Reduction)
+#endif
     do_not_recurse prob =
       case fam_flags of
         TEFA_Recurse   -> return $ PuFail (cteProblem prob)

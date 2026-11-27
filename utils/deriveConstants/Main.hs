@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {- ------------------------------------------------------------------------
 
 (c) The GHC Team, 1992-2012
@@ -36,8 +37,29 @@ import System.Environment (getArgs)
 import System.Exit (ExitCode(ExitSuccess), exitFailure)
 import System.FilePath ((</>),(<.>))
 import System.IO (stderr, hPutStrLn)
+#if defined(__MHS__)
+-- MicroHs's System.Process exports system and readProcess, not
+-- showCommandForUser or rawSystem.  Both are only used by execute.
+import System.Process (readProcess, system)
+showCommandForUser :: String -> [String] -> String
+showCommandForUser prog args = unwords (prog : args)
+rawSystem :: String -> [String] -> IO ExitCode
+rawSystem prog args = system (unwords (prog : args))
+#else
 import System.Process (showCommandForUser, readProcess, rawSystem)
+#endif
+#if defined(__MHS__)
+-- MicroHs's System.Directory has copyFile and removeFile, not renameFile.
+import Foreign.C.String (CString, withCString)
+foreign import ccall "rename" c_rename :: CString -> CString -> IO Int
+renameFile :: String -> String -> IO ()
+renameFile src dst = do
+  r <- withCString src $ \s -> withCString dst $ \d -> c_rename s d
+  when (r /= 0) $
+    die ("renameFile " ++ src ++ " -> " ++ dst ++ " failed")
+#else
 import System.Directory (renameFile)
+#endif
 
 main :: IO ()
 main = do opts <- parseArgs
@@ -891,6 +913,9 @@ getWanted verbose os tmpdir gccProgram gccFlags nmProgram mobjdumpProgram
           -- "_derivedConstantMAX_Vanilla_REG C 000000b" (MinGW)
           -- "derivedConstantMAX_Vanilla_REG D        1        b" (Solaris)
           -- and returns ("MAX_Vanilla_REG", 11)
+#if defined(__MHS__)
+          parseNmLine :: String -> Maybe (String, Integer)
+#endif
           parseNmLine line
               = case words line of
                 ('_' : n) : "C" : s : _ -> mkP n s
@@ -899,7 +924,12 @@ getWanted verbose os tmpdir gccProgram gccFlags nmProgram mobjdumpProgram
                 [n, "D", _, s]          -> mkP n s
                 [s, "O", "*COM*", _, n] -> mkP n s
                 _ -> Nothing
+#if defined(__MHS__)
+              where mkP :: String -> String -> Maybe (String, Integer)
+                    mkP r s = case (stripPrefix prefix r, readHex s) of
+#else
               where mkP r s = case (stripPrefix prefix r, readHex s) of
+#endif
                         (Just name, [(size, "")]) -> Just (name, size)
                         _ -> Nothing
 
@@ -1015,10 +1045,10 @@ getWantedJS = mapM lookupResult (wanteds (Just JS))
 writeHaskellType :: FilePath -> [What Fst] -> IO ()
 writeHaskellType fn ws = atomicWriteFile fn xs
     where xs = unlines [header, body, footer, parser]
-          header = "module GHC.Platform.Constants where\n\n\
-                   \import Prelude\n\
-                   \import Data.Char\n\n\
-                   \data PlatformConstants = PlatformConstants {"
+          header = "module GHC.Platform.Constants where\n\n"
+                   ++ "import Prelude\n"
+                   ++ "import Data.Char\n\n"
+                   ++ "data PlatformConstants = PlatformConstants {"
           footer = "  } deriving (Show, Read, Eq, Ord)\n\n"
           body = intercalate ",\n" (concatMap doWhat ws)
 
@@ -1035,25 +1065,25 @@ writeHaskellType fn ws = atomicWriteFile fn xs
 
           vs = zip ws [(0::Int)..]
           parser =
-            "parseConstantsHeader :: FilePath -> IO PlatformConstants\n\
-            \parseConstantsHeader fp = do\n\
-            \  s <- readFile fp\n\
-            \  let def = \"#define HS_CONSTANTS \\\"\"\n\
-            \      find [] xs = xs\n\
-            \      find _  [] = error $ \"GHC couldn't find the RTS constants (\"++def++\") in \" ++ fp ++ \": the RTS package you are trying to use is perhaps for another GHC version\" ++\n\
-            \                               \"(e.g. you are using the wrong package database) or the package database is broken.\\n\"\n\
-            \      find (d:ds) (x:xs)\n\
-            \        | d == x    = find ds xs\n\
-            \        | otherwise = find def xs\n\n\
-            \      readVal' :: Bool -> Integer -> String -> [Integer]\n\
-            \      readVal' n     c (x:xs) = case x of\n\
-            \        '\"' -> [if n then negate c else c]\n\
-            \        '-' -> readVal' True c xs\n\
-            \        ',' -> (if n then negate c else c) : readVal' False 0 xs\n\
-            \        _   -> readVal' n (c*10 + fromIntegral (ord x - ord '0')) xs\n\
-            \      readVal' n     c []     = [if n then negate c else c]\n\n\
-            \      readVal = readVal' False 0\n\n\
-            \  return $! case readVal (find def s) of\n"
+            "parseConstantsHeader :: FilePath -> IO PlatformConstants\n"
+                   ++ "parseConstantsHeader fp = do\n"
+                   ++ "  s <- readFile fp\n"
+                   ++ "  let def = \"#define HS_CONSTANTS \\\"\"\n"
+                   ++ "      find [] xs = xs\n"
+                   ++ "      find _  [] = error $ \"GHC couldn't find the RTS constants (\"++def++\") in \" ++ fp ++ \": the RTS package you are trying to use is perhaps for another GHC version\" ++\n"
+                   ++ "                               \"(e.g. you are using the wrong package database) or the package database is broken.\\n\"\n"
+                   ++ "      find (d:ds) (x:xs)\n"
+                   ++ "        | d == x    = find ds xs\n"
+                   ++ "        | otherwise = find def xs\n\n"
+                   ++ "      readVal' :: Bool -> Integer -> String -> [Integer]\n"
+                   ++ "      readVal' n     c (x:xs) = case x of\n"
+                   ++ "        '\"' -> [if n then negate c else c]\n"
+                   ++ "        '-' -> readVal' True c xs\n"
+                   ++ "        ',' -> (if n then negate c else c) : readVal' False 0 xs\n"
+                   ++ "        _   -> readVal' n (c*10 + fromIntegral (ord x - ord '0')) xs\n"
+                   ++ "      readVal' n     c []     = [if n then negate c else c]\n\n"
+                   ++ "      readVal = readVal' False 0\n\n"
+                   ++ "  return $! case readVal (find def s) of\n"
             ++ "    [" ++ concatMap (nicetab . snd) vs
             ++ "\n     ] -> PlatformConstants\n            { "
             ++ intercalate "\n            , " (concatMap (uncurry doParse) vs)

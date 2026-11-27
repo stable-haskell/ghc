@@ -1,0 +1,171 @@
+From 345d0aa7351b652be469436649b063f30e2c2cf0 Mon Sep 17 00:00:00 2001
+From: Moritz Angermann <moritz@zw3rk.com>
+Date: Thu, 19 Nov 2026 21:37:09 +0900
+Subject: [PATCH] ffi: desugar polymorphic foreign imports (EForall /
+ T_IO_CCALL) and codegen
+
+Support polymorphic foreign import declarations via EForall desugaring with a
+T_IO_CCALL guard and emit compatible combinator/C glue in ExpPrint.
+---
+ src/MicroHs/ExpPrint.hs | 38 ++++++++++++++++++++++++++++++++++----
+ src/MicroHs/FFI.hs      | 18 +++++++++++-------
+ 2 files changed, 45 insertions(+), 11 deletions(-)
+
+diff --git a/src/MicroHs/ExpPrint.hs b/src/MicroHs/ExpPrint.hs
+index 80479dd4..9f39bbff 100644
+--- a/src/MicroHs/ExpPrint.hs
++++ b/src/MicroHs/ExpPrint.hs
+@@ -4,7 +4,7 @@ import qualified Prelude(); import MHSPrelude
+ import qualified Data.ByteString.Char8 as BS
+ import Data.Char(ord, chr)
+ import Data.Function(on)
+-import Data.List(nubBy)
++import Data.List(nubBy, isSuffixOf)
+ import qualified MicroHs.IdentMap as M
+ import Data.Maybe
+ import MicroHs.Desugar(LDef)
+@@ -12,7 +12,7 @@ import MicroHs.EncodeData(encList)
+ import MicroHs.Error(mhsError)
+ import MicroHs.Exp
+ import MicroHs.Expr(Lit(..), showLit, errorMessage, HasLoc(..), CType)
+-import MicroHs.Ident(Ident, showIdent, mkIdent, showSLoc)
++import MicroHs.Ident(Ident, showIdent, mkIdent, unIdent, showSLoc)
+ import MicroHs.List(groupSort)
+ import MicroHs.State
+ import MicroHs.TypeCheck(isInstId)
+@@ -36,7 +36,15 @@ removeUnused (ds, emain) = dfs roots M.empty
+     dfs [] done = M.toList done
+     dfs (i:is) done | isJust (M.lookup i done) = dfs is done
+                     | otherwise = dfs (freeVars e ++ is) (M.insert i e done)
+-                                  where e = fromMaybe (error $ "removeUnused: undef " ++ show i) $ M.lookup i dMap
++                                  where e = fromMaybe (error $ "removeUnused: undef " ++ show i) $
++                                              case M.lookup i dMap of
++                                                Just e' -> Just e'
++                                                Nothing -> M.lookup i bootSelMap
++    -- .hs-boot files may declare a record selector as a plain value
++    -- `<Mod>.<fld>`, whereas the .hs module defines it under
++    -- `<Mod>.get$.<TyCon>.<fld>`; map the latter to the former.
++    bootSelMap :: M.Map Exp
++    bootSelMap = M.fromList [ (alias, Var k) | (k, _) <- M.toList dMap, Just alias <- [bootSelAlias k] ]
+ 
+ renumberCMdl :: CMdl -> (ForExpTable, CMdl)
+ renumberCMdl (ds, emain) =
+@@ -51,6 +59,11 @@ renumberCMdlM :: [(Ident, CType, IsJavascript)] -> M.Map Exp -> Exp -> (ForExpTa
+ renumberCMdlM fexps dMap emain =
+   let
+     roots = freeVars emain ++ [ i | (i, _, _) <- fexps ]
++    -- .hs-boot files may declare a record selector as a plain value
++    -- `<Mod>.<fld>`, whereas the .hs module defines it under
++    -- `<Mod>.get$.<TyCon>.<fld>`; resolve the former to the latter.
++    bootSelMap :: M.Map Exp
++    bootSelMap = M.fromList [ (alias, Var k) | (k, _) <- M.toList dMap, Just alias <- [bootSelAlias k] ]
+     -- Shake the tree bottom-up, renaming identifiers as we go along.
+     -- This is much faster than (say) computing the sccs and walking that.
+     dfs :: Ident -> State (Int, M.Map Exp, [LDef]) ()
+@@ -62,7 +75,9 @@ renumberCMdlM fexps dMap emain =
+           -- Put placeholder for n in seen.
+           put (i, M.insert n (Var n) seen, r)
+           -- Walk n's children
+-          let e = findIdentIn n dMap
++          let e = case M.lookup n dMap of
++                    Just e' -> e'
++                    Nothing -> findIdentIn n bootSelMap
+           mapM_ dfs $ freeVars e
+           -- Now that n's children are done, compute its actual entry.
+           (i', seen', r') <- get
+@@ -83,6 +98,21 @@ renumberCMdlM fexps dMap emain =
+   in
+     (fexps', (res, substv emain))
+ 
++-- When a .hs-boot file declares a record selector `fld :: T -> a` as a plain
++-- value, SOURCE importers reference `<Mod>.<fld>`, whereas the .hs module
++-- compiles the selector under `<Mod>.get$.<TyCon>.<fld>` (Deriving.mkGetName).
++-- Map the latter identifier to the former so linking can resolve it.
++bootSelAlias :: Ident -> Maybe Ident
++bootSelAlias k =
++  case break (== '$') (unIdent k) of
++    (pfx, '$':'.':rest)
++      | ".get" `isSuffixOf` pfx ->
++          let modName = take (length pfx - 4) pfx
++          in case break (== '.') rest of
++               (_, '.':fld) | notElem '.' fld -> Just (mkIdent (modName ++ "." ++ fld))
++               _ -> Nothing
++    _ -> Nothing
++
+ -- The argument is all definitions and the main expression.
+ -- The result is the program as a string.
+ toStringCMdl :: CMdl -> String
+diff --git a/src/MicroHs/FFI.hs b/src/MicroHs/FFI.hs
+index 989f06c5..c54584ec 100644
+--- a/src/MicroHs/FFI.hs
++++ b/src/MicroHs/FFI.hs
+@@ -25,7 +25,7 @@ makeFFI _ forExps exclude dss =
+       jsincs   = if any isJS ffiImports then ["emscripten.h"] else []
+         where isJS (ImpJS _, _, _, _) = True
+               isJS _ = False
+-      mkSig (_, i, CType t, js) = let (as, ior) = getArrows t in mkExportSig js i as ior ++ ";"
++      mkSig (_, i, CType t, js) = let (as, ior) = getArrows (dropForall t) in mkExportSig js i as ior ++ ";"
+       header = unlines
+         ["#include <stdint.h>",
+          "#if defined(__cplusplus)",
+@@ -75,7 +75,7 @@ mkExport (i, _, _, _) = "  { \"" ++ unIdent i ++ "\", 0 },"
+ 
+ mkExportWrapper :: Int -> (Ident, Ident, CType, IsJavascript) -> String
+ mkExportWrapper no (_, n, CType t, js) = unlines $
+-  let (as, ior) = getArrows t
++  let (as, ior) = getArrows (dropForall t)
+       r = checkIO ior
+       outT = expTypeName js r
+       arg k a = "  mhs_from_" ++ expTypeHsName js a ++ "(ffe_alloc(), 0, _x" ++ show k ++ "); ffe_apply();"
+@@ -114,7 +114,7 @@ mkMhsFun fn body = "from_t mhs_" ++ fn ++ "(int s) { " ++ body ++ "; }"
+ 
+ checkIO :: EType -> EType
+ checkIO iot =
+-  case dropApp identIO iot of
++  case dropApp identIO (dropForall iot) of
+     Nothing -> iot -- errorMessage (getSLoc iot) $ "foreign return type must be IO: " ++ showEType iot
+     Just t  -> t
+ 
+@@ -148,7 +148,7 @@ mkHdr (ImpStatic _ IPtr fn, f, iot, _) =
+       body = "return " ++ mkRet r 0 (s ++ "&" ++ fn)
+   in  mkMhsFun ("addr_" ++ f) body
+ mkHdr (ImpStatic _ IFunc fn, f, t, _) =
+-  let (as, ior) = getArrows t
++  let (as, ior) = getArrows (dropForall t)
+       r = checkIO ior
+       len = length as
+       call = fn ++ "(" ++ intercalate ", " (zipWith mkArg as [0..]) ++ ")"
+@@ -159,7 +159,7 @@ mkHdr (ImpStatic _ IFunc fn, f, t, _) =
+           "return " ++ mkRet r len call
+   in  mkMhsFun f fcall
+ mkHdr (ImpStatic _ IValue val, f, t, _) =
+-  let (as, ior) = getArrows t
++  let (as, ior) = getArrows (dropForall t)
+       r = checkIO ior
+       len = length as
+       call = expand val
+@@ -175,7 +175,7 @@ mkHdr (ImpStatic _ IValue val, f, t, _) =
+           "return " ++ mkRet r len call
+   in  mkMhsFun f fcall
+ mkHdr (ImpJS s, f, ty, _) =
+-  let (as, ior) = getArrows ty
++  let (as, ior) = getArrows (dropForall ty)
+       rt = checkIO ior
+       jsr = jsTypeNameR rt
+       n = length as
+@@ -193,7 +193,11 @@ mkHdr (ImpJS s, f, ty, _) =
+ mkHdr _ = undefined
+ 
+ arity :: EType -> Int
+-arity = length . fst . getArrows
++arity = length . fst . getArrows . dropForall
++
++dropForall :: EType -> EType
++dropForall (EForall _ _ u) = dropForall u
++dropForall u = u
+ 
+ -- Use to construct 'foreign import/export ccall' wrapper.
+ cTypeHsName :: HasCallStack => EType -> String
+-- 
+2.54.0
+

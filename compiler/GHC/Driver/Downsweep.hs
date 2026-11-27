@@ -94,7 +94,11 @@ import GHC.Unit.Module.Deps
 import qualified GHC.Unit.Home.Graph as HUG
 import GHC.Unit.Module.Stage
 
+#if defined(__MHS__)
+import Data.Either ( partitionEithers )
+#else
 import Data.Either ( rights, partitionEithers, lefts )
+#endif
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 
@@ -114,6 +118,15 @@ import Control.Monad.Trans.Reader
 import qualified Data.Map.Strict as M
 import Control.Monad.Trans.Class
 import System.IO.Unsafe (unsafeInterleaveIO)
+
+#if defined(__MHS__)
+-- MicroHs's Data.Either package module lacks `rights` and `lefts`
+-- (dropped from its export table): define them here with the same semantics.
+rights :: [Either a b] -> [b]
+rights es = [ b | Right b <- es ]
+lefts :: [Either a b] -> [a]
+lefts es = [ a | Left a <- es ]
+#endif
 
 {-
 Note [Downsweep and the ModuleGraph]

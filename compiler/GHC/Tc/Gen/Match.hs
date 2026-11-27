@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE ConstraintKinds  #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE RankNTypes       #-}
@@ -623,8 +624,16 @@ tcLcStmt m_tc ctxt (ParStmt _ bndr_stmts_s _ _) elt_ty thing_inside
      :: LocalRdrEnv -> [Name] -> [ParStmtBlock GhcRn GhcRn]
      -> TcM ([ParStmtBlock GhcTc GhcTc], _)
     -- matching in the branches
+#if defined(__MHS__)
+    loop1 _ binds [] = do { a <- bindLocalNames binds (thing_inside elt_ty); return ([], a) }
+#else
     loop1 _ binds [] = [ ([], a) | a <- bindLocalNames binds (thing_inside elt_ty) ]
+#endif
+#if defined(__MHS__)
+    loop1 env binds (x:xs) = do { (ys, a) <- loop env binds (x:|xs); return (toList ys, a) }
+#else
     loop1 env binds (x:xs) = [ (toList ys, a) | (ys, a) <- loop env binds (x:|xs) ]
+#endif
 
 tcLcStmt m_tc ctxt (TransStmt { trS_form = form, trS_stmts = stmts
                               , trS_bndrs =  bindersMap
@@ -729,8 +738,14 @@ tcMcStmt ctxt (BindStmt xbsrn pat rhs) res_ty thing_inside
         ; hasFixedRuntimeRep_syntactic (FRRBindStmt MonadComprehension) rhs_ty
 
         -- If (but only if) the pattern can fail, typecheck the 'fail' operator
+#if defined(__MHS__)
+        ; fail_op' <- case xbsrn_failOp xbsrn of
+                        Nothing   -> return Nothing
+                        Just fail -> tcMonadFailOp (MCompPatOrigin pat) pat' fail new_res_ty
+#else
         ; fail_op' <- fmap join . forM (xbsrn_failOp xbsrn) $ \fail ->
             tcMonadFailOp (MCompPatOrigin pat) pat' fail new_res_ty
+#endif
 
         ; let xbstc = XBindStmtTc
                 { xbstc_bindOp = bind_op'
@@ -924,8 +939,12 @@ tcMcStmt ctxt (ParStmt _ bndr_stmts_s mzip_op bind_op) res_ty thing_inside
 
         -- type dummies since we don't know all binder types yet
        ; tup_tys_and_bndr_stmts_s <- traverse (\ bndr_stmts@(ParStmtBlock _ _ names _) ->
+#if defined(__MHS__)
+           do { tup_tys <- mkBigCoreTupTy <$> traverse (const (newFlexiTyVarTy liftedTypeKind)) names; return (tup_tys, bndr_stmts) }) bndr_stmts_s
+#else
            [ (tup_tys, bndr_stmts)
            | tup_tys <- mkBigCoreTupTy <$> traverse (const (newFlexiTyVarTy liftedTypeKind)) names ]) bndr_stmts_s
+#endif
 
        -- Typecheck bind:
        ; let tuple_ty = mk_tuple_ty (NE.map fst tup_tys_and_bndr_stmts_s)
@@ -965,8 +984,16 @@ tcMcStmt ctxt (ParStmt _ bndr_stmts_s mzip_op bind_op) res_ty thing_inside
      :: Type -> ExpRhoType -> [(Type, ParStmtBlock GhcRn GhcRn)]
      -> TcM ([ParStmtBlock GhcTc GhcTc], _)
     -- matching in the branches
+#if defined(__MHS__)
+    loop1 _ r [] = do { a <- thing_inside r; return ([], a) }
+#else
     loop1 _ r [] = [ ([], a) | a <- thing_inside r ]
+#endif
+#if defined(__MHS__)
+    loop1 m r (x:xs) = do { (ys, a) <- loop m r (x:|xs); return (toList ys, a) }
+#else
     loop1 m r (x:xs) = [ (toList ys, a) | (ys, a) <- loop m r (x:|xs) ]
+#endif
 
 tcMcStmt _ stmt _ _
   = pprPanic "tcMcStmt: unexpected Stmt" (ppr stmt)
@@ -1000,8 +1027,14 @@ tcDoStmt ctxt (BindStmt xbsrn pat rhs) res_ty thing_inside
         ; hasFixedRuntimeRep_syntactic (FRRBindStmt DoNotation) rhs_ty
 
         -- If (but only if) the pattern can fail, typecheck the 'fail' operator
+#if defined(__MHS__)
+        ; fail_op' <- case xbsrn_failOp xbsrn of
+                        Nothing   -> return Nothing
+                        Just fail -> tcMonadFailOp (DoPatOrigin pat) pat' fail new_res_ty
+#else
         ; fail_op' <- fmap join . forM (xbsrn_failOp xbsrn) $ \fail ->
             tcMonadFailOp (DoPatOrigin pat) pat' fail new_res_ty
+#endif
         ; let xbstc = XBindStmtTc
                 { xbstc_bindOp = bind_op'
                 , xbstc_boundResultType = new_res_ty
@@ -1219,8 +1252,14 @@ tcApplicativeStmts ctxt pairs rhs_ty thing_inside
         do { rhs'      <- tcCheckMonoExprNC rhs exp_ty
            ; (pat', _) <- tcCheckPat (StmtCtxt ctxt) pat (unrestricted pat_ty) $
                           return ()
+#if defined(__MHS__)
+           ; fail_op' <- case fail_op of
+                           Nothing   -> return Nothing
+                           Just fail -> tcMonadFailOp (DoPatOrigin pat) pat' fail body_ty
+#else
            ; fail_op' <- fmap join . forM fail_op $ \fail ->
                tcMonadFailOp (DoPatOrigin pat) pat' fail body_ty
+#endif
 
            ; return (ApplicativeArgOne
                       { xarg_app_arg_one = fail_op'

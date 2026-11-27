@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE DerivingVia #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE RankNTypes #-}
@@ -32,7 +33,13 @@ import GHC.Utils.Outputable
 import Control.Monad          ( when )
 import Control.Monad.IO.Class ( MonadIO(..) )
 
+#if defined(__MHS__)
+-- MicroHs ghc-compat GHC.Exts has no oneShot; it is semantically the identity.
+oneShot :: (a -> b) -> a -> b
+oneShot f x = f x
+#else
 import GHC.Exts               ( oneShot )
+#endif
 
 --------------------------------------------------------------------------------
 

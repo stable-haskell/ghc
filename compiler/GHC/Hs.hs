@@ -19,6 +19,7 @@ therefore, is almost nothing but re-exporting.
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleInstances #-} -- For deriving instance Data
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE CPP #-}
 
 module GHC.Hs (
         module Language.Haskell.Syntax,
@@ -48,6 +49,9 @@ import GHC.Hs.Expr
 import GHC.Hs.ImpExp
 import GHC.Hs.Lit
 import Language.Haskell.Syntax
+#if defined(__MHS__)
+import Language.Haskell.Syntax.Extension
+#endif
 import GHC.Hs.Extension
 import GHC.Parser.Annotation
 import GHC.Hs.Pat

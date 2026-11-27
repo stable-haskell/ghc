@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE RankNTypes #-}
 
@@ -124,7 +125,14 @@ type Warns = [Warn]
 newtype EwM m a = EwM { unEwM :: Located String -- Current parse arg
                               -> Errs -> Warns
                               -> m (Errs, Warns, a) }
+#if !defined(__MHS__)
   deriving (Functor)
+#endif
+
+#if defined(__MHS__)
+instance Functor m => Functor (EwM m) where
+  fmap f (EwM g) = EwM (\l e w -> fmap (\(e', w', a) -> (e', w', f a)) (g l e w))
+#endif
 
 instance Monad m => Applicative (EwM m) where
     pure v = EwM (\_ e w -> return (e, w, v))

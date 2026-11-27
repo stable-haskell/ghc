@@ -19,6 +19,9 @@ import GHC.Driver.Backend
 import GHC.CmmToLlvm.Version
 import GHC.Platform
 import GHC.Platform.ArchOS
+#if defined(__MHS__)
+import GHC.Platform.Host (hostPlatformArchOS)
+#endif
 
 import GHC.SysTools
 
@@ -141,10 +144,20 @@ doCpp logger tmpfs dflags unit_env opts input_fn output_fn = do
         targetOS = stringEncodeOS $ platformOS platform
         isWindows = platformOS platform == OSMinGW32
     let target_defs =
+#if defined(__MHS__)
+          -- The bootstrap ghcplatform.h is a stub without the HOST_OS /
+          -- HOST_ARCH string macros; spell them via the host ArchOS
+          -- (stringEncodeOS/Arch give the same strings). Same meaning.
+          [ "-D" ++ stringEncodeOS (archOS_OS hostPlatformArchOS)    ++ "_BUILD_OS",
+            "-D" ++ stringEncodeArch (archOS_arch hostPlatformArchOS) ++ "_BUILD_ARCH",
+            "-D" ++ targetOS    ++ "_HOST_OS",
+            "-D" ++ targetArch  ++ "_HOST_ARCH" ]
+#else
           [ "-D" ++ HOST_OS     ++ "_BUILD_OS",
             "-D" ++ HOST_ARCH   ++ "_BUILD_ARCH",
             "-D" ++ targetOS    ++ "_HOST_OS",
             "-D" ++ targetArch  ++ "_HOST_ARCH" ]
+#endif
         -- remember, in code we *compile*, the HOST is the same our TARGET,
         -- and BUILD is the same as our HOST.
 

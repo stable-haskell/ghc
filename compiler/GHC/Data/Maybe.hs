@@ -1,4 +1,5 @@
 
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE KindSignatures #-}
@@ -26,13 +27,21 @@ module GHC.Data.Maybe (
     ) where
 
 import GHC.Prelude
+#if defined(__MHS__)
+import GHC.Utils.Exception (catchException)
+#else
 import GHC.IO (catchException)
+#endif
 
 import Control.Monad
 import Control.Monad.Trans.Maybe
 import Control.Exception (SomeException(..))
 import Data.Maybe
+#if defined(__MHS__)
+import Data.Foldable ( foldlM, for_, asum )
+#else
 import Data.Foldable ( foldlM, for_ )
+#endif
 import GHC.Utils.Misc (HasCallStack)
 import GHC.Utils.Panic
 import GHC.Utils.Outputable
@@ -55,7 +64,11 @@ firstJust = (<|>)
 -- | Takes a list of @Maybes@ and returns the first @Just@ if there is one, or
 -- @Nothing@ otherwise.
 firstJusts :: Foldable f => f (Maybe a) -> Maybe a
+#if defined(__MHS__)
+firstJusts = asum
+#else
 firstJusts = msum
+#endif
 {-# SPECIALISE firstJusts :: [Maybe a] -> Maybe a #-}
 {-# SPECIALISE firstJusts :: NonEmpty (Maybe a) -> Maybe a #-}
 

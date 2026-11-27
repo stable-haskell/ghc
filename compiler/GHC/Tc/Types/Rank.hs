@@ -1,6 +1,13 @@
+{-# LANGUAGE CPP #-}
 module GHC.Tc.Types.Rank (Rank(..))  where
 
+#if defined(__MHS__)
+-- The empty __MHS__ GHC.Base shim exports nothing; Bool comes from the
+-- compiler prelude instead. Same meaning as the GHC.Base import below.
+import GHC.Prelude (Bool)
+#else
 import GHC.Base (Bool)
+#endif
 import GHC.Utils.Outputable (Outputable, (<+>), parens, ppr, text)
 
 {-

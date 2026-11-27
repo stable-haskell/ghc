@@ -333,7 +333,13 @@ checkModuleGraph ModuleGraph{..} =
   ++ mapMaybe (checkAllDependenciesInGraph node_types) mg_mss
   ++ duplicate_errs
   where
-    duplicate_errs = rights (Map.elems node_types)
+    duplicate_errs =
+#if defined(__MHS__)
+      -- mhs base Data.Either lacks `rights`; partitionEithers is equivalent.
+      snd (partitionEithers (Map.elems node_types))
+#else
+      rights (Map.elems node_types)
+#endif
 
     node_types :: Map NodeKey (Either ModuleNodeType ModuleGraphInvariantError)
     node_types = Map.fromListWithKey go [ (mkNodeKey n, Left (moduleNodeType n)) | n <- mg_mss ]

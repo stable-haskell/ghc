@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE ViewPatterns #-}
 
 -- | Code generation for the Static Pointer Table
@@ -150,6 +151,9 @@ import GHC.Data.FastString
 
 import Control.Monad.Trans.State.Strict
 import Data.List (intercalate)
+#if defined(__MHS__)
+import GHC.Utils.Fingerprint (fingerprintString)
+#endif
 import GHC.Fingerprint
 
 data StaticPtrOpts = StaticPtrOpts

@@ -6,8 +6,11 @@
 Buffers for scanning string input stored in external arrays.
 -}
 
+{-# LANGUAGE CPP #-}
+#if !defined(__MHS__)
 {-# LANGUAGE MagicHash #-}
 {-# LANGUAGE UnboxedTuples #-}
+#endif
 {-# LANGUAGE LambdaCase #-}
 
 {-# OPTIONS_GHC -O2 #-}
@@ -54,29 +57,51 @@ module GHC.Data.StringBuffer
         bidirectionalFormatChars
         ) where
 
+#if defined(__MHS__)
+import GHC.Prelude.Basic
+import GHC.Utils.Fingerprint (Fingerprint(..), fingerprintData)
+#else
 import GHC.Prelude
+#endif
 
 import GHC.Data.FastString
 import GHC.Utils.Encoding
+#if !defined(__MHS__)
 import GHC.Utils.IO.Unsafe
 import GHC.Utils.Panic.Plain
 import GHC.Utils.Exception      ( bracket_ )
 import GHC.Fingerprint
+#endif
 
+#if !defined(__MHS__)
 import Data.Maybe
+#endif
 import System.IO
 import System.IO.Unsafe         ( unsafePerformIO )
+#if !defined(__MHS__)
 import GHC.IO.Encoding.UTF8     ( mkUTF8 )
 import GHC.IO.Encoding.Failure  ( CodingFailureMode(IgnoreCodingFailure) )
 
 import qualified Data.ByteString.Internal as BS
+#endif
 import qualified Data.ByteString as BS
 import Data.ByteString ( ByteString )
 
+#if !defined(__MHS__)
 import GHC.Exts
+#endif
 
 import Foreign
+#if defined(__MHS__)
+-- withForeignPtr, not GHC.ForeignPtr.unsafeWithForeignPtr.
+unsafeWithForeignPtr :: ForeignPtr a -> (Ptr a -> IO b) -> IO b
+unsafeWithForeignPtr = withForeignPtr
+
+inlinePerformIO :: IO a -> a
+inlinePerformIO = unsafePerformIO
+#else
 import GHC.ForeignPtr (unsafeWithForeignPtr)
+#endif
 
 -- -----------------------------------------------------------------------------
 -- The StringBuffer type
@@ -124,6 +149,14 @@ hGetStringBuffer fname = do
         else newUTF8StringBuffer buf ptr size
 
 hGetStringBufferBlock :: Handle -> Int -> IO StringBuffer
+#if defined(__MHS__)
+-- MicroHs Handle has no hTell.  A short read is end-of-file.
+hGetStringBufferBlock handle wanted = do
+  buf <- mallocForeignPtrArray (wanted + 3)
+  unsafeWithForeignPtr buf $ \ptr -> do
+    r <- if wanted == 0 then return 0 else hGetBuf handle ptr wanted
+    newUTF8StringBuffer buf ptr r
+#else
 hGetStringBufferBlock handle wanted
     = do size_i <- hFileSize handle
          offset_i <- hTell handle >>= skipBOM handle size_i
@@ -134,6 +167,7 @@ hGetStringBufferBlock handle wanted
                 if r /= size
                    then ioError (userError $ "short read of file: "++show(r,size,size_i,handle))
                    else newUTF8StringBuffer buf ptr size
+#endif
 
 hPutStringBuffer :: Handle -> StringBuffer -> IO ()
 hPutStringBuffer hdl (StringBuffer buf len cur)
@@ -148,6 +182,17 @@ hPutStringBuffer hdl (StringBuffer buf len cur)
 -- of zero-width whitespace in Haskell: all whitespace codepoints
 -- have a width of one column.
 skipBOM :: Handle -> Integer -> Integer -> IO Integer
+#if defined(__MHS__)
+-- No hTell, hSeek, or mkUTF8.  A decoded U+FEFF is the 3-byte UTF-8 BOM.
+skipBOM h size offset =
+  if size > 0 && offset == 0
+    then do
+      c <- hLookAhead h
+      if c == '\xfeff'
+        then hGetChar h >> return 3
+        else return 0
+    else return offset
+#else
 skipBOM h size offset =
   -- Only skip BOM at the beginning of a file.
   if size > 0 && offset == 0
@@ -164,6 +209,7 @@ skipBOM h size offset =
     else return offset
   where
     safeEncoding = mkUTF8 IgnoreCodingFailure
+#endif
 
 newUTF8StringBuffer :: ForeignPtr Word8 -> Ptr Word8 -> Int -> IO StringBuffer
 newUTF8StringBuffer buf ptr size = do
@@ -204,9 +250,21 @@ stringToStringBuffer str =
 --
 -- /O(n)/ (but optimized into a @memcpy@ by @bytestring@ under the hood)
 stringBufferFromByteString :: ByteString -> StringBuffer
+#if defined(__MHS__)
+-- MicroHs ByteString has no PS constructor.  Copy into a ForeignPtr.
+stringBufferFromByteString bs = unsafePerformIO $ do
+  let bs' = BS.append bs (BS.pack [0,0,0])
+      n = BS.length bs
+  fp <- mallocForeignPtrBytes (n + 3)
+  withForeignPtr fp $ \dst ->
+    BS.useAsCStringLen bs' $ \(src, len) ->
+      copyBytes dst (castPtr src) len
+  return (StringBuffer fp n 0)
+#else
 stringBufferFromByteString bs =
   let BS.PS fp off len = BS.append bs (BS.pack [0,0,0])
   in StringBuffer { buf = fp, len = len - 3, cur = off }
+#endif
 
 -- -----------------------------------------------------------------------------
 -- Grab a character
@@ -218,6 +276,13 @@ stringBufferFromByteString bs =
 -- character cannot be decoded as UTF-8, @\'\\0\'@ is returned.
 {-# INLINE nextChar #-}
 nextChar :: StringBuffer -> (Char,StringBuffer)
+#if defined(__MHS__)
+nextChar (StringBuffer buf len cur) =
+  inlinePerformIO $
+    unsafeWithForeignPtr buf $ \p -> do
+      let (c, nBytes) = utf8DecodeCharPtr (p `plusPtr` cur)
+      return (c, StringBuffer buf len (cur + nBytes))
+#else
 nextChar (StringBuffer buf len (I# cur#)) =
   -- Getting our fingers dirty a little here, but this is performance-critical
   inlinePerformIO $
@@ -226,6 +291,7 @@ nextChar (StringBuffer buf len (I# cur#)) =
           (# c#, nBytes# #) ->
              let cur' = I# (cur# +# nBytes#) in
              return (C# c#, StringBuffer buf len cur')
+#endif
 
 
 bidirectionalFormatChars :: [(Char,String)]
@@ -262,6 +328,18 @@ This list is encoded in 'bidirectionalFormatChars'
 -}
 {-# INLINE containsBidirectionalFormatChar #-}
 containsBidirectionalFormatChar :: StringBuffer -> Bool
+#if defined(__MHS__)
+containsBidirectionalFormatChar (StringBuffer buf len cur) =
+  inlinePerformIO $ unsafeWithForeignPtr buf $ \p -> do
+    let go i
+          | i >= len = return False
+          | otherwise = do
+              let (c, nBytes) = utf8DecodeCharPtr (p `plusPtr` i)
+              if isBidi c then return True else go (i + nBytes)
+        isBidi c = (c >= '\x202a' && c <= '\x202e')
+                || (c >= '\x2066' && c <= '\x2069')
+    go cur
+#else
 containsBidirectionalFormatChar (StringBuffer buf (I# len#) (I# cur#))
   = inlinePerformIO $ unsafeWithForeignPtr buf $ \(Ptr a#) -> do
   let go :: Int# -> Bool
@@ -278,6 +356,7 @@ containsBidirectionalFormatChar (StringBuffer buf (I# len#) (I# cur#))
                 (# '\x2069'#  , _ #) -> True
                 (# _, bytes #) -> go (i +# bytes)
   pure $! go cur#
+#endif
 
 -- | Return the first UTF-8 character of a nonempty 'StringBuffer' (analogous
 -- to 'Data.List.head').  __Warning:__ The behavior is undefined if the
@@ -377,8 +456,14 @@ lexemeToString :: StringBuffer
                -> Int                   -- ^ @n@, the number of bytes
                -> String
 lexemeToString _ 0 = ""
+#if defined(__MHS__)
+-- The MicroHs codec returns IO.  The exported function stays pure.
+lexemeToString (StringBuffer buf _ cur) bytes =
+  unsafePerformIO (utf8DecodeForeignPtr buf cur bytes)
+#else
 lexemeToString (StringBuffer buf _ cur) bytes =
   utf8DecodeForeignPtr buf cur bytes
+#endif
 
 lexemeToFastString :: StringBuffer
                    -> Int               -- ^ @n@, the number of bytes

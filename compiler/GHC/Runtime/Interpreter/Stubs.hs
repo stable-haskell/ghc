@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE MagicHash #-}
 
 -- | Stub types for builds without interpreter support.
@@ -64,7 +65,13 @@ module GHC.Runtime.Interpreter.Stubs
 
 import GHC.Prelude
 
+#if defined(__MHS__)
+-- ghc-compat GHC.Exts provides no Any. HValue is never scrutinized in a
+-- no-interpreter build, so a private unit wrapper is exact here.
+data Any = MkAny
+#else
 import GHC.Exts (Any)
+#endif
 import GHC.Types.Name.Env (NameEnv)
 import GHC.Types.Name (Name)
 import GHC.Types.Unique.DSet (UniqDSet, emptyUniqDSet)

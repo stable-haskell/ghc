@@ -282,7 +282,11 @@ rnUntypedSpliceGen run_splice (flavour, run_pending) splice
   = addErrCtxt (UntypedSpliceCtxt splice) $ do
     { level <- getThLevel
     ; case level of
+#if defined(__MHS__)
+        TypedBrack _
+#else
         TypedBrack {}
+#endif
           -> failWithTc $ thSyntaxError
                         $ MismatchedSpliceType Untyped IsSplice
 
@@ -452,7 +456,11 @@ rnTypedSplice sp@(HsTypedSpliceExpr _ expr)
                 ; return (HsTypedSplice (HsTypedSpliceNested n') (HsTypedSpliceExpr noExtField e), fvs)
                 }
 
+#if defined(__MHS__)
+        UntypedBrack _ _
+#else
         UntypedBrack {}
+#endif
           -> failWithTc $ thSyntaxError $ MismatchedSpliceType Typed IsSplice
 
         _ -> do { unlessXOptM LangExt.TemplateHaskell

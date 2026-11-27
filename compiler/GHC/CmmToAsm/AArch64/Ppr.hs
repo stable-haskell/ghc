@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
 module GHC.CmmToAsm.AArch64.Ppr (pprNatCmmDecl, pprInstr, pprBasicBlock) where
@@ -7,6 +8,9 @@ import GHC.Prelude hiding (EQ)
 import GHC.CmmToAsm.AArch64.Instr
 import GHC.CmmToAsm.AArch64.Regs
 import GHC.CmmToAsm.AArch64.Cond
+#if defined(__MHS__)
+import qualified GHC.CmmToAsm.AArch64.Cond as Cond
+#endif
 import GHC.CmmToAsm.AArch64.Peephole (peephole)
 import GHC.CmmToAsm.Ppr
 import GHC.CmmToAsm.Format
@@ -630,7 +634,11 @@ pprBcond c = text "b." <> pprCond c
 pprCond :: IsLine doc => Cond -> doc
 pprCond c = case c of
   ALWAYS -> text "al" -- Always
+#if defined(__MHS__)
+  Cond.EQ -> text "eq" -- Equal
+#else
   EQ     -> text "eq" -- Equal
+#endif
   NE     -> text "ne" -- Not Equal
 
   SLT    -> text "lt" -- Signed less than                  ; Less than, or unordered

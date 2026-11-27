@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE NondecreasingIndentation #-}
 
 {-# OPTIONS_GHC -Wno-incomplete-record-updates #-}
@@ -51,12 +52,32 @@ import Control.Monad
 import Data.List (isSuffixOf, intersperse)
 import Data.Foldable (toList)
 
+#if defined(HAVE_HPC)
 import Trace.Hpc.Mix
+#endif
 
 import Data.Bifunctor (second)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Set (Set)
 import qualified Data.Set as Set
+
+#if !defined(HAVE_HPC)
+-- Stage1 builds with -hpc, which also drops the hpc package. Coverage.hs
+-- (the only consumer of the real Trace.Hpc.Mix types) is not built then.
+-- These constructors are the ones the tick pass allocates; they never leave
+-- this module. With +hpc the types come from the hpc library so .mix files
+-- stay compatible.
+data BoxLabel
+  = ExpBox Bool
+  | TopLevelBox [String]
+  | LocalBox [String]
+  | BinBox CondBox Bool
+
+data CondBox
+  = GuardBinBox
+  | CondBinBox
+  | QualBinBox
+#endif
 
 {-
 ************************************************************************

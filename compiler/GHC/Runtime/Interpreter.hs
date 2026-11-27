@@ -234,6 +234,16 @@ import qualified GHC.Exts.Heap as Heap
 import GHC.Stack.CCS (CostCentre,CostCentreStack)
 import System.Directory
 import System.Process
+#if defined(__MHS__)
+import GHC.SysTools.Process (getProcessExitCode)
+
+-- MicroHs's System.Directory has no canonicalizePath; absolutize relative
+-- paths against getCurrentDirectory for Stage 1.
+canonicalizePath :: FilePath -> IO FilePath
+canonicalizePath p = case p of
+  ('/':_) -> return p
+  _       -> (\cwd -> cwd ++ "/" ++ p) <$> getCurrentDirectory
+#endif
 import qualified GHC.InfoProv as InfoProv
 
 import GHC.Builtin.Names
@@ -732,6 +742,10 @@ findSystemLibrary interp str = interpCmd interp (FindSystemLibrary str)
 
 -- | Spawn an external interpreter
 spawnIServ :: IServConfig -> IO (ExtInterpInstance ())
+#if defined(__MHS__)
+spawnIServ _ =
+  ioError (userError "spawnIServ: external interpreters are not supported in the MicroHs stage1 build")
+#else
 spawnIServ conf = do
   iservConfTrace conf
   let createProc = fromMaybe (\cp -> do { (_,_,_,ph) <- createProcess cp
@@ -755,6 +769,7 @@ spawnIServ conf = do
         , instExtra             = ()
         }
   pure inst
+#endif
 
 -- | Stop the interpreter
 stopInterp :: Interp -> IO ()

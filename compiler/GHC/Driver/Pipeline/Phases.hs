@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE RankNTypes #-}
 
@@ -13,7 +14,11 @@ import GHC.Unit.Module.Status
 import GHC.Tc.Types ( FrontendResult )
 import GHC.Types.Error
 import GHC.Driver.Errors.Types
+#if defined(__MHS__)
+import GHC.Fingerprint (Fingerprint)
+#else
 import GHC.Fingerprint.Type
+#endif
 import GHC.Unit.Module.Location ( ModLocation )
 import GHC.Unit.Module.ModIface
 import GHC.Driver.Phases

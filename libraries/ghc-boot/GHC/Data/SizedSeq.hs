@@ -29,7 +29,17 @@ instance Foldable SizedSeq where
 instance Traversable SizedSeq where
   traverse f (SizedSeq sz l) = SizedSeq sz . reverse <$> traverse f (reverse l)
 
+#if defined(__MHS__)
+-- binary-mhs has no Generic defaults.  Fields are the size, then the list.
+instance Binary a => Binary (SizedSeq a) where
+  put (SizedSeq n xs) = put n <> put xs
+  get = do
+    n <- get
+    xs <- get
+    return (SizedSeq n xs)
+#else
 instance Binary a => Binary (SizedSeq a)
+#endif
 
 instance NFData a => NFData (SizedSeq a) where
   rnf (SizedSeq _ xs) = rnf xs

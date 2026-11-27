@@ -27,6 +27,13 @@ module GHC.Prelude.Basic
   , head, tail, unzip
 
   , strictGenericLength
+#if defined(__MHS__)
+  , (<$!>)
+  , default Num
+  , default IsString
+  , default Foldable
+  , default Traversable
+#endif
   ) where
 
 
@@ -59,10 +66,35 @@ NoImplicitPrelude. There are two motivations for this:
 -}
 
 import qualified Prelude
+#if defined(__MHS__)
+-- MicroHs Prelude exports monomorphic Data.List / Control.Monad functions
+-- rather than Foldable/Foldable1/Traversable methods for foldr, length, mapM,
+-- etc.  Hide the monomorphic versions here so Data.Foldable, Data.Foldable1,
+-- and Data.Traversable below re-export the polymorphic methods unambiguously.
+import Prelude as X hiding ((<>), Applicative(..), Foldable(..), Traversable(..), head, tail, unzip,
+                            foldr, foldl, foldl1, foldr1, length, null, elem,
+                            sum, product, maximum, minimum,
+                            any, all, and, or, concat, concatMap, notElem,
+                            mapM, mapM_, sequence, sequence_)
+#else
 import Prelude as X hiding ((<>), Applicative(..), Foldable(..), head, tail, unzip)
+#endif
 import Control.Applicative (Applicative(..))
+#if defined(__MHS__)
+-- As in GHC base, foldl1, foldr1, maximum and minimum are Foldable methods;
+-- MicroHs Data.Foldable1 also exports those four names, so hide them there
+-- to keep the re-export unambiguous (verified: plain hiding is ambiguous).
+import Data.Foldable as X (Foldable (elem, foldMap, foldl, foldl', foldl1, foldr, foldr1, length, maximum, minimum, null, product, sum),
+                           any, all, and, or, concat, concatMap, notElem, mapM_, sequence_)
+import Data.Foldable1 as X hiding (head, last, maximum, minimum, foldl1, foldr1)
+import Data.Traversable as X (Traversable (traverse, sequenceA, mapM, sequence))
+import qualified Data.Data as DData
+import qualified Data.ByteString as DBS
+import qualified Data.ByteString.Short as DSBS
+#else
 import Data.Foldable as X (Foldable (elem, foldMap, foldl, foldl', foldr, length, null, product, sum))
 import Data.Foldable1 as X hiding (head, last)
+#endif
 import qualified Data.List as List
 import qualified GHC.Data.List.NonEmpty as NE
 import GHC.Stack.Types (HasCallStack)
@@ -146,7 +178,11 @@ See #25706 for why it is important to use a strict, specialised version.
 
 -}
 strictGenericLength :: Num a => [x] -> a
+#if defined(__MHS__)
+strictGenericLength = fromIntegral . List.length
+#else
 strictGenericLength = fromIntegral . length
+#endif
 
 -- This is `Data.Functor.unzip`. Unfortunately, that function lacks the RULES for specialization.
 unzip :: Functor f => f (a, b) -> (f a, f b)
@@ -154,3 +190,43 @@ unzip = \ xs -> (fmap fst xs, fmap snd xs)
 {-# NOINLINE [1] unzip #-}
 {-# RULES "unzip/List" unzip = List.unzip #-}
 {-# RULES "unzip/NonEmpty" unzip = NE.unzip #-}
+
+#if defined(__MHS__)
+infixl 4 <$!>
+(<$!>) :: Monad m => (a -> b) -> m a -> m b
+f <$!> m = do
+  x <- m
+  let z = f x
+  z `seq` return z
+
+default Foldable ([])
+default Traversable ([])
+
+instance DData.Data DBS.ByteString where
+  gfoldl f z bs = z DBS.pack `f` DBS.unpack bs
+  toConstr _    = bsPackConstr
+  gunfold k z c = case DData.constrIndex c of
+    1 -> k (z DBS.pack)
+    _ -> Prelude.error "Data.ByteString.ByteString.gunfold"
+  dataTypeOf _  = bsDataType
+
+bsPackConstr :: DData.Constr
+bsPackConstr = DData.mkConstr bsDataType "pack" [] DData.Prefix
+
+bsDataType :: DData.DataType
+bsDataType = DData.mkDataType "Data.ByteString.ByteString" [bsPackConstr]
+
+instance DData.Data DSBS.ShortByteString where
+  gfoldl f z sbs = z DSBS.pack `f` DSBS.unpack sbs
+  toConstr _     = sbsPackConstr
+  gunfold k z c  = case DData.constrIndex c of
+    1 -> k (z DSBS.pack)
+    _ -> Prelude.error "Data.ByteString.Short.ShortByteString.gunfold"
+  dataTypeOf _   = sbsDataType
+
+sbsPackConstr :: DData.Constr
+sbsPackConstr = DData.mkConstr sbsDataType "pack" [] DData.Prefix
+
+sbsDataType :: DData.DataType
+sbsDataType = DData.mkDataType "Data.ByteString.Short.ShortByteString" [sbsPackConstr]
+#endif

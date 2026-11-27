@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE RankNTypes, ScopedTypeVariables #-}
 {-# OPTIONS_GHC -fno-warn-name-shadowing #-}
@@ -24,6 +25,12 @@ import Data.Word        ( Word8 )
 import Data.Data
 import Control.DeepSeq
 
+#if defined(__MHS__)
+-- Installed MicroHs deepseq has no NFData TypeRep.  The MicroHs source tree
+-- does; this bootstrap does not rebuild that package.
+instance NFData TypeRep where
+  rnf = rwhnf
+#endif
 
 -- | Represents a serialized value of a particular type. Attempts can be made to deserialize it at certain types
 data Serialized = Serialized TypeRep [Word8]

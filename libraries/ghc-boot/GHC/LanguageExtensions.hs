@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
 -- | This module re-exports the 'Extension' type along with an orphan 'Binary'
@@ -13,5 +14,15 @@ module GHC.LanguageExtensions ( module GHC.LanguageExtensions.Type ) where
 
 import Data.Binary
 import GHC.LanguageExtensions.Type
+#if defined(__MHS__)
+import Prelude
+#endif
 
+#if defined(__MHS__)
+-- binary-mhs has no Generic defaults.  Constructor order is Enum order.
+instance Binary Extension where
+  put e = put (fromEnum e :: Int)
+  get = fmap toEnum (get :: Get Int)
+#else
 instance Binary Extension
+#endif

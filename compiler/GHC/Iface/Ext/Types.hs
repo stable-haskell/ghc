@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP                      #-}
 {-# LANGUAGE DeriveDataTypeable         #-}
 {-# LANGUAGE DeriveTraversable          #-}
 {-# LANGUAGE FlexibleInstances          #-}
@@ -174,7 +175,15 @@ type HieTypeFlat = HieType TypeIndex
 
 -- | Roughly isomorphic to the original core 'Type'.
 newtype HieTypeFix = Roll (HieType (HieTypeFix))
+#if defined(__MHS__)
+-- MicroHs cannot solve the `Coercible` constraint that `deriving Eq`
+-- needs to tie the knot on this recursive newtype: spell out the same
+-- structural equality manually.
+instance Eq HieTypeFix where
+  Roll a == Roll b = a == b
+#else
   deriving Eq
+#endif
 
 instance Binary (HieType TypeIndex) where
   put_ bh (HTyVarTy n) = do
@@ -245,7 +254,21 @@ pattern HiePath fs = LexicalFastString fs
 
 -- | Mapping from filepaths to the corresponding AST
 newtype HieASTs a = HieASTs { getAsts :: M.Map HiePath (HieAST a) }
+#if defined(__MHS__)
+-- MicroHs's derived `Functor`/`Foldable`/`Traversable` do not compose the
+-- element function through nested fields such as this `M.Map`: spell the
+-- instances out manually (same semantics as derived).
+instance Functor HieASTs where
+  fmap f (HieASTs m) = HieASTs (M.fromList [(k, fmap f v) | (k, v) <- M.toList m])
+instance Foldable HieASTs where
+  foldMap f (HieASTs m) =
+    foldr mappend mempty [foldMap f v | (_, v) <- M.toList m]
+instance Traversable HieASTs where
+  traverse f (HieASTs m) = HieASTs . M.fromList <$> traverse g (M.toList m)
+    where g (k, v) = (,) k <$> traverse f v
+#else
   deriving (Functor, Foldable, Traversable)
+#endif
 
 instance Binary (HieASTs TypeIndex) where
   put_ bh asts = put_ bh $ M.toAscList $ getAsts asts
@@ -287,7 +310,20 @@ instance Outputable a => Outputable (HieAST a) where
 
 -- | NodeInfos grouped by source
 newtype SourcedNodeInfo a = SourcedNodeInfo { getSourcedNodeInfo :: (M.Map NodeOrigin (NodeInfo a)) }
+#if defined(__MHS__)
+-- As for `HieASTs` above: MicroHs's deriving does not compose through the
+-- nested `M.Map`; manual instances with the same semantics as derived.
+instance Functor SourcedNodeInfo where
+  fmap f (SourcedNodeInfo m) = SourcedNodeInfo (M.fromList [(k, fmap f v) | (k, v) <- M.toList m])
+instance Foldable SourcedNodeInfo where
+  foldMap f (SourcedNodeInfo m) =
+    foldr mappend mempty [foldMap f v | (_, v) <- M.toList m]
+instance Traversable SourcedNodeInfo where
+  traverse f (SourcedNodeInfo m) = SourcedNodeInfo . M.fromList <$> traverse g (M.toList m)
+    where g (k, v) = (,) k <$> traverse f v
+#else
   deriving (Functor, Foldable, Traversable)
+#endif
 
 instance Binary (SourcedNodeInfo TypeIndex) where
   put_ bh asts = put_ bh $ M.toAscList $ getSourcedNodeInfo asts
@@ -351,7 +387,24 @@ data NodeInfo a = NodeInfo
 
     , nodeIdentifiers :: NodeIdentifiers a
     -- ^ All the identifiers and their details
-    } deriving (Functor, Foldable, Traversable)
+    }
+#if defined(__MHS__)
+-- As for `HieASTs` above: MicroHs's deriving does not compose through the
+-- nested `NodeIdentifiers a = M.Map Identifier (IdentifierDetails a)`;
+-- manual instances with the same semantics as derived.
+instance Functor NodeInfo where
+  fmap f (NodeInfo anns tys ids) =
+    NodeInfo anns (map f tys) (M.fromList [(k, fmap f v) | (k, v) <- M.toList ids])
+instance Foldable NodeInfo where
+  foldMap f (NodeInfo _ tys ids) =
+    foldr mappend mempty (map f tys ++ [foldMap f v | (_, v) <- M.toList ids])
+instance Traversable NodeInfo where
+  traverse f (NodeInfo anns tys ids) =
+    NodeInfo anns <$> traverse f tys <*> (M.fromList <$> traverse g (M.toList ids))
+    where g (k, v) = (,) k <$> traverse f v
+#else
+  deriving (Functor, Foldable, Traversable)
+#endif
 
 instance Binary (NodeInfo TypeIndex) where
   put_ bh ni = do
